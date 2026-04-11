@@ -734,6 +734,19 @@ select.input {
   font-size: 10.5px;
 }
 
+/* ========== ACTIVE RELATION ROW (column highlight on selection) ========== */
+.table-node-column.active-relation-row {
+  background: var(--color-accent-muted);
+  border-left: 2px solid var(--color-accent-primary);
+}
+.table-node-column.active-relation-row .table-node-col-name {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.table-node-column.active-relation-row .table-node-col-type {
+  color: var(--color-accent-secondary);
+}
+
 /* ========== EDGE LABEL (dbdiagram) ========== */
 .dbdiagram-edge-label {
   position: absolute;
@@ -743,6 +756,18 @@ select.input {
   pointer-events: none;
   white-space: nowrap;
   user-select: none;
+}
+
+/* ========== EDGE FLOW ANIMATION ========== */
+@keyframes erEdgeFlow {
+  to { stroke-dashoffset: -24; }
+}
+.er-edge-flow-anim {
+  stroke: var(--color-accent-secondary);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  animation: erEdgeFlow 0.6s linear infinite;
+  pointer-events: none;
 }
 
 /* ========== RIGHT PANEL ========== */

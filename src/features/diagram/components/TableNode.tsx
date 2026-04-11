@@ -8,6 +8,7 @@ import type { TableModel } from '@/types/model';
 interface TableNodeData {
   table: TableModel;
   selected?: boolean;
+  activeRelationColumns?: string[];
   [key: string]: unknown;
 }
 
@@ -15,6 +16,7 @@ function TableNodeComponent({ data }: NodeProps) {
   const nodeData = data as TableNodeData;
   const table = nodeData?.table;
   const isSelected = nodeData?.selected || false;
+  const activeRelCols = nodeData?.activeRelationColumns ?? [];
   const [hoveredCol, setHoveredCol] = useState<number | null>(null);
 
   if (!table) return null;
@@ -39,10 +41,12 @@ function TableNodeComponent({ data }: NodeProps) {
 
           const hasTooltip = col.functionalDefinition || col.isForeignKey;
 
+          const isActiveRelation = activeRelCols.includes(col.name);
+
           return (
             <div
               key={idx}
-              className="table-node-column"
+              className={`table-node-column${isActiveRelation ? ' active-relation-row' : ''}`}
               onMouseEnter={() => setHoveredCol(idx)}
               onMouseLeave={() => setHoveredCol(null)}
             >

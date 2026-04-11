@@ -5,6 +5,8 @@ import {
   BaseEdge,
   getSmoothStepPath,
   EdgeLabelRenderer,
+  Position,
+  useInternalNode,
   type EdgeProps,
 } from '@xyflow/react';
 
@@ -17,15 +19,18 @@ interface AnimatedEdgeData {
 }
 
 const ENDPOINT_R = 4;
+const DEFAULT_NODE_WIDTH = 260;
 
 export default function AnimatedEREdge({
   id,
-  sourceX,
+  source,
+  target,
+  sourceX: fallbackSrcX,
   sourceY,
-  targetX,
+  targetX: fallbackTgtX,
   targetY,
-  sourcePosition,
-  targetPosition,
+  sourcePosition: fallbackSrcPos,
+  targetPosition: fallbackTgtPos,
   data,
   style,
 }: EdgeProps) {
@@ -33,13 +38,46 @@ export default function AnimatedEREdge({
   const isHighlighted = edgeData?.highlighted ?? false;
   const isDimmed = edgeData?.dimmed ?? false;
 
+  // ── Smart routing: read node positions in real-time ──
+  const sourceNode = useInternalNode(source);
+  const targetNode = useInternalNode(target);
+
+  let dynamicSrcX = fallbackSrcX;
+  let dynamicTgtX = fallbackTgtX;
+  let dynamicSrcPos = fallbackSrcPos;
+  let dynamicTgtPos = fallbackTgtPos;
+
+  if (sourceNode && targetNode) {
+    const srcAbsX = sourceNode.internals.positionAbsolute.x;
+    const tgtAbsX = targetNode.internals.positionAbsolute.x;
+    const srcW = sourceNode.measured.width ?? DEFAULT_NODE_WIDTH;
+    const tgtW = targetNode.measured.width ?? DEFAULT_NODE_WIDTH;
+
+    const srcCenterX = srcAbsX + srcW / 2;
+    const tgtCenterX = tgtAbsX + tgtW / 2;
+
+    const isSourceLeft = srcCenterX < tgtCenterX;
+
+    if (isSourceLeft) {
+      dynamicSrcX = srcAbsX + srcW;
+      dynamicSrcPos = Position.Right;
+      dynamicTgtX = tgtAbsX;
+      dynamicTgtPos = Position.Left;
+    } else {
+      dynamicSrcX = srcAbsX;
+      dynamicSrcPos = Position.Left;
+      dynamicTgtX = tgtAbsX + tgtW;
+      dynamicTgtPos = Position.Right;
+    }
+  }
+
   const [edgePath] = getSmoothStepPath({
-    sourceX,
+    sourceX: dynamicSrcX,
     sourceY,
-    sourcePosition,
-    targetX,
+    sourcePosition: dynamicSrcPos,
+    targetX: dynamicTgtX,
     targetY,
-    targetPosition,
+    targetPosition: dynamicTgtPos,
     borderRadius: 0,
   });
 
@@ -48,8 +86,8 @@ export default function AnimatedEREdge({
   const endpointFill = isHighlighted ? '#3d7a82' : isDimmed ? '#d6dbd9' : '#5a8fa0';
   const labelColor = isHighlighted ? '#3d7a82' : isDimmed ? '#b0bab7' : '#5a7a83';
 
-  const srcLabelOffX = targetX > sourceX ? 14 : -14;
-  const tgtLabelOffX = sourceX > targetX ? 14 : -14;
+  const srcLabelOffX = dynamicSrcPos === Position.Right ? 14 : -14;
+  const tgtLabelOffX = dynamicTgtPos === Position.Right ? 14 : -14;
 
   return (
     <>
@@ -65,9 +103,18 @@ export default function AnimatedEREdge({
         }}
       />
 
+      {/* Animated flow overlay for highlighted edges */}
+      {isHighlighted && (
+        <path
+          d={edgePath}
+          fill="none"
+          className="er-edge-flow-anim"
+        />
+      )}
+
       {/* Source endpoint circle */}
       <circle
-        cx={sourceX}
+        cx={dynamicSrcX}
         cy={sourceY}
         r={ENDPOINT_R}
         fill="#FFFFFF"
@@ -77,7 +124,7 @@ export default function AnimatedEREdge({
 
       {/* Target endpoint circle */}
       <circle
-        cx={targetX}
+        cx={dynamicTgtX}
         cy={targetY}
         r={ENDPOINT_R}
         fill="#FFFFFF"
@@ -91,7 +138,7 @@ export default function AnimatedEREdge({
           <div
             className="dbdiagram-edge-label"
             style={{
-              transform: `translate(-50%, -50%) translate(${sourceX + srcLabelOffX}px, ${sourceY - 12}px)`,
+              transform: `translate(-50%, -50%) translate(${dynamicSrcX + srcLabelOffX}px, ${sourceY - 12}px)`,
               color: labelColor,
             }}
           >
@@ -102,7 +149,7 @@ export default function AnimatedEREdge({
           <div
             className="dbdiagram-edge-label"
             style={{
-              transform: `translate(-50%, -50%) translate(${targetX + tgtLabelOffX}px, ${targetY - 12}px)`,
+              transform: `translate(-50%, -50%) translate(${dynamicTgtX + tgtLabelOffX}px, ${targetY - 12}px)`,
               color: labelColor,
             }}
           >

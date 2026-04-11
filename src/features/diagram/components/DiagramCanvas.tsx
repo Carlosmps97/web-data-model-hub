@@ -65,6 +65,35 @@ function DiagramCanvasInner({
       .join('||');
   }, []);
 
+  // ── Derive active relation columns per table ──
+  const activeColsByTable = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    if (!selectedTableId) return map;
+
+    const selectedTable = tables.find(t => t.id === selectedTableId);
+    if (!selectedTable) return map;
+
+    relationships.forEach(rel => {
+      const src = tables.find(t => t.name === rel.sourceTable || t.id === rel.sourceTable);
+      const tgt = tables.find(t => t.name === rel.targetTable || t.id === rel.targetTable);
+      if (!src || !tgt) return;
+
+      const srcConnected = src.id === selectedTableId;
+      const tgtConnected = tgt.id === selectedTableId;
+      if (!srcConnected && !tgtConnected) return;
+
+      // Mark source-side column
+      if (!map.has(src.id)) map.set(src.id, new Set());
+      map.get(src.id)!.add(rel.sourceColumn);
+
+      // Mark target-side column
+      if (!map.has(tgt.id)) map.set(tgt.id, new Set());
+      map.get(tgt.id)!.add(rel.targetColumn);
+    });
+
+    return map;
+  }, [selectedTableId, tables, relationships]);
+
   // ── Sync tables → React Flow nodes ──
   useEffect(() => {
     const currFP = getStructFingerprint(tables);
@@ -73,28 +102,28 @@ function DiagramCanvasInner({
 
     setNodes(prev => {
       const existingMap = new Map(prev.map(n => [n.id, n]));
-      const tableIds = new Set(tables.map(t => t.id));
 
-      // Remove nodes that no longer exist
       const result: RFNode[] = [];
 
       tables.forEach(table => {
         const existing = existingMap.get(table.id);
+        const activeCols = activeColsByTable.get(table.id);
+        const nodeData = {
+          table,
+          selected: table.id === selectedTableId,
+          activeRelationColumns: activeCols ? Array.from(activeCols) : [],
+        };
+
         if (existing && !structChanged) {
-          // Position-only change or selection change — just update data
-          result.push({
-            ...existing,
-            data: { table, selected: table.id === selectedTableId },
-          });
+          result.push({ ...existing, data: nodeData });
         } else {
-          // New node or structure changed
           result.push({
             id: table.id,
             type: 'erTable',
             position: existing
-              ? existing.position // preserve dragged position
+              ? existing.position
               : { x: table.position?.x || 50, y: table.position?.y || 50 },
-            data: { table, selected: table.id === selectedTableId },
+            data: nodeData,
             width: NODE_WIDTH,
           });
         }
@@ -102,7 +131,7 @@ function DiagramCanvasInner({
 
       return result;
     });
-  }, [tables, selectedTableId, setNodes, getStructFingerprint]);
+  }, [tables, selectedTableId, activeColsByTable, setNodes, getStructFingerprint]);
 
   // ── Sync relationships → React Flow edges ──
   useEffect(() => {
