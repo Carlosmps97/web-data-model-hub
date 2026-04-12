@@ -39,8 +39,6 @@ function TableNodeComponent({ data }: NodeProps) {
           else if (col.isSurrogateKey) { iconLabel = 'SK'; iconClass = 'sk'; }
           else if (col.isPartitionKey) { iconLabel = 'PT'; iconClass = 'pk'; }
 
-          const hasTooltip = col.functionalDefinition || col.isForeignKey;
-
           const isActiveRelation = activeRelCols.includes(col.name);
 
           return (
@@ -90,8 +88,8 @@ function TableNodeComponent({ data }: NodeProps) {
                 className="dbdiagram-handle"
               />
 
-              {/* Tooltip */}
-              {hoveredCol === idx && hasTooltip && (
+              {/* Tooltip — shows on hover for every column */}
+              {hoveredCol === idx && (
                 <div className="table-node-column-tooltip">
                   <strong>{col.name} {col.dataType}</strong>
                   {col.functionalDefinition && (

@@ -770,6 +770,87 @@ select.input {
   pointer-events: none;
 }
 
+/* ========== AUTO ARRANGE POPOVER ========== */
+.auto-arrange-popover {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 340px;
+  background: #FFFFFF;
+  border: 1px solid rgba(157, 190, 187, 0.35);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(3, 25, 38, 0.15);
+  z-index: 100;
+  padding: var(--space-4);
+  animation: fadeIn 150ms ease;
+}
+.auto-arrange-title {
+  font-size: var(--text-base);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: var(--space-3);
+}
+.auto-arrange-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition-fast);
+}
+.auto-arrange-option:hover {
+  background: var(--color-bg-hover);
+}
+.auto-arrange-option + .auto-arrange-option {
+  margin-top: var(--space-1);
+}
+.auto-arrange-option-icon {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+.auto-arrange-option-body {
+  flex: 1;
+  min-width: 0;
+}
+.auto-arrange-option-label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.auto-arrange-option-badge {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+}
+.auto-arrange-option-desc {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
 /* ========== RIGHT PANEL ========== */
 .right-panel {
   width: var(--right-panel-width);
@@ -988,6 +1069,10 @@ select.input {
 }
 .react-flow__node:active {
   cursor: grabbing !important;
+}
+/* Re-enable pointer events on edges so hover works */
+.react-flow__edge.inactive {
+  pointer-events: all !important;
 }
 /* Invisible handles — dbdiagram style (no circles on rows) */
 .dbdiagram-handle.react-flow__handle {

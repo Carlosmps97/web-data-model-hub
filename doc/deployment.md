@@ -4,111 +4,122 @@
 
 ### Prerequisites
 
-- Node.js 18 or later
-- npm (included with Node.js)
+- Node.js 18+
+- npm (bundled with Node.js)
 - Git
 
 ### Setup
 
 ```bash
-# Clone the repository
 git clone https://github.com/Carlosmps97/web-data-model-hub.git
 cd web-data-model-hub
-
-# Install dependencies
 npm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your configuration
 ```
 
-### Running in Development
+Create a `.env` file (or copy `.env.example` if it exists):
+
+```bash
+# Optional: override the local JSON storage directory
+DATA_DIR=./data
+```
+
+### Development Server
 
 ```bash
 npm run dev
+# → http://localhost:3000 with HMR
 ```
 
-The application starts on http://localhost:3000 with hot module replacement enabled.
-
-### Building for Production
+### Production Build
 
 ```bash
 npm run build
 npm start
 ```
 
+---
+
 ## Environment Variables
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `DATA_DIR` | Path to local JSON storage directory | No (defaults to `./data`) |
-| `APP_AZURE_TENANT_ID` | Azure AD tenant ID (future SharePoint) | No |
-| `APP_AZURE_CLIENT_ID` | Azure AD client ID (future SharePoint) | No |
-| `APP_AZURE_CLIENT_SECRET` | Azure AD client secret (future SharePoint) | No |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATA_DIR` | `./data` | Path to the local JSON storage directory |
+| `APP_AZURE_TENANT_ID` | — | Azure AD tenant ID (future SharePoint integration) |
+| `APP_AZURE_CLIENT_ID` | — | Azure AD client ID |
+| `APP_AZURE_CLIENT_SECRET` | — | Azure AD client secret |
+
+All Azure variables are optional — they are placeholders for future database migration.
+
+---
 
 ## Data Storage
 
 ### Local JSON (Current)
 
-Data is stored in the `data/` directory:
-
 ```
 data/
-  projects.json        # Project registry
-  models/
-    {uuid}.json        # Individual model files
+├── projects.json        # Project[] registry
+└── models/
+    └── {uuid}.json      # Full DataModel per project
 ```
 
-The data directory is created automatically on first API call. It is excluded from version control via `.gitignore`.
+- Created automatically on first API call
+- Excluded from version control (`.gitignore`)
+- Backup: copy the entire `data/` directory
 
-To back up your data, simply copy the `data/` directory.
+### Migration to Another Machine
 
-### Data Migration
+1. Copy `data/` to the new machine
+2. Set `DATA_DIR` if using a non-default path
+3. Start the app — all projects and models load immediately
 
-To migrate data to a new environment:
-1. Copy the `data/` directory to the new location
-2. Set the `DATA_DIR` environment variable if using a non-default path
-3. Start the application
+---
 
-## Production Considerations
+## Deployment Platforms
 
-### Deployment Platforms
+### Node.js Server (recommended for persistent storage)
 
-The application can be deployed to any platform that supports Node.js:
+```bash
+npm run build
+npm start
+# Runs on port 3000 (set PORT env variable to override)
+```
 
-- **Vercel**: Native Next.js support, zero configuration
-- **Docker**: Containerized deployment
-- **Node.js Server**: Direct deployment with `npm start`
+Data persists in the `data/` directory on the server filesystem.
 
-### Docker Deployment
+### Docker
 
 ```dockerfile
 FROM node:18-alpine
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci
 COPY . .
 RUN npm run build
 EXPOSE 3000
+VOLUME ["/app/data"]
 CMD ["npm", "start"]
 ```
 
-### Vercel Deployment
+Mount the `data/` volume to persist JSON files across container restarts:
 
 ```bash
-# Install Vercel CLI
-npm i -g vercel
+docker run -p 3000:3000 -v $(pwd)/data:/app/data data-model-hub
+```
 
-# Deploy
+### Vercel / Serverless
+
+> **Warning:** Serverless platforms do not have a persistent filesystem. The `data/` directory will be reset on every deployment. For production, migrate storage to Cosmos DB, PostgreSQL, or SharePoint by replacing `jsonStore.ts` with a database adapter.
+
+```bash
+npm i -g vercel
 vercel
 ```
 
-Note: When deploying to serverless platforms, the local JSON storage will not persist between deployments. For production use, migrate to a database solution (Cosmos DB, PostgreSQL, etc.) or SharePoint.
+---
 
 ## Security Notes
 
-- The `.env` file contains sensitive credentials and is excluded from version control
-- Azure service principal credentials are stored for future SharePoint integration
-- Never commit the `.env` file or the `data/` directory to public repositories
-- When deploying to production, use environment variable injection through the hosting platform
+- Never commit `.env` or the `data/` directory to public repositories
+- Azure credentials (future SharePoint) must be injected via the hosting platform's environment variable system
+- The `data/` directory contains all project and model data — protect it with appropriate file system permissions in production

@@ -1,5 +1,8 @@
 # API Reference
 
+> All API routes live under `src/app/api/` and are served by Next.js.  
+> Data is persisted to `data/` on the server filesystem via `src/lib/storage/jsonStore.ts`.
+
 ## Base URL
 
 ```
@@ -186,7 +189,9 @@ DELETE /api/models/:id
 
 ---
 
-### Chat (Shell)
+### Chat (Shell — mock)
+
+> **Current status:** returns mock responses. Future: will forward to an AI agent backend that returns `TableModel[]` to auto-populate the canvas.
 
 ```
 POST /api/chat
@@ -213,8 +218,6 @@ Response:
   }
 }
 ```
-
-Note: This endpoint currently returns mock responses. The actual AI agent backend will be connected in a future update.
 
 ---
 

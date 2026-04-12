@@ -2,118 +2,134 @@
 
 ## System Overview
 
-Data Model Hub is a unified Next.js application that serves both the frontend UI and backend API. The application follows a feature-based architecture pattern, where each functional domain is encapsulated in its own module under `src/features/`.
+Data Model Hub is a unified **Next.js 16 (App Router)** application serving both the React frontend and REST API. The architecture follows a **feature-based module pattern** — each functional domain lives under `src/features/` with its own components and utilities.
 
-## Architecture Diagram
+## High-Level Architecture
 
+```mermaid
+graph TB
+    subgraph Browser["Browser (Client)"]
+        UI["React UI\n(Client Components)"]
+        ZS["Zustand Stores\nuseModelStore · useUIStore"]
+        RF["@xyflow/react\nDiagram Canvas"]
+    end
+
+    subgraph Server["Next.js Server"]
+        API["/api/projects\n/api/models\n/api/chat"]
+        JS["jsonStore.ts\n(Storage Service)"]
+    end
+
+    subgraph Storage["Filesystem"]
+        PJ["data/projects.json"]
+        MJ["data/models/{uuid}.json"]
+    end
+
+    UI -->|"dispatch actions"| ZS
+    ZS -->|"HTTP fetch"| API
+    UI --> RF
+    API --> JS
+    JS --> PJ
+    JS --> MJ
+    API -->|"JSON response"| ZS
+    ZS -->|"reactive update"| UI
 ```
-                    +-------------------------------------------+
-                    |           Next.js Application             |
-                    |                                           |
-                    |  +------------------+  +---------------+  |
-                    |  |   Client Layer   |  |  API Layer    |  |
-                    |  |  (React + X6)    |  |  (Routes)     |  |
-                    |  |                  |  |               |  |
-                    |  |  - DiagramCanvas |  | /api/projects |  |
-                    |  |  - TableForm    |  | /api/models   |  |
-                    |  |  - DBMLEditor   |  | /api/chat     |  |
-                    |  |  - ExcelImport  |  |               |  |
-                    |  |  - ChatPanel    |  +-------+-------+  |
-                    |  |                  |          |          |
-                    |  +--------+---------+          |          |
-                    |           |                    |          |
-                    |  +--------v---------+  +------v-------+  |
-                    |  |  Zustand Store   |  | JSON Storage |  |
-                    |  |  (Client State)  |  | Service      |  |
-                    |  +------------------+  +------+-------+  |
-                    |                               |          |
-                    +-------------------------------|----------+
-                                                    |
-                                              +-----v------+
-                                              | Local JSON  |
-                                              | Files       |
-                                              | (data/)     |
-                                              +-------------+
-```
-
-## Technology Decisions
-
-### Next.js (App Router)
-
-Selected as the unified framework to eliminate the complexity of maintaining separate frontend and backend applications. Key benefits:
-- Server-side rendering for initial page loads
-- API Routes for backend logic without a separate server
-- TypeScript support built-in
-- File-based routing reduces configuration overhead
-- App Router enables server components and streaming
-
-### AntV X6 3.x
-
-Chosen as the graph rendering engine for ER diagrams. Justification:
-- Purpose-built for node-edge graph editing (not just visualization)
-- Native support for React component rendering inside nodes via @antv/x6-react-shape
-- Built-in plugins for editing features: snapline, history, selection, minimap
-- ER-specific edge routing algorithms
-- JSON serialization support (toJSON/fromJSON) for persistence
-- Active maintenance and large community
-
-### Zustand
-
-Selected for client-side state management over Redux or Context API:
-- Minimal boilerplate compared to Redux
-- TypeScript support with strong inference
-- No provider wrappers needed
-- Supports derived state and async actions
-- Small bundle size (~1KB)
-
-### Local JSON Storage
-
-MVP storage approach with clear migration path:
-- Zero infrastructure requirements for development
-- Direct filesystem operations via Node.js fs module
-- JSON format aligns with the application data model
-- Abstract storage interface enables future migration to SharePoint, Cosmos DB, or any database
 
 ## Component Architecture
 
 ### Feature Modules
 
-Each feature is self-contained with its own components, hooks, utilities, and index file:
+```mermaid
+graph LR
+    App["src/app/"]
+    Features["src/features/"]
 
+    App --> Projects["projects/[projectId]/page.tsx"]
+    App --> Dashboard["page.tsx (Dashboard)"]
+    App --> API["api/ (REST routes)"]
+
+    Features --> Diagram["diagram/"]
+    Features --> TableEditor["table-editor/"]
+    Features --> ExcelImport["excel-import/"]
+    Features --> Chat["chat-agent/"]
+    Features --> ProjectsMgmt["projects/"]
+
+    Diagram --> DC["DiagramCanvas.tsx"]
+    Diagram --> TN["TableNode.tsx"]
+    Diagram --> AE["AnimatedEdge.tsx"]
+    Diagram --> AAP["AutoArrangePopover.tsx"]
+    Diagram --> LA["utils/layoutAlgorithms.ts"]
 ```
-features/
-  diagram/          - Core ER diagram visualization
-  table-editor/     - Manual table CRUD and DBML code editor
-  excel-import/     - Excel file upload and preview
-  chat-agent/       - AI assistant interface (shell)
-  projects/         - Project management
+
+### Diagram Feature — Internal Component Tree
+
+```mermaid
+graph TD
+    DCP["DiagramCanvas (Provider wrapper)"]
+    DCI["DiagramCanvasInner"]
+    RF2["ReactFlow"]
+    TN2["TableNode (erTable)"]
+    AE2["AnimatedEREdge (animatedER)"]
+    AAP2["AutoArrangePopover"]
+
+    DCP --> DCI
+    DCI --> RF2
+    RF2 --> TN2
+    RF2 --> AE2
+    DCI --> AAP2
 ```
 
-### Data Flow
+**`DiagramCanvasInner`** owns:
+- `hoveredTableId` + `selectedTableId` → `activeTableId`
+- Active column derivation (`activeColsByTable`)
+- Edge `highlighted`/`dimmed` + `edgeIndex` assignment
+- `handleAutoArrange` callback → calls layout algorithm → updates node positions + persists
 
-1. User interacts with React components (Client Components)
-2. Components dispatch actions to Zustand stores
-3. Stores make HTTP requests to Next.js API Routes
-4. API Routes use the JSON Storage Service for persistence
-5. Storage Service reads/writes JSON files to the data/ directory
-6. Changes propagate back through the store to update the UI
+**`AnimatedEdge`** owns:
+- Smart routing (same-side vs opposite-side based on horizontal overlap)
+- Per-edge `offset` from `edgeIndex` to separate parallel wires
+- Hover state (`isHovered`) → flow animation overlay
 
-### Rendering Strategy
+## Technology Decisions
 
-- **Client Components** (`'use client'`): All interactive features (diagram canvas, modals, forms)
-- **Server Components**: Layout shells, static pages
-- **Dynamic Import**: DiagramCanvas is dynamically imported with `ssr: false` because AntV X6 requires DOM access
+### Next.js 16 (App Router)
+- Single repo for frontend + backend API routes — no separate server
+- Server Components for layout shells; Client Components for all interactive features
+- `DiagramCanvas` uses `dynamic(..., { ssr: false })` because `@xyflow/react` requires DOM
+
+### @xyflow/react v12
+- Purpose-built React graph library with hooks API (`useInternalNode`, `useReactFlow`)
+- Custom node (`erTable`) and edge (`animatedER`) types via `nodeTypes`/`edgeTypes`
+- `useInternalNode` provides real-time absolute node positions inside edge components — used for smart routing
+- `getSmoothStepPath` with `offset` parameter enables separated parallel edges
+- `Controls` component accepts children — used to embed the Auto-Arrange popover
+
+### Zustand v5
+- No provider boilerplate; stores imported directly in any component
+- `useModelStore` — tables, relationships, CRUD actions, auto-save debounce
+- `useUIStore` — `selectedTableId`, right panel open state
+
+### Local JSON Storage
+- Zero infrastructure for development; Node.js `fs` module only
+- Abstract interface: swap `jsonStore.ts` for a database adapter (Cosmos DB, SharePoint) without changing API route signatures
+
+## Rendering Strategy
+
+| Layer | Strategy | Reason |
+|-------|----------|--------|
+| Layout shells, nav | Server Component | Static structure, no interactivity |
+| Dashboard, project list | Server Component | Can be pre-rendered |
+| Diagram canvas | `'use client'` + `dynamic(ssr:false)` | React Flow requires DOM |
+| Modals, forms, panels | `'use client'` | Interactive state |
+| API routes | Node.js (server) | File system access |
 
 ## Future Architecture
 
-When migrating to SharePoint or Cosmos DB:
+**Migrating to a database (Cosmos DB / SharePoint):**
+1. Create `cosmosStore.ts` implementing the same function signatures as `jsonStore.ts`
+2. Swap the import in each API route file
+3. No frontend changes — the HTTP API contract stays identical
 
-1. Create a new implementation of the storage interface (e.g., `sharepointStore.ts`)
-2. Swap the import in API routes from `jsonStore` to the new implementation
-3. No frontend changes required - the API contract remains the same
-
-When connecting the AI agent:
-
-1. Implement the `/api/chat` route to forward requests to the agent backend
-2. Parse agent responses into TableModel/Relationship structures
-3. The ChatPanel component already handles the UI - only the API integration changes
+**Connecting the AI agent:**
+1. Implement `/api/chat` to forward to the agent backend
+2. Parse agent responses into `TableModel[]` + `Relationship[]`
+3. Call `useModelStore.addTable()` / `addRelationship()` — the canvas auto-reacts
