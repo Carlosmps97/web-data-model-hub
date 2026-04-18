@@ -99,21 +99,13 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) => {
   return (
     <div className="chat-panel">
       {/* Header */}
-      <div style={{
-        padding: 'var(--space-3) var(--space-4)',
-        borderBottom: 'var(--border-subtle)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-          <div style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            background: 'var(--color-warning)',
-            boxShadow: '0 0 6px rgba(240, 198, 116, 0.5)',
-          }} />
+      <div className="chat-panel-header">
+        <div className="chat-panel-header-title">
+          <span className="chat-panel-avatar" aria-hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2l2.4 4.9 5.4.8-3.9 3.8.9 5.4L12 14.8 7.2 16.9l.9-5.4L4.2 7.7l5.4-.8L12 2z" />
+            </svg>
+          </span>
           <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>AI Assistant</span>
           <span className="badge badge-warning" style={{ fontSize: '0.6rem' }}>Preview</span>
         </div>
@@ -184,7 +176,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({ isOpen, onClose }) => {
             onKeyDown={handleKeyDown}
             disabled={sending}
           />
-          <button className="btn btn-primary btn-icon" onClick={handleSend} disabled={sending || (!input.trim() && !attachment)}>
+          <button className="btn btn-icon chat-send-btn" onClick={handleSend} disabled={sending || (!input.trim() && !attachment)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="22" y1="2" x2="11" y2="13" />
               <polygon points="22 2 15 22 11 13 2 9 22 2" />

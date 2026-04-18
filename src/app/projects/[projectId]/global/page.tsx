@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import AppLayout from '@/components/layout/AppLayout';
 import ChatPanel from '@/features/chat-agent/components/ChatPanel';
 import EngineBadge from '@/features/engines/components/EngineBadge';
+import DBMLEditorPanel, { type DBMLEditorGroup } from '@/features/table-editor/components/DBMLEditorPanel';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
 import type { Project, DataModel, TableModel, Relationship, DatabaseEngine } from '@/types/model';
@@ -126,6 +127,7 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
   const [models, setModels] = useState<DataModel[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [modelFilter, setModelFilter] = useState<string>('all');
+  const [leftTab, setLeftTab] = useState<'visual' | 'code'>('visual');
 
   useEffect(() => {
     async function load() {
@@ -153,6 +155,17 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
   useEffect(() => () => setSelectedTable(null), [setSelectedTable]);
 
   const aggregated = useMemo(() => aggregate(models), [models]);
+
+  // Build per-model groups for the read-only DBML Code tab
+  const dbmlGroups: DBMLEditorGroup[] = useMemo(() => {
+    const src = modelFilter === 'all' ? models : models.filter((m) => m.id === modelFilter);
+    return src.map((m) => ({
+      name: m.name,
+      engine: m.engine,
+      tables: m.tables,
+      relationships: m.relationships,
+    }));
+  }, [models, modelFilter]);
 
   // Filter view when user picks a single model
   const visible = useMemo(() => {
@@ -206,7 +219,7 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
               </svg>
               Global Canvas
             </span>
-            <span className="editor-save-badge saved" style={{ background: 'rgba(108, 92, 231, 0.08)', color: '#6c5ce7', borderColor: 'rgba(108, 92, 231, 0.25)' }}>
+            <span className="editor-save-badge saved" style={{ background: 'rgba(79, 70, 229, 0.08)', color: '#4f46e5', borderColor: 'rgba(79, 70, 229, 0.25)' }}>
               View only
             </span>
           </div>
@@ -238,6 +251,29 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
       <div className="editor-workspace">
         {/* Left Panel: model filter + all entities grouped */}
         <aside className="editor-left-panel">
+          <div className="editor-left-tabs">
+            <button
+              type="button"
+              className={`editor-tab ${leftTab === 'visual' ? 'active' : ''}`}
+              onClick={() => setLeftTab('visual')}
+            >
+              Visual
+            </button>
+            <button
+              type="button"
+              className={`editor-tab ${leftTab === 'code' ? 'active' : ''}`}
+              onClick={() => setLeftTab('code')}
+            >
+              Code
+            </button>
+          </div>
+
+          {leftTab === 'code' ? (
+            <div className="editor-left-content">
+              <DBMLEditorPanel groups={dbmlGroups} readOnly />
+            </div>
+          ) : (
+          <>
           <div className="editor-left-section">
             <div className="editor-left-section-title">Models</div>
             <div className="model-filter-list">
@@ -324,6 +360,8 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
               )}
             </div>
           </div>
+          </>
+          )}
         </aside>
 
         <DiagramCanvas

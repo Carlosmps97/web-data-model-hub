@@ -17,6 +17,7 @@ export interface TableColumn {
   isForeignKey?: boolean;
   foreignKeyRef?: { table: string; column: string };
   isNullable?: boolean;
+  isUnique?: boolean;
   defaultValue?: string;
   functionalDefinition?: string;
 }
@@ -28,6 +29,12 @@ export interface TableModel {
   columns: TableColumn[];
   functionalDefinition?: string;
   color?: string;
+  /** Optional classification metadata to help organise large catalogs. */
+  applicationCode?: string;
+  domain?: string;
+  subdomain?: string;
+  /** Free-form labels users can attach to a table (filtering / grouping). */
+  tags?: string[];
 }
 
 export interface Relationship {

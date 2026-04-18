@@ -3,17 +3,17 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useUIStore } from '@/store/useUIStore';
 
-const DEFAULT_COLOR = '#468189';
+const DEFAULT_COLOR = '#0d9488';
 
 const PRESET_COLORS = [
-  { label: 'Teal',    value: '#468189' },
-  { label: 'Indigo',  value: '#5C6BC0' },
-  { label: 'Rose',    value: '#E05C7A' },
-  { label: 'Amber',   value: '#D4821A' },
-  { label: 'Emerald', value: '#2E8B57' },
-  { label: 'Violet',  value: '#7B5EA7' },
-  { label: 'Slate',   value: '#4A5568' },
-  { label: 'Coral',   value: '#D95F3B' },
+  { label: 'Teal',    value: '#0d9488' },
+  { label: 'Indigo',  value: '#4f46e5' },
+  { label: 'Rose',    value: '#e11d48' },
+  { label: 'Amber',   value: '#d97706' },
+  { label: 'Emerald', value: '#059669' },
+  { label: 'Violet',  value: '#7c3aed' },
+  { label: 'Slate',   value: '#475569' },
+  { label: 'Coral',   value: '#ea580c' },
 ];
 
 type View = 'root' | 'color';

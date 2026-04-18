@@ -23,10 +23,24 @@ const emptyColumn = (): TableColumn => ({
 const TableForm: React.FC<TableFormProps> = ({ table, existingTables, onSave, onCancel }) => {
   const [name, setName] = useState(table?.name || '');
   const [functionalDef, setFunctionalDef] = useState(table?.functionalDefinition || '');
+  const [applicationCode, setApplicationCode] = useState(table?.applicationCode || '');
+  const [domain, setDomain] = useState(table?.domain || '');
+  const [subdomain, setSubdomain] = useState(table?.subdomain || '');
+  const [tags, setTags] = useState<string[]>(table?.tags ?? []);
+  const [tagDraft, setTagDraft] = useState('');
   const [columns, setColumns] = useState<TableColumn[]>(
     table?.columns?.length ? [...table.columns] : [emptyColumn()]
   );
   const [error, setError] = useState('');
+
+  const addTag = () => {
+    const v = tagDraft.trim();
+    if (!v) return;
+    if (tags.includes(v)) { setTagDraft(''); return; }
+    setTags([...tags, v]);
+    setTagDraft('');
+  };
+  const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
 
   const addColumn = () => {
     setColumns([...columns, emptyColumn()]);
@@ -58,6 +72,11 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, onSave, on
       name: name.trim(),
       columns: validColumns,
       functionalDefinition: functionalDef.trim() || undefined,
+      color: table?.color,
+      applicationCode: applicationCode.trim() || undefined,
+      domain: domain.trim() || undefined,
+      subdomain: subdomain.trim() || undefined,
+      tags: tags.length > 0 ? tags : undefined,
     };
 
     onSave(result);
@@ -105,11 +124,83 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, onSave, on
           />
         </div>
 
+        <div className="form-row">
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="input-label">Application Code</label>
+            <input
+              className="input"
+              type="text"
+              placeholder="e.g. CRM, ERP-01"
+              value={applicationCode}
+              onChange={(e) => setApplicationCode(e.target.value)}
+            />
+          </div>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="input-label">Domain</label>
+            <input
+              className="input"
+              type="text"
+              placeholder="e.g. Sales"
+              value={domain}
+              onChange={(e) => setDomain(e.target.value)}
+            />
+          </div>
+          <div className="form-group" style={{ flex: 1 }}>
+            <label className="input-label">Subdomain</label>
+            <input
+              className="input"
+              type="text"
+              placeholder="e.g. Orders"
+              value={subdomain}
+              onChange={(e) => setSubdomain(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="form-group">
+          <label className="input-label">Tags</label>
+          <div className="tag-chip-input">
+            {tags.map((t) => (
+              <span key={t} className="tag-chip">
+                {t}
+                <button
+                  type="button"
+                  className="tag-chip-remove"
+                  onClick={() => removeTag(t)}
+                  aria-label={`Remove tag ${t}`}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" />
+                    <line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </span>
+            ))}
+            <input
+              className="tag-chip-field"
+              type="text"
+              placeholder={tags.length === 0 ? 'Add tag and press Enter' : 'Add more…'}
+              value={tagDraft}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ',') {
+                  e.preventDefault();
+                  addTag();
+                } else if (e.key === 'Backspace' && !tagDraft && tags.length > 0) {
+                  e.preventDefault();
+                  setTags(tags.slice(0, -1));
+                }
+              }}
+              onBlur={addTag}
+            />
+          </div>
+        </div>
+
         <div className="divider" />
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-3)' }}>
           <label className="input-label" style={{ marginBottom: 0 }}>Columns</label>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={addColumn}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={addColumn}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
@@ -122,7 +213,7 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, onSave, on
           {/* Header */}
           <div style={{
             display: 'grid',
-            gridTemplateColumns: '1fr 120px 50px 50px 50px 50px 30px',
+            gridTemplateColumns: '1fr 120px 50px 50px 50px 50px 50px 30px',
             gap: 'var(--space-2)',
             padding: '0 var(--space-1)',
             fontSize: 'var(--text-xs)',
@@ -136,15 +227,16 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, onSave, on
             <span title="Primary Key" style={{ textAlign: 'center' }}>PK</span>
             <span title="Foreign Key" style={{ textAlign: 'center' }}>FK</span>
             <span title="Surrogate Key" style={{ textAlign: 'center' }}>SK</span>
+            <span title="Unique" style={{ textAlign: 'center' }}>Uniq</span>
             <span title="Nullable" style={{ textAlign: 'center' }}>Null</span>
             <span></span>
           </div>
 
           {columns.map((col, idx) => (
-            <div key={idx} style={{ borderRadius: 'var(--radius-sm)', background: idx % 2 === 0 ? 'transparent' : 'rgba(12, 45, 64, 0.3)' }}>
+            <div key={idx} className="table-form-column-row">
               <div style={{
                 display: 'grid',
-                gridTemplateColumns: '1fr 120px 50px 50px 50px 50px 30px',
+                gridTemplateColumns: '1fr 120px 50px 50px 50px 50px 50px 30px',
                 gap: 'var(--space-2)',
                 alignItems: 'center',
                 padding: 'var(--space-1)',
@@ -185,6 +277,13 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, onSave, on
                     className={`toggle ${col.isSurrogateKey ? 'active' : ''}`}
                     style={{ width: '28px', height: '16px', margin: '0 auto' }}
                     onClick={() => updateColumn(idx, { isSurrogateKey: !col.isSurrogateKey })}
+                  />
+                </div>
+                <div style={{ textAlign: 'center' }}>
+                  <div
+                    className={`toggle ${col.isUnique ? 'active' : ''}`}
+                    style={{ width: '28px', height: '16px', margin: '0 auto' }}
+                    onClick={() => updateColumn(idx, { isUnique: !col.isUnique })}
                   />
                 </div>
                 <div style={{ textAlign: 'center' }}>

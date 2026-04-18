@@ -1,10 +1,10 @@
-# Architecture
+# Arquitectura
 
-## System Overview
+## Visión General del Sistema
 
-Data Model Hub is a unified **Next.js 16 (App Router)** application serving both the React frontend and REST API. The architecture follows a **feature-based module pattern** — each functional domain lives under `src/features/` with its own components and utilities.
+Data Model Hub es una aplicación unificada de **Next.js 16 (App Router)** que sirve tanto el frontend React como la API REST. La arquitectura sigue un **patrón de módulos por funcionalidad** — cada dominio funcional vive bajo `src/features/` con sus propios componentes y utilidades.
 
-## High-Level Architecture
+## Arquitectura de Alto Nivel
 
 ```mermaid
 graph TB
@@ -34,9 +34,9 @@ graph TB
     ZS -->|"reactive update"| UI
 ```
 
-## Component Architecture
+## Arquitectura de Componentes
 
-### Feature Modules
+### Módulos por Funcionalidad
 
 ```mermaid
 graph LR
@@ -44,6 +44,9 @@ graph LR
     Features["src/features/"]
 
     App --> Projects["projects/[projectId]/page.tsx"]
+    App --> Models["projects/[projectId]/models/[modelId]/page.tsx"]
+    App --> Global["projects/[projectId]/global/page.tsx"]
+    App --> Docs["docs/page.tsx"]
     App --> Dashboard["page.tsx (Dashboard)"]
     App --> API["api/ (REST routes)"]
 
@@ -52,15 +55,23 @@ graph LR
     Features --> ExcelImport["excel-import/"]
     Features --> Chat["chat-agent/"]
     Features --> ProjectsMgmt["projects/"]
+    Features --> Engines["engines/"]
 
     Diagram --> DC["DiagramCanvas.tsx"]
     Diagram --> TN["TableNode.tsx"]
     Diagram --> AE["AnimatedEdge.tsx"]
     Diagram --> AAP["AutoArrangePopover.tsx"]
     Diagram --> LA["utils/layoutAlgorithms.ts"]
+
+    TableEditor --> TF["TableForm.tsx"]
+    TableEditor --> LV["TablesListView.tsx"]
+    TableEditor --> DBML["DBMLEditorPanel.tsx"]
+
+    Engines --> ES["EngineSelect.tsx"]
+    Engines --> EB["EngineBadge.tsx"]
 ```
 
-### Diagram Feature — Internal Component Tree
+### Característica de Diagrama — Árbol de Componentes Interno
 
 ```mermaid
 graph TD
@@ -78,59 +89,91 @@ graph TD
     DCI --> AAP2
 ```
 
-**`DiagramCanvasInner`** owns:
+**`DiagramCanvasInner`** gestiona:
 - `hoveredTableId` + `selectedTableId` → `activeTableId`
-- Active column derivation (`activeColsByTable`)
-- Edge `highlighted`/`dimmed` + `edgeIndex` assignment
-- **Auto-layout on load** — when tables are first rendered or structure changes, `layoutLeftRight()` computes initial positions (no positions are persisted to the backend)
-- `handleAutoArrange` callback → calls layout algorithm → updates node positions in-memory
+- Derivación de columnas activas (`activeColsByTable`)
+- Asignación de `highlighted`/`dimmed` + `edgeIndex` por arista
+- **Auto-distribución al cargar** — cuando las tablas se renderizan por primera vez o cambia la estructura, `layoutLeftRight()` calcula las posiciones iniciales (ninguna posición se persiste en el backend)
+- Callback `handleAutoArrange` → llama al algoritmo de distribución → actualiza posiciones en memoria
 
-**`AnimatedEdge`** owns:
-- Smart routing (same-side vs opposite-side based on horizontal overlap)
-- Per-edge `offset` from `edgeIndex` to separate parallel wires
-- Hover state (`isHovered`) → flow animation overlay
+**`AnimatedEdge`** gestiona:
+- Enrutamiento inteligente (mismo lado vs lado opuesto según superposición horizontal)
+- `offset` por arista desde `edgeIndex` para separar conexiones paralelas
+- Estado de hover (`isHovered`) → superposición de animación de flujo
 
-## Technology Decisions
+### Página del Editor de Modelos — Arquitectura de Vistas
+
+`ModelEditorPage` (`src/app/projects/[projectId]/models/[modelId]/page.tsx`) gestiona un estado `mainView` (`'list' | 'canvas'`) que controla qué componente de área de trabajo se renderiza:
+
+```
+mainView === 'list'   → <TablesListView>  (cuadrícula de tarjetas con búsqueda + filtro de etiquetas)
+mainView === 'canvas' → <DiagramCanvas>   (diagrama ER con React Flow)
+```
+
+El panel izquierdo (estado `leftTab`) controla de forma independiente:
+
+```
+leftTab === 'visual' → disparador del modal TableForm + importación Excel + chat IA
+leftTab === 'code'   → DBMLEditorPanel
+```
+
+**`TablesListView`** gestiona:
+- Estado local `search` (filtra por nombre, descripción, código de app, dominio, subdominio, etiquetas)
+- Estado local `activeTag` (filtrado por clic en chips de etiquetas)
+- `allTags` derivado (unión de etiquetas de todas las tablas, ordenado)
+- Renderiza tarjetas de tabla con insignias de clasificación (`applicationCode`, `domain`, `subdomain`) y chips de etiquetas
+- Botones de acción editar/eliminar delegados a los manejadores de `ModelEditorPage`
+
+**`EngineSelect`** gestiona:
+- Popover con posición fija (evita recorte por ancestros con `overflow: hidden`)
+- Posicionamiento dinámico calculado desde `getBoundingClientRect()` en el botón disparador
+- Lista de opciones de motor con íconos dentro de un listener DOM adjunto por `useEffect` para cierre al hacer clic afuera
+
+### Página del Lienzo Global
+
+`GlobalPage` (`src/app/projects/[projectId]/global/page.tsx`) obtiene todos los modelos de un proyecto y fusiona sus tablas en un único render de `DiagramCanvas`. Las tablas se colorean según su modelo de origen.
+
+## Decisiones Tecnológicas
 
 ### Next.js 16 (App Router)
-- Single repo for frontend + backend API routes — no separate server
-- Server Components for layout shells; Client Components for all interactive features
-- `DiagramCanvas` uses `dynamic(..., { ssr: false })` because `@xyflow/react` requires DOM
+- Un solo repositorio para frontend + rutas de API backend — sin servidor separado
+- Server Components para estructuras de diseño; Client Components para todas las funcionalidades interactivas
+- `DiagramCanvas` usa `dynamic(..., { ssr: false })` porque `@xyflow/react` requiere el DOM
 
 ### @xyflow/react v12
-- Purpose-built React graph library with hooks API (`useInternalNode`, `useReactFlow`)
-- Custom node (`erTable`) and edge (`animatedER`) types via `nodeTypes`/`edgeTypes`
-- `useInternalNode` provides real-time absolute node positions inside edge components — used for smart routing
-- `getSmoothStepPath` with `offset` parameter enables separated parallel edges
-- `Controls` component accepts children — used to embed the Auto-Arrange popover
+- Librería de grafos React con API de hooks (`useInternalNode`, `useReactFlow`)
+- Tipos de nodo (`erTable`) y arista (`animatedER`) personalizados vía `nodeTypes`/`edgeTypes`
+- `useInternalNode` provee posiciones absolutas en tiempo real dentro de componentes de arista — usado para enrutamiento inteligente
+- `getSmoothStepPath` con parámetro `offset` permite aristas paralelas separadas
+- El componente `Controls` acepta hijos — usado para incrustar el popover de Auto-Arrange
 
 ### Zustand v5
-- No provider boilerplate; stores imported directly in any component
-- `useModelStore` — tables, relationships, CRUD actions, auto-save debounce
-- `useUIStore` — `selectedTableId`, right panel open state
+- Sin boilerplate de provider; los stores se importan directamente en cualquier componente
+- `useModelStore` — tablas, relaciones, acciones CRUD, debounce de auto-guardado
+- `useUIStore` — `selectedTableId`, estado abierto del panel derecho
 
-### Local JSON Storage
-- Zero infrastructure for development; Node.js `fs` module only
-- Abstract interface: swap `jsonStore.ts` for a database adapter (Cosmos DB, SharePoint) without changing API route signatures
+### Almacenamiento JSON Local
+- Cero infraestructura para desarrollo; solo módulo `fs` de Node.js
+- Interfaz abstracta: reemplaza `jsonStore.ts` por un adaptador de base de datos (Cosmos DB, SharePoint) sin cambiar las firmas de las rutas de API
 
-## Rendering Strategy
+## Estrategia de Renderizado
 
-| Layer | Strategy | Reason |
-|-------|----------|--------|
-| Layout shells, nav | Server Component | Static structure, no interactivity |
-| Dashboard, project list | Server Component | Can be pre-rendered |
-| Diagram canvas | `'use client'` + `dynamic(ssr:false)` | React Flow requires DOM |
-| Modals, forms, panels | `'use client'` | Interactive state |
-| API routes | Node.js (server) | File system access |
+| Capa | Estrategia | Razón |
+|------|------------|---------|
+| Estructuras de diseño, nav | Server Component | Estructura estática, sin interactividad |
+| Dashboard, lista de proyectos | Server Component | Puede pre-renderizarse |
+| Lienzo de diagrama | `'use client'` + `dynamic(ssr:false)` | React Flow requiere el DOM |
+| Modales, formularios, paneles | `'use client'` | Estado interactivo |
+| Rutas de API | Node.js (servidor) | Acceso al sistema de archivos |
 
-## Future Architecture
+## Arquitectura Futura
 
-**Migrating to a database (Cosmos DB / SharePoint):**
-1. Create `cosmosStore.ts` implementing the same function signatures as `jsonStore.ts`
-2. Swap the import in each API route file
-3. No frontend changes — the HTTP API contract stays identical
+**Migración a una base de datos (Cosmos DB / SharePoint):**
+1. Crea `cosmosStore.ts` implementando las mismas firmas de función que `jsonStore.ts`
+2. Reemplaza la importación en cada archivo de ruta de API
+3. Sin cambios en el frontend — el contrato HTTP de la API permanece idéntico
 
-**Connecting the AI agent:**
-1. Implement `/api/chat` to forward to the agent backend
-2. Parse agent responses into `TableModel[]` + `Relationship[]`
-3. Call `useModelStore.addTable()` / `addRelationship()` — the canvas auto-reacts
+**Conexión del agente IA:**
+1. Implementa `/api/chat` para redirigir al backend del agente
+2. Parsea las respuestas del agente en `TableModel[]` + `Relationship[]`
+3. Llama a `useModelStore.addTable()` / `addRelationship()` — el lienzo reacciona automáticamente

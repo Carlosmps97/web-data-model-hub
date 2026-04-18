@@ -1,9 +1,9 @@
-# API Reference
+# Referencia de API
 
-> All API routes live under `src/app/api/` and are served by Next.js.  
-> Data is persisted to `data/` on the server filesystem via `src/lib/storage/jsonStore.ts`.
+> Todas las rutas de API viven en `src/app/api/` y son servidas por Next.js.  
+> Los datos se persisten en `data/` en el sistema de archivos del servidor a través de `src/lib/storage/jsonStore.ts`.
 
-## Base URL
+## URL Base
 
 ```
 http://localhost:3000/api
@@ -11,15 +11,15 @@ http://localhost:3000/api
 
 ## Endpoints
 
-### Projects
+### Proyectos
 
-#### List Projects
+#### Listar Proyectos
 
 ```
 GET /api/projects
 ```
 
-Response:
+Respuesta:
 ```json
 {
   "success": true,
@@ -35,7 +35,7 @@ Response:
 }
 ```
 
-#### Create Project
+#### Crear Proyecto
 
 ```
 POST /api/projects
@@ -47,7 +47,7 @@ Content-Type: application/json
 }
 ```
 
-Response (201):
+Respuesta (201):
 ```json
 {
   "success": true,
@@ -61,13 +61,13 @@ Response (201):
 }
 ```
 
-#### Get Project
+#### Obtener Proyecto
 
 ```
 GET /api/projects/:id
 ```
 
-#### Update Project
+#### Actualizar Proyecto
 
 ```
 PUT /api/projects/:id
@@ -79,28 +79,28 @@ Content-Type: application/json
 }
 ```
 
-#### Delete Project
+#### Eliminar Proyecto
 
 ```
 DELETE /api/projects/:id
 ```
 
-Note: Deleting a project also deletes all associated models.
+Nota: Eliminar un proyecto también elimina todos sus modelos asociados.
 
 ---
 
-### Models
+### Modelos
 
-#### List Models
+#### Listar Modelos
 
 ```
 GET /api/models
 GET /api/models?projectId=uuid
 ```
 
-The optional `projectId` query parameter filters models by project.
+El parámetro de consulta opcional `projectId` filtra los modelos por proyecto.
 
-Response:
+Respuesta:
 ```json
 {
   "success": true,
@@ -119,7 +119,7 @@ Response:
 }
 ```
 
-#### Create Model
+#### Crear Modelo
 
 ```
 POST /api/models
@@ -134,15 +134,15 @@ Content-Type: application/json
 }
 ```
 
-#### Get Model
+#### Obtener Modelo
 
 ```
 GET /api/models/:id
 ```
 
-Returns the full model including all tables and relationships.
+Retorna el modelo completo incluyendo todas las tablas y relaciones.
 
-#### Update Model
+#### Actualizar Modelo
 
 ```
 PUT /api/models/:id
@@ -180,7 +180,7 @@ Content-Type: application/json
 }
 ```
 
-#### Delete Model
+#### Eliminar Modelo
 
 ```
 DELETE /api/models/:id
@@ -188,9 +188,9 @@ DELETE /api/models/:id
 
 ---
 
-### Chat (Shell — mock)
+### Chat (Shell — simulado)
 
-> **Current status:** returns mock responses. Future: will forward to an AI agent backend that returns `TableModel[]` to auto-populate the canvas.
+> **Estado actual:** devuelve respuestas simuladas. En el futuro, redirigirá a un backend de agente IA que retornará `TableModel[]` para poblar el lienzo automáticamente.
 
 ```
 POST /api/chat
@@ -207,7 +207,7 @@ Content-Type: application/json
 }
 ```
 
-Response:
+Respuesta:
 ```json
 {
   "success": true,
@@ -220,9 +220,9 @@ Response:
 
 ---
 
-## Error Responses
+## Respuestas de Error
 
-All error responses follow this format:
+Todas las respuestas de error siguen este formato:
 
 ```json
 {
@@ -231,68 +231,91 @@ All error responses follow this format:
 }
 ```
 
-Common HTTP status codes:
-- 400: Bad request (missing required fields)
-- 404: Resource not found
-- 500: Internal server error
+Códigos de estado HTTP comunes:
+- 400: Solicitud incorrecta (campos obligatorios faltantes)
+- 404: Recurso no encontrado
+- 500: Error interno del servidor
 
-## Data Types
+## Tipos de Datos
 
 ### Project
 
-| Field | Type | Description |
+| Campo | Tipo | Descripción |
 |-------|------|-------------|
-| id | string (UUID) | Unique identifier |
-| name | string | Project name |
-| description | string? | Optional description |
-| createdAt | string (ISO 8601) | Creation timestamp |
-| updatedAt | string (ISO 8601) | Last update timestamp |
+| id | string (UUID) | Identificador único |
+| name | string | Nombre del proyecto |
+| description | string? | Descripción opcional |
+| createdAt | string (ISO 8601) | Fecha de creación |
+| updatedAt | string (ISO 8601) | Fecha de última actualización |
 
 ### DataModel
 
-| Field | Type | Description |
+| Campo | Tipo | Descripción |
 |-------|------|-------------|
-| id | string (UUID) | Unique identifier |
-| projectId | string (UUID) | Parent project ID |
-| name | string | Model name |
-| description | string? | Optional description |
-| tables | TableModel[] | Array of table definitions |
-| relationships | Relationship[] | Array of relationships |
-| createdAt | string (ISO 8601) | Creation timestamp |
-| updatedAt | string (ISO 8601) | Last update timestamp |
+| id | string (UUID) | Identificador único |
+| projectId | string (UUID) | ID del proyecto padre |
+| name | string | Nombre del modelo |
+| description | string? | Descripción opcional |
+| engine | DatabaseEngine? | Motor de base de datos destino (ver abajo) |
+| tables | TableModel[] | Arreglo de definiciones de tablas |
+| relationships | Relationship[] | Arreglo de relaciones |
+| createdAt | string (ISO 8601) | Fecha de creación |
+| updatedAt | string (ISO 8601) | Fecha de última actualización |
+
+### DatabaseEngine
+
+Valores válidos para el campo `engine`:
+
+| Valor | Nombre mostrado |
+|-------|-----------------|
+| `postgresql` | PostgreSQL |
+| `mysql` | MySQL |
+| `sqlserver` | SQL Server |
+| `oracle` | Oracle |
+| `snowflake` | Snowflake |
+| `databricks` | Databricks |
+| `bigquery` | BigQuery |
+| `redshift` | Redshift |
+| `sqlite` | SQLite |
+| `mongodb` | MongoDB |
 
 ### TableModel
 
-| Field | Type | Description |
+| Campo | Tipo | Descripción |
 |-------|------|-------------|
-| id | string (UUID) | Unique identifier |
-| name | string | Table name |
-| schema | string? | Optional schema name |
-| columns | TableColumn[] | Array of columns |
-| functionalDefinition | string? | Table description |
+| id | string (UUID) | Identificador único |
+| name | string | Nombre de la tabla |
+| schema | string? | Esquema/namespace opcional |
+| columns | TableColumn[] | Arreglo de columnas |
+| functionalDefinition | string? | Descripción de negocio de la tabla |
+| applicationCode | string? | Aplicación o sistema dueño de esta tabla |
+| domain | string? | Clasificación de dominio de negocio (ej. `Ventas`) |
+| subdomain | string? | Agrupación dentro del dominio (ej. `Facturación`) |
+| tags | string[]? | Etiquetas libres para filtrado y agrupación |
+| color | string? | Color de visualización opcional para el nodo del lienzo |
 
 ### TableColumn
 
-| Field | Type | Description |
+| Campo | Tipo | Descripción |
 |-------|------|-------------|
-| name | string | Column name |
-| dataType | string | Data type |
-| isPrimaryKey | boolean? | Primary key flag |
-| isSurrogateKey | boolean? | Surrogate key flag |
-| isPartitionKey | boolean? | Partition key flag |
-| isForeignKey | boolean? | Foreign key flag |
-| foreignKeyRef | {table, column}? | FK reference |
-| isNullable | boolean? | Nullable flag |
-| defaultValue | string? | Default value |
-| functionalDefinition | string? | Column description |
+| name | string | Nombre de la columna |
+| dataType | string | Tipo de dato |
+| isPrimaryKey | boolean? | Indica llave primaria |
+| isSurrogateKey | boolean? | Indica llave sustituta |
+| isPartitionKey | boolean? | Indica llave de partición |
+| isForeignKey | boolean? | Indica llave foránea |
+| foreignKeyRef | {table, column}? | Referencia FK |
+| isNullable | boolean? | Indica si acepta nulos |
+| defaultValue | string? | Valor predeterminado |
+| functionalDefinition | string? | Descripción de la columna |
 
 ### Relationship
 
-| Field | Type | Description |
+| Campo | Tipo | Descripción |
 |-------|------|-------------|
-| id | string (UUID) | Unique identifier |
-| sourceTable | string | Source table name |
-| sourceColumn | string | Source column name |
-| targetTable | string | Target table name |
-| targetColumn | string | Target column name |
+| id | string (UUID) | Identificador único |
+| sourceTable | string | Nombre de la tabla origen |
+| sourceColumn | string | Nombre de la columna origen |
+| targetTable | string | Nombre de la tabla destino |
+| targetColumn | string | Nombre de la columna destino |
 | type | enum | one-to-one, one-to-many, many-to-many |

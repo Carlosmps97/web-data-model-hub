@@ -314,7 +314,7 @@ function DiagramCanvasInner({
   const miniMapNodeColor = useCallback((node: RFNode) => {
     if (node.type === 'namespace') return 'transparent';
     const data = node.data as { selected?: boolean } | undefined;
-    return data?.selected ? '#468189' : '#B8CCCA';
+    return data?.selected ? '#0d9488' : '#cbd5e1';
   }, []);
 
   return (
@@ -340,13 +340,13 @@ function DiagramCanvasInner({
         proOptions={{ hideAttribution: true }}
         snapToGrid
         snapGrid={[16, 16]}
-        style={{ background: '#FAFAF8' }}
+        style={{ background: '#f1f5f9' }}
       >
         <Background
           variant={BackgroundVariant.Dots}
-          gap={20}
+          gap={24}
           size={1}
-          color="#d7d2c7"
+          color="#94a3b8"
         />
         <Controls
           showInteractive={false}
@@ -356,23 +356,23 @@ function DiagramCanvasInner({
             flexDirection: 'row',
             gap: '2px',
             background: '#FFFFFF',
-            border: '1px solid rgba(157,190,187,0.4)',
+            border: '1px solid #e2e8f0',
             borderRadius: '12px',
-            boxShadow: '0 4px 16px rgba(3,25,38,0.1)',
+            boxShadow: '0 4px 16px rgba(15,23,42,0.08)',
             padding: '4px',
             bottom: '16px',
           }}
         >
-          <div className="divider-v" style={{ width: 1, height: 20, background: 'rgba(157,190,187,0.3)', margin: '0 2px' }} />
+          <div className="divider-v" style={{ width: 1, height: 20, background: '#e2e8f0', margin: '0 2px' }} />
           <AutoArrangePopover onSelect={handleAutoArrange} />
         </Controls>
         <MiniMap
           nodeColor={miniMapNodeColor}
           nodeStrokeWidth={1}
-          maskColor="rgba(251, 247, 238, 0.7)"
+          maskColor="rgba(241, 245, 249, 0.8)"
           style={{
             background: '#FFFFFF',
-            border: '1px solid rgba(157,190,187,0.4)',
+            border: '1px solid #e2e8f0',
             borderRadius: '8px',
           }}
           pannable

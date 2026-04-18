@@ -1,14 +1,27 @@
 // DBML (Database Markup Language) Parser
-// Parses DBML-like syntax into TableModel[] and Relationship[] structures
-// Supports: Table definitions, column settings [pk, fk, not null, unique, default, ref], Notes, Ref declarations
+// Parses DBML-like syntax into TableModel[] / Relationship[] structures
+// Features supported:
+//   - Table { ... } with columns & inline settings
+//   - Column settings: pk | primary key, sk, partition, not null, null, unique, default: ..., note: ..., ref: > Table.col
+//   - Inline column comments   ("name type // comment")
+//   - Standalone Ref: Table.col > Table.col
+//   - Single-line Note: 'text'   and   multi-line Note { '''...''' } blocks
+//   - Top-level Project { database_type: 'PostgreSQL' Note: '...' } block
+//   - // line comments
+//   - Graceful handling of cross-model refs (target table may be absent from parsed set)
 
 import { v4 as uuidv4 } from 'uuid';
-import type { TableModel, TableColumn, Relationship } from '@/types/model';
+import type { TableModel, TableColumn, Relationship, DatabaseEngine } from '@/types/model';
 
 export interface DBMLParseResult {
   tables: TableModel[];
   relationships: Relationship[];
   errors: DBMLError[];
+  project?: {
+    name?: string;
+    engine?: DatabaseEngine;
+    note?: string;
+  };
 }
 
 export interface DBMLError {
@@ -16,24 +29,136 @@ export interface DBMLError {
   message: string;
 }
 
+// Map DBML `database_type` values (case-insensitive) to our internal engine ids.
+const ENGINE_ALIASES: Record<string, DatabaseEngine> = {
+  postgres: 'postgresql',
+  postgresql: 'postgresql',
+  psql: 'postgresql',
+  mysql: 'mysql',
+  mariadb: 'mysql',
+  sqlserver: 'sqlserver',
+  'sql server': 'sqlserver',
+  mssql: 'sqlserver',
+  tsql: 'sqlserver',
+  oracle: 'oracle',
+  plsql: 'oracle',
+  snowflake: 'snowflake',
+  databricks: 'databricks',
+  bigquery: 'bigquery',
+  'big query': 'bigquery',
+  redshift: 'redshift',
+  sqlite: 'sqlite',
+  mongo: 'mongodb',
+  mongodb: 'mongodb',
+};
+
+function normalizeEngine(raw: string): DatabaseEngine | undefined {
+  const k = raw.trim().toLowerCase().replace(/[_-]/g, ' ').replace(/\s+/g, ' ');
+  return ENGINE_ALIASES[k] ?? ENGINE_ALIASES[k.replace(/\s/g, '')];
+}
+
 export function parseDBML(input: string): DBMLParseResult {
   const lines = input.split('\n');
   const tables: TableModel[] = [];
   const relationships: Relationship[] = [];
   const errors: DBMLError[] = [];
+  let project: DBMLParseResult['project'] = undefined;
 
   let currentTable: TableModel | null = null;
   let braceDepth = 0;
+
+  // Context for top-level Project { ... } block
+  let inProject = false;
+  let projectBraceDepth = 0;
+
+  // Buffers for multi-line note capture
+  // When active, lines are accumulated (raw, preserving indentation after the opener)
+  // until the closing triple-quote is found.
+  let noteBuffer: string[] | null = null;
+  let noteTarget: 'table' | 'project' | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const lineNum = i + 1;
     const raw = lines[i];
     const line = raw.trim();
 
-    // Skip empty lines and comments
+    // ---------- MULTI-LINE NOTE CAPTURE ----------
+    if (noteBuffer !== null) {
+      // Look for closing triple quote
+      const closeIdx = raw.indexOf("'''");
+      if (closeIdx >= 0) {
+        const before = raw.slice(0, closeIdx);
+        if (before.trim().length > 0) noteBuffer.push(before);
+        const text = noteBuffer.join('\n').trim();
+        if (noteTarget === 'table' && currentTable) {
+          currentTable.functionalDefinition = text;
+        } else if (noteTarget === 'project') {
+          project = { ...(project ?? {}), note: text };
+        }
+        noteBuffer = null;
+        noteTarget = null;
+        // The remainder of the line after the closing quote is ignored (usually just `}`).
+      } else {
+        noteBuffer.push(raw);
+      }
+      continue;
+    }
+
+    // Skip empty and full-line comments
     if (!line || line.startsWith('//')) continue;
 
-    // --- Table declaration ---
+    // ---------- PROJECT BLOCK ----------
+    if (!currentTable && !inProject) {
+      const projMatch = line.match(/^Project\s+(\S+)?\s*\{/i);
+      if (projMatch) {
+        inProject = true;
+        projectBraceDepth = 1;
+        project = { ...(project ?? {}) };
+        if (projMatch[1]) project.name = projMatch[1];
+        continue;
+      }
+    }
+
+    if (inProject) {
+      if (line === '}') {
+        projectBraceDepth--;
+        if (projectBraceDepth === 0) inProject = false;
+        continue;
+      }
+
+      // database_type: 'PostgreSQL'
+      const engineMatch = line.match(/^database_type\s*:\s*['"]([^'"]+)['"]/i);
+      if (engineMatch) {
+        const engine = normalizeEngine(engineMatch[1]);
+        if (engine) project = { ...(project ?? {}), engine };
+        continue;
+      }
+
+      // Note — triple-quoted (multi-line) FIRST to avoid the single-line regex
+      // greedily capturing the two leading quotes of a ''' opener.
+      const noteOpen = line.match(/^Note\s*:\s*'''(.*)$/i);
+      if (noteOpen) {
+        const rest = noteOpen[1];
+        const closeIdx = rest.indexOf("'''");
+        if (closeIdx >= 0) {
+          project = { ...(project ?? {}), note: rest.slice(0, closeIdx).trim() };
+        } else {
+          noteBuffer = rest.length > 0 ? [rest] : [];
+          noteTarget = 'project';
+        }
+        continue;
+      }
+      // Note: 'single-line'
+      const noteSingle = line.match(/^Note\s*:\s*['"]([^'"]*)['"]/i);
+      if (noteSingle) {
+        project = { ...(project ?? {}), note: noteSingle[1] };
+        continue;
+      }
+      // ignore other project-level keys silently
+      continue;
+    }
+
+    // ---------- TABLE DECLARATION ----------
     const tableMatch = line.match(/^Table\s+(\S+)\s*\{/i);
     if (tableMatch) {
       currentTable = {
@@ -45,26 +170,22 @@ export function parseDBML(input: string): DBMLParseResult {
       continue;
     }
 
-    // --- Standalone Ref declaration ---
-    const refMatch = line.match(/^Ref\s*:\s*(\S+)\.(\S+)\s*([<>-])\s*(\S+)\.(\S+)/i);
-    if (refMatch) {
+    // ---------- STANDALONE REF ----------
+    const refMatch = line.match(/^Ref\s*:?\s*(\S+)\.(\S+)\s*([<>-])\s*(\S+)\.(\S+)/i);
+    if (refMatch && !currentTable) {
       const [, srcTable, srcCol, relSymbol, tgtTable, tgtCol] = refMatch;
-      let relType: Relationship['type'] = 'one-to-many';
-      if (relSymbol === '-') relType = 'one-to-one';
-      else if (relSymbol === '<') relType = 'many-to-many';
-
       relationships.push({
         id: uuidv4(),
         sourceTable: srcTable,
         sourceColumn: srcCol,
         targetTable: tgtTable,
         targetColumn: tgtCol,
-        type: relType,
+        type: relSymbol === '-' ? 'one-to-one' : relSymbol === '<' ? 'many-to-many' : 'one-to-many',
       });
       continue;
     }
 
-    // --- Inside a table block ---
+    // ---------- INSIDE TABLE BLOCK ----------
     if (currentTable && braceDepth > 0) {
       // Closing brace
       if (line === '}') {
@@ -76,10 +197,29 @@ export function parseDBML(input: string): DBMLParseResult {
         continue;
       }
 
-      // Table Note
-      const noteMatch = line.match(/^Note\s*:\s*['"](.+)['"]/i);
-      if (noteMatch) {
-        currentTable.functionalDefinition = noteMatch[1];
+      // Multi-line Note opener FIRST: Note: '''... OR Note { '''...
+      const noteOpen = line.match(/^Note\s*[:{]\s*'''(.*)$/i);
+      if (noteOpen) {
+        const rest = noteOpen[1];
+        const closeIdx = rest.indexOf("'''");
+        if (closeIdx >= 0) {
+          currentTable.functionalDefinition = rest.slice(0, closeIdx).trim();
+        } else {
+          noteBuffer = rest.length > 0 ? [rest] : [];
+          noteTarget = 'table';
+        }
+        continue;
+      }
+      // Single-line Note
+      const noteSingle = line.match(/^Note\s*:\s*['"]([^'"]*)['"]/i);
+      if (noteSingle) {
+        currentTable.functionalDefinition = noteSingle[1];
+        continue;
+      }
+      // Note { 'single line' }
+      const noteBlockSingle = line.match(/^Note\s*\{\s*['"]([^'"]*)['"]\s*\}?/i);
+      if (noteBlockSingle) {
+        currentTable.functionalDefinition = noteBlockSingle[1];
         continue;
       }
 
@@ -97,15 +237,31 @@ export function parseDBML(input: string): DBMLParseResult {
       const colMatch = line.match(/^(\S+)\s+(\S+(?:\([^)]*\))?)\s*(?:\[([^\]]*)\])?\s*(?:\/\/\s*(.*))?$/);
       if (colMatch) {
         const [, name, dataType, settings, comment] = colMatch;
-        const column: TableColumn = {
-          name,
-          dataType,
-        };
+        const column: TableColumn = { name, dataType };
 
         if (settings) {
-          const settingsList = settings.split(',').map((s) => s.trim().toLowerCase());
+          // Split on commas that are NOT inside quotes
+          const parts: string[] = [];
+          let buf = '';
+          let inQuote: string | null = null;
+          for (const ch of settings) {
+            if (inQuote) {
+              buf += ch;
+              if (ch === inQuote) inQuote = null;
+            } else if (ch === "'" || ch === '"') {
+              inQuote = ch;
+              buf += ch;
+            } else if (ch === ',') {
+              parts.push(buf.trim());
+              buf = '';
+            } else {
+              buf += ch;
+            }
+          }
+          if (buf.trim()) parts.push(buf.trim());
 
-          for (const setting of settingsList) {
+          for (const rawSetting of parts) {
+            const setting = rawSetting.toLowerCase();
             if (setting === 'pk' || setting === 'primary key') {
               column.isPrimaryKey = true;
             } else if (setting === 'sk' || setting === 'surrogate key') {
@@ -117,32 +273,29 @@ export function parseDBML(input: string): DBMLParseResult {
             } else if (setting === 'null') {
               column.isNullable = true;
             } else if (setting === 'unique') {
-              // stored as-is in type info
+              column.isUnique = true;
             } else if (setting === 'increment' || setting === 'auto_increment') {
               // informational
             } else if (setting.startsWith('default:')) {
-              column.defaultValue = setting.replace('default:', '').trim().replace(/['"]/g, '');
+              const val = rawSetting.slice(rawSetting.indexOf(':') + 1).trim();
+              column.defaultValue = val.replace(/^['"]|['"]$/g, '');
             } else if (setting.startsWith('note:')) {
-              column.functionalDefinition = setting.replace('note:', '').trim().replace(/['"]/g, '');
+              const val = rawSetting.slice(rawSetting.indexOf(':') + 1).trim();
+              column.functionalDefinition = val.replace(/^['"]|['"]$/g, '');
             } else if (setting.startsWith('ref:')) {
-              const refStr = setting.replace('ref:', '').trim();
+              const refStr = rawSetting.slice(rawSetting.indexOf(':') + 1).trim();
               const refParts = refStr.match(/([<>-])\s*(\S+)\.(\S+)/);
               if (refParts) {
                 const [, relSymbol, tgtTable, tgtCol] = refParts;
                 column.isForeignKey = true;
                 column.foreignKeyRef = { table: tgtTable, column: tgtCol };
-
-                let relType: Relationship['type'] = 'one-to-many';
-                if (relSymbol === '-') relType = 'one-to-one';
-                else if (relSymbol === '<') relType = 'many-to-many';
-
                 relationships.push({
                   id: uuidv4(),
                   sourceTable: currentTable.name,
                   sourceColumn: name,
                   targetTable: tgtTable,
                   targetColumn: tgtCol,
-                  type: relType,
+                  type: relSymbol === '-' ? 'one-to-one' : relSymbol === '<' ? 'many-to-many' : 'one-to-many',
                 });
               }
             }
@@ -160,17 +313,83 @@ export function parseDBML(input: string): DBMLParseResult {
     }
   }
 
-  // Check for unclosed table
+  // Unclosed structures
   if (currentTable) {
     errors.push({ line: lines.length, message: `Unclosed table block: "${currentTable.name}"` });
   }
+  if (inProject) {
+    errors.push({ line: lines.length, message: 'Unclosed Project block' });
+  }
+  if (noteBuffer !== null) {
+    errors.push({ line: lines.length, message: 'Unclosed multi-line Note block' });
+  }
 
-  return { tables, relationships, errors };
+  return { tables, relationships, errors, project };
 }
 
-// Generate DBML from tables and relationships
-export function generateDBML(tables: TableModel[], relationships: Relationship[]): string {
+// ---------- GENERATOR ----------
+
+export interface GenerateDBMLOptions {
+  /**
+   * When generating a global (multi-model) DBML document, the set of tables
+   * belonging to _other_ models is provided here so that the generator can
+   * emit an explanatory comment next to cross-model references instead of
+   * silently assuming the target exists in the current table list.
+   */
+  knownTables?: Set<string>;
+  /**
+   * Optional Project block to emit at the top of the document. Useful to
+   * surface the selected database engine in the generated code.
+   */
+  project?: {
+    name?: string;
+    engine?: DatabaseEngine;
+    note?: string;
+  };
+}
+
+// Reverse map engine → DBML `database_type` literal
+const ENGINE_TO_DBML: Record<DatabaseEngine, string> = {
+  postgresql: 'PostgreSQL',
+  mysql: 'MySQL',
+  sqlserver: 'SQL Server',
+  oracle: 'Oracle',
+  snowflake: 'Snowflake',
+  databricks: 'Databricks',
+  bigquery: 'BigQuery',
+  redshift: 'Redshift',
+  sqlite: 'SQLite',
+  mongodb: 'MongoDB',
+};
+
+export function generateDBML(
+  tables: TableModel[],
+  relationships: Relationship[],
+  options: GenerateDBMLOptions = {}
+): string {
   const lines: string[] = [];
+  const tableNames = new Set(tables.map((t) => t.name));
+
+  // Project block
+  if (options.project && (options.project.engine || options.project.note || options.project.name)) {
+    const projName = options.project.name ?? 'data_model';
+    lines.push(`Project ${projName} {`);
+    if (options.project.engine) {
+      lines.push(`  database_type: '${ENGINE_TO_DBML[options.project.engine]}'`);
+    }
+    if (options.project.note) {
+      const note = options.project.note;
+      if (note.includes('\n')) {
+        lines.push(`  Note: '''`);
+        for (const ln of note.split('\n')) lines.push(`  ${ln}`);
+        lines.push(`  '''`);
+      } else {
+        lines.push(`  Note: '${note.replace(/'/g, "\\'")}'`);
+      }
+    }
+    lines.push('}');
+    lines.push('');
+  }
 
   for (const table of tables) {
     lines.push(`Table ${table.name} {`);
@@ -180,28 +399,48 @@ export function generateDBML(tables: TableModel[], relationships: Relationship[]
       if (col.isPrimaryKey) settings.push('pk');
       if (col.isSurrogateKey) settings.push('sk');
       if (col.isPartitionKey) settings.push('partition');
+      if (col.isUnique) settings.push('unique');
       if (col.isNullable === false) settings.push('not null');
-      if (col.defaultValue) settings.push(`default: '${col.defaultValue}'`);
+      if (col.defaultValue) settings.push(`default: '${col.defaultValue.replace(/'/g, "\\'")}'`);
       if (col.isForeignKey && col.foreignKeyRef) {
         settings.push(`ref: > ${col.foreignKeyRef.table}.${col.foreignKeyRef.column}`);
       }
-      if (col.functionalDefinition) {
-        settings.push(`note: '${col.functionalDefinition}'`);
+      if (col.functionalDefinition && !col.functionalDefinition.includes('\n')) {
+        settings.push(`note: '${col.functionalDefinition.replace(/'/g, "\\'")}'`);
       }
 
       const settingsStr = settings.length > 0 ? ` [${settings.join(', ')}]` : '';
-      lines.push(`  ${col.name} ${col.dataType}${settingsStr}`);
+
+      // Cross-model reference comment: if FK points outside current table set AND
+      // caller advertised other known tables, annotate for clarity.
+      let crossComment = '';
+      if (
+        col.isForeignKey &&
+        col.foreignKeyRef &&
+        !tableNames.has(col.foreignKeyRef.table) &&
+        options.knownTables?.has(col.foreignKeyRef.table)
+      ) {
+        crossComment = ' // cross-model ref';
+      }
+
+      lines.push(`  ${col.name} ${col.dataType}${settingsStr}${crossComment}`);
     }
 
     if (table.functionalDefinition) {
-      lines.push(`  Note: '${table.functionalDefinition}'`);
+      if (table.functionalDefinition.includes('\n')) {
+        lines.push(`  Note: '''`);
+        for (const ln of table.functionalDefinition.split('\n')) lines.push(`  ${ln}`);
+        lines.push(`  '''`);
+      } else {
+        lines.push(`  Note: '${table.functionalDefinition.replace(/'/g, "\\'")}'`);
+      }
     }
 
     lines.push('}');
     lines.push('');
   }
 
-  // Standalone relationships not already defined inline
+  // Standalone relationships not already expressed inline
   const inlineFKs = new Set<string>();
   for (const table of tables) {
     for (const col of table.columns) {
@@ -215,7 +454,13 @@ export function generateDBML(tables: TableModel[], relationships: Relationship[]
     const key = `${rel.sourceTable}.${rel.sourceColumn}->${rel.targetTable}.${rel.targetColumn}`;
     if (!inlineFKs.has(key)) {
       const symbol = rel.type === 'one-to-one' ? '-' : rel.type === 'many-to-many' ? '<' : '>';
-      lines.push(`Ref: ${rel.sourceTable}.${rel.sourceColumn} ${symbol} ${rel.targetTable}.${rel.targetColumn}`);
+      const crossHint =
+        !tableNames.has(rel.sourceTable) || !tableNames.has(rel.targetTable)
+          ? ' // cross-model'
+          : '';
+      lines.push(
+        `Ref: ${rel.sourceTable}.${rel.sourceColumn} ${symbol} ${rel.targetTable}.${rel.targetColumn}${crossHint}`
+      );
     }
   }
 

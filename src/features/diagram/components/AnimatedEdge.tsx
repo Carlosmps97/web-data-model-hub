@@ -124,15 +124,15 @@ export default function AnimatedEREdge({
     offset: pathOffset,
   });
 
-  // Cross-model wires render in indigo to distinguish from intra-model relationships
+  // Cross-model wires render in indigo to distinguish from intra-model (teal) relationships
   const wireColor = isCross
-    ? (isActive ? '#4f46e5' : isDimmed ? '#c7c9e8' : '#6c5ce7')
-    : (isActive ? '#3d7a82' : isDimmed ? '#d6dbd9' : '#5a8fa0');
+    ? (isActive ? '#4338ca' : isDimmed ? '#c7d2fe' : '#4f46e5')
+    : (isActive ? '#0f766e' : isDimmed ? '#e2e8f0' : '#14b8a6');
   const wireWidth = isActive ? 2 : isDimmed ? 1 : 1.5;
   const endpointFill = wireColor;
   const labelColor = isCross
-    ? (isActive ? '#4338ca' : isDimmed ? '#b8bae0' : '#6c5ce7')
-    : (isActive ? '#3d7a82' : isDimmed ? '#b0bab7' : '#5a7a83');
+    ? (isActive ? '#4338ca' : isDimmed ? '#a5b4fc' : '#4f46e5')
+    : (isActive ? '#0f766e' : isDimmed ? '#94a3b8' : '#0d9488');
 
   const srcLabelOffX = dynamicSrcPos === Position.Right ? 14 : -14;
   const tgtLabelOffX = dynamicTgtPos === Position.Right ? 14 : -14;

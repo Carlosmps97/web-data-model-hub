@@ -7,7 +7,7 @@ import { useUIStore } from '@/store/useUIStore';
 import { useModelStore } from '@/store/useModelStore';
 import TableNodeGearMenu from './TableNodeGearMenu';
 
-const DEFAULT_COLOR = '#468189';
+const DEFAULT_COLOR = '#0d9488';
 
 interface TableNodeData {
   table: TableModel;

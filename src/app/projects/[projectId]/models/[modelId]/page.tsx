@@ -8,6 +8,7 @@ import AppLayout from '@/components/layout/AppLayout';
 import TableForm from '@/features/table-editor/components/TableForm';
 import ExcelImportModal from '@/features/excel-import/components/ExcelImportModal';
 import DBMLEditorPanel from '@/features/table-editor/components/DBMLEditorPanel';
+import TablesListView from '@/features/table-editor/components/TablesListView';
 import ChatPanel from '@/features/chat-agent/components/ChatPanel';
 import EngineSelect from '@/features/engines/components/EngineSelect';
 import { useModelStore } from '@/store/useModelStore';
@@ -20,6 +21,7 @@ const DiagramCanvas = dynamic(
 );
 
 type LeftTab = 'visual' | 'code';
+type MainView = 'list' | 'canvas';
 
 interface PageProps {
   params: Promise<{ projectId: string; modelId: string }>;
@@ -51,6 +53,7 @@ export default function ModelEditorPage({ params }: PageProps) {
 
   const [loaded, setLoaded] = useState(false);
   const [leftTab, setLeftTab] = useState<LeftTab>('visual');
+  const [mainView, setMainView] = useState<MainView>('list');
   const [showTableForm, setShowTableForm] = useState(false);
   const [editingTable, setEditingTable] = useState<TableModel | null>(null);
   const [showExcelImport, setShowExcelImport] = useState(false);
@@ -138,10 +141,19 @@ export default function ModelEditorPage({ params }: PageProps) {
     setShowExcelImport(false);
   };
 
-  // DBML Code tab applies a full replacement of the model
-  const handleDBMLApply = (dbmlTables: TableModel[], dbmlRels: Relationship[]) => {
+  // DBML Code tab applies a full replacement of the model.
+  // If the DBML source declared a Project { database_type: ... } block, we also
+  // update the model's engine to match.
+  const handleDBMLApply = (
+    dbmlTables: TableModel[],
+    dbmlRels: Relationship[],
+    meta?: { engine?: DatabaseEngine }
+  ) => {
     setTables(dbmlTables);
     setRelationships(dbmlRels);
+    if (meta?.engine && meta.engine !== currentModel?.engine) {
+      handleUpdateEngine(meta.engine);
+    }
   };
 
   const handleEditTable = (id: string) => {
@@ -153,8 +165,14 @@ export default function ModelEditorPage({ params }: PageProps) {
   };
 
   const handleDeleteTable = (id: string) => {
+    if (!confirm('Delete this table? This cannot be undone.')) return;
     removeTable(id);
     if (selectedTableId === id) setSelectedTable(null);
+  };
+
+  const handleNewTable = () => {
+    setEditingTable(null);
+    setShowTableForm(true);
   };
 
   const handleUpdateEngine = async (engine: DatabaseEngine | null) => {
@@ -172,7 +190,6 @@ export default function ModelEditorPage({ params }: PageProps) {
     }
   };
 
-  const selectedTable = tables.find((t) => t.id === selectedTableId);
 
   // ── Loading state ──
   if (!loaded) {
@@ -224,6 +241,46 @@ export default function ModelEditorPage({ params }: PageProps) {
         </div>
 
         <div className="editor-header-actions">
+          {/* View toggle: List view (table catalog) vs Canvas (ER diagram) */}
+          <div className="view-toggle" role="tablist" aria-label="View mode">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainView === 'list'}
+              className={`view-toggle-btn ${mainView === 'list' ? 'active' : ''}`}
+              onClick={() => setMainView('list')}
+              title="Tables list"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <circle cx="3" cy="6" r="1" />
+                <circle cx="3" cy="12" r="1" />
+                <circle cx="3" cy="18" r="1" />
+              </svg>
+              List
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mainView === 'canvas'}
+              className={`view-toggle-btn ${mainView === 'canvas' ? 'active' : ''}`}
+              onClick={() => setMainView('canvas')}
+              title="ER diagram canvas"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+              Canvas
+            </button>
+          </div>
+
+          <div className="editor-header-divider" />
+
           <div className="editor-toolbar-group">
             <button
               className="btn btn-ghost btn-sm"
@@ -257,6 +314,20 @@ export default function ModelEditorPage({ params }: PageProps) {
 
       {/* Editor Workspace */}
       <div className="editor-workspace">
+        {mainView === 'list' ? (
+          <>
+            <TablesListView
+              tables={tables}
+              onAddTable={handleNewTable}
+              onEditTable={handleEditTable}
+              onDeleteTable={handleDeleteTable}
+            />
+            {chatPanelOpen && (
+              <ChatPanel isOpen={chatPanelOpen} onClose={() => setChatPanelOpen(false)} />
+            )}
+          </>
+        ) : (
+        <>
         {/* Left Panel — Construction Tools */}
         <aside className="editor-left-panel">
           <div className="editor-tabs">
@@ -337,6 +408,8 @@ export default function ModelEditorPage({ params }: PageProps) {
               <DBMLEditorPanel
                 tables={tables}
                 relationships={relationships}
+                engine={currentModel?.engine}
+                modelName={currentModel?.name}
                 onApply={handleDBMLApply}
               />
             )}
@@ -352,103 +425,12 @@ export default function ModelEditorPage({ params }: PageProps) {
           onEditTable={handleEditTable}
         />
 
-        {/* Right-side panels (mutually exclusive: AI has priority) */}
-        {chatPanelOpen ? (
+        {/* AI assistant side panel (only opens when explicitly toggled) */}
+        {chatPanelOpen && (
           <ChatPanel isOpen={chatPanelOpen} onClose={() => setChatPanelOpen(false)} />
-        ) : selectedTable ? (
-          <div className="right-panel">
-            <div className="right-panel-header">
-              <h4 style={{ fontSize: 'var(--text-base)' }}>{selectedTable.name}</h4>
-              <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
-                <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleEditTable(selectedTable.id)} title="Edit">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                  </svg>
-                </button>
-                <button className="btn btn-ghost btn-icon btn-sm" onClick={() => handleDeleteTable(selectedTable.id)} title="Delete">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                  </svg>
-                </button>
-                <button className="btn btn-ghost btn-icon btn-sm" onClick={() => setSelectedTable(null)} title="Close">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div className="right-panel-content">
-              {selectedTable.functionalDefinition && (
-                <div style={{ marginBottom: 'var(--space-4)' }}>
-                  <label className="input-label">Description</label>
-                  <p style={{ fontSize: 'var(--text-sm)', lineHeight: 1.6 }}>
-                    {selectedTable.functionalDefinition}
-                  </p>
-                </div>
-              )}
-
-              <label className="input-label" style={{ marginBottom: 'var(--space-3)' }}>
-                Columns ({selectedTable.columns.length})
-              </label>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-1)' }}>
-                {selectedTable.columns.map((col, idx) => (
-                  <div key={idx} style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 'var(--space-2)',
-                    padding: 'var(--space-2) var(--space-3)',
-                    background: idx % 2 === 0 ? 'transparent' : 'var(--color-bg-surface)',
-                    borderRadius: 'var(--radius-sm)',
-                  }}>
-                    {col.isPrimaryKey && <span className="badge badge-warning" style={{ fontSize: '0.55rem', padding: '0 4px' }}>PK</span>}
-                    {col.isForeignKey && <span className="badge badge-primary" style={{ fontSize: '0.55rem', padding: '0 4px' }}>FK</span>}
-                    {col.isSurrogateKey && <span className="badge badge-neutral" style={{ fontSize: '0.55rem', padding: '0 4px' }}>SK</span>}
-                    <span style={{ flex: 1, fontSize: 'var(--text-sm)', fontWeight: 500 }}>{col.name}</span>
-                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontFamily: 'var(--font-mono)' }}>
-                      {col.dataType}
-                    </span>
-                  </div>
-                ))}
-              </div>
-
-              {/* Relationships */}
-              {relationships.filter((r) =>
-                r.sourceTable === selectedTable.name || r.targetTable === selectedTable.name ||
-                r.sourceTable === selectedTable.id || r.targetTable === selectedTable.id
-              ).length > 0 && (
-                <div style={{ marginTop: 'var(--space-6)' }}>
-                  <label className="input-label" style={{ marginBottom: 'var(--space-3)' }}>Relationships</label>
-                  {relationships
-                    .filter((r) =>
-                      r.sourceTable === selectedTable.name || r.targetTable === selectedTable.name ||
-                      r.sourceTable === selectedTable.id || r.targetTable === selectedTable.id
-                    )
-                    .map((rel) => (
-                      <div key={rel.id} style={{
-                        padding: 'var(--space-2) var(--space-3)',
-                        background: 'rgba(119, 172, 162, 0.08)',
-                        borderRadius: 'var(--radius-sm)',
-                        fontSize: 'var(--text-xs)',
-                        marginBottom: 'var(--space-2)',
-                        border: '1px solid rgba(119, 172, 162, 0.15)',
-                      }}>
-                        <span style={{ color: 'var(--color-accent-secondary)' }}>{rel.sourceTable}.{rel.sourceColumn}</span>
-                        <span style={{ color: 'var(--color-text-muted)', margin: '0 var(--space-2)' }}>
-                          {rel.type === 'one-to-one' ? '1:1' : rel.type === 'one-to-many' ? '1:N' : 'N:M'}
-                        </span>
-                        <span style={{ color: 'var(--color-accent-secondary)' }}>{rel.targetTable}.{rel.targetColumn}</span>
-                      </div>
-                    ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ) : null}
+        )}
+        </>
+        )}
       </div>
 
       {/* Table Form Modal */}

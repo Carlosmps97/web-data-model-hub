@@ -1,16 +1,16 @@
-# Data Flow
+# Flujo de Datos
 
-## Overview
+## Visión General
 
-This document describes how data moves through the application for each ingestion method, the persistence cycle, canvas synchronization, and the diagram interaction flows.
+Este documento describe cómo se mueven los datos a través de la aplicación para cada método de ingesta, el ciclo de persistencia, la sincronización del lienzo y los flujos de interacción con el diagrama.
 
-## Ingestion Flows
+## Flujos de Ingesta
 
-### 1. Manual Form
+### 1. Formulario Manual
 
 ```mermaid
 flowchart TD
-    A["User fills TableForm\n(name, columns, FK refs, definitions)"] --> B["addTable() — Zustand"]
+    A["User fills TableForm\n(name, columns, FK refs,\nfunctionalDefinition,\nappCode, domain, subdomain, tags)"] --> B["addTable() — Zustand"]
     B --> C["FK columns → addRelationship() — Zustand"]
     C --> D["DiagramCanvas useEffect reacts\n→ new React Flow node + edges"]
     B --> E["2s debounce timer"]
@@ -19,13 +19,15 @@ flowchart TD
     G --> H["data/models/{uuid}.json"]
 ```
 
-**Steps:**
-1. User opens Table Form, fills name, columns with types/keys, per-column functional definitions, and FK references
-2. `addTable()` adds `TableModel` to Zustand; FK columns trigger `addRelationship()`
-3. `DiagramCanvasInner` `useEffect` detects store change → adds React Flow node + edges
-4. 2-second debounce fires `saveModel()` → `PUT /api/models/:id` → disk
+**Pasos:**
+1. El usuario abre el formulario de tabla, completa el nombre, columnas con tipos/llaves, definiciones funcionales por columna, referencias FK, y metadatos de clasificación opcionales (código de app, dominio, subdominio) y etiquetas libres
+2. `addTable()` agrega el `TableModel` a Zustand; las columnas FK disparan `addRelationship()`
+3. El `useEffect` de `DiagramCanvasInner` detecta el cambio en el store → agrega nodo + aristas en React Flow
+4. El debounce de 2 segundos dispara `saveModel()` → `PUT /api/models/:id` → disco
 
-### 2. Excel Import
+Los metadatos de clasificación (`applicationCode`, `domain`, `subdomain`, `tags`) se almacenan en el objeto `TableModel` y se persisten en el JSON del modelo. No se usan en el renderizado del lienzo, pero impulsan el filtrado y la visualización de insignias en la **Vista de Lista**.
+
+### 2. Importación desde Excel
 
 ```mermaid
 flowchart TD
@@ -40,15 +42,15 @@ flowchart TD
     H --> J["Auto-save → disk"]
 ```
 
-**Sheet format:**
+**Formato de hoja:**
 
-| Column A | Column B | Column C |
-|----------|----------|----------|
+| Columna A | Columna B | Columna C |
+|-----------|-----------|-----------|
 | column_name | data_type | functional_definition |
 
-Header row detection: if the first row contains keywords like `column`, `name`, `columna`, or `nombre`, it is skipped automatically.
+Detección de encabezado: si la primera fila contiene palabras clave como `column`, `name`, `columna` o `nombre`, se omite automáticamente.
 
-### 3. DBML Editor
+### 3. Editor DBML
 
 ```mermaid
 flowchart TD
@@ -61,28 +63,28 @@ flowchart TD
     F --> H["Auto-save → disk"]
 ```
 
-**Parser capabilities:**
-- `Table` declarations with columns and inline settings
-- Column settings: `pk`, `sk`, `partition`, `not null`, `unique`, `increment`, `default`, `note`, `ref`
-- Standalone `Ref:` declarations
-- `Note:` table descriptions
-- `//` comment lines
-- Error reporting with line numbers
+**Capacidades del parser:**
+- Declaraciones `Table` con columnas y configuraciones inline
+- Configuraciones de columna: `pk`, `sk`, `partition`, `not null`, `unique`, `increment`, `default`, `note`, `ref`
+- Declaraciones `Ref:` independientes
+- Descripciones de tabla con `Note:`
+- Líneas de comentario `//`
+- Reporte de errores con números de línea
 
-**Reverse (`generateDBML()`):** takes `TableModel[]` + `Relationship[]` and emits valid DBML text.
+**Inverso (`generateDBML()`):** toma `TableModel[]` + `Relationship[]` y genera texto DBML válido.
 
-### 4. Chat Agent (Shell)
+### 4. Agente de Chat (Shell)
 
 ```mermaid
 flowchart TD
-    A["User types message\n± Excel attachment"] --> B["POST /api/chat"]
-    B --> C["Mock response (current)"]
-    C --> D["ChatPanel displays message"]
+    A["El usuario escribe un mensaje\n± adjunto Excel"] --> B["POST /api/chat"]
+    B --> C["Respuesta simulada (actual)"]
+    C --> D["ChatPanel muestra el mensaje"]
 ```
 
-> Future: `/api/chat` forwards to AI agent → agent returns `TableModel[]` → tables auto-added to canvas.
+> Futuro: `/api/chat` redirige al agente IA → el agente retorna `TableModel[]` → las tablas se agregan automáticamente al lienzo.
 
-## Persistence Cycle
+## Ciclo de Persistencia
 
 ```mermaid
 sequenceDiagram
@@ -91,47 +93,47 @@ sequenceDiagram
     participant API as Next.js API
     participant FS as Filesystem
 
-    U->>S: Modify table / relationship
-    S->>S: Optimistic update (immediate UI)
-    Note over S: 2s debounce
+    U->>S: Modifica tabla / relación
+    S->>S: Actualización optimista (UI inmediata)
+    Note over S: Debounce 2s
     S->>API: PUT /api/models/:id
-    API->>FS: Write data/models/{uuid}.json
+    API->>FS: Escribe data/models/{uuid}.json
     FS-->>API: OK
     API-->>S: { success: true, data: DataModel }
 ```
 
-### Data Directory
+### Directorio de Datos
 
 ```
 data/
-├── projects.json            # Project[] registry
+├── projects.json            # Registro de Project[]
 └── models/
-    └── {uuid}.json          # Full DataModel (tables + relationships + positions)
+    └── {uuid}.json          # DataModel completo (tablas + relaciones + posiciones)
 ```
 
-## Canvas Synchronization
+## Sincronización del Lienzo
 
-`DiagramCanvasInner` uses two `useEffect` hooks:
+`DiagramCanvasInner` utiliza dos hooks `useEffect`:
 
-### Node sync (tables)
+### Sincronización de nodos (tablas)
 
-Runs when `tables`, `selectedTableId`, `hoveredTableId`, or `activeColsByTable` changes.
+Se ejecuta cuando cambia `tables`, `selectedTableId`, `hoveredTableId` o `activeColsByTable`.
 
-- Computes a **structural fingerprint** of the tables array
-- If only display state changed (hover/selection), updates `data` in-place without re-positioning
-- If structure changed (column added/removed), runs `layoutLeftRight()` to compute fresh positions for new tables (existing dragged positions are preserved in-memory)
-- **Positions are never persisted** — they are computed from the layout algorithm each time the model is loaded
-- Passes `activeRelationColumns` array to each node so `TableNode` can highlight connected columns
+- Calcula una **huella estructural** del arreglo de tablas
+- Si solo cambió el estado de visualización (hover/selección), actualiza `data` en el lugar sin reposicionar
+- Si cambió la estructura (columna agregada/eliminada), ejecuta `layoutLeftRight()` para calcular posiciones nuevas (las posiciones arrastradas existentes se conservan en memoria)
+- **Las posiciones nunca se persisten** — se calculan desde el algoritmo de distribución cada vez que se carga el modelo
+- Pasa el arreglo `activeRelationColumns` a cada nodo para que `TableNode` resalte las columnas conectadas
 
-### Edge sync (relationships)
+### Sincronización de aristas (relaciones)
 
-Runs when `relationships`, `tables`, or `activeTableId` changes.
+Se ejecuta cuando cambia `relationships`, `tables` o `activeTableId`.
 
-- Rebuilds all edges from scratch
-- Assigns `highlighted` / `dimmed` based on `activeTableId`
-- Assigns `edgeIndex` per node-pair to offset parallel wires
+- Reconstruye todas las aristas desde cero
+- Asigna `highlighted` / `dimmed` según `activeTableId`
+- Asigna `edgeIndex` por par de nodos para separar conexiones paralelas
 
-## Hover & Selection Interaction Flow
+## Flujo de Interacción por Hover y Selección
 
 ```mermaid
 flowchart TD
@@ -144,9 +146,28 @@ flowchart TD
 
     C["Click table node\nonNodeClick"] --> SS["setSelectedTableId(nodeId)"]
     SS --> AT
+
+    G["Click gear icon ⚙ on table node\nhandleGearClick"] --> GM["TableNodeGearMenu\n(Edit / Delete options)"]
+    GM -->|"Edit"| OE["onEditTable(id)\n→ ModelEditorPage opens TableForm modal"]
+    GM -->|"Delete"| OD["onDeleteTable(id)\n→ removeTable() + removeRelationshipsByTable()"]
 ```
 
-## Auto-Arrange Flow
+> **Nota:** Hacer clic en el cuerpo de la tabla (no en el engranaje) solo dispara `setSelectedTableId` para resaltado visual. El formulario de edición se abre exclusivamente a través de la ruta engranaje → Edit.
+
+## Flujo de Alternancia de Vista
+
+```mermaid
+flowchart TD
+    T["User clicks List / Canvas toggle\nin ModelEditorPage header"] --> MV["setMainView('list' | 'canvas')"]
+    MV -->|"'list'"| LV["Renders TablesListView\n(card grid, search, tag filter)"]
+    MV -->|"'canvas'"| CV["Renders DiagramCanvas\n(React Flow ER diagram)"]
+    LV --> EA["Edit → openTableForm(table)\nDelete → handleDeleteTable(id)"]
+    CV --> GE["Gear menu → Edit / Delete\n(same handlers)"]
+```
+
+Ambas vistas comparten las mismas `tables` y `relationships` del store de Zustand — cambiar de vista nunca provoca una recarga de datos.
+
+## Flujo de Distribución Automática
 
 ```mermaid
 flowchart TD

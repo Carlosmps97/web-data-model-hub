@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { DatabaseEngine } from '@/types/model';
 import { ENGINES } from '../engines';
 import EngineBadge from './EngineBadge';
@@ -16,18 +16,45 @@ interface EngineSelectProps {
 
 /**
  * Compact popover picker for a DatabaseEngine.
- * Shows the current engine badge; clicking opens a list of available engines.
+ * The popover is rendered with fixed positioning so it never gets clipped by
+ * an ancestor with `overflow: hidden` (e.g. the models table wrapper).
  */
 export default function EngineSelect({ value, onChange, size = 'md', disabled }: EngineSelectProps) {
   const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Compute / refresh popover coordinates based on trigger rect
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const update = () => {
+      const r = triggerRef.current!.getBoundingClientRect();
+      const popoverWidth = 220;
+      // Align right edge of popover to right edge of trigger to keep within viewport
+      let left = r.left;
+      if (left + popoverWidth > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - popoverWidth - 8);
+      }
+      setPos({ top: r.bottom + 6, left });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setOpen(false);
     };
     window.addEventListener('mousedown', onClick);
     return () => window.removeEventListener('mousedown', onClick);
@@ -36,6 +63,7 @@ export default function EngineSelect({ value, onChange, size = 'md', disabled }:
   return (
     <div ref={rootRef} className={`engine-select engine-select-${size}`}>
       <button
+        ref={triggerRef}
         type="button"
         className="engine-select-trigger"
         onClick={(e) => { e.stopPropagation(); if (!disabled) setOpen((v) => !v); }}
@@ -48,8 +76,13 @@ export default function EngineSelect({ value, onChange, size = 'md', disabled }:
         </svg>
       </button>
 
-      {open && (
-        <div className="engine-select-popover" onClick={(e) => e.stopPropagation()}>
+      {open && pos && (
+        <div
+          ref={popoverRef}
+          className="engine-select-popover"
+          style={{ position: 'fixed', top: pos.top, left: pos.left }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <div className="engine-select-title">Database engine</div>
           <div className="engine-select-list">
             {ENGINES.map((eng) => (

@@ -1,72 +1,72 @@
-# Design System
+# Sistema de Diseño
 
-The application uses a **light theme** built on cream-to-teal color palette, defined entirely as CSS custom properties in `src/app/globals.css`.
+La aplicación usa un **tema claro** basado en una paleta de colores crema-teal, definida íntegramente como propiedades CSS personalizadas en `src/app/globals.css`.
 
-## Color Palette
+## Paleta de Colores
 
-### Background Colors (light → dark)
+### Colores de Fondo (claro → oscuro)
 
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--color-bg-canvas` | `#FAFAF8` | Diagram canvas background |
-| `--color-bg-primary` | `#FBF7EE` | App main background |
-| `--color-bg-secondary` | `#F4E9CD` | Champagne — sidebar, cards |
-| `--color-bg-elevated` | `#FFFFFF` | Modals, panels, popovers |
-| `--color-bg-surface` | `#F7F1E3` | Inputs, dropdowns |
-| `--color-bg-hover` | `#EDE5D1` | Hover states |
-| `--color-bg-active` | `#E5DBBD` | Active / pressed states |
+| Token | Hex | Uso |
+|-------|-----|-----|
+| `--color-bg-canvas` | `#FAFAF8` | Fondo del lienzo de diagrama |
+| `--color-bg-primary` | `#FBF7EE` | Fondo principal de la app |
+| `--color-bg-secondary` | `#F4E9CD` | Champagne — barra lateral, tarjetas |
+| `--color-bg-elevated` | `#FFFFFF` | Modales, paneles, popovers |
+| `--color-bg-surface` | `#F7F1E3` | Inputs, desplegables |
+| `--color-bg-hover` | `#EDE5D1` | Estados de hover |
+| `--color-bg-active` | `#E5DBBD` | Estados activos / presionados |
 
-### Accent Colors
+### Colores de Acento
 
-| Token | Hex | Name | Usage |
-|-------|-----|------|-------|
-| `--color-accent-primary` | `#468189` | Metallic Seaweed | Buttons, table node headers, selected border |
-| `--color-accent-primary-hover` | `#3a6d74` | — | Button hover |
-| `--color-accent-secondary` | `#77ACA2` | Green Sheen | Edge wires, secondary actions, flow animation |
-| `--color-accent-tertiary` | `#9DBEBB` | Opal | Borders, badges, muted accents |
-| `--color-accent-muted` | `rgba(70,129,137,0.12)` | — | Active column row highlight background |
+| Token | Hex | Nombre | Uso |
+|-------|-----|--------|-----|
+| `--color-accent-primary` | `#468189` | Metallic Seaweed | Botones, encabezados de nodo de tabla, borde seleccionado |
+| `--color-accent-primary-hover` | `#3a6d74` | — | Hover de botón |
+| `--color-accent-secondary` | `#77ACA2` | Green Sheen | Conexiones de aristas, acciones secundarias, animación de flujo |
+| `--color-accent-tertiary` | `#9DBEBB` | Opal | Bordes, insignias, acentos atenuados |
+| `--color-accent-muted` | `rgba(70,129,137,0.12)` | — | Fondo de resaltado de fila de columna activa |
 
-### Text Colors
+### Colores de Texto
 
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--color-text-primary` | `#031926` | Rich Black — headings, body |
-| `--color-text-secondary` | `#3a5a60` | Descriptions, labels |
-| `--color-text-muted` | `#6b8f8a` | Placeholders, timestamps |
-| `--color-text-inverse` | `#FFFFFF` | Text on dark/gradient surfaces |
+| Token | Hex | Uso |
+|-------|-----|-----|
+| `--color-text-primary` | `#031926` | Rich Black — títulos, cuerpo |
+| `--color-text-secondary` | `#3a5a60` | Descripciones, etiquetas |
+| `--color-text-muted` | `#6b8f8a` | Placeholders, marcas de tiempo |
+| `--color-text-inverse` | `#FFFFFF` | Texto sobre superficies oscuras/degradado |
 
-### State Colors
+### Colores de Estado
 
-| Token | Hex | Usage |
-|-------|-----|-------|
-| `--color-success` | `#2e9e5a` | Success confirmations |
-| `--color-warning` | `#d4930d` | PK badge background |
-| `--color-error` | `#c5403a` | Delete actions, validation errors |
-| `--color-info` | `#468189` | Info indicators |
+| Token | Hex | Uso |
+|-------|-----|-----|
+| `--color-success` | `#2e9e5a` | Confirmaciones de éxito |
+| `--color-warning` | `#d4930d` | Fondo de insignia PK |
+| `--color-error` | `#c5403a` | Acciones de eliminación, errores de validación |
+| `--color-info` | `#468189` | Indicadores informativos |
 
-## Typography
+## Tipografía
 
-### Fonts
+### Fuentes
 
-- **Inter** (sans-serif) — loaded from Google Fonts; weights 300 / 400 / 500 / 600 / 700
-- **JetBrains Mono** (monospace) — DBML editor, column data types, code blocks; weights 400 / 500 / 600
+- **Inter** (sans-serif) — cargada desde Google Fonts; pesos 300 / 400 / 500 / 600 / 700
+- **JetBrains Mono** (monoespaciada) — editor DBML, tipos de dato de columnas, bloques de código; pesos 400 / 500 / 600
 
-### Type Scale
+### Escala Tipográfica
 
-| Token | `rem` | `px` | Usage |
-|-------|-------|------|-------|
-| `--text-xs` | 0.75 | 12 | Column data types, badges, tooltips |
-| `--text-sm` | 0.8125 | 13 | Body, descriptions, sidebar items |
-| `--text-base` | 0.875 | 14 | Default inputs, table names |
-| `--text-lg` | 1.0625 | 17 | Section titles |
-| `--text-xl` | 1.25 | 20 | Sub-headings |
-| `--text-2xl` | 1.5 | 24 | Page headings |
-| `--text-3xl` | 1.875 | 30 | Hero / dashboard text |
-| `--text-4xl` | 2.25 | 36 | Large display |
+| Token | `rem` | `px` | Uso |
+|-------|-------|------|-----|
+| `--text-xs` | 0.75 | 12 | Tipos de dato de columnas, insignias, tooltips |
+| `--text-sm` | 0.8125 | 13 | Cuerpo, descripciones, elementos de barra lateral |
+| `--text-base` | 0.875 | 14 | Inputs por defecto, nombres de tabla |
+| `--text-lg` | 1.0625 | 17 | Títulos de sección |
+| `--text-xl` | 1.25 | 20 | Sub-títulos |
+| `--text-2xl` | 1.5 | 24 | Títulos de página |
+| `--text-3xl` | 1.875 | 30 | Texto hero / dashboard |
+| `--text-4xl` | 2.25 | 36 | Display grande |
 
-## Spacing Scale (4px grid)
+## Escala de Espaciado (cuadrícula de 4px)
 
-| Token | Value |
+| Token | Valor |
 |-------|-------|
 | `--space-1` | 4px |
 | `--space-2` | 8px |
@@ -79,87 +79,87 @@ The application uses a **light theme** built on cream-to-teal color palette, def
 | `--space-12` | 48px |
 | `--space-16` | 64px |
 
-## Border Radii
+## Radios de Borde
 
-| Token | Value | Usage |
-|-------|-------|-------|
-| `--radius-sm` | 6px | Badges, small chips |
-| `--radius-md` | 8px | Buttons, inputs, tooltips |
-| `--radius-lg` | 12px | Cards, panels, popovers |
-| `--radius-xl` | 16px | Modals |
-| `--radius-full` | 9999px | Pills, circles |
+| Token | Valor | Uso |
+|-------|-------|-----|
+| `--radius-sm` | 6px | Insignias, chips pequeños |
+| `--radius-md` | 8px | Botones, inputs, tooltips |
+| `--radius-lg` | 12px | Tarjetas, paneles, popovers |
+| `--radius-xl` | 16px | Modales |
+| `--radius-full` | 9999px | Pills, círculos |
 
-## Button Variants
+## Variantes de Botón
 
-| Class | Appearance |
-|-------|-----------|
-| `.btn-primary` | Gradient (`#468189 → #5a9aa2`), white text, glow shadow |
-| `.btn-secondary` | White bg, teal border, primary text |
-| `.btn-ghost` | Transparent, muted text; hover adds `bg-hover` |
-| `.btn-danger` | Red-tinted bg, red border, red text |
-| `.btn-icon` | Square, used for toolbar actions |
-| `.btn-sm` | Reduced padding + font size |
+| Clase | Apariencia |
+|-------|------------|
+| `.btn-primary` | Degradado (`#468189 → #5a9aa2`), texto blanco, sombra luminosa |
+| `.btn-secondary` | Fondo blanco, borde teal, texto primario |
+| `.btn-ghost` | Transparente, texto atenuado; hover agrega `bg-hover` |
+| `.btn-danger` | Fondo rojo suave, borde rojo, texto rojo |
+| `.btn-icon` | Cuadrado, usado para acciones de barra de herramientas |
+| `.btn-sm` | Padding y tamaño de fuente reducidos |
 
-## Transitions
+## Transiciones
 
-| Token | Duration | Usage |
-|-------|----------|-------|
-| `--transition-fast` | 150ms | Hover states, toggles, color changes |
-| `--transition-normal` | 250ms | Panel reveals, card hover |
-| `--transition-slow` | 400ms | Page/modal transitions, auto-arrange `fitView` |
-| `--transition-spring` | 500ms cubic-bezier(0.34,1.56,0.64,1) | Modal scale-in entry |
+| Token | Duración | Uso |
+|-------|----------|---------|
+| `--transition-fast` | 150ms | Estados de hover, alternancias, cambios de color |
+| `--transition-normal` | 250ms | Revelado de paneles, hover en tarjetas |
+| `--transition-slow` | 400ms | Transiciones de página/modal, `fitView` de auto-arrange |
+| `--transition-spring` | 500ms cubic-bezier(0.34,1.56,0.64,1) | Entrada del modal con escala |
 
-## Keyframe Animations
+## Animaciones de Keyframe
 
-| Name | Effect |
-|------|--------|
-| `fadeIn` / `fadeOut` | Opacity mount/unmount |
-| `slideUp` | Cards/grid items enter from below |
-| `slideInRight` | Right panel, chat panel enter from right |
-| `scaleIn` | Modal scale + fade entry |
-| `pulse` | Loading indicators |
-| `shimmer` | Skeleton loading placeholders |
-| `erEdgeFlow` | `stroke-dashoffset` animation on active ER edges |
+| Nombre | Efecto |
+|--------|--------|
+| `fadeIn` / `fadeOut` | Opacidad al montar/desmontar |
+| `slideUp` | Tarjetas/ítems de cuadrícula entran desde abajo |
+| `slideInRight` | Panel derecho, panel de chat entran desde la derecha |
+| `scaleIn` | Entrada de modal con escala + fundido |
+| `pulse` | Indicadores de carga |
+| `shimmer` | Placeholders de carga tipo esqueleto |
+| `erEdgeFlow` | Animación `stroke-dashoffset` en aristas ER activas |
 
-## Table Node Design
+## Diseño del Nodo de Tabla
 
 ```
 ┌────────────────────────────────────┐
-│  table_name                    [N] │  ← Header (#468189 solid bg, white text)
+│  table_name                    [N] │  ← Encabezado (#468189 fondo sólido, texto blanco)
 ├────────────────────────────────────┤
-│  [PK]  id          ◇  integer      │  ← PK row (gold badge)
-│  [FK]  user_id     ◇  integer      │  ← FK row (teal badge)
-│   •    username       varchar(50)  │  ← Regular column (dot bullet)
+│  [PK]  id          ◇  integer      │  ← Fila PK (insignia dorada)
+│  [FK]  user_id     ◇  integer      │  ← Fila FK (insignia teal)
+│   •    username       varchar(50)  │  ← Columna regular (punto)
 ├────────────────────────────────────┤
-│  Functional definition text…       │  ← Footer (muted, italic, truncated)
+│  Texto de definición funcional…     │  ← Pie de página (atenuado, itálica, truncado)
 └────────────────────────────────────┘
 ```
 
-- **Header**: `#468189` background, white table name, column-count badge
-- **Column rows**: 28px height; key icon (16×16px), column name, nullable diamond `◇`, data type in monospace
-- **Key badges**: PK = `--color-warning` gold | FK = Green Sheen teal | SK = Metallic Seaweed | PT = gold (same as PK)
-- **Active-relation row** (`.active-relation-row`): `--color-accent-muted` bg + left border `#468189`
-- **Selected node**: teal box-shadow glow + border `#468189`
-- **Hover tooltip**: dark pill (`#1a2e35`) showing column name, data type, functional definition, FK reference if applicable; appears for **every** column on hover
+- **Encabezado**: fondo `#468189`, nombre de tabla en blanco, insignia con conteo de columnas
+- **Filas de columna**: altura 28px; ícono de llave (16×16px), nombre de columna, diamante de nulabilidad `◇`, tipo de dato en monoespaciado
+- **Insignias de llave**: PK = dorado `--color-warning` | FK = teal Green Sheen | SK = Metallic Seaweed | PT = dorado (igual que PK)
+- **Fila de relación activa** (`.active-relation-row`): fondo `--color-accent-muted` + borde izquierdo `#468189`
+- **Nodo seleccionado**: sombra luminosa teal + borde `#468189`
+- **Tooltip de hover**: píldora oscura (`#1a2e35`) mostrando nombre de columna, tipo de dato, definición funcional y referencia FK si aplica; aparece en **todas** las columnas al pasar el cursor
 
-## Relationship Edge Design
+## Diseño de Aristas de Relación
 
-| Property | Value |
-|----------|-------|
-| Default color | `#5a8fa0` |
-| Active/hover color | `#3d7a82` |
-| Dimmed color | `#d6dbd9` |
-| Line width | 1.5px default / 2px active |
-| Path style | Sharp orthogonal step (`borderRadius: 0`) |
-| Routing | Same-side (L→L or R→R) when nodes overlap horizontally; opposite-side (R→L) when clear gap |
-| Parallel offset | `20 + edgeIndex × 16` px — prevents wires sharing the same vertical line |
-| Endpoint circles | 4px hollow circles at source + target |
-| Cardinality labels | `*` / `0..1` / `1` positioned near endpoints |
-| Flow animation | `er-edge-flow-anim` class: `stroke-dasharray: 6 4`, animates on hover or table selection |
+| Propiedad | Valor |
+|-----------|-------|
+| Color por defecto | `#5a8fa0` |
+| Color activo/hover | `#3d7a82` |
+| Color atenuado | `#d6dbd9` |
+| Ancho de línea | 1.5px por defecto / 2px activo |
+| Estilo de trayectoria | Paso ortogonal anguloso (`borderRadius: 0`) |
+| Enrutamiento | Mismo lado (L→L o R→R) cuando los nodos se superponen horizontalmente; lado opuesto (R→L) cuando hay espacio libre |
+| Desplazamiento paralelo | `20 + edgeIndex × 16` px — evita que las conexiones compartan la misma línea vertical |
+| Círculos de extremo | Círculos huecos de 4px en origen y destino |
+| Etiquetas de cardinalidad | `*` / `0..1` / `1` posicionadas cerca de los extremos |
+| Animación de flujo | Clase `er-edge-flow-anim`: `stroke-dasharray: 6 4`, anima al hacer hover o al seleccionar una tabla |
 
-## Auto-Arrange Popover
+## Popover de Distribución Automática
 
-Floating card (`white`, `border-radius: 12px`, `box-shadow: 0 8px 32px rgba(3,25,38,0.15)`) containing three options. Each option has:
-- SVG icon (28×28px, `--color-text-secondary`)
-- Bold label + numbered badge
-- Small description text (`--color-text-muted`)
+Tarjeta flotante (`white`, `border-radius: 12px`, `box-shadow: 0 8px 32px rgba(3,25,38,0.15)`) con tres opciones. Cada opción tiene:
+- Ícono SVG (28×28px, `--color-text-secondary`)
+- Etiqueta en negrita + insignia numerada
+- Texto de descripción pequeño (`--color-text-muted`)
