@@ -125,7 +125,7 @@ Move your mouse over any **table block** to:
 ### Moving Tables
 
 - Drag a table node to reposition it
-- Position is persisted automatically on drag release
+- Positions are **in-memory only** — on reload, the layout algorithm re-computes optimal positions automatically
 
 ### Editing a Table
 
@@ -153,7 +153,7 @@ Places the most-connected table at the center, then arranges connected tables in
 ### Compact (3)
 Places tables in a grid sorted by connection count. Ideal for **diagrams with few relationships** or when you want a clean overview.
 
-> After applying any layout, the canvas auto-fits to show all tables. Positions are automatically saved.
+> After applying any layout, the canvas auto-fits to show all tables. Positions are kept in-memory for the current session.
 
 ---
 

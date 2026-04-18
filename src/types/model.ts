@@ -27,7 +27,7 @@ export interface TableModel {
   schema?: string;
   columns: TableColumn[];
   functionalDefinition?: string;
-  position?: { x: number; y: number };
+  color?: string;
 }
 
 export interface Relationship {
@@ -39,11 +39,25 @@ export interface Relationship {
   type: 'one-to-one' | 'one-to-many' | 'many-to-many';
 }
 
+// Database engines a DataModel can target
+export type DatabaseEngine =
+  | 'postgresql'
+  | 'mysql'
+  | 'sqlserver'
+  | 'oracle'
+  | 'snowflake'
+  | 'databricks'
+  | 'bigquery'
+  | 'redshift'
+  | 'sqlite'
+  | 'mongodb';
+
 export interface DataModel {
   id: string;
   projectId: string;
   name: string;
   description?: string;
+  engine?: DatabaseEngine;
   tables: TableModel[];
   relationships: Relationship[];
   createdAt: string;

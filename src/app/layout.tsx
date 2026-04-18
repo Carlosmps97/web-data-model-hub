@@ -5,6 +5,11 @@ export const metadata: Metadata = {
   title: "Data Model Hub",
   description: "Interactive platform for visualizing, designing, and managing Entity-Relationship data models across multiple project solutions.",
   keywords: ["data model", "ER diagram", "entity relationship", "database design", "schema visualization"],
+  icons: {
+    icon: "/logo-dog.png",
+    shortcut: "/logo-dog.png",
+    apple: "/logo-dog.png",
+  },
 };
 
 export default function RootLayout({

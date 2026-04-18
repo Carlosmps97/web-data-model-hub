@@ -164,8 +164,7 @@ Content-Type: application/json
           "dataType": "varchar",
           "isNullable": false
         }
-      ],
-      "position": { "x": 100, "y": 50 }
+      ]
     }
   ],
   "relationships": [
@@ -271,7 +270,6 @@ Common HTTP status codes:
 | schema | string? | Optional schema name |
 | columns | TableColumn[] | Array of columns |
 | functionalDefinition | string? | Table description |
-| position | {x, y}? | Canvas position |
 
 ### TableColumn
 

@@ -40,7 +40,6 @@ export function parseDBML(input: string): DBMLParseResult {
         id: uuidv4(),
         name: tableMatch[1],
         columns: [],
-        position: { x: tables.length * 320, y: 50 },
       };
       braceDepth = 1;
       continue;

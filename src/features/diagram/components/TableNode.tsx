@@ -1,14 +1,19 @@
 'use client';
 
-import React, { useState, memo } from 'react';
+import React, { useState, memo, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { TableModel } from '@/types/model';
+import { useUIStore } from '@/store/useUIStore';
+import { useModelStore } from '@/store/useModelStore';
+import TableNodeGearMenu from './TableNodeGearMenu';
 
+const DEFAULT_COLOR = '#468189';
 
 interface TableNodeData {
   table: TableModel;
   selected?: boolean;
   activeRelationColumns?: string[];
+  onEditTable?: (id: string) => void;
   [key: string]: unknown;
 }
 
@@ -17,16 +22,64 @@ function TableNodeComponent({ data }: NodeProps) {
   const table = nodeData?.table;
   const isSelected = nodeData?.selected || false;
   const activeRelCols = nodeData?.activeRelationColumns ?? [];
+  const onEditTable = nodeData?.onEditTable as ((id: string) => void) | undefined;
+
   const [hoveredCol, setHoveredCol] = useState<number | null>(null);
+  const [gearMenuOpen, setGearMenuOpen] = useState(false);
+
+  // Live preview from UI store — applies to any table when its gear menu is open
+  const previewColor = useUIStore(s => s.previewColor);
+  const headerColor = (gearMenuOpen && previewColor !== null)
+    ? previewColor
+    : (table?.color ?? DEFAULT_COLOR);
+
+  const updateTable = useModelStore(s => s.updateTable);
+
+  const handleGearClick = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setGearMenuOpen(prev => !prev);
+  }, []);
+
+  const handleEdit = useCallback(() => {
+    onEditTable?.(table.id);
+  }, [onEditTable, table?.id]);
+
+  const handleApplyColor = useCallback((color: string) => {
+    updateTable(table.id, { color });
+  }, [updateTable, table?.id]);
 
   if (!table) return null;
 
   return (
     <div className={`table-node ${isSelected ? 'selected' : ''}`}>
       {/* Header */}
-      <div className="table-node-header">
+      <div
+        className="table-node-header"
+        style={{ background: headerColor }}
+      >
         <span className="table-node-title">{table.name}</span>
         <span className="table-node-badge">{table.columns.length}</span>
+        <button
+          className="table-node-gear-btn nodrag"
+          onClick={handleGearClick}
+          onMouseDown={(e) => e.stopPropagation()}
+          title="Options"
+          type="button"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+        </button>
+
+        {gearMenuOpen && (
+          <TableNodeGearMenu
+            currentColor={table.color}
+            onEdit={handleEdit}
+            onApplyColor={handleApplyColor}
+            onClose={() => setGearMenuOpen(false)}
+          />
+        )}
       </div>
 
       {/* Columns */}

@@ -41,9 +41,6 @@ interface ModelStore {
   addRelationship: (rel: Relationship) => void;
   removeRelationship: (id: string) => void;
   setRelationships: (relationships: Relationship[]) => void;
-
-  // Position updates
-  updateTablePosition: (id: string, position: { x: number; y: number }) => void;
 }
 
 export const useModelStore = create<ModelStore>((set, get) => ({
@@ -216,8 +213,4 @@ export const useModelStore = create<ModelStore>((set, get) => ({
   })),
 
   setRelationships: (relationships) => set({ relationships }),
-
-  updateTablePosition: (id, position) => set((state) => ({
-    tables: state.tables.map((t) => (t.id === id ? { ...t, position } : t)),
-  })),
 }));

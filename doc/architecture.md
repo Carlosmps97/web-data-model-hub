@@ -82,7 +82,8 @@ graph TD
 - `hoveredTableId` + `selectedTableId` → `activeTableId`
 - Active column derivation (`activeColsByTable`)
 - Edge `highlighted`/`dimmed` + `edgeIndex` assignment
-- `handleAutoArrange` callback → calls layout algorithm → updates node positions + persists
+- **Auto-layout on load** — when tables are first rendered or structure changes, `layoutLeftRight()` computes initial positions (no positions are persisted to the backend)
+- `handleAutoArrange` callback → calls layout algorithm → updates node positions in-memory
 
 **`AnimatedEdge`** owns:
 - Smart routing (same-side vs opposite-side based on horizontal overlap)

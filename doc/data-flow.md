@@ -119,7 +119,8 @@ Runs when `tables`, `selectedTableId`, `hoveredTableId`, or `activeColsByTable` 
 
 - Computes a **structural fingerprint** of the tables array
 - If only display state changed (hover/selection), updates `data` in-place without re-positioning
-- If structure changed (column added/removed), full node rebuild
+- If structure changed (column added/removed), runs `layoutLeftRight()` to compute fresh positions for new tables (existing dragged positions are preserved in-memory)
+- **Positions are never persisted** — they are computed from the layout algorithm each time the model is loaded
 - Passes `activeRelationColumns` array to each node so `TableNode` can highlight connected columns
 
 ### Edge sync (relationships)
@@ -157,7 +158,6 @@ flowchart TD
     LR --> P["positions Record — id → x,y"]
     SF --> P
     CP --> P
-    P --> N["setNodes() — update positions"]
+    P --> N["setNodes() — update positions in-memory"]
     N --> F["fitView() — animate to show all"]
-    N --> PER["onUpdatePosition() × N — persist each"]
 ```

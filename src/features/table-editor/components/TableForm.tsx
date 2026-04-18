@@ -58,7 +58,6 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, onSave, on
       name: name.trim(),
       columns: validColumns,
       functionalDefinition: functionalDef.trim() || undefined,
-      position: table?.position || { x: 50 + Math.random() * 200, y: 50 + Math.random() * 200 },
     };
 
     onSave(result);

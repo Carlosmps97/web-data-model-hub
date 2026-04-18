@@ -16,6 +16,8 @@ interface AnimatedEdgeData {
   sourceLabel?: string;
   targetLabel?: string;
   edgeIndex?: number;
+  /** When true, edge spans two different namespaces → render as cross-model wire. */
+  crossModel?: boolean;
   [key: string]: unknown;
 }
 
@@ -41,6 +43,7 @@ export default function AnimatedEREdge({
   const edgeData = data as AnimatedEdgeData | undefined;
   const isHighlighted = edgeData?.highlighted ?? false;
   const isDimmed = edgeData?.dimmed ?? false;
+  const isCross = edgeData?.crossModel ?? false;
   const [isHovered, setIsHovered] = useState(false);
   const isActive = isHighlighted || isHovered;
 
@@ -121,10 +124,15 @@ export default function AnimatedEREdge({
     offset: pathOffset,
   });
 
-  const wireColor = isActive ? '#3d7a82' : isDimmed ? '#d6dbd9' : '#5a8fa0';
+  // Cross-model wires render in indigo to distinguish from intra-model relationships
+  const wireColor = isCross
+    ? (isActive ? '#4f46e5' : isDimmed ? '#c7c9e8' : '#6c5ce7')
+    : (isActive ? '#3d7a82' : isDimmed ? '#d6dbd9' : '#5a8fa0');
   const wireWidth = isActive ? 2 : isDimmed ? 1 : 1.5;
-  const endpointFill = isActive ? '#3d7a82' : isDimmed ? '#d6dbd9' : '#5a8fa0';
-  const labelColor = isActive ? '#3d7a82' : isDimmed ? '#b0bab7' : '#5a7a83';
+  const endpointFill = wireColor;
+  const labelColor = isCross
+    ? (isActive ? '#4338ca' : isDimmed ? '#b8bae0' : '#6c5ce7')
+    : (isActive ? '#3d7a82' : isDimmed ? '#b0bab7' : '#5a7a83');
 
   const srcLabelOffX = dynamicSrcPos === Position.Right ? 14 : -14;
   const tgtLabelOffX = dynamicTgtPos === Position.Right ? 14 : -14;
@@ -150,16 +158,17 @@ export default function AnimatedEREdge({
           ...style,
           stroke: wireColor,
           strokeWidth: wireWidth,
+          strokeDasharray: isCross ? '6 4' : undefined,
           transition: 'stroke 0.2s ease, stroke-width 0.2s ease',
         }}
       />
 
-      {/* Animated flow overlay — on hover or selection */}
-      {isActive && (
+      {/* Animated flow overlay — on hover or selection. Cross-model edges always animate */}
+      {(isActive || isCross) && (
         <path
           d={edgePath}
           fill="none"
-          className="er-edge-flow-anim"
+          className={`er-edge-flow-anim${isCross ? ' er-edge-flow-anim-cross' : ''}`}
         />
       )}
 

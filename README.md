@@ -30,7 +30,7 @@ Data Model Hub provides an interactive canvas where teams can design, visualize,
 - **Excel (.xlsx) import** — each sheet becomes a table; preview and edit before confirming
 - **AI Chat panel** — UI shell ready for agent backend integration
 - **Project organization** — multiple projects, each with their own data model
-- **Auto-save** — 2-second debounce persistence to local JSON files
+- **Auto-save** — 2-second debounce persistence of tables and relationships (positions are computed at runtime, not persisted)
 - **Light theme** — cream/teal color palette based on CSS custom properties
 
 ## Technology Stack

@@ -74,12 +74,18 @@ export function layoutLeftRight(tables: TableModel[], relationships: Relationshi
     layers.set(sorted[0].id, 0);
   }
 
+  const visited = new Set<string>();
   while (queue.length > 0) {
     const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
     const currentLayer = layers.get(current)!;
     outgoing.get(current)?.forEach(neighbor => {
-      if (!layers.has(neighbor) || layers.get(neighbor)! < currentLayer + 1) {
-        layers.set(neighbor, currentLayer + 1);
+      const newLayer = currentLayer + 1;
+      if (!layers.has(neighbor) || layers.get(neighbor)! < newLayer) {
+        layers.set(neighbor, newLayer);
+      }
+      if (!visited.has(neighbor)) {
         queue.push(neighbor);
       }
     });
