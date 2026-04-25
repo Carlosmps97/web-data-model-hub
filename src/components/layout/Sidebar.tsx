@@ -17,7 +17,7 @@ const Sidebar: React.FC = () => {
     <aside className="app-sidebar">
       <Link href="/" className="sidebar-logo" style={{ textDecoration: 'none' }}>
         <div className="sidebar-logo-icon">
-          <Image src="/logo-dog.png" alt="Data Model Hub" width={34} height={34} style={{ objectFit: 'contain' }} priority />
+          <Image src="/logo-dog.svg" alt="Data Model Hub" width={34} height={34} style={{ objectFit: 'contain' }} priority />
         </div>
         <div>
           <div className="sidebar-logo-text">Data Model Hub</div>

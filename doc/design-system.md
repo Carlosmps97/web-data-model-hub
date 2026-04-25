@@ -163,3 +163,48 @@ Tarjeta flotante (`white`, `border-radius: 12px`, `box-shadow: 0 8px 32px rgba(3
 - Ícono SVG (28×28px, `--color-text-secondary`)
 - Etiqueta en negrita + insignia numerada
 - Texto de descripción pequeño (`--color-text-muted`)
+
+## Encabezado del Editor (clases `ed-*`)
+
+El editor de modelos usa un encabezado de **dos filas** con su propio namespace de clases para evitar colisión con la cabecera global de la app.
+
+| Clase | Rol |
+|-------|-----|
+| `.ed-header` | Contenedor sticky, fondo `--color-bg-elevated`, borde inferior |
+| `.ed-header-row` | Fila individual; min-height 48px, padding lateral `--space-5` |
+| `.ed-header-identity` | Variante de fila con borde inferior sutil (separa identidad de toolbar) |
+| `.ed-header-toolbar` | Variante de fila con fondo `--color-bg-surface` |
+| `.ed-back` | Botón cuadrado de 32px para volver |
+| `.ed-breadcrumb` / `.ed-crumb` / `.ed-crumb-link` / `.ed-crumb-current` / `.ed-crumb-sep` | Breadcrumb clickeable |
+| `.ed-save-pill` (`.saved` / `.saving`) | Pill de estado verde / ámbar; `.ed-save-dot` con animación `pulse` cuando guarda |
+| `.ed-engine-wrap` / `.ed-engine-label` | Wrapper del selector de motor |
+| `.ed-segmented` / `.ed-segmented-btn` | Control segmentado para `List \| Canvas` |
+| `.ed-action-btn` | Botón base del toolbar (icono + label, padding `7×14px`) |
+| `.ed-action-primary` | Variante teal acentuada (Export DDL) |
+| `.ed-action-ai` (`.active`) | Variante índigo activable (AI Agent) |
+| `.ed-toolbar-divider` | Línea vertical de 1×22px que agrupa secciones del toolbar |
+
+## Tarjeta de Columna del Edit Table (clases `tf-col-*` y `tf-key-chip`)
+
+La pestaña Columns del formulario usa cards independientes con jerarquía visual clara, no un grid denso de checkboxes.
+
+| Clase | Rol |
+|-------|-----|
+| `.tf-col-cards` | Contenedor flex vertical con `gap: --space-3` |
+| `.tf-col-card` | Tarjeta individual: borde `#e2e8f0`, radio `--radius-lg`, hover ligero |
+| `.tf-col-card-top` | Cabecera: índice + nombre + tipo + papelera |
+| `.tf-col-index` | Círculo numérico de 22px, fondo `--color-bg-active` |
+| `.tf-col-name` | Input grande con underline al focus |
+| `.tf-col-type` | Pill mono con dropdown nativo (chevron como background-image) |
+| `.tf-col-delete` | Botón papelera; hover tiñe a `--color-error` |
+| `.tf-chip-row` | Fila flex-wrap con los chips de constraints |
+| `.tf-key-chip` | Chip base (gris, círculo `tf-key-chip-dot`) |
+| `.tf-chip-pk.active` | Ámbar `#d97706` |
+| `.tf-chip-fk.active` | Azul `#2563eb` |
+| `.tf-chip-sk.active` | Púrpura `#7c3aed` |
+| `.tf-chip-uq.active` | Verde `#16a34a` |
+| `.tf-chip-nn.active` | Slate `#475569` |
+| `.tf-col-fields` / `.tf-field` / `.tf-field-label` / `.tf-field-input` / `.tf-field-grow` | Pills inline para Length / Scale / Default / Description |
+| `.tf-fk-banner` / `.tf-fk-banner-icon` / `.tf-fk-banner-text` / `.tf-fk-banner-dot` / `.tf-fk-select` | Banner azul que aparece cuando se activa el chip FK, con dos selectores `schema.table` y `column` |
+
+> Tipografías alineadas con el resto de la app: nombres y chips usan `--font-sans` (Inter); solo el tipo de dato usa `--font-mono` por ser un token de código. Sin `text-transform: uppercase` agresivo — los acrónimos como `PK` o `NOT NULL` ya vienen así en el JSX.

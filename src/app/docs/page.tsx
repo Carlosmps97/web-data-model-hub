@@ -8,6 +8,9 @@ type SectionId =
   | 'getting-started'
   | 'model-editor'
   | 'adding-tables'
+  | 'schemas-partitioning'
+  | 'ddl-export'
+  | 'engine-capabilities'
   | 'list-view'
   | 'canvas-view'
   | 'auto-arrange'
@@ -27,14 +30,17 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { id: 'getting-started', label: 'Primeros Pasos', group: 'Guía de Usuario' },
   { id: 'model-editor', label: 'Editor de Modelos', group: 'Guía de Usuario' },
-  { id: 'adding-tables', label: 'Agregar Tablas', group: 'Guía de Usuario' },
+  { id: 'adding-tables', label: 'Agregar / Editar Tablas', group: 'Guía de Usuario' },
+  { id: 'schemas-partitioning', label: 'Esquemas y Particionamiento', group: 'Guía de Usuario' },
+  { id: 'ddl-export', label: 'Exportación DDL', group: 'Guía de Usuario' },
   { id: 'list-view', label: 'Vista de Lista', group: 'Guía de Usuario' },
   { id: 'canvas-view', label: 'Lienzo (Diagrama ER)', group: 'Guía de Usuario' },
   { id: 'auto-arrange', label: 'Distribución Automática', group: 'Guía de Usuario' },
   { id: 'global-canvas', label: 'Lienzo Global', group: 'Guía de Usuario' },
-  { id: 'dbml-reference', label: 'Referencia DBML', group: 'Guía de Usuario' },
   { id: 'classification', label: 'Clasificación y Etiquetas', group: 'Guía de Usuario' },
   { id: 'auto-save', label: 'Guardado Automático', group: 'Guía de Usuario' },
+  { id: 'engine-capabilities', label: 'Capacidades por Motor', group: 'Referencia Técnica' },
+  { id: 'dbml-reference', label: 'Referencia DBML', group: 'Referencia Técnica' },
   { id: 'technical-overview', label: 'Arquitectura', group: 'Referencia Técnica' },
   { id: 'declarative-model', label: 'Modelo Declarativo', group: 'Referencia Técnica' },
 ];
@@ -79,7 +85,7 @@ function Code({ children }: { children: React.ReactNode }) {
 
 function CodeBlock({ children, lang = '' }: { children: string; lang?: string }) {
   return (
-    <pre style={{
+    <pre data-lang={lang || undefined} style={{
       background: '#031926',
       color: '#9dbebb',
       borderRadius: 'var(--radius-md)',
@@ -255,79 +261,188 @@ export default function DocsPage() {
           {/* ── EDITOR DE MODELOS ── */}
           <SectionTitle id="model-editor">Editor de Modelos</SectionTitle>
 
-          <P>El editor de modelos tiene dos áreas principales:</P>
+          <P>El editor presenta un encabezado de dos filas y un área de trabajo central:</P>
+
+          <SubTitle>Fila Superior — Identidad y Estado</SubTitle>
           <Ul items={[
-            <><strong>Panel izquierdo</strong> — agrega tablas manualmente, pega código DBML o importa desde Excel</>,
-            <><strong>Área de trabajo principal</strong> — alterna entre Vista de Lista y Vista de Lienzo mediante los botones en la parte superior derecha del encabezado</>,
+            <><strong>Botón volver</strong> (‹) — regresa a la lista de modelos del proyecto</>,
+            <><strong>Breadcrumb clickeable</strong>: <Code>Projects › Nombre del Proyecto › Nombre del Modelo</Code>. Cualquier segmento previo es clickable y navega a esa ruta</>,
+            <><strong>Pill de estado</strong> — muestra <em>Saving…</em> en ámbar mientras se persiste y <em>Saved</em> en verde tras un debounce de 2 s</>,
+            <><strong>Selector de motor</strong> — desplegable con PostgreSQL / Oracle / Databricks SQL, alineado a la derecha</>,
           ]} />
 
-          <SubTitle>Alternancia de Vista — Lista vs Lienzo</SubTitle>
+          <SubTitle>Fila Inferior — Toolbar</SubTitle>
           <Table
             headers={['Botón', 'Descripción']}
             rows={[
-              ['List', 'Cuadrícula de tarjetas con todas las tablas, búsqueda, insignias de clasificación y filtros por etiqueta'],
-              ['Canvas', 'Diagrama ER interactivo con posicionamiento por arrastre y conexiones de relaciones'],
+              ['List | Canvas', 'Control segmentado para alternar entre la cuadrícula de tarjetas y el diagrama ER'],
+              ['Import Excel', 'Sube un .xlsx; cada hoja se convierte en una tabla con previsualización editable'],
+              ['Export DDL', 'Acción primaria (acentuada en teal) que abre el modal de exportación DDL para todo el modelo'],
+              ['AI Agent', 'Botón acentuado en índigo cuando está activo; muestra el panel del asistente'],
             ]}
           />
-          <P>La vista activa se resalta en color teal. Cambiar de vista no pierde datos ni posiciones en memoria.</P>
+          <P>La fila superior es la identidad inmutable del modelo (qué estoy editando, en qué motor, si está guardado). La fila inferior agrupa acciones de trabajo (qué hago con él).</P>
+
+          <SubTitle>Panel Izquierdo</SubTitle>
+          <Ul items={[
+            <><strong>Add Table</strong> — abre el formulario en blanco</>,
+            <><strong>Editor DBML</strong> (<Code>&lt;&gt;</Code>) — panel que permite escribir / pegar DBML y sincronizarlo con el modelo</>,
+            <><strong>Importación Excel</strong> (↑) — atajo equivalente al botón del toolbar</>,
+          ]} />
 
           <SubTitle>Motor de Base de Datos</SubTitle>
           <P>
-            Usa el <strong>selector de motor</strong> (desplegable junto al nombre del modelo en el encabezado) para etiquetar el modelo con su plataforma de base de datos de destino. El motor seleccionado se muestra como una insignia de color y se guarda con el modelo.
+            El motor seleccionado etiqueta el modelo y dirige toda la generación de DDL: tipo de datos por columna, sintaxis de partition / cluster, comillas para identificadores y comentarios. Solo se soportan tres motores con DDL de primera clase.
           </P>
           <Table
-            headers={['Motor', 'Color de insignia']}
+            headers={['Motor', 'Color', 'Schema por defecto', 'Particionamiento', 'Clustering']}
             rows={[
-              ['PostgreSQL', 'Azul-gris'], ['MySQL', 'Naranja'], ['SQL Server', 'Índigo'],
-              ['Oracle', 'Rojo'], ['Snowflake', 'Azul cielo'], ['Databricks', 'Ámbar'],
-              ['BigQuery', 'Azul'], ['Redshift', 'Coral'], ['SQLite', 'Verde'], ['MongoDB', 'Esmeralda'],
+              ['PostgreSQL', '#336791 (azul)', 'public', 'RANGE · LIST · HASH', 'No'],
+              ['Oracle', '#c54138 (rojo)', 'HR', 'RANGE · LIST · HASH', 'No'],
+              ['Databricks SQL', '#ff3621 (coral)', 'default', 'RANGE · LIST · BUCKET', 'Sí (Z-ORDER)'],
             ]}
           />
+          <Callout type="info">
+            Cambiar el motor de un modelo existente no traduce el contenido automáticamente. La generación DDL toma el motor del modelo en tiempo de exportación; los tipos canónicos se mapean al dialecto destino en cada llamada.
+          </Callout>
 
-          {/* ── AGREGAR TABLAS ── */}
-          <SectionTitle id="adding-tables">Agregar Tablas</SectionTitle>
+          {/* ── AGREGAR / EDITAR TABLAS ── */}
+          <SectionTitle id="adding-tables">Agregar / Editar Tablas</SectionTitle>
 
-          <SubTitle>Método 1 — Formulario Manual</SubTitle>
-          <Ol items={[
-            <>Haz clic en el botón <strong>+</strong> en el encabezado del panel izquierdo (o <strong>New Table</strong> en la Vista de Lista)</>,
-            <>Completa los detalles de la tabla (ver campos abajo)</>,
-            <>Haz clic en <strong>Add Table</strong> (o <strong>Update Table</strong> al editar una tabla existente)</>,
-          ]} />
+          <P>El diálogo <strong>Edit Table</strong> se abre desde tres puntos: <em>Add Table</em> en el panel izquierdo, <em>New Table</em> en la Vista de Lista, o el menú de engranaje sobre un nodo del lienzo. Internamente está dividido en cuatro pestañas.</P>
+
+          <SubTitle>Pestaña 1 — General</SubTitle>
           <Table
-            headers={['Campo', 'Obligatorio', 'Descripción']}
+            headers={['Campo', 'Obligatorio', 'Notas']}
             rows={[
-              ['Table Name', 'Sí', 'Identificador SQL, ej. user_accounts'],
-              ['Functional Definition', 'No', 'Descripción de negocio en texto libre de lo que almacena esta tabla'],
-              ['App Code', 'No', 'Aplicación o sistema dueño de esta tabla'],
-              ['Domain', 'No', 'Dominio de negocio, ej. Ventas o Finanzas'],
-              ['Subdomain', 'No', 'Agrupación más fina dentro del dominio, ej. Facturación'],
-              ['Tags', 'No', 'Etiquetas libres; presiona Enter o , para agregar, × para eliminar'],
-              ['Columns', 'No', 'Filas de: Nombre, Tipo, PK, FK, SK, Null, Descripción'],
+              ['Schema', 'Sí', 'Namespace SQL al que pertenece la tabla. Si lo dejas en blanco, se usa el schema por defecto del motor (public / HR / default).'],
+              ['Table Name', 'Sí', 'Identificador SQL (snake_case recomendado). Se valida no-vacío al guardar.'],
+              ['Functional Definition', 'No', 'Descripción de negocio. Aparece en tooltips, en la tarjeta de la Vista de Lista y como comentario en el DDL.'],
             ]}
           />
-          <P>Para columnas FK, una sección <strong>Foreign Key References</strong> aparece automáticamente — selecciona la tabla y columna destino.</P>
+          <P>Bajo el nombre se muestra una previsualización <Code>schema.table_name</Code> en vivo, exactamente como saldrá en el DDL.</P>
 
-          <SubTitle>Método 2 — Editor DBML</SubTitle>
+          <SubTitle>Pestaña 2 — Columns</SubTitle>
+          <P>Cada columna es una <strong>tarjeta independiente</strong> con jerarquía visual clara, no un grid denso de checkboxes:</P>
+          <Ul items={[
+            <><strong>Cabecera</strong>: índice numerado · nombre (input grande) · selector de tipo (pill) · papelera</>,
+            <><strong>Fila de chips semánticos</strong>: <Badge variant="pk">PK</Badge> <Badge variant="fk">FK</Badge> <Badge variant="sk">SK</Badge> <Badge variant="info">UNIQUE</Badge> <Badge variant="default">NOT NULL</Badge>. Cada chip apagado es gris; al activarlo se tiñe con su color semántico (ámbar para PK, azul para FK, púrpura para SK, verde para UNIQUE, slate para NOT NULL).</>,
+            <><strong>Pills de parámetros inline</strong>: Length / Scale (cuando aplican al tipo) · Default · Description. Se muestran como pequeños campos con label uppercase y borde sutil.</>,
+            <><strong>Banner FK</strong>: cuando activas el chip FK aparece un banner azul claro con un ícono de cadena, una etiqueta <em>references</em> y dos selectores: <Code>schema.table</Code> y <Code>column</Code>. Solo se listan tablas existentes en el modelo.</>,
+          ]} />
+          <Callout type="tip">
+            Length aplica a tipos char-like (varchar, char, nvarchar, string). Scale aparece adicionalmente en decimal / numeric. Para tipos como integer / boolean / timestamp los pills de Length / Scale se ocultan automáticamente.
+          </Callout>
+
+          <SubTitle>Pestaña 3 — Partitioning</SubTitle>
+          <P>Define la <Code>PartitionSpec</Code> de la tabla. Las opciones disponibles dependen del motor (ver Capacidades por Motor abajo).</P>
+          <Table
+            headers={['Campo', 'Descripción']}
+            rows={[
+              ['Strategy', 'NONE · RANGE · LIST · HASH · BUCKET (filtrado por motor)'],
+              ['Columns', 'Una o más columnas que dirigen la partición. El orden importa.'],
+              ['Buckets', 'Solo para HASH / BUCKET — número de cubetas.'],
+              ['Granularity', 'Solo para DATE — DAY / MONTH / YEAR / HOUR.'],
+              ['Clustering Columns', 'Solo Databricks — columnas adicionales para Z-ORDER.'],
+            ]}
+          />
+
+          <SubTitle>Pestaña 4 — Metadata</SubTitle>
+          <Table
+            headers={['Campo', 'Descripción']}
+            rows={[
+              ['Application Code', 'Código de la aplicación / sistema dueño (CRM, ERP, MDM…)'],
+              ['Domain', 'Área de negocio de alto nivel (Ventas, Finanzas, RRHH…)'],
+              ['Subdomain', 'Agrupación más fina dentro del dominio'],
+              ['Tags', 'Etiquetas libres. Enter o coma para agregar, × para eliminar'],
+            ]}
+          />
+
+          <SubTitle>Métodos Alternativos de Carga</SubTitle>
+          <P>Además del formulario, puedes poblar tablas en lote:</P>
           <Ol items={[
-            <>Haz clic en el botón <Code>&lt;&gt;</Code> en el panel izquierdo</>,
-            <>Escribe DBML en el editor (ver la sección Referencia DBML abajo)</>,
-            <>Haz clic en <strong>Apply DBML</strong> para analizar y crear/reemplazar tablas</>,
+            <><strong>Editor DBML</strong> (<Code>&lt;&gt;</Code> en el panel izquierdo) — escribe / pega DBML y aplica para crear o reemplazar todas las tablas. Soporta <Code>Table schema.name {`{ … }`}</Code> para fijar schema desde DBML.</>,
+            <><strong>Importación Excel</strong> (↑ en el panel o en el toolbar) — cada hoja se convierte en una tabla. Columna A = nombres, B = tipos, C = descripciones. La primera fila se omite si parece encabezado.</>,
           ]} />
           <Callout type="note">
-            Aplicar DBML reemplaza todas las tablas actuales del modelo. Exporta el estado actual primero si es necesario.
+            Aplicar DBML reemplaza todas las tablas actuales del modelo. Si necesitas conservar el estado actual, expórtalo primero como DDL.
           </Callout>
 
-          <SubTitle>Método 3 — Importación desde Excel</SubTitle>
-          <Ol items={[
-            <>Haz clic en el botón de carga (↑) en el panel izquierdo</>,
-            <>Arrastra y suelta un archivo <Code>.xlsx</Code> o haz clic para explorar</>,
-            <>Cada hoja/pestaña se convierte en una tabla: Columna A = nombres, Columna B = tipos, Columna C = descripciones</>,
-            <>Revisa y edita en el modal de vista previa</>,
-            <>Haz clic en <strong>Import N Tables</strong></>,
-          ]} />
+          {/* ── ESQUEMAS Y PARTICIONAMIENTO ── */}
+          <SectionTitle id="schemas-partitioning">Esquemas y Particionamiento</SectionTitle>
+
+          <SubTitle>Schemas — obligatorio en el formulario</SubTitle>
+          <P>
+            Cada tabla pertenece a un <strong>schema</strong> (namespace SQL). El campo es obligatorio en el formulario; si lo dejas vacío, al guardar se rellena con el schema convencional del motor. La búsqueda en la Vista de Lista ya considera el schema, y el lienzo lo muestra como prefijo gris en el encabezado del nodo (<Code>schema.table_name</Code>).
+          </P>
+          <P>El parser DBML acepta dos sintaxis equivalentes:</P>
+          <CodeBlock lang="dbml">{`
+Table orders {
+  id integer [pk]
+}
+
+Table sales.orders {     // schema.name — fija schema desde DBML
+  id integer [pk]
+}
+          `}</CodeBlock>
+
+          <SubTitle>PartitionSpec — más allá del flag legacy</SubTitle>
+          <P>
+            La forma correcta de declarar particionamiento es la pestaña <em>Partitioning</em> del formulario, que pobla la propiedad <Code>partition</Code> en la tabla. El flag <Code>isPartitionKey</Code> a nivel columna se mantiene por compatibilidad con modelos antiguos pero el generador DDL prioriza <Code>partition.columns</Code>.
+          </P>
+          <Table
+            headers={['Strategy', 'Sintaxis emitida', 'Motores']}
+            rows={[
+              ['NONE', '(sin cláusula)', 'todos'],
+              ['RANGE', 'PARTITION BY RANGE (cols)', 'PostgreSQL, Oracle, Databricks'],
+              ['LIST', 'PARTITION BY LIST (cols)', 'PostgreSQL, Oracle, Databricks'],
+              ['HASH', 'PARTITION BY HASH (cols)', 'PostgreSQL, Oracle'],
+              ['BUCKET', 'CLUSTERED BY (cols) INTO N BUCKETS', 'Databricks'],
+              ['DATE', 'PARTITION BY (col)  // con granularidad anotada', 'reservado para BigQuery'],
+              ['INGESTION_TIME', 'PARTITION BY _PARTITIONTIME', 'reservado para BigQuery'],
+            ]}
+          />
           <Callout type="info">
-            La primera fila se omite automáticamente si parece un encabezado — verifica palabras como "column", "name", "columna", "nombre".
+            DATE e INGESTION_TIME existen en el tipo <Code>PartitionStrategy</Code> pero hoy ningún motor soportado los emite — quedan como contrato preparado para una futura extensión a BigQuery.
           </Callout>
+
+          <SubTitle>Clustering / Z-ORDER</SubTitle>
+          <P>
+            Solo Databricks expone clustering: la propiedad <Code>clusteringColumns</Code> de <Code>PartitionSpec</Code> se traduce en una cláusula <Code>CLUSTER BY (…)</Code> seguida de <Code>ZORDER BY (…)</Code> en el DDL final.
+          </P>
+
+          {/* ── EXPORTACIÓN DDL ── */}
+          <SectionTitle id="ddl-export">Exportación DDL</SectionTitle>
+
+          <P>El generador de DDL produce SQL listo para ejecutar adaptado al motor del modelo. Hay tres niveles de granularidad:</P>
+          <Table
+            headers={['Origen', 'Cómo se invoca', 'Resultado']}
+            rows={[
+              ['Modelo completo', 'Botón Export DDL en el toolbar del editor', 'CREATE SCHEMA por cada schema + CREATE TABLE de todas las tablas + ALTER TABLE FKs al final'],
+              ['Por dominio', 'Icono ↓ junto al header de un grupo en la Vista de Lista (cuando está agrupada)', 'Subset del modelo — solo tablas del grupo, FKs hacia tablas externas omitidas'],
+              ['Una sola tabla', 'Icono ↓ en cada tarjeta de la Vista de Lista', 'CREATE SCHEMA + CREATE TABLE de esa tabla con sus FKs salientes'],
+            ]}
+          />
+
+          <SubTitle>Modal de Vista Previa</SubTitle>
+          <P>Al disparar cualquier exportación se abre un modal con:</P>
+          <Ul items={[
+            <><strong>Editor con sintaxis SQL</strong> — monoespaciado, con scroll, en modo sólo lectura</>,
+            <><strong>Toggles de opciones</strong>: <em>Emit schemas</em> (CREATE SCHEMA al inicio) · <em>Emit foreign keys</em> (ALTER TABLE al final) · <em>Emit comments</em> (COMMENT ON TABLE / COLUMN)</>,
+            <><strong>Copy</strong> — copia al portapapeles</>,
+            <><strong>Download</strong> — descarga como <Code>.sql</Code> con nombre derivado del scope (modelo / dominio / tabla) y el motor</>,
+          ]} />
+
+          <SubTitle>Pipeline de Generación</SubTitle>
+          <Ol items={[
+            <><strong>Resolución de schemas</strong> — toda tabla sin <Code>schema</Code> recibe el default del motor.</>,
+            <><strong>Resolución de tipos</strong> — tipos canónicos (<Code>integer</Code>, <Code>varchar</Code>, <Code>decimal</Code>…) se mapean al dialecto destino. Si el usuario escribió ya un tipo dialect-specific con paréntesis (ej. <Code>VARCHAR2(50)</Code>), se respeta tal cual.</>,
+            <><strong>Quoting</strong> — los identificadores se entrecomillan solo si contienen caracteres no SQL-safe. PostgreSQL / Oracle usan dobles comillas; Databricks usa backticks.</>,
+            <><strong>Constraints inline</strong> — PRIMARY KEY se emite en línea; UNIQUE de columna única también.</>,
+            <><strong>Particionamiento / Clustering</strong> — la cláusula PARTITION BY / CLUSTER BY se añade tras la lista de columnas.</>,
+            <><strong>Foreign keys</strong> — se emiten como <Code>ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY</Code> al final, para que el script aplique aunque las tablas referenciadas se creen en cualquier orden.</>,
+            <><strong>Comentarios</strong> — si <em>Emit comments</em> está activo, las definiciones funcionales se traducen a <Code>COMMENT ON TABLE</Code> / <Code>COMMENT ON COLUMN</Code>.</>,
+          ]} />
 
           {/* ── VISTA DE LISTA ── */}
           <SectionTitle id="list-view">Vista de Lista</SectionTitle>
@@ -336,18 +451,32 @@ export default function DocsPage() {
 
           <SubTitle>Búsqueda y Filtrado</SubTitle>
           <Ul items={[
-            <><strong>Barra de búsqueda</strong> — filtra por nombre de tabla, descripción, código de app, dominio, subdominio o cualquier etiqueta (sin distinción de mayúsculas)</>,
+            <><strong>Barra de búsqueda</strong> — filtra por schema, nombre de tabla, descripción, código de app, dominio, subdominio o cualquier etiqueta (sin distinción de mayúsculas)</>,
             <><strong>Fila de pills de etiquetas</strong> — cuando existen etiquetas, haz clic en un pill para filtrar; haz clic de nuevo o en el pill activo para limpiar</>,
             <><strong>Contador</strong> — muestra tablas que coinciden vs total</>,
           ]} />
 
+          <SubTitle>Agrupamiento</SubTitle>
+          <P>El selector <strong>Group by</strong> en la barra de filtros ofrece tres modos:</P>
+          <Table
+            headers={['Modo', 'Cabecera de grupo', 'Cuándo usar']}
+            rows={[
+              ['By schema', 'Icono de cilindro + nombre del schema + conteo', 'Cuando organizas el catálogo por namespace SQL (default)'],
+              ['By domain', 'Icono de carpeta + dominio + conteo', 'Cuando trabajas por área de negocio'],
+              ['Flat', '— sin grupos, todas las tarjetas seguidas —', 'Para una vista plana cuando filtras por búsqueda'],
+            ]}
+          />
+          <Callout type="info">
+            Cuando estás agrupado por schema, las tarjetas <em>no</em> repiten el prefijo <Code>schema.</Code> en el título (la cabecera del grupo ya lo indica). Al pasar a <em>Flat</em> o <em>By domain</em> el prefijo vuelve para no perder la referencia.
+          </Callout>
+
           <SubTitle>Anatomía de Tarjeta de Tabla</SubTitle>
           <Ul items={[
-            <><strong>Encabezado</strong> — nombre de tabla + insignia de conteo de columnas</>,
+            <><strong>Encabezado</strong> — ícono de tabla + nombre (con prefijo de schema cuando no está agrupado por schema) + pill de conteo de columnas</>,
+            <><strong>Acciones</strong> — ↓ (descargar DDL de esta tabla), lápiz (editar), papelera (eliminar)</>,
             <><strong>Descripción</strong> — texto de definición funcional (si se proporcionó)</>,
-            <><strong>Insignias de clasificación</strong>: <Badge variant="app">app</Badge> <Badge variant="domain">domain</Badge> <Badge variant="sub">sub</Badge> — chips de color mostrando los valores de clasificación</>,
+            <><strong>Insignias de clasificación</strong>: <Badge variant="app">app</Badge> <Badge variant="domain">domain</Badge> <Badge variant="sub">sub</Badge> y chip de partition si aplica</>,
             <><strong>Chips de etiquetas</strong> — haz clic en cualquier chip para activarlo como filtro de etiqueta</>,
-            <><strong>Acciones</strong> — botones de lápiz (editar) y papelera (eliminar)</>,
           ]} />
 
           {/* ── VISTA DE LIENZO ── */}
@@ -421,6 +550,55 @@ export default function DocsPage() {
             <>Útil para una visión general de alto nivel de todo el panorama de datos del proyecto</>,
           ]} />
 
+          {/* ── CAPACIDADES POR MOTOR ── */}
+          <SectionTitle id="engine-capabilities">Capacidades por Motor</SectionTitle>
+
+          <P>Cada motor declara sus capacidades en <Code>src/features/engines/engines.ts</Code> bajo la interfaz <Code>EngineDefinition</Code>. La UI usa este metadato para filtrar opciones (ej. estrategias de partition) y el generador DDL para emitir la sintaxis correcta.</P>
+
+          <SubTitle>Mapeo de Tipos Canónicos → Dialecto</SubTitle>
+          <Table
+            headers={['Canónico', 'PostgreSQL', 'Oracle', 'Databricks SQL']}
+            rows={[
+              ['integer',   'INTEGER',           'NUMBER(10)',    'INT'],
+              ['bigint',    'BIGINT',            'NUMBER(19)',    'BIGINT'],
+              ['smallint',  'SMALLINT',          'NUMBER(5)',     'SMALLINT'],
+              ['float',     'REAL',              'BINARY_FLOAT',  'FLOAT'],
+              ['double',    'DOUBLE PRECISION',  'BINARY_DOUBLE', 'DOUBLE'],
+              ['decimal',   'NUMERIC',           'NUMBER',        'DECIMAL'],
+              ['varchar',   'VARCHAR',           'VARCHAR2',      'STRING'],
+              ['char',      'CHAR',              'CHAR',          'STRING'],
+              ['text',      'TEXT',              'CLOB',          'STRING'],
+              ['nvarchar',  'VARCHAR',           'NVARCHAR2',     'STRING'],
+              ['boolean',   'BOOLEAN',           'NUMBER(1)',     'BOOLEAN'],
+              ['date',      'DATE',              'DATE',          'DATE'],
+              ['datetime',  'TIMESTAMP',         'TIMESTAMP',     'TIMESTAMP'],
+              ['timestamp', 'TIMESTAMP',         'TIMESTAMP',     'TIMESTAMP'],
+              ['time',      'TIME',              'TIMESTAMP',     'STRING'],
+              ['binary',    'BYTEA',             'RAW',           'BINARY'],
+              ['varbinary', 'BYTEA',             'BLOB',          'BINARY'],
+              ['blob',      'BYTEA',             'BLOB',          'BINARY'],
+              ['json',      'JSONB',             'JSON',          'STRING'],
+              ['xml',       'XML',               'XMLTYPE',       'STRING'],
+              ['uuid',      'UUID',              'RAW(16)',       'STRING'],
+              ['array',     'JSONB',             'JSON',          'ARRAY<STRING>'],
+              ['map',       'JSONB',             'JSON',          'MAP<STRING, STRING>'],
+              ['struct',    'JSONB',             'JSON',          'STRUCT'],
+            ]}
+          />
+          <Callout type="tip">
+            Si escribes un tipo con paréntesis ya formateado para el dialecto destino (ej. <Code>VARCHAR2(50)</Code>, <Code>DECIMAL(10,2)</Code>), el generador lo respeta literalmente sin volver a mapearlo.
+          </Callout>
+
+          <SubTitle>Quoting de Identificadores</SubTitle>
+          <Table
+            headers={['Motor', 'Comilla', 'Cuándo se aplica']}
+            rows={[
+              ['PostgreSQL', '"…"', 'solo si el identificador contiene caracteres fuera de [A-Za-z_][A-Za-z0-9_]*'],
+              ['Oracle',     '"…"', 'igual que PostgreSQL'],
+              ['Databricks', '`…`', 'igual, pero usa backticks'],
+            ]}
+          />
+
           {/* ── REFERENCIA DBML ── */}
           <SectionTitle id="dbml-reference">Referencia DBML</SectionTitle>
 
@@ -434,6 +612,14 @@ Table users {
   email varchar(100) [unique, note: 'Contact email']
   created_at timestamp
   Note: 'User account information'
+}
+          `}</CodeBlock>
+
+          <SubTitle>Tabla con Schema Explícito</SubTitle>
+          <CodeBlock lang="dbml">{`
+Table sales.orders {       // schema.name — fija schema desde DBML
+  id integer [pk]
+  user_id integer [ref: > public.users.id]
 }
           `}</CodeBlock>
 
@@ -459,7 +645,7 @@ Ref: products.id < order_items.product_id  // many-to-many
             rows={[
               ['pk', 'Llave Primaria'],
               ['sk', 'Llave Sustituta'],
-              ['partition', 'Llave de Partición'],
+              ['partition', 'Llave de Partición (legacy column-level; preferir PartitionSpec)'],
               ['not null', 'Columna no nula'],
               ['unique', 'Restricción de unicidad'],
               ['increment', 'Auto-incremento / identidad'],
@@ -470,6 +656,9 @@ Ref: products.id < order_items.product_id  // many-to-many
               ['ref: < t.col', 'FK — muchos a muchos (lado muchos allá)'],
             ]}
           />
+          <Callout type="info">
+            Las refs FK aceptan la forma <Code>schema.table.column</Code>, no sólo <Code>table.column</Code>. Cuando el modelo está distribuido en varios schemas, califica siempre las referencias para evitar ambigüedad.
+          </Callout>
 
           <SubTitle>Comentarios</SubTitle>
           <CodeBlock lang="dbml">{`
@@ -508,7 +697,7 @@ Ref: products.id < order_items.product_id  // many-to-many
 
           <P>
             Todos los cambios se guardan automáticamente <strong>2 segundos</strong> después de la última modificación.
-            Un indicador <em>"Saving…"</em> aparece en el encabezado de la página mientras se está guardando.
+            Un indicador <em>&ldquo;Saving&hellip;&rdquo;</em> aparece en el encabezado de la página mientras se está guardando.
             No se requiere ninguna acción manual de guardado.
           </P>
           <P>
@@ -583,8 +772,8 @@ interface DataModel {
 // A TableModel represents a database table / entity
 interface TableModel {
   id: string;
+  schema?: string;            // SQL schema; required at form level
   name: string;
-  schema?: string;
   columns: TableColumn[];
   functionalDefinition?: string;
   color?: string;
@@ -593,14 +782,18 @@ interface TableModel {
   domain?: string;
   subdomain?: string;
   tags?: string[];
+  partition?: PartitionSpec;  // engine-aware partitioning
 }
 
 // A column within a table
 interface TableColumn {
   name: string;
   dataType: string;
+  length?: number;            // varchar(50), decimal(10,...)
+  scale?: number;             // decimal(10, 2)
   isPrimaryKey?: boolean;
   isSurrogateKey?: boolean;
+  /** Legacy column-level partition flag. Prefer TableModel.partition.columns. */
   isPartitionKey?: boolean;
   isForeignKey?: boolean;
   foreignKeyRef?: { table: string; column: string };
@@ -610,10 +803,20 @@ interface TableColumn {
   functionalDefinition?: string;   // shown in canvas tooltip
 }
 
+// Engine-aware partitioning specification
+interface PartitionSpec {
+  strategy: 'NONE' | 'RANGE' | 'LIST' | 'HASH'
+          | 'DATE' | 'INGESTION_TIME' | 'BUCKET';
+  columns: string[];                // order matters
+  buckets?: number;                 // for HASH / BUCKET
+  granularity?: 'DAY' | 'MONTH' | 'YEAR' | 'HOUR';  // for DATE
+  clusteringColumns?: string[];     // for Databricks Z-ORDER
+}
+
 // A directed relationship between two columns
 interface Relationship {
   id: string;
-  sourceTable: string;   // table name
+  sourceTable: string;   // table name (use schema.name when ambiguous)
   sourceColumn: string;
   targetTable: string;
   targetColumn: string;
@@ -621,35 +824,37 @@ interface Relationship {
 }
 
 // Supported target engines
-type DatabaseEngine =
-  | 'postgresql' | 'mysql' | 'sqlserver' | 'oracle'
-  | 'snowflake' | 'databricks' | 'bigquery'
-  | 'redshift' | 'sqlite' | 'mongodb';
+type DatabaseEngine = 'postgresql' | 'oracle' | 'databricks';
           `}</CodeBlock>
 
           <SubTitle>Cómo DBML se Mapea a TableModel</SubTitle>
-          <P>El parser DBML (<Code>src/features/table-editor/utils/</Code>) convierte texto DBML en <Code>TableModel[]</Code> y <Code>Relationship[]</Code> siguiendo estas reglas:</P>
+          <P>El parser DBML (<Code>src/utils/dbmlParser.ts</Code>) convierte texto DBML en <Code>TableModel[]</Code> y <Code>Relationship[]</Code> siguiendo estas reglas:</P>
           <Table
             headers={['Construcción DBML', 'Campo TypeScript']}
             rows={[
               ['Table name', 'TableModel.name'],
+              ['Table schema.name', 'TableModel.schema = schema, TableModel.name = name'],
               ['Note: …', 'TableModel.functionalDefinition'],
               ['Column name', 'TableColumn.name'],
               ['Column type', 'TableColumn.dataType'],
+              ['varchar(N)', 'TableColumn.dataType = "varchar", TableColumn.length = N'],
+              ['decimal(N,M)', 'TableColumn.dataType = "decimal", length = N, scale = M'],
               ['[pk]', 'TableColumn.isPrimaryKey = true'],
               ['[sk]', 'TableColumn.isSurrogateKey = true'],
-              ['[partition]', 'TableColumn.isPartitionKey = true'],
+              ['[partition]', 'TableColumn.isPartitionKey = true (legacy)'],
               ['[not null]', 'TableColumn.isNullable = false'],
               ['[unique]', 'TableColumn.isUnique = true'],
               ['[increment]', 'TableColumn.defaultValue = "increment"'],
               ["[default: 'x']", "TableColumn.defaultValue = 'x'"],
               ["[note: 'x']", "TableColumn.functionalDefinition = 'x'"],
               ['[ref: > t.col]', 'TableColumn.isForeignKey = true + Relationship (uno a muchos)'],
+              ['[ref: > schema.t.col]', 'Igual, con FK calificada'],
               ['[ref: - t.col]', 'Relationship (uno a uno)'],
               ['[ref: < t.col]', 'Relationship (muchos a muchos)'],
               ['Ref: a.col > b.col', 'Entrada de Relationship independiente'],
             ]}
           />
+          <P>El generador inverso (<Code>generateDBML</Code>) emite <Code>{'Table schema.name { … }'}</Code> cuando el schema está definido y respeta length/scale en la firma del tipo.</P>
 
           <SubTitle>Cómo el Lienzo Renderiza TableModel</SubTitle>
           <P>

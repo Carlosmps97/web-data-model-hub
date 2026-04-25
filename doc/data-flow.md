@@ -63,15 +63,17 @@ flowchart TD
     F --> H["Auto-save → disk"]
 ```
 
-**Capacidades del parser:**
-- Declaraciones `Table` con columnas y configuraciones inline
+**Capacidades del parser** (`src/utils/dbmlParser.ts`):
+- Declaraciones `Table name { … }` y `Table schema.name { … }` (asigna `TableModel.schema`)
 - Configuraciones de columna: `pk`, `sk`, `partition`, `not null`, `unique`, `increment`, `default`, `note`, `ref`
+- Refs FK calificables con schema: `[ref: > schema.table.column]`
 - Declaraciones `Ref:` independientes
+- Length / scale embebidos en el tipo: `varchar(50)`, `decimal(10,2)` → `length` + `scale` en `TableColumn`
 - Descripciones de tabla con `Note:`
 - Líneas de comentario `//`
 - Reporte de errores con números de línea
 
-**Inverso (`generateDBML()`):** toma `TableModel[]` + `Relationship[]` y genera texto DBML válido.
+**Inverso (`generateDBML()`):** toma `TableModel[]` + `Relationship[]` y genera texto DBML válido. Emite `Table schema.name { … }` cuando el schema está definido y respeta `length` / `scale` en la firma del tipo.
 
 ### 4. Agente de Chat (Shell)
 
@@ -166,6 +168,37 @@ flowchart TD
 ```
 
 Ambas vistas comparten las mismas `tables` y `relationships` del store de Zustand — cambiar de vista nunca provoca una recarga de datos.
+
+## Flujo de Exportación DDL
+
+```mermaid
+flowchart TD
+    A["User triggers export\n(Export DDL button / row ↓ / group ↓)"] --> B{"Scope"}
+    B -->|"Model"| MS["generateTablesDDL(allTables, …)"]
+    B -->|"Domain group"| DS["generateTablesDDL(groupTables, allTables, …)"]
+    B -->|"Single table"| TS["generateTableDDL(table, allTables, …)"]
+    MS --> CTX["buildContext()\nresolveSchema per table"]
+    DS --> CTX
+    TS --> CTX
+    CTX --> EM["emitSchemas (CREATE SCHEMA)"]
+    CTX --> ET["emitTable per row\n(types via TYPE_MAP, quoting,\nPK inline, partition / cluster suffix)"]
+    CTX --> EFK["emitForeignKeys\n(ALTER TABLE … ADD CONSTRAINT …)"]
+    CTX --> ECM["appendComments\n(COMMENT ON TABLE / COLUMN)"]
+    EM --> O["DDL string"]
+    ET --> O
+    EFK --> O
+    ECM --> O
+    O --> M["DDLPreviewModal"]
+    M -->|"Copy"| CB["navigator.clipboard"]
+    M -->|"Download"| DL["Blob → .sql download"]
+    M -->|"Toggle option"| RG["regenerate via the same generator"]
+    RG --> O
+```
+
+**Características clave:**
+- El generador es **puro** — misma entrada produce misma salida; los toggles del modal disparan una regeneración en memoria.
+- `allTables` siempre se pasa al contexto para que las refs FK puedan calificarse con su schema destino, incluso si el scope solo expone un subset.
+- Los `ALTER TABLE` de FKs se emiten al final para que el script aplique aunque las tablas referenciadas se creen en cualquier orden.
 
 ## Flujo de Distribución Automática
 

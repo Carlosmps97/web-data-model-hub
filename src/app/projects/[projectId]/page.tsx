@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
 import EngineSelect from '@/features/engines/components/EngineSelect';
@@ -154,7 +155,7 @@ export default function ProjectModelsPage({ params }: PageProps) {
       <div className="app-content">
         {/* Breadcrumb */}
         <nav className="breadcrumbs">
-          <a href="/" onClick={(e) => { e.preventDefault(); router.push('/'); }}>Projects</a>
+          <Link href="/">Projects</Link>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 18 15 12 9 6" />
           </svg>

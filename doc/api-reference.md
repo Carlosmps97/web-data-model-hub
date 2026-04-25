@@ -264,28 +264,21 @@ Códigos de estado HTTP comunes:
 
 ### DatabaseEngine
 
-Valores válidos para el campo `engine`:
+Valores válidos para el campo `engine` (límite intencional a los motores con DDL de primera clase):
 
-| Valor | Nombre mostrado |
-|-------|-----------------|
-| `postgresql` | PostgreSQL |
-| `mysql` | MySQL |
-| `sqlserver` | SQL Server |
-| `oracle` | Oracle |
-| `snowflake` | Snowflake |
-| `databricks` | Databricks |
-| `bigquery` | BigQuery |
-| `redshift` | Redshift |
-| `sqlite` | SQLite |
-| `mongodb` | MongoDB |
+| Valor | Nombre mostrado | Schema por defecto | Particionamiento | Clustering |
+|-------|-----------------|---------------------|------------------|------------|
+| `postgresql` | PostgreSQL | `public` | RANGE · LIST · HASH | No |
+| `oracle` | Oracle | `HR` | RANGE · LIST · HASH | No |
+| `databricks` | Databricks SQL | `default` | RANGE · LIST · BUCKET | Sí (Z-ORDER) |
 
 ### TableModel
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | id | string (UUID) | Identificador único |
+| schema | string? | Namespace SQL. Obligatorio en el formulario; cuando está ausente, los generadores DDL aplican el default del motor. |
 | name | string | Nombre de la tabla |
-| schema | string? | Esquema/namespace opcional |
 | columns | TableColumn[] | Arreglo de columnas |
 | functionalDefinition | string? | Descripción de negocio de la tabla |
 | applicationCode | string? | Aplicación o sistema dueño de esta tabla |
@@ -293,21 +286,35 @@ Valores válidos para el campo `engine`:
 | subdomain | string? | Agrupación dentro del dominio (ej. `Facturación`) |
 | tags | string[]? | Etiquetas libres para filtrado y agrupación |
 | color | string? | Color de visualización opcional para el nodo del lienzo |
+| partition | PartitionSpec? | Especificación de particionamiento aware del motor (ver abajo) |
 
 ### TableColumn
 
 | Campo | Tipo | Descripción |
 |-------|------|-------------|
 | name | string | Nombre de la columna |
-| dataType | string | Tipo de dato |
+| dataType | string | Tipo de dato canónico (`integer`, `varchar`, `decimal`…) o dialect-specific con paréntesis para mantenerse literal |
+| length | number? | Longitud para tipos char-like (varchar(N)) o decimal(N) |
+| scale | number? | Escala para tipos decimal/numeric (decimal(N, M)) |
 | isPrimaryKey | boolean? | Indica llave primaria |
 | isSurrogateKey | boolean? | Indica llave sustituta |
-| isPartitionKey | boolean? | Indica llave de partición |
+| isPartitionKey | boolean? | _Legacy_ — flag a nivel columna. El generador prefiere `TableModel.partition.columns`. |
 | isForeignKey | boolean? | Indica llave foránea |
 | foreignKeyRef | {table, column}? | Referencia FK |
 | isNullable | boolean? | Indica si acepta nulos |
+| isUnique | boolean? | Indica restricción de unicidad |
 | defaultValue | string? | Valor predeterminado |
 | functionalDefinition | string? | Descripción de la columna |
+
+### PartitionSpec
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| strategy | enum | `NONE` · `RANGE` · `LIST` · `HASH` · `DATE` · `INGESTION_TIME` · `BUCKET`. La UI filtra por las soportadas en cada motor. |
+| columns | string[] | Columnas que dirigen la partición. El orden importa. |
+| buckets | number? | Conteo de cubetas para `HASH` / `BUCKET`. |
+| granularity | enum? | `DAY` · `MONTH` · `YEAR` · `HOUR` para particionado por fecha. |
+| clusteringColumns | string[]? | Columnas adicionales para clustering / Z-ORDER (Databricks). |
 
 ### Relationship
 

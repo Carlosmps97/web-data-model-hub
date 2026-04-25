@@ -30,26 +30,16 @@ export interface DBMLError {
 }
 
 // Map DBML `database_type` values (case-insensitive) to our internal engine ids.
+// Unknown / unsupported engines (mysql, sqlserver, snowflake, etc.) are rejected
+// silently; the importer can still load the model but the `engine` will be
+// unset, which the user can fix from the engine picker.
 const ENGINE_ALIASES: Record<string, DatabaseEngine> = {
   postgres: 'postgresql',
   postgresql: 'postgresql',
   psql: 'postgresql',
-  mysql: 'mysql',
-  mariadb: 'mysql',
-  sqlserver: 'sqlserver',
-  'sql server': 'sqlserver',
-  mssql: 'sqlserver',
-  tsql: 'sqlserver',
   oracle: 'oracle',
   plsql: 'oracle',
-  snowflake: 'snowflake',
   databricks: 'databricks',
-  bigquery: 'bigquery',
-  'big query': 'bigquery',
-  redshift: 'redshift',
-  sqlite: 'sqlite',
-  mongo: 'mongodb',
-  mongodb: 'mongodb',
 };
 
 function normalizeEngine(raw: string): DatabaseEngine | undefined {
@@ -159,11 +149,14 @@ export function parseDBML(input: string): DBMLParseResult {
     }
 
     // ---------- TABLE DECLARATION ----------
-    const tableMatch = line.match(/^Table\s+(\S+)\s*\{/i);
+    // Supports `Table users { ... }` and `Table sales.orders { ... }`
+    const tableMatch = line.match(/^Table\s+(?:(\S+?)\.)?(\S+)\s*\{/i);
     if (tableMatch) {
+      const [, schemaPart, namePart] = tableMatch;
       currentTable = {
         id: uuidv4(),
-        name: tableMatch[1],
+        schema: schemaPart || undefined,
+        name: namePart,
         columns: [],
       };
       braceDepth = 1;
@@ -351,15 +344,8 @@ export interface GenerateDBMLOptions {
 // Reverse map engine → DBML `database_type` literal
 const ENGINE_TO_DBML: Record<DatabaseEngine, string> = {
   postgresql: 'PostgreSQL',
-  mysql: 'MySQL',
-  sqlserver: 'SQL Server',
   oracle: 'Oracle',
-  snowflake: 'Snowflake',
   databricks: 'Databricks',
-  bigquery: 'BigQuery',
-  redshift: 'Redshift',
-  sqlite: 'SQLite',
-  mongodb: 'MongoDB',
 };
 
 export function generateDBML(
@@ -392,7 +378,8 @@ export function generateDBML(
   }
 
   for (const table of tables) {
-    lines.push(`Table ${table.name} {`);
+    const fq = table.schema ? `${table.schema}.${table.name}` : table.name;
+    lines.push(`Table ${fq} {`);
 
     for (const col of table.columns) {
       const settings: string[] = [];

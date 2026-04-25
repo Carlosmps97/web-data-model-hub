@@ -56,6 +56,7 @@ graph LR
     Features --> Chat["chat-agent/"]
     Features --> ProjectsMgmt["projects/"]
     Features --> Engines["engines/"]
+    Features --> DDL["ddl/"]
 
     Diagram --> DC["DiagramCanvas.tsx"]
     Diagram --> TN["TableNode.tsx"]
@@ -69,7 +70,14 @@ graph LR
 
     Engines --> ES["EngineSelect.tsx"]
     Engines --> EB["EngineBadge.tsx"]
+    Engines --> EE["engines.ts\n(EngineDefinition + capabilities)"]
+
+    DDL --> DPM["components/DDLPreviewModal.tsx"]
+    DDL --> GEN["generators.ts"]
+    DDL --> TM["typeMappings.ts"]
 ```
+
+> El parser DBML vive en `src/utils/dbmlParser.ts` (no en `features/table-editor/`). Acepta tanto `Table name { … }` como `Table schema.name { … }`.
 
 ### Característica de Diagrama — Árbol de Componentes Interno
 
@@ -128,6 +136,18 @@ leftTab === 'code'   → DBMLEditorPanel
 - Popover con posición fija (evita recorte por ancestros con `overflow: hidden`)
 - Posicionamiento dinámico calculado desde `getBoundingClientRect()` en el botón disparador
 - Lista de opciones de motor con íconos dentro de un listener DOM adjunto por `useEffect` para cierre al hacer clic afuera
+
+### Generación DDL — Característica `ddl/`
+
+La característica `src/features/ddl/` está separada del editor para mantener una frontera limpia entre el modelo en memoria y la salida SQL.
+
+- **`engines/engines.ts`** — declara cada `EngineDefinition` con `defaultSchema`, `partitionStrategies`, `supportsClustering` y un `partitionHint`. La UI filtra opciones de partition usando este metadato.
+- **`ddl/typeMappings.ts`** — matriz `TYPE_MAP` de tipo canónico → tipo dialect-specific (PostgreSQL / Oracle / Databricks). También expone `quoteIdent()` (comillas dobles vs backticks) y `qualifyTable()` (`schema.name` con quoting correcto).
+- **`ddl/generators.ts`** — punto de entrada `generateTableDDL()` y `generateTablesDDL()`. El primero produce DDL para una tabla aislada con sus FKs salientes; el segundo agrupa CREATE SCHEMA al inicio, CREATE TABLE en el medio, y ALTER TABLE de FKs al final. Ambos respetan los toggles `emitSchemas` / `emitForeignKeys` / `emitComments`.
+- **`ddl/components/DDLPreviewModal.tsx`** — diálogo unificado que muestra el SQL generado, ofrece toggles para las opciones, copia al portapapeles y descarga como `.sql`. Es invocado desde:
+  - el botón _Export DDL_ del toolbar del editor (scope = modelo)
+  - el icono `↓` de cada cabecera de grupo en la Vista de Lista (scope = dominio / schema)
+  - el icono `↓` de cada tarjeta en la Vista de Lista (scope = tabla)
 
 ### Página del Lienzo Global
 

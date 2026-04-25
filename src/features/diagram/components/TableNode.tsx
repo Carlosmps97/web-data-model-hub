@@ -57,7 +57,25 @@ function TableNodeComponent({ data }: NodeProps) {
         className="table-node-header"
         style={{ background: headerColor }}
       >
-        <span className="table-node-title">{table.name}</span>
+        <span className="table-node-title">
+          {table.schema && (
+            <span className="table-node-schema">{table.schema}.</span>
+          )}
+          {table.name}
+        </span>
+        {table.partition && table.partition.strategy !== 'NONE' && table.partition.columns.length > 0 && (
+          <span
+            className="table-node-partition-badge"
+            title={`Partitioned by ${table.partition.strategy} (${table.partition.columns.join(', ')})`}
+          >
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="9" x2="21" y2="9" />
+              <line x1="3" y1="15" x2="21" y2="15" />
+              <line x1="9" y1="3" x2="9" y2="21" />
+              <line x1="15" y1="3" x2="15" y2="21" />
+            </svg>
+          </span>
+        )}
         <span className="table-node-badge">{table.columns.length}</span>
         <button
           className="table-node-gear-btn nodrag"
@@ -85,12 +103,15 @@ function TableNodeComponent({ data }: NodeProps) {
       {/* Columns */}
       <div className="table-node-columns">
         {table.columns.map((col, idx) => {
+          const isPartitionCol =
+            !!col.isPartitionKey ||
+            !!table.partition?.columns?.includes(col.name);
           let iconLabel = '';
           let iconClass = '';
           if (col.isPrimaryKey) { iconLabel = 'PK'; iconClass = 'pk'; }
           else if (col.isForeignKey) { iconLabel = 'FK'; iconClass = 'fk'; }
           else if (col.isSurrogateKey) { iconLabel = 'SK'; iconClass = 'sk'; }
-          else if (col.isPartitionKey) { iconLabel = 'PT'; iconClass = 'pk'; }
+          else if (isPartitionCol) { iconLabel = 'PT'; iconClass = 'pk'; }
 
           const isActiveRelation = activeRelCols.includes(col.name);
 

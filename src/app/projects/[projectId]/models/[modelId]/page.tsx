@@ -11,6 +11,7 @@ import DBMLEditorPanel from '@/features/table-editor/components/DBMLEditorPanel'
 import TablesListView from '@/features/table-editor/components/TablesListView';
 import ChatPanel from '@/features/chat-agent/components/ChatPanel';
 import EngineSelect from '@/features/engines/components/EngineSelect';
+import DDLPreviewModal, { type DDLScope } from '@/features/ddl/components/DDLPreviewModal';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
 import type { TableModel, Relationship, DatabaseEngine } from '@/types/model';
@@ -57,6 +58,7 @@ export default function ModelEditorPage({ params }: PageProps) {
   const [showTableForm, setShowTableForm] = useState(false);
   const [editingTable, setEditingTable] = useState<TableModel | null>(null);
   const [showExcelImport, setShowExcelImport] = useState(false);
+  const [ddlScope, setDdlScope] = useState<DDLScope | null>(null);
 
   // ── Load project + model ──
   useEffect(() => {
@@ -207,51 +209,77 @@ export default function ModelEditorPage({ params }: PageProps) {
 
   return (
     <AppLayout>
-      {/* Editor Header (document-level actions only) */}
-      <header className="editor-header">
-        <div className="editor-header-breadcrumb">
+      {/* ──────────────────────────────────────────────────────────────
+          Editor Header — two well-spaced rows:
+            Row 1 (identity):  back · clickable breadcrumb · saved · engine
+            Row 2 (toolbar):   view toggle · primary actions · AI agent
+          ────────────────────────────────────────────────────────────── */}
+      <header className="ed-header">
+        {/* Row 1: identity & status */}
+        <div className="ed-header-row ed-header-identity">
           <button
-            className="editor-back-btn"
+            className="ed-back"
             onClick={() => router.push(`/projects/${projectId}`)}
             title="Back to models"
             type="button"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6" />
             </svg>
           </button>
-          <div className="editor-header-crumbs">
-            <span className="editor-crumb-muted">{currentProject?.name ?? 'Project'}</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="editor-crumb-sep">
-              <polyline points="9 18 15 12 9 6" />
-            </svg>
-            <span className="editor-crumb-current">{currentModel?.name ?? 'Model'}</span>
-            <span className={`editor-save-badge ${saving ? 'saving' : 'saved'}`}>
-              {saving ? 'Saving…' : 'Saved'}
-            </span>
-          </div>
 
-          <div className="editor-header-engines">
+          <nav className="ed-breadcrumb" aria-label="Breadcrumb">
+            <button
+              type="button"
+              className="ed-crumb ed-crumb-link"
+              onClick={() => router.push('/')}
+              title="All projects"
+            >
+              Projects
+            </button>
+            <ChevronCrumb />
+            <button
+              type="button"
+              className="ed-crumb ed-crumb-link"
+              onClick={() => router.push(`/projects/${projectId}`)}
+              title={`Open ${currentProject?.name ?? 'project'}`}
+            >
+              {currentProject?.name ?? 'Project'}
+            </button>
+            <ChevronCrumb />
+            <span className="ed-crumb ed-crumb-current" title={currentModel?.name}>
+              {currentModel?.name ?? 'Model'}
+            </span>
+          </nav>
+
+          <span className={`ed-save-pill ${saving ? 'saving' : 'saved'}`} role="status">
+            <span className="ed-save-dot" />
+            {saving ? 'Saving…' : 'Saved'}
+          </span>
+
+          <div className="ed-spacer" />
+
+          <div className="ed-engine-wrap">
+            <span className="ed-engine-label">Engine</span>
             <EngineSelect
               value={currentModel?.engine ?? null}
               onChange={handleUpdateEngine}
-              size="sm"
+              size="md"
             />
           </div>
         </div>
 
-        <div className="editor-header-actions">
-          {/* View toggle: List view (table catalog) vs Canvas (ER diagram) */}
-          <div className="view-toggle" role="tablist" aria-label="View mode">
+        {/* Row 2: view + actions toolbar */}
+        <div className="ed-header-row ed-header-toolbar">
+          <div className="ed-segmented" role="tablist" aria-label="View mode">
             <button
               type="button"
               role="tab"
               aria-selected={mainView === 'list'}
-              className={`view-toggle-btn ${mainView === 'list' ? 'active' : ''}`}
+              className={`ed-segmented-btn ${mainView === 'list' ? 'active' : ''}`}
               onClick={() => setMainView('list')}
-              title="Tables list"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="8" y1="6" x2="21" y2="6" />
                 <line x1="8" y1="12" x2="21" y2="12" />
                 <line x1="8" y1="18" x2="21" y2="18" />
@@ -259,50 +287,61 @@ export default function ModelEditorPage({ params }: PageProps) {
                 <circle cx="3" cy="12" r="1" />
                 <circle cx="3" cy="18" r="1" />
               </svg>
-              List
+              <span>List</span>
             </button>
             <button
               type="button"
               role="tab"
               aria-selected={mainView === 'canvas'}
-              className={`view-toggle-btn ${mainView === 'canvas' ? 'active' : ''}`}
+              className={`ed-segmented-btn ${mainView === 'canvas' ? 'active' : ''}`}
               onClick={() => setMainView('canvas')}
-              title="ER diagram canvas"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <rect x="3" y="3" width="7" height="7" rx="1" />
                 <rect x="14" y="3" width="7" height="7" rx="1" />
                 <rect x="3" y="14" width="7" height="7" rx="1" />
                 <rect x="14" y="14" width="7" height="7" rx="1" />
               </svg>
-              Canvas
+              <span>Canvas</span>
             </button>
           </div>
 
-          <div className="editor-header-divider" />
-
-          <div className="editor-toolbar-group">
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => setShowExcelImport(true)}
-              title="Import from Excel"
-              type="button"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              Import Excel
-            </button>
-          </div>
-
-          <div className="editor-header-divider" />
+          <div className="ed-toolbar-spacer" />
 
           <button
-            className={`btn btn-sm editor-ai-toggle ${chatPanelOpen ? 'active' : ''}`}
+            className="ed-action-btn"
+            onClick={() => setShowExcelImport(true)}
+            type="button"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Import Excel
+          </button>
+
+          <button
+            className="ed-action-btn ed-action-primary"
+            onClick={() => setDdlScope({ kind: 'all' })}
+            type="button"
+            disabled={tables.length === 0}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export DDL
+          </button>
+
+          <div className="ed-toolbar-divider" />
+
+          <button
+            className={`ed-action-btn ed-action-ai ${chatPanelOpen ? 'active' : ''}`}
             onClick={() => setChatPanelOpen(!chatPanelOpen)}
             type="button"
+            aria-pressed={chatPanelOpen}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2L14.39 8.25 21 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.61-1.02L12 2z" />
@@ -321,6 +360,9 @@ export default function ModelEditorPage({ params }: PageProps) {
               onAddTable={handleNewTable}
               onEditTable={handleEditTable}
               onDeleteTable={handleDeleteTable}
+              onDownloadTableDDL={(t) => setDdlScope({ kind: 'table', table: t })}
+              onDownloadDomainDDL={(d) => setDdlScope({ kind: 'domain', domain: d })}
+              onDownloadModelDDL={() => setDdlScope({ kind: 'all' })}
             />
             {chatPanelOpen && (
               <ChatPanel isOpen={chatPanelOpen} onClose={() => setChatPanelOpen(false)} />
@@ -449,6 +491,7 @@ export default function ModelEditorPage({ params }: PageProps) {
             <TableForm
               table={editingTable}
               existingTables={tables}
+              engine={currentModel?.engine ?? null}
               onSave={handleAddTable}
               onCancel={() => { setShowTableForm(false); setEditingTable(null); }}
             />
@@ -462,6 +505,36 @@ export default function ModelEditorPage({ params }: PageProps) {
         onClose={() => setShowExcelImport(false)}
         onImport={handleImportExcel}
       />
+
+      {/* DDL Preview / Download Modal */}
+      <DDLPreviewModal
+        open={ddlScope !== null}
+        onClose={() => setDdlScope(null)}
+        tables={tables}
+        relationships={relationships}
+        defaultEngine={currentModel?.engine ?? null}
+        scope={ddlScope ?? { kind: 'all' }}
+      />
     </AppLayout>
+  );
+}
+
+// Visual separator used between breadcrumb segments.
+function ChevronCrumb() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="ed-crumb-sep"
+      aria-hidden="true"
+    >
+      <polyline points="9 18 15 12 9 6" />
+    </svg>
   );
 }
