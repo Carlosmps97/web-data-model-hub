@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useEffect, useState, use } from 'react';
+import React, { useEffect, useRef, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { v4 as uuidv4 } from 'uuid';
 import AppLayout from '@/components/layout/AppLayout';
 import TableForm from '@/features/table-editor/components/TableForm';
+import DomainManager from '@/features/domains/components/DomainManager';
+import ViewForm from '@/features/views/components/ViewForm';
 import ExcelImportModal from '@/features/excel-import/components/ExcelImportModal';
 import DBMLEditorPanel from '@/features/table-editor/components/DBMLEditorPanel';
 import TablesListView from '@/features/table-editor/components/TablesListView';
@@ -14,6 +16,8 @@ import EngineSelect from '@/features/engines/components/EngineSelect';
 import DDLPreviewModal, { type DDLScope } from '@/features/ddl/components/DDLPreviewModal';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
+import { modelingResponseToCanvas, fromAgentEngine } from '@/lib/agent/mapping';
+import type { ModelingResponse } from '@/lib/agent/types';
 import type { TableModel, Relationship, DatabaseEngine } from '@/types/model';
 
 const DiagramCanvas = dynamic(
@@ -39,12 +43,18 @@ export default function ModelEditorPage({ params }: PageProps) {
     setCurrentModel,
     tables,
     relationships,
+    views,
+    domainCatalog,
     addTable,
     updateTable,
     removeTable,
     setTables,
     addRelationship,
+    removeRelationship,
     setRelationships,
+    addView,
+    updateView,
+    removeView,
     loadModel,
     saveModel,
     saving,
@@ -53,6 +63,14 @@ export default function ModelEditorPage({ params }: PageProps) {
   const { selectedTableId, setSelectedTable, chatPanelOpen, setChatPanelOpen } = useUIStore();
 
   const [loaded, setLoaded] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showDomainManager, setShowDomainManager] = useState(false);
+  const [showViewForm, setShowViewForm] = useState(false);
+  const [editingView, setEditingView] = useState<import('@/types/model').ViewModel | null>(null);
+  // Ref para ignorar el primer disparo del efecto dirty (carga inicial).
+  // React 18 batchea loadModel (Zustand) + setLoaded(true) en un solo render,
+  // por lo que el efecto ve loaded=true + tablas nuevas simultáneamente.
+  const skipDirtyRef = useRef(true);
   const [leftTab, setLeftTab] = useState<LeftTab>('visual');
   const [mainView, setMainView] = useState<MainView>('list');
   const [showTableForm, setShowTableForm] = useState(false);
@@ -82,15 +100,20 @@ export default function ModelEditorPage({ params }: PageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, modelId]);
 
-  // ── Auto-save on changes (debounced) ──
+  // ── Marcar dirty cuando el usuario hace cambios reales ──
+  // Salta el primer disparo (carga inicial) para evitar el falso dirty
+  // causado por React 18 batching de loadModel + setLoaded en un render.
   useEffect(() => {
-    if (!currentModel || !loaded) return;
-    const timer = setTimeout(() => {
-      saveModel();
-    }, 2000);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!loaded) return;
+    if (skipDirtyRef.current) { skipDirtyRef.current = false; return; }
+    setIsDirty(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tables, relationships]);
+
+  // ── Marcar como guardado cuando el save completa ──
+  useEffect(() => {
+    if (!saving) setIsDirty(false);
+  }, [saving]);
 
   // ── Clear selected table when switching models ──
   useEffect(() => {
@@ -192,6 +215,43 @@ export default function ModelEditorPage({ params }: PageProps) {
     }
   };
 
+  // ── View handlers ──
+  const handleSaveView = (view: import('@/types/model').ViewModel) => {
+    if (editingView) {
+      updateView(view.id, view);
+    } else {
+      addView(view);
+    }
+    setShowViewForm(false);
+    setEditingView(null);
+  };
+
+  const handleEditView = (id: string) => {
+    const v = views.find((x) => x.id === id);
+    if (v) { setEditingView(v); setShowViewForm(true); }
+  };
+
+  const handleDeleteView = (id: string) => {
+    removeView(id);
+    setShowViewForm(false);
+    setEditingView(null);
+  };
+
+  // Aplica un modelo generado por el agente al canvas. Por consigna del
+  // usuario, el primer release REEMPLAZA tablas y relaciones (no hace
+  // merge incremental). Si el engine devuelto por el backend difiere del
+  // configurado en el modelo, lo persistimos también.
+  const handleApplyAgentModel = (response: ModelingResponse) => {
+    const { tables: newTables, relationships: newRels } = modelingResponseToCanvas(response);
+    setTables(newTables);
+    setRelationships(newRels);
+    const responseEngine = fromAgentEngine(response.engine);
+    if (responseEngine !== currentModel?.engine) {
+      handleUpdateEngine(responseEngine);
+    }
+  };
+
+
 
   // ── Loading state ──
   if (!loaded) {
@@ -252,11 +312,6 @@ export default function ModelEditorPage({ params }: PageProps) {
             </span>
           </nav>
 
-          <span className={`ed-save-pill ${saving ? 'saving' : 'saved'}`} role="status">
-            <span className="ed-save-dot" />
-            {saving ? 'Saving…' : 'Saved'}
-          </span>
-
           <div className="ed-spacer" />
 
           <div className="ed-engine-wrap">
@@ -310,6 +365,45 @@ export default function ModelEditorPage({ params }: PageProps) {
 
           <button
             className="ed-action-btn"
+            onClick={() => setShowDomainManager(true)}
+            type="button"
+            title="Gestionar dominios y subdominios del modelo"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3"/>
+              <circle cx="12" cy="4" r="2"/>
+              <circle cx="20" cy="16" r="2"/>
+              <circle cx="4" cy="16" r="2"/>
+              <line x1="12" y1="6" x2="12" y2="9"/>
+              <line x1="18.5" y1="15" x2="14" y2="13"/>
+              <line x1="5.5" y1="15" x2="10" y2="13"/>
+            </svg>
+            Dominios
+            {domainCatalog.length > 0 && (
+              <span className="badge badge-primary" style={{ fontSize: '0.6rem', padding: '1px 5px' }}>{domainCatalog.length}</span>
+            )}
+          </button>
+
+          <button
+            className="ed-action-btn"
+            onClick={() => { setEditingView(null); setShowViewForm(true); }}
+            type="button"
+            title="Crear una vista SQL derivada de una tabla física"
+            disabled={tables.length === 0}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <ellipse cx="12" cy="12" rx="9" ry="3"/>
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+            </svg>
+            Nueva Vista
+            {views.length > 0 && (
+              <span className="badge badge-neutral" style={{ fontSize: '0.6rem', padding: '1px 5px' }}>{views.length}</span>
+            )}
+          </button>
+
+          <button
+            className="ed-action-btn"
             onClick={() => setShowExcelImport(true)}
             type="button"
           >
@@ -319,6 +413,39 @@ export default function ModelEditorPage({ params }: PageProps) {
               <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
             Import Excel
+          </button>
+
+          <button
+            className={`ed-action-btn ed-save-btn ${isDirty ? 'dirty' : saving ? 'saving' : 'saved'}`}
+            onClick={() => saveModel()}
+            type="button"
+            disabled={saving || tables.length === 0}
+            title={isDirty ? 'Hay cambios sin guardar' : 'Todo guardado'}
+          >
+            {saving ? (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ animation: 'spin 1s linear infinite' }}>
+                  <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                </svg>
+                Guardando…
+              </>
+            ) : isDirty ? (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+                  <polyline points="17 21 17 13 7 13 7 21"/>
+                  <polyline points="7 3 7 8 15 8"/>
+                </svg>
+                Guardar
+              </>
+            ) : (
+              <>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+                Guardado
+              </>
+            )}
           </button>
 
           <button
@@ -343,9 +470,8 @@ export default function ModelEditorPage({ params }: PageProps) {
             type="button"
             aria-pressed={chatPanelOpen}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2L14.39 8.25 21 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.61-1.02L12 2z" />
-            </svg>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo-dog.png" alt="" width="18" height="18" style={{ objectFit: 'contain', flexShrink: 0 }} />
             AI Agent
           </button>
         </div>
@@ -365,7 +491,13 @@ export default function ModelEditorPage({ params }: PageProps) {
               onDownloadModelDDL={() => setDdlScope({ kind: 'all' })}
             />
             {chatPanelOpen && (
-              <ChatPanel isOpen={chatPanelOpen} onClose={() => setChatPanelOpen(false)} />
+              <ChatPanel
+                isOpen={chatPanelOpen}
+                onClose={() => setChatPanelOpen(false)}
+                modelId={modelId}
+                engine={currentModel?.engine ?? null}
+                onApplyModel={handleApplyAgentModel}
+              />
             )}
           </>
         ) : (
@@ -462,14 +594,24 @@ export default function ModelEditorPage({ params }: PageProps) {
         <DiagramCanvas
           tables={tables}
           relationships={relationships}
+          views={views}
           selectedTableId={selectedTableId}
           onSelectTable={setSelectedTable}
           onEditTable={handleEditTable}
+          onEditView={handleEditView}
+          onAddRelationship={addRelationship}
+          onRemoveRelationship={removeRelationship}
         />
 
         {/* AI assistant side panel (only opens when explicitly toggled) */}
         {chatPanelOpen && (
-          <ChatPanel isOpen={chatPanelOpen} onClose={() => setChatPanelOpen(false)} />
+          <ChatPanel
+            isOpen={chatPanelOpen}
+            onClose={() => setChatPanelOpen(false)}
+            modelId={modelId}
+            engine={currentModel?.engine ?? null}
+            onApplyModel={handleApplyAgentModel}
+          />
         )}
         </>
         )}
@@ -492,6 +634,7 @@ export default function ModelEditorPage({ params }: PageProps) {
               table={editingTable}
               existingTables={tables}
               engine={currentModel?.engine ?? null}
+              domainCatalog={domainCatalog}
               onSave={handleAddTable}
               onCancel={() => { setShowTableForm(false); setEditingTable(null); }}
             />
@@ -505,6 +648,39 @@ export default function ModelEditorPage({ params }: PageProps) {
         onClose={() => setShowExcelImport(false)}
         onImport={handleImportExcel}
       />
+
+      {/* View Form Modal */}
+      {showViewForm && (
+        <div className="modal-backdrop" onClick={() => { setShowViewForm(false); setEditingView(null); }}>
+          <div className="modal-content modal-large animate-scaleIn" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3>{editingView ? 'Editar Vista' : 'Nueva Vista SQL'}</h3>
+                <p style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', marginTop: 2 }}>
+                  Vistas derivadas de tablas físicas — con alias, expresiones SQL y filtros WHERE
+                </p>
+              </div>
+              <button className="btn btn-ghost btn-icon" onClick={() => { setShowViewForm(false); setEditingView(null); }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+              </button>
+            </div>
+            <ViewForm
+              view={editingView}
+              tables={tables}
+              onSave={handleSaveView}
+              onCancel={() => { setShowViewForm(false); setEditingView(null); }}
+              onDelete={editingView ? handleDeleteView : undefined}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Domain Manager Modal */}
+      {showDomainManager && (
+        <DomainManager onClose={() => setShowDomainManager(false)} />
+      )}
 
       {/* DDL Preview / Download Modal */}
       <DDLPreviewModal

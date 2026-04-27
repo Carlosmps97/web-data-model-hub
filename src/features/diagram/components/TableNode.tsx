@@ -14,6 +14,8 @@ interface TableNodeData {
   selected?: boolean;
   activeRelationColumns?: string[];
   onEditTable?: (id: string) => void;
+  /** Controls whether to display logical (business) or physical (SQL) names. */
+  viewMode?: 'logical' | 'physical';
   [key: string]: unknown;
 }
 
@@ -23,6 +25,8 @@ function TableNodeComponent({ data }: NodeProps) {
   const isSelected = nodeData?.selected || false;
   const activeRelCols = nodeData?.activeRelationColumns ?? [];
   const onEditTable = nodeData?.onEditTable as ((id: string) => void) | undefined;
+  const viewMode = (nodeData?.viewMode as 'logical' | 'physical' | undefined) ?? 'physical';
+  const isLogical = viewMode === 'logical';
 
   const [hoveredCol, setHoveredCol] = useState<number | null>(null);
   const [gearMenuOpen, setGearMenuOpen] = useState(false);
@@ -51,17 +55,25 @@ function TableNodeComponent({ data }: NodeProps) {
   if (!table) return null;
 
   return (
-    <div className={`table-node ${isSelected ? 'selected' : ''}`}>
+    <div className={`table-node ${isSelected ? 'selected' : ''} ${isLogical ? 'table-node--logical' : ''}`}>
       {/* Header */}
       <div
         className="table-node-header"
-        style={{ background: headerColor }}
+        style={{ background: isLogical ? 'var(--color-indigo-primary)' : headerColor }}
       >
         <span className="table-node-title">
-          {table.schema && (
-            <span className="table-node-schema">{table.schema}.</span>
+          {isLogical ? (
+            // Vista lógica: muestra nombre de entidad (lógico) sin schema
+            <>{table.logicalName || table.name}</>
+          ) : (
+            // Vista física: muestra schema.nombre
+            <>
+              {table.schema && (
+                <span className="table-node-schema">{table.schema}.</span>
+              )}
+              {table.name}
+            </>
           )}
-          {table.name}
         </span>
         {table.partition && table.partition.strategy !== 'NONE' && table.partition.columns.length > 0 && (
           <span
@@ -139,8 +151,10 @@ function TableNodeComponent({ data }: NodeProps) {
                 )}
               </div>
 
-              {/* Column name */}
-              <span className="table-node-col-name">{col.name}</span>
+              {/* Column name — lógico o físico según viewMode */}
+              <span className="table-node-col-name">
+                {isLogical && col.logicalName ? col.logicalName : col.name}
+              </span>
 
               {/* Nullable indicator */}
               {col.isNullable !== false && (
@@ -165,7 +179,8 @@ function TableNodeComponent({ data }: NodeProps) {
               {/* Tooltip — shows on hover for every column */}
               {hoveredCol === idx && (
                 <div className="table-node-column-tooltip">
-                  <strong>{col.name} {col.dataType}</strong>
+                  <strong>{col.logicalName ? `${col.logicalName} / ` : ''}{col.name}</strong>
+                  <span style={{ color: '#9DBEBB', fontSize: '10px' }}>{col.dataType}</span>
                   {col.functionalDefinition && (
                     <span>{col.functionalDefinition}</span>
                   )}
@@ -181,12 +196,19 @@ function TableNodeComponent({ data }: NodeProps) {
         })}
       </div>
 
-      {/* Footer description */}
-      {table.functionalDefinition && (
+      {/* Footer: en lógico muestra dominio + definición, en físico solo definición */}
+      {(table.functionalDefinition || (isLogical && table.domain)) && (
         <div className="table-node-footer">
-          {table.functionalDefinition.length > 45
-            ? table.functionalDefinition.substring(0, 45) + '…'
-            : table.functionalDefinition}
+          {isLogical && table.domain && (
+            <span className="table-node-domain-badge">{table.domain}{table.subdomain ? ` › ${table.subdomain}` : ''}</span>
+          )}
+          {table.functionalDefinition && (
+            <span>
+              {table.functionalDefinition.length > 45
+                ? table.functionalDefinition.substring(0, 45) + '…'
+                : table.functionalDefinition}
+            </span>
+          )}
         </div>
       )}
     </div>

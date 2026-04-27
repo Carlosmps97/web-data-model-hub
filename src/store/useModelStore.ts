@@ -1,6 +1,6 @@
 // Zustand store for data model state management
 import { create } from 'zustand';
-import type { Project, DataModel, TableModel, Relationship } from '@/types/model';
+import type { Project, DataModel, TableModel, Relationship, ViewModel, DomainDefinition } from '@/types/model';
 
 interface ModelStore {
   // Projects
@@ -11,6 +11,8 @@ interface ModelStore {
   currentModel: DataModel | null;
   tables: TableModel[];
   relationships: Relationship[];
+  views: ViewModel[];
+  domainCatalog: DomainDefinition[];
 
   // Loading states
   loading: boolean;
@@ -41,6 +43,18 @@ interface ModelStore {
   addRelationship: (rel: Relationship) => void;
   removeRelationship: (id: string) => void;
   setRelationships: (relationships: Relationship[]) => void;
+
+  // View actions
+  addView: (view: ViewModel) => void;
+  updateView: (id: string, updates: Partial<ViewModel>) => void;
+  removeView: (id: string) => void;
+  setViews: (views: ViewModel[]) => void;
+
+  // Domain catalog actions
+  setDomainCatalog: (catalog: DomainDefinition[]) => void;
+  addDomain: (domain: DomainDefinition) => void;
+  updateDomain: (id: string, updates: Partial<DomainDefinition>) => void;
+  removeDomain: (id: string) => void;
 }
 
 export const useModelStore = create<ModelStore>((set, get) => ({
@@ -49,6 +63,8 @@ export const useModelStore = create<ModelStore>((set, get) => ({
   currentModel: null,
   tables: [],
   relationships: [],
+  views: [],
+  domainCatalog: [],
   loading: false,
   saving: false,
 
@@ -111,6 +127,8 @@ export const useModelStore = create<ModelStore>((set, get) => ({
     currentModel: model,
     tables: model?.tables || [],
     relationships: model?.relationships || [],
+    views: model?.views || [],
+    domainCatalog: model?.domainCatalog || [],
   }),
 
   loadModels: async (projectId) => {
@@ -135,6 +153,8 @@ export const useModelStore = create<ModelStore>((set, get) => ({
           currentModel: json.data,
           tables: json.data.tables || [],
           relationships: json.data.relationships || [],
+          views: json.data.views || [],
+          domainCatalog: json.data.domainCatalog || [],
         });
       }
     } catch (err) {
@@ -161,14 +181,14 @@ export const useModelStore = create<ModelStore>((set, get) => ({
   },
 
   saveModel: async () => {
-    const { currentModel, tables, relationships } = get();
+    const { currentModel, tables, relationships, views, domainCatalog } = get();
     if (!currentModel) return;
     set({ saving: true });
     try {
       await fetch(`/api/models/${currentModel.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tables, relationships }),
+        body: JSON.stringify({ tables, relationships, views, domainCatalog }),
       });
     } catch (err) {
       console.error('Failed to save model:', err);
@@ -213,4 +233,38 @@ export const useModelStore = create<ModelStore>((set, get) => ({
   })),
 
   setRelationships: (relationships) => set({ relationships }),
+
+  addView: (view) => set((state) => ({ views: [...state.views, view] })),
+
+  updateView: (id, updates) => set((state) => ({
+    views: state.views.map((v) => v.id === id ? { ...v, ...updates } : v),
+  })),
+
+  removeView: (id) => set((state) => ({
+    views: state.views.filter((v) => v.id !== id),
+  })),
+
+  setViews: (views) => set({ views }),
+
+  setDomainCatalog: (catalog) => set({ domainCatalog: catalog }),
+
+  addDomain: (domain) => set((state) => ({
+    domainCatalog: [...state.domainCatalog, domain],
+  })),
+
+  updateDomain: (id, updates) => set((state) => ({
+    domainCatalog: state.domainCatalog.map((d) =>
+      d.id === id ? { ...d, ...updates } : d
+    ),
+  })),
+
+  removeDomain: (id) => set((state) => ({
+    domainCatalog: state.domainCatalog.filter((d) => d.id !== id),
+    // Clear domainId/subdomainId references in tables that used this domain
+    tables: state.tables.map((t) =>
+      t.domainId === id
+        ? { ...t, domainId: undefined, subdomainId: undefined }
+        : t
+    ),
+  })),
 }));

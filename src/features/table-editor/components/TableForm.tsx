@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { TableModel, TableColumn, PartitionSpec, PartitionStrategy, DatabaseEngine } from '@/types/model';
+import type { TableModel, TableColumn, PartitionSpec, PartitionStrategy, DatabaseEngine, DomainDefinition } from '@/types/model';
 import { COLUMN_DATA_TYPES } from '@/types/model';
 import { getEngine } from '@/features/engines/engines';
 
@@ -11,6 +11,8 @@ interface TableFormProps {
   existingTables: TableModel[];
   /** Engine of the parent model, used to derive defaults and partition options. */
   engine?: DatabaseEngine | null;
+  /** Domain catalog from the model — enables catalog-backed domain/subdomain selectors. */
+  domainCatalog?: DomainDefinition[];
   onSave: (table: TableModel) => void;
   onCancel: () => void;
 }
@@ -31,14 +33,18 @@ const emptyPartition = (): PartitionSpec => ({
 
 type SectionKey = 'general' | 'columns' | 'partition' | 'metadata';
 
-const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, onSave, onCancel }) => {
+const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, domainCatalog = [], onSave, onCancel }) => {
   const engineDef = getEngine(engine);
   const defaultSchema = engineDef?.defaultSchema ?? 'public';
 
   const [schema, setSchema] = useState(table?.schema || defaultSchema);
   const [name, setName] = useState(table?.name || '');
+  const [logicalName, setLogicalName] = useState(table?.logicalName || '');
   const [functionalDef, setFunctionalDef] = useState(table?.functionalDefinition || '');
   const [applicationCode, setApplicationCode] = useState(table?.applicationCode || '');
+  // Domain: prefer catalog-based IDs, fall back to free text
+  const [domainId, setDomainId] = useState(table?.domainId || '');
+  const [subdomainId, setSubdomainId] = useState(table?.subdomainId || '');
   const [domain, setDomain] = useState(table?.domain || '');
   const [subdomain, setSubdomain] = useState(table?.subdomain || '');
   const [tags, setTags] = useState<string[]>(table?.tags ?? []);
@@ -115,16 +121,25 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, on
             clusteringColumns: sanitizedClusterCols.length > 0 ? sanitizedClusterCols : undefined,
           };
 
+    // Resolve domain/subdomain names from catalog if IDs are set
+    const resolvedDomain = domainCatalog.find((d) => d.id === domainId);
+    const resolvedSub = resolvedDomain?.subdomains.find((s) => s.id === subdomainId);
+    const finalDomain = resolvedDomain?.name || domain.trim() || undefined;
+    const finalSubdomain = resolvedSub?.name || subdomain.trim() || undefined;
+
     const result: TableModel = {
       id: table?.id || uuidv4(),
       schema: cleanSchema,
       name: name.trim(),
+      logicalName: logicalName.trim() || undefined,
       columns: validColumns,
       functionalDefinition: functionalDef.trim() || undefined,
       color: table?.color,
       applicationCode: applicationCode.trim() || undefined,
-      domain: domain.trim() || undefined,
-      subdomain: subdomain.trim() || undefined,
+      domain: finalDomain,
+      subdomain: finalSubdomain,
+      domainId: domainId || undefined,
+      subdomainId: subdomainId || undefined,
       tags: tags.length > 0 ? tags : undefined,
       partition: finalPartition,
     };
@@ -194,48 +209,95 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, on
         {/* ───────────── GENERAL SECTION ───────────── */}
         {section === 'general' && (
           <>
-            <div className="form-row">
-              <div className="form-group" style={{ flex: '0 0 35%' }}>
-                <label className="input-label">
-                  Schema <span className="tf-required">*</span>
-                </label>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder={defaultSchema}
-                  value={schema}
-                  onChange={(e) => { setSchema(e.target.value); setError(''); }}
-                  autoFocus
-                  spellCheck={false}
-                />
-                <small className="tf-help">{engineDef ? `${engineDef.label} default: ${engineDef.defaultSchema}` : 'Required identifier'}</small>
+            {/* Vista lógica vs física */}
+            <div className="tf-view-banner">
+              <div className="tf-view-col">
+                <span className="tf-view-label tf-view-label--logical">Vista Lógica</span>
+                <div className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="input-label">Nombre de Entidad</label>
+                  <input
+                    className="input"
+                    type="text"
+                    placeholder="e.g. Cliente, Orden de Compra"
+                    value={logicalName}
+                    onChange={(e) => setLogicalName(e.target.value)}
+                    spellCheck={false}
+                  />
+                  <small className="tf-help">Nombre de negocio visible en vista lógica del diagrama</small>
+                </div>
               </div>
-              <div className="form-group" style={{ flex: 1 }}>
-                <label className="input-label">
-                  Table Name <span className="tf-required">*</span>
-                </label>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder="e.g. orders, customers, products"
-                  value={name}
-                  onChange={(e) => { setName(e.target.value); setError(''); }}
-                  spellCheck={false}
-                />
-                <small className="tf-help">Will resolve to <code>{fqPreview}</code></small>
+              <div className="tf-view-divider">→</div>
+              <div className="tf-view-col">
+                <span className="tf-view-label tf-view-label--physical">Vista Física</span>
+                <div className="form-row" style={{ marginBottom: 0 }}>
+                  <div className="form-group" style={{ flex: '0 0 38%', marginBottom: 0 }}>
+                    <label className="input-label">Schema <span className="tf-required">*</span></label>
+                    <input
+                      className="input"
+                      type="text"
+                      placeholder={defaultSchema}
+                      value={schema}
+                      onChange={(e) => { setSchema(e.target.value); setError(''); }}
+                      autoFocus
+                      spellCheck={false}
+                    />
+                    <small className="tf-help">{engineDef ? `Default: ${engineDef.defaultSchema}` : 'Requerido'}</small>
+                  </div>
+                  <div className="form-group" style={{ flex: 1, marginBottom: 0 }}>
+                    <label className="input-label">Nombre de Tabla <span className="tf-required">*</span></label>
+                    <input
+                      className="input"
+                      type="text"
+                      placeholder="e.g. HD_CLIENTE"
+                      value={name}
+                      onChange={(e) => { setName(e.target.value); setError(''); }}
+                      spellCheck={false}
+                    />
+                    <small className="tf-help">→ <code>{fqPreview}</code></small>
+                  </div>
+                </div>
               </div>
             </div>
 
             <div className="form-group">
-              <label className="input-label">Functional Definition</label>
+              <label className="input-label">Definición Funcional</label>
               <textarea
                 className="input"
-                placeholder="Describe what this table represents in business terms…"
+                placeholder="Describí el propósito de esta tabla en términos de negocio…"
                 value={functionalDef}
                 onChange={(e) => setFunctionalDef(e.target.value)}
                 rows={3}
               />
             </div>
+
+            {/* Dominio / Subdominio con herencia del catálogo */}
+            <DomainSelector
+              domainCatalog={domainCatalog}
+              domainId={domainId}
+              subdomainId={subdomainId}
+              freeDomain={domain}
+              freeSubdomain={subdomain}
+              onDomainChange={(did, dName) => {
+                setDomainId(did);
+                setSubdomainId('');
+                setDomain(dName);
+                setSubdomain('');
+                // Hereda schema si el dominio tiene default y el schema es el del engine
+                const def = domainCatalog.find((d) => d.id === did);
+                if (def?.defaults?.schema && schema === defaultSchema) setSchema(def.defaults.schema);
+                if (def?.defaults?.tags) setTags((prev) => [...new Set([...prev, ...(def.defaults?.tags ?? [])])]);
+              }}
+              onSubdomainChange={(sid, sName) => {
+                setSubdomainId(sid);
+                setSubdomain(sName);
+                const dom = domainCatalog.find((d) => d.id === domainId);
+                const sub = dom?.subdomains.find((s) => s.id === sid);
+                if (sub?.defaults?.schema) setSchema(sub.defaults.schema);
+                if (sub?.defaults?.tags) setTags((prev) => [...new Set([...prev, ...(sub.defaults?.tags ?? [])])]);
+              }}
+              onFreeDomainChange={setDomain}
+              onFreeSubdomainChange={setSubdomain}
+            />
           </>
         )}
 
@@ -365,6 +427,15 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, on
                         </label>
                       )}
                       <label className="tf-field tf-field-grow">
+                        <span className="tf-field-label">Nombre lógico</span>
+                        <input
+                          className="tf-field-input"
+                          placeholder="e.g. Código de Cliente"
+                          value={col.logicalName ?? ''}
+                          onChange={(e) => updateColumn(idx, { logicalName: e.target.value || undefined })}
+                        />
+                      </label>
+                      <label className="tf-field tf-field-grow">
                         <span className="tf-field-label">Default</span>
                         <input
                           className="tf-field-input"
@@ -374,10 +445,10 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, on
                         />
                       </label>
                       <label className="tf-field tf-field-grow">
-                        <span className="tf-field-label">Description</span>
+                        <span className="tf-field-label">Definición</span>
                         <input
                           className="tf-field-input"
-                          placeholder="Shown as DDL comment"
+                          placeholder="Descripción funcional (DDL comment)"
                           value={col.functionalDefinition ?? ''}
                           onChange={(e) => updateColumn(idx, { functionalDefinition: e.target.value || undefined })}
                         />
@@ -649,3 +720,90 @@ function supportsScale(dataType: string): boolean {
 }
 
 export default TableForm;
+
+// ─────────────────────────────────────────────────────────────────────────
+// DomainSelector — selector de dominio/subdominio respaldado por catálogo
+// ─────────────────────────────────────────────────────────────────────────
+
+interface DomainSelectorProps {
+  domainCatalog: DomainDefinition[];
+  domainId: string;
+  subdomainId: string;
+  freeDomain: string;
+  freeSubdomain: string;
+  onDomainChange: (id: string, name: string) => void;
+  onSubdomainChange: (id: string, name: string) => void;
+  onFreeDomainChange: (v: string) => void;
+  onFreeSubdomainChange: (v: string) => void;
+}
+
+function DomainSelector({
+  domainCatalog, domainId, subdomainId, freeDomain, freeSubdomain,
+  onDomainChange, onSubdomainChange, onFreeDomainChange, onFreeSubdomainChange,
+}: DomainSelectorProps) {
+  const hasCatalog = domainCatalog.length > 0;
+  const selectedDomain = domainCatalog.find((d) => d.id === domainId);
+
+  return (
+    <div className="tf-domain-row">
+      <div className="form-group" style={{ flex: 1 }}>
+        <label className="input-label">
+          Dominio
+          {hasCatalog && selectedDomain && (
+            <span className="tf-domain-badge" style={{ background: selectedDomain.color ?? '#cbd5e1' }}>
+              {selectedDomain.code ?? selectedDomain.name}
+            </span>
+          )}
+        </label>
+        {hasCatalog ? (
+          <select
+            className="input"
+            value={domainId}
+            onChange={(e) => {
+              const d = domainCatalog.find((x) => x.id === e.target.value);
+              onDomainChange(e.target.value, d?.name ?? '');
+            }}
+          >
+            <option value="">— Sin dominio —</option>
+            {domainCatalog.map((d) => (
+              <option key={d.id} value={d.id}>{d.name}{d.code ? ` (${d.code})` : ''}</option>
+            ))}
+          </select>
+        ) : (
+          <input className="input" placeholder="e.g. Campañas CRM" value={freeDomain} onChange={(e) => onFreeDomainChange(e.target.value)} />
+        )}
+      </div>
+
+      <div className="form-group" style={{ flex: 1 }}>
+        <label className="input-label">Subdominio</label>
+        {hasCatalog && selectedDomain ? (
+          <select
+            className="input"
+            value={subdomainId}
+            onChange={(e) => {
+              const s = selectedDomain.subdomains.find((x) => x.id === e.target.value);
+              onSubdomainChange(e.target.value, s?.name ?? '');
+            }}
+            disabled={!selectedDomain}
+          >
+            <option value="">— Sin subdominio —</option>
+            {selectedDomain.subdomains.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}{s.code ? ` (${s.code})` : ''}</option>
+            ))}
+          </select>
+        ) : (
+          <input className="input" placeholder="e.g. Ofertas" value={freeSubdomain} onChange={(e) => onFreeSubdomainChange(e.target.value)} />
+        )}
+      </div>
+
+      {hasCatalog && (selectedDomain?.defaults?.schema || selectedDomain?.subdomains.find(s => s.id === subdomainId)?.defaults?.schema) && (
+        <div className="tf-domain-hint">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          Defaults aplicados automáticamente al seleccionar
+        </div>
+      )}
+    </div>
+  );
+}

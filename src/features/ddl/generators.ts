@@ -159,7 +159,10 @@ function createSchemaStmt(schema: string, engine: DatabaseEngine): string {
   if (engine === 'oracle') {
     return `-- Oracle: schemas are users; ensure user ${schema} exists`;
   }
-  // PostgreSQL and Databricks both accept CREATE SCHEMA IF NOT EXISTS
+  if (engine === 'cosmosdb') {
+    return `-- Cosmos DB: schema-less; '${schema}' is treated as the database/container namespace`;
+  }
+  // PostgreSQL, Databricks SQL, SQL Server and MySQL all accept the form.
   return `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schema, engine)};`;
 }
 
@@ -190,7 +193,28 @@ function emitTable(lines: string[], table: TableModel, ctx: GenContext) {
     }
   }
 
-  const createPrefix = engine === 'databricks' ? 'CREATE TABLE IF NOT EXISTS' : 'CREATE TABLE';
+  // Cosmos DB is schema-less. We emit a JSON-shaped descriptor so the export
+  // is still useful as documentation, but it isn't valid DDL.
+  if (engine === 'cosmosdb') {
+    lines.push(`-- Cosmos DB container descriptor (NOT executable DDL)`);
+    lines.push(`-- Container: ${fqName}`);
+    const colDescriptors = table.columns
+      .filter((c) => c.name.trim().length > 0)
+      .map((c) => {
+        const t = resolveDataType(c, engine);
+        const opt = c.isNullable === false || c.isPrimaryKey ? 'required' : 'optional';
+        return `--   ${c.name}: ${t} (${opt})`;
+      });
+    lines.push(...colDescriptors);
+    appendTableSuffix(lines, table, ctx);
+    if (ctx.options.emitComments) appendComments(lines, table, ctx);
+    return;
+  }
+
+  const createPrefix =
+    engine === 'databricks_sql' || engine === 'databricks'
+      ? 'CREATE TABLE IF NOT EXISTS'
+      : 'CREATE TABLE';
   lines.push(`${createPrefix} ${fqName} (`);
   lines.push(colLines.join(',\n'));
   lines.push(')');
@@ -234,9 +258,15 @@ function appendTableSuffix(lines: string[], table: TableModel, ctx: GenContext) 
   const partition = table.partition;
   const cluster = partition?.clusteringColumns ?? [];
 
-  // ── Databricks SQL ────────────────────────────────────────────────
+  // ── Cosmos DB ───────────────────────────────────────
+  // No CREATE TABLE statement was emitted; just leave the descriptor as-is.
+  if (ctx.engine === 'cosmosdb') {
+    return;
+  }
+
+  // ── Databricks SQL ─────────────────────────────────
   // USING DELTA + PARTITIONED BY (cols) + CLUSTER BY (Z-ORDER cols) + COMMENT
-  if (ctx.engine === 'databricks') {
+  if (ctx.engine === 'databricks_sql' || ctx.engine === 'databricks') {
     const tail: string[] = ['USING DELTA'];
     if (partition && partition.strategy !== 'NONE' && partition.columns.length > 0) {
       tail.push(`PARTITIONED BY (${joinCols(partition.columns, ctx)})`);
@@ -251,7 +281,35 @@ function appendTableSuffix(lines: string[], table: TableModel, ctx: GenContext) 
     return;
   }
 
-  // ── PostgreSQL / Oracle ───────────────────────────────────────────
+  // ── SQL Server ──────────────────────────────────────
+  // SQL Server needs a partition function + scheme, which is too verbose to
+  // generate inline. Emit a tail comment so the user knows what's missing.
+  if (ctx.engine === 'sqlserver') {
+    if (partition && partition.strategy !== 'NONE' && partition.columns.length > 0) {
+      lines[lines.length - 1] +=
+        `\n-- TODO: define PARTITION FUNCTION + PARTITION SCHEME on (${partition.columns.join(', ')})`;
+    }
+    lines[lines.length - 1] += ';';
+    return;
+  }
+
+  // ── MySQL ───────────────────────────────────────────
+  // PARTITION BY <STRATEGY>(col_expr)  with HASH carrying an optional bucket count.
+  if (ctx.engine === 'mysql') {
+    if (partition && partition.strategy !== 'NONE' && partition.columns.length > 0) {
+      const strat = partition.strategy === 'BUCKET' ? 'HASH' : partition.strategy;
+      const colsExpr = joinCols(partition.columns, ctx);
+      const buckets =
+        partition.strategy === 'HASH' && partition.buckets
+          ? `\nPARTITIONS ${partition.buckets}`
+          : '';
+      lines[lines.length - 1] += `\nPARTITION BY ${strat}(${colsExpr})${buckets}`;
+    }
+    lines[lines.length - 1] += ';';
+    return;
+  }
+
+  // ── PostgreSQL / Oracle (and any other SQL engine) ─────────────────
   // PARTITION BY <STRATEGY> (cols)
   if (
     partition &&
@@ -322,11 +380,23 @@ function emitForeignKeysFor(
 }
 
 function appendComments(lines: string[], table: TableModel, ctx: GenContext) {
-  // Databricks embeds COMMENT inside CREATE TABLE — skip the trailing block
-  if (ctx.engine === 'databricks') return;
+  // Databricks embeds COMMENT inside CREATE TABLE — skip the trailing block.
+  if (ctx.engine === 'databricks_sql' || ctx.engine === 'databricks') return;
+
+  // Cosmos DB has no COMMENT statement; the descriptor already documents the columns.
+  if (ctx.engine === 'cosmosdb') return;
 
   const schema = resolveSchema(table.schema, ctx.engine);
   const fqName = qualifyTable(schema, table.name, ctx.engine, ctx.supportsSchemas);
+
+  // SQL Server doesn't have COMMENT ON; it uses sp_addextendedproperty. Skip
+  // for now and emit an explanatory comment instead.
+  if (ctx.engine === 'sqlserver') {
+    if (table.functionalDefinition) {
+      lines.push(`-- ${truncateOneLine(table.functionalDefinition)}`);
+    }
+    return;
+  }
 
   if (table.functionalDefinition) {
     lines.push(

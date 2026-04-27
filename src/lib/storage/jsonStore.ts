@@ -5,7 +5,23 @@
 import fs from 'fs/promises';
 import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { PATHS } from './paths';
-import type { Project, DataModel } from '@/types/model';
+import type { Project, DataModel, DatabaseEngine } from '@/types/model';
+
+/**
+ * Normaliza un modelo cargado desde disco.
+ *
+ * Migra el alias legacy `databricks` (era de 3 engines) al nombre
+ * canónico que comparte el backend (`databricks_sql`). El resto de
+ * valores se deja intacto, incluido `oracle`, que sigue siendo válido
+ * como engine legacy de solo lectura: el editor lo respeta, el AI
+ * agent lo degrada a PostgreSQL con warning para un turno.
+ */
+function normalizeModel(model: DataModel): DataModel {
+  if (model.engine === 'databricks') {
+    return { ...model, engine: 'databricks_sql' as DatabaseEngine };
+  }
+  return model;
+}
 
 // Ensure data directories exist on first use
 function ensureDataDirs() {
@@ -74,7 +90,7 @@ export async function getModels(projectId?: string): Promise<DataModel[]> {
 
   for (const file of jsonFiles) {
     const raw = await fs.readFile(`${PATHS.modelsDir}/${file}`, 'utf-8');
-    const model = JSON.parse(raw) as DataModel;
+    const model = normalizeModel(JSON.parse(raw) as DataModel);
     if (!projectId || model.projectId === projectId) {
       models.push(model);
     }
@@ -88,7 +104,7 @@ export async function getModel(id: string): Promise<DataModel | null> {
   const filePath = PATHS.modelFile(id);
   try {
     const raw = await fs.readFile(filePath, 'utf-8');
-    return JSON.parse(raw) as DataModel;
+    return normalizeModel(JSON.parse(raw) as DataModel);
   } catch {
     return null;
   }

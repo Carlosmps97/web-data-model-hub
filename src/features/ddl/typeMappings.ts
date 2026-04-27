@@ -2,36 +2,40 @@
 // each engine prefers. The mapper is permissive: if the user has typed a
 // dialect-specific type already (e.g. "VARCHAR2(50)" for Oracle), we return it
 // untouched. Length / scale captured in TableColumn override the canonical name.
+//
+// Each row covers the five engines the AI agent backend supports plus the two
+// legacy aliases (`databricks`, `oracle`) so a saved model from before the
+// engine refresh still emits coherent DDL.
 
 import type { DatabaseEngine, TableColumn } from '@/types/model';
 
 /** Canonical → engine-specific mapping. */
 const TYPE_MAP: Record<string, Partial<Record<DatabaseEngine, string>>> = {
-  integer:   { postgresql: 'INTEGER',           oracle: 'NUMBER(10)',    databricks: 'INT' },
-  bigint:    { postgresql: 'BIGINT',            oracle: 'NUMBER(19)',    databricks: 'BIGINT' },
-  smallint:  { postgresql: 'SMALLINT',          oracle: 'NUMBER(5)',     databricks: 'SMALLINT' },
-  float:     { postgresql: 'REAL',              oracle: 'BINARY_FLOAT',  databricks: 'FLOAT' },
-  double:    { postgresql: 'DOUBLE PRECISION',  oracle: 'BINARY_DOUBLE', databricks: 'DOUBLE' },
-  decimal:   { postgresql: 'NUMERIC',           oracle: 'NUMBER',        databricks: 'DECIMAL' },
-  numeric:   { postgresql: 'NUMERIC',           oracle: 'NUMBER',        databricks: 'DECIMAL' },
-  varchar:   { postgresql: 'VARCHAR',           oracle: 'VARCHAR2',      databricks: 'STRING' },
-  char:      { postgresql: 'CHAR',              oracle: 'CHAR',          databricks: 'STRING' },
-  text:      { postgresql: 'TEXT',              oracle: 'CLOB',          databricks: 'STRING' },
-  nvarchar:  { postgresql: 'VARCHAR',           oracle: 'NVARCHAR2',     databricks: 'STRING' },
-  boolean:   { postgresql: 'BOOLEAN',           oracle: 'NUMBER(1)',     databricks: 'BOOLEAN' },
-  date:      { postgresql: 'DATE',              oracle: 'DATE',          databricks: 'DATE' },
-  datetime:  { postgresql: 'TIMESTAMP',         oracle: 'TIMESTAMP',     databricks: 'TIMESTAMP' },
-  timestamp: { postgresql: 'TIMESTAMP',         oracle: 'TIMESTAMP',     databricks: 'TIMESTAMP' },
-  time:      { postgresql: 'TIME',              oracle: 'TIMESTAMP',     databricks: 'STRING' },
-  binary:    { postgresql: 'BYTEA',             oracle: 'RAW',           databricks: 'BINARY' },
-  varbinary: { postgresql: 'BYTEA',             oracle: 'BLOB',          databricks: 'BINARY' },
-  blob:      { postgresql: 'BYTEA',             oracle: 'BLOB',          databricks: 'BINARY' },
-  json:      { postgresql: 'JSONB',             oracle: 'JSON',          databricks: 'STRING' },
-  xml:       { postgresql: 'XML',               oracle: 'XMLTYPE',       databricks: 'STRING' },
-  uuid:      { postgresql: 'UUID',              oracle: 'RAW(16)',       databricks: 'STRING' },
-  array:     { postgresql: 'JSONB',             oracle: 'JSON',          databricks: 'ARRAY<STRING>' },
-  map:       { postgresql: 'JSONB',             oracle: 'JSON',          databricks: 'MAP<STRING, STRING>' },
-  struct:    { postgresql: 'JSONB',             oracle: 'JSON',          databricks: 'STRUCT' },
+  integer:   { postgresql: 'INTEGER',           databricks_sql: 'INT',              sqlserver: 'INT',              mysql: 'INT',              cosmosdb: 'number',        oracle: 'NUMBER(10)',    databricks: 'INT' },
+  bigint:    { postgresql: 'BIGINT',            databricks_sql: 'BIGINT',           sqlserver: 'BIGINT',           mysql: 'BIGINT',           cosmosdb: 'number',        oracle: 'NUMBER(19)',    databricks: 'BIGINT' },
+  smallint:  { postgresql: 'SMALLINT',          databricks_sql: 'SMALLINT',         sqlserver: 'SMALLINT',         mysql: 'SMALLINT',         cosmosdb: 'number',        oracle: 'NUMBER(5)',     databricks: 'SMALLINT' },
+  float:     { postgresql: 'REAL',              databricks_sql: 'FLOAT',            sqlserver: 'REAL',             mysql: 'FLOAT',            cosmosdb: 'number',        oracle: 'BINARY_FLOAT',  databricks: 'FLOAT' },
+  double:    { postgresql: 'DOUBLE PRECISION',  databricks_sql: 'DOUBLE',           sqlserver: 'FLOAT',            mysql: 'DOUBLE',           cosmosdb: 'number',        oracle: 'BINARY_DOUBLE', databricks: 'DOUBLE' },
+  decimal:   { postgresql: 'NUMERIC',           databricks_sql: 'DECIMAL',          sqlserver: 'DECIMAL',          mysql: 'DECIMAL',          cosmosdb: 'number',        oracle: 'NUMBER',        databricks: 'DECIMAL' },
+  numeric:   { postgresql: 'NUMERIC',           databricks_sql: 'DECIMAL',          sqlserver: 'NUMERIC',          mysql: 'DECIMAL',          cosmosdb: 'number',        oracle: 'NUMBER',        databricks: 'DECIMAL' },
+  varchar:   { postgresql: 'VARCHAR',           databricks_sql: 'STRING',           sqlserver: 'NVARCHAR',         mysql: 'VARCHAR',          cosmosdb: 'string',        oracle: 'VARCHAR2',      databricks: 'STRING' },
+  char:      { postgresql: 'CHAR',              databricks_sql: 'STRING',           sqlserver: 'CHAR',             mysql: 'CHAR',             cosmosdb: 'string',        oracle: 'CHAR',          databricks: 'STRING' },
+  text:      { postgresql: 'TEXT',              databricks_sql: 'STRING',           sqlserver: 'NVARCHAR(MAX)',    mysql: 'TEXT',             cosmosdb: 'string',        oracle: 'CLOB',          databricks: 'STRING' },
+  nvarchar:  { postgresql: 'VARCHAR',           databricks_sql: 'STRING',           sqlserver: 'NVARCHAR',         mysql: 'VARCHAR',          cosmosdb: 'string',        oracle: 'NVARCHAR2',     databricks: 'STRING' },
+  boolean:   { postgresql: 'BOOLEAN',           databricks_sql: 'BOOLEAN',          sqlserver: 'BIT',              mysql: 'TINYINT(1)',       cosmosdb: 'boolean',       oracle: 'NUMBER(1)',     databricks: 'BOOLEAN' },
+  date:      { postgresql: 'DATE',              databricks_sql: 'DATE',             sqlserver: 'DATE',             mysql: 'DATE',             cosmosdb: 'string',        oracle: 'DATE',          databricks: 'DATE' },
+  datetime:  { postgresql: 'TIMESTAMP',         databricks_sql: 'TIMESTAMP',        sqlserver: 'DATETIME2',        mysql: 'DATETIME',         cosmosdb: 'string',        oracle: 'TIMESTAMP',     databricks: 'TIMESTAMP' },
+  timestamp: { postgresql: 'TIMESTAMP',         databricks_sql: 'TIMESTAMP',        sqlserver: 'DATETIME2',        mysql: 'TIMESTAMP',        cosmosdb: 'string',        oracle: 'TIMESTAMP',     databricks: 'TIMESTAMP' },
+  time:      { postgresql: 'TIME',              databricks_sql: 'STRING',           sqlserver: 'TIME',             mysql: 'TIME',             cosmosdb: 'string',        oracle: 'TIMESTAMP',     databricks: 'STRING' },
+  binary:    { postgresql: 'BYTEA',             databricks_sql: 'BINARY',           sqlserver: 'VARBINARY(MAX)',   mysql: 'BLOB',             cosmosdb: 'string',        oracle: 'RAW',           databricks: 'BINARY' },
+  varbinary: { postgresql: 'BYTEA',             databricks_sql: 'BINARY',           sqlserver: 'VARBINARY(MAX)',   mysql: 'BLOB',             cosmosdb: 'string',        oracle: 'BLOB',          databricks: 'BINARY' },
+  blob:      { postgresql: 'BYTEA',             databricks_sql: 'BINARY',           sqlserver: 'VARBINARY(MAX)',   mysql: 'BLOB',             cosmosdb: 'string',        oracle: 'BLOB',          databricks: 'BINARY' },
+  json:      { postgresql: 'JSONB',             databricks_sql: 'STRING',           sqlserver: 'NVARCHAR(MAX)',    mysql: 'JSON',             cosmosdb: 'object',        oracle: 'JSON',          databricks: 'STRING' },
+  xml:       { postgresql: 'XML',               databricks_sql: 'STRING',           sqlserver: 'XML',              mysql: 'TEXT',             cosmosdb: 'string',        oracle: 'XMLTYPE',       databricks: 'STRING' },
+  uuid:      { postgresql: 'UUID',              databricks_sql: 'STRING',           sqlserver: 'UNIQUEIDENTIFIER', mysql: 'CHAR(36)',         cosmosdb: 'string',        oracle: 'RAW(16)',       databricks: 'STRING' },
+  array:     { postgresql: 'JSONB',             databricks_sql: 'ARRAY<STRING>',    sqlserver: 'NVARCHAR(MAX)',    mysql: 'JSON',             cosmosdb: 'array',         oracle: 'JSON',          databricks: 'ARRAY<STRING>' },
+  map:       { postgresql: 'JSONB',             databricks_sql: 'MAP<STRING, STRING>', sqlserver: 'NVARCHAR(MAX)', mysql: 'JSON',             cosmosdb: 'object',        oracle: 'JSON',          databricks: 'MAP<STRING, STRING>' },
+  struct:    { postgresql: 'JSONB',             databricks_sql: 'STRUCT',           sqlserver: 'NVARCHAR(MAX)',    mysql: 'JSON',             cosmosdb: 'object',        oracle: 'JSON',          databricks: 'STRUCT' },
 };
 
 /**
@@ -77,12 +81,21 @@ export function resolveDataType(
  * Quote an identifier using engine-specific rules. We intentionally only quote
  * when the identifier contains characters that would require it. This keeps
  * generated DDL clean and idiomatic.
+ *
+ *  - SQL Server uses square brackets `[name]`.
+ *  - Databricks (and the legacy alias) and MySQL use backticks `` `name` ``.
+ *  - PostgreSQL, Oracle and Cosmos DB use double quotes `"name"`. Cosmos
+ *    isn't really SQL but the few places that emit a quoted identifier
+ *    (e.g. for documentation comments) match the JSON-friendly form.
  */
 export function quoteIdent(name: string, engine: DatabaseEngine): string {
   const safe = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name);
   if (safe) return name;
-  if (engine === 'databricks') return `\`${name.replace(/`/g, '``')}\``;
-  // PostgreSQL & Oracle use double quotes
+  if (engine === 'sqlserver') return `[${name.replace(/]/g, ']]')}]`;
+  if (engine === 'databricks_sql' || engine === 'databricks' || engine === 'mysql') {
+    return `\`${name.replace(/`/g, '``')}\``;
+  }
+  // PostgreSQL, Oracle, Cosmos DB → double quotes.
   return `"${name.replace(/"/g, '""')}"`;
 }
 

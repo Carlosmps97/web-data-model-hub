@@ -188,35 +188,31 @@ DELETE /api/models/:id
 
 ---
 
-### Chat (Shell — simulado)
+### Agente IA (proxy al `agent-modeler`)
 
-> **Estado actual:** devuelve respuestas simuladas. En el futuro, redirigirá a un backend de agente IA que retornará `TableModel[]` para poblar el lienzo automáticamente.
+Todas las rutas bajo `/api/agent/*` son **pass-through** directos al FastAPI del
+proyecto hermano `agent-modeler`. La URL del backend se resuelve server-side
+con `AGENT_BACKEND_URL` (por defecto `http://localhost:8000`) y **nunca** se
+expone al navegador. El browser habla siempre con el proxy de Next.
 
-```
-POST /api/chat
-Content-Type: application/json
+| Método | Ruta (Next)                                           | Ruta (FastAPI)                                            | Descripción                                                             |
+|--------|-------------------------------------------------------|-----------------------------------------------------------|-------------------------------------------------------------------------|
+| GET    | `/api/agent/health`                                   | `/api/health`                                             | Estado de la API y conexión con Azure AI Foundry.                       |
+| GET    | `/api/agent/engines`                                  | `/api/engines`                                            | Motores de BD soportados y engine default.                              |
+| POST   | `/api/agent/conversations`                            | `/api/conversations`                                      | Crea o reutiliza una conversación (idempotente). Body: `{ conversation_id, engine }`. |
+| DELETE | `/api/agent/conversations/{id}`                       | `/api/conversations/{id}`                                 | Libera la memoria de la conversación.                                   |
+| POST   | `/api/agent/conversations/{id}/guidelines`            | `/api/conversations/{id}/guidelines`                      | Sube PDF/DOCX/MD/JSON/XLSX/TXT con guidelines de modelado.              |
+| POST   | `/api/agent/conversations/{id}/model`                 | `/api/conversations/{id}/model`                           | Ejecuta un turno del pipeline. Body multipart con `context_text`, `excel_file`, `engine`. |
+| GET    | `/api/agent/conversations/{id}/model`                 | `/api/conversations/{id}/model`                           | Devuelve el último modelo generado sin reejecutar.                      |
 
-{
-  "message": "Create a user management schema",
-  "attachments": [
-    {
-      "name": "schema.xlsx",
-      "type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    }
-  ]
-}
-```
+El proxy reenvía status, body y headers relevantes verbatim. Si el backend no
+responde, devuelve `502` con body `{ detail, code: 'AGENT_BACKEND_UNREACHABLE' }`
+o `{ code: 'AGENT_BACKEND_TIMEOUT' }` según corresponda.
 
-Respuesta:
-```json
-{
-  "success": true,
-  "data": {
-    "message": "I've received your request...",
-    "timestamp": "2026-04-11T00:00:00.000Z"
-  }
-}
-```
+El frontend consume estas rutas a través de `src/lib/agent/client.ts`
+(tipado fuerte) y del hook `useAgentConversation` (en
+`src/features/chat-agent/hooks/`), que mantiene un `conversation_id` (UUID v4)
+estable por `modelId` mientras dure la sesión del browser.
 
 ---
 

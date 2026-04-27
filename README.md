@@ -28,7 +28,7 @@ Data Model Hub provides an interactive canvas where teams can design, visualize,
 - **Manual table editor** — full column CRUD with PK, FK, SK, Partition key toggles and FK references
 - **DBML code editor** — write table definitions using DBML syntax with live parse feedback
 - **Excel (.xlsx) import** — each sheet becomes a table; preview and edit before confirming
-- **AI Chat panel** — UI shell ready for agent backend integration
+- **AI Modeling Agent** — per-model conversational chat connected to the `agent-modeler` FastAPI backend (Microsoft Agent Framework + Azure AI Foundry). Supports multi-turn refinement, custom guidelines upload (PDF/DOCX/MD/XLSX/JSON/TXT), DDL generation, and QA reports. Every generated model can be applied to the canvas in one click.
 - **Project organization** — multiple projects, each with their own data model
 - **Auto-save** — 2-second debounce persistence of tables and relationships (positions are computed at runtime, not persisted)
 - **Light theme** — cream/teal color palette based on CSS custom properties
@@ -52,6 +52,7 @@ Data Model Hub provides an interactive canvas where teams can design, visualize,
 
 - Node.js 18+
 - npm
+- Python 3.11+ and [the `agent-modeler` sibling repo](../agent-modeler) running on `http://localhost:8000` if you want to use the AI chat. The web app works fine without it; the chat panel will surface a clear error until the backend is reachable.
 
 ### Installation
 
@@ -62,7 +63,21 @@ npm install
 cp .env.example .env   # or create .env manually
 ```
 
+Edit `.env` and set (at minimum) `AGENT_BACKEND_URL`. The default
+`http://localhost:8000` matches the default port of the `agent-modeler`
+FastAPI. This variable is **server-only**: the browser never sees the
+backend URL; it always talks to the `/api/agent/*` proxy of Next.
+
 ### Development
+
+In one terminal, run the FastAPI backend (optional, only needed for the AI chat):
+
+```bash
+cd ../agent-modeler
+python -m api.main   # → http://localhost:8000
+```
+
+In another, run the Next.js app:
 
 ```bash
 npm run dev
@@ -82,7 +97,9 @@ npm start
 web-data-model-hub/
 ├── src/
 │   ├── app/                        # Next.js App Router
-│   │   ├── api/                    # REST API routes (projects, models, chat)
+│   │   ├── api/                    # REST API routes
+│   │   │   ├── projects/, models/  # Local data (jsonStore)
+│   │   │   └── agent/              # Pass-through proxy to the FastAPI agent-modeler
 │   │   ├── projects/[projectId]/   # Diagram editor page
 │   │   ├── layout.tsx              # Root layout
 │   │   ├── page.tsx                # Dashboard (project list)
@@ -100,13 +117,15 @@ web-data-model-hub/
 │   │   │       └── layoutAlgorithms.ts    # Left-right, Snowflake, Compact layouts
 │   │   ├── table-editor/           # Manual form + DBML editor
 │   │   ├── excel-import/           # Excel upload, parse, preview
-│   │   ├── chat-agent/             # AI chat panel (shell)
+│   │   ├── chat-agent/             # AI chat panel + useAgentConversation hook
 │   │   └── projects/               # Project CRUD UI
 │   ├── lib/
+│   │   ├── agent/                  # Typed client + server proxy + mapping helpers
 │   │   └── storage/jsonStore.ts    # JSON file persistence service
 │   ├── store/
 │   │   ├── useModelStore.ts        # Tables, relationships, auto-save
-│   │   └── useUIStore.ts           # Selected table, panel state
+│   │   ├── useUIStore.ts           # Selected table, panel state
+│   │   └── useAgentStore.ts        # Chat sessions scoped by modelId (volatile)
 │   ├── types/model.ts              # Project, TableModel, TableColumn, Relationship
 │   └── utils/dbmlParser.ts         # DBML parse + generate
 ├── data/                           # Local JSON storage (gitignored)
@@ -147,6 +166,8 @@ Table orders {
 ```
 
 **Excel import** — click the upload button, drop a `.xlsx` file. Each sheet → one table (col A = names, col B = types, col C = definitions).
+
+**AI Agent** — open a model, click the **AI Agent** button to reveal the chat panel. Describe what you want to model in natural language and/or attach an Excel file; optionally upload organization-specific modeling guidelines so the agent respects them on every turn. Each response is rendered inline with its table list, relationship list, QA report and generated DDL. Click **Aplicar al canvas** to replace the current canvas tables and relationships with the generated model.
 
 ### Canvas Controls
 

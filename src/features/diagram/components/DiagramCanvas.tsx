@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import {
   ReactFlow,
   Background,
@@ -14,23 +15,27 @@ import {
   type Edge as RFEdge,
   type NodeTypes,
   type EdgeTypes,
+  type Connection,
   ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
 import TableNodeComponent from './TableNode';
+import ViewNodeComponent from './ViewNode';
 import AnimatedEREdge from './AnimatedEdge';
 import NamespaceNode from './NamespaceNode';
 import AutoArrangePopover, { type LayoutAlgorithm } from './AutoArrangePopover';
 import { layoutLeftRight, layoutSnowflake, layoutCompact } from '../utils/layoutAlgorithms';
-import type { TableModel, Relationship, DatabaseEngine } from '@/types/model';
+import type { TableModel, Relationship, ViewModel, DatabaseEngine } from '@/types/model';
 
 // ── Layout constants (must match TableNode) ──
 const NODE_WIDTH = 260;
+const VIEW_NODE_WIDTH = 280;
 
 // ── Register custom types once ──
 const nodeTypes: NodeTypes = {
   erTable: TableNodeComponent,
+  erView: ViewNodeComponent,
   namespace: NamespaceNode,
 };
 const edgeTypes: EdgeTypes = {
@@ -51,33 +56,49 @@ export interface NamespaceInfo {
   tintIndex?: number;
 }
 
+type CanvasTool = 'select' | 'connect';
+
+interface PendingConn {
+  sourceNodeId: string;
+  sourceColumn: string;
+  targetNodeId: string;
+  targetColumn: string;
+}
+
 interface DiagramCanvasProps {
   tables: TableModel[];
   relationships: Relationship[];
+  views?: ViewModel[];
   selectedTableId: string | null;
   onSelectTable: (id: string | null) => void;
   onEditTable?: (id: string) => void;
-  /**
-   * Optional namespace groups to render as background panels.
-   * When provided, tables without an explicit position will be placed inside their namespace.
-   */
+  onEditView?: (id: string) => void;
+  /** Called when user creates a new relationship by dragging column handles. */
+  onAddRelationship?: (rel: Relationship) => void;
+  /** Called when user selects an edge and presses Delete. */
+  onRemoveRelationship?: (id: string) => void;
   namespaces?: NamespaceInfo[];
-  /** Map of tableId -> pre-computed position (used by global canvas to place tables within namespaces). */
   tablePositions?: Record<string, { x: number; y: number }>;
 }
 
 function DiagramCanvasInner({
   tables,
   relationships,
+  views = [],
   selectedTableId,
   onSelectTable,
   onEditTable,
+  onEditView,
+  onAddRelationship,
+  onRemoveRelationship,
   namespaces,
   tablePositions,
 }: DiagramCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<CanvasTool>('select');
+  const [pendingConn, setPendingConn] = useState<PendingConn | null>(null);
 
   // Hover takes visual priority over click selection
   const activeTableId = hoveredTableId ?? selectedTableId;
@@ -192,9 +213,31 @@ function DiagramCanvasInner({
         }
       });
 
+      // 3. View nodes — placed below their source table
+      views.forEach((view, vIdx) => {
+        const srcTable = tables.find((t) => t.id === view.sourceTableId);
+        const existingView = existingMap.get(view.id);
+        const viewData = {
+          view,
+          sourceTableName: srcTable?.name ?? '',
+          selected: false,
+          onEditView,
+        };
+        const fallbackPos = srcTable
+          ? { x: (autoPositions[srcTable.id]?.x ?? 50) + NODE_WIDTH + 60, y: (autoPositions[srcTable.id]?.y ?? 50) + vIdx * 40 }
+          : { x: 50 + vIdx * (VIEW_NODE_WIDTH + 40), y: 400 };
+        result.push({
+          id: view.id,
+          type: 'erView',
+          position: existingView?.position ?? fallbackPos,
+          data: viewData,
+          width: VIEW_NODE_WIDTH,
+        });
+      });
+
       return result;
     });
-  }, [tables, relationships, selectedTableId, hoveredTableId, activeColsByTable, setNodes, getStructFingerprint, onEditTable, namespaces, namespaceFP, tablePositions]);
+  }, [tables, relationships, views, selectedTableId, hoveredTableId, activeColsByTable, setNodes, getStructFingerprint, onEditTable, onEditView, namespaces, namespaceFP, tablePositions]);
 
   // ── Build tableId → namespaceId map for cross-model detection ──
   const tableNamespace = useMemo(() => {
@@ -249,8 +292,29 @@ function DiagramCanvasInner({
       });
     });
 
+    // View → source table: dashed edges
+    views.forEach((view) => {
+      const srcTable = tables.find((t) => t.id === view.sourceTableId);
+      if (!srcTable) return;
+      newEdges.push({
+        id: `view-edge-${view.id}`,
+        source: view.id,
+        target: srcTable.id,
+        type: 'default',
+        animated: false,
+        style: {
+          stroke: '#94a3b8',
+          strokeWidth: 1.5,
+          strokeDasharray: '5 4',
+        },
+        label: 'derived from',
+        labelStyle: { fontSize: 9, fill: '#94a3b8' },
+        labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.8 },
+      });
+    });
+
     setEdges(newEdges);
-  }, [relationships, tables, activeTableId, setEdges, tableNamespace]);
+  }, [relationships, tables, views, activeTableId, setEdges, tableNamespace]);
 
   // ── Event handlers ──
   const handleNodeClick = useCallback(
@@ -277,6 +341,65 @@ function DiagramCanvasInner({
   const handleNodeMouseLeave = useCallback(() => {
     setHoveredTableId(null);
   }, []);
+
+  // ── Connection handlers ──
+
+  /** Fires when user drags from a column handle to another. */
+  const handleConnect = useCallback((connection: Connection) => {
+    if (!connection.source || !connection.target) return;
+    if (connection.source === connection.target) return; // no self-loops
+
+    const sourceCol = connection.sourceHandle?.replace(/-source$/, '') ?? '';
+    const targetCol = connection.targetHandle?.replace(/-target$/, '') ?? '';
+    if (!sourceCol || !targetCol) return;
+
+    // Only allow table → table connections (not view nodes)
+    const srcIsTable = tables.some((t) => t.id === connection.source);
+    const tgtIsTable = tables.some((t) => t.id === connection.target);
+    if (!srcIsTable || !tgtIsTable) return;
+
+    setPendingConn({
+      sourceNodeId: connection.source,
+      sourceColumn: sourceCol,
+      targetNodeId: connection.target,
+      targetColumn: targetCol,
+    });
+  }, [tables]);
+
+  /** Called when user confirms relationship type in the picker. */
+  const confirmConnection = useCallback((type: Relationship['type']) => {
+    if (!pendingConn) return;
+    const srcTable = tables.find((t) => t.id === pendingConn.sourceNodeId);
+    const tgtTable = tables.find((t) => t.id === pendingConn.targetNodeId);
+    if (!srcTable || !tgtTable) { setPendingConn(null); return; }
+
+    onAddRelationship?.({
+      id: uuidv4(),
+      sourceTable: srcTable.name,
+      sourceColumn: pendingConn.sourceColumn,
+      targetTable: tgtTable.name,
+      targetColumn: pendingConn.targetColumn,
+      type,
+    });
+    setPendingConn(null);
+    setActiveTool('select');
+  }, [pendingConn, tables, onAddRelationship]);
+
+  /** Fires when user selects an edge and presses Delete. */
+  const handleEdgesDelete = useCallback((deleted: RFEdge[]) => {
+    deleted.forEach((edge) => {
+      if (!edge.id.startsWith('view-edge-')) {
+        onRemoveRelationship?.(edge.id);
+      }
+    });
+  }, [onRemoveRelationship]);
+
+  /** Validates whether a dragged connection is allowed. */
+  const isValidConnection = useCallback((connection: Connection | RFEdge) => {
+    if (connection.source === connection.target) return false;
+    return tables.some((t) => t.id === connection.source) &&
+           tables.some((t) => t.id === connection.target);
+  }, [tables]);
 
   // ── Auto arrange ──
   const { fitView } = useReactFlow();
@@ -317,8 +440,88 @@ function DiagramCanvasInner({
     return data?.selected ? '#0d9488' : '#cbd5e1';
   }, []);
 
+  // Derive names for the pending connection label
+  const pendingSrcName = pendingConn ? tables.find(t => t.id === pendingConn.sourceNodeId)?.name : null;
+  const pendingTgtName = pendingConn ? tables.find(t => t.id === pendingConn.targetNodeId)?.name : null;
+
   return (
-    <div className="diagram-canvas-wrapper">
+    <div className={`diagram-canvas-wrapper ${activeTool === 'connect' ? 'canvas--connect-mode' : ''}`}>
+
+      {/* ── Tool sidebar ─────────────────────────────────────────────── */}
+      <div className="canvas-tool-sidebar" role="toolbar" aria-label="Herramientas del canvas">
+        <button
+          type="button"
+          className={`canvas-tool-btn ${activeTool === 'select' ? 'active' : ''}`}
+          onClick={() => { setActiveTool('select'); setPendingConn(null); }}
+          title="Seleccionar · mover nodos (V)"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M5 3l14 9-7 1-4 7-3-17z"/>
+          </svg>
+        </button>
+
+        <div className="canvas-tool-sep" />
+
+        <button
+          type="button"
+          className={`canvas-tool-btn ${activeTool === 'connect' ? 'active' : ''}`}
+          onClick={() => setActiveTool(activeTool === 'connect' ? 'select' : 'connect')}
+          title="Conectar columnas · arrastrá de una columna a otra para crear relación (E)"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+          </svg>
+        </button>
+
+        {activeTool === 'connect' && (
+          <div className="canvas-tool-hint">
+            Arrastrá entre columnas para conectar
+          </div>
+        )}
+      </div>
+
+      {/* ── Connection type picker ────────────────────────────────────── */}
+      {pendingConn && (
+        <div className="conn-picker-overlay" onClick={() => setPendingConn(null)}>
+          <div className="conn-picker" onClick={(e) => e.stopPropagation()}>
+            <div className="conn-picker-header">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+              </svg>
+              Nueva relación
+            </div>
+            <div className="conn-picker-route">
+              <code>{pendingSrcName}.{pendingConn.sourceColumn}</code>
+              <span>→</span>
+              <code>{pendingTgtName}.{pendingConn.targetColumn}</code>
+            </div>
+            <p className="conn-picker-label">Tipo de relación</p>
+            <div className="conn-picker-options">
+              {([
+                { type: 'one-to-one',  label: '1 : 1',  desc: 'Uno a uno' },
+                { type: 'one-to-many', label: '1 : N',  desc: 'Uno a muchos' },
+                { type: 'many-to-many',label: 'N : M',  desc: 'Muchos a muchos' },
+              ] as const).map(({ type, label, desc }) => (
+                <button
+                  key={type}
+                  type="button"
+                  className="conn-picker-btn"
+                  onClick={() => confirmConnection(type)}
+                >
+                  <span className="conn-picker-rel">{label}</span>
+                  <span className="conn-picker-desc">{desc}</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={() => setPendingConn(null)}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -330,13 +533,16 @@ function DiagramCanvasInner({
         onPaneClick={handlePaneClick}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
+        onConnect={handleConnect}
+        onEdgesDelete={handleEdgesDelete}
+        isValidConnection={isValidConnection}
+        connectionMode={'loose' as never}
         fitView
         fitViewOptions={{ padding: 0.3, maxZoom: 1.2 }}
         minZoom={0.15}
         maxZoom={2.5}
-        defaultEdgeOptions={{
-          type: 'animatedER',
-        }}
+        deleteKeyCode="Delete"
+        defaultEdgeOptions={{ type: 'animatedER' }}
         proOptions={{ hideAttribution: true }}
         snapToGrid
         snapGrid={[16, 16]}

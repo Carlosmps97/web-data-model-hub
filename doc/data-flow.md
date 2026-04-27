@@ -75,16 +75,41 @@ flowchart TD
 
 **Inverso (`generateDBML()`):** toma `TableModel[]` + `Relationship[]` y genera texto DBML válido. Emite `Table schema.name { … }` cuando el schema está definido y respeta `length` / `scale` en la firma del tipo.
 
-### 4. Agente de Chat (Shell)
+### 4. Agente IA de Modelado
+
+El ChatPanel, cuando se abre dentro de un modelo, se conecta al backend
+FastAPI `agent-modeler` (proyecto hermano) a través del proxy `/api/agent/*`
+de Next. La conversación está **scoped por `modelId`**: cada modelo
+abierto mantiene su propio `conversation_id` (UUID v4) estable durante la
+sesión del browser.
 
 ```mermaid
 flowchart TD
-    A["El usuario escribe un mensaje\n± adjunto Excel"] --> B["POST /api/chat"]
-    B --> C["Respuesta simulada (actual)"]
-    C --> D["ChatPanel muestra el mensaje"]
+    A["Usuario: texto libre + Excel opcional"] --> B["useAgentConversation hook"]
+    B -->|ensureSession| C["POST /api/agent/conversations\n{ conversation_id, engine }"]
+    C --> D["POST /api/agent/conversations/{id}/model\nmultipart: context_text, excel_file, engine"]
+    D --> E["FastAPI: pipeline de modelado con QA"]
+    E --> F["ModelingResponse: tables, relationships,\nexport_sql, qa_report, guidelines_applied"]
+    F --> G["ChatPanel: ModelResultBlock\n(tablas, relaciones, DDL, QA)"]
+    G -->|"Aplicar al canvas"| H["modelingResponseToCanvas"]
+    H --> I["setTables + setRelationships\n(useModelStore)"]
+    I --> J["Auto-save 2s → /api/models/{id}"]
 ```
 
-> Futuro: `/api/chat` redirige al agente IA → el agente retorna `TableModel[]` → las tablas se agregan automáticamente al lienzo.
+Características:
+
+- **Guidelines por sesión** (`POST /api/agent/conversations/{id}/guidelines`):
+  el usuario sube un PDF/DOCX/MD/XLSX/JSON/TXT y el agente lo respetará en
+  todos los turnos siguientes de esa conversación.
+- **Historial multi-turno**: el backend mantiene en memoria el último
+  modelo generado; cada turno nuevo puede refinar tablas existentes sin
+  que el usuario reexplique el contexto.
+- **Volátil en el cliente**: los mensajes del chat se pierden al recargar
+  la página (por diseño, consigna del usuario). Sólo el modelo "aplicado
+  al canvas" se persiste a `data/models/{id}.json`.
+- **Engine pass-through**: el engine del modelo (`postgresql`,
+  `databricks_sql`, `sqlserver`, `mysql`, `cosmosdb`) se envía en cada
+  turno; el agente genera DDL para ese motor.
 
 ## Ciclo de Persistencia
 

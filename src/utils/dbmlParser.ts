@@ -30,16 +30,30 @@ export interface DBMLError {
 }
 
 // Map DBML `database_type` values (case-insensitive) to our internal engine ids.
-// Unknown / unsupported engines (mysql, sqlserver, snowflake, etc.) are rejected
-// silently; the importer can still load the model but the `engine` will be
-// unset, which the user can fix from the engine picker.
+// Engines not in this list are rejected silently; the importer can still load
+// the model but `engine` will be unset, which the user can fix from the engine
+// picker.
+//
+// `databricks` (legacy alias) → `databricks_sql` so freshly imported DBML
+// always lands on a non-legacy engine.
 const ENGINE_ALIASES: Record<string, DatabaseEngine> = {
   postgres: 'postgresql',
   postgresql: 'postgresql',
   psql: 'postgresql',
   oracle: 'oracle',
   plsql: 'oracle',
-  databricks: 'databricks',
+  databricks: 'databricks_sql',
+  'databricks sql': 'databricks_sql',
+  databrickssql: 'databricks_sql',
+  mysql: 'mysql',
+  mariadb: 'mysql',
+  sqlserver: 'sqlserver',
+  'sql server': 'sqlserver',
+  mssql: 'sqlserver',
+  tsql: 'sqlserver',
+  cosmosdb: 'cosmosdb',
+  'cosmos db': 'cosmosdb',
+  cosmos: 'cosmosdb',
 };
 
 function normalizeEngine(raw: string): DatabaseEngine | undefined {
@@ -341,9 +355,16 @@ export interface GenerateDBMLOptions {
   };
 }
 
-// Reverse map engine → DBML `database_type` literal
+// Reverse map engine → DBML `database_type` literal.
+// Includes both backend-supported engines and the two legacy ids so a
+// model loaded from older JSON still serializes back to valid DBML.
 const ENGINE_TO_DBML: Record<DatabaseEngine, string> = {
   postgresql: 'PostgreSQL',
+  databricks_sql: 'Databricks',
+  sqlserver: 'SQL Server',
+  mysql: 'MySQL',
+  cosmosdb: 'CosmosDB',
+  // Legacy aliases (read path; writes prefer the non-legacy ids above).
   oracle: 'Oracle',
   databricks: 'Databricks',
 };

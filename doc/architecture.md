@@ -10,12 +10,13 @@ Data Model Hub es una aplicación unificada de **Next.js 16 (App Router)** que s
 graph TB
     subgraph Browser["Browser (Client)"]
         UI["React UI\n(Client Components)"]
-        ZS["Zustand Stores\nuseModelStore · useUIStore"]
+        ZS["Zustand Stores\nuseModelStore · useUIStore · useAgentStore"]
         RF["@xyflow/react\nDiagram Canvas"]
     end
 
     subgraph Server["Next.js Server"]
-        API["/api/projects\n/api/models\n/api/chat"]
+        API["/api/projects\n/api/models"]
+        Proxy["/api/agent/*\n(proxy a FastAPI)"]
         JS["jsonStore.ts\n(Storage Service)"]
     end
 
@@ -24,13 +25,20 @@ graph TB
         MJ["data/models/{uuid}.json"]
     end
 
+    subgraph Agent["agent-modeler (FastAPI)"]
+        AGT["Pipeline de modelado con QA\nMS Agent Framework + Azure AI Foundry"]
+    end
+
     UI -->|"dispatch actions"| ZS
     ZS -->|"HTTP fetch"| API
+    ZS -->|"HTTP fetch"| Proxy
     UI --> RF
     API --> JS
     JS --> PJ
     JS --> MJ
     API -->|"JSON response"| ZS
+    Proxy -->|"pass-through"| AGT
+    AGT -->|"ModelingResponse"| Proxy
     ZS -->|"reactive update"| UI
 ```
 
@@ -193,7 +201,16 @@ La característica `src/features/ddl/` está separada del editor para mantener u
 2. Reemplaza la importación en cada archivo de ruta de API
 3. Sin cambios en el frontend — el contrato HTTP de la API permanece idéntico
 
-**Conexión del agente IA:**
-1. Implementa `/api/chat` para redirigir al backend del agente
-2. Parsea las respuestas del agente en `TableModel[]` + `Relationship[]`
-3. Llama a `useModelStore.addTable()` / `addRelationship()` — el lienzo reacciona automáticamente
+**Conexión del agente IA (implementada):**
+1. El proxy `/api/agent/*` (en `src/app/api/agent/`) hace pass-through a
+   `AGENT_BACKEND_URL` (FastAPI del repo hermano `agent-modeler`). La URL
+   del backend es server-only; nunca se expone al navegador.
+2. El hook `useAgentConversation` (en `src/features/chat-agent/hooks/`)
+   mantiene un `conversation_id` (UUID v4) estable por `modelId` en
+   `useAgentStore`, gestiona guidelines por sesión y orquesta los turnos
+   de modelado.
+3. El `ModelingResponse` (`src/lib/agent/types.ts`) se convierte a
+   `TableModel[]` + `Relationship[]` con `modelingResponseToCanvas`
+   (`src/lib/agent/mapping.ts`) y se aplica al lienzo vía
+   `useModelStore.setTables` / `setRelationships` cuando el usuario
+   pulsa "Aplicar al canvas" en el bloque de resultado.

@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import AppLayout from '@/components/layout/AppLayout';
-import ChatPanel from '@/features/chat-agent/components/ChatPanel';
 import EngineBadge from '@/features/engines/components/EngineBadge';
 import DBMLEditorPanel, { type DBMLEditorGroup } from '@/features/table-editor/components/DBMLEditorPanel';
 import { useModelStore } from '@/store/useModelStore';
@@ -121,7 +120,10 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
   const router = useRouter();
 
   const { loadModels } = useModelStore();
-  const { selectedTableId, setSelectedTable, chatPanelOpen, setChatPanelOpen } = useUIStore();
+  // El chat IA está deshabilitado en la vista global porque la conversación
+  // del agente está scoped por `modelId` y este overview agrega varios
+  // modelos. Para usar el chat, abrir un modelo individual.
+  const { selectedTableId, setSelectedTable } = useUIStore();
 
   const [project, setProject] = useState<Project | null>(null);
   const [models, setModels] = useState<DataModel[]>([]);
@@ -234,18 +236,6 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
           )}
         </div>
 
-        <div className="editor-header-actions">
-          <button
-            className={`btn btn-sm editor-ai-toggle ${chatPanelOpen ? 'active' : ''}`}
-            onClick={() => setChatPanelOpen(!chatPanelOpen)}
-            type="button"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 2L14.39 8.25 21 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14l-5-4.87 6.61-1.02L12 2z" />
-            </svg>
-            AI Agent
-          </button>
-        </div>
       </header>
 
       <div className="editor-workspace">
@@ -373,10 +363,9 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
           tablePositions={visible.tablePositions}
         />
 
-        {/* Right Panel */}
-        {chatPanelOpen ? (
-          <ChatPanel isOpen={chatPanelOpen} onClose={() => setChatPanelOpen(false)} />
-        ) : selectedTable && selectedTableModel ? (
+        {/* Right Panel — el chat IA sólo se renderiza dentro de un
+            modelo individual (ver `models/[modelId]/page.tsx`). */}
+        {selectedTable && selectedTableModel ? (
           <div className="right-panel">
             <div className="right-panel-header">
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
