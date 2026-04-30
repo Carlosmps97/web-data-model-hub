@@ -9,6 +9,13 @@ interface UIStore {
   rightPanelOpen: boolean;
   chatPanelOpen: boolean;
 
+  /**
+   * Width in pixels of the left workbench panel (Visual / Code tabs) inside
+   * the model editor and the global canvas. Persisted across sessions via
+   * `localStorage` so the user's preferred working width is remembered.
+   */
+  leftPanelWidth: number;
+
   // Selection
   selectedTableId: string | null;
 
@@ -26,16 +33,33 @@ interface UIStore {
   setRightPanelOpen: (open: boolean) => void;
   toggleChatPanel: () => void;
   setChatPanelOpen: (open: boolean) => void;
+  setLeftPanelWidth: (width: number) => void;
   setSelectedTable: (id: string | null) => void;
   setPreviewColor: (color: string | null) => void;
   openModal: (modal: ModalType, data?: Record<string, unknown>) => void;
   closeModal: () => void;
 }
 
+/** Clamp the left-panel width to sane bounds independent of viewport size. */
+const LEFT_PANEL_MIN = 220;
+const LEFT_PANEL_MAX = 720;
+const LEFT_PANEL_DEFAULT = 288;
+const LEFT_PANEL_STORAGE_KEY = 'dmh:leftPanelWidth';
+
+function loadInitialLeftPanelWidth(): number {
+  if (typeof window === 'undefined') return LEFT_PANEL_DEFAULT;
+  const raw = window.localStorage.getItem(LEFT_PANEL_STORAGE_KEY);
+  if (!raw) return LEFT_PANEL_DEFAULT;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed)) return LEFT_PANEL_DEFAULT;
+  return Math.min(LEFT_PANEL_MAX, Math.max(LEFT_PANEL_MIN, parsed));
+}
+
 export const useUIStore = create<UIStore>((set) => ({
   sidebarOpen: true,
   rightPanelOpen: false,
   chatPanelOpen: false,
+  leftPanelWidth: loadInitialLeftPanelWidth(),
   selectedTableId: null,
   previewColor: null,
   activeModal: null,
@@ -47,6 +71,13 @@ export const useUIStore = create<UIStore>((set) => ({
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
   toggleChatPanel: () => set((state) => ({ chatPanelOpen: !state.chatPanelOpen })),
   setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
+  setLeftPanelWidth: (width) => {
+    const clamped = Math.min(LEFT_PANEL_MAX, Math.max(LEFT_PANEL_MIN, Math.round(width)));
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(LEFT_PANEL_STORAGE_KEY, String(clamped));
+    }
+    set({ leftPanelWidth: clamped });
+  },
   setSelectedTable: (id) => set({ selectedTableId: id, rightPanelOpen: id !== null, previewColor: null }),
   setPreviewColor: (color) => set({ previewColor: color }),
   openModal: (modal, data) => set({ activeModal: modal, modalData: data || null }),

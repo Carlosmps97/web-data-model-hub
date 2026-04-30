@@ -9,7 +9,7 @@
 // dependency en los tipos auto-generados (que solo existen tras un
 // `next dev` o `next typegen`).
 import type { NextRequest } from 'next/server';
-import { proxyToBackend } from '@/lib/agent/server';
+import { proxyToBackend } from '@/server/agent/proxy';
 
 export const dynamic = 'force-dynamic';
 

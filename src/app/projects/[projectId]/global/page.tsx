@@ -1,11 +1,16 @@
 'use client';
 
-import React, { useEffect, useMemo, useState, use } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import AppLayout from '@/components/layout/AppLayout';
+import LeftPanelResizer from '@/components/layout/LeftPanelResizer';
 import EngineBadge from '@/features/engines/components/EngineBadge';
 import DBMLEditorPanel, { type DBMLEditorGroup } from '@/features/table-editor/components/DBMLEditorPanel';
+import TableForm from '@/features/table-editor/components/TableForm';
+import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
+import { projectsService, modelsService } from '@/services';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
 import type { Project, DataModel, TableModel, Relationship, DatabaseEngine } from '@/types/model';
@@ -119,11 +124,18 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
   const { projectId } = use(params);
   const router = useRouter();
 
-  const { loadModels } = useModelStore();
+  const { loadModelsFull } = useModelStore();
   // El chat IA está deshabilitado en la vista global porque la conversación
   // del agente está scoped por `modelId` y este overview agrega varios
   // modelos. Para usar el chat, abrir un modelo individual.
-  const { selectedTableId, setSelectedTable } = useUIStore();
+  const { selectedTableId, setSelectedTable, leftPanelWidth } = useUIStore();
+
+  // Permission — the global canvas spans multiple models, so the
+  // simplest rule is: you can edit here only if you have edit access
+  // to the whole project. Finer-grained editing is available in the
+  // per-model editor page.
+  const canEditProject = useAuthStore((s) => s.canEditProject(projectId));
+  const readOnly = !canEditProject;
 
   const [project, setProject] = useState<Project | null>(null);
   const [models, setModels] = useState<DataModel[]>([]);
@@ -131,18 +143,30 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
   const [modelFilter, setModelFilter] = useState<string>('all');
   const [leftTab, setLeftTab] = useState<'visual' | 'code'>('visual');
 
+  /**
+   * Manual-edit state. When the user clicks "edit" on a table inside the
+   * global canvas, we open the `TableForm` modal with the table data +
+   * the model id it belongs to — so the save handler knows which model's
+   * PUT endpoint to target.
+   */
+  const [editingCtx, setEditingCtx] = useState<
+    { modelId: string; table: TableModel | null } | null
+  >(null);
+  const [savingState, setSavingState] = useState<'idle' | 'saving' | 'error'>('idle');
+
+  /** Pending delete-table confirmation. Stored separately from the
+   *  TableForm context so dialogs don't fight over the same state. */
+  const [pendingTableDelete, setPendingTableDelete] = useState<
+    { modelId: string; tableId: string; tableName: string } | null
+  >(null);
+
   useEffect(() => {
     async function load() {
       try {
-        const projRes = await fetch(`/api/projects/${projectId}`);
-        const projJson = await projRes.json();
-        if (!projJson.success) {
-          router.push('/');
-          return;
-        }
-        setProject(projJson.data);
+        const proj = await projectsService.getProject(projectId);
+        setProject(proj);
 
-        const loadedModels = await loadModels(projectId);
+        const loadedModels = await loadModelsFull(projectId);
         setModels(loadedModels);
         setLoaded(true);
       } catch {
@@ -155,6 +179,157 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
 
   // Clear selection on unmount
   useEffect(() => () => setSelectedTable(null), [setSelectedTable]);
+
+  // ── Persistence helpers ───────────────────────────────────────────
+  /**
+   * Apply `mutator` to the model with `modelId` locally and in the DB.
+   * Optimistic: UI updates first (so the canvas re-renders immediately),
+   * then a PUT sends the full model payload. On failure we revert by
+   * reloading the whole project.
+   */
+  const persistModel = useCallback(
+    async (modelId: string, mutator: (model: DataModel) => DataModel) => {
+      let nextModel: DataModel | undefined;
+      setModels((prev) =>
+        prev.map((m) => {
+          if (m.id !== modelId) return m;
+          nextModel = mutator(m);
+          return nextModel;
+        }),
+      );
+      if (!nextModel) return;
+
+      setSavingState('saving');
+      try {
+        await modelsService.updateModel(modelId, nextModel);
+        setSavingState('idle');
+      } catch (err) {
+        console.error('Failed to persist model change:', err);
+        setSavingState('error');
+        // Reload project state so the UI stays consistent with the DB
+        const refreshed = await loadModelsFull(projectId);
+        setModels(refreshed);
+      }
+    },
+    [loadModelsFull, projectId],
+  );
+
+  const findModelOwning = useCallback(
+    (predicate: (m: DataModel) => boolean) => models.find(predicate),
+    [models],
+  );
+
+  // ── Edit handlers passed down to DiagramCanvas ──────────────────
+  const handleEditTable = useCallback(
+    (tableId: string) => {
+      const owner = findModelOwning((m) => m.tables.some((t) => t.id === tableId));
+      if (!owner) return;
+      const table = owner.tables.find((t) => t.id === tableId) ?? null;
+      setEditingCtx({ modelId: owner.id, table });
+    },
+    [findModelOwning],
+  );
+
+  const handleSaveTable = useCallback(
+    (updated: TableModel) => {
+      if (!editingCtx) return;
+      const { modelId } = editingCtx;
+      persistModel(modelId, (model) => {
+        const exists = model.tables.some((t) => t.id === updated.id);
+        return {
+          ...model,
+          tables: exists
+            ? model.tables.map((t) => (t.id === updated.id ? updated : t))
+            : [...model.tables, updated],
+        };
+      });
+      setEditingCtx(null);
+    },
+    [editingCtx, persistModel],
+  );
+
+  /** Actually delete the table. Pulled out so it can be invoked both
+   *  from the dialog's confirm callback AND from the skip-confirm
+   *  fast-path below. */
+  const performDeleteTable = useCallback(
+    (modelId: string, tableId: string, tableName: string) => {
+      persistModel(modelId, (model) => ({
+        ...model,
+        tables: model.tables.filter((t) => t.id !== tableId),
+        // Drop FK relations that referenced this table (by id or name)
+        relationships: model.relationships.filter(
+          (r) =>
+            r.sourceTable !== tableId &&
+            r.targetTable !== tableId &&
+            r.sourceTable !== tableName &&
+            r.targetTable !== tableName,
+        ),
+      }));
+      if (selectedTableId === tableId) setSelectedTable(null);
+    },
+    [persistModel, selectedTableId, setSelectedTable],
+  );
+
+  const handleDeleteTable = useCallback(
+    (tableId: string) => {
+      const owner = findModelOwning((m) => m.tables.some((t) => t.id === tableId));
+      if (!owner) return;
+      const table = owner.tables.find((t) => t.id === tableId);
+      if (!table) return;
+      // Session-scoped opt-out: if the user previously ticked "don't ask
+      // again", skip straight to the destructive action.
+      if (shouldSkipConfirm('global-canvas:delete-table')) {
+        performDeleteTable(owner.id, tableId, table.name);
+        return;
+      }
+      setPendingTableDelete({ modelId: owner.id, tableId, tableName: table.name });
+    },
+    [findModelOwning, performDeleteTable],
+  );
+
+  const handleAddRelationship = useCallback(
+    (rel: Relationship) => {
+      // A relationship is attached to whichever model owns the *source*
+      // table. Cross-model relationships are therefore stored against the
+      // source side — the UI already draws them across namespace borders.
+      const srcId = rel.sourceTable;
+      const owner = findModelOwning((m) =>
+        m.tables.some((t) => t.id === srcId || t.name === srcId),
+      );
+      if (!owner) return;
+
+      // Normalise: store names (consistent with the model editor)
+      const srcTable = owner.tables.find((t) => t.id === srcId || t.name === srcId);
+      const tgtTable = models
+        .flatMap((m) => m.tables)
+        .find((t) => t.id === rel.targetTable || t.name === rel.targetTable);
+      if (!srcTable || !tgtTable) return;
+
+      const normalised: Relationship = {
+        ...rel,
+        sourceTable: srcTable.name,
+        targetTable: tgtTable.name,
+      };
+
+      persistModel(owner.id, (model) => ({
+        ...model,
+        relationships: [...model.relationships, normalised],
+      }));
+    },
+    [findModelOwning, models, persistModel],
+  );
+
+  const handleRemoveRelationship = useCallback(
+    (relId: string) => {
+      const owner = findModelOwning((m) => m.relationships.some((r) => r.id === relId));
+      if (!owner) return;
+      persistModel(owner.id, (model) => ({
+        ...model,
+        relationships: model.relationships.filter((r) => r.id !== relId),
+      }));
+    },
+    [findModelOwning, persistModel],
+  );
 
   const aggregated = useMemo(() => aggregate(models), [models]);
 
@@ -221,8 +396,22 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
               </svg>
               Global Canvas
             </span>
-            <span className="editor-save-badge saved" style={{ background: 'rgba(79, 70, 229, 0.08)', color: '#4f46e5', borderColor: 'rgba(79, 70, 229, 0.25)' }}>
-              View only
+            <span
+              className="editor-save-badge saved"
+              style={{
+                background: savingState === 'error' ? 'rgba(220, 38, 38, 0.12)' : 'rgba(5, 150, 105, 0.10)',
+                color: savingState === 'error' ? '#dc2626' : '#059669',
+                borderColor: savingState === 'error' ? 'rgba(220, 38, 38, 0.3)' : 'rgba(5, 150, 105, 0.3)',
+              }}
+              title={
+                savingState === 'saving'
+                  ? 'Saving…'
+                  : savingState === 'error'
+                  ? 'Last save failed — reloaded from server'
+                  : 'Edits are persisted per-model'
+              }
+            >
+              {savingState === 'saving' ? 'Saving…' : savingState === 'error' ? 'Save error' : 'Editable'}
             </span>
           </div>
 
@@ -240,7 +429,7 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
 
       <div className="editor-workspace">
         {/* Left Panel: model filter + all entities grouped */}
-        <aside className="editor-left-panel">
+        <aside className="editor-left-panel" style={{ width: leftPanelWidth }}>
           <div className="editor-left-tabs">
             <button
               type="button"
@@ -354,11 +543,18 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
           )}
         </aside>
 
+        {/* Drag handle to resize the left panel */}
+        <LeftPanelResizer />
+
         <DiagramCanvas
           tables={visible.tables}
           relationships={visible.relationships}
           selectedTableId={selectedTableId}
           onSelectTable={setSelectedTable}
+          onEditTable={handleEditTable}
+          onDeleteTable={handleDeleteTable}
+          onAddRelationship={handleAddRelationship}
+          onRemoveRelationship={handleRemoveRelationship}
           namespaces={visible.namespaces}
           tablePositions={visible.tablePositions}
         />
@@ -375,8 +571,27 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
                 </span>
               </div>
               <div style={{ display: 'flex', gap: 'var(--space-1)' }}>
+                {!readOnly && (
+                  <>
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      onClick={() => handleEditTable(selectedTable.id)}
+                      title="Edit table (columns, keys, metadata)"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      style={{ color: '#dc2626' }}
+                      onClick={() => handleDeleteTable(selectedTable.id)}
+                      title="Delete this table and its relationships"
+                    >
+                      Delete
+                    </button>
+                  </>
+                )}
                 <button
-                  className="btn btn-secondary btn-sm"
+                  className="btn btn-ghost btn-sm"
                   onClick={() => router.push(`/projects/${projectId}/models/${selectedTableModel.modelId}`)}
                   title="Open in model editor"
                 >
@@ -460,6 +675,53 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
           </div>
         ) : null}
       </div>
+
+      {/* Confirm-delete dialog (replaces window.confirm). The "don't
+          ask again" choice persists in sessionStorage only — refresh
+          or new tab brings the dialog back. */}
+      <ConfirmDialog
+        open={pendingTableDelete !== null}
+        title="Delete table"
+        message={
+          pendingTableDelete ? (
+            <>
+              Are you sure you want to delete <strong>{pendingTableDelete.tableName}</strong>?
+              Its relationships will also be removed. This cannot be undone.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        dontAskKey="global-canvas:delete-table"
+        onConfirm={() => {
+          if (!pendingTableDelete) return;
+          performDeleteTable(
+            pendingTableDelete.modelId,
+            pendingTableDelete.tableId,
+            pendingTableDelete.tableName,
+          );
+          setPendingTableDelete(null);
+        }}
+        onCancel={() => setPendingTableDelete(null)}
+      />
+
+      {/* Manual-edit modal: opens when user clicks Edit on a table.
+          The form itself is engine/domain-aware per model, so we look
+          those up from the owning model when mounting. */}
+      {editingCtx && (() => {
+        const ownerModel = models.find((m) => m.id === editingCtx.modelId);
+        if (!ownerModel) return null;
+        return (
+          <TableForm
+            table={editingCtx.table}
+            existingTables={ownerModel.tables}
+            engine={ownerModel.engine ?? null}
+            domainCatalog={ownerModel.domainCatalog ?? []}
+            onSave={handleSaveTable}
+            onCancel={() => setEditingCtx(null)}
+          />
+        );
+      })()}
     </AppLayout>
   );
 }

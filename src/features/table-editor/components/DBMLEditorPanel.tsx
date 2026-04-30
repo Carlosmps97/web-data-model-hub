@@ -1,7 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { parseDBML, generateDBML } from '@/utils/dbmlParser';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { EditorState, Compartment } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection } from '@codemirror/view';
+import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
+import { bracketMatching, indentOnInput } from '@codemirror/language';
+import { parseDBML, generateDBML } from '../utils/dbmlParser';
+import { dbmlExtensions } from '../utils/dbmlLanguage';
 import type { TableModel, Relationship, DatabaseEngine } from '@/types/model';
 
 /** A single "model" group, used in read-only multi-model (global) mode. */
@@ -109,20 +114,93 @@ export default function DBMLEditorPanel({
   const [appliedFlash, setAppliedFlash] = useState(false);
 
   // Re-sync code from external model only when the panel is NOT dirty (or in read-only).
-  // This is an intentional controlled synchronisation from props into the textarea state,
-  // so we accept a "setState in effect" pattern here.
+  // This is an intentional controlled synchronisation from props into the
+  // editor state, so we accept a "setState in effect" pattern here.
   useEffect(() => {
     if (dirty && !effectivelyReadOnly) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCode(generated);
   }, [generated, dirty, effectivelyReadOnly]);
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (effectivelyReadOnly) return;
-    setCode(e.target.value);
-    setDirty(true);
-    if (parseErrors.length > 0) setParseErrors([]);
-  };
+  // ── CodeMirror wiring ──────────────────────────────────────────────
+  // Mount the editor once; update its doc via transactions whenever the
+  // generated DBML changes upstream (and the buffer is clean). Read-only
+  // state is driven by a `Compartment` so it can be flipped without
+  // rebuilding the whole editor.
+  const editorHostRef = useRef<HTMLDivElement | null>(null);
+  const editorViewRef = useRef<EditorView | null>(null);
+  const readOnlyCompartment = useRef(new Compartment()).current;
+
+  useEffect(() => {
+    if (!editorHostRef.current) return;
+    if (editorViewRef.current) return; // already mounted
+
+    const onDocChange = EditorView.updateListener.of((update) => {
+      if (!update.docChanged) return;
+      if (effectivelyReadOnly) return;
+      const value = update.state.doc.toString();
+      setCode(value);
+      setDirty(true);
+      if (parseErrors.length > 0) setParseErrors([]);
+    });
+
+    const state = EditorState.create({
+      doc: code,
+      extensions: [
+        lineNumbers(),
+        highlightActiveLine(),
+        highlightActiveLineGutter(),
+        drawSelection(),
+        history(),
+        bracketMatching(),
+        indentOnInput(),
+        keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+        EditorView.lineWrapping,
+        ...dbmlExtensions(),
+        readOnlyCompartment.of([
+          EditorState.readOnly.of(effectivelyReadOnly),
+          EditorView.editable.of(!effectivelyReadOnly),
+        ]),
+        onDocChange,
+      ],
+    });
+
+    const view = new EditorView({ state, parent: editorHostRef.current });
+    editorViewRef.current = view;
+
+    return () => {
+      view.destroy();
+      editorViewRef.current = null;
+    };
+    // We intentionally mount the editor only once — subsequent doc/readOnly
+    // updates are handled via the dedicated effects below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sync read-only state without rebuilding the editor
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: readOnlyCompartment.reconfigure([
+        EditorState.readOnly.of(effectivelyReadOnly),
+        EditorView.editable.of(!effectivelyReadOnly),
+      ]),
+    });
+  }, [effectivelyReadOnly, readOnlyCompartment]);
+
+  // Push `code` state back into the editor ONLY when the change comes from
+  // outside (regeneration / reset) — detected by comparing with the current
+  // doc. User keystrokes take the reverse path (onDocChange → setCode),
+  // so this no-ops in that case.
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    const current = view.state.doc.toString();
+    if (current === code) return;
+    view.dispatch({
+      changes: { from: 0, to: current.length, insert: code },
+    });
+  }, [code]);
 
   const handleApply = () => {
     if (effectivelyReadOnly || !onApply) return;
@@ -214,13 +292,11 @@ export default function DBMLEditorPanel({
         </div>
       </div>
 
-      <textarea
-        className="dbml-panel-textarea"
-        value={code}
-        onChange={handleChange}
-        readOnly={effectivelyReadOnly}
+      <div
+        ref={editorHostRef}
+        className="dbml-panel-editor"
         spellCheck={false}
-        placeholder="Write your DBML here..."
+        data-placeholder="Write your DBML here..."
       />
 
       {parseErrors.length > 0 && (

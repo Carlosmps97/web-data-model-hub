@@ -5,7 +5,7 @@
 // reenvía el body como stream sin re-empaquetarlo, así el boundary se
 // preserva.
 import type { NextRequest } from 'next/server';
-import { proxyToBackend } from '@/lib/agent/server';
+import { proxyToBackend } from '@/server/agent/proxy';
 
 export const dynamic = 'force-dynamic';
 

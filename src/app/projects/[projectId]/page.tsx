@@ -7,6 +7,9 @@ import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
 import EngineSelect from '@/features/engines/components/EngineSelect';
 import EngineBadge from '@/features/engines/components/EngineBadge';
+import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
+import { projectsService, modelsService } from '@/services';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useModelStore } from '@/store/useModelStore';
 import type { Project, DataModel, DatabaseEngine } from '@/types/model';
 
@@ -18,7 +21,11 @@ export default function ProjectModelsPage({ params }: PageProps) {
   const { projectId } = use(params);
   const router = useRouter();
 
-  const { loadModels, createModel } = useModelStore();
+  const { loadModels, createModel, deleteModel } = useModelStore();
+  // Authorization — drives visibility of mutation controls. The
+  // backend enforces the same rules; this is purely UX.
+  const canEditProject = useAuthStore((s) => s.canEditProject(projectId));
+  const canEditModelFn = useAuthStore((s) => s.canEditModel);
 
   const [project, setProject] = useState<Project | null>(null);
   const [models, setModels] = useState<DataModel[]>([]);
@@ -27,17 +34,13 @@ export default function ProjectModelsPage({ params }: PageProps) {
   const [showCreateModel, setShowCreateModel] = useState(false);
   const [newModelName, setNewModelName] = useState('');
   const [creating, setCreating] = useState(false);
+  const [pendingModelDelete, setPendingModelDelete] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        const projRes = await fetch(`/api/projects/${projectId}`);
-        const projJson = await projRes.json();
-        if (!projJson.success) {
-          router.push('/');
-          return;
-        }
-        setProject(projJson.data);
+        const proj = await projectsService.getProject(projectId);
+        setProject(proj);
 
         const loadedModels = await loadModels(projectId);
         setModels(loadedModels);
@@ -70,15 +73,24 @@ export default function ProjectModelsPage({ params }: PageProps) {
     router.push(`/projects/${projectId}/global`);
   };
 
+  const performModelDelete = async (modelId: string) => {
+    const ok = await deleteModel(modelId);
+    if (ok) setModels((prev) => prev.filter((m) => m.id !== modelId));
+  };
+
+  const handleDeleteModel = (modelId: string, modelName: string) => {
+    if (shouldSkipConfirm('project:delete-model')) {
+      void performModelDelete(modelId);
+      return;
+    }
+    setPendingModelDelete({ id: modelId, name: modelName });
+  };
+
   const handleUpdateEngine = async (modelId: string, engine: DatabaseEngine | null) => {
     // Optimistic update
     setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, engine: engine ?? undefined } : m)));
     try {
-      await fetch(`/api/models/${modelId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engine: engine ?? null }),
-      });
+      await modelsService.updateModel(modelId, { engine: engine ?? undefined });
     } catch (err) {
       console.error('Failed to update engine:', err);
     }
@@ -141,13 +153,15 @@ export default function ProjectModelsPage({ params }: PageProps) {
                 Global Canvas
               </button>
             )}
-            <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModel(true)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              New Model
-            </button>
+            {canEditProject && (
+              <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModel(true)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                New Model
+              </button>
+            )}
           </div>
         }
       />
@@ -205,14 +219,20 @@ export default function ProjectModelsPage({ params }: PageProps) {
               </svg>
             </div>
             <h3>No models yet</h3>
-            <p>Create your first data model in this project to start designing ER diagrams.</p>
-            <button className="btn btn-primary btn-lg" onClick={() => setShowCreateModel(true)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              Create First Model
-            </button>
+            <p>
+              {canEditProject
+                ? 'Create your first data model in this project to start designing ER diagrams.'
+                : 'There are no models to view yet. Ask an administrator for access.'}
+            </p>
+            {canEditProject && (
+              <button className="btn btn-primary btn-lg" onClick={() => setShowCreateModel(true)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Create First Model
+              </button>
+            )}
           </div>
         )}
 
@@ -254,6 +274,7 @@ export default function ProjectModelsPage({ params }: PageProps) {
                         value={model.engine ?? null}
                         onChange={(eng) => handleUpdateEngine(model.id, eng)}
                         size="sm"
+                        disabled={!canEditModelFn(model.id, projectId)}
                       />
                     </td>
                     <td>
@@ -263,6 +284,20 @@ export default function ProjectModelsPage({ params }: PageProps) {
                       <span className="models-table-pill">{model.relationships.length}</span>
                     </td>
                     <td className="models-table-date">{formatRelative(model.updatedAt)}</td>
+                    <td onClick={(e) => e.stopPropagation()} style={{ width: 40, textAlign: 'center' }}>
+                      {canEditModelFn(model.id, projectId) && (
+                        <button
+                          className="btn btn-ghost btn-icon btn-sm"
+                          title="Eliminar modelo"
+                          onClick={() => handleDeleteModel(model.id, model.name)}
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -319,6 +354,27 @@ export default function ProjectModelsPage({ params }: PageProps) {
           </div>
         </div>
       )}
+      <ConfirmDialog
+        open={pendingModelDelete !== null}
+        title="Eliminar modelo"
+        message={
+          pendingModelDelete ? (
+            <>
+              ¿Eliminar el modelo <strong>{pendingModelDelete.name}</strong>? Esta acción no se puede deshacer.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        variant="danger"
+        dontAskKey="project:delete-model"
+        onConfirm={() => {
+          if (!pendingModelDelete) return;
+          void performModelDelete(pendingModelDelete.id);
+          setPendingModelDelete(null);
+        }}
+        onCancel={() => setPendingModelDelete(null)}
+      />
     </AppLayout>
   );
 }

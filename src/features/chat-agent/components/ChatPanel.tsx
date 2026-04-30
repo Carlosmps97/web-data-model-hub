@@ -14,6 +14,13 @@ export interface ChatPanelProps {
   modelId: string | null;
   engine: DatabaseEngine | null | undefined;
   onApplyModel: (result: ModelingResponse) => void;
+  /**
+   * When true, the panel renders the conversation history but disables
+   * every mutation control (send message, attach file, upload
+   * guidelines, reset session, apply-to-model button). Used for
+   * viewers with read-only access to the model.
+   */
+  readOnly?: boolean;
 }
 
 const ChatPanel: React.FC<ChatPanelProps> = ({
@@ -22,6 +29,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
   modelId,
   engine,
   onApplyModel,
+  readOnly = false,
 }) => {
   const conv = useAgentConversation({ modelId, engine });
 
@@ -46,7 +54,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
 
   if (!isOpen) return null;
 
-  const canSend = !!modelId && !conv.sending && (input.trim().length > 0 || excelFile !== null);
+  const canSend = !readOnly && !!modelId && !conv.sending && (input.trim().length > 0 || excelFile !== null);
   const hasContent = conv.messages.length > 0;
 
   // Detecta si el último mensaje del asistente fue un error o devolvió tablas vacías.
@@ -111,8 +119,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           <button
             className="chat-panel-icon-btn"
             onClick={handleNewSession}
-            disabled={resetting || conv.sending}
-            title="Nueva sesión — limpia el chat y el canvas"
+            disabled={readOnly || resetting || conv.sending}
+            title={readOnly ? 'Solo lectura — no se puede reiniciar la sesión' : 'Nueva sesión — limpia el chat y el canvas'}
             type="button"
           >
             <svg
@@ -152,7 +160,7 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
         current={conv.guidelines}
         uploading={conv.uploadingGuidelines}
         onUpload={conv.uploadGuidelinesFile}
-        disabled={!modelId}
+        disabled={readOnly || !modelId}
       />
 
       {/* ── Messages ─────────────────────────────────────────────────── */}
@@ -273,8 +281,8 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
           <button
             className="chat-attach-btn"
             onClick={handleExcelPick}
-            disabled={conv.sending}
-            title="Adjuntar Excel (.xlsx)"
+            disabled={readOnly || conv.sending}
+            title={readOnly ? 'Solo lectura — no se pueden adjuntar archivos' : 'Adjuntar Excel (.xlsx)'}
             type="button"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -285,14 +293,16 @@ const ChatPanel: React.FC<ChatPanelProps> = ({
             ref={textareaRef}
             className="chat-input-textarea"
             placeholder={
-              modelId
-                ? 'Describí el modelo o ajustá el existente… (Enter para enviar)'
-                : 'Abrí un modelo para usar el agente'
+              readOnly
+                ? 'Solo lectura — no se pueden enviar mensajes al agente'
+                : modelId
+                  ? 'Describí el modelo o ajustá el existente… (Enter para enviar)'
+                  : 'Abrí un modelo para usar el agente'
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={conv.sending || !modelId}
+            disabled={readOnly || conv.sending || !modelId}
             rows={2}
           />
           <button

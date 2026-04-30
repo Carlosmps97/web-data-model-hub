@@ -3,7 +3,7 @@
 // Pass-through directo. No transformamos la respuesta; el cliente del
 // browser recibe el body verbatim del FastAPI.
 import type { NextRequest } from 'next/server';
-import { proxyToBackend } from '@/lib/agent/server';
+import { proxyToBackend } from '@/server/agent/proxy';
 
 export const dynamic = 'force-dynamic';
 

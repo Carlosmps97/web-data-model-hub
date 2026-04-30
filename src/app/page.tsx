@@ -6,17 +6,22 @@ import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
 import CreateProjectModal from '@/features/projects/components/CreateProjectModal';
 import EngineBadge from '@/features/engines/components/EngineBadge';
+import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
+import { modelsService } from '@/services';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useModelStore } from '@/store/useModelStore';
-import type { Project, DatabaseEngine } from '@/types/model';
+import type { DatabaseEngine } from '@/types/model';
 
 export default function HomePage() {
   const router = useRouter();
   const { projects, loading, loadProjects, createProject, deleteProject } = useModelStore();
+  const isAdmin = useAuthStore((s) => s.isAdmin());
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [search, setSearch] = useState('');
   const [modelCounts, setModelCounts] = useState<Record<string, number>>({});
   const [projectEngines, setProjectEngines] = useState<Record<string, DatabaseEngine[]>>({});
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [pendingProjectDelete, setPendingProjectDelete] = useState<{ id: string; name: string } | null>(null);
 
   useEffect(() => {
     loadProjects();
@@ -29,16 +34,13 @@ export default function HomePage() {
       const engines: Record<string, DatabaseEngine[]> = {};
       for (const project of projects) {
         try {
-          const res = await fetch(`/api/models?projectId=${project.id}`);
-          const json = await res.json();
-          if (json.success) {
-            counts[project.id] = json.data.length;
-            const set = new Set<DatabaseEngine>();
-            for (const m of json.data) {
-              if (m.engine) set.add(m.engine);
-            }
-            engines[project.id] = Array.from(set);
+          const models = await modelsService.listModels({ projectId: project.id });
+          counts[project.id] = models.length;
+          const set = new Set<DatabaseEngine>();
+          for (const m of models) {
+            if (m.engine) set.add(m.engine);
           }
+          engines[project.id] = Array.from(set);
         } catch {
           counts[project.id] = 0;
           engines[project.id] = [];
@@ -63,13 +65,22 @@ export default function HomePage() {
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
+  const performProjectDelete = async (id: string) => {
+    setDeletingId(id);
+    await deleteProject(id);
+    setDeletingId(null);
+  };
+
+  const handleDelete = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (confirm('Are you sure you want to delete this project and all its models?')) {
-      setDeletingId(id);
-      await deleteProject(id);
-      setDeletingId(null);
+    // Skip the modal entirely when the user previously chose
+    // "don't ask again" this session.
+    if (shouldSkipConfirm('home:delete-project')) {
+      void performProjectDelete(id);
+      return;
     }
+    const project = projects.find((p) => p.id === id);
+    setPendingProjectDelete({ id, name: project?.name ?? 'this project' });
   };
 
   const formatDate = (dateStr: string) => {
@@ -86,13 +97,17 @@ export default function HomePage() {
         title="Projects"
         subtitle="Manage your data model projects"
         actions={
-          <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New Project
-          </button>
+          // Only admins can spin up new projects. Editors work inside
+          // projects they've been granted access to.
+          isAdmin && (
+            <button className="btn btn-primary" onClick={() => setShowCreateModal(true)}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              New Project
+            </button>
+          )
         }
       />
 
@@ -140,14 +155,20 @@ export default function HomePage() {
               </svg>
             </div>
             <h3>No projects yet</h3>
-            <p>Create your first project to start designing data models with interactive ER diagrams.</p>
-            <button className="btn btn-primary btn-lg" onClick={() => setShowCreateModal(true)}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19" />
-                <line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              Create Your First Project
-            </button>
+            <p>
+              {isAdmin
+                ? 'Create your first project to start designing data models with interactive ER diagrams.'
+                : 'You have no projects assigned yet. Ask an administrator to grant you access.'}
+            </p>
+            {isAdmin && (
+              <button className="btn btn-primary btn-lg" onClick={() => setShowCreateModal(true)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+                Create Your First Project
+              </button>
+            )}
           </div>
         )}
 
@@ -164,19 +185,21 @@ export default function HomePage() {
                   onClick={() => router.push(`/projects/${project.id}`)}
                   style={{ animationDelay: `${index * 50}ms`, animation: `slideUp var(--transition-normal) ease both` }}
                 >
-                  <div className="project-card-actions">
-                    <button
-                      className="btn btn-ghost btn-icon btn-sm"
-                      onClick={(e) => handleDelete(e, project.id)}
-                      title="Delete project"
-                      style={{ opacity: deletingId === project.id ? 0.5 : 1 }}
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="3 6 5 6 21 6" />
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                      </svg>
-                    </button>
-                  </div>
+                  {isAdmin && (
+                    <div className="project-card-actions">
+                      <button
+                        className="btn btn-ghost btn-icon btn-sm"
+                        onClick={(e) => handleDelete(e, project.id)}
+                        title="Delete project"
+                        style={{ opacity: deletingId === project.id ? 0.5 : 1 }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
 
                   <div className="project-card-title">{project.name}</div>
                   <div className="project-card-description">
@@ -238,6 +261,28 @@ export default function HomePage() {
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
         onSubmit={handleCreate}
+      />
+
+      <ConfirmDialog
+        open={pendingProjectDelete !== null}
+        title="Delete project"
+        message={
+          pendingProjectDelete ? (
+            <>
+              Are you sure you want to delete <strong>{pendingProjectDelete.name}</strong> and all its models?
+              This cannot be undone.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        dontAskKey="home:delete-project"
+        onConfirm={() => {
+          if (!pendingProjectDelete) return;
+          void performProjectDelete(pendingProjectDelete.id);
+          setPendingProjectDelete(null);
+        }}
+        onCancel={() => setPendingProjectDelete(null)}
       />
     </AppLayout>
   );

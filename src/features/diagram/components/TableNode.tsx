@@ -14,7 +14,7 @@ interface TableNodeData {
   selected?: boolean;
   activeRelationColumns?: string[];
   onEditTable?: (id: string) => void;
-  /** Controls whether to display logical (business) or physical (SQL) names. */
+  onDeleteTable?: (id: string) => void;
   viewMode?: 'logical' | 'physical';
   [key: string]: unknown;
 }
@@ -25,6 +25,7 @@ function TableNodeComponent({ data }: NodeProps) {
   const isSelected = nodeData?.selected || false;
   const activeRelCols = nodeData?.activeRelationColumns ?? [];
   const onEditTable = nodeData?.onEditTable as ((id: string) => void) | undefined;
+  const onDeleteTable = nodeData?.onDeleteTable as ((id: string) => void) | undefined;
   const viewMode = (nodeData?.viewMode as 'logical' | 'physical' | undefined) ?? 'physical';
   const isLogical = viewMode === 'logical';
 
@@ -47,6 +48,10 @@ function TableNodeComponent({ data }: NodeProps) {
   const handleEdit = useCallback(() => {
     onEditTable?.(table.id);
   }, [onEditTable, table?.id]);
+
+  const handleDelete = useCallback(() => {
+    onDeleteTable?.(table.id);
+  }, [onDeleteTable, table?.id]);
 
   const handleApplyColor = useCallback((color: string) => {
     updateTable(table.id, { color });
@@ -106,6 +111,7 @@ function TableNodeComponent({ data }: NodeProps) {
           <TableNodeGearMenu
             currentColor={table.color}
             onEdit={handleEdit}
+            onDelete={onDeleteTable ? handleDelete : undefined}
             onApplyColor={handleApplyColor}
             onClose={() => setGearMenuOpen(false)}
           />
@@ -142,31 +148,42 @@ function TableNodeComponent({ data }: NodeProps) {
                 className="dbdiagram-handle"
               />
 
-              {/* Key icon */}
-              <div className={`table-node-col-icon ${iconClass}`}>
-                {iconLabel ? iconLabel : (
-                  <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
-                    <circle cx="8" cy="8" r="2.5" fill="#c4ccc9" />
-                  </svg>
+              {/* Main column row — name, type, nullable, PK/FK icon */}
+              <div className="table-node-column-main">
+                {/* Key icon */}
+                <div className={`table-node-col-icon ${iconClass}`}>
+                  {iconLabel ? iconLabel : (
+                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
+                      <circle cx="8" cy="8" r="2.5" fill="#c4ccc9" />
+                    </svg>
+                  )}
+                </div>
+
+                {/* Column name — lógico o físico según viewMode */}
+                <span className="table-node-col-name">
+                  {isLogical && col.logicalName ? col.logicalName : col.name}
+                </span>
+
+                {/* Nullable indicator */}
+                {col.isNullable !== false && (
+                  <span className="table-node-col-nullable">
+                    <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
+                      <path d="M8 2L14 8L8 14L2 8Z" stroke="#b8c4c1" strokeWidth="1.5" fill="none" />
+                    </svg>
+                  </span>
                 )}
+
+                {/* Data type */}
+                <span className="table-node-col-type">{col.dataType}</span>
               </div>
 
-              {/* Column name — lógico o físico según viewMode */}
-              <span className="table-node-col-name">
-                {isLogical && col.logicalName ? col.logicalName : col.name}
-              </span>
-
-              {/* Nullable indicator */}
-              {col.isNullable !== false && (
-                <span className="table-node-col-nullable">
-                  <svg width="8" height="8" viewBox="0 0 16 16" fill="none">
-                    <path d="M8 2L14 8L8 14L2 8Z" stroke="#b8c4c1" strokeWidth="1.5" fill="none" />
-                  </svg>
-                </span>
+              {/* Functional definition — visible inline debajo del nombre
+                  (truncado a 2 líneas; el tooltip al hover muestra el texto completo). */}
+              {col.functionalDefinition && (
+                <div className="table-node-col-comment" title={col.functionalDefinition}>
+                  {col.functionalDefinition}
+                </div>
               )}
-
-              {/* Data type */}
-              <span className="table-node-col-type">{col.dataType}</span>
 
               {/* Right handle (source) — invisible, functional */}
               <Handle

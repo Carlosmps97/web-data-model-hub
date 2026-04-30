@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 
-export type LayoutAlgorithm = 'left-right' | 'snowflake' | 'compact';
+export type LayoutAlgorithm = 'left-right' | 'compact';
 
 interface AutoArrangePopoverProps {
   onSelect: (algorithm: LayoutAlgorithm) => void;
@@ -21,24 +21,6 @@ const algorithms: { id: LayoutAlgorithm; label: string; description: string; ico
         <rect x="18" y="16" width="8" height="8" rx="1.5" />
         <line x1="10" y1="8" x2="18" y2="8" />
         <line x1="10" y1="20" x2="18" y2="20" />
-      </svg>
-    ),
-  },
-  {
-    id: 'snowflake',
-    label: 'Snowflake',
-    description: 'Arrange tables in a snowflake shape, with the most connected tables in the center. Ideal for densely connected diagrams like data warehouses.',
-    icon: (
-      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="10" y="10" width="8" height="8" rx="1.5" />
-        <rect x="1" y="1" width="6" height="6" rx="1" />
-        <rect x="21" y="1" width="6" height="6" rx="1" />
-        <rect x="1" y="21" width="6" height="6" rx="1" />
-        <rect x="21" y="21" width="6" height="6" rx="1" />
-        <line x1="10" y1="12" x2="7" y2="6" />
-        <line x1="18" y1="12" x2="21" y2="6" />
-        <line x1="10" y1="16" x2="7" y2="21" />
-        <line x1="18" y1="16" x2="21" y2="21" />
       </svg>
     ),
   },

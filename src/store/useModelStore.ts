@@ -1,6 +1,11 @@
-// Zustand store for data model state management
+// Zustand store for data model state management.
+//
+// All HTTP calls delegate to `@/services/*` helpers; the store itself
+// only owns in-memory state and optimistic updates. This keeps the
+// store focused and makes services easy to mock in tests.
 import { create } from 'zustand';
 import type { Project, DataModel, TableModel, Relationship, ViewModel, DomainDefinition } from '@/types/model';
+import { projectsService, modelsService, ApiError } from '@/services';
 
 interface ModelStore {
   // Projects
@@ -28,6 +33,7 @@ interface ModelStore {
   // Model actions
   setCurrentModel: (model: DataModel | null) => void;
   loadModels: (projectId: string) => Promise<DataModel[]>;
+  loadModelsFull: (projectId: string) => Promise<DataModel[]>;
   loadModel: (modelId: string) => Promise<void>;
   createModel: (data: { projectId: string; name: string; description?: string }) => Promise<DataModel | null>;
   saveModel: () => Promise<void>;
@@ -74,13 +80,11 @@ export const useModelStore = create<ModelStore>((set, get) => ({
   loadProjects: async () => {
     set({ loading: true });
     try {
-      const res = await fetch('/api/projects');
-      const json = await res.json();
-      if (json.success) {
-        set({ projects: json.data });
-      }
+      const projects = await projectsService.listProjects();
+      set({ projects });
     } catch (err) {
-      console.error('Failed to load projects:', err);
+      if (err instanceof ApiError) console.error('Failed to load projects:', err.message);
+      else console.error('Failed to load projects:', err);
     } finally {
       set({ loading: false });
     }
@@ -88,17 +92,9 @@ export const useModelStore = create<ModelStore>((set, get) => ({
 
   createProject: async (data) => {
     try {
-      const res = await fetch('/api/projects', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      if (json.success) {
-        set((state) => ({ projects: [...state.projects, json.data] }));
-        return json.data;
-      }
-      return null;
+      const project = await projectsService.createProject(data);
+      set((state) => ({ projects: [...state.projects, project] }));
+      return project;
     } catch (err) {
       console.error('Failed to create project:', err);
       return null;
@@ -107,16 +103,12 @@ export const useModelStore = create<ModelStore>((set, get) => ({
 
   deleteProject: async (id) => {
     try {
-      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-      const json = await res.json();
-      if (json.success) {
-        set((state) => ({
-          projects: state.projects.filter((p) => p.id !== id),
-          currentProject: state.currentProject?.id === id ? null : state.currentProject,
-        }));
-        return true;
-      }
-      return false;
+      await projectsService.deleteProject(id);
+      set((state) => ({
+        projects: state.projects.filter((p) => p.id !== id),
+        currentProject: state.currentProject?.id === id ? null : state.currentProject,
+      }));
+      return true;
     } catch (err) {
       console.error('Failed to delete project:', err);
       return false;
@@ -133,12 +125,21 @@ export const useModelStore = create<ModelStore>((set, get) => ({
 
   loadModels: async (projectId) => {
     try {
-      const res = await fetch(`/api/models?projectId=${projectId}`);
-      const json = await res.json();
-      if (json.success) return json.data;
-      return [];
+      return await modelsService.listModels({ projectId });
     } catch (err) {
       console.error('Failed to load models:', err);
+      return [];
+    }
+  },
+
+  // Variant used by the Global Canvas. Asks the API for models with
+  // their real tables and relationships instead of lightweight stubs
+  // (which is what listing screens want for speed).
+  loadModelsFull: async (projectId) => {
+    try {
+      return await modelsService.listModels({ projectId, full: true });
+    } catch (err) {
+      console.error('Failed to load full models:', err);
       return [];
     }
   },
@@ -146,17 +147,14 @@ export const useModelStore = create<ModelStore>((set, get) => ({
   loadModel: async (modelId) => {
     set({ loading: true });
     try {
-      const res = await fetch(`/api/models/${modelId}`);
-      const json = await res.json();
-      if (json.success) {
-        set({
-          currentModel: json.data,
-          tables: json.data.tables || [],
-          relationships: json.data.relationships || [],
-          views: json.data.views || [],
-          domainCatalog: json.data.domainCatalog || [],
-        });
-      }
+      const model = await modelsService.getModel(modelId);
+      set({
+        currentModel: model,
+        tables: model.tables || [],
+        relationships: model.relationships || [],
+        views: model.views || [],
+        domainCatalog: model.domainCatalog || [],
+      });
     } catch (err) {
       console.error('Failed to load model:', err);
     } finally {
@@ -166,14 +164,7 @@ export const useModelStore = create<ModelStore>((set, get) => ({
 
   createModel: async (data) => {
     try {
-      const res = await fetch('/api/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      if (json.success) return json.data;
-      return null;
+      return await modelsService.createModel(data);
     } catch (err) {
       console.error('Failed to create model:', err);
       return null;
@@ -185,10 +176,11 @@ export const useModelStore = create<ModelStore>((set, get) => ({
     if (!currentModel) return;
     set({ saving: true });
     try {
-      await fetch(`/api/models/${currentModel.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tables, relationships, views, domainCatalog }),
+      await modelsService.updateModel(currentModel.id, {
+        tables,
+        relationships,
+        views,
+        domainCatalog,
       });
     } catch (err) {
       console.error('Failed to save model:', err);
@@ -199,9 +191,8 @@ export const useModelStore = create<ModelStore>((set, get) => ({
 
   deleteModel: async (id) => {
     try {
-      const res = await fetch(`/api/models/${id}`, { method: 'DELETE' });
-      const json = await res.json();
-      return json.success;
+      await modelsService.deleteModel(id);
+      return true;
     } catch {
       return false;
     }

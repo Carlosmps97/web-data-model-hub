@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
+import { modelsService } from '@/services';
 import { useModelStore } from '@/store/useModelStore';
 import type { DataModel } from '@/types/model';
 
@@ -60,24 +61,20 @@ export default function DashboardPage() {
 
       for (const project of projects) {
         try {
-          const listRes = await fetch(`/api/models?projectId=${project.id}`);
-          const listJson = await listRes.json();
-          if (!listJson.success) continue;
-          const models: DataModel[] = listJson.data;
+          // One round-trip per project: `full: true` hydrates tables
+          // and relationships server-side so the dashboard no longer
+          // fires N+1 requests to `/api/models/:id`.
+          const models = await modelsService.listModels({
+            projectId: project.id,
+            full: true,
+          });
           totalModels += models.length;
 
-          // Fetch each model for full contents
-          for (const m of models) {
-            try {
-              const detailRes = await fetch(`/api/models/${m.id}`);
-              const detailJson = await detailRes.json();
-              if (!detailJson.success) continue;
-              const full: DataModel = detailJson.data;
-              totalTables += full.tables.length;
-              totalRelationships += full.relationships.length;
-              totalColumns += full.tables.reduce((sum, t) => sum + t.columns.length, 0);
-              recentCandidates.push({ projectId: project.id, projectName: project.name, model: full });
-            } catch { /* skip */ }
+          for (const full of models) {
+            totalTables += full.tables.length;
+            totalRelationships += full.relationships.length;
+            totalColumns += full.tables.reduce((sum, t) => sum + t.columns.length, 0);
+            recentCandidates.push({ projectId: project.id, projectName: project.name, model: full });
           }
         } catch { /* skip */ }
       }

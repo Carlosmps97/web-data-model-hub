@@ -25,12 +25,22 @@ import ViewNodeComponent from './ViewNode';
 import AnimatedEREdge from './AnimatedEdge';
 import NamespaceNode from './NamespaceNode';
 import AutoArrangePopover, { type LayoutAlgorithm } from './AutoArrangePopover';
-import { layoutLeftRight, layoutSnowflake, layoutCompact } from '../utils/layoutAlgorithms';
+import { layoutLeftRight, layoutCompact } from '../utils/layoutAlgorithms';
 import type { TableModel, Relationship, ViewModel, DatabaseEngine } from '@/types/model';
 
 // ── Layout constants (must match TableNode) ──
 const NODE_WIDTH = 260;
 const VIEW_NODE_WIDTH = 280;
+
+/**
+ * Stable empty-array singleton used as the default for optional array
+ * props. Returning `[]` literal from a default parameter creates a new
+ * reference on every render, which — when fed into a `useEffect`
+ * dependency list (see the tables→nodes sync below) — triggers an infinite
+ * update loop. Keeping this constant module-scoped guarantees referential
+ * stability across renders.
+ */
+const EMPTY_VIEWS: ViewModel[] = [];
 
 // ── Register custom types once ──
 const nodeTypes: NodeTypes = {
@@ -72,6 +82,7 @@ interface DiagramCanvasProps {
   selectedTableId: string | null;
   onSelectTable: (id: string | null) => void;
   onEditTable?: (id: string) => void;
+  onDeleteTable?: (id: string) => void;
   onEditView?: (id: string) => void;
   /** Called when user creates a new relationship by dragging column handles. */
   onAddRelationship?: (rel: Relationship) => void;
@@ -84,10 +95,11 @@ interface DiagramCanvasProps {
 function DiagramCanvasInner({
   tables,
   relationships,
-  views = [],
+  views = EMPTY_VIEWS,
   selectedTableId,
   onSelectTable,
   onEditTable,
+  onDeleteTable,
   onEditView,
   onAddRelationship,
   onRemoveRelationship,
@@ -154,8 +166,11 @@ function DiagramCanvasInner({
     const structChanged = currFP !== prevStructRef.current;
     prevStructRef.current = currFP;
 
-    // Compute smart positions when structure changes and no explicit positions given
-    const autoPositions = structChanged && !tablePositions ? layoutLeftRight(tables, relationships) : {};
+    // Compute smart positions when structure changes and no explicit positions
+    // given. `layoutCompact` is the default because it handles disconnected
+    // models (no FKs) gracefully AND degrades into a masonry pack when the
+    // graph has no hierarchy.
+    const autoPositions = structChanged && !tablePositions ? layoutCompact(tables, relationships) : {};
 
     setNodes(prev => {
       const existingMap = new Map(prev.map(n => [n.id, n]));
@@ -195,6 +210,7 @@ function DiagramCanvasInner({
           selected: table.id === selectedTableId || table.id === hoveredTableId,
           activeRelationColumns: activeCols ? Array.from(activeCols) : [],
           onEditTable,
+          onDeleteTable,
         };
 
         if (existing && !structChanged) {
@@ -237,7 +253,7 @@ function DiagramCanvasInner({
 
       return result;
     });
-  }, [tables, relationships, views, selectedTableId, hoveredTableId, activeColsByTable, setNodes, getStructFingerprint, onEditTable, onEditView, namespaces, namespaceFP, tablePositions]);
+  }, [tables, relationships, views, selectedTableId, hoveredTableId, activeColsByTable, setNodes, getStructFingerprint, onEditTable, onDeleteTable, onEditView, namespaces, namespaceFP, tablePositions]);
 
   // ── Build tableId → namespaceId map for cross-model detection ──
   const tableNamespace = useMemo(() => {
@@ -410,9 +426,6 @@ function DiagramCanvasInner({
       switch (algorithm) {
         case 'left-right':
           positions = layoutLeftRight(tables, relationships);
-          break;
-        case 'snowflake':
-          positions = layoutSnowflake(tables, relationships);
           break;
         case 'compact':
           positions = layoutCompact(tables, relationships);

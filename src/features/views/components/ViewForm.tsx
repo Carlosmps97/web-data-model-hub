@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
+import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
 import type { TableModel, ViewModel, ViewColumnTransform, ViewType } from '@/types/model';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -46,6 +47,7 @@ export default function ViewForm({ view, tables, onSave, onCancel, onDelete }: V
   // ── UI state ──────────────────────────────────────────────────────────
   const [tab, setTab] = useState<'info' | 'columns' | 'filters'>('info');
   const [error, setError] = useState('');
+  const [pendingDelete, setPendingDelete] = useState(false);
 
   // Build initial columns from source table when source changes
   const sourceTable = tables.find((t) => t.id === sourceTableId) ?? null;
@@ -352,7 +354,11 @@ export default function ViewForm({ view, tables, onSave, onCancel, onDelete }: V
               type="button"
               className="btn btn-danger btn-sm"
               onClick={() => {
-                if (confirm('¿Eliminar esta vista?')) onDelete(view.id);
+                if (shouldSkipConfirm('view-form:delete-view')) {
+                  onDelete(view.id);
+                  return;
+                }
+                setPendingDelete(true);
               }}
             >
               Eliminar
@@ -366,6 +372,24 @@ export default function ViewForm({ view, tables, onSave, onCancel, onDelete }: V
           </button>
         </div>
       </div>
+      <ConfirmDialog
+        open={pendingDelete}
+        title="Eliminar vista"
+        message={
+          view ? (
+            <>¿Eliminar la vista <strong>{view.name}</strong>? Esta acción no se puede deshacer.</>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        variant="danger"
+        dontAskKey="view-form:delete-view"
+        onConfirm={() => {
+          setPendingDelete(false);
+          if (view && onDelete) onDelete(view.id);
+        }}
+        onCancel={() => setPendingDelete(false)}
+      />
     </form>
   );
 }

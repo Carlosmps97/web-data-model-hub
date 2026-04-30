@@ -18,7 +18,7 @@ import type {
   GuidelinesUploadResponse,
   HealthResponse,
   ModelingResponse,
-} from './types';
+} from '@/lib/agent/types';
 
 /** Prefijo del proxy de Next. */
 const AGENT_API_BASE = '/api/agent';

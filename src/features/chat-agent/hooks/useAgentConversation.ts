@@ -25,7 +25,7 @@ import {
   generateModel,
   uploadGuidelines,
   type GenerateModelInput,
-} from '@/lib/agent/client';
+} from '@/services/agent.service';
 import { toAgentEngine } from '@/lib/agent/mapping';
 import type {
   AgentChatMessage,

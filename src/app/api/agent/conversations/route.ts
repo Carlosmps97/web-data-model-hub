@@ -4,7 +4,7 @@
 // El backend devuelve 201 si creó la conversación, o 200 si ya existía
 // (es idempotente). El status se reenvía verbatim.
 import type { NextRequest } from 'next/server';
-import { proxyToBackend } from '@/lib/agent/server';
+import { proxyToBackend } from '@/server/agent/proxy';
 
 export const dynamic = 'force-dynamic';
 

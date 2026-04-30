@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useModelStore } from '@/store/useModelStore';
+import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
 import type { DomainDefinition, SubdomainDefinition } from '@/types/model';
 
 // ─── Palette de colores predefinidos para dominios ─────────────────────────
@@ -38,6 +39,9 @@ export default function DomainManager({ onClose }: DomainManagerProps) {
   const [subCode, setSubCode] = useState('');
   const [subSchema, setSubSchema] = useState('');
   const [editingSubId, setEditingSubId] = useState<string | null>(null);
+
+  // ── Confirm-dialog state ───────────────────────────────────────────────
+  const [pendingDomainDelete, setPendingDomainDelete] = useState<{ id: string; name: string } | null>(null);
 
   const startNewDomain = () => {
     setIsAdding(true);
@@ -98,11 +102,19 @@ export default function DomainManager({ onClose }: DomainManagerProps) {
     }
   };
 
-  const deleteDomain = (id: string) => {
-    if (!confirm('¿Eliminar este dominio? Las tablas que lo referencien quedarán sin dominio asignado.')) return;
+  const performDomainDelete = (id: string) => {
     removeDomain(id);
     setSelectedId(domainCatalog.find((d) => d.id !== id)?.id ?? null);
     setIsAdding(false);
+  };
+
+  const deleteDomain = (id: string) => {
+    if (shouldSkipConfirm('domain-manager:delete-domain')) {
+      performDomainDelete(id);
+      return;
+    }
+    const d = domainCatalog.find((x) => x.id === id);
+    setPendingDomainDelete({ id, name: d?.name ?? 'this domain' });
   };
 
   // ── Subdomain operations ───────────────────────────────────────────────
@@ -337,6 +349,28 @@ export default function DomainManager({ onClose }: DomainManagerProps) {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={pendingDomainDelete !== null}
+        title="Eliminar dominio"
+        message={
+          pendingDomainDelete ? (
+            <>
+              ¿Eliminar el dominio <strong>{pendingDomainDelete.name}</strong>? Las tablas
+              que lo referencien quedarán sin dominio asignado.
+            </>
+          ) : null
+        }
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        variant="danger"
+        dontAskKey="domain-manager:delete-domain"
+        onConfirm={() => {
+          if (!pendingDomainDelete) return;
+          performDomainDelete(pendingDomainDelete.id);
+          setPendingDomainDelete(null);
+        }}
+        onCancel={() => setPendingDomainDelete(null)}
+      />
     </div>
   );
 }

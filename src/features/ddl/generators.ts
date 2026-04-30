@@ -239,6 +239,19 @@ function buildColumnLine(col: TableColumn, ctx: GenContext): string {
   if (col.isNullable === false || col.isPrimaryKey) parts.push('NOT NULL');
   if (col.defaultValue) parts.push(`DEFAULT ${formatDefault(col.defaultValue, type)}`);
 
+  // Databricks / MySQL support inline COMMENT per column. For Postgres/Oracle
+  // the comment is emitted as a separate `COMMENT ON COLUMN` statement
+  // (handled in `appendComments`), so we skip it here for those engines.
+  if (ctx.options.emitComments && col.functionalDefinition) {
+    if (
+      engine === 'databricks_sql' ||
+      engine === 'databricks' ||
+      engine === 'mysql'
+    ) {
+      parts.push(`COMMENT '${escapeSqlLiteral(col.functionalDefinition)}'`);
+    }
+  }
+
   return parts.join(' ');
 }
 

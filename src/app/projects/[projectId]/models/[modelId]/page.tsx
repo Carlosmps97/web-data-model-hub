@@ -9,11 +9,16 @@ import TableForm from '@/features/table-editor/components/TableForm';
 import DomainManager from '@/features/domains/components/DomainManager';
 import ViewForm from '@/features/views/components/ViewForm';
 import ExcelImportModal from '@/features/excel-import/components/ExcelImportModal';
+import CreateFromSqlModal from '@/features/table-editor/components/CreateFromSqlModal';
 import DBMLEditorPanel from '@/features/table-editor/components/DBMLEditorPanel';
 import TablesListView from '@/features/table-editor/components/TablesListView';
 import ChatPanel from '@/features/chat-agent/components/ChatPanel';
+import LeftPanelResizer from '@/components/layout/LeftPanelResizer';
 import EngineSelect from '@/features/engines/components/EngineSelect';
 import DDLPreviewModal, { type DDLScope } from '@/features/ddl/components/DDLPreviewModal';
+import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
+import { projectsService, modelsService } from '@/services';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
 import { modelingResponseToCanvas, fromAgentEngine } from '@/lib/agent/mapping';
@@ -60,7 +65,13 @@ export default function ModelEditorPage({ params }: PageProps) {
     saving,
   } = useModelStore();
 
-  const { selectedTableId, setSelectedTable, chatPanelOpen, setChatPanelOpen } = useUIStore();
+  const { selectedTableId, setSelectedTable, chatPanelOpen, setChatPanelOpen, leftPanelWidth } = useUIStore();
+
+  // Read-only flag: the auth store resolves the user's effective
+  // access level for THIS specific model. Viewers get the full UI but
+  // all mutation controls are either hidden or disabled with a tooltip.
+  const canEdit = useAuthStore((s) => s.canEditModel(modelId, projectId));
+  const readOnly = !canEdit;
 
   const [loaded, setLoaded] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -76,19 +87,16 @@ export default function ModelEditorPage({ params }: PageProps) {
   const [showTableForm, setShowTableForm] = useState(false);
   const [editingTable, setEditingTable] = useState<TableModel | null>(null);
   const [showExcelImport, setShowExcelImport] = useState(false);
+  const [showSqlCreate, setShowSqlCreate] = useState(false);
   const [ddlScope, setDdlScope] = useState<DDLScope | null>(null);
+  const [pendingTableDelete, setPendingTableDelete] = useState<{ id: string; name: string } | null>(null);
 
   // ── Load project + model ──
   useEffect(() => {
     async function load() {
       try {
-        const projRes = await fetch(`/api/projects/${projectId}`);
-        const projJson = await projRes.json();
-        if (!projJson.success) {
-          router.push('/');
-          return;
-        }
-        setCurrentProject(projJson.data);
+        const proj = await projectsService.getProject(projectId);
+        setCurrentProject(proj);
 
         await loadModel(modelId);
         setLoaded(true);
@@ -166,6 +174,24 @@ export default function ModelEditorPage({ params }: PageProps) {
     setShowExcelImport(false);
   };
 
+  // Bridge from the SQL-to-Table modal. Persists the newly inferred
+  // table plus whatever JOIN-derived relationships the user confirmed
+  // (we skip duplicates of relationships that already exist, comparing
+  // by both id-match and composite (src, src_col, tgt, tgt_col) key).
+  const handleCreateFromSql = (payload: { table: TableModel; relationships: Relationship[] }) => {
+    addTable(payload.table);
+    const existingKeys = new Set(
+      relationships.map((r) =>
+        `${r.sourceTable}.${r.sourceColumn}->${r.targetTable}.${r.targetColumn}`.toLowerCase(),
+      ),
+    );
+    payload.relationships.forEach((rel) => {
+      const key = `${rel.sourceTable}.${rel.sourceColumn}->${rel.targetTable}.${rel.targetColumn}`.toLowerCase();
+      if (!existingKeys.has(key)) addRelationship(rel);
+    });
+    setShowSqlCreate(false);
+  };
+
   // DBML Code tab applies a full replacement of the model.
   // If the DBML source declared a Project { database_type: ... } block, we also
   // update the model's engine to match.
@@ -189,10 +215,18 @@ export default function ModelEditorPage({ params }: PageProps) {
     }
   };
 
-  const handleDeleteTable = (id: string) => {
-    if (!confirm('Delete this table? This cannot be undone.')) return;
+  const performTableDelete = (id: string) => {
     removeTable(id);
     if (selectedTableId === id) setSelectedTable(null);
+  };
+
+  const handleDeleteTable = (id: string) => {
+    if (shouldSkipConfirm('model-editor:delete-table')) {
+      performTableDelete(id);
+      return;
+    }
+    const t = tables.find((x) => x.id === id);
+    setPendingTableDelete({ id, name: t?.name ?? 'this table' });
   };
 
   const handleNewTable = () => {
@@ -205,11 +239,7 @@ export default function ModelEditorPage({ params }: PageProps) {
     // Optimistic update
     setCurrentModel({ ...currentModel, engine: engine ?? undefined });
     try {
-      await fetch(`/api/models/${currentModel.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ engine: engine ?? null }),
-      });
+      await modelsService.updateModel(currentModel.id, { engine: engine ?? undefined });
     } catch (err) {
       console.error('Failed to update engine:', err);
     }
@@ -256,7 +286,7 @@ export default function ModelEditorPage({ params }: PageProps) {
   // ── Loading state ──
   if (!loaded) {
     return (
-      <AppLayout>
+      <AppLayout fixedViewport>
         <div className="flex-center" style={{ height: '100vh' }}>
           <div style={{ textAlign: 'center' }}>
             <div className="skeleton" style={{ width: '200px', height: '20px', marginBottom: 'var(--space-3)', margin: '0 auto' }} />
@@ -268,7 +298,7 @@ export default function ModelEditorPage({ params }: PageProps) {
   }
 
   return (
-    <AppLayout>
+    <AppLayout fixedViewport>
       {/* ──────────────────────────────────────────────────────────────
           Editor Header — two well-spaced rows:
             Row 1 (identity):  back · clickable breadcrumb · saved · engine
@@ -320,6 +350,7 @@ export default function ModelEditorPage({ params }: PageProps) {
               value={currentModel?.engine ?? null}
               onChange={handleUpdateEngine}
               size="md"
+              disabled={readOnly}
             />
           </div>
         </div>
@@ -367,7 +398,8 @@ export default function ModelEditorPage({ params }: PageProps) {
             className="ed-action-btn"
             onClick={() => setShowDomainManager(true)}
             type="button"
-            title="Gestionar dominios y subdominios del modelo"
+            title={readOnly ? 'Solo lectura — no se puede editar el catálogo de dominios' : 'Gestionar dominios y subdominios del modelo'}
+            disabled={readOnly}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <circle cx="12" cy="12" r="3"/>
@@ -388,8 +420,8 @@ export default function ModelEditorPage({ params }: PageProps) {
             className="ed-action-btn"
             onClick={() => { setEditingView(null); setShowViewForm(true); }}
             type="button"
-            title="Crear una vista SQL derivada de una tabla física"
-            disabled={tables.length === 0}
+            title={readOnly ? 'Solo lectura — no se puede crear vistas' : 'Crear una vista SQL derivada de una tabla física'}
+            disabled={readOnly || tables.length === 0}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <ellipse cx="12" cy="12" rx="9" ry="3"/>
@@ -406,6 +438,8 @@ export default function ModelEditorPage({ params }: PageProps) {
             className="ed-action-btn"
             onClick={() => setShowExcelImport(true)}
             type="button"
+            title={readOnly ? 'Solo lectura — no se puede importar' : 'Importar tablas desde un Excel'}
+            disabled={readOnly}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -416,11 +450,26 @@ export default function ModelEditorPage({ params }: PageProps) {
           </button>
 
           <button
+            className="ed-action-btn"
+            onClick={() => setShowSqlCreate(true)}
+            type="button"
+            title={readOnly ? 'Solo lectura — no se puede crear tablas' : 'Crear una tabla a partir de una consulta SQL, heredando columnas de tablas existentes'}
+            disabled={readOnly}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3" />
+              <path d="M3 5v14a9 3 0 0 0 18 0V5" />
+              <path d="M3 12a9 3 0 0 0 18 0" />
+            </svg>
+            From SQL
+          </button>
+
+          <button
             className={`ed-action-btn ed-save-btn ${isDirty ? 'dirty' : saving ? 'saving' : 'saved'}`}
             onClick={() => saveModel()}
             type="button"
-            disabled={saving || tables.length === 0}
-            title={isDirty ? 'Hay cambios sin guardar' : 'Todo guardado'}
+            disabled={readOnly || saving || tables.length === 0}
+            title={readOnly ? 'Solo lectura — no se puede guardar' : isDirty ? 'Hay cambios sin guardar' : 'Todo guardado'}
           >
             {saving ? (
               <>
@@ -489,6 +538,7 @@ export default function ModelEditorPage({ params }: PageProps) {
               onDownloadTableDDL={(t) => setDdlScope({ kind: 'table', table: t })}
               onDownloadDomainDDL={(d) => setDdlScope({ kind: 'domain', domain: d })}
               onDownloadModelDDL={() => setDdlScope({ kind: 'all' })}
+              readOnly={readOnly}
             />
             {chatPanelOpen && (
               <ChatPanel
@@ -497,13 +547,14 @@ export default function ModelEditorPage({ params }: PageProps) {
                 modelId={modelId}
                 engine={currentModel?.engine ?? null}
                 onApplyModel={handleApplyAgentModel}
+                readOnly={readOnly}
               />
             )}
           </>
         ) : (
         <>
         {/* Left Panel — Construction Tools */}
-        <aside className="editor-left-panel">
+        <aside className="editor-left-panel" style={{ width: leftPanelWidth }}>
           <div className="editor-tabs">
             <button
               className={`editor-tab ${leftTab === 'visual' ? 'active' : ''}`}
@@ -537,24 +588,26 @@ export default function ModelEditorPage({ params }: PageProps) {
                   <span style={{ fontSize: 'var(--text-sm)', fontWeight: 600 }}>
                     Tables ({tables.length})
                   </span>
-                  <button
-                    className="btn btn-ghost btn-icon btn-sm"
-                    onClick={() => { setEditingTable(null); setShowTableForm(true); }}
-                    title="Add table"
-                    type="button"
-                  >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="12" y1="5" x2="12" y2="19" />
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                    </svg>
-                  </button>
+                  {!readOnly && (
+                    <button
+                      className="btn btn-ghost btn-icon btn-sm"
+                      onClick={() => { setEditingTable(null); setShowTableForm(true); }}
+                      title="Add table"
+                      type="button"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
                 <div className="editor-entities-list">
                   {tables.length === 0 ? (
                     <div className="editor-entities-empty">
                       <p>No tables yet.</p>
                       <p style={{ marginTop: 'var(--space-2)' }}>
-                        Click the <strong>+</strong> button to add one, switch to the <strong>Code</strong> tab to write DBML, or use <strong>Import Excel</strong> from the toolbar.
+                        Click the <strong>+</strong> button to add one, switch to the <strong>Code</strong> tab to write DBML, or use <strong>Import Excel</strong> / <strong>From SQL</strong> from the toolbar.
                       </p>
                     </div>
                   ) : (
@@ -585,10 +638,14 @@ export default function ModelEditorPage({ params }: PageProps) {
                 engine={currentModel?.engine}
                 modelName={currentModel?.name}
                 onApply={handleDBMLApply}
+                readOnly={readOnly}
               />
             )}
           </div>
         </aside>
+
+        {/* Drag handle to resize the left panel */}
+        <LeftPanelResizer />
 
         {/* Canvas */}
         <DiagramCanvas
@@ -598,6 +655,7 @@ export default function ModelEditorPage({ params }: PageProps) {
           selectedTableId={selectedTableId}
           onSelectTable={setSelectedTable}
           onEditTable={handleEditTable}
+          onDeleteTable={handleDeleteTable}
           onEditView={handleEditView}
           onAddRelationship={addRelationship}
           onRemoveRelationship={removeRelationship}
@@ -611,6 +669,7 @@ export default function ModelEditorPage({ params }: PageProps) {
             modelId={modelId}
             engine={currentModel?.engine ?? null}
             onApplyModel={handleApplyAgentModel}
+            readOnly={readOnly}
           />
         )}
         </>
@@ -647,6 +706,14 @@ export default function ModelEditorPage({ params }: PageProps) {
         isOpen={showExcelImport}
         onClose={() => setShowExcelImport(false)}
         onImport={handleImportExcel}
+      />
+
+      {/* Create-from-SQL Modal */}
+      <CreateFromSqlModal
+        isOpen={showSqlCreate}
+        existingTables={tables}
+        onCreate={handleCreateFromSql}
+        onCancel={() => setShowSqlCreate(false)}
       />
 
       {/* View Form Modal */}
@@ -690,6 +757,28 @@ export default function ModelEditorPage({ params }: PageProps) {
         relationships={relationships}
         defaultEngine={currentModel?.engine ?? null}
         scope={ddlScope ?? { kind: 'all' }}
+      />
+
+      <ConfirmDialog
+        open={pendingTableDelete !== null}
+        title="Delete table"
+        message={
+          pendingTableDelete ? (
+            <>
+              Delete <strong>{pendingTableDelete.name}</strong>? Its relationships
+              will also be removed. This cannot be undone.
+            </>
+          ) : null
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        dontAskKey="model-editor:delete-table"
+        onConfirm={() => {
+          if (!pendingTableDelete) return;
+          performTableDelete(pendingTableDelete.id);
+          setPendingTableDelete(null);
+        }}
+        onCancel={() => setPendingTableDelete(null)}
       />
     </AppLayout>
   );
