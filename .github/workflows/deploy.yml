@@ -100,11 +100,11 @@ jobs:
             --settings \
               WEBSITES_PORT=3000 \
               NODE_ENV=production \
-              AGENT_BACKEND_URL="${{ secrets.AGENT_BACKEND_URL }}" \
-              AGENT_BACKEND_MODEL_TIMEOUT_MS="${{ secrets.AGENT_BACKEND_MODEL_TIMEOUT_MS }}" \
-              AGENT_BACKEND_DEFAULT_TIMEOUT_MS="${{ secrets.AGENT_BACKEND_DEFAULT_TIMEOUT_MS }}" \
-              COSMOS_CONNECTION_STRING="${{ secrets.COSMOS_CONNECTION_STRING }}" \
-              COSMOS_DATABASE="${{ secrets.COSMOS_DATABASE }}"
+              AGENT_BACKEND_URL="${{ vars.AGENT_BACKEND_URL }}" \
+              AGENT_BACKEND_MODEL_TIMEOUT_MS="${{ vars.AGENT_BACKEND_MODEL_TIMEOUT_MS }}" \
+              AGENT_BACKEND_DEFAULT_TIMEOUT_MS="${{ vars.AGENT_BACKEND_DEFAULT_TIMEOUT_MS }}" \
+              COSMOS_CONNECTION_STRING="${{ vars.COSMOS_CONNECTION_STRING }}" \
+              COSMOS_DATABASE="${{ vars.COSMOS_DATABASE }}"
 
       # ── 7. Apuntar el App Service a la nueva imagen ───────────────────
       # Sin --container-registry-url: evita que el CLI intente buscar
