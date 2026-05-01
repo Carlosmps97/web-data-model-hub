@@ -22,7 +22,6 @@ import { AUTH_COOKIE_NAME, verifyAuthToken } from '@/server/auth/jwt';
 // Paths that skip the auth check entirely.
 const PUBLIC_PATHS = new Set<string>([
   '/login',
-  '/api/auth/login',
 ]);
 
 function isPublicPath(pathname: string): boolean {

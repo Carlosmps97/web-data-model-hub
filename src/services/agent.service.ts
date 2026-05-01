@@ -1,9 +1,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 //  Cliente HTTP del browser para el agent-modeler.
 //
-//  Llama SIEMPRE al proxy de Next.js bajo `/api/agent/*`. NUNCA toca al
-//  FastAPI directamente: la URL del backend es secreta para el cliente.
-//
+//  Llama directamente al backend FastAPI usando NEXT_PUBLIC_API_URL.
 //  Las funciones devuelven el body parseado o lanzan `AgentClientError`
 //  con `status`, `code` y `detail` para que el caller pueda discriminar
 //  errores semánticos (ej. 404 en GET /model = "todavía sin modelo").
@@ -20,8 +18,7 @@ import type {
   ModelingResponse,
 } from '@/lib/agent/types';
 
-/** Prefijo del proxy de Next. */
-const AGENT_API_BASE = '/api/agent';
+const AGENT_API_BASE = `${process.env.NEXT_PUBLIC_API_URL ?? ''}/api`;
 
 /** Error tipado que arrojan los helpers cuando el backend devuelve no-2xx. */
 export class AgentClientError extends Error {
