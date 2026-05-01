@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * GET /api/auth/me — returns the current session user, or 401 if the
  * session is invalid / expired / deactivated.

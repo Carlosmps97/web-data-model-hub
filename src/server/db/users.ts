@@ -47,8 +47,14 @@ function toRecord(doc: any): UserRecord {
 
 export async function listUsers(): Promise<UserRecord[]> {
   const db = await getDb();
-  const docs = await col(db).find({}).sort({ createdAt: 1 }).toArray();
-  return docs.map(toRecord);
+  // Cosmos DB for MongoDB (RU) rejects .sort() on fields without an explicit
+  // index. The users collection is always small, so we sort in JS instead.
+  const docs = await col(db).find({}).toArray();
+  return docs
+    .map(toRecord)
+    .sort((a: UserRecord, b: UserRecord) =>
+      new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
 }
 
 export async function getUserById(id: string): Promise<UserRecord | null> {

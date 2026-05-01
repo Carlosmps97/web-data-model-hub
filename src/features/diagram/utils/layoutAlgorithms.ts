@@ -1,27 +1,34 @@
-import type { TableModel, Relationship } from '@/types/model';
+import type { TableModel, Relationship, ViewModel } from '@/types/model';
 
 // ── Dimension constants (must match CSS) ──
-const NODE_WIDTH = 260;
-const HEADER_H = 36;
-const ROW_H = 28;
-// Extra vertical budget added to a row when the column carries a
-// functionalDefinition rendered inline (up to 2 lines at ~13px line-height
-// plus the 2px gap from `.table-node-column { gap: 2px }`).
-const ROW_COMMENT_H = 28;
-const FOOTER_H = 28;
-const H_GAP = 100;
-const V_GAP = 60;
+const NODE_WIDTH  = 260;
+const VIEW_WIDTH  = 280;
+const HEADER_H    = 36;
+const ROW_H       = 28;
+// Functional definitions are only shown in the hover tooltip, not inline,
+// so we no longer need extra vertical budget per commented column.
+const FOOTER_H    = 28;
+const H_GAP       = 100;
+const V_GAP       = 60;
+// Gap between the rightmost table column and the views column.
+const TABLE_VIEW_GAP = 140;
 
-type Positions = Record<string, { x: number; y: number }>;
+export type Positions = Record<string, { x: number; y: number }>;
 
 function estimateHeight(table: TableModel): number {
-  const commented = table.columns.filter((c) => !!c.functionalDefinition).length;
   return (
     HEADER_H +
     table.columns.length * ROW_H +
-    commented * ROW_COMMENT_H +
     (table.functionalDefinition ? FOOTER_H : 0)
   );
+}
+
+// Estimate height of a view node (header + included columns + optional footer)
+function estimateViewHeight(view: ViewModel): number {
+  if (view.useCustomSql) return HEADER_H + 40 + FOOTER_H; // custom SQL indicator
+  const includedCols = view.columns.filter((c) => c.include).length;
+  const hasFooter = view.columns.some((c) => c.include && c.expression) || !!view.whereClause;
+  return HEADER_H + includedCols * ROW_H + (hasFooter ? FOOTER_H : 0);
 }
 
 // ── Helpers ──
@@ -325,4 +332,88 @@ export function layoutCompact(tables: TableModel[], relationships: Relationship[
 
   const numCols = pickCompactCols(sorted.length);
   return packSkyline(sorted, numCols, heights);
+}
+
+// ════════════════════════════════════════════════════
+// 3. VIEWS  (align views with their source table)
+// ════════════════════════════════════════════════════
+/**
+ * Positions view nodes to the right of the table column area, aligned
+ * vertically with their source table so the "derived from" edge is short
+ * and the visual hierarchy is clear.
+ *
+ * Strategy:
+ *   1. Find the rightmost X coordinate among all table positions.
+ *   2. Place all views in a single views column at (maxTableX + NODE_WIDTH
+ *      + TABLE_VIEW_GAP), which keeps them clearly separated from tables.
+ *   3. Group views by source table. Within each group, stack vertically
+ *      starting at the source table's Y. Groups that would overlap are
+ *      pushed down past the previous group's bottom edge.
+ *   4. Views without a known source table are appended at the bottom.
+ *
+ * @param views          All view models to position.
+ * @param tablePositions Pre-computed table positions from layoutCompact /
+ *                       layoutLeftRight.
+ * @param tables         Full table list (to look up source table height
+ *                       for offset calculations).
+ */
+export function layoutViews(
+  views: ViewModel[],
+  tablePositions: Positions,
+  tables: TableModel[],
+): Positions {
+  if (views.length === 0) return {};
+
+  // X for the views column: right of the furthest table node.
+  const tableXValues = Object.values(tablePositions).map((p) => p.x);
+  const maxTableX = tableXValues.length > 0 ? Math.max(...tableXValues) : CANVAS_PAD_X;
+  const viewsX = maxTableX + NODE_WIDTH + TABLE_VIEW_GAP;
+
+  // Build lookup: tableId → its position
+  const tableById = new Map(tables.map((t) => [t.id, t]));
+
+  // Group views by sourceTableId (preserving insertion order for determinism)
+  const grouped = new Map<string, ViewModel[]>();
+  const orphans: ViewModel[] = [];
+  for (const view of views) {
+    if (view.sourceTableId && tablePositions[view.sourceTableId] !== undefined) {
+      const group = grouped.get(view.sourceTableId) ?? [];
+      group.push(view);
+      grouped.set(view.sourceTableId, group);
+    } else {
+      orphans.push(view);
+    }
+  }
+
+  // Sort groups by their source table's Y position so the view column flows
+  // top-to-bottom in the same order as the tables on the left.
+  const sortedGroups = [...grouped.entries()].sort(
+    ([aId], [bId]) =>
+      (tablePositions[aId]?.y ?? 0) - (tablePositions[bId]?.y ?? 0),
+  );
+
+  const positions: Positions = {};
+  let yFloor = CANVAS_PAD_Y; // minimum Y for the next group to avoid overlap
+
+  for (const [sourceId, group] of sortedGroups) {
+    const srcPos = tablePositions[sourceId];
+    // Align the first view of the group with its source table's Y, but
+    // never go above the previous group's bottom.
+    let y = Math.max(srcPos.y, yFloor);
+
+    for (const view of group) {
+      positions[view.id] = { x: viewsX, y };
+      const h = estimateViewHeight(view);
+      y += h + V_GAP;
+    }
+    yFloor = y; // next group must start at or below this
+  }
+
+  // Orphan views (source table not positioned or unknown) go below everything
+  for (const view of orphans) {
+    positions[view.id] = { x: viewsX, y: yFloor };
+    yFloor += estimateViewHeight(view) + V_GAP;
+  }
+
+  return positions;
 }

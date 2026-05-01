@@ -177,14 +177,6 @@ function TableNodeComponent({ data }: NodeProps) {
                 <span className="table-node-col-type">{col.dataType}</span>
               </div>
 
-              {/* Functional definition — visible inline debajo del nombre
-                  (truncado a 2 líneas; el tooltip al hover muestra el texto completo). */}
-              {col.functionalDefinition && (
-                <div className="table-node-col-comment" title={col.functionalDefinition}>
-                  {col.functionalDefinition}
-                </div>
-              )}
-
               {/* Right handle (source) — invisible, functional */}
               <Handle
                 type="source"

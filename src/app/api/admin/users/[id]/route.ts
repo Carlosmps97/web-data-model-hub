@@ -33,6 +33,8 @@ function toAuthUser(r: UserRecord): AuthUser {
   };
 }
 
+export const dynamic = 'force-dynamic';
+
 export async function PUT(
   req: Request,
   ctx: { params: Promise<{ id: string }> },
@@ -126,7 +128,11 @@ export async function PUT(
   } catch (err) {
     const authResp = handleAuthError(err);
     if (authResp) return authResp;
-    throw err;
+    console.error('[admin/users/[id] PUT]', err);
+    return NextResponse.json(
+      { success: false, error: 'Internal server error.' },
+      { status: 500 },
+    );
   }
 }
 
@@ -154,7 +160,11 @@ export async function DELETE(
   } catch (err) {
     const authResp = handleAuthError(err);
     if (authResp) return authResp;
-    throw err;
+    console.error('[admin/users/[id] DELETE]', err);
+    return NextResponse.json(
+      { success: false, error: 'Internal server error.' },
+      { status: 500 },
+    );
   }
 }
 

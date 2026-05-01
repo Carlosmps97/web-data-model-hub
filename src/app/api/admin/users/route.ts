@@ -32,6 +32,8 @@ function toAuthUser(r: UserRecord): AuthUser {
   };
 }
 
+export const dynamic = 'force-dynamic';
+
 export async function GET() {
   try {
     await requireAdmin();
@@ -41,7 +43,11 @@ export async function GET() {
   } catch (err) {
     const authResp = handleAuthError(err);
     if (authResp) return authResp;
-    throw err;
+    console.error('[admin/users GET]', err);
+    return NextResponse.json(
+      { success: false, error: 'Internal server error.' },
+      { status: 500 },
+    );
   }
 }
 
@@ -93,7 +99,11 @@ export async function POST(req: Request) {
   } catch (err) {
     const authResp = handleAuthError(err);
     if (authResp) return authResp;
-    throw err;
+    console.error('[admin/users POST]', err);
+    return NextResponse.json(
+      { success: false, error: 'Internal server error.' },
+      { status: 500 },
+    );
   }
 }
 

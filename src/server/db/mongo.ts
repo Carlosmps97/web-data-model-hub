@@ -248,7 +248,12 @@ export async function getModels(
   const filter = projectId
     ? { projectId, flgactive: { $ne: false } }
     : { flgactive: { $ne: false } };
-  const docs = await col(db, 'models').find(filter).sort({ updatedAt: -1 }).toArray();
+  // Cosmos DB for MongoDB (RU) rejects .sort() without an explicit index.
+  // Sort in JavaScript — the models collection stays small per project.
+  const docs = await col(db, 'models').find(filter).toArray();
+  docs.sort((a: any, b: any) =>
+    new Date(b.updatedAt ?? 0).getTime() - new Date(a.updatedAt ?? 0).getTime()
+  );
   if (docs.length === 0) return [];
 
   const modelIds = docs.map((d: any) => d._id);

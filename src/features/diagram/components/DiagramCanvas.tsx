@@ -25,7 +25,7 @@ import ViewNodeComponent from './ViewNode';
 import AnimatedEREdge from './AnimatedEdge';
 import NamespaceNode from './NamespaceNode';
 import AutoArrangePopover, { type LayoutAlgorithm } from './AutoArrangePopover';
-import { layoutLeftRight, layoutCompact } from '../utils/layoutAlgorithms';
+import { layoutLeftRight, layoutCompact, layoutViews } from '../utils/layoutAlgorithms';
 import type { TableModel, Relationship, ViewModel, DatabaseEngine } from '@/types/model';
 
 // ── Layout constants (must match TableNode) ──
@@ -172,6 +172,13 @@ function DiagramCanvasInner({
     // graph has no hierarchy.
     const autoPositions = structChanged && !tablePositions ? layoutCompact(tables, relationships) : {};
 
+    // View positions: computed from the resolved table positions so views
+    // align with their source table on the right side of the canvas.
+    const resolvedTablePositions = tablePositions ?? autoPositions;
+    const autoViewPositions = structChanged && views.length > 0
+      ? layoutViews(views, resolvedTablePositions, tables)
+      : {};
+
     setNodes(prev => {
       const existingMap = new Map(prev.map(n => [n.id, n]));
 
@@ -229,8 +236,8 @@ function DiagramCanvasInner({
         }
       });
 
-      // 3. View nodes — placed below their source table
-      views.forEach((view, vIdx) => {
+      // 3. View nodes — smart layout via layoutViews (aligned with source table)
+      views.forEach((view) => {
         const srcTable = tables.find((t) => t.id === view.sourceTableId);
         const existingView = existingMap.get(view.id);
         const viewData = {
@@ -239,13 +246,13 @@ function DiagramCanvasInner({
           selected: false,
           onEditView,
         };
-        const fallbackPos = srcTable
-          ? { x: (autoPositions[srcTable.id]?.x ?? 50) + NODE_WIDTH + 60, y: (autoPositions[srcTable.id]?.y ?? 50) + vIdx * 40 }
-          : { x: 50 + vIdx * (VIEW_NODE_WIDTH + 40), y: 400 };
+        // Priority: existing drag position → layoutViews result → simple fallback
+        const smartPos = autoViewPositions[view.id];
+        const fallbackPos = { x: (resolvedTablePositions[view.sourceTableId]?.x ?? 50) + NODE_WIDTH + 140, y: 60 };
         result.push({
           id: view.id,
           type: 'erView',
-          position: existingView?.position ?? fallbackPos,
+          position: existingView?.position ?? smartPos ?? fallbackPos,
           data: viewData,
           width: VIEW_NODE_WIDTH,
         });
@@ -422,15 +429,19 @@ function DiagramCanvasInner({
 
   const handleAutoArrange = useCallback(
     (algorithm: LayoutAlgorithm) => {
-      let positions: Record<string, { x: number; y: number }>;
+      let tablePos: Record<string, { x: number; y: number }>;
       switch (algorithm) {
         case 'left-right':
-          positions = layoutLeftRight(tables, relationships);
+          tablePos = layoutLeftRight(tables, relationships);
           break;
         case 'compact':
-          positions = layoutCompact(tables, relationships);
+          tablePos = layoutCompact(tables, relationships);
           break;
       }
+
+      // Also recompute view positions relative to the new table layout
+      const viewPos = layoutViews(views, tablePos, tables);
+      const positions = { ...tablePos, ...viewPos };
 
       setNodes(prev =>
         prev.map(n => {
@@ -443,7 +454,7 @@ function DiagramCanvasInner({
       // Fit view after layout with a small delay for rendering
       setTimeout(() => fitView({ padding: 0.3, maxZoom: 1.2, duration: 400 }), 50);
     },
-    [tables, relationships, setNodes, fitView],
+    [tables, views, relationships, setNodes, fitView],
   );
 
   // ── MiniMap node color ──

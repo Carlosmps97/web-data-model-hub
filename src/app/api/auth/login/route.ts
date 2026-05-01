@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic';
+
 /**
  * POST /api/auth/login — exchanges username+password for a session
  * cookie.
