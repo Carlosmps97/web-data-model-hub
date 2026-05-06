@@ -49,7 +49,16 @@ interface RequestOptions {
 export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, signal } = opts;
 
-  const init: RequestInit = { method, signal, headers: { ...headers } };
+  // The Next.js frontend (`:3000`) and the FastAPI backend (`:8000`) live on
+  // different origins. Without `credentials: 'include'` the browser neither
+  // sends nor accepts the `modeler-auth` session cookie on cross-origin
+  // requests, which would silently break every authenticated call.
+  const init: RequestInit = {
+    method,
+    signal,
+    credentials: 'include',
+    headers: { ...headers },
+  };
 
   if (body !== undefined) {
     init.body = typeof body === 'string' ? body : JSON.stringify(body);

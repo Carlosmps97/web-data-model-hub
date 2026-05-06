@@ -12,6 +12,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { TableModel, TableColumn, Relationship, DatabaseEngine } from '@/types/model';
+import { findColumnId, resolveColumnName } from '@/lib/columnRef';
 
 export interface DBMLParseResult {
   tables: TableModel[];
@@ -244,7 +245,7 @@ export function parseDBML(input: string): DBMLParseResult {
       const colMatch = line.match(/^(\S+)\s+(\S+(?:\([^)]*\))?)\s*(?:\[([^\]]*)\])?\s*(?:\/\/\s*(.*))?$/);
       if (colMatch) {
         const [, name, dataType, settings, comment] = colMatch;
-        const column: TableColumn = { name, dataType };
+        const column: TableColumn = { id: uuidv4(), name, dataType };
 
         if (settings) {
           // Split on commas that are NOT inside quotes
@@ -331,7 +332,26 @@ export function parseDBML(input: string): DBMLParseResult {
     errors.push({ line: lines.length, message: 'Unclosed multi-line Note block' });
   }
 
-  return { tables, relationships, errors, project };
+  // ---------- POST-PROCESS: resolve relationship column NAMES → column IDs ----------
+  // During the line-by-line parse we don't always have all tables available
+  // when a relationship is registered (e.g. an inline `ref: > other.col`
+  // may point forward to a table that hasn't been seen yet, or a
+  // standalone `Ref:` at the top of the file may forward-reference both
+  // endpoints). Once the full set of tables is known we walk every
+  // relationship and rewrite `sourceColumn` / `targetColumn` from the
+  // DBML-level physical name to the canonical `TableColumn.id` so the
+  // canvas edges bind to stable handles (see `src/lib/columnRef.ts`).
+  //
+  // If a column can't be resolved — e.g. cross-model reference to a
+  // table that isn't in this DBML — we leave the name in place so the
+  // user can still see the intent; the canvas will flag the orphan.
+  const resolvedRelationships = relationships.map((r) => ({
+    ...r,
+    sourceColumn: findColumnId(tables, r.sourceTable, r.sourceColumn) ?? r.sourceColumn,
+    targetColumn: findColumnId(tables, r.targetTable, r.targetColumn) ?? r.targetColumn,
+  }));
+
+  return { tables, relationships: resolvedRelationships, errors, project };
 }
 
 // ---------- GENERATOR ----------
@@ -448,7 +468,13 @@ export function generateDBML(
     lines.push('');
   }
 
-  // Standalone relationships not already expressed inline
+  // Standalone relationships not already expressed inline.
+  //
+  // Relationships now store `sourceColumn` / `targetColumn` as
+  // `TableColumn.id` (post column-id migration). DBML, by contrast,
+  // only speaks physical names, so we resolve both endpoints through
+  // `resolveColumnName` before emitting. Duplicate-detection also
+  // works on names so a rel that mirrors an inline FK is elided.
   const inlineFKs = new Set<string>();
   for (const table of tables) {
     for (const col of table.columns) {
@@ -459,17 +485,23 @@ export function generateDBML(
   }
 
   for (const rel of relationships) {
-    const key = `${rel.sourceTable}.${rel.sourceColumn}->${rel.targetTable}.${rel.targetColumn}`;
-    if (!inlineFKs.has(key)) {
-      const symbol = rel.type === 'one-to-one' ? '-' : rel.type === 'many-to-many' ? '<' : '>';
-      const crossHint =
-        !tableNames.has(rel.sourceTable) || !tableNames.has(rel.targetTable)
-          ? ' // cross-model'
-          : '';
-      lines.push(
-        `Ref: ${rel.sourceTable}.${rel.sourceColumn} ${symbol} ${rel.targetTable}.${rel.targetColumn}${crossHint}`
-      );
-    }
+    const srcColName = resolveColumnName(tables, rel.sourceTable, rel.sourceColumn);
+    const tgtColName = resolveColumnName(tables, rel.targetTable, rel.targetColumn);
+    // Orphan rels (column id no longer resolvable) are skipped silently —
+    // the canvas already flags them visually.
+    if (!srcColName || !tgtColName) continue;
+
+    const key = `${rel.sourceTable}.${srcColName}->${rel.targetTable}.${tgtColName}`;
+    if (inlineFKs.has(key)) continue;
+
+    const symbol = rel.type === 'one-to-one' ? '-' : rel.type === 'many-to-many' ? '<' : '>';
+    const crossHint =
+      !tableNames.has(rel.sourceTable) || !tableNames.has(rel.targetTable)
+        ? ' // cross-model'
+        : '';
+    lines.push(
+      `Ref: ${rel.sourceTable}.${srcColName} ${symbol} ${rel.targetTable}.${tgtColName}${crossHint}`
+    );
   }
 
   return lines.join('\n');

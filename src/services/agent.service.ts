@@ -69,6 +69,10 @@ async function jsonRequest<T>(
     headers,
     // Las llamadas son siempre dinámicas; nunca queremos cache.
     cache: 'no-store',
+    // El backend (FastAPI :8000) es cross-origin respecto al frontend
+    // (:3000). Sin `credentials: 'include'` el browser no envía el cookie
+    // `modeler-auth`, y toda request autenticada devolvería 401.
+    credentials: 'include',
   });
 
   if (!res.ok) throw await parseError(res);

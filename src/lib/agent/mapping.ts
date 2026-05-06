@@ -22,6 +22,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { v4 as uuidv4 } from 'uuid';
+import { findColumnId } from '@/lib/columnRef';
 import type {
   AgentColumn,
   AgentEngine,
@@ -141,6 +142,12 @@ export function agentColumnToTableColumn(col: AgentColumn): TableColumn {
   const fkRef = col.is_fk ? parseFkReference(col.fk_references) : undefined;
 
   return {
+    // Fresh id per column — the agent output is plain JSON and doesn't
+    // carry our canvas-internal identifiers. The backend normaliser
+    // assigns an id when persisting (see `models_db._replace_entities`
+    // and `db_models.TableColumnDoc.id`), but keeping a UUID here too
+    // means the model is immediately self-consistent before any save.
+    id: uuidv4(),
     name: col.column_name,
     dataType: parsed.dataType,
     ...(parsed.length !== undefined ? { length: parsed.length } : {}),
@@ -168,27 +175,31 @@ export function agentTableToTableModel(table: AgentTable): TableModel {
 }
 
 /**
- * Deriva `Relationship[]` a partir de los `fk_references` declarados en
- * las columnas del modelo del agente. Ignora FKs malformadas y FKs que
- * apuntan a tablas que no forman parte del modelo (que serían
- * referencias colgantes en el canvas).
+ * Deriva `Relationship[]` a partir de los `TableModel` ya convertidos.
+ *
+ * IMPORTANTE: esta función debe ejecutarse DESPUÉS de `agentTableToTableModel`
+ * porque las relaciones ahora referencian `TableColumn.id` (no el nombre).
+ * Leemos `foreignKeyRef` de cada columna (poblado por el mapper a partir
+ * de `AgentColumn.fk_references`) y resolvemos el nombre de la columna
+ * destino a un id vía `findColumnId`. FKs malformadas o que apuntan a
+ * tablas/columnas ausentes se ignoran silenciosamente.
  */
-export function agentTablesToRelationships(tables: AgentTable[]): Relationship[] {
-  const tableNames = new Set(tables.map((t) => t.table_name));
+export function tableModelsToRelationships(tables: TableModel[]): Relationship[] {
   const rels: Relationship[] = [];
 
   for (const table of tables) {
     for (const col of table.columns) {
-      if (!col.is_fk) continue;
-      const parsed = parseFkReference(col.fk_references);
-      if (!parsed) continue;
-      if (!tableNames.has(parsed.table)) continue;
+      if (!col.isForeignKey) continue;
+      const ref = col.foreignKeyRef;
+      if (!ref?.table || !ref?.column) continue;
+      const targetColId = findColumnId(tables, ref.table, ref.column);
+      if (!targetColId) continue;
       rels.push({
         id: uuidv4(),
-        sourceTable: table.table_name,
-        sourceColumn: col.column_name,
-        targetTable: parsed.table,
-        targetColumn: parsed.column,
+        sourceTable: table.name,
+        sourceColumn: col.id,
+        targetTable: ref.table,
+        targetColumn: targetColId,
         type: 'one-to-many',
       });
     }
@@ -209,6 +220,6 @@ export function modelingResponseToCanvas(
   response: ModelingResponse,
 ): { tables: TableModel[]; relationships: Relationship[] } {
   const tables = response.tables.map(agentTableToTableModel);
-  const relationships = agentTablesToRelationships(response.tables);
+  const relationships = tableModelsToRelationships(tables);
   return { tables, relationships };
 }

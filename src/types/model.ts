@@ -104,6 +104,18 @@ export interface DomainDefinition {
 // ─── Column ────────────────────────────────────────────────────────────────
 
 export interface TableColumn {
+  /**
+   * Stable identifier that survives column renames. All relationship
+   * references (`Relationship.sourceColumn` / `Relationship.targetColumn`)
+   * and React Flow handle IDs are keyed by this value — never by `name` —
+   * so the user can rename a column without invalidating edges, FK
+   * relationships or the canvas wiring.
+   *
+   * Columns authored before this field was introduced are backfilled on
+   * first read (see `src/lib/columnRef.ts::ensureColumnId`) and the
+   * backend migration script `scripts/backfill_column_ids.py`.
+   */
+  id: string;
   /** Physical column name (SQL). */
   name: string;
   /** Logical / business attribute name shown in logical view (e.g. "Código de Cliente"). */
@@ -189,9 +201,18 @@ export interface TableModel {
 
 export interface Relationship {
   id: string;
+  /** Table identity — accepts `TableModel.id` (preferred) or `TableModel.name` (legacy). */
   sourceTable: string;
+  /**
+   * Column identity of the source column. Since the column-ID migration
+   * this stores `TableColumn.id`; legacy relationships authored before
+   * the migration still carry `TableColumn.name` here and are resolved
+   * transparently by `src/lib/columnRef.ts::resolveColumnName`.
+   */
   sourceColumn: string;
+  /** See `sourceTable`. */
   targetTable: string;
+  /** See `sourceColumn` — also a column id. */
   targetColumn: string;
   type: 'one-to-one' | 'one-to-many' | 'many-to-many';
 }

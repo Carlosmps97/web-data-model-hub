@@ -100,6 +100,7 @@ export function sheetsToTables(sheets: ParsedSheet[]): TableModel[] {
     id: uuidv4(),
     name: sheet.sheetName,
     columns: sheet.columns.map((col): TableColumn => ({
+      id: uuidv4(),
       name: col.name,
       dataType: col.dataType,
       functionalDefinition: col.functionalDefinition || undefined,

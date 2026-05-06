@@ -131,7 +131,12 @@ function TableNodeComponent({ data }: NodeProps) {
           else if (col.isSurrogateKey) { iconLabel = 'SK'; iconClass = 'sk'; }
           else if (isPartitionCol) { iconLabel = 'PT'; iconClass = 'pk'; }
 
-          const isActiveRelation = activeRelCols.includes(col.name);
+          // `activeRelationColumns` now carries column IDs (kept in sync with
+          // `Relationship.sourceColumn`/`targetColumn`), so match against
+          // `col.id`. Falls back to name-match to stay compatible with legacy
+          // pre-migration relationships that still hold column names.
+          const isActiveRelation =
+            activeRelCols.includes(col.id) || activeRelCols.includes(col.name);
 
           return (
             <div
@@ -140,11 +145,13 @@ function TableNodeComponent({ data }: NodeProps) {
               onMouseEnter={() => setHoveredCol(idx)}
               onMouseLeave={() => setHoveredCol(null)}
             >
-              {/* Left handle (target) — invisible, functional */}
+              {/* Left handle (target) — invisible, functional.
+                  Handle id is keyed by `col.id` (NOT `col.name`) so
+                  edges survive column renames. */}
               <Handle
                 type="target"
                 position={Position.Left}
-                id={`${col.name}-target`}
+                id={`${col.id}-target`}
                 className="dbdiagram-handle"
               />
 
@@ -177,11 +184,13 @@ function TableNodeComponent({ data }: NodeProps) {
                 <span className="table-node-col-type">{col.dataType}</span>
               </div>
 
-              {/* Right handle (source) — invisible, functional */}
+              {/* Right handle (source) — invisible, functional.
+                  Handle id is keyed by `col.id` (NOT `col.name`) so
+                  edges survive column renames. */}
               <Handle
                 type="source"
                 position={Position.Right}
-                id={`${col.name}-source`}
+                id={`${col.id}-source`}
                 className="dbdiagram-handle"
               />
 

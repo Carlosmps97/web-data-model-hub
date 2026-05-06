@@ -22,6 +22,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
 import { modelingResponseToCanvas, fromAgentEngine } from '@/lib/agent/mapping';
+import { findColumnId } from '@/lib/columnRef';
 import type { ModelingResponse } from '@/lib/agent/types';
 import type { TableModel, Relationship, DatabaseEngine } from '@/types/model';
 
@@ -132,37 +133,104 @@ export default function ModelEditorPage({ params }: PageProps) {
   // ── Handlers ──
   const handleAddTable = (table: TableModel) => {
     if (editingTable) {
+      // Editing path.
+      //
+      // The previous implementation nuked every relationship where the
+      // edited table was the source and rebuilt them only from the
+      // form's `isForeignKey` columns. That silently dropped every
+      // relationship the user had drawn manually in the canvas (those
+      // edges live in `relationships` but don't set `isForeignKey` on
+      // the column itself), so any edit — even a tag change — erased
+      // the whole relational schema for that table.
+      //
+      // Conservative strategy used here:
+      //   1. Preserve every existing relationship.
+      //   2. If the table was renamed, cascade the new name into every
+      //      relationship that referenced the old name (as source or
+      //      target), so they keep pointing to the same table.
+      //   3. Add FK-derived relationships declared in the form only
+      //      when an equivalent relationship doesn't already exist.
+      //   4. Column renames are NOT auto-cascaded because without
+      //      stable per-column IDs we cannot reliably tell renames
+      //      apart from add+delete. If the user renames a column that
+      //      participates in a relationship, the relationship survives
+      //      pointing at the old column name — the canvas will warn
+      //      on the orphaned handle, making the inconsistency visible
+      //      instead of silently wiping the edge.
+      const oldName = editingTable.name;
+      const newName = table.name;
+      const renamed = oldName !== newName;
+
       updateTable(editingTable.id, table);
-      const newRels: Relationship[] = [];
+
+      const cascaded = renamed
+        ? relationships.map((r) => {
+            let next = r;
+            if (r.sourceTable === oldName || r.sourceTable === editingTable.id) {
+              next = { ...next, sourceTable: newName };
+            }
+            if (r.targetTable === oldName || r.targetTable === editingTable.id) {
+              next = { ...next, targetTable: newName };
+            }
+            return next;
+          })
+        : relationships;
+
+      // Resolve every FK declared in the form to column *ids*. The
+      // `foreignKeyRef` on the column still stores NAMES (that's the
+      // contract users enter in the form), so we look up the id in the
+      // target table via `findColumnId`. If the target column doesn't
+      // exist we skip the relationship silently rather than creating
+      // an orphan pointing at nothing.
+      const nextTables = tables.map((t) => (t.id === editingTable.id ? table : t));
+      const toAdd: Relationship[] = [];
       table.columns.forEach((col) => {
-        if (col.isForeignKey && col.foreignKeyRef?.table && col.foreignKeyRef?.column) {
-          newRels.push({
+        if (!col.isForeignKey || !col.foreignKeyRef?.table || !col.foreignKeyRef?.column) return;
+        const targetColId = findColumnId(
+          nextTables,
+          col.foreignKeyRef.table,
+          col.foreignKeyRef.column,
+        );
+        if (!targetColId) return;
+        const alreadyExists = cascaded.some(
+          (r) =>
+            r.sourceTable === newName &&
+            r.sourceColumn === col.id &&
+            r.targetTable === col.foreignKeyRef!.table &&
+            r.targetColumn === targetColId,
+        );
+        if (!alreadyExists) {
+          toAdd.push({
             id: uuidv4(),
-            sourceTable: table.name,
-            sourceColumn: col.name,
+            sourceTable: newName,
+            sourceColumn: col.id,
             targetTable: col.foreignKeyRef.table,
-            targetColumn: col.foreignKeyRef.column,
+            targetColumn: targetColId,
             type: 'one-to-many',
           });
         }
       });
-      const filteredRels = relationships.filter(
-        (r) => r.sourceTable !== editingTable.name && r.sourceTable !== editingTable.id
-      );
-      setRelationships([...filteredRels, ...newRels]);
+
+      setRelationships(toAdd.length > 0 ? [...cascaded, ...toAdd] : cascaded);
     } else {
       addTable(table);
+      const nextTables = [...tables, table];
       table.columns.forEach((col) => {
-        if (col.isForeignKey && col.foreignKeyRef?.table && col.foreignKeyRef?.column) {
-          addRelationship({
-            id: uuidv4(),
-            sourceTable: table.name,
-            sourceColumn: col.name,
-            targetTable: col.foreignKeyRef.table,
-            targetColumn: col.foreignKeyRef.column,
-            type: 'one-to-many',
-          });
-        }
+        if (!col.isForeignKey || !col.foreignKeyRef?.table || !col.foreignKeyRef?.column) return;
+        const targetColId = findColumnId(
+          nextTables,
+          col.foreignKeyRef.table,
+          col.foreignKeyRef.column,
+        );
+        if (!targetColId) return;
+        addRelationship({
+          id: uuidv4(),
+          sourceTable: table.name,
+          sourceColumn: col.id,
+          targetTable: col.foreignKeyRef.table,
+          targetColumn: targetColId,
+          type: 'one-to-many',
+        });
       });
     }
     setShowTableForm(false);

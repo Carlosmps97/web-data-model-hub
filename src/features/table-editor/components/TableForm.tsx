@@ -18,6 +18,10 @@ interface TableFormProps {
 }
 
 const emptyColumn = (): TableColumn => ({
+  // Every column carries a stable id from birth — freshly added rows
+  // get a fresh UUID so relationships drawn on the canvas (which index
+  // by `col.id`) survive subsequent renames.
+  id: uuidv4(),
   name: '',
   dataType: 'varchar',
   isPrimaryKey: false,
@@ -344,6 +348,20 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, do
                         value={col.dataType}
                         onChange={(e) => updateColumn(idx, { dataType: e.target.value })}
                       >
+                        {/* If the current value isn't one of the canonical
+                            lowercase options (e.g. the LLM/Excel produced
+                            `VARCHAR`, `INT`, `NUMBER(10,2)`, `STRING`…),
+                            render it as a custom option so the `<select>`
+                            shows the real value instead of silently
+                            defaulting to the first option (`integer`). */}
+                        {col.dataType &&
+                          !COLUMN_DATA_TYPES.includes(
+                            col.dataType as (typeof COLUMN_DATA_TYPES)[number],
+                          ) && (
+                            <option key="__custom" value={col.dataType}>
+                              {col.dataType}
+                            </option>
+                          )}
                         {COLUMN_DATA_TYPES.map((dt) => <option key={dt} value={dt}>{dt}</option>)}
                       </select>
                       <button
