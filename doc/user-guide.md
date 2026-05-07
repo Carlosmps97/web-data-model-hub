@@ -1,368 +1,358 @@
 # Guía de Usuario
 
-## Primeros Pasos
+> Cómo usar `web-data-model-hub` desde la perspectiva de un modelador
+> o un administrador. Asume que el backend `agent-modeler` está corriendo
+> y conectado a Cosmos DB + Azure AI Foundry.
 
-### Crear tu Primer Proyecto
+## 1. Acceso
 
-1. Abre la aplicación en `http://localhost:3000`
-2. Haz clic en **New Project** (parte superior derecha)
-3. Ingresa un nombre de proyecto (obligatorio) y una descripción opcional
-4. Haz clic en **Create Project** → serás redirigido a la página de detalle del proyecto
-
-### Crear un Modelo de Datos
-
-1. Dentro de un proyecto, haz clic en **Create First Model** (o **New Model** si ya existen modelos)
-2. Ingresa un nombre para el modelo → **Create Model**
-3. El editor de modelos se abre en **Vista de Lista** por defecto
-
----
-
-## Editor de Modelos
-
-El editor presenta un encabezado de **dos filas** y un área de trabajo central.
-
-### Fila Superior — Identidad y Estado
-
-- **Botón volver** (`‹`) — regresa a la lista de modelos del proyecto
-- **Breadcrumb clickeable**: `Projects › Nombre del Proyecto › Nombre del Modelo`. Cualquier segmento previo navega a esa ruta
-- **Pill de estado** — _Saving…_ en ámbar mientras se persiste, _Saved_ en verde tras el debounce de 2 s
-- **Selector de motor** — desplegable con PostgreSQL / Oracle / Databricks SQL, alineado a la derecha
-
-### Fila Inferior — Toolbar
-
-| Botón | Descripción |
-|-------|-------------|
-| **List \| Canvas** | Control segmentado para alternar entre la cuadrícula de tarjetas y el diagrama ER |
-| **Import Excel** | Sube un `.xlsx`; cada hoja se convierte en una tabla con previsualización editable |
-| **Export DDL** | Acción primaria (acentuada en teal) que abre el modal de exportación DDL para todo el modelo |
-| **AI Agent** | Acentuado en índigo cuando está activo; muestra el panel del asistente |
-
-La fila superior es la identidad inmutable del modelo (qué estoy editando, en qué motor, si está guardado). La fila inferior agrupa acciones de trabajo.
-
-### Panel Izquierdo
-
-- **Add Table** — abre el formulario en blanco
-- **Editor DBML** (`<>`) — escribe / pega DBML y sincroniza con el modelo
-- **Importación Excel** (`↑`) — atajo equivalente al botón del toolbar
-
-### Motor de Base de Datos
-
-El motor seleccionado etiqueta el modelo y dirige toda la generación de DDL: tipo de datos por columna, sintaxis de partition / cluster, comillas para identificadores y comentarios. **Solo se soportan tres motores con DDL de primera clase:**
-
-| Motor | Color | Schema por defecto | Particionamiento | Clustering |
-|-------|-------|---------------------|------------------|------------|
-| **PostgreSQL** | `#336791` (azul) | `public` | RANGE · LIST · HASH | No |
-| **Oracle** | `#c54138` (rojo) | `HR` | RANGE · LIST · HASH | No |
-| **Databricks SQL** | `#ff3621` (coral) | `default` | RANGE · LIST · BUCKET | Sí (Z-ORDER) |
-
-> Cambiar el motor de un modelo existente no traduce el contenido automáticamente. La generación DDL toma el motor del modelo en tiempo de exportación; los tipos canónicos se mapean al dialecto destino en cada llamada.
-
----
-
-## Agregar / Editar Tablas
-
-El diálogo **Edit Table** se abre desde tres puntos: _Add Table_ en el panel izquierdo, _New Table_ en la Vista de Lista, o el menú de engranaje sobre un nodo del lienzo. Internamente está dividido en **cuatro pestañas**.
-
-### Método 1 — Formulario Manual
-
-#### Pestaña 1 — General
-
-| Campo | Obligatorio | Notas |
-|-------|-------------|-------|
-| **Schema** | Sí | Namespace SQL al que pertenece la tabla. Si lo dejas en blanco, se rellena con el schema convencional del motor (`public` / `HR` / `default`). |
-| **Table Name** | Sí | Identificador SQL (snake_case recomendado). Se valida no-vacío al guardar. |
-| **Functional Definition** | No | Descripción de negocio. Aparece en tooltips del lienzo, en la tarjeta de la Vista de Lista y como `COMMENT ON TABLE` en el DDL. |
-
-Bajo el nombre se muestra una previsualización en vivo `schema.table_name`, exactamente como saldrá en el DDL.
-
-#### Pestaña 2 — Columns
-
-Cada columna es una **tarjeta independiente** con jerarquía visual clara, no un grid denso de checkboxes:
-
-- **Cabecera de la tarjeta**: índice numerado · nombre (input grande) · selector de tipo (pill) · papelera
-- **Fila de chips semánticos**: `PK` (ámbar) · `FK` (azul) · `SK` (púrpura) · `UNIQUE` (verde) · `NOT NULL` (slate). Cada chip apagado es gris; al activarlo se tiñe con su color semántico.
-- **Pills de parámetros inline**: Length / Scale (cuando aplican al tipo) · Default · Description.
-- **Banner FK**: cuando activas el chip FK aparece un banner azul claro con un ícono de cadena, etiqueta _references_ y dos selectores (`schema.table` y `column`). Solo se listan tablas existentes en el modelo.
-
-> Length aplica a tipos char-like (`varchar`, `char`, `nvarchar`, `string`). Scale aparece adicionalmente en `decimal` / `numeric`. Para tipos como `integer` / `boolean` / `timestamp` los pills de Length / Scale se ocultan automáticamente.
-
-#### Pestaña 3 — Partitioning
-
-Define la `PartitionSpec` de la tabla. Las opciones disponibles dependen del motor (ver _Esquemas y Particionamiento_).
-
-| Campo | Descripción |
-|-------|-------------|
-| **Strategy** | `NONE` · `RANGE` · `LIST` · `HASH` · `BUCKET` (filtrado por motor) |
-| **Columns** | Una o más columnas que dirigen la partición. El orden importa. |
-| **Buckets** | Solo para `HASH` / `BUCKET` — número de cubetas. |
-| **Granularity** | Solo para `DATE` — `DAY` / `MONTH` / `YEAR` / `HOUR`. |
-| **Clustering Columns** | Solo Databricks — columnas adicionales para Z-ORDER. |
-
-#### Pestaña 4 — Metadata
-
-| Campo | Descripción |
-|-------|-------------|
-| **Application Code** | Código de la aplicación / sistema dueño (CRM, ERP, MDM…) |
-| **Domain** | Área de negocio de alto nivel (Ventas, Finanzas, RRHH…) |
-| **Subdomain** | Agrupación más fina dentro del dominio |
-| **Tags** | Etiquetas libres. Enter o coma para agregar, × para eliminar |
-
-Finalmente haz clic en **Add Table** (o **Update Table** al editar).
-
-### Método 2 — Editor DBML
-
-1. Haz clic en el botón **`<>`** en el panel izquierdo
-2. Escribe DBML en el editor (soporta `Table schema.name { … }` para fijar schema desde DBML):
-
-```dbml
-Table sales.users {
-  id integer [pk, increment]
-  username varchar(50) [not null]
-  email varchar(100) [unique, note: 'Correo de contacto']
-  created_at timestamp
-  Note: 'Información de cuentas de usuario'
-}
-
-Table sales.orders {
-  id integer [pk]
-  user_id integer [ref: > sales.users.id]
-  total decimal(10,2)
-  status varchar(20) [default: 'pending']
-  Note: 'Registros de pedidos de clientes'
-}
+```mermaid
+flowchart LR
+    A["Abrir http://localhost:3000"] --> M{"Cookie modeler-auth válido?"}
+    M -->|"sí"| H["Home / Dashboard"]
+    M -->|"no"| L["Redirect /login"]
+    L --> F["Form: username + password"]
+    F -->|"submit"| API["POST /api/auth/login"]
+    API -->|"200"| R["Redirect a `next` o /"]
+    API -->|"401"| ERR["Toast: credenciales inválidas"]
 ```
 
-3. Haz clic en **Apply DBML** para analizar y crear las tablas en el lienzo
-4. Usa el botón **Syntax Reference** para un resumen rápido de sintaxis
-
-> Aplicar DBML reemplaza todas las tablas actuales del modelo. Si necesitas conservar el estado actual, expórtalo primero como DDL.
-
-**Configuraciones de columna en DBML:**
-
-| Configuración | Significado |
-|---------------|-------------|
-| `pk` | Llave Primaria |
-| `sk` | Llave Sustituta |
-| `partition` | Llave de Partición (legacy column-level; preferir `PartitionSpec`) |
-| `not null` | No permite nulos |
-| `unique` | Restricción de unicidad |
-| `increment` | Auto-incremento |
-| `default: 'x'` | Valor predeterminado |
-| `note: 'texto'` | Definición funcional de la columna |
-| `ref: > t.col` o `ref: > schema.t.col` | FK → uno a muchos (opcionalmente calificada con schema) |
-| `ref: - t.col` | FK → uno a uno |
-| `ref: < t.col` | FK → muchos a muchos |
-
-Ref independiente: `Ref: sales.orders.user_id > sales.users.id`  
-Comentarios: `// esto es un comentario`
-
-### Método 3 — Importación desde Excel
-
-1. Haz clic en el botón de carga (↑) en el panel izquierdo
-2. Arrastra y suelta un archivo `.xlsx` (o haz clic para explorar)
-3. Cada **hoja/pestaña** se convierte en una tabla:
-   - Columna A = nombres de columnas
-   - Columna B = tipos de datos
-   - Columna C = definiciones funcionales (opcional)
-4. Revisa y edita en el modal de vista previa
-5. Haz clic en **Import N Tables** para agregar al modelo
-
-> La primera fila se omite automáticamente si parece un encabezado (contiene palabras como "column", "name", "columna", "nombre").
+**Bootstrap inicial**: la primera vez que el sistema arranca con la
+DB vacía, el usuario `admin / dogadmin2019` se crea automáticamente
+en el primer login. Cambiá la contraseña inmediatamente desde
+**Admin → Users**.
 
 ---
 
-## Esquemas y Particionamiento
+## 2. Navegación principal
 
-### Schemas — obligatorio en el formulario
-
-Cada tabla pertenece a un **schema** (namespace SQL). El campo es obligatorio en el formulario; si lo dejas vacío al guardar, se rellena con el schema convencional del motor. La búsqueda en la Vista de Lista ya considera el schema, y el lienzo lo muestra como prefijo gris en el encabezado del nodo (`schema.table_name`).
-
-El parser DBML acepta dos sintaxis equivalentes:
-
-```dbml
-Table orders { id integer [pk] }
-
-Table sales.orders {     // schema.name — fija schema desde DBML
-  id integer [pk]
-}
+```
+┌──────────────────────────────────────────────────────────┐
+│  ⚡ Modeler          Projects | Dashboard | Docs | 👤   │   ← AppLayout header
+├──────────────────────────────────────────────────────────┤
+│                                                          │
+│   ⌂ Projects                                             │
+│     ├─ Project A (3 modelos)                             │
+│     ├─ Project B (1 modelo)                              │
+│     └─ + New Project (admin)                             │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
 ```
 
-### PartitionSpec — más allá del flag legacy
+Rutas principales:
 
-La forma correcta de declarar particionamiento es la pestaña _Partitioning_ del formulario, que pobla la propiedad `partition` en la tabla. El flag `isPartitionKey` a nivel columna se mantiene por compatibilidad pero el generador DDL prioriza `partition.columns`.
-
-| Strategy | Sintaxis emitida | Motores |
-|----------|------------------|---------|
-| `NONE` | _(sin cláusula)_ | todos |
-| `RANGE` | `PARTITION BY RANGE (cols)` | PostgreSQL, Oracle, Databricks |
-| `LIST` | `PARTITION BY LIST (cols)` | PostgreSQL, Oracle, Databricks |
-| `HASH` | `PARTITION BY HASH (cols)` | PostgreSQL, Oracle |
-| `BUCKET` | `CLUSTERED BY (cols) INTO N BUCKETS` | Databricks |
-| `DATE` | `PARTITION BY (col)` _con granularidad anotada_ | reservado para BigQuery |
-| `INGESTION_TIME` | `PARTITION BY _PARTITIONTIME` | reservado para BigQuery |
-
-> `DATE` e `INGESTION_TIME` existen en el tipo `PartitionStrategy` pero hoy ningún motor soportado los emite — quedan como contrato preparado para una futura extensión a BigQuery.
-
-### Clustering / Z-ORDER
-
-Solo Databricks expone clustering: la propiedad `clusteringColumns` de `PartitionSpec` se traduce en una cláusula `CLUSTER BY (…)` seguida de `ZORDER BY (…)` en el DDL final.
+| Ruta | Descripción | Acceso |
+|------|-------------|--------|
+| `/` | Listado de proyectos visibles | sesión |
+| `/projects/{id}` | Listado de modelos del proyecto | view sobre el proyecto |
+| `/projects/{id}/models/{modelId}` | Editor del modelo (canvas + lista + chat) | view (lectura) o edit (escritura) |
+| `/projects/{id}/global` | Lienzo global con todos los modelos del proyecto | view |
+| `/dashboard` | KPIs agregados (proyectos, modelos, tablas, columnas) | sesión |
+| `/admin/users` | CRUD usuarios + edición de permisos | rol `admin` |
+| `/docs` | Documentación in-app | sesión |
+| `/login` | Form de login | público |
 
 ---
 
-## Exportación DDL
+## 3. Crear un modelo
 
-El generador de DDL produce SQL listo para ejecutar adaptado al motor del modelo. Hay tres niveles de granularidad:
+```mermaid
+sequenceDiagram
+    participant U as Modelador
+    participant FE as Frontend
 
-| Origen | Cómo se invoca | Resultado |
-|--------|----------------|-----------|
-| **Modelo completo** | Botón _Export DDL_ en el toolbar del editor | `CREATE SCHEMA` por cada schema + `CREATE TABLE` de todas las tablas + `ALTER TABLE` FKs al final |
-| **Por dominio** | Icono `↓` junto al header de un grupo en la Vista de Lista (cuando está agrupada) | Subset del modelo — solo tablas del grupo, FKs hacia tablas externas omitidas |
-| **Una sola tabla** | Icono `↓` en cada tarjeta de la Vista de Lista | `CREATE SCHEMA` + `CREATE TABLE` de esa tabla con sus FKs salientes |
+    U->>FE: Click "New Model" en /projects/{id}
+    FE->>U: Modal con campos<br/>(name, description, engine, copy from?)
+    U->>FE: Confirma
+    FE->>FE: POST /api/models
+    FE->>U: Redirect /projects/{id}/models/{newId}<br/>(modelo vacío en el editor)
+```
 
-### Modal de Vista Previa
-
-Al disparar cualquier exportación se abre un modal con:
-
-- **Editor con sintaxis SQL** — monoespaciado, con scroll, en modo sólo lectura
-- **Toggles de opciones**: _Emit schemas_ (`CREATE SCHEMA` al inicio) · _Emit foreign keys_ (`ALTER TABLE` al final) · _Emit comments_ (`COMMENT ON TABLE` / `COLUMN`)
-- **Copy** — copia al portapapeles
-- **Download** — descarga como `.sql` con nombre derivado del scope (modelo / dominio / tabla) y el motor
-
-### Pipeline de Generación
-
-1. **Resolución de schemas** — toda tabla sin `schema` recibe el default del motor.
-2. **Resolución de tipos** — tipos canónicos (`integer`, `varchar`, `decimal`…) se mapean al dialecto destino. Si el usuario escribió ya un tipo dialect-specific con paréntesis (ej. `VARCHAR2(50)`), se respeta tal cual.
-3. **Quoting** — los identificadores se entrecomillan solo si contienen caracteres no SQL-safe. PostgreSQL / Oracle usan dobles comillas; Databricks usa backticks.
-4. **Constraints inline** — `PRIMARY KEY` se emite en línea; `UNIQUE` de columna única también.
-5. **Particionamiento / Clustering** — la cláusula `PARTITION BY` / `CLUSTER BY` se añade tras la lista de columnas.
-6. **Foreign keys** — se emiten como `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` al final, para que el script aplique aunque las tablas referenciadas se creen en cualquier orden.
-7. **Comentarios** — si _Emit comments_ está activo, las definiciones funcionales se traducen a `COMMENT ON TABLE` / `COMMENT ON COLUMN`.
+> **Engine**: elegirlo bien al inicio importa porque define
+> particionamiento disponible, mapeo de tipos y schema default. Se
+> puede cambiar después en **Settings → Engine**, pero los DDL ya
+> generados pueden requerir ajuste.
 
 ---
 
-## Vista de Lista
+## 4. Agregar tablas — 5 caminos
 
-La **Vista de Lista** muestra cada tabla del modelo como una tarjeta, con metadatos de clasificación y chips de etiquetas.
+### 4.1 Formulario manual
 
-### Búsqueda y Filtrado
+1. Click en **+ Add Table** en la toolbar del editor.
+2. Pestañas:
+   - **General** — nombre, schema, dominio, color, descripción.
+   - **Columns** — agregar/quitar/reordenar columnas. Cada columna
+     puede ser PK, SK (surrogate key), Nullable, Unique, FK con ref
+     `tabla.columna`.
+   - **Partitioning** — solo si el engine soporta (ej. Databricks).
+   - **Metadata** — tags y campos extra.
+3. **Save**.
 
-- **Barra de búsqueda** — filtra por schema, nombre de tabla, descripción, código de app, dominio, subdominio o etiqueta (sin distinción entre mayúsculas y minúsculas)
-- **Chips de etiquetas** (debajo de la barra de búsqueda, cuando existen etiquetas) — haz clic en una etiqueta para filtrar solo las tablas que la tengan; haz clic de nuevo o en la × para limpiar el filtro
-- **Contador** — muestra cuántas tablas coinciden con el filtro actual vs el total
+> Cuando renombres una columna, las relaciones que la referencian
+> **NO se rompen** — el sistema usa `id` estables por columna. La UI
+> tampoco actualiza el nombre de la columna en otras pestañas hasta
+> guardar; revisa el preview antes de confirmar.
 
-### Agrupamiento
+### 4.2 Importar desde Excel
 
-El selector **Group by** en la barra de filtros ofrece tres modos:
+1. Click en **Import → From Excel** en la toolbar.
+2. Drop o seleccionar el `.xlsx`. Cada pestaña → una tabla.
+3. Modal de preview: editá nombres, tipos, PKs antes de aceptar.
+4. **Aplicar**.
 
-| Modo | Cabecera de grupo | Cuándo usar |
-|------|-------------------|-------------|
-| **By schema** | Icono de cilindro + nombre del schema + conteo | Cuando organizas el catálogo por namespace SQL (default) |
-| **By domain** | Icono de carpeta + dominio + conteo | Cuando trabajas por área de negocio |
-| **Flat** | _— sin grupos, todas las tarjetas seguidas —_ | Para una vista plana cuando filtras por búsqueda |
+Headers reconocidos (matching flexible, case-insensitive):
 
-> Cuando estás agrupado por schema, las tarjetas _no_ repiten el prefijo `schema.` en el título (la cabecera del grupo ya lo indica). Al pasar a _Flat_ o _By domain_ el prefijo vuelve para no perder la referencia.
+| Concepto | Aliases |
+|----------|---------|
+| `column_name` | `column`, `columna`, `nombre`, `nombre_columna`, `field`, `campo` |
+| `data_type` | `tipo`, `tipo_dato`, `type`, `datatype` |
+| `functional_definition` | `definicion`, `descripcion`, `description`, `desc` |
+| `is_nullable` | `nullable`, `nulo`, `null`, `nulable` |
 
-### Tarjetas de Tabla
+### 4.3 Editor DBML
 
-Cada tarjeta muestra:
-- **Ícono + nombre de la tabla** (con prefijo de schema cuando no está agrupado por schema) y **pill de conteo de columnas**
-- **Acciones**: `↓` (descargar DDL de esta tabla) · lápiz (editar) · papelera (eliminar)
-- **Definición funcional** (si se proporcionó)
-- **Insignias de clasificación**: chips de color `app`, `domain`, `sub` y chip de _partition_ si aplica
-- **Chips de etiquetas** — haz clic en cualquier chip para activarlo como filtro de etiqueta
+1. Toggle a la pestaña **Code (DBML)** en el panel izquierdo.
+2. Escribí o pegá DBML.
+3. Click **Apply** — reemplaza todas las tablas del modelo (con
+   confirmación si hay datos previos).
 
----
+Soporte: `Table`, `Note`, refs cortos (`[ref: > schema.table.column]`),
+declaraciones `Ref:`, settings (`pk`, `sk`, `partition`, `not null`,
+`unique`, `increment`, `default: 'x'`, `note: '…'`), tipos con
+`length(N)` y `decimal(N, M)`.
 
-## Vista de Lienzo (Diagrama ER)
+### 4.4 Crear tabla desde SQL
 
-### Navegación
+1. **+ Add Table → Create from SQL**.
+2. Pegá un `CREATE TABLE …` o `SELECT … FROM … JOIN …`.
+3. El parser infiere columnas y, en el caso del SELECT, sugiere FKs
+   por cada JOIN encontrado.
+4. Modal de preview con checkboxes para confirmar cuáles JOINs
+   convertir en relaciones del modelo.
 
-| Acción | Entrada |
-|--------|---------|
-| Desplazar | Arrastrar en un área vacía del lienzo |
-| Zoom | Rueda del ratón |
-| Acercar/Alejar | Botones ± / lupa de la barra de controles |
-| Ajustar todas las tablas | Botón de ajuste de vista en la barra de controles |
-| Desplazar minimapa | Arrastrar dentro del minimapa superpuesto |
+### 4.5 Agente IA de modelado
 
-### Interacciones al Pasar el Cursor
+```mermaid
+flowchart TD
+    A["Click 'AI Agent' en la toolbar"] --> B["Slide-in ChatPanel"]
+    B --> C["Drop opcional: archivo de guidelines<br/>(.json / .pdf / .docx / .md / .xlsx)"]
+    C --> D["Drop o picker: archivo Excel<br/>con tablas y columnas a modelar"]
+    D --> E["(opcional) Texto libre con contexto"]
+    E --> F["Click 'Modelar'"]
+    F --> W["Loading 5–60s · 'dog state' animado"]
+    W --> R["ModelResultBlock con tablas propuestas"]
+    R --> P{"¿Conforme?"}
+    P -->|"sí"| AP["Aplicar al canvas"]
+    P -->|"no"| RT["Refinar prompt → Modelar otra vez"]
+    AP --> S["Auto-save → backend"]
+```
 
-Pasa el cursor sobre cualquier **bloque de tabla** para:
-- **Resaltar** las conexiones de relaciones con una animación de flujo
-- **Atenuar** todas las conexiones no relacionadas
-- **Resaltar** las columnas específicas involucradas en la relación en ambas tablas
-- Ver un **tooltip** en cada columna con su nombre, tipo de dato, definición funcional y referencia FK
+**Recomendaciones**:
 
-### Seleccionar Tablas
-
-- **Clic en el nodo de tabla** → lo selecciona (resaltado con borde teal); NO abre ningún formulario de edición
-- **Clic en el lienzo vacío** → deselecciona
-- El resaltado por cursor tiene prioridad visual sobre la selección por clic
-
-### Editar una Tabla desde el Lienzo
-
-1. Pasa el cursor sobre un nodo de tabla → aparece un **ícono de engranaje (⚙)** en la esquina superior derecha
-2. Haz clic en el engranaje → aparece un menú pequeño con las opciones **Edit** y **Delete**
-3. Haz clic en **Edit** → el modal del formulario se abre con los datos precargados
-4. Realiza los cambios → **Update Table**
-
-> Hacer clic en el cuerpo de la tabla solo la selecciona visualmente; el formulario de edición se abre exclusivamente a través del menú de engranaje.
-
-### Eliminar una Tabla desde el Lienzo
-
-Haz clic en el engranaje → **Delete** → la tabla y todas sus relaciones son eliminadas.
-
-### Mover Tablas
-
-- Arrastra cualquier nodo de tabla para reubicarlo
-- Las posiciones son **solo en memoria** — al recargar, el algoritmo de distribución recalcula las posiciones automáticamente (las posiciones arrastradas dentro de una sesión se conservan hasta recargar la página)
-
----
-
-## Distribución Automática
-
-Haz clic en el **ícono de cuadrícula** en la barra de controles inferior para abrir el panel de **Auto Arrange**.
-
-### Izquierda-Derecha (1)
-Ordena las tablas en capas topológicas de izquierda a derecha, siguiendo la dirección de las relaciones. Las tablas sin relaciones entrantes aparecen en la columna más a la izquierda. Ideal para **pipelines ETL y diagramas de linaje**.
-
-### Copo de Nieve (2)
-Coloca la tabla más conectada al centro y organiza las demás en anillos radiales concéntricos. Ideal para **esquemas estrella y almacenes de datos**.
-
-### Compacto (3)
-Coloca las tablas en una cuadrícula ordenada por número de conexiones. Ideal para **diagramas con pocas relaciones** o cuando se desea una vista limpia y resumida.
-
-> Al aplicar cualquier distribución, el lienzo se ajusta automáticamente para mostrar todas las tablas. Las posiciones se conservan en memoria durante la sesión actual.
+- **Subir guidelines** la primera vez: el agente respeta
+  convenciones (snake_case, prefijos `id_`, audit columns, mappings
+  de tipo por engine, longitudes máximas).
+- **El Excel debe ser limpio**: una pestaña por tabla, headers en la
+  primera fila. El parser es flexible pero no adivina si la primera
+  fila es data.
+- **Definiciones funcionales** son la pieza clave — el agente las usa
+  para reusar nombres del **diccionario semántico** del backend
+  (matching vectorial). Una columna definida como "identificador
+  único del cliente" en dos tablas distintas terminará usando el
+  mismo nombre físico (`id_customer` o el canónico que tenga el
+  catálogo).
+- El agente devuelve **solo nombres físicos + tipos + DDL**. Las
+  relaciones FK las modela el revisor humano en el canvas.
 
 ---
 
-## Lienzo Global
+## 5. Editor del modelo
 
-Cada proyecto expone un **Lienzo Global** que renderiza todas las tablas de todos sus modelos en un diagrama combinado, con código de colores por modelo.
+### 5.1 Layout
 
-- Accede mediante el enlace **"Global canvas"** en la tarjeta del proyecto en la página de Proyectos
-- La vista global es de solo lectura — no se pueden agregar ni editar tablas desde ella
-- Útil para tener una visión general de alto nivel de todo el panorama de datos del proyecto
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Toolbar: [Visual | Code]  [List | Canvas]  [+ Add Table]       │
+│             [Import ▾]  [Export DDL ▾]  [Domains]  [AI Agent]   │
+├──────────────────┬───────────────────────────────────────────────┤
+│                  │                                                │
+│  Visual:         │   List | Canvas                               │
+│   - TableForm    │                                                │
+│     embebido     │   Cards o React Flow ER                        │
+│   - DomainMgr    │                                                │
+│                  │                                                │
+└──────────────────┴───────────────────────────────────────────────┘
+```
+
+### 5.2 Vista List
+
+- Cards con resumen: nombre, columnas, tags, dominio.
+- Búsqueda full-text + filtros por engine, dominio, schema, tags.
+- Group-by: `none / domain / schema / tag`.
+- Edit / Delete por gear ⚙ en cada card.
+
+### 5.3 Vista Canvas
+
+- React Flow con `TableNode` por cada tabla y `AnimatedEREdge` por
+  relación.
+- **Hover** sobre una tabla resalta sus relaciones y las columnas
+  conectadas en sus vecinos.
+- **Click** selecciona persistente (sobrevive al unhover).
+- **Gear ⚙** del nodo abre menú: Edit / Delete.
+- **Auto-Arrange** (icono grid en Controls): 3 algoritmos
+  - **Compact**: grid ordenado por número de relaciones.
+  - **Left-right**: capas topológicas (Kahn).
+  - **Snowflake**: BFS rings desde el nodo más conectado.
+- Las posiciones de drag se conservan en memoria, **no se persisten
+  al backend**. Recargar reaplica el algoritmo.
+
+### 5.4 Toggle Visual / Code
+
+- **Visual**: paneles lado a lado (form a la izquierda, canvas/list a
+  la derecha).
+- **Code (DBML)**: editor monoespaciado a la izquierda con resaltado
+  + botón **Apply**. La canvas/list a la derecha actualiza en vivo
+  cuando se aplica.
 
 ---
 
-## Chat con IA (Vista previa)
+## 6. Generar DDL
 
-1. Haz clic en el botón de **burbuja de chat** en el panel izquierdo → el panel de chat se desliza desde la derecha
-2. Escribe un mensaje describiendo tus necesidades de modelo de datos
-3. Opcionalmente adjunta un archivo Excel con el botón de **clip**
-4. Haz clic en **Send**
+Tres scopes disponibles:
 
-> **Nota:** El backend de IA aún no está conectado — esta es la interfaz de usuario para una integración futura.
+| Scope | Cómo se invoca | Genera |
+|-------|----------------|--------|
+| **Modelo completo** | Toolbar → Export DDL | todas las tablas + FKs + comments |
+| **Dominio** | Group-by domain → header del grupo → ↓ icon | tablas del dominio + FKs internas |
+| **Tabla individual** | Lista → row → ↓ icon, o canvas → gear → Export DDL | una sola tabla + sus FKs |
+
+`DDLPreviewModal` muestra el SQL generado con toggles para:
+
+- **Emit schemas** (`CREATE SCHEMA IF NOT EXISTS …`).
+- **Emit foreign keys** (`ALTER TABLE … ADD CONSTRAINT …`).
+- **Emit comments** (`COMMENT ON TABLE/COLUMN …`).
+
+Acciones:
+
+- **Copy**: al portapapeles.
+- **Download**: como `.sql` con nombre `<model>__<scope>.sql`.
+
+> El DDL generado respeta el engine activo: tipos, quoting, y el
+> schema default vienen de `engines/engines.ts`. Cambiar el engine
+> regenera el DDL al instante.
 
 ---
 
-## Guardado Automático
+## 7. Lienzo Global
 
-Todos los cambios se guardan automáticamente **2 segundos** después de la última modificación. Un indicador "Saving…" aparece en el encabezado de la página mientras se está guardando.
+`/projects/{id}/global` carga **todas las tablas de todos los modelos
+del proyecto** en un único canvas. Cada tabla mantiene su modelo de
+origen como `namespace` (background coloreado).
+
+Útil para:
+
+- Ver el linaje completo de un proyecto multi-modelo.
+- Detectar duplicaciones cross-modelo.
+- Revisar relaciones que cruzan modelos (si las hay).
+
+> Es **solo lectura**: para editar tablas, abrir el modelo
+> correspondiente.
 
 ---
 
-## Cambio de Modelo
+## 8. Dominios
 
-Si un proyecto tiene varios modelos, usa el **desplegable de modelos** en el encabezado del editor para cambiar entre ellos. Cada modelo mantiene sus propias tablas, relaciones, motor y posiciones en memoria.
+`Domain Manager` (toolbar → Domains) permite definir un catálogo de
+dominios y subdominios para el modelo, cada uno con `code`, `color`,
+descripción y defaults (`schema`, `tags`).
+
+Asignar una tabla a un dominio:
+
+1. Editar la tabla → pestaña **General**.
+2. Dropdown **Domain** y **Subdomain**.
+3. Save.
+
+Las tablas con dominio asignado heredan automáticamente los defaults
+si los suyos están vacíos. La vista List puede agruparse por dominio,
+y el canvas las pinta con `color` del dominio.
+
+---
+
+## 9. Permisos y administración
+
+### 9.1 Niveles
+
+| Nivel | Puede |
+|-------|-------|
+| **admin** (rol global) | TODO: crear proyectos, gestionar usuarios, edit en cualquier modelo |
+| **edit** (permission) | crear/editar/eliminar tablas, modelos, dominios dentro del scope |
+| **view** (permission) | navegar y exportar DDL, sin escritura |
+
+Los `permissions` por usuario son **scoped**: pueden ser por proyecto
+(aplica a todos sus modelos) o por modelo individual.
+
+### 9.2 Editar permisos (admin)
+
+1. **Admin → Users**.
+2. Click en un usuario → **Edit permissions**.
+3. Modal con árbol jerárquico:
+   - Project A
+     - ☐ View   ☐ Edit
+     - └── Model A.1
+       - ☐ View   ☐ Edit
+     - └── Model A.2
+       - ☐ View   ☐ Edit
+4. Marcar lo necesario y **Save**. La toma de efecto es inmediata —
+   el backend recarga `UserDoc` en cada request.
+
+> Activar/desactivar usuarios: `Active` toggle en la lista. Un
+> usuario inactivo no puede loguear ni mantener sesión existente
+> (el siguiente request cae en 401).
+
+---
+
+## 10. Ciclo de auto-guardado
+
+- Cualquier cambio en el modelo dispara un debouncer de **2 segundos**.
+- Mientras espera: indicador "Saving…" sutil junto al título.
+- Al confirmar el `PUT /api/models/{id}`: indicador "Saved hace
+  Xs" con el timestamp del último save exitoso.
+- Si falla: toast destructivo con el mensaje de error. El usuario
+  puede reintentar haciendo cualquier otro cambio (re-dispara el
+  debouncer).
+
+> No hay botón "Save" explícito. Para forzar un save inmediato,
+> cambiar y revertir cualquier campo dispara el debouncer.
+
+---
+
+## 11. Atajos visuales
+
+| Acción | Cómo |
+|--------|------|
+| Buscar tabla en list view | input de búsqueda en la barra superior |
+| Filtrar por engine / dominio / tag | chips en la barra de filtros |
+| Resaltar relaciones de una tabla | hover sobre el nodo en canvas |
+| Seleccionar persistente | click en el nodo |
+| Auto-distribuir el canvas | botón grid en Controls |
+| Centrar el canvas | botón fit-view en Controls |
+| Ver DDL de una tabla | gear ⚙ → Export DDL |
+| Abrir formulario de tabla | gear ⚙ → Edit |
+| Eliminar tabla | gear ⚙ → Delete (con confirmación, opcional "no preguntar más esta sesión") |
+| Cerrar chat del agente | × en el header del panel (libera la conversación en el backend) |
+
+---
+
+## 12. Troubleshooting rápido
+
+| Síntoma | Causa probable | Acción |
+|---------|----------------|--------|
+| "Sesión expirada" al recargar | `AUTH_SECRET` divergente entre frontend y backend | Reiniciar ambos con la misma `.env` |
+| Tabla no responde a hover en canvas | id legacy de columna sin estampar | Volver a guardar la tabla (la safety net del backend stamp el id) |
+| Edge huérfano (no llega a destino) | Relación apunta a columna eliminada | Editar la relación (o la columna FK) en el TableForm |
+| "El agente no aplica mis guidelines" | El archivo no se subió a la sesión actual | Volver a soltar el archivo en el ChatPanel; cerrar/reabrir el chat crea sesión nueva |
+| Auto-save siempre muestra error | Permiso revocado mid-sesión | Refrescar la página; el middleware redirigirá a login si aplica |
+| Excel no detecta tablas al importar | Header en fila distinta a la primera | Limpiar el Excel y reintentar |
+| DDL exportado sin schemas | Toggle "Emit schemas" desactivado | Reactivarlo en el modal de DDL |
+| El canvas se desorganiza al abrir | Auto-layout corre cada vez (no se persiste) | Aplicar Auto-Arrange manual y trabajar; el modelo no recuerda posiciones |

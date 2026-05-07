@@ -1,242 +1,399 @@
-# Flujo de Datos
+# Flujos de Datos
 
-## Visión General
+> Cómo se mueven los datos del browser al backend FastAPI (y viceversa)
+> para cada acción del usuario. Todos los diagramas reflejan el estado
+> post-migración: **no hay rutas API en Next.js**, la persistencia
+> vive en Cosmos DB y se accede mediante `apiFetch` cross-origin con
+> cookie JWT.
 
-Este documento describe cómo se mueven los datos a través de la aplicación para cada método de ingesta, el ciclo de persistencia, la sincronización del lienzo y los flujos de interacción con el diagrama.
+## 0. Login y bootstrap del estado
 
-## Flujos de Ingesta
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant LP as /login (Next page)
+    participant SVC as authService
+    participant FA as FastAPI :8000
+    participant DB as Cosmos DB
 
-### 1. Formulario Manual
+    B->>LP: render Login form
+    B->>SVC: authService.login({username, password})
+    SVC->>FA: POST /api/auth/login (credentials: 'include')
+    FA->>FA: ensure_bootstrap_admin (idempotente)
+    FA->>DB: get_user_by_username
+    DB-->>FA: UserDoc
+    FA->>FA: bcrypt.checkpw + sign_token (HS256, 10h)
+    FA-->>B: 200 {success, data: AuthUser} + Set-Cookie modeler-auth
+    SVC-->>B: AuthUser
+    B->>B: useAuthStore.setUser(user) + redirect (next param o /)
+
+    Note over B,FA: En subsequent navigations
+    B->>FA: GET /api/auth/me (cookie)
+    FA-->>B: AuthUser actualizado (recargado de DB)
+    B->>B: useAuthStore.hydrate() → status: 'ready'
+```
+
+Si el cookie expira o se invalida, cualquier `apiFetch` posterior cae
+en 401, `agentService` arroja `AgentClientError` y el resto arroja
+`ApiError`. La UI desencadena un logout + redirect a `/login`.
+
+---
+
+## 1. Flujos de ingesta de tablas
+
+### 1.1 Formulario manual
 
 ```mermaid
 flowchart TD
-    A["User fills TableForm\n(name, columns, FK refs,\nfunctionalDefinition,\nappCode, domain, subdomain, tags)"] --> B["addTable() — Zustand"]
-    B --> C["FK columns → addRelationship() — Zustand"]
-    C --> D["DiagramCanvas useEffect reacts\n→ new React Flow node + edges"]
-    B --> E["2s debounce timer"]
-    E --> F["PUT /api/models/:id"]
-    F --> G["jsonStore.updateModel()"]
-    G --> H["data/models/{uuid}.json"]
+    A["Usuario abre TableForm<br/>(Add Table o Edit gear)"] --> B["Completa General · Columns ·<br/>Partitioning · Metadata"]
+    B --> C["Submit"]
+    C --> D{"editingTable?"}
+    D -->|"sí"| U["updateTable() — Zustand"]
+    D -->|"no"| AD["addTable() — Zustand"]
+    U --> CR["cascade rename: actualizar relationships<br/>cuyo sourceTable/targetTable era el name viejo"]
+    AD --> RES["Resolver FKs declaradas en columnas:<br/>findColumnId(targetTable, fkRef.column) → addRelationship"]
+    CR --> RES
+    RES --> RF["DiagramCanvas useEffect detecta cambio<br/>→ TableNode + AnimatedEdges nuevas/renovadas"]
+    RES --> SAVE["debounce 2s → modelsService.update"]
+    SAVE --> FA["PUT /api/models/{id} en FastAPI"]
+    FA --> DB[("Cosmos DB<br/>models + child collections")]
 ```
 
-**Pasos:**
-1. El usuario abre el formulario de tabla, completa el nombre, columnas con tipos/llaves, definiciones funcionales por columna, referencias FK, y metadatos de clasificación opcionales (código de app, dominio, subdominio) y etiquetas libres
-2. `addTable()` agrega el `TableModel` a Zustand; las columnas FK disparan `addRelationship()`
-3. El `useEffect` de `DiagramCanvasInner` detecta el cambio en el store → agrega nodo + aristas en React Flow
-4. El debounce de 2 segundos dispara `saveModel()` → `PUT /api/models/:id` → disco
+**Detalles importantes**:
 
-Los metadatos de clasificación (`applicationCode`, `domain`, `subdomain`, `tags`) se almacenan en el objeto `TableModel` y se persisten en el JSON del modelo. No se usan en el renderizado del lienzo, pero impulsan el filtrado y la visualización de insignias en la **Vista de Lista**.
+- `TableForm.emptyColumn()` siempre genera un `id: uuidv4()` para
+  cada columna nueva. **Renombrar** una columna no cambia su `id`,
+  por lo que las relaciones que la referenciaban siguen apuntando al
+  mismo handle de React Flow.
+- `handleAddTable` resuelve los `foreignKeyRef` declarados en el form
+  (que contienen **nombre** de tabla.columna) a `column.id` mediante
+  `findColumnId(allTables, fkRef.table, fkRef.column)`. Si el destino
+  no existe, la FK se ignora silenciosamente.
+- Al editar, las relaciones existentes se preservan; solo se cascadea
+  el cambio de `name` cuando aplica.
 
-### 2. Importación desde Excel
+### 1.2 Importación desde Excel
 
 ```mermaid
 flowchart TD
-    A[".xlsx file dropped/selected"] --> B["FileReader → ArrayBuffer"]
-    B --> C["SheetJS workbook.Sheets"]
-    C --> D["ParsedSheet[] — one per tab"]
-    D --> E["ExcelImportModal preview\n(editable table per sheet)"]
-    E --> F["User confirms"]
-    F --> G["sheetsToTables() → TableModel[]"]
-    G --> H["addTable() × N — Zustand"]
-    H --> I["DiagramCanvas renders nodes"]
-    H --> J["Auto-save → disk"]
+    A[".xlsx drop / file picker"] --> B["FileReader → ArrayBuffer"]
+    B --> C["XLSX.read (SheetJS)"]
+    C --> D["parseExcelFile<br/>una pestaña por tabla"]
+    D --> E["ExcelImportModal preview editable"]
+    E --> F["Confirmar"]
+    F --> G["sheetsToTables<br/>(asigna id UUID por columna)"]
+    G --> H["addTable × N — Zustand"]
+    H --> I["Auto-save 2s → PUT /api/models/{id}"]
 ```
 
-**Formato de hoja:**
+`sheetsToTables` siempre stamp `id: uuidv4()` en cada `TableColumn`
+generada desde Excel — los datos de Excel no traen ids estables, así
+que se inventan acá.
 
-| Columna A | Columna B | Columna C |
-|-----------|-----------|-----------|
-| column_name | data_type | functional_definition |
-
-Detección de encabezado: si la primera fila contiene palabras clave como `column`, `name`, `columna` o `nombre`, se omite automáticamente.
-
-### 3. Editor DBML
+### 1.3 Editor DBML
 
 ```mermaid
 flowchart TD
-    A["User writes DBML text"] --> B["parseDBML()"]
-    B --> C{"Parse result"}
-    C -->|"errors"| D["Error list shown in editor"]
-    C -->|"success"| E["TableModel[] + Relationship[]"]
-    E --> F["addTable() + addRelationship()\n— Zustand (replaces existing)"]
-    F --> G["Canvas re-renders"]
-    F --> H["Auto-save → disk"]
+    A["Usuario escribe DBML"] --> B["parseDBML(text)"]
+    B --> C{"errores?"}
+    C -->|"sí"| ERR["panel de errores con línea/col"]
+    C -->|"no"| D["TableModel[] + Relationship[]<br/>(post-process: name → id en relations)"]
+    D --> E["setTables / setRelationships<br/>REPLACE total del modelo"]
+    E --> F["DiagramCanvas re-render"]
+    E --> G["debounce 2s → PUT /api/models/{id}"]
+
+    style ERR fill:#fdd
 ```
 
-**Capacidades del parser** (`src/utils/dbmlParser.ts`):
-- Declaraciones `Table name { … }` y `Table schema.name { … }` (asigna `TableModel.schema`)
-- Configuraciones de columna: `pk`, `sk`, `partition`, `not null`, `unique`, `increment`, `default`, `note`, `ref`
-- Refs FK calificables con schema: `[ref: > schema.table.column]`
-- Declaraciones `Ref:` independientes
-- Length / scale embebidos en el tipo: `varchar(50)`, `decimal(10,2)` → `length` + `scale` en `TableColumn`
-- Descripciones de tabla con `Note:`
-- Líneas de comentario `//`
-- Reporte de errores con números de línea
+**Capacidades del parser** (`@/features/table-editor/utils/dbmlParser.ts`):
 
-**Inverso (`generateDBML()`):** toma `TableModel[]` + `Relationship[]` y genera texto DBML válido. Emite `Table schema.name { … }` cuando el schema está definido y respeta `length` / `scale` en la firma del tipo.
+- `Table name { … }` y `Table schema.name { … }` (asigna `TableModel.schema`).
+- Settings de columna: `pk`, `sk`, `partition`, `not null`, `unique`,
+  `increment`, `default: 'x'`, `note: '…'`, `ref: > t.col`.
+- Refs FK con schema: `[ref: > schema.table.column]`.
+- Declaraciones `Ref:` independientes.
+- `length`/`scale` embebidos en el tipo: `varchar(50)`, `decimal(10,2)`.
+- Descripciones de tabla con `Note:` (line o multi-line con `'''…'''`).
+- Comentarios `//`.
+- **Post-process** crítico al final del parse: cada `Relationship.sourceColumn`
+  / `targetColumn` se resuelve de **nombre** a `id` vía `findColumnId`,
+  porque DBML solo conoce nombres pero el modelo interno opera con
+  ids estables. Si un nombre no resuelve (cross-model ref), se deja
+  el nombre tal cual y la canvas lo flagea como huérfano.
 
-### 4. Agente IA de Modelado
+**Inverso (`generateDBML()`)**: emite el DBML reproducible. Las
+referencias `Ref:` se reescriben de id → nombre con `resolveColumnName`
+para que el output sea legible.
 
-El ChatPanel, cuando se abre dentro de un modelo, se conecta al backend
-FastAPI `agent-modeler` (proyecto hermano) a través del proxy `/api/agent/*`
-de Next. La conversación está **scoped por `modelId`**: cada modelo
-abierto mantiene su propio `conversation_id` (UUID v4) estable durante la
-sesión del browser.
+> Aplicar DBML **reemplaza** todas las tablas del modelo. Si hay
+> trabajo no guardado en otro flujo, el frontend pide confirmación
+> con `ConfirmDialog`.
+
+### 1.4 Crear tabla desde SQL (`CreateFromSqlModal`)
 
 ```mermaid
 flowchart TD
-    A["Usuario: texto libre + Excel opcional"] --> B["useAgentConversation hook"]
-    B -->|ensureSession| C["POST /api/agent/conversations\n{ conversation_id, engine }"]
-    C --> D["POST /api/agent/conversations/{id}/model\nmultipart: context_text, excel_file, engine"]
-    D --> E["FastAPI: pipeline de modelado con QA"]
-    E --> F["ModelingResponse: tables, relationships,\nexport_sql, qa_report, guidelines_applied"]
-    F --> G["ChatPanel: ModelResultBlock\n(tablas, relaciones, DDL, QA)"]
-    G -->|"Aplicar al canvas"| H["modelingResponseToCanvas"]
-    H --> I["setTables + setRelationships\n(useModelStore)"]
-    I --> J["Auto-save 2s → /api/models/{id}"]
+    A["Usuario pega SELECT / CREATE TABLE AS"] --> B["parseSqlToTable<br/>(infiere columnas + JOINs)"]
+    B --> C["Modal preview con columnas editables<br/>+ checkboxes por JOIN como FK propuesta"]
+    C --> D["Confirmar"]
+    D --> E["Construir TableModel + Relationship[]<br/>(joins → rels resueltas a column.id)"]
+    E --> F["addTable + addRelationship × M — Zustand"]
+    F --> G["Auto-save 2s"]
 ```
 
-Características:
+Las relaciones inferidas desde JOINs apuntan a las **tablas existentes**
+del modelo (las que el SQL hace JOIN). El resolver
+(`findColumnId(existingTables, leftTable, leftColumn)`) descarta joins
+contra columnas que no existen.
 
-- **Guidelines por sesión** (`POST /api/agent/conversations/{id}/guidelines`):
-  el usuario sube un PDF/DOCX/MD/XLSX/JSON/TXT y el agente lo respetará en
-  todos los turnos siguientes de esa conversación.
-- **Historial multi-turno**: el backend mantiene en memoria el último
-  modelo generado; cada turno nuevo puede refinar tablas existentes sin
-  que el usuario reexplique el contexto.
-- **Volátil en el cliente**: los mensajes del chat se pierden al recargar
-  la página (por diseño, consigna del usuario). Sólo el modelo "aplicado
-  al canvas" se persiste a `data/models/{id}.json`.
-- **Engine pass-through**: el engine del modelo (`postgresql`,
-  `databricks_sql`, `sqlserver`, `mysql`, `cosmosdb`) se envía en cada
-  turno; el agente genera DDL para ese motor.
+### 1.5 Agente de IA de modelado
 
-## Ciclo de Persistencia
+```mermaid
+flowchart TD
+    A["Usuario abre AI Agent panel"] --> EN["useAgentConversation.ensureSession(modelId, engine)"]
+    EN --> CR["agentService.createConversation<br/>(POST /api/conversations)"]
+    CR --> ST["useAgentStore.setSession(modelId, conversationId)"]
+
+    A --> UP["Drop archivo de guidelines (opcional)"]
+    UP --> UG["agentService.uploadGuidelines<br/>(POST /api/conversations/{id}/guidelines)"]
+
+    A --> M["Drop Excel + click 'Modelar'"]
+    M --> SM["agentService.generateModel(...)"]
+    SM --> POST["POST /api/conversations/{id}/model<br/>(multipart: excel_file, engine, context_text)"]
+    POST --> WAIT["Loading dog state · 5–60s típicos"]
+    WAIT --> RES["ModelingResponse:<br/>tables · export_sql · export_markdown<br/>· qa_report (vacío hoy)"]
+    RES --> BLOCK["ChatPanel renderiza ModelResultBlock<br/>(tablas + relaciones + DDL preview + QA)"]
+    BLOCK -->|"Aplicar al canvas"| MAP["modelingResponseToCanvas:<br/>asigna ids estables a columnas<br/>y resuelve fk_references"]
+    MAP --> APPLY["setTables + setRelationships"]
+    APPLY --> AUTO["debounce 2s → PUT /api/models/{id}"]
+
+    A -->|"Cerrar chat"| DEL["agentService.deleteConversation<br/>(libera memoria del backend)"]
+```
+
+**Características**:
+
+- **Sesión scoped por `modelId`**: cada modelo abierto mantiene un
+  `conversation_id` UUID v4 estable mientras dura la pestaña del
+  browser. Recargar la página crea una sesión nueva (los mensajes
+  del chat son volátiles por diseño).
+- **Guidelines por sesión**: el archivo subido aplica solo a esta
+  conversación. El backend lo cachea en memoria por `session_id`
+  (ver backend doc).
+- **Engine pass-through**: el engine del modelo
+  (`postgresql` / `databricks_sql` / `sqlserver` / `mysql` / `cosmosdb`)
+  se envía en cada turno; el agente genera DDL para ese motor.
+- **Volátil en cliente**: los mensajes del chat NO se persisten en
+  Cosmos DB. Solo el modelo "aplicado al canvas" llega a la DB.
+
+---
+
+## 2. Ciclo de persistencia (auto-save)
 
 ```mermaid
 sequenceDiagram
     participant U as User
-    participant S as Zustand Store
-    participant API as Next.js API
-    participant FS as Filesystem
+    participant S as Zustand (useModelStore)
+    participant DBC as 2s debouncer
+    participant SVC as modelsService
+    participant FA as FastAPI
+    participant DB as Cosmos DB
 
-    U->>S: Modifica tabla / relación
-    S->>S: Actualización optimista (UI inmediata)
-    Note over S: Debounce 2s
-    S->>API: PUT /api/models/:id
-    API->>FS: Escribe data/models/{uuid}.json
-    FS-->>API: OK
-    API-->>S: { success: true, data: DataModel }
+    U->>S: Modifica tabla / relación / view
+    S->>S: Update optimista (UI re-render inmediato)
+    S->>S: saving = true; trigger debouncer
+    Note over DBC: 2 segundos de inactividad
+    DBC->>SVC: modelsService.update(modelId, patch)
+    SVC->>FA: PUT /api/models/{id} (cookie)
+    FA->>FA: get_current_user + can_edit_model
+    FA->>FA: _ensure_column_ids (safety net)
+    FA->>DB: replace_entities (soft-delete + bulkWrite)
+    DB-->>FA: ok
+    FA-->>SVC: 200 {success, data: DataModel}
+    SVC-->>S: payload
+    S->>S: saving = false; lastSavedAt = now
 ```
 
-### Directorio de Datos
+**Garantías**:
 
+- **Optimismo total**: la UI nunca espera al servidor para reflejar
+  cambios. Si el `PUT` falla, se muestra el error pero la UI no
+  rollbackea (criterio actual: el usuario corrige y reintenta).
+- **Idempotencia**: el body del PUT incluye el modelo completo. El
+  backend hace soft-delete de las child entities ausentes y upsert
+  de las presentes — repetir el mismo PUT no genera divergencias.
+- **Permisos en cada PUT**: el backend revalida `can_edit_model`. Si
+  el admin revocó el permiso mid-sesión, el siguiente PUT cae en 403
+  y la UI dispara logout/refresh.
+
+---
+
+## 3. Sincronización del canvas (DiagramCanvasInner)
+
+`DiagramCanvasInner` usa dos `useEffect` independientes:
+
+### 3.1 Sync de nodos
+
+Se ejecuta cuando cambia `tables`, `selectedTableId`, `hoveredTableId`
+o `activeColsByTable`.
+
+```mermaid
+flowchart TD
+    A["Cambio en tables / hover / selección"] --> B["Calcular fingerprint estructural<br/>(hash de IDs + nombres + columnas)"]
+    B --> C{"¿cambió la estructura?"}
+    C -->|"no — solo hover/select"| D["Actualizar 'data' de cada node<br/>(highlight, activeRelationColumns)<br/>SIN reposicionar"]
+    C -->|"sí"| E["layoutCompact() para nodos nuevos"]
+    E --> F["Conservar posiciones existentes (drag) + asignar las nuevas"]
+    D --> G["setNodes()"]
+    F --> G
 ```
-data/
-├── projects.json            # Registro de Project[]
-└── models/
-    └── {uuid}.json          # DataModel completo (tablas + relaciones + posiciones)
-```
 
-## Sincronización del Lienzo
+`activeColsByTable` es un `Map<tableId, Set<columnId>>` que rellena
+la información de qué columnas están conectadas a `activeTableId`.
+Como las relaciones almacenan `column.id`, el set también guarda ids.
+`TableNode` matchea cada fila con `activeRelCols.includes(col.id)
+|| activeRelCols.includes(col.name)` (el segundo término es fallback
+para datos legacy pre-migration).
 
-`DiagramCanvasInner` utiliza dos hooks `useEffect`:
-
-### Sincronización de nodos (tablas)
-
-Se ejecuta cuando cambia `tables`, `selectedTableId`, `hoveredTableId` o `activeColsByTable`.
-
-- Calcula una **huella estructural** del arreglo de tablas
-- Si solo cambió el estado de visualización (hover/selección), actualiza `data` en el lugar sin reposicionar
-- Si cambió la estructura (columna agregada/eliminada), ejecuta `layoutLeftRight()` para calcular posiciones nuevas (las posiciones arrastradas existentes se conservan en memoria)
-- **Las posiciones nunca se persisten** — se calculan desde el algoritmo de distribución cada vez que se carga el modelo
-- Pasa el arreglo `activeRelationColumns` a cada nodo para que `TableNode` resalte las columnas conectadas
-
-### Sincronización de aristas (relaciones)
+### 3.2 Sync de aristas
 
 Se ejecuta cuando cambia `relationships`, `tables` o `activeTableId`.
 
-- Reconstruye todas las aristas desde cero
-- Asigna `highlighted` / `dimmed` según `activeTableId`
-- Asigna `edgeIndex` por par de nodos para separar conexiones paralelas
+- Reconstruye **todas** las edges desde cero (más simple que diff).
+- `sourceHandle: ${rel.sourceColumn}-source`,
+  `targetHandle: ${rel.targetColumn}-target`. Como `sourceColumn` /
+  `targetColumn` son `column.id`, los handles del `TableNode` (ids
+  también) matchean directamente.
+- Asigna `highlighted` / `dimmed` según la relación con `activeTableId`.
+- Asigna `edgeIndex` por par de nodos (offset escalonado para edges
+  paralelos).
 
-## Flujo de Interacción por Hover y Selección
+---
+
+## 4. Hover & selección en el lienzo
 
 ```mermaid
 flowchart TD
-    H["Mouse enters table node\nonNodeMouseEnter"] --> HS["setHoveredTableId(nodeId)"]
+    H["Mouse enters table node<br/>(onNodeMouseEnter)"] --> HS["setHoveredTableId(nodeId)"]
     HS --> AT["activeTableId = hoveredTableId ?? selectedTableId"]
-    AT --> CE["Edge useEffect: highlighted/dimmed per edge"]
-    AT --> CN["Node useEffect: activeRelationColumns per node"]
-    CE --> AE["AnimatedEdge: flow animation overlay\n+ wire color change"]
-    CN --> TN["TableNode: active-relation-row CSS on matched columns"]
+    AT --> CE["Edge useEffect: highlighted/dimmed por arista"]
+    AT --> CN["Node useEffect: activeRelationColumns por nodo"]
+    CE --> AE["AnimatedEdge: animación stroke + cambio de color"]
+    CN --> TN["TableNode: clase active-relation-row en filas matched"]
 
-    C["Click table node\nonNodeClick"] --> SS["setSelectedTableId(nodeId)"]
+    C["Click en nodo<br/>(onNodeClick)"] --> SS["setSelectedTableId(nodeId)"]
     SS --> AT
 
-    G["Click gear icon ⚙ on table node\nhandleGearClick"] --> GM["TableNodeGearMenu\n(Edit / Delete options)"]
-    GM -->|"Edit"| OE["onEditTable(id)\n→ ModelEditorPage opens TableForm modal"]
-    GM -->|"Delete"| OD["onDeleteTable(id)\n→ removeTable() + removeRelationshipsByTable()"]
+    G["Click en gear ⚙ del nodo"] --> GM["TableNodeGearMenu (Edit / Delete)"]
+    GM -->|"Edit"| OE["onEditTable(id)<br/>→ ModelEditorPage abre TableForm modal"]
+    GM -->|"Delete"| OD["ConfirmDialog (con skip-for-session)<br/>→ removeTable + removeRelationshipsByTable"]
 ```
 
-> **Nota:** Hacer clic en el cuerpo de la tabla (no en el engranaje) solo dispara `setSelectedTableId` para resaltado visual. El formulario de edición se abre exclusivamente a través de la ruta engranaje → Edit.
+> Hacer click en el cuerpo del nodo (no en el gear) **solo selecciona**.
+> El TableForm se abre exclusivamente vía gear → Edit, para evitar
+> aperturas accidentales mid-arrastre.
 
-## Flujo de Alternancia de Vista
+---
+
+## 5. Toggle de vista List ↔ Canvas
+
+```mermaid
+flowchart LR
+    T["Click en List | Canvas (segmented control)"] --> MV["setMainView('list' | 'canvas')"]
+    MV -->|"'list'"| LV["TablesListView<br/>(card grid + búsqueda + tag filter + group-by)"]
+    MV -->|"'canvas'"| CV["DiagramCanvas<br/>(React Flow ER)"]
+    LV --> EA["Edit → openTableForm(table)<br/>Delete → handleDeleteTable(id)"]
+    CV --> GE["Gear → Edit / Delete<br/>(mismos handlers)"]
+```
+
+Ambos componentes leen del mismo store. Cambiar de vista nunca
+refetcha datos.
+
+---
+
+## 6. Exportación DDL
+
+Tres scopes — cada uno invoca el mismo modal con un dataset distinto:
 
 ```mermaid
 flowchart TD
-    T["User clicks List / Canvas toggle\nin ModelEditorPage header"] --> MV["setMainView('list' | 'canvas')"]
-    MV -->|"'list'"| LV["Renders TablesListView\n(card grid, search, tag filter)"]
-    MV -->|"'canvas'"| CV["Renders DiagramCanvas\n(React Flow ER diagram)"]
-    LV --> EA["Edit → openTableForm(table)\nDelete → handleDeleteTable(id)"]
-    CV --> GE["Gear menu → Edit / Delete\n(same handlers)"]
-```
-
-Ambas vistas comparten las mismas `tables` y `relationships` del store de Zustand — cambiar de vista nunca provoca una recarga de datos.
-
-## Flujo de Exportación DDL
-
-```mermaid
-flowchart TD
-    A["User triggers export\n(Export DDL button / row ↓ / group ↓)"] --> B{"Scope"}
-    B -->|"Model"| MS["generateTablesDDL(allTables, …)"]
-    B -->|"Domain group"| DS["generateTablesDDL(groupTables, allTables, …)"]
-    B -->|"Single table"| TS["generateTableDDL(table, allTables, …)"]
-    MS --> CTX["buildContext()\nresolveSchema per table"]
+    A["Trigger export<br/>(Export DDL toolbar / row ↓ / group ↓)"] --> B{"Scope"}
+    B -->|"Modelo"| MS["generateTablesDDL(allTables, allRels, engine, opts)"]
+    B -->|"Dominio"| DS["generateTablesDDL(domainTables, allTables, allRels, engine, opts)"]
+    B -->|"Tabla"| TS["generateTableDDL(table, allTables, allRels, engine, opts)"]
+    MS --> CTX["buildContext (resolveSchema · supportsSchemas · ...)"]
     DS --> CTX
     TS --> CTX
     CTX --> EM["emitSchemas (CREATE SCHEMA)"]
-    CTX --> ET["emitTable per row\n(types via TYPE_MAP, quoting,\nPK inline, partition / cluster suffix)"]
-    CTX --> EFK["emitForeignKeys\n(ALTER TABLE … ADD CONSTRAINT …)"]
-    CTX --> ECM["appendComments\n(COMMENT ON TABLE / COLUMN)"]
+    CTX --> ET["emitTable per row"]
+    CTX --> EFK["emitForeignKeysFor<br/>resolveColumnName(rel.sourceColumn → name)"]
+    CTX --> ECM["appendComments<br/>(COMMENT ON TABLE / COLUMN)"]
     EM --> O["DDL string"]
     ET --> O
     EFK --> O
     ECM --> O
     O --> M["DDLPreviewModal"]
     M -->|"Copy"| CB["navigator.clipboard"]
-    M -->|"Download"| DL["Blob → .sql download"]
-    M -->|"Toggle option"| RG["regenerate via the same generator"]
+    M -->|"Download"| DL["Blob → .sql"]
+    M -->|"Toggle option"| RG["regenerar in-memory"]
     RG --> O
 ```
 
-**Características clave:**
-- El generador es **puro** — misma entrada produce misma salida; los toggles del modal disparan una regeneración en memoria.
-- `allTables` siempre se pasa al contexto para que las refs FK puedan calificarse con su schema destino, incluso si el scope solo expone un subset.
-- Los `ALTER TABLE` de FKs se emiten al final para que el script aplique aunque las tablas referenciadas se creen en cualquier orden.
+**Características clave**:
 
-## Flujo de Distribución Automática
+- El generador es **puro**: misma entrada → misma salida. Los toggles
+  del modal disparan regeneración en memoria.
+- `allTables` siempre se pasa al contexto para que las refs FK puedan
+  calificarse con su schema destino, incluso si el scope expone solo
+  un subset.
+- Las FKs se emiten como `ALTER TABLE` al final → el script aplica
+  aunque las tablas referenciadas se creen en cualquier orden.
+- **Compat con datos legacy**: si una `Relationship.sourceColumn`
+  todavía guarda un nombre (pre-migration), `resolveColumnName` lo
+  detecta como fallback y no rompe.
+
+---
+
+## 7. Auto-distribución (Auto-Arrange)
 
 ```mermaid
 flowchart TD
-    A["User clicks grid icon\nin Controls bar"] --> B["AutoArrangePopover opens"]
-    B --> C{"Algorithm selected"}
-    C -->|"Left-right"| LR["layoutLeftRight()\nKahn topological sort → layers"]
-    C -->|"Snowflake"| SF["layoutSnowflake()\nBFS rings from most-connected"]
-    C -->|"Compact"| CP["layoutCompact()\nGrid sorted by degree"]
-    LR --> P["positions Record — id → x,y"]
+    A["Click en grid icon de Controls bar"] --> B["AutoArrangePopover"]
+    B --> C{"Algoritmo"}
+    C -->|"Left-right"| LR["layoutLeftRight()<br/>Kahn topological sort → layers"]
+    C -->|"Snowflake"| SF["layoutSnowflake()<br/>BFS rings desde el nodo más conectado"]
+    C -->|"Compact"| CP["layoutCompact()<br/>grid ordenado por degree"]
+    LR --> P["positions: Record<id, {x,y}>"]
     SF --> P
     CP --> P
-    P --> N["setNodes() — update positions in-memory"]
-    N --> F["fitView() — animate to show all"]
+    P --> N["setNodes() en memoria"]
+    N --> F["fitView animate"]
 ```
+
+Las posiciones **no se persisten** al backend — son volátiles
+mientras dura la sesión.
+
+---
+
+## 8. Manejo centralizado de errores
+
+```mermaid
+flowchart LR
+    F["fetch (apiFetch o agentService)"] --> S{"status"}
+    S -->|"401"| AUTH["throw ApiError(401)"]
+    S -->|"403"| FBD["throw ApiError(403)"]
+    S -->|"4xx envelope.success=false"| BE["throw ApiError(envelope.error)"]
+    S -->|"500 / red caída"| NET["throw ApiError(message, 0|500)"]
+    S -->|"OK"| OK["return data"]
+
+    AUTH --> H1["Componente: catch ApiError → useAuthStore.logout()<br/>+ redirect /login"]
+    FBD --> H2["Componente: catch ApiError → toast 'Sin permiso'"]
+    BE --> H3["Componente: toast con err.message"]
+    NET --> H4["Componente: toast 'Sin conexión'"]
+```
+
+`ApiError` (en `services/http.ts`) y `AgentClientError` (en
+`services/agent.service.ts`) son las dos únicas formas de error que
+llegan a la UI desde la capa HTTP. Cualquier componente que haga una
+llamada usa `try/catch` y decide si muestra toast / redirige / dispara
+un retry. Nunca se inspecciona `json.success` a mano fuera de la capa
+service.
