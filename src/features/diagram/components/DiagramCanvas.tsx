@@ -351,13 +351,53 @@ function DiagramCanvasInner({
     highlight.onEdgeHover(null);
   }, [highlight]);
 
-  // ── Drag persistence ───────────────────────────────────────────────
+  // ── Drag — start, persistence, smoothstep takeover ─────────────────
+  //
+  // dbdiagram.io-style fluid drag: while a node is being dragged, every
+  // incident edge has its ELK-baked `data.waypoints` cleared. With an
+  // empty waypoints array, `CrowsFootEdge` falls back to React Flow's
+  // live `getSmoothStepPath`, which recomputes geometry from the node's
+  // current `sourceX/Y` / `targetX/Y` on every frame. The wire follows
+  // the cursor at 60 fps with zero per-frame work on our side.
+  //
+  // After `onNodeDragStop`, the waypoints stay empty — we deliberately
+  // do NOT restore the ELK-routed path. Re-routing is reserved for
+  // explicit user actions (`Auto arrange` button, or reopening the
+  // model), which `runVersion` will signal and Effect 1 will pick up.
+  //
+  // We also `abort()` any layout that may be in flight when the drag
+  // begins. Otherwise a layout that resolves mid-drag would push fresh
+  // ELK waypoints into the structural effect and snap the wire back to
+  // its old route while the user is still moving the table.
+  const handleNodeDragStart = useCallback(
+    (_: React.MouseEvent, node: RFNode) => {
+      if (node.type === 'namespace') return;
+      elk.abort();
+      const draggedId = node.id;
+      setEdges((prev) => {
+        let mutated = false;
+        const next = prev.map((e) => {
+          if (e.source !== draggedId && e.target !== draggedId) return e;
+          const data = (e.data ?? {}) as { waypoints?: unknown };
+          // Skip work when the edge is already in smoothstep mode.
+          if (Array.isArray(data.waypoints) && data.waypoints.length === 0) return e;
+          mutated = true;
+          return { ...e, data: { ...e.data, waypoints: [] } };
+        });
+        return mutated ? next : prev;
+      });
+    },
+    [elk, setEdges],
+  );
+
   const handleNodeDragStop = useCallback(
     (_: React.MouseEvent, node: RFNode) => {
       // Persist tables and views — never the namespace background.
       if (node.type === 'namespace') return;
       const pos: NodePosition = { x: node.position.x, y: node.position.y };
       persistence.persistSinglePosition(node.id, pos);
+      // Intentionally NOT restoring waypoints — the wire stays in
+      // smoothstep mode until the next ELK run (Auto arrange / reload).
     },
     [persistence],
   );
@@ -562,6 +602,7 @@ function DiagramCanvasInner({
         onNodeMouseLeave={handleNodeMouseLeave}
         onEdgeMouseEnter={handleEdgeMouseEnter}
         onEdgeMouseLeave={handleEdgeMouseLeave}
+        onNodeDragStart={handleNodeDragStart}
         onNodeDragStop={handleNodeDragStop}
         onConnect={handleConnect}
         onEdgesDelete={handleEdgesDelete}

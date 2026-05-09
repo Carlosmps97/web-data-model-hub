@@ -88,6 +88,22 @@ export default function CrowsFootEdge(props: EdgeProps) {
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
 
+  // ── Path resolution ────────────────────────────────────────────────
+  // The two render modes the canvas supports:
+  //   1. ELK-routed: `data.waypoints` is an ordered list of bend points.
+  //      Used at rest and right after auto-layout — the bend points hug
+  //      column rows perfectly and avoid foreign nodes.
+  //   2. Live smoothstep: `data.waypoints` is empty. Triggered by the
+  //      drag handler in `DiagramCanvas` (`onNodeDragStart` clears the
+  //      waypoints of every edge incident to the dragged node so React
+  //      Flow falls back to live orthogonal routing). React Flow re-
+  //      evaluates `sourceX/Y/targetX/Y` on every frame as the user
+  //      drags, so the line follows the cursor at 60 fps without any
+  //      additional bookkeeping.
+  // We use a generous `borderRadius` so smoothstep corners look polished
+  // (matches dbdiagram.io's style) and keep visual continuity with the
+  // ELK-routed path that has hard 90° bends — the rounded corners only
+  // show up while dragging.
   let edgePath = pathFromWaypoints(waypoints);
   if (!edgePath) {
     if (sourceNode && targetNode) {
@@ -98,7 +114,7 @@ export default function CrowsFootEdge(props: EdgeProps) {
         targetX,
         targetY,
         targetPosition: targetPosition ?? Position.Left,
-        borderRadius: 0,
+        borderRadius: 8,
       });
       edgePath = fallback;
     } else {

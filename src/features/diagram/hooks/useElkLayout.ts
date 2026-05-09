@@ -90,6 +90,13 @@ export interface UseElkLayoutOutput {
    * is what the "Auto-layout" button uses.
    */
   runLayout: (opts?: { mode?: ElkLayoutMode; ignorePersisted?: boolean }) => Promise<void>;
+  /**
+   * Cancel any in-flight layout. Used by the canvas drag handler so a
+   * layout that finishes mid-drag does NOT overwrite the smoothstep
+   * waypoints (`[]`) the drag just installed on the incident edges.
+   * Safe to call when nothing is in flight.
+   */
+  abort: () => void;
 }
 
 function fingerprint(input: UseElkLayoutInput): string {
@@ -273,6 +280,10 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
     [],
   );
 
+  const abort = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
   return {
     nodes: result.nodes,
     edges: result.edges,
@@ -282,5 +293,6 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
     elapsedMs,
     runVersion,
     runLayout,
+    abort,
   };
 }
