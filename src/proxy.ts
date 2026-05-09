@@ -1,5 +1,5 @@
 /**
- * Global auth middleware.
+ * Global auth proxy.
  *
  * Runs on every matched request BEFORE the route handler. It:
  *
@@ -12,8 +12,13 @@
  *      without checks.
  *
  * Finer-grained checks (is the user admin? does they have access to
- * this specific project?) live in the route handlers — middleware
+ * this specific project?) live in the route handlers — the proxy
  * only enforces "signed-in".
+ *
+ * NOTE: Next.js 16 deprecated the `middleware.ts` filename in favour
+ * of `proxy.ts` with a `proxy` named export. This module replaces
+ * the previous `src/middleware.ts`; the matcher config still works
+ * the same way.
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
@@ -31,7 +36,7 @@ function isPublicPath(pathname: string): boolean {
   return false;
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
   if (isPublicPath(pathname)) {

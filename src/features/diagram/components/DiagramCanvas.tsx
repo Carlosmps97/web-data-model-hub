@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import {
   ReactFlow,
@@ -22,23 +22,28 @@ import '@xyflow/react/dist/style.css';
 
 import TableNodeComponent from './TableNode';
 import ViewNodeComponent from './ViewNode';
-import AnimatedEREdge from './AnimatedEdge';
 import NamespaceNode from './NamespaceNode';
+import CrowsFootEdge from './CrowsFootEdge';
+import CrowsFootMarkers from '../markers/CrowsFootMarkers';
 import AutoArrangePopover, { type LayoutAlgorithm } from './AutoArrangePopover';
-import { layoutLeftRight, layoutCompact, layoutViews } from '../utils/layoutAlgorithms';
-import type { TableModel, Relationship, ViewModel, DatabaseEngine } from '@/types/model';
 
-// ── Layout constants (must match TableNode) ──
-const NODE_WIDTH = 260;
-const VIEW_NODE_WIDTH = 280;
+import { useElkLayout, type UseElkLayoutNamespace } from '../hooks/useElkLayout';
+import { useHighlightController } from '../hooks/useHighlightController';
+import { useLayoutPersistence } from '../hooks/useLayoutPersistence';
+
+import type {
+  DatabaseEngine,
+  NodePosition,
+  Relationship,
+  TableModel,
+  ViewModel,
+} from '@/types/model';
 
 /**
  * Stable empty-array singleton used as the default for optional array
- * props. Returning `[]` literal from a default parameter creates a new
- * reference on every render, which — when fed into a `useEffect`
- * dependency list (see the tables→nodes sync below) — triggers an infinite
- * update loop. Keeping this constant module-scoped guarantees referential
- * stability across renders.
+ * props. Without this, a literal `= []` in destructuring creates a new
+ * reference per render that propagates through `useElkLayout`'s
+ * fingerprint and triggers spurious layout reruns.
  */
 const EMPTY_VIEWS: ViewModel[] = [];
 
@@ -49,19 +54,28 @@ const nodeTypes: NodeTypes = {
   namespace: NamespaceNode,
 };
 const edgeTypes: EdgeTypes = {
-  animatedER: AnimatedEREdge,
+  /** Crow's Foot ER edge with ELK-computed orthogonal waypoints. */
+  crowsFootER: CrowsFootEdge,
 };
 
 // ── Props ──
-/** Namespace = a logical grouping (usually a model) rendered as a background rect on the canvas. */
+/**
+ * Namespace = a logical grouping (usually a model) rendered as a
+ * background rect on the canvas.
+ *
+ * Position + width + height are now optional: ELK's hierarchy mode
+ * computes them when `tableIds` is provided. They are only honoured as
+ * hints for legacy callers that still pre-place namespaces (none today
+ * after the ELK migration, kept to ease external integration).
+ */
 export interface NamespaceInfo {
   id: string;
   label: string;
   engine?: DatabaseEngine;
   tableIds: string[];
-  position: { x: number; y: number };
-  width: number;
-  height: number;
+  position?: { x: number; y: number };
+  width?: number;
+  height?: number;
   /** Optional palette index for tint. */
   tintIndex?: number;
 }
@@ -89,7 +103,18 @@ interface DiagramCanvasProps {
   /** Called when user selects an edge and presses Delete. */
   onRemoveRelationship?: (id: string) => void;
   namespaces?: NamespaceInfo[];
-  tablePositions?: Record<string, { x: number; y: number }>;
+  /**
+   * Model id for canvas position persistence. When absent — and no
+   * `resolveModelIdForTable` is provided — drag/auto-layout writes are
+   * suppressed (preview canvases / read-only views).
+   */
+  modelId?: string | null;
+  /**
+   * Multi-model resolver. Used by the global project view where each
+   * table belongs to a different model. Takes precedence over `modelId`
+   * when present.
+   */
+  resolveModelIdForTable?: (tableId: string) => string | null;
 }
 
 function DiagramCanvasInner({
@@ -104,245 +129,194 @@ function DiagramCanvasInner({
   onAddRelationship,
   onRemoveRelationship,
   namespaces,
-  tablePositions,
+  modelId,
+  resolveModelIdForTable,
 }: DiagramCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
-  const [hoveredTableId, setHoveredTableId] = useState<string | null>(null);
   const [activeTool, setActiveTool] = useState<CanvasTool>('select');
   const [pendingConn, setPendingConn] = useState<PendingConn | null>(null);
+  const [layoutMode, setLayoutMode] = useState<LayoutAlgorithm>('horizontal');
 
-  // Hover takes visual priority over click selection
-  const activeTableId = hoveredTableId ?? selectedTableId;
+  // ── Persisted positions (from DataModel.tables[*].position) ────────
+  const persistedPositions = useMemo(() => {
+    const map = new Map<string, { x: number; y: number }>();
+    for (const t of tables) if (t.position) map.set(t.id, t.position);
+    for (const v of views) if (v.position) map.set(v.id, v.position);
+    return map.size > 0 ? map : undefined;
+  }, [tables, views]);
 
-  // Track structural changes to avoid re-syncing on position-only updates
-  const prevStructRef = useRef<string>('');
-
-  const getStructFingerprint = useCallback((tbls: TableModel[]) => {
-    return tbls
-      .map(t => {
-        const cols = t.columns.map(c => `${c.name}:${c.dataType}:${c.isPrimaryKey}:${c.isForeignKey}`).join(',');
-        return `${t.id}|${t.name}|${cols}|${t.functionalDefinition || ''}|${t.color || ''}`;
-      })
-      .sort()
-      .join('||');
-  }, []);
-
-  // ── Derive active relation columns per table ──
-  const activeColsByTable = useMemo(() => {
-    const map = new Map<string, Set<string>>();
-    if (!activeTableId) return map;
-
-    relationships.forEach(rel => {
-      const src = tables.find(t => t.name === rel.sourceTable || t.id === rel.sourceTable);
-      const tgt = tables.find(t => t.name === rel.targetTable || t.id === rel.targetTable);
-      if (!src || !tgt) return;
-
-      const srcConnected = src.id === activeTableId;
-      const tgtConnected = tgt.id === activeTableId;
-      if (!srcConnected && !tgtConnected) return;
-
-      if (!map.has(src.id)) map.set(src.id, new Set());
-      map.get(src.id)!.add(rel.sourceColumn);
-
-      if (!map.has(tgt.id)) map.set(tgt.id, new Set());
-      map.get(tgt.id)!.add(rel.targetColumn);
-    });
-
-    return map;
-  }, [activeTableId, tables, relationships]);
-
-  // ── Fingerprint for namespaces (structural) ──
-  const namespaceFP = useMemo(() => {
-    if (!namespaces) return '';
-    return namespaces
-      .map(n => `${n.id}|${n.label}|${n.engine ?? ''}|${n.position.x},${n.position.y}|${n.width}x${n.height}`)
-      .join('||');
+  // ── Namespaces adapter for the layout hook ─────────────────────────
+  const elkNamespaces: UseElkLayoutNamespace[] | undefined = useMemo(() => {
+    if (!namespaces || namespaces.length === 0) return undefined;
+    return namespaces.map((n) => ({
+      id: n.id,
+      label: n.label,
+      engine: n.engine,
+      tintIndex: n.tintIndex,
+      tableIds: n.tableIds,
+    }));
   }, [namespaces]);
 
-  // ── Sync tables + namespaces → React Flow nodes ──
+  // ── Run ELK layout — returns nodes, edges, handle sides, runLayout fn
+  const elk = useElkLayout({
+    tables,
+    relationships,
+    views,
+    namespaces: elkNamespaces,
+    persistedPositions,
+    mode: layoutMode,
+    autoRun: true,
+  });
+
+  // ── Highlight (hover / selection) ──────────────────────────────────
+  const highlight = useHighlightController(tables, relationships, selectedTableId);
+
+  // ── Persistence (drag + auto-layout) ───────────────────────────────
+  const persistence = useLayoutPersistence({
+    modelId,
+    resolveModelId: resolveModelIdForTable,
+  });
+
+  // ── Stable callback refs ───────────────────────────────────────────
+  // The decoration effect below would re-fire on every render if it
+  // closed over the prop callbacks directly (parents may pass fresh
+  // arrow functions). Routing through a ref keeps the effect stable
+  // while still calling whatever the latest function is.
+  const callbackRefs = useRef({ onEditTable, onDeleteTable, onEditView });
   useEffect(() => {
-    const currFP = getStructFingerprint(tables) + '::' + namespaceFP;
-    const structChanged = currFP !== prevStructRef.current;
-    prevStructRef.current = currFP;
+    callbackRefs.current = { onEditTable, onDeleteTable, onEditView };
+  }, [onEditTable, onDeleteTable, onEditView]);
 
-    // Compute smart positions when structure changes and no explicit positions
-    // given. `layoutCompact` is the default because it handles disconnected
-    // models (no FKs) gracefully AND degrades into a masonry pack when the
-    // graph has no hierarchy.
-    const autoPositions = structChanged && !tablePositions ? layoutCompact(tables, relationships) : {};
+  // ── Track the last ELK runVersion we applied ───────────────────────
+  // The decoration effect must NEVER blow away node positions — those
+  // are owned by either ELK (initial run / auto-layout) or by the
+  // user (drag). This ref lets us tell `(structural change)` apart
+  // from `(hover change)` cheaply.
+  const lastAppliedRunVersionRef = useRef(-1);
 
-    // View positions: computed from the resolved table positions so views
-    // align with their source table on the right side of the canvas.
-    const resolvedTablePositions = tablePositions ?? autoPositions;
-    const autoViewPositions = structChanged && views.length > 0
-      ? layoutViews(views, resolvedTablePositions, tables)
-      : {};
+  // ── Effect 1: STRUCTURAL — runs only when ELK produces a fresh
+  // layout (`elk.runVersion` ticks). Reseeds React Flow's node/edge
+  // state with the new layout, preserving identity for nodes that
+  // already exist (so React Flow keeps its measured / dragged state).
+  // ───────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (elk.runVersion === lastAppliedRunVersionRef.current) return;
+    lastAppliedRunVersionRef.current = elk.runVersion;
 
-    setNodes(prev => {
-      const existingMap = new Map(prev.map(n => [n.id, n]));
+    if (elk.nodes.length === 0) {
+      setNodes([]);
+      setEdges([]);
+      return;
+    }
 
-      const result: RFNode[] = [];
-
-      // 1. Namespace background nodes (render first → behind tables)
-      if (namespaces && namespaces.length > 0) {
-        namespaces.forEach((ns, idx) => {
-          const existing = existingMap.get(`ns:${ns.id}`);
-          result.push({
-            id: `ns:${ns.id}`,
-            type: 'namespace',
-            position: existing?.position ?? ns.position,
-            data: {
-              label: ns.label,
-              engine: ns.engine,
-              width: ns.width,
-              height: ns.height,
-              tintIndex: ns.tintIndex ?? idx,
-            },
-            width: ns.width,
-            height: ns.height,
-            draggable: false,
-            selectable: false,
-            zIndex: -1,
-          });
-        });
-      }
-
-      // 2. Table nodes
-      tables.forEach(table => {
-        const existing = existingMap.get(table.id);
-        const activeCols = activeColsByTable.get(table.id);
-        const nodeData = {
-          table,
-          selected: table.id === selectedTableId || table.id === hoveredTableId,
-          activeRelationColumns: activeCols ? Array.from(activeCols) : [],
-          onEditTable,
-          onDeleteTable,
-        };
-
-        if (existing && !structChanged) {
-          result.push({ ...existing, data: nodeData });
-        } else {
-          // Priority: explicit position override (from global view) > existing (drag) > auto layout
-          const explicit = tablePositions?.[table.id];
-          const position = explicit ?? existing?.position ?? autoPositions[table.id] ?? { x: 50, y: 50 };
-          result.push({
-            id: table.id,
-            type: 'erTable',
-            position,
-            data: nodeData,
-            width: NODE_WIDTH,
-          });
+    setNodes((prev) => {
+      const prevById = new Map(prev.map((n) => [n.id, n]));
+      return elk.nodes.map((next) => {
+        const existing = prevById.get(next.id);
+        // Keep the existing node's identity + measured flag whenever
+        // possible. Replace position with ELK's and merge data.
+        if (existing) {
+          return {
+            ...existing,
+            type: next.type,
+            position: next.position,
+            // `width`/`height` come from ELK based on column count; if
+            // the table grew/shrank we want the new size.
+            width: next.width,
+            height: next.height,
+            data: { ...(existing.data ?? {}), ...(next.data ?? {}) },
+            // Preserve the `selectable`, `draggable` etc. from the
+            // freshly-built node (ELK adapter sets these per type).
+            selectable: next.selectable,
+            draggable: next.draggable,
+            zIndex: next.zIndex,
+            parentId: next.parentId,
+            extent: next.extent,
+          } as RFNode;
         }
+        return next;
       });
-
-      // 3. View nodes — smart layout via layoutViews (aligned with source table)
-      views.forEach((view) => {
-        const srcTable = tables.find((t) => t.id === view.sourceTableId);
-        const existingView = existingMap.get(view.id);
-        const viewData = {
-          view,
-          sourceTableName: srcTable?.name ?? '',
-          selected: false,
-          onEditView,
-        };
-        // Priority: existing drag position → layoutViews result → simple fallback
-        const smartPos = autoViewPositions[view.id];
-        const fallbackPos = { x: (resolvedTablePositions[view.sourceTableId]?.x ?? 50) + NODE_WIDTH + 140, y: 60 };
-        result.push({
-          id: view.id,
-          type: 'erView',
-          position: existingView?.position ?? smartPos ?? fallbackPos,
-          data: viewData,
-          width: VIEW_NODE_WIDTH,
-        });
-      });
-
-      return result;
     });
-  }, [tables, relationships, views, selectedTableId, hoveredTableId, activeColsByTable, setNodes, getStructFingerprint, onEditTable, onDeleteTable, onEditView, namespaces, namespaceFP, tablePositions]);
 
-  // ── Build tableId → namespaceId map for cross-model detection ──
-  const tableNamespace = useMemo(() => {
-    const map = new Map<string, string>();
-    namespaces?.forEach(ns => ns.tableIds.forEach(tid => map.set(tid, ns.id)));
-    return map;
-  }, [namespaces]);
+    setEdges((prev) => {
+      const prevById = new Map(prev.map((e) => [e.id, e]));
+      return elk.edges.map((next) => {
+        const existing = prevById.get(next.id);
+        if (existing) {
+          return {
+            ...existing,
+            type: next.type,
+            source: next.source,
+            target: next.target,
+            sourceHandle: next.sourceHandle,
+            targetHandle: next.targetHandle,
+            data: { ...(existing.data ?? {}), ...(next.data ?? {}) },
+          } as RFEdge;
+        }
+        return next;
+      });
+    });
+  }, [elk.runVersion, elk.nodes, elk.edges, setNodes, setEdges]);
 
-  // ── Sync relationships → React Flow edges ──
+  // ── Effect 2: DECORATION — runs on hover/selection. Only updates
+  // the `data` field on each node/edge; never touches position,
+  // identity, or React Flow's internal handle map. This is what
+  // prevents the previous flicker + `error#015` (drag of an
+  // un-initialised node) — the React Flow store keeps the same node
+  // refs across hovers.
+  // ───────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const newEdges: RFEdge[] = [];
-    // Track edge index per node-pair to offset overlapping wires
-    const pairCounter = new Map<string, number>();
+    setNodes((prev) =>
+      prev.map((n) => {
+        if (n.type === 'erTable') {
+          const tableId = n.id;
+          const activeCols = highlight.state.activeColumnIdsByTable.get(tableId);
+          const isHl = highlight.state.highlightedTableIds.has(tableId);
+          const isDimmed = highlight.state.hasActive && !isHl;
+          const next = {
+            ...(n.data ?? {}),
+            selected:
+              tableId === selectedTableId ||
+              tableId === highlight.state.activeTableId,
+            dimmed: isDimmed,
+            activeRelationColumns: activeCols ? Array.from(activeCols) : [],
+            onEditTable: callbackRefs.current.onEditTable,
+            onDeleteTable: callbackRefs.current.onDeleteTable,
+          };
+          return { ...n, data: next };
+        }
+        if (n.type === 'erView') {
+          const next = {
+            ...(n.data ?? {}),
+            onEditView: callbackRefs.current.onEditView,
+          };
+          return { ...n, data: next };
+        }
+        return n;
+      }),
+    );
 
-    relationships.forEach(rel => {
-      const src = tables.find(t => t.name === rel.sourceTable || t.id === rel.sourceTable);
-      const tgt = tables.find(t => t.name === rel.targetTable || t.id === rel.targetTable);
-      if (!src || !tgt) return;
+    setEdges((prev) =>
+      prev.map((e) => {
+        if (e.type !== 'crowsFootER') return e;
+        const isHl = highlight.state.highlightedEdgeIds.has(e.id);
+        const isDimmed = highlight.state.hasActive && !isHl;
+        return {
+          ...e,
+          data: {
+            ...(e.data ?? {}),
+            highlighted: isHl,
+            dimmed: isDimmed,
+          },
+        };
+      }),
+    );
+  }, [highlight.state, selectedTableId, setNodes, setEdges]);
 
-      const isConnectedToActive =
-        activeTableId === src.id || activeTableId === tgt.id;
-      const hasSomeActive = activeTableId !== null;
-
-      const sourceLabel = rel.type === 'one-to-one' ? '1' : rel.type === 'one-to-many' ? '*' : '*';
-      const targetLabel = rel.type === 'one-to-one' ? '1' : rel.type === 'one-to-many' ? '0..1' : '*';
-
-      // Cross-model = source and target belong to different namespaces
-      const srcNs = tableNamespace.get(src.id);
-      const tgtNs = tableNamespace.get(tgt.id);
-      const crossModel = !!srcNs && !!tgtNs && srcNs !== tgtNs;
-
-      // Compute edge index for this node pair (order-independent key)
-      const pairKey = [src.id, tgt.id].sort().join('::');
-      const edgeIndex = pairCounter.get(pairKey) ?? 0;
-      pairCounter.set(pairKey, edgeIndex + 1);
-
-      newEdges.push({
-        id: rel.id,
-        source: src.id,
-        target: tgt.id,
-        sourceHandle: `${rel.sourceColumn}-source`,
-        targetHandle: `${rel.targetColumn}-target`,
-        type: 'animatedER',
-        data: {
-          highlighted: isConnectedToActive,
-          dimmed: hasSomeActive && !isConnectedToActive,
-          sourceLabel,
-          targetLabel,
-          edgeIndex,
-          crossModel,
-        },
-      });
-    });
-
-    // View → source table: dashed edges
-    views.forEach((view) => {
-      const srcTable = tables.find((t) => t.id === view.sourceTableId);
-      if (!srcTable) return;
-      newEdges.push({
-        id: `view-edge-${view.id}`,
-        source: view.id,
-        target: srcTable.id,
-        type: 'default',
-        animated: false,
-        style: {
-          stroke: '#94a3b8',
-          strokeWidth: 1.5,
-          strokeDasharray: '5 4',
-        },
-        label: 'derived from',
-        labelStyle: { fontSize: 9, fill: '#94a3b8' },
-        labelBgStyle: { fill: '#f8fafc', fillOpacity: 0.8 },
-      });
-    });
-
-    setEdges(newEdges);
-  }, [relationships, tables, views, activeTableId, setEdges, tableNamespace]);
-
-  // ── Event handlers ──
+  // ── Event handlers ─────────────────────────────────────────────────
   const handleNodeClick = useCallback(
     (_: React.MouseEvent, node: RFNode) => {
-      // Namespace nodes are purely visual ─ don't affect selection
       if (node.type === 'namespace') return;
       onSelectTable(node.id);
     },
@@ -351,19 +325,42 @@ function DiagramCanvasInner({
 
   const handlePaneClick = useCallback(() => {
     onSelectTable(null);
-  }, [onSelectTable]);
+    highlight.clearHover();
+  }, [onSelectTable, highlight]);
 
   const handleNodeMouseEnter = useCallback(
     (_: React.MouseEvent, node: RFNode) => {
       if (node.type === 'namespace') return;
-      setHoveredTableId(node.id);
+      highlight.onNodeHover(node.id);
     },
-    [],
+    [highlight],
   );
 
   const handleNodeMouseLeave = useCallback(() => {
-    setHoveredTableId(null);
-  }, []);
+    highlight.onNodeHover(null);
+  }, [highlight]);
+
+  const handleEdgeMouseEnter = useCallback(
+    (_: React.MouseEvent, edge: RFEdge) => {
+      if (edge.type === 'crowsFootER') highlight.onEdgeHover(edge.id);
+    },
+    [highlight],
+  );
+
+  const handleEdgeMouseLeave = useCallback(() => {
+    highlight.onEdgeHover(null);
+  }, [highlight]);
+
+  // ── Drag persistence ───────────────────────────────────────────────
+  const handleNodeDragStop = useCallback(
+    (_: React.MouseEvent, node: RFNode) => {
+      // Persist tables and views — never the namespace background.
+      if (node.type === 'namespace') return;
+      const pos: NodePosition = { x: node.position.x, y: node.position.y };
+      persistence.persistSinglePosition(node.id, pos);
+    },
+    [persistence],
+  );
 
   // ── Connection handlers ──
 
@@ -396,11 +393,15 @@ function DiagramCanvasInner({
     const tgtTable = tables.find((t) => t.id === pendingConn.targetNodeId);
     if (!srcTable || !tgtTable) { setPendingConn(null); return; }
 
+    // Use the table's stable `id` (not `name`). Old relationships
+    // could carry names because of legacy code paths; the post-clean
+    // codebase only emits ids so the FK is rename-safe out of the
+    // box. The column refs already are ids (handles are keyed by id).
     onAddRelationship?.({
       id: uuidv4(),
-      sourceTable: srcTable.name,
+      sourceTable: srcTable.id,
       sourceColumn: pendingConn.sourceColumn,
-      targetTable: tgtTable.name,
+      targetTable: tgtTable.id,
       targetColumn: pendingConn.targetColumn,
       type,
     });
@@ -424,37 +425,35 @@ function DiagramCanvasInner({
            tables.some((t) => t.id === connection.target);
   }, [tables]);
 
-  // ── Auto arrange ──
+  // ── Auto arrange ───────────────────────────────────────────────────
   const { fitView } = useReactFlow();
 
+  /**
+   * Re-runs ELK with the chosen mode, ignoring the persisted positions
+   * so the layout reflows from scratch. The `useEffect` that consumes
+   * `elk.nodes` will pick up the new positions and re-render. We then
+   * persist the new positions in bulk so they survive a reload.
+   */
   const handleAutoArrange = useCallback(
-    (algorithm: LayoutAlgorithm) => {
-      let tablePos: Record<string, { x: number; y: number }>;
-      switch (algorithm) {
-        case 'left-right':
-          tablePos = layoutLeftRight(tables, relationships);
-          break;
-        case 'compact':
-          tablePos = layoutCompact(tables, relationships);
-          break;
+    async (algorithm: LayoutAlgorithm) => {
+      setLayoutMode(algorithm);
+      await elk.runLayout({ mode: algorithm, ignorePersisted: true });
+
+      // After the engine resolves, `elk.nodes` carries the fresh
+      // positions. Persist them so the layout sticks across reloads.
+      const positions = new Map<string, NodePosition>();
+      // Read straight from the in-memory result; `elk.nodes` is already
+      // up-to-date because `runLayout` awaits the engine.
+      for (const n of elk.nodes) {
+        if (n.type === 'namespace') continue;
+        positions.set(n.id, { x: n.position.x, y: n.position.y });
       }
-
-      // Also recompute view positions relative to the new table layout
-      const viewPos = layoutViews(views, tablePos, tables);
-      const positions = { ...tablePos, ...viewPos };
-
-      setNodes(prev =>
-        prev.map(n => {
-          if (n.type === 'namespace') return n; // keep namespace positions
-          const pos = positions[n.id];
-          return pos ? { ...n, position: pos } : n;
-        }),
-      );
+      void persistence.persistAllPositions(positions);
 
       // Fit view after layout with a small delay for rendering
       setTimeout(() => fitView({ padding: 0.3, maxZoom: 1.2, duration: 400 }), 50);
     },
-    [tables, views, relationships, setNodes, fitView],
+    [elk, persistence, fitView],
   );
 
   // ── MiniMap node color ──
@@ -546,6 +545,10 @@ function DiagramCanvasInner({
         </div>
       )}
 
+      {/* Crow's Foot SVG markers — must be mounted once per canvas
+          so `url(#cf-…)` resolves on every CrowsFootEdge. */}
+      <CrowsFootMarkers />
+
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -557,6 +560,9 @@ function DiagramCanvasInner({
         onPaneClick={handlePaneClick}
         onNodeMouseEnter={handleNodeMouseEnter}
         onNodeMouseLeave={handleNodeMouseLeave}
+        onEdgeMouseEnter={handleEdgeMouseEnter}
+        onEdgeMouseLeave={handleEdgeMouseLeave}
+        onNodeDragStop={handleNodeDragStop}
         onConnect={handleConnect}
         onEdgesDelete={handleEdgesDelete}
         isValidConnection={isValidConnection}
@@ -566,7 +572,7 @@ function DiagramCanvasInner({
         minZoom={0.15}
         maxZoom={2.5}
         deleteKeyCode="Delete"
-        defaultEdgeOptions={{ type: 'animatedER' }}
+        defaultEdgeOptions={{ type: 'crowsFootER' }}
         proOptions={{ hideAttribution: true }}
         snapToGrid
         snapGrid={[16, 16]}

@@ -727,6 +727,8 @@ export default function ModelEditorPage({ params }: PageProps) {
           onEditView={handleEditView}
           onAddRelationship={addRelationship}
           onRemoveRelationship={removeRelationship}
+          // Persist drag/auto-layout positions to this model.
+          modelId={modelId}
         />
 
         {/* AI assistant side panel (only opens when explicitly toggled) */}

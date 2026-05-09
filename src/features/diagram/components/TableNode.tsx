@@ -13,6 +13,14 @@ interface TableNodeData {
   table: TableModel;
   selected?: boolean;
   activeRelationColumns?: string[];
+  /**
+   * Map of `columnId → 'left' | 'right'` dictated by ELK's port side.
+   * When present, each column renders a single handle on the chosen
+   * side (cleaner wires). When absent — e.g. during a new-table
+   * creation before ELK has run — we fall back to rendering both
+   * handles so a user-drawn connection still works.
+   */
+  handleSideByColumn?: Record<string, 'left' | 'right'>;
   onEditTable?: (id: string) => void;
   onDeleteTable?: (id: string) => void;
   viewMode?: 'logical' | 'physical';
@@ -24,6 +32,7 @@ function TableNodeComponent({ data }: NodeProps) {
   const table = nodeData?.table;
   const isSelected = nodeData?.selected || false;
   const activeRelCols = nodeData?.activeRelationColumns ?? [];
+  const handleSideByColumn = nodeData?.handleSideByColumn;
   const onEditTable = nodeData?.onEditTable as ((id: string) => void) | undefined;
   const onDeleteTable = nodeData?.onDeleteTable as ((id: string) => void) | undefined;
   const viewMode = (nodeData?.viewMode as 'logical' | 'physical' | undefined) ?? 'physical';
@@ -138,6 +147,16 @@ function TableNodeComponent({ data }: NodeProps) {
           const isActiveRelation =
             activeRelCols.includes(col.id) || activeRelCols.includes(col.name);
 
+          // ELK port placement decides on which side this column's
+          // handle pair lives:
+          //   - 'left'   → target + source both on the left edge
+          //   - 'right'  → target + source both on the right edge
+          //   - undefined (ELK not yet run, e.g. brand-new table) →
+          //     legacy fallback: target on the left, source on the
+          //     right (the historic React Flow pattern).
+          const elkSide = handleSideByColumn?.[col.id];
+          const fallback = elkSide === undefined;
+
           return (
             <div
               key={idx}
@@ -145,15 +164,24 @@ function TableNodeComponent({ data }: NodeProps) {
               onMouseEnter={() => setHoveredCol(idx)}
               onMouseLeave={() => setHoveredCol(null)}
             >
-              {/* Left handle (target) — invisible, functional.
-                  Handle id is keyed by `col.id` (NOT `col.name`) so
-                  edges survive column renames. */}
-              <Handle
-                type="target"
-                position={Position.Left}
-                id={`${col.id}-target`}
-                className="dbdiagram-handle"
-              />
+              {/* Left side handles. Handle ids are keyed by `col.id`
+                  (NOT `col.name`) so edges survive column renames. */}
+              {(elkSide === 'left' || fallback) && (
+                <Handle
+                  type="target"
+                  position={Position.Left}
+                  id={`${col.id}-target`}
+                  className="dbdiagram-handle"
+                />
+              )}
+              {elkSide === 'left' && (
+                <Handle
+                  type="source"
+                  position={Position.Left}
+                  id={`${col.id}-source`}
+                  className="dbdiagram-handle"
+                />
+              )}
 
               {/* Main column row — name, type, nullable, PK/FK icon */}
               <div className="table-node-column-main">
@@ -184,15 +212,26 @@ function TableNodeComponent({ data }: NodeProps) {
                 <span className="table-node-col-type">{col.dataType}</span>
               </div>
 
-              {/* Right handle (source) — invisible, functional.
-                  Handle id is keyed by `col.id` (NOT `col.name`) so
-                  edges survive column renames. */}
-              <Handle
-                type="source"
-                position={Position.Right}
-                id={`${col.id}-source`}
-                className="dbdiagram-handle"
-              />
+              {/* Right side handles. Source on the right is both the
+                  legacy fallback (ELK not yet run) and the canonical
+                  placement when ELK assigns this column to the right
+                  edge. */}
+              {(elkSide === 'right' || fallback) && (
+                <Handle
+                  type="source"
+                  position={Position.Right}
+                  id={`${col.id}-source`}
+                  className="dbdiagram-handle"
+                />
+              )}
+              {elkSide === 'right' && (
+                <Handle
+                  type="target"
+                  position={Position.Right}
+                  id={`${col.id}-target`}
+                  className="dbdiagram-handle"
+                />
+              )}
 
               {/* Tooltip — shows on hover for every column */}
               {hoveredCol === idx && (

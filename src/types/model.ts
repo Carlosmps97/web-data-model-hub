@@ -68,6 +68,11 @@ export interface ViewModel {
   subdomainId?: string;
   tags?: string[];
   color?: string;
+  /**
+   * Canvas position. Persisted alongside `TableModel.position` via the
+   * same PATCH endpoint. See `NodePosition` above.
+   */
+  position?: { x: number; y: number };
 }
 
 // ─── Domain catalog ────────────────────────────────────────────────────────
@@ -176,6 +181,18 @@ export interface PartitionSpec {
   clusteringColumns?: string[];
 }
 
+/**
+ * Canvas position of a node. Persisted so the layout survives reloads.
+ *
+ * When absent, the frontend runs ELK on load to derive one. When the user
+ * drags a table or triggers "Auto-layout", the new positions are written
+ * back to Cosmos via `PATCH /api/models/{id}/positions`.
+ */
+export interface NodePosition {
+  x: number;
+  y: number;
+}
+
 export interface TableModel {
   id: string;
   /** SQL schema / namespace the table belongs to. */
@@ -197,7 +214,27 @@ export interface TableModel {
   subdomainId?: string;
   tags?: string[];
   partition?: PartitionSpec;
+  /**
+   * Canvas position (in React Flow world coordinates). Persisted by the
+   * ELK layout engine on auto-arrange and by the drag handler on
+   * node-drag-stop. See `useLayoutPersistence`.
+   */
+  position?: NodePosition;
 }
+
+/**
+ * Crow's Foot cardinality for one end of a relationship.
+ *
+ *   `one-only`     — exactly one (vertical bar  |)
+ *   `zero-or-one`  — optional one (circle + bar o|)
+ *   `one-or-many`  — at least one (bar + crow's foot |<)
+ *   `zero-or-many` — any number   (circle + crow's foot o<)
+ */
+export type CrowsFootCardinality =
+  | 'one-only'
+  | 'zero-or-one'
+  | 'one-or-many'
+  | 'zero-or-many';
 
 export interface Relationship {
   id: string;
@@ -215,6 +252,14 @@ export interface Relationship {
   /** See `sourceColumn` — also a column id. */
   targetColumn: string;
   type: 'one-to-one' | 'one-to-many' | 'many-to-many';
+  /**
+   * Optional Crow's Foot cardinality overrides. When absent, the edge
+   * renderer derives them from `type` + the FK column's `isNullable`
+   * flag (see `src/features/diagram/layout/cardinality/crowsFootMapping.ts`).
+   * Populated by future editor UI that lets the user tune the notation.
+   */
+  sourceCardinality?: CrowsFootCardinality;
+  targetCardinality?: CrowsFootCardinality;
 }
 
 // Database engines a DataModel can target.

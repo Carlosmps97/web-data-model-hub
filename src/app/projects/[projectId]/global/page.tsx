@@ -14,22 +14,12 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
 import type { Project, DataModel, TableModel, Relationship, DatabaseEngine } from '@/types/model';
-import { layoutLeftRight } from '@/features/diagram/utils/layoutAlgorithms';
 import type { NamespaceInfo } from '@/features/diagram/components/DiagramCanvas';
 
 const DiagramCanvas = dynamic(
   () => import('@/features/diagram/components/DiagramCanvas'),
   { ssr: false }
 );
-
-const NODE_W = 260;
-const ROW_H = 28;
-const HEADER_H = 36;
-const FOOTER_H = 28;
-const PAD_X = 40;
-const PAD_TOP = 56;
-const PAD_BOTTOM = 40;
-const NS_GAP = 64;
 
 interface PageProps {
   params: Promise<{ projectId: string }>;
@@ -39,69 +29,37 @@ interface AggregatedData {
   tables: TableModel[];
   relationships: Relationship[];
   namespaces: NamespaceInfo[];
-  tablePositions: Record<string, { x: number; y: number }>;
   engines: DatabaseEngine[];
   tableModelMap: Map<string, { modelId: string; modelName: string }>;
 }
 
 /**
- * Compute per-model namespace rectangles + table positions for a "global" canvas view.
- * Each model gets its own background panel. Models are stacked vertically.
+ * Aggregate every model in the project into one flat canvas dataset.
+ *
+ * Layout used to be computed here (per-model `layoutLeftRight` + manual
+ * vertical stacking); now we delegate everything to the ELK pipeline
+ * inside `DiagramCanvas`. This function only flattens tables and
+ * relationships and returns the namespace metadata (one per model)
+ * that the canvas turns into compound nodes.
  */
 function aggregate(models: DataModel[]): AggregatedData {
   const namespaces: NamespaceInfo[] = [];
-  const tablePositions: Record<string, { x: number; y: number }> = {};
   const allTables: TableModel[] = [];
   const allRels: Relationship[] = [];
   const tableModelMap = new Map<string, { modelId: string; modelName: string }>();
   const engineSet = new Set<DatabaseEngine>();
 
-  let cursorY = 40;
-
   models.forEach((model, idx) => {
     if (model.tables.length === 0) return;
-    const positions = layoutLeftRight(model.tables, model.relationships);
-
-    // Bounding box of this model's tables in layout space
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    model.tables.forEach((t) => {
-      const p = positions[t.id] ?? { x: 0, y: 0 };
-      const h = HEADER_H + t.columns.length * ROW_H + (t.functionalDefinition ? FOOTER_H : 0);
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x + NODE_W);
-      maxY = Math.max(maxY, p.y + h);
-    });
-    if (!isFinite(minX)) { minX = 0; minY = 0; maxX = NODE_W; maxY = 120; }
-
-    const nsX = 40;
-    const nsY = cursorY;
-    const offsetX = nsX + PAD_X - minX;
-    const offsetY = nsY + PAD_TOP - minY;
-
-    // Shift each table by the namespace origin
-    model.tables.forEach((t) => {
-      const p = positions[t.id] ?? { x: 0, y: 0 };
-      tablePositions[t.id] = { x: p.x + offsetX, y: p.y + offsetY };
-    });
-
-    const nsWidth = (maxX - minX) + PAD_X * 2;
-    const nsHeight = (maxY - minY) + PAD_TOP + PAD_BOTTOM;
 
     namespaces.push({
       id: model.id,
       label: model.name,
       engine: model.engine,
       tableIds: model.tables.map((t) => t.id),
-      position: { x: nsX, y: nsY },
-      width: nsWidth,
-      height: nsHeight,
       tintIndex: idx,
     });
 
-    cursorY = nsY + nsHeight + NS_GAP;
-
-    // Aggregate tables + rels
     model.tables.forEach((t) => {
       allTables.push(t);
       tableModelMap.set(t.id, { modelId: model.id, modelName: model.name });
@@ -114,7 +72,6 @@ function aggregate(models: DataModel[]): AggregatedData {
     tables: allTables,
     relationships: allRels,
     namespaces,
-    tablePositions,
     engines: Array.from(engineSet),
     tableModelMap,
   };
@@ -556,7 +513,12 @@ export default function ProjectGlobalCanvasPage({ params }: PageProps) {
           onAddRelationship={handleAddRelationship}
           onRemoveRelationship={handleRemoveRelationship}
           namespaces={visible.namespaces}
-          tablePositions={visible.tablePositions}
+          // Multi-model persistence: each table is owned by its model,
+          // and a drag in this aggregated canvas should PATCH the
+          // corresponding model's positions endpoint.
+          resolveModelIdForTable={(tid) =>
+            visible.tableModelMap.get(tid)?.modelId ?? null
+          }
         />
 
         {/* Right Panel — el chat IA sólo se renderiza dentro de un
