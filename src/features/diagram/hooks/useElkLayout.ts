@@ -184,6 +184,11 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
     [relationships, namespaces],
   );
 
+  // Fingerprint is still computed (cheap) and exposed via the hook
+  // result for callers that want to detect "structural change" — but we
+  // no longer auto-rerun the layout when it ticks. Keeping it here means
+  // a future feature can opt back in to fingerprint-driven reruns
+  // without rebuilding the whole memoisation pipeline.
   const fp = useMemo(
     () => fingerprint({ tables, relationships, views, namespaces, persistedPositions, mode }),
     [tables, relationships, views, namespaces, persistedPositions, mode],
@@ -261,17 +266,32 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
     ],
   );
 
+  // First-mount layout. Runs ONCE per consumer-component lifetime when
+  // the table set transitions from empty → non-empty. Subsequent
+  // structural changes (new table, new relationship, edited columns)
+  // do NOT trigger an automatic re-layout — the canvas adds the new
+  // entity at a sensible default position and lets the user fine-tune
+  // it, only re-flowing when they explicitly hit "Auto arrange". This
+  // mirrors dbdiagram.io's behaviour and avoids the disorienting
+  // "all my tables jumped" effect every time a relationship is drawn.
+  //
+  // `autoRun=false` opts out entirely (used by preview canvases).
+  const hasAutoRunRef = useRef(false);
+  const hasTables = tables.length > 0;
   useEffect(() => {
     if (!autoRun) return;
-    if (tables.length === 0) {
+    if (!hasTables) {
+      // Empty model — clear any leftover result and stay primed for the
+      // next non-empty render to count as a fresh first-mount.
       setResult({ nodes: [], edges: [], handleSideByTable: new Map() });
+      hasAutoRunRef.current = false;
       return;
     }
+    if (hasAutoRunRef.current) return;
+    hasAutoRunRef.current = true;
     runLayout();
-    // We deliberately depend on the fingerprint (not the raw inputs) to
-    // avoid rerunning when only object identity changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fp, autoRun]);
+  }, [autoRun, hasTables]);
 
   useEffect(
     () => () => {

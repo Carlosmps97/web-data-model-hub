@@ -79,6 +79,11 @@ export default function ModelEditorPage({ params }: PageProps) {
   const [showDomainManager, setShowDomainManager] = useState(false);
   const [showViewForm, setShowViewForm] = useState(false);
   const [editingView, setEditingView] = useState<import('@/types/model').ViewModel | null>(null);
+  // Bumped by handlers that perform a massive table load (Excel /
+  // SQL / DBML / Agent). The canvas listens on this counter and
+  // triggers a fresh ELK auto-layout when it changes. Single-table
+  // and single-relationship edits intentionally do NOT bump it.
+  const [layoutNonce, setLayoutNonce] = useState(0);
   // Ref para ignorar el primer disparo del efecto dirty (carga inicial).
   // React 18 batchea loadModel (Zustand) + setLoaded(true) en un solo render,
   // por lo que el efecto ve loaded=true + tablas nuevas simultáneamente.
@@ -240,6 +245,7 @@ export default function ModelEditorPage({ params }: PageProps) {
   const handleImportExcel = (importedTables: TableModel[]) => {
     importedTables.forEach((t) => addTable(t));
     setShowExcelImport(false);
+    setLayoutNonce((n) => n + 1);
   };
 
   // Bridge from the SQL-to-Table modal. Persists the newly inferred
@@ -258,6 +264,7 @@ export default function ModelEditorPage({ params }: PageProps) {
       if (!existingKeys.has(key)) addRelationship(rel);
     });
     setShowSqlCreate(false);
+    setLayoutNonce((n) => n + 1);
   };
 
   // DBML Code tab applies a full replacement of the model.
@@ -273,6 +280,7 @@ export default function ModelEditorPage({ params }: PageProps) {
     if (meta?.engine && meta.engine !== currentModel?.engine) {
       handleUpdateEngine(meta.engine);
     }
+    setLayoutNonce((n) => n + 1);
   };
 
   const handleEditTable = (id: string) => {
@@ -347,6 +355,7 @@ export default function ModelEditorPage({ params }: PageProps) {
     if (responseEngine !== currentModel?.engine) {
       handleUpdateEngine(responseEngine);
     }
+    setLayoutNonce((n) => n + 1);
   };
 
 
@@ -729,6 +738,7 @@ export default function ModelEditorPage({ params }: PageProps) {
           onRemoveRelationship={removeRelationship}
           // Persist drag/auto-layout positions to this model.
           modelId={modelId}
+          layoutNonce={layoutNonce}
         />
 
         {/* AI assistant side panel (only opens when explicitly toggled) */}

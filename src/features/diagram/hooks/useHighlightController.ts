@@ -41,6 +41,14 @@ export interface HighlightAPI {
   state: HighlightState;
   onNodeHover: (tableId: string | null) => void;
   onEdgeHover: (edgeId: string | null) => void;
+  /**
+   * Hover entered/left a specific column row. Pass `null` to clear.
+   * When a column hover is active it WINS over node hover so only
+   * the relationships that actually touch that column are highlighted
+   * (Issue #5). Edge hover still wins over column hover so the user
+   * can drill in further.
+   */
+  onColumnHover: (ref: { tableId: string; columnId: string } | null) => void;
   clearHover: () => void;
 }
 
@@ -51,9 +59,19 @@ export function useHighlightController(
 ): HighlightAPI {
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null);
   const [hoveredEdgeId, setHoveredEdgeId] = useState<string | null>(null);
+  // Column-level hover (Issue #5). Mutually exclusive with edge hover
+  // and dominant over node hover so the user can pinpoint a column's
+  // relationships even when the cursor sits inside the table node.
+  const [hoveredColumn, setHoveredColumn] = useState<{ tableId: string; columnId: string } | null>(null);
 
   const state = useMemo<HighlightState>(() => {
-    const activeTableId = hoveredTableId ?? (hoveredEdgeId ? null : selectedTableId);
+    // Priority: edge > column > node > selection. Each level zeros out
+    // the lower ones so we never double-attribute a hover.
+    const activeColumn = hoveredEdgeId ? null : hoveredColumn;
+    const activeTableId =
+      hoveredEdgeId || activeColumn
+        ? null
+        : (hoveredTableId ?? selectedTableId);
     const activeEdgeId = hoveredEdgeId;
 
     const highlightedTableIds = new Set<string>();
@@ -82,6 +100,38 @@ export function useHighlightController(
           if (!activeColumnIdsByTable.has(tgtT.id)) activeColumnIdsByTable.set(tgtT.id, new Set());
           activeColumnIdsByTable.get(tgtT.id)!.add(tCol.id);
         }
+      }
+    } else if (activeColumn) {
+      // Column-level hover — narrow highlights to relationships that
+      // *touch* this exact column, not every relationship of the table.
+      const { tableId: hoveredTid, columnId: hoveredCid } = activeColumn;
+      highlightedTableIds.add(hoveredTid);
+      // Mark the hovered column itself as active so its row stays lit.
+      activeColumnIdsByTable.set(hoveredTid, new Set([hoveredCid]));
+      for (const rel of relationships) {
+        const srcT = tables.find(
+          (t) => t.id === rel.sourceTable || t.name === rel.sourceTable,
+        );
+        const tgtT = tables.find(
+          (t) => t.id === rel.targetTable || t.name === rel.targetTable,
+        );
+        if (!srcT || !tgtT) continue;
+        // Resolve to ids so the comparison works for legacy relationships
+        // that still carry column names.
+        const sCol = resolveColumn(tables, srcT.id, rel.sourceColumn);
+        const tCol = resolveColumn(tables, tgtT.id, rel.targetColumn);
+        if (!sCol || !tCol) continue;
+        const touchesColumn =
+          (srcT.id === hoveredTid && sCol.id === hoveredCid) ||
+          (tgtT.id === hoveredTid && tCol.id === hoveredCid);
+        if (!touchesColumn) continue;
+        highlightedEdgeIds.add(rel.id);
+        highlightedTableIds.add(srcT.id);
+        highlightedTableIds.add(tgtT.id);
+        if (!activeColumnIdsByTable.has(srcT.id)) activeColumnIdsByTable.set(srcT.id, new Set());
+        activeColumnIdsByTable.get(srcT.id)!.add(sCol.id);
+        if (!activeColumnIdsByTable.has(tgtT.id)) activeColumnIdsByTable.set(tgtT.id, new Set());
+        activeColumnIdsByTable.get(tgtT.id)!.add(tCol.id);
       }
     } else if (activeTableId) {
       highlightedTableIds.add(activeTableId);
@@ -119,9 +169,10 @@ export function useHighlightController(
       highlightedTableIds,
       highlightedEdgeIds,
       activeColumnIdsByTable,
-      hasActive: activeTableId !== null || activeEdgeId !== null,
+      hasActive:
+        activeTableId !== null || activeEdgeId !== null || activeColumn !== null,
     };
-  }, [tables, relationships, selectedTableId, hoveredTableId, hoveredEdgeId]);
+  }, [tables, relationships, selectedTableId, hoveredTableId, hoveredEdgeId, hoveredColumn]);
 
   const onNodeHover = useCallback((id: string | null) => {
     setHoveredTableId(id);
@@ -129,12 +180,23 @@ export function useHighlightController(
   }, []);
   const onEdgeHover = useCallback((id: string | null) => {
     setHoveredEdgeId(id);
-    if (id) setHoveredTableId(null);
+    if (id) {
+      setHoveredTableId(null);
+      setHoveredColumn(null);
+    }
   }, []);
+  const onColumnHover = useCallback(
+    (ref: { tableId: string; columnId: string } | null) => {
+      setHoveredColumn(ref);
+      if (ref) setHoveredEdgeId(null);
+    },
+    [],
+  );
   const clearHover = useCallback(() => {
     setHoveredEdgeId(null);
     setHoveredTableId(null);
+    setHoveredColumn(null);
   }, []);
 
-  return { state, onNodeHover, onEdgeHover, clearHover };
+  return { state, onNodeHover, onEdgeHover, onColumnHover, clearHover };
 }

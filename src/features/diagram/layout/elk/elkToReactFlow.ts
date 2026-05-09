@@ -124,30 +124,40 @@ export function adaptElkResultToReactFlow(
   const tableById = new Map(tables.map((t) => [t.id, t]));
   const viewById = new Map(views.map((v) => [v.id, v]));
 
-  // ── handleSideByTable — scan every port ────────────────────────────
+  // ── handleSideByTable + per-role side map ──────────────────────────
+  // We track which side ELK ended up placing each port on so:
+  //   1. `handleSideByTable` (back-compat: one side per column) drives
+  //      the visual dimming of the OTHER side's pair in `TableNode`.
+  //   2. `roleSideByTable` (new: per role) tells the React Flow edge
+  //      which exact handle id to anchor to (`<col>-source-<side>` /
+  //      `<col>-target-<side>`).
   const handleSideByTable = new Map<string, Record<string, 'left' | 'right'>>();
+  const roleSideByTable = new Map<
+    string,
+    Record<string, { source?: 'left' | 'right'; target?: 'left' | 'right' }>
+  >();
   for (const entry of positions.values()) {
     const t = tableById.get(entry.node.id);
     if (!t) continue;
     const width = entry.node.width ?? 0;
     const ports = entry.node.ports ?? [];
     const map: Record<string, 'left' | 'right'> = {};
+    const roleMap: Record<string, { source?: 'left' | 'right'; target?: 'left' | 'right' }> = {};
     for (const p of ports) {
       const parsed = parsePortId(p.id ?? '');
       if (!parsed) continue;
-      // Pick the side by port's x relative to node width. The engine
-      // only declares one side per (role, column) so the last-seen
-      // source OR target is enough — they share the same column row
-      // vertically.
       const side: 'left' | 'right' = (p.x ?? 0) >= width / 2 ? 'right' : 'left';
-      // Prefer the `source` port's side as the canonical "column side"
-      // because that's where the edge outbound is drawn from; targets
-      // always sit opposite automatically in ORTHOGONAL mode.
+      // Per-role side (used by edges to pick the right anchor).
+      if (!roleMap[parsed.columnId]) roleMap[parsed.columnId] = {};
+      roleMap[parsed.columnId][parsed.role] = side;
+      // Single-side hint (used by TableNode dimming). Prefer the source
+      // port's side because that's where the column "outputs" visually.
       if (parsed.role === 'source' || map[parsed.columnId] === undefined) {
         map[parsed.columnId] = side;
       }
     }
     handleSideByTable.set(t.id, map);
+    roleSideByTable.set(t.id, roleMap);
   }
 
   // ── Nodes ──────────────────────────────────────────────────────────
@@ -255,12 +265,22 @@ export function adaptElkResultToReactFlow(
 
         const waypoints = edgeToWaypoints(e, myAbsX, myAbsY);
 
+        // Resolve the side ELK chose for each end so React Flow anchors
+        // the edge to the right handle (`<col>-source-<side>`,
+        // `<col>-target-<side>`). Default to 'right' for source / 'left'
+        // for target if the lookup somehow misses (matches the legacy
+        // ELK direction RIGHT default).
+        const sourceSide =
+          roleSideByTable.get(pm.sourceTableId)?.[pm.sourceColumnId]?.source ?? 'right';
+        const targetSide =
+          roleSideByTable.get(pm.targetTableId)?.[pm.targetColumnId]?.target ?? 'left';
+
         edges.push({
           id: rel.id,
           source: pm.sourceTableId,
           target: pm.targetTableId,
-          sourceHandle: `${pm.sourceColumnId}-source`,
-          targetHandle: `${pm.targetColumnId}-target`,
+          sourceHandle: `${pm.sourceColumnId}-source-${sourceSide}`,
+          targetHandle: `${pm.targetColumnId}-target-${targetSide}`,
           type: 'crowsFootER',
           data: {
             waypoints,

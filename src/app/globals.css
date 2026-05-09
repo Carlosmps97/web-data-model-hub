@@ -1567,18 +1567,29 @@ select.input {
 .react-flow__edge.inactive {
   pointer-events: all !important;
 }
-/* Invisible handles — dbdiagram style (no circles on rows) */
+/* Invisible handles — dbdiagram style (no circles on rows). Each
+   column row carries four handles (source-left, target-left,
+   source-right, target-right). All four are live drop targets so
+   `CrowsFootEdge` can pick the best anchor at render time and Connect
+   mode lets the user drag from any side. The default look is "barely
+   there" (1px transparent) — they grow on hover or in Connect mode. */
 .dbdiagram-handle.react-flow__handle {
-  width: 1px !important;
-  height: 1px !important;
+  width: 8px !important;
+  height: 8px !important;
   min-width: 0 !important;
   min-height: 0 !important;
   background: transparent !important;
   border: none !important;
   opacity: 0 !important;
-  pointer-events: none;
+  pointer-events: all !important;
   top: 50%;
   transform: translateY(-50%);
+}
+/* `--inactive` is set on the side ELK did NOT choose for this column.
+   Visual: stays hidden by default, slightly more pronounced in Connect
+   mode so the user still sees there's a drop target available. */
+.dbdiagram-handle--inactive.react-flow__handle {
+  opacity: 0 !important;
 }
 .react-flow__controls {
   box-shadow: none !important;

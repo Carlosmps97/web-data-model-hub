@@ -30,6 +30,7 @@ import AutoArrangePopover, { type LayoutAlgorithm } from './AutoArrangePopover';
 import { useElkLayout, type UseElkLayoutNamespace } from '../hooks/useElkLayout';
 import { useHighlightController } from '../hooks/useHighlightController';
 import { useLayoutPersistence } from '../hooks/useLayoutPersistence';
+import { buildCardinalityMap } from '../layout/cardinality/crowsFootMapping';
 
 import type {
   DatabaseEngine,
@@ -115,6 +116,15 @@ interface DiagramCanvasProps {
    * when present.
    */
   resolveModelIdForTable?: (tableId: string) => string | null;
+  /**
+   * Bumping this counter triggers a full ELK re-layout (reflowing all
+   * tables, ignoring persisted positions). Used by callers right after
+   * a massive import (Excel / SQL / DBML / Agent) where the user
+   * expects the freshly-loaded tables to be auto-arranged. For incremental
+   * structural edits (single new table, single new relationship) DO NOT
+   * bump this — the canvas is designed to keep existing tables put.
+   */
+  layoutNonce?: number;
 }
 
 function DiagramCanvasInner({
@@ -131,6 +141,7 @@ function DiagramCanvasInner({
   namespaces,
   modelId,
   resolveModelIdForTable,
+  layoutNonce,
 }: DiagramCanvasProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<RFNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<RFEdge>([]);
@@ -188,17 +199,165 @@ function DiagramCanvasInner({
     callbackRefs.current = { onEditTable, onDeleteTable, onEditView };
   }, [onEditTable, onDeleteTable, onEditView]);
 
+  // Cardinality lookup is computed locally (cheap) so the structural
+  // sync effect can stamp Crow's Foot symbols on edges added without
+  // ELK having run for them yet.
+  const cardinalityByRelId = useMemo(
+    () => buildCardinalityMap(relationships, tables),
+    [relationships, tables],
+  );
+
   // ── Track the last ELK runVersion we applied ───────────────────────
-  // The decoration effect must NEVER blow away node positions — those
-  // are owned by either ELK (initial run / auto-layout) or by the
-  // user (drag). This ref lets us tell `(structural change)` apart
-  // from `(hover change)` cheaply.
+  // Effect B must NEVER fire twice for the same ELK output (would blow
+  // away user drag positions). This ref lets us tell `(fresh layout)`
+  // apart from `(hover change)` cheaply.
   const lastAppliedRunVersionRef = useRef(-1);
 
-  // ── Effect 1: STRUCTURAL — runs only when ELK produces a fresh
-  // layout (`elk.runVersion` ticks). Reseeds React Flow's node/edge
-  // state with the new layout, preserving identity for nodes that
-  // already exist (so React Flow keeps its measured / dragged state).
+  // ── Effect A: STRUCTURAL SYNC — lightweight, NO ELK ────────────────
+  // Runs whenever `tables` / `relationships` / `views` change. Adds
+  // and removes React Flow nodes / edges to keep them in sync with
+  // upstream data, WITHOUT moving any existing node and WITHOUT running
+  // ELK. The point is: drawing a new relationship between two existing
+  // tables, or adding a new table, must not reflow the canvas. Existing
+  // tables stay exactly where the user put them.
+  //
+  // New tables that lack a persisted `position` are placed at a sensible
+  // default to the right of the existing cluster (with an offset so
+  // multiple new tables in the same render don't stack). The user can
+  // then drag them; "Auto arrange" reflows everything when explicitly
+  // invoked.
+  //
+  // New relationships are inserted with `data.waypoints = []` so
+  // `CrowsFootEdge` falls back to its live smoothstep router — the wire
+  // appears immediately, anchored to the column handles, without an
+  // ELK round-trip.
+  // ───────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    const tableById = new Map(tables.map((t) => [t.id, t]));
+    const viewById = new Map(views.map((v) => [v.id, v]));
+    const relById = new Map(relationships.map((r) => [r.id, r]));
+    const namespaceIds = new Set((namespaces ?? []).map((n) => `ns:${n.id}`));
+
+    setNodes((prev) => {
+      const prevById = new Map(prev.map((n) => [n.id, n]));
+      let mutated = false;
+
+      // 1. Rightmost edge of the current cluster — used to spawn new
+      //    tables in a free spot. Falls back to `(80, 80)` if empty.
+      let nextDefaultX = 80;
+      const nextDefaultY = 80;
+      for (const n of prev) {
+        if (n.type !== 'erTable' && n.type !== 'erView') continue;
+        const w = typeof n.width === 'number' ? n.width : 280;
+        const right = n.position.x + w;
+        if (right + 80 > nextDefaultX) nextDefaultX = right + 80;
+      }
+
+      // 2. Keep nodes that still belong; drop the rest.
+      const next: RFNode[] = [];
+      for (const n of prev) {
+        if (n.type === 'erTable') {
+          if (!tableById.has(n.id)) { mutated = true; continue; }
+        } else if (n.type === 'erView') {
+          if (!viewById.has(n.id)) { mutated = true; continue; }
+        } else if (n.type === 'namespace') {
+          if (!namespaceIds.has(n.id)) { mutated = true; continue; }
+        }
+        next.push(n);
+      }
+
+      // 3. Append brand-new tables at the right of the cluster.
+      let newCount = 0;
+      for (const t of tables) {
+        if (prevById.has(t.id)) continue;
+        mutated = true;
+        const pos = t.position
+          ? { x: t.position.x, y: t.position.y }
+          : { x: nextDefaultX + newCount * 40, y: nextDefaultY + newCount * 40 };
+        newCount++;
+        next.push({
+          id: t.id,
+          type: 'erTable',
+          position: pos,
+          data: {
+            table: t,
+            handleSideByColumn: {},
+          },
+        } as RFNode);
+      }
+
+      // 4. Append brand-new views the same way.
+      for (const v of views) {
+        if (prevById.has(v.id)) continue;
+        mutated = true;
+        const pos = v.position
+          ? { x: v.position.x, y: v.position.y }
+          : { x: nextDefaultX + newCount * 40, y: nextDefaultY + newCount * 40 };
+        newCount++;
+        const srcTable = tableById.get(v.sourceTableId);
+        next.push({
+          id: v.id,
+          type: 'erView',
+          position: pos,
+          data: { view: v, sourceTableName: srcTable?.name ?? '' },
+        } as RFNode);
+      }
+
+      return mutated ? next : prev;
+    });
+
+    setEdges((prev) => {
+      const prevById = new Map(prev.map((e) => [e.id, e]));
+      let mutated = false;
+      const next: RFEdge[] = [];
+
+      // 1. Keep edges that still belong; drop deleted ones.
+      for (const e of prev) {
+        if (e.id.startsWith('view-edge-')) {
+          const viewId = e.id.replace('view-edge-', '');
+          if (!viewById.has(viewId)) { mutated = true; continue; }
+        } else if (e.type === 'crowsFootER') {
+          if (!relById.has(e.id)) { mutated = true; continue; }
+        }
+        next.push(e);
+      }
+
+      // 2. Append brand-new relationships in smoothstep mode (no
+      //    waypoints — `CrowsFootEdge` will route them live until the
+      //    next ELK run.)
+      for (const rel of relationships) {
+        if (prevById.has(rel.id)) continue;
+        mutated = true;
+        const cardinality = cardinalityByRelId.get(rel.id) ?? {
+          source: 'one-only' as const,
+          target: 'one-only' as const,
+        };
+        // Brand-new relationship — no ELK side info yet. Default to
+        // the conventional ER orientation (source on the right of its
+        // table, target on the left of its table). `CrowsFootEdge`
+        // overrides this dynamically per frame in smoothstep mode by
+        // reading live node bounds, so the choice here is only the
+        // structural anchor for React Flow's bookkeeping.
+        next.push({
+          id: rel.id,
+          source: rel.sourceTable,
+          target: rel.targetTable,
+          sourceHandle: `${rel.sourceColumn}-source-right`,
+          targetHandle: `${rel.targetColumn}-target-left`,
+          type: 'crowsFootER',
+          data: { waypoints: [], cardinality },
+        } as RFEdge);
+      }
+
+      return mutated ? next : prev;
+    });
+  }, [tables, relationships, views, namespaces, cardinalityByRelId, setNodes, setEdges]);
+
+  // ── Effect B: ELK APPLY — runs only when ELK produces a fresh layout
+  // (`elk.runVersion` ticks). Snaps every node's position to the ELK
+  // result and rehydrates each edge's `waypoints`. This is what turns
+  // smoothstep wires (post-drag, post-create) back into beautifully
+  // routed orthogonal lines after the user clicks "Auto arrange".
   // ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (elk.runVersion === lastAppliedRunVersionRef.current) return;
@@ -259,6 +418,27 @@ function DiagramCanvasInner({
     });
   }, [elk.runVersion, elk.nodes, elk.edges, setNodes, setEdges]);
 
+  // ── Effect C: BULK-IMPORT TRIGGER — bumping `layoutNonce` reflows
+  // the entire canvas via ELK with `ignorePersisted=true`. The page-
+  // level handlers for Excel / SQL / DBML / Agent imports use this to
+  // request a fresh auto-arrange right after a massive load. The very
+  // first render is skipped (the hook's first-mount run already covers
+  // it).
+  // ───────────────────────────────────────────────────────────────────
+  const lastNonceRef = useRef<number | undefined>(layoutNonce);
+  // Stable handle on the latest `runLayout` so the effect below can
+  // depend on `layoutNonce` alone — `elk.runLayout`'s identity changes
+  // on every render of the hook (depends on tables/relationships) and
+  // would otherwise re-fire the trigger on unrelated structural edits.
+  const runLayoutRef = useRef(elk.runLayout);
+  useEffect(() => { runLayoutRef.current = elk.runLayout; }, [elk.runLayout]);
+  useEffect(() => {
+    if (layoutNonce === undefined) return;
+    if (lastNonceRef.current === layoutNonce) return;
+    lastNonceRef.current = layoutNonce;
+    void runLayoutRef.current({ ignorePersisted: true });
+  }, [layoutNonce]);
+
   // ── Effect 2: DECORATION — runs on hover/selection. Only updates
   // the `data` field on each node/edge; never touches position,
   // identity, or React Flow's internal handle map. This is what
@@ -283,6 +463,11 @@ function DiagramCanvasInner({
             activeRelationColumns: activeCols ? Array.from(activeCols) : [],
             onEditTable: callbackRefs.current.onEditTable,
             onDeleteTable: callbackRefs.current.onDeleteTable,
+            // Column-level hover sink — TableNode calls this on each
+            // row's mouseenter/leave so `useHighlightController` can
+            // narrow the highlight to the relationships touching that
+            // exact column (Issue #5).
+            onColumnHover: highlight.onColumnHover,
           };
           return { ...n, data: next };
         }
@@ -378,11 +563,21 @@ function DiagramCanvasInner({
         let mutated = false;
         const next = prev.map((e) => {
           if (e.source !== draggedId && e.target !== draggedId) return e;
-          const data = (e.data ?? {}) as { waypoints?: unknown };
-          // Skip work when the edge is already in smoothstep mode.
-          if (Array.isArray(data.waypoints) && data.waypoints.length === 0) return e;
+          const data = (e.data ?? {}) as { waypoints?: unknown; elevated?: unknown };
+          const alreadySmoothstep = Array.isArray(data.waypoints) && data.waypoints.length === 0;
+          const alreadyElevated = data.elevated === true && e.zIndex === 1000;
+          if (alreadySmoothstep && alreadyElevated) return e;
           mutated = true;
-          return { ...e, data: { ...e.data, waypoints: [] } };
+          // `zIndex: 1000` lifts the edge's own SVG layer above
+          // unselected nodes (which sit at z=0). The dragged node
+          // itself is also elevated by React Flow when selected, so
+          // `getElevatedEdgeZIndex` ends up at ~2000 — well above any
+          // table the wire might cross during the drag (Issue #2).
+          return {
+            ...e,
+            zIndex: 1000,
+            data: { ...e.data, waypoints: [], elevated: true },
+          };
         });
         return mutated ? next : prev;
       });
@@ -396,10 +591,24 @@ function DiagramCanvasInner({
       if (node.type === 'namespace') return;
       const pos: NodePosition = { x: node.position.x, y: node.position.y };
       persistence.persistSinglePosition(node.id, pos);
-      // Intentionally NOT restoring waypoints — the wire stays in
-      // smoothstep mode until the next ELK run (Auto arrange / reload).
+      // Drop the elevation flag on the incident edges. They keep their
+      // `waypoints: []` (smoothstep mode persists past the drop), but
+      // the z-index returns to default so they sit *behind* nodes again
+      // — matching dbdiagram's resting visual.
+      const draggedId = node.id;
+      setEdges((prev) => {
+        let mutated = false;
+        const next = prev.map((e) => {
+          if (e.source !== draggedId && e.target !== draggedId) return e;
+          if (e.zIndex === undefined) return e;
+          mutated = true;
+          const { elevated: _drop, ...restData } = (e.data ?? {}) as Record<string, unknown>;
+          return { ...e, zIndex: undefined, data: restData };
+        });
+        return mutated ? next : prev;
+      });
     },
-    [persistence],
+    [persistence, setEdges],
   );
 
   // ── Connection handlers ──
@@ -409,8 +618,12 @@ function DiagramCanvasInner({
     if (!connection.source || !connection.target) return;
     if (connection.source === connection.target) return; // no self-loops
 
-    const sourceCol = connection.sourceHandle?.replace(/-source$/, '') ?? '';
-    const targetCol = connection.targetHandle?.replace(/-target$/, '') ?? '';
+    // Handle ids are `<col.id>-source-<side>` / `<col.id>-target-<side>`
+    // post the four-handle migration. Legacy `-source` / `-target`
+    // suffixes are still tolerated so any stale React Flow internal
+    // reference (e.g. mid-upgrade) resolves gracefully.
+    const sourceCol = connection.sourceHandle?.replace(/-source(?:-(?:left|right))?$/, '') ?? '';
+    const targetCol = connection.targetHandle?.replace(/-target(?:-(?:left|right))?$/, '') ?? '';
     if (!sourceCol || !targetCol) return;
 
     // Only allow table → table connections (not view nodes)
