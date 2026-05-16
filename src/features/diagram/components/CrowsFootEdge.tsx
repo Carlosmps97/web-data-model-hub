@@ -63,6 +63,56 @@ function pathFromWaypoints(points: Array<{ x: number; y: number }>): string {
  * right side of the column row regardless of which side React Flow's
  * `sourceX/sourceY` happens to point at this frame.
  */
+/**
+ * Outward offset added to the SOURCE-side smoothstep anchor so the
+ * rendered path starts in the gap between tables, matching the
+ * geometry ELK produces for its own waypoints.
+ *
+ * ELK setup (`logicalToElk.ts`):
+ *   • Source ports (EAST side) live at `port.x = dims.width, width = 8`,
+ *     so ELK's `section.startPoint` lands at `dims.width + 8`
+ *     (8px OUTSIDE the right edge of the table).
+ *   • Target ports (WEST side) live at `port.x = 0, width = 8`,
+ *     so ELK's `section.endPoint` lands at `0`
+ *     (AT the left edge of the table — NOT outside).
+ *
+ * Why this asymmetry is on purpose: the target marker uses
+ * `refX = 20` against a viewBox-x=14 bar with `orient=auto`, which
+ * already shifts the rendered bar 6px BACKWARD along the path
+ * (i.e. AWAY from the table) — so the visual gap on the target side
+ * comes "for free" from the marker geometry, with no port offset
+ * needed. The source marker uses `refX = -4` against a viewBox-x=2
+ * bar with `orient=auto-start-reverse`, which similarly shifts the
+ * rendered bar 6px backward along the path. Combined with the 8px
+ * port-side offset, the source bar ends up ~2px outside the table
+ * edge.
+ *
+ * Without an offset on the source side, smoothstep mode anchors at
+ * the handle CENTER (the table column edge) and the source bar
+ * (shifted 6px backward) ends up 6px INSIDE the table block, where
+ * the table's own background occludes it. Result: the source-side
+ * notation visually disappears after a drag or right after a new
+ * relationship is created.
+ *
+ * The TARGET side is intentionally NOT offset — ELK lands its target
+ * endpoint at the table edge and so does smoothstep when we leave
+ * the anchor at the handle center. Adding a target offset would push
+ * the target marker too far into the gap and create a visible
+ * asymmetry between the two render modes (initial-load ELK vs
+ * post-drag smoothstep).
+ *
+ * Sided variant: when source is on the LEFT (inverted layout where
+ * the source table has been dragged across the target), the offset
+ * negates so the path is pushed LEFT (still outward).
+ *
+ * The dynamic side-switching logic (Issue #3 / #4) is untouched —
+ * `pickHandleAnchor` still chooses left vs. right based on the live
+ * node centres; the offset is just applied to the chosen handle's
+ * output coordinate when (and only when) that handle plays the
+ * `source` role.
+ */
+const SMOOTHSTEP_ANCHOR_OFFSET = 8;
+
 function pickHandleAnchor(
   internalNode: ReturnType<typeof useInternalNode>,
   role: 'source' | 'target',
@@ -92,7 +142,20 @@ function pickHandleAnchor(
   if (!h) h = handles[0];
   const ax = internalNode.internals.positionAbsolute.x + h.x + h.width / 2;
   const ay = internalNode.internals.positionAbsolute.y + h.y + h.height / 2;
-  return { x: ax, y: ay, position: h.position };
+  // Push the SOURCE-side anchor outward along the resolved side so
+  // the marker bar lands in the gap, not behind the table block.
+  // TARGET side stays at the handle center to match ELK's target-port
+  // anchor (which sits AT the table edge, not 8px outside). See the
+  // long-form comment on `SMOOTHSTEP_ANCHOR_OFFSET`.
+  const dx =
+    role !== 'source'
+      ? 0
+      : h.position === Position.Right
+        ? SMOOTHSTEP_ANCHOR_OFFSET
+        : h.position === Position.Left
+          ? -SMOOTHSTEP_ANCHOR_OFFSET
+          : 0;
+  return { x: ax + dx, y: ay, position: h.position };
 }
 
 export default function CrowsFootEdge(props: EdgeProps) {
@@ -225,26 +288,21 @@ export default function CrowsFootEdge(props: EdgeProps) {
   const markerEnd = markerUrl(CROWS_FOOT_MARKERS[cardinality.target].target);
 
   // ── Label anchors ─────────────────────────────────────────────────
-  // In ELK mode the first/last waypoints already sit on the column row,
-  // so the historical "above the bend" offset (`-14`) reads cleanly.
-  // In smoothstep mode the labels need to slide a bit AWAY from the
-  // node along the wire's exit direction so they don't end up stacked
-  // on top of the handle dot — otherwise during drag they look pinned
-  // to the node corner. We use `sPos`/`tPos` (resolved per-frame above)
-  // to choose the offset direction.
+  // After the smoothstep-anchor offset above, both render modes place
+  // the path start/end ~8px outside the table edge — so the labels
+  // can sit at `firstPt`/`lastPt` directly without an extra in-mode
+  // adjustment. The historical "+22 in smoothstep" offset was a
+  // patch for the old geometry where `sx` sat on the handle centre
+  // and labels would otherwise overlap the handle dot; with the new
+  // offset that compensation is no longer needed and would push the
+  // labels too far from their cardinality marker.
   const isSmoothstepMode = waypoints.length === 0;
-  const labelDx = (pos: Position) => {
-    if (!isSmoothstepMode) return 0;
-    if (pos === Position.Right) return 22;
-    if (pos === Position.Left) return -22;
-    return 0;
-  };
   const labelDy = isSmoothstepMode ? -10 : -14;
   const firstPt = waypoints[0] ?? { x: sx, y: sy };
   const lastPt = waypoints[waypoints.length - 1] ?? { x: tx, y: ty };
-  const sLabelX = firstPt.x + labelDx(sPos);
+  const sLabelX = firstPt.x;
   const sLabelY = firstPt.y + labelDy;
-  const tLabelX = lastPt.x + labelDx(tPos);
+  const tLabelX = lastPt.x;
   const tLabelY = lastPt.y + labelDy;
 
   return (

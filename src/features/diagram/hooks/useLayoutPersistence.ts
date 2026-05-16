@@ -150,5 +150,54 @@ export function useLayoutPersistence({
     [],
   );
 
+  // ── beforeunload safety net (Frente C) ────────────────────────────
+  // If the user closes the tab with a pending debounced PATCH, the
+  // window/component teardown happens before the timer fires and
+  // those positions are lost. `navigator.sendBeacon` posts the
+  // pending payload as a fire-and-forget request that the browser
+  // guarantees to deliver even after the page unloads. It's UTF-8
+  // text-only by contract, so we ship JSON via a Blob.
+  //
+  // We register the listener on the window — `pagehide` is more
+  // reliable than `beforeunload` on Safari (which sometimes skips
+  // beforeunload for tab close vs. navigation). Both fire here for
+  // belt-and-suspenders coverage.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const flushBeacon = () => {
+      if (!enabled || !navigator.sendBeacon) return;
+      if (pendingRef.current.size === 0) return;
+      // Snapshot first so a race with the React unmount cycle
+      // doesn't double-send.
+      const snapshot = pendingRef.current;
+      pendingRef.current = new Map();
+      for (const [mid, entries] of snapshot) {
+        const payload: Record<string, NodePosition> = {};
+        for (const [k, v] of entries) payload[k] = v;
+        const url = `/api/models/${encodeURIComponent(mid)}/positions`;
+        try {
+          const blob = new Blob([JSON.stringify({ tables: payload })], {
+            type: 'application/json',
+          });
+          // sendBeacon returns false if the browser refused to queue
+          // (typically size > 64KB). For large bulk drags this is
+          // unlikely (each NodePosition is ~50 bytes), but we accept
+          // the silent-loss tradeoff — beacon is a best-effort
+          // safety net, not the primary write path.
+          navigator.sendBeacon(url, blob);
+        } catch {
+          // Beacon construction failed (rare). The page is already
+          // unloading, no recovery is possible — don't throw.
+        }
+      }
+    };
+    window.addEventListener('pagehide', flushBeacon);
+    window.addEventListener('beforeunload', flushBeacon);
+    return () => {
+      window.removeEventListener('pagehide', flushBeacon);
+      window.removeEventListener('beforeunload', flushBeacon);
+    };
+  }, [enabled]);
+
   return { persistSinglePosition, persistAllPositions, syncState };
 }

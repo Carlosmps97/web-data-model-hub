@@ -78,7 +78,19 @@ export function resolveLayoutOptions(
 
 /** Options applied to a *table* node so ELK respects column order. */
 export const TABLE_NODE_OPTIONS: Record<string, string> = {
-  'elk.portConstraints': 'FIXED_ORDER',
+  // FIXED_POS — ELK honours the exact `(port.x, port.y)` we declare in
+  // `logicalToElk.ts`. We need this (instead of FIXED_ORDER) because:
+  //   - `port.y = columnRowCenterY(idx)` must align pixel-perfect with
+  //     the DOM column row in `TableNode`.
+  //   - FIXED_ORDER respects only the declared order along each side
+  //     and redistributes `y` evenly between top/bottom of the node,
+  //     so a 2-port EAST side ends up at ~33% / ~66% of node height
+  //     regardless of which actual rows the columns live in. That is
+  //     the root cause of Issue #6 (wire visually nacía de la fila
+  //     incorrecta tras Auto Arrange — diagnosticado vía análisis
+  //     estático del pipeline; ports declarados con id estable +
+  //     parser correcto descartan H1 y H2).
+  'elk.portConstraints': 'FIXED_POS',
   // Allow ELK to let edges cross the node boundary through the declared
   // ports rather than trying to route around the node.
   'elk.portAlignment.default': 'CENTER',

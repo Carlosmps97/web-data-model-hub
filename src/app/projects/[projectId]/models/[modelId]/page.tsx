@@ -347,6 +347,70 @@ export default function ModelEditorPage({ params }: PageProps) {
   // usuario, el primer release REEMPLAZA tablas y relaciones (no hace
   // merge incremental). Si el engine devuelto por el backend difiere del
   // configurado en el modelo, lo persistimos también.
+  /**
+   * Bridge for the canvas drag-to-connect flow (Issue #5).
+   *
+   * The `DiagramCanvas` only knows how to emit a `Relationship`; it has
+   * no way to mutate the column model. After we persist the new
+   * relationship, we walk the source table's columns, find the column
+   * that participates as the FK side, and stamp it with
+   * `isForeignKey=true` + `foreignKeyRef` if those fields are missing.
+   *
+   * Why ONLY here (not on every `addRelationship` call site): the
+   * Excel / SQL / DBML / Agent importers already build columns with
+   * `isForeignKey` set during their own normalisation, so applying
+   * this wrapper there would be a no-op or, worse, would clobber a
+   * legitimate target-column reference. The drag flow is the only
+   * place where the column is touched without going through an
+   * importer.
+   *
+   * The decision to NOT auto-create a join table for `many-to-many`
+   * relationships is intentional and matches dbdiagram.io — the
+   * picker emits N:M and the canvas renders it as a direct edge
+   * with crow's-foot on both ends.
+   */
+  const handleAddRelationshipFromCanvas = (rel: Relationship) => {
+    addRelationship(rel);
+
+    // Resolve the source / target tables. The relationship stores ids
+    // (the canvas always emits ids), but we tolerate name-based legacy
+    // refs to stay compatible with old DBML imports.
+    const srcTable = tables.find(
+      (t) => t.id === rel.sourceTable || t.name === rel.sourceTable,
+    );
+    const tgtTable = tables.find(
+      (t) => t.id === rel.targetTable || t.name === rel.targetTable,
+    );
+    if (!srcTable || !tgtTable) return;
+
+    const srcCol = srcTable.columns.find(
+      (c) => c.id === rel.sourceColumn || c.name === rel.sourceColumn,
+    );
+    const tgtCol = tgtTable.columns.find(
+      (c) => c.id === rel.targetColumn || c.name === rel.targetColumn,
+    );
+    if (!srcCol || !tgtCol) return;
+
+    // If the column is already marked as FK pointing at the same
+    // target, leave it alone — don't bump the model dirty for nothing.
+    const refMatches =
+      srcCol.isForeignKey === true &&
+      srcCol.foreignKeyRef?.table === tgtTable.name &&
+      srcCol.foreignKeyRef?.column === tgtCol.name;
+    if (refMatches) return;
+
+    const updatedColumns = srcTable.columns.map((c) =>
+      c.id === srcCol.id
+        ? {
+            ...c,
+            isForeignKey: true,
+            foreignKeyRef: { table: tgtTable.name, column: tgtCol.name },
+          }
+        : c,
+    );
+    updateTable(srcTable.id, { columns: updatedColumns });
+  };
+
   const handleApplyAgentModel = (response: ModelingResponse) => {
     const { tables: newTables, relationships: newRels } = modelingResponseToCanvas(response);
     setTables(newTables);
@@ -734,7 +798,7 @@ export default function ModelEditorPage({ params }: PageProps) {
           onEditTable={handleEditTable}
           onDeleteTable={handleDeleteTable}
           onEditView={handleEditView}
-          onAddRelationship={addRelationship}
+          onAddRelationship={handleAddRelationshipFromCanvas}
           onRemoveRelationship={removeRelationship}
           // Persist drag/auto-layout positions to this model.
           modelId={modelId}

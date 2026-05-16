@@ -34,6 +34,17 @@ import type { Edge, Node } from '@xyflow/react';
 import type { Relationship, TableModel, ViewModel } from '@/types/model';
 
 import { createElkEngine } from '../layout/elk/engine';
+// NOTE (Phase 2 — Worker integration deferred):
+// `../layout/elk/worker/elkClient` is the future home of the
+// off-main-thread engine. It's wired correctly in code but the
+// Turbopack dev-mode bundling shows non-deterministic behaviour
+// (cf. parse error in `DiagramCanvas.tsx:1118` after Fast Refresh,
+// and Auto Arrange hanging on first invocation). Until those are
+// reproduced and fixed in isolation, we keep using the in-thread
+// engine — same correct ELK layout, just runs on the main thread.
+// The Worker files (`elk.worker.ts`, `elkClient.ts`, `elkProtocol.ts`)
+// are kept in tree to retain the work; nothing imports them.
+// import { createElkClient } from '../layout/elk/worker/elkClient';
 import { buildElkGraph } from '../layout/elk/logicalToElk';
 import {
   adaptElkResultToReactFlow,
@@ -97,6 +108,14 @@ export interface UseElkLayoutOutput {
    * Safe to call when nothing is in flight.
    */
   abort: () => void;
+  /**
+   * `true` between the moment the first-mount auto-run is dispatched
+   * and the first time `runVersion` ticks. The canvas uses this to
+   * suppress the structural-sync placeholder render on a model with
+   * no persisted positions — otherwise we'd flash a cascade of tables
+   * before ELK finishes its inaugural layout (Issue #1).
+   */
+  isFirstLayout: boolean;
 }
 
 function fingerprint(input: UseElkLayoutInput): string {
@@ -162,6 +181,8 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
     autoRun = true,
   } = input;
 
+  // In-thread ELK engine. The Worker version (Phase 2 / Frente A) is
+  // built but not wired in — see the import-block comment above.
   const engineRef = useRef(createElkEngine());
   const abortRef = useRef<AbortController | null>(null);
 
@@ -174,6 +195,11 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [runVersion, setRunVersion] = useState(0);
+  // `isFirstLayout` flips false once the very first `runLayout` finishes
+  // (success OR abort). The first-mount effect below sets it to true
+  // before dispatching the inaugural run; explicit subsequent runs
+  // (Auto Arrange, layoutNonce trigger) do NOT toggle it back to true.
+  const [isFirstLayout, setIsFirstLayout] = useState(false);
 
   const cardinalityByRelId = useMemo(
     () => buildCardinalityMap(relationships, tables),
@@ -246,10 +272,19 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
         // shape is structurally identical — because the user may have
         // explicitly hit "Auto-layout" and expects a re-flow.
         setRunVersion((v) => v + 1);
+        // First successful layout has landed — clear the suppression
+        // flag so the canvas reveals nodes (Issue #1).
+        setIsFirstLayout(false);
       } catch (err) {
-        if ((err as Error)?.name === 'AbortError') return;
+        if ((err as Error)?.name === 'AbortError') {
+          // First-mount layout was aborted (e.g. user nav'd away).
+          // Clear the flag so any future remount starts clean.
+          setIsFirstLayout(false);
+          return;
+        }
         // Surface the failure but keep previous layout visible.
         console.error('[useElkLayout] layout failed', err);
+        setIsFirstLayout(false);
       } finally {
         if (!ctrl.signal.aborted) setIsLayouting(false);
       }
@@ -289,6 +324,11 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
     }
     if (hasAutoRunRef.current) return;
     hasAutoRunRef.current = true;
+    // Mark the inaugural layout as in-flight before dispatching so the
+    // canvas can hide the placeholder render until ELK lands. The
+    // matching `setIsFirstLayout(false)` lives inside `runLayout` so
+    // it covers both the success path and the abort path.
+    setIsFirstLayout(true);
     runLayout();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoRun, hasTables]);
@@ -314,5 +354,6 @@ export function useElkLayout(input: UseElkLayoutInput): UseElkLayoutOutput {
     runVersion,
     runLayout,
     abort,
+    isFirstLayout,
   };
 }

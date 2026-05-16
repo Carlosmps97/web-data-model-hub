@@ -46,6 +46,42 @@ export function markerUrl(id: string): string {
 const MARKER_WIDTH = 18;
 const MARKER_HEIGHT = 18;
 
+// `refX` shifts the marker so the bar lands ~6px OUTSIDE the table
+// edge on BOTH sides of the wire — matching dbdiagram.io's layout
+// and producing a symmetric visual gap regardless of which end is
+// being measured (Issue #3 + symmetry follow-up).
+//
+// SVG marker mechanics:
+//   • `orient=auto` (target markers): the path's terminal point
+//     aligns with the viewBox coord `(refX, refY)`. Marker +X axis
+//     points along path-forward.
+//   • `orient=auto-start-reverse` (source markers): the marker is
+//     flipped 180°. Path start aligns with `(refX, refY)`. Marker
+//     +X axis points OPPOSITE to path-forward.
+//
+// Bar positions in viewBox: x=2 (source) / x=14 (target).
+//
+// Geometry of the rendered bar relative to the path endpoint, after
+// applying the orient rotation:
+//   • Source: bar canvas = P_start + (refX - 2)         ← horizontal
+//   • Target: bar canvas = P_end   + (14 - refX)        ← horizontal
+// (both signs measured in path-forward direction; for a normal
+//  left→right wire, "negative" means BACKWARD from the endpoint,
+//  i.e. AWAY from the table the endpoint is attached to.)
+//
+// With `refX = 0` (source) and `refX = 20` (target):
+//   • Source bar = P_start − 2.  ELK gives P_start = node_right + 8
+//     (port outer edge), so bar lands at node_right + 6 → 6px OUTSIDE.
+//   • Target bar = P_end   − 6.  ELK gives P_end = node_left
+//     (port at edge), so bar lands at node_left − 6 → 6px OUTSIDE.
+//
+// The smoothstep fallback in CrowsFootEdge mirrors the ELK port
+// geometry via `SMOOTHSTEP_ANCHOR_OFFSET = 8` on the source side and
+// no offset on the target — keeping these two refX values valid in
+// both render modes (Auto Arrange + drag) without per-mode tweaks.
+const SRC_REF_X = 0;
+const TGT_REF_X = 20;
+
 /** Orientation — `auto-start-reverse` on source markers makes them
  *  point opposite to the edge direction; auto on target markers keeps
  *  them aligned. */
@@ -111,39 +147,39 @@ export default function CrowsFootMarkers() {
     >
       <defs>
         {/* ─── one-only (|) ───────────────────────────────────────── */}
-        <Marker id="cf-one-only-s" orient="auto-start-reverse" refX={2}>
+        <Marker id="cf-one-only-s" orient="auto-start-reverse" refX={SRC_REF_X}>
           {BAR}
         </Marker>
-        <Marker id="cf-one-only-t" orient="auto" refX={14}>
+        <Marker id="cf-one-only-t" orient="auto" refX={TGT_REF_X}>
           {BAR_TARGET}
         </Marker>
 
         {/* ─── zero-or-one (o|) ───────────────────────────────────── */}
-        <Marker id="cf-zero-or-one-s" orient="auto-start-reverse" refX={2}>
+        <Marker id="cf-zero-or-one-s" orient="auto-start-reverse" refX={SRC_REF_X}>
           {BAR}
           {CIRCLE}
         </Marker>
-        <Marker id="cf-zero-or-one-t" orient="auto" refX={14}>
+        <Marker id="cf-zero-or-one-t" orient="auto" refX={TGT_REF_X}>
           {BAR_TARGET}
           {CIRCLE_TARGET}
         </Marker>
 
         {/* ─── one-or-many (|<) ───────────────────────────────────── */}
-        <Marker id="cf-one-or-many-s" orient="auto-start-reverse" refX={2}>
+        <Marker id="cf-one-or-many-s" orient="auto-start-reverse" refX={SRC_REF_X}>
           {BAR}
           {CROW_SRC}
         </Marker>
-        <Marker id="cf-one-or-many-t" orient="auto" refX={14}>
+        <Marker id="cf-one-or-many-t" orient="auto" refX={TGT_REF_X}>
           {BAR_TARGET}
           {CROW_TGT}
         </Marker>
 
         {/* ─── zero-or-many (o<) ──────────────────────────────────── */}
-        <Marker id="cf-zero-or-many-s" orient="auto-start-reverse" refX={2}>
+        <Marker id="cf-zero-or-many-s" orient="auto-start-reverse" refX={SRC_REF_X}>
           {CIRCLE}
           {CROW_SRC}
         </Marker>
-        <Marker id="cf-zero-or-many-t" orient="auto" refX={14}>
+        <Marker id="cf-zero-or-many-t" orient="auto" refX={TGT_REF_X}>
           {CIRCLE_TARGET}
           {CROW_TGT}
         </Marker>

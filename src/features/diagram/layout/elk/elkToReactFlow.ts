@@ -228,6 +228,16 @@ export function adaptElkResultToReactFlow(
   // position so waypoints are in canvas coordinates.
   const edges: Edge[] = [];
 
+  // Issue #6 diagnostic gate. Set `NEXT_PUBLIC_DIAGRAM_DEBUG=1` in the
+  // env (or window override) to log every edge's port↔column mapping
+  // after a layout. Off by default — does NOT run in production builds
+  // unless the var is explicitly set.
+  const debugPorts =
+    typeof process !== 'undefined' &&
+    (process.env.NEXT_PUBLIC_DIAGRAM_DEBUG === '1' ||
+      (typeof window !== 'undefined' &&
+        (window as unknown as { __DIAGRAM_DEBUG__?: boolean }).__DIAGRAM_DEBUG__ === true));
+
   function walkEdges(
     node: ElkNode,
     parentAbsX = 0,
@@ -242,6 +252,23 @@ export function adaptElkResultToReactFlow(
     for (const e of ownEdges) {
       const rel = relationships.find((r) => r.id === e.id);
       if (rel) {
+        if (debugPorts) {
+          const sParsed = parsePortId(e.sources?.[0] ?? '');
+          const tParsed = parsePortId(e.targets?.[0] ?? '');
+          // eslint-disable-next-line no-console
+          console.debug('[edge-port-debug]', {
+            relId: rel.id,
+            relSourceColumn: rel.sourceColumn,
+            relTargetColumn: rel.targetColumn,
+            elkSourcePort: e.sources?.[0],
+            elkTargetPort: e.targets?.[0],
+            parsedSourceCol: sParsed?.columnId,
+            parsedTargetCol: tParsed?.columnId,
+            firstWaypointY: e.sections?.[0]?.startPoint?.y,
+            lastWaypointY: e.sections?.[(e.sections?.length ?? 1) - 1]?.endPoint?.y,
+            match: sParsed?.columnId === rel.sourceColumn,
+          });
+        }
         const pm = (() => {
           // Reconstruct the source/target column from the port ids; if
           // the port id doesn't parse (e.g. view edge), fall back to

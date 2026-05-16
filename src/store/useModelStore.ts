@@ -176,10 +176,26 @@ export const useModelStore = create<ModelStore>((set, get) => ({
     if (!currentModel) return;
     set({ saving: true });
     try {
+      // Frente C — multi-session safety:
+      // The Save button must NEVER persist node positions. Positions
+      // are owned exclusively by `useLayoutPersistence`, which writes
+      // them to the dedicated `PATCH /api/models/{id}/positions`
+      // endpoint with last-write-wins semantics at the row level.
+      // Without this strip, a Save in tab A would overwrite a drag
+      // that tab B persisted seconds earlier (because A's `tables`
+      // snapshot was loaded before B's drag landed in Cosmos).
+      //
+      // The strip is intentionally idempotent on the backend side:
+      // `updateModel` should treat missing `position` as "leave the
+      // existing value alone". If the backend currently nulls out
+      // missing fields, that contract needs to be flipped — see
+      // `doc/phase-2-multi-session.md` for the backend audit.
+      const tablesWithoutPositions = tables.map(({ position: _stripPos, ...rest }) => rest);
+      const viewsWithoutPositions = views.map(({ position: _stripVPos, ...rest }) => rest);
       await modelsService.updateModel(currentModel.id, {
-        tables,
+        tables: tablesWithoutPositions,
         relationships,
-        views,
+        views: viewsWithoutPositions,
         domainCatalog,
       });
     } catch (err) {

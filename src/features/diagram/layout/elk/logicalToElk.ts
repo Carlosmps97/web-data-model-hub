@@ -111,13 +111,27 @@ export function buildElkGraph(input: LogicalToElkInput): LogicalToElkResult {
   //    edges leave EAST and incoming arrive WEST by default. We drop
   //    both a source (east) and a target (west) port per participating
   //    column so any direction of FK works without re-computing.
+  //
+  //    Important contract (Issue #6 lock):
+  //    The TABLE node uses `elk.portConstraints=FIXED_POS` (see
+  //    `config.TABLE_NODE_OPTIONS`), which means ELK honours the
+  //    exact `(port.x, port.y)` we declare — `port.y` is set to
+  //    `columnRowCenterY(idx)`, mirroring the DOM row layout in
+  //    `TableNode`. With FIXED_POS, `elk.port.index` is irrelevant
+  //    (it would only matter under FIXED_ORDER), so we don't emit
+  //    it. `elk.port.side` is still useful as a hint for ELK's
+  //    routing reasoning even under FIXED_POS.
   const tableNodes: ElkNode[] = tables.map((t) => {
     const dims = estimateTableSize(t);
     const cols = portsByTable.get(t.id);
 
     const ports: ElkNode['ports'] = [];
     if (cols) {
-      // Iterate in declaration order so `port.index` mirrors column row order.
+      // Iterate in declaration order. The `idx` is the absolute column
+      // row in `t.columns` — which is what `columnRowCenterY` expects
+      // and what `TableNode` renders. Skip non-FK columns so we don't
+      // bloat ELK's port reasoning, but their `idx` is still respected
+      // for whatever FK ports come later.
       t.columns.forEach((col, idx) => {
         if (!cols.has(col.id)) return;
         const y = columnRowCenterY(idx);
@@ -125,12 +139,13 @@ export function buildElkGraph(input: LogicalToElkInput): LogicalToElkResult {
           id: buildPortId(t.id, col.id, 'source'),
           width: 8,
           height: 8,
-          // Position the port at the right edge, aligned with the row center.
+          // Position the port at the right edge, aligned with the
+          // exact vertical centre of the column row. Under FIXED_POS
+          // ELK uses these coords verbatim.
           x: dims.width,
           y,
           layoutOptions: {
             'elk.port.side': 'EAST',
-            'elk.port.index': String(idx * 2 + 1),
           },
         });
         ports.push({
@@ -141,7 +156,6 @@ export function buildElkGraph(input: LogicalToElkInput): LogicalToElkResult {
           y,
           layoutOptions: {
             'elk.port.side': 'WEST',
-            'elk.port.index': String(idx * 2),
           },
         });
       });

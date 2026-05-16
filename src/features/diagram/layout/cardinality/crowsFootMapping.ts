@@ -90,3 +90,39 @@ export function buildCardinalityMap(
   }
   return map;
 }
+
+/**
+ * Dev-only contract assertions — these run once at module load and fail
+ * fast if someone changes `deriveCardinality` and breaks the symmetry of
+ * `many-to-many` or the asymmetry of `one-to-many` (Issue #4 lock).
+ *
+ * Production builds strip the `process.env.NODE_ENV !== 'production'`
+ * branch via Next's tree-shake of dead code, so there is zero runtime
+ * cost in deployed environments.
+ */
+if (typeof process !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  // Use an empty tables array — `deriveCardinality` only touches tables
+  // when both columns resolve, and we pass non-existent column refs so
+  // the nullable-weakening is skipped and we exercise the pure type
+  // mapping.
+  const probe = (type: Relationship['type']) =>
+    deriveCardinality(
+      { id: '__probe', sourceTable: 'x', sourceColumn: 'y', targetTable: 'a', targetColumn: 'b', type } as Relationship,
+      [],
+    );
+  const _oneOne = probe('one-to-one');
+  const _oneMany = probe('one-to-many');
+  const _manyMany = probe('many-to-many');
+  if (_oneOne.source !== 'one-only' || _oneOne.target !== 'one-only') {
+    throw new Error('[crowsFootMapping] one-to-one must be (one-only, one-only)');
+  }
+  if (_oneMany.source !== 'one-only' || _oneMany.target !== 'one-or-many') {
+    throw new Error('[crowsFootMapping] one-to-many must be (one-only, one-or-many)');
+  }
+  if (_manyMany.source !== 'one-or-many' || _manyMany.target !== 'one-or-many') {
+    // Issue #4 — N:M MUST mark BOTH ends with crow's foot. If you ever
+    // want to render a join-table form instead, please change the
+    // picker contract — do NOT silently weaken one side here.
+    throw new Error('[crowsFootMapping] many-to-many must be (one-or-many, one-or-many)');
+  }
+}
