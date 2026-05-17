@@ -2,7 +2,6 @@
 
 import React, { useEffect, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
 import EngineSelect from '@/features/engines/components/EngineSelect';
@@ -132,17 +131,13 @@ export default function ProjectModelsPage({ params }: PageProps) {
   return (
     <AppLayout>
       <Header
-        title={project?.name || 'Project'}
-        subtitle={project?.description || 'Data models in this project'}
+        crumbs={[
+          { label: 'Projects', href: '/' },
+          { label: project?.name ?? '…', href: `/projects/${projectId}` },
+          { label: 'Data Models' },
+        ]}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            <button className="btn btn-secondary btn-sm" onClick={() => router.push('/')}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="19" y1="12" x2="5" y2="12" />
-                <polyline points="12 19 5 12 12 5" />
-              </svg>
-              Projects
-            </button>
             {models.length > 0 && (
               <button className="btn btn-secondary btn-sm btn-global" onClick={handleOpenGlobal} title="Open global canvas">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -167,18 +162,13 @@ export default function ProjectModelsPage({ params }: PageProps) {
       />
 
       <div className="app-content">
-        {/* Breadcrumb */}
-        <nav className="breadcrumbs">
-          <Link href="/">Projects</Link>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-          <span>{project?.name}</span>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="9 18 15 12 9 6" />
-          </svg>
-          <span className="breadcrumb-current">Data Models</span>
-        </nav>
+        <div className="page-intro">
+          <h1 className="page-intro-title">{project?.name ?? 'Project'}</h1>
+          {project?.description && (
+            <p className="page-intro-description">{project.description}</p>
+          )}
+        </div>
+
 
         {/* Aggregated engines strip */}
         {aggregatedEngines.length > 0 && (

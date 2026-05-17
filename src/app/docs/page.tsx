@@ -41,10 +41,20 @@ import { TechnicalOverviewSection }     from './_sections/TechnicalOverviewSecti
 export default function DocsPage() {
   return (
     <AppLayout>
-      <Header
-        title="Documentación"
-        subtitle="Guía completa de uso de Data Model Hub para modeladores de datos"
-      />
+      <Header crumbs={[{ label: 'Documentación' }]} />
+
+      <div
+        style={{
+          maxWidth: 1140,
+          margin: '0 auto',
+          padding: '24px 24px 0 24px',
+        }}
+      >
+        <div className="page-intro">
+          <h1 className="page-intro-title">Documentación</h1>
+          <p className="page-intro-description">Guía completa de uso de Data Model Hub para modeladores de datos</p>
+        </div>
+      </div>
 
       <div
         style={{

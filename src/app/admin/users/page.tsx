@@ -146,8 +146,7 @@ export default function AdminUsersPage() {
   return (
     <AppLayout>
       <Header
-        title="Gestión de usuarios"
-        subtitle="Administra credenciales, roles y permisos de acceso."
+        crumbs={[{ label: 'Gestión de usuarios' }]}
         actions={
           isAdminReady && (
             <button
@@ -166,6 +165,11 @@ export default function AdminUsersPage() {
       />
 
       <div className="admin-users-page">
+        <div className="page-intro">
+          <h1 className="page-intro-title">Gestión de usuarios</h1>
+          <p className="page-intro-description">Administra credenciales, roles y permisos de acceso.</p>
+        </div>
+
         {!isAdminReady ? (
           <div className="admin-users-empty">
             <p>Cargando sesión…</p>

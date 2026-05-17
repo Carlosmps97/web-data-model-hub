@@ -94,8 +94,7 @@ export default function HomePage() {
   return (
     <AppLayout>
       <Header
-        title="Projects"
-        subtitle="Manage your data model projects"
+        crumbs={[{ label: 'Projects' }]}
         actions={
           // Only admins can spin up new projects. Editors work inside
           // projects they've been granted access to.
@@ -112,6 +111,11 @@ export default function HomePage() {
       />
 
       <div className="app-content">
+        <div className="page-intro">
+          <h1 className="page-intro-title">Projects</h1>
+          <p className="page-intro-description">Manage your data model projects</p>
+        </div>
+
         {/* Search Bar */}
         <div className="search-bar" style={{ marginBottom: 'var(--space-6)', maxWidth: '400px' }}>
           <span className="search-bar-icon">

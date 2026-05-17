@@ -100,12 +100,14 @@ export default function DashboardPage() {
 
   return (
     <AppLayout>
-      <Header
-        title="Dashboard"
-        subtitle="Overview of your data modeling workspace"
-      />
+      <Header crumbs={[{ label: 'Dashboard' }]} />
 
       <div className="app-content">
+        <div className="page-intro">
+          <h1 className="page-intro-title">Dashboard</h1>
+          <p className="page-intro-description">Overview of your data modeling workspace</p>
+        </div>
+
         {/* Stats Grid */}
         <div className="dashboard-stats-grid">
           <StatCard
