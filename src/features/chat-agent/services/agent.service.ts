@@ -1,12 +1,18 @@
 // ─────────────────────────────────────────────────────────────────────────
-//  Cliente HTTP del browser para el agent-modeler.
+//  Cliente HTTP del browser para el servicio de agentes
+//  (`app-agents-modeler`, FastAPI :8001).
 //
-//  Llama directamente al backend FastAPI usando NEXT_PUBLIC_API_URL.
+//  El agente vive en un proceso distinto al backend de plataforma. Su URL
+//  base se configura con `NEXT_PUBLIC_AGENT_API_URL` (ver `../config`).
+//  Las llamadas se hacen con `credentials: 'omit'` (sin cookies): el
+//  aislamiento se obtiene por CORS estricto en el servidor, no por sesión.
+//
 //  Las funciones devuelven el body parseado o lanzan `AgentClientError`
 //  con `status`, `code` y `detail` para que el caller pueda discriminar
 //  errores semánticos (ej. 404 en GET /model = "todavía sin modelo").
 // ─────────────────────────────────────────────────────────────────────────
 
+import { AGENT_API_BASE } from '../config';
 import type {
   AgentEngine,
   AgentErrorResponse,
@@ -16,9 +22,7 @@ import type {
   GuidelinesUploadResponse,
   HealthResponse,
   ModelingResponse,
-} from '@/lib/agent/types';
-
-const AGENT_API_BASE = `${process.env.NEXT_PUBLIC_API_URL ?? ''}/api`;
+} from '../lib/types';
 
 /** Error tipado que arrojan los helpers cuando el backend devuelve no-2xx. */
 export class AgentClientError extends Error {
@@ -69,10 +73,10 @@ async function jsonRequest<T>(
     headers,
     // Las llamadas son siempre dinámicas; nunca queremos cache.
     cache: 'no-store',
-    // El backend (FastAPI :8000) es cross-origin respecto al frontend
-    // (:3000). Sin `credentials: 'include'` el browser no envía el cookie
-    // `modeler-auth`, y toda request autenticada devolvería 401.
-    credentials: 'include',
+    // El servicio de agentes corre en un proceso aparte (`app-agents-modeler`,
+    // :8001) y NO comparte la cookie `modeler-auth`. CORS en el servidor está
+    // configurado con `allow_credentials=False`. Mandamos sin credenciales.
+    credentials: 'omit',
   });
 
   if (!res.ok) throw await parseError(res);

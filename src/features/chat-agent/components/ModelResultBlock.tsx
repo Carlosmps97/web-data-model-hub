@@ -17,7 +17,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
-import type { ModelingResponse } from '@/lib/agent/types';
+import type { ModelingResponse } from '../lib/types';
 
 export interface ModelResultBlockProps {
   result: ModelingResponse;

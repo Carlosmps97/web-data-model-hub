@@ -12,7 +12,12 @@ import ExcelImportModal from '@/features/excel-import/components/ExcelImportModa
 import CreateFromSqlModal from '@/features/table-editor/components/CreateFromSqlModal';
 import DBMLEditorPanel from '@/features/table-editor/components/DBMLEditorPanel';
 import TablesListView from '@/features/table-editor/components/TablesListView';
-import ChatPanel from '@/features/chat-agent/components/ChatPanel';
+import {
+  ChatPanel,
+  fromAgentEngine,
+  modelingResponseToCanvas,
+  type ModelingResponse,
+} from '@/features/chat-agent';
 import LeftPanelResizer from '@/components/layout/LeftPanelResizer';
 import EngineSelect from '@/features/engines/components/EngineSelect';
 import DDLPreviewModal, { type DDLScope } from '@/features/ddl/components/DDLPreviewModal';
@@ -21,9 +26,7 @@ import { projectsService, modelsService } from '@/services';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
-import { modelingResponseToCanvas, fromAgentEngine } from '@/lib/agent/mapping';
 import { findColumnId } from '@/lib/columnRef';
-import type { ModelingResponse } from '@/lib/agent/types';
 import type { TableModel, Relationship, DatabaseEngine } from '@/types/model';
 
 const DiagramCanvas = dynamic(

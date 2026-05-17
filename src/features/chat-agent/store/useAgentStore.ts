@@ -28,7 +28,7 @@ import type {
   AgentEngine,
   GuidelinesUploadResponse,
   ModelingResponse,
-} from '@/lib/agent/types';
+} from '../lib/types';
 
 /** Mensaje individual del chat. Volátil: sólo vive en memoria. */
 export interface AgentChatMessage {
