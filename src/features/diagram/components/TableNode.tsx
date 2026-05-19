@@ -13,8 +13,26 @@ interface TableNodeData {
   table: TableModel;
   selected?: boolean;
   activeRelationColumns?: string[];
+  /**
+   * Map of `columnId → 'left' | 'right'` reflecting which side ELK
+   * placed the column's source port on after the most recent layout.
+   * Purely a styling hint now — every column row renders a full set of
+   * four handles (`source-left`, `target-left`, `source-right`,
+   * `target-right`). The hint is used to fade the inactive handles so
+   * they don't visually clutter the row, while keeping them as live
+   * drop targets for the user when they re-route a connection by drag
+   * or open Connect mode.
+   */
+  handleSideByColumn?: Record<string, 'left' | 'right'>;
   onEditTable?: (id: string) => void;
   onDeleteTable?: (id: string) => void;
+  /**
+   * Notify the canvas that the cursor entered/left a specific column
+   * row. Wired by `DiagramCanvas` to `useHighlightController.onColumnHover`
+   * so wires touching only the hovered column light up (Issue #5).
+   * Pass `null` to clear.
+   */
+  onColumnHover?: (ref: { tableId: string; columnId: string } | null) => void;
   viewMode?: 'logical' | 'physical';
   [key: string]: unknown;
 }
@@ -24,8 +42,12 @@ function TableNodeComponent({ data }: NodeProps) {
   const table = nodeData?.table;
   const isSelected = nodeData?.selected || false;
   const activeRelCols = nodeData?.activeRelationColumns ?? [];
+  const handleSideByColumn = nodeData?.handleSideByColumn;
   const onEditTable = nodeData?.onEditTable as ((id: string) => void) | undefined;
   const onDeleteTable = nodeData?.onDeleteTable as ((id: string) => void) | undefined;
+  const onColumnHover = nodeData?.onColumnHover as
+    | ((ref: { tableId: string; columnId: string } | null) => void)
+    | undefined;
   const viewMode = (nodeData?.viewMode as 'logical' | 'physical' | undefined) ?? 'physical';
   const isLogical = viewMode === 'logical';
 
@@ -131,21 +153,58 @@ function TableNodeComponent({ data }: NodeProps) {
           else if (col.isSurrogateKey) { iconLabel = 'SK'; iconClass = 'sk'; }
           else if (isPartitionCol) { iconLabel = 'PT'; iconClass = 'pk'; }
 
-          const isActiveRelation = activeRelCols.includes(col.name);
+          // `activeRelationColumns` now carries column IDs (kept in sync with
+          // `Relationship.sourceColumn`/`targetColumn`), so match against
+          // `col.id`. Falls back to name-match to stay compatible with legacy
+          // pre-migration relationships that still hold column names.
+          const isActiveRelation =
+            activeRelCols.includes(col.id) || activeRelCols.includes(col.name);
+
+          // Every column row carries the full set of four handles —
+          // source-left, target-left, source-right, target-right —
+          // keyed by column id (NOT name) so connections survive
+          // renames. We pass the ELK-chosen side via `handleSideByColumn`
+          // purely to dim the unused pair so the row stays visually
+          // calm. All four are live drop targets so the canvas can:
+          //   1. switch sides dynamically at render time when a node is
+          //      dragged across its peer (CrowsFootEdge picks the right
+          //      anchor each frame),
+          //   2. let the user start a Connect-mode drag from any side
+          //      of any column without ELK having to "approve" the side
+          //      first (Issue #6).
+          // Handle ids encode the side so React Flow can map an edge's
+          // `sourceHandle` / `targetHandle` to the right anchor.
+          const elkSide = handleSideByColumn?.[col.id];
+          const dimLeft = elkSide === 'right';
+          const dimRight = elkSide === 'left';
 
           return (
             <div
               key={idx}
               className={`table-node-column${isActiveRelation ? ' active-relation-row' : ''}`}
-              onMouseEnter={() => setHoveredCol(idx)}
-              onMouseLeave={() => setHoveredCol(null)}
+              onMouseEnter={() => {
+                setHoveredCol(idx);
+                onColumnHover?.({ tableId: table.id, columnId: col.id });
+              }}
+              onMouseLeave={() => {
+                setHoveredCol(null);
+                onColumnHover?.(null);
+              }}
             >
-              {/* Left handle (target) — invisible, functional */}
+              {/* Left-side handle pair. Both source + target render so
+                  the edge can anchor to whichever ELK / live routing
+                  picks. Visual dim controlled by `handleSideByColumn`. */}
               <Handle
                 type="target"
                 position={Position.Left}
-                id={`${col.name}-target`}
-                className="dbdiagram-handle"
+                id={`${col.id}-target-left`}
+                className={`dbdiagram-handle${dimLeft ? ' dbdiagram-handle--inactive' : ''}`}
+              />
+              <Handle
+                type="source"
+                position={Position.Left}
+                id={`${col.id}-source-left`}
+                className={`dbdiagram-handle${dimLeft ? ' dbdiagram-handle--inactive' : ''}`}
               />
 
               {/* Main column row — name, type, nullable, PK/FK icon */}
@@ -177,20 +236,20 @@ function TableNodeComponent({ data }: NodeProps) {
                 <span className="table-node-col-type">{col.dataType}</span>
               </div>
 
-              {/* Functional definition — visible inline debajo del nombre
-                  (truncado a 2 líneas; el tooltip al hover muestra el texto completo). */}
-              {col.functionalDefinition && (
-                <div className="table-node-col-comment" title={col.functionalDefinition}>
-                  {col.functionalDefinition}
-                </div>
-              )}
-
-              {/* Right handle (source) — invisible, functional */}
+              {/* Right-side handle pair. Same rules as the left pair —
+                  always rendered, dimmed when ELK chose the opposite
+                  side as the canonical anchor for this column. */}
               <Handle
                 type="source"
                 position={Position.Right}
-                id={`${col.name}-source`}
-                className="dbdiagram-handle"
+                id={`${col.id}-source-right`}
+                className={`dbdiagram-handle${dimRight ? ' dbdiagram-handle--inactive' : ''}`}
+              />
+              <Handle
+                type="target"
+                position={Position.Right}
+                id={`${col.id}-target-right`}
+                className={`dbdiagram-handle${dimRight ? ' dbdiagram-handle--inactive' : ''}`}
               />
 
               {/* Tooltip — shows on hover for every column */}

@@ -1,324 +1,444 @@
-# Referencia de API
+# Referencia de API (consumida por el frontend)
 
-> Todas las rutas de API viven en `src/app/api/` y son servidas por Next.js.  
-> Los datos se persisten en `data/` en el sistema de archivos del servidor a través de `src/lib/storage/jsonStore.ts`.
+> **El frontend ya no expone rutas API propias.** Toda la comunicación
+> apunta directamente al backend FastAPI `agent-modeler` (puerto
+> `:8000` en dev). Este documento describe los endpoints que el
+> frontend consume y los **tipos** que cruzan ambos lados.
 
 ## URL Base
 
 ```
-http://localhost:3000/api
+http://localhost:8000/api    # development
+https://<tu-backend>/api     # production
 ```
 
-## Endpoints
+Configurado en el frontend con `NEXT_PUBLIC_API_URL`.
 
-### Proyectos
+**Toda request lleva el cookie `modeler-auth`** (HttpOnly, SameSite=Lax,
+firmado HS256). El cliente de frontend lo activa con `credentials:
+'include'` en cada `fetch`.
 
-#### Listar Proyectos
+---
 
-```
-GET /api/projects
-```
+## 1. Envelope de respuesta
 
-Respuesta:
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "uuid",
-      "name": "Sales Analytics",
-      "description": "Data model for sales pipeline",
-      "createdAt": "2026-04-11T00:00:00.000Z",
-      "updatedAt": "2026-04-11T00:00:00.000Z"
-    }
-  ]
-}
+Todos los endpoints CRUD (auth / projects / models / admin) usan el
+envelope estándar:
+
+```typescript
+type ApiResponse<T> =
+  | { success: true; data: T }
+  | { success: false; error: string };
 ```
 
-#### Crear Proyecto
+`apiFetch` desempaqueta automáticamente: devuelve `data` si
+`success === true`, lanza `ApiError(message, status)` en cualquier
+otro caso.
 
-```
-POST /api/projects
-Content-Type: application/json
+**Excepción**: los endpoints del agente (`/api/conversations/*`,
+`/api/health`, `/api/engines`) devuelven el body directo (no envuelto).
+Por eso `agent.service.ts` usa un cliente especializado que arroja
+`AgentClientError(status, detail, code)`.
 
-{
-  "name": "Sales Analytics",
-  "description": "Data model for sales pipeline"
-}
-```
+Ver `web-data-model-hub/src/services/http.ts` y `agent.service.ts`.
 
-Respuesta (201):
+---
+
+## 2. Endpoints
+
+### 2.1 Auth
+
+| Método | Ruta | Auth | Body | Response |
+|--------|------|------|------|----------|
+| POST | `/api/auth/login` | público | `{ username, password }` | `AuthUser` + Set-Cookie |
+| POST | `/api/auth/logout` | público | — | `null` (limpia cookie) |
+| GET  | `/api/auth/me` | cookie | — | `AuthUser` o 401 |
+
+Respuesta de `login` (envelope abierto):
+
 ```json
 {
   "success": true,
   "data": {
-    "id": "generated-uuid",
-    "name": "Sales Analytics",
-    "description": "Data model for sales pipeline",
-    "createdAt": "2026-04-11T00:00:00.000Z",
-    "updatedAt": "2026-04-11T00:00:00.000Z"
+    "id": "uuid",
+    "username": "admin",
+    "role": "admin",
+    "isActive": true,
+    "permissions": [],
+    "createdAt": "2026-...",
+    "statusUpdatedAt": "2026-...",
+    "lastLoginAt": "2026-..."
   }
 }
 ```
 
-#### Obtener Proyecto
+`AuthUser.permissions` es `Permission[]` con `{scope, projectId,
+modelId?, level}`. El frontend lo guarda en `useAuthStore` y lo
+expone como helpers (`canViewProject`, `canEditModel`, …).
 
-```
-GET /api/projects/:id
-```
+### 2.2 Proyectos
 
-#### Actualizar Proyecto
+| Método | Ruta | Auth | Body | Notas |
+|--------|------|------|------|-------|
+| GET | `/api/projects` | sesión | — | filtra por permisos del usuario |
+| POST | `/api/projects` | **admin** | `{ name, description? }` | |
+| GET | `/api/projects/{id}` | view sobre el proyecto | — | |
+| PUT | `/api/projects/{id}` | edit sobre el proyecto | `{ name?, description? }` | |
+| DELETE | `/api/projects/{id}` | **admin** | — | cascade soft-delete de modelos hijos |
 
-```
-PUT /api/projects/:id
-Content-Type: application/json
+Respuesta envuelta. Tipo del payload:
 
-{
-  "name": "Updated Name",
-  "description": "Updated description"
+```typescript
+interface Project {
+  id: string;            // uuid
+  name: string;
+  description: string | null;
+  createdAt: string;     // ISO 8601
+  updatedAt: string;
 }
 ```
 
-#### Eliminar Proyecto
+### 2.3 Modelos
 
-```
-DELETE /api/projects/:id
-```
+| Método | Ruta | Auth | Notas |
+|--------|------|------|-------|
+| GET | `/api/models?projectId=…&full=…` | sesión | `projectId` filtra por proyecto; `full=true` hidrata `tables/relationships/views`; default = stubs livianos |
+| POST | `/api/models` | edit sobre el `projectId` | body `{ projectId, name, description?, engine?, tables?, relationships?, views?, domainCatalog? }` |
+| GET | `/api/models/{id}` | view sobre el modelo | siempre hidratado |
+| PUT | `/api/models/{id}` | edit sobre el modelo | partial update; las child arrays se reemplazan en bloque si están en el body |
+| DELETE | `/api/models/{id}` | edit sobre el modelo | cascade soft-delete de child collections |
 
-Nota: Eliminar un proyecto también elimina todos sus modelos asociados.
-
----
-
-### Modelos
-
-#### Listar Modelos
-
-```
-GET /api/models
-GET /api/models?projectId=uuid
-```
-
-El parámetro de consulta opcional `projectId` filtra los modelos por proyecto.
-
-Respuesta:
-```json
-{
-  "success": true,
-  "data": [
-    {
-      "id": "uuid",
-      "projectId": "project-uuid",
-      "name": "Main Data Model",
-      "description": null,
-      "tables": [],
-      "relationships": [],
-      "createdAt": "2026-04-11T00:00:00.000Z",
-      "updatedAt": "2026-04-11T00:00:00.000Z"
-    }
-  ]
-}
-```
-
-#### Crear Modelo
-
-```
-POST /api/models
-Content-Type: application/json
-
-{
-  "projectId": "project-uuid",
-  "name": "Main Data Model",
-  "description": "Primary ER model",
-  "tables": [],
-  "relationships": []
-}
-```
-
-#### Obtener Modelo
-
-```
-GET /api/models/:id
-```
-
-Retorna el modelo completo incluyendo todas las tablas y relaciones.
-
-#### Actualizar Modelo
-
-```
-PUT /api/models/:id
-Content-Type: application/json
-
-{
-  "tables": [
-    {
-      "id": "table-uuid",
-      "name": "users",
-      "columns": [
-        {
-          "name": "id",
-          "dataType": "integer",
-          "isPrimaryKey": true
-        },
-        {
-          "name": "email",
-          "dataType": "varchar",
-          "isNullable": false
-        }
-      ]
-    }
-  ],
-  "relationships": [
-    {
-      "id": "rel-uuid",
-      "sourceTable": "orders",
-      "sourceColumn": "user_id",
-      "targetTable": "users",
-      "targetColumn": "id",
-      "type": "one-to-many"
-    }
-  ]
-}
-```
-
-#### Eliminar Modelo
-
-```
-DELETE /api/models/:id
-```
-
----
-
-### Agente IA (proxy al `agent-modeler`)
-
-Todas las rutas bajo `/api/agent/*` son **pass-through** directos al FastAPI del
-proyecto hermano `agent-modeler`. La URL del backend se resuelve server-side
-con `AGENT_BACKEND_URL` (por defecto `http://localhost:8000`) y **nunca** se
-expone al navegador. El browser habla siempre con el proxy de Next.
-
-| Método | Ruta (Next)                                           | Ruta (FastAPI)                                            | Descripción                                                             |
-|--------|-------------------------------------------------------|-----------------------------------------------------------|-------------------------------------------------------------------------|
-| GET    | `/api/agent/health`                                   | `/api/health`                                             | Estado de la API y conexión con Azure AI Foundry.                       |
-| GET    | `/api/agent/engines`                                  | `/api/engines`                                            | Motores de BD soportados y engine default.                              |
-| POST   | `/api/agent/conversations`                            | `/api/conversations`                                      | Crea o reutiliza una conversación (idempotente). Body: `{ conversation_id, engine }`. |
-| DELETE | `/api/agent/conversations/{id}`                       | `/api/conversations/{id}`                                 | Libera la memoria de la conversación.                                   |
-| POST   | `/api/agent/conversations/{id}/guidelines`            | `/api/conversations/{id}/guidelines`                      | Sube PDF/DOCX/MD/JSON/XLSX/TXT con guidelines de modelado.              |
-| POST   | `/api/agent/conversations/{id}/model`                 | `/api/conversations/{id}/model`                           | Ejecuta un turno del pipeline. Body multipart con `context_text`, `excel_file`, `engine`. |
-| GET    | `/api/agent/conversations/{id}/model`                 | `/api/conversations/{id}/model`                           | Devuelve el último modelo generado sin reejecutar.                      |
-
-El proxy reenvía status, body y headers relevantes verbatim. Si el backend no
-responde, devuelve `502` con body `{ detail, code: 'AGENT_BACKEND_UNREACHABLE' }`
-o `{ code: 'AGENT_BACKEND_TIMEOUT' }` según corresponda.
-
-El frontend consume estas rutas a través de `src/lib/agent/client.ts`
-(tipado fuerte) y del hook `useAgentConversation` (en
-`src/features/chat-agent/hooks/`), que mantiene un `conversation_id` (UUID v4)
-estable por `modelId` mientras dure la sesión del browser.
-
----
-
-## Respuestas de Error
-
-Todas las respuestas de error siguen este formato:
+**Stub mode** (`full=false`):
 
 ```json
 {
-  "success": false,
-  "error": "Description of the error"
+  "id": "uuid",
+  "projectId": "uuid",
+  "name": "Sales DM",
+  "engine": "postgresql",
+  "tables": [{"id": "stub-0", "name": "", "columns": []}, ...],   // tantos stubs como tablas
+  "relationships": [],
+  "views": [],
+  "createdAt": "...",
+  "updatedAt": "..."
 }
 ```
 
-Códigos de estado HTTP comunes:
-- 400: Solicitud incorrecta (campos obligatorios faltantes)
-- 404: Recurso no encontrado
-- 500: Error interno del servidor
+El frontend usa stubs en la pantalla de proyectos para mostrar el
+conteo de tablas sin pagar la hidratación completa.
 
-## Tipos de Datos
+### 2.4 Conversaciones (chat con el agente IA)
 
-### Project
+| Método | Ruta | Auth | Body | Response |
+|--------|------|------|------|----------|
+| POST | `/api/conversations` | sesión | `{ conversation_id, engine }` | `{ conversation_id, engine, created }` |
+| DELETE | `/api/conversations/{id}` | sesión | — | `{ conversation_id, deleted }` |
+| POST | `/api/conversations/{id}/guidelines` | sesión | multipart `file` | `{ status, conversation_id, file_name, file_format, file_size_bytes, preview }` |
+| POST | `/api/conversations/{id}/model` | sesión | multipart `excel_file`, `engine?`, `context_text?` | `ModelingResponse` |
+| GET | `/api/conversations/{id}/model` | sesión | — | último `ModelingResponse` (404 si todavía sin turno) |
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | string (UUID) | Identificador único |
-| name | string | Nombre del proyecto |
-| description | string? | Descripción opcional |
-| createdAt | string (ISO 8601) | Fecha de creación |
-| updatedAt | string (ISO 8601) | Fecha de última actualización |
+> Estos endpoints **no usan envelope**. El cliente
+> (`src/services/agent.service.ts`) parsea body crudo y arroja
+> `AgentClientError` ante no-2xx.
 
-### DataModel
+### 2.5 Health / engines
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | string (UUID) | Identificador único |
-| projectId | string (UUID) | ID del proyecto padre |
-| name | string | Nombre del modelo |
-| description | string? | Descripción opcional |
-| engine | DatabaseEngine? | Motor de base de datos destino (ver abajo) |
-| tables | TableModel[] | Arreglo de definiciones de tablas |
-| relationships | Relationship[] | Arreglo de relaciones |
-| createdAt | string (ISO 8601) | Fecha de creación |
-| updatedAt | string (ISO 8601) | Fecha de última actualización |
+| Método | Ruta | Auth | Response |
+|--------|------|------|----------|
+| GET | `/api/health` | público | `{ status, version, foundry_connected, default_engine, active_conversations }` |
+| GET | `/api/engines` | público | `{ engines: string[], default: string }` |
 
-### DatabaseEngine
+---
 
-Valores válidos para el campo `engine` (límite intencional a los motores con DDL de primera clase):
+## 3. Códigos de error comunes
 
-| Valor | Nombre mostrado | Schema por defecto | Particionamiento | Clustering |
-|-------|-----------------|---------------------|------------------|------------|
-| `postgresql` | PostgreSQL | `public` | RANGE · LIST · HASH | No |
-| `oracle` | Oracle | `HR` | RANGE · LIST · HASH | No |
-| `databricks` | Databricks SQL | `default` | RANGE · LIST · BUCKET | Sí (Z-ORDER) |
+| HTTP | Causa típica |
+|------|--------------|
+| 400 | `conversation_id` no es UUID v4, engine no soportado, body inválido |
+| 401 | Cookie ausente, expirada o firmada con secret distinto. El frontend lo trata como logout. |
+| 403 | Usuario autenticado pero sin permisos para el recurso (project/model). |
+| 404 | Recurso no encontrado o conversación no creada todavía. |
+| 422 | Pydantic rechazó el body (ej. archivo de guidelines vacío o formato no soportado). |
+| 429 | Rate limit (Foundry o el limiter interno). El backend ya hace retry; si llega al cliente significa que se agotaron. |
+| 500 | Error inesperado. Log para diagnóstico. |
+| 503 | Foundry no conectado o `ConversationStore` no inicializado al arranque. |
 
-### TableModel
+---
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | string (UUID) | Identificador único |
-| schema | string? | Namespace SQL. Obligatorio en el formulario; cuando está ausente, los generadores DDL aplican el default del motor. |
-| name | string | Nombre de la tabla |
-| columns | TableColumn[] | Arreglo de columnas |
-| functionalDefinition | string? | Descripción de negocio de la tabla |
-| applicationCode | string? | Aplicación o sistema dueño de esta tabla |
-| domain | string? | Clasificación de dominio de negocio (ej. `Ventas`) |
-| subdomain | string? | Agrupación dentro del dominio (ej. `Facturación`) |
-| tags | string[]? | Etiquetas libres para filtrado y agrupación |
-| color | string? | Color de visualización opcional para el nodo del lienzo |
-| partition | PartitionSpec? | Especificación de particionamiento aware del motor (ver abajo) |
+## 4. Tipos compartidos (frontend ↔ backend)
 
-### TableColumn
+Los modelos viven en `web-data-model-hub/src/types/` y se reflejan
+exactamente en los Pydantic docs de
+`agent-modeler/src/db/db_models.py`. Esta sincronía es manual; cualquier
+cambio de schema **debe replicarse en ambos lados**.
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| name | string | Nombre de la columna |
-| dataType | string | Tipo de dato canónico (`integer`, `varchar`, `decimal`…) o dialect-specific con paréntesis para mantenerse literal |
-| length | number? | Longitud para tipos char-like (varchar(N)) o decimal(N) |
-| scale | number? | Escala para tipos decimal/numeric (decimal(N, M)) |
-| isPrimaryKey | boolean? | Indica llave primaria |
-| isSurrogateKey | boolean? | Indica llave sustituta |
-| isPartitionKey | boolean? | _Legacy_ — flag a nivel columna. El generador prefiere `TableModel.partition.columns`. |
-| isForeignKey | boolean? | Indica llave foránea |
-| foreignKeyRef | {table, column}? | Referencia FK |
-| isNullable | boolean? | Indica si acepta nulos |
-| isUnique | boolean? | Indica restricción de unicidad |
-| defaultValue | string? | Valor predeterminado |
-| functionalDefinition | string? | Descripción de la columna |
+### 4.1 `AuthUser` y permisos
 
-### PartitionSpec
+```typescript
+interface AuthUser {
+  id: string;
+  username: string;
+  role: 'admin' | 'editor' | 'viewer';
+  isActive: boolean;
+  permissions: Permission[];
+  createdAt: string;
+  statusUpdatedAt: string;
+  lastLoginAt: string | null;
+}
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| strategy | enum | `NONE` · `RANGE` · `LIST` · `HASH` · `DATE` · `INGESTION_TIME` · `BUCKET`. La UI filtra por las soportadas en cada motor. |
-| columns | string[] | Columnas que dirigen la partición. El orden importa. |
-| buckets | number? | Conteo de cubetas para `HASH` / `BUCKET`. |
-| granularity | enum? | `DAY` · `MONTH` · `YEAR` · `HOUR` para particionado por fecha. |
-| clusteringColumns | string[]? | Columnas adicionales para clustering / Z-ORDER (Databricks). |
+interface Permission {
+  scope: 'project' | 'model';
+  projectId: string;
+  modelId?: string | null;     // solo cuando scope === 'model'
+  level: 'view' | 'edit';
+}
 
-### Relationship
+interface AuthJwtClaims {
+  sub: string;        // userId
+  username: string;
+  role: AuthUser['role'];
+  iat?: number;
+  exp?: number;
+}
+```
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| id | string (UUID) | Identificador único |
-| sourceTable | string | Nombre de la tabla origen |
-| sourceColumn | string | Nombre de la columna origen |
-| targetTable | string | Nombre de la tabla destino |
-| targetColumn | string | Nombre de la columna destino |
-| type | enum | one-to-one, one-to-many, many-to-many |
+### 4.2 `Project`
+
+```typescript
+interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### 4.3 `DataModel`
+
+```typescript
+interface DataModel {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string | null;
+  engine: DatabaseEngine | null;
+  domainCatalog: DomainDefinition[];
+  tables: TableModel[];
+  relationships: Relationship[];
+  views: ViewModel[];
+  createdAt: string;
+  updatedAt: string;
+}
+```
+
+### 4.4 `DatabaseEngine`
+
+Conjunto de motores soportados por el backend (`SUPPORTED_ENGINES`)
+**y** por el frontend (los DDL generators los respetan):
+
+| Valor | Schema default | Particionamiento | Clustering |
+|-------|----------------|------------------|------------|
+| `databricks_sql` | `default` | `RANGE`, `LIST`, `BUCKET` | sí (Z-ORDER) |
+| `cosmosdb` | — | — | — |
+| `sqlserver` | `dbo` | `RANGE` | — |
+| `postgresql` | `public` | `RANGE`, `LIST`, `HASH` | — |
+| `mysql` | — | `RANGE`, `LIST`, `HASH`, `KEY` | — |
+
+> Los motores `oracle` y otros que aparecían en la doc legacy fueron
+> retirados — el set canonical lo dicta `settings.SUPPORTED_ENGINES`
+> en el backend.
+
+### 4.5 `TableModel` y `TableColumn`
+
+```typescript
+interface TableModel {
+  id: string;                   // uuid
+  schema?: string;              // default del engine si vacío
+  name: string;
+  logicalName?: string;
+  columns: TableColumn[];
+  functionalDefinition?: string;
+  applicationCode?: string;
+  domain?: string;
+  subdomain?: string;
+  domainId?: string;
+  subdomainId?: string;
+  tags?: string[];
+  color?: string;
+  partition?: PartitionSpec;
+}
+
+interface TableColumn {
+  /**
+   * Identificador estable que sobrevive a renames. Todas las
+   * relaciones (Relationship.sourceColumn / targetColumn) y los
+   * handles de React Flow se referencian por este id, NUNCA por
+   * `name`. Asegura que renombrar una columna no invalide edges
+   * ni FKs.
+   */
+  id: string;
+  name: string;                 // physical name (SQL)
+  logicalName?: string;
+  dataType: string;             // canónico (integer, varchar, decimal) o dialect-specific con paréntesis
+  length?: number;              // varchar(N) / decimal(N)
+  scale?: number;               // decimal(N, M)
+  isPrimaryKey?: boolean;
+  isSurrogateKey?: boolean;
+  isPartitionKey?: boolean;     // legacy — preferir TableModel.partition
+  isForeignKey?: boolean;
+  foreignKeyRef?: { table: string; column: string };  // por NOMBRE (lo que el usuario escribe)
+  isNullable?: boolean;
+  isUnique?: boolean;
+  defaultValue?: string;
+  functionalDefinition?: string;
+  observations?: string;        // notas del agente sobre la columna
+}
+```
+
+### 4.6 `PartitionSpec`
+
+```typescript
+interface PartitionSpec {
+  strategy: 'NONE' | 'RANGE' | 'LIST' | 'HASH' | 'BUCKET';
+  columns: string[];            // por nombre — el orden importa
+  buckets?: number;             // para HASH / BUCKET
+  granularity?: 'DAY' | 'MONTH' | 'YEAR' | 'HOUR';
+  clusteringColumns?: string[]; // solo Databricks (Z-ORDER)
+}
+```
+
+### 4.7 `Relationship`
+
+```typescript
+interface Relationship {
+  id: string;                   // uuid
+  /** Acepta TableModel.id (preferido) o TableModel.name (legacy). */
+  sourceTable: string;
+  /**
+   * Apunta a TableColumn.id (post-migration). Datos pre-migration
+   * todavía pueden contener nombres; el frontend los resuelve con
+   * fallback en src/lib/columnRef.ts::resolveColumnName.
+   */
+  sourceColumn: string;
+  targetTable: string;
+  targetColumn: string;
+  type: 'one-to-one' | 'one-to-many' | 'many-to-many';
+}
+```
+
+### 4.8 `ViewModel`
+
+```typescript
+interface ViewModel {
+  id: string;
+  name: string;
+  logicalName?: string;
+  schema?: string;
+  sourceTableId: string;
+  viewType: 'technical' | 'user' | 'business';
+  columns: ViewColumnTransform[];
+  whereClause?: string;
+  useCustomSql?: boolean;
+  customSql?: string;
+  functionalDefinition?: string;
+  domain?: string;
+  subdomain?: string;
+  tags?: string[];
+  color?: string;
+}
+
+interface ViewColumnTransform {
+  sourceColumn: string;
+  alias?: string;
+  expression?: string;
+  include?: boolean;
+}
+```
+
+### 4.9 `DomainDefinition`
+
+```typescript
+interface DomainDefinition {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  color?: string;
+  subdomains: SubdomainDefinition[];
+  defaults?: { schema?: string; tags?: string[] };
+}
+
+interface SubdomainDefinition {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  defaults?: { schema?: string; tags?: string[] };
+}
+```
+
+### 4.10 `ModelingResponse` (output del agente)
+
+```typescript
+interface ModelingResponse {
+  conversation_id: string;
+  engine: AgentEngine;
+  turn_number: number;
+  tables: AgentTable[];
+  relationships: string[];                      // siempre [] hoy
+  export_sql: string;
+  export_markdown: string;
+  qa_report: AgentQAReport;                     // todos vacíos hoy
+  guidelines_applied: string;
+  summary: string;
+}
+
+interface AgentTable {
+  table_name: string;
+  table_description: string;
+  columns: AgentColumn[];
+  ddl: string;
+}
+
+interface AgentColumn {
+  column_name: string;
+  data_type: string;
+  nullable: boolean;
+  is_pk: boolean;
+  is_fk: boolean;
+  fk_references: string | null;                 // "tabla.columna" o null
+  functional_definition: string;
+  observations: string;
+}
+```
+
+`modelingResponseToCanvas` (en `src/lib/agent/mapping.ts`) convierte
+esto a `TableModel[]` + `Relationship[]` listos para inyectar en
+`useModelStore`. Asigna `id: uuidv4()` a cada `TableModel` y a cada
+`TableColumn`, y resuelve `fk_references` a relaciones por `id`
+mediante `findColumnId`.
+
+---
+
+## 5. Migración desde rutas API legacy
+
+Si encuentras código que todavía llama a `/api/projects` desde el
+frontend usando `fetch` directo (sin `services/`), está pegado a la
+era pre-migration. La regla actual es:
+
+```typescript
+// ❌ legacy
+const res = await fetch('/api/projects');
+const json = await res.json();
+
+// ✅ ahora
+import { projectsService } from '@/services';
+const projects = await projectsService.listProjects();
+```
+
+`projectsService` ya:
+- Apunta a `NEXT_PUBLIC_API_URL` (cross-origin con FastAPI).
+- Manda `credentials: 'include'`.
+- Desempaqueta el envelope.
+- Lanza `ApiError` ante problemas — el componente solo `try/catch`.

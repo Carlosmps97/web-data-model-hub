@@ -23,7 +23,7 @@
  * `DATE`) y el consumidor decide si lo refina.
  */
 
-import type { TableModel, TableColumn } from '@/types/model';
+import type { TableModel, TableColumn, Tag } from '@/types/model';
 
 // ─── Public API shapes ───────────────────────────────────────────────
 
@@ -39,7 +39,7 @@ export interface InferredColumn {
   /** Inherited from source column. */
   domainId?: string;
   subdomainId?: string;
-  tags?: string[];
+  tags?: Tag[];
   /** Kind of expression in the SELECT that produced this column. */
   kind: InferredColumnKind;
   /** Raw SQL snippet — helpful for the user in the preview. */

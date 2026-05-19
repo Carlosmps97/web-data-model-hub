@@ -4,8 +4,34 @@
 // only owns in-memory state and optimistic updates. This keeps the
 // store focused and makes services easy to mock in tests.
 import { create } from 'zustand';
-import type { Project, DataModel, TableModel, Relationship, ViewModel, DomainDefinition } from '@/types/model';
+import type { Project, DataModel, TableModel, Relationship, ViewModel, DomainDefinition, DatabaseEngine } from '@/types/model';
 import { projectsService, modelsService, ApiError } from '@/services';
+import { normalizeTags } from '@/lib/tags';
+
+/**
+ * Coerce tags coming off the wire into the current {@link Tag} shape.
+ * Pre-migration Cosmos documents store table/domain tags as `string[]`;
+ * this keeps the UI safe while the backend rolls out the new payload.
+ * Remove once all docs are migrated.
+ */
+function normalizeModelTags(model: DataModel): DataModel {
+  return {
+    ...model,
+    tables: (model.tables ?? []).map((t) => ({ ...t, tags: normalizeTags(t.tags) })),
+    domainCatalog: (model.domainCatalog ?? []).map((d) => ({
+      ...d,
+      defaults: d.defaults
+        ? { ...d.defaults, tags: normalizeTags(d.defaults.tags) }
+        : d.defaults,
+      subdomains: (d.subdomains ?? []).map((s) => ({
+        ...s,
+        defaults: s.defaults
+          ? { ...s.defaults, tags: normalizeTags(s.defaults.tags) }
+          : s.defaults,
+      })),
+    })),
+  };
+}
 
 interface ModelStore {
   // Projects
@@ -35,7 +61,7 @@ interface ModelStore {
   loadModels: (projectId: string) => Promise<DataModel[]>;
   loadModelsFull: (projectId: string) => Promise<DataModel[]>;
   loadModel: (modelId: string) => Promise<void>;
-  createModel: (data: { projectId: string; name: string; description?: string }) => Promise<DataModel | null>;
+  createModel: (data: { projectId: string; name: string; description?: string; engine?: DatabaseEngine }) => Promise<DataModel | null>;
   saveModel: () => Promise<void>;
   deleteModel: (id: string) => Promise<boolean>;
 
@@ -137,7 +163,8 @@ export const useModelStore = create<ModelStore>((set, get) => ({
   // (which is what listing screens want for speed).
   loadModelsFull: async (projectId) => {
     try {
-      return await modelsService.listModels({ projectId, full: true });
+      const models = await modelsService.listModels({ projectId, full: true });
+      return models.map(normalizeModelTags);
     } catch (err) {
       console.error('Failed to load full models:', err);
       return [];
@@ -147,7 +174,7 @@ export const useModelStore = create<ModelStore>((set, get) => ({
   loadModel: async (modelId) => {
     set({ loading: true });
     try {
-      const model = await modelsService.getModel(modelId);
+      const model = normalizeModelTags(await modelsService.getModel(modelId));
       set({
         currentModel: model,
         tables: model.tables || [],
@@ -176,10 +203,26 @@ export const useModelStore = create<ModelStore>((set, get) => ({
     if (!currentModel) return;
     set({ saving: true });
     try {
+      // Frente C — multi-session safety:
+      // The Save button must NEVER persist node positions. Positions
+      // are owned exclusively by `useLayoutPersistence`, which writes
+      // them to the dedicated `PATCH /api/models/{id}/positions`
+      // endpoint with last-write-wins semantics at the row level.
+      // Without this strip, a Save in tab A would overwrite a drag
+      // that tab B persisted seconds earlier (because A's `tables`
+      // snapshot was loaded before B's drag landed in Cosmos).
+      //
+      // The strip is intentionally idempotent on the backend side:
+      // `updateModel` should treat missing `position` as "leave the
+      // existing value alone". If the backend currently nulls out
+      // missing fields, that contract needs to be flipped — see
+      // `doc/phase-2-multi-session.md` for the backend audit.
+      const tablesWithoutPositions = tables.map(({ position: _stripPos, ...rest }) => rest);
+      const viewsWithoutPositions = views.map(({ position: _stripVPos, ...rest }) => rest);
       await modelsService.updateModel(currentModel.id, {
-        tables,
+        tables: tablesWithoutPositions,
         relationships,
-        views,
+        views: viewsWithoutPositions,
         domainCatalog,
       });
     } catch (err) {

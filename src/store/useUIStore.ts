@@ -6,6 +6,11 @@ type ModalType = 'createProject' | 'importExcel' | 'tableForm' | 'dbmlEditor' | 
 interface UIStore {
   // Panel visibility
   sidebarOpen: boolean;
+  /**
+   * Whether the main app sidebar is collapsed to its icon-only width.
+   * Persisted across reloads via localStorage so the user's choice sticks.
+   */
+  sidebarCollapsed: boolean;
   rightPanelOpen: boolean;
   chatPanelOpen: boolean;
 
@@ -29,6 +34,8 @@ interface UIStore {
   // Actions
   toggleSidebar: () => void;
   setSidebarOpen: (open: boolean) => void;
+  toggleSidebarCollapsed: () => void;
+  setSidebarCollapsed: (collapsed: boolean) => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
   toggleChatPanel: () => void;
@@ -45,6 +52,7 @@ const LEFT_PANEL_MIN = 220;
 const LEFT_PANEL_MAX = 720;
 const LEFT_PANEL_DEFAULT = 288;
 const LEFT_PANEL_STORAGE_KEY = 'dmh:leftPanelWidth';
+const SIDEBAR_COLLAPSED_STORAGE_KEY = 'dmh:sidebarCollapsed';
 
 function loadInitialLeftPanelWidth(): number {
   if (typeof window === 'undefined') return LEFT_PANEL_DEFAULT;
@@ -55,8 +63,14 @@ function loadInitialLeftPanelWidth(): number {
   return Math.min(LEFT_PANEL_MAX, Math.max(LEFT_PANEL_MIN, parsed));
 }
 
+function loadInitialSidebarCollapsed(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
+}
+
 export const useUIStore = create<UIStore>((set) => ({
   sidebarOpen: true,
+  sidebarCollapsed: loadInitialSidebarCollapsed(),
   rightPanelOpen: false,
   chatPanelOpen: false,
   leftPanelWidth: loadInitialLeftPanelWidth(),
@@ -67,6 +81,20 @@ export const useUIStore = create<UIStore>((set) => ({
 
   toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  toggleSidebarCollapsed: () =>
+    set((state) => {
+      const next = !state.sidebarCollapsed;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, next ? '1' : '0');
+      }
+      return { sidebarCollapsed: next };
+    }),
+  setSidebarCollapsed: (collapsed) => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
+    }
+    set({ sidebarCollapsed: collapsed });
+  },
   toggleRightPanel: () => set((state) => ({ rightPanelOpen: !state.rightPanelOpen })),
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
   toggleChatPanel: () => set((state) => ({ chatPanelOpen: !state.chatPanelOpen })),

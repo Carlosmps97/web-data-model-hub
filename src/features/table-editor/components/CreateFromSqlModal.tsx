@@ -30,7 +30,9 @@ import {
 import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { sql } from '@codemirror/lang-sql';
-import { COLUMN_DATA_TYPES, type TableModel, type Relationship, type TableColumn } from '@/types/model';
+import { COLUMN_DATA_TYPES, type TableModel, type Relationship, type TableColumn, type Tag } from '@/types/model';
+import { findColumnId } from '@/lib/columnRef';
+import { tagId } from '@/lib/tags';
 import {
   parseSqlToTable,
   type InferredColumn,
@@ -227,17 +229,34 @@ export default function CreateFromSqlModal({
       tags: mergeTags(effectiveColumns),
     };
 
-    // Build relationships. All use the NEW table's name as neither
-    // side — these are inferred relationships between the *source*
-    // tables (what the SQL JOINed). Default to 1:N from left to right.
-    const newRelationships: Relationship[] = effectiveJoins.map((j) => ({
-      id: uuidv4(),
-      sourceTable: j.leftTable,
-      sourceColumn: j.leftColumn,
-      targetTable: j.rightTable,
-      targetColumn: j.rightColumn,
-      type: 'one-to-many',
-    }));
+    // Build relationships. These run between *source* tables (what the
+    // SQL JOINed together) — the new table being created here never
+    // appears in the edge. The join parser emits column *names*
+    // (leftColumn / rightColumn); we resolve them to the stable
+    // `TableColumn.id` in `existingTables` so the canvas edges survive
+    // subsequent column renames. Joins whose columns can't be resolved
+    // are dropped with a console warning rather than silently pointing
+    // at a non-existent handle.
+    const newRelationships: Relationship[] = [];
+    for (const j of effectiveJoins) {
+      const srcColId = findColumnId(existingTables, j.leftTable, j.leftColumn);
+      const tgtColId = findColumnId(existingTables, j.rightTable, j.rightColumn);
+      if (!srcColId || !tgtColId) {
+        console.warn(
+          `[CreateFromSql] skipping relationship ${j.leftTable}.${j.leftColumn} → ` +
+            `${j.rightTable}.${j.rightColumn}: column id not found`,
+        );
+        continue;
+      }
+      newRelationships.push({
+        id: uuidv4(),
+        sourceTable: j.leftTable,
+        sourceColumn: srcColId,
+        targetTable: j.rightTable,
+        targetColumn: tgtColId,
+        type: 'one-to-many',
+      });
+    }
 
     onCreate({ table: newTable, relationships: newRelationships });
   }, [parsed, tableName, effectiveColumns, effectiveJoins, existingTables, onCreate]);
@@ -463,6 +482,7 @@ function inferredToColumn(c: InferredColumn): TableColumn {
   const length = m?.[2] ? parseInt(m[2], 10) : undefined;
   const scale = m?.[3] ? parseInt(m[3], 10) : undefined;
   return {
+    id: uuidv4(),
     name: c.name,
     dataType: base,
     length,
@@ -471,12 +491,18 @@ function inferredToColumn(c: InferredColumn): TableColumn {
   };
 }
 
-function mergeTags(cols: InferredColumn[]): string[] | undefined {
-  const all = new Set<string>();
+function mergeTags(cols: InferredColumn[]): Tag[] | undefined {
+  const seen = new Set<string>();
+  const out: Tag[] = [];
   for (const c of cols) {
-    (c.tags ?? []).forEach((t) => all.add(t));
+    (c.tags ?? []).forEach((t) => {
+      const id = tagId(t);
+      if (seen.has(id)) return;
+      seen.add(id);
+      out.push(t);
+    });
   }
-  return all.size ? Array.from(all) : undefined;
+  return out.length ? out : undefined;
 }
 
 function findDuplicateNames(names: string[]): string[] {

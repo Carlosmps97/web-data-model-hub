@@ -13,11 +13,11 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.41.0",
     "@xyflow/react": "^12.10.2",
-    "bcryptjs": "^3.0.3",
     "codemirror": "^6.0.2",
+    "elkjs": "^0.9.3",
     "jose": "^6.2.3",
-    "mongodb": "^7.2.0",
     "next": "16.2.3",
+    "potpack": "^2.1.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "sonner": "^2.0.7",
@@ -26,7 +26,6 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
 import { v4 as uuidv4 } from 'uuid';
 import AppLayout from '@/components/layout/AppLayout';
+import Header from '@/components/layout/Header';
 import TableForm from '@/features/table-editor/components/TableForm';
 import DomainManager from '@/features/domains/components/DomainManager';
 import ViewForm from '@/features/views/components/ViewForm';
@@ -12,7 +13,12 @@ import ExcelImportModal from '@/features/excel-import/components/ExcelImportModa
 import CreateFromSqlModal from '@/features/table-editor/components/CreateFromSqlModal';
 import DBMLEditorPanel from '@/features/table-editor/components/DBMLEditorPanel';
 import TablesListView from '@/features/table-editor/components/TablesListView';
-import ChatPanel from '@/features/chat-agent/components/ChatPanel';
+import {
+  ChatPanel,
+  fromAgentEngine,
+  modelingResponseToCanvas,
+  type ModelingResponse,
+} from '@/features/chat-agent';
 import LeftPanelResizer from '@/components/layout/LeftPanelResizer';
 import EngineSelect from '@/features/engines/components/EngineSelect';
 import DDLPreviewModal, { type DDLScope } from '@/features/ddl/components/DDLPreviewModal';
@@ -21,8 +27,7 @@ import { projectsService, modelsService } from '@/services';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useModelStore } from '@/store/useModelStore';
 import { useUIStore } from '@/store/useUIStore';
-import { modelingResponseToCanvas, fromAgentEngine } from '@/lib/agent/mapping';
-import type { ModelingResponse } from '@/lib/agent/types';
+import { findColumnId } from '@/lib/columnRef';
 import type { TableModel, Relationship, DatabaseEngine } from '@/types/model';
 
 const DiagramCanvas = dynamic(
@@ -78,6 +83,11 @@ export default function ModelEditorPage({ params }: PageProps) {
   const [showDomainManager, setShowDomainManager] = useState(false);
   const [showViewForm, setShowViewForm] = useState(false);
   const [editingView, setEditingView] = useState<import('@/types/model').ViewModel | null>(null);
+  // Bumped by handlers that perform a massive table load (Excel /
+  // SQL / DBML / Agent). The canvas listens on this counter and
+  // triggers a fresh ELK auto-layout when it changes. Single-table
+  // and single-relationship edits intentionally do NOT bump it.
+  const [layoutNonce, setLayoutNonce] = useState(0);
   // Ref para ignorar el primer disparo del efecto dirty (carga inicial).
   // React 18 batchea loadModel (Zustand) + setLoaded(true) en un solo render,
   // por lo que el efecto ve loaded=true + tablas nuevas simultáneamente.
@@ -132,37 +142,104 @@ export default function ModelEditorPage({ params }: PageProps) {
   // ── Handlers ──
   const handleAddTable = (table: TableModel) => {
     if (editingTable) {
+      // Editing path.
+      //
+      // The previous implementation nuked every relationship where the
+      // edited table was the source and rebuilt them only from the
+      // form's `isForeignKey` columns. That silently dropped every
+      // relationship the user had drawn manually in the canvas (those
+      // edges live in `relationships` but don't set `isForeignKey` on
+      // the column itself), so any edit — even a tag change — erased
+      // the whole relational schema for that table.
+      //
+      // Conservative strategy used here:
+      //   1. Preserve every existing relationship.
+      //   2. If the table was renamed, cascade the new name into every
+      //      relationship that referenced the old name (as source or
+      //      target), so they keep pointing to the same table.
+      //   3. Add FK-derived relationships declared in the form only
+      //      when an equivalent relationship doesn't already exist.
+      //   4. Column renames are NOT auto-cascaded because without
+      //      stable per-column IDs we cannot reliably tell renames
+      //      apart from add+delete. If the user renames a column that
+      //      participates in a relationship, the relationship survives
+      //      pointing at the old column name — the canvas will warn
+      //      on the orphaned handle, making the inconsistency visible
+      //      instead of silently wiping the edge.
+      const oldName = editingTable.name;
+      const newName = table.name;
+      const renamed = oldName !== newName;
+
       updateTable(editingTable.id, table);
-      const newRels: Relationship[] = [];
+
+      const cascaded = renamed
+        ? relationships.map((r) => {
+            let next = r;
+            if (r.sourceTable === oldName || r.sourceTable === editingTable.id) {
+              next = { ...next, sourceTable: newName };
+            }
+            if (r.targetTable === oldName || r.targetTable === editingTable.id) {
+              next = { ...next, targetTable: newName };
+            }
+            return next;
+          })
+        : relationships;
+
+      // Resolve every FK declared in the form to column *ids*. The
+      // `foreignKeyRef` on the column still stores NAMES (that's the
+      // contract users enter in the form), so we look up the id in the
+      // target table via `findColumnId`. If the target column doesn't
+      // exist we skip the relationship silently rather than creating
+      // an orphan pointing at nothing.
+      const nextTables = tables.map((t) => (t.id === editingTable.id ? table : t));
+      const toAdd: Relationship[] = [];
       table.columns.forEach((col) => {
-        if (col.isForeignKey && col.foreignKeyRef?.table && col.foreignKeyRef?.column) {
-          newRels.push({
+        if (!col.isForeignKey || !col.foreignKeyRef?.table || !col.foreignKeyRef?.column) return;
+        const targetColId = findColumnId(
+          nextTables,
+          col.foreignKeyRef.table,
+          col.foreignKeyRef.column,
+        );
+        if (!targetColId) return;
+        const alreadyExists = cascaded.some(
+          (r) =>
+            r.sourceTable === newName &&
+            r.sourceColumn === col.id &&
+            r.targetTable === col.foreignKeyRef!.table &&
+            r.targetColumn === targetColId,
+        );
+        if (!alreadyExists) {
+          toAdd.push({
             id: uuidv4(),
-            sourceTable: table.name,
-            sourceColumn: col.name,
+            sourceTable: newName,
+            sourceColumn: col.id,
             targetTable: col.foreignKeyRef.table,
-            targetColumn: col.foreignKeyRef.column,
+            targetColumn: targetColId,
             type: 'one-to-many',
           });
         }
       });
-      const filteredRels = relationships.filter(
-        (r) => r.sourceTable !== editingTable.name && r.sourceTable !== editingTable.id
-      );
-      setRelationships([...filteredRels, ...newRels]);
+
+      setRelationships(toAdd.length > 0 ? [...cascaded, ...toAdd] : cascaded);
     } else {
       addTable(table);
+      const nextTables = [...tables, table];
       table.columns.forEach((col) => {
-        if (col.isForeignKey && col.foreignKeyRef?.table && col.foreignKeyRef?.column) {
-          addRelationship({
-            id: uuidv4(),
-            sourceTable: table.name,
-            sourceColumn: col.name,
-            targetTable: col.foreignKeyRef.table,
-            targetColumn: col.foreignKeyRef.column,
-            type: 'one-to-many',
-          });
-        }
+        if (!col.isForeignKey || !col.foreignKeyRef?.table || !col.foreignKeyRef?.column) return;
+        const targetColId = findColumnId(
+          nextTables,
+          col.foreignKeyRef.table,
+          col.foreignKeyRef.column,
+        );
+        if (!targetColId) return;
+        addRelationship({
+          id: uuidv4(),
+          sourceTable: table.name,
+          sourceColumn: col.id,
+          targetTable: col.foreignKeyRef.table,
+          targetColumn: targetColId,
+          type: 'one-to-many',
+        });
       });
     }
     setShowTableForm(false);
@@ -172,6 +249,7 @@ export default function ModelEditorPage({ params }: PageProps) {
   const handleImportExcel = (importedTables: TableModel[]) => {
     importedTables.forEach((t) => addTable(t));
     setShowExcelImport(false);
+    setLayoutNonce((n) => n + 1);
   };
 
   // Bridge from the SQL-to-Table modal. Persists the newly inferred
@@ -190,6 +268,7 @@ export default function ModelEditorPage({ params }: PageProps) {
       if (!existingKeys.has(key)) addRelationship(rel);
     });
     setShowSqlCreate(false);
+    setLayoutNonce((n) => n + 1);
   };
 
   // DBML Code tab applies a full replacement of the model.
@@ -205,6 +284,7 @@ export default function ModelEditorPage({ params }: PageProps) {
     if (meta?.engine && meta.engine !== currentModel?.engine) {
       handleUpdateEngine(meta.engine);
     }
+    setLayoutNonce((n) => n + 1);
   };
 
   const handleEditTable = (id: string) => {
@@ -271,6 +351,70 @@ export default function ModelEditorPage({ params }: PageProps) {
   // usuario, el primer release REEMPLAZA tablas y relaciones (no hace
   // merge incremental). Si el engine devuelto por el backend difiere del
   // configurado en el modelo, lo persistimos también.
+  /**
+   * Bridge for the canvas drag-to-connect flow (Issue #5).
+   *
+   * The `DiagramCanvas` only knows how to emit a `Relationship`; it has
+   * no way to mutate the column model. After we persist the new
+   * relationship, we walk the source table's columns, find the column
+   * that participates as the FK side, and stamp it with
+   * `isForeignKey=true` + `foreignKeyRef` if those fields are missing.
+   *
+   * Why ONLY here (not on every `addRelationship` call site): the
+   * Excel / SQL / DBML / Agent importers already build columns with
+   * `isForeignKey` set during their own normalisation, so applying
+   * this wrapper there would be a no-op or, worse, would clobber a
+   * legitimate target-column reference. The drag flow is the only
+   * place where the column is touched without going through an
+   * importer.
+   *
+   * The decision to NOT auto-create a join table for `many-to-many`
+   * relationships is intentional and matches dbdiagram.io — the
+   * picker emits N:M and the canvas renders it as a direct edge
+   * with crow's-foot on both ends.
+   */
+  const handleAddRelationshipFromCanvas = (rel: Relationship) => {
+    addRelationship(rel);
+
+    // Resolve the source / target tables. The relationship stores ids
+    // (the canvas always emits ids), but we tolerate name-based legacy
+    // refs to stay compatible with old DBML imports.
+    const srcTable = tables.find(
+      (t) => t.id === rel.sourceTable || t.name === rel.sourceTable,
+    );
+    const tgtTable = tables.find(
+      (t) => t.id === rel.targetTable || t.name === rel.targetTable,
+    );
+    if (!srcTable || !tgtTable) return;
+
+    const srcCol = srcTable.columns.find(
+      (c) => c.id === rel.sourceColumn || c.name === rel.sourceColumn,
+    );
+    const tgtCol = tgtTable.columns.find(
+      (c) => c.id === rel.targetColumn || c.name === rel.targetColumn,
+    );
+    if (!srcCol || !tgtCol) return;
+
+    // If the column is already marked as FK pointing at the same
+    // target, leave it alone — don't bump the model dirty for nothing.
+    const refMatches =
+      srcCol.isForeignKey === true &&
+      srcCol.foreignKeyRef?.table === tgtTable.name &&
+      srcCol.foreignKeyRef?.column === tgtCol.name;
+    if (refMatches) return;
+
+    const updatedColumns = srcTable.columns.map((c) =>
+      c.id === srcCol.id
+        ? {
+            ...c,
+            isForeignKey: true,
+            foreignKeyRef: { table: tgtTable.name, column: tgtCol.name },
+          }
+        : c,
+    );
+    updateTable(srcTable.id, { columns: updatedColumns });
+  };
+
   const handleApplyAgentModel = (response: ModelingResponse) => {
     const { tables: newTables, relationships: newRels } = modelingResponseToCanvas(response);
     setTables(newTables);
@@ -279,6 +423,7 @@ export default function ModelEditorPage({ params }: PageProps) {
     if (responseEngine !== currentModel?.engine) {
       handleUpdateEngine(responseEngine);
     }
+    setLayoutNonce((n) => n + 1);
   };
 
 
@@ -299,64 +444,27 @@ export default function ModelEditorPage({ params }: PageProps) {
 
   return (
     <AppLayout fixedViewport>
-      {/* ──────────────────────────────────────────────────────────────
-          Editor Header — two well-spaced rows:
-            Row 1 (identity):  back · clickable breadcrumb · saved · engine
-            Row 2 (toolbar):   view toggle · primary actions · AI agent
-          ────────────────────────────────────────────────────────────── */}
-      <header className="ed-header">
-        {/* Row 1: identity & status */}
-        <div className="ed-header-row ed-header-identity">
-          <button
-            className="ed-back"
-            onClick={() => router.push(`/projects/${projectId}`)}
-            title="Back to models"
-            type="button"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 18 9 12 15 6" />
-            </svg>
-          </button>
-
-          <nav className="ed-breadcrumb" aria-label="Breadcrumb">
-            <button
-              type="button"
-              className="ed-crumb ed-crumb-link"
-              onClick={() => router.push('/')}
-              title="All projects"
-            >
-              Projects
-            </button>
-            <ChevronCrumb />
-            <button
-              type="button"
-              className="ed-crumb ed-crumb-link"
-              onClick={() => router.push(`/projects/${projectId}`)}
-              title={`Open ${currentProject?.name ?? 'project'}`}
-            >
-              {currentProject?.name ?? 'Project'}
-            </button>
-            <ChevronCrumb />
-            <span className="ed-crumb ed-crumb-current" title={currentModel?.name}>
-              {currentModel?.name ?? 'Model'}
-            </span>
-          </nav>
-
-          <div className="ed-spacer" />
-
+      <Header
+        crumbs={[
+          { label: 'Projects', href: '/' },
+          { label: currentProject?.name ?? 'Project', href: `/projects/${projectId}` },
+          { label: currentModel?.name ?? 'Model' },
+        ]}
+        actions={
           <div className="ed-engine-wrap">
             <span className="ed-engine-label">Engine</span>
             <EngineSelect
               value={currentModel?.engine ?? null}
               onChange={handleUpdateEngine}
-              size="md"
+              size="sm"
               disabled={readOnly}
             />
           </div>
-        </div>
+        }
+      />
 
-        {/* Row 2: view + actions toolbar */}
-        <div className="ed-header-row ed-header-toolbar">
+      {/* Editor toolbar — view toggle + primary actions, sticky below the header */}
+      <div className="ed-toolbar">
           <div className="ed-segmented" role="tablist" aria-label="View mode">
             <button
               type="button"
@@ -523,8 +631,7 @@ export default function ModelEditorPage({ params }: PageProps) {
             <img src="/logo-dog.png" alt="" width="18" height="18" style={{ objectFit: 'contain', flexShrink: 0 }} />
             AI Agent
           </button>
-        </div>
-      </header>
+      </div>
 
       {/* Editor Workspace */}
       <div className="editor-workspace">
@@ -657,8 +764,11 @@ export default function ModelEditorPage({ params }: PageProps) {
           onEditTable={handleEditTable}
           onDeleteTable={handleDeleteTable}
           onEditView={handleEditView}
-          onAddRelationship={addRelationship}
+          onAddRelationship={handleAddRelationshipFromCanvas}
           onRemoveRelationship={removeRelationship}
+          // Persist drag/auto-layout positions to this model.
+          modelId={modelId}
+          layoutNonce={layoutNonce}
         />
 
         {/* AI assistant side panel (only opens when explicitly toggled) */}
@@ -784,22 +894,3 @@ export default function ModelEditorPage({ params }: PageProps) {
   );
 }
 
-// Visual separator used between breadcrumb segments.
-function ChevronCrumb() {
-  return (
-    <svg
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="ed-crumb-sep"
-      aria-hidden="true"
-    >
-      <polyline points="9 18 15 12 9 6" />
-    </svg>
-  );
-}

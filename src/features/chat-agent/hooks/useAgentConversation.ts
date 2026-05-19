@@ -25,13 +25,13 @@ import {
   generateModel,
   uploadGuidelines,
   type GenerateModelInput,
-} from '@/services/agent.service';
-import { toAgentEngine } from '@/lib/agent/mapping';
+} from '../services/agent.service';
+import { toAgentEngine } from '../lib/mapping';
 import type {
   AgentChatMessage,
   useAgentStore as useAgentStoreType,
-} from '@/store/useAgentStore';
-import { useAgentStore } from '@/store/useAgentStore';
+} from '../store/useAgentStore';
+import { useAgentStore } from '../store/useAgentStore';
 import type { DatabaseEngine } from '@/types/model';
 
 type StoreState = ReturnType<typeof useAgentStoreType.getState>;

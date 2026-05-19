@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import type { TableModel } from '@/types/model';
+import type { TableModel, Tag } from '@/types/model';
+import { formatTag, tagId } from '@/lib/tags';
 
 interface TablesListViewProps {
   tables: TableModel[];
@@ -36,21 +37,36 @@ export default function TablesListView({
   readOnly = false,
 }: TablesListViewProps) {
   const [search, setSearch] = useState('');
-  const [activeTag, setActiveTag] = useState<string | null>(null);
+  // Tag filter identifies a tag by its (key, value) pair, serialized via tagId().
+  const [activeTagId, setActiveTagId] = useState<string | null>(null);
   const [groupBy, setGroupBy] = useState<GroupBy>('schema');
 
-  // Collect all unique tags for quick reference in the UI
+  // Collect all unique tags for quick reference in the UI, keyed by (key, value).
   const allTags = useMemo(() => {
-    const set = new Set<string>();
-    tables.forEach((t) => (t.tags ?? []).forEach((tag) => set.add(tag)));
-    return Array.from(set).sort();
+    const map = new Map<string, Tag>();
+    tables.forEach((t) =>
+      (t.tags ?? []).forEach((tag) => {
+        const id = tagId(tag);
+        if (!map.has(id)) map.set(id, tag);
+      }),
+    );
+    return Array.from(map.values()).sort((a, b) =>
+      formatTag(a).localeCompare(formatTag(b)),
+    );
   }, [tables]);
+
+  const activeTagLabel = useMemo(() => {
+    if (!activeTagId) return null;
+    const found = allTags.find((t) => tagId(t) === activeTagId);
+    return found ? formatTag(found) : null;
+  }, [activeTagId, allTags]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tables.filter((t) => {
-      if (activeTag && !(t.tags ?? []).includes(activeTag)) return false;
+      if (activeTagId && !(t.tags ?? []).some((tag) => tagId(tag) === activeTagId)) return false;
       if (!q) return true;
+      const tagText = (t.tags ?? []).map(formatTag).join(' ');
       const hay = [
         t.schema ?? '',
         t.name,
@@ -58,13 +74,13 @@ export default function TablesListView({
         t.applicationCode ?? '',
         t.domain ?? '',
         t.subdomain ?? '',
-        ...(t.tags ?? []),
+        tagText,
       ]
         .join(' ')
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [tables, search, activeTag]);
+  }, [tables, search, activeTagId]);
 
   /** Group `filtered` according to the active grouping. Returns ordered groups. */
   const groups: { label: string; key: string; rows: TableModel[]; isDomain: boolean }[] = useMemo(() => {
@@ -103,14 +119,14 @@ export default function TablesListView({
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          {activeTag && (
+          {activeTagId && activeTagLabel && (
             <button
               type="button"
               className="tables-list-tag-filter"
-              onClick={() => setActiveTag(null)}
+              onClick={() => setActiveTagId(null)}
               title="Clear tag filter"
             >
-              #{activeTag}
+              {activeTagLabel}
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" />
                 <line x1="6" y1="6" x2="18" y2="18" />
@@ -181,16 +197,19 @@ export default function TablesListView({
           <span style={{ fontSize: 'var(--text-xs)', color: 'var(--color-text-muted)', fontWeight: 600, marginRight: 4 }}>
             Tags:
           </span>
-          {allTags.map((tag) => (
-            <button
-              key={tag}
-              type="button"
-              className={`tables-list-tag ${activeTag === tag ? 'active' : ''}`}
-              onClick={() => setActiveTag(activeTag === tag ? null : tag)}
-            >
-              #{tag}
-            </button>
-          ))}
+          {allTags.map((tag) => {
+            const id = tagId(tag);
+            return (
+              <button
+                key={id}
+                type="button"
+                className={`tables-list-tag ${activeTagId === id ? 'active' : ''}`}
+                onClick={() => setActiveTagId(activeTagId === id ? null : id)}
+              >
+                {formatTag(tag)}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -337,16 +356,19 @@ export default function TablesListView({
 
                     {t.tags && t.tags.length > 0 && (
                       <div className="tables-list-card-tags">
-                        {t.tags.map((tag) => (
-                          <button
-                            key={tag}
-                            type="button"
-                            className={`tables-list-tag ${activeTag === tag ? 'active' : ''}`}
-                            onClick={() => setActiveTag(activeTag === tag ? null : tag)}
-                          >
-                            #{tag}
-                          </button>
-                        ))}
+                        {t.tags.map((tag, idx) => {
+                          const id = tagId(tag);
+                          return (
+                            <button
+                              key={`${id}-${idx}`}
+                              type="button"
+                              className={`tables-list-tag ${activeTagId === id ? 'active' : ''}`}
+                              onClick={() => setActiveTagId(activeTagId === id ? null : id)}
+                            >
+                              {formatTag(tag)}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>

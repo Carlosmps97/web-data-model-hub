@@ -2,9 +2,10 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { TableModel, TableColumn, PartitionSpec, PartitionStrategy, DatabaseEngine, DomainDefinition } from '@/types/model';
+import type { TableModel, TableColumn, PartitionSpec, PartitionStrategy, DatabaseEngine, DomainDefinition, Tag } from '@/types/model';
 import { COLUMN_DATA_TYPES } from '@/types/model';
 import { getEngine } from '@/features/engines/engines';
+import { mergeTagLists, tagId } from '@/lib/tags';
 
 interface TableFormProps {
   table?: TableModel | null;
@@ -18,6 +19,10 @@ interface TableFormProps {
 }
 
 const emptyColumn = (): TableColumn => ({
+  // Every column carries a stable id from birth — freshly added rows
+  // get a fresh UUID so relationships drawn on the canvas (which index
+  // by `col.id`) survive subsequent renames.
+  id: uuidv4(),
   name: '',
   dataType: 'varchar',
   isPrimaryKey: false,
@@ -47,8 +52,9 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, do
   const [subdomainId, setSubdomainId] = useState(table?.subdomainId || '');
   const [domain, setDomain] = useState(table?.domain || '');
   const [subdomain, setSubdomain] = useState(table?.subdomain || '');
-  const [tags, setTags] = useState<string[]>(table?.tags ?? []);
-  const [tagDraft, setTagDraft] = useState('');
+  const [tags, setTags] = useState<Tag[]>(table?.tags ?? []);
+  const [tagKeyDraft, setTagKeyDraft] = useState('');
+  const [tagValueDraft, setTagValueDraft] = useState('');
   const [columns, setColumns] = useState<TableColumn[]>(
     table?.columns?.length ? [...table.columns] : [emptyColumn()]
   );
@@ -65,13 +71,20 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, do
   }, [engineDef?.defaultSchema]);
 
   const addTag = () => {
-    const v = tagDraft.trim();
-    if (!v) return;
-    if (tags.includes(v)) { setTagDraft(''); return; }
-    setTags([...tags, v]);
-    setTagDraft('');
+    const k = tagKeyDraft.trim();
+    const v = tagValueDraft.trim();
+    if (!k && !v) return;
+    const next: Tag = { key: k, value: v };
+    if (tags.some((t) => t.key === next.key && t.value === next.value)) {
+      setTagKeyDraft('');
+      setTagValueDraft('');
+      return;
+    }
+    setTags([...tags, next]);
+    setTagKeyDraft('');
+    setTagValueDraft('');
   };
-  const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
+  const removeTagAt = (idx: number) => setTags(tags.filter((_, i) => i !== idx));
 
   const addColumn = () => {
     setColumns([...columns, emptyColumn()]);
@@ -285,7 +298,7 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, do
                 // Hereda schema si el dominio tiene default y el schema es el del engine
                 const def = domainCatalog.find((d) => d.id === did);
                 if (def?.defaults?.schema && schema === defaultSchema) setSchema(def.defaults.schema);
-                if (def?.defaults?.tags) setTags((prev) => [...new Set([...prev, ...(def.defaults?.tags ?? [])])]);
+                if (def?.defaults?.tags) setTags((prev) => mergeTagLists(prev, def.defaults?.tags));
               }}
               onSubdomainChange={(sid, sName) => {
                 setSubdomainId(sid);
@@ -293,7 +306,7 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, do
                 const dom = domainCatalog.find((d) => d.id === domainId);
                 const sub = dom?.subdomains.find((s) => s.id === sid);
                 if (sub?.defaults?.schema) setSchema(sub.defaults.schema);
-                if (sub?.defaults?.tags) setTags((prev) => [...new Set([...prev, ...(sub.defaults?.tags ?? [])])]);
+                if (sub?.defaults?.tags) setTags((prev) => mergeTagLists(prev, sub.defaults?.tags));
               }}
               onFreeDomainChange={setDomain}
               onFreeSubdomainChange={setSubdomain}
@@ -344,6 +357,20 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, do
                         value={col.dataType}
                         onChange={(e) => updateColumn(idx, { dataType: e.target.value })}
                       >
+                        {/* If the current value isn't one of the canonical
+                            lowercase options (e.g. the LLM/Excel produced
+                            `VARCHAR`, `INT`, `NUMBER(10,2)`, `STRING`…),
+                            render it as a custom option so the `<select>`
+                            shows the real value instead of silently
+                            defaulting to the first option (`integer`). */}
+                        {col.dataType &&
+                          !COLUMN_DATA_TYPES.includes(
+                            col.dataType as (typeof COLUMN_DATA_TYPES)[number],
+                          ) && (
+                            <option key="__custom" value={col.dataType}>
+                              {col.dataType}
+                            </option>
+                          )}
                         {COLUMN_DATA_TYPES.map((dt) => <option key={dt} value={dt}>{dt}</option>)}
                       </select>
                       <button
@@ -626,29 +653,62 @@ const TableForm: React.FC<TableFormProps> = ({ table, existingTables, engine, do
 
             <div className="form-group">
               <label className="input-label">Tags</label>
-              <div className="tag-chip-input">
-                {tags.map((t) => (
-                  <span key={t} className="tag-chip">
-                    {t}
-                    <button type="button" className="tag-chip-remove" onClick={() => removeTag(t)} aria-label={`Remove tag ${t}`}>
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
-                  </span>
-                ))}
+              <small className="tf-help" style={{ display: 'block', marginBottom: 6 }}>
+                Key-value metadata (e.g. <code>owner: data-platform</code>, <code>pii: high</code>).
+              </small>
+
+              {tags.length > 0 && (
+                <div className="tag-kv-list">
+                  {tags.map((t, idx) => (
+                    <span key={`${tagId(t)}-${idx}`} className="tag-chip tag-chip--kv">
+                      {t.key && <span className="tag-chip-key">{t.key}</span>}
+                      {t.key && t.value && <span className="tag-chip-sep">:</span>}
+                      {t.value && <span className="tag-chip-value">{t.value}</span>}
+                      <button
+                        type="button"
+                        className="tag-chip-remove"
+                        onClick={() => removeTagAt(idx)}
+                        aria-label={`Remove tag ${t.key || ''} ${t.value || ''}`.trim()}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="tag-kv-row">
                 <input
-                  className="tag-chip-field"
+                  className="input tag-kv-input tag-kv-input--key"
                   type="text"
-                  placeholder={tags.length === 0 ? 'Add tag and press Enter' : 'Add more…'}
-                  value={tagDraft}
-                  onChange={(e) => setTagDraft(e.target.value)}
+                  placeholder="key (e.g. owner)"
+                  value={tagKeyDraft}
+                  onChange={(e) => setTagKeyDraft(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(); }
-                    else if (e.key === 'Backspace' && !tagDraft && tags.length > 0) { e.preventDefault(); setTags(tags.slice(0, -1)); }
+                    if (e.key === 'Enter') { e.preventDefault(); addTag(); }
                   }}
-                  onBlur={addTag}
                 />
+                <span className="tag-kv-sep">=</span>
+                <input
+                  className="input tag-kv-input tag-kv-input--value"
+                  type="text"
+                  placeholder="value (e.g. data-platform)"
+                  value={tagValueDraft}
+                  onChange={(e) => setTagValueDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); addTag(); }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={addTag}
+                  disabled={!tagKeyDraft.trim() && !tagValueDraft.trim()}
+                >
+                  Add tag
+                </button>
               </div>
             </div>
           </>

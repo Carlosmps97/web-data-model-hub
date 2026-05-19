@@ -418,6 +418,46 @@ select.input {
   color: var(--color-text-primary);
 }
 
+/* ── Key/value tag editor ─────────────────────────────────────────── */
+.tag-kv-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.tag-chip--kv {
+  padding: 2px 4px 2px 6px;
+  gap: 2px;
+}
+.tag-chip-key {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.tag-chip-sep {
+  opacity: 0.55;
+  margin: 0 2px;
+}
+.tag-chip-value {
+  font-weight: 500;
+}
+.tag-kv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tag-kv-input {
+  flex: 1;
+  min-width: 0;
+}
+.tag-kv-input--key {
+  flex: 0 0 35%;
+}
+.tag-kv-sep {
+  color: var(--color-text-muted);
+  font-weight: 600;
+  user-select: none;
+}
+
 /* ========== TABLES LIST VIEW (model editor) ========== */
 .tables-list-view {
   flex: 1;
@@ -743,8 +783,17 @@ select.input {
   position: fixed;
   top: 0;
   left: 0;
-  z-index: var(--z-sticky);
+  /* Sidebar sits one layer above the sticky header so its overhang elements
+     (collapse toggle) stay visible over the header / breadcrumb strip. */
+  z-index: calc(var(--z-sticky) + 1);
+  /* Must stay visible — the collapse toggle protrudes -12px past the right
+     edge and would otherwise be clipped by any overflow set here. */
+  overflow: visible;
   transition: width var(--transition-normal);
+}
+
+.app-sidebar--collapsed {
+  width: var(--sidebar-collapsed-width);
 }
 
 .app-main {
@@ -754,6 +803,10 @@ select.input {
   display: flex;
   flex-direction: column;
   transition: margin-left var(--transition-normal);
+}
+
+.app-sidebar--collapsed + .app-main {
+  margin-left: var(--sidebar-collapsed-width);
 }
 
 /* Workbench mode — used by the model editor where every panel (canvas,
@@ -768,11 +821,16 @@ select.input {
   overflow: hidden;
 }
 
+/* Shared top header — single, fixed-height bar used across every view.
+   Contains only the breadcrumb (left) and optional actions (right). The
+   page title/description belong to the content area, never the header. */
 .app-header {
   height: var(--header-height);
+  flex-shrink: 0;
   background: var(--color-bg-elevated);
   border-bottom: var(--border-subtle);
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: var(--space-3);
   padding: 0 var(--space-5);
@@ -781,10 +839,51 @@ select.input {
   z-index: var(--z-sticky);
   overflow: hidden;
 }
-.app-header-title {
+.app-header-crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
   flex: 1;
   min-width: 0;
   overflow: hidden;
+}
+.app-header-crumb-link {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: inherit;
+  font-family: inherit;
+  color: var(--color-text-muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.app-header-crumb-link:hover {
+  color: var(--color-accent-primary);
+  background: var(--color-accent-muted);
+}
+.app-header-crumb-current {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  padding: 4px 8px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+.app-header-crumb-sep {
+  color: var(--color-accent-tertiary);
+  flex-shrink: 0;
 }
 .app-header-actions {
   display: flex;
@@ -795,6 +894,33 @@ select.input {
 }
 
 .app-content { flex: 1; padding: var(--space-6); animation: fadeIn var(--transition-normal) ease; }
+
+/* Page intro — title + optional description rendered at the top of the
+   content area (replaces in-header titles). Keeps the sticky header purely
+   navigational. */
+.page-intro {
+  margin-bottom: var(--space-6);
+}
+.page-intro-title {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--color-text-primary);
+  line-height: 1.2;
+  margin: 0;
+}
+.page-intro-description {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin: var(--space-2) 0 0 0;
+}
+.section-description {
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+  margin-bottom: var(--space-5);
+  margin-top: calc(-1 * var(--space-2));
+}
 
 /* ========== SIDEBAR ========== */
 .sidebar-logo {
@@ -861,7 +987,75 @@ select.input {
 .sidebar-item-icon { width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; opacity: 0.7; }
 .sidebar-item:hover .sidebar-item-icon,
 .sidebar-item.active .sidebar-item-icon { opacity: 1; }
+.sidebar-item-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sidebar-footer { padding: var(--space-3); border-top: 1px solid #e2e8f0; background: var(--color-bg-secondary); }
+
+/* Collapse toggle — anchored to the sidebar's right inner border and
+   vertically centered. Protrudes -12px so its midline sits on the border
+   itself; relies on the sidebar's `overflow: visible` and its z-index above
+   the sticky header so the button is never clipped or covered. */
+.sidebar-collapse-toggle {
+  position: absolute;
+  top: 50%;
+  right: -12px;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--color-bg-elevated);
+  border: 1px solid #e2e8f0;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  box-shadow: var(--shadow-sm);
+  transition: color var(--transition-fast), border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
+  /* Keep above the sibling .sidebar-nav scroll container. The parent sidebar
+     already sits above the header, so this is enough to stay topmost. */
+  z-index: 2;
+}
+.sidebar-collapse-toggle:hover {
+  color: var(--color-accent-primary);
+  border-color: var(--color-accent-primary);
+  background: var(--color-bg-elevated);
+  transform: translateY(-50%) scale(1.08);
+}
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
+}
+
+/* ===== Collapsed state ===== */
+.app-sidebar--collapsed .sidebar-logo {
+  justify-content: center;
+  padding: var(--space-4) 0;
+  gap: 0;
+}
+.app-sidebar--collapsed .sidebar-logo-meta { display: none; }
+
+.app-sidebar--collapsed .sidebar-nav { padding: var(--space-3) 6px; }
+.app-sidebar--collapsed .sidebar-section-title { display: none; }
+
+.app-sidebar--collapsed .sidebar-item {
+  justify-content: center;
+  padding: 9px 0;
+  gap: 0;
+}
+.app-sidebar--collapsed .sidebar-item-label { display: none; }
+
+.app-sidebar--collapsed .sidebar-footer { padding: var(--space-2) 6px; }
+.app-sidebar--collapsed .sidebar-user {
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: transparent;
+  border-color: transparent;
+}
+.app-sidebar--collapsed .sidebar-user-meta { display: none; }
+.app-sidebar--collapsed .sidebar-user-avatar { width: 30px; height: 30px; }
+.app-sidebar--collapsed .sidebar-version { display: none; }
 
 /* ========== PROJECT CARDS ========== */
 .project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--space-4); }
@@ -1567,18 +1761,29 @@ select.input {
 .react-flow__edge.inactive {
   pointer-events: all !important;
 }
-/* Invisible handles — dbdiagram style (no circles on rows) */
+/* Invisible handles — dbdiagram style (no circles on rows). Each
+   column row carries four handles (source-left, target-left,
+   source-right, target-right). All four are live drop targets so
+   `CrowsFootEdge` can pick the best anchor at render time and Connect
+   mode lets the user drag from any side. The default look is "barely
+   there" (1px transparent) — they grow on hover or in Connect mode. */
 .dbdiagram-handle.react-flow__handle {
-  width: 1px !important;
-  height: 1px !important;
+  width: 8px !important;
+  height: 8px !important;
   min-width: 0 !important;
   min-height: 0 !important;
   background: transparent !important;
   border: none !important;
   opacity: 0 !important;
-  pointer-events: none;
+  pointer-events: all !important;
   top: 50%;
   transform: translateY(-50%);
+}
+/* `--inactive` is set on the side ELK did NOT choose for this column.
+   Visual: stays hidden by default, slightly more pronounced in Connect
+   mode so the user still sees there's a drop target available. */
+.dbdiagram-handle--inactive.react-flow__handle {
+  opacity: 0 !important;
 }
 .react-flow__controls {
   box-shadow: none !important;
@@ -2082,7 +2287,7 @@ select.input {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   min-width: 0;
 }
 .editor-crumb-muted {
@@ -3035,66 +3240,19 @@ select.input {
 }
 
 /* ============================================================
-   NEW EDITOR HEADER (ed-*) — two well-spaced rows.
-   Replaces the older .editor-header layout for the model editor.
+   EDITOR-SPECIFIC ELEMENTS (ed-*)
+   The model editor and global canvas use the shared <Header /> for the
+   top breadcrumb bar; the toolbar below it lives in `.ed-toolbar`.
+   `.ed-crumb*` styles remain because the global canvas still composes
+   crumb-like markup for its save badge area.
    ============================================================ */
-.ed-header {
-  flex-shrink: 0;
-  background: var(--color-bg-elevated);
-  border-bottom: var(--border-default);
-  display: flex;
-  flex-direction: column;
-  position: sticky;
-  top: 0;
-  z-index: var(--z-sticky);
-}
-.ed-header-row {
-  display: flex;
-  align-items: center;
-  padding: 0 var(--space-5);
-  gap: var(--space-3);
-  min-height: 48px;
-}
-.ed-header-identity {
-  border-bottom: 1px solid #f1f5f9;
-}
-
-.ed-back {
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--color-text-muted);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  flex-shrink: 0;
-}
-.ed-back:hover {
-  background: var(--color-bg-hover);
-  color: var(--color-text-primary);
-  border-color: #e2e8f0;
-}
-
-.ed-breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: var(--space-1);
-  min-width: 0;
-  font-size: var(--text-base);
-  flex-shrink: 1;
-  flex-wrap: wrap;
-}
 .ed-crumb {
   appearance: none;
   background: transparent;
   border: 0;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
-  font-size: var(--text-base);
+  font-size: var(--text-xs);
   color: var(--color-text-muted);
   cursor: default;
   white-space: nowrap;
@@ -3153,8 +3311,6 @@ select.input {
   animation: pulse 1.4s ease-in-out infinite;
 }
 
-.ed-spacer { flex: 1; }
-
 .ed-engine-wrap {
   display: inline-flex;
   align-items: center;
@@ -3169,10 +3325,20 @@ select.input {
   color: var(--color-text-muted);
 }
 
-/* Toolbar row */
-.ed-header-toolbar {
+/* Editor toolbar — standalone strip rendered below the shared header.
+   Sticky underneath the top header so primary actions stay reachable. */
+.ed-toolbar {
+  flex-shrink: 0;
   background: var(--color-bg-surface);
+  border-bottom: var(--border-subtle);
+  display: flex;
+  align-items: center;
   gap: var(--space-2);
+  padding: 0 var(--space-5);
+  min-height: 48px;
+  position: sticky;
+  top: var(--header-height);
+  z-index: calc(var(--z-sticky) - 1);
 }
 .ed-toolbar-spacer { flex: 1; }
 .ed-toolbar-divider {

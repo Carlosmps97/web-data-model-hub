@@ -10,7 +10,7 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import React, { useRef } from 'react';
-import type { GuidelinesUploadResponse } from '@/lib/agent/types';
+import type { GuidelinesUploadResponse } from '../lib/types';
 
 const ACCEPT = '.pdf,.docx,.md,.json,.xlsx,.txt';
 

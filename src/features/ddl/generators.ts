@@ -13,6 +13,7 @@ import type {
   DatabaseEngine,
 } from '@/types/model';
 import { getEngine, resolveSchema } from '@/features/engines/engines';
+import { resolveColumnName } from '@/lib/columnRef';
 import { resolveDataType, quoteIdent, qualifyTable } from './typeMappings';
 
 export interface GenerateOptions {
@@ -370,24 +371,32 @@ function emitForeignKeysFor(
     );
   }
 
-  // Standalone relationships not represented by a column-level FK
+  // Standalone relationships not represented by a column-level FK.
+  // Since the column-id migration, `rel.sourceColumn` / `rel.targetColumn`
+  // hold `TableColumn.id`, not names — resolve to physical names before
+  // emitting SQL. `resolveColumnName` falls back to name-match for any
+  // legacy relationships still keyed by name.
   for (const rel of relationships) {
-    if (rel.sourceTable !== table.name) continue;
+    if (rel.sourceTable !== table.name && rel.sourceTable !== table.id) continue;
+    const srcColName = resolveColumnName(ctx.allTables, rel.sourceTable, rel.sourceColumn);
+    const tgtColName = resolveColumnName(ctx.allTables, rel.targetTable, rel.targetColumn);
+    if (!srcColName || !tgtColName) continue; // orphan — skip silently
+
     const inlineMatch = table.columns.some(
       (c) =>
         c.isForeignKey &&
-        c.name === rel.sourceColumn &&
+        c.name === srcColName &&
         c.foreignKeyRef?.table === rel.targetTable &&
-        c.foreignKeyRef?.column === rel.targetColumn
+        c.foreignKeyRef?.column === tgtColName
     );
     if (inlineMatch) continue;
 
     const targetSchema = ctx.schemaByTableName.get(rel.targetTable) ?? resolveSchema(undefined, engine);
     const targetFq = qualifyTable(targetSchema, rel.targetTable, engine, supportsSchemas);
-    const fkName = `fk_${rel.sourceTable}_${rel.sourceColumn}`;
+    const fkName = `fk_${table.name}_${srcColName}`;
     out.push(
       `ALTER TABLE ${sourceFq} ADD CONSTRAINT ${quoteIdent(fkName, engine)} ` +
-      `FOREIGN KEY (${quoteIdent(rel.sourceColumn, engine)}) REFERENCES ${targetFq}(${quoteIdent(rel.targetColumn, engine)});`
+      `FOREIGN KEY (${quoteIdent(srcColName, engine)}) REFERENCES ${targetFq}(${quoteIdent(tgtColName, engine)});`
     );
   }
 }

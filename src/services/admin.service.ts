@@ -1,11 +1,7 @@
-/**
- * Admin-only service for user management. All methods go through
- * `/api/admin/users`; the backend enforces the admin role, so a
- * non-admin hitting these will get a 403.
- */
-
 import type { AuthUser, Permission, UserRole } from '@/types/auth';
 import { apiDelete, apiGet, apiPost, apiPut } from './http';
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
 
 export interface CreateUserPayload {
   username: string;
@@ -25,18 +21,18 @@ export interface UpdateUserPayload {
 
 export const adminService = {
   async listUsers(): Promise<AuthUser[]> {
-    return apiGet<AuthUser[]>('/api/admin/users');
+    return apiGet<AuthUser[]>(`${API_BASE}/api/admin/users`);
   },
 
   async createUser(payload: CreateUserPayload): Promise<AuthUser> {
-    return apiPost<AuthUser>('/api/admin/users', payload);
+    return apiPost<AuthUser>(`${API_BASE}/api/admin/users`, payload);
   },
 
   async updateUser(id: string, payload: UpdateUserPayload): Promise<AuthUser> {
-    return apiPut<AuthUser>(`/api/admin/users/${encodeURIComponent(id)}`, payload);
+    return apiPut<AuthUser>(`${API_BASE}/api/admin/users/${encodeURIComponent(id)}`, payload);
   },
 
   async deleteUser(id: string): Promise<void> {
-    await apiDelete<void>(`/api/admin/users/${encodeURIComponent(id)}`);
+    await apiDelete<void>(`${API_BASE}/api/admin/users/${encodeURIComponent(id)}`);
   },
 };

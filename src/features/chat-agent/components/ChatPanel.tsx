@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
-import { useAgentConversation } from '@/features/chat-agent/hooks/useAgentConversation';
+import { useAgentConversation } from '../hooks/useAgentConversation';
 import GuidelinesUploader from './GuidelinesUploader';
 import ModelResultBlock from './ModelResultBlock';
 import { AgentDogState } from './AgentDogState';
-import type { ModelingResponse } from '@/lib/agent/types';
+import type { ModelingResponse } from '../lib/types';
 import type { DatabaseEngine } from '@/types/model';
 
 export interface ChatPanelProps {
