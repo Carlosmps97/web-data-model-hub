@@ -55,7 +55,7 @@ export default function ProjectModelsPage({ params }: PageProps) {
   const handleCreateModel = async () => {
     if (!newModelName.trim()) return;
     setCreating(true);
-    const model = await createModel({ projectId, name: newModelName.trim() });
+    const model = await createModel({ projectId, name: newModelName.trim(), engine: 'databricks_sql' });
     setCreating(false);
     if (model) {
       setShowCreateModel(false);
@@ -133,8 +133,7 @@ export default function ProjectModelsPage({ params }: PageProps) {
       <Header
         crumbs={[
           { label: 'Projects', href: '/' },
-          { label: project?.name ?? '…', href: `/projects/${projectId}` },
-          { label: 'Data Models' },
+          { label: project?.name ?? '…' },
         ]}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>

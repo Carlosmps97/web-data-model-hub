@@ -1,5 +1,16 @@
 // Core data model types for Data Model Hub
 
+/**
+ * Metadata tag attached to tables (and inheritable from domain/subdomain defaults).
+ * Tags are key-value pairs — `key` is the facet name (e.g. "owner", "pii", "sla")
+ * and `value` is the concrete classification (e.g. "data-platform", "high", "T1").
+ * Both are free-text; the UI does not enforce a controlled vocabulary.
+ */
+export interface Tag {
+  key: string;
+  value: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -86,7 +97,7 @@ export interface SubdomainDefinition {
   /** Values inherited by tables assigned to this subdomain. */
   defaults?: {
     schema?: string;
-    tags?: string[];
+    tags?: Tag[];
   };
 }
 
@@ -102,7 +113,7 @@ export interface DomainDefinition {
   /** Values inherited by tables assigned to this domain (overridden by subdomain defaults). */
   defaults?: {
     schema?: string;
-    tags?: string[];
+    tags?: Tag[];
   };
 }
 
@@ -212,7 +223,7 @@ export interface TableModel {
   /** IDs into the model's domainCatalog, enabling inheritance of defaults. */
   domainId?: string;
   subdomainId?: string;
-  tags?: string[];
+  tags?: Tag[];
   partition?: PartitionSpec;
   /**
    * Canvas position (in React Flow world coordinates). Persisted by the
@@ -302,30 +313,49 @@ export interface DataModel {
   updatedAt: string;
 }
 
-// Column data type options
+// Column data type options.
+// Aligned with the canonical set in
+// `backend-data-model-hub/src/excel_import/type_normalizer.py::CANONICAL_TYPES`.
+// Anything the user types into Excel is normalised by the backend to one of these
+// (or returned as-is with a "unknown" badge in the preview).
 export const COLUMN_DATA_TYPES = [
+  // Integers
   'integer',
   'bigint',
   'smallint',
+  'tinyint',
+  // Real numbers
   'float',
   'double',
+  'real',
   'decimal',
   'numeric',
+  'money',
+  // Text
   'varchar',
   'char',
   'text',
   'nvarchar',
+  'string',
+  // Boolean
   'boolean',
+  // Time
   'date',
   'datetime',
   'timestamp',
+  'timestamptz',
   'time',
+  // Binary
   'binary',
   'varbinary',
   'blob',
+  'bytes',
+  // Semi-structured
   'json',
+  'jsonb',
   'xml',
   'uuid',
+  // Structured (Spark/Databricks)
   'array',
   'map',
   'struct',

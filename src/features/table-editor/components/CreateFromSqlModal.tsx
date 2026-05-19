@@ -30,8 +30,9 @@ import {
 import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { bracketMatching, indentOnInput } from '@codemirror/language';
 import { sql } from '@codemirror/lang-sql';
-import { COLUMN_DATA_TYPES, type TableModel, type Relationship, type TableColumn } from '@/types/model';
+import { COLUMN_DATA_TYPES, type TableModel, type Relationship, type TableColumn, type Tag } from '@/types/model';
 import { findColumnId } from '@/lib/columnRef';
+import { tagId } from '@/lib/tags';
 import {
   parseSqlToTable,
   type InferredColumn,
@@ -490,12 +491,18 @@ function inferredToColumn(c: InferredColumn): TableColumn {
   };
 }
 
-function mergeTags(cols: InferredColumn[]): string[] | undefined {
-  const all = new Set<string>();
+function mergeTags(cols: InferredColumn[]): Tag[] | undefined {
+  const seen = new Set<string>();
+  const out: Tag[] = [];
   for (const c of cols) {
-    (c.tags ?? []).forEach((t) => all.add(t));
+    (c.tags ?? []).forEach((t) => {
+      const id = tagId(t);
+      if (seen.has(id)) return;
+      seen.add(id);
+      out.push(t);
+    });
   }
-  return all.size ? Array.from(all) : undefined;
+  return out.length ? out : undefined;
 }
 
 function findDuplicateNames(names: string[]): string[] {

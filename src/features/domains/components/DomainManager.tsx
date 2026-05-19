@@ -4,7 +4,8 @@ import React, { useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useModelStore } from '@/store/useModelStore';
 import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
-import type { DomainDefinition, SubdomainDefinition } from '@/types/model';
+import type { DomainDefinition, SubdomainDefinition, Tag } from '@/types/model';
+import { tagId } from '@/lib/tags';
 
 // ─── Palette de colores predefinidos para dominios ─────────────────────────
 const DOMAIN_COLORS = [
@@ -31,8 +32,27 @@ export default function DomainManager({ onClose }: DomainManagerProps) {
   const [editDesc, setEditDesc] = useState('');
   const [editColor, setEditColor] = useState(DOMAIN_COLORS[0]);
   const [editSchema, setEditSchema] = useState('');
-  const [editTags, setEditTags] = useState('');
+  const [editTags, setEditTags] = useState<Tag[]>([]);
+  const [tagKeyDraft, setTagKeyDraft] = useState('');
+  const [tagValueDraft, setTagValueDraft] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+
+  const addEditTag = () => {
+    const k = tagKeyDraft.trim();
+    const v = tagValueDraft.trim();
+    if (!k && !v) return;
+    const next: Tag = { key: k, value: v };
+    if (editTags.some((t) => t.key === next.key && t.value === next.value)) {
+      setTagKeyDraft('');
+      setTagValueDraft('');
+      return;
+    }
+    setEditTags([...editTags, next]);
+    setTagKeyDraft('');
+    setTagValueDraft('');
+  };
+
+  const removeEditTagAt = (idx: number) => setEditTags(editTags.filter((_, i) => i !== idx));
 
   // ── Subdomain form state ───────────────────────────────────────────────
   const [subName, setSubName] = useState('');
@@ -51,7 +71,9 @@ export default function DomainManager({ onClose }: DomainManagerProps) {
     setEditDesc('');
     setEditColor(DOMAIN_COLORS[domainCatalog.length % DOMAIN_COLORS.length]);
     setEditSchema('');
-    setEditTags('');
+    setEditTags([]);
+    setTagKeyDraft('');
+    setTagValueDraft('');
   };
 
   const selectDomain = (d: DomainDefinition) => {
@@ -62,7 +84,9 @@ export default function DomainManager({ onClose }: DomainManagerProps) {
     setEditDesc(d.description ?? '');
     setEditColor(d.color ?? DOMAIN_COLORS[0]);
     setEditSchema(d.defaults?.schema ?? '');
-    setEditTags((d.defaults?.tags ?? []).join(', '));
+    setEditTags(d.defaults?.tags ?? []);
+    setTagKeyDraft('');
+    setTagValueDraft('');
     setSubName('');
     setSubCode('');
     setSubSchema('');
@@ -71,7 +95,7 @@ export default function DomainManager({ onClose }: DomainManagerProps) {
 
   const saveDomain = () => {
     if (!editName.trim()) return;
-    const tags = editTags.split(',').map((t) => t.trim()).filter(Boolean);
+    const tags = editTags;
     if (isAdding) {
       const newDomain: DomainDefinition = {
         id: uuidv4(),
@@ -269,14 +293,62 @@ export default function DomainManager({ onClose }: DomainManagerProps) {
                   </div>
 
                   <div className="dm-section-title" style={{ marginTop: 'var(--space-3)' }}>Defaults heredables</div>
-                  <div className="form-row">
-                    <div className="form-group" style={{ flex: 1 }}>
-                      <label className="input-label">Schema por defecto</label>
-                      <input className="input" placeholder="e.g. bcp_ddv_crm" value={editSchema} onChange={(e) => setEditSchema(e.target.value)} />
-                    </div>
-                    <div className="form-group" style={{ flex: 1 }}>
-                      <label className="input-label">Tags (separados por coma)</label>
-                      <input className="input" placeholder="e.g. crm, campanias" value={editTags} onChange={(e) => setEditTags(e.target.value)} />
+                  <div className="form-group">
+                    <label className="input-label">Schema por defecto</label>
+                    <input className="input" placeholder="e.g. bcp_ddv_crm" value={editSchema} onChange={(e) => setEditSchema(e.target.value)} />
+                  </div>
+                  <div className="form-group">
+                    <label className="input-label">Tags (clave-valor)</label>
+                    <small className="tf-help" style={{ display: 'block', marginBottom: 6 }}>
+                      Se heredan por cada tabla asignada a este dominio.
+                    </small>
+                    {editTags.length > 0 && (
+                      <div className="tag-kv-list">
+                        {editTags.map((t, idx) => (
+                          <span key={`${tagId(t)}-${idx}`} className="tag-chip tag-chip--kv">
+                            {t.key && <span className="tag-chip-key">{t.key}</span>}
+                            {t.key && t.value && <span className="tag-chip-sep">:</span>}
+                            {t.value && <span className="tag-chip-value">{t.value}</span>}
+                            <button
+                              type="button"
+                              className="tag-chip-remove"
+                              onClick={() => removeEditTagAt(idx)}
+                              aria-label="Remove tag"
+                            >
+                              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                              </svg>
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    <div className="tag-kv-row">
+                      <input
+                        className="input tag-kv-input tag-kv-input--key"
+                        type="text"
+                        placeholder="key (e.g. owner)"
+                        value={tagKeyDraft}
+                        onChange={(e) => setTagKeyDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEditTag(); } }}
+                      />
+                      <span className="tag-kv-sep">=</span>
+                      <input
+                        className="input tag-kv-input tag-kv-input--value"
+                        type="text"
+                        placeholder="value (e.g. crm)"
+                        value={tagValueDraft}
+                        onChange={(e) => setTagValueDraft(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEditTag(); } }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={addEditTag}
+                        disabled={!tagKeyDraft.trim() && !tagValueDraft.trim()}
+                      >
+                        Add
+                      </button>
                     </div>
                   </div>
 

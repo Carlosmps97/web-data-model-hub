@@ -28,6 +28,7 @@ export interface CreateModelRequest {
   projectId: string;
   name: string;
   description?: string;
+  engine?: DataModel['engine'];
   tables?: DataModel['tables'];
   relationships?: DataModel['relationships'];
 }
