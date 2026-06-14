@@ -3,15 +3,13 @@
 /**
  * /login — standalone page outside AppLayout.
  *
- * The `?next=<encoded-path>` query param (set by the middleware when
- * it redirects an unauthenticated request) tells us where to send the
- * user after a successful login. We only honour same-origin relative
- * paths; anything else falls back to `/`.
+ * `?next=<encoded-path>` (set by the proxy on redirect) tells us where to send
+ * the user after login. Only same-origin relative paths are honoured.
  */
 
 import React, { Suspense, useCallback, useEffect, useState } from 'react';
-import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
+import Icon from '@/components/ui/Icon';
 import { useAuthStore } from '@/store/useAuthStore';
 import type { ApiError } from '@/services';
 
@@ -21,12 +19,14 @@ function sanitizeNext(next: string | null): string {
   return next;
 }
 
-// Next.js 16 requires `useSearchParams()` to be wrapped in a Suspense
-// boundary so the login page can be statically pre-rendered. Fallback
-// renders an empty shell while the search params hydrate on the client.
+const shellStyle: React.CSSProperties = {
+  minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+  padding: 24, background: 'linear-gradient(180deg, var(--primary-soft), var(--bg))',
+};
+
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="login-shell" />}>
+    <Suspense fallback={<div style={shellStyle} />}>
       <LoginForm />
     </Suspense>
   );
@@ -43,87 +43,48 @@ function LoginForm() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // If the user is already authenticated (navigated here manually),
-  // send them to their destination immediately.
-  useEffect(() => {
-    if (user) router.replace(sanitizeNext(search.get('next')));
-  }, [user, router, search]);
+  useEffect(() => { if (user) router.replace(sanitizeNext(search.get('next'))); }, [user, router, search]);
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      setError(null);
-      setBusy(true);
-      try {
-        await login(username, password);
-        router.replace(sanitizeNext(search.get('next')));
-      } catch (err) {
-        const apiErr = err as ApiError;
-        setError(apiErr?.message ?? 'No se pudo iniciar sesión.');
-      } finally {
-        setBusy(false);
-      }
-    },
-    [username, password, login, router, search],
-  );
+  const handleSubmit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      await login(username, password);
+      router.replace(sanitizeNext(search.get('next')));
+    } catch (err) {
+      setError((err as ApiError)?.message ?? 'No se pudo iniciar sesión.');
+    } finally {
+      setBusy(false);
+    }
+  }, [username, password, login, router, search]);
 
   return (
-    <div className="login-shell">
-      <div className="login-card">
-        <div className="login-brand">
-          <Image
-            src="/logo-dog.png"
-            alt="Modeler"
-            width={56}
-            height={56}
-            priority
-            style={{ borderRadius: 12 }}
-          />
+    <div style={shellStyle}>
+      <div className="rd-card" style={{ width: 400, maxWidth: '100%', padding: 32 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
+          <span style={{ width: 48, height: 48, borderRadius: 'var(--r)', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Icon name="database" size={24} />
+          </span>
           <div>
-            <h1 className="login-title">Data Model Hub</h1>
-            <p className="login-subtitle">
-              Ingresa tus credenciales para continuar.
-            </p>
+            <h1 className="rd-h2" style={{ marginBottom: 2 }}>Data Model Hub</h1>
+            <p className="rd-small">Ingresa tus credenciales para continuar.</p>
           </div>
         </div>
 
-        <form className="login-form" onSubmit={handleSubmit} autoComplete="on">
-          <label className="login-label" htmlFor="login-username">
-            Usuario
-          </label>
-          <input
-            id="login-username"
-            className="input"
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            autoComplete="username"
-            autoFocus
-            required
-            disabled={busy}
-          />
+        <form onSubmit={handleSubmit} autoComplete="on">
+          <div style={{ marginBottom: 14 }}>
+            <label className="rd-label" htmlFor="login-username">Usuario</label>
+            <input id="login-username" className="rd-input" type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus required disabled={busy} />
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <label className="rd-label" htmlFor="login-password">Contraseña</label>
+            <input id="login-password" className="rd-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required disabled={busy} />
+          </div>
 
-          <label className="login-label" htmlFor="login-password">
-            Contraseña
-          </label>
-          <input
-            id="login-password"
-            className="input"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
-            required
-            disabled={busy}
-          />
+          {error && <div className="rd-small" style={{ color: 'var(--error)', marginBottom: 12 }}>{error}</div>}
 
-          {error && <div className="login-error">{error}</div>}
-
-          <button
-            type="submit"
-            className="btn btn-primary login-submit"
-            disabled={busy || !username || !password}
-          >
+          <button type="submit" className="rd-btn rd-btn-primary rd-btn-lg" style={{ width: '100%' }} disabled={busy || !username || !password}>
             {busy ? 'Ingresando…' : 'Ingresar'}
           </button>
         </form>

@@ -10,38 +10,19 @@
 export type UserRole = 'admin' | 'editor' | 'viewer';
 
 /**
- * A single permission grant. `admin` users do not use this list — they
- * have implicit access to everything. `editor` / `viewer` users must
- * have at least one matching grant to access a project or model.
- *
- *   - `project` scope: access to the project AND every model inside it.
- *   - `model`   scope: access to a single model (plus implicit read of
- *                      its parent project's metadata).
- *
- * The `level` determines what the user can do within that scope:
- *   - `view`  → read-only
- *   - `edit`  → full read + write
- *
- * A user's effective level for a resource is the MAX across all
- * matching grants. E.g. a grant of `view` at project-level plus `edit`
- * at model-level gives `edit` for that model but `view` for its
- * siblings.
+ * A single permission grant, scoped to a project. `admin` users do not use
+ * this list — they have implicit access to everything. `editor` / `viewer`
+ * users must have at least one matching grant to access a project (which in
+ * the project-centric model is the unit of access — there's one canvas per
+ * project). `level` is `view` (read-only) or `edit` (read + write); the
+ * effective level for a project is the MAX across matching grants.
  */
 export type PermissionLevel = 'view' | 'edit';
 
-export type Permission =
-  | {
-      scope: 'project';
-      projectId: string;
-      level: PermissionLevel;
-    }
-  | {
-      scope: 'model';
-      /** The parent project — needed so the UI can surface the project. */
-      projectId: string;
-      modelId: string;
-      level: PermissionLevel;
-    };
+export interface Permission {
+  projectId: string;
+  level: PermissionLevel;
+}
 
 /**
  * User record as stored in Cosmos DB's `users` collection.

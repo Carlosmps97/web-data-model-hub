@@ -77,42 +77,13 @@ export const ENGINES: EngineDefinition[] = [
   },
 ];
 
-/**
- * Legacy engines kept reachable by `getEngine` so old saved models still
- * render with a meaningful badge. Hidden from the picker.
- */
-const LEGACY_ENGINES: EngineDefinition[] = [
-  {
-    id: 'databricks', label: 'Databricks (legacy)', shortLabel: 'Databricks',
-    color: '#ff3621', bg: 'rgba(255, 54, 33, 0.08)',
-    defaultSchema: 'default', supportsSchemas: true,
-    partitionStrategies: ['NONE', 'RANGE', 'LIST', 'BUCKET'],
-    supportsClustering: true,
-    partitionHint: 'Legacy alias of databricks_sql (auto-migrated on read).',
-    legacy: true,
-  },
-  {
-    id: 'oracle', label: 'Oracle (legacy)', shortLabel: 'Oracle',
-    color: '#c54138', bg: 'rgba(197, 65, 56, 0.08)',
-    defaultSchema: 'HR', supportsSchemas: true,
-    partitionStrategies: ['NONE', 'RANGE', 'LIST', 'HASH'],
-    supportsClustering: false,
-    partitionHint: 'PARTITION BY (RANGE | LIST | HASH) (column). DDL kept for compatibility.',
-    legacy: true,
-  },
-];
-
-const ENGINE_MAP = new Map<DatabaseEngine, EngineDefinition>([
-  ...ENGINES.map((e) => [e.id, e] as const),
-  ...LEGACY_ENGINES.map((e) => [e.id, e] as const),
-]);
+const ENGINE_MAP = new Map<DatabaseEngine, EngineDefinition>(
+  ENGINES.map((e) => [e.id, e] as const),
+);
 
 /**
- * Look up an engine definition.
- *
- * Returns a definition for both pickable and legacy engines. Returns
- * `undefined` only when `id` is null/undefined or unknown — callers
- * should treat that as "engine not set".
+ * Look up an engine definition. Returns `undefined` when `id` is
+ * null/undefined or unknown — callers should treat that as "engine not set".
  */
 export function getEngine(id: DatabaseEngine | undefined | null): EngineDefinition | undefined {
   if (!id) return undefined;

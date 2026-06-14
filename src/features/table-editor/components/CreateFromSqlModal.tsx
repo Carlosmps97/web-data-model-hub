@@ -1,525 +1,147 @@
 'use client';
 
-/**
- * CreateFromSqlModal — crea una nueva tabla (y opcionalmente relaciones
- * FK entre sus fuentes) a partir de una consulta SQL escrita por el
- * usuario.
- *
- * Flujo:
- *   1. El usuario pega o escribe un `SELECT …` o `CREATE TABLE … AS SELECT …`.
- *   2. Al "Parse", el parser (`sqlToTable.ts`) infiere:
- *        - nombre de la tabla (si vino en un CTAS)
- *        - columnas (directas heredadas vs computadas)
- *        - joins (propuestas de relaciones FK entre tablas fuente)
- *   3. El usuario revisa el preview, puede editar cada columna
- *      (nombre/tipo/descripción) y tildar qué relaciones crear.
- *   4. "Create table" emite `{ table, relationships }` al llamador,
- *      que decide cómo persistirlas (usualmente a través del store).
- *
- * Este modal *no* habla con el backend — no sabe si existe store o
- * servicio. Sólo parsea, presenta y emite objetos `TableModel` +
- * `Relationship`. La página/feature de hosting lo integra al modelo.
- */
-
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import { EditorState, Compartment } from '@codemirror/state';
-import {
-  EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection,
-} from '@codemirror/view';
-import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
-import { bracketMatching, indentOnInput } from '@codemirror/language';
-import { sql } from '@codemirror/lang-sql';
-import { COLUMN_DATA_TYPES, type TableModel, type Relationship, type TableColumn, type Tag } from '@/types/model';
-import { findColumnId } from '@/lib/columnRef';
-import { tagId } from '@/lib/tags';
-import {
-  parseSqlToTable,
-  type InferredColumn,
-  type InferredJoin,
-  type ParsedSqlResult,
-} from '../utils/sqlToTable';
-
-// ─── Props ────────────────────────────────────────────────────────
+import React, { useState } from 'react';
+import Icon from '@/components/ui/Icon';
+import type { Table, ModelLevel, Domain, Relationship } from '@/types/model';
+import type { Scope } from '@/lib/hierarchy';
+import { findLayer } from '@/lib/hierarchy';
+import { tableFromSources } from '@/features/diagram/builders';
 
 interface CreateFromSqlModalProps {
-  isOpen: boolean;
-  /** All tables currently in the model — used to resolve SQL aliases. */
-  existingTables: TableModel[];
-  /** Called when the user confirms creation. The host decides how to
-   *  persist; usually `addTable(table)` and one `addRelationship(r)`
-   *  per item in `relationships`. */
-  onCreate: (payload: { table: TableModel; relationships: Relationship[] }) => void;
-  onCancel: () => void;
+  tables: Table[];
+  scope: Scope;
+  isInScope: (t: Table) => boolean;
+  layers: ModelLevel[];
+  domains: Domain[];
+  onClose: () => void;
+  onCreate: (built: { table: Table; rels: Relationship[] }) => void;
+  pushToast: (msg: string, type?: 'err') => void;
 }
 
-// ─── Defaults ─────────────────────────────────────────────────────
+export default function CreateFromSqlModal({ tables, scope, isInScope, layers, domains, onClose, onCreate, pushToast }: CreateFromSqlModalProps) {
+  const [sources, setSources] = useState<string[]>([]);
+  const [picks, setPicks] = useState<Set<string>>(() => new Set());
+  const [srcQuery, setSrcQuery] = useState('');
+  const [colQuery, setColQuery] = useState('');
+  const [srcScope, setSrcScope] = useState<'scope' | 'all'>('scope');
+  const [name, setName] = useState('');
+  const [layer, setLayer] = useState(scope.layers.length === 1 ? scope.layers[0] : layers[0]?.id ?? '');
+  const [schema, setSchema] = useState(scope.layers.length === 1 ? scope.layers[0] : layers[0]?.id ?? '');
+  const [domain, setDomain] = useState(scope.domains.length === 1 ? scope.domains[0] : domains[0]?.id ?? '');
+  const [link, setLink] = useState(true);
 
-const SQL_EXAMPLE = `-- Ejemplo: crea HD_CLIENTE_ENRIQUECIDO a partir de HD_CLIENTE
--- y HD_SEGMENTO, heredando columnas directas + columna calculada.
---
--- Puedes escribir un SELECT aislado o un CREATE TABLE ... AS SELECT.
+  const srcTables = sources.map((id) => tables.find((t) => t.id === id)).filter((t): t is Table => !!t);
 
-SELECT
-  c.id_cliente,
-  c.nombre,
-  c.fec_nacimiento,
-  s.nombre        AS segmento,
-  CASE
-    WHEN c.saldo > 1000 THEN 'PREMIUM'
-    ELSE 'BASICO'
-  END            AS tier,
-  CAST(c.saldo AS DECIMAL(18,2)) AS saldo_normalizado
-FROM HD_CLIENTE c
-LEFT JOIN HD_SEGMENTO s ON c.id_segmento = s.id
-`;
-
-// ─── Component ────────────────────────────────────────────────────
-
-export default function CreateFromSqlModal({
-  isOpen,
-  existingTables,
-  onCreate,
-  onCancel,
-}: CreateFromSqlModalProps) {
-  const [sqlText, setSqlText] = useState<string>(SQL_EXAMPLE);
-  const [parsed, setParsed] = useState<ParsedSqlResult | null>(null);
-  // Editable overlay on top of the parse result. We never mutate the
-  // `parsed` object itself — all user edits live here and are merged at
-  // submit time. Keyed by column index.
-  const [tableName, setTableName] = useState<string>('');
-  const [columnOverrides, setColumnOverrides] = useState<Record<number, Partial<InferredColumn>>>({});
-  const [joinChoices, setJoinChoices] = useState<Record<number, boolean>>({});
-  const [submitError, setSubmitError] = useState<string | null>(null);
-
-  // Reset state every time the modal re-opens. We use the "derive state
-  // from props" pattern instead of useEffect to avoid an extra render.
-  const [prevOpen, setPrevOpen] = useState(isOpen);
-  if (isOpen !== prevOpen) {
-    setPrevOpen(isOpen);
-    if (isOpen) {
-      setSqlText(SQL_EXAMPLE);
-      setParsed(null);
-      setTableName('');
-      setColumnOverrides({});
-      setJoinChoices({});
-      setSubmitError(null);
+  const toggleSource = (id: string) => {
+    if (sources.includes(id)) {
+      const t = tables.find((x) => x.id === id);
+      if (t) setPicks((p) => { const n = new Set(p); t.columns.forEach((c) => n.delete(c.id)); return n; });
+      setSources((s) => s.filter((x) => x !== id));
+      return;
     }
-  }
+    if (sources.length >= 2) { pushToast('Elige máximo 2 tablas fuente', 'err'); return; }
+    setSources((s) => [...s, id]);
+  };
+  const togglePick = (cid: string) => setPicks((p) => { const n = new Set(p); if (n.has(cid)) n.delete(cid); else n.add(cid); return n; });
+  const allOn = (t: Table) => t.columns.every((c) => picks.has(c.id));
+  const selectAll = (t: Table) => setPicks((p) => { const n = new Set(p); const on = t.columns.every((c) => n.has(c.id)); t.columns.forEach((c) => (on ? n.delete(c.id) : n.add(c.id))); return n; });
 
-  // ── CodeMirror SQL editor ────────────────────────────────────────
-  const editorHostRef = useRef<HTMLDivElement | null>(null);
-  const editorViewRef = useRef<EditorView | null>(null);
-  // Mirror `sqlText` into a ref so the mount effect — which must only
-  // run when `isOpen` flips — can read the freshest value without
-  // pulling `sqlText` into its dependency array (that would recreate
-  // the whole editor on every keystroke).
-  const sqlTextRef = useRef(sqlText);
-  useEffect(() => {
-    sqlTextRef.current = sqlText;
-  });
-
-  useEffect(() => {
-    if (!isOpen) return;
-    if (!editorHostRef.current) return;
-    if (editorViewRef.current) return;
-
-    const onDocChange = EditorView.updateListener.of((update) => {
-      if (!update.docChanged) return;
-      setSqlText(update.state.doc.toString());
+  const create = () => {
+    const built = tableFromSources(srcTables, picks, {
+      name: name.trim(), schema, layer, domain, subdomain: '',
+      color: domains.find((dm) => dm.id === domain)?.color, link,
     });
-
-    const view = new EditorView({
-      state: EditorState.create({
-        doc: sqlTextRef.current,
-        extensions: [
-          lineNumbers(),
-          highlightActiveLine(),
-          highlightActiveLineGutter(),
-          drawSelection(),
-          history(),
-          bracketMatching(),
-          indentOnInput(),
-          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
-          EditorView.lineWrapping,
-          sql(),
-          new Compartment().of([]),
-          onDocChange,
-        ],
-      }),
-      parent: editorHostRef.current,
-    });
-    editorViewRef.current = view;
-
-    return () => {
-      view.destroy();
-      editorViewRef.current = null;
-    };
-  }, [isOpen]);
-
-  // ── Parse handler ────────────────────────────────────────────────
-  const handleParse = useCallback(() => {
-    const result = parseSqlToTable(sqlText, existingTables);
-    setParsed(result);
-    setColumnOverrides({});
-    setTableName(result.tableName ?? '');
-    // Tick every inferred join by default — the user unticks what they
-    // don't want rather than starting from scratch.
-    const choices: Record<number, boolean> = {};
-    result.joins.forEach((_, i) => { choices[i] = true; });
-    setJoinChoices(choices);
-    setSubmitError(null);
-  }, [sqlText, existingTables]);
-
-  // ── Resolve effective columns (parsed + user overrides) ──────────
-  const effectiveColumns = useMemo(() => {
-    if (!parsed) return [] as InferredColumn[];
-    return parsed.columns.map((c, idx) => ({ ...c, ...columnOverrides[idx] }));
-  }, [parsed, columnOverrides]);
-
-  const effectiveJoins = useMemo(() => {
-    if (!parsed) return [] as InferredJoin[];
-    return parsed.joins.filter((_, idx) => joinChoices[idx] !== false);
-  }, [parsed, joinChoices]);
-
-  const patchColumn = useCallback((idx: number, patch: Partial<InferredColumn>) => {
-    setColumnOverrides((prev) => ({ ...prev, [idx]: { ...prev[idx], ...patch } }));
-  }, []);
-
-  // ── Submit ───────────────────────────────────────────────────────
-  const handleCreate = useCallback(() => {
-    if (!parsed) return;
-    const trimmedName = tableName.trim();
-    if (!trimmedName) {
-      setSubmitError('El nombre de la tabla es obligatorio.');
-      return;
-    }
-    if (/\s/.test(trimmedName)) {
-      setSubmitError('El nombre de la tabla no puede contener espacios.');
-      return;
-    }
-    const clash = existingTables.find(
-      (t) => t.name.toLowerCase() === trimmedName.toLowerCase(),
-    );
-    if (clash) {
-      setSubmitError(`Ya existe una tabla con el nombre "${clash.name}".`);
-      return;
-    }
-    if (effectiveColumns.length === 0) {
-      setSubmitError('La tabla debe tener al menos una columna.');
-      return;
-    }
-    const dupes = findDuplicateNames(effectiveColumns.map((c) => c.name));
-    if (dupes.length) {
-      setSubmitError(`Columnas con nombre duplicado: ${dupes.join(', ')}.`);
-      return;
-    }
-
-    // Build the TableModel. Inherit domain/subdomain/tags from the
-    // first direct column that had them (that's the best signal we
-    // have for "what domain does this new table belong to").
-    const originColumn = effectiveColumns.find((c) => c.domainId);
-    const newTable: TableModel = {
-      id: uuidv4(),
-      name: trimmedName,
-      columns: effectiveColumns.map(inferredToColumn),
-      functionalDefinition: `Created from SQL on ${new Date().toISOString().slice(0, 10)}.`,
-      domainId: originColumn?.domainId,
-      subdomainId: originColumn?.subdomainId,
-      tags: mergeTags(effectiveColumns),
-    };
-
-    // Build relationships. These run between *source* tables (what the
-    // SQL JOINed together) — the new table being created here never
-    // appears in the edge. The join parser emits column *names*
-    // (leftColumn / rightColumn); we resolve them to the stable
-    // `TableColumn.id` in `existingTables` so the canvas edges survive
-    // subsequent column renames. Joins whose columns can't be resolved
-    // are dropped with a console warning rather than silently pointing
-    // at a non-existent handle.
-    const newRelationships: Relationship[] = [];
-    for (const j of effectiveJoins) {
-      const srcColId = findColumnId(existingTables, j.leftTable, j.leftColumn);
-      const tgtColId = findColumnId(existingTables, j.rightTable, j.rightColumn);
-      if (!srcColId || !tgtColId) {
-        console.warn(
-          `[CreateFromSql] skipping relationship ${j.leftTable}.${j.leftColumn} → ` +
-            `${j.rightTable}.${j.rightColumn}: column id not found`,
-        );
-        continue;
-      }
-      newRelationships.push({
-        id: uuidv4(),
-        sourceTable: j.leftTable,
-        sourceColumn: srcColId,
-        targetTable: j.rightTable,
-        targetColumn: tgtColId,
-        type: 'one-to-many',
-      });
-    }
-
-    onCreate({ table: newTable, relationships: newRelationships });
-  }, [parsed, tableName, effectiveColumns, effectiveJoins, existingTables, onCreate]);
-
-  if (!isOpen) return null;
-
-  const canParse = sqlText.trim().length > 0;
-  const hasParseResult = parsed !== null;
+    if (tables.some((x) => x.id === built.table.id)) { pushToast('Ya existe una tabla con ese nombre', 'err'); return; }
+    onCreate(built);
+  };
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div
-        className="modal-content modal-large animate-scaleIn sql-create-modal"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <div>
-            <h3>Crear tabla desde SQL</h3>
-            <p className="sql-create-subtitle">
-              Escribe un <code>SELECT</code> o <code>CREATE TABLE … AS SELECT</code>;
-              las columnas que referencien tablas existentes heredan tipo, descripción,
-              dominio y tags.
-            </p>
+    <div className="dmh-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="dmh-modal lg">
+        <div className="m-head">
+          <span className="ico"><Icon name="database" size={16} /></span>
+          <div className="m-title"><div className="t">Nueva tabla desde existentes</div><div className="s">Hereda columnas de hasta 2 tablas padre — sin redeclararlas</div></div>
+          <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" onClick={onClose}><Icon name="x" size={15} /></button>
+        </div>
+        <div className="m-body" style={{ display: 'flex', gap: 0, padding: 0, minHeight: 360 }}>
+          <div style={{ width: 232, flexShrink: 0, borderRight: '1px solid var(--border-soft)', padding: 14, overflowY: 'auto' }}>
+            <div className="rd-label" style={{ marginBottom: 9 }}>Tablas fuente · {sources.length}/2</div>
+            <div className="rd-seg" style={{ width: '100%', marginBottom: 9, padding: 2 }}>
+              <button className={srcScope === 'scope' ? 'active' : ''} style={{ flex: 1, justifyContent: 'center', padding: '5px 8px', fontSize: 11 }} onClick={() => setSrcScope('scope')}>En scope</button>
+              <button className={srcScope === 'all' ? 'active' : ''} style={{ flex: 1, justifyContent: 'center', padding: '5px 8px', fontSize: 11 }} onClick={() => setSrcScope('all')}>Todas</button>
+            </div>
+            <div className="rd-search" style={{ marginBottom: 9 }}><Icon name="search" size={14} /><input className="rd-input" style={{ padding: '7px 10px 7px 32px', fontSize: 12 }} placeholder="Buscar tablas…" value={srcQuery} onChange={(e) => setSrcQuery(e.target.value)} /></div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {tables.filter((t) => (srcScope === 'all' || isInScope(t)) && (!srcQuery || t.name.toLowerCase().includes(srcQuery.toLowerCase()))).map((t) => {
+                const on = sources.includes(t.id);
+                const dis = !on && sources.length >= 2;
+                return (
+                  <button key={t.id} className="fs-src" data-on={on} disabled={dis} style={{ opacity: dis ? 0.4 : 1 }} onClick={() => toggleSource(t.id)}>
+                    <span className="fs-check">{on && <Icon name="check" size={12} sw={3} />}</span>
+                    <span style={{ flex: 1, textAlign: 'left', fontWeight: 600 }}>{t.name}</span>
+                    {t.layer && <span className="ed-layer-pill" style={{ fontSize: 8.5 }}>{findLayer(layers, t.layer)?.name ?? t.layer}</span>}
+                    <span className="rd-small">{t.columns.length}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          <button className="btn btn-ghost btn-icon" onClick={onCancel} type="button" title="Close">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
+          <div style={{ flex: 1, padding: '14px 16px', overflowY: 'auto' }}>
+            {srcTables.length === 0 ? (
+              <div className="dmh-empty" style={{ padding: '70px 10px' }}><div className="ico"><Icon name="columns" size={40} /></div>Elige una tabla fuente para escoger qué columnas heredar.</div>
+            ) : (
+              <>
+                <div className="rd-search" style={{ marginBottom: 12 }}><Icon name="search" size={14} /><input className="rd-input" style={{ padding: '7px 10px 7px 32px', fontSize: 12 }} placeholder="Buscar columnas en las fuentes…" value={colQuery} onChange={(e) => setColQuery(e.target.value)} /></div>
+                {srcTables.map((t) => {
+                  const shown = t.columns.filter((c) => !colQuery || c.name.toLowerCase().includes(colQuery.toLowerCase()));
+                  if (!shown.length) return null;
+                  return (
+                    <div key={t.id} style={{ marginBottom: 16 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
+                        <span className="rd-badge rd-badge-primary"><Icon name="table" size={11} />{t.schema}.{t.name}</span>
+                        <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ marginLeft: 'auto', padding: '4px 8px' }} onClick={() => selectAll(t)}>{allOn(t) ? 'Quitar todo' : 'Seleccionar todo'}</button>
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        {shown.map((c) => {
+                          const k = c.isPrimaryKey ? 'PK' : c.isForeignKey ? 'FK' : c.isSurrogateKey ? 'SK' : c.isPartitionKey ? 'PT' : '';
+                          const on = picks.has(c.id);
+                          return (
+                            <button key={c.id} type="button" className="fs-col" data-on={on} onClick={() => togglePick(c.id)}>
+                              <span className="fs-check">{on && <Icon name="check" size={12} sw={3} />}</span>
+                              {k ? <span className={`rd-key ${k.toLowerCase()}`}>{k}</span> : <span className="rd-key none"><span className="d" /></span>}
+                              <span style={{ flex: 1, fontWeight: 600, fontSize: 12.5, textAlign: 'left' }}>{c.name}</span>
+                              <span className="rd-mono" style={{ fontSize: 10.5, color: 'var(--muted)' }}>{c.dataType}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
         </div>
-
-        <div className="modal-body sql-create-body">
-          {/* SQL editor */}
-          <section className="sql-create-section">
-            <label className="sql-create-label">SQL</label>
-            <div ref={editorHostRef} className="sql-create-editor" />
-            <div className="sql-create-actions">
-              <button
-                type="button"
-                className="btn btn-primary btn-sm"
-                onClick={handleParse}
-                disabled={!canParse}
-              >
-                Parsear SQL
-              </button>
-            </div>
-          </section>
-
-          {/* Errors + warnings */}
-          {hasParseResult && parsed.errors.length > 0 && (
-            <div className="sql-create-errors">
-              {parsed.errors.map((e, i) => (
-                <div key={i} className="sql-create-error">{e}</div>
-              ))}
-            </div>
-          )}
-          {hasParseResult && parsed.warnings.length > 0 && (
-            <div className="sql-create-warnings">
-              {parsed.warnings.map((w, i) => (
-                <div key={i} className="sql-create-warning">{w}</div>
-              ))}
-            </div>
-          )}
-
-          {/* Preview */}
-          {hasParseResult && parsed.success && (
-            <>
-              <section className="sql-create-section">
-                <label className="sql-create-label" htmlFor="sql-create-name">
-                  Nombre de la tabla
-                </label>
-                <input
-                  id="sql-create-name"
-                  className="input"
-                  type="text"
-                  value={tableName}
-                  onChange={(e) => setTableName(e.target.value)}
-                  placeholder="Ej: HD_CLIENTE_ENRIQUECIDO"
-                />
-              </section>
-
-              <section className="sql-create-section">
-                <div className="sql-create-section-header">
-                  <label className="sql-create-label">
-                    Columnas ({effectiveColumns.length})
-                  </label>
-                  <span className="sql-create-legend">
-                    <span className="sql-create-kind is-direct">directa</span>
-                    <span className="sql-create-kind is-wildcard">wildcard</span>
-                    <span className="sql-create-kind is-expression">computada</span>
-                  </span>
-                </div>
-                <div className="sql-create-columns">
-                  {effectiveColumns.map((col, idx) => (
-                    <ColumnRow
-                      key={idx}
-                      col={col}
-                      onPatch={(patch) => patchColumn(idx, patch)}
-                    />
-                  ))}
-                </div>
-              </section>
-
-              {parsed.joins.length > 0 && (
-                <section className="sql-create-section">
-                  <label className="sql-create-label">
-                    Relaciones inferidas ({parsed.joins.length})
-                  </label>
-                  <p className="sql-create-help">
-                    Se crearán como 1:N entre las tablas fuente. Destildá las que no quieras.
-                  </p>
-                  <div className="sql-create-joins">
-                    {parsed.joins.map((j, idx) => (
-                      <label key={idx} className="sql-create-join">
-                        <input
-                          type="checkbox"
-                          checked={joinChoices[idx] !== false}
-                          onChange={(e) =>
-                            setJoinChoices((prev) => ({ ...prev, [idx]: e.target.checked }))
-                          }
-                        />
-                        <span>
-                          <code>{j.leftTable}.{j.leftColumn}</code>
-                          <span className="sql-create-join-arrow"> → </span>
-                          <code>{j.rightTable}.{j.rightColumn}</code>
-                          <span className="sql-create-join-type"> ({j.joinType} JOIN)</span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </>
-          )}
-
-          {submitError && <div className="sql-create-error">{submitError}</div>}
+        <div style={{ padding: '12px 18px', borderTop: '1px solid var(--border-soft)', display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 130 }}><span className="rd-label">Nombre</span><input className="rd-input" value={name} placeholder="ej. f_saldo_cliente" onChange={(e) => setName(e.target.value)} /></div>
+          <div style={{ width: 96 }}><span className="rd-label">Schema</span><input className="rd-input" value={schema} onChange={(e) => setSchema(e.target.value)} /></div>
+          <div style={{ width: 120 }}><span className="rd-label">Modelo</span>
+            <div className="dmh-select"><select className="rd-input" value={layer} onChange={(e) => setLayer(e.target.value)}>{layers.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}</select><Icon name="chevD" size={13} className="chev" /></div>
+          </div>
+          <div style={{ width: 120 }}><span className="rd-label">Dominio</span>
+            <div className="dmh-select"><select className="rd-input" value={domain} onChange={(e) => setDomain(e.target.value)}>{domains.map((dm) => <option key={dm.id} value={dm.id}>{dm.name}</option>)}</select><Icon name="chevD" size={13} className="chev" /></div>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', paddingBottom: 9 }}>
+            <span className={`rd-toggle${link ? ' on' : ''}`} style={{ transform: 'scale(.85)' }} onClick={(e) => { e.preventDefault(); setLink((v) => !v); }} />
+            <span className="rd-small" style={{ maxWidth: 110 }}>Mantener relación a las tablas padre</span>
+          </label>
         </div>
-
-        <div className="modal-footer">
-          <button type="button" className="btn btn-secondary" onClick={onCancel}>
-            Cancelar
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleCreate}
-            disabled={!hasParseResult || !parsed.success}
-          >
-            Crear tabla
-          </button>
+        <div className="m-foot">
+          <span className="rd-small left">{picks.size} columnas seleccionadas</span>
+          <button className="rd-btn rd-btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="rd-btn rd-btn-primary" disabled={!name.trim() || picks.size === 0} onClick={create}><Icon name="check" size={14} sw={2.6} />Crear tabla</button>
         </div>
       </div>
     </div>
   );
-}
-
-// ─── Sub-components ───────────────────────────────────────────────
-
-interface ColumnRowProps {
-  col: InferredColumn;
-  onPatch: (patch: Partial<InferredColumn>) => void;
-}
-
-function ColumnRow({ col, onPatch }: ColumnRowProps) {
-  const kindLabel: Record<InferredColumn['kind'], string> = {
-    direct: 'directa',
-    wildcard: 'wildcard',
-    expression: 'computada',
-  };
-  return (
-    <div className={`sql-create-column is-${col.kind}`}>
-      <span className={`sql-create-kind is-${col.kind}`}>{kindLabel[col.kind]}</span>
-      <input
-        className="input sql-create-column-name"
-        type="text"
-        value={col.name}
-        onChange={(e) => onPatch({ name: e.target.value })}
-        placeholder="column_name"
-      />
-      <select
-        className="input sql-create-column-type"
-        value={normaliseTypeForSelect(col.dataType)}
-        onChange={(e) => onPatch({ dataType: e.target.value })}
-      >
-        {/* Preserve the inferred type even when it's not in the canonical
-            list (e.g. `DECIMAL(18,2)`), by rendering it as the first
-            option. */}
-        {!COLUMN_DATA_TYPES.some((t) => t.toUpperCase() === normaliseTypeForSelect(col.dataType)) && (
-          <option value={normaliseTypeForSelect(col.dataType)}>
-            {col.dataType}
-          </option>
-        )}
-        {COLUMN_DATA_TYPES.map((t) => (
-          <option key={t} value={t.toUpperCase()}>{t}</option>
-        ))}
-      </select>
-      <input
-        className="input sql-create-column-desc"
-        type="text"
-        value={col.functionalDefinition ?? ''}
-        onChange={(e) => onPatch({ functionalDefinition: e.target.value })}
-        placeholder="Descripción funcional (opcional)"
-      />
-      <span className="sql-create-column-origin" title={col.explanation}>
-        {col.sourceRef ? (
-          <code>{col.sourceRef.tableName}.{col.sourceRef.columnName}</code>
-        ) : (
-          <em>{truncate(col.rawExpression, 40)}</em>
-        )}
-      </span>
-    </div>
-  );
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────
-
-function inferredToColumn(c: InferredColumn): TableColumn {
-  // Strip the `(length[,scale])` suffix from the type; the base type
-  // lives in `dataType` and the dimensions in `length` / `scale`.
-  const m = c.dataType.match(/^([A-Za-z_][\w]*)\s*(?:\(\s*(\d+)\s*(?:,\s*(\d+))?\s*\))?$/);
-  const base = (m?.[1] ?? c.dataType).toLowerCase();
-  const length = m?.[2] ? parseInt(m[2], 10) : undefined;
-  const scale = m?.[3] ? parseInt(m[3], 10) : undefined;
-  return {
-    id: uuidv4(),
-    name: c.name,
-    dataType: base,
-    length,
-    scale,
-    functionalDefinition: c.functionalDefinition,
-  };
-}
-
-function mergeTags(cols: InferredColumn[]): Tag[] | undefined {
-  const seen = new Set<string>();
-  const out: Tag[] = [];
-  for (const c of cols) {
-    (c.tags ?? []).forEach((t) => {
-      const id = tagId(t);
-      if (seen.has(id)) return;
-      seen.add(id);
-      out.push(t);
-    });
-  }
-  return out.length ? out : undefined;
-}
-
-function findDuplicateNames(names: string[]): string[] {
-  const seen = new Set<string>();
-  const dupes = new Set<string>();
-  for (const n of names) {
-    const k = n.toLowerCase();
-    if (seen.has(k)) dupes.add(n);
-    seen.add(k);
-  }
-  return Array.from(dupes);
-}
-
-function normaliseTypeForSelect(t: string): string {
-  return t.toUpperCase().trim();
-}
-
-function truncate(s: string, max: number): string {
-  return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 }

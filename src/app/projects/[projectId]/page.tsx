@@ -1,128 +1,87 @@
 'use client';
 
-import React, { useEffect, useState, use } from 'react';
+import React, { useEffect, useMemo, useState, use } from 'react';
 import { useRouter } from 'next/navigation';
 import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
-import EngineSelect from '@/features/engines/components/EngineSelect';
-import EngineBadge from '@/features/engines/components/EngineBadge';
-import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
-import { projectsService, modelsService } from '@/services';
+import Icon from '@/components/ui/Icon';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import LevelModal from '@/features/levels/components/LevelModal';
+import DomainModal from '@/features/domains/components/DomainModal';
+import { useProjectStore } from '@/store/useProjectStore';
 import { useAuthStore } from '@/store/useAuthStore';
-import { useModelStore } from '@/store/useModelStore';
-import type { Project, DataModel, DatabaseEngine } from '@/types/model';
+import type { ModelLevel, Domain } from '@/types/model';
 
 interface PageProps {
   params: Promise<{ projectId: string }>;
 }
 
-export default function ProjectModelsPage({ params }: PageProps) {
+export default function ProjectHubPage({ params }: PageProps) {
   const { projectId } = use(params);
   const router = useRouter();
 
-  const { loadModels, createModel, deleteModel } = useModelStore();
-  // Authorization — drives visibility of mutation controls. The
-  // backend enforces the same rules; this is purely UX.
-  const canEditProject = useAuthStore((s) => s.canEditProject(projectId));
-  const canEditModelFn = useAuthStore((s) => s.canEditModel);
+  const {
+    currentProject, tables, loading, loadProject,
+    addLayer, updateLayer, removeLayer,
+    addDomain, updateDomain, removeDomain,
+    persistProjectMeta,
+  } = useProjectStore();
+  const canEdit = useAuthStore((s) => s.canEditProject(projectId));
 
-  const [project, setProject] = useState<Project | null>(null);
-  const [models, setModels] = useState<DataModel[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [search, setSearch] = useState('');
-  const [showCreateModel, setShowCreateModel] = useState(false);
-  const [newModelName, setNewModelName] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [pendingModelDelete, setPendingModelDelete] = useState<{ id: string; name: string } | null>(null);
+  const [levelModal, setLevelModal] = useState<{ level: ModelLevel | null } | null>(null);
+  const [domainModal, setDomainModal] = useState<{ domain: Domain | null } | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ kind: 'layer' | 'domain'; id: string; name: string } | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const proj = await projectsService.getProject(projectId);
-        setProject(proj);
+  useEffect(() => { loadProject(projectId); }, [projectId, loadProject]);
 
-        const loadedModels = await loadModels(projectId);
-        setModels(loadedModels);
-        setLoaded(true);
-      } catch {
-        router.push('/');
-      }
-    }
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  const layers = currentProject?.layers ?? [];
+  const domains = currentProject?.domains ?? [];
 
-  const handleCreateModel = async () => {
-    if (!newModelName.trim()) return;
-    setCreating(true);
-    const model = await createModel({ projectId, name: newModelName.trim(), engine: 'databricks_sql' });
-    setCreating(false);
-    if (model) {
-      setShowCreateModel(false);
-      setNewModelName('');
-      router.push(`/projects/${projectId}/models/${model.id}`);
-    }
+  const counts = useMemo(() => {
+    const tablesInLayer = (id: string) => tables.filter((t) => t.layer === id).length;
+    const domainsInLayer = (id: string) => new Set(tables.filter((t) => t.layer === id && t.domain).map((t) => t.domain)).size;
+    const tablesInDomain = (id: string) => tables.filter((t) => t.domain === id).length;
+    return { tablesInLayer, domainsInLayer, tablesInDomain };
+  }, [tables]);
+
+  const openEditor = (q = '') => router.push(`/projects/${projectId}/editor${q}`);
+
+  const saveLevel = async (level: ModelLevel, isNew: boolean) => {
+    if (isNew) addLayer({ ...level, order: layers.length });
+    else updateLayer(level.id, level);
+    setLevelModal(null);
+    await persistProjectMeta();
+  };
+  const saveDomain = async (domain: Domain, isNew: boolean) => {
+    if (isNew) addDomain(domain);
+    else updateDomain(domain.id, domain);
+    setDomainModal(null);
+    await persistProjectMeta();
+  };
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    if (pendingDelete.kind === 'layer') removeLayer(pendingDelete.id);
+    else removeDomain(pendingDelete.id);
+    setPendingDelete(null);
+    await persistProjectMeta();
   };
 
-  const handleOpenModel = (modelId: string) => {
-    router.push(`/projects/${projectId}/models/${modelId}`);
-  };
-
-  const handleOpenGlobal = () => {
-    router.push(`/projects/${projectId}/global`);
-  };
-
-  const performModelDelete = async (modelId: string) => {
-    const ok = await deleteModel(modelId);
-    if (ok) setModels((prev) => prev.filter((m) => m.id !== modelId));
-  };
-
-  const handleDeleteModel = (modelId: string, modelName: string) => {
-    if (shouldSkipConfirm('project:delete-model')) {
-      void performModelDelete(modelId);
-      return;
-    }
-    setPendingModelDelete({ id: modelId, name: modelName });
-  };
-
-  const handleUpdateEngine = async (modelId: string, engine: DatabaseEngine | null) => {
-    // Optimistic update
-    setModels((prev) => prev.map((m) => (m.id === modelId ? { ...m, engine: engine ?? undefined } : m)));
-    try {
-      await modelsService.updateModel(modelId, { engine: engine ?? undefined });
-    } catch (err) {
-      console.error('Failed to update engine:', err);
-    }
-  };
-
-  const aggregatedEngines = Array.from(
-    new Set(models.map((m) => m.engine).filter((e): e is DatabaseEngine => !!e))
-  );
-
-  const filteredModels = models.filter((m) =>
-    m.name.toLowerCase().includes(search.toLowerCase())
-  );
-
-  const formatRelative = (dateStr: string) => {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'Just now';
-    if (mins < 60) return `${mins} min ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 30) return `${days} day${days > 1 ? 's' : ''} ago`;
-    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
-  if (!loaded) {
+  if (!currentProject && loading) {
     return (
       <AppLayout>
-        <div className="flex-center" style={{ height: '60vh' }}>
-          <div style={{ textAlign: 'center' }}>
-            <div className="skeleton" style={{ width: '200px', height: '20px', marginBottom: 'var(--space-3)', margin: '0 auto' }} />
-            <div className="skeleton" style={{ width: '150px', height: '14px', margin: '0 auto' }} />
-          </div>
+        <div className="dmh-main">
+          <Header crumbs={[{ label: 'Projects', href: '/projects' }, { label: '…' }]} />
+          <div className="dmh-page"><div className="rd-small">Cargando…</div></div>
+        </div>
+      </AppLayout>
+    );
+  }
+  if (!currentProject) {
+    return (
+      <AppLayout>
+        <div className="dmh-main">
+          <Header crumbs={[{ label: 'Projects', href: '/projects' }, { label: 'No encontrado' }]} />
+          <div className="dmh-page"><div className="dmh-empty">Proyecto no encontrado.</div></div>
         </div>
       </AppLayout>
     );
@@ -130,161 +89,108 @@ export default function ProjectModelsPage({ params }: PageProps) {
 
   return (
     <AppLayout>
-      <Header
-        crumbs={[
-          { label: 'Projects', href: '/' },
-          { label: project?.name ?? '…' },
-        ]}
-        actions={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-            {models.length > 0 && (
-              <button className="btn btn-secondary btn-sm btn-global" onClick={handleOpenGlobal} title="Open global canvas">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="2" y1="12" x2="22" y2="12" />
-                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-                </svg>
-                Global Canvas
-              </button>
-            )}
-            {canEditProject && (
-              <button className="btn btn-primary btn-sm" onClick={() => setShowCreateModel(true)}>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                New Model
+      <div className="dmh-main">
+        <Header
+          crumbs={[{ label: 'Projects', href: '/projects' }, { label: currentProject.name }]}
+          actions={
+            <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" onClick={() => openEditor()}>
+              <Icon name="columns" size={14} />Abrir canvas
+            </button>
+          }
+        />
+        <div className="dmh-page">
+          <div className="dmh-page-head">
+            <div>
+              <div className="rd-h1" style={{ marginBottom: 4 }}>{currentProject.name}</div>
+              <div className="rd-small">{currentProject.description || 'Sin descripción'}</div>
+            </div>
+          </div>
+
+          {/* Modelos (niveles) */}
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+            <div className="mc-cardlbl" style={{ margin: 0 }}><Icon name="layers" size={13} />Modelos (niveles) · {layers.length}</div>
+            {canEdit && (
+              <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setLevelModal({ level: null })}>
+                <Icon name="plus" size={14} sw={2.6} />Nuevo modelo
               </button>
             )}
           </div>
-        }
-      />
-
-      <div className="app-content">
-        <div className="page-intro">
-          <h1 className="page-intro-title">{project?.name ?? 'Project'}</h1>
-          {project?.description && (
-            <p className="page-intro-description">{project.description}</p>
-          )}
-        </div>
-
-
-        {/* Aggregated engines strip */}
-        {aggregatedEngines.length > 0 && (
-          <div className="project-engines-strip">
-            <span className="project-engines-label">Engines in this project:</span>
-            {aggregatedEngines.map((e) => (
-              <EngineBadge key={e} engine={e} compact />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px,1fr))', gap: 14, marginBottom: 26 }}>
+            {layers.length === 0 && <div className="rd-small">Aún no hay modelos. Crea el primero para empezar.</div>}
+            {layers.map((l) => (
+              <div className="dmh-pcard" key={l.id} onClick={() => openEditor(`?layer=${encodeURIComponent(l.id)}`)}>
+                {canEdit && (
+                  <div className="dmh-pcard-del" style={{ display: 'flex', gap: 2 }} onClick={(e) => e.stopPropagation()}>
+                    <button type="button" className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" onClick={() => setLevelModal({ level: l })}><Icon name="edit" size={13} /></button>
+                    <button type="button" className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" onClick={() => setPendingDelete({ kind: 'layer', id: l.id, name: l.name })}><Icon name="trash" size={13} style={{ color: 'var(--error)' }} /></button>
+                  </div>
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <span className="lv-card-ico" style={{ background: (l.color ?? '#4f46e5') + '1a', color: l.color }}><Icon name="database" size={16} /></span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 15, fontWeight: 800 }}>{l.name}</div>
+                    <div className="rd-small">{l.full}</div>
+                  </div>
+                </div>
+                <div className="rd-small" style={{ marginBottom: 12, minHeight: 18 }}>{l.desc}</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <span className="rd-badge rd-badge-neutral"><Icon name="table" size={11} />{counts.tablesInLayer(l.id)} tablas</span>
+                  <span className="rd-badge rd-badge-primary">{counts.domainsInLayer(l.id)} dominios</span>
+                </div>
+              </div>
             ))}
           </div>
-        )}
 
-        {/* Search + count */}
-        {models.length > 0 && (
-          <div className="search-bar" style={{ marginBottom: 'var(--space-5)', maxWidth: '400px' }}>
-            <span className="search-bar-icon">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-              </svg>
-            </span>
-            <input
-              type="text"
-              placeholder="Search models..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        )}
-
-        {/* Empty state */}
-        {models.length === 0 && (
-          <div className="empty-state">
-            <div className="empty-state-icon">
-              <svg width="80" height="80" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-tertiary)" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round">
-                <ellipse cx="12" cy="5" rx="9" ry="3" />
-                <path d="M3 5v14a9 3 0 0 0 18 0V5" />
-                <path d="M3 12a9 3 0 0 0 18 0" />
-              </svg>
-            </div>
-            <h3>No models yet</h3>
-            <p>
-              {canEditProject
-                ? 'Create your first data model in this project to start designing ER diagrams.'
-                : 'There are no models to view yet. Ask an administrator for access.'}
-            </p>
-            {canEditProject && (
-              <button className="btn btn-primary btn-lg" onClick={() => setShowCreateModel(true)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
-                Create First Model
+          {/* Dominios */}
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
+            <div className="mc-cardlbl" style={{ margin: 0 }}><Icon name="folder" size={13} />Dominios (productos de datos) · {domains.length}</div>
+            {canEdit && (
+              <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setDomainModal({ domain: null })}>
+                <Icon name="plus" size={14} sw={2.6} />Nuevo dominio
               </button>
             )}
           </div>
-        )}
-
-        {/* Models table */}
-        {filteredModels.length > 0 && (
-          <div className="models-table-wrapper">
-            <table className="models-table">
+          <div className="mc-gridwrap">
+            <table className="mc-grid">
               <thead>
                 <tr>
-                  <th>Model Name</th>
-                  <th>Engine</th>
-                  <th>Tables</th>
-                  <th>Relationships</th>
-                  <th>Last edited</th>
+                  <th className="mc-th">Dominio</th>
+                  <th className="mc-th">Owner</th>
+                  <th className="mc-th">Steward</th>
+                  <th className="mc-th">Sensibilidad</th>
+                  <th className="mc-th">Capas</th>
+                  <th className="mc-th" style={{ textAlign: 'right', width: 64 }}>Tablas</th>
+                  <th className="mc-th" style={{ width: 90 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {filteredModels.map((model) => (
-                  <tr key={model.id} onClick={() => handleOpenModel(model.id)}>
+                {domains.length === 0 && (
+                  <tr><td colSpan={7}><div className="rd-small" style={{ padding: '14px' }}>Aún no hay dominios.</div></td></tr>
+                )}
+                {domains.map((d) => (
+                  <tr key={d.id} onClick={() => openEditor(`?domain=${encodeURIComponent(d.id)}`)}>
                     <td>
-                      <div className="models-table-name">
-                        <div className="models-table-icon">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                            <line x1="3" y1="9" x2="21" y2="9" />
-                            <line x1="9" y1="21" x2="9" y2="9" />
-                          </svg>
-                        </div>
-                        <div>
-                          <div className="models-table-model-name">{model.name}</div>
-                          {model.description && (
-                            <div className="models-table-model-desc">{model.description}</div>
-                          )}
-                        </div>
+                      <span className="mc-name"><span style={{ width: 12, height: 12, borderRadius: 3, background: d.color }} />{d.name}</span>
+                      <div className="rd-small" style={{ marginTop: 2, maxWidth: 280, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.description}</div>
+                    </td>
+                    <td className="mc-dim">{d.owner || '—'}</td>
+                    <td className="mc-dim">{d.steward || '—'}</td>
+                    <td><span className={`rd-badge ${d.sensitivity === 'PII' || d.sensitivity === 'Restricted' ? 'rd-badge-warning' : 'rd-badge-neutral'}`}>{d.sensitivity ?? 'Internal'}</span></td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {(d.layers ?? []).map((lid) => {
+                          const L = layers.find((x) => x.id === lid);
+                          return <span key={lid} className="ed-layer-pill" style={{ color: L?.color ?? '#888', borderColor: L?.color ?? '#888' }}>{L?.name ?? lid}</span>;
+                        })}
                       </div>
                     </td>
+                    <td className="mc-num">{counts.tablesInDomain(d.id)}</td>
                     <td onClick={(e) => e.stopPropagation()}>
-                      <EngineSelect
-                        value={model.engine ?? null}
-                        onChange={(eng) => handleUpdateEngine(model.id, eng)}
-                        size="sm"
-                        disabled={!canEditModelFn(model.id, projectId)}
-                      />
-                    </td>
-                    <td>
-                      <span className="models-table-pill">{model.tables.length}</span>
-                    </td>
-                    <td>
-                      <span className="models-table-pill">{model.relationships.length}</span>
-                    </td>
-                    <td className="models-table-date">{formatRelative(model.updatedAt)}</td>
-                    <td onClick={(e) => e.stopPropagation()} style={{ width: 40, textAlign: 'center' }}>
-                      {canEditModelFn(model.id, projectId) && (
-                        <button
-                          className="btn btn-ghost btn-icon btn-sm"
-                          title="Eliminar modelo"
-                          onClick={() => handleDeleteModel(model.id, model.name)}
-                        >
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="3 6 5 6 21 6" />
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                          </svg>
-                        </button>
+                      {canEdit && (
+                        <div style={{ display: 'flex', gap: 2 }}>
+                          <button type="button" className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" onClick={() => setDomainModal({ domain: d })}><Icon name="edit" size={13} /></button>
+                          <button type="button" className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" onClick={() => setPendingDelete({ kind: 'domain', id: d.id, name: d.name })}><Icon name="trash" size={13} style={{ color: 'var(--error)' }} /></button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -292,77 +198,20 @@ export default function ProjectModelsPage({ params }: PageProps) {
               </tbody>
             </table>
           </div>
-        )}
-
-        {/* No search matches */}
-        {search && models.length > 0 && filteredModels.length === 0 && (
-          <div className="empty-state" style={{ paddingTop: 'var(--space-8)' }}>
-            <h3>No models match your search</h3>
-            <p>Try a different search term.</p>
-          </div>
-        )}
+        </div>
       </div>
 
-      {/* Create Model Modal */}
-      {showCreateModel && (
-        <div className="modal-backdrop" onClick={() => setShowCreateModel(false)}>
-          <div className="modal-content animate-scaleIn" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Create New Model</h3>
-              <button className="btn btn-ghost btn-icon" onClick={() => setShowCreateModel(false)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="form-group">
-                <label className="input-label">Model Name</label>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder="e.g. Sales Data Model, User Management Schema"
-                  value={newModelName}
-                  onChange={(e) => setNewModelName(e.target.value)}
-                  autoFocus
-                  onKeyDown={(e) => e.key === 'Enter' && handleCreateModel()}
-                />
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button className="btn btn-secondary" onClick={() => setShowCreateModel(false)}>Cancel</button>
-              <button
-                className="btn btn-primary"
-                onClick={handleCreateModel}
-                disabled={!newModelName.trim() || creating}
-              >
-                {creating ? 'Creating…' : 'Create Model'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {levelModal && <LevelModal level={levelModal.level} onClose={() => setLevelModal(null)} onSave={saveLevel} />}
+      {domainModal && <DomainModal domain={domainModal.domain} layers={layers} onClose={() => setDomainModal(null)} onSave={saveDomain} />}
+
       <ConfirmDialog
-        open={pendingModelDelete !== null}
-        title="Eliminar modelo"
-        message={
-          pendingModelDelete ? (
-            <>
-              ¿Eliminar el modelo <strong>{pendingModelDelete.name}</strong>? Esta acción no se puede deshacer.
-            </>
-          ) : null
-        }
+        open={pendingDelete !== null}
+        title={pendingDelete?.kind === 'layer' ? 'Eliminar modelo' : 'Eliminar dominio'}
+        message={pendingDelete ? <>¿Eliminar <strong>{pendingDelete.name}</strong>? Las tablas que lo usaban quedarán sin asignar.</> : null}
         confirmLabel="Eliminar"
-        cancelLabel="Cancelar"
         variant="danger"
-        dontAskKey="project:delete-model"
-        onConfirm={() => {
-          if (!pendingModelDelete) return;
-          void performModelDelete(pendingModelDelete.id);
-          setPendingModelDelete(null);
-        }}
-        onCancel={() => setPendingModelDelete(null)}
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
       />
     </AppLayout>
   );

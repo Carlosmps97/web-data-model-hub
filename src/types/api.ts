@@ -1,6 +1,14 @@
 // API request/response types
 
-import type { Project, DataModel } from './model';
+import type {
+  Project,
+  Canvas,
+  EngineId,
+  ModelLevel,
+  Domain,
+  Table,
+  Relationship,
+} from './model';
 
 // Generic API response wrapper
 export interface ApiResponse<T> {
@@ -9,37 +17,35 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
-// Project endpoints
+// ─── Project endpoints ───────────────────────────────────────────────────────
 export type ProjectListResponse = ApiResponse<Project[]>;
 export type ProjectResponse = ApiResponse<Project>;
+
 export interface CreateProjectRequest {
   name: string;
   description?: string;
+  engines?: EngineId[];
+  layers?: ModelLevel[];
+  domains?: Domain[];
 }
+
 export interface UpdateProjectRequest {
   name?: string;
   description?: string;
+  engines?: EngineId[];
+  layers?: ModelLevel[];
+  domains?: Domain[];
 }
 
-// Model endpoints
-export type ModelListResponse = ApiResponse<DataModel[]>;
-export type ModelResponse = ApiResponse<DataModel>;
-export interface CreateModelRequest {
-  projectId: string;
-  name: string;
-  description?: string;
-  engine?: DataModel['engine'];
-  tables?: DataModel['tables'];
-  relationships?: DataModel['relationships'];
-}
-export interface UpdateModelRequest {
-  name?: string;
-  description?: string;
-  tables?: DataModel['tables'];
-  relationships?: DataModel['relationships'];
+// ─── Canvas endpoints (a project's tables + relationships) ───────────────────
+export type CanvasResponse = ApiResponse<Canvas>;
+
+export interface CanvasReplaceRequest {
+  tables?: Table[];
+  relationships?: Relationship[];
 }
 
-// Chat endpoint
+// ─── Chat endpoint (AI agent — decoupled, kept) ──────────────────────────────
 export interface ChatRequest {
   message: string;
   attachments?: { name: string; type: string; data: string }[];

@@ -2,25 +2,15 @@
 
 import React, { useEffect } from 'react';
 import Sidebar from './Sidebar';
+import HelpDrawer from '@/features/help/HelpDrawer';
 import { useAuthStore } from '@/store/useAuthStore';
 
-interface AppLayoutProps {
-  children: React.ReactNode;
-  /**
-   * Si `true`, fuerza al `<main>` a ocupar exactamente `100vh` y recorta el
-   * overflow. Usar en páginas con layouts tipo workbench (editor de modelo)
-   * donde el scroll debe ser interno a cada panel y NO global. Dejar en
-   * `false` (default) en páginas con contenido vertical largo que sí debe
-   * hacer scroll (listas, formularios extensos).
-   */
-  fixedViewport?: boolean;
-}
-
-const AppLayout: React.FC<AppLayoutProps> = ({ children, fixedViewport = false }) => {
-  // Hydrate the auth store on first mount. The middleware already
-  // blocks unauthenticated traffic, so by the time this effect runs
-  // we expect a valid session — but the client needs the user object
-  // to drive role-dependent UI (admin link, viewer disables, etc.).
+/**
+ * App shell: the slim 64px icon rail + the routed page content. Pages render
+ * their own `.dmh-main` (top bar + scrollable page), so this layout only owns
+ * the flex container and one-time auth hydration.
+ */
+const AppLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const status = useAuthStore((s) => s.status);
   const hydrate = useAuthStore((s) => s.hydrate);
   useEffect(() => {
@@ -28,11 +18,10 @@ const AppLayout: React.FC<AppLayoutProps> = ({ children, fixedViewport = false }
   }, [status, hydrate]);
 
   return (
-    <div className="app-layout">
+    <div className="dmh">
       <Sidebar />
-      <main className={`app-main${fixedViewport ? ' app-main--fixed' : ''}`}>
-        {children}
-      </main>
+      {children}
+      <HelpDrawer />
     </div>
   );
 };

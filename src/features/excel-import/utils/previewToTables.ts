@@ -1,38 +1,32 @@
 /**
- * Convierte el `ExcelPreview` (ya editado por el usuario en el modal)
- * en los `TableModel[]` que el resto de la app sabe manejar.
- *
- * Responsabilidades acotadas:
- * - Generar `id` estables (UUID) tanto para tabla como para columna.
- * - Mapear `description` (de TablesDescriptions) → `functionalDefinition`
- *   en `TableModel`, que es donde el resto de la UI muestra la
- *   descripción funcional de la tabla.
- * - Conservar `length`/`scale` de cada columna.
- * - Layout inicial determinístico — 3 columnas, espaciado fijo.
- *   `ELK` lo reacomoda después por `layoutNonce`.
+ * Convierte el `ExcelPreview` (ya editado por el usuario) en `Table[]` con la
+ * forma project-centric. Genera ids estables, mapea `description` →
+ * `functionalDefinition` y hereda `layer`/`domain`/`color` del scope actual.
+ * No fija `position` — el editor calcula el layout.
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import type { TableColumn, TableModel } from '@/types/model';
+import type { TableColumn, Table } from '@/types/model';
 import type { PreviewTable } from '@/features/excel-import/services/excelImport.service';
 
-const GRID_COLUMNS = 3;
-const X_SPACING = 350;
-const Y_SPACING = 400;
-const X_OFFSET = 50;
-const Y_OFFSET = 50;
+export interface PreviewMeta {
+  layer?: string;
+  domain?: string;
+  color?: string;
+}
 
-export function previewToTables(tables: PreviewTable[]): TableModel[] {
-  return tables.map((table, index) => ({
+export function previewToTables(tables: PreviewTable[], meta: PreviewMeta = {}): Table[] {
+  return tables.map((table) => ({
     id: uuidv4(),
     name: table.name,
     schema: table.schema ?? undefined,
+    layer: meta.layer,
+    domain: meta.domain,
+    subdomain: '',
+    color: meta.color ?? '#4f46e5',
     functionalDefinition: table.description ?? undefined,
     columns: table.columns.map(toColumn),
-    position: {
-      x: (index % GRID_COLUMNS) * X_SPACING + X_OFFSET,
-      y: Math.floor(index / GRID_COLUMNS) * Y_SPACING + Y_OFFSET,
-    },
+    views: [],
   }));
 }
 

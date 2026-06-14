@@ -8,6 +8,6 @@
 
 export * from './http';
 export * as projectsService from './projects.service';
-export * as modelsService from './models.service';
+export * as canvasService from './canvas.service';
 export { authService } from './auth.service';
 export { adminService } from './admin.service';

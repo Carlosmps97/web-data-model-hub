@@ -22,19 +22,21 @@
 // ─────────────────────────────────────────────────────────────────────────
 
 import { v4 as uuidv4 } from 'uuid';
-import { findColumnId } from '@/lib/columnRef';
 import type {
   AgentColumn,
   AgentEngine,
   AgentTable,
   ModelingResponse,
 } from './types';
-import type {
-  DatabaseEngine,
-  Relationship,
-  TableColumn,
-  TableModel,
-} from '@/types/model';
+// Decoupled AI agent: kept on the frozen legacy model shape until reworked
+// for the project-centric schema (see `legacyModel.ts`).
+import {
+  findColumnId,
+  type DatabaseEngine,
+  type Relationship,
+  type TableColumn,
+  type TableModel,
+} from './legacyModel';
 
 // ─── Engine mapping ──────────────────────────────────────────────────────
 

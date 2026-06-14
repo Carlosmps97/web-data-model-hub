@@ -14,9 +14,7 @@ import { create } from 'zustand';
 import type { AuthUser } from '@/types/auth';
 import { authService } from '@/services';
 import {
-  canEditModel as canEditModelFn,
   canEditProject as canEditProjectFn,
-  canViewModel as canViewModelFn,
   canViewProject as canViewProjectFn,
   isAdmin as isAdminFn,
 } from '@/lib/auth/permissions';
@@ -35,8 +33,6 @@ interface AuthState {
   isAdmin: () => boolean;
   canViewProject: (projectId: string) => boolean;
   canEditProject: (projectId: string) => boolean;
-  canViewModel: (modelId: string, projectId: string) => boolean;
-  canEditModel: (modelId: string, projectId: string) => boolean;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -93,11 +89,5 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
   canEditProject(projectId) {
     return canEditProjectFn(get().user, projectId);
-  },
-  canViewModel(modelId, projectId) {
-    return canViewModelFn(get().user, modelId, projectId);
-  },
-  canEditModel(modelId, projectId) {
-    return canEditModelFn(get().user, modelId, projectId);
   },
 }));

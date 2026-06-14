@@ -1,436 +1,285 @@
 # Arquitectura del Frontend — `web-data-model-hub`
 
-> Este documento refleja el estado **post-migración** a backend
-> centralizado: el frontend ya **no expone rutas API propias** (la
-> carpeta `src/app/api/` fue eliminada). Todo el tráfico — auth, CRUD
-> de proyectos / modelos / usuarios y el agente de modelado — apunta
-> directamente al backend FastAPI `agent-modeler` cross-origin.
+> UI Next.js (App Router) del Data Modeler, rediseño **"Aurora"**
+> (project-centric). El frontend **no expone rutas API propias**: llama
+> directamente al backend FastAPI `backend-data-model-hub` cross-origin con la
+> cookie `modeler-auth`. El agente de modelado IA está **desacoplado** (vive en
+> `app-agents-modeler`) y por ahora su botón solo avisa que se reconectará.
 
-## 1. Visión General
-
-`web-data-model-hub` es la UI Next.js (App Router) del sistema de
-modelamiento. Sus responsabilidades:
-
-- Render del editor visual de modelos (canvas ER + lista de tablas).
-- Captura del input del usuario (formulario, DBML, Excel, SQL, chat
-  con el agente).
-- Estado local efímero (Zustand) y sincronización persistente con el
-  backend mediante `apiFetch`.
-- Generación cliente-side de DDL y DBML a partir del modelo en memoria
-  (no requiere round-trip al backend).
-- Validación de sesión vía middleware de Next.js que verifica el JWT
-  cookie firmado por el backend.
+## 1. Visión general
 
 ```mermaid
 flowchart LR
     subgraph Browser["Browser :3000"]
-        UI["React UI<br/>(Client Components)"]
-        ZS["Zustand stores<br/>useAuthStore · useModelStore<br/>useUIStore · useAgentStore"]
-        RF["@xyflow/react<br/>Diagram Canvas"]
-        SVC["src/services/*<br/>(apiFetch, auth, projects,<br/>models, admin, agent)"]
+        UI["React 19 UI<br/>(Client Components)"]
+        ZS["Zustand stores<br/>useProjectStore · useAuthStore · useUIStore"]
+        ER["ERCanvas propio<br/>(pan/zoom/edges hechos a mano)"]
+        SVC["src/services/*<br/>(http, auth, projects, canvas, admin)"]
     end
 
     subgraph Server["Next.js Server :3000"]
-        MID["middleware.ts<br/>(JWT verify + redirect)"]
+        PXY["proxy.ts<br/>(verifica JWT + redirect)"]
         PAGES["app/* (Server + Client Components)"]
     end
 
-    subgraph Backend["FastAPI agent-modeler :8000"]
-        FAPI["/api/auth/*<br/>/api/projects/*<br/>/api/models/*<br/>/api/conversations/*"]
-        DB[("Cosmos DB<br/>db_modeler")]
+    subgraph Backend["FastAPI backend-data-model-hub :8000"]
+        FAPI["/api/auth/*<br/>/api/projects/*<br/>/api/projects/{id}/canvas<br/>/api/admin/* · /api/excel-import/*"]
+        DB[("Cosmos DB · db_modeler")]
         FAPI --> DB
     end
 
-    UI --> ZS
-    ZS --> SVC
-    UI --> RF
+    UI --> ZS --> SVC
+    UI --> ER
     UI --> PAGES
     SVC -.cookie modeler-auth (cross-origin).-> FAPI
-    PAGES --> MID
-    MID -. verifica JWT .- FAPI
-    FAPI -.401 / 200.-> ZS
+    PAGES --> PXY
+    PXY -. verifica firma (mismo AUTH_SECRET) .- FAPI
 ```
 
-> **No hay storage local en el frontend**. La carpeta `data/` del
-> proyecto y el módulo `jsonStore.ts` desaparecieron en la migración a
-> Cosmos DB. Si el backend está caído, el frontend muestra estados de
-> error pero no almacena nada offline.
+**Stack**: Next.js 16 (Turbopack) · React 19 · TypeScript · **sin Tailwind**
+(CSS custom properties en `globals.css`, sistema *Aurora*) · `next/font`
+(Manrope + JetBrains Mono) · Zustand 5 · `sonner` (toasts) · `uuid` · `xlsx` ·
+`jose` (verificación JWT en el proxy).
+
+> **No hay storage local.** La fuente de verdad es Cosmos DB vía el backend. Si
+> el backend está caído, la UI muestra estados de error pero no guarda nada
+> offline. Las **posiciones del canvas son per-sesión** (se auto-organizan al
+> abrir; no se persisten).
 
 ---
 
-## 2. Estructura del repositorio
+## 2. Jerarquía del dominio
+
+```
+Proyecto → Modelo (nivel: RDV·UDV·DDV…) → Dominio (vertical) → Tabla → Columnas + Vistas
+```
+
+- Un **Proyecto** posee `engines`, `layers` (los "Modelos / niveles") y
+  `domains` (productos de datos verticales). Tiene **un único canvas**.
+- Una **Tabla** vive en una `layer` y (opcional) un `domain`, hereda su color del
+  dominio, y embebe `views` (SQL por rol).
+- Las **Relaciones** son `source`/`target`/`cardinality`; `crossLayer`/`skip` se
+  derivan del orden de los niveles.
+
+---
+
+## 3. Estructura del repositorio
 
 ```
 web-data-model-hub/
 ├── src/
 │   ├── app/                       # App Router (sin /api/*)
-│   │   ├── layout.tsx
-│   │   ├── page.tsx               # Dashboard / Projects landing
+│   │   ├── layout.tsx             # fuentes + favicon (icon.png/apple-icon.png = logo-dog)
+│   │   ├── icon.png · apple-icon.png   # favicon (perro, cuadrado, transparente)
+│   │   ├── page.tsx               # Model Center (catálogo cross-project)
 │   │   ├── login/page.tsx
-│   │   ├── admin/                 # Admin de usuarios + permisos
-│   │   ├── dashboard/             # Dashboard con métricas
-│   │   ├── docs/                  # Documentación in-app
-│   │   └── projects/[projectId]/
-│   │       ├── page.tsx           # Lista de modelos del proyecto
-│   │       ├── global/page.tsx    # Canvas global (todos los modelos)
-│   │       └── models/[modelId]/page.tsx   # Editor del modelo
-│   ├── components/                # Components compartidos (UI primitives)
-│   ├── features/                  # Feature modules (componentes + utils)
-│   │   ├── admin-users/           # CRUD users + permission editor
-│   │   ├── chat-agent/            # ChatPanel + useAgentConversation
-│   │   ├── ddl/                   # Generators y modal de DDL preview
-│   │   ├── diagram/               # DiagramCanvas + TableNode + edges
-│   │   ├── domains/               # DomainManager
-│   │   ├── engines/               # EngineSelect + EngineBadge + capabilities
-│   │   ├── excel-import/          # Modal + parser de Excel
-│   │   ├── projects/              # Tarjetas y forms de proyectos
-│   │   ├── table-editor/          # TableForm, DBML editor, SQL importer
-│   │   └── views/                 # ViewForm
-│   ├── hooks/
-│   ├── lib/
-│   │   ├── columnRef.ts           # findColumnId / resolveColumnName / ensureColumnId
-│   │   ├── auth/permissions.ts    # canViewModel, canEditProject, ...
-│   │   └── agent/
-│   │       ├── mapping.ts         # ModelingResponse → Tables/Relationships
-│   │       └── types.ts
-│   ├── server/
-│   │   └── auth/jwt.ts            # signAuthToken / verifyAuthToken (jose)
-│   ├── services/
-│   │   ├── http.ts                # apiFetch + ApiError envelope
-│   │   ├── auth.service.ts
-│   │   ├── projects.service.ts
-│   │   ├── models.service.ts
-│   │   ├── admin.service.ts
-│   │   ├── agent.service.ts
-│   │   └── index.ts               # barrel
-│   ├── store/
-│   │   ├── useAuthStore.ts
-│   │   ├── useModelStore.ts
-│   │   ├── useUIStore.ts
-│   │   └── useAgentStore.ts
-│   ├── types/
-│   │   ├── model.ts               # TableModel, TableColumn (con id estable), Relationship, ...
-│   │   ├── api.ts                 # ApiResponse envelope
-│   │   └── auth.ts                # AuthUser, AuthJwtClaims, Permission
-│   └── middleware.ts              # JWT cookie verification
-├── doc/                           # Esta carpeta
+│   │   ├── projects/page.tsx      # lista de proyectos
+│   │   ├── projects/[projectId]/page.tsx          # hub: Modelos (niveles) + Dominios
+│   │   ├── projects/[projectId]/editor/page.tsx   # editor (canvas + rail + inspector)
+│   │   ├── docs/page.tsx          # Centro de ayuda in-app
+│   │   └── admin/users/page.tsx   # CRUD usuarios + permisos
+│   ├── components/
+│   │   ├── layout/ (AppLayout · Header · Sidebar [rail 64px])
+│   │   └── ui/ (Icon · Modal · ConfirmDialog · …)
+│   ├── features/
+│   │   ├── diagram/   ERCanvas · Inspector · ScopeControl · layout/layouts · builders
+│   │   ├── table-editor/  TablesListView · TableForm · CreateFromSqlModal · DBMLModal
+│   │   ├── views/     ViewForm
+│   │   ├── ddl/       generators · DDLPreviewModal
+│   │   ├── levels/    LevelModal           (CRUD de Modelos/niveles)
+│   │   ├── domains/   DomainModal          (CRUD de Dominios)
+│   │   ├── engines/   engines · EngineBadge · EngineSelect
+│   │   ├── excel-import/ ExcelImportModal + service
+│   │   ├── admin-users/  UserFormModal
+│   │   ├── projects/  CreateProjectModal
+│   │   ├── help/      help (contenido) · HelpDrawer (drawer "?")
+│   │   └── chat-agent/  DESACOPLADO — compila vía legacyModel.ts
+│   ├── store/   useProjectStore · useAuthStore · useUIStore
+│   ├── services/ http · auth.service · projects.service · canvas.service · admin.service · index
+│   ├── types/   model.ts (project-centric) · api.ts · auth.ts
+│   ├── lib/     hierarchy.ts (scope/layerGap) · auth/permissions.ts · tags.ts
+│   └── server/auth/jwt.ts   # signAuthToken / verifyAuthToken (jose)
+├── proxy.ts                  # middleware Next 16 (export `proxy`) — verifica JWT
+├── doc/                      # esta carpeta
 └── package.json
 ```
 
+> Next.js 16 renombró el archivo de middleware de `middleware.ts` a **`proxy.ts`**
+> (con un export `proxy`). El matcher funciona igual.
+
 ---
 
-## 3. Capa de servicios (`src/services/`)
+## 4. Capa de servicios (`src/services/`)
 
-Toda comunicación con el backend pasa por aquí. La capa es fina
-y tipada — un wrapper sobre `fetch` que desempaqueta el envelope
-`{success, data?, error?}` y arroja `ApiError` en cualquier ruta no-OK.
+Wrapper fino y tipado sobre `fetch` que desempaqueta el envelope
+`{success, data?, error?}` y arroja `ApiError` ante cualquier ruta no-OK.
 
-```mermaid
-flowchart LR
-    UI["Component / Store"] --> SERVICE["projectsService.listProjects(...)"]
-    SERVICE --> APIF["apiFetch<T>(url, opts)"]
-    APIF --> FETCH["fetch<br/>credentials: 'include'<br/>cache: 'no-store'"]
-    FETCH --> BACK["FastAPI :8000"]
-    BACK --> ENV["{ success, data?, error? }"]
-    ENV -->|"success === true"| OK["return data as T"]
-    ENV -->|"success === false<br/>o no-2xx"| ERR["throw ApiError"]
-    OK --> SERVICE
-    ERR --> SERVICE
-```
-
-| Service | Endpoints que consume | Notas |
-|---------|-----------------------|-------|
+| Service | Endpoints | Notas |
+|---|---|---|
 | `authService` | `/api/auth/login`, `/logout`, `/me` | `getCurrentUser` retorna `null` ante 401 (no lanza). |
-| `projectsService` | `/api/projects/*` | Funciones puras sin estado. |
-| `modelsService` | `/api/models/*` | Soporta `projectId` y `full` query params. |
-| `adminService` | `/api/admin/users/*` | CRUD usuarios + edición de permisos. |
-| `agentService` | `/api/conversations/*` | Cliente especializado: usa `AgentClientError` (con `code` y `detail`) en vez del envelope genérico, porque el backend del agente devuelve `{detail, code}` directo (no envuelve). |
-| `apiFetch` | base genérica | Agrega `Content-Type: application/json` automático cuando hay body, propaga `AbortSignal`, lanza `ApiError(message, status)` ante errores. |
+| `projectsService` | `/api/projects/*` | `list/get/create/update/delete`. |
+| `canvasService` | `/api/projects/{id}/canvas`, `/positions` | `getCanvas` · `saveCanvas` · `updatePositions`. |
+| `adminService` | `/api/admin/users/*` | CRUD usuarios + permisos. |
+| `apiFetch` | base genérica | `credentials: 'include'`, agrega `Content-Type` cuando hay body, lanza `ApiError(message, status)`. |
 
-**`NEXT_PUBLIC_API_URL`**: la base URL del backend la lee cada service
-de `process.env.NEXT_PUBLIC_API_URL` (default vacío → mismo origen).
-En desarrollo típico se setea a `http://localhost:8000`.
+`NEXT_PUBLIC_API_URL` (p. ej. `http://localhost:8000`) es la base que cada
+service antepone. **Es cross-origin con el backend** → `credentials: 'include'`
+es obligatorio para que viaje la cookie.
+
+> El chat-agent es decoupled: cuando se reconecte, hablará con
+> `app-agents-modeler` con su propio cliente, no con este backend.
 
 ---
 
-## 4. Stores de Zustand
+## 5. Stores de Zustand
 
 ```mermaid
 graph TB
     subgraph AUTH["useAuthStore"]
-        AU_ST["user · status · error"]
-        AU_AC["hydrate · login · logout · setUser"]
-        AU_HE["isAdmin · canViewProject · canEditProject<br/>canViewModel · canEditModel"]
+        A1["user · status · error"]
+        A2["hydrate · login · logout"]
+        A3["isAdmin · canViewProject · canEditProject"]
     end
-
-    subgraph MODEL["useModelStore"]
-        MO_ST["currentModel · tables · relationships<br/>views · domainCatalog · saving"]
-        MO_AC["loadModel · setTables · setRelationships<br/>addTable · updateTable · removeTable<br/>addRelationship · removeRelationship<br/>saveModel (debounced 2s)"]
+    subgraph PROJ["useProjectStore"]
+        P1["projects · currentProject<br/>tables · relationships · scope · saving"]
+        P2["loadProjects · loadProject · setScope"]
+        P3["persistCanvas → PUT /canvas (stripea position)<br/>persistProjectMeta → PUT /projects/{id}"]
+        P4["add/update/removeTable · add/removeRelationship<br/>saveView · add/update/removeLayer · add/update/removeDomain"]
     end
-
     subgraph UI["useUIStore"]
-        UI_ST["selectedTableId · hoveredTableId<br/>panelOpen · activeRightTab"]
+        U1["helpOpen (drawer '?')"]
     end
-
-    subgraph AGENT["useAgentStore"]
-        AG_ST["sessionByModel: modelId → { conversationId, ... }<br/>history · isThinking · lastResponse"]
-        AG_AC["ensureSession · sendMessage · uploadGuidelines · clearSession"]
-    end
-
-    AU_HE -. consume .-> MODEL
-    AU_HE -. consume .-> AGENT
 ```
 
-| Store | Persistencia | Cuándo se hidrata |
-|-------|--------------|--------------------|
-| `useAuthStore` | sin persist; `hydrate()` consulta `/api/auth/me` | una vez por mount del app shell |
-| `useModelStore` | sin persist; `loadModel(id)` consulta `/api/models/{id}` | al entrar al editor |
-| `useUIStore` | sin persist | local a la sesión del browser |
-| `useAgentStore` | sin persist; `conversationId` por `modelId` | en el primer `ensureSession` por modelo |
+| Store | Persistencia | Hidratación |
+|---|---|---|
+| `useAuthStore` | sin persist; `hydrate()` → `/api/auth/me` | una vez en `AppLayout` |
+| `useProjectStore` | sin persist; `loadProject(id)` → `/api/projects/{id}` + `/canvas` | al entrar al hub / editor |
+| `useUIStore` | sin persist | local a la sesión |
 
-> Mantener los stores **sin `persist`** es deliberado: la fuente de
-> verdad es Cosmos DB. Persistir en localStorage agrega complejidad y
-> no aporta — el modelo siempre se rehidrata desde el backend.
+Sin `persist` a propósito: Cosmos es la fuente de verdad; el estado siempre se
+rehidrata del backend.
 
 ---
 
-## 5. Auth y middleware
+## 6. Auth y proxy
 
 ```mermaid
 sequenceDiagram
     participant B as Browser
-    participant M as middleware.ts
-    participant FA as FastAPI
+    participant P as proxy.ts
+    participant FA as FastAPI :8000
 
-    B->>M: GET /projects/abc (cookie modeler-auth)
-    M->>M: jose.jwtVerify(cookie, AUTH_SECRET)
+    B->>P: GET /projects/abc (cookie modeler-auth)
+    P->>P: jose.jwtVerify(cookie, AUTH_SECRET)
     alt token válido
-        M-->>B: NextResponse.next() (renderiza la página)
-        Note right of B: Client component pide datos
-        B->>FA: GET /api/projects (cookie incluido)
-        FA->>FA: pyjwt.verify(cookie, AUTH_SECRET)
-        FA->>FA: get_user_by_id (recarga viva desde Cosmos)
-        FA-->>B: 200 + payload filtrado por permisos
-    else token inválido / ausente
-        M-->>B: redirect 302 → /login?next=/projects/abc
+        P-->>B: NextResponse.next() (renderiza)
+        B->>FA: GET /api/projects (cookie incluida)
+        FA->>FA: PyJWT verify + recarga UserDoc viva
+        FA-->>B: 200 filtrado por permisos
+    else inválido/ausente
+        P-->>B: redirect 307 → /login?next=/projects/abc
     end
-
-    Note over B,FA: Las rutas /api/* del browser que NO requieren login (login screen)<br/>están en la lista PUBLIC_PATHS del middleware
 ```
-
-**Detalles importantes**:
 
 - **Mismo `AUTH_SECRET`** en `web-data-model-hub/.env` y
-  `agent-modeler/.env`. El frontend firma con `jose`, el backend con
-  `pyjwt`, ambos HS256.
-- El middleware **no consulta DB**: solo verifica firma + expiración.
-  Eso lo hace edge-compatible y rápido. Las verificaciones de
-  permisos finos (admin? puedo editar este proyecto?) las hace el
-  backend en cada request — el frontend usa `useAuthStore.canEdit*`
-  solo para esconder/deshabilitar UI.
-- El cookie es **`HttpOnly`** + `SameSite=Lax`. JS no lo ve, no
-  hay riesgo XSS de robo del token. Pero como ambos servidores corren
-  en orígenes distintos en dev (`:3000` ↔ `:8000`), el browser solo
-  envía el cookie si el fetch usa `credentials: 'include'`. Ambos
-  clientes (`apiFetch` y `agentService`) lo activan explícitamente.
+  `backend-data-model-hub/.env`. El proxy firma/valida con `jose` (Edge), el
+  backend con `PyJWT`; ambos HS256, cookie `modeler-auth`, 10 h. Si divergen →
+  401 silencioso (login parece colgarse).
+- El proxy **no consulta DB**: solo verifica firma + expiración. Los permisos
+  finos los revalida el backend en cada request; el frontend usa
+  `useAuthStore.can*Project` solo para esconder/deshabilitar UI.
+- La cookie es `HttpOnly` + `SameSite=Lax`. Como `localhost:3000` y
+  `localhost:8000` son el **mismo site** (distinto puerto = distinto origen, pero
+  mismo site), el cookie se guarda y se envía bien con `credentials: 'include'`.
 
 ---
 
-## 6. Editor de modelos — vistas y navegación
+## 7. Editor (`app/projects/[projectId]/editor/page.tsx`)
 
-`ModelEditorPage` (`src/app/projects/[projectId]/models/[modelId]/page.tsx`)
-gestiona dos toggles independientes:
+Orquestador de un **único canvas por proyecto**, scope-driven. Coordina:
 
-```mermaid
-flowchart LR
-    subgraph LEFT["leftTab"]
-        LT_V["'visual'<br/>(formularios + chat)"]
-        LT_C["'code'<br/>(DBMLEditorPanel)"]
-    end
-    subgraph MAIN["mainView"]
-        MV_L["'list'<br/>TablesListView"]
-        MV_C["'canvas'<br/>DiagramCanvas"]
-    end
+- **Barra superior**: breadcrumb `Proyecto › <scope>` + engine badge ·
+  `ScopeControl` · toggle `List/Canvas` · `Export` (DDL) · indicador
+  `Saved/Saving…` · botón `AI Agent` (violeta, decoupled).
+- **Rail izquierdo** (`TablesListView`): contador + `New ▾` (Nueva tabla · Desde
+  existentes · Escribir DBML · Importar Excel) · búsqueda · agrupar por
+  Dominio/Modelo · lista agrupada (chip PK/FK + pill de capa + nº columnas).
+- **Canvas** (`ERCanvas`) o **lista** según el toggle.
+- **Inspector** (`Inspector`): auto-abre al seleccionar; tabs Columns / Views / Links.
+- **Modales**: TableForm, CreateFromSqlModal, ViewForm, DDLPreviewModal,
+  DBMLModal, ExcelImportModal, ConfirmDialog.
+- **Autosave**: debounce 800 ms → `persistCanvas()` (que stripea `position`).
 
-    PAGE["ModelEditorPage"] --> LEFT
-    PAGE --> MAIN
-    LT_V -. dispara .-> TF["TableForm modal"]
-    LT_V -. dispara .-> EX["ExcelImport modal"]
-    LT_V -. abre .-> CHAT["ChatPanel (slideInRight)"]
-    LT_C --> DBML["DBMLEditorPanel"]
-    MV_L --> CARDS["Tablas como tarjetas + filtros"]
-    MV_C --> CANVAS["React Flow ER"]
-```
-
-`TablesListView` y `DiagramCanvas` comparten el **mismo store**
-(`useModelStore`); cambiar de vista nunca refetcha datos.
+El **Scope** (`src/lib/hierarchy.ts::Scope = {layers, domains}`) filtra qué
+tablas/relaciones son visibles y editables. El scope inicial viene de
+`?layer=` / `?domain=` (al entrar desde una tarjeta de Modelo o fila de Dominio).
 
 ---
 
-## 7. Diagrama (`features/diagram/`)
+## 8. Canvas ER propio (`features/diagram/components/ERCanvas.tsx`)
 
-```mermaid
-graph TD
-    DC["DiagramCanvas (Provider wrapper)"]
-    DCI["DiagramCanvasInner"]
-    RF["ReactFlow"]
-    TN["TableNode (erTable)"]
-    NS["NamespaceBackground (namespace)"]
-    AE["AnimatedEREdge (animatedER)"]
-    CTRL["Controls"]
-    AAP["AutoArrangePopover"]
+Lienzo **hecho a mano** (sin React Flow ni librerías de grafos):
 
-    DC --> DCI
-    DCI --> RF
-    RF --> TN
-    RF --> NS
-    RF --> AE
-    DCI --> CTRL
-    CTRL --> AAP
-```
+- `er-world` con `transform: translate(x,y) scale(s)`; pan arrastrando el fondo,
+  zoom con la rueda hacia el cursor, dock con Fit / zoom %.
+- **Nodos** tintados por color de dominio: header `schema.name` + pill de capa +
+  indicador de partición + contador de vistas/columnas + engranaje
+  (Editar · color · Eliminar). Fila por columna con chip PK/FK/SK/PT, nombre,
+  punto nullable, tipo; tooltip al hover.
+- **Edges** SVG con curva Bézier + crow's-foot derivado de la cardinalidad;
+  *flow* animado (dash) en la relación activa; estilo **cross-layer**: gap 1 =
+  etiqueta teal `A→B`, gap ≥2 = ámbar/punteado + "!" (aviso).
+- **Modo Conectar**: clic en columna origen → clic en columna destino de otra
+  tabla → crea la relación con la cardinalidad elegida y marca la columna origen
+  como FK.
+- **Dock**: Seleccionar · Conectar · Auto-organizar (Por modelo / Snowflake /
+  Compacto) · Ajustar a pantalla · zoom. **Minimapa** abajo a la derecha.
 
-### `DiagramCanvasInner` gestiona
+### Layouts (`features/diagram/layout/layouts.ts`)
+`nodeHeight(t)` estima la altura real de cada nodo (varía mucho con el nº de
+columnas). Los tres layouts empaquetan por esa altura real (masonry) para que
+**nunca se solapen**, incluso con tablas de 4 vs 38 columnas:
 
-- **Estado de hover/selección** (`hoveredTableId` + `selectedTableId`)
-  → derivado `activeTableId`.
-- **Columnas activas** (`activeColsByTable`): mapa
-  `tableId → Set<columnId>`. Se rellena recorriendo las relaciones
-  conectadas a `activeTableId`. **Las relaciones almacenan `column.id`
-  estables, no nombres** — ver §9.
-- **Asignación de `highlighted` / `dimmed` / `edgeIndex`** a cada
-  arista para enrutar conexiones paralelas con offset escalonado.
-- **Auto-distribución al cargar**: cuando cambia la "huella estructural"
-  del set de tablas (hash de IDs + nombres + columnas), se ejecuta
-  `layoutCompact` por defecto. Las posiciones arrastradas se conservan
-  en memoria mientras dure la sesión, **pero no se persisten al backend**.
-
-### `TableNode`
-
-- Encabezado con nombre + conteo de columnas.
-- Una fila por columna con: ícono PK/FK/SK/PT, nombre, ◇ nullable,
-  tipo en mono.
-- **Handles** (`react-flow`) por columna, con id `${col.id}-source` y
-  `${col.id}-target`. La estabilidad del id de columna es lo que evita
-  que renombrar una columna rompa los edges existentes.
-- Tooltip on hover con `logicalName / name`, tipo, `functionalDefinition`,
-  FK ref.
-
-### `AnimatedEdge`
-
-- Enrutamiento inteligente: lado mismo (L→L o R→R) cuando los nodos
-  se solapan horizontalmente; lado opuesto (R→L) cuando hay espacio.
-- `offset = 20 + edgeIndex × 16` para separar conexiones paralelas.
-- Animación `stroke-dashoffset` cuando la arista está activa.
+- `layoutByLayer` — bandas por nivel (orden), 1–3 sub-columnas balanceadas.
+- `layoutCompact` — grilla cuasi-cuadrada, más altos primero.
+- `layoutSnowflake` — radial con separación basada en el círculo envolvente del
+  nodo más alto (si no hay relaciones, cae a compacto).
 
 ---
 
-## 8. Generación de DDL (`features/ddl/`)
+## 9. Generación de DDL (`features/ddl/`)
 
-Todo client-side, sin round-trip al backend:
-
-```mermaid
-flowchart LR
-    BTN["Export DDL button<br/>(toolbar / list view / card row)"] --> SCOPE{"scope"}
-    SCOPE -->|"model"| GT["generateTablesDDL(allTables, allRels, engine, opts)"]
-    SCOPE -->|"domain"| GTD["generateTablesDDL(domainTables, allTables, ...)"]
-    SCOPE -->|"single table"| GTS["generateTableDDL(table, allTables, ...)"]
-    GT --> CTX["buildContext<br/>resolveSchema · supportsSchemas · supportsClustering"]
-    GTD --> CTX
-    GTS --> CTX
-    CTX --> EM["emitSchemas<br/>(CREATE SCHEMA)"]
-    CTX --> ET["emitTable<br/>(types via TYPE_MAP, quoting,<br/>PK inline, partition / cluster suffix)"]
-    CTX --> EFK["emitForeignKeysFor<br/>(ALTER TABLE ... FK<br/>resolveColumnName(id → name))"]
-    CTX --> CMT["appendComments<br/>(COMMENT ON ...)"]
-    EM --> SQL["SQL string"]
-    ET --> SQL
-    EFK --> SQL
-    CMT --> SQL
-    SQL --> M["DDLPreviewModal<br/>(copy / download / toggle options)"]
-```
+Client-side, sin round-trip:
 
 | Archivo | Rol |
-|---------|-----|
-| `engines/engines.ts` | Define `EngineDefinition` con `defaultSchema`, `partitionStrategies`, `supportsClustering`, `partitionHint`. La UI filtra opciones de partition usando este metadato. |
-| `ddl/typeMappings.ts` | `TYPE_MAP` (canónico → dialect) + `quoteIdent()` + `qualifyTable()`. |
-| `ddl/generators.ts` | Punto de entrada `generateTableDDL()` y `generateTablesDDL()`. Resuelve `Relationship.sourceColumn` (id) → nombre físico vía `resolveColumnName`. |
-| `ddl/components/DDLPreviewModal.tsx` | Diálogo unificado (model / domain / single-table). Toggles `emitSchemas` · `emitForeignKeys` · `emitComments`. |
+|---|---|
+| `engines/engines.ts` | `EngineDefinition` (defaultSchema, partitionStrategies, supportsClustering…) por engine. |
+| `ddl/generators.ts` | `genDDL(tables, opts)` → `CREATE TABLE` (+ NOT NULL, PRIMARY KEY) + `ALTER TABLE … ADD FOREIGN KEY`. `genViewDDL(table, view)` → `CREATE VIEW … AS SELECT … FROM … [WHERE …]`. `includeViews` añade un `CREATE VIEW` por vista. |
+| `ddl/components/DDLPreviewModal.tsx` | Toggles "Solo el scope actual" / "Incluir vistas" + "Copiar DDL". |
+
+DBML (`features/diagram/builders.ts`): `genDBML` serializa el canvas; `parseDBML`
+lo reconstruye (Aplicar **reemplaza** el canvas). `tableFromSources` deriva una
+tabla heredando columnas de ≤2 padres (FromSQL).
 
 ---
 
-## 9. Identidad estable de columnas (column IDs)
+## 10. Identidad estable de columnas
 
-Cambio importante introducido durante la migración: cada `TableColumn`
-tiene un `id` UUIDv4 estable.
-
-| Por qué | Antes | Ahora |
-|---------|-------|-------|
-| Renombrar una columna no debe romper sus relaciones | `Relationship.sourceColumn` guardaba el **nombre** → renombrar dejaba edges huérfanos y warnings de React Flow | guarda el `id` UUID; el nombre se resuelve solo al emitir DDL/DBML |
-| Handles de React Flow | `${col.name}-source` | `${col.id}-source` |
-| Edge construction | matching por nombre | matching por id (con fallback a nombre para compat) |
-
-**Punto único de verdad**: `src/lib/columnRef.ts`.
-
-```typescript
-findColumnId(tables, tableRef, columnName): string | null     // name → id (en imports)
-resolveColumnName(tables, tableRef, columnRef): string | null // id → name (al emitir SQL)
-ensureColumnId(col): col with id guaranteed                    // backfill defensivo
-ensureTableColumnIds(table): table con todos sus cols con id
-```
-
-**Cobertura**:
-
-- `TableForm.emptyColumn()` siempre stamp un `uuidv4()`.
-- Importadores (`excelParser`, `dbmlParser`, `sqlToTable`,
-  `agentColumnToTableColumn`) idem.
-- El backend (`models_db._ensure_column_ids`) hace **safety net** en
-  cada write: si llega una columna sin `id`, la stampa antes de
-  persistir.
-- Hay un **script de migración one-shot**
-  (`agent-modeler/scripts/backfill_column_ids.py`) para datos
-  pre-migración: backfillea los IDs en `model_tables` y purga las
-  relaciones legacy (que apuntaban por nombre).
-
----
-
-## 10. Lienzo Global
-
-`GlobalPage` (`src/app/projects/[projectId]/global/page.tsx`) carga
-todos los modelos del proyecto con `modelsService.list({ projectId, full: true })`,
-fusiona sus tablas en un único `DiagramCanvas` y las colorea según
-modelo de origen vía `namespaces` (background nodes).
-
-Es de **solo lectura**: no permite agregar/editar tablas. Útil para
-ver el linaje completo cuando un proyecto agrupa varios modelos.
+Cada `TableColumn` tiene un `id` estable que sobrevive a renames. Las relaciones
+referencian `column.id`, **no `name`**, así que renombrar una columna no rompe
+sus vínculos. El backend (`canvas_db._ensure_column_ids`) stampa un UUID
+defensivo en cualquier columna que llegue sin id.
 
 ---
 
 ## 11. Decisiones tecnológicas
 
-### Next.js 16 (App Router) sin rutas API propias
-El frontend solo usa Next.js para SSR / routing / middleware. Las
-rutas API se eliminaron al migrar a Cosmos DB porque mantenerlas como
-proxy era redundante: cualquier feature de auth o permisos que
-exponíamos en `/api/*` ya vivía mejor en FastAPI con permission
-helpers compartidos. La consecuencia es que el frontend funciona
-incluso desplegado en **Vercel / serverless** sin filesystem propio.
-
-### `@xyflow/react` v12
-Misma decisión que en versiones previas: hooks-first
-(`useInternalNode`, `useReactFlow`), tipos custom de nodo y arista,
-`getSmoothStepPath` con `offset` para edges paralelos.
-
-### Zustand v5 sin `persist`
-Cosmos DB es la fuente de verdad. Persistir en localStorage añadiría
-una capa más de divergencia que no compensa.
-
-### `jose` (Edge runtime) para verificar JWT
-El middleware corre en el Edge runtime de Next.js. `jsonwebtoken`
-no funciona ahí; `jose` sí. El backend Python usa `pyjwt`. Misma
-firma HS256, claves idénticas → cookie firmado por uno verificable
-por el otro.
-
-### Sin storage local para el diagrama
-Las posiciones del canvas son **solo en memoria**. Algoritmos de
-auto-layout (`layoutCompact`, `layoutLeftRight`, `layoutSnowflake`) se
-recalculan cada vez que se carga el modelo. Esto evita el infierno de
-tener posiciones obsoletas tras renombres / borrados.
+| Decisión | Razón |
+|---|---|
+| **Sin Tailwind** | El sistema *Aurora* se modela con CSS custom properties en `globals.css` (`rd-*`/`dmh-*`/`ed-*`/`mc-*`/`doc-*`). Ver `doc/design-system.md`. |
+| **Canvas propio, sin React Flow** | El prototipo definía interacciones específicas (flow animado, cross-layer, dock). Hacerlo a mano elimina dependencias pesadas (se quitaron `@xyflow/react`, `elkjs`). |
+| **Zustand sin `persist`** | Cosmos es la fuente de verdad. |
+| **`jose` (Edge) en el proxy** | El proxy corre en el Edge runtime; `jsonwebtoken` no funciona ahí. El backend usa `PyJWT`. Misma firma HS256. |
+| **Posiciones per-sesión** | El editor auto-organiza al abrir; evita posiciones obsoletas tras renombres/borrados. (`PATCH /positions` existe para persistirlas a futuro.) |
+| **Agente IA desacoplado** | Se integra en una versión próxima desde `app-agents-modeler`; su código compila aislado vía `chat-agent/lib/legacyModel.ts`. |

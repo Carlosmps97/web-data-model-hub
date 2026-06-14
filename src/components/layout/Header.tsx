@@ -1,61 +1,58 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import Icon from '@/components/ui/Icon';
 
 export interface BreadcrumbItem {
   label: string;
-  /** Internal href for <Link>. Omit for the current (last) segment. */
+  /** Internal href to navigate to. Omit for the current (last) segment. */
   href?: string;
+  /** Custom click handler (takes precedence over href). */
+  onClick?: () => void;
 }
 
 interface HeaderProps {
   crumbs: BreadcrumbItem[];
+  /** Right-aligned actions (buttons, badges). */
   actions?: React.ReactNode;
+  /**
+   * Inline content placed immediately after the breadcrumbs (before the
+   * flex spacer) — e.g. the editor's Scope control.
+   */
+  children?: React.ReactNode;
 }
 
-const ChevronSep = () => (
-  <svg
-    className="app-header-crumb-sep"
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    <polyline points="9 18 15 12 9 6" />
-  </svg>
-);
-
-const Header: React.FC<HeaderProps> = ({ crumbs, actions }) => {
+const Header: React.FC<HeaderProps> = ({ crumbs, actions, children }) => {
+  const router = useRouter();
   return (
-    <header className="app-header">
-      <nav className="app-header-crumbs" aria-label="Breadcrumb">
-        {crumbs.map((crumb, i) => (
-          <React.Fragment key={i}>
-            {i > 0 && <ChevronSep />}
-            {crumb.href ? (
-              <Link href={crumb.href} className="app-header-crumb-link" title={crumb.label}>
-                {crumb.label}
-              </Link>
-            ) : (
-              <span className="app-header-crumb-current" title={crumb.label}>
+    <div className="dmh-top">
+      <nav className="dmh-crumbs" aria-label="Breadcrumb">
+        {crumbs.map((crumb, i) => {
+          const isLast = i === crumbs.length - 1;
+          const clickable = !isLast && (crumb.href || crumb.onClick);
+          return (
+            <React.Fragment key={i}>
+              {i > 0 && <Icon name="chevR" size={12} style={{ color: 'var(--subtle)' }} />}
+              <span
+                className={`dmh-crumb${isLast ? ' current' : ''}`}
+                title={crumb.label}
+                onClick={
+                  clickable
+                    ? () => (crumb.onClick ? crumb.onClick() : router.push(crumb.href!))
+                    : undefined
+                }
+              >
                 {crumb.label}
               </span>
-            )}
-          </React.Fragment>
-        ))}
+            </React.Fragment>
+          );
+        })}
       </nav>
-      {actions && (
-        <div className="app-header-actions">
-          {actions}
-        </div>
-      )}
-    </header>
+      {children}
+      <div style={{ flex: 1 }} />
+      {actions}
+    </div>
   );
 };
 

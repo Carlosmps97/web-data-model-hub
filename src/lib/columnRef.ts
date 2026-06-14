@@ -30,14 +30,14 @@
  */
 
 import { v4 as uuidv4 } from 'uuid';
-import type { TableColumn, TableModel } from '@/types/model';
+import type { TableColumn, Table } from '@/types/model';
 
 /**
  * Find a table by either id or physical name. Order matters: id match
  * wins so that after the migration any lingering name collisions don't
  * mis-resolve.
  */
-function findTable(tables: TableModel[], tableRef: string): TableModel | undefined {
+function findTable(tables: Table[], tableRef: string): Table | undefined {
   return tables.find((t) => t.id === tableRef) ?? tables.find((t) => t.name === tableRef);
 }
 
@@ -47,7 +47,7 @@ function findTable(tables: TableModel[], tableRef: string): TableModel | undefin
  * should decide whether to surface an error or fall back.
  */
 export function findColumnId(
-  tables: TableModel[],
+  tables: Table[],
   tableRef: string,
   columnName: string,
 ): string | null {
@@ -64,7 +64,7 @@ export function findColumnId(
  * a column name keep rendering. Returns `null` when neither matches.
  */
 export function resolveColumnName(
-  tables: TableModel[],
+  tables: Table[],
   tableRef: string,
   columnRef: string,
 ): string | null {
@@ -82,7 +82,7 @@ export function resolveColumnName(
  * canvas to highlight related columns on hover.)
  */
 export function resolveColumn(
-  tables: TableModel[],
+  tables: Table[],
   tableRef: string,
   columnRef: string,
 ): TableColumn | null {
@@ -112,13 +112,13 @@ export function ensureColumnId<T extends Partial<TableColumn>>(col: T): T & { id
 }
 
 /**
- * Walks a `TableModel`'s columns and stamps ids on any that are
+ * Walks a `Table`'s columns and stamps ids on any that are
  * missing. Returns the same table reference when nothing changed,
  * otherwise a shallow clone with a fresh `columns` array. Cheap enough
  * to call during `loadModel` as a last-resort backfill for any records
  * the backend migration didn't reach.
  */
-export function ensureTableColumnIds(table: TableModel): TableModel {
+export function ensureTableColumnIds(table: Table): Table {
   let mutated = false;
   const columns = table.columns.map((c) => {
     if (typeof c.id === 'string' && c.id.length > 0) return c;

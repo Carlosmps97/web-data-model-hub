@@ -13,6 +13,8 @@ interface UIStore {
   sidebarCollapsed: boolean;
   rightPanelOpen: boolean;
   chatPanelOpen: boolean;
+  /** Off-canvas quick-help drawer (opened from the rail "?" button). */
+  helpOpen: boolean;
 
   /**
    * Width in pixels of the left workbench panel (Visual / Code tabs) inside
@@ -40,6 +42,8 @@ interface UIStore {
   setRightPanelOpen: (open: boolean) => void;
   toggleChatPanel: () => void;
   setChatPanelOpen: (open: boolean) => void;
+  setHelpOpen: (open: boolean) => void;
+  toggleHelp: () => void;
   setLeftPanelWidth: (width: number) => void;
   setSelectedTable: (id: string | null) => void;
   setPreviewColor: (color: string | null) => void;
@@ -73,6 +77,7 @@ export const useUIStore = create<UIStore>((set) => ({
   sidebarCollapsed: loadInitialSidebarCollapsed(),
   rightPanelOpen: false,
   chatPanelOpen: false,
+  helpOpen: false,
   leftPanelWidth: loadInitialLeftPanelWidth(),
   selectedTableId: null,
   previewColor: null,
@@ -99,6 +104,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
   toggleChatPanel: () => set((state) => ({ chatPanelOpen: !state.chatPanelOpen })),
   setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
+  setHelpOpen: (open) => set({ helpOpen: open }),
+  toggleHelp: () => set((state) => ({ helpOpen: !state.helpOpen })),
   setLeftPanelWidth: (width) => {
     const clamped = Math.min(LEFT_PANEL_MAX, Math.max(LEFT_PANEL_MIN, Math.round(width)));
     if (typeof window !== 'undefined') {

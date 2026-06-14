@@ -1,29 +1,17 @@
 # Referencia de API (consumida por el frontend)
 
-> **El frontend ya no expone rutas API propias.** Toda la comunicación
-> apunta directamente al backend FastAPI `agent-modeler` (puerto
-> `:8000` en dev). Este documento describe los endpoints que el
-> frontend consume y los **tipos** que cruzan ambos lados.
-
-## URL Base
-
-```
-http://localhost:8000/api    # development
-https://<tu-backend>/api     # production
-```
-
-Configurado en el frontend con `NEXT_PUBLIC_API_URL`.
+> El frontend **no expone rutas API propias**. Toda la comunicación apunta al
+> backend FastAPI `backend-data-model-hub` (`:8000` en dev), configurado con
+> `NEXT_PUBLIC_API_URL`. Este documento describe los endpoints que el frontend
+> consume y los **tipos** que cruzan ambos lados (espejados en
+> `backend-data-model-hub/src/db/db_models.py`).
 
 **Toda request lleva el cookie `modeler-auth`** (HttpOnly, SameSite=Lax,
-firmado HS256). El cliente de frontend lo activa con `credentials:
-'include'` en cada `fetch`.
+HS256). El cliente lo activa con `credentials: 'include'`.
 
 ---
 
 ## 1. Envelope de respuesta
-
-Todos los endpoints CRUD (auth / projects / models / admin) usan el
-envelope estándar:
 
 ```typescript
 type ApiResponse<T> =
@@ -31,16 +19,9 @@ type ApiResponse<T> =
   | { success: false; error: string };
 ```
 
-`apiFetch` desempaqueta automáticamente: devuelve `data` si
-`success === true`, lanza `ApiError(message, status)` en cualquier
-otro caso.
-
-**Excepción**: los endpoints del agente (`/api/conversations/*`,
-`/api/health`, `/api/engines`) devuelven el body directo (no envuelto).
-Por eso `agent.service.ts` usa un cliente especializado que arroja
-`AgentClientError(status, detail, code)`.
-
-Ver `web-data-model-hub/src/services/http.ts` y `agent.service.ts`.
+`apiFetch` (en `src/services/http.ts`) desempaqueta: devuelve `data` si
+`success === true`, lanza `ApiError(message, status)` en cualquier otro caso
+(red caída, 4xx/5xx, envelope inválido).
 
 ---
 
@@ -49,128 +30,79 @@ Ver `web-data-model-hub/src/services/http.ts` y `agent.service.ts`.
 ### 2.1 Auth
 
 | Método | Ruta | Auth | Body | Response |
-|--------|------|------|------|----------|
+|---|---|---|---|---|
 | POST | `/api/auth/login` | público | `{ username, password }` | `AuthUser` + Set-Cookie |
 | POST | `/api/auth/logout` | público | — | `null` (limpia cookie) |
 | GET  | `/api/auth/me` | cookie | — | `AuthUser` o 401 |
 
-Respuesta de `login` (envelope abierto):
-
-```json
-{
-  "success": true,
-  "data": {
-    "id": "uuid",
-    "username": "admin",
-    "role": "admin",
-    "isActive": true,
-    "permissions": [],
-    "createdAt": "2026-...",
-    "statusUpdatedAt": "2026-...",
-    "lastLoginAt": "2026-..."
-  }
-}
-```
-
-`AuthUser.permissions` es `Permission[]` con `{scope, projectId,
-modelId?, level}`. El frontend lo guarda en `useAuthStore` y lo
-expone como helpers (`canViewProject`, `canEditModel`, …).
-
 ### 2.2 Proyectos
 
-| Método | Ruta | Auth | Body | Notas |
-|--------|------|------|------|-------|
-| GET | `/api/projects` | sesión | — | filtra por permisos del usuario |
-| POST | `/api/projects` | **admin** | `{ name, description? }` | |
-| GET | `/api/projects/{id}` | view sobre el proyecto | — | |
-| PUT | `/api/projects/{id}` | edit sobre el proyecto | `{ name?, description? }` | |
-| DELETE | `/api/projects/{id}` | **admin** | — | cascade soft-delete de modelos hijos |
+| Método | Ruta | Auth | Body |
+|---|---|---|---|
+| GET | `/api/projects` | sesión | — (filtra por permisos) |
+| POST | `/api/projects` | **admin** | `{ name, description?, engines?, layers?, domains? }` |
+| GET | `/api/projects/{id}` | view | — |
+| PUT | `/api/projects/{id}` | edit | `{ name?, description?, engines?, layers?, domains? }` |
+| DELETE | `/api/projects/{id}` | **admin** | — (cascade al canvas) |
 
-Respuesta envuelta. Tipo del payload:
+El payload es un `Project` (con `engines` / `layers` / `domains` embebidos).
+`PUT` es la vía para editar la jerarquía (Modelos/niveles y Dominios) desde el
+hub del proyecto.
 
-```typescript
-interface Project {
-  id: string;            // uuid
-  name: string;
-  description: string | null;
-  createdAt: string;     // ISO 8601
-  updatedAt: string;
-}
-```
-
-### 2.3 Modelos
-
-| Método | Ruta | Auth | Notas |
-|--------|------|------|-------|
-| GET | `/api/models?projectId=…&full=…` | sesión | `projectId` filtra por proyecto; `full=true` hidrata `tables/relationships/views`; default = stubs livianos |
-| POST | `/api/models` | edit sobre el `projectId` | body `{ projectId, name, description?, engine?, tables?, relationships?, views?, domainCatalog? }` |
-| GET | `/api/models/{id}` | view sobre el modelo | siempre hidratado |
-| PUT | `/api/models/{id}` | edit sobre el modelo | partial update; las child arrays se reemplazan en bloque si están en el body |
-| DELETE | `/api/models/{id}` | edit sobre el modelo | cascade soft-delete de child collections |
-
-**Stub mode** (`full=false`):
-
-```json
-{
-  "id": "uuid",
-  "projectId": "uuid",
-  "name": "Sales DM",
-  "engine": "postgresql",
-  "tables": [{"id": "stub-0", "name": "", "columns": []}, ...],   // tantos stubs como tablas
-  "relationships": [],
-  "views": [],
-  "createdAt": "...",
-  "updatedAt": "..."
-}
-```
-
-El frontend usa stubs en la pantalla de proyectos para mostrar el
-conteo de tablas sin pagar la hidratación completa.
-
-### 2.4 Conversaciones (chat con el agente IA)
+### 2.3 Canvas (tablas + relaciones)
 
 | Método | Ruta | Auth | Body | Response |
-|--------|------|------|------|----------|
-| POST | `/api/conversations` | sesión | `{ conversation_id, engine }` | `{ conversation_id, engine, created }` |
-| DELETE | `/api/conversations/{id}` | sesión | — | `{ conversation_id, deleted }` |
-| POST | `/api/conversations/{id}/guidelines` | sesión | multipart `file` | `{ status, conversation_id, file_name, file_format, file_size_bytes, preview }` |
-| POST | `/api/conversations/{id}/model` | sesión | multipart `excel_file`, `engine?`, `context_text?` | `ModelingResponse` |
-| GET | `/api/conversations/{id}/model` | sesión | — | último `ModelingResponse` (404 si todavía sin turno) |
+|---|---|---|---|---|
+| GET | `/api/projects/{id}/canvas` | view | — | `{ tables: Table[], relationships: Relationship[] }` |
+| PUT | `/api/projects/{id}/canvas` | edit | `{ tables?, relationships? }` | canvas actualizado |
+| PATCH | `/api/projects/{id}/positions` | edit | `{ tables: { [tableId]: {x,y} } }` | `{ updated: N }` |
 
-> Estos endpoints **no usan envelope**. El cliente
-> (`src/services/agent.service.ts`) parsea body crudo y arroja
-> `AgentClientError` ante no-2xx.
+- `PUT /canvas` **reemplaza en bloque** lo que llegue (tablas y/o relaciones).
+  Exige al menos uno (400 si ambos faltan).
+- El store **omite `position`** al guardar el canvas; las posiciones van solo por
+  `PATCH /positions`. (El editor actual las trata como per-sesión.)
 
-### 2.5 Health / engines
+### 2.4 Admin de usuarios
 
-| Método | Ruta | Auth | Response |
-|--------|------|------|----------|
-| GET | `/api/health` | público | `{ status, version, foundry_connected, default_engine, active_conversations }` |
-| GET | `/api/engines` | público | `{ engines: string[], default: string }` |
+| Método | Ruta | Auth |
+|---|---|---|
+| GET | `/api/admin/users` | admin |
+| POST | `/api/admin/users` | admin |
+| PUT | `/api/admin/users/{id}` | admin |
+| DELETE | `/api/admin/users/{id}` | admin |
+
+Body de create/update: `{ username, password?, role, isActive, permissions: Permission[] }`
+(password obligatorio al crear, ≥6 chars; omitir para no cambiarlo al editar).
+
+### 2.5 Excel-import
+
+| Método | Ruta | Auth | Body | Response |
+|---|---|---|---|---|
+| POST | `/api/excel-import/preview` | sesión | multipart `file` (.xlsx/.xlsm) | `ExcelPreview` |
+
+> El **agente de IA** (modelado conversacional) está desacoplado en
+> `app-agents-modeler` y no se documenta aquí; el botón "AI Agent" del editor
+> avisa que se reconectará en una versión próxima.
 
 ---
 
 ## 3. Códigos de error comunes
 
 | HTTP | Causa típica |
-|------|--------------|
-| 400 | `conversation_id` no es UUID v4, engine no soportado, body inválido |
-| 401 | Cookie ausente, expirada o firmada con secret distinto. El frontend lo trata como logout. |
-| 403 | Usuario autenticado pero sin permisos para el recurso (project/model). |
-| 404 | Recurso no encontrado o conversación no creada todavía. |
-| 422 | Pydantic rechazó el body (ej. archivo de guidelines vacío o formato no soportado). |
-| 429 | Rate limit (Foundry o el limiter interno). El backend ya hace retry; si llega al cliente significa que se agotaron. |
-| 500 | Error inesperado. Log para diagnóstico. |
-| 503 | Foundry no conectado o `ConversationStore` no inicializado al arranque. |
+|---|---|
+| 400 | body inválido (p. ej. `PUT /canvas` sin tablas ni relaciones) |
+| 401 | cookie ausente/expirada/firmada con otro secret → tratado como logout |
+| 403 | autenticado pero sin permiso sobre el proyecto |
+| 404 | recurso no encontrado |
+| 413 | Excel > 10 MB |
+| 500 | error inesperado / DB no conectada |
 
 ---
 
 ## 4. Tipos compartidos (frontend ↔ backend)
 
-Los modelos viven en `web-data-model-hub/src/types/` y se reflejan
-exactamente en los Pydantic docs de
-`agent-modeler/src/db/db_models.py`. Esta sincronía es manual; cualquier
-cambio de schema **debe replicarse en ambos lados**.
+Viven en `web-data-model-hub/src/types/` y se reflejan en
+`backend-data-model-hub/src/db/db_models.py`. La sincronía es manual.
 
 ### 4.1 `AuthUser` y permisos
 
@@ -187,258 +119,159 @@ interface AuthUser {
 }
 
 interface Permission {
-  scope: 'project' | 'model';
-  projectId: string;
-  modelId?: string | null;     // solo cuando scope === 'model'
+  projectId: string;       // unidad de acceso = el proyecto (un canvas por proyecto)
   level: 'view' | 'edit';
-}
-
-interface AuthJwtClaims {
-  sub: string;        // userId
-  username: string;
-  role: AuthUser['role'];
-  iat?: number;
-  exp?: number;
 }
 ```
 
-### 4.2 `Project`
+### 4.2 `DatabaseEngine`
+
+```typescript
+type DatabaseEngine = 'postgresql' | 'databricks_sql' | 'sqlserver' | 'mysql' | 'cosmosdb';
+```
+
+| Engine | Schema default | Particionamiento | Clustering |
+|---|---|---|---|
+| `postgresql` | `public` | RANGE · LIST · HASH | — |
+| `databricks_sql` | `default` | RANGE · LIST · BUCKET | sí (Z-ORDER) |
+| `sqlserver` | `dbo` | RANGE | — |
+| `mysql` | `public` | RANGE · LIST · HASH | — |
+| `cosmosdb` | `default` | — (NoSQL) | — |
+
+### 4.3 `Project` y su jerarquía
 
 ```typescript
 interface Project {
   id: string;
   name: string;
-  description: string | null;
-  createdAt: string;
-  updatedAt: string;
+  description?: string;
+  engines: DatabaseEngine[];
+  layers: ModelLevel[];     // los "Modelos / niveles"
+  domains: Domain[];        // verticales
+  createdAt?: string;
+  updatedAt?: string;
 }
-```
 
-### 4.3 `DataModel`
+interface ModelLevel {
+  id: string;     // slug, p. ej. "rdv"
+  name: string;   // código, p. ej. "RDV"
+  full?: string;  // "Raw Data Vault"
+  color?: string;
+  order: number;  // banda izquierda→derecha + adyacencia cross-layer
+  engine?: DatabaseEngine;
+  desc?: string;
+}
 
-```typescript
-interface DataModel {
+type Sensitivity = 'Public' | 'Internal' | 'Confidential' | 'Restricted' | 'PII';
+
+interface Domain {
   id: string;
-  projectId: string;
   name: string;
-  description: string | null;
-  engine: DatabaseEngine | null;
-  domainCatalog: DomainDefinition[];
-  tables: TableModel[];
-  relationships: Relationship[];
-  views: ViewModel[];
-  createdAt: string;
-  updatedAt: string;
+  color?: string;
+  owner?: string;
+  steward?: string;
+  sensitivity?: Sensitivity;
+  description?: string;
+  subdomains: string[];   // etiquetas libres
+  layers: string[];       // ids de ModelLevel que atraviesa
 }
 ```
 
-### 4.4 `DatabaseEngine`
-
-Conjunto de motores soportados por el backend (`SUPPORTED_ENGINES`)
-**y** por el frontend (los DDL generators los respetan):
-
-| Valor | Schema default | Particionamiento | Clustering |
-|-------|----------------|------------------|------------|
-| `databricks_sql` | `default` | `RANGE`, `LIST`, `BUCKET` | sí (Z-ORDER) |
-| `cosmosdb` | — | — | — |
-| `sqlserver` | `dbo` | `RANGE` | — |
-| `postgresql` | `public` | `RANGE`, `LIST`, `HASH` | — |
-| `mysql` | — | `RANGE`, `LIST`, `HASH`, `KEY` | — |
-
-> Los motores `oracle` y otros que aparecían en la doc legacy fueron
-> retirados — el set canonical lo dicta `settings.SUPPORTED_ENGINES`
-> en el backend.
-
-### 4.5 `TableModel` y `TableColumn`
+### 4.4 `Table`, `TableColumn`, `View`
 
 ```typescript
-interface TableModel {
-  id: string;                   // uuid
-  schema?: string;              // default del engine si vacío
+interface Table {
+  id: string;
+  schema?: string;
   name: string;
   logicalName?: string;
-  columns: TableColumn[];
+  layer?: string;         // ModelLevel id
+  domain?: string;        // Domain id
+  subdomain?: string;
+  color?: string;         // heredado del dominio
   functionalDefinition?: string;
   applicationCode?: string;
-  domain?: string;
-  subdomain?: string;
-  domainId?: string;
-  subdomainId?: string;
-  tags?: string[];
-  color?: string;
+  columns: TableColumn[];
+  views: View[];          // proyecciones SQL por rol (no van en el diagrama ER)
+  tags?: Tag[];
   partition?: PartitionSpec;
+  position?: NodePosition; // per-sesión
 }
 
 interface TableColumn {
-  /**
-   * Identificador estable que sobrevive a renames. Todas las
-   * relaciones (Relationship.sourceColumn / targetColumn) y los
-   * handles de React Flow se referencian por este id, NUNCA por
-   * `name`. Asegura que renombrar una columna no invalide edges
-   * ni FKs.
-   */
-  id: string;
-  name: string;                 // physical name (SQL)
+  id: string;             // ESTABLE — sobrevive a renames; las relaciones apuntan a este id
+  name: string;
   logicalName?: string;
-  dataType: string;             // canónico (integer, varchar, decimal) o dialect-specific con paréntesis
-  length?: number;              // varchar(N) / decimal(N)
-  scale?: number;               // decimal(N, M)
+  dataType: string;       // canónico (integer, varchar, decimal…) o dialect-specific
+  length?: number;
+  scale?: number;
   isPrimaryKey?: boolean;
   isSurrogateKey?: boolean;
-  isPartitionKey?: boolean;     // legacy — preferir TableModel.partition
+  isPartitionKey?: boolean;
   isForeignKey?: boolean;
-  foreignKeyRef?: { table: string; column: string };  // por NOMBRE (lo que el usuario escribe)
+  foreignKeyRef?: { table: string; column: string };
   isNullable?: boolean;
   isUnique?: boolean;
   defaultValue?: string;
   functionalDefinition?: string;
-  observations?: string;        // notas del agente sobre la columna
+  observations?: string;
+}
+
+interface View {
+  id: string;
+  name: string;
+  type: 'business' | 'technical';
+  role?: string;
+  select: string;   // multilínea: una expresión por línea (CONCAT, sha256, CASE…)
+  where: string;    // multilínea: condiciones unidas con AND
 }
 ```
 
-### 4.6 `PartitionSpec`
+### 4.5 `Relationship`
 
 ```typescript
-interface PartitionSpec {
-  strategy: 'NONE' | 'RANGE' | 'LIST' | 'HASH' | 'BUCKET';
-  columns: string[];            // por nombre — el orden importa
-  buckets?: number;             // para HASH / BUCKET
-  granularity?: 'DAY' | 'MONTH' | 'YEAR' | 'HOUR';
-  clusteringColumns?: string[]; // solo Databricks (Z-ORDER)
+type Cardinality = '1:1' | '1:N' | 'N:N';
+
+interface RelationshipEndpoint {
+  table: string;    // Table.id
+  column: string;   // TableColumn.id
 }
-```
 
-### 4.7 `Relationship`
-
-```typescript
 interface Relationship {
-  id: string;                   // uuid
-  /** Acepta TableModel.id (preferido) o TableModel.name (legacy). */
-  sourceTable: string;
-  /**
-   * Apunta a TableColumn.id (post-migration). Datos pre-migration
-   * todavía pueden contener nombres; el frontend los resuelve con
-   * fallback en src/lib/columnRef.ts::resolveColumnName.
-   */
-  sourceColumn: string;
-  targetTable: string;
-  targetColumn: string;
-  type: 'one-to-one' | 'one-to-many' | 'many-to-many';
+  id: string;
+  source: RelationshipEndpoint;
+  target: RelationshipEndpoint;
+  cardinality: Cardinality;
+  crossLayer?: boolean;  // DERIVADO (source.layer ≠ target.layer) — no se persiste
+  skip?: boolean;        // DERIVADO (|orderΔ| > 1) — no se persiste
 }
 ```
 
-### 4.8 `ViewModel`
+### 4.6 `Canvas`
 
 ```typescript
-interface ViewModel {
-  id: string;
-  name: string;
-  logicalName?: string;
-  schema?: string;
-  sourceTableId: string;
-  viewType: 'technical' | 'user' | 'business';
-  columns: ViewColumnTransform[];
-  whereClause?: string;
-  useCustomSql?: boolean;
-  customSql?: string;
-  functionalDefinition?: string;
-  domain?: string;
-  subdomain?: string;
-  tags?: string[];
-  color?: string;
-}
-
-interface ViewColumnTransform {
-  sourceColumn: string;
-  alias?: string;
-  expression?: string;
-  include?: boolean;
+interface Canvas {
+  tables: Table[];
+  relationships: Relationship[];
 }
 ```
 
-### 4.9 `DomainDefinition`
-
-```typescript
-interface DomainDefinition {
-  id: string;
-  name: string;
-  code?: string;
-  description?: string;
-  color?: string;
-  subdomains: SubdomainDefinition[];
-  defaults?: { schema?: string; tags?: string[] };
-}
-
-interface SubdomainDefinition {
-  id: string;
-  name: string;
-  code?: string;
-  description?: string;
-  defaults?: { schema?: string; tags?: string[] };
-}
-```
-
-### 4.10 `ModelingResponse` (output del agente)
-
-```typescript
-interface ModelingResponse {
-  conversation_id: string;
-  engine: AgentEngine;
-  turn_number: number;
-  tables: AgentTable[];
-  relationships: string[];                      // siempre [] hoy
-  export_sql: string;
-  export_markdown: string;
-  qa_report: AgentQAReport;                     // todos vacíos hoy
-  guidelines_applied: string;
-  summary: string;
-}
-
-interface AgentTable {
-  table_name: string;
-  table_description: string;
-  columns: AgentColumn[];
-  ddl: string;
-}
-
-interface AgentColumn {
-  column_name: string;
-  data_type: string;
-  nullable: boolean;
-  is_pk: boolean;
-  is_fk: boolean;
-  fk_references: string | null;                 // "tabla.columna" o null
-  functional_definition: string;
-  observations: string;
-}
-```
-
-`modelingResponseToCanvas` (en `src/lib/agent/mapping.ts`) convierte
-esto a `TableModel[]` + `Relationship[]` listos para inyectar en
-`useModelStore`. Asigna `id: uuidv4()` a cada `TableModel` y a cada
-`TableColumn`, y resuelve `fk_references` a relaciones por `id`
-mediante `findColumnId`.
+`canvasService.getCanvas(projectId)` devuelve este shape; `saveCanvas` lo envía
+(sin `position`).
 
 ---
 
-## 5. Migración desde rutas API legacy
+## 5. Regla de oro
 
-Si encuentras código que todavía llama a `/api/projects` desde el
-frontend usando `fetch` directo (sin `services/`), está pegado a la
-era pre-migration. La regla actual es:
+Nunca llamar `fetch` directo a `/api/*` desde un componente. Usar siempre la capa
+`services/`:
 
 ```typescript
-// ❌ legacy
-const res = await fetch('/api/projects');
-const json = await res.json();
-
-// ✅ ahora
-import { projectsService } from '@/services';
+// ✅
+import { projectsService, canvasService } from '@/services';
 const projects = await projectsService.listProjects();
+const canvas = await canvasService.getCanvas(projectId);
 ```
 
-`projectsService` ya:
-- Apunta a `NEXT_PUBLIC_API_URL` (cross-origin con FastAPI).
-- Manda `credentials: 'include'`.
-- Desempaqueta el envelope.
-- Lanza `ApiError` ante problemas — el componente solo `try/catch`.
+`services/*` ya apunta a `NEXT_PUBLIC_API_URL`, manda `credentials: 'include'`,
+desempaqueta el envelope y lanza `ApiError` ante problemas.
