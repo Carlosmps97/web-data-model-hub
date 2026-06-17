@@ -30,6 +30,42 @@ export interface Tag {
   value: string;
 }
 
+// ─── UDP / Semantic Type catalog (transversal governance metadata) ───────────
+// Cross-project, organization-wide. Created & managed in the Model Center
+// "Metadata" section, then assigned to a project's tables/columns. Mirrors the
+// backend `SemanticTypeDoc` / `UdpDoc` in `db_models.py`.
+
+/** A controlled-vocabulary label carried by a Semantic Type — the user picks a
+ *  value from `allowedValues` when assigning the type to a column. */
+export interface SemanticTag {
+  key: string;
+  allowedValues: string[];
+}
+
+/** A semantic classification of a column (e.g. Monto, Porcentaje, Hash).
+ *  Assigning it inherits `dataType` onto the column (still editable) and
+ *  surfaces its controlled tags. */
+export interface SemanticType {
+  id: string;
+  name: string;
+  dataType: string;
+  description?: string;
+  tags: SemanticTag[];
+}
+
+export type UdpScope = 'table' | 'column';
+
+/** A user-defined property assignable to tables and/or columns. Extensible:
+ *  free-text or a controlled enum. */
+export interface Udp {
+  id: string;
+  name: string;
+  description?: string;
+  appliesTo: UdpScope[];
+  valueType: 'text' | 'enum';
+  allowedValues?: string[];
+}
+
 // ─── Model level ("Modelo / nivel") ──────────────────────────────────────────
 
 /**
@@ -75,6 +111,8 @@ export interface Domain {
   subdomains: string[];
   /** ModelLevel ids this domain spans. */
   layers: string[];
+  /** Free key/value governance tags (secondary metadata, shown last). */
+  tags?: Tag[];
 }
 
 // ─── View (role-specific SQL projection, embedded in a table) ────────────────
@@ -110,12 +148,23 @@ export interface TableColumn {
   isSurrogateKey?: boolean;
   isPartitionKey?: boolean;
   isForeignKey?: boolean;
+  /** True when the FK was pinned by hand — a relationship delete won't clear it. */
+  fkManual?: boolean;
   foreignKeyRef?: { table: string; column: string };
   isNullable?: boolean;
   isUnique?: boolean;
   defaultValue?: string;
   functionalDefinition?: string;
   observations?: string;
+  /** Assigned Semantic Type (id into the transversal catalog). Inherits its
+   *  data type onto this column and surfaces its controlled-vocab tags. */
+  semanticTypeId?: string;
+  /** Chosen values for the Semantic Type's controlled tags (tag key → value). */
+  semanticValues?: Record<string, string>;
+  /** Chosen values for assigned column-level UDPs (udp id → value). */
+  udpValues?: Record<string, string>;
+  /** Free key/value governance tags (secondary metadata, shown last). */
+  tags?: Tag[];
 }
 
 // ─── Partitioning ────────────────────────────────────────────────────────────
@@ -169,6 +218,8 @@ export interface Table {
   /** Role-specific SQL views derived from this table. */
   views: View[];
   tags?: Tag[];
+  /** Chosen values for assigned table-level UDPs (udp id → value). */
+  udpValues?: Record<string, string>;
   partition?: PartitionSpec;
   position?: NodePosition;
 }

@@ -9,5 +9,6 @@
 export * from './http';
 export * as projectsService from './projects.service';
 export * as canvasService from './canvas.service';
+export * as metadataService from './metadata.service';
 export { authService } from './auth.service';
 export { adminService } from './admin.service';

@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-//  Hook que orquesta una conversación con el agente para un `modelId`.
+//  Hook que orquesta una conversación con el agente para un `projectId`.
 //
 //  Encapsula:
 //
@@ -56,7 +56,7 @@ export interface AgentConversationState {
 
 export interface UseAgentConversationParams {
   /** Id del modelo abierto en el editor (scope de la conversación). */
-  modelId: string | null;
+  projectId: string | null;
   /** Engine actual del modelo (puede ser legacy `oracle` o `databricks`). */
   engine: DatabaseEngine | null | undefined;
 }
@@ -89,13 +89,13 @@ export interface UseAgentConversationApi extends AgentConversationState {
 
 /**
  * Hook principal del chat con el agente. Mantiene el `conversation_id`
- * estable mientras dure el `modelId`; al cambiar de modelo, el hook
+ * estable mientras dure el `projectId`; al cambiar de modelo, el hook
  * usado por otro panel verá otra sesión.
  */
 export function useAgentConversation(
   params: UseAgentConversationParams,
 ): UseAgentConversationApi {
-  const { modelId, engine } = params;
+  const { projectId, engine } = params;
 
   // Engine que vamos a enviar al backend (mapea oracle→postgresql, etc.).
   const agentEngine = toAgentEngine(engine);
@@ -111,23 +111,23 @@ export function useAgentConversation(
   const setSending = useAgentStore((s) => s.setSending);
   const setUploadingGuidelines = useAgentStore((s) => s.setUploadingGuidelines);
 
-  // Hidratamos la sesión apenas tengamos modelId/engine. El UUID se
+  // Hidratamos la sesión apenas tengamos projectId/engine. El UUID se
   // genera la primera vez y es estable mientras viva la pestaña.
   useEffect(() => {
-    if (!modelId) return;
-    ensureSession(modelId, agentEngine);
-  }, [modelId, agentEngine, ensureSession]);
+    if (!projectId) return;
+    ensureSession(projectId, agentEngine);
+  }, [projectId, agentEngine, ensureSession]);
 
   // Si el engine cambia mientras la conversación está viva, lo reflejamos.
   // El backend lo ajustará en el próximo turno (el form-data mandará
   // `engine` y el endpoint `create_conversation` también es idempotente).
   const lastEngineRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!modelId) return;
+    if (!projectId) return;
     if (lastEngineRef.current === agentEngine) return;
     lastEngineRef.current = agentEngine;
-    setSessionEngine(modelId, agentEngine);
-  }, [modelId, agentEngine, setSessionEngine]);
+    setSessionEngine(projectId, agentEngine);
+  }, [projectId, agentEngine, setSessionEngine]);
 
   // Suscripción granular al estado de la sesión + flags UI.
   //
@@ -138,14 +138,14 @@ export function useAgentConversation(
   // Por eso usamos `EMPTY_MESSAGES` como referencia estable.
   const view = useAgentStore(
     useShallow((s): AgentConversationState => {
-      const session = modelId ? s.sessions[modelId] : undefined;
+      const session = projectId ? s.sessions[projectId] : undefined;
       return {
         conversationId: session?.conversationId ?? null,
         messages: session?.messages ?? EMPTY_MESSAGES,
         lastResult: session?.lastResult ?? null,
         guidelines: session?.guidelines ?? null,
-        sending: modelId ? !!s.sending[modelId] : false,
-        uploadingGuidelines: modelId ? !!s.uploadingGuidelines[modelId] : false,
+        sending: projectId ? !!s.sending[projectId] : false,
+        uploadingGuidelines: projectId ? !!s.uploadingGuidelines[projectId] : false,
       };
     }),
   );
@@ -173,7 +173,7 @@ export function useAgentConversation(
 
   const sendTurn = useCallback<UseAgentConversationApi['sendTurn']>(
     async ({ text, excelFile }) => {
-      if (!modelId) return null;
+      if (!projectId) return null;
       const trimmed = (text ?? '').trim();
       if (!trimmed && !excelFile) return null;
 
@@ -187,28 +187,28 @@ export function useAgentConversation(
           ? { name: excelFile.name, sizeBytes: excelFile.size, kind: 'excel' }
           : undefined,
       };
-      appendMessage(modelId, userMsg);
+      appendMessage(projectId, userMsg);
 
       // Placeholder del assistant.
       const placeholderId = cryptoId('a');
-      appendMessage(modelId, {
+      appendMessage(projectId, {
         id: placeholderId,
         role: 'assistant',
         content: 'Pensando…',
         timestamp: new Date().toISOString(),
       });
 
-      setSending(modelId, true);
+      setSending(projectId, true);
       try {
-        const conversationId = await ensureBackendConversation(modelId);
+        const conversationId = await ensureBackendConversation(projectId);
         const payload: GenerateModelInput = {
           contextText: trimmed || undefined,
           excelFile: excelFile ?? undefined,
           engine: agentEngine,
         };
         const response = await generateModel(conversationId, payload);
-        setLastResult(modelId, response);
-        replaceMessage(modelId, placeholderId, {
+        setLastResult(projectId, response);
+        replaceMessage(projectId, placeholderId, {
           id: placeholderId,
           role: 'assistant',
           content: response.summary || 'Modelo generado.',
@@ -218,7 +218,7 @@ export function useAgentConversation(
         return response;
       } catch (err) {
         const message = describeError(err, 'No se pudo generar el modelo.');
-        replaceMessage(modelId, placeholderId, {
+        replaceMessage(projectId, placeholderId, {
           id: placeholderId,
           role: 'assistant',
           content: message,
@@ -228,11 +228,11 @@ export function useAgentConversation(
         });
         return null;
       } finally {
-        setSending(modelId, false);
+        setSending(projectId, false);
       }
     },
     [
-      modelId,
+      projectId,
       agentEngine,
       ensureBackendConversation,
       appendMessage,
@@ -244,13 +244,13 @@ export function useAgentConversation(
 
   const uploadGuidelinesFile = useCallback<UseAgentConversationApi['uploadGuidelinesFile']>(
     async (file) => {
-      if (!modelId) return null;
-      setUploadingGuidelines(modelId, true);
+      if (!projectId) return null;
+      setUploadingGuidelines(projectId, true);
       try {
-        const conversationId = await ensureBackendConversation(modelId);
+        const conversationId = await ensureBackendConversation(projectId);
         const response = await uploadGuidelines(conversationId, file);
-        setGuidelines(modelId, response);
-        appendMessage(modelId, {
+        setGuidelines(projectId, response);
+        appendMessage(projectId, {
           id: cryptoId('s'),
           role: 'system',
           content: `Guidelines cargadas: ${response.file_name} (${formatBytes(response.file_size_bytes)}).`,
@@ -265,7 +265,7 @@ export function useAgentConversation(
         return response;
       } catch (err) {
         const message = describeError(err, 'No se pudieron cargar las guidelines.');
-        appendMessage(modelId, {
+        appendMessage(projectId, {
           id: cryptoId('s'),
           role: 'system',
           content: message,
@@ -274,11 +274,11 @@ export function useAgentConversation(
         });
         return null;
       } finally {
-        setUploadingGuidelines(modelId, false);
+        setUploadingGuidelines(projectId, false);
       }
     },
     [
-      modelId,
+      projectId,
       ensureBackendConversation,
       appendMessage,
       setGuidelines,
@@ -287,9 +287,9 @@ export function useAgentConversation(
   );
 
   const reset = useCallback<UseAgentConversationApi['reset']>(async () => {
-    if (!modelId) return;
-    const session = useAgentStore.getState().sessions[modelId];
-    clearSession(modelId);
+    if (!projectId) return;
+    const session = useAgentStore.getState().sessions[projectId];
+    clearSession(projectId);
     if (session?.conversationId && session.ensured) {
       try {
         await deleteConversation(session.conversationId);
@@ -298,7 +298,7 @@ export function useAgentConversation(
         console.warn('[useAgentConversation] failed to delete remote conversation', err);
       }
     }
-  }, [modelId, clearSession]);
+  }, [projectId, clearSession]);
 
   return {
     ...view,

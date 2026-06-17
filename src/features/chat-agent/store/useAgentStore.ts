@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-//  Estado del agente de modelado AI, scoped por `modelId`.
+//  Estado del agente de modelado AI, scoped por `projectId`.
 //
 //  Responsabilidades:
 //
@@ -69,12 +69,12 @@ interface ModelSession {
 }
 
 interface AgentStore {
-  /** Por `modelId` (entidad del editor) → sesión del agente. */
+  /** Por `projectId` (entidad del editor) → sesión del agente. */
   sessions: Record<string, ModelSession>;
 
-  /** Estado UI por modelId: si hay un POST /model en vuelo. */
+  /** Estado UI por projectId: si hay un POST /model en vuelo. */
   sending: Record<string, boolean>;
-  /** Estado UI por modelId: si hay un POST /guidelines en vuelo. */
+  /** Estado UI por projectId: si hay un POST /guidelines en vuelo. */
   uploadingGuidelines: Record<string, boolean>;
 
   // ── Selectores (puros, no mutan estado) ───────────────────────────────
@@ -83,12 +83,12 @@ interface AgentStore {
    * Devuelve la sesión existente o `null`. NO la crea: usar
    * `ensureSession` para eso.
    */
-  getSession: (modelId: string) => ModelSession | null;
+  getSession: (projectId: string) => ModelSession | null;
 
   // ── Acciones ──────────────────────────────────────────────────────────
 
   /**
-   * Crea (si no existe) la sesión del agente para `modelId` con un
+   * Crea (si no existe) la sesión del agente para `projectId` con un
    * `conversation_id` recién generado. Idempotente: si ya hay una
    * sesión, la devuelve sin tocarla. NO hace I/O contra el backend.
    *
@@ -98,63 +98,63 @@ interface AgentStore {
    * síncrona y testable, y la sincronización con el backend sea opcional
    * (ej. el ChatPanel la hace en el primer envío).
    */
-  ensureSession: (modelId: string, engine: AgentEngine) => ModelSession;
+  ensureSession: (projectId: string, engine: AgentEngine) => ModelSession;
 
   /**
    * Marca la sesión como confirmada en el backend (tras un
    * `createConversation` exitoso). Si la sesión no existe, no-op.
    */
-  markSessionEnsured: (modelId: string) => void;
+  markSessionEnsured: (projectId: string) => void;
 
   /**
    * Cambia el engine de la sesión en memoria. NO llama al backend; el
    * próximo turno enviará el nuevo `engine` en el form-data y el backend
    * lo respetará para esa ejecución y los siguientes turnos.
    */
-  setSessionEngine: (modelId: string, engine: AgentEngine) => void;
+  setSessionEngine: (projectId: string, engine: AgentEngine) => void;
 
   /**
    * Elimina toda la sesión (incluyendo mensajes y conversation_id).
    * Útil al cerrar o resetear el chat. NO llama al backend; el caller
    * decide si invocar `deleteConversation`.
    */
-  clearSession: (modelId: string) => void;
+  clearSession: (projectId: string) => void;
 
-  /** Agrega un mensaje al final de la conversación de `modelId`. */
-  appendMessage: (modelId: string, msg: AgentChatMessage) => void;
+  /** Agrega un mensaje al final de la conversación de `projectId`. */
+  appendMessage: (projectId: string, msg: AgentChatMessage) => void;
 
   /**
    * Reemplaza un mensaje existente por id (para actualizar el placeholder
    * "thinking..." con el resultado real).
    */
-  replaceMessage: (modelId: string, msgId: string, msg: AgentChatMessage) => void;
+  replaceMessage: (projectId: string, msgId: string, msg: AgentChatMessage) => void;
 
   /** Guarda el último resultado del backend en la sesión. */
-  setLastResult: (modelId: string, result: ModelingResponse) => void;
+  setLastResult: (projectId: string, result: ModelingResponse) => void;
 
   /** Guarda la última carga de guidelines exitosa en la sesión. */
-  setGuidelines: (modelId: string, guidelines: GuidelinesUploadResponse) => void;
+  setGuidelines: (projectId: string, guidelines: GuidelinesUploadResponse) => void;
 
-  /** Setea el flag `sending` para `modelId`. */
-  setSending: (modelId: string, sending: boolean) => void;
+  /** Setea el flag `sending` para `projectId`. */
+  setSending: (projectId: string, sending: boolean) => void;
 
-  /** Setea el flag `uploadingGuidelines` para `modelId`. */
-  setUploadingGuidelines: (modelId: string, uploading: boolean) => void;
+  /** Setea el flag `uploadingGuidelines` para `projectId`. */
+  setUploadingGuidelines: (projectId: string, uploading: boolean) => void;
 }
 
 // Helper para mutar (o crear) una sesión sin perder otras claves del map.
 function patchSession(
   state: AgentStore,
-  modelId: string,
+  projectId: string,
   patch: Partial<ModelSession> | ((s: ModelSession) => Partial<ModelSession>),
 ): Pick<AgentStore, 'sessions'> {
-  const current = state.sessions[modelId];
+  const current = state.sessions[projectId];
   if (!current) return { sessions: state.sessions };
   const partial = typeof patch === 'function' ? patch(current) : patch;
   return {
     sessions: {
       ...state.sessions,
-      [modelId]: { ...current, ...partial },
+      [projectId]: { ...current, ...partial },
     },
   };
 }
@@ -164,10 +164,10 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   sending: {},
   uploadingGuidelines: {},
 
-  getSession: (modelId) => get().sessions[modelId] ?? null,
+  getSession: (projectId) => get().sessions[projectId] ?? null,
 
-  ensureSession: (modelId, engine) => {
-    const existing = get().sessions[modelId];
+  ensureSession: (projectId, engine) => {
+    const existing = get().sessions[projectId];
     if (existing) return existing;
     const fresh: ModelSession = {
       conversationId: uuidv4(),
@@ -178,52 +178,52 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
       ensured: false,
     };
     set((state) => ({
-      sessions: { ...state.sessions, [modelId]: fresh },
+      sessions: { ...state.sessions, [projectId]: fresh },
     }));
     return fresh;
   },
 
-  markSessionEnsured: (modelId) =>
-    set((state) => patchSession(state, modelId, { ensured: true })),
+  markSessionEnsured: (projectId) =>
+    set((state) => patchSession(state, projectId, { ensured: true })),
 
-  setSessionEngine: (modelId, engine) =>
-    set((state) => patchSession(state, modelId, { engine })),
+  setSessionEngine: (projectId, engine) =>
+    set((state) => patchSession(state, projectId, { engine })),
 
-  clearSession: (modelId) =>
+  clearSession: (projectId) =>
     set((state) => {
-      if (!state.sessions[modelId]) return state;
+      if (!state.sessions[projectId]) return state;
       const next = { ...state.sessions };
-      delete next[modelId];
+      delete next[projectId];
       const sending = { ...state.sending };
-      delete sending[modelId];
+      delete sending[projectId];
       const uploadingGuidelines = { ...state.uploadingGuidelines };
-      delete uploadingGuidelines[modelId];
+      delete uploadingGuidelines[projectId];
       return { sessions: next, sending, uploadingGuidelines };
     }),
 
-  appendMessage: (modelId, msg) =>
-    set((state) => patchSession(state, modelId, (s) => ({
+  appendMessage: (projectId, msg) =>
+    set((state) => patchSession(state, projectId, (s) => ({
       messages: [...s.messages, msg],
     }))),
 
-  replaceMessage: (modelId, msgId, msg) =>
-    set((state) => patchSession(state, modelId, (s) => ({
+  replaceMessage: (projectId, msgId, msg) =>
+    set((state) => patchSession(state, projectId, (s) => ({
       messages: s.messages.map((m) => (m.id === msgId ? msg : m)),
     }))),
 
-  setLastResult: (modelId, result) =>
-    set((state) => patchSession(state, modelId, { lastResult: result })),
+  setLastResult: (projectId, result) =>
+    set((state) => patchSession(state, projectId, { lastResult: result })),
 
-  setGuidelines: (modelId, guidelines) =>
-    set((state) => patchSession(state, modelId, { guidelines })),
+  setGuidelines: (projectId, guidelines) =>
+    set((state) => patchSession(state, projectId, { guidelines })),
 
-  setSending: (modelId, sending) =>
+  setSending: (projectId, sending) =>
     set((state) => ({
-      sending: { ...state.sending, [modelId]: sending },
+      sending: { ...state.sending, [projectId]: sending },
     })),
 
-  setUploadingGuidelines: (modelId, uploading) =>
+  setUploadingGuidelines: (projectId, uploading) =>
     set((state) => ({
-      uploadingGuidelines: { ...state.uploadingGuidelines, [modelId]: uploading },
+      uploadingGuidelines: { ...state.uploadingGuidelines, [projectId]: uploading },
     })),
 }));

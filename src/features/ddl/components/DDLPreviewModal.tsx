@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import Icon from '@/components/ui/Icon';
-import type { Table } from '@/types/model';
+import type { Table, DatabaseEngine } from '@/types/model';
 import { genDDL, countViews } from '../generators';
 
 interface DDLPreviewModalProps {
@@ -11,18 +11,20 @@ interface DDLPreviewModalProps {
   allTables: Table[];
   scopeLabel: string;
   engineLabel: string;
+  engine?: DatabaseEngine;
   modelName: string;
   onClose: () => void;
   pushToast: (msg: string, type?: 'err') => void;
 }
 
-export default function DDLPreviewModal({ scopedTables, allTables, scopeLabel, engineLabel, modelName, onClose, pushToast }: DDLPreviewModalProps) {
+export default function DDLPreviewModal({ scopedTables, allTables, scopeLabel, engineLabel, engine, modelName, onClose, pushToast }: DDLPreviewModalProps) {
   const hasScope = scopedTables.length > 0 && scopedTables.length < allTables.length;
   const [onlyScope, setOnlyScope] = useState(hasScope);
   const tables = onlyScope ? scopedTables : allTables;
   const vCount = countViews(tables);
   const [withViews, setWithViews] = useState(vCount > 0);
-  const ddl = genDDL(tables, { name: modelName, engineLabel, includeViews: withViews });
+  const [withKeys, setWithKeys] = useState(true);
+  const ddl = genDDL(tables, { name: modelName, engineLabel, engine, includeViews: withViews, includeKeys: withKeys });
 
   return (
     <Modal
@@ -48,6 +50,10 @@ export default function DDLPreviewModal({ scopedTables, allTables, scopeLabel, e
         <span className={`rd-toggle${withViews ? ' on' : ''}`} style={{ opacity: vCount ? 1 : 0.4, pointerEvents: vCount ? 'auto' : 'none' }} onClick={() => setWithViews((v) => !v)} />
         <div><div style={{ fontSize: 13, fontWeight: 700 }}>Incluir vistas</div><div className="rd-small">Añade CREATE VIEW (negocio y técnico){vCount ? '' : ' (ninguna definida)'}</div></div>
         {vCount > 0 && <span className="rd-badge rd-badge-flow" style={{ marginLeft: 'auto' }}><Icon name="eye" size={11} />{vCount}</span>}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, padding: '10px 12px', background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: 'var(--r-sm)' }}>
+        <span className={`rd-toggle${withKeys ? ' on' : ''}`} onClick={() => setWithKeys((v) => !v)} />
+        <div><div style={{ fontSize: 13, fontWeight: 700 }}>Incluir PK/FK</div><div className="rd-small">Emite PRIMARY KEY y FOREIGN KEY (los dos juntos). Si se apaga, no se generan.</div></div>
       </div>
       <textarea className="code-area ddl" value={ddl} readOnly spellCheck={false} />
     </Modal>

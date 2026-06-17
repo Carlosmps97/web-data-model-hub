@@ -44,9 +44,9 @@ const Sidebar: React.FC = () => {
         className="dmh-rail-logo"
         title="Data Model Hub"
         onClick={() => router.push('/')}
-        style={{ border: 'none', cursor: 'pointer' }}
+        style={{ border: 'none', cursor: 'pointer', background: 'var(--primary-soft)', overflow: 'hidden', padding: 0 }}
       >
-        <Icon name="database" size={19} />
+        <img src="/logo-dog.png" alt="Data Model Hub" width={30} height={30} style={{ objectFit: 'contain' }} />
       </button>
 
       {NAV.filter((n) => !n.adminOnly || isAdmin).map((n) => (

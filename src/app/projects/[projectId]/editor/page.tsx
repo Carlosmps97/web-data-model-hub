@@ -17,6 +17,7 @@ import DBMLModal from '@/features/table-editor/components/DBMLModal';
 import ExcelImportModal from '@/features/excel-import/components/ExcelImportModal';
 import ViewForm from '@/features/views/components/ViewForm';
 import DDLPreviewModal from '@/features/ddl/components/DDLPreviewModal';
+import { ChatPanel, ApplyToCanvasDialog, modelingResponseToCanvas, type TablePlacement, type ModelingResponse } from '@/features/chat-agent';
 import { layoutByLayer, layoutCompact, arrange, type Positions, type ArrangeKind } from '@/features/diagram/layout/layouts';
 import { isTableInScope, layerName, scopeLabel as buildScopeLabel } from '@/lib/hierarchy';
 import { getEngine } from '@/features/engines/engines';
@@ -33,6 +34,7 @@ type ModalState =
   | { type: 'dbml' }
   | { type: 'excel' }
   | { type: 'ddl' }
+  | { type: 'applyAgent'; result: ModelingResponse }
   | { type: 'confirm'; title: string; message: string; onConfirm: () => void }
   | null;
 
@@ -47,7 +49,7 @@ export default function EditorPage({ params }: PageProps) {
     currentProject, tables, relationships, scope, loading,
     loadProject, setScope, persistCanvas,
     addTable, updateTable, removeTable, setTables,
-    addRelationship, setRelationships, saveView, removeView,
+    addRelationship, removeRelationship, setRelationships, saveView, removeView,
   } = useProjectStore();
   const canEdit = useAuthStore((s) => s.canEditProject(projectId));
 
@@ -57,6 +59,7 @@ export default function EditorPage({ params }: PageProps) {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [modal, setModal] = useState<ModalState>(null);
   const [saved, setSaved] = useState(true);
+  const [chatOpen, setChatOpen] = useState(false);
 
   const initRef = useRef(false);
   const saveSkip = useRef(true);
@@ -123,11 +126,40 @@ export default function EditorPage({ params }: PageProps) {
       return x == null || y == null ? 0 : Math.abs(x - y);
     })();
     const tcol = tT.columns.find((c) => c.id === rel.target.column);
+    // Safe autoset (Feature 4): the SOURCE column references the target, so it
+    // becomes the FK. We never rebuild the target's PK (it may be composite) —
+    // we only validate it and warn. `...c` preserves any manual FK pin.
     updateTable(sT.id, { columns: sT.columns.map((c) => (c.id === rel.source.column ? { ...c, isForeignKey: true, foreignKeyRef: { table: tT.id, column: tcol?.name ?? '' } } : c)) });
     addRelationship({ ...rel, crossLayer: gap > 0, skip: gap > 1 });
     if (gap > 1) pushToast(`Relación cruza modelos no adyacentes (${layerName(layers, sT.layer)} → ${layerName(layers, tT.layer)}) — revisar`, 'err');
     else if (gap === 1) pushToast(`Relación cross-layer ${layerName(layers, sT.layer)} → ${layerName(layers, tT.layer)} creada`);
     else pushToast('Relación creada');
+    // The referenced (target) column should be a PK or unique key; warn if not.
+    if (!(tcol && (tcol.isPrimaryKey || tcol.isUnique)))
+      pushToast(`El destino ${tT.name}.${tcol?.name ?? '—'} no es PK ni clave única — revisá la dirección`, 'err');
+  };
+
+  const doDeleteRel = (rel: Relationship) => {
+    removeRelationship(rel.id);
+    // Clear the FK flag on the source column unless another relationship still uses it,
+    // so the column (and the generated DDL) stays consistent with the canvas.
+    const stillUsed = relationships.some(
+      (r) => r.id !== rel.id && r.source.table === rel.source.table && r.source.column === rel.source.column,
+    );
+    if (!stillUsed) {
+      const sT = tables.find((t) => t.id === rel.source.table);
+      const col = sT?.columns.find((c) => c.id === rel.source.column);
+      // Only clear an auto-set FK — never one the user pinned by hand (fkManual).
+      if (sT && col && !col.fkManual) updateTable(sT.id, { columns: sT.columns.map((c) => (c.id === rel.source.column ? { ...c, isForeignKey: false, foreignKeyRef: undefined } : c)) });
+    }
+    pushToast('Relación eliminada');
+  };
+
+  const onDeleteRel = (rel: Relationship) => {
+    const sT = tables.find((t) => t.id === rel.source.table);
+    const tT = tables.find((t) => t.id === rel.target.table);
+    const what = sT && tT ? `${sT.name} → ${tT.name} (${rel.cardinality})` : 'esta relación';
+    setModal({ type: 'confirm', title: '¿Eliminar relación?', message: `Se eliminará la relación ${what}. No se puede deshacer.`, onConfirm: () => doDeleteRel(rel) });
   };
 
   const onGear = (id: string, action: 'edit' | 'color' | 'delete', payload?: string) => {
@@ -176,6 +208,28 @@ export default function EditorPage({ params }: PageProps) {
     pushToast(`Importadas ${newTables.length} tablas`);
   };
 
+  // Merge the AI agent's result into the project at the chosen placement.
+  // Tables matching by name are updated in place; new ones are added. FK
+  // relationships are derived and de-duped against the existing graph.
+  const applyAgentModel = (result: ModelingResponse, placement: TablePlacement) => {
+    const { tables: finalTables, relationships: derived } = modelingResponseToCanvas(result, placement, tables);
+    const relKey = (r: Relationship) => `${r.source.table}:${r.source.column}->${r.target.table}:${r.target.column}`;
+    const existingKeys = new Set(relationships.map(relKey));
+    const newRels = derived.filter((r) => !existingKeys.has(relKey(r)));
+    setTables(finalTables);
+    if (newRels.length) setRelationships([...relationships, ...newRels]);
+    setPositions((prev) => {
+      const base = layoutByLayer(finalTables, layers);
+      const next = { ...prev };
+      finalTables.forEach((t) => { if (!next[t.id]) next[t.id] = t.position ?? base[t.id] ?? { x: 140, y: 140 }; });
+      return next;
+    });
+    const n = result.tables.length;
+    const domNm = domains.find((d) => d.id === placement.domain)?.name;
+    pushToast(`Aplicadas ${n} tabla${n === 1 ? '' : 's'}${domNm ? ` en ${domNm}` : ''}`);
+    setModal(null);
+  };
+
   const onCreate = (kind: CreateKind) => {
     if (kind === 'table') setModal({ type: 'table', table: null });
     else setModal({ type: kind });
@@ -206,7 +260,7 @@ export default function EditorPage({ params }: PageProps) {
           <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={() => setModal({ type: 'ddl' })}><Icon name="download" size={14} />Export</button>
           <span className="dmh-sep" />
           <span className="rd-badge" style={{ background: 'transparent', color: saved ? 'var(--success)' : 'var(--muted)', gap: 5 }}>{saved ? <><Icon name="check" size={13} sw={2.5} />Saved</> : <><Icon name="save" size={13} />Saving…</>}</span>
-          <button className="rd-btn rd-btn-sm" style={{ background: 'var(--accent2)', color: '#fff' }} onClick={() => pushToast('El asistente IA se conectará en una versión próxima', 'err')}><Icon name="sparkles" size={14} />AI Agent</button>
+          <button className="rd-btn rd-btn-sm" style={{ background: 'var(--accent2)', color: '#fff' }} onClick={() => setChatOpen((o) => !o)} aria-pressed={chatOpen}><Icon name="sparkles" size={14} />AI Agent</button>
         </Header>
 
         <div className="ed">
@@ -229,6 +283,7 @@ export default function EditorPage({ params }: PageProps) {
               onSelect={handleSelect}
               onMove={onMove}
               onCreateRel={onCreateRel}
+              onDeleteRel={onDeleteRel}
               onArrange={onArrange}
               onGear={onGear}
               pushToast={pushToast}
@@ -274,7 +329,8 @@ export default function EditorPage({ params }: PageProps) {
               onEditTable={(t) => setModal({ type: 'table', table: t })}
               onNewView={(t) => setModal({ type: 'view', table: t, view: null })}
               onEditView={(t, v) => setModal({ type: 'view', table: t, view: v })}
-              onDeleteView={(t, v) => { removeView(t.id, v.id); pushToast('Vista eliminada'); }}
+              onDeleteView={(t, v) => setModal({ type: 'confirm', title: '¿Eliminar vista?', message: `Se eliminará la vista ${v.name}. No se puede deshacer.`, onConfirm: () => { removeView(t.id, v.id); pushToast('Vista eliminada'); } })}
+              onDeleteRel={onDeleteRel}
               onExportDDL={() => setModal({ type: 'ddl' })}
             />
           )}
@@ -282,12 +338,23 @@ export default function EditorPage({ params }: PageProps) {
       </div>
 
       {/* Modals */}
-      {modal?.type === 'table' && <TableForm table={modal.table} layers={layers} domains={domains} onClose={() => setModal(null)} onSave={saveTable} />}
+      {modal?.type === 'table' && <TableForm table={modal.table} layers={layers} domains={domains} tables={tables} onClose={() => setModal(null)} onSave={saveTable} />}
       {modal?.type === 'fromsql' && <CreateFromSqlModal tables={tables} scope={scope} isInScope={isInScope} layers={layers} domains={domains} onClose={() => setModal(null)} onCreate={createFromSQL} pushToast={pushToast} />}
       {modal?.type === 'dbml' && <DBMLModal tables={tables} onClose={() => setModal(null)} onApply={applyDBML} pushToast={pushToast} />}
       {modal?.type === 'excel' && <ExcelImportModal meta={{ layer: scope.layers.length === 1 ? scope.layers[0] : layers[0]?.id, domain: scope.domains.length === 1 ? scope.domains[0] : undefined, color: domains.find((d) => d.id === (scope.domains.length === 1 ? scope.domains[0] : ''))?.color }} onClose={() => setModal(null)} onImport={importExcel} pushToast={pushToast} />}
       {modal?.type === 'view' && <ViewForm table={modal.table} view={modal.view} onClose={() => setModal(null)} onSave={(v, isNew) => { saveView(modal.table.id, v); setModal(null); pushToast(isNew ? 'Vista creada' : 'Vista guardada'); }} />}
-      {modal?.type === 'ddl' && <DDLPreviewModal scopedTables={scopedTables} allTables={tables} scopeLabel={scopeText} engineLabel={engineDef?.label ?? ''} modelName={currentProject.name} onClose={() => setModal(null)} pushToast={pushToast} />}
+      {modal?.type === 'ddl' && <DDLPreviewModal scopedTables={scopedTables} allTables={tables} scopeLabel={scopeText} engineLabel={engineDef?.label ?? ''} engine={currentProject.engines[0]} modelName={currentProject.name} onClose={() => setModal(null)} pushToast={pushToast} />}
+      {modal?.type === 'applyAgent' && <ApplyToCanvasDialog result={modal.result} layers={layers} domains={domains} scope={scope} onClose={() => setModal(null)} onApply={(placement) => applyAgentModel(modal.result, placement)} />}
+
+      {/* AI modeler chat — right-side drawer (decoupled agent service :8001) */}
+      <ChatPanel
+        isOpen={chatOpen}
+        onClose={() => setChatOpen(false)}
+        projectId={projectId}
+        engine={currentProject.engines[0]}
+        onApplyModel={(result) => setModal({ type: 'applyAgent', result })}
+        readOnly={!canEdit}
+      />
 
       <ConfirmDialog
         open={modal?.type === 'confirm'}

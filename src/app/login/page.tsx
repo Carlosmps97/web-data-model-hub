@@ -9,7 +9,6 @@
 
 import React, { Suspense, useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import Icon from '@/components/ui/Icon';
 import { useAuthStore } from '@/store/useAuthStore';
 import type { ApiError } from '@/services';
 
@@ -63,8 +62,8 @@ function LoginForm() {
     <div style={shellStyle}>
       <div className="rd-card" style={{ width: 400, maxWidth: '100%', padding: 32 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
-          <span style={{ width: 48, height: 48, borderRadius: 'var(--r)', background: 'var(--primary)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Icon name="database" size={24} />
+          <span style={{ width: 48, height: 48, borderRadius: 'var(--r)', background: 'var(--primary-soft)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', flexShrink: 0 }}>
+            <img src="/logo-dog.png" alt="Data Model Hub" width={40} height={40} style={{ objectFit: 'contain' }} />
           </span>
           <div>
             <h1 className="rd-h2" style={{ marginBottom: 2 }}>Data Model Hub</h1>

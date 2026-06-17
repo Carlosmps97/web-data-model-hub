@@ -10,6 +10,8 @@
 // UI
 export { default as ChatPanel } from './components/ChatPanel';
 export type { ChatPanelProps } from './components/ChatPanel';
+export { default as ApplyToCanvasDialog } from './components/ApplyToCanvasDialog';
+export type { ApplyToCanvasDialogProps } from './components/ApplyToCanvasDialog';
 
 // Hook
 export { useAgentConversation } from './hooks/useAgentConversation';
@@ -39,16 +41,17 @@ export type {
   ModelingResponse,
 } from './lib/types';
 
-// Mapeo agente ↔ editor
+// Mapeo agente ↔ editor (project-centric)
 export {
   agentColumnToTableColumn,
-  agentTableToTableModel,
+  agentTableToTable,
+  deriveRelationships,
   fromAgentEngine,
   modelingResponseToCanvas,
   parseDataType,
-  tableModelsToRelationships,
   toAgentEngine,
 } from './lib/mapping';
+export type { TablePlacement } from './lib/mapping';
 
 // Cliente HTTP (uso fuera del hook es raro pero válido)
 export {

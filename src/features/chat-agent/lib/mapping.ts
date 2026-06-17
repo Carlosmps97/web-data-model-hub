@@ -1,53 +1,57 @@
 // ─────────────────────────────────────────────────────────────────────────
-//  Adaptadores entre el contrato del backend (agent-modeler) y los tipos
-//  internos del editor (`@/types/model`).
+//  Adaptadores entre el contrato del agente (app-agents-modeler) y los tipos
+//  project-centric del editor (`@/types/model`).
+//
+//  El agente devuelve un modelo agnóstico a la jerarquía del proyecto: no
+//  conoce `layer` (model level), `domain`, `subdomain`, `color`, `views`, ni
+//  la geometría del canvas. Esos campos se asignan en la UI al "Aplicar al
+//  canvas" (ver `ApplyToCanvasDialog`) y se inyectan acá vía `placement`.
 //
 //  Reglas:
 //
-//  1. El agente devuelve modelos agnósticos a la geometría del canvas
-//     (no tiene `position`, `color`, `domain`, `tags`). Esos campos quedan
-//     `undefined` y el frontend los maneja con defaults.
+//  1. Cada columna recibe un `id` estable (`ensureColumnId`). Las relaciones
+//     del editor referencian `TableColumn.id`, nunca el nombre.
 //
-//  2. El agente devuelve `relationships: string[]` como texto libre. Para
-//     el grafo del canvas usamos las FKs declaradas en las columnas
-//     (`is_fk` + `fk_references`), que sí están estructuradas. El array
-//     textual se preserva aparte para mostrarlo en el bloque de resultado
-//     del chat.
+//  2. El agente declara FKs a nivel de columna (`is_fk` + `fk_references` con
+//     formato `"tabla.columna"`). De ahí derivamos las `Relationship`
+//     anidadas. El array textual `relationships` del agente es solo para
+//     mostrar en el chat.
 //
-//  3. `fk_references` tiene formato `"tabla.columna"`. Si no parsea,
-//     la FK se ignora (no se fabrica una referencia inválida).
+//  3. Convención de dirección (idéntica al `onCreateRel` manual del editor):
+//     `source` = lado FK (hijo / "muchos"), `target` = lado PK referenciado
+//     (padre / "uno"), `cardinality: '1:N'`. En la columna FK se marca
+//     `foreignKeyRef = { table: <id destino>, column: <nombre col destino> }`.
 //
-//  4. El tipo de relación siempre se marca como `one-to-many` (convención
-//     del editor manual; ver `handleAddTable` en la página del modelo).
+//  4. Las FKs que no resuelven (tabla/columna destino ausente) se ignoran
+//     en silencio: no se fabrica un wire inválido.
 // ─────────────────────────────────────────────────────────────────────────
 
 import { v4 as uuidv4 } from 'uuid';
-import type {
-  AgentColumn,
-  AgentEngine,
-  AgentTable,
-  ModelingResponse,
-} from './types';
-// Decoupled AI agent: kept on the frozen legacy model shape until reworked
-// for the project-centric schema (see `legacyModel.ts`).
-import {
-  findColumnId,
-  type DatabaseEngine,
-  type Relationship,
-  type TableColumn,
-  type TableModel,
-} from './legacyModel';
+import type { AgentColumn, AgentEngine, AgentTable, ModelingResponse } from './types';
+import { ensureColumnId, findColumnId } from '@/lib/columnRef';
+import type { DatabaseEngine, Relationship, Table, TableColumn } from '@/types/model';
 
-// ─── Engine mapping ──────────────────────────────────────────────────────
+// ─── Placement (jerarquía elegida en la UI al importar) ────────────────────
+
+/** Ubicación destino para las tablas importadas del agente. Todos opcionales:
+ *  lo elige el usuario en el diálogo de "Aplicar al canvas". */
+export interface TablePlacement {
+  /** ModelLevel id. */
+  layer?: string;
+  /** Domain id. */
+  domain?: string;
+  /** Subdomain label (de los `subdomains` del dominio). */
+  subdomain?: string;
+  /** Color de cabecera — heredado del dominio. */
+  color?: string;
+}
+
+// ─── Engine mapping ────────────────────────────────────────────────────────
 
 /**
- * Normaliza un engine del frontend al valor que entiende el backend.
- *
- * Tras la ampliación a los 5 motores del backend, esta función es
- * principalmente identity. Conserva el alias legacy `databricks`
- * → `databricks_sql` para modelos guardados antes de la ampliación.
- * Engines sin correspondencia (`oracle`) se degradan a `postgresql` con
- * una señal en consola; el caller puede detectarlo revisando el retorno.
+ * Normaliza un engine del frontend al valor que entiende el backend. Tras la
+ * unificación a los 5 motores soportados es prácticamente identity; cualquier
+ * valor inesperado cae a `databricks_sql`.
  */
 export function toAgentEngine(engine: DatabaseEngine | null | undefined): AgentEngine {
   switch (engine) {
@@ -57,46 +61,21 @@ export function toAgentEngine(engine: DatabaseEngine | null | undefined): AgentE
     case 'postgresql':
     case 'mysql':
       return engine;
-    case 'databricks':
-      // Alias legacy.
-      return 'databricks_sql';
-    case 'oracle':
-      // El backend no soporta Oracle. Degradamos a postgresql, que es el
-      // motor SQL más cercano en semántica para que el agente siga pudiendo
-      // razonar sobre el modelo. El usuario debe cambiar el engine.
-      if (typeof console !== 'undefined') {
-        console.warn(
-          "[agent-mapping] engine 'oracle' no soportado por el backend; usando 'postgresql' para este turno.",
-        );
-      }
-      return 'postgresql';
     default:
       return 'databricks_sql';
   }
 }
 
-/**
- * Motor del backend → motor del frontend. Identity en el caso común.
- * El alias legacy `databricks` NO se reintroduce en sentido inverso:
- * el frontend ya soporta `databricks_sql` nativamente.
- */
+/** Motor del backend → motor del frontend. Identity (mismo conjunto). */
 export function fromAgentEngine(engine: AgentEngine): DatabaseEngine {
   return engine;
 }
 
-// ─── Data type parsing ───────────────────────────────────────────────────
+// ─── Data type parsing ─────────────────────────────────────────────────────
 
 /**
- * Parsea un data type estilo SQL (ej. `VARCHAR(50)`, `DECIMAL(10,2)`,
- * `BIGINT`) a los campos que espera `TableColumn`.
- *
- * Casos:
- *
- *  - `VARCHAR(50)` → `{ dataType: 'varchar', length: 50 }`
- *  - `DECIMAL(10,2)` → `{ dataType: 'decimal', length: 10, scale: 2 }`
- *  - `BIGINT` → `{ dataType: 'bigint' }`
- *  - Tipos con espacios (`TIMESTAMP WITH TIME ZONE`) → dataType completo
- *    en lowercase, sin length/scale.
+ * Parsea un data type estilo SQL (`VARCHAR(50)`, `DECIMAL(10,2)`, `BIGINT`) a
+ * los campos que espera `TableColumn`.
  */
 export function parseDataType(raw: string): {
   dataType: string;
@@ -120,7 +99,7 @@ export function parseDataType(raw: string): {
   };
 }
 
-// ─── Column / Table mapping ──────────────────────────────────────────────
+// ─── Column / Table mapping ────────────────────────────────────────────────
 
 function parseFkReference(ref: string | null): { table: string; column: string } | undefined {
   if (!ref) return undefined;
@@ -133,23 +112,15 @@ function parseFkReference(ref: string | null): { table: string; column: string }
 }
 
 /**
- * `AgentColumn` → `TableColumn`.
- *
- * Nota: el agente nunca marca `isSurrogateKey`, `isPartitionKey`,
- * `isUnique`, `defaultValue`. Esas propiedades quedan `undefined` y
- * el usuario puede ajustarlas a mano en el editor si lo necesita.
+ * `AgentColumn` → `TableColumn`. La FK queda referenciada por NOMBRE
+ * (`{ table, column }`); el id destino se resuelve en `deriveRelationships`
+ * una vez que el conjunto de tablas final está armado.
  */
 export function agentColumnToTableColumn(col: AgentColumn): TableColumn {
   const parsed = parseDataType(col.data_type);
   const fkRef = col.is_fk ? parseFkReference(col.fk_references) : undefined;
 
-  return {
-    // Fresh id per column — the agent output is plain JSON and doesn't
-    // carry our canvas-internal identifiers. The backend normaliser
-    // assigns an id when persisting (see `models_db._replace_entities`
-    // and `db_models.TableColumnDoc.id`), but keeping a UUID here too
-    // means the model is immediately self-consistent before any save.
-    id: uuidv4(),
+  return ensureColumnId({
     name: col.column_name,
     dataType: parsed.dataType,
     ...(parsed.length !== undefined ? { length: parsed.length } : {}),
@@ -160,49 +131,96 @@ export function agentColumnToTableColumn(col: AgentColumn): TableColumn {
     isNullable: col.nullable,
     functionalDefinition: col.functional_definition || undefined,
     observations: col.observations || undefined,
-  };
+  });
 }
 
 /**
- * `AgentTable` → `TableModel`. Genera un `id` nuevo; el editor usa
- * IDs internos distintos al nombre de la tabla.
+ * `AgentTable` → `Table` project-centric. Genera un `id` nuevo, embebe
+ * `views: []` y estampa la jerarquía elegida (`placement`).
  */
-export function agentTableToTableModel(table: AgentTable): TableModel {
+export function agentTableToTable(table: AgentTable, placement: TablePlacement = {}): Table {
   return {
     id: uuidv4(),
     name: table.table_name,
     columns: table.columns.map(agentColumnToTableColumn),
+    views: [],
     functionalDefinition: table.table_description || undefined,
+    ...(placement.layer ? { layer: placement.layer } : {}),
+    ...(placement.domain ? { domain: placement.domain } : {}),
+    ...(placement.subdomain ? { subdomain: placement.subdomain } : {}),
+    ...(placement.color ? { color: placement.color } : {}),
   };
 }
 
 /**
- * Deriva `Relationship[]` a partir de los `TableModel` ya convertidos.
- *
- * IMPORTANTE: esta función debe ejecutarse DESPUÉS de `agentTableToTableModel`
- * porque las relaciones ahora referencian `TableColumn.id` (no el nombre).
- * Leemos `foreignKeyRef` de cada columna (poblado por el mapper a partir
- * de `AgentColumn.fk_references`) y resolvemos el nombre de la columna
- * destino a un id vía `findColumnId`. FKs malformadas o que apuntan a
- * tablas/columnas ausentes se ignoran silenciosamente.
+ * Mezcla (upsert por NOMBRE físico) las tablas entrantes del agente sobre las
+ * tablas existentes del proyecto. Un match existente conserva su `id`,
+ * `position` y `schema`; reemplaza columnas + definición + placement con lo
+ * último del agente. Las nuevas se agregan. Devuelve el conjunto resultante.
  */
-export function tableModelsToRelationships(tables: TableModel[]): Relationship[] {
+function upsertByName(existing: Table[], incoming: Table[]): Table[] {
+  const result = existing.slice();
+  const indexByName = new Map(existing.map((t, i) => [t.name, i] as const));
+
+  for (const t of incoming) {
+    const idx = indexByName.get(t.name);
+    if (idx !== undefined) {
+      const prev = result[idx];
+      result[idx] = {
+        ...prev,
+        columns: t.columns,
+        functionalDefinition: t.functionalDefinition ?? prev.functionalDefinition,
+        layer: t.layer ?? prev.layer,
+        domain: t.domain ?? prev.domain,
+        subdomain: t.subdomain ?? prev.subdomain,
+        color: t.color ?? prev.color,
+        views: prev.views ?? [],
+      };
+    } else {
+      indexByName.set(t.name, result.length);
+      result.push(t);
+    }
+  }
+  return result;
+}
+
+/**
+ * Deriva `Relationship[]` a partir de las FKs declaradas en las columnas.
+ *
+ * `sourceTableNames`, si se pasa, restringe el lado SOURCE a esas tablas (las
+ * que el agente produjo) para no resucitar/duplicar relaciones de tablas
+ * preexistentes; el lado TARGET puede ser cualquier tabla del conjunto.
+ *
+ * Efecto colateral intencional: reescribe `foreignKeyRef.table` de la columna
+ * source al `id` destino resuelto, igual que el `onCreateRel` manual.
+ */
+export function deriveRelationships(
+  tables: Table[],
+  sourceTableNames?: Set<string>,
+): Relationship[] {
   const rels: Relationship[] = [];
 
   for (const table of tables) {
+    if (sourceTableNames && !sourceTableNames.has(table.name)) continue;
     for (const col of table.columns) {
-      if (!col.isForeignKey) continue;
-      const ref = col.foreignKeyRef;
-      if (!ref?.table || !ref?.column) continue;
-      const targetColId = findColumnId(tables, ref.table, ref.column);
+      if (!col.isForeignKey || !col.foreignKeyRef) continue;
+      const targetName = col.foreignKeyRef.table;
+      const targetCol = col.foreignKeyRef.column;
+      if (!targetName || !targetCol) continue;
+
+      const targetTable =
+        tables.find((t) => t.name === targetName) ?? tables.find((t) => t.id === targetName);
+      if (!targetTable) continue;
+      const targetColId = findColumnId(tables, targetTable.id, targetCol);
       if (!targetColId) continue;
+
+      // Reescribe la FK al id destino (consistente con relaciones manuales).
+      col.foreignKeyRef = { table: targetTable.id, column: targetCol };
       rels.push({
         id: uuidv4(),
-        sourceTable: table.name,
-        sourceColumn: col.id,
-        targetTable: ref.table,
-        targetColumn: targetColId,
-        type: 'one-to-many',
+        source: { table: table.id, column: col.id },
+        target: { table: targetTable.id, column: targetColId },
+        cardinality: '1:N',
       });
     }
   }
@@ -211,17 +229,22 @@ export function tableModelsToRelationships(tables: TableModel[]): Relationship[]
 }
 
 /**
- * Convierte la respuesta completa del agente al par `{tables, relationships}`
- * listo para inyectar en `useModelStore`.
+ * Convierte la respuesta del agente al par `{ tables, relationships }` ya
+ * MEZCLADO con las tablas existentes del proyecto, listo para `setTables` /
+ * merge de relaciones en el editor.
  *
- * IMPORTANTE: los IDs de las tablas generadas son nuevos (uuidv4). El caller
- * que quiera merge incremental debe resolver la identidad por `name`, no
- * por `id`.
+ * - `placement`: jerarquía elegida en la UI (layer/domain/subdomain/color).
+ * - `existingTables`: tablas actuales del proyecto (para upsert por nombre y
+ *   para que las FKs puedan apuntar a tablas preexistentes).
  */
 export function modelingResponseToCanvas(
   response: ModelingResponse,
-): { tables: TableModel[]; relationships: Relationship[] } {
-  const tables = response.tables.map(agentTableToTableModel);
-  const relationships = tableModelsToRelationships(tables);
+  placement: TablePlacement = {},
+  existingTables: Table[] = [],
+): { tables: Table[]; relationships: Relationship[] } {
+  const incoming = response.tables.map((t) => agentTableToTable(t, placement));
+  const incomingNames = new Set(incoming.map((t) => t.name));
+  const tables = upsertByName(existingTables, incoming);
+  const relationships = deriveRelationships(tables, incomingNames);
   return { tables, relationships };
 }

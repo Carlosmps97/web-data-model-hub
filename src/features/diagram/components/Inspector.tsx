@@ -4,10 +4,12 @@ import React, { useState } from 'react';
 import Icon from '@/components/ui/Icon';
 import type { Table, Relationship, ModelLevel, Domain, View } from '@/types/model';
 import { findLayer, findDomain } from '@/lib/hierarchy';
+import { normalizeTags, formatTag, tagId } from '@/lib/tags';
 
 function ViewCard({ v, onEdit, onDelete }: { v: View; onEdit: (v: View) => void; onDelete: (v: View) => void }) {
   const exprs = (v.select ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
-  const conds = (v.where ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
+  // WHERE is a single free-text condition (Feature 7) — shown verbatim.
+  const whereClause = (v.where ?? '').trim();
   const protectedCount = exprs.filter((l) => /sha256|md5|hash|regexp_replace|crypt|mask/i.test(l)).length;
   return (
     <div className="iv-card">
@@ -20,9 +22,9 @@ function ViewCard({ v, onEdit, onDelete }: { v: View; onEdit: (v: View) => void;
         <span className="rd-badge rd-badge-neutral"><Icon name="users" size={10} />{v.role || '—'}</span>
         <span className="rd-badge rd-badge-neutral"><Icon name="columns" size={10} />{exprs.length}</span>
         {protectedCount > 0 && <span className="rd-badge rd-badge-warning"><Icon name="key" size={10} />{protectedCount} protegidas</span>}
-        {conds.length > 0 && <span className="rd-badge rd-badge-flow"><Icon name="filter" size={10} /><span>{conds.length} filtro{conds.length > 1 ? 's' : ''}</span></span>}
+        {whereClause && <span className="rd-badge rd-badge-flow"><Icon name="filter" size={10} /><span>filtro</span></span>}
       </div>
-      {conds.length > 0 && <div className="rd-mono" style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 7, padding: '5px 8px', background: 'var(--surface-2)', borderRadius: 6, whiteSpace: 'pre-wrap' }}>WHERE {conds.join('\n  AND ')}</div>}
+      {whereClause && <div className="rd-mono" style={{ fontSize: 10.5, color: 'var(--muted)', marginTop: 7, padding: '5px 8px', background: 'var(--surface-2)', borderRadius: 6, whiteSpace: 'pre-wrap' }}>WHERE {whereClause}</div>}
     </div>
   );
 }
@@ -39,17 +41,19 @@ interface InspectorProps {
   onNewView: (t: Table) => void;
   onEditView: (t: Table, v: View) => void;
   onDeleteView: (t: Table, v: View) => void;
+  onDeleteRel: (r: Relationship) => void;
   onExportDDL: () => void;
 }
 
 export default function Inspector({
   table, tables, relationships, layers, domains, engineShort,
-  onClose, onEditTable, onNewView, onEditView, onDeleteView, onExportDDL,
+  onClose, onEditTable, onNewView, onEditView, onDeleteView, onDeleteRel, onExportDDL,
 }: InspectorProps) {
   const [tab, setTab] = useState<'columns' | 'views' | 'links'>('columns');
 
   const D = findDomain(domains, table.domain);
   const L = findLayer(layers, table.layer);
+  const tableTags = normalizeTags(table.tags) ?? [];
   const views = table.views ?? [];
   const biz = views.filter((v) => v.type === 'business');
   const tech = views.filter((v) => v.type === 'technical');
@@ -78,6 +82,11 @@ export default function Inspector({
         </div>
       )}
       {table.functionalDefinition && <div className="rd-small" style={{ padding: '0 14px 12px' }}>{table.functionalDefinition}</div>}
+      {tableTags.length > 0 && (
+        <div style={{ padding: '0 14px 12px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {tableTags.map((t) => <span key={tagId(t)} className="rd-badge rd-badge-neutral" title={t.key || 'tag'}><Icon name="tag" size={9} />{formatTag(t)}</span>)}
+        </div>
+      )}
 
       <div className="rd-tabs" style={{ padding: '0 8px' }}>
         <button className={tab === 'columns' ? 'active' : ''} onClick={() => setTab('columns')}>Columns <span className="ins-count">{table.columns.length}</span></button>
@@ -91,9 +100,12 @@ export default function Inspector({
             {table.columns.map((c) => {
               const k = c.isPrimaryKey ? 'PK' : c.isForeignKey ? 'FK' : c.isSurrogateKey ? 'SK' : c.isPartitionKey ? 'PT' : '';
               return (
-                <div className="ins-col" key={c.id}>
+                <div className="ins-col" key={c.id} style={{ alignItems: c.functionalDefinition ? 'flex-start' : undefined }}>
                   {k ? <span className={`rd-key ${k.toLowerCase()}`}>{k}</span> : <span className="rd-key none"><span className="d" /></span>}
-                  <span style={{ flex: 1, fontWeight: 600, fontSize: 12.5 }}>{c.name}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: 600, fontSize: 12.5 }}>{c.name}</span>
+                    {c.functionalDefinition && <div className="rd-small" style={{ lineHeight: 1.4, marginTop: 2 }}>{c.functionalDefinition}</div>}
+                  </div>
                   {c.isNullable !== false && <span className="rd-row" style={{ padding: 0 }}><span className="nul" /></span>}
                   <span className="rd-mono" style={{ fontSize: 10.5, color: 'var(--muted)' }}>{c.dataType}</span>
                 </div>
@@ -140,6 +152,7 @@ export default function Inspector({
                     <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Icon name="chevR" size={11} />{otherT ? otherT.name : other.table}.{otherCol}</div>
                   </div>
                   <span className="rd-badge rd-badge-flow">{r.cardinality}</span>
+                  <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" style={{ width: 26, height: 26, flexShrink: 0 }} title="Eliminar relación" onClick={() => onDeleteRel(r)}><Icon name="trash" size={12} style={{ color: 'var(--error)' }} /></button>
                 </div>
               );
             })}

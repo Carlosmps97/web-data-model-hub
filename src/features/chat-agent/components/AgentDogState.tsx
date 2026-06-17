@@ -1,5 +1,11 @@
 'use client';
 
+/* eslint-disable react-hooks/set-state-in-effect --
+   This mascot is a timed animation state machine (think ↔ search → answer/error)
+   driven by the `sending` transition. The synchronous resets at the top of each
+   effect are intentional and behavior-correct; the rest of the state changes
+   happen inside timer callbacks. Refactoring would regress the animation. */
+
 import React, { useEffect, useRef, useState } from 'react';
 
 // ─── Types ────────────────────────────────────────────────────────────────

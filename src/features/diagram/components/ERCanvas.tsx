@@ -21,6 +21,7 @@ interface ERCanvasProps {
   onSelect: (id: string | null) => void;
   onMove: (id: string, pos: { x: number; y: number }) => void;
   onCreateRel: (rel: Relationship) => void;
+  onDeleteRel: (rel: Relationship) => void;
   onArrange: (kind: ArrangeKind) => void;
   onGear: (id: string, action: 'edit' | 'color' | 'delete', payload?: string) => void;
   pushToast: (msg: string, type?: 'err') => void;
@@ -38,24 +39,69 @@ function anchor(model: ERModel, tableId: string, colId: string, side: 'left' | '
   return { x: side === 'right' ? p.x + NODE_W : p.x, y: p.y + HEADER + ROWS_PAD + i * ROW + ROW / 2 };
 }
 
-function CrowFoot({ x, y, side, one }: { x: number; y: number; side: 'left' | 'right'; one: boolean }) {
+// ── Crow's-foot cardinality notation ─────────────────────────────────────────
+// A relationship is directional: source → target, where the SOURCE column holds
+// the FK and the TARGET column is the referenced PK (see editor `onCreateRel` and
+// `genDDL`). The cardinality string is read PK-first (target:source):
+//   '1:1' → one ↔ one      '1:N' → one parent (target/PK) ↔ many children (source/FK)
+//   'N:N' → many ↔ many
+// So the mark at each end reflects its own multiplicity: a single perpendicular
+// tick for "one", a splayed crow's foot for "many".
+type EndKind = 'one' | 'many';
+
+function relEnds(card: Cardinality): { source: EndKind; target: EndKind } {
+  const [t, s] = (card ?? '1:N').split(':');
+  return { target: t === 'N' ? 'many' : 'one', source: s === 'N' ? 'many' : 'one' };
+}
+
+/** Cardinality mark drawn at an entity edge. The "many" foot opens toward the
+ *  entity (toes on the table edge) and its apex points outward to the wire. */
+function CardMark({ x, y, side, kind, color }: { x: number; y: number; side: 'left' | 'right'; kind: EndKind; color: string }) {
   const d = side === 'right' ? 1 : -1;
-  const o = 7 * d;
-  if (one) return <line x1={x + o} y1={y - 7} x2={x + o} y2={y + 7} stroke="var(--flow)" strokeWidth="2.4" strokeLinecap="round" />;
+  const reach = 13 * d;  // how far the mark extends from the table edge toward the wire
+  const sp = 7;          // half-height of the foot / tick
+  if (kind === 'one') {
+    const tx = x + 7 * d; // a small standoff tick = exactly one
+    return <line x1={tx} y1={y - sp} x2={tx} y2={y + sp} stroke={color} strokeWidth="2.4" strokeLinecap="round" />;
+  }
+  const ax = x + reach;   // crow's-foot apex (toward the wire)
   return (
-    <g stroke="var(--flow)" strokeWidth="2.4" strokeLinecap="round" fill="none">
-      <path d={`M${x + o},${y - 7} L${x},${y} L${x + o},${y + 7}`} />
-      <line x1={x} y1={y} x2={x + o} y2={y} />
+    <g stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none">
+      <line x1={ax} y1={y} x2={x} y2={y - sp} />
+      <line x1={ax} y1={y} x2={x} y2={y} />
+      <line x1={ax} y1={y} x2={x} y2={y + sp} />
     </g>
   );
 }
 
+/** Small live preview of the chosen cardinality for the Connect panel:
+ *  origin (FK) on the left, destination (PK) on the right. */
+function RelPreview({ card }: { card: Cardinality }) {
+  const e = relEnds(card);
+  return (
+    <svg width="100%" height="46" viewBox="0 0 240 46" style={{ display: 'block' }} aria-hidden="true">
+      <text x="6" y="14" fontSize="9.5" fontWeight="700" fill="var(--muted)" style={{ fontFamily: 'var(--mono)' }}>ORIGEN · FK</text>
+      <text x="234" y="14" textAnchor="end" fontSize="9.5" fontWeight="700" fill="var(--muted)" style={{ fontFamily: 'var(--mono)' }}>DESTINO · PK</text>
+      <line x1="64" y1="32" x2="176" y2="32" stroke="#cfd6e0" strokeWidth="2" />
+      <CardMark x={64} y={32} side="right" kind={e.source} color="var(--flow-700)" />
+      <CardMark x={176} y={32} side="left" kind={e.target} color="var(--flow-700)" />
+    </svg>
+  );
+}
+
+const CARD_HINT: Record<Cardinality, string> = {
+  '1:1': 'Uno a uno — una fila se corresponde con una.',
+  '1:N': 'Uno a muchos — el destino (PK) es el lado «uno»; el origen (FK) es «muchos».',
+  'N:N': 'Muchos a muchos — suele resolverse con una tabla puente.',
+};
+
 const HEADER_COLORS = ['#4f46e5', '#0d9488', '#7c3aed', '#0e7490', '#b45309', '#475569'];
 
-export default function ERCanvas({ model, selectedId, onSelect, onMove, onCreateRel, onArrange, onGear, pushToast }: ERCanvasProps) {
+export default function ERCanvas({ model, selectedId, onSelect, onMove, onCreateRel, onDeleteRel, onArrange, onGear, pushToast }: ERCanvasProps) {
   const [tf, setTf] = useState({ x: 40, y: 20, scale: 0.82 });
   const [hover, setHover] = useState<string | null>(null);
   const [hoverCol, setHoverCol] = useState<string | null>(null);
+  const [hoverEdge, setHoverEdge] = useState<string | null>(null);
   const [tool, setTool] = useState<'select' | 'connect'>('select');
   const [connectSrc, setConnectSrc] = useState<{ table: string; column: string; name: string } | null>(null);
   const [card, setCard] = useState<Cardinality>('1:N');
@@ -111,14 +157,17 @@ export default function ERCanvas({ model, selectedId, onSelect, onMove, onCreate
     e.stopPropagation();
     onSelect(id);
     setGearId(null);
-    const start = { mx: e.clientX, my: e.clientY, px: pos[id].x, py: pos[id].y };
+    const sp = pos[id];
+    if (!sp) return; // position not seeded yet — nothing to drag
+    const start = { mx: e.clientX, my: e.clientY, px: sp.x, py: sp.y };
     const move = (ev: PointerEvent) => {
       const dx = (ev.clientX - start.mx) / tf.scale, dy = (ev.clientY - start.my) / tf.scale;
       onMove(id, { x: Math.round(start.px + dx), y: Math.round(start.py + dy) });
     };
-    const up = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); };
+    const up = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
   };
 
   const startPan = (e: React.PointerEvent) => {
@@ -127,10 +176,17 @@ export default function ERCanvas({ model, selectedId, onSelect, onMove, onCreate
     onSelect(null);
     setGearId(null);
     panning.current = { mx: e.clientX, my: e.clientY, x: tf.x, y: tf.y };
-    const move = (ev: PointerEvent) => setTf((t) => ({ ...t, x: panning.current!.x + (ev.clientX - panning.current!.mx), y: panning.current!.y + (ev.clientY - panning.current!.my) }));
-    const up = () => { panning.current = null; document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); };
+    // Guard `panning.current`: a stray pointermove can fire after `up` has cleared
+    // it (or after a pointercancel), which otherwise throws "reading 'x' of null".
+    const move = (ev: PointerEvent) => {
+      const p = panning.current;
+      if (!p) return;
+      setTf((t) => ({ ...t, x: p.x + (ev.clientX - p.mx), y: p.y + (ev.clientY - p.my) }));
+    };
+    const up = () => { panning.current = null; document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); document.removeEventListener('pointercancel', up); };
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
+    document.addEventListener('pointercancel', up);
   };
 
   const onRowClick = (tableId: string, c: Table['columns'][number]) => {
@@ -171,7 +227,11 @@ export default function ERCanvas({ model, selectedId, onSelect, onMove, onCreate
     const gap = st && tt ? layerGap(model.layers, st.layer, tt.layer) : 0;
     return {
       r, a, b, sideS, sideT, gap, sLayer: st?.layer, tLayer: tt?.layer,
+      // straight midpoint (kept for reference) + the actual point on the bezier at
+      // t=0.5, where the delete affordance sits so it overlaps the hover hit-path.
       mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2,
+      bmx: 0.125 * a.x + 0.375 * c1 + 0.375 * c2 + 0.125 * b.x,
+      bmy: (a.y + b.y) / 2,
       d: `M${a.x},${a.y} C${c1},${a.y} ${c2},${b.y} ${b.x},${b.y}`,
       active: activeRels.has(r.id),
     };
@@ -181,21 +241,41 @@ export default function ERCanvas({ model, selectedId, onSelect, onMove, onCreate
     <div className="ed-canvas" ref={wrapRef} onPointerDown={startPan} style={{ cursor: panning.current ? 'grabbing' : 'default' }}>
       <div className="er-world" style={{ transform: `translate(${tf.x}px,${tf.y}px) scale(${tf.scale})` }}>
         <svg className="er-edges" width="4000" height="3000">
-          {edges.map(({ r, d, active, a, b, sideS, sideT, gap, sLayer, tLayer, mx, my }) => {
+          {edges.map(({ r, d, active, a, b, sideS, sideT, gap, sLayer, tLayer, bmx, bmy }) => {
             const skip = gap > 1;
+            const hov = hoverEdge === r.id;
             const baseStroke = skip ? '#d97706' : active ? 'var(--flow)' : gap > 0 ? '#9aa6c2' : '#b9c2cf';
             const dash = skip ? '7 5' : gap > 0 ? '2 5' : 'none';
+            const markColor = hov ? 'var(--error)' : skip ? '#d97706' : active ? 'var(--flow-700)' : gap > 0 ? '#7c8aa6' : '#7c8699';
+            const ends = relEnds(r.cardinality);
+            const reqDelete = (e: React.MouseEvent) => { e.stopPropagation(); setHoverEdge(null); onDeleteRel(r); };
             return (
-              <g key={r.id} style={{ opacity: focusId && !active ? 0.28 : 1 }}>
-                <path d={d} className="rd-wire-base" style={{ stroke: baseStroke, strokeWidth: skip ? 2.6 : 2, strokeDasharray: dash }} />
-                {active && <path d={d} className="rd-wire-flow" />}
-                <CrowFoot x={a.x} y={a.y} side={sideS} one={false} />
-                <CrowFoot x={b.x} y={b.y} side={sideT} one />
-                {(skip || (gap > 0 && active)) && (
-                  <g transform={`translate(${mx},${my})`}>
+              <g key={r.id} style={{ opacity: focusId && !active && !hov ? 0.28 : 1 }}
+                onMouseEnter={() => setHoverEdge(r.id)} onMouseLeave={() => setHoverEdge((h) => (h === r.id ? null : h))}>
+                {/* wide invisible hit area: makes the thin wire easy to target, and a
+                    click anywhere on it requests deletion (so it never depends on
+                    landing precisely on the × button). */}
+                <path d={d} fill="none" stroke="transparent" strokeWidth={16}
+                  style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                  onPointerDown={(e) => e.stopPropagation()} onClick={reqDelete} />
+                <path d={d} className="rd-wire-base" style={{ stroke: hov ? 'var(--error)' : baseStroke, strokeWidth: (skip ? 2.6 : 2) + (hov ? 1 : 0), strokeDasharray: dash, pointerEvents: 'none' }} />
+                {active && <path d={d} className="rd-wire-flow" style={{ pointerEvents: 'none' }} />}
+                <CardMark x={a.x} y={a.y} side={sideS} kind={ends.source} color={markColor} />
+                <CardMark x={b.x} y={b.y} side={sideT} kind={ends.target} color={markColor} />
+                {(skip || (gap > 0 && active)) && !hov && (
+                  <g transform={`translate(${bmx},${bmy})`} style={{ pointerEvents: 'none' }}>
                     <rect x={-26} y={-9} width={52} height={18} rx={5} fill={skip ? '#fbf0e2' : '#ffffff'} stroke={skip ? '#d97706' : '#d3d8e0'} strokeWidth={1} />
                     {skip && <text x={-19} y={3.5} fontSize="11" fontWeight="800" fill="#d97706">!</text>}
                     <text x={skip ? 3 : 0} y={3} textAnchor="middle" fontSize="8.5" fontWeight="700" fill={skip ? '#b45309' : '#6b7280'} style={{ fontFamily: 'var(--mono)' }}>{LN(sLayer)}→{LN(tLayer)}</text>
+                  </g>
+                )}
+                {hov && (
+                  <g transform={`translate(${bmx},${bmy})`} style={{ cursor: 'pointer' }}
+                    onPointerDown={(e) => e.stopPropagation()} onClick={reqDelete}>
+                    <title>Eliminar relación</title>
+                    <circle r={12} fill="#fff" stroke="var(--error)" strokeWidth={1.6} />
+                    <line x1={-4} y1={-4} x2={4} y2={4} stroke="var(--error)" strokeWidth={2.2} strokeLinecap="round" />
+                    <line x1={4} y1={-4} x2={-4} y2={4} stroke="var(--error)" strokeWidth={2.2} strokeLinecap="round" />
                   </g>
                 )}
               </g>
@@ -288,6 +368,10 @@ export default function ERCanvas({ model, selectedId, onSelect, onMove, onCreate
           <div className="rd-label" style={{ marginBottom: 7 }}>Cardinalidad</div>
           <div className="rd-seg" style={{ width: '100%' }}>
             {(['1:1', '1:N', 'N:N'] as Cardinality[]).map((c) => <button key={c} className={card === c ? 'active' : ''} style={{ flex: 1, justifyContent: 'center' }} onClick={() => setCard(c)}>{c}</button>)}
+          </div>
+          <div style={{ marginTop: 10, padding: '8px 10px', background: 'var(--flow-soft)', borderRadius: 'var(--r-sm)', border: '1px solid var(--border)' }}>
+            <RelPreview card={card} />
+            <div className="rd-small" style={{ marginTop: 4, color: 'var(--flow-700)' }}>{CARD_HINT[card]}</div>
           </div>
         </div>
       )}

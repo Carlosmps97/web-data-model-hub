@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import Icon from '@/components/ui/Icon';
-import type { Domain, ModelLevel } from '@/types/model';
+import TagEditor from '@/components/ui/TagEditor';
+import type { Domain, ModelLevel, Tag } from '@/types/model';
 import { SENSITIVITY_LEVELS } from '@/types/model';
 
 const PALETTE = ['#0d9488', '#4f46e5', '#7c3aed', '#0e7490', '#b45309', '#be123c', '#475569', '#15803d'];
@@ -115,6 +116,10 @@ export default function DomainModal({ domain, layers, onClose, onSave }: DomainM
           <input className="rd-input" style={{ flex: 1 }} value={subInput} placeholder="Añadir subdominio…" onChange={(e) => setSubInput(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSub(); } }} />
           <button type="button" className="rd-btn rd-btn-secondary" onClick={addSub}><Icon name="plus" size={14} sw={2.6} />Añadir</button>
         </div>
+      </div>
+      <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+        <span className="rd-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Icon name="tag" size={12} />Etiquetas (clave-valor)</span>
+        <TagEditor value={d.tags} onChange={(tags: Tag[]) => patch({ tags })} />
       </div>
     </Modal>
   );

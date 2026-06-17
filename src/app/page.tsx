@@ -2,15 +2,20 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Toaster, toast } from 'sonner';
 import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
 import Icon, { type IconName } from '@/components/ui/Icon';
+import MetadataAdmin from '@/features/metadata/components/MetadataAdmin';
 import { projectsService, canvasService } from '@/services';
 import { getEngine } from '@/features/engines/engines';
-import type { Project, Table, DatabaseEngine } from '@/types/model';
+import { normalizeTags, formatTag, tagId } from '@/lib/tags';
+import type { Project, Table, DatabaseEngine, Tag } from '@/types/model';
+
+const pushToast = (msg: string, kind?: 'err') => (kind === 'err' ? toast.error(msg) : toast.success(msg));
 
 // ── Catalog row (one per table, flattened across all projects) ───────────────
-interface ColRow { name: string; dataType: string; key: '' | 'PK' | 'FK' | 'SK' | 'PT' }
+interface ColRow { name: string; dataType: string; key: '' | 'PK' | 'FK' | 'SK' | 'PT'; def: string; tags: Tag[] }
 interface ViewRow { name: string; type: string; role: string }
 interface CatalogRow {
   projectId: string; project: string;
@@ -19,10 +24,15 @@ interface CatalogRow {
   schema: string; table: string;
   domainId: string; domainName: string; domainColor: string;
   owner: string;
-  columns: ColRow[]; views: ViewRow[]; fkCount: number;
+  columns: ColRow[]; views: ViewRow[]; fkCount: number; tags: Tag[];
 }
 
 const PII = /email|phone|ssn|dni|passport|card|tax|address|documento|tel[eé]fono|correo|nombre/i;
+
+// Governance severity → number color (badge styling lives in globals.css `.sev-*`).
+const GOV_SEV_COLOR: Record<'medium' | 'info' | 'critical', string> = {
+  medium: 'var(--warning)', info: 'var(--ink-2)', critical: 'var(--error)',
+};
 
 function keyOf(c: { isPrimaryKey?: boolean; isForeignKey?: boolean; isSurrogateKey?: boolean; isPartitionKey?: boolean }): ColRow['key'] {
   if (c.isPrimaryKey) return 'PK';
@@ -45,9 +55,10 @@ function buildCatalog(project: Project, tables: Table[]): CatalogRow[] {
       schema: t.schema ?? '', table: t.name,
       domainId: t.domain ?? '', domainName: domain?.name ?? '', domainColor: domain?.color ?? '#99a1ae',
       owner: domain?.owner ?? '',
-      columns: (t.columns ?? []).map((c) => ({ name: c.name, dataType: c.dataType, key: keyOf(c) })),
+      columns: (t.columns ?? []).map((c) => ({ name: c.name, dataType: c.dataType, key: keyOf(c), def: c.functionalDefinition ?? '', tags: normalizeTags(c.tags) ?? [] })),
       views: (t.views ?? []).map((v) => ({ name: v.name, type: v.type, role: v.role ?? '—' })),
       fkCount: (t.columns ?? []).filter((c) => c.isForeignKey).length,
+      tags: normalizeTags(t.tags) ?? [],
     };
   });
 }
@@ -95,7 +106,7 @@ function FilterSelect({ value, onChange, options }: { value: string; onChange: (
   );
 }
 
-type Tab = 'overview' | 'tables' | 'views' | 'columns';
+type Tab = 'overview' | 'tables' | 'views' | 'columns' | 'metadata';
 type Selection = { kind: 'table'; row: CatalogRow } | { kind: 'view'; row: CatalogRow; view: ViewRow } | null;
 
 export default function ModelCenterPage() {
@@ -191,7 +202,7 @@ export default function ModelCenterPage() {
   const tSort = useSort('table'); const vSort = useSort('name'); const cSort = useSort('name');
   const tRows = tSort.sortBy(tableRows, (t, k) => (({ table: `${t.schema}.${t.table}`, project: t.project, layer: t.model, engine: t.engine ?? '', domain: t.domainName, owner: t.owner, columns: t.columns.length, views: t.views.length, fks: t.fkCount } as Record<string, string | number>)[k] ?? ''));
   const vRows = vSort.sortBy(viewRows, (r, k) => (({ name: r.v.name, table: r.t.table, project: r.t.project, type: r.v.type, role: r.v.role } as Record<string, string>)[k] ?? ''));
-  const cRows = cSort.sortBy(colRows, (r, k) => (({ name: r.c.name, dataType: r.c.dataType, key: r.c.key, table: r.t.table, project: r.t.project } as Record<string, string>)[k] ?? ''));
+  const cRows = cSort.sortBy(colRows, (r, k) => (({ name: r.c.name, dataType: r.c.dataType, key: r.c.key, def: r.c.def, table: r.t.table, project: r.t.project } as Record<string, string>)[k] ?? ''));
 
   const goTables = (f: typeof flag) => { setFlag(f); setQ(''); setTab('tables'); };
   const engOpts: [string, string][] = [['all', 'Todos los engines'], ...byEngine.map(([e]) => [e, getEngine(e as DatabaseEngine)?.shortLabel ?? e] as [string, string])];
@@ -203,68 +214,95 @@ export default function ModelCenterPage() {
   return (
     <AppLayout>
       <div className="dmh-main">
-        <Header
-          crumbs={[{ label: 'Model Center' }]}
-          actions={
-            <div className="rd-seg">
-              {(['overview', 'tables', 'views', 'columns'] as Tab[]).map((k) => (
-                <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
-                  {{ overview: 'Overview', tables: 'Tables', views: 'Views', columns: 'Columns' }[k]}
-                </button>
-              ))}
-            </div>
-          }
-        />
+        <Header crumbs={[{ label: 'Model Center' }]} />
         <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
           <div className="dmh-page" style={{ flex: 1 }}>
-            {loading ? (
+            <div className="mc-top">
+              <div className="mc-top-titles">
+                <div className="rd-h1">Model Center</div>
+                <div className="rd-small">Un catálogo único de todos los proyectos — busca tablas, vistas y columnas, y vigila la salud del modelo</div>
+              </div>
+              <div className="rd-seg">
+                {(['overview', 'tables', 'views', 'columns', 'metadata'] as Tab[]).map((k) => (
+                  <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
+                    {{ overview: 'Overview', tables: 'Tables', views: 'Views', columns: 'Columns', metadata: 'Metadata' }[k]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {tab === 'metadata' ? (
+              <MetadataAdmin pushToast={pushToast} />
+            ) : loading ? (
               <div className="rd-small">Cargando catálogo…</div>
             ) : tab === 'overview' ? (
               <>
-                <div style={{ marginBottom: 20 }}>
-                  <div className="rd-h1" style={{ marginBottom: 4 }}>Model Center</div>
-                  <div className="rd-small">Un catálogo único de todos los proyectos — busca tablas, vistas y columnas, y vigila la salud del modelo</div>
-                </div>
                 <div className="dash-stats">
-                  {([['grid', stats.projects, 'PROJECTS', '#4f46e5'], ['layers', stats.models, 'DATA MODELS', '#7c3aed'], ['table', stats.tables, 'TABLES', '#0d9488'], ['eye', stats.views, 'VIEWS', '#0e7490'], ['columns', stats.columns, 'COLUMNS', '#b45309']] as [IconName, number, string, string][]).map(([ic, v, l, c]) => (
+                  {([['folder', stats.projects, 'Projects', 'Activos en el workspace'], ['layers', stats.models, 'Data Models', 'Niveles de modelado'], ['database', stats.tables, 'Tables', 'Catalogadas con éxito'], ['eye', stats.views, 'Views', 'Expuestas al negocio'], ['columns', stats.columns, 'Columns', 'Metadatos parseados']] as [IconName, number, string, string][]).map(([ic, v, l, cap]) => (
                     <div className="dash-stat" key={l}>
-                      <span className="dash-stat-ico" style={{ background: c + '1a', color: c }}><Icon name={ic} size={18} /></span>
-                      <div><div className="dash-stat-val">{v}</div><div className="dash-stat-lbl">{l}</div></div>
+                      <div className="dash-stat-top">
+                        <span className="dash-stat-lbl">{l}</span>
+                        <Icon name={ic} size={16} className="dash-stat-ico" />
+                      </div>
+                      <div className="dash-stat-val">{v}</div>
+                      <div className="dash-stat-cap">{cap}</div>
                     </div>
                   ))}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
-                  <div className="rd-card" style={{ padding: 18 }}>
-                    <div className="mc-cardlbl"><Icon name="database" size={13} />Tablas por engine</div>
+                <div className="mc-panels">
+                  <div className="rd-card mc-panel">
+                    <div className="mc-cardhead">
+                      <span className="mc-cardlbl"><Icon name="database" size={13} />Tablas por engine</span>
+                      <span className="mc-pill">{byEngine.length} {byEngine.length === 1 ? 'motor' : 'motores'}</span>
+                    </div>
                     {byEngine.map(([e, n]) => {
                       const def = getEngine(e as DatabaseEngine);
+                      const pct = Math.round((n / Math.max(stats.tables, 1)) * 100);
                       return (
                         <div className="mc-bar" key={e}>
                           <span className="mc-bar-lbl"><span style={{ width: 8, height: 8, borderRadius: '50%', background: def?.color }} />{def?.shortLabel ?? e}</span>
-                          <div className="mc-bar-track"><div className="mc-bar-fill" style={{ width: `${(n / Math.max(stats.tables, 1)) * 100}%`, background: def?.color }} /></div>
-                          <span className="mc-bar-num">{n}</span>
+                          <div className="mc-bar-track"><div className="mc-bar-fill" style={{ width: `${pct}%`, background: def?.color }} /></div>
+                          <span className="mc-bar-num">{n} <span className="mc-bar-pct">{pct}%</span></span>
                         </div>
                       );
                     })}
                   </div>
-                  <div className="rd-card" style={{ padding: 18 }}>
-                    <div className="mc-cardlbl"><Icon name="folder" size={13} />Tablas por dominio</div>
-                    {byDomain.map(([d, { n, color }]) => (
-                      <div className="mc-bar" key={d}>
-                        <span className="mc-bar-lbl"><span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />{d}</span>
-                        <div className="mc-bar-track"><div className="mc-bar-fill" style={{ width: `${(n / Math.max(stats.tables, 1)) * 100}%`, background: color }} /></div>
-                        <span className="mc-bar-num">{n}</span>
-                      </div>
-                    ))}
+                  <div className="rd-card mc-panel">
+                    <div className="mc-cardhead">
+                      <span className="mc-cardlbl"><Icon name="folder" size={13} />Tablas por dominio</span>
+                      <span className="mc-pill">{byDomain.length} {byDomain.length === 1 ? 'dominio' : 'dominios'}</span>
+                    </div>
+                    {byDomain.map(([d, { n, color }]) => {
+                      const pct = Math.round((n / Math.max(stats.tables, 1)) * 100);
+                      return (
+                        <div className="mc-bar" key={d}>
+                          <span className="mc-bar-lbl"><span style={{ width: 8, height: 8, borderRadius: '50%', background: color }} />{d}</span>
+                          <div className="mc-bar-track"><div className="mc-bar-fill" style={{ width: `${pct}%`, background: color }} /></div>
+                          <span className="mc-bar-num">{n} <span className="mc-bar-pct">{pct}%</span></span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-                <div className="rd-card" style={{ padding: 18 }}>
-                  <div className="mc-cardlbl"><Icon name="activity" size={13} />Salud y gobierno del modelo</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
-                    <button className="mc-health" onClick={() => goTables('nopk')}><div className="mc-health-v" style={{ color: gov.nopk ? 'var(--warning)' : 'var(--success)' }}>{gov.nopk}</div><div className="mc-health-l">Tablas sin clave primaria</div></button>
-                    <button className="mc-health" onClick={() => goTables('nodomain')}><div className="mc-health-v" style={{ color: gov.nodomain ? 'var(--warning)' : 'var(--success)' }}>{gov.nodomain}</div><div className="mc-health-l">Tablas sin dominio</div></button>
-                    <button className="mc-health" onClick={() => goTables('noview')}><div className="mc-health-v">{gov.noview}</div><div className="mc-health-l">Tablas sin ninguna vista</div></button>
-                    <button className="mc-health" onClick={() => { setTab('columns'); setQ('email'); }}><div className="mc-health-v" style={{ color: 'var(--error)' }}>{gov.pii}</div><div className="mc-health-l">Columnas sensibles (PII)</div></button>
+                <div className="rd-card mc-panel">
+                  <div className="mc-cardhead">
+                    <span className="mc-cardlbl"><Icon name="shield" size={13} />Salud y gobierno del modelo</span>
+                  </div>
+                  <div className="mc-gov-grid">
+                    {([
+                      [gov.nopk, 'Tablas sin clave primaria', 'Afecta el rendimiento de queries.', 'medium', () => goTables('nopk')],
+                      [gov.nodomain, 'Tablas sin dominio asignado', 'Dificulta el catalogado del modelo.', 'medium', () => goTables('nodomain')],
+                      [gov.noview, 'Tablas sin ninguna vista', 'Bajo consumo interno actual.', 'info', () => goTables('noview')],
+                      [gov.pii, 'Columnas sensibles (PII)', 'Requiere enmascaramiento.', 'critical', () => { setTab('columns'); setQ('email'); }],
+                    ] as [number, string, string, 'medium' | 'info' | 'critical', () => void][]).map(([n, title, cap, sev, on]) => (
+                      <button className="mc-gov" key={title} onClick={on}>
+                        <div className="mc-gov-top">
+                          <span className="mc-gov-v" style={{ color: n ? GOV_SEV_COLOR[sev] : 'var(--success)' }}>{n}</span>
+                          <span className={`mc-gov-sev sev-${sev}`}>{sev}</span>
+                        </div>
+                        <div className="mc-gov-t">{title}</div>
+                        <div className="mc-gov-cap">{cap}</div>
+                      </button>
+                    ))}
                   </div>
                 </div>
               </>
@@ -299,7 +337,7 @@ export default function ModelCenterPage() {
                       <tbody>
                         {tRows.map((t, i) => (
                           <tr key={i} className={sel?.kind === 'table' && sel.row === t ? 'active' : ''} onClick={() => setSel({ kind: 'table', row: t })}>
-                            <td><span className="mc-name"><span className="mc-tico"><Icon name="table" size={12} /></span>{t.schema}.{t.table}</span></td>
+                            <td><span className="mc-name"><span className="mc-tico"><Icon name="table" size={12} /></span>{t.schema}.{t.table}{t.tags.length > 0 && <span className="mc-tagdot" title={t.tags.map(formatTag).join(' · ')}><Icon name="tag" size={9} />{t.tags.length}</span>}</span></td>
                             <td className="mc-dim">{t.project} · {t.model}</td>
                             <td>{t.layerId ? <span className="rd-badge" style={{ background: t.layerColor + '1a', color: t.layerColor }}>{t.model}</span> : <span className="mc-dim">—</span>}</td>
                             <td><span className="rd-engine" style={{ padding: '2px 8px 2px 6px' }}><span className="dot" style={{ background: getEngine(t.engine)?.color }} />{getEngine(t.engine)?.shortLabel ?? '—'}</span></td>
@@ -347,10 +385,11 @@ export default function ModelCenterPage() {
                     <table className="mc-grid">
                       <thead><tr>
                         <Th label="Columna" k="name" {...cSort} />
-                        <Th label="Tipo" k="dataType" {...cSort} w={150} />
-                        <Th label="Clave" k="key" {...cSort} w={70} />
-                        <Th label="Tabla" k="table" {...cSort} />
-                        <Th label="Proyecto" k="project" {...cSort} w={150} />
+                        <Th label="Tipo" k="dataType" {...cSort} w={130} />
+                        <Th label="Clave" k="key" {...cSort} w={64} />
+                        <Th label="Definición · tags" k="def" {...cSort} />
+                        <Th label="Tabla" k="table" {...cSort} w={170} />
+                        <Th label="Proyecto" k="project" {...cSort} w={140} />
                       </tr></thead>
                       <tbody>
                         {cRows.slice(0, 400).map((r, i) => (
@@ -358,6 +397,10 @@ export default function ModelCenterPage() {
                             <td><span className="mc-name" style={{ fontWeight: 600 }}>{PII.test(r.c.name) && <span title="Sensible (PII)" style={{ color: 'var(--error)', display: 'inline-flex' }}><Icon name="key" size={12} /></span>}{r.c.name}</span></td>
                             <td><span className="rd-mono mc-dim" style={{ fontSize: 11.5 }}>{r.c.dataType}</span></td>
                             <td>{r.c.key ? <span className={`rd-key ${r.c.key.toLowerCase()}`}>{r.c.key}</span> : <span className="mc-dim">—</span>}</td>
+                            <td>
+                              <span className="mc-coldef" title={r.c.def || undefined}>{r.c.def || <span className="mc-dim">—</span>}</span>
+                              {r.c.tags.length > 0 && <span className="mc-tagdot" title={r.c.tags.map(formatTag).join(' · ')}><Icon name="tag" size={9} />{r.c.tags.length}</span>}
+                            </td>
                             <td className="mc-dim">{r.t.schema}.{r.t.table}</td>
                             <td className="mc-dim">{r.t.project}</td>
                           </tr>
@@ -393,9 +436,13 @@ export default function ModelCenterPage() {
                   <>
                     <div className="ins-grouplbl" style={{ marginBottom: 8 }}><Icon name="columns" size={12} />Columnas · {sel.row.columns.length}</div>
                     {sel.row.columns.map((c, i) => (
-                      <div className="ins-col" key={i}>
+                      <div className="ins-col" key={i} style={{ alignItems: (c.def || c.tags.length) ? 'flex-start' : undefined }}>
                         {c.key ? <span className={`rd-key ${c.key.toLowerCase()}`}>{c.key}</span> : <span className="rd-key none"><span className="d" /></span>}
-                        <span style={{ flex: 1, fontWeight: 600, fontSize: 12.5 }}>{c.name}</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ fontWeight: 600, fontSize: 12.5 }}>{c.name}</span>
+                          {c.def && <div className="rd-small" style={{ lineHeight: 1.4, marginTop: 2 }}>{c.def}</div>}
+                          {c.tags.length > 0 && <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>{c.tags.map((t) => <span key={tagId(t)} className="rd-badge rd-badge-neutral" style={{ fontSize: 9.5 }}>{formatTag(t)}</span>)}</div>}
+                        </div>
                         <span className="rd-mono" style={{ fontSize: 10.5, color: 'var(--muted)' }}>{c.dataType}</span>
                       </div>
                     ))}
@@ -410,6 +457,12 @@ export default function ModelCenterPage() {
                         ))}
                       </>
                     )}
+                    {sel.row.tags.length > 0 && (
+                      <>
+                        <div className="ins-grouplbl" style={{ margin: '16px 0 8px' }}><Icon name="tag" size={12} />Etiquetas · {sel.row.tags.length}</div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{sel.row.tags.map((t) => <span key={tagId(t)} className="rd-badge rd-badge-neutral"><Icon name="tag" size={9} />{formatTag(t)}</span>)}</div>
+                      </>
+                    )}
                   </>
                 ) : (
                   <div className="rd-small" style={{ lineHeight: 1.6 }}>Vista {sel.view.type} para el rol <b style={{ color: 'var(--ink)' }}>{sel.view.role}</b>, proyectada desde <b style={{ color: 'var(--ink)' }}>{sel.row.schema}.{sel.row.table}</b>. Abre el proyecto para editar su SQL.</div>
@@ -420,6 +473,7 @@ export default function ModelCenterPage() {
           )}
         </div>
       </div>
+      <Toaster richColors position="bottom-center" toastOptions={{ style: { fontFamily: 'var(--ui)' } }} />
     </AppLayout>
   );
 }
