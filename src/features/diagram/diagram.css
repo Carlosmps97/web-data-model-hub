@@ -1,0 +1,82 @@
+/* ER canvas: node, wires, dock, minimap, arrange, gear, scope (rd-node, er-, ed-canvas, ed-scope). Part of the Aurora system — see doc/feature-architecture.md. */
+
+/* ============================================================ ER table node */
+.rd-node { width: 250px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow-md); overflow: hidden; font-family: var(--ui); }
+.rd-node.selected { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-muted), var(--shadow-md); }
+.rd-node-head { display: flex; align-items: center; gap: 8px; padding: 9px 11px; background: var(--primary); color: #fff; }
+.rd-node-head .ico { display: flex; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: var(--r-sm); background: rgba(255,255,255,.16); }
+.rd-node-head .ico svg { width: 12px; height: 12px; color: #fff; }
+.rd-node-title { flex: 1; font-size: 13px; font-weight: 700; letter-spacing: .01em; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rd-node-title .schema { opacity: .7; font-weight: 500; }
+.rd-node-count { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: var(--r-full); background: rgba(255,255,255,.2); color: rgba(255,255,255,.95); }
+.rd-node-layer { display: inline-flex; align-items: center; padding: 1px 6px; font-size: 9px; font-weight: 800; letter-spacing: .04em; border-radius: var(--r-sm); background: rgba(255,255,255,.22); color: #fff; flex-shrink: 0; }
+.rd-node-gear { display: flex; width: 22px; height: 22px; align-items: center; justify-content: center; border-radius: var(--r-sm); background: rgba(255,255,255,.12); border: none; cursor: pointer; color: #fff; }
+.rd-node-gear svg { width: 13px; height: 13px; }
+.rd-node-gear:hover { background: rgba(255,255,255,.24); }
+.rd-node-rows { padding: 3px; }
+.rd-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: var(--r-sm); font-size: 12px; cursor: default; transition: background .12s; }
+.rd-row:hover { background: var(--surface-2); }
+.rd-row .name { flex: 1; font-weight: 600; color: var(--ink); }
+.rd-row .type { font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+.rd-row .nul { width: 7px; height: 7px; transform: rotate(45deg); border: 1.4px solid var(--subtle); border-radius: 1px; }
+.rd-row.active { background: var(--flow-soft); box-shadow: inset 2px 0 0 var(--flow); }
+.rd-row.active .name, .rd-row.active .type { color: var(--flow-700); }
+.rd-node-foot { padding: 7px 11px; border-top: 1px solid var(--border-soft); font-size: 10.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+
+@keyframes rd-flow { to { stroke-dashoffset: -28; } }
+.rd-wire-flow { stroke: var(--flow); stroke-width: 2.5; fill: none; stroke-dasharray: 7 5; animation: rd-flow .7s linear infinite; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--flow) 45%, transparent)); }
+.rd-wire-base { stroke: var(--border-strong); stroke-width: 2; fill: none; }
+.rd-wire-dim { opacity: .35; }
+@media (prefers-reduced-motion: reduce) { .rd-wire-flow { animation: none; } }
+
+.rd-dock { display: inline-flex; align-items: center; gap: 3px; padding: 5px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); box-shadow: var(--shadow-md); }
+.rd-dock-btn { display: flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: var(--r-sm); border: none; background: transparent; color: var(--ink-2); cursor: pointer; transition: all .14s; }
+.rd-dock-btn svg { width: 17px; height: 17px; }
+.rd-dock-btn:hover { background: var(--primary-muted); color: var(--primary); }
+.rd-dock-btn.active { background: var(--primary); color: #fff; }
+.rd-dock-sep { width: 1px; height: 22px; background: var(--border); margin: 0 3px; }
+
+.rd-bubble { display: flex; flex-direction: column; gap: 4px; padding: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow-lg); }
+.rd-bubble button { width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; border-radius: var(--r-sm); border: none; cursor: pointer; }
+.rd-bubble button svg { width: 15px; height: 15px; }
+.rd-bubble .b-primary { background: var(--primary); color: #fff; }
+.rd-bubble .b-ghost { background: var(--surface-2); color: var(--ink-2); }
+
+.ed-canvas { flex: 1; position: relative; overflow: hidden; background: radial-gradient(circle at center, rgba(20,22,40,.05) 1.1px, transparent 1.1px) 0 0 / 24px 24px, var(--canvas); }
+.er-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
+.er-edges { position: absolute; top: 0; left: 0; overflow: visible; pointer-events: none; }
+.er-node { position: absolute; }
+.er-node .rd-node { width: 250px; cursor: grab; }
+.er-node.dragging .rd-node { cursor: grabbing; box-shadow: 0 14px 40px -6px rgba(20,22,40,.28); }
+.er-node .rd-node-head { cursor: grab; }
+.er-row { position: relative; }
+.er-row.connectable { cursor: crosshair; }
+.er-row.connectable:hover { background: var(--primary-muted); box-shadow: inset 2px 0 0 var(--primary); }
+.er-row.connect-source { background: var(--primary-soft); box-shadow: inset 2px 0 0 var(--primary); }
+.er-node-tip { position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); z-index: 40; width: 200px; pointer-events: none; }
+
+.ed-dock { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 15; }
+.ed-connect { position: absolute; top: 16px; right: 16px; width: 244px; z-index: 15; padding: 15px; }
+.ed-minimap { position: absolute; bottom: 18px; right: 18px; width: 168px; height: 108px; border-radius: var(--r-sm); background: var(--surface); border: 1px solid var(--border); box-shadow: var(--shadow-sm); overflow: hidden; z-index: 14; }
+.ed-minimap .mm-node { position: absolute; border-radius: 2px; background: var(--border-strong); }
+.ed-minimap .mm-node.sel { background: var(--primary); }
+.ed-arrange-pop { position: absolute; bottom: calc(100% + 10px); left: 50%; transform: translateX(-50%); width: 320px; z-index: 30; padding: 8px; }
+.ed-arrange-opt { display: flex; gap: 12px; align-items: flex-start; width: 100%; padding: 11px; border: none; background: transparent; border-radius: var(--r-sm); cursor: pointer; text-align: left; transition: background .12s; }
+.ed-arrange-opt:hover { background: var(--surface-2); }
+.ed-arrange-opt .ico { width: 36px; height: 36px; border-radius: var(--r-sm); background: var(--primary-soft); color: var(--primary-700); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+.er-gear-menu { position: absolute; top: 38px; right: 6px; z-index: 50; width: 188px; }
+.er-color-row { display: flex; gap: 7px; padding: 8px 10px 4px; }
+.er-color-dot { width: 22px; height: 22px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; }
+.er-color-dot.sel { border-color: var(--ink); }
+
+.ed-scope-btn { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; font-size: 12.5px; color: var(--ink-2); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-sm); cursor: pointer; box-shadow: var(--shadow-xs); transition: all .14s; }
+.ed-scope-btn:hover { border-color: var(--primary); }
+.ed-scope-btn svg { color: var(--muted); }
+.ed-scope-pop { position: absolute; top: calc(100% + 8px); left: 0; z-index: 60; width: 340px; padding: 6px; }
+.ed-scope-presets { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px 10px 8px; }
+.ed-scope-presets button { font-size: 11.5px; font-weight: 600; padding: 5px 10px; border-radius: var(--r-full); border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink-2); cursor: pointer; transition: all .12s; }
+.ed-scope-presets button:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-muted); }
+.ed-scope-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 4px 10px 8px; }
+.ed-scope-chk { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); cursor: pointer; }
+.ed-scope-chk .fs-check { width: 16px; height: 16px; }

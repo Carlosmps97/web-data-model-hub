@@ -5,7 +5,7 @@ import Icon from '@/components/ui/Icon';
 import type { Table, ModelLevel, Domain, Relationship } from '@/types/model';
 import type { Scope } from '@/lib/hierarchy';
 import { findLayer } from '@/lib/hierarchy';
-import { tableFromSources } from '@/features/diagram/builders';
+import { tableFromSources } from '@/features/diagram';
 
 interface CreateFromSqlModalProps {
   tables: Table[];

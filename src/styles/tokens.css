@@ -1,0 +1,57 @@
+/* Aurora design tokens (:root). Element resets are in base.css. Part of the Aurora system — see doc/feature-architecture.md. */
+
+/* ============================================================
+   Data Model Hub — Aurora design system (single light theme).
+   Ported from newStyleWeb/Redesign/{redesign.css, app/app.css}.
+   No dark mode. Fonts: Manrope (UI) + JetBrains Mono (data/SQL).
+   Tokens live on :root so every class works without a wrapper.
+   ============================================================ */
+
+:root {
+  /* surfaces / neutrals */
+  --bg: #f5f6f8;
+  --canvas: #eceff4;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --border: #e4e7ec;
+  --border-soft: #eef0f3;
+  --border-strong: #d3d8e0;
+  --ink: #14161c;
+  --ink-2: #3d4453;
+  --muted: #6b7280;
+  --subtle: #99a1ae;
+  --inverse: #ffffff;
+
+  /* semantics */
+  --success: #15a34a; --success-soft: #e8f6ee;
+  --warning: #d97706; --warning-soft: #fbf0e2;
+  --error: #dc2626;   --error-soft: #fbeaea;
+
+  /* Aurora accents */
+  --primary: #4f46e5;
+  --primary-700: #4338ca;
+  --primary-soft: #eef0fe;
+  --primary-muted: rgba(79, 70, 229, .10);
+  --on-primary: #ffffff;
+  --flow: #0d9488;          /* teal — relationship wire + flow accents */
+  --flow-700: #0f766e;
+  --flow-soft: #d8f3ee;
+  --accent2: #7c3aed;       /* violet — AI agent only */
+
+  /* ER key chips */
+  --k-pk: #b45309; --k-pk-soft: #fbf0e2;
+  --k-fk: #0d9488; --k-fk-soft: #d8f3ee;
+  --k-sk: #7c3aed; --k-sk-soft: #f0eafe;
+  --k-pt: #0e7490; --k-pt-soft: #e0f2f6;
+
+  /* radii + elevation */
+  --r-sm: 7px; --r: 11px; --r-lg: 15px; --r-xl: 20px; --r-full: 999px;
+  --shadow-xs: 0 1px 2px rgba(20,22,28,.05);
+  --shadow-sm: 0 1px 3px rgba(20,22,28,.07);
+  --shadow-md: 0 6px 18px -4px rgba(20,22,28,.12), 0 2px 6px -2px rgba(20,22,28,.07);
+  --shadow-lg: 0 16px 40px -8px rgba(20,22,28,.18);
+
+  /* typography (next/font sets --font-manrope / --font-jbmono in layout.tsx) */
+  --ui: var(--font-manrope), 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: var(--font-jbmono), 'JetBrains Mono', ui-monospace, monospace;
+}

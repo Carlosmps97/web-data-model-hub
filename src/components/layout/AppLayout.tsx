@@ -2,7 +2,7 @@
 
 import React, { useEffect } from 'react';
 import Sidebar from './Sidebar';
-import HelpDrawer from '@/features/help/HelpDrawer';
+import { HelpDrawer } from '@/features/help';
 import { useAuthStore } from '@/store/useAuthStore';
 
 /**

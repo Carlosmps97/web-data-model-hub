@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import Icon from '@/components/ui/Icon';
 import type { Table, Relationship } from '@/types/model';
-import { genDBML, parseDBML } from '@/features/diagram/builders';
+import { genDBML, parseDBML } from '@/features/diagram';
 
 interface DBMLModalProps {
   tables: Table[];

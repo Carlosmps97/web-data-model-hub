@@ -1,0 +1,18 @@
+/* Global element resets + tiny utilities (app-wide). Part of the Aurora system — see doc/feature-architecture.md. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+body {
+  font-family: var(--ui);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+button { font-family: inherit; }
+a { color: inherit; text-decoration: none; }
+
+/* utility */
+.flex-1 { flex: 1; }
+.nodrag { }

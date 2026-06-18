@@ -7,7 +7,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import type { TableColumn, Table } from '@/types/model';
-import type { PreviewTable } from '@/features/excel-import/services/excelImport.service';
+import type { PreviewTable } from '../services/excelImport.service';
 
 export interface PreviewMeta {
   layer?: string;

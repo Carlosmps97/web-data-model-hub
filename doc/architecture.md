@@ -65,44 +65,58 @@ Proyecto → Modelo (nivel: RDV·UDV·DDV…) → Dominio (vertical) → Tabla �
 
 ## 3. Estructura del repositorio
 
+> **Convención de features:** cada `features/<name>/` es autocontenida y expone su
+> API pública por `index.ts` (barrel). El código de fuera importa **solo** desde
+> `@/features/<name>`, nunca rutas internas (lo vigila un guard de ESLint). Las
+> rutas de `app/` son **shells finos** que renderizan el *screen* de una feature.
+> Detalle y "cómo agregar una feature" en **`doc/feature-architecture.md`**.
+
 ```
 web-data-model-hub/
 ├── src/
-│   ├── app/                       # App Router (sin /api/*)
-│   │   ├── layout.tsx             # fuentes + favicon (icon.png/apple-icon.png = logo-dog)
-│   │   ├── icon.png · apple-icon.png   # favicon (perro, cuadrado, transparente)
-│   │   ├── page.tsx               # Model Center (catálogo cross-project)
-│   │   ├── login/page.tsx
-│   │   ├── projects/page.tsx      # lista de proyectos
-│   │   ├── projects/[projectId]/page.tsx          # hub: Modelos (niveles) + Dominios
-│   │   ├── projects/[projectId]/editor/page.tsx   # editor (canvas + rail + inspector)
-│   │   ├── docs/page.tsx          # Centro de ayuda in-app
-│   │   └── admin/users/page.tsx   # CRUD usuarios + permisos
+│   ├── app/                       # App Router — shells finos (sin /api/*)
+│   │   ├── layout.tsx             # fuentes + import único de globals.css
+│   │   ├── page.tsx               # → <ModelCenterScreen/>  (features/model-center)
+│   │   ├── login/page.tsx         # → <LoginScreen/>        (features/auth)
+│   │   ├── projects/page.tsx      # → <ProjectsScreen/>     (features/projects)
+│   │   ├── projects/[projectId]/page.tsx          # → <ProjectHubScreen/>
+│   │   ├── projects/[projectId]/editor/page.tsx   # → <EditorScreen/>  (features/editor)
+│   │   ├── docs/page.tsx          # → <HelpCenterScreen/>   (features/help)
+│   │   └── admin/users/page.tsx   # → <AdminUsersScreen/>   (features/admin-users)
 │   ├── components/
 │   │   ├── layout/ (AppLayout · Header · Sidebar [rail 64px])
-│   │   └── ui/ (Icon · Modal · ConfirmDialog · …)
-│   ├── features/
-│   │   ├── diagram/   ERCanvas · Inspector · ScopeControl · layout/layouts · builders
+│   │   └── ui/ (Icon · Modal · ConfirmDialog · TagEditor · …)
+│   ├── features/<name>/           # components/ [hooks/ lib/ services/ store/]
+│   │   │                          #   + <name>.css + index.ts (API pública) + README.md
+│   │   ├── auth/          LoginScreen
+│   │   ├── projects/      ProjectsScreen · ProjectHubScreen · CreateProjectModal
+│   │   ├── model-center/  ModelCenterScreen + grids/overview/inspector (lib/catalog · hooks)
+│   │   ├── editor/        EditorScreen · useEditorController · EditorListView
+│   │   ├── diagram/       ERCanvas · Inspector · ScopeControl · layout/layouts · builders
 │   │   ├── table-editor/  TablesListView · TableForm · CreateFromSqlModal · DBMLModal
-│   │   ├── views/     ViewForm
-│   │   ├── ddl/       generators · DDLPreviewModal
-│   │   ├── levels/    LevelModal           (CRUD de Modelos/niveles)
-│   │   ├── domains/   DomainModal          (CRUD de Dominios)
-│   │   ├── engines/   engines · EngineBadge · EngineSelect
-│   │   ├── excel-import/ ExcelImportModal + service
-│   │   ├── admin-users/  UserFormModal
-│   │   ├── projects/  CreateProjectModal
-│   │   ├── help/      help (contenido) · HelpDrawer (drawer "?")
-│   │   └── chat-agent/  DESACOPLADO — compila vía legacyModel.ts
-│   ├── store/   useProjectStore · useAuthStore · useUIStore
-│   ├── services/ http · auth.service · projects.service · canvas.service · admin.service · index
+│   │   ├── views/         ViewForm        · ddl/ generators · DDLPreviewModal
+│   │   ├── levels/        LevelModal      · domains/ DomainModal
+│   │   ├── engines/       engines · EngineBadge · EngineSelect
+│   │   ├── excel-import/  ExcelImportModal + service
+│   │   ├── metadata/      MetadataAdmin (Semantic Types & UDP)
+│   │   ├── admin-users/   AdminUsersScreen · UserFormModal
+│   │   ├── help/          HelpCenterScreen · HelpDrawer · HelpContent
+│   │   ├── chat-agent/    DESACOPLADO (agente :8001)
+│   │   └── _template/     esqueleto para una feature nueva
+│   ├── styles/  tokens.css · base.css · ui.css · shell.css   (CSS global compartido)
+│   ├── store/   useProjectStore · useAuthStore · useUIStore · useMetadataStore
+│   ├── services/ http · auth · projects · canvas · admin · metadata · index
 │   ├── types/   model.ts (project-centric) · api.ts · auth.ts
-│   ├── lib/     hierarchy.ts (scope/layerGap) · auth/permissions.ts · tags.ts
+│   ├── lib/     hierarchy.ts (scope/layerGap) · auth/permissions.ts · tags.ts · columnRef.ts
 │   └── server/auth/jwt.ts   # signAuthToken / verifyAuthToken (jose)
 ├── proxy.ts                  # middleware Next 16 (export `proxy`) — verifica JWT
-├── doc/                      # esta carpeta
+├── doc/                      # esta carpeta (incl. feature-architecture.md)
 └── package.json
 ```
+
+> **CSS:** `app/globals.css` solo hace `@import` (en orden de cascada) de
+> `src/styles/{tokens,base,ui,shell}.css` + el `<name>.css` de cada feature.
+> Todo sigue siendo **global** (sin CSS Modules); los nombres de clase no cambian.
 
 > Next.js 16 renombró el archivo de middleware de `middleware.ts` a **`proxy.ts`**
 > (con un export `proxy`). El matcher funciona igual.

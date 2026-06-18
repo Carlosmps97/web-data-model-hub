@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Icon from '@/components/ui/Icon';
 import { useUIStore } from '@/store/useUIStore';
-import { CATS, ARTICLES, catOf, ArticleBody, useHelpSearch, type Article } from './help';
+import { CATS, ARTICLES, catOf, ArticleBody, useHelpSearch, type Article } from './HelpContent';
 
 /** Off-canvas quick-help drawer — opened from the rail "?" button. */
 export default function HelpDrawer() {

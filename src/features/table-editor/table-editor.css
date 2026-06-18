@@ -1,0 +1,38 @@
+/* Column editor + FromSQL (ce-, fs-). Part of the Aurora system — see doc/feature-architecture.md. */
+
+.ce-row { display: flex; align-items: center; gap: 8px; padding: 8px 9px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); }
+.ce-row:hover { border-color: var(--border-strong); }
+.ce-keys { display: flex; gap: 4px; flex-shrink: 0; }
+.ce-keys .rd-key { cursor: pointer; opacity: .34; filter: grayscale(1); }
+.ce-keys .rd-key.on { opacity: 1; filter: none; }
+.ce-keys .rd-key.pt { cursor: default; }
+
+/* Column row wrapper (groups the row + its expandable detail panel) */
+.ce-rowwrap { border: 1px solid transparent; border-radius: var(--r-sm); transition: border-color .12s, background .12s; }
+.ce-rowwrap.open { border-color: var(--border); background: var(--surface-2); }
+.ce-rowwrap.dragover { border-color: var(--primary); background: var(--primary-muted); }
+.ce-rowwrap.open .ce-row { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.ce-grip { display: inline-flex; align-items: center; color: var(--subtle); cursor: grab; flex-shrink: 0; }
+.ce-grip:active { cursor: grabbing; }
+.ce-expand { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; border: none; background: transparent; color: var(--muted); cursor: pointer; border-radius: var(--r-sm); flex-shrink: 0; transition: transform .15s, background .12s, color .12s; }
+.ce-expand:hover { background: var(--surface-2); color: var(--ink); }
+.ce-expand.open { transform: rotate(90deg); color: var(--primary); }
+.ce-detail { display: flex; flex-direction: column; gap: 12px; padding: 12px 11px 13px; }
+.ce-detail-field { display: flex; flex-direction: column; }
+.ce-detail-field textarea.rd-input { min-height: 0; }
+.ce-detail-block { display: flex; flex-direction: column; gap: 7px; padding-top: 11px; border-top: 1px solid var(--border); }
+.ce-detail-toggle { display: flex; align-items: flex-start; gap: 10px; padding-top: 11px; border-top: 1px solid var(--border); }
+.ce-detail-toggle .rd-toggle { margin-top: 1px; }
+.ce-detail-fk { display: flex; align-items: center; gap: 7px; padding: 8px 10px; background: var(--k-fk-soft); color: var(--k-fk); border-radius: var(--r-sm); font-size: 12px; }
+.ce-detail-fk b { font-weight: 700; }
+.ce-sem-tags { display: flex; flex-direction: column; gap: 7px; margin-top: 8px; }
+.ce-sem-tag { display: flex; align-items: center; gap: 9px; }
+.ce-sem-tag-k { width: 150px; flex-shrink: 0; font-size: 12px; font-weight: 600; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ============================================================ FromSQL / view editor / scope */
+.fs-src, .fs-col { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface); cursor: pointer; font-size: 12.5px; color: var(--ink); transition: all .12s; text-align: left; }
+.fs-src:hover, .fs-col:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.fs-src[data-on="true"], .fs-col[data-on="true"] { border-color: var(--primary); background: var(--primary-muted); }
+.fs-src:disabled { cursor: not-allowed; }
+.fs-check { width: 17px; height: 17px; flex-shrink: 0; border-radius: 5px; border: 1.5px solid var(--border-strong); background: var(--surface); display: flex; align-items: center; justify-content: center; color: #fff; }
+.fs-src[data-on="true"] .fs-check, .fs-col[data-on="true"] .fs-check, .fs-check[data-on="true"] { background: var(--primary); border-color: var(--primary); }
