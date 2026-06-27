@@ -4,10 +4,10 @@
 > backend FastAPI `backend-data-model-hub` (`:8000` en dev), configurado con
 > `NEXT_PUBLIC_API_URL`. Este documento describe los endpoints que el frontend
 > consume y los **tipos** que cruzan ambos lados (espejados en
-> `backend-data-model-hub/src/db/db_models.py`).
+> `backend-data-model-hub/app/features/<x>/models.py`).
 
-**Toda request lleva el cookie `modeler-auth`** (HttpOnly, SameSite=Lax,
-HS256). El cliente lo activa con `credentials: 'include'`.
+> **MVP sin auth**: los endpoints son **abiertos** (no hay login ni cookies). El
+> modelo de roles/permisos se reintroduce al final como una matriz robusta.
 
 ---
 
@@ -27,62 +27,50 @@ type ApiResponse<T> =
 
 ## 2. Endpoints
 
-### 2.1 Auth
+### 2.1 Proyectos
 
-| Método | Ruta | Auth | Body | Response |
-|---|---|---|---|---|
-| POST | `/api/auth/login` | público | `{ username, password }` | `AuthUser` + Set-Cookie |
-| POST | `/api/auth/logout` | público | — | `null` (limpia cookie) |
-| GET  | `/api/auth/me` | cookie | — | `AuthUser` o 401 |
-
-### 2.2 Proyectos
-
-| Método | Ruta | Auth | Body |
-|---|---|---|---|
-| GET | `/api/projects` | sesión | — (filtra por permisos) |
-| POST | `/api/projects` | **admin** | `{ name, description?, engines?, layers?, domains? }` |
-| GET | `/api/projects/{id}` | view | — |
-| PUT | `/api/projects/{id}` | edit | `{ name?, description?, engines?, layers?, domains? }` |
-| DELETE | `/api/projects/{id}` | **admin** | — (cascade al canvas) |
+| Método | Ruta | Body |
+|---|---|---|
+| GET | `/api/projects` | — (lista todos) |
+| POST | `/api/projects` | `{ name, description?, engines?, layers?, domains? }` |
+| GET | `/api/projects/{id}` | — |
+| PUT | `/api/projects/{id}` | `{ name?, description?, engines?, layers?, domains? }` |
+| DELETE | `/api/projects/{id}` | — (cascade al canvas) |
 
 El payload es un `Project` (con `engines` / `layers` / `domains` embebidos).
 `PUT` es la vía para editar la jerarquía (Modelos/niveles y Dominios) desde el
 hub del proyecto.
 
-### 2.3 Canvas (tablas + relaciones)
+### 2.2 Canvas (tablas + relaciones)
 
-| Método | Ruta | Auth | Body | Response |
-|---|---|---|---|---|
-| GET | `/api/projects/{id}/canvas` | view | — | `{ tables: Table[], relationships: Relationship[] }` |
-| PUT | `/api/projects/{id}/canvas` | edit | `{ tables?, relationships? }` | canvas actualizado |
-| PATCH | `/api/projects/{id}/positions` | edit | `{ tables: { [tableId]: {x,y} } }` | `{ updated: N }` |
+| Método | Ruta | Body | Response |
+|---|---|---|---|
+| GET | `/api/projects/{id}/canvas` | — | `{ tables: Table[], relationships: Relationship[] }` |
+| PUT | `/api/projects/{id}/canvas` | `{ tables?, relationships? }` | canvas actualizado |
+| PATCH | `/api/projects/{id}/positions` | `{ tables: { [tableId]: {x,y} } }` | `{ updated: N }` |
 
 - `PUT /canvas` **reemplaza en bloque** lo que llegue (tablas y/o relaciones).
   Exige al menos uno (400 si ambos faltan).
 - El store **omite `position`** al guardar el canvas; las posiciones van solo por
   `PATCH /positions`. (El editor actual las trata como per-sesión.)
 
-### 2.4 Admin de usuarios
+### 2.3 Metadata (Semantic Types / UDP)
 
-| Método | Ruta | Auth |
+| Método | Ruta | Response |
 |---|---|---|
-| GET | `/api/admin/users` | admin |
-| POST | `/api/admin/users` | admin |
-| PUT | `/api/admin/users/{id}` | admin |
-| DELETE | `/api/admin/users/{id}` | admin |
+| GET/POST/PUT/DELETE | `/api/metadata/semantic-types[/{id}]` | catálogo de Semantic Types |
+| GET/POST/PUT/DELETE | `/api/metadata/udps[/{id}]` | catálogo de UDPs |
 
-Body de create/update: `{ username, password?, role, isActive, permissions: Permission[] }`
-(password obligatorio al crear, ≥6 chars; omitir para no cambiarlo al editar).
+Catálogo transversal que potencia la sección "Metadata" del Model Center.
 
-### 2.5 Excel-import
+### 2.4 Excel-import
 
-| Método | Ruta | Auth | Body | Response |
-|---|---|---|---|---|
-| POST | `/api/excel-import/preview` | sesión | multipart `file` (.xlsx/.xlsm) | `ExcelPreview` |
+| Método | Ruta | Body | Response |
+|---|---|---|---|
+| POST | `/api/excel-import/preview` | multipart `file` (.xlsx/.xlsm) | `ExcelPreview` |
 
 > El **agente de IA** (modelado conversacional) está desacoplado en
-> `app-agents-modeler` y no se documenta aquí; el botón "AI Agent" del editor
-> avisa que se reconectará en una versión próxima.
+> `app-agents-modeler` y **fuera del MVP** — no se documenta aquí.
 
 ---
 
@@ -91,40 +79,18 @@ Body de create/update: `{ username, password?, role, isActive, permissions: Perm
 | HTTP | Causa típica |
 |---|---|
 | 400 | body inválido (p. ej. `PUT /canvas` sin tablas ni relaciones) |
-| 401 | cookie ausente/expirada/firmada con otro secret → tratado como logout |
-| 403 | autenticado pero sin permiso sobre el proyecto |
-| 404 | recurso no encontrado |
+| 404 | recurso no encontrado (o `/` raíz del backend — la API vive en `/api/*`) |
 | 413 | Excel > 10 MB |
-| 500 | error inesperado / DB no conectada |
+| 500 | error inesperado / DB no conectada (`/api/health` → `db_connected:false`) |
 
 ---
 
 ## 4. Tipos compartidos (frontend ↔ backend)
 
-Viven en `web-data-model-hub/src/types/` y se reflejan en
-`backend-data-model-hub/src/db/db_models.py`. La sincronía es manual.
+Viven en `web-data-model-hub/src/types/model.ts` y se reflejan en
+`backend-data-model-hub/app/features/<x>/models.py`. La sincronía es manual.
 
-### 4.1 `AuthUser` y permisos
-
-```typescript
-interface AuthUser {
-  id: string;
-  username: string;
-  role: 'admin' | 'editor' | 'viewer';
-  isActive: boolean;
-  permissions: Permission[];
-  createdAt: string;
-  statusUpdatedAt: string;
-  lastLoginAt: string | null;
-}
-
-interface Permission {
-  projectId: string;       // unidad de acceso = el proyecto (un canvas por proyecto)
-  level: 'view' | 'edit';
-}
-```
-
-### 4.2 `DatabaseEngine`
+### 4.1 `DatabaseEngine`
 
 ```typescript
 type DatabaseEngine = 'postgresql' | 'databricks_sql' | 'sqlserver' | 'mysql' | 'cosmosdb';
@@ -138,7 +104,7 @@ type DatabaseEngine = 'postgresql' | 'databricks_sql' | 'sqlserver' | 'mysql' | 
 | `mysql` | `public` | RANGE · LIST · HASH | — |
 | `cosmosdb` | `default` | — (NoSQL) | — |
 
-### 4.3 `Project` y su jerarquía
+### 4.2 `Project` y su jerarquía
 
 ```typescript
 interface Project {
@@ -177,7 +143,7 @@ interface Domain {
 }
 ```
 
-### 4.4 `Table`, `TableColumn`, `View`
+### 4.3 `Table`, `TableColumn`, `View`
 
 ```typescript
 interface Table {
@@ -227,7 +193,7 @@ interface View {
 }
 ```
 
-### 4.5 `Relationship`
+### 4.4 `Relationship`
 
 ```typescript
 type Cardinality = '1:1' | '1:N' | 'N:N';
@@ -247,7 +213,7 @@ interface Relationship {
 }
 ```
 
-### 4.6 `Canvas`
+### 4.5 `Canvas`
 
 ```typescript
 interface Canvas {
@@ -273,5 +239,5 @@ const projects = await projectsService.listProjects();
 const canvas = await canvasService.getCanvas(projectId);
 ```
 
-`services/*` ya apunta a `NEXT_PUBLIC_API_URL`, manda `credentials: 'include'`,
-desempaqueta el envelope y lanza `ApiError` ante problemas.
+`services/*` ya apunta a `NEXT_PUBLIC_API_URL`, desempaqueta el envelope y lanza
+`ApiError` ante problemas.

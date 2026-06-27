@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import Icon from '@/components/ui/Icon';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useMetadataStore } from '@/store/useMetadataStore';
-import { useAuthStore } from '@/store/useAuthStore';
 import type { SemanticType, Udp } from '@/types/model';
 import SemanticTypeForm from './SemanticTypeForm';
 import UdpForm from './UdpForm';
@@ -23,7 +22,7 @@ export default function MetadataAdmin({ pushToast }: { pushToast: (m: string, k?
     createSemanticType, updateSemanticType, deleteSemanticType,
     createUdp, updateUdp, deleteUdp,
   } = useMetadataStore();
-  const canEdit = useAuthStore((s) => !!s.user && s.user.role !== 'viewer');
+  const canEdit = true; // MVP abierto: escritura sin permisos (la matriz vuelve al final)
   const [modal, setModal] = useState<ModalState>(null);
 
   useEffect(() => { load(); }, [load]);

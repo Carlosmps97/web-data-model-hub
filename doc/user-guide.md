@@ -2,39 +2,27 @@
 
 > Cómo usar `web-data-model-hub` (rediseño *Aurora*, project-centric). Asume que
 > el backend `backend-data-model-hub` está corriendo y conectado a Cosmos DB.
-> Para tutoriales paso a paso hay también un **Centro de ayuda dentro de la app**
-> (rail → Documentación, y el botón "?" para la ayuda rápida).
+> Hay también un **Centro de ayuda dentro de la app** (rail → Documentación, y el
+> botón "?" para la ayuda rápida).
 
 ## 1. Acceso
 
-```mermaid
-flowchart LR
-    A["Abrir http://localhost:3000"] --> M{"cookie modeler-auth válida?"}
-    M -->|"sí"| H["Model Center (/)"]
-    M -->|"no"| L["redirect /login"]
-    L --> F["usuario + contraseña → Ingresar"]
-    F -->|"200"| R["redirect a `next` o /"]
-```
-
-**Bootstrap**: la primera vez que el sistema arranca con la DB vacía, el primer
-login crea `admin / dogadmin2019`. Cambiá la contraseña enseguida desde
-**Usuarios**.
+**MVP abierto**: no hay login. Abre `http://localhost:3000` y entras directo al
+**Model Center**. (El control de acceso por roles/permisos vuelve al final como
+una matriz robusta; entonces la identidad la dará el proxy de Databricks Apps.)
 
 ---
 
 ## 2. Navegación: el rail (64 px)
 
-| Icono | Destino | Acceso |
-|---|---|---|
-| Capas | **Model Center** (`/`) — catálogo cross-project | sesión |
-| Grilla | **Projects** (`/projects`) | sesión |
-| Libro | **Documentación** (`/docs`) | sesión |
-| Personas | **Usuarios** (`/admin/users`) | admin |
-| "?" (abajo) | **Ayuda rápida** (drawer off-canvas) | sesión |
-| Avatar (abajo) | Cerrar sesión | sesión |
+| Icono | Destino |
+|---|---|
+| Capas | **Model Center** (`/`) — catálogo cross-project |
+| Grilla | **Projects** (`/projects`) |
+| Libro | **Documentación** (`/docs`) |
+| "?" (abajo) | **Ayuda rápida** (drawer off-canvas) |
 
-La barra superior de cada pantalla muestra las migas de pan y las acciones de esa
-pantalla.
+La barra superior de cada pantalla muestra las migas de pan y las acciones de esa pantalla.
 
 ---
 
@@ -46,9 +34,9 @@ Catálogo único de **todos** los proyectos. Pestañas:
   barras "tablas por engine" y "por dominio", y el panel de **salud y gobierno**:
   tablas sin clave primaria, sin dominio, sin ninguna vista, columnas sensibles
   (PII). Cada tarjeta de salud salta a la lista filtrada.
-- **Tables / Views / Columns** — grillas densas, ordenables por cualquier columna,
-  con filtros (engine, modelo, dominio) y buscador. En Tables, seleccionar una
-  fila abre un panel de detalle con "Abrir proyecto".
+- **Tables / Views / Columns** — grillas densas, ordenables, con filtros (engine,
+  modelo, dominio) y buscador. En Tables, seleccionar una fila abre un panel de
+  detalle con "Abrir proyecto".
 
 ---
 
@@ -56,19 +44,17 @@ Catálogo único de **todos** los proyectos. Pestañas:
 
 ### 4.1 Lista (`/projects`)
 Tarjetas con engines, nº de modelos y fecha de actualización. Buscador. "Nuevo
-proyecto" y borrado solo para admin.
+proyecto" y borrado disponibles para todos (MVP sin permisos).
 
 ### 4.2 Hub (`/projects/{id}`)
 Dos secciones CRUD + "Abrir canvas" arriba a la derecha:
 
 - **Modelos (niveles)** — tarjetas con código, nombre completo, descripción y
-  conteos (tablas, dominios). "Nuevo modelo" abre el editor de nivel (Código /
-  Nombre completo / Descripción / Color). Clic en una tarjeta abre el canvas
-  filtrado a esa capa.
+  conteos (tablas, dominios). "Nuevo modelo" abre el editor de nivel. Clic en una
+  tarjeta abre el canvas filtrado a esa capa.
 - **Dominios (productos de datos)** — grilla `Dominio · Owner · Steward ·
-  Sensibilidad · Capas · Tablas`. "Nuevo dominio" abre el editor (Nombre / Color /
-  Owner / Steward / Sensibilidad / Descripción / Capas donde vive / Subdominios).
-  Clic en una fila abre el canvas con ese dominio vertical enfocado.
+  Sensibilidad · Capas · Tablas`. "Nuevo dominio" abre el editor. Clic en una fila
+  abre el canvas con ese dominio vertical enfocado.
 
 Editar niveles/dominios persiste vía `PUT /api/projects/{id}`. Eliminar uno deja
 sus tablas "sin asignar".
@@ -79,7 +65,7 @@ sus tablas "sin asignar".
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  Proyecto › <scope>   [engine]   [Scope ▾]   [List|Canvas]  Export  ✓Saved  [AI Agent]
+│  Proyecto › <scope>   [engine]   [Scope ▾]   [List|Canvas]  Export  ✓Saved
 ├───────────────┬────────────────────────────────────────┬─────────────┤
 │ Tablas  [+New▾]│                                        │  Inspector  │
 │ buscar…        │     Canvas ER  (o vista de lista)      │ Columns·Views·Links │
@@ -90,19 +76,16 @@ sus tablas "sin asignar".
 
 ### 5.1 Scope
 El control **Scope** limita qué ves y editás. Presets (Todo el modelo · "<Modelo>
-completa" · "<Dominio> (vertical)") + casillas Modelos×Dominios. Trabajá en el
-nivel más pequeño que necesites.
+completa" · "<Dominio> (vertical)") + casillas Modelos×Dominios.
 
 ### 5.2 Rail de tablas
 Contador + **New ▾** (Nueva tabla · Desde tablas existentes · Escribir DBML ·
-Importar Excel) · búsqueda (tablas y columnas) · **agrupar por Dominio/Modelo** ·
-lista agrupada (chip PK/FK + pill de capa + nº columnas). Clic = seleccionar,
+Importar Excel) · búsqueda · **agrupar por Dominio/Modelo**. Clic = seleccionar,
 doble clic = editar.
 
 ### 5.3 Canvas
 Pan (arrastrar fondo), zoom (rueda / dock), **Ajustar a pantalla**, minimapa. Cada
-nodo: header tintado por dominio (`schema.name` + pill de capa + indicador de
-partición + nº vistas/columnas + engranaje). Hover/selección resalta las columnas
+nodo: header tintado por dominio. Hover/selección resalta las columnas
 relacionadas y el wire "fluye".
 
 - **Dock**: Seleccionar · **Conectar** · **Auto-organizar** (Por modelo /
@@ -113,11 +96,8 @@ relacionadas y el wire "fluye".
 - **Engranaje** del nodo: Editar tabla · color de cabecera · Eliminar.
 
 ### 5.4 Inspector (panel derecho)
-Auto-abre al seleccionar. Tabs:
-- **Columns** — lista + "Editar columnas".
-- **Views** — CRUD de vistas SQL por rol (banner informativo, "Nueva vista",
-  tarjetas agrupadas Business/Technical, "Exportar DDL con vistas").
-- **Links** — relaciones de la tabla con su cardinalidad.
+Auto-abre al seleccionar. Tabs **Columns** · **Views** (CRUD de vistas SQL por
+rol) · **Links** (relaciones de la tabla con su cardinalidad).
 
 ---
 
@@ -135,11 +115,9 @@ Auto-abre al seleccionar. Tabs:
 ## 7. Vistas y SQL por rol
 
 En el Inspector → Views → "Nueva vista" (`ViewForm`): Nombre · Tipo
-(Business/Technical) · Rol · **SELECT** (una expresión por línea: columnas,
-`CONCAT`, `CASE`, `sha256`…) · **WHERE** (una condición por línea, AND) · preview
-`CREATE VIEW` en vivo. Las expresiones de enmascarado (`sha256`, `regexp_replace`,
-`md5`…) se cuentan como columnas "protegidas". Las vistas no van en el diagrama
-ER pero se exportan con el DDL.
+(Business/Technical) · Rol · **SELECT** (una expresión por línea) · **WHERE** (una
+condición por línea, AND) · preview `CREATE VIEW` en vivo. Las vistas no van en el
+diagrama ER pero se exportan con el DDL.
 
 ---
 
@@ -155,18 +133,12 @@ respetando el engine del proyecto.
 
 ---
 
-## 9. Usuarios y permisos (admin)
+## 9. Usuarios y permisos (próximamente)
 
-| Rol | Puede |
-|---|---|
-| **Administrador** | todo: crear proyectos, gestionar usuarios, editar cualquier proyecto |
-| **Editor** | editar los proyectos con permiso `edit` |
-| **Solo lectura** | ver los proyectos con permiso `view` |
-
-En **Usuarios** (solo admin): crear/editar/desactivar. Para no-admins, una tabla
-de **permisos por proyecto** (Sin acceso / Ver / Editar). Password obligatorio al
-crear (≥6); vacío al editar = no cambia. No podés borrar tu propia cuenta. Los
-cambios toman efecto al instante (el backend recarga el usuario en cada request).
+En este MVP la app es **abierta**: no hay usuarios, roles ni permisos. El modelo
+de control de acceso (roles `admin/editor/viewer` + permisos `view`/`edit` por
+proyecto) se reintroducirá al final como una **matriz de permisos robusta**, con
+la identidad provista por el proxy de Databricks Apps.
 
 ---
 
@@ -184,8 +156,8 @@ guardan al confirmar el modal en el hub.
 
 | Síntoma | Causa probable | Acción |
 |---|---|---|
-| Login no termina / "sesión expirada" | `AUTH_SECRET` divergente, o bundle viejo en la pestaña tras un refactor | igualar `.env` de ambos lados; `Cmd+Shift+R` |
-| 403 al abrir un proyecto | sin permiso sobre ese `projectId` | un admin asigna permiso en Usuarios |
-| Auto-save muestra error | permiso revocado mid-sesión, o backend caído | refrescar; revisar `GET /api/health` |
+| La app no carga datos | backend caído o sin Cosmos | revisar `GET /api/health` (`db_connected`) |
+| Auto-save muestra error | backend caído mid-sesión | refrescar; revisar el backend |
 | Excel no detecta tablas | header fuera de la primera fila | limpiar el Excel (1ª fila = header) y reintentar |
 | El canvas "se desordena" al abrir | las posiciones no se persisten | usar Auto-organizar; es por diseño |
+| Pestaña con bundle viejo tras un refactor | caché del navegador | `Cmd+Shift+R` (hard reload) |

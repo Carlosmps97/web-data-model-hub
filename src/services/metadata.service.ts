@@ -5,7 +5,7 @@
 import type { SemanticType, Udp } from '@/types/model';
 import { apiGet, apiPost, apiPut, apiDelete } from './http';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const ST = `${API_BASE}/api/metadata/semantic-types`;
 const UDP = `${API_BASE}/api/metadata/udps`;
 

@@ -27,10 +27,10 @@ src/
     <name>.css             # estilos de esta feature (globales, clases planas)
     index.ts               # API PÚBLICA — lo único que otros pueden importar
     README.md              # qué administra + responsable
-  store/                   # stores de zustand transversales (auth · project · ui)
-  services/                # capa de API transversal (http · auth · projects · …)
-  lib/                     # helpers puros transversales (hierarchy · tags · …)
-  types/                   # tipos de dominio compartidos (model · api · auth)
+  store/                   # stores de zustand transversales (project · ui · metadata)
+  services/                # capa de API transversal (http · projects · canvas · metadata)
+  lib/                     # helpers puros transversales (hierarchy · tags · columnRef)
+  types/                   # tipos de dominio compartidos (model · api)
   styles/                  # tokens · base · ui · shell (CSS global de toda la app)
 ```
 
@@ -54,19 +54,21 @@ dueño puede renombrar, mover o dividir todo lo interno sin romper a otros
 equipos. Un guard de ESLint (`no-restricted-imports` en `eslint.config.mjs`)
 avisa cuando algún código importa internals `@/features/*/...`.
 
-`features/chat-agent/index.ts` es el ejemplo de referencia de un barrel bien
-formado.
+`features/diagram/index.ts` es un buen ejemplo de un barrel bien formado.
 
 ## Cómo agregar una feature
 
 1. Copia `src/features/_template/` a `src/features/<name>/`.
 2. Construye tus components/hooks/etc. dentro; conecta un shell de ruta en
    `src/app/` que renderice tu screen desde el barrel.
-3. Reexporta la superficie pública desde `index.ts` — solo lo que otros
-   necesiten.
+3. Reexporta la superficie pública desde `index.ts` — solo lo que otros necesiten.
 4. Pon los estilos en `<name>.css` (usa un prefijo de clase único) y agrega un
    `@import` ordenado en `src/app/globals.css`.
 5. Agrega un `README.md` de una línea (qué administra + quién lo mantiene).
+
+> Las features grandes que vienen (la **matriz de permisos** robusta; la
+> reconexión del **agente IA**; colaboración sin autoguardado) entran como nuevas
+> `features/<name>/` sin tocar las demás.
 
 ## Qué queda compartido (no es una feature)
 

@@ -11,7 +11,6 @@ import { TablesListView, TableForm, CreateFromSqlModal, DBMLModal } from '@/feat
 import { ExcelImportModal } from '@/features/excel-import';
 import { ViewForm } from '@/features/views';
 import { DDLPreviewModal } from '@/features/ddl';
-import { ChatPanel, ApplyToCanvasDialog } from '@/features/chat-agent';
 import { useEditorController, pushToast } from '../hooks/useEditorController';
 import EditorListView from './EditorListView';
 
@@ -26,10 +25,10 @@ export default function EditorScreen({ projectId }: EditorScreenProps) {
     currentProject, loading, layers, domains, engineDef, scope, setScope,
     scopedTables, scopedRels, scopedModel, scopeText, isInScope, tables, relationships,
     selectedId, selected, handleSelect, mainView, setMainView,
-    inspectorOpen, setInspectorOpen, saved, chatOpen, setChatOpen, canEdit,
+    inspectorOpen, setInspectorOpen, saved, canEdit,
     modal, setModal,
     onMove, onArrange, onCreateRel, onDeleteRel, onGear,
-    saveTable, createFromSQL, applyDBML, importExcel, applyAgentModel, onCreate,
+    saveTable, createFromSQL, applyDBML, importExcel, onCreate,
     saveView, removeView,
   } = c;
 
@@ -57,7 +56,6 @@ export default function EditorScreen({ projectId }: EditorScreenProps) {
           <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={() => setModal({ type: 'ddl' })}><Icon name="download" size={14} />Export</button>
           <span className="dmh-sep" />
           <span className="rd-badge" style={{ background: 'transparent', color: saved ? 'var(--success)' : 'var(--muted)', gap: 5 }}>{saved ? <><Icon name="check" size={13} sw={2.5} />Saved</> : <><Icon name="save" size={13} />Saving…</>}</span>
-          <button className="rd-btn rd-btn-sm" style={{ background: 'var(--accent2)', color: '#fff' }} onClick={() => setChatOpen((o) => !o)} aria-pressed={chatOpen}><Icon name="sparkles" size={14} />AI Agent</button>
         </Header>
 
         <div className="ed">
@@ -116,17 +114,6 @@ export default function EditorScreen({ projectId }: EditorScreenProps) {
       {modal?.type === 'excel' && <ExcelImportModal meta={{ layer: scope.layers.length === 1 ? scope.layers[0] : layers[0]?.id, domain: scope.domains.length === 1 ? scope.domains[0] : undefined, color: domains.find((d) => d.id === (scope.domains.length === 1 ? scope.domains[0] : ''))?.color }} onClose={() => setModal(null)} onImport={importExcel} pushToast={pushToast} />}
       {modal?.type === 'view' && <ViewForm table={modal.table} view={modal.view} onClose={() => setModal(null)} onSave={(v, isNew) => { saveView(modal.table.id, v); setModal(null); pushToast(isNew ? 'Vista creada' : 'Vista guardada'); }} />}
       {modal?.type === 'ddl' && <DDLPreviewModal scopedTables={scopedTables} allTables={tables} scopeLabel={scopeText} engineLabel={engineDef?.label ?? ''} engine={engine} modelName={currentProject.name} onClose={() => setModal(null)} pushToast={pushToast} />}
-      {modal?.type === 'applyAgent' && <ApplyToCanvasDialog result={modal.result} layers={layers} domains={domains} scope={scope} onClose={() => setModal(null)} onApply={(placement) => applyAgentModel(modal.result, placement)} />}
-
-      {/* AI modeler chat — right-side drawer (decoupled agent service :8001) */}
-      <ChatPanel
-        isOpen={chatOpen}
-        onClose={() => setChatOpen(false)}
-        projectId={projectId}
-        engine={engine}
-        onApplyModel={(result) => setModal({ type: 'applyAgent', result })}
-        readOnly={!canEdit}
-      />
 
       <ConfirmDialog
         open={modal?.type === 'confirm'}

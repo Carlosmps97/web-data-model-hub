@@ -18,6 +18,10 @@
 
 import type { ApiResponse } from '@/types/api';
 
+// Usuario dev activo (solo afecta AUTH_MODE=local en el backend; ignorado en Databricks).
+let _devUser = '';
+export function setDevUser(u: string): void { _devUser = u; }
+
 /** Error tipado que propagan todos los helpers cuando el backend
  *  devuelve un `success: false` o cuando el fetch falla. */
 export class ApiError extends Error {
@@ -57,7 +61,7 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
     method,
     signal,
     credentials: 'include',
-    headers: { ...headers },
+    headers: { ...(_devUser ? { 'X-Dev-User': _devUser } : {}), ...headers },
   };
 
   if (body !== undefined) {

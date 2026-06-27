@@ -12,7 +12,6 @@ interface UIStore {
    */
   sidebarCollapsed: boolean;
   rightPanelOpen: boolean;
-  chatPanelOpen: boolean;
   /** Off-canvas quick-help drawer (opened from the rail "?" button). */
   helpOpen: boolean;
 
@@ -40,8 +39,6 @@ interface UIStore {
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleRightPanel: () => void;
   setRightPanelOpen: (open: boolean) => void;
-  toggleChatPanel: () => void;
-  setChatPanelOpen: (open: boolean) => void;
   setHelpOpen: (open: boolean) => void;
   toggleHelp: () => void;
   setLeftPanelWidth: (width: number) => void;
@@ -76,7 +73,6 @@ export const useUIStore = create<UIStore>((set) => ({
   sidebarOpen: true,
   sidebarCollapsed: loadInitialSidebarCollapsed(),
   rightPanelOpen: false,
-  chatPanelOpen: false,
   helpOpen: false,
   leftPanelWidth: loadInitialLeftPanelWidth(),
   selectedTableId: null,
@@ -102,8 +98,6 @@ export const useUIStore = create<UIStore>((set) => ({
   },
   toggleRightPanel: () => set((state) => ({ rightPanelOpen: !state.rightPanelOpen })),
   setRightPanelOpen: (open) => set({ rightPanelOpen: open }),
-  toggleChatPanel: () => set((state) => ({ chatPanelOpen: !state.chatPanelOpen })),
-  setChatPanelOpen: (open) => set({ chatPanelOpen: open }),
   setHelpOpen: (open) => set({ helpOpen: open }),
   toggleHelp: () => set((state) => ({ helpOpen: !state.helpOpen })),
   setLeftPanelWidth: (width) => {

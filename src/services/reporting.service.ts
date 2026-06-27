@@ -1,0 +1,63 @@
+// Reporting service (R6c). Read-only tabular metadata for Screen 11 (Reporting):
+// table-level rows + column-level rows for the on-screen grid and the Excel
+// export. The backend returns the `{ success, data }` envelope, which
+// `apiGet` already unwraps; these helpers only give types and build the URLs.
+//
+// Endpoints (per R1c contract):
+//   GET /api/reporting/tables?schema=&projectId=  → ReportTableRow[]
+//   GET /api/reporting/columns?tableId=           → ReportColumnRow[] (no id = all)
+
+import { apiGet } from './http';
+
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
+
+/** One table row in the reporting grid (table-level metadata). */
+export interface ReportTableRow {
+  id: string;
+  physicalName: string;
+  logicalName: string;
+  schema: string;
+  /** Subject area names this table belongs to (rendered as chips). */
+  subjectAreas: string[];
+  columnCount: number;
+  relationshipCount: number;
+  /** Project names this table is referenced by (rendered as chips). */
+  projects: string[];
+  description: string;
+}
+
+/** One column row (field-level metadata), used for the "Columns detail" sheet. */
+export interface ReportColumnRow {
+  tableId: string;
+  physicalName: string;
+  logicalName: string;
+  dataType: string;
+  parentDomain?: string;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+  isNullable: boolean;
+  isPartition: boolean;
+  description: string;
+  ordinal: number;
+}
+
+/** Optional server-side filters for the table list. Empty values are omitted. */
+export interface ReportTableFilters {
+  schema?: string;
+  projectId?: string;
+}
+
+/** Lists table-level reporting rows, optionally narrowed by schema / project. */
+export function listReportTables(filters: ReportTableFilters = {}): Promise<ReportTableRow[]> {
+  const qs = new URLSearchParams();
+  if (filters.schema) qs.set('schema', filters.schema);
+  if (filters.projectId) qs.set('projectId', filters.projectId);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return apiGet<ReportTableRow[]>(`${API_BASE}/api/reporting/tables${suffix}`);
+}
+
+/** Lists column-level reporting rows. Omit `tableId` to get every column. */
+export function listReportColumns(tableId?: string): Promise<ReportColumnRow[]> {
+  const suffix = tableId ? `?tableId=${encodeURIComponent(tableId)}` : '';
+  return apiGet<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns${suffix}`);
+}

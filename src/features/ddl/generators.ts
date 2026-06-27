@@ -77,3 +77,253 @@ export function genDDL(tables: Table[], opts: GenDDLOptions = {}): string {
 export function countViews(tables: Table[]): number {
   return tables.reduce((a, t) => a + (t.views?.length ?? 0), 0);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Databricks DDL generator (Screen 10 — Export DDL, `#pd`).
+//
+// Decoupled from `@/types/model`: works off the *canonical* diagram shape the
+// modeler store actually holds (`Diagram.tables/columns/relationships`). Kept as
+// thin local interfaces so the generator is pure and unit-testable, and so the
+// older `genDDL`/EditorScreen path above stays untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Dialects offered by the Export DDL modal. Only `databricks` is implemented;
+ *  `oracle` is surfaced as a locked/disabled option per the design. */
+export type DdlDialect = 'databricks' | 'oracle';
+
+/** Storage format for `USING <format>` (Databricks). */
+export type DdlTableFormat = 'delta' | 'parquet' | 'avro' | 'orc' | 'csv' | 'json';
+
+/** Minimal table shape the generator consumes (subset of `CanonicalTable`). */
+export interface DdlTable {
+  id: string;
+  physicalName: string;
+  logicalName?: string;
+  schema?: string;
+  /** Functional/business definition → emitted as a table `COMMENT`. */
+  description?: string;
+}
+
+/** Minimal column shape (subset of `CanonicalColumn`). */
+export interface DdlColumn {
+  id: string;
+  tableId: string;
+  physicalName: string;
+  logicalName?: string;
+  dataType: string;
+  ordinal: number;
+  isPrimaryKey?: boolean;
+  isForeignKey?: boolean;
+  isNullable?: boolean;
+  /** Column marked as a partition key. */
+  isPartition?: boolean;
+  /** Functional definition → emitted as a column `COMMENT`. */
+  description?: string;
+}
+
+/** Minimal relationship shape (subset of governance `Relationship`). Used to
+ *  emit `FOREIGN KEY … REFERENCES` constraints. */
+export interface DdlRelationship {
+  id: string;
+  sourceTableId: string;
+  sourceColumnId: string;
+  targetTableId: string;
+  targetColumnId: string;
+}
+
+export interface DatabricksDdlOptions {
+  /** Append `CREATE VIEW` per role view (none in the canonical shape today). */
+  includeViews: boolean;
+  /** Emit PRIMARY KEY / FOREIGN KEY constraints. */
+  includeKeys: boolean;
+  /** Emit `COMMENT` clauses from functional definitions. */
+  includeComments: boolean;
+  /** Emit `PARTITIONED BY (…)` from partition-key columns. */
+  includePartitions: boolean;
+  /** Emit a trailing `-- index` hint (Databricz has no CREATE INDEX). */
+  includeIndexes: boolean;
+  /** `USING <format>`. */
+  tableFormat: DdlTableFormat;
+  /** Unity Catalog: qualify names as `catalog.schema.table`. */
+  unityCatalog: boolean;
+  /** Catalog name used when `unityCatalog` is on. */
+  catalog: string;
+  /** Default schema when a table has none. */
+  defaultSchema: string;
+  /** External table → `CREATE EXTERNAL TABLE … LOCATION '<base>/<table>'`. */
+  external: boolean;
+  /** Base storage path (S3/ADLS/…) for external tables. */
+  location: string;
+  /** Optional `TBLPROPERTIES (…)` key/value pairs. */
+  tblProperties: { key: string; value: string }[];
+}
+
+export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
+  includeViews: false,
+  includeKeys: true,
+  includeComments: true,
+  includePartitions: true,
+  includeIndexes: false,
+  tableFormat: 'delta',
+  unityCatalog: false,
+  catalog: 'main',
+  defaultSchema: 'default',
+  external: false,
+  location: 's3://my-bucket/warehouse',
+  tblProperties: [],
+};
+
+/** Backtick-quote a Databricks identifier. */
+const ident = (s: string) => `\`${s}\``;
+
+/** SQL string literal with single-quote escaping. */
+const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
+
+/** Fully-qualified, backtick-quoted table name honoring Unity Catalog. */
+function qualify(t: DdlTable, o: DatabricksDdlOptions): string {
+  const schema = (t.schema?.trim() || o.defaultSchema || 'default');
+  const parts = o.unityCatalog
+    ? [o.catalog || 'main', schema, t.physicalName]
+    : [schema, t.physicalName];
+  return parts.map(ident).join('.');
+}
+
+/** Map a canonical/logical data type to a Databricks SQL type. */
+function dbxType(raw: string): string {
+  const t = (raw || 'string').trim().toLowerCase();
+  const map: Record<string, string> = {
+    integer: 'INT', int: 'INT', smallint: 'SMALLINT', tinyint: 'TINYINT', bigint: 'BIGINT',
+    float: 'FLOAT', real: 'FLOAT', double: 'DOUBLE',
+    decimal: 'DECIMAL(38,18)', numeric: 'DECIMAL(38,18)', money: 'DECIMAL(19,4)',
+    varchar: 'STRING', nvarchar: 'STRING', char: 'STRING', text: 'STRING', string: 'STRING', uuid: 'STRING',
+    boolean: 'BOOLEAN', bool: 'BOOLEAN',
+    date: 'DATE', datetime: 'TIMESTAMP', timestamp: 'TIMESTAMP', timestamptz: 'TIMESTAMP', time: 'STRING',
+    binary: 'BINARY', varbinary: 'BINARY', blob: 'BINARY', bytes: 'BINARY',
+    json: 'STRING', jsonb: 'STRING', xml: 'STRING',
+    array: 'ARRAY<STRING>', map: 'MAP<STRING,STRING>', struct: 'STRUCT<>',
+  };
+  // Preserve explicit params like decimal(10,2) verbatim (upper-cased).
+  if (/\(.*\)/.test(t)) return t.toUpperCase();
+  return map[t] ?? t.toUpperCase();
+}
+
+/** One `CREATE TABLE` statement for a single table. */
+function tableDDL(
+  t: DdlTable,
+  cols: DdlColumn[],
+  rels: DdlRelationship[],
+  o: DatabricksDdlOptions,
+  tableById: Map<string, DdlTable>,
+  colName: Map<string, string>,
+): string {
+  const full = qualify(t, o);
+  const ordered = [...cols].sort((a, b) => a.ordinal - b.ordinal);
+
+  const colLines = ordered.map((c) => {
+    let l = `  ${ident(c.physicalName)} ${dbxType(c.dataType)}`;
+    if (c.isNullable === false || c.isPrimaryKey) l += ' NOT NULL';
+    if (o.includeComments && c.description?.trim()) l += ` COMMENT ${lit(c.description.trim())}`;
+    return l;
+  });
+
+  const inner: string[] = [...colLines];
+  if (o.includeKeys) {
+    const pks = ordered.filter((c) => c.isPrimaryKey).map((c) => ident(c.physicalName));
+    if (pks.length) inner.push(`  CONSTRAINT ${ident(`pk_${t.physicalName}`)} PRIMARY KEY (${pks.join(', ')})`);
+  }
+
+  const create = o.external ? 'CREATE EXTERNAL TABLE' : 'CREATE TABLE';
+  let out = `${create} IF NOT EXISTS ${full} (\n${inner.join(',\n')}\n)`;
+  out += `\nUSING ${o.tableFormat}`;
+
+  if (o.includePartitions) {
+    const parts = ordered.filter((c) => c.isPartition).map((c) => ident(c.physicalName));
+    if (parts.length) out += `\nPARTITIONED BY (${parts.join(', ')})`;
+  }
+
+  if (o.includeComments && t.description?.trim()) out += `\nCOMMENT ${lit(t.description.trim())}`;
+
+  if (o.external) {
+    const base = (o.location || '').replace(/\/+$/, '');
+    out += `\nLOCATION ${lit(`${base}/${t.physicalName}`)}`;
+  }
+
+  if (o.tblProperties.length) {
+    const props = o.tblProperties
+      .filter((p) => p.key.trim())
+      .map((p) => `  ${lit(p.key.trim())} = ${lit(p.value)}`);
+    if (props.length) out += `\nTBLPROPERTIES (\n${props.join(',\n')}\n)`;
+  }
+
+  out += ';\n';
+
+  // FK constraints (added after the table; Databricks supports informational FKs).
+  if (o.includeKeys) {
+    rels
+      .filter((r) => r.sourceTableId === t.id || r.targetTableId === t.id)
+      // child = source table holds the FK column referencing the parent (target).
+      .filter((r) => r.sourceTableId === t.id)
+      .forEach((r) => {
+        const fkCol = cols.find((c) => c.id === r.sourceColumnId);
+        if (!fkCol) return;
+        const parent = tableById.get(r.targetTableId);
+        const parentRef = parent ? qualify(parent, o) : ident(r.targetTableId);
+        const parentCol = colName.get(r.targetColumnId) ?? r.targetColumnId;
+        out += `ALTER TABLE ${full} ADD CONSTRAINT ${ident(`fk_${t.physicalName}_${fkCol.physicalName}`)}`
+          + ` FOREIGN KEY (${ident(fkCol.physicalName)}) REFERENCES ${parentRef}(${ident(parentCol)});\n`;
+      });
+  }
+
+  if (o.includeIndexes) {
+    out += `-- index: Databricks has no CREATE INDEX; clustering via ZORDER (OPTIMIZE ${full} ZORDER BY (…)).\n`;
+  }
+
+  return out;
+}
+
+export interface DatabricksDdlInput {
+  tables: DdlTable[];
+  columns: DdlColumn[];
+  relationships: DdlRelationship[];
+  /** Only export these table ids; empty/undefined ⇒ all. */
+  tableIds?: string[];
+  modelName?: string;
+}
+
+/** Generate Databricks DDL for the selected tables of a diagram. */
+export function databricksDdl(input: DatabricksDdlInput, o: DatabricksDdlOptions): string {
+  const wanted = input.tableIds && input.tableIds.length
+    ? new Set(input.tableIds)
+    : null;
+  const tables = input.tables.filter((t) => !wanted || wanted.has(t.id));
+  const byTable = new Map<string, DdlColumn[]>();
+  for (const c of input.columns) {
+    (byTable.get(c.tableId) ?? byTable.set(c.tableId, []).get(c.tableId)!).push(c);
+  }
+  // Lookups para resolver el destino de las FK a nombre físico (no id).
+  const tableById = new Map(input.tables.map((t) => [t.id, t]));
+  const colName = new Map(input.columns.map((c) => [c.id, c.physicalName]));
+  // Only relationships fully inside the export set produce constraints.
+  const ids = new Set(tables.map((t) => t.id));
+  const rels = input.relationships.filter((r) => ids.has(r.sourceTableId) && ids.has(r.targetTableId));
+
+  const header = `-- ${input.modelName ?? 'model'} · Databricks · ${tables.length} table(s)\n`
+    + `-- Generated by Data Model Hub\n`;
+
+  if (!tables.length) return `${header}\n-- (no tables selected)`;
+
+  const body = tables
+    .map((t) => tableDDL(t, byTable.get(t.id) ?? [], rels, o, tableById, colName))
+    .join('\n');
+
+  return `${header}\n${body}`.trimEnd() + '\n';
+}
+
+/** Filesystem-safe filename for the download. One table ⇒ its physical name. */
+export function ddlFilename(tables: DdlTable[], modelName?: string): string {
+  const base = tables.length === 1
+    ? tables[0].physicalName
+    : (modelName ?? 'model');
+  const safe = base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'model';
+  return `${safe}.sql`;
+}

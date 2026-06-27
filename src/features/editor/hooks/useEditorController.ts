@@ -1,15 +1,13 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { layoutByLayer, layoutCompact, arrange, type Positions, type ArrangeKind } from '@/features/diagram';
-import { modelingResponseToCanvas, type TablePlacement, type ModelingResponse } from '@/features/chat-agent';
 import type { CreateKind } from '@/features/table-editor';
 import { isTableInScope, layerName, scopeLabel as buildScopeLabel } from '@/lib/hierarchy';
 import { getEngine } from '@/features/engines';
 import { useProjectStore } from '@/store/useProjectStore';
-import { useAuthStore } from '@/store/useAuthStore';
 import type { Table, Relationship, View } from '@/types/model';
 
 export type ModalState =
@@ -19,7 +17,6 @@ export type ModalState =
   | { type: 'dbml' }
   | { type: 'excel' }
   | { type: 'ddl' }
-  | { type: 'applyAgent'; result: ModelingResponse }
   | { type: 'confirm'; title: string; message: string; onConfirm: () => void }
   | null;
 
@@ -32,7 +29,7 @@ export const pushToast = (msg: string, kind?: 'err') => (kind === 'err' ? toast.
  * separate from layout.
  */
 export function useEditorController(projectId: string) {
-  const searchParams = useSearchParams();
+  const [searchParams] = useSearchParams();
 
   const {
     currentProject, tables, relationships, scope, loading,
@@ -40,7 +37,8 @@ export function useEditorController(projectId: string) {
     addTable, updateTable, removeTable, setTables,
     addRelationship, removeRelationship, setRelationships, saveView, removeView,
   } = useProjectStore();
-  const canEdit = useAuthStore((s) => s.canEditProject(projectId));
+  // MVP abierto: edición sin permisos (la matriz de permisos vuelve al final).
+  const canEdit = true;
 
   const [positions, setPositions] = useState<Positions>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -48,7 +46,6 @@ export function useEditorController(projectId: string) {
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [modal, setModal] = useState<ModalState>(null);
   const [saved, setSaved] = useState(true);
-  const [chatOpen, setChatOpen] = useState(false);
 
   const initRef = useRef(false);
   const saveSkip = useRef(true);
@@ -197,28 +194,6 @@ export function useEditorController(projectId: string) {
     pushToast(`Importadas ${newTables.length} tablas`);
   };
 
-  // Merge the AI agent's result into the project at the chosen placement.
-  // Tables matching by name are updated in place; new ones are added. FK
-  // relationships are derived and de-duped against the existing graph.
-  const applyAgentModel = (result: ModelingResponse, placement: TablePlacement) => {
-    const { tables: finalTables, relationships: derived } = modelingResponseToCanvas(result, placement, tables);
-    const relKey = (r: Relationship) => `${r.source.table}:${r.source.column}->${r.target.table}:${r.target.column}`;
-    const existingKeys = new Set(relationships.map(relKey));
-    const newRels = derived.filter((r) => !existingKeys.has(relKey(r)));
-    setTables(finalTables);
-    if (newRels.length) setRelationships([...relationships, ...newRels]);
-    setPositions((prev) => {
-      const base = layoutByLayer(finalTables, layers);
-      const next = { ...prev };
-      finalTables.forEach((t) => { if (!next[t.id]) next[t.id] = t.position ?? base[t.id] ?? { x: 140, y: 140 }; });
-      return next;
-    });
-    const n = result.tables.length;
-    const domNm = domains.find((d) => d.id === placement.domain)?.name;
-    pushToast(`Aplicadas ${n} tabla${n === 1 ? '' : 's'}${domNm ? ` en ${domNm}` : ''}`);
-    setModal(null);
-  };
-
   const onCreate = (kind: CreateKind) => {
     if (kind === 'table') setModal({ type: 'table', table: null });
     else setModal({ type: kind });
@@ -234,12 +209,12 @@ export function useEditorController(projectId: string) {
     tables, relationships,
     // selection / layout state
     selectedId, selected, handleSelect, mainView, setMainView,
-    inspectorOpen, setInspectorOpen, saved, chatOpen, setChatOpen, canEdit,
+    inspectorOpen, setInspectorOpen, saved, canEdit,
     // modal state machine
     modal, setModal,
     // handlers
     onMove, onArrange, onCreateRel, onDeleteRel, onGear,
-    saveTable, createFromSQL, applyDBML, importExcel, applyAgentModel, onCreate,
+    saveTable, createFromSQL, applyDBML, importExcel, onCreate,
     saveView, removeView,
   };
 }

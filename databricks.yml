@@ -1,0 +1,24 @@
+# Databricks Asset Bundle — frontend (Next.js) como Databricks App.
+# Docs: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/apps-tutorial
+# Deploy:  databricks bundle deploy --target prod
+# Arranca: databricks bundle run frontend --target prod
+bundle:
+  name: frnt-data-model-hub
+
+resources:
+  apps:
+    frontend:                     # resource key (lo usa `databricks bundle run frontend`)
+      name: frnt-data-model-hub   # nombre real de la app en el workspace
+      source_code_path: .         # el código de la app está en la raíz del repo
+      description: "Data Model Hub — frontend (Next.js · editor ER)."
+      permissions:
+        - level: CAN_USE
+          group_name: users
+
+targets:
+  prod:
+    mode: production
+    default: true
+    workspace:
+      host: https://adb-3871428306507680.0.azuredatabricks.net
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

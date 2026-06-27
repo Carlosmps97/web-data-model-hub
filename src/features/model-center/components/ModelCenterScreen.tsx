@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import { Toaster, toast } from 'sonner';
 import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
@@ -27,7 +27,7 @@ const pushToast = (msg: string, kind?: 'err') => (kind === 'err' ? toast.error(m
  * filtering/sorting, and the tab grids / overview / inspector.
  */
 export default function ModelCenterScreen() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { catalog, loading } = useCatalog();
   const [tab, setTab] = useState<Tab>('overview');
   const [q, setQ] = useState('');
@@ -156,7 +156,7 @@ export default function ModelCenterScreen() {
               sel={sel}
               onSelect={setSel}
               onClose={() => setSel(null)}
-              onOpenProject={(projectId) => router.push(`/projects/${projectId}`)}
+              onOpenProject={(projectId) => navigate(`/projects/${projectId}`)}
             />
           )}
         </div>

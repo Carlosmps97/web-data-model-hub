@@ -1,57 +1,139 @@
-/* Aurora design tokens (:root). Element resets are in base.css. Part of the Aurora system — see doc/feature-architecture.md. */
-
 /* ============================================================
-   Data Model Hub — Aurora design system (single light theme).
-   Ported from newStyleWeb/Redesign/{redesign.css, app/app.css}.
-   No dark mode. Fonts: Manrope (UI) + JetBrains Mono (data/SQL).
+   Data Model Hub — design tokens (DMH-Erwin v20260625-2).
+   Single LIGHT theme · navy. NO dark mode.
+   Source of truth: design_handoff_data_model_hub/README.md (§Design Tokens).
+   Fonts: Geist (UI) + Geist Mono (data/SQL) — set in globals.css.
+
+   Naming policy: the variable names used by the existing codebase
+   (--primary, --ink, --bg, --border, --muted, --success, …) are KEPT
+   STABLE and remapped to the new palette so every legacy class keeps
+   working. New design tokens are ADDED below (raw hex aliases + the
+   card/popup shadows + the canvas/blur tokens).
    Tokens live on :root so every class works without a wrapper.
    ============================================================ */
 
 :root {
+  /* ── Design palette (raw, exact hex from the handoff) ────────────── */
+
+  /* Blue (primary actions, active states, FK) */
+  --blue:            #2E5BFF;   /* Primary blue */
+  --blue-tint:       #EAF0FF;   /* active nav/tab, selected fills */
+  --blue-border:     #D4E0FF;   /* pills / soft borders */
+  --blue-border-2:   #D9E3FB;
+  --blue-soft:       #F2F6FF;   /* very soft blue wash */
+
+  /* Green (publish / success) */
+  --green:           #16A37B;   /* Publish button, completed steps */
+  --green-deep:      #0E8C6A;   /* added text, partition icon */
+  --green-tint:      #E4F6EF;   /* success pills */
+  --green-tint-2:    #EFFAF4;   /* added rows */
+  --green-tint-3:    #F4F9F6;   /* current production row */
+
+  /* Amber (PK icon, warnings, in-review, overrides) */
+  --amber:           #E0A024;   /* PK icon */
+  --amber-deep:      #9A6B00;   /* warning text */
+  --amber-tint:      #FFF6E6;   /* in-review pills */
+  --amber-tint-2:    #FFF1D6;   /* overrides */
+
+  /* Red (reject) */
+  --red:             #C0392B;
+  --red-border:      #F0C9C4;
+  --red-tint:        #FBEAEA;
+
+  /* Purple (parent-domain glyph, modifier badge, some avatars) */
+  --purple:          #8B5CF6;
+  --purple-tint:     #F2EEFE;
+
+  /* Ink / text */
+  --navy:            #1A2B4A;   /* headings, dark cards, table headers */
+  --text-body:       #3A4658;   /* default text */
+  --text-muted:      #56607A;   /* secondary */
+  --text-muted-2:    #8A93A5;   /* labels / mono types */
+  --text-muted-3:    #9AA3B2;   /* fainter labels */
+  --text-placeholder:#A9B1BE;   /* input placeholders */
+
+  /* Borders */
+  --border-1:        #E2E6EE;   /* cards */
+  --border-2:        #EAEDF2;   /* dividers / top-nav border */
+  --border-3:        #DDE2EC;   /* inputs / secondary button */
+  --border-4:        #E6EAF0;
+
+  /* Subtle fills */
+  --fill-1:          #F4F6F9;
+  --fill-2:          #F7F9FC;   /* table header */
+  --fill-3:          #FAFBFC;
+  --fill-4:          #F0F2F6;
+
+  /* Page + canvas */
+  --page-bg:         #EDEFF3;   /* app background */
+  --canvas-bg:       #FBFCFD;   /* modeling surface */
+  --canvas-dot:      #D6DBE6;   /* dotted grid */
+
+  /* Popup backdrop — dims+blurs ONLY the canvas region */
+  --blur-overlay:    rgba(16,27,48,0.42);
+  --blur-amount:     2px;
+
+  /* ── Legacy-compatible aliases (KEEP these names) ───────────────── */
+
   /* surfaces / neutrals */
-  --bg: #f5f6f8;
-  --canvas: #eceff4;
-  --surface: #ffffff;
-  --surface-2: #fafbfc;
-  --border: #e4e7ec;
-  --border-soft: #eef0f3;
-  --border-strong: #d3d8e0;
-  --ink: #14161c;
-  --ink-2: #3d4453;
-  --muted: #6b7280;
-  --subtle: #99a1ae;
-  --inverse: #ffffff;
+  --bg:            var(--page-bg);
+  --canvas:        var(--canvas-bg);
+  --surface:       #ffffff;
+  --surface-2:     var(--fill-2);
+  --border:        var(--border-1);
+  --border-soft:   var(--border-2);
+  --border-strong: var(--border-3);
+  --ink:           var(--navy);
+  --ink-2:         var(--text-body);
+  --muted:         var(--text-muted);
+  --subtle:        var(--text-muted-2);
+  --placeholder:   var(--text-placeholder);
+  --inverse:       #ffffff;
 
   /* semantics */
-  --success: #15a34a; --success-soft: #e8f6ee;
-  --warning: #d97706; --warning-soft: #fbf0e2;
-  --error: #dc2626;   --error-soft: #fbeaea;
+  --success:      var(--green-deep);  --success-soft: var(--green-tint);
+  --warning:      var(--amber-deep);  --warning-soft: var(--amber-tint);
+  --error:        var(--red);         --error-soft:   var(--red-tint);
 
-  /* Aurora accents */
-  --primary: #4f46e5;
-  --primary-700: #4338ca;
-  --primary-soft: #eef0fe;
-  --primary-muted: rgba(79, 70, 229, .10);
-  --on-primary: #ffffff;
-  --flow: #0d9488;          /* teal — relationship wire + flow accents */
-  --flow-700: #0f766e;
-  --flow-soft: #d8f3ee;
-  --accent2: #7c3aed;       /* violet — AI agent only */
+  /* Primary = design blue (was navy). Navy lives on --navy / --ink. */
+  --primary:       var(--blue);
+  --primary-700:   #1F46E0;          /* darker blue for :hover */
+  --primary-soft:  var(--blue-tint);
+  --primary-muted: rgba(46,91,255,.10);
+  --on-primary:    #ffffff;
 
-  /* ER key chips */
-  --k-pk: #b45309; --k-pk-soft: #fbf0e2;
-  --k-fk: #0d9488; --k-fk-soft: #d8f3ee;
-  --k-sk: #7c3aed; --k-sk-soft: #f0eafe;
-  --k-pt: #0e7490; --k-pt-soft: #e0f2f6;
+  /* flow accents (relationship wires) — keep teal-ish but align to blue */
+  --flow:          var(--green);
+  --flow-700:      var(--green-deep);
+  --flow-soft:     var(--green-tint);
+  --accent2:       var(--blue);
 
-  /* radii + elevation */
-  --r-sm: 7px; --r: 11px; --r-lg: 15px; --r-xl: 20px; --r-full: 999px;
-  --shadow-xs: 0 1px 2px rgba(20,22,28,.05);
-  --shadow-sm: 0 1px 3px rgba(20,22,28,.07);
-  --shadow-md: 0 6px 18px -4px rgba(20,22,28,.12), 0 2px 6px -2px rgba(20,22,28,.07);
-  --shadow-lg: 0 16px 40px -8px rgba(20,22,28,.18);
+  /* ER key chips (PK amber / FK blue / partition green) */
+  --k-pk: var(--amber);      --k-pk-soft: var(--amber-tint);
+  --k-fk: var(--blue);       --k-fk-soft: var(--blue-tint);
+  --k-sk: var(--purple);     --k-sk-soft: var(--purple-tint);
+  --k-pt: var(--green-deep); --k-pt-soft: var(--green-tint);
 
-  /* typography (next/font sets --font-manrope / --font-jbmono in layout.tsx) */
-  --ui: var(--font-manrope), 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --mono: var(--font-jbmono), 'JetBrains Mono', ui-monospace, monospace;
+  /* ── Radii ──────────────────────────────────────────────────────── */
+  --r-sm:  9px;    /* inputs / buttons / icon buttons */
+  --r:     11px;   /* cards (small) */
+  --r-lg:  13px;   /* cards */
+  --r-xl:  14px;   /* large cards */
+  --r-full:999px;  /* pills */
+  --r-chip:7px;    /* small chips (5–8) */
+
+  /* ── Elevation ──────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px rgba(16,27,48,.05);
+  --shadow-sm: 0 1px 3px rgba(16,27,48,.06);
+  --shadow-md: 0 6px 18px -4px rgba(16,27,48,.12), 0 2px 6px -2px rgba(16,27,48,.08);
+  --shadow-lg: 0 16px 40px -8px rgba(16,27,48,.20);
+  /* Named design shadows */
+  --shadow-card:  0 1px 3px rgba(16,27,48,.04), 0 18px 50px rgba(16,27,48,.07);
+  --shadow-table: 0 2px 6px rgba(16,27,48,.06), 0 10px 28px rgba(16,27,48,.07);
+  --shadow-popup: 0 30px 90px rgba(16,27,48,.34);
+
+  /* ── Typography ─────────────────────────────────────────────────── */
+  /* --font-geist / --font-geist-mono are set in globals.css */
+  --ui:   var(--font-geist), 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: var(--font-geist-mono), 'Geist Mono Variable', ui-monospace, 'JetBrains Mono', monospace;
 }

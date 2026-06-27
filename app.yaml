@@ -1,0 +1,11 @@
+# Databricks Apps — runtime del frontend (Next.js standalone, Node 22).
+# Docs: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/databricks-apps/app-runtime
+#
+# `npm run start` dispara `prestart` (next build) y luego `next start`. El puerto
+# se toma de DATABRICKS_APP_PORT DENTRO del script de npm (expansión de shell):
+#   "start": "next start -H 0.0.0.0 -p ${DATABRICKS_APP_PORT:-3000}"
+# porque la sustitución del token en `command` NO funciona a través de `npm run -- …`.
+#
+# NO setear NODE_ENV=production (rompería el `npm install` de devDeps → next build).
+# NEXT_PUBLIC_API_URL va en `.env.production` (build-time), no acá.
+command: ['npm', 'run', 'start']

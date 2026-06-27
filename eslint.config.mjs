@@ -1,38 +1,33 @@
-import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import reactHooks from 'eslint-plugin-react-hooks';
 
-const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
-  // Override default ignores of eslint-config-next.
-  globalIgnores([
-    // Default ignores of eslint-config-next:
-    ".next/**",
-    "out/**",
-    "build/**",
-    "next-env.d.ts",
-  ]),
-  // Feature-boundary guard: code must import a feature through its public
-  // barrel (`@/features/<name>`), never reach into its internals
-  // (`@/features/<name>/components/...`). A feature imports its OWN files via
-  // relative paths. See doc/feature-architecture.md. Warning-only for now.
+export default tseslint.config(
+  { ignores: ['dist', 'node_modules', '.next', 'scripts'] },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
   {
+    plugins: { 'react-hooks': reactHooks },
     rules: {
-      "no-restricted-imports": [
-        "warn",
+      'react-hooks/exhaustive-deps': 'warn',
+    },
+  },
+  {
+    // Guard de límites de feature: importá una feature por su barrel
+    // (`@/features/<name>`), nunca su interior. Ver doc/feature-architecture.md.
+    rules: {
+      'no-restricted-imports': [
+        'warn',
         {
           patterns: [
             {
-              group: ["@/features/*/**"],
+              group: ['@/features/*/**'],
               message:
-                "Import a feature via its barrel '@/features/<name>', not its internal path. Use relative paths inside the same feature. See doc/feature-architecture.md.",
+                "Importá una feature por su barrel '@/features/<name>', no su ruta interna. Ver doc/feature-architecture.md.",
             },
           ],
         },
       ],
     },
   },
-]);
-
-export default eslintConfig;
+);

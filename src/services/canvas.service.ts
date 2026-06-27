@@ -2,7 +2,7 @@ import type { Canvas, NodePosition } from '@/types/model';
 import type { CanvasReplaceRequest } from '@/types/api';
 import { apiGet, apiFetch } from './http';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 /** Fetch a project's hydrated canvas (tables + relationships). */
 export function getCanvas(projectId: string): Promise<Canvas> {

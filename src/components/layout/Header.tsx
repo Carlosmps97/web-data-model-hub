@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import Icon from '@/components/ui/Icon';
 
 export interface BreadcrumbItem {
@@ -24,7 +24,7 @@ interface HeaderProps {
 }
 
 const Header: React.FC<HeaderProps> = ({ crumbs, actions, children }) => {
-  const router = useRouter();
+  const navigate = useNavigate();
   return (
     <div className="dmh-top">
       <nav className="dmh-crumbs" aria-label="Breadcrumb">
@@ -39,7 +39,7 @@ const Header: React.FC<HeaderProps> = ({ crumbs, actions, children }) => {
                 title={crumb.label}
                 onClick={
                   clickable
-                    ? () => (crumb.onClick ? crumb.onClick() : router.push(crumb.href!))
+                    ? () => (crumb.onClick ? crumb.onClick() : navigate(crumb.href!))
                     : undefined
                 }
               >

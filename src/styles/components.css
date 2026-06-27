@@ -1,0 +1,128 @@
+/* ============================================================
+   Design-system primitives (DMH-Erwin v20260625-2).
+   Classes: dmh-btn, dmh-pill, dmh-chip, dmh-badge, dmh-avatar,
+   dmh-seg, dmh-dialog. Light-only, navy. Uses tokens.css.
+   These are NEW (the legacy rd-/dmh-modal classes in ui.css stay).
+   ============================================================ */
+
+/* ─────────────────────────────── Button ──────────────────────────── */
+.dmh-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  height: 36px; padding: 0 14px;
+  font-family: var(--ui); font-size: 13px; font-weight: 600; line-height: 1;
+  border-radius: var(--r-sm); border: 1px solid transparent; cursor: pointer;
+  white-space: nowrap; color: var(--text-body); background: transparent;
+  transition: background .15s, border-color .15s, color .15s, box-shadow .15s;
+}
+.dmh-btn:disabled { opacity: .5; cursor: not-allowed; }
+.dmh-btn--sm { height: 30px; padding: 0 11px; font-size: 12px; gap: 6px; }
+
+.dmh-btn--primary { background: var(--blue); color: #fff; box-shadow: 0 1px 2px rgba(16,27,48,.12), 0 2px 8px -2px var(--primary-muted); }
+.dmh-btn--primary:hover:not(:disabled) { background: var(--primary-700); }
+
+.dmh-btn--success { background: var(--green); color: #fff; box-shadow: 0 1px 2px rgba(16,27,48,.12); }
+.dmh-btn--success:hover:not(:disabled) { background: var(--green-deep); }
+
+.dmh-btn--secondary { background: var(--surface); color: var(--text-body); border-color: var(--border-3); box-shadow: var(--shadow-xs); }
+.dmh-btn--secondary:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+
+.dmh-btn--ghost { background: transparent; color: var(--text-muted); }
+.dmh-btn--ghost:hover:not(:disabled) { background: var(--blue-tint); color: var(--blue); }
+
+.dmh-btn--danger { background: var(--red-tint); color: var(--red); border-color: var(--red-border); }
+.dmh-btn--danger:hover:not(:disabled) { background: #f6dcd8; }
+
+/* ─────────────────────────────── Pill ────────────────────────────── */
+.dmh-pill {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; font-size: 11.5px; font-weight: 700; line-height: 1.4;
+  border-radius: var(--r-full); border: 1px solid transparent; white-space: nowrap;
+}
+.dmh-pill svg { width: 12px; height: 12px; }
+.dmh-pill--blue    { background: var(--blue-tint);    color: var(--blue);       border-color: var(--blue-border); }
+.dmh-pill--green   { background: var(--green-tint);   color: var(--green-deep); }
+.dmh-pill--amber   { background: var(--amber-tint);   color: var(--amber-deep); }
+.dmh-pill--red     { background: var(--red-tint);     color: var(--red);        border-color: var(--red-border); }
+.dmh-pill--purple  { background: var(--purple-tint);  color: var(--purple); }
+.dmh-pill--neutral { background: var(--fill-1);       color: var(--text-muted); border-color: var(--border-2); }
+
+/* ─────────────────────────────── Chip ────────────────────────────── */
+.dmh-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; font-size: 12.5px; font-weight: 600; line-height: 1.3;
+  color: var(--text-body); background: var(--surface);
+  border: 1px solid var(--border-3); border-radius: var(--r-full); white-space: nowrap;
+  cursor: default;
+}
+.dmh-chip--sm { padding: 3px 9px; font-size: 11.5px; }
+.dmh-chip.is-active { background: var(--blue-tint); color: var(--blue); border-color: var(--blue-border); }
+
+/* ─────────────────────────────── Badge ───────────────────────────── */
+.dmh-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; font-size: 10px; font-weight: 700; line-height: 1.4;
+  letter-spacing: .03em; text-transform: uppercase; border-radius: 6px; white-space: nowrap;
+}
+.dmh-badge svg { width: 11px; height: 11px; }
+.dmh-badge--blue    { background: var(--blue-tint);   color: var(--blue); }
+.dmh-badge--green   { background: var(--green-tint);  color: var(--green-deep); }
+.dmh-badge--amber   { background: var(--amber-tint);  color: var(--amber-deep); }
+.dmh-badge--red     { background: var(--red-tint);    color: var(--red); }
+.dmh-badge--purple  { background: var(--purple-tint); color: var(--purple); }
+.dmh-badge--neutral { background: var(--fill-1);      color: var(--text-muted); }
+
+/* ─────────────────────────────── Avatar ──────────────────────────── */
+.dmh-avatar {
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; font-family: var(--ui); font-weight: 700; color: #fff;
+  letter-spacing: .01em; flex-shrink: 0; line-height: 1; user-select: none;
+}
+.dmh-avatar--blue   { background: var(--blue); }
+.dmh-avatar--purple { background: var(--purple); }
+.dmh-avatar--green  { background: var(--green); }
+.dmh-avatar--navy   { background: var(--navy); }
+
+/* ──────────────────────────── SegmentedControl ───────────────────── */
+.dmh-seg {
+  display: inline-flex; padding: 3px; gap: 2px;
+  background: var(--fill-2); border: 1px solid var(--border-2); border-radius: var(--r);
+}
+.dmh-seg-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 13px; font-family: var(--ui); font-size: 12px; font-weight: 600;
+  color: var(--text-muted); background: transparent; border: none;
+  border-radius: calc(var(--r) - 3px); cursor: pointer; transition: all .15s;
+}
+.dmh-seg-btn.is-active { background: var(--surface); color: var(--blue); box-shadow: var(--shadow-xs); }
+
+/* ─────────────────────────────── Dialog ──────────────────────────── */
+.dmh-dialog-backdrop {
+  position: fixed; z-index: 300;
+  display: flex; align-items: center; justify-content: center; padding: 30px;
+  background: var(--blur-overlay);
+  animation: dmh-dialog-fade .15s ease;
+}
+/* canvas variant: backdrop-filter blurs ONLY the region it covers (set via inline
+   top/left/right/bottom), so the TopNav + toolbar above it stay sharp. */
+.dmh-dialog-backdrop--canvas { backdrop-filter: blur(var(--blur-amount)); -webkit-backdrop-filter: blur(var(--blur-amount)); }
+
+.dmh-dialog {
+  background: var(--surface); border: 1px solid var(--border-3);
+  border-radius: var(--r-xl); box-shadow: var(--shadow-popup);
+  width: 560px; max-width: 100%; max-height: 86vh;
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: dmh-dialog-pop .2s cubic-bezier(.2,.8,.3,1);
+}
+.dmh-dialog-head { display: flex; align-items: center; gap: 11px; padding: 16px 18px; border-bottom: 1px solid var(--border-2); flex-shrink: 0; }
+.dmh-dialog-ico { width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--blue-tint); color: var(--blue); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.dmh-dialog-titles { flex: 1; min-width: 0; }
+.dmh-dialog-title { font-size: 15px; font-weight: 700; color: var(--navy); }
+.dmh-dialog-sub { font-size: 12px; color: var(--text-muted); margin-top: 1px; }
+.dmh-dialog-close { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; color: var(--text-muted); border-radius: var(--r-sm); cursor: pointer; transition: background .12s, color .12s; }
+.dmh-dialog-close:hover { background: var(--fill-1); color: var(--navy); }
+.dmh-dialog-body { padding: 18px; overflow-y: auto; }
+.dmh-dialog-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 13px 18px; border-top: 1px solid var(--border-2); background: var(--fill-3); flex-shrink: 0; }
+.dmh-dialog-foot-left { margin-right: auto; }
+
+@keyframes dmh-dialog-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes dmh-dialog-pop { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: none; } }

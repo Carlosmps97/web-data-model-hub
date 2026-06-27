@@ -2,29 +2,14 @@
 
 > Cómo se mueven los datos del browser al backend FastAPI (y viceversa) para cada
 > acción. Arquitectura project-centric: **no hay rutas API en Next.js**, la
-> persistencia vive en Cosmos DB y se accede con `apiFetch` cross-origin + cookie
-> JWT. El estado de canvas vive en `useProjectStore`.
+> persistencia vive en Cosmos DB y se accede con `apiFetch` cross-origin (CORS).
+> **MVP abierto** (sin login). El estado del canvas vive en `useProjectStore`.
 
-## 0. Login y bootstrap del estado
+## 0. Bootstrap del estado (MVP sin login)
 
-```mermaid
-sequenceDiagram
-    participant B as Browser
-    participant SVC as authService
-    participant FA as FastAPI :8000
-
-    B->>SVC: login({username, password})
-    SVC->>FA: POST /api/auth/login (credentials: 'include')
-    FA->>FA: ensure_bootstrap_admin + bcrypt + sign_token (HS256, 10h)
-    FA-->>B: 200 {success, data: AuthUser} + Set-Cookie modeler-auth
-    B->>B: useAuthStore.setUser(user) + router.replace(next ?? '/')
-
-    Note over B,FA: AppLayout monta → hydrate()
-    B->>FA: GET /api/auth/me (cookie)
-    FA-->>B: AuthUser (recargado de DB) → status 'ready'
-```
-
-Si la cookie expira, cualquier `apiFetch` cae en 401 → la UI redirige a `/login`.
+No hay login: la app carga directamente. `useProjectStore.loadProjects()` /
+`loadProject(id)` traen los datos del backend al entrar a cada pantalla. (Cuando
+vuelva la auth, una hidratación de identidad correrá acá, en `AppLayout`.)
 
 ---
 
@@ -85,8 +70,8 @@ sequenceDiagram
     DBC->>S: persistCanvas()
     S->>S: stripear `position` de cada tabla
     S->>SVC: saveCanvas(projectId, {tables, relationships})
-    SVC->>FA: PUT /api/projects/{id}/canvas (cookie)
-    FA->>FA: check_project_access('edit') + _ensure_column_ids
+    SVC->>FA: PUT /api/projects/{id}/canvas
+    FA->>FA: _ensure_column_ids
     FA-->>S: { tables, relationships } → indicador "Saved"
 ```
 
@@ -150,8 +135,7 @@ flowchart TD
     SQL --> CP["Copiar DDL → portapapeles"]
 ```
 
-El generador es **puro**: misma entrada → misma salida; los toggles regeneran en
-memoria.
+El generador es **puro**: misma entrada → misma salida; los toggles regeneran en memoria.
 
 ---
 
@@ -161,12 +145,10 @@ memoria.
 flowchart LR
     F["apiFetch"] --> S{"resultado"}
     S -->|"OK envelope"| OK["return data"]
-    S -->|"401"| A["ApiError(401) → UI redirige a /login"]
-    S -->|"403"| FB["ApiError(403) → toast 'sin permiso'"]
     S -->|"success=false / no-2xx"| BE["ApiError(error, status) → toast"]
     S -->|"red caída"| NET["ApiError(message, 0)"]
 ```
 
 `ApiError` (en `services/http.ts`) es la única forma de error que llega a la UI
-desde la capa HTTP. Los componentes hacen `try/catch` y deciden toast / redirect.
+desde la capa HTTP. Los componentes hacen `try/catch` y deciden toast / acción.
 Nunca se inspecciona `json.success` a mano fuera de `services/`.

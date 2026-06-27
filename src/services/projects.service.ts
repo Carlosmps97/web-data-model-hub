@@ -2,7 +2,7 @@ import type { Project } from '@/types/model';
 import type { CreateProjectRequest, UpdateProjectRequest } from '@/types/api';
 import { apiGet, apiPost, apiPut, apiDelete } from './http';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 export function listProjects(): Promise<Project[]> {
   return apiGet<Project[]>(`${API_BASE}/api/projects`);

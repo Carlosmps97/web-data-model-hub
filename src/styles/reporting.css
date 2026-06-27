@@ -1,0 +1,162 @@
+/* ============================================================
+   Reporting (pr / Screen 11) — DMH-Erwin v20260625-2.
+   Tabular metadata grid + search/multi-filter bar + Excel export panel.
+   Token-driven, light-only navy. Source: design_handoff …/README.md (#pr).
+   ============================================================ */
+
+/* ───────────────────────────── Page shell ────────────────────────── */
+.dmh-rep { flex: 1; overflow-y: auto; background: var(--page-bg); padding: 26px 30px 40px; }
+.dmh-rep-inner { max-width: 1500px; margin: 0 auto; }
+
+/* ── Header ────────────────────────────────────────────────────────── */
+.dmh-rep-head { margin-bottom: 18px; }
+.dmh-rep-eyebrow { font-size: 12px; font-weight: 600; color: var(--text-muted-2); text-transform: uppercase; letter-spacing: .06em; }
+.dmh-rep-h1 { margin: 4px 0 0; font-size: 26px; font-weight: 700; color: var(--navy); letter-spacing: -.015em; line-height: 1.1; }
+.dmh-rep-sub { margin: 6px 0 0; font-size: 13.5px; color: var(--text-muted); max-width: 720px; }
+
+/* ── Body: grid column (left) + export rail (right) ────────────────── */
+.dmh-rep-cols { display: flex; gap: 20px; align-items: flex-start; }
+.dmh-rep-main { flex: 1; min-width: 0; }
+.dmh-rep-rail { width: 312px; flex: none; position: sticky; top: 14px; display: flex; flex-direction: column; gap: 16px; }
+
+/* ── Filter / search bar ───────────────────────────────────────────── */
+.dmh-rep-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+.dmh-rep-search { position: relative; flex: 1; min-width: 220px; }
+.dmh-rep-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-muted-3); pointer-events: none; }
+.dmh-rep-search input {
+  width: 100%; height: 38px; padding: 0 12px 0 34px; border: 1px solid var(--border-3);
+  border-radius: var(--r-sm); background: var(--surface); color: var(--text-body);
+  font-family: var(--ui); font-size: 13.5px; outline: none; transition: border-color .14s, box-shadow .14s;
+}
+.dmh-rep-search input::placeholder { color: var(--text-placeholder); }
+.dmh-rep-search input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--primary-muted); }
+
+/* ── Multi-select combobox filter ──────────────────────────────────── */
+.dmh-rep-filter { position: relative; }
+.dmh-rep-filter-btn {
+  display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 11px;
+  border: 1px solid var(--border-3); border-radius: var(--r-sm); background: var(--surface);
+  color: var(--text-body); font-family: var(--ui); font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: border-color .14s, background .14s;
+}
+.dmh-rep-filter-btn:hover { border-color: var(--blue-border); }
+.dmh-rep-filter-btn.is-open { border-color: var(--blue); box-shadow: 0 0 0 3px var(--primary-muted); }
+.dmh-rep-filter-btn .ico { width: 14px; height: 14px; color: var(--text-muted-2); }
+.dmh-rep-filter-btn .chev { width: 14px; height: 14px; color: var(--text-muted-3); transition: transform .14s; }
+.dmh-rep-filter-btn.is-open .chev { transform: rotate(180deg); }
+.dmh-rep-filter-count {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: var(--r-full); background: var(--blue); color: #fff;
+  font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+
+.dmh-rep-menu {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; min-width: 220px; max-width: 320px;
+  max-height: 320px; overflow-y: auto; padding: 6px; background: var(--surface);
+  border: 1px solid var(--border-2); border-radius: var(--r); box-shadow: var(--shadow-popup);
+}
+.dmh-rep-menu-empty { padding: 10px 10px; font-size: 12.5px; color: var(--text-muted-3); }
+.dmh-rep-opt {
+  display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border: none;
+  background: none; border-radius: 7px; cursor: pointer; font-family: var(--ui); font-size: 13px;
+  color: var(--text-body); text-align: left; transition: background .12s;
+}
+.dmh-rep-opt:hover { background: var(--fill-1); }
+.dmh-rep-opt-box {
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none;
+  border: 1.5px solid var(--border-3); border-radius: 5px; color: #fff; transition: background .12s, border-color .12s;
+}
+.dmh-rep-opt.is-on .dmh-rep-opt-box { background: var(--blue); border-color: var(--blue); }
+.dmh-rep-opt-box svg { width: 11px; height: 11px; }
+.dmh-rep-opt-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dmh-rep-clear {
+  height: 38px; padding: 0 11px; border: none; background: none; color: var(--text-muted);
+  font-family: var(--ui); font-size: 12.5px; font-weight: 600; cursor: pointer; border-radius: var(--r-sm);
+  transition: color .14s, background .14s;
+}
+.dmh-rep-clear:hover { color: var(--blue); background: var(--blue-tint); }
+
+/* ── Metadata table ────────────────────────────────────────────────── */
+.dmh-rep-tablewrap {
+  border: 1px solid var(--border-2); border-radius: 13px; overflow: hidden; background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+.dmh-rep-tablescroll { max-height: calc(100vh - 250px); overflow: auto; }
+.dmh-rep-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.dmh-rep-table thead th {
+  position: sticky; top: 0; z-index: 2; background: var(--fill-2); text-align: left;
+  padding: 11px 14px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-muted-3); white-space: nowrap; border-bottom: 1px solid var(--border-2);
+}
+.dmh-rep-table thead th.num { text-align: right; }
+.dmh-rep-table tbody td { padding: 12px 14px; border-bottom: 1px solid #F2F4F8; vertical-align: top; color: var(--text-body); }
+.dmh-rep-table tbody tr:last-child td { border-bottom: none; }
+.dmh-rep-table tbody tr:nth-child(even) { background: var(--fill-3); }
+.dmh-rep-table tbody tr:hover { background: var(--blue-soft); }
+.dmh-rep-table td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--navy); font-weight: 600; }
+
+.dmh-rep-tname { display: flex; flex-direction: column; gap: 2px; }
+.dmh-rep-tname-phys { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--navy); }
+.dmh-rep-tname-log { font-size: 12px; color: var(--text-muted); }
+.dmh-rep-schema { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+.dmh-rep-def { max-width: 320px; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+.dmh-rep-def.is-empty { color: var(--text-muted-3); font-style: italic; }
+
+.dmh-rep-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.dmh-rep-chip {
+  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--r-chip);
+  font-size: 11.5px; font-weight: 600; white-space: nowrap;
+}
+.dmh-rep-chip--sa { background: var(--purple-tint); color: #6D44C9; }
+.dmh-rep-chip--proj { background: var(--blue-tint); color: var(--blue); }
+.dmh-rep-chip-none { font-size: 12px; color: var(--text-muted-3); }
+
+/* ── States (loading / empty) ──────────────────────────────────────── */
+.dmh-rep-state { padding: 54px 20px; text-align: center; color: var(--text-muted); }
+.dmh-rep-state-ico { display: inline-flex; color: var(--text-muted-3); margin-bottom: 10px; }
+.dmh-rep-state-t { font-size: 14px; font-weight: 600; color: var(--navy); }
+.dmh-rep-state-m { margin-top: 4px; font-size: 13px; color: var(--text-muted); }
+.dmh-rep-skel { padding: 0; }
+.dmh-rep-skel-row { height: 46px; border-bottom: 1px solid #F2F4F8; background:
+  linear-gradient(90deg, var(--fill-3) 0%, var(--fill-1) 50%, var(--fill-3) 100%);
+  background-size: 200% 100%; animation: dmh-skeleton 1.1s ease-in-out infinite; }
+
+/* ── Export rail card ──────────────────────────────────────────────── */
+.dmh-rep-card { border: 1px solid var(--border-2); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
+.dmh-rep-card-head { display: flex; align-items: center; gap: 9px; padding: 14px 16px 10px; }
+.dmh-rep-card-ico { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: var(--green-tint); color: var(--green-deep); }
+.dmh-rep-card-title { font-size: 14px; font-weight: 700; color: var(--navy); }
+.dmh-rep-card-desc { padding: 0 16px 12px; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+
+.dmh-rep-levels { padding: 0 12px 4px; display: flex; flex-direction: column; gap: 2px; }
+.dmh-rep-level {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 8px; border: none;
+  background: none; border-radius: 8px; cursor: pointer; text-align: left; transition: background .12s;
+}
+.dmh-rep-level:hover { background: var(--fill-1); }
+.dmh-rep-level-box {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none;
+  margin-top: 1px; border: 1.5px solid var(--border-3); border-radius: 5px; color: #fff; transition: background .12s, border-color .12s;
+}
+.dmh-rep-level.is-on .dmh-rep-level-box { background: var(--green); border-color: var(--green); }
+.dmh-rep-level-box svg { width: 12px; height: 12px; }
+.dmh-rep-level-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.dmh-rep-level-name { font-size: 13px; font-weight: 600; color: var(--navy); }
+.dmh-rep-level-hint { font-size: 11.5px; color: var(--text-muted-2); line-height: 1.35; }
+
+.dmh-rep-card-foot { padding: 12px 16px 16px; }
+.dmh-rep-export-btn { width: 100%; justify-content: center; height: 40px; }
+.dmh-rep-export-note { margin-top: 8px; font-size: 11.5px; color: var(--text-muted-3); text-align: center; }
+
+/* ── Indicators card ───────────────────────────────────────────────── */
+.dmh-rep-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border-2); border: 1px solid var(--border-2); border-radius: 13px; overflow: hidden; }
+.dmh-rep-kpi { background: var(--surface); padding: 14px 15px; }
+.dmh-rep-kpi-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted-3); }
+.dmh-rep-kpi-value { margin-top: 4px; font-size: 22px; font-weight: 700; color: var(--navy); line-height: 1.05; font-variant-numeric: tabular-nums; }
+.dmh-rep-kpi-value.is-loading { width: 40px; height: 24px; margin-top: 4px; border-radius: 6px; background: var(--fill-1); animation: dmh-skeleton 1.1s ease-in-out infinite; }
+
+@media (max-width: 1080px) {
+  .dmh-rep-cols { flex-direction: column; }
+  .dmh-rep-rail { width: 100%; position: static; }
+}

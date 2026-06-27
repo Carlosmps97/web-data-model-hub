@@ -14,7 +14,7 @@
 import type { ApiResponse } from '@/types/api';
 import { ApiError } from '@/services/http';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? '';
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 // ─── Tipos del contrato HTTP ──────────────────────────────────────
 

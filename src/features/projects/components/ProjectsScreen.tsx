@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
 import Icon from '@/components/ui/Icon';
 import ConfirmDialog, { shouldSkipConfirm } from '@/components/ui/ConfirmDialog';
 import { EngineBadge } from '@/features/engines';
 import { useProjectStore } from '@/store/useProjectStore';
-import { useAuthStore } from '@/store/useAuthStore';
 import CreateProjectModal from './CreateProjectModal';
 
 function formatDate(s?: string): string {
@@ -19,9 +18,9 @@ function formatDate(s?: string): string {
 }
 
 export default function ProjectsScreen() {
-  const router = useRouter();
+  const navigate = useNavigate();
   const { projects, loading, loadProjects, createProject, deleteProject } = useProjectStore();
-  const isAdmin = useAuthStore((s) => s.isAdmin());
+  const isAdmin = true; // MVP abierto: creación/borrado sin permisos (la matriz vuelve al final)
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; name: string } | null>(null);
@@ -38,7 +37,7 @@ export default function ProjectsScreen() {
     const project = await createProject(data);
     if (project) {
       setShowCreate(false);
-      router.push(`/projects/${project.id}`);
+      navigate(`/projects/${project.id}`);
     }
   };
 
@@ -90,7 +89,7 @@ export default function ProjectsScreen() {
           ) : (
             <div className="dmh-grid">
               {filtered.map((p) => (
-                <div className="dmh-pcard" key={p.id} onClick={() => router.push(`/projects/${p.id}`)}>
+                <div className="dmh-pcard" key={p.id} onClick={() => navigate(`/projects/${p.id}`)}>
                   {isAdmin && (
                     <div className="dmh-pcard-del">
                       <button type="button" className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Eliminar proyecto" onClick={(e) => askDelete(e, p.id, p.name)}>

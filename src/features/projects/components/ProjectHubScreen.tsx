@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useNavigate } from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import Header from '@/components/layout/Header';
 import Icon from '@/components/ui/Icon';
@@ -9,7 +9,6 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { LevelModal } from '@/features/levels';
 import { DomainModal } from '@/features/domains';
 import { useProjectStore } from '@/store/useProjectStore';
-import { useAuthStore } from '@/store/useAuthStore';
 import type { ModelLevel, Domain } from '@/types/model';
 
 export interface ProjectHubScreenProps {
@@ -17,7 +16,7 @@ export interface ProjectHubScreenProps {
 }
 
 export default function ProjectHubScreen({ projectId }: ProjectHubScreenProps) {
-  const router = useRouter();
+  const navigate = useNavigate();
 
   const {
     currentProject, tables, loading, loadProject,
@@ -25,7 +24,7 @@ export default function ProjectHubScreen({ projectId }: ProjectHubScreenProps) {
     addDomain, updateDomain, removeDomain,
     persistProjectMeta,
   } = useProjectStore();
-  const canEdit = useAuthStore((s) => s.canEditProject(projectId));
+  const canEdit = true; // MVP abierto: edición sin permisos (la matriz vuelve al final)
 
   const [levelModal, setLevelModal] = useState<{ level: ModelLevel | null } | null>(null);
   const [domainModal, setDomainModal] = useState<{ domain: Domain | null } | null>(null);
@@ -43,7 +42,7 @@ export default function ProjectHubScreen({ projectId }: ProjectHubScreenProps) {
     return { tablesInLayer, domainsInLayer, tablesInDomain };
   }, [tables]);
 
-  const openEditor = (q = '') => router.push(`/projects/${projectId}/editor${q}`);
+  const openEditor = (q = '') => navigate(`/projects/${projectId}/editor${q}`);
 
   const saveLevel = async (level: ModelLevel, isNew: boolean) => {
     if (isNew) addLayer({ ...level, order: layers.length });

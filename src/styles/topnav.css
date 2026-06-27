@@ -1,0 +1,93 @@
+/* ============================================================
+   Global shell — TopNav (52px) + app page region (DMH-Erwin).
+   Pattern "A": white bar, bottom border #EAEDF2, logo + wordmark,
+   center nav links, right search + avatar/UserMenu. Light-only.
+   ============================================================ */
+
+/* App root: column with the fixed TopNav on top and the routed page below. */
+.dmh-app { display: flex; flex-direction: column; height: 100vh; background: var(--page-bg); overflow: hidden; }
+.dmh-app-main { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ─────────────────────────────── TopNav ──────────────────────────── */
+.dmh-topnav {
+  height: 52px; flex-shrink: 0; display: flex; align-items: center; gap: 18px;
+  padding: 0 18px; background: var(--surface); border-bottom: 1px solid var(--border-2);
+  position: relative; z-index: 40;
+}
+
+/* Brand (logo + wordmark) */
+.dmh-brand { display: flex; align-items: center; gap: 10px; border: none; background: transparent; cursor: pointer; padding: 0; }
+.dmh-brand-logo {
+  width: 28px; height: 28px; border-radius: 8px; background: var(--navy); color: #fff;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.dmh-brand-word { font-size: 14px; font-weight: 700; letter-spacing: -.01em; color: var(--navy); white-space: nowrap; }
+
+/* Center nav links */
+.dmh-nav { display: flex; align-items: center; gap: 4px; }
+.dmh-nav-link {
+  display: inline-flex; align-items: center; gap: 7px;
+  height: 32px; padding: 0 12px; border-radius: var(--r-sm); border: none; background: transparent;
+  font-family: var(--ui); font-size: 13px; font-weight: 600; color: var(--text-muted);
+  cursor: pointer; transition: background .14s, color .14s; white-space: nowrap; text-decoration: none;
+}
+.dmh-nav-link svg { width: 15px; height: 15px; }
+.dmh-nav-link:hover { background: var(--fill-1); color: var(--navy); }
+.dmh-nav-link.is-active { background: var(--blue-tint); color: var(--blue); }
+
+.dmh-nav-spacer { flex: 1; }
+
+/* Right cluster */
+.dmh-topnav-right { display: flex; align-items: center; gap: 12px; }
+
+/* Search field (200px, #F4F6F9 bg) */
+.dmh-topnav-search { position: relative; width: 200px; }
+.dmh-topnav-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-muted-2); pointer-events: none; }
+.dmh-topnav-search input {
+  width: 100%; height: 34px; padding: 0 12px 0 32px;
+  font-family: var(--ui); font-size: 13px; color: var(--text-body);
+  background: var(--fill-1); border: 1px solid transparent; border-radius: var(--r-sm); outline: none;
+  transition: background .14s, border-color .14s, box-shadow .14s;
+}
+.dmh-topnav-search input::placeholder { color: var(--text-placeholder); }
+.dmh-topnav-search input:focus { background: var(--surface); border-color: var(--blue); box-shadow: 0 0 0 3px var(--primary-muted); }
+
+/* ───────────────────────────── UserMenu ──────────────────────────── */
+.dmh-usermenu { position: relative; }
+.dmh-usermenu-trigger { border: none; background: transparent; padding: 0; cursor: pointer; border-radius: 50%; display: inline-flex; }
+.dmh-usermenu-trigger:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.dmh-usermenu-pop {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 50;
+  min-width: 232px; background: var(--surface); border: 1px solid var(--border-1);
+  border-radius: var(--r); box-shadow: var(--shadow-lg); padding: 6px;
+  animation: dmh-dialog-pop .14s cubic-bezier(.2,.8,.3,1);
+}
+.dmh-usermenu-label { font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--text-muted-2); padding: 8px 10px 5px; }
+.dmh-usermenu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 7px 9px; border: none; background: transparent; border-radius: var(--r-sm);
+  font-family: var(--ui); font-size: 13px; font-weight: 500; color: var(--text-body);
+  cursor: pointer; text-align: left; transition: background .12s;
+}
+.dmh-usermenu-item:hover { background: var(--fill-1); }
+.dmh-usermenu-item.is-active { background: var(--blue-tint); }
+.dmh-usermenu-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dmh-usermenu-item-id { font-family: var(--mono); font-size: 11px; color: var(--text-muted-2); }
+.dmh-usermenu-item.is-active .dmh-usermenu-check { color: var(--blue); display: inline-flex; }
+.dmh-usermenu-check { color: transparent; display: inline-flex; flex-shrink: 0; }
+
+/* ───────────── Legacy screens nested under the TopNav ─────────────── */
+/* The modeler's .wk grid (and the governance shell) hard-code height:100vh,
+   which would overflow by the 52px TopNav. When nested under the global shell
+   we constrain them to the available region (R3 re-styles the canvas shell). */
+.dmh-app-main > .dmh-model-route { flex: 1; min-height: 0; display: flex; }
+.dmh-app-main > .dmh-model-route > .wk { height: 100%; flex: 1; min-width: 0; }
+.dmh-app-main > .dmh { height: 100%; }
+
+/* ─────────────────────────────── Page stub ───────────────────────── */
+.dmh-stub { flex: 1; overflow-y: auto; padding: 40px 36px; }
+.dmh-stub-inner { max-width: 760px; }
+.dmh-stub h1 { font-size: 26px; font-weight: 700; letter-spacing: -.015em; color: var(--navy); line-height: 1.15; }
+.dmh-stub p { margin-top: 10px; font-size: 14px; line-height: 1.6; color: var(--text-muted); }
+.dmh-stub-eyebrow { display: inline-block; margin-bottom: 14px; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted-2); }

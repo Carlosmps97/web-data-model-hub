@@ -5,7 +5,12 @@
 @import '../styles/tokens.css';
 @import '../styles/base.css';
 @import '../styles/ui.css';
+@import '../styles/components.css';
+@import '../styles/topnav.css';
 @import '../styles/shell.css';
+@import '../styles/home.css';
+@import '../styles/review.css';
+@import '../styles/reporting.css';
 @import '../features/diagram/diagram.css';
 @import '../features/editor/editor.css';
 @import '../features/table-editor/table-editor.css';
@@ -14,4 +19,14 @@
 @import '../features/model-center/model-center.css';
 @import '../features/metadata/metadata.css';
 @import '../features/help/help.css';
-@import '../features/chat-agent/chat-agent.css';
+@import '../features/modeler/modeler.css';
+
+/* Fuentes — Geist (UI) + Geist Mono (data/SQL), self-hosted vía @fontsource-variable.
+   Los archivos .woff2 los importa main.tsx; acá solo nombramos las familias. */
+:root {
+  --font-geist: 'Geist Variable', system-ui, sans-serif;
+  --font-geist-mono: 'Geist Mono Variable', ui-monospace, monospace;
+  /* Aliases legacy (por si quedara alguna referencia suelta a las fuentes viejas). */
+  --font-manrope: var(--font-geist);
+  --font-jbmono: var(--font-geist-mono);
+}

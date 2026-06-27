@@ -19,7 +19,7 @@
 | `--primary-soft` | `#eef0fe` | tintes, filas seleccionadas |
 | `--flow` | `#0d9488` | **teal** — wire de relación activo + acentos "flow" |
 | `--flow-700` | `#0f766e` | énfasis flow |
-| `--accent2` | `#7c3aed` | violeta — solo agente IA |
+| `--accent2` | `#7c3aed` | violeta — acento (reservado) |
 | `--ink` `#14161c` · `--ink-2` `#3d4453` · `--muted` `#6b7280` · `--subtle` `#99a1ae` | | escala de texto |
 | `--surface` `#ffffff` · `--surface-2` `#fafbfc` · `--bg` `#f5f6f8` · `--canvas` `#eceff4` | | superficies |
 | `--border` `#e4e7ec` · `--border-soft` `#eef0f3` · `--border-strong` `#d3d8e0` | | bordes |
