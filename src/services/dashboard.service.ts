@@ -12,10 +12,13 @@ import { apiGet } from './http';
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 /**
- * Trae los 5 contadores del Home. Pasá `projectId` para acotar al proyecto;
- * omitilo (o `undefined`) para los totales globales.
+ * Trae los 5 contadores del Home. Pasá uno o varios `projectIds` para acotar a
+ * la UNIÓN de esos proyectos; omitilo (o vacío) para los totales globales.
  */
-export function getSummary(projectId?: string): Promise<DashboardSummary> {
-  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+export function getSummary(projectIds?: string[]): Promise<DashboardSummary> {
+  const ids = (projectIds ?? []).filter(Boolean);
+  const qs = ids.length
+    ? `?${ids.map((id) => `projectId=${encodeURIComponent(id)}`).join('&')}`
+    : '';
   return apiGet<DashboardSummary>(`${API_BASE}/api/summary${qs}`);
 }

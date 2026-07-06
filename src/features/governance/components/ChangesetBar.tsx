@@ -1,39 +1,51 @@
 import { useEffect } from 'react';
 import Icon from '@/components/ui/Icon';
+import { confirmDialog, promptDialog } from '@/components/ui/dialogs';
 import { useChangesetStore } from '@/store/useChangesetStore';
-
-const DEV_USERS = ['ana', 'beto', 'qa'];
+import { useSessionStore } from '@/store/useSessionStore';
 
 export default function ChangesetBar({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const { devUser, activeId, changesets, setDev, setActive, load, create, submit } = useChangesetStore();
 
-  useEffect(() => { setDev(devUser); load().catch(() => pushToast('No se pudieron cargar los changesets', 'err')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // Alinea el actor legacy con el usuario REAL de la sesión (el mirror de
+    // useSessionStore ya trae el username logueado). Bajo auth por token el
+    // header X-Dev-User es ignorado por el backend, pero `devUser` se usa acá
+    // para filtrar "mis drafts", así que debe ser el usuario real — no un switch.
+    setDev(useSessionStore.getState().user.id);
+    load().catch(() => pushToast('No se pudieron cargar los changesets', 'err'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const myDrafts = changesets.filter((c) => c.owner === devUser && c.status === 'draft');
   const active = changesets.find((c) => c.id === activeId) || null;
 
   const onCreate = async () => {
-    const title = prompt('Título del changeset (ej. "alta dominio tasa"):');
-    if (!title?.trim()) return;
-    try { await create(title.trim()); pushToast('Changeset creado — estás en modo draft'); }
-    catch { pushToast('No se pudo crear el changeset', 'err'); }
+    try {
+      const title = await promptDialog({
+        title: 'Nuevo changeset',
+        label: 'Título',
+        placeholder: 'ej. "alta dominio tasa"',
+        confirmLabel: 'Crear', cancelLabel: 'Cancelar',
+        action: async (v) => { if (v.trim()) await create(v.trim()); },
+      });
+      if (title?.trim()) pushToast('Changeset creado — estás en modo draft');
+    } catch { pushToast('No se pudo crear el changeset', 'err'); }
   };
   const onPublish = async () => {
     if (!activeId) return;
-    if (!confirm('¿Publicar este changeset para revisión?')) return;
-    try { await submit(activeId); pushToast('Publicado — pendiente de aprobación'); }
-    catch { pushToast('No se pudo publicar', 'err'); }
+    try {
+      const ok = await confirmDialog({
+        title: 'Publicar changeset',
+        message: 'Se enviará este changeset a revisión.',
+        confirmLabel: 'Publicar', cancelLabel: 'Cancelar',
+        action: () => submit(activeId),
+      });
+      if (ok) pushToast('Publicado — pendiente de aprobación');
+    } catch { pushToast('No se pudo publicar', 'err'); }
   };
 
   return (
     <div className="rd-card" style={{ padding: 10, marginBottom: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-      <span className="rd-small" style={{ color: 'var(--muted)' }}><Icon name="bolt" size={12} /> Usuario (dev)</span>
-      <select className="rd-input" style={{ width: 110 }} value={devUser} onChange={(e) => { setDev(e.target.value); setActive(null); load(); }}>
-        {DEV_USERS.map((u) => <option key={u} value={u}>{u}</option>)}
-      </select>
-
-      <span style={{ width: 1, height: 22, background: 'var(--border)' }} />
-
       <span className="rd-small" style={{ color: 'var(--muted)' }}>Changeset</span>
       <select className="rd-input" style={{ minWidth: 200 }} value={activeId ?? ''} onChange={(e) => setActive(e.target.value || null)}>
         <option value="">— Publicado (read-only) —</option>

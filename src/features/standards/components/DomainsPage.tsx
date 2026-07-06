@@ -1,0 +1,194 @@
+import { useEffect, useMemo, useState } from 'react';
+import { Boxes, Pencil, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { toast } from 'sonner';
+import type { StandardsSnapshot, SnapshotDomain } from '../standards.service';
+import { applyStandards } from '../standards.service';
+import { getDomainImpact, type DomainImpact } from '@/services/naming.service';
+
+type Mode = 'view' | 'edit' | 'create';
+
+export default function DomainsPage({ snapshot, canEdit, onApplied }: {
+  snapshot: StandardsSnapshot;
+  canEdit: boolean;
+  onApplied: () => void;
+}) {
+  const domains = snapshot.domains;
+  const [selId, setSelId] = useState<string | null>(domains[0]?.id ?? null);
+  const [mode, setMode] = useState<Mode>('view');
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<null | 'apply' | 'delete'>(null);
+  const [impact, setImpact] = useState<DomainImpact | null>(null);
+  // Tras crear un dominio, el id lo genera el backend; guardamos el nombre para
+  // seleccionarlo cuando la recarga lo traiga (si no, selId quedaba en '__new__').
+  const [pendingName, setPendingName] = useState<string | null>(null);
+
+  const selected = useMemo(() => domains.find((d) => d.id === selId) ?? null, [domains, selId]);
+
+  useEffect(() => {
+    if (!pendingName) return;
+    const d = domains.find((x) => x.name === pendingName);
+    if (d) { setSelId(d.id); setPendingName(null); }
+  }, [domains, pendingName]);
+  const [form, setForm] = useState<SnapshotDomain>({ id: '', name: '', defaultDataType: '', namingTerm: '', description: '' });
+
+  useEffect(() => {
+    setMode('view'); setConfirm(null); setImpact(null);
+    if (selected) setForm({ ...selected });
+    if (selId && selId !== '__new__') getDomainImpact(selId).then(setImpact).catch(() => setImpact(null));
+  }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const filtered = useMemo(() => {
+    const n = q.trim().toLowerCase();
+    return !n ? domains : domains.filter((d) => d.name.toLowerCase().includes(n));
+  }, [domains, q]);
+
+  const startCreate = () => { setSelId('__new__'); setForm({ id: '', name: '', defaultDataType: '', namingTerm: '', description: '' }); setMode('create'); setImpact(null); };
+  const startEdit = () => { if (selected) { setForm({ ...selected }); setMode('edit'); } };
+  const cancel = () => { setMode('view'); setConfirm(null); if (selected) setForm({ ...selected }); };
+
+  const typeChanged = mode === 'edit' && selected && selected.defaultDataType !== form.defaultDataType;
+
+  const apply = async () => {
+    setBusy(true);
+    try {
+      const creating = mode === 'create';
+      const v = await applyStandards({
+        kind: 'domain',
+        domainsUpsert: [{ id: creating ? undefined : form.id, name: form.name.trim(), defaultDataType: form.defaultDataType.trim(), namingTerm: form.namingTerm || undefined, description: form.description || undefined }],
+      });
+      toast.success(`Applied · ${v.label} · ${v.impact.columns} columns re-typed`);
+      if (creating) setPendingName(form.name.trim());   // seleccionarlo al recargar
+      setMode('view'); setConfirm(null); onApplied();
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo aplicar'); } finally { setBusy(false); }
+  };
+  const del = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      const v = await applyStandards({ kind: 'domain', domainsDelete: [selected.id] });
+      toast.success(`Domain deleted · ${v.label}`);
+      setConfirm(null); setSelId(domains.find((d) => d.id !== selected.id)?.id ?? null); onApplied();
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo eliminar'); } finally { setBusy(false); }
+  };
+
+  const editable = mode === 'edit' || mode === 'create';
+
+  return (
+    <div style={{ display: 'flex', minHeight: 0, flex: 1 }}>
+      {/* list */}
+      <div style={{ width: 308, flex: 'none', borderRight: '1px solid #EAEDF2', background: '#FAFBFC', padding: '18px 16px', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#9AA3B2' }}>Domains · {domains.length}</span>
+          {canEdit && <button onClick={startCreate} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, height: 28, padding: '0 9px', border: '1px solid #D4E0FF', background: '#fff', color: '#2E5BFF', borderRadius: 7, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}><Plus size={12} />New</button>}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 11px', background: '#fff', border: '1px solid #E6EAF0', borderRadius: 9, marginBottom: 12 }}>
+          <Search size={14} color="#9AA3B2" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search domains…" style={{ flex: 1, border: 0, outline: 'none', fontSize: 12.5, background: 'transparent' }} />
+        </div>
+        {mode === 'create' && <div style={{ ...domCard(true), marginBottom: 8 }}><Boxes size={15} color="#8B5CF6" /><span style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A', marginLeft: 8 }}>{form.name || 'Nuevo dominio'}</span></div>}
+        {filtered.map((d) => (
+          <div key={d.id} onClick={() => { if (!editable) setSelId(d.id); }} style={{ ...domCard(d.id === selId && mode !== 'create'), marginBottom: 8, cursor: editable ? 'default' : 'pointer' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Boxes size={15} color="#8B5CF6" /><span style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>{d.name}</span></div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8 }}><span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '2px 7px' }}>{d.defaultDataType}</span></div>
+          </div>
+        ))}
+      </div>
+
+      {/* detail */}
+      <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '26px 30px', background: '#FBFCFD' }}>
+        {!selected && mode !== 'create' ? <div style={{ fontSize: 13, color: '#9AA3B2' }}>Elegí un dominio.</div> : (
+          <div style={{ maxWidth: 720 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#1A2B4A' }}>{mode === 'create' ? 'New domain' : mode === 'edit' ? 'Edit domain' : form.name}</h1>
+              {editable && <span style={{ fontSize: 11.5, fontWeight: 600, color: '#2E5BFF', background: '#EAF0FF', border: '1px solid #D4E0FF', borderRadius: 999, padding: '3px 10px' }}>Edit mode</span>}
+            </div>
+            {!editable && form.description && <p style={{ margin: '0 0 22px', fontSize: 13, color: '#6B7689', lineHeight: 1.5 }}>{form.description}</p>}
+
+            <label style={lbl}>Domain name</label>
+            {editable ? <input className="rd-input" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="p.ej. Importe" />
+              : <div style={fieldRO}>{form.name}</div>}
+
+            <label style={lbl}>Default data type</label>
+            {editable ? <input className="rd-input" style={{ ...field, fontFamily: 'var(--mono, monospace)' }} value={form.defaultDataType} onChange={(e) => setForm({ ...form, defaultDataType: e.target.value })} placeholder="DECIMAL(18,2)" />
+              : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.defaultDataType}</div>}
+            {editable && <div style={{ fontSize: 12, color: '#8A93A5', margin: '-10px 0 18px' }}>Al aplicar, las columnas de este dominio SIN override se re-tipan.</div>}
+
+            <label style={lbl}>Description</label>
+            {editable ? <textarea className="rd-input" style={{ ...field, minHeight: 64, resize: 'vertical' }} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+              : <div style={{ ...fieldRO, minHeight: 44 }}>{form.description || '—'}</div>}
+
+            {/* impact */}
+            {impact && mode !== 'create' && (
+              <div style={{ background: 'linear-gradient(180deg,#F4F7FF,#FAFBFF)', border: '1px solid #D9E3FB', borderRadius: 12, padding: '15px 17px', margin: '4px 0 18px' }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>Usado por <strong style={{ color: '#2E5BFF' }}>{impact.columnsUsing} columnas</strong>.</div>
+                <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
+                  <span style={{ fontSize: 13, color: '#0E8C6A', fontWeight: 600 }}>● {impact.willUpdate} se actualizan</span>
+                  <span style={{ fontSize: 13, color: '#9A6B00', fontWeight: 600 }}>● {impact.overridden} con override (skip)</span>
+                </div>
+              </div>
+            )}
+
+            {/* actions */}
+            {canEdit && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, paddingTop: 18, borderTop: '1px solid #EAEDF2' }}>
+                <span style={{ flex: 1 }} />
+                {mode === 'view' && <>
+                  <button onClick={() => setConfirm('delete')} style={{ ...btnGhost, color: '#D6455D', borderColor: '#F1D4D9' }}><Trash2 size={14} />Delete</button>
+                  <button onClick={startEdit} style={btnPrimary}><Pencil size={14} />Edit domain</button>
+                </>}
+                {editable && <>
+                  <button onClick={cancel} style={btnGhost}>Cancel</button>
+                  <button onClick={() => setConfirm('apply')} disabled={!form.name.trim() || !form.defaultDataType.trim()} style={{ ...btnPrimary, opacity: form.name.trim() && form.defaultDataType.trim() ? 1 : 0.5 }}><UploadCloud size={14} />{mode === 'create' ? 'Create domain' : 'Apply changes'}</button>
+                </>}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* confirm apply (15e) */}
+      {confirm === 'apply' && (
+        <div style={backdrop} onClick={() => !busy && setConfirm(null)}>
+          <div style={dialog} onClick={(e) => e.stopPropagation()}>
+            <div style={dlgHead}><div style={{ ...dlgIcon, background: '#F3EEFF', color: '#8B5CF6' }}><Boxes size={21} /></div>
+              <div style={{ flex: 1 }}><h2 style={dlgTitle}>{mode === 'create' ? `Create domain ${form.name}` : `Apply changes · ${form.name}`}</h2><p style={dlgSub}>{typeChanged ? 'Cascada el nuevo tipo a las columnas sin override.' : 'Nada se aplica hasta confirmar.'}</p></div>
+              <button onClick={() => setConfirm(null)} style={iconClose}><X size={13} /></button>
+            </div>
+            <div style={{ padding: '18px 24px' }}>
+              {typeChanged && selected && <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'var(--mono, monospace)', fontSize: 13, marginBottom: 12 }}><span style={{ color: '#8A93A5', textDecoration: 'line-through' }}>{selected.defaultDataType}</span> → <span style={{ fontWeight: 600, color: '#1A2B4A' }}>{form.defaultDataType}</span></div>}
+              {impact && typeChanged && <div style={{ background: 'linear-gradient(180deg,#F4F7FF,#FAFBFF)', border: '1px solid #D9E3FB', borderRadius: 11, padding: '12px 15px', fontSize: 13, color: '#1A2B4A' }}><strong style={{ color: '#2E5BFF' }}>{impact.willUpdate}</strong> columnas se re-tipan · {impact.overridden} con override se saltan.</div>}
+              {mode === 'create' && <div style={{ fontSize: 13, color: '#56607A' }}>Se crea el dominio <strong>{form.name}</strong> con tipo <span style={{ fontFamily: 'var(--mono, monospace)' }}>{form.defaultDataType}</span>.</div>}
+            </div>
+            <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}><span style={{ flex: 1 }} /><button onClick={() => setConfirm(null)} disabled={busy} style={btnGhost}>Cancel</button><button onClick={apply} disabled={busy} style={btnPrimary}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Applying…' : mode === 'create' ? 'Create' : 'Apply cascade'}</button></div>
+          </div>
+        </div>
+      )}
+
+      {/* confirm delete */}
+      {confirm === 'delete' && selected && (
+        <div style={backdrop} onClick={() => !busy && setConfirm(null)}>
+          <div style={{ ...dialog, width: 480 }} onClick={(e) => e.stopPropagation()}>
+            <div style={dlgHead}><div style={{ ...dlgIcon, background: '#FBEEF0', color: '#D6455D' }}><Trash2 size={20} /></div>
+              <div style={{ flex: 1 }}><h2 style={dlgTitle}>Delete domain {selected.name}?</h2><p style={dlgSub}>Las columnas conservan su tipo actual pero pierden el vínculo al dominio.</p></div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}><span style={{ flex: 1 }} /><button onClick={() => setConfirm(null)} disabled={busy} style={btnGhost}>Cancel</button><button onClick={del} disabled={busy} style={{ ...btnPrimary, background: '#D6455D' }}>{busy ? <span className="rd-spin" /> : <Trash2 size={15} />}Delete</button></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const domCard = (active: boolean): React.CSSProperties => ({ background: '#fff', border: `${active ? 1.5 : 1}px solid ${active ? '#2E5BFF' : '#E6EAF0'}`, borderRadius: 11, padding: '11px 12px', boxShadow: active ? '0 0 0 3px rgba(46,91,255,0.1)' : 'none' });
+const lbl: React.CSSProperties = { display: 'block', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2', marginBottom: 7 };
+const field: React.CSSProperties = { width: '100%', height: 44, marginBottom: 18, fontSize: 14 };
+const fieldRO: React.CSSProperties = { display: 'flex', alignItems: 'center', minHeight: 44, padding: '0 14px', background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, fontSize: 14, color: '#1A2B4A', marginBottom: 18 };
+const backdrop: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(20,28,45,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
+const dialog: React.CSSProperties = { width: 560, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' };
+const dlgHead: React.CSSProperties = { display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' };
+const dlgIcon: React.CSSProperties = { width: 42, height: 42, borderRadius: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
+const dlgTitle: React.CSSProperties = { margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' };
+const dlgSub: React.CSSProperties = { margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5', lineHeight: 1.5 };
+const iconClose: React.CSSProperties = { width: 30, height: 30, borderRadius: 8, border: '1px solid #E6EAF0', background: '#fff', color: '#8A93A5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const btnGhost: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 7, height: 40, padding: '0 18px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
+const btnPrimary: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };

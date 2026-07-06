@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
   useNodesState, useEdgesState, type Node, type Edge, type Connection,
@@ -27,7 +27,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const setHoverNode = useModelerStore((s) => s.setHoverNode);
   const setFlow = useModelerStore((s) => s.setFlow);
   const activeChangeset = useChangesetStore((s) => s.activeId);
-  // Viewer-lock: en modo solo-lectura, clicar una tabla NO abre el PropertiesPanel.
+  // Viewer-lock: en read-only se puede VER (click abre PropertiesPanel en modo
+  // reader) pero no mutar: sin drag de nodos y sin conexiones; las escrituras
+  // del panel ya están gateadas por el changeset activo (canEdit).
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   // Estado interno de React Flow: con `onNodesChange` los nodos son arrastrables.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -80,14 +82,56 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     });
   }, [drawings, setNodes]);
 
+  // Extremo donde EMPEZÓ el gesto de conexión. React Flow normaliza la conexión
+  // (source = siempre el extremo con handle `source`), así que si el usuario
+  // arrancó desde un handle `target` (lado izquierdo), la dirección normalizada
+  // queda invertida respecto del gesto. Guardamos el inicio para reorientar.
+  const connectStart = useRef<{ nodeId: string | null; handleId: string | null } | null>(null);
+
   const onConnect = useCallback((conn: Connection) => {
+    // En modo visor puede haber changeset activo (se está VIENDO un request):
+    // nunca habilita mutaciones.
+    if (readonly) { pushToast('El modelo está en solo lectura: no se pueden crear relaciones', 'err'); return; }
     // El changeset activo viene del Open model (modo `editing`) vía el bridge
     // session → changeset. Si falta, es read-only o una sesión inconsistente.
     if (!activeChangeset) { pushToast('Abrí el modelo en modo edición para crear relaciones', 'err'); return; }
+    // Guard defensivo: sin la herramienta "Dibujar relación" armada, los handles
+    // no son conectables (TableNode) — si algo llega igual, no crear nada.
+    if (!useModelerStore.getState().relPreset) { pushToast('Armá "Dibujar relación" en el toolbar para crear relaciones', 'err'); return; }
     if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return;
-    void createRelationship({ source: conn.source, sourceHandle: conn.sourceHandle, target: conn.target, targetHandle: conn.targetHandle })
-      .catch(() => pushToast('No se pudo crear la relación', 'err'));
-  }, [activeChangeset, createRelationship, pushToast]);
+    // La dirección la define el GESTO: origen = donde se empezó a arrastrar,
+    // destino = donde se soltó. Si el inicio quedó normalizado como `target`,
+    // invertimos los extremos antes de persistir.
+    const start = connectStart.current;
+    const startedAtTarget = !!start && conn.target === start.nodeId && conn.targetHandle === start.handleId;
+    const rel = startedAtTarget
+      ? { source: conn.target, sourceHandle: conn.targetHandle, target: conn.source, targetHandle: conn.sourceHandle }
+      : { source: conn.source, sourceHandle: conn.sourceHandle, target: conn.target, targetHandle: conn.targetHandle };
+
+    // Edge FANTASMA optimista: el wire aparece al soltar (semitransparente) y el
+    // reload del diagrama lo reemplaza por el real al persistir. Usa los extremos
+    // tal como los dio React Flow (handles válidos) y mapea las cardinalidades a
+    // esa orientación para que los marcadores crow's-foot caigan del lado correcto.
+    const preset = useModelerStore.getState().relPreset;
+    const ghostId = `pending-${crypto.randomUUID()}`;
+    setEdges((eds) => [...eds, {
+      id: ghostId,
+      source: conn.source, target: conn.target,
+      sourceHandle: conn.sourceHandle, targetHandle: conn.targetHandle,
+      type: 'crowfoot',
+      data: {
+        sourceCardinality: startedAtTarget ? (preset?.target ?? 'many') : (preset?.source ?? 'one'),
+        targetCardinality: startedAtTarget ? (preset?.source ?? 'one') : (preset?.target ?? 'many'),
+        identifying: preset?.identifying ?? false,
+        pending: true,
+      },
+    }]);
+    void createRelationship(rel).catch((err: unknown) => {
+      setEdges((eds) => eds.filter((e) => e.id !== ghostId));
+      // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador).
+      pushToast(err instanceof Error && err.message ? err.message : 'No se pudo crear la relación', 'err');
+    });
+  }, [readonly, activeChangeset, createRelationship, setEdges, pushToast]);
 
   // Expone la instancia de React Flow al store (la usa el toolbar: focusTable / Save).
   useEffect(() => () => setFlow(null), [setFlow]);
@@ -101,8 +145,10 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectStart={(_e, params) => { connectStart.current = { nodeId: params.nodeId, handleId: params.handleId }; }}
+        onConnectEnd={() => { connectStart.current = null; }}
         onInit={setFlow}
-        onNodeClick={(_e, node) => { if (!readonly && node.type !== 'shape') setSelectedTable(node.id); }}
+        onNodeClick={(_e, node) => { if (node.type !== 'shape') setSelectedTable(node.id); }}
         onEdgeClick={(_e, edge) => setSelectedEdge(edge.id)}
         onEdgeDoubleClick={(_e, edge) => setEditRelId(edge.id)}
         onPaneClick={() => { setSelectedTable(null); setSelectedEdge(null); }}
@@ -112,6 +158,15 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         onNodeMouseLeave={() => setHoverNode(null)}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
+        // Virtualización del viewport: con 100 tablas × ~30 columnas hay ~3.000
+        // filas y ~6.000 handles — sólo montan DOM los nodos visibles.
+        onlyRenderVisibleElements
+        nodesDraggable={!readonly}
+        // Sin delete por teclado: el default de React Flow (Backspace) borraba
+        // tablas/wires SÓLO en pantalla (sin persistir, el reload los restaura)
+        // — engañoso en edición y una violación del viewer-lock en readonly.
+        // Los borrados reales van por la UI explícita (panel / popup de relación).
+        deleteKeyCode={null}
         fitView
         onNodeDragStop={(_e, node) => {
           if (readonly) return; // viewer-lock: no persistir movimientos

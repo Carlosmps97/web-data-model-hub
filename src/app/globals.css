@@ -11,14 +11,8 @@
 @import '../styles/home.css';
 @import '../styles/review.css';
 @import '../styles/reporting.css';
-@import '../features/diagram/diagram.css';
-@import '../features/editor/editor.css';
-@import '../features/table-editor/table-editor.css';
-@import '../features/views/views.css';
-@import '../features/excel-import/excel-import.css';
-@import '../features/model-center/model-center.css';
-@import '../features/metadata/metadata.css';
-@import '../features/help/help.css';
+@import '../features/auth/auth.css';
+@import '../features/governance/governance.css';
 @import '../features/modeler/modeler.css';
 
 /* Fuentes — Geist (UI) + Geist Mono (data/SQL), self-hosted vía @fontsource-variable.
@@ -26,7 +20,4 @@
 :root {
   --font-geist: 'Geist Variable', system-ui, sans-serif;
   --font-geist-mono: 'Geist Mono Variable', ui-monospace, monospace;
-  /* Aliases legacy (por si quedara alguna referencia suelta a las fuentes viejas). */
-  --font-manrope: var(--font-geist);
-  --font-jbmono: var(--font-geist-mono);
 }

@@ -3,6 +3,7 @@
 // del overlay activo).
 import { apiGet, apiPost, apiPut, apiDelete, apiFetch } from '@/services/http';
 import * as gov from '@/features/governance/services/governance.service';
+import { useChangesetStore } from '@/store/useChangesetStore';
 import type { CanonicalTable, CanonicalColumn } from '@/features/governance/services/governance.service';
 import type { Relationship } from '@/features/governance/services/governance.service';
 export type { Relationship };
@@ -52,13 +53,12 @@ export const setSubjectAreaDrawings = (saId: string, drawings: Drawing[]) => api
 export const listRelationships = () => gov.listRelationships();
 
 // ── Armado del diagrama (changeset-aware) ──
+// UNA request: el backend arma el diagrama con queries batched ($in) y aplica
+// el overlay del changeset server-side. El armado viejo en el cliente (pool
+// completo de tablas + un fetch POR tabla + todas las relaciones) tardaba
+// segundos con 100 tablas y movía el catálogo entero (15k) por apertura.
 export async function loadDiagram(saId: string): Promise<Diagram> {
-  const sa = await getSubjectArea(saId);
-  const ids = new Set(sa.tableIds);
-  const allTables = await gov.listTables();
-  const tables = allTables.filter((t) => ids.has(t.id));
-  const columns: CanonicalColumn[] = [];
-  for (const t of tables) columns.push(...(await gov.listColumns(t.id)));
-  const rels = (await gov.listRelationships()).filter((r) => ids.has(r.sourceTableId) && ids.has(r.targetTableId));
-  return { subjectArea: sa, tables, columns, relationships: rels };
+  const cs = useChangesetStore.getState().activeId;
+  const qs = cs ? `?changesetId=${encodeURIComponent(cs)}` : '';
+  return apiGet<Diagram>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}/diagram${qs}`);
 }

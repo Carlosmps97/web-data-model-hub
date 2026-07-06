@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { LogOut } from 'lucide-react';
 import Avatar from '@/components/ui/Avatar';
-import { useSessionStore } from '@/store/useSessionStore';
+import { useAuthStore } from '@/store/useAuthStore';
 
 /**
- * UserMenu — avatar trigger in the TopNav that opens a dropdown to switch the
- * **simulated** current user (sim auth). Reads/writes `useSessionStore`, which
- * propagates the `X-Dev-User` header. Closes on outside click / ESC.
+ * UserMenu — avatar en el TopNav que abre un dropdown con la identidad REAL de
+ * la sesión (auth propia) + Cerrar sesión. Cierra al click afuera / ESC.
  */
 export default function UserMenu() {
-  const user = useSessionStore((s) => s.user);
-  const users = useSessionStore((s) => s.users);
-  const setUser = useSessionStore((s) => s.setUser);
+  const navigate = useNavigate();
+  const user = useAuthStore((s) => s.user);
+  const doLogout = useAuthStore((s) => s.logout);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
 
@@ -24,6 +24,15 @@ export default function UserMenu() {
     return () => { document.removeEventListener('mousedown', onDoc); document.removeEventListener('keydown', onKey); };
   }, [open]);
 
+  if (!user) return null;
+  const initials = user.initials ?? (user.name ?? user.username).slice(0, 2).toUpperCase();
+
+  const onLogout = async () => {
+    setOpen(false);
+    await doLogout();
+    navigate('/login', { replace: true });
+  };
+
   return (
     <div className="dmh-usermenu" ref={ref}>
       <button
@@ -32,33 +41,27 @@ export default function UserMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Current user: ${user.name}. Switch user.`}
-        title={user.name}
+        aria-label={`Usuario: ${user.name ?? user.username}`}
+        title={user.name ?? user.username}
       >
-        <Avatar initials={user.initials} size={30} />
+        <Avatar initials={initials} size={30} />
       </button>
 
       {open && (
         <div className="dmh-usermenu-pop" role="menu">
-          <div className="dmh-usermenu-label">Switch user (simulated)</div>
-          {users.map((u) => {
-            const active = u.id === user.id;
-            return (
-              <button
-                key={u.id}
-                type="button"
-                role="menuitemradio"
-                aria-checked={active}
-                className={`dmh-usermenu-item${active ? ' is-active' : ''}`}
-                onClick={() => { setUser(u.id); setOpen(false); }}
-              >
-                <Avatar initials={u.initials} size={26} />
-                <span className="dmh-usermenu-item-name">{u.name}</span>
-                <span className="dmh-usermenu-item-id">{u.id}</span>
-                <span className="dmh-usermenu-check"><Check size={15} strokeWidth={2} aria-hidden /></span>
-              </button>
-            );
-          })}
+          <div className="dmh-usermenu-me">
+            <Avatar initials={initials} size={34} />
+            <div style={{ minWidth: 0 }}>
+              <div className="dmh-usermenu-me-name">{user.name ?? user.username}</div>
+              <div className="dmh-usermenu-me-sub">{user.email ?? user.username}</div>
+              {user.roleName && <span className="dmh-usermenu-role">{user.roleName}</span>}
+            </div>
+          </div>
+          <div className="dmh-usermenu-sep" />
+          <button type="button" role="menuitem" className="dmh-usermenu-item" onClick={onLogout}>
+            <LogOut size={16} strokeWidth={1.8} aria-hidden />
+            <span className="dmh-usermenu-item-name">Cerrar sesión</span>
+          </button>
         </div>
       )}
     </div>

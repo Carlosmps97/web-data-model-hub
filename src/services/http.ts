@@ -18,9 +18,19 @@
 
 import type { ApiResponse } from '@/types/api';
 
-// Usuario dev activo (solo afecta AUTH_MODE=local en el backend; ignorado en Databricks).
+// Usuario dev activo (fallback del seam local; el backend prefiere el token).
 let _devUser = '';
 export function setDevUser(u: string): void { _devUser = u; }
+
+// Token de sesión (auth propia). Se envía como `Authorization: Bearer` en TODA
+// llamada. Lo setea el store de auth al login/restore y lo limpia al logout.
+let _token = '';
+export function setAuthToken(t: string): void { _token = t; }
+
+// Callback global de 401 (sesión inválida/expirada): el store de auth registra
+// aquí su "cerrar sesión + ir a /login", sin acoplar http.ts al router.
+let _onUnauthorized: (() => void) | null = null;
+export function setOnUnauthorized(cb: (() => void) | null): void { _onUnauthorized = cb; }
 
 /** Error tipado que propagan todos los helpers cuando el backend
  *  devuelve un `success: false` o cuando el fetch falla. */
@@ -50,8 +60,16 @@ interface RequestOptions {
  *   const projects = await apiFetch<Project[]>('/api/projects');
  *   const project  = await apiFetch<Project>('/api/projects', { method: 'POST', body: { name } });
  */
+/** Timeout por defecto de toda llamada API: sin él, un backend colgado deja
+ *  la UI en spinners eternos (fetch no tiene timeout propio). */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, signal } = opts;
+
+  // Combina el signal del caller (cleanup de useEffect) con el timeout global.
+  const timeout = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
   // The Next.js frontend (`:3000`) and the FastAPI backend (`:8000`) live on
   // different origins. Without `credentials: 'include'` the browser neither
@@ -59,9 +77,13 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
   // requests, which would silently break every authenticated call.
   const init: RequestInit = {
     method,
-    signal,
+    signal: combined,
     credentials: 'include',
-    headers: { ...(_devUser ? { 'X-Dev-User': _devUser } : {}), ...headers },
+    headers: {
+      ...(_token ? { Authorization: `Bearer ${_token}` } : {}),
+      ...(_devUser ? { 'X-Dev-User': _devUser } : {}),
+      ...headers,
+    },
   };
 
   if (body !== undefined) {
@@ -73,9 +95,16 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
   try {
     response = await fetch(url, init);
   } catch (err) {
-    // Red caída, aborto, DNS fail, etc.
+    // Red caída, timeout, aborto, DNS fail, etc.
+    if (timeout.aborted && !(signal?.aborted)) {
+      throw new ApiError(`El servidor no respondió en ${DEFAULT_TIMEOUT_MS / 1000}s — reintentá en un momento.`, 0);
+    }
     throw new ApiError(err instanceof Error ? err.message : 'Network error', 0);
   }
+
+  // Sesión inválida/expirada: dispara el handler global (logout + /login). Se
+  // sigue lanzando ApiError para que el caller no continúe con datos vacíos.
+  if (response.status === 401 && _onUnauthorized) _onUnauthorized();
 
   let json: ApiResponse<T> | null = null;
   try {
@@ -85,6 +114,13 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
   }
 
   if (!json || typeof json.success !== 'boolean') {
+    // FastAPI HTTPException responde `{detail}` (sin envelope): propaga el
+    // mensaje real (p.ej. 409 "versión ya no está en borrador") en vez de un
+    // genérico ilegible.
+    const detail = (json as { detail?: unknown } | null)?.detail;
+    if (!response.ok && typeof detail === 'string' && detail) {
+      throw new ApiError(detail, response.status);
+    }
     throw new ApiError(`Unexpected response shape (HTTP ${response.status})`, response.status);
   }
 

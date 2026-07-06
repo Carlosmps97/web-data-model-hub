@@ -4,9 +4,11 @@ const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const CS = `${API_BASE}/api/changesets`;
 
 export interface ChangesetDiff { added: string[]; modified: string[]; removed: string[]; }
+// Cabecera del changeset. Los cambios en sí viven en la colección
+// `changeset_changes` del backend (un doc por cambio, sin límite de 2MB/doc) y
+// NUNCA viajan crudos al cliente — se consumen vía /effective y /diff.
 export interface Changeset {
   id: string; title: string; owner: string; status: string;
-  changes: Record<string, Record<string, { op: string; payload?: Record<string, unknown> }>>;
   diff?: Record<string, ChangesetDiff>;
   submittedAt?: string; reviewedBy?: string; reviewedAt?: string; reviewNote?: string;
 }
@@ -16,7 +18,19 @@ export const getChangeset = (id: string) => apiGet<Changeset>(`${CS}/${encodeURI
 export const createChangeset = (title: string) => apiPost<Changeset>(CS, { title });
 export const recordChange = (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) =>
   apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
-export const effective = <T>(id: string, collection: string) => apiGet<T[]>(`${CS}/${encodeURIComponent(id)}/effective/${collection}`);
+/** Estado efectivo de una colección. `opts.tableId`/`opts.ids` acotan la
+ *  respuesta a un slice server-side — sin filtro, canonical_columns a escala
+ *  (300k docs) mueve la colección completa por request. `opts.q`/`opts.limit`:
+ *  búsqueda server-side por nombre (modales de catálogo). */
+export const effective = <T>(id: string, collection: string, opts?: { tableId?: string; ids?: string[]; q?: string; limit?: number }) => {
+  const params = new URLSearchParams();
+  if (opts?.tableId) params.set('tableId', opts.tableId);
+  if (opts?.ids?.length) params.set('ids', opts.ids.join(','));
+  if (opts?.q) params.set('q', opts.q);
+  if (opts?.limit != null) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return apiGet<T[]>(`${CS}/${encodeURIComponent(id)}/effective/${collection}${qs ? `?${qs}` : ''}`);
+};
 export const submitChangeset = (id: string) => apiPost<Changeset>(`${CS}/${encodeURIComponent(id)}/submit`);
 export const approveChangeset = (id: string) => apiPost<Changeset>(`${CS}/${encodeURIComponent(id)}/approve`);
 export const rejectChangeset = (id: string, note?: string) => apiPost<Changeset>(`${CS}/${encodeURIComponent(id)}/reject`, { note });

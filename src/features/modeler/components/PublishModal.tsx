@@ -22,7 +22,8 @@ import { ArrowUpToLine, Check, Info } from 'lucide-react';
 
 import { Avatar, Button, Dialog } from '@/components/ui';
 import { useSessionStore } from '@/store/useSessionStore';
-import { listUsers, submit } from '@/services/versioning.service';
+import { useModelerStore } from '@/store/useModelerStore';
+import { getPublished, listUsers, submit } from '@/services/versioning.service';
 import type { SimUserDto } from '@/types/versioning';
 
 export interface PublishModalProps {
@@ -90,7 +91,14 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
         description: description.trim() || undefined,
         reviewers,
       });
-      toast.success('Request enviado');
+      // Publicado = checkpoint: ya no hay cambios "sin guardar" en la sesión.
+      useModelerStore.getState().clearDirty();
+      // La working copy salió de `draft` (submitted): el backend rechaza nuevas
+      // ediciones (409). Transiciona la sesión a SOLO LECTURA (producción) para
+      // no dejar al usuario "editando" una versión bloqueada en silencio.
+      const pub = await getPublished().catch(() => null);
+      useSessionStore.getState().openModel({ mode: 'readonly', versionLabel: pub?.versionLabel ?? null });
+      toast.success('Request enviado — el canvas quedó en solo lectura (producción)');
       onClose();
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'No se pudo enviar el request.');
@@ -119,7 +127,7 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
       footer={footer}
       width={560}
       backdrop="canvas"
-      canvasTop={116}
+      canvasTop={136}
     >
       <div className="ppub">
         {!hasChangeset && (

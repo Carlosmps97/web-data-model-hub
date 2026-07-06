@@ -18,7 +18,14 @@ export async function elkLayout(nodes: Node[], edges: Edge[]): Promise<Record<st
   const graph = {
     id: 'root',
     layoutOptions: opts,
-    children: nodes.map((n) => ({ id: n.id, width: NODE_W, height: NODE_H })),
+    // Usa el tamaño MEDIDO del nodo cuando está disponible (una tabla de 30
+    // columnas mide ~700px de alto): con el tamaño fijo 230×150 el layered
+    // superponía tablas grandes.
+    children: nodes.map((n) => ({
+      id: n.id,
+      width: n.measured?.width ?? (typeof n.width === 'number' ? n.width : NODE_W),
+      height: n.measured?.height ?? (typeof n.height === 'number' ? n.height : NODE_H),
+    })),
     edges: edges.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
   };
   const res = await elk.layout(graph);

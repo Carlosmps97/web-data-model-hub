@@ -3,6 +3,10 @@ import Icon from '@/components/ui/Icon';
 import * as gov from '../services/governance.service';
 import type { CanonicalTable, CanonicalColumn, ParentDomain } from '../services/governance.service';
 
+// Página server-side: el backend matchea por nombre y devuelve las primeras 50
+// — el catálogo a 15k tablas no se baja completo para filtrar en el cliente.
+const PAGE = 50;
+
 export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: string, k?: 'err') => void; canEdit: boolean }) {
   const [tables, setTables] = useState<CanonicalTable[]>([]);
   const [domains, setDomains] = useState<ParentDomain[]>([]);
@@ -11,12 +15,26 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
   const [expanded, setExpanded] = useState<string | null>(null);
   const [columns, setColumns] = useState<CanonicalColumn[]>([]);
   const [cForm, setCForm] = useState({ logicalName: '', parentDomainId: '', dataType: '', isPrimaryKey: false });
+  const [q, setQ] = useState('');
+  const [reloadKey, setReloadKey] = useState(0); // fuerza re-búsqueda tras crear tabla
 
-  const load = async () => {
-    try { const [t, d] = await Promise.all([gov.listTables(), gov.listDomains()]); setTables(t); setDomains(d); }
-    catch { pushToast('No se pudo cargar el catálogo', 'err'); }
-  };
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    gov.listDomains().then(setDomains).catch(() => pushToast('No se pudieron cargar los dominios', 'err'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Búsqueda server-side con debounce (300ms: el regex-scan en Cosmos cuesta
+  // RUs — no disparar por tecla); `alive` descarta respuestas fuera de orden.
+  useEffect(() => {
+    let alive = true;
+    const h = setTimeout(() => {
+      gov.searchTables(q.trim(), PAGE)
+        .then((t) => { if (alive) setTables(t); })
+        .catch(() => pushToast('No se pudo cargar el catálogo', 'err'));
+    }, q ? 300 : 0);
+    return () => { alive = false; clearTimeout(h); };
+  }, [q, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visible = tables;
 
   const saveTable = async () => {
     if (!tForm.logicalName.trim()) { pushToast('El nombre lógico es obligatorio', 'err'); return; }
@@ -24,7 +42,7 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
       const id = crypto.randomUUID();
       const physical = (await gov.physicalize(tForm.logicalName.trim())).physical;
       await gov.createTable({ id, logicalName: tForm.logicalName.trim(), physicalName: physical, schema: tForm.schema.trim() || undefined });
-      setOpenTable(false); setTForm({ logicalName: '', schema: '' }); await load(); pushToast('Tabla canónica creada (en draft)');
+      setOpenTable(false); setTForm({ logicalName: '', schema: '' }); setReloadKey((k) => k + 1); pushToast('Tabla canónica creada (en draft)');
     } catch { pushToast('No se pudo crear la tabla', 'err'); }
   };
   const toggle = async (t: CanonicalTable) => {
@@ -54,7 +72,7 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
     <div className="rd-card mc-panel">
       <div className="mc-cardhead">
         <span className="mc-cardlbl"><Icon name="grid" size={13} />Tablas canónicas</span>
-        <span className="mc-pill">{tables.length}</span>
+        <span className="mc-pill">{tables.length >= PAGE ? `${PAGE}+` : tables.length}</span>
         {canEdit && <button className="rd-btn rd-btn-secondary rd-btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setOpenTable(!openTable)}><Icon name="plus" size={13} sw={2.6} />Nueva tabla</button>}
       </div>
       {canEdit && openTable && (
@@ -68,8 +86,15 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
         </div>
       )}
       {!canEdit && <div className="rd-small" style={{ padding: '4px 2px', color: 'var(--muted)' }}>Vista publicada (read-only). Creá o seleccioná un changeset para editar.</div>}
+      <input
+        className="rd-input"
+        placeholder="Buscar tabla (físico o lógico)…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        style={{ width: '100%', margin: '6px 0' }}
+      />
       <div className="meta-list">
-        {tables.map((t) => (
+        {visible.map((t) => (
           <div key={t.id}>
             <div className="meta-item" style={{ cursor: 'pointer' }} onClick={() => toggle(t)}>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -103,6 +128,11 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
             )}
           </div>
         ))}
+        {tables.length >= PAGE && (
+          <div className="rd-small" style={{ padding: '8px 2px', color: 'var(--muted)' }}>
+            Mostrando las primeras {PAGE} coincidencias — refiná la búsqueda.
+          </div>
+        )}
         {tables.length === 0 && <div className="rd-small" style={{ padding: '8px 2px' }}>Sin tablas canónicas. Crea una (su nombre físico se deriva del diccionario).</div>}
       </div>
     </div>

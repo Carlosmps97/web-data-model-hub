@@ -279,8 +279,7 @@ export interface Canvas {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-// Canonical column data types. Aligned with the backend
-// `excel_import/type_normalizer.py::CANONICAL_TYPES`.
+// Canonical column data types (Databricks-flavored superset).
 export const COLUMN_DATA_TYPES = [
   'integer', 'bigint', 'smallint', 'tinyint',
   'float', 'double', 'real', 'decimal', 'numeric', 'money',

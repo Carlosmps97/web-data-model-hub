@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   EllipsisVertical, ChevronRight, ChevronDown, Folder as FolderIcon,
   FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useModelerStore, buildProjectTree } from '@/store/useModelerStore';
-import type { FolderNode, ProjectTree } from '@/store/useModelerStore';
-import type { Project, SubjectArea } from '../services/modeler.service';
+import { useSessionStore } from '@/store/useSessionStore';
+import type { FolderNode } from '@/store/useModelerStore';
+import type { Folder, Project, SubjectArea } from '../services/modeler.service';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Model Explorer — árbol jerárquico Projects → Folders (anidadas) → Canvas.
@@ -15,26 +16,29 @@ import type { Project, SubjectArea } from '../services/modeler.service';
      · folder:  New folder · New canvas · Rename · Delete
      · canvas:  Rename · Delete
    Crear/renombrar = input inline. Borrar = ConfirmDialog. Carpetas con chevron.
-   El store sólo tiene cargados folders/canvases del proyecto ACTIVO, por eso
-   sólo ese proyecto se expande; clicar otro lo selecciona (carga su árbol).
+
+   Navegación tipo file-tree: expandir/colapsar proyectos y carpetas es SÓLO
+   navegación (varios proyectos abiertos a la vez, árboles lazy-load al cache
+   `trees` del store) y NO toca el canvas abierto — el canvas sólo cambia al
+   clicar OTRO canvas (con spinner mientras carga el diagrama).
    ────────────────────────────────────────────────────────────────────────── */
 
 const INDENT = 14;            // px por nivel de profundidad
 const PAD_BASE = 6;           // padding-left base del primer nivel
 
 type NodeKind = 'project' | 'folder' | 'canvas';
-interface MenuState { kind: NodeKind; id: string; x: number; y: number; }
+interface MenuState { kind: NodeKind; id: string; projectId: string; x: number; y: number; }
 // `create` = input transitorio para crear (folder/canvas) dentro de un padre.
 interface CreateState { type: 'folder' | 'canvas'; projectId: string; parentFolderId: string | null; }
-interface DeleteState { kind: NodeKind; id: string; name: string; }
+interface DeleteState { kind: NodeKind; id: string; name: string; projectId: string; }
 
 export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const projects = useModelerStore((s) => s.projects);
-  const folders = useModelerStore((s) => s.folders);
-  const subjectAreas = useModelerStore((s) => s.subjectAreas);
+  const trees = useModelerStore((s) => s.trees);
   const activeProjectId = useModelerStore((s) => s.activeProjectId);
   const activeSaId = useModelerStore((s) => s.activeSaId);
-  const selectProject = useModelerStore((s) => s.selectProject);
+  const openingSaId = useModelerStore((s) => s.openingSaId);
+  const loadProjectTree = useModelerStore((s) => s.loadProjectTree);
   const selectSubjectArea = useModelerStore((s) => s.selectSubjectArea);
   const createProject = useModelerStore((s) => s.createProject);
   const renameProject = useModelerStore((s) => s.renameProject);
@@ -45,22 +49,40 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   const createCanvas = useModelerStore((s) => s.createCanvas);
   const renameCanvas = useModelerStore((s) => s.renameCanvas);
   const deleteCanvas = useModelerStore((s) => s.deleteCanvas);
+  // En modo visor el explorer es SOLO navegación: su CRUD (projects/folders/
+  // canvases) son escrituras REST directas no versionadas que no pasan por el
+  // choke-point del changeset — se ocultan las affordances de mutación.
+  const readonly = useSessionStore((s) => s.openMode === 'readonly');
 
-  // Árbol del proyecto activo (folders/canvases del store son sólo del activo).
-  const activeTree = useMemo<ProjectTree | null>(() => {
-    const p = projects.find((x) => x.id === activeProjectId);
-    return p ? buildProjectTree(p, folders, subjectAreas) : null;
-  }, [projects, folders, subjectAreas, activeProjectId]);
-
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // ids de folders/projects colapsados
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // ids de folders colapsadas (default: abiertas)
+  const [expandedP, setExpandedP] = useState<Set<string>>(new Set()); // ids de proyectos expandidos (default: cerrados)
+  const [loadingTrees, setLoadingTrees] = useState<Set<string>>(new Set()); // proyectos con árbol cargando
   const [menu, setMenu] = useState<MenuState | null>(null);
-  const [editing, setEditing] = useState<{ kind: NodeKind; id: string } | null>(null);
+  const [editing, setEditing] = useState<{ kind: NodeKind; id: string; projectId: string } | null>(null);
   const [creating, setCreating] = useState<CreateState | null>(null);
   const [toDelete, setToDelete] = useState<DeleteState | null>(null);
 
   const isCollapsed = (id: string) => collapsed.has(id);
   const toggle = (id: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const expand = (id: string) => setCollapsed((s) => { if (!s.has(id)) return s; const n = new Set(s); n.delete(id); return n; });
+
+  // Expande un proyecto y lazy-carga su árbol al cache si aún no está.
+  const ensureProjectOpen = useCallback((pid: string) => {
+    setExpandedP((s) => (s.has(pid) ? s : new Set(s).add(pid)));
+    if (!useModelerStore.getState().trees[pid]) {
+      setLoadingTrees((s) => new Set(s).add(pid));
+      loadProjectTree(pid)
+        .catch(() => pushToast('No se pudo cargar el proyecto', 'err'))
+        .finally(() => setLoadingTrees((s) => { const n = new Set(s); n.delete(pid); return n; }));
+    }
+  }, [loadProjectTree, pushToast]);
+  const toggleProject = (pid: string) => {
+    if (expandedP.has(pid)) setExpandedP((s) => { const n = new Set(s); n.delete(pid); return n; });
+    else ensureProjectOpen(pid);
+  };
+
+  // El proyecto del canvas abierto queda expandido (aditivo: no colapsa otros).
+  useEffect(() => { if (activeProjectId) ensureProjectOpen(activeProjectId); }, [activeProjectId, ensureProjectOpen]);
 
   // Cerrar el menú contextual al clicar fuera o con Escape.
   useEffect(() => {
@@ -72,29 +94,31 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     return () => { window.removeEventListener('mousedown', onDown); window.removeEventListener('keydown', onKey); };
   }, [menu]);
 
-  const openMenu = (kind: NodeKind, id: string, e: React.MouseEvent) => {
+  const openMenu = (kind: NodeKind, id: string, projectId: string, e: React.MouseEvent) => {
+    if (readonly) return; // visor: sin menú contextual (rename/delete/create)
     e.preventDefault(); e.stopPropagation();
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setMenu({ kind, id, x: r.right, y: r.bottom + 2 });
+    setMenu({ kind, id, projectId, x: r.right, y: r.bottom + 2 });
   };
 
   // ── Acciones del menú ──────────────────────────────────────────────────
-  const startRename = (kind: NodeKind, id: string) => { setMenu(null); setCreating(null); setEditing({ kind, id }); };
+  const startRename = (kind: NodeKind, id: string, projectId: string) => { setMenu(null); setCreating(null); setEditing({ kind, id, projectId }); };
   const startCreate = (type: 'folder' | 'canvas', projectId: string, parentFolderId: string | null) => {
     setMenu(null); setEditing(null);
-    if (parentFolderId) expand(parentFolderId); else expand(projectId);
+    ensureProjectOpen(projectId);
+    if (parentFolderId) expand(parentFolderId);
     setCreating({ type, projectId, parentFolderId });
   };
-  const askDelete = (kind: NodeKind, id: string, name: string) => { setMenu(null); setToDelete({ kind, id, name }); };
+  const askDelete = (kind: NodeKind, id: string, name: string, projectId: string) => { setMenu(null); setToDelete({ kind, id, name, projectId }); };
 
-  const commitRename = useCallback(async (kind: NodeKind, id: string, value: string) => {
+  const commitRename = useCallback(async (kind: NodeKind, id: string, projectId: string, value: string) => {
     setEditing(null);
     const name = value.trim();
     if (!name) return;
     try {
       if (kind === 'project') await renameProject(id, name);
-      else if (kind === 'folder') await renameFolder(id, name);
-      else await renameCanvas(id, name);
+      else if (kind === 'folder') await renameFolder(id, name, projectId);
+      else await renameCanvas(id, name, projectId);
     } catch { pushToast('No se pudo renombrar', 'err'); }
   }, [renameProject, renameFolder, renameCanvas, pushToast]);
 
@@ -109,14 +133,19 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     } catch { pushToast(c.type === 'folder' ? 'No se pudo crear la carpeta' : 'No se pudo crear el canvas', 'err'); }
   }, [creating, createFolder, createCanvas, pushToast]);
 
+  // El diálogo queda abierto y bloqueado (busy) hasta que el borrado termina —
+  // así se ve que la acción está en proceso en vez de "no pasó nada".
+  const [deleting, setDeleting] = useState(false);
   const confirmDelete = useCallback(async () => {
-    const d = toDelete; setToDelete(null);
+    const d = toDelete;
     if (!d) return;
+    setDeleting(true);
     try {
       if (d.kind === 'project') await deleteProject(d.id);
-      else if (d.kind === 'folder') await deleteFolder(d.id);
-      else await deleteCanvas(d.id);
+      else if (d.kind === 'folder') await deleteFolder(d.id, d.projectId);
+      else await deleteCanvas(d.id, d.projectId);
     } catch { pushToast('No se pudo eliminar', 'err'); }
+    finally { setDeleting(false); setToDelete(null); }
   }, [toDelete, deleteProject, deleteFolder, deleteCanvas, pushToast]);
 
   const onNewProject = () => { setMenu(null); setEditing(null); setCreating({ type: 'folder', projectId: '__new_project__', parentFolderId: null }); };
@@ -132,20 +161,26 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     <InlineInput depth={depth} placeholder={placeholder} leading={leading} onCommit={onCommit} onCancel={() => setCreating(null)} />
   );
 
-  const renderCanvas = (sa: SubjectArea, depth: number) => {
+  const renderCanvas = (sa: SubjectArea, depth: number, projectId: string) => {
     if (editing?.kind === 'canvas' && editing.id === sa.id) {
       return <InlineInput key={sa.id} depth={depth} defaultValue={sa.name} leading={<LayoutGrid size={14} />}
-        onCommit={(v) => commitRename('canvas', sa.id, v)} onCancel={() => setEditing(null)} />;
+        onCommit={(v) => commitRename('canvas', sa.id, projectId, v)} onCancel={() => setEditing(null)} />;
     }
+    const opening = openingSaId === sa.id;
     return (
       <Row key={sa.id} depth={depth} active={sa.id === activeSaId} kind="canvas"
-        icon={<LayoutGrid size={14} />} label={sa.name}
-        onClick={() => selectSubjectArea(sa.id).catch(() => pushToast('No se pudo abrir el canvas', 'err'))}
-        onMenu={(e) => openMenu('canvas', sa.id, e)} />
+        icon={opening ? <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden /> : <LayoutGrid size={14} />}
+        label={sa.name}
+        onClick={() => {
+          // Abrir sólo si no es el canvas ya abierto y no hay otra apertura en vuelo.
+          if (sa.id === activeSaId || openingSaId) return;
+          selectSubjectArea(sa.id, projectId).catch(() => pushToast('No se pudo abrir el canvas', 'err'));
+        }}
+        onMenu={readonly ? undefined : (e) => openMenu('canvas', sa.id, projectId, e)} />
     );
   };
 
-  const renderFolder = (node: FolderNode, depth: number) => {
+  const renderFolder = (node: FolderNode, depth: number, projectId: string) => {
     const { folder } = node;
     const open = !isCollapsed(folder.id);
     const childCount = node.folders.length + node.canvases.length;
@@ -153,17 +188,17 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
       <div key={folder.id}>
         {editing?.kind === 'folder' && editing.id === folder.id ? (
           <InlineInput depth={depth} defaultValue={folder.name} leading={<FolderIcon size={14} />}
-            onCommit={(v) => commitRename('folder', folder.id, v)} onCancel={() => setEditing(null)} />
+            onCommit={(v) => commitRename('folder', folder.id, projectId, v)} onCancel={() => setEditing(null)} />
         ) : (
           <Row depth={depth} kind="folder"
             chevron={childCount > 0 ? (open ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span style={{ width: 13 }} />}
             icon={open ? <FolderOpen size={14} /> : <FolderIcon size={14} />} label={folder.name}
-            onClick={() => toggle(folder.id)} onMenu={(e) => openMenu('folder', folder.id, e)} />
+            onClick={() => toggle(folder.id)} onMenu={readonly ? undefined : (e) => openMenu('folder', folder.id, projectId, e)} />
         )}
         {open && (
           <>
-            {node.folders.map((f) => renderFolder(f, depth + 1))}
-            {node.canvases.map((c) => renderCanvas(c, depth + 1))}
+            {node.folders.map((f) => renderFolder(f, depth + 1, projectId))}
+            {node.canvases.map((c) => renderCanvas(c, depth + 1, projectId))}
             {creating && creating.parentFolderId === folder.id &&
               renderCreateInput(depth + 1, commitCreate,
                 creating.type === 'folder' ? 'Nombre de la carpeta' : 'Nombre del canvas',
@@ -175,25 +210,32 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   };
 
   const renderProject = (p: Project) => {
-    const isActive = p.id === activeProjectId;
-    const open = isActive && !isCollapsed(p.id);
-    const tree = isActive ? activeTree : null;
+    // Expandir/colapsar es SÓLO navegación: nunca cambia el canvas abierto.
+    const open = expandedP.has(p.id);
+    const cached = trees[p.id];
+    const tree = open && cached ? buildProjectTree(p, cached.folders, cached.subjectAreas) : null;
+    const loadingTree = loadingTrees.has(p.id);
     return (
       <div key={p.id}>
         {editing?.kind === 'project' && editing.id === p.id ? (
           <InlineInput depth={0} defaultValue={p.name} leading={<Database size={14} />}
-            onCommit={(v) => commitRename('project', p.id, v)} onCancel={() => setEditing(null)} />
+            onCommit={(v) => commitRename('project', p.id, p.id, v)} onCancel={() => setEditing(null)} />
         ) : (
           <Row depth={0} kind="project" strong active={false}
-            chevron={isActive ? (open ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span style={{ width: 13 }} />}
+            chevron={open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             icon={<Database size={14} />} label={p.name}
-            onClick={() => { if (isActive) toggle(p.id); else selectProject(p.id).catch(() => pushToast('No se pudo abrir el proyecto', 'err')); }}
-            onMenu={(e) => openMenu('project', p.id, e)} />
+            onClick={() => toggleProject(p.id)}
+            onMenu={readonly ? undefined : (e) => openMenu('project', p.id, p.id, e)} />
+        )}
+        {open && loadingTree && !cached && (
+          <div className="wk-exp-empty" style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: PAD_BASE + INDENT + 13 }}>
+            <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden /> Cargando…
+          </div>
         )}
         {open && tree && (
           <>
-            {tree.folders.map((f) => renderFolder(f, 1))}
-            {tree.canvases.map((c) => renderCanvas(c, 1))}
+            {tree.folders.map((f) => renderFolder(f, 1, p.id))}
+            {tree.canvases.map((c) => renderCanvas(c, 1, p.id))}
             {creating && creating.projectId === p.id && creating.parentFolderId === null &&
               renderCreateInput(1, commitCreate,
                 creating.type === 'folder' ? 'Nombre de la carpeta' : 'Nombre del canvas',
@@ -211,7 +253,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     <div className="wk-explorer">
       <div className="wk-exp-head">
         <span>Model Explorer</span>
-        <button className="wk-exp-headbtn" title="New project" onClick={onNewProject}><Plus size={13} /></button>
+        {!readonly && <button className="wk-exp-headbtn" title="New project" onClick={onNewProject}><Plus size={13} /></button>}
       </div>
 
       {creating?.projectId === '__new_project__' &&
@@ -225,10 +267,10 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
 
       {menu && (
         <ContextMenu menu={menu}
-          onNewFolder={() => startCreate('folder', menu.kind === 'project' ? menu.id : (activeProjectId ?? ''), menu.kind === 'folder' ? menu.id : null)}
-          onNewCanvas={() => startCreate('canvas', menu.kind === 'project' ? menu.id : (activeProjectId ?? ''), menu.kind === 'folder' ? menu.id : null)}
-          onRename={() => startRename(menu.kind, menu.id)}
-          onDelete={() => askDelete(menu.kind, menu.id, nameOf(menu, activeTree, projects))} />
+          onNewFolder={() => startCreate('folder', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
+          onNewCanvas={() => startCreate('canvas', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
+          onRename={() => startRename(menu.kind, menu.id, menu.projectId)}
+          onDelete={() => askDelete(menu.kind, menu.id, nameOf(menu, trees, projects), menu.projectId)} />
       )}
 
       {toDelete && (
@@ -244,31 +286,27 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
                 ? <>Se eliminará el proyecto <strong>{toDelete.name}</strong> con todas sus carpetas y canvases. Esta acción no se puede deshacer.</>
                 : <>Se eliminará el canvas <strong>{toDelete.name}</strong>. Esta acción no se puede deshacer.</>
           }
+          busy={deleting}
           onConfirm={confirmDelete}
-          onCancel={() => setToDelete(null)}
+          onCancel={() => { if (!deleting) setToDelete(null); }}
         />
       )}
     </div>
   );
 }
 
-// Busca el nombre del nodo del menú para el diálogo de borrado.
-function nameOf(menu: MenuState, tree: ProjectTree | null, projects: Project[]): string {
+// Busca el nombre del nodo del menú para el diálogo de borrado (en el cache
+// del árbol de SU proyecto — las listas planas alcanzan, sin recorrer nodos).
+function nameOf(
+  menu: MenuState,
+  trees: Record<string, { folders: Folder[]; subjectAreas: SubjectArea[] }>,
+  projects: Project[],
+): string {
   if (menu.kind === 'project') return projects.find((p) => p.id === menu.id)?.name ?? '';
-  if (!tree) return '';
-  if (menu.kind === 'canvas') {
-    const find = (nodes: FolderNode[], rootC: SubjectArea[]): string | undefined => {
-      const hit = rootC.find((c) => c.id === menu.id); if (hit) return hit.name;
-      for (const n of nodes) { const r = find(n.folders, n.canvases); if (r) return r; }
-      return undefined;
-    };
-    return find(tree.folders, tree.canvases) ?? '';
-  }
-  const findF = (nodes: FolderNode[]): string | undefined => {
-    for (const n of nodes) { if (n.folder.id === menu.id) return n.folder.name; const r = findF(n.folders); if (r) return r; }
-    return undefined;
-  };
-  return findF(tree.folders) ?? '';
+  const cached = trees[menu.projectId];
+  if (!cached) return '';
+  if (menu.kind === 'canvas') return cached.subjectAreas.find((c) => c.id === menu.id)?.name ?? '';
+  return cached.folders.find((f) => f.id === menu.id)?.name ?? '';
 }
 
 // ── Fila de árbol genérica ───────────────────────────────────────────────
@@ -277,7 +315,7 @@ function Row({
 }: {
   depth: number; active?: boolean; strong?: boolean; kind: NodeKind;
   chevron?: React.ReactNode; icon: React.ReactNode; label: string;
-  onClick: () => void; onMenu: (e: React.MouseEvent) => void;
+  onClick: () => void; onMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
     <div
@@ -289,7 +327,7 @@ function Row({
       {chevron ?? <span style={{ width: 13 }} />}
       <span className="wk-exp-ico">{icon}</span>
       <span className="wk-exp-label">{label}</span>
-      <button className="wk-exp-dots" title="Opciones" onClick={onMenu}><EllipsisVertical size={15} /></button>
+      {onMenu && <button className="wk-exp-dots" title="Opciones" onClick={onMenu}><EllipsisVertical size={15} /></button>}
     </div>
   );
 }

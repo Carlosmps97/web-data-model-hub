@@ -8,19 +8,19 @@
  * talks to the plain REST endpoints directly via `@/services/http`.
  *
  * Backend contract (envelope `{ success, data }`):
- *   - GET    /api/dictionary?scope=table|column   → DictTerm[]
- *   - POST   /api/dictionary                       {term, abbrev, scope, wordType?}
- *   - PUT    /api/dictionary/{id}                  {term, abbrev, scope, wordType?}
- *   - DELETE /api/dictionary/{id}
+ *   - GET    /api/glossary?scope=table|column   → DictTerm[]
+ *   - POST   /api/glossary                       {term, abbrev, scope, wordType?}
+ *   - PUT    /api/glossary/{id}                  {term, abbrev, scope, wordType?}
+ *   - DELETE /api/glossary/{id}
  *   - GET    /api/settings/naming                  → {column:NamingRule, table:NamingRule}
  *   - PUT    /api/settings/naming/{scope}          {separator, case}
- *   - POST   /api/dictionary/physicalize           {logical, scope} → {physical}
- *   - POST   /api/dictionary/rephysicalize         {scope?}         → {updated}
+ *   - POST   /api/glossary/physicalize           {logical, scope} → {physical}
+ *   - POST   /api/glossary/rephysicalize         {scope?}         → {updated}
  */
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
-const DICT = `${API_BASE}/api/dictionary`;
+const DICT = `${API_BASE}/api/glossary`;
 const NAMING = `${API_BASE}/api/settings/naming`;
 
 export type UdpScope = 'column' | 'table';

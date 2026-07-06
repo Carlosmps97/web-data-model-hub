@@ -1,27 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
-  Table2, Combine, Network, BookA, Shapes, Search, Save, ArrowUpToLine,
+  Table2, Combine, Network, Search, Save, ArrowUpToLine,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, ImageDown,
+  FileCode2, ImageDown, FolderOpen, Spline,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
-import RelIcon, { type RelKind } from './RelIcon';
+import { EndIcon } from './RelIcon';
 import type { Cardinality } from '@/features/governance/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import NewTableModal from './NewTableModal';
 import CtasModal from './CtasModal';
-import GovPopup, { type GovKind } from './GovDrawer';
 import PublishModal from './PublishModal';
 import { ExportDdlModal } from '@/features/ddl';
 
-const PRESETS: { k: RelKind; s: Cardinality; t: Cardinality; id: boolean; tip: string }[] = [
-  { k: '1:N', s: 'one', t: 'many', id: false, tip: 'Relación uno a muchos' },
-  { k: '1:1', s: 'one', t: 'one', id: false, tip: 'Relación uno a uno' },
-  { k: '0:N', s: 'zero-one', t: 'zero-many', id: false, tip: 'Relación cero a muchos' },
-  { k: 'N:M', s: 'many', t: 'many', id: false, tip: 'Relación muchos a muchos' },
-  { k: 'ID', s: 'one', t: 'many', id: true, tip: 'Relación identificadora (FK→PK)' },
+// Las 4 cardinalidades crow's-foot que puede tener cada extremo de la relación.
+const CARDS: { k: Cardinality; tip: string }[] = [
+  { k: 'one', tip: 'Exactly one' },
+  { k: 'zero-one', tip: 'Zero or one' },
+  { k: 'many', tip: 'One or more' },
+  { k: 'zero-many', tip: 'Zero, one or more' },
 ];
 
 // Formas del grupo DRAWING (R6d). `id` = DrawingType; cada botón crea una forma.
@@ -29,7 +28,11 @@ const SHAPES: { id: DrawingType; tip: string; icon: ReactNode }[] = [
   { id: 'rect', tip: 'Rectángulo', icon: <RectangleHorizontal size={17} /> },
   { id: 'square', tip: 'Cuadrado', icon: <Square size={17} /> },
   { id: 'circle', tip: 'Círculo', icon: <Circle size={17} /> },
-  { id: 'ellipse', tip: 'Elipse', icon: <Circle size={17} style={{ transform: 'scaleY(.72)' }} /> },
+  { id: 'ellipse', tip: 'Elipse', icon: (
+    <svg width={17} height={17} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden>
+      <ellipse cx="8" cy="8" rx="7" ry="4.5" />
+    </svg>
+  ) },
   { id: 'line', tip: 'Línea', icon: <Minus size={17} /> },
   { id: 'star', tip: 'Estrella', icon: <Star size={17} /> },
   { id: 'diamond', tip: 'Rombo', icon: <Diamond size={17} /> },
@@ -38,7 +41,7 @@ const SHAPES: { id: DrawingType; tip: string; icon: ReactNode }[] = [
 
 const VIEWER_TIP = 'Solo lectura — versión publicada';
 
-export default function Toolbar({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
+export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: string, k?: 'err') => void; onOpenModel?: () => void }) {
   const activeSaId = useModelerStore((s) => s.activeSaId);
   const diagram = useModelerStore((s) => s.diagram);
   const relPreset = useModelerStore((s) => s.relPreset);
@@ -47,19 +50,32 @@ export default function Toolbar({ pushToast }: { pushToast: (m: string, k?: 'err
   const createTable = useModelerStore((s) => s.createTable);
   const focusTable = useModelerStore((s) => s.focusTable);
   const addDrawing = useModelerStore((s) => s.addDrawing);
-  const saveAllLayout = useModelerStore((s) => s.saveAllLayout);
+  const saveAll = useModelerStore((s) => s.saveAll);
 
   const openMode = useSessionStore((s) => s.openMode);
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
   const readonly = openMode === 'readonly';
 
   const [modal, setModal] = useState<'table' | 'ctas' | null>(null);
-  const [gov, setGov] = useState<GovKind | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
   const [find, setFind] = useState('');
   const [findOpen, setFindOpen] = useState(false);
   const findRef = useRef<HTMLInputElement>(null);
+  // Selección de cardinalidad por extremo (crow's-foot). El "lápiz" se arma con
+  // el botón Draw (relPreset != null); al cambiar un extremo estando armado, se
+  // refleja en vivo.
+  const [relSel, setRelSel] = useState<{ source: Cardinality; target: Cardinality }>({ source: 'one', target: 'many' });
+  // Acciones largas del toolbar en vuelo (feedback de "en proceso").
+  const [saving, setSaving] = useState(false);
+  const [arranging, setArranging] = useState(false);
+  const relArmed = relPreset != null;
+  const setRelEnd = (end: 'source' | 'target', c: Cardinality) => {
+    const next = { ...relSel, [end]: c };
+    setRelSel(next);
+    if (relArmed) setRelPreset({ ...next, identifying: false });
+  };
+  const toggleRelDraw = () => setRelPreset(relArmed ? null : { ...relSel, identifying: false });
 
   const hasCanvas = activeSaId != null && diagram != null;
   // Edición habilitada: hay canvas y NO es modo solo-lectura.
@@ -87,8 +103,17 @@ export default function Toolbar({ pushToast }: { pushToast: (m: string, k?: 'err
   const pickTable = (id: string) => { focusTable(id); setFind(''); setFindOpen(false); findRef.current?.blur(); };
 
   const onSave = async () => {
-    try { await saveAllLayout(); pushToast('Saved'); }
-    catch { pushToast('No se pudo guardar', 'err'); }
+    setSaving(true);
+    try { await saveAll(); pushToast('Saved'); }
+    // Propaga el motivo real (p.ej. un 4xx del backend), no un genérico.
+    catch (e) { pushToast(e instanceof Error && e.message ? e.message : 'No se pudo guardar', 'err'); }
+    finally { setSaving(false); }
+  };
+  const onArrange = async () => {
+    setArranging(true);
+    try { await autoOrganize(); }
+    catch { pushToast('No se pudo auto-organizar', 'err'); }
+    finally { setArranging(false); }
   };
 
   // Export image: ajusta la vista a todo el modelo y captura el viewport a PNG.
@@ -96,8 +121,11 @@ export default function Toolbar({ pushToast }: { pushToast: (m: string, k?: 'err
     const rf = useModelerStore.getState().flow;
     const el = document.querySelector('.react-flow__viewport') as HTMLElement | null;
     if (!rf || !el) { pushToast('Nada para exportar', 'err'); return; }
-    rf.fitView({ padding: 0.15, duration: 0 });
-    await new Promise((r) => setTimeout(r, 250));
+    // fitView devuelve promesa en React Flow 12: esperarla + doble rAF evita la
+    // carrera del sleep fijo (a 100 tablas el re-layout tardaba más de 250ms y
+    // la captura salía cortada).
+    await rf.fitView({ padding: 0.15, duration: 0 });
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
       const { toPng } = await import('html-to-image');
       const dataUrl = await toPng(el, { backgroundColor: '#FBFCFD', pixelRatio: 2, cacheBust: true });
@@ -161,41 +189,66 @@ export default function Toolbar({ pushToast }: { pushToast: (m: string, k?: 'err
       </div>
       <span className="wk-div" />
 
-      {/* RELATIONSHIPS (presets crow's-foot) */}
+      {/* RELATIONSHIPS — cardinalidad por extremo (crow's-foot) + Draw */}
       <div className="wk-grp">
-        <div className="wk-grp-row">
-          {PRESETS.map((p) => {
-            const on = relPreset?.source === p.s && relPreset?.target === p.t && relPreset?.identifying === p.id;
-            return <span key={p.k}>{ic(p.tip, <RelIcon kind={p.k} />, () => setRelPreset(on ? null : { source: p.s, target: p.t, identifying: p.id }), { on, disabled: !canEdit, lockTip: true })}</span>;
-          })}
+        <div className="wk-relwrap">
+          <div className="wk-relbuild">
+            {(['source', 'target'] as const).map((end) => (
+              <div className="wk-relrow" key={end}>
+                <span className="wk-rellbl">{end === 'source' ? 'Source' : 'Target'}</span>
+                {CARDS.map((c) => (
+                  <Tooltip key={c.k} label={readonly ? VIEWER_TIP : c.tip}>
+                    <button
+                      type="button"
+                      className={`wk-relend${relSel[end] === c.k ? ' on' : ''}`}
+                      disabled={!canEdit}
+                      onClick={() => setRelEnd(end, c.k)}
+                    >
+                      <EndIcon cardinality={c.k} size={15} />
+                    </button>
+                  </Tooltip>
+                ))}
+              </div>
+            ))}
+          </div>
+          <Tooltip label={readonly ? VIEWER_TIP : relArmed ? 'Salir del modo dibujo' : 'Dibujar relación: arrastrá de una columna a otra'}>
+            <button
+              type="button"
+              className={`wk-reldraw${relArmed ? ' on' : ''}`}
+              disabled={!canEdit}
+              onClick={toggleRelDraw}
+            >
+              <Spline size={17} />
+            </button>
+          </Tooltip>
         </div>
         <span className="wk-grp-cap">Relationships</span>
       </div>
       <span className="wk-div" />
 
-      {/* DRAWING (R6d): cada botón crea una forma en el centro del viewport) */}
+      {/* DRAWING (R6d): 2 filas × 4; cada botón crea una forma en el centro */}
       <div className="wk-grp">
-        <div className="wk-grp-row">
-          {SHAPES.map((s) => <span key={s.id}>{ic(s.tip, s.icon, () => addDrawing(s.id), { disabled: !canEdit, lockTip: true })}</span>)}
+        <div className="wk-drawgrid">
+          {SHAPES.map((s) => (
+            <Tooltip key={s.id} label={readonly ? VIEWER_TIP : s.tip}>
+              <button type="button" className="wk-drawbtn" disabled={!canEdit} onClick={() => addDrawing(s.id)}>
+                {s.icon}
+              </button>
+            </Tooltip>
+          ))}
         </div>
         <span className="wk-grp-cap">Drawing</span>
       </div>
       <span className="wk-div" />
 
-      {/* STANDARDS */}
-      <div className="wk-grp">
-        <div className="wk-grp-row">
-          {ic('UDP (glossary)', <BookA size={17} />, () => setGov('udp'), { disabled: readonly, lockTip: true })}
-          {ic('Parent Domains', <Shapes size={17} />, () => setGov('domains'), { disabled: readonly, lockTip: true })}
-        </div>
-        <span className="wk-grp-cap">Standards</span>
-      </div>
-      <span className="wk-div" />
+      {/* STANDARDS (UDP / Parent Domains) se movió a su propio módulo
+          "Data Standards" (2026-07-04): reglas globales, versionadas aparte,
+          fuera del canvas/changeset. Ver plan-implementacion/03. */}
 
       {/* ACTIONS */}
       <div className="wk-grp">
         <div className="wk-grp-row">
-          {ic('Autoarrange', <Network size={17} />, () => autoOrganize().catch(() => pushToast('No se pudo auto-organizar', 'err')), { disabled: !canEdit, lockTip: true })}
+          {ic('Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !canEdit || arranging, lockTip: true })}
           {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas })}
           {ic('Export image', <ImageDown size={17} />, exportImage, { disabled: !hasCanvas })}
         </div>
@@ -204,13 +257,18 @@ export default function Toolbar({ pushToast }: { pushToast: (m: string, k?: 'err
 
       {/* ── Cluster derecho ── */}
       <div className="wk-right">
+        {onOpenModel && (
+          <Tooltip label="Abrir o cambiar de versión">
+            <button className="wk-save" onClick={onOpenModel}><FolderOpen size={15} />Open model</button>
+          </Tooltip>
+        )}
         {openMode && (
           <span className={`wk-vpill${readonly ? ' viewer' : ''}`}>
             {readonly ? 'Viewer' : 'Editing'} · {versionLabel ?? '—'}
           </span>
         )}
         <Tooltip label={readonly ? VIEWER_TIP : 'Guardar working copy'}>
-          <button className="wk-save" disabled={!canEdit} onClick={onSave}><Save size={15} />Save</button>
+          <button className="wk-save" disabled={!canEdit || saving} onClick={onSave}>{saving ? <span className="rd-spin" /> : <Save size={15} />}{saving ? 'Saving…' : 'Save'}</button>
         </Tooltip>
         <Tooltip label={readonly ? VIEWER_TIP : 'Publicar versión'}>
           <button className="wk-publish" disabled={!canEdit} onClick={() => setPublishOpen(true)}><ArrowUpToLine size={15} />Publish</button>
@@ -219,7 +277,6 @@ export default function Toolbar({ pushToast }: { pushToast: (m: string, k?: 'err
 
       {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={async (input) => { await createTable(input).catch((e) => { pushToast('No se pudo crear', 'err'); throw e; }); }} />}
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}
-      {gov && <GovPopup kind={gov} onClose={() => setGov(null)} pushToast={pushToast} />}
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
 

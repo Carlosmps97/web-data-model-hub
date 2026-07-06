@@ -3,6 +3,7 @@ import Modal from '@/components/ui/Modal';
 import Icon from '@/components/ui/Icon';
 import * as gov from '@/features/governance/services/governance.service';
 import type { ParentDomain, CanonicalColumn } from '@/features/governance/services/governance.service';
+import UdpAssign from './UdpAssign';
 
 export default function ColumnEditor({ tableId, onClose, onAdd }: {
   tableId: string;
@@ -31,23 +32,23 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   };
 
   return (
-    <Modal title="Nueva columna (Attribute)" icon="columns" onClose={onClose}
+    <Modal title="New column (Attribute)" icon="columns" onClose={onClose}
       footer={<>
-        <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancelar</button>
-        <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={submit}>Agregar</button>
+        <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
+        <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={submit}>Add</button>
       </>}>
       <div className="rd-seg" style={{ marginBottom: 10 }}>
-        <button className={mode === 'logical' ? 'active' : ''} onClick={() => setMode('logical')}>Lógica</button>
-        <button className={mode === 'physical' ? 'active' : ''} onClick={() => setMode('physical')}>Física</button>
+        <button className={mode === 'logical' ? 'active' : ''} onClick={() => setMode('logical')}>Logical</button>
+        <button className={mode === 'physical' ? 'active' : ''} onClick={() => setMode('physical')}>Physical</button>
       </div>
-      <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Palabras (ej. monto deuda dólares)' : 'Nombre físico (ej. MTO_DEU_USD)'} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
-      {mode === 'logical' && preview && <div className="rd-small" style={{ marginTop: 8 }}>Físico: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
+      <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Words (e.g. monto deuda dólares)' : 'Physical name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
+      {mode === 'logical' && preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
       <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
         <select className="rd-input" value={parentDomainId} onChange={(e) => setParentDomainId(e.target.value)}>
-          <option value="">— Parent Domain (tipo) —</option>
+          <option value="">— Parent Domain (type) —</option>
           {domains.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.defaultDataType})</option>)}
         </select>
-        <input className="rd-input rd-mono" placeholder="Tipo override (opcional)" value={dataType} onChange={(e) => setDataType(e.target.value)} />
+        <input className="rd-input rd-mono" placeholder="Type override (optional)" value={dataType} onChange={(e) => setDataType(e.target.value)} />
       </div>
     </Modal>
   );
@@ -66,6 +67,10 @@ interface ColumnRowProps {
   col: CanonicalColumn;
   domains: ParentDomain[];
   canEdit: boolean;
+  /** Fila expandida (editor completo); colapsada muestra la fila compacta del diseño p8. */
+  expanded: boolean;
+  /** Expande (`id`) o colapsa (`null`) esta fila. */
+  onToggle: (id: string | null) => void;
   /** Upsert changeset-aware de campos (debe mergear sobre la columna). */
   onPatch: (id: string, fields: Partial<CanonicalColumn>) => Promise<void>;
   onDelete: (id: string, name: string) => void;
@@ -79,19 +84,26 @@ interface ColumnRowProps {
 }
 
 /**
- * Fila editable de columna en el PropertiesPanel · Columns.
- * Inputs de texto debounced (~400ms) → upsert changeset-aware. Parent Domain
- * setea el dataType heredado salvo override (marca `typeOverridden`). Drag por el
- * grip para reordenar (el ordinal lo recomputa el contenedor al soltar).
+ * Fila de columna en el PropertiesPanel · Columns (diseño p8).
+ * COLAPSADA (default): fila compacta grip · icono PK/FK/PART · lógico · físico ·
+ * tipo · badges; click expande. EXPANDIDA: card "Editing column" con el editor
+ * completo. Inputs debounced (~400ms) → upsert changeset-aware. Parent Domain se
+ * refleja al instante (estado local) y el tipo muestra un spinner mientras el
+ * cambio viaja al changeset. Drag por el grip para reordenar.
  */
-export function ColumnRow({ col, domains, canEdit, onPatch, onDelete, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
+export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, onDelete, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
   const [logical, setLogical] = useState(col.logicalName);
   const [physical, setPhysical] = useState(col.physicalName);
   const [dataType, setDataType] = useState(col.dataType);
   const [description, setDescription] = useState(col.description ?? '');
+  const [domainId, setDomainId] = useState(col.parentDomainId ?? '');
+  // Spinner del tipo mientras el cambio de dominio viaja al changeset (user feeling).
+  const [typeBusy, setTypeBusy] = useState(false);
+  // Flags (PK/FK/Nullable/Partition) en vuelo: bloquea la fila de flags + spinner.
+  const [flagsBusy, setFlagsBusy] = useState(false);
   // Resincroniza si la columna cambió por fuera (reload). No pisa lo que tipea el usuario:
   // los inputs son no controlados respecto al server salvo cuando cambia la identidad.
-  useEffect(() => { setLogical(col.logicalName); setPhysical(col.physicalName); setDataType(col.dataType); setDescription(col.description ?? ''); }, [col.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setLogical(col.logicalName); setPhysical(col.physicalName); setDataType(col.dataType); setDescription(col.description ?? ''); setDomainId(col.parentDomainId ?? ''); }, [col.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const debounced = (key: string, fields: Partial<CanonicalColumn>) => {
@@ -104,57 +116,124 @@ export function ColumnRow({ col, domains, canEdit, onPatch, onDelete, isDragging
     setLogical(v);
     debounced('logical', { logicalName: v });
     // Auto-physicalize scope 'column' (el físico queda editable como override).
-    if (v.trim()) gov.physicalize(v.trim()).then((r) => { setPhysical(r.physical); debounced('physical', { physicalName: r.physical }); }).catch(() => {});
+    // DEBOUNCED: antes disparaba un POST /physicalize por KEYSTROKE (escribir
+    // "monto deuda cliente" = 19 requests); ahora uno por pausa de tipeo.
+    clearTimeout(timers.current.__phys);
+    if (v.trim()) {
+      timers.current.__phys = setTimeout(() => {
+        gov.physicalize(v.trim()).then((r) => { setPhysical(r.physical); debounced('physical', { physicalName: r.physical }); }).catch(() => {});
+      }, 400);
+    }
   };
   const onPhysical = (v: string) => { setPhysical(v); debounced('physical', { physicalName: v }); };
   const onDescription = (v: string) => { setDescription(v); debounced('description', { description: v.trim() || undefined }); };
   const onDataType = (v: string) => {
     setDataType(v);
-    const dom = domains.find((d) => d.id === col.parentDomainId);
+    const dom = domains.find((d) => d.id === domainId);
     debounced('dataType', { dataType: v, typeOverridden: !!dom && v.trim() !== (dom.defaultDataType ?? '') });
   };
   const onDomain = (id: string) => {
+    // El select refleja el cambio AL INSTANTE (estado local); el reload del
+    // overlay confirma después. El spinner vive en el input de tipo.
+    setDomainId(id);
     const dom = domains.find((d) => d.id === id);
     // Al elegir dominio: hereda su defaultDataType salvo que ya haya override.
     const nextType = dom && !col.typeOverridden ? (dom.defaultDataType ?? dataType) : dataType;
     setDataType(nextType);
-    void onPatch(col.id, { parentDomainId: id || undefined, dataType: nextType, typeOverridden: col.typeOverridden });
+    setTypeBusy(true);
+    // Recalcula el override contra el NUEVO dominio: si el tipo resultante coincide
+    // con su default, la conexión queda "sana" (typeOverridden=false); si difiere
+    // (el usuario ya lo había pisado), sigue roto (true) → la cascada lo respeta.
+    onPatch(col.id, { parentDomainId: id || undefined, dataType: nextType,
+                      typeOverridden: !!dom && nextType.trim() !== (dom.defaultDataType ?? '') })
+      .finally(() => setTypeBusy(false));
   };
-  const toggle = (field: 'isPrimaryKey' | 'isForeignKey' | 'isNullable' | 'isPartition', cur?: boolean) => () => { void onPatch(col.id, { [field]: !cur }); };
+  const toggle = (field: 'isPrimaryKey' | 'isForeignKey' | 'isNullable' | 'isPartition', cur?: boolean) => () => {
+    setFlagsBusy(true);
+    onPatch(col.id, { [field]: !cur }).finally(() => setFlagsBusy(false));
+  };
 
+  const dndProps = {
+    onDragOver: (e: React.DragEvent) => { if (canEdit) onDragOver(col.id, e); },
+    onDrop: () => { if (canEdit) onDrop(col.id); },
+  };
+  const grip = (
+    <span
+      className="wk-pp-grip"
+      title={canEdit ? 'Drag to reorder' : undefined}
+      draggable={canEdit}
+      onClick={(e) => e.stopPropagation()}
+      onDragStart={() => onDragStart(col.id)}
+      onDragEnd={onDragEnd}
+    ><Grip /></span>
+  );
+
+  // ── Fila compacta (diseño p8): click para expandir ──
+  if (!expanded) {
+    return (
+      <div
+        className={`wk-pp-colrow${col.isPartition ? ' pt' : ''}${isDragging ? ' dragging' : ''}${dropHint ? ` drop${dropHint}` : ''}`}
+        role="button"
+        title={canEdit ? 'Click to edit' : 'Click to view'}
+        onClick={() => onToggle(col.id)}
+        {...dndProps}
+      >
+        {grip}
+        <span className="wk-pp-colrow-ic" aria-hidden>
+          {col.isPrimaryKey ? <Icon name="key" size={12} style={{ color: 'var(--k-pk)' }} />
+            : col.isForeignKey ? <Icon name="link" size={12} style={{ color: 'var(--k-fk)' }} />
+            : col.isPartition ? <Icon name="grid" size={12} style={{ color: 'var(--k-pt)' }} /> : null}
+        </span>
+        <span className={`wk-pp-colrow-name${col.isPrimaryKey ? ' pk' : ''}`}>{logical || physical}</span>
+        <span className="wk-pp-colrow-phys rd-mono">{physical}</span>
+        <span className="wk-pp-colrow-dt rd-mono">{dataType}</span>
+        {col.isPrimaryKey && <span className="wk-pp-badge pk">PK</span>}
+        {col.isForeignKey && <span className="wk-pp-badge fk">FK</span>}
+        {col.isPartition && <span className="wk-pp-badge pt">PART</span>}
+      </div>
+    );
+  }
+
+  // ── Card expandida (diseño p8 · "Editing column") ──
   return (
     <div
       className={`wk-pp-colcard${isDragging ? ' dragging' : ''}${dropHint ? ` drop${dropHint}` : ''}`}
-      onDragOver={(e) => { if (canEdit) onDragOver(col.id, e); }}
-      onDrop={() => { if (canEdit) onDrop(col.id); }}
+      {...dndProps}
     >
-      <span
-        className="wk-pp-grip"
-        title="Arrastrá para reordenar"
-        draggable={canEdit}
-        onDragStart={() => onDragStart(col.id)}
-        onDragEnd={onDragEnd}
-      ><Grip /></span>
-
-      <div className="wk-pp-colbody">
+      <button type="button" className="wk-pp-colcard-head" title="Collapse" onClick={() => onToggle(null)}>
+        {canEdit ? <Icon name="edit" size={12} /> : <Icon name="eye" size={12} />}
+        <span className="wk-pp-colcard-ttl">{canEdit ? 'Editing column' : 'Column details'}</span>
+        <span className="wk-pp-colcard-sub rd-mono">{physical}</span>
+        <Icon name="chevD" size={13} style={{ transform: 'rotate(180deg)' }} />
+      </button>
+      <div className="wk-pp-colcard-body">
         <div className="wk-pp-row2">
-          <input className="rd-input" disabled={!canEdit} placeholder="Lógico" value={logical} onChange={(e) => onLogical(e.target.value)} />
-          <input className="rd-input rd-mono" disabled={!canEdit} placeholder="Físico" value={physical} onChange={(e) => onPhysical(e.target.value)} />
+          <input className="rd-input" disabled={!canEdit} placeholder="Logical name" value={logical} onChange={(e) => onLogical(e.target.value)} />
+          <input className="rd-input rd-mono" disabled={!canEdit} placeholder="Physical name" value={physical} onChange={(e) => onPhysical(e.target.value)} />
         </div>
         <div className="wk-pp-row2">
-          <select className="rd-input" disabled={!canEdit} value={col.parentDomainId ?? ''} onChange={(e) => onDomain(e.target.value)}>
+          <select className="rd-input" disabled={!canEdit} value={domainId} onChange={(e) => onDomain(e.target.value)}>
             <option value="">— Parent Domain —</option>
             {domains.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
           </select>
-          <input className="rd-input rd-mono" disabled={!canEdit} placeholder="dataType" value={dataType} onChange={(e) => onDataType(e.target.value)} />
+          <span className="wk-pp-typewrap">
+            <input className="rd-input rd-mono" disabled={!canEdit || typeBusy} placeholder="dataType" value={dataType} onChange={(e) => onDataType(e.target.value)} />
+            {typeBusy && <span className="wk-spin" aria-hidden />}
+          </span>
         </div>
-        <input className="rd-input" disabled={!canEdit} placeholder="Definición funcional" value={description} onChange={(e) => onDescription(e.target.value)} />
-        <div className="wk-pp-flags">
-          <label className={`wk-pp-flag pk${col.isPrimaryKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit} checked={!!col.isPrimaryKey} onChange={toggle('isPrimaryKey', col.isPrimaryKey)} /><Icon name="key" size={11} /> PK</label>
-          <label className={`wk-pp-flag fk${col.isForeignKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit} checked={!!col.isForeignKey} onChange={toggle('isForeignKey', col.isForeignKey)} /><Icon name="link" size={11} /> FK</label>
-          <label className={`wk-pp-flag nl${col.isNullable !== false ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit} checked={col.isNullable !== false} onChange={toggle('isNullable', col.isNullable !== false)} /> Nullable</label>
-          <label className={`wk-pp-flag pt${col.isPartition ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit} checked={!!col.isPartition} onChange={toggle('isPartition', col.isPartition)} /><Icon name="grid" size={11} /> Partition</label>
-          {canEdit && <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" style={{ marginLeft: 'auto' }} title="Eliminar columna" onClick={() => onDelete(col.id, col.physicalName)}><Icon name="trash" size={11} style={{ color: 'var(--error)' }} /></button>}
+        <input className="rd-input" disabled={!canEdit} placeholder="Functional definition" value={description} onChange={(e) => onDescription(e.target.value)} />
+        <div className="wk-pp-flags" style={flagsBusy ? { opacity: 0.7 } : undefined}>
+          <label className={`wk-pp-flag pk${col.isPrimaryKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isPrimaryKey} onChange={toggle('isPrimaryKey', col.isPrimaryKey)} /><Icon name="key" size={11} /> PK</label>
+          <label className={`wk-pp-flag fk${col.isForeignKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isForeignKey} onChange={toggle('isForeignKey', col.isForeignKey)} /><Icon name="link" size={11} /> FK</label>
+          <label className={`wk-pp-flag nl${col.isNullable !== false ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={col.isNullable !== false} onChange={toggle('isNullable', col.isNullable !== false)} /> Nullable</label>
+          <label className={`wk-pp-flag pt${col.isPartition ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isPartition} onChange={toggle('isPartition', col.isPartition)} /><Icon name="grid" size={11} /> Partition</label>
+          {flagsBusy && <span className="rd-spin" style={{ marginLeft: 'auto', color: 'var(--primary)' }} aria-hidden />}
+          {canEdit && <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" style={flagsBusy ? undefined : { marginLeft: 'auto' }} title="Delete column" disabled={flagsBusy} onClick={() => onDelete(col.id, col.physicalName)}><Icon name="trash" size={11} style={{ color: 'var(--error)' }} /></button>}
+        </div>
+        {/* UDP a nivel columna (etiquetas key-value definidas en Data Standards). */}
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #EEF1F6' }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A93A5', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 8 }}>User Defined Properties</div>
+          <UdpAssign level="column" values={col.udpValues ?? {}} disabled={!canEdit} onChange={(next) => onPatch(col.id, { udpValues: next })} />
         </div>
       </div>
     </div>

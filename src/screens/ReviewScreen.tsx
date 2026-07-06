@@ -1,30 +1,39 @@
 /**
- * ReviewScreen (p5) — Review & publish / Versioning, CROSS-PROJECT.
+ * ReviewScreen (p5) — "Requests · review & approval", CROSS-PROJECT.
  *
- * Layout (per design #p5):
- *   · breadcrumb "All projects / Change history" (globe)
- *   · filters: by requester (owner) + by approver (reviewer)
- *   · versions table (grid 80 / 1.4fr / 1fr / 1fr / 150; production row green,
- *     selected row blue) — data: listVersions() + getPublished()
- *   · body: version-card rail (left) + detail panel (right). Selecting a version
- *     (or arriving with `?id=`) loads getChangeset(id) + getDiff(id) and renders
- *     the approval stepper, impact summary, diff panel, actions, and comments.
+ * Layout (per design #p5) — a two-section panel:
+ *   · header: "Requests · review & approval" + close
+ *   · SECTION 1 (left): From / Reviewer filters, "{N} requests", request cards
+ *     (status badge, "Assigned to you", snap · vN, requester → reviewer, project)
+ *   · SECTION 2 (right): open request detail — title + status, meta line
+ *     (From {owner} · snapshot of vN · date · Reviewer {names}), actions
+ *     (Open in canvas / Comment / Reject / Approve), an assigned-reviewer note,
+ *     impact chips + legend, the requester note, "Changes · N" diff, and the
+ *     reviewer comments thread + input.
  *
- * The actor comes from useSessionStore (injects X-Dev-User). Approve/Reject are
- * disabled (with tooltip) when the actor is NOT in `reviewers`; on 403 we toast.
- * Lists + detail reload when the actor changes — key for validating the flow.
+ * Data: versioning.service (listVersions / getPublished / listUsers /
+ * getChangeset / getDiff / review / addComment) + projects.service. The actor
+ * comes from useSessionStore (injects X-Dev-User). Approve/Reject are disabled
+ * when the actor is NOT the assigned reviewer; on 403 we toast. Lists + detail
+ * reload when the actor changes — key for validating the approval flow.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
-  AlertTriangle,
+  ArrowRight,
+  Boxes,
   Check,
-  Globe,
-  GitCompare,
+  ExternalLink,
+  Inbox,
+  Lock,
   MessageSquare,
+  Table2,
+  TriangleAlert,
+  Undo2,
   X,
 } from 'lucide-react';
+import { confirmDialog } from '@/components/ui/dialogs';
 
 import { Avatar, Tooltip } from '@/components/ui';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -35,7 +44,9 @@ import {
   getPublished,
   listUsers,
   listVersions,
+  reopen,
   review,
+  withdraw,
 } from '@/services/versioning.service';
 import { listProjects } from '@/services/projects.service';
 import type { Project } from '@/types/model';
@@ -58,7 +69,7 @@ function avatarTone(id: string): (typeof AVATAR_TONES)[number] {
   return AVATAR_TONES[h % AVATAR_TONES.length];
 }
 
-/** Compact, locale-aware date for table rows / card meta. */
+/** Compact, locale-aware date for card meta / comments. */
 function fmtDate(iso?: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -66,99 +77,31 @@ function fmtDate(iso?: string | null): string {
   return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-interface CardPillSpec {
+interface StatusSpec {
   cls: string;
   text: string;
 }
-/** Maps a status (+ production flag) onto the version-card status pill. */
-function cardPill(status: VersionStatus, isProduction: boolean): CardPillSpec {
-  if (isProduction) return { cls: 'dmh-rv-spill--published', text: 'Published · global' };
+/** Maps a request status onto its badge (In review / Approved / Rejected). */
+function statusBadge(status: VersionStatus): StatusSpec {
   switch (status) {
     case 'submitted':
       return { cls: 'dmh-rv-spill--review', text: 'In review' };
-    case 'draft':
-      return { cls: 'dmh-rv-spill--draft', text: 'Editing' };
+    case 'approved':
+      return { cls: 'dmh-rv-spill--approved', text: 'Approved' };
     case 'rejected':
       return { cls: 'dmh-rv-spill--rejected', text: 'Rejected' };
-    case 'approved':
-      return { cls: 'dmh-rv-spill--historical', text: 'Historical' };
     default:
-      return { cls: 'dmh-rv-spill--draft', text: status };
+      return { cls: 'dmh-rv-spill--draft', text: 'Editing' };
   }
-}
-
-type StepState = 'completed' | 'current' | 'pending' | 'rejected';
-interface Step {
-  key: string;
-  label: string;
-  mono?: string;
-  state: StepState;
-}
-
-/**
- * Derives the approval stepper from the changeset:
- *   Submitted → (one step per reviewer) → Published.
- * - Submitted: completed once the changeset has been submitted (not a draft).
- * - Reviewer steps: approved → completed, rejected → rejected; the first pending
- *   reviewer of a submitted changeset is the `current` step, the rest pending.
- * - Published: completed when status==='approved'; `current` once every reviewer
- *   approved (awaiting publish); pending otherwise.
- */
-function deriveSteps(cs: ChangesetDetail, userName: (id?: string | null) => string): Step[] {
-  const submitted = cs.status !== 'draft';
-  const isApproved = cs.status === 'approved';
-  const isRejected = cs.status === 'rejected';
-
-  const steps: Step[] = [
-    {
-      key: 'submitted',
-      label: 'Submitted for review',
-      state: submitted ? 'completed' : 'current',
-    },
-  ];
-
-  let currentAssigned = false;
-  cs.reviewers.forEach((rid) => {
-    const verdict = cs.approvals[rid]?.status;
-    let state: StepState;
-    if (verdict === 'approved') state = 'completed';
-    else if (verdict === 'rejected') state = 'rejected';
-    else if (submitted && !isApproved && !isRejected && !currentAssigned) {
-      state = 'current';
-      currentAssigned = true;
-    } else {
-      state = 'pending';
-    }
-    steps.push({ key: `rev-${rid}`, label: `Review · ${userName(rid)}`, state });
-  });
-
-  const everyApproved =
-    cs.reviewers.length > 0 && cs.reviewers.every((rid) => cs.approvals[rid]?.status === 'approved');
-  steps.push({
-    key: 'published',
-    label: 'Publish',
-    mono: cs.versionLabel ?? undefined,
-    state: isApproved
-      ? 'completed'
-      : everyApproved && submitted && !isRejected
-        ? 'current'
-        : 'pending',
-  });
-
-  return steps;
-}
-
-/** Splits a column-ish entity name into chips for the diff row (best-effort). */
-function colChips(entity: DiffEntity): string[] {
-  // Backend may pack columns into `name`; keep it as a single chip otherwise.
-  return [entity.name];
 }
 
 // ── component ────────────────────────────────────────────────────────────────
 
 export default function ReviewScreen() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const user = useSessionStore((s) => s.user);
+  const openModel = useSessionStore((s) => s.openModel);
 
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [published, setPublished] = useState<VersionRow | null>(null);
@@ -166,9 +109,9 @@ export default function ReviewScreen() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
 
-  // Filters (by requester / approver).
+  // Filters: From (requester/owner) + Reviewer (defaults to "Me", the actor).
   const [ownerFilter, setOwnerFilter] = useState('');
-  const [reviewerFilter, setReviewerFilter] = useState('');
+  const [reviewerFilter, setReviewerFilter] = useState(user.id);
 
   // Selection + detail.
   const selectedId = searchParams.get('id');
@@ -176,6 +119,10 @@ export default function ReviewScreen() {
   const [diff, setDiff] = useState<ChangesetDiff | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [acting, setActing] = useState(false);
+  // Tras withdraw/reopen la versión volvió a draft y SALE de la lista: en vez de
+  // auto-seleccionar en silencio otro request (que confunde: "Open in canvas"
+  // abriría el request de OTRO), mostramos un empty-state con la vuelta al canvas.
+  const [draftHint, setDraftHint] = useState<{ id: string; label: string | null } | null>(null);
 
   const [commentText, setCommentText] = useState('');
   const [commentSending, setCommentSending] = useState(false);
@@ -195,9 +142,14 @@ export default function ReviewScreen() {
     [users],
   );
   const projectName = useCallback(
-    (id: string): string => projects.find((p) => p.id === id)?.name ?? id,
+    (id?: string | null): string => (id ? (projects.find((p) => p.id === id)?.name ?? id) : ''),
     [projects],
   );
+
+  // When the actor changes, follow them with the "Reviewer: Me" default.
+  useEffect(() => {
+    setReviewerFilter((prev) => (prev === '' ? '' : user.id));
+  }, [user.id]);
 
   // ── load the cross-project lists (reload when the actor changes) ────────────
   useEffect(() => {
@@ -213,7 +165,7 @@ export default function ReviewScreen() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        toast.error(err instanceof Error ? err.message : 'Could not load the change history.');
+        toast.error(err instanceof Error ? err.message : 'Could not load the requests.');
       })
       .finally(() => {
         if (!cancelled) setListsLoading(false);
@@ -237,7 +189,7 @@ export default function ReviewScreen() {
         if (cancelled) return;
         setDetail(null);
         setDiff(null);
-        toast.error(err instanceof Error ? err.message : 'Could not load this change.');
+        toast.error(err instanceof Error ? err.message : 'Could not load this request.');
       })
       .finally(() => {
         if (!cancelled) setDetailLoading(false);
@@ -256,49 +208,84 @@ export default function ReviewScreen() {
       return;
     }
     setCommentText('');
+    // Clear the previous request immediately so the detail panel shows its
+    // skeleton while the new one loads (no stale content during the fetch).
+    setDetail(null);
+    setDiff(null);
     return loadDetail(selectedId);
   }, [selectedId, user.id, loadDetail]);
 
-  const select = (id: string) => {
-    const next = new URLSearchParams(searchParams);
-    next.set('id', id);
-    setSearchParams(next, { replace: true });
-  };
+  const select = useCallback(
+    (id: string) => {
+      setDraftHint(null);
+      const next = new URLSearchParams(searchParams);
+      next.set('id', id);
+      setSearchParams(next, { replace: true });
+    },
+    [searchParams, setSearchParams],
+  );
 
-  // ── derive the table rows (published first, then everything else) ───────────
-  const tableRows = useMemo(() => {
-    const matchesFilters = (v: VersionRow) =>
-      (!ownerFilter || v.owner === ownerFilter) &&
-      (!reviewerFilter || v.reviewers.includes(reviewerFilter));
-
-    const out: { row: VersionRow; isProduction: boolean }[] = [];
-    if (published && matchesFilters(published)) out.push({ row: published, isProduction: true });
-    versions
-      .filter((v) => v.id !== published?.id && matchesFilters(v))
-      .forEach((v) => out.push({ row: v, isProduction: false }));
-    return out;
+  // ── the request list (submitted/approved/rejected, not the production base) ──
+  const requestRows = useMemo(() => {
+    return versions
+      .filter((v) => v.status !== 'draft' && v.id !== published?.id)
+      .filter((v) => !ownerFilter || v.owner === ownerFilter)
+      .filter((v) => !reviewerFilter || v.reviewers.includes(reviewerFilter))
+      .sort((a, b) => {
+        const ta = Date.parse(a.submittedAt ?? a.updatedAt ?? a.createdAt ?? '') || 0;
+        const tb = Date.parse(b.submittedAt ?? b.updatedAt ?? b.createdAt ?? '') || 0;
+        return tb - ta;
+      });
   }, [versions, published, ownerFilter, reviewerFilter]);
 
-  const filtersActive = Boolean(ownerFilter || reviewerFilter);
+  // Auto-select the first request when nothing is selected (the design always
+  // shows an open request on the right) — EXCEPT right after a withdraw/reopen,
+  // where jumping to another request reads as "my request mutated into this one".
+  useEffect(() => {
+    if (!selectedId && !draftHint && requestRows.length > 0) select(requestRows[0].id);
+  }, [selectedId, draftHint, requestRows, select]);
 
   // ── derived detail bits ─────────────────────────────────────────────────────
   const isReviewer = Boolean(detail && user.id && detail.reviewers.includes(user.id));
   const alreadyVoted = Boolean(detail && user.id && detail.approvals[user.id]);
   const canAct = Boolean(detail && detail.status === 'submitted' && isReviewer && !alreadyVoted);
-  const actDisabledReason = !detail
-    ? ''
-    : detail.status !== 'submitted'
-      ? `This change is ${detail.status}; no decision is needed.`
-      : !isReviewer
-        ? 'Only assigned reviewers can approve or reject this change.'
-        : alreadyVoted
-          ? 'You have already recorded a decision on this change.'
-          : '';
+  // El OWNER puede retirar su request mientras siga en revisión (para seguir
+  // editando la versión y re-enviarla después).
+  const canWithdraw = Boolean(detail && detail.status === 'submitted' && user.id && detail.owner === user.id);
+  // El OWNER puede reabrir un request RECHAZADO (rejected → draft): el reject
+  // nunca elimina la versión, sólo rechaza la solicitud.
+  const canReopen = Boolean(detail && detail.status === 'rejected' && user.id && detail.owner === user.id);
+  // Sólo el dueño de un DRAFT edita en el canvas; cualquier otro caso se abre
+  // como visor (solo lectura) — la edición vuelve recién con Withdraw/Reopen.
+  const isOwnDraft = Boolean(detail && detail.status === 'draft' && user.id && detail.owner === user.id);
 
-  const steps = useMemo(
-    () => (detail ? deriveSteps(detail, userName) : []),
-    [detail, userName],
-  );
+  const reviewerNames = detail ? detail.reviewers.map(userName).join(', ') || '—' : '—';
+
+  /** The assigned-reviewer note shown when the actor cannot act. */
+  const noteText = useMemo(() => {
+    if (!detail || canAct) return '';
+    if (detail.status !== 'submitted') return `This request is ${detail.status}.`;
+    if (!isReviewer)
+      return `Only the assigned reviewer ${reviewerNames} can approve or reject this request. You can still leave a comment.`;
+    if (alreadyVoted) return 'You already recorded your decision on this request.';
+    return '';
+  }, [detail, canAct, isReviewer, alreadyVoted, reviewerNames]);
+
+  // Diff totals for the impact legend + "Changes · N" (+ conflictos vs producción).
+  const diffTotals = useMemo(() => {
+    let added = 0;
+    let edited = 0;
+    let deleted = 0;
+    let conflicts = 0;
+    if (diff)
+      Object.values(diff.collections).forEach((b) => {
+        added += b.added.length;
+        edited += b.edited.length;
+        deleted += b.deleted.length;
+        conflicts += [...b.added, ...b.edited, ...b.deleted].filter((e) => e.conflict).length;
+      });
+    return { added, edited, deleted, conflicts, total: added + edited + deleted };
+  }, [diff]);
 
   // ── actions ─────────────────────────────────────────────────────────────────
   const doReview = async (decision: 'approve' | 'reject') => {
@@ -307,18 +294,114 @@ export default function ReviewScreen() {
     try {
       const updated = await review(detail.id, { decision });
       setDetail(updated);
-      toast.success(decision === 'approve' ? 'Change approved.' : 'Change rejected.');
-      // Refresh the cross-project lists so the table/cards reflect the new state.
+      toast.success(decision === 'approve' ? 'Request approved.' : 'Request rejected.');
       void Promise.all([listVersions(), getPublished()])
         .then(([vers, pub]) => {
           setVersions(vers);
           setPublished(pub);
         })
         .catch(() => undefined);
-      // Re-fetch the diff (impact may shift once published).
       void getDiff(detail.id).then(setDiff).catch(() => undefined);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'The decision could not be recorded.');
+    } finally {
+      setActing(false);
+    }
+  };
+
+  const openInCanvas = () => {
+    if (!detail) return;
+    // Modo edición SÓLO para el dueño de un draft. Un request en revisión (o ya
+    // decidido) se abre en SOLO LECTURA sobre su propio overlay: se ve el
+    // contenido enviado, pero no se puede mutar ni re-publicar — antes este
+    // camino ligaba el canvas en `editing` a un changeset no-draft y producía
+    // 409 persistentes o re-submits que pisaban el envío.
+    openModel({
+      mode: isOwnDraft ? 'editing' : 'readonly',
+      changesetId: detail.id,
+      versionLabel: detail.versionLabel,
+    });
+    navigate('/model');
+  };
+
+  /** Post-withdraw/reopen: la versión volvió a draft — limpia selección y
+   *  listas, y deja el empty-state con la vuelta directa al canvas. */
+  const backToDraft = (id: string, label: string | null) => {
+    setDraftHint({ id, label });
+    setDetail(null);
+    setDiff(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete('id');
+    setSearchParams(next, { replace: true });
+    void Promise.all([listVersions(), getPublished()])
+      .then(([vers, pub]) => {
+        setVersions(vers);
+        setPublished(pub);
+      })
+      .catch(() => undefined);
+  };
+
+  /** Owner retira su request en revisión: vuelve a draft (reaparece en Open
+   *  model → "Continue a working version") y sale de la lista de requests. */
+  const doWithdraw = async () => {
+    if (!detail || acting) return;
+    const { id, versionLabel } = detail;
+    setActing(true);
+    try {
+      const ok = await confirmDialog({
+        title: 'Withdraw request',
+        message: (
+          <>
+            The request goes back to <strong>draft</strong> so you can keep editing the version;
+            reviewer decisions recorded so far are discarded. You can send it for approval again later.
+          </>
+        ),
+        confirmLabel: 'Withdraw', cancelLabel: 'Cancel',
+        action: () => withdraw(id),
+      });
+      if (!ok) return;
+      toast.success('Request withdrawn — the version is a draft again.');
+      backToDraft(id, versionLabel ?? null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not withdraw the request.');
+      // El fallo típico es una carrera (409: un revisor decidió antes): refresca
+      // el detalle y las listas para no dejar botones sobre un estado que ya no existe.
+      void loadDetail(id);
+      void Promise.all([listVersions(), getPublished()])
+        .then(([vers, pub]) => { setVersions(vers); setPublished(pub); })
+        .catch(() => undefined);
+    } finally {
+      setActing(false);
+    }
+  };
+
+  /** Owner reabre su request rechazado: rejected → draft para corregir y
+   *  re-enviar (el reject nunca elimina la versión). */
+  const doReopen = async () => {
+    if (!detail || acting) return;
+    const { id, versionLabel } = detail;
+    setActing(true);
+    try {
+      const ok = await confirmDialog({
+        title: 'Reopen as draft',
+        message: (
+          <>
+            The rejected request goes back to <strong>draft</strong> so you can fix the version and
+            send it for approval again. The recorded rejection is cleared; the version is never deleted.
+          </>
+        ),
+        confirmLabel: 'Reopen', cancelLabel: 'Cancel',
+        action: () => reopen(id),
+      });
+      if (!ok) return;
+      toast.success('Request reopened — the version is a draft again.');
+      backToDraft(id, versionLabel ?? null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not reopen the request.');
+      void loadDetail(id);
+      void Promise.all([listVersions(), getPublished()])
+        .then(([vers, pub]) => { setVersions(vers); setPublished(pub); })
+        .catch(() => undefined);
     } finally {
       setActing(false);
     }
@@ -339,270 +422,258 @@ export default function ReviewScreen() {
     }
   };
 
+  const otherUsers = users.filter((u) => u.id !== user.id);
+
   // ── render ──────────────────────────────────────────────────────────────────
   return (
     <div className="dmh-review">
-      <div className="dmh-review-inner">
-        {/* breadcrumb */}
-        <div className="dmh-rv-crumb">
-          <Globe size={14} strokeWidth={1.4} aria-hidden />
-          All projects <span className="sep">/</span>
-          <span className="leaf">Change history</span>
-        </div>
-
-        {/* filters */}
-        <div className="dmh-rv-filters">
-          <div className="dmh-rv-filter">
-            <span className="dmh-rv-filter-label">Requester</span>
-            <select
-              className="dmh-rv-select"
-              value={ownerFilter}
-              onChange={(e) => setOwnerFilter(e.target.value)}
-              aria-label="Filter by requester"
-            >
-              <option value="">All requesters</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
+      <div className="dmh-rv-panel">
+        {/* header */}
+        <div className="dmh-rv-phead">
+          <div className="dmh-rv-phead-ico">
+            <Inbox size={19} strokeWidth={1.5} aria-hidden />
           </div>
-          <div className="dmh-rv-filter">
-            <span className="dmh-rv-filter-label">Approver</span>
-            <select
-              className="dmh-rv-select"
-              value={reviewerFilter}
-              onChange={(e) => setReviewerFilter(e.target.value)}
-              aria-label="Filter by approver"
-            >
-              <option value="">All approvers</option>
-              {users.map((u) => (
-                <option key={u.id} value={u.id}>
-                  {u.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          {filtersActive && (
-            <button
-              type="button"
-              className="dmh-rv-filter-clear"
-              onClick={() => {
-                setOwnerFilter('');
-                setReviewerFilter('');
-              }}
-            >
-              Clear filters
-            </button>
-          )}
-        </div>
-
-        {/* versions table */}
-        <div className="dmh-rv-table">
-          <div className="dmh-rv-thead">
-            <div>Version</div>
-            <div>Title</div>
-            <div>Owner</div>
-            <div>Updated</div>
-            <div>Projects</div>
-          </div>
-          {listsLoading ? (
-            <div className="dmh-rv-table-empty">Loading change history…</div>
-          ) : tableRows.length === 0 ? (
-            <div className="dmh-rv-table-empty">
-              {filtersActive
-                ? 'No versions match the current filters.'
-                : 'No versions yet. Snapshot production to start one.'}
+          <div className="dmh-rv-phead-text">
+            <div className="dmh-rv-phead-title">Requests · review &amp; approval</div>
+            <div className="dmh-rv-phead-sub">
+              Approve, reject or comment change requests — cross-project
             </div>
-          ) : (
-            tableRows.map(({ row, isProduction }) => {
-              const cls = [
-                'dmh-rv-trow',
-                isProduction ? 'is-production' : '',
-                row.id === selectedId ? 'is-selected' : '',
-              ]
-                .filter(Boolean)
-                .join(' ');
-              return (
-                <div
-                  key={row.id}
-                  role="button"
-                  tabIndex={0}
-                  className={cls}
-                  onClick={() => select(row.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      select(row.id);
-                    }
-                  }}
+          </div>
+          <button
+            type="button"
+            className="dmh-rv-phead-close"
+            onClick={() => navigate('/')}
+            aria-label="Close"
+          >
+            <X size={14} strokeWidth={1.6} aria-hidden />
+          </button>
+        </div>
+
+        <div className="dmh-rv-cols">
+          {/* ── SECTION 1 · request list + filters ────────────────────── */}
+          <div className="dmh-rv-list">
+            <div className="dmh-rv-list-filters">
+              <label className="dmh-rv-flt">
+                <span className="lbl">From:</span>
+                <select
+                  className="dmh-rv-flt-sel"
+                  value={ownerFilter}
+                  onChange={(e) => setOwnerFilter(e.target.value)}
+                  aria-label="Filter by requester"
                 >
-                  <div className="dmh-rv-tlabel">{row.versionLabel ?? '—'}</div>
-                  <div className="dmh-rv-ttitle">{row.title ?? 'Untitled change'}</div>
-                  <div className="dmh-rv-towner">
-                    <Avatar
-                      initials={userInitials(row.owner)}
-                      tone={avatarTone(row.owner ?? row.id)}
-                      size={22}
-                    />
-                    <span className="dmh-rv-towner-name">{userName(row.owner)}</span>
-                  </div>
-                  <div className="dmh-rv-tdate">{fmtDate(row.updatedAt ?? row.createdAt)}</div>
-                  <div className="dmh-rv-tchips">
-                    {row.projectIds.length === 0 ? (
-                      <span className="dmh-rv-tchips-empty">—</span>
-                    ) : (
-                      row.projectIds.map((pid) => (
-                        <span key={pid} className="dmh-rv-pchip">
-                          {projectName(pid)}
-                        </span>
-                      ))
-                    )}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        {/* body: card rail + detail */}
-        <div className="dmh-rv-body">
-          {/* version-card rail */}
-          <div className="dmh-rv-rail">
-            <div className="dmh-rv-rail-head">
-              <div className="dmh-rv-rail-title">Versions</div>
-              <div className="dmh-rv-rail-sub">across all projects · changes can be cross-project</div>
+                  <option value="">Anyone</option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={`dmh-rv-flt${reviewerFilter === user.id ? ' is-me' : ''}`}>
+                <span className="lbl">Reviewer:</span>
+                <select
+                  className="dmh-rv-flt-sel"
+                  value={reviewerFilter}
+                  onChange={(e) => setReviewerFilter(e.target.value)}
+                  aria-label="Filter by reviewer"
+                >
+                  <option value={user.id}>Me</option>
+                  <option value="">Anyone</option>
+                  {otherUsers.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
-            {listsLoading ? (
-              <div className="dmh-rv-rail-empty">Loading…</div>
-            ) : tableRows.length === 0 ? (
-              <div className="dmh-rv-rail-empty">No versions to show.</div>
-            ) : (
-              tableRows.map(({ row, isProduction }) => {
-                const pill = cardPill(row.status, isProduction);
-                const cls = [
-                  'dmh-rv-card',
-                  isProduction ? 'is-published' : '',
-                  row.id === selectedId ? 'is-selected' : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ');
-                return (
-                  <button key={row.id} type="button" className={cls} onClick={() => select(row.id)}>
-                    <div className="dmh-rv-card-top">
-                      <span className={`dmh-rv-spill ${pill.cls}`}>{pill.text}</span>
-                      <span className="dmh-rv-card-ver">{row.versionLabel ?? '—'}</span>
-                    </div>
-                    <div className="dmh-rv-card-name">{row.title ?? 'Untitled change'}</div>
-                    {row.projectIds.length > 0 && (
-                      <div className="dmh-rv-card-chips">
-                        {row.projectIds.map((pid) => (
-                          <span key={pid} className="dmh-rv-pchip">
-                            {projectName(pid)}
-                          </span>
-                        ))}
+
+            <div className="dmh-rv-list-body">
+              <div className="dmh-rv-list-count">{requestRows.length} requests</div>
+              {listsLoading ? (
+                <div className="dmh-rv-list-empty">Loading requests…</div>
+              ) : requestRows.length === 0 ? (
+                <div className="dmh-rv-list-empty">No requests match these filters.</div>
+              ) : (
+                requestRows.map((row) => {
+                  const badge = statusBadge(row.status);
+                  const assigned = row.reviewers.includes(user.id);
+                  const reviewer = row.reviewers[0];
+                  const cls = `dmh-rv-card${row.id === selectedId ? ' is-selected' : ''}`;
+                  return (
+                    <button
+                      key={row.id}
+                      type="button"
+                      className={cls}
+                      onClick={() => select(row.id)}
+                    >
+                      <div className="dmh-rv-card-top">
+                        <span className={`dmh-rv-spill ${badge.cls}`}>{badge.text}</span>
+                        {assigned && <span className="dmh-rv-card-assigned">Assigned to you</span>}
+                        <span className="dmh-rv-card-spacer" />
+                        {row.versionLabel && (
+                          <span className="dmh-rv-card-snap">snap · {row.versionLabel}</span>
+                        )}
                       </div>
-                    )}
-                    <div className="dmh-rv-card-author">
-                      <Avatar
-                        initials={userInitials(row.owner)}
-                        tone={avatarTone(row.owner ?? row.id)}
-                        size={18}
-                      />
-                      <span className="dmh-rv-card-author-name">{userName(row.owner)}</span>
-                    </div>
-                  </button>
-                );
-              })
-            )}
+                      <div className="dmh-rv-card-name">{row.title ?? 'Untitled request'}</div>
+                      <div className="dmh-rv-card-foot">
+                        <Avatar
+                          initials={userInitials(row.owner)}
+                          tone={avatarTone(row.owner ?? row.id)}
+                          size={18}
+                        />
+                        <span className="dmh-rv-card-uname">{userName(row.owner)}</span>
+                        {reviewer && (
+                          <>
+                            <ArrowRight
+                              size={13}
+                              strokeWidth={1.5}
+                              aria-hidden
+                              className="dmh-rv-card-arrow"
+                            />
+                            <Avatar initials={userInitials(reviewer)} tone={avatarTone(reviewer)} size={18} />
+                            <span className="dmh-rv-card-uname">{userName(reviewer)}</span>
+                          </>
+                        )}
+                        <span className="dmh-rv-card-spacer" />
+                        {row.projectIds[0] && (
+                          <span className="dmh-rv-pchip">{projectName(row.projectIds[0])}</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
           </div>
 
-          {/* detail panel */}
+          {/* ── SECTION 2 · open request detail ───────────────────────── */}
           <div className="dmh-rv-detail">
             {!selectedId ? (
               <div className="dmh-rv-detail-empty">
                 <div className="dmh-rv-detail-empty-ico">
-                  <GitCompare size={22} strokeWidth={1.5} aria-hidden />
+                  <Inbox size={22} strokeWidth={1.5} aria-hidden />
                 </div>
-                <div className="dmh-rv-detail-empty-t">Select a version to review</div>
+                <div className="dmh-rv-detail-empty-t">Select a request to review</div>
                 <div className="dmh-rv-detail-empty-m">
-                  Pick a row or a card to see its approval flow, impact and diff.
+                  Pick one on the left to see its impact, diff and comments.
                 </div>
               </div>
             ) : detailLoading && !detail ? (
               <div className="dmh-rv-detail-loading">
-                <div className="dmh-rv-skel" style={{ height: 22, width: '40%' }} />
-                <div className="dmh-rv-skel" style={{ height: 28, width: '60%' }} />
+                <div className="dmh-rv-skel" style={{ height: 24, width: '50%' }} />
+                <div className="dmh-rv-skel" style={{ height: 18, width: '70%' }} />
                 <div className="dmh-rv-skel" style={{ height: 80 }} />
                 <div className="dmh-rv-skel" style={{ height: 60 }} />
               </div>
             ) : !detail ? (
-              <div className="dmh-rv-detail-empty">
-                <div className="dmh-rv-detail-empty-t">Change not found</div>
-                <div className="dmh-rv-detail-empty-m">It may have been removed or is unavailable.</div>
-              </div>
+              draftHint ? (
+                <div className="dmh-rv-detail-empty">
+                  <div className="dmh-rv-detail-empty-t">The version is a draft again</div>
+                  <div className="dmh-rv-detail-empty-m">
+                    {draftHint.label ?? 'Your version'} left the review queue. Keep editing it in the
+                    canvas, or find it later under Open model → Continue.
+                  </div>
+                  <button
+                    type="button"
+                    className="dmh-rv-act dmh-rv-act--canvas"
+                    style={{ marginTop: 12 }}
+                    onClick={() => {
+                      openModel({ mode: 'editing', changesetId: draftHint.id, versionLabel: draftHint.label });
+                      navigate('/model');
+                    }}
+                  >
+                    <ExternalLink size={14} strokeWidth={1.6} aria-hidden />
+                    Continue editing in canvas
+                  </button>
+                </div>
+              ) : (
+                <div className="dmh-rv-detail-empty">
+                  <div className="dmh-rv-detail-empty-t">Request not found</div>
+                  <div className="dmh-rv-detail-empty-m">It may have been removed or is unavailable.</div>
+                </div>
+              )
             ) : (
               <>
-                <div className="dmh-rv-detail-head">
-                  {/* approval stepper */}
-                  <div className="dmh-rv-stepper">
-                    {steps.map((step, i) => (
-                      <div key={step.key} style={{ display: 'contents' }}>
-                        {i > 0 && (
-                          <span
-                            className={`dmh-rv-step-conn${
-                              steps[i - 1].state === 'completed'
-                                ? ' is-done'
-                                : steps[i - 1].state === 'current'
-                                  ? ' is-active'
-                                  : ''
-                            }`}
-                          />
-                        )}
-                        <div className={`dmh-rv-step is-${step.state}`}>
-                          <span className="dmh-rv-step-dot">
-                            {step.state === 'completed' ? (
-                              <Check size={12} strokeWidth={2.4} color="#fff" aria-hidden />
-                            ) : step.state === 'rejected' ? (
-                              <X size={12} strokeWidth={2.4} color="#fff" aria-hidden />
-                            ) : (
-                              <span className="dmh-rv-step-dot-inner" />
-                            )}
-                          </span>
-                          <span className="dmh-rv-step-label">
-                            {step.label}
-                            {step.mono ? <> <span className="mono">{step.mono}</span></> : null}
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* headline + actions */}
-                  <div className="dmh-rv-headline">
-                    <div className="dmh-rv-headline-main">
-                      <div className="dmh-rv-headline-title-row">
-                        <h1 className="dmh-rv-h1">{detail.title ?? 'Untitled change'}</h1>
+                {/* detail header */}
+                <div className="dmh-rv-dhead">
+                  <div className="dmh-rv-dhead-row">
+                    <div className="dmh-rv-dhead-main">
+                      <div className="dmh-rv-dtitle-row">
+                        <h1 className="dmh-rv-h1">{detail.title ?? 'Untitled request'}</h1>
                         {(() => {
-                          const p = cardPill(detail.status, false);
-                          return <span className={`dmh-rv-spill ${p.cls}`}>{p.text}</span>;
+                          const b = statusBadge(detail.status);
+                          return <span className={`dmh-rv-spill ${b.cls}`}>{b.text}</span>;
                         })()}
                       </div>
-                      <div className="dmh-rv-meta">
+                      <div className="dmh-rv-dmeta">
                         <Avatar
                           initials={userInitials(detail.owner)}
                           tone={avatarTone(detail.owner ?? detail.id)}
-                          size={22}
+                          size={20}
                         />
-                        <span className="dmh-rv-meta-text">
-                          <strong>{userName(detail.owner)}</strong> took a snapshot
-                          {detail.versionLabel ? <> of {detail.versionLabel}</> : null}
-                          {detail.submittedAt ? ` · ${fmtDate(detail.submittedAt)}` : ''}
+                        <span>
+                          From <strong>{userName(detail.owner)}</strong>
+                        </span>
+                        <span className="sep">·</span>
+                        <span>snapshot of {detail.versionLabel ?? '—'}</span>
+                        <span className="sep">·</span>
+                        <span>{fmtDate(detail.submittedAt ?? detail.createdAt)}</span>
+                        <span className="sep">·</span>
+                        <span>
+                          Reviewer <strong>{reviewerNames}</strong>
                         </span>
                       </div>
                     </div>
-                    <div className="dmh-rv-actions">
+                    <div className="dmh-rv-dactions">
+                      <Tooltip
+                        label={isOwnDraft
+                          ? 'Open your working copy for editing'
+                          : 'Opens read-only: the version is not a draft of yours — editing comes back with Withdraw / Reopen'}
+                      >
+                        <button
+                          type="button"
+                          className="dmh-rv-act dmh-rv-act--canvas"
+                          onClick={openInCanvas}
+                        >
+                          <ExternalLink size={14} strokeWidth={1.6} aria-hidden />
+                          {isOwnDraft ? 'Open in canvas' : 'View in canvas'}
+                        </button>
+                      </Tooltip>
+                      {canWithdraw && (
+                        <Tooltip label="Back to draft to keep editing — reviewer decisions are discarded">
+                          <button
+                            type="button"
+                            className="dmh-rv-act dmh-rv-act--withdraw"
+                            onClick={doWithdraw}
+                            disabled={acting}
+                          >
+                            <Undo2 size={14} strokeWidth={1.7} aria-hidden />
+                            Withdraw
+                          </button>
+                        </Tooltip>
+                      )}
+                      {canReopen && (
+                        <Tooltip label="Back to draft to fix the version and resubmit — a reject never deletes it">
+                          <button
+                            type="button"
+                            className="dmh-rv-act dmh-rv-act--withdraw"
+                            onClick={doReopen}
+                            disabled={acting}
+                          >
+                            <Undo2 size={14} strokeWidth={1.7} aria-hidden />
+                            Reopen as draft
+                          </button>
+                        </Tooltip>
+                      )}
+                      <button
+                        type="button"
+                        className="dmh-rv-act dmh-rv-act--comment"
+                        onClick={() => document.getElementById('dmh-rv-comment-input')?.focus()}
+                      >
+                        <MessageSquare size={14} strokeWidth={1.6} aria-hidden />
+                        Comment
+                      </button>
                       {canAct ? (
                         <button
                           type="button"
@@ -614,23 +685,13 @@ export default function ReviewScreen() {
                           Reject
                         </button>
                       ) : (
-                        <Tooltip label={actDisabledReason || 'Unavailable'}>
+                        <Tooltip label={noteText || 'Unavailable'}>
                           <button type="button" className="dmh-rv-act dmh-rv-act--reject" disabled>
                             <X size={14} strokeWidth={1.7} aria-hidden />
                             Reject
                           </button>
                         </Tooltip>
                       )}
-                      <button
-                        type="button"
-                        className="dmh-rv-act dmh-rv-act--comment"
-                        onClick={() => {
-                          document.getElementById('dmh-rv-comment-input')?.focus();
-                        }}
-                      >
-                        <MessageSquare size={14} strokeWidth={1.6} aria-hidden />
-                        Comment
-                      </button>
                       {canAct ? (
                         <button
                           type="button"
@@ -639,130 +700,133 @@ export default function ReviewScreen() {
                           disabled={acting}
                         >
                           <Check size={14} strokeWidth={1.9} aria-hidden />
-                          Approve and publish
+                          Approve
                         </button>
                       ) : (
-                        <Tooltip label={actDisabledReason || 'Unavailable'}>
+                        <Tooltip label={noteText || 'Unavailable'}>
                           <button type="button" className="dmh-rv-act dmh-rv-act--approve" disabled>
                             <Check size={14} strokeWidth={1.9} aria-hidden />
-                            Approve and publish
+                            Approve
                           </button>
                         </Tooltip>
                       )}
                     </div>
                   </div>
 
-                  {/* reviewers row */}
-                  {detail.reviewers.length > 0 && (
-                    <div className="dmh-rv-reviewers">
-                      <span className="dmh-rv-reviewers-label">Reviewers</span>
-                      {detail.reviewers.map((rid) => {
-                        const verdict = detail.approvals[rid]?.status;
-                        const stateCls =
-                          verdict === 'approved'
-                            ? 'dmh-rv-reviewer-state--approved'
-                            : verdict === 'rejected'
-                              ? 'dmh-rv-reviewer-state--rejected'
-                              : 'dmh-rv-reviewer-state--pending';
-                        const stateText =
-                          verdict === 'approved'
-                            ? 'approved'
-                            : verdict === 'rejected'
-                              ? 'rejected'
-                              : 'pending';
-                        return (
-                          <span key={rid} className="dmh-rv-reviewer">
-                            <Avatar
-                              initials={userInitials(rid)}
-                              tone={avatarTone(rid)}
-                              size={22}
-                            />
-                            <span className="dmh-rv-reviewer-name">{userName(rid)}</span>
-                            <span className={`dmh-rv-reviewer-state ${stateCls}`}>{stateText}</span>
-                          </span>
-                        );
-                      })}
+                  {noteText && (
+                    <div className="dmh-rv-note">
+                      <Lock size={15} strokeWidth={1.5} aria-hidden />
+                      <span>{noteText}</span>
                     </div>
                   )}
 
-                  {/* impact summary */}
                   {diff && (
                     <div className="dmh-rv-impact">
-                      <span className="dmh-rv-impact-counts">
-                        <GitCompare size={15} strokeWidth={1.6} aria-hidden />
-                        <span className="n">{diff.impact.tablesTouched}</span> tables /{' '}
-                        <span className="n">{diff.impact.columnsTouched}</span> columns touched
+                      <span className="dmh-rv-impact-chip">
+                        <Table2 size={13} strokeWidth={1.5} aria-hidden />
+                        {diff.impact.tablesTouched} tables
                       </span>
-                      {diff.impact.affectedOtherTables.length > 0 && (
-                        <span className="dmh-rv-impact-affected">
-                          <span className="dmh-rv-impact-affected-label">
-                            <AlertTriangle size={14} strokeWidth={1.6} aria-hidden />
-                            Also affects
-                          </span>
-                          {diff.impact.affectedOtherTables.map((t) => (
-                            <span key={t.id} className="dmh-rv-affected-chip">
-                              {t.name}
-                            </span>
-                          ))}
+                      <span className="dmh-rv-impact-chip">{diff.impact.columnsTouched} columns</span>
+                      <span className="dmh-rv-impact-chip">
+                        <Boxes size={13} strokeWidth={1.5} aria-hidden />
+                        {detail.projectIds.length} projects affected
+                      </span>
+                      <span className="dmh-rv-impact-spacer" />
+                      <span className="dmh-rv-impact-legend">
+                        <span className="lg lg--add">
+                          <span className="sq" />
+                          {diffTotals.added} added
                         </span>
-                      )}
+                        <span className="lg lg--mod">
+                          <span className="sq" />
+                          {diffTotals.edited} modified
+                        </span>
+                        <span className="lg lg--del">
+                          <span className="sq" />
+                          {diffTotals.deleted} deleted
+                        </span>
+                      </span>
                     </div>
                   )}
                 </div>
 
-                {/* diff body */}
-                <DiffBody diff={diff} />
-
-                {/* comments */}
-                <div className="dmh-rv-comments">
-                  <div className="dmh-rv-comments-title">
-                    <MessageSquare size={15} strokeWidth={1.6} aria-hidden />
-                    Comments
-                    <span className="dmh-rv-comments-count">{detail.comments.length}</span>
-                  </div>
-                  {detail.comments.length === 0 ? (
-                    <div className="dmh-rv-comments-empty">No comments yet. Start the discussion.</div>
-                  ) : (
-                    detail.comments.map((c, i) => (
-                      <div key={`${c.author}-${c.at ?? i}`} className="dmh-rv-comment">
+                {/* detail body */}
+                <div className="dmh-rv-dbody">
+                  {detail.description && (
+                    <div className="dmh-rv-note-card">
+                      <div className="dmh-rv-note-card-head">
                         <Avatar
-                          initials={userInitials(c.author)}
-                          tone={avatarTone(c.author)}
-                          size={26}
+                          initials={userInitials(detail.owner)}
+                          tone={avatarTone(detail.owner ?? detail.id)}
+                          size={22}
                         />
+                        <span className="dmh-rv-note-card-name">{userName(detail.owner)}</span>
+                        <span className="dmh-rv-note-card-role">requester</span>
+                        <span className="dmh-rv-note-card-spacer" />
+                        <span className="dmh-rv-note-card-at">
+                          {fmtDate(detail.submittedAt ?? detail.createdAt)}
+                        </span>
+                      </div>
+                      <div className="dmh-rv-note-card-text">{detail.description}</div>
+                    </div>
+                  )}
+
+                  {diffTotals.conflicts > 0 && (
+                    <div className="dmh-rv-note" role="alert">
+                      <TriangleAlert size={15} strokeWidth={1.7} aria-hidden />
+                      <span>
+                        <strong>{diffTotals.conflicts}</strong> {diffTotals.conflicts === 1 ? 'entity in this request was' : 'entities in this request were'} modified
+                        in production after this version edited {diffTotals.conflicts === 1 ? 'it' : 'them'} — approving will overwrite those production changes.
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="dmh-rv-changes-label">Changes · {diffTotals.total}</div>
+                  <DiffBody diff={diff} />
+
+                  {/* reviewer comments */}
+                  <div className="dmh-rv-comments">
+                    <div className="dmh-rv-comments-title">Reviewer comments</div>
+                    {detail.comments.map((c, i) => (
+                      <div key={`${c.author}-${c.at ?? i}`} className="dmh-rv-comment">
+                        <Avatar initials={userInitials(c.author)} tone={avatarTone(c.author)} size={26} />
                         <div className="dmh-rv-comment-body">
                           <div className="dmh-rv-comment-meta">
                             <span className="dmh-rv-comment-author">{userName(c.author)}</span>
+                            {detail.reviewers.includes(c.author) && (
+                              <span className="dmh-rv-comment-role">reviewer</span>
+                            )}
+                            <span className="dmh-rv-comment-spacer" />
                             <span className="dmh-rv-comment-at">{fmtDate(c.at)}</span>
                           </div>
                           <div className="dmh-rv-comment-text">{c.text}</div>
                         </div>
                       </div>
-                    ))
-                  )}
-                  <div className="dmh-rv-comment-form">
-                    <textarea
-                      id="dmh-rv-comment-input"
-                      className="dmh-rv-comment-input"
-                      placeholder="Add a comment…"
-                      value={commentText}
-                      onChange={(e) => setCommentText(e.target.value)}
-                      onKeyDown={(e) => {
-                        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
-                          e.preventDefault();
-                          void submitComment();
-                        }
-                      }}
-                      rows={1}
-                    />
-                    <button
-                      type="button"
-                      className="dmh-rv-comment-send"
-                      onClick={() => void submitComment()}
-                      disabled={!commentText.trim() || commentSending}
-                    >
-                      {commentSending ? 'Posting…' : 'Comment'}
-                    </button>
+                    ))}
+                    <div className="dmh-rv-comment-form">
+                      <Avatar initials={userInitials(user.id)} tone={avatarTone(user.id)} size={26} />
+                      <input
+                        id="dmh-rv-comment-input"
+                        className="dmh-rv-comment-input"
+                        placeholder="Add a comment…"
+                        value={commentText}
+                        onChange={(e) => setCommentText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            void submitComment();
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className="dmh-rv-comment-send"
+                        onClick={() => void submitComment()}
+                        disabled={!commentText.trim() || commentSending}
+                      >
+                        {commentSending ? 'Sending…' : 'Send'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </>
@@ -774,9 +838,24 @@ export default function ReviewScreen() {
   );
 }
 
-// ── diff body (added / edited / deleted rows) ────────────────────────────────
+// ── diff body (added / modified / deleted cards) ─────────────────────────────
+
+/** Label legible por colección versionada (el detalle agrupa por tipo de entidad). */
+const COLL_LBL: Record<string, string> = {
+  canonical_tables: 'Table',
+  canonical_columns: 'Column',
+  relationships: 'Relationship',
+  views: 'View',
+  parent_domains: 'Parent Domain',
+  abbreviation_dict: 'UDP term',
+};
+
+// Render por páginas: un changeset grande (migración/refactor) puede tocar
+// miles de entidades — montar una card por cada una congela la pantalla.
+const DIFF_PAGE = 100;
 
 function DiffBody({ diff }: { diff: ChangesetDiff | null }) {
+  const [shown, setShown] = useState(DIFF_PAGE);
   const rows = useMemo(() => {
     if (!diff) return [];
     const out: { kind: 'added' | 'edited' | 'deleted'; entity: DiffEntity }[] = [];
@@ -787,47 +866,56 @@ function DiffBody({ diff }: { diff: ChangesetDiff | null }) {
     });
     return out;
   }, [diff]);
+  useEffect(() => { setShown(DIFF_PAGE); }, [diff]);
 
   if (!diff) return <div className="dmh-rv-diff-empty">Loading diff…</div>;
   if (rows.length === 0)
-    return <div className="dmh-rv-diff-empty">No structural changes in this version.</div>;
+    return <div className="dmh-rv-diff-empty">No structural changes in this request.</div>;
 
   const meta: Record<typeof rows[number]['kind'], { sign: string; pill: string; verb: string }> = {
     added: { sign: '+', pill: 'added', verb: 'added' },
-    edited: { sign: '~', pill: 'edited', verb: 'modified' },
+    edited: { sign: '~', pill: 'modified', verb: 'modified' },
     deleted: { sign: '−', pill: 'deleted', verb: 'deleted' },
   };
 
   return (
     <div className="dmh-rv-diff">
-      {rows.map(({ kind, entity }) => {
+      {rows.slice(0, shown).map(({ kind, entity }) => {
         const m = meta[kind];
-        const chips = kind === 'deleted' ? [] : colChips(entity);
         return (
           <div key={`${kind}-${entity.id}`} className={`dmh-rv-diffrow is-${kind}`}>
             <div className="dmh-rv-diffrow-head">
               <span className="dmh-rv-diffrow-sign">{m.sign}</span>
               <span className="dmh-rv-diffrow-name">
-                <span className="mono">{entity.name}</span> {m.verb}
+                <span className={`mono${kind === 'deleted' ? ' strike' : ''}`}>{entity.name}</span> {m.verb}
               </span>
-              <span className="dmh-rv-diffrow-pill">{m.pill}</span>
+              <span className={`dmh-rv-diffrow-pill is-${kind}`}>{m.pill}</span>
+              {entity.conflict && (
+                <span
+                  className="dmh-rv-diffrow-conflict"
+                  title="Modified in production after this version edited it — approving will overwrite that change."
+                >
+                  <TriangleAlert size={11} strokeWidth={1.8} aria-hidden /> changed in production
+                </span>
+              )}
               <span className="dmh-rv-diffrow-spacer" />
               {entity.collection && (
-                <span className="dmh-rv-diffrow-coll">{entity.collection}</span>
+                <span className="dmh-rv-diffrow-coll">{COLL_LBL[entity.collection] ?? entity.collection}</span>
               )}
             </div>
-            {chips.length > 0 && (
-              <div className="dmh-rv-diffrow-cols">
-                {chips.map((c, i) => (
-                  <span key={`${c}-${i}`} className="dmh-rv-colchip">
-                    {c}
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
         );
       })}
+      {rows.length > shown && (
+        <button
+          type="button"
+          className="dmh-rv-act"
+          style={{ margin: '8px auto' }}
+          onClick={() => setShown((n) => n + DIFF_PAGE)}
+        >
+          Show {Math.min(DIFF_PAGE, rows.length - shown)} more ({rows.length - shown} remaining)
+        </button>
+      )}
     </div>
   );
 }

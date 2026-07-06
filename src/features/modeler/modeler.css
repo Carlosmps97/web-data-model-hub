@@ -1,7 +1,7 @@
 /* Workspace shell estilo Erwin (wk-*). Light only, navy via tokens. */
-.wk { display: grid; height: 100vh; grid-template-rows: 64px 1fr 40px;
+.wk { display: grid; height: 100vh; grid-template-rows: 84px 1fr 34px;
   grid-template-columns: 264px 1fr;
-  grid-template-areas: "toolbar toolbar" "explorer canvas" "tabs tabs";
+  grid-template-areas: "toolbar toolbar" "explorer canvas" "explorer status";
   background: var(--bg); overflow: hidden; }
 
 /* ── Toolbar por secciones (Screen 04 "B": 64px, grupos con divisor + caption) ── */
@@ -10,15 +10,22 @@
   overflow-x: auto; overflow-y: visible; white-space: nowrap; }
 .wk-toolbar::-webkit-scrollbar { height: 0; }
 
-/* Grupo: fila de botones-icono + caption tipográfico debajo */
-.wk-grp { display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3px; padding: 0 8px; flex-shrink: 0; }
+/* Grupo: contenido centrado + caption SIEMPRE abajo (todas a la misma altura) */
+.wk-grp { display: grid; grid-template-rows: 1fr auto; align-items: center; justify-items: center;
+  row-gap: 2px; padding: 7px 8px 6px; flex-shrink: 0; }
 .wk-grp-row { display: flex; align-items: center; gap: 2px; }
-.wk-grp-cap { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+.wk-grp-cap { align-self: end; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
   color: var(--text-muted-3); line-height: 1; }
+/* DRAWING en 2 filas (4 columnas) para mantener el alto armónico con Relationships */
+.wk-drawgrid { display: grid; grid-template-columns: repeat(4, auto); gap: 2px; }
+.wk-drawbtn { width: 34px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer;
+  transition: background .12s, color .12s; }
+.wk-drawbtn:hover:not(:disabled) { background: var(--fill-4); }
+.wk-drawbtn:disabled { opacity: .4; cursor: not-allowed; }
 
 /* Divisor entre grupos */
-.wk-div { width: 1px; align-self: center; height: 38px; background: var(--border-soft); flex-shrink: 0; margin: 0 2px; }
+.wk-div { width: 1px; align-self: center; height: 56px; background: var(--border-soft); flex-shrink: 0; margin: 0 2px; }
 
 /* Botón-icono 38×38 radius 9; hover #EFF2F7; activo .on #EAF0FF + #2E5BFF */
 .wk-tic { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center;
@@ -27,6 +34,35 @@
 .wk-tic:hover:not(:disabled) { background: var(--fill-4); }                    /* #F0F2F6 ≈ #EFF2F7 */
 .wk-tic:disabled { opacity: .4; cursor: not-allowed; }
 .wk-tic.on { background: var(--blue-tint); color: var(--primary); }            /* #EAF0FF + #2E5BFF */
+
+/* Segmented selector (Logical / Physical) en el grupo Actions */
+.wk-seg { display: inline-flex; align-items: center; height: 32px; padding: 2px; gap: 2px;
+  background: var(--fill-4); border-radius: 9px; flex-shrink: 0; }
+.wk-seg-btn { height: 28px; padding: 0 10px; border: none; background: transparent; border-radius: 7px;
+  font-family: var(--ui); font-size: 11.5px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+  transition: background .12s, color .12s; }
+.wk-seg-btn.on { background: var(--surface); color: var(--primary); box-shadow: 0 1px 2px rgba(16,27,48,.12); }
+.wk-seg-btn:not(.on):not(:disabled):hover { color: var(--ink); }
+.wk-seg-btn:disabled { opacity: .5; cursor: not-allowed; }
+.wk-seg-row { display: flex; justify-content: center; margin-top: 4px; }
+
+/* RELATIONSHIPS — selectores de extremo crow's-foot (Source/Target) + Draw */
+.wk-relwrap { display: flex; align-items: center; gap: 6px; }
+.wk-relbuild { display: flex; flex-direction: column; gap: 3px; }
+.wk-relrow { display: flex; align-items: center; gap: 2px; }
+.wk-rellbl { width: 46px; flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted-3); text-align: right; padding-right: 5px; }
+.wk-relend { width: 36px; height: 26px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s; }
+.wk-relend:hover:not(:disabled) { background: var(--fill-4); }
+.wk-relend.on { background: var(--blue-tint); color: var(--primary); border-color: var(--blue-border); }
+.wk-relend:disabled { opacity: .4; cursor: not-allowed; }
+.wk-reldraw { width: 40px; height: 40px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-soft); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-2); cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s; }
+.wk-reldraw:hover:not(:disabled) { background: var(--fill-4); }
+.wk-reldraw.on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.wk-reldraw:disabled { opacity: .4; cursor: not-allowed; }
 
 /* LOCATE & CENTER — input "Find a table…" con dropdown de coincidencias */
 .wk-find-wrap { position: relative; }
@@ -134,41 +170,110 @@
 .wk-canvas { grid-area: canvas; min-width: 0; min-height: 0; position: relative;
   display: flex; flex-direction: column; }
 
-/* Panel de Propiedades (derecha) — 3ª columna al seleccionar un bloque */
-.wk.has-props { grid-template-columns: 264px 1fr 304px;
-  grid-template-areas: "toolbar toolbar toolbar" "explorer canvas props" "tabs tabs tabs"; }
-.wk-props { grid-area: props; background: var(--surface); border-left: 1px solid var(--border); overflow-y: auto; padding: 12px; }
-.wk-props-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.wk-props-title { font-size: 13px; font-weight: 800; letter-spacing: -.01em; }
-.wk-props-sec { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--subtle); margin: 12px 0 6px; }
-.wk-props-field { display: grid; gap: 3px; margin-bottom: 8px; }
-.wk-props-field label { font-size: 11px; color: var(--muted); }
+/* Franja inferior del canvas: a un lado el toggle Logical / Physical */
+.wk-status { grid-area: status; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+  border-top: 1px solid var(--border-soft); background: var(--surface); }
+.wk-status-spacer { flex: 1; }
+
+/* Panel de Propiedades (derecha) — 3ª columna al seleccionar un bloque (diseño p8: 472px) */
+.wk.has-props { grid-template-columns: 264px minmax(0, 1fr) min(472px, 38vw);
+  grid-template-areas: "toolbar toolbar toolbar" "explorer canvas props" "explorer status props"; }
+.wk-props { grid-area: props; display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(16,27,48,.04); }
+
+/* Header fijo: glyph navy 34px + nombre 16/700 + "schema x · table" + close */
+.wk-props-top { flex: none; padding: 16px 18px 0; }
+.wk-props-head { display: flex; align-items: center; gap: 11px; }
+.wk-props-glyph { width: 34px; height: 34px; flex: none; border-radius: 9px; background: var(--navy); color: #fff;
+  display: flex; align-items: center; justify-content: center; }
+.wk-props-id { flex: 1; min-width: 0; }
+.wk-props-title { font-size: 16px; font-weight: 700; color: var(--ink); letter-spacing: -.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wk-props-sub { font-size: 12px; color: var(--subtle); }
+.wk-props-ro { margin-left: 7px; font-size: 10px; font-weight: 700; color: var(--amber-deep);
+  background: var(--amber-tint); border-radius: 999px; padding: 1px 7px; vertical-align: 1px; }
+.wk-props-close { width: 30px; height: 30px; flex: none; border: none; border-radius: 8px; background: var(--fill-4);
+  color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background .12s, color .12s; }
+.wk-props-close:hover { background: var(--border-2); color: var(--ink); }
+
+/* Cuerpo scrolleable (el header y las tabs quedan fijos) */
+.wk-props-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; }
+
+.wk-props-sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-muted-3); margin: 14px 0 9px; }
+.wk-props-field { display: grid; gap: 6px; margin-bottom: 12px; }
+.wk-props-field label { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-muted-3); }
 .wk-props-col { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-top: 1px solid var(--border-soft); font-size: 12px; }
 
-/* ── PropertiesPanel · pestañas (Definition / Columns / Links / Metadata) ── */
-.wk-pp-tabs { display: flex; gap: 4px; padding: 2px; margin-bottom: 10px; background: var(--fill-2); border: 1px solid var(--border-1); border-radius: var(--r-sm); }
-.wk-pp-tab { flex: 1; font-size: 11.5px; font-weight: 600; padding: 5px 6px; border-radius: calc(var(--r-sm) - 3px); cursor: pointer; color: var(--muted); background: transparent; border: none; text-align: center; transition: background .12s, color .12s; }
+/* ── PropertiesPanel · pestañas SUBRAYADAS (diseño p8: underline, no pill) ── */
+.wk-pp-tabs { display: flex; gap: 2px; margin-top: 14px; border-bottom: 1px solid var(--border-2); overflow-x: auto; }
+.wk-pp-tabs::-webkit-scrollbar { height: 0; }
+.wk-pp-tab { display: inline-flex; align-items: center; gap: 6px; padding: 9px 12px; margin-bottom: -1px;
+  font-family: var(--ui); font-size: 12.5px; font-weight: 600; color: var(--subtle); background: none; border: none;
+  border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; transition: color .12s, border-color .12s; }
 .wk-pp-tab:hover { color: var(--text-body); }
-.wk-pp-tab.active { background: var(--blue-tint); color: var(--primary); }       /* #EAF0FF / #2E5BFF */
+.wk-pp-tab.active { color: var(--primary); font-weight: 700; border-bottom-color: var(--primary); }
+.wk-pp-tab-count { font-size: 10.5px; font-weight: 600; color: inherit; background: var(--fill-4);
+  border-radius: 999px; padding: 0 6px; line-height: 16px; }
+.wk-pp-tab.active .wk-pp-tab-count { background: var(--blue-tint); }
 
 .wk-pp-cap { font-size: 11px; color: var(--muted); margin: 0 0 8px; }
 .wk-pp-textarea { font: inherit; font-size: 12.5px; line-height: 1.45; width: 100%; min-height: 64px; resize: vertical;
   padding: 7px 9px; color: var(--text-body); background: var(--surface); border: 1px solid var(--border-3); border-radius: var(--r-sm); }
 .wk-pp-textarea:focus { outline: none; border-color: var(--blue-border); box-shadow: 0 0 0 3px var(--primary-muted); }
 
-/* ── Column card (editor de fila, reordenable por DnD) ── */
+/* ── Columns: fila COMPACTA por default (diseño p8) + card expandida al click ── */
 .wk-pp-collist { display: flex; flex-direction: column; gap: 7px; }
-.wk-pp-colcard { position: relative; display: grid; grid-template-columns: 16px 1fr; gap: 7px; align-items: start;
-  padding: 8px; background: var(--surface); border: 1px solid var(--border-1); border-radius: var(--r-sm); transition: border-color .12s, box-shadow .12s, opacity .12s, transform .12s; }
-.wk-pp-colcard.dragging { opacity: .55; border-color: var(--blue); box-shadow: var(--shadow-xs); transform: rotate(-1deg); }
-.wk-pp-colcard.dropbefore { box-shadow: 0 -2px 0 0 var(--blue); }                 /* drop-indicator line (top) */
-.wk-pp-colcard.dropafter  { box-shadow: 0 2px 0 0 var(--blue); }                  /* drop-indicator line (bottom) */
-.wk-pp-grip { display: inline-flex; align-items: center; justify-content: center; padding-top: 5px; color: var(--text-muted-3); cursor: grab; user-select: none; }
+
+/* Fila colapsada: grip · icono PK/FK/PART · lógico · físico (azul) · tipo · badges */
+.wk-pp-colrow { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px 11px;
+  background: var(--surface); border: 1px solid var(--border-4); border-radius: 9px; font-size: 12.5px;
+  cursor: pointer; transition: border-color .12s, box-shadow .12s, opacity .12s; }
+.wk-pp-colrow:hover { border-color: var(--blue-border); box-shadow: var(--shadow-xs); }
+.wk-pp-colrow.pt { border-color: #C3EAD7; background: #F4FBF7; }                  /* fila partition (diseño) */
+.wk-pp-colrow-ic { width: 14px; flex: none; display: inline-flex; justify-content: center; }
+.wk-pp-colrow-name { flex: 1; min-width: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-pp-colrow-name.pk { font-weight: 600; color: var(--ink); }
+.wk-pp-colrow-phys { flex: none; font-size: 10.5px; color: var(--primary); }
+.wk-pp-colrow-dt { flex: none; font-size: 10.5px; color: var(--subtle); }
+.wk-pp-badge { flex: none; font-size: 9.5px; font-weight: 700; border-radius: 5px; padding: 1px 6px; }
+.wk-pp-badge.pk { color: var(--amber-deep); background: var(--amber-tint); }
+.wk-pp-badge.fk { color: var(--primary); background: var(--blue-tint); }
+.wk-pp-badge.pt { color: var(--green-deep); background: var(--green-tint); }
+
+/* Card expandida ("Editing column"): borde azul + ring + header colapsable */
+.wk-pp-colcard { background: var(--surface); border: 1.5px solid var(--primary); border-radius: 11px;
+  box-shadow: 0 0 0 3px var(--primary-muted); overflow: hidden;
+  transition: border-color .12s, box-shadow .12s, opacity .12s; }
+.wk-pp-colcard-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 11px;
+  background: var(--blue-soft); border: none; border-bottom: 1px solid var(--blue-border-2); text-align: left;
+  font-family: var(--ui); font-size: 12.5px; font-weight: 700; color: var(--ink); cursor: pointer; }
+.wk-pp-colcard-head svg { color: var(--primary); flex: none; }
+.wk-pp-colcard-ttl { flex: none; }
+.wk-pp-colcard-sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  text-align: right; font-size: 10.5px; font-weight: 600; color: var(--subtle); }
+.wk-pp-colcard-body { padding: 12px; display: grid; gap: 6px; min-width: 0; }
+.wk-pp-colcard-body .rd-input { height: 30px; font-size: 12px; }
+
+/* Estados DnD compartidos (fila colapsada y card expandida) */
+.wk-pp-colrow.dragging, .wk-pp-colcard.dragging { opacity: .55; }
+.wk-pp-colrow.dropbefore, .wk-pp-colcard.dropbefore { box-shadow: 0 -2px 0 0 var(--blue); } /* drop-indicator (top) */
+.wk-pp-colrow.dropafter,  .wk-pp-colcard.dropafter  { box-shadow: 0 2px 0 0 var(--blue); }  /* drop-indicator (bottom) */
+.wk-pp-grip { display: inline-flex; align-items: center; justify-content: center; flex: none;
+  color: var(--text-muted-3); cursor: grab; user-select: none; }
 .wk-pp-grip:active { cursor: grabbing; }
 .wk-pp-grip svg { display: block; }
-.wk-pp-colbody { display: grid; gap: 6px; min-width: 0; }
-.wk-pp-colbody .rd-input { height: 30px; font-size: 12px; }
 .wk-pp-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+/* Spinner del input de tipo mientras aplica el cambio de Parent Domain */
+.wk-pp-typewrap { position: relative; display: block; min-width: 0; }
+.wk-pp-typewrap .rd-input { width: 100%; padding-right: 26px; }
+.wk-spin { position: absolute; right: 8px; top: 50%; width: 12px; height: 12px; margin-top: -6px;
+  border-radius: 50%; border: 2px solid var(--blue-border); border-top-color: var(--primary);
+  animation: wk-spin .7s linear infinite; pointer-events: none; }
+@keyframes wk-spin { to { transform: rotate(360deg); } }
 .wk-pp-flags { display: flex; flex-wrap: wrap; gap: 4px; }
 .wk-pp-flag { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; padding: 3px 7px;
   border-radius: 999px; cursor: pointer; color: var(--muted); background: var(--fill-2); border: 1px solid var(--border-1); user-select: none; transition: all .12s; }
@@ -178,15 +283,20 @@
 .wk-pp-flag.on.pt { color: var(--k-pt); background: var(--k-pt-soft); border-color: var(--green-tint); }
 .wk-pp-flag.on.nl { color: var(--primary); background: var(--blue-tint); border-color: var(--blue-border); }
 
-/* ── Links (solo lectura) ── */
-.wk-pp-link { padding: 8px; border: 1px solid var(--border-1); border-radius: var(--r-sm); margin-bottom: 7px; font-size: 12px; }
-.wk-pp-link-head { display: flex; align-items: center; gap: 6px; color: var(--k-fk); font-weight: 600; margin-bottom: 4px; }
-.wk-pp-link-card { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); }
+/* ── Links (diseño pp3: cards con badge PARENT/CHILD + "on col" + "1 : N") ── */
+.wk-pp-link { padding: 12px 13px; border: 1px solid var(--border-4); border-radius: var(--r); margin-bottom: 10px; font-size: 12px; }
+.wk-pp-link-head { display: flex; align-items: center; gap: 9px; color: var(--ink); font-weight: 600; margin-bottom: 7px; font-size: 13px; min-width: 0; }
+.wk-pp-link-head .rd-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-pp-role { font-size: 10px; font-weight: 700; border-radius: 6px; padding: 2px 7px; flex: none; }
+.wk-pp-role.parent { color: var(--green-deep); background: var(--green-tint); }
+.wk-pp-role.child { color: var(--primary); background: var(--blue-tint); }
+.wk-pp-link-card { display: flex; align-items: center; gap: 9px; font-size: 11px; color: var(--subtle); }
 .wk-pp-link-card .rd-mono { color: var(--text-body); }
+.wk-pp-card-lbl { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
 
-/* ── Metadata (pares clave/valor, solo lectura) ── */
-.wk-pp-meta { display: grid; grid-template-columns: 96px 1fr; gap: 6px 10px; font-size: 12px; }
-.wk-pp-meta dt { color: var(--muted); }
+/* ── Metadata (diseño pp4: label 104px + valor) ── */
+.wk-pp-meta { display: grid; grid-template-columns: 104px 1fr; gap: 12px 10px; font-size: 12.5px; align-items: start; }
+.wk-pp-meta dt { font-size: 12px; font-weight: 600; color: var(--text-muted-3); }
 .wk-pp-meta dd { margin: 0; color: var(--text-body); word-break: break-word; }
 
 .wk-tabs { grid-area: tabs; display: flex; align-items: center; gap: 4px; padding: 0 8px;
@@ -302,7 +412,7 @@
 .exd-section { font-size: 12.5px; font-weight: 700; color: var(--ink); }
 .exd-locked { font-size: 11.5px; color: var(--text-muted); }
 
-.exd-cols { display: grid; grid-template-columns: 1.25fr 1fr; gap: 16px; align-items: start; }
+.exd-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; align-items: stretch; }
 @media (max-width: 760px) { .exd-cols { grid-template-columns: 1fr; } }
 
 .exd-opts { display: flex; flex-direction: column; gap: 11px; min-width: 0; }
@@ -364,6 +474,67 @@ select.exd-input { padding: 0 10px; }
 }
 .exd-foot-count { font-size: 12px; color: var(--text-muted); font-weight: 600; }
 
+/* Tables-to-export panel (top of the modal) + dark preview column */
+.exd-tablesx { display: flex; flex-direction: column; gap: 9px; }
+.exd-tablesx-head { display: flex; align-items: center; gap: 8px; }
+.exd-tablesx-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted-2); }
+.exd-tablesx-sub { font-size: 11px; color: var(--text-muted-2); }
+.exd-tablesx-spacer { flex: 1; }
+.exd-tablesx-count { font-size: 11px; font-weight: 600; color: var(--primary); background: var(--blue-tint); border-radius: var(--r-full); padding: 2px 9px; }
+.exd-tablesx-filter { display: flex; align-items: center; gap: 9px; height: 36px; padding: 0 11px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 9px; }
+.exd-tablesx-filter-ico { color: var(--text-muted-2); flex: none; }
+.exd-tablesx-filter-input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; font-family: var(--ui); font-size: 12.5px; color: var(--ink); }
+.exd-tablesx-filter-input::placeholder { color: var(--text-placeholder); }
+.exd-tablesx-link { border: none; background: none; cursor: pointer; font-family: var(--ui); font-size: 11.5px; font-weight: 600; color: var(--primary); padding: 2px; }
+.exd-tablesx-link.is-muted { color: var(--text-muted); }
+.exd-tablesx-link:hover:not(:disabled) { text-decoration: underline; }
+.exd-tablesx-link:disabled { opacity: .5; cursor: not-allowed; }
+.exd-tablesx-dot { color: var(--border-strong); }
+.exd-tablesx-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; border: 1px solid var(--border-soft); border-radius: 11px; }
+.exd-tablesx-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer; padding: 9px 12px; background: var(--surface); border: none; border-bottom: 1px solid var(--fill-2); font-family: var(--ui); }
+.exd-tablesx-row:last-child { border-bottom: none; }
+.exd-tablesx-row:hover { background: var(--fill-3); }
+.exd-cbox { width: 18px; height: 18px; flex: none; border-radius: 5px; border: 1.5px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; color: var(--on-primary); }
+.exd-cbox.is-on { background: var(--primary); border-color: var(--primary); }
+.exd-tablesx-row-ico { color: var(--text-muted); flex: none; }
+.exd-tablesx-row-name { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exd-tablesx-row-name.is-off { color: var(--text-muted-2); }
+.exd-tablesx-row-cols { flex: none; font-size: 11px; color: var(--text-muted-2); }
+.exd-previewcol { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.exd-previewcol .exd-code { flex: 1; min-height: 260px; max-height: 520px; }
+
+/* dialect cards */
+.exd-dialects { display: flex; gap: 10px; }
+.exd-dialect { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border-soft); border-radius: 11px; background: var(--surface); cursor: pointer; font-family: var(--ui); text-align: left; transition: border-color .12s, box-shadow .12s, background .12s; }
+.exd-dialect:hover:not(:disabled):not(.is-on) { border-color: var(--blue-border); }
+.exd-dialect:disabled { opacity: .7; cursor: not-allowed; }
+.exd-dialect.is-on { border: 1.5px solid var(--primary); background: #F6F9FF; box-shadow: 0 0 0 3px var(--primary-muted); }
+.exd-dialect-ico { width: 30px; height: 30px; flex: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.exd-dialect-ico--oracle { background: #FCEEEA; color: #C74634; }
+.exd-dialect-ico--dbx { background: #FDEEE3; color: #E8612C; }
+.exd-dialect-txt { display: flex; flex-direction: column; min-width: 0; }
+.exd-dialect-name { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.exd-dialect-sub { font-size: 11px; color: var(--text-muted-2); }
+.exd-dialect.is-on .exd-dialect-sub { color: var(--primary); }
+.exd-dialect-lock { margin-left: auto; color: var(--text-muted-3); flex: none; }
+
+/* include / databricks switches */
+.exd-switches { display: flex; flex-direction: column; gap: 13px; }
+.exd-swrow { display: flex; align-items: center; gap: 12px; }
+.exd-swrow-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.exd-swrow-label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.exd-swrow-hint { font-size: 11.5px; color: var(--text-muted-2); }
+.exd-swt { width: 38px; height: 22px; flex: none; border-radius: 999px; border: none; background: #CBD2DE; position: relative; cursor: pointer; transition: background .15s; padding: 0; }
+.exd-swt::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(16,27,48,.25); transition: left .15s; }
+.exd-swt.on { background: var(--primary); }
+.exd-swt.on::after { left: 18px; }
+
+/* table-format chips */
+.exd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.exd-chip { font-size: 12px; font-weight: 500; color: var(--text-muted); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 11px; cursor: pointer; font-family: var(--ui); transition: border-color .12s, background .12s, color .12s; }
+.exd-chip:hover:not(.is-on) { border-color: var(--blue-border); }
+.exd-chip.is-on { font-weight: 600; color: var(--primary); background: var(--blue-tint); border: 1.5px solid var(--primary); }
+
 /* ── Capa DRAWING (R6d): formas libres detrás de las tablas (nodeType 'shape') ── */
 .wk-shape { position: relative; box-sizing: border-box; }
 /* Anillo de selección consistente con las tablas (.wk-node.sel) pero más sutil. */
@@ -389,3 +560,11 @@ select.exd-input { padding: 0 10px; }
   border: none; background: transparent; color: var(--text-muted); font-size: 16px; line-height: 1; cursor: pointer;
   border-radius: 4px; }
 .wk-shape-del:hover { background: #F0C9C4; color: var(--danger, #C0392B); }
+
+/* View editor (PropertiesPanel · tab Views): lista de source tables + preview
+   SQL. Clases usadas por ViewEditor.tsx que nunca tuvieron definición. */
+.wk-ve-srclist { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; border: 1px solid var(--border-soft, #EAEDF2); border-radius: 8px; padding: 6px; }
+.wk-ve-srchead { display: flex; gap: 8px; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted, #8A93A5); padding: 2px 4px; }
+.wk-ve-srcrow { display: flex; gap: 8px; align-items: center; padding: 3px 4px; font-size: 12px; border-radius: 6px; }
+.wk-ve-srcrow:hover { background: var(--fill-3, #F4F6F9); }
+.wk-ve-preview { margin: 6px 0 0; padding: 10px; background: #101828; color: #D7E3F4; font-size: 11.5px; line-height: 1.5; border-radius: 8px; overflow: auto; max-height: 220px; white-space: pre-wrap; }

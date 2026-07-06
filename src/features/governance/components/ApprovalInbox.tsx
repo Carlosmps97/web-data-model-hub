@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Icon from '@/components/ui/Icon';
+import { promptDialog } from '@/components/ui/dialogs';
 import { useChangesetStore } from '@/store/useChangesetStore';
 import { getChangeset, type Changeset } from '../services/changeset.service';
 
@@ -23,8 +24,16 @@ export default function ApprovalInbox({ pushToast }: { pushToast: (m: string, k?
     try { await approve(id); setDetail(null); pushToast('Aprobado y publicado'); } catch { pushToast('No se pudo aprobar', 'err'); }
   };
   const onReject = async (id: string) => {
-    const note = prompt('Motivo del rechazo (opcional):') ?? undefined;
-    try { await reject(id, note); setDetail(null); pushToast('Rechazado'); } catch { pushToast('No se pudo rechazar', 'err'); }
+    try {
+      const value = await promptDialog({
+        title: 'Rechazar changeset',
+        label: 'Motivo del rechazo (opcional)',
+        confirmLabel: 'Rechazar', cancelLabel: 'Cancelar',
+        action: (v) => reject(id, v.trim() || undefined),
+      });
+      if (value === null) return; // canceló — no rechazar
+      setDetail(null); pushToast('Rechazado');
+    } catch { pushToast('No se pudo rechazar', 'err'); }
   };
 
   return (

@@ -39,7 +39,12 @@ export type OpenMode = 'readonly' | 'editing';
 /** Parámetros de apertura del modelo elegidos en el Open model modal (pg). */
 export interface OpenModelArgs {
   mode: OpenMode;
-  /** Working copy a editar (sólo en `editing`). */
+  /**
+   * Changeset asociado: en `editing` es la working copy a MUTAR; en `readonly`
+   * permite VER el contenido de un changeset (overlay /effective) sin habilitar
+   * escrituras — p.ej. un request en revisión abierto desde Review. Sin él,
+   * `readonly` muestra producción.
+   */
   changesetId?: string;
   /** Etiqueta de versión asociada (p.ej. la publicada en readonly, o la del draft). */
   versionLabel?: string | null;
@@ -52,10 +57,14 @@ interface SessionState {
   users: SimUser[];
   /** Cambia el actor por id; propaga el header `X-Dev-User`. No-op si el id no existe. */
   setUser: (id: string) => void;
+  /** Setea el actor REAL tras el login (usuario arbitrario, no de SIM_USERS).
+   *  La identidad autoritativa vive en `useAuthStore`; esto espeja el actor a
+   *  los lectores legacy (`user.id` == username) + el header X-Dev-User. */
+  setSessionUser: (u: SimUser) => void;
 
   /** Modo con el que se abrió el modelo, o `null` si no hay sesión de canvas. */
   openMode: OpenMode | null;
-  /** Id de la working copy abierta para editar (sólo `editing`). */
+  /** Changeset abierto: working copy en `editing`, o changeset visualizado en `readonly`. */
   activeChangesetId: string | null;
   /** Etiqueta de versión activa en el canvas (readonly: la publicada; editing: la del draft). */
   activeVersionLabel: string | null;
@@ -80,6 +89,10 @@ export const useSessionStore = create<SessionState>((set) => {
       setDevUser(next.id);
       set({ user: next });
     },
+    setSessionUser: (u: SimUser) => {
+      setDevUser(u.id);
+      set({ user: u });
+    },
 
     openMode: null,
     activeChangesetId: null,
@@ -87,7 +100,10 @@ export const useSessionStore = create<SessionState>((set) => {
     openModel: ({ mode, changesetId, versionLabel }: OpenModelArgs) =>
       set({
         openMode: mode,
-        activeChangesetId: mode === 'editing' ? (changesetId ?? null) : null,
+        // También en `readonly`: con changesetId el canvas LEE su overlay
+        // (/effective) para visualizar un request; las escrituras quedan
+        // bloqueadas por el gate de `openMode` (governance.service `rec()`).
+        activeChangesetId: changesetId ?? null,
         activeVersionLabel: versionLabel ?? null,
       }),
   };

@@ -108,3 +108,21 @@ export async function review(id: string, body: ReviewBody): Promise<ChangesetDet
 export function addComment(id: string, body: { text: string }): Promise<ChangesetDetail> {
   return apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/comments`, body);
 }
+
+/**
+ * Retira un request en revisión (`submitted → draft`) para seguir editándolo y
+ * re-enviarlo después. Sólo el owner (403 si no); invalida las decisiones ya
+ * registradas. 409 si el request ya fue decidido.
+ */
+export function withdraw(id: string): Promise<ChangesetDetail> {
+  return apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/withdraw`);
+}
+
+/**
+ * Reabre un request RECHAZADO (`rejected → draft`) para corregir la versión y
+ * re-enviarla. El reject nunca elimina la versión: esta es la vuelta a edición
+ * del owner (403 si no lo es). 409 si ya no está en rejected.
+ */
+export function reopen(id: string): Promise<ChangesetDetail> {
+  return apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/reopen`);
+}

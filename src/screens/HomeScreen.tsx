@@ -1,24 +1,26 @@
 /**
  * HomeScreen (p0) — the Data Model Hub workspace landing.
  *
- * Sections (per design #p0):
- *   · header: WORKSPACE eyebrow + "Data Model Hub" h1 + New project / Open model
- *   · PROJECTS filter strip (chips refilter the 5 counters; "+ New")
+ * Per the DMH-Erwin v20260625-2 design (#p0) the Home is purely informational:
+ *   · title row: "Workspace overview" eyebrow + "Welcome back, {name}" + a note
+ *     pointing to Model (canvas) for choosing / creating a version
+ *   · PROJECTS strip (chips refilter the 5 counters; "+N more")
  *   · 5 summary cards (Tables / Views / Relationships / Subject Areas / Projects)
- *   · two columns: versions panel (left) + side rail (dark snapshot card +
- *     requests inbox) (right)
+ *   · two columns: Requests assigned to you (left) + Versions read-only (right)
+ *
+ * Version creation / snapshot now lives INSIDE Model (the Open-model entry moved
+ * to the canvas toolbar), so the Versions panel here is read-only.
  *
  * Data: dashboard.service.getSummary + versioning.service (versions, published,
  * requests, users) + projects.service.listProjects. The actor comes from
  * useSessionStore (injects X-Dev-User). Loading → skeleton; errors → sonner.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { ArrowRight, Database, GitBranch, Inbox, Plus } from 'lucide-react';
+import { Database, GitBranch, Inbox, Info } from 'lucide-react';
 
 import { Avatar } from '@/components/ui';
-import OpenModelModal from '@/components/OpenModelModal';
 import { useSessionStore } from '@/store/useSessionStore';
 import { getSummary } from '@/services/dashboard.service';
 import {
@@ -27,7 +29,7 @@ import {
   listUsers,
   listVersions,
 } from '@/services/versioning.service';
-import { listProjects, createProject } from '@/services/projects.service';
+import { listProjects } from '@/services/projects.service';
 import type { Project } from '@/types/model';
 import type {
   DashboardSummary,
@@ -61,6 +63,13 @@ function statusPill(status: VersionStatus, isProduction: boolean): PillSpec {
   }
 }
 
+/** Label tone for the version mono code, matching the status. */
+function labelTone(status: VersionStatus, isProduction: boolean): string {
+  if (isProduction) return 'tone-green';
+  if (status === 'submitted') return 'tone-blue';
+  return 'tone-muted';
+}
+
 const STAT_DEFS: { key: keyof DashboardSummary; label: string }[] = [
   { key: 'tables', label: 'Tables' },
   { key: 'views', label: 'Views' },
@@ -77,14 +86,44 @@ function avatarTone(id: string): (typeof AVATAR_TONES)[number] {
   return AVATAR_TONES[h % AVATAR_TONES.length];
 }
 
+/** Epoch ms of the most recent timestamp on a row (for sorting). */
+function rowTs(v: VersionRow): number {
+  const iso = v.submittedAt ?? v.updatedAt ?? v.createdAt ?? null;
+  const t = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/** Compact relative time ("2h ago", "yesterday", "3d ago", or a date). */
+function relTime(iso?: string | null): string {
+  if (!iso) return '';
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return '';
+  const sec = Math.max(0, (Date.now() - then) / 1000);
+  if (sec < 60) return 'just now';
+  const min = sec / 60;
+  if (min < 60) return `${Math.floor(min)}m ago`;
+  const hr = min / 60;
+  if (hr < 24) return `${Math.floor(hr)}h ago`;
+  const day = hr / 24;
+  if (day < 2) return 'yesterday';
+  if (day < 7) return `${Math.floor(day)}d ago`;
+  const wk = day / 7;
+  if (wk < 5) return `${Math.floor(wk)}w ago`;
+  return new Date(then).toLocaleDateString();
+}
+
+const MAX_PROJECT_CHIPS = 6;
+
 // ── component ────────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
   const navigate = useNavigate();
   const user = useSessionStore((s) => s.user);
+  const firstName = user.name.split(' ')[0] || user.name;
 
   const [projects, setProjects] = useState<Project[]>([]);
-  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [selectedProjectIds, setSelectedProjectIds] = useState<Set<string>>(new Set());
+  const [showAllProjects, setShowAllProjects] = useState(false);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
 
@@ -93,8 +132,6 @@ export default function HomeScreen() {
   const [requests, setRequests] = useState<VersionRow[]>([]);
   const [users, setUsers] = useState<SimUserDto[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
-
-  const [openModelShown, setOpenModelShown] = useState(false);
 
   const userName = useCallback(
     (id?: string | null): string => {
@@ -110,20 +147,13 @@ export default function HomeScreen() {
     },
     [users],
   );
-
-  // Alta rápida de proyecto desde el Home (el Model Explorer también lo permite).
-  const handleNewProject = useCallback(async () => {
-    const name = window.prompt('Nombre del nuevo proyecto:')?.trim();
-    if (!name) return;
-    try {
-      const p = await createProject({ name });
-      setProjects((ps) => [...ps, p]);
-      setActiveProjectId(p.id);
-      toast.success(`Proyecto “${name}” creado`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo crear el proyecto');
-    }
-  }, []);
+  const projectName = useCallback(
+    (id?: string | null): string | null => {
+      if (!id) return null;
+      return projects.find((p) => p.id === id)?.name ?? null;
+    },
+    [projects],
+  );
 
   // Project list + non-summary lists load once (actor-scoped via the http header).
   useEffect(() => {
@@ -157,11 +187,17 @@ export default function HomeScreen() {
     // Re-run when the simulated actor changes so the inbox reflects them.
   }, [user.id]);
 
-  // Summary reloads whenever the project filter changes.
+  // Stable key for the multi-project filter (sorted ids) → drives the summary.
+  const projectFilterKey = useMemo(
+    () => [...selectedProjectIds].sort().join(','),
+    [selectedProjectIds],
+  );
+
+  // Summary reloads whenever the project filter (union) changes.
   useEffect(() => {
     let cancelled = false;
     setSummaryLoading(true);
-    getSummary(activeProjectId ?? undefined)
+    getSummary(projectFilterKey ? projectFilterKey.split(',') : [])
       .then((s) => {
         if (!cancelled) setSummary(s);
       })
@@ -175,20 +211,29 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-  }, [activeProjectId]);
+  }, [projectFilterKey]);
 
-  /** Versions shown in the left panel: production row first, then submitted. */
-  const panelRows = useMemo(() => {
+  /** Read-only version list: production first, then everything else by recency. */
+  const versionRows = useMemo(() => {
     const rows: { row: VersionRow; isProduction: boolean }[] = [];
-    if (published) rows.push({ row: published, isProduction: true });
-    versions
-      .filter((v) => v.status === 'submitted' && v.id !== published?.id)
-      .forEach((v) => rows.push({ row: v, isProduction: false }));
+    const seen = new Set<string>();
+    if (published) {
+      rows.push({ row: published, isProduction: true });
+      seen.add(published.id);
+    }
+    [...versions]
+      .filter((v) => !seen.has(v.id))
+      .sort((a, b) => rowTs(b) - rowTs(a))
+      .forEach((v) => {
+        rows.push({ row: v, isProduction: false });
+        seen.add(v.id);
+      });
     return rows;
   }, [versions, published]);
 
+  const shownProjects = showAllProjects ? projects : projects.slice(0, MAX_PROJECT_CHIPS);
+  const hiddenProjects = Math.max(0, projects.length - MAX_PROJECT_CHIPS);
   const pendingCount = requests.length;
-  const publishedLabel = published?.versionLabel ?? null;
 
   const goReview = (versionId?: string) => {
     navigate(versionId ? `/review?id=${encodeURIComponent(versionId)}` : '/review');
@@ -197,48 +242,47 @@ export default function HomeScreen() {
   return (
     <div className="dmh-home">
       <div className="dmh-home-inner">
-        {/* ── header ─────────────────────────────────────────────── */}
+        {/* ── title row ──────────────────────────────────────────── */}
         <div className="dmh-home-head">
           <div className="dmh-home-head-titles">
-            <div className="dmh-home-eyebrow">Workspace</div>
-            <h1 className="dmh-home-h1">Data Model Hub</h1>
+            <div className="dmh-home-eyebrow">Workspace overview</div>
+            <h1 className="dmh-home-h1">Welcome back, {firstName}</h1>
           </div>
-          <div className="dmh-home-actions">
-            <button
-              type="button"
-              className="dmh-btn dmh-btn--secondary dmh-home-cta"
-              onClick={handleNewProject}
-            >
-              <Plus size={15} strokeWidth={1.7} aria-hidden />
-              <span>New project</span>
-            </button>
-            <button
-              type="button"
-              className="dmh-btn dmh-btn--primary dmh-home-cta"
-              onClick={() => setOpenModelShown(true)}
-            >
-              <ArrowRight size={16} strokeWidth={1.6} aria-hidden />
-              <span>Open model</span>
-            </button>
+          <div className="dmh-home-note">
+            Open{' '}
+            <Link to="/model" className="dmh-home-note-link">
+              Model (canvas)
+            </Link>{' '}
+            to choose
+            <br />
+            or create a version.
           </div>
         </div>
 
         {/* ── projects filter strip ──────────────────────────────── */}
         <div className="dmh-home-projects">
           <span className="dmh-home-projects-label">Projects</span>
-          {projects.map((p) => {
-            const active = p.id === activeProjectId;
+          {shownProjects.map((p) => {
+            const active = selectedProjectIds.has(p.id);
+            const toggle = () =>
+              setSelectedProjectIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(p.id)) next.delete(p.id);
+                else next.add(p.id);
+                return next;
+              });
             return (
               <span
                 key={p.id}
                 role="button"
                 tabIndex={0}
+                aria-pressed={active}
                 className={`dmh-chip${active ? ' is-active' : ''}`}
-                onClick={() => setActiveProjectId(active ? null : p.id)}
+                onClick={toggle}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
-                    setActiveProjectId(active ? null : p.id);
+                    toggle();
                   }
                 }}
               >
@@ -247,14 +291,33 @@ export default function HomeScreen() {
               </span>
             );
           })}
-          <button
-            type="button"
-            className="dmh-home-chip-new"
-            onClick={handleNewProject}
-          >
-            <Plus size={12} strokeWidth={1.8} aria-hidden />
-            New
-          </button>
+          {!showAllProjects && hiddenProjects > 0 && (
+            <button
+              type="button"
+              className="dmh-home-projects-more"
+              onClick={() => setShowAllProjects(true)}
+            >
+              +{hiddenProjects} more
+            </button>
+          )}
+          {showAllProjects && projects.length > MAX_PROJECT_CHIPS && (
+            <button
+              type="button"
+              className="dmh-home-projects-more"
+              onClick={() => setShowAllProjects(false)}
+            >
+              Show less
+            </button>
+          )}
+          {selectedProjectIds.size > 0 && (
+            <button
+              type="button"
+              className="dmh-home-projects-clear"
+              onClick={() => setSelectedProjectIds(new Set())}
+            >
+              Clear
+            </button>
+          )}
         </div>
 
         {/* ── 5 summary cards ────────────────────────────────────── */}
@@ -271,174 +334,128 @@ export default function HomeScreen() {
           ))}
         </div>
 
-        {/* ── two columns ────────────────────────────────────────── */}
+        {/* ── two columns: requests (left) · versions read-only (right) ── */}
         <div className="dmh-home-cols">
-          {/* versions panel */}
-          <div className="dmh-vpanel">
-            <div className="dmh-vpanel-head">
-              <span className="dmh-vpanel-title">
-                <GitBranch size={15} strokeWidth={1.5} aria-hidden />
-                Versions
-              </span>
-              <span className="dmh-vpanel-spacer" />
-              <button type="button" className="dmh-vpanel-link" onClick={() => goReview()}>
-                Open Review &amp; publish
-                <ArrowRight size={14} strokeWidth={1.6} aria-hidden />
+          {/* requests assigned to the logged-in user */}
+          <div className="dmh-reqpanel">
+            <div className="dmh-reqpanel-head">
+              <div className="dmh-reqpanel-ico">
+                <Inbox size={16} strokeWidth={1.5} aria-hidden />
+              </div>
+              <div className="dmh-reqpanel-htext">
+                <div className="dmh-reqpanel-title">Requests</div>
+                <div className="dmh-reqpanel-sub">
+                  Change requests across projects waiting for review
+                </div>
+              </div>
+              {pendingCount > 0 && (
+                <span className="dmh-reqpanel-count">{pendingCount} pending</span>
+              )}
+              <button
+                type="button"
+                className="dmh-btn dmh-btn--primary dmh-reqpanel-cta"
+                onClick={() => goReview()}
+              >
+                <Inbox size={14} strokeWidth={1.6} aria-hidden />
+                Review requests
               </button>
             </div>
-            <div className="dmh-vtable-head">
-              <div>Version</div>
-              <div>Status</div>
-              <div>Owner</div>
-              <div className="dmh-vcol-actions">Actions</div>
+
+            <div className="dmh-reqpanel-body">
+              {listsLoading ? (
+                <div className="dmh-reqpanel-empty">Loading…</div>
+              ) : pendingCount === 0 ? (
+                <div className="dmh-reqpanel-empty">
+                  No requests waiting for your review.
+                </div>
+              ) : (
+                requests.map((req) => {
+                  const proj = projectName(req.projectIds[0]);
+                  return (
+                    <button
+                      key={req.id}
+                      type="button"
+                      className="dmh-reqitem"
+                      onClick={() => goReview(req.id)}
+                    >
+                      <Avatar
+                        initials={userInitials(req.owner)}
+                        tone={avatarTone(req.owner ?? req.id)}
+                        size={32}
+                      />
+                      <span className="dmh-reqitem-body">
+                        <span className="dmh-reqitem-top">
+                          <span className="dmh-reqitem-t">
+                            {req.title ?? req.versionLabel ?? 'Untitled request'}
+                          </span>
+                          {proj && <span className="dmh-reqitem-proj">{proj}</span>}
+                        </span>
+                        <span className="dmh-reqitem-m">
+                          {userName(req.owner)}
+                          {req.versionLabel ? ` · snapshot of ${req.versionLabel}` : ''}
+                          {relTime(req.submittedAt ?? req.createdAt)
+                            ? ` · ${relTime(req.submittedAt ?? req.createdAt)}`
+                            : ''}
+                        </span>
+                      </span>
+                      <span className="dmh-reqitem-cta">Review</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* versions (read-only, all projects) */}
+          <div className="dmh-vside">
+            <div className="dmh-vside-head">
+              <div className="dmh-vside-ico">
+                <GitBranch size={16} strokeWidth={1.5} aria-hidden />
+              </div>
+              <div>
+                <div className="dmh-vside-title">Versions</div>
+                <div className="dmh-vside-sub">{versionRows.length} total · all projects</div>
+              </div>
             </div>
 
-            {listsLoading ? (
-              <div className="dmh-vpanel-empty">Loading versions…</div>
-            ) : panelRows.length === 0 ? (
-              <div className="dmh-vpanel-empty">
-                No published or in-review versions yet. Snapshot production to start one.
-              </div>
-            ) : (
-              panelRows.map(({ row, isProduction }) => {
-                const pill = statusPill(row.status, isProduction);
-                const labelTone = isProduction
-                  ? 'tone-green'
-                  : row.status === 'submitted'
-                    ? 'tone-blue'
-                    : 'tone-muted';
-                return (
-                  <div
-                    key={row.id}
-                    className={`dmh-vrow${isProduction ? ' is-production' : ''}`}
-                  >
-                    <div>
-                      <div className={`dmh-vrow-label ${labelTone}`}>
+            <div className="dmh-vside-body">
+              {listsLoading ? (
+                <div className="dmh-reqpanel-empty">Loading versions…</div>
+              ) : versionRows.length === 0 ? (
+                <div className="dmh-reqpanel-empty">No versions yet.</div>
+              ) : (
+                versionRows.map(({ row, isProduction }) => {
+                  const pill = statusPill(row.status, isProduction);
+                  const proj = projectName(row.projectIds[0]);
+                  return (
+                    <div
+                      key={row.id}
+                      className={`dmh-vside-row${isProduction ? ' is-production' : ''}`}
+                    >
+                      <span className={`dmh-vside-label ${labelTone(row.status, isProduction)}`}>
                         {row.versionLabel ?? '—'}
-                      </div>
-                      {row.title && <div className="dmh-vrow-sub">{row.title}</div>}
-                    </div>
-                    <div>
+                      </span>
+                      <span className="dmh-vside-meta">
+                        {proj ? `${proj} · ` : ''}
+                        {userName(row.owner)}
+                      </span>
                       <span className={`dmh-vpill ${pill.cls}`}>
                         <span className={`dot${pill.hollow ? ' hollow' : ''}`} />
                         {pill.text}
                       </span>
                     </div>
-                    <div className="dmh-vrow-owner">{userName(row.owner)}</div>
-                    <div className="dmh-vrow-actions">
-                      {isProduction ? (
-                        <button
-                          type="button"
-                          className="dmh-vrow-act is-muted"
-                          onClick={() => goReview(row.id)}
-                        >
-                          View
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className="dmh-vrow-act"
-                          onClick={() => goReview(row.id)}
-                        >
-                          Review
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* side rail */}
-          <div className="dmh-home-rail">
-            {/* dark snapshot card */}
-            <div className="dmh-newcard">
-              <div className="dmh-newcard-ico">
-                <GitBranch size={18} strokeWidth={1.5} aria-hidden />
-              </div>
-              <div className="dmh-newcard-title">Create new version</div>
-              <div className="dmh-newcard-desc">
-                Take a snapshot of{' '}
-                <strong>{publishedLabel ? `production ${publishedLabel}` : 'production'}</strong>{' '}
-                and work on your own copy without affecting anyone.
-              </div>
-              <button
-                type="button"
-                className="dmh-newcard-btn"
-                onClick={() => setOpenModelShown(true)}
-              >
-                {publishedLabel ? `Snapshot of ${publishedLabel} →` : 'Snapshot production →'}
-              </button>
+                  );
+                })
+              )}
             </div>
 
-            {/* requests inbox */}
-            <div className="dmh-reqcard">
-              <div className="dmh-reqcard-head">
-                <div className="dmh-reqcard-ico">
-                  <Inbox size={18} strokeWidth={1.5} aria-hidden />
-                </div>
-                <div className="dmh-reqcard-title">Requests</div>
-                {pendingCount > 0 && (
-                  <span className="dmh-reqcard-count">{pendingCount} pending</span>
-                )}
-              </div>
-
-              {listsLoading ? (
-                <div className="dmh-reqcard-empty">Loading…</div>
-              ) : pendingCount === 0 ? (
-                <div className="dmh-reqcard-empty">
-                  No requests waiting for your review.
-                </div>
-              ) : (
-                requests.map((req) => (
-                  <button
-                    key={req.id}
-                    type="button"
-                    className="dmh-reqrow"
-                    onClick={() => goReview(req.id)}
-                  >
-                    <Avatar
-                      initials={userInitials(req.owner)}
-                      tone={avatarTone(req.owner ?? req.id)}
-                      size={24}
-                    />
-                    <span className="dmh-reqrow-body">
-                      <span className="dmh-reqrow-t">
-                        {req.title ?? req.versionLabel ?? 'Untitled request'}
-                      </span>
-                      <span className="dmh-reqrow-m">
-                        {userName(req.owner)}
-                        {req.versionLabel ? ` · ${req.versionLabel}` : ''}
-                      </span>
-                    </span>
-                    <span className="dmh-reqrow-cta">Review</span>
-                  </button>
-                ))
-              )}
-
-              <button type="button" className="dmh-reqcard-foot" onClick={() => goReview()}>
-                Open Review &amp; publish
-                <ArrowRight size={13} strokeWidth={1.6} aria-hidden />
-              </button>
+            <div className="dmh-vside-foot">
+              <Info size={13} strokeWidth={1.5} aria-hidden />
+              Read-only · manage versions inside Model
             </div>
           </div>
         </div>
       </div>
-
-      {/* ── Open model modal (pg) ───────────────────────────────── */}
-      <OpenModelModal
-        open={openModelShown}
-        onClose={() => setOpenModelShown(false)}
-        published={published}
-        projectName={
-          activeProjectId
-            ? (projects.find((p) => p.id === activeProjectId)?.name ?? null)
-            : null
-        }
-        defaultProjectId={activeProjectId}
-        users={users}
-      />
     </div>
   );
 }

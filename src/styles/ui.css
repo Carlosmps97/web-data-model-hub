@@ -52,6 +52,16 @@
 .rd-input::placeholder { color: var(--subtle); }
 .rd-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-muted); }
 textarea.rd-input { font-family: var(--ui); resize: vertical; }
+/* Selects: el padding vertical de .rd-input recorta el texto cuando se fija un
+   height menor (p.ej. 30px en el PropertiesPanel) — el nativo ya centra solo. */
+select.rd-input { padding-top: 0; padding-bottom: 0; height: 38px; }
+
+/* Spinner genérico inline (feedback de acción en curso; hereda el color del texto) */
+.rd-spin { display: inline-block; width: 12px; height: 12px; flex: none; border-radius: 50%;
+  border: 2px solid transparent; border-top-color: currentColor; border-right-color: currentColor;
+  animation: rd-spin .6s linear infinite; vertical-align: -2px; }
+.rd-btn .rd-spin { margin-right: 6px; }
+@keyframes rd-spin { to { transform: rotate(360deg); } }
 .rd-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
 .rd-search { position: relative; }
 .rd-search > svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--subtle); pointer-events: none; }

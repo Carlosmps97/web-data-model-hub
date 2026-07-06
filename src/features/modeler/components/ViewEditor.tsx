@@ -134,7 +134,7 @@ export default function ViewEditor({
       subtitle={editing ? name : `Define a SQL view over ${defaultName}`}
       icon={Eye}
       backdrop="canvas"
-      canvasTop={116}
+      canvasTop={136}
       width={620}
       onClose={onClose}
       footer={

@@ -34,6 +34,8 @@ interface ConfirmDialogProps {
   cancelLabel?: string;
   variant?: 'danger' | 'primary';
   dontAskKey?: string;
+  /** Acción en curso: deshabilita botones/ESC/backdrop y muestra spinner en confirmar. */
+  busy?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -46,6 +48,7 @@ export default function ConfirmDialog({
   cancelLabel = 'Cancelar',
   variant = 'primary',
   dontAskKey,
+  busy = false,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -60,10 +63,12 @@ export default function ConfirmDialog({
   useEffect(() => {
     if (!open) return;
     const t = window.setTimeout(() => confirmBtnRef.current?.focus(), 30);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onCancel(); };
-    window.addEventListener('keydown', onKey);
-    return () => { window.clearTimeout(t); window.removeEventListener('keydown', onKey); };
-  }, [open, onCancel]);
+    // Capture + stopPropagation: si el confirm se abre SOBRE un Modal (que
+    // también escucha ESC en window), el ESC cierra sólo este diálogo.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); if (!busy) onCancel(); } };
+    window.addEventListener('keydown', onKey, true);
+    return () => { window.clearTimeout(t); window.removeEventListener('keydown', onKey, true); };
+  }, [open, busy, onCancel]);
 
   const handleConfirm = useCallback(() => {
     if (dontAskKey && skipNext) {
@@ -77,7 +82,7 @@ export default function ConfirmDialog({
   const danger = variant === 'danger';
 
   return (
-    <div className="dmh-backdrop" onClick={onCancel} role="presentation">
+    <div className="dmh-backdrop" onClick={busy ? undefined : onCancel} role="presentation">
       <div
         className="dmh-modal"
         style={{ width: 440 }}
@@ -108,13 +113,15 @@ export default function ConfirmDialog({
           </div>
         </div>
         <div className="m-foot">
-          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onCancel}>{cancelLabel}</button>
+          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
           <button
             ref={confirmBtnRef}
             type="button"
             className={`rd-btn rd-btn-sm ${danger ? 'rd-btn-danger' : 'rd-btn-primary'}`}
+            disabled={busy}
             onClick={handleConfirm}
           >
+            {busy && <span className="rd-spin" aria-hidden />}
             {confirmLabel}
           </button>
         </div>

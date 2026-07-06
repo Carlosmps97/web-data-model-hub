@@ -6,7 +6,7 @@
  * `useSessionStore.activeChangesetId` (modo `editing`). Pero TODOS los lectores
  * existentes del changeset activo —tanto las escrituras de `governance.service`
  * (`active()`) como los gates de UI (`ModelerCanvas.onConnect`, `TableNode`,
- * `PropertiesPanel`, `RelationshipPopup`, `GovDrawer`, `ModelerScreen`)— leen
+ * `PropertiesPanel`, `RelationshipPopup`, `GovDrawer`)— leen
  * `useChangesetStore.activeId`. Sin este puente, editar en el canvas no
  * encuentra changeset activo y lanza "Se requiere un changeset activo".
  *

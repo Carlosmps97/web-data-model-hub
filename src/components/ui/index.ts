@@ -12,12 +12,6 @@ export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';
 export { default as Dialog } from './Dialog';
 export type { DialogProps, DialogBackdrop } from './Dialog';
 
-export { default as Pill } from './Pill';
-export type { PillProps, PillTone } from './Pill';
-
-export { default as Chip } from './Chip';
-export type { ChipProps } from './Chip';
-
 export { default as Badge } from './Badge';
 export type { BadgeProps, BadgeTone } from './Badge';
 
@@ -30,4 +24,4 @@ export type { SegmentedControlProps, SegmentOption } from './SegmentedControl';
 // Reused existing primitives.
 export { default as Tooltip } from './Tooltip';
 export { default as Modal } from './Modal';
-export { default as ConfirmDialog, shouldSkipConfirm, clearSkipConfirm } from './ConfirmDialog';
+export { default as ConfirmDialog } from './ConfirmDialog';

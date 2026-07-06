@@ -29,6 +29,9 @@ export interface VersionRow {
   createdAt?: string | null;
   updatedAt?: string | null;
   submittedAt?: string | null;
+  /** Timestamp del apply COMPLETO a producción. `approved` sin appliedAt =
+   *  publish interrumpido (el backend lo excluye de la fila de producción). */
+  appliedAt?: string | null;
 }
 
 /** Los 5 contadores del Home (global o acotado a un proyecto). */
@@ -108,6 +111,9 @@ export interface DiffEntity {
   id: string;
   name: string;
   collection?: string | null;
+  /** true: la entidad cambió en PRODUCCIÓN después de que esta versión la editó
+   *  (al publicar, este delta la pisaría). */
+  conflict?: boolean;
 }
 
 /** Buckets de cambios de una colección dentro del diff. */

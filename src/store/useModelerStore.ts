@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import type { ReactFlowInstance } from '@xyflow/react';
 import * as mod from '@/features/modeler/services/modeler.service';
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
@@ -25,6 +26,14 @@ interface ModelerState {
   projects: Project[];
   folders: Folder[];
   subjectAreas: SubjectArea[];
+  /**
+   * Cache por-proyecto del árbol del explorer (folders + canvases), independiente
+   * del proyecto ACTIVO: permite expandir varios proyectos a la vez sin tocar la
+   * sesión del canvas. `folders`/`subjectAreas` (legacy) siguen espejando el activo.
+   */
+  trees: Record<string, { folders: Folder[]; subjectAreas: SubjectArea[] }>;
+  /** Canvas cuya apertura está en vuelo (spinner en el explorer). */
+  openingSaId: string | null;
   activeProjectId: string | null;
   activeFolderId: string | null;
   activeSaId: string | null;
@@ -52,18 +61,34 @@ interface ModelerState {
   deleteDrawing: (id: string) => void;
   /** Persiste el array de drawings (debounced) vía el endpoint del canvas activo. */
   persistDrawings: () => void;
+  /**
+   * Cambios de la sesión de edición desde el último Save/Publish (checkpoint).
+   * Alimenta el guard de salida: navegar a otro módulo o cerrar la pestaña con
+   * `dirty` pide confirmación (guardar y salir / salir sin guardar).
+   */
+  dirty: boolean;
+  markDirty: () => void;
+  clearDirty: () => void;
+  /** Save integral (botón Save / "Guardar y salir"): layout completo + drawings (flush) y limpia `dirty`. */
+  saveAll: () => Promise<void>;
   loadProjects: () => Promise<void>;
   selectProject: (pid: string) => Promise<void>;
   selectFolder: (folderId: string | null) => void;
-  selectSubjectArea: (saId: string) => Promise<void>;
+  /** Carga el árbol (folders+canvases) de CUALQUIER proyecto al cache `trees` sin tocar la selección. */
+  loadProjectTree: (pid: string) => Promise<void>;
+  /**
+   * Abre un canvas (de cualquier proyecto cargado). Si pertenece a otro proyecto,
+   * ese proyecto pasa a ser el activo. `openingSaId` marca la apertura en vuelo.
+   */
+  selectSubjectArea: (saId: string, projectId?: string) => Promise<void>;
   // ── Folders / Canvas / Projects (gestión del Model Explorer) ──
   loadFolders: (projectId: string) => Promise<void>;
   createFolder: (projectId: string, parentFolderId: string | null, name: string) => Promise<void>;
-  renameFolder: (id: string, name: string) => Promise<void>;
-  deleteFolder: (id: string) => Promise<void>;
+  renameFolder: (id: string, name: string, projectId?: string) => Promise<void>;
+  deleteFolder: (id: string, projectId?: string) => Promise<void>;
   createCanvas: (projectId: string, folderId: string | null, name: string) => Promise<void>;
-  renameCanvas: (id: string, name: string) => Promise<void>;
-  deleteCanvas: (id: string) => Promise<void>;
+  renameCanvas: (id: string, name: string, projectId?: string) => Promise<void>;
+  deleteCanvas: (id: string, projectId?: string) => Promise<void>;
   moveCanvas: (id: string, folderId: string | null) => Promise<void>;
   renameProject: (id: string, name: string) => Promise<void>;
   deleteProject: (id: string) => Promise<void>;
@@ -85,7 +110,7 @@ interface ModelerState {
   setSelectedTable: (id: string | null) => void;
   setSelectedEdge: (id: string | null) => void;
   removeTableFromArea: (tableId: string) => Promise<void>;
-  updateTable: (id: string, fields: { logicalName?: string; physicalName?: string; schema?: string }) => Promise<void>;
+  updateTable: (id: string, fields: { logicalName?: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
   /** Upsert changeset-aware de una columna (merge sobre la columna actual del diagrama) + reload. */
   updateColumn: (colId: string, fields: Partial<CanonicalColumn>) => Promise<void>;
   /** Reordena columnas de una tabla al nuevo orden de ids: recomputa `ordinal` y persiste cada movida. */
@@ -107,11 +132,16 @@ const DRAWING_DEFAULT_COLOR = '#2E5BFF';
 
 // Debounce de la persistencia de drawings (PUT del array completo).
 let _drawingsTimer: ReturnType<typeof setTimeout> | null = null;
+// Secuencia de cargas del diagrama: descarta respuestas fuera de orden (dos
+// clicks rápidos en el explorer, reload en vuelo al cambiar de canvas).
+let _loadSeq = 0;
 
 export const useModelerStore = create<ModelerState>((set, get) => ({
   projects: [],
   folders: [],
   subjectAreas: [],
+  trees: {},
+  openingSaId: null,
   activeProjectId: null,
   activeFolderId: null,
   activeSaId: null,
@@ -156,12 +186,38 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   persistDrawings: () => {
     const saId = get().activeSaId; if (!saId) return;
+    get().markDirty();
     if (_drawingsTimer) clearTimeout(_drawingsTimer);
     _drawingsTimer = setTimeout(() => {
       _drawingsTimer = null;
-      const id = get().activeSaId; if (!id) return;
-      void mod.setSubjectAreaDrawings(id, get().drawings).catch(() => {});
+      // Canvas capturado al AGENDAR el flush: si el usuario cambió de canvas
+      // dentro del debounce, los drawings actuales ya son del canvas nuevo y
+      // no deben escribirse con este disparo (selectSubjectArea hace el flush
+      // del canvas anterior al cambiar).
+      if (get().activeSaId !== saId) return;
+      // El guardado es en background (debounce): si falla, avisar — un error
+      // silencioso deja al usuario creyendo que sus dibujos persistieron.
+      void mod.setSubjectAreaDrawings(saId, get().drawings).catch((e: unknown) => {
+        toast.error(e instanceof Error && e.message ? e.message : 'No se pudieron guardar los dibujos');
+      });
     }, 500);
+  },
+  dirty: false,
+  markDirty: () => { if (!get().dirty) set({ dirty: true }); },
+  clearDirty: () => { if (get().dirty) set({ dirty: false }); },
+  saveAll: async () => {
+    const saId = get().activeSaId;
+    // Capturados JUNTO con saId: si durante el await del layout el usuario
+    // cambia de canvas, get().drawings ya sería el canvas NUEVO y el flush
+    // los escribiría bajo el saId viejo (pisando sus dibujos persistidos).
+    const drawings = get().drawings;
+    await get().saveAllLayout();
+    // Flush inmediato de drawings (cancela el debounce pendiente).
+    if (saId) {
+      if (_drawingsTimer) { clearTimeout(_drawingsTimer); _drawingsTimer = null; }
+      await mod.setSubjectAreaDrawings(saId, drawings);
+    }
+    set({ dirty: false });
   },
   focusTable: (tableId) => {
     const rf = get().flow; if (!rf) return;
@@ -176,12 +232,52 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   loadProjects: async () => { set({ projects: await mod.listProjects() }); },
   selectProject: async (pid) => {
     const [folders, subjectAreas] = await Promise.all([mod.listFolders(pid), mod.listSubjectAreas(pid)]);
-    set({ activeProjectId: pid, folders, subjectAreas, activeFolderId: null, activeSaId: null, diagram: null, selectedTableId: null, drawings: [] });
+    set((s) => ({
+      activeProjectId: pid, folders, subjectAreas, activeFolderId: null, activeSaId: null,
+      diagram: null, selectedTableId: null, drawings: [],
+      trees: { ...s.trees, [pid]: { folders, subjectAreas } },
+    }));
   },
   selectFolder: (folderId) => set({ activeFolderId: folderId }),
-  selectSubjectArea: async (saId) => {
-    const diagram = await mod.loadDiagram(saId);
-    set({ activeSaId: saId, diagram, selectedTableId: null, drawings: diagram.subjectArea.drawings ?? [] });
+  loadProjectTree: async (pid) => {
+    const [folders, subjectAreas] = await Promise.all([mod.listFolders(pid), mod.listSubjectAreas(pid)]);
+    set((s) => ({ trees: { ...s.trees, [pid]: { folders, subjectAreas } } }));
+  },
+  selectSubjectArea: async (saId, projectId) => {
+    // Flush inmediato de drawings pendientes del canvas ANTERIOR: el debounce
+    // de 500ms perdería el último trazo al cambiar de canvas.
+    const prevSa = get().activeSaId;
+    if (_drawingsTimer && prevSa) {
+      clearTimeout(_drawingsTimer); _drawingsTimer = null;
+      void mod.setSubjectAreaDrawings(prevSa, get().drawings).catch(() => {});
+    }
+    const seq = ++_loadSeq;
+    set({ openingSaId: saId });
+    try {
+      const diagram = await mod.loadDiagram(saId);
+      // Descarta respuestas VIEJAS: si mientras cargaba el usuario seleccionó
+      // otro canvas (o corrió otro reload), pisar el diagrama con esta
+      // respuesta dejaría el canvas mostrando un subject area ajeno.
+      if (seq !== _loadSeq) return;
+      // Si el canvas es de OTRO proyecto, ése pasa a ser el activo y se espejan
+      // los campos legacy (folders/subjectAreas) desde el cache del árbol.
+      let crossProject = {};
+      const pid = projectId ?? null;
+      if (pid && pid !== get().activeProjectId) {
+        const tree = get().trees[pid]
+          ?? { folders: await mod.listFolders(pid), subjectAreas: await mod.listSubjectAreas(pid) };
+        // El fetch del árbol agrega awaits DESPUÉS del primer guard: re-chequear
+        // antes del set final — otro select pudo ganar mientras tanto y esta
+        // respuesta vieja pisaría su canvas.
+        if (seq !== _loadSeq) return;
+        crossProject = { activeProjectId: pid, folders: tree.folders, subjectAreas: tree.subjectAreas, activeFolderId: null };
+      }
+      set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null, drawings: diagram.subjectArea.drawings ?? [] });
+    } finally {
+      // Sólo la llamada MÁS RECIENTE limpia el spinner: una vieja descartada
+      // no debe apagar el openingSaId de la que sigue en vuelo.
+      if (seq === _loadSeq) set({ openingSaId: null });
+    }
   },
   // ── Folders / Canvas / Projects (gestión del Model Explorer) ───────────
   loadFolders: async (projectId) => { set({ folders: await mod.listFolders(projectId) }); },
@@ -191,28 +287,29 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await mod.createFolder(projectId, parentFolderId, name);
     await get()._refreshProject(projectId);
   },
-  renameFolder: async (id, name) => {
+  renameFolder: async (id, name, projectId) => {
     await mod.renameFolder(id, name);
-    const pid = get().activeProjectId; if (pid) await get()._refreshProject(pid);
+    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid);
   },
-  deleteFolder: async (id) => {
+  deleteFolder: async (id, projectId) => {
     await mod.deleteFolder(id);
-    const pid = get().activeProjectId; if (pid) await get()._refreshProject(pid);
+    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid);
   },
   createCanvas: async (projectId, folderId, name) => {
     const sa = await mod.createSubjectArea(projectId, name, folderId);
     await get()._refreshProject(projectId);
-    await get().selectSubjectArea(sa.id);
+    await get().selectSubjectArea(sa.id, projectId);
   },
-  renameCanvas: async (id, name) => {
-    const pid = get().activeProjectId; if (!pid) return;
-    const sa = get().subjectAreas.find((s) => s.id === id);
+  renameCanvas: async (id, name, projectId) => {
+    const pid = projectId ?? get().activeProjectId; if (!pid) return;
+    const pool = get().trees[pid]?.subjectAreas ?? get().subjectAreas;
+    const sa = pool.find((s) => s.id === id);
     await mod.updateSubjectArea(id, { projectId: pid, name, folderId: sa?.folderId ?? null });
     await get()._refreshProject(pid);
   },
-  deleteCanvas: async (id) => {
+  deleteCanvas: async (id, projectId) => {
     await mod.deleteSubjectArea(id);
-    const pid = get().activeProjectId; if (pid) await get()._refreshProject(pid);
+    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid);
   },
   moveCanvas: async (id, folderId) => {
     const pid = get().activeProjectId; if (!pid) return;
@@ -227,39 +324,63 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   deleteProject: async (id) => {
     await mod.deleteProject(id);
     const wasActive = get().activeProjectId === id;
+    const trees = { ...get().trees };
+    delete trees[id];
     set({
       projects: get().projects.filter((p) => p.id !== id),
+      trees,
       ...(wasActive ? { activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null, activeSaId: null, diagram: null, selectedTableId: null } : {}),
     });
   },
-  // Helper interno: recarga folders+canvases del proyecto y depura selección.
+  // Helper interno: recarga folders+canvases del proyecto al cache `trees` y,
+  // si es el proyecto ACTIVO, espeja los campos legacy y depura la selección
+  // (el canvas activo pudo haberse borrado).
   _refreshProject: async (projectId) => {
     const [folders, subjectAreas] = await Promise.all([mod.listFolders(projectId), mod.listSubjectAreas(projectId)]);
     const st = get();
+    const treesPatch = { trees: { ...st.trees, [projectId]: { folders, subjectAreas } } };
+    if (projectId !== st.activeProjectId) { set(treesPatch); return; }
     const activeFolderId = st.activeFolderId && folders.some((f) => f.id === st.activeFolderId) ? st.activeFolderId : null;
     const saStillExists = st.activeSaId != null && subjectAreas.some((s) => s.id === st.activeSaId);
     set({
+      ...treesPatch,
       folders, subjectAreas, activeFolderId,
       ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [] }),
     });
   },
-  reload: async () => { const id = get().activeSaId; if (id) set({ diagram: await mod.loadDiagram(id) }); },
+  reload: async () => {
+    const id = get().activeSaId; if (!id) return;
+    const seq = ++_loadSeq;
+    const diagram = await mod.loadDiagram(id);
+    // Descarta respuestas viejas (cambio de canvas o carga más nueva en vuelo).
+    if (seq !== _loadSeq || get().activeSaId !== id) return;
+    set({ diagram });
+  },
   saveLayout: async (tableId, pos) => {
     const saId = get().activeSaId; if (!saId) return;
+    get().markDirty();
     await mod.setSubjectAreaLayout(saId, { [tableId]: pos });
   },
   saveAllLayout: async () => {
     const saId = get().activeSaId; const rf = get().flow;
     if (!saId || !rf) return;
     const layout: Record<string, { x: number; y: number }> = {};
-    for (const n of rf.getNodes()) layout[n.id] = { x: n.position.x, y: n.position.y };
+    // Sólo nodos de TABLA: las posiciones de los shapes viven en `drawings`;
+    // escribirlas también en `layout` contaminaba el doc de la subject area.
+    for (const n of rf.getNodes()) if (n.type === 'table') layout[n.id] = { x: n.position.x, y: n.position.y };
     await mod.setSubjectAreaLayout(saId, layout); // MERGEA en backend (M3a)
   },
   autoOrganize: async () => {
     const dia = get().diagram; const saId = get().activeSaId;
     if (!dia || !saId) return;
+    get().markDirty();
     const { elkLayout } = await import('@/features/modeler/lib/elkLayout');
-    const nodes = dia.tables.map((t) => ({ id: t.id, position: { x: 0, y: 0 }, data: {} })) as never;
+    // Tamaños MEDIDOS de los nodos vivos: ELK con tamaño fijo superponía las
+    // tablas altas (30 columnas ≈ 700px).
+    const measured = new Map((get().flow?.getNodes() ?? []).map((n) => [n.id, n.measured]));
+    const nodes = dia.tables.map((t) => ({
+      id: t.id, position: { x: 0, y: 0 }, data: {}, measured: measured.get(t.id),
+    })) as never;
     const edges = dia.relationships.map((r) => ({ id: r.id, source: r.sourceTableId, target: r.targetTableId })) as never;
     const pos = await elkLayout(nodes, edges);
     await mod.setSubjectAreaLayout(saId, pos);   // setSubjectAreaLayout MERGEA (M3a)
@@ -267,6 +388,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   createTable: async (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical' }) => {
     const saId = get().activeSaId; if (!saId) throw new Error('Elegí una Subject Area');
+    get().markDirty();
     const id = crypto.randomUUID();
     // Físico: explícito (New table modal, ya auto-physicalizado scope:'table') →
     // si no, modo legacy ('physical' = tal cual; 'logical'/undefined = derivar).
@@ -280,6 +402,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await get().reload();
   },
   addColumn: async (tableId: string, input: { logicalName: string; mode: 'logical' | 'physical'; parentDomainId?: string; dataType?: string }) => {
+    get().markDirty();
     const id = crypto.randomUUID();
     const physical = input.mode === 'logical' ? (await gov.physicalize(input.logicalName)).physical : input.logicalName;
     const domains = await gov.listDomains();
@@ -293,6 +416,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await get().reload();
   },
   createRelationship: async (conn: { source: string; sourceHandle: string; target: string; targetHandle: string }) => {
+    get().markDirty();
     const preset = get().relPreset; // {source,target,identifying} o null
     const identifying = preset?.identifying ?? false;
     const sourceCardinality = preset?.source ?? 'one';
@@ -309,10 +433,33 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (child) await gov.markForeignKey(child, identifying);
     await get().reload();
   },
-  updateRelationship: async (r) => { await gov.updateRelationship(r); await get().reload(); },
-  deleteRelationship: async (id) => { await gov.deleteRelationship(id); await get().reload(); },
+  updateRelationship: async (r) => { get().markDirty(); await gov.updateRelationship(r); await get().reload(); },
+  deleteRelationship: async (id) => {
+    get().markDirty();
+    const rel = get().diagram?.relationships.find((r) => r.id === id);
+    await gov.deleteRelationship(id);
+    // Limpieza del flag FK (inverso de markForeignKey en create): si una columna
+    // extremo de la relación borrada ya NO participa en NINGUNA relación del pool
+    // (global, no sólo las visibles en este canvas), se le quita isForeignKey.
+    // Conservador a propósito: si sigue siendo extremo de otra relación (aunque
+    // sea en otro canvas), el flag se mantiene. isPrimaryKey nunca se toca.
+    if (rel) {
+      for (const colId of [rel.targetColumnId, rel.sourceColumnId]) {
+        const col = get().diagram?.columns.find((c) => c.id === colId);
+        if (!col?.isForeignKey) continue;
+        // Slice server-side: sólo las relaciones que tocan la TABLA de la
+        // columna (una relación siempre referencia la tabla de sus columnas
+        // extremo) — antes se bajaba el pool GLOBAL de relaciones por borrado.
+        const near = (await gov.listRelationships(col.tableId)).filter((r) => r.id !== id);
+        const stillLinked = near.some((r) => r.sourceColumnId === colId || r.targetColumnId === colId);
+        if (!stillLinked) await gov.updateColumn({ ...col, isForeignKey: false });
+      }
+    }
+    await get().reload();
+  },
   addExistingTables: async (tableIds: string[]) => {
     const saId = get().activeSaId; if (!saId || tableIds.length === 0) return;
+    get().markDirty();
     const sa = await mod.getSubjectArea(saId);
     const merged = Array.from(new Set([...sa.tableIds, ...tableIds]));
     await mod.setSubjectAreaTables(saId, merged);
@@ -320,6 +467,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   createTableFromSources: async ({ logicalName, schema, columns }) => {
     const saId = get().activeSaId; if (!saId) throw new Error('Elegí una Subject Area');
+    get().markDirty();
     const id = crypto.randomUUID();
     const physical = (await gov.physicalize(logicalName, 'table')).physical;
     await gov.createTable({ id, logicalName, physicalName: physical, schema: schema?.trim() || undefined });
@@ -340,12 +488,14 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null }),
   setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedTableId: null }),
   removeTableFromArea: async (tableId) => {
+    get().markDirty();
     const saId = get().activeSaId; if (!saId) return;
     const sa = await mod.getSubjectArea(saId);
     await mod.setSubjectAreaTables(saId, sa.tableIds.filter((t) => t !== tableId));
     await get().reload();
   },
   updateTable: async (id, fields) => {
+    get().markDirty();
     const t = get().diagram?.tables.find((x) => x.id === id);
     if (!t) return;
     await gov.createTable({ ...t, ...fields }); // upsert por id = update
@@ -354,23 +504,38 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   updateColumn: async (colId, fields) => {
     const c = get().diagram?.columns.find((x) => x.id === colId);
     if (!c) return;
+    get().markDirty();
     await gov.updateColumn({ ...c, ...fields }); // upsert por id = update (merge)
     await get().reload();
   },
   reorderColumns: async (tableId, orderedIds) => {
-    const cols = get().diagram?.columns.filter((c) => c.tableId === tableId) ?? [];
-    const byId = new Map(cols.map((c) => [c.id, c]));
-    // Persistí SOLO las columnas cuyo ordinal cambió (evita upserts inútiles).
-    await Promise.all(
-      orderedIds.map((id, ordinal) => {
-        const c = byId.get(id);
-        if (!c || c.ordinal === ordinal) return null;
-        return gov.updateColumn({ ...c, ordinal });
-      }).filter(Boolean) as Promise<unknown>[],
-    );
+    get().markDirty();
+    const dia = get().diagram; if (!dia) return;
+    const byId = new Map(dia.columns.filter((c) => c.tableId === tableId).map((c) => [c.id, c]));
+    // OPTIMISTA: la UI reordena al soltar (ordinal = índice nuevo, local); la
+    // persistencia corre detrás y el reload final reconcilia con el overlay.
+    set({
+      diagram: {
+        ...dia,
+        columns: dia.columns.map((c) => {
+          const idx = orderedIds.indexOf(c.id);
+          return idx >= 0 && c.ordinal !== idx ? { ...c, ordinal: idx } : c;
+        }),
+      },
+    });
+    // Persistí SOLO las columnas cuyo ordinal cambió, en TANDAS de 5: mover una
+    // columna al tope de una tabla de 30 disparaba 30 PUT simultáneos (ráfaga
+    // que con varios usuarios satura backend/Cosmos). El backend graba cada
+    // cambio con $set atómico por entidad, así que no se pisan entre sí.
+    const changed = orderedIds
+      .map((id, ordinal) => ({ c: byId.get(id), ordinal }))
+      .filter((x): x is { c: CanonicalColumn; ordinal: number } => !!x.c && x.c.ordinal !== x.ordinal);
+    for (let i = 0; i < changed.length; i += 5) {
+      await Promise.all(changed.slice(i, i + 5).map(({ c, ordinal }) => gov.updateColumn({ ...c, ordinal })));
+    }
     await get().reload();
   },
-  deleteColumn: async (colId) => { await gov.deleteColumn(colId); await get().reload(); },
+  deleteColumn: async (colId) => { get().markDirty(); await gov.deleteColumn(colId); await get().reload(); },
   setViewMode: (m: 'logical' | 'physical') => set({ viewMode: m }),
   createProject: async (name: string) => {
     const p = await mod.createProject(name);

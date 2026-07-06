@@ -45,6 +45,8 @@ export interface ReportColumnRow {
 export interface ReportTableFilters {
   schema?: string;
   projectId?: string;
+  /** Cap the number of rows (lighter initial load). */
+  limit?: number;
 }
 
 /** Lists table-level reporting rows, optionally narrowed by schema / project. */
@@ -52,12 +54,17 @@ export function listReportTables(filters: ReportTableFilters = {}): Promise<Repo
   const qs = new URLSearchParams();
   if (filters.schema) qs.set('schema', filters.schema);
   if (filters.projectId) qs.set('projectId', filters.projectId);
+  if (filters.limit != null) qs.set('limit', String(filters.limit));
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return apiGet<ReportTableRow[]>(`${API_BASE}/api/reporting/tables${suffix}`);
 }
 
-/** Lists column-level reporting rows. Omit `tableId` to get every column. */
-export function listReportColumns(tableId?: string): Promise<ReportColumnRow[]> {
-  const suffix = tableId ? `?tableId=${encodeURIComponent(tableId)}` : '';
+/** Lists column-level reporting rows. Pass `tableIds` to scope the export to a
+ *  batch of tables (server-side `$in`); omit both to get every column. */
+export function listReportColumns(tableId?: string, tableIds?: string[]): Promise<ReportColumnRow[]> {
+  const qs = new URLSearchParams();
+  if (tableIds?.length) qs.set('tableIds', tableIds.join(','));
+  else if (tableId) qs.set('tableId', tableId);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return apiGet<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns${suffix}`);
 }

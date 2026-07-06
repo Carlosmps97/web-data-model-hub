@@ -50,7 +50,9 @@ export default function NewTableModal({ onClose, onCreate }: {
   };
 
   // ── Import existing ────────────────────────────────────────────────────
-  const { subjectAreas, diagram, addExistingTables } = useModelerStore();
+  const subjectAreas = useModelerStore((s) => s.subjectAreas);
+  const diagram = useModelerStore((s) => s.diagram);
+  const addExistingTables = useModelerStore((s) => s.addExistingTables);
   const inCanvas = useMemo(() => new Set(diagram?.subjectArea.tableIds ?? []), [diagram]);
   const [tables, setTables] = useState<CanonicalTable[]>([]);
   const [q, setQ] = useState('');
@@ -58,24 +60,33 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [adding, setAdding] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
 
+  // Búsqueda SERVER-SIDE con debounce: a 15k tablas el modal no baja el
+  // catálogo completo — el backend matchea por nombre y devuelve la página.
+  // `alive` descarta respuestas fuera de orden (el usuario siguió tipeando).
+  // 300ms: cada búsqueda es un scan por regex en Cosmos (RU proporcional a la
+  // colección) — no disparar por tecla.
+  const PAGE = 50;
   useEffect(() => {
     if (mode !== 'import') return;
-    gov.listTables().then(setTables).catch(() => {});
-  }, [mode]);
+    let alive = true;
+    const h = setTimeout(() => {
+      gov.searchTables(q.trim(), PAGE)
+        .then((r) => { if (alive) setTables(r); })
+        .catch(() => {});
+    }, q ? 300 : 0);
+    return () => { alive = false; clearTimeout(h); };
+  }, [mode, q]);
 
   const schemas = useMemo(
     () => Array.from(new Set(tables.map((t) => t.schema).filter(Boolean))) as string[],
     [tables],
   );
   const usageOf = (id: string) => (subjectAreas ?? []).filter((sa) => (sa.tableIds ?? []).includes(id)).length;
-  const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
-    return tables.filter((t) => {
-      if (schemaFilter && t.schema !== schemaFilter) return false;
-      if (!needle) return true;
-      return t.physicalName.toLowerCase().includes(needle) || t.logicalName.toLowerCase().includes(needle);
-    });
-  }, [tables, q, schemaFilter]);
+  // El filtro por schema aplica sobre la página traída (el server ya acotó por nombre).
+  const visible = useMemo(
+    () => (schemaFilter ? tables.filter((t) => t.schema === schemaFilter) : tables),
+    [tables, schemaFilter],
+  );
 
   const addOne = async (id: string) => {
     setAdding(id);
@@ -93,7 +104,7 @@ export default function NewTableModal({ onClose, onCreate }: {
       subtitle="Create a blank entity or import an existing one"
       icon={Table2}
       backdrop="canvas"
-      canvasTop={116}
+      canvasTop={136}
       width={mode === 'import' ? 660 : 520}
       onClose={onClose}
       footer={mode === 'blank' ? (
@@ -146,7 +157,7 @@ export default function NewTableModal({ onClose, onCreate }: {
             </select>
           </div>
           <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {filtered.map((t) => {
+            {visible.map((t) => {
               const already = inCanvas.has(t.id) || added.has(t.id);
               return (
                 <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--border-soft, #EAEDF2)', borderRadius: 10 }}>
@@ -160,7 +171,18 @@ export default function NewTableModal({ onClose, onCreate }: {
                 </div>
               );
             })}
-            {filtered.length === 0 && <div className="rd-small" style={{ padding: 10, color: 'var(--text-muted, #8A93A5)' }}>No tables match your search.</div>}
+            {tables.length >= PAGE && visible.length > 0 && (
+              <div className="rd-small" style={{ padding: 10, color: 'var(--text-muted, #8A93A5)' }}>
+                Showing the first {PAGE} matches — refine your search to narrow the list.
+              </div>
+            )}
+            {visible.length === 0 && (
+              <div className="rd-small" style={{ padding: 10, color: 'var(--text-muted, #8A93A5)' }}>
+                {schemaFilter && tables.length > 0
+                  ? `No tables from schema "${schemaFilter}" in the first ${PAGE} matches — refine your search or clear the schema filter.`
+                  : 'No tables match your search.'}
+              </div>
+            )}
           </div>
           <div className="rd-small" style={{ marginTop: 12, color: 'var(--text-muted, #56607A)' }}>
             Imported tables are <strong>universal</strong> — editing structure propagates to every module that references them.

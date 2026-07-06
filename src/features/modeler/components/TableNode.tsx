@@ -1,7 +1,9 @@
+import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { KeyRound, Link2, Table2 } from 'lucide-react';
 import { useChangesetStore } from '@/store/useChangesetStore';
 import { useModelerStore } from '@/store/useModelerStore';
+import { useSessionStore } from '@/store/useSessionStore';
 import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
 
 export interface TableNodeData {
@@ -10,14 +12,22 @@ export interface TableNodeData {
   [key: string]: unknown;
 }
 
-export default function TableNode({ data }: NodeProps) {
+function TableNode({ data }: NodeProps) {
   const { table, columns } = data as TableNodeData;
-  const canEdit = useChangesetStore((s) => s.activeId) != null;
+  // En modo visor puede haber changeset activo (viendo un request): sin handles
+  // conectables ni affordances de edición.
+  const readonly = useSessionStore((s) => s.openMode === 'readonly');
+  const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
+  // Los handles sólo conectan con la herramienta "Dibujar relación" armada
+  // (relPreset != null) — sin armar, el drag desde una columna no crea wires.
+  const relArmed = useModelerStore((s) => s.relPreset != null);
+  const connectable = canEdit && relArmed;
   const setColumnTarget = useModelerStore((s) => s.setColumnTarget);
   const viewMode = useModelerStore((s) => s.viewMode);
-  // Selección desde el store (consistente con la del wire): evita el borde
-  // "fantasma" del nodo cuando se selecciona una relación.
-  const selected = useModelerStore((s) => s.selectedTableId) === table.id;
+  // Selector BOOLEANO (no el id crudo): con el id, cambiar la selección
+  // re-renderizaba los 100 nodos del canvas; con el booleano sólo los 2
+  // afectados (el que se selecciona y el que se deselecciona).
+  const selected = useModelerStore((s) => s.selectedTableId === table.id);
 
   const nameOf = (o: { logicalName: string; physicalName: string }) =>
     viewMode === 'logical' ? o.logicalName : o.physicalName;
@@ -35,8 +45,8 @@ export default function TableNode({ data }: NodeProps) {
       </span>
       <span className={`wk-node-name${c.isForeignKey ? ' fk' : ''}`}>{nameOf(c)}</span>
       <span className="wk-node-dt rd-mono">{c.dataType}</span>
-      <Handle type="source" position={Position.Right} id={`${c.id}__src`} isConnectable={canEdit} className="wk-handle" />
-      <Handle type="target" position={Position.Left} id={`${c.id}__tgt`} isConnectable={canEdit} className="wk-handle" />
+      <Handle type="source" position={Position.Right} id={`${c.id}__src`} isConnectable={connectable} className="wk-handle" />
+      <Handle type="target" position={Position.Left} id={`${c.id}__tgt`} isConnectable={connectable} className="wk-handle" />
     </div>
   );
 
@@ -55,3 +65,8 @@ export default function TableNode({ data }: NodeProps) {
     </div>
   );
 }
+
+// memo: React Flow re-renderiza los custom nodes en cada update del grafo
+// (pan/zoom/drag); sin memo, un canvas de 100 tablas × 30 columnas repinta
+// ~3.000 filas + ~6.000 handles por frame.
+export default memo(TableNode);

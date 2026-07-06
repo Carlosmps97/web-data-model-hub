@@ -23,10 +23,10 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  FileCode2, Download, Copy, Lock, Plus, Trash2, Check,
+  FileCode2, Download, Copy, Lock, Plus, Trash2, Check, Search, Table2, Database, Hexagon,
 } from 'lucide-react';
 
-import { Button, Dialog, SegmentedControl } from '@/components/ui';
+import { Button, Dialog } from '@/components/ui';
 import type { Diagram } from '@/features/modeler/services/modeler.service';
 import {
   databricksDdl, ddlFilename, DEFAULT_DATABRICKS_OPTS,
@@ -40,25 +40,32 @@ export interface ExportDdlModalProps {
   onClose: () => void;
 }
 
-const DIALECTS: { value: DdlDialect; label: string }[] = [
-  { value: 'databricks', label: 'Databricks' },
-  { value: 'oracle', label: 'Oracle' },
-];
-
 const FORMATS: DdlTableFormat[] = ['delta', 'parquet', 'avro', 'orc', 'csv', 'json'];
 
-/** A labelled toggle row (checkbox-style) used for the boolean options. */
-function Toggle({
+/** Display label for a format chip (ORC/CSV/JSON upper, rest capitalised). */
+function fmtLabel(f: DdlTableFormat): string {
+  return f === 'orc' || f === 'csv' || f === 'json' ? f.toUpperCase() : f.charAt(0).toUpperCase() + f.slice(1);
+}
+
+/** A labelled switch row (on/off slider) used for the boolean options. */
+function SwitchRow({
   on, onClick, label, hint,
 }: { on: boolean; onClick: () => void; label: string; hint?: string }) {
   return (
-    <button type="button" className={`exd-toggle${on ? ' is-on' : ''}`} onClick={onClick} aria-pressed={on}>
-      <span className="exd-toggle-box">{on && <Check size={12} strokeWidth={3} aria-hidden />}</span>
-      <span className="exd-toggle-txt">
-        <span className="exd-toggle-label">{label}</span>
-        {hint && <span className="exd-toggle-hint">{hint}</span>}
+    <div className="exd-swrow">
+      <span className="exd-swrow-txt">
+        <span className="exd-swrow-label">{label}</span>
+        {hint && <span className="exd-swrow-hint">{hint}</span>}
       </span>
-    </button>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={label}
+        className={`exd-swt${on ? ' on' : ''}`}
+        onClick={onClick}
+      />
+    </div>
   );
 }
 
@@ -78,6 +85,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
 
   // Which table ids to export — defaults to all; recomputed if the diagram changes.
   const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [tableFilter, setTableFilter] = useState('');
   const selectedIds = useMemo(() => {
     const all = new Set(allTables.map((t) => t.id));
     if (!selected) return all;
@@ -106,8 +114,22 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     if (base.has(id)) base.delete(id); else base.add(id);
     setSelected(base);
   };
-  const allOn = exportTables.length === allTables.length && allTables.length > 0;
-  const toggleAll = () => setSelected(allOn ? new Set() : new Set(allTables.map((t) => t.id)));
+  const selectAll = () => setSelected(new Set(allTables.map((t) => t.id)));
+  const selectNone = () => setSelected(new Set<string>());
+
+  // Column count per table (for the "N cols" hint) + name filter over the list.
+  const colCountByTable = useMemo(() => {
+    const m = new Map<string, number>();
+    (diagram?.columns ?? []).forEach((c) => m.set(c.tableId, (m.get(c.tableId) ?? 0) + 1));
+    return m;
+  }, [diagram]);
+  const filteredTables = useMemo(() => {
+    const q = tableFilter.trim().toLowerCase();
+    if (!q) return allTables;
+    return allTables.filter(
+      (t) => t.physicalName.toLowerCase().includes(q) || (t.logicalName ?? '').toLowerCase().includes(q),
+    );
+  }, [allTables, tableFilter]);
 
   const addProp = () => set('tblProperties', [...opts.tblProperties, { key: '', value: '' }]);
   const setProp = (i: number, patch: Partial<{ key: string; value: string }>) =>
@@ -158,46 +180,113 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
       footer={footer}
       width={920}
       backdrop="canvas"
-      canvasTop={64}
+      canvasTop={136}
     >
       <div className="exd">
-        {/* Dialect */}
+        {/* Tables to export — from current canvas */}
+        <div className="exd-tablesx">
+          <div className="exd-tablesx-head">
+            <span className="exd-tablesx-title">Tables to export</span>
+            <span className="exd-tablesx-sub">from current canvas</span>
+            <span className="exd-tablesx-spacer" />
+            <span className="exd-tablesx-count">{exportTables.length} / {allTables.length}</span>
+          </div>
+          <div className="exd-tablesx-filter">
+            <Search size={14} strokeWidth={1.5} className="exd-tablesx-filter-ico" aria-hidden />
+            <input
+              className="exd-tablesx-filter-input"
+              placeholder="Filter tables…"
+              value={tableFilter}
+              onChange={(e) => setTableFilter(e.target.value)}
+              aria-label="Filter tables"
+            />
+            <button type="button" className="exd-tablesx-link" onClick={selectAll} disabled={allTables.length === 0}>All</button>
+            <span className="exd-tablesx-dot">·</span>
+            <button type="button" className="exd-tablesx-link is-muted" onClick={selectNone} disabled={allTables.length === 0}>None</button>
+          </div>
+          <div className="exd-tablesx-list">
+            {allTables.length === 0 ? (
+              <span className="exd-empty">El canvas no tiene tablas.</span>
+            ) : filteredTables.length === 0 ? (
+              <span className="exd-empty">Ninguna tabla coincide con el filtro.</span>
+            ) : (
+              filteredTables.map((t) => {
+                const on = selectedIds.has(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    className="exd-tablesx-row"
+                    onClick={() => toggleTable(t.id)}
+                    aria-pressed={on}
+                  >
+                    <span className={`exd-cbox${on ? ' is-on' : ''}`}>
+                      {on && <Check size={11} strokeWidth={2.6} aria-hidden />}
+                    </span>
+                    <Table2 size={14} strokeWidth={1.5} className="exd-tablesx-row-ico" aria-hidden />
+                    <span className={`exd-tablesx-row-name${on ? '' : ' is-off'}`}>{t.physicalName}</span>
+                    <span className="exd-tablesx-row-cols">{colCountByTable.get(t.id) ?? 0} cols</span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+
+        {/* Dialect (cards) */}
         <div className="exd-field">
-          <span className="exd-lbl">Dialecto</span>
-          <SegmentedControl
-            aria-label="Dialecto"
-            value={dialect}
-            onChange={(v) => { if (v === 'databricks') setDialect(v); }}
-            options={DIALECTS.map((d) => ({
-              value: d.value,
-              label: d.value === 'oracle' ? `${d.label} · pronto` : d.label,
-              icon: d.value === 'oracle' ? Lock : undefined,
-            }))}
-          />
-          {!isDbx && <span className="exd-locked">Oracle aún no está disponible.</span>}
+          <span className="exd-lbl">Target dialect</span>
+          <div className="exd-dialects">
+            <button type="button" className="exd-dialect" disabled aria-disabled="true" title="Oracle aún no está disponible">
+              <span className="exd-dialect-ico exd-dialect-ico--oracle"><Database size={16} strokeWidth={1.4} aria-hidden /></span>
+              <span className="exd-dialect-txt">
+                <span className="exd-dialect-name">Oracle</span>
+                <span className="exd-dialect-sub">PL/SQL · pronto</span>
+              </span>
+              <Lock size={13} className="exd-dialect-lock" aria-hidden />
+            </button>
+            <button
+              type="button"
+              className={`exd-dialect${isDbx ? ' is-on' : ''}`}
+              onClick={() => setDialect('databricks')}
+            >
+              <span className="exd-dialect-ico exd-dialect-ico--dbx"><Hexagon size={16} strokeWidth={1.4} aria-hidden /></span>
+              <span className="exd-dialect-txt">
+                <span className="exd-dialect-name">Databricks</span>
+                <span className="exd-dialect-sub">{isDbx ? 'selected' : 'Delta / Spark SQL'}</span>
+              </span>
+            </button>
+          </div>
         </div>
 
         <div className="exd-cols">
           {/* ── Options column ── */}
           <div className="exd-opts">
-            <span className="exd-section">Incluir</span>
-            <div className="exd-toggles">
-              <Toggle on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Vistas" hint="CREATE VIEW por rol" />
-              <Toggle on={opts.includeKeys} onClick={() => set('includeKeys', !opts.includeKeys)} label="PK / FK" hint="PRIMARY/FOREIGN KEY" />
-              <Toggle on={opts.includeComments} onClick={() => set('includeComments', !opts.includeComments)} label="Comments" hint="Definiciones funcionales" />
-              <Toggle on={opts.includePartitions} onClick={() => set('includePartitions', !opts.includePartitions)} label="Partitions" hint="PARTITIONED BY" />
-              <Toggle on={opts.includeIndexes} onClick={() => set('includeIndexes', !opts.includeIndexes)} label="Index" hint="Hint ZORDER" />
+            <span className="exd-section">Include</span>
+            <div className="exd-switches">
+              <SwitchRow on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Views" hint="CREATE VIEW por rol" />
+              <SwitchRow on={opts.includeKeys} onClick={() => set('includeKeys', !opts.includeKeys)} label="Primary & foreign keys" hint="PK / FK constraints" />
+              <SwitchRow on={opts.includeComments} onClick={() => set('includeComments', !opts.includeComments)} label="Comments" hint="Definiciones funcionales" />
+              <SwitchRow on={opts.includePartitions} onClick={() => set('includePartitions', !opts.includePartitions)} label="Partitions" hint="PARTITIONED BY" />
+              <SwitchRow on={opts.includeIndexes} onClick={() => set('includeIndexes', !opts.includeIndexes)} label="Indexes" hint="Hint ZORDER" />
             </div>
 
-            <span className="exd-section">Tabla</span>
-            <div className="exd-field">
-              <span className="exd-sublbl">Tipo de tabla · USING</span>
-              <select className="rd-input exd-input" value={opts.tableFormat} onChange={(e) => set('tableFormat', e.target.value as DdlTableFormat)}>
-                {FORMATS.map((f) => <option key={f} value={f}>{f}</option>)}
-              </select>
+            <span className="exd-section">Table format · USING</span>
+            <div className="exd-chips">
+              {FORMATS.map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  className={`exd-chip${opts.tableFormat === f ? ' is-on' : ''}`}
+                  onClick={() => set('tableFormat', f)}
+                  aria-pressed={opts.tableFormat === f}
+                >
+                  {fmtLabel(f)}
+                </button>
+              ))}
             </div>
 
-            <Toggle on={opts.unityCatalog} onClick={() => set('unityCatalog', !opts.unityCatalog)} label="Unity Catalog" hint="catalog.schema.table" />
+            <SwitchRow on={opts.unityCatalog} onClick={() => set('unityCatalog', !opts.unityCatalog)} label="Unity Catalog" hint="catalog.schema.table" />
             <div className="exd-row2">
               <div className="exd-field">
                 <span className="exd-sublbl">Catalog</span>
@@ -209,7 +298,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
               </div>
             </div>
 
-            <Toggle on={opts.external} onClick={() => set('external', !opts.external)} label="External table" hint="CREATE EXTERNAL TABLE … LOCATION" />
+            <SwitchRow on={opts.external} onClick={() => set('external', !opts.external)} label="External table" hint="CREATE EXTERNAL TABLE … LOCATION" />
             {opts.external && (
               <div className="exd-field">
                 <span className="exd-sublbl">Location (S3 / ADLS)</span>
@@ -232,34 +321,11 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
               ))}
           </div>
 
-          {/* ── Table selection column ── */}
-          <div className="exd-tables">
-            <div className="exd-tables-head">
-              <span className="exd-section">Tablas</span>
-              <button type="button" className="exd-selall" onClick={toggleAll} disabled={allTables.length === 0}>
-                {allOn ? 'Ninguna' : 'Todas'}
-              </button>
-            </div>
-            <div className="exd-tablelist">
-              {allTables.length === 0
-                ? <span className="exd-empty">El canvas no tiene tablas.</span>
-                : allTables.map((t) => (
-                  <button key={t.id} type="button" className={`exd-tablerow${selectedIds.has(t.id) ? ' is-on' : ''}`} onClick={() => toggleTable(t.id)} aria-pressed={selectedIds.has(t.id)}>
-                    <span className="exd-toggle-box">{selectedIds.has(t.id) && <Check size={12} strokeWidth={3} aria-hidden />}</span>
-                    <span className="exd-tablerow-txt">
-                      <span className="exd-tablerow-name exd-mono">{t.physicalName}</span>
-                      {t.logicalName && t.logicalName !== t.physicalName && <span className="exd-tablerow-sub">{t.logicalName}</span>}
-                    </span>
-                  </button>
-                ))}
-            </div>
+          {/* ── Preview column (dark) ── */}
+          <div className="exd-previewcol">
+            <span className="exd-lbl">Preview</span>
+            <pre className="exd-code" aria-label="DDL preview">{canExport ? ddl : '-- Seleccioná al menos una tabla (dialecto Databricks).'}</pre>
           </div>
-        </div>
-
-        {/* ── Live preview ── */}
-        <div className="exd-field">
-          <span className="exd-lbl">Preview</span>
-          <pre className="exd-code" aria-label="DDL preview">{canExport ? ddl : '-- Seleccioná al menos una tabla (dialecto Databricks).'}</pre>
         </div>
       </div>
     </Dialog>
