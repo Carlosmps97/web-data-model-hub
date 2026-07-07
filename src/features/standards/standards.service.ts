@@ -22,10 +22,10 @@ export type UdpLevel = 'table' | 'column';
 export interface UdpDefinition {
   id: string;
   name: string;
+  level: UdpLevel;              // Class: 'table' | 'column' (extensible a más jerarquías)
   dataType: UdpDataType;
   defaultValue?: string | null;
   allowedValues: string[];
-  appliesTo: UdpLevel[];
   description?: string | null;
 }
 
@@ -59,10 +59,10 @@ export interface NamingEditInput { separator: string; case: string; }
 export interface UdpEditInput {
   id?: string;
   name: string;
+  level: UdpLevel;
   dataType: UdpDataType;
   defaultValue?: string;
   allowedValues?: string[];
-  appliesTo: UdpLevel[];
   description?: string;
 }
 export interface ApplyStandardsBody {

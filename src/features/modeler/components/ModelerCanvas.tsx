@@ -167,7 +167,12 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // — engañoso en edición y una violación del viewer-lock en readonly.
         // Los borrados reales van por la UI explícita (panel / popup de relación).
         deleteKeyCode={null}
+        // Zoom-out amplio: canvases enormes (auto-arrange de 100 tablas ≈
+        // 14000×19000px) necesitan bajar del default minZoom 0.5 para verse
+        // completos. fitViewOptions hace que el auto-fit inicial respete ese piso.
+        minZoom={0.02}
         fitView
+        fitViewOptions={{ padding: 0.12, minZoom: 0.02 }}
         onNodeDragStop={(_e, node) => {
           if (readonly) return; // viewer-lock: no persistir movimientos
           if (node.type === 'shape') updateDrawing(node.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) });

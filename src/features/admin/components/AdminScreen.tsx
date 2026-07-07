@@ -42,7 +42,10 @@ export default function AdminScreen() {
 
   const [search, setSearch] = useState('');
   const [selectedRoleId, setSelectedRoleId] = useState<string | null>(null);
-  const [pendingCell, setPendingCell] = useState<string | null>(null);
+  // Matriz de permisos: edición explícita con borrador (nada se persiste hasta Guardar).
+  const [editingMatrix, setEditingMatrix] = useState(false);
+  const [draftRoles, setDraftRoles] = useState<Role[] | null>(null);
+  const [savingMatrix, setSavingMatrix] = useState(false);
 
   const [userModal, setUserModal] = useState<UserModalState>({ open: false, mode: 'create', initial: null });
   const [roleModal, setRoleModal] = useState<RoleModalState>({ open: false, mode: 'create', initial: null });
@@ -102,23 +105,49 @@ export default function AdminScreen() {
     });
   }, [users, search, selectedRoleId]);
 
-  // ── mutaciones ──
-  const handleToggle = useCallback(async (role: Role, perm: string) => {
-    const cellId = `${role.id}:${perm}`;
-    const nextPerms = { ...role.permissions, [perm]: !role.permissions[perm] };
-    setPendingCell(cellId);
-    setRoles((prev) => prev.map((r) => (r.id === role.id ? { ...r, permissions: nextPerms } : r))); // optimista
-    try {
-      await upsertRole(role.id, { name: role.name, description: role.description ?? undefined, permissions: nextPerms });
-      const fresh = await listRoles(); // refresca (mantiene niveles de acceso en sync)
-      setRoles(fresh);
-    } catch (e) {
-      setRoles((prev) => prev.map((r) => (r.id === role.id ? role : r))); // revierte
-      toast.error(e instanceof Error ? e.message : 'No se pudo actualizar el permiso');
-    } finally {
-      setPendingCell(null);
-    }
+  // ── Matriz de permisos: edición con BORRADOR ──
+  // Nada se aplica al instante: entrás en modo edición, tocás las celdas del
+  // borrador local y recién al Guardar se persisten los roles cambiados.
+  const startEditMatrix = () => {
+    setDraftRoles(roles.map((r) => ({ ...r, permissions: { ...r.permissions } })));
+    setEditingMatrix(true);
+  };
+  const cancelEditMatrix = () => { setDraftRoles(null); setEditingMatrix(false); };
+  const handleDraftToggle = useCallback((role: Role, perm: string) => {
+    setDraftRoles((prev) => (prev ?? []).map((r) => (
+      r.id === role.id ? { ...r, permissions: { ...r.permissions, [perm]: !r.permissions[perm] } } : r
+    )));
   }, []);
+  // Roles cuyo set de permisos difiere del original (los únicos que se guardan).
+  const changedRoles = useMemo(() => {
+    if (!draftRoles) return [] as Role[];
+    const byId = new Map(roles.map((r) => [r.id, r]));
+    return draftRoles.filter((d) => {
+      const o = byId.get(d.id);
+      if (!o) return true;
+      const keys = new Set([...Object.keys(d.permissions), ...Object.keys(o.permissions)]);
+      return [...keys].some((k) => !!d.permissions[k] !== !!o.permissions[k]);
+    });
+  }, [draftRoles, roles]);
+  const saveMatrix = async () => {
+    if (!draftRoles) return;
+    setSavingMatrix(true);
+    try {
+      for (const r of changedRoles) {
+        await upsertRole(r.id, { name: r.name, description: r.description ?? undefined, permissions: r.permissions });
+      }
+      setRoles(await listRoles());
+      setEditingMatrix(false);
+      setDraftRoles(null);
+      toast.success(changedRoles.length
+        ? `Permisos actualizados (${changedRoles.length} rol${changedRoles.length === 1 ? '' : 'es'})`
+        : 'Sin cambios para guardar');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudieron guardar los permisos');
+    } finally {
+      setSavingMatrix(false);
+    }
+  };
 
   const askDeleteUser = (u: AdminUser) => setConfirm({
     title: 'Eliminar usuario',
@@ -323,11 +352,41 @@ export default function AdminScreen() {
 
               {/* Matriz de permisos */}
               <section style={{ marginTop: 34 }}>
-                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.navy }}>Matriz de permisos por rol</h2>
-                <p style={{ margin: '5px 0 16px', fontSize: 13, color: C.text2 }}>
-                  Activá o desactivá permisos por rol. Cada usuario hereda el nivel de acceso del rol que tiene asignado.
-                </p>
-                <PermissionMatrix roles={roles} permissions={permissions} onToggle={handleToggle} pending={pendingCell} />
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 16 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.navy }}>Matriz de permisos por rol</h2>
+                    <p style={{ margin: '5px 0 0', fontSize: 13, color: C.text2 }}>
+                      Los permisos afectan a todos los usuarios del rol. Entrá en modo edición para modificarlos y guardá cuando termines.
+                    </p>
+                  </div>
+                  <div style={{ flex: 'none', display: 'flex', gap: 8 }}>
+                    {editingMatrix ? (
+                      <>
+                        <button type="button" onClick={cancelEditMatrix} disabled={savingMatrix}
+                          style={{ height: 36, padding: '0 15px', borderRadius: 9, border: `1px solid ${C.border}`, background: C.white, color: C.text2, fontSize: 13, fontWeight: 600, cursor: savingMatrix ? 'default' : 'pointer' }}>
+                          Cancelar
+                        </button>
+                        <button type="button" onClick={saveMatrix} disabled={savingMatrix || changedRoles.length === 0}
+                          style={{ height: 36, padding: '0 16px', borderRadius: 9, border: 'none', background: changedRoles.length === 0 ? C.grey : C.blue, color: changedRoles.length === 0 ? C.muted : '#fff', fontSize: 13, fontWeight: 600, cursor: savingMatrix || changedRoles.length === 0 ? 'default' : 'pointer' }}>
+                          {savingMatrix ? 'Guardando…' : `Guardar cambios${changedRoles.length ? ` (${changedRoles.length})` : ''}`}
+                        </button>
+                      </>
+                    ) : (
+                      <button type="button" onClick={startEditMatrix} disabled={roles.length === 0}
+                        style={{ height: 36, padding: '0 16px', borderRadius: 9, border: `1px solid ${C.blueBorder}`, background: C.blueSoft, color: C.blue, fontSize: 13, fontWeight: 600, cursor: roles.length === 0 ? 'default' : 'pointer', opacity: roles.length === 0 ? 0.5 : 1 }}>
+                        Editar matriz
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <PermissionMatrix
+                  roles={editingMatrix ? (draftRoles ?? roles) : roles}
+                  permissions={permissions}
+                  editing={editingMatrix}
+                  saving={savingMatrix}
+                  onToggle={handleDraftToggle}
+                  original={roles}
+                />
               </section>
             </>
           )}

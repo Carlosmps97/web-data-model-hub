@@ -1,7 +1,9 @@
 /**
- * PermissionMatrix — grilla permiso (fila) × rol (columna). Cada celda es un
- * toggle que persiste el cambio vía `onToggle` (upsertRole en el padre).
- * Filas en el ORDEN de getPermissions(); etiquetas de PERMISSION_LABELS.
+ * PermissionMatrix — grilla permiso (fila) × rol (columna).
+ * Flujo SEGURO: por defecto es SOLO-LECTURA. Solo en modo edición (`editing`)
+ * las celdas son toggles; los cambios van a un BORRADOR en el padre y se
+ * persisten todos juntos al Guardar (nada se aplica de inmediato). Las celdas
+ * modificadas respecto al original se resaltan.
  */
 import type { Permission } from '@/features/auth/auth.service';
 import type { Role } from '../admin.service';
@@ -10,24 +12,22 @@ import { C, MONO } from './helpers';
 import { CheckIcon, MinusIcon } from './icons';
 
 interface Props {
-  roles: Role[];
+  roles: Role[];            // roles mostrados (borrador si editing, en vivo si no)
   permissions: Permission[];
-  onToggle: (role: Role, perm: string) => void;
-  pending: string | null; // `${roleId}:${perm}` en guardado
+  editing: boolean;
+  saving: boolean;
+  onToggle: (role: Role, perm: string) => void; // solo se invoca en modo edición
+  original?: Role[];        // para resaltar celdas cambiadas
 }
 
-function Dot({ on, size = 30 }: { on: boolean; size?: number }) {
+function Dot({ on, size = 30, dim }: { on: boolean; size?: number; dim?: boolean }) {
   return (
     <span
       style={{
-        width: size,
-        height: size,
-        borderRadius: 999,
-        background: on ? C.greenBg : C.grey,
-        color: on ? C.green : C.muted,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
+        width: size, height: size, borderRadius: 999,
+        background: on ? C.greenBg : C.grey, color: on ? C.green : C.muted,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+        opacity: dim ? 0.5 : 1,
       }}
     >
       {on ? <CheckIcon size={Math.round(size * 0.5)} sw={2.6} /> : <MinusIcon size={Math.round(size * 0.5)} sw={2.6} />}
@@ -35,12 +35,15 @@ function Dot({ on, size = 30 }: { on: boolean; size?: number }) {
   );
 }
 
-export default function PermissionMatrix({ roles, permissions, onToggle, pending }: Props) {
+export default function PermissionMatrix({ roles, permissions, editing, saving, onToggle, original }: Props) {
   const cols = `minmax(230px, 1.5fr) repeat(${Math.max(roles.length, 1)}, minmax(112px, 1fr))`;
+  const origById = new Map((original ?? []).map((r) => [r.id, r]));
+  const isChanged = (r: Role, perm: string) =>
+    editing && origById.has(r.id) && !!origById.get(r.id)!.permissions[perm] !== !!r.permissions[perm];
 
   return (
     <div>
-      <div style={{ overflowX: 'auto', border: `1px solid ${C.border}`, borderRadius: 13, background: C.white }}>
+      <div style={{ overflowX: 'auto', border: `1px solid ${editing ? C.blue : C.border}`, borderRadius: 13, background: C.white, boxShadow: editing ? `0 0 0 3px ${C.blueSoft}` : 'none', transition: 'border-color .12s, box-shadow .12s' }}>
         <div style={{ minWidth: 'max-content' }}>
           {/* Header */}
           <div style={{ display: 'grid', gridTemplateColumns: cols, background: C.panel, borderBottom: `1px solid ${C.border}` }}>
@@ -55,42 +58,32 @@ export default function PermissionMatrix({ roles, permissions, onToggle, pending
 
           {/* Filas de permiso */}
           {permissions.map((perm, idx) => (
-            <div
-              key={perm}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: cols,
-                borderBottom: idx === permissions.length - 1 ? 'none' : `1px solid ${C.border}`,
-              }}
-            >
+            <div key={perm} style={{ display: 'grid', gridTemplateColumns: cols, borderBottom: idx === permissions.length - 1 ? 'none' : `1px solid ${C.border}` }}>
               <div style={{ padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 2, justifyContent: 'center' }}>
                 <span style={{ fontSize: 13, color: C.text, fontWeight: 500 }}>{PERMISSION_LABELS[perm] ?? perm}</span>
                 <span style={{ fontFamily: MONO, fontSize: 10.5, color: C.text3 }}>{perm}</span>
               </div>
               {roles.map((r) => {
                 const on = !!r.permissions[perm];
-                const id = `${r.id}:${perm}`;
-                const isPending = pending === id;
+                const changed = isChanged(r, perm);
                 return (
-                  <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: `1px solid ${C.border}`, padding: '8px 0' }}>
-                    <button
-                      type="button"
-                      onClick={() => onToggle(r, perm)}
-                      disabled={isPending}
-                      aria-pressed={on}
-                      title={`${r.name} · ${on ? 'permitido' : 'no permitido'}`}
-                      aria-label={`${r.name} — ${PERMISSION_LABELS[perm] ?? perm}: ${on ? 'permitido' : 'no permitido'}`}
-                      style={{
-                        border: 'none',
-                        background: 'transparent',
-                        padding: 0,
-                        cursor: isPending ? 'default' : 'pointer',
-                        opacity: isPending ? 0.45 : 1,
-                        borderRadius: 999,
-                      }}
-                    >
-                      <Dot on={on} />
-                    </button>
+                  <div key={r.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', borderLeft: `1px solid ${C.border}`, padding: '8px 0', background: changed ? C.blueSoft : 'transparent' }}>
+                    {editing ? (
+                      <button
+                        type="button"
+                        onClick={() => onToggle(r, perm)}
+                        disabled={saving}
+                        aria-pressed={on}
+                        title={`${r.name} · ${on ? 'permitido' : 'no permitido'}${changed ? ' (cambiado)' : ''}`}
+                        aria-label={`${r.name} — ${PERMISSION_LABELS[perm] ?? perm}: ${on ? 'permitido' : 'no permitido'}`}
+                        style={{ border: 'none', background: 'transparent', padding: 0, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.5 : 1, borderRadius: 999, outline: changed ? `2px solid ${C.blue}` : 'none', outlineOffset: 2 }}
+                      >
+                        <Dot on={on} />
+                      </button>
+                    ) : (
+                      // Solo-lectura: no es interactivo.
+                      <Dot on={on} dim />
+                    )}
                   </div>
                 );
               })}
@@ -113,7 +106,7 @@ export default function PermissionMatrix({ roles, permissions, onToggle, pending
           <Dot on={false} size={20} /> No permitido
         </span>
         <span style={{ fontSize: 12, color: C.text3, marginLeft: 'auto' }}>
-          Los cambios se aplican de inmediato a todos los usuarios del rol.
+          {editing ? 'Los cambios se guardan recién al presionar «Guardar cambios».' : 'Presioná «Editar matriz» para modificar los permisos.'}
         </span>
       </div>
     </div>

@@ -26,9 +26,11 @@ import {
   Filter,
   Layers,
   Search,
+  SlidersHorizontal,
   TableProperties,
 } from 'lucide-react';
 
+import ReportDesigner from '@/features/reporting/components/ReportDesigner';
 import { Button } from '@/components/ui';
 import {
   listReportColumns,
@@ -130,7 +132,13 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
 
 // ── component ──────────────────────────────────────────────────────────────────
 
-export default function ReportingScreen() {
+export default function ReportingScreenWrapper() {
+  const [designer, setDesigner] = useState(false);
+  if (designer) return <div style={{ height: '100%', minHeight: 0 }}><ReportDesigner onClose={() => setDesigner(false)} /></div>;
+  return <ReportingScreen onDesign={() => setDesigner(true)} />;
+}
+
+function ReportingScreen({ onDesign }: { onDesign: () => void }) {
   const [tables, setTables] = useState<ReportTableRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -651,6 +659,16 @@ export default function ReportingScreen() {
                   ))}
                 </div>
               )}
+            </div>
+
+            {/* Report Designer — motor de consulta (SQL + filtros UDP). Bajo el rail. */}
+            <div className="dmh-rep-card" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <Button variant="primary" icon={SlidersHorizontal} onClick={onDesign} style={{ width: '100%', justifyContent: 'center' }}>
+                Design report
+              </Button>
+              <span style={{ fontSize: 11.5, color: 'var(--text-muted-2)', textAlign: 'center' }}>
+                Query engine · SQL &amp; UDP filters
+              </span>
             </div>
           </div>
         </div>

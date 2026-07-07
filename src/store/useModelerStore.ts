@@ -221,10 +221,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   focusTable: (tableId) => {
     const rf = get().flow; if (!rf) return;
-    const node = rf.getNode(tableId); if (!node) return;
-    const w = node.measured?.width ?? node.width ?? 212;
-    const h = node.measured?.height ?? node.height ?? 120;
-    void rf.setCenter(node.position.x + w / 2, node.position.y + h / 2, { zoom: 1, duration: 420 });
+    if (!rf.getNode(tableId)) return;
+    // fitView sobre el nodo: usa su tamaño REAL medido y calcula el zoom para
+    // encuadrar la tabla COMPLETA y centrada (setCenter con zoom fijo 1 dejaba
+    // las tablas altas cortadas, mostrando sólo su mitad). maxZoom evita acercar
+    // demasiado a tablas chicas.
+    void rf.fitView({ nodes: [{ id: tableId }], padding: 0.2, maxZoom: 1.2, duration: 420 });
     // Viewer-lock: en solo-lectura centramos sin abrir el PropertiesPanel.
     if (useSessionStore.getState().openMode === 'readonly') return;
     set({ selectedTableId: tableId, selectedEdgeId: null });

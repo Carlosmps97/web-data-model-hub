@@ -54,7 +54,10 @@ function TableNode({ data }: NodeProps) {
     <div className={`wk-node${selected ? ' sel' : ''}`}>
       <div className="wk-node-head">
         <Table2 size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
-        <span className="rd-mono">{nameOf(table)}</span>
+        <span className="rd-mono wk-node-title">
+          {table.schema && <span className="wk-node-schema">{table.schema}.</span>}
+          {nameOf(table)}
+        </span>
         <span className="wk-node-sub">{viewMode === 'logical' ? table.physicalName : table.logicalName}</span>
         {canEdit && <button className="wk-node-add" title="Agregar columna" onClick={() => setColumnTarget(table.id)}>+</button>}
       </div>

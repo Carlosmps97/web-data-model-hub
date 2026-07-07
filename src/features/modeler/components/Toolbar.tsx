@@ -163,7 +163,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           <input
             ref={findRef}
             className="wk-find"
-            placeholder="Find a table…  ⌘K"
+            placeholder="Find a Table"
             value={find}
             disabled={!hasCanvas}
             onChange={(e) => { setFind(e.target.value); setFindOpen(true); }}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpenText, Boxes, ChevronRight, History, RotateCcw, ShieldCheck, TriangleAlert, X } from 'lucide-react';
+import { BookOpenText, Boxes, ChevronRight, History, RotateCcw, ShieldCheck, Tags, TriangleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
 import {
@@ -161,7 +161,7 @@ function Overview({ snapshot, versions, canEdit, meName, onGo, onHistory }: {
           <div><strong style={{ color: '#8A6D1F' }}>Scope global.</strong> Editar una regla de naming o un dominio re-deriva nombres físicos y tipos de dato en <strong>toda tabla de todo proyecto</strong> — no está acotado a un modelo. Por eso los estándares viven en su propio módulo, separados del canvas y restringidos.</div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 26 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 26 }}>
           <button onClick={() => onGo('glossary')} style={ovCard}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 13 }}><div style={{ width: 44, height: 44, borderRadius: 12, background: '#EAF0FF', color: '#2E5BFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><BookOpenText size={22} /></div><div style={{ flex: 1, textAlign: 'left' }}><div style={{ fontSize: 16, fontWeight: 700, color: '#1A2B4A' }}>Glossary · Naming rules</div><div style={{ fontSize: 12, color: '#8A93A5' }}>Terms &amp; abbreviations · physical naming</div></div><ChevronRight size={16} color="#B6BECD" /></div>
             <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, fontWeight: 600, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '3px 8px', display: 'inline-block' }}>{snapshot.dict.length} terms</div>
@@ -169,6 +169,10 @@ function Overview({ snapshot, versions, canEdit, meName, onGo, onHistory }: {
           <button onClick={() => onGo('domains')} style={ovCard}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 13 }}><div style={{ width: 44, height: 44, borderRadius: 12, background: '#F3EEFF', color: '#8B5CF6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Boxes size={22} /></div><div style={{ flex: 1, textAlign: 'left' }}><div style={{ fontSize: 16, fontWeight: 700, color: '#1A2B4A' }}>Parent Domains</div><div style={{ fontSize: 12, color: '#8A93A5' }}>Reusable data domains</div></div><ChevronRight size={16} color="#B6BECD" /></div>
             <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, fontWeight: 600, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '3px 8px', display: 'inline-block' }}>{snapshot.domains.length} domains</div>
+          </button>
+          <button onClick={() => onGo('udp')} style={ovCard}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 13 }}><div style={{ width: 44, height: 44, borderRadius: 12, background: '#F1EBFF', color: '#7A4DD6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Tags size={22} /></div><div style={{ flex: 1, textAlign: 'left' }}><div style={{ fontSize: 16, fontWeight: 700, color: '#1A2B4A' }}>UDP</div><div style={{ fontSize: 12, color: '#8A93A5' }}>User Defined Properties · etiquetas</div></div><ChevronRight size={16} color="#B6BECD" /></div>
+            <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, fontWeight: 600, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '3px 8px', display: 'inline-block' }}>{(snapshot.udp ?? []).length} properties</div>
           </button>
         </div>
 

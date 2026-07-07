@@ -15,7 +15,7 @@ export default function UdpAssign({ level, values, onChange, disabled }: {
   const [defs, setDefs] = useState<UdpDefinition[]>([]);
   useEffect(() => {
     let alive = true;
-    getUdpDefs().then((d) => { if (alive) setDefs(d.filter((x) => x.appliesTo.includes(level))); }).catch(() => {});
+    getUdpDefs().then((d) => { if (alive) setDefs(d.filter((x) => x.level === level)); }).catch(() => {});
     return () => { alive = false; };
   }, [level]);
 
