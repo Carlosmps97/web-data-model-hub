@@ -41,6 +41,34 @@ const SHAPES: { id: DrawingType; tip: string; icon: ReactNode }[] = [
 
 const VIEWER_TIP = 'Solo lectura — versión publicada';
 
+/**
+ * Inyecta los `<defs>` de los markers crow's-foot (cf-*) en el SVG exportado.
+ * Esos markers viven en un `<svg>` aparte (CrowFootMarkers) que NO está dentro
+ * del `.react-flow__viewport` capturado, así que sin esto el SVG referencia
+ * `url(#cf-*)` sin definición y sólo se ven los wires, no la cardinalidad.
+ * Además resuelve las CSS vars (var(--ink-2)/var(--surface)) a color literal,
+ * porque en el SVG standalone no existen esas variables.
+ */
+function injectCrowFootDefs(dataUrl: string): string {
+  try {
+    if (!dataUrl.startsWith('data:image/svg+xml')) return dataUrl;
+    const cfDefs = document.querySelector('marker[id^="cf-"]')?.closest('defs');
+    if (!cfDefs) return dataUrl;
+    const cs = getComputedStyle(document.documentElement);
+    const ink = cs.getPropertyValue('--ink-2').trim() || '#48526A';
+    const surface = cs.getPropertyValue('--surface').trim() || '#ffffff';
+    const defsHtml = cfDefs.outerHTML
+      .replace(/var\(--ink-2\)/g, ink)
+      .replace(/var\(--surface\)/g, surface);
+    const comma = dataUrl.indexOf(',');
+    let svg = decodeURIComponent(dataUrl.slice(comma + 1));
+    svg = svg.replace(/(<svg[^>]*>)/, `$1${defsHtml}`);
+    return dataUrl.slice(0, comma + 1) + encodeURIComponent(svg);
+  } catch {
+    return dataUrl; // ante cualquier problema, exportar el SVG sin markers
+  }
+}
+
 export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: string, k?: 'err') => void; onOpenModel?: () => void }) {
   const activeSaId = useModelerStore((s) => s.activeSaId);
   const diagram = useModelerStore((s) => s.diagram);
@@ -116,24 +144,28 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     finally { setArranging(false); }
   };
 
-  // Export image: ajusta la vista a todo el modelo y captura el viewport a PNG.
+  // Export image: ajusta la vista a todo el modelo y captura el viewport a SVG.
+  // SVG (vectorial) en vez de PNG: se mantiene NÍTIDO a cualquier zoom y es
+  // navegable en el browser; además NO rasteriza un bitmap gigante, así que en
+  // canvases grandes no congela la pestaña como el PNG con pixelRatio 2.
   const exportImage = async () => {
     const rf = useModelerStore.getState().flow;
     const el = document.querySelector('.react-flow__viewport') as HTMLElement | null;
     if (!rf || !el) { pushToast('Nada para exportar', 'err'); return; }
     // fitView devuelve promesa en React Flow 12: esperarla + doble rAF evita la
     // carrera del sleep fijo (a 100 tablas el re-layout tardaba más de 250ms y
-    // la captura salía cortada).
+    // la captura salía cortada). Con onlyRenderVisibleElements, el fitView además
+    // monta en el DOM todos los nodos para que entren en la captura.
     await rf.fitView({ padding: 0.15, duration: 0 });
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     try {
-      const { toPng } = await import('html-to-image');
-      const dataUrl = await toPng(el, { backgroundColor: '#FBFCFD', pixelRatio: 2, cacheBust: true });
+      const { toSvg } = await import('html-to-image');
+      const dataUrl = await toSvg(el, { backgroundColor: '#FBFCFD', cacheBust: true });
       const a = document.createElement('a');
-      a.download = `${diagram?.subjectArea.name ?? 'canvas'}.png`;
-      a.href = dataUrl;
+      a.download = `${diagram?.subjectArea.name ?? 'canvas'}.svg`;
+      a.href = injectCrowFootDefs(dataUrl);
       a.click();
-      pushToast('Imagen exportada');
+      pushToast('Imagen SVG exportada');
     } catch { pushToast('No se pudo exportar la imagen', 'err'); }
   };
 

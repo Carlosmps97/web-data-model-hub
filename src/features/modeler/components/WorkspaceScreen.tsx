@@ -59,6 +59,10 @@ export default function WorkspaceScreen() {
   useEffect(() => {
     if (openMode) void reload();
     useModelerStore.getState().clearDirty();
+    // Al abrir una versión para EDITAR se muestra el modelo LÓGICO (es lo que se
+    // edita) para que los cambios de naming lógico se vean de una; en solo-lectura
+    // se mantiene el físico (nombres de producción). El toggle sigue disponible.
+    if (openMode === 'editing') useModelerStore.getState().setViewMode('logical');
   }, [openMode, activeChangesetId, reload]);
 
   // Defensa en profundidad: una sesión `editing` sólo es válida sobre un draft

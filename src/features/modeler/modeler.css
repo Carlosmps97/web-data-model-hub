@@ -432,6 +432,10 @@
 
 .exd-input { height: 34px; font-size: 13px; }
 select.exd-input { padding: 0 10px; }
+/* Deshabilitado (p.ej. Catalog cuando Unity Catalog está apagado): se ve gris,
+   con el placeholder atenuado, para leerse como "no editable". */
+.exd-input:disabled { background: #F0F2F6; color: #9AA3B2; border-color: #E6EAF0; cursor: not-allowed; }
+.exd-input:disabled::placeholder { color: #C4CBD6; }
 .exd-mono { font-family: var(--mono); font-size: 12.5px; }
 
 /* Checkbox-style toggle row (shared by options + table rows) */

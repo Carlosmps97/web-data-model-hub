@@ -20,7 +20,7 @@
  */
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
   FileCode2, Download, Copy, Lock, Plus, Trash2, Check, Search, Table2, Database, Hexagon,
@@ -28,9 +28,10 @@ import {
 
 import { Button, Dialog } from '@/components/ui';
 import type { Diagram } from '@/features/modeler/services/modeler.service';
+import { listViewsForTables } from '@/services/views.service';
 import {
   databricksDdl, ddlFilename, DEFAULT_DATABRICKS_OPTS,
-  type DatabricksDdlOptions, type DdlDialect, type DdlTableFormat, type DdlTable,
+  type DatabricksDdlOptions, type DdlDialect, type DdlTableFormat, type DdlTable, type DdlView,
 } from '../generators';
 
 export interface ExportDdlModalProps {
@@ -83,6 +84,18 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     [diagram],
   );
 
+  // Vistas del canvas (las tablas no traen sus vistas en el Diagram) — se cargan
+  // al abrir el modal, en UNA request por tableIds, y alimentan `includeViews`.
+  const [views, setViews] = useState<DdlView[]>([]);
+  useEffect(() => {
+    if (!open || !diagram?.tables.length) { setViews([]); return; }
+    let alive = true;
+    listViewsForTables(diagram.tables.map((t) => t.id))
+      .then((vs) => { if (alive) setViews(vs.map((v) => ({ id: v.id, tableId: v.tableId, name: v.name, schema: v.schema, sql: v.sql, filter: v.filter, description: v.description, sources: v.sources }))); })
+      .catch(() => { if (alive) setViews([]); });
+    return () => { alive = false; };
+  }, [open, diagram]);
+
   // Which table ids to export — defaults to all; recomputed if the diagram changes.
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [tableFilter, setTableFilter] = useState('');
@@ -102,12 +115,13 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
         tables: diagram.tables,
         columns: diagram.columns,
         relationships: diagram.relationships,
+        views,
         tableIds: [...selectedIds],
         modelName,
       },
       opts,
     );
-  }, [diagram, selectedIds, modelName, opts]);
+  }, [diagram, selectedIds, modelName, opts, views]);
 
   const toggleTable = (id: string) => {
     const base = new Set(selectedIds);
@@ -264,7 +278,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
           <div className="exd-opts">
             <span className="exd-section">Include</span>
             <div className="exd-switches">
-              <SwitchRow on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Views" hint="CREATE VIEW por rol" />
+              <SwitchRow on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Views" hint={views.length ? `${views.length} vista(s) en el canvas` : 'Sin vistas en el canvas'} />
               <SwitchRow on={opts.includeKeys} onClick={() => set('includeKeys', !opts.includeKeys)} label="Primary & foreign keys" hint="PK / FK constraints" />
               <SwitchRow on={opts.includeComments} onClick={() => set('includeComments', !opts.includeComments)} label="Comments" hint="Definiciones funcionales" />
               <SwitchRow on={opts.includePartitions} onClick={() => set('includePartitions', !opts.includePartitions)} label="Partitions" hint="PARTITIONED BY" />

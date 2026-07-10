@@ -131,8 +131,24 @@ export interface DdlRelationship {
   targetColumnId: string;
 }
 
+/** Minimal view shape para emitir `CREATE VIEW` (subconjunto de la View canónica). */
+export interface DdlView {
+  id: string;
+  tableId?: string;
+  name: string;
+  schema?: string;
+  /** Definición SQL libre (fallback cuando no hay estructura). */
+  sql?: string;
+  /** Filtro (WHERE). */
+  filter?: string;
+  description?: string;
+  /** Proyecciones del editor de vista: una por columna incluida. Sin proyecciones
+   *  (o todas plain = todas las columnas sin rename/expresión) ⇒ SELECT *. */
+  sources?: { column?: string; table?: string; outputAlias?: string; expression?: string }[];
+}
+
 export interface DatabricksDdlOptions {
-  /** Append `CREATE VIEW` per role view (none in the canonical shape today). */
+  /** Emite `CREATE OR REPLACE VIEW` por cada vista del canvas exportado. */
   includeViews: boolean;
   /** Emit PRIMARY KEY / FOREIGN KEY constraints. */
   includeKeys: boolean;
@@ -281,10 +297,50 @@ function tableDDL(
   return out;
 }
 
+/** Un `CREATE OR REPLACE VIEW` desde una vista canónica. Regla de columnas:
+ *  si la vista NO declara proyecciones (es de todas las columnas) ⇒ `SELECT *`;
+ *  si declara columnas/expresiones en sus `sources` ⇒ se listan explícitas.
+ *  El FROM usa la tabla base CUALIFICADA (honra Unity Catalog); WHERE = filter. */
+function viewDDL(v: DdlView, o: DatabricksDdlOptions, tableById: Map<string, DdlTable>): string {
+  const base = v.tableId ? tableById.get(v.tableId) : undefined;
+  const schema = (v.schema?.trim() || base?.schema?.trim() || o.defaultSchema || 'default');
+  const parts = o.unityCatalog ? [o.catalog || 'main', schema, v.name] : [schema, v.name];
+  const full = parts.map(ident).join('.');
+
+  // Solo cuentan las proyecciones por COLUMNA o EXPRESIÓN (se ignora el formato
+  // legacy table-only, que cae al fallback SELECT *).
+  const srcs = (v.sources ?? []).filter((s) => (s.column ?? s.expression));
+  const from = base ? qualify(base, o) : `${ident(schema)}.${ident(v.name)}`;
+  const where = (v.filter ?? '').trim();
+
+  // La vista LISTA sus columnas explícitas (una por línea) en el orden definido.
+  // `SELECT *` solo como fallback si la vista no tiene proyección por columna.
+  let body: string;
+  if (srcs.length === 0) {
+    body = (!base && v.sql?.trim() && !where)
+      ? v.sql.trim().replace(/;\s*$/, '')
+      : `SELECT *\nFROM ${from}`;
+  } else {
+    const projections = srcs.map((s) => {
+      const expr = (s.expression ?? '').trim() || (s.column ?? '*');
+      const alias = (s.outputAlias ?? '').trim();
+      return alias && alias !== expr ? `${expr} AS ${alias}` : expr;
+    });
+    body = `SELECT\n  ${projections.join(',\n  ')}\nFROM ${from}`;
+  }
+  if (where) body += `\nWHERE ${where}`;
+
+  let out = `CREATE OR REPLACE VIEW ${full}`;
+  if (o.includeComments && v.description?.trim()) out += ` COMMENT ${lit(v.description.trim())}`;
+  return out + ` AS\n${body};\n`;
+}
+
 export interface DatabricksDdlInput {
   tables: DdlTable[];
   columns: DdlColumn[];
   relationships: DdlRelationship[];
+  /** Vistas del canvas (para `CREATE VIEW` cuando `includeViews`). */
+  views?: DdlView[];
   /** Only export these table ids; empty/undefined ⇒ all. */
   tableIds?: string[];
   modelName?: string;
@@ -316,7 +372,16 @@ export function databricksDdl(input: DatabricksDdlInput, o: DatabricksDdlOptions
     .map((t) => tableDDL(t, byTable.get(t.id) ?? [], rels, o, tableById, colName))
     .join('\n');
 
-  return `${header}\n${body}`.trimEnd() + '\n';
+  // Vistas: solo las de las tablas dentro del set exportado.
+  let viewsOut = '';
+  if (o.includeViews && input.views?.length) {
+    const wanted = input.views.filter((v) => !v.tableId || ids.has(v.tableId));
+    if (wanted.length) {
+      viewsOut = `\n-- ${wanted.length} view(s)\n` + wanted.map((v) => viewDDL(v, o, tableById)).join('\n');
+    }
+  }
+
+  return `${header}\n${body}${viewsOut}`.trimEnd() + '\n';
 }
 
 /** Filesystem-safe filename for the download. One table ⇒ its physical name. */

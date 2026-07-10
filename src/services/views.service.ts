@@ -12,10 +12,17 @@ import { apiGet, apiPost, apiPut, apiDelete } from './http';
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const VIEWS = `${API_BASE}/api/views`;
 
-/** Una fuente (tabla origen) dentro de una vista, con alias/expresión opcionales. */
+/** Una proyección de columna dentro de una vista (editor 07b-2): la columna
+ *  origen de la tabla base, con nombre de salida y/o expresión SQL opcionales.
+ *  `table` queda por compatibilidad con vistas legacy multi-fuente. */
 export interface ViewSource {
-  table: string;
+  /** Columna origen de la tabla base. */
+  column?: string;
+  /** (Legacy) tabla origen. */
+  table?: string;
+  /** Nombre de salida (alias) de la columna en la vista. */
   outputAlias?: string;
+  /** Expresión SQL libre (mask/hash/cast/concat…). */
   expression?: string;
 }
 
@@ -51,6 +58,13 @@ export interface ViewInput {
 /** Vistas de una tabla concreta. */
 export function listViews(tableId: string): Promise<View[]> {
   return apiGet<View[]>(`${VIEWS}?tableId=${encodeURIComponent(tableId)}`);
+}
+
+/** Vistas de VARIAS tablas en UNA request (p.ej. todas las tablas de un canvas
+ *  para el Export DDL) — evita N llamadas por tabla. */
+export function listViewsForTables(tableIds: string[]): Promise<View[]> {
+  if (!tableIds.length) return Promise.resolve([]);
+  return apiGet<View[]>(`${VIEWS}?tableIds=${encodeURIComponent(tableIds.join(','))}`);
 }
 
 export function createView(body: ViewInput): Promise<View> {

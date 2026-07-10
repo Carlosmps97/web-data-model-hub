@@ -102,9 +102,17 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
   const saveDef = async () => {
     setSavingDef(true);
     try {
+      const logical = form.logicalName.trim();
+      let physical = form.physicalName.trim();
+      // Si cambió el LÓGICO y el físico NO se editó a mano (sigue igual al
+      // original), re-derivar el físico del nuevo lógico — consistente con las
+      // columnas y el alta de tabla (antes la tabla dejaba el físico obsoleto).
+      if (logical && logical !== table.logicalName && physical === table.physicalName) {
+        try { physical = (await gov.physicalize(logical, 'table')).physical; } catch { /* mantener el actual */ }
+      }
       // `updateTable` sólo cubre name/schema; un único upsert changeset-aware (merge
       // sobre la tabla actual) cubre además `description`, y luego reload.
-      await gov.createTable({ ...table, logicalName: form.logicalName.trim(), physicalName: form.physicalName.trim(), schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
+      await gov.createTable({ ...table, logicalName: logical, physicalName: physical, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
       await reload();
       pushToast('Table updated');
     // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador) en
@@ -341,6 +349,7 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
           tableId={table.id}
           defaultName={table.physicalName}
           defaultSchema={table.schema ?? ''}
+          columns={cols.map((c) => ({ id: c.id, physicalName: c.physicalName, dataType: c.dataType }))}
           view={viewEditor.view}
           onClose={() => setViewEditor(null)}
           onSaved={reloadViews}
