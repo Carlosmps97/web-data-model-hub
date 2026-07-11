@@ -6,6 +6,7 @@ import * as gov from '@/features/governance/services/governance.service';
 import { useChangesetStore } from '@/store/useChangesetStore';
 import type { CanonicalTable, CanonicalColumn } from '@/features/governance/services/governance.service';
 import type { Relationship } from '@/features/governance/services/governance.service';
+import type { View } from '@/services/views.service';
 export type { Relationship };
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
@@ -18,7 +19,9 @@ export type DrawingType = 'rect' | 'square' | 'circle' | 'ellipse' | 'line' | 's
 export interface Drawing { id: string; type: DrawingType; x: number; y: number; w: number; h: number; text?: string; color?: string; }
 // Un canvas = una subject_area = un diagrama ER. `folderId=null` ⇒ cuelga de la raíz del proyecto.
 export interface SubjectArea { id: string; projectId: string; name: string; folderId?: string | null; tableIds: string[]; layout: Record<string, { x: number; y: number }>; drawings?: Drawing[]; }
-export interface Diagram { subjectArea: SubjectArea; tables: CanonicalTable[]; columns: CanonicalColumn[]; relationships: Relationship[]; }
+// F3: `views` = vistas showOnCanvas con ≥1 fuente en este canvas (las filtra
+// el backend en /diagram; el front solo las dibuja — nodos 'view' + wires).
+export interface Diagram { subjectArea: SubjectArea; tables: CanonicalTable[]; columns: CanonicalColumn[]; relationships: Relationship[]; views: View[]; }
 
 // ── Projects (directos) ──
 export const listProjects = () => apiGet<Project[]>(`${API_BASE}/api/projects`);

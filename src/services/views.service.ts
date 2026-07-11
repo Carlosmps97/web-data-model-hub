@@ -12,24 +12,38 @@ import { apiGet, apiPost, apiPut, apiDelete } from './http';
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const VIEWS = `${API_BASE}/api/views`;
 
-/** Una proyección de columna dentro de una vista (editor 07b-2): la columna
- *  origen de la tabla base, con nombre de salida y/o expresión SQL opcionales.
- *  `table` queda por compatibilidad con vistas legacy multi-fuente. */
+/** Una proyección de columna dentro de una vista (editor 07b-2 / F3 multi-fuente):
+ *  la columna origen, de qué tabla fuente viene, nombre de salida, expresión SQL
+ *  y/o CAST opcionales. `table` queda por compatibilidad con vistas legacy. */
 export interface ViewSource {
-  /** Columna origen de la tabla base. */
+  /** Columna origen. */
   column?: string;
-  /** (Legacy) tabla origen. */
+  /** (Legacy) tabla origen por nombre. */
   table?: string;
+  /** F3: id de la tabla fuente de la que viene la columna. */
+  tableId?: string;
   /** Nombre de salida (alias) de la columna en la vista. */
   outputAlias?: string;
   /** Expresión SQL libre (mask/hash/cast/concat…). */
   expression?: string;
+  /** F3: override de tipo ⇒ el DDL emite `CAST(col AS castType) AS alias`. */
+  castType?: string;
 }
 
-/** Vista persistida (forma completa del backend R4c). */
+/** Vista persistida (forma completa del backend R4c + F3).
+ *  Invariante round-trip: cada campo persistido vive acá Y en el `ViewDoc`
+ *  Pydantic del backend (F3a) — si falta en uno, desaparece al recargar. */
 export interface View {
   id: string;
+  /** Legacy: primera fuente (= sourceTableIds[0], compat). */
   tableId?: string;
+  /** F3: fuentes canónicas de la vista, en orden (definen los alias t1, t2…). */
+  sourceTableIds?: string[];
+  /** F3 (D3): flag GLOBAL — la vista aparece en todo canvas con ≥1 fuente.
+   *  NO afecta el export DDL. */
+  showOnCanvas?: boolean;
+  /** F3 (D2): condición de JOIN manual (override de la inferida de relaciones). */
+  joinOverride?: string;
   name: string;
   schema?: string;
   tags?: Tag[];
@@ -44,6 +58,9 @@ export interface View {
 /** Body de creación/actualización (sin `id`, lo asigna/usa el backend). */
 export interface ViewInput {
   tableId?: string;
+  sourceTableIds?: string[];
+  showOnCanvas?: boolean;
+  joinOverride?: string;
   name: string;
   schema?: string;
   tags?: Tag[];
