@@ -114,18 +114,23 @@ export interface ParentDomainFull {
   description?: string;
 }
 
-export interface DomainImpactColumn {
-  id: string;
-  physicalName: string;
+/** Fila del impacto agrupado por tabla (F2 #2). */
+export interface DomainImpactTable {
   tableId: string;
-  overridden: boolean;
+  schema: string | null;
+  physicalName: string;
+  logicalName: string;
+  columns: number;    // columnas del dominio en esta tabla
+  overridden: number; // de esas, con override manual (NO cambian)
 }
 
 export interface DomainImpact {
   columnsUsing: number;
   willUpdate: number;
   overridden: number;
-  columns: DomainImpactColumn[];
+  totalTables: number;    // tablas que matchean q (sin q = todas)
+  modelsAffected: number; // canvases cuyos tableIds intersectan las afectadas
+  tables: DomainImpactTable[];
 }
 
 export const listDomainsGlobal = () => apiGet<ParentDomainFull[]>(DOMAINS);
@@ -133,7 +138,18 @@ export const createDomainGlobal = (d: Omit<ParentDomainFull, 'id'>) => apiPost<P
 export const updateDomainGlobal = (id: string, d: Omit<ParentDomainFull, 'id'>) =>
   apiPut<ParentDomainFull>(`${DOMAINS}/${encodeURIComponent(id)}`, d);
 export const deleteDomainGlobal = (id: string) => apiDelete<{ id: string }>(`${DOMAINS}/${encodeURIComponent(id)}`);
-/** Columnas afectadas por un cambio de tipo del dominio (p4b). */
-export const getDomainImpact = (id: string) => apiGet<DomainImpact>(`${DOMAINS}/${encodeURIComponent(id)}/impact`);
+/** Impacto detallado de un cambio de tipo del dominio (F2 #2): totales
+ *  globales + tablas agrupadas; `q` busca por nombre de tabla server-side. */
+export const getDomainImpact = (
+  id: string,
+  opts: { q?: string; offset?: number; limit?: number } = {},
+) => {
+  const params = new URLSearchParams();
+  if (opts.q) params.set('q', opts.q);
+  if (opts.offset != null) params.set('offset', String(opts.offset));
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  const qs = params.toString();
+  return apiGet<DomainImpact>(`${DOMAINS}/${encodeURIComponent(id)}/impact${qs ? `?${qs}` : ''}`);
+};
 /** Aplica el `defaultDataType` actual del dominio a las columnas sin override. */
 export const propagateDomain = (id: string) => apiPost<{ updated: number }>(`${DOMAINS}/${encodeURIComponent(id)}/propagate`);
