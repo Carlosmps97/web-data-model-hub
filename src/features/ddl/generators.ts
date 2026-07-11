@@ -297,6 +297,41 @@ function tableDDL(
   return out;
 }
 
+/** Condición de JOIN inferida de las relaciones modeladas entre las fuentes de
+ *  una vista (D2, spec §3-5). Para cada fuente después de la primera toma la
+ *  PRIMERA relación que la conecte con alguna fuente ANTERIOR y emite
+ *  `tA.col = tB.col` con alias POSICIONALES (t1, t2… por orden en
+ *  sourceTableIds; la fuente anterior a la izquierda). Une las condiciones con
+ *  ' AND '; devuelve '' si ninguna fuente nueva conecta con las previas (el
+ *  ViewEditor entonces exige joinOverride). Los alias y nombres de columna se
+ *  emiten RAW (sin ident(): no deben casearse — coordinación F4).
+ *  Pura — la usan viewDDL y la sección JOIN del ViewEditor. */
+export function inferJoin(
+  sourceTableIds: string[],
+  relationships: DdlRelationship[],
+  columns: DdlColumn[],
+): string {
+  if (sourceTableIds.length < 2) return '';
+  const alias = new Map(sourceTableIds.map((id, i) => [id, `t${i + 1}`]));
+  const colName = new Map(columns.map((c) => [c.id, c.physicalName]));
+  const conds: string[] = [];
+  for (let k = 1; k < sourceTableIds.length; k++) {
+    const cur = sourceTableIds[k];
+    const prev = new Set(sourceTableIds.slice(0, k));
+    const rel = relationships.find(
+      (r) => (r.sourceTableId === cur && prev.has(r.targetTableId))
+        || (r.targetTableId === cur && prev.has(r.sourceTableId)),
+    );
+    if (!rel) continue;
+    // Extremo de la fuente ANTERIOR primero (se lee izquierda→derecha).
+    const [aTid, aCol, bTid, bCol] = rel.sourceTableId === cur
+      ? [rel.targetTableId, rel.targetColumnId, rel.sourceTableId, rel.sourceColumnId]
+      : [rel.sourceTableId, rel.sourceColumnId, rel.targetTableId, rel.targetColumnId];
+    conds.push(`${alias.get(aTid)}.${colName.get(aCol) ?? aCol} = ${alias.get(bTid)}.${colName.get(bCol) ?? bCol}`);
+  }
+  return conds.join(' AND ');
+}
+
 /** Un `CREATE OR REPLACE VIEW` desde una vista canónica. Regla de columnas:
  *  si la vista NO declara proyecciones (es de todas las columnas) ⇒ `SELECT *`;
  *  si declara columnas/expresiones en sus `sources` ⇒ se listan explícitas.
