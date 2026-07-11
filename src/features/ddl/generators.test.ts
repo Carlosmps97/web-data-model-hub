@@ -145,7 +145,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
 
   it('sin relación ni joinOverride ⇒ fallback explícito 1 = 1 comentado', () => {
     const ddl = databricksDdl({ ...TWO, relationships: [], views: [V] }, { ...DEF, includeViews: true });
-    expect(ddl).toContain('ON 1 = 1 -- sin relación modelada entre las fuentes');
+    expect(ddl).toContain('ON 1 = 1 /* sin relación modelada entre las fuentes */');
   });
 
   it('UNA fuente: sin alias ni cualificación (regresión legacy); CAST sin alias conserva el nombre', () => {

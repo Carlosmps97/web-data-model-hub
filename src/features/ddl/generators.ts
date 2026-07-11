@@ -381,7 +381,7 @@ export function viewDDL(
   else {
     const on = (v.joinOverride ?? '').trim()
       || inferJoin(srcIds, relationships, columns)
-      || '1 = 1 -- sin relación modelada entre las fuentes';
+      || '1 = 1 /* sin relación modelada entre las fuentes */';
     from = `${refOf(srcIds[0])} t1\n`
       + srcIds.slice(1).map((id) => `  INNER JOIN ${refOf(id)} ${aliasOf.get(id)}`).join('\n')
       + `\n  ON ${on}`;
