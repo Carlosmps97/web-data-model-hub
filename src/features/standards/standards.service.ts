@@ -12,7 +12,7 @@ import type { UdpScope, WordType, Separator, Casing } from '@/services/naming.se
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const STD = `${API_BASE}/api/standards`;
 
-export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType | null; }
+export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType | null; locked?: boolean; lockedBy?: string | null; lockedAt?: string | null; }
 export interface SnapshotDomain { id: string; name: string; defaultDataType: string; namingTerm?: string | null; description?: string | null; }
 export interface NamingRuleSnap { separator: Separator | string | null; case: Casing | string | null; }
 /** Definición de un UDP (User Defined Property): la KEY + su tipo + default +

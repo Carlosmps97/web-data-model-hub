@@ -34,6 +34,10 @@ export interface DictTerm {
   abbrev: string;
   scope: UdpScope;
   wordType?: WordType;
+  // F2 #1 (round-trip TS ↔ Pydantic): lock por ADMIN. También en SnapshotTerm.
+  locked?: boolean;
+  lockedBy?: string | null;
+  lockedAt?: string | null;
 }
 
 export interface NamingRule {
@@ -56,6 +60,34 @@ export const updateTerm = (id: string, x: Omit<DictTerm, 'id'>) =>
   apiPut<DictTerm>(`${DICT}/${encodeURIComponent(id)}`, x);
 
 export const deleteTerm = (id: string) => apiDelete<{ id: string }>(`${DICT}/${encodeURIComponent(id)}`);
+
+// ── Validación de término nuevo + lock por ADMIN (F2 #1) ──
+export interface GlossaryCorpusHit {
+  entity: 'table' | 'column';
+  tableName: string;
+  columnName: string | null;
+  logicalName: string;
+}
+
+export interface GlossaryValidation {
+  ok: boolean;
+  conflicts: {
+    glossaryDuplicate: { id: string; term: string; abbrev: string } | null;
+    corpus: GlossaryCorpusHit[]; // muestra capada a 50
+    total: number;               // corpus total + 1 si hay duplicado
+  };
+}
+
+/** Valida un término/frase contra el glosario del scope y el corpus de nombres
+ *  lógicos publicados. Cortesía de UX: el backend re-valida en cada write. */
+export const validateTerm = (term: string, scope: UdpScope) =>
+  apiPost<GlossaryValidation>(`${DICT}/validate`, { term, scope });
+
+/** Bloquea/desbloquea una entrada (solo admin.manage; D4: intocable para todos). */
+export const lockTerm = (id: string) =>
+  apiPost<DictTerm>(`${DICT}/${encodeURIComponent(id)}/lock`, {});
+export const unlockTerm = (id: string) =>
+  apiPost<DictTerm>(`${DICT}/${encodeURIComponent(id)}/unlock`, {});
 
 // ── Naming config (separator / case per scope) ──
 export const getNamingConfig = () => apiGet<NamingConfig>(NAMING);
