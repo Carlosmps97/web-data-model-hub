@@ -373,6 +373,11 @@
 .wk-vnode-foot { padding: 5px 11px; border-top: 1px dashed var(--border-1);
   font-size: 10px; color: var(--text-muted-2); white-space: nowrap; background: #FAFBFC; }
 
+/* Vista COMPARTIDA (2+ fuentes) en Properties→Views (F3): tinte + badge. */
+.wk-pp-link.shared { background: #F8F5FF; border-color: #E1D4FB; }
+.wk-pp-shared { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700;
+  color: #6D3FC4; background: #EFE7FD; border-radius: var(--r-full); padding: 2px 8px; }
+
 /* ── UDP popup (Screen 08a per-column / 08b per-table) ─────────────────── */
 .udp { display: flex; flex-direction: column; gap: 14px; }
 

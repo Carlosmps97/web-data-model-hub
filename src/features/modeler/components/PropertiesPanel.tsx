@@ -293,21 +293,36 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
               {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setViewEditor({})}><Icon name="plus" size={12} sw={2.6} /> New view</button>}
             </div>
             {views.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No views for this table{canEdit ? '. Use “New view”.' : '.'}</div>}
-            {views.map((v) => (
-              <div className="wk-pp-link" key={v.id}>
-                <div className="wk-pp-link-head">
-                  <Eye size={13} style={{ color: 'var(--purple)', flex: 'none' }} />
-                  <span className="rd-mono">{v.schema ? `${v.schema}.` : ''}{v.name}</span>
-                  {canEdit && (
-                    <span style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
-                      <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Edit" onClick={() => setViewEditor({ view: v })}><Pencil size={12} /></button>
-                      <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Delete" onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete view', message: <>View <strong>“{v.name}”</strong> will be deleted.</>, confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
-                    </span>
+            {views.map((v) => {
+              // F3: fuentes canónicas (fallback tableId legacy). Compartida =
+              // 2+ fuentes ⇒ tinte violeta + badge con las OTRAS fuentes (los
+              // nombres se resuelven contra las tablas del canvas actual).
+              const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+              const shared = srcIds.length > 1;
+              const others = srcIds
+                .filter((id) => id !== table.id)
+                .map((id) => diagram?.tables.find((t) => t.id === id)?.physicalName ?? 'otra tabla');
+              return (
+                <div className={`wk-pp-link${shared ? ' shared' : ''}`} key={v.id}>
+                  <div className="wk-pp-link-head">
+                    <Eye size={13} style={{ color: 'var(--purple)', flex: 'none' }} />
+                    <span className="rd-mono">{v.schema ? `${v.schema}.` : ''}{v.name}</span>
+                    {canEdit && (
+                      <span style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+                        <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Edit" onClick={() => setViewEditor({ view: v })}><Pencil size={12} /></button>
+                        <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Delete" onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete view', message: <>View <strong>“{v.name}”</strong> will be deleted.</>, confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
+                      </span>
+                    )}
+                  </div>
+                  {shared && (
+                    <div className="wk-pp-link-card">
+                      <span className="wk-pp-shared">Compartida con {others.join(' · ')}</span>
+                    </div>
                   )}
+                  {v.tags && v.tags.length > 0 && <div className="wk-pp-link-card"><span className="rd-small" style={{ color: 'var(--muted)' }}>{v.tags.length} tag{v.tags.length === 1 ? '' : 's'}</span></div>}
                 </div>
-                {v.tags && v.tags.length > 0 && <div className="wk-pp-link-card"><span className="rd-small" style={{ color: 'var(--muted)' }}>{v.tags.length} tag{v.tags.length === 1 ? '' : 's'}</span></div>}
-              </div>
-            ))}
+              );
+            })}
           </>
         )}
 
