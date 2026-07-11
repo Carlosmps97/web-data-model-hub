@@ -135,13 +135,42 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
   };
   const removeCol = async (id: string, name: string) => {
     try {
+      // Impacto GLOBAL (spec 10 §8): relaciones — en CUALQUIER canvas — donde
+      // la columna es extremo (publicadas + overlay del changeset). Si el
+      // impact falla (red), se cae al confirm genérico sin cascade.
+      let impact: gov.RelationshipImpact = { relationships: [], total: 0 };
+      try { impact = await gov.columnImpact(id); } catch { /* confirm genérico */ }
+      const relIds = impact.relationships.map((r) => r.relId);
       const ok = await confirmDialog({
         title: 'Delete column',
-        message: <>Column <strong>“{name}”</strong> will be removed from this table.</>,
-        confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger',
-        action: () => deleteColumn(id),
+        message: impact.total > 0 ? (
+          <>
+            <p style={{ margin: 0 }}>
+              Column <strong>“{name}”</strong> participates in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} that will also be deleted:
+            </p>
+            <ul style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 180, overflow: 'auto' }}>
+              {impact.relationships.map((r) => (
+                <li key={r.relId} style={{ marginBottom: 4 }}>
+                  <span className="rd-mono">{r.otherTableName}.{r.otherColumnName}</span>
+                  {r.canvases.length > 0 && (
+                    <span className="rd-small" style={{ color: 'var(--muted)' }}>
+                      {' '}— in {r.canvases.map((c) => c.name).join(', ')}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          <>Column <strong>“{name}”</strong> will be removed from this table.</>
+        ),
+        confirmLabel: impact.total > 0 ? 'Delete anyway' : 'Delete',
+        cancelLabel: 'Cancel', variant: 'danger',
+        // Cascade: el changeset registra el delete de la columna Y de cada
+        // relación afectada (Task 12).
+        action: () => deleteColumn(id, relIds),
       });
-      if (ok) pushToast('Column deleted');
+      if (ok) pushToast(impact.total > 0 ? 'Column and its relationships deleted' : 'Column deleted');
     } catch { pushToast("Couldn't delete", 'err'); }
   };
 
