@@ -307,7 +307,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         </Tooltip>
       </div>
 
-      {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={async (input) => { await createTable(input).catch((e) => { pushToast('No se pudo crear', 'err'); throw e; }); }} />}
+      {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={createTable} />}
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />

@@ -4,6 +4,7 @@ import Dialog from '@/components/ui/Dialog';
 import * as gov from '@/features/governance/services/governance.service';
 import type { CanonicalTable } from '@/features/governance/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
+import { apiErrorMessage } from '@/services/http';
 
 type Mode = 'blank' | 'import';
 
@@ -27,6 +28,7 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [physEdited, setPhysEdited] = useState(false);
   const [schema, setSchema] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Auto-physicalize (scope 'table') con debounce, salvo override manual.
   useEffect(() => {
@@ -43,9 +45,14 @@ export default function NewTableModal({ onClose, onCreate }: {
     const ln = logical.trim();
     if (!ln) return;
     setBusy(true);
+    setError(null);
     try {
       await onCreate({ logicalName: ln, physicalName: physical.trim() || undefined, schema: schema.trim() || undefined });
       onClose();
+    } catch (e) {
+      // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
+      // detail real del backend — el modal NO se cierra.
+      setError(apiErrorMessage(e, "Couldn't create the table"));
     } finally { setBusy(false); }
   };
 
@@ -142,6 +149,11 @@ export default function NewTableModal({ onClose, onCreate }: {
             <input className="rd-input rd-mono" placeholder="schema_name" value={schema}
               onChange={(e) => setSchema(e.target.value)} style={{ width: '100%' }} />
           </div>
+          {error && (
+            <div className="rd-small" role="alert" style={{ color: 'var(--error, #C4314B)', marginTop: 2 }}>
+              {error}
+            </div>
+          )}
         </div>
       ) : (
         <div>
