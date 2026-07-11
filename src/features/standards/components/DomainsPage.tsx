@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import type { StandardsSnapshot, SnapshotDomain } from '../standards.service';
 import { applyStandards } from '../standards.service';
 import { getDomainImpact, type DomainImpact } from '@/services/naming.service';
+import { impactWarning, visibleImpactTables, tableLabel } from '../domainImpact';
 
 type Mode = 'view' | 'edit' | 'create';
 
@@ -48,6 +49,29 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
   const cancel = () => { setMode('view'); setConfirm(null); if (selected) setForm({ ...selected }); };
 
   const typeChanged = mode === 'edit' && selected && selected.defaultDataType !== form.defaultDataType;
+
+  // F2 #2: estado del dialog de impacto detallado (búsqueda server-side + toggle).
+  const [dlgQ, setDlgQ] = useState('');
+  const [showOverridden, setShowOverridden] = useState(false);
+  const [dlgImpact, setDlgImpact] = useState<DomainImpact | null>(null);
+
+  // Reset del dialog de impacto al abrirlo.
+  useEffect(() => {
+    if (confirm === 'apply') { setDlgQ(''); setShowOverridden(false); setDlgImpact(null); }
+  }, [confirm]);
+
+  // Búsqueda server-side (q) con debounce 300ms dentro del dialog (F2 #2);
+  // `alive` descarta respuestas fuera de orden (patrón CatalogPanel).
+  useEffect(() => {
+    if (confirm !== 'apply' || !typeChanged || !selId || selId === '__new__') return;
+    let alive = true;
+    const h = setTimeout(() => {
+      getDomainImpact(selId, { q: dlgQ.trim() || undefined, limit: 200 })
+        .then((i) => { if (alive) setDlgImpact(i); })
+        .catch(() => { if (alive) setDlgImpact(null); });
+    }, 300);
+    return () => { alive = false; clearTimeout(h); };
+  }, [confirm, dlgQ, selId, typeChanged]);
 
   const apply = async () => {
     setBusy(true);
@@ -120,7 +144,9 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
             {/* impact */}
             {impact && mode !== 'create' && (
               <div style={{ background: 'linear-gradient(180deg,#F4F7FF,#FAFBFF)', border: '1px solid #D9E3FB', borderRadius: 12, padding: '15px 17px', margin: '4px 0 18px' }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>Usado por <strong style={{ color: '#2E5BFF' }}>{impact.columnsUsing} columnas</strong>.</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>
+                  Usado por <strong style={{ color: '#2E5BFF' }}>{impact.columnsUsing} columnas</strong> en <strong>{impact.totalTables} tablas</strong> de <strong>{impact.modelsAffected} modelos</strong>.
+                </div>
                 <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
                   <span style={{ fontSize: 13, color: '#0E8C6A', fontWeight: 600 }}>● {impact.willUpdate} se actualizan</span>
                   <span style={{ fontSize: 13, color: '#9A6B00', fontWeight: 600 }}>● {impact.overridden} con override (skip)</span>
@@ -156,7 +182,44 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
             </div>
             <div style={{ padding: '18px 24px' }}>
               {typeChanged && selected && <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'var(--mono, monospace)', fontSize: 13, marginBottom: 12 }}><span style={{ color: '#8A93A5', textDecoration: 'line-through' }}>{selected.defaultDataType}</span> → <span style={{ fontWeight: 600, color: '#1A2B4A' }}>{form.defaultDataType}</span></div>}
-              {impact && typeChanged && <div style={{ background: 'linear-gradient(180deg,#F4F7FF,#FAFBFF)', border: '1px solid #D9E3FB', borderRadius: 11, padding: '12px 15px', fontSize: 13, color: '#1A2B4A' }}><strong style={{ color: '#2E5BFF' }}>{impact.willUpdate}</strong> columnas se re-tipan · {impact.overridden} con override se saltan.</div>}
+              {typeChanged && (
+                <>
+                  {/* Warning explícito (spec #2) — números GLOBALES (impact sin q). */}
+                  <div style={{ background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '12px 15px', fontSize: 13, fontWeight: 600, color: '#7A6220', marginBottom: 12 }}>
+                    {impact ? impactWarning(impact) : 'Calculando impacto…'}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 10px', background: '#fff', border: '1px solid #E6EAF0', borderRadius: 8, flex: 1 }}>
+                      <Search size={13} color="#9AA3B2" />
+                      <input value={dlgQ} onChange={(e) => setDlgQ(e.target.value)} placeholder="¿Está afectada una tabla? Buscá por nombre…" style={{ flex: 1, border: 0, outline: 'none', fontSize: 12.5, background: 'transparent' }} />
+                    </div>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#56607A', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                      <input type="checkbox" checked={showOverridden} onChange={(e) => setShowOverridden(e.target.checked)} />
+                      Ver columnas con override
+                    </label>
+                  </div>
+                  <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #EAEDF2', borderRadius: 10 }}>
+                    {visibleImpactTables((dlgImpact ?? impact)?.tables ?? [], showOverridden).map((t) => (
+                      <div key={t.tableId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid #F2F4F8', fontSize: 12.5 }}>
+                        <span style={{ fontFamily: 'var(--mono, monospace)', fontWeight: 600, color: '#1A2B4A' }}>{tableLabel(t)}</span>
+                        <span style={{ color: '#8A93A5', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.logicalName}</span>
+                        <span style={{ color: '#0E8C6A', fontWeight: 600, whiteSpace: 'nowrap' }}>{t.columns - t.overridden} col.</span>
+                        {t.overridden > 0 && <span style={{ color: '#9A6B00', fontWeight: 600, whiteSpace: 'nowrap' }}>{t.overridden} override</span>}
+                      </div>
+                    ))}
+                    {visibleImpactTables((dlgImpact ?? impact)?.tables ?? [], showOverridden).length === 0 && (
+                      <div style={{ padding: 14, fontSize: 12.5, color: '#9AA3B2' }}>
+                        {dlgQ.trim() ? 'Ninguna tabla afectada coincide con la búsqueda.' : 'Sin tablas afectadas.'}
+                      </div>
+                    )}
+                  </div>
+                  {(dlgImpact ?? impact) && (dlgImpact ?? impact)!.totalTables > ((dlgImpact ?? impact)!.tables.length) && (
+                    <div style={{ fontSize: 11.5, color: '#9AA3B2', marginTop: 6 }}>
+                      Mostrando {(dlgImpact ?? impact)!.tables.length} de {(dlgImpact ?? impact)!.totalTables} tablas
+                    </div>
+                  )}
+                </>
+              )}
               {mode === 'create' && <div style={{ fontSize: 13, color: '#56607A' }}>Se crea el dominio <strong>{form.name}</strong> con tipo <span style={{ fontFamily: 'var(--mono, monospace)' }}>{form.defaultDataType}</span>.</div>}
             </div>
             <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}><span style={{ flex: 1 }} /><button onClick={() => setConfirm(null)} disabled={busy} style={btnGhost}>Cancel</button><button onClick={apply} disabled={busy} style={btnPrimary}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Applying…' : mode === 'create' ? 'Create' : 'Apply cascade'}</button></div>
