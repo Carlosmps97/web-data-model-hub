@@ -98,3 +98,86 @@ describe('inferJoin — condición de JOIN inferida (F3, spec §3-5 D2)', () => 
       .toBe('t1.cy = t2.cx');
   });
 });
+
+describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () => {
+  const TWO: DatabricksDdlInput = {
+    tables: [
+      { id: 't1', physicalName: 'CLIENTE', schema: 'core' },
+      { id: 't2', physicalName: 'CUENTA', schema: 'core' },
+    ],
+    columns: [
+      { id: 'c1', tableId: 't1', physicalName: 'ID', dataType: 'bigint', ordinal: 0, isPrimaryKey: true },
+      { id: 'c2', tableId: 't2', physicalName: 'CLIENTE_ID', dataType: 'bigint', ordinal: 0 },
+      { id: 'c3', tableId: 't2', physicalName: 'SALDO', dataType: 'decimal', ordinal: 1 },
+    ],
+    relationships: [{ id: 'r1', sourceTableId: 't2', sourceColumnId: 'c2', targetTableId: 't1', targetColumnId: 'c1' }],
+    modelName: 'm',
+  };
+  const V: DdlView = {
+    id: 'v', tableId: 't1', name: 'v_cliente_cuenta', schema: 'core',
+    sourceTableIds: ['t1', 't2'],
+    sources: [
+      { column: 'ID', tableId: 't1' },
+      { column: 'SALDO', tableId: 't2', castType: 'STRING', outputAlias: 'saldo_txt' },
+    ],
+  };
+
+  it('FROM primera fuente t1 + INNER JOIN resto ON inferido de relationships', () => {
+    const ddl = databricksDdl({ ...TWO, views: [V] }, { ...DEF, includeViews: true });
+    expect(ddl).toContain('FROM `core`.`CLIENTE` t1');
+    expect(ddl).toContain('INNER JOIN `core`.`CUENTA` t2');
+    expect(ddl).toContain('ON t1.ID = t2.CLIENTE_ID');
+  });
+
+  it('columnas cualificadas con alias posicional + CAST(col AS tipo) AS alias', () => {
+    const ddl = databricksDdl({ ...TWO, views: [V] }, { ...DEF, includeViews: true });
+    expect(ddl).toContain('t1.ID');
+    expect(ddl).toContain('CAST(t2.SALDO AS STRING) AS saldo_txt');
+  });
+
+  it('joinOverride gana sobre la condición inferida y se emite VERBATIM', () => {
+    const ddl = databricksDdl(
+      { ...TWO, views: [{ ...V, joinOverride: 't1.ID = t2.CLIENTE_ID AND t2.SALDO > 0' }] },
+      { ...DEF, includeViews: true },
+    );
+    expect(ddl).toContain('ON t1.ID = t2.CLIENTE_ID AND t2.SALDO > 0');
+  });
+
+  it('sin relación ni joinOverride ⇒ fallback explícito 1 = 1 comentado', () => {
+    const ddl = databricksDdl({ ...TWO, relationships: [], views: [V] }, { ...DEF, includeViews: true });
+    expect(ddl).toContain('ON 1 = 1 -- sin relación modelada entre las fuentes');
+  });
+
+  it('UNA fuente: sin alias ni cualificación (regresión legacy); CAST sin alias conserva el nombre', () => {
+    const one: DdlView = {
+      id: 'v1', tableId: 't1', name: 'v_c', schema: 'core', sourceTableIds: ['t1'],
+      sources: [{ column: 'ID', tableId: 't1', castType: 'STRING' }],
+    };
+    const ddl = databricksDdl({ ...TWO, views: [one] }, { ...DEF, includeViews: true });
+    expect(ddl).toContain('CAST(ID AS STRING) AS ID');
+    expect(ddl).not.toContain('t1.ID');
+  });
+
+  it('la vista entra al export si ALGUNA fuente está en el set exportado', () => {
+    const ddl = databricksDdl({ ...TWO, views: [V], tableIds: ['t2'] }, { ...DEF, includeViews: true });
+    expect(ddl).toContain('v_cliente_cuenta');
+  });
+
+  it('fuente FUERA del contexto (tabla desconocida): id backtickeado visible', () => {
+    const v: DdlView = { ...V, sourceTableIds: ['t1', 'tx'], sources: [{ column: 'ID', tableId: 't1' }] };
+    const ddl = databricksDdl({ ...TWO, views: [v] }, { ...DEF, includeViews: true });
+    expect(ddl).toContain('INNER JOIN `tx` t2');
+  });
+
+  it('expression se emite VERBATIM también con 2+ fuentes (sin cualificar)', () => {
+    const v: DdlView = {
+      ...V,
+      sources: [
+        { column: 'ID', tableId: 't1' },
+        { column: 'SALDO', tableId: 't2', expression: 'ROUND(t2.SALDO, 2)', outputAlias: 'saldo_r' },
+      ],
+    };
+    const ddl = databricksDdl({ ...TWO, views: [v] }, { ...DEF, includeViews: true });
+    expect(ddl).toContain('ROUND(t2.SALDO, 2) AS saldo_r');
+  });
+});

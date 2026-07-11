@@ -134,7 +134,12 @@ export interface DdlRelationship {
 /** Minimal view shape para emitir `CREATE VIEW` (subconjunto de la View canónica). */
 export interface DdlView {
   id: string;
+  /** Legacy: primera fuente (compat). El canónico F3 es `sourceTableIds`. */
   tableId?: string;
+  /** F3: fuentes de la vista, en orden — definen los alias posicionales t1, t2… */
+  sourceTableIds?: string[];
+  /** F3: condición de JOIN manual — se emite VERBATIM (gana a la inferida). */
+  joinOverride?: string;
   name: string;
   schema?: string;
   /** Definición SQL libre (fallback cuando no hay estructura). */
@@ -143,8 +148,9 @@ export interface DdlView {
   filter?: string;
   description?: string;
   /** Proyecciones del editor de vista: una por columna incluida. Sin proyecciones
-   *  (o todas plain = todas las columnas sin rename/expresión) ⇒ SELECT *. */
-  sources?: { column?: string; table?: string; outputAlias?: string; expression?: string }[];
+   *  (o todas plain = legacy) ⇒ SELECT *. `tableId` = de qué fuente viene la
+   *  columna; `castType` ⇒ `CAST(col AS castType) AS alias` (verbatim). */
+  sources?: { column?: string; table?: string; tableId?: string; outputAlias?: string; expression?: string; castType?: string }[];
 }
 
 export interface DatabricksDdlOptions {
@@ -332,21 +338,54 @@ export function inferJoin(
   return conds.join(' AND ');
 }
 
-/** Un `CREATE OR REPLACE VIEW` desde una vista canónica. Regla de columnas:
- *  si la vista NO declara proyecciones (es de todas las columnas) ⇒ `SELECT *`;
- *  si declara columnas/expresiones en sus `sources` ⇒ se listan explícitas.
- *  El FROM usa la tabla base CUALIFICADA (honra Unity Catalog); WHERE = filter. */
-function viewDDL(v: DdlView, o: DatabricksDdlOptions, tableById: Map<string, DdlTable>): string {
-  const base = v.tableId ? tableById.get(v.tableId) : undefined;
+/** Un `CREATE OR REPLACE VIEW` desde una vista canónica (F3: multi-fuente).
+ *  Reglas por columna: `expression` VERBATIM > `CAST(col AS castType) AS alias`
+ *  > `col AS alias` (si difiere) > `col`. Con 2+ fuentes las columnas se
+ *  cualifican con alias posicionales t1, t2… — RAW, nunca via ident(): no son
+ *  identificadores del modelo (coordinación F4) — y el FROM encadena
+ *  `INNER JOIN` con UNA condición: `joinOverride` VERBATIM si está seteado,
+ *  si no la inferida de `relationships` (inferJoin), con fallback explícito
+ *  `1 = 1` comentado. Sin proyecciones ⇒ `SELECT *` (fallback legacy).
+ *  `showOnCanvas` NO participa del export. Exportada: el ViewEditor la usa
+ *  para el preview (mismo SQL que el export). */
+export function viewDDL(
+  v: DdlView,
+  o: DatabricksDdlOptions,
+  tableById: Map<string, DdlTable>,
+  relationships: DdlRelationship[] = [],
+  columns: DdlColumn[] = [],
+): string {
+  // Fuentes canónicas con fallback al tableId legacy (docs pre-F3a).
+  const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+  const base = srcIds.length ? tableById.get(srcIds[0]) : undefined;
   const schema = (v.schema?.trim() || base?.schema?.trim() || o.defaultSchema || 'default');
   const parts = o.unityCatalog ? [o.catalog || 'main', schema, v.name] : [schema, v.name];
   const full = parts.map(ident).join('.');
 
-  // Solo cuentan las proyecciones por COLUMNA o EXPRESIÓN (se ignora el formato
-  // legacy table-only, que cae al fallback SELECT *).
+  const aliased = srcIds.length > 1;
+  // Alias POSICIONAL por fuente (t1, t2, …): raw, nunca via ident() (F4).
+  const aliasOf = new Map(srcIds.map((id, i) => [id, `t${i + 1}`]));
+  // Fuente fuera del contexto exportado (tabla no resuelta): id backtickeado
+  // visible — señal explícita en el DDL en vez de inventar un nombre.
+  const refOf = (id: string) => { const t = tableById.get(id); return t ? qualify(t, o) : ident(id); };
+
+  // Solo cuentan proyecciones por COLUMNA o EXPRESIÓN (el formato legacy
+  // table-only cae al fallback SELECT *).
   const srcs = (v.sources ?? []).filter((s) => (s.column ?? s.expression));
-  const from = base ? qualify(base, o) : `${ident(schema)}.${ident(v.name)}`;
   const where = (v.filter ?? '').trim();
+
+  // FROM: 1 fuente = igual que siempre; 2+ = cadena INNER JOIN con UNA condición.
+  let from: string;
+  if (!srcIds.length) from = `${ident(schema)}.${ident(v.name)}`; // legacy sin tabla
+  else if (!aliased) from = refOf(srcIds[0]);
+  else {
+    const on = (v.joinOverride ?? '').trim()
+      || inferJoin(srcIds, relationships, columns)
+      || '1 = 1 -- sin relación modelada entre las fuentes';
+    from = `${refOf(srcIds[0])} t1\n`
+      + srcIds.slice(1).map((id) => `  INNER JOIN ${refOf(id)} ${aliasOf.get(id)}`).join('\n')
+      + `\n  ON ${on}`;
+  }
 
   // La vista LISTA sus columnas explícitas (una por línea) en el orden definido.
   // `SELECT *` solo como fallback si la vista no tiene proyección por columna.
@@ -357,9 +396,15 @@ function viewDDL(v: DdlView, o: DatabricksDdlOptions, tableById: Map<string, Ddl
       : `SELECT *\nFROM ${from}`;
   } else {
     const projections = srcs.map((s) => {
-      const expr = (s.expression ?? '').trim() || (s.column ?? '*');
       const alias = (s.outputAlias ?? '').trim();
-      return alias && alias !== expr ? `${expr} AS ${alias}` : expr;
+      const cast = (s.castType ?? '').trim();
+      const expr = (s.expression ?? '').trim();
+      if (expr) return alias && alias !== expr ? `${expr} AS ${alias}` : expr;
+      // Cualificada con su alias de fuente cuando hay 2+ (sin tableId ⇒ t1,
+      // ítems legacy de vistas de una sola tabla).
+      const col = aliased ? `${aliasOf.get(s.tableId ?? '') ?? 't1'}.${s.column}` : s.column!;
+      if (cast) return `CAST(${col} AS ${cast}) AS ${alias || s.column}`;
+      return alias && alias !== s.column ? `${col} AS ${alias}` : col;
     });
     body = `SELECT\n  ${projections.join(',\n  ')}\nFROM ${from}`;
   }
@@ -407,12 +452,20 @@ export function databricksDdl(input: DatabricksDdlInput, o: DatabricksDdlOptions
     .map((t) => tableDDL(t, byTable.get(t.id) ?? [], rels, o, tableById, colName))
     .join('\n');
 
-  // Vistas: solo las de las tablas dentro del set exportado.
+  // Vistas (F3): entra toda vista con ALGUNA fuente dentro del set exportado
+  // (misma semántica que Properties→Views: la vista "pertenece" a cada fuente).
+  // showOnCanvas NO participa del export. Las relaciones/columnas van SIN
+  // filtrar por el set: el JOIN de la vista es el que es, esté o no exportada
+  // la otra fuente.
   let viewsOut = '';
   if (o.includeViews && input.views?.length) {
-    const wanted = input.views.filter((v) => !v.tableId || ids.has(v.tableId));
-    if (wanted.length) {
-      viewsOut = `\n-- ${wanted.length} view(s)\n` + wanted.map((v) => viewDDL(v, o, tableById)).join('\n');
+    const exportViews = input.views.filter((v) => {
+      const src = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+      return src.length === 0 || src.some((id) => ids.has(id));
+    });
+    if (exportViews.length) {
+      viewsOut = `\n-- ${exportViews.length} view(s)\n`
+        + exportViews.map((v) => viewDDL(v, o, tableById, input.relationships, input.columns)).join('\n');
     }
   }
 
