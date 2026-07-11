@@ -152,7 +152,7 @@ export default function WorkspaceScreen() {
         </div>
       </div>
       {selectedTableId && openMode && <PropertiesPanel pushToast={pushToast} />}
-      {columnTarget && <ColumnEditor tableId={columnTarget} onClose={() => setColumnTarget(null)} onAdd={async (...a) => { await addColumn(...a).catch((e) => { pushToast('No se pudo agregar', 'err'); throw e; }); }} />}
+      {columnTarget && <ColumnEditor tableId={columnTarget} onClose={() => setColumnTarget(null)} onAdd={addColumn} />}
       <OpenModelModal open={openModelShown} onClose={closeOpenModel} published={published} users={users} />
       {/* El <Toaster> ahora es global (App.tsx): uno solo para toda la app. */}
     </div>

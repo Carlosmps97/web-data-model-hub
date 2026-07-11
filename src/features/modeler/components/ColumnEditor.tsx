@@ -3,6 +3,7 @@ import Modal from '@/components/ui/Modal';
 import Icon from '@/components/ui/Icon';
 import * as gov from '@/features/governance/services/governance.service';
 import type { ParentDomain, CanonicalColumn } from '@/features/governance/services/governance.service';
+import { apiErrorMessage } from '@/services/http';
 import UdpAssign from './UdpAssign';
 
 export default function ColumnEditor({ tableId, onClose, onAdd }: {
@@ -17,6 +18,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const [dataType, setDataType] = useState('');
   const [domains, setDomains] = useState<ParentDomain[]>([]);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => { gov.listDomains().then(setDomains).catch(() => {}); }, []);
   useEffect(() => {
@@ -27,8 +29,15 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const submit = async () => {
     if (!name.trim()) return;
     setBusy(true);
-    try { await onAdd(tableId, { logicalName: name.trim(), mode, parentDomainId: parentDomainId || undefined, dataType: dataType || undefined }); onClose(); }
-    finally { setBusy(false); }
+    setError(null);
+    try {
+      await onAdd(tableId, { logicalName: name.trim(), mode, parentDomainId: parentDomainId || undefined, dataType: dataType || undefined });
+      onClose();
+    } catch (e) {
+      // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
+      // detail real del backend — el modal NO se cierra.
+      setError(apiErrorMessage(e, "Couldn't add the column"));
+    } finally { setBusy(false); }
   };
 
   return (
@@ -50,6 +59,11 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
         </select>
         <input className="rd-input rd-mono" placeholder="Type override (optional)" value={dataType} onChange={(e) => setDataType(e.target.value)} />
       </div>
+      {error && (
+        <div className="rd-small" role="alert" style={{ color: 'var(--error, #C4314B)', marginTop: 8 }}>
+          {error}
+        </div>
+      )}
     </Modal>
   );
 }
