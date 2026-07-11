@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, ImageDown, FolderOpen, Spline,
+  FileCode2, ImageDown, FolderOpen, Spline, Eye,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
 import { EndIcon } from './RelIcon';
@@ -14,6 +14,7 @@ import NewTableModal from './NewTableModal';
 import CtasModal from './CtasModal';
 import PublishModal from './PublishModal';
 import { ExportDdlModal } from '@/features/ddl';
+import ViewEditor from './ViewEditor';
 
 // Las 4 cardinalidades crow's-foot que puede tener cada extremo de la relación.
 const CARDS: { k: Cardinality; tip: string }[] = [
@@ -79,12 +80,13 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const focusTable = useModelerStore((s) => s.focusTable);
   const addDrawing = useModelerStore((s) => s.addDrawing);
   const saveAll = useModelerStore((s) => s.saveAll);
+  const reload = useModelerStore((s) => s.reload);
 
   const openMode = useSessionStore((s) => s.openMode);
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
   const readonly = openMode === 'readonly';
 
-  const [modal, setModal] = useState<'table' | 'ctas' | null>(null);
+  const [modal, setModal] = useState<'table' | 'ctas' | 'view' | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
   const [find, setFind] = useState('');
@@ -118,14 +120,19 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Coincidencias del buscador por nombre lógico/físico.
+  // Coincidencias del buscador: tablas (nombre lógico/físico) + vistas del
+  // canvas (F3 — diagram.views ya viene filtrado a las visibles). El pick usa
+  // focusTable, que para nodos view centra sin abrir el PropertiesPanel.
   const matches = useMemo(() => {
     const q = find.trim().toLowerCase();
-    const tables = diagram?.tables ?? [];
     if (!q) return [];
-    return tables
+    const tables = (diagram?.tables ?? [])
       .filter((t) => t.logicalName.toLowerCase().includes(q) || t.physicalName.toLowerCase().includes(q))
-      .slice(0, 8);
+      .map((t) => ({ id: t.id, kind: 'table' as const, primary: t.logicalName, secondary: t.physicalName }));
+    const views = (diagram?.views ?? [])
+      .filter((v) => v.name.toLowerCase().includes(q))
+      .map((v) => ({ id: v.id, kind: 'view' as const, primary: v.name, secondary: 'vista' }));
+    return [...tables, ...views].slice(0, 8);
   }, [find, diagram]);
 
   const pickTable = (id: string) => { focusTable(id); setFind(''); setFindOpen(false); findRef.current?.blur(); };
@@ -183,6 +190,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         <div className="wk-grp-row">
           {ic('Nueva tabla', <Table2 size={17} />, () => setModal('table'), { disabled: !canEdit, lockTip: true })}
           {ic('CTAS — crear desde existentes', <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit, lockTip: true })}
+          {ic('Crear vista', <Eye size={17} />, () => setModal('view'), { disabled: !canEdit, lockTip: true })}
         </div>
         <span className="wk-grp-cap">Structure</span>
       </div>
@@ -208,10 +216,13 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           />
           {findOpen && matches.length > 0 && (
             <div className="wk-find-menu">
-              {matches.map((t) => (
-                <button key={t.id} className="wk-find-item" onMouseDown={(e) => { e.preventDefault(); pickTable(t.id); }}>
-                  <span className="wk-find-lname">{t.logicalName}</span>
-                  <span className="wk-find-pname rd-mono">{t.physicalName}</span>
+              {matches.map((m) => (
+                <button key={m.id} className="wk-find-item" onMouseDown={(e) => { e.preventDefault(); pickTable(m.id); }}>
+                  <span className="wk-find-lname">
+                    {m.kind === 'view' && <Eye size={11} style={{ marginRight: 5, verticalAlign: -1, color: 'var(--purple)' }} aria-hidden />}
+                    {m.primary}
+                  </span>
+                  <span className="wk-find-pname rd-mono">{m.secondary}</span>
                 </button>
               ))}
             </div>
@@ -309,6 +320,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
 
       {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={createTable} />}
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}
+      {modal === 'view' && <ViewEditor onClose={() => setModal(null)} onSaved={() => void reload()} pushToast={pushToast} />}
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
 
