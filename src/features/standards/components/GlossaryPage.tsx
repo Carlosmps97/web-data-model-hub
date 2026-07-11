@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpenText, Pencil, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { BookOpenText, Lock, Pencil, Plus, Search, ShieldCheck, Trash2, Unlock, UploadCloud, X } from 'lucide-react';
 import { toast } from 'sonner';
 import type { StandardsSnapshot, SnapshotTerm, ApplyStandardsBody } from '../standards.service';
 import { applyStandards } from '../standards.service';
+import { validateTerm, lockTerm, unlockTerm } from '@/services/naming.service';
 import type { UdpScope, WordType } from '@/services/naming.service';
+import { useAuthStore } from '@/store/useAuthStore';
+import { termsToValidate, conflictLines } from '../glossaryValidation';
 
 // ── Preview físico client-side (para el edit en vivo, antes de aplicar) ──
 // Réplica mínima del motor: longest-match sobre los términos del scope + case + separador.
@@ -36,7 +39,9 @@ const WORD_TONE: Record<string, { c: string; b: string }> = {
   modifier: { c: '#8B5CF6', b: '#F3EEFF' },
 };
 
-type Draft = SnapshotTerm & { _new?: boolean; _deleted?: boolean };
+// _orig: término original al entrar en edición — permite detectar renombres
+// de texto para validarlos antes de aplicar (F2 #1, ver termsToValidate).
+type Draft = SnapshotTerm & { _new?: boolean; _deleted?: boolean; _orig?: string };
 
 export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   snapshot: StandardsSnapshot;
@@ -48,6 +53,11 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   const [q, setQ] = useState('');
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // F2 #1: candado admin + dialog de conflictos de validación.
+  const isAdmin = useAuthStore((s) => s.has('admin.manage'));
+  const [conflicts, setConflicts] = useState<{ term: string; lines: string[] } | null>(null);
+  const [checking, setChecking] = useState<string | null>(null); // id de la fila validándose
 
   // Config editable (separador/case por scope).
   const cfg0 = snapshot.namingConfig[scope];
@@ -67,7 +77,9 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   }, [scope, editing, snapshot]);
 
   const enterEdit = () => {
-    setTerms(snapshot.dict.filter((t) => t.scope === scope).map((t) => ({ ...t })));
+    // Se estampa _orig al entrar en edición: si el texto del término cambia,
+    // termsToValidate lo trata como renombre y también se valida al aplicar.
+    setTerms(snapshot.dict.filter((t) => t.scope === scope).map((t) => ({ ...t, _orig: t.term })));
     setSep(String(snapshot.namingConfig[scope].separator ?? '_'));
     setCasing(String(snapshot.namingConfig[scope].case ?? 'upper'));
     setEditing(true);
@@ -75,7 +87,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   const cancel = () => { setEditing(false); setConfirm(false); };
   const switchScope = (s: UdpScope) => { if (editing) return; setScope(s); };
 
-  const live = editing ? terms.filter((t) => !t._deleted) : snapshot.dict.filter((t) => t.scope === scope);
+  const live: Draft[] = editing ? terms.filter((t) => !t._deleted) : snapshot.dict.filter((t) => t.scope === scope);
   const shown = useMemo(() => {
     const n = q.trim().toLowerCase();
     return !n ? live : live.filter((t) => t.term.toLowerCase().includes(n) || t.abbrev.toLowerCase().includes(n));
@@ -97,9 +109,45 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
     return { added, edited, removed, cfgChanged, count: added.length + edited.length + removed.length };
   }, [terms, sep, casing, snapshot.dict, scope, cfg0]);
 
+  // Validación on-demand de una fila NUEVA (botón junto al alta). El backend
+  // igual re-valida al guardar: esto es cortesía de UX.
+  const validateDraft = async (t: Draft) => {
+    const term = t.term.trim();
+    if (!term) { toast.error('Escribí el término antes de validar'); return; }
+    setChecking(t.id);
+    try {
+      const v = await validateTerm(term, scope);
+      if (v.ok) toast.success(`'${term}' no tiene conflictos`);
+      else setConflicts({ term, lines: conflictLines(v) });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo validar');
+    } finally { setChecking(null); }
+  };
+
+  const toggleLock = async (t: SnapshotTerm) => {
+    try {
+      if (t.locked) await unlockTerm(t.id); else await lockTerm(t.id);
+      toast.success(t.locked ? `'${t.term}' desbloqueado` : `'${t.term}' bloqueado`);
+      onApplied();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo cambiar el bloqueo');
+    }
+  };
+
   const apply = async () => {
     setBusy(true);
     try {
+      // F2 #1: validación automática al guardar — cada término NUEVO se chequea
+      // contra el glosario y el corpus; el primero con conflictos corta el apply
+      // (dialog con la lista de dónde aparece). El backend re-valida igual.
+      for (const term of termsToValidate(terms)) {
+        const v = await validateTerm(term, scope);
+        if (!v.ok) {
+          setConflicts({ term, lines: conflictLines(v) });
+          setConfirm(false);
+          return;
+        }
+      }
       const body: ApplyStandardsBody = { kind: 'glossary' };
       // Solo se envían términos NUEVOS o realmente EDITADOS (antes se reenviaban
       // TODOS como upsert → inflaba el diff/impacto y re-derivaba de más).
@@ -126,6 +174,10 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   // estilos
   const card: React.CSSProperties = { background: '#fff', border: '1px solid #E6EAF0', borderRadius: 12, padding: '16px 17px' };
   const th: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' };
+
+  // Columnas de la grilla: en edición hay celda de acciones (validar + borrar);
+  // en lectura, el admin ve la celda del candado.
+  const gridCols = editing ? '1.4fr 1fr 1.3fr 76px' : isAdmin ? '1.4fr 1fr 1.3fr 40px' : '1.4fr 1fr 1.3fr';
 
   return (
     <div style={{ padding: '24px 34px', maxWidth: 1000 }}>
@@ -191,24 +243,42 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
         {editing && <button onClick={() => setTerms((ts) => [{ id: `new-${Date.now()}`, term: '', abbrev: '', scope, wordType: 'prime', _new: true }, ...ts])} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', border: '1px solid #D4E0FF', background: '#EAF0FF', color: '#2E5BFF', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}><Plus size={14} />Add term</button>}
       </div>
       <div style={{ border: '1px solid #EAEDF2', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: editing ? '1.4fr 1fr 1.3fr 40px' : '1.4fr 1fr 1.3fr', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', padding: '10px 16px', ...th }}>
-          <div>Term</div><div>Abbrev.</div><div>Word type</div>{editing && <div />}
+        <div style={{ display: 'grid', gridTemplateColumns: gridCols, background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', padding: '10px 16px', ...th }}>
+          <div>Term</div><div>Abbrev.</div><div>Word type</div>{(editing || isAdmin) && <div />}
         </div>
         {shown.map((t) => {
           const tone = WORD_TONE[t.wordType ?? 'prime'] ?? WORD_TONE.prime;
+          const locked = Boolean(t.locked);
           return (
-            <div key={t.id} style={{ display: 'grid', gridTemplateColumns: editing ? '1.4fr 1fr 1.3fr 40px' : '1.4fr 1fr 1.3fr', alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #F2F4F8', fontSize: 13 }}>
-              {editing ? <>
+            <div key={t.id} style={{ display: 'grid', gridTemplateColumns: gridCols, alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #F2F4F8', fontSize: 13, background: locked ? '#F1F3F6' : undefined }}>
+              {editing && !locked ? <>
                 <input className="rd-input" style={inp} value={t.term} onChange={(e) => upd(setTerms, t.id, { term: e.target.value })} placeholder="término" />
                 <input className="rd-input" style={{ ...inp, fontFamily: 'var(--mono, monospace)' }} value={t.abbrev} onChange={(e) => upd(setTerms, t.id, { abbrev: e.target.value })} placeholder="ABR" />
                 <select className="rd-input" style={inp} value={t.wordType ?? 'prime'} onChange={(e) => upd(setTerms, t.id, { wordType: e.target.value as WordType })}>
                   <option value="prime">prime</option><option value="class">class</option><option value="modifier">modifier</option>
                 </select>
-                <button onClick={() => del(setTerms, t.id)} style={{ width: 28, height: 28, border: '1px solid #F1D4D4', background: '#fff', borderRadius: 7, color: '#C0392B', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={13} /></button>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {t._new && (
+                    <button onClick={() => validateDraft(t)} disabled={checking === t.id} title="Validar contra glosario y catálogo"
+                      style={{ width: 28, height: 28, border: '1px solid #D4E0FF', background: '#EAF0FF', borderRadius: 7, color: '#2E5BFF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {checking === t.id ? <span className="rd-spin" /> : <ShieldCheck size={13} />}
+                    </button>
+                  )}
+                  <button onClick={() => del(setTerms, t.id)} style={{ width: 28, height: 28, border: '1px solid #F1D4D4', background: '#fff', borderRadius: 7, color: '#C0392B', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Trash2 size={13} /></button>
+                </div>
               </> : <>
-                <div style={{ fontWeight: 600, color: '#1A2B4A' }}>{t.term}</div>
-                <div style={{ fontFamily: 'var(--mono, monospace)', fontWeight: 600, color: '#2E5BFF' }}>{t.abbrev}</div>
-                <div><span style={{ fontSize: 11, fontWeight: 600, color: tone.c, background: tone.b, borderRadius: 999, padding: '3px 10px' }}>{t.wordType ?? 'prime'}</span></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 600, color: locked ? '#9AA3B2' : '#1A2B4A' }}>
+                  {locked && <Lock size={12} color="#9AA3B2" />}{t.term}
+                </div>
+                <div style={{ fontFamily: 'var(--mono, monospace)', fontWeight: 600, color: locked ? '#9AA3B2' : '#2E5BFF' }}>{t.abbrev}</div>
+                <div><span style={{ fontSize: 11, fontWeight: 600, color: locked ? '#9AA3B2' : tone.c, background: locked ? '#E7EAEF' : tone.b, borderRadius: 999, padding: '3px 10px' }}>{t.wordType ?? 'prime'}</span></div>
+                {editing && locked && <div />}
+                {!editing && isAdmin && (
+                  <button onClick={() => toggleLock(t)} title={locked ? `Bloqueado por ${t.lockedBy ?? 'ADMIN'} — desbloquear` : 'Bloquear término'}
+                    style={{ width: 28, height: 28, border: '1px solid #E6EAF0', background: '#fff', borderRadius: 7, color: locked ? '#9A6B00' : '#8A93A5', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {locked ? <Lock size={13} /> : <Unlock size={13} />}
+                  </button>
+                )}
               </>}
             </div>
           );
@@ -248,6 +318,31 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
               <span style={{ flex: 1 }} />
               <button onClick={() => setConfirm(false)} disabled={busy} style={btnGhost}>Cancel</button>
               <button onClick={apply} disabled={busy} style={btnPrimary}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Applying…' : 'Apply to catalog'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* dialog de conflictos de validación (F2 #1) */}
+      {conflicts && (
+        <div style={backdrop} onClick={() => setConflicts(null)}>
+          <div style={{ width: 560, maxHeight: '78vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
+              <div style={{ width: 42, height: 42, borderRadius: 11, background: '#FBEEF0', color: '#D6455D', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ShieldCheck size={21} /></div>
+              <div style={{ flex: 1 }}>
+                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>El término &lsquo;{conflicts.term}&rsquo; tiene conflictos</h2>
+                <p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>Ya existe en el glosario o aparece como frase completa en nombres lógicos del catálogo. No se puede aplicar.</p>
+              </div>
+              <button onClick={() => setConflicts(null)} style={iconClose}><X size={13} /></button>
+            </div>
+            <div style={{ padding: '16px 24px', overflowY: 'auto' }}>
+              {conflicts.lines.map((line, i) => (
+                <div key={i} style={{ fontSize: 13, color: '#1A2B4A', padding: '5px 0', borderBottom: '1px solid #F5F7FA' }}>· {line}</div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, padding: '14px 24px 20px' }}>
+              <span style={{ flex: 1 }} />
+              <button onClick={() => setConflicts(null)} style={btnPrimary}>Entendido</button>
             </div>
           </div>
         </div>
