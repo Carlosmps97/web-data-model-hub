@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { databricksDdl, inferJoin, DEFAULT_DATABRICKS_OPTS as DEF, type DatabricksDdlInput, type DdlView } from './generators';
+import { databricksDdl, viewDDL, inferJoin, DEFAULT_DATABRICKS_OPTS as DEF, type DatabricksDdlInput, type DdlTable, type DdlView } from './generators';
 
 const BASE = {
   tables: [{ id: 't1', physicalName: 'CLIENTE', schema: 'core' }],
@@ -242,5 +242,120 @@ describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', ()
     expect(ddl).toContain('`monto` DECIMAL(10,2)');
     // LOCATION es un literal (path físico): queda intacto, incluido el physicalName:
     expect(ddl).toContain("LOCATION 's3://Bucket/Warehouse/Cliente'");
+  });
+});
+
+describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #7)', () => {
+  const MULTI: DatabricksDdlInput = {
+    tables: [
+      { id: 't1', physicalName: 'Cliente', schema: 'Core' },
+      { id: 't2', physicalName: 'Cuenta', schema: 'Core' },
+    ],
+    columns: [
+      { id: 'c1', tableId: 't1', physicalName: 'Id', dataType: 'bigint', ordinal: 0, isPrimaryKey: true },
+      { id: 'c2', tableId: 't2', physicalName: 'ClienteId', dataType: 'bigint', ordinal: 0, isForeignKey: true },
+      { id: 'c3', tableId: 't2', physicalName: 'Saldo', dataType: 'decimal', ordinal: 1 },
+    ],
+    relationships: [
+      { id: 'r1', sourceTableId: 't2', sourceColumnId: 'c2', targetTableId: 't1', targetColumnId: 'c1' },
+    ],
+    modelName: 'm',
+    views: [{
+      id: 'v', tableId: 't1', name: 'v_cliente_cuenta', schema: 'Core',
+      sourceTableIds: ['t1', 't2'],
+      sources: [
+        { column: 'Id', tableId: 't1' },
+        { column: 'ClienteId', tableId: 't2', outputAlias: 'cuenta_id' },
+      ],
+    }],
+  };
+  /** Sección de vistas del DDL (desde el primer CREATE VIEW), para no matchear
+   *  contra los CREATE TABLE de arriba. */
+  const viewPart = (ddl: string) => ddl.slice(ddl.indexOf('CREATE OR REPLACE VIEW'));
+
+  it("'upper' casea nombre de vista y tablas del FROM/JOIN; alias generados t1/t2 quedan tal cual", () => {
+    const vp = viewPart(databricksDdl(MULTI, { ...DEF, includeViews: true, identifierCase: 'upper' }));
+    expect(vp).toContain('CREATE OR REPLACE VIEW `CORE`.`V_CLIENTE_CUENTA`');
+    expect(vp).toContain('`CORE`.`CLIENTE`');
+    expect(vp).toContain('`CORE`.`CUENTA`');
+    expect(vp).toMatch(/\bt1\b/);      // alias generado: minúscula intacta
+    expect(vp).not.toMatch(/\bT1\b/);
+    expect(vp).toMatch(/\bt2\b/);
+    expect(vp).not.toMatch(/\bT2\b/);
+  });
+
+  it('joinOverride se emite VERBATIM (sin casing)', () => {
+    const input: DatabricksDdlInput = {
+      ...MULTI,
+      views: [{ ...MULTI.views![0], joinOverride: 't1.Id = t2.ClienteId' }],
+    };
+    const vp = viewPart(databricksDdl(input, { ...DEF, includeViews: true, identifierCase: 'upper' }));
+    expect(vp).toContain('t1.Id = t2.ClienteId');
+  });
+
+  it('expresiones de vista se emiten VERBATIM (sin casing)', () => {
+    const v: DdlView = {
+      id: 'v', tableId: 't1', name: 'v_x', schema: 'Core', sourceTableIds: ['t1'],
+      sources: [
+        { column: 'Id', tableId: 't1' },
+        { column: 'Id', tableId: 't1', expression: 'UPPER(Nombre)', outputAlias: 'nombre_up' },
+      ],
+    };
+    const vp = viewPart(databricksDdl({ ...MULTI, views: [v] }, { ...DEF, includeViews: true, identifierCase: 'lower' }));
+    expect(vp).toContain('UPPER(Nombre)');
+  });
+
+  it('castType NO se casea (es un tipo de dato, no un identificador)', () => {
+    const v: DdlView = {
+      id: 'v', tableId: 't1', name: 'v_cast', schema: 'Core', sourceTableIds: ['t1'],
+      sources: [{ column: 'Id', tableId: 't1', castType: 'DECIMAL(10,2)', outputAlias: 'id_dec' }],
+    };
+    const vp = viewPart(databricksDdl({ ...MULTI, views: [v] }, { ...DEF, includeViews: true, identifierCase: 'lower' }));
+    expect(vp).toContain('DECIMAL(10,2)');
+  });
+
+  // ── Criterio obligatorio #2 (controller): 2 fuentes bajo 'upper' — un solo
+  //    caso que congela TODAS las reglas verbatim junto al casing del FROM/JOIN.
+  it("2 fuentes bajo 'upper': FROM/JOIN caseados; alias/joinOverride/expression/castType VERBATIM", () => {
+    const v: DdlView = {
+      id: 'v', tableId: 't1', name: 'v_multi', schema: 'Core',
+      sourceTableIds: ['t1', 't2'],
+      joinOverride: 't1.Id = t2.ClienteId',
+      sources: [
+        { column: 'Id', tableId: 't1' },
+        { column: 'Saldo', tableId: 't2', expression: 'ROUND(t2.saldo, 2)', outputAlias: 'saldo_r' },
+        { column: 'Saldo', tableId: 't2', castType: 'DECIMAL(10,2)', outputAlias: 'saldo_dec' },
+      ],
+    };
+    const vp = viewPart(databricksDdl({ ...MULTI, views: [v] }, { ...DEF, includeViews: true, identifierCase: 'upper' }));
+    // FROM/JOIN: nombres del modelo caseados.
+    expect(vp).toContain('FROM `CORE`.`CLIENTE` t1');
+    expect(vp).toContain('INNER JOIN `CORE`.`CUENTA` t2');
+    // Alias generados: minúscula intacta (no `T1`/`T2`).
+    expect(vp).not.toMatch(/\bT1\b/);
+    expect(vp).not.toMatch(/\bT2\b/);
+    // joinOverride: VERBATIM (gana a la inferida, sin casing).
+    expect(vp).toContain('ON t1.Id = t2.ClienteId');
+    // expression: VERBATIM.
+    expect(vp).toContain('ROUND(t2.saldo, 2) AS saldo_r');
+    // castType: VERBATIM (tipo de dato, no identificador).
+    expect(vp).toContain('DECIMAL(10,2)');
+  });
+
+  // ── Criterio obligatorio #1 (controller): el path directo `viewDDL(...)` (el que
+  //    usa ViewEditor, nunca databricksDdl) no debe heredar el `activeCase` del
+  //    ÚLTIMO export. viewDDL fija activeCase desde SUS opciones al entrar.
+  it("path directo viewDDL tras un export 'upper' NO casea (deriva activeCase de SUS opciones)", () => {
+    // Ensucia el activeCase global con un export en MAYÚSCULAS.
+    databricksDdl(MULTI, { ...DEF, includeViews: true, identifierCase: 'upper' });
+    // Ahora el ViewEditor llama viewDDL directo con las opciones por defecto ('as-is').
+    const tableById = new Map<string, DdlTable>(MULTI.tables.map((t) => [t.id, t]));
+    const out = viewDDL(MULTI.views![0], DEF, tableById, MULTI.relationships, MULTI.columns);
+    // Identificadores del modelo: tal cual (no caseados por el export previo).
+    expect(out).toContain('CREATE OR REPLACE VIEW `Core`.`v_cliente_cuenta`');
+    expect(out).toContain('`Core`.`Cliente`');
+    expect(out).toContain('`Core`.`Cuenta`');
+    expect(out).not.toContain('`CORE`');
+    expect(out).not.toContain('`CLIENTE`');
   });
 });

@@ -374,6 +374,13 @@ export function viewDDL(
   relationships: DdlRelationship[] = [],
   columns: DdlColumn[] = [],
 ): string {
+  // Funnel de casing (F4 #7): fija activeCase desde LAS OPCIONES DE ESTA vista.
+  // - Como entry point DIRECTO (ViewEditor → viewDDL(...), nunca databricksDdl):
+  //   deriva el casing de SUS opciones en vez de heredar el activeCase que dejó
+  //   el último export → el preview del editor no arrastra un 'upper'/'lower'.
+  // - Desde databricksDdl: idempotente (databricksDdl ya lo fijó al mismo valor
+  //   y pasa `o` tal cual) ⇒ respeta el casing del export en curso.
+  activeCase = o.identifierCase ?? 'as-is';
   // Fuentes canónicas con fallback al tableId legacy (docs pre-F3a).
   const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
   const base = srcIds.length ? tableById.get(srcIds[0]) : undefined;
