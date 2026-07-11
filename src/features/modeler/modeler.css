@@ -583,6 +583,9 @@ select.exd-input { padding: 0 10px; }
 .exd-chip { font-size: 12px; font-weight: 500; color: var(--text-muted); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 11px; cursor: pointer; font-family: var(--ui); transition: border-color .12s, background .12s, color .12s; }
 .exd-chip:hover:not(.is-on) { border-color: var(--blue-border); }
 .exd-chip.is-on { font-weight: 600; color: var(--primary); background: var(--blue-tint); border: 1.5px solid var(--primary); }
+/* Switch triple de casing de identificadores (Tal cual / lower / UPPER) */
+.exd-caseseg { align-self: flex-start; }
+.exd-caseseg button { font-family: var(--mono); font-size: 11.5px; padding: 5px 11px; }
 
 /* ── Capa DRAWING (R6d): formas libres detrás de las tablas (nodeType 'shape') ── */
 .wk-shape { position: relative; box-sizing: border-box; }

@@ -287,6 +287,24 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
               <SwitchRow on={opts.includeIndexes} onClick={() => set('includeIndexes', !opts.includeIndexes)} label="Indexes" hint="Hint ZORDER" />
             </div>
 
+            <span className="exd-section">Identifier casing</span>
+            <div className="rd-seg exd-caseseg" role="group" aria-label="Casing de identificadores">
+              {(['as-is', 'lower', 'upper'] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  className={opts.identifierCase === c ? 'active' : ''}
+                  onClick={() => set('identifierCase', c)}
+                  aria-pressed={opts.identifierCase === c}
+                  title={c === 'as-is'
+                    ? 'Identificadores tal como están en el modelo'
+                    : c === 'lower' ? 'Identificadores en minúsculas' : 'Identificadores en MAYÚSCULAS'}
+                >
+                  {c === 'as-is' ? 'Tal cual' : c === 'lower' ? 'lower' : 'UPPER'}
+                </button>
+              ))}
+            </div>
+
             <span className="exd-section">Table format · USING</span>
             <div className="exd-chips">
               {FORMATS.map((f) => (
