@@ -317,7 +317,7 @@
   border-radius: var(--r); box-shadow: var(--shadow-table); font-size: 12px; overflow: hidden;  /* radius 11 */
   transition: border-color .12s, box-shadow .12s; }
 .wk-node.sel { border: 1.5px solid var(--blue); box-shadow: 0 0 0 3px var(--primary-muted), var(--shadow-table); }  /* 1.5px #2E5BFF */
-.wk-node-head { padding: 6px 11px; background: var(--navy); color: var(--on-primary);            /* #1A2B4A */
+.wk-node-head { position: relative; padding: 6px 11px; background: var(--navy); color: var(--on-primary);  /* #1A2B4A */
   font-weight: 700; display: flex; align-items: center; gap: 7px; }
 .wk-node-head .wk-node-glyph { flex-shrink: 0; opacity: .9; }
 /* schema.tabla en una sola línea → empuja el ancho del nodo (max-content). */
@@ -343,6 +343,11 @@
 .wk-handle { width: 7px; height: 7px; background: var(--subtle); border: 1.5px solid var(--surface); opacity: 0; transition: opacity .12s; }
 .react-flow__node:hover .wk-handle, .wk-node:hover .wk-handle { opacity: .9; }
 .react-flow__handle-connecting .wk-handle, .wk-handle.connectionindicator { opacity: 1; }
+
+/* Anclas header-a-header del wire de derivación (F3): invisibles y NO
+   interactivas — solo posicionan los extremos del edge 'derivation'. */
+.wk-hdr-handle { width: 1px; height: 1px; min-width: 0; min-height: 0;
+  opacity: 0; pointer-events: none; border: none; background: transparent; }
 
 /* ── UDP popup (Screen 08a per-column / 08b per-table) ─────────────────── */
 .udp { display: flex; flex-direction: column; gap: 14px; }

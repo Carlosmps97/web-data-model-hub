@@ -60,6 +60,10 @@ function TableNode({ data }: NodeProps) {
         </span>
         <span className="wk-node-sub">{viewMode === 'logical' ? table.physicalName : table.logicalName}</span>
         {canEdit && <button className="wk-node-add" title="Agregar columna" onClick={() => setColumnTarget(table.id)}>+</button>}
+        {/* Ancla del wire de derivación tabla→vista (F3): header-a-header.
+            Invisible y NO conectable — los edges 'derivation' los arma el
+            canvas desde diagram.views, nunca un drag manual. */}
+        <Handle type="source" position={Position.Right} id="__hdr_src" isConnectable={false} className="wk-hdr-handle" />
       </div>
       {pks.length > 0 && <div className="wk-node-pk">{pks.map(renderRow)}</div>}
       {pks.length > 0 && rest.length > 0 && <div className="wk-node-div" />}
