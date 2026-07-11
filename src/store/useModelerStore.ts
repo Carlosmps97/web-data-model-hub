@@ -115,7 +115,10 @@ interface ModelerState {
   updateColumn: (colId: string, fields: Partial<CanonicalColumn>) => Promise<void>;
   /** Reordena columnas de una tabla al nuevo orden de ids: recomputa `ordinal` y persiste cada movida. */
   reorderColumns: (tableId: string, orderedIds: string[]) => Promise<void>;
-  deleteColumn: (colId: string) => Promise<void>;
+  /** Borra la columna en el changeset; con `relIds`, borra ANTES cada relación
+   *  afectada (cascade del warning de impacto — spec 10 §8, cierra el caso
+   *  columna del bug #21 de relaciones huérfanas). */
+  deleteColumn: (colId: string, relIds?: string[]) => Promise<void>;
   setViewMode: (m: 'logical' | 'physical') => void;
   createProject: (name: string) => Promise<void>;
   createSubjectArea: (name: string) => Promise<void>;
@@ -537,7 +540,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     await get().reload();
   },
-  deleteColumn: async (colId) => { get().markDirty(); await gov.deleteColumn(colId); await get().reload(); },
+  deleteColumn: async (colId, relIds = []) => {
+    get().markDirty();
+    // Primero las relaciones (elegidas en el dialog de impacto), después la
+    // columna: el changeset nunca queda con relaciones colgando de una columna
+    // borrada (spec 10 §8).
+    for (const rid of relIds) await gov.deleteRelationship(rid);
+    await gov.deleteColumn(colId);
+    await get().reload();
+  },
   setViewMode: (m: 'logical' | 'physical') => set({ viewMode: m }),
   createProject: async (name: string) => {
     const p = await mod.createProject(name);
