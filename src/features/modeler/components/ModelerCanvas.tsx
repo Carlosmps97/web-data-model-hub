@@ -8,12 +8,16 @@ import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import TableNode from './TableNode';
 import ShapeNode from './ShapeNode';
+import ViewNode from './ViewNode';
 import CrowFootEdge from './CrowFootEdge';
+import DerivationEdge from './DerivationEdge';
 import CrowFootMarkers from './CrowFootMarkers';
 import RelationshipPopup from './RelationshipPopup';
+import ViewEditor from './ViewEditor';
+import { buildViewGraph } from '../lib/viewGraph';
 
-const nodeTypes = { table: TableNode, shape: ShapeNode };
-const edgeTypes = { crowfoot: CrowFootEdge };
+const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode };
+const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge };
 
 export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const diagram = useModelerStore((s) => s.diagram);
@@ -26,6 +30,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const setHoverEdge = useModelerStore((s) => s.setHoverEdge);
   const setHoverNode = useModelerStore((s) => s.setHoverNode);
   const setFlow = useModelerStore((s) => s.setFlow);
+  const reload = useModelerStore((s) => s.reload);
   const activeChangeset = useChangesetStore((s) => s.activeId);
   // Viewer-lock: en read-only se puede VER (click abre PropertiesPanel en modo
   // reader) pero no mutar: sin drag de nodos y sin conexiones; las escrituras
@@ -35,6 +40,11 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [editRelId, setEditRelId] = useState<string | null>(null);
+  // Vista en edición desde el lápiz del ViewNode (F3). El editor vive acá y no
+  // en el PropertiesPanel: el click en un nodo view NO abre el panel.
+  const [editViewId, setEditViewId] = useState<string | null>(null);
+  // Callback ESTABLE para el data de los nodos view (evita rearmar el grafo).
+  const onEditView = useCallback((id: string) => setEditViewId(id), []);
 
   // Sincroniza el diagrama (store) → nodos/aristas de React Flow.
   useEffect(() => {
@@ -48,15 +58,23 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       position: layout[t.id] ?? { x: 60 + (i % 4) * 260, y: 60 + Math.floor(i / 4) * 220 },
       data: { table: t, columns: colsByTable.get(t.id) ?? [] },
     }));
+    // F3: nodos 'view' + edges 'derivation' desde diagram.views (solo vistas
+    // showOnCanvas con ≥1 fuente en el canvas — ya filtradas por el backend).
+    // Posición: layout[viewId] o default junto a su primera fuente presente.
+    const tablePos = new Map(tableNodes.map((n) => [n.id, n.position]));
+    const views = buildViewGraph(diagram.views ?? [], diagram.tables, diagram.columns, layout, tablePos, onEditView);
     // Preserva los nodos de shapes ya presentes (los repuebla el efecto de drawings).
-    setNodes((prev) => [...prev.filter((n) => n.type === 'shape'), ...tableNodes]);
-    setEdges(diagram.relationships.map((r) => ({
-      id: r.id, source: r.sourceTableId, target: r.targetTableId,
-      sourceHandle: `${r.sourceColumnId}__src`, targetHandle: `${r.targetColumnId}__tgt`,
-      type: 'crowfoot',
-      data: { sourceCardinality: r.sourceCardinality, targetCardinality: r.targetCardinality, identifying: r.identifying },
-    })));
-  }, [diagram, setNodes, setEdges]);
+    setNodes((prev) => [...prev.filter((n) => n.type === 'shape'), ...tableNodes, ...views.nodes]);
+    setEdges([
+      ...diagram.relationships.map((r) => ({
+        id: r.id, source: r.sourceTableId, target: r.targetTableId,
+        sourceHandle: `${r.sourceColumnId}__src`, targetHandle: `${r.targetColumnId}__tgt`,
+        type: 'crowfoot',
+        data: { sourceCardinality: r.sourceCardinality, targetCardinality: r.targetCardinality, identifying: r.identifying },
+      })),
+      ...views.edges,
+    ]);
+  }, [diagram, setNodes, setEdges, onEditView]);
 
   // Sincroniza la capa DRAWING (store) → nodos 'shape', detrás de las tablas (zIndex < 0).
   // Mantiene la posición que React Flow ya tenga del nodo (drag en curso) y sólo
@@ -136,6 +154,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // Expone la instancia de React Flow al store (la usa el toolbar: focusTable / Save).
   useEffect(() => () => setFlow(null), [setFlow]);
 
+  // Vista en edición (lápiz del ViewNode) resuelta contra el diagrama vivo.
+  const editView = editViewId ? (diagram?.views ?? []).find((v) => v.id === editViewId) : undefined;
+
   return (
     <div style={{ flex: 1, minHeight: 0 }}>
       <CrowFootMarkers />
@@ -148,9 +169,17 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         onConnectStart={(_e, params) => { connectStart.current = { nodeId: params.nodeId, handleId: params.handleId }; }}
         onConnectEnd={() => { connectStart.current = null; }}
         onInit={setFlow}
-        onNodeClick={(_e, node) => { if (node.type !== 'shape') setSelectedTable(node.id); }}
+        onNodeClick={(_e, node) => {
+          // Nodo VISTA: click = selección visual solamente (selected nativo de
+          // React Flow) — NUNCA abre el PropertiesPanel (spec §3-5, pedido 5).
+          // También cierra el panel si estaba abierto sobre una tabla.
+          if (node.type === 'view') { setSelectedTable(null); return; }
+          if (node.type !== 'shape') setSelectedTable(node.id);
+        }}
         onEdgeClick={(_e, edge) => setSelectedEdge(edge.id)}
-        onEdgeDoubleClick={(_e, edge) => setEditRelId(edge.id)}
+        // El popup de relación es SOLO para wires crowfoot (una derivación no
+        // tiene cardinalidades que editar).
+        onEdgeDoubleClick={(_e, edge) => { if (edge.type === 'crowfoot') setEditRelId(edge.id); }}
         onPaneClick={() => { setSelectedTable(null); setSelectedEdge(null); }}
         onEdgeMouseEnter={(_e, edge) => setHoverEdge(edge.id)}
         onEdgeMouseLeave={() => setHoverEdge(null)}
@@ -185,6 +214,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         <MiniMap pannable zoomable />
       </ReactFlow>
       {editRelId && <RelationshipPopup relId={editRelId} onClose={() => setEditRelId(null)} pushToast={pushToast} />}
+      {editView && <ViewEditor view={editView} onClose={() => setEditViewId(null)} onSaved={() => void reload()} pushToast={pushToast} />}
     </div>
   );
 }

@@ -224,12 +224,16 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   focusTable: (tableId) => {
     const rf = get().flow; if (!rf) return;
-    if (!rf.getNode(tableId)) return;
+    const node = rf.getNode(tableId);
+    if (!node) return;
     // fitView sobre el nodo: usa su tamaño REAL medido y calcula el zoom para
     // encuadrar la tabla COMPLETA y centrada (setCenter con zoom fijo 1 dejaba
     // las tablas altas cortadas, mostrando sólo su mitad). maxZoom evita acercar
     // demasiado a tablas chicas.
     void rf.fitView({ nodes: [{ id: tableId }], padding: 0.2, maxZoom: 1.2, duration: 420 });
+    // Nodos VISTA (F3): solo centrar — la selección de vistas nunca abre el
+    // PropertiesPanel (spec §3-5) y selectedTableId es exclusivo de tablas.
+    if (node.type === 'view') return;
     // Viewer-lock: en solo-lectura centramos sin abrir el PropertiesPanel.
     if (useSessionStore.getState().openMode === 'readonly') return;
     set({ selectedTableId: tableId, selectedEdgeId: null });
@@ -370,9 +374,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const saId = get().activeSaId; const rf = get().flow;
     if (!saId || !rf) return;
     const layout: Record<string, { x: number; y: number }> = {};
-    // Sólo nodos de TABLA: las posiciones de los shapes viven en `drawings`;
-    // escribirlas también en `layout` contaminaba el doc de la subject area.
-    for (const n of rf.getNodes()) if (n.type === 'table') layout[n.id] = { x: n.position.x, y: n.position.y };
+    // Tablas Y vistas (F3: la posición de una vista vive en layout[viewId],
+    // misma estructura); los shapes NO — sus posiciones viven en `drawings`.
+    for (const n of rf.getNodes()) if (n.type === 'table' || n.type === 'view') layout[n.id] = { x: n.position.x, y: n.position.y };
     await mod.setSubjectAreaLayout(saId, layout); // MERGEA en backend (M3a)
   },
   autoOrganize: async () => {
@@ -380,13 +384,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (!dia || !saId) return;
     get().markDirty();
     const { elkLayout } = await import('@/features/modeler/lib/elkLayout');
+    const { viewSourceIds } = await import('@/features/modeler/lib/viewGraph');
     // Tamaños MEDIDOS de los nodos vivos: ELK con tamaño fijo superponía las
     // tablas altas (30 columnas ≈ 700px).
     const measured = new Map((get().flow?.getNodes() ?? []).map((n) => [n.id, n.measured]));
-    const nodes = dia.tables.map((t) => ({
-      id: t.id, position: { x: 0, y: 0 }, data: {}, measured: measured.get(t.id),
-    })) as never;
-    const edges = dia.relationships.map((r) => ({ id: r.id, source: r.sourceTableId, target: r.targetTableId })) as never;
+    // F3: las vistas visibles se auto-organizan como nodos normales; sus
+    // derivaciones entran como edges para que ELK las ubique junto a sus fuentes.
+    const tableIds = new Set(dia.tables.map((t) => t.id));
+    const views = (dia.views ?? []).filter((v) => viewSourceIds(v).some((id) => tableIds.has(id)));
+    const nodes = [
+      ...dia.tables.map((t) => ({ id: t.id, position: { x: 0, y: 0 }, data: {}, measured: measured.get(t.id) })),
+      ...views.map((v) => ({ id: v.id, position: { x: 0, y: 0 }, data: {}, measured: measured.get(v.id) })),
+    ] as never;
+    const edges = [
+      ...dia.relationships.map((r) => ({ id: r.id, source: r.sourceTableId, target: r.targetTableId })),
+      ...views.flatMap((v) => viewSourceIds(v).filter((id) => tableIds.has(id))
+        .map((tid) => ({ id: `deriv__${v.id}__${tid}`, source: tid, target: v.id }))),
+    ] as never;
     const pos = await elkLayout(nodes, edges);
     await mod.setSubjectAreaLayout(saId, pos);   // setSubjectAreaLayout MERGEA (M3a)
     await get().reload();
