@@ -153,6 +153,10 @@ export interface DdlView {
   sources?: { column?: string; table?: string; tableId?: string; outputAlias?: string; expression?: string; castType?: string }[];
 }
 
+/** Casing aplicado a los identificadores exportados (F4 #7). Solo afecta el
+ *  TEXTO exportado (ADLS es case-sensitive) — nunca la base de datos. */
+export type IdentifierCase = 'as-is' | 'lower' | 'upper';
+
 export interface DatabricksDdlOptions {
   /** Emite `CREATE OR REPLACE VIEW` por cada vista del canvas exportado. */
   includeViews: boolean;
@@ -178,6 +182,10 @@ export interface DatabricksDdlOptions {
   location: string;
   /** Optional `TBLPROPERTIES (…)` key/value pairs. */
   tblProperties: { key: string; value: string }[];
+  /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_).
+   *  NUNCA aplica a: literales, COMMENTs, tipos de datos, expresiones de
+   *  vistas, joinOverride ni alias generados (t1, t2, …). */
+  identifierCase: IdentifierCase;
 }
 
 export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
@@ -193,10 +201,21 @@ export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
   external: false,
   location: 's3://my-bucket/warehouse',
   tblProperties: [],
+  identifierCase: 'as-is',
 };
 
-/** Backtick-quote a Databricks identifier. */
-const ident = (s: string) => `\`${s}\``;
+// Casing activo del export en curso. `databricksDdl` (único entry point
+// exportado que usa `ident`/`qualify`) lo fija al entrar; así TODO
+// identificador — incluidos los del FROM/JOIN de las vistas multi-fuente
+// (F3b) y los nombres de constraint pk_/fk_ — pasa por el mismo funnel sin
+// enhebrar la opción por call-site. El generador es síncrono ⇒ sin carreras.
+let activeCase: IdentifierCase = 'as-is';
+
+const applyCase = (s: string): string =>
+  activeCase === 'lower' ? s.toLowerCase() : activeCase === 'upper' ? s.toUpperCase() : s;
+
+/** Backtick-quote a Databricks identifier (aplica el casing del export). */
+const ident = (s: string) => `\`${applyCase(s)}\``;
 
 /** SQL string literal with single-quote escaping. */
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
@@ -428,6 +447,7 @@ export interface DatabricksDdlInput {
 
 /** Generate Databricks DDL for the selected tables of a diagram. */
 export function databricksDdl(input: DatabricksDdlInput, o: DatabricksDdlOptions): string {
+  activeCase = o.identifierCase ?? 'as-is';
   const wanted = input.tableIds && input.tableIds.length
     ? new Set(input.tableIds)
     : null;

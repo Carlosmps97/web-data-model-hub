@@ -181,3 +181,66 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     expect(ddl).toContain('ROUND(t2.SALDO, 2) AS saldo_r');
   });
 });
+
+describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', () => {
+  const CASED: DatabricksDdlInput = {
+    tables: [
+      { id: 't1', physicalName: 'Cliente', schema: 'Core', description: 'Maestro de Clientes' },
+      { id: 't2', physicalName: 'Cuenta', schema: 'Core' },
+    ],
+    columns: [
+      { id: 'c1', tableId: 't1', physicalName: 'Id', dataType: 'bigint', ordinal: 0, isPrimaryKey: true, description: 'Id del Cliente' },
+      { id: 'c2', tableId: 't2', physicalName: 'ClienteId', dataType: 'bigint', ordinal: 0, isForeignKey: true },
+    ],
+    relationships: [
+      { id: 'r1', sourceTableId: 't2', sourceColumnId: 'c2', targetTableId: 't1', targetColumnId: 'c1' },
+    ],
+    modelName: 'm',
+  };
+
+  it("default 'as-is': identificadores tal cual están en el modelo", () => {
+    const ddl = databricksDdl(CASED, DEF);
+    expect(ddl).toContain('CREATE TABLE IF NOT EXISTS `Core`.`Cliente`');
+    expect(ddl).toContain('`Id` BIGINT');
+    expect(ddl).toContain('CONSTRAINT `pk_Cliente` PRIMARY KEY (`Id`)');
+  });
+
+  it("'upper': schema/tabla/columna y nombres de constraint en MAYÚSCULAS", () => {
+    const ddl = databricksDdl(CASED, { ...DEF, identifierCase: 'upper' });
+    expect(ddl).toContain('CREATE TABLE IF NOT EXISTS `CORE`.`CLIENTE`');
+    expect(ddl).toContain('`ID` BIGINT');
+    expect(ddl).toContain('CONSTRAINT `PK_CLIENTE` PRIMARY KEY (`ID`)');
+    expect(ddl).toContain(
+      'CONSTRAINT `FK_CUENTA_CLIENTEID` FOREIGN KEY (`CLIENTEID`) REFERENCES `CORE`.`CLIENTE`(`ID`)',
+    );
+    expect(ddl).not.toContain('`Cliente`');
+  });
+
+  it("'lower': todo identificador en minúsculas", () => {
+    const ddl = databricksDdl(CASED, { ...DEF, identifierCase: 'lower' });
+    expect(ddl).toContain('CREATE TABLE IF NOT EXISTS `core`.`cliente`');
+    expect(ddl).toContain('CONSTRAINT `pk_cliente` PRIMARY KEY (`id`)');
+    expect(ddl).not.toContain('`Cliente`');
+  });
+
+  it("'upper' NO toca literales de string ni COMMENTs", () => {
+    const ddl = databricksDdl(CASED, { ...DEF, identifierCase: 'upper' });
+    expect(ddl).toContain("COMMENT 'Maestro de Clientes'");
+    expect(ddl).toContain("COMMENT 'Id del Cliente'");
+  });
+
+  it("'lower' NO toca tipos de datos ni el path de LOCATION", () => {
+    const input: DatabricksDdlInput = {
+      ...CASED,
+      columns: [{ id: 'c1', tableId: 't1', physicalName: 'Monto', dataType: 'decimal(10,2)', ordinal: 0 }],
+      relationships: [],
+    };
+    const ddl = databricksDdl(input, {
+      ...DEF, identifierCase: 'lower', external: true, location: 's3://Bucket/Warehouse',
+    });
+    // dbxType decide el casing del tipo, no el switch:
+    expect(ddl).toContain('`monto` DECIMAL(10,2)');
+    // LOCATION es un literal (path físico): queda intacto, incluido el physicalName:
+    expect(ddl).toContain("LOCATION 's3://Bucket/Warehouse/Cliente'");
+  });
+});
