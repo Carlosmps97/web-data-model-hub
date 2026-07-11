@@ -375,13 +375,10 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
 
       {viewEditor && (
         <ViewEditor
-          tableId={table.id}
-          defaultName={table.physicalName}
-          defaultSchema={table.schema ?? ''}
-          columns={cols.map((c) => ({ id: c.id, physicalName: c.physicalName, dataType: c.dataType }))}
+          lockedTableId={table.id}
           view={viewEditor.view}
           onClose={() => setViewEditor(null)}
-          onSaved={reloadViews}
+          onSaved={() => { reloadViews(); void reload(); }}
           pushToast={pushToast}
         />
       )}
