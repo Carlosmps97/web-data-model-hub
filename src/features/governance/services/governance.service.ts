@@ -103,3 +103,22 @@ export const listRelationships = (tableId?: string) => {
 export const createRelationship = (r: Omit<Relationship, 'id'>) => { const id = uuid(); return rec('relationships', id, 'upsert', { ...r, id }); };
 export const updateRelationship = (r: Relationship) => rec('relationships', r.id, 'upsert', { ...r });
 export const deleteRelationship = (id: string) => rec('relationships', id, 'delete');
+
+// ── Impacto de eliminar una columna (spec 10 §8) ──
+export interface ImpactCanvas { id: string; name: string; }
+export interface RelationshipImpactRow {
+  relId: string; otherTableId: string; otherTableName: string;
+  otherColumnId: string; otherColumnName: string;
+  thisSide: 'source' | 'target';
+  sourceCardinality: Cardinality; targetCardinality: Cardinality;
+  canvases: ImpactCanvas[];
+}
+export interface RelationshipImpact { relationships: RelationshipImpactRow[]; total: number; }
+/** Relaciones GLOBALES (cualquier canvas) donde la columna es extremo —
+ *  publicadas + overlay del changeset activo. Alimenta el warning del delete. */
+export const columnImpact = (columnId: string) => {
+  const params = new URLSearchParams({ columnId });
+  const a = active();
+  if (a) params.set('changesetId', a);
+  return apiGet<RelationshipImpact>(`${API_BASE}/api/relationships/impact?${params.toString()}`);
+};
