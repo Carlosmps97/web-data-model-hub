@@ -148,3 +148,16 @@ export function apiPut<T>(url: string, body?: unknown, opts: Omit<RequestOptions
 export function apiDelete<T>(url: string, opts: Omit<RequestOptions, 'method' | 'body'> = {}): Promise<T> {
   return apiFetch<T>(url, { ...opts, method: 'DELETE' });
 }
+
+// ─── Error helpers ────────────────────────────────────────────────
+
+/** Mensaje legible de un error de API: el `detail` del backend si vino
+ *  (ApiError lo conserva como `message`), o `fallback`. */
+export function apiErrorMessage(e: unknown, fallback: string): string {
+  return e instanceof Error && e.message ? e.message : fallback;
+}
+
+/** ¿Es un 409 de negocio del backend (p.ej. nombre duplicado — spec 10 §9)? */
+export function isConflictError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 409;
+}
