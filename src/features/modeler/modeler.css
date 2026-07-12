@@ -351,29 +351,39 @@
 .wk-hdr-handle { width: 1px; height: 1px; min-width: 0; min-height: 0;
   opacity: 0; pointer-events: none; border: none; background: transparent; }
 
-/* ── Nodo VISTA (F3, spec §3-5) ──────────────────────────────────────────
-   Mismo card dinámico que .wk-node (min/max/anchura max-content) pero con
-   franja izquierda PUNTEADA violeta y header oscuro (violeta profundo,
-   distinto del navy de tablas) + badge VISTA + footer "Origen: …". */
+/* ── Nodo VISTA (F3, spec §3-5 · mock 2026-07-12) ────────────────────────
+   Mismo card dinámico que .wk-node pero "medio plomo": header gris pizarra,
+   borde PUNTEADO envolvente (sin franja izquierda) y cuerpo con hatch
+   diagonal tenue a 45°. Grayscale a propósito — se distingue de las tablas
+   por textura/borde, no por color de acento. */
 .wk-vnode { min-width: 220px; max-width: 520px; width: max-content;
-  background: var(--surface); border: 1px solid var(--border-1);
-  border-left: 3px dashed #8B5CF6;
-  border-radius: var(--r); box-shadow: var(--shadow-table); font-size: 12px; overflow: hidden;
+  background: var(--surface); border: 2px dashed #C5CCD8;
+  border-radius: 12px; box-shadow: var(--shadow-table); font-size: 12px; overflow: hidden;
   transition: border-color .12s, box-shadow .12s; }
-.wk-vnode.sel { border-color: var(--blue); border-left: 3px dashed var(--blue);
+.wk-vnode.sel { border-color: var(--blue);
   box-shadow: 0 0 0 3px var(--primary-muted), var(--shadow-table); }
-.wk-vnode-head { position: relative; padding: 6px 11px; background: #241E38; color: #fff;
+.wk-vnode-head { position: relative; padding: 7px 12px; background: #5D6675; color: #fff;
   font-weight: 700; display: flex; align-items: center; gap: 7px; }
 .wk-vnode-title { white-space: nowrap; }
-.wk-vnode-badge { flex: none; font-size: 8.5px; font-weight: 800; letter-spacing: .09em;
-  padding: 1.5px 6px; border-radius: var(--r-full); background: rgba(139,92,246,.28); color: #DDD3FF; }
+.wk-vnode-badge { flex: none; font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  color: #CBD1DA; }
 .wk-vnode-edit { margin-left: auto; display: inline-flex; align-items: center;
   color: #fff; opacity: .8; background: transparent; border: none; cursor: pointer; padding: 0 2px; }
 .wk-vnode-edit:hover { opacity: 1; }
-.wk-vnode-fx { display: inline-flex; justify-content: center; min-width: 14px; flex: none;
-  font-size: 9px; font-style: italic; font-weight: 800; color: #8B5CF6; }
-.wk-vnode-foot { padding: 5px 11px; border-top: 1px dashed var(--border-1);
-  font-size: 10px; color: var(--text-muted-2); white-space: nowrap; background: #FAFBFC; }
+/* Rayas sobre el CONTENEDOR de filas (por-fila el patrón reinicia el offset
+   en cada borde y se ven costuras). */
+.wk-vnode-body { background-image: repeating-linear-gradient(45deg,
+  rgba(100,116,139,.08) 0 1px, transparent 1px 8px); }
+.wk-vnode-fx { display: inline-flex; justify-content: center; align-items: center;
+  min-width: 16px; height: 13px; flex: none; font-size: 9px; font-style: italic;
+  font-weight: 800; color: #7A8598; background: rgba(255,255,255,.75);
+  border: 1px solid #D5DBE4; border-radius: 4px; }
+.wk-vnode-fx-sp { min-width: 16px; flex: none; }
+.wk-vnode-foot { display: flex; align-items: center; gap: 6px; padding: 5px 12px;
+  border-top: 1px solid var(--border-2); font-size: 10px; color: var(--text-muted-2);
+  white-space: nowrap; background: #F4F6F9; }
+.wk-vnode-foot svg { flex: none; color: #8A93A5; }
+.wk-vnode-foot-k { font-weight: 700; color: #566275; }
 
 /* Vista COMPARTIDA (2+ fuentes) en Properties→Views (F3): tinte + badge. */
 .wk-pp-link.shared { background: #F8F5FF; border-color: #E1D4FB; }

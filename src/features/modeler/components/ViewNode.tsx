@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Eye, Pencil } from 'lucide-react';
+import { Eye, GitBranch, Pencil } from 'lucide-react';
 import { useChangesetStore } from '@/store/useChangesetStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -55,18 +55,24 @@ function ViewNode({ data, selected }: NodeProps) {
         {/* Ancla del wire de derivación (header-a-header). No conectable. */}
         <Handle type="target" position={Position.Left} id="__hdr_tgt" isConnectable={false} className="wk-hdr-handle" />
       </div>
-      {rows.map((r, i) => (
-        <div className="wk-node-row" key={`${r.name}-${i}`}>
-          <span className="wk-vnode-fx" aria-hidden>{r.fx ? 'fx' : ''}</span>
-          <span className="wk-node-name">{r.name}</span>
-          <span className="wk-node-dt rd-mono" title={isComplexType(r.type) ? r.type : undefined}>
-            {collapseComplexType(r.type)}
-          </span>
-        </div>
-      ))}
-      {rows.length === 0 && <div className="wk-node-empty rd-small">Sin columnas</div>}
+      <div className="wk-vnode-body">
+        {rows.map((r, i) => (
+          <div className="wk-node-row" key={`${r.name}-${i}`}>
+            {r.fx
+              ? <span className="wk-vnode-fx" aria-hidden>fx</span>
+              : <span className="wk-vnode-fx-sp" aria-hidden />}
+            <span className="wk-node-name">{r.name}</span>
+            <span className="wk-node-dt rd-mono" title={isComplexType(r.type) ? r.type : undefined}>
+              {collapseComplexType(r.type)}
+            </span>
+          </div>
+        ))}
+        {rows.length === 0 && <div className="wk-node-empty rd-small">Sin columnas</div>}
+      </div>
       <div className="wk-vnode-foot rd-mono">
-        Origen: {sourceTables.length ? sourceTables.map(nameOf).join(' · ') : '—'}
+        <GitBranch size={11} strokeWidth={2} aria-hidden />
+        <span className="wk-vnode-foot-k">Origen</span>
+        {sourceTables.length ? sourceTables.map(nameOf).join(' · ') : '—'}
       </div>
     </div>
   );
