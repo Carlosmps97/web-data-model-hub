@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, ImageDown, FolderOpen, Spline, Eye,
+  FileCode2, ImageDown, FolderOpen, Spline, Eye, Tags,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
 import { EndIcon } from './RelIcon';
@@ -15,6 +15,7 @@ import CtasModal from './CtasModal';
 import PublishModal from './PublishModal';
 import { ExportDdlModal } from '@/features/ddl';
 import ViewEditor from './ViewEditor';
+import ModelPropertiesModal from './ModelPropertiesModal';
 
 // Las 4 cardinalidades crow's-foot que puede tener cada extremo de la relación.
 const CARDS: { k: Cardinality; tip: string }[] = [
@@ -89,6 +90,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const [modal, setModal] = useState<'table' | 'ctas' | 'view' | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
+  const [modelPropsOpen, setModelPropsOpen] = useState(false);
   const [find, setFind] = useState('');
   const [findOpen, setFindOpen] = useState(false);
   const findRef = useRef<HTMLInputElement>(null);
@@ -294,6 +296,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           {ic('Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !canEdit || arranging, lockTip: true })}
           {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas })}
           {ic('Export image', <ImageDown size={17} />, exportImage, { disabled: !hasCanvas })}
+          {ic('Model properties — UDP del Modelo de Datos', <Tags size={17} />, () => setModelPropsOpen(true), { disabled: !canEdit, lockTip: true })}
         </div>
         <span className="wk-grp-cap">Actions</span>
       </div>
@@ -323,6 +326,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {modal === 'view' && <ViewEditor onClose={() => setModal(null)} onSaved={() => void reload()} pushToast={pushToast} />}
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
+
+      {modelPropsOpen && diagram && (
+        <ModelPropertiesModal
+          subjectArea={diagram.subjectArea}
+          canEdit={canEdit}
+          onClose={() => setModelPropsOpen(false)}
+          pushToast={pushToast}
+        />
+      )}
 
       <ExportDdlModal open={ddlOpen} diagram={diagram} modelName={diagram?.subjectArea.name ?? 'model'} onClose={() => setDdlOpen(false)} />
 

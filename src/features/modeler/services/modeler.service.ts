@@ -51,6 +51,8 @@ export const setSubjectAreaTables = (saId: string, tableIds: string[]) => apiPut
 export const setSubjectAreaLayout = (saId: string, layout: Record<string, { x: number; y: number }>) => apiPut<SubjectArea>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}/layout`, { layout });
 // Capa DRAWING: persiste el array completo de formas del canvas (R6d).
 export const setSubjectAreaDrawings = (saId: string, drawings: Drawing[]) => apiPut<SubjectArea>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}/drawings`, { drawings });
+// F5 — UDP del Modelo de Datos: mapa completo {defId: value} del canvas (mutación directa, sin changeset).
+export const setSubjectAreaUdp = (saId: string, udpValues: Record<string, string>) => apiPut<SubjectArea>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}/udp`, { udpValues });
 
 // ── Relaciones (changeset-aware, sólo render en M3b-1) ──
 export const listRelationships = () => gov.listRelationships();
