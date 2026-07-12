@@ -231,7 +231,12 @@ function qualify(t: DdlTable, o: DatabricksDdlOptions): string {
 
 /** Map a canonical/logical data type to a Databricks SQL type. */
 function dbxType(raw: string): string {
-  const t = (raw || 'string').trim().toLowerCase();
+  const t0 = (raw || 'string').trim();
+  // Tipos complejos (contienen '<'): VERBATIM (F4 #6). Upper-casear rompería
+  // la sintaxis interna (campos del STRUCT, tipos anidados). El switch de
+  // casing (identifierCase) tampoco aplica: no son identificadores.
+  if (t0.includes('<')) return t0;
+  const t = t0.toLowerCase();
   const map: Record<string, string> = {
     integer: 'INT', int: 'INT', smallint: 'SMALLINT', tinyint: 'TINYINT', bigint: 'BIGINT',
     float: 'FLOAT', real: 'FLOAT', double: 'DOUBLE',

@@ -359,3 +359,33 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
     expect(out).not.toContain('`CLIENTE`');
   });
 });
+
+describe('databricksDdl — tipos complejos verbatim (F4 #6)', () => {
+  const complex = (dataType: string): DatabricksDdlInput => ({
+    tables: [{ id: 't1', physicalName: 'evento', schema: 'core' }],
+    columns: [{ id: 'c1', tableId: 't1', physicalName: 'payload', dataType, ordinal: 0 }],
+    relationships: [],
+    modelName: 'm',
+  });
+
+  it('un STRUCT anidado se emite VERBATIM (bug actual: toUpperCase rompe la sintaxis interna)', () => {
+    const t = 'STRUCT<nombre:STRING, montos:ARRAY<DECIMAL(10,2)>, extra:MAP<STRING,STRING>>';
+    expect(databricksDdl(complex(t), DEF)).toContain(`\`payload\` ${t}`);
+  });
+
+  it('respeta el casing tipeado por el usuario dentro del tipo complejo', () => {
+    const t = 'array<struct<id:int, tags:map<string,string>>>';
+    expect(databricksDdl(complex(t), DEF)).toContain(`\`payload\` ${t}`);
+  });
+
+  it('el switch identifierCase NO toca tipos complejos', () => {
+    const t = 'STRUCT<Nombre:STRING>';
+    expect(databricksDdl(complex(t), { ...DEF, identifierCase: 'upper' })).toContain(t);
+    expect(databricksDdl(complex(t), { ...DEF, identifierCase: 'lower' })).toContain(t);
+  });
+
+  it('los tipos simples siguen mapeando igual que antes', () => {
+    expect(databricksDdl(complex('varchar'), DEF)).toContain('`payload` STRING');
+    expect(databricksDdl(complex('decimal(10,2)'), DEF)).toContain('`payload` DECIMAL(10,2)');
+  });
+});
