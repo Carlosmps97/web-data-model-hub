@@ -5,6 +5,7 @@ import { useChangesetStore } from '@/store/useChangesetStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 
 export interface TableNodeData {
   table: CanonicalTable;
@@ -44,7 +45,9 @@ function TableNode({ data }: NodeProps) {
         ) : null}
       </span>
       <span className={`wk-node-name${c.isForeignKey ? ' fk' : ''}`}>{nameOf(c)}</span>
-      <span className="wk-node-dt rd-mono">{c.dataType}</span>
+      <span className="wk-node-dt rd-mono" title={isComplexType(c.dataType) ? c.dataType : undefined}>
+        {collapseComplexType(c.dataType)}
+      </span>
       <Handle type="source" position={Position.Right} id={`${c.id}__src`} isConnectable={connectable} className="wk-handle" />
       <Handle type="target" position={Position.Left} id={`${c.id}__tgt`} isConnectable={connectable} className="wk-handle" />
     </div>

@@ -336,7 +336,9 @@
    shrink+ellipsis recortan el nombre (el tipo nunca se recorta). */
 .wk-node-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-body); }
 .wk-node-name.fk { color: var(--k-fk); }                                                          /* FK name blue */
-.wk-node-dt { flex: 0 0 auto; white-space: nowrap; color: var(--text-muted-2); font-size: 10px; }  /* #8A93A5 Geist Mono */
+/* Tipos: los complejos llegan colapsados (STRUCT<…>) con tooltip; max-width +
+   ellipsis protege además contra tipos simples patológicamente largos. */
+.wk-node-dt { flex: 0 0 auto; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted-2); font-size: 10px; }  /* #8A93A5 Geist Mono */
 .wk-node-empty { padding: 6px 11px; color: var(--muted); }
 
 /* Handles de conexión por columna (id único __src/__tgt) — discretos, aparecen al hover del nodo */
