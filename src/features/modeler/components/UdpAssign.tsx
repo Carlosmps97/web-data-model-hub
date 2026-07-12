@@ -20,7 +20,8 @@ export default function UdpAssign({ level, values, onChange, disabled }: {
   }, [level]);
 
   if (defs.length === 0) {
-    return <div style={{ fontSize: 12, color: '#9AA3B2', padding: '4px 0' }}>No hay UDP definidos para {level === 'table' ? 'tablas' : 'columnas'}. Definilos en <b>Data Standards → UDP</b>.</div>;
+    const noun = level === 'table' ? 'tablas' : level === 'canvas' ? 'modelos' : 'columnas';
+    return <div style={{ fontSize: 12, color: '#9AA3B2', padding: '4px 0' }}>No hay UDP definidos para {noun}. Definilos en <b>Data Standards → UDP</b>.</div>;
   }
 
   const setVal = (id: string, v: string) => {

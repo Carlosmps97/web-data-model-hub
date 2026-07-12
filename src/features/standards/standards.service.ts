@@ -18,11 +18,11 @@ export interface NamingRuleSnap { separator: Separator | string | null; case: Ca
 /** Definición de un UDP (User Defined Property): la KEY + su tipo + default +
  *  valores permitidos (enum si dataType='list') + niveles donde aplica. */
 export type UdpDataType = 'string' | 'number' | 'boolean' | 'date' | 'list';
-export type UdpLevel = 'table' | 'column';
+export type UdpLevel = 'table' | 'column' | 'canvas';
 export interface UdpDefinition {
   id: string;
   name: string;
-  level: UdpLevel;              // Class: 'table' | 'column' (extensible a más jerarquías)
+  level: UdpLevel;              // Class: 'table' | 'column' | 'canvas' (Modelo de Datos)
   dataType: UdpDataType;
   defaultValue?: string | null;
   allowedValues: string[];

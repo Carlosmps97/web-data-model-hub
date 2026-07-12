@@ -4,12 +4,14 @@ import { toast } from 'sonner';
 import { applyStandards, type StandardsSnapshot, type UdpDataType, type UdpDefinition, type UdpLevel } from '../standards.service';
 
 const TYPES: UdpDataType[] = ['string', 'number', 'boolean', 'date', 'list'];
-// Niveles (Class). Segmentado: cada UDP pertenece a UNO. Extensible a más
-// jerarquías (base de datos, modelo de datos, …) agregando entradas acá.
+// Niveles (Class). Segmentado: cada UDP pertenece a UNO. 'canvas' = el Modelo
+// de Datos completo (F5); extensible a más jerarquías agregando entradas acá.
 const LEVELS: { id: UdpLevel; label: string }[] = [
   { id: 'table', label: 'Table' },
   { id: 'column', label: 'Column' },
+  { id: 'canvas', label: 'Model' },
 ];
+const LEVEL_NOUN: Record<UdpLevel, string> = { table: 'Tabla', column: 'Columna', canvas: 'Modelo de Datos' };
 const TYPE_LABEL: Record<UdpDataType, string> = { string: 'Text', number: 'Number', boolean: 'Boolean', date: 'Date', list: 'List' };
 const NEW = '__new__';
 
@@ -81,7 +83,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
             </button>
           ))}
         </div>
-        <span style={{ fontSize: 12, color: '#9AA3B2' }}>User Defined Properties del nivel <b>{level === 'table' ? 'Tabla' : 'Columna'}</b></span>
+        <span style={{ fontSize: 12, color: '#9AA3B2' }}>User Defined Properties del nivel <b>{LEVEL_NOUN[level]}</b></span>
         <span style={{ flex: 1 }} />
         {canEdit && <button onClick={() => setSelId(NEW)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 13px', border: '1px solid #2E5BFF', background: '#2E5BFF', color: '#fff', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}><Plus size={13} />New property</button>}
       </div>
@@ -122,7 +124,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
         {editing && (
           <div style={{ width: 400, flex: 'none', borderLeft: '1px solid #EAEDF2', overflowY: 'auto', padding: 22 }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1A2B4A', flex: 1 }}>{selId === NEW ? `Nueva propiedad · ${level === 'table' ? 'Tabla' : 'Columna'}` : form.name}</h3>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1A2B4A', flex: 1 }}>{selId === NEW ? `Nueva propiedad · ${LEVEL_NOUN[level]}` : form.name}</h3>
               <button onClick={() => setSelId(null)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#9AA3B2' }}><X size={18} /></button>
             </div>
             <fieldset disabled={!canEdit || busy} style={{ border: 'none', padding: 0, margin: 0 }}>
