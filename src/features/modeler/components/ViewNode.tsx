@@ -6,6 +6,7 @@ import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { CanonicalTable } from '@/features/governance/services/governance.service';
 import type { View } from '@/services/views.service';
+import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 import { viewNodeRows } from '../lib/viewGraph';
 
 export interface ViewNodeData {
@@ -58,7 +59,9 @@ function ViewNode({ data, selected }: NodeProps) {
         <div className="wk-node-row" key={`${r.name}-${i}`}>
           <span className="wk-vnode-fx" aria-hidden>{r.fx ? 'fx' : ''}</span>
           <span className="wk-node-name">{r.name}</span>
-          <span className="wk-node-dt rd-mono">{r.type}</span>
+          <span className="wk-node-dt rd-mono" title={isComplexType(r.type) ? r.type : undefined}>
+            {collapseComplexType(r.type)}
+          </span>
         </div>
       ))}
       {rows.length === 0 && <div className="wk-node-empty rd-small">Sin columnas</div>}

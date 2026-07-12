@@ -180,6 +180,19 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     const ddl = databricksDdl({ ...TWO, views: [v] }, { ...DEF, includeViews: true });
     expect(ddl).toContain('ROUND(t2.SALDO, 2) AS saldo_r');
   });
+
+  it('descarta una fuente con expression en blanco (A4: no emite `t1.undefined`)', () => {
+    const v: DdlView = {
+      ...V,
+      sources: [
+        { column: 'ID', tableId: 't1' },
+        { expression: '   ' }, // solo espacios ⇒ se trata como ausente, no como proyección
+      ],
+    };
+    const ddl = databricksDdl({ ...TWO, views: [v] }, { ...DEF, includeViews: true });
+    expect(ddl).not.toContain('undefined');
+    expect(ddl).toContain('t1.ID'); // la fuente válida sobrevive
+  });
 });
 
 describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', () => {

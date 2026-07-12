@@ -401,8 +401,9 @@ export function viewDDL(
   const refOf = (id: string) => { const t = tableById.get(id); return t ? qualify(t, o) : ident(id); };
 
   // Solo cuentan proyecciones por COLUMNA o EXPRESIÓN (el formato legacy
-  // table-only cae al fallback SELECT *).
-  const srcs = (v.sources ?? []).filter((s) => (s.column ?? s.expression));
+  // table-only cae al fallback SELECT *). Trim: una expression solo-espacios
+  // es ausencia (evita proyectar `t1.undefined` con payloads directos a la API).
+  const srcs = (v.sources ?? []).filter((s) => (s.column ?? '').trim() || (s.expression ?? '').trim());
   const where = (v.filter ?? '').trim();
 
   // FROM: 1 fuente = igual que siempre; 2+ = cadena INNER JOIN con UNA condición.
