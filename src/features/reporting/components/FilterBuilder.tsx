@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
-import { getFacets, type Condition, type FieldDef, type Op, type ViewKey, type WhereGroup } from '../query.service';
+import { getFacets, isFilterableField, shouldFetchFacets, type Condition, type FieldDef, type Op, type ViewKey, type WhereGroup } from '../query.service';
 
 const OP_LABEL: Record<Op, string> = {
   eq: '=', ne: '≠', in: 'in', nin: 'not in', contains: 'contains', startsWith: 'starts with',
@@ -17,8 +17,9 @@ function ValueEditor({ fd, cond, from, onChange }: { fd?: FieldDef; cond: Condit
   const [facets, setFacets] = useState<{ value: string; label: string }[]>([]);
   useEffect(() => {
     // Carga opciones (typeahead server-side) para campos hidratados (dominio) o
-    // facetables conocidos (schema/dataType). enum ya trae sus allowedValues.
-    if (fd && !fd.enumValues && (fd.hydrated || ['schema', 'dataType'].includes(fd.key))) {
+    // facetables conocidos (schema/dataType). enum ya trae sus allowedValues; los
+    // campos derived nunca facetan (ops=[]).
+    if (fd && shouldFetchFacets(fd)) {
       getFacets(from, fd.key).then(setFacets).catch(() => {});
     } else {
       setFacets([]);
@@ -50,13 +51,15 @@ function ConditionRow({ cond, catalog, from, onChange, onRemove }: {
   cond: Condition; catalog: FieldDef[]; from: ViewKey; onChange: (c: Condition) => void; onRemove: () => void;
 }) {
   const fd = catalog.find((f) => f.key === cond.field);
+  // Los campos derived (ops=[]) no son filtrables → fuera del selector.
+  const fields = catalog.filter(isFilterableField);
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
       <select style={{ ...sel, minWidth: 150 }} value={cond.field} onChange={(e) => {
         const nf = catalog.find((f) => f.key === e.target.value);
         onChange({ field: e.target.value, op: (nf?.ops[0] ?? 'eq'), value: undefined });
       }}>
-        {catalog.map((f) => <option key={f.key} value={f.key}>{f.udp ? '◆ ' : ''}{f.label}</option>)}
+        {fields.map((f) => <option key={f.key} value={f.key}>{f.udp ? '◆ ' : ''}{f.label}</option>)}
       </select>
       <select style={sel} value={cond.op} onChange={(e) => onChange({ ...cond, op: e.target.value as Op, value: undefined })}>
         {(fd?.ops ?? []).map((o) => <option key={o} value={o}>{OP_LABEL[o]}</option>)}
@@ -71,7 +74,8 @@ export default function FilterBuilder({ group, catalog, from, onChange, depth = 
   group: WhereGroup; catalog: FieldDef[]; from: ViewKey; onChange: (g: WhereGroup) => void; depth?: number;
 }) {
   const set = (conditions: (Condition | WhereGroup)[]) => onChange({ ...group, conditions });
-  const addCond = () => set([...group.conditions, { field: catalog[0]?.key ?? '', op: 'eq', value: undefined }]);
+  const firstFilterable = catalog.find(isFilterableField);
+  const addCond = () => set([...group.conditions, { field: firstFilterable?.key ?? '', op: firstFilterable?.ops[0] ?? 'eq', value: undefined }]);
   const addGroup = () => set([...group.conditions, { op: 'and', conditions: [] }]);
 
   return (

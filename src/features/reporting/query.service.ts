@@ -18,7 +18,21 @@ export interface FieldDef {
   key: string; label: string; type: FieldType; ops: Op[];
   sortable: boolean; groupable: boolean; indexed: boolean;
   enumValues: string[] | null; udp: boolean; hydrated: boolean;
+  // Campo calculado post-fetch (p.ej. tableCount): el backend lo publica con
+  // ops=[]; NO es filtrable ni facetable, solo seleccionable.
+  derived?: boolean;
 }
+
+/** Campos que el builder de filtros puede ofrecer: los derived (ops=[]) quedan
+ *  fuera (el backend los rechaza en where → 422). */
+export const isFilterableField = (fd: FieldDef): boolean =>
+  !fd.derived && fd.ops.length > 0;
+
+/** ¿Debe dispararse el typeahead server-side (facets) para este campo? Nunca en
+ *  derived (valores inútiles); sí en hidratados o facetables conocidos. */
+export const shouldFetchFacets = (fd: FieldDef): boolean =>
+  !fd.derived && fd.ops.length > 0 && !fd.enumValues &&
+  (fd.hydrated || ['schema', 'dataType'].includes(fd.key));
 
 export interface Condition { field: string; op: Op; value?: unknown; }
 export interface WhereGroup { op: 'and' | 'or' | 'not'; conditions: (Condition | WhereGroup)[]; }
