@@ -4,7 +4,13 @@ import Icon from '@/components/ui/Icon';
 import * as gov from '@/features/governance/services/governance.service';
 import type { ParentDomain, CanonicalColumn } from '@/features/governance/services/governance.service';
 import { apiErrorMessage } from '@/services/http';
+import { COLUMN_DATA_TYPES } from '@/types/model';
 import UdpAssign from './UdpAssign';
+
+/** Plantillas rápidas de tipos complejos (F4 #6). */
+const TYPE_TEMPLATES = ['STRUCT<>', 'ARRAY<>', 'MAP<>'] as const;
+/** Umbral a partir del cual el tipo se edita en textarea monospace expandida. */
+const LONG_TYPE_LEN = 40;
 
 export default function ColumnEditor({ tableId, onClose, onAdd }: {
   tableId: string;
@@ -57,7 +63,37 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
           <option value="">— Parent Domain (type) —</option>
           {domains.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.defaultDataType})</option>)}
         </select>
-        <input className="rd-input rd-mono" placeholder="Type override (optional)" value={dataType} onChange={(e) => setDataType(e.target.value)} />
+        <div>
+          {dataType.length > LONG_TYPE_LEN ? (
+            <textarea
+              className="rd-input rd-mono"
+              rows={3}
+              placeholder="Type override (optional)"
+              value={dataType}
+              onChange={(e) => setDataType(e.target.value)}
+              style={{ width: '100%', resize: 'vertical', lineHeight: 1.5 }}
+            />
+          ) : (
+            <input
+              className="rd-input rd-mono"
+              list="col-type-options"
+              placeholder="Type override (optional)"
+              value={dataType}
+              onChange={(e) => setDataType(e.target.value)}
+              style={{ width: '100%' }}
+            />
+          )}
+          <datalist id="col-type-options">
+            {COLUMN_DATA_TYPES.map((t) => <option key={t} value={t} />)}
+          </datalist>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+            {TYPE_TEMPLATES.map((t) => (
+              <button key={t} type="button" className="rd-btn rd-btn-ghost rd-btn-sm rd-mono" title={`Insertar plantilla ${t}`} onClick={() => setDataType(t)}>
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
       {error && (
         <div className="rd-small" role="alert" style={{ color: 'var(--error, #C4314B)', marginTop: 8 }}>
