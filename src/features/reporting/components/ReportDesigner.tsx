@@ -11,7 +11,7 @@ import SqlEditor from './SqlEditor';
 
 type Mode = 'builder' | 'sql';
 
-const VIEWS: ViewKey[] = ['columns', 'tables', 'relationships', 'views'];
+const VIEWS: ViewKey[] = ['columns', 'tables', 'relationships', 'views', 'models'];
 const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
 
 export default function ReportDesigner({ onClose }: { onClose?: () => void }) {

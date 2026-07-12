@@ -8,7 +8,7 @@ import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const R = `${API_BASE}/api/reporting`;
 
-export type ViewKey = 'columns' | 'tables' | 'relationships' | 'views';
+export type ViewKey = 'columns' | 'tables' | 'relationships' | 'views' | 'models';
 export type FieldType = 'string' | 'enum' | 'number' | 'boolean' | 'date';
 export type Op =
   | 'eq' | 'ne' | 'in' | 'nin' | 'contains' | 'startsWith'

@@ -21,7 +21,7 @@ export default function SqlEditor({ text, onText, onValidated }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       <div style={{ fontSize: 12, color: '#8A93A5' }}>
-        SQL-like sobre las vistas <code>columns · tables · relationships · views</code>. UDP: <code>udp."Nombre"</code>. Sin JOIN/subquery.
+        SQL-like sobre las vistas <code>columns · tables · relationships · views · models</code>. UDP: <code>udp."Nombre"</code>. Sin JOIN/subquery.
       </div>
       <textarea value={text} onChange={(e) => onText(e.target.value)} spellCheck={false}
         style={{ width: '100%', height: 130, padding: 12, border: `1px solid ${errors.length ? '#E5B4B4' : '#DCE1EA'}`, borderRadius: 9, fontFamily: 'var(--mono, monospace)', fontSize: 13, color: '#1A2B4A', resize: 'vertical', boxSizing: 'border-box' }}
