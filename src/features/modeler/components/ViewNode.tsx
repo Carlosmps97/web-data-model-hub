@@ -1,8 +1,7 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { Eye, GitBranch, Pencil } from 'lucide-react';
+import { Eye, Pencil } from 'lucide-react';
 import { useChangesetStore } from '@/store/useChangesetStore';
-import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { CanonicalTable } from '@/features/governance/services/governance.service';
 import type { View } from '@/services/views.service';
@@ -11,7 +10,8 @@ import { viewNodeRows } from '../lib/viewGraph';
 
 export interface ViewNodeData {
   view: View;
-  /** Tablas fuente resueltas (las presentes en el diagrama), para el footer. */
+  /** Tablas fuente resueltas (las presentes en el diagrama). Las conserva
+   *  ModelerCanvas para trazar el wire de derivación; el nodo ya no las lista. */
   sourceTables: CanonicalTable[];
   /** dataType de la columna origen por `${tableId}::${column}`. */
   colTypes: Record<string, string>;
@@ -21,20 +21,19 @@ export interface ViewNodeData {
 }
 
 /**
- * Nodo VISTA del canvas (F3, spec §3-5): header oscuro con ojo + badge VISTA,
- * franja izquierda punteada, filas alias+tipo (marca fx si expresión/cast) y
- * footer "Origen: …" (nombres según viewMode lógico/físico). Click = SOLO
+ * Nodo VISTA del canvas (F3, spec §3-5): card "medio plomo" — header gris
+ * pizarra con ojo + badge VISTA, borde punteado envolvente y cuerpo con hatch
+ * diagonal tenue a 45°. La derivación se comunica SOLO por el wire punteado
+ * tabla→vista (el nodo ya no lleva etiqueta "Origen/Deriva de"). Click = SOLO
  * selección (usa el `selected` nativo de React Flow — nunca abre el
  * PropertiesPanel); el lápiz del header abre el ViewEditor si canEdit.
  */
 function ViewNode({ data, selected }: NodeProps) {
-  const { view, sourceTables, colTypes, onEdit } = data as ViewNodeData;
+  const { view, colTypes, onEdit } = data as ViewNodeData;
   // Mismo gate que TableNode: en modo visor no hay affordances de edición.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
-  const viewMode = useModelerStore((s) => s.viewMode);
 
-  const nameOf = (t: CanonicalTable) => (viewMode === 'logical' ? t.logicalName : t.physicalName);
   const rows = viewNodeRows(view, colTypes);
 
   return (
@@ -68,11 +67,6 @@ function ViewNode({ data, selected }: NodeProps) {
           </div>
         ))}
         {rows.length === 0 && <div className="wk-node-empty rd-small">Sin columnas</div>}
-      </div>
-      <div className="wk-vnode-foot rd-mono">
-        <GitBranch size={11} strokeWidth={2} aria-hidden />
-        <span className="wk-vnode-foot-k">Origen</span>
-        {sourceTables.length ? sourceTables.map(nameOf).join(' · ') : '—'}
       </div>
     </div>
   );

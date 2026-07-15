@@ -10,6 +10,7 @@
 import { create } from 'zustand';
 import { setAuthToken, setOnUnauthorized } from '@/services/http';
 import { useSessionStore } from '@/store/useSessionStore';
+import { resetAppState } from '@/store/resetAppState';
 import * as auth from '@/features/auth/auth.service';
 import type { Permission, SessionUser } from '@/features/auth/auth.service';
 
@@ -42,6 +43,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (username, password) => {
     set({ error: null });
     const { token, user } = await auth.login(username.trim(), password);
+    // Defensa en profundidad: si la sesión anterior murió sin logout (token
+    // expirado, tab reusada), el nuevo actor arranca SIN estado heredado.
+    resetAppState();
     localStorage.setItem(TOKEN_KEY, token);
     setAuthToken(token);
     mirror(user);
@@ -52,6 +56,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try { await auth.logout(); } catch { /* best-effort */ }
     localStorage.removeItem(TOKEN_KEY);
     setAuthToken('');
+    // El logout es navegación SPA (sin reload): sin esto, los stores singleton
+    // conservan openMode/activeSaId y el siguiente usuario heredaba el canvas.
+    resetAppState();
     set({ user: null, status: 'anon' });
   },
 
@@ -81,6 +88,7 @@ setOnUnauthorized(() => {
   if (useAuthStore.getState().status === 'authed') {
     localStorage.removeItem(TOKEN_KEY);
     setAuthToken('');
+    resetAppState();
     useAuthStore.setState({ status: 'anon', user: null });
   }
 });

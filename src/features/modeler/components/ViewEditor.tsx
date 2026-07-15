@@ -172,9 +172,15 @@ export default function ViewEditor({
   const candidates = useMemo(() => {
     const q = srcSearch.trim().toLowerCase();
     if (!q) return [];
+    // Matchea nombre físico/lógico, ESQUEMA y el naming completo "esquema.tabla":
+    // sin el esquema, escribir "bcp_ddv_…" devolvía 0 resultados aunque todas
+    // las tablas del canvas colgaran de ese esquema.
     return tables
-      .filter((t) => !sourceIds.includes(t.id)
-        && (t.physicalName.toLowerCase().includes(q) || t.logicalName.toLowerCase().includes(q)))
+      .filter((t) => !sourceIds.includes(t.id) && (
+        t.physicalName.toLowerCase().includes(q)
+        || t.logicalName.toLowerCase().includes(q)
+        || (t.schema ?? '').toLowerCase().includes(q)
+        || `${t.schema ?? ''}.${t.physicalName}`.toLowerCase().includes(q)))
       .slice(0, 8);
   }, [tables, sourceIds, srcSearch]);
 

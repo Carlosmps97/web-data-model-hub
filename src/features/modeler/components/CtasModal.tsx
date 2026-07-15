@@ -50,7 +50,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
   const sql = useMemo(() => {
     const tbl = `${schema.trim() || 'schema'}.${physName || 'new_table'}`;
     const cols = pickedCols.length ? pickedCols.map((c) => `  ${c.physicalName}`).join(',\n') : '  *';
-    const from = srcTables.map((t) => t.physicalName).join(', ') || '<source tables>';
+    const from = srcTables.map((t) => (t.schema ? `${t.schema}.${t.physicalName}` : t.physicalName)).join(', ') || '<source tables>';
     return `CREATE TABLE ${tbl} AS\nSELECT\n${cols}\nFROM ${from};`;
   }, [schema, physName, pickedCols, srcTables]);
 
@@ -99,7 +99,12 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
             {tables.map((t) => (
               <label key={t.id} style={row}>
                 <input type="checkbox" checked={sources.has(t.id)} onChange={() => toggleSrc(t.id)} />
-                <span className="rd-mono" style={{ flex: 1, fontSize: 12 }}>{t.physicalName}</span>
+                {/* esquema.tabla completo (dos tablas pueden llamarse igual en
+                    esquemas distintos); sin nowrap/ellipsis → nunca se trunca */}
+                <span className="rd-mono" style={{ flex: 1, fontSize: 12, wordBreak: 'break-all' }}>
+                  {t.schema && <span style={{ opacity: 0.62 }}>{t.schema}.</span>}
+                  {t.physicalName}
+                </span>
               </label>
             ))}
             {tables.length === 0 && <div className="rd-small" style={{ padding: 6 }}>No tables in this canvas.</div>}

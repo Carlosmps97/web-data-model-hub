@@ -57,11 +57,13 @@ function TableNode({ data }: NodeProps) {
     <div className={`wk-node${selected ? ' sel' : ''}`}>
       <div className="wk-node-head">
         <Table2 size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
+        {/* Header = SOLO esquema.nombre del modo activo (lógico o físico); el
+            nombre del otro modo no se muestra — sin nowrap envolvía en varias
+            líneas y estiraba el nodo hacia ABAJO al topar el max-width. */}
         <span className="rd-mono wk-node-title">
           {table.schema && <span className="wk-node-schema">{table.schema}.</span>}
           {nameOf(table)}
         </span>
-        <span className="wk-node-sub">{viewMode === 'logical' ? table.physicalName : table.logicalName}</span>
         {canEdit && <button className="wk-node-add" title="Agregar columna" onClick={() => setColumnTarget(table.id)}>+</button>}
         {/* Ancla del wire de derivación tabla→vista (F3): header-a-header.
             Invisible y NO conectable — los edges 'derivation' los arma el

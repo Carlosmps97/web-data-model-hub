@@ -42,7 +42,7 @@ export default function LoginScreen() {
 
         <label className="dmh-login-lbl" htmlFor="login-user">Usuario</label>
         <input id="login-user" className="dmh-login-input" autoFocus autoComplete="username"
-          value={username} onChange={(e) => setUsername(e.target.value)} placeholder="maria.rojas" />
+          value={username} onChange={(e) => setUsername(e.target.value)} placeholder="T#####" />
 
         <label className="dmh-login-lbl" htmlFor="login-pass">Contraseña</label>
         <input id="login-pass" type="password" className="dmh-login-input" autoComplete="current-password"

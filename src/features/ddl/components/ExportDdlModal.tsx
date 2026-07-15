@@ -142,8 +142,13 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const filteredTables = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
     if (!q) return allTables;
+    // También por ESQUEMA y "esquema.tabla": dos tablas pueden llamarse igual
+    // en esquemas distintos y el filtro debe poder distinguirlas.
     return allTables.filter(
-      (t) => t.physicalName.toLowerCase().includes(q) || (t.logicalName ?? '').toLowerCase().includes(q),
+      (t) => t.physicalName.toLowerCase().includes(q)
+        || (t.logicalName ?? '').toLowerCase().includes(q)
+        || (t.schema ?? '').toLowerCase().includes(q)
+        || `${t.schema ?? ''}.${t.physicalName}`.toLowerCase().includes(q),
     );
   }, [allTables, tableFilter]);
 
@@ -211,7 +216,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
             <Search size={14} strokeWidth={1.5} className="exd-tablesx-filter-ico" aria-hidden />
             <input
               className="exd-tablesx-filter-input"
-              placeholder="Filter tables…"
+              placeholder="Filter by schema or table…"
               value={tableFilter}
               onChange={(e) => setTableFilter(e.target.value)}
               aria-label="Filter tables"
@@ -240,7 +245,10 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
                       {on && <Check size={11} strokeWidth={2.6} aria-hidden />}
                     </span>
                     <Table2 size={14} strokeWidth={1.5} className="exd-tablesx-row-ico" aria-hidden />
-                    <span className={`exd-tablesx-row-name${on ? '' : ' is-off'}`}>{t.physicalName}</span>
+                    <span className={`exd-tablesx-row-name${on ? '' : ' is-off'}`}>
+                      {t.schema && <span className="exd-tablesx-row-schema">{t.schema}.</span>}
+                      {t.physicalName}
+                    </span>
                     <span className="exd-tablesx-row-cols">{colCountByTable.get(t.id) ?? 0} cols</span>
                   </button>
                 );

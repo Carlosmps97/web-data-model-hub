@@ -59,9 +59,11 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   const [conflicts, setConflicts] = useState<{ term: string; lines: string[] } | null>(null);
   const [checking, setChecking] = useState<string | null>(null); // id de la fila validándose
 
-  // Config editable (separador/case por scope).
+  // Config del scope. La REGLA CORPORATIVA está bloqueada en join + UPPER
+  // (así se derivan los físicos reales del catálogo: CODCLAVESUJETOCLI); los
+  // combos se muestran pero las demás opciones quedan deshabilitadas.
   const cfg0 = snapshot.namingConfig[scope];
-  const [sep, setSep] = useState<string>(String(cfg0.separator ?? '_'));
+  const [sep, setSep] = useState<string>(String(cfg0.separator ?? ''));
   const [casing, setCasing] = useState<string>(String(cfg0.case ?? 'upper'));
 
   // Borrador EDITABLE de términos (vacío hasta entrar en modo edición; la vista
@@ -72,7 +74,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   // (cuando NO se está editando): sin esto mostraban las reglas del scope viejo.
   useEffect(() => {
     if (editing) return;
-    setSep(String(snapshot.namingConfig[scope].separator ?? '_'));
+    setSep(String(snapshot.namingConfig[scope].separator ?? ''));
     setCasing(String(snapshot.namingConfig[scope].case ?? 'upper'));
   }, [scope, editing, snapshot]);
 
@@ -80,7 +82,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
     // Se estampa _orig al entrar en edición: si el texto del término cambia,
     // termsToValidate lo trata como renombre y también se valida al aplicar.
     setTerms(snapshot.dict.filter((t) => t.scope === scope).map((t) => ({ ...t, _orig: t.term })));
-    setSep(String(snapshot.namingConfig[scope].separator ?? '_'));
+    setSep(String(snapshot.namingConfig[scope].separator ?? ''));
     setCasing(String(snapshot.namingConfig[scope].case ?? 'upper'));
     setEditing(true);
   };
@@ -93,7 +95,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
     return !n ? live : live.filter((t) => t.term.toLowerCase().includes(n) || t.abbrev.toLowerCase().includes(n));
   }, [live, q]);
 
-  const preview = previewPhysical('monto deuda dólares', live, editing ? sep : String(cfg0.separator ?? '_'), editing ? casing : String(cfg0.case ?? 'upper'));
+  const preview = previewPhysical('monto deuda dólares', live, editing ? sep : String(cfg0.separator ?? ''), editing ? casing : String(cfg0.case ?? 'upper'));
 
   // ── Diff para el diálogo de apply ──
   const diff = useMemo(() => {
@@ -104,7 +106,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
       if (t._new) added.push(`${t.term} → ${t.abbrev}`);
       else { const b = before.get(t.id); if (b && (b.term !== t.term || b.abbrev !== t.abbrev || b.wordType !== t.wordType)) edited.push(`${t.term} → ${t.abbrev}`); }
     }
-    const cfgChanged = sep !== String(cfg0.separator ?? '_') || casing !== String(cfg0.case ?? 'upper');
+    const cfgChanged = sep !== String(cfg0.separator ?? '') || casing !== String(cfg0.case ?? 'upper');
     if (cfgChanged) edited.push(`${scope === 'column' ? 'Column' : 'Table'} naming · sep '${sep || '(none)'}' · ${casing}`);
     return { added, edited, removed, cfgChanged, count: added.length + edited.length + removed.length };
   }, [terms, sep, casing, snapshot.dict, scope, cfg0]);
@@ -205,23 +207,25 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
       {/* banner */}
       <div style={{ display: 'flex', gap: 12, background: editing ? '#EAF0FF' : '#F4F6F9', border: `1px solid ${editing ? '#D4E0FF' : '#E6EAF0'}`, borderRadius: 12, padding: '12px 15px', marginBottom: 20, fontSize: 12.5, color: '#56607A', lineHeight: 1.5 }}>
         {editing
-          ? <span><strong style={{ color: '#2E5BFF' }}>Edit mode.</strong> Add / edit / delete terms and change the separator or case. Nothing changes until you <strong>Save &amp; apply</strong> — then names re-derive catalog-wide.</span>
+          ? <span><strong style={{ color: '#2E5BFF' }}>Edit mode.</strong> Add / edit / delete terms. The naming rule is fixed at <strong>join + UPPER</strong> (corporate standard). Nothing changes until you <strong>Save &amp; apply</strong> — then names re-derive catalog-wide.</span>
           : <span><strong style={{ color: '#3A4658' }}>Read-only view.</strong> {canEdit ? 'Click Edit standards to change rules or terms.' : 'Your role can view the naming rules but not edit them.'}</span>}
       </div>
 
       {/* config + preview */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
         <div style={{ ...card, flex: 1 }}>
+          {/* Regla corporativa BLOQUEADA en join + UPPER (column y table): los
+              combos se ven, pero las otras opciones están deshabilitadas. */}
           <div style={{ fontSize: 12, fontWeight: 600, color: '#56607A', marginBottom: 8 }}>Separator between terms</div>
           {editing ? (
-            <select value={sep} onChange={(e) => setSep(e.target.value)} className="rd-input" style={{ height: 36 }}>
-              <option value="_">_ underscore</option><option value="">(none) · join</option><option value="-">- hyphen</option>
+            <select value={sep} onChange={(e) => setSep(e.target.value)} className="rd-input" style={{ height: 36 }} title="Regla corporativa fija: (none) · join">
+              <option value="_" disabled>_ underscore</option><option value="">(none) · join</option><option value="-" disabled>- hyphen</option>
             </select>
           ) : <div style={chip}>{sep === '' ? '(none) · join' : `${sep} ${sep === '_' ? 'underscore' : 'hyphen'}`}</div>}
           <div style={{ fontSize: 12, fontWeight: 600, color: '#56607A', margin: '15px 0 8px' }}>Upper / lower case</div>
           {editing ? (
-            <select value={casing} onChange={(e) => setCasing(e.target.value)} className="rd-input" style={{ height: 36 }}>
-              <option value="upper">UPPER</option><option value="lower">lower</option><option value="camel">camelCase</option>
+            <select value={casing} onChange={(e) => setCasing(e.target.value)} className="rd-input" style={{ height: 36 }} title="Regla corporativa fija: UPPER">
+              <option value="upper">UPPER</option><option value="lower" disabled>lower</option><option value="camel" disabled>camelCase</option>
             </select>
           ) : <div style={chip}>{casing.toUpperCase()}</div>}
         </div>
