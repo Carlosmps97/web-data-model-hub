@@ -11,7 +11,7 @@ const LEVELS: { id: UdpLevel; label: string }[] = [
   { id: 'column', label: 'Column' },
   { id: 'canvas', label: 'Model' },
 ];
-const LEVEL_NOUN: Record<UdpLevel, string> = { table: 'Tabla', column: 'Columna', canvas: 'Modelo de Datos' };
+const LEVEL_NOUN: Record<UdpLevel, string> = { table: 'Table', column: 'Column', canvas: 'Data Model' };
 const TYPE_LABEL: Record<UdpDataType, string> = { string: 'Text', number: 'Number', boolean: 'Boolean', date: 'Date', list: 'List' };
 const NEW = '__new__';
 
@@ -44,7 +44,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
   const set = (p: Partial<Form>) => setForm((f) => ({ ...f, ...p }));
 
   const save = async () => {
-    if (!form.name.trim()) { toast.error('El nombre es obligatorio'); return; }
+    if (!form.name.trim()) { toast.error('The name is required'); return; }
     setBusy(true);
     try {
       const v = await applyStandards({
@@ -58,7 +58,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
       });
       toast.success(`Applied · ${v.label}`);
       setSelId(null); await onApplied();
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo aplicar'); } finally { setBusy(false); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't apply"); } finally { setBusy(false); }
   };
 
   const doDelete = async (d: UdpDefinition) => {
@@ -67,7 +67,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
       const v = await applyStandards({ kind: 'udp', title: `Remove UDP ${d.name}`, udpDelete: [d.id] });
       toast.success(`Applied · ${v.label}`);
       setConfirmDel(null); if (selId === d.id) setSelId(null); await onApplied();
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo eliminar'); } finally { setBusy(false); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete"); } finally { setBusy(false); }
   };
 
   return (
@@ -83,7 +83,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
             </button>
           ))}
         </div>
-        <span style={{ fontSize: 12, color: '#9AA3B2' }}>User Defined Properties del nivel <b>{LEVEL_NOUN[level]}</b></span>
+        <span style={{ fontSize: 12, color: '#9AA3B2' }}>User Defined Properties at the <b>{LEVEL_NOUN[level]}</b> level</span>
         <span style={{ flex: 1 }} />
         {canEdit && <button onClick={() => setSelId(NEW)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 13px', border: '1px solid #2E5BFF', background: '#2E5BFF', color: '#fff', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}><Plus size={13} />New property</button>}
       </div>
@@ -101,7 +101,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
               </tr>
             </thead>
             <tbody>
-              {defs.length === 0 && <tr><td colSpan={4} style={{ padding: '16px 8px', color: '#9AA3B2' }}>Sin propiedades para este nivel. {canEdit && 'Creá una con “New property”.'}</td></tr>}
+              {defs.length === 0 && <tr><td colSpan={4} style={{ padding: '16px 8px', color: '#9AA3B2' }}>No properties for this level. {canEdit && 'Create one with “New property”.'}</td></tr>}
               {defs.map((d) => (
                 <tr key={d.id} onClick={() => setSelId(d.id)} style={{ cursor: 'pointer', background: selId === d.id ? '#F5F8FF' : 'transparent' }}>
                   <td style={{ padding: '9px 8px', borderBottom: '1px solid #F0F2F6', color: '#1A2B4A', fontWeight: 500 }}>
@@ -112,7 +112,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
                     {d.dataType === 'list' ? (d.allowedValues.join(', ') || '—') : (d.defaultValue || '—')}
                   </td>
                   {canEdit && <td style={{ padding: '9px 4px', borderBottom: '1px solid #F0F2F6' }}>
-                    <button onClick={(e) => { e.stopPropagation(); setConfirmDel(d); }} title="Eliminar" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#C0392B' }}><Trash2 size={14} /></button>
+                    <button onClick={(e) => { e.stopPropagation(); setConfirmDel(d); }} title="Delete" style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#C0392B' }}><Trash2 size={14} /></button>
                   </td>}
                 </tr>
               ))}
@@ -124,11 +124,11 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
         {editing && (
           <div style={{ width: 400, flex: 'none', borderLeft: '1px solid #EAEDF2', overflowY: 'auto', padding: 22 }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1A2B4A', flex: 1 }}>{selId === NEW ? `Nueva propiedad · ${LEVEL_NOUN[level]}` : form.name}</h3>
+              <h3 style={{ margin: 0, fontSize: 15, fontWeight: 700, color: '#1A2B4A', flex: 1 }}>{selId === NEW ? `New property · ${LEVEL_NOUN[level]}` : form.name}</h3>
               <button onClick={() => setSelId(null)} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#9AA3B2' }}><X size={18} /></button>
             </div>
             <fieldset disabled={!canEdit || busy} style={{ border: 'none', padding: 0, margin: 0 }}>
-              <div style={{ marginBottom: 14 }}><label style={lbl}>Name</label><input style={inp} value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="ej. Clasificación del Dato" /></div>
+              <div style={{ marginBottom: 14 }}><label style={lbl}>Name</label><input style={inp} value={form.name} onChange={(e) => set({ name: e.target.value })} placeholder="e.g. Clasificación del Dato" /></div>
               <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
                 <div style={{ flex: 1 }}><label style={lbl}>Type</label>
                   <select style={inp} value={form.dataType} onChange={(e) => set({ dataType: e.target.value as UdpDataType })}>{TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select>
@@ -140,7 +140,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
                 </div>
               </div>
               {form.dataType === 'list' && (
-                <div style={{ marginBottom: 14 }}><label style={lbl}>Allowed values (uno por línea)</label>
+                <div style={{ marginBottom: 14 }}><label style={lbl}>Allowed values (one per line)</label>
                   <textarea style={{ ...inp, height: 96, padding: 9, resize: 'vertical' }} value={form.allowedValues.join('\n')} onChange={(e) => set({ allowedValues: e.target.value.split('\n') })} placeholder={'No Definido\nDAC\nNo DAC'} />
                 </div>
               )}
@@ -148,7 +148,7 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
               {canEdit && (
                 <div style={{ display: 'flex', gap: 10 }}>
                   <button onClick={save} disabled={busy} style={{ height: 38, padding: '0 18px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Aplicando…' : 'Save & apply'}</button>
-                  {selId !== NEW && form.id && <button onClick={() => setConfirmDel(defs.find((x) => x.id === form.id) ?? null)} disabled={busy} style={{ height: 38, padding: '0 14px', border: '1px solid #E5B4B4', background: '#fff', color: '#C0392B', borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Trash2 size={14} />Eliminar</button>}
+                  {selId !== NEW && form.id && <button onClick={() => setConfirmDel(defs.find((x) => x.id === form.id) ?? null)} disabled={busy} style={{ height: 38, padding: '0 14px', border: '1px solid #E5B4B4', background: '#fff', color: '#C0392B', borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Trash2 size={14} />Delete</button>}
                 </div>
               )}
             </fieldset>
@@ -157,13 +157,13 @@ export default function UdpDefsPage({ snapshot, canEdit, onApplied }: { snapshot
       </div>
 
       {confirmDel && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,28,45,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }} onClick={() => setConfirmDel(null)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(20,28,45,.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 60 }}>
           <div style={{ background: '#fff', borderRadius: 14, padding: 24, width: 420, maxWidth: '90vw' }} onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#1A2B4A' }}>Eliminar «{confirmDel.name}»</h3>
-            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#6B7486' }}>Se registra como una versión nueva. Los valores ya asignados quedan huérfanos (se ignoran).</p>
+            <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#1A2B4A' }}>Delete «{confirmDel.name}»</h3>
+            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#6B7486' }}>Recorded as a new version. Values already assigned become orphaned (they are ignored).</p>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-              <button onClick={() => setConfirmDel(null)} style={{ height: 36, padding: '0 16px', border: '1px solid #DCE1EA', background: '#fff', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancelar</button>
-              <button onClick={() => doDelete(confirmDel)} disabled={busy} style={{ height: 36, padding: '0 16px', border: 'none', background: '#C0392B', color: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Eliminar</button>
+              <button onClick={() => setConfirmDel(null)} style={{ height: 36, padding: '0 16px', border: '1px solid #DCE1EA', background: '#fff', borderRadius: 8, fontSize: 13, cursor: 'pointer' }}>Cancel</button>
+              <button onClick={() => doDelete(confirmDel)} disabled={busy} style={{ height: 36, padding: '0 16px', border: 'none', background: '#C0392B', color: '#fff', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Delete</button>
             </div>
           </div>
         </div>

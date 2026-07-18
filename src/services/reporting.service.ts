@@ -23,6 +23,8 @@ export interface ReportTableRow {
   relationshipCount: number;
   /** Project names this table is referenced by (rendered as chips). */
   projects: string[];
+  /** UDPs de la tabla ya traducidos a {NOMBRE de la def: valor} (export). */
+  udpValues?: Record<string, string>;
   description: string;
 }
 
@@ -37,8 +39,35 @@ export interface ReportColumnRow {
   isForeignKey: boolean;
   isNullable: boolean;
   isPartition: boolean;
+  /** UDPs de la columna ya traducidos a {NOMBRE de la def: valor} (export). */
+  udpValues?: Record<string, string>;
   description: string;
   ordinal: number;
+}
+
+/** One view row for the "Views detail" sheets: resolved sources + per-column
+ *  detail from the view editor (alias, origin, cast, expression). */
+export interface ReportViewRow {
+  id: string;
+  schema?: string | null;
+  name: string;
+  sourceTableIds: string[];
+  /** Fuentes resueltas a `schema.tabla` legible. */
+  sourceTables: string[];
+  /** WHERE de la vista (si tiene). */
+  filter?: string | null;
+  /** Condición de JOIN manual (multi-fuente). */
+  joinOverride?: string | null;
+  showOnCanvas: boolean;
+  description?: string | null;
+  sql?: string | null;
+  columns: Array<{
+    outputAlias?: string | null;
+    sourceTable?: string | null;
+    sourceColumn?: string | null;
+    castType?: string | null;
+    expression?: string | null;
+  }>;
 }
 
 /** Optional server-side filters for the table list. Empty values are omitted. */
@@ -67,4 +96,15 @@ export function listReportColumns(tableId?: string, tableIds?: string[]): Promis
   else if (tableId) qs.set('tableId', tableId);
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   return apiGet<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns${suffix}`);
+}
+
+/** Lists view rows for the export. Pass `tableIds` to scope to the views
+ *  derived from those tables (server-side `$in` over sourceTableIds), or
+ *  `schema` to scope to one schema (Database Explorer, doc 18). */
+export function listReportViews(tableIds?: string[], schema?: string): Promise<ReportViewRow[]> {
+  const qs = new URLSearchParams();
+  if (tableIds?.length) qs.set('tableIds', tableIds.join(','));
+  if (schema) qs.set('schema', schema);
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return apiGet<ReportViewRow[]>(`${API_BASE}/api/reporting/views${suffix}`);
 }

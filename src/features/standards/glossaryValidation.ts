@@ -27,15 +27,15 @@ export function termsToValidate<
 export function conflictLines(v: GlossaryValidation): string[] {
   const lines: string[] = [];
   const dup = v.conflicts.glossaryDuplicate;
-  if (dup) lines.push(`Ya existe en el glosario: ${dup.term} → ${dup.abbrev}`);
+  if (dup) lines.push(`Already in the glossary: ${dup.term} → ${dup.abbrev}`);
   for (const hit of v.conflicts.corpus) {
     lines.push(hit.entity === 'table'
-      ? `Tabla ${hit.tableName} · "${hit.logicalName}"`
-      : `Columna ${hit.tableName}.${hit.columnName} · "${hit.logicalName}"`);
+      ? `Table ${hit.tableName} · "${hit.logicalName}"`
+      : `Column ${hit.tableName}.${hit.columnName} · "${hit.logicalName}"`);
   }
   const corpusTotal = v.conflicts.total - (dup ? 1 : 0);
   if (corpusTotal > v.conflicts.corpus.length) {
-    lines.push(`… y ${corpusTotal - v.conflicts.corpus.length} coincidencias más`);
+    lines.push(`… and ${corpusTotal - v.conflicts.corpus.length} more matches`);
   }
   return lines;
 }

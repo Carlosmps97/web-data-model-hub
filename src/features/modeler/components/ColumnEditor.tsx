@@ -5,6 +5,9 @@ import * as gov from '@/features/governance/services/governance.service';
 import type { ParentDomain, CanonicalColumn } from '@/features/governance/services/governance.service';
 import { apiErrorMessage } from '@/services/http';
 import { COLUMN_DATA_TYPES } from '@/types/model';
+import { isComplexTypeStart } from '../lib/complexTypes';
+import { createNameSync, type NameSync } from '../lib/nameSync';
+import ComplexTypeBuilder from './ComplexTypeBuilder';
 import UdpAssign from './UdpAssign';
 
 /** Plantillas rápidas de tipos complejos (F4 #6). */
@@ -87,12 +90,22 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
             {COLUMN_DATA_TYPES.map((t) => <option key={t} value={t} />)}
           </datalist>
           <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            {TYPE_TEMPLATES.map((t) => (
-              <button key={t} type="button" className="rd-btn rd-btn-ghost rd-btn-sm rd-mono" title={`Insertar plantilla ${t}`} onClick={() => setDataType(t)}>
-                {t}
-              </button>
-            ))}
+            {TYPE_TEMPLATES.map((t) => {
+              const active = dataType.trim().toUpperCase().startsWith(t.slice(0, -2));
+              return (
+                <button key={t} type="button" className={`rd-btn rd-btn-sm rd-mono ${active ? 'rd-btn-primary' : 'rd-btn-ghost'}`} title={`Insert ${t} template`} onClick={() => setDataType(t)}>
+                  {/* ZWNJ entre < y > SOLO en el label: corta la ligadura
+                      less_greater de Geist Mono pase lo que pase con el CSS. */}
+                  {t.replace('<>', '<‌>')}
+                </button>
+              );
+            })}
           </div>
+          {/* Builder visual: al elegir STRUCT/ARRAY/MAP se abre la cajita para
+              declarar la estructura campo a campo (recompone el texto). */}
+          {isComplexTypeStart(dataType) && (
+            <ComplexTypeBuilder value={dataType} onChange={setDataType} />
+          )}
         </div>
       </div>
       {error && (
@@ -151,31 +164,36 @@ export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, 
   const [typeBusy, setTypeBusy] = useState(false);
   // Flags (PK/FK/Nullable/Partition) en vuelo: bloquea la fila de flags + spinner.
   const [flagsBusy, setFlagsBusy] = useState(false);
+  // Nombres lógico/físico: los maneja nameSync (anti-carreras, doc 18 §6) —
+  // token de secuencia contra respuestas stale de physicalize, override manual
+  // del físico, y UN solo upsert con AMBOS campos (sin lost-update entre dos
+  // patches read-modify-write concurrentes). Un POST /physicalize por pausa de
+  // tipeo (debounce interno), no por keystroke.
+  const onPatchRef = useRef(onPatch);
+  onPatchRef.current = onPatch;
+  const sync = useRef<NameSync | null>(null);
+  if (!sync.current) {
+    sync.current = createNameSync({
+      physicalize: (l) => gov.physicalize(l),
+      onState: (s) => { setLogical(s.logical); setPhysical(s.physical); },
+      // col.id es estable por instancia (la fila se monta con key=col.id).
+      onCommit: (fields) => { void onPatchRef.current(col.id, fields); },
+    });
+    sync.current.reset(col.logicalName, col.physicalName);
+  }
   // Resincroniza si la columna cambió por fuera (reload). No pisa lo que tipea el usuario:
   // los inputs son no controlados respecto al server salvo cuando cambia la identidad.
-  useEffect(() => { setLogical(col.logicalName); setPhysical(col.physicalName); setDataType(col.dataType); setDescription(col.description ?? ''); setDomainId(col.parentDomainId ?? ''); }, [col.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setLogical(col.logicalName); setPhysical(col.physicalName); setDataType(col.dataType); setDescription(col.description ?? ''); setDomainId(col.parentDomainId ?? ''); sync.current?.reset(col.logicalName, col.physicalName); }, [col.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const debounced = (key: string, fields: Partial<CanonicalColumn>) => {
     clearTimeout(timers.current[key]);
     timers.current[key] = setTimeout(() => { void onPatch(col.id, fields); }, 400);
   };
-  useEffect(() => () => { Object.values(timers.current).forEach(clearTimeout); }, []);
+  useEffect(() => () => { Object.values(timers.current).forEach(clearTimeout); sync.current?.dispose(); }, []);
 
-  const onLogical = (v: string) => {
-    setLogical(v);
-    debounced('logical', { logicalName: v });
-    // Auto-physicalize scope 'column' (el físico queda editable como override).
-    // DEBOUNCED: antes disparaba un POST /physicalize por KEYSTROKE (escribir
-    // "monto deuda cliente" = 19 requests); ahora uno por pausa de tipeo.
-    clearTimeout(timers.current.__phys);
-    if (v.trim()) {
-      timers.current.__phys = setTimeout(() => {
-        gov.physicalize(v.trim()).then((r) => { setPhysical(r.physical); debounced('physical', { physicalName: r.physical }); }).catch(() => {});
-      }, 400);
-    }
-  };
-  const onPhysical = (v: string) => { setPhysical(v); debounced('physical', { physicalName: v }); };
+  const onLogical = (v: string) => sync.current?.setLogical(v);
+  const onPhysical = (v: string) => sync.current?.setPhysical(v);
   const onDescription = (v: string) => { setDescription(v); debounced('description', { description: v.trim() || undefined }); };
   const onDataType = (v: string) => {
     setDataType(v);
@@ -200,7 +218,13 @@ export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, 
   };
   const toggle = (field: 'isPrimaryKey' | 'isForeignKey' | 'isNullable' | 'isPartition', cur?: boolean) => () => {
     setFlagsBusy(true);
-    onPatch(col.id, { [field]: !cur }).finally(() => setFlagsBusy(false));
+    // Al SACAR una columna de la PK se limpia su posición de llave (pkPosition,
+    // metadata de la migración Erwin): si la vuelven a marcar, ordena por el
+    // orden físico como cualquier PK creada a mano (doc 19 §12b).
+    const patch = field === 'isPrimaryKey' && cur
+      ? { isPrimaryKey: false, pkPosition: null }
+      : { [field]: !cur };
+    onPatch(col.id, patch).finally(() => setFlagsBusy(false));
   };
 
   const dndProps = {
@@ -271,6 +295,11 @@ export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, 
             {typeBusy && <span className="wk-spin" aria-hidden />}
           </span>
         </div>
+        {/* Builder visual de tipos complejos: misma cajita que el modal de alta
+            (edita la estructura campo a campo; persiste vía onDataType). */}
+        {isComplexTypeStart(dataType) && (
+          <ComplexTypeBuilder value={dataType} onChange={onDataType} disabled={!canEdit || typeBusy} />
+        )}
         <input className="rd-input" disabled={!canEdit} placeholder="Functional definition" value={description} onChange={(e) => onDescription(e.target.value)} />
         <div className="wk-pp-flags" style={flagsBusy ? { opacity: 0.7 } : undefined}>
           <label className={`wk-pp-flag pk${col.isPrimaryKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isPrimaryKey} onChange={toggle('isPrimaryKey', col.isPrimaryKey)} /><Icon name="key" size={11} /> PK</label>

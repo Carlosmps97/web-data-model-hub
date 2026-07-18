@@ -92,7 +92,7 @@ export default function PermissionMatrix({ roles, permissions, editing, saving, 
           ))}
 
           {permissions.length === 0 && (
-            <div style={{ padding: '18px 16px', fontSize: 13, color: C.text3 }}>Sin permisos en el catálogo.</div>
+            <div style={{ padding: '18px 16px', fontSize: 13, color: C.text3 }}>No permissions in the catalog.</div>
           )}
         </div>
       </div>
@@ -106,7 +106,7 @@ export default function PermissionMatrix({ roles, permissions, editing, saving, 
           <Dot on={false} size={20} /> No permitido
         </span>
         <span style={{ fontSize: 12, color: C.text3, marginLeft: 'auto' }}>
-          {editing ? 'Los cambios se guardan recién al presionar «Guardar cambios».' : 'Presioná «Editar matriz» para modificar los permisos.'}
+          {editing ? 'Changes are saved only when you press "Save changes".' : 'Press "Edit matrix" to modify permissions.'}
         </span>
       </div>
     </div>

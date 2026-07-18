@@ -14,7 +14,7 @@ const IMPACT: DomainImpact = {
 describe('impactWarning', () => {
   it('arma el warning explícito con columnas/tablas/modelos', () => {
     expect(impactWarning(IMPACT)).toBe(
-      'Este cambio afectará 4 columnas en 2 tablas de 3 modelos de datos',
+      'This change will affect 4 columns in 2 tables across 3 data models',
     );
   });
 });

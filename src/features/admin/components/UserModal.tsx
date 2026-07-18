@@ -37,11 +37,11 @@ export default function UserModal({ mode, initial, roles, onClose, onSaved }: Pr
   const parseProjects = () => projectsText.split(',').map((s) => s.trim()).filter(Boolean);
 
   const submit = async () => {
-    if (!isEdit && !username.trim()) { toast.error('El usuario (username) es obligatorio'); return; }
-    if (!name.trim()) { toast.error('El nombre es obligatorio'); return; }
-    if (!email.trim()) { toast.error('El email es obligatorio'); return; }
-    if (!role) { toast.error('Seleccioná un rol'); return; }
-    if (!isEdit && !password) { toast.error('La contraseña es obligatoria'); return; }
+    if (!isEdit && !username.trim()) { toast.error('The username is required'); return; }
+    if (!name.trim()) { toast.error('The name is required'); return; }
+    if (!email.trim()) { toast.error('The email is required'); return; }
+    if (!role) { toast.error('Select a role'); return; }
+    if (!isEdit && !password) { toast.error('The password is required'); return; }
 
     setBusy(true);
     try {
@@ -65,7 +65,7 @@ export default function UserModal({ mode, initial, roles, onClose, onSaved }: Pr
       await onSaved();
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo guardar el usuario');
+      toast.error(e instanceof Error ? e.message : "Couldn't save the user");
     } finally {
       setBusy(false);
     }
@@ -73,15 +73,15 @@ export default function UserModal({ mode, initial, roles, onClose, onSaved }: Pr
 
   return (
     <ModalShell
-      title={isEdit ? 'Editar usuario' : 'Agregar usuario'}
-      subtitle={isEdit ? initial?.id : 'Creá una cuenta y asignale un rol'}
+      title={isEdit ? 'Edit user' : 'Add user'}
+      subtitle={isEdit ? initial?.id : 'Create an account and assign it a role'}
       onClose={onClose}
       width={480}
       footer={
         <>
-          <button type="button" style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }} onClick={onClose} disabled={busy}>Cancelar</button>
+          <button type="button" style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }} onClick={onClose} disabled={busy}>Cancel</button>
           <button type="button" style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} onClick={submit} disabled={busy}>
-            {isEdit ? 'Guardar cambios' : 'Crear usuario'}
+            {isEdit ? 'Save changes' : 'Create user'}
           </button>
         </>
       }
@@ -97,7 +97,7 @@ export default function UserModal({ mode, initial, roles, onClose, onSaved }: Pr
             autoComplete="off"
           />
         </Field>
-        <Field label="Nombre completo">
+        <Field label="Full name">
           <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Juan Pérez" />
         </Field>
         <Field label="Email">
@@ -106,7 +106,7 @@ export default function UserModal({ mode, initial, roles, onClose, onSaved }: Pr
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <Field label="Rol">
             <select style={inputStyle} value={role} onChange={(e) => setRole(e.target.value)}>
-              {roles.length === 0 && <option value="">— sin roles —</option>}
+              {roles.length === 0 && <option value="">— no roles —</option>}
               {roles.map((r) => (
                 <option key={r.id} value={r.id}>{r.name}</option>
               ))}
@@ -120,16 +120,16 @@ export default function UserModal({ mode, initial, roles, onClose, onSaved }: Pr
             </select>
           </Field>
         </div>
-        <Field label="Proyectos" hint="IDs separados por coma. Vacío = acceso a todos los proyectos.">
+        <Field label="Proyectos" hint="Comma-separated IDs. Empty = access to all projects.">
           <input style={inputStyle} value={projectsText} onChange={(e) => setProjectsText(e.target.value)} placeholder="proj-riesgos, proj-finanzas" />
         </Field>
-        <Field label={isEdit ? 'Contraseña' : 'Contraseña'} hint={isEdit ? 'Dejá en blanco para no cambiarla.' : undefined}>
+        <Field label="Password" hint={isEdit ? 'Leave blank to keep it unchanged.' : undefined}>
           <input
             style={inputStyle}
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder={isEdit ? '••••••••' : 'Contraseña inicial'}
+            placeholder={isEdit ? '••••••••' : 'Initial password'}
             autoComplete="new-password"
           />
         </Field>

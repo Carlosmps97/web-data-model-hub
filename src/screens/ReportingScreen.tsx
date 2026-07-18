@@ -35,13 +35,15 @@ import { Button } from '@/components/ui';
 import {
   listReportColumns,
   listReportTables,
+  listReportViews,
   type ReportColumnRow,
   type ReportTableRow,
 } from '@/services/reporting.service';
+import { getRelationshipsReport } from '@/features/reporting/query.service';
 
 // ── export levels ─────────────────────────────────────────────────────────────
 
-type LevelKey = 'tables' | 'columns' | 'relationships' | 'definitions';
+type LevelKey = 'tables' | 'columns' | 'relationships' | 'views' | 'definitions';
 
 interface LevelSpec {
   key: LevelKey;
@@ -51,11 +53,18 @@ interface LevelSpec {
 }
 
 const EXPORT_LEVELS: LevelSpec[] = [
-  { key: 'tables', name: 'Tables overview', hint: 'One row per table: schema, counts, subject areas, projects.', sheet: 'Tables' },
-  { key: 'columns', name: 'Columns detail', hint: 'Every field: type, PK/FK, nullable, partition, parent domain.', sheet: 'Columns' },
-  { key: 'relationships', name: 'Relationships', hint: 'Relationship totals per table.', sheet: 'Relationships' },
+  { key: 'tables', name: 'Tables overview', hint: 'One row per table: schema, counts, subject areas, projects, UDPs.', sheet: 'Tables' },
+  { key: 'columns', name: 'Columns detail', hint: 'Every field: type, PK/FK, nullable, partition, parent domain, UDPs.', sheet: 'Columns' },
+  { key: 'relationships', name: 'Relationships', hint: 'One row per relationship: tables, columns and cardinality.', sheet: 'Relationships' },
+  { key: 'views', name: 'Views detail', hint: 'Views derived from the selected tables: sources, filters, joins, per-column aliases, casts and expressions.', sheet: 'Views' },
   { key: 'definitions', name: 'Definitions', hint: 'Functional definition text per table.', sheet: 'Definitions' },
 ];
+
+/** Columnas Excel dinámicas "UDP · <def>" — una por cada UDP presente en las
+ *  filas exportadas (union de claves, orden alfabético estable). */
+function udpSheetColumns(maps: Array<Record<string, string> | undefined>): string[] {
+  return Array.from(new Set(maps.flatMap((m) => Object.keys(m ?? {})))).sort();
+}
 
 // ── multi-select filter popover ───────────────────────────────────────────────
 
@@ -320,6 +329,8 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
       const wb = XLSX.utils.book_new();
 
       if (levels.has('tables')) {
+        // UDPs como columnas dinámicas (una por def presente en la selección).
+        const udpKeys = udpSheetColumns(rows.map((t) => t.udpValues));
         const data = rows.map((t) => ({
           Table: t.physicalName,
           'Logical name': t.logicalName,
@@ -328,6 +339,7 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
           '#Columns': t.columnCount,
           '#Relations': t.relationshipCount,
           Projects: t.projects.join(', '),
+          ...Object.fromEntries(udpKeys.map((k) => [`UDP · ${k}`, t.udpValues?.[k] ?? ''])),
         }));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Tables');
       }
@@ -342,8 +354,9 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
         );
         const visibleIds = new Set(ids);
         const nameById = new Map(rows.map((t) => [t.id, t.physicalName] as const));
-        const data = allCols
-          .filter((c) => visibleIds.size === 0 || visibleIds.has(c.tableId))
+        const visibleCols = allCols.filter((c) => visibleIds.size === 0 || visibleIds.has(c.tableId));
+        const udpKeys = udpSheetColumns(visibleCols.map((c) => c.udpValues));
+        const data = visibleCols
           .sort((a, b) => a.tableId.localeCompare(b.tableId) || a.ordinal - b.ordinal)
           .map((c) => ({
             Table: nameById.get(c.tableId) ?? c.tableId,
@@ -355,20 +368,69 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
             FK: c.isForeignKey ? 'Y' : '',
             Nullable: c.isNullable ? 'Y' : 'N',
             Partition: c.isPartition ? 'Y' : '',
+            ...Object.fromEntries(udpKeys.map((k) => [`UDP · ${k}`, c.udpValues?.[k] ?? ''])),
             Definition: c.description,
           }));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Columns');
       }
 
       if (levels.has('relationships')) {
-        const data = rows
-          .filter((t) => t.relationshipCount > 0)
-          .map((t) => ({
-            Table: t.physicalName,
-            Schema: t.schema,
-            '#Relations': t.relationshipCount,
+        // Detalle POR PAR de columnas (v2, doc 19): una FK compuesta emite una
+        // fila por par (mismo Rel id + Pair). Acotado a las tablas seleccionadas.
+        const ids = new Set(rows.map((t) => t.id));
+        const rels = await getRelationshipsReport(5000);
+        const data = rels
+          .filter((r) => (r.parentTableId && ids.has(r.parentTableId))
+            || (r.childTableId && ids.has(r.childTableId)))
+          .map((r) => ({
+            'Parent schema': r.parentSchema ?? '',
+            'Parent table': r.parentTable ?? r.parent,
+            'Parent column': r.parentColumn ?? '',
+            'Child schema': r.childSchema ?? '',
+            'Child table': r.childTable ?? r.child,
+            'Child column': r.childColumn ?? '',
+            'Role name': r.roleName ?? '',
+            Pair: r.pairCount && r.pairCount > 1 ? `${(r.pairIndex ?? 0) + 1}/${r.pairCount}` : '',
+            Cardinality: r.cardinality,
+            Identifying: r.identifying ? 'Y' : '',
+            'Self-referencing': r.isSelfReferencing ? 'Y' : '',
+            'Cross-schema': r.crossSchema ? 'Y' : '',
           }));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Relationships');
+      }
+
+      if (levels.has('views')) {
+        // Vistas derivadas de las tablas seleccionadas: 2 hojas — la vista en
+        // sí (fuentes/filtro/join/SQL) y su detalle columna a columna (alias,
+        // origen, casteo, transformación). Mismo patrón acotado que Columns.
+        const ids = rows.map((t) => t.id);
+        const idSet = new Set(ids);
+        const views = (await listReportViews(ids.length > 0 && ids.length <= 300 ? ids : undefined))
+          .filter((v) => v.sourceTableIds.some((tid) => idSet.has(tid)));
+        const viewsData = views.map((v) => ({
+          View: v.name,
+          Schema: v.schema ?? '',
+          'Source tables': v.sourceTables.join(', '),
+          '#Columns': v.columns.length,
+          Filter: v.filter ?? '',
+          'Join override': v.joinOverride ?? '',
+          'On canvas': v.showOnCanvas ? 'Y' : '',
+          Description: v.description ?? '',
+          SQL: v.sql ?? '',
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(viewsData), 'Views');
+        const colsData = views.flatMap((v) =>
+          v.columns.map((c) => ({
+            View: v.name,
+            Schema: v.schema ?? '',
+            'Output alias': c.outputAlias ?? '',
+            'Source table': c.sourceTable ?? '',
+            'Source column': c.sourceColumn ?? '',
+            'Cast type': c.castType ?? '',
+            'Expression / transform': c.expression ?? '',
+          })),
+        );
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(colsData), 'View columns');
       }
 
       if (levels.has('definitions')) {

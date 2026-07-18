@@ -80,7 +80,13 @@ export interface DomainUsage {
 }
 export interface GlossaryUsage { term: string; abbrev?: string; scope?: string; wordType?: string; columnUsage: number; isUnused: boolean; }
 export interface RelationshipRow {
-  id: string; source: string; sourceSchema?: string; target: string; targetSchema?: string;
+  /** v2 (doc 19): UNA fila POR PAR de columnas — una FK compuesta repite `id`
+   *  con `pairIndex` incremental. parent = lado PK, child = lado FK. */
+  id: string; pairIndex?: number; pairCount?: number;
+  parent: string; parentSchema?: string; child: string; childSchema?: string;
+  parentTableId?: string; childTableId?: string;
+  parentTable?: string; parentColumn?: string; childTable?: string; childColumn?: string;
+  roleName?: string | null;
   cardinality: string; identifying: boolean; isSelfReferencing: boolean; crossSchema: boolean; label: string;
 }
 
@@ -122,7 +128,7 @@ export async function exportCsv(spec: ReportSpec): Promise<void> {
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(spec),
   });
-  if (!res.ok) throw new Error(`Export falló (${res.status})`);
+  if (!res.ok) throw new Error(`Export failed (${res.status})`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

@@ -2,46 +2,48 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, ImageDown, FolderOpen, Spline, Eye, Tags,
+  FileCode2, ImageDown, FolderCog, FolderOpen, Eye, Tags,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
-import { EndIcon } from './RelIcon';
+import { EndIcon, RelLineIcon } from './RelIcon';
 import type { Cardinality } from '@/features/governance/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import NewTableModal from './NewTableModal';
 import CtasModal from './CtasModal';
+import SchemaManagerModal from './SchemaManagerModal';
 import PublishModal from './PublishModal';
 import { ExportDdlModal } from '@/features/ddl';
 import ViewEditor from './ViewEditor';
 import ModelPropertiesModal from './ModelPropertiesModal';
 
-// Las 4 cardinalidades crow's-foot que puede tener cada extremo de la relación.
+// Las 4 cardinalidades crow's-foot del preset por extremo (el popup de la
+// relación ofrece las 6, incluyendo 'many' pelado y 'one-only').
 const CARDS: { k: Cardinality; tip: string }[] = [
   { k: 'one', tip: 'Exactly one' },
   { k: 'zero-one', tip: 'Zero or one' },
-  { k: 'many', tip: 'One or more' },
-  { k: 'zero-many', tip: 'Zero, one or more' },
+  { k: 'one-many', tip: 'One or more' },
+  { k: 'zero-many', tip: 'Zero or many' },
 ];
 
 // Formas del grupo DRAWING (R6d). `id` = DrawingType; cada botón crea una forma.
 const SHAPES: { id: DrawingType; tip: string; icon: ReactNode }[] = [
-  { id: 'rect', tip: 'Rectángulo', icon: <RectangleHorizontal size={17} /> },
-  { id: 'square', tip: 'Cuadrado', icon: <Square size={17} /> },
-  { id: 'circle', tip: 'Círculo', icon: <Circle size={17} /> },
-  { id: 'ellipse', tip: 'Elipse', icon: (
+  { id: 'rect', tip: 'Rectangle', icon: <RectangleHorizontal size={17} /> },
+  { id: 'square', tip: 'Square', icon: <Square size={17} /> },
+  { id: 'circle', tip: 'Circle', icon: <Circle size={17} /> },
+  { id: 'ellipse', tip: 'Ellipse', icon: (
     <svg width={17} height={17} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} aria-hidden>
       <ellipse cx="8" cy="8" rx="7" ry="4.5" />
     </svg>
   ) },
-  { id: 'line', tip: 'Línea', icon: <Minus size={17} /> },
-  { id: 'star', tip: 'Estrella', icon: <Star size={17} /> },
-  { id: 'diamond', tip: 'Rombo', icon: <Diamond size={17} /> },
-  { id: 'text', tip: 'Texto', icon: <Type size={17} /> },
+  { id: 'line', tip: 'Line', icon: <Minus size={17} /> },
+  { id: 'star', tip: 'Star', icon: <Star size={17} /> },
+  { id: 'diamond', tip: 'Diamond', icon: <Diamond size={17} /> },
+  { id: 'text', tip: 'Text', icon: <Type size={17} /> },
 ];
 
-const VIEWER_TIP = 'Solo lectura — versión publicada';
+const VIEWER_TIP = 'Read-only — published version';
 
 /**
  * Inyecta los `<defs>` de los markers crow's-foot (cf-*) en el SVG exportado.
@@ -87,27 +89,29 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
   const readonly = openMode === 'readonly';
 
-  const [modal, setModal] = useState<'table' | 'ctas' | 'view' | null>(null);
+  const [modal, setModal] = useState<'table' | 'ctas' | 'view' | 'schema' | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
   const [modelPropsOpen, setModelPropsOpen] = useState(false);
   const [find, setFind] = useState('');
   const [findOpen, setFindOpen] = useState(false);
   const findRef = useRef<HTMLInputElement>(null);
-  // Selección de cardinalidad por extremo (crow's-foot). El "lápiz" se arma con
-  // el botón Draw (relPreset != null); al cambiar un extremo estando armado, se
-  // refleja en vivo.
-  const [relSel, setRelSel] = useState<{ source: Cardinality; target: Cardinality }>({ source: 'one', target: 'many' });
+  // Selección de cardinalidad por extremo (crow's-foot), en términos
+  // PARENT (lado PK) / CHILD (lado FK) — doc 19. Default Erwin: one → zero-many.
+  const [relSel, setRelSel] = useState<{ parent: Cardinality; child: Cardinality }>({ parent: 'one', child: 'zero-many' });
   // Acciones largas del toolbar en vuelo (feedback de "en proceso").
   const [saving, setSaving] = useState(false);
   const [arranging, setArranging] = useState(false);
   const relArmed = relPreset != null;
-  const setRelEnd = (end: 'source' | 'target', c: Cardinality) => {
+  const setRelEnd = (end: 'parent' | 'child', c: Cardinality) => {
     const next = { ...relSel, [end]: c };
     setRelSel(next);
-    if (relArmed) setRelPreset({ ...next, identifying: false });
+    if (relPreset) setRelPreset({ ...next, identifying: relPreset.identifying });
   };
-  const toggleRelDraw = () => setRelPreset(relArmed ? null : { ...relSel, identifying: false });
+  // Dos herramientas de dibujo estilo Erwin: Identifying (sólida) y
+  // Non-identifying (punteada). Armar una desarma la otra; re-click desarma.
+  const armRel = (identifying: boolean) =>
+    setRelPreset(relPreset?.identifying === identifying ? null : { ...relSel, identifying });
 
   const hasCanvas = activeSaId != null && diagram != null;
   // Edición habilitada: hay canvas y NO es modo solo-lectura.
@@ -133,7 +137,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       .map((t) => ({ id: t.id, kind: 'table' as const, primary: t.logicalName, secondary: t.physicalName }));
     const views = (diagram?.views ?? [])
       .filter((v) => v.name.toLowerCase().includes(q))
-      .map((v) => ({ id: v.id, kind: 'view' as const, primary: v.name, secondary: 'vista' }));
+      .map((v) => ({ id: v.id, kind: 'view' as const, primary: v.name, secondary: 'view' }));
     return [...tables, ...views].slice(0, 8);
   }, [find, diagram]);
 
@@ -143,13 +147,13 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     setSaving(true);
     try { await saveAll(); pushToast('Saved'); }
     // Propaga el motivo real (p.ej. un 4xx del backend), no un genérico.
-    catch (e) { pushToast(e instanceof Error && e.message ? e.message : 'No se pudo guardar', 'err'); }
+    catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
     finally { setSaving(false); }
   };
   const onArrange = async () => {
     setArranging(true);
     try { await autoOrganize(); }
-    catch { pushToast('No se pudo auto-organizar', 'err'); }
+    catch { pushToast("Couldn't auto-arrange", 'err'); }
     finally { setArranging(false); }
   };
 
@@ -160,7 +164,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const exportImage = async () => {
     const rf = useModelerStore.getState().flow;
     const el = document.querySelector('.react-flow__viewport') as HTMLElement | null;
-    if (!rf || !el) { pushToast('Nada para exportar', 'err'); return; }
+    if (!rf || !el) { pushToast('Nothing to export', 'err'); return; }
     // fitView devuelve promesa en React Flow 12: esperarla + doble rAF evita la
     // carrera del sleep fijo (a 100 tablas el re-layout tardaba más de 250ms y
     // la captura salía cortada). Con onlyRenderVisibleElements, el fitView además
@@ -174,8 +178,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       a.download = `${diagram?.subjectArea.name ?? 'canvas'}.svg`;
       a.href = injectCrowFootDefs(dataUrl);
       a.click();
-      pushToast('Imagen SVG exportada');
-    } catch { pushToast('No se pudo exportar la imagen', 'err'); }
+      pushToast('SVG image exported');
+    } catch { pushToast("Couldn't export the image", 'err'); }
   };
 
   // Botón-icono de sección. `disabled` ya contempla viewer-lock en cada call.
@@ -190,9 +194,10 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {/* STRUCTURE */}
       <div className="wk-grp">
         <div className="wk-grp-row">
-          {ic('Nueva tabla', <Table2 size={17} />, () => setModal('table'), { disabled: !canEdit, lockTip: true })}
-          {ic('CTAS — crear desde existentes', <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit, lockTip: true })}
-          {ic('Crear vista', <Eye size={17} />, () => setModal('view'), { disabled: !canEdit, lockTip: true })}
+          {ic('New table', <Table2 size={17} />, () => setModal('table'), { disabled: !canEdit, lockTip: true })}
+          {ic('CTAS — create from existing', <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit, lockTip: true })}
+          {ic('Create view', <Eye size={17} />, () => setModal('view'), { disabled: !canEdit, lockTip: true })}
+          {ic('Schemas — create & manage', <FolderCog size={17} />, () => setModal('schema'), { disabled: !canEdit, lockTip: true })}
         </div>
         <span className="wk-grp-cap">Structure</span>
       </div>
@@ -234,13 +239,14 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       </div>
       <span className="wk-div" />
 
-      {/* RELATIONSHIPS — cardinalidad por extremo (crow's-foot) + Draw */}
+      {/* RELATIONSHIPS — cardinalidad por extremo (crow's-foot, Parent/Child)
+          + dos herramientas de dibujo estilo Erwin (doc 19) */}
       <div className="wk-grp">
         <div className="wk-relwrap">
           <div className="wk-relbuild">
-            {(['source', 'target'] as const).map((end) => (
+            {(['parent', 'child'] as const).map((end) => (
               <div className="wk-relrow" key={end}>
-                <span className="wk-rellbl">{end === 'source' ? 'Source' : 'Target'}</span>
+                <span className="wk-rellbl">{end === 'parent' ? 'Parent' : 'Child'}</span>
                 {CARDS.map((c) => (
                   <Tooltip key={c.k} label={readonly ? VIEWER_TIP : c.tip}>
                     <button
@@ -256,16 +262,32 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
               </div>
             ))}
           </div>
-          <Tooltip label={readonly ? VIEWER_TIP : relArmed ? 'Salir del modo dibujo' : 'Dibujar relación: arrastrá de una columna a otra'}>
-            <button
-              type="button"
-              className={`wk-reldraw${relArmed ? ' on' : ''}`}
-              disabled={!canEdit}
-              onClick={toggleRelDraw}
-            >
-              <Spline size={17} />
-            </button>
-          </Tooltip>
+          <div className="wk-reldraw2">
+            <Tooltip label={readonly ? VIEWER_TIP : relPreset?.identifying
+              ? 'Exit drawing mode'
+              : "Identifying (solid line): the FK joins the child's PK. Drag from PARENT to child"}>
+              <button
+                type="button"
+                className={`wk-reldraw${relPreset?.identifying ? ' on' : ''}`}
+                disabled={!canEdit}
+                onClick={() => armRel(true)}
+              >
+                <RelLineIcon />
+              </button>
+            </Tooltip>
+            <Tooltip label={readonly ? VIEWER_TIP : relPreset && !relPreset.identifying
+              ? 'Exit drawing mode'
+              : 'Non-identifying (dashed line): plain FK, outside the PK. Drag from PARENT to child'}>
+              <button
+                type="button"
+                className={`wk-reldraw${relPreset && !relPreset.identifying ? ' on' : ''}`}
+                disabled={!canEdit}
+                onClick={() => armRel(false)}
+              >
+                <RelLineIcon dashed />
+              </button>
+            </Tooltip>
+          </div>
         </div>
         <span className="wk-grp-cap">Relationships</span>
       </div>
@@ -296,7 +318,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           {ic('Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !canEdit || arranging, lockTip: true })}
           {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas })}
           {ic('Export image', <ImageDown size={17} />, exportImage, { disabled: !hasCanvas })}
-          {ic('Model properties — UDP del Modelo de Datos', <Tags size={17} />, () => setModelPropsOpen(true), { disabled: !canEdit, lockTip: true })}
+          {ic('Model properties — model-level UDPs', <Tags size={17} />, () => setModelPropsOpen(true), { disabled: !canEdit, lockTip: true })}
         </div>
         <span className="wk-grp-cap">Actions</span>
       </div>
@@ -304,7 +326,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {/* ── Cluster derecho ── */}
       <div className="wk-right">
         {onOpenModel && (
-          <Tooltip label="Abrir o cambiar de versión">
+          <Tooltip label="Open or switch version">
             <button className="wk-save" onClick={onOpenModel}><FolderOpen size={15} />Open model</button>
           </Tooltip>
         )}
@@ -313,10 +335,10 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             {readonly ? 'Viewer' : 'Editing'} · {versionLabel ?? '—'}
           </span>
         )}
-        <Tooltip label={readonly ? VIEWER_TIP : 'Guardar working copy'}>
+        <Tooltip label={readonly ? VIEWER_TIP : 'Save working copy'}>
           <button className="wk-save" disabled={!canEdit || saving} onClick={onSave}>{saving ? <span className="rd-spin" /> : <Save size={15} />}{saving ? 'Saving…' : 'Save'}</button>
         </Tooltip>
-        <Tooltip label={readonly ? VIEWER_TIP : 'Publicar versión'}>
+        <Tooltip label={readonly ? VIEWER_TIP : 'Publish version'}>
           <button className="wk-publish" disabled={!canEdit} onClick={() => setPublishOpen(true)}><ArrowUpToLine size={15} />Publish</button>
         </Tooltip>
       </div>
@@ -324,6 +346,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={createTable} />}
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}
       {modal === 'view' && <ViewEditor onClose={() => setModal(null)} onSaved={() => void reload()} pushToast={pushToast} />}
+      {modal === 'schema' && <SchemaManagerModal onClose={() => setModal(null)} pushToast={pushToast} />}
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
 
@@ -338,7 +361,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
 
       <ExportDdlModal open={ddlOpen} diagram={diagram} modelName={diagram?.subjectArea.name ?? 'model'} onClose={() => setDdlOpen(false)} />
 
-      {relPreset && <div className="wk-relhint">Dibujá la relación: arrastrá de una columna a otra. <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setRelPreset(null)}>salir</button></div>}
+      {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT column (it gets promoted to PK) to the child column. <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setRelPreset(null)}>exit</button></div>}
     </div>
   );
 }

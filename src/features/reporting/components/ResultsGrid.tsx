@@ -34,7 +34,7 @@ export default function ResultsGrid({ result, loading, onLoadMore, onSort, sort 
     return String(v);
   };
 
-  if (!result) return <div style={{ padding: 40, color: '#9AA3B2', fontSize: 13 }}>Corré una consulta para ver resultados.</div>;
+  if (!result) return <div style={{ padding: 40, color: '#9AA3B2', fontSize: 13 }}>Run a query to see results.</div>;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>

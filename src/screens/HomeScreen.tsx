@@ -18,9 +18,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Database, GitBranch, Inbox, Info } from 'lucide-react';
+import { Database, GitBranch, Inbox, Info, Undo2 } from 'lucide-react';
 
 import { Avatar } from '@/components/ui';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { getSummary } from '@/services/dashboard.service';
 import {
@@ -28,6 +30,7 @@ import {
   listRequests,
   listUsers,
   listVersions,
+  rollbackVersion,
 } from '@/services/versioning.service';
 import { listProjects } from '@/services/projects.service';
 import type { Project } from '@/types/model';
@@ -132,6 +135,26 @@ export default function HomeScreen() {
   const [requests, setRequests] = useState<VersionRow[]>([]);
   const [users, setUsers] = useState<SimUserDto[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
+
+  // Rollback de la versión en producción (crea un draft inverso; doc 16 §5d).
+  const canEdit = useAuthStore((s) => s.has('model.edit'));
+  const [rollbackTarget, setRollbackTarget] = useState<VersionRow | null>(null);
+  const [rollingBack, setRollingBack] = useState(false);
+  const doRollback = async () => {
+    if (!rollbackTarget) return;
+    setRollingBack(true);
+    try {
+      const draft = await rollbackVersion(rollbackTarget.id);
+      toast.success(`Draft "${draft.title ?? 'Rollback'}" created — open it in Model (Open model) `
+        + 'to review it and send it for approval. Production does not change until the approve.');
+      setRollbackTarget(null);
+      listVersions().then(setVersions).catch(() => {});
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't create the rollback.");
+    } finally {
+      setRollingBack(false);
+    }
+  };
 
   const userName = useCallback(
     (id?: string | null): string => {
@@ -439,6 +462,20 @@ export default function HomeScreen() {
                         {proj ? `${proj} · ` : ''}
                         {userName(row.owner)}
                       </span>
+                      {/* Rollback: solo la versión EN PRODUCCIÓN es reversible
+                          (deshacer en orden). Crea un draft inverso que pasa
+                          por el flujo normal de revisión (doc 16 §5d). */}
+                      {isProduction && canEdit && (
+                        <button
+                          type="button"
+                          className="dmh-vside-rollback"
+                          title="Create a draft that reverts this version (goes through review)"
+                          onClick={() => setRollbackTarget(row)}
+                        >
+                          <Undo2 size={11} strokeWidth={1.9} aria-hidden />
+                          Rollback
+                        </button>
+                      )}
                       <span className={`dmh-vpill ${pill.cls}`}>
                         <span className={`dot${pill.hollow ? ' hollow' : ''}`} />
                         {pill.text}
@@ -453,6 +490,27 @@ export default function HomeScreen() {
               <Info size={13} strokeWidth={1.5} aria-hidden />
               Read-only · manage versions inside Model
             </div>
+
+            {rollbackTarget && (
+              <ConfirmDialog
+                open
+                variant="danger"
+                title={`Rollback of ${rollbackTarget.versionLabel ?? 'the published version'}`}
+                confirmLabel="Create rollback draft"
+                message={
+                  <>
+                    A <strong>draft</strong> will be created with the inverse changes of{' '}
+                    <strong>{rollbackTarget.versionLabel ?? rollbackTarget.title}</strong>{' '}
+                    (it restores the previous state of each entity it touched).
+                    Production <strong>does not change</strong> until that draft goes through
+                    review and gets approved — like any publish.
+                  </>
+                }
+                busy={rollingBack}
+                onConfirm={doRollback}
+                onCancel={() => { if (!rollingBack) setRollbackTarget(null); }}
+              />
+            )}
           </div>
         </div>
       </div>

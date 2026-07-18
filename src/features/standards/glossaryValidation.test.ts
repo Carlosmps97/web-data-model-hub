@@ -48,9 +48,9 @@ describe('conflictLines', () => {
 
   it('lista duplicado + corpus distinguiendo tabla/columna', () => {
     expect(conflictLines(base)).toEqual([
-      'Ya existe en el glosario: codigo → COD',
-      'Tabla CLIENTE · "codigo cliente"',
-      'Columna CTA.CODIGOCTAPEN · "codigo cuenta en soles"',
+      'Already in the glossary: codigo → COD',
+      'Table CLIENTE · "codigo cliente"',
+      'Column CTA.CODIGOCTAPEN · "codigo cuenta en soles"',
     ]);
   });
 
@@ -59,13 +59,13 @@ describe('conflictLines', () => {
       ...base,
       conflicts: { ...base.conflicts, glossaryDuplicate: null, total: 2 },
     };
-    expect(conflictLines(v)[0]).toBe('Tabla CLIENTE · "codigo cliente"');
+    expect(conflictLines(v)[0]).toBe('Table CLIENTE · "codigo cliente"');
   });
 
   it('agrega el remanente cuando la muestra viene capada (total > muestra)', () => {
     const v: GlossaryValidation = { ...base, conflicts: { ...base.conflicts, total: 60 } };
     const lines = conflictLines(v);
     // total 60 − 1 duplicado = 59 de corpus; muestra 2 → 57 más.
-    expect(lines[lines.length - 1]).toBe('… y 57 coincidencias más');
+    expect(lines[lines.length - 1]).toBe('… and 57 more matches');
   });
 });

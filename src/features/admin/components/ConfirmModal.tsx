@@ -15,7 +15,7 @@ interface Props {
   onClose: () => void;
 }
 
-export default function ConfirmModal({ title, message, confirmLabel = 'Eliminar', onConfirm, onClose }: Props) {
+export default function ConfirmModal({ title, message, confirmLabel = 'Delete', onConfirm, onClose }: Props) {
   const [busy, setBusy] = useState(false);
 
   const run = async () => {
@@ -24,7 +24,7 @@ export default function ConfirmModal({ title, message, confirmLabel = 'Eliminar'
       await onConfirm();
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo completar la acción');
+      toast.error(e instanceof Error ? e.message : "Couldn't complete the action");
       setBusy(false);
     }
   };
@@ -36,8 +36,8 @@ export default function ConfirmModal({ title, message, confirmLabel = 'Eliminar'
       onClose={busy ? () => undefined : onClose}
       footer={
         <>
-          <button type="button" style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }} onClick={onClose} disabled={busy}>Cancelar</button>
-          <button type="button" style={{ ...dangerBtn, opacity: busy ? 0.6 : 1 }} onClick={run} disabled={busy}>{busy ? 'Eliminando…' : confirmLabel}</button>
+          <button type="button" style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }} onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" style={{ ...dangerBtn, opacity: busy ? 0.6 : 1 }} onClick={run} disabled={busy}>{busy ? 'Deleting…' : confirmLabel}</button>
         </>
       }
     >

@@ -9,6 +9,7 @@ import type { SimUserDto, VersionRow } from '@/types/versioning';
 import ModelerCanvas from './ModelerCanvas';
 import Toolbar from './Toolbar';
 import ModelExplorer from './ModelExplorer';
+import DatabaseExplorer from './DatabaseExplorer';
 import ColumnEditor from './ColumnEditor';
 import PropertiesPanel from './PropertiesPanel';
 
@@ -34,7 +35,7 @@ export default function WorkspaceScreen() {
   const [published, setPublished] = useState<VersionRow | null>(null);
   const [users, setUsers] = useState<SimUserDto[]>([]);
 
-  useEffect(() => { loadProjects().catch(() => pushToast('No se pudieron cargar los proyectos', 'err')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadProjects().catch(() => pushToast("Couldn't load the projects", 'err')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Data the Open-model modal needs (production label + draft owners).
   useEffect(() => {
@@ -53,17 +54,20 @@ export default function WorkspaceScreen() {
   // can't interact with a "production" canvas until you pick a version/mode.
   useEffect(() => { if (!openMode) setOpenModelShown(true); }, [openMode]);
 
-  // Once a version / working-copy is chosen, refresh the canvas so it reflects
-  // the right overlay (production for readonly, the working copy for editing).
+  // Once a version / working-copy is chosen, refresh EVERYTHING for that
+  // context: cambio de versión = cambio de overlay, así que se purga el cache
+  // del explorer y se re-fetch (proyectos/canvases draft incluidos) + se
+  // re-carga el canvas activo si sigue existiendo. Antes solo se recargaba el
+  // diagrama y el árbol quedaba PEGADO a la versión anterior (doc 16).
   // Reabrir/cambiar de versión también resetea el checkpoint de cambios (dirty).
   useEffect(() => {
-    if (openMode) void reload();
+    if (openMode) void useModelerStore.getState().refreshExplorer().catch(() => {});
     useModelerStore.getState().clearDirty();
     // Al abrir una versión para EDITAR se muestra el modelo LÓGICO (es lo que se
     // edita) para que los cambios de naming lógico se vean de una; en solo-lectura
     // se mantiene el físico (nombres de producción). El toggle sigue disponible.
     if (openMode === 'editing') useModelerStore.getState().setViewMode('logical');
-  }, [openMode, activeChangesetId, reload]);
+  }, [openMode, activeChangesetId]);
 
   // Defensa en profundidad: una sesión `editing` sólo es válida sobre un draft
   // PROPIO. Si el changeset dejó de estar en draft (enviado desde otra pestaña,
@@ -83,8 +87,8 @@ export default function WorkspaceScreen() {
         });
         pushToast(
           cs.status !== 'draft'
-            ? `La versión ${cs.versionLabel ?? ''} ya no está en borrador (${cs.status}): el canvas quedó en solo lectura`
-            : 'La versión pertenece a otro usuario: el canvas quedó en solo lectura',
+            ? `Version ${cs.versionLabel ?? ''} is no longer in draft (${cs.status}): the canvas is now read-only`
+            : 'The version belongs to another user: the canvas is now read-only',
           'err',
         );
       })
@@ -116,17 +120,22 @@ export default function WorkspaceScreen() {
   return (
     <div className={`wk${selectedTableId && openMode ? ' has-props' : ''}`}>
       <Toolbar pushToast={pushToast} onOpenModel={() => setOpenModelShown(true)} />
-      <ModelExplorer pushToast={pushToast} />
+      {/* Sidebar apilado (doc 18): Model Explorer (versión activa) arriba +
+          Database Explorer (producción, solo lectura) abajo. */}
+      <div className="wk-expl-stack">
+        <ModelExplorer pushToast={pushToast} />
+        <DatabaseExplorer />
+      </div>
       <div className="wk-canvas">
         {!openMode ? (
           <div className="rd-small" style={{ padding: 16, color: 'var(--muted)' }}>
-            Elegí una versión para abrir el modelo.
+            Pick a version to open the model.
           </div>
         ) : activeSaId ? (
           <ModelerCanvas pushToast={pushToast} />
         ) : (
           <div className="rd-small" style={{ padding: 16, color: 'var(--muted)' }}>
-            Elegí una Subject Area en el explorer.
+            Pick a Subject Area in the explorer.
           </div>
         )}
       </div>

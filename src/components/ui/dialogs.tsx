@@ -119,8 +119,10 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
   }); // sin deps: cancel/submit capturan estado fresco; listener barato
 
   return (
-    <div className="dmh-backdrop" onClick={cancel} role="presentation">
-      <div className="dmh-modal" style={{ width: 440 }} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+    // --top: por encima de cualquier modal abierto (incl. Dialog, z-index 300).
+    // El scrim NO cierra al click (pedido owner 07-17): sólo botones / ESC.
+    <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
+      <div className="dmh-modal" style={{ width: 440 }} role="dialog" aria-modal="true">
         <div className="m-body">
           <h3 className="rd-h3" style={{ marginBottom: 10 }}>{opts.title}</h3>
           {opts.label && <label className="rd-label">{opts.label}</label>}

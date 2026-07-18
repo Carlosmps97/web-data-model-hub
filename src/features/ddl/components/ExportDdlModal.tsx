@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 
 import { Button, Dialog } from '@/components/ui';
+import SchemaSelect from '@/features/modeler/components/SchemaSelect';
 import type { Diagram } from '@/features/modeler/services/modeler.service';
 import { listViewsForTables } from '@/services/views.service';
 import {
@@ -160,7 +161,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const copy = async () => {
     if (!exportTables.length) return;
     try { await navigator.clipboard.writeText(ddl); toast.success('DDL copiado al portapapeles'); }
-    catch { toast.error('No se pudo copiar al portapapeles'); }
+    catch { toast.error("Couldn't copy to clipboard"); }
   };
 
   const download = () => {
@@ -185,7 +186,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
       <span className="dmh-dialog-foot-left exd-foot-count">
         {exportTables.length}/{allTables.length} tablas
       </span>
-      <Button variant="secondary" onClick={onClose}>Cerrar</Button>
+      <Button variant="secondary" onClick={onClose}>Close</Button>
       <Button variant="secondary" icon={Copy} onClick={copy} disabled={!canExport}>Copiar</Button>
       <Button variant="primary" icon={Download} onClick={download} disabled={!canExport}>Descargar .sql</Button>
     </>
@@ -227,9 +228,9 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
           </div>
           <div className="exd-tablesx-list">
             {allTables.length === 0 ? (
-              <span className="exd-empty">El canvas no tiene tablas.</span>
+              <span className="exd-empty">The canvas has no tables.</span>
             ) : filteredTables.length === 0 ? (
-              <span className="exd-empty">Ninguna tabla coincide con el filtro.</span>
+              <span className="exd-empty">No table matches the filter.</span>
             ) : (
               filteredTables.map((t) => {
                 const on = selectedIds.has(t.id);
@@ -261,7 +262,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
         <div className="exd-field">
           <span className="exd-lbl">Target dialect</span>
           <div className="exd-dialects">
-            <button type="button" className="exd-dialect" disabled aria-disabled="true" title="Oracle aún no está disponible">
+            <button type="button" className="exd-dialect" disabled aria-disabled="true" title="Oracle is not available yet">
               <span className="exd-dialect-ico exd-dialect-ico--oracle"><Database size={16} strokeWidth={1.4} aria-hidden /></span>
               <span className="exd-dialect-txt">
                 <span className="exd-dialect-name">Oracle</span>
@@ -288,9 +289,9 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
           <div className="exd-opts">
             <span className="exd-section">Include</span>
             <div className="exd-switches">
-              <SwitchRow on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Views" hint={views.length ? `${views.length} vista(s) en el canvas` : 'Sin vistas en el canvas'} />
+              <SwitchRow on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Views" hint={views.length ? `${views.length} view(s) on the canvas` : 'No views on the canvas'} />
               <SwitchRow on={opts.includeKeys} onClick={() => set('includeKeys', !opts.includeKeys)} label="Primary & foreign keys" hint="PK / FK constraints" />
-              <SwitchRow on={opts.includeComments} onClick={() => set('includeComments', !opts.includeComments)} label="Comments" hint="Definiciones funcionales" />
+              <SwitchRow on={opts.includeComments} onClick={() => set('includeComments', !opts.includeComments)} label="Comments" hint="Functional definitions" />
               <SwitchRow on={opts.includePartitions} onClick={() => set('includePartitions', !opts.includePartitions)} label="Partitions" hint="PARTITIONED BY" />
               <SwitchRow on={opts.includeIndexes} onClick={() => set('includeIndexes', !opts.includeIndexes)} label="Indexes" hint="Hint ZORDER" />
             </div>
@@ -305,10 +306,10 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
                   onClick={() => set('identifierCase', c)}
                   aria-pressed={opts.identifierCase === c}
                   title={c === 'as-is'
-                    ? 'Identificadores tal como están en el modelo'
-                    : c === 'lower' ? 'Identificadores en minúsculas' : 'Identificadores en MAYÚSCULAS'}
+                    ? 'Identifiers as they are in the model'
+                    : c === 'lower' ? 'Identifiers in lowercase' : 'Identifiers in UPPERCASE'}
                 >
-                  {c === 'as-is' ? 'Tal cual' : c === 'lower' ? 'lower' : 'UPPER'}
+                  {c === 'as-is' ? 'As-is' : c === 'lower' ? 'lower' : 'UPPER'}
                 </button>
               ))}
             </div>
@@ -335,8 +336,9 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
                 <input className="rd-input exd-input" value={opts.catalog} disabled={!opts.unityCatalog} onChange={(e) => set('catalog', e.target.value)} placeholder="main" />
               </div>
               <div className="exd-field">
-                <span className="exd-sublbl">Schema por defecto</span>
-                <input className="rd-input exd-input" value={opts.defaultSchema} onChange={(e) => set('defaultSchema', e.target.value)} placeholder="default" />
+                <span className="exd-sublbl">Default schema</span>
+                {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
+                <SchemaSelect className="rd-input exd-input" value={opts.defaultSchema} onChange={(v) => set('defaultSchema', v)} />
               </div>
             </div>
 
@@ -350,7 +352,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
 
             <div className="exd-tblprops-head">
               <span className="exd-section">TBLPROPERTIES</span>
-              <button type="button" className="exd-add" onClick={addProp}><Plus size={13} strokeWidth={2} />Añadir</button>
+              <button type="button" className="exd-add" onClick={addProp}><Plus size={13} strokeWidth={2} />Add</button>
             </div>
             {opts.tblProperties.length === 0
               ? <span className="exd-empty">Sin propiedades.</span>
@@ -358,7 +360,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
                 <div key={i} className="exd-prop">
                   <input className="rd-input exd-input exd-mono" value={p.key} onChange={(e) => setProp(i, { key: e.target.value })} placeholder="delta.appendOnly" />
                   <input className="rd-input exd-input exd-mono" value={p.value} onChange={(e) => setProp(i, { value: e.target.value })} placeholder="true" />
-                  <button type="button" className="exd-iconbtn" onClick={() => delProp(i)} aria-label="Quitar"><Trash2 size={14} /></button>
+                  <button type="button" className="exd-iconbtn" onClick={() => delProp(i)} aria-label="Remove"><Trash2 size={14} /></button>
                 </div>
               ))}
           </div>
@@ -366,7 +368,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
           {/* ── Preview column (dark) ── */}
           <div className="exd-previewcol">
             <span className="exd-lbl">Preview</span>
-            <pre className="exd-code" aria-label="DDL preview">{canExport ? ddl : '-- Seleccioná al menos una tabla (dialecto Databricks).'}</pre>
+            <pre className="exd-code" aria-label="DDL preview">{canExport ? ddl : '-- Select at least one table (Databricks dialect).'}</pre>
           </div>
         </div>
       </div>

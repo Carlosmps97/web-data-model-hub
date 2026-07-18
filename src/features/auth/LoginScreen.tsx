@@ -25,7 +25,7 @@ export default function LoginScreen() {
       await doLogin(username, password);
       navigate(location.state?.from ?? '/', { replace: true });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'No se pudo iniciar sesión.');
+      setError(err instanceof ApiError ? err.message : "Couldn't sign in.");
     } finally {
       setBusy(false);
     }
@@ -36,15 +36,15 @@ export default function LoginScreen() {
       <form className="dmh-login-card" onSubmit={submit}>
         <div className="dmh-login-head">
           <span className="dmh-login-logo"><Database size={24} strokeWidth={1.6} aria-hidden /></span>
-          <h1 className="dmh-login-title">Iniciar sesión</h1>
+          <h1 className="dmh-login-title">Sign in</h1>
           <p className="dmh-login-sub">Data Model Hub</p>
         </div>
 
-        <label className="dmh-login-lbl" htmlFor="login-user">Usuario</label>
+        <label className="dmh-login-lbl" htmlFor="login-user">Username</label>
         <input id="login-user" className="dmh-login-input" autoFocus autoComplete="username"
           value={username} onChange={(e) => setUsername(e.target.value)} placeholder="T#####" />
 
-        <label className="dmh-login-lbl" htmlFor="login-pass">Contraseña</label>
+        <label className="dmh-login-lbl" htmlFor="login-pass">Password</label>
         <input id="login-pass" type="password" className="dmh-login-input" autoComplete="current-password"
           value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" />
 
@@ -52,7 +52,7 @@ export default function LoginScreen() {
 
         <button type="submit" className="dmh-login-btn" disabled={busy || !username.trim() || !password}>
           {busy ? <span className="rd-spin" aria-hidden /> : <LogIn size={15} aria-hidden />}
-          {busy ? 'Ingresando…' : 'Iniciar sesión'}
+          {busy ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
     </div>

@@ -19,7 +19,7 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
   const [reloadKey, setReloadKey] = useState(0); // fuerza re-búsqueda tras crear tabla
 
   useEffect(() => {
-    gov.listDomains().then(setDomains).catch(() => pushToast('No se pudieron cargar los dominios', 'err'));
+    gov.listDomains().then(setDomains).catch(() => pushToast("Couldn't load the domains", 'err'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Búsqueda server-side con debounce (300ms: el regex-scan en Cosmos cuesta
@@ -29,7 +29,7 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
     const h = setTimeout(() => {
       gov.searchTables(q.trim(), PAGE)
         .then((t) => { if (alive) setTables(t); })
-        .catch(() => pushToast('No se pudo cargar el catálogo', 'err'));
+        .catch(() => pushToast("Couldn't load the catalog", 'err'));
     }, q ? 300 : 0);
     return () => { alive = false; clearTimeout(h); };
   }, [q, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -37,21 +37,21 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
   const visible = tables;
 
   const saveTable = async () => {
-    if (!tForm.logicalName.trim()) { pushToast('El nombre lógico es obligatorio', 'err'); return; }
+    if (!tForm.logicalName.trim()) { pushToast('The logical name is required', 'err'); return; }
     try {
       const id = crypto.randomUUID();
       const physical = (await gov.physicalize(tForm.logicalName.trim())).physical;
       await gov.createTable({ id, logicalName: tForm.logicalName.trim(), physicalName: physical, schema: tForm.schema.trim() || undefined });
-      setOpenTable(false); setTForm({ logicalName: '', schema: '' }); setReloadKey((k) => k + 1); pushToast('Tabla canónica creada (en draft)');
-    } catch { pushToast('No se pudo crear la tabla', 'err'); }
+      setOpenTable(false); setTForm({ logicalName: '', schema: '' }); setReloadKey((k) => k + 1); pushToast('Canonical table created (in draft)');
+    } catch { pushToast("Couldn't create the table", 'err'); }
   };
   const toggle = async (t: CanonicalTable) => {
     if (expanded === t.id) { setExpanded(null); return; }
     setExpanded(t.id);
-    try { setColumns(await gov.listColumns(t.id)); } catch { pushToast('No se pudieron cargar las columnas', 'err'); }
+    try { setColumns(await gov.listColumns(t.id)); } catch { pushToast("Couldn't load the columns", 'err'); }
   };
   const addColumn = async (tableId: string) => {
-    if (!cForm.logicalName.trim()) { pushToast('El nombre lógico es obligatorio', 'err'); return; }
+    if (!cForm.logicalName.trim()) { pushToast('The logical name is required', 'err'); return; }
     try {
       const id = crypto.randomUUID();
       const physical = (await gov.physicalize(cForm.logicalName.trim())).physical;
@@ -65,19 +65,19 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
       });
       setCForm({ logicalName: '', parentDomainId: '', dataType: '', isPrimaryKey: false });
       setColumns(await gov.listColumns(tableId)); pushToast('Columna agregada (en draft)');
-    } catch { pushToast('No se pudo agregar la columna', 'err'); }
+    } catch { pushToast("Couldn't add the column", 'err'); }
   };
 
   return (
     <div className="rd-card mc-panel">
       <div className="mc-cardhead">
-        <span className="mc-cardlbl"><Icon name="grid" size={13} />Tablas canónicas</span>
+        <span className="mc-cardlbl"><Icon name="grid" size={13} />Canonical tables</span>
         <span className="mc-pill">{tables.length >= PAGE ? `${PAGE}+` : tables.length}</span>
         {canEdit && <button className="rd-btn rd-btn-secondary rd-btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setOpenTable(!openTable)}><Icon name="plus" size={13} sw={2.6} />Nueva tabla</button>}
       </div>
       {canEdit && openTable && (
         <div className="rd-card" style={{ padding: 10, margin: '8px 0', display: 'grid', gap: 6 }}>
-          <input className="rd-input" placeholder="Nombre lógico (ej. deuda cliente)" value={tForm.logicalName} onChange={(e) => setTForm({ ...tForm, logicalName: e.target.value })} />
+          <input className="rd-input" placeholder="Logical name (e.g. deuda cliente)" value={tForm.logicalName} onChange={(e) => setTForm({ ...tForm, logicalName: e.target.value })} />
           <input className="rd-input" placeholder="Schema (opcional, ej. riesgos)" value={tForm.schema} onChange={(e) => setTForm({ ...tForm, schema: e.target.value })} />
           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
             <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setOpenTable(false)}>Cancelar</button>
@@ -85,10 +85,10 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
           </div>
         </div>
       )}
-      {!canEdit && <div className="rd-small" style={{ padding: '4px 2px', color: 'var(--muted)' }}>Vista publicada (read-only). Creá o seleccioná un changeset para editar.</div>}
+      {!canEdit && <div className="rd-small" style={{ padding: '4px 2px', color: 'var(--muted)' }}>Published view (read-only). Create or select a changeset to edit.</div>}
       <input
         className="rd-input"
-        placeholder="Buscar tabla (físico o lógico)…"
+        placeholder="Search table (physical or logical)…"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         style={{ width: '100%', margin: '6px 0' }}
@@ -114,7 +114,7 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
                 ))}
                 {canEdit && (
                   <div style={{ display: 'grid', gap: 6, gridTemplateColumns: '1fr 1fr', marginTop: 6 }}>
-                    <input className="rd-input" placeholder="Columna lógica (ej. monto deuda)" value={cForm.logicalName} onChange={(e) => setCForm({ ...cForm, logicalName: e.target.value })} />
+                    <input className="rd-input" placeholder="Logical column (e.g. monto deuda)" value={cForm.logicalName} onChange={(e) => setCForm({ ...cForm, logicalName: e.target.value })} />
                     <select className="rd-input" value={cForm.parentDomainId} onChange={(e) => setCForm({ ...cForm, parentDomainId: e.target.value })}>
                       <option value="">— Parent Domain —</option>
                       {domains.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.defaultDataType})</option>)}
@@ -133,7 +133,7 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
             Mostrando las primeras {PAGE} coincidencias — refiná la búsqueda.
           </div>
         )}
-        {tables.length === 0 && <div className="rd-small" style={{ padding: '8px 2px' }}>Sin tablas canónicas. Crea una (su nombre físico se deriva del diccionario).</div>}
+        {tables.length === 0 && <div className="rd-small" style={{ padding: '8px 2px' }}>No canonical tables. Create one (its physical name derives from the glossary).</div>}
       </div>
     </div>
   );

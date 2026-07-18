@@ -1,13 +1,20 @@
-// Views service (R4c). CRUD de las vistas asociadas a una tabla. El backend
-// devuelve el envelope `{ success, data }`, que `apiGet/apiPost/...` ya
-// desempaquetan; estos helpers sólo dan tipos y construyen las URLs.
+// Views service (R4c → doc 20: VERSIONADAS). CRUD de las vistas asociadas a
+// una tabla. El backend devuelve el envelope `{ success, data }`, que
+// `apiGet/apiPost/...` ya desempaquetan.
 //
-// Las vistas NO son changeset-aware (a diferencia de governance): son recursos
-// REST directos sobre `/api/views`. Lectura/escritura van siempre al mismo
-// endpoint publicado.
+// Desde el doc 20 las vistas siguen el MISMO patrón changeset-aware que
+// governance/estructura/esquemas: con changeset activo, las lecturas van al
+// estado EFECTIVO (publicado + overlay del draft) y las escrituras se
+// registran en el changeset con el DOC COMPLETO (el overlay REEMPLAZA).
+// Producción se toca SOLO en el apply del approve; el ROLLBACK las revierte.
+// Sin changeset (scripts/compat), sigue el REST directo.
 
 import type { Tag } from '@/types/model';
 import { apiGet, apiPost, apiPut, apiDelete } from './http';
+import * as csvc from '@/features/governance/services/changeset.service';
+import { useChangesetStore } from '@/store/useChangesetStore';
+
+const active = () => useChangesetStore.getState().activeId;
 
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 const VIEWS = `${API_BASE}/api/views`;
@@ -72,26 +79,51 @@ export interface ViewInput {
   description?: string;
 }
 
-/** Vistas de una tabla concreta. */
+/** Normaliza el doc para el changeset (espejo de la normalización del apply):
+ *  tableId ↔ sourceTableIds coherentes — el payload es el DOC COMPLETO. */
+function normalizeInput(body: ViewInput): ViewInput {
+  const src = body.sourceTableIds?.length
+    ? body.sourceTableIds
+    : (body.tableId ? [body.tableId] : []);
+  return { ...body, sourceTableIds: src, tableId: src[0] ?? body.tableId };
+}
+
+/** Vistas de una tabla concreta (con changeset: estado EFECTIVO). */
 export function listViews(tableId: string): Promise<View[]> {
+  const a = active();
+  if (a) return csvc.effective<View>(a, 'views', { tableId });
   return apiGet<View[]>(`${VIEWS}?tableId=${encodeURIComponent(tableId)}`);
 }
 
 /** Vistas de VARIAS tablas en UNA request (p.ej. todas las tablas de un canvas
- *  para el Export DDL) — evita N llamadas por tabla. */
-export function listViewsForTables(tableIds: string[]): Promise<View[]> {
+ *  para el Export DDL) — evita N llamadas por tabla. Con changeset activo se
+ *  resuelve por tabla contra el estado efectivo y se dedup-ea por id. */
+export async function listViewsForTables(tableIds: string[]): Promise<View[]> {
   if (!tableIds.length) return Promise.resolve([]);
-  return apiGet<View[]>(`${VIEWS}?tableIds=${encodeURIComponent(tableIds.join(','))}`);
+  const a = active();
+  if (!a) return apiGet<View[]>(`${VIEWS}?tableIds=${encodeURIComponent(tableIds.join(','))}`);
+  const perTable = await Promise.all(tableIds.map((t) => csvc.effective<View>(a, 'views', { tableId: t })));
+  const byId = new Map<string, View>();
+  perTable.flat().forEach((v) => byId.set(v.id, v));
+  return [...byId.values()];
 }
 
 export function createView(body: ViewInput): Promise<View> {
-  return apiPost<View>(VIEWS, body);
+  const a = active();
+  if (!a) return apiPost<View>(VIEWS, body);
+  const doc = { ...normalizeInput(body), id: crypto.randomUUID() } as View;
+  return csvc.recordChange(a, 'views', doc.id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
 }
 
 export function updateView(id: string, body: ViewInput): Promise<View> {
-  return apiPut<View>(`${VIEWS}/${encodeURIComponent(id)}`, body);
+  const a = active();
+  if (!a) return apiPut<View>(`${VIEWS}/${encodeURIComponent(id)}`, body);
+  const doc = { ...normalizeInput(body), id } as View;
+  return csvc.recordChange(a, 'views', id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
 }
 
 export function deleteView(id: string): Promise<{ deleted: boolean }> {
-  return apiDelete<{ deleted: boolean }>(`${VIEWS}/${encodeURIComponent(id)}`);
+  const a = active();
+  if (!a) return apiDelete<{ deleted: boolean }>(`${VIEWS}/${encodeURIComponent(id)}`);
+  return csvc.recordChange(a, 'views', id, 'delete').then(() => ({ deleted: true }));
 }

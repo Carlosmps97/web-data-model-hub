@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Eye, Pencil, Table2, Trash2 } from 'lucide-react';
+import { ArrowDownUp, Eye, Pencil, Table2, Trash2 } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
@@ -8,7 +8,10 @@ import UdpAssign from './UdpAssign';
 import { useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/features/governance/services/governance.service';
 import type { ParentDomain } from '@/features/governance/services/governance.service';
+import { nextPkPosition, pkInKeyOrder, reorderKey } from '../lib/keyOrder';
+import { alignSourcesToPhysical, syncRenamedColumnInViews } from '../lib/viewSync';
 import { ColumnRow } from './ColumnEditor';
+import SchemaSelect from './SchemaSelect';
 import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
 import type { View } from '@/services/views.service';
@@ -55,7 +58,7 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
     [diagram, selectedTableId],
   );
   const links = useMemo(
-    () => (diagram?.relationships ?? []).filter((r) => r.sourceTableId === selectedTableId || r.targetTableId === selectedTableId),
+    () => (diagram?.relationships ?? []).filter((r) => r.parentTableId === selectedTableId || r.childTableId === selectedTableId),
     [diagram, selectedTableId],
   );
 
@@ -90,13 +93,40 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
     else setViews([]);
   }, [selectedTableId]);
 
+  // ── Orden de la LLAVE (pkPosition, doc 19 §12b) + alineado de vistas (V2) ──
+  // (hooks ANTES del early-return de abajo — el orden de hooks es fijo)
+  const keyPks = useMemo(() => pkInKeyOrder(cols), [cols]);
+  const [keyBusy, setKeyBusy] = useState(false);
+  const [aligningId, setAligningId] = useState<string | null>(null);
+  // ── Metadata (V3): dónde se usa la tabla (proyecto › carpeta › canvas) ──
+  const [usage, setUsage] = useState<gov.TableUsageRow[] | null>(null);
+  useEffect(() => {
+    setUsage(null);
+    if (selectedTableId) gov.tableUsage(selectedTableId).then((u) => setUsage(u.usage)).catch(() => setUsage([]));
+  }, [selectedTableId]);
+  // ── Links: relaciones GLOBALES de la tabla (es canónica — las de otros
+  // canvases no están en el diagrama actual; llegan con nombres resueltos).
+  // Se refresca también al cambiar el diagrama: dibujar/borrar un wire acá
+  // mueve relaciones entre las secciones "this canvas"/"other canvases". ──
+  const [allLinks, setAllLinks] = useState<gov.TableLinkRow[] | null>(null);
+  useEffect(() => { setAllLinks(null); }, [selectedTableId]);
+  useEffect(() => {
+    if (!selectedTableId) return;
+    let alive = true;
+    gov.tableLinks(selectedTableId)
+      .then((r) => { if (alive) setAllLinks(r.links); })
+      .catch(() => { if (alive) setAllLinks([]); });
+    return () => { alive = false; };
+  }, [selectedTableId, diagram]);
+
   if (!table) return null;
 
   const lookup = (id: string) => diagram?.tables.find((t) => t.id === id);
   const tableName = (id: string) => { const t = lookup(id); return t?.physicalName || t?.logicalName || id; };
   const colName = (id: string) => diagram?.columns.find((c) => c.id === id)?.physicalName ?? id;
   const counts: Partial<Record<Tab, number>> = { columns: cols.length, views: views.length };
-  const parents = links.filter((r) => r.targetTableId === table.id).length;
+  // parents = relaciones donde esta tabla es HIJA (la otra es su padre).
+  const parents = links.filter((r) => r.childTableId === table.id).length;
   const children = links.length - parents;
 
   const saveDef = async () => {
@@ -131,7 +161,66 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
   };
 
   const patchCol = async (id: string, fields: Parameters<typeof updateColumn>[1]) => {
-    try { await updateColumn(id, fields); } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the column", 'err'); }
+    // Entrar a la llave (doc 19 §12b): si la tabla maneja orden EXPLÍCITO de
+    // llave (pkPosition — migración Erwin o llave reordenada), la nueva PK se
+    // agrega AL FINAL; si no, queda sin posición y rige el orden físico.
+    if (fields.isPrimaryKey === true && fields.pkPosition === undefined) {
+      const pos = nextPkPosition(cols, id);
+      if (pos != null) fields = { ...fields, pkPosition: pos };
+    }
+    const before = cols.find((c) => c.id === id);
+    try {
+      await updateColumn(id, fields);
+      // Rename FÍSICO: las vistas referencian columnas POR NOMBRE — se
+      // re-apuntan los sources que usaban el nombre viejo (best-effort).
+      if (before && fields.physicalName && fields.physicalName !== before.physicalName) {
+        try {
+          const n = await syncRenamedColumnInViews(
+            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+            before.tableId, before.physicalName, fields.physicalName);
+          if (n) { pushToast(`Rename also applied to ${n} view(s)`); reloadViews(); void reload(); }
+        } catch { /* la vista se corrige a mano si hiciera falta */ }
+      }
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the column", 'err'); }
+  };
+
+  // ── Orden de la LLAVE (pkPosition) — mover una PK dentro de la llave ──
+  const moveKey = async (id: string, dir: -1 | 1) => {
+    const plan = reorderKey(cols, id, dir);
+    if (!plan.length) return;
+    setKeyBusy(true);
+    try {
+      const byId = new Map(cols.map((c) => [c.id, c]));
+      for (const step of plan) {
+        const col = byId.get(step.id);
+        if (col && (col.pkPosition ?? null) !== step.pkPosition) {
+          await gov.updateColumn({ ...col, pkPosition: step.pkPosition });
+        }
+      }
+      await reload();
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't reorder the key", 'err'); }
+    finally { setKeyBusy(false); }
+  };
+
+  // ── V2 (doc 19 §12b): "Match physical order" — reordena los sources de la
+  // vista según el orden físico (ordinal) de cada tabla fuente. Idea del
+  // equipo (Erwin no lo tiene). Las columnas no resolubles (expresiones)
+  // conservan su orden relativo al final de su grupo.
+  const alignView = async (v: View) => {
+    setAligningId(v.id);
+    try {
+      const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : [table.id]);
+      const colsByTable = new Map<string, gov.CanonicalColumn[]>();
+      for (const tid of srcIds) {
+        const list = tid === table.id ? cols : await gov.listColumns(tid);
+        colsByTable.set(tid, list.slice().sort((a, b) => a.ordinal - b.ordinal));
+      }
+      await viewsSvc.updateView(v.id, { ...v, sources: alignSourcesToPhysical(v, colsByTable) });
+      reloadViews();
+      void reload();
+      pushToast('View reordered to match the physical order of its table(s)');
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't reorder the view", 'err'); }
+    finally { setAligningId(null); }
   };
   const removeCol = async (id: string, name: string) => {
     try {
@@ -146,7 +235,7 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
         message: impact.total > 0 ? (
           <>
             <p style={{ margin: 0 }}>
-              Column <strong>“{name}”</strong> participates in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} that will also be deleted:
+              Column <strong>“{name}”</strong> participates in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} — each will lose this pair (or be deleted if it was the last one):
             </p>
             <ul style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 180, overflow: 'auto' }}>
               {impact.relationships.map((r) => (
@@ -237,7 +326,8 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
               </div>
             </div>
             <div className="wk-props-field"><label>Schema</label>
-              <input className="rd-input rd-mono" disabled={!canEdit} placeholder="schema_name" value={form.schema} onChange={(e) => setForm({ ...form, schema: e.target.value })} />
+              {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
+              <SchemaSelect value={form.schema} onChange={(v) => setForm({ ...form, schema: v })} disabled={!canEdit} />
             </div>
             <div className="wk-props-field"><label>Functional definition</label>
               <textarea className="wk-pp-textarea" disabled={!canEdit} placeholder="What this entity represents…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
@@ -261,6 +351,30 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
               {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setColumnTarget(table.id)}><Icon name="plus" size={12} sw={2.6} /> Add column</button>}
             </div>
             <p className="wk-pp-cap">{canEdit ? 'Drag the handle to reorder · click a column to edit.' : 'Click a column to view its details.'}</p>
+            {/* Orden de la LLAVE (independiente del orden físico): manda el
+                bloque PK del canvas y el PRIMARY KEY(...) del Export DDL. */}
+            {keyPks.length >= 2 && (
+              <div className="wk-pp-keyorder">
+                <div className="wk-pp-cap" style={{ margin: '0 0 4px' }}>
+                  Primary key — key order (PK block &amp; DDL constraint)
+                  {keyBusy && <span className="rd-spin" style={{ marginLeft: 6, color: 'var(--primary)' }} aria-hidden />}
+                </div>
+                <div className="wk-pp-keychips">
+                  {keyPks.map((c, i) => (
+                    <span className="wk-pp-keychip" key={c.id} title={c.logicalName}>
+                      <span className="wk-pp-keyn">{i + 1}</span>
+                      <span className="rd-mono">{c.physicalName}</span>
+                      {canEdit && (
+                        <span className="wk-pp-keymv">
+                          <button type="button" disabled={keyBusy || i === 0} title="Move up in the key" onClick={() => moveKey(c.id, -1)}>↑</button>
+                          <button type="button" disabled={keyBusy || i === keyPks.length - 1} title="Move down in the key" onClick={() => moveKey(c.id, 1)}>↓</button>
+                        </span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             {cols.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No columns yet.{canEdit ? ' Use “Add column”.' : ''}</div>}
             <div className="wk-pp-collist">
               {cols.map((c) => (
@@ -301,7 +415,7 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
               const shared = srcIds.length > 1;
               const others = srcIds
                 .filter((id) => id !== table.id)
-                .map((id) => diagram?.tables.find((t) => t.id === id)?.physicalName ?? 'otra tabla');
+                .map((id) => diagram?.tables.find((t) => t.id === id)?.physicalName ?? 'another table');
               return (
                 <div className={`wk-pp-link${shared ? ' shared' : ''}`} key={v.id}>
                   <div className="wk-pp-link-head">
@@ -309,6 +423,9 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
                     <span className="rd-mono">{v.schema ? `${v.schema}.` : ''}{v.name}</span>
                     {canEdit && (
                       <span style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+                        <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Match the table's physical order" disabled={aligningId === v.id} onClick={() => alignView(v)}>
+                          {aligningId === v.id ? <span className="rd-spin" aria-hidden /> : <ArrowDownUp size={12} />}
+                        </button>
                         <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Edit" onClick={() => setViewEditor({ view: v })}><Pencil size={12} /></button>
                         <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Delete" onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete view', message: <>View <strong>“{v.name}”</strong> will be deleted.</>, confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
                       </span>
@@ -316,7 +433,7 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
                   </div>
                   {shared && (
                     <div className="wk-pp-link-card">
-                      <span className="wk-pp-shared">Compartida con {others.join(' · ')}</span>
+                      <span className="wk-pp-shared">Shared with {others.join(' · ')}</span>
                     </div>
                   )}
                   {v.tags && v.tags.length > 0 && <div className="wk-pp-link-card"><span className="rd-small" style={{ color: 'var(--muted)' }}>{v.tags.length} tag{v.tags.length === 1 ? '' : 's'}</span></div>}
@@ -326,23 +443,24 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
           </>
         )}
 
-        {/* ── Links (pp3: cards PARENT/CHILD) ── */}
+        {/* ── Links (pp3: cards PARENT/CHILD) — this canvas + other canvases ── */}
         {tab === 'links' && (
           <>
-            <div className="wk-props-sec" style={{ marginTop: 0 }}>Relationships · {links.length} link{links.length === 1 ? '' : 's'}</div>
-            {links.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>This table has no relationships yet.</div>}
+            <div className="wk-props-sec" style={{ marginTop: 0 }}>This canvas · {links.length} link{links.length === 1 ? '' : 's'}</div>
+            {links.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>This table has no relationships on this canvas.</div>}
             {links.map((r) => {
-              const outgoing = r.sourceTableId === table.id;
-              // Rol de la OTRA tabla respecto de la actual: entrante ⇒ su padre; saliente ⇒ su hija.
-              const role = outgoing ? 'child' : 'parent';
-              const ownCol = outgoing ? r.sourceColumnId : r.targetColumnId;
+              const isParentHere = r.parentTableId === table.id;
+              // Rol de la OTRA tabla respecto de la actual.
+              const role = isParentHere ? 'child' : 'parent';
+              // Columnas PROPIAS de la unión (todas las de los pares — PK compuesta).
+              const ownCols = r.pairs.map((p) => (isParentHere ? p.parentColumnId : p.childColumnId));
               return (
                 <div className="wk-pp-link" key={r.id}>
                   <div className="wk-pp-link-head">
                     <span className={`wk-pp-role ${role}`}>{role.toUpperCase()}</span>
-                    <span className="rd-mono">{tableName(r.sourceTableId)}</span>
+                    <span className="rd-mono">{tableName(r.parentTableId)}</span>
                     <span style={{ color: 'var(--text-muted-3)' }}>→</span>
-                    <span className="rd-mono">{tableName(r.targetTableId)}</span>
+                    <span className="rd-mono">{tableName(r.childTableId)}</span>
                     {canEdit && (
                       <button
                         type="button"
@@ -356,14 +474,54 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
                     )}
                   </div>
                   <div className="wk-pp-link-card">
-                    <span className="rd-mono">on {colName(ownCol)}</span>
+                    <span className="rd-mono">on {ownCols.map(colName).join(', ')}</span>
                     <span className="wk-pp-card-lbl">
-                      {CARD_LBL[r.sourceCardinality]} : {CARD_LBL[r.targetCardinality]}{r.identifying ? ' · identifying' : ''}
+                      {CARD_LBL[r.parentCardinality]} : {CARD_LBL[r.childCardinality]}{r.identifying ? ' · identifying' : ''}{r.pairs.length > 1 ? ` · ${r.pairs.length} pairs` : ''}
                     </span>
                   </div>
                 </div>
               );
             })}
+            {/* Relaciones visibles sólo en OTROS canvases (la tabla es la misma
+                en todos): cards plomo, solo lectura, con el/los canvas(es). */}
+            {(() => {
+              const others = (allLinks ?? []).filter((l) => !links.some((r) => r.id === l.id));
+              if (allLinks === null) {
+                return <div className="rd-small" style={{ color: 'var(--muted)', marginTop: 10 }}>Loading other canvases…</div>;
+              }
+              if (others.length === 0) return null;
+              return (
+                <>
+                  <div className="wk-props-sec">Other canvases · {others.length} link{others.length === 1 ? '' : 's'}</div>
+                  {others.map((l) => {
+                    const isParentHere = l.parentTableId === table.id;
+                    const role = isParentHere ? 'child' : 'parent';
+                    const ownCols = l.pairs.map((p) => (isParentHere ? p.parentColumnName : p.childColumnName));
+                    return (
+                      <div className="wk-pp-link other" key={l.id}>
+                        <div className="wk-pp-link-head">
+                          <span className={`wk-pp-role ${role}`}>{role.toUpperCase()}</span>
+                          <span className="rd-mono">{l.parentTableName}</span>
+                          <span style={{ color: 'var(--text-muted-3)' }}>→</span>
+                          <span className="rd-mono">{l.childTableName}</span>
+                        </div>
+                        <div className="wk-pp-link-card">
+                          <span className="rd-mono">on {ownCols.join(', ')}</span>
+                          <span className="wk-pp-card-lbl">
+                            {CARD_LBL[l.parentCardinality]} : {CARD_LBL[l.childCardinality]}{l.identifying ? ' · identifying' : ''}{l.pairs.length > 1 ? ` · ${l.pairs.length} pairs` : ''}
+                          </span>
+                        </div>
+                        <div className="wk-pp-link-card">
+                          <span className="rd-small" style={{ color: 'var(--muted)' }}>
+                            in {l.canvases.length > 0 ? l.canvases.map((c) => c.name).join(' · ') : 'no shared canvas'}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </>
+              );
+            })()}
           </>
         )}
 
@@ -379,6 +537,26 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
               <dt>Definition</dt><dd>{table.description || '—'}</dd>
               <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{table.id}</dd>
             </dl>
+            {/* V3 (doc 19 §12b): dónde se usa la tabla — proyecto › carpeta ›
+                canvas (efectivo: con changeset activo incluye lo pendiente). */}
+            <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px solid #EAEDF2' }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#1A2B4A', marginBottom: 8 }}>
+                Used in{usage !== null ? ` · ${usage.length} canvas${usage.length === 1 ? '' : 'es'}` : ''}
+              </div>
+              {usage === null && <div className="rd-small" style={{ color: 'var(--muted)' }}>Loading…</div>}
+              {usage !== null && usage.length === 0 && (
+                <div className="rd-small" style={{ color: 'var(--muted)' }}>Not referenced on any canvas.</div>
+              )}
+              {(usage ?? []).map((u) => (
+                <div key={u.canvasId} className="wk-pp-usage rd-small">
+                  <span>{u.project ?? '—'}</span>
+                  <span className="wk-pp-usep">›</span>
+                  <span>{u.folder ?? 'root'}</span>
+                  <span className="wk-pp-usep">›</span>
+                  <span className="rd-mono">{u.canvas}</span>
+                </div>
+              ))}
+            </div>
             {/* User Defined Properties (etiquetas key-value para clasificar el dato). */}
             <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px solid #EAEDF2' }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#1A2B4A', marginBottom: 10 }}>User Defined Properties</div>

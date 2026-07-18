@@ -44,8 +44,8 @@ export default function ConfirmDialog({
   open,
   title,
   message,
-  confirmLabel = 'Confirmar',
-  cancelLabel = 'Cancelar',
+  confirmLabel = 'Confirm',
+  cancelLabel = 'Cancel',
   variant = 'primary',
   dontAskKey,
   busy = false,
@@ -82,14 +82,16 @@ export default function ConfirmDialog({
   const danger = variant === 'danger';
 
   return (
-    <div className="dmh-backdrop" onClick={busy ? undefined : onCancel} role="presentation">
+    // --top: una confirmación SIEMPRE pinta por encima de cualquier modal,
+    // incluido el Dialog del design-system (z-index 300 > .dmh-backdrop 200).
+    // El scrim NO cierra al click (pedido owner 07-17): sólo botones / ESC.
+    <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
       <div
         className="dmh-modal"
         style={{ width: 440 }}
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="m-body" style={{ display: 'flex', gap: 14 }}>
           <span
@@ -107,7 +109,7 @@ export default function ConfirmDialog({
             {dontAskKey && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer' }}>
                 <input type="checkbox" checked={skipNext} onChange={(e) => setSkipNext(e.target.checked)} />
-                <span className="rd-small">No volver a preguntar en esta sesión</span>
+                <span className="rd-small">Don't ask again this session</span>
               </label>
             )}
           </div>

@@ -46,7 +46,7 @@ function ViewNode({ data, selected }: NodeProps) {
         </span>
         <span className="wk-vnode-badge">VISTA</span>
         {canEdit && (
-          <button className="wk-vnode-edit" title="Editar vista"
+          <button className="wk-vnode-edit" title="Edit view"
             onClick={(e) => { e.stopPropagation(); onEdit(view.id); }}>
             <Pencil size={11} />
           </button>

@@ -13,27 +13,27 @@ export default function ApprovalInbox({ pushToast }: { pushToast: (m: string, k?
   const { changesets, load, approve, reject } = useChangesetStore();
   const [detail, setDetail] = useState<Changeset | null>(null);
 
-  useEffect(() => { load().catch(() => pushToast('No se pudieron cargar los changesets', 'err')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load().catch(() => pushToast("Couldn't load the changesets", 'err')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submitted = changesets.filter((c) => c.status === 'submitted');
 
   const openDetail = async (id: string) => {
-    try { setDetail(await getChangeset(id)); } catch { pushToast('No se pudo cargar el detalle', 'err'); }
+    try { setDetail(await getChangeset(id)); } catch { pushToast("Couldn't load the detail", 'err'); }
   };
   const onApprove = async (id: string) => {
-    try { await approve(id); setDetail(null); pushToast('Aprobado y publicado'); } catch { pushToast('No se pudo aprobar', 'err'); }
+    try { await approve(id); setDetail(null); pushToast('Approved and published'); } catch { pushToast("Couldn't approve", 'err'); }
   };
   const onReject = async (id: string) => {
     try {
       const value = await promptDialog({
         title: 'Rechazar changeset',
-        label: 'Motivo del rechazo (opcional)',
-        confirmLabel: 'Rechazar', cancelLabel: 'Cancelar',
+        label: 'Rejection reason (optional)',
+        confirmLabel: 'Reject', cancelLabel: 'Cancel',
         action: (v) => reject(id, v.trim() || undefined),
       });
       if (value === null) return; // canceló — no rechazar
       setDetail(null); pushToast('Rechazado');
-    } catch { pushToast('No se pudo rechazar', 'err'); }
+    } catch { pushToast("Couldn't reject", 'err'); }
   };
 
   return (
@@ -54,12 +54,12 @@ export default function ApprovalInbox({ pushToast }: { pushToast: (m: string, k?
             <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => onReject(c.id)} style={{ color: 'var(--error)' }}>Rechazar</button>
           </div>
         ))}
-        {submitted.length === 0 && <div className="rd-small" style={{ padding: '8px 2px' }}>No hay changesets pendientes de aprobación.</div>}
+        {submitted.length === 0 && <div className="rd-small" style={{ padding: '8px 2px' }}>No changesets pending approval.</div>}
       </div>
 
       {detail && (
         <div className="rd-card" style={{ padding: 10, marginTop: 8 }}>
-          <div className="meta-name" style={{ marginBottom: 6 }}>Diff de "{detail.title}"</div>
+          <div className="meta-name" style={{ marginBottom: 6 }}>Diff of "{detail.title}"</div>
           {Object.entries(detail.diff ?? {}).map(([col, d]) => (
             <div key={col} className="rd-small" style={{ marginBottom: 4 }}>
               <b>{COLS[col] ?? col}:</b>{' '}

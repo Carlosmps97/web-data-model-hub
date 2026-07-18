@@ -27,10 +27,11 @@ export default function Modal({ title, subtitle, icon, onClose, children, footer
   }, [onClose]);
 
   return (
-    <div className="dmh-backdrop" onClick={onClose} role="presentation">
+    // El scrim NO cierra al click (pedido owner 07-17: un click afuera perdía
+    // lo tipeado). Cerrar = X / acción del footer / ESC.
+    <div className="dmh-backdrop" role="presentation">
       <div
         className={`dmh-modal${size === 'lg' ? ' lg' : ''}`}
-        onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
       >
@@ -40,7 +41,7 @@ export default function Modal({ title, subtitle, icon, onClose, children, footer
             <div className="t">{title}</div>
             {subtitle && <div className="s">{subtitle}</div>}
           </div>
-          <button type="button" className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" onClick={onClose} aria-label="Cerrar">
+          <button type="button" className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" onClick={onClose} aria-label="Close">
             <Icon name="x" size={16} />
           </button>
         </div>

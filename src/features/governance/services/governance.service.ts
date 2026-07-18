@@ -18,6 +18,10 @@ export interface CanonicalColumn {
   id: string; tableId: string; physicalName: string; logicalName: string;
   parentDomainId?: string; dataType: string; typeOverridden: boolean;
   isPrimaryKey?: boolean; isForeignKey?: boolean; ordinal: number;
+  /** Posición dentro de la LLAVE primaria (0-based) — independiente del
+   *  `ordinal` físico. Ordena el bloque PK del canvas y el PRIMARY KEY(...)
+   *  del DDL, como Erwin (doc 19 §12b). */
+  pkPosition?: number | null;
   // R1a (backend) — persistidos; deben existir en el tipo o se pierden al recargar.
   isNullable?: boolean; isPartition?: boolean; description?: string;
   // UDP: valores de las etiquetas key-value asignadas ({udpDefId: value}).
@@ -31,10 +35,10 @@ const rec = (collection: string, id: string, op: 'upsert' | 'delete', payload?: 
   // NUNCA habilita mutaciones — el backend igual respondería 409; esto corta
   // antes y con un mensaje claro.
   if (useSessionStore.getState().openMode === 'readonly') {
-    throw new Error('El modelo está abierto en solo lectura: no admite cambios.');
+    throw new Error('The model is open read-only: it does not accept changes.');
   }
   const a = active();
-  if (!a) throw new Error('Se requiere un changeset activo para editar.');
+  if (!a) throw new Error('An active changeset is required to edit.');
   return csvc.recordChange(a, collection, id, op, payload);
 };
 
@@ -82,15 +86,40 @@ export const createColumn = (c: CanonicalColumn) => rec('canonical_columns', c.i
 // columna completa + los campos a cambiar). NO borra+recrea.
 export const updateColumn = (c: CanonicalColumn) => rec('canonical_columns', c.id, 'upsert', { ...c });
 export const deleteColumn = (id: string) => rec('canonical_columns', id, 'delete');
-// Marca la columna hija de una relación como FK (y PK si la relación es identificadora).
-export const markForeignKey = (col: CanonicalColumn, identifying: boolean) =>
-  rec('canonical_columns', col.id, 'upsert', { ...col, isForeignKey: true, isPrimaryKey: identifying ? true : col.isPrimaryKey });
+// Marca la columna hija de una relación como FK; si la relación es
+// identificadora, la FK entra a la PK del hijo (y una PK no es nullable).
+// `pkPosition` (opcional): posición AL FINAL de la llave cuando la tabla
+// maneja orden explícito — no pisa una posición ya existente (doc 19 §12b).
+export const markForeignKey = (col: CanonicalColumn, identifying: boolean, pkPosition?: number | null) =>
+  rec('canonical_columns', col.id, 'upsert', {
+    ...col, isForeignKey: true,
+    ...(identifying ? {
+      isPrimaryKey: true, isNullable: false,
+      ...(pkPosition != null && col.pkPosition == null ? { pkPosition } : {}),
+    } : {}),
+  });
+
+// Promueve la columna padre a PK: la relación "nace" de la PK del padre
+// (doc 19 — al jalar el wire, el extremo padre se vuelve PK automáticamente).
+export const markPrimaryKey = (col: CanonicalColumn, pkPosition?: number | null) =>
+  rec('canonical_columns', col.id, 'upsert', {
+    ...col, isPrimaryKey: true, isNullable: false,
+    ...(pkPosition != null && col.pkPosition == null ? { pkPosition } : {}),
+  });
 
 // ── Relationships (ER) — changeset-aware ──
+// v2 (doc 19): orientación EXPLÍCITA parent (lado PK) / child (lado FK) +
+// pares múltiples de columnas (PK compuesta) + roleName estilo Erwin por par.
 export type Cardinality = 'one' | 'many' | 'one-only' | 'zero-one' | 'one-many' | 'zero-many';
+export interface RelationshipPair {
+  parentColumnId: string;
+  childColumnId: string;
+  roleName?: string | null;
+}
 export interface Relationship {
-  id: string; sourceTableId: string; sourceColumnId: string; targetTableId: string; targetColumnId: string;
-  sourceCardinality: Cardinality; targetCardinality: Cardinality; identifying: boolean;
+  id: string; parentTableId: string; childTableId: string;
+  pairs: RelationshipPair[];
+  parentCardinality: Cardinality; childCardinality: Cardinality; identifying: boolean;
 }
 /** Con `tableId`, sólo las relaciones que tocan esa tabla (slice server-side
  *  en ambos modos) — el pool global de relaciones no se baja entero. */
@@ -104,13 +133,56 @@ export const createRelationship = (r: Omit<Relationship, 'id'>) => { const id = 
 export const updateRelationship = (r: Relationship) => rec('relationships', r.id, 'upsert', { ...r });
 export const deleteRelationship = (id: string) => rec('relationships', id, 'delete');
 
+// ── Uso de la tabla (V3, doc 19 §12b): dónde está referenciada ──
+export interface TableUsageRow {
+  canvasId: string; canvas: string;
+  folderId?: string | null; folder?: string | null;
+  projectId?: string | null; project?: string | null;
+}
+/** Canvases que referencian la tabla, con carpeta y proyecto. Con changeset
+ *  activo aplica el overlay del draft (canvases/membresías pendientes). */
+export const tableUsage = (tableId: string) => {
+  const a = active();
+  const qs = a ? `?changesetId=${encodeURIComponent(a)}` : '';
+  return apiGet<{ usage: TableUsageRow[]; total: number }>(
+    `${CATALOG}/tables/${encodeURIComponent(tableId)}/usage${qs}`);
+};
+
+// ── Links de la tabla en TODOS los canvases (Properties · Links) ──
+export interface TableLinkPair {
+  parentColumnId: string; parentColumnName: string;
+  childColumnId: string; childColumnName: string;
+  roleName?: string | null;
+}
+export interface TableLinkRow {
+  id: string;
+  parentTableId: string; parentTableName: string;
+  childTableId: string; childTableName: string;
+  parentCardinality: Cardinality; childCardinality: Cardinality;
+  identifying: boolean;
+  pairs: TableLinkPair[];
+  /** Canvases donde la relación es VISIBLE (contienen ambas tablas). */
+  canvases: { id: string; name: string }[];
+}
+/** Relaciones GLOBALES de la tabla (la tabla es canónica): además de las del
+ *  canvas abierto, las visibles sólo en otros canvases — con nombres resueltos
+ *  server-side (esas tablas/columnas no están en el diagrama actual). */
+export const tableLinks = (tableId: string) => {
+  const params = new URLSearchParams({ tableId });
+  const a = active();
+  if (a) params.set('changesetId', a);
+  return apiGet<{ links: TableLinkRow[]; total: number }>(
+    `${API_BASE}/api/relationships/links?${params.toString()}`);
+};
+
 // ── Impacto de eliminar una columna (spec 10 §8) ──
 export interface ImpactCanvas { id: string; name: string; }
 export interface RelationshipImpactRow {
   relId: string; otherTableId: string; otherTableName: string;
   otherColumnId: string; otherColumnName: string;
-  thisSide: 'source' | 'target';
-  sourceCardinality: Cardinality; targetCardinality: Cardinality;
+  thisSide: 'parent' | 'child';
+  parentCardinality: Cardinality; childCardinality: Cardinality;
+  identifying: boolean;
   canvases: ImpactCanvas[];
 }
 export interface RelationshipImpact { relationships: RelationshipImpactRow[]; total: number; }

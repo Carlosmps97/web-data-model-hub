@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 
 /**
  * UserMenu — avatar en el TopNav que abre un dropdown con la identidad REAL de
- * la sesión (auth propia) + Cerrar sesión. Cierra al click afuera / ESC.
+ * la sesión (auth propia) + Sign out. Cierra al click afuera / ESC.
  */
 export default function UserMenu() {
   const navigate = useNavigate();
@@ -60,7 +60,7 @@ export default function UserMenu() {
           <div className="dmh-usermenu-sep" />
           <button type="button" role="menuitem" className="dmh-usermenu-item" onClick={onLogout}>
             <LogOut size={16} strokeWidth={1.8} aria-hidden />
-            <span className="dmh-usermenu-item-name">Cerrar sesión</span>
+            <span className="dmh-usermenu-item-name">Sign out</span>
           </button>
         </div>
       )}

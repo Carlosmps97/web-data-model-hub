@@ -15,6 +15,10 @@ const fakeFlow = (nodes: FakeNode[]) => ({
   getNodes: () => nodes,
   getNode: (id: string) => nodes.find((n) => n.id === id),
   fitView: vi.fn().mockResolvedValue(true),
+  // focusTable ahora centra con setCenter (position+tamaño con fallback) en
+  // vez de fitView: con onlyRenderVisibleElements el nodo puede no estar medido.
+  getZoom: () => 1,
+  setCenter: vi.fn().mockResolvedValue(true),
 }) as never;
 
 beforeEach(() => {

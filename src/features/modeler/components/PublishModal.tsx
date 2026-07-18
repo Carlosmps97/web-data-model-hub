@@ -60,13 +60,16 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
 
     let cancelled = false;
     setUsersLoading(true);
-    listUsers()
+    // Solo usuarios que PUEDEN decidir (rol con `review.decide`): asignar a
+    // alguien sin ese permiso dejaba el request trabado (unanimidad imposible)
+    // y ese revisor recibía un 403 al intentar aprobar.
+    listUsers('review.decide')
       .then((rows) => {
         if (!cancelled) setUsers(rows);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        toast.error(err instanceof Error ? err.message : 'No se pudieron cargar los revisores.');
+        toast.error(err instanceof Error ? err.message : "Couldn't load the reviewers.");
       })
       .finally(() => {
         if (!cancelled) setUsersLoading(false);
@@ -98,10 +101,10 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
       // no dejar al usuario "editando" una versión bloqueada en silencio.
       const pub = await getPublished().catch(() => null);
       useSessionStore.getState().openModel({ mode: 'readonly', versionLabel: pub?.versionLabel ?? null });
-      toast.success('Request enviado — el canvas quedó en solo lectura (producción)');
+      toast.success('Request sent — the canvas is now read-only (production)');
       onClose();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'No se pudo enviar el request.');
+      toast.error(err instanceof Error ? err.message : "Couldn't send the request.");
       setSubmitting(false);
     }
   };
@@ -132,7 +135,7 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
       <div className="ppub">
         {!hasChangeset && (
           <div className="ppub-hint">
-            Abrí una versión editable (Open model) para publicar.
+            Open an editable version (Open model) to publish.
           </div>
         )}
 
@@ -140,7 +143,7 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
           <span className="ppub-label">Title</span>
           <input
             className="rd-input"
-            placeholder="Resumen del cambio (ej. Agrega tabla de transacciones)"
+            placeholder="Change summary (e.g. Adds transactions table)"
             value={title}
             disabled={!hasChangeset}
             onChange={(e) => setTitle(e.target.value)}
@@ -151,7 +154,7 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
           <span className="ppub-label">Description</span>
           <textarea
             className="rd-input ppub-textarea"
-            placeholder="Detalle de qué cambió y por qué (opcional)"
+            placeholder="Detail of what changed and why (optional)"
             value={description}
             disabled={!hasChangeset}
             rows={3}
@@ -162,10 +165,10 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
         <div className="ppub-field">
           <span className="ppub-label">
             Reviewers
-            <span className="ppub-req">· al menos 1</span>
+            <span className="ppub-req">· at least 1</span>
           </span>
           {usersLoading ? (
-            <div className="ppub-loading">Cargando revisores…</div>
+            <div className="ppub-loading">Loading reviewers…</div>
           ) : (
             <div className="ppub-reviewers">
               {users.map((u) => {
@@ -195,7 +198,7 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
 
         <div className="ppub-info">
           <Info size={15} strokeWidth={1.7} aria-hidden />
-          <span>Los revisores asignados deberán aprobar antes de publicar.</span>
+          <span>The assigned reviewers must approve before publishing.</span>
         </div>
       </div>
     </Dialog>

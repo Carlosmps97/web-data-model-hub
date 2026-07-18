@@ -65,27 +65,27 @@ describe('inferJoin — condición de JOIN inferida (F3, spec §3-5 D2)', () => 
     { id: 'c3', tableId: 't2', physicalName: 'ID', dataType: 'bigint', ordinal: 1 },
     { id: 'c4', tableId: 't3', physicalName: 'CUENTA_ID', dataType: 'bigint', ordinal: 0 },
   ];
-  const R = (id: string, sT: string, sC: string, tT: string, tC: string) =>
-    ({ id, sourceTableId: sT, sourceColumnId: sC, targetTableId: tT, targetColumnId: tC });
+  const R = (id: string, pT: string, pC: string, cT: string, cC: string) =>
+    ({ id, parentTableId: pT, childTableId: cT, pairs: [{ parentColumnId: pC, childColumnId: cC }] });
 
   it('2 fuentes con FK hija→padre: fuente ANTERIOR primero (t1.pk = t2.fk)', () => {
-    expect(inferJoin(['t1', 't2'], [R('r1', 't2', 'c2', 't1', 'c1')], COLS))
-      .toBe('t1.ID = t2.CLIENTE_ID');
-  });
-
-  it('orientación de la relación indistinta (declarada t1→t2, mismo resultado)', () => {
     expect(inferJoin(['t1', 't2'], [R('r1', 't1', 'c1', 't2', 'c2')], COLS))
       .toBe('t1.ID = t2.CLIENTE_ID');
   });
 
+  it('orientación de la relación indistinta (padre/hijo invertidos, mismo resultado)', () => {
+    expect(inferJoin(['t1', 't2'], [R('r1', 't2', 'c2', 't1', 'c1')], COLS))
+      .toBe('t1.ID = t2.CLIENTE_ID');
+  });
+
   it('3 fuentes encadenadas: condiciones unidas con AND', () => {
-    const rels = [R('r1', 't2', 'c2', 't1', 'c1'), R('r2', 't3', 'c4', 't2', 'c3')];
+    const rels = [R('r1', 't1', 'c1', 't2', 'c2'), R('r2', 't2', 'c3', 't3', 'c4')];
     expect(inferJoin(['t1', 't2', 't3'], rels, COLS))
       .toBe('t1.ID = t2.CLIENTE_ID AND t2.ID = t3.CUENTA_ID');
   });
 
   it('sin relación entre las fuentes ⇒ cadena vacía (el editor exige joinOverride)', () => {
-    expect(inferJoin(['t1', 't3'], [R('r1', 't2', 'c2', 't1', 'c1')], COLS)).toBe('');
+    expect(inferJoin(['t1', 't3'], [R('r1', 't1', 'c1', 't2', 'c2')], COLS)).toBe('');
   });
 
   it('menos de 2 fuentes ⇒ cadena vacía', () => {
@@ -94,7 +94,7 @@ describe('inferJoin — condición de JOIN inferida (F3, spec §3-5 D2)', () => 
   });
 
   it('ids de columna desconocidos degradan al id crudo (no revienta)', () => {
-    expect(inferJoin(['t1', 't2'], [R('r1', 't2', 'cx', 't1', 'cy')], COLS))
+    expect(inferJoin(['t1', 't2'], [R('r1', 't1', 'cy', 't2', 'cx')], COLS))
       .toBe('t1.cy = t2.cx');
   });
 });
@@ -110,7 +110,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
       { id: 'c2', tableId: 't2', physicalName: 'CLIENTE_ID', dataType: 'bigint', ordinal: 0 },
       { id: 'c3', tableId: 't2', physicalName: 'SALDO', dataType: 'decimal', ordinal: 1 },
     ],
-    relationships: [{ id: 'r1', sourceTableId: 't2', sourceColumnId: 'c2', targetTableId: 't1', targetColumnId: 'c1' }],
+    relationships: [{ id: 'r1', parentTableId: 't1', childTableId: 't2', pairs: [{ parentColumnId: 'c1', childColumnId: 'c2' }] }],
     modelName: 'm',
   };
   const V: DdlView = {
@@ -145,7 +145,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
 
   it('sin relación ni joinOverride ⇒ fallback explícito 1 = 1 comentado', () => {
     const ddl = databricksDdl({ ...TWO, relationships: [], views: [V] }, { ...DEF, includeViews: true });
-    expect(ddl).toContain('ON 1 = 1 /* sin relación modelada entre las fuentes */');
+    expect(ddl).toContain('ON 1 = 1 /* no modeled relationship between the sources */');
   });
 
   it('UNA fuente: sin alias ni cualificación (regresión legacy); CAST sin alias conserva el nombre', () => {
@@ -206,7 +206,7 @@ describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', ()
       { id: 'c2', tableId: 't2', physicalName: 'ClienteId', dataType: 'bigint', ordinal: 0, isForeignKey: true },
     ],
     relationships: [
-      { id: 'r1', sourceTableId: 't2', sourceColumnId: 'c2', targetTableId: 't1', targetColumnId: 'c1' },
+      { id: 'r1', parentTableId: 't1', childTableId: 't2', pairs: [{ parentColumnId: 'c1', childColumnId: 'c2' }] },
     ],
     modelName: 'm',
   };
@@ -270,7 +270,7 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
       { id: 'c3', tableId: 't2', physicalName: 'Saldo', dataType: 'decimal', ordinal: 1 },
     ],
     relationships: [
-      { id: 'r1', sourceTableId: 't2', sourceColumnId: 'c2', targetTableId: 't1', targetColumnId: 'c1' },
+      { id: 'r1', parentTableId: 't1', childTableId: 't2', pairs: [{ parentColumnId: 'c1', childColumnId: 'c2' }] },
     ],
     modelName: 'm',
     views: [{
@@ -400,5 +400,38 @@ describe('databricksDdl — tipos complejos verbatim (F4 #6)', () => {
   it('los tipos simples siguen mapeando igual que antes', () => {
     expect(databricksDdl(complex('varchar'), DEF)).toContain('`payload` STRING');
     expect(databricksDdl(complex('decimal(10,2)'), DEF)).toContain('`payload` DECIMAL(10,2)');
+  });
+});
+
+describe('PRIMARY KEY compuesta — orden de la LLAVE (pkPosition), no orden físico (doc 19 §12b)', () => {
+  it('ordena el constraint por pkPosition aunque el ordinal diga lo contrario', () => {
+    const input: DatabricksDdlInput = {
+      tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
+      columns: [
+        { id: 'a', tableId: 't1', physicalName: 'FEC', dataType: 'date', ordinal: 4, isPrimaryKey: true, pkPosition: 3 },
+        { id: 'b', tableId: 't1', physicalName: 'COD', dataType: 'string', ordinal: 6, isPrimaryKey: true, pkPosition: 2 },
+        { id: 'c', tableId: 't1', physicalName: 'OTRA', dataType: 'string', ordinal: 0 },
+      ],
+      relationships: [],
+      modelName: 'm',
+    };
+    const ddl = databricksDdl(input, DEF);
+    // columnas del CREATE en orden físico (ordinal)…
+    expect(ddl.indexOf('`OTRA`')).toBeLessThan(ddl.indexOf('`FEC` DATE'));
+    // …pero el PRIMARY KEY en orden de llave (COD antes que FEC).
+    expect(ddl).toContain('PRIMARY KEY (`COD`, `FEC`)');
+  });
+
+  it('PK marcada a mano (sin pkPosition) cae al orden físico', () => {
+    const input: DatabricksDdlInput = {
+      tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
+      columns: [
+        { id: 'a', tableId: 't1', physicalName: 'B2', dataType: 'string', ordinal: 2, isPrimaryKey: true },
+        { id: 'b', tableId: 't1', physicalName: 'A1', dataType: 'string', ordinal: 1, isPrimaryKey: true },
+      ],
+      relationships: [],
+      modelName: 'm',
+    };
+    expect(databricksDdl(input, DEF)).toContain('PRIMARY KEY (`A1`, `B2`)');
   });
 });

@@ -5,6 +5,7 @@ import * as gov from '@/features/governance/services/governance.service';
 import type { CanonicalTable } from '@/features/governance/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
 import { apiErrorMessage } from '@/services/http';
+import SchemaSelect from './SchemaSelect';
 
 type Mode = 'blank' | 'import';
 
@@ -31,14 +32,18 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [error, setError] = useState<string | null>(null);
 
   // Auto-physicalize (scope 'table') con debounce, salvo override manual.
+  // `alive` descarta la respuesta si el efecto ya se limpió (el usuario siguió
+  // tipeando o tomó el override): sin esto una respuesta VIEJA que llegara
+  // tarde pisaba el físico vigente con el derivado de un lógico anterior.
   useEffect(() => {
     if (physEdited) return;
     const t = logical.trim();
     if (!t) { setPhysical(''); return; }
+    let alive = true;
     const h = setTimeout(() => {
-      gov.physicalize(t, 'table').then((r) => { if (!physEdited) setPhysical(r.physical); }).catch(() => {});
+      gov.physicalize(t, 'table').then((r) => { if (alive) setPhysical(r.physical); }).catch(() => {});
     }, 300);
-    return () => clearTimeout(h);
+    return () => { alive = false; clearTimeout(h); };
   }, [logical, physEdited]);
 
   const submitBlank = async () => {
@@ -84,10 +89,10 @@ export default function NewTableModal({ onClose, onCreate }: {
     return () => { alive = false; clearTimeout(h); };
   }, [mode, q]);
 
-  const schemas = useMemo(
-    () => Array.from(new Set(tables.map((t) => t.schema).filter(Boolean))) as string[],
-    [tables],
-  );
+  // Filtro por esquema: opciones del catálogo real de esquemas (doc 18) —
+  // antes se derivaba client-side de la página de tablas visible (incompleto).
+  const schemaPool = useModelerStore((s) => s.schemas);
+  const schemas = useMemo(() => schemaPool.map((s) => s.name), [schemaPool]);
   const usageOf = (id: string) => (subjectAreas ?? []).filter((sa) => (sa.tableIds ?? []).includes(id)).length;
   // El filtro por schema aplica sobre la página traída (el server ya acotó por nombre).
   const visible = useMemo(
@@ -146,8 +151,8 @@ export default function NewTableModal({ onClose, onCreate }: {
           </div>
           <div style={field}>
             <label style={lbl}>Schema</label>
-            <input className="rd-input rd-mono" placeholder="schema_name" value={schema}
-              onChange={(e) => setSchema(e.target.value)} style={{ width: '100%' }} />
+            {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
+            <SchemaSelect value={schema} onChange={setSchema} style={{ width: '100%' }} />
           </div>
           {error && (
             <div className="rd-small" role="alert" style={{ color: 'var(--error, #C4314B)', marginTop: 2 }}>

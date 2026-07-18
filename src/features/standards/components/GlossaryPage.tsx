@@ -115,14 +115,14 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   // igual re-valida al guardar: esto es cortesía de UX.
   const validateDraft = async (t: Draft) => {
     const term = t.term.trim();
-    if (!term) { toast.error('Escribí el término antes de validar'); return; }
+    if (!term) { toast.error('Type the term before validating'); return; }
     setChecking(t.id);
     try {
       const v = await validateTerm(term, scope);
       if (v.ok) toast.success(`'${term}' no tiene conflictos`);
       else setConflicts({ term, lines: conflictLines(v) });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo validar');
+      toast.error(e instanceof Error ? e.message : "Couldn't validate");
     } finally { setChecking(null); }
   };
 
@@ -132,7 +132,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
       toast.success(t.locked ? `'${t.term}' desbloqueado` : `'${t.term}' bloqueado`);
       onApplied();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo cambiar el bloqueo');
+      toast.error(e instanceof Error ? e.message : "Couldn't toggle the lock");
     }
   };
 
@@ -169,7 +169,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
       toast.success(`Standards applied · ${v.label} · ${v.impact.columns} names re-derived`);
       setEditing(false); setConfirm(false); onApplied();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo aplicar');
+      toast.error(e instanceof Error ? e.message : "Couldn't apply");
     } finally { setBusy(false); }
   };
 
@@ -256,14 +256,14 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
           return (
             <div key={t.id} style={{ display: 'grid', gridTemplateColumns: gridCols, alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #F2F4F8', fontSize: 13, background: locked ? '#F1F3F6' : undefined }}>
               {editing && !locked ? <>
-                <input className="rd-input" style={inp} value={t.term} onChange={(e) => upd(setTerms, t.id, { term: e.target.value })} placeholder="término" />
+                <input className="rd-input" style={inp} value={t.term} onChange={(e) => upd(setTerms, t.id, { term: e.target.value })} placeholder="term" />
                 <input className="rd-input" style={{ ...inp, fontFamily: 'var(--mono, monospace)' }} value={t.abbrev} onChange={(e) => upd(setTerms, t.id, { abbrev: e.target.value })} placeholder="ABR" />
                 <select className="rd-input" style={inp} value={t.wordType ?? 'prime'} onChange={(e) => upd(setTerms, t.id, { wordType: e.target.value as WordType })}>
                   <option value="prime">prime</option><option value="class">class</option><option value="modifier">modifier</option>
                 </select>
                 <div style={{ display: 'flex', gap: 6 }}>
                   {t._new && (
-                    <button onClick={() => validateDraft(t)} disabled={checking === t.id} title="Validar contra glosario y catálogo"
+                    <button onClick={() => validateDraft(t)} disabled={checking === t.id} title="Validate against glossary and catalog"
                       style={{ width: 28, height: 28, border: '1px solid #D4E0FF', background: '#EAF0FF', borderRadius: 7, color: '#2E5BFF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {checking === t.id ? <span className="rd-spin" /> : <ShieldCheck size={13} />}
                     </button>
@@ -278,7 +278,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
                 <div><span style={{ fontSize: 11, fontWeight: 600, color: locked ? '#9AA3B2' : tone.c, background: locked ? '#E7EAEF' : tone.b, borderRadius: 999, padding: '3px 10px' }}>{t.wordType ?? 'prime'}</span></div>
                 {editing && locked && <div />}
                 {!editing && isAdmin && (
-                  <button onClick={() => toggleLock(t)} title={locked ? `Bloqueado por ${t.lockedBy ?? 'ADMIN'} — desbloquear` : 'Bloquear término'}
+                  <button onClick={() => toggleLock(t)} title={locked ? `Locked by ${t.lockedBy ?? 'ADMIN'} — unlock` : 'Lock term'}
                     style={{ width: 28, height: 28, border: '1px solid #E6EAF0', background: '#fff', borderRadius: 7, color: locked ? '#9A6B00' : '#8A93A5', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {locked ? <Lock size={13} /> : <Unlock size={13} />}
                   </button>
@@ -287,7 +287,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
             </div>
           );
         })}
-        {shown.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9AA3B2' }}>No hay términos que coincidan.</div>}
+        {shown.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9AA3B2' }}>No matching terms.</div>}
       </div>
 
       {/* footer edit actions */}
@@ -302,7 +302,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
 
       {/* confirm dialog (15d) */}
       {confirm && (
-        <div style={backdrop} onClick={() => !busy && setConfirm(false)}>
+        <div style={backdrop}>
           <div style={{ width: 560, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
               <div style={{ width: 42, height: 42, borderRadius: 11, background: '#EAF0FF', color: '#2E5BFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UploadCloud size={21} /></div>
@@ -315,7 +315,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
                 <div key={`${k}-${i}`} style={{ fontSize: 13, color: '#1A2B4A', padding: '4px 0' }}>· <span style={{ color: k === 'removed' ? '#C0392B' : k === 'added' ? '#0E8C6A' : '#56607A', fontWeight: 600 }}>{k}</span> {s}</div>
               )))}
               <div style={{ display: 'flex', gap: 12, background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '12px 15px', marginTop: 14, fontSize: 12.5, color: '#7A6220' }}>
-                Se re-derivan los nombres físicos afectados en todo el catálogo. Esto no se puede deshacer parcialmente (pero podés hacer rollback de la versión).
+                The affected physical names are re-derived across the whole catalog. This cannot be partially undone (but you can roll back the version).
               </div>
             </div>
             <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}>
@@ -329,13 +329,13 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
 
       {/* dialog de conflictos de validación (F2 #1) */}
       {conflicts && (
-        <div style={backdrop} onClick={() => setConflicts(null)}>
+        <div style={backdrop}>
           <div style={{ width: 560, maxHeight: '78vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
               <div style={{ width: 42, height: 42, borderRadius: 11, background: '#FBEEF0', color: '#D6455D', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ShieldCheck size={21} /></div>
               <div style={{ flex: 1 }}>
-                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>El término &lsquo;{conflicts.term}&rsquo; tiene conflictos</h2>
-                <p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>Ya existe en el glosario o aparece como frase completa en nombres lógicos del catálogo. No se puede aplicar.</p>
+                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>The term &lsquo;{conflicts.term}&rsquo; has conflicts</h2>
+                <p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>It already exists in the glossary or appears as a full phrase in catalog logical names. It cannot be applied.</p>
               </div>
               <button onClick={() => setConflicts(null)} style={iconClose}><X size={13} /></button>
             </div>

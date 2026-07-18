@@ -2,13 +2,15 @@ import { useState } from 'react';
 import { Tags } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import UdpAssign from './UdpAssign';
-import { setSubjectAreaUdp, type SubjectArea } from '@/features/modeler/services/modeler.service';
+import type { SubjectArea } from '@/features/modeler/services/modeler.service';
+import { setSubjectAreaUdp } from '@/features/modeler/services/structure.service';
 import { useModelerStore } from '@/store/useModelerStore';
 
 /**
  * "Model properties" (F5): asigna los UDP level='canvas' al Modelo de Datos
- * (subject area). Mutación DIRECTA — PUT /api/subject-areas/{id}/udp, sin
- * changeset (mismo régimen que layout/drawings). Al guardar refleja el mapa
+ * (subject area). Va por la capa de ESTRUCTURA changeset-aware (doc 16): en
+ * sesión de edición se registra al changeset; sin changeset, PUT directo
+ * (mismo régimen que layout/drawings). Al guardar refleja el mapa
  * en el diagrama en memoria (sin refetch).
  */
 export default function ModelPropertiesModal({ subjectArea, canEdit, onClose, pushToast }: {
@@ -33,7 +35,7 @@ export default function ModelPropertiesModal({ subjectArea, canEdit, onClose, pu
       pushToast('Model properties saved');
       onClose();
     } catch (e) {
-      pushToast(e instanceof Error && e.message ? e.message : 'No se pudo guardar', 'err');
+      pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err');
     } finally { setBusy(false); }
   };
 

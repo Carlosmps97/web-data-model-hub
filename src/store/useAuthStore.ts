@@ -70,7 +70,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const user = await auth.fetchMe();
       // /me degrada al Principal básico si el actor no está registrado; sin
       // `permissions` no es una sesión válida de la auth propia.
-      if (!user || !('permissions' in user)) throw new Error('sesión inválida');
+      if (!user || !('permissions' in user)) throw new Error('invalid session');
       mirror(user);
       set({ user, status: 'authed' });
     } catch {

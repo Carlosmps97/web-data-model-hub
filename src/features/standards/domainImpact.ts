@@ -8,7 +8,7 @@ import type { DomainImpact, DomainImpactTable } from '@/services/naming.service'
  *  GLOBALES: willUpdate (las columnas que realmente cambian), totalTables y
  *  modelsAffected del impact SIN filtro q. */
 export function impactWarning(i: DomainImpact): string {
-  return `Este cambio afectará ${i.willUpdate} columnas en ${i.totalTables} tablas de ${i.modelsAffected} modelos de datos`;
+  return `This change will affect ${i.willUpdate} columns in ${i.totalTables} tables across ${i.modelsAffected} data models`;
 }
 
 /** Filas visibles según el toggle "ver columnas con override": ON = solo

@@ -113,6 +113,8 @@ export interface DdlColumn {
   dataType: string;
   ordinal: number;
   isPrimaryKey?: boolean;
+  /** Posición dentro de la llave (0-based) — ordena el PRIMARY KEY(...). */
+  pkPosition?: number | null;
   isForeignKey?: boolean;
   isNullable?: boolean;
   /** Column marked as a partition key. */
@@ -121,14 +123,18 @@ export interface DdlColumn {
   description?: string;
 }
 
-/** Minimal relationship shape (subset of governance `Relationship`). Used to
- *  emit `FOREIGN KEY … REFERENCES` constraints. */
+/** Minimal relationship shape (subset of governance `Relationship`, v2 doc 19:
+ *  parent = lado PK, child = lado FK, con pares múltiples). Used to emit
+ *  `FOREIGN KEY … REFERENCES` constraints (compuestas incluidas). */
+export interface DdlRelationshipPair {
+  parentColumnId: string;
+  childColumnId: string;
+}
 export interface DdlRelationship {
   id: string;
-  sourceTableId: string;
-  sourceColumnId: string;
-  targetTableId: string;
-  targetColumnId: string;
+  parentTableId: string;
+  childTableId: string;
+  pairs: DdlRelationshipPair[];
 }
 
 /** Minimal view shape para emitir `CREATE VIEW` (subconjunto de la View canónica). */
@@ -274,7 +280,12 @@ function tableDDL(
 
   const inner: string[] = [...colLines];
   if (o.includeKeys) {
-    const pks = ordered.filter((c) => c.isPrimaryKey).map((c) => ident(c.physicalName));
+    // El PRIMARY KEY(...) va en el ORDEN DE LA LLAVE (pkPosition), que es
+    // independiente del orden físico de columnas — convención Erwin (doc 19
+    // §12b). Sin pkPosition cae al ordinal (sort estable sobre `ordered`).
+    const pks = ordered.filter((c) => c.isPrimaryKey)
+      .sort((a, b) => (a.pkPosition ?? Number.MAX_SAFE_INTEGER) - (b.pkPosition ?? Number.MAX_SAFE_INTEGER))
+      .map((c) => ident(c.physicalName));
     if (pks.length) inner.push(`  CONSTRAINT ${ident(`pk_${t.physicalName}`)} PRIMARY KEY (${pks.join(', ')})`);
   }
 
@@ -304,19 +315,22 @@ function tableDDL(
   out += ';\n';
 
   // FK constraints (added after the table; Databricks supports informational FKs).
+  // v2 (doc 19): el HIJO (childTableId) es quien tiene la FK; una relación con
+  // pares múltiples emite UNA constraint compuesta con las listas de columnas.
   if (o.includeKeys) {
     rels
-      .filter((r) => r.sourceTableId === t.id || r.targetTableId === t.id)
-      // child = source table holds the FK column referencing the parent (target).
-      .filter((r) => r.sourceTableId === t.id)
+      .filter((r) => r.childTableId === t.id && r.pairs.length)
       .forEach((r) => {
-        const fkCol = cols.find((c) => c.id === r.sourceColumnId);
-        if (!fkCol) return;
-        const parent = tableById.get(r.targetTableId);
-        const parentRef = parent ? qualify(parent, o) : ident(r.targetTableId);
-        const parentCol = colName.get(r.targetColumnId) ?? r.targetColumnId;
-        out += `ALTER TABLE ${full} ADD CONSTRAINT ${ident(`fk_${t.physicalName}_${fkCol.physicalName}`)}`
-          + ` FOREIGN KEY (${ident(fkCol.physicalName)}) REFERENCES ${parentRef}(${ident(parentCol)});\n`;
+        const fkCols = r.pairs
+          .map((p) => cols.find((c) => c.id === p.childColumnId))
+          .filter((c): c is DdlColumn => !!c);
+        if (fkCols.length !== r.pairs.length) return; // par con columna fuera del set exportado
+        const parent = tableById.get(r.parentTableId);
+        const parentRef = parent ? qualify(parent, o) : ident(r.parentTableId);
+        const parentCols = r.pairs.map((p) => colName.get(p.parentColumnId) ?? p.parentColumnId);
+        out += `ALTER TABLE ${full} ADD CONSTRAINT ${ident(`fk_${t.physicalName}_${fkCols[0].physicalName}`)}`
+          + ` FOREIGN KEY (${fkCols.map((c) => ident(c.physicalName)).join(', ')})`
+          + ` REFERENCES ${parentRef}(${parentCols.map((c) => ident(c)).join(', ')});\n`;
       });
   }
 
@@ -349,15 +363,18 @@ export function inferJoin(
     const cur = sourceTableIds[k];
     const prev = new Set(sourceTableIds.slice(0, k));
     const rel = relationships.find(
-      (r) => (r.sourceTableId === cur && prev.has(r.targetTableId))
-        || (r.targetTableId === cur && prev.has(r.sourceTableId)),
+      (r) => (r.childTableId === cur && prev.has(r.parentTableId))
+        || (r.parentTableId === cur && prev.has(r.childTableId)),
     );
     if (!rel) continue;
-    // Extremo de la fuente ANTERIOR primero (se lee izquierda→derecha).
-    const [aTid, aCol, bTid, bCol] = rel.sourceTableId === cur
-      ? [rel.targetTableId, rel.targetColumnId, rel.sourceTableId, rel.sourceColumnId]
-      : [rel.sourceTableId, rel.sourceColumnId, rel.targetTableId, rel.targetColumnId];
-    conds.push(`${alias.get(aTid)}.${colName.get(aCol) ?? aCol} = ${alias.get(bTid)}.${colName.get(bCol) ?? bCol}`);
+    // TODOS los pares de la relación entran al ON (FK compuesta = AND de pares).
+    for (const p of rel.pairs) {
+      // Extremo de la fuente ANTERIOR primero (se lee izquierda→derecha).
+      const [aTid, aCol, bTid, bCol] = rel.childTableId === cur
+        ? [rel.parentTableId, p.parentColumnId, rel.childTableId, p.childColumnId]
+        : [rel.childTableId, p.childColumnId, rel.parentTableId, p.parentColumnId];
+      conds.push(`${alias.get(aTid)}.${colName.get(aCol) ?? aCol} = ${alias.get(bTid)}.${colName.get(bCol) ?? bCol}`);
+    }
   }
   return conds.join(' AND ');
 }
@@ -413,7 +430,7 @@ export function viewDDL(
   else {
     const on = (v.joinOverride ?? '').trim()
       || inferJoin(srcIds, relationships, columns)
-      || '1 = 1 /* sin relación modelada entre las fuentes */';
+      || '1 = 1 /* no modeled relationship between the sources */';
     from = `${refOf(srcIds[0])} t1\n`
       + srcIds.slice(1).map((id) => `  INNER JOIN ${refOf(id)} ${aliasOf.get(id)}`).join('\n')
       + `\n  ON ${on}`;
@@ -474,7 +491,7 @@ export function databricksDdl(input: DatabricksDdlInput, o: DatabricksDdlOptions
   const colName = new Map(input.columns.map((c) => [c.id, c.physicalName]));
   // Only relationships fully inside the export set produce constraints.
   const ids = new Set(tables.map((t) => t.id));
-  const rels = input.relationships.filter((r) => ids.has(r.sourceTableId) && ids.has(r.targetTableId));
+  const rels = input.relationships.filter((r) => ids.has(r.parentTableId) && ids.has(r.childTableId));
 
   const header = `-- ${input.modelName ?? 'model'} · Databricks · ${tables.length} table(s)\n`
     + `-- Generated by Data Model Hub\n`;

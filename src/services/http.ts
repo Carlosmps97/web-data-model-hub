@@ -97,7 +97,7 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
   } catch (err) {
     // Red caída, timeout, aborto, DNS fail, etc.
     if (timeout.aborted && !(signal?.aborted)) {
-      throw new ApiError(`El servidor no respondió en ${DEFAULT_TIMEOUT_MS / 1000}s — reintentá en un momento.`, 0);
+      throw new ApiError(`The server didn't respond within ${DEFAULT_TIMEOUT_MS / 1000}s — try again in a moment.`, 0);
     }
     throw new ApiError(err instanceof Error ? err.message : 'Network error', 0);
   }

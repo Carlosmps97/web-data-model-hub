@@ -63,10 +63,10 @@ export const getAudit = (limit = 200) => apiGet<AuditEntry[]>(`${ADMIN}/audit?li
 /** Etiquetas legibles de cada permiso (filas de la matriz, pantalla 14 + R10). */
 export const PERMISSION_LABELS: Record<string, string> = {
   'model.view': 'Ver modelo / Canvas',
-  'model.edit': 'Crear / editar tablas',
+  'model.edit': 'Create / edit tables',
   'review.decide': 'Aprobar / rechazar solicitudes',
-  'publish': 'Publicar a producción',
+  'publish': 'Publish to production',
   'export': 'Exportar DDL / metadata',
-  'standards.edit': 'Editar Data Standards',
-  'admin.manage': 'Administrar usuarios y permisos',
+  'standards.edit': 'Edit Data Standards',
+  'admin.manage': 'Manage users and permissions',
 };

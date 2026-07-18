@@ -87,20 +87,20 @@ export default function FilterBuilder({ group, catalog, from, onChange, depth = 
               style={{ height: 26, padding: '0 11px', border: 'none', background: group.op === o ? '#2E5BFF' : '#fff', color: group.op === o ? '#fff' : '#48526A', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', textTransform: 'uppercase' }}>{o}</button>
           ))}
         </div>
-        <span style={{ fontSize: 11.5, color: '#9AA3B2' }}>de estas condiciones</span>
+        <span style={{ fontSize: 11.5, color: '#9AA3B2' }}>of these conditions</span>
       </div>
       {group.conditions.map((c, i) => (
         isGroup(c)
           ? <div key={i} style={{ marginBottom: 6 }}><FilterBuilder group={c} catalog={catalog} from={from} depth={depth + 1}
               onChange={(g) => set(group.conditions.map((x, j) => (j === i ? g : x)))} />
-              <button onClick={() => set(group.conditions.filter((_, j) => j !== i))} style={{ marginTop: 4, border: 'none', background: 'transparent', color: '#C0392B', fontSize: 11.5, cursor: 'pointer' }}>quitar grupo</button></div>
+              <button onClick={() => set(group.conditions.filter((_, j) => j !== i))} style={{ marginTop: 4, border: 'none', background: 'transparent', color: '#C0392B', fontSize: 11.5, cursor: 'pointer' }}>remove group</button></div>
           : <ConditionRow key={i} cond={c} catalog={catalog} from={from}
               onChange={(nc) => set(group.conditions.map((x, j) => (j === i ? nc : x)))}
               onRemove={() => set(group.conditions.filter((_, j) => j !== i))} />
       ))}
       <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-        <button onClick={addCond} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #DCE1EA', background: '#fff', borderRadius: 7, height: 28, padding: '0 10px', fontSize: 12, cursor: 'pointer', color: '#48526A' }}><Plus size={12} />Condición</button>
-        {depth < 2 && <button onClick={addGroup} style={{ border: '1px solid #DCE1EA', background: '#fff', borderRadius: 7, height: 28, padding: '0 10px', fontSize: 12, cursor: 'pointer', color: '#8A93A5' }}>+ grupo</button>}
+        <button onClick={addCond} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, border: '1px solid #DCE1EA', background: '#fff', borderRadius: 7, height: 28, padding: '0 10px', fontSize: 12, cursor: 'pointer', color: '#48526A' }}><Plus size={12} />Condition</button>
+        {depth < 2 && <button onClick={addGroup} style={{ border: '1px solid #DCE1EA', background: '#fff', borderRadius: 7, height: 28, padding: '0 10px', fontSize: 12, cursor: 'pointer', color: '#8A93A5' }}>+ group</button>}
       </div>
     </div>
   );

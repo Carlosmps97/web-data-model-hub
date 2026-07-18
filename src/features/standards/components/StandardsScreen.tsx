@@ -30,7 +30,7 @@ export default function StandardsScreen() {
 
   useEffect(() => {
     setLoading(true);
-    reload().catch(() => toast.error('No se pudo cargar Data Standards')).finally(() => setLoading(false));
+    reload().catch(() => toast.error("Couldn't load Data Standards")).finally(() => setLoading(false));
   }, [reload]);
 
   const current = versions[0];
@@ -40,7 +40,7 @@ export default function StandardsScreen() {
       const v = await rollbackStandards(target.seq);
       toast.success(`Rolled back to ${target.label} · new ${v.label}`);
       setRollbackTarget(null); setHistory(false); await reload();
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo revertir'); } finally { setBusy(false); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't revert"); } finally { setBusy(false); }
   };
 
   const subTab = (id: Tab, label: string) => (
@@ -77,7 +77,7 @@ export default function StandardsScreen() {
       {/* footer: última versión + historial */}
       {!loading && current && (
         <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '12px 24px', borderTop: '1px solid #EAEDF2', background: '#fff' }}>
-          <span style={{ fontSize: 12, color: '#8A93A5' }}>Última versión <strong style={{ color: '#56607A' }}>{current.label}</strong> · {current.author}</span>
+          <span style={{ fontSize: 12, color: '#8A93A5' }}>Latest version <strong style={{ color: '#56607A' }}>{current.label}</strong> · {current.author}</span>
           <span style={{ flex: 1 }} />
           <button onClick={() => setHistory(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 34, padding: '0 14px', border: '1px solid #DDE2EC', background: '#fff', color: '#3A4658', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}><History size={14} />Version history</button>
         </div>
@@ -85,11 +85,11 @@ export default function StandardsScreen() {
 
       {/* 15f · historial */}
       {history && (
-        <div style={backdrop} onClick={() => setHistory(false)}>
+        <div style={backdrop}>
           <div style={{ width: 740, maxHeight: 800, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', gap: 14, padding: '22px 24px 16px', borderBottom: '1px solid #EEF1F6' }}>
               <div style={{ width: 42, height: 42, borderRadius: 11, background: '#EAF0FF', color: '#2E5BFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><History size={21} /></div>
-              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Standard change history</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>Todas las versiones de Glossary, UDP + Parent Domains, más reciente primero. Cada una aplicada puede revertirse.</p></div>
+              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Standard change history</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>All versions of Glossary, UDP + Parent Domains, newest first. Each applied one can be rolled back.</p></div>
               <button onClick={() => setHistory(false)} style={iconClose}><X size={13} /></button>
             </div>
             <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '6px 24px 8px' }}>
@@ -115,7 +115,7 @@ export default function StandardsScreen() {
               ))}
             </div>
             <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 24px 18px', borderTop: '1px solid #EEF1F6' }}>
-              <span style={{ flex: 1, fontSize: 11.5, color: '#9AA3B2' }}>El rollback re-deriva nombres y tipos a la versión elegida y se registra como una versión nueva.</span>
+              <span style={{ flex: 1, fontSize: 11.5, color: '#9AA3B2' }}>Rollback re-derives names and types to the chosen version and is recorded as a new version.</span>
               <button onClick={() => setHistory(false)} style={btnGhost}>Close</button>
             </div>
           </div>
@@ -124,14 +124,14 @@ export default function StandardsScreen() {
 
       {/* 15g · rollback confirm */}
       {rollbackTarget && (
-        <div style={backdrop} onClick={() => !busy && setRollbackTarget(null)}>
+        <div style={backdrop}>
           <div style={{ width: 520, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
               <div style={{ width: 42, height: 42, borderRadius: 11, background: '#FBEEF0', color: '#D6455D', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><TriangleAlert size={20} /></div>
-              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Roll back to {rollbackTarget.label}?</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5', lineHeight: 1.5 }}>Restaura el estado de estándares de <strong>{rollbackTarget.label}</strong> y re-deriva los nombres/tipos afectados. Se registra como una versión nueva.</p></div>
+              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Roll back to {rollbackTarget.label}?</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5', lineHeight: 1.5 }}>Restores the standards state of <strong>{rollbackTarget.label}</strong> and re-derives the affected names/types. Recorded as a new version.</p></div>
             </div>
             <div style={{ padding: '16px 24px', fontSize: 12.5, color: '#7A6220', background: '#FFF9EE', borderTop: '1px solid #F1E2BD', borderBottom: '1px solid #F1E2BD' }}>
-              Las columnas editadas desde entonces conservan sus nombres/tipos más nuevos si tienen override.
+              Columns edited since then keep their newer names/types if they have an override.
             </div>
             <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}>
               <span style={{ flex: 1 }} /><button onClick={() => setRollbackTarget(null)} disabled={busy} style={btnGhost}>Cancel</button>
@@ -158,7 +158,7 @@ function Overview({ snapshot, versions, canEdit, meName, onGo, onHistory }: {
 
         <div style={{ display: 'flex', gap: 12, background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 12, padding: '13px 16px', marginBottom: 22, fontSize: 12.5, color: '#7A6220', lineHeight: 1.5 }}>
           <TriangleAlert size={18} color="#B98600" style={{ flex: 'none', marginTop: 1 }} />
-          <div><strong style={{ color: '#8A6D1F' }}>Scope global.</strong> Editar una regla de naming o un dominio re-deriva nombres físicos y tipos de dato en <strong>toda tabla de todo proyecto</strong> — no está acotado a un modelo. Por eso los estándares viven en su propio módulo, separados del canvas y restringidos.</div>
+          <div><strong style={{ color: '#8A6D1F' }}>Global scope.</strong> Editing a naming rule or a domain re-derives physical names and data types in <strong>every table of every project</strong> — it is not scoped to one model. That is why standards live in their own module, separate from the canvas and restricted.</div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 26 }}>
@@ -186,15 +186,15 @@ function Overview({ snapshot, versions, canEdit, meName, onGo, onHistory }: {
                 <span style={{ fontSize: 10.5, fontWeight: 600, color: v.kind === 'baseline' ? '#8A93A5' : '#0E8C6A', background: v.kind === 'baseline' ? '#F2F4F8' : '#E4F6EF', borderRadius: 999, padding: '3px 9px', flex: 'none' }}>{v.kind === 'baseline' ? 'Baseline' : 'Applied'}</span>
               </div>
             ))}
-            {recent.length === 0 && <div style={{ fontSize: 12.5, color: '#9AA3B2', padding: '8px 0' }}>Sin cambios todavía.</div>}
+            {recent.length === 0 && <div style={{ fontSize: 12.5, color: '#9AA3B2', padding: '8px 0' }}>No changes yet.</div>}
           </div>
           <div style={{ background: '#fff', border: '1px solid #E6EAF0', borderRadius: 14, padding: '18px 20px' }}>
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2', marginBottom: 14 }}>Who can manage standards</div>
             {canEdit
-              ? <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ width: 32, height: 32, borderRadius: 999, background: '#2E5BFF', color: '#fff', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{(meName ?? 'YO').slice(0, 2).toUpperCase()}</span><div><div style={{ fontSize: 13, fontWeight: 600, color: '#1A2B4A' }}>{meName ?? 'Vos'}</div><div style={{ fontSize: 11, color: '#8A93A5' }}>Standards admin · vos</div></div></div>
-              : <div style={{ fontSize: 12.5, color: '#8A93A5', lineHeight: 1.5 }}>Tu rol puede <strong>ver</strong> los estándares pero no editarlos.</div>}
+              ? <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ width: 32, height: 32, borderRadius: 999, background: '#2E5BFF', color: '#fff', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{(meName ?? 'ME').slice(0, 2).toUpperCase()}</span><div><div style={{ fontSize: 13, fontWeight: 600, color: '#1A2B4A' }}>{meName ?? 'You'}</div><div style={{ fontSize: 11, color: '#8A93A5' }}>Standards admin · you</div></div></div>
+              : <div style={{ fontSize: 12.5, color: '#8A93A5', lineHeight: 1.5 }}>Your role can <strong>view</strong> standards but not edit them.</div>}
             <div style={{ height: 1, background: '#F2F4F8', margin: '15px 0' }} />
-            <div style={{ fontSize: 11.5, color: '#8A93A5', lineHeight: 1.5 }}>El acceso de edición de estándares se otorga desde <strong style={{ color: '#56607A' }}>Admin · Permisos</strong> (permiso <span style={{ fontFamily: 'var(--mono, monospace)' }}>standards.edit</span>).</div>
+            <div style={{ fontSize: 11.5, color: '#8A93A5', lineHeight: 1.5 }}>Standards edit access is granted from <strong style={{ color: '#56607A' }}>Admin · Permissions</strong> (permission <span style={{ fontFamily: 'var(--mono, monospace)' }}>standards.edit</span>).</div>
           </div>
         </div>
       </div>

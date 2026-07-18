@@ -63,8 +63,8 @@ export default function App() {
       </Routes>
       {/* Host global de confirm/prompt estilizados. */}
       <DialogHost />
-      {/* Toaster GLOBAL. */}
-      <Toaster richColors position="bottom-center" toastOptions={{ style: { fontFamily: 'var(--ui)' } }} />
+      {/* Toaster GLOBAL. closeButton = la "x" para cerrarlo sin esperar. */}
+      <Toaster richColors closeButton position="bottom-center" toastOptions={{ style: { fontFamily: 'var(--ui)' } }} />
     </BrowserRouter>
   );
 }

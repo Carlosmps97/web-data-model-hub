@@ -48,8 +48,9 @@ export default function HelpCenter({ onClose }: { onClose: () => void }) {
   const panel: React.CSSProperties = { width: '100%', maxWidth: 1200, height: '100%', maxHeight: 900, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.28)', overflow: 'hidden', display: 'flex', flexDirection: 'column' };
 
   return createPortal(
-    <div style={overlay} onClick={onClose} role="presentation">
-      <div style={panel} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label={t.title}>
+    // El overlay NO cierra al click (pedido owner 07-17): sólo la X.
+    <div style={overlay} role="presentation">
+      <div style={panel} role="dialog" aria-modal="true" aria-label={t.title}>
         {/* header */}
         <div style={{ flex: 'none', height: 58, display: 'flex', alignItems: 'center', gap: 14, padding: '0 20px', borderBottom: '1px solid #EAEDF2' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontWeight: 700, color: navy, fontSize: 15 }}>

@@ -62,9 +62,11 @@ export function snapshot(body: SnapshotBody = {}): Promise<VersionRow> {
   return apiPost<VersionRow>(`${API_BASE}/api/changesets/snapshot`, body);
 }
 
-/** Usuarios simulados (id/name/initials) — para resolver nombres en filas. */
-export function listUsers(): Promise<SimUserDto[]> {
-  return apiGet<SimUserDto[]>(`${API_BASE}/api/users`);
+/** Usuarios (id/name/initials). Con `can` (p.ej. 'review.decide'), sólo los
+ *  usuarios cuyo ROL otorga ese permiso — el selector de revisores lo usa
+ *  para no ofrecer gente que nunca podría aprobar (request trabado). */
+export function listUsers(can?: string): Promise<SimUserDto[]> {
+  return apiGet<SimUserDto[]>(`${API_BASE}/api/users${can ? `?can=${encodeURIComponent(can)}` : ''}`);
 }
 
 /**
@@ -89,19 +91,27 @@ export function getDiff(id: string): Promise<ChangesetDiff> {
 }
 
 /**
- * Veredicto del actor sobre el changeset. El backend usa `X-Dev-User` y devuelve
- * **403 si el actor NO está en `reviewers`**: ese caso se reescribe a un mensaje
- * legible para el toast (el resto de `ApiError` se propaga tal cual).
+ * Veredicto del actor sobre el changeset. El backend distingue los dos 403
+ * (sin permiso `review.decide` vs no asignado como revisor) con `detail`
+ * propio: se PROPAGA ese mensaje al toast. El rewrite fijo anterior mostraba
+ * "not assigned" aunque el problema real fuera de permisos del rol.
  */
 export async function review(id: string, body: ReviewBody): Promise<ChangesetDetail> {
   try {
     return await apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/review`, body);
   } catch (err) {
     if (err instanceof ApiError && err.status === 403) {
-      throw new ApiError('You are not assigned as a reviewer of this change.', 403);
+      throw new ApiError(err.message || 'You are not assigned as a reviewer of this change.', 403);
     }
     throw err;
   }
+}
+
+/** Rollback de la ÚLTIMA versión publicada: el backend crea un DRAFT con los
+ *  cambios INVERSOS (restaura las imágenes previas capturadas en el publish).
+ *  Producción no cambia hasta que ese draft pase submit → review → approve. */
+export function rollbackVersion(id: string): Promise<VersionRow> {
+  return apiPost<VersionRow>(`${API_BASE}/api/changesets/${id}/rollback`, {});
 }
 
 /** Agrega un comentario al hilo del changeset; devuelve el changeset refrescado. */

@@ -84,7 +84,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
       toast.success(`Applied · ${v.label} · ${v.impact.columns} columns re-typed`);
       if (creating) setPendingName(form.name.trim());   // seleccionarlo al recargar
       setMode('view'); setConfirm(null); onApplied();
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo aplicar'); } finally { setBusy(false); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't apply"); } finally { setBusy(false); }
   };
   const del = async () => {
     if (!selected) return;
@@ -93,7 +93,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
       const v = await applyStandards({ kind: 'domain', domainsDelete: [selected.id] });
       toast.success(`Domain deleted · ${v.label}`);
       setConfirm(null); setSelId(domains.find((d) => d.id !== selected.id)?.id ?? null); onApplied();
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'No se pudo eliminar'); } finally { setBusy(false); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete"); } finally { setBusy(false); }
   };
 
   const editable = mode === 'edit' || mode === 'create';
@@ -109,7 +109,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 11px', background: '#fff', border: '1px solid #E6EAF0', borderRadius: 9, marginBottom: 12 }}>
           <Search size={14} color="#9AA3B2" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search domains…" style={{ flex: 1, border: 0, outline: 'none', fontSize: 12.5, background: 'transparent' }} />
         </div>
-        {mode === 'create' && <div style={{ ...domCard(true), marginBottom: 8 }}><Boxes size={15} color="#8B5CF6" /><span style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A', marginLeft: 8 }}>{form.name || 'Nuevo dominio'}</span></div>}
+        {mode === 'create' && <div style={{ ...domCard(true), marginBottom: 8 }}><Boxes size={15} color="#8B5CF6" /><span style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A', marginLeft: 8 }}>{form.name || 'New domain'}</span></div>}
         {filtered.map((d) => (
           <div key={d.id} onClick={() => { if (!editable) setSelId(d.id); }} style={{ ...domCard(d.id === selId && mode !== 'create'), marginBottom: 8, cursor: editable ? 'default' : 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Boxes size={15} color="#8B5CF6" /><span style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>{d.name}</span></div>
@@ -120,7 +120,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
 
       {/* detail */}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '26px 30px', background: '#FBFCFD' }}>
-        {!selected && mode !== 'create' ? <div style={{ fontSize: 13, color: '#9AA3B2' }}>Elegí un dominio.</div> : (
+        {!selected && mode !== 'create' ? <div style={{ fontSize: 13, color: '#9AA3B2' }}>Pick a domain.</div> : (
           <div style={{ maxWidth: 720 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
               <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#1A2B4A' }}>{mode === 'create' ? 'New domain' : mode === 'edit' ? 'Edit domain' : form.name}</h1>
@@ -129,13 +129,13 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
             {!editable && form.description && <p style={{ margin: '0 0 22px', fontSize: 13, color: '#6B7689', lineHeight: 1.5 }}>{form.description}</p>}
 
             <label style={lbl}>Domain name</label>
-            {editable ? <input className="rd-input" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="p.ej. Importe" />
+            {editable ? <input className="rd-input" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Importe" />
               : <div style={fieldRO}>{form.name}</div>}
 
             <label style={lbl}>Default data type</label>
             {editable ? <input className="rd-input" style={{ ...field, fontFamily: 'var(--mono, monospace)' }} value={form.defaultDataType} onChange={(e) => setForm({ ...form, defaultDataType: e.target.value })} placeholder="DECIMAL(18,2)" />
               : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.defaultDataType}</div>}
-            {editable && <div style={{ fontSize: 12, color: '#8A93A5', margin: '-10px 0 18px' }}>Al aplicar, las columnas de este dominio SIN override se re-tipan.</div>}
+            {editable && <div style={{ fontSize: 12, color: '#8A93A5', margin: '-10px 0 18px' }}>On apply, columns of this domain WITHOUT an override are re-typed.</div>}
 
             <label style={lbl}>Description</label>
             {editable ? <textarea className="rd-input" style={{ ...field, minHeight: 64, resize: 'vertical' }} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
@@ -174,7 +174,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
 
       {/* confirm apply (15e) */}
       {confirm === 'apply' && (
-        <div style={backdrop} onClick={() => !busy && setConfirm(null)}>
+        <div style={backdrop}>
           <div style={dialog} onClick={(e) => e.stopPropagation()}>
             <div style={dlgHead}><div style={{ ...dlgIcon, background: '#F3EEFF', color: '#8B5CF6' }}><Boxes size={21} /></div>
               <div style={{ flex: 1 }}><h2 style={dlgTitle}>{mode === 'create' ? `Create domain ${form.name}` : `Apply changes · ${form.name}`}</h2><p style={dlgSub}>{typeChanged ? 'Cascada el nuevo tipo a las columnas sin override.' : 'Nada se aplica hasta confirmar.'}</p></div>
@@ -191,11 +191,11 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 10px', background: '#fff', border: '1px solid #E6EAF0', borderRadius: 8, flex: 1 }}>
                       <Search size={13} color="#9AA3B2" />
-                      <input value={dlgQ} onChange={(e) => setDlgQ(e.target.value)} placeholder="¿Está afectada una tabla? Buscá por nombre…" style={{ flex: 1, border: 0, outline: 'none', fontSize: 12.5, background: 'transparent' }} />
+                      <input value={dlgQ} onChange={(e) => setDlgQ(e.target.value)} placeholder="Is a table affected? Search by name…" style={{ flex: 1, border: 0, outline: 'none', fontSize: 12.5, background: 'transparent' }} />
                     </div>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#56607A', cursor: 'pointer', whiteSpace: 'nowrap' }}>
                       <input type="checkbox" checked={showOverridden} onChange={(e) => setShowOverridden(e.target.checked)} />
-                      Ver columnas con override
+                      Show overridden columns
                     </label>
                   </div>
                   <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #EAEDF2', borderRadius: 10 }}>
@@ -209,18 +209,18 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
                     ))}
                     {visibleImpactTables((dlgImpact ?? impact)?.tables ?? [], showOverridden).length === 0 && (
                       <div style={{ padding: 14, fontSize: 12.5, color: '#9AA3B2' }}>
-                        {dlgQ.trim() ? 'Ninguna tabla afectada coincide con la búsqueda.' : 'Sin tablas afectadas.'}
+                        {dlgQ.trim() ? 'No affected table matches the search.' : 'No affected tables.'}
                       </div>
                     )}
                   </div>
                   {(dlgImpact ?? impact) && (dlgImpact ?? impact)!.totalTables > ((dlgImpact ?? impact)!.tables.length) && (
                     <div style={{ fontSize: 11.5, color: '#9AA3B2', marginTop: 6 }}>
-                      Mostrando {(dlgImpact ?? impact)!.tables.length} de {(dlgImpact ?? impact)!.totalTables} tablas
+                      Showing {(dlgImpact ?? impact)!.tables.length} of {(dlgImpact ?? impact)!.totalTables} tables
                     </div>
                   )}
                 </>
               )}
-              {mode === 'create' && <div style={{ fontSize: 13, color: '#56607A' }}>Se crea el dominio <strong>{form.name}</strong> con tipo <span style={{ fontFamily: 'var(--mono, monospace)' }}>{form.defaultDataType}</span>.</div>}
+              {mode === 'create' && <div style={{ fontSize: 13, color: '#56607A' }}>Domain <strong>{form.name}</strong> will be created with type <span style={{ fontFamily: 'var(--mono, monospace)' }}>{form.defaultDataType}</span>.</div>}
             </div>
             <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}><span style={{ flex: 1 }} /><button onClick={() => setConfirm(null)} disabled={busy} style={btnGhost}>Cancel</button><button onClick={apply} disabled={busy} style={btnPrimary}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Applying…' : mode === 'create' ? 'Create' : 'Apply cascade'}</button></div>
           </div>
@@ -229,10 +229,10 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
 
       {/* confirm delete */}
       {confirm === 'delete' && selected && (
-        <div style={backdrop} onClick={() => !busy && setConfirm(null)}>
+        <div style={backdrop}>
           <div style={{ ...dialog, width: 480 }} onClick={(e) => e.stopPropagation()}>
             <div style={dlgHead}><div style={{ ...dlgIcon, background: '#FBEEF0', color: '#D6455D' }}><Trash2 size={20} /></div>
-              <div style={{ flex: 1 }}><h2 style={dlgTitle}>Delete domain {selected.name}?</h2><p style={dlgSub}>Las columnas conservan su tipo actual pero pierden el vínculo al dominio.</p></div>
+              <div style={{ flex: 1 }}><h2 style={dlgTitle}>Delete domain {selected.name}?</h2><p style={dlgSub}>Columns keep their current type but lose the link to the domain.</p></div>
             </div>
             <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}><span style={{ flex: 1 }} /><button onClick={() => setConfirm(null)} disabled={busy} style={btnGhost}>Cancel</button><button onClick={del} disabled={busy} style={{ ...btnPrimary, background: '#D6455D' }}>{busy ? <span className="rd-spin" /> : <Trash2 size={15} />}Delete</button></div>
           </div>

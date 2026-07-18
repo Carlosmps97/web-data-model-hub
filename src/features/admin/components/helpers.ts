@@ -67,8 +67,8 @@ export interface Chip { label: string; color: string; bg: string; }
 export function accessLevelOf(perms: Record<string, boolean> | undefined): Chip {
   const p = perms ?? {};
   if (p['admin.manage']) return { label: 'Control total', color: C.redDeep, bg: C.redBg };
-  if (p['model.edit'] || p['standards.edit'] || p['publish']) return { label: 'Edición', color: C.amber, bg: C.amberBg };
-  return { label: 'Solo lectura', color: C.green, bg: C.greenBg };
+  if (p['model.edit'] || p['standards.edit'] || p['publish']) return { label: 'Edit', color: C.amber, bg: C.amberBg };
+  return { label: 'Read-only', color: C.green, bg: C.greenBg };
 }
 
 export function statusMeta(status: string): Chip {

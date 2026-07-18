@@ -13,7 +13,7 @@ export default function ChangesetBar({ pushToast }: { pushToast: (m: string, k?:
     // header X-Dev-User es ignorado por el backend, pero `devUser` se usa acá
     // para filtrar "mis drafts", así que debe ser el usuario real — no un switch.
     setDev(useSessionStore.getState().user.id);
-    load().catch(() => pushToast('No se pudieron cargar los changesets', 'err'));
+    load().catch(() => pushToast("Couldn't load the changesets", 'err'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const myDrafts = changesets.filter((c) => c.owner === devUser && c.status === 'draft');
@@ -22,26 +22,26 @@ export default function ChangesetBar({ pushToast }: { pushToast: (m: string, k?:
   const onCreate = async () => {
     try {
       const title = await promptDialog({
-        title: 'Nuevo changeset',
-        label: 'Título',
-        placeholder: 'ej. "alta dominio tasa"',
-        confirmLabel: 'Crear', cancelLabel: 'Cancelar',
+        title: 'New changeset',
+        label: 'Title',
+        placeholder: 'e.g. "add rate domain"',
+        confirmLabel: 'Create', cancelLabel: 'Cancel',
         action: async (v) => { if (v.trim()) await create(v.trim()); },
       });
-      if (title?.trim()) pushToast('Changeset creado — estás en modo draft');
-    } catch { pushToast('No se pudo crear el changeset', 'err'); }
+      if (title?.trim()) pushToast('Changeset created — you are in draft mode');
+    } catch { pushToast("Couldn't create the changeset", 'err'); }
   };
   const onPublish = async () => {
     if (!activeId) return;
     try {
       const ok = await confirmDialog({
-        title: 'Publicar changeset',
-        message: 'Se enviará este changeset a revisión.',
-        confirmLabel: 'Publicar', cancelLabel: 'Cancelar',
+        title: 'Publish changeset',
+        message: 'This changeset will be sent to review.',
+        confirmLabel: 'Publish', cancelLabel: 'Cancel',
         action: () => submit(activeId),
       });
-      if (ok) pushToast('Publicado — pendiente de aprobación');
-    } catch { pushToast('No se pudo publicar', 'err'); }
+      if (ok) pushToast('Published — pending approval');
+    } catch { pushToast("Couldn't publish", 'err'); }
   };
 
   return (

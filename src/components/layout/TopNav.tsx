@@ -78,7 +78,7 @@ export default function TopNav() {
       setLeaveTo(null);
       if (to) navigate(to);
     } catch {
-      toast.error('No se pudo guardar — seguís en el canvas');
+      toast.error("Couldn't save — you're still on the canvas");
     } finally {
       setSavingLeave(false);
     }
@@ -128,27 +128,28 @@ export default function TopNav() {
 
       {helpOpen && <HelpCenter onClose={() => setHelpOpen(false)} />}
 
-      {/* ── Popup de cambios sin guardar (guard de salida del modeler) ── */}
+      {/* ── Popup de cambios sin guardar (guard de salida del modeler) ──
+          El scrim NO cierra al click (pedido owner 07-17): sólo botones. */}
       {leaveTo !== null && (
-        <div className="dmh-backdrop" onClick={stay} role="presentation">
-          <div className="dmh-modal" style={{ width: 470 }} role="dialog" aria-modal="true" aria-labelledby="unsaved-title" onClick={(e) => e.stopPropagation()}>
+        <div className="dmh-backdrop" role="presentation">
+          <div className="dmh-modal" style={{ width: 470 }} role="dialog" aria-modal="true" aria-labelledby="unsaved-title">
             <div className="m-body" style={{ display: 'flex', gap: 14 }}>
               <span className="ins-ico" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
                 <TriangleAlert size={18} />
               </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <h3 id="unsaved-title" className="rd-h3" style={{ marginBottom: 6 }}>Cambios sin guardar</h3>
+                <h3 id="unsaved-title" className="rd-h3" style={{ marginBottom: 6 }}>Unsaved changes</h3>
                 <div className="rd-small" style={{ lineHeight: 1.6 }}>
-                  Estás editando una versión y hay cambios sin guardar. Si salís sin guardar, se perderán.
+                  You are editing a version and have unsaved changes. If you leave without saving, they will be lost.
                 </div>
               </div>
             </div>
             <div className="m-foot">
-              <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={savingLeave} onClick={stay}>Cancelar</button>
-              <button type="button" className="rd-btn rd-btn-danger rd-btn-sm" disabled={savingLeave} onClick={leaveAnyway}>Salir sin guardar</button>
+              <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={savingLeave} onClick={stay}>Cancel</button>
+              <button type="button" className="rd-btn rd-btn-danger rd-btn-sm" disabled={savingLeave} onClick={leaveAnyway}>Leave without saving</button>
               <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={savingLeave} onClick={saveAndLeave}>
                 {savingLeave && <span className="rd-spin" aria-hidden />}
-                {savingLeave ? 'Guardando…' : 'Guardar y salir'}
+                {savingLeave ? 'Saving…' : 'Save and leave'}
               </button>
             </div>
           </div>

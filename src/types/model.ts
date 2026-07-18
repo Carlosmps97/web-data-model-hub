@@ -225,36 +225,9 @@ export interface Table {
 }
 
 // ─── Relationship ────────────────────────────────────────────────────────────
-
-export type Cardinality = '1:1' | '1:N' | 'N:N';
-
-export interface RelationshipEndpoint {
-  /** TableColumn endpoint: `table` = Table.id, `column` = TableColumn.id. */
-  table: string;
-  column: string;
-}
-
-/**
- * Crow's Foot cardinality for one end of a relationship. Derived from
- * `cardinality` + the FK column's `isNullable` by the edge renderer
- * (`src/features/diagram/components/ERCanvas.tsx`).
- */
-export type CrowsFootCardinality =
-  | 'one-only'
-  | 'zero-or-one'
-  | 'one-or-many'
-  | 'zero-or-many';
-
-export interface Relationship {
-  id: string;
-  source: RelationshipEndpoint;
-  target: RelationshipEndpoint;
-  cardinality: Cardinality;
-  /** Derived (source.layer ≠ target.layer) — not persisted. */
-  crossLayer?: boolean;
-  /** Derived (|orderΔ| > 1) — not persisted. */
-  skip?: boolean;
-}
+// El tipo runtime de relación vive en governance.service (`Relationship` v2:
+// parent/child + pairs, doc 19). Acá NO hay tipo de relación: el legacy
+// (source/target anidados + '1:N') se eliminó al no tener consumidores.
 
 // ─── Project ─────────────────────────────────────────────────────────────────
 
@@ -269,12 +242,6 @@ export interface Project {
   domains: Domain[];
   createdAt?: string;
   updatedAt?: string;
-}
-
-/** Hydrated canvas: a project's tables + relationships (heavy child data). */
-export interface Canvas {
-  tables: Table[];
-  relationships: Relationship[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -292,5 +259,3 @@ export const COLUMN_DATA_TYPES = [
 ] as const;
 
 export type ColumnDataType = (typeof COLUMN_DATA_TYPES)[number] | string;
-
-export const CARDINALITY_VALUES: Cardinality[] = ['1:1', '1:N', 'N:N'];

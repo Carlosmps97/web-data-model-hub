@@ -68,10 +68,10 @@ export default function Dialog({
     : { inset: 0 };
 
   return createPortal(
+    // El backdrop NO cierra al click (pedido owner 07-17): sólo X / acciones / ESC.
     <div
       className={`dmh-dialog-backdrop${isCanvas ? ' dmh-dialog-backdrop--canvas' : ''}`}
       style={overlayStyle}
-      onClick={onClose}
       role="presentation"
     >
       <div
@@ -80,7 +80,6 @@ export default function Dialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="dmh-dialog-head">
           {Icon && (

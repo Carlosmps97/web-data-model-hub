@@ -18,7 +18,11 @@ function CrowFootEdge(props: EdgeProps) {
 
   if (!sourceNode || !targetNode) return null;
   // `pending` = edge fantasma optimista: recién dibujado, aún persistiéndose.
-  const d = (data ?? {}) as { sourceCardinality: Cardinality; targetCardinality: Cardinality; identifying: boolean; pending?: boolean };
+  // v2 (doc 19): source del edge = PADRE (lado PK), target = HIJO (lado FK).
+  const d = (data ?? {}) as {
+    parentCardinality: Cardinality; childCardinality: Cardinality;
+    identifying: boolean; pending?: boolean; pairCount?: number;
+  };
 
   // Lado que mira a la otra tabla (dbdiagram): si el centro del origen está a la
   // izquierda del centro del destino, el origen sale por la DERECHA y el destino
@@ -50,13 +54,14 @@ function CrowFootEdge(props: EdgeProps) {
   return (
     <BaseEdge
       path={path}
-      markerStart={`url(#cf-${d.sourceCardinality ?? 'one'})`}
-      markerEnd={`url(#cf-${d.targetCardinality ?? 'many'})`}
+      markerStart={`url(#cf-${d.parentCardinality ?? 'one'})`}
+      markerEnd={`url(#cf-${d.childCardinality ?? 'zero-many'})`}
       style={{
         stroke,
         strokeWidth: active ? 2.4 : 1.5,
-        // Todas punteadas, con un dash angosto y casi continuo (pending: más aire).
-        strokeDasharray: d.pending ? '6 5' : '6 2',
+        // Convención Erwin (doc 19): identifying = línea SÓLIDA (la FK entra a
+        // la PK del hijo); non-identifying = punteada. Pending: dash más aireado.
+        strokeDasharray: d.pending ? '6 5' : d.identifying ? undefined : '7 4',
         opacity: d.pending ? 0.5 : dimmed ? 0.22 : 1,
         transition: 'opacity .12s, stroke .12s, stroke-width .12s',
       }}

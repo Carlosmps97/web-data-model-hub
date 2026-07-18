@@ -66,11 +66,17 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     // Preserva los nodos de shapes ya presentes (los repuebla el efecto de drawings).
     setNodes((prev) => [...prev.filter((n) => n.type === 'shape'), ...tableNodes, ...views.nodes]);
     setEdges([
+      // v2 (doc 19): el edge SIEMPRE va padre → hijo y ancla en el PRIMER par
+      // de columnas; los pares extra (PK compuesta) viven en el popup.
       ...diagram.relationships.map((r) => ({
-        id: r.id, source: r.sourceTableId, target: r.targetTableId,
-        sourceHandle: `${r.sourceColumnId}__src`, targetHandle: `${r.targetColumnId}__tgt`,
+        id: r.id, source: r.parentTableId, target: r.childTableId,
+        sourceHandle: `${r.pairs[0]?.parentColumnId}__src`,
+        targetHandle: `${r.pairs[0]?.childColumnId}__tgt`,
         type: 'crowfoot',
-        data: { sourceCardinality: r.sourceCardinality, targetCardinality: r.targetCardinality, identifying: r.identifying },
+        data: {
+          parentCardinality: r.parentCardinality, childCardinality: r.childCardinality,
+          identifying: r.identifying, pairCount: r.pairs.length,
+        },
       })),
       ...views.edges,
     ]);
@@ -109,16 +115,16 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const onConnect = useCallback((conn: Connection) => {
     // En modo visor puede haber changeset activo (se está VIENDO un request):
     // nunca habilita mutaciones.
-    if (readonly) { pushToast('El modelo está en solo lectura: no se pueden crear relaciones', 'err'); return; }
+    if (readonly) { pushToast("The model is read-only: relationships can't be created", 'err'); return; }
     // El changeset activo viene del Open model (modo `editing`) vía el bridge
     // session → changeset. Si falta, es read-only o una sesión inconsistente.
-    if (!activeChangeset) { pushToast('Abrí el modelo en modo edición para crear relaciones', 'err'); return; }
+    if (!activeChangeset) { pushToast('Open the model in edit mode to create relationships', 'err'); return; }
     // Guard defensivo: sin la herramienta "Dibujar relación" armada, los handles
     // no son conectables (TableNode) — si algo llega igual, no crear nada.
-    if (!useModelerStore.getState().relPreset) { pushToast('Armá "Dibujar relación" en el toolbar para crear relaciones', 'err'); return; }
+    if (!useModelerStore.getState().relPreset) { pushToast('Arm "Draw relationship" in the toolbar to create relationships', 'err'); return; }
     if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return;
-    // La dirección la define el GESTO: origen = donde se empezó a arrastrar,
-    // destino = donde se soltó. Si el inicio quedó normalizado como `target`,
+    // La dirección la define el GESTO (doc 19): se arrastra DESDE el padre
+    // (lado PK) hacia el hijo. Si React Flow normalizó el inicio como `target`,
     // invertimos los extremos antes de persistir.
     const start = connectStart.current;
     const startedAtTarget = !!start && conn.target === start.nodeId && conn.targetHandle === start.handleId;
@@ -127,19 +133,21 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       : { source: conn.source, sourceHandle: conn.sourceHandle, target: conn.target, targetHandle: conn.targetHandle };
 
     // Edge FANTASMA optimista: el wire aparece al soltar (semitransparente) y el
-    // reload del diagrama lo reemplaza por el real al persistir. Usa los extremos
-    // tal como los dio React Flow (handles válidos) y mapea las cardinalidades a
-    // esa orientación para que los marcadores crow's-foot caigan del lado correcto.
+    // reload del diagrama lo reemplaza por el real al persistir. Se arma YA
+    // orientado padre→hijo (cada columna tiene ambos handles __src/__tgt, así
+    // que se re-anclan a la orientación real y los marcadores caen bien).
     const preset = useModelerStore.getState().relPreset;
+    const parentCol = rel.sourceHandle.replace(/__src$|__tgt$/, '');
+    const childCol = rel.targetHandle.replace(/__src$|__tgt$/, '');
     const ghostId = `pending-${crypto.randomUUID()}`;
     setEdges((eds) => [...eds, {
       id: ghostId,
-      source: conn.source, target: conn.target,
-      sourceHandle: conn.sourceHandle, targetHandle: conn.targetHandle,
+      source: rel.source, target: rel.target,
+      sourceHandle: `${parentCol}__src`, targetHandle: `${childCol}__tgt`,
       type: 'crowfoot',
       data: {
-        sourceCardinality: startedAtTarget ? (preset?.target ?? 'many') : (preset?.source ?? 'one'),
-        targetCardinality: startedAtTarget ? (preset?.source ?? 'one') : (preset?.target ?? 'many'),
+        parentCardinality: preset?.parent ?? 'one',
+        childCardinality: preset?.child ?? 'zero-many',
         identifying: preset?.identifying ?? false,
         pending: true,
       },
@@ -147,7 +155,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     void createRelationship(rel).catch((err: unknown) => {
       setEdges((eds) => eds.filter((e) => e.id !== ghostId));
       // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador).
-      pushToast(err instanceof Error && err.message ? err.message : 'No se pudo crear la relación', 'err');
+      pushToast(err instanceof Error && err.message ? err.message : "Couldn't create the relationship", 'err');
     });
   }, [readonly, activeChangeset, createRelationship, setEdges, pushToast]);
 

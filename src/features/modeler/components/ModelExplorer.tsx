@@ -72,7 +72,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     if (!useModelerStore.getState().trees[pid]) {
       setLoadingTrees((s) => new Set(s).add(pid));
       loadProjectTree(pid)
-        .catch(() => pushToast('No se pudo cargar el proyecto', 'err'))
+        .catch(() => pushToast("Couldn't load the project", 'err'))
         .finally(() => setLoadingTrees((s) => { const n = new Set(s); n.delete(pid); return n; }));
     }
   }, [loadProjectTree, pushToast]);
@@ -119,7 +119,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
       if (kind === 'project') await renameProject(id, name);
       else if (kind === 'folder') await renameFolder(id, name, projectId);
       else await renameCanvas(id, name, projectId);
-    } catch { pushToast('No se pudo renombrar', 'err'); }
+    } catch { pushToast("Couldn't rename", 'err'); }
   }, [renameProject, renameFolder, renameCanvas, pushToast]);
 
   const commitCreate = useCallback(async (value: string) => {
@@ -130,7 +130,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     try {
       if (c.type === 'folder') await createFolder(c.projectId, c.parentFolderId, name);
       else await createCanvas(c.projectId, c.parentFolderId, name);
-    } catch { pushToast(c.type === 'folder' ? 'No se pudo crear la carpeta' : 'No se pudo crear el canvas', 'err'); }
+    } catch { pushToast(c.type === 'folder' ? "Couldn't create the folder" : "Couldn't create the canvas", 'err'); }
   }, [creating, createFolder, createCanvas, pushToast]);
 
   // El diálogo queda abierto y bloqueado (busy) hasta que el borrado termina —
@@ -144,7 +144,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
       if (d.kind === 'project') await deleteProject(d.id);
       else if (d.kind === 'folder') await deleteFolder(d.id, d.projectId);
       else await deleteCanvas(d.id, d.projectId);
-    } catch { pushToast('No se pudo eliminar', 'err'); }
+    } catch { pushToast("Couldn't delete", 'err'); }
     finally { setDeleting(false); setToDelete(null); }
   }, [toDelete, deleteProject, deleteFolder, deleteCanvas, pushToast]);
 
@@ -153,7 +153,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     setCreating(null);
     const name = value.trim();
     if (!name) return;
-    try { await createProject(name); } catch { pushToast('No se pudo crear el Project', 'err'); }
+    try { await createProject(name); } catch { pushToast("Couldn't create the Project", 'err'); }
   }, [createProject, pushToast]);
 
   // ── Render helpers ─────────────────────────────────────────────────────
@@ -174,7 +174,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
         onClick={() => {
           // Abrir sólo si no es el canvas ya abierto y no hay otra apertura en vuelo.
           if (sa.id === activeSaId || openingSaId) return;
-          selectSubjectArea(sa.id, projectId).catch(() => pushToast('No se pudo abrir el canvas', 'err'));
+          selectSubjectArea(sa.id, projectId).catch(() => pushToast("Couldn't open the canvas", 'err'));
         }}
         onMenu={readonly ? undefined : (e) => openMenu('canvas', sa.id, projectId, e)} />
     );
@@ -201,7 +201,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
             {node.canvases.map((c) => renderCanvas(c, depth + 1, projectId))}
             {creating && creating.parentFolderId === folder.id &&
               renderCreateInput(depth + 1, commitCreate,
-                creating.type === 'folder' ? 'Nombre de la carpeta' : 'Nombre del canvas',
+                creating.type === 'folder' ? 'Folder name' : 'Canvas name',
                 creating.type === 'folder' ? <FolderIcon size={14} /> : <LayoutGrid size={14} />)}
           </>
         )}
@@ -238,10 +238,10 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
             {tree.canvases.map((c) => renderCanvas(c, 1, p.id))}
             {creating && creating.projectId === p.id && creating.parentFolderId === null &&
               renderCreateInput(1, commitCreate,
-                creating.type === 'folder' ? 'Nombre de la carpeta' : 'Nombre del canvas',
+                creating.type === 'folder' ? 'Folder name' : 'Canvas name',
                 creating.type === 'folder' ? <FolderIcon size={14} /> : <LayoutGrid size={14} />)}
             {tree.folders.length === 0 && tree.canvases.length === 0 && !(creating && creating.projectId === p.id) && (
-              <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + INDENT + 13 }}>Vacío</div>
+              <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + INDENT + 13 }}>Empty</div>
             )}
           </>
         )}
@@ -257,13 +257,13 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
       </div>
 
       {creating?.projectId === '__new_project__' &&
-        <InlineInput depth={0} placeholder="Nombre del Project" leading={<Database size={14} />}
+        <InlineInput depth={0} placeholder="Project name" leading={<Database size={14} />}
           onCommit={commitNewProject} onCancel={() => setCreating(null)} />}
 
       {projects.map(renderProject)}
 
       {projects.length === 0 && !creating &&
-        <div className="wk-exp-empty" style={{ padding: 8 }}>Sin proyectos. Creá uno con +.</div>}
+        <div className="wk-exp-empty" style={{ padding: 8 }}>No projects. Create one with +.</div>}
 
       {menu && (
         <ContextMenu menu={menu}
@@ -277,14 +277,14 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
         <ConfirmDialog
           open
           variant="danger"
-          title={`Eliminar ${toDelete.kind === 'project' ? 'proyecto' : toDelete.kind === 'folder' ? 'carpeta' : 'canvas'}`}
-          confirmLabel="Eliminar"
+          title={`Delete ${toDelete.kind === 'project' ? 'project' : toDelete.kind === 'folder' ? 'folder' : 'canvas'}`}
+          confirmLabel="Delete"
           message={
             toDelete.kind === 'folder'
-              ? <>Se eliminará la carpeta <strong>{toDelete.name}</strong> y todas sus subcarpetas. Los canvases que contenga se moverán a la raíz del proyecto.</>
+              ? <>Folder <strong>{toDelete.name}</strong> and all its subfolders will be deleted. Any canvases inside will move to the project root.</>
               : toDelete.kind === 'project'
-                ? <>Se eliminará el proyecto <strong>{toDelete.name}</strong> con todas sus carpetas y canvases. Esta acción no se puede deshacer.</>
-                : <>Se eliminará el canvas <strong>{toDelete.name}</strong>. Esta acción no se puede deshacer.</>
+                ? <>Project <strong>{toDelete.name}</strong> will be deleted with all its folders and canvases. This action cannot be undone.</>
+                : <>Canvas <strong>{toDelete.name}</strong> will be deleted. This action cannot be undone.</>
           }
           busy={deleting}
           onConfirm={confirmDelete}

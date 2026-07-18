@@ -4,6 +4,7 @@ import Dialog from '@/components/ui/Dialog';
 import { useModelerStore } from '@/store/useModelerStore';
 import * as gov from '@/features/governance/services/governance.service';
 import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import SchemaSelect from './SchemaSelect';
 
 /**
  * CTAS — Create Table As Select (Pantalla 06). Dos secciones:
@@ -128,7 +129,8 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <div style={{ flex: 1 }}>
               <label style={lbl}>Schema</label>
-              <input className="rd-input rd-mono" placeholder="schema_name" value={schema} onChange={(e) => setSchema(e.target.value)} style={{ width: '100%' }} />
+              {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
+              <SchemaSelect value={schema} onChange={setSchema} style={{ width: '100%' }} />
             </div>
             <div style={{ flex: 1 }}>
               <label style={lbl}>Table Name</label>

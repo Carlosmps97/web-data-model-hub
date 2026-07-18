@@ -24,7 +24,7 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState<SavedReport[]>([]);
 
-  useEffect(() => { getCatalog(from).then(setCatalog).catch(() => toast.error('No se pudo cargar el catálogo')); }, [from]);
+  useEffect(() => { getCatalog(from).then(setCatalog).catch(() => toast.error("Couldn't load the catalog")); }, [from]);
   useEffect(() => { listReports().then(setSaved).catch(() => {}); }, []);
   useEffect(() => { setSpec((s) => ({ ...emptySpec(from), select: [] })); setResult(null); }, [from]);
 
@@ -37,7 +37,7 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
       const res = mode === 'sql' ? await runSql(sqlText) : await runQuery(spec);
       setResult(res);
       res.meta?.warnings?.forEach((w) => toast.warning(w));
-    } catch (e) { toast.error(e instanceof Error ? e.message : 'La consulta falló'); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'The query failed'); }
     finally { setLoading(false); }
   }, [mode, spec, sqlText]);
 
@@ -67,12 +67,12 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
 
   const doExport = async () => {
     try { await exportCsv(spec); toast.success('Export CSV iniciado'); }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Export falló'); }
+    catch (e) { toast.error(e instanceof Error ? e.message : 'Export failed'); }
   };
   const doSave = async () => {
-    const name = window.prompt('Nombre del reporte'); if (!name?.trim()) return;
+    const name = window.prompt('Report name'); if (!name?.trim()) return;
     try { await createReport({ name: name.trim(), spec, shared: false }); setSaved(await listReports()); toast.success('Reporte guardado'); }
-    catch { toast.error('No se pudo guardar'); }
+    catch { toast.error("Couldn't save"); }
   };
   const loadReport = (r: SavedReport) => { setFrom(r.spec.from); setTimeout(() => { setSpec(r.spec); setMode('builder'); }, 0); toast.success(`Cargado: ${r.name}`); };
 

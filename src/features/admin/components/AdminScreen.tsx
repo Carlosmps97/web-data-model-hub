@@ -65,7 +65,7 @@ export default function AdminScreen() {
     try {
       await fetchAll();
     } catch (e) {
-      const msg = e instanceof ApiError ? e.message : 'No se pudieron cargar los datos de administración';
+      const msg = e instanceof ApiError ? e.message : "Couldn't load the admin data";
       setError(msg);
       toast.error(msg);
     } finally {
@@ -77,7 +77,7 @@ export default function AdminScreen() {
     try {
       await fetchAll();
     } catch {
-      toast.error('No se pudo refrescar la información');
+      toast.error("Couldn't refresh the data");
     }
   }, [fetchAll]);
 
@@ -140,27 +140,27 @@ export default function AdminScreen() {
       setEditingMatrix(false);
       setDraftRoles(null);
       toast.success(changedRoles.length
-        ? `Permisos actualizados (${changedRoles.length} rol${changedRoles.length === 1 ? '' : 'es'})`
-        : 'Sin cambios para guardar');
+        ? `Permissions updated (${changedRoles.length} role${changedRoles.length === 1 ? '' : 's'})`
+        : 'No changes to save');
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudieron guardar los permisos');
+      toast.error(e instanceof Error ? e.message : "Couldn't save the permissions");
     } finally {
       setSavingMatrix(false);
     }
   };
 
   const askDeleteUser = (u: AdminUser) => setConfirm({
-    title: 'Eliminar usuario',
-    message: `Se eliminará "${u.name}" (${u.id}). Esta acción no se puede deshacer.`,
-    onConfirm: async () => { await deleteUser(u.id); toast.success('Usuario eliminado'); await softRefresh(); },
+    title: 'Delete user',
+    message: `"${u.name}" (${u.id}) will be deleted. This action cannot be undone.`,
+    onConfirm: async () => { await deleteUser(u.id); toast.success('User deleted'); await softRefresh(); },
   });
 
   const askDeleteRole = (r: Role) => setConfirm({
-    title: 'Eliminar rol',
-    message: `Se eliminará el rol "${r.name}"${roleCounts[r.id] ? ` — ${roleCounts[r.id]} usuario(s) lo tienen asignado` : ''}. Esta acción no se puede deshacer.`,
+    title: 'Delete role',
+    message: `Role "${r.name}" will be deleted${roleCounts[r.id] ? ` — ${roleCounts[r.id]} user(s) have it assigned` : ''}. This action cannot be undone.`,
     onConfirm: async () => {
       await deleteRole(r.id);
-      toast.success('Rol eliminado');
+      toast.success('Role deleted');
       setSelectedRoleId((sel) => (sel === r.id ? null : sel));
       await softRefresh();
     },
@@ -194,7 +194,7 @@ export default function AdminScreen() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 13.5, color: selected ? C.blue : C.navy, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</span>
                   <span
-                    title={`${count} usuario(s)`}
+                    title={`${count} user(s)`}
                     style={{ padding: '1px 9px', borderRadius: 999, fontSize: 12, fontWeight: 700, color: selected ? C.blue : C.text2, background: selected ? C.white : C.grey, border: selected ? `1px solid ${C.blueBorder}` : '1px solid transparent' }}
                   >
                     {count}
@@ -205,7 +205,7 @@ export default function AdminScreen() {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); setRoleModal({ open: true, mode: 'edit', initial: r }); }}
-                    aria-label={`Editar rol ${r.name}`}
+                    aria-label={`Edit role ${r.name}`}
                     style={{ ...iconBtnStyle, width: 28, height: 28 }}
                   >
                     <PencilIcon size={14} />
@@ -213,7 +213,7 @@ export default function AdminScreen() {
                   <button
                     type="button"
                     onClick={(e) => { e.stopPropagation(); askDeleteRole(r); }}
-                    aria-label={`Eliminar rol ${r.name}`}
+                    aria-label={`Delete role ${r.name}`}
                     style={{ ...iconBtnStyle, width: 28, height: 28, color: C.red }}
                   >
                     <TrashIcon size={14} />
@@ -223,7 +223,7 @@ export default function AdminScreen() {
             );
           })}
           {!loading && roles.length === 0 && (
-            <div style={{ fontSize: 12.5, color: C.text3, padding: '8px 4px' }}>Sin roles todavía. Creá el primero.</div>
+            <div style={{ fontSize: 12.5, color: C.text3, padding: '8px 4px' }}>No roles yet. Create the first one.</div>
           )}
         </div>
         <div style={{ padding: 12, borderTop: `1px solid ${C.border}` }}>
@@ -243,8 +243,8 @@ export default function AdminScreen() {
           {/* Header */}
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
             <div>
-              <div style={eyebrowStyle}>Administración</div>
-              <h1 style={h1Style}>Permisos y niveles de acceso</h1>
+              <div style={eyebrowStyle}>Administration</div>
+              <h1 style={h1Style}>Permissions and access levels</h1>
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -252,8 +252,8 @@ export default function AdminScreen() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Buscar usuario"
-                  aria-label="Buscar usuario"
+                  placeholder="Search user"
+                  aria-label="Search user"
                   style={{ ...inputStyle, width: 230, paddingLeft: 33 }}
                 />
               </div>
@@ -268,10 +268,10 @@ export default function AdminScreen() {
           </div>
 
           {loading ? (
-            <div style={{ padding: '60px 0', textAlign: 'center', color: C.text3, fontSize: 14 }}>Cargando administración…</div>
+            <div style={{ padding: '60px 0', textAlign: 'center', color: C.text3, fontSize: 14 }}>Loading administration…</div>
           ) : error ? (
             <div style={{ marginTop: 26, padding: 24, border: `1px solid ${C.redBg}`, background: C.redBg, borderRadius: 13, color: C.redDeep }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>No se pudo cargar</div>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Couldn't load</div>
               <div style={{ fontSize: 13, marginBottom: 14 }}>{error}</div>
               <button type="button" onClick={() => void initialLoad()} style={primaryBtn}>Reintentar</button>
             </div>
@@ -281,7 +281,7 @@ export default function AdminScreen() {
               {selectedRoleId && (
                 <div style={{ marginTop: 20, display: 'inline-flex', alignItems: 'center', gap: 9, padding: '6px 8px 6px 13px', borderRadius: 999, background: C.blueSoft, border: `1px solid ${C.blueBorder}`, fontSize: 12.5, color: C.blue }}>
                   Filtrando por <strong>{roleNameOf(roles, selectedRoleId)}</strong>
-                  <button type="button" onClick={() => setSelectedRoleId(null)} aria-label="Quitar filtro" style={{ display: 'inline-flex', border: 'none', background: C.white, color: C.blue, borderRadius: 999, width: 22, height: 22, alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}>
+                  <button type="button" onClick={() => setSelectedRoleId(null)} aria-label="Clear filter" style={{ display: 'inline-flex', border: 'none', background: C.white, color: C.blue, borderRadius: 999, width: 22, height: 22, alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}>
                     <CloseIcon size={13} />
                   </button>
                 </div>
@@ -294,7 +294,7 @@ export default function AdminScreen() {
                     <div style={{ display: 'grid', gridTemplateColumns: TABLE_COLS, background: C.panel, borderBottom: `1px solid ${C.border}` }}>
                       <div style={thStyle}>Usuario</div>
                       <div style={thStyle}>Rol</div>
-                      <div style={thStyle}>Nivel de acceso</div>
+                      <div style={thStyle}>Access level</div>
                       <div style={thStyle}>Proyectos</div>
                       <div style={thStyle}>Estado</div>
                       <div style={{ ...thStyle, textAlign: 'right' }} />
@@ -330,10 +330,10 @@ export default function AdminScreen() {
                             <span style={chipStyle(status)}>{status.label}</span>
                           </div>
                           <div style={{ ...tdStyle, justifyContent: 'flex-end', gap: 6 }}>
-                            <button type="button" onClick={() => setUserModal({ open: true, mode: 'edit', initial: u })} aria-label={`Editar ${u.name}`} style={{ ...iconBtnStyle, width: 30, height: 30 }}>
+                            <button type="button" onClick={() => setUserModal({ open: true, mode: 'edit', initial: u })} aria-label={`Edit ${u.name}`} style={{ ...iconBtnStyle, width: 30, height: 30 }}>
                               <PencilIcon size={14} />
                             </button>
-                            <button type="button" onClick={() => askDeleteUser(u)} aria-label={`Eliminar ${u.name}`} style={{ ...iconBtnStyle, width: 30, height: 30, color: C.red }}>
+                            <button type="button" onClick={() => askDeleteUser(u)} aria-label={`Delete ${u.name}`} style={{ ...iconBtnStyle, width: 30, height: 30, color: C.red }}>
                               <TrashIcon size={14} />
                             </button>
                           </div>
@@ -343,7 +343,7 @@ export default function AdminScreen() {
 
                     {filteredUsers.length === 0 && (
                       <div style={{ padding: '34px 16px', textAlign: 'center', fontSize: 13, color: C.text3 }}>
-                        {users.length === 0 ? 'No hay usuarios todavía. Agregá el primero.' : 'Ningún usuario coincide con el filtro.'}
+                        {users.length === 0 ? 'No users yet. Add the first one.' : 'No user matches the filter.'}
                       </div>
                     )}
                   </div>
@@ -354,9 +354,9 @@ export default function AdminScreen() {
               <section style={{ marginTop: 34 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, marginBottom: 16 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.navy }}>Matriz de permisos por rol</h2>
+                    <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.navy }}>Permission matrix by role</h2>
                     <p style={{ margin: '5px 0 0', fontSize: 13, color: C.text2 }}>
-                      Los permisos afectan a todos los usuarios del rol. Entrá en modo edición para modificarlos y guardá cuando termines.
+                      Permissions affect every user of the role. Enter edit mode to modify them and save when you finish.
                     </p>
                   </div>
                   <div style={{ flex: 'none', display: 'flex', gap: 8 }}>
@@ -368,7 +368,7 @@ export default function AdminScreen() {
                         </button>
                         <button type="button" onClick={saveMatrix} disabled={savingMatrix || changedRoles.length === 0}
                           style={{ height: 36, padding: '0 16px', borderRadius: 9, border: 'none', background: changedRoles.length === 0 ? C.grey : C.blue, color: changedRoles.length === 0 ? C.muted : '#fff', fontSize: 13, fontWeight: 600, cursor: savingMatrix || changedRoles.length === 0 ? 'default' : 'pointer' }}>
-                          {savingMatrix ? 'Guardando…' : `Guardar cambios${changedRoles.length ? ` (${changedRoles.length})` : ''}`}
+                          {savingMatrix ? 'Saving…' : `Save changes${changedRoles.length ? ` (${changedRoles.length})` : ''}`}
                         </button>
                       </>
                     ) : (

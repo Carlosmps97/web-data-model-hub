@@ -9,6 +9,7 @@ import * as viewsSvc from '@/services/views.service';
 import type { View } from '@/services/views.service';
 import { DEFAULT_DATABRICKS_OPTS, inferJoin, viewDDL, type DdlView } from '@/features/ddl';
 import { colKey, splitColKey, serializeSources, resolveJoinOverride, type ColCfg } from '../lib/viewEditorLogic';
+import SchemaSelect from './SchemaSelect';
 
 const PURPLE = '#8B5CF6', PURPLE_DK = '#6D3FC4', BLUE = '#2E5BFF', NAVY = '#1A2B4A', MUTED = '#9AA3B2';
 const MONO = "var(--mono, 'Geist Mono', monospace)";
@@ -195,8 +196,8 @@ export default function ViewEditor({
   const allConnected = useMemo(() => sourceIds.every((tid, i) => {
     if (i === 0) return true;
     const prev = new Set(sourceIds.slice(0, i));
-    return relationships.some((r) => (r.sourceTableId === tid && prev.has(r.targetTableId))
-      || (r.targetTableId === tid && prev.has(r.sourceTableId)));
+    return relationships.some((r) => (r.childTableId === tid && prev.has(r.parentTableId))
+      || (r.parentTableId === tid && prev.has(r.childTableId)));
   }), [sourceIds, relationships]);
   const needsJoin = sourceIds.length >= 2;
   // Guardable si TODAS las fuentes conectan (JOIN derivado vivo) O hay override
@@ -206,7 +207,7 @@ export default function ViewEditor({
 
   // Preview con el MISMO generador del Export DDL — una sola fuente de verdad.
   const preview = useMemo(() => {
-    if (includedCount === 0) return '-- Seleccioná al menos una columna para la vista.';
+    if (includedCount === 0) return '-- Select at least one column for the view.';
     const dv: DdlView = {
       id: view?.id ?? 'new',
       name: name.trim() || 'view',
@@ -236,6 +237,9 @@ export default function ViewEditor({
         showOnCanvas,
         joinOverride: resolveJoinOverride(joinText, inferred),
         sql: preview,
+        // Campo persistido que el editor NO edita: se PRESERVA del doc actual
+        // (el guardado es doc COMPLETO — omitirlo lo borraría en silencio).
+        description: view?.description,
       };
       if (editing && view) await viewsSvc.updateView(view.id, body);
       else await viewsSvc.createView(body);
@@ -244,7 +248,7 @@ export default function ViewEditor({
       onClose();
     } catch (e) {
       // Propaga el motivo real (p.ej. el 409 del backend F3a: vista sin fuentes).
-      pushToast(e instanceof Error && e.message ? e.message : 'No se pudo guardar la vista', 'err');
+      pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the view", 'err');
     } finally {
       setBusy(false);
     }
@@ -257,7 +261,7 @@ export default function ViewEditor({
     <Dialog
       open
       title={editing ? `Edit view · ${view?.name}` : 'New view'}
-      subtitle="Definí una vista sobre una o más tablas fuente — columnas, alias, CAST y JOIN"
+      subtitle="Define a view over one or more source tables — columns, aliases, CAST and JOIN"
       icon={Eye}
       backdrop="canvas"
       canvasTop={136}
@@ -266,11 +270,11 @@ export default function ViewEditor({
       footer={
         <>
           <span style={{ flex: 1, fontSize: 11.5, color: '#56607A' }}>
-            Una vista nunca copia datos — deriva de {sourceIds.length === 1 ? 'su tabla fuente' : `sus ${sourceIds.length} tablas fuente`}.
+            A view never copies data — it derives from {sourceIds.length === 1 ? 'its source table' : `its ${sourceIds.length} source tables`}.
           </span>
           <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
           <button className="rd-btn rd-btn-sm" disabled={!canSave} onClick={save}
-            title={!joinOk ? 'Definí la condición de JOIN entre las fuentes' : includedCount === 0 ? 'Seleccioná al menos una columna' : undefined}
+            title={!joinOk ? 'Define the JOIN condition between the sources' : includedCount === 0 ? 'Select at least one column' : undefined}
             style={{ background: canSave ? PURPLE : '#CBD2DE', color: '#fff', border: 'none' }}>
             {editing ? 'Save changes' : 'Create view'}
           </button>
@@ -294,13 +298,14 @@ export default function ViewEditor({
             </div>
             <div>
               <label style={lbl}>Schema</label>
-              <input style={idField} value={schema} onChange={(e) => setSchema(e.target.value)} placeholder="schema_name" />
+              {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
+              <SchemaSelect value={schema} onChange={setSchema} className="" style={idField} />
             </div>
             {/* ── Fuentes: chips + buscador de tablas del canvas ── */}
             <div>
               <label style={lbl}>Source tables</label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {sourceIds.length === 0 && <span style={{ fontSize: 12, color: '#C0392B', fontWeight: 600 }}>Agregá al menos una tabla fuente.</span>}
+                {sourceIds.length === 0 && <span style={{ fontSize: 12, color: '#C0392B', fontWeight: 600 }}>Add at least one source table.</span>}
                 {sourceIds.map((tid, i) => {
                   const t = tableById.get(tid);
                   const locked = tid === lockedTableId;
@@ -309,9 +314,9 @@ export default function ViewEditor({
                       <span style={{ color: PURPLE_DK, fontWeight: 700 }}>t{i + 1}</span>
                       {t ? `${t.schema ? `${t.schema}.` : ''}${t.physicalName}` : tid}
                       {locked
-                        ? <Lock size={10} style={{ color: MUTED }} aria-label="Fuente fija (abierta desde esta tabla)" />
+                        ? <Lock size={10} style={{ color: MUTED }} aria-label="Fixed source (opened from this table)" />
                         : (
-                          <button type="button" title="Quitar fuente" onClick={() => removeSource(tid)}
+                          <button type="button" title="Remove source" onClick={() => removeSource(tid)}
                             style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, display: 'inline-flex', color: MUTED }}>
                             <X size={11} />
                           </button>
@@ -322,11 +327,11 @@ export default function ViewEditor({
               </div>
               <div style={{ position: 'relative', marginTop: 8 }}>
                 <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: MUTED }} />
-                <input value={srcSearch} onChange={(e) => setSrcSearch(e.target.value)} placeholder="Agregar tabla fuente (del canvas)…"
+                <input value={srcSearch} onChange={(e) => setSrcSearch(e.target.value)} placeholder="Add source table (from the canvas)…"
                   style={{ width: '100%', height: 32, padding: '0 10px 0 30px', border: '1px solid #DDE2EC', borderRadius: 8, fontSize: 12, color: NAVY, outline: 'none', background: '#fff', boxSizing: 'border-box' }} />
                 {srcSearch.trim() && (
                   <div style={{ position: 'absolute', top: 34, left: 0, right: 0, zIndex: 5, background: '#fff', border: '1px solid #DDE2EC', borderRadius: 8, boxShadow: '0 8px 22px rgba(20,30,60,.12)', maxHeight: 180, overflowY: 'auto' }}>
-                    {candidates.length === 0 && <div style={{ padding: '8px 12px', fontSize: 12, color: MUTED }}>Sin coincidencias en este canvas.</div>}
+                    {candidates.length === 0 && <div style={{ padding: '8px 12px', fontSize: 12, color: MUTED }}>No matches on this canvas.</div>}
                     {candidates.map((t) => (
                       <button key={t.id} type="button" onClick={() => addSource(t.id)}
                         style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'center', padding: '7px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: MONO, fontSize: 12, color: NAVY }}>
@@ -344,7 +349,7 @@ export default function ViewEditor({
                 <span style={{ position: 'absolute', top: 2, left: showOnCanvas ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left .12s' }} />
               </button>
               <span style={{ fontSize: 12.5, color: NAVY, fontWeight: 600 }}>Mostrar en canvas</span>
-              <span style={{ fontSize: 10.5, color: MUTED }}>global · no afecta el export DDL</span>
+              <span style={{ fontSize: 10.5, color: MUTED }}>global · doesn't affect the DDL export</span>
             </div>
             <div>
               <label style={lbl}>Labels / tags</label>
@@ -355,7 +360,7 @@ export default function ViewEditor({
               <textarea value={filter} onChange={(e) => setFilter(e.target.value)}
                 placeholder="estado = 'ACTIVA' AND saldo > 0"
                 style={{ flex: 1, minHeight: 90, padding: '11px 13px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 10, fontFamily: MONO, fontSize: 12.5, lineHeight: 1.6, color: NAVY, resize: 'none', outline: 'none', boxSizing: 'border-box' }} />
-              <div style={{ marginTop: 7, fontSize: 11, color: MUTED }}>Cualquier expresión booleana SQL — sin la palabra WHERE.</div>
+              <div style={{ marginTop: 7, fontSize: 11, color: MUTED }}>Any boolean SQL expression — without the WHERE keyword.</div>
             </div>
           </div>
         </div>
@@ -371,7 +376,7 @@ export default function ViewEditor({
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
               <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
                 <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: MUTED }} />
-                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar columna…"
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search column…"
                   style={{ width: '100%', height: 32, padding: '0 10px 0 30px', border: '1px solid #DDE2EC', borderRadius: 8, fontSize: 12.5, color: NAVY, outline: 'none', background: '#fff', boxSizing: 'border-box' }} />
               </div>
               <span style={{ flex: 1 }} />
@@ -387,7 +392,7 @@ export default function ViewEditor({
               <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 10, padding: '9px 13px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
                 <span /><span /><span>Source column</span><span>Output name</span><span>Expression · free SQL</span><span>Cast · tipo</span>
               </div>
-              {sourceIds.length === 0 && <div style={{ padding: '14px 13px', fontSize: 12.5, color: MUTED }}>Agregá una tabla fuente para elegir columnas.</div>}
+              {sourceIds.length === 0 && <div style={{ padding: '14px 13px', fontSize: 12.5, color: MUTED }}>Add a source table to pick columns.</div>}
               {sourceIds.map((tid) => {
                 const t = tableById.get(tid);
                 const keys = order.filter((k) => splitColKey(k).tableId === tid && validKeys.has(k)
@@ -396,9 +401,9 @@ export default function ViewEditor({
                   <div key={tid}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 13px', background: '#F3F5FA', borderTop: '1px solid #EAEDF2', borderBottom: '1px solid #EAEDF2', fontFamily: MONO, fontSize: 11, fontWeight: 700, color: '#56607A' }}>
                       <span style={{ color: PURPLE_DK }}>t{sourceIds.indexOf(tid) + 1}</span>
-                      {t ? `${t.schema ? `${t.schema}.` : ''}${t.physicalName}` : `${tid} (fuera de este canvas — columnas preservadas)`}
+                      {t ? `${t.schema ? `${t.schema}.` : ''}${t.physicalName}` : `${tid} (outside this canvas — columns preserved)`}
                     </div>
-                    {keys.length === 0 && <div style={{ padding: '10px 13px', fontSize: 12, color: MUTED }}>{q ? 'Ninguna columna coincide con la búsqueda.' : 'La tabla no tiene columnas.'}</div>}
+                    {keys.length === 0 && <div style={{ padding: '10px 13px', fontSize: 12, color: MUTED }}>{q ? 'No column matches the search.' : 'The table has no columns.'}</div>}
                     {keys.map((k) => {
                       const meta = colMeta.get(k) ?? { name: splitColKey(k).column, dataType: '' };
                       const cc = cfg[k] ?? { included: false, output: meta.name, expression: '', castType: '' };
@@ -430,28 +435,28 @@ export default function ViewEditor({
                 );
               })}
             </div>
-            {searching && <div style={{ marginTop: 7, fontSize: 11, color: MUTED }}>Limpiá la búsqueda para reordenar las columnas.</div>}
+            {searching && <div style={{ marginTop: 7, fontSize: 11, color: MUTED }}>Clear the search to reorder columns.</div>}
 
             {/* ── JOIN (2+ fuentes): inferido de relaciones (D2), editable ── */}
             {needsJoin && (
               <div style={{ marginTop: 14, border: `1px solid ${joinOk ? '#DDE2EC' : '#F3C1B8'}`, borderRadius: 12, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
-                  JOIN · condición entre fuentes
+                  JOIN · condition between sources
                   {allConnected
-                    ? <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#1E7F4F' }}>inferida de las relaciones del modelo</span>
-                    : <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#C0392B' }}>{inferred ? 'hay fuentes sin relación modelada — completá la condición' : 'sin relación modelada — escribila manualmente'}</span>}
+                    ? <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#1E7F4F' }}>inferred from the model relationships</span>
+                    : <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#C0392B' }}>{inferred ? 'some sources have no modeled relationship — complete the condition' : 'no modeled relationship — write it manually'}</span>}
                 </div>
                 <textarea
                   value={joinText}
                   onChange={(e) => { setJoinText(e.target.value); setJoinDirty(true); }}
-                  placeholder="t1.columna = t2.columna"
+                  placeholder="t1.column = t2.column"
                   style={{ display: 'block', width: '100%', minHeight: 64, padding: '11px 13px', border: 'none', fontFamily: MONO, fontSize: 12, lineHeight: 1.6, color: NAVY, resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
                 />
                 {!joinOk && (
                   <div style={{ padding: '0 14px 10px', fontSize: 11.5, color: '#C0392B', fontWeight: 600 }}>
                     {joinText.trim()
-                      ? 'Hay fuentes sin relación modelada: editá la condición de JOIN para cubrirlas y poder guardar.'
-                      : 'Definí la condición de JOIN para poder guardar: no hay relación modelada entre las fuentes.'}
+                      ? 'Some sources have no modeled relationship: edit the JOIN condition to cover them before saving.'
+                      : 'Define the JOIN condition to save: there is no modeled relationship between the sources.'}
                   </div>
                 )}
               </div>

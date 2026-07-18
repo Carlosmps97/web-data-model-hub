@@ -46,8 +46,11 @@
 .wk-seg-btn:disabled { opacity: .5; cursor: not-allowed; }
 .wk-seg-row { display: flex; justify-content: center; margin-top: 4px; }
 
-/* RELATIONSHIPS — selectores de extremo crow's-foot (Source/Target) + Draw */
+/* RELATIONSHIPS — selectores de extremo crow's-foot (Parent/Child) + las dos
+   herramientas de dibujo estilo Erwin (Identifying sólida / Non-id. punteada) */
 .wk-relwrap { display: flex; align-items: center; gap: 6px; }
+.wk-reldraw2 { display: flex; flex-direction: column; gap: 3px; }
+.wk-reldraw2 .wk-reldraw { width: 40px; height: 26px; }
 .wk-relbuild { display: flex; flex-direction: column; gap: 3px; }
 .wk-relrow { display: flex; align-items: center; gap: 2px; }
 .wk-rellbl { width: 46px; flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted-3); text-align: right; padding-right: 5px; }
@@ -63,6 +66,34 @@
 .wk-reldraw:hover:not(:disabled) { background: var(--fill-4); }
 .wk-reldraw.on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 .wk-reldraw:disabled { opacity: .4; cursor: not-allowed; }
+
+/* "Used in" (V3) — proyecto › carpeta › canvas en Metadata. Cada canvas es un
+   BLOQUE delimitado (borde+fondo): con 2+ rutas largas, las filas sueltas se
+   leían como una sopa sin saber dónde empezaba/terminaba cada una. */
+.wk-pp-usage { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap;
+  padding: 5px 9px; margin-bottom: 5px; border: 1px solid var(--border-soft);
+  border-radius: 7px; background: var(--fill-5, var(--surface-2)); overflow-wrap: anywhere; }
+.wk-pp-usage > span { min-width: 0; }
+.wk-pp-usep { color: var(--text-muted-3); flex: none; }
+
+/* Orden de la LLAVE primaria (pkPosition) — strip en PropertiesPanel · Columns */
+.wk-pp-keyorder { margin: 2px 0 10px; padding: 7px 8px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--fill-5, transparent); }
+.wk-pp-keychips { display: flex; flex-wrap: wrap; gap: 4px; }
+.wk-pp-keychip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; border: 1px solid var(--border-soft); border-radius: 6px; font-size: 11px; background: var(--surface); }
+.wk-pp-keyn { font-size: 9.5px; font-weight: 700; color: var(--k-pk, #b58a00); }
+.wk-pp-keymv { display: inline-flex; gap: 2px; }
+.wk-pp-keymv button { width: 18px; height: 18px; border: 1px solid var(--border-soft); border-radius: 4px; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 11px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.wk-pp-keymv button:hover:not(:disabled) { background: var(--fill-4); }
+.wk-pp-keymv button:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Popup de relación v2 (doc 19) — grid de pares migrados + role name */
+.wk-relpairs { display: flex; flex-direction: column; gap: 8px; }
+.wk-relpair { border: 1px solid var(--border-soft); border-radius: 8px; padding: 7px 8px; display: flex; flex-direction: column; gap: 6px; background: var(--fill-5, transparent); }
+.wk-relpair-cols { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.wk-relpair-role { display: flex; align-items: center; gap: 6px; }
+.wk-relpair-role .rd-input { flex: 1; height: 28px; font-size: 12px; }
+.wk-relpair-add { display: flex; align-items: center; gap: 6px; }
+.wk-relpair-add .rd-input { flex: 1; height: 30px; font-size: 12px; min-width: 0; }
 
 /* LOCATE & CENTER — input "Find a table…" con dropdown de coincidencias */
 .wk-find-wrap { position: relative; }
@@ -124,13 +155,41 @@
   background: var(--blue-soft); border: 1px solid var(--blue-border-2); color: var(--text-muted); font-size: 12px; line-height: 1.45; }
 .ppub-info > svg { flex-shrink: 0; margin-top: 1px; color: var(--blue); }
 
-.wk-relhint { position: fixed; top: 70px; left: 50%; transform: translateX(-50%); z-index: 30;
+/* Abajo y centrado (pedido owner 07-17): arriba tapaba los botones del menú;
+   el centro-inferior queda libre (Controls abajo-izq, MiniMap abajo-der). */
+.wk-relhint { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 30;
   background: var(--primary); color: var(--on-primary); font-size: 12px; padding: 5px 12px;
   border-radius: var(--r-full); box-shadow: var(--shadow-md); display: flex; align-items: center; gap: 8px; }
 .wk-relhint .wk-tic { color: var(--on-primary); }
 
-.wk-explorer { grid-area: explorer; background: var(--surface); border-right: 1px solid var(--border-soft);
-  overflow-y: auto; padding: 6px; }
+/* ── Sidebar apilado (doc 18): Model Explorer + Database Explorer ── */
+.wk-expl-stack { grid-area: explorer; display: flex; flex-direction: column; min-height: 0;
+  background: var(--surface); border-right: 1px solid var(--border-soft); }
+.wk-explorer { flex: 1 1 auto; min-height: 0; background: var(--surface); overflow-y: auto; padding: 6px; }
+
+/* Database Explorer (producción publicada, solo lectura) */
+.wk-dbx { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
+  border-top: 1px solid var(--border-soft); }
+.wk-dbx.open { flex: 0 1 50%; }
+.wk-dbx-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 10px; border: none;
+  background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--subtle); font-family: inherit; }
+.wk-dbx-head:hover { background: var(--fill-4); }
+.wk-dbx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 6px 6px; }
+.wk-dbx-search { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; padding: 0 8px;
+  background: var(--fill-3, #F4F6F9); border-radius: 8px; color: var(--muted); }
+.wk-dbx-search input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+  padding: 7px 0; font-size: 12px; color: var(--ink); font-family: inherit; }
+.wk-dbx-search button { border: none; background: transparent; color: var(--muted); cursor: pointer;
+  display: inline-flex; padding: 2px; }
+.wk-dbx-badge { margin-left: auto; flex-shrink: 0; font-size: 10px; color: var(--text-muted-3); }
+.wk-dbx-type { flex-shrink: 0; max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; color: var(--text-muted-3); margin-left: auto; }
+.wk-dbx-badge + .wk-dbx-type { margin-left: 6px; }
+.wk-dbx-col:hover { background: transparent; }
+
+/* Gestor de esquemas (doc 18 v2): línea de impacto bajo un cambio pendiente */
+.wk-schx-impact { color: var(--text-muted, #56607A); margin-top: 2px; }
 .wk-exp-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
   color: var(--subtle); padding: 6px 6px 6px; display: flex; align-items: center; justify-content: space-between; }
 .wk-exp-headbtn { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
@@ -330,6 +389,10 @@
 .wk-node-div + .wk-node-row { border-top: none; }
 .wk-node-row { position: relative; display: flex; gap: 7px; align-items: center; padding: 6px 11px; border-top: 1px solid #F2F4F8; }
 .wk-node-pk .wk-node-row:first-child { border-top: none; }
+/* Hover/selección de un wire: además del edge se resaltan las columnas de sus
+   pares (los dos extremos, incl. relaciones compuestas). Mismo azul del wire. */
+.wk-node-row.hot { background: var(--blue-tint); box-shadow: inset 2.5px 0 0 var(--primary); }
+.wk-node-row.hot .wk-node-name { color: var(--primary-700); font-weight: 600; }
 .wk-node-key { display: inline-flex; align-items: center; justify-content: center; min-width: 14px; }
 /* flex-basis auto (no 0%): la columna aporta su ancho de contenido → el nodo
    crece para que entre "nombre  TIPO"; recién al tocar max-width del nodo,
@@ -340,6 +403,18 @@
    ellipsis protege además contra tipos simples patológicamente largos. */
 .wk-node-dt { flex: 0 0 auto; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted-2); font-size: 10px; }  /* #8A93A5 Geist Mono */
 .wk-node-empty { padding: 6px 11px; color: var(--muted); }
+
+/* ── ComplexTypeBuilder: cajita para declarar STRUCT/ARRAY/MAP en bonito ──
+   Aparece bajo el input de tipo (ColumnEditor modal + card del panel) cuando
+   el texto arranca como complejo; recompone el string canónico al editar. */
+.wk-ctb { margin-top: 8px; border: 1px solid var(--border-1, #E2E6EE); border-radius: 10px;
+  padding: 10px 11px; background: #F8FAFD; display: grid; gap: 6px; }
+.wk-ctb-head { font-size: 10.5px; font-weight: 700; color: #8A93A5; text-transform: uppercase; letter-spacing: .04em; }
+.wk-ctb-row { display: flex; gap: 6px; align-items: center; }
+.wk-ctb-in { flex: 1; min-width: 0; height: 30px; font-size: 12px; }
+.wk-ctb-add { justify-self: start; }
+.wk-ctb-empty { color: var(--muted, #8A93A5); }
+.wk-ctb-warn { color: #8A6D1A; background: #FFF8E6; border-color: #F0E2B6; }
 
 /* Handles de conexión por columna (id único __src/__tgt) — discretos, aparecen al hover del nodo */
 .wk-handle { width: 7px; height: 7px; background: var(--subtle); border: 1.5px solid var(--surface); opacity: 0; transition: opacity .12s; }
@@ -386,6 +461,10 @@
 
 /* Vista COMPARTIDA (2+ fuentes) en Properties→Views (F3): tinte + badge. */
 .wk-pp-link.shared { background: #F8F5FF; border-color: #E1D4FB; }
+/* Relación visible sólo en OTRO canvas (Links · Other canvases): card plomo,
+   solo lectura — la blanca queda para las del canvas abierto. */
+.wk-pp-link.other { background: var(--fill-4, #F1F3F6); border-color: var(--border-soft); }
+.wk-pp-link.other .wk-pp-link-head { color: var(--ink-2); }
 .wk-pp-shared { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700;
   color: #6D3FC4; background: #EFE7FD; border-radius: var(--r-full); padding: 2px 8px; }
 

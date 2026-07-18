@@ -1,6 +1,7 @@
 /**
  * Modal — shell reutilizable (backdrop + card centrada + header/footer) para los
- * modales del módulo Admin. Cierre por click en el backdrop (mousedown) o botón X.
+ * modales del módulo Admin. El backdrop NO cierra al click (pedido owner 07-17):
+ * cierre sólo por la X o las acciones del footer.
  */
 import type { ReactNode } from 'react';
 import { C, iconBtnStyle, labelStyle } from './helpers';
@@ -18,7 +19,6 @@ interface ModalShellProps {
 export default function ModalShell({ title, subtitle, onClose, children, footer, width = 460 }: ModalShellProps) {
   return (
     <div
-      onMouseDown={onClose}
       style={{
         position: 'fixed',
         inset: 0,
@@ -31,7 +31,6 @@ export default function ModalShell({ title, subtitle, onClose, children, footer,
       }}
     >
       <div
-        onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-label={title}
         style={{
@@ -51,7 +50,7 @@ export default function ModalShell({ title, subtitle, onClose, children, footer,
             <div style={{ fontSize: 16, fontWeight: 700, color: C.navy }}>{title}</div>
             {subtitle && <div style={{ fontSize: 12.5, color: C.text3, marginTop: 3 }}>{subtitle}</div>}
           </div>
-          <button type="button" onClick={onClose} aria-label="Cerrar" style={iconBtnStyle}><CloseIcon size={16} /></button>
+          <button type="button" onClick={onClose} aria-label="Close" style={iconBtnStyle}><CloseIcon size={16} /></button>
         </div>
         <div style={{ padding: '16px 20px', overflowY: 'auto' }}>{children}</div>
         {footer && (

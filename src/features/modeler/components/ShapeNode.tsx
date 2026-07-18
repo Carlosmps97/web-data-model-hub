@@ -126,7 +126,7 @@ export default function ShapeNode({ id, data, selected }: NodeProps) {
             />
           ))}
           <span className="wk-shape-bar-div" />
-          <button type="button" className="wk-shape-del" title="Eliminar forma" onClick={() => deleteDrawing(id)}>×</button>
+          <button type="button" className="wk-shape-del" title="Delete shape" onClick={() => deleteDrawing(id)}>×</button>
         </div>
       )}
     </div>

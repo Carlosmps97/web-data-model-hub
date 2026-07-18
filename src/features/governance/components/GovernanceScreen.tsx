@@ -24,7 +24,7 @@ export default function GovernanceScreen() {
         <div className="dmh-page">
           <ChangesetBar pushToast={pushToast} />
           <div className="rd-seg" style={{ marginBottom: 12 }}>
-            <button className={tab === 'catalog' ? 'active' : ''} onClick={() => setTab('catalog')}>Tablas canónicas</button>
+            <button className={tab === 'catalog' ? 'active' : ''} onClick={() => setTab('catalog')}>Canonical tables</button>
             <button className={tab === 'approvals' ? 'active' : ''} onClick={() => setTab('approvals')}>Aprobaciones</button>
           </div>
           {tab === 'catalog' && <CatalogPanel key={`c-${activeId}`} pushToast={pushToast} canEdit={canEdit} />}

@@ -26,8 +26,8 @@ export default function RoleModal({ mode, initial, onClose, onSaved }: Props) {
   const key = isEdit && initial ? initial.id : slug(name);
 
   const submit = async () => {
-    if (!name.trim()) { toast.error('El nombre del rol es obligatorio'); return; }
-    if (!isEdit && !key) { toast.error('El nombre no genera una clave válida'); return; }
+    if (!name.trim()) { toast.error('The role name is required'); return; }
+    if (!isEdit && !key) { toast.error("The name doesn't produce a valid key"); return; }
 
     setBusy(true);
     try {
@@ -40,7 +40,7 @@ export default function RoleModal({ mode, initial, onClose, onSaved }: Props) {
       await onSaved();
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo guardar el rol');
+      toast.error(e instanceof Error ? e.message : "Couldn't save the role");
     } finally {
       setBusy(false);
     }
@@ -48,21 +48,21 @@ export default function RoleModal({ mode, initial, onClose, onSaved }: Props) {
 
   return (
     <ModalShell
-      title={isEdit ? 'Editar rol' : 'Nuevo rol'}
-      subtitle={isEdit ? initial?.id : 'Los permisos se ajustan luego en la matriz'}
+      title={isEdit ? 'Edit role' : 'New role'}
+      subtitle={isEdit ? initial?.id : 'Permissions are adjusted later in the matrix'}
       onClose={onClose}
       width={440}
       footer={
         <>
-          <button type="button" style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }} onClick={onClose} disabled={busy}>Cancelar</button>
+          <button type="button" style={{ ...ghostBtn, opacity: busy ? 0.6 : 1 }} onClick={onClose} disabled={busy}>Cancel</button>
           <button type="button" style={{ ...primaryBtn, opacity: busy ? 0.6 : 1 }} onClick={submit} disabled={busy}>
-            {isEdit ? 'Guardar cambios' : 'Crear rol'}
+            {isEdit ? 'Save changes' : 'Create role'}
           </button>
         </>
       }
     >
       <div style={{ display: 'grid', gap: 13 }}>
-        <Field label="Nombre del rol">
+        <Field label="Role name">
           <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Analista de datos" autoFocus />
         </Field>
         {!isEdit && (
@@ -70,12 +70,12 @@ export default function RoleModal({ mode, initial, onClose, onSaved }: Props) {
             Clave: <span style={{ fontFamily: MONO, color: C.text2 }}>{key || '—'}</span>
           </div>
         )}
-        <Field label="Descripción">
+        <Field label="Description">
           <textarea
             style={{ ...inputStyle, minHeight: 74, resize: 'vertical' }}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Breve descripción del alcance del rol"
+            placeholder="Short description of the role scope"
           />
         </Field>
       </div>

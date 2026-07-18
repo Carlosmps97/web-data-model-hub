@@ -2,12 +2,9 @@
 
 import type {
   Project,
-  Canvas,
   EngineId,
   ModelLevel,
   Domain,
-  Table,
-  Relationship,
 } from './model';
 
 // Generic API response wrapper
@@ -37,13 +34,9 @@ export interface UpdateProjectRequest {
   domains?: Domain[];
 }
 
-// ─── Canvas endpoints (a project's tables + relationships) ───────────────────
-export type CanvasResponse = ApiResponse<Canvas>;
-
-export interface CanvasReplaceRequest {
-  tables?: Table[];
-  relationships?: Relationship[];
-}
+// (Los tipos legacy CanvasResponse/CanvasReplaceRequest se eliminaron junto
+// con el Relationship viejo de types/model — el canvas real usa el diagrama
+// canónico de modeler.service + governance.service.)
 
 // ─── Chat endpoint (AI agent — decoupled, kept) ──────────────────────────────
 export interface ChatRequest {
