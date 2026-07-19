@@ -1,4 +1,4 @@
-# Databricks Asset Bundle — frontend (Next.js) como Databricks App.
+# Databricks Asset Bundle — frontend (SPA Vite/React) como Databricks App.
 # Docs: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/apps-tutorial
 # Deploy:  databricks bundle deploy --target prod
 # Arranca: databricks bundle run frontend --target prod
@@ -10,7 +10,7 @@ resources:
     frontend:                     # resource key (lo usa `databricks bundle run frontend`)
       name: frnt-data-model-hub   # nombre real de la app en el workspace
       source_code_path: .         # el código de la app está en la raíz del repo
-      description: "Data Model Hub — frontend (Next.js · editor ER)."
+      description: "Data Model Hub — frontend (SPA Vite/React · editor ER)."
       permissions:
         - level: CAN_USE
           group_name: users

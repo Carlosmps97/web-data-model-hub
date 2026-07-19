@@ -8,7 +8,7 @@ Guía de despliegue del **frontend** de Data Model Hub: qué es, cómo se compil
 
 El frontend es una **SPA (Single Page Application)** construida con **Vite + React 19 + TypeScript**. No tiene servidor propio en producción: se **compila a archivos estáticos** (HTML, JS, CSS e imágenes) que cualquier host de estáticos puede servir. Toda la lógica corre en el navegador, y los datos se obtienen llamando por HTTP al **backend FastAPI** (que a su vez habla con Azure Cosmos DB usando la API de Mongo).
 
-> Nota importante sobre el stack: aunque en el repositorio quedan algunos archivos heredados de la etapa previa con Next.js (`app.yaml`, `databricks.yml`, `.env.example`, `.env.production` mencionan `NEXT_PUBLIC_API_URL` y `npm run start`), **el proyecto ya migró a Vite**. La fuente de verdad es `package.json` y `vite.config.ts`. La variable real que lee el código es `VITE_API_URL`, no `NEXT_PUBLIC_API_URL`. Ver la sección 8 (Notas sobre archivos heredados).
+> Nota sobre el stack (actualizada 2026-07-19): los archivos de despliegue ya reflejan Vite — `app.yaml` invoca `npm run start` (que hace `vite build` + `vite preview` en `$DATABRICKS_APP_PORT`), y `.env.example`/`.env.production` usan `VITE_API_URL` (la variable que realmente lee el código). La herencia `NEXT_PUBLIC_API_URL` de la etapa Next.js quedó eliminada. Ver la sección 8.
 
 ### Stack real (extraído de `package.json`)
 
@@ -240,27 +240,27 @@ Recomendaciones de caché al servir `dist/`:
 
 El repositorio incluye `databricks.yml` (Databricks Asset Bundle) que declara la app `frnt-data-model-hub`, y el backend corre como una app hermana `bknd-data-model-hub`. En este esquema, front y back son **apps separadas con orígenes distintos**, por lo que el build del frontend debe llevar `VITE_API_URL` apuntando a la URL pública del backend (la que hoy figura en `.env.production` como referencia de la app de Databricks) y el backend debe tener CORS habilitado.
 
-> Aviso: el `app.yaml` y `databricks.yml` actuales todavía describen el runtime Next.js (`command: ['npm', 'run', 'start']`, `next build`/`next start`). Con el stack Vite ya no hay `npm run start`: el flujo correcto es `npm run build` para generar `dist/` y servir esos estáticos. Estos manifiestos deben actualizarse para reflejar la SPA de Vite (ver sección 8).
+> Actualizado 2026-07-19: `app.yaml` mantiene `command: ['npm', 'run', 'start']`, pero ahora `start` es un script de Vite — `prestart` corre `npm run build` (tsc + `vite build` → `dist/`) y `start` sirve `dist/` con `vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort` (fallback SPA incluido). No requiere variables en `app.yaml`: `VITE_API_URL` viaja en el build vía `.env.production`.
 
 ---
 
-## 7. Consideraciones de base de datos (Azure Cosmos DB con API de Mongo)
+## 7. Consideraciones de base de datos (Databricks Lakebase Postgres)
 
-El frontend **no se conecta nunca a la base de datos directamente** y no maneja credenciales de Cosmos. La persistencia (proyectos, modelos, dominios, changesets, reporting, etc.) vive en **Azure Cosmos DB con la API de Mongo**, y solo el **backend FastAPI** habla con ella.
+El frontend **no se conecta nunca a la base de datos directamente** y no maneja credenciales. Desde 2026-07-19 la persistencia (proyectos, modelos, dominios, changesets, reporting, etc.) vive en **Databricks Lakebase Postgres** (con Azure Cosmos DB como fallback conmutable — ver `plan-implementacion/28-MIGRACION-LAKEBASE.md` del backend), y solo el **backend FastAPI** habla con ella.
 
-El único punto de acoplamiento del frontend con los datos es `VITE_API_URL`: debe apuntar al backend que es dueño de la conexión a Cosmos. Cadenas de conexión, nombres de base y colecciones son responsabilidad del backend.
+El único punto de acoplamiento del frontend con los datos es `VITE_API_URL`: debe apuntar al backend, que es dueño de la conexión a la base. Credenciales, nombres de base y colecciones son responsabilidad del backend.
 
 ```mermaid
 sequenceDiagram
     participant U as Navegador (SPA)
     participant S as Host de estaticos (dist)
     participant B as Backend FastAPI
-    participant C as Cosmos DB (API Mongo)
+    participant C as Lakebase Postgres
     U->>S: GET /model/123 (deep link)
     S-->>U: index.html (fallback SPA)
     Note over U: React Router renderiza la ruta en el cliente
     U->>B: GET base VITE_API_URL + /api/projects
-    B->>C: consulta Mongo
+    B->>C: consulta (adaptador jsonb)
     C-->>B: documentos
     B-->>U: { success: true, data: [ ... ] }
 ```
@@ -277,7 +277,7 @@ El contrato de respuesta que espera el frontend es un *envelope* uniforme que de
 
 Cuando `success` es `false`, o ante un `4xx/5xx`, o una respuesta sin envelope, el cliente lanza un `ApiError` tipado que los componentes capturan para mostrar toasts o redirigir. Un `401` dispara además el cierre de sesión global.
 
-Podés validar de punta a punta que el backend responde el envelope esperado con curl:
+Puedes validar de punta a punta que el backend responde el envelope esperado con curl:
 
 ```bash
 # Contra el backend directamente
@@ -289,18 +289,17 @@ curl -s https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com/
 
 ---
 
-## 8. Notas sobre archivos heredados (post-migración a Vite)
+## 8. Archivos heredados de Next.js — RESUELTO (2026-07-19)
 
-Durante la migración de Next.js a Vite quedaron artefactos que **no reflejan el estado real** y no deben tomarse al pie de la letra:
+Los artefactos que quedaron de la migración Next.js → Vite ya fueron alineados:
 
-| Archivo | Contenido heredado | Estado correcto con Vite |
-|---|---|---|
-| `.env.example` | `NEXT_PUBLIC_API_URL=http://localhost:8000` | Debería ser `VITE_API_URL=` (vacío en dev; el proxy cubre `/api`). Vite ignora las variables `NEXT_PUBLIC_*`. |
-| `.env.production` | `NEXT_PUBLIC_API_URL=https://bknd-...databricksapps.com` | La URL del backend es correcta como referencia, pero la variable debe llamarse `VITE_API_URL`. |
-| `app.yaml` | `command: ['npm', 'run', 'start']` (runtime Next) | No hay script `start`. El artefacto es `dist/` servido como estáticos. |
-| `databricks.yml` | Describe la app como Next.js standalone | La app es una SPA de Vite; el manifiesto debería servir `dist/`. |
-
-El único `.env` alineado con el stack actual es `.env` (raíz), que ya usa `VITE_API_URL=`.
+| Archivo | Estado actual |
+|---|---|
+| `.env.example` | `VITE_API_URL=` (vacío en dev; el proxy de Vite cubre `/api`). |
+| `.env.production` | `VITE_API_URL=https://bknd-...databricksapps.com` (build-time, se commitea). |
+| `app.yaml` | Sigue con `command: ['npm', 'run', 'start']`, pero `start` ahora es Vite: `prestart` = `npm run build` y `start` = `vite preview` en `$DATABRICKS_APP_PORT`. |
+| `databricks.yml` | Describe la app como SPA Vite/React. |
+| `.gitignore` | Ignora `/dist` (build de Vite) y permite commitear `.env.example`. OJO: `dist/` quedó trackeado de un build viejo → `git rm -r --cached dist` en el próximo commit. |
 
 ---
 

@@ -496,7 +496,7 @@ const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 Consideración importante: como `VITE_API_URL` es build-time, cambiar el backend de destino exige reconstruir el bundle; no basta con reiniciar el proceso ni con variables de runtime.
 
-Nota sobre archivos heredados: en el repo conviven artefactos de la migración anterior a Next.js (`app.yaml`, `.env.production` con `NEXT_PUBLIC_API_URL`, `databricks.yml` que menciona "Next.js", partes del README). El runtime vigente es Vite y la variable efectiva es `VITE_API_URL`; esos archivos con `NEXT_PUBLIC_*` son residuales y no los lee la SPA actual.
+Nota sobre archivos heredados (resuelto 2026-07-19): `app.yaml`, `databricks.yml`, `.env.production` y `.env.example` ya reflejan el stack Vite (`VITE_API_URL`, build + `vite preview` en Databricks Apps); la herencia `NEXT_PUBLIC_*` de la etapa Next.js fue eliminada.
 
 ### 3.3 Base de datos (Cosmos DB con API de Mongo)
 

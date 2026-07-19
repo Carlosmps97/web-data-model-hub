@@ -136,8 +136,9 @@ export default function HomeScreen() {
   const [users, setUsers] = useState<SimUserDto[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
 
-  // Rollback de la versión en producción (crea un draft inverso; doc 16 §5d).
-  const canEdit = useAuthStore((s) => s.has('model.edit'));
+  // Rollback: restaura el modelo a CUALQUIER versión publicada pasada (crea un
+  // draft que deshace las versiones posteriores). Permiso propio `rollback`.
+  const canRollback = useAuthStore((s) => s.has('rollback'));
   const [rollbackTarget, setRollbackTarget] = useState<VersionRow | null>(null);
   const [rollingBack, setRollingBack] = useState(false);
   const doRollback = async () => {
@@ -462,18 +463,19 @@ export default function HomeScreen() {
                         {proj ? `${proj} · ` : ''}
                         {userName(row.owner)}
                       </span>
-                      {/* Rollback: solo la versión EN PRODUCCIÓN es reversible
-                          (deshacer en orden). Crea un draft inverso que pasa
-                          por el flujo normal de revisión (doc 16 §5d). */}
-                      {isProduction && canEdit && (
+                      {/* Rollback a CUALQUIER versión publicada pasada: restaura
+                          el modelo a ese estado (deshace las posteriores). La
+                          producción actual no se ofrece (ya es ese estado).
+                          Crea un draft que pasa por el flujo normal de revisión. */}
+                      {!isProduction && row.status === 'approved' && !!row.appliedAt && canRollback && (
                         <button
                           type="button"
                           className="dmh-vside-rollback"
-                          title="Create a draft that reverts this version (goes through review)"
+                          title="Restore the model to this version (creates a draft, goes through review)"
                           onClick={() => setRollbackTarget(row)}
                         >
                           <Undo2 size={11} strokeWidth={1.9} aria-hidden />
-                          Rollback
+                          Restore
                         </button>
                       )}
                       <span className={`dmh-vpill ${pill.cls}`}>
@@ -495,13 +497,13 @@ export default function HomeScreen() {
               <ConfirmDialog
                 open
                 variant="danger"
-                title={`Rollback of ${rollbackTarget.versionLabel ?? 'the published version'}`}
+                title={`Restore to ${rollbackTarget.versionLabel ?? 'this version'}`}
                 confirmLabel="Create rollback draft"
                 message={
                   <>
-                    A <strong>draft</strong> will be created with the inverse changes of{' '}
-                    <strong>{rollbackTarget.versionLabel ?? rollbackTarget.title}</strong>{' '}
-                    (it restores the previous state of each entity it touched).
+                    A <strong>draft</strong> will be created that restores the model to{' '}
+                    <strong>{rollbackTarget.versionLabel ?? rollbackTarget.title}</strong>,{' '}
+                    undoing every version published after it.
                     Production <strong>does not change</strong> until that draft goes through
                     review and gets approved — like any publish.
                   </>

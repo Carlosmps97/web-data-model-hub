@@ -373,15 +373,16 @@ El `.gitignore` ignora todos los `.env*` salvo `.env.production`, que se commite
 ```gitignore
 # env files (can opt-in for committing if needed)
 .env*
-# NEXT_PUBLIC_API_URL es público (URL del backend) y debe viajar al build → se commitea.
+# VITE_API_URL es público (URL del backend) y debe viajar al build → se commitea.
 !.env.production
+!.env.example
 ```
 
 ### 4.3 Principio y observación
 
 **Principio**: nada sensible (contraseñas, connection strings de Cosmos, claves de firma de JWT, credenciales de servicio) vive en el frontend. Esos secretos residen únicamente en el backend, que es quien habla con la base de datos y firma/valida los tokens. El navegador solo conoce la URL pública de la API y el token de su propia sesión.
 
-**Observación de higiene (deuda menor)**: el código efectivo lee `VITE_API_URL`, pero `.env.production` y `.env.example` aún declaran la variable con el nombre antiguo `NEXT_PUBLIC_API_URL`, heredado de la etapa en que el front corría sobre Next.js (hoy migrado a Vite). Esto no expone ningún secreto —ambas son solo la URL pública— pero conviene renombrarlas a `VITE_API_URL` para que la configuración de producción realmente tome efecto en el build de Vite y no quede dependiendo del fallback a mismo origen. Es una limpieza de configuración, no un problema de seguridad.
+**Observación de higiene (RESUELTA 2026-07-19)**: `.env.production` y `.env.example` ya declaran `VITE_API_URL` (se renombraron desde el nombre antiguo `NEXT_PUBLIC_API_URL` de la etapa Next.js), con lo que la configuración de producción toma efecto real en el build de Vite. Nunca expuso secretos — ambas son solo la URL pública.
 
 ---
 
@@ -425,7 +426,7 @@ El frontend es una SPA estática (build de Vite) que se sirve como archivos y ha
 |----------|---------|-----------|
 | `VITE_API_URL` | vacío (dev, mismo origen vía proxy Vite) o `https://<backend-host>` (prod) | Pública, se inlinea en el bundle al construir. No es secreto. |
 
-Al ser build-time e inlineada, `VITE_API_URL` debe definirse **antes** de construir el bundle; cambiarla en runtime no tiene efecto (hay que reconstruir). Recordar la observación de la sección 4.3 sobre renombrar los `.env` de `NEXT_PUBLIC_API_URL` a `VITE_API_URL`.
+Al ser build-time e inlineada, `VITE_API_URL` debe definirse **antes** de construir el bundle; cambiarla en runtime no tiene efecto (hay que reconstruir). El renombre de los `.env` de `NEXT_PUBLIC_API_URL` a `VITE_API_URL` (sección 4.3) ya está aplicado.
 
 ### 6.2 Consideraciones de base de datos
 

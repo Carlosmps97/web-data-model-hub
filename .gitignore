@@ -13,9 +13,14 @@
 # testing
 /coverage
 
-# next.js
+# next.js (legado)
 /.next/
 /out/
+
+# vite (build de la SPA — se regenera con `npm run build`; NO se commitea.
+# OJO: dist/ quedó trackeado de un build viejo → al próximo commit correr
+# `git rm -r --cached dist` para des-trackearlo.)
+/dist
 
 # production
 /build
@@ -32,8 +37,9 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
-# NEXT_PUBLIC_API_URL es público (URL del backend) y debe viajar al build → se commitea.
+# VITE_API_URL es público (URL del backend) y debe viajar al build → se commitea.
 !.env.production
+!.env.example
 
 # local data storage
 /data/

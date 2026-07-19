@@ -245,7 +245,7 @@ Solo se expone al browser lo prefijado con `VITE_` (Vite las inlinea en build ti
 |----------|-----|---------|
 | `VITE_API_URL` | Base absoluta del backend. Vacío = mismo origen (dev: el proxy de Vite reenvía `/api` → `:8000`). | `` (vacío) en dev; `https://bknd-....azuredatabricksapps.com` en prod |
 
-> Nota: el archivo `.env.example` menciona `NEXT_PUBLIC_API_URL` por herencia de una etapa previa con Next.js; **el código actual (Vite) usa exclusivamente `VITE_API_URL`** (ver `src/vite-env.d.ts` y los ~14 servicios que hacen `import.meta.env.VITE_API_URL`).
+> Nota (2026-07-19): `.env.example` y `.env.production` ya usan `VITE_API_URL` (se renombraron desde la herencia `NEXT_PUBLIC_API_URL` de la etapa Next.js). El código lee `import.meta.env.VITE_API_URL` (ver `src/vite-env.d.ts` y los ~14 servicios).
 
 ---
 
@@ -256,6 +256,7 @@ Solo se expone al browser lo prefijado con `VITE_` (Vite las inlinea en build ti
 | `dev` | `vite` | Servidor de desarrollo con HMR (`:3000`). |
 | `build` | `tsc --noEmit && vite build` | Chequeo de tipos + bundle de producción en `dist/`. |
 | `preview` | `vite preview` | Sirve el build de `dist/` para verificación local. |
+| `start` | `vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort` | Runtime en Databricks Apps (lo invoca `app.yaml`); `prestart` corre `npm run build` antes. |
 | `test` | `vitest run` | Corre los tests unitarios (`src/**/*.test.ts(x)`). |
 | `lint` | `eslint .` | Linter sobre todo el proyecto. |
 

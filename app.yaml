@@ -1,11 +1,14 @@
-# Databricks Apps — runtime del frontend (Next.js standalone, Node 22).
+# Databricks Apps — runtime del frontend (SPA Vite/React, Node 22).
 # Docs: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/databricks-apps/app-runtime
 #
-# `npm run start` dispara `prestart` (next build) y luego `next start`. El puerto
-# se toma de DATABRICKS_APP_PORT DENTRO del script de npm (expansión de shell):
-#   "start": "next start -H 0.0.0.0 -p ${DATABRICKS_APP_PORT:-3000}"
+# `npm run start` dispara `prestart` (tsc + vite build → dist/) y luego
+# `vite preview`, que sirve dist/ con fallback SPA para las rutas de
+# react-router. El puerto se toma de DATABRICKS_APP_PORT DENTRO del script de
+# npm (expansión de shell):
+#   "start": "vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort"
 # porque la sustitución del token en `command` NO funciona a través de `npm run -- …`.
 #
-# NO setear NODE_ENV=production (rompería el `npm install` de devDeps → next build).
-# NEXT_PUBLIC_API_URL va en `.env.production` (build-time), no acá.
+# NO setear NODE_ENV=production (rompería el `npm install` de devDeps →
+# vite/tsc son devDependencies y se necesitan para build + preview).
+# VITE_API_URL va en `.env.production` (build-time, la inlinea Vite), no acá.
 command: ['npm', 'run', 'start']

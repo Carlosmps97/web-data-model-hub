@@ -128,12 +128,39 @@ export interface DiffImpact {
   tablesTouched: number;
   columnsTouched: number;
   affectedOtherTables: { id: string; name: string }[];
+  /** Proyectos distintos afectados (membership de canvas), computado del diff. */
+  projectsAffected?: number;
+}
+
+/** Nodo de la jerarquía del diff (Proyecto→Folder→Canvas→Esquema→Tabla→Columna).
+ *  `change` sólo en hojas que cambiaron (una tabla contenedora puede no tenerlo). */
+export interface DiffTreeNode {
+  type: 'project' | 'folder' | 'canvas' | 'schema' | 'table' | 'view' | 'column';
+  id: string;
+  name: string;
+  change?: 'added' | 'edited' | 'deleted' | null;
+  children?: DiffTreeNode[];
+}
+
+/** Cambio de una entidad de ESTRUCTURA (proyecto/folder/canvas/esquema). */
+export interface DiffStructureEntry {
+  type: string;
+  id: string;
+  name: string;
+  kind: string;
+  change: 'added' | 'edited' | 'deleted';
 }
 
 /** Diff completo de `GET /api/changesets/{id}/diff`. */
 export interface ChangesetDiff {
   collections: Record<string, DiffBucket>;
   impact: DiffImpact;
+  /** Jerarquía de los cambios de datos (tablas/columnas/vistas). */
+  tree?: DiffTreeNode[];
+  /** Tablas/vistas cambiadas que no están en ningún canvas. */
+  orphans?: DiffTreeNode[];
+  /** Cambios de estructura (proyectos/folders/canvases/esquemas). */
+  structure?: DiffStructureEntry[];
 }
 
 /** Body de `POST /api/changesets/{id}/review`. */

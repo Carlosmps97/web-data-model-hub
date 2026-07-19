@@ -13,8 +13,12 @@ jobs:
   deploy:
     name: Deploy frontend
     runs-on: ubuntu-latest
-    # Auth por PAT: define DATABRICKS_HOST y DATABRICKS_TOKEN como
-    # GitHub Actions secrets (Settings → Secrets and variables → Actions).
+    # Auth del CLI por PAT — en GitHub (Settings → Secrets and variables →
+    # Actions) deben existir:
+    #   · variable DATABRICKS_HOST  = https://adb-3871428306507680.0.azuredatabricks.net
+    #   · secret   DATABRICKS_TOKEN = PAT del workspace
+    # El runtime de la app no usa nada de esto: la SPA se buildea al arrancar
+    # (VITE_API_URL viaja commiteada en .env.production, no es secreto).
     env:
       DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}

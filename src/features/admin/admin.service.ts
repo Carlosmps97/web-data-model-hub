@@ -66,6 +66,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'model.edit': 'Create / edit tables',
   'review.decide': 'Aprobar / rechazar solicitudes',
   'publish': 'Publish to production',
+  'rollback': 'Roll back to a published version',
   'export': 'Exportar DDL / metadata',
   'standards.edit': 'Edit Data Standards',
   'admin.manage': 'Manage users and permissions',

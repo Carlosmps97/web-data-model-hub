@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  ReactFlow, Background, BackgroundVariant, Controls, MiniMap,
+  ReactFlow, Background, BackgroundVariant, Controls, MiniMap, ConnectionMode,
   useNodesState, useEdgesState, type Node, type Edge, type Connection,
 } from '@xyflow/react';
 import { useModelerStore } from '@/store/useModelerStore';
@@ -237,6 +237,12 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // Virtualización del viewport: con 100 tablas × ~30 columnas hay ~3.000
         // filas y ~6.000 handles — sólo montan DOM los nodos visibles.
         onlyRenderVisibleElements
+        // Loose: una relación puede EMPEZAR y TERMINAR en cualquier lado (cada
+        // columna tiene handle a izq. y der.). En Strict sólo source(der)→target(izq),
+        // así que "de la izquierda sólo llegaba a la derecha" (pedido owner). El
+        // ruteo del edge ya elige el mejor lado por posición (CrowFootEdge), y el
+        // onConnect ya orienta padre/hijo por el gesto — nada más cambia.
+        connectionMode={ConnectionMode.Loose}
         nodesDraggable={!readonly}
         // Sin delete por teclado: el default de React Flow (Backspace) borraba
         // tablas/wires SÓLO en pantalla (sin persistir, el reload los restaura)

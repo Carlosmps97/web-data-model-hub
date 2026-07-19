@@ -23,7 +23,7 @@ Un principio transversal es que **el frontend nunca toca la base de datos direct
 
 ## 2. Stack tecnológico
 
-El proyecto es 100% TypeScript, construido y servido con **Vite**. No usa Next.js (migró desde Next a Vite); cualquier referencia a `NEXT_PUBLIC_*` en archivos `.env` es legado y el código real lee `import.meta.env.VITE_API_URL`.
+El proyecto es 100% TypeScript, construido y servido con **Vite**. No usa Next.js (migró desde Next a Vite); desde 2026-07-19 los `.env` y manifiestos de deploy ya usan `VITE_API_URL` (la herencia `NEXT_PUBLIC_*` fue eliminada) y el código lee `import.meta.env.VITE_API_URL`.
 
 | Categoría | Tecnología | Versión | Rol en la app |
 |-----------|-----------|---------|---------------|
@@ -609,7 +609,7 @@ La única variable que el código consume es `VITE_API_URL` (inyectada en *build
 
 Todos los servicios anteponen `const API_BASE = import.meta.env.VITE_API_URL ?? ''` a sus rutas `/api/...`, de modo que con `VITE_API_URL` vacío las llamadas son relativas (ideal para dev con proxy o para despliegues donde front y back comparten dominio).
 
-**Caveat de legado**: los archivos `.env.example` y `.env.production` todavía nombran `NEXT_PUBLIC_API_URL` (herencia de la etapa Next.js). Esa variable **ya no se usa**; al configurar un entorno nuevo hay que definir `VITE_API_URL`. Conviene actualizar esos ejemplos para evitar confusión.
+**Nota (resuelto 2026-07-19)**: `.env.example` y `.env.production` ya nombran `VITE_API_URL` (la herencia `NEXT_PUBLIC_API_URL` de la etapa Next.js fue renombrada). Al configurar un entorno nuevo se define `VITE_API_URL`.
 
 Como `VITE_API_URL` se inlinea en el bundle al construir, no es secreto (es una URL pública) y cambiarla implica reconstruir.
 
