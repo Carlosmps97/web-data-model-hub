@@ -21,13 +21,15 @@ export const recordChange = (id: string, collection: string, entityId: string, o
 /** Estado efectivo de una colección. `opts.tableId`/`opts.ids` acotan la
  *  respuesta a un slice server-side — sin filtro, canonical_columns a escala
  *  (300k docs) mueve la colección completa por request. `opts.q`/`opts.limit`:
- *  búsqueda server-side por nombre (modales de catálogo). */
-export const effective = <T>(id: string, collection: string, opts?: { tableId?: string; ids?: string[]; q?: string; limit?: number }) => {
+ *  búsqueda server-side por nombre (modales de catálogo). `opts.schema`:
+ *  tablas/vistas de UN esquema, draft-aware (Database Explorer, doc 25). */
+export const effective = <T>(id: string, collection: string, opts?: { tableId?: string; ids?: string[]; q?: string; limit?: number; schema?: string }) => {
   const params = new URLSearchParams();
   if (opts?.tableId) params.set('tableId', opts.tableId);
   if (opts?.ids?.length) params.set('ids', opts.ids.join(','));
   if (opts?.q) params.set('q', opts.q);
   if (opts?.limit != null) params.set('limit', String(opts.limit));
+  if (opts?.schema) params.set('schema', opts.schema);
   const qs = params.toString();
   return apiGet<T[]>(`${CS}/${encodeURIComponent(id)}/effective/${collection}${qs ? `?${qs}` : ''}`);
 };

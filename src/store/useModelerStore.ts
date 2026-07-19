@@ -66,6 +66,13 @@ interface ModelerState {
   setFlow: (rf: ReactFlowInstance | null) => void;
   /** Centra el canvas sobre la tabla (Find a table… del toolbar). No-op si no hay nodo. */
   focusTable: (tableId: string) => void;
+  /** Tabla a centrar en cuanto MONTE el canvas destino (Finder cross-canvas del
+   *  Database Explorer). Lo consume ModelerCanvas tras cargar el diagrama. */
+  pendingFocusTableId: string | null;
+  setPendingFocus: (tableId: string | null) => void;
+  /** Abre el canvas `canvasId` (de `projectId`) y centra sobre `tableId` cuando
+   *  monte (Finder cross-canvas). Si ese canvas ya está abierto, centra directo. */
+  openCanvasAndFocus: (canvasId: string, projectId: string | null | undefined, tableId: string) => Promise<void>;
   // ── Capa DRAWING (R6d): formas libres detrás de las tablas ──
   drawings: Drawing[];
   /** Crea una forma con tamaño default en el centro del viewport actual. */
@@ -131,6 +138,9 @@ interface ModelerState {
   setSelectedTable: (id: string | null) => void;
   setSelectedEdge: (id: string | null) => void;
   removeTableFromArea: (tableId: string) => Promise<void>;
+  /** Borra la tabla del MODELO con cascada versionada: vistas, relaciones,
+   *  columnas, membresía en TODOS los canvases, y la tabla. Todo en el changeset. */
+  deleteTable: (tableId: string) => Promise<void>;
   updateTable: (id: string, fields: { logicalName?: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
   /** Upsert changeset-aware de una columna (merge sobre la columna actual del diagrama) + reload. */
   updateColumn: (colId: string, fields: Partial<CanonicalColumn>) => Promise<void>;
@@ -188,6 +198,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   setHoverNode: (id) => set({ hoverNodeId: id }),
   flow: null,
   setFlow: (rf) => set({ flow: rf }),
+  pendingFocusTableId: null,
+  setPendingFocus: (tableId) => set({ pendingFocusTableId: tableId }),
   drawings: [],
   addDrawing: (type) => {
     const saId = get().activeSaId; if (!saId) return;
@@ -272,6 +284,16 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const zoom = Math.min(1.2, Math.max(0.8, rf.getZoom()));
       void rf.setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom, duration: 420 });
     }));
+  },
+  openCanvasAndFocus: async (canvasId, projectId, tableId) => {
+    // Ya abierto → el nodo está montado, centrar directo (sin pending).
+    if (get().activeSaId === canvasId) { get().focusTable(tableId); return; }
+    // Cambio de canvas: primero cargamos el diagrama destino y RECIÉN dejamos la
+    // tabla pendiente (el diagrama ya es el nuevo cuando el efecto de
+    // ModelerCanvas la consume ⇒ no centra sobre una tabla homónima del canvas
+    // viejo). Los nodos aún no montaron, así que el efecto poll-ea por rAF.
+    await get().selectSubjectArea(canvasId, projectId ?? undefined);
+    set({ pendingFocusTableId: tableId });
   },
   loadProjects: async () => { set({ projects: await struct.listProjects() }); },
   selectProject: async (pid) => {
@@ -495,6 +517,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const sa = await struct.getSubjectArea(saId);
     await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
     await get().reload();
+    // La tabla nueva queda SELECCIONADA → sube al frente (zIndex) y no cae oculta
+    // detrás de un bloque que ya estaba en el canvas (pedido owner).
+    set({ selectedTableId: id, selectedEdgeId: null });
   },
   addColumn: async (tableId: string, input: { logicalName: string; mode: 'logical' | 'physical'; parentDomainId?: string; dataType?: string }) => {
     get().markDirty();
@@ -584,6 +609,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const merged = Array.from(new Set([...sa.tableIds, ...tableIds]));
     await struct.setSubjectAreaTables(saId, merged);
     await get().reload();
+    // Selecciona la primera importada → al frente (zIndex) y visible (owner).
+    set({ selectedTableId: tableIds[0], selectedEdgeId: null });
   },
   createTableFromSources: async ({ logicalName, schema, columns }) => {
     const saId = get().activeSaId; if (!saId) throw new Error('Pick a Subject Area');
@@ -603,6 +630,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const sa = await struct.getSubjectArea(saId);
     await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
     await get().reload();
+    set({ selectedTableId: id, selectedEdgeId: null });   // al frente + visible (owner)
   },
   setColumnTarget: (id: string | null) => set({ columnTarget: id }),
   setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null }),
@@ -610,8 +638,46 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   removeTableFromArea: async (tableId) => {
     get().markDirty();
     const saId = get().activeSaId; if (!saId) return;
-    const sa = await struct.getSubjectArea(saId);
-    await struct.setSubjectAreaTables(saId, sa.tableIds.filter((t) => t !== tableId));
+    await struct.removeTableFromCanvas(saId, tableId);   // quita de tableIds + layout
+    if (get().selectedTableId === tableId) set({ selectedTableId: null });
+    await get().reload();
+  },
+  deleteTable: async (tableId) => {
+    get().markDirty();
+    // Cascada COMPLETA en el changeset (versionada): primero lo que REFERENCIA
+    // la tabla, la tabla al final. Un solo reload al terminar.
+    // 1) vistas que la usan (cualquier fuente: tableId o sourceTableIds).
+    const views = await viewsSvc.listViews(tableId).catch(() => []);
+    for (const v of views) await viewsSvc.deleteView(v.id);
+    // 2) relaciones donde es extremo (globales). Junta las columnas HIJA de la
+    //    OTRA tabla (sobrevive) para limpiarles el FK huérfano después.
+    const rels = await gov.listRelationships(tableId).catch(() => []);
+    const orphanFk: { colId: string; tableId: string }[] = [];
+    for (const r of rels) {
+      if (r.parentTableId === tableId && r.childTableId !== tableId) {
+        r.pairs.forEach((p) => orphanFk.push({ colId: p.childColumnId, tableId: r.childTableId }));
+      }
+      await gov.deleteRelationship(r.id);
+    }
+    // 3) columnas de la tabla.
+    const cols = await gov.listColumns(tableId).catch(() => []);
+    for (const c of cols) await gov.deleteColumn(c.id);
+    // 4) FK huérfano en columnas HIJA sobrevivientes (misma regla conservadora
+    //    que deleteRelationship: si ya no participan en ninguna relación).
+    const seen = new Set<string>();
+    for (const { colId, tableId: ctid } of orphanFk) {
+      if (seen.has(colId)) continue; seen.add(colId);
+      const near = await gov.listRelationships(ctid).catch(() => []);
+      if (near.some((r) => r.pairs.some((p) => p.childColumnId === colId))) continue;
+      const c = (await gov.listColumns(ctid).catch(() => [])).find((x) => x.id === colId);
+      if (c?.isForeignKey) await gov.updateColumn({ ...c, isForeignKey: false });
+    }
+    // 5) sacar de TODOS los canvases que la contienen (tableIds + layout).
+    const usage = await gov.tableUsage(tableId).then((u) => u.usage).catch(() => []);
+    for (const u of usage) await struct.removeTableFromCanvas(u.canvasId, tableId);
+    // 6) la tabla.
+    await gov.deleteTable(tableId);
+    if (get().selectedTableId === tableId) set({ selectedTableId: null });
     await get().reload();
   },
   updateTable: async (id, fields) => {

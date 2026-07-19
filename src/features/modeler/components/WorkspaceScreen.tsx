@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useModelerStore } from '@/store/useModelerStore';
@@ -34,6 +34,46 @@ export default function WorkspaceScreen() {
   const [openModelShown, setOpenModelShown] = useState(false);
   const [published, setPublished] = useState<VersionRow | null>(null);
   const [users, setUsers] = useState<SimUserDto[]>([]);
+
+  // Ancho resizable del panel de propiedades (solo-vista, persiste por browser).
+  // Sirve para leer nombres largos de tabla que no entran en el default.
+  const [propsWidth, setPropsWidthRaw] = useState<number | null>(() => {
+    try { const v = localStorage.getItem('dmh:propsWidth'); return v ? Number(v) : null; } catch { return null; }
+  });
+  const setPropsWidth = (w: number) => {
+    const clamped = Math.round(Math.max(320, Math.min(w, window.innerWidth * 0.6)));
+    setPropsWidthRaw(clamped);
+    try { localStorage.setItem('dmh:propsWidth', String(clamped)); } catch { /* ignore */ }
+  };
+
+  // Ancho resizable del sidebar IZQUIERDO (explorer): mismo patrón, para árboles
+  // con nombres largos. El handle vive en el borde derecho de .wk-expl-stack.
+  const [explWidth, setExplWidthRaw] = useState<number | null>(() => {
+    try { const v = localStorage.getItem('dmh:explWidth'); return v ? Number(v) : null; } catch { return null; }
+  });
+  const [explResizing, setExplResizing] = useState(false);
+  const setExplWidth = (w: number) => {
+    const clamped = Math.round(Math.max(220, Math.min(w, Math.min(560, window.innerWidth * 0.44))));
+    setExplWidthRaw(clamped);
+    try { localStorage.setItem('dmh:explWidth', String(clamped)); } catch { /* ignore */ }
+  };
+  const startExplResize = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    setExplResizing(true);
+    document.body.style.userSelect = 'none';
+    const move = (ev: PointerEvent) => setExplWidth(ev.clientX);   // clientX = ancho desde el borde izq.
+    const up = () => {
+      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      document.body.style.userSelect = '';
+      setExplResizing(false);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
 
   useEffect(() => { loadProjects().catch(() => pushToast("Couldn't load the projects", 'err')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -118,13 +158,19 @@ export default function WorkspaceScreen() {
   };
 
   return (
-    <div className={`wk${selectedTableId && openMode ? ' has-props' : ''}`}>
+    <div className={`wk${selectedTableId && openMode ? ' has-props' : ''}`}
+      style={{
+        ...(propsWidth ? { ['--props-w']: `${propsWidth}px` } : {}),
+        ...(explWidth ? { ['--expl-w']: `${explWidth}px` } : {}),
+      } as CSSProperties}>
       <Toolbar pushToast={pushToast} onOpenModel={() => setOpenModelShown(true)} />
       {/* Sidebar apilado (doc 18): Model Explorer (versión activa) arriba +
           Database Explorer (producción, solo lectura) abajo. */}
       <div className="wk-expl-stack">
         <ModelExplorer pushToast={pushToast} />
         <DatabaseExplorer />
+        <div className={`wk-expl-resizer${explResizing ? ' dragging' : ''}`}
+          onPointerDown={startExplResize} title="Drag to resize" />
       </div>
       <div className="wk-canvas">
         {!openMode ? (
@@ -160,7 +206,7 @@ export default function WorkspaceScreen() {
           </button>
         </div>
       </div>
-      {selectedTableId && openMode && <PropertiesPanel pushToast={pushToast} />}
+      {selectedTableId && openMode && <PropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />}
       {columnTarget && <ColumnEditor tableId={columnTarget} onClose={() => setColumnTarget(null)} onAdd={addColumn} />}
       <OpenModelModal open={openModelShown} onClose={closeOpenModel} published={published} users={users} />
       {/* El <Toaster> ahora es global (App.tsx): uno solo para toda la app. */}

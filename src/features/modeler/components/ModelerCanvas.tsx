@@ -31,6 +31,10 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const setHoverNode = useModelerStore((s) => s.setHoverNode);
   const setFlow = useModelerStore((s) => s.setFlow);
   const reload = useModelerStore((s) => s.reload);
+  const selectedTableId = useModelerStore((s) => s.selectedTableId);
+  const focusTable = useModelerStore((s) => s.focusTable);
+  const pendingFocusTableId = useModelerStore((s) => s.pendingFocusTableId);
+  const setPendingFocus = useModelerStore((s) => s.setPendingFocus);
   const activeChangeset = useChangesetStore((s) => s.activeId);
   // Viewer-lock: en read-only se puede VER (click abre PropertiesPanel en modo
   // reader) pero no mutar: sin drag de nodos y sin conexiones; las escrituras
@@ -52,10 +56,15 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     const colsByTable = new Map<string, typeof diagram.columns>();
     diagram.columns.forEach((c) => { const a = colsByTable.get(c.tableId) ?? []; a.push(c); colsByTable.set(c.tableId, a); });
     const layout = diagram.subjectArea.layout || {};
+    // zIndex inicial desde la selección actual (getState evita re-armar el
+    // diagrama en cada click; los cambios de selección los aplica el efecto de
+    // abajo). El seleccionado sube al frente para no quedar oculto.
+    const selNow = useModelerStore.getState().selectedTableId;
     const tableNodes: Node[] = diagram.tables.map((t, i) => ({
       id: t.id,
       type: 'table',
       position: layout[t.id] ?? { x: 60 + (i % 4) * 260, y: 60 + Math.floor(i / 4) * 220 },
+      zIndex: t.id === selNow ? 10 : 0,
       data: { table: t, columns: colsByTable.get(t.id) ?? [] },
     }));
     // F3: nodos 'view' + edges 'derivation' desde diagram.views (solo vistas
@@ -81,6 +90,36 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       ...views.edges,
     ]);
   }, [diagram, setNodes, setEdges, onEditView]);
+
+  // El nodo seleccionado (incl. una tabla recién creada/importada) sube al
+  // frente: React Flow pinta por orden de array ⇒ una tabla nueva podía quedar
+  // DETRÁS de un bloque existente. Update liviano (sólo zIndex), sin re-armar.
+  useEffect(() => {
+    setNodes((prev) => prev.map((n) => {
+      if (n.type === 'shape') return n;               // shapes siempre atrás (zIndex -1)
+      const z = n.id === selectedTableId ? 10 : 0;
+      return n.zIndex === z ? n : { ...n, zIndex: z };
+    }));
+  }, [selectedTableId, setNodes]);
+
+  // Finder cross-canvas (Database Explorer): tras abrir el canvas destino,
+  // centra sobre la tabla PENDIENTE en cuanto su nodo monta. selectSubjectArea
+  // resuelve ANTES de que React monte los nodos ⇒ poll por rAF hasta que exista
+  // (o se rinde). focusTable, además, tiene su propio doble-rAF de medición.
+  useEffect(() => {
+    const id = pendingFocusTableId;
+    if (!id) return;
+    let tries = 0;
+    let handle = 0;
+    const tryFocus = () => {
+      const rf = useModelerStore.getState().flow;
+      if (rf?.getNode(id)) { focusTable(id); setPendingFocus(null); return; }
+      if (tries++ < 40) handle = requestAnimationFrame(tryFocus);   // ~0.6s techo
+      else setPendingFocus(null);
+    };
+    handle = requestAnimationFrame(tryFocus);
+    return () => cancelAnimationFrame(handle);
+  }, [pendingFocusTableId, diagram, focusTable, setPendingFocus]);
 
   // Sincroniza la capa DRAWING (store) → nodos 'shape', detrás de las tablas (zIndex < 0).
   // Mantiene la posición que React Flow ya tenga del nodo (drag en curso) y sólo

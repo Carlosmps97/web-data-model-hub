@@ -5,10 +5,10 @@ import { colKey, splitColKey, serializeSources, resolveJoinOverride, type ColCfg
 
 describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
   const cfg: Record<string, ColCfg> = {
-    't1::ID': { included: true, output: 'ID', expression: '', castType: '' },
-    't1::NOMBRE': { included: true, output: 'nombre_up', expression: 'UPPER(t1.NOMBRE)', castType: '' },
-    't2::SALDO': { included: true, output: 'saldo_txt', expression: '', castType: 'STRING' },
-    't2::MONEDA': { included: false, output: 'MONEDA', expression: '', castType: '' },
+    't1::ID': { included: true, output: 'ID', expression: '', castType: '', description: 'Business key' },
+    't1::NOMBRE': { included: true, output: 'nombre_up', expression: 'UPPER(t1.NOMBRE)', castType: '', description: '' },
+    't2::SALDO': { included: true, output: 'saldo_txt', expression: '', castType: 'STRING', description: '  ' },
+    't2::MONEDA': { included: false, output: 'MONEDA', expression: '', castType: '', description: '' },
   };
   const order = ['t1::ID', 't1::NOMBRE', 't2::SALDO', 't2::MONEDA', 't9::FANTASMA'];
   const valid = new Set(['t1::ID', 't1::NOMBRE', 't2::SALDO', 't2::MONEDA']);
@@ -20,7 +20,7 @@ describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
   it('serializa solo columnas incluidas Y válidas, en orden, con tableId', () => {
     const out = serializeSources(order, cfg, valid);
     expect(out.map((s) => s.column)).toEqual(['ID', 'NOMBRE', 'SALDO']);
-    expect(out[0]).toEqual({ column: 'ID', tableId: 't1', outputAlias: undefined, expression: undefined, castType: undefined });
+    expect(out[0]).toEqual({ column: 'ID', tableId: 't1', outputAlias: undefined, expression: undefined, castType: undefined, description: 'Business key' });
   });
 
   it('alias solo si difiere de la columna; expression y castType solo si no vacíos', () => {
@@ -29,6 +29,12 @@ describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
     expect(out[1].expression).toBe('UPPER(t1.NOMBRE)');
     expect(out[2].castType).toBe('STRING');
     expect(out[2].outputAlias).toBe('saldo_txt');
+  });
+
+  it('description (F5): se serializa con texto, se omite si vacía/whitespace', () => {
+    const out = serializeSources(order, cfg, valid);
+    expect(out[0].description).toBe('Business key');   // t1::ID
+    expect(out[2].description).toBeUndefined();          // t2::SALDO = '  ' → trim → undefined
   });
 
   it('resolveJoinOverride: persiste solo si difiere de la inferida (derivación viva)', () => {

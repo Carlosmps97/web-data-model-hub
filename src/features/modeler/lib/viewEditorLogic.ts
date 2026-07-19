@@ -3,7 +3,7 @@
 import type { ViewSource } from '@/services/views.service';
 
 /** Config editable por columna de la grilla del editor. */
-export interface ColCfg { included: boolean; output: string; expression: string; castType: string; }
+export interface ColCfg { included: boolean; output: string; expression: string; castType: string; description: string; }
 
 /** Clave única de una columna en la grilla multi-fuente. */
 export const colKey = (tableId: string, column: string) => `${tableId}::${column}`;
@@ -29,6 +29,9 @@ export function serializeSources(order: string[], cfg: Record<string, ColCfg>, v
         outputAlias: out && out !== column ? out : undefined,
         expression: cc.expression.trim() || undefined,
         castType: cc.castType.trim() || undefined,
+        // Definición propia SOLO si el usuario escribió una (vacío ⇒ hereda la
+        // de la columna física; no duplicamos passthroughs).
+        description: cc.description.trim() || undefined,
       };
     });
 }

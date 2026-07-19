@@ -74,6 +74,9 @@ export const searchTables = (q: string, limit = 50) => {
   return apiGet<CanonicalTable[]>(`${CATALOG}/tables?${params.toString()}`);
 };
 export const createTable = (t: CanonicalTable) => rec('canonical_tables', t.id, 'upsert', { ...t });
+/** Borra la tabla en el changeset (soft-delete VERSIONADO). El cascade
+ *  (columnas/relaciones/vistas/membresías de canvas) lo orquesta el store. */
+export const deleteTable = (id: string) => rec('canonical_tables', id, 'delete');
 export const listColumns = (tableId: string) => {
   const a = active();
   if (!a) return apiGet<CanonicalColumn[]>(`${CATALOG}/tables/${encodeURIComponent(tableId)}/columns`);

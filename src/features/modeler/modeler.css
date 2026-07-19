@@ -1,6 +1,6 @@
 /* Workspace shell estilo Erwin (wk-*). Light only, navy via tokens. */
 .wk { display: grid; height: 100vh; grid-template-rows: 84px 1fr 34px;
-  grid-template-columns: 264px 1fr;
+  grid-template-columns: var(--expl-w, 264px) 1fr;
   grid-template-areas: "toolbar toolbar" "explorer canvas" "explorer status";
   background: var(--bg); overflow: hidden; }
 
@@ -163,8 +163,14 @@
 .wk-relhint .wk-tic { color: var(--on-primary); }
 
 /* ── Sidebar apilado (doc 18): Model Explorer + Database Explorer ── */
-.wk-expl-stack { grid-area: explorer; display: flex; flex-direction: column; min-height: 0;
+.wk-expl-stack { grid-area: explorer; position: relative; display: flex; flex-direction: column; min-height: 0;
   background: var(--surface); border-right: 1px solid var(--border-soft); }
+/* Handle de resize del explorer (solo-vista) sobre su borde derecho. */
+.wk-expl-resizer { position: absolute; right: -3px; top: 0; bottom: 0; width: 7px; z-index: 6;
+  cursor: col-resize; touch-action: none; }
+.wk-expl-resizer::before { content: ''; position: absolute; right: 3px; top: 0; bottom: 0; width: 1px;
+  background: transparent; transition: background .12s; }
+.wk-expl-resizer:hover::before, .wk-expl-resizer.dragging::before { background: var(--primary); }
 .wk-explorer { flex: 1 1 auto; min-height: 0; background: var(--surface); overflow-y: auto; padding: 6px; }
 
 /* Database Explorer (producción publicada, solo lectura) */
@@ -235,10 +241,18 @@
 .wk-status-spacer { flex: 1; }
 
 /* Panel de Propiedades (derecha) — 3ª columna al seleccionar un bloque (diseño p8: 472px) */
-.wk.has-props { grid-template-columns: 264px minmax(0, 1fr) min(472px, 38vw);
+/* El ancho del panel de propiedades es resizable (solo-vista): `--props-w` lo
+   fija WorkspaceScreen desde el drag; sin valor cae al default original. */
+.wk.has-props { grid-template-columns: var(--expl-w, 264px) minmax(0, 1fr) var(--props-w, min(472px, 38vw));
   grid-template-areas: "toolbar toolbar toolbar" "explorer canvas props" "explorer status props"; }
-.wk-props { grid-area: props; display: flex; flex-direction: column; min-height: 0; min-width: 0;
+.wk-props { grid-area: props; position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0;
   background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(16,27,48,.04); }
+/* Handle de resize sobre el borde izquierdo del panel (col-resize). */
+.wk-props-resizer { position: absolute; left: -3px; top: 0; bottom: 0; width: 7px; z-index: 6;
+  cursor: col-resize; touch-action: none; }
+.wk-props-resizer::before { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px;
+  background: transparent; transition: background .12s; }
+.wk-props-resizer:hover::before, .wk-props-resizer.dragging::before { background: var(--primary); }
 
 /* Header fijo: glyph navy 34px + nombre 16/700 + "schema x · table" + close */
 .wk-props-top { flex: none; padding: 16px 18px 0; }

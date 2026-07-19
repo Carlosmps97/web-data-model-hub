@@ -195,8 +195,9 @@ export interface DatabricksDdlOptions {
 }
 
 export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
-  includeViews: false,
-  includeKeys: true,
+  // Default pedido owner: Views + Comments + Partitions ON; PK&FK (keys) e Indexes OFF.
+  includeViews: true,
+  includeKeys: false,
   includeComments: true,
   includePartitions: true,
   includeIndexes: false,

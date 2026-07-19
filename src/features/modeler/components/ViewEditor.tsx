@@ -18,7 +18,7 @@ const idField: React.CSSProperties = { width: '100%', height: 42, padding: '0 13
 const cellInput: React.CSSProperties = { width: '100%', height: 32, padding: '0 10px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 7, fontFamily: MONO, fontSize: 11.5, color: NAVY, outline: 'none', boxSizing: 'border-box' };
 const link: React.CSSProperties = { border: 'none', background: 'transparent', color: BLUE, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 };
 const updn = (dis: boolean): React.CSSProperties => ({ height: 13, border: 'none', background: 'transparent', cursor: dis ? 'default' : 'pointer', color: dis ? '#D6DCE6' : '#8A93A5', padding: 0, lineHeight: 0 });
-const GRID = '20px 26px 1.2fr 1fr 1.3fr 0.9fr';
+const GRID = '20px 24px 0.9fr 0.72fr 1fr 0.62fr 1.15fr';
 
 /**
  * ViewEditor multi-fuente (F3, spec §3-5). Una vista nace de 1..N tablas del
@@ -31,7 +31,7 @@ const GRID = '20px 26px 1.2fr 1fr 1.3fr 0.9fr';
  * El preview usa el MISMO generador que el Export DDL (`viewDDL`).
  */
 export default function ViewEditor({
-  lockedTableId, view, onClose, onSaved, pushToast,
+  lockedTableId, view, onClose, onSaved, pushToast, readOnly,
 }: {
   /** Tabla pre-amarrada (abierto desde Properties→Views): fuente fija, no removible. */
   lockedTableId?: string;
@@ -40,8 +40,12 @@ export default function ViewEditor({
   onClose: () => void;
   onSaved: () => void;
   pushToast: (m: string, k?: 'err') => void;
+  /** Modo VISOR (F5): abre la vista solo-lectura desde un canvas productivo
+   *  (sin changeset) — muestra definiciones sin necesidad de crear versión. */
+  readOnly?: boolean;
 }) {
   const editing = !!view;
+  const ro = !!readOnly;
   const diagram = useModelerStore((s) => s.diagram);
   const tables = useMemo(() => diagram?.tables ?? [], [diagram]);
   const allColumns = useMemo(() => diagram?.columns ?? [], [diagram]);
@@ -69,6 +73,8 @@ export default function ViewEditor({
   const [tags, setTags] = useState<Tag[]>(view?.tags ?? []);
   const [filter, setFilter] = useState(view?.filter ?? '');
   const [showOnCanvas, setShowOnCanvas] = useState(view?.showOnCanvas ?? false);
+  // F5: definición funcional de la vista (nivel vista). Editable en el panel izq.
+  const [description, setDescription] = useState(view?.description ?? '');
   const [search, setSearch] = useState('');
   const [srcSearch, setSrcSearch] = useState('');
   const [busy, setBusy] = useState(false);
@@ -84,7 +90,7 @@ export default function ViewEditor({
       const k = colKey(s.tableId ?? initialSourceIds[0] ?? '', s.column!);
       if (cfg[k]) continue;
       order.push(k);
-      cfg[k] = { included: true, output: s.outputAlias ?? s.column!, expression: s.expression ?? '', castType: s.castType ?? '' };
+      cfg[k] = { included: true, output: s.outputAlias ?? s.column!, expression: s.expression ?? '', castType: s.castType ?? '', description: s.description ?? '' };
     }
     // 2) resto de columnas de cada fuente: excluidas si ya hay proyección;
     //    TODAS incluidas en una vista nueva (comportamiento 07b-2).
@@ -93,7 +99,7 @@ export default function ViewEditor({
         const k = colKey(tid, c.physicalName);
         if (cfg[k]) continue;
         order.push(k);
-        cfg[k] = { included: !hasProjection, output: c.physicalName, expression: '', castType: '' };
+        cfg[k] = { included: !hasProjection, output: c.physicalName, expression: '', castType: '', description: '' };
       }
     }
     return { order, cfg };
@@ -101,9 +107,9 @@ export default function ViewEditor({
 
   // Metadata por clave de las fuentes ACTUALES (nombre + tipo de la columna).
   const colMeta = useMemo(() => {
-    const m = new Map<string, { name: string; dataType: string }>();
+    const m = new Map<string, { name: string; dataType: string; description: string }>();
     for (const tid of sourceIds) {
-      for (const c of colsByTable.get(tid) ?? []) m.set(colKey(tid, c.physicalName), { name: c.physicalName, dataType: c.dataType });
+      for (const c of colsByTable.get(tid) ?? []) m.set(colKey(tid, c.physicalName), { name: c.physicalName, dataType: c.dataType, description: c.description ?? '' });
     }
     return m;
   }, [sourceIds, colsByTable]);
@@ -155,7 +161,7 @@ export default function ViewEditor({
         order.push(k);
         // Fuente agregada a una proyección existente ⇒ columnas EXCLUIDAS por
         // default (el usuario elige); en una vista nueva se incluye todo.
-        cfg[k] = { included: !editing, output: c.physicalName, expression: '', castType: '' };
+        cfg[k] = { included: !editing, output: c.physicalName, expression: '', castType: '', description: '' };
       }
       return { order, cfg };
     });
@@ -223,7 +229,7 @@ export default function ViewEditor({
   }, [includedCount, view, name, schema, filter, sourceIds, joinText, inferred, order, cfg, validKeys, tables, relationships, allColumns]);
 
   const save = async () => {
-    if (!canSave) return;
+    if (!canSave || ro) return;
     setBusy(true);
     try {
       const body: viewsSvc.ViewInput = {
@@ -237,9 +243,9 @@ export default function ViewEditor({
         showOnCanvas,
         joinOverride: resolveJoinOverride(joinText, inferred),
         sql: preview,
-        // Campo persistido que el editor NO edita: se PRESERVA del doc actual
-        // (el guardado es doc COMPLETO — omitirlo lo borraría en silencio).
-        description: view?.description,
+        // F5: definición funcional de la vista, ahora EDITABLE (panel izq).
+        // Vacío ⇒ undefined (no persistimos cadena vacía).
+        description: description.trim() || undefined,
       };
       if (editing && view) await viewsSvc.updateView(view.id, body);
       else await viewsSvc.createView(body);
@@ -260,31 +266,38 @@ export default function ViewEditor({
   return (
     <Dialog
       open
-      title={editing ? `Edit view · ${view?.name}` : 'New view'}
-      subtitle="Define a view over one or more source tables — columns, aliases, CAST and JOIN"
+      title={ro ? `View · ${view?.name}` : editing ? `Edit view · ${view?.name}` : 'New view'}
+      subtitle={ro ? 'Read-only — definitions and structure as stored (create a version to edit)' : 'Define a view over one or more source tables — columns, aliases, CAST and JOIN'}
       icon={Eye}
       backdrop="canvas"
       canvasTop={136}
-      width={1180}
+      width={1320}
       onClose={onClose}
       footer={
-        <>
-          <span style={{ flex: 1, fontSize: 11.5, color: '#56607A' }}>
-            A view never copies data — it derives from {sourceIds.length === 1 ? 'its source table' : `its ${sourceIds.length} source tables`}.
-          </span>
-          <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
-          <button className="rd-btn rd-btn-sm" disabled={!canSave} onClick={save}
-            title={!joinOk ? 'Define the JOIN condition between the sources' : includedCount === 0 ? 'Select at least one column' : undefined}
-            style={{ background: canSave ? PURPLE : '#CBD2DE', color: '#fff', border: 'none' }}>
-            {editing ? 'Save changes' : 'Create view'}
-          </button>
-        </>
+        ro ? (
+          <>
+            <span style={{ flex: 1, fontSize: 11.5, color: '#56607A' }}>Read-only — productive version. Create a version to edit this view.</span>
+            <button className="rd-btn rd-btn-sm" onClick={onClose} style={{ background: PURPLE, color: '#fff', border: 'none' }}>Close</button>
+          </>
+        ) : (
+          <>
+            <span style={{ flex: 1, fontSize: 11.5, color: '#56607A' }}>
+              A view never copies data — it derives from {sourceIds.length === 1 ? 'its source table' : `its ${sourceIds.length} source tables`}.
+            </span>
+            <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
+            <button className="rd-btn rd-btn-sm" disabled={!canSave} onClick={save}
+              title={!joinOk ? 'Define the JOIN condition between the sources' : includedCount === 0 ? 'Select at least one column' : undefined}
+              style={{ background: canSave ? PURPLE : '#CBD2DE', color: '#fff', border: 'none' }}>
+              {editing ? 'Save changes' : 'Create view'}
+            </button>
+          </>
+        )
       }
     >
       <datalist id="view-cast-types">
         {COLUMN_DATA_TYPES.map((t) => <option key={t} value={t} />)}
       </datalist>
-      <div style={{ display: 'flex', gap: 0, height: 560, margin: '-4px -4px 0', minHeight: 0 }}>
+      <fieldset disabled={ro} style={{ border: 0, padding: 0, margin: '-4px -4px 0', minWidth: 0, display: 'flex', gap: 0, height: 560, minHeight: 0 }}>
         {/* ── LEFT · identity + fuentes ── */}
         <div style={{ width: 400, flex: 'none', borderRight: '1px solid #EAEDF2', background: '#FAFBFC', display: 'flex', flexDirection: 'column', minHeight: 0, borderRadius: '10px 0 0 10px' }}>
           <div style={{ padding: '14px 18px', borderBottom: '1px solid #EAEDF2', display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -300,6 +313,13 @@ export default function ViewEditor({
               <label style={lbl}>Schema</label>
               {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
               <SchemaSelect value={schema} onChange={setSchema} className="" style={idField} />
+            </div>
+            {/* F5: definición funcional de la VISTA (nivel vista, no de columna). */}
+            <div>
+              <label style={lbl}>Functional definition</label>
+              <textarea value={description} onChange={(e) => setDescription(e.target.value)}
+                placeholder="What this view represents (business definition)…"
+                style={{ width: '100%', minHeight: 66, padding: '10px 13px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 10, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.55, color: NAVY, resize: 'vertical', outline: 'none', boxSizing: 'border-box' }} />
             </div>
             {/* ── Fuentes: chips + buscador de tablas del canvas ── */}
             <div>
@@ -390,7 +410,7 @@ export default function ViewEditor({
             {/* grilla de columnas AGRUPADA por tabla fuente */}
             <div style={{ border: '1px solid #EAEDF2', borderRadius: 12, overflow: 'hidden' }}>
               <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 10, padding: '9px 13px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
-                <span /><span /><span>Source column</span><span>Output name</span><span>Expression · free SQL</span><span>Cast · tipo</span>
+                <span /><span /><span>Source column</span><span>Output name</span><span>Expression · free SQL</span><span>Cast · tipo</span><span>Definition</span>
               </div>
               {sourceIds.length === 0 && <div style={{ padding: '14px 13px', fontSize: 12.5, color: MUTED }}>Add a source table to pick columns.</div>}
               {sourceIds.map((tid) => {
@@ -405,7 +425,7 @@ export default function ViewEditor({
                     </div>
                     {keys.length === 0 && <div style={{ padding: '10px 13px', fontSize: 12, color: MUTED }}>{q ? 'No column matches the search.' : 'The table has no columns.'}</div>}
                     {keys.map((k) => {
-                      const meta = colMeta.get(k) ?? { name: splitColKey(k).column, dataType: '' };
+                      const meta = colMeta.get(k) ?? { name: splitColKey(k).column, dataType: '', description: '' };
                       const cc = cfg[k] ?? { included: false, output: meta.name, expression: '', castType: '' };
                       return (
                         <div key={k} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 10, padding: '7px 13px', borderBottom: '1px solid #F2F4F8' }}>
@@ -428,6 +448,13 @@ export default function ViewEditor({
                           <input style={{ ...cellInput, opacity: cc.included ? 1 : 0.5, borderColor: cc.castType.trim() ? '#E1D4FB' : '#DDE2EC', color: cc.castType.trim() ? PURPLE_DK : NAVY }}
                             value={cc.castType} disabled={!cc.included} list="view-cast-types"
                             onChange={(e) => patch(k, { castType: e.target.value })} placeholder="cast a tipo…" />
+                          {/* F5: definición propia de la columna-de-vista. Placeholder =
+                              la definición HEREDADA de la columna física (vacío ⇒ hereda). */}
+                          <input style={{ ...cellInput, opacity: cc.included ? 1 : 0.5, borderColor: cc.description.trim() ? '#E1D4FB' : '#DDE2EC' }}
+                            value={cc.description} disabled={!cc.included}
+                            onChange={(e) => patch(k, { description: e.target.value })}
+                            title={meta.description ? `Inherits from physical column: ${meta.description}` : undefined}
+                            placeholder={meta.description || 'definition…'} />
                         </div>
                       );
                     })}
@@ -471,7 +498,7 @@ export default function ViewEditor({
             </div>
           </div>
         </div>
-      </div>
+      </fieldset>
     </Dialog>
   );
 }

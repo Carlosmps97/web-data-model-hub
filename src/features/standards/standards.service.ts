@@ -14,7 +14,7 @@ const STD = `${API_BASE}/api/standards`;
 
 export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType | null; locked?: boolean; lockedBy?: string | null; lockedAt?: string | null; }
 export interface SnapshotDomain { id: string; name: string; defaultDataType: string; namingTerm?: string | null; description?: string | null; }
-export interface NamingRuleSnap { separator: Separator | string | null; case: Casing | string | null; }
+export interface NamingRuleSnap { separator: Separator | string | null; case: Casing | string | null; maxLength?: number | null; }
 /** Definición de un UDP (User Defined Property): la KEY + su tipo + default +
  *  valores permitidos (enum si dataType='list') + niveles donde aplica. */
 export type UdpDataType = 'string' | 'number' | 'boolean' | 'date' | 'list';
@@ -55,7 +55,7 @@ export interface StandardsVersion {
 // ── Batch de cambios que se aplica como UNA versión (15d/15e) ──
 export interface TermEditInput { id?: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType; }
 export interface DomainEditInput { id?: string; name: string; defaultDataType: string; namingTerm?: string; description?: string; }
-export interface NamingEditInput { separator: string; case: string; }
+export interface NamingEditInput { separator: string; case: string; maxLength: number; }
 export interface UdpEditInput {
   id?: string;
   name: string;

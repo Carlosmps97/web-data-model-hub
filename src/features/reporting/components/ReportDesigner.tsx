@@ -11,7 +11,12 @@ import SqlEditor from './SqlEditor';
 
 type Mode = 'builder' | 'sql';
 
-const VIEWS: ViewKey[] = ['columns', 'tables', 'relationships', 'views', 'models'];
+const VIEWS: ViewKey[] = ['columns', 'tables', 'relationships', 'views', 'view_columns', 'models'];
+// Etiqueta legible del selector (la key `view_columns` se muestra "view columns").
+const VIEW_LABELS: Record<ViewKey, string> = {
+  columns: 'columns', tables: 'tables', relationships: 'relationships',
+  views: 'views', view_columns: 'view columns', models: 'models',
+};
 const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
 
 export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
@@ -83,7 +88,7 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
         <Table2 size={18} color="#2E5BFF" />
         <span style={{ fontSize: 15, fontWeight: 700, color: '#1A2B4A' }}>Report Designer</span>
         <select value={from} onChange={(e) => setFrom(e.target.value as ViewKey)} style={{ height: 32, padding: '0 10px', border: '1px solid #DCE1EA', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', color: '#1A2B4A' }}>
-          {VIEWS.map((v) => <option key={v} value={v}>{v}</option>)}
+          {VIEWS.map((v) => <option key={v} value={v}>{VIEW_LABELS[v]}</option>)}
         </select>
         <div style={{ display: 'inline-flex', border: '1px solid #DCE1EA', borderRadius: 8, overflow: 'hidden' }}>
           {(['builder', 'sql'] as const).map((m) => (

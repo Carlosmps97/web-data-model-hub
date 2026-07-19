@@ -65,6 +65,8 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
   const cfg0 = snapshot.namingConfig[scope];
   const [sep, setSep] = useState<string>(String(cfg0.separator ?? ''));
   const [casing, setCasing] = useState<string>(String(cfg0.case ?? 'upper'));
+  // Límite de caracteres del nombre FÍSICO (default 150; se versiona en Data Standards).
+  const [maxLen, setMaxLen] = useState<number>(Number(cfg0.maxLength ?? 150));
 
   // Borrador EDITABLE de términos (vacío hasta entrar en modo edición; la vista
   // read-only usa `snapshot.dict` directamente vía `live`).
@@ -76,6 +78,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
     if (editing) return;
     setSep(String(snapshot.namingConfig[scope].separator ?? ''));
     setCasing(String(snapshot.namingConfig[scope].case ?? 'upper'));
+    setMaxLen(Number(snapshot.namingConfig[scope].maxLength ?? 150));
   }, [scope, editing, snapshot]);
 
   const enterEdit = () => {
@@ -84,6 +87,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
     setTerms(snapshot.dict.filter((t) => t.scope === scope).map((t) => ({ ...t, _orig: t.term })));
     setSep(String(snapshot.namingConfig[scope].separator ?? ''));
     setCasing(String(snapshot.namingConfig[scope].case ?? 'upper'));
+    setMaxLen(Number(snapshot.namingConfig[scope].maxLength ?? 150));
     setEditing(true);
   };
   const cancel = () => { setEditing(false); setConfirm(false); };
@@ -106,10 +110,10 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
       if (t._new) added.push(`${t.term} → ${t.abbrev}`);
       else { const b = before.get(t.id); if (b && (b.term !== t.term || b.abbrev !== t.abbrev || b.wordType !== t.wordType)) edited.push(`${t.term} → ${t.abbrev}`); }
     }
-    const cfgChanged = sep !== String(cfg0.separator ?? '') || casing !== String(cfg0.case ?? 'upper');
-    if (cfgChanged) edited.push(`${scope === 'column' ? 'Column' : 'Table'} naming · sep '${sep || '(none)'}' · ${casing}`);
+    const cfgChanged = sep !== String(cfg0.separator ?? '') || casing !== String(cfg0.case ?? 'upper') || maxLen !== Number(cfg0.maxLength ?? 150);
+    if (cfgChanged) edited.push(`${scope === 'column' ? 'Column' : 'Table'} naming · sep '${sep || '(none)'}' · ${casing} · max ${maxLen}`);
     return { added, edited, removed, cfgChanged, count: added.length + edited.length + removed.length };
-  }, [terms, sep, casing, snapshot.dict, scope, cfg0]);
+  }, [terms, sep, casing, maxLen, snapshot.dict, scope, cfg0]);
 
   // Validación on-demand de una fila NUEVA (botón junto al alta). El backend
   // igual re-valida al guardar: esto es cortesía de UX.
@@ -164,7 +168,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
         .map((t) => ({ id: t._new ? undefined : t.id, term: t.term.trim(), abbrev: t.abbrev.trim(), scope, wordType: t.wordType ?? undefined }))
         .filter((t) => t.term && t.abbrev);
       body.termsDelete = terms.filter((t) => t._deleted && !t._new).map((t) => t.id);
-      if (diff.cfgChanged) body.namingConfig = { [scope]: { separator: sep, case: casing } };
+      if (diff.cfgChanged) body.namingConfig = { [scope]: { separator: sep, case: casing, maxLength: maxLen } };
       const v = await applyStandards(body);
       toast.success(`Standards applied · ${v.label} · ${v.impact.columns} names re-derived`);
       setEditing(false); setConfirm(false); onApplied();
@@ -228,6 +232,15 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
               <option value="upper">UPPER</option><option value="lower" disabled>lower</option><option value="camel" disabled>camelCase</option>
             </select>
           ) : <div style={chip}>{casing.toUpperCase()}</div>}
+          {/* F: límite de caracteres del físico (tabla/columna). Al crear, si
+              el físico lo excede, el backend rechaza con error. Versionado. */}
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#56607A', margin: '15px 0 8px' }}>Max physical length (chars)</div>
+          {editing ? (
+            <input type="number" min={1} max={1000} value={maxLen}
+              onChange={(e) => setMaxLen(Math.max(1, Number(e.target.value) || 0))}
+              className="rd-input" style={{ height: 36 }}
+              title="Máximo de caracteres del nombre físico (tabla/columna). Al crear/renombrar, si el físico lo excede no se crea." />
+          ) : <div style={chip}>{maxLen} chars</div>}
         </div>
         <div style={{ width: 340, flex: 'none', background: '#1A2B4A', borderRadius: 12, padding: '16px 17px' }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#9DB0D6', marginBottom: 10, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Preview · physical name</div>

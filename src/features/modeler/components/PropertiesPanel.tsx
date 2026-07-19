@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowDownUp, Eye, Pencil, Table2, Trash2 } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
@@ -36,7 +36,7 @@ const CARD_LBL: Record<gov.Cardinality, string> = {
  * en Columns/Views, y cuerpo scrolleable. En read-only (sin changeset activo)
  * el panel abre igual pero como reader: inputs deshabilitados y sin acciones.
  */
-export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
+export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m: string, k?: 'err') => void; onResize?: (width: number) => void }) {
   // Selectores individuales (no el store entero): el panel vive junto al canvas
   // y suscribirse a TODO el store lo re-renderizaba en cada hover/drag/dirty.
   const diagram = useModelerStore((s) => s.diagram);
@@ -48,6 +48,8 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
   const deleteColumn = useModelerStore((s) => s.deleteColumn);
   const setColumnTarget = useModelerStore((s) => s.setColumnTarget);
   const deleteRelationship = useModelerStore((s) => s.deleteRelationship);
+  const removeTableFromArea = useModelerStore((s) => s.removeTableFromArea);
+  const deleteTable = useModelerStore((s) => s.deleteTable);
   // En modo visor puede haber changeset activo (viendo un request desde Review):
   // el panel abre como reader igual que sin changeset.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
@@ -83,10 +85,15 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
   useEffect(() => { setExpandedColId(null); }, [selectedTableId]);
   // Reorden persistiéndose en background (la lista ya se movió de forma optimista).
   const [reordering, setReordering] = useState(false);
+  // Quitar del canvas / borrar la tabla: mientras corre, spinner en el botón y
+  // ambos deshabilitados (el borrado tarda; evita reclicks — pedido owner).
+  const [delBusy, setDelBusy] = useState<'remove' | 'delete' | null>(null);
+  // Drag del handle para ensanchar el panel (solo-vista; nombres largos).
+  const [resizing, setResizing] = useState(false);
 
   // ── Views (pp2) — se cargan al seleccionar la tabla para el contador del tab ──
   const [views, setViews] = useState<View[]>([]);
-  const [viewEditor, setViewEditor] = useState<{ view?: View } | null>(null);
+  const [viewEditor, setViewEditor] = useState<{ view?: View; readOnly?: boolean } | null>(null);
   const reloadViews = () => { if (selectedTableId) viewsSvc.listViews(selectedTableId).then(setViews).catch(() => {}); };
   useEffect(() => {
     if (selectedTableId) viewsSvc.listViews(selectedTableId).then(setViews).catch(() => setViews([]));
@@ -207,6 +214,15 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
   // equipo (Erwin no lo tiene). Las columnas no resolubles (expresiones)
   // conservan su orden relativo al final de su grupo.
   const alignView = async (v: View) => {
+    // Confirmación previa (pedido owner): reordenar reescribe la definición de
+    // la vista → popup Aceptar/Cancelar antes de ejecutar.
+    const ok = await confirmDialog({
+      title: 'Reorder view columns',
+      message: <>The columns of view <strong>“{v.name}”</strong> will be reordered to match the physical order of its source table(s). This rewrites the view definition.</>,
+      confirmLabel: 'Reorder',
+      cancelLabel: 'Cancel',
+    });
+    if (!ok) return;
     setAligningId(v.id);
     try {
       const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : [table.id]);
@@ -286,8 +302,92 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
     finally { setReordering(false); }
   };
 
+  // ── Quitar del canvas / borrar la tabla (versionado + popup de impacto) ──
+  const removeFromCanvas = async () => {
+    if (delBusy) return;
+    setDelBusy('remove');
+    try {
+      const ok = await confirmDialog({
+        title: 'Remove from canvas',
+        message: <>Remove <strong>“{table.physicalName || table.logicalName}”</strong> from this canvas? The table and its data stay in the model — you can add it back later.</>,
+        confirmLabel: 'Remove', cancelLabel: 'Cancel',
+        // El diálogo queda con spinner y bloqueado hasta que termina (no cierra
+        // ni deja re-clickear mientras se aplica).
+        action: async () => { await removeTableFromArea(table.id); },
+      });
+      if (ok) pushToast('Table removed from this canvas');
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't remove the table", 'err'); }
+    finally { setDelBusy(null); }
+  };
+  const askDeleteTable = async () => {
+    if (delBusy) return;
+    setDelBusy('delete');
+    try {
+      // Impacto: canvases donde aparece, tablas relacionadas (relaciones que se
+      // van) y vistas que también se eliminan. Durante este pre-conteo el botón
+      // ya muestra el spinner (el diálogo todavía no abre).
+      let canvases = 0, related = 0, nViews = 0;
+      try {
+        const [usage, rels, vs] = await Promise.all([
+          gov.tableUsage(table.id).then((u) => u.usage).catch(() => []),
+          gov.listRelationships(table.id).catch(() => []),
+          viewsSvc.listViews(table.id).catch(() => []),
+        ]);
+        canvases = usage.length;
+        related = new Set(rels.flatMap((r) => [r.parentTableId, r.childTableId]).filter((t) => t !== table.id)).size;
+        nViews = vs.length;
+      } catch { /* si falla el conteo se muestran ceros */ }
+      const ok = await confirmDialog({
+        title: 'Delete table',
+        variant: 'danger',
+        confirmLabel: 'Delete table',
+        cancelLabel: 'Cancel',
+        message: <>
+          Table <strong>“{table.physicalName || table.logicalName}”</strong> will be deleted from the model. This affects:
+          <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+            <li><strong>{canvases}</strong> canvas{canvases === 1 ? '' : 'es'} it appears on</li>
+            <li><strong>{related}</strong> related table{related === 1 ? '' : 's'} (their relationships are removed)</li>
+            <li><strong>{nViews}</strong> view{nViews === 1 ? '' : 's'} (also deleted)</li>
+          </ul>
+          <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--muted)' }}>Its columns and relationships go too. This change is part of the current version.</div>
+        </>,
+        // El borrado (cascada versionada) corre DENTRO del diálogo: queda con
+        // spinner y bloqueado hasta terminar (el owner reportó reclicks por el delay).
+        action: async () => { await deleteTable(table.id); },
+      });
+      if (ok) pushToast('Table deleted');
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't delete the table", 'err'); }
+    finally { setDelBusy(null); }
+  };
+
+  // ── Resize del panel (drag del borde izquierdo). El ancho lo fija/clampa/
+  // persiste WorkspaceScreen; acá sólo emitimos el ancho = viewport − X. ──
+  const startResize = (e: ReactPointerEvent) => {
+    if (!onResize) return;
+    e.preventDefault();
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    setResizing(true);
+    document.body.style.userSelect = 'none';
+    const move = (ev: PointerEvent) => onResize(window.innerWidth - ev.clientX);
+    const up = () => {
+      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      document.body.style.userSelect = '';
+      setResizing(false);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
+
   return (
     <aside className="wk-props">
+      {/* Handle de resize (solo-vista): ensancha el panel para nombres largos. */}
+      {onResize && (
+        <div className={`wk-props-resizer${resizing ? ' dragging' : ''}`}
+          onPointerDown={startResize} title="Drag to resize" />
+      )}
       {/* ── Header fijo: glyph + nombre + schema · table + close (diseño p8) ── */}
       <div className="wk-props-top">
         <div className="wk-props-head">
@@ -336,6 +436,16 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
               <button className="rd-btn rd-btn-primary rd-btn-sm" style={{ width: '100%' }} disabled={savingDef} onClick={saveDef}>
                 {savingDef && <span className="rd-spin" aria-hidden />}{savingDef ? 'Saving…' : 'Save'}
               </button>
+            )}
+            {canEdit && (
+              <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={delBusy !== null} onClick={removeFromCanvas}>
+                  {delBusy === 'remove' ? <span className="rd-spin" aria-hidden /> : <Table2 size={12} />} Remove from this canvas
+                </button>
+                <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'var(--error, #C4314B)' }} disabled={delBusy !== null} onClick={askDeleteTable}>
+                  {delBusy === 'delete' ? <span className="rd-spin" aria-hidden /> : <Trash2 size={12} />} Delete table…
+                </button>
+              </div>
             )}
           </>
         )}
@@ -421,15 +531,20 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
                   <div className="wk-pp-link-head">
                     <Eye size={13} style={{ color: 'var(--purple)', flex: 'none' }} />
                     <span className="rd-mono">{v.schema ? `${v.schema}.` : ''}{v.name}</span>
-                    {canEdit && (
-                      <span style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
-                        <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Match the table's physical order" disabled={aligningId === v.id} onClick={() => alignView(v)}>
-                          {aligningId === v.id ? <span className="rd-spin" aria-hidden /> : <ArrowDownUp size={12} />}
-                        </button>
-                        <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Edit" onClick={() => setViewEditor({ view: v })}><Pencil size={12} /></button>
-                        <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Delete" onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete view', message: <>View <strong>“{v.name}”</strong> will be deleted.</>, confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
-                      </span>
-                    )}
+                    <span style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
+                      {/* Ojo (F5): abre la vista SOLO-LECTURA — sirve en canvas
+                          productivo sin crear versión. Siempre visible. */}
+                      <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="View definition (read-only)" onClick={() => setViewEditor({ view: v, readOnly: true })}><Eye size={12} /></button>
+                      {canEdit && (
+                        <>
+                          <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Match the table's physical order" disabled={aligningId === v.id} onClick={() => alignView(v)}>
+                            {aligningId === v.id ? <span className="rd-spin" aria-hidden /> : <ArrowDownUp size={12} />}
+                          </button>
+                          <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Edit" onClick={() => setViewEditor({ view: v })}><Pencil size={12} /></button>
+                          <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Delete" onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete view', message: <>View <strong>“{v.name}”</strong> will be deleted.</>, confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
+                        </>
+                      )}
+                    </span>
                   </div>
                   {shared && (
                     <div className="wk-pp-link-card">
@@ -570,6 +685,7 @@ export default function PropertiesPanel({ pushToast }: { pushToast: (m: string, 
         <ViewEditor
           lockedTableId={table.id}
           view={viewEditor.view}
+          readOnly={viewEditor.readOnly}
           onClose={() => setViewEditor(null)}
           onSaved={() => { reloadViews(); void reload(); }}
           pushToast={pushToast}

@@ -212,14 +212,14 @@ describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', ()
   };
 
   it("default 'as-is': identificadores tal cual están en el modelo", () => {
-    const ddl = databricksDdl(CASED, DEF);
+    const ddl = databricksDdl(CASED, { ...DEF, includeKeys: true });
     expect(ddl).toContain('CREATE TABLE IF NOT EXISTS `Core`.`Cliente`');
     expect(ddl).toContain('`Id` BIGINT');
     expect(ddl).toContain('CONSTRAINT `pk_Cliente` PRIMARY KEY (`Id`)');
   });
 
   it("'upper': schema/tabla/columna y nombres de constraint en MAYÚSCULAS", () => {
-    const ddl = databricksDdl(CASED, { ...DEF, identifierCase: 'upper' });
+    const ddl = databricksDdl(CASED, { ...DEF, includeKeys: true, identifierCase: 'upper' });
     expect(ddl).toContain('CREATE TABLE IF NOT EXISTS `CORE`.`CLIENTE`');
     expect(ddl).toContain('`ID` BIGINT');
     expect(ddl).toContain('CONSTRAINT `PK_CLIENTE` PRIMARY KEY (`ID`)');
@@ -230,7 +230,7 @@ describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', ()
   });
 
   it("'lower': todo identificador en minúsculas", () => {
-    const ddl = databricksDdl(CASED, { ...DEF, identifierCase: 'lower' });
+    const ddl = databricksDdl(CASED, { ...DEF, includeKeys: true, identifierCase: 'lower' });
     expect(ddl).toContain('CREATE TABLE IF NOT EXISTS `core`.`cliente`');
     expect(ddl).toContain('CONSTRAINT `pk_cliente` PRIMARY KEY (`id`)');
     expect(ddl).not.toContain('`Cliente`');
@@ -415,7 +415,7 @@ describe('PRIMARY KEY compuesta — orden de la LLAVE (pkPosition), no orden fí
       relationships: [],
       modelName: 'm',
     };
-    const ddl = databricksDdl(input, DEF);
+    const ddl = databricksDdl(input, { ...DEF, includeKeys: true });
     // columnas del CREATE en orden físico (ordinal)…
     expect(ddl.indexOf('`OTRA`')).toBeLessThan(ddl.indexOf('`FEC` DATE'));
     // …pero el PRIMARY KEY en orden de llave (COD antes que FEC).
@@ -432,6 +432,6 @@ describe('PRIMARY KEY compuesta — orden de la LLAVE (pkPosition), no orden fí
       relationships: [],
       modelName: 'm',
     };
-    expect(databricksDdl(input, DEF)).toContain('PRIMARY KEY (`A1`, `B2`)');
+    expect(databricksDdl(input, { ...DEF, includeKeys: true })).toContain('PRIMARY KEY (`A1`, `B2`)');
   });
 });

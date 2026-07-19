@@ -54,7 +54,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   // choke-point del changeset — se ocultan las affordances de mutación.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // ids de folders colapsadas (default: abiertas)
+  const [expandedF, setExpandedF] = useState<Set<string>>(new Set()); // ids de folders EXPANDIDAS (default: TODAS colapsadas — pedido owner)
   const [expandedP, setExpandedP] = useState<Set<string>>(new Set()); // ids de proyectos expandidos (default: cerrados)
   const [loadingTrees, setLoadingTrees] = useState<Set<string>>(new Set()); // proyectos con árbol cargando
   const [menu, setMenu] = useState<MenuState | null>(null);
@@ -62,9 +62,9 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   const [creating, setCreating] = useState<CreateState | null>(null);
   const [toDelete, setToDelete] = useState<DeleteState | null>(null);
 
-  const isCollapsed = (id: string) => collapsed.has(id);
-  const toggle = (id: string) => setCollapsed((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
-  const expand = (id: string) => setCollapsed((s) => { if (!s.has(id)) return s; const n = new Set(s); n.delete(id); return n; });
+  const isOpen = (id: string) => expandedF.has(id);
+  const toggle = (id: string) => setExpandedF((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const expand = (id: string) => setExpandedF((s) => (s.has(id) ? s : new Set(s).add(id)));
 
   // Expande un proyecto y lazy-carga su árbol al cache si aún no está.
   const ensureProjectOpen = useCallback((pid: string) => {
@@ -182,7 +182,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
 
   const renderFolder = (node: FolderNode, depth: number, projectId: string) => {
     const { folder } = node;
-    const open = !isCollapsed(folder.id);
+    const open = isOpen(folder.id);
     const childCount = node.folders.length + node.canvases.length;
     return (
       <div key={folder.id}>

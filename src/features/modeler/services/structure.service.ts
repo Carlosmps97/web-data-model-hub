@@ -192,6 +192,20 @@ export const setSubjectAreaTables = (saId: string, tableIds: string[]): Promise<
   return cs ? patchSa(cs, saId, { tableIds }) : mod.setSubjectAreaTables(saId, tableIds);
 };
 
+/** Saca UNA tabla del canvas: la quita de `tableIds` Y del `layout` (si sólo se
+ *  quitara de tableIds, quedaría un nodo fantasma en layout → audit C9b).
+ *  Changeset-aware; requiere versión activa (la acción está gateada por canEdit). */
+export const removeTableFromCanvas = async (saId: string, tableId: string): Promise<void> => {
+  const cs = writeCs();
+  if (!cs) throw new Error('An active version is required to remove a table.');
+  const cur = await fetchEffectiveSa(cs, saId);
+  if (!cur) return;
+  const tableIds = (cur.tableIds ?? []).filter((t) => t !== tableId);
+  const layout = { ...(cur.layout ?? {}) };
+  delete layout[tableId];
+  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...cur, tableIds, layout, id: saId });
+};
+
 export const setSubjectAreaLayout = async (
   saId: string, layout: Record<string, { x: number; y: number }>,
 ): Promise<SubjectArea> => {

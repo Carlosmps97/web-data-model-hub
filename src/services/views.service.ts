@@ -35,6 +35,10 @@ export interface ViewSource {
   expression?: string;
   /** F3: override de tipo ⇒ el DDL emite `CAST(col AS castType) AS alias`. */
   castType?: string;
+  /** F5: definición funcional PROPIA de esta columna en la vista (semántica
+   *  re-contextualizada respecto de la física). Vacío ⇒ hereda la definición
+   *  de la columna física origen. Erwin la trae a nivel de columna-de-vista. */
+  description?: string;
 }
 
 /** Vista persistida (forma completa del backend R4c + F3).

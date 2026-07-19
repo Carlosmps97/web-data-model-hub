@@ -28,11 +28,22 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const [domains, setDomains] = useState<ParentDomain[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Token de secuencia: al escribir rápido, la respuesta de physicalize de un
+  // texto MÁS CORTO podía llegar DESPUÉS y pisar el preview (carrera fuera de
+  // orden → "colcomplicado2" mostraba "COLCOMPLIC"). Debounce + guarda: solo
+  // la respuesta del ÚLTIMO input actualiza el preview.
+  const previewSeq = useRef(0);
 
   useEffect(() => { gov.listDomains().then(setDomains).catch(() => {}); }, []);
   useEffect(() => {
-    if (mode === 'logical' && name.trim()) gov.physicalize(name.trim()).then((r) => setPreview(r.physical)).catch(() => {});
-    else setPreview('');
+    if (mode !== 'logical' || !name.trim()) { setPreview(''); return; }
+    const mySeq = ++previewSeq.current;
+    const t = setTimeout(() => {
+      gov.physicalize(name.trim())
+        .then((r) => { if (mySeq === previewSeq.current) setPreview(r.physical); })
+        .catch(() => {});
+    }, 220);
+    return () => clearTimeout(t);
   }, [mode, name]);
 
   const submit = async () => {
