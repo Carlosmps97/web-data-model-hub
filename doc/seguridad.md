@@ -21,7 +21,7 @@ La app usa autenticación propia por **token (Bearer)**. El backend expone tres 
 Definidas en `src/features/auth/auth.service.ts`:
 
 ```ts
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase'; // base única (homologación 2026-07-19)
 
 export const login  = (username, password) =>
   apiPost<LoginResult>(`${API_BASE}/api/auth/login`, { username, password });
@@ -365,16 +365,16 @@ const API_BASE = import.meta.env.VITE_API_URL ?? '';
 | Archivo | Contenido | Rol |
 |---------|-----------|-----|
 | `.env` | `VITE_API_URL=` (vacío) | Dev: base vacía = mismo origen; el proxy de Vite reenvía `/api` → `:8000` |
-| `.env.production` | URL pública del backend | Build de producción (commiteado a propósito, ver `.gitignore`) |
+| variable `backend_api_url` (`databricks.yml`) | URL pública del backend | Build de producción en Databricks Apps (env del app, no es secreto) |
 | `.env.example` | Plantilla de referencia | Documenta la variable esperada |
 
-El `.gitignore` ignora todos los `.env*` salvo `.env.production`, que se commitea porque solo contiene una URL pública, no un secreto:
+El `.gitignore` ignora todos los `.env*` salvo `.env.example` (plantilla); la URL de producción ya no vive en un `.env` sino en el bundle:
 
 ```gitignore
 # env files (can opt-in for committing if needed)
 .env*
-# VITE_API_URL es público (URL del backend) y debe viajar al build → se commitea.
-!.env.production
+# (VITE_API_URL de producción ya NO vive en un .env: llega como env del app
+# desde databricks.yml → variable `backend_api_url`.)
 !.env.example
 ```
 
@@ -382,7 +382,7 @@ El `.gitignore` ignora todos los `.env*` salvo `.env.production`, que se commite
 
 **Principio**: nada sensible (contraseñas, connection strings de Cosmos, claves de firma de JWT, credenciales de servicio) vive en el frontend. Esos secretos residen únicamente en el backend, que es quien habla con la base de datos y firma/valida los tokens. El navegador solo conoce la URL pública de la API y el token de su propia sesión.
 
-**Observación de higiene (RESUELTA 2026-07-19)**: `.env.production` y `.env.example` ya declaran `VITE_API_URL` (se renombraron desde el nombre antiguo `NEXT_PUBLIC_API_URL` de la etapa Next.js), con lo que la configuración de producción toma efecto real en el build de Vite. Nunca expuso secretos — ambas son solo la URL pública.
+**Observación de higiene (RESUELTA 2026-07-19)**: la configuración de producción quedó homologada — `VITE_API_URL` llega del bundle (`databricks.yml` → `backend_api_url`) y se inlinea en el build de Vite; `.env.production` fue eliminado y `.env.example` declara `VITE_API_URL` vacía para dev. Nunca hubo secretos en juego — es solo la URL pública.
 
 ---
 
@@ -418,7 +418,7 @@ El `.gitignore` ignora todos los `.env*` salvo `.env.production`, que se commite
 El frontend es una SPA estática (build de Vite) que se sirve como archivos y habla con el backend por HTTP. Puede alojarse en dos entornos:
 
 - **Azure App Service**: hospeda los archivos estáticos del build de Vite. El origen del frontend debe estar permitido por el CORS del backend.
-- **Databricks Apps**: el backend FastAPI corre como una Databricks App (por ejemplo, `https://bknd-data-model-hub-...azure.databricksapps.com`, según `.env.production`). El frontend consume esa URL como `VITE_API_URL`.
+- **Databricks Apps**: el backend FastAPI corre como una Databricks App (por ejemplo, `https://bknd-data-model-hub-...azure.databricksapps.com`, según la variable `backend_api_url` del bundle). El frontend consume esa URL como `VITE_API_URL`.
 
 ### 6.1 Variables de entorno (build-time)
 

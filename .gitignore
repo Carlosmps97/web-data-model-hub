@@ -37,8 +37,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
-# VITE_API_URL es público (URL del backend) y debe viajar al build → se commitea.
-!.env.production
+# (VITE_API_URL de producción ya NO vive en un .env: llega como env del app
+# desde databricks.yml → variable `backend_api_url`.)
 !.env.example
 
 # local data storage

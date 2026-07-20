@@ -9,7 +9,7 @@
 
 import { apiGet } from './http';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 
 /** One table row in the reporting grid (table-level metadata). */
 export interface ReportTableRow {

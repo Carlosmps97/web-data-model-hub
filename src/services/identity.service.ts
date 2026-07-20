@@ -1,7 +1,7 @@
 import { apiGet } from '@/services/http';
 import type { Principal } from '@/types/identity';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 
 /** Trae la identidad del usuario en sesión. Backend: `GET /api/me`. */
 export function getMe(): Promise<Principal> {

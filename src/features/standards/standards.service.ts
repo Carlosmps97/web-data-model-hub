@@ -9,7 +9,7 @@
 import { apiGet, apiPost } from '@/services/http';
 import type { UdpScope, WordType, Separator, Casing } from '@/services/naming.service';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 const STD = `${API_BASE}/api/standards`;
 
 export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType | null; locked?: boolean; lockedBy?: string | null; lockedAt?: string | null; }

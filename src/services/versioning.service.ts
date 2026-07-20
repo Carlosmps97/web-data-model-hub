@@ -27,7 +27,7 @@ import type {
 } from '@/types/versioning';
 import { ApiError, apiGet, apiPost } from './http';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 
 /** Lista cross-project de versiones (filas para la tabla de Review y el Home). */
 export function listVersions(): Promise<VersionRow[]> {

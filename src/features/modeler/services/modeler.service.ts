@@ -9,7 +9,7 @@ import type { Relationship } from '@/features/governance/services/governance.ser
 import type { View } from '@/services/views.service';
 export type { Relationship };
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 
 export interface Project { id: string; name: string; description?: string; }
 // Carpeta del Model Explorer (jerarquía anidada por `parentFolderId` dentro de un proyecto).

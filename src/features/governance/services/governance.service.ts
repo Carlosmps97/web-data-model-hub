@@ -7,7 +7,7 @@ import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import * as csvc from './changeset.service';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 const DOMAINS = `${API_BASE}/api/domains`;
 const DICT = `${API_BASE}/api/glossary`;
 const CATALOG = `${API_BASE}/api/catalog`;

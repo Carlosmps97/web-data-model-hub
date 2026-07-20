@@ -16,7 +16,7 @@ import { useChangesetStore } from '@/store/useChangesetStore';
 
 const active = () => useChangesetStore.getState().activeId;
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 const VIEWS = `${API_BASE}/api/views`;
 
 /** Una proyección de columna dentro de una vista (editor 07b-2 / F3 multi-fuente):

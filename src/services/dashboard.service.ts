@@ -9,7 +9,7 @@
 import type { DashboardSummary } from '@/types/versioning';
 import { apiGet } from './http';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 
 /**
  * Trae los 5 contadores del Home. Pasá uno o varios `projectIds` para acotar a

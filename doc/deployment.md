@@ -8,7 +8,7 @@ Guía de despliegue del **frontend** de Data Model Hub: qué es, cómo se compil
 
 El frontend es una **SPA (Single Page Application)** construida con **Vite + React 19 + TypeScript**. No tiene servidor propio en producción: se **compila a archivos estáticos** (HTML, JS, CSS e imágenes) que cualquier host de estáticos puede servir. Toda la lógica corre en el navegador, y los datos se obtienen llamando por HTTP al **backend FastAPI** (que a su vez habla con Azure Cosmos DB usando la API de Mongo).
 
-> Nota sobre el stack (actualizada 2026-07-19): los archivos de despliegue ya reflejan Vite — `app.yaml` invoca `npm run start` (que hace `vite build` + `vite preview` en `$DATABRICKS_APP_PORT`), y `.env.example`/`.env.production` usan `VITE_API_URL` (la variable que realmente lee el código). La herencia `NEXT_PUBLIC_API_URL` de la etapa Next.js quedó eliminada. Ver la sección 8.
+> Nota sobre el stack (actualizada 2026-07-19, homologación): el deploy vive TODO en `databricks.yml` — sección `variables:` (parámetros por entorno, p. ej. `backend_api_url`) + bloque `config:` que invoca `npm run start` (`vite build` + `vite preview` en `$DATABRICKS_APP_PORT`) con `VITE_API_URL` como env del app. Los viejos `app.yaml` y `.env.production` fueron ELIMINADOS; la herencia `NEXT_PUBLIC_API_URL` de Next.js también. Ver la sección 8.
 
 ### Stack real (extraído de `package.json`)
 
@@ -169,7 +169,7 @@ VITE_API_URL=
 
 Para un build de producción podés:
 
-- Crear un `.env.production` con `VITE_API_URL=https://<tu-backend>` (Vite lo toma automáticamente en `vite build`), **o**
+- Exportar `VITE_API_URL=https://<tu-backend>` en el entorno del build (Vite la toma automáticamente en `vite build`; así lo hace Databricks Apps vía el bundle), **o** crear un `.env.production` local temporal, **o**
 - Pasarla en línea al compilar:
 
 ```bash
@@ -238,9 +238,9 @@ Recomendaciones de caché al servir `dist/`:
 
 ### Opción B — Databricks Apps
 
-El repositorio incluye `databricks.yml` (Databricks Asset Bundle) que declara la app `frnt-data-model-hub`, y el backend corre como una app hermana `bknd-data-model-hub`. En este esquema, front y back son **apps separadas con orígenes distintos**, por lo que el build del frontend debe llevar `VITE_API_URL` apuntando a la URL pública del backend (la que hoy figura en `.env.production` como referencia de la app de Databricks) y el backend debe tener CORS habilitado.
+El repositorio incluye `databricks.yml` (Databricks Asset Bundle) que declara la app `frnt-data-model-hub`, y el backend corre como una app hermana `bknd-data-model-hub`. En este esquema, front y back son **apps separadas con orígenes distintos**, por lo que el build del frontend debe llevar `VITE_API_URL` apuntando a la URL pública del backend — viaja como env del app definida en la variable `backend_api_url` del bundle — y el backend debe tener CORS habilitado (usa `CORS_ORIGIN_REGEX`, que matchea el front en cualquier workspace).
 
-> Actualizado 2026-07-19: `app.yaml` mantiene `command: ['npm', 'run', 'start']`, pero ahora `start` es un script de Vite — `prestart` corre `npm run build` (tsc + `vite build` → `dist/`) y `start` sirve `dist/` con `vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort` (fallback SPA incluido). No requiere variables en `app.yaml`: `VITE_API_URL` viaja en el build vía `.env.production`.
+> Actualizado 2026-07-19 (homologación): el `config:` del bundle invoca `command: ['npm', 'run', 'start']` — `prestart` corre `npm run build` (tsc + `vite build` → `dist/`) y `start` sirve `dist/` con `vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort` (fallback SPA incluido). `VITE_API_URL` llega como env del app (variable `backend_api_url` del bundle) y `vite build` la inlinea; ya no existen `app.yaml` ni `.env.production`.
 
 ---
 
@@ -296,8 +296,8 @@ Los artefactos que quedaron de la migración Next.js → Vite ya fueron alineado
 | Archivo | Estado actual |
 |---|---|
 | `.env.example` | `VITE_API_URL=` (vacío en dev; el proxy de Vite cubre `/api`). |
-| `.env.production` | `VITE_API_URL=https://bknd-...databricksapps.com` (build-time, se commitea). |
-| `app.yaml` | Sigue con `command: ['npm', 'run', 'start']`, pero `start` ahora es Vite: `prestart` = `npm run build` y `start` = `vite preview` en `$DATABRICKS_APP_PORT`. |
+| `.env.production` | **ELIMINADO** — `VITE_API_URL` llega del bundle (variable `backend_api_url`) como env del app y se inlinea en el build. |
+| `app.yaml` | **ELIMINADO** — el comando y el env viven en el bloque `config:` de `databricks.yml` (CLI ≥ 0.283). |
 | `databricks.yml` | Describe la app como SPA Vite/React. |
 | `.gitignore` | Ignora `/dist` (build de Vite) y permite commitear `.env.example`. OJO: `dist/` quedó trackeado de un build viejo → `git rm -r --cached dist` en el próximo commit. |
 

@@ -8,7 +8,7 @@
  */
 import { apiGet, apiPost } from '@/services/http';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 
 /** Permisos de la matriz (1:1 con el backend `PERMISSIONS`). */
 export type Permission =

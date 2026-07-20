@@ -22,7 +22,7 @@ import * as csvc from '@/features/governance/services/changeset.service';
 import type { View } from '@/services/views.service';
 import { useChangesetStore } from '@/store/useChangesetStore';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 /** Tope de tablas por esquema (igual que el reporting per-schema del Explorer). */
 const TABLES_CAP = 500;
 

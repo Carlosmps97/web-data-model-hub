@@ -13,34 +13,38 @@ jobs:
   deploy:
     name: Deploy frontend
     runs-on: ubuntu-latest
-    # Auth del CLI por PAT — en GitHub (Settings → Secrets and variables →
-    # Actions) deben existir:
-    #   · variable DATABRICKS_HOST  = https://adb-3871428306507680.0.azuredatabricks.net
-    #   · secret   DATABRICKS_TOKEN = PAT del workspace
-    # El runtime de la app no usa nada de esto: la SPA se buildea al arrancar
-    # (VITE_API_URL viaja commiteada en .env.production, no es secreto).
+    # ⚙️ Config por repositorio (Settings → Secrets and variables → Actions):
+    #   · variable DATABRICKS_HOST  = URL del workspace destino
+    #   · secret   DATABRICKS_TOKEN = PAT de ese workspace (solo lo usa el CLI)
+    #   · variable BUNDLE_TARGET    = target del bundle (opcional; default prod)
+    # El runtime no usa nada de esto: VITE_API_URL llega desde databricks.yml
+    # (variable `backend_api_url`) y se inlinea en el build al arrancar la app.
     env:
       DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
+      BUNDLE_TARGET: ${{ vars.BUNDLE_TARGET || 'prod' }}
     steps:
       - uses: actions/checkout@v4
 
+      # setup-cli@main instala el CLI más reciente (se requiere ≥ 0.283 por el
+      # bloque `config:` del recurso app en databricks.yml).
       - name: Install Databricks CLI
         uses: databricks/setup-cli@main
 
       - name: Validate bundle
-        run: databricks bundle validate --target prod
+        run: databricks bundle validate --target "$BUNDLE_TARGET"
 
       - name: Deploy bundle (sube el código + crea/actualiza la app)
-        run: databricks bundle deploy --target prod
+        run: databricks bundle deploy --target "$BUNDLE_TARGET"
 
       - name: Deploy & (re)start app
-        run: databricks bundle run frontend --target prod
+        run: databricks bundle run frontend --target "$BUNDLE_TARGET"
 
       - name: Wait for app RUNNING
-        env:
-          APP_NAME: frnt-data-model-hub
         run: |
+          # Nombre real de la app desde el bundle (una sola fuente de verdad).
+          APP_NAME=$(databricks bundle summary --target "$BUNDLE_TARGET" --output json \
+            | jq -r '.resources.apps.frontend.name')
           for i in $(seq 1 20); do
             STATE=$(databricks apps get "$APP_NAME" --output json | jq -r '.app_status.state')
             echo "Attempt $i/20: state=$STATE"

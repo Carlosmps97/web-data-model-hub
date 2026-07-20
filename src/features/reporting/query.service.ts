@@ -5,7 +5,7 @@
  */
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 const R = `${API_BASE}/api/reporting`;
 
 export type ViewKey = 'columns' | 'tables' | 'relationships' | 'views' | 'view_columns' | 'models';

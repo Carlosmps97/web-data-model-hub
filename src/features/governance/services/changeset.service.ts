@@ -1,6 +1,6 @@
 import { apiGet, apiPost, apiPut } from '@/services/http';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 const CS = `${API_BASE}/api/changesets`;
 
 export interface ChangesetDiff { added: string[]; modified: string[]; removed: string[]; }

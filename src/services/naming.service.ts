@@ -19,7 +19,7 @@
  */
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 const DICT = `${API_BASE}/api/glossary`;
 const NAMING = `${API_BASE}/api/settings/naming`;
 

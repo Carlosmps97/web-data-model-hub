@@ -17,7 +17,7 @@ La aplicación se organiza como una *shell* con navegación superior persistente
 
 El diseño rector es **DMH-Erwin v20260625-2**: un sistema visual claro (light-only), de acento *navy* y azul, con tipografía Geist. Todo el estado de sesión, edición y gobernanza vive en el cliente mediante **Zustand**, y todas las escrituras de modelo pasan por un *choke-point* consciente del *changeset* activo (la unidad de versionado del backend).
 
-Un principio transversal es que **el frontend nunca toca la base de datos directamente**: consume exclusivamente endpoints REST `/api/*` con un envelope uniforme `{ success, data, error }`. La persistencia (Azure Cosmos DB con API de Mongo) es responsabilidad del backend.
+Un principio transversal es que **el frontend nunca toca la base de datos directamente**: consume exclusivamente endpoints REST `/api/*` con un envelope uniforme `{ success, data, error }`. La persistencia (Databricks Lakebase Postgres; Cosmos como fallback) es responsabilidad del backend.
 
 ---
 
@@ -609,7 +609,7 @@ La única variable que el código consume es `VITE_API_URL` (inyectada en *build
 
 Todos los servicios anteponen `const API_BASE = import.meta.env.VITE_API_URL ?? ''` a sus rutas `/api/...`, de modo que con `VITE_API_URL` vacío las llamadas son relativas (ideal para dev con proxy o para despliegues donde front y back comparten dominio).
 
-**Nota (resuelto 2026-07-19)**: `.env.example` y `.env.production` ya nombran `VITE_API_URL` (la herencia `NEXT_PUBLIC_API_URL` de la etapa Next.js fue renombrada). Al configurar un entorno nuevo se define `VITE_API_URL`.
+**Nota (resuelto 2026-07-19, homologación)**: la lectura de env está centralizada en `src/services/apiBase.ts`. En dev `VITE_API_URL` va vacía (proxy de Vite); en producción la define el bundle (`databricks.yml` → variable `backend_api_url`) como env del app y `vite build` la inlinea. `.env.production` y la herencia `NEXT_PUBLIC_API_URL` fueron eliminados.
 
 Como `VITE_API_URL` se inlinea en el bundle al construir, no es secreto (es una URL pública) y cambiarla implica reconstruir.
 

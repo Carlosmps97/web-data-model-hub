@@ -5,7 +5,7 @@
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 import type { Permission } from '@/features/auth/auth.service';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 const ADMIN = `${API_BASE}/api/admin`;
 
 export interface AdminUser {

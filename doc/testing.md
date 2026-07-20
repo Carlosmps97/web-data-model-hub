@@ -2,7 +2,7 @@
 
 Este documento describe cómo se verifica hoy el frontend (SPA en Vite + React 19) y qué consideraciones de rendimiento y límites conocidos aplican al canvas del modelador y a la grilla del reporting. Está basado en el código real del repositorio `web-data-model-hub`.
 
-El frontend no toca la base de datos: es una SPA que consume el backend FastAPI vía HTTP (capa `src/services/*` y `src/features/*/*.service.ts`). La persistencia (Cosmos DB con API de Mongo) vive del lado del backend.
+El frontend no toca la base de datos: es una SPA que consume el backend FastAPI vía HTTP (capa `src/services/*` y `src/features/*/*.service.ts`). La persistencia (Databricks Lakebase Postgres; Cosmos como fallback) vive del lado del backend.
 
 ---
 
@@ -10,13 +10,14 @@ El frontend no toca la base de datos: es una SPA que consume el backend FastAPI 
 
 ### 1.1 Scripts disponibles (`package.json`)
 
-El proyecto expone cinco scripts de npm. No hay más automatización local que estos comandos.
+El proyecto expone siete scripts de npm. No hay más automatización local que estos comandos.
 
 | Script | Comando | Para qué sirve |
 |---|---|---|
 | `npm run dev` | `vite` | Servidor de desarrollo en `:3000` con HMR y proxy `/api` → backend `:8000`. |
 | `npm run build` | `tsc --noEmit && vite build` | Verificación de tipos (sin emitir) y luego bundle de producción a `dist/`. |
 | `npm run preview` | `vite preview` | Sirve el `dist/` ya construido para revisarlo localmente. |
+| `npm run start` | `vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort` | Runtime en Databricks Apps (lo invoca el `config:` del bundle); `prestart` corre `npm run build` antes. |
 | `npm test` | `vitest run` | Corre la suite de tests una sola vez (no watch). |
 | `npm run lint` | `eslint .` | Linting de todo el árbol con la config flat de ESLint. |
 
@@ -496,7 +497,7 @@ const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 Consideración importante: como `VITE_API_URL` es build-time, cambiar el backend de destino exige reconstruir el bundle; no basta con reiniciar el proceso ni con variables de runtime.
 
-Nota sobre archivos heredados (resuelto 2026-07-19): `app.yaml`, `databricks.yml`, `.env.production` y `.env.example` ya reflejan el stack Vite (`VITE_API_URL`, build + `vite preview` en Databricks Apps); la herencia `NEXT_PUBLIC_*` de la etapa Next.js fue eliminada.
+Nota sobre archivos heredados (resuelto 2026-07-19): el deploy quedó homologado en `databricks.yml` (`variables:` + `config:`; `app.yaml` y `.env.production` eliminados); `VITE_API_URL` llega del bundle y `API_BASE` está centralizado en `src/services/apiBase.ts`. La herencia `NEXT_PUBLIC_*` de la etapa Next.js fue eliminada.
 
 ### 3.3 Base de datos (Cosmos DB con API de Mongo)
 

@@ -13,7 +13,7 @@ import * as csvc from '@/features/governance/services/changeset.service';
 import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+import { API_BASE } from '@/services/apiBase';
 const SCHEMAS = `${API_BASE}/api/schemas`;
 const CS = `${API_BASE}/api/changesets`;
 
