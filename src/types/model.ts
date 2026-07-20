@@ -1,176 +1,174 @@
-// Core data model types for Data Model Hub
+// Core data model types for Data Model Hub — project-centric ("Aurora").
+//
+// Hierarchy:  Project → Model (level) → Domain (vertical) → Table → Column + View
+//
+// A Project owns its `engines`, `layers` (the "Modelos / niveles", e.g.
+// RDV·UDV·DDV) and `domains` (vertical data products that span layers). Tables
+// belong to exactly one (layer, domain) and embed their role-specific SQL
+// `views`. Relationships use a nested source/target shape and may cross
+// layers/domains. Mirrors the backend persistence models in
+// `backend-data-model-hub/src/db/db_models.py`.
 
-/**
- * Metadata tag attached to tables (and inheritable from domain/subdomain defaults).
- * Tags are key-value pairs — `key` is the facet name (e.g. "owner", "pii", "sla")
- * and `value` is the concrete classification (e.g. "data-platform", "high", "T1").
- * Both are free-text; the UI does not enforce a controlled vocabulary.
- */
+// ─── Engines ─────────────────────────────────────────────────────────────────
+
+// Database engines a project can target (the set the agent backend supports
+// natively). Stored on `Project.engines` and per `ModelLevel.engine`.
+export type DatabaseEngine =
+  | 'postgresql'
+  | 'databricks_sql'
+  | 'sqlserver'
+  | 'mysql'
+  | 'cosmosdb';
+
+export type EngineId = DatabaseEngine;
+
+// ─── Tags ────────────────────────────────────────────────────────────────────
+
+/** Key-value metadata tag attached to tables. Both fields are free-text. */
 export interface Tag {
   key: string;
   value: string;
 }
 
-export interface Project {
+// ─── UDP / Semantic Type catalog (transversal governance metadata) ───────────
+// Cross-project, organization-wide. Created & managed in the Model Center
+// "Metadata" section, then assigned to a project's tables/columns. Mirrors the
+// backend `SemanticTypeDoc` / `UdpDoc` in `db_models.py`.
+
+/** A controlled-vocabulary label carried by a Semantic Type — the user picks a
+ *  value from `allowedValues` when assigning the type to a column. */
+export interface SemanticTag {
+  key: string;
+  allowedValues: string[];
+}
+
+/** A semantic classification of a column (e.g. Monto, Porcentaje, Hash).
+ *  Assigning it inherits `dataType` onto the column (still editable) and
+ *  surfaces its controlled tags. */
+export interface SemanticType {
+  id: string;
+  name: string;
+  dataType: string;
+  description?: string;
+  tags: SemanticTag[];
+}
+
+export type UdpScope = 'table' | 'column';
+
+/** A user-defined property assignable to tables and/or columns. Extensible:
+ *  free-text or a controlled enum. */
+export interface Udp {
   id: string;
   name: string;
   description?: string;
-  createdAt: string;
-  updatedAt: string;
+  appliesTo: UdpScope[];
+  valueType: 'text' | 'enum';
+  allowedValues?: string[];
 }
 
-// ─── Views (logical layer derived from physical tables) ────────────────────
+// ─── Model level ("Modelo / nivel") ──────────────────────────────────────────
 
 /**
- * Category of a view, reflecting its intended audience.
- *  - `technical`  — internal/ETL use (e.g. staging, audit layers)
- *  - `user`       — end-user facing (simplified, clean column names)
- *  - `business`   — business-analyst facing (with KPI transforms, filters)
+ * A configurable, engine-agnostic layer of the project — e.g. RDV·UDV·DDV
+ * (or Staging/Core/Marts…). `order` drives the left→right band position on the
+ * canvas and the adjacency used for cross-layer relationship warnings.
  */
-export type ViewType = 'technical' | 'user' | 'business';
-
-/**
- * Configuration for a single column inside a ViewModel.
- * Defines whether it's included, its alias, and any SQL expression applied.
- */
-export interface ViewColumnTransform {
-  /** Physical column name from the source table. */
-  sourceColumn: string;
-  /** Alias exposed by the view (null = same as sourceColumn). */
-  alias?: string;
-  /**
-   * SQL expression to apply to the column.
-   * Examples: "CAST(col AS VARCHAR(50))", "CASE WHEN active = 1 THEN 'SI' ELSE 'NO' END"
-   * Engine-specific syntax is allowed (validated by the user, not by the app).
-   */
-  expression?: string;
-  /** Whether to include this column in the view. Defaults to true. */
-  include: boolean;
+export interface ModelLevel {
+  id: string;            // slug, e.g. "rdv"
+  name: string;          // short code, e.g. "RDV"
+  full?: string;         // full name, e.g. "Raw Data Vault"
+  color?: string;        // hex
+  order: number;         // canvas band order + adjacency
+  engine?: DatabaseEngine;
+  desc?: string;
 }
 
+// ─── Domain (data product, vertical) ─────────────────────────────────────────
+
+export type Sensitivity = 'Public' | 'Internal' | 'Confidential' | 'Restricted' | 'PII';
+
+export const SENSITIVITY_LEVELS: Sensitivity[] = [
+  'Public',
+  'Internal',
+  'Confidential',
+  'Restricted',
+  'PII',
+];
+
 /**
- * A SQL view derived from a physical table.
- * Lives alongside TableModel in the canvas as a distinct visual entity.
+ * A Domain is project-level and **vertical**: the same domain (e.g. Finanzas)
+ * has tables across several model levels (`table = (layer, domain)`).
  */
-export interface ViewModel {
+export interface Domain {
   id: string;
-  /** Physical view name (e.g. VW_CLIENTE, VW_CAMPANIAS_ACTIVAS). */
   name: string;
-  /** Business / logical name shown as label. */
-  logicalName?: string;
-  schema?: string;
-  /** ID of the TableModel this view is derived from. */
-  sourceTableId: string;
-  viewType: ViewType;
-  /** Column-level configuration (include, alias, expression). */
-  columns: ViewColumnTransform[];
-  /** SQL WHERE clause to filter the source data (engine-specific syntax). */
-  whereClause?: string;
-  /**
-   * When true the view is defined by customSql instead of the derived query.
-   * Useful for complex joins or subqueries that go beyond a single source table.
-   */
-  useCustomSql?: boolean;
-  customSql?: string;
-  functionalDefinition?: string;
-  domain?: string;
-  subdomain?: string;
-  domainId?: string;
-  subdomainId?: string;
-  tags?: string[];
   color?: string;
-  /**
-   * Canvas position. Persisted alongside `TableModel.position` via the
-   * same PATCH endpoint. See `NodePosition` above.
-   */
-  position?: { x: number; y: number };
+  owner?: string;
+  steward?: string;
+  sensitivity?: Sensitivity;
+  description?: string;
+  /** Free-text subdomain labels selectable on a table. */
+  subdomains: string[];
+  /** ModelLevel ids this domain spans. */
+  layers: string[];
+  /** Free key/value governance tags (secondary metadata, shown last). */
+  tags?: Tag[];
 }
 
-// ─── Domain catalog ────────────────────────────────────────────────────────
+// ─── View (role-specific SQL projection, embedded in a table) ────────────────
 
-export interface SubdomainDefinition {
+export type ViewType = 'business' | 'technical';
+
+/**
+ * A SQL view tied to a table and a role. `select` is multiline (one expression
+ * per line, e.g. `sha256(CAST(email AS varchar)) AS email_hash`); `where` is
+ * multiline AND-joined conditions. Rendered in the Inspector, not on the canvas.
+ */
+export interface View {
   id: string;
   name: string;
-  /** Short abbreviation used in naming conventions (e.g. "CRM", "MKTG"). */
-  code?: string;
-  description?: string;
-  /** Values inherited by tables assigned to this subdomain. */
-  defaults?: {
-    schema?: string;
-    tags?: Tag[];
-  };
+  type: ViewType;
+  role?: string;
+  select: string;
+  where: string;
 }
 
-export interface DomainDefinition {
-  id: string;
-  name: string;
-  /** Short abbreviation used in naming conventions (e.g. "CRM", "MKTG"). */
-  code?: string;
-  description?: string;
-  /** Hex color for visual identification in the canvas (#0d9488). */
-  color?: string;
-  subdomains: SubdomainDefinition[];
-  /** Values inherited by tables assigned to this domain (overridden by subdomain defaults). */
-  defaults?: {
-    schema?: string;
-    tags?: Tag[];
-  };
-}
-
-// ─── Column ────────────────────────────────────────────────────────────────
+// ─── Column ──────────────────────────────────────────────────────────────────
 
 export interface TableColumn {
-  /**
-   * Stable identifier that survives column renames. All relationship
-   * references (`Relationship.sourceColumn` / `Relationship.targetColumn`)
-   * and React Flow handle IDs are keyed by this value — never by `name` —
-   * so the user can rename a column without invalidating edges, FK
-   * relationships or the canvas wiring.
-   *
-   * Columns authored before this field was introduced are backfilled on
-   * first read (see `src/lib/columnRef.ts::ensureColumnId`) and the
-   * backend migration script `scripts/backfill_column_ids.py`.
-   */
+  /** Stable identifier that survives renames. Relationship endpoints and React
+   *  Flow handle ids are keyed by this value — never by `name`. */
   id: string;
-  /** Physical column name (SQL). */
   name: string;
-  /** Logical / business attribute name shown in logical view (e.g. "Código de Cliente"). */
   logicalName?: string;
   dataType: string;
-  /** Optional length / precision (e.g. 50 for varchar(50)) */
   length?: number;
-  /** Optional scale for decimal/numeric types */
   scale?: number;
   isPrimaryKey?: boolean;
   isSurrogateKey?: boolean;
-  /** Legacy single-column partition flag — kept for backwards compatibility.
-   *  Prefer TableModel.partition.columns going forward. */
   isPartitionKey?: boolean;
   isForeignKey?: boolean;
+  /** True when the FK was pinned by hand — a relationship delete won't clear it. */
+  fkManual?: boolean;
   foreignKeyRef?: { table: string; column: string };
   isNullable?: boolean;
   isUnique?: boolean;
   defaultValue?: string;
   functionalDefinition?: string;
-  /**
-   * Notas libres sobre la columna (ej. razón del tipo, default aplicado,
-   * constraints inusuales). Poblado por el AI Agent cuando propone un
-   * modelo; editable a mano si se expone en el TableForm.
-   */
   observations?: string;
+  /** Assigned Semantic Type (id into the transversal catalog). Inherits its
+   *  data type onto this column and surfaces its controlled-vocab tags. */
+  semanticTypeId?: string;
+  /** Chosen values for the Semantic Type's controlled tags (tag key → value). */
+  semanticValues?: Record<string, string>;
+  /** Chosen values for assigned column-level UDPs (udp id → value). */
+  udpValues?: Record<string, string>;
+  /** Free key/value governance tags (secondary metadata, shown last). */
+  tags?: Tag[];
 }
 
-/**
- * Partitioning strategy supported by the target engine.
- *
- *  - `RANGE`   — partition by a value range (Postgres, Oracle, SQL Server)
- *  - `LIST`    — partition by an explicit set of values
- *  - `HASH`    — hash modulo N buckets for parallelism
- *  - `DATE`    — temporal partitioning (BigQuery DATE/TIMESTAMP)
- *  - `INGESTION_TIME` — BigQuery `_PARTITIONTIME`
- *  - `BUCKET`  — Databricks/Snowflake bucketing on a column set
- *  - `NONE`    — explicit non-partitioned (default when omitted)
- */
+// ─── Partitioning ────────────────────────────────────────────────────────────
+
 export type PartitionStrategy =
   | 'NONE'
   | 'RANGE'
@@ -182,190 +180,82 @@ export type PartitionStrategy =
 
 export interface PartitionSpec {
   strategy: PartitionStrategy;
-  /** Columns that drive the partition. Order matters. */
   columns: string[];
-  /** Bucket count for HASH / BUCKET strategies. */
   buckets?: number;
-  /** Temporal granularity for DATE strategy: 'DAY' | 'MONTH' | 'YEAR' | 'HOUR'. */
   granularity?: 'DAY' | 'MONTH' | 'YEAR' | 'HOUR';
-  /** Additional columns used for clustering / Z-ORDER (Databricks, BigQuery, Redshift). */
   clusteringColumns?: string[];
 }
 
-/**
- * Canvas position of a node. Persisted so the layout survives reloads.
- *
- * When absent, the frontend runs ELK on load to derive one. When the user
- * drags a table or triggers "Auto-layout", the new positions are written
- * back to Cosmos via `PATCH /api/models/{id}/positions`.
- */
+// ─── Canvas position ─────────────────────────────────────────────────────────
+
+/** Canvas position of a node, persisted via `PATCH /api/projects/{id}/positions`. */
 export interface NodePosition {
   x: number;
   y: number;
 }
 
-export interface TableModel {
+// ─── Table ───────────────────────────────────────────────────────────────────
+
+export interface Table {
   id: string;
-  /** SQL schema / namespace the table belongs to. */
+  /** SQL schema / namespace. */
   schema?: string;
-  /** Physical table name (SQL, e.g. HD_CLIENTE). */
+  /** Physical table name (SQL). */
   name: string;
-  /** Logical / business entity name shown in logical view (e.g. "Cliente"). */
+  /** Logical / business entity name. */
   logicalName?: string;
-  columns: TableColumn[];
-  functionalDefinition?: string;
-  color?: string;
-  applicationCode?: string;
-  /** Business domain — free text OR populated from DomainDefinition.name via catalog. */
+  /** ModelLevel id. */
+  layer?: string;
+  /** Domain id. */
   domain?: string;
-  /** Business subdomain — free text OR populated from SubdomainDefinition.name via catalog. */
+  /** Subdomain label (from the domain's `subdomains`). */
   subdomain?: string;
-  /** IDs into the model's domainCatalog, enabling inheritance of defaults. */
-  domainId?: string;
-  subdomainId?: string;
+  /** Header color — inherited from the domain. */
+  color?: string;
+  functionalDefinition?: string;
+  applicationCode?: string;
+  columns: TableColumn[];
+  /** Role-specific SQL views derived from this table. */
+  views: View[];
   tags?: Tag[];
+  /** Chosen values for assigned table-level UDPs (udp id → value). */
+  udpValues?: Record<string, string>;
   partition?: PartitionSpec;
-  /**
-   * Canvas position (in React Flow world coordinates). Persisted by the
-   * ELK layout engine on auto-arrange and by the drag handler on
-   * node-drag-stop. See `useLayoutPersistence`.
-   */
   position?: NodePosition;
 }
 
-/**
- * Crow's Foot cardinality for one end of a relationship.
- *
- *   `one-only`     — exactly one (vertical bar  |)
- *   `zero-or-one`  — optional one (circle + bar o|)
- *   `one-or-many`  — at least one (bar + crow's foot |<)
- *   `zero-or-many` — any number   (circle + crow's foot o<)
- */
-export type CrowsFootCardinality =
-  | 'one-only'
-  | 'zero-or-one'
-  | 'one-or-many'
-  | 'zero-or-many';
+// ─── Relationship ────────────────────────────────────────────────────────────
+// El tipo runtime de relación vive en governance.service (`Relationship` v2:
+// parent/child + pairs, doc 19). Acá NO hay tipo de relación: el legacy
+// (source/target anidados + '1:N') se eliminó al no tener consumidores.
 
-export interface Relationship {
+// ─── Project ─────────────────────────────────────────────────────────────────
+
+export interface Project {
   id: string;
-  /** Table identity — accepts `TableModel.id` (preferred) or `TableModel.name` (legacy). */
-  sourceTable: string;
-  /**
-   * Column identity of the source column. Since the column-ID migration
-   * this stores `TableColumn.id`; legacy relationships authored before
-   * the migration still carry `TableColumn.name` here and are resolved
-   * transparently by `src/lib/columnRef.ts::resolveColumnName`.
-   */
-  sourceColumn: string;
-  /** See `sourceTable`. */
-  targetTable: string;
-  /** See `sourceColumn` — also a column id. */
-  targetColumn: string;
-  type: 'one-to-one' | 'one-to-many' | 'many-to-many';
-  /**
-   * Optional Crow's Foot cardinality overrides. When absent, the edge
-   * renderer derives them from `type` + the FK column's `isNullable`
-   * flag (see `src/features/diagram/layout/cardinality/crowsFootMapping.ts`).
-   * Populated by future editor UI that lets the user tune the notation.
-   */
-  sourceCardinality?: CrowsFootCardinality;
-  targetCardinality?: CrowsFootCardinality;
-}
-
-// Database engines a DataModel can target.
-//
-// The first five values are the engines the AI agent backend supports
-// natively (`agent-modeler/src/config.py::SUPPORTED_ENGINES`). The
-// frontend's manual editor and DDL generator must accept the same set
-// so a model produced by the agent can be opened, edited and re-exported
-// without engine drift.
-//
-// The last two values are LEGACY entries kept only so saved JSON files
-// from previous versions still load. They are not shown in the engine
-// picker and `loadModel` normalizes `databricks` → `databricks_sql` on
-// read. `oracle` is preserved verbatim because there is no obvious
-// migration target; the AI agent degrades it to PostgreSQL with a
-// console warning during a turn.
-export type DatabaseEngine =
-  | 'postgresql'
-  | 'databricks_sql'
-  | 'sqlserver'
-  | 'mysql'
-  | 'cosmosdb'
-  // Legacy — read-only, hidden from the picker.
-  | 'databricks'
-  | 'oracle';
-
-export interface DataModel {
-  id: string;
-  projectId: string;
   name: string;
   description?: string;
-  engine?: DatabaseEngine;
-  tables: TableModel[];
-  relationships: Relationship[];
-  /** SQL views derived from the physical tables in this model. */
-  views?: ViewModel[];
-  /** Model-level domain catalog. Tables reference entries by domainId/subdomainId. */
-  domainCatalog?: DomainDefinition[];
-  createdAt: string;
-  updatedAt: string;
+  engines: EngineId[];
+  /** The project's models (levels) — CRUD. */
+  layers: ModelLevel[];
+  /** The project's domains (vertical) — CRUD. */
+  domains: Domain[];
+  createdAt?: string;
+  updatedAt?: string;
 }
 
-// Column data type options.
-// Aligned with the canonical set in
-// `backend-data-model-hub/src/excel_import/type_normalizer.py::CANONICAL_TYPES`.
-// Anything the user types into Excel is normalised by the backend to one of these
-// (or returned as-is with a "unknown" badge in the preview).
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+// Canonical column data types (Databricks-flavored superset).
 export const COLUMN_DATA_TYPES = [
-  // Integers
-  'integer',
-  'bigint',
-  'smallint',
-  'tinyint',
-  // Real numbers
-  'float',
-  'double',
-  'real',
-  'decimal',
-  'numeric',
-  'money',
-  // Text
-  'varchar',
-  'char',
-  'text',
-  'nvarchar',
-  'string',
-  // Boolean
+  'integer', 'bigint', 'smallint', 'tinyint',
+  'float', 'double', 'real', 'decimal', 'numeric', 'money',
+  'varchar', 'char', 'text', 'nvarchar', 'string',
   'boolean',
-  // Time
-  'date',
-  'datetime',
-  'timestamp',
-  'timestamptz',
-  'time',
-  // Binary
-  'binary',
-  'varbinary',
-  'blob',
-  'bytes',
-  // Semi-structured
-  'json',
-  'jsonb',
-  'xml',
-  'uuid',
-  // Structured (Spark/Databricks)
-  'array',
-  'map',
-  'struct',
+  'date', 'datetime', 'timestamp', 'timestamptz', 'time',
+  'binary', 'varbinary', 'blob', 'bytes',
+  'json', 'jsonb', 'xml', 'uuid',
+  'array', 'map', 'struct',
 ] as const;
 
 export type ColumnDataType = (typeof COLUMN_DATA_TYPES)[number] | string;
-
-// Relationship type labels
-export const RELATIONSHIP_TYPE_LABELS: Record<Relationship['type'], string> = {
-  'one-to-one': '1:1',
-  'one-to-many': '1:N',
-  'many-to-many': 'N:M',
-};

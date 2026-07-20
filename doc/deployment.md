@@ -1,382 +1,334 @@
-# Deployment
+# Despliegue del Frontend — Data Model Hub
 
-> Cómo configurar y desplegar `web-data-model-hub` (Next.js 16) y su
-> contraparte `agent-modeler` (FastAPI) post-migración a Cosmos DB.
-> El frontend ya **no expone rutas API propias** — solo SSR + middleware.
+Guía de despliegue del **frontend** de Data Model Hub: qué es, cómo se compila, dónde corre, qué variables de entorno necesita y cómo levantarlo en local. Este documento describe únicamente el *dónde y cómo se ejecuta*; no cubre integración continua ni pipelines de despliegue.
 
 ---
 
-## 1. Topología
+## 1. Qué es el frontend
+
+El frontend es una **SPA (Single Page Application)** construida con **Vite + React 19 + TypeScript**. No tiene servidor propio en producción: se **compila a archivos estáticos** (HTML, JS, CSS e imágenes) que cualquier host de estáticos puede servir. Toda la lógica corre en el navegador, y los datos se obtienen llamando por HTTP al **backend FastAPI** (que a su vez habla con Azure Cosmos DB usando la API de Mongo).
+
+> Nota sobre el stack (actualizada 2026-07-19, homologación): el deploy vive TODO en `databricks.yml` — sección `variables:` (parámetros por entorno, p. ej. `backend_api_url`) + bloque `config:` que invoca `npm run start` (`vite build` + `vite preview` en `$DATABRICKS_APP_PORT`) con `VITE_API_URL` como env del app. Los viejos `app.yaml` y `.env.production` fueron ELIMINADOS; la herencia `NEXT_PUBLIC_API_URL` de Next.js también. Ver la sección 8.
+
+### Stack real (extraído de `package.json`)
+
+| Pieza | Versión / detalle |
+|---|---|
+| Bundler / dev server | Vite `^6.0.7` |
+| UI | React `19.2.4` + React DOM `19.2.4` |
+| Ruteo | `react-router-dom` `^7.1.0` (usa `BrowserRouter`) |
+| Lenguaje | TypeScript `^5` (chequeo de tipos con `tsc --noEmit`) |
+| Estado | Zustand `^5.0.12` |
+| Diagramas ER | `@xyflow/react` `^12.3.5` + `elkjs` `^0.11.1` (layout) |
+| Grillas virtualizadas | `@tanstack/react-virtual` `^3.14.5` |
+| Export | `xlsx` `^0.18.5`, `html-to-image` `^1.11.13` |
+| Notificaciones / iconos / fuentes | `sonner`, `lucide-react`, `@fontsource-variable/geist` |
+| Tests | Vitest `^2.1.8` |
+
+---
+
+## 2. Scripts disponibles
+
+Definidos en `package.json`:
+
+| Comando | Qué hace |
+|---|---|
+| `npm run dev` | Levanta el dev server de Vite en el puerto **3000** con hot reload. |
+| `npm run build` | Ejecuta `tsc --noEmit && vite build`. Primero valida tipos, luego compila a `dist/`. |
+| `npm run preview` | Sirve localmente el contenido ya compilado de `dist/` (para verificar el build de producción). |
+| `npm test` | Corre los tests con Vitest (`vitest run`). |
+| `npm run lint` | Corre ESLint sobre todo el proyecto. |
+
+Observación clave: **no existe un script `start`** ni un runtime de servidor Node en producción. El artefacto final es una carpeta de estáticos.
+
+---
+
+## 3. Cómo correr en local
+
+### Requisitos
+
+- Node.js 20 o superior (los tipos usan `@types/node ^20`).
+- npm (viene con Node).
+- El **backend FastAPI** corriendo en `http://localhost:8000` (si querés que la app traiga datos reales).
+
+### Pasos
+
+```bash
+# 1. Instalar dependencias
+npm install
+
+# 2. Levantar el frontend en modo desarrollo
+npm run dev
+```
+
+La app queda disponible en **http://localhost:3000**.
+
+### El proxy de desarrollo
+
+En dev **no necesitás configurar `VITE_API_URL`**. El `vite.config.ts` incluye un proxy que reenvía todo lo que empiece con `/api` al backend local:
+
+```ts
+// vite.config.ts
+server: {
+  port: 3000,
+  proxy: {
+    // En dev, el frontend (:3000) reenvía /api al backend FastAPI (:8000).
+    '/api': { target: 'http://localhost:8000', changeOrigin: true },
+  },
+},
+```
+
+Así, cuando el código llama a `/api/projects`, Vite lo redirige a `http://localhost:8000/api/projects`. Esto evita problemas de CORS en desarrollo y hace que front y back se comporten como si estuvieran en el mismo origen.
+
+### Verificar el build de producción en local
+
+```bash
+npm run build     # genera dist/
+npm run preview   # sirve dist/ (por defecto en http://localhost:4173)
+```
+
+`preview` es solo para inspección local; **no** es un servidor de producción.
+
+---
+
+## 4. El artefacto de build (`dist/`)
+
+`npm run build` produce la carpeta `dist/` con esta estructura:
+
+```
+dist/
+├── index.html              # punto de entrada; referencia /assets/*
+├── assets/
+│   ├── index-xcMPIGEr.js   # bundle principal (con hash de contenido)
+│   ├── index-CrHmHkrc.css  # estilos
+│   ├── elkLayout-*.js      # chunk de layout ELK (lazy)
+│   └── geist-*.woff2       # fuentes
+├── icon.png, apple-icon.png, logo-dog.png, ...  # estáticos de public/
+```
+
+El `dist/index.html` generado inyecta las rutas con hash de los assets:
+
+```html
+<script type="module" crossorigin src="/assets/index-xcMPIGEr.js"></script>
+<link rel="stylesheet" crossorigin href="/assets/index-CrHmHkrc.css">
+```
+
+Los nombres llevan **hash de contenido**, lo que permite cachear los assets de forma agresiva (cambian de nombre cuando cambia el contenido), mientras que `index.html` debe servirse **sin caché** para que siempre apunte a los assets más recientes.
+
+Todo lo que pongas en `public/` se copia tal cual a la raíz de `dist/` (por eso `icon.png` termina en `/icon.png`).
+
+---
+
+## 5. La variable de entorno `VITE_API_URL`
+
+Es la **única** variable de entorno del frontend. Le dice a la SPA dónde vive el backend.
+
+### Cómo la lee el código
+
+Cada servicio del frontend hace lo mismo:
+
+```ts
+// p.ej. src/services/projects.service.ts
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
+
+export function listProjects() {
+  return apiGet<Project[]>(`${API_BASE}/api/projects`);
+}
+```
+
+Comportamiento:
+
+- Si `VITE_API_URL` está **vacía**, `API_BASE` queda vacío y las llamadas van a rutas **relativas** como `/api/projects` → mismo origen que sirve la SPA.
+- Si `VITE_API_URL` tiene un valor (p.ej. `https://bknd-data-model-hub-...azuredatabricks...`), las llamadas van a ese host: `https://bknd.../api/projects`.
+
+### Es una variable *build-time* (crítico)
+
+Vite **inlinea** las variables `VITE_*` en el bundle **al momento de compilar** (`vite build`). No se leen en tiempo de ejecución. Consecuencias:
+
+1. Debés definir `VITE_API_URL` **antes** de correr `npm run build`, no en el host donde servís los estáticos.
+2. Si cambia la URL del backend, hay que **recompilar**.
+3. Solo se exponen al navegador las variables con prefijo `VITE_`. Cualquier otra (como la vieja `NEXT_PUBLIC_API_URL`) es **ignorada** por Vite.
+
+El tipo está declarado en `src/vite-env.d.ts`:
+
+```ts
+interface ImportMetaEnv {
+  readonly VITE_API_URL: string;
+}
+```
+
+### Dónde se define
+
+Vite carga archivos `.env` según el modo. El archivo `.env` del repo trae el valor por defecto para desarrollo:
+
+```bash
+# .env
+# Base del backend. Vacío = mismo origen (en dev el proxy de Vite reenvía /api → :8000).
+VITE_API_URL=
+```
+
+Para un build de producción podés:
+
+- Exportar `VITE_API_URL=https://<tu-backend>` en el entorno del build (Vite la toma automáticamente en `vite build`; así lo hace Databricks Apps vía el bundle), **o** crear un `.env.production` local temporal, **o**
+- Pasarla en línea al compilar:
+
+```bash
+VITE_API_URL=https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com npm run build
+```
+
+### Las dos topologías de despliegue
 
 ```mermaid
-flowchart LR
-    U["Browser"] -->|"https"| FE["web-data-model-hub<br/>Next.js (:3000 dev / cualquiera prod)"]
-    U -->|"https · cookie"| BE["agent-modeler<br/>FastAPI (:8000)"]
-    BE --> DB[("Cosmos DB for MongoDB")]
-    BE --> AI["Azure AI Foundry<br/>(GPT-4o + embeddings)"]
-
-    FE -. SSR + middleware .-> FE
-    FE -. NO toca DB ni Foundry .- BE
+flowchart TD
+    A["VITE_API_URL en tiempo de build"] --> B{"Que valor tiene?"}
+    B -->|Vacio| C["API_BASE vacio, las llamadas van a /api en el mismo origen"]
+    B -->|URL del backend| D["API_BASE con URL, las llamadas van al backend en otro origen"]
+    C --> E["El mismo host debe servir el front y proxear /api hacia el backend"]
+    D --> F["El backend necesita habilitar CORS y aceptar credentials include"]
 ```
 
-Tres componentes desplegables:
+| Escenario | `VITE_API_URL` | Requiere |
+|---|---|---|
+| Front y back en el **mismo origen** (un reverse proxy sirve estáticos y enruta `/api` al FastAPI) | vacía | Regla de proxy `/api → backend` en el host |
+| Front y back en **orígenes distintos** (apps separadas, típico en Databricks Apps: `frnt-*` y `bknd-*`) | URL absoluta del backend | **CORS** habilitado en el backend |
 
-| Componente | Tipo | Notas |
-|------------|------|-------|
-| `web-data-model-hub` | Next.js (Node 20+ o serverless) | Solo HTML/JS/SSR — sin filesystem state |
-| `agent-modeler` | FastAPI (Uvicorn / Gunicorn) | Single-process por instancia (ver concurrencia) |
-| Cosmos DB for MongoDB + AI Foundry | servicios Azure gestionados | provisionados aparte |
+Sobre CORS y credenciales: el cliente HTTP (`src/services/http.ts`) envía todas las llamadas con `credentials: 'include'` y agrega `Authorization: Bearer <token>` cuando hay sesión. Por eso, en la topología de orígenes distintos, el backend debe responder con los headers CORS adecuados (incluyendo permitir credenciales), o el navegador bloqueará las respuestas.
 
 ---
 
-## 2. Variables de entorno
+## 6. Dónde se sirve (despliegue)
 
-### 2.1 Frontend (`web-data-model-hub/.env`)
+El frontend se sirve como **conjunto de estáticos**. Dos destinos soportados:
 
-| Variable | Descripción | Ejemplo |
-|----------|-------------|---------|
-| `NEXT_PUBLIC_API_URL` | URL pública del backend FastAPI | `https://api.modeler.midominio.com` |
-| `AUTH_SECRET` | Secret HS256 — **debe coincidir** con el del backend | `<random 32+ chars>` |
+### Opción A — Azure App Service (sitio estático detrás de un servidor)
 
-> Los `NEXT_PUBLIC_*` se exponen al browser; cualquier cosa secreta
-> NO va con ese prefijo. `AUTH_SECRET` no lleva prefijo público y
-> solo se usa server-side (middleware).
+Se publica el contenido de `dist/` y el App Service lo sirve. Como es una SPA con `BrowserRouter`, hace falta una **regla de reescritura (fallback SPA)**: cualquier ruta que no sea un archivo real debe devolver `index.html`, para que React Router resuelva la navegación del lado del cliente. Sin esto, recargar una URL profunda como `/model/123` da 404.
 
-### 2.2 Backend (`agent-modeler/.env`)
+En App Service de Windows (IIS) se logra con un `web.config` en la raíz de `dist/`:
 
-Ver `agent-modeler/doc/configuration.md` para la lista completa.
-Variables imprescindibles para producción:
-
-```env
-FOUNDRY_PROJECT_ENDPOINT=...
-APP_AZURE_TENANT_ID=...
-APP_AZURE_CLIENT_ID=...
-APP_AZURE_CLIENT_SECRET=...
-
-AZURE_OPENAI_ENDPOINT=...
-AZURE_OPENAI_EMBEDDING_DEPLOYMENT=text-embedding-3-small
-
-COSMOS_CONNECTION_STRING=mongodb+srv://...
-COSMOS_DATABASE=db_modeler
-
-AUTH_SECRET=<el mismo del frontend>
-
-CORS_ORIGINS=https://modeler.midominio.com
-
-LOG_FORMAT=json
-LOG_LEVEL=INFO
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <system.webServer>
+    <rewrite>
+      <rules>
+        <rule name="SPA fallback" stopProcessing="true">
+          <match url=".*" />
+          <conditions logicalGrouping="MatchAll">
+            <!-- No reescribir archivos ni carpetas reales -->
+            <add input="{REQUEST_FILENAME}" matchType="IsFile" negate="true" />
+            <add input="{REQUEST_FILENAME}" matchType="IsDirectory" negate="true" />
+            <!-- No reescribir las llamadas al backend -->
+            <add input="{REQUEST_URI}" pattern="^/api/" negate="true" />
+          </conditions>
+          <action type="Rewrite" url="/index.html" />
+        </rule>
+      </rules>
+    </rewrite>
+  </system.webServer>
+</configuration>
 ```
 
-> **Crítico**: `AUTH_SECRET` debe ser idéntico en frontend y backend
-> (mayúsculas, espacios, todo). Si divergen, el cookie firmado por
-> uno no se valida con el otro y todas las requests autenticadas
-> caen en 401.
+En un App Service de Linux con un servidor de estáticos genérico, el equivalente es configurar `try_files $uri /index.html` (nginx) o el `--single`/fallback del servidor que uses. La idea es siempre la misma: **archivo real si existe, si no `index.html`**.
+
+Recomendaciones de caché al servir `dist/`:
+
+- `index.html`: `Cache-Control: no-cache` (siempre revalidar).
+- `/assets/*` (llevan hash): `Cache-Control: public, max-age=31536000, immutable`.
+
+### Opción B — Databricks Apps
+
+El repositorio incluye `databricks.yml` (Databricks Asset Bundle) que declara la app `frnt-data-model-hub`, y el backend corre como una app hermana `bknd-data-model-hub`. En este esquema, front y back son **apps separadas con orígenes distintos**, por lo que el build del frontend debe llevar `VITE_API_URL` apuntando a la URL pública del backend — viaja como env del app definida en la variable `backend_api_url` del bundle — y el backend debe tener CORS habilitado (usa `CORS_ORIGIN_REGEX`, que matchea el front en cualquier workspace).
+
+> Actualizado 2026-07-19 (homologación): el `config:` del bundle invoca `command: ['npm', 'run', 'start']` — `prestart` corre `npm run build` (tsc + `vite build` → `dist/`) y `start` sirve `dist/` con `vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort` (fallback SPA incluido). `VITE_API_URL` llega como env del app (variable `backend_api_url` del bundle) y `vite build` la inlinea; ya no existen `app.yaml` ni `.env.production`.
 
 ---
 
-## 3. Desarrollo local
+## 7. Consideraciones de base de datos (Databricks Lakebase Postgres)
 
-### 3.1 Estructura
+El frontend **no se conecta nunca a la base de datos directamente** y no maneja credenciales. Desde 2026-07-19 la persistencia (proyectos, modelos, dominios, changesets, reporting, etc.) vive en **Databricks Lakebase Postgres** (con Azure Cosmos DB como fallback conmutable — ver `plan-implementacion/28-MIGRACION-LAKEBASE.md` del backend), y solo el **backend FastAPI** habla con ella.
 
+El único punto de acoplamiento del frontend con los datos es `VITE_API_URL`: debe apuntar al backend, que es dueño de la conexión a la base. Credenciales, nombres de base y colecciones son responsabilidad del backend.
+
+```mermaid
+sequenceDiagram
+    participant U as Navegador (SPA)
+    participant S as Host de estaticos (dist)
+    participant B as Backend FastAPI
+    participant C as Lakebase Postgres
+    U->>S: GET /model/123 (deep link)
+    S-->>U: index.html (fallback SPA)
+    Note over U: React Router renderiza la ruta en el cliente
+    U->>B: GET base VITE_API_URL + /api/projects
+    B->>C: consulta (adaptador jsonb)
+    C-->>B: documentos
+    B-->>U: { success: true, data: [ ... ] }
 ```
-MODELER/
-├── web-data-model-hub/      # Next.js
-└── agent-modeler/           # FastAPI
+
+El contrato de respuesta que espera el frontend es un *envelope* uniforme que devuelve el backend, manejado en `src/services/http.ts`:
+
+```json
+{ "success": true, "data": [ /* ... */ ] }
 ```
 
-### 3.2 Levantar todo
+```json
+{ "success": false, "error": "mensaje legible del backend" }
+```
+
+Cuando `success` es `false`, o ante un `4xx/5xx`, o una respuesta sin envelope, el cliente lanza un `ApiError` tipado que los componentes capturan para mostrar toasts o redirigir. Un `401` dispara además el cierre de sesión global.
+
+Puedes validar de punta a punta que el backend responde el envelope esperado con curl:
 
 ```bash
-# Terminal 1 — backend
-cd agent-modeler
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env  # editar
-python -m api.main    # uvicorn 0.0.0.0:8000
-
-# Terminal 2 — frontend
-cd web-data-model-hub
-npm install
-cp .env.example .env  # editar
-npm run dev           # next 0.0.0.0:3000
-```
-
-Visitar `http://localhost:3000` → redirige a `/login` → admin/dogadmin2019
-en el primer arranque.
-
-### 3.3 Hot reload
-
-- **Backend**: `python -m api.main` lanza Uvicorn con `reload=True`.
-- **Frontend**: `npm run dev` con Turbopack.
-
-### 3.4 Limpiar estado
-
-- DB: drop `db_modeler` o las colecciones específicas en Cosmos DB.
-- Sesiones del agente: `DELETE /api/conversations/{id}` o reiniciar
-  el backend (el store es in-memory).
-
----
-
-## 4. Producción — frontend
-
-### 4.1 Build
-
-```bash
-cd web-data-model-hub
-npm install --production=false
-npm run build       # produce .next/
-npm run start       # next start (Node)
-```
-
-### 4.2 Opciones de hosting
-
-| Plataforma | Notas |
-|------------|-------|
-| **Self-hosted Node** | `npm run start` detrás de Nginx/Caddy. Funciona como cualquier app Next.js standalone. |
-| **Vercel** | Compatible. Solo SSR + middleware (no API routes), edge runtime para el middleware. Setear `NEXT_PUBLIC_API_URL` y `AUTH_SECRET` en project settings. |
-| **Azure App Service** | Stack Node 20. Variables como app settings. |
-| **Docker** | Imagen `node:20-alpine` + `npm run build` + `npm run start`. Exponer 3000. |
-
-#### Dockerfile mínimo
-
-```dockerfile
-FROM node:20-alpine AS deps
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci
-
-FROM node:20-alpine AS build
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
-RUN npm run build
-
-FROM node:20-alpine AS runner
-WORKDIR /app
-ENV NODE_ENV=production
-COPY --from=build /app/.next ./.next
-COPY --from=build /app/public ./public
-COPY --from=build /app/package.json ./package.json
-COPY --from=build /app/node_modules ./node_modules
-EXPOSE 3000
-CMD ["npm", "run", "start"]
-```
-
-### 4.3 Cookies cross-origin en prod
-
-En desarrollo el browser acepta el cookie `modeler-auth` cross-origin
-(`localhost:3000` ↔ `localhost:8000`) gracias a `SameSite=Lax`. En
-producción, **si frontend y backend están en dominios distintos**:
-
-- El cookie debe llevar `SameSite=None; Secure` para que el browser
-  lo envíe.
-- Ambos sitios deben servirse por HTTPS.
-- El backend debe configurar `CORS_ORIGINS` con el dominio exacto
-  del frontend.
-
-> Recomendación: servir ambos bajo el mismo dominio raíz si es
-> posible (ej. `app.midominio.com` y `api.midominio.com`). Eso evita
-> problemas de SameSite y permite mantener `SameSite=Lax`.
-
-> El comportamiento de `SameSite` lo configura el backend en
-> `authCookieOptions()` (frontend) y `_cookie_options()` (backend).
-> Si vas a cross-domain, ajustá ambos.
-
----
-
-## 5. Producción — backend
-
-### 5.1 Build & run
-
-```bash
-cd agent-modeler
-pip install -r requirements.txt
-python -m gunicorn api.main:app \
-  --workers 1 \
-  --worker-class uvicorn.workers.UvicornWorker \
-  --bind 0.0.0.0:8000 \
-  --timeout 120
-```
-
-> **Importante**: usar **1 worker** por instancia. Los singletons
-> (rate limiter, ConversationStore) son por proceso. Multi-worker
-> rompería el rate limit y duplicaría sesiones. Para escalar,
-> levantar varias instancias detrás de un load balancer con sticky
-> sessions, **no más workers**.
-
-### 5.2 Dockerfile
-
-```dockerfile
-FROM python:3.12-slim
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential libffi-dev && rm -rf /var/lib/apt/lists/*
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-ENV PYTHONUNBUFFERED=1
-EXPOSE 8000
-CMD ["python", "-m", "gunicorn", "api.main:app", \
-     "--workers", "1", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--bind", "0.0.0.0:8000", \
-     "--timeout", "120"]
-```
-
-### 5.3 Health checks
-
-| Endpoint | Uso |
-|----------|-----|
-| `GET /api/health` | Liveness + readiness. Devuelve `foundry_connected` y `active_conversations`. |
-| `GET /api/engines` | Smoke test de configuración de motores soportados. |
-
-Ambos son públicos (sin auth) — apuntá tu balanceador a `/api/health`
-con `expected status 200`.
-
----
-
-## 6. Cosmos DB
-
-### 6.1 Provisión
-
-- Cuenta Azure Cosmos DB con API **MongoDB vCore** (no Core SQL).
-  Solo vCore expone `cosmosSearch` para vector indexes.
-- Tier mínimo recomendado: M40 si vas a usar vector search activo;
-  M10/M20 funcionan con catálogos pequeños.
-- Crear DB `db_modeler` (la app no la crea automáticamente).
-
-### 6.2 Índices
-
-El backend crea idempotentemente al arranque:
-
-| Colección | Índice |
-|-----------|--------|
-| `users` | único en `username` |
-| `models` | `(projectId, updatedAt desc)` |
-| `model_tables` | `(modelId)`, `(modelId, schema)`, `(modelId, domain)` |
-| `model_relationships` | `(modelId)` |
-| `model_views` | `(modelId)`, `(modelId, sourceTableId)` |
-| `column_catalog` | text en `functional_definition` + `cosmosSearch` 1536-dim |
-
-### 6.3 Backup y rollback
-
-- **Backup automático** de Cosmos DB: Azure mantiene snapshots
-  cada 4 h (configurable hasta 30 días). Restaurar desde el portal.
-- **Soft-delete** garantiza que las eliminaciones desde la app son
-  reversibles flippeando `flgactive`. Útil mientras la operación es
-  reciente — pasada cierta cantidad de tiempo, los docs `flgactive=false`
-  pueden purgarse manualmente.
-
-### 6.4 Migración de IDs estables de columna (one-shot)
-
-Si tenés datos pre-migration (columnas sin `id` y relaciones por
-nombre), correr el script:
-
-```bash
-cd agent-modeler
-source .venv/bin/activate
-python scripts/backfill_column_ids.py
-```
-
-Pasos que hace el script:
-
-1. Lee todos los `model_tables` y stamp `id: uuidv4()` en columnas
-   sin id.
-2. Recorre `model_relationships` y reescribe `sourceColumn` /
-   `targetColumn` de **nombre → id** usando match exacto en la tabla
-   correspondiente.
-3. Marca como `flgactive=false` cualquier relación que no se pudo
-   resolver (típicamente apunta a columnas borradas).
-
-Es **idempotente**: correrlo dos veces no hace daño.
-
----
-
-## 7. Azure AI Foundry
-
-### 7.1 Recursos necesarios
-
-- Un proyecto en Azure AI Foundry con un deployment de **GPT-4o**
-  (o variante compatible — definido por `FOUNDRY_MODEL`).
-- Un recurso de Azure OpenAI con un deployment de
-  **`text-embedding-3-small`** (o equivalente — definido por
-  `AZURE_OPENAI_EMBEDDING_DEPLOYMENT`).
-- Un Service Principal (Azure AD App Registration) con rol
-  **Cognitive Services User** sobre el recurso de Foundry.
-
-### 7.2 Quotas y rate limits
-
-El rate limit típico de Foundry GPT-4o es del orden de 30 RPM por
-deployment estándar. La app por defecto:
-
-- `LLM_RPM_CAP = 30` (token bucket por minuto).
-- `MAX_CONCURRENT_PIPELINES = 5` (turnos paralelos).
-- `PER_TABLE_PARALLELISM = 4` (tablas paralelas por turno).
-
-Si tu deployment tiene más capacidad, subí `LLM_RPM_CAP`. Si tenés
-capacidad inferior (PTU compartido), bajalo a `15` o `10`.
-
----
-
-## 8. Observabilidad
-
-### 8.1 Logs
-
-`LOG_FORMAT=json` produce una línea por evento. Pipear a Loki /
-Datadog / cualquier collector. Eventos clave:
-
-| Evento | Logger | Severidad |
-|--------|--------|-----------|
-| `request started` / `request finished` | `api.main` | INFO |
-| `excel parsed` | `src.api.modeling` | INFO |
-| `table modelled` (con `ms`) | `src.api.modeling` | INFO |
-| `pipeline finished` | `src.api.modeling` | INFO |
-| `rate limit reached, waiting` | `src.api.rate_limit` | INFO |
-| `rate limit hit, retrying` | `src.api.rate_limit` | WARN |
-| `rate limit retries exhausted` | `src.api.rate_limit` | ERROR |
-| `motor db connection failed` | `src.db.motor_client` | ERROR |
-| `foundry connection failed` | `api.main` | ERROR |
-
-### 8.2 Métricas mínimas
-
-Sin instrumentación formal — agregar OpenTelemetry o Prometheus si
-hace falta. Mientras tanto, los logs JSON permiten:
-
-- p50/p95 de `pipeline finished.ms`.
-- ratio `failed > 0` / total → tasa de fallos parciales.
-- frecuencia de `rate limit reached, waiting` → saturación.
-
----
-
-## 9. Checklist de release
-
-```
-[ ] AUTH_SECRET coincide entre web-data-model-hub/.env y agent-modeler/.env
-[ ] NEXT_PUBLIC_API_URL apunta al hostname público del backend
-[ ] CORS_ORIGINS del backend incluye exactamente el origen del frontend
-[ ] Cosmos DB y AI Foundry accesibles desde la red del backend (firewall / VNet)
-[ ] Service Principal del backend tiene rol sobre Foundry y Azure OpenAI
-[ ] /api/health responde 200 con foundry_connected: true
-[ ] Login con admin/dogadmin2019 funciona (cambiar password ASAP)
-[ ] Subir un Excel de prueba → ModelingResponse vuelve con tablas
-[ ] Aplicar al canvas + auto-save → modelo persiste en Cosmos DB
-[ ] Recargar la página → modelo aparece igual
-[ ] Logs en formato JSON visibles en el collector
+# Contra el backend directamente
+curl -s https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com/api/projects | jq
+
+# Salida esperada
+# { "success": true, "data": [ { "id": "...", "name": "..." }, ... ] }
 ```
 
 ---
 
-## 10. Rollback
+## 8. Archivos heredados de Next.js — RESUELTO (2026-07-19)
 
-- **Frontend**: redeploy de la versión anterior (Vercel / Azure App
-  Service mantienen builds previos). El frontend es stateless, no
-  hay migración de datos al rollback.
-- **Backend**: idem — la imagen previa funciona contra la misma DB
-  porque el schema es backward-compatible (los campos nuevos se
-  ignoran con `extra="ignore"`).
-- **DB schema**: las migraciones que hicimos (`id` estables de
-  columna) son **aditivas** — el backend viejo simplemente ignora
-  los `id` nuevos y todo sigue funcionando. La única migración
-  destructiva fue la limpieza de relaciones huérfanas, que está
-  en `flgactive=false` y se puede revertir flippeando el flag si
-  hace falta.
+Los artefactos que quedaron de la migración Next.js → Vite ya fueron alineados:
+
+| Archivo | Estado actual |
+|---|---|
+| `.env.example` | `VITE_API_URL=` (vacío en dev; el proxy de Vite cubre `/api`). |
+| `.env.production` | **ELIMINADO** — `VITE_API_URL` llega del bundle (variable `backend_api_url`) como env del app y se inlinea en el build. |
+| `app.yaml` | **ELIMINADO** — el comando y el env viven en el bloque `config:` de `databricks.yml` (CLI ≥ 0.283). |
+| `databricks.yml` | Describe la app como SPA Vite/React. |
+| `.gitignore` | Ignora `/dist` (build de Vite) y permite commitear `.env.example`. OJO: `dist/` quedó trackeado de un build viejo → `git rm -r --cached dist` en el próximo commit. |
+
+---
+
+## 9. Flujo de build y despliegue (resumen visual)
+
+```mermaid
+flowchart TD
+    A["Codigo fuente: src, index.html, public"] --> B["npm install"]
+    B --> C["Definir VITE_API_URL (build-time)"]
+    C --> D["npm run build"]
+    D --> E["tsc --noEmit: chequeo de tipos"]
+    E --> F["vite build: bundling y minificado"]
+    F --> G["dist/: index.html + assets con hash + imagenes"]
+    G --> H{"Donde se sirve?"}
+    H --> I["Azure App Service: estaticos + fallback SPA a index.html"]
+    H --> J["Databricks Apps: frnt-data-model-hub (estaticos)"]
+    I --> K["El navegador carga la SPA y llama al backend via VITE_API_URL"]
+    J --> K
+```
+
+---
+
+## 10. Checklist de despliegue
+
+- [ ] `npm install` corre sin errores y `npm run build` termina limpio (tipos + bundle).
+- [ ] `VITE_API_URL` definida **antes** del build (vacía si es mismo origen; URL absoluta si el backend está en otro origen).
+- [ ] El host de estáticos tiene **fallback SPA** a `index.html` para las rutas del cliente (BrowserRouter).
+- [ ] Las llamadas a `/api/*` llegan al backend (por proxy en mismo origen, o por URL absoluta + CORS en orígenes distintos).
+- [ ] Si es cross-origin: el backend habilita **CORS con credenciales** (el cliente usa `credentials: 'include'` y `Authorization: Bearer`).
+- [ ] Caché: `index.html` sin caché; `/assets/*` cacheables e inmutables.
+- [ ] El backend apunta correctamente a Azure Cosmos DB (API de Mongo); el frontend no toca la base directamente.
+- [ ] `curl` al endpoint del backend devuelve el envelope `{ "success": true, "data": ... }`.

@@ -1,444 +1,533 @@
-// Engine-aware DDL generators.
-//
-// Each generator takes a normalised input (a table + the surrounding model so
-// FK references can be resolved across the catalog) and produces a full
-// CREATE TABLE block. Top-level helpers (`generateTablesDDL`, etc.) take care
-// of grouping CREATE SCHEMA statements, ordering by dependency, and stitching
-// individual statements into a single document.
+// DDL generators — ported from `data.js` (genDDL / genViewDDL).
+// Views are SQL projections embedded in their table; `includeViews` appends a
+// `CREATE VIEW` per role view.
 
-import type {
-  TableModel,
-  TableColumn,
-  Relationship,
-  DatabaseEngine,
-} from '@/types/model';
-import { getEngine, resolveSchema } from '@/features/engines/engines';
-import { resolveColumnName } from '@/lib/columnRef';
-import { resolveDataType, quoteIdent, qualifyTable } from './typeMappings';
+import type { Table, View, DatabaseEngine } from '@/types/model';
 
-export interface GenerateOptions {
-  /** Include CREATE SCHEMA statements at the top of the output. */
-  emitSchemas?: boolean;
-  /** Include FK constraints inline / as ALTER TABLE blocks at the bottom. */
-  emitForeignKeys?: boolean;
-  /** Include COMMENT ON / column descriptions when supported. */
-  emitComments?: boolean;
+/** `CREATE VIEW schema.name AS SELECT <exprs> FROM schema.table [WHERE …];`
+ *  WHERE is a single free-text condition used verbatim (Feature 7). */
+export function genViewDDL(table: Table, v: View): string {
+  const full = `${table.schema}.${table.name}`;
+  const cols = (v.select ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
+  const where = (v.where ?? '').trim();
+  let out = `CREATE VIEW ${table.schema}.${v.name} AS\nSELECT\n  ${cols.join(',\n  ') || '*'}\nFROM ${full}`;
+  if (where) out += `\nWHERE ${where}`;
+  return out + ';';
 }
 
-const DEFAULT_OPTIONS: Required<GenerateOptions> = {
-  emitSchemas: true,
-  emitForeignKeys: true,
-  emitComments: true,
+/** Engine-aware partition clause for a `CREATE TABLE`, from the columns the user
+ *  marked as partition keys (Feature 6A). Emitted between `)` and `;`. */
+function partitionClause(engine: DatabaseEngine | undefined, cols: string[]): string {
+  if (!cols.length) return '';
+  const list = cols.join(', ');
+  switch (engine) {
+    case 'databricks_sql':
+      return `\nPARTITIONED BY (${list})`;
+    case 'postgresql':
+    case 'mysql':
+      return `\nPARTITION BY RANGE (${list})`;
+    case 'sqlserver':
+      return `\n-- Partition: define una PARTITION FUNCTION/SCHEME sobre (${list})`;
+    default:
+      return `\n-- Partition columns: ${list}`;
+  }
+}
+
+export interface GenDDLOptions {
+  name?: string;
+  engineLabel?: string;
+  /** Engine id — drives the partition clause syntax. */
+  engine?: DatabaseEngine;
+  includeViews?: boolean;
+  /** Emit PRIMARY KEY + FOREIGN KEY statements (combined switch). Default true. */
+  includeKeys?: boolean;
+}
+
+export function genDDL(tables: Table[], opts: GenDDLOptions = {}): string {
+  const includeKeys = opts.includeKeys !== false;
+  let out = `-- ${opts.name ?? 'model'} · ${opts.engineLabel ?? ''}\n\n`;
+  tables.forEach((t) => {
+    const full = `${t.schema}.${t.name}`;
+    const lines = t.columns.map((c) => {
+      let l = `  ${c.name} ${c.dataType.toUpperCase()}`;
+      if (c.isNullable === false) l += ' NOT NULL';
+      return l;
+    });
+    const pks = t.columns.filter((c) => c.isPrimaryKey).map((c) => c.name);
+    if (includeKeys && pks.length) lines.push(`  PRIMARY KEY (${pks.join(', ')})`);
+    const partCols = t.columns.filter((c) => c.isPartitionKey).map((c) => c.name);
+    out += `CREATE TABLE ${full} (\n${lines.join(',\n')}\n)${partitionClause(opts.engine, partCols)};\n`;
+    if (includeKeys) {
+      t.columns
+        .filter((c) => c.isForeignKey && c.foreignKeyRef)
+        .forEach((c) => {
+          out += `ALTER TABLE ${full} ADD FOREIGN KEY (${c.name}) REFERENCES ${c.foreignKeyRef!.table}(${c.foreignKeyRef!.column});\n`;
+        });
+    }
+    out += '\n';
+  });
+  if (opts.includeViews) {
+    tables.forEach((t) => (t.views ?? []).forEach((v) => {
+      out += `-- view · ${v.type} · ${v.role ?? ''}\n${genViewDDL(t, v)}\n\n`;
+    }));
+  }
+  return out.trim();
+}
+
+export function countViews(tables: Table[]): number {
+  return tables.reduce((a, t) => a + (t.views?.length ?? 0), 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Databricks DDL generator (Screen 10 — Export DDL, `#pd`).
+//
+// Decoupled from `@/types/model`: works off the *canonical* diagram shape the
+// modeler store actually holds (`Diagram.tables/columns/relationships`). Kept as
+// thin local interfaces so the generator is pure and unit-testable, and so the
+// older `genDDL`/EditorScreen path above stays untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Dialects offered by the Export DDL modal. Only `databricks` is implemented;
+ *  `oracle` is surfaced as a locked/disabled option per the design. */
+export type DdlDialect = 'databricks' | 'oracle';
+
+/** Storage format for `USING <format>` (Databricks). */
+export type DdlTableFormat = 'delta' | 'parquet' | 'avro' | 'orc' | 'csv' | 'json';
+
+/** Minimal table shape the generator consumes (subset of `CanonicalTable`). */
+export interface DdlTable {
+  id: string;
+  physicalName: string;
+  logicalName?: string;
+  schema?: string;
+  /** Functional/business definition → emitted as a table `COMMENT`. */
+  description?: string;
+}
+
+/** Minimal column shape (subset of `CanonicalColumn`). */
+export interface DdlColumn {
+  id: string;
+  tableId: string;
+  physicalName: string;
+  logicalName?: string;
+  dataType: string;
+  ordinal: number;
+  isPrimaryKey?: boolean;
+  /** Posición dentro de la llave (0-based) — ordena el PRIMARY KEY(...). */
+  pkPosition?: number | null;
+  isForeignKey?: boolean;
+  isNullable?: boolean;
+  /** Column marked as a partition key. */
+  isPartition?: boolean;
+  /** Functional definition → emitted as a column `COMMENT`. */
+  description?: string;
+}
+
+/** Minimal relationship shape (subset of governance `Relationship`, v2 doc 19:
+ *  parent = lado PK, child = lado FK, con pares múltiples). Used to emit
+ *  `FOREIGN KEY … REFERENCES` constraints (compuestas incluidas). */
+export interface DdlRelationshipPair {
+  parentColumnId: string;
+  childColumnId: string;
+}
+export interface DdlRelationship {
+  id: string;
+  parentTableId: string;
+  childTableId: string;
+  pairs: DdlRelationshipPair[];
+}
+
+/** Minimal view shape para emitir `CREATE VIEW` (subconjunto de la View canónica). */
+export interface DdlView {
+  id: string;
+  /** Legacy: primera fuente (compat). El canónico F3 es `sourceTableIds`. */
+  tableId?: string;
+  /** F3: fuentes de la vista, en orden — definen los alias posicionales t1, t2… */
+  sourceTableIds?: string[];
+  /** F3: condición de JOIN manual — se emite VERBATIM (gana a la inferida). */
+  joinOverride?: string;
+  name: string;
+  schema?: string;
+  /** Definición SQL libre (fallback cuando no hay estructura). */
+  sql?: string;
+  /** Filtro (WHERE). */
+  filter?: string;
+  description?: string;
+  /** Proyecciones del editor de vista: una por columna incluida. Sin proyecciones
+   *  (o todas plain = legacy) ⇒ SELECT *. `tableId` = de qué fuente viene la
+   *  columna; `castType` ⇒ `CAST(col AS castType) AS alias` (verbatim). */
+  sources?: { column?: string; table?: string; tableId?: string; outputAlias?: string; expression?: string; castType?: string }[];
+}
+
+/** Casing aplicado a los identificadores exportados (F4 #7). Solo afecta el
+ *  TEXTO exportado (ADLS es case-sensitive) — nunca la base de datos. */
+export type IdentifierCase = 'as-is' | 'lower' | 'upper';
+
+export interface DatabricksDdlOptions {
+  /** Emite `CREATE OR REPLACE VIEW` por cada vista del canvas exportado. */
+  includeViews: boolean;
+  /** Emit PRIMARY KEY / FOREIGN KEY constraints. */
+  includeKeys: boolean;
+  /** Emit `COMMENT` clauses from functional definitions. */
+  includeComments: boolean;
+  /** Emit `PARTITIONED BY (…)` from partition-key columns. */
+  includePartitions: boolean;
+  /** Emit a trailing `-- index` hint (Databricz has no CREATE INDEX). */
+  includeIndexes: boolean;
+  /** `USING <format>`. */
+  tableFormat: DdlTableFormat;
+  /** Unity Catalog: qualify names as `catalog.schema.table`. */
+  unityCatalog: boolean;
+  /** Catalog name used when `unityCatalog` is on. */
+  catalog: string;
+  /** Default schema when a table has none. */
+  defaultSchema: string;
+  /** External table → `CREATE EXTERNAL TABLE … LOCATION '<base>/<table>'`. */
+  external: boolean;
+  /** Base storage path (S3/ADLS/…) for external tables. */
+  location: string;
+  /** Optional `TBLPROPERTIES (…)` key/value pairs. */
+  tblProperties: { key: string; value: string }[];
+  /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_).
+   *  NUNCA aplica a: literales, COMMENTs, tipos de datos, expresiones de
+   *  vistas, joinOverride ni alias generados (t1, t2, …). */
+  identifierCase: IdentifierCase;
+}
+
+export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
+  // Default pedido owner: Views + Comments + Partitions ON; PK&FK (keys) e Indexes OFF.
+  includeViews: true,
+  includeKeys: false,
+  includeComments: true,
+  includePartitions: true,
+  includeIndexes: false,
+  tableFormat: 'delta',
+  unityCatalog: false,
+  catalog: 'main',
+  defaultSchema: 'default',
+  external: false,
+  location: 's3://my-bucket/warehouse',
+  tblProperties: [],
+  identifierCase: 'as-is',
 };
 
-interface GenContext {
-  engine: DatabaseEngine;
-  supportsSchemas: boolean;
-  options: Required<GenerateOptions>;
-  /** Map from table name (without schema) → resolved schema name. */
-  schemaByTableName: Map<string, string>;
-  allTables: TableModel[];
+// Casing activo del export en curso. `databricksDdl` (único entry point
+// exportado que usa `ident`/`qualify`) lo fija al entrar; así TODO
+// identificador — incluidos los del FROM/JOIN de las vistas multi-fuente
+// (F3b) y los nombres de constraint pk_/fk_ — pasa por el mismo funnel sin
+// enhebrar la opción por call-site. El generador es síncrono ⇒ sin carreras.
+let activeCase: IdentifierCase = 'as-is';
+
+const applyCase = (s: string): string =>
+  activeCase === 'lower' ? s.toLowerCase() : activeCase === 'upper' ? s.toUpperCase() : s;
+
+/** Backtick-quote a Databricks identifier (aplica el casing del export). */
+const ident = (s: string) => `\`${applyCase(s)}\``;
+
+/** SQL string literal with single-quote escaping. */
+const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
+
+/** Fully-qualified, backtick-quoted table name honoring Unity Catalog. */
+function qualify(t: DdlTable, o: DatabricksDdlOptions): string {
+  const schema = (t.schema?.trim() || o.defaultSchema || 'default');
+  const parts = o.unityCatalog
+    ? [o.catalog || 'main', schema, t.physicalName]
+    : [schema, t.physicalName];
+  return parts.map(ident).join('.');
 }
 
-// ────────────────────────────────────────────────────────────────────────────
-// Public API
-// ────────────────────────────────────────────────────────────────────────────
-
-/**
- * Generate DDL for a single table within the context of a model.
- * The context is required so FK references can be qualified with their
- * target schema.
- */
-export function generateTableDDL(
-  table: TableModel,
-  allTables: TableModel[],
-  relationships: Relationship[],
-  engine: DatabaseEngine,
-  options: GenerateOptions = {}
-): string {
-  const ctx = buildContext(allTables, engine, options);
-  const lines: string[] = [];
-  emitSchema(lines, table, ctx);
-  emitTable(lines, table, ctx);
-  if (ctx.options.emitForeignKeys) {
-    emitForeignKeysFor(lines, table, relationships, ctx);
-  }
-  return lines.join('\n').trimEnd() + '\n';
-}
-
-/**
- * Generate DDL for an arbitrary set of tables. Schemas are grouped at the
- * top, tables are emitted next, and FK ALTER TABLE statements are appended
- * at the bottom so the output applies cleanly even with cross-table
- * dependencies.
- */
-export function generateTablesDDL(
-  tables: TableModel[],
-  allTables: TableModel[],
-  relationships: Relationship[],
-  engine: DatabaseEngine,
-  options: GenerateOptions = {}
-): string {
-  const ctx = buildContext(allTables, engine, options);
-  const lines: string[] = [];
-
-  // Group schemas
-  if (ctx.options.emitSchemas && ctx.supportsSchemas) {
-    const schemas = new Set<string>();
-    for (const t of tables) schemas.add(resolveSchema(t.schema, engine));
-    for (const s of Array.from(schemas).sort()) {
-      lines.push(createSchemaStmt(s, engine));
-    }
-    if (schemas.size) lines.push('');
-  }
-
-  // Tables
-  for (const t of tables) {
-    emitTable(lines, t, ctx);
-    lines.push('');
-  }
-
-  // Foreign-key ALTERs
-  if (ctx.options.emitForeignKeys) {
-    const fkLines: string[] = [];
-    for (const t of tables) {
-      emitForeignKeysFor(fkLines, t, relationships, ctx);
-    }
-    if (fkLines.length) {
-      lines.push('-- Foreign key constraints');
-      lines.push(...fkLines);
-    }
-  }
-
-  return lines.join('\n').trimEnd() + '\n';
-}
-
-/** Generate DDL for every table that belongs to a domain (TableModel.domain). */
-export function generateDomainDDL(
-  domain: string,
-  allTables: TableModel[],
-  relationships: Relationship[],
-  engine: DatabaseEngine,
-  options: GenerateOptions = {}
-): string {
-  const subset = allTables.filter((t) => (t.domain ?? '').toLowerCase() === domain.toLowerCase());
-  return generateTablesDDL(subset, allTables, relationships, engine, options);
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Internal — context + table emission
-// ────────────────────────────────────────────────────────────────────────────
-
-function buildContext(
-  allTables: TableModel[],
-  engine: DatabaseEngine,
-  options: GenerateOptions
-): GenContext {
-  const def = getEngine(engine);
-  const supportsSchemas = def?.supportsSchemas ?? true;
-  const schemaByTableName = new Map<string, string>();
-  for (const t of allTables) {
-    schemaByTableName.set(t.name, resolveSchema(t.schema, engine));
-  }
-  return {
-    engine,
-    supportsSchemas,
-    options: { ...DEFAULT_OPTIONS, ...options },
-    schemaByTableName,
-    allTables,
+/** Map a canonical/logical data type to a Databricks SQL type. */
+function dbxType(raw: string): string {
+  const t0 = (raw || 'string').trim();
+  // Tipos complejos (contienen '<'): VERBATIM (F4 #6). Upper-casear rompería
+  // la sintaxis interna (campos del STRUCT, tipos anidados). El switch de
+  // casing (identifierCase) tampoco aplica: no son identificadores.
+  if (t0.includes('<')) return t0;
+  const t = t0.toLowerCase();
+  const map: Record<string, string> = {
+    integer: 'INT', int: 'INT', smallint: 'SMALLINT', tinyint: 'TINYINT', bigint: 'BIGINT',
+    float: 'FLOAT', real: 'FLOAT', double: 'DOUBLE',
+    decimal: 'DECIMAL(38,18)', numeric: 'DECIMAL(38,18)', money: 'DECIMAL(19,4)',
+    varchar: 'STRING', nvarchar: 'STRING', char: 'STRING', text: 'STRING', string: 'STRING', uuid: 'STRING',
+    boolean: 'BOOLEAN', bool: 'BOOLEAN',
+    date: 'DATE', datetime: 'TIMESTAMP', timestamp: 'TIMESTAMP', timestamptz: 'TIMESTAMP', time: 'STRING',
+    binary: 'BINARY', varbinary: 'BINARY', blob: 'BINARY', bytes: 'BINARY',
+    json: 'STRING', jsonb: 'STRING', xml: 'STRING',
+    array: 'ARRAY<STRING>', map: 'MAP<STRING,STRING>', struct: 'STRUCT<>',
   };
+  // Preserve explicit params like decimal(10,2) verbatim (upper-cased).
+  if (/\(.*\)/.test(t)) return t.toUpperCase();
+  return map[t] ?? t.toUpperCase();
 }
 
-function emitSchema(lines: string[], table: TableModel, ctx: GenContext) {
-  if (!ctx.options.emitSchemas || !ctx.supportsSchemas) return;
-  const s = resolveSchema(table.schema, ctx.engine);
-  lines.push(createSchemaStmt(s, ctx.engine));
-  lines.push('');
-}
+/** One `CREATE TABLE` statement for a single table. */
+function tableDDL(
+  t: DdlTable,
+  cols: DdlColumn[],
+  rels: DdlRelationship[],
+  o: DatabricksDdlOptions,
+  tableById: Map<string, DdlTable>,
+  colName: Map<string, string>,
+): string {
+  const full = qualify(t, o);
+  const ordered = [...cols].sort((a, b) => a.ordinal - b.ordinal);
 
-function createSchemaStmt(schema: string, engine: DatabaseEngine): string {
-  if (engine === 'oracle') {
-    return `-- Oracle: schemas are users; ensure user ${schema} exists`;
-  }
-  if (engine === 'cosmosdb') {
-    return `-- Cosmos DB: schema-less; '${schema}' is treated as the database/container namespace`;
-  }
-  // PostgreSQL, Databricks SQL, SQL Server and MySQL all accept the form.
-  return `CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schema, engine)};`;
-}
+  const colLines = ordered.map((c) => {
+    let l = `  ${ident(c.physicalName)} ${dbxType(c.dataType)}`;
+    if (c.isNullable === false || c.isPrimaryKey) l += ' NOT NULL';
+    if (o.includeComments && c.description?.trim()) l += ` COMMENT ${lit(c.description.trim())}`;
+    return l;
+  });
 
-function emitTable(lines: string[], table: TableModel, ctx: GenContext) {
-  const { engine, supportsSchemas } = ctx;
-  const schema = resolveSchema(table.schema, engine);
-  const fqName = qualifyTable(schema, table.name, engine, supportsSchemas);
-
-  // Optional table comment header
-  if (ctx.options.emitComments && table.functionalDefinition) {
-    lines.push(`-- ${truncateOneLine(table.functionalDefinition)}`);
-  }
-
-  const colLines = table.columns
-    .filter((c) => c.name.trim().length > 0)
-    .map((c) => '  ' + buildColumnLine(c, ctx));
-
-  // Inline PRIMARY KEY clause — supported by all 3 target engines
-  const pkCols = table.columns.filter((c) => c.isPrimaryKey).map((c) => quoteIdent(c.name, engine));
-  if (pkCols.length > 0) {
-    colLines.push(`  PRIMARY KEY (${pkCols.join(', ')})`);
+  const inner: string[] = [...colLines];
+  if (o.includeKeys) {
+    // El PRIMARY KEY(...) va en el ORDEN DE LA LLAVE (pkPosition), que es
+    // independiente del orden físico de columnas — convención Erwin (doc 19
+    // §12b). Sin pkPosition cae al ordinal (sort estable sobre `ordered`).
+    const pks = ordered.filter((c) => c.isPrimaryKey)
+      .sort((a, b) => (a.pkPosition ?? Number.MAX_SAFE_INTEGER) - (b.pkPosition ?? Number.MAX_SAFE_INTEGER))
+      .map((c) => ident(c.physicalName));
+    if (pks.length) inner.push(`  CONSTRAINT ${ident(`pk_${t.physicalName}`)} PRIMARY KEY (${pks.join(', ')})`);
   }
 
-  // Inline UNIQUE constraints (single-column only — composite kept simple)
-  for (const c of table.columns) {
-    if (c.isUnique && !c.isPrimaryKey) {
-      colLines.push(`  UNIQUE (${quoteIdent(c.name, engine)})`);
-    }
+  const create = o.external ? 'CREATE EXTERNAL TABLE' : 'CREATE TABLE';
+  let out = `${create} IF NOT EXISTS ${full} (\n${inner.join(',\n')}\n)`;
+  out += `\nUSING ${o.tableFormat}`;
+
+  if (o.includePartitions) {
+    const parts = ordered.filter((c) => c.isPartition).map((c) => ident(c.physicalName));
+    if (parts.length) out += `\nPARTITIONED BY (${parts.join(', ')})`;
   }
 
-  // Cosmos DB is schema-less. We emit a JSON-shaped descriptor so the export
-  // is still useful as documentation, but it isn't valid DDL.
-  if (engine === 'cosmosdb') {
-    lines.push(`-- Cosmos DB container descriptor (NOT executable DDL)`);
-    lines.push(`-- Container: ${fqName}`);
-    const colDescriptors = table.columns
-      .filter((c) => c.name.trim().length > 0)
-      .map((c) => {
-        const t = resolveDataType(c, engine);
-        const opt = c.isNullable === false || c.isPrimaryKey ? 'required' : 'optional';
-        return `--   ${c.name}: ${t} (${opt})`;
+  if (o.includeComments && t.description?.trim()) out += `\nCOMMENT ${lit(t.description.trim())}`;
+
+  if (o.external) {
+    const base = (o.location || '').replace(/\/+$/, '');
+    out += `\nLOCATION ${lit(`${base}/${t.physicalName}`)}`;
+  }
+
+  if (o.tblProperties.length) {
+    const props = o.tblProperties
+      .filter((p) => p.key.trim())
+      .map((p) => `  ${lit(p.key.trim())} = ${lit(p.value)}`);
+    if (props.length) out += `\nTBLPROPERTIES (\n${props.join(',\n')}\n)`;
+  }
+
+  out += ';\n';
+
+  // FK constraints (added after the table; Databricks supports informational FKs).
+  // v2 (doc 19): el HIJO (childTableId) es quien tiene la FK; una relación con
+  // pares múltiples emite UNA constraint compuesta con las listas de columnas.
+  if (o.includeKeys) {
+    rels
+      .filter((r) => r.childTableId === t.id && r.pairs.length)
+      .forEach((r) => {
+        const fkCols = r.pairs
+          .map((p) => cols.find((c) => c.id === p.childColumnId))
+          .filter((c): c is DdlColumn => !!c);
+        if (fkCols.length !== r.pairs.length) return; // par con columna fuera del set exportado
+        const parent = tableById.get(r.parentTableId);
+        const parentRef = parent ? qualify(parent, o) : ident(r.parentTableId);
+        const parentCols = r.pairs.map((p) => colName.get(p.parentColumnId) ?? p.parentColumnId);
+        out += `ALTER TABLE ${full} ADD CONSTRAINT ${ident(`fk_${t.physicalName}_${fkCols[0].physicalName}`)}`
+          + ` FOREIGN KEY (${fkCols.map((c) => ident(c.physicalName)).join(', ')})`
+          + ` REFERENCES ${parentRef}(${parentCols.map((c) => ident(c)).join(', ')});\n`;
       });
-    lines.push(...colDescriptors);
-    appendTableSuffix(lines, table, ctx);
-    if (ctx.options.emitComments) appendComments(lines, table, ctx);
-    return;
   }
 
-  const createPrefix =
-    engine === 'databricks_sql' || engine === 'databricks'
-      ? 'CREATE TABLE IF NOT EXISTS'
-      : 'CREATE TABLE';
-  lines.push(`${createPrefix} ${fqName} (`);
-  lines.push(colLines.join(',\n'));
-  lines.push(')');
-
-  // Engine-specific table-level clauses: USING / PARTITION / CLUSTER
-  appendTableSuffix(lines, table, ctx);
-
-  // Comments: COMMENT ON COLUMN / COMMENT ON TABLE
-  if (ctx.options.emitComments) {
-    appendComments(lines, table, ctx);
+  if (o.includeIndexes) {
+    out += `-- index: Databricks has no CREATE INDEX; clustering via ZORDER (OPTIMIZE ${full} ZORDER BY (…)).\n`;
   }
+
+  return out;
 }
 
-function buildColumnLine(col: TableColumn, ctx: GenContext): string {
-  const { engine } = ctx;
-  const name = quoteIdent(col.name, engine);
-  const type = resolveDataType(col, engine);
-  const parts: string[] = [name, type];
-
-  // NULL / NOT NULL — primary keys are implicitly NOT NULL on most engines but
-  // we emit it explicitly for clarity.
-  if (col.isNullable === false || col.isPrimaryKey) parts.push('NOT NULL');
-  if (col.defaultValue) parts.push(`DEFAULT ${formatDefault(col.defaultValue, type)}`);
-
-  // Databricks / MySQL support inline COMMENT per column. For Postgres/Oracle
-  // the comment is emitted as a separate `COMMENT ON COLUMN` statement
-  // (handled in `appendComments`), so we skip it here for those engines.
-  if (ctx.options.emitComments && col.functionalDefinition) {
-    if (
-      engine === 'databricks_sql' ||
-      engine === 'databricks' ||
-      engine === 'mysql'
-    ) {
-      parts.push(`COMMENT '${escapeSqlLiteral(col.functionalDefinition)}'`);
-    }
-  }
-
-  return parts.join(' ');
-}
-
-function formatDefault(raw: string, dataType: string): string {
-  const isNumeric = /^(INT|BIGINT|SMALLINT|NUMERIC|DECIMAL|NUMBER|FLOAT|DOUBLE|REAL|INT64|FLOAT64)/i.test(dataType);
-  if (isNumeric) return raw;
-  if (/^(CURRENT_TIMESTAMP|CURRENT_DATE|NOW\(\)|GETDATE\(\)|SYSDATE)$/i.test(raw)) return raw;
-  if (raw.startsWith("'") || raw.startsWith('"')) return raw;
-  return `'${raw.replace(/'/g, "''")}'`;
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// Partitioning + clustering
-// ────────────────────────────────────────────────────────────────────────────
-
-function appendTableSuffix(lines: string[], table: TableModel, ctx: GenContext) {
-  const partition = table.partition;
-  const cluster = partition?.clusteringColumns ?? [];
-
-  // ── Cosmos DB ───────────────────────────────────────
-  // No CREATE TABLE statement was emitted; just leave the descriptor as-is.
-  if (ctx.engine === 'cosmosdb') {
-    return;
-  }
-
-  // ── Databricks SQL ─────────────────────────────────
-  // USING DELTA + PARTITIONED BY (cols) + CLUSTER BY (Z-ORDER cols) + COMMENT
-  if (ctx.engine === 'databricks_sql' || ctx.engine === 'databricks') {
-    const tail: string[] = ['USING DELTA'];
-    if (partition && partition.strategy !== 'NONE' && partition.columns.length > 0) {
-      tail.push(`PARTITIONED BY (${joinCols(partition.columns, ctx)})`);
-    }
-    if (cluster.length > 0) {
-      tail.push(`CLUSTER BY (${joinCols(cluster, ctx)})`);
-    }
-    if (table.functionalDefinition && ctx.options.emitComments) {
-      tail.push(`COMMENT '${escapeSqlLiteral(table.functionalDefinition)}'`);
-    }
-    lines[lines.length - 1] = lines[lines.length - 1] + '\n' + tail.join('\n') + ';';
-    return;
-  }
-
-  // ── SQL Server ──────────────────────────────────────
-  // SQL Server needs a partition function + scheme, which is too verbose to
-  // generate inline. Emit a tail comment so the user knows what's missing.
-  if (ctx.engine === 'sqlserver') {
-    if (partition && partition.strategy !== 'NONE' && partition.columns.length > 0) {
-      lines[lines.length - 1] +=
-        `\n-- TODO: define PARTITION FUNCTION + PARTITION SCHEME on (${partition.columns.join(', ')})`;
-    }
-    lines[lines.length - 1] += ';';
-    return;
-  }
-
-  // ── MySQL ───────────────────────────────────────────
-  // PARTITION BY <STRATEGY>(col_expr)  with HASH carrying an optional bucket count.
-  if (ctx.engine === 'mysql') {
-    if (partition && partition.strategy !== 'NONE' && partition.columns.length > 0) {
-      const strat = partition.strategy === 'BUCKET' ? 'HASH' : partition.strategy;
-      const colsExpr = joinCols(partition.columns, ctx);
-      const buckets =
-        partition.strategy === 'HASH' && partition.buckets
-          ? `\nPARTITIONS ${partition.buckets}`
-          : '';
-      lines[lines.length - 1] += `\nPARTITION BY ${strat}(${colsExpr})${buckets}`;
-    }
-    lines[lines.length - 1] += ';';
-    return;
-  }
-
-  // ── PostgreSQL / Oracle (and any other SQL engine) ─────────────────
-  // PARTITION BY <STRATEGY> (cols)
-  if (
-    partition &&
-    partition.strategy !== 'NONE' &&
-    partition.columns.length > 0
-  ) {
-    const strat = partition.strategy === 'BUCKET' ? 'HASH' : partition.strategy;
-    const colsExpr = joinCols(partition.columns, ctx);
-    if (partition.strategy === 'HASH' && partition.buckets) {
-      lines[lines.length - 1] += `\nPARTITION BY ${strat} (${colsExpr})  -- ${partition.buckets} buckets`;
-    } else {
-      lines[lines.length - 1] += `\nPARTITION BY ${strat} (${colsExpr})`;
-    }
-  }
-
-  lines[lines.length - 1] += ';';
-}
-
-function joinCols(cols: string[], ctx: GenContext): string {
-  return cols.map((c) => quoteIdent(c, ctx.engine)).join(', ');
-}
-
-// ────────────────────────────────────────────────────────────────────────────
-// FKs + comments
-// ────────────────────────────────────────────────────────────────────────────
-
-function emitForeignKeysFor(
-  out: string[],
-  table: TableModel,
-  relationships: Relationship[],
-  ctx: GenContext
-) {
-  const { engine, supportsSchemas } = ctx;
-  const sourceSchema = resolveSchema(table.schema, engine);
-  const sourceFq = qualifyTable(sourceSchema, table.name, engine, supportsSchemas);
-
-  for (const col of table.columns) {
-    if (!col.isForeignKey || !col.foreignKeyRef?.table || !col.foreignKeyRef?.column) continue;
-    const targetSchema = ctx.schemaByTableName.get(col.foreignKeyRef.table) ?? resolveSchema(undefined, engine);
-    const targetFq = qualifyTable(targetSchema, col.foreignKeyRef.table, engine, supportsSchemas);
-    const fkName = `fk_${table.name}_${col.name}`;
-    out.push(
-      `ALTER TABLE ${sourceFq} ADD CONSTRAINT ${quoteIdent(fkName, engine)} ` +
-      `FOREIGN KEY (${quoteIdent(col.name, engine)}) REFERENCES ${targetFq}(${quoteIdent(col.foreignKeyRef.column, engine)});`
+/** Condición de JOIN inferida de las relaciones modeladas entre las fuentes de
+ *  una vista (D2, spec §3-5). Para cada fuente después de la primera toma la
+ *  PRIMERA relación que la conecte con alguna fuente ANTERIOR y emite
+ *  `tA.col = tB.col` con alias POSICIONALES (t1, t2… por orden en
+ *  sourceTableIds; la fuente anterior a la izquierda). Une las condiciones con
+ *  ' AND '; devuelve '' si ninguna fuente nueva conecta con las previas (el
+ *  ViewEditor entonces exige joinOverride). Los alias y nombres de columna se
+ *  emiten RAW (sin ident(): no deben casearse — coordinación F4).
+ *  Pura — la usan viewDDL y la sección JOIN del ViewEditor. */
+export function inferJoin(
+  sourceTableIds: string[],
+  relationships: DdlRelationship[],
+  columns: DdlColumn[],
+): string {
+  if (sourceTableIds.length < 2) return '';
+  const alias = new Map(sourceTableIds.map((id, i) => [id, `t${i + 1}`]));
+  const colName = new Map(columns.map((c) => [c.id, c.physicalName]));
+  const conds: string[] = [];
+  for (let k = 1; k < sourceTableIds.length; k++) {
+    const cur = sourceTableIds[k];
+    const prev = new Set(sourceTableIds.slice(0, k));
+    const rel = relationships.find(
+      (r) => (r.childTableId === cur && prev.has(r.parentTableId))
+        || (r.parentTableId === cur && prev.has(r.childTableId)),
     );
-  }
-
-  // Standalone relationships not represented by a column-level FK.
-  // Since the column-id migration, `rel.sourceColumn` / `rel.targetColumn`
-  // hold `TableColumn.id`, not names — resolve to physical names before
-  // emitting SQL. `resolveColumnName` falls back to name-match for any
-  // legacy relationships still keyed by name.
-  for (const rel of relationships) {
-    if (rel.sourceTable !== table.name && rel.sourceTable !== table.id) continue;
-    const srcColName = resolveColumnName(ctx.allTables, rel.sourceTable, rel.sourceColumn);
-    const tgtColName = resolveColumnName(ctx.allTables, rel.targetTable, rel.targetColumn);
-    if (!srcColName || !tgtColName) continue; // orphan — skip silently
-
-    const inlineMatch = table.columns.some(
-      (c) =>
-        c.isForeignKey &&
-        c.name === srcColName &&
-        c.foreignKeyRef?.table === rel.targetTable &&
-        c.foreignKeyRef?.column === tgtColName
-    );
-    if (inlineMatch) continue;
-
-    const targetSchema = ctx.schemaByTableName.get(rel.targetTable) ?? resolveSchema(undefined, engine);
-    const targetFq = qualifyTable(targetSchema, rel.targetTable, engine, supportsSchemas);
-    const fkName = `fk_${table.name}_${srcColName}`;
-    out.push(
-      `ALTER TABLE ${sourceFq} ADD CONSTRAINT ${quoteIdent(fkName, engine)} ` +
-      `FOREIGN KEY (${quoteIdent(srcColName, engine)}) REFERENCES ${targetFq}(${quoteIdent(tgtColName, engine)});`
-    );
-  }
-}
-
-function appendComments(lines: string[], table: TableModel, ctx: GenContext) {
-  // Databricks embeds COMMENT inside CREATE TABLE — skip the trailing block.
-  if (ctx.engine === 'databricks_sql' || ctx.engine === 'databricks') return;
-
-  // Cosmos DB has no COMMENT statement; the descriptor already documents the columns.
-  if (ctx.engine === 'cosmosdb') return;
-
-  const schema = resolveSchema(table.schema, ctx.engine);
-  const fqName = qualifyTable(schema, table.name, ctx.engine, ctx.supportsSchemas);
-
-  // SQL Server doesn't have COMMENT ON; it uses sp_addextendedproperty. Skip
-  // for now and emit an explanatory comment instead.
-  if (ctx.engine === 'sqlserver') {
-    if (table.functionalDefinition) {
-      lines.push(`-- ${truncateOneLine(table.functionalDefinition)}`);
+    if (!rel) continue;
+    // TODOS los pares de la relación entran al ON (FK compuesta = AND de pares).
+    for (const p of rel.pairs) {
+      // Extremo de la fuente ANTERIOR primero (se lee izquierda→derecha).
+      const [aTid, aCol, bTid, bCol] = rel.childTableId === cur
+        ? [rel.parentTableId, p.parentColumnId, rel.childTableId, p.childColumnId]
+        : [rel.childTableId, p.childColumnId, rel.parentTableId, p.parentColumnId];
+      conds.push(`${alias.get(aTid)}.${colName.get(aCol) ?? aCol} = ${alias.get(bTid)}.${colName.get(bCol) ?? bCol}`);
     }
-    return;
   }
-
-  if (table.functionalDefinition) {
-    lines.push(
-      `COMMENT ON TABLE ${fqName} IS '${escapeSqlLiteral(table.functionalDefinition)}';`
-    );
-  }
-
-  for (const c of table.columns) {
-    if (!c.functionalDefinition) continue;
-    lines.push(
-      `COMMENT ON COLUMN ${fqName}.${quoteIdent(c.name, ctx.engine)} IS '${escapeSqlLiteral(c.functionalDefinition)}';`
-    );
-  }
+  return conds.join(' AND ');
 }
 
-function escapeSqlLiteral(s: string): string {
-  return s.replace(/'/g, "''");
+/** Un `CREATE OR REPLACE VIEW` desde una vista canónica (F3: multi-fuente).
+ *  Reglas por columna: `expression` VERBATIM > `CAST(col AS castType) AS alias`
+ *  > `col AS alias` (si difiere) > `col`. Con 2+ fuentes las columnas se
+ *  cualifican con alias posicionales t1, t2… — RAW, nunca via ident(): no son
+ *  identificadores del modelo (coordinación F4) — y el FROM encadena
+ *  `INNER JOIN` con UNA condición: `joinOverride` VERBATIM si está seteado,
+ *  si no la inferida de `relationships` (inferJoin), con fallback explícito
+ *  `1 = 1` comentado. Sin proyecciones ⇒ `SELECT *` (fallback legacy).
+ *  `showOnCanvas` NO participa del export. Exportada: el ViewEditor la usa
+ *  para el preview (mismo SQL que el export). */
+export function viewDDL(
+  v: DdlView,
+  o: DatabricksDdlOptions,
+  tableById: Map<string, DdlTable>,
+  relationships: DdlRelationship[] = [],
+  columns: DdlColumn[] = [],
+): string {
+  // Funnel de casing (F4 #7): fija activeCase desde LAS OPCIONES DE ESTA vista.
+  // - Como entry point DIRECTO (ViewEditor → viewDDL(...), nunca databricksDdl):
+  //   deriva el casing de SUS opciones en vez de heredar el activeCase que dejó
+  //   el último export → el preview del editor no arrastra un 'upper'/'lower'.
+  // - Desde databricksDdl: idempotente (databricksDdl ya lo fijó al mismo valor
+  //   y pasa `o` tal cual) ⇒ respeta el casing del export en curso.
+  activeCase = o.identifierCase ?? 'as-is';
+  // Fuentes canónicas con fallback al tableId legacy (docs pre-F3a).
+  const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+  const base = srcIds.length ? tableById.get(srcIds[0]) : undefined;
+  const schema = (v.schema?.trim() || base?.schema?.trim() || o.defaultSchema || 'default');
+  const parts = o.unityCatalog ? [o.catalog || 'main', schema, v.name] : [schema, v.name];
+  const full = parts.map(ident).join('.');
+
+  const aliased = srcIds.length > 1;
+  // Alias POSICIONAL por fuente (t1, t2, …): raw, nunca via ident() (F4).
+  const aliasOf = new Map(srcIds.map((id, i) => [id, `t${i + 1}`]));
+  // Fuente fuera del contexto exportado (tabla no resuelta): id backtickeado
+  // visible — señal explícita en el DDL en vez de inventar un nombre.
+  const refOf = (id: string) => { const t = tableById.get(id); return t ? qualify(t, o) : ident(id); };
+
+  // Solo cuentan proyecciones por COLUMNA o EXPRESIÓN (el formato legacy
+  // table-only cae al fallback SELECT *). Trim: una expression solo-espacios
+  // es ausencia (evita proyectar `t1.undefined` con payloads directos a la API).
+  const srcs = (v.sources ?? []).filter((s) => (s.column ?? '').trim() || (s.expression ?? '').trim());
+  const where = (v.filter ?? '').trim();
+
+  // FROM: 1 fuente = igual que siempre; 2+ = cadena INNER JOIN con UNA condición.
+  let from: string;
+  if (!srcIds.length) from = `${ident(schema)}.${ident(v.name)}`; // legacy sin tabla
+  else if (!aliased) from = refOf(srcIds[0]);
+  else {
+    const on = (v.joinOverride ?? '').trim()
+      || inferJoin(srcIds, relationships, columns)
+      || '1 = 1 /* no modeled relationship between the sources */';
+    from = `${refOf(srcIds[0])} t1\n`
+      + srcIds.slice(1).map((id) => `  INNER JOIN ${refOf(id)} ${aliasOf.get(id)}`).join('\n')
+      + `\n  ON ${on}`;
+  }
+
+  // La vista LISTA sus columnas explícitas (una por línea) en el orden definido.
+  // `SELECT *` solo como fallback si la vista no tiene proyección por columna.
+  let body: string;
+  if (srcs.length === 0) {
+    body = (!base && v.sql?.trim() && !where)
+      ? v.sql.trim().replace(/;\s*$/, '')
+      : `SELECT *\nFROM ${from}`;
+  } else {
+    const projections = srcs.map((s) => {
+      const alias = (s.outputAlias ?? '').trim();
+      const cast = (s.castType ?? '').trim();
+      const expr = (s.expression ?? '').trim();
+      if (expr) return alias && alias !== expr ? `${expr} AS ${alias}` : expr;
+      // Cualificada con su alias de fuente cuando hay 2+ (sin tableId ⇒ t1,
+      // ítems legacy de vistas de una sola tabla).
+      const col = aliased ? `${aliasOf.get(s.tableId ?? '') ?? 't1'}.${s.column}` : s.column!;
+      if (cast) return `CAST(${col} AS ${cast}) AS ${alias || s.column}`;
+      return alias && alias !== s.column ? `${col} AS ${alias}` : col;
+    });
+    body = `SELECT\n  ${projections.join(',\n  ')}\nFROM ${from}`;
+  }
+  if (where) body += `\nWHERE ${where}`;
+
+  let out = `CREATE OR REPLACE VIEW ${full}`;
+  if (o.includeComments && v.description?.trim()) out += ` COMMENT ${lit(v.description.trim())}`;
+  return out + ` AS\n${body};\n`;
 }
 
-function truncateOneLine(s: string): string {
-  const line = s.replace(/\s+/g, ' ').trim();
-  return line.length > 200 ? line.slice(0, 197) + '...' : line;
+export interface DatabricksDdlInput {
+  tables: DdlTable[];
+  columns: DdlColumn[];
+  relationships: DdlRelationship[];
+  /** Vistas del canvas (para `CREATE VIEW` cuando `includeViews`). */
+  views?: DdlView[];
+  /** Only export these table ids; empty/undefined ⇒ all. */
+  tableIds?: string[];
+  modelName?: string;
+}
+
+/** Generate Databricks DDL for the selected tables of a diagram. */
+export function databricksDdl(input: DatabricksDdlInput, o: DatabricksDdlOptions): string {
+  activeCase = o.identifierCase ?? 'as-is';
+  const wanted = input.tableIds && input.tableIds.length
+    ? new Set(input.tableIds)
+    : null;
+  const tables = input.tables.filter((t) => !wanted || wanted.has(t.id));
+  const byTable = new Map<string, DdlColumn[]>();
+  for (const c of input.columns) {
+    (byTable.get(c.tableId) ?? byTable.set(c.tableId, []).get(c.tableId)!).push(c);
+  }
+  // Lookups para resolver el destino de las FK a nombre físico (no id).
+  const tableById = new Map(input.tables.map((t) => [t.id, t]));
+  const colName = new Map(input.columns.map((c) => [c.id, c.physicalName]));
+  // Only relationships fully inside the export set produce constraints.
+  const ids = new Set(tables.map((t) => t.id));
+  const rels = input.relationships.filter((r) => ids.has(r.parentTableId) && ids.has(r.childTableId));
+
+  const header = `-- ${input.modelName ?? 'model'} · Databricks · ${tables.length} table(s)\n`
+    + `-- Generated by Data Model Hub\n`;
+
+  if (!tables.length) return `${header}\n-- (no tables selected)`;
+
+  const body = tables
+    .map((t) => tableDDL(t, byTable.get(t.id) ?? [], rels, o, tableById, colName))
+    .join('\n');
+
+  // Vistas (F3): entra toda vista con ALGUNA fuente dentro del set exportado
+  // (misma semántica que Properties→Views: la vista "pertenece" a cada fuente).
+  // showOnCanvas NO participa del export. Las relaciones/columnas van SIN
+  // filtrar por el set: el JOIN de la vista es el que es, esté o no exportada
+  // la otra fuente.
+  let viewsOut = '';
+  if (o.includeViews && input.views?.length) {
+    const exportViews = input.views.filter((v) => {
+      const src = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+      return src.length === 0 || src.some((id) => ids.has(id));
+    });
+    if (exportViews.length) {
+      viewsOut = `\n-- ${exportViews.length} view(s)\n`
+        + exportViews.map((v) => viewDDL(v, o, tableById, input.relationships, input.columns)).join('\n');
+    }
+  }
+
+  return `${header}\n${body}${viewsOut}`.trimEnd() + '\n';
+}
+
+/** Filesystem-safe filename for the download. One table ⇒ its physical name. */
+export function ddlFilename(tables: DdlTable[], modelName?: string): string {
+  const base = tables.length === 1
+    ? tables[0].physicalName
+    : (modelName ?? 'model');
+  const safe = base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'model';
+  return `${safe}.sql`;
 }

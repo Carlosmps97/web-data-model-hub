@@ -1,0 +1,49 @@
+# Databricks Asset Bundle — frontend (SPA Vite/React) como Databricks App.
+# Docs: https://learn.microsoft.com/en-us/azure/databricks/dev-tools/bundles/apps-tutorial
+# Deploy:  databricks bundle deploy --target prod
+# Arranca: databricks bundle run frontend --target prod
+#
+# ⚙️ PARÁMETROS POR ENTORNO = sección `variables:` (defaults = entorno actual).
+# La config de runtime vive en `config:` (sustituye al viejo app.yaml;
+# requiere CLI ≥ 0.283 — el workflow usa setup-cli@main = último).
+bundle:
+  name: frnt-data-model-hub
+
+variables:
+  backend_api_url:
+    description: "URL pública de la app backend (bknd-data-model-hub) de ESTE workspace — se inlinea en el build de Vite."
+    default: https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com
+
+resources:
+  apps:
+    frontend:                     # resource key (lo usa `databricks bundle run frontend`)
+      name: frnt-data-model-hub   # nombre real de la app en el workspace
+      source_code_path: .         # el código de la app está en la raíz del repo
+      description: "Data Model Hub — frontend (SPA Vite/React · editor ER)."
+      config:
+        # `npm run start` dispara `prestart` (tsc + vite build → dist/) y
+        # luego `vite preview` sirve dist/ con fallback SPA. El puerto se toma
+        # de DATABRICKS_APP_PORT DENTRO del script de npm (expansión de shell)
+        # porque la sustitución del token en `command` NO funciona vía npm.
+        # NO setear NODE_ENV=production (rompería el `npm install` de
+        # devDeps → vite/tsc se necesitan para build + preview).
+        command: ['npm', 'run', 'start']
+        env:
+          # Build-time: `vite build` (en `prestart`) la lee del entorno del
+          # proceso y la inlinea en el bundle — por eso NO hay .env.production.
+          - name: VITE_API_URL
+            value: ${var.backend_api_url}
+      permissions:
+        - level: CAN_USE
+          group_name: users       # todos los usuarios del workspace pueden abrir la app
+
+targets:
+  prod:
+    mode: production
+    default: true
+    workspace:
+      # ÚNICO valor de workspace hardcodeado en el repo (además de las GitHub
+      # vars del CLI). Para otro Databricks: cambiar esta línea (y la variable
+      # backend_api_url) o agregar un target nuevo.
+      host: https://adb-3871428306507680.0.azuredatabricks.net
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
