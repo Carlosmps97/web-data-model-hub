@@ -125,7 +125,11 @@ export async function exportCsv(spec: ReportSpec): Promise<void> {
   const token = localStorage.getItem('dmh.token');
   const res = await fetch(`${R}/export`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    // X-Session-Token (no Authorization) + credentials: mismo contrato que
+    // http.ts — en Databricks Apps el proxy SSO consume `Authorization` y
+    // exige su cookie de sesión en requests cross-app.
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Session-Token': token } : {}) },
     body: JSON.stringify(spec),
   });
   if (!res.ok) throw new Error(`Export failed (${res.status})`);
