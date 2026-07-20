@@ -26,8 +26,12 @@ import type { ApiResponse } from '@/types/api';
 let _devUser = '';
 export function setDevUser(u: string): void { _devUser = u; }
 
-// Token de sesión (auth propia). Se envía como `Authorization: Bearer` en TODA
-// llamada. Lo setea el store de auth al login/restore y lo limpia al logout.
+// Token de sesión (auth propia). Se envía como `X-Session-Token` en TODA
+// llamada — NO como `Authorization: Bearer`: en Databricks Apps ese header le
+// pertenece al proxy SSO de la plataforma (lo consume para su propia auth y
+// el backend nunca lo recibe — visto 2026-07-20: 401 con el Bearer en vuelo).
+// El backend acepta ambos headers (Authorization sigue para curl/dev).
+// Lo setea el store de auth al login/restore y lo limpia al logout.
 let _token = '';
 export function setAuthToken(t: string): void { _token = t; }
 
@@ -84,7 +88,7 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
     signal: combined,
     credentials: 'include',
     headers: {
-      ...(_token ? { Authorization: `Bearer ${_token}` } : {}),
+      ...(_token ? { 'X-Session-Token': _token } : {}),
       ...(import.meta.env.DEV && _devUser ? { 'X-Dev-User': _devUser } : {}),
       ...headers,
     },
