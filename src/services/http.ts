@@ -19,6 +19,10 @@
 import type { ApiResponse } from '@/types/api';
 
 // Usuario dev activo (fallback del seam local; el backend prefiere el token).
+// El header `X-Dev-User` viaja SOLO en desarrollo (`vite dev`): en producción
+// la identidad es el token y el backend (REQUIRE_AUTH) ignora este header —
+// mandarlo solo servía para que el preflight CORS lo rechazara (400
+// "Disallowed CORS headers" → "Failed to fetch" en el login de Apps).
 let _devUser = '';
 export function setDevUser(u: string): void { _devUser = u; }
 
@@ -81,7 +85,7 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
     credentials: 'include',
     headers: {
       ...(_token ? { Authorization: `Bearer ${_token}` } : {}),
-      ...(_devUser ? { 'X-Dev-User': _devUser } : {}),
+      ...(import.meta.env.DEV && _devUser ? { 'X-Dev-User': _devUser } : {}),
       ...headers,
     },
   };
