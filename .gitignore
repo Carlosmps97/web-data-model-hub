@@ -22,6 +22,10 @@
 # `git rm -r --cached dist` para des-trackearlo.)
 /dist
 
+# Databricks Asset Bundle: artefactos de deploy (bundle.tf.json, estado); se
+# regeneran con `databricks bundle validate/deploy`, NO se commitean.
+/.databricks
+
 # production
 /build
 
