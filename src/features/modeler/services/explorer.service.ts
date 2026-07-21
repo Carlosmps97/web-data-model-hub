@@ -38,6 +38,11 @@ export interface DbxViewCol {
 }
 export interface DbxView { id: string; name: string; schema?: string | null; sourceTables: string[]; columns: DbxViewCol[] }
 export interface DbxHit { id: string; physicalName: string; logicalName?: string; schema?: string }
+/** Hit de búsqueda por COLUMNA: la columna + su tabla resuelta (esquema.tabla). */
+export interface DbxColumnHit {
+  id: string; physicalName: string; logicalName?: string; dataType?: string;
+  tableId: string; table: string; schema?: string | null;
+}
 
 // Docs crudos que devuelve `/effective` (subconjunto que usa el Explorer).
 interface RawTable { id: string; physicalName: string; logicalName?: string; schema?: string }
@@ -118,4 +123,26 @@ export async function explorerSearch(q: string, limit = 50): Promise<DbxHit[]> {
   if (!cs) return apiGet<DbxHit[]>(`${API_BASE}/api/catalog/tables?q=${encodeURIComponent(q)}&limit=${limit}`);
   const docs = await csvc.effective<RawTable>(cs, 'canonical_tables', { q, limit });
   return docs.map((t) => ({ id: t.id, physicalName: t.physicalName, logicalName: t.logicalName, schema: t.schema }));
+}
+
+/** Búsqueda por nombre de COLUMNA (pedido de los modelers): cada hit sale con
+ *  su esquema.tabla. Producción → `/api/catalog/columns` (join server-side);
+ *  draft → efectivo de `canonical_columns` + resolución de sus tablas por ids
+ *  (una tabla renombrada/creada en la versión sale con su nombre del draft;
+ *  una columna cuya tabla no existe en el efectivo se descarta). */
+export async function explorerSearchColumns(q: string, limit = 50): Promise<DbxColumnHit[]> {
+  const cs = activeVersion();
+  if (!cs) return apiGet<DbxColumnHit[]>(`${API_BASE}/api/catalog/columns?q=${encodeURIComponent(q)}&limit=${limit}`);
+  const cols = await csvc.effective<RawColumn>(cs, 'canonical_columns', { q, limit });
+  const ids = [...new Set(cols.map((c) => c.tableId).filter(Boolean))].sort();
+  const tables = ids.length ? await csvc.effective<RawTable>(cs, 'canonical_tables', { ids }) : [];
+  const byId = new Map(tables.map((t) => [t.id, t]));
+  return cols.flatMap((c) => {
+    const t = byId.get(c.tableId);
+    if (!t) return [];
+    return [{
+      id: c.id, physicalName: c.physicalName, logicalName: c.logicalName, dataType: c.dataType,
+      tableId: c.tableId, table: t.physicalName, schema: t.schema ?? null,
+    }];
+  });
 }

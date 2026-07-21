@@ -391,7 +391,7 @@ export default function ViewEditor({
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <span style={{ width: 22, height: 22, borderRadius: 6, background: '#F3EEFF', color: PURPLE, fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
               <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: NAVY }}>Columns — include, rename, express &amp; cast</h2>
-              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: includedCount === 0 ? '#C0392B' : MUTED, fontWeight: includedCount === 0 ? 700 : 400 }}>{includedCount}/{validKeys.size} incluidas</span>
+              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: includedCount === 0 ? '#C0392B' : MUTED, fontWeight: includedCount === 0 ? 700 : 400 }}>{includedCount}/{validKeys.size} included</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
               <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
@@ -410,7 +410,7 @@ export default function ViewEditor({
             {/* grilla de columnas AGRUPADA por tabla fuente */}
             <div style={{ border: '1px solid #EAEDF2', borderRadius: 12, overflow: 'hidden' }}>
               <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 10, padding: '9px 13px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
-                <span /><span /><span>Source column</span><span>Output name</span><span>Expression · free SQL</span><span>Cast · tipo</span><span>Definition</span>
+                <span /><span /><span>Source column</span><span>Output name</span><span>Expression · free SQL</span><span>Cast · type</span><span>Definition</span>
               </div>
               {sourceIds.length === 0 && <div style={{ padding: '14px 13px', fontSize: 12.5, color: MUTED }}>Add a source table to pick columns.</div>}
               {sourceIds.map((tid) => {
