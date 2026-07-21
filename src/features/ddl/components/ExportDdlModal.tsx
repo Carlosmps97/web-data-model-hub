@@ -34,6 +34,7 @@ import {
   databricksDdl, ddlFilename, DEFAULT_DATABRICKS_OPTS,
   type DatabricksDdlOptions, type DdlDialect, type DdlTableFormat, type DdlTable, type DdlView,
 } from '../generators';
+import { fetchExportRules, renderWithRules, selectableRules, type ExportRule } from '../rulesBridge';
 
 export interface ExportDdlModalProps {
   open: boolean;
@@ -94,10 +95,39 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     listViewsForTables(diagram.tables.map((t) => t.id))
       // F3: sourceTableIds/joinOverride viajan al generador (multi-fuente).
       // showOnCanvas NO se mapea a propósito: no afecta el export.
-      .then((vs) => { if (alive) setViews(vs.map((v) => ({ id: v.id, tableId: v.tableId, sourceTableIds: v.sourceTableIds, joinOverride: v.joinOverride, name: v.name, schema: v.schema, sql: v.sql, filter: v.filter, description: v.description, sources: v.sources }))); })
+      .then((vs) => { if (alive) setViews(vs.map((v) => ({ id: v.id, tableId: v.tableId, sourceTableIds: v.sourceTableIds, joinOverride: v.joinOverride, name: v.name, schema: v.schema, sql: v.sql, filter: v.filter, description: v.description, sources: v.sources, showOnCanvas: v.showOnCanvas }))); })
       .catch(() => { if (alive) setViews([]); });
     return () => { alive = false; };
   }, [open, diagram]);
+
+  // DDL Export rules (doc 30 F10): habilitadas+válidas del catálogo, TODAS
+  // marcadas por default. Sin selección el export sale byte-idéntico al de
+  // siempre (cero regresión).
+  const [exportRules, setExportRules] = useState<ExportRule[]>([]);
+  const [selRules, setSelRules] = useState<Set<string> | null>(null);
+  const [rendering, setRendering] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    fetchExportRules()
+      .then((rs) => { if (alive) { setExportRules(selectableRules(rs)); setSelRules(null); } })
+      .catch(() => { if (alive) setExportRules([]); });
+    return () => { alive = false; };
+  }, [open]);
+  const selRuleIds = useMemo(
+    () => selRules ?? new Set(exportRules.map((r) => r.id)),
+    [selRules, exportRules],
+  );
+  const toggleRule = (id: string) => {
+    const base = new Set(selRuleIds);
+    if (base.has(id)) base.delete(id); else base.add(id);
+    setSelRules(base);
+  };
+
+  // Preview CON reglas aplicadas: bajo demanda ("Apply rules"), nunca en vivo
+  // — es una llamada al motor del backend y debe coincidir EXACTO con el
+  // download. Cualquier cambio de opciones/selección lo invalida.
+  const [rulesPreview, setRulesPreview] = useState<{ sql: string; applied: number; version: string } | null>(null);
 
   // Which table ids to export — defaults to all; recomputed if the diagram changes.
   const [selected, setSelected] = useState<Set<string> | null>(null);
@@ -111,20 +141,47 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
 
   const exportTables = allTables.filter((t) => selectedIds.has(t.id));
 
-  const ddl = useMemo(() => {
-    if (!diagram) return '';
-    return databricksDdl(
-      {
-        tables: diagram.tables,
-        columns: diagram.columns,
-        relationships: diagram.relationships,
-        views,
-        tableIds: [...selectedIds],
-        modelName,
-      },
-      opts,
-    );
-  }, [diagram, selectedIds, modelName, opts, views]);
+  const ddlInput = useMemo(() => (diagram ? {
+    tables: diagram.tables,
+    columns: diagram.columns,
+    relationships: diagram.relationships,
+    views,
+    tableIds: [...selectedIds],
+    modelName,
+  } : null), [diagram, selectedIds, modelName, views]);
+
+  const ddl = useMemo(() => (ddlInput ? databricksDdl(ddlInput, opts) : ''), [ddlInput, opts]);
+
+  // Todo lo que cambia el resultado invalida el preview renderizado.
+  useEffect(() => { setRulesPreview(null); }, [ddlInput, opts, selRuleIds]);
+
+  /** El `.sql` final: con reglas seleccionadas pasa por el motor del backend
+   *  (`POST /api/ddl-rules/render`); sin reglas, el texto base tal cual. */
+  const buildFinalSql = async (): Promise<string> => {
+    if (!diagram || !ddlInput || selRuleIds.size === 0) return ddl;
+    if (rulesPreview) return rulesPreview.sql;        // ya renderizado, idéntico
+    setRendering(true);
+    try {
+      const { sql } = await renderWithRules({
+        diagram, input: ddlInput, opts, ruleIds: [...selRuleIds], modelName,
+      });
+      return sql;
+    } finally { setRendering(false); }
+  };
+
+  /** Botón "Apply rules" del Preview: mismo motor, mismo texto que el download. */
+  const applyRulesToPreview = async () => {
+    if (!diagram || !ddlInput || selRuleIds.size === 0) return;
+    setRendering(true);
+    try {
+      const { sql, rendered } = await renderWithRules({
+        diagram, input: ddlInput, opts, ruleIds: [...selRuleIds], modelName,
+      });
+      setRulesPreview({ sql, applied: rendered.applied, version: rendered.rulesetVersion });
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : "Couldn't apply the export rules");
+    } finally { setRendering(false); }
+  };
 
   const toggleTable = (id: string) => {
     const base = new Set(selectedIds);
@@ -160,13 +217,24 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
 
   const copy = async () => {
     if (!exportTables.length) return;
-    try { await navigator.clipboard.writeText(ddl); toast.success('DDL copiado al portapapeles'); }
-    catch { toast.error("Couldn't copy to clipboard"); }
+    try {
+      const sql = await buildFinalSql();
+      await navigator.clipboard.writeText(sql);
+      toast.success('DDL copied to clipboard');
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : "Couldn't copy to clipboard");
+    }
   };
 
-  const download = () => {
+  const download = async () => {
     if (!exportTables.length) return;
-    const blob = new Blob([ddl], { type: 'text/sql;charset=utf-8' });
+    let sql: string;
+    try { sql = await buildFinalSql(); }
+    catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : "Couldn't apply the export rules");
+      return;
+    }
+    const blob = new Blob([sql], { type: 'text/sql;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -175,7 +243,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
-    toast.success(`Descargado ${ddlFilename(exportTables, modelName)}`);
+    toast.success(`Downloaded ${ddlFilename(exportTables, modelName)}`);
   };
 
   const isDbx = dialect === 'databricks';
@@ -184,11 +252,14 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const footer = (
     <>
       <span className="dmh-dialog-foot-left exd-foot-count">
-        {exportTables.length}/{allTables.length} tablas
+        {exportTables.length}/{allTables.length} tables
+        {selRuleIds.size > 0 && ` · ${selRuleIds.size} rule${selRuleIds.size === 1 ? '' : 's'}`}
       </span>
       <Button variant="secondary" onClick={onClose}>Close</Button>
-      <Button variant="secondary" icon={Copy} onClick={copy} disabled={!canExport}>Copiar</Button>
-      <Button variant="primary" icon={Download} onClick={download} disabled={!canExport}>Descargar .sql</Button>
+      <Button variant="secondary" icon={Copy} onClick={copy} disabled={!canExport || rendering}>Copy</Button>
+      <Button variant="primary" icon={Download} onClick={download} disabled={!canExport || rendering}>
+        {rendering ? 'Applying rules…' : 'Download .sql'}
+      </Button>
     </>
   );
 
@@ -196,7 +267,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     <Dialog
       open={open}
       title="Export DDL"
-      subtitle={`Genera DDL desde el modelo · ${allTables.length} tablas`}
+      subtitle={`Generate DDL from the model · ${allTables.length} tables`}
       icon={FileCode2}
       onClose={onClose}
       footer={footer}
@@ -266,7 +337,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
               <span className="exd-dialect-ico exd-dialect-ico--oracle"><Database size={16} strokeWidth={1.4} aria-hidden /></span>
               <span className="exd-dialect-txt">
                 <span className="exd-dialect-name">Oracle</span>
-                <span className="exd-dialect-sub">PL/SQL · pronto</span>
+                <span className="exd-dialect-sub">PL/SQL · soon</span>
               </span>
               <Lock size={13} className="exd-dialect-lock" aria-hidden />
             </button>
@@ -296,8 +367,52 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
               <SwitchRow on={opts.includeIndexes} onClick={() => set('includeIndexes', !opts.includeIndexes)} label="Indexes" hint="Hint ZORDER" />
             </div>
 
+            {/* ── Export rules (doc 30 §12): lista compacta, todas ON ── */}
+            {exportRules.length > 0 && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 2 }}>
+                  <span className="exd-section" style={{ margin: 0 }}>Export rules</span>
+                  <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 10.5, color: '#8A93A5' }}>
+                    {selRuleIds.size}/{exportRules.length}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  <button type="button" className="exd-tablesx-link"
+                    onClick={() => setSelRules(new Set(exportRules.map((r) => r.id)))}>All</button>
+                  <span className="exd-tablesx-dot">·</span>
+                  <button type="button" className="exd-tablesx-link is-muted"
+                    onClick={() => setSelRules(new Set<string>())}>None</button>
+                </div>
+                <div style={{ border: '1px solid #E6EAF0', borderRadius: 9, padding: '4px 2px', margin: '6px 0 2px', maxHeight: 168, overflowY: 'auto' }}>
+                  {exportRules.map((r) => {
+                    const on = selRuleIds.has(r.id);
+                    return (
+                      <button key={r.id} type="button" onClick={() => toggleRule(r.id)} aria-pressed={on}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', height: 26, padding: '0 8px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
+                        <span className={`exd-cbox${on ? ' is-on' : ''}`}>
+                          {on && <Check size={11} strokeWidth={2.6} aria-hidden />}
+                        </span>
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--mono, monospace)', fontSize: 11.5, color: on ? '#1A2B4A' : '#9AA3B2' }}>
+                          {r.name}
+                        </span>
+                        {r.validationState === 'stale' && (
+                          <span title="A UDP list value this rule uses was removed"
+                            style={{ width: 6, height: 6, borderRadius: '50%', background: '#E5A83B', flex: 'none' }} />
+                        )}
+                        <span style={{ flex: 'none', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.04em', color: r.kind === 'generator' ? '#8B5CF6' : '#2E5BFF', background: r.kind === 'generator' ? '#F3EEFF' : '#EAF0FF', borderRadius: 4, padding: '1px 5px' }}>
+                          {r.kind === 'generator' ? 'GEN' : 'RULE'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <span className="exd-empty">
+                  Applied on download/copy · manage in Data Standards → DDL Export rules.
+                </span>
+              </>
+            )}
+
             <span className="exd-section">Identifier casing</span>
-            <div className="rd-seg exd-caseseg" role="group" aria-label="Casing de identificadores">
+            <div className="rd-seg exd-caseseg" role="group" aria-label="Identifier casing">
               {(['as-is', 'lower', 'upper'] as const).map((c) => (
                 <button
                   key={c}
@@ -355,7 +470,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
               <button type="button" className="exd-add" onClick={addProp}><Plus size={13} strokeWidth={2} />Add</button>
             </div>
             {opts.tblProperties.length === 0
-              ? <span className="exd-empty">Sin propiedades.</span>
+              ? <span className="exd-empty">No properties.</span>
               : opts.tblProperties.map((p, i) => (
                 <div key={i} className="exd-prop">
                   <input className="rd-input exd-input exd-mono" value={p.key} onChange={(e) => setProp(i, { key: e.target.value })} placeholder="delta.appendOnly" />
@@ -367,8 +482,28 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
 
           {/* ── Preview column (dark) ── */}
           <div className="exd-previewcol">
-            <span className="exd-lbl">Preview</span>
-            <pre className="exd-code" aria-label="DDL preview">{canExport ? ddl : '-- Select at least one table (Databricks dialect).'}</pre>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span className="exd-lbl" style={{ margin: 0 }}>
+                Preview{selRuleIds.size > 0 ? (rulesPreview ? ` · with rules · ${rulesPreview.version}` : ' · base DDL') : ''}
+              </span>
+              <span style={{ flex: 1 }} />
+              {canExport && selRuleIds.size > 0 && !rulesPreview && (
+                <button type="button" onClick={applyRulesToPreview} disabled={rendering}
+                  style={{ height: 24, padding: '0 10px', border: '1px solid #D4E0FF', background: '#EAF0FF', color: '#2E5BFF', borderRadius: 6, fontSize: 11.5, fontWeight: 600, cursor: rendering ? 'default' : 'pointer', fontFamily: 'inherit', opacity: rendering ? 0.6 : 1 }}>
+                  {rendering ? 'Applying…' : `Apply ${selRuleIds.size} rule${selRuleIds.size === 1 ? '' : 's'}`}
+                </button>
+              )}
+              {rulesPreview && (
+                <span style={{ fontSize: 10.5, color: '#8A93A5' }}>
+                  {rulesPreview.applied} applied — same text as the download
+                </span>
+              )}
+            </div>
+            <pre className="exd-code" aria-label="DDL preview">
+              {canExport
+                ? (rulesPreview ? rulesPreview.sql : ddl)
+                : '-- Select at least one table (Databricks dialect).'}
+            </pre>
           </div>
         </div>
       </div>

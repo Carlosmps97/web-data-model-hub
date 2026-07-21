@@ -29,18 +29,62 @@ export interface UdpDefinition {
   description?: string | null;
 }
 
+// ── DDL Export Rules (doc 30) — viven en el MISMO snapshot/versionado ──
+export type DdlRuleKind = 'rule' | 'generator';
+export type DdlRuleTarget = 'column' | 'table';
+export type DdlValidationState = 'valid' | 'invalid' | 'stale';
+export interface DdlValidationCheck { name: string; ok: boolean | null; detail: string; }
+export interface DdlValidationError {
+  check: string; message: string; token?: string | null; suggestion?: string | null;
+  snippet?: string | null; line: number; col: number;
+}
+export interface DdlValidationReport {
+  state: 'valid' | 'invalid';
+  checks: DdlValidationCheck[];
+  errors: DdlValidationError[];
+  warnings: string[];
+}
+export interface DdlRule {
+  id: string;
+  name: string;
+  description?: string | null;
+  kind: DdlRuleKind;
+  target?: DdlRuleTarget | null;          // solo kind='rule'
+  sourceArtifact?: string | null;         // solo kind='generator'
+  condition: string;
+  udpRefs: { udpId: string; level: UdpLevel }[];
+  action: Record<string, unknown>;        // expression|tags|tblproperties|emit (spec §6.6)
+  appliesTo: string[];
+  priority: number;
+  enabled: boolean;
+  validationState: DdlValidationState;
+  validationReport: Partial<DdlValidationReport>;
+  updatedBy?: string | null;
+}
+export interface DdlLookup {
+  fromUdpId?: string; fromLevel?: UdpLevel;
+  values: Record<string, string | null>;
+  default?: string | null;
+}
+export interface DdlRulesetConfig {
+  lookups: Record<string, DdlLookup>;
+  functions: { name: string; params: string[]; body: string }[];
+}
+
 export interface StandardsSnapshot {
   domains: SnapshotDomain[];
   dict: SnapshotTerm[];
   namingConfig: { column: NamingRuleSnap; table: NamingRuleSnap };
   udp: UdpDefinition[];
+  ddlRules?: DdlRule[];
+  ddlConfig?: DdlRulesetConfig;
 }
 
 export interface StandardsVersion {
   id: string;
   seq: number;
   label: string;
-  kind: 'glossary' | 'udp' | 'domain' | 'naming' | 'batch' | 'baseline' | 'rollback';
+  kind: 'glossary' | 'udp' | 'domain' | 'naming' | 'ddl' | 'batch' | 'baseline' | 'rollback';
   title: string;
   description?: string | null;
   author: string;
@@ -65,8 +109,23 @@ export interface UdpEditInput {
   allowedValues?: string[];
   description?: string;
 }
+/** Regla de DDL Export en el batch: `udpRefs`/estado los deriva el server. */
+export interface DdlRuleEditInput {
+  id?: string;
+  name: string;
+  description?: string | null;
+  kind: DdlRuleKind;
+  target?: DdlRuleTarget | null;
+  sourceArtifact?: string | null;
+  condition: string;
+  udpRefs?: { udpId: string; level: UdpLevel }[];
+  action: Record<string, unknown>;
+  appliesTo: string[];
+  priority: number;
+  enabled: boolean;
+}
 export interface ApplyStandardsBody {
-  kind?: 'glossary' | 'udp' | 'domain' | 'naming' | 'batch';
+  kind?: 'glossary' | 'udp' | 'domain' | 'naming' | 'ddl' | 'batch';
   title?: string;
   description?: string;
   termsUpsert?: TermEditInput[];
@@ -76,6 +135,9 @@ export interface ApplyStandardsBody {
   domainsDelete?: string[];
   udpUpsert?: UdpEditInput[];
   udpDelete?: string[];
+  rulesUpsert?: DdlRuleEditInput[];
+  rulesDelete?: string[];
+  ddlConfigPatch?: { lookups?: Record<string, DdlLookup>; functions?: DdlRulesetConfig['functions'] };
 }
 
 export const getSnapshot = () => apiGet<StandardsSnapshot>(`${STD}/snapshot`);

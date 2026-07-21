@@ -9,8 +9,9 @@ import {
 import GlossaryPage from './GlossaryPage';
 import DomainsPage from './DomainsPage';
 import UdpDefsPage from './UdpDefsPage';
+import DdlRulesTab from './DdlRulesTab';
 
-type Tab = 'overview' | 'glossary' | 'domains' | 'udp';
+type Tab = 'overview' | 'glossary' | 'domains' | 'udp' | 'ddl';
 
 export default function StandardsScreen() {
   const canEdit = useAuthStore((s) => s.has('standards.edit'));
@@ -55,6 +56,7 @@ export default function StandardsScreen() {
         {subTab('glossary', 'Glossary')}
         {subTab('domains', 'Parent Domains')}
         {subTab('udp', 'UDP')}
+        {subTab('ddl', 'DDL Export rules')}
         <span style={{ flex: 1 }} />
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 30, padding: '0 12px', borderRadius: 999, background: '#F3EEFF', border: '1px solid #E3D6FB', color: '#7A4DD6', fontSize: 12, fontWeight: 600 }}><ShieldCheck size={13} />Restricted module</span>
       </div>
@@ -69,8 +71,11 @@ export default function StandardsScreen() {
           <GlossaryPage snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
         ) : tab === 'domains' ? (
           <DomainsPage snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
-        ) : (
+        ) : tab === 'udp' ? (
           <UdpDefsPage snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
+        ) : (
+          <DdlRulesTab snapshot={snapshot} versions={versions} canEdit={canEdit}
+            meName={me?.name ?? me?.username} onApplied={reload} />
         )}
       </div>
 

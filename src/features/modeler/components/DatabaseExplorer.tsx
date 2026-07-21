@@ -1,12 +1,12 @@
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { toast } from 'sonner';
 import {
-  ChevronDown, ChevronRight, Crosshair, Database, EllipsisVertical, Eye, KeyRound, Link as LinkIcon,
-  RefreshCw, Search, Table2, X,
+  ChevronDown, ChevronRight, Columns3, Crosshair, Database, EllipsisVertical, Eye, KeyRound,
+  Link as LinkIcon, RefreshCw, Search, Table2, X,
 } from 'lucide-react';
 import {
-  explorerColumns, explorerSchemas, explorerSearch, explorerTables, explorerViews,
-  type DbxColumn, type DbxHit, type DbxSchema, type DbxTable, type DbxView,
+  explorerColumns, explorerSchemas, explorerSearch, explorerSearchColumns, explorerTables, explorerViews,
+  type DbxColumn, type DbxColumnHit, type DbxHit, type DbxSchema, type DbxTable, type DbxView,
 } from '@/features/modeler/services/explorer.service';
 import * as gov from '@/features/governance/services/governance.service';
 import { useChangesetStore } from '@/store/useChangesetStore';
@@ -44,6 +44,8 @@ export default function DatabaseExplorer() {
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [q, setQ] = useState('');
   const [hits, setHits] = useState<DbxHit[] | null>(null);
+  // Búsqueda por COLUMNA (pedido de los modelers): hits con su esquema.tabla.
+  const [colHits, setColHits] = useState<DbxColumnHit[] | null>(null);
 
   // Finder cross-canvas (pedido owner): menú "⋮" por tabla → canvases donde está
   // + click para abrir ese canvas y centrar sobre la tabla.
@@ -108,7 +110,7 @@ export default function DatabaseExplorer() {
   // quedan obsoletas → resetear y, si el panel está abierto, recargar.
   useEffect(() => {
     setTablesBySchema({}); setViewsBySchema({}); setColsByTable({});
-    setExpTables(new Set()); setExpViews(new Set()); setHits(null); setQ('');
+    setExpTables(new Set()); setExpViews(new Set()); setHits(null); setColHits(null); setQ('');
     setSchemas(null);
     if (open) void loadSchemas(true);
   }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -156,16 +158,19 @@ export default function DatabaseExplorer() {
   });
 
   // Búsqueda server-side por nombre (draft-aware: efectivo si hay versión, si no
-  // catálogo publicado; contains + limit).
+  // catálogo publicado; contains + limit). TABLAS y COLUMNAS en paralelo: los
+  // hits de columna salen con su esquema.tabla (pedido de los modelers).
   useEffect(() => {
     const term = q.trim();
-    if (!term) { setHits(null); return; }
+    if (!term) { setHits(null); setColHits(null); return; }
     let alive = true;
     const h = setTimeout(() => {
       mark('search', true);
-      explorerSearch(term, 50)
-        .then((rows) => { if (alive) setHits(rows); })
-        .catch(() => { if (alive) setHits([]); })
+      void Promise.all([
+        explorerSearch(term, 50).catch(() => [] as DbxHit[]),
+        explorerSearchColumns(term, 50).catch(() => [] as DbxColumnHit[]),
+      ])
+        .then(([tables, cols]) => { if (alive) { setHits(tables); setColHits(cols); } })
         .finally(() => { if (alive) mark('search', false); });
     }, 300);
     return () => { alive = false; clearTimeout(h); };
@@ -179,11 +184,11 @@ export default function DatabaseExplorer() {
 
   const columnRows = (tableId: string, depth: number) => {
     if (loading.has(`tbl:${tableId}`)) {
-      return <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + depth * INDENT }}>Cargando…</div>;
+      return <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + depth * INDENT }}>Loading…</div>;
     }
     const cols = colsByTable[tableId] ?? [];
     if (cols.length === 0) {
-      return <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + depth * INDENT }}>Sin columnas.</div>;
+      return <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + depth * INDENT }}>No columns.</div>;
     }
     return cols.map((c) => (
       <div key={`${tableId}:${c.ordinal}:${c.physicalName}`} className="wk-exp-row wk-dbx-col"
@@ -216,10 +221,24 @@ export default function DatabaseExplorer() {
     );
   };
 
+  // Hit de la búsqueda por columna: columna + esquema.tabla al que pertenece
+  // (dos líneas) + tipo + Finder cross-canvas de su tabla.
+  const colHitRow = (c: DbxColumnHit) => (
+    <div key={c.id} className="wk-exp-row wk-dbx-col wk-dbx-colhit" title={c.logicalName || undefined}>
+      <span className="wk-exp-ico" style={{ width: 12, justifyContent: 'center' }}><Columns3 size={11} /></span>
+      <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+        <span className="wk-exp-label rd-mono" style={{ fontSize: 12 }}>{c.physicalName}</span>
+        <span className="rd-mono wk-dbx-sub">{c.schema ? `${c.schema}.` : ''}{c.table}</span>
+      </span>
+      {c.dataType && <span className="wk-dbx-type rd-mono">{c.dataType}</span>}
+      {kebab(c.tableId, `${c.schema ? `${c.schema}.` : ''}${c.table}`)}
+    </div>
+  );
+
   const viewRow = (v: DbxView, depth: number) => (
     <div key={v.id}>
       <div className="wk-exp-row" style={{ paddingLeft: PAD_BASE + depth * INDENT }}
-        title={v.sourceTables.length ? `Fuentes: ${v.sourceTables.join(', ')}` : undefined}
+        title={v.sourceTables.length ? `Sources: ${v.sourceTables.join(', ')}` : undefined}
         onClick={() => toggleView(v.id)}>
         {expViews.has(v.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <span className="wk-exp-ico"><Eye size={13} style={{ color: 'var(--purple)' }} /></span>
@@ -260,7 +279,7 @@ export default function DatabaseExplorer() {
             {tables.map((t) => tableRow(t, 1))}
             {tables.length >= TABLES_CAP && (
               <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + INDENT }}>
-                Mostrando las primeras {TABLES_CAP} tablas — usá la búsqueda.
+                Showing the first {TABLES_CAP} tables — use the search.
               </div>
             )}
             {views.map((v) => viewRow(v, 1))}
@@ -301,36 +320,49 @@ export default function DatabaseExplorer() {
         <div className="wk-dbx-body">
           <div className="wk-dbx-search">
             <Search size={12} />
-            <input placeholder="Search table…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input placeholder="Search tables & columns…" value={q} onChange={(e) => setQ(e.target.value)} />
             {q && (
-              <button type="button" title="Limpiar" onClick={() => setQ('')}><X size={11} /></button>
+              <button type="button" title="Clear" onClick={() => setQ('')}><X size={11} /></button>
             )}
           </div>
-          {hits !== null ? (
+          {hits !== null || colHits !== null ? (
             <>
-              {loading.has('search') && <div className="wk-exp-empty">Buscando…</div>}
-              {!loading.has('search') && hits.length === 0 && <div className="wk-exp-empty">Sin resultados.</div>}
-              {hits.map((t) => (
-                <div key={t.id}>
-                  <div className="wk-exp-row" style={{ paddingLeft: PAD_BASE }} title={t.logicalName}
-                    onClick={() => toggleTable(t.id)}>
-                    {expTables.has(t.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                    <span className="wk-exp-ico"><Table2 size={13} /></span>
-                    <span className="wk-exp-label rd-mono" style={{ fontSize: 12 }}>
-                      {t.schema ? `${t.schema}.` : ''}{t.physicalName}
-                    </span>
-                    {kebab(t.id, `${t.schema ? `${t.schema}.` : ''}${t.physicalName}`)}
-                    {loading.has(`tbl:${t.id}`) && spin}
-                  </div>
-                  {expTables.has(t.id) && columnRows(t.id, 1)}
-                </div>
-              ))}
+              {loading.has('search') && <div className="wk-exp-empty">Searching…</div>}
+              {!loading.has('search') && (hits ?? []).length === 0 && (colHits ?? []).length === 0 && (
+                <div className="wk-exp-empty">No results.</div>
+              )}
+              {hits && hits.length > 0 && (
+                <>
+                  <div className="wk-dbx-sect">Tables · {hits.length}</div>
+                  {hits.map((t) => (
+                    <div key={t.id}>
+                      <div className="wk-exp-row" style={{ paddingLeft: PAD_BASE }} title={t.logicalName}
+                        onClick={() => toggleTable(t.id)}>
+                        {expTables.has(t.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        <span className="wk-exp-ico"><Table2 size={13} /></span>
+                        <span className="wk-exp-label rd-mono" style={{ fontSize: 12 }}>
+                          {t.schema ? `${t.schema}.` : ''}{t.physicalName}
+                        </span>
+                        {kebab(t.id, `${t.schema ? `${t.schema}.` : ''}${t.physicalName}`)}
+                        {loading.has(`tbl:${t.id}`) && spin}
+                      </div>
+                      {expTables.has(t.id) && columnRows(t.id, 1)}
+                    </div>
+                  ))}
+                </>
+              )}
+              {colHits && colHits.length > 0 && (
+                <>
+                  <div className="wk-dbx-sect">Columns · {colHits.length}</div>
+                  {colHits.map(colHitRow)}
+                </>
+              )}
             </>
           ) : (
             <>
-              {loading.has('root') && <div className="wk-exp-empty">Cargando esquemas…</div>}
+              {loading.has('root') && <div className="wk-exp-empty">Loading schemas…</div>}
               {schemas !== null && schemas.length === 0 && !loading.has('root') && (
-                <div className="wk-exp-empty">No hay esquemas publicados.</div>
+                <div className="wk-exp-empty">No published schemas.</div>
               )}
               {(schemas ?? []).map(schemaNode)}
             </>

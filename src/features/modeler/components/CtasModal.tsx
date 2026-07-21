@@ -37,6 +37,12 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
     return out;
   }, [allCols, sources]);
 
+  // Select all / Clear (pedido de los modelers): actúan SOLO sobre las
+  // candidatas visibles — picks de fuentes deseleccionadas quedan intactas
+  // (son inertes: pickedCols filtra por candidatas).
+  const pickAll = () => setPicks((p) => { const n = new Set(p); for (const c of candidates) n.add(c.id); return n; });
+  const pickNone = () => setPicks((p) => { const n = new Set(p); for (const c of candidates) n.delete(c.id); return n; });
+
   // Preview físico del nombre (scope table), debounced.
   useEffect(() => {
     const t = name.trim();
@@ -67,6 +73,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
 
   const step: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: 'var(--ink, #1A2B4A)', marginBottom: 6 };
   const lbl: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted, #56607A)', marginBottom: 5, display: 'block' };
+  const link: React.CSSProperties = { border: 'none', background: 'transparent', color: 'var(--primary, #2F6BFF)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 };
   const listBox: React.CSSProperties = { maxHeight: 150, overflow: 'auto', border: '1px solid var(--border-soft, #EAEDF2)', borderRadius: 9, padding: 4 };
   const row: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, padding: '5px 7px', cursor: 'pointer', borderRadius: 6 };
 
@@ -110,7 +117,16 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
             ))}
             {tables.length === 0 && <div className="rd-small" style={{ padding: 6 }}>No tables in this canvas.</div>}
           </div>
-          <label style={lbl}>Columns to inherit</label>
+          <div style={{ display: 'flex', alignItems: 'baseline' }}>
+            <label style={lbl}>Columns to inherit</label>
+            {candidates.length > 0 && (
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+                <button type="button" style={link} onClick={pickAll}>Select all</button>
+                <span style={{ color: '#D6DCE6' }}>·</span>
+                <button type="button" style={{ ...link, color: 'var(--text-muted, #8A93A5)' }} onClick={pickNone}>Clear</button>
+              </span>
+            )}
+          </div>
           <div style={listBox}>
             {candidates.map((c) => (
               <label key={c.id} style={row}>
