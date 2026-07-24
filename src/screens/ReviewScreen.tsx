@@ -24,8 +24,6 @@ import {
   ArrowRight,
   Boxes,
   Check,
-  ChevronDown,
-  ChevronRight,
   ExternalLink,
   Inbox,
   Lock,
@@ -51,12 +49,12 @@ import {
   withdraw,
 } from '@/services/versioning.service';
 import { listProjects } from '@/services/projects.service';
+import ChangesDetailModal from '@/screens/review/ChangesDetailModal';
+import ChangesSummary from '@/screens/review/ChangesSummary';
 import type { Project } from '@/types/model';
 import type {
   ChangesetDetail,
   ChangesetDiff,
-  DiffEntity,
-  DiffTreeNode,
   SimUserDto,
   VersionRow,
   VersionStatus,
@@ -122,6 +120,8 @@ export default function ReviewScreen() {
   const [diff, setDiff] = useState<ChangesetDiff | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [acting, setActing] = useState(false);
+  // Popup "Change details" (doc 31) — se cierra solo al cambiar de request.
+  const [detailsOpen, setDetailsOpen] = useState(false);
   // Tras withdraw/reopen la versión volvió a draft y SALE de la lista: en vez de
   // auto-seleccionar en silencio otro request (que confunde: "Open in canvas"
   // abriría el request de OTRO), mostramos un empty-state con la vuelta al canvas.
@@ -205,6 +205,7 @@ export default function ReviewScreen() {
   // Reload detail when the selection OR the actor changes (latter re-evaluates
   // reviewer permissions / approvals).
   useEffect(() => {
+    setDetailsOpen(false);
     if (!selectedId) {
       setDetail(null);
       setDiff(null);
@@ -784,8 +785,18 @@ export default function ReviewScreen() {
                     </div>
                   )}
 
-                  <div className="dmh-rv-changes-label">Changes · {diffTotals.total}</div>
-                  <DiffBody diff={diff} />
+                  {/* Resumen (doc 31) — el detalle fino vive en el popup */}
+                  <ChangesSummary diff={diff} onOpenDetails={() => setDetailsOpen(true)} />
+
+                  {detailsOpen && diff && (
+                    <ChangesDetailModal
+                      csId={detail.id}
+                      title={detail.title}
+                      versionLabel={detail.versionLabel ?? null}
+                      diff={diff}
+                      onClose={() => setDetailsOpen(false)}
+                    />
+                  )}
 
                   {/* reviewer comments */}
                   <div className="dmh-rv-comments">
@@ -841,162 +852,5 @@ export default function ReviewScreen() {
   );
 }
 
-// ── diff body (added / modified / deleted cards) ─────────────────────────────
-
-/** Label legible por colección versionada (el detalle agrupa por tipo de entidad). */
-const COLL_LBL: Record<string, string> = {
-  canonical_tables: 'Table',
-  canonical_columns: 'Column',
-  relationships: 'Relationship',
-  views: 'View',
-  parent_domains: 'Parent Domain',
-  abbreviation_dict: 'UDP term',
-};
-
-// Render por páginas: un changeset grande (migración/refactor) puede tocar
-// miles de entidades — montar una card por cada una congela la pantalla.
-const DIFF_PAGE = 100;
-
-const CHANGE_PILL: Record<string, string> = { added: 'added', edited: 'modified', deleted: 'deleted' };
-const TYPE_LABEL: Record<string, string> = {
-  project: 'Project', folder: 'Folder', canvas: 'Canvas', schema: 'Schema',
-  table: 'Table', view: 'View', column: 'Column',
-};
-const TREE_TYPE_STYLE: React.CSSProperties = {
-  fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.3px',
-  color: 'var(--subtle)', minWidth: 46, flex: 'none',
-};
-
-function DiffBody({ diff }: { diff: ChangesetDiff | null }) {
-  // Tablas colapsadas por default (concentran el grueso: las columnas).
-  const [openTables, setOpenTables] = useState<Set<string>>(new Set());
-  const [shown, setShown] = useState(DIFF_PAGE);
-  const toggle = (k: string) =>
-    setOpenTables((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
-
-  const flat = useMemo(() => {
-    if (!diff) return [];
-    const out: { kind: 'added' | 'edited' | 'deleted'; entity: DiffEntity }[] = [];
-    Object.values(diff.collections).forEach((bucket) => {
-      bucket.added.forEach((entity) => out.push({ kind: 'added', entity }));
-      bucket.edited.forEach((entity) => out.push({ kind: 'edited', entity }));
-      bucket.deleted.forEach((entity) => out.push({ kind: 'deleted', entity }));
-    });
-    return out;
-  }, [diff]);
-  useEffect(() => { setShown(DIFF_PAGE); setOpenTables(new Set()); }, [diff]);
-
-  if (!diff) return <div className="dmh-rv-diff-empty">Loading diff…</div>;
-
-  const tree = diff.tree ?? [];
-  const orphans = diff.orphans ?? [];
-  const structure = diff.structure ?? [];
-  const hasHierarchy = tree.length > 0 || orphans.length > 0 || structure.length > 0;
-
-  // ── Render jerárquico (Proyecto→Folder→Canvas→Esquema→Tabla→Columnas) ──
-  const renderNode = (node: DiffTreeNode, depth: number, path: string): React.ReactNode => {
-    const key = `${path}/${node.type}:${node.id}`;
-    const kids = node.children ?? [];
-    const isTable = node.type === 'table';
-    const collapsible = isTable && kids.length > 0;
-    const expanded = !isTable || openTables.has(key);
-    return (
-      <div key={key}>
-        <div
-          className="dmh-rv-treerow"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 7, minHeight: 27,
-            paddingLeft: 8 + depth * 15, paddingRight: 8,
-            borderBottom: '1px solid var(--border-soft)',
-            cursor: collapsible ? 'pointer' : 'default',
-          }}
-          onClick={collapsible ? () => toggle(key) : undefined}
-          role={collapsible ? 'button' : undefined}
-        >
-          {collapsible
-            ? (expanded ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />)
-            : <span style={{ width: 13, flex: 'none' }} />}
-          <span style={TREE_TYPE_STYLE}>{TYPE_LABEL[node.type] ?? node.type}</span>
-          <span
-            className={`mono${node.change === 'deleted' ? ' strike' : ''}`}
-            style={{ fontSize: 12.5, color: node.change ? 'var(--ink)' : 'var(--muted)', fontWeight: node.change ? 600 : 400, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          >
-            {node.name}
-          </span>
-          {node.change && <span className={`dmh-rv-diffrow-pill is-${node.change}`}>{CHANGE_PILL[node.change]}</span>}
-          {isTable && kids.length > 0 && (
-            <span style={{ fontSize: 10.5, color: 'var(--subtle)', marginLeft: 'auto', flex: 'none' }}>
-              {kids.length} col{kids.length === 1 ? '' : 's'}
-            </span>
-          )}
-        </div>
-        {expanded && kids.map((c) => renderNode(c, depth + 1, key))}
-      </div>
-    );
-  };
-
-  const section = (label: string) => (
-    <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.4px', color: 'var(--subtle)', padding: '10px 8px 4px' }}>{label}</div>
-  );
-
-  if (hasHierarchy) {
-    return (
-      <div className="dmh-rv-diff">
-        {tree.map((n) => renderNode(n, 0, ''))}
-        {orphans.length > 0 && (<>{section('Not on any canvas')}{orphans.map((n) => renderNode(n, 0, 'orphan'))}</>)}
-        {structure.length > 0 && (<>
-          {section('Structure changes')}
-          {structure.map((s) => (
-            <div key={`${s.type}:${s.id}`} className="dmh-rv-treerow"
-              style={{ display: 'flex', alignItems: 'center', gap: 7, minHeight: 27, paddingLeft: 8, paddingRight: 8, borderBottom: '1px solid var(--border-soft)' }}>
-              <span style={{ width: 13, flex: 'none' }} />
-              <span style={TREE_TYPE_STYLE}>{s.kind}</span>
-              <span className={`mono${s.change === 'deleted' ? ' strike' : ''}`} style={{ fontSize: 12.5, color: 'var(--ink)', fontWeight: 600 }}>{s.name}</span>
-              <span className={`dmh-rv-diffrow-pill is-${s.change}`}>{CHANGE_PILL[s.change]}</span>
-            </div>
-          ))}
-        </>)}
-      </div>
-    );
-  }
-
-  // ── Fallback plano (backend viejo / sin jerarquía) ──
-  if (flat.length === 0)
-    return <div className="dmh-rv-diff-empty">No structural changes in this request.</div>;
-  const meta: Record<'added' | 'edited' | 'deleted', { pill: string; verb: string }> = {
-    added: { pill: 'added', verb: 'added' },
-    edited: { pill: 'modified', verb: 'modified' },
-    deleted: { pill: 'deleted', verb: 'deleted' },
-  };
-  return (
-    <div className="dmh-rv-diff">
-      {flat.slice(0, shown).map(({ kind, entity }) => {
-        const m = meta[kind];
-        return (
-          <div key={`${kind}-${entity.id}`} className={`dmh-rv-diffrow is-${kind}`}>
-            <div className="dmh-rv-diffrow-head">
-              <span className="dmh-rv-diffrow-name">
-                <span className={`mono${kind === 'deleted' ? ' strike' : ''}`}>{entity.name}</span> {m.verb}
-              </span>
-              <span className={`dmh-rv-diffrow-pill is-${kind}`}>{m.pill}</span>
-              {entity.conflict && (
-                <span className="dmh-rv-diffrow-conflict" title="Modified in production after this version edited it.">
-                  <TriangleAlert size={11} strokeWidth={1.8} aria-hidden /> changed in production
-                </span>
-              )}
-              <span className="dmh-rv-diffrow-spacer" />
-              {entity.collection && (
-                <span className="dmh-rv-diffrow-coll">{COLL_LBL[entity.collection] ?? entity.collection}</span>
-              )}
-            </div>
-          </div>
-        );
-      })}
-      {flat.length > shown && (
-        <button type="button" className="dmh-rv-act" style={{ margin: '8px auto' }} onClick={() => setShown((n) => n + DIFF_PAGE)}>
-          Show {Math.min(DIFF_PAGE, flat.length - shown)} more ({flat.length - shown} remaining)
-        </button>
-      )}
-    </div>
-  );
-}
+// El viejo DiffBody inline (árbol + fallback plano) se movió al popup
+// "Change details" (doc 31): screens/review/DiffTree.tsx + ChangesDetailModal.

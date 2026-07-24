@@ -19,6 +19,7 @@
 import type {
   ChangesetDetail,
   ChangesetDiff,
+  DiffEntityDetail,
   ReviewBody,
   SimUserDto,
   SnapshotBody,
@@ -88,6 +89,99 @@ export function getChangeset(id: string): Promise<ChangesetDetail> {
 /** Diff estructurado (added/edited/deleted por colección + resumen de impacto). */
 export function getDiff(id: string): Promise<ChangesetDiff> {
   return apiGet<ChangesetDiff>(`${API_BASE}/api/changesets/${id}/diff`);
+}
+
+// ─── Change details (doc 31 — resumen + popup) ───────────────────────────────
+
+/** Diff de campos antes→después de entidades PUNTUALES del changeset (popup
+ *  "Change details"). Bajo demanda por selección; máx. 200 items por llamada
+ *  (el modal trocea). Entidades fuera del changeset se omiten en la respuesta. */
+export function getDiffDetails(
+  id: string,
+  items: { collection: string; entityId: string }[],
+): Promise<{ items: DiffEntityDetail[] }> {
+  return apiPost<{ items: DiffEntityDetail[] }>(
+    `${API_BASE}/api/changesets/${id}/diff/details`,
+    { items },
+  );
+}
+
+/** Fila de la matriz del resumen (una por tipo de entidad con cambios). */
+export interface DiffSummaryRow {
+  collection: string;
+  label: string;
+  added: number;
+  edited: number;
+  deleted: number;
+}
+
+/** Resumen agregado del diff para la card "Changes summary" (doc 31). */
+export interface DiffSummary {
+  rows: DiffSummaryRow[];
+  added: number;
+  edited: number;
+  deleted: number;
+  total: number;
+  /** Nombres de proyectos afectados (nodos raíz del árbol del diff). */
+  projects: string[];
+  /** Modelos (canvases) afectados como "Folder › Canvas" (sin el folder raíz). */
+  models: string[];
+}
+
+/** Orden y labels EN INGLÉS de la matriz del resumen (regla UI). */
+const SUMMARY_ROWS: [string, string][] = [
+  ['canonical_tables', 'Tables'],
+  ['canonical_columns', 'Columns'],
+  ['views', 'Views'],
+  ['relationships', 'Relationships'],
+  ['schemas', 'Schemas'],
+  ['subject_areas', 'Canvases'],
+  ['folders', 'Folders'],
+  ['projects', 'Projects'],
+];
+
+/**
+ * Agrega el `GET /diff` ya cargado a la card de resumen — PURO, cero backend:
+ * conteos por colección de `collections`, proyectos/modelos con nombre real
+ * desde los nodos del `tree`. Filas con 0 cambios se omiten.
+ */
+export function summarizeDiff(diff: ChangesetDiff): DiffSummary {
+  const rows: DiffSummaryRow[] = [];
+  let added = 0;
+  let edited = 0;
+  let deleted = 0;
+  const push = (collection: string, label: string) => {
+    const b = diff.collections[collection];
+    if (!b) return;
+    const row = {
+      collection,
+      label,
+      added: b.added.length,
+      edited: b.edited.length,
+      deleted: b.deleted.length,
+    };
+    if (row.added + row.edited + row.deleted === 0) return;
+    rows.push(row);
+    added += row.added;
+    edited += row.edited;
+    deleted += row.deleted;
+  };
+  for (const [collection, label] of SUMMARY_ROWS) push(collection, label);
+  // Colecciones fuera del orden conocido (defensivo: una futura colección
+  // versionada nunca debe quedar invisible en el resumen).
+  for (const collection of Object.keys(diff.collections)) {
+    if (!SUMMARY_ROWS.some(([c]) => c === collection)) push(collection, collection);
+  }
+
+  const projects = (diff.tree ?? []).map((p) => p.name);
+  const models: string[] = [];
+  for (const p of diff.tree ?? []) {
+    for (const f of p.children ?? []) {
+      const prefix = f.name && !f.name.startsWith('—') ? `${f.name} › ` : '';
+      for (const c of f.children ?? []) models.push(`${prefix}${c.name}`);
+    }
+  }
+  return { rows, added, edited, deleted, total: added + edited + deleted, projects, models };
 }
 
 /**

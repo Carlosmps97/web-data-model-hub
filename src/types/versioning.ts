@@ -168,3 +168,27 @@ export interface ReviewBody {
   decision: 'approve' | 'reject';
   note?: string;
 }
+
+// ─── Change details (doc 31 — popup de la revisión) ──────────────────────────
+
+/** Una fila de campo del diff antes→después de una entidad.
+ *  `kind: 'delta'` = resumen de un cambio de conjunto (p.ej. "+2 added · −1
+ *  removed") que se pinta como un solo valor ámbar, sin columna before. */
+export interface DiffFieldRow {
+  key: string;
+  label: string;
+  before?: unknown;
+  after?: unknown;
+  kind?: 'delta' | null;
+}
+
+/** Diff de UNA entidad de `POST /api/changesets/{id}/diff/details`.
+ *  `fields` trae SOLO los campos con cambio real (vacío = solo metadata
+ *  interna); las referencias vienen resueltas a NOMBRE por el backend. */
+export interface DiffEntityDetail {
+  collection: string;
+  entityId: string;
+  action: 'created' | 'modified' | 'deleted';
+  name: string | null;
+  fields: DiffFieldRow[];
+}
