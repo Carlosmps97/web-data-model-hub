@@ -448,6 +448,15 @@
 .wk-hdr-handle { width: 1px; height: 1px; min-width: 0; min-height: 0;
   opacity: 0; pointer-events: none; border: none; background: transparent; }
 
+/* ── LOD (doc 33): caja COMPACTA bajo el umbral de zoom ──────────────────
+   Mismo card (header, colores, franja PK, hatch de vista) con width/height
+   explícitos = las métricas del nodo detallado — de lejos se ve idéntico;
+   solo dejan de pintarse las filas, que a ese zoom miden <1px. */
+.wk-lod { display: flex; flex-direction: column; contain: layout paint; }
+.wk-lod .wk-node-head, .wk-lod .wk-vnode-head { flex-shrink: 0; }
+.wk-lod .wk-node-pk { flex-shrink: 0; }
+.wk-lod-body { flex: 1; }
+
 /* ── Nodo VISTA (F3, spec §3-5 · mock 2026-07-12) ────────────────────────
    Mismo card dinámico que .wk-node pero "medio plomo": header gris pizarra,
    borde PUNTEADO envolvente (sin franja izquierda) y cuerpo con hatch

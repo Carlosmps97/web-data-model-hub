@@ -64,6 +64,15 @@ interface ModelerState {
   /** Instancia de React Flow del canvas activo (la setea ModelerCanvas en onInit). */
   flow: ReactFlowInstance | null;
   setFlow: (rf: ReactFlowInstance | null) => void;
+  /** LOD (doc 33): bajo el umbral de zoom los nodos se pintan COMPACTOS (misma
+   *  caja, tamaño y colores; sin las filas, que a ese zoom miden <1px). Default
+   *  true: el fitView inicial de un canvas grande arranca alejado y la primera
+   *  pintura ya sale liviana; si el canvas es chico, el primer onMove lo apaga
+   *  al instante. `lodLock` lo congela en detalle durante el export SVG. */
+  lod: boolean;
+  setLod: (v: boolean) => void;
+  lodLock: boolean;
+  setLodLock: (v: boolean) => void;
   /** Centra el canvas sobre la tabla (Find a table… del toolbar). No-op si no hay nodo. */
   focusTable: (tableId: string) => void;
   /** Tabla a centrar en cuanto MONTE el canvas destino (Finder cross-canvas del
@@ -198,6 +207,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   setHoverNode: (id) => set({ hoverNodeId: id }),
   flow: null,
   setFlow: (rf) => set({ flow: rf }),
+  lod: true,
+  setLod: (v) => { if (get().lod !== v) set({ lod: v }); },
+  lodLock: false,
+  setLodLock: (v) => set({ lodLock: v }),
   pendingFocusTableId: null,
   setPendingFocus: (tableId) => set({ pendingFocusTableId: tableId }),
   drawings: [],
