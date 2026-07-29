@@ -17,6 +17,7 @@ import PublishModal from './PublishModal';
 import { ExportDdlModal } from '@/features/ddl';
 import ViewEditor from './ViewEditor';
 import ModelPropertiesModal from './ModelPropertiesModal';
+import { nextLod } from '../lib/lodSize';
 
 // Las 4 cardinalidades crow's-foot del preset por extremo (el popup de la
 // relación ofrece las 6, incluyendo 'many' pelado y 'one-only').
@@ -165,13 +166,19 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     const rf = useModelerStore.getState().flow;
     const el = document.querySelector('.react-flow__viewport') as HTMLElement | null;
     if (!rf || !el) { pushToast('Nothing to export', 'err'); return; }
-    // fitView devuelve promesa en React Flow 12: esperarla + doble rAF evita la
-    // carrera del sleep fijo (a 100 tablas el re-layout tardaba más de 250ms y
-    // la captura salía cortada). Con onlyRenderVisibleElements, el fitView además
-    // monta en el DOM todos los nodos para que entren en la captura.
-    await rf.fitView({ padding: 0.15, duration: 0 });
-    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    // LOD (doc 33): la captura va SIEMPRE con detalle completo — candado para
+    // que el fitView del export (zoom bajo) no re-active el modo compacto. En
+    // canvases gigantes tarda unos segundos: precio de la foto completa.
+    const st = useModelerStore.getState();
+    st.setLodLock(true);
+    st.setLod(false);
     try {
+      // fitView devuelve promesa en React Flow 12: esperarla + doble rAF evita la
+      // carrera del sleep fijo (a 100 tablas el re-layout tardaba más de 250ms y
+      // la captura salía cortada). Con onlyRenderVisibleElements, el fitView además
+      // monta en el DOM todos los nodos para que entren en la captura.
+      await rf.fitView({ padding: 0.15, duration: 0 });
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const { toSvg } = await import('html-to-image');
       const dataUrl = await toSvg(el, { backgroundColor: '#FBFCFD', cacheBust: true });
       const a = document.createElement('a');
@@ -179,7 +186,14 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       a.href = injectCrowFootDefs(dataUrl);
       a.click();
       pushToast('SVG image exported');
-    } catch { pushToast("Couldn't export the image", 'err'); }
+    } catch {
+      pushToast("Couldn't export the image", 'err');
+    } finally {
+      const s2 = useModelerStore.getState();
+      s2.setLodLock(false);
+      // Re-evalúa contra el viewport FINAL (el export deja la vista en fit).
+      s2.setLod(nextLod(false, rf.getViewport().zoom));
+    }
   };
 
   // Botón-icono de sección. `disabled` ya contempla viewer-lock en cada call.

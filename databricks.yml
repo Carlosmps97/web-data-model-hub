@@ -3,7 +3,9 @@
 # Deploy:  databricks bundle deploy --target prod
 # Arranca: databricks bundle run frontend --target prod
 #
-# ⚙️ PARÁMETROS POR ENTORNO = sección `variables:` (defaults = entorno actual).
+# PARÁMETROS POR ENTORNO = sección `variables:`. NINGUNO hay que editar por
+# ambiente: el workflow los exporta como `BUNDLE_VAR_<nombre>` desde las GitHub
+# Variables del repo cuando existen, y si no existen mandan estos defaults.
 # La config de runtime vive en `config:` (sustituye al viejo app.yaml;
 # requiere CLI ≥ 0.283 — el workflow usa setup-cli@main = último).
 bundle:
@@ -11,8 +13,21 @@ bundle:
 
 variables:
   backend_api_url:
+    # GitHub Variable: BACKEND_API_URL (obligatoria en un workspace nuevo — el
+    # default apunta al workspace original y el front quedaría hablándole a otro).
     description: "URL pública de la app backend (bknd-data-model-hub) de ESTE workspace — se inlinea en el build de Vite."
     default: https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com
+  app_admin_user:
+    # GitHub Variable: APP_ADMIN_USER (opcional).
+    # Cuando el deploy lo hace un SERVICE PRINCIPAL (token de CI), `mode:
+    # production` le da CAN_MANAGE SOLO a ese SP y el humano que creó la app
+    # pierde hasta el botón de Stop. Con esta variable el humano recupera el
+    # control en cada deploy.
+    # El default es la identidad que despliega: repite el grant que production
+    # mode ya hace (el CLI lo deduplica) → sin la variable NO se agrega a nadie
+    # extra y el deploy no falla.
+    description: "Usuario humano que queda con CAN_MANAGE sobre la app (stop/start/logs desde la UI)."
+    default: ${workspace.current_user.userName}
 
 resources:
   apps:
@@ -34,6 +49,8 @@ resources:
           - name: VITE_API_URL
             value: ${var.backend_api_url}
       permissions:
+        - level: CAN_MANAGE       # el humano dueño: stop/start/logs/permissions en la UI
+          user_name: ${var.app_admin_user}
         - level: CAN_USE
           group_name: users       # todos los usuarios del workspace pueden abrir la app
 
@@ -42,8 +59,4 @@ targets:
     mode: production
     default: true
     workspace:
-      # ÚNICO valor de workspace hardcodeado en el repo (además de las GitHub
-      # vars del CLI). Para otro Databricks: cambiar esta línea (y la variable
-      # backend_api_url) o agregar un target nuevo.
-      host: https://adb-3871428306507680.0.azuredatabricks.net
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

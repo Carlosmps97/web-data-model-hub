@@ -7,15 +7,22 @@ import { useSessionStore } from '@/store/useSessionStore';
 import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 import { pkInKeyOrder } from '../lib/keyOrder';
+import { tableLodSize } from '../lib/lodSize';
 
 export interface TableNodeData {
   table: CanonicalTable;
   columns: CanonicalColumn[];
+  /** LOD (doc 33): render compacto bajo el umbral de zoom. */
+  lod?: boolean;
+  /** Ids de columnas ancladas por algún wire (par 0 de sus relaciones): el
+   *  nodo compacto les deja handles fantasma con el MISMO id que la fila del
+   *  modo detallado, así los edges nunca se re-arman ni pierden ancla. */
+  refCols?: string[];
   [key: string]: unknown;
 }
 
 function TableNode({ data }: NodeProps) {
-  const { table, columns } = data as TableNodeData;
+  const { table, columns, lod, refCols } = data as TableNodeData;
   // En modo visor puede haber changeset activo (viendo un request): sin handles
   // conectables ni affordances de edición.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
@@ -55,6 +62,34 @@ function TableNode({ data }: NodeProps) {
   // ordinal. Misma regla que el PRIMARY KEY(...) del DDL (lib/keyOrder).
   const pks = pkInKeyOrder(columns);
   const rest = columns.filter((c) => !c.isPrimaryKey);
+
+  // LOD (doc 33): caja compacta con el MISMO tamaño, header y franja PK que el
+  // nodo detallado — a este zoom las filas medían <1px, no se pierde nada
+  // visible. Handles: el del header (ancla de derivaciones) + fantasmas por
+  // columna referenciada por wires (mismo id que la fila real → los edges no
+  // cambian entre modos). Sin botón "+" (la edición vuelve al acercar).
+  if (lod) {
+    const { w, h, pkRows } = tableLodSize(table as CanonicalTable, columns, viewMode);
+    return (
+      <div className={`wk-node wk-lod${selected ? ' sel' : ''}`} style={{ width: w, height: h }}>
+        <div className="wk-node-head">
+          <Table2 size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
+          <span className="rd-mono wk-node-title">
+            {table.schema && <span className="wk-node-schema">{table.schema}.</span>}
+            {nameOf(table)}
+          </span>
+          <Handle type="source" position={Position.Right} id="__hdr_src" isConnectable={false} className="wk-hdr-handle" />
+        </div>
+        {pkRows > 0 && <div className="wk-node-pk" style={{ height: pkRows * 28 }} />}
+        {(refCols ?? []).map((cid) => (
+          <span key={cid}>
+            <Handle type="source" position={Position.Right} id={`${cid}__src`} isConnectable={false} className="wk-hdr-handle" style={{ top: '50%' }} />
+            <Handle type="target" position={Position.Left} id={`${cid}__tgt`} isConnectable={false} className="wk-hdr-handle" style={{ top: '50%' }} />
+          </span>
+        ))}
+      </div>
+    );
+  }
 
   const renderRow = (c: CanonicalColumn) => (
     <div className={`wk-node-row${hotCols.has(c.id) ? ' hot' : ''}`} key={c.id}>

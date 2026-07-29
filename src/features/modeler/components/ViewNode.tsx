@@ -7,6 +7,7 @@ import type { CanonicalTable } from '@/features/governance/services/governance.s
 import type { View } from '@/services/views.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 import { viewNodeRows } from '../lib/viewGraph';
+import { viewLodSize } from '../lib/lodSize';
 
 export interface ViewNodeData {
   view: View;
@@ -17,6 +18,8 @@ export interface ViewNodeData {
   colTypes: Record<string, string>;
   /** Abre el ViewEditor (lo inyecta ModelerCanvas). */
   onEdit: (viewId: string) => void;
+  /** LOD (doc 33): render compacto bajo el umbral de zoom. */
+  lod?: boolean;
   [key: string]: unknown;
 }
 
@@ -29,12 +32,33 @@ export interface ViewNodeData {
  * PropertiesPanel); el lápiz del header abre el ViewEditor si canEdit.
  */
 function ViewNode({ data, selected }: NodeProps) {
-  const { view, colTypes, onEdit } = data as ViewNodeData;
+  const { view, colTypes, onEdit, lod } = data as ViewNodeData;
   // Mismo gate que TableNode: en modo visor no hay affordances de edición.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
 
   const rows = viewNodeRows(view, colTypes);
+
+  // LOD (doc 33): misma caja "medio plomo" (borde punteado + hatch del body =
+  // la identidad visual de VISTA a lo lejos) con el MISMO tamaño, sin filas.
+  // Conserva el ancla del wire de derivación (__hdr_tgt). Sin lápiz de edición.
+  if (lod) {
+    const { w, h } = viewLodSize(view, colTypes);
+    return (
+      <div className={`wk-vnode wk-lod${selected ? ' sel' : ''}`} style={{ width: w, height: h }}>
+        <div className="wk-vnode-head">
+          <Eye size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
+          <span className="rd-mono wk-vnode-title">
+            {view.schema && <span className="wk-node-schema">{view.schema}.</span>}
+            {view.name}
+          </span>
+          <span className="wk-vnode-badge">VISTA</span>
+          <Handle type="target" position={Position.Left} id="__hdr_tgt" isConnectable={false} className="wk-hdr-handle" />
+        </div>
+        <div className="wk-vnode-body wk-lod-body" />
+      </div>
+    );
+  }
 
   return (
     <div className={`wk-vnode${selected ? ' sel' : ''}`}>
