@@ -34,6 +34,11 @@ export async function ensureBackendSession(
     // insistir: que el login muestre su error normal.
     if (sessionStorage.getItem(GUARD_KEY)) return;
     sessionStorage.setItem(GUARD_KEY, '1');
-    navigate(`${base}/api/auth/warmup?next=${encodeURIComponent(window.location.href)}`);
+    // `next` va EN EL PATH (base64url sin padding), no como query string: el
+    // replay post-SSO del proxy de Databricks se atora con query strings y
+    // dejaba al usuario varado en un `{}` (visto 2026-07-30 en corporativo).
+    const token = btoa(window.location.href)
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    navigate(`${base}/api/auth/warmup/${token}`);
   }
 }
