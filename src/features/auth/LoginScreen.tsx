@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Database, LogIn } from 'lucide-react';
 import { ApiError } from '@/services/http';
+import { ensureBackendSession } from '@/services/warmup';
 import { useAuthStore } from '@/store/useAuthStore';
 
 /**
@@ -16,6 +17,11 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Databricks Apps: si el navegador aún no tiene sesión SSO con el DOMINIO
+  // del backend, ningún fetch pasa el proxy. El probe lo detecta y hace una
+  // navegación de ida y vuelta por /api/auth/warmup (doc 36). En dev es no-op.
+  useEffect(() => { void ensureBackendSession(); }, []);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
