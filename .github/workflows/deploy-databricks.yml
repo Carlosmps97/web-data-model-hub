@@ -17,8 +17,9 @@ jobs:
     #   · variable DATABRICKS_HOST  = URL del workspace destino
     #   · secret   DATABRICKS_TOKEN = PAT de ese workspace (solo lo usa el CLI)
     #   · variable BUNDLE_TARGET    = target del bundle (opcional; default prod)
-    # El runtime no usa nada de esto: VITE_API_URL llega desde databricks.yml
-    # (variable `backend_api_url`) y se inlinea en el build al arrancar la app.
+    # El runtime no usa nada de esto: BACKEND_API_URL llega desde databricks.yml
+    # (variable `backend_api_url`) y la consume server.mjs como destino del
+    # proxy /api (doc 36; ya no existe VITE_API_URL en el build de Apps).
     env:
       DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -104,6 +105,34 @@ jobs:
 
       - name: Deploy bundle (sube el código + crea/actualiza la app)
         run: databricks bundle deploy --target "$BUNDLE_TARGET"
+
+      # Doc 36 §6.3: el SP de ESTA app necesita CAN_USE sobre la app backend
+      # para que el proxy /api de server.mjs funcione. El workflow del BACKEND
+      # re-aplica ese grant en cada deploy suyo (su bundle resetea la ACL);
+      # este paso cubre el arranque inicial (backend desplegado antes de que
+      # existiera el front) — así el resultado no depende del orden de deploys.
+      # PATCH = agrega/actualiza sin pisar el resto de la ACL. Idempotente.
+      - name: Autorizar a este SP sobre la app backend (proxy /api)
+        env:
+          BACKEND_APP_NAME: ${{ vars.BACKEND_APP_NAME || 'bknd-data-model-hub' }}
+        run: |
+          FRONT_APP=$(databricks bundle validate --target "$BUNDLE_TARGET" --output json \
+            | jq -r '.resources.apps.frontend.name')
+          FRONT_SP=$(databricks apps get "$FRONT_APP" --output json \
+            | jq -r '.service_principal_client_id // empty')
+          if [ -z "$FRONT_SP" ]; then
+            echo "No pude resolver el SP de '$FRONT_APP'." >&2; exit 1
+          fi
+          if ! databricks apps get "$BACKEND_APP_NAME" >/dev/null 2>&1; then
+            echo "La app backend '$BACKEND_APP_NAME' no existe todavia: se salta"
+            echo "(su propio workflow aplica el grant cuando se despliegue)."
+            exit 0
+          fi
+          databricks api patch "/api/2.0/permissions/apps/$BACKEND_APP_NAME" --json "{
+            \"access_control_list\": [
+              {\"service_principal_name\": \"$FRONT_SP\", \"permission_level\": \"CAN_USE\"}
+            ]}" > /dev/null
+          echo "CAN_USE aplicado: SP de $FRONT_APP ($FRONT_SP) -> $BACKEND_APP_NAME"
 
       - name: Deploy & (re)start app
         run: databricks bundle run frontend --target "$BUNDLE_TARGET"

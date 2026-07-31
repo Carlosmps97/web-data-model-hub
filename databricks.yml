@@ -15,7 +15,7 @@ variables:
   backend_api_url:
     # GitHub Variable: BACKEND_API_URL (obligatoria en un workspace nuevo — el
     # default apunta al workspace original y el front quedaría hablándole a otro).
-    description: "URL pública de la app backend (bknd-data-model-hub) de ESTE workspace — se inlinea en el build de Vite."
+    description: "URL pública de la app backend (bknd-data-model-hub) de ESTE workspace — destino del proxy /api de server.mjs (runtime, ya no se inlinea en el build)."
     default: https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com
   app_admin_user:
     # GitHub Variable: APP_ADMIN_USER (opcional).
@@ -37,16 +37,22 @@ resources:
       description: "Data Model Hub — frontend (SPA Vite/React · editor ER)."
       config:
         # `npm run start` dispara `prestart` (tsc + vite build → dist/) y
-        # luego `vite preview` sirve dist/ con fallback SPA. El puerto se toma
-        # de DATABRICKS_APP_PORT DENTRO del script de npm (expansión de shell)
-        # porque la sustitución del token en `command` NO funciona vía npm.
-        # NO setear NODE_ENV=production (rompería el `npm install` de
-        # devDeps → vite/tsc se necesitan para build + preview).
+        # luego `node server.mjs` (doc 36): server propio que sirve dist/ y
+        # PROXYA /api al backend servidor-a-servidor con el token M2M del
+        # service principal del front (Databricks inyecta DATABRICKS_HOST y
+        # CLIENT_ID/SECRET; el server lee DATABRICKS_APP_PORT solo).
+        # El navegador asi habla con UN solo origen: sin CORS, sin doble SSO.
+        # ONE-TIME por workspace: CAN_USE del SP del front sobre la app
+        # backend (doc 36 §5).
+        # NO setear NODE_ENV=production (romperia el `npm install` de
+        # devDeps → vite/tsc se necesitan para el build).
+        # OJO: VITE_API_URL ya NO se define → API_BASE queda VACIO en el build
+        # y el front usa rutas RELATIVAS /api (mismo origen). Definirla aqui
+        # reactivaria el cruce navegador→backend (el bug del doble SSO).
         command: ['npm', 'run', 'start']
         env:
-          # Build-time: `vite build` (en `prestart`) la lee del entorno del
-          # proceso y la inlinea en el bundle — por eso NO hay .env.production.
-          - name: VITE_API_URL
+          # Runtime (server.mjs): destino del proxy /api.
+          - name: BACKEND_API_URL
             value: ${var.backend_api_url}
       permissions:
         - level: CAN_MANAGE       # el humano dueño: stop/start/logs/permissions en la UI
