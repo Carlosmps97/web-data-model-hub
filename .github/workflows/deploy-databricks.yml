@@ -38,9 +38,11 @@ jobs:
       # (verificado), así que "no definida en GitHub" = "usa el default".
       # El workspace destino NO va acá: sale de la variable DATABRICKS_HOST que
       # ya usa el CLI (el bundle dejó de hardcodear `workspace.host`).
+      # OJO: BACKEND_API_URL ya NO es variable del bundle (se movió a app.yaml
+      # como env de runtime). Solo queda app_admin_user, que alimenta los
+      # permisos que el bundle SÍ aplica.
       - name: Parámetros del bundle desde GitHub Variables
         env:
-          BACKEND_API_URL: ${{ vars.BACKEND_API_URL }}
           APP_ADMIN_USER: ${{ vars.APP_ADMIN_USER }}
         run: |
           set_var() {   # $1 = variable del bundle · $2 = valor de GitHub
@@ -49,7 +51,6 @@ jobs:
             echo "· $1 = $2   (GitHub Variables)"
           }
           echo "Workspace (DATABRICKS_HOST): $DATABRICKS_HOST"
-          set_var backend_api_url "$BACKEND_API_URL"
           set_var app_admin_user  "$APP_ADMIN_USER"
 
       # `bundle deploy` instala el provider Terraform de Databricks. El CLI usa

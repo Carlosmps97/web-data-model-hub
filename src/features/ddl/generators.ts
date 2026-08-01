@@ -556,3 +556,8 @@ export function ddlFilename(tables: DdlTable[], modelName?: string): string {
   const safe = base.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'model';
   return `${safe}.sql`;
 }
+
+/** Nombre del `.zip` de descarga: mismo criterio/saneado que `ddlFilename`. */
+export function ddlZipName(tables: DdlTable[], modelName?: string): string {
+  return ddlFilename(tables, modelName).replace(/\.sql$/, '.zip');
+}

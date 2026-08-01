@@ -1,0 +1,33 @@
+# App spec de Databricks Apps (frontend SPA · server.mjs).
+#
+# NO BORRAR este archivo. Databricks lo lee EN CADA ARRANQUE de la app —
+# tanto en el deploy como al apagar/prender desde la UI o en un reinicio del
+# runtime. Es la ÚNICA fuente del `command` y las `env` que sobrevive a un
+# stop/start.
+#
+# Historia: el doc 28 eliminó este app.yaml apostando al bloque `config:` de
+# databricks.yml, pero `databricks bundle deploy` lo IGNORA en silencio (bug
+# databricks/cli #4901). Sin app.yaml la app arrancaba sin BACKEND_API_URL y,
+# al prenderla, "Failed to load app spec / No command to run". Por eso el
+# command+env viven ACÁ. Los permisos siguen en databricks.yml (el bundle sí
+# los aplica).
+#
+# `npm run start` dispara `prestart` (tsc + vite build → dist/) y luego
+# `node server.mjs`: server propio que sirve dist/ y PROXYA /api al backend
+# servidor-a-servidor con el token M2M del service principal del front
+# (Databricks inyecta DATABRICKS_HOST y CLIENT_ID/SECRET; el server lee
+# DATABRICKS_APP_PORT). El navegador habla con UN solo origen: sin CORS, sin
+# doble SSO (doc 36).
+#
+# NO setear NODE_ENV=production (rompería el `npm install` de devDeps →
+# vite/tsc se necesitan para el build).
+# NO definir VITE_API_URL: API_BASE queda vacío en el build y el front usa
+# rutas RELATIVAS /api (mismo origen). Definirla reactivaría el cruce
+# navegador→backend (el bug del doble SSO).
+command: ["npm", "run", "start"]
+
+env:
+  # Runtime (server.mjs): destino del proxy /api. Único valor genuinamente
+  # por-workspace — para apuntar a OTRO backend, editar esta línea.
+  - name: BACKEND_API_URL
+    value: https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com

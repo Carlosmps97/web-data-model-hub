@@ -15,8 +15,10 @@
  *  - optional TBLPROPERTIES key/value pairs,
  *  - per-table selection (which tables to export).
  *
- * Footer: **Download .sql** (single file; named after the table when exactly
- * one is selected) and **Copy to clipboard**. UI-only — no persistence.
+ * Footer: **Download** (a `.zip` with one `.sql` per object — `[TABLE] X.sql` /
+ * `[VIEW] Y.sql` — each table and its views under a folder named after the
+ * table) and **Copy to clipboard** (single concatenated SQL). UI-only — no
+ * persistence.
  */
 'use client';
 
@@ -31,10 +33,13 @@ import SchemaSelect from '@/features/modeler/components/SchemaSelect';
 import type { Diagram } from '@/features/modeler/services/modeler.service';
 import { listViewsForTables } from '@/services/views.service';
 import {
-  databricksDdl, ddlFilename, DEFAULT_DATABRICKS_OPTS,
+  databricksDdl, ddlZipName, tableStatements, viewStatements,
+  DEFAULT_DATABRICKS_OPTS,
   type DatabricksDdlOptions, type DdlDialect, type DdlTableFormat, type DdlTable, type DdlView,
 } from '../generators';
 import { fetchExportRules, renderWithRules, selectableRules, type ExportRule } from '../rulesBridge';
+import { buildZip } from '@/lib/zip';
+import { plainToObjects, statementsToObjects, objectsToEntries, viewKey } from '../ddlExportBundle';
 
 export interface ExportDdlModalProps {
   open: boolean;
@@ -227,23 +232,52 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   };
 
   const download = async () => {
-    if (!exportTables.length) return;
-    let sql: string;
-    try { sql = await buildFinalSql(); }
-    catch (e) {
-      toast.error(e instanceof Error && e.message ? e.message : "Couldn't apply the export rules");
-      return;
+    if (!exportTables.length || !diagram || !ddlInput) return;
+    setRendering(true);
+    try {
+      let objects;
+      if (selRuleIds.size === 0) {
+        // Sin reglas: DDL base partido por objeto (mismo texto que el archivo único).
+        const ts = tableStatements(ddlInput, opts).map(({ table, sql }) => ({
+          id: table.id, physicalName: table.physicalName, schema: table.schema, sql,
+        }));
+        const vs = (opts.includeViews ? viewStatements(ddlInput, opts) : []).map(({ view, sql }) => ({
+          name: view.name, schema: view.schema,
+          sourceTableIds: view.sourceTableIds?.length ? view.sourceTableIds : (view.tableId ? [view.tableId] : []),
+          sql,
+        }));
+        objects = plainToObjects({ tables: ts, views: vs });
+      } else {
+        // Con reglas: el motor devuelve una sentencia por objeto.
+        const { rendered } = await renderWithRules({
+          diagram, input: ddlInput, opts, ruleIds: [...selRuleIds], modelName,
+        });
+        const viewSources = new Map<string, string[]>();
+        views.forEach((v) => viewSources.set(
+          viewKey(v.schema ?? null, v.name),
+          v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []),
+        ));
+        const tablesById = new Map(exportTables.map((t) => [t.id, { physicalName: t.physicalName, schema: t.schema }]));
+        objects = statementsToObjects({ statements: rendered.statements, viewSources, tablesById });
+      }
+
+      const entries = objectsToEntries(objects);
+      const zipName = ddlZipName(exportTables, modelName);
+      const blob = buildZip(entries);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = zipName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Downloaded ${zipName} · ${entries.length} file${entries.length === 1 ? '' : 's'}`);
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : "Couldn't build the DDL download");
+    } finally {
+      setRendering(false);
     }
-    const blob = new Blob([sql], { type: 'text/sql;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = ddlFilename(exportTables, modelName);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
-    toast.success(`Downloaded ${ddlFilename(exportTables, modelName)}`);
   };
 
   const isDbx = dialect === 'databricks';
@@ -258,7 +292,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
       <Button variant="secondary" onClick={onClose}>Close</Button>
       <Button variant="secondary" icon={Copy} onClick={copy} disabled={!canExport || rendering}>Copy</Button>
       <Button variant="primary" icon={Download} onClick={download} disabled={!canExport || rendering}>
-        {rendering ? 'Applying rules…' : 'Download .sql'}
+        {rendering ? 'Applying rules…' : 'Download .zip'}
       </Button>
     </>
   );
