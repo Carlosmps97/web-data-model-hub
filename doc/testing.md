@@ -1,6 +1,8 @@
 # Testing y consideraciones/límites del frontend — Data Model Hub
 
-Este documento describe cómo se verifica hoy el frontend (SPA en Vite + React 19) y qué consideraciones de rendimiento y límites conocidos aplican al canvas del modelador y a la grilla del reporting. Está basado en el código real del repositorio `web-data-model-hub`.
+Actualizado al 2026-07-31.
+
+Este documento describe cómo se verifica el frontend (SPA en Vite + React 19) y qué consideraciones de rendimiento y límites conocidos aplican al canvas del modelador y a la grilla del reporting. Está basado en el código real del repositorio `web-data-model-hub`.
 
 El frontend no toca la base de datos: es una SPA que consume el backend FastAPI vía HTTP (capa `src/services/*` y `src/features/*/*.service.ts`). La persistencia (Databricks Lakebase Postgres; Cosmos como fallback) vive del lado del backend.
 
@@ -17,7 +19,7 @@ El proyecto expone siete scripts de npm. No hay más automatización local que e
 | `npm run dev` | `vite` | Servidor de desarrollo en `:3000` con HMR y proxy `/api` → backend `:8000`. |
 | `npm run build` | `tsc --noEmit && vite build` | Verificación de tipos (sin emitir) y luego bundle de producción a `dist/`. |
 | `npm run preview` | `vite preview` | Sirve el `dist/` ya construido para revisarlo localmente. |
-| `npm run start` | `vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort` | Runtime en Databricks Apps (lo invoca el `config:` del bundle); `prestart` corre `npm run build` antes. |
+| `npm run start` | `node server.mjs` | Runtime en Databricks Apps (lo invoca el `config:` del bundle): el servidor de producción propio sirve `dist/` y proxya `/api` al backend; `prestart` corre `npm run build` antes. |
 | `npm test` | `vitest run` | Corre la suite de tests una sola vez (no watch). |
 | `npm run lint` | `eslint .` | Linting de todo el árbol con la config flat de ESLint. |
 
@@ -34,17 +36,33 @@ La configuración de Vitest está embebida en `vite.config.ts` (se usa `defineCo
 // vite.config.ts (bloque test)
 test: {
   environment: 'node',
-  include: ['src/**/*.test.{ts,tsx}'],
+  include: ['src/**/*.test.{ts,tsx}', 'server.test.mjs'],
 },
 ```
 
-- Entorno `node` (no `jsdom`): los tests actuales son de lógica pura (stores de Zustand, servicios), no de renderizado del DOM. Si a futuro se testean componentes con render, habría que cambiar a `jsdom` o `happy-dom`.
-- Patrón de descubrimiento: cualquier archivo `*.test.ts` o `*.test.tsx` bajo `src/`.
+- Entorno `node` (no `jsdom`): los tests actuales son de lógica pura (stores de Zustand, servicios, lib del modeler), no de renderizado del DOM. Si a futuro se testean componentes con render, habría que cambiar a `jsdom` o `happy-dom`.
+- Patrón de descubrimiento: cualquier archivo `*.test.ts` o `*.test.tsx` bajo `src/`, más `server.test.mjs` en la raíz — los tests del servidor de producción (`server.mjs`) corren bajo Vitest porque están listados explícitamente en el `include`.
 - El alias `@` → `src/` se resuelve tanto en runtime como en los tests (`resolve.alias`), por eso los tests importan con `@/services/...`.
 
 ### 1.3 Qué se testea hoy
 
-Hoy existe un único archivo de test: `src/store/useIdentityStore.test.ts`. Cubre el store de identidad (Zustand) mockeando el servicio HTTP:
+La suite al 2026-07-31: **166 tests en 24 archivos**, todos verdes (verificable con `npx vitest run`). Los 24 archivos son 23 `*.test.ts` bajo `src/` más `server.test.mjs` en la raíz del repo:
+
+| Área | Archivos de test |
+|---|---|
+| Stores (`src/store/`) | `useIdentityStore.test.ts`, `useModelerStore.test.ts`, `useModelerStore.views.test.ts` |
+| Servicios base (`src/services/`) | `http.test.ts`, `warmup.test.ts`, `versioning.summarize.test.ts`, `views.service.types.test.ts` |
+| Modeler — lógica pura (`features/modeler/lib/`) | `complexTypes`, `keyOrder`, `lodSize`, `nameSync`, `relationshipPairs`, `schemaStaging`, `viewEditorLogic`, `viewGraph`, `viewSync` (todos `.test.ts`) |
+| Modeler — servicios | `explorer.service.test.ts` |
+| DDL (`features/ddl/`) | `generators.test.ts` |
+| Governance (`features/governance/services/`) | `governance.service.test.ts` |
+| Reporting (`features/reporting/`) | `query.service.test.ts` |
+| Standards (`features/standards/`) | `ddlRules.service.test.ts`, `domainImpact.test.ts`, `glossaryValidation.test.ts` |
+| Servidor de producción (raíz) | `server.test.mjs` (12 tests) |
+
+`server.test.mjs` cubre el servidor de producción `server.mjs` en dos planos. Unit: `safeJoin` (bloqueo de path traversal, `%2e%2e`, encoding inválido), `contentTypeFor`, `buildUpstreamHeaders` (descarta `host` y el `Authorization` entrante del cliente, pone el Bearer del service principal, conserva `X-Session-Token`, precedencia de `x-forwarded-for`) y `TokenCache` (un solo mint compartido entre llamadas concurrentes, cache, re-mint tras `invalidate()`, propagación de fallo). Integración contra un backend fake: asset con cache immutable, fallback SPA con `no-cache`, proxy con Bearer y query string, streaming de un POST de 50 KB, y retry ante 401 solo para GET (un POST no se reintenta porque su body ya se consumió del stream).
+
+El patrón de los tests de store/servicio queda ilustrado por `src/store/useIdentityStore.test.ts`, que cubre el store de identidad (Zustand) mockeando el servicio HTTP:
 
 ```ts
 // src/store/useIdentityStore.test.ts (esencia)
@@ -72,7 +90,7 @@ Lo que valida:
 1. `loadIdentity()` llama a `getMe()` (el `GET /api/me`) y guarda el `principal` en el store.
 2. La memoización del cargado: una segunda llamada a `loadIdentity()` no vuelve a pegarle al backend (se apoya en el flag `loaded`).
 
-El patrón que establece este test para futuros tests de store/servicio:
+El patrón que siguen los tests de store/servicio:
 
 - Aislar el efecto de red con `vi.mock` sobre el módulo de servicio.
 - Resetear el estado del store en `beforeEach` con `store.setState({...})` y limpiar mocks con `vi.clearAllMocks()`.
@@ -92,11 +110,13 @@ El patrón que establece este test para futuros tests de store/servicio:
 | `paths` | `@/*` → `./src/*` | Alias de imports; debe coincidir con el alias de `vite.config.ts`. |
 | `types` | `["vite/client"]` | Tipos de `import.meta.env` (p. ej. `VITE_API_URL`). |
 
-La verificación de tipos se corre implícitamente con `npm run build`, o de forma directa con:
+La verificación de tipos se corre implícitamente con `npm run build` (es la compuerta previa a `vite build`), o de forma directa con:
 
 ```bash
 npx tsc --noEmit
 ```
+
+El gate de tipos cubre solo `src/` (`include: ["src"]` en `tsconfig.json`): `server.mjs` y `server.test.mjs` no pasan por `tsc` — su red de seguridad son los 12 tests de `server.test.mjs`.
 
 ### 1.5 ESLint
 
@@ -130,7 +150,7 @@ flowchart TD
     A --> D[npm run build]
     B --> B1[eslint . - recommended + ts + react-hooks + guard de barrels]
     C --> C1[vitest run - entorno node]
-    C1 --> C2[useIdentityStore.test.ts]
+    C1 --> C2[166 tests en 24 archivos - 23 en src + server.test.mjs]
     D --> D1[tsc --noEmit - tipos estrictos]
     D1 --> D2[vite build - bundle a dist/]
     D1 -->|error de tipos| X[Build abortado]
@@ -140,14 +160,17 @@ flowchart TD
 
 | Área | Estado de test |
 |---|---|
-| Store de identidad (`useIdentityStore`) | Cubierto (unit). |
-| Otros stores (`useModelerStore`, `useSessionStore`, `useChangesetStore`, `useAuthStore`) | Sin tests. |
-| Servicios HTTP (`reporting.service`, `governance.service`, etc.) | Sin tests. |
+| Stores (`useIdentityStore`, `useModelerStore` incl. vistas) | Cubiertos (unit). |
+| Otros stores (`useSessionStore`, `useChangesetStore`, `useAuthStore`) | Sin tests. |
+| Servicios base (`http`, `warmup`, resumen de diff de `versioning`, tipos de `views.service`) | Cubiertos (unit, red mockeada). |
+| Servicios de features (`explorer.service`, `query.service`, `governance.service`, `ddlRules.service`) | Cubiertos (unit, red mockeada). |
+| Lógica pura del modeler (`lib/`: complexTypes, keyOrder, lodSize, nameSync, relationshipPairs, schemaStaging, viewEditorLogic, viewGraph, viewSync) | Cubierta (unit). |
+| Generadores DDL (`generators.ts`) y validaciones de Standards (`domainImpact`, `glossaryValidation`) | Cubiertos (unit). |
+| Servidor de producción (`server.mjs`) | Cubierto (`server.test.mjs`: unit + integración con backend fake). |
 | Componentes React (canvas, grillas, modales) | Sin tests de render (entorno `node`, no `jsdom`). |
 | Lógica de layout ELK (`elkLayout.ts`) | Sin tests. |
-| Motor de query del reporting (cliente `query.service`) | Sin tests. |
 
-En la práctica, la red de seguridad principal hoy son las compuertas estáticas (`tsc --noEmit` estricto + ESLint), más el único test unitario. El grueso de la lógica pesada (canvas, motor de reporting, keyset, SQL) vive validada del lado del backend y por pruebas de estrés a nivel de datos, no por tests de frontend.
+En la práctica, la red de seguridad son las compuertas estáticas (`tsc --noEmit` estricto + ESLint) más los 166 tests de Vitest (lógica pura, stores, servicios con red mockeada y el servidor de producción). Lo que sigue sin cobertura de frontend es el render de componentes (canvas, grillas): esa capa se valida del lado del backend (su propia suite pytest) y por pruebas de estrés a nivel de datos.
 
 ---
 
@@ -258,9 +281,21 @@ children: nodes.map((n) => ({
 
 El auto-arrange corre en el store (`autoOrganize`): toma los tamaños medidos de los nodos vivos, calcula posiciones con ELK, hace merge en el backend (`setSubjectAreaLayout`) y recarga.
 
+#### j) LOD / zoom semántico para canvases gigantes (2026-07-25)
+
+La virtualización del viewport (a) tiene un punto ciego: en fit view TODOS los nodos son "visibles" y no se poda nada. Caso real tras la carga del segundo XML de Erwin: el canvas "Analytics" (392 nodos = 196 tablas + 196 vistas espejo, ~99 mil filas de columna/source) ≈ 400–500 mil elementos DOM — el fit view se trababa por rendering del navegador, no por el backend ni por la base. La mitigación es el LOD (zoom semántico), implementado solo en el front (`src/features/modeler/lib/lodSize.ts` + `TableNode`/`ViewNode`/`ModelerCanvas`/`Toolbar`):
+
+- Umbrales con histéresis `LOD_ENTER = 0.10` / `LOD_EXIT = 0.20` (banda muerta anti-parpadeo), constantes en `lodSize.ts`, calibrados en vivo el 2026-07-25 sobre el canvas Analytics: a zoom 0.10 una fila de 12 px mide 1.2 px, nada legible se pierde.
+- En modo compacto el nodo pinta solo la caja `schema.nombre` (con franja PK proporcional en tablas y hatch en vistas), del MISMO tamaño que el nodo detallado: `lodSize.ts` replica las fórmulas de medida del layout batch del backend, así el arreglo no salta al cruzar el umbral.
+- Edges intactos: la caja compacta expone handles fantasma con los mismos ids que las filas del modo detallado, por lo que los wires nunca se re-arman ni pierden ancla; el cruce de umbral es un patch atómico (cero frames sin wires).
+- `lod: true` por default en `useModelerStore`: la primera pintura de un canvas grande ya sale compacta; `onInit` + doble `requestAnimationFrame` lo corrigen en canvases chicos.
+- Candado `lodLock` para el export SVG: la captura fuerza siempre el detalle completo y restaura al terminar.
+
+Resultado medido: el fit view de Analytics pasa de ~450 mil a ~2 mil elementos DOM (392 cajas + wires simples). Detalle completo en el doc 33 de plan-implementacion/ (referencia histórica).
+
 #### Límites del canvas
 
-- La virtualización cubre el DOM, pero las aristas (edges) no se virtualizan con la misma agresividad que los nodos; diagramas con muchísimas relaciones densas pueden pesar más que la cuenta de tablas sugeriría.
+- La virtualización cubre el DOM solo fuera del viewport; el caso extremo (fit view de un canvas gigante, donde todo es "visible") quedó mitigado por el LOD (j). Las aristas (edges) no se virtualizan con la misma agresividad que los nodos; diagramas con muchísimas relaciones densas pueden pesar más que la cuenta de tablas sugeriría.
 - El auto-arrange (ELK) es una operación asíncrona y sincrónicamente costosa en diagramas muy grandes; corre en el hilo principal (elkjs bundled) y puede tardar en canvases de estrés.
 - El export a imagen (PNG vía `html-to-image`) captura el viewport DOM: en canvases enormes hace `fitView` + doble `requestAnimationFrame` antes de capturar para evitar cortes; con `pixelRatio: 2` el archivo puede ser grande.
 
@@ -447,6 +482,7 @@ Como es client-side, tiene límites deliberados:
 | Límite | Detalle |
 |---|---|
 | `minZoom` 0.02 | Fijado para canvases de auto-arrange enormes (~14.000 x 19.000 px). Por debajo, la legibilidad es nula; es un piso de emergencia, no una vista de trabajo. |
+| Canvas gigante en fit view | Mitigado por el LOD (umbrales 0.10/0.20 con histéresis, ver §2.1.j): en el canvas Analytics (392 nodos, ~99k filas) el DOM baja de ~450 mil a ~2 mil elementos. Palanca pendiente (no implementada): dieta del payload del diagrama (~99k filas traen `description` que el canvas no pinta), solo si la APERTURA del canvas sigue lenta tras el LOD. |
 | Ancho de nodo 220–520 px | Nombres de columna muy largos se truncan con ellipsis al tocar el `max-width`; el tipo de dato nunca se recorta. |
 | Export XLSX solo filas seleccionadas | Es client-side: no está pensado para exportar el modelo entero, sino la selección. |
 | Nivel Columns del XLSX: umbral de 300 ids | Hasta 300 tablas se acota server-side (`$in`); por encima descarga todas las columnas y filtra en cliente (más pesado). |
@@ -460,59 +496,22 @@ Como es client-side, tiene límites deliberados:
 
 ## 3. Despliegue: dónde corre, variables de entorno y base de datos
 
-El frontend es una SPA de Vite: `npm run build` produce archivos estáticos en `dist/` (HTML + JS + CSS + assets). No hay servidor propio de la app más allá de servir esos estáticos.
+El frontend corre en Databricks Apps con un servidor de producción propio (desde 2026-07-31): `npm run build` (tsc + Vite) deja los estáticos en `dist/` y `npm run start` levanta `server.mjs` (Node puro, cero dependencias), que sirve `dist/` con fallback SPA y proxya `/api/*` al backend FastAPI con un token OAuth M2M del service principal del front. Con esto el navegador habla con UN solo origen y desaparece el doble muro SSO de Databricks Apps (una app cross-origin no podía completar el SSO del backend desde `fetch`).
 
-### 3.1 Dónde corre
-
-Dos destinos posibles para hospedar el `dist/`:
-
-- Azure App Service (sirviendo los estáticos del build).
-- Databricks Apps (mismo build estático servido como app del workspace).
-
-En ambos casos el patrón es idéntico: el navegador descarga la SPA y llama por HTTP al backend FastAPI (que es quien habla con la base de datos). El frontend nunca abre conexión a la base.
-
-### 3.2 Variables de entorno
-
-La única variable que consume el frontend es la base del backend, y es de tiempo de build (Vite inlina `import.meta.env.VITE_API_URL` al compilar):
-
-| Variable | Uso | Ejemplo |
+| Variable | Momento | Uso |
 |---|---|---|
-| `VITE_API_URL` | Base del backend. Vacío = mismo origen. | `` (vacío en dev, el proxy resuelve) / `https://bknd-...azuredatabricksapps.com` en prod |
+| `VITE_API_URL` | build-time (solo dev/local) | Base del backend para la SPA (`API_BASE` en `src/services/apiBase.ts`). En producción NO se define: `API_BASE` queda vacía y las rutas son relativas `/api` (mismo origen). Definirla en Apps reactivaría el cruce navegador→backend y el doble SSO. |
+| `BACKEND_API_URL` | runtime (variable del bundle) | Destino del proxy `/api` de `server.mjs`. Al ser runtime, cambiar de backend ya no exige reconstruir el bundle. |
 
-En desarrollo (`.env`), `VITE_API_URL` va vacío y el proxy de Vite reenvía `/api` al backend local:
+En desarrollo nada cambió: `npm run dev` usa el proxy de Vite (`/api` → `http://localhost:8000`); la simulación local de producción es `BACKEND_API_URL=http://localhost:8000 node server.mjs` (sin credenciales del service principal, el proxy no adjunta Bearer).
 
-```ts
-// vite.config.ts
-server: {
-  port: 3000,
-  proxy: { '/api': { target: 'http://localhost:8000', changeOrigin: true } },
-},
-```
-
-En producción se fija `VITE_API_URL` a la URL pública del backend en el momento del build (no en runtime, porque Vite lo inlina). Todos los servicios la leen con el mismo patrón:
-
-```ts
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
-```
-
-Consideración importante: como `VITE_API_URL` es build-time, cambiar el backend de destino exige reconstruir el bundle; no basta con reiniciar el proceso ni con variables de runtime.
-
-Nota sobre archivos heredados (resuelto 2026-07-19): el deploy quedó homologado en `databricks.yml` (`variables:` + `config:`; `app.yaml` y `.env.production` eliminados); `VITE_API_URL` llega del bundle y `API_BASE` está centralizado en `src/services/apiBase.ts`. La herencia `NEXT_PUBLIC_*` de la etapa Next.js fue eliminada.
-
-### 3.3 Base de datos (Cosmos DB con API de Mongo)
-
-- La persistencia vive en Azure Cosmos DB con API de Mongo, y la maneja exclusivamente el backend FastAPI.
-- El frontend no tiene credenciales ni driver de base: toda lectura/escritura pasa por HTTP contra el backend (`src/services/*` y `src/features/*/*.service.ts`), que a su vez consulta Cosmos.
-- Implicancia de rendimiento ligada a la BD: las señales de scan (`meta.scan: index | collscan`) que muestra la grilla del reporting reflejan si la consulta usó un índice de Cosmos; el keyset y el streaming del CSV existen precisamente para que grandes volúmenes de la colección no se materialicen en el navegador.
+La persistencia es Databricks Lakebase Postgres y la maneja exclusivamente el backend (Cosmos DB queda como fallback legacy, `DB_BACKEND=cosmos`); el frontend no tiene credenciales ni driver de base: toda lectura/escritura pasa por HTTP (`src/services/*` y `src/features/*/*.service.ts`). El keyset y el streaming del CSV del reporting existen precisamente para que grandes volúmenes no se materialicen en el navegador.
 
 ```mermaid
 flowchart LR
-    B[Navegador - SPA Vite dist/] -->|HTTP con VITE_API_URL| API[Backend FastAPI]
-    API -->|driver Mongo| DB[(Cosmos DB - API de Mongo)]
-    subgraph Hosting del frontend
-      H1[Azure App Service]
-      H2[Databricks Apps]
-    end
-    H1 -. sirve estaticos .-> B
-    H2 -. sirve estaticos .-> B
+    B[Navegador - SPA] -->|mismo origen /api| S[server.mjs - Databricks Apps]
+    S -->|Bearer M2M del SP| API[Backend FastAPI]
+    API --> DB[(Databricks Lakebase Postgres)]
 ```
+
+El detalle completo del deploy (bundle `databricks.yml`, workflow de GitHub Actions, `TokenCache`, grants del service principal) está en [deployment.md](deployment.md).

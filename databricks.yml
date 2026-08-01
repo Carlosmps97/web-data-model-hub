@@ -3,20 +3,16 @@
 # Deploy:  databricks bundle deploy --target prod
 # Arranca: databricks bundle run frontend --target prod
 #
-# PARÁMETROS POR ENTORNO = sección `variables:`. NINGUNO hay que editar por
-# ambiente: el workflow los exporta como `BUNDLE_VAR_<nombre>` desde las GitHub
-# Variables del repo cuando existen, y si no existen mandan estos defaults.
-# La config de runtime vive en `config:` (sustituye al viejo app.yaml;
-# requiere CLI ≥ 0.283 — el workflow usa setup-cli@main = último).
+# PARÁMETROS POR ENTORNO = sección `variables:`.
+# La config de RUNTIME de la app (command + env, incl. BACKEND_API_URL) vive
+# en `app.yaml` (raíz del repo), NO acá. Databricks lo lee en cada arranque, así
+# que sobrevive a un stop/start. Antes vivía en un bloque `config:`, pero el CLI
+# lo IGNORA en silencio (bug databricks/cli #4901) → al prender la app decía
+# "Failed to load app spec". Para apuntar a OTRO backend: editar app.yaml.
 bundle:
   name: frnt-data-model-hub
 
 variables:
-  backend_api_url:
-    # GitHub Variable: BACKEND_API_URL (obligatoria en un workspace nuevo — el
-    # default apunta al workspace original y el front quedaría hablándole a otro).
-    description: "URL pública de la app backend (bknd-data-model-hub) de ESTE workspace — se inlinea en el build de Vite."
-    default: https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com
   app_admin_user:
     # GitHub Variable: APP_ADMIN_USER (opcional).
     # Cuando el deploy lo hace un SERVICE PRINCIPAL (token de CI), `mode:
@@ -35,19 +31,9 @@ resources:
       name: frnt-data-model-hub   # nombre real de la app en el workspace
       source_code_path: .         # el código de la app está en la raíz del repo
       description: "Data Model Hub — frontend (SPA Vite/React · editor ER)."
-      config:
-        # `npm run start` dispara `prestart` (tsc + vite build → dist/) y
-        # luego `vite preview` sirve dist/ con fallback SPA. El puerto se toma
-        # de DATABRICKS_APP_PORT DENTRO del script de npm (expansión de shell)
-        # porque la sustitución del token en `command` NO funciona vía npm.
-        # NO setear NODE_ENV=production (rompería el `npm install` de
-        # devDeps → vite/tsc se necesitan para build + preview).
-        command: ['npm', 'run', 'start']
-        env:
-          # Build-time: `vite build` (en `prestart`) la lee del entorno del
-          # proceso y la inlinea en el bundle — por eso NO hay .env.production.
-          - name: VITE_API_URL
-            value: ${var.backend_api_url}
+      # command + env (incl. BACKEND_API_URL) → app.yaml (raíz del repo).
+      # ONE-TIME por workspace: CAN_USE del SP del front sobre la app backend
+      # (doc 36 §5). El bloque `config:` no funciona (bug #4901).
       permissions:
         - level: CAN_MANAGE       # el humano dueño: stop/start/logs/permissions en la UI
           user_name: ${var.app_admin_user}

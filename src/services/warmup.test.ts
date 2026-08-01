@@ -36,15 +36,17 @@ describe('ensureBackendSession (warm-up SSO de Databricks Apps, doc 36)', () => 
     expect(store.has('dmh-warmup-redirected')).toBe(false);   // guard rearmado
   });
 
-  it('probe bloqueado (proxy SSO): redirige UNA vez al warmup con next codificado', async () => {
+  it('probe bloqueado (proxy SSO): redirige UNA vez al warmup con next en el PATH (b64url)', async () => {
     const store = stubBrowser('https://front.example.com/login?a=1');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     const navigate = vi.fn();
     await ensureBackendSession('https://bknd.example.com', navigate);
+    const token = btoa('https://front.example.com/login?a=1')
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     expect(navigate).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledWith(
-      'https://bknd.example.com/api/auth/warmup?next='
-      + encodeURIComponent('https://front.example.com/login?a=1'));
+    expect(navigate).toHaveBeenCalledWith(`https://bknd.example.com/api/auth/warmup/${token}`);
+    // sin query string: el replay post-SSO del proxy de Databricks la rompia
+    expect((navigate.mock.calls[0][0] as string).includes('?')).toBe(false);
     expect(store.get('dmh-warmup-redirected')).toBe('1');
   });
 

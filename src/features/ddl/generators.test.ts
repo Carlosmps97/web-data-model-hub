@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { databricksDdl, viewDDL, inferJoin, DEFAULT_DATABRICKS_OPTS as DEF, type DatabricksDdlInput, type DdlTable, type DdlView } from './generators';
+import { databricksDdl, viewDDL, inferJoin, DEFAULT_DATABRICKS_OPTS as DEF, type DatabricksDdlInput, type DdlTable, type DdlView, ddlZipName } from './generators';
 
 const BASE = {
   tables: [{ id: 't1', physicalName: 'CLIENTE', schema: 'core' }],
@@ -433,5 +433,17 @@ describe('PRIMARY KEY compuesta — orden de la LLAVE (pkPosition), no orden fí
       modelName: 'm',
     };
     expect(databricksDdl(input, { ...DEF, includeKeys: true })).toContain('PRIMARY KEY (`A1`, `B2`)');
+  });
+});
+
+describe('ddlZipName', () => {
+  it('one table → that table name .zip', () => {
+    expect(ddlZipName([{ id: '1', physicalName: 'CLIENTE' }], 'M')).toBe('CLIENTE.zip');
+  });
+  it('many tables → model name .zip', () => {
+    expect(ddlZipName(
+      [{ id: '1', physicalName: 'A' }, { id: '2', physicalName: 'B' }],
+      'My Model',
+    )).toBe('My_Model.zip');
   });
 });
