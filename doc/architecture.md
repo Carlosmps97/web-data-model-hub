@@ -1,5 +1,7 @@
 # Arquitectura del Frontend — web-data-model-hub
 
+> **Actualizado 2026-07-31** — versiones de dependencias pineadas exactas (política de ambos repos), servidor de producción propio `server.mjs` (§3.1), LOD del canvas (§6.7), review con `ChangesSummary`/`ChangesDetailModal` y 5.ª pestaña "DDL Export rules" en Data Standards (§9), despliegue de un solo origen (§11).
+
 ## 1. Visión
 
 `web-data-model-hub` es la interfaz web del **Data Model Hub (DMH)**: una plataforma para diseñar, visualizar, gobernar y reportar modelos de datos empresariales. Reemplaza el flujo tradicional de una herramienta de modelado de escritorio (tipo Erwin) por una aplicación de una sola página (SPA) que corre en el navegador y conversa con un backend FastAPI.
@@ -23,26 +25,30 @@ Un principio transversal es que **el frontend nunca toca la base de datos direct
 
 ## 2. Stack tecnológico
 
-El proyecto es 100% TypeScript, construido y servido con **Vite**. No usa Next.js (migró desde Next a Vite); desde 2026-07-19 los `.env` y manifiestos de deploy ya usan `VITE_API_URL` (la herencia `NEXT_PUBLIC_*` fue eliminada) y el código lee `import.meta.env.VITE_API_URL`.
+El proyecto es 100% TypeScript, construido con **Vite** (que también sirve el dev server; en producción sirve `server.mjs`, §3.1). No usa Next.js (migró desde Next a Vite); desde 2026-07-19 los `.env` y manifiestos de deploy ya usan `VITE_API_URL` (la herencia `NEXT_PUBLIC_*` fue eliminada) y el código lee `import.meta.env.VITE_API_URL` (centralizado en `src/services/apiBase.ts`; en producción la variable no se define, ver §11).
+
+**Política de versiones (2026-07-31, ambos repos)**: todas las dependencias — `dependencies` y `devDependencies` — van pineadas **exactas**, sin `^` ni `~` (el backend aplica el mismo criterio con `==` en pip). Actualizar una versión es siempre un cambio deliberado y revisable en el `package.json`, nunca un efecto lateral de un `npm install`.
 
 | Categoría | Tecnología | Versión | Rol en la app |
 |-----------|-----------|---------|---------------|
-| Build / dev server | **Vite** | `^6.0.7` | Bundler, HMR, proxy `/api` en dev, build estático. |
+| Build / dev server | **Vite** | `6.4.3` | Bundler, HMR, proxy `/api` en dev, build estático. |
+| Runtime de producción | **`server.mjs`** (Node puro) | — | Sirve `dist/` con fallback SPA y proxya `/api` al backend con token M2M. No es una dependencia npm (cero deps, solo módulos `node:*`); es pieza del stack (§3.1). |
 | UI runtime | **React** + **React DOM** | `19.2.4` | Componentes, `StrictMode`, hooks. |
-| Lenguaje | **TypeScript** | `^5` | Tipado estricto (`strict: true`), alias `@ → ./src`. |
-| Routing | **react-router-dom** | `^7.1.0` | `BrowserRouter`, rutas anidadas, guards, `useSearchParams`. |
-| Estado | **Zustand** | `^5.0.12` | Stores globales (`create`), suscripciones, selectores. |
-| Canvas ER | **@xyflow/react** (React Flow) | `^12.3.5` | Nodos/aristas, viewport, minimapa, virtualización. |
-| Auto-layout | **elkjs** | `^0.11.1` | Algoritmo `layered` (Sugiyama) para auto-organizar el diagrama. |
-| Grilla virtual | **@tanstack/react-virtual** | `^3.14.5` | Render virtualizado de resultados del reporting. |
-| Toasts | **sonner** | `^2.0.7` | Notificaciones globales (`richColors`, `bottom-center`). |
-| Export Excel | **xlsx** (SheetJS) | `^0.18.5` | Workbook multi-hoja desde el reporting. |
-| Export PNG | **html-to-image** | `^1.11.13` | Captura del canvas a imagen. |
-| Íconos | **lucide-react** | `^1.21.0` | Set de íconos SVG. |
-| Tipografía | **@fontsource-variable/geist** + **geist-mono** | `^5.2.x` | Geist (UI) y Geist Mono (datos/SQL), self-hosted. |
-| IDs | **uuid** | `^13.0.0` | Identificadores de entidades cliente-side. |
-| Testing | **Vitest** | `^2.1.8` | Tests unitarios (`src/**/*.test.ts`). |
-| Linting | **ESLint** + **typescript-eslint** + **eslint-plugin-react-hooks** | `^9` / `^8` / `^7` | Reglas TS, hooks, y guard de límites de feature. |
+| Lenguaje | **TypeScript** | `5.9.3` | Tipado estricto (`strict: true`), alias `@ → ./src`. |
+| Routing | **react-router-dom** | `7.18.0` | `BrowserRouter`, rutas anidadas, guards, `useSearchParams`. |
+| Estado | **Zustand** | `5.0.12` | Los 5 stores globales de `src/store/` + `dialogs.tsx`. |
+| Canvas ER | **@xyflow/react** (React Flow) | `12.11.0` | Nodos/aristas, viewport, minimapa, virtualización. |
+| Auto-layout | **elkjs** | `0.11.1` | Algoritmo `layered` (Sugiyama); único import en `lib/elkLayout.ts`. |
+| Grilla virtual | **@tanstack/react-virtual** | `3.14.5` | Render virtualizado del reporting; único uso en `ResultsGrid.tsx`. |
+| Toasts | **sonner** | `2.0.7` | Notificaciones globales (`richColors`, `bottom-center`). |
+| Export Excel | **xlsx** (SheetJS) | `0.18.5` | Workbook multi-hoja; único uso en `ReportingScreen.tsx`. |
+| Export SVG | **html-to-image** | `1.11.13` | Export SVG del canvas (`toSvg`, import dinámico en `Toolbar.tsx`). |
+| Íconos | **lucide-react** | `1.21.0` | Set de íconos SVG (~40 archivos). |
+| Tipografía | **@fontsource-variable/geist** + **geist-mono** | `5.2.9` / `5.2.8` | Geist (UI) y Geist Mono (datos/SQL, feature GSUB `liga` para `<>`), self-hosted. |
+| IDs | **uuid** | `13.0.0` | `v4` para ids cliente-side; único import en `governance.service.ts`. |
+| YAML | **yaml** | `2.9.0` | Round-trip YAML del editor de DDL Export Rules; único import en `ddlRules.service.ts`. |
+| Testing | **Vitest** | `2.1.9` | Tests unitarios (`src/**/*.test.{ts,tsx}` + `server.test.mjs`). |
+| Linting | **ESLint** + **typescript-eslint** + **eslint-plugin-react-hooks** | `9.39.4` / `8.58.1` / `7.1.1` | Reglas TS, hooks, y guard de límites de feature. |
 
 Configuración clave (`vite.config.ts`):
 
@@ -54,7 +60,7 @@ export default defineConfig({
     port: 3000,
     proxy: { '/api': { target: 'http://localhost:8000', changeOrigin: true } },
   },
-  test: { environment: 'node', include: ['src/**/*.test.{ts,tsx}'] },
+  test: { environment: 'node', include: ['src/**/*.test.{ts,tsx}', 'server.test.mjs'] },
 });
 ```
 
@@ -87,51 +93,64 @@ src/
 ├── app/
 │   └── globals.css          # Orquesta @imports de tokens + base + estilos por feature
 ├── components/
-│   ├── ui/                  # Design-system: Button, Dialog, Badge, Avatar,
+│   ├── ui/                  # Design-system: Button, Dialog, Badge, Avatar, Icon,
 │   │                        #   SegmentedControl, Tooltip, Modal, ConfirmDialog,
 │   │                        #   TagEditor, dialogs (DialogHost), index (barrel)
 │   ├── layout/              # TopNav, UserMenu, Header, Sidebar, AppLayout
 │   └── OpenModelModal.tsx   # Selector de versión/modo al entrar al canvas
 ├── features/
 │   ├── modeler/             # El canvas ER (ver §6)
-│   │   ├── components/      #   WorkspaceScreen, ModelerCanvas, TableNode,
-│   │   │                    #   ShapeNode, CrowFootEdge, CrowFootMarkers,
-│   │   │                    #   Toolbar, ModelExplorer, PropertiesPanel,
-│   │   │                    #   ColumnEditor, ViewEditor, RelationshipPopup,
-│   │   │                    #   NewTableModal, CtasModal, PublishModal, UdpAssign…
-│   │   ├── lib/elkLayout.ts #   Auto-layout con ELK
-│   │   ├── services/modeler.service.ts
+│   │   ├── components/      #   WorkspaceScreen, ModelerCanvas, TableNode, ViewNode,
+│   │   │                    #   ShapeNode, CrowFootEdge, DerivationEdge, CrowFootMarkers,
+│   │   │                    #   Toolbar, ModelExplorer, DatabaseExplorer, PropertiesPanel,
+│   │   │                    #   ColumnEditor, ViewEditor, ComplexTypeBuilder,
+│   │   │                    #   RelationshipPopup, RelIcon, NewTableModal, CtasModal,
+│   │   │                    #   PublishModal, SchemaManagerModal, SchemaSelect,
+│   │   │                    #   ModelPropertiesModal, UdpAssign
+│   │   ├── lib/             #   elkLayout (auto-layout ELK), lodSize (LOD, §6.7),
+│   │   │                    #   complexTypes, keyOrder, nameSync, relationshipPairs,
+│   │   │                    #   schemaStaging, viewEditorLogic, viewGraph, viewSync
+│   │   ├── services/        #   modeler.service, structure.service, schemas.service,
+│   │   │                    #   explorer.service (Database Explorer draft-aware)
 │   │   └── index.ts         #   Barrel: exporta WorkspaceScreen
 │   ├── reporting/           # Grilla + Report Designer (ver §7)
 │   │   ├── components/      #   ReportDesigner, FilterBuilder, ResultsGrid, SqlEditor
 │   │   └── query.service.ts #   ReportSpec, runQuery/runSql, insights, export
-│   ├── standards/           # Glossary / Parent Domains / UDP versionados
-│   │   ├── components/      #   StandardsScreen, GlossaryPage, DomainsPage, UdpDefsPage
-│   │   ├── standards.service.ts
+│   ├── standards/           # Glossary / Parent Domains / UDP / DDL Export rules (ver §9)
+│   │   ├── components/      #   StandardsScreen, GlossaryPage, DomainsPage, UdpDefsPage,
+│   │   │                    #   DdlRulesTab, DdlRuleCatalog, DdlRuleEditor,
+│   │   │                    #   DdlRuleTemplates, DdlLookupsEditor
+│   │   ├── standards.service.ts, ddlRules.service.ts (YAML round-trip),
+│   │   ├── domainImpact.ts, glossaryValidation.ts
 │   │   └── index.ts
 │   ├── admin/               # RBAC: usuarios, roles, matriz
 │   │   ├── components/      #   AdminScreen, UserModal, RoleModal, PermissionMatrix…
 │   │   ├── admin.service.ts
 │   │   └── index.ts
-│   ├── governance/          # Changesets / aprobaciones (legacy + servicios vivos)
-│   │   ├── components/      #   GovernanceScreen, ChangesetBar, ApprovalInbox, CatalogPanel
+│   ├── governance/          # Servicios changeset-aware + pantalla legacy
+│   │   ├── components/      #   GovernanceScreen y ApprovalInbox (legacy, fuera del rail),
+│   │   │                    #   ChangesetBar, CatalogPanel
 │   │   └── services/        #   changeset.service, governance.service
-│   ├── ddl/                 # Generación de DDL (genDDL/genViewDDL) + ExportDdlModal
+│   ├── ddl/                 # generators (genDDL/genViewDDL), rulesBridge, ExportDdlModal
 │   ├── auth/                # LoginScreen, guards (RequireAuth/RequirePermission), auth.service
 │   └── help/                # HelpCenter bilingüe + contenido + PDF técnico
 ├── screens/                 # Pantallas de alto nivel montadas por el router
 │   ├── HomeScreen.tsx
 │   ├── ReportingScreen.tsx
-│   └── ReviewScreen.tsx
-├── store/                   # Stores Zustand + bridge (ver §4)
+│   ├── ReviewScreen.tsx
+│   └── review/              #   ChangesSummary, ChangesDetailModal, DiffTree (ver §9)
+├── store/                   # Stores Zustand + bridge + reset (ver §4)
 │   ├── useAuthStore.ts
 │   ├── useSessionStore.ts
 │   ├── useChangesetStore.ts
 │   ├── useIdentityStore.ts
 │   ├── useModelerStore.ts
-│   └── sessionChangesetBridge.ts
+│   ├── sessionChangesetBridge.ts
+│   └── resetAppState.ts     #   Limpia el estado de trabajo por usuario (logout/401/login)
 ├── services/                # Clientes HTTP transversales
-│   ├── http.ts              #   apiFetch + envelope + token + X-Dev-User + 401
+│   ├── http.ts              #   apiFetch + envelope + X-Session-Token + 401 global
+│   ├── apiBase.ts           #   API_BASE = import.meta.env.VITE_API_URL ?? ''
+│   ├── warmup.ts            #   Warm-up SSO cross-app (inerte con API_BASE vacía)
 │   ├── versioning.service.ts, dashboard.service.ts, projects.service.ts,
 │   ├── reporting.service.ts, views.service.ts, naming.service.ts, identity.service.ts
 ├── hooks/                   # useIdentity (+ README de convenciones)
@@ -141,13 +160,26 @@ src/
                              #   review, reporting (CSS global, sin CSS Modules)
 ```
 
+Fuera de `src/`, en la raíz del repo, viven **`server.mjs`** (el servidor de producción, §3.1) y **`server.test.mjs`** (sus 12 tests, incluidos en el `include` de Vitest). `server.mjs` no está bajo `tsc` (el `tsconfig.json` solo incluye `src/`).
+
 **Convención de estilos**: el CSS es global y se compone en cascada desde `app/globals.css`, que hace `@import` de los tokens y de las hojas por feature. No hay CSS Modules ni CSS-in-JS por defecto (aunque algunos componentes usan estilos inline puntuales, como `AdminScreen` o `ReportDesigner`).
+
+### 3.1 El servidor de producción (`server.mjs`)
+
+En producción el bundle estático no se sirve suelto: lo sirve `server.mjs`, un servidor Node propio de **cero dependencias** (solo módulos `node:fs`, `node:http`, `node:https`, `node:path`, `node:url`) que reemplaza a `vite preview` y cumple dos roles:
+
+1. **Estáticos + fallback SPA**: sirve `dist/` (solo GET/HEAD; otros métodos → 405), con guardia anti path-traversal (`safeJoin`), cache inmutable para `/assets/*` (`public, max-age=31536000, immutable`) y `no-cache` para el resto (incluido `index.html`). Cualquier ruta no encontrada cae a `index.html` — el requisito del `BrowserRouter` (§5).
+2. **Proxy `/api` → backend**: reenvía `/api` y `/api/*` al backend FastAPI (destino en `BACKEND_API_URL`) adjuntando un token OAuth **M2M** del service principal del front (`POST {DATABRICKS_HOST}/oidc/v1/token`, grant `client_credentials`, scope `all-apis`). La clase `TokenCache` cachea el token hasta su expiry **menos 5 minutos** y deduplica mints concurrentes (N requests simultáneas = 1 solo mint). El tráfico es **streaming puro** en ambos sentidos (pipe, sin bufferear cuerpos). Ante `401/403` del backend invalida el cache y reintenta UNA vez con token fresco, **solo para GET/HEAD** (el body de un POST ya se consumió del stream). El header `Authorization` entrante del cliente **se descarta** — el Bearer siempre lo pone este server; el JWT propio de la plataforma viaja aparte en `X-Session-Token` y pasa intacto al backend.
+
+El motivo (doc 36 de plan-implementacion/): en Databricks Apps cada app tiene su propio muro SSO y `databricksapps.com` está en la Public Suffix List, así que la cookie de sesión es **por app** — un `fetch()` del navegador hacia la app backend no puede completar el baile SSO cross-origin. La solución definitiva es **un solo origen**: el navegador solo habla con el front, y `server.mjs` habla con el backend servidor-a-servidor.
+
+Variables de entorno: `BACKEND_API_URL` (destino del proxy; sin ella el proxy responde 502), `DATABRICKS_HOST` + `DATABRICKS_CLIENT_ID`/`DATABRICKS_CLIENT_SECRET` (inyectadas por Databricks Apps; sin credenciales el proxy no adjunta Bearer — el modo local: `BACKEND_API_URL=http://localhost:8000 node server.mjs`) y `DATABRICKS_APP_PORT` (fallback `PORT`, fallback 3000). El archivo exporta `contentTypeFor`, `safeJoin`, `TokenCache`, `buildUpstreamHeaders` y `createServer` para los tests. Detalle operativo del deploy en [deployment.md](deployment.md).
 
 ---
 
 ## 4. Gestión de estado (Zustand)
 
-El estado se reparte en cinco stores Zustand, cada uno con una responsabilidad clara, más un *bridge* que sincroniza dos de ellos. No hay Context API ni Redux: los componentes leen con selectores (`useStore(s => s.campo)`) y los servicios leen/escriben con `getState()`.
+El estado se reparte en cinco stores Zustand, cada uno con una responsabilidad clara, más un *bridge* que sincroniza dos de ellos y un módulo de limpieza (`resetAppState.ts`) que borra el estado de trabajo por usuario en logout/401/login — aísla la sesión entre usuarios en la misma máquina. No hay Context API ni Redux: los componentes leen con selectores (`useStore(s => s.campo)`) y los servicios leen/escriben con `getState()`.
 
 ```mermaid
 flowchart TD
@@ -211,6 +243,8 @@ El store más grande (~600 líneas). Gestiona:
 - **Árbol del explorer**: `projects`, `folders`, `subjectAreas`, y un cache por-proyecto `trees` para expandir varios proyectos a la vez.
 - **Sesión de canvas**: `activeProjectId`, `activeFolderId`, `activeSaId`, `diagram`, `viewMode` (`logical`/`physical`).
 - **Selección e interacción**: `selectedTableId`, `selectedEdgeId`, `hoverEdgeId`, `hoverNodeId`, la instancia de React Flow (`flow`) y `focusTable`.
+- **LOD del canvas**: `lod` (default `true` — la primera pintura de un canvas grande ya sale compacta) y `lodLock` (candado que fuerza detalle completo durante el export SVG). Ver §6.7.
+- **Focus cross-canvas**: `openCanvasAndFocus` / `pendingFocusTableId` — el Finder del Database Explorer abre otro canvas y centra la tabla pedida.
 - **Capa DRAWING**: formas libres (`drawings`) persistidas con *debounce* de 500 ms por canvas.
 - **Checkpoint `dirty`**: alimenta el guard de salida (guardar y salir / salir sin guardar). `saveAll()` persiste layout + drawings y limpia `dirty`.
 - **CRUD de modelo**: `createTable`, `addColumn`, `createRelationship`, `updateColumn`, `reorderColumns`, `deleteColumn`, etc. Todas marcan `dirty`, escriben vía `governance.service` (changeset-aware) y hacen `reload()`.
@@ -236,7 +270,7 @@ Se instala una sola vez desde `App.tsx` (`installSessionChangesetBridge()`), es 
 
 Todos los servicios se construyen sobre `apiFetch<T>`, que:
 
-1. Envía en **cada** llamada el header `Authorization: Bearer <token>` (si hay token) y `X-Dev-User: <id>` (actor local), con `credentials: 'include'`.
+1. Envía en **cada** llamada el token de sesión como header `X-Session-Token: <token>` (si hay token) — NO como `Authorization: Bearer`: en Databricks Apps ese header lo consume el proxy SSO de la plataforma (y `server.mjs` lo descarta, §3.1). El backend acepta ambos headers (`Authorization` sigue sirviendo para `curl`/dev). `X-Dev-User: <id>` (actor simulado) viaja **solo en desarrollo** (`import.meta.env.DEV`). Todo con `credentials: 'include'`.
 2. Aplica un **timeout global de 30 s** combinando el `AbortSignal` del caller con `AbortSignal.timeout(...)`.
 3. Desempaqueta el envelope `{ success, data, error }` y devuelve `data`; ante error lanza `ApiError` tipado (con `status`).
 4. Ante `401` dispara el handler global de sesión inválida.
@@ -246,7 +280,7 @@ Ejemplo de llamada real (equivalente en `curl` de lo que emite el navegador):
 
 ```bash
 curl -s http://localhost:8000/api/projects \
-  -H "Authorization: Bearer eyJhbGciOi..." \
+  -H "X-Session-Token: eyJhbGciOi..." \
   -H "X-Dev-User: mr"
 ```
 
@@ -381,14 +415,15 @@ Al entrar a `/model` sin una versión elegida, `WorkspaceScreen` **fuerza** el `
 Registra los tipos de nodo y arista y sincroniza el `diagram` del store con el estado interno de React Flow:
 
 ```tsx
-const nodeTypes = { table: TableNode, shape: ShapeNode };
-const edgeTypes = { crowfoot: CrowFootEdge };
+const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode };
+const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge };
 ```
 
 Puntos de diseño relevantes:
 
-- **Virtualización**: `onlyRenderVisibleElements` monta DOM solo para lo visible. Con ~100 tablas × ~30 columnas hay ~3.000 filas y ~6.000 *handles*; sin virtualización el navegador se ahoga.
+- **Virtualización**: `onlyRenderVisibleElements` monta DOM solo para lo visible. Con ~100 tablas × ~30 columnas hay ~3.000 filas y ~6.000 *handles*; sin virtualización el navegador se ahoga. (En fit view esta poda no alcanza — de eso se encarga el LOD, §6.7.)
 - **Zoom amplio**: `minZoom={0.02}` y `fitView` para ver canvases enormes (un auto-arrange de 100 tablas puede medir ~14000×19000 px).
+- **Conexión por cualquier lado**: `connectionMode={ConnectionMode.Loose}` permite iniciar o soltar una relación en cualquier *handle* (source o target); el canvas reorienta los extremos antes de persistir.
 - **Viewer-lock**: en `readonly` los nodos no son arrastrables (`nodesDraggable={!readonly}`) y los *handles* no conectan.
 - **Sin borrado por teclado** (`deleteKeyCode={null}`): el default de React Flow borraba solo en pantalla (sin persistir), engañoso; los borrados reales van por UI explícita.
 - **Persistencia al soltar**: `onNodeDragStop` guarda el layout de la tabla (o la posición del shape), marcando `dirty`.
@@ -397,7 +432,7 @@ La creación de relaciones (`onConnect`) usa un **edge fantasma optimista**: al 
 
 ### 6.3 `TableNode` — nodo de tabla con ancho dinámico
 
-Cada tabla es un nodo custom, **memoizado** (`memo`) porque React Flow repinta los custom nodes en cada pan/zoom/drag. Renderiza el encabezado (esquema + nombre), separa PK del resto, y por cada columna emite dos *handles* (`{id}__src` a la derecha, `{id}__tgt` a la izquierda). El ancho no es fijo: se adapta al contenido (nombre físico/lógico + tipo), y ese ancho **medido** es el que consume el auto-layout.
+Cada tabla es un nodo custom, **memoizado** (`React.memo`) porque React Flow repinta los custom nodes en cada pan/zoom/drag — los cuatro componentes custom (`TableNode`, `ViewNode`, `CrowFootEdge`, `DerivationEdge`) van envueltos en `React.memo`. Renderiza el encabezado (esquema + nombre), separa PK del resto, y por cada columna emite dos *handles* (`{id}__src` a la derecha, `{id}__tgt` a la izquierda). El ancho no es fijo: se adapta al contenido (nombre físico/lógico + tipo), y ese ancho **medido** es el que consume el auto-layout.
 
 Detalle de rendimiento: los selectores son **booleanos derivados**, no ids crudos. Por ejemplo `selected = useModelerStore(s => s.selectedTableId === table.id)` — así cambiar la selección solo re-renderiza los 2 nodos afectados, no los 100.
 
@@ -454,7 +489,7 @@ Ejemplo de escritura (equivalente `curl`):
 
 ```bash
 curl -s -X PUT http://localhost:8000/api/changesets/cs-42/changes \
-  -H "Authorization: Bearer <token>" -H "X-Dev-User: mr" \
+  -H "X-Session-Token: <token>" -H "X-Dev-User: mr" \
   -H "Content-Type: application/json" \
   -d '{
     "collection": "canonical_columns",
@@ -465,6 +500,18 @@ curl -s -X PUT http://localhost:8000/api/changesets/cs-42/changes \
                  "isPrimaryKey": true, "ordinal": 0, "typeOverridden": false }
   }'
 ```
+
+### 6.7 LOD — zoom semántico para canvases gigantes
+
+Desde 2026-07-25 el canvas tiene **nivel de detalle** (LOD, doc 33 de plan-implementacion/). El disparador: en fit view TODOS los nodos son "visibles" y `onlyRenderVisibleElements` no poda nada — un canvas de 392 nodos con ~99 mil filas de columna/source generaba ~450 mil elementos DOM y se trababa; en modo compacto ese mismo fit view baja a ~2 mil elementos.
+
+- **Umbrales con histéresis** en `lib/lodSize.ts`: `LOD_ENTER = 0.10` / `LOD_EXIT = 0.20` (calibrados en vivo el 2026-07-25). En compacto se sale recién con zoom > 0.20; en detalle se entra recién con zoom < 0.10 — la banda muerta evita el parpadeo al orbitar el umbral. `onMove` evalúa `nextLod` con *throttle* por rAF y solo parchea `data.lod` de los nodos al CRUZAR el umbral.
+- **Caja compacta del mismo tamaño**: en modo LOD, `TableNode`/`ViewNode` pintan solo la caja (`schema.nombre` + conteo) replicando las métricas del nodo detallado (`lodSize.ts`, espejo de las fórmulas de `arrange_all` del backend) — el layout no salta. Las tablas conservan una franja PK proporcional y las vistas su *hatch* con borde punteado: no se pierde información visual.
+- **Edges intactos — handles fantasma**: la caja compacta emite *handles* con los MISMOS ids que las filas del modo detallado (más `__hdr_src`/`__hdr_tgt`), y el cruce de umbral es un patch atómico: los wires nunca se re-arman ni pierden ancla, cero frames sin edges.
+- **`lod` default `true`** en `useModelerStore`: la primera pintura de un canvas grande ya sale compacta; `onInit` + doble rAF la corrige en canvases chicos.
+- **`lodLock` en el export**: el export SVG (`Toolbar`) fuerza detalle completo siempre — activa el candado, apaga el LOD, captura con `toSvg` y restaura al terminar.
+
+El diagnóstico completo (por qué NO era Lakebase ni el backend) y la calibración están en [consideraciones-tecnicas.md](consideraciones-tecnicas.md).
 
 ---
 
@@ -541,13 +588,17 @@ Se abre desde el botón "Help" del `TopNav` y se cierra con `Escape` o clic en e
 
 Para completar el mapa funcional:
 
-- **Data Standards** (`features/standards`): `StandardsScreen` con sub-tabs *Overview / Glossary / Parent Domains / UDP*. El glosario, los Parent Domains y las definiciones UDP se versionan **independientemente** del canvas (snapshot + `apply` + `rollback` por `seq`). Ver requiere `model.view`; editar requiere `standards.edit`. El servicio (`standards.service.ts`) expone `getSnapshot`, `getVersions`, `applyStandards`, `rollbackStandards`, `getUdpDefs`.
+- **Data Standards** (`features/standards`): `StandardsScreen` con cinco sub-tabs — *Overview / Glossary / Parent Domains / UDP / DDL Export rules*. El glosario, los Parent Domains, las definiciones UDP y las reglas DDL se versionan **independientemente** del canvas, todos en el mismo stream (`standards_versions`, snapshot + `apply` + `rollback` por `seq`). Ver requiere `model.view`; editar requiere `standards.edit`. El servicio (`standards.service.ts`) expone `getSnapshot`, `getVersions`, `applyStandards`, `rollbackStandards`, `getUdpDefs`.
+  - La 5.ª pestaña **"DDL Export rules"** (2026-07-20, doc 30 de plan-implementacion/) autora reglas que transforman el texto SQL del Export DDL según los valores de UDP del modelo (mask, tags, generación de tabla `_rej` y vista técnica), sin tocar el modelo ni la data. Componentes: `DdlRulesTab` (overview → catálogo → editor), `DdlRuleCatalog`, `DdlRuleEditor` (split Form ↔ YAML con 5 checks de validación y bloque Test/Impact), `DdlRuleTemplates`, `DdlLookupsEditor`. El servicio `ddlRules.service.ts` (con la dependencia `yaml 2.9.0` para el round-trip) consume los endpoints read-only `/api/ddl-rules/*` y el `POST /api/ddl-rules/render` (permiso `export`); las mutaciones van SOLO por `POST /api/standards/apply` extendido.
 - **Admin** (`features/admin`): `AdminScreen` con sidebar de roles + tabla de usuarios + `PermissionMatrix` editable en borrador (nada se persiste hasta Guardar). Todo bajo `admin.manage`. El servicio cubre CRUD de usuarios/roles, catálogo de permisos y auditoría (`getAudit`).
-- **Governance** (`features/governance`): hoy provee sobre todo los servicios `changeset.service` (cabecera del changeset, `recordChange`, `effective`, `submit`/`approve`/`reject`) y `governance.service` (el choke-point de escrituras). La `GovernanceScreen` quedó parkeada fuera del rail; la revisión real vive en `ReviewScreen`.
-- **DDL** (`features/ddl`): `genDDL`/`genViewDDL` generan `CREATE TABLE`/`CREATE VIEW` con cláusula de partición según el engine (Databricks SQL, PostgreSQL, MySQL, SQL Server), expuestos por `ExportDdlModal`.
+- **Governance** (`features/governance`): hoy provee sobre todo los servicios `changeset.service` (cabecera del changeset, `recordChange`, `effective`, `submit`/`approve`/`reject`) y `governance.service` (el choke-point de escrituras). La `GovernanceScreen` — con su `ApprovalInbox` — es **legacy**: quedó parkeada fuera del rail (`/governance` sin entrada en el `TopNav`), pendiente de retiro; la revisión real vive en `ReviewScreen`.
+- **DDL** (`features/ddl`): `genDDL`/`genViewDDL` generan `CREATE TABLE`/`CREATE VIEW` con cláusula de partición según el engine (Databricks SQL, PostgreSQL, MySQL, SQL Server), expuestos por `ExportDdlModal`; `rulesBridge.ts` conecta con las DDL Export rules — el modal genera el DDL base y lo manda a `POST /api/ddl-rules/render` con las reglas marcadas (sin reglas seleccionadas, el export es byte-identical al flujo previo).
 - **Auth** (`features/auth`): `LoginScreen`, los guards y `auth.service` (`login`/`logout`/`fetchMe`).
 
-El flujo de gobernanza (crear draft → editar en canvas → enviar a revisión → aprobar/rechazar/retirar/reabrir) se maneja en `ReviewScreen`, que consume `versioning.service` (`listVersions`, `getChangeset`, `getDiff`, `review`, `withdraw`, `reopen`, `addComment`) y muestra el *diff* paginado por colección con detección de conflictos contra producción.
+El flujo de gobernanza (crear draft → editar en canvas → enviar a revisión → aprobar/rechazar/retirar/reabrir) se maneja en `ReviewScreen`, que consume `versioning.service` (`listVersions`, `getChangeset`, `getDiff`, `getDiffDetails`, `review`, `withdraw`, `reopen`, `addComment`) con detección de conflictos contra producción. Desde 2026-07-24 (doc 31 de plan-implementacion/) la presentación de cambios vive en `src/screens/review/`:
+
+- **`ChangesSummary`**: card de resumen del request — chips de proyectos y modelos afectados + matriz de conteos Created/Modified/Deleted (verde/ámbar/rojo) por tipo de entidad (Tables, Columns, Views, Relationships, Schemas, Projects, Folders, Canvases; solo filas con conteo > 0). Todo derivado del `GET /diff` ya cargado (`summarizeDiff()`), cero backend nuevo.
+- **`ChangesDetailModal`**: popup master-detail con el árbol jerárquico tintado por verbo (`DiffTree`), sección propia de **Relationships** (antes invisibles en modo jerárquico) y panel de diff de campos ANTES→DESPUÉS bajo demanda vía el endpoint read-only `POST /api/changesets/{id}/diff/details`, con UDP, dominios y tablas resueltos a NOMBRE (no ids).
 
 ---
 
@@ -575,7 +626,7 @@ sequenceDiagram
   Mod->>Gov: updateColumn(col)
   Gov->>Gov: rec() valida openMode + activeId
   Gov->>Http: PUT /api/changesets/{id}/changes
-  Http->>API: fetch (Bearer + X-Dev-User)
+  Http->>API: fetch (X-Session-Token + X-Dev-User)
   API-->>Http: { success, data }
   Http-->>Gov: data (o ApiError)
   Gov-->>Mod: ok
@@ -589,46 +640,41 @@ sequenceDiagram
 
 ### 11.1 Dónde corre
 
-El frontend es un **build estático de Vite** (`npm run build` → `tsc --noEmit && vite build` → carpeta `dist/`). Ese bundle estático se sirve como un sitio web; hay dos destinos previstos:
+En producción el frontend es una **Databricks App** (`frnt-data-model-hub`). El `config.command` del bundle es `npm run start`: el hook `prestart` construye (`npm run build` = `tsc --noEmit && vite build` → carpeta `dist/`) y `start` levanta **`node server.mjs`** (§3.1), que sirve el bundle estático y proxya `/api` al backend con el token M2M del service principal. Al usar `BrowserRouter` (rutas limpias sin `#`), es `server.mjs` quien hace el *fallback* de cualquier ruta no encontrada a `index.html`, para que el enrutado del lado del cliente funcione al recargar en `/model`, `/reporting`, etc. (Cualquier otro host estático necesitaría replicar ese fallback y un proxy equivalente.)
 
-- **Azure App Service**: sirviendo la carpeta `dist/` como sitio estático.
-- **Databricks Apps**: como una app que publica los estáticos (la app front separada del backend FastAPI).
+Arquitectura de **un solo origen** (desde 2026-07-31, doc 36 de plan-implementacion/): el navegador solo habla con el front; el cruce al backend lo hace `server.mjs` servidor-a-servidor. En desarrollo, el dev server de Vite (`:3000`) reenvía `/api` al FastAPI (`:8000`) vía proxy — mismo contrato de rutas relativas. La simulación local de producción es `BACKEND_API_URL=http://localhost:8000 node server.mjs` (sin credenciales de SP, el proxy va sin Bearer).
 
-En ambos casos, al usar `BrowserRouter` (rutas limpias sin `#`), el servidor debe hacer *fallback* de cualquier ruta no encontrada a `index.html` para que el enrutado del lado del cliente funcione al recargar en `/model`, `/reporting`, etc.
-
-Arquitectura de dos orígenes: el **front** y el **backend FastAPI** viven en orígenes distintos. En desarrollo, el dev server de Vite (`:3000`) reenvía `/api` al FastAPI (`:8000`) vía proxy; en producción, el front apunta al backend con `VITE_API_URL`.
+La suite del repo, verificada 2026-07-31: `npx tsc --noEmit` limpio + `npx vitest run` = **166 tests en 24 archivos** (23 `*.test.ts` bajo `src/` + los 12 tests de `server.test.mjs`).
 
 ### 11.2 Variables de entorno
 
-La única variable que el código consume es `VITE_API_URL` (inyectada en *build-time* por Vite; `import.meta.env.VITE_API_URL`):
+Desde 2026-07-31 la URL del backend es una variable de **runtime** que consume `server.mjs`; ya no se inlinea nada en el build:
 
-| Archivo | Valor | Significado |
-|---------|-------|-------------|
-| `.env` (dev) | `VITE_API_URL=` (vacío) | Mismo origen: el proxy de Vite reenvía `/api` → `:8000`. |
-| Producción | `VITE_API_URL=https://<backend>...` | URL absoluta del backend (Databricks App / App Service). |
+| Variable | Ámbito | Significado |
+|----------|--------|-------------|
+| `BACKEND_API_URL` | **Runtime** (env de la app; `databricks.yml` → variable `backend_api_url` ← GitHub Variable `BACKEND_API_URL`) | Destino del proxy `/api` de `server.mjs`. Cambiarla no exige tocar el bundle JS: el navegador siempre llama rutas relativas `/api`. |
+| `VITE_API_URL` | **Solo local** (build-time, `import.meta.env`) | En dev va vacía (`.env`) — el proxy de Vite reenvía `/api` → `:8000`. Sirve para apuntar el dev local a otro backend. **NO debe definirse en Databricks Apps**: reactivaría el cruce directo navegador→backend y el doble SSO. |
 
-Todos los servicios anteponen `const API_BASE = import.meta.env.VITE_API_URL ?? ''` a sus rutas `/api/...`, de modo que con `VITE_API_URL` vacío las llamadas son relativas (ideal para dev con proxy o para despliegues donde front y back comparten dominio).
-
-**Nota (resuelto 2026-07-19, homologación)**: la lectura de env está centralizada en `src/services/apiBase.ts`. En dev `VITE_API_URL` va vacía (proxy de Vite); en producción la define el bundle (`databricks.yml` → variable `backend_api_url`) como env del app y `vite build` la inlinea. `.env.production` y la herencia `NEXT_PUBLIC_API_URL` fueron eliminados.
-
-Como `VITE_API_URL` se inlinea en el bundle al construir, no es secreto (es una URL pública) y cambiarla implica reconstruir.
+Todos los servicios anteponen `API_BASE` (centralizado en `src/services/apiBase.ts`: `import.meta.env.VITE_API_URL ?? ''`) a sus rutas `/api/...`. Con `VITE_API_URL` sin definir, `API_BASE` queda vacío y **todas las llamadas son relativas `/api`** — que es exactamente el estado de producción: mismo origen, atendido por `server.mjs`. `.env.production` y la herencia `NEXT_PUBLIC_API_URL` fueron eliminados en la homologación de 2026-07-19.
 
 ### 11.3 Consideraciones de base de datos
 
-El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Azure Cosmos DB con la API de Mongo**. Lo relevante para el front es el contrato y sus implicancias de escala:
+El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Databricks Lakebase Postgres** (adaptador JSONB motor-like; Azure Cosmos DB con API de Mongo queda como fallback legacy vía `DB_BACKEND=cosmos`). Lo relevante para el front es el contrato y sus implicancias de escala:
 
 - **Envelope uniforme** `{ success, data, error }` en todo `/api/*`, desempaquetado por `http.ts`. Los `HTTPException` de FastAPI (`{ detail }`) también se propagan legibles.
 - **Escala**: el modelo puede tener decenas de miles de tablas y cientos de miles de columnas. Por eso el front nunca baja colecciones completas: usa slices server-side (`?tableId=`, `?ids=`, `?q=`, `?limit=`), armado del diagrama en una sola request, y paginación por **keyset/cursor** en el reporting.
-- **Changesets**: los cambios de una versión viven en una colección `changeset_changes` (un documento por cambio, para no chocar con el límite de 2 MB por documento de Cosmos) y nunca viajan crudos al cliente; se consumen vía `/effective` y `/diff`.
-- **Sesión**: el token JWT se guarda en `localStorage` (`dmh.token`) y viaja como `Authorization: Bearer`; en modo local el actor simulado viaja como `X-Dev-User`. Un `401` limpia el token y redirige a `/login`.
+- **Changesets**: los cambios de una versión viven en una colección `changeset_changes` (un documento por cambio — patrón nacido del límite de 2 MB por documento de Cosmos y conservado sobre Lakebase) y nunca viajan crudos al cliente; se consumen vía `/effective` y `/diff`.
+- **Sesión**: el token JWT se guarda en `localStorage` (`dmh.token`) y viaja como `X-Session-Token` (§4.7); en modo local el actor simulado viaja como `X-Dev-User`. Un `401` limpia el token y redirige a `/login`.
 
 En resumen, el front es un cliente delgado y consciente de la escala: delega toda la lógica de persistencia, versionado y consulta al backend, y se concentra en el modelado visual, la gobernanza y el reporting sobre un contrato REST estable.
 
 ---
 
 Rutas de referencia (absolutas) de los archivos clave descritos:
+- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/server.mjs` y `server.test.mjs`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/App.tsx`
-- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/http.ts`
-- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/store/` (`useAuthStore`, `useSessionStore`, `useChangesetStore`, `useIdentityStore`, `useModelerStore`, `sessionChangesetBridge`)
-- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/modeler/components/ModelerCanvas.tsx`, `.../TableNode.tsx`, `.../CrowFootEdge.tsx`, `.../lib/elkLayout.ts`
+- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/http.ts` y `.../services/apiBase.ts`
+- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/store/` (`useAuthStore`, `useSessionStore`, `useChangesetStore`, `useIdentityStore`, `useModelerStore`, `sessionChangesetBridge`, `resetAppState`)
+- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/modeler/components/ModelerCanvas.tsx`, `.../TableNode.tsx`, `.../CrowFootEdge.tsx`, `.../lib/elkLayout.ts`, `.../lib/lodSize.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/reporting/query.service.ts` y `.../components/ReportDesigner.tsx`
+- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/screens/review/` (`ChangesSummary`, `ChangesDetailModal`, `DiffTree`)

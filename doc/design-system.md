@@ -2,7 +2,7 @@
 
 > Sistema de diseño del frontend de **Data Model Hub (DMH)**, la aplicación web de modelado y gobierno de datos estilo Erwin. Documento de referencia para desarrolladores y stakeholders técnicos.
 >
-> Fuente de verdad del código: `src/styles/` (tokens y hojas por feature), `src/components/ui/` (primitivos reutilizables) y `src/features/admin/components/helpers.ts` (paleta `C` para estilos inline). Versión de tokens: **DMH-Erwin v20260625-2**.
+> Fuente de verdad del código: `src/styles/` (tokens y hojas por feature), `src/components/ui/` (primitivos reutilizables) y `src/features/admin/components/helpers.ts` (paleta `C` para estilos inline). Versión de tokens: **DMH-Erwin v20260625-2**. Actualizado: **2026-07-31**.
 
 El frontend está construido con **React 19 + Vite + TypeScript**. Todo el diseño es **light-only sobre una identidad navy/blue/green**: no existe modo oscuro y no está previsto. Los estilos son **globales** (no hay CSS Modules): se cargan por cascada desde `src/app/globals.css`.
 
@@ -205,7 +205,7 @@ Todas las sombras usan tinte navy (`rgba(16,27,48,…)`), nunca negro puro.
 
 ## 4. Tipografía
 
-Dos familias, **self-hosted** vía `@fontsource-variable` (importadas en `main.tsx`, sin CDN):
+Dos familias, **self-hosted** vía `@fontsource-variable` — `@fontsource-variable/geist 5.2.9` y `@fontsource-variable/geist-mono 5.2.8`, pineadas exactas — cuyos `.woff2` importa `src/main.tsx` (sin CDN):
 
 | Familia | Token | Uso |
 |---|---|---|
@@ -224,6 +224,25 @@ Definición (`tokens.css` + `globals.css`):
 
 `base.css` fija `font-family: var(--ui)` en `body` con `antialiased` y `optimizeLegibility`.
 
+### Ligaduras de Geist Mono: la feature `liga` va APAGADA
+
+Geist Mono trae sus ligaduras de código en la feature GSUB **`liga`** (verificado en el GSUB del `.woff2`: `less+greater → less_greater.liga`): el dígrafo `<>` se dibuja como un solo glifo traslapado. En esta app eso es indeseable — se muestran identificadores y DDL, y en tipos como `STRUCT<...>`/`ARRAY<>`/`MAP<>` el `<>` debe verse como dos caracteres. Por eso `base.css` apaga todas las ligaduras en `body` con el override de más bajo nivel (`font-feature-settings` le gana a `text-rendering: optimizeLegibility`; `liga` viene ON por defecto y `no-contextual` no la apaga — eso es `calt`, que esta fuente ni tiene):
+
+```css
+body {
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'clig' 0, 'dlig' 0, 'calt' 0;
+}
+/* Los form controls NO heredan los font-* del body (el UA stylesheet los
+   resetea con el shorthand `font`); sin esta re-herencia los botones
+   STRUCT<>/ARRAY<>/MAP<> seguían ligando. */
+button, input, textarea, select {
+  font-family: inherit;
+  font-variant-ligatures: inherit;
+  font-feature-settings: inherit;
+}
+```
+
 ### Escala tipográfica (clases `rd-` en `ui.css`)
 
 | Clase | Tamaño | Peso | Notas |
@@ -241,7 +260,7 @@ Ejemplo:
 ```html
 <div class="rd-eyebrow">Governance</div>
 <h1 class="rd-h1">Model requests</h1>
-<p class="rd-body">Revisá los cambios propuestos antes de publicarlos.</p>
+<p class="rd-body">Review the proposed changes before publishing.</p>
 <code class="rd-mono">customer_id BIGINT</code>
 ```
 
@@ -249,7 +268,7 @@ Ejemplo:
 
 ## 5. Convenciones de estilos
 
-Conviven **tres mecanismos**. Elegí según el contexto:
+Conviven **cuatro mecanismos**; el criterio de elección:
 
 ```mermaid
 flowchart TD
@@ -295,7 +314,30 @@ statusMeta('active')  // { label: 'Activo',   color: C.green,  bg: C.greenBg }
 statusMeta('disabled')// { label: 'Inactivo', color: C.red,    bg: C.redBg   }
 ```
 
-> **Criterio:** para pantallas nuevas preferí un `.css` por feature con tokens de `tokens.css`. El inline con `C` es el patrón del módulo Admin y solo se replica ahí.
+> **Criterio:** para pantallas nuevas se prefiere un `.css` por feature con tokens de `tokens.css`. El inline con `C` es el patrón del módulo Admin y solo se replica ahí.
+
+### Vocabulario visual del canvas (`modeler.css`)
+
+Los nodos del lienzo (prefijo `.wk-`) codifican el tipo de objeto por textura, no solo por color:
+
+- **Tabla** (`.wk-node`): card blanco con header navy; las filas PK van agrupadas arriba sobre un wash azulado (`.wk-node-pk`, fondo `--blue-soft`).
+- **Vista** (`.wk-vnode`): el mismo card pero "medio plomo" — header gris pizarra `#5D6675`, **borde punteado** envolvente (`2px dashed #C5CCD8`) y cuerpo `#EDEFF4` con **hatch diagonal a 45°** (`repeating-linear-gradient` de `rgba(90,102,117,.11)`). Grayscale a propósito: se distingue de las tablas por textura/borde, no por color de acento.
+
+#### Modo LOD (zoom semántico)
+
+Para canvases gigantes (el caso real que lo motivó: "Analytics", 392 nodos y ~99 mil filas de columna/source), con **zoom bajo el umbral** cada nodo se pinta como **caja compacta** `.wk-lod`: solo el header con `schema.nombre` + conteo de filas, sin pintar las filas (que a ese zoom miden menos de 1 px). Reglas del modo:
+
+- **Mismo tamaño que el nodo detallado**: `src/features/modeler/lib/lodSize.ts` replica las métricas reales de `.wk-node`/`.wk-vnode` (ancho `clamp(chars·8 + 72, 240, 880)`, alto `32 + filas·28` — las mismas fórmulas del `arrange_all` del backend), así el layout no salta al cruzar el umbral.
+- **Fidelidad de lejos**: las tablas conservan la **franja PK azulada proporcional** (`.wk-node-pk`, alto = filas PK · 28) y las vistas conservan el hatch y el borde punteado.
+- **Histéresis**: entra en compacto con zoom < `LOD_ENTER = 0.10` y sale recién con zoom > `LOD_EXIT = 0.20` (banda muerta anti-parpadeo; constantes en `lodSize.ts`).
+- **Edges intactos**: la caja compacta deja handles fantasma con los **mismos ids** que las filas del modo detallado — los wires nunca se re-arman ni pierden ancla al cruzar el umbral.
+- **Export SVG siempre detallado**: el candado `lodLock` del store fuerza detalle completo durante la captura y lo restaura al terminar.
+
+En CSS el modo es liviano a propósito: `.wk-lod` en `modeler.css` (flex column + `contain: layout paint`; `.wk-lod-body` estira el cuerpo).
+
+#### Sidebars redimensionables
+
+El grid del workspace se parametriza con dos variables CSS: `--expl-w` (columna de explorers a la izquierda, default `264px`) y `--props-w` (panel Properties, default `min(472px, 38vw)`). `WorkspaceScreen` las setea inline al arrastrar el divisor y persiste los anchos en `localStorage` (`dmh:explWidth` / `dmh:propsWidth`).
 
 ---
 
@@ -315,7 +357,7 @@ flowchart TD
 
 ### 6.1 lucide-react
 
-Librería principal (`lucide-react ^1.21.0`). Se importa cada ícono por nombre y se pasa como componente. El `Button` y `Dialog` reciben el **componente** (tipo `LucideIcon`), no un string:
+Librería principal (`lucide-react 1.21.0`, pineada exacta). Se importa cada ícono por nombre y se pasa como componente. El `Button` y `Dialog` reciben el **componente** (tipo `LucideIcon`), no un string:
 
 ```tsx
 import { Search, Plus, ArrowUpToLine } from 'lucide-react';
@@ -340,7 +382,7 @@ Props: `name` (obligatorio), `size` (default 16), `sw` (stroke width, default 2)
 
 Nombres disponibles (extracto): `plus, search, gear, link, cursor, table, grid, layers, database, sparkles, code, upload, trash, edit, chevR, chevD, chevL, x, key, eye, filter, arrange, fit, zoomIn, zoomOut, merge, check, dots, download, hand, folder, columns, list, logout, book, users, activity, save, undo, redo, share, info, panelRight, move, magnet, bolt, send, paperclip, refresh, warning, file, shield, tag`.
 
-> **Regla:** ambos sets comparten estética (trazo redondeado, `currentColor`). Usá **lucide-react** por defecto; usá **Icon.tsx** cuando la API por nombre te convenga (Modal/ConfirmDialog/TagEditor) o necesites un glifo del set propio.
+> **Regla:** ambos sets comparten estética (trazo redondeado, `currentColor`). **lucide-react** por defecto; **Icon.tsx** cuando convenga la API por nombre (Modal/ConfirmDialog/TagEditor) o haga falta un glifo del set propio.
 
 ---
 
@@ -413,13 +455,13 @@ import { Button } from '@/components/ui';
 import { ArrowUpToLine } from 'lucide-react';
 
 // Ejemplo real (PublishModal.tsx):
-<Button variant="secondary" onClick={onClose}>Cancelar</Button>
+<Button variant="secondary" onClick={onClose}>Cancel</Button>
 <Button variant="success" icon={ArrowUpToLine} onClick={handleSend} disabled={!canSend}>
-  Enviar a revisión
+  Send for Approval
 </Button>
 
 // Compacto + ghost:
-<Button variant="ghost" size="sm" icon={Search}>Buscar</Button>
+<Button variant="ghost" size="sm" icon={Search}>Search</Button>
 ```
 
 ### 7.2 Avatar
@@ -461,16 +503,16 @@ El modo `canvas` aplica `rgba(16,27,48,.42)` + `blur(2px)` **solo** en la regió
 
 ```tsx
 import { Dialog, Button } from '@/components/ui';
-import { FileCode2 } from 'lucide-react';
+import { FileCode2, Copy } from 'lucide-react';
 
 // Ejemplo real (ExportDdlModal.tsx):
 <Dialog
   open={open}
   title="Export DDL"
-  subtitle={`Genera DDL desde el modelo · ${allTables.length} tablas`}
+  subtitle={`Generate DDL from the model · ${allTables.length} tables`}
   icon={FileCode2}
   onClose={onClose}
-  footer={<Button variant="primary" onClick={handleCopy}>Copiar DDL</Button>}
+  footer={<Button variant="secondary" icon={Copy} onClick={copy}>Copy</Button>}
   width={920}
   backdrop="canvas"
   canvasTop={136}
@@ -547,7 +589,7 @@ import { Modal } from '@/components/ui';
 </Modal>
 ```
 
-> **Cuándo usar cuál:** para pantallas nuevas del DS preferí **`Dialog`** (icono lucide, patrón canvas-blur, tokens nuevos). **`Modal`** sigue vigente para pantallas que ya lo usan y para el set de íconos por nombre.
+> **Cuándo usar cuál:** para pantallas nuevas del DS se prefiere **`Dialog`** (icono lucide, patrón canvas-blur, tokens nuevos). **`Modal`** sigue vigente para pantallas que ya lo usan y para el set de íconos por nombre.
 
 ### 7.7 ConfirmDialog y diálogos imperativos
 
@@ -639,59 +681,62 @@ Para estilar por clase sin componente React:
 | `.dmh-backdrop`, `.dmh-modal.lg`, `.m-head/.m-body/.m-foot` | Modal legacy | ui.css |
 | `.dmh-topnav`, `.dmh-nav-link.is-active`, `.dmh-usermenu` | Barra superior | topnav.css |
 | `.dmh-rail`, `.dmh-pcard`, `.dmh-page` | Shell / cards de proyecto | shell.css |
+| `.dmh-rvs-card`, `.dmh-rvs-table` (`th/td.is-added/.is-edited/.is-deleted`) | Card y matriz de conteos del resumen de cambios | review.css |
+| `.dmh-rvd-row.is-added/.is-edited/.is-deleted` | Fila del árbol de cambios tintada por verbo | review.css |
+| `.wk-node-pk`, `.wk-vnode`, `.wk-lod` | Franja PK / nodo vista / caja LOD del canvas | modeler.css |
+
+### Review: cambios tintados por verbo
+
+Las pantallas de review presentan cada cambio con el mismo código de color verde/ámbar/rojo en dos patrones (`src/styles/review.css`):
+
+- **Matriz de conteos** (card `ChangesSummary`, `.dmh-rvs-table`): columnas **Added / Modified / Deleted** con encabezado y celdas tintados — verde `--green-deep`, ámbar `--amber-deep`, rojo `--red` — con cuadritos `.sq` en el header (`--green` / `--amber` / `#DC4234`), ceros como `—` en `--text-muted-3` y cifras con `font-variant-numeric: tabular-nums`. Solo se pintan las filas de entidad (Tables, Columns, Views, Relationships…) con conteo > 0.
+- **Árbol de cambios** (popup `ChangesDetailModal` + `DiffTree`, `.dmh-rvd-row`): cada fila cambiada lleva fondo suave + **borde izquierdo de 3px** según el verbo — `is-added`: fondo `--green-tint-2`, borde `--green-deep`; `is-edited`: fondo `#FFFAF0`, borde `--amber-deep`; `is-deleted`: fondo `#FDF1EF`, borde `--red` y nombre tachado (`.dmh-rvd-name.strike`). La fila seleccionada agrega `outline` de 2px en `--blue`; los ancestros sin cambio propio van con texto tenue (`--text-muted`, peso 400).
 
 ---
 
 ## 9. Despliegue
 
-El frontend es una SPA de **Vite** (build estático en `dist/`). Corre en **uno de dos entornos**:
-
-| Entorno | Cómo corre | Notas |
-|---|---|---|
-| **Azure App Service** | Servido como sitio estático (o detrás del backend FastAPI). | Objetivo cloud principal. |
-| **Databricks Apps** | Empaquetado junto al backend (dos apps: Next/Vite standalone + FastAPI). Config vía `databricks.yml` y `app.yaml`. | MVP abierto/anónimo; despliegue por bundle. |
+El frontend es una SPA de **Vite**: `npm run build` corre `tsc --noEmit && vite build` y deja el estático en `dist/`. En producción (**Databricks Apps**) la app arranca con `npm run start`: el `prestart` hace ese build y luego **`server.mjs`** — servidor Node propio, cero dependencias — sirve `dist/` (fallback SPA, cache inmutable de `/assets/`) y **proxya `/api` al backend** con un token OAuth M2M del service principal del front. El navegador habla con **un solo origen**; el detalle operativo (bundle, workflow, variables) está en [deployment.md](deployment.md).
 
 ### Variables de entorno
 
-Vite expone al bundle solo variables con prefijo `VITE_`. La única del frontend:
-
-| Variable | Uso | Default |
+| Variable | Cuándo | Uso |
 |---|---|---|
-| `VITE_API_URL` | Base URL del backend FastAPI. Todos los `*.service.ts` hacen `import.meta.env.VITE_API_URL ?? ''`. | `''` (mismo origen → `/api`) |
-
-En **desarrollo**, `vite.config.ts` levanta el front en `:3000` y proxya `/api` al FastAPI en `http://localhost:8000`, así que `VITE_API_URL` puede quedar vacío. En **producción**, si el frontend y el backend comparten origen se deja vacío (rutas relativas `/api/...`); si están en hosts distintos se setea `VITE_API_URL` al host del backend en build time.
+| `VITE_API_URL` | Build-time (prefijo `VITE_`) | Base URL del backend para `API_BASE` (`src/services/apiBase.ts`). En Databricks Apps **no se define**: `API_BASE` queda vacía y todos los `*.service.ts` usan rutas relativas `/api` (mismo origen). Solo sirve en local para apuntar a otro backend. |
+| `BACKEND_API_URL` | Runtime (`server.mjs`) | Destino del proxy `/api`. |
 
 ```bash
 # Desarrollo
-npm run dev            # front :3000, proxy /api -> :8000
+npm run dev            # front :3000, proxy Vite /api -> :8000
 
-# Build de producción (con backend en otro host)
-VITE_API_URL="https://dmh-api.example.com" npm run build
-# genera dist/ para servir en Azure App Service o empaquetar en Databricks Apps
+# Simular producción en local
+npm run build
+BACKEND_API_URL=http://localhost:8000 node server.mjs
 ```
 
-### Base de datos (Azure Cosmos DB · API de Mongo)
+### Base de datos
 
-La persistencia la maneja el backend contra **Azure Cosmos DB con API de Mongo** — el frontend nunca habla con la base directamente, siempre pasa por FastAPI. Consideraciones que impactan al DS/UI:
+La persistencia la maneja el backend FastAPI contra **Databricks Lakebase Postgres** (la base productiva; Azure Cosmos DB con API de Mongo quedó como fallback **legacy** vía `DB_BACKEND=cosmos`). El frontend nunca habla con la base directamente, siempre pasa por FastAPI. Consideraciones que impactan al DS/UI:
 
-- **Cosmos con Mongo API** implica límites de tamaño de documento (~2 MB). Los cambios de un changeset se guardan **solo** vía un `changes_map` (colección `changeset_changes`), no como un blob gigante, lo que evita romper ese límite. La UI de gobierno/review consume esos cambios paginados desde el server.
-- Reporting y catálogo trabajan **server-side** (slices, conteos con `$group`, búsqueda paginada) para escalar a cientos de miles de columnas; el frontend virtualiza grillas y memoiza el canvas. El DS provee para esto la grilla virtualizada del Report Designer y los primitivos de tabla/badge.
+- Los cambios de un changeset se guardan **solo** vía un `changes_map` (colección `changeset_changes`), no como un blob gigante — regla nacida del límite ~2 MB por documento de la era Cosmos y que sigue vigente. La UI de gobierno/review consume esos cambios paginados desde el server.
+- Reporting y catálogo trabajan **server-side** (slices, conteos agregados, búsqueda paginada) para escalar a cientos de miles de columnas; el frontend virtualiza grillas y memoiza el canvas (más el modo LOD del §5). El DS provee para esto la grilla virtualizada del Report Designer y los primitivos de tabla/badge.
 - El invariante de persistencia relevante para cualquier campo nuevo: debe existir en **el tipo TS y en el modelo Pydantic** del backend, o se pierde al recargar (el read-path revalida con `extra="ignore"`).
 
 ```mermaid
 flowchart LR
-    UI["Frontend Vite SPA<br/>(Azure App Service / Databricks Apps)"] -->|"VITE_API_URL + /api"| API["Backend FastAPI"]
-    API -->|"driver Mongo"| DB["Azure Cosmos DB<br/>(API de Mongo)"]
+    B["Navegador"] -->|"un solo origen"| S["server.mjs<br/>(Databricks Apps · sirve dist/)"]
+    S -->|"proxy /api + Bearer M2M"| API["Backend FastAPI"]
+    API -->|"adaptador JSONB"| DB["Databricks Lakebase<br/>Postgres"]
 ```
 
 ---
 
 ## 10. Checklist para colaborar
 
-- Usá **tokens** (`var(--…)`), nunca hex sueltos en CSS. En pantallas con inline, importá la paleta `C` de `helpers.ts`.
-- Preferí los **primitivos `dmh-`** (`Button`, `Badge`, `Avatar`, `Dialog`, `SegmentedControl`) sobre reescribir estilos.
-- Íconos: **lucide-react** por defecto; **Icon.tsx** cuando necesites la API por nombre o un glifo del set propio. Nunca emojis.
+- **Tokens** (`var(--…)`) siempre, nunca hex sueltos en CSS. En pantallas con inline, importar la paleta `C` de `helpers.ts`.
+- Preferir los **primitivos `dmh-`** (`Button`, `Badge`, `Avatar`, `Dialog`, `SegmentedControl`) sobre reescribir estilos.
+- Íconos: **lucide-react** por defecto; **Icon.tsx** cuando haga falta la API por nombre o un glifo del set propio. Nunca emojis.
 - Diálogos nuevos: `Dialog` (con `backdrop="canvas"` cuando el modal vive sobre el lienzo). Confirmaciones: `confirmDialog` / `promptDialog`.
 - Tipografía: `--ui` (Geist) para UI, `--mono` (Geist Mono) para datos/SQL/identificadores.
 - Estilos por feature en `features/<name>/<name>.css` con su `@import` en `globals.css`, respetando el orden de cascada.
-- Light-only, navy: no agregues variantes dark ni colores fuera de la paleta.
+- Light-only, navy: sin variantes dark ni colores fuera de la paleta.

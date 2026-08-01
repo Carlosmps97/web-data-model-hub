@@ -1,8 +1,43 @@
 # Seguridad del Frontend — Data Model Hub
 
-Este documento describe el modelo de seguridad del cliente web (SPA en React + Vite) de Data Model Hub: cómo se maneja el token de sesión, cómo el frontend gatea la experiencia según el rol/permisos del usuario (RBAC), cómo funciona el viewer-lock del canvas, por qué no viajan secretos en el bundle y qué buenas prácticas se aplican.
+> **Actualizado 2026-07-31** — autenticación de producción frente al SSO de Databricks Apps con un solo origen (`server.mjs`, doc 36), token de sesión por `X-Session-Token`, permisos `export` y `rollback`, producción sin `VITE_API_URL` (bundle sin URLs ni secretos) y buenas prácticas del server de producción.
+
+Este documento describe el modelo de seguridad del cliente web (SPA en React + Vite) de Data Model Hub: cómo funciona la autenticación en producción frente al SSO de Databricks Apps (un solo origen), cómo se maneja el token de sesión, cómo el frontend gatea la experiencia según el rol/permisos del usuario (RBAC), cómo funciona el viewer-lock del canvas, por qué no viajan secretos en el bundle y qué buenas prácticas se aplican.
 
 La premisa central y no negociable: **el frontend gatea la experiencia de usuario (UX), pero la AUTORIDAD es siempre el backend.** Todo lo que se describe acá mejora la usabilidad y evita mostrar acciones que el usuario no puede ejecutar, pero ninguna de estas defensas reemplaza la autorización del servidor. Un atacante que edite el JavaScript en su navegador, use la consola o llame la API con `curl` no obtiene ningún privilegio adicional: el backend valida cada request contra el token y la matriz de permisos.
+
+---
+
+## Autenticación en producción: SSO de Databricks Apps + un solo origen
+
+En producción la plataforma corre como **dos Databricks Apps** (`frnt-data-model-hub` y `bknd-data-model-hub`) y cada app vive detrás de su **propio proxy OAuth (muro SSO) en su propio subdominio**. Como `databricksapps.com` está en la **Public Suffix List**, la cookie de sesión del SSO es **por app**: la sesión que el usuario gana al abrir el front no vale para el subdominio del backend. Y un `fetch()` desde el front hacia la app backend **no puede completar el baile SSO** (el redirect cross-origin a Microsoft es imposible dentro de una llamada XHR/fetch): el proxy del backend responde su propio `401` de 2 bytes (`{}`), sin headers CORS, y el navegador lo reporta como "Failed to fetch". Así se manifestó el problema en el workspace corporativo (2026-07-30): cualquier usuario distinto al que desplegó no podía loguearse — el request moría **antes** de llegar a FastAPI. Historia completa en el doc 36 de `plan-implementacion/`.
+
+**El warm-up por redirect (opción A) fracasó y queda inerte.** El primer intento fue `src/services/warmup.ts` (`ensureBackendSession`, invocado por `LoginScreen`): un probe a `GET /api/health` y, si el backend resultaba inalcanzable, UNA navegación top-level a `GET /api/auth/warmup/{next}` (el `next` en el path como base64url) para que el SSO ocurriera solo y rebotara de vuelta. Motivo del fracaso: el proxy de Databricks **no inicia el SSO en navegaciones lanzadas por script desde otro sitio** — el usuario quedaba varado en un `{}`. El código sigue en el repo pero es un no-op con `API_BASE` vacía (la producción actual); solo actúa en local apuntando a un backend remoto.
+
+**Solución definitiva (2026-07-31): el navegador habla con UN SOLO origen.** `server.mjs` — servidor de producción propio del front, cero dependencias (solo módulos `node:*`) — sirve el build (`dist/`) y **proxya `/api/*` al backend servidor-a-servidor**, adjuntando un token OAuth **M2M** del service principal del front (`POST {DATABRICKS_HOST}/oidc/v1/token`, `grant_type=client_credentials`, `scope=all-apis`; el token se cachea hasta su expiración menos 5 minutos, con un solo mint concurrente — clase `TokenCache`). El front deja de definir `VITE_API_URL`: `API_BASE` queda vacío y todas las rutas son relativas (`/api/...`), mismo origen. Para el navegador no hay CORS en juego y el muro SSO del backend lo cruza el server, no el usuario.
+
+Consecuencias de seguridad de este diseño:
+
+- **Las credenciales del service principal (`DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET`) viven SOLO en el proceso del server** (las inyecta Databricks Apps en runtime): jamás llegan al navegador ni al bundle de JavaScript.
+- **El server DESCARTA el header `Authorization` entrante del cliente** (`DROP_HEADERS` en `buildUpstreamHeaders` de `server.mjs`) y pone el suyo: un cliente no puede inyectar su propio Bearer hacia el backend a través del proxy.
+- **El JWT propio de la plataforma viaja en `X-Session-Token`**, no en `Authorization`: en Databricks Apps ese header le pertenece al proxy SSO (lo consume para su propia autenticación y el backend nunca lo recibiría). Ver §1.2.
+- El prerequisito de permisos del proxy (el SP del front necesita `CAN_USE` sobre la app backend) lo re-aplica CI en cada deploy — ver §6.
+
+```mermaid
+sequenceDiagram
+    participant B as Navegador
+    participant F as server.mjs (app front)
+    participant P as Proxy SSO del backend
+    participant BK as FastAPI (backend)
+
+    B->>F: GET / (SSO del usuario: cookie solo de frnt-...)
+    B->>F: /api/... con X-Session-Token
+    F->>F: TokenCache: token M2M del SP (cache o mint)
+    F->>P: request + Authorization Bearer M2M
+    P->>BK: pasa (el SP del front tiene CAN_USE)
+    BK-->>F: valida X-Session-Token + permisos y responde
+    F-->>B: respuesta (streaming)
+```
 
 ---
 
@@ -33,7 +68,7 @@ export const fetchMe = () => apiGet<SessionUser>(`${API_BASE}/api/auth/me`);
 
 El token se persiste en `localStorage` bajo la clave `dmh.token` (constante `TOKEN_KEY` en `src/store/useAuthStore.ts`). El store de auth es la fuente de verdad de la identidad y empuja el token al cliente HTTP mediante `setAuthToken`.
 
-En `src/services/http.ts`, `apiFetch` inyecta el token como header `Authorization: Bearer` en **toda** llamada a la API:
+En `src/services/http.ts`, `apiFetch` inyecta el token como header **`X-Session-Token`** en **toda** llamada a la API:
 
 ```ts
 const init: RequestInit = {
@@ -41,8 +76,8 @@ const init: RequestInit = {
   signal: combined,
   credentials: 'include',
   headers: {
-    ...(_token ? { Authorization: `Bearer ${_token}` } : {}),
-    ...(_devUser ? { 'X-Dev-User': _devUser } : {}),
+    ...(_token ? { 'X-Session-Token': _token } : {}),
+    ...(import.meta.env.DEV && _devUser ? { 'X-Dev-User': _devUser } : {}),
     ...headers,
   },
 };
@@ -50,18 +85,21 @@ const init: RequestInit = {
 
 Notas importantes de este bloque:
 
-- **`Authorization: Bearer <token>`**: es el mecanismo principal de autenticación. El token vive en memoria de módulo (`let _token`) y se setea vía `setAuthToken(t)`.
-- **`credentials: 'include'`**: el frontend (por ejemplo `:3000`/`:5173`) y el backend FastAPI (`:8000`) corren en orígenes distintos. Sin `include`, el navegador no envía ni acepta la cookie de sesión `modeler-auth` en requests cross-origin, lo que rompería silenciosamente toda llamada autenticada. Esto implica que el backend debe tener CORS configurado con el origen exacto del frontend y `allow_credentials=true` (no se puede usar `*` con credenciales).
-- **`X-Dev-User`**: es un "seam" solo para desarrollo local (usuario dev de fallback). El backend prefiere el token; en un despliegue real este header no aporta autoridad.
+- **`X-Session-Token: <token>`**: es el mecanismo de autenticación de la sesión propia. NO se usa `Authorization: Bearer` porque en Databricks Apps ese header le pertenece al proxy SSO de la plataforma: lo consume para su propia autenticación y el backend nunca lo recibe (verificado 2026-07-20: 401 con el Bearer en vuelo). El backend acepta ambos headers (`Authorization` sigue sirviendo para `curl` y desarrollo). El token vive en memoria de módulo (`let _token`) y se setea vía `setAuthToken(t)`.
+- **`credentials: 'include'`**: el caso normal (dev y producción) es MISMO origen — en dev el proxy de Vite reenvía `/api` → `:8000`; en producción `server.mjs` proxya `/api` al backend. `include` se conserva para el escenario local en que `VITE_API_URL` apunta a otro backend (orígenes distintos): sin él, el navegador no enviaría ni aceptaría la cookie de sesión `modeler-auth` en requests cross-origin. Ese escenario exige que el backend tenga CORS con el origen exacto y `allow_credentials=true` (no se puede usar `*` con credenciales).
+- **`X-Dev-User`**: seam solo de desarrollo, gateado por `import.meta.env.DEV` — en producción nunca viaja. No aporta autoridad (el backend con auth requerida lo ignora) y mandarlo en producción hacía además que el preflight CORS lo rechazara ("Disallowed CORS headers" → "Failed to fetch" en el login).
 
 ### 1.3 Ciclo de vida del token
 
 El store `useAuthStore` define `status`: `'loading'` (restaurando al boot), `'anon'` (sin sesión) o `'authed'`.
 
-**Login** (`login`): llama a `auth.login`, guarda el token en `localStorage`, lo empuja al cliente HTTP y espeja el usuario:
+**Login** (`login`): llama a `auth.login`, limpia el estado de trabajo del actor anterior (`resetAppState`), guarda el token en `localStorage`, lo empuja al cliente HTTP y espeja el usuario:
 
 ```ts
 const { token, user } = await auth.login(username.trim(), password);
+// Defensa en profundidad: si la sesión anterior murió sin logout (token
+// expirado, tab reusada), el nuevo actor arranca SIN estado heredado.
+resetAppState();
 localStorage.setItem(TOKEN_KEY, token);
 setAuthToken(token);
 mirror(user);
@@ -77,7 +115,7 @@ restore: async () => {
   setAuthToken(token);
   try {
     const user = await auth.fetchMe();
-    if (!user || !('permissions' in user)) throw new Error('sesión inválida');
+    if (!user || !('permissions' in user)) throw new Error('invalid session');
     mirror(user);
     set({ user, status: 'authed' });
   } catch {
@@ -88,7 +126,7 @@ restore: async () => {
 },
 ```
 
-**Logout** (`logout`): hace el POST de logout en modo best-effort (si falla, igual sigue), borra el token de `localStorage`, lo limpia del cliente y pasa a `anon`.
+**Logout** (`logout`): hace el POST de logout en modo best-effort (si falla, igual sigue), borra el token de `localStorage`, lo limpia del cliente, ejecuta `resetAppState()` y pasa a `anon`. El reset es imprescindible: el logout es navegación SPA (sin reload de página) y los stores de Zustand son singletons de módulo — sin él, el siguiente usuario heredaría la sesión de canvas del anterior.
 
 **Manejo global de 401**: `http.ts` expone un callback `setOnUnauthorized`. Cuando cualquier request responde `401`, `apiFetch` lo dispara:
 
@@ -96,17 +134,20 @@ restore: async () => {
 if (response.status === 401 && _onUnauthorized) _onUnauthorized();
 ```
 
-El store lo registra al cargar el módulo: ante un 401 con sesión `authed`, borra el token y pasa a `anon`; el guard de ruta se encarga de redirigir a `/login`. Así una sesión expirada o revocada en el backend expulsa al usuario sin acoplar `http.ts` al router.
+El store lo registra al cargar el módulo: ante un 401 con sesión `authed`, borra el token, resetea el estado de trabajo y pasa a `anon`; el guard de ruta se encarga de redirigir a `/login`. Así una sesión expirada o revocada en el backend expulsa al usuario sin acoplar `http.ts` al router.
 
 ```ts
 setOnUnauthorized(() => {
   if (useAuthStore.getState().status === 'authed') {
     localStorage.removeItem(TOKEN_KEY);
     setAuthToken('');
+    resetAppState();
     useAuthStore.setState({ status: 'anon', user: null });
   }
 });
 ```
+
+**Aislamiento de estado por usuario — `resetAppState()`** (`src/store/resetAppState.ts`): un único punto que borra TODO el estado de trabajo ligado al usuario, invocado en los tres momentos del ciclo (login — antes de sentar al nuevo actor —, logout y 401 global). Limpia la intención de apertura del canvas (`useSessionStore`: `openMode`, `activeChangesetId`), el workspace completo del modeler (`useModelerStore`: proyectos/árboles cacheados, diagrama, selección, instancia de React Flow, drawings), los changesets (`useChangesetStore`), la identidad cacheada (`useIdentityStore` con `loaded=false` para forzar el re-fetch de `/api/me`), el header dev (`setDevUser('')`) y las preferencias "no volver a preguntar" de `ConfirmDialog` (`confirm-skip:*` en `sessionStorage`). Sin este reset, el siguiente usuario de la misma pestaña heredaba el canvas abierto del anterior y se saltaba el modal "Open model".
 
 ### 1.4 Diagrama — restauración de sesión al boot
 
@@ -125,7 +166,7 @@ sequenceDiagram
         App->>B: redirige a /login
     else con token
         Store->>Store: setAuthToken(token)
-        Store->>API: GET /api/auth/me (Bearer token)
+        Store->>API: GET /api/auth/me (X-Session-Token)
         alt token valido y con permissions
             API-->>Store: SessionUser + permissions
             Store-->>App: status = authed
@@ -144,7 +185,7 @@ sequenceDiagram
 ```mermaid
 flowchart TD
     A[Componente llama service] --> B[apiFetch en http.ts]
-    B --> C[Agrega Authorization Bearer + credentials include]
+    B --> C[Agrega X-Session-Token + credentials include]
     C --> D[fetch al backend]
     D --> E{status de la respuesta}
     E -->|401| F[dispara onUnauthorized]
@@ -168,7 +209,7 @@ Definidos en `auth.service.ts`, 1:1 con la matriz del backend (`PERMISSIONS`):
 ```ts
 export type Permission =
   | 'model.view' | 'model.edit' | 'review.decide' | 'publish'
-  | 'export' | 'standards.edit' | 'admin.manage';
+  | 'rollback' | 'export' | 'standards.edit' | 'admin.manage';
 ```
 
 El `SessionUser` trae `permissions: Record<string, boolean>` (permisos efectivos ya resueltos por el backend según el rol). El helper del store resuelve un permiso puntual:
@@ -176,6 +217,11 @@ El `SessionUser` trae `permissions: Record<string, boolean>` (permisos efectivos
 ```ts
 has: (perm) => Boolean(get().user?.permissions?.[perm]),
 ```
+
+Dos permisos con presencia propia en la UI, además de los gates de ruta:
+
+- **`rollback`** — Restore de versiones: en Home, el botón "Restore" de una versión publicada solo se muestra si `useAuthStore((s) => s.has('rollback'))` (`src/screens/HomeScreen.tsx`). El rollback crea un draft inverso que deshace las versiones posteriores; producción no cambia hasta el approve.
+- **`export`** — exportar DDL/metadata: lo exige el backend en `POST /api/ddl-rules/render` (aplicar las Export rules del Export DDL); figura en la matriz de permisos de Admin con la etiqueta "Exportar DDL / metadata" (`src/features/admin/admin.service.ts`). El modal Export DDL no lo gatea client-side: si el usuario no lo tiene, el render de reglas falla con el 403 del backend — la autoridad, como siempre, es el servidor.
 
 ### 2.2 Capa 1 — `RequireAuth` (autenticación)
 
@@ -246,7 +292,7 @@ flowchart TD
     P -->|no| H[Redirige a Home]
     P -->|si| N[Filtro del nav oculta modulos sin permiso]
     N --> R[Renderiza el modulo]
-    R --> BK[Toda accion llama al backend con Bearer token]
+    R --> BK[Toda accion llama al backend con X-Session-Token]
     BK --> AUTH[Backend re-valida token + permisos: AUTORIDAD real]
     AUTH -->|autorizado| OK[Ejecuta y responde data]
     AUTH -->|no autorizado| DENY[Responde 401/403 - la UX no basto]
@@ -358,17 +404,17 @@ Vite solo inyecta al bundle del cliente las variables de entorno con prefijo `VI
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 ```
 
-`VITE_API_URL` es la base del backend. **No es un secreto**: es simplemente la URL pública del servicio de API. Todos los `*.service.ts` (auth, admin, modeler, governance, standards, reporting, naming, versioning) la usan de la misma forma.
+**En producción `VITE_API_URL` NO se define**: `API_BASE` queda vacío y el front usa rutas relativas (`/api/...`) contra su propio origen, donde `server.mjs` proxya al backend. Definirla en Databricks Apps reactivaría el cruce navegador→backend y el bug del doble SSO (el `databricks.yml` lo advierte explícitamente). La variable queda para desarrollo local: apuntar el front a otro backend (p. ej. probar contra el desplegado). En cualquier caso **no es un secreto** — sería solo la URL pública del servicio de API. Todos los `*.service.ts` (auth, admin, modeler, governance, standards, reporting, naming, versioning) consumen `API_BASE` de la misma forma.
 
 ### 4.2 Archivos de entorno
 
 | Archivo | Contenido | Rol |
 |---------|-----------|-----|
 | `.env` | `VITE_API_URL=` (vacío) | Dev: base vacía = mismo origen; el proxy de Vite reenvía `/api` → `:8000` |
-| variable `backend_api_url` (`databricks.yml`) | URL pública del backend | Build de producción en Databricks Apps (env del app, no es secreto) |
+| variable `backend_api_url` (`databricks.yml`) | URL pública del backend | Producción: llega como env **`BACKEND_API_URL`**, runtime de `server.mjs` (destino del proxy `/api`). **No llega al bundle JS** — no tiene prefijo `VITE_` y el navegador nunca la ve |
 | `.env.example` | Plantilla de referencia | Documenta la variable esperada |
 
-El `.gitignore` ignora todos los `.env*` salvo `.env.example` (plantilla); la URL de producción ya no vive en un `.env` sino en el bundle:
+El `.gitignore` ignora todos los `.env*` salvo `.env.example` (plantilla); la URL de producción ya no vive en un `.env` ni en el bundle JS, sino que llega en runtime como env de la app (variable `backend_api_url` del Asset Bundle):
 
 ```gitignore
 # env files (can opt-in for committing if needed)
@@ -380,9 +426,9 @@ El `.gitignore` ignora todos los `.env*` salvo `.env.example` (plantilla); la UR
 
 ### 4.3 Principio y observación
 
-**Principio**: nada sensible (contraseñas, connection strings de Cosmos, claves de firma de JWT, credenciales de servicio) vive en el frontend. Esos secretos residen únicamente en el backend, que es quien habla con la base de datos y firma/valida los tokens. El navegador solo conoce la URL pública de la API y el token de su propia sesión.
+**Principio**: nada sensible (contraseñas, credenciales de la base de datos, claves de firma de JWT, credenciales de servicio) vive en el bundle JavaScript. Los secretos de datos residen únicamente en el backend, que es quien habla con la base y firma/valida los tokens; las credenciales del service principal del front (`DATABRICKS_CLIENT_ID/SECRET`) viven solo en el proceso de `server.mjs` (runtime, inyectadas por Databricks Apps). El navegador solo conoce su propio origen y el token de su propia sesión.
 
-**Observación de higiene (RESUELTA 2026-07-19)**: la configuración de producción quedó homologada — `VITE_API_URL` llega del bundle (`databricks.yml` → `backend_api_url`) y se inlinea en el build de Vite; `.env.production` fue eliminado y `.env.example` declara `VITE_API_URL` vacía para dev. Nunca hubo secretos en juego — es solo la URL pública.
+**Observación de higiene (actualizada 2026-07-31)**: con el server de producción propio (doc 36), en Databricks Apps ya no se define NINGUNA variable `VITE_*`: el build de Vite no inlinea ninguna URL y `API_BASE` queda vacío. La única env de la app front es `BACKEND_API_URL` (runtime de `server.mjs`, no del bundle JS). El estado previo (RESUELTO 2026-07-19) — `VITE_API_URL` inlineada en el build desde la variable `backend_api_url` — quedó superado; nunca hubo secretos en juego en ninguna de las dos etapas.
 
 ---
 
@@ -393,47 +439,68 @@ El `.gitignore` ignora todos los `.env*` salvo `.env.example` (plantilla); la UR
 | Práctica | Implementación |
 |----------|----------------|
 | Token en un único lugar | `dmh.token` en `localStorage`, empujado a un único cliente HTTP; nunca duplicado en el código |
-| Envío consistente del token | `Authorization: Bearer` centralizado en `apiFetch`; ningún service arma su propio fetch |
-| Expulsión automática ante 401 | Handler global `onUnauthorized` limpia sesión y redirige a `/login` |
+| Envío consistente del token | `X-Session-Token` centralizado en `apiFetch`; ningún service arma su propio fetch |
+| Expulsión automática ante 401 | Handler global `onUnauthorized` limpia sesión, resetea el estado de trabajo y redirige a `/login` |
+| Aislamiento de estado por usuario | `resetAppState()` en login/logout/401 borra la sesión de canvas, los stores y las prefs por-usuario (§1.3) |
 | Validación de la sesión al boot | `restore()` re-consulta `/me` y exige `permissions`; no confía ciegamente en el token guardado |
 | Timeout de red | `DEFAULT_TIMEOUT_MS = 30_000` vía `AbortSignal.timeout`, evita spinners eternos si el backend cuelga |
 | Manejo de errores tipado | `ApiError` con `status`; los consumidores hacen `try/catch` en vez de inspeccionar `success` a mano |
-| Sin secretos en el bundle | Solo `VITE_API_URL` (URL pública) llega al navegador |
+| Sin secretos en el bundle | En producción el bundle no lleva ni siquiera la URL del backend (`API_BASE` vacío, rutas relativas); las credenciales del SP viven solo en el proceso de `server.mjs` (§4) |
 | Defensa en profundidad de UX | RBAC en 3 capas (auth → permiso → nav) + viewer-lock, todo respaldado por autoridad del backend |
 | Escape de contenido | React escapa el contenido renderizado por defecto; no se detectó uso de `dangerouslySetInnerHTML` para datos de usuario en las rutas revisadas |
 
 ### 5.2 Consideraciones y riesgos a tener presentes
 
-- **Token en `localStorage` y XSS**: guardar el token en `localStorage` lo hace accesible desde JavaScript, por lo que una vulnerabilidad de XSS podría filtrarlo. La mitigación principal es evitar el XSS de raíz: React escapa por defecto, no inyectar HTML crudo de fuentes no confiables, y (a nivel de despliegue) servir una **Content-Security-Policy** estricta. Como el backend además acepta la cookie `modeler-auth` (`credentials: 'include'`), una alternativa más robusta a futuro sería mover la sesión a una cookie `HttpOnly` + `Secure` + `SameSite`, que el JavaScript no puede leer; hoy conviven ambos mecanismos (Bearer en `localStorage` y cookie cross-origin).
-- **CORS con credenciales**: al usar `credentials: 'include'`, el backend debe listar el origen exacto del frontend (no `*`) y habilitar `allow_credentials`. Un CORS mal configurado rompe la autenticación o, peor, la abre de más.
-- **CSRF**: la autenticación primaria por header `Authorization: Bearer` no es vulnerable a CSRF (el navegador no adjunta headers custom automáticamente en requests cross-site). El vector CSRF aplicaría solo a la cookie `modeler-auth`; conviene que esa cookie use `SameSite` y que el backend no acepte mutaciones basándose únicamente en la cookie.
+- **Token en `localStorage` y XSS**: guardar el token en `localStorage` lo hace accesible desde JavaScript, por lo que una vulnerabilidad de XSS podría filtrarlo. La mitigación principal es evitar el XSS de raíz: React escapa por defecto, no inyectar HTML crudo de fuentes no confiables, y (a nivel de despliegue) servir una **Content-Security-Policy** estricta. Como el backend además acepta la cookie `modeler-auth` (`credentials: 'include'`), una alternativa más robusta a futuro sería mover la sesión a una cookie `HttpOnly` + `Secure` + `SameSite`, que el JavaScript no puede leer; conviven ambos mecanismos (token en `localStorage` enviado como `X-Session-Token` y cookie).
+- **CORS con credenciales**: en producción el navegador solo habla con su propio origen, así que CORS deja de estar en juego para el usuario final. Aplica en los escenarios cross-origin de desarrollo (front local contra un backend remoto): ahí el backend debe listar el origen exacto del frontend (no `*`) y habilitar `allow_credentials`. Un CORS mal configurado rompe la autenticación o, peor, la abre de más.
+- **CSRF**: la autenticación primaria por header custom `X-Session-Token` no es vulnerable a CSRF (el navegador no adjunta headers custom automáticamente en requests cross-site). El vector CSRF aplicaría solo a la cookie `modeler-auth`; conviene que esa cookie use `SameSite` y que el backend no acepte mutaciones basándose únicamente en la cookie.
 - **El gating de UI es cosmético**: repetido a propósito — permisos, rutas protegidas y viewer-lock son manipulables desde el navegador. La seguridad efectiva la impone el backend en cada endpoint.
-- **Rotación/expiración del token**: el frontend reacciona a `401` cerrando sesión, pero no renueva tokens proactivamente. La expiración y revocación las define el backend; el cliente simplemente re-loguea cuando la sesión deja de ser válida.
-- **HTTPS obligatorio en producción**: dado que el token viaja en cada request, el transporte debe ser siempre TLS. Tanto Azure App Service como Databricks Apps sirven sobre HTTPS por defecto.
+- **Rotación/expiración del token**: el frontend reacciona a `401` cerrando sesión, pero no renueva tokens proactivamente. La expiración y revocación las define el backend; el cliente simplemente re-loguea cuando la sesión deja de ser válida. (El token OAuth M2M del proxy es otra historia: ese sí se renueva solo, en el server — ver §5.3.)
+- **HTTPS obligatorio en producción**: dado que el token viaja en cada request, el transporte debe ser siempre TLS. Databricks Apps sirve sobre HTTPS por defecto.
+
+### 5.3 Buenas prácticas del server de producción (`server.mjs`)
+
+El server propio del front (doc 36) aplica sus propias defensas, verificadas por los 12 tests de `server.test.mjs` (corren bajo vitest junto con la suite del front):
+
+| Práctica | Implementación |
+|----------|----------------|
+| Anti path-traversal | `safeJoin(root, urlPath)` decodifica el URI, normaliza y rechaza con `400` cualquier ruta que escape de `dist/` (incluye variantes codificadas como `%2e%2e`); encoding inválido también es `400` |
+| Métodos restringidos en estáticos | Solo `GET`/`HEAD` sobre archivos estáticos; cualquier otro método → `405` JSON |
+| Cache inmutable solo en `/assets/` | `public, max-age=31536000, immutable` únicamente para los assets con hash en el nombre; `index.html` y el resto → `no-cache` (siempre revalidar: un deploy nuevo no deja clientes pegados a HTML viejo) |
+| Timeout upstream | 120 000 ms por request proxeada; timeout o error de red → `502 {"detail":"Backend unreachable."}` en vez de colgar al navegador |
+| Retry limitado | UN reintento con token M2M fresco ante `401/403` del proxy del backend, SOLO para `GET`/`HEAD` — el body de un `POST` ya se consumió del stream y no puede re-enviarse |
+| `Authorization` del cliente descartado | `buildUpstreamHeaders` elimina los headers hop-by-hop, `host` y el `authorization` entrante; el Bearer hacia el backend lo pone siempre el server (§ de autenticación en producción) |
+| Cadena de proxies y rate limit | El server conserva el `X-Forwarded-For` que trae el proxy de Databricks (la IP del cliente real) o, si no vino, pone la IP del socket; el rate limiter del backend keyea por la **primera IP** de esa cadena — sin ese fix, detrás de los proxies el límite de login (5/min) contaba por IP del proxy y era efectivamente global para todos los usuarios |
+
+El token M2M se cachea hasta su expiración menos 5 minutos y `TokenCache` deduplica mints concurrentes (N usuarios simultáneos = 1 solo mint contra `/oidc/v1/token`); `invalidate()` fuerza el re-mint en el retry.
 
 ---
 
 ## 6. Despliegue (dónde corre y configuración)
 
-El frontend es una SPA estática (build de Vite) que se sirve como archivos y habla con el backend por HTTP. Puede alojarse en dos entornos:
+El frontend corre como la Databricks App **`frnt-data-model-hub`** (workspace corporativo): `npm run start` compila (el `prestart` ejecuta `tsc --noEmit && vite build` → `dist/`) y levanta **`server.mjs`**, que sirve la SPA y proxya `/api` a la app backend **`bknd-data-model-hub`**. El navegador habla con **un solo origen** — nunca con el backend directamente (ver la sección "Autenticación en producción" al inicio). El esquema anterior — SPA de archivos estáticos (hospedable p. ej. en Azure App Service) con `VITE_API_URL` apuntando al backend — quedó descartado en Databricks Apps: reintroduciría el cruce navegador→backend y el doble SSO.
 
-- **Azure App Service**: hospeda los archivos estáticos del build de Vite. El origen del frontend debe estar permitido por el CORS del backend.
-- **Databricks Apps**: el backend FastAPI corre como una Databricks App (por ejemplo, `https://bknd-data-model-hub-...azure.databricksapps.com`, según la variable `backend_api_url` del bundle). El frontend consume esa URL como `VITE_API_URL`.
-
-### 6.1 Variables de entorno (build-time)
+### 6.1 Variables de entorno
 
 | Variable | Ejemplo | Naturaleza |
 |----------|---------|-----------|
-| `VITE_API_URL` | vacío (dev, mismo origen vía proxy Vite) o `https://<backend-host>` (prod) | Pública, se inlinea en el bundle al construir. No es secreto. |
+| `BACKEND_API_URL` | `https://bknd-data-model-hub-<id>.<n>.azure.databricksapps.com` | **Runtime de `server.mjs`** (destino del proxy `/api`). Llega vía la variable `backend_api_url` del Asset Bundle (GitHub Variable `BACKEND_API_URL`). No llega al bundle JS. |
+| `DATABRICKS_HOST` · `DATABRICKS_CLIENT_ID` · `DATABRICKS_CLIENT_SECRET` · `DATABRICKS_APP_PORT` | — | Las inyecta Databricks Apps al proceso del server (mint del token M2M y puerto). Jamás en el navegador. |
+| `VITE_API_URL` | vacío | Solo desarrollo local (apuntar el front a otro backend; build-time, se inlinea). **En producción NO se define** — definirla reactivaría el cruce navegador→backend (§4.1). |
 
-Al ser build-time e inlineada, `VITE_API_URL` debe definirse **antes** de construir el bundle; cambiarla en runtime no tiene efecto (hay que reconstruir). El renombre de los `.env` de `NEXT_PUBLIC_API_URL` a `VITE_API_URL` (sección 4.3) ya está aplicado.
+### 6.2 Permisos de las apps (ACL re-aplicada por el deploy)
 
-### 6.2 Consideraciones de base de datos
+El bloque `permissions:` del `databricks.yml` es **autoritativo**: se re-aplica en cada `bundle deploy` y pisa los grants hechos a mano en la UI. Para el front declara `CAN_MANAGE` al humano dueño (variable `app_admin_user`) y `CAN_USE` al grupo `users`. De ahí se derivan dos reglas operativas:
 
-El frontend **nunca** toca la base de datos directamente. La persistencia vive en **Azure Cosmos DB con API de Mongo**, accedida exclusivamente por el backend. Las implicancias de seguridad para el cliente son:
+- Los usuarios finales necesitan `CAN_USE` sobre **ambas** apps (el muro SSO de cada una lo exige).
+- El **SP del front necesita `CAN_USE` sobre la app backend** para que su token M2M cruce el proxy. Como un grant manual se perdería en el siguiente deploy del backend, ese grant lo re-aplica **CI** tras cada `bundle deploy` de cualquiera de los dos repos: el workflow resuelve el SP de la app front (`databricks apps get` → `service_principal_client_id`) y lo agrega con `databricks api patch /api/2.0/permissions/apps/<backend>` (PATCH agrega sin pisar; idempotente). No queda ningún paso manual por workspace para el proxy.
 
-- Las credenciales y el connection string de Cosmos residen solo en el backend; jamás en el bundle ni en variables `VITE_*`.
-- Toda lectura/escritura de datos pasa por endpoints autenticados y autorizados del backend, que aplican la validación de permisos antes de consultar Cosmos.
+### 6.3 Consideraciones de base de datos
+
+El frontend **nunca** toca la base de datos directamente. La persistencia productiva vive en **Databricks Lakebase Postgres** (workspace corporativo), accedida exclusivamente por el backend; Azure Cosmos DB quedó como fallback legacy (`DB_BACKEND=cosmos`), dormido en el código del backend. Las implicancias de seguridad para el cliente son:
+
+- Las credenciales de la base residen solo en el backend: su service principal acuña un token OAuth rotativo (~1 h) como password de Postgres. El SP del **front** no tiene ningún rol en Postgres — ni la SPA ni `server.mjs` hablan jamás con la base.
+- Toda lectura/escritura de datos pasa por endpoints autenticados y autorizados del backend, que aplican la validación de permisos antes de consultar la base.
 - El aislamiento por proyecto/permiso (qué datos ve cada usuario) lo resuelve el backend según el `SessionUser`; el frontend solo consume lo que la API le devuelve.
 
-En resumen: el navegador conoce una URL pública y su propio token de sesión; los secretos (Cosmos, firma de JWT) y la autoridad (validación de permisos y del estado de los datos) viven íntegramente del lado del servidor.
+En resumen: el navegador conoce su propio origen y el token de su propia sesión; los secretos (credenciales del SP, acceso a Lakebase, firma de JWT) y la autoridad (validación de permisos y del estado de los datos) viven íntegramente del lado del servidor.
