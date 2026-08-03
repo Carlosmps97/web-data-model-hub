@@ -22,8 +22,8 @@ export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: st
     gov.listDomains().then(setDomains).catch(() => pushToast("Couldn't load the domains", 'err'));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Búsqueda server-side con debounce (300ms: el regex-scan en Cosmos cuesta
-  // RUs — no disparar por tecla); `alive` descarta respuestas fuera de orden.
+  // Búsqueda server-side con debounce (300ms: el regex-scan server-side es caro
+  // sobre colecciones grandes — no disparar por tecla); `alive` descarta respuestas fuera de orden.
   useEffect(() => {
     let alive = true;
     const h = setTimeout(() => {

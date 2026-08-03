@@ -497,7 +497,7 @@ El bloque `permissions:` del `databricks.yml` es **autoritativo**: se re-aplica 
 
 ### 6.3 Consideraciones de base de datos
 
-El frontend **nunca** toca la base de datos directamente. La persistencia productiva vive en **Databricks Lakebase Postgres** (workspace corporativo), accedida exclusivamente por el backend; Azure Cosmos DB quedó como fallback legacy (`DB_BACKEND=cosmos`), dormido en el código del backend. Las implicancias de seguridad para el cliente son:
+El frontend **nunca** toca la base de datos directamente. La persistencia productiva vive en **Databricks Lakebase Postgres** (workspace corporativo), accedida exclusivamente por el backend. Las implicancias de seguridad para el cliente son:
 
 - Las credenciales de la base residen solo en el backend: su service principal acuña un token OAuth rotativo (~1 h) como password de Postgres. El SP del **front** no tiene ningún rol en Postgres — ni la SPA ni `server.mjs` hablan jamás con la base.
 - Toda lectura/escritura de datos pasa por endpoints autenticados y autorizados del backend, que aplican la validación de permisos antes de consultar la base.

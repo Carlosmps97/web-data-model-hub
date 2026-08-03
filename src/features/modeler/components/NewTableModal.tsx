@@ -75,8 +75,8 @@ export default function NewTableModal({ onClose, onCreate }: {
   // Búsqueda SERVER-SIDE con debounce: a 15k tablas el modal no baja el
   // catálogo completo — el backend matchea por nombre y devuelve la página.
   // `alive` descarta respuestas fuera de orden (el usuario siguió tipeando).
-  // 300ms: cada búsqueda es un scan por regex en Cosmos (RU proporcional a la
-  // colección) — no disparar por tecla.
+  // 300ms: cada búsqueda es un scan por regex server-side (costo proporcional
+  // a la colección) — no disparar por tecla.
   const PAGE = 50;
   useEffect(() => {
     if (mode !== 'import') return;

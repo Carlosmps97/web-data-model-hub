@@ -1118,9 +1118,9 @@ Otras piezas de configuración del cliente son runtime, no variables de entorno:
 - El token de sesión vive en `localStorage` bajo la clave `dmh.token`.
 - El timeout global de request es una constante del código (`DEFAULT_TIMEOUT_MS = 30_000`).
 
-### 6.3. Base de datos: Databricks Lakebase Postgres (Cosmos DB legacy)
+### 6.3. Base de datos: Databricks Lakebase Postgres
 
-El backend persiste sobre **Databricks Lakebase Postgres** (migración ejecutada 2026-07-19, doc 28): un adaptador JSONB con superficie estilo Motor traduce las operaciones a SQL/JSONB, así que el contrato de la API no cambió con la migración. **Azure Cosmos DB (API de Mongo) quedó como fallback legacy** (`DB_BACKEND=cosmos`, seam de rollback dormido en el código), no como base productiva. Las decisiones de escala del contrato siguen vigentes con cualquiera de los dos motores:
+El backend persiste sobre **Databricks Lakebase Postgres** (migración ejecutada 2026-07-19, doc 28): un adaptador JSONB con superficie estilo Mongo traduce las operaciones a SQL/JSONB, así que el contrato de la API no cambió con la migración. Las decisiones de escala del contrato siguen vigentes:
 
 - **Nada de colecciones completas por request.** Endpoints como `GET /api/catalog/tables?q=&limit=`, `GET /api/changesets/{id}/effective/{collection}?tableId=` o `GET /api/reporting/columns?tableIds=` fuerzan filtros server-side. A escala real (2,108 tablas y ~96k columnas cargadas del modelo DDV) bajar la colección entera al cliente no es viable.
 - **Cambios de modelo como documentos independientes.** Los cambios de un changeset se guardan uno por documento en la colección `changeset_changes` (decisión tomada por el límite de 2 MB por documento de Cosmos, que sigue siendo el diseño en Lakebase). El cliente nunca recibe esos cambios crudos: los ve derivados vía `/effective` y `/diff`.

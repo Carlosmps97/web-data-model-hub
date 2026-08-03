@@ -706,9 +706,9 @@ El frontend es una SPA de Vite (React) que consume la API FastAPI. No se cubren 
 
 El token de sesión se guarda en `localStorage['dmh.token']` (constante `TOKEN_KEY` en `useAuthStore`, y leído directo en `query.service.exportCsv`).
 
-### 10.3 Base de datos: Databricks Lakebase Postgres (Cosmos legacy)
+### 10.3 Base de datos: Databricks Lakebase Postgres
 
-La BD productiva es **Databricks Lakebase Postgres** (2026-07-19), consumida a través de un adaptador JSONB motor-like en el backend — la semántica de "colecciones" y "documentos" de abajo se mantiene tal cual. Azure Cosmos DB (API de Mongo) quedó como **fallback legacy** (`DB_BACKEND=cosmos`), no la base principal. Consideraciones que moldean los flujos del front:
+La BD productiva es **Databricks Lakebase Postgres** (2026-07-19), consumida a través de un adaptador JSONB estilo Mongo en el backend — la semántica de "colecciones" y "documentos" de abajo se mantiene tal cual. Consideraciones que moldean los flujos del front:
 
 - El backend arma el diagrama con queries batched (`$in`) y aplica el overlay del changeset **server-side**: una sola request por apertura, en vez de mover el catálogo completo (a escala real: 2,108 tablas / 96,184 columnas publicadas al 2026-07-26).
 - Los cambios de un changeset viven en la colección `changeset_changes` (un documento por cambio) — diseño nacido del límite de **2MB por documento** de Cosmos y que sigue vigente sobre Lakebase. Nunca viajan crudos al cliente: se consumen vía `/effective` (lectura), `/diff` (review) y `/diff/details` (popup de detalle).

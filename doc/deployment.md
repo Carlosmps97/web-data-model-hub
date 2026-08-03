@@ -6,7 +6,7 @@ Guía de despliegue del **frontend** de Data Model Hub: qué es, cómo se compil
 
 ## 1. Qué es el frontend
 
-El frontend es una **SPA (Single Page Application)** construida con **Vite + React 19 + TypeScript**. Se **compila a archivos estáticos** (HTML, JS, CSS e imágenes) que en producción sirve un servidor Node propio, **`server.mjs`** (sección 5). Toda la lógica de UI corre en el navegador, y los datos se obtienen llamando por HTTP al **backend FastAPI** (que a su vez habla con **Databricks Lakebase Postgres**; Azure Cosmos DB quedó como fallback legacy conmutable por `DB_BACKEND`).
+El frontend es una **SPA (Single Page Application)** construida con **Vite + React 19 + TypeScript**. Se **compila a archivos estáticos** (HTML, JS, CSS e imágenes) que en producción sirve un servidor Node propio, **`server.mjs`** (sección 5). Toda la lógica de UI corre en el navegador, y los datos se obtienen llamando por HTTP al **backend FastAPI** (que a su vez habla con **Databricks Lakebase Postgres**).
 
 > Nota sobre el stack (actualizada 2026-07-31): en producción el front ya **NO se sirve con `vite preview`**. `npm run start` ejecuta **`server.mjs`** — servidor Node puro, **cero dependencias** — que sirve `dist/` **y** proxya `/api` al backend con un token OAuth M2M del service principal del front. El navegador habla con **un solo origen**, lo que resuelve el doble muro SSO de Databricks Apps (cada app tiene su propio muro SSO por subdominio; detalle en la sección 5 e historia completa en el doc 36 de `plan-implementacion/` del backend). El deploy sigue viviendo TODO en `databricks.yml` (homologación 2026-07-19: sección `variables:` + bloque `config:`; los viejos `app.yaml`, `.env.production` y la herencia `NEXT_PUBLIC_API_URL` de Next.js fueron ELIMINADOS — ver la sección 9), ahora parametrizado por GitHub Variables (sección 7).
 
@@ -309,7 +309,7 @@ Recomendaciones de caché al servir `dist/` (las mismas que `server.mjs` ya apli
 
 ## 8. Consideraciones de base de datos (Databricks Lakebase Postgres)
 
-El frontend **no se conecta nunca a la base de datos directamente** y no maneja credenciales. Desde 2026-07-19 la persistencia (proyectos, modelos, dominios, changesets, reporting, etc.) vive en **Databricks Lakebase Postgres** (con Azure Cosmos DB como fallback legacy conmutable — ver `plan-implementacion/28-MIGRACION-LAKEBASE.md` del backend), y solo el **backend FastAPI** habla con ella. El service principal del front tampoco necesita rol alguno en Postgres: nunca la toca.
+El frontend **no se conecta nunca a la base de datos directamente** y no maneja credenciales. Desde 2026-07-19 la persistencia (proyectos, modelos, dominios, changesets, reporting, etc.) vive en **Databricks Lakebase Postgres** (ver `plan-implementacion/28-MIGRACION-LAKEBASE.md` del backend), y solo el **backend FastAPI** habla con ella. El service principal del front tampoco necesita rol alguno en Postgres: nunca la toca.
 
 El único punto de acoplamiento del frontend con los datos es **`BACKEND_API_URL`**: el proxy de `server.mjs` debe apuntar al backend, que es dueño de la conexión a la base. Credenciales, nombres de base y colecciones son responsabilidad del backend.
 
@@ -394,4 +394,4 @@ flowchart TD
 - [ ] El workflow llegó a "App RUNNING" (parámetros → validate → bind → deploy → grant → run).
 - [ ] Con la sesión SSO iniciada en el navegador, `GET /api/health` **a través del origen del front** responde con `db_connected: true` — prueba conjunta del proxy de `server.mjs` y del grant `CAN_USE` del SP del front sobre la app backend.
 - [ ] Fallback SPA y caché correctos: recargar una ruta profunda (p. ej. `/model`) devuelve la app; `/assets/*` sale con `immutable` e `index.html` con `no-cache` (todo lo hace `server.mjs`; verificar solo si se tocó el server).
-- [ ] El backend habla con **Databricks Lakebase Postgres** (Cosmos DB solo como fallback legacy); el frontend no toca la base directamente.
+- [ ] El backend habla con **Databricks Lakebase Postgres**; el frontend no toca la base directamente.

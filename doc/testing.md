@@ -4,7 +4,7 @@ Actualizado al 2026-07-31.
 
 Este documento describe cómo se verifica el frontend (SPA en Vite + React 19) y qué consideraciones de rendimiento y límites conocidos aplican al canvas del modelador y a la grilla del reporting. Está basado en el código real del repositorio `web-data-model-hub`.
 
-El frontend no toca la base de datos: es una SPA que consume el backend FastAPI vía HTTP (capa `src/services/*` y `src/features/*/*.service.ts`). La persistencia (Databricks Lakebase Postgres; Cosmos como fallback) vive del lado del backend.
+El frontend no toca la base de datos: es una SPA que consume el backend FastAPI vía HTTP (capa `src/services/*` y `src/features/*/*.service.ts`). La persistencia (Databricks Lakebase Postgres) vive del lado del backend.
 
 ---
 
@@ -505,7 +505,7 @@ El frontend corre en Databricks Apps con un servidor de producción propio (desd
 
 En desarrollo nada cambió: `npm run dev` usa el proxy de Vite (`/api` → `http://localhost:8000`); la simulación local de producción es `BACKEND_API_URL=http://localhost:8000 node server.mjs` (sin credenciales del service principal, el proxy no adjunta Bearer).
 
-La persistencia es Databricks Lakebase Postgres y la maneja exclusivamente el backend (Cosmos DB queda como fallback legacy, `DB_BACKEND=cosmos`); el frontend no tiene credenciales ni driver de base: toda lectura/escritura pasa por HTTP (`src/services/*` y `src/features/*/*.service.ts`). El keyset y el streaming del CSV del reporting existen precisamente para que grandes volúmenes no se materialicen en el navegador.
+La persistencia es Databricks Lakebase Postgres y la maneja exclusivamente el backend; el frontend no tiene credenciales ni driver de base: toda lectura/escritura pasa por HTTP (`src/services/*` y `src/features/*/*.service.ts`). El keyset y el streaming del CSV del reporting existen precisamente para que grandes volúmenes no se materialicen en el navegador.
 
 ```mermaid
 flowchart LR

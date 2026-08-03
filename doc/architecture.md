@@ -19,7 +19,7 @@ La aplicación se organiza como una *shell* con navegación superior persistente
 
 El diseño rector es **DMH-Erwin v20260625-2**: un sistema visual claro (light-only), de acento *navy* y azul, con tipografía Geist. Todo el estado de sesión, edición y gobernanza vive en el cliente mediante **Zustand**, y todas las escrituras de modelo pasan por un *choke-point* consciente del *changeset* activo (la unidad de versionado del backend).
 
-Un principio transversal es que **el frontend nunca toca la base de datos directamente**: consume exclusivamente endpoints REST `/api/*` con un envelope uniforme `{ success, data, error }`. La persistencia (Databricks Lakebase Postgres; Cosmos como fallback) es responsabilidad del backend.
+Un principio transversal es que **el frontend nunca toca la base de datos directamente**: consume exclusivamente endpoints REST `/api/*` con un envelope uniforme `{ success, data, error }`. La persistencia (Databricks Lakebase Postgres) es responsabilidad del backend.
 
 ---
 
@@ -659,7 +659,7 @@ Todos los servicios anteponen `API_BASE` (centralizado en `src/services/apiBase.
 
 ### 11.3 Consideraciones de base de datos
 
-El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Databricks Lakebase Postgres** (adaptador JSONB motor-like; Azure Cosmos DB con API de Mongo queda como fallback legacy vía `DB_BACKEND=cosmos`). Lo relevante para el front es el contrato y sus implicancias de escala:
+El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Databricks Lakebase Postgres** (adaptador JSONB estilo Mongo). Lo relevante para el front es el contrato y sus implicancias de escala:
 
 - **Envelope uniforme** `{ success, data, error }` en todo `/api/*`, desempaquetado por `http.ts`. Los `HTTPException` de FastAPI (`{ detail }`) también se propagan legibles.
 - **Escala**: el modelo puede tener decenas de miles de tablas y cientos de miles de columnas. Por eso el front nunca baja colecciones completas: usa slices server-side (`?tableId=`, `?ids=`, `?q=`, `?limit=`), armado del diagrama en una sola request, y paginación por **keyset/cursor** en el reporting.

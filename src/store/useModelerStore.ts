@@ -724,7 +724,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     });
     // Persistí SOLO las columnas cuyo ordinal cambió, en TANDAS de 5: mover una
     // columna al tope de una tabla de 30 disparaba 30 PUT simultáneos (ráfaga
-    // que con varios usuarios satura backend/Cosmos). El backend graba cada
+    // que con varios usuarios satura el backend). El backend graba cada
     // cambio con $set atómico por entidad, así que no se pisan entre sí.
     const changed = orderedIds
       .map((id, ordinal) => ({ c: byId.get(id), ordinal }))

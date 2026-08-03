@@ -6,7 +6,7 @@
  * `src/types/model.ts`) with N tables, average M columns each, and a
  * realistic web of FK relationships. The output can be:
  *
- *   1. Pasted into the DBML / SQL importer to seed a real Cosmos
+ *   1. Pasted into the DBML / SQL importer to seed a real backend
  *      model for end-to-end perf testing.
  *   2. Loaded directly into the canvas via the `loadModel` store
  *      action (see `useModelStore.ts`) for in-memory benchmarking

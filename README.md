@@ -1,6 +1,6 @@
 # Data Model Hub — Frontend
 
-Aplicación web (SPA) para **diseñar, documentar, gobernar y reportar modelos de datos** al estilo de herramientas como erwin Data Modeler, pero pensada para la nube y el trabajo colaborativo. Es el **frontend** de la plataforma Data Model Hub: consume una API REST (FastAPI) que persiste en Azure Cosmos DB (API de Mongo) y expone toda la experiencia visual — el canvas entidad-relación, el reporting de metadata, los estándares de datos, la administración/RBAC y una guía de uso in-app.
+Aplicación web (SPA) para **diseñar, documentar, gobernar y reportar modelos de datos** al estilo de herramientas como erwin Data Modeler, pero pensada para la nube y el trabajo colaborativo. Es el **frontend** de la plataforma Data Model Hub: consume una API REST (FastAPI) que persiste en Databricks Lakebase Postgres y expone toda la experiencia visual — el canvas entidad-relación, el reporting de metadata, los estándares de datos, la administración/RBAC y una guía de uso in-app.
 
 Este repositorio contiene **solo la capa de presentación** (Vite + React + TypeScript). El backend vive en un repositorio aparte (`backend-data-model-hub`).
 
@@ -271,7 +271,7 @@ web-data-model-hub/
 ├── tsconfig.json             # TypeScript strict, paths @/*
 ├── public/                   # Íconos y assets estáticos servidos tal cual
 ├── doc/                      # Documentación técnica y de usuario (ver abajo)
-├── scripts/                  # Utilidades node (seed de stress, migración a Cosmos)
+├── scripts/                  # Utilidades node (seed de stress)
 └── src/
     ├── main.tsx              # Bootstrap React (fuentes Geist, estilos globales)
     ├── App.tsx               # Router + shell (TopNav + Outlet), guards, Toaster
@@ -401,7 +401,7 @@ El frontend es una SPA estática (salida de `vite build` en `dist/`). Puede aloj
 - `VITE_API_URL` es *build-time*: se inlinea al compilar, así que hay que definirla antes de `npm run build` para cada entorno. No es secreto (es una URL pública).
 - CORS/cookies: `apiFetch` usa `credentials: 'include'` y `Authorization: Bearer`; si frontend y backend viven en orígenes distintos, el backend debe permitir el origen del frontend y las cabeceras de auth.
 
-**Base de datos:** la persistencia es **Azure Cosmos DB con API de Mongo** (el frontend nunca la toca directamente — siempre pasa por la API `/api/*` del backend). Colecciones relevantes del backend incluyen las de proyectos/tablas/columnas/relaciones publicadas y `changeset_changes` (cambios pendientes por changeset, mutados solo vía `changes_map`). Toda la escritura del modelo fluye por el ciclo de gobernanza descrito arriba.
+**Base de datos:** la persistencia es **Databricks Lakebase Postgres** (el frontend nunca la toca directamente — siempre pasa por la API `/api/*` del backend). Colecciones relevantes del backend incluyen las de proyectos/tablas/columnas/relaciones publicadas y `changeset_changes` (cambios pendientes por changeset, mutados solo vía `changes_map`). Toda la escritura del modelo fluye por el ciclo de gobernanza descrito arriba.
 
 ---
 
