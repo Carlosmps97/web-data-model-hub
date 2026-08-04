@@ -1,4 +1,4 @@
-/* Global element resets + tiny utilities (app-wide). Part of the Aurora system — see doc/feature-architecture.md. */
+/* Global element resets + tiny utilities (app-wide). Part of the Aurora system — see doc/architecture.md. */
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 

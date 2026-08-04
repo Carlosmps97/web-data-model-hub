@@ -19,7 +19,7 @@ El proyecto expone siete scripts de npm. No hay más automatización local que e
 | `npm run dev` | `vite` | Servidor de desarrollo en `:3000` con HMR y proxy `/api` → backend `:8000`. |
 | `npm run build` | `tsc --noEmit && vite build` | Verificación de tipos (sin emitir) y luego bundle de producción a `dist/`. |
 | `npm run preview` | `vite preview` | Sirve el `dist/` ya construido para revisarlo localmente. |
-| `npm run start` | `node server.mjs` | Runtime en Databricks Apps (lo invoca el `config:` del bundle): el servidor de producción propio sirve `dist/` y proxya `/api` al backend; `prestart` corre `npm run build` antes. |
+| `npm run start` | `node server.mjs` | Runtime en Databricks Apps (lo invoca el `command` de `app.yaml`): el servidor de producción propio sirve `dist/` y proxya `/api` al backend; `prestart` corre `npm run build` antes. |
 | `npm test` | `vitest run` | Corre la suite de tests una sola vez (no watch). |
 | `npm run lint` | `eslint .` | Linting de todo el árbol con la config flat de ESLint. |
 
@@ -297,7 +297,7 @@ Resultado medido: el fit view de Analytics pasa de ~450 mil a ~2 mil elementos D
 
 - La virtualización cubre el DOM solo fuera del viewport; el caso extremo (fit view de un canvas gigante, donde todo es "visible") quedó mitigado por el LOD (j). Las aristas (edges) no se virtualizan con la misma agresividad que los nodos; diagramas con muchísimas relaciones densas pueden pesar más que la cuenta de tablas sugeriría.
 - El auto-arrange (ELK) es una operación asíncrona y sincrónicamente costosa en diagramas muy grandes; corre en el hilo principal (elkjs bundled) y puede tardar en canvases de estrés.
-- El export a imagen (PNG vía `html-to-image`) captura el viewport DOM: en canvases enormes hace `fitView` + doble `requestAnimationFrame` antes de capturar para evitar cortes; con `pixelRatio: 2` el archivo puede ser grande.
+- El export a imagen (SVG vía `html-to-image`, `toSvg`) captura el canvas con detalle completo: en canvases enormes hace `fitView` + doble `requestAnimationFrame` antes de capturar para evitar cortes.
 
 ### 2.2 Grilla de reporting virtualizada (keyset + scroll infinito)
 

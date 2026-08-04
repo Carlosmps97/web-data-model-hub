@@ -374,7 +374,7 @@ El tipo `Permission` es 1:1 con el backend:
 ```ts
 type Permission =
   | 'model.view' | 'model.edit' | 'review.decide' | 'publish'
-  | 'export' | 'standards.edit' | 'admin.manage';
+  | 'rollback' | 'export' | 'standards.edit' | 'admin.manage';
 ```
 
 `SessionUser` (de `GET /api/auth/me`) trae `permissions: Record<string, boolean>` ya resueltos por rol, más `projectIds`, `role`, `accessLevel`, etc.
@@ -640,7 +640,7 @@ sequenceDiagram
 
 ### 11.1 Dónde corre
 
-En producción el frontend es una **Databricks App** (`frnt-data-model-hub`). El `config.command` del bundle es `npm run start`: el hook `prestart` construye (`npm run build` = `tsc --noEmit && vite build` → carpeta `dist/`) y `start` levanta **`node server.mjs`** (§3.1), que sirve el bundle estático y proxya `/api` al backend con el token M2M del service principal. Al usar `BrowserRouter` (rutas limpias sin `#`), es `server.mjs` quien hace el *fallback* de cualquier ruta no encontrada a `index.html`, para que el enrutado del lado del cliente funcione al recargar en `/model`, `/reporting`, etc. (Cualquier otro host estático necesitaría replicar ese fallback y un proxy equivalente.)
+En producción el frontend es una **Databricks App** (`frnt-data-model-hub`). El `command` de `app.yaml` es `npm run start`: el hook `prestart` construye (`npm run build` = `tsc --noEmit && vite build` → carpeta `dist/`) y `start` levanta **`node server.mjs`** (§3.1), que sirve el bundle estático y proxya `/api` al backend con el token M2M del service principal. Al usar `BrowserRouter` (rutas limpias sin `#`), es `server.mjs` quien hace el *fallback* de cualquier ruta no encontrada a `index.html`, para que el enrutado del lado del cliente funcione al recargar en `/model`, `/reporting`, etc. (Cualquier otro host estático necesitaría replicar ese fallback y un proxy equivalente.)
 
 Arquitectura de **un solo origen** (desde 2026-07-31, doc 36 de plan-implementacion/): el navegador solo habla con el front; el cruce al backend lo hace `server.mjs` servidor-a-servidor. En desarrollo, el dev server de Vite (`:3000`) reenvía `/api` al FastAPI (`:8000`) vía proxy — mismo contrato de rutas relativas. La simulación local de producción es `BACKEND_API_URL=http://localhost:8000 node server.mjs` (sin credenciales de SP, el proxy va sin Bearer).
 
@@ -659,11 +659,11 @@ Todos los servicios anteponen `API_BASE` (centralizado en `src/services/apiBase.
 
 ### 11.3 Consideraciones de base de datos
 
-El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Databricks Lakebase Postgres** (adaptador JSONB estilo Mongo). Lo relevante para el front es el contrato y sus implicancias de escala:
+El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Databricks Lakebase Postgres** (adaptador JSONB estilo pymongo). Lo relevante para el front es el contrato y sus implicancias de escala:
 
 - **Envelope uniforme** `{ success, data, error }` en todo `/api/*`, desempaquetado por `http.ts`. Los `HTTPException` de FastAPI (`{ detail }`) también se propagan legibles.
 - **Escala**: el modelo puede tener decenas de miles de tablas y cientos de miles de columnas. Por eso el front nunca baja colecciones completas: usa slices server-side (`?tableId=`, `?ids=`, `?q=`, `?limit=`), armado del diagrama en una sola request, y paginación por **keyset/cursor** en el reporting.
-- **Changesets**: los cambios de una versión viven en una colección `changeset_changes` (un documento por cambio — patrón nacido del límite de 2 MB por documento de Cosmos y conservado sobre Lakebase) y nunca viajan crudos al cliente; se consumen vía `/effective` y `/diff`.
+- **Changesets**: los cambios de una versión viven en una colección `changeset_changes` (un documento por cambio — patrón del versionado por changesets, que mantiene los updates chicos y los diffs por slice) y nunca viajan crudos al cliente; se consumen vía `/effective` y `/diff`.
 - **Sesión**: el token JWT se guarda en `localStorage` (`dmh.token`) y viaja como `X-Session-Token` (§4.7); en modo local el actor simulado viaja como `X-Dev-User`. Un `401` limpia el token y redirige a `/login`.
 
 En resumen, el front es un cliente delgado y consciente de la escala: delega toda la lógica de persistencia, versionado y consulta al backend, y se concentra en el modelado visual, la gobernanza y el reporting sobre un contrato REST estable.

@@ -8,7 +8,7 @@ Guía de despliegue del **frontend** de Data Model Hub: qué es, cómo se compil
 
 El frontend es una **SPA (Single Page Application)** construida con **Vite + React 19 + TypeScript**. Se **compila a archivos estáticos** (HTML, JS, CSS e imágenes) que en producción sirve un servidor Node propio, **`server.mjs`** (sección 5). Toda la lógica de UI corre en el navegador, y los datos se obtienen llamando por HTTP al **backend FastAPI** (que a su vez habla con **Databricks Lakebase Postgres**).
 
-> Nota sobre el stack (actualizada 2026-07-31): en producción el front ya **NO se sirve con `vite preview`**. `npm run start` ejecuta **`server.mjs`** — servidor Node puro, **cero dependencias** — que sirve `dist/` **y** proxya `/api` al backend con un token OAuth M2M del service principal del front. El navegador habla con **un solo origen**, lo que resuelve el doble muro SSO de Databricks Apps (cada app tiene su propio muro SSO por subdominio; detalle en la sección 5 e historia completa en el doc 36 de `plan-implementacion/` del backend). El deploy sigue viviendo TODO en `databricks.yml` (homologación 2026-07-19: sección `variables:` + bloque `config:`; los viejos `app.yaml`, `.env.production` y la herencia `NEXT_PUBLIC_API_URL` de Next.js fueron ELIMINADOS — ver la sección 9), ahora parametrizado por GitHub Variables (sección 7).
+> Nota sobre el stack (actualizada 2026-07-31): en producción el front ya **NO se sirve con `vite preview`**. `npm run start` ejecuta **`server.mjs`** — servidor Node puro, **cero dependencias** — que sirve `dist/` **y** proxya `/api` al backend con un token OAuth M2M del service principal del front. El navegador habla con **un solo origen**, lo que resuelve el doble muro SSO de Databricks Apps (cada app tiene su propio muro SSO por subdominio; detalle en la sección 5). El `command` (`npm run start`) y las `env` de runtime (incluida `BACKEND_API_URL`) viven en el **`app.yaml`** de la raíz del repo, que Databricks lee en cada arranque; el bundle `databricks.yml` aporta las `variables:` por entorno y los permisos. El bloque `config:` del bundle **no** se usa: el CLI lo ignora (bug `databricks/cli` #4901). El `.env.production` y la herencia `NEXT_PUBLIC_API_URL` de Next.js fueron eliminados (sección 9). El deploy está parametrizado por GitHub Variables (sección 7).
 
 ### Stack real (extraído de `package.json`)
 
@@ -160,7 +160,7 @@ Dos responsabilidades:
 | `DATABRICKS_APP_PORT` | Databricks Apps | Puerto a escuchar (fallback `PORT`, fallback `3000`; escucha en `0.0.0.0`). |
 | `DATABRICKS_HOST` | Databricks Apps | Workspace contra el que se acuña el token OAuth. |
 | `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` | Databricks Apps | Credenciales del service principal de la app front (inyección automática). |
-| `BACKEND_API_URL` | Bundle (`databricks.yml`, variable `backend_api_url`) | URL pública de la app backend — destino del proxy `/api`. |
+| `BACKEND_API_URL` | `env` de `app.yaml` (override por GitHub Variable homónima) | URL pública de la app backend — destino del proxy `/api`. |
 
 Sin `DATABRICKS_CLIENT_ID`/`SECRET` el proxy no adjunta Bearer; ese es el modo de simulación local:
 
@@ -176,7 +176,7 @@ Requisito one-time por workspace: el service principal del front necesita **`CAN
 
 ## 6. Variables de entorno: `BACKEND_API_URL` y `VITE_API_URL`
 
-En producción la variable operativa es **`BACKEND_API_URL`** — la lee `server.mjs` en **runtime** (no se inlinea en ningún build) y define el destino del proxy `/api`. Llega a la app como variable del bundle `backend_api_url`, que a su vez se alimenta de la GitHub Variable `BACKEND_API_URL` del repo (sección 7). Si cambia la URL del backend basta re-desplegar con la variable nueva; el bundle JS no cambia.
+En producción la variable operativa es **`BACKEND_API_URL`** — la lee `server.mjs` en **runtime** (no se inlinea en ningún build) y define el destino del proxy `/api`. Vive como `env` en el `app.yaml` del repo (con un default por workspace); el paso "Env del app.yaml desde GitHub Variables" del workflow reemplaza ese `value` con la GitHub Variable homónima `BACKEND_API_URL` cuando está definida (sección 7). Si cambia la URL del backend basta re-desplegar con la variable nueva; el bundle JS no cambia.
 
 `VITE_API_URL` sigue existiendo pero con un rol **solo local**: apuntar el front a otro backend durante el desarrollo (p. ej. probar contra el desplegado). **NO debe definirse en Databricks Apps.**
 
@@ -198,13 +198,13 @@ Vite **inlinea** las variables `VITE_*` en el bundle al compilar (`vite build`);
 
 ### Dónde se define cada una
 
-- **`BACKEND_API_URL` (producción)**: variable del bundle `backend_api_url` en `databricks.yml`, alimentada por la GitHub Variable `BACKEND_API_URL` (el workflow la exporta como `BUNDLE_VAR_backend_api_url` solo si trae valor; sin definirla rige el default del repo, que apunta al backend del workspace original). Llega al proceso de la app vía `config.env`.
+- **`BACKEND_API_URL` (producción)**: `env` en el `app.yaml` del repo (con un default commiteado por workspace). El workflow la sobrescribe con la GitHub Variable homónima `BACKEND_API_URL` mediante un paso `yq` ("Env del app.yaml desde GitHub Variables"); sin definirla rige el default commiteado. La lee `server.mjs` en runtime.
 - **`VITE_API_URL` (solo local)**: el `.env` del repo la trae vacía (mismo origen). Para apuntar a otro backend en local: `VITE_API_URL=https://<backend> npm run dev` (o `npm run build`). Ese cruce de origen exige CORS en el backend y, si el backend es una Databricks App, choca con su muro SSO — de ahí que sea un modo de trabajo solo para desarrollo.
 
-Dos advertencias del bundle (comentadas en el propio `databricks.yml`):
+Dos advertencias (comentadas en el propio `app.yaml`):
 
 1. **NO definir `VITE_API_URL` en Apps** — `API_BASE` debe quedar vacío para que el front use rutas relativas `/api` (mismo origen).
-2. **NO setear `NODE_ENV=production`** en el `config:` — rompería el `npm install` de devDependencies, y `vite`/`tsc` se necesitan para el build que corre en el arranque de la app (`prestart`).
+2. **NO setear `NODE_ENV=production`** — rompería el `npm install` de devDependencies, y `vite`/`tsc` se necesitan para el build que corre en el arranque de la app (`prestart`).
 
 ### Topologías
 
@@ -236,9 +236,8 @@ El destino productivo es **Databricks Apps**: la app **`frnt-data-model-hub`** d
 ### 7.1 El bundle (`databricks.yml`)
 
 - **`variables:`** — parámetros por entorno, ninguno se edita en el repo:
-  - `backend_api_url` ← GitHub Variable `BACKEND_API_URL`. Obligatoria en un workspace nuevo: el default apunta al backend del workspace original y el front quedaría hablándole a otro. Es el destino del proxy `/api` de `server.mjs` (**runtime**, ya no se inlinea en el build).
   - `app_admin_user` ← GitHub Variable `APP_ADMIN_USER` (opcional; default `${workspace.current_user.userName}`). Cuando el deploy lo hace un service principal de CI, `mode: production` le da `CAN_MANAGE` solo a ese SP; esta variable devuelve el control (stop/start/logs) al humano en cada deploy.
-- **`resources.apps.frontend`** — `name: frnt-data-model-hub`, `source_code_path: .`, `config.command: ['npm','run','start']` (dispara `prestart` = tsc + `vite build` → `dist/`, luego `node server.mjs`) y `config.env` con **una sola** entrada: `BACKEND_API_URL=${var.backend_api_url}`.
+- **`resources.apps.frontend`** — `name: frnt-data-model-hub`, `source_code_path: .` y el bloque `permissions:`. El `command` (`npm run start`, que dispara `prestart` = tsc + `vite build` → `dist/`, y luego `node server.mjs`) y las `env` (incluida `BACKEND_API_URL`) **no** van en el bundle: viven en `app.yaml` (el bloque `config:` lo ignora el CLI, bug #4901).
 - **`permissions:`** — declarativo y **autoritativo** (se re-aplica en cada deploy; los grants manuales hechos en la UI se pierden): `CAN_MANAGE` → `${var.app_admin_user}`, `CAN_USE` → grupo `users`. Para apps los únicos niveles válidos son exactamente esos dos.
 - **`targets:`** — solo `prod` (`mode: production`, `default: true`). El bundle **NO declara `workspace.host`**: el workspace destino sale de la variable `DATABRICKS_HOST` que usa el CLI (un `host:` hardcodeado ganaría sobre la variable y podía desplegar callado al workspace equivocado).
 
@@ -251,7 +250,7 @@ Corre en cada push a `main` (o a mano por `workflow_dispatch`). Configuración p
 | Variable | `DATABRICKS_HOST` | (la usa el CLI) | falla |
 | Secret | `DATABRICKS_TOKEN` | (la usa el CLI) | falla |
 | Variable | `BUNDLE_TARGET` | (target) | `prod` |
-| Variable | `BACKEND_API_URL` | `backend_api_url` | default del repo (workspace original) |
+| Variable | `BACKEND_API_URL` | `env` de `app.yaml` (paso `yq`) | default commiteado en `app.yaml` |
 | Variable | `APP_ADMIN_USER` | `app_admin_user` | solo el SP que despliega queda con CAN_MANAGE |
 | Variable | `BACKEND_APP_NAME` | (paso del grant) | `bknd-data-model-hub` |
 
@@ -358,9 +357,9 @@ Los artefactos que quedaron de la migración Next.js → Vite ya fueron alineado
 | Archivo | Estado actual |
 |---|---|
 | `.env.example` | `VITE_API_URL=` (vacío en dev; el proxy de Vite cubre `/api`). |
-| `.env.production` | **ELIMINADO** — desde 2026-07-31 la variable operativa de producción es `BACKEND_API_URL` (runtime, variable `backend_api_url` del bundle); `VITE_API_URL` ya no se define en Apps. |
-| `app.yaml` | **ELIMINADO** — el comando y el env viven en el bloque `config:` de `databricks.yml` (CLI ≥ 0.283). |
-| `databricks.yml` | Describe la app con `config.command: ['npm','run','start']` (build + `node server.mjs`), env `BACKEND_API_URL` y permisos declarativos (sección 7). |
+| `.env.production` | **ELIMINADO** — desde 2026-07-31 la variable operativa de producción es `BACKEND_API_URL` (runtime, `env` de `app.yaml`); `VITE_API_URL` ya no se define en Apps. |
+| `app.yaml` | **VIGENTE** — contiene `command` (`npm run start`) + `env` (`BACKEND_API_URL`); es la fuente de runtime que Databricks lee en cada arranque. |
+| `databricks.yml` | Bundle: `variables:` (`app_admin_user`) y `permissions:` declarativos; el `command`/`env` NO van acá (bloque `config:` ignorado por el CLI, bug #4901). Sección 7. |
 | `.gitignore` | Ignora `/dist` (build de Vite) y permite commitear `.env.example`. OJO: `dist/` quedó trackeado de un build viejo → `git rm -r --cached dist` en el próximo commit. |
 
 ---

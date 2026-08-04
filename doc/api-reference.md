@@ -1120,10 +1120,10 @@ Otras piezas de configuración del cliente son runtime, no variables de entorno:
 
 ### 6.3. Base de datos: Databricks Lakebase Postgres
 
-El backend persiste sobre **Databricks Lakebase Postgres** (migración ejecutada 2026-07-19, doc 28): un adaptador JSONB con superficie estilo Mongo traduce las operaciones a SQL/JSONB, así que el contrato de la API no cambió con la migración. Las decisiones de escala del contrato siguen vigentes:
+El backend persiste sobre **Databricks Lakebase Postgres**: un adaptador JSONB con superficie estilo pymongo traduce las operaciones a SQL/JSONB. Las decisiones de escala del contrato siguen vigentes:
 
 - **Nada de colecciones completas por request.** Endpoints como `GET /api/catalog/tables?q=&limit=`, `GET /api/changesets/{id}/effective/{collection}?tableId=` o `GET /api/reporting/columns?tableIds=` fuerzan filtros server-side. A escala real (2,108 tablas y ~96k columnas cargadas del modelo DDV) bajar la colección entera al cliente no es viable.
-- **Cambios de modelo como documentos independientes.** Los cambios de un changeset se guardan uno por documento en la colección `changeset_changes` (decisión tomada por el límite de 2 MB por documento de Cosmos, que sigue siendo el diseño en Lakebase). El cliente nunca recibe esos cambios crudos: los ve derivados vía `/effective` y `/diff`.
+- **Cambios de modelo como documentos independientes.** Los cambios de un changeset se guardan uno por documento en la colección `changeset_changes` (decisión del versionado por changesets: updates chicos y diffs por slice). El cliente nunca recibe esos cambios crudos: los ve derivados vía `/effective` y `/diff`.
 - **Paginación por cursor en reporting.** `runQuery` / `runSql` devuelven `nextCursor` y `hasMore` (keyset/streaming), y el export es un stream (`POST /api/reporting/export`), pensados para no materializar resultados grandes en memoria.
 - **Envelope y errores estables.** El backend responde siempre `{ success, data, error }`, salvo los `HTTPException` de FastAPI que devuelven `{ detail }`; el cliente los reconoce en el path de error para no perder el mensaje real (por ejemplo, un `409` de conflicto de versión). Esto es independiente del motor de base y del entorno de despliegue.
 

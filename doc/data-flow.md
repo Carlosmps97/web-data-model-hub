@@ -270,7 +270,7 @@ const rec = (collection, id, op, payload?) => {
 };
 ```
 
-`recordChange` (`changeset.service.ts`) hace `PUT /api/changesets/{id}/changes` con `{collection, entityId, op, payload}`. Cada cambio se persiste como un documento en la colección `changeset_changes` del backend (un doc por cambio, sin el límite de 2MB por doc). Las **lecturas** con changeset activo van por `effective` → `GET /api/changesets/{id}/effective/{collection}?tableId=&ids=&q=&limit=` (slices server-side, nunca baja la colección completa).
+`recordChange` (`changeset.service.ts`) hace `PUT /api/changesets/{id}/changes` con `{collection, entityId, op, payload}`. Cada cambio se persiste como un documento en la colección `changeset_changes` del backend (un doc por cambio). Las **lecturas** con changeset activo van por `effective` → `GET /api/changesets/{id}/effective/{collection}?tableId=&ids=&q=&limit=` (slices server-side, nunca baja la colección completa).
 
 Ejemplos de operaciones (todas terminan en un `reload()` que reconcilia con el overlay):
 
@@ -443,7 +443,7 @@ sequenceDiagram
 
 ---
 
-## 6. Flujo 5 — Reporting: QuerySpec, /query, grilla virtualizada y export CSV
+## 6. Flujo 5 — Reporting: ReportSpec, /query, grilla virtualizada y export CSV
 
 ### 6.1 El IR compartido: ReportSpec
 
@@ -708,10 +708,10 @@ El token de sesión se guarda en `localStorage['dmh.token']` (constante `TOKEN_K
 
 ### 10.3 Base de datos: Databricks Lakebase Postgres
 
-La BD productiva es **Databricks Lakebase Postgres** (2026-07-19), consumida a través de un adaptador JSONB estilo Mongo en el backend — la semántica de "colecciones" y "documentos" de abajo se mantiene tal cual. Consideraciones que moldean los flujos del front:
+La BD productiva es **Databricks Lakebase Postgres**, consumida a través de un adaptador JSONB estilo pymongo en el backend — la semántica de "colecciones" y "documentos" de abajo se mantiene tal cual. Consideraciones que moldean los flujos del front:
 
 - El backend arma el diagrama con queries batched (`$in`) y aplica el overlay del changeset **server-side**: una sola request por apertura, en vez de mover el catálogo completo (a escala real: 2,108 tablas / 96,184 columnas publicadas al 2026-07-26).
-- Los cambios de un changeset viven en la colección `changeset_changes` (un documento por cambio) — diseño nacido del límite de **2MB por documento** de Cosmos y que sigue vigente sobre Lakebase. Nunca viajan crudos al cliente: se consumen vía `/effective` (lectura), `/diff` (review) y `/diff/details` (popup de detalle).
+- Los cambios de un changeset viven en la colección `changeset_changes` (un documento por cambio) — diseño del versionado por changesets, con updates chicos y diffs por slice. Nunca viajan crudos al cliente: se consumen vía `/effective` (lectura), `/diff` (review) y `/diff/details` (popup de detalle).
 - Las lecturas grandes se acotan con slices server-side (`?tableId=`, `?ids=`, `?q=&limit=`) para no bajar colecciones enteras.
 - El reporting depende de **índices**: `meta.scan` (index vs collscan) es la señal que la grilla expone; el ordenamiento server-side se habilita solo sobre campos indexados. La paginación es keyset (cursor), apta para 400k filas sin offset.
 - Las escrituras se hacen con `$set` atómico por entidad (por ejemplo, en el reorder de columnas en tandas de 5), de modo que operaciones concurrentes sobre entidades distintas no se pisan.

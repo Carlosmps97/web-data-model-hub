@@ -27,7 +27,10 @@
 command: ["npm", "run", "start"]
 
 env:
-  # Runtime (server.mjs): destino del proxy /api. Único valor genuinamente
-  # por-workspace — para apuntar a OTRO backend, editar esta línea.
+  # Runtime (server.mjs): destino del proxy /api. Valor por-workspace; el de acá
+  # es el DEFAULT. Para apuntar a OTRO backend NO se edita este archivo: se define
+  # la GitHub Variable BACKEND_API_URL en el repo destino y el deploy workflow
+  # (paso "Env del app.yaml desde GitHub Variables") reemplaza el value antes del
+  # deploy. Sin esa Variable definida, queda este default.
   - name: BACKEND_API_URL
     value: https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com

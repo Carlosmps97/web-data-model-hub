@@ -1,4 +1,4 @@
-/* App shell: rail + top bar + page + project cards (dmh-). Part of the Aurora system — see doc/feature-architecture.md. */
+/* App shell: rail + top bar + page + project cards (dmh-). Part of the Aurora system — see doc/architecture.md. */
 
 /* ============================================================ App shell */
 .dmh { height: 100vh; display: flex; overflow: hidden; background: var(--bg); }
