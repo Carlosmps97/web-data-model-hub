@@ -64,13 +64,17 @@ export const listTables = () => {
 /** Búsqueda server-side del pool (modales de catálogo): a 15k tablas el
  *  cliente NO baja la colección completa para filtrar — el backend matchea por
  *  nombre físico/lógico y devuelve las primeras `limit`. `q` vacío = página
- *  inicial alfabética. Con changeset activo busca sobre el estado efectivo. */
-export const searchTables = (q: string, limit = 50) => {
+ *  inicial alfabética. `schema` opcional acota a UN esquema server-side (el
+ *  filtro del modal Import existing NO puede hacerse en el cliente sobre la
+ *  página de `limit`: se perderían las tablas del esquema fuera de esa página).
+ *  Con changeset activo busca sobre el estado efectivo. */
+export const searchTables = (q: string, limit = 50, schema?: string) => {
   const a = active();
-  if (a) return csvc.effective<CanonicalTable>(a, 'canonical_tables', { q: q || undefined, limit });
+  if (a) return csvc.effective<CanonicalTable>(a, 'canonical_tables', { q: q || undefined, limit, schema: schema || undefined });
   const params = new URLSearchParams();
   if (q) params.set('q', q);
   params.set('limit', String(limit));
+  if (schema) params.set('schema', schema);
   return apiGet<CanonicalTable[]>(`${CATALOG}/tables?${params.toString()}`);
 };
 export const createTable = (t: CanonicalTable) => rec('canonical_tables', t.id, 'upsert', { ...t });

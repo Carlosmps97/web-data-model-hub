@@ -1,7 +1,7 @@
 /* Aurora design system — split into feature-owned stylesheets, @imported here
    in cascade order: tokens + base + shared UI first, then per-feature styles.
    When you add a feature, create features/<name>/<name>.css and @import it
-   below. All styles stay GLOBAL (no CSS Modules). See doc/feature-architecture.md. */
+   below. All styles stay GLOBAL (no CSS Modules). See doc/architecture.md. */
 @import '../styles/tokens.css';
 @import '../styles/base.css';
 @import '../styles/ui.css';

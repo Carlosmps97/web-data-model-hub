@@ -41,7 +41,7 @@ export default function UserMenu() {
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`Usuario: ${user.name ?? user.username}`}
+        aria-label={`User: ${user.name ?? user.username}`}
         title={user.name ?? user.username}
       >
         <Avatar initials={initials} size={30} />

@@ -54,6 +54,25 @@ describe('buildUpstreamHeaders', () => {
     expect(out.authorization).toBeUndefined();
     expect(out['x-forwarded-for']).toBe('127.0.0.1');
   });
+  it('borra x-dmh-* forjados, releva la identidad atestada y adjunta el secreto (doc 38)', () => {
+    const out = buildUpstreamHeaders(
+      { 'x-dmh-sso-email': 'atacante@evil.com', 'x-dmh-proxy-secret': 'forjado',
+        'x-forwarded-email': 'carlos.perez@corp.com',
+        'x-forwarded-preferred-username': 'carlos.perez@corp.com',
+        'x-forwarded-user': '12345' },
+      'tok-sp', '10.0.0.1', 's3cr3t');
+    expect(out['x-dmh-sso-email']).toBe('carlos.perez@corp.com');   // el del proxy, no el forjado
+    expect(out['x-dmh-sso-username']).toBe('carlos.perez@corp.com');
+    expect(out['x-dmh-sso-user-id']).toBe('12345');
+    expect(out['x-dmh-proxy-secret']).toBe('s3cr3t');               // el configurado, no el forjado
+  });
+  it('sin identidad del proxy no inventa relay; sin secreto configurado no lo manda', () => {
+    const out = buildUpstreamHeaders(
+      { 'x-dmh-sso-email': 'forjado@evil.com', accept: '*/*' }, null, '127.0.0.1');
+    expect(out['x-dmh-sso-email']).toBeUndefined();
+    expect(out['x-dmh-sso-username']).toBeUndefined();
+    expect(out['x-dmh-proxy-secret']).toBeUndefined();
+  });
 });
 
 // ── unit: TokenCache ─────────────────────────────────────────────────────
@@ -131,6 +150,7 @@ describe('server integrado (estaticos + proxy)', () => {
       host: 'https://ws.example.com',
       clientId: 'sp-id',
       clientSecret: 'sp-secret',
+      proxySecret: 'shhh',
       tokens,
       timeoutMs: 5000,
     });
@@ -162,6 +182,25 @@ describe('server integrado (estaticos + proxy)', () => {
     const req = seen.at(-1);
     expect(req.headers.authorization).toBe('Bearer tok-1');       // el del SP, no el del cliente
     expect(req.headers['x-session-token']).toBe('jwt-user-1');
+  });
+
+  it('releva la identidad SSO en x-dmh-* con secreto y pisa lo forjado por el cliente', async () => {
+    const r = await fetch(`${base}/api/auth/sso/login`, {
+      method: 'POST',
+      headers: {
+        // lo que pondria el proxy de Databricks en el hop del front:
+        'x-forwarded-email': 'carlos.perez@corp.com',
+        'x-forwarded-preferred-username': 'carlos.perez@corp.com',
+        // intento de suplantacion desde fetch() del navegador:
+        'x-dmh-sso-email': 'victima@corp.com',
+        'x-dmh-proxy-secret': 'adivinado',
+      },
+    });
+    expect(r.status).toBe(200);
+    const req = seen.at(-1);
+    expect(req.headers['x-dmh-sso-email']).toBe('carlos.perez@corp.com');
+    expect(req.headers['x-dmh-sso-username']).toBe('carlos.perez@corp.com');
+    expect(req.headers['x-dmh-proxy-secret']).toBe('shhh');
   });
 
   it('streamea el body de un POST', async () => {

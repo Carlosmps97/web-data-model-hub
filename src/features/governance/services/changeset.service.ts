@@ -5,7 +5,7 @@ const CS = `${API_BASE}/api/changesets`;
 
 export interface ChangesetDiff { added: string[]; modified: string[]; removed: string[]; }
 // Cabecera del changeset. Los cambios en sí viven en la colección
-// `changeset_changes` del backend (un doc por cambio, sin límite de 2MB/doc) y
+// `changeset_changes` del backend (un doc por cambio) y
 // NUNCA viajan crudos al cliente — se consumen vía /effective y /diff.
 export interface Changeset {
   id: string; title: string; owner: string; status: string;

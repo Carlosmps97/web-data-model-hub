@@ -1,9 +1,14 @@
 /**
- * AdminScreen — pantalla 14 "Permisos: administrar niveles de acceso por usuario".
+ * AdminScreen — pantalla 14 "Permisos: administrar niveles de acceso".
  *
- * Layout: sidebar de roles (izq) + main con header, tabla de usuarios y matriz de
- * permisos por rol. Se renderiza DEBAJO del TopNav global (chrome de ShellLayout)
- * y ya viene gated a `admin.manage`. Estilos inline (diseño navy light-only).
+ * Doc 38: la tabla de usuarios es la WHITELIST de acceso — correos asignados a
+ * una matriz de rol (el login es el SSO de Databricks; sin asignación no se
+ * entra). "Add email" da acceso; quitar la entrada lo revoca. Las cuentas
+ * locales con contraseña (`admin`) conviven en la misma lista.
+ *
+ * Layout: sidebar de roles (izq) + main con header, tabla de accesos y matriz
+ * de permisos por rol. Se renderiza DEBAJO del TopNav global (chrome de
+ * ShellLayout) y ya viene gated a `admin.manage`. Estilos inline (navy).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
@@ -26,7 +31,7 @@ interface ConfirmState { title: string; message: string; confirmLabel?: string; 
 interface UserModalState { open: boolean; mode: 'create' | 'edit'; initial: AdminUser | null; }
 interface RoleModalState { open: boolean; mode: 'create' | 'edit'; initial: Role | null; }
 
-const TABLE_COLS = 'minmax(230px, 2.2fr) 132px 150px minmax(150px, 1.5fr) 118px 96px';
+const TABLE_COLS = 'minmax(260px, 2.4fr) 150px 150px 118px 96px';
 
 const eyebrowStyle: CSSProperties = { fontSize: 11.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: '#8A93A5' };
 const h1Style: CSSProperties = { margin: '6px 0 0', fontSize: 24, fontWeight: 800, letterSpacing: '-0.01em', color: C.navy };
@@ -150,9 +155,11 @@ export default function AdminScreen() {
   };
 
   const askDeleteUser = (u: AdminUser) => setConfirm({
-    title: 'Delete user',
-    message: `"${u.name}" (${u.id}) will be deleted. This action cannot be undone.`,
-    onConfirm: async () => { await deleteUser(u.id); toast.success('User deleted'); await softRefresh(); },
+    title: 'Remove access',
+    message: `"${u.name || u.id}" (${u.id}) will lose access to the platform. `
+      + 'You can grant it again later by adding the email back.',
+    confirmLabel: 'Remove',
+    onConfirm: async () => { await deleteUser(u.id); toast.success('Access removed'); await softRefresh(); },
   });
 
   const askDeleteRole = (r: Role) => setConfirm({
@@ -173,7 +180,7 @@ export default function AdminScreen() {
       <aside style={{ width: 270, flexShrink: 0, background: C.panel, borderRight: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ padding: '20px 18px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <ShieldIcon size={14} color={C.muted} />
-          <span style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: C.muted }}>Roles definidos</span>
+          <span style={{ fontSize: 11.5, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', color: C.muted }}>Defined roles</span>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: '4px 12px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {roles.map((r) => {
@@ -232,7 +239,7 @@ export default function AdminScreen() {
             onClick={() => setRoleModal({ open: true, mode: 'create', initial: null })}
             style={{ width: '100%', padding: '10px', border: `1px dashed ${C.blueBorder}`, borderRadius: 10, background: C.white, color: C.blue, fontWeight: 600, fontSize: 13, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, fontFamily: 'inherit' }}
           >
-            <PlusIcon size={15} sw={2.4} /> Nuevo rol
+            <PlusIcon size={15} sw={2.4} /> New role
           </button>
         </div>
       </aside>
@@ -244,7 +251,10 @@ export default function AdminScreen() {
           <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
             <div>
               <div style={eyebrowStyle}>Administration</div>
-              <h1 style={h1Style}>Permissions and access levels</h1>
+              <h1 style={h1Style}>Access and permissions</h1>
+              <p style={{ margin: '6px 0 0', fontSize: 13, color: C.text2 }}>
+                Emails assigned to a role can sign in with their Databricks account.
+              </p>
             </div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
@@ -252,8 +262,8 @@ export default function AdminScreen() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search user"
-                  aria-label="Search user"
+                  placeholder="Search email or name"
+                  aria-label="Search email or name"
                   style={{ ...inputStyle, width: 230, paddingLeft: 33 }}
                 />
               </div>
@@ -262,7 +272,7 @@ export default function AdminScreen() {
                 onClick={() => setUserModal({ open: true, mode: 'create', initial: null })}
                 style={primaryBtn}
               >
-                <PlusIcon size={16} sw={2.4} /> Agregar usuario
+                <PlusIcon size={16} sw={2.4} /> Add email
               </button>
             </div>
           </div>
@@ -273,14 +283,14 @@ export default function AdminScreen() {
             <div style={{ marginTop: 26, padding: 24, border: `1px solid ${C.redBg}`, background: C.redBg, borderRadius: 13, color: C.redDeep }}>
               <div style={{ fontWeight: 700, marginBottom: 6 }}>Couldn't load</div>
               <div style={{ fontSize: 13, marginBottom: 14 }}>{error}</div>
-              <button type="button" onClick={() => void initialLoad()} style={primaryBtn}>Reintentar</button>
+              <button type="button" onClick={() => void initialLoad()} style={primaryBtn}>Retry</button>
             </div>
           ) : (
             <>
               {/* Filtro por rol seleccionado */}
               {selectedRoleId && (
                 <div style={{ marginTop: 20, display: 'inline-flex', alignItems: 'center', gap: 9, padding: '6px 8px 6px 13px', borderRadius: 999, background: C.blueSoft, border: `1px solid ${C.blueBorder}`, fontSize: 12.5, color: C.blue }}>
-                  Filtrando por <strong>{roleNameOf(roles, selectedRoleId)}</strong>
+                  Filtering by <strong>{roleNameOf(roles, selectedRoleId)}</strong>
                   <button type="button" onClick={() => setSelectedRoleId(null)} aria-label="Clear filter" style={{ display: 'inline-flex', border: 'none', background: C.white, color: C.blue, borderRadius: 999, width: 22, height: 22, alignItems: 'center', justifyContent: 'center', cursor: 'pointer', padding: 0 }}>
                     <CloseIcon size={13} />
                   </button>
@@ -292,18 +302,20 @@ export default function AdminScreen() {
                 <div style={{ overflowX: 'auto' }}>
                   <div style={{ minWidth: 860 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: TABLE_COLS, background: C.panel, borderBottom: `1px solid ${C.border}` }}>
-                      <div style={thStyle}>Usuario</div>
-                      <div style={thStyle}>Rol</div>
+                      <div style={thStyle}>User</div>
+                      <div style={thStyle}>Role</div>
                       <div style={thStyle}>Access level</div>
-                      <div style={thStyle}>Proyectos</div>
-                      <div style={thStyle}>Estado</div>
+                      <div style={thStyle}>Status</div>
                       <div style={{ ...thStyle, textAlign: 'right' }} />
                     </div>
 
                     {filteredUsers.map((u, idx) => {
                       const level = accessLevelOf(rolesById[u.role]?.permissions);
                       const status = statusMeta(u.status);
-                      const projects = u.projectIds.length ? u.projectIds.join(' · ') : 'Todos';
+                      // Entradas de whitelist recién creadas aún no tienen nombre
+                      // (lo resuelve el backend en el primer login SSO).
+                      const primary = u.name || u.email || u.id;
+                      const secondary = u.name ? (u.email || u.id) : 'Pending first sign-in';
                       return (
                         <div key={u.id} style={{ display: 'grid', gridTemplateColumns: TABLE_COLS, borderBottom: idx === filteredUsers.length - 1 ? 'none' : `1px solid ${C.border}` }}>
                           <div style={{ ...tdStyle, gap: 11 }}>
@@ -311,8 +323,8 @@ export default function AdminScreen() {
                               {initialsOf(u)}
                             </span>
                             <span style={{ minWidth: 0 }}>
-                              <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: C.navy, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.name}</span>
-                              <span style={{ display: 'block', fontSize: 12, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</span>
+                              <span style={{ display: 'block', fontSize: 13.5, fontWeight: 600, color: C.navy, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{primary}</span>
+                              <span style={{ display: 'block', fontSize: 12, color: C.text3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontStyle: u.name ? 'normal' : 'italic' }}>{secondary}</span>
                             </span>
                           </div>
                           <div style={tdStyle}>
@@ -323,17 +335,14 @@ export default function AdminScreen() {
                           <div style={tdStyle}>
                             <span style={chipStyle(level)}>{level.label}</span>
                           </div>
-                          <div style={{ ...tdStyle, fontSize: 12.5, color: u.projectIds.length ? C.text2 : C.text3 }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{projects}</span>
-                          </div>
                           <div style={tdStyle}>
                             <span style={chipStyle(status)}>{status.label}</span>
                           </div>
                           <div style={{ ...tdStyle, justifyContent: 'flex-end', gap: 6 }}>
-                            <button type="button" onClick={() => setUserModal({ open: true, mode: 'edit', initial: u })} aria-label={`Edit ${u.name}`} style={{ ...iconBtnStyle, width: 30, height: 30 }}>
+                            <button type="button" onClick={() => setUserModal({ open: true, mode: 'edit', initial: u })} aria-label={`Edit ${primary}`} style={{ ...iconBtnStyle, width: 30, height: 30 }}>
                               <PencilIcon size={14} />
                             </button>
-                            <button type="button" onClick={() => askDeleteUser(u)} aria-label={`Delete ${u.name}`} style={{ ...iconBtnStyle, width: 30, height: 30, color: C.red }}>
+                            <button type="button" onClick={() => askDeleteUser(u)} aria-label={`Remove access for ${primary}`} style={{ ...iconBtnStyle, width: 30, height: 30, color: C.red }}>
                               <TrashIcon size={14} />
                             </button>
                           </div>
@@ -343,7 +352,7 @@ export default function AdminScreen() {
 
                     {filteredUsers.length === 0 && (
                       <div style={{ padding: '34px 16px', textAlign: 'center', fontSize: 13, color: C.text3 }}>
-                        {users.length === 0 ? 'No users yet. Add the first one.' : 'No user matches the filter.'}
+                        {users.length === 0 ? 'No emails yet. Add the first one to grant access.' : 'No user matches the filter.'}
                       </div>
                     )}
                   </div>
@@ -364,7 +373,7 @@ export default function AdminScreen() {
                       <>
                         <button type="button" onClick={cancelEditMatrix} disabled={savingMatrix}
                           style={{ height: 36, padding: '0 15px', borderRadius: 9, border: `1px solid ${C.border}`, background: C.white, color: C.text2, fontSize: 13, fontWeight: 600, cursor: savingMatrix ? 'default' : 'pointer' }}>
-                          Cancelar
+                          Cancel
                         </button>
                         <button type="button" onClick={saveMatrix} disabled={savingMatrix || changedRoles.length === 0}
                           style={{ height: 36, padding: '0 16px', borderRadius: 9, border: 'none', background: changedRoles.length === 0 ? C.grey : C.blue, color: changedRoles.length === 0 ? C.muted : '#fff', fontSize: 13, fontWeight: 600, cursor: savingMatrix || changedRoles.length === 0 ? 'default' : 'pointer' }}>
@@ -374,7 +383,7 @@ export default function AdminScreen() {
                     ) : (
                       <button type="button" onClick={startEditMatrix} disabled={roles.length === 0}
                         style={{ height: 36, padding: '0 16px', borderRadius: 9, border: `1px solid ${C.blueBorder}`, background: C.blueSoft, color: C.blue, fontSize: 13, fontWeight: 600, cursor: roles.length === 0 ? 'default' : 'pointer', opacity: roles.length === 0 ? 0.5 : 1 }}>
-                        Editar matriz
+                        Edit matrix
                       </button>
                     )}
                   </div>

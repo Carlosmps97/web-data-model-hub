@@ -716,9 +716,9 @@ BACKEND_API_URL=http://localhost:8000 node server.mjs
 
 ### Base de datos
 
-La persistencia la maneja el backend FastAPI contra **Databricks Lakebase Postgres** (la base productiva; Azure Cosmos DB con API de Mongo quedó como fallback **legacy** vía `DB_BACKEND=cosmos`). El frontend nunca habla con la base directamente, siempre pasa por FastAPI. Consideraciones que impactan al DS/UI:
+La persistencia la maneja el backend FastAPI contra **Databricks Lakebase Postgres** (la base productiva). El frontend nunca habla con la base directamente, siempre pasa por FastAPI. Consideraciones que impactan al DS/UI:
 
-- Los cambios de un changeset se guardan **solo** vía un `changes_map` (colección `changeset_changes`), no como un blob gigante — regla nacida del límite ~2 MB por documento de la era Cosmos y que sigue vigente. La UI de gobierno/review consume esos cambios paginados desde el server.
+- Los cambios de un changeset se guardan **solo** vía un `changes_map` (colección `changeset_changes`), no como un blob gigante — el versionado por changesets trata cada cambio como su propio documento (updates chicos, diffs por slice). La UI de gobierno/review consume esos cambios paginados desde el server.
 - Reporting y catálogo trabajan **server-side** (slices, conteos agregados, búsqueda paginada) para escalar a cientos de miles de columnas; el frontend virtualiza grillas y memoiza el canvas (más el modo LOD del §5). El DS provee para esto la grilla virtualizada del Report Designer y los primitivos de tabla/badge.
 - El invariante de persistencia relevante para cualquier campo nuevo: debe existir en **el tipo TS y en el modelo Pydantic** del backend, o se pierde al recargar (el read-path revalida con `extra="ignore"`).
 

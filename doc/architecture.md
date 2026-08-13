@@ -19,7 +19,7 @@ La aplicación se organiza como una *shell* con navegación superior persistente
 
 El diseño rector es **DMH-Erwin v20260625-2**: un sistema visual claro (light-only), de acento *navy* y azul, con tipografía Geist. Todo el estado de sesión, edición y gobernanza vive en el cliente mediante **Zustand**, y todas las escrituras de modelo pasan por un *choke-point* consciente del *changeset* activo (la unidad de versionado del backend).
 
-Un principio transversal es que **el frontend nunca toca la base de datos directamente**: consume exclusivamente endpoints REST `/api/*` con un envelope uniforme `{ success, data, error }`. La persistencia (Databricks Lakebase Postgres; Cosmos como fallback) es responsabilidad del backend.
+Un principio transversal es que **el frontend nunca toca la base de datos directamente**: consume exclusivamente endpoints REST `/api/*` con un envelope uniforme `{ success, data, error }`. La persistencia (Databricks Lakebase Postgres) es responsabilidad del backend.
 
 ---
 
@@ -374,7 +374,7 @@ El tipo `Permission` es 1:1 con el backend:
 ```ts
 type Permission =
   | 'model.view' | 'model.edit' | 'review.decide' | 'publish'
-  | 'export' | 'standards.edit' | 'admin.manage';
+  | 'rollback' | 'export' | 'standards.edit' | 'admin.manage';
 ```
 
 `SessionUser` (de `GET /api/auth/me`) trae `permissions: Record<string, boolean>` ya resueltos por rol, más `projectIds`, `role`, `accessLevel`, etc.
@@ -593,7 +593,7 @@ Para completar el mapa funcional:
 - **Admin** (`features/admin`): `AdminScreen` con sidebar de roles + tabla de usuarios + `PermissionMatrix` editable en borrador (nada se persiste hasta Guardar). Todo bajo `admin.manage`. El servicio cubre CRUD de usuarios/roles, catálogo de permisos y auditoría (`getAudit`).
 - **Governance** (`features/governance`): hoy provee sobre todo los servicios `changeset.service` (cabecera del changeset, `recordChange`, `effective`, `submit`/`approve`/`reject`) y `governance.service` (el choke-point de escrituras). La `GovernanceScreen` — con su `ApprovalInbox` — es **legacy**: quedó parkeada fuera del rail (`/governance` sin entrada en el `TopNav`), pendiente de retiro; la revisión real vive en `ReviewScreen`.
 - **DDL** (`features/ddl`): `genDDL`/`genViewDDL` generan `CREATE TABLE`/`CREATE VIEW` con cláusula de partición según el engine (Databricks SQL, PostgreSQL, MySQL, SQL Server), expuestos por `ExportDdlModal`; `rulesBridge.ts` conecta con las DDL Export rules — el modal genera el DDL base y lo manda a `POST /api/ddl-rules/render` con las reglas marcadas (sin reglas seleccionadas, el export es byte-identical al flujo previo).
-- **Auth** (`features/auth`): `LoginScreen`, los guards y `auth.service` (`login`/`logout`/`fetchMe`).
+- **Auth** (`features/auth`): `LoginScreen` (dos caminos: SSO de Databricks + contraseña del admin, doc 38), los guards y `auth.service` (`ssoLogin`/`login`/`logout`/`fetchMe`).
 
 El flujo de gobernanza (crear draft → editar en canvas → enviar a revisión → aprobar/rechazar/retirar/reabrir) se maneja en `ReviewScreen`, que consume `versioning.service` (`listVersions`, `getChangeset`, `getDiff`, `getDiffDetails`, `review`, `withdraw`, `reopen`, `addComment`) con detección de conflictos contra producción. Desde 2026-07-24 (doc 31 de plan-implementacion/) la presentación de cambios vive en `src/screens/review/`:
 
@@ -640,7 +640,7 @@ sequenceDiagram
 
 ### 11.1 Dónde corre
 
-En producción el frontend es una **Databricks App** (`frnt-data-model-hub`). El `config.command` del bundle es `npm run start`: el hook `prestart` construye (`npm run build` = `tsc --noEmit && vite build` → carpeta `dist/`) y `start` levanta **`node server.mjs`** (§3.1), que sirve el bundle estático y proxya `/api` al backend con el token M2M del service principal. Al usar `BrowserRouter` (rutas limpias sin `#`), es `server.mjs` quien hace el *fallback* de cualquier ruta no encontrada a `index.html`, para que el enrutado del lado del cliente funcione al recargar en `/model`, `/reporting`, etc. (Cualquier otro host estático necesitaría replicar ese fallback y un proxy equivalente.)
+En producción el frontend es una **Databricks App** (`frnt-data-model-hub`). El `command` de `app.yaml` es `npm run start`: el hook `prestart` construye (`npm run build` = `tsc --noEmit && vite build` → carpeta `dist/`) y `start` levanta **`node server.mjs`** (§3.1), que sirve el bundle estático y proxya `/api` al backend con el token M2M del service principal. Al usar `BrowserRouter` (rutas limpias sin `#`), es `server.mjs` quien hace el *fallback* de cualquier ruta no encontrada a `index.html`, para que el enrutado del lado del cliente funcione al recargar en `/model`, `/reporting`, etc. (Cualquier otro host estático necesitaría replicar ese fallback y un proxy equivalente.)
 
 Arquitectura de **un solo origen** (desde 2026-07-31, doc 36 de plan-implementacion/): el navegador solo habla con el front; el cruce al backend lo hace `server.mjs` servidor-a-servidor. En desarrollo, el dev server de Vite (`:3000`) reenvía `/api` al FastAPI (`:8000`) vía proxy — mismo contrato de rutas relativas. La simulación local de producción es `BACKEND_API_URL=http://localhost:8000 node server.mjs` (sin credenciales de SP, el proxy va sin Bearer).
 
@@ -659,11 +659,11 @@ Todos los servicios anteponen `API_BASE` (centralizado en `src/services/apiBase.
 
 ### 11.3 Consideraciones de base de datos
 
-El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Databricks Lakebase Postgres** (adaptador JSONB motor-like; Azure Cosmos DB con API de Mongo queda como fallback legacy vía `DB_BACKEND=cosmos`). Lo relevante para el front es el contrato y sus implicancias de escala:
+El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Databricks Lakebase Postgres** (adaptador JSONB estilo pymongo). Lo relevante para el front es el contrato y sus implicancias de escala:
 
 - **Envelope uniforme** `{ success, data, error }` en todo `/api/*`, desempaquetado por `http.ts`. Los `HTTPException` de FastAPI (`{ detail }`) también se propagan legibles.
 - **Escala**: el modelo puede tener decenas de miles de tablas y cientos de miles de columnas. Por eso el front nunca baja colecciones completas: usa slices server-side (`?tableId=`, `?ids=`, `?q=`, `?limit=`), armado del diagrama en una sola request, y paginación por **keyset/cursor** en el reporting.
-- **Changesets**: los cambios de una versión viven en una colección `changeset_changes` (un documento por cambio — patrón nacido del límite de 2 MB por documento de Cosmos y conservado sobre Lakebase) y nunca viajan crudos al cliente; se consumen vía `/effective` y `/diff`.
+- **Changesets**: los cambios de una versión viven en una colección `changeset_changes` (un documento por cambio — patrón del versionado por changesets, que mantiene los updates chicos y los diffs por slice) y nunca viajan crudos al cliente; se consumen vía `/effective` y `/diff`.
 - **Sesión**: el token JWT se guarda en `localStorage` (`dmh.token`) y viaja como `X-Session-Token` (§4.7); en modo local el actor simulado viaja como `X-Dev-User`. Un `401` limpia el token y redirige a `/login`.
 
 En resumen, el front es un cliente delgado y consciente de la escala: delega toda la lógica de persistencia, versionado y consulta al backend, y se concentra en el modelado visual, la gobernanza y el reporting sobre un contrato REST estable.

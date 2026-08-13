@@ -24,6 +24,15 @@ variables:
     # extra y el deploy no falla.
     description: "Usuario humano que queda con CAN_MANAGE sobre la app (stop/start/logs desde la UI)."
     default: ${workspace.current_user.userName}
+  secret_scope:
+    # GitHub Variable: SECRET_SCOPE (mismo scope que usa el backend).
+    description: "Scope de secretos que guarda el secreto compartido del relay SSO (doc 38)."
+    default: kv-scope-datacraft
+  proxy_secret_key:
+    # GitHub Variable: PROXY_SECRET_KEY (opcional; su valor es la KEY del
+    # secreto en el scope — misma key en el backend).
+    description: "Key del secreto compartido entre las apps front y backend (relay SSO)."
+    default: dmh-proxy-secret
 
 resources:
   apps:
@@ -34,6 +43,13 @@ resources:
       # command + env (incl. BACKEND_API_URL) → app.yaml (raíz del repo).
       # ONE-TIME por workspace: CAN_USE del SP del front sobre la app backend
       # (doc 36 §5). El bloque `config:` no funciona (bug #4901).
+      resources:
+        - name: proxy_secret
+          description: "Secreto compartido front↔backend que autentica el relay de identidad SSO (doc 38)."
+          secret:
+            scope: ${var.secret_scope}
+            key: ${var.proxy_secret_key}
+            permission: READ
       permissions:
         - level: CAN_MANAGE       # el humano dueño: stop/start/logs/permissions en la UI
           user_name: ${var.app_admin_user}

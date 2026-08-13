@@ -66,16 +66,16 @@ export interface Chip { label: string; color: string; bg: string; }
 /** Nivel de acceso derivado de los permisos del ROL (no del usuario). */
 export function accessLevelOf(perms: Record<string, boolean> | undefined): Chip {
   const p = perms ?? {};
-  if (p['admin.manage']) return { label: 'Control total', color: C.redDeep, bg: C.redBg };
+  if (p['admin.manage']) return { label: 'Full control', color: C.redDeep, bg: C.redBg };
   if (p['model.edit'] || p['standards.edit'] || p['publish']) return { label: 'Edit', color: C.amber, bg: C.amberBg };
   return { label: 'Read-only', color: C.green, bg: C.greenBg };
 }
 
 export function statusMeta(status: string): Chip {
   switch (status) {
-    case 'active': return { label: 'Activo', color: C.green, bg: C.greenBg };
-    case 'invited': return { label: 'Invitado', color: C.text2, bg: C.grey };
-    case 'disabled': return { label: 'Inactivo', color: C.red, bg: C.redBg };
+    case 'active': return { label: 'Active', color: C.green, bg: C.greenBg };
+    case 'invited': return { label: 'Invited', color: C.text2, bg: C.grey };
+    case 'disabled': return { label: 'Disabled', color: C.red, bg: C.redBg };
     default: return { label: status || '—', color: C.text2, bg: C.grey };
   }
 }

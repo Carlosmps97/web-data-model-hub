@@ -73,28 +73,31 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [added, setAdded] = useState<Set<string>>(new Set());
 
   // Búsqueda SERVER-SIDE con debounce: a 15k tablas el modal no baja el
-  // catálogo completo — el backend matchea por nombre y devuelve la página.
-  // `alive` descarta respuestas fuera de orden (el usuario siguió tipeando).
-  // 300ms: cada búsqueda es un scan por regex en Cosmos (RU proporcional a la
-  // colección) — no disparar por tecla.
+  // catálogo completo — el backend matchea por nombre + esquema y devuelve la
+  // página. `alive` descarta respuestas fuera de orden (el usuario siguió
+  // tipeando). 300ms: cada búsqueda es un scan por regex server-side (costo
+  // proporcional a la colección) — no disparar por tecla. `schemaFilter` está en
+  // las deps: cambiar el esquema RE-CONSULTA (antes filtraba client-side sobre la
+  // página de 50 y las tablas del esquema fuera de esa página no aparecían).
   const PAGE = 50;
   useEffect(() => {
     if (mode !== 'import') return;
     let alive = true;
     const h = setTimeout(() => {
-      gov.searchTables(q.trim(), PAGE)
+      gov.searchTables(q.trim(), PAGE, schemaFilter || undefined)
         .then((r) => { if (alive) setTables(r); })
         .catch(() => {});
     }, q ? 300 : 0);
     return () => { alive = false; clearTimeout(h); };
-  }, [mode, q]);
+  }, [mode, q, schemaFilter]);
 
-  // Filtro por esquema: opciones del catálogo real de esquemas (doc 18) —
-  // antes se derivaba client-side de la página de tablas visible (incompleto).
+  // Filtro por esquema: opciones del catálogo real de esquemas (doc 18). El
+  // acotado por esquema lo hace el BACKEND (server-side, junto a `q`); el filtro
+  // client-side de acá es sólo defensa — descarta cualquier resultado de un
+  // esquema previo que quedara en pantalla mientras resuelve la nueva consulta.
   const schemaPool = useModelerStore((s) => s.schemas);
   const schemas = useMemo(() => schemaPool.map((s) => s.name), [schemaPool]);
   const usageOf = (id: string) => (subjectAreas ?? []).filter((sa) => (sa.tableIds ?? []).includes(id)).length;
-  // El filtro por schema aplica sobre la página traída (el server ya acotó por nombre).
   const visible = useMemo(
     () => (schemaFilter ? tables.filter((t) => t.schema === schemaFilter) : tables),
     [tables, schemaFilter],
@@ -195,8 +198,8 @@ export default function NewTableModal({ onClose, onCreate }: {
             )}
             {visible.length === 0 && (
               <div className="rd-small" style={{ padding: 10, color: 'var(--text-muted, #8A93A5)' }}>
-                {schemaFilter && tables.length > 0
-                  ? `No tables from schema "${schemaFilter}" in the first ${PAGE} matches — refine your search or clear the schema filter.`
+                {schemaFilter
+                  ? `No tables in schema "${schemaFilter}"${q.trim() ? ' match your search' : ''}.`
                   : 'No tables match your search.'}
               </div>
             )}

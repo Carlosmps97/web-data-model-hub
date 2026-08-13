@@ -263,13 +263,14 @@ A continuación, el detalle por área funcional. En todas las tablas, la ruta es
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
+| `ssoLogin()` | POST | `/api/auth/sso/login` | — (identidad en headers de relay del server, doc 38) | `{ token, user: SessionUser }` |
 | `login(username, password)` | POST | `/api/auth/login` | `{ username, password }` | `{ token, user: SessionUser }` |
 | `logout()` | POST | `/api/auth/logout` | — | `{ ok: boolean }` |
 | `fetchMe()` | GET | `/api/auth/me` | — | `SessionUser` |
 | `getMe()` | GET | `/api/me` | — | `Principal` |
 | `ensureBackendSession()` | GET | `/api/health` (probe) + `/api/auth/warmup/{next_b64}` (navegación) | — | — |
 
-El login está rate-limited en el backend (`5/minute` por IP). `SessionUser` incluye el rol, `projectIds`, `initials` y el mapa de permisos efectivos:
+`ssoLogin()` es el carril principal (doc 38): el botón "Continue with Databricks" hereda la identidad del SSO de la plataforma — el server del front la releva en headers `x-dmh-sso-*` con secreto compartido — y entra solo si el correo está asignado a un rol en Admin (403 con mensaje accionable si no). `login()` queda como carril del administrador (la UI pide solo la contraseña de la cuenta `admin`). Ambos emiten el mismo token y comparten el pipeline del store (`enterSession`: resetAppState → localStorage → mirror). El login por contraseña está rate-limited en el backend (`5/minute` por IP; el SSO a `10/minute`). `SessionUser` incluye el rol, `projectIds`, `initials` y el mapa de permisos efectivos:
 
 ```ts
 /** Permisos de la matriz (1:1 con el backend `PERMISSIONS`). */
@@ -1118,12 +1119,12 @@ Otras piezas de configuración del cliente son runtime, no variables de entorno:
 - El token de sesión vive en `localStorage` bajo la clave `dmh.token`.
 - El timeout global de request es una constante del código (`DEFAULT_TIMEOUT_MS = 30_000`).
 
-### 6.3. Base de datos: Databricks Lakebase Postgres (Cosmos DB legacy)
+### 6.3. Base de datos: Databricks Lakebase Postgres
 
-El backend persiste sobre **Databricks Lakebase Postgres** (migración ejecutada 2026-07-19, doc 28): un adaptador JSONB con superficie estilo Motor traduce las operaciones a SQL/JSONB, así que el contrato de la API no cambió con la migración. **Azure Cosmos DB (API de Mongo) quedó como fallback legacy** (`DB_BACKEND=cosmos`, seam de rollback dormido en el código), no como base productiva. Las decisiones de escala del contrato siguen vigentes con cualquiera de los dos motores:
+El backend persiste sobre **Databricks Lakebase Postgres**: un adaptador JSONB con superficie estilo pymongo traduce las operaciones a SQL/JSONB. Las decisiones de escala del contrato siguen vigentes:
 
 - **Nada de colecciones completas por request.** Endpoints como `GET /api/catalog/tables?q=&limit=`, `GET /api/changesets/{id}/effective/{collection}?tableId=` o `GET /api/reporting/columns?tableIds=` fuerzan filtros server-side. A escala real (2,108 tablas y ~96k columnas cargadas del modelo DDV) bajar la colección entera al cliente no es viable.
-- **Cambios de modelo como documentos independientes.** Los cambios de un changeset se guardan uno por documento en la colección `changeset_changes` (decisión tomada por el límite de 2 MB por documento de Cosmos, que sigue siendo el diseño en Lakebase). El cliente nunca recibe esos cambios crudos: los ve derivados vía `/effective` y `/diff`.
+- **Cambios de modelo como documentos independientes.** Los cambios de un changeset se guardan uno por documento en la colección `changeset_changes` (decisión del versionado por changesets: updates chicos y diffs por slice). El cliente nunca recibe esos cambios crudos: los ve derivados vía `/effective` y `/diff`.
 - **Paginación por cursor en reporting.** `runQuery` / `runSql` devuelven `nextCursor` y `hasMore` (keyset/streaming), y el export es un stream (`POST /api/reporting/export`), pensados para no materializar resultados grandes en memoria.
 - **Envelope y errores estables.** El backend responde siempre `{ success, data, error }`, salvo los `HTTPException` de FastAPI que devuelven `{ detail }`; el cliente los reconoce en el path de error para no perder el mensaje real (por ejemplo, un `409` de conflicto de versión). Esto es independiente del motor de base y del entorno de despliegue.
 

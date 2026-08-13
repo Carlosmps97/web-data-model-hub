@@ -1,6 +1,6 @@
 # Data Model Hub — Frontend
 
-Aplicación web (SPA) para **diseñar, documentar, gobernar y reportar modelos de datos** al estilo de herramientas como erwin Data Modeler, pero pensada para la nube y el trabajo colaborativo. Es el **frontend** de la plataforma Data Model Hub: consume una API REST (FastAPI) que persiste en Azure Cosmos DB (API de Mongo) y expone toda la experiencia visual — el canvas entidad-relación, el reporting de metadata, los estándares de datos, la administración/RBAC y una guía de uso in-app.
+Aplicación web (SPA) para **diseñar, documentar, gobernar y reportar modelos de datos** al estilo de herramientas como erwin Data Modeler, pero pensada para la nube y el trabajo colaborativo. Es el **frontend** de la plataforma Data Model Hub: consume una API REST (FastAPI) que persiste en Databricks Lakebase Postgres y expone toda la experiencia visual — el canvas entidad-relación, el reporting de metadata, los estándares de datos, la administración/RBAC y una guía de uso in-app.
 
 Este repositorio contiene **solo la capa de presentación** (Vite + React + TypeScript). El backend vive en un repositorio aparte (`backend-data-model-hub`).
 
@@ -32,7 +32,7 @@ Data Model Hub resuelve el ciclo de vida completo de un modelo de datos empresar
 2. **Gobernar** los cambios: cada edición ocurre dentro de una *sesión* que se materializa en un *changeset/solicitud*, se envía a revisión, un aprobador decide y recién ahí se publica a producción.
 3. **Estandarizar** con glosario de términos/abreviaturas, dominios padre (plantillas de tipo de dato con cascada), reglas de nomenclatura y propiedades definidas por el usuario (UDP), todo versionado de forma independiente.
 4. **Reportar** la metadata con un motor de consulta (builder visual + caja SQL) sobre columnas, tablas, relaciones y vistas, con exportación a Excel/CSV.
-5. **Administrar** usuarios, roles y una matriz de permisos (RBAC), con login propio (token) y auditoría.
+5. **Administrar** el acceso (whitelist de correos asignados a una matriz de rol, doc 38), los roles y la matriz de permisos (RBAC), con sesión por token y auditoría.
 6. **Guiar** al usuario con un Centro de ayuda in-app bilingüe (español/inglés) que documenta cada módulo.
 
 La navegación global se organiza en un *shell* con una barra superior persistente (`TopNav`) sobre la pantalla ruteada:
@@ -64,7 +64,7 @@ flowchart TD
 | `/admin` | `AdminScreen` | Usuarios, roles, matriz de permisos y auditoría. | `admin.manage` |
 | `/governance` | `GovernanceScreen` | Pantalla legacy parkeada (fuera del rail de navegación). | sesión |
 
-Permisos del sistema (matriz RBAC, 1:1 con el backend): `model.view`, `model.edit`, `review.decide`, `publish`, `export`, `standards.edit`, `admin.manage`.
+Permisos del sistema (matriz RBAC, 1:1 con el backend): `model.view`, `model.edit`, `review.decide`, `publish`, `rollback`, `export`, `standards.edit`, `admin.manage`.
 
 ---
 
@@ -72,22 +72,25 @@ Permisos del sistema (matriz RBAC, 1:1 con el backend): `model.view`, `model.edi
 
 | Categoría | Tecnología | Versión | Rol |
 |-----------|-----------|---------|-----|
-| Build / dev server | **Vite** | ^6.0.7 | Bundler y servidor de desarrollo (HMR, proxy `/api`). |
+| Build / dev server | **Vite** | 6.4.3 | Bundler y servidor de desarrollo (HMR, proxy `/api`). |
 | UI | **React** + React DOM | 19.2.4 | Librería de vistas (StrictMode). |
-| Lenguaje | **TypeScript** | ^5 | Tipado estricto (`strict: true`). |
-| Ruteo | **React Router** (`react-router-dom`) | ^7.1.0 | Rutas del shell, guards de auth/permiso. |
-| Estado | **Zustand** | ^5.0.12 | Stores del canvas, sesión, auth, changeset e identidad. |
-| Canvas ER | **@xyflow/react** (React Flow 12) | ^12.3.5 | Nodos (tablas/figuras) y aristas (relaciones). |
-| Auto-layout | **elkjs** | ^0.11.1 | Distribución automática del diagrama. |
-| Grillas | **@tanstack/react-virtual** | ^3.14.5 | Virtualización de resultados de reporting a gran escala. |
-| Notificaciones | **sonner** | ^2.0.7 | Toasts globales. |
-| Export Excel | **xlsx** (SheetJS) | ^0.18.5 | Workbook multi-hoja desde el reporting. |
-| Export imagen | **html-to-image** | ^1.11.13 | Captura del canvas a PNG. |
-| Íconos | **lucide-react** | ^1.21.0 | Iconografía consistente. |
-| Tipografías | **Geist** / **Geist Mono** (`@fontsource-variable/*`) | ^5.2.x | Fuente de UI y monoespaciada (self-hosted). |
-| IDs | **uuid** | ^13.0.0 | Identificadores estables cliente-side. |
-| Testing | **Vitest** | ^2.1.8 | Tests unitarios (`src/**/*.test.ts(x)`). |
-| Linting | **ESLint** + `typescript-eslint` + `eslint-plugin-react-hooks` | ^9 / ^8.18 / ^7.1 | Reglas de calidad y hooks. |
+| Lenguaje | **TypeScript** | 5.9.3 | Tipado estricto (`strict: true`). |
+| Ruteo | **React Router** (`react-router-dom`) | 7.18.0 | Rutas del shell, guards de auth/permiso. |
+| Estado | **Zustand** | 5.0.12 | Stores del canvas, sesión, auth, changeset e identidad. |
+| Canvas ER | **@xyflow/react** (React Flow 12) | 12.11.0 | Nodos (tablas/figuras) y aristas (relaciones). |
+| Auto-layout | **elkjs** | 0.11.1 | Distribución automática del diagrama (`layered`/Sugiyama). |
+| Grillas | **@tanstack/react-virtual** | 3.14.5 | Virtualización de resultados de reporting a gran escala. |
+| Notificaciones | **sonner** | 2.0.7 | Toasts globales. |
+| Export Excel | **xlsx** (SheetJS) | 0.18.5 | Workbook multi-hoja desde el reporting. |
+| Export imagen | **html-to-image** | 1.11.13 | Captura del canvas a **SVG** (`toSvg`). |
+| Reglas DDL | **yaml** | 2.9.0 | Editor y parseo YAML de las reglas del Export DDL. |
+| Íconos | **lucide-react** | 1.21.0 | Iconografía consistente. |
+| Tipografías | **Geist** / **Geist Mono** (`@fontsource-variable/*`) | 5.2.9 / 5.2.8 | Fuente de UI y monoespaciada (self-hosted). |
+| IDs | **uuid** | 13.0.0 | Identificadores estables cliente-side. |
+| Testing | **Vitest** | 2.1.9 | Tests unitarios (`src/**/*.test.ts(x)`). |
+| Linting | **ESLint** + `typescript-eslint` + `eslint-plugin-react-hooks` | 9.39.4 / 8.58.1 / 7.1.1 | Reglas de calidad y hooks. |
+
+Todas las dependencias están **pineadas exactas** (sin `^` ni `~`; política 2026-07-31).
 
 Configuración clave (`vite.config.ts` / `tsconfig.json`):
 
@@ -129,7 +132,7 @@ flowchart TD
 
 Puntos de diseño relevantes:
 
-- **Cliente HTTP único** (`src/services/http.ts`): `apiFetch<T>()` desempaqueta el envelope `{ success, data?, error? }` que devuelve toda la API, adjunta `Authorization: Bearer <token>` y `X-Dev-User`, aplica un timeout global de 30 s (`AbortSignal.timeout`), usa `credentials: 'include'` para la cookie de sesión cross-origin y despacha un handler global ante `401` (logout + redirección a `/login`). Los errores se propagan como `ApiError` tipado con `status`.
+- **Cliente HTTP único** (`src/services/http.ts`): `apiFetch<T>()` desempaqueta el envelope `{ success, data?, error? }` que devuelve toda la API, adjunta el token de sesión como `X-Session-Token: <token>` (y `X-Dev-User` solo en desarrollo; en Databricks Apps el header `Authorization: Bearer` le pertenece al proxy SSO de la plataforma), aplica un timeout global de 30 s (`AbortSignal.timeout`), usa `credentials: 'include'` para la cookie de sesión cross-origin y despacha un handler global ante `401` (logout + redirección a `/login`). Los errores se propagan como `ApiError` tipado con `status`.
 - **Auth token-first** (`useAuthStore`): al arrancar, `restore()` lee el token de `localStorage` y valida contra `/api/auth/me`; mientras `status === 'loading'` los guards muestran un splash. Los guards `RequireAuth` y `RequirePermission` protegen las rutas.
 - **Puente sesión → changeset** (`installSessionChangesetBridge`): espeja `useSessionStore.activeChangesetId` hacia `useChangesetStore.activeId` para que el changeset elegido al abrir un modelo alimente a todos los lectores del changeset activo (escrituras de gobernanza y gates del canvas).
 - **Base de la API configurable**: cada servicio construye sus URLs con `const API_BASE = import.meta.env.VITE_API_URL ?? ''`. Con `VITE_API_URL` vacío, las llamadas van al mismo origen y en dev el proxy de Vite las reenvía al backend.
@@ -160,7 +163,7 @@ Conceptos clave del dominio:
 - **SubjectArea (Canvas)**: vista temática que agrupa `tableIds`, guarda `layout` (posiciones) y `drawings` (figuras: rectángulos, círculos, texto, etc.). Las tablas se organizan en carpetas (`Folder`) dentro del proyecto.
 - **Table / TableColumn**: la columna tiene `id` estable (sobrevive renames — las relaciones y los handles de React Flow se referencian por `id`, nunca por `name`), flags de clave (PK, surrogate, partition, FK con `fkManual`), `semanticTypeId`/`semanticValues` (tipo semántico transversal), `udpValues` (propiedades definidas por el usuario) y `tags`.
 - **View**: proyección SQL por rol embebida en la tabla (`select` multilínea, `where` AND-joined), renderizada en el inspector y exportable como `CREATE VIEW`.
-- **Relationship**: `source`/`target` como `{ table, column }`, `cardinality` (`1:1`, `1:N`, `N:N`) y derivados no persistidos (`crossLayer`, `skip`) usados para avisos visuales.
+- **Relationship** (`src/features/governance/services/governance.service.ts`): modelo v2 parent/child — `parentTableId`/`childTableId` + `pairs[]` (los pares de columnas de la FK), con `parentCardinality`/`childCardinality` (enum crow's foot por extremo) e `identifying`.
 - **Versionado** (`src/types/versioning.ts`): un changeset tiene estado `draft → submitted → approved/rejected`; expone `diff` (buckets added/edited/deleted por colección), `impact` (tablas/columnas tocadas) y `approvals`/`comments`.
 
 ---
@@ -173,7 +176,7 @@ Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCa
 
 - Explorador de árbol Proyecto → Carpetas → Canvases con caché por proyecto (`useModelerStore.trees`) para expandir varios a la vez.
 - Edición de tablas, columnas (tipos de dato de un superset "Databricks-flavored"), relaciones con notación crow's foot, vistas SQL por rol y asignación de UDP/tipos semánticos.
-- Modos **lógico** y **físico**; auto-layout con `elkjs` (`lib/elkLayout.ts`); export a PNG con `html-to-image`.
+- Modos **lógico** y **físico**; auto-layout con `elkjs` (`lib/elkLayout.ts`); export del canvas a **SVG** con `html-to-image` (`toSvg`).
 - **Guard de cambios sin guardar**: al navegar fuera de `/model` con una versión en edición y estado `dirty`, `TopNav` intercepta y ofrece "Guardar y salir / Salir sin guardar / Cancelar"; el cierre de pestaña lo cubre un `beforeunload`.
 - Generación de **DDL** (`features/ddl/generators.ts`): `CREATE TABLE`/`CREATE VIEW` con cláusula de particionado según el motor (`PARTITIONED BY` en Databricks, `PARTITION BY RANGE` en Postgres/MySQL, etc.).
 
@@ -196,11 +199,11 @@ Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCa
 
 ### Admin / RBAC (`/admin`)
 
-- `AdminScreen`, `UserModal`, `RoleModal`, `PermissionMatrix`: CRUD de usuarios, roles y matriz de permisos, más auditoría (`AuditEntry`). Todo gated por `admin.manage` (`admin.service`).
+- `AdminScreen`, `UserModal`, `RoleModal`, `PermissionMatrix`: **whitelist de acceso** (correos asignados a un rol — dan el login SSO; sin contraseñas, doc 38), roles y matriz de permisos, más auditoría (`AuditEntry`). La cuenta local `admin` convive en la lista (con reset de contraseña, `hasPassword`). Todo gated por `admin.manage` (`admin.service`).
 
 ### Auth (`/login`)
 
-- Login usuario/contraseña con token (`auth.service`: `/api/auth/login`, `/logout`, `/me`), guards `RequireAuth`/`RequirePermission`, `UserMenu` en la barra superior.
+- Dos caminos hacia la misma sesión por token (doc 38): **"Continue with Databricks"** (`ssoLogin` → `/api/auth/sso/login`; hereda la identidad del SSO de la plataforma, requiere el correo whitelisteado en Admin) y **"Administrator"** (solo contraseña → `/api/auth/login`). Guards `RequireAuth`/`RequirePermission`, `UserMenu` en la barra superior.
 
 ### Help — guía in-app
 
@@ -239,13 +242,14 @@ npm run lint       # eslint .
 
 ## Variables de entorno
 
-Solo se expone al browser lo prefijado con `VITE_` (Vite las inlinea en build time). La variable real que consume el código es `VITE_API_URL`.
+Solo se expone al browser lo prefijado con `VITE_` (Vite las inlinea en build time). En producción el navegador habla con un **solo origen**: el servidor `server.mjs` sirve la SPA y proxya `/api/*` al backend, así que `VITE_API_URL` queda vacía y la URL del backend se configura en el runtime del servidor con `BACKEND_API_URL`.
 
-| Variable | Uso | Ejemplo |
-|----------|-----|---------|
-| `VITE_API_URL` | Base absoluta del backend. Vacío = mismo origen (dev: el proxy de Vite reenvía `/api` → `:8000`). | `` (vacío) en dev; `https://bknd-....azuredatabricksapps.com` en prod |
+| Variable | Ámbito | Uso | Ejemplo |
+|----------|--------|-----|---------|
+| `VITE_API_URL` | build-time (cliente) | Base absoluta del backend. Vacío = mismo origen. En producción va **vacía** (el proxy de `server.mjs` resuelve `/api`); en dev, el proxy de Vite reenvía `/api` → `:8000`. | `` (vacío) |
+| `BACKEND_API_URL` | runtime (`server.mjs`) | Destino al que `server.mjs` proxya `/api/*` en producción. Vive como `env` de `app.yaml` (sobrescribible por una GitHub Variable homónima). | `https://bknd-data-model-hub-....databricksapps.com` |
 
-> Nota (2026-07-19, homologación): la única lectura de env está centralizada en `src/services/apiBase.ts` (`API_BASE`); los ~16 servicios la importan. En dev `VITE_API_URL` va vacía (`.env`/`.env.example`, proxy de Vite); en producción llega del bundle (`databricks.yml` → variable `backend_api_url`) y se inlinea en el build. `.env.production` y la herencia `NEXT_PUBLIC_API_URL` fueron eliminados.
+> Nota (2026-07-31): la única lectura de env del cliente está centralizada en `src/services/apiBase.ts` (`API_BASE = import.meta.env.VITE_API_URL ?? ''`); los servicios la importan. En producción `API_BASE` queda vacío y todas las llamadas van al mismo origen que sirve `server.mjs`. `.env.production` y la herencia `NEXT_PUBLIC_API_URL` fueron eliminados.
 
 ---
 
@@ -256,7 +260,7 @@ Solo se expone al browser lo prefijado con `VITE_` (Vite las inlinea en build ti
 | `dev` | `vite` | Servidor de desarrollo con HMR (`:3000`). |
 | `build` | `tsc --noEmit && vite build` | Chequeo de tipos + bundle de producción en `dist/`. |
 | `preview` | `vite preview` | Sirve el build de `dist/` para verificación local. |
-| `start` | `vite preview --host 0.0.0.0 --port ${DATABRICKS_APP_PORT:-3000} --strictPort` | Runtime en Databricks Apps (lo invoca el `config:` de `databricks.yml`); `prestart` corre `npm run build` antes. |
+| `start` | `node server.mjs` | Runtime en Databricks Apps: sirve `dist/` y proxya `/api` al backend con token M2M; lo invoca el `command` de `app.yaml`. `prestart` corre `npm run build` antes. |
 | `test` | `vitest run` | Corre los tests unitarios (`src/**/*.test.ts(x)`). |
 | `lint` | `eslint .` | Linter sobre todo el proyecto. |
 
@@ -271,7 +275,7 @@ web-data-model-hub/
 ├── tsconfig.json             # TypeScript strict, paths @/*
 ├── public/                   # Íconos y assets estáticos servidos tal cual
 ├── doc/                      # Documentación técnica y de usuario (ver abajo)
-├── scripts/                  # Utilidades node (seed de stress, migración a Cosmos)
+├── scripts/                  # Utilidades node (seed de stress)
 └── src/
     ├── main.tsx              # Bootstrap React (fuentes Geist, estilos globales)
     ├── App.tsx               # Router + shell (TopNav + Outlet), guards, Toaster
@@ -389,19 +393,19 @@ sequenceDiagram
 
 ## Despliegue
 
-El frontend es una SPA estática (salida de `vite build` en `dist/`). Puede alojarse detrás del mismo dominio del backend o servirse por separado.
+En producción el frontend corre como una **Databricks App** servida por `server.mjs` (Node puro, cero dependencias): sirve el build estático de `dist/` y **proxya `/api/*`** al backend FastAPI con un token OAuth M2M de su service principal. Así el navegador habla con un **solo origen** — no hay CORS cross-origin ni el muro SSO por-app entre front y back.
 
 **Dónde corre** (dos entornos objetivo):
 
-- **Azure App Service**: se sirve el contenido estático de `dist/`; `VITE_API_URL` apunta a la URL pública del backend (o queda vacío si se sirve tras el mismo dominio/reverse-proxy que expone `/api`).
-- **Databricks Apps**: el frontend se despliega como app estática y consume el backend FastAPI (otra Databricks App). En producción `VITE_API_URL` es la URL pública del backend, por ejemplo `https://bknd-data-model-hub-....azuredatabricksapps.com`.
+- **Databricks Apps** (primario): el `command` (`node server.mjs`) y las `env` de runtime (`BACKEND_API_URL`) viven en el **`app.yaml`** de la raíz del repo; el bundle `databricks.yml` aporta las `variables:` por entorno y los permisos. El bloque `config:` del bundle **no** se usa: el CLI lo ignora (bug `databricks/cli` #4901).
+- **Azure App Service** (alternativa): se puede correr el mismo `server.mjs`, o servir `dist/` estático tras un reverse-proxy que exponga `/api`.
 
 **Consideraciones de configuración:**
 
-- `VITE_API_URL` es *build-time*: se inlinea al compilar, así que hay que definirla antes de `npm run build` para cada entorno. No es secreto (es una URL pública).
-- CORS/cookies: `apiFetch` usa `credentials: 'include'` y `Authorization: Bearer`; si frontend y backend viven en orígenes distintos, el backend debe permitir el origen del frontend y las cabeceras de auth.
+- La URL del backend es de *runtime* (`BACKEND_API_URL`, consumida por `server.mjs`), no build-time: cambiarla no exige recompilar el bundle. `VITE_API_URL` (build-time, cliente) va vacía en producción.
+- Auth/cookies: `apiFetch` manda el token propio como `X-Session-Token` y usa `credentials: 'include'` para la cookie del proxy SSO; como todo pasa por un solo origen, no hay preflight CORS cross-origin en producción.
 
-**Base de datos:** la persistencia es **Azure Cosmos DB con API de Mongo** (el frontend nunca la toca directamente — siempre pasa por la API `/api/*` del backend). Colecciones relevantes del backend incluyen las de proyectos/tablas/columnas/relaciones publicadas y `changeset_changes` (cambios pendientes por changeset, mutados solo vía `changes_map`). Toda la escritura del modelo fluye por el ciclo de gobernanza descrito arriba.
+**Base de datos:** la persistencia es **Databricks Lakebase Postgres** (el frontend nunca la toca directamente — siempre pasa por la API `/api/*` del backend). Colecciones relevantes del backend incluyen las de proyectos/tablas/columnas/relaciones publicadas y `changeset_changes` (cambios pendientes por changeset, mutados solo vía `changes_map`). Toda la escritura del modelo fluye por el ciclo de gobernanza descrito arriba.
 
 ---
 
@@ -411,13 +415,13 @@ La carpeta `doc/` contiene la documentación técnica y de usuario. Índice de l
 
 | Documento | Contenido |
 |-----------|-----------|
-| [`architecture.md`](doc/architecture.md) | Arquitectura general del frontend: capas, ruteo, cliente HTTP, stores. |
-| [`feature-architecture.md`](doc/feature-architecture.md) | Organización *feature-sliced*: cómo se estructura cada módulo (componentes/servicios/estilos). |
+| [`architecture.md`](doc/architecture.md) | Arquitectura general del frontend: capas, ruteo, cliente HTTP, stores, canvas y el servidor de producción `server.mjs`. |
+| [`consideraciones-tecnicas.md`](doc/consideraciones-tecnicas.md) | Decisiones técnicas grandes: auto-layout con ELK (`layered`/Sugiyama) y renderización a escala (LOD/zoom semántico, virtualización). |
 | [`data-flow.md`](doc/data-flow.md) | Flujo de datos: componentes → stores → servicios → API, y el puente sesión/changeset. |
 | [`api-reference.md`](doc/api-reference.md) | Referencia de los endpoints del backend que consume el frontend y el envelope de respuesta. |
 | [`design-system.md`](doc/design-system.md) | Sistema de diseño: tokens (`styles/tokens.css`), tipografías Geist, componentes UI base. |
-| [`icons.md`](doc/icons.md) | Guía de uso de íconos (lucide-react) y convenciones. |
-| [`user-guide.md`](doc/user-guide.md) | Guía funcional de usuario (equivalente escrito del Help in-app). |
-| [`deployment.md`](doc/deployment.md) | Notas de despliegue: dónde corre, variables de entorno y consideraciones. |
+| [`seguridad.md`](doc/seguridad.md) | Autenticación en producción (SSO de Databricks Apps + un solo origen), token de sesión, gating RBAC y ausencia de secretos en el bundle. |
+| [`deployment.md`](doc/deployment.md) | Dónde corre: `server.mjs`, bundle de Databricks Apps, GitHub Variables y `BACKEND_API_URL`. |
+| [`testing.md`](doc/testing.md) | Estrategia de tests con Vitest (incluidos los del servidor de producción) y consideraciones conocidas. |
 
 > El testing se ejecuta con Vitest (`npm run test`) sobre `src/**/*.test.ts(x)`; la seguridad se apoya en el login por token, los guards `RequireAuth`/`RequirePermission` del frontend y la matriz RBAC autoritativa del backend.

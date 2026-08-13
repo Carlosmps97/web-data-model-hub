@@ -17,9 +17,10 @@ jobs:
     #   · variable DATABRICKS_HOST  = URL del workspace destino
     #   · secret   DATABRICKS_TOKEN = PAT de ese workspace (solo lo usa el CLI)
     #   · variable BUNDLE_TARGET    = target del bundle (opcional; default prod)
-    # El runtime no usa nada de esto: BACKEND_API_URL llega desde databricks.yml
-    # (variable `backend_api_url`) y la consume server.mjs como destino del
-    # proxy /api (doc 36; ya no existe VITE_API_URL en el build de Apps).
+    # El runtime no usa nada de esto: BACKEND_API_URL vive en app.yaml como env
+    # de runtime (parametrizable con la GitHub Variable homónima, más abajo) y lo
+    # consume server.mjs como destino del proxy /api (doc 36; ya no existe
+    # VITE_API_URL en el build de Apps).
     env:
       DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
       DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
@@ -39,11 +40,14 @@ jobs:
       # El workspace destino NO va acá: sale de la variable DATABRICKS_HOST que
       # ya usa el CLI (el bundle dejó de hardcodear `workspace.host`).
       # OJO: BACKEND_API_URL ya NO es variable del bundle (se movió a app.yaml
-      # como env de runtime). Solo queda app_admin_user, que alimenta los
-      # permisos que el bundle SÍ aplica.
+      # como env de runtime; se parametriza en el paso siguiente). Quedan las
+      # que alimentan lo que el bundle SÍ aplica: permisos (app_admin_user) y
+      # el binding del secreto compartido del relay SSO (doc 38).
       - name: Parámetros del bundle desde GitHub Variables
         env:
           APP_ADMIN_USER: ${{ vars.APP_ADMIN_USER }}
+          SECRET_SCOPE: ${{ vars.SECRET_SCOPE }}
+          PROXY_SECRET_KEY: ${{ vars.PROXY_SECRET_KEY }}
         run: |
           set_var() {   # $1 = variable del bundle · $2 = valor de GitHub
             if [ -z "$2" ]; then echo "· $1 → default del databricks.yml"; return; fi
@@ -51,7 +55,35 @@ jobs:
             echo "· $1 = $2   (GitHub Variables)"
           }
           echo "Workspace (DATABRICKS_HOST): $DATABRICKS_HOST"
-          set_var app_admin_user  "$APP_ADMIN_USER"
+          set_var app_admin_user    "$APP_ADMIN_USER"
+          set_var secret_scope      "$SECRET_SCOPE"
+          set_var proxy_secret_key  "$PROXY_SECRET_KEY"
+
+      # Env de runtime del app.yaml desde GitHub Variables (mismo criterio que
+      # el paso de arriba, pero para el app.yaml en vez del bundle). BACKEND_API_URL
+      # se sobrescribe con la GitHub Variable HOMÓNIMA; si NO está definida
+      # (vacía), se conserva el valor commiteado del app.yaml (default) → el
+      # deploy de prod actual queda IDÉNTICO. En otro workspace basta definir la
+      # Variable BACKEND_API_URL (URL de ESE backend), sin editar el repo.
+      # app.yaml SIGUE siendo la fuente (no se borra, NO vuelve a `config:`):
+      # solo se le inyecta el valor justo antes del deploy, que `bundle deploy`
+      # sube con el resto del código (source_code_path: .). `yq` (mikefarah)
+      # viene preinstalado en ubuntu-latest; `strenv`+`style="double"` meten el
+      # valor como string literal.
+      - name: Env del app.yaml desde GitHub Variables (override opcional)
+        env:
+          BACKEND_API_URL: ${{ vars.BACKEND_API_URL }}
+        run: |
+          set_env() {   # $1 = name del env en app.yaml · $2 = valor de la GitHub Variable
+            if [ -z "$2" ]; then echo "· $1 → default de app.yaml (committed)"; return; fi
+            NAME="$1" VAL="$2" yq -i \
+              '(.env[] | select(.name == strenv(NAME)) | .value) = strenv(VAL)
+               | (.env[] | select(.name == strenv(NAME)) | .value) style="double"' app.yaml
+            echo "· $1 = $2   (GitHub Variables)"
+          }
+          set_env BACKEND_API_URL  "$BACKEND_API_URL"
+          echo "── app.yaml env efectivo ──"
+          yq '.env' app.yaml
 
       # `bundle deploy` instala el provider Terraform de Databricks. El CLI usa
       # OpenTofu por debajo y fija el provider a registry.opentofu.org; en el
@@ -72,6 +104,37 @@ jobs:
 
       - name: Validate bundle
         run: databricks bundle validate --target "$BUNDLE_TARGET"
+
+      # Doc 38: el app.yaml referencia el secreto compartido del relay SSO
+      # (`proxy_secret`) — server.mjs lo manda como x-dmh-proxy-secret. Si NO
+      # existe en el scope, la app quedaría sin arrancar tras el deploy — por
+      # eso se asegura ANTES: si el scope es Databricks-backed se crea solo
+      # (valor aleatorio, una vez; el backend lee el MISMO secret); si es Azure
+      # KeyVault-backed (solo-lectura vía API) y falta, se ABORTA con la
+      # instrucción, sin tocar la app que corre.
+      - name: Asegurar el secreto del proxy (relay SSO, doc 38)
+        env:
+          SCOPE: ${{ vars.SECRET_SCOPE || 'kv-scope-datacraft' }}
+          KEY: ${{ vars.PROXY_SECRET_KEY || 'dmh-proxy-secret' }}
+        run: |
+          if databricks secrets list-secrets "$SCOPE" --output json 2>/dev/null \
+               | jq -e --arg k "$KEY" '.secrets[]? | select(.key == $k)' > /dev/null; then
+            echo "· Secreto $SCOPE/$KEY ya existe."
+            exit 0
+          fi
+          echo "· Secreto $SCOPE/$KEY no existe: intento crearlo…"
+          if databricks secrets put-secret "$SCOPE" "$KEY" \
+               --string-value "$(openssl rand -hex 32)" 2>/dev/null; then
+            echo "· Creado (valor aleatorio). El backend lee el MISMO secret."
+            exit 0
+          fi
+          echo "ERROR: no se pudo crear $SCOPE/$KEY (¿scope Azure KeyVault-backed," >&2
+          echo "solo-lectura vía API?). Créalo a mano ANTES de re-correr el deploy:" >&2
+          echo "  · KV-backed: crear el secret '$KEY' en el Key Vault del scope." >&2
+          echo "  · Databricks-backed: databricks secrets put-secret $SCOPE $KEY \\" >&2
+          echo "      --string-value \"\$(openssl rand -hex 32)\"" >&2
+          echo "Se aborta ANTES del deploy: la app que corre no se toca." >&2
+          exit 1
 
       # Adopción de una app PRE-CREADA a mano. En workspaces con cupo de
       # apps (corporativos: se llenan y ya no dejan crear más) conviene

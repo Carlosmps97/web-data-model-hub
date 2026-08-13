@@ -11,7 +11,7 @@ Custom React hooks transversales (no pertenecen a una feature concreta).
 
 - **Dentro de una feature (`src/features/<feature>/hooks/`)**: el hook
   encapsula lógica propia de ese dominio y sólo tiene sentido para esa
-  feature. Ejemplo actual: `@/features/chat-agent/hooks/useAgentConversation.ts`.
+  feature (por ejemplo, un hook del canvas dentro de `src/features/modeler/`).
 
 ## Nomenclatura
 

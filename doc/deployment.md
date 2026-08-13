@@ -6,9 +6,9 @@ Guía de despliegue del **frontend** de Data Model Hub: qué es, cómo se compil
 
 ## 1. Qué es el frontend
 
-El frontend es una **SPA (Single Page Application)** construida con **Vite + React 19 + TypeScript**. Se **compila a archivos estáticos** (HTML, JS, CSS e imágenes) que en producción sirve un servidor Node propio, **`server.mjs`** (sección 5). Toda la lógica de UI corre en el navegador, y los datos se obtienen llamando por HTTP al **backend FastAPI** (que a su vez habla con **Databricks Lakebase Postgres**; Azure Cosmos DB quedó como fallback legacy conmutable por `DB_BACKEND`).
+El frontend es una **SPA (Single Page Application)** construida con **Vite + React 19 + TypeScript**. Se **compila a archivos estáticos** (HTML, JS, CSS e imágenes) que en producción sirve un servidor Node propio, **`server.mjs`** (sección 5). Toda la lógica de UI corre en el navegador, y los datos se obtienen llamando por HTTP al **backend FastAPI** (que a su vez habla con **Databricks Lakebase Postgres**).
 
-> Nota sobre el stack (actualizada 2026-07-31): en producción el front ya **NO se sirve con `vite preview`**. `npm run start` ejecuta **`server.mjs`** — servidor Node puro, **cero dependencias** — que sirve `dist/` **y** proxya `/api` al backend con un token OAuth M2M del service principal del front. El navegador habla con **un solo origen**, lo que resuelve el doble muro SSO de Databricks Apps (cada app tiene su propio muro SSO por subdominio; detalle en la sección 5 e historia completa en el doc 36 de `plan-implementacion/` del backend). El deploy sigue viviendo TODO en `databricks.yml` (homologación 2026-07-19: sección `variables:` + bloque `config:`; los viejos `app.yaml`, `.env.production` y la herencia `NEXT_PUBLIC_API_URL` de Next.js fueron ELIMINADOS — ver la sección 9), ahora parametrizado por GitHub Variables (sección 7).
+> Nota sobre el stack (actualizada 2026-07-31): en producción el front ya **NO se sirve con `vite preview`**. `npm run start` ejecuta **`server.mjs`** — servidor Node puro, **cero dependencias** — que sirve `dist/` **y** proxya `/api` al backend con un token OAuth M2M del service principal del front. El navegador habla con **un solo origen**, lo que resuelve el doble muro SSO de Databricks Apps (cada app tiene su propio muro SSO por subdominio; detalle en la sección 5). El `command` (`npm run start`) y las `env` de runtime (incluida `BACKEND_API_URL`) viven en el **`app.yaml`** de la raíz del repo, que Databricks lee en cada arranque; el bundle `databricks.yml` aporta las `variables:` por entorno y los permisos. El bloque `config:` del bundle **no** se usa: el CLI lo ignora (bug `databricks/cli` #4901). El `.env.production` y la herencia `NEXT_PUBLIC_API_URL` de Next.js fueron eliminados (sección 9). El deploy está parametrizado por GitHub Variables (sección 7).
 
 ### Stack real (extraído de `package.json`)
 
@@ -147,6 +147,7 @@ Dos responsabilidades:
 ### 5.2 Proxy `/api` → backend
 
 - Aplica a `/api` y `/api/*`. El destino es **`BACKEND_API_URL`**; sin ella el proxy responde 502 `{"detail":"BACKEND_API_URL is not configured."}`.
+- **Relay de identidad SSO (doc 38):** en cada request proxeada, el server BORRA cualquier header entrante `x-dmh-*` (un `fetch()` del navegador no puede suplantar el relay), copia la identidad que el proxy de Databricks atestó en este dominio (`X-Forwarded-Email` / `-Preferred-Username` / `-User`) a los headers propios `x-dmh-sso-email` / `x-dmh-sso-username` / `x-dmh-sso-user-id`, y adjunta `x-dmh-proxy-secret` (env `PROXY_SHARED_SECRET`) para autenticarlos ante el backend (`POST /api/auth/sso/login`).
 - **Token M2M (clase `TokenCache`)**: acuña `POST {DATABRICKS_HOST}/oidc/v1/token` con `Authorization: Basic base64(clientId:clientSecret)` y body `grant_type=client_credentials&scope=all-apis`. Cachea el `access_token` hasta `expires_in` (default 3600 s) **menos 5 minutos**; los mints concurrentes se deduplican — N usuarios en paralelo producen **un solo mint**. Si el mint falla → 502 `Backend authorization unavailable.`.
 - **Headers hacia el backend** (`buildUpstreamHeaders`): descarta los hop-by-hop, `host` y el **`Authorization` entrante del cliente** — el Bearer hacia el backend lo pone SIEMPRE este server, nunca el navegador. El resto pasa intacto; en particular **`X-Session-Token`**, donde viaja el JWT propio de la plataforma (ver `src/services/http.ts`). `x-forwarded-for`: se conserva el que trae el proxy de Databricks (cliente real) o, en corrida local, se usa la IP del socket — el rate limiter del backend toma la **primera IP** de esa cadena.
 - **Streaming en ambos sentidos** (`req.pipe(upstream)` y `upRes.pipe(res)`): los payloads grandes de reporting y del diagrama no se bufferizan en memoria.
@@ -160,7 +161,8 @@ Dos responsabilidades:
 | `DATABRICKS_APP_PORT` | Databricks Apps | Puerto a escuchar (fallback `PORT`, fallback `3000`; escucha en `0.0.0.0`). |
 | `DATABRICKS_HOST` | Databricks Apps | Workspace contra el que se acuña el token OAuth. |
 | `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` | Databricks Apps | Credenciales del service principal de la app front (inyección automática). |
-| `BACKEND_API_URL` | Bundle (`databricks.yml`, variable `backend_api_url`) | URL pública de la app backend — destino del proxy `/api`. |
+| `BACKEND_API_URL` | `env` de `app.yaml` (override por GitHub Variable homónima) | URL pública de la app backend — destino del proxy `/api`. |
+| `PROXY_SHARED_SECRET` | `env` de `app.yaml` (`valueFrom proxy_secret` — secreto del scope, compartido con el backend) | Autentica el relay de identidad SSO (`x-dmh-proxy-secret`, doc 38). El workflow asegura que el secreto exista antes del deploy. |
 
 Sin `DATABRICKS_CLIENT_ID`/`SECRET` el proxy no adjunta Bearer; ese es el modo de simulación local:
 
@@ -170,13 +172,13 @@ BACKEND_API_URL=http://localhost:8000 node server.mjs
 
 Requisito one-time por workspace: el service principal del front necesita **`CAN_USE` sobre la app backend** para que el proxy atraviese el muro SSO de esta; el grant está automatizado en los workflows de CI (sección 7).
 
-`server.mjs` exporta `contentTypeFor`, `safeJoin`, `TokenCache`, `buildUpstreamHeaders` y `createServer` para poder testearse; `server.test.mjs` (12 tests: unit + integración contra un backend fake) corre bajo Vitest junto con la suite del front (166 tests en total).
+`server.mjs` exporta `contentTypeFor`, `safeJoin`, `TokenCache`, `buildUpstreamHeaders` y `createServer` para poder testearse; `server.test.mjs` (15 tests: unit + integración contra un backend fake, incluido el relay SSO anti-suplantación) corre bajo Vitest junto con la suite del front (187 tests en total).
 
 ---
 
 ## 6. Variables de entorno: `BACKEND_API_URL` y `VITE_API_URL`
 
-En producción la variable operativa es **`BACKEND_API_URL`** — la lee `server.mjs` en **runtime** (no se inlinea en ningún build) y define el destino del proxy `/api`. Llega a la app como variable del bundle `backend_api_url`, que a su vez se alimenta de la GitHub Variable `BACKEND_API_URL` del repo (sección 7). Si cambia la URL del backend basta re-desplegar con la variable nueva; el bundle JS no cambia.
+En producción la variable operativa es **`BACKEND_API_URL`** — la lee `server.mjs` en **runtime** (no se inlinea en ningún build) y define el destino del proxy `/api`. Vive como `env` en el `app.yaml` del repo (con un default por workspace); el paso "Env del app.yaml desde GitHub Variables" del workflow reemplaza ese `value` con la GitHub Variable homónima `BACKEND_API_URL` cuando está definida (sección 7). Si cambia la URL del backend basta re-desplegar con la variable nueva; el bundle JS no cambia.
 
 `VITE_API_URL` sigue existiendo pero con un rol **solo local**: apuntar el front a otro backend durante el desarrollo (p. ej. probar contra el desplegado). **NO debe definirse en Databricks Apps.**
 
@@ -198,13 +200,13 @@ Vite **inlinea** las variables `VITE_*` en el bundle al compilar (`vite build`);
 
 ### Dónde se define cada una
 
-- **`BACKEND_API_URL` (producción)**: variable del bundle `backend_api_url` en `databricks.yml`, alimentada por la GitHub Variable `BACKEND_API_URL` (el workflow la exporta como `BUNDLE_VAR_backend_api_url` solo si trae valor; sin definirla rige el default del repo, que apunta al backend del workspace original). Llega al proceso de la app vía `config.env`.
+- **`BACKEND_API_URL` (producción)**: `env` en el `app.yaml` del repo (con un default commiteado por workspace). El workflow la sobrescribe con la GitHub Variable homónima `BACKEND_API_URL` mediante un paso `yq` ("Env del app.yaml desde GitHub Variables"); sin definirla rige el default commiteado. La lee `server.mjs` en runtime.
 - **`VITE_API_URL` (solo local)**: el `.env` del repo la trae vacía (mismo origen). Para apuntar a otro backend en local: `VITE_API_URL=https://<backend> npm run dev` (o `npm run build`). Ese cruce de origen exige CORS en el backend y, si el backend es una Databricks App, choca con su muro SSO — de ahí que sea un modo de trabajo solo para desarrollo.
 
-Dos advertencias del bundle (comentadas en el propio `databricks.yml`):
+Dos advertencias (comentadas en el propio `app.yaml`):
 
 1. **NO definir `VITE_API_URL` en Apps** — `API_BASE` debe quedar vacío para que el front use rutas relativas `/api` (mismo origen).
-2. **NO setear `NODE_ENV=production`** en el `config:` — rompería el `npm install` de devDependencies, y `vite`/`tsc` se necesitan para el build que corre en el arranque de la app (`prestart`).
+2. **NO setear `NODE_ENV=production`** — rompería el `npm install` de devDependencies, y `vite`/`tsc` se necesitan para el build que corre en el arranque de la app (`prestart`).
 
 ### Topologías
 
@@ -236,9 +238,8 @@ El destino productivo es **Databricks Apps**: la app **`frnt-data-model-hub`** d
 ### 7.1 El bundle (`databricks.yml`)
 
 - **`variables:`** — parámetros por entorno, ninguno se edita en el repo:
-  - `backend_api_url` ← GitHub Variable `BACKEND_API_URL`. Obligatoria en un workspace nuevo: el default apunta al backend del workspace original y el front quedaría hablándole a otro. Es el destino del proxy `/api` de `server.mjs` (**runtime**, ya no se inlinea en el build).
   - `app_admin_user` ← GitHub Variable `APP_ADMIN_USER` (opcional; default `${workspace.current_user.userName}`). Cuando el deploy lo hace un service principal de CI, `mode: production` le da `CAN_MANAGE` solo a ese SP; esta variable devuelve el control (stop/start/logs) al humano en cada deploy.
-- **`resources.apps.frontend`** — `name: frnt-data-model-hub`, `source_code_path: .`, `config.command: ['npm','run','start']` (dispara `prestart` = tsc + `vite build` → `dist/`, luego `node server.mjs`) y `config.env` con **una sola** entrada: `BACKEND_API_URL=${var.backend_api_url}`.
+- **`resources.apps.frontend`** — `name: frnt-data-model-hub`, `source_code_path: .` y el bloque `permissions:`. El `command` (`npm run start`, que dispara `prestart` = tsc + `vite build` → `dist/`, y luego `node server.mjs`) y las `env` (incluida `BACKEND_API_URL`) **no** van en el bundle: viven en `app.yaml` (el bloque `config:` lo ignora el CLI, bug #4901).
 - **`permissions:`** — declarativo y **autoritativo** (se re-aplica en cada deploy; los grants manuales hechos en la UI se pierden): `CAN_MANAGE` → `${var.app_admin_user}`, `CAN_USE` → grupo `users`. Para apps los únicos niveles válidos son exactamente esos dos.
 - **`targets:`** — solo `prod` (`mode: production`, `default: true`). El bundle **NO declara `workspace.host`**: el workspace destino sale de la variable `DATABRICKS_HOST` que usa el CLI (un `host:` hardcodeado ganaría sobre la variable y podía desplegar callado al workspace equivocado).
 
@@ -251,7 +252,7 @@ Corre en cada push a `main` (o a mano por `workflow_dispatch`). Configuración p
 | Variable | `DATABRICKS_HOST` | (la usa el CLI) | falla |
 | Secret | `DATABRICKS_TOKEN` | (la usa el CLI) | falla |
 | Variable | `BUNDLE_TARGET` | (target) | `prod` |
-| Variable | `BACKEND_API_URL` | `backend_api_url` | default del repo (workspace original) |
+| Variable | `BACKEND_API_URL` | `env` de `app.yaml` (paso `yq`) | default commiteado en `app.yaml` |
 | Variable | `APP_ADMIN_USER` | `app_admin_user` | solo el SP que despliega queda con CAN_MANAGE |
 | Variable | `BACKEND_APP_NAME` | (paso del grant) | `bknd-data-model-hub` |
 
@@ -309,7 +310,7 @@ Recomendaciones de caché al servir `dist/` (las mismas que `server.mjs` ya apli
 
 ## 8. Consideraciones de base de datos (Databricks Lakebase Postgres)
 
-El frontend **no se conecta nunca a la base de datos directamente** y no maneja credenciales. Desde 2026-07-19 la persistencia (proyectos, modelos, dominios, changesets, reporting, etc.) vive en **Databricks Lakebase Postgres** (con Azure Cosmos DB como fallback legacy conmutable — ver `plan-implementacion/28-MIGRACION-LAKEBASE.md` del backend), y solo el **backend FastAPI** habla con ella. El service principal del front tampoco necesita rol alguno en Postgres: nunca la toca.
+El frontend **no se conecta nunca a la base de datos directamente** y no maneja credenciales. Desde 2026-07-19 la persistencia (proyectos, modelos, dominios, changesets, reporting, etc.) vive en **Databricks Lakebase Postgres** (ver `plan-implementacion/28-MIGRACION-LAKEBASE.md` del backend), y solo el **backend FastAPI** habla con ella. El service principal del front tampoco necesita rol alguno en Postgres: nunca la toca.
 
 El único punto de acoplamiento del frontend con los datos es **`BACKEND_API_URL`**: el proxy de `server.mjs` debe apuntar al backend, que es dueño de la conexión a la base. Credenciales, nombres de base y colecciones son responsabilidad del backend.
 
@@ -358,9 +359,9 @@ Los artefactos que quedaron de la migración Next.js → Vite ya fueron alineado
 | Archivo | Estado actual |
 |---|---|
 | `.env.example` | `VITE_API_URL=` (vacío en dev; el proxy de Vite cubre `/api`). |
-| `.env.production` | **ELIMINADO** — desde 2026-07-31 la variable operativa de producción es `BACKEND_API_URL` (runtime, variable `backend_api_url` del bundle); `VITE_API_URL` ya no se define en Apps. |
-| `app.yaml` | **ELIMINADO** — el comando y el env viven en el bloque `config:` de `databricks.yml` (CLI ≥ 0.283). |
-| `databricks.yml` | Describe la app con `config.command: ['npm','run','start']` (build + `node server.mjs`), env `BACKEND_API_URL` y permisos declarativos (sección 7). |
+| `.env.production` | **ELIMINADO** — desde 2026-07-31 la variable operativa de producción es `BACKEND_API_URL` (runtime, `env` de `app.yaml`); `VITE_API_URL` ya no se define en Apps. |
+| `app.yaml` | **VIGENTE** — contiene `command` (`npm run start`) + `env` (`BACKEND_API_URL`); es la fuente de runtime que Databricks lee en cada arranque. |
+| `databricks.yml` | Bundle: `variables:` (`app_admin_user`) y `permissions:` declarativos; el `command`/`env` NO van acá (bloque `config:` ignorado por el CLI, bug #4901). Sección 7. |
 | `.gitignore` | Ignora `/dist` (build de Vite) y permite commitear `.env.example`. OJO: `dist/` quedó trackeado de un build viejo → `git rm -r --cached dist` en el próximo commit. |
 
 ---
@@ -394,4 +395,4 @@ flowchart TD
 - [ ] El workflow llegó a "App RUNNING" (parámetros → validate → bind → deploy → grant → run).
 - [ ] Con la sesión SSO iniciada en el navegador, `GET /api/health` **a través del origen del front** responde con `db_connected: true` — prueba conjunta del proxy de `server.mjs` y del grant `CAN_USE` del SP del front sobre la app backend.
 - [ ] Fallback SPA y caché correctos: recargar una ruta profunda (p. ej. `/model`) devuelve la app; `/assets/*` sale con `immutable` e `index.html` con `no-cache` (todo lo hace `server.mjs`; verificar solo si se tocó el server).
-- [ ] El backend habla con **Databricks Lakebase Postgres** (Cosmos DB solo como fallback legacy); el frontend no toca la base directamente.
+- [ ] El backend habla con **Databricks Lakebase Postgres**; el frontend no toca la base directamente.
