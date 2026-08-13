@@ -32,7 +32,7 @@ Data Model Hub resuelve el ciclo de vida completo de un modelo de datos empresar
 2. **Gobernar** los cambios: cada edición ocurre dentro de una *sesión* que se materializa en un *changeset/solicitud*, se envía a revisión, un aprobador decide y recién ahí se publica a producción.
 3. **Estandarizar** con glosario de términos/abreviaturas, dominios padre (plantillas de tipo de dato con cascada), reglas de nomenclatura y propiedades definidas por el usuario (UDP), todo versionado de forma independiente.
 4. **Reportar** la metadata con un motor de consulta (builder visual + caja SQL) sobre columnas, tablas, relaciones y vistas, con exportación a Excel/CSV.
-5. **Administrar** usuarios, roles y una matriz de permisos (RBAC), con login propio (token) y auditoría.
+5. **Administrar** el acceso (whitelist de correos asignados a una matriz de rol, doc 38), los roles y la matriz de permisos (RBAC), con sesión por token y auditoría.
 6. **Guiar** al usuario con un Centro de ayuda in-app bilingüe (español/inglés) que documenta cada módulo.
 
 La navegación global se organiza en un *shell* con una barra superior persistente (`TopNav`) sobre la pantalla ruteada:
@@ -199,11 +199,11 @@ Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCa
 
 ### Admin / RBAC (`/admin`)
 
-- `AdminScreen`, `UserModal`, `RoleModal`, `PermissionMatrix`: CRUD de usuarios, roles y matriz de permisos, más auditoría (`AuditEntry`). Todo gated por `admin.manage` (`admin.service`).
+- `AdminScreen`, `UserModal`, `RoleModal`, `PermissionMatrix`: **whitelist de acceso** (correos asignados a un rol — dan el login SSO; sin contraseñas, doc 38), roles y matriz de permisos, más auditoría (`AuditEntry`). La cuenta local `admin` convive en la lista (con reset de contraseña, `hasPassword`). Todo gated por `admin.manage` (`admin.service`).
 
 ### Auth (`/login`)
 
-- Login usuario/contraseña con token (`auth.service`: `/api/auth/login`, `/logout`, `/me`), guards `RequireAuth`/`RequirePermission`, `UserMenu` en la barra superior.
+- Dos caminos hacia la misma sesión por token (doc 38): **"Continue with Databricks"** (`ssoLogin` → `/api/auth/sso/login`; hereda la identidad del SSO de la plataforma, requiere el correo whitelisteado en Admin) y **"Administrator"** (solo contraseña → `/api/auth/login`). Guards `RequireAuth`/`RequirePermission`, `UserMenu` en la barra superior.
 
 ### Help — guía in-app
 

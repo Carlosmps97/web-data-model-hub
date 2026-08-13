@@ -36,7 +36,7 @@ export default function RoleModal({ mode, initial, onClose, onSaved }: Props) {
         description: description.trim() || undefined,
         permissions: initial?.permissions ?? {},
       });
-      toast.success(isEdit ? 'Rol actualizado' : 'Rol creado');
+      toast.success(isEdit ? 'Role updated' : 'Role created');
       await onSaved();
       onClose();
     } catch (e) {
@@ -63,11 +63,11 @@ export default function RoleModal({ mode, initial, onClose, onSaved }: Props) {
     >
       <div style={{ display: 'grid', gap: 13 }}>
         <Field label="Role name">
-          <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Analista de datos" autoFocus />
+          <input style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} placeholder="Data analyst" autoFocus />
         </Field>
         {!isEdit && (
           <div style={{ fontSize: 11.5, color: C.text3, marginTop: -4 }}>
-            Clave: <span style={{ fontFamily: MONO, color: C.text2 }}>{key || '—'}</span>
+            Key: <span style={{ fontFamily: MONO, color: C.text2 }}>{key || '—'}</span>
           </div>
         )}
         <Field label="Description">

@@ -636,8 +636,8 @@ export const MODULES: ModuleDoc[] = [
         {
           "subEn": "Screen layout",
           "subEs": "Disposición de la pantalla",
-          "bodyEn": "The screen is titled \"Permissions and access levels\" under the \"Administration\" eyebrow. On the left is a sidebar listing the defined roles. The main area holds, top to bottom: a search box plus an \"Add user\" button, the users table, and the per-role permission matrix. While data loads you see a loading message; if loading fails, an error card offers a \"Retry\" button.",
-          "bodyEs": "La pantalla se titula \"Permisos y niveles de acceso\" bajo el rótulo \"Administración\". A la izquierda hay una barra lateral con los roles definidos. El área principal contiene, de arriba a abajo: un buscador junto a un botón \"Agregar usuario\", la tabla de usuarios y la matriz de permisos por rol. Mientras cargan los datos ves un mensaje de carga; si la carga falla, una tarjeta de error ofrece un botón \"Reintentar\"."
+          "bodyEn": "The screen is titled \"Access and permissions\" under the \"Administration\" eyebrow. On the left is a sidebar listing the defined roles. The main area holds, top to bottom: a search box plus an \"Add email\" button, the access table (the whitelist of emails assigned to a role — assignment is what lets an account sign in with Databricks), and the per-role permission matrix. While data loads you see a loading message; if loading fails, an error card offers a \"Retry\" button.",
+          "bodyEs": "La pantalla se titula \"Access and permissions\" bajo el rótulo \"Administration\". A la izquierda hay una barra lateral con los roles definidos. El área principal contiene, de arriba a abajo: un buscador junto a un botón \"Add email\", la tabla de accesos (la whitelist de correos asignados a un rol — esa asignación es lo que permite entrar con la cuenta de Databricks) y la matriz de permisos por rol. Mientras cargan los datos se ve un mensaje de carga; si la carga falla, una tarjeta de error ofrece un botón \"Retry\"."
         },
         {
           "subEn": "Roles sidebar (Defined roles)",
@@ -666,23 +666,21 @@ export const MODULES: ModuleDoc[] = [
         {
           "subEn": "Users table",
           "subEs": "Tabla de usuarios",
-          "bodyEn": "The users table lists every user with these columns: User (round avatar with initials, full name, and email), Role (the assigned role shown as a chip), Access level (a colored chip: Full control, Edit, or Read only), Projects (the list of assigned project IDs, or \"All\" when none are set), Status (Active, Invited, or Inactive chip), and a row-actions cell with Edit (pencil) and Delete (trash) buttons. A search box above the table filters by name, email, or username. When a role is selected in the sidebar, a \"Filtering by <role>\" chip appears with an X to remove it. Empty states read \"No users yet. Add the first one.\" or \"No user matches the filter.\"",
-          "bodyEs": "La tabla de usuarios lista a cada usuario con estas columnas: Usuario (avatar redondo con iniciales, nombre completo y email), Rol (el rol asignado como chip), Nivel de acceso (un chip de color: Control total, Edición o Solo lectura), Proyectos (la lista de IDs de proyectos asignados, o \"Todos\" cuando no hay ninguno), Estado (chip Activo, Invitado o Inactivo) y una celda de acciones con botones de Editar (lápiz) y Eliminar (papelera). Un buscador sobre la tabla filtra por nombre, email o usuario. Cuando hay un rol seleccionado en la barra lateral, aparece un chip \"Filtrando por <rol>\" con una X para quitarlo. Los estados vacíos dicen \"No hay usuarios todavía. Agregá el primero.\" o \"Ningún usuario coincide con el filtro.\"",
+          "bodyEn": "The access table lists every entry with these columns: User (round avatar with initials, the name — or the email in italics with \"Pending first sign-in\" until the account signs in for the first time), Role (the assigned role shown as a chip), Access level (a colored chip: Full control, Edit, or Read only), Status (Active, Invited, or Disabled chip), and a row-actions cell with Edit (pencil) and Remove access (trash) buttons. A search box above the table filters by name or email. When a role is selected in the sidebar, a \"Filtering by <role>\" chip appears with an X to remove it. Empty states read \"No emails yet. Add the first one to grant access.\" or \"No user matches the filter.\"",
+          "bodyEs": "La tabla de accesos lista cada entrada con estas columnas: User (avatar redondo con iniciales, el nombre — o el correo en cursiva con \"Pending first sign-in\" hasta que la cuenta entre por primera vez), Role (el rol asignado como chip), Access level (un chip de color: Full control, Edit o Read only), Status (chip Active, Invited o Disabled) y una celda de acciones con botones de Editar (lápiz) y Quitar acceso (papelera). Un buscador sobre la tabla filtra por nombre o correo. Cuando hay un rol seleccionado en la barra lateral, aparece un chip \"Filtering by <rol>\" con una X para quitarlo. Los estados vacíos dicen \"No emails yet. Add the first one to grant access.\" o \"No user matches the filter.\"",
           "itemsEn": [
-            "User (avatar + name + email)",
+            "User (avatar + name or email; \"Pending first sign-in\" until first login)",
             "Role chip",
             "Access level chip: Full control / Edit / Read only",
-            "Projects (assigned IDs or \"All\")",
-            "Status chip: Active / Invited / Inactive",
-            "Per-row Edit and Delete buttons"
+            "Status chip: Active / Invited / Disabled",
+            "Per-row Edit and Remove access buttons"
           ],
           "itemsEs": [
-            "Usuario (avatar + nombre + email)",
-            "Chip de Rol",
-            "Chip de Nivel de acceso: Control total / Edición / Solo lectura",
-            "Proyectos (IDs asignados o \"Todos\")",
-            "Chip de Estado: Activo / Invitado / Inactivo",
-            "Botones de Editar y Eliminar por fila"
+            "User (avatar + nombre o correo; \"Pending first sign-in\" hasta el primer login)",
+            "Chip de rol",
+            "Chip de nivel de acceso: Full control / Edit / Read only",
+            "Chip de estado: Active / Invited / Disabled",
+            "Botones de Editar y Quitar acceso por fila"
           ]
         },
         {
@@ -692,28 +690,30 @@ export const MODULES: ModuleDoc[] = [
           "bodyEs": "El chip de Nivel de acceso se calcula automáticamente a partir de los permisos del rol, no se define a mano. Si el rol tiene \"Administrar usuarios y permisos\" muestra Control total (rojo). Si no, y tiene \"Crear/editar tablas\", \"Editar Data Standards\" o \"Publicar a producción\", muestra Edición (ámbar). Si no tiene ninguno de esos, muestra Solo lectura (verde). Esto da un resumen de un vistazo de lo que el rol de cada usuario realmente le permite hacer."
         },
         {
-          "subEn": "Adding and editing users",
-          "subEs": "Agregar y editar usuarios",
-          "bodyEn": "The \"Add user\" button (and the row Edit button) opens the user dialog. Fields: Username (required when creating; read-only when editing), Full name (required), Email (required), Role (dropdown of existing roles, required), Status (Active / Invited / Inactive), Projects (comma-separated project IDs — leaving it empty grants access to all projects), and Password. On creation the password is required and acts as the initial password; when editing, leaving the password blank keeps the current one unchanged. Buttons are Cancel and Create user / Save changes. This is where you activate or deactivate a user, by setting Status to Active or Inactive.",
-          "bodyEs": "El botón \"Agregar usuario\" (y el botón Editar de la fila) abre el diálogo de usuario. Campos: Usuario/username (obligatorio al crear; de solo lectura al editar), Nombre completo (obligatorio), Email (obligatorio), Rol (desplegable de los roles existentes, obligatorio), Estado (Activo / Invitado / Inactivo), Proyectos (IDs de proyecto separados por coma — dejarlo vacío da acceso a todos los proyectos) y Contraseña. Al crear, la contraseña es obligatoria y funciona como contraseña inicial; al editar, dejar la contraseña en blanco mantiene la actual sin cambios. Los botones son Cancelar y Crear usuario / Guardar cambios. Acá es donde activás o desactivás a un usuario, poniendo el Estado en Activo o Inactivo.",
+          "subEn": "Granting and editing access (the whitelist)",
+          "subEs": "Dar y editar acceso (la whitelist)",
+          "bodyEn": "There are no passwords to create: access is granted by whitelisting an email. The \"Add email\" button opens the dialog with just two required fields — Email (the Databricks account email, exactly as it signs in to the workspace) and Role — plus Status. The person then signs in with \"Continue with Databricks\"; their name fills in automatically on first sign-in (you can override it later). The row Edit button lets you change Role, Status, and Name. Only local accounts with a password (such as admin) additionally show a \"Reset password\" field; leaving it blank keeps the current one. Disabling an entry (Status: Disabled) blocks access without removing the email from the list.",
+          "bodyEs": "Ya no se crean contraseñas: el acceso se otorga whitelisteando un correo. El botón \"Add email\" abre el diálogo con solo dos campos obligatorios — Email (el correo de la cuenta de Databricks, exactamente como entra al workspace) y Role — más Status. La persona luego entra con \"Continue with Databricks\"; su nombre se completa solo en el primer login (se puede sobreescribir después). El botón Editar de la fila permite cambiar rol, estado y nombre. Solo las cuentas locales con contraseña (como admin) muestran además un campo \"Reset password\"; dejarlo en blanco mantiene la actual. Deshabilitar una entrada (Status: Disabled) bloquea el acceso sin quitar el correo de la lista.",
           "itemsEn": [
-            "Username (fixed after creation), Full name, Email",
-            "Role (required) and Status (Active / Invited / Inactive)",
-            "Projects: comma-separated IDs, or empty for all projects",
-            "Password: required on create; blank on edit = keep current"
+            "Add email: Email + Role (no password — access comes from the whitelist)",
+            "The email must match the Databricks sign-in email (case-insensitive)",
+            "Name auto-fills on first sign-in; editable afterwards",
+            "Status Disabled blocks access without removing the entry",
+            "\"Reset password\" appears only for local accounts (admin)"
           ],
           "itemsEs": [
-            "Usuario (fijo tras crear), Nombre completo, Email",
-            "Rol (obligatorio) y Estado (Activo / Invitado / Inactivo)",
-            "Proyectos: IDs separados por coma, o vacío para todos los proyectos",
-            "Contraseña: obligatoria al crear; en blanco al editar = mantener la actual"
+            "Add email: correo + rol (sin contraseña — el acceso nace de la whitelist)",
+            "El correo debe coincidir con el del login de Databricks (sin distinguir mayúsculas)",
+            "El nombre se completa solo en el primer login; editable después",
+            "El estado Disabled bloquea el acceso sin quitar la entrada",
+            "\"Reset password\" aparece solo en cuentas locales (admin)"
           ]
         },
         {
           "subEn": "Deleting users and roles",
           "subEs": "Eliminar usuarios y roles",
-          "bodyEn": "Deleting a user or a role always opens a confirmation dialog before anything happens. For a user it warns that the account will be removed and the action cannot be undone. For a role it names the role and warns how many users currently have it assigned, and that the action cannot be undone; if that role was being used as the table filter, the filter is cleared afterward. The confirm button shows \"Deleting…\" while it works, and if the deletion fails the dialog stays open with an error message.",
-          "bodyEs": "Eliminar un usuario o un rol siempre abre un diálogo de confirmación antes de que pase nada. Para un usuario advierte que la cuenta se eliminará y que la acción no se puede deshacer. Para un rol nombra el rol y advierte cuántos usuarios lo tienen asignado actualmente, y que la acción no se puede deshacer; si ese rol se estaba usando como filtro de la tabla, el filtro se limpia después. El botón de confirmar muestra \"Eliminando…\" mientras trabaja, y si la eliminación falla el diálogo permanece abierto con un mensaje de error."
+          "bodyEn": "Deleting a user or a role always opens a confirmation dialog before anything happens. For an access entry it warns that the account will lose access to the platform (it can be granted again later by adding the email back). For a role it names the role and warns how many users currently have it assigned, and that the action cannot be undone; if that role was being used as the table filter, the filter is cleared afterward. The confirm button shows \"Deleting…\" while it works, and if the deletion fails the dialog stays open with an error message.",
+          "bodyEs": "Eliminar un usuario o un rol siempre abre un diálogo de confirmación antes de que pase nada. Para una entrada de acceso advierte que la cuenta perderá el acceso a la plataforma (se puede volver a otorgar agregando el correo de nuevo). Para un rol nombra el rol y advierte cuántos usuarios lo tienen asignado actualmente, y que la acción no se puede deshacer; si ese rol se estaba usando como filtro de la tabla, el filtro se limpia después. El botón de confirmar muestra \"Eliminando…\" mientras trabaja, y si la eliminación falla el diálogo permanece abierto con un mensaje de error."
         },
         {
           "subEn": "Permission matrix (RBAC)",

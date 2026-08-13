@@ -34,3 +34,10 @@ env:
   # deploy. Sin esa Variable definida, queda este default.
   - name: BACKEND_API_URL
     value: https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com
+  # Secreto compartido con el backend (doc 38): server.mjs lo adjunta como
+  # `x-dmh-proxy-secret` para autenticar el relay de identidad SSO
+  # (x-dmh-sso-*). MISMO secret del scope que lee el backend (recurso
+  # `proxy_secret` en databricks.yml). Si falta en el scope, el workflow lo
+  # crea o aborta ANTES del deploy (paso "Asegurar el secreto del proxy").
+  - name: PROXY_SHARED_SECRET
+    valueFrom: proxy_secret

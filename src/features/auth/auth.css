@@ -42,6 +42,25 @@
 .dmh-login-btn:hover:not(:disabled) { background: #1E48E0; }
 .dmh-login-btn:disabled { opacity: 0.55; cursor: default; }
 
+/* Doc 38: variante secundaria (modo administrador) + piezas del layout de
+   dos caminos (hint bajo el botón SSO, divisor "or", volver). */
+.dmh-login-btn--ghost { background: #fff; color: #1A2B4A; border: 1px solid #E2E6EE; }
+.dmh-login-btn--ghost:hover:not(:disabled) { background: #F4F6FA; }
+.dmh-login-hint { font-size: 12px; color: #8A93A5; line-height: 1.45; margin: 10px 2px 14px; }
+.dmh-login-divider {
+  display: flex; align-items: center; gap: 10px; margin: 4px 0 6px;
+  color: #B4BBC8; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.06em;
+}
+.dmh-login-divider::before, .dmh-login-divider::after {
+  content: ''; flex: 1; height: 1px; background: #EAEDF2;
+}
+.dmh-login-form { display: flex; flex-direction: column; }
+.dmh-login-back {
+  display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 14px;
+  border: none; background: none; color: #8A93A5; font-size: 12.5px; font-family: inherit; cursor: pointer;
+}
+.dmh-login-back:hover { color: #1A2B4A; }
+
 /* UserMenu — bloque de identidad real. */
 .dmh-usermenu-me { display: flex; align-items: center; gap: 11px; padding: 10px 12px; }
 .dmh-usermenu-me-name { font-size: 13.5px; font-weight: 600; color: #1A2B4A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

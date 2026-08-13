@@ -19,6 +19,15 @@
  *  - DATABRICKS_HOST      workspace (para acunar el token OAuth)
  *  - DATABRICKS_CLIENT_ID / DATABRICKS_CLIENT_SECRET  credenciales del SP
  *  - BACKEND_API_URL      URL publica de la app backend (variable del bundle)
+ *  - PROXY_SHARED_SECRET  secreto compartido con el backend (doc 38): viaja en
+ *    `x-dmh-proxy-secret` y autentica el relay de identidad SSO (valueFrom en
+ *    app.yaml; el backend lee el MISMO secret del scope)
+ *
+ * Relay de identidad SSO (doc 38): el proxy de Databricks autentica al usuario
+ *  en ESTE dominio e inyecta X-Forwarded-Email / -Preferred-Username / -User.
+ *  Este server copia esa identidad a headers propios `x-dmh-sso-*` (que el hop
+ *  del backend no pisa) y BORRA cualquier `x-dmh-*` que venga del cliente — un
+ *  fetch() del navegador jamas puede suplantar la identidad relevada.
  *
  * Sin DATABRICKS_CLIENT_ID/SECRET (corrida local) el proxy NO adjunta Bearer:
  *  `BACKEND_API_URL=http://localhost:8000 node server.mjs` simula produccion
@@ -130,14 +139,27 @@ const DROP_HEADERS = new Set([
   'proxy-authorization', 'proxy-authenticate', 'authorization',
 ]);
 
-export function buildUpstreamHeaders(incoming, token, clientIp) {
+export function buildUpstreamHeaders(incoming, token, clientIp, proxySecret = '') {
   const out = {};
   for (const [key, value] of Object.entries(incoming)) {
     const k = key.toLowerCase();
     if (DROP_HEADERS.has(k)) continue;
+    // Anti-suplantacion (doc 38): los `x-dmh-*` SOLO los pone este server; un
+    // fetch() del navegador con esos headers forjados se descarta siempre.
+    if (k.startsWith('x-dmh-')) continue;
     out[k] = value;
   }
   if (token) out.authorization = `Bearer ${token}`;
+  // Relay de identidad SSO (doc 38): la identidad que el proxy de Databricks
+  // atesto EN ESTE dominio se copia a headers propios (el proxy del hop
+  // backend puede pisar los X-Forwarded-*; los x-dmh-* llegan intactos) y el
+  // secreto compartido los autentica en el backend.
+  if (out['x-forwarded-email']) out['x-dmh-sso-email'] = out['x-forwarded-email'];
+  if (out['x-forwarded-preferred-username']) {
+    out['x-dmh-sso-username'] = out['x-forwarded-preferred-username'];
+  }
+  if (out['x-forwarded-user']) out['x-dmh-sso-user-id'] = out['x-forwarded-user'];
+  if (proxySecret) out['x-dmh-proxy-secret'] = proxySecret;
   // El X-Forwarded-For del proxy de Databricks (cliente real) se conserva;
   // si no vino (corrida local directa), se usa el peer del socket. El rate
   // limiter del backend toma la PRIMERA IP de esta cadena.
@@ -171,7 +193,8 @@ async function proxyApi(req, res, cfg, attempt = 0) {
   const client = target.protocol === 'http:' ? http : https;
   const upstream = client.request(target, {
     method: req.method,
-    headers: buildUpstreamHeaders(req.headers, token, req.socket?.remoteAddress),
+    headers: buildUpstreamHeaders(req.headers, token, req.socket?.remoteAddress,
+                                  cfg.proxySecret),
     timeout: cfg.timeoutMs,
   }, (upRes) => {
     // Token vencido/revocado a mitad de vida: el proxy de Databricks del
@@ -274,12 +297,14 @@ if (isMain) {
     host: normalizeHost(process.env.DATABRICKS_HOST),
     clientId: process.env.DATABRICKS_CLIENT_ID ?? '',
     clientSecret: process.env.DATABRICKS_CLIENT_SECRET ?? '',
+    proxySecret: process.env.PROXY_SHARED_SECRET ?? '',
     tokens: new TokenCache(),
     timeoutMs: 120_000,
   };
   const port = Number(process.env.DATABRICKS_APP_PORT ?? process.env.PORT ?? 3000);
   createServer(cfg).listen(port, '0.0.0.0', () => {
     console.log(`[server] escuchando en :${port} | backend: ${cfg.backend || '(no configurado)'}`
-      + ` | auth SP: ${cfg.clientId ? 'si' : 'no (passthrough local)'}`);
+      + ` | auth SP: ${cfg.clientId ? 'si' : 'no (passthrough local)'}`
+      + ` | relay SSO: ${cfg.proxySecret ? 'con secreto' : 'sin secreto'}`);
   });
 }

@@ -1,8 +1,12 @@
 /**
- * auth.service — login usuario/contraseña + sesión por token (auth propia).
+ * auth.service — sesión por token; dos formas de iniciarla (doc 38).
  *
  * Backend (envelope `{success,data}`):
- *   POST /api/auth/login  {username, password} → { token, user }
+ *   POST /api/auth/sso/login                     → { token, user }  (identidad
+ *        heredada del SSO de Databricks Apps; 403 si el correo no está
+ *        asignado a un rol en Admin)
+ *   POST /api/auth/login  {username, password} → { token, user }  (cuenta
+ *        local con contraseña — carril del administrador)
  *   POST /api/auth/logout                        → { ok }
  *   GET  /api/auth/me                            → SessionUser | Principal básico
  */
@@ -36,6 +40,10 @@ export interface LoginResult {
 
 export const login = (username: string, password: string) =>
   apiPost<LoginResult>(`${API_BASE}/api/auth/login`, { username, password });
+
+/** Login con la identidad heredada de Databricks (doc 38). Sin body: la
+ *  identidad viaja en headers que el server del front releva al backend. */
+export const ssoLogin = () => apiPost<LoginResult>(`${API_BASE}/api/auth/sso/login`);
 
 export const logout = () => apiPost<{ ok: boolean }>(`${API_BASE}/api/auth/logout`);
 

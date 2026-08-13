@@ -263,13 +263,14 @@ A continuación, el detalle por área funcional. En todas las tablas, la ruta es
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
+| `ssoLogin()` | POST | `/api/auth/sso/login` | — (identidad en headers de relay del server, doc 38) | `{ token, user: SessionUser }` |
 | `login(username, password)` | POST | `/api/auth/login` | `{ username, password }` | `{ token, user: SessionUser }` |
 | `logout()` | POST | `/api/auth/logout` | — | `{ ok: boolean }` |
 | `fetchMe()` | GET | `/api/auth/me` | — | `SessionUser` |
 | `getMe()` | GET | `/api/me` | — | `Principal` |
 | `ensureBackendSession()` | GET | `/api/health` (probe) + `/api/auth/warmup/{next_b64}` (navegación) | — | — |
 
-El login está rate-limited en el backend (`5/minute` por IP). `SessionUser` incluye el rol, `projectIds`, `initials` y el mapa de permisos efectivos:
+`ssoLogin()` es el carril principal (doc 38): el botón "Continue with Databricks" hereda la identidad del SSO de la plataforma — el server del front la releva en headers `x-dmh-sso-*` con secreto compartido — y entra solo si el correo está asignado a un rol en Admin (403 con mensaje accionable si no). `login()` queda como carril del administrador (la UI pide solo la contraseña de la cuenta `admin`). Ambos emiten el mismo token y comparten el pipeline del store (`enterSession`: resetAppState → localStorage → mirror). El login por contraseña está rate-limited en el backend (`5/minute` por IP; el SSO a `10/minute`). `SessionUser` incluye el rol, `projectIds`, `initials` y el mapa de permisos efectivos:
 
 ```ts
 /** Permisos de la matriz (1:1 con el backend `PERMISSIONS`). */

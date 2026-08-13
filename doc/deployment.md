@@ -147,6 +147,7 @@ Dos responsabilidades:
 ### 5.2 Proxy `/api` → backend
 
 - Aplica a `/api` y `/api/*`. El destino es **`BACKEND_API_URL`**; sin ella el proxy responde 502 `{"detail":"BACKEND_API_URL is not configured."}`.
+- **Relay de identidad SSO (doc 38):** en cada request proxeada, el server BORRA cualquier header entrante `x-dmh-*` (un `fetch()` del navegador no puede suplantar el relay), copia la identidad que el proxy de Databricks atestó en este dominio (`X-Forwarded-Email` / `-Preferred-Username` / `-User`) a los headers propios `x-dmh-sso-email` / `x-dmh-sso-username` / `x-dmh-sso-user-id`, y adjunta `x-dmh-proxy-secret` (env `PROXY_SHARED_SECRET`) para autenticarlos ante el backend (`POST /api/auth/sso/login`).
 - **Token M2M (clase `TokenCache`)**: acuña `POST {DATABRICKS_HOST}/oidc/v1/token` con `Authorization: Basic base64(clientId:clientSecret)` y body `grant_type=client_credentials&scope=all-apis`. Cachea el `access_token` hasta `expires_in` (default 3600 s) **menos 5 minutos**; los mints concurrentes se deduplican — N usuarios en paralelo producen **un solo mint**. Si el mint falla → 502 `Backend authorization unavailable.`.
 - **Headers hacia el backend** (`buildUpstreamHeaders`): descarta los hop-by-hop, `host` y el **`Authorization` entrante del cliente** — el Bearer hacia el backend lo pone SIEMPRE este server, nunca el navegador. El resto pasa intacto; en particular **`X-Session-Token`**, donde viaja el JWT propio de la plataforma (ver `src/services/http.ts`). `x-forwarded-for`: se conserva el que trae el proxy de Databricks (cliente real) o, en corrida local, se usa la IP del socket — el rate limiter del backend toma la **primera IP** de esa cadena.
 - **Streaming en ambos sentidos** (`req.pipe(upstream)` y `upRes.pipe(res)`): los payloads grandes de reporting y del diagrama no se bufferizan en memoria.
@@ -161,6 +162,7 @@ Dos responsabilidades:
 | `DATABRICKS_HOST` | Databricks Apps | Workspace contra el que se acuña el token OAuth. |
 | `DATABRICKS_CLIENT_ID` / `DATABRICKS_CLIENT_SECRET` | Databricks Apps | Credenciales del service principal de la app front (inyección automática). |
 | `BACKEND_API_URL` | `env` de `app.yaml` (override por GitHub Variable homónima) | URL pública de la app backend — destino del proxy `/api`. |
+| `PROXY_SHARED_SECRET` | `env` de `app.yaml` (`valueFrom proxy_secret` — secreto del scope, compartido con el backend) | Autentica el relay de identidad SSO (`x-dmh-proxy-secret`, doc 38). El workflow asegura que el secreto exista antes del deploy. |
 
 Sin `DATABRICKS_CLIENT_ID`/`SECRET` el proxy no adjunta Bearer; ese es el modo de simulación local:
 
@@ -170,7 +172,7 @@ BACKEND_API_URL=http://localhost:8000 node server.mjs
 
 Requisito one-time por workspace: el service principal del front necesita **`CAN_USE` sobre la app backend** para que el proxy atraviese el muro SSO de esta; el grant está automatizado en los workflows de CI (sección 7).
 
-`server.mjs` exporta `contentTypeFor`, `safeJoin`, `TokenCache`, `buildUpstreamHeaders` y `createServer` para poder testearse; `server.test.mjs` (12 tests: unit + integración contra un backend fake) corre bajo Vitest junto con la suite del front (166 tests en total).
+`server.mjs` exporta `contentTypeFor`, `safeJoin`, `TokenCache`, `buildUpstreamHeaders` y `createServer` para poder testearse; `server.test.mjs` (15 tests: unit + integración contra un backend fake, incluido el relay SSO anti-suplantación) corre bajo Vitest junto con la suite del front (187 tests en total).
 
 ---
 

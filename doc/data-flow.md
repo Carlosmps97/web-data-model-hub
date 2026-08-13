@@ -65,7 +65,7 @@ curl -sS http://localhost:8000/api/projects \
 
 ### 2.1 Piezas
 
-- `src/features/auth/LoginScreen.tsx` — formulario usuario/contraseña; al montar dispara `ensureBackendSession()` (warm-up, ver 2.4).
+- `src/features/auth/LoginScreen.tsx` — dos caminos (doc 38): botón **"Continue with Databricks"** (POST `/api/auth/sso/login`, hereda la identidad del SSO; el correo debe estar asignado a un rol en Admin) y botón **"Administrator"** (solo contraseña; cuenta local `admin`). Al montar dispara `ensureBackendSession()` (warm-up, ver 2.4 — no-op con un solo origen).
 - `src/features/auth/auth.service.ts` — `login`, `logout`, `fetchMe`.
 - `src/store/useAuthStore.ts` — orquesta token + estado (`loading | anon | authed`).
 - `src/store/resetAppState.ts` — aislamiento por sesión: se ejecuta en login/logout/401.

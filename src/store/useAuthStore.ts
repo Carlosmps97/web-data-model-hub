@@ -21,6 +21,7 @@ interface AuthState {
   user: SessionUser | null;
   error: string | null;
   login: (username: string, password: string) => Promise<void>;
+  loginSso: () => Promise<void>;
   logout: () => Promise<void>;
   restore: () => Promise<void>;
   has: (perm: Permission) => boolean;
@@ -35,7 +36,19 @@ function mirror(user: SessionUser): void {
   });
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
+export const useAuthStore = create<AuthState>((set, get) => {
+  /** Pipeline común a ambos logins: el nuevo actor arranca SIN estado heredado
+   *  (defensa en profundidad: token expirado, tab reusada), persiste el token
+   *  y espeja al actor legacy. */
+  const enterSession = (token: string, user: SessionUser): void => {
+    resetAppState();
+    localStorage.setItem(TOKEN_KEY, token);
+    setAuthToken(token);
+    mirror(user);
+    set({ user, status: 'authed', error: null });
+  };
+
+  return {
   status: 'loading',
   user: null,
   error: null,
@@ -43,13 +56,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (username, password) => {
     set({ error: null });
     const { token, user } = await auth.login(username.trim(), password);
-    // Defensa en profundidad: si la sesión anterior murió sin logout (token
-    // expirado, tab reusada), el nuevo actor arranca SIN estado heredado.
-    resetAppState();
-    localStorage.setItem(TOKEN_KEY, token);
-    setAuthToken(token);
-    mirror(user);
-    set({ user, status: 'authed', error: null });
+    enterSession(token, user);
+  },
+
+  loginSso: async () => {
+    set({ error: null });
+    const { token, user } = await auth.ssoLogin();
+    enterSession(token, user);
   },
 
   logout: async () => {
@@ -81,7 +94,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   has: (perm) => Boolean(get().user?.permissions?.[perm]),
-}));
+  };
+});
 
 // 401 global → cerrar sesión (el guard de ruta redirige a /login).
 setOnUnauthorized(() => {

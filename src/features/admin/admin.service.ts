@@ -9,13 +9,16 @@ import { API_BASE } from '@/services/apiBase';
 const ADMIN = `${API_BASE}/api/admin`;
 
 export interface AdminUser {
-  id: string;               // username
+  id: string;               // username (correo lowercase en entradas SSO — doc 38)
   email: string;
   name: string;
   role: string;             // role key
   projectIds: string[];
   status: 'active' | 'invited' | 'disabled' | string;
   initials?: string | null;
+  /** true solo en cuentas locales con contraseña (p.ej. `admin`): habilita el
+   *  reset de contraseña en el modal. Las entradas de whitelist no la tienen. */
+  hasPassword?: boolean;
 }
 
 export interface Role {
@@ -35,8 +38,10 @@ export interface AuditEntry {
   meta?: Record<string, unknown>;
 }
 
+/** Alta en la whitelist (doc 38): correo + rol. `password` queda solo para
+ *  cuentas locales (el backend la exige si el username no es un correo). */
 export interface CreateUserInput {
-  username: string; email: string; name: string; role: string; password: string;
+  username: string; role: string; email?: string; name?: string; password?: string;
   projectIds?: string[]; status?: string;
 }
 export interface UpdateUserInput {
@@ -62,12 +67,12 @@ export const getAudit = (limit = 200) => apiGet<AuditEntry[]>(`${ADMIN}/audit?li
 
 /** Etiquetas legibles de cada permiso (filas de la matriz, pantalla 14 + R10). */
 export const PERMISSION_LABELS: Record<string, string> = {
-  'model.view': 'Ver modelo / Canvas',
+  'model.view': 'View model / canvas',
   'model.edit': 'Create / edit tables',
-  'review.decide': 'Aprobar / rechazar solicitudes',
+  'review.decide': 'Approve / reject requests',
   'publish': 'Publish to production',
   'rollback': 'Roll back to a published version',
-  'export': 'Exportar DDL / metadata',
+  'export': 'Export DDL / metadata',
   'standards.edit': 'Edit Data Standards',
   'admin.manage': 'Manage users and permissions',
 };
