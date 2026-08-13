@@ -37,7 +37,8 @@ env:
   # Secreto compartido con el backend (doc 38): server.mjs lo adjunta como
   # `x-dmh-proxy-secret` para autenticar el relay de identidad SSO
   # (x-dmh-sso-*). MISMO secret del scope que lee el backend (recurso
-  # `proxy_secret` en databricks.yml). Si falta en el scope, el workflow lo
-  # crea o aborta ANTES del deploy (paso "Asegurar el secreto del proxy").
+  # `proxy_secret` en databricks.yml). Se administra A MANO (igual que
+  # session-secret-key); el workflow solo VERIFICA que exista antes del
+  # deploy (paso "Verificar el secreto del proxy").
   - name: PROXY_SHARED_SECRET
     valueFrom: proxy_secret
