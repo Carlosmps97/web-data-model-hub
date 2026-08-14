@@ -73,7 +73,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const [savingDef, setSavingDef] = useState(false);
   useEffect(() => {
     if (table) setForm({ logicalName: table.logicalName, physicalName: table.physicalName, schema: table.schema ?? '', description: table.description ?? '' });
-  }, [table]);
+    // Re-sembrar SOLO al cambiar de tabla (doc 40): con deps por identidad,
+    // cualquier reload del diagrama (guardar un UDP, blur de la definición)
+    // pisaba lo que el usuario tenía a medio tipear en este form.
+  }, [table?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── DnD reorder (HTML5 nativo) ──
   const [dragId, setDragId] = useState<string | null>(null);
@@ -150,6 +153,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       // `updateTable` sólo cubre name/schema; un único upsert changeset-aware (merge
       // sobre la tabla actual) cubre además `description`, y luego reload.
       await gov.createTable({ ...table, logicalName: logical, physicalName: physical, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
+      // El form ya no se re-siembra en cada reload (solo al cambiar de tabla):
+      // reflejar acá el físico derivado para que el input no quede stale.
+      setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
       await reload();
       pushToast('Table updated');
     // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador) en
@@ -160,6 +166,19 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const derivePhysical = async () => {
     try { const p = (await gov.physicalize(form.logicalName.trim(), 'table')).physical; setForm((f) => ({ ...f, physicalName: p })); }
     catch { pushToast("Couldn't derive the physical name", 'err'); }
+  };
+  // Definición funcional: auto-guardado al salir del campo (doc 40), mismo
+  // paradigma que la definición de columna — antes cerrar el panel sin Save la
+  // perdía. Los NOMBRES y el schema siguen detrás del botón Save: un rename es
+  // transaccional (re-deriva el físico, re-apunta vistas, valida unicidad) y
+  // no debe dispararse a medio tipear. `...table` usa los nombres del server:
+  // un nombre a medio editar en el form NO viaja con este blur.
+  const saveDescriptionOnBlur = async () => {
+    if (!canEdit || !table) return;
+    const next = form.description.trim() || undefined;
+    if ((table.description ?? undefined) === next) return;
+    try { await gov.createTable({ ...table, description: next }); await reload(); }
+    catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
   };
   const saveTableUdp = async (next: Record<string, string>) => {
     if (!table) return;
@@ -430,7 +449,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
               <SchemaSelect value={form.schema} onChange={(v) => setForm({ ...form, schema: v })} disabled={!canEdit} />
             </div>
             <div className="wk-props-field"><label>Functional definition</label>
-              <textarea className="wk-pp-textarea" disabled={!canEdit} placeholder="What this entity represents…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+              <textarea className="wk-pp-textarea" disabled={!canEdit} placeholder="What this entity represents…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} onBlur={() => void saveDescriptionOnBlur()} />
             </div>
             {canEdit && (
               <button className="rd-btn rd-btn-primary rd-btn-sm" style={{ width: '100%' }} disabled={savingDef} onClick={saveDef}>
@@ -675,7 +694,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
             {/* User Defined Properties (etiquetas key-value para clasificar el dato). */}
             <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px solid #EAEDF2' }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#1A2B4A', marginBottom: 10 }}>User Defined Properties</div>
-              <UdpAssign level="table" values={table.udpValues ?? {}} disabled={!canEdit} onChange={saveTableUdp} />
+              {/* key por tabla: al cambiar de selección se resetean borradores
+                  y pendientes del asignador (estado interno de UdpAssign). */}
+              <UdpAssign key={table.id} level="table" values={table.udpValues ?? {}} disabled={!canEdit} onChange={saveTableUdp} />
             </div>
           </>
         )}

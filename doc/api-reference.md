@@ -547,25 +547,30 @@ export const effective = <T>(
 
 Ruta: `GET /api/changesets/{id}/effective/{collection}?tableId=&ids=&q=&limit=&schema=`. Las colecciones que consulta la UI son `canonical_tables`, `canonical_columns`, `relationships`, `views`, `schemas`, `projects`, `folders` y `subject_areas`. Los filtros son obligatorios en la práctica para no mover colecciones enteras (por ejemplo, `canonical_columns` puede tener cientos de miles de docs); `schema` acota a un esquema (Database Explorer draft-aware, doc 25).
 
-**Escrituras (siempre al changeset)** — todas pasan por un choke-point único, `governance.service.rec()`, que:
+**Escrituras (siempre al changeset)** — todas pasan por el guard único `governance.service.writableCs()`, que:
 
 1. Bloquea si el modo de apertura es `readonly`.
-2. Exige un changeset activo.
-3. Llama a `changeset.service.recordChange`.
+2. Exige un changeset activo (y devuelve su id).
+
+Sobre ese guard hay dos caminos: `rec()` (un cambio → `changeset.service.recordChange`) y `recordChangesBulk()` (un LOTE de cambios → `changeset.service.recordChangesBulk`, doc 39 — cascadas de borrar tabla / crear tabla desde fuentes en una sola llamada; los ítems se arman con los builders de `governance.service.bulk` para que los nombres de colecciones versionadas no salgan de los services).
 
 ```ts
-const rec = (collection, id, op, payload?) => {
+const writableCs = (): string => {
   if (useSessionStore.getState().openMode === 'readonly')
     throw new Error('The model is open read-only: it does not accept changes.');
   const a = active();
   if (!a) throw new Error('An active changeset is required to edit.');
-  return csvc.recordChange(a, collection, id, op, payload);
+  return a;
 };
+const rec = (collection, id, op, payload?) => csvc.recordChange(writableCs(), collection, id, op, payload);
+export const recordChangesBulk = (changes: BulkChange[]) => csvc.recordChangesBulk(writableCs(), changes);
 ```
 
 ```ts
 export const recordChange = (id, collection, entityId, op: 'upsert' | 'delete', payload?) =>
   apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
+// Lote: tandas de 1000 SECUENCIALES contra PUT /changes/bulk; lote vacío = cero requests.
+export const recordChangesBulk = async (id, changes: BulkChange[], chunkSize = 1000) => { /* doc 39 */ };
 ```
 
 Operaciones de modelo mapeadas a `PUT /api/changesets/{id}/changes`:
@@ -573,7 +578,7 @@ Operaciones de modelo mapeadas a `PUT /api/changesets/{id}/changes`:
 | Operación de UI | `collection` | `op` |
 |---|---|---|
 | `createTable(t)` | `canonical_tables` | `upsert` |
-| `deleteTable(id)` — soft-delete versionado; el cascade (columnas/relaciones/vistas/membresías) lo orquesta el store, doc 23 | `canonical_tables` | `delete` |
+| `deleteTable(id)` — soft-delete versionado; el cascade (columnas/relaciones/vistas/membresías) lo orquesta el store, doc 23; desde doc 39 vistas+relaciones+columnas viajan EN LOTE (`recordChangesBulk`) y la tabla cierra la cascada | `canonical_tables` | `delete` |
 | `createColumn(c)` / `updateColumn(c)` | `canonical_columns` | `upsert` |
 | `deleteColumn(id)` | `canonical_columns` | `delete` |
 | `markForeignKey(col, identifying, pkPosition?)` | `canonical_columns` | `upsert` |
@@ -591,6 +596,7 @@ El backend valida en `add_change` el límite de longitud del nombre físico por 
 | `getChangeset(id)` | GET | `/api/changesets/{id}` | — | `Changeset` |
 | `createChangeset(title)` | POST | `/api/changesets` | `{ title }` | `Changeset` |
 | `recordChange(...)` | PUT | `/api/changesets/{id}/changes` | `{ collection, entityId, op, payload }` | `Changeset` |
+| `recordChangesBulk(id, changes)` (doc 39) | PUT | `/api/changesets/{id}/changes/bulk` | `{ changes: BulkChange[] }` (tandas de 1000) | `Changeset` |
 | `submitChangeset(id)` | POST | `/api/changesets/{id}/submit` | — | `Changeset` |
 | `approveChangeset(id)` (legacy) | POST | `/api/changesets/{id}/approve` | — | `Changeset` |
 | `rejectChangeset(id, note?)` (legacy) | POST | `/api/changesets/{id}/reject` | `{ note }` | `Changeset` |

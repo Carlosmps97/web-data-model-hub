@@ -644,7 +644,7 @@ En producción el frontend es una **Databricks App** (`frnt-data-model-hub`). El
 
 Arquitectura de **un solo origen** (desde 2026-07-31, doc 36 de plan-implementacion/): el navegador solo habla con el front; el cruce al backend lo hace `server.mjs` servidor-a-servidor. En desarrollo, el dev server de Vite (`:3000`) reenvía `/api` al FastAPI (`:8000`) vía proxy — mismo contrato de rutas relativas. La simulación local de producción es `BACKEND_API_URL=http://localhost:8000 node server.mjs` (sin credenciales de SP, el proxy va sin Bearer).
 
-La suite del repo, verificada 2026-07-31: `npx tsc --noEmit` limpio + `npx vitest run` = **166 tests en 24 archivos** (23 `*.test.ts` bajo `src/` + los 12 tests de `server.test.mjs`).
+La suite del repo, verificada 2026-08-13: `npx tsc --noEmit` limpio + `npx vitest run` = **208 tests en 30 archivos** (29 `*.test.ts` bajo `src/` + los 15 tests de `server.test.mjs`).
 
 ### 11.2 Variables de entorno
 

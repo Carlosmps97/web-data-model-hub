@@ -30,6 +30,22 @@ export interface ProjectTree {
   canvases: SubjectArea[]; // canvases sin carpeta (folderId == null)
 }
 
+/** Alta de columna (popup "New column", doc 40): además del nombre/dominio/
+ *  tipo, el popup captura la metadata completa — definición funcional, flags
+ *  y UDPs — para no obligar a pasar por Properties · Columns tras crear. */
+export interface AddColumnInput {
+  logicalName: string;
+  mode: 'logical' | 'physical';
+  parentDomainId?: string;
+  dataType?: string;
+  description?: string;
+  isPrimaryKey?: boolean;
+  isForeignKey?: boolean;
+  isNullable?: boolean;
+  isPartition?: boolean;
+  udpValues?: Record<string, string>;
+}
+
 interface ModelerState {
   projects: Project[];
   folders: Folder[];
@@ -137,7 +153,7 @@ interface ModelerState {
   saveAllLayout: () => Promise<void>;
   autoOrganize: () => Promise<void>;
   createTable: (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical' }) => Promise<void>;
-  addColumn: (tableId: string, input: { logicalName: string; mode: 'logical' | 'physical'; parentDomainId?: string; dataType?: string }) => Promise<void>;
+  addColumn: (tableId: string, input: AddColumnInput) => Promise<void>;
   createRelationship: (conn: { source: string; sourceHandle: string; target: string; targetHandle: string }) => Promise<void>;
   updateRelationship: (r: gov.Relationship) => Promise<void>;
   deleteRelationship: (id: string) => Promise<void>;
@@ -534,7 +550,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // detrás de un bloque que ya estaba en el canvas (pedido owner).
     set({ selectedTableId: id, selectedEdgeId: null });
   },
-  addColumn: async (tableId: string, input: { logicalName: string; mode: 'logical' | 'physical'; parentDomainId?: string; dataType?: string }) => {
+  addColumn: async (tableId: string, input: AddColumnInput) => {
     get().markDirty();
     const id = crypto.randomUUID();
     const physical = input.mode === 'logical' ? (await gov.physicalize(input.logicalName)).physical : input.logicalName;
@@ -546,9 +562,22 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // INICIO de la tabla) — coherente con la propagación a vistas de abajo.
     const siblings = (get().diagram?.columns ?? []).filter((c) => c.tableId === tableId);
     const ordinal = siblings.length ? Math.max(...siblings.map((c) => c.ordinal)) + 1 : 0;
+    // Metadata del alta (doc 40): payload LIMPIO como en edición — flags solo
+    // cuando se apartan del default (nullable true ES el default: no viaja),
+    // description/udpValues solo con contenido. Una PK nueva entra AL FINAL de
+    // la llave si la tabla maneja orden explícito (doc 19 §12b, como patchCol).
+    const description = (input.description ?? '').trim();
+    const pkPosition = input.isPrimaryKey ? nextPkPosition(siblings) : null;
     await gov.createColumn({
       id, tableId, logicalName: input.logicalName, physicalName: physical,
       parentDomainId: input.parentDomainId || undefined, dataType, typeOverridden: !!override, ordinal,
+      ...(description ? { description } : {}),
+      ...(input.isPrimaryKey ? { isPrimaryKey: true } : {}),
+      ...(input.isForeignKey ? { isForeignKey: true } : {}),
+      ...(input.isNullable === false ? { isNullable: false } : {}),
+      ...(input.isPartition ? { isPartition: true } : {}),
+      ...(input.udpValues && Object.keys(input.udpValues).length ? { udpValues: input.udpValues } : {}),
+      ...(pkPosition != null ? { pkPosition } : {}),
     });
     // V1 (doc 19 §12b): la columna nueva entra AUTOMÁTICAMENTE a las vistas
     // ESPEJO de la tabla (las que reflejan TODAS sus columnas), al final. Las
@@ -630,16 +659,20 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     get().markDirty();
     const id = crypto.randomUUID();
     const physical = (await gov.physicalize(logicalName, 'table')).physical;
-    await gov.createTable({ id, logicalName, physicalName: physical, schema: schema?.trim() || undefined });
+    // Tabla + columnas EN UN LOTE (doc 39): el loop por columna eran N requests
+    // secuenciales — importar cientos de columnas de tablas fuente demoraba
+    // igual que el borrado. El backend valida el lote completo antes de
+    // escribir: una columna inválida/duplicada ya no deja la tabla a medias.
     let ordinal = 0;
-    for (const c of columns) {
-      await gov.createColumn({
+    await gov.recordChangesBulk([
+      gov.bulk.createTable({ id, logicalName, physicalName: physical, schema: schema?.trim() || undefined }),
+      ...columns.map((c) => gov.bulk.createColumn({
         id: crypto.randomUUID(), tableId: id,
         logicalName: c.logicalName, physicalName: c.physicalName,
         parentDomainId: c.parentDomainId, dataType: c.dataType, typeOverridden: c.typeOverridden,
         isPrimaryKey: c.isPrimaryKey, ordinal: ordinal++,
-      });
-    }
+      })),
+    ]);
     const sa = await struct.getSubjectArea(saId);
     await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
     await get().reload();
@@ -657,26 +690,34 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   deleteTable: async (tableId) => {
     get().markDirty();
-    // Cascada COMPLETA en el changeset (versionada): primero lo que REFERENCIA
-    // la tabla, la tabla al final. Un solo reload al terminar.
-    // 1) vistas que la usan (cualquier fuente: tableId o sourceTableIds).
-    const views = await viewsSvc.listViews(tableId).catch(() => []);
-    for (const v of views) await viewsSvc.deleteView(v.id);
-    // 2) relaciones donde es extremo (globales). Junta las columnas HIJA de la
-    //    OTRA tabla (sobrevive) para limpiarles el FK huérfano después.
-    const rels = await gov.listRelationships(tableId).catch(() => []);
+    // Cascada COMPLETA en el changeset (versionada), grabada EN LOTE (doc 39):
+    // el camino cambio-por-cambio eran ~1 request por columna — a 4k columnas
+    // (tablas DDV reales) el borrado tomaba minutos. Las LECTURAS van primero
+    // (estado pre-borrado, como el loop viejo: ninguna afecta a las otras),
+    // luego UN bulk con vistas + relaciones + columnas, y la tabla AL FINAL
+    // fuera del lote — mismo orden observable: si algo se interrumpe, la tabla
+    // sigue viva y repetir el delete converge. Un solo reload al terminar.
+    const [views, rels, cols] = await Promise.all([
+      // vistas que la usan (cualquier fuente: tableId o sourceTableIds)
+      viewsSvc.listViews(tableId).catch(() => []),
+      // relaciones donde es extremo (globales)
+      gov.listRelationships(tableId).catch(() => []),
+      gov.listColumns(tableId).catch(() => []),
+    ]);
+    // Columnas HIJA de la OTRA tabla (sobrevive): FK huérfano a limpiar después.
     const orphanFk: { colId: string; tableId: string }[] = [];
     for (const r of rels) {
       if (r.parentTableId === tableId && r.childTableId !== tableId) {
         r.pairs.forEach((p) => orphanFk.push({ colId: p.childColumnId, tableId: r.childTableId }));
       }
-      await gov.deleteRelationship(r.id);
     }
-    // 3) columnas de la tabla.
-    const cols = await gov.listColumns(tableId).catch(() => []);
-    for (const c of cols) await gov.deleteColumn(c.id);
-    // 4) FK huérfano en columnas HIJA sobrevivientes (misma regla conservadora
-    //    que deleteRelationship: si ya no participan en ninguna relación).
+    await gov.recordChangesBulk([
+      ...views.map((v) => gov.bulk.deleteView(v.id)),
+      ...rels.map((r) => gov.bulk.deleteRelationship(r.id)),
+      ...cols.map((c) => gov.bulk.deleteColumn(c.id)),
+    ]);
+    // FK huérfano en columnas HIJA sobrevivientes (misma regla conservadora
+    // que deleteRelationship: si ya no participan en ninguna relación).
     const seen = new Set<string>();
     for (const { colId, tableId: ctid } of orphanFk) {
       if (seen.has(colId)) continue; seen.add(colId);
@@ -685,10 +726,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const c = (await gov.listColumns(ctid).catch(() => [])).find((x) => x.id === colId);
       if (c?.isForeignKey) await gov.updateColumn({ ...c, isForeignKey: false });
     }
-    // 5) sacar de TODOS los canvases que la contienen (tableIds + layout).
+    // Sacar de TODOS los canvases que la contienen (tableIds + layout).
     const usage = await gov.tableUsage(tableId).then((u) => u.usage).catch(() => []);
     for (const u of usage) await struct.removeTableFromCanvas(u.canvasId, tableId);
-    // 6) la tabla.
+    // La tabla.
     await gov.deleteTable(tableId);
     if (get().selectedTableId === tableId) set({ selectedTableId: null });
     await get().reload();
