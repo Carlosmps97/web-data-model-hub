@@ -7,6 +7,7 @@ import { apiErrorMessage } from '@/services/http';
 import { COLUMN_DATA_TYPES } from '@/types/model';
 import { isComplexTypeStart } from '../lib/complexTypes';
 import { createNameSync, type NameSync } from '../lib/nameSync';
+import type { AddColumnInput } from '@/store/useModelerStore';
 import ComplexTypeBuilder from './ComplexTypeBuilder';
 import UdpAssign from './UdpAssign';
 
@@ -18,7 +19,7 @@ const LONG_TYPE_LEN = 40;
 export default function ColumnEditor({ tableId, onClose, onAdd }: {
   tableId: string;
   onClose: () => void;
-  onAdd: (tableId: string, input: { logicalName: string; mode: 'logical' | 'physical'; parentDomainId?: string; dataType?: string }) => Promise<void>;
+  onAdd: (tableId: string, input: AddColumnInput) => Promise<void>;
 }) {
   const [mode, setMode] = useState<'logical' | 'physical'>('logical');
   const [name, setName] = useState('');
@@ -28,6 +29,18 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const [domains, setDomains] = useState<ParentDomain[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Metadata del alta (doc 40): definición funcional, flags y UDPs en el MISMO
+  // popup — antes había que crear la columna y luego ir a Properties · Columns.
+  const [description, setDescription] = useState('');
+  const [isPrimaryKey, setIsPrimaryKey] = useState(false);
+  const [isForeignKey, setIsForeignKey] = useState(false);
+  const [isNullable, setIsNullable] = useState(true);
+  const [isPartition, setIsPartition] = useState(false);
+  const [udpValues, setUdpValues] = useState<Record<string, string>>({});
+  // Ref espejo de los UDP: el blur del input (commit de UdpAssign) dispara en
+  // el MISMO gesto que el click en "Add" — el submit lee el ref (sincrónico)
+  // para no perder ese último valor contra el batching del estado.
+  const udpRef = useRef<Record<string, string>>({});
   // Token de secuencia: al escribir rápido, la respuesta de physicalize de un
   // texto MÁS CORTO podía llegar DESPUÉS y pisar el preview (carrera fuera de
   // orden → "colcomplicado2" mostraba "COLCOMPLIC"). Debounce + guarda: solo
@@ -51,7 +64,12 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     setBusy(true);
     setError(null);
     try {
-      await onAdd(tableId, { logicalName: name.trim(), mode, parentDomainId: parentDomainId || undefined, dataType: dataType || undefined });
+      await onAdd(tableId, {
+        logicalName: name.trim(), mode, parentDomainId: parentDomainId || undefined, dataType: dataType || undefined,
+        description: description.trim() || undefined,
+        isPrimaryKey, isForeignKey, isNullable, isPartition,
+        udpValues: udpRef.current,
+      });
       onClose();
     } catch (e) {
       // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
@@ -59,6 +77,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       setError(apiErrorMessage(e, "Couldn't add the column"));
     } finally { setBusy(false); }
   };
+  const setUdp = (next: Record<string, string>) => { udpRef.current = next; setUdpValues(next); };
 
   return (
     <Modal title="New column (Attribute)" icon="columns" onClose={onClose}
@@ -117,6 +136,22 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
           {isComplexTypeStart(dataType) && (
             <ComplexTypeBuilder value={dataType} onChange={setDataType} />
           )}
+        </div>
+        <input className="rd-input" placeholder="Functional definition (optional)" value={description}
+          onChange={(e) => setDescription(e.target.value)} style={{ width: '100%' }} />
+        {/* Flags — misma fila que Properties · Columns. Marcar PK des-marca
+            Nullable (una PK no es nullable); sigue editable por si acaso. */}
+        <div className="wk-pp-flags">
+          <label className={`wk-pp-flag pk${isPrimaryKey ? ' on' : ''}`}><input type="checkbox" checked={isPrimaryKey} onChange={() => { const on = !isPrimaryKey; setIsPrimaryKey(on); if (on) setIsNullable(false); }} /><Icon name="key" size={11} /> PK</label>
+          <label className={`wk-pp-flag fk${isForeignKey ? ' on' : ''}`}><input type="checkbox" checked={isForeignKey} onChange={() => setIsForeignKey(!isForeignKey)} /><Icon name="link" size={11} /> FK</label>
+          <label className={`wk-pp-flag nl${isNullable ? ' on' : ''}`}><input type="checkbox" checked={isNullable} onChange={() => setIsNullable(!isNullable)} /> Nullable</label>
+          <label className={`wk-pp-flag pt${isPartition ? ' on' : ''}`}><input type="checkbox" checked={isPartition} onChange={() => setIsPartition(!isPartition)} /><Icon name="grid" size={11} /> Partition</label>
+        </div>
+        {/* UDP a nivel columna: BUFFER local (como el modal de Model properties)
+            — nada viaja hasta el Add; el alta va en un solo payload. */}
+        <div style={{ paddingTop: 10, borderTop: '1px solid #EEF1F6' }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A93A5', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 8 }}>User Defined Properties</div>
+          <UdpAssign level="column" values={udpValues} onChange={setUdp} />
         </div>
       </div>
       {error && (
@@ -197,11 +232,20 @@ export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, 
   useEffect(() => { setLogical(col.logicalName); setPhysical(col.physicalName); setDataType(col.dataType); setDescription(col.description ?? ''); setDomainId(col.parentDomainId ?? ''); sync.current?.reset(col.logicalName, col.physicalName); }, [col.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const pendingDeb = useRef<Record<string, Partial<CanonicalColumn>>>({});
   const debounced = (key: string, fields: Partial<CanonicalColumn>) => {
     clearTimeout(timers.current[key]);
-    timers.current[key] = setTimeout(() => { void onPatch(col.id, fields); }, 400);
+    pendingDeb.current[key] = fields;
+    timers.current[key] = setTimeout(() => { delete pendingDeb.current[key]; void onPatch(col.id, fields); }, 400);
   };
-  useEffect(() => () => { Object.values(timers.current).forEach(clearTimeout); sync.current?.dispose(); }, []);
+  useEffect(() => () => {
+    Object.values(timers.current).forEach(clearTimeout);
+    // Flush (doc 40): colapsar la fila o cerrar el panel DENTRO de la ventana
+    // del debounce ya no pierde lo tipeado (description/dataType pendientes).
+    for (const fields of Object.values(pendingDeb.current)) void onPatchRef.current(col.id, fields);
+    pendingDeb.current = {};
+    sync.current?.dispose();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onLogical = (v: string) => sync.current?.setLogical(v);
   const onPhysical = (v: string) => sync.current?.setPhysical(v);

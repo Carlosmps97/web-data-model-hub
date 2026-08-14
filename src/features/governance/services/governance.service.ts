@@ -29,17 +29,36 @@ export interface CanonicalColumn {
 }
 
 const active = () => useChangesetStore.getState().activeId;
-const rec = (collection: string, id: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) => {
-  // Choke-point de TODAS las escrituras de modelo. En `readonly` puede haber
-  // changeset activo (visualizar un request desde Review lee su overlay), pero
-  // NUNCA habilita mutaciones — el backend igual respondería 409; esto corta
-  // antes y con un mensaje claro.
+// Guard común de TODAS las escrituras de modelo. En `readonly` puede haber
+// changeset activo (visualizar un request desde Review lee su overlay), pero
+// NUNCA habilita mutaciones — el backend igual respondería 409; esto corta
+// antes y con un mensaje claro.
+const writableCs = (): string => {
   if (useSessionStore.getState().openMode === 'readonly') {
     throw new Error('The model is open read-only: it does not accept changes.');
   }
   const a = active();
   if (!a) throw new Error('An active changeset is required to edit.');
-  return csvc.recordChange(a, collection, id, op, payload);
+  return a;
+};
+const rec = (collection: string, id: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) =>
+  csvc.recordChange(writableCs(), collection, id, op, payload);
+
+/** Lote de cambios en UNA llamada (doc 39) — cascadas de borrar tabla / crear
+ *  tabla desde fuentes: el camino cambio-por-cambio eran N requests
+ *  secuenciales (minutos a 4k columnas). Mismos guards que `rec`; lote vacío
+ *  no viaja. Los ítems se arman con los builders de `bulk` (las colecciones
+ *  versionadas no se nombran fuera de los services). */
+export type BulkChange = csvc.BulkChange;
+export const recordChangesBulk = (changes: BulkChange[]) => csvc.recordChangesBulk(writableCs(), changes);
+export const bulk = {
+  deleteTable: (id: string): BulkChange => ({ collection: 'canonical_tables', entityId: id, op: 'delete' }),
+  deleteColumn: (id: string): BulkChange => ({ collection: 'canonical_columns', entityId: id, op: 'delete' }),
+  deleteRelationship: (id: string): BulkChange => ({ collection: 'relationships', entityId: id, op: 'delete' }),
+  // Paridad con views.service.deleteView (misma colección versionada).
+  deleteView: (id: string): BulkChange => ({ collection: 'views', entityId: id, op: 'delete' }),
+  createTable: (t: CanonicalTable): BulkChange => ({ collection: 'canonical_tables', entityId: t.id, op: 'upsert', payload: { ...t } }),
+  createColumn: (c: CanonicalColumn): BulkChange => ({ collection: 'canonical_columns', entityId: c.id, op: 'upsert', payload: { ...c } }),
 };
 
 // ── lectura helper público (siempre publicado): conversión lógico→físico ──

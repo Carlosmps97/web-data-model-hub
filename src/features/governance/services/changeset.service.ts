@@ -18,6 +18,23 @@ export const getChangeset = (id: string) => apiGet<Changeset>(`${CS}/${encodeURI
 export const createChangeset = (title: string) => apiPost<Changeset>(CS, { title });
 export const recordChange = (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) =>
   apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
+/** Un cambio del lote de `recordChangesBulk` (mismo shape que recordChange). */
+export interface BulkChange {
+  collection: string; entityId: string; op: 'upsert' | 'delete';
+  payload?: Record<string, unknown>;
+}
+/** Lote de cambios en UNA request por tanda (doc 39): las cascadas de borrar
+ *  tabla / crear tabla desde fuentes iban cambio-por-cambio — a 4k columnas
+ *  eran minutos. Tandas de 1000 (mismo criterio que la carga Erwin),
+ *  SECUENCIALES para no saturar el backend; el server valida el lote COMPLETO
+ *  de cada tanda antes de escribir. Lote vacío = cero requests. */
+export const recordChangesBulk = async (id: string, changes: BulkChange[], chunkSize = 1000): Promise<Changeset | undefined> => {
+  let last: Changeset | undefined;
+  for (let i = 0; i < changes.length; i += chunkSize) {
+    last = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes/bulk`, { changes: changes.slice(i, i + chunkSize) });
+  }
+  return last;
+};
 /** Estado efectivo de una colección. `opts.tableId`/`opts.ids` acotan la
  *  respuesta a un slice server-side — sin filtro, canonical_columns a escala
  *  (300k docs) mueve la colección completa por request. `opts.q`/`opts.limit`:
