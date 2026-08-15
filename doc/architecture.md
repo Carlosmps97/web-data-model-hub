@@ -1,6 +1,6 @@
 # Arquitectura del Frontend — web-data-model-hub
 
-> **Actualizado 2026-07-31** — versiones de dependencias pineadas exactas (política de ambos repos), servidor de producción propio `server.mjs` (§3.1), LOD del canvas (§6.7), review con `ChangesSummary`/`ChangesDetailModal` y 5.ª pestaña "DDL Export rules" en Data Standards (§9), despliegue de un solo origen (§11).
+> **Actualizado 2026-07-31** — versiones de dependencias pineadas exactas (política de ambos repos), servidor de producción propio `server.mjs` (§3.1), LOD del canvas (§6.7), review con `ChangesSummary`/`ChangesDetailModal` y 5.ª pestaña "DDL Export rules" en Data Standards (§8), despliegue de un solo origen (§10).
 
 ## 1. Visión
 
@@ -25,7 +25,7 @@ Un principio transversal es que **el frontend nunca toca la base de datos direct
 
 ## 2. Stack tecnológico
 
-El proyecto es 100% TypeScript, construido con **Vite** (que también sirve el dev server; en producción sirve `server.mjs`, §3.1). No usa Next.js (migró desde Next a Vite); desde 2026-07-19 los `.env` y manifiestos de deploy ya usan `VITE_API_URL` (la herencia `NEXT_PUBLIC_*` fue eliminada) y el código lee `import.meta.env.VITE_API_URL` (centralizado en `src/services/apiBase.ts`; en producción la variable no se define, ver §11).
+El proyecto es 100% TypeScript, construido con **Vite** (que también sirve el dev server; en producción sirve `server.mjs`, §3.1). No usa Next.js (migró desde Next a Vite); desde 2026-07-19 los `.env` y manifiestos de deploy ya usan `VITE_API_URL` (la herencia `NEXT_PUBLIC_*` fue eliminada) y el código lee `import.meta.env.VITE_API_URL` (centralizado en `src/services/apiBase.ts`; en producción la variable no se define, ver §10).
 
 **Política de versiones (2026-07-31, ambos repos)**: todas las dependencias — `dependencies` y `devDependencies` — van pineadas **exactas**, sin `^` ni `~` (el backend aplica el mismo criterio con `==` en pip). Actualizar una versión es siempre un cambio deliberado y revisable en el `package.json`, nunca un efecto lateral de un `npm install`.
 
@@ -84,7 +84,7 @@ Una regla de ESLint (`no-restricted-imports`) refuerza los **límites de feature
 
 ## 3. Scaffolding de `src/`
 
-La estructura separa el *chrome* global (shell, layout, UI primitives) de las *features* verticales (modeler, reporting, standards, admin, governance, ddl, auth, help). Cada feature es autocontenida (componentes + servicios + estilos + barrel).
+La estructura separa el *chrome* global (shell, layout, UI primitives) de las *features* verticales (modeler, reporting, standards, admin, governance, ddl, auth). Cada feature es autocontenida (componentes + servicios + estilos + barrel).
 
 ```
 src/
@@ -116,7 +116,7 @@ src/
 │   ├── reporting/           # Grilla + Report Designer (ver §7)
 │   │   ├── components/      #   ReportDesigner, FilterBuilder, ResultsGrid, SqlEditor
 │   │   └── query.service.ts #   ReportSpec, runQuery/runSql, insights, export
-│   ├── standards/           # Glossary / Parent Domains / UDP / DDL Export rules (ver §9)
+│   ├── standards/           # Glossary / Parent Domains / UDP / DDL Export rules (ver §8)
 │   │   ├── components/      #   StandardsScreen, GlossaryPage, DomainsPage, UdpDefsPage,
 │   │   │                    #   DdlRulesTab, DdlRuleCatalog, DdlRuleEditor,
 │   │   │                    #   DdlRuleTemplates, DdlLookupsEditor
@@ -132,13 +132,12 @@ src/
 │   │   │                    #   ChangesetBar, CatalogPanel
 │   │   └── services/        #   changeset.service, governance.service
 │   ├── ddl/                 # generators (genDDL/genViewDDL), rulesBridge, ExportDdlModal
-│   ├── auth/                # LoginScreen, guards (RequireAuth/RequirePermission), auth.service
-│   └── help/                # HelpCenter bilingüe + contenido + PDF técnico
+│   └── auth/                # LoginScreen, guards (RequireAuth/RequirePermission), auth.service
 ├── screens/                 # Pantallas de alto nivel montadas por el router
 │   ├── HomeScreen.tsx
 │   ├── ReportingScreen.tsx
 │   ├── ReviewScreen.tsx
-│   └── review/              #   ChangesSummary, ChangesDetailModal, DiffTree (ver §9)
+│   └── review/              #   ChangesSummary, ChangesDetailModal, DiffTree (ver §8)
 ├── store/                   # Stores Zustand + bridge + reset (ver §4)
 │   ├── useAuthStore.ts
 │   ├── useSessionStore.ts
@@ -570,21 +569,7 @@ flowchart TD
 
 ---
 
-## 8. El módulo Help (`features/help`)
-
-`HelpCenter` es una guía de uso in-app, renderizada con `createPortal` como modal a pantalla completa (`z-index 1000`). Características:
-
-- **Bilingüe** ES/EN con un selector propio (`lang`), sin depender de i18n externo: el contenido (`helpContent.ts`, `helpModules.generated.ts`) trae variantes `...En`/`...Es`.
-- **Buscable**: filtra los módulos por texto (título, blurb, bullets).
-- **Estructurado**: módulos (home, canvas, standards, reporting, admin, workflow), conceptos, pasos (STEPS) y FAQ, cada uno con su ícono lucide.
-- **PDF técnico**: `openTechnicalDocPdf(lang)` abre la documentación técnica; si el navegador bloquea el pop-up, avisa con un toast.
-- **Contacto**: enlace `mailto:` al soporte.
-
-Se abre desde el botón "Help" del `TopNav` y se cierra con `Escape` o clic en el *backdrop*.
-
----
-
-## 9. Los otros módulos de feature
+## 8. Los otros módulos de feature
 
 Para completar el mapa funcional:
 
@@ -602,7 +587,7 @@ El flujo de gobernanza (crear draft → editar en canvas → enviar a revisión 
 
 ---
 
-## 10. Diagrama del flujo de estado end-to-end
+## 9. Diagrama del flujo de estado end-to-end
 
 Este `sequenceDiagram` traza un caso completo: abrir un modelo en edición y editar una columna.
 
@@ -636,9 +621,9 @@ sequenceDiagram
 
 ---
 
-## 11. Despliegue y entorno
+## 10. Despliegue y entorno
 
-### 11.1 Dónde corre
+### 10.1 Dónde corre
 
 En producción el frontend es una **Databricks App** (`frnt-data-model-hub`). El `command` de `app.yaml` es `npm run start`: el hook `prestart` construye (`npm run build` = `tsc --noEmit && vite build` → carpeta `dist/`) y `start` levanta **`node server.mjs`** (§3.1), que sirve el bundle estático y proxya `/api` al backend con el token M2M del service principal. Al usar `BrowserRouter` (rutas limpias sin `#`), es `server.mjs` quien hace el *fallback* de cualquier ruta no encontrada a `index.html`, para que el enrutado del lado del cliente funcione al recargar en `/model`, `/reporting`, etc. (Cualquier otro host estático necesitaría replicar ese fallback y un proxy equivalente.)
 
@@ -646,7 +631,7 @@ Arquitectura de **un solo origen** (desde 2026-07-31, doc 36 de plan-implementac
 
 La suite del repo, verificada 2026-08-14: `npx tsc --noEmit` limpio + `npx vitest run` = **251 tests en 35 archivos** (34 `*.test.ts` bajo `src/` + los 15 tests de `server.test.mjs`).
 
-### 11.2 Variables de entorno
+### 10.2 Variables de entorno
 
 Desde 2026-07-31 la URL del backend es una variable de **runtime** que consume `server.mjs`; ya no se inlinea nada en el build:
 
@@ -657,7 +642,7 @@ Desde 2026-07-31 la URL del backend es una variable de **runtime** que consume `
 
 Todos los servicios anteponen `API_BASE` (centralizado en `src/services/apiBase.ts`: `import.meta.env.VITE_API_URL ?? ''`) a sus rutas `/api/...`. Con `VITE_API_URL` sin definir, `API_BASE` queda vacío y **todas las llamadas son relativas `/api`** — que es exactamente el estado de producción: mismo origen, atendido por `server.mjs`. `.env.production` y la herencia `NEXT_PUBLIC_API_URL` fueron eliminados en la homologación de 2026-07-19.
 
-### 11.3 Consideraciones de base de datos
+### 10.3 Consideraciones de base de datos
 
 El frontend **no accede a la base de datos**: toda la persistencia la resuelve el backend contra **Databricks Lakebase Postgres** (adaptador JSONB estilo pymongo). Lo relevante para el front es el contrato y sus implicancias de escala:
 

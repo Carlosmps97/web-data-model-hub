@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { CircleHelp, Database, Search, TriangleAlert } from 'lucide-react';
+import { Database, Search, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import type { Permission } from '@/features/auth/auth.service';
-import HelpCenter from '@/features/help/HelpCenter';
 import UserMenu from './UserMenu';
 
 interface NavItem {
@@ -51,7 +50,6 @@ export default function TopNav() {
   // Destino de navegación interceptado por el guard (null = sin popup).
   const [leaveTo, setLeaveTo] = useState<string | null>(null);
   const [savingLeave, setSavingLeave] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
 
   /** true si interceptó la navegación (hay cambios sin guardar en /model). */
   const intercept = (to: string): boolean => {
@@ -118,15 +116,8 @@ export default function TopNav() {
             aria-label="Search"
           />
         </div>
-        {/* Help — Guía de uso in-app (a la izquierda del usuario logueado). */}
-        <button type="button" className="dmh-help-btn" onClick={() => setHelpOpen(true)} aria-label="Help — usage guide">
-          <CircleHelp size={16} strokeWidth={1.8} aria-hidden />
-          <span>Help</span>
-        </button>
         <UserMenu />
       </div>
-
-      {helpOpen && <HelpCenter onClose={() => setHelpOpen(false)} />}
 
       {/* ── Popup de cambios sin guardar (guard de salida del modeler) ──
           El scrim NO cierra al click (pedido owner 07-17): sólo botones. */}
