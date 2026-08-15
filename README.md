@@ -1,6 +1,6 @@
 # Data Model Hub — Frontend
 
-Aplicación web (SPA) para **diseñar, documentar, gobernar y reportar modelos de datos** al estilo de herramientas como erwin Data Modeler, pero pensada para la nube y el trabajo colaborativo. Es el **frontend** de la plataforma Data Model Hub: consume una API REST (FastAPI) que persiste en Databricks Lakebase Postgres y expone toda la experiencia visual — el canvas entidad-relación, el reporting de metadata, los estándares de datos, la administración/RBAC y una guía de uso in-app.
+Aplicación web (SPA) para **diseñar, documentar, gobernar y reportar modelos de datos** al estilo de herramientas como erwin Data Modeler, pero pensada para la nube y el trabajo colaborativo. Es el **frontend** de la plataforma Data Model Hub: consume una API REST (FastAPI) que persiste en Databricks Lakebase Postgres y expone toda la experiencia visual — el canvas entidad-relación, el reporting de metadata, los estándares de datos y la administración/RBAC.
 
 Este repositorio contiene **solo la capa de presentación** (Vite + React + TypeScript). El backend vive en un repositorio aparte (`backend-data-model-hub`).
 
@@ -33,7 +33,6 @@ Data Model Hub resuelve el ciclo de vida completo de un modelo de datos empresar
 3. **Estandarizar** con glosario de términos/abreviaturas, dominios padre (plantillas de tipo de dato con cascada), reglas de nomenclatura y propiedades definidas por el usuario (UDP), todo versionado de forma independiente.
 4. **Reportar** la metadata con un motor de consulta (builder visual + caja SQL) sobre columnas, tablas, relaciones y vistas, con exportación a Excel/CSV.
 5. **Administrar** el acceso (whitelist de correos asignados a una matriz de rol, doc 38), los roles y la matriz de permisos (RBAC), con sesión por token y auditoría.
-6. **Guiar** al usuario con un Centro de ayuda in-app bilingüe (español/inglés) que documenta cada módulo.
 
 La navegación global se organiza en un *shell* con una barra superior persistente (`TopNav`) sobre la pantalla ruteada:
 
@@ -204,10 +203,6 @@ Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCa
 ### Auth (`/login`)
 
 - Dos caminos hacia la misma sesión por token (doc 38): **"Continue with Databricks"** (`ssoLogin` → `/api/auth/sso/login`; hereda la identidad del SSO de la plataforma, requiere el correo whitelisteado en Admin) y **"Administrator"** (solo contraseña → `/api/auth/login`). Guards `RequireAuth`/`RequirePermission`, `UserMenu` en la barra superior.
-
-### Help — guía in-app
-
-- `HelpCenter` bilingüe (es/en): conceptos clave, primeros pasos, FAQ y documentación por módulo generada leyendo el código real (`helpModules.generated.ts`). Botón "Help" en `TopNav`.
 
 ---
 

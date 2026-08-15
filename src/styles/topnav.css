@@ -40,16 +40,6 @@
 /* Right cluster */
 .dmh-topnav-right { display: flex; align-items: center; gap: 12px; }
 
-/* Help — botón de la Guía de uso (pill verde suave, a la izquierda del usuario) */
-.dmh-help-btn {
-  display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px;
-  font-family: var(--ui); font-size: 13px; font-weight: 600; cursor: pointer;
-  color: #0E8C6A; background: #E4F6EF; border: 1px solid transparent; border-radius: var(--r-sm);
-  transition: background .14s, border-color .14s;
-}
-.dmh-help-btn:hover { background: #D6F0E6; border-color: #BFE7D6; }
-.dmh-help-btn svg { flex: none; }
-
 /* Search field (200px, #F4F6F9 bg) */
 .dmh-topnav-search { position: relative; width: 200px; }
 .dmh-topnav-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-muted-2); pointer-events: none; }
