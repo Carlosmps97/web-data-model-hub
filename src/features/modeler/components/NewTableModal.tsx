@@ -6,6 +6,8 @@ import type { CanonicalTable } from '@/features/governance/services/governance.s
 import { useModelerStore } from '@/store/useModelerStore';
 import { apiErrorMessage } from '@/services/http';
 import SchemaSelect from './SchemaSelect';
+import SearchSelect from './SearchSelect';
+import { tableSchemasCached } from '../services/schemaPartition';
 
 type Mode = 'blank' | 'import';
 
@@ -91,12 +93,29 @@ export default function NewTableModal({ onClose, onCreate }: {
     return () => { alive = false; clearTimeout(h); };
   }, [mode, q, schemaFilter]);
 
-  // Filtro por esquema: opciones del catálogo real de esquemas (doc 18). El
-  // acotado por esquema lo hace el BACKEND (server-side, junto a `q`); el filtro
-  // client-side de acá es sólo defensa — descarta cualquier resultado de un
-  // esquema previo que quedara en pantalla mientras resuelve la nueva consulta.
+  // Filtro por esquema (doc 43): opciones = esquemas que contienen TABLAS
+  // (cacheados por sesión y versión en schemaPartition, compartidos con el
+  // CTAS) — así el combobox no mezcla los esquemas solo-de-vistas (`_vu`).
+  // Mientras cargan se muestra solo "All schemas"; el catálogo completo queda
+  // como fallback únicamente si la bajada FALLA. El acotado por esquema lo
+  // hace el BACKEND (server-side, junto a `q`); el filtro client-side de acá
+  // es sólo defensa — descarta cualquier resultado de un esquema previo que
+  // quedara en pantalla mientras resuelve la nueva consulta.
   const schemaPool = useModelerStore((s) => s.schemas);
-  const schemas = useMemo(() => schemaPool.map((s) => s.name), [schemaPool]);
+  const [tableSchemas, setTableSchemas] = useState<string[] | null>(null);
+  const [schemasErr, setSchemasErr] = useState(false);
+  useEffect(() => {
+    if (mode !== 'import') return;
+    let live = true;
+    tableSchemasCached()
+      .then((ts) => { if (live) setTableSchemas(ts); })
+      .catch(() => { if (live) setSchemasErr(true); });
+    return () => { live = false; };
+  }, [mode]);
+  const schemaOpts = useMemo(() => {
+    const base = tableSchemas ?? (schemasErr ? schemaPool.map((s) => s.name) : []);
+    return base.map((s) => ({ value: s, label: s }));
+  }, [tableSchemas, schemasErr, schemaPool]);
   const usageOf = (id: string) => (subjectAreas ?? []).filter((sa) => (sa.tableIds ?? []).includes(id)).length;
   const visible = useMemo(
     () => (schemaFilter ? tables.filter((t) => t.schema === schemaFilter) : tables),
@@ -171,10 +190,10 @@ export default function NewTableModal({ onClose, onCreate }: {
               <input placeholder="Search tables in the database…" value={q} onChange={(e) => setQ(e.target.value)}
                 style={{ flex: 1, border: 0, background: 'transparent', outline: 'none', padding: '10px 0', fontSize: 13 }} />
             </div>
-            <select className="rd-input" value={schemaFilter} onChange={(e) => setSchemaFilter(e.target.value)} style={{ width: 150 }}>
-              <option value="">All schemas</option>
-              {schemas.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <div style={{ width: 168, flexShrink: 0 }}>
+              {/* Combobox buscable (doc 41), mismo estilo que el del CTAS. */}
+              <SearchSelect mono options={schemaOpts} valueLabel={schemaFilter} placeholder="All schemas" emptyLabel="All schemas" onPick={setSchemaFilter} />
+            </div>
           </div>
           <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {visible.map((t) => {

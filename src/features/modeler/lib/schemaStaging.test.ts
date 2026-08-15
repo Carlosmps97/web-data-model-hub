@@ -66,3 +66,17 @@ describe('schemaStaging', () => {
     expect(pendingFor(ops, 's2')).toBeUndefined();
   });
 });
+
+describe('schemaKind del create (doc 44)', () => {
+  it('stageCreate guarda el kind elegido y editCreate lo preserva', () => {
+    let ops = stageCreate([], 'core_vu', 'views');
+    expect(ops[0]).toMatchObject({ kind: 'create', name: 'core_vu', schemaKind: 'views' });
+    ops = editCreate(ops, ops[0].key, 'core_v2_vu');
+    expect(ops[0]).toMatchObject({ name: 'core_v2_vu', schemaKind: 'views' });
+  });
+
+  it('sin kind explícito, el create nace como tables', () => {
+    const ops = stageCreate([], 'core');
+    expect(ops[0]).toMatchObject({ kind: 'create', schemaKind: 'tables' });
+  });
+});

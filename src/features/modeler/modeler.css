@@ -78,13 +78,25 @@
 
 /* Orden de la LLAVE primaria (pkPosition) — strip en PropertiesPanel · Columns */
 .wk-pp-keyorder { margin: 2px 0 10px; padding: 7px 8px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--fill-5, transparent); }
-.wk-pp-keychips { display: flex; flex-wrap: wrap; gap: 4px; }
-.wk-pp-keychip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; border: 1px solid var(--border-soft); border-radius: 6px; font-size: 11px; background: var(--surface); }
-.wk-pp-keyn { font-size: 9.5px; font-weight: 700; color: var(--k-pk, #b58a00); }
+/* Doc 42: lista VERTICAL de alto fijo con scroll — homogénea sin importar
+   cuántas columnas tenga la llave (los chips en flujo crecían disparejo). */
+.wk-pp-keylist { height: 128px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+.wk-pp-keyrow { display: flex; align-items: center; gap: 8px; padding: 3px 7px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--surface); flex-shrink: 0; }
+.wk-pp-keyname { flex: 1; min-width: 0; font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-pp-keyn { min-width: 16px; text-align: center; font-size: 9.5px; font-weight: 700; color: var(--k-pk, #b58a00); }
 .wk-pp-keymv { display: inline-flex; gap: 2px; }
 .wk-pp-keymv button { width: 18px; height: 18px; border: 1px solid var(--border-soft); border-radius: 4px; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 11px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
 .wk-pp-keymv button:hover:not(:disabled) { background: var(--fill-4); }
 .wk-pp-keymv button:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Buscador de columnas (doc 42) — icono embebido + botón de limpiar. */
+.wk-pp-colfind { position: relative; margin: 2px 0 8px; }
+.wk-pp-colfind-ico { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text-muted-3); pointer-events: none; }
+.wk-pp-colfind .rd-input { width: 100%; padding-left: 28px; padding-right: 26px; }
+.wk-pp-colfind-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: var(--text-muted-2); cursor: pointer; display: inline-flex; padding: 2px; border-radius: 4px; }
+.wk-pp-colfind-clear:hover { background: var(--fill-4); color: var(--ink-2); }
+/* Grip con el reorder apagado (filtro activo): visible pero inerte. */
+.wk-pp-grip.nodrag { opacity: .35; cursor: default; }
 
 /* Popup de relación v2 (doc 19) — grid de pares migrados + role name */
 .wk-relpairs { display: flex; flex-direction: column; gap: 8px; }
@@ -111,6 +123,25 @@
 .wk-find-item:hover { background: var(--fill-4); }
 .wk-find-lname { font-size: 12.5px; color: var(--ink); font-weight: 600; }
 .wk-find-pname { font-size: 10.5px; color: var(--text-muted-2); }
+
+/* ── SearchSelect (doc 41): combobox con buscador embebido — mismo lenguaje
+   visual que el dropdown "Find a Table" (lista acotada + scroll + item con
+   etiqueta y detalle a la derecha). Lo usan Parent Domain y Type override. */
+.wk-ss-wrap { position: relative; min-width: 0; }
+.wk-ss-caret { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: var(--text-muted-3); pointer-events: none; }
+.wk-ss-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 100%; z-index: 40;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow-md); padding: 4px; max-height: 240px; overflow: auto; }
+.wk-ss-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px;
+  border: none; background: transparent; border-radius: 7px; cursor: pointer; text-align: left; }
+.wk-ss-item.hi { background: var(--fill-4); }
+.wk-ss-label { flex: 1; font-size: 12.5px; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-ss-detail { font-size: 10.5px; color: var(--text-muted-2); flex-shrink: 0; }
+.wk-ss-empty { padding: 8px; font-size: 12px; color: var(--text-muted-2); }
+/* Argumentos puntuales de tipos parametrizados — DECIMAL(p,s), VARCHAR(n) …
+   (el ancho va inline en TypePicker: gana a `.wk-pp-typewrap .rd-input`). */
+.wk-ss-args { display: flex; gap: 6px; margin-top: 6px; }
+.wk-ss-args .rd-input { height: 30px; font-size: 12px; }
 
 /* Cluster derecho: version pill + Save + Publish */
 .wk-right { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px; flex-shrink: 0; }

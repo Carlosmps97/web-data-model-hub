@@ -4,17 +4,21 @@ import Icon from '@/components/ui/Icon';
 import * as gov from '@/features/governance/services/governance.service';
 import type { ParentDomain, CanonicalColumn } from '@/features/governance/services/governance.service';
 import { apiErrorMessage } from '@/services/http';
-import { COLUMN_DATA_TYPES } from '@/types/model';
 import { isComplexTypeStart } from '../lib/complexTypes';
+import { applyDomainPick } from '../lib/domainType';
 import { createNameSync, type NameSync } from '../lib/nameSync';
 import type { AddColumnInput } from '@/store/useModelerStore';
 import ComplexTypeBuilder from './ComplexTypeBuilder';
+import SearchSelect from './SearchSelect';
+import TypePicker from './TypePicker';
 import UdpAssign from './UdpAssign';
 
-/** Plantillas rápidas de tipos complejos (F4 #6). */
-const TYPE_TEMPLATES = ['STRUCT<>', 'ARRAY<>', 'MAP<>'] as const;
-/** Umbral a partir del cual el tipo se edita en textarea monospace expandida. */
-const LONG_TYPE_LEN = 40;
+/** Opciones del combobox de Parent Domain: alfabético, con el tipo por defecto
+ *  como detalle a la derecha (doc 41). */
+export const domainOptions = (domains: ParentDomain[]) =>
+  [...domains]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((d) => ({ value: d.id, label: d.name, detail: d.defaultDataType }));
 
 export default function ColumnEditor({ tableId, onClose, onAdd }: {
   tableId: string;
@@ -92,45 +96,24 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Words (e.g. monto deuda dólares)' : 'Physical name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
       {mode === 'logical' && preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
       <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-        <select className="rd-input" value={parentDomainId} onChange={(e) => setParentDomainId(e.target.value)}>
-          <option value="">— Parent Domain (type) —</option>
-          {domains.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.defaultDataType})</option>)}
-        </select>
+        {/* Combobox con buscador (doc 41): empieza-por, lista acotada con
+            scroll, nombre + tipo default a la derecha. */}
+        <SearchSelect
+          options={domainOptions(domains)}
+          valueLabel={domains.find((d) => d.id === parentDomainId)?.name ?? ''}
+          placeholder="— Parent Domain (type) —"
+          emptyLabel="(none)"
+          onPick={setParentDomainId}
+        />
         <div>
-          {dataType.length > LONG_TYPE_LEN ? (
-            <textarea
-              className="rd-input rd-mono"
-              rows={3}
-              placeholder="Type override (optional)"
-              value={dataType}
-              onChange={(e) => setDataType(e.target.value)}
-              style={{ width: '100%', resize: 'vertical', lineHeight: 1.5 }}
-            />
-          ) : (
-            <input
-              className="rd-input rd-mono"
-              list="col-type-options"
-              placeholder="Type override (optional)"
-              value={dataType}
-              onChange={(e) => setDataType(e.target.value)}
-              style={{ width: '100%' }}
-            />
-          )}
-          <datalist id="col-type-options">
-            {COLUMN_DATA_TYPES.map((t) => <option key={t} value={t} />)}
-          </datalist>
-          <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-            {TYPE_TEMPLATES.map((t) => {
-              const active = dataType.trim().toUpperCase().startsWith(t.slice(0, -2));
-              return (
-                <button key={t} type="button" className={`rd-btn rd-btn-sm rd-mono ${active ? 'rd-btn-primary' : 'rd-btn-ghost'}`} title={`Insert ${t} template`} onClick={() => setDataType(t)}>
-                  {/* ZWNJ entre < y > SOLO en el label: corta la ligadura
-                      less_greater de Geist Mono pase lo que pase con el CSS. */}
-                  {t.replace('<>', '<‌>')}
-                </button>
-              );
-            })}
-          </div>
+          {/* Catálogo cerrado con argumentos puntuales; STRUCT/ARRAY/MAP están
+              EN la lista (los botones-plantilla se retiraron, doc 41). */}
+          <TypePicker
+            value={dataType}
+            onChange={setDataType}
+            placeholder="Type override (optional)"
+            emptyLabel="(none — domain default)"
+          />
           {/* Builder visual: al elegir STRUCT/ARRAY/MAP se abre la cajita para
               declarar la estructura campo a campo (recompone el texto). */}
           {isComplexTypeStart(dataType) && (
@@ -176,6 +159,9 @@ interface ColumnRowProps {
   col: CanonicalColumn;
   domains: ParentDomain[];
   canEdit: boolean;
+  /** Doc 42: con el buscador de columnas activo el reorder se apaga — el drop
+   *  se resuelve contra la lista COMPLETA y una lista filtrada lo corrompería. */
+  dragDisabled?: boolean;
   /** Fila expandida (editor completo); colapsada muestra la fila compacta del diseño p8. */
   expanded: boolean;
   /** Expande (`id`) o colapsa (`null`) esta fila. */
@@ -200,7 +186,7 @@ interface ColumnRowProps {
  * refleja al instante (estado local) y el tipo muestra un spinner mientras el
  * cambio viaja al changeset. Drag por el grip para reordenar.
  */
-export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, onDelete, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
+export function ColumnRow({ col, domains, canEdit, dragDisabled, expanded, onToggle, onPatch, onDelete, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
   const [logical, setLogical] = useState(col.logicalName);
   const [physical, setPhysical] = useState(col.physicalName);
   const [dataType, setDataType] = useState(col.dataType);
@@ -260,15 +246,26 @@ export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, 
     // overlay confirma después. El spinner vive en el input de tipo.
     setDomainId(id);
     const dom = domains.find((d) => d.id === id);
-    // Al elegir dominio: hereda su defaultDataType salvo que ya haya override.
-    const nextType = dom && !col.typeOverridden ? (dom.defaultDataType ?? dataType) : dataType;
-    setDataType(nextType);
+    // Regla dominio→tipo (doc 46, applyDomainPick): elegir OTRO dominio
+    // RE-APLICA su default aunque hubiera override manual (bug reportado: el
+    // tipo personalizado se quedaba "pegado" — pertenecía a la combinación
+    // anterior); re-elegir el MISMO dominio respeta el override; quitar el
+    // dominio conserva el tipo. La cascada de Standards sigue respetando
+    // typeOverridden — acá solo se recalcula contra el dominio NUEVO.
+    const next = applyDomainPick({
+      currentDomainId: col.parentDomainId ?? '',
+      typeOverridden: !!col.typeOverridden,
+      currentType: dataType,
+      nextDomainId: id,
+      nextDefault: dom?.defaultDataType,
+    });
+    // Un tipeo de tipo aún en debounce quedó obsoleto: si volara después,
+    // pisaría el default re-aplicado con el tipo viejo (lost-update).
+    clearTimeout(timers.current['dataType']);
+    delete pendingDeb.current['dataType'];
+    setDataType(next.dataType);
     setTypeBusy(true);
-    // Recalcula el override contra el NUEVO dominio: si el tipo resultante coincide
-    // con su default, la conexión queda "sana" (typeOverridden=false); si difiere
-    // (el usuario ya lo había pisado), sigue roto (true) → la cascada lo respeta.
-    onPatch(col.id, { parentDomainId: id || undefined, dataType: nextType,
-                      typeOverridden: !!dom && nextType.trim() !== (dom.defaultDataType ?? '') })
+    onPatch(col.id, { parentDomainId: id || undefined, ...next })
       .finally(() => setTypeBusy(false));
   };
   const toggle = (field: 'isPrimaryKey' | 'isForeignKey' | 'isNullable' | 'isPartition', cur?: boolean) => () => {
@@ -282,17 +279,18 @@ export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, 
     onPatch(col.id, patch).finally(() => setFlagsBusy(false));
   };
 
+  const canDrag = canEdit && !dragDisabled;
   const dndProps = {
-    onDragOver: (e: React.DragEvent) => { if (canEdit) onDragOver(col.id, e); },
-    onDrop: () => { if (canEdit) onDrop(col.id); },
+    onDragOver: (e: React.DragEvent) => { if (canDrag) onDragOver(col.id, e); },
+    onDrop: () => { if (canDrag) onDrop(col.id); },
   };
   const grip = (
     <span
-      className="wk-pp-grip"
-      title={canEdit ? 'Drag to reorder' : undefined}
-      draggable={canEdit}
+      className={`wk-pp-grip${canEdit && dragDisabled ? ' nodrag' : ''}`}
+      title={canDrag ? 'Drag to reorder' : (canEdit && dragDisabled ? 'Clear the search to reorder' : undefined)}
+      draggable={canDrag}
       onClick={(e) => e.stopPropagation()}
-      onDragStart={() => onDragStart(col.id)}
+      onDragStart={() => { if (canDrag) onDragStart(col.id); }}
       onDragEnd={onDragEnd}
     ><Grip /></span>
   );
@@ -341,12 +339,18 @@ export function ColumnRow({ col, domains, canEdit, expanded, onToggle, onPatch, 
           <input className="rd-input rd-mono" disabled={!canEdit} placeholder="Physical name" value={physical} onChange={(e) => onPhysical(e.target.value)} />
         </div>
         <div className="wk-pp-row2">
-          <select className="rd-input" disabled={!canEdit} value={domainId} onChange={(e) => onDomain(e.target.value)}>
-            <option value="">— Parent Domain —</option>
-            {domains.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-          </select>
+          {/* Mismos combobox del alta (doc 41): buscador empieza-por, dominio
+              con su tipo default al costado, tipo por catálogo + argumentos. */}
+          <SearchSelect
+            options={domainOptions(domains)}
+            valueLabel={domains.find((d) => d.id === domainId)?.name ?? ''}
+            placeholder="— Parent Domain —"
+            emptyLabel="(none)"
+            disabled={!canEdit}
+            onPick={onDomain}
+          />
           <span className="wk-pp-typewrap">
-            <input className="rd-input rd-mono" disabled={!canEdit || typeBusy} placeholder="dataType" value={dataType} onChange={(e) => onDataType(e.target.value)} />
+            <TypePicker value={dataType} onChange={onDataType} placeholder="dataType" disabled={!canEdit || typeBusy} />
             {typeBusy && <span className="wk-spin" aria-hidden />}
           </span>
         </div>

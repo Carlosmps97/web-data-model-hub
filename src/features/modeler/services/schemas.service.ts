@@ -17,7 +17,13 @@ import { API_BASE } from '@/services/apiBase';
 const SCHEMAS = `${API_BASE}/api/schemas`;
 const CS = `${API_BASE}/api/changesets`;
 
-export interface DbSchema { id: string; name: string; description?: string | null }
+/** Qué contiene el esquema (doc 44): tablas o vistas. Erwin no trae este dato
+ *  (los Hive_Database del XML no llevan ningún atributo/UDP que lo marque) —
+ *  nace en la plataforma: la migración lo deriva de los miembros y la UI lo
+ *  pide al crear. Opcional: esquemas pre-doc-44 pueden venir sin él. */
+export type SchemaKind = 'tables' | 'views';
+
+export interface DbSchema { id: string; name: string; description?: string | null; kind?: SchemaKind | null }
 
 /** Regla de nombre (espeja el backend): letras/números/guión bajo empezando
  *  con letra. Acepta mayúsculas — el legacy `No_Definido` debe validar. */
@@ -41,10 +47,12 @@ export const listSchemas = async (): Promise<DbSchema[]> => {
 export const listPublishedSchemas = async (): Promise<DbSchema[]> =>
   (await apiGet<DbSchema[]>(SCHEMAS)).sort(byName);
 
-export const createSchema = async (name: string, description?: string): Promise<DbSchema> => {
+export const createSchema = async (name: string, description?: string, kind?: SchemaKind): Promise<DbSchema> => {
   const cs = writeCs();
-  if (!cs) return apiPost<DbSchema>(SCHEMAS, { name, description });
-  const s: DbSchema = { id: crypto.randomUUID(), name, description: description || null };
+  if (!cs) return apiPost<DbSchema>(SCHEMAS, { name, description, kind });
+  // Camino changeset: el payload es el DOC COMPLETO — kind debe ir acá o se
+  // publicaría sin él (invariante round-trip).
+  const s: DbSchema = { id: crypto.randomUUID(), name, description: description || null, kind: kind ?? null };
   await csvc.recordChange(cs, 'schemas', s.id, 'upsert', { ...s });
   return s;
 };

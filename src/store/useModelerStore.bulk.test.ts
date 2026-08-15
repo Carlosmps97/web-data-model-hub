@@ -129,3 +129,43 @@ describe('useModelerStore.createTableFromSources — tabla+columnas en lote', ()
     expect(useModelerStore.getState().selectedTableId).toBe(tabla.entityId);
   });
 });
+
+describe('useModelerStore.createTableFromSources — herencia de metadata individual (doc 45)', () => {
+  it('copia definición, flags, UDPs, dominio y tipo; ids nuevos y pkPosition re-numerado', async () => {
+    useModelerStore.setState({ activeSaId: 'sa1' });
+
+    await useModelerStore.getState().createTableFromSources({
+      logicalName: 'nueva',
+      columns: [
+        { id: 'cSrc', tableId: 'tSrc', ordinal: 7, logicalName: 'codigo', physicalName: 'COD',
+          dataType: 'BIGINT', typeOverridden: false, isPrimaryKey: true, isForeignKey: true,
+          isNullable: false, isPartition: true, description: 'Código del cliente',
+          parentDomainId: 'dom-1', udpValues: { 'udp-1': 'CLIENTE' }, pkPosition: 3 },
+        { id: 'cSrc2', tableId: 'tSrc', ordinal: 8, logicalName: 'texto', physicalName: 'TXT',
+          dataType: 'STRING', typeOverridden: false, isPrimaryKey: false },
+        { id: 'cSrc3', tableId: 'tSrc', ordinal: 9, logicalName: 'fecha', physicalName: 'FEC',
+          dataType: 'DATE', typeOverridden: false, isPrimaryKey: true },
+      ] as never,
+    });
+
+    const items = vi.mocked(gov.recordChangesBulk).mock.calls[0][0];
+    const [tabla, c1, c2, c3] = items;
+    expect(c1.payload).toMatchObject({
+      physicalName: 'COD', dataType: 'BIGINT', parentDomainId: 'dom-1',
+      isPrimaryKey: true, isForeignKey: true, isNullable: false, isPartition: true,
+      description: 'Código del cliente', udpValues: { 'udp-1': 'CLIENTE' },
+      ordinal: 0, pkPosition: 0,
+    });
+    // ids NUEVOS y tableId de la tabla nueva — no arrastra los del origen
+    expect(c1.payload?.id).not.toBe('cSrc');
+    expect(c1.payload?.tableId).toBe(tabla.entityId);
+    // columna sin extras: payload limpio (las claves opcionales NO viajan)
+    expect(c2.payload).toMatchObject({ physicalName: 'TXT', ordinal: 1 });
+    for (const k of ['description', 'isForeignKey', 'isPartition', 'udpValues', 'pkPosition']) {
+      expect(c2.payload).not.toHaveProperty(k);
+    }
+    // la llave heredada se re-numera secuencial (los pkPosition del origen
+    // podrían chocar entre fuentes distintas)
+    expect(c3.payload).toMatchObject({ isPrimaryKey: true, pkPosition: 1, ordinal: 2 });
+  });
+});
