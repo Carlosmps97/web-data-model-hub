@@ -8,6 +8,7 @@ import UdpAssign from './UdpAssign';
 import { useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/features/governance/services/governance.service';
 import type { ParentDomain } from '@/features/governance/services/governance.service';
+import { matchesColumn } from '../lib/columnSearch';
 import { nextPkPosition, pkInKeyOrder, reorderKey } from '../lib/keyOrder';
 import { alignSourcesToPhysical, syncRenamedColumnInViews } from '../lib/viewSync';
 import { ColumnRow } from './ColumnEditor';
@@ -73,6 +74,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const [savingDef, setSavingDef] = useState(false);
   useEffect(() => {
     if (table) setForm({ logicalName: table.logicalName, physicalName: table.physicalName, schema: table.schema ?? '', description: table.description ?? '' });
+    setColQuery('');   // el buscador de columnas no arrastra el filtro a OTRA tabla
     // Re-sembrar SOLO al cambiar de tabla (doc 40): con deps por identidad,
     // cualquier reload del diagrama (guardar un UDP, blur de la definición)
     // pisaba lo que el usuario tenía a medio tipear en este form.
@@ -107,6 +109,14 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // (hooks ANTES del early-return de abajo — el orden de hooks es fijo)
   const keyPks = useMemo(() => pkInKeyOrder(cols), [cols]);
   const [keyBusy, setKeyBusy] = useState(false);
+  // Buscador de columnas (doc 42): empieza-por CI sobre lógico/físico. Con
+  // filtro activo el drag&drop se desactiva (ver comentario en el render).
+  const [colQuery, setColQuery] = useState('');
+  const colFiltering = colQuery.trim() !== '';
+  const visibleCols = useMemo(
+    () => (colFiltering ? cols.filter((c) => matchesColumn(c, colQuery)) : cols),
+    [cols, colQuery, colFiltering],
+  );
   const [aligningId, setAligningId] = useState<string | null>(null);
   // ── Metadata (V3): dónde se usa la tabla (proyecto › carpeta › canvas) ──
   const [usage, setUsage] = useState<gov.TableUsageRow[] | null>(null);
@@ -309,7 +319,11 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const handleDrop = async (targetId: string) => {
     const src = dragId; const wasAfter = after;
     setDragId(null); setOverId(null);
-    if (!src || src === targetId || reordering) return;
+    // Con filtro activo NO se reordena (doc 42): el splice de abajo trabaja
+    // sobre la lista COMPLETA y un drop calculado sobre el subconjunto visible
+    // insertaría en una posición equivocada. El grip ya viene deshabilitado;
+    // este guard es el cinturón por si un drag nació antes de filtrar.
+    if (!src || src === targetId || reordering || colFiltering) return;
     const ids = cols.map((c) => c.id).filter((x) => x !== src);
     let idx = ids.indexOf(targetId);
     if (idx < 0) return;
@@ -481,37 +495,70 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
             </div>
             <p className="wk-pp-cap">{canEdit ? 'Drag the handle to reorder · click a column to edit.' : 'Click a column to view its details.'}</p>
             {/* Orden de la LLAVE (independiente del orden físico): manda el
-                bloque PK del canvas y el PRIMARY KEY(...) del Export DDL. */}
+                bloque PK del canvas y el PRIMARY KEY(...) del Export DDL.
+                Doc 42: contenedor de ALTO FIJO con scroll y filas apiladas —
+                el flujo de chips a la derecha crecía disparejo con la llave. */}
             {keyPks.length >= 2 && (
               <div className="wk-pp-keyorder">
                 <div className="wk-pp-cap" style={{ margin: '0 0 4px' }}>
                   Primary key — key order (PK block &amp; DDL constraint)
                   {keyBusy && <span className="rd-spin" style={{ marginLeft: 6, color: 'var(--primary)' }} aria-hidden />}
                 </div>
-                <div className="wk-pp-keychips">
+                <div className="wk-pp-keylist">
                   {keyPks.map((c, i) => (
-                    <span className="wk-pp-keychip" key={c.id} title={c.logicalName}>
+                    <div className="wk-pp-keyrow" key={c.id} title={c.logicalName}>
                       <span className="wk-pp-keyn">{i + 1}</span>
-                      <span className="rd-mono">{c.physicalName}</span>
+                      <span className="wk-pp-keyname rd-mono">{c.physicalName}</span>
                       {canEdit && (
                         <span className="wk-pp-keymv">
                           <button type="button" disabled={keyBusy || i === 0} title="Move up in the key" onClick={() => moveKey(c.id, -1)}>↑</button>
                           <button type="button" disabled={keyBusy || i === keyPks.length - 1} title="Move down in the key" onClick={() => moveKey(c.id, 1)}>↓</button>
                         </span>
                       )}
-                    </span>
+                    </div>
                   ))}
                 </div>
               </div>
             )}
             {cols.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No columns yet.{canEdit ? ' Use “Add column”.' : ''}</div>}
+            {/* Buscador de columnas (doc 42): empieza-por CI sobre lógico o
+                físico. Con filtro activo el drag&drop SE DESACTIVA — el drop
+                se resuelve contra la lista completa y reordenar viendo un
+                subconjunto corrompería el orden físico. */}
+            {cols.length > 0 && (
+              <div className="wk-pp-colfind">
+                <Icon name="search" size={12} className="wk-pp-colfind-ico" />
+                <input
+                  className="rd-input"
+                  placeholder="Find a column (starts with…)"
+                  value={colQuery}
+                  onChange={(e) => setColQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setColQuery(''); } }}
+                />
+                {colFiltering && (
+                  <button type="button" className="wk-pp-colfind-clear" title="Clear search" onClick={() => setColQuery('')}>
+                    <Icon name="x" size={11} />
+                  </button>
+                )}
+              </div>
+            )}
+            {colFiltering && (
+              <p className="wk-pp-cap" style={{ margin: '0 0 6px' }}>
+                {visibleCols.length} of {cols.length} columns
+                {canEdit && visibleCols.length > 0 ? ' · reordering is disabled while filtering' : ''}
+              </p>
+            )}
+            {colFiltering && visibleCols.length === 0 && (
+              <div className="rd-small" style={{ color: 'var(--muted)' }}>No columns match “{colQuery.trim()}”.</div>
+            )}
             <div className="wk-pp-collist">
-              {cols.map((c) => (
+              {visibleCols.map((c) => (
                 <ColumnRow
                   key={c.id}
                   col={c}
                   domains={domains}
                   canEdit={canEdit}
+                  dragDisabled={colFiltering}
                   expanded={expandedColId === c.id}
                   onToggle={setExpandedColId}
                   onPatch={patchCol}

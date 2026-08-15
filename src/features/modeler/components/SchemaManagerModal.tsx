@@ -9,7 +9,7 @@ import * as schemasSvc from '@/features/modeler/services/schemas.service';
 import { SCHEMA_NAME_RE, type SchemaImpact } from '@/features/modeler/services/schemas.service';
 import {
   editCreate, orderedForSave, pendingFor, stageCreate, stageDelete, stageRename,
-  takenNames, unstage, type StagedOp,
+  takenNames, unstage, type SchemaKind, type StagedOp,
 } from '../lib/schemaStaging';
 
 /**
@@ -35,6 +35,8 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
 
   const [staged, setStaged] = useState<StagedOp[]>([]);
   const [newName, setNewName] = useState('');
+  // Qué contendrá el esquema nuevo (doc 44) — Erwin no trae este dato, nace acá.
+  const [newKind, setNewKind] = useState<SchemaKind>('tables');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Edición inline de nombre: fila existente ({id}) o create pendiente ({key}).
@@ -68,7 +70,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     const err = nameError(newName);
     if (err) { setError(err); return; }
     setError(null);
-    setStaged((ops) => stageCreate(ops, newName.trim()));
+    setStaged((ops) => stageCreate(ops, newName.trim(), newKind));
     setNewName('');
   };
 
@@ -111,7 +113,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     try {
       markDirty();
       for (const op of ops) {
-        if (op.kind === 'create') await schemasSvc.createSchema(op.name);
+        if (op.kind === 'create') await schemasSvc.createSchema(op.name, undefined, op.schemaKind);
         else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
         else await schemasSvc.deleteSchema(op.id);
         done.add(op.key);
@@ -161,6 +163,13 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title={title} disabled={busy} onClick={onClick}>{node}</button>
   );
 
+  // Badge del contenido del esquema (doc 44); los pre-doc-44 sin kind no lo muestran.
+  const kindBadge = (k?: SchemaKind | null) => (k ? (
+    <span className="rd-small rd-mono" style={{ flexShrink: 0, padding: '1px 7px', border: '1px solid var(--border-soft, #EAEDF2)', borderRadius: 999, color: 'var(--text-muted, #8A93A5)', background: 'var(--fill-4, #F7F9FC)' }}>
+      {k}
+    </span>
+  ) : null);
+
   const editRow = (onCancel: () => void) => (
     <>
       <input className="rd-input rd-mono" value={editing!.name} autoFocus
@@ -198,11 +207,16 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     >
       <div style={{ marginBottom: 14 }}>
         <label style={lbl}>Nuevo esquema</label>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <input className="rd-input rd-mono" autoFocus placeholder="ej. bcp_ddv_clientes" value={newName}
             onChange={(e) => { setNewName(e.target.value); setError(null); }}
             onKeyDown={(e) => { if (e.key === 'Enter') addCreate(); }}
             style={{ flex: 1 }} />
+          {/* Qué contendrá (doc 44): separa tablas de vistas al acotar por esquema. */}
+          <div className="rd-seg" style={{ flexShrink: 0 }}>
+            <button type="button" className={newKind === 'tables' ? 'active' : ''} onClick={() => setNewKind('tables')}>Tables</button>
+            <button type="button" className={newKind === 'views' ? 'active' : ''} onClick={() => setNewKind('views')}>Views</button>
+          </div>
           <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy || !newName.trim()} onClick={addCreate}>
             <Plus size={14} /> Agregar
           </button>
@@ -232,6 +246,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
                         {s.name}
                       </span>
                       {isRename && <span className="rd-mono" style={{ fontSize: 13, color: 'var(--primary-700, #2E5BFF)' }}>→ {pending.to}</span>}
+                      {kindBadge(s.kind)}
                       {isRename && pendingBadge('renombrar · pendiente', 'var(--primary-700, #2E5BFF)')}
                       {isDelete && pendingBadge('eliminar · pendiente', 'var(--error, #C4314B)')}
                     </div>
@@ -261,6 +276,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
             {editing?.key === op.key ? editRow(() => setEditing(null)) : (
               <>
                 <span className="rd-mono" style={{ flex: 1, fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{op.name}</span>
+                {kindBadge(op.schemaKind)}
                 {pendingBadge('crear · pendiente', 'var(--primary-700, #2E5BFF)')}
                 {iconBtn('Edit name', () => { setError(null); setEditing({ key: op.key, name: op.name }); }, <Pencil size={13} />)}
                 {iconBtn('Deshacer', () => setStaged((ops) => unstage(ops, op.key)), <Undo2 size={13} />)}

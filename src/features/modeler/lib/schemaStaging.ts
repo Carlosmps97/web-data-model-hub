@@ -7,8 +7,12 @@
  */
 export interface DbSchemaLike { id: string; name: string; description?: string | null }
 
+/** Qué contiene el esquema (doc 44). OJO: `kind` en StagedOp ya nombra el TIPO
+ *  de operación — el del esquema viaja como `schemaKind`. */
+export type SchemaKind = 'tables' | 'views';
+
 export type StagedOp =
-  | { kind: 'create'; key: string; name: string }
+  | { kind: 'create'; key: string; name: string; schemaKind: SchemaKind }
   | { kind: 'rename'; key: string; id: string; from: string; to: string }
   | { kind: 'delete'; key: string; id: string; name: string };
 
@@ -24,9 +28,9 @@ export function takenNames(schemas: DbSchemaLike[], ops: StagedOp[]): Set<string
   return names;
 }
 
-export function stageCreate(ops: StagedOp[], name: string): StagedOp[] {
+export function stageCreate(ops: StagedOp[], name: string, schemaKind: SchemaKind = 'tables'): StagedOp[] {
   // key determinista por nombre: los duplicados ya se validan antes de stagear.
-  return [...ops, { kind: 'create', key: `new:${name.toLowerCase()}`, name }];
+  return [...ops, { kind: 'create', key: `new:${name.toLowerCase()}`, name, schemaKind }];
 }
 
 export function editCreate(ops: StagedOp[], key: string, name: string): StagedOp[] {

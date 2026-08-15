@@ -663,15 +663,33 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // secuenciales — importar cientos de columnas de tablas fuente demoraba
     // igual que el borrado. El backend valida el lote completo antes de
     // escribir: una columna inválida/duplicada ya no deja la tabla a medias.
+    // Cada columna hereda su metadata INDIVIDUAL del origen (doc 45):
+    // definición, PK/FK/nullable/partition, UDPs, dominio y tipo. Lo que NO
+    // se arrastra: relaciones (isForeignKey queda como marca individual, sin
+    // relationship en la tabla nueva) ni vistas. pkPosition se RE-NUMERA
+    // secuencial en el orden heredado — los del origen podrían chocar entre
+    // fuentes distintas. Claves opcionales solo si aportan (payload limpio,
+    // patrón addColumn del doc 40).
     let ordinal = 0;
+    let pk = 0;
     await gov.recordChangesBulk([
       gov.bulk.createTable({ id, logicalName, physicalName: physical, schema: schema?.trim() || undefined }),
-      ...columns.map((c) => gov.bulk.createColumn({
-        id: crypto.randomUUID(), tableId: id,
-        logicalName: c.logicalName, physicalName: c.physicalName,
-        parentDomainId: c.parentDomainId, dataType: c.dataType, typeOverridden: c.typeOverridden,
-        isPrimaryKey: c.isPrimaryKey, ordinal: ordinal++,
-      })),
+      ...columns.map((c) => {
+        const description = (c.description ?? '').trim();
+        const pkPosition = c.isPrimaryKey ? pk++ : null;
+        return gov.bulk.createColumn({
+          id: crypto.randomUUID(), tableId: id,
+          logicalName: c.logicalName, physicalName: c.physicalName,
+          parentDomainId: c.parentDomainId, dataType: c.dataType, typeOverridden: c.typeOverridden,
+          isPrimaryKey: c.isPrimaryKey, ordinal: ordinal++,
+          ...(description ? { description } : {}),
+          ...(c.isForeignKey ? { isForeignKey: true } : {}),
+          ...(c.isNullable === false ? { isNullable: false } : {}),
+          ...(c.isPartition ? { isPartition: true } : {}),
+          ...(c.udpValues && Object.keys(c.udpValues).length ? { udpValues: { ...c.udpValues } } : {}),
+          ...(pkPosition != null ? { pkPosition } : {}),
+        });
+      }),
     ]);
     const sa = await struct.getSubjectArea(saId);
     await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
