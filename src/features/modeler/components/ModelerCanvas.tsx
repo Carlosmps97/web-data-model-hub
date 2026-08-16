@@ -13,9 +13,13 @@ import CrowFootEdge from './CrowFootEdge';
 import DerivationEdge from './DerivationEdge';
 import CrowFootMarkers from './CrowFootMarkers';
 import RelationshipPopup from './RelationshipPopup';
+import RelationshipCreatePopup, { type RelDraft } from './RelationshipCreatePopup';
 import ViewEditor from './ViewEditor';
 import { buildViewGraph } from '../lib/viewGraph';
 import { nextLod } from '../lib/lodSize';
+import { pkInKeyOrder } from '../lib/keyOrder';
+import { relationshipDrift } from '../lib/relationshipPairs';
+import { fanSlots } from '../lib/edgeFanout';
 
 const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode };
 const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge };
@@ -25,7 +29,6 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const drawings = useModelerStore((s) => s.drawings);
   const updateDrawing = useModelerStore((s) => s.updateDrawing);
   const saveLayout = useModelerStore((s) => s.saveLayout);
-  const createRelationship = useModelerStore((s) => s.createRelationship);
   const setSelectedTable = useModelerStore((s) => s.setSelectedTable);
   const setSelectedEdge = useModelerStore((s) => s.setSelectedEdge);
   const setHoverEdge = useModelerStore((s) => s.setHoverEdge);
@@ -45,6 +48,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [editRelId, setEditRelId] = useState<string | null>(null);
+  // Borrador de relación en confirmación (doc 47): drop hecho, popup abierto,
+  // NADA persistido — el edge fantasma `ghostId` vive mientras se decide.
+  const [relDraft, setRelDraft] = useState<RelDraft | null>(null);
   // Vista en edición desde el lápiz del ViewNode (F3). El editor vive acá y no
   // en el PropertiesPanel: el click en un nodo view NO abre el panel.
   const [editViewId, setEditViewId] = useState<string | null>(null);
@@ -71,7 +77,8 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     for (const r of diagram.relationships) {
       const p0 = r.pairs[0];
       if (!p0) continue;
-      addRef(r.parentTableId, p0.parentColumnId);
+      // Doc 47: el ancla del PADRE es __hdr_src (existe también en LOD) — sólo
+      // el lado HIJO necesita handle fantasma por columna en modo compacto.
       addRef(r.childTableId, p0.childColumnId);
     }
     // zIndex inicial desde la selección actual (getState evita re-armar el
@@ -93,19 +100,38 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     const viewNodes = views.nodes.map((n) => ({ ...n, data: { ...n.data, lod: lodNow } }));
     // Preserva los nodos de shapes ya presentes (los repuebla el efecto de drawings).
     setNodes((prev) => [...prev.filter((n) => n.type === 'shape'), ...tableNodes, ...viewNodes]);
+    // Fan-out (doc 47): slot/count por relación agrupando por PADRE, orden por
+    // posición del hijo (menos cruces). Drift: pares vs llave efectiva del padre.
+    const pkIdsByTable = new Map<string, Set<string>>();
+    diagram.columns.forEach((c) => {
+      if (!c.isPrimaryKey) return;
+      const s = pkIdsByTable.get(c.tableId);
+      if (s) s.add(c.id); else pkIdsByTable.set(c.tableId, new Set([c.id]));
+    });
+    const slots = fanSlots(diagram.relationships.map((r) => {
+      const tp = tablePos.get(r.childTableId) ?? { x: 0, y: 0 };
+      return { id: r.id, parentId: r.parentTableId, targetY: tp.y, targetX: tp.x };
+    }));
     setEdges([
-      // v2 (doc 19): el edge SIEMPRE va padre → hijo y ancla en el PRIMER par
-      // de columnas; los pares extra (PK compuesta) viven en el popup.
-      ...diagram.relationships.map((r) => ({
-        id: r.id, source: r.parentTableId, target: r.childTableId,
-        sourceHandle: `${r.pairs[0]?.parentColumnId}__src`,
-        targetHandle: `${r.pairs[0]?.childColumnId}__tgt`,
-        type: 'crowfoot',
-        data: {
-          parentCardinality: r.parentCardinality, childCardinality: r.childCardinality,
-          identifying: r.identifying, pairCount: r.pairs.length,
-        },
-      })),
+      // v2 (doc 19) + doc 47: el edge SIEMPRE va padre → hijo; SALE de la
+      // cabecera del padre (fan-out en la zona de llave) y ENTRA por la
+      // columna del PRIMER par (orden de llave). Los pares viven en el popup.
+      ...diagram.relationships.map((r) => {
+        const fan = slots.get(r.id);
+        const pkIds = pkIdsByTable.get(r.parentTableId) ?? new Set<string>();
+        return {
+          id: r.id, source: r.parentTableId, target: r.childTableId,
+          sourceHandle: '__hdr_src',
+          targetHandle: `${r.pairs[0]?.childColumnId}__tgt`,
+          type: 'crowfoot',
+          data: {
+            parentCardinality: r.parentCardinality, childCardinality: r.childCardinality,
+            identifying: r.identifying, pairCount: r.pairs.length,
+            fanSlot: fan?.slot ?? 0, fanCount: fan?.count ?? 1, parentPkRows: pkIds.size,
+            drifted: relationshipDrift(r, [...pkIds]) != null,
+          },
+        };
+      }),
       ...views.edges,
     ]);
   }, [diagram, setNodes, setEdges, onEditView]);
@@ -200,43 +226,46 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     if (!activeChangeset) { pushToast('Open the model in edit mode to create relationships', 'err'); return; }
     // Guard defensivo: sin la herramienta "Dibujar relación" armada, los handles
     // no son conectables (TableNode) — si algo llega igual, no crear nada.
-    if (!useModelerStore.getState().relPreset) { pushToast('Arm "Draw relationship" in the toolbar to create relationships', 'err'); return; }
-    if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return;
-    // La dirección la define el GESTO (doc 19): se arrastra DESDE el padre
-    // (lado PK) hacia el hijo. Si React Flow normalizó el inicio como `target`,
-    // invertimos los extremos antes de persistir.
-    const start = connectStart.current;
-    const startedAtTarget = !!start && conn.target === start.nodeId && conn.targetHandle === start.handleId;
-    const rel = startedAtTarget
-      ? { source: conn.target, sourceHandle: conn.targetHandle, target: conn.source, targetHandle: conn.sourceHandle }
-      : { source: conn.source, sourceHandle: conn.sourceHandle, target: conn.target, targetHandle: conn.targetHandle };
-
-    // Edge FANTASMA optimista: el wire aparece al soltar (semitransparente) y el
-    // reload del diagrama lo reemplaza por el real al persistir. Se arma YA
-    // orientado padre→hijo (cada columna tiene ambos handles __src/__tgt, así
-    // que se re-anclan a la orientación real y los marcadores caen bien).
     const preset = useModelerStore.getState().relPreset;
-    const parentCol = rel.sourceHandle.replace(/__src$|__tgt$/, '');
-    const childCol = rel.targetHandle.replace(/__src$|__tgt$/, '');
+    if (!preset) { pushToast('Arm "Draw relationship" in the toolbar to create relationships', 'err'); return; }
+    if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return;
+    // Doc 47: el gesto SIEMPRE nace en la CABECERA del padre (las columnas ya
+    // no inician conexiones); si React Flow normalizó al revés, se reorienta.
+    const start = connectStart.current;
+    const startedAtSource = !start || (conn.source === start.nodeId && conn.sourceHandle === start.handleId);
+    const parentId = startedAtSource ? conn.source : conn.target;
+    const childId = startedAtSource ? conn.target : conn.source;
+    const dropHandle = startedAtSource ? conn.targetHandle : conn.sourceHandle;
+
+    const st = useModelerStore.getState();
+    const cols = st.diagram?.columns ?? [];
+    const parentTable = st.diagram?.tables.find((t) => t.id === parentId);
+    // Guard doc 47 (D1): sin llave en el padre no hay nada que migrar.
+    if (!pkInKeyOrder(cols.filter((c) => c.tableId === parentId)).length) {
+      pushToast(`"${parentTable?.physicalName ?? parentId}" has no primary key — define its key before drawing a relationship`, 'err');
+      return;
+    }
+    // Recursivas: solo non-identifying (una llave no puede contenerse a sí misma).
+    if (parentId === childId && preset.identifying) {
+      pushToast('A table cannot have an identifying relationship with itself', 'err');
+      return;
+    }
+    const dropColumnId = dropHandle === '__hdr_src' ? null : dropHandle.replace(/__src$|__tgt$/, '');
+    // Edge FANTASMA mientras el popup confirma (nada persistido aún): sale de
+    // la cabecera del padre; si el drop fue en una columna, ancla ahí.
     const ghostId = `pending-${crypto.randomUUID()}`;
     setEdges((eds) => [...eds, {
-      id: ghostId,
-      source: rel.source, target: rel.target,
-      sourceHandle: `${parentCol}__src`, targetHandle: `${childCol}__tgt`,
+      id: ghostId, source: parentId, target: childId,
+      sourceHandle: '__hdr_src', targetHandle: dropColumnId ? `${dropColumnId}__tgt` : '__hdr_src',
       type: 'crowfoot',
-      data: {
-        parentCardinality: preset?.parent ?? 'one',
-        childCardinality: preset?.child ?? 'zero-many',
-        identifying: preset?.identifying ?? false,
-        pending: true,
-      },
+      data: { parentCardinality: preset.parent, childCardinality: preset.child, identifying: preset.identifying, pending: true },
     }]);
-    void createRelationship(rel).catch((err: unknown) => {
-      setEdges((eds) => eds.filter((e) => e.id !== ghostId));
-      // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador).
-      pushToast(err instanceof Error && err.message ? err.message : "Couldn't create the relationship", 'err');
+    setRelDraft({
+      parentTableId: parentId, childTableId: childId, dropColumnId,
+      identifying: preset.identifying, parentCardinality: preset.parent, childCardinality: preset.child,
+      ghostId,
     });
-  }, [readonly, activeChangeset, createRelationship, setEdges, pushToast]);
+  }, [readonly, activeChangeset, setEdges, pushToast]);
 
   // Expone la instancia de React Flow al store (la usa el toolbar: focusTable / Save).
   useEffect(() => () => setFlow(null), [setFlow]);
@@ -315,6 +344,18 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         <MiniMap pannable zoomable />
       </ReactFlow>
       {editRelId && <RelationshipPopup relId={editRelId} onClose={() => setEditRelId(null)} pushToast={pushToast} />}
+      {relDraft && (
+        <RelationshipCreatePopup
+          draft={relDraft}
+          onClose={(created) => {
+            // Cancel: se quita el fantasma. Confirm: el reload rearma los
+            // edges desde el diagrama y el fantasma muere solo.
+            if (!created) setEdges((eds) => eds.filter((e) => e.id !== relDraft.ghostId));
+            setRelDraft(null);
+          }}
+          pushToast={pushToast}
+        />
+      )}
       {editView && <ViewEditor view={editView} onClose={() => setEditViewId(null)} onSaved={() => void reload()} pushToast={pushToast} />}
     </div>
   );

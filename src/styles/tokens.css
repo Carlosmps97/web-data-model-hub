@@ -21,6 +21,7 @@
   --blue-border:     #D4E0FF;   /* pills / soft borders */
   --blue-border-2:   #D9E3FB;
   --blue-soft:       #F2F6FF;   /* very soft blue wash */
+  --blue-soft-2:     #E3EBFF;   /* franja PK del nodo — un paso más oscura (doc 47) */
 
   /* Green (publish / success) */
   --green:           #16A37B;   /* Publish button, completed steps */

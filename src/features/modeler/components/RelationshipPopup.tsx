@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, Plus, Trash2 } from 'lucide-react';
+import { Check, Trash2 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
@@ -8,23 +8,25 @@ import { useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/features/governance/services/governance.service';
 import type { Cardinality } from '@/features/governance/services/governance.service';
 import {
-  childCandidates, demotablePkChildren, pairError, parentCandidates, roleNamePlan,
+  buildKeyMapping, demotablePkChildren, mappingToBulk, relationshipDrift, roleNamePlan,
+  type MappingResolution,
 } from '@/features/modeler/lib/relationshipPairs';
-import { nextPkPosition } from '@/features/modeler/lib/keyOrder';
+import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { syncNewColumnToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
+import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 
-const CARDS: { v: Cardinality; lbl: string }[] = [
+export const CARDS: { v: Cardinality; lbl: string }[] = [
   { v: 'one', lbl: 'One' }, { v: 'many', lbl: 'Many' }, { v: 'one-only', lbl: 'Exactly one' },
   { v: 'zero-one', lbl: 'Zero or one' }, { v: 'one-many', lbl: 'One or more' }, { v: 'zero-many', lbl: 'Zero or more' },
 ];
-const NEW_COL = '__new__';
 
 /**
- * Popup de relación v2 (doc 19, estilo editor de Erwin): tipo Identifying /
- * Non-identifying (con propagación de flags PK), cardinalidad Parent/Child,
- * grid de pares migrados (PK compuesta) con Role name por par (rename in
- * place, o SPLIT si la columna hija está "unificada" con otra relación).
+ * Popup de EDICIÓN de relación (docs 19 + 47): tipo Identifying/Non-identifying
+ * (con propagación de flags PK), cardinalidades, mapa READ-ONLY de pares
+ * (N=N por construcción — el alta manual de pares murió con doc 47) con Role
+ * name por par (rename in place, o SPLIT si la columna está unificada), y el
+ * banner de DRIFT con "Sync with parent key" cuando la llave del padre cambió.
  */
 export default function RelationshipPopup({ relId, onClose, pushToast }: { relId: string; onClose: () => void; pushToast: (m: string, k?: 'err') => void }) {
   const diagram = useModelerStore((s) => s.diagram);
@@ -35,20 +37,22 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
   const [saving, setSaving] = useState(false);
-  // Par nuevo (staging local) + drafts de role name por índice de par.
-  const [addParent, setAddParent] = useState('');
-  const [addChild, setAddChild] = useState('');
   const [roleDrafts, setRoleDrafts] = useState<Record<number, string>>({});
+  // Modo SYNC (doc 47): re-mapeo de la llave tras un drift del padre.
+  const [syncing, setSyncing] = useState(false);
+  const [syncRows, setSyncRows] = useState<KeyRowState[]>([]);
+  const [syncInherit, setSyncInherit] = useState(true);
 
   const rel = diagram?.relationships.find((r) => r.id === relId);
-  const cols = diagram?.columns ?? [];
+  const cols = useMemo(() => diagram?.columns ?? [], [diagram]);
   const parentTable = diagram?.tables.find((t) => t.id === rel?.parentTableId);
   const childTable = diagram?.tables.find((t) => t.id === rel?.childTableId);
   const colById = useMemo(() => new Map(cols.map((c) => [c.id, c])), [cols]);
-  const parentOpts = useMemo(() => (rel ? parentCandidates(cols, rel.parentTableId) : []), [cols, rel]);
-  const childOpts = useMemo(() => (rel ? childCandidates(cols, rel.childTableId) : []), [cols, rel]);
+  const childOpts = useMemo(() => cols.filter((c) => c.tableId === rel?.childTableId), [cols, rel?.childTableId]);
+  const parentPksNow = useMemo(() => pkInKeyOrder(cols.filter((c) => c.tableId === rel?.parentTableId)), [cols, rel?.parentTableId]);
   if (!rel) return null;
 
+  const drift = relationshipDrift(rel, parentPksNow.map((c) => c.id));
   const locked = !canEdit || saving;
   const colName = (id: string) => colById.get(id)?.physicalName ?? id;
   const run = async (fn: () => Promise<void>, err: string) => {
@@ -95,69 +99,6 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         ? { ...rel, parentCardinality: v } : { ...rel, childCardinality: v });
     }, "Couldn't update");
 
-  // ── Pares (PK compuesta) ──
-  const addPair = () => {
-    const err = addChild === NEW_COL ? (addParent ? null : 'Pick both columns') : pairError(rel, addParent, addChild);
-    if (err) { pushToast(err, 'err'); return; }
-    void run(async () => {
-      let childId = addChild;
-      if (addChild === NEW_COL) {
-        // "Migrar" la columna del padre: crea la FK en el hijo copiando
-        // nombre/tipo/dominio (unificación manual: elegí una existente).
-        // OJO: el spread copia campos del PADRE — pkPosition se fija aparte
-        // (posición en la llave del HIJO, no la del padre).
-        const src = colById.get(addParent);
-        if (!src) throw new Error('Parent column does not exist');
-        childId = crypto.randomUUID();
-        const physical = (await gov.physicalize(src.logicalName)).physical;
-        await gov.createColumn({
-          ...src, id: childId, tableId: rel.childTableId,
-          logicalName: src.logicalName, physicalName: physical,
-          isForeignKey: true, isPrimaryKey: rel.identifying,
-          pkPosition: rel.identifying ? nextPkPosition(childOpts) : null,
-          isNullable: rel.identifying ? false : true,
-          ordinal: childOpts.length,
-        });
-        // V1: la columna migrada entra también a las vistas ESPEJO del hijo.
-        try {
-          await syncNewColumnToMirrorViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            rel.childTableId, physical, childOpts);
-        } catch { /* best-effort */ }
-      }
-      await gov.updateRelationship({
-        ...rel, pairs: [...rel.pairs, { parentColumnId: addParent, childColumnId: childId }],
-      });
-      const child = childId === addChild ? colById.get(childId) : null;
-      if (child) {
-        await gov.markForeignKey(child, rel.identifying,
-          rel.identifying ? nextPkPosition(childOpts, child.id) : undefined);
-      }
-      setAddParent(''); setAddChild('');
-      await reload();
-      pushToast('Pair added to the relationship');
-    }, "Couldn't add the pair");
-  };
-
-  const removePair = (i: number) => {
-    if (rel.pairs.length <= 1) return; // el último par = borrar la relación
-    void run(async () => {
-      const removed = rel.pairs[i];
-      await gov.updateRelationship({ ...rel, pairs: rel.pairs.filter((_, k) => k !== i) });
-      // Limpieza del flag FK de la columna hija sacada, si ya no es hija en
-      // ninguna relación (mismo criterio conservador que al borrar la relación).
-      const col = colById.get(removed.childColumnId);
-      if (col?.isForeignKey) {
-        // `near` es el estado efectivo POST-update (el par ya no está).
-        const near = await gov.listRelationships(col.tableId);
-        const still = near.some((r) => r.pairs.some((p) => p.childColumnId === col.id));
-        if (!still) await gov.updateColumn({ ...col, isForeignKey: false });
-      }
-      await reload();
-      pushToast('Par quitado');
-    }, "Couldn't remove the pair");
-  };
-
   // ── Role name (Erwin): rename in place, o SPLIT si está unificada ──
   const applyRole = (i: number) => {
     const name = (roleDrafts[i] ?? '').trim();
@@ -169,7 +110,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       const inNear = near.find((r) => r.id === rel.id);
       const plan = roleNamePlan(inNear ?? rel, i, near.length ? near : [rel]);
       const cur = colById.get(rel.pairs[i].childColumnId);
-      if (!cur) throw new Error('Columna hija inexistente');
+      if (!cur) throw new Error('Child column no longer exists');
       const physical = (await gov.physicalize(name)).physical;
       if (plan.kind === 'rename') {
         await gov.updateColumn({ ...cur, logicalName: name, physicalName: physical });
@@ -183,7 +124,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
           ...rel,
           pairs: rel.pairs.map((p, k) => (k === i ? { ...p, roleName: name } : p)),
         });
-        pushToast(`Role name aplicado: “${cur.physicalName}” renombrada a “${physical}”`);
+        pushToast(`Role name applied: "${cur.physicalName}" renamed to "${physical}"`);
       } else {
         // SPLIT: la columna está compartida (unificada) — se crea una nueva
         // con el role name y ESTE par se repunta; la vieja queda para el resto.
@@ -206,12 +147,75 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
           ...rel,
           pairs: rel.pairs.map((p, k) => (k === i ? { ...p, childColumnId: newId, roleName: name } : p)),
         });
-        pushToast(`Split: created “${physical}” in ${childTable?.physicalName ?? 'the child'} — this pair now points there`);
+        pushToast(`Split: created "${physical}" in ${childTable?.physicalName ?? 'the child'} — this pair now points there`);
       }
       setRoleDrafts((d) => ({ ...d, [i]: '' }));
       await reload();
     }, "Couldn't apply the role name");
   };
+
+  // ── Sync con la llave del padre (doc 47) ──
+  const startSync = () => {
+    const pkIdSet = new Set(parentPksNow.map((c) => c.id));
+    const kept = rel.pairs.filter((p) => pkIdSet.has(p.parentColumnId));
+    const claimed = new Set(kept.map((p) => p.childColumnId));
+    const free = childOpts.filter((c) => !claimed.has(c.id));
+    setSyncRows(parentPksNow.map((pk) => {
+      const pair = kept.find((p) => p.parentColumnId === pk.id);
+      if (pair) return { parentColumnId: pk.id, target: { kind: 'existing' as const, columnId: pair.childColumnId }, roleName: '', locked: true };
+      const [auto] = buildKeyMapping([pk], free);
+      return { parentColumnId: pk.id, target: auto.target, roleName: '' };
+    }));
+    setSyncInherit(true);
+    setSyncing(true);
+  };
+
+  const applySync = () => void run(async () => {
+    const pkIdSet = new Set(parentPksNow.map((c) => c.id));
+    const pkById = new Map(parentPksNow.map((c) => [c.id, c]));
+    const keptRole = new Map(rel.pairs.map((p) => [p.parentColumnId, p.roleName ?? undefined]));
+    const resolutions: MappingResolution[] = await Promise.all(syncRows.map(async (r) => {
+      const parentCol = pkById.get(r.parentColumnId);
+      if (!parentCol) throw new Error('Parent key changed — reopen the popup');
+      if (r.target.kind === 'existing') {
+        const c = colById.get(r.target.columnId);
+        if (!c) throw new Error('Child column no longer exists');
+        const role = r.locked ? keptRole.get(r.parentColumnId) : undefined;
+        return { parentCol, target: { kind: 'existing' as const, col: c, preexisting: !!r.locked },
+                 ...(role ? { roleName: role } : {}) };
+      }
+      const logical = (r.roleName.trim() || parentCol.logicalName).trim();
+      const { physical } = await gov.physicalize(logical);
+      return { parentCol, target: { kind: 'create' as const, id: crypto.randomUUID(), logicalName: logical, physicalName: physical },
+               ...(r.roleName.trim() ? { roleName: r.roleName.trim() } : {}) };
+    }));
+    const { changes, createdCols } = mappingToBulk({
+      relId: rel.id, parentTableId: rel.parentTableId, childTableId: rel.childTableId,
+      identifying: rel.identifying, parentCardinality: rel.parentCardinality, childCardinality: rel.childCardinality,
+      inherit: syncInherit, rows: resolutions, childCols: childOpts,
+    });
+    // Pares retirados (su PK ya no existe en el padre): limpieza conservadora
+    // del flag FK — misma regla que el delete de relación.
+    const near = await gov.listRelationships(rel.childTableId);
+    for (const p of rel.pairs.filter((pp) => !pkIdSet.has(pp.parentColumnId))) {
+      const c = colById.get(p.childColumnId);
+      if (!c?.isForeignKey) continue;
+      const still = near.some((r2) => r2.id !== rel.id && r2.pairs.some((q) => q.childColumnId === c.id));
+      if (!still) changes.push(gov.bulk.createColumn({ ...c, isForeignKey: false }));
+    }
+    await gov.recordChangesBulk(changes);
+    for (const c of createdCols) {
+      try {
+        await syncNewColumnToMirrorViews(
+          { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+          rel.childTableId, c.physicalName, childOpts);
+      } catch { /* best-effort */ }
+    }
+    setSyncing(false);
+    useModelerStore.getState().markDirty();
+    await reload();
+    pushToast('Relationship synced with the parent key');
+  }, "Couldn't sync the relationship");
 
   const remove = async () => {
     try {
@@ -225,6 +229,8 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
     } catch { pushToast("Couldn't delete the relationship", 'err'); }
   };
 
+  const removedPairs = rel.pairs.filter((p) => !parentPksNow.some((c) => c.id === p.parentColumnId));
+
   return (
     <Modal title="Relationship" icon="link" onClose={onClose}>
       {/* Parent → Child */}
@@ -235,6 +241,18 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         <span className="wk-pp-role child">CHILD</span>
         <span className="rd-mono">{childTable?.physicalName ?? rel.childTableId}</span>
       </div>
+
+      {/* Drift (doc 47): la llave del padre cambió después de crear la relación. */}
+      {drift && canEdit && !syncing && (
+        <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+          background: 'var(--warning-soft)', border: '1px solid var(--warning)', borderRadius: 8, padding: '8px 12px' }}>
+          <span style={{ flex: 1 }}>
+            Parent key changed — this relationship is out of sync
+            ({drift.missing.length} missing / {drift.extra.length} stale pair{drift.extra.length === 1 ? '' : 's'}).
+          </span>
+          <button type="button" className="rd-btn rd-btn-sm" disabled={locked} onClick={startSync}>Sync with parent key</button>
+        </div>
+      )}
 
       {/* Tipo: identifying / non-identifying */}
       <div className="wk-props-field"><label>Type</label>
@@ -261,61 +279,64 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         </select>
       </div>
 
-      {/* Pares migrados (PK compuesta) + role name por par */}
-      <div className="wk-props-field"><label>Migrated columns · {rel.pairs.length} par{rel.pairs.length === 1 ? '' : 'es'}</label>
-        <div className="wk-relpairs">
-          {rel.pairs.map((p, i) => (
-            <div className="wk-relpair" key={`${p.parentColumnId}-${p.childColumnId}`}>
-              <div className="wk-relpair-cols">
-                <span className="rd-mono">{colName(p.parentColumnId)}</span>
-                <span style={{ color: 'var(--text-muted-3)' }}>→</span>
-                <span className="rd-mono">{colName(p.childColumnId)}</span>
-                {canEdit && (
-                  <button type="button" className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" style={{ marginLeft: 'auto' }}
-                    disabled={locked || rel.pairs.length <= 1}
-                    title={rel.pairs.length <= 1 ? "It's the last pair: delete the relationship instead" : 'Remove pair'}
-                    onClick={() => removePair(i)}>
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </div>
-              {canEdit && (
-                <div className="wk-relpair-role">
-                  <input
-                    className="rd-input rd-mono"
-                    disabled={locked}
-                    placeholder={`Role name… (e.g. ${colName(p.childColumnId)})`}
-                    value={roleDrafts[i] ?? p.roleName ?? ''}
-                    onChange={(e) => setRoleDrafts((d) => ({ ...d, [i]: e.target.value }))}
-                  />
-                  <button type="button" className="rd-btn rd-btn-sm" disabled={locked || !(roleDrafts[i] ?? '').trim()}
-                    title="Apply role name: renames the child FK (or creates a new column if it is shared)"
-                    onClick={() => applyRole(i)}>
-                    <Check size={13} /> Apply
-                  </button>
-                </div>
-              )}
+      {syncing ? (
+        /* ── Modo SYNC: re-mapeo N=N contra la llave vigente del padre ── */
+        <div className="wk-props-field">
+          <label>Sync with parent key · parent key has {parentPksNow.length} column{parentPksNow.length === 1 ? '' : 's'}</label>
+          <KeyMappingRows parentPks={parentPksNow} childCols={childOpts} rows={syncRows} onChange={setSyncRows} locked={locked} />
+          {removedPairs.map((p) => (
+            <div key={p.childColumnId} className="rd-small" style={{ color: 'var(--red)', padding: '4px 2px' }}>
+              {colName(p.parentColumnId)} → {colName(p.childColumnId)} — will be removed
             </div>
           ))}
-          {canEdit && (
-            <div className="wk-relpair-add">
-              <select className="rd-input" disabled={locked} value={addParent} onChange={(e) => setAddParent(e.target.value)}>
-                <option value="">parent PK column…</option>
-                {parentOpts.map((c) => <option key={c.id} value={c.id}>{c.physicalName}</option>)}
-              </select>
-              <span style={{ color: 'var(--text-muted-3)' }}>→</span>
-              <select className="rd-input" disabled={locked} value={addChild} onChange={(e) => setAddChild(e.target.value)}>
-                <option value="">child column…</option>
-                <option value={NEW_COL}>➕ create new column (migrate the parent one)</option>
-                {childOpts.map((c) => <option key={c.id} value={c.id}>{c.physicalName}</option>)}
-              </select>
-              <button type="button" className="rd-btn rd-btn-sm" disabled={locked || !addParent || !addChild} onClick={addPair}>
-                <Plus size={13} /> Par
-              </button>
-            </div>
-          )}
+          <div className="wk-props-field" style={{ marginTop: 10 }}><label>Inherit parent definition?</label>
+            <select className="rd-input" disabled={locked} value={syncInherit ? 'yes' : 'no'}
+              onChange={(e) => setSyncInherit(e.target.value === 'yes')}>
+              <option value="yes">Yes — copy definition, UDPs and metadata from the parent</option>
+              <option value="no">No — keep existing metadata / leave new columns blank</option>
+            </select>
+          </div>
+          <div className="m-foot">
+            <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={locked} onClick={() => setSyncing(false)}>Cancel</button>
+            <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={locked} onClick={applySync}>
+              {saving && <span className="rd-spin" aria-hidden />}
+              {saving ? 'Syncing…' : 'Apply sync'}
+            </button>
+          </div>
         </div>
-      </div>
+      ) : (
+        /* ── Mapa READ-ONLY de pares (N=N) + role name por par ── */
+        <div className="wk-props-field"><label>Key migration · {rel.pairs.length} pair{rel.pairs.length === 1 ? '' : 's'}</label>
+          <div className="wk-relpairs">
+            {rel.pairs.map((p, i) => (
+              <div className="wk-relpair" key={`${p.parentColumnId}-${p.childColumnId}`}>
+                <div className="wk-relpair-cols">
+                  <span className="rd-mono">{colName(p.parentColumnId)}</span>
+                  <span style={{ color: 'var(--text-muted-3)' }}>→</span>
+                  <span className="rd-mono">{colName(p.childColumnId)}</span>
+                  {p.roleName && <span className="rd-small" style={{ color: 'var(--muted)', marginLeft: 'auto' }}>role: {p.roleName}</span>}
+                </div>
+                {canEdit && (
+                  <div className="wk-relpair-role">
+                    <input
+                      className="rd-input rd-mono"
+                      disabled={locked}
+                      placeholder={`Role name… (e.g. ${colName(p.childColumnId)})`}
+                      value={roleDrafts[i] ?? p.roleName ?? ''}
+                      onChange={(e) => setRoleDrafts((d) => ({ ...d, [i]: e.target.value }))}
+                    />
+                    <button type="button" className="rd-btn rd-btn-sm" disabled={locked || !(roleDrafts[i] ?? '').trim()}
+                      title="Apply role name: renames the child FK (or creates a new column if it is shared)"
+                      onClick={() => applyRole(i)}>
+                      <Check size={13} /> Apply
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {saving && <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--muted)', marginTop: 8 }}><span className="rd-spin" /> Saving…</div>}
       {!canEdit && <div className="rd-small" style={{ color: 'var(--muted)', marginTop: 8 }}>Read-only — open the model in editing mode to change it.</div>}

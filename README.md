@@ -171,10 +171,10 @@ Conceptos clave del dominio:
 
 ### Modeler — canvas ER (`/model`)
 
-Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCanvas`, `ModelExplorer`, `TableNode`, `ShapeNode`, `CrowFootEdge`/`CrowFootMarkers`, `PropertiesPanel`, `ColumnEditor`, `ViewEditor`, `Toolbar`, `NewTableModal`, `RelationshipPopup`, `PublishModal`, `CtasModal`, `UdpAssign`.
+Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCanvas`, `ModelExplorer`, `TableNode`, `ShapeNode`, `CrowFootEdge`/`CrowFootMarkers`, `PropertiesPanel`, `ColumnEditor`, `ViewEditor`, `Toolbar`, `NewTableModal`, `RelationshipPopup`, `RelationshipCreatePopup`/`KeyMappingRows`, `PublishModal`, `CtasModal`, `UdpAssign`.
 
 - Explorador de árbol Proyecto → Carpetas → Canvases con caché por proyecto (`useModelerStore.trees`) para expandir varios a la vez.
-- Edición de tablas, columnas (tipos de dato de un superset "Databricks-flavored"), relaciones con notación crow's foot, vistas SQL por rol y asignación de UDP/tipos semánticos.
+- Edición de tablas, columnas (tipos de dato de un superset "Databricks-flavored"), relaciones con notación crow's foot que **migran la llave compuesta completa del padre** (doc 47: el wire nace de la cabecera del bloque, un popup N=N confirma el mapeo/creación de columnas con herencia de metadata, y las salidas se reparten en la zona de llave), vistas SQL por rol y asignación de UDP/tipos semánticos.
 - Modos **lógico** y **físico**; auto-layout con `elkjs` (`lib/elkLayout.ts`); export del canvas a **SVG** con `html-to-image` (`toSvg`).
 - **Guard de cambios sin guardar**: al navegar fuera de `/model` con una versión en edición y estado `dirty`, `TopNav` intercepta y ofrece "Guardar y salir / Salir sin guardar / Cancelar"; el cierre de pestaña lo cubre un `beforeunload`.
 - Generación de **DDL** (`features/ddl/generators.ts`): `CREATE TABLE`/`CREATE VIEW` con cláusula de particionado según el motor (`PARTITIONED BY` en Databricks, `PARTITION BY RANGE` en Postgres/MySQL, etc.).

@@ -279,7 +279,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           <div className="wk-reldraw2">
             <Tooltip label={readonly ? VIEWER_TIP : relPreset?.identifying
               ? 'Exit drawing mode'
-              : "Identifying (solid line): the FK joins the child's PK. Drag from PARENT to child"}>
+              : "Identifying (solid line): the FK joins the child's PK. Drag from the PARENT table header to the child"}>
               <button
                 type="button"
                 className={`wk-reldraw${relPreset?.identifying ? ' on' : ''}`}
@@ -291,7 +291,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             </Tooltip>
             <Tooltip label={readonly ? VIEWER_TIP : relPreset && !relPreset.identifying
               ? 'Exit drawing mode'
-              : 'Non-identifying (dashed line): plain FK, outside the PK. Drag from PARENT to child'}>
+              : 'Non-identifying (dashed line): plain FK, outside the PK. Drag from the PARENT table header to the child'}>
               <button
                 type="button"
                 className={`wk-reldraw${relPreset && !relPreset.identifying ? ' on' : ''}`}

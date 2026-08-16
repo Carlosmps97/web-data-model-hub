@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { BaseEdge, getSmoothStepPath, useInternalNode, Position, type EdgeProps } from '@xyflow/react';
 import { useModelerStore } from '@/store/useModelerStore';
 import type { Cardinality } from '@/features/governance/services/governance.service';
+import { fanSourceY, HEADER_H, ROW_H } from '../lib/edgeFanout';
 
 function CrowFootEdge(props: EdgeProps) {
   const { id, source, target, sourceY, targetY, data } = props;
@@ -17,11 +18,14 @@ function CrowFootEdge(props: EdgeProps) {
   const anyHover = useModelerStore((s) => !!s.hoverEdgeId || !!s.hoverNodeId);
 
   if (!sourceNode || !targetNode) return null;
-  // `pending` = edge fantasma optimista: recién dibujado, aún persistiéndose.
+  // `pending` = edge fantasma (drop hecho, popup de confirmación abierto).
   // v2 (doc 19): source del edge = PADRE (lado PK), target = HIJO (lado FK).
+  // Doc 47: fanSlot/fanCount/parentPkRows reparten la salida en la zona de
+  // llave del padre; `drifted` = pares fuera de sync con la llave (ámbar).
   const d = (data ?? {}) as {
     parentCardinality: Cardinality; childCardinality: Cardinality;
     identifying: boolean; pending?: boolean; pairCount?: number;
+    fanSlot?: number; fanCount?: number; parentPkRows?: number; drifted?: boolean;
   };
 
   // Lado que mira a la otra tabla (dbdiagram): si el centro del origen está a la
@@ -38,18 +42,27 @@ function CrowFootEdge(props: EdgeProps) {
   const sPos = sourceFacesRight ? Position.Right : Position.Left;
   const tPos = sourceFacesRight ? Position.Left : Position.Right;
 
+  // Doc 47: la salida se reparte en la zona de llave del padre (fan-out). El
+  // fantasma (sin fanCount) conserva la Y de su handle.
+  const sh = sourceNode.measured?.height ?? HEADER_H + ROW_H;
+  const sy = d.fanCount
+    ? fanSourceY(sAbs.y, sh, d.parentPkRows ?? 0, d.fanSlot ?? 0, d.fanCount)
+    : sourceY;
+
   // Ruteo ortogonal (H/V) con esquinas redondeadas — lo provee React Flow
   // (`getSmoothStepPath`), sin matemática manual de caminos.
   const [path] = getSmoothStepPath({
-    sourceX: sx, sourceY, sourcePosition: sPos,
+    sourceX: sx, sourceY: sy, sourcePosition: sPos,
     targetX: tx, targetY, targetPosition: tPos,
     borderRadius: 10,
   });
 
   // Resaltado (dbdiagram): activa la relación bajo el mouse o las conectadas a la
-  // tabla bajo el mouse; atenúa el resto.
+  // tabla bajo el mouse; atenúa el resto. Drift (doc 47) → ámbar.
   const dimmed = anyHover && !active;
-  const stroke = d.pending ? 'var(--primary)' : active ? 'var(--primary)' : 'var(--ink-2)';
+  const stroke = d.pending ? 'var(--primary)'
+    : d.drifted ? 'var(--warning)'
+    : active ? 'var(--primary)' : 'var(--ink-2)';
 
   return (
     <BaseEdge
