@@ -1,7 +1,6 @@
 // API de Governance, consciente del changeset activo: con changeset → lee el
 // overlay (/effective) y escribe al changeset (/changes); sin changeset → lee
 // publicado (la UI queda read-only).
-import { v4 as uuid } from 'uuid';
 import { apiGet, apiPost } from '@/services/http';
 import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -59,6 +58,8 @@ export const bulk = {
   deleteView: (id: string): BulkChange => ({ collection: 'views', entityId: id, op: 'delete' }),
   createTable: (t: CanonicalTable): BulkChange => ({ collection: 'canonical_tables', entityId: t.id, op: 'upsert', payload: { ...t } }),
   createColumn: (c: CanonicalColumn): BulkChange => ({ collection: 'canonical_columns', entityId: c.id, op: 'upsert', payload: { ...c } }),
+  // Doc 47: la migración de llave graba columnas + relación en UN solo lote.
+  upsertRelationship: (r: Relationship): BulkChange => ({ collection: 'relationships', entityId: r.id, op: 'upsert', payload: { ...r } }),
 };
 
 // ── lectura helper público (siempre publicado): conversión lógico→físico ──
@@ -125,13 +126,8 @@ export const markForeignKey = (col: CanonicalColumn, identifying: boolean, pkPos
     } : {}),
   });
 
-// Promueve la columna padre a PK: la relación "nace" de la PK del padre
-// (doc 19 — al jalar el wire, el extremo padre se vuelve PK automáticamente).
-export const markPrimaryKey = (col: CanonicalColumn, pkPosition?: number | null) =>
-  rec('canonical_columns', col.id, 'upsert', {
-    ...col, isPrimaryKey: true, isNullable: false,
-    ...(pkPosition != null && col.pkPosition == null ? { pkPosition } : {}),
-  });
+// markPrimaryKey se retiró (doc 47): la relación ya no promueve la columna
+// padre — el gesto exige que el padre TENGA llave (guard en el canvas).
 
 // ── Relationships (ER) — changeset-aware ──
 // v2 (doc 19): orientación EXPLÍCITA parent (lado PK) / child (lado FK) +
@@ -155,7 +151,8 @@ export const listRelationships = (tableId?: string) => {
   const qs = tableId ? `?tableId=${encodeURIComponent(tableId)}` : '';
   return apiGet<Relationship[]>(`${API_BASE}/api/relationships${qs}`);
 };
-export const createRelationship = (r: Omit<Relationship, 'id'>) => { const id = uuid(); return rec('relationships', id, 'upsert', { ...r, id }); };
+// createRelationship se retiró (doc 47): crear una relación exige el mapeo
+// N=N completo — va SIEMPRE en lote (bulk.upsertRelationship + columnas).
 export const updateRelationship = (r: Relationship) => rec('relationships', r.id, 'upsert', { ...r });
 export const deleteRelationship = (id: string) => rec('relationships', id, 'delete');
 

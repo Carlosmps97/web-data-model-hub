@@ -104,8 +104,12 @@ function TableNode({ data }: NodeProps) {
       <span className="wk-node-dt rd-mono" title={isComplexType(c.dataType) ? c.dataType : undefined}>
         {collapseComplexType(c.dataType)}
       </span>
-      <Handle type="source" position={Position.Right} id={`${c.id}__src`} isConnectable={connectable} className="wk-handle" />
-      <Handle type="target" position={Position.Left} id={`${c.id}__tgt`} isConnectable={connectable} className="wk-handle" />
+      {/* Doc 47: las columnas ya NO inician relaciones (el origen es la
+          cabecera del padre); siguen siendo el destino del drop en el hijo. */}
+      <Handle type="source" position={Position.Right} id={`${c.id}__src`} isConnectable={connectable}
+        isConnectableStart={false} className="wk-handle" />
+      <Handle type="target" position={Position.Left} id={`${c.id}__tgt`} isConnectable={connectable}
+        isConnectableStart={false} className="wk-handle" />
     </div>
   );
 
@@ -121,10 +125,12 @@ function TableNode({ data }: NodeProps) {
           {nameOf(table)}
         </span>
         {canEdit && <button className="wk-node-add" title="Add column" onClick={() => setColumnTarget(table.id)}>+</button>}
-        {/* Ancla del wire de derivación tabla→vista (F3): header-a-header.
-            Invisible y NO conectable — los edges 'derivation' los arma el
-            canvas desde diagram.views, nunca un drag manual. */}
-        <Handle type="source" position={Position.Right} id="__hdr_src" isConnectable={false} className="wk-hdr-handle" />
+        {/* Origen de RELACIONES (doc 47): con la herramienta armada, el header
+            entero inicia el drag (hit-area .armed). Sin armar queda 1px
+            invisible: sigue siendo el ancla de las derivaciones F3 y de los
+            wires crowfoot (sourceHandle __hdr_src). */}
+        <Handle type="source" position={Position.Right} id="__hdr_src" isConnectable={connectable}
+          className={`wk-hdr-handle${connectable ? ' armed' : ''}`} />
       </div>
       {pks.length > 0 && <div className="wk-node-pk">{pks.map(renderRow)}</div>}
       {pks.length > 0 && rest.length > 0 && <div className="wk-node-div" />}

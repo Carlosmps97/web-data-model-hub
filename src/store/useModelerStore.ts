@@ -154,7 +154,8 @@ interface ModelerState {
   autoOrganize: () => Promise<void>;
   createTable: (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical' }) => Promise<void>;
   addColumn: (tableId: string, input: AddColumnInput) => Promise<void>;
-  createRelationship: (conn: { source: string; sourceHandle: string; target: string; targetHandle: string }) => Promise<void>;
+  // createRelationship se retiró (doc 47): la creación es popup-gated — el
+  // RelationshipCreatePopup graba el lote (columnas + relación) directamente.
   updateRelationship: (r: gov.Relationship) => Promise<void>;
   deleteRelationship: (id: string) => Promise<void>;
   addExistingTables: (tableIds: string[]) => Promise<void>;
@@ -590,36 +591,6 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       );
       if (touched) toast.success(`Column also added to ${touched} mirror view(s)`);
     } catch { /* la vista se alinea después con "Match physical order" */ }
-    await get().reload();
-  },
-  createRelationship: async (conn: { source: string; sourceHandle: string; target: string; targetHandle: string }) => {
-    get().markDirty();
-    // El GESTO define la orientación (doc 19): se arrastra DESDE el padre
-    // (lado PK) hacia el hijo (lado FK) — ModelerCanvas ya reorientó `conn`.
-    const preset = get().relPreset; // {parent,child,identifying} o null
-    const identifying = preset?.identifying ?? false;
-    const parentCol = conn.sourceHandle.replace(/__src$|__tgt$/, '');
-    const childCol = conn.targetHandle.replace(/__src$|__tgt$/, '');
-    await gov.createRelationship({
-      parentTableId: conn.source, childTableId: conn.target,
-      pairs: [{ parentColumnId: parentCol, childColumnId: childCol }],
-      parentCardinality: preset?.parent ?? 'one',
-      childCardinality: preset?.child ?? 'zero-many',
-      identifying,
-    });
-    const cols = get().diagram?.columns ?? [];
-    // El padre "nace" de su PK: si la columna padre no era PK, se promueve —
-    // entrando AL FINAL de la llave si la tabla maneja orden explícito.
-    const parent = cols.find((c) => c.id === parentCol);
-    if (parent && !parent.isPrimaryKey) {
-      await gov.markPrimaryKey(parent, nextPkPosition(cols.filter((c) => c.tableId === parent.tableId), parent.id));
-    }
-    // Hijo: FK (y PK si identificadora — línea sólida), también al final de la llave.
-    const child = cols.find((c) => c.id === childCol);
-    if (child) {
-      await gov.markForeignKey(child, identifying,
-        identifying ? nextPkPosition(cols.filter((c) => c.tableId === child.tableId), child.id) : undefined);
-    }
     await get().reload();
   },
   updateRelationship: async (r) => { get().markDirty(); await gov.updateRelationship(r); await get().reload(); },

@@ -104,11 +104,13 @@ src/
 │   │   │                    #   ShapeNode, CrowFootEdge, DerivationEdge, CrowFootMarkers,
 │   │   │                    #   Toolbar, ModelExplorer, DatabaseExplorer, PropertiesPanel,
 │   │   │                    #   ColumnEditor, ViewEditor, ComplexTypeBuilder,
-│   │   │                    #   RelationshipPopup, RelIcon, NewTableModal, CtasModal,
+│   │   │                    #   RelationshipPopup, RelationshipCreatePopup,
+│   │   │                    #   KeyMappingRows, RelIcon, NewTableModal, CtasModal,
 │   │   │                    #   PublishModal, SchemaManagerModal, SchemaSelect,
 │   │   │                    #   ModelPropertiesModal, UdpAssign
 │   │   ├── lib/             #   elkLayout (auto-layout ELK), lodSize (LOD, §6.7),
-│   │   │                    #   complexTypes, keyOrder, nameSync, relationshipPairs,
+│   │   │                    #   edgeFanout (fan-out de wires, doc 47), complexTypes,
+│   │   │                    #   keyOrder, nameSync, relationshipPairs,
 │   │   │                    #   schemaStaging, viewEditorLogic, viewGraph, viewSync
 │   │   ├── services/        #   modeler.service, structure.service, schemas.service,
 │   │   │                    #   explorer.service (Database Explorer draft-aware)
@@ -246,7 +248,7 @@ El store más grande (~600 líneas). Gestiona:
 - **Focus cross-canvas**: `openCanvasAndFocus` / `pendingFocusTableId` — el Finder del Database Explorer abre otro canvas y centra la tabla pedida.
 - **Capa DRAWING**: formas libres (`drawings`) persistidas con *debounce* de 500 ms por canvas.
 - **Checkpoint `dirty`**: alimenta el guard de salida (guardar y salir / salir sin guardar). `saveAll()` persiste layout + drawings y limpia `dirty`.
-- **CRUD de modelo**: `createTable`, `addColumn`, `createRelationship`, `updateColumn`, `reorderColumns`, `deleteColumn`, etc. Todas marcan `dirty`, escriben vía `governance.service` (changeset-aware) y hacen `reload()`.
+- **CRUD de modelo**: `createTable`, `addColumn`, `updateColumn`, `reorderColumns`, `deleteColumn`, etc. Todas marcan `dirty`, escriben vía `governance.service` (changeset-aware) y hacen `reload()`. (Crear relaciones ya NO pasa por el store — doc 47: el `RelationshipCreatePopup` graba el lote directamente.)
 
 Incluye protecciones de concurrencia notables: un contador de secuencia (`_loadSeq`) descarta respuestas de diagrama fuera de orden, y `reorderColumns` persiste en tandas de 5 para no saturar el backend con ráfagas de PUT.
 
@@ -402,6 +404,7 @@ flowchart TD
   MC --> CF["CrowFootEdge (type=crowfoot)"]
   MC --> CM["CrowFootMarkers (defs SVG)"]
   MC --> RPop["RelationshipPopup (editar relacion)"]
+  MC --> RCre["RelationshipCreatePopup (confirmar creacion N=N)"]
 ```
 
 Al entrar a `/model` sin una versión elegida, `WorkspaceScreen` **fuerza** el `OpenModelModal`: no se puede interactuar con un canvas de "producción" hasta escoger versión y modo (`readonly` o `editing`). Además:
@@ -422,12 +425,12 @@ Puntos de diseño relevantes:
 
 - **Virtualización**: `onlyRenderVisibleElements` monta DOM solo para lo visible. Con ~100 tablas × ~30 columnas hay ~3.000 filas y ~6.000 *handles*; sin virtualización el navegador se ahoga. (En fit view esta poda no alcanza — de eso se encarga el LOD, §6.7.)
 - **Zoom amplio**: `minZoom={0.02}` y `fitView` para ver canvases enormes (un auto-arrange de 100 tablas puede medir ~14000×19000 px).
-- **Conexión por cualquier lado**: `connectionMode={ConnectionMode.Loose}` permite iniciar o soltar una relación en cualquier *handle* (source o target); el canvas reorienta los extremos antes de persistir.
+- **Conexión desde la cabecera** (doc 47): `connectionMode={ConnectionMode.Loose}`, pero el gesto SOLO nace en el header del padre (los handles de columna llevan `isConnectableStart={false}`); el drop cae en una columna puntual del hijo o en su cabecera.
 - **Viewer-lock**: en `readonly` los nodos no son arrastrables (`nodesDraggable={!readonly}`) y los *handles* no conectan.
 - **Sin borrado por teclado** (`deleteKeyCode={null}`): el default de React Flow borraba solo en pantalla (sin persistir), engañoso; los borrados reales van por UI explícita.
 - **Persistencia al soltar**: `onNodeDragStop` guarda el layout de la tabla (o la posición del shape), marcando `dirty`.
 
-La creación de relaciones (`onConnect`) usa un **edge fantasma optimista**: al soltar aparece un wire semitransparente (`pending`) mientras se persiste, y el `reload()` lo reemplaza por el real. Como React Flow normaliza la dirección de la conexión, el canvas guarda dónde empezó el gesto (`onConnectStart`) para reorientar los extremos antes de persistir.
+La creación de relaciones (`onConnect`, doc 47) es **popup-gated**: el drop no persiste nada — valida los guards (padre con PK; recursiva solo non-identifying), pinta un **edge fantasma** (`pending`) desde la cabecera del padre y abre `RelationshipCreatePopup`. El popup muestra N filas fijas (una por PK del padre, en orden de llave — `buildKeyMapping` sugiere homónimas del hijo o `Create`), el desplegable `Inherit parent definition?` (default Yes) y el role name por columna nueva; **Confirm** arma UN `PUT /changes/bulk` (`mappingToBulk`: columnas + relación con N pares) y **Cancel** deja cero rastro. La regla N=N también la garantiza el backend (409). Como React Flow normaliza la dirección de la conexión, el canvas guarda dónde empezó el gesto (`onConnectStart`) para reorientar los extremos.
 
 ### 6.3 `TableNode` — nodo de tabla con ancho dinámico
 
@@ -435,7 +438,7 @@ Cada tabla es un nodo custom, **memoizado** (`React.memo`) porque React Flow rep
 
 Detalle de rendimiento: los selectores son **booleanos derivados**, no ids crudos. Por ejemplo `selected = useModelerStore(s => s.selectedTableId === table.id)` — así cambiar la selección solo re-renderiza los 2 nodos afectados, no los 100.
 
-El modo edición (`canEdit`) exige changeset activo y no-readonly; el *tool* "Dibujar relación" armado (`relPreset != null`) es lo que vuelve conectables los *handles*.
+El modo edición (`canEdit`) exige changeset activo y no-readonly; el *tool* "Dibujar relación" armado (`relPreset != null`) es lo que vuelve conectables los *handles*. Con la herramienta armada, el handle del header (`__hdr_src`) cubre la cabecera entera (`.wk-hdr-handle.armed`, cursor de mira) y es el ÚNICO origen posible del gesto; las columnas solo reciben el drop (doc 47).
 
 ### 6.4 `CrowFootEdge` — aristas con notación pata de gallo
 
@@ -446,6 +449,8 @@ type Cardinality = 'one' | 'many' | 'one-only' | 'zero-one' | 'one-many' | 'zero
 ```
 
 El resaltado al hover (relación bajo el mouse, o relaciones conectadas a la tabla bajo el mouse) usa selectores booleanos derivados para no re-renderizar todas las aristas.
+
+**Fan-out (doc 47)**: los wires ya no salen de la fila de su columna — anclan en `__hdr_src` y la **Y de salida** se calcula en render: los K edges del mismo padre se reparten equiespaciados en la *zona de llave* (cabecera 32px + franja PK `pkRows × 28px`, `lib/edgeFanout.ts`), ordenados por la posición del hijo (menos cruces); si el espaciado cae bajo 9px se usa todo el alto del bloque. El canvas asigna `fanSlot/fanCount/parentPkRows` al armar los edges; nada se persiste. Además cada relación lleva `drifted` (sus pares vs la llave efectiva del padre, `relationshipDrift`): un wire drifteado se pinta **ámbar** y su popup ofrece `Sync with parent key`.
 
 ### 6.5 Auto-layout con ELK (`lib/elkLayout.ts`)
 
