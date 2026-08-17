@@ -10,10 +10,11 @@ import type { DbSchema } from '@/features/modeler/services/schemas.service';
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
 import * as gov from '@/features/governance/services/governance.service';
 import type { CanonicalColumn } from '@/features/governance/services/governance.service';
-import { nextPkPosition } from '@/features/modeler/lib/keyOrder';
+import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { syncNewColumnToMirrorViews, syncRemovedColumnFromViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import { useSessionStore } from '@/store/useSessionStore';
+import { useChangesetStore } from '@/store/useChangesetStore';
 
 // ── Árbol del Model Explorer ──────────────────────────────────────────
 // Nodo recursivo: una carpeta con sus subcarpetas y los canvases que cuelgan
@@ -77,6 +78,33 @@ interface ModelerState {
   hoverNodeId: string | null;
   setHoverEdge: (id: string | null) => void;
   setHoverNode: (id: string | null) => void;
+  // ── Copy/paste de columnas entre bloques (doc 48) ──────────────────────
+  /** Selección de filas en el bloque del canvas: UNA tabla fuente a la vez.
+   *  `anchor` = última fila clickeada (extremo fijo del rango con Shift). */
+  colSel: { tableId: string; ids: string[]; anchor: string } | null;
+  toggleColSelect: (tableId: string, colId: string, mode: 'single' | 'toggle' | 'range') => void;
+  clearColSel: () => void;
+  /** Clipboard EN MEMORIA (snapshot por VALOR, orden físico de la fuente) —
+   *  no es el portapapeles del SO. Sobrevive al cambio de canvas dentro del
+   *  proyecto (decisión owner iii); muere al cambiar de proyecto o changeset. */
+  colClipboard: { source: { logicalName: string; physicalName: string }; cols: CanonicalColumn[] } | null;
+  /** Copia la selección actual al clipboard. Devuelve cuántas columnas. */
+  copySelectedColumns: () => number;
+  /** Menú contextual del canvas (fila: colId; bloque: colId null). */
+  colMenu: { x: number; y: number; tableId: string; colId: string | null } | null;
+  openColMenu: (m: { x: number; y: number; tableId: string; colId: string | null }) => void;
+  closeColMenu: () => void;
+  /** Tabla destino del paste en confirmación (monta PasteColumnsPopup). */
+  pasteTarget: string | null;
+  setPasteTarget: (id: string | null) => void;
+  /** Deep-link del panel (fix prueba viva doc 48): columna a abrir EXPANDIDA
+   *  en Properties · Columns tras un click simple en la fila del canvas. El
+   *  panel la consume (vuelve a null) al navegar — una sola vez. */
+  panelFocusColId: string | null;
+  setPanelFocusCol: (id: string | null) => void;
+  /** Click simple en una fila del canvas: selecciona la tabla y deja la
+   *  columna pendiente de foco para el panel (pestaña Columns, expandida). */
+  focusColumnInPanel: (tableId: string, colId: string) => void;
   /** Instancia de React Flow del canvas activo (la setea ModelerCanvas en onInit). */
   flow: ReactFlowInstance | null;
   setFlow: (rf: ReactFlowInstance | null) => void;
@@ -222,6 +250,62 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   hoverNodeId: null,
   setHoverEdge: (id) => set({ hoverEdgeId: id }),
   setHoverNode: (id) => set({ hoverNodeId: id }),
+  colSel: null,
+  toggleColSelect: (tableId, colId, mode) => {
+    const cur = get().colSel;
+    // Cambiar de tabla fuente (o click simple) reinicia la selección: el
+    // contrato del doc 48 es UNA tabla fuente por copia.
+    if (mode === 'single' || !cur || cur.tableId !== tableId) {
+      set({ colSel: { tableId, ids: [colId], anchor: colId } });
+      return;
+    }
+    if (mode === 'toggle') {
+      const ids = cur.ids.includes(colId) ? cur.ids.filter((i) => i !== colId) : [...cur.ids, colId];
+      set({ colSel: ids.length ? { tableId, ids, anchor: colId } : null });
+      return;
+    }
+    // range: contra el orden VISUAL del nodo (bloque PK en orden de llave,
+    // luego el resto) — es lo que el usuario ve al Shift-clickear.
+    const tcols = (get().diagram?.columns ?? []).filter((c) => c.tableId === tableId);
+    const visual = [...pkInKeyOrder(tcols), ...tcols.filter((c) => !c.isPrimaryKey)].map((c) => c.id);
+    const a = visual.indexOf(cur.anchor);
+    const b = visual.indexOf(colId);
+    if (a < 0 || b < 0) { set({ colSel: { tableId, ids: [colId], anchor: colId } }); return; }
+    const [lo, hi] = a <= b ? [a, b] : [b, a];
+    set({ colSel: { tableId, ids: visual.slice(lo, hi + 1), anchor: cur.anchor } });
+  },
+  clearColSel: () => { if (get().colSel) set({ colSel: null }); },
+  colClipboard: null,
+  copySelectedColumns: () => {
+    const sel = get().colSel;
+    const d = get().diagram;
+    if (!sel || !d || !sel.ids.length) return 0;
+    const t = d.tables.find((x) => x.id === sel.tableId);
+    const wanted = new Set(sel.ids);
+    // Snapshot por VALOR en el ORDEN FÍSICO de la fuente (contrato doc 48):
+    // editar o borrar la fuente después no altera lo ya copiado.
+    const cols = d.columns
+      .filter((c) => c.tableId === sel.tableId && wanted.has(c.id))
+      .sort((x, y) => x.ordinal - y.ordinal)
+      .map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
+    if (!cols.length) return 0;
+    // Copiar DESELECCIONA (fix prueba viva): tras el copy el estado que
+    // importa es el clipboard; dejar las filas marcadas leía como "pegado".
+    set({
+      colClipboard: { source: { logicalName: t?.logicalName ?? '', physicalName: t?.physicalName ?? '' }, cols },
+      colSel: null,
+    });
+    return cols.length;
+  },
+  colMenu: null,
+  openColMenu: (m) => set({ colMenu: m }),
+  closeColMenu: () => { if (get().colMenu) set({ colMenu: null }); },
+  pasteTarget: null,
+  setPasteTarget: (id) => set({ pasteTarget: id }),
+  panelFocusColId: null,
+  setPanelFocusCol: (id) => set({ panelFocusColId: id }),
+  focusColumnInPanel: (tableId, colId) =>
+    set({ selectedTableId: tableId, selectedEdgeId: null, panelFocusColId: colId }),
   flow: null,
   setFlow: (rf) => set({ flow: rf }),
   lod: true,
@@ -331,6 +415,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set((s) => ({
       activeProjectId: pid, folders, subjectAreas, activeFolderId: null, activeSaId: null,
       diagram: null, selectedTableId: null, drawings: [],
+      // Doc 48: cambiar de PROYECTO invalida también el clipboard de columnas.
+      colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, colClipboard: null,
       trees: { ...s.trees, [pid]: { folders, subjectAreas } },
     }));
   },
@@ -354,7 +440,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (pid && !valid.has(pid)) {
       pid = null;
       set({ activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null,
-            activeSaId: null, diagram: null, selectedTableId: null, drawings: [] });
+            activeSaId: null, diagram: null, selectedTableId: null, drawings: [],
+            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, colClipboard: null });
     }
     // Re-hidrata los árboles que ya estaban cargados (los proyectos expandidos
     // del explorer siguen mostrando su contenido, ahora bajo el overlay nuevo).
@@ -366,7 +453,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // El canvas sobrevive al cambio de contexto: re-cargarlo COMPLETO
       // (diagrama + drawings) bajo el overlay de la versión nueva.
       try { await get().selectSubjectArea(saId); }
-      catch { set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [] }); }
+      catch { set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null }); }
     }
   },
   selectSubjectArea: async (saId, projectId) => {
@@ -398,7 +485,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         if (seq !== _loadSeq) return;
         crossProject = { activeProjectId: pid, folders: tree.folders, subjectAreas: tree.subjectAreas, activeFolderId: null };
       }
-      set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null, drawings: diagram.subjectArea.drawings ?? [] });
+      // Doc 48: la selección/menú/popup son del canvas anterior; el CLIPBOARD
+      // sobrevive al cambio de canvas (copiar en A, pegar en B — decisión iii).
+      set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null,
+            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
+            drawings: diagram.subjectArea.drawings ?? [] });
     } finally {
       // Sólo la llamada MÁS RECIENTE limpia el spinner: una vieja descartada
       // no debe apagar el openingSaId de la que sigue en vuelo.
@@ -455,7 +546,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({
       projects: get().projects.filter((p) => p.id !== id),
       trees,
-      ...(wasActive ? { activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null, activeSaId: null, diagram: null, selectedTableId: null } : {}),
+      ...(wasActive ? { activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null, activeSaId: null, diagram: null, selectedTableId: null,
+                        colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, colClipboard: null } : {}),
     });
   },
   // Helper interno: recarga folders+canvases del proyecto al cache `trees` y,
@@ -471,7 +563,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({
       ...treesPatch,
       folders, subjectAreas, activeFolderId,
-      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [] }),
+      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null }),
     });
   },
   reload: async () => {
@@ -485,7 +577,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // tras cambiar de changeset): limpiar la selección en vez de dejar el
       // diagrama viejo pegado.
       if (seq === _loadSeq && get().activeSaId === id) {
-        set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [] });
+        set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null });
       }
       return;
     }
@@ -823,6 +915,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await get().selectSubjectArea(sa.id);
   },
 }));
+
+// Doc 48: el clipboard de columnas pertenece al changeset donde se copió —
+// cambiar de changeset (o soltarlo) lo invalida, junto con la selección y el
+// popup. Suscripción a nivel de módulo (useChangesetStore no importa este
+// store, así que no hay ciclo).
+useChangesetStore.subscribe((s, prev) => {
+  if (s.activeId === prev.activeId) return;
+  useModelerStore.setState({ colClipboard: null, colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null });
+});
 
 /**
  * Arma el árbol del Model Explorer del proyecto activo a partir del estado plano

@@ -41,7 +41,6 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   // Modo SYNC (doc 47): re-mapeo de la llave tras un drift del padre.
   const [syncing, setSyncing] = useState(false);
   const [syncRows, setSyncRows] = useState<KeyRowState[]>([]);
-  const [syncInherit, setSyncInherit] = useState(true);
 
   const rel = diagram?.relationships.find((r) => r.id === relId);
   const cols = useMemo(() => diagram?.columns ?? [], [diagram]);
@@ -162,11 +161,10 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
     const free = childOpts.filter((c) => !claimed.has(c.id));
     setSyncRows(parentPksNow.map((pk) => {
       const pair = kept.find((p) => p.parentColumnId === pk.id);
-      if (pair) return { parentColumnId: pk.id, target: { kind: 'existing' as const, columnId: pair.childColumnId }, roleName: '', locked: true };
+      if (pair) return { parentColumnId: pk.id, target: { kind: 'existing' as const, columnId: pair.childColumnId }, roleName: '', inherit: true, locked: true };
       const [auto] = buildKeyMapping([pk], free);
-      return { parentColumnId: pk.id, target: auto.target, roleName: '' };
+      return { parentColumnId: pk.id, target: auto.target, roleName: '', inherit: true };
     }));
-    setSyncInherit(true);
     setSyncing(true);
   };
 
@@ -180,19 +178,30 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       if (r.target.kind === 'existing') {
         const c = colById.get(r.target.columnId);
         if (!c) throw new Error('Child column no longer exists');
-        const role = r.locked ? keptRole.get(r.parentColumnId) : undefined;
-        return { parentCol, target: { kind: 'existing' as const, col: c, preexisting: !!r.locked },
-                 ...(role ? { roleName: role } : {}) };
+        if (r.locked) {
+          const role = keptRole.get(r.parentColumnId);
+          return { parentCol, inherit: r.inherit, target: { kind: 'existing' as const, col: c, preexisting: true },
+                   ...(role ? { roleName: role } : {}) };
+        }
+        // Role name sobre existente = rename in place (semántica del Apply).
+        const role = r.roleName.trim();
+        const rename = role && role !== c.logicalName
+          ? { logicalName: role, physicalName: (await gov.physicalize(role)).physical }
+          : undefined;
+        return { parentCol, inherit: r.inherit,
+          target: { kind: 'existing' as const, col: c, ...(rename ? { rename } : {}) },
+          ...(role ? { roleName: role } : {}) };
       }
       const logical = (r.roleName.trim() || parentCol.logicalName).trim();
       const { physical } = await gov.physicalize(logical);
-      return { parentCol, target: { kind: 'create' as const, id: crypto.randomUUID(), logicalName: logical, physicalName: physical },
+      return { parentCol, inherit: r.inherit,
+               target: { kind: 'create' as const, id: crypto.randomUUID(), logicalName: logical, physicalName: physical },
                ...(r.roleName.trim() ? { roleName: r.roleName.trim() } : {}) };
     }));
     const { changes, createdCols } = mappingToBulk({
       relId: rel.id, parentTableId: rel.parentTableId, childTableId: rel.childTableId,
       identifying: rel.identifying, parentCardinality: rel.parentCardinality, childCardinality: rel.childCardinality,
-      inherit: syncInherit, rows: resolutions, childCols: childOpts,
+      rows: resolutions, childCols: childOpts,
     });
     // Pares retirados (su PK ya no existe en el padre): limpieza conservadora
     // del flag FK — misma regla que el delete de relación.
@@ -209,6 +218,14 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         await syncNewColumnToMirrorViews(
           { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
           rel.childTableId, c.physicalName, childOpts);
+      } catch { /* best-effort */ }
+    }
+    for (const r of resolutions) {
+      if (r.target.kind !== 'existing' || !r.target.rename) continue;
+      try {
+        await syncRenamedColumnInViews(
+          { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+          rel.childTableId, r.target.col.physicalName, r.target.rename.physicalName);
       } catch { /* best-effort */ }
     }
     setSyncing(false);
@@ -232,7 +249,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const removedPairs = rel.pairs.filter((p) => !parentPksNow.some((c) => c.id === p.parentColumnId));
 
   return (
-    <Modal title="Relationship" icon="link" onClose={onClose}>
+    <Modal title="Relationship" icon="link" size="lg" onClose={onClose}>
       {/* Parent → Child */}
       <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="wk-pp-role parent">PARENT</span>
@@ -282,20 +299,13 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       {syncing ? (
         /* ── Modo SYNC: re-mapeo N=N contra la llave vigente del padre ── */
         <div className="wk-props-field">
-          <label>Sync with parent key · parent key has {parentPksNow.length} column{parentPksNow.length === 1 ? '' : 's'}</label>
+          <label>Sync with parent key · parent key has {parentPksNow.length} column{parentPksNow.length === 1 ? '' : 's'} · "Inherit" copies the parent's definition, UDPs and metadata</label>
           <KeyMappingRows parentPks={parentPksNow} childCols={childOpts} rows={syncRows} onChange={setSyncRows} locked={locked} />
           {removedPairs.map((p) => (
             <div key={p.childColumnId} className="rd-small" style={{ color: 'var(--red)', padding: '4px 2px' }}>
               {colName(p.parentColumnId)} → {colName(p.childColumnId)} — will be removed
             </div>
           ))}
-          <div className="wk-props-field" style={{ marginTop: 10 }}><label>Inherit parent definition?</label>
-            <select className="rd-input" disabled={locked} value={syncInherit ? 'yes' : 'no'}
-              onChange={(e) => setSyncInherit(e.target.value === 'yes')}>
-              <option value="yes">Yes — copy definition, UDPs and metadata from the parent</option>
-              <option value="no">No — keep existing metadata / leave new columns blank</option>
-            </select>
-          </div>
           <div className="m-foot">
             <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={locked} onClick={() => setSyncing(false)}>Cancel</button>
             <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={locked} onClick={applySync}>

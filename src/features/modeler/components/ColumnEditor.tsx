@@ -303,6 +303,7 @@ export function ColumnRow({ col, domains, canEdit, dragDisabled, expanded, onTog
         role="button"
         title={canEdit ? 'Click to edit' : 'Click to view'}
         onClick={() => onToggle(col.id)}
+        data-colid={col.id}
         {...dndProps}
       >
         {grip}
@@ -325,6 +326,7 @@ export function ColumnRow({ col, domains, canEdit, dragDisabled, expanded, onTog
   return (
     <div
       className={`wk-pp-colcard${isDragging ? ' dragging' : ''}${dropHint ? ` drop${dropHint}` : ''}`}
+      data-colid={col.id}
       {...dndProps}
     >
       <button type="button" className="wk-pp-colcard-head" title="Collapse" onClick={() => onToggle(null)}>

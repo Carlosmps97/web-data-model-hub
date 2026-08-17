@@ -101,12 +101,12 @@ describe('mappingToBulk (doc 47)', () => {
     parentCardinality: 'one' as const, childCardinality: 'zero-many' as const,
   };
   const rows: MappingResolution[] = [
-    { parentCol: parent1, target: { kind: 'create', id: 'n1', logicalName: 'customer_id', physicalName: 'CUSTOMER_ID' } },
-    { parentCol: parent2, target: { kind: 'existing', col: existing } },
+    { parentCol: parent1, target: { kind: 'create', id: 'n1', logicalName: 'customer_id', physicalName: 'CUSTOMER_ID' }, inherit: true },
+    { parentCol: parent2, target: { kind: 'existing', col: existing }, inherit: true },
   ];
 
   it('identifying + inherit: crea con metadata del padre, PK al final de la llave, y no pisa pkPosition existente', () => {
-    const { changes, createdCols, relationship } = mappingToBulk({ ...base, identifying: true, inherit: true, rows, childCols: childColsBulk });
+    const { changes, createdCols, relationship } = mappingToBulk({ ...base, identifying: true, rows, childCols: childColsBulk });
     expect(createdCols).toHaveLength(1);
     const nueva = createdCols[0];
     expect(nueva).toMatchObject({
@@ -126,7 +126,8 @@ describe('mappingToBulk (doc 47)', () => {
   });
 
   it('non-identifying + inherit=No: la nueva queda FK nullable en blanco; la PK existente del hijo CONSERVA su PK', () => {
-    const { changes, createdCols } = mappingToBulk({ ...base, identifying: false, inherit: false, rows, childCols: childColsBulk });
+    const rowsNo = rows.map((r) => ({ ...r, inherit: false }));
+    const { changes, createdCols } = mappingToBulk({ ...base, identifying: false, rows: rowsNo, childCols: childColsBulk });
     expect(createdCols[0]).toMatchObject({ isForeignKey: true, isPrimaryKey: false, isNullable: true, pkPosition: null });
     expect(createdCols[0].description).toBeUndefined();
     const upd = changes.find((c) => c.entityId === 'h1')!.payload as unknown as CanonicalColumn;
@@ -136,10 +137,10 @@ describe('mappingToBulk (doc 47)', () => {
 
   it('preexisting (sync): el par se conserva sin re-emitir la columna; roleName viaja en el par', () => {
     const rowsSync: MappingResolution[] = [
-      { parentCol: parent1, target: { kind: 'create', id: 'n2', logicalName: 'boss id', physicalName: 'BOSS_ID' }, roleName: 'boss id' },
-      { parentCol: parent2, target: { kind: 'existing', col: existing, preexisting: true }, roleName: 'region' },
+      { parentCol: parent1, target: { kind: 'create', id: 'n2', logicalName: 'boss id', physicalName: 'BOSS_ID' }, roleName: 'boss id', inherit: true },
+      { parentCol: parent2, target: { kind: 'existing', col: existing, preexisting: true }, roleName: 'region', inherit: true },
     ];
-    const { changes, relationship } = mappingToBulk({ ...base, identifying: false, inherit: true, rows: rowsSync, childCols: childColsBulk });
+    const { changes, relationship } = mappingToBulk({ ...base, identifying: false, rows: rowsSync, childCols: childColsBulk });
     expect(changes.some((c) => c.entityId === 'h1')).toBe(false);            // preexisting: sin cambio de columna
     expect(relationship.pairs).toEqual([
       { parentColumnId: 'p1', childColumnId: 'n2', roleName: 'boss id' },
@@ -150,10 +151,34 @@ describe('mappingToBulk (doc 47)', () => {
   it('hijo sin orden explícito de llave: pkPosition null también en identifying', () => {
     const plainChild = [col('h3', 'H', 'OTRA', { isPrimaryKey: true })];   // PK sin pkPosition
     const { createdCols } = mappingToBulk({
-      ...base, identifying: true, inherit: false, childCols: plainChild,
-      rows: [{ parentCol: parent1, target: { kind: 'create', id: 'n3', logicalName: 'x', physicalName: 'X' } }],
+      ...base, identifying: true, childCols: plainChild,
+      rows: [{ parentCol: parent1, target: { kind: 'create', id: 'n3', logicalName: 'x', physicalName: 'X' }, inherit: false }],
     });
     expect(createdCols[0].pkPosition).toBeNull();
+  });
+
+  it('inherit POR FILA: una fila en blanco y otra heredando en el MISMO lote', () => {
+    const mixed: MappingResolution[] = [
+      { parentCol: parent2, target: { kind: 'create', id: 'n4', logicalName: 'region_cd', physicalName: 'REGION_CD' }, inherit: false },
+      { parentCol: parent1, target: { kind: 'existing', col: existing }, inherit: true },
+    ];
+    const { changes, createdCols } = mappingToBulk({ ...base, identifying: false, rows: mixed, childCols: childColsBulk });
+    expect(createdCols[0].description).toBeUndefined();                     // fila 1: sin herencia
+    const upd = changes.find((c) => c.entityId === 'h1')!.payload as unknown as CanonicalColumn;
+    expect(upd).toMatchObject({                                             // fila 2: hereda TODO del padre
+      parentDomainId: 'domA', description: 'Id del cliente', udpValues: { u1: 'oro' },
+    });
+  });
+
+  it('existente con role name: el update RENOMBRA la columna y el par lleva roleName', () => {
+    const rowsRen: MappingResolution[] = [{
+      parentCol: parent1, roleName: 'region venta', inherit: false,
+      target: { kind: 'existing', col: existing, rename: { logicalName: 'region venta', physicalName: 'REGION_VENTA' } },
+    }];
+    const { changes, relationship } = mappingToBulk({ ...base, identifying: false, rows: rowsRen, childCols: childColsBulk });
+    const upd = changes.find((c) => c.entityId === 'h1')!.payload as unknown as CanonicalColumn;
+    expect(upd).toMatchObject({ logicalName: 'region venta', physicalName: 'REGION_VENTA', isForeignKey: true });
+    expect(relationship.pairs[0]).toEqual({ parentColumnId: 'p1', childColumnId: 'h1', roleName: 'region venta' });
   });
 });
 

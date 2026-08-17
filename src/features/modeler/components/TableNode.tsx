@@ -54,6 +54,14 @@ function TableNode({ data }: NodeProps) {
     return ids.join('|');
   });
   const hotCols = useMemo(() => new Set(hotColsKey ? hotColsKey.split('|') : []), [hotColsKey]);
+  // Selección de columnas para copy/paste (doc 48). Mismo patrón de clave
+  // ESTABLE que hotColsKey: '' para las tablas sin selección — un click solo
+  // re-renderiza los nodos afectados, no el canvas entero.
+  const selColsKey = useModelerStore((s) => (s.colSel?.tableId === table.id ? s.colSel.ids.join('|') : ''));
+  const selCols = useMemo(() => new Set(selColsKey ? selColsKey.split('|') : []), [selColsKey]);
+  const toggleColSelect = useModelerStore((s) => s.toggleColSelect);
+  const openColMenu = useModelerStore((s) => s.openColMenu);
+  const focusColumnInPanel = useModelerStore((s) => s.focusColumnInPanel);
 
   const nameOf = (o: { logicalName: string; physicalName: string }) =>
     viewMode === 'logical' ? o.logicalName : o.physicalName;
@@ -92,7 +100,32 @@ function TableNode({ data }: NodeProps) {
   }
 
   const renderRow = (c: CanonicalColumn) => (
-    <div className={`wk-node-row${hotCols.has(c.id) ? ' hot' : ''}`} key={c.id}>
+    <div
+      className={`wk-node-row${hotCols.has(c.id) ? ' hot' : ''}${selCols.has(c.id) ? ' selcol' : ''}`}
+      key={c.id}
+      // Doc 48 (+fix prueba viva): click simple = seleccionar la fila Y abrir
+      // Properties · Columns con ESTA columna expandida; Ctrl/Cmd+click y
+      // Shift+click solo arman la multi-selección (sin navegar el panel).
+      // Con la herramienta de relación armada NO hay selección (los gestos no
+      // se mezclan). stopPropagation: el onNodeClick del canvas ahora
+      // DESELECCIONA filas — acá la selección de tabla la hace
+      // focusColumnInPanel. El click fantasma tras un drag real del nodo no
+      // llega: nodeDragThreshold + clickDistance de React Flow lo suprimen.
+      onClick={(e) => {
+        if (relArmed) return;
+        e.stopPropagation();
+        const multi = e.shiftKey || e.metaKey || e.ctrlKey;
+        toggleColSelect(table.id, c.id, e.shiftKey ? 'range' : multi ? 'toggle' : 'single');
+        if (!multi) focusColumnInPanel(table.id, c.id);
+      }}
+      onContextMenu={(e) => {
+        if (relArmed) return;
+        e.preventDefault();
+        e.stopPropagation();   // que no dispare también el menú del BLOQUE
+        if (!selCols.has(c.id)) toggleColSelect(table.id, c.id, 'single');
+        openColMenu({ x: e.clientX, y: e.clientY, tableId: table.id, colId: c.id });
+      }}
+    >
       <span className="wk-node-key" aria-hidden>
         {c.isPrimaryKey ? (
           <KeyRound size={11} strokeWidth={2} style={{ color: 'var(--k-pk)' }} />
@@ -114,8 +147,9 @@ function TableNode({ data }: NodeProps) {
   );
 
   return (
-    <div className={`wk-node${selected ? ' sel' : ''}`}>
-      <div className="wk-node-head">
+    // rel-armed: apaga el hover de filas (CSS) mientras se dibuja una relación.
+    <div className={`wk-node${selected ? ' sel' : ''}${relArmed ? ' rel-armed' : ''}`}>
+      <div className={`wk-node-head${connectable ? ' armed' : ''}`}>
         <Table2 size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
         {/* Header = SOLO esquema.nombre del modo activo (lógico o físico); el
             nombre del otro modo no se muestra — sin nowrap envolvía en varias
@@ -130,7 +164,8 @@ function TableNode({ data }: NodeProps) {
             invisible: sigue siendo el ancla de las derivaciones F3 y de los
             wires crowfoot (sourceHandle __hdr_src). */}
         <Handle type="source" position={Position.Right} id="__hdr_src" isConnectable={connectable}
-          className={`wk-hdr-handle${connectable ? ' armed' : ''}`} />
+          className={`wk-hdr-handle${connectable ? ' armed' : ''}`}
+          title={connectable ? 'Drag from this header onto a child table to create the relationship' : undefined} />
       </div>
       {pks.length > 0 && <div className="wk-node-pk">{pks.map(renderRow)}</div>}
       {pks.length > 0 && rest.length > 0 && <div className="wk-node-div" />}
