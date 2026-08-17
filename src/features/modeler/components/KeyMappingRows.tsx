@@ -7,7 +7,9 @@ export interface KeyRowState {
   parentColumnId: string;
   target: MappingTarget;
   roleName: string;
-  /** Sync: par ya vigente — mapeo fijo, sin selector. */
+  /** Herencia de metadata del padre — POR FILA (default sí). */
+  inherit: boolean;
+  /** Sync: par ya vigente — mapeo fijo, sin selector ni role/inherit. */
   locked?: boolean;
 }
 
@@ -15,8 +17,9 @@ const CREATE = '__create__';
 
 /**
  * Grid de mapeo N=N (doc 47): una fila por PK del padre — destino en el hijo
- * (columna existente o "Create") + role name opcional en filas Create. Sin
- * agregar/quitar filas. Presentacional puro: el estado vive en el popup.
+ * (columna existente o "Create") + role name e "Inherit" POR FILA (feedback
+ * prueba viva 2026-08-15; en existentes el role name RENOMBRA la columna).
+ * Sin agregar/quitar filas. Presentacional puro: el estado vive en el popup.
  */
 export default function KeyMappingRows({ parentPks, childCols, rows, onChange, locked }: {
   parentPks: CanonicalColumn[];
@@ -49,10 +52,10 @@ export default function KeyMappingRows({ parentPks, childCols, rows, onChange, l
           <div className="wk-relpair" key={pk.id}>
             <div className="wk-relpair-cols">
               <KeyRound size={11} strokeWidth={2} style={{ color: 'var(--k-pk)', flex: 'none' }} aria-hidden />
-              <span className="rd-mono">{pk.physicalName}</span>
+              <span className="rd-mono" title={pk.physicalName}>{pk.physicalName}</span>
               <span style={{ color: 'var(--text-muted-3)' }}>→</span>
               {row.locked ? (
-                <span className="rd-mono">{current?.physicalName ?? '—'}</span>
+                <span className="rd-mono" title={current?.physicalName}>{current?.physicalName ?? '—'}</span>
               ) : (
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <SearchSelect
@@ -65,14 +68,25 @@ export default function KeyMappingRows({ parentPks, childCols, rows, onChange, l
                 </div>
               )}
             </div>
-            {isCreate && !row.locked && (
+            {!row.locked && (
               <div className="wk-relpair-role">
                 <input
                   className="rd-input rd-mono" disabled={locked}
-                  placeholder={`Role name (optional) — default "${pk.logicalName}"`}
+                  placeholder={isCreate
+                    ? `Role name (optional) — default "${pk.logicalName}"`
+                    : 'Role name (optional) — renames this column'}
                   value={row.roleName}
                   onChange={(e) => patch(i, { roleName: e.target.value })}
                 />
+                <select
+                  className="rd-input wk-relpair-inherit" disabled={locked}
+                  title="Copy definition, UDPs and metadata from the parent column"
+                  value={row.inherit ? 'yes' : 'no'}
+                  onChange={(e) => patch(i, { inherit: e.target.value === 'yes' })}
+                >
+                  <option value="yes">Inherit: Yes</option>
+                  <option value="no">Inherit: No</option>
+                </select>
               </div>
             )}
           </div>

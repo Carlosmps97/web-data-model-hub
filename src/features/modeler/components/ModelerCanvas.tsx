@@ -14,6 +14,8 @@ import DerivationEdge from './DerivationEdge';
 import CrowFootMarkers from './CrowFootMarkers';
 import RelationshipPopup from './RelationshipPopup';
 import RelationshipCreatePopup, { type RelDraft } from './RelationshipCreatePopup';
+import ColumnContextMenu, { copiedMessage } from './ColumnContextMenu';
+import PasteColumnsPopup from './PasteColumnsPopup';
 import ViewEditor from './ViewEditor';
 import { buildViewGraph } from '../lib/viewGraph';
 import { nextLod } from '../lib/lodSize';
@@ -36,6 +38,8 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const setFlow = useModelerStore((s) => s.setFlow);
   const reload = useModelerStore((s) => s.reload);
   const selectedTableId = useModelerStore((s) => s.selectedTableId);
+  const pasteTarget = useModelerStore((s) => s.pasteTarget);
+  const setPasteTarget = useModelerStore((s) => s.setPasteTarget);
   const focusTable = useModelerStore((s) => s.focusTable);
   const pendingFocusTableId = useModelerStore((s) => s.pendingFocusTableId);
   const setPendingFocus = useModelerStore((s) => s.setPendingFocus);
@@ -211,6 +215,41 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     });
   }, [drawings, setNodes]);
 
+  // Atajos del copy/paste de columnas (doc 48): Ctrl/Cmd+C copia la selección
+  // de filas, Ctrl/Cmd+V abre la confirmación sobre la tabla SELECCIONADA y
+  // Esc limpia menú/selección. Guardas: cualquier modal abierto
+  // (.dmh-backdrop), foco en un campo editable, o texto seleccionado en la
+  // página (ahí manda el Ctrl+C nativo).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (document.querySelector('.dmh-backdrop')) return;
+      const st = useModelerStore.getState();
+      if (e.key === 'Escape') {
+        if (st.colMenu) st.closeColMenu();
+        else if (st.colSel) st.clearColSel();
+        return;
+      }
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const k = e.key.toLowerCase();
+      if (k !== 'c' && k !== 'v') return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (k === 'c') {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) return;
+        const n = st.copySelectedColumns();
+        if (n > 0) pushToast(copiedMessage(n));
+        return;
+      }
+      if (!st.colClipboard?.cols.length) return;
+      if (readonly || !activeChangeset) { pushToast('Open the model in edit mode to paste columns', 'err'); return; }
+      if (!st.selectedTableId) { pushToast('Select the target table, then paste', 'err'); return; }
+      st.setPasteTarget(st.selectedTableId);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [readonly, activeChangeset, pushToast]);
+
   // Extremo donde EMPEZÓ el gesto de conexión. React Flow normaliza la conexión
   // (source = siempre el extremo con handle `source`), así que si el usuario
   // arrancó desde un handle `target` (lado izquierdo), la dirección normalizada
@@ -294,6 +333,11 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           requestAnimationFrame(() => requestAnimationFrame(() => onMove(null, rf.getViewport())));
         }}
         onNodeClick={(_e, node) => {
+          // Doc 48 fix: cualquier click FUERA de una fila suelta la selección
+          // de columnas (las filas hacen stopPropagation, así que acá solo
+          // llegan cuerpo/cabecera del nodo) — deseleccionar es trivial.
+          const st = useModelerStore.getState();
+          st.clearColSel(); st.closeColMenu();
           // Nodo VISTA: click = selección visual solamente (selected nativo de
           // React Flow) — NUNCA abre el PropertiesPanel (spec §3-5, pedido 5).
           // También cierra el panel si estaba abierto sobre una tabla.
@@ -304,7 +348,21 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // El popup de relación es SOLO para wires crowfoot (una derivación no
         // tiene cardinalidades que editar).
         onEdgeDoubleClick={(_e, edge) => { if (edge.type === 'crowfoot') setEditRelId(edge.id); }}
-        onPaneClick={() => { setSelectedTable(null); setSelectedEdge(null); }}
+        onPaneClick={() => {
+          setSelectedTable(null); setSelectedEdge(null);
+          const st = useModelerStore.getState();
+          st.clearColSel(); st.closeColMenu();
+        }}
+        // Doc 48: menú contextual del BLOQUE (paste). Solo cuando hay algo que
+        // pegar y se puede editar — si no, el menú nativo queda intacto. El
+        // menú de FILA (copy) lo abre TableNode con stopPropagation.
+        onNodeContextMenu={(e, node) => {
+          if (node.type !== 'table' || readonly || !activeChangeset) return;
+          const st = useModelerStore.getState();
+          if (!st.colClipboard?.cols.length || st.relPreset) return;
+          e.preventDefault();
+          st.openColMenu({ x: e.clientX, y: e.clientY, tableId: node.id, colId: null });
+        }}
         onEdgeMouseEnter={(_e, edge) => setHoverEdge(edge.id)}
         onEdgeMouseLeave={() => setHoverEdge(null)}
         onNodeMouseEnter={(_e, node) => setHoverNode(node.id)}
@@ -326,6 +384,15 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // — engañoso en edición y una violación del viewer-lock en readonly.
         // Los borrados reales van por la UI explícita (panel / popup de relación).
         deleteKeyCode={null}
+        // Doc 48 fix (prueba viva): con los defaults de React Flow, 1px de
+        // movimiento ya es DRAG (nodeDragThreshold 1) y el click del gesto se
+        // SUPRIME (clickDistance) — en trackpad "a veces el click no
+        // selecciona" la fila. A 4px, el click con jitter sigue siendo click;
+        // mover la tabla exige un arrastre real (bonus: mueren los saves de
+        // layout por micro-drags accidentales). paneClickDistance hace
+        // robusto el click en el fondo (deseleccionar).
+        nodeDragThreshold={4}
+        paneClickDistance={4}
         // Zoom-out amplio: canvases enormes (auto-arrange de 100 tablas ≈
         // 14000×19000px) necesitan bajar del default minZoom 0.5 para verse
         // completos. fitViewOptions hace que el auto-fit inicial respete ese piso.
@@ -357,6 +424,10 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         />
       )}
       {editView && <ViewEditor view={editView} onClose={() => setEditViewId(null)} onSaved={() => void reload()} pushToast={pushToast} />}
+      <ColumnContextMenu pushToast={pushToast} />
+      {pasteTarget && (
+        <PasteColumnsPopup targetId={pasteTarget} onClose={() => setPasteTarget(null)} pushToast={pushToast} />
+      )}
     </div>
   );
 }

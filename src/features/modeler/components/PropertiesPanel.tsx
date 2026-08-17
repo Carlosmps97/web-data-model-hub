@@ -118,6 +118,24 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     [cols, colQuery, colFiltering],
   );
   const [aligningId, setAligningId] = useState<string | null>(null);
+  // Deep-link desde el canvas (fix prueba viva doc 48): click simple en una
+  // fila del bloque → pestaña Columns con ESA columna expandida y a la vista.
+  // Se limpia el buscador (podría ocultarla) y el foco se CONSUME (una sola
+  // navegación; después el usuario recupera el control). Declarado DESPUÉS
+  // del reset de expandedColId por cambio de tabla: en el mismo commit, gana.
+  const panelFocusColId = useModelerStore((s) => s.panelFocusColId);
+  useEffect(() => {
+    if (!panelFocusColId) return;
+    setTab('columns');
+    setColQuery('');
+    setExpandedColId(panelFocusColId);
+    const id = panelFocusColId;
+    // Doble rAF (patrón focusTable): scroll recién con la card montada y medida.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelector(`[data-colid="${id}"]`)?.scrollIntoView({ block: 'nearest' });
+    }));
+    useModelerStore.getState().setPanelFocusCol(null);
+  }, [panelFocusColId]);
   // ── Metadata (V3): dónde se usa la tabla (proyecto › carpeta › canvas) ──
   const [usage, setUsage] = useState<gov.TableUsageRow[] | null>(null);
   useEffect(() => {

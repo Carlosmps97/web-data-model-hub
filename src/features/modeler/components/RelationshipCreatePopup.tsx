@@ -7,7 +7,7 @@ import {
   buildKeyMapping, mappingToBulk, type MappingResolution,
 } from '@/features/modeler/lib/relationshipPairs';
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
-import { syncNewColumnToMirrorViews } from '@/features/modeler/lib/viewSync';
+import { syncNewColumnToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 import { CARDS } from './RelationshipPopup';
@@ -28,7 +28,6 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
 }) {
   const diagram = useModelerStore((s) => s.diagram);
   const [saving, setSaving] = useState(false);
-  const [inherit, setInherit] = useState(true);
   const [cards, setCards] = useState({ parent: draft.parentCardinality, child: draft.childCardinality });
 
   const cols = useMemo(() => diagram?.columns ?? [], [diagram]);
@@ -40,7 +39,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
   const colById = useMemo(() => new Map(childCols.map((c) => [c.id, c])), [childCols]);
 
   const [rows, setRows] = useState<KeyRowState[]>(() =>
-    buildKeyMapping(parentPks, childCols, draft.dropColumnId).map((r) => ({ ...r, roleName: '' })));
+    buildKeyMapping(parentPks, childCols, draft.dropColumnId).map((r) => ({ ...r, roleName: '', inherit: true })));
 
   const confirm = async () => {
     setSaving(true);
@@ -48,32 +47,49 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
       const resolutions: MappingResolution[] = await Promise.all(rows.map(async (r) => {
         const parentCol = pkById.get(r.parentColumnId);
         if (!parentCol) throw new Error('Parent key changed — reopen the popup');
+        const role = r.roleName.trim();
         if (r.target.kind === 'existing') {
           const c = colById.get(r.target.columnId);
           if (!c) throw new Error('Child column no longer exists');
-          return { parentCol, target: { kind: 'existing' as const, col: c } };
+          // Role name sobre existente = rename in place (semántica del Apply
+          // del popup de edición); mismo nombre lógico → no-op.
+          const rename = role && role !== c.logicalName
+            ? { logicalName: role, physicalName: (await gov.physicalize(role)).physical }
+            : undefined;
+          return { parentCol, inherit: r.inherit,
+            target: { kind: 'existing' as const, col: c, ...(rename ? { rename } : {}) },
+            ...(role ? { roleName: role } : {}) };
         }
-        const logical = (r.roleName.trim() || parentCol.logicalName).trim();
+        const logical = (role || parentCol.logicalName).trim();
         const { physical } = await gov.physicalize(logical);
         return {
-          parentCol,
+          parentCol, inherit: r.inherit,
           target: { kind: 'create' as const, id: crypto.randomUUID(), logicalName: logical, physicalName: physical },
-          ...(r.roleName.trim() ? { roleName: r.roleName.trim() } : {}),
+          ...(role ? { roleName: role } : {}),
         };
       }));
       const { changes, createdCols } = mappingToBulk({
         relId: crypto.randomUUID(),
         parentTableId: draft.parentTableId, childTableId: draft.childTableId,
         identifying: draft.identifying, parentCardinality: cards.parent, childCardinality: cards.child,
-        inherit, rows: resolutions, childCols,
+        rows: resolutions, childCols,
       });
       await gov.recordChangesBulk(changes);
-      // V1: las columnas migradas entran también a las vistas ESPEJO del hijo.
+      // V1: las columnas migradas entran también a las vistas ESPEJO del hijo;
+      // los renames por role name re-apuntan los sources de las vistas.
       for (const c of createdCols) {
         try {
           await syncNewColumnToMirrorViews(
             { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
             draft.childTableId, c.physicalName, childCols);
+        } catch { /* best-effort */ }
+      }
+      for (const r of resolutions) {
+        if (r.target.kind !== 'existing' || !r.target.rename) continue;
+        try {
+          await syncRenamedColumnInViews(
+            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+            draft.childTableId, r.target.col.physicalName, r.target.rename.physicalName);
         } catch { /* best-effort */ }
       }
       useModelerStore.getState().markDirty();
@@ -86,7 +102,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
   };
 
   return (
-    <Modal title="Create relationship" icon="link" onClose={() => { if (!saving) onClose(false); }}>
+    <Modal title="Create relationship" icon="link" size="lg" onClose={() => { if (!saving) onClose(false); }}>
       <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="wk-pp-role parent">PARENT</span>
         <span className="rd-mono">{parentTable?.physicalName ?? draft.parentTableId}</span>
@@ -112,16 +128,8 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
       </div>
 
       <div className="wk-props-field">
-        <label>Key migration · parent key has {parentPks.length} column{parentPks.length === 1 ? '' : 's'}</label>
+        <label>Key migration · parent key has {parentPks.length} column{parentPks.length === 1 ? '' : 's'} · "Inherit" copies the parent's definition, UDPs and metadata</label>
         <KeyMappingRows parentPks={parentPks} childCols={childCols} rows={rows} onChange={setRows} locked={saving} />
-      </div>
-
-      <div className="wk-props-field"><label>Inherit parent definition?</label>
-        <select className="rd-input" disabled={saving} value={inherit ? 'yes' : 'no'}
-          onChange={(e) => setInherit(e.target.value === 'yes')}>
-          <option value="yes">Yes — copy definition, UDPs and metadata from the parent</option>
-          <option value="no">No — keep existing metadata / leave new columns blank</option>
-        </select>
       </div>
 
       <div className="m-foot">

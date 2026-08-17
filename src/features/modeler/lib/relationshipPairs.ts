@@ -100,11 +100,17 @@ export function buildKeyMapping(parentPks: CanonicalColumn[], childCols: Canonic
 export interface MappingResolution {
   parentCol: CanonicalColumn;
   target:
-    | { kind: 'existing'; col: CanonicalColumn; preexisting?: boolean }
+    | { kind: 'existing'; col: CanonicalColumn; preexisting?: boolean;
+        /** Role name sobre columna EXISTENTE = rename in place (nombres ya
+         *  fisicalizados — la función es pura). */
+        rename?: { logicalName: string; physicalName: string } }
     | { kind: 'create'; id: string; logicalName: string; physicalName: string };
-  /** Role name del par (en create nombra la columna nueva; en preexisting
-   *  conserva el roleName vigente del par). */
+  /** Role name del par (en create nombra la columna nueva; en existentes viaja
+   *  con `target.rename`; en preexisting conserva el vigente del par). */
   roleName?: string;
+  /** Herencia POR FILA (feedback prueba viva 2026-08-15): definición/UDPs del
+   *  padre (y en existentes también tipo/dominio). */
+  inherit: boolean;
 }
 
 export interface MappingBulkInput {
@@ -114,7 +120,6 @@ export interface MappingBulkInput {
   identifying: boolean;
   parentCardinality: Cardinality;
   childCardinality: Cardinality;
-  inherit: boolean;
   /** En orden de llave del padre. */
   rows: MappingResolution[];
   /** Columnas ACTUALES del hijo (ordinal / nextPkPosition). */
@@ -125,14 +130,16 @@ export interface MappingBulkInput {
  * Lote de confirmación del popup (create y sync): columnas nuevas + updates de
  * existentes + upsert de la relación — payloads DOC COMPLETO, la relación al
  * FINAL. Tipo/dominio SIEMPRE espejan al padre en columnas nuevas (contrato de
- * una FK); `inherit` gobierna definición/UDPs (y en existentes también
- * tipo/dominio). `preexisting` (sync): el par ya existía — la columna no se
- * re-emite. Pura — `physicalize` corre ANTES (los nombres llegan resueltos).
+ * una FK); `inherit` va POR FILA y gobierna definición/UDPs (en existentes
+ * también tipo/dominio). Role name en existentes = `target.rename` (rename in
+ * place, mismo semántico que el Apply del popup de edición). `preexisting`
+ * (sync): el par ya existía — la columna no se re-emite. Pura — `physicalize`
+ * corre ANTES (los nombres llegan resueltos).
  */
 export function mappingToBulk(input: MappingBulkInput): {
   changes: BulkChange[]; createdCols: CanonicalColumn[]; relationship: Relationship;
 } {
-  const { identifying, inherit, childCols } = input;
+  const { identifying, childCols } = input;
   let nextPos = nextPkPosition(childCols);
   const takePos = (): number | null => (nextPos == null ? null : nextPos++);
   const createdCols: CanonicalColumn[] = [];
@@ -153,7 +160,7 @@ export function mappingToBulk(input: MappingBulkInput): {
         isForeignKey: true, isPrimaryKey: identifying,
         isNullable: identifying ? false : true,
         pkPosition: identifying ? takePos() : null,
-        ...(inherit ? { description: p.description, udpValues: p.udpValues ? { ...p.udpValues } : undefined } : {}),
+        ...(row.inherit ? { description: p.description, udpValues: p.udpValues ? { ...p.udpValues } : undefined } : {}),
       };
       createdCols.push(colNew);
       changes.push(bulk.createColumn(colNew));
@@ -163,11 +170,12 @@ export function mappingToBulk(input: MappingBulkInput): {
       if (!row.target.preexisting) {
         changes.push(bulk.createColumn({
           ...colOld, isForeignKey: true,
+          ...(row.target.rename ?? {}),
           ...(identifying ? {
             isPrimaryKey: true, isNullable: false,
             ...(colOld.pkPosition == null ? { pkPosition: takePos() } : {}),
           } : {}),
-          ...(inherit ? {
+          ...(row.inherit ? {
             dataType: p.dataType, parentDomainId: p.parentDomainId, typeOverridden: p.typeOverridden,
             description: p.description, udpValues: p.udpValues ? { ...p.udpValues } : undefined,
           } : {}),

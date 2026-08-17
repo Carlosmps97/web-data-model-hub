@@ -102,8 +102,13 @@
 .wk-relpairs { display: flex; flex-direction: column; gap: 8px; }
 .wk-relpair { border: 1px solid var(--border-soft); border-radius: 8px; padding: 7px 8px; display: flex; flex-direction: column; gap: 6px; background: var(--fill-5, transparent); }
 .wk-relpair-cols { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+/* Nombres largos: la PK del padre (y el destino fijo en filas locked) truncan
+   con ellipsis + title; el SearchSelect ya maneja el suyo (flex:1 min-width:0). */
+.wk-relpair-cols > .rd-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wk-relpair-role { display: flex; align-items: center; gap: 6px; }
 .wk-relpair-role .rd-input { flex: 1; height: 28px; font-size: 12px; }
+/* "Inherit: Yes/No" POR FILA (feedback prueba viva 2026-08-15). */
+.wk-relpair-role select.wk-relpair-inherit { flex: none; width: 132px; height: 28px; font-size: 12px; }
 .wk-relpair-add { display: flex; align-items: center; gap: 6px; }
 .wk-relpair-add .rd-input { flex: 1; height: 30px; font-size: 12px; min-width: 0; }
 
@@ -446,6 +451,15 @@
    pares (los dos extremos, incl. relaciones compuestas). Mismo azul del wire. */
 .wk-node-row.hot { background: var(--blue-tint); box-shadow: inset 2.5px 0 0 var(--primary); }
 .wk-node-row.hot .wk-node-name { color: var(--primary-700); font-weight: 600; }
+/* Doc 48: filas seleccionadas para copy/paste (click / Ctrl+click / Shift+click). */
+.wk-node-row.selcol { background: var(--blue-tint); box-shadow: inset 0 0 0 1.5px var(--primary); }
+.wk-node-row.selcol.hot { box-shadow: inset 0 0 0 1.5px var(--primary), inset 2.5px 0 0 var(--primary); }
+/* Hover TENUE de fila (fix prueba viva): feedback de que la fila es
+   clickeable/copiable. SOLO CSS — cero estado React, cero re-renders (lo
+   pinta el compositor). No pisa .hot/.selcol y se apaga mientras se dibuja
+   una relación (.rel-armed en la raíz del nodo). */
+.wk-node:not(.rel-armed) .wk-node-row:hover { cursor: pointer; }
+.wk-node:not(.rel-armed) .wk-node-row:not(.hot):not(.selcol):hover { background: #F5F7FB; }
 .wk-node-key { display: inline-flex; align-items: center; justify-content: center; min-width: 14px; }
 /* flex-basis auto (no 0%): la columna aporta su ancho de contenido → el nodo
    crece para que entre "nombre  TIPO"; recién al tocar max-width del nodo,
@@ -469,10 +483,14 @@
 .wk-ctb-empty { color: var(--muted, #8A93A5); }
 .wk-ctb-warn { color: #8A6D1A; background: #FFF8E6; border-color: #F0E2B6; }
 
-/* Handles de conexión por columna (id único __src/__tgt) — discretos, aparecen al hover del nodo */
+/* Handles de conexión por columna (id único __src/__tgt) — doc 47: ya NO
+   inician wires (el origen es la cabecera del padre), así que en reposo son
+   invisibles; se encienden SOLO como candidatos de drop mientras hay una
+   conexión en curso (clase connectionindicator de React Flow v12), y se
+   pintan de azul cuando el wire está encima (valid ⇒ connectingto). */
 .wk-handle { width: 7px; height: 7px; background: var(--subtle); border: 1.5px solid var(--surface); opacity: 0; transition: opacity .12s; }
-.react-flow__node:hover .wk-handle, .wk-node:hover .wk-handle { opacity: .9; }
-.react-flow__handle-connecting .wk-handle, .wk-handle.connectionindicator { opacity: 1; }
+.wk-handle.connectionindicator { opacity: 1; }
+.wk-handle.valid { background: var(--primary); }
 
 /* Anclas header-a-header del wire de derivación (F3): invisibles y NO
    interactivas — solo posicionan los extremos del edge 'derivation'. */
@@ -483,6 +501,13 @@
    invisible a lo ancho del head, cursor de mira; sólo con la herramienta armada. */
 .wk-hdr-handle.armed { width: 100%; height: 100%; left: 0; top: 0; right: auto; min-width: 0;
   transform: none; border-radius: 0; opacity: 0; pointer-events: all; cursor: crosshair; }
+/* Affordance del origen (feedback prueba viva 2026-08-15): con la herramienta
+   armada la cabecera se marca visiblemente (anillo primario + mira) y el "+"
+   se oculta (el overlay lo tapa igual). El veil blanco se pinta cuando el
+   wire en curso está SOBRE una cabecera destino (clase connectingto). */
+.wk-node-head.armed { box-shadow: inset 0 0 0 2px var(--primary); cursor: crosshair; }
+.wk-node-head.armed .wk-node-add { visibility: hidden; }
+.wk-hdr-handle.armed.connectingto { opacity: 1; background: rgba(255, 255, 255, .2); }
 
 /* ── LOD (doc 33): caja COMPACTA bajo el umbral de zoom ──────────────────
    Mismo card (header, colores, franja PK, hatch de vista) con width/height
@@ -780,3 +805,32 @@ select.exd-input { padding: 0 10px; }
 .wk-ve-srcrow { display: flex; gap: 8px; align-items: center; padding: 3px 4px; font-size: 12px; border-radius: 6px; }
 .wk-ve-srcrow:hover { background: var(--fill-3, #F4F6F9); }
 .wk-ve-preview { margin: 6px 0 0; padding: 10px; background: #101828; color: #D7E3F4; font-size: 11.5px; line-height: 1.5; border-radius: 8px; overflow: auto; max-height: 220px; white-space: pre-wrap; }
+
+/* ── Copy/paste de columnas (doc 48) ─────────────────────────────────────── */
+/* Menú contextual del canvas (fila: Copy · bloque: Paste). position: fixed —
+   lo monta ModelerCanvas FUERA del viewport transformado de React Flow. */
+.wk-ctxmenu { position: fixed; z-index: 300; min-width: 200px; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border-1, #E3E8F0); border-radius: 9px;
+  box-shadow: 0 10px 28px rgba(20, 30, 55, .16); }
+.wk-ctxmenu button { display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; border: 0; border-radius: 6px; background: none;
+  font-family: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.wk-ctxmenu button:hover { background: var(--blue-tint); }
+
+/* Popup de confirmación del paste: lista con nombre lógico+físico, tipo y el
+   estado por fila (New / Logical name exists / Name exists — skipped). */
+.wk-paste-list { display: flex; flex-direction: column; max-height: 320px; overflow: auto;
+  border: 1px solid #E8ECF3; border-radius: 8px; margin: 4px 0 10px; }
+.wk-paste-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-top: 1px solid #F2F4F8; font-size: 12.5px; }
+.wk-paste-row:first-child { border-top: none; }
+.wk-paste-row.blocked { opacity: .55; }
+.wk-paste-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.wk-paste-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-paste-phys { color: var(--muted); font-size: 11px; }
+.wk-paste-dt { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--muted); font-size: 11px; }
+.wk-paste-tag { flex: none; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.wk-paste-tag.ok { color: var(--primary-700, #1E4FD6); background: var(--blue-tint); }
+.wk-paste-tag.warn { color: #8A5B00; background: #FFF3D6; }
+.wk-paste-tag.blocked { color: #6B7688; background: #EEF1F6; }
