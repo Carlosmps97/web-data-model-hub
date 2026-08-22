@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronUp, Eye, Lock, Plus, Search, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import TagEditor from '@/components/ui/TagEditor';
@@ -9,6 +9,7 @@ import * as viewsSvc from '@/services/views.service';
 import type { View } from '@/services/views.service';
 import { DEFAULT_DATABRICKS_OPTS, inferJoin, viewDDL, type DdlView } from '@/features/ddl';
 import { colKey, splitColKey, serializeSources, resolveJoinOverride, type ColCfg } from '../lib/viewEditorLogic';
+import { defaultViewSchema } from '../lib/schemaPick';
 import SchemaSelect from './SchemaSelect';
 
 const PURPLE = '#8B5CF6', PURPLE_DK = '#6D3FC4', BLUE = '#2E5BFF', NAVY = '#1A2B4A', MUTED = '#9AA3B2';
@@ -68,11 +69,32 @@ export default function ViewEditor({
   const firstTable = tableById.get(initialSourceIds[0] ?? '');
 
   const [sourceIds, setSourceIds] = useState<string[]>(initialSourceIds);
-  const [name, setName] = useState(view?.name ?? (firstTable ? `v_${firstTable.physicalName}` : ''));
+  // Defaults de creación (doc 52 §4): nombre = el FÍSICO de la tabla origen
+  // tal cual (M_CLIENTE → M_CLIENTE; antes `v_<físico>`); esquema = el de la
+  // tabla como fallback, que el efecto de abajo upgradea a `<esquema>_VU` si
+  // esa convención existe en el catálogo de vistas.
+  const [name, setName] = useState(view?.name ?? (firstTable ? firstTable.physicalName : ''));
   const [schema, setSchema] = useState(view?.schema ?? firstTable?.schema ?? '');
+  // Convención `_VU` (doc 52 §4), solo al CREAR: cuando el catálogo llega, si
+  // existe `<esquemaTabla>_VU` (CI, kind vistas) se auto-selecciona UNA sola
+  // vez — y solo si el usuario no tocó el campo (se compara contra el fallback
+  // inicial; un valor editado no se pisa). Si no existe, queda el fallback.
+  const storeSchemas = useModelerStore((s) => s.schemas);
+  const schemaAutoRef = useRef<string | null>(view ? null : (firstTable?.schema ?? ''));
+  useEffect(() => {
+    const initial = schemaAutoRef.current;
+    if (initial === null || ro) return;
+    const hit = defaultViewSchema(firstTable?.schema, storeSchemas);
+    if (!hit) return;
+    schemaAutoRef.current = null;
+    setSchema((cur) => (cur === initial ? hit : cur));
+  }, [storeSchemas, ro, firstTable?.schema]);
   const [tags, setTags] = useState<Tag[]>(view?.tags ?? []);
   const [filter, setFilter] = useState(view?.filter ?? '');
-  const [showOnCanvas, setShowOnCanvas] = useState(view?.showOnCanvas ?? false);
+  // "Show on this canvas" arranca ON al CREAR (doc 50 §5 — pedido del equipo);
+  // al editar una existente se respeta lo persistido (un `?? true` pelado
+  // habría "encendido" vistas legacy sin el campo).
+  const [showOnCanvas, setShowOnCanvas] = useState(view ? (view.showOnCanvas ?? false) : true);
   // F5: definición funcional de la vista (nivel vista). Editable en el panel izq.
   const [description, setDescription] = useState(view?.description ?? '');
   const [search, setSearch] = useState('');
@@ -307,12 +329,13 @@ export default function ViewEditor({
           <div style={{ flex: 1, overflowY: 'auto', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div>
               <label style={lbl}>View name</label>
-              <input style={idField} value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="v_nombre" />
+              <input style={idField} value={name} autoFocus onChange={(e) => setName(e.target.value)} placeholder="view name" />
             </div>
             <div>
               <label style={lbl}>Schema</label>
-              {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
-              <SchemaSelect value={schema} onChange={setSchema} className="" style={idField} />
+              {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
+                  de VISTAS; se crean desde Structure · Esquemas. */}
+              <SchemaSelect kind="views" value={schema} onChange={setSchema} className="" inputStyle={idField} />
             </div>
             {/* F5: definición funcional de la VISTA (nivel vista, no de columna). */}
             <div>

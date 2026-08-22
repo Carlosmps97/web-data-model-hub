@@ -1,8 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Icon from '@/components/ui/Icon';
 import { startsWithCI } from '../lib/typePick';
 
 export interface SearchOption { value: string; label: string; detail?: string }
+
+/** Posición del menú flotante (doc 52): fixed contra el viewport. */
+interface MenuPos {
+  left: number;
+  top?: number;
+  bottom?: number;
+  minWidth: number;
+  maxWidth: number;
+  maxHeight: number;
+}
 
 /**
  * Combobox con buscador embebido (doc 41) — reemplaza selects nativos y
@@ -15,8 +26,15 @@ export interface SearchOption { value: string; label: string; detail?: string }
  * case-insensitive y REEMPLAZA al elegir. Esto corrige el bloqueo del datalist
  * nativo: con un valor puesto ya no hace falta borrarlo para ver la lista.
  * Teclado: ↑/↓ navegan, Enter elige, Esc cierra sin cambiar.
+ *
+ * Doc 52: el menú se renderiza por PORTAL a `document.body` con posición
+ * `fixed` — un menú absoluto dentro de un contenedor con overflow (el cuerpo
+ * de Dialog/Modal) contribuía a su área scrolleable y generaba scroll
+ * horizontal en el popup. Flotante de verdad: no altera el layout de ningún
+ * contenedor; flip hacia arriba si abajo no entra; un scroll FUERA del menú o
+ * un resize lo cierran (patrón select nativo — no se re-posiciona).
  */
-export default function SearchSelect({ options, valueLabel, placeholder, onPick, disabled, mono, emptyLabel, inputClassName }: {
+export default function SearchSelect({ options, valueLabel, placeholder, onPick, disabled, mono, emptyLabel, inputClassName, inputStyle }: {
   options: SearchOption[];
   /** Etiqueta del valor actual ('' si no hay). */
   valueLabel: string;
@@ -28,10 +46,14 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
   /** Opción "ninguno" (value '') al tope de la lista, si aplica. */
   emptyLabel?: string;
   inputClassName?: string;
+  /** Estilos extra del INPUT (doc 52 — SchemaSelect reenvía acá su `style`);
+   *  el padding derecho del caret se re-impone después. */
+  inputStyle?: React.CSSProperties;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [hi, setHi] = useState(0);
+  const [pos, setPos] = useState<MenuPos | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
@@ -44,7 +66,42 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
     el?.scrollIntoView({ block: 'nearest' });
   }, [hi, open]);
 
-  const openList = () => { if (disabled) return; setOpen(true); setQuery(''); setHi(0); };
+  // Abierto: scroll fuera del menú (cuerpo del dialog, sidebar, página) o
+  // resize → cerrar. Capture: el scroll de contenedores internos no burbujea.
+  useEffect(() => {
+    if (!open) return;
+    const onScroll = (e: Event) => {
+      if (menuRef.current && e.target instanceof Node && menuRef.current.contains(e.target)) return;
+      setOpen(false); setQuery('');
+    };
+    const onResize = () => { setOpen(false); setQuery(''); };
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [open]);
+
+  /** Posición fixed desde el rect del input: abajo por defecto; flip arriba
+   *  si abajo hay <160px y arriba hay más; clamps al viewport. */
+  const place = (): MenuPos | null => {
+    const r = inputRef.current?.getBoundingClientRect();
+    if (!r) return null;
+    const GAP = 4, MARGIN = 8, MENU_MAX = 240;
+    const below = window.innerHeight - r.bottom - GAP - MARGIN;
+    const above = r.top - GAP - MARGIN;
+    const up = below < 160 && above > below;
+    return {
+      left: Math.max(MARGIN, Math.min(r.left, window.innerWidth - r.width - MARGIN)),
+      ...(up ? { bottom: window.innerHeight - r.top + GAP } : { top: r.bottom + GAP }),
+      minWidth: r.width,
+      maxWidth: Math.max(r.width, window.innerWidth - r.left - MARGIN),
+      maxHeight: Math.max(96, Math.min(MENU_MAX, up ? above : below)),
+    };
+  };
+
+  const openList = () => { if (disabled) return; setPos(place()); setOpen(true); setQuery(''); setHi(0); };
   const close = () => { setOpen(false); setQuery(''); };
   const pick = (v: string) => { onPick(v); close(); inputRef.current?.blur(); };
 
@@ -53,7 +110,7 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
       <input
         ref={inputRef}
         className={`${inputClassName ?? 'rd-input'}${mono ? ' rd-mono' : ''}`}
-        style={{ width: '100%', paddingRight: 26 }}
+        style={{ width: '100%', ...inputStyle, paddingRight: 26 }}
         disabled={disabled}
         value={open ? query : valueLabel}
         placeholder={open ? (valueLabel || placeholder) : placeholder}
@@ -70,10 +127,14 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
         }}
       />
       <Icon name="chevD" size={12} className="wk-ss-caret" />
-      {open && (
+      {open && pos && createPortal(
         // preventDefault también en el CONTENEDOR: arrastrar el scrollbar del
         // menú no debe blurear el input (cerraría la lista a media navegación).
-        <div className="wk-ss-menu" ref={menuRef} onMouseDown={(e) => e.preventDefault()}>
+        // position fixed + zIndex inline pisan el absolute del CSS (el menú
+        // sigue usando .wk-ss-menu para el look).
+        <div className="wk-ss-menu" ref={menuRef} onMouseDown={(e) => e.preventDefault()}
+          style={{ position: 'fixed', zIndex: 500, left: pos.left, top: pos.top ?? 'auto',
+                   bottom: pos.bottom, minWidth: pos.minWidth, maxWidth: pos.maxWidth, maxHeight: pos.maxHeight }}>
           {filtered.length === 0 && <div className="wk-ss-empty">No matches</div>}
           {filtered.map((o, i) => (
             // onMouseDown (no onClick): elige ANTES de que el blur del input
@@ -85,7 +146,8 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
               {o.detail && <span className="wk-ss-detail rd-mono">{o.detail}</span>}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

@@ -49,6 +49,7 @@ const rec = (collection: string, id: string, op: 'upsert' | 'delete', payload?: 
  *  no viaja. Los ítems se arman con los builders de `bulk` (las colecciones
  *  versionadas no se nombran fuera de los services). */
 export type BulkChange = csvc.BulkChange;
+export type ChangeOrigin = csvc.ChangeOrigin;
 export const recordChangesBulk = (changes: BulkChange[]) => csvc.recordChangesBulk(writableCs(), changes);
 export const bulk = {
   deleteTable: (id: string): BulkChange => ({ collection: 'canonical_tables', entityId: id, op: 'delete' }),
@@ -56,10 +57,18 @@ export const bulk = {
   deleteRelationship: (id: string): BulkChange => ({ collection: 'relationships', entityId: id, op: 'delete' }),
   // Paridad con views.service.deleteView (misma colección versionada).
   deleteView: (id: string): BulkChange => ({ collection: 'views', entityId: id, op: 'delete' }),
-  createTable: (t: CanonicalTable): BulkChange => ({ collection: 'canonical_tables', entityId: t.id, op: 'upsert', payload: { ...t } }),
-  createColumn: (c: CanonicalColumn): BulkChange => ({ collection: 'canonical_columns', entityId: c.id, op: 'upsert', payload: { ...c } }),
+  // `origin` (doc 51, opcional): procedencia del alta — paste/CTAS — para el
+  // historial de auditoría ("Created from …"). El backend la arrastra si una
+  // edición posterior del mismo draft no la trae.
+  createTable: (t: CanonicalTable, origin?: ChangeOrigin): BulkChange =>
+    ({ collection: 'canonical_tables', entityId: t.id, op: 'upsert', payload: { ...t }, ...(origin ? { origin } : {}) }),
+  createColumn: (c: CanonicalColumn, origin?: ChangeOrigin): BulkChange =>
+    ({ collection: 'canonical_columns', entityId: c.id, op: 'upsert', payload: { ...c }, ...(origin ? { origin } : {}) }),
   // Doc 47: la migración de llave graba columnas + relación en UN solo lote.
   upsertRelationship: (r: Relationship): BulkChange => ({ collection: 'relationships', entityId: r.id, op: 'upsert', payload: { ...r } }),
+  // Doc 50 (Undo): restaurar vistas de una cascada deshecha — el payload es el
+  // doc COMPLETO que devolvió views.service (round-trip garantizado).
+  upsertView: (v: { id: string }): BulkChange => ({ collection: 'views', entityId: v.id, op: 'upsert', payload: { ...v } }),
 };
 
 // ── lectura helper público (siempre publicado): conversión lógico→físico ──
@@ -97,6 +106,11 @@ export const searchTables = (q: string, limit = 50, schema?: string) => {
   if (schema) params.set('schema', schema);
   return apiGet<CanonicalTable[]>(`${CATALOG}/tables?${params.toString()}`);
 };
+// ── Historial de auditoría (doc 51): eventos PUBLICADOS de una entidad ──
+export type { HistoryField, HistoryItem, HistoryUser } from './changeset.service';
+export const tableHistory = (id: string, limit = 50) => csvc.entityHistory('canonical_tables', id, limit);
+export const columnHistory = (id: string, limit = 50) => csvc.entityHistory('canonical_columns', id, limit);
+
 export const createTable = (t: CanonicalTable) => rec('canonical_tables', t.id, 'upsert', { ...t });
 /** Borra la tabla en el changeset (soft-delete VERSIONADO). El cascade
  *  (columnas/relaciones/vistas/membresías de canvas) lo orquesta el store. */

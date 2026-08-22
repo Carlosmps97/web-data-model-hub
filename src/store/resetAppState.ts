@@ -12,6 +12,7 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useChangesetStore } from '@/store/useChangesetStore';
 import { useIdentityStore } from '@/store/useIdentityStore';
+import { useUndoStore } from '@/store/useUndoStore';
 import { setDevUser } from '@/services/http';
 
 export function resetAppState(): void {
@@ -22,9 +23,18 @@ export function resetAppState(): void {
   useModelerStore.setState({
     projects: [], folders: [], subjectAreas: [], trees: {}, openingSaId: null,
     activeProjectId: null, activeFolderId: null, activeSaId: null, diagram: null,
-    columnTarget: null, selectedTableId: null, selectedEdgeId: null,
+    columnTarget: null, selectedTableId: null, selectedEdgeId: null, selectedColumnId: null,
     relPreset: null, hoverEdgeId: null, hoverNodeId: null, flow: null, drawings: [],
+    // Aislamiento por sesión/usuario (doc 50 §4): los clipboards de copy/paste
+    // (docs 48/50) y la selección/menú/deep-link viven en memoria del tab —
+    // sin este reset, el SIGUIENTE usuario del mismo tab heredaba lo copiado
+    // por el anterior y podía pegarlo sin querer.
+    colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
+    colClipboard: null, tblClipboard: null,
   });
+  // La pila de Undo también es de la sesión (doc 50): las inversas del usuario
+  // anterior no deben poder ejecutarse desde la sesión nueva.
+  useUndoStore.getState().clear();
   useChangesetStore.setState({ activeId: null, changesets: [] });
   // `loaded=false` fuerza el re-fetch de /api/me para el próximo actor (el
   // guard idempotente de loadIdentity dejaba pegado el principal anterior).

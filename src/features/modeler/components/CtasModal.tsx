@@ -165,7 +165,12 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
     if (pickedCols.length === 0) { pushToast('Pick at least one column', 'err'); return; }
     setBusy(true);
     try {
-      await createTableFromSources({ logicalName: name.trim(), schema: schema.trim() || undefined, columns: pickedCols });
+      await createTableFromSources({
+        logicalName: name.trim(), schema: schema.trim() || undefined,
+        // `sourceTable` = tabla dueña en el ORIGEN (doc 51): procedencia para
+        // el historial de auditoría; el store no la incluye en el payload.
+        columns: pickedCols.map((c) => ({ ...c, sourceTable: selById.get(c.tableId)?.physicalName })),
+      });
       pushToast('Table created from sources'); onClose();
     } catch { pushToast('Could not create the table', 'err'); } finally { setBusy(false); }
   };

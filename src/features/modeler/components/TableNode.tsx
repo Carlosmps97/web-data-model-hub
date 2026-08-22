@@ -103,8 +103,8 @@ function TableNode({ data }: NodeProps) {
     <div
       className={`wk-node-row${hotCols.has(c.id) ? ' hot' : ''}${selCols.has(c.id) ? ' selcol' : ''}`}
       key={c.id}
-      // Doc 48 (+fix prueba viva): click simple = seleccionar la fila Y abrir
-      // Properties · Columns con ESTA columna expandida; Ctrl/Cmd+click y
+      // Doc 48 + doc 49: click simple = seleccionar la fila Y abrir el
+      // Properties de ESTA columna (sidebar propio); Ctrl/Cmd+click y
       // Shift+click solo arman la multi-selección (sin navegar el panel).
       // Con la herramienta de relación armada NO hay selección (los gestos no
       // se mezclan). stopPropagation: el onNodeClick del canvas ahora

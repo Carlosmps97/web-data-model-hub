@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, ImageDown, FolderCog, FolderOpen, Eye, Tags,
+  FileCode2, ImageDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
 import { EndIcon, RelLineIcon } from './RelIcon';
 import type { Cardinality } from '@/features/governance/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
+import { useUndoStore } from '@/store/useUndoStore';
+import { UNDO_KEY_LABEL } from './ColumnContextMenu';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import NewTableModal from './NewTableModal';
@@ -90,6 +92,17 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
   const readonly = openMode === 'readonly';
 
+  // Undo (doc 50): el tooltip muestra QUÉ se va a deshacer; el botón se apaga
+  // sin pila, con una inversa en vuelo o en solo-lectura.
+  const undoCount = useUndoStore((s) => s.stack.length);
+  const undoLabel = useUndoStore((s) => (s.stack.length ? s.stack[s.stack.length - 1].label : null));
+  const undoBusy = useUndoStore((s) => s.busy);
+  const onUndo = () => {
+    void useUndoStore.getState().undoLast()
+      .then((label) => { if (label) pushToast(`Undid: ${label}`); })
+      .catch((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't undo", 'err'));
+  };
+
   const [modal, setModal] = useState<'table' | 'ctas' | 'view' | 'schema' | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
@@ -103,7 +116,6 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Acciones largas del toolbar en vuelo (feedback de "en proceso").
   const [saving, setSaving] = useState(false);
   const [arranging, setArranging] = useState(false);
-  const relArmed = relPreset != null;
   const setRelEnd = (end: 'parent' | 'child', c: Cardinality) => {
     const next = { ...relSel, [end]: c };
     setRelSel(next);
@@ -329,6 +341,12 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {/* ACTIONS */}
       <div className="wk-grp">
         <div className="wk-grp-row">
+          {ic(
+            undoLabel ? `Undo — ${undoLabel} (${UNDO_KEY_LABEL})` : `Undo (${UNDO_KEY_LABEL}) — nothing to undo`,
+            undoBusy ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Undo2 size={17} />,
+            onUndo,
+            { disabled: !canEdit || undoBusy || undoCount === 0, lockTip: true },
+          )}
           {ic('Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !canEdit || arranging, lockTip: true })}
           {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas })}
           {ic('Export image', <ImageDown size={17} />, exportImage, { disabled: !hasCanvas })}

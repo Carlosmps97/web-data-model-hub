@@ -18,10 +18,18 @@ export const getChangeset = (id: string) => apiGet<Changeset>(`${CS}/${encodeURI
 export const createChangeset = (title: string) => apiPost<Changeset>(CS, { title });
 export const recordChange = (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) =>
   apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
+/** Procedencia de un alta (doc 51): la muestra el historial de auditoría
+ *  ("Created from …"). Solo la adjuntan paste de tabla/columnas y CTAS. */
+export interface ChangeOrigin {
+  kind: 'paste-table' | 'paste-columns' | 'ctas';
+  sourceTable?: string;
+  sourceColumn?: string;
+}
 /** Un cambio del lote de `recordChangesBulk` (mismo shape que recordChange). */
 export interface BulkChange {
   collection: string; entityId: string; op: 'upsert' | 'delete';
   payload?: Record<string, unknown>;
+  origin?: ChangeOrigin;
 }
 /** Lote de cambios en UNA request por tanda (doc 39): las cascadas de borrar
  *  tabla / crear tabla desde fuentes iban cambio-por-cambio — a 4k columnas
@@ -53,3 +61,34 @@ export const effective = <T>(id: string, collection: string, opts?: { tableId?: 
 export const submitChangeset = (id: string) => apiPost<Changeset>(`${CS}/${encodeURIComponent(id)}/submit`);
 export const approveChangeset = (id: string) => apiPost<Changeset>(`${CS}/${encodeURIComponent(id)}/approve`);
 export const rejectChangeset = (id: string, note?: string) => apiPost<Changeset>(`${CS}/${encodeURIComponent(id)}/reject`, { note });
+
+// ── Historial de auditoría por entidad (doc 51) ────────────────────────────
+
+export interface HistoryUser { id: string; name?: string | null; email?: string | null; }
+export interface HistoryField { key: string; label: string; before?: unknown; after?: unknown; }
+/** Procedencia mostrada por el historial: las de `ChangeOrigin` + la entrada
+ *  sintética de la migración inicial. */
+export interface HistoryOrigin { kind: ChangeOrigin['kind'] | 'migration'; sourceTable?: string; sourceColumn?: string; }
+/** Un evento PUBLICADO del historial de una tabla/columna: quién (autor del
+ *  draft), cuándo (appliedAt de la versión), qué acción, qué versión y qué
+ *  campos cambiaron (mismo motor de diff del popup de revisión, doc 31).
+ *  `synthetic` marca la entrada "Initial load" de la migración (sin usuario). */
+export interface HistoryItem {
+  action: 'created' | 'edited' | 'deleted';
+  at?: string | null;
+  editedAt?: string | null;
+  csId?: string | null;
+  version?: string | null;
+  versionTitle?: string | null;
+  user?: HistoryUser | null;
+  publishedBy?: HistoryUser | null;
+  approvedBy: HistoryUser[];
+  origin?: HistoryOrigin | null;
+  name?: string | null;
+  fields: HistoryField[];
+  synthetic: boolean;
+}
+/** Historial publicado de una entidad — read-only, deriva del ledger de
+ *  changesets aplicados (no existe para drafts nunca publicados). */
+export const entityHistory = (collection: 'canonical_tables' | 'canonical_columns', entityId: string, limit = 50) =>
+  apiGet<{ items: HistoryItem[] }>(`${CS}/history/${collection}/${encodeURIComponent(entityId)}?limit=${limit}`);

@@ -11,6 +11,7 @@ import Toolbar from './Toolbar';
 import ModelExplorer from './ModelExplorer';
 import DatabaseExplorer from './DatabaseExplorer';
 import ColumnEditor from './ColumnEditor';
+import ColumnPropertiesPanel from './ColumnPropertiesPanel';
 import PropertiesPanel from './PropertiesPanel';
 
 export const pushToast = (m: string, k?: 'err') => (k === 'err' ? toast.error(m) : toast.success(m));
@@ -23,7 +24,7 @@ export default function WorkspaceScreen() {
   const setColumnTarget = useModelerStore((s) => s.setColumnTarget);
   const addColumn = useModelerStore((s) => s.addColumn);
   const selectedTableId = useModelerStore((s) => s.selectedTableId);
-  const reload = useModelerStore((s) => s.reload);
+  const selectedColumnId = useModelerStore((s) => s.selectedColumnId);
   const viewMode = useModelerStore((s) => s.viewMode);
   const setViewMode = useModelerStore((s) => s.setViewMode);
   const openMode = useSessionStore((s) => s.openMode);
@@ -158,7 +159,7 @@ export default function WorkspaceScreen() {
   };
 
   return (
-    <div className={`wk${selectedTableId && openMode ? ' has-props' : ''}`}
+    <div className={`wk${(selectedTableId || selectedColumnId) && openMode ? ' has-props' : ''}`}
       style={{
         ...(propsWidth ? { ['--props-w']: `${propsWidth}px` } : {}),
         ...(explWidth ? { ['--expl-w']: `${explWidth}px` } : {}),
@@ -206,7 +207,11 @@ export default function WorkspaceScreen() {
           </button>
         </div>
       </div>
-      {selectedTableId && openMode && <PropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />}
+      {/* Doc 49: el área `props` del grid muestra UN panel a la vez — con una
+          columna seleccionada, su Properties reemplaza al de la tabla. */}
+      {selectedColumnId && openMode
+        ? <ColumnPropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />
+        : selectedTableId && openMode && <PropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />}
       {columnTarget && <ColumnEditor tableId={columnTarget} onClose={() => setColumnTarget(null)} onAdd={addColumn} />}
       <OpenModelModal open={openModelShown} onClose={closeOpenModel} published={published} users={users} />
       {/* El <Toaster> ahora es global (App.tsx): uno solo para toda la app. */}

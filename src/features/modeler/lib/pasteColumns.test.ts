@@ -96,4 +96,16 @@ describe('pasteColumnsToBulk (variante de createTableFromSources sobre tabla exi
     expect('pkPosition' in (changes[0].payload ?? {})).toBe(false);
     expect(changes[0].payload?.isPrimaryKey).toBe(true);
   });
+
+  it('origin de auditoría (doc 51): con sourceTable viaja por columna; sin él, no', () => {
+    const clip = [col('a', { physicalName: 'COL_A' }), col('b', { physicalName: 'COL_B' })];
+    const withSrc = pasteColumnsToBulk({ targetTableId: 'tTgt', cols: clip, targetCols: [], sourceTable: 'M_SRC', newId: ids() });
+    expect(withSrc.map((c) => c.origin)).toEqual([
+      { kind: 'paste-columns', sourceTable: 'M_SRC', sourceColumn: 'COL_A' },
+      { kind: 'paste-columns', sourceTable: 'M_SRC', sourceColumn: 'COL_B' },
+    ]);
+    expect(withSrc.every((c) => !('origin' in (c.payload as object)))).toBe(true);
+    const without = pasteColumnsToBulk({ targetTableId: 'tTgt', cols: clip, targetCols: [], newId: ids() });
+    expect(without.every((c) => c.origin === undefined)).toBe(true);
+  });
 });

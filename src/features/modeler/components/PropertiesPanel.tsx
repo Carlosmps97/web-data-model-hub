@@ -4,25 +4,29 @@ import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useChangesetStore } from '@/store/useChangesetStore';
+import { pushUndo } from '@/store/useUndoStore';
+import AuditHistory from './AuditHistory';
 import UdpAssign from './UdpAssign';
 import { useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/features/governance/services/governance.service';
-import type { ParentDomain } from '@/features/governance/services/governance.service';
 import { matchesColumn } from '../lib/columnSearch';
-import { nextPkPosition, pkInKeyOrder, reorderKey } from '../lib/keyOrder';
-import { alignSourcesToPhysical, syncRenamedColumnInViews } from '../lib/viewSync';
+import { pkInKeyOrder, reorderKey } from '../lib/keyOrder';
+import { alignSourcesToPhysical } from '../lib/viewSync';
 import { ColumnRow } from './ColumnEditor';
 import SchemaSelect from './SchemaSelect';
 import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
 import type { View } from '@/services/views.service';
 
-type Tab = 'definition' | 'columns' | 'views' | 'links' | 'metadata';
+// Doc 51: los UDPs dejan Metadata y pasan a pestaña propia (paridad con el
+// panel de columna del doc 49); Metadata conserva el resto y suma History.
+type Tab = 'definition' | 'columns' | 'views' | 'links' | 'udps' | 'metadata';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'definition', label: 'Definition' },
   { id: 'columns', label: 'Columns' },
   { id: 'views', label: 'Views' },
   { id: 'links', label: 'Links' },
+  { id: 'udps', label: 'UDPs' },
   { id: 'metadata', label: 'Metadata' },
 ];
 
@@ -44,9 +48,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const selectedTableId = useModelerStore((s) => s.selectedTableId);
   const setSelectedTable = useModelerStore((s) => s.setSelectedTable);
   const reload = useModelerStore((s) => s.reload);
-  const updateColumn = useModelerStore((s) => s.updateColumn);
   const reorderColumns = useModelerStore((s) => s.reorderColumns);
-  const deleteColumn = useModelerStore((s) => s.deleteColumn);
+  // Doc 49: el click en una fila abre el Properties de ESA columna (sidebar
+  // propio) — la edición inline (fila expandida) se retiró de este panel.
+  const setSelectedColumn = useModelerStore((s) => s.setSelectedColumn);
   const setColumnTarget = useModelerStore((s) => s.setColumnTarget);
   const deleteRelationship = useModelerStore((s) => s.deleteRelationship);
   const removeTableFromArea = useModelerStore((s) => s.removeTableFromArea);
@@ -66,8 +71,6 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   );
 
   const [tab, setTab] = useState<Tab>('definition');
-  const [domains, setDomains] = useState<ParentDomain[]>([]);
-  useEffect(() => { gov.listDomains().then(setDomains).catch(() => {}); }, []);
 
   // ── Definition: form local de la tabla ──
   const [form, setForm] = useState({ logicalName: '', physicalName: '', schema: '', description: '' });
@@ -85,9 +88,6 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const [overId, setOverId] = useState<string | null>(null);
   const [after, setAfter] = useState(false);
 
-  // ── Columns: fila expandida (default TODO contraído; se resetea al cambiar de tabla) ──
-  const [expandedColId, setExpandedColId] = useState<string | null>(null);
-  useEffect(() => { setExpandedColId(null); }, [selectedTableId]);
   // Reorden persistiéndose en background (la lista ya se movió de forma optimista).
   const [reordering, setReordering] = useState(false);
   // Quitar del canvas / borrar la tabla: mientras corre, spinner en el botón y
@@ -118,17 +118,16 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     [cols, colQuery, colFiltering],
   );
   const [aligningId, setAligningId] = useState<string | null>(null);
-  // Deep-link desde el canvas (fix prueba viva doc 48): click simple en una
-  // fila del bloque → pestaña Columns con ESA columna expandida y a la vista.
-  // Se limpia el buscador (podría ocultarla) y el foco se CONSUME (una sola
-  // navegación; después el usuario recupera el control). Declarado DESPUÉS
-  // del reset de expandedColId por cambio de tabla: en el mismo commit, gana.
+  // Deep-link al listado (doc 48, ajustado en doc 49): pestaña Columns con la
+  // fila A LA VISTA (scroll, ya sin expandir — la edición vive en el panel de
+  // columna). Hoy lo produce el botón Back del ColumnPropertiesPanel. Se
+  // limpia el buscador (podría ocultarla) y el foco se CONSUME (una sola
+  // navegación; después el usuario recupera el control).
   const panelFocusColId = useModelerStore((s) => s.panelFocusColId);
   useEffect(() => {
     if (!panelFocusColId) return;
     setTab('columns');
     setColQuery('');
-    setExpandedColId(panelFocusColId);
     const id = panelFocusColId;
     // Doble rAF (patrón focusTable): scroll recién con la card montada y medida.
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -167,8 +166,13 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const parents = links.filter((r) => r.childTableId === table.id).length;
   const children = links.length - parents;
 
+  // Pre-imagen POR VALOR de la tabla para el Undo (doc 50) — común a los tres
+  // caminos de guardado de abajo (Save, blur de la definición, UDP).
+  const tablePre = () => ({ ...table, ...(table.udpValues ? { udpValues: { ...table.udpValues } } : {}) });
+
   const saveDef = async () => {
     setSavingDef(true);
+    const pre = tablePre();
     try {
       const logical = form.logicalName.trim();
       let physical = form.physicalName.trim();
@@ -181,6 +185,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       // `updateTable` sólo cubre name/schema; un único upsert changeset-aware (merge
       // sobre la tabla actual) cubre además `description`, y luego reload.
       await gov.createTable({ ...table, logicalName: logical, physicalName: physical, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); });
       // El form ya no se re-siembra en cada reload (solo al cambiar de tabla):
       // reflejar acá el físico derivado para que el input no quede stale.
       setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
@@ -205,37 +210,21 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     if (!canEdit || !table) return;
     const next = form.description.trim() || undefined;
     if ((table.description ?? undefined) === next) return;
-    try { await gov.createTable({ ...table, description: next }); await reload(); }
-    catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
+    const pre = tablePre();
+    try {
+      await gov.createTable({ ...table, description: next });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); });
+      await reload();
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
   };
   const saveTableUdp = async (next: Record<string, string>) => {
     if (!table) return;
-    try { await gov.createTable({ ...table, udpValues: next }); await reload(); }
-    catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save UDP", 'err'); }
-  };
-
-  const patchCol = async (id: string, fields: Parameters<typeof updateColumn>[1]) => {
-    // Entrar a la llave (doc 19 §12b): si la tabla maneja orden EXPLÍCITO de
-    // llave (pkPosition — migración Erwin o llave reordenada), la nueva PK se
-    // agrega AL FINAL; si no, queda sin posición y rige el orden físico.
-    if (fields.isPrimaryKey === true && fields.pkPosition === undefined) {
-      const pos = nextPkPosition(cols, id);
-      if (pos != null) fields = { ...fields, pkPosition: pos };
-    }
-    const before = cols.find((c) => c.id === id);
+    const pre = tablePre();
     try {
-      await updateColumn(id, fields);
-      // Rename FÍSICO: las vistas referencian columnas POR NOMBRE — se
-      // re-apuntan los sources que usaban el nombre viejo (best-effort).
-      if (before && fields.physicalName && fields.physicalName !== before.physicalName) {
-        try {
-          const n = await syncRenamedColumnInViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            before.tableId, before.physicalName, fields.physicalName);
-          if (n) { pushToast(`Rename also applied to ${n} view(s)`); reloadViews(); void reload(); }
-        } catch { /* la vista se corrige a mano si hiciera falta */ }
-      }
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the column", 'err'); }
+      await gov.createTable({ ...table, udpValues: next });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); });
+      await reload();
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save UDP", 'err'); }
   };
 
   // ── Orden de la LLAVE (pkPosition) — mover una PK dentro de la llave ──
@@ -245,11 +234,20 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     setKeyBusy(true);
     try {
       const byId = new Map(cols.map((c) => [c.id, c]));
+      // Pre-imágenes de las columnas tocadas, para el Undo (doc 50).
+      const pres: typeof cols = [];
       for (const step of plan) {
         const col = byId.get(step.id);
         if (col && (col.pkPosition ?? null) !== step.pkPosition) {
+          pres.push({ ...col });
           await gov.updateColumn({ ...col, pkPosition: step.pkPosition });
         }
+      }
+      if (pres.length) {
+        pushUndo('Reorder key', async () => {
+          for (const c of pres) await gov.updateColumn(c);
+          await reload();
+        });
       }
       await reload();
     } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't reorder the key", 'err'); }
@@ -285,47 +283,6 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't reorder the view", 'err'); }
     finally { setAligningId(null); }
   };
-  const removeCol = async (id: string, name: string) => {
-    try {
-      // Impacto GLOBAL (spec 10 §8): relaciones — en CUALQUIER canvas — donde
-      // la columna es extremo (publicadas + overlay del changeset). Si el
-      // impact falla (red), se cae al confirm genérico sin cascade.
-      let impact: gov.RelationshipImpact = { relationships: [], total: 0 };
-      try { impact = await gov.columnImpact(id); } catch { /* confirm genérico */ }
-      const relIds = impact.relationships.map((r) => r.relId);
-      const ok = await confirmDialog({
-        title: 'Delete column',
-        message: impact.total > 0 ? (
-          <>
-            <p style={{ margin: 0 }}>
-              Column <strong>“{name}”</strong> participates in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} — each will lose this pair (or be deleted if it was the last one):
-            </p>
-            <ul style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 180, overflow: 'auto' }}>
-              {impact.relationships.map((r) => (
-                <li key={r.relId} style={{ marginBottom: 4 }}>
-                  <span className="rd-mono">{r.otherTableName}.{r.otherColumnName}</span>
-                  {r.canvases.length > 0 && (
-                    <span className="rd-small" style={{ color: 'var(--muted)' }}>
-                      {' '}— in {r.canvases.map((c) => c.name).join(', ')}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <>Column <strong>“{name}”</strong> will be removed from this table.</>
-        ),
-        confirmLabel: impact.total > 0 ? 'Delete anyway' : 'Delete',
-        cancelLabel: 'Cancel', variant: 'danger',
-        // Cascade: el changeset registra el delete de la columna Y de cada
-        // relación afectada (Task 12).
-        action: () => deleteColumn(id, relIds),
-      });
-      if (ok) pushToast(impact.total > 0 ? 'Column and its relationships deleted' : 'Column deleted');
-    } catch { pushToast("Couldn't delete", 'err'); }
-  };
-
   // DnD: al pasar por encima decide si el drop va antes/después según la mitad del row.
   const handleDragOver = (id: string, e: React.DragEvent) => {
     e.preventDefault();
@@ -478,7 +435,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
             </div>
             <div className="wk-props-field"><label>Schema</label>
               {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
-              <SchemaSelect value={form.schema} onChange={(v) => setForm({ ...form, schema: v })} disabled={!canEdit} />
+              <SchemaSelect kind="tables" value={form.schema} onChange={(v) => setForm({ ...form, schema: v })} disabled={!canEdit} />
             </div>
             <div className="wk-props-field"><label>Functional definition</label>
               <textarea className="wk-pp-textarea" disabled={!canEdit} placeholder="What this entity represents…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} onBlur={() => void saveDescriptionOnBlur()} />
@@ -574,13 +531,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 <ColumnRow
                   key={c.id}
                   col={c}
-                  domains={domains}
                   canEdit={canEdit}
                   dragDisabled={colFiltering}
-                  expanded={expandedColId === c.id}
-                  onToggle={setExpandedColId}
-                  onPatch={patchCol}
-                  onDelete={removeCol}
+                  onOpen={setSelectedColumn}
                   isDragging={dragId === c.id}
                   dropHint={overId === c.id ? (after ? 'after' : 'before') : null}
                   onDragStart={setDragId}
@@ -724,6 +677,16 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
           </>
         )}
 
+        {/* ── UDPs (doc 51: pestaña propia — antes vivían dentro de Metadata) ── */}
+        {tab === 'udps' && (
+          <>
+            <p className="wk-pp-cap" style={{ marginTop: 0 }}>User Defined Properties — governance tags for this table.</p>
+            {/* key por tabla: al cambiar de selección se resetean borradores
+                y pendientes del asignador (estado interno de UdpAssign). */}
+            <UdpAssign key={table.id} level="table" values={table.udpValues ?? {}} disabled={!canEdit} onChange={saveTableUdp} />
+          </>
+        )}
+
         {/* ── Metadata (pp4, solo lectura) ── */}
         {tab === 'metadata' && (
           <>
@@ -756,13 +719,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 </div>
               ))}
             </div>
-            {/* User Defined Properties (etiquetas key-value para clasificar el dato). */}
-            <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px solid #EAEDF2' }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: '#1A2B4A', marginBottom: 10 }}>User Defined Properties</div>
-              {/* key por tabla: al cambiar de selección se resetean borradores
-                  y pendientes del asignador (estado interno de UdpAssign). */}
-              <UdpAssign key={table.id} level="table" values={table.udpValues ?? {}} disabled={!canEdit} onChange={saveTableUdp} />
-            </div>
+            {/* Historial de auditoría (doc 51): acciones PUBLICADAS sobre la
+                tabla — quién / qué / cuándo / qué versión, detalle bajo demanda. */}
+            <AuditHistory kind="table" entityId={table.id} />
           </>
         )}
       </div>

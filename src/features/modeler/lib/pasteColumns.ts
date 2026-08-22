@@ -52,6 +52,9 @@ export function pasteColumnsToBulk(input: {
   targetTableId: string;
   cols: CanonicalColumn[];
   targetCols: CanonicalColumn[];
+  /** Tabla FUENTE del clipboard — procedencia para el historial de auditoría
+   *  (doc 51: "Copied from column …"). */
+  sourceTable?: string;
   /** Inyectable para tests; default crypto.randomUUID. */
   newId?: () => string;
 }): BulkChange[] {
@@ -74,6 +77,8 @@ export function pasteColumnsToBulk(input: {
       ...(c.isPartition ? { isPartition: true } : {}),
       ...(c.udpValues && Object.keys(c.udpValues).length ? { udpValues: { ...c.udpValues } } : {}),
       ...(pkPosition != null ? { pkPosition } : {}),
-    });
+    }, input.sourceTable
+      ? { kind: 'paste-columns', sourceTable: input.sourceTable, sourceColumn: c.physicalName }
+      : undefined);
   });
 }

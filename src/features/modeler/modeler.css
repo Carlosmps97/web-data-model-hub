@@ -313,6 +313,8 @@
   color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
   transition: background .12s, color .12s; }
 .wk-props-close:hover { background: var(--border-2); color: var(--ink); }
+/* Back del panel de columna (doc 49): mismo look que el close, pegado al glyph. */
+.wk-props-back { margin-right: -3px; }
 
 /* Cuerpo scrolleable (el header y las tabs quedan fijos) */
 .wk-props-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; }
@@ -360,29 +362,15 @@
 .wk-pp-badge.fk { color: var(--primary); background: var(--blue-tint); }
 .wk-pp-badge.pt { color: var(--green-deep); background: var(--green-tint); }
 
-/* Card expandida ("Editing column"): borde azul + ring + header colapsable */
-.wk-pp-colcard { background: var(--surface); border: 1.5px solid var(--primary); border-radius: 11px;
-  box-shadow: 0 0 0 3px var(--primary-muted); overflow: hidden;
-  transition: border-color .12s, box-shadow .12s, opacity .12s; }
-.wk-pp-colcard-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 11px;
-  background: var(--blue-soft); border: none; border-bottom: 1px solid var(--blue-border-2); text-align: left;
-  font-family: var(--ui); font-size: 12.5px; font-weight: 700; color: var(--ink); cursor: pointer; }
-.wk-pp-colcard-head svg { color: var(--primary); flex: none; }
-.wk-pp-colcard-ttl { flex: none; }
-.wk-pp-colcard-sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  text-align: right; font-size: 10.5px; font-weight: 600; color: var(--subtle); }
-.wk-pp-colcard-body { padding: 12px; display: grid; gap: 6px; min-width: 0; }
-.wk-pp-colcard-body .rd-input { height: 30px; font-size: 12px; }
-
-/* Estados DnD compartidos (fila colapsada y card expandida) */
-.wk-pp-colrow.dragging, .wk-pp-colcard.dragging { opacity: .55; }
-.wk-pp-colrow.dropbefore, .wk-pp-colcard.dropbefore { box-shadow: 0 -2px 0 0 var(--blue); } /* drop-indicator (top) */
-.wk-pp-colrow.dropafter,  .wk-pp-colcard.dropafter  { box-shadow: 0 2px 0 0 var(--blue); }  /* drop-indicator (bottom) */
+/* Estados DnD de la fila (la card expandida "Editing column" se retiró en el
+   doc 49 — la edición vive en el ColumnPropertiesPanel) */
+.wk-pp-colrow.dragging { opacity: .55; }
+.wk-pp-colrow.dropbefore { box-shadow: 0 -2px 0 0 var(--blue); } /* drop-indicator (top) */
+.wk-pp-colrow.dropafter  { box-shadow: 0 2px 0 0 var(--blue); }  /* drop-indicator (bottom) */
 .wk-pp-grip { display: inline-flex; align-items: center; justify-content: center; flex: none;
   color: var(--text-muted-3); cursor: grab; user-select: none; }
 .wk-pp-grip:active { cursor: grabbing; }
 .wk-pp-grip svg { display: block; }
-.wk-pp-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 
 /* Spinner del input de tipo mientras aplica el cambio de Parent Domain */
 .wk-pp-typewrap { position: relative; display: block; min-width: 0; }
@@ -415,6 +403,35 @@
 .wk-pp-meta { display: grid; grid-template-columns: 104px 1fr; gap: 12px 10px; font-size: 12.5px; align-items: start; }
 .wk-pp-meta dt { font-size: 12px; font-weight: 600; color: var(--text-muted-3); }
 .wk-pp-meta dd { margin: 0; color: var(--text-body); word-break: break-word; }
+
+/* ── Historial de auditoría en Metadata (doc 51): filas compactas usuario ·
+   acción · versión · fecha, con el detalle de campos expandible bajo demanda. */
+.wk-pp-hist { display: flex; flex-direction: column; gap: 4px; }
+.wk-pp-histrow { border: 1px solid var(--border-2); border-radius: 7px; background: var(--surface); }
+.wk-pp-histhead { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px;
+  background: none; border: none; cursor: pointer; font-family: var(--ui); font-size: 11.5px;
+  color: var(--text-body); text-align: left; }
+.wk-pp-histact { flex: none; font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  padding: 1px 6px; border-radius: 999px; }
+.wk-pp-histact.created { color: #1F7A4D; background: #E7F5EC; }
+.wk-pp-histact.edited { color: #8A5A00; background: #FFF3DB; }
+.wk-pp-histact.deleted { color: #C4314B; background: #FDECEF; }
+.wk-pp-histuser { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-weight: 600; }
+.wk-pp-histver { flex: none; font-size: 10.5px; color: var(--primary); background: var(--blue-tint);
+  border-radius: 999px; padding: 0 6px; line-height: 16px; }
+.wk-pp-histwhen { flex: none; font-size: 10.5px; color: var(--muted); }
+.wk-pp-histcaret { flex: none; color: var(--muted); transition: transform .12s; }
+.wk-pp-histrow.open .wk-pp-histcaret { transform: rotate(180deg); }
+.wk-pp-histdetail { padding: 7px 10px 9px; border-top: 1px dashed var(--border-2);
+  font-size: 11px; color: var(--text-body); display: flex; flex-direction: column; gap: 5px; }
+.wk-pp-histmeta { color: var(--muted); overflow-wrap: anywhere; }
+.wk-pp-histfields { display: flex; flex-direction: column; gap: 3px; max-height: 190px;
+  overflow: auto; padding-top: 2px; }
+.wk-pp-histfield { display: flex; gap: 8px; align-items: baseline; }
+.wk-pp-histflabel { flex: none; width: 108px; color: var(--text-muted-3); font-weight: 600; }
+.wk-pp-histfvals { min-width: 0; overflow-wrap: anywhere; }
+.wk-pp-histarrow { color: var(--text-muted-3); }
 
 .wk-tabs { grid-area: tabs; display: flex; align-items: center; gap: 4px; padding: 0 8px;
   background: var(--surface); border-top: 1px solid var(--border); }

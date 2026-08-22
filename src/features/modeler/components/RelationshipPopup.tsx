@@ -5,8 +5,9 @@ import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
+import { pushUndo } from '@/store/useUndoStore';
 import * as gov from '@/features/governance/services/governance.service';
-import type { Cardinality } from '@/features/governance/services/governance.service';
+import type { Cardinality, CanonicalColumn } from '@/features/governance/services/governance.service';
 import {
   buildKeyMapping, demotablePkChildren, mappingToBulk, relationshipDrift, roleNamePlan,
   type MappingResolution,
@@ -64,6 +65,14 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const setType = (identifying: boolean) => {
     if (identifying === rel.identifying) return;
     void run(async () => {
+      // Pre-imágenes para el Undo (doc 50): la relación + las columnas HIJAS
+      // de sus pares (la propagación de abajo solo toca esas: promoción a PK
+      // o demote conservador).
+      const relPre = { ...rel, pairs: rel.pairs.map((p) => ({ ...p })) };
+      const colPres = rel.pairs
+        .map((p) => colById.get(p.childColumnId))
+        .filter((c): c is CanonicalColumn => !!c)
+        .map((c) => ({ ...c }));
       await gov.updateRelationship({ ...rel, identifying });
       if (identifying) {
         // Erwin: la FK entra a la PK del hijo — se promueven TODOS los pares,
@@ -88,6 +97,13 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         }
         pushToast(n ? `Non-identifying: ${n} child column(s) leave the PK` : 'Non-identifying');
       }
+      pushUndo('Edit relationship', async () => {
+        await gov.recordChangesBulk([
+          ...colPres.map((c) => gov.bulk.createColumn(c)),
+          gov.bulk.upsertRelationship(relPre),
+        ]);
+        await reload();
+      });
       await reload();
     }, "Couldn't update");
   };

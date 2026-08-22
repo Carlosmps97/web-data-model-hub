@@ -3,23 +3,31 @@ import { useChangesetStore } from '@/store/useChangesetStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 
-export const PASTE_KEY_LABEL =
-  /Mac/i.test(typeof navigator === 'undefined' ? '' : navigator.platform) ? '⌘V' : 'Ctrl+V';
+// Etiquetas de atajos agnósticas al SO (Windows/Linux = Ctrl, macOS = ⌘) —
+// el handler real ya acepta ambos (`metaKey || ctrlKey`).
+const IS_MAC = /Mac/i.test(typeof navigator === 'undefined' ? '' : navigator.platform);
+export const PASTE_KEY_LABEL = IS_MAC ? '⌘V' : 'Ctrl+V';
+export const UNDO_KEY_LABEL = IS_MAC ? '⌘Z' : 'Ctrl+Z';
 
 export const copiedMessage = (n: number) =>
   `${n} column${n === 1 ? '' : 's'} copied — paste with ${PASTE_KEY_LABEL} on the target table`;
 
+export const copiedTableMessage = (name: string) =>
+  `Table ${name} copied — paste with ${PASTE_KEY_LABEL}`;
+
 /**
- * Menú contextual del canvas (doc 48): espejo DESCUBRIBLE de Ctrl/Cmd+C/V.
- * Fila → Copy (+ Paste si hay clipboard y edición); bloque → Paste. Vive fuera
- * del viewport de React Flow (position: fixed sin ancestro con transform), lo
- * monta ModelerCanvas; TableNode/onNodeContextMenu lo abren vía store.
+ * Menú contextual del canvas (docs 48 + 50): espejo DESCUBRIBLE de Ctrl/Cmd+C/V.
+ * Fila → Copy de columnas (+ Paste de columnas si hay clipboard y edición);
+ * bloque → Copy table (+ Paste de columnas / Paste table según clipboard).
+ * Vive fuera del viewport de React Flow (position: fixed sin ancestro con
+ * transform), lo monta ModelerCanvas; TableNode/onNodeContextMenu lo abren vía store.
  */
 export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const menu = useModelerStore((s) => s.colMenu);
   const closeColMenu = useModelerStore((s) => s.closeColMenu);
   const selCount = useModelerStore((s) => s.colSel?.ids.length ?? 0);
   const clipCount = useModelerStore((s) => s.colClipboard?.cols.length ?? 0);
+  const tblClipName = useModelerStore((s) => s.tblClipboard?.table.physicalName ?? null);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
   const ref = useRef<HTMLDivElement>(null);
@@ -48,9 +56,14 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   }, [menu, closeColMenu]);
 
   if (!menu) return null;
-  const showCopy = menu.colId != null && selCount > 0;   // copiar es lectura: vale también en readonly
-  const showPaste = clipCount > 0 && canEdit;
-  if (!showCopy && !showPaste) return null;
+  const isBlock = menu.colId == null;
+  const showCopyCols = !isBlock && selCount > 0;   // copiar es lectura: vale también en readonly
+  const showPasteCols = clipCount > 0 && canEdit;
+  // Doc 50: el menú del BLOQUE siempre ofrece copiar la tabla; pegarla exige
+  // clipboard de tabla + edición (crea una tabla NUEVA, no necesita destino).
+  const showCopyTable = isBlock;
+  const showPasteTable = isBlock && tblClipName != null && canEdit;
+  if (!showCopyCols && !showPasteCols && !showCopyTable && !showPasteTable) return null;
 
   const doCopy = () => {
     const st = useModelerStore.getState();
@@ -64,21 +77,44 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
     st.setPasteTarget(menu.tableId);
     st.closeColMenu();
   };
+  const doCopyTable = () => {
+    const st = useModelerStore.getState();
+    const name = st.copyTable(menu.tableId);
+    if (name) pushToast(copiedTableMessage(name));
+    st.closeColMenu();
+  };
+  const doPasteTable = () => {
+    const st = useModelerStore.getState();
+    st.closeColMenu();
+    void st.pasteTable()
+      .then((name) => { if (name) pushToast(`Table pasted as ${name}`); })
+      .catch((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't paste the table", 'err'));
+  };
 
-  // Clamp al viewport: el menú es chico (~200×72), que no se corte en el borde.
+  // Clamp al viewport: el menú es chico (~200×~120), que no se corte en el borde.
   const x = Math.min(menu.x, window.innerWidth - 216);
-  const y = Math.min(menu.y, window.innerHeight - 92);
+  const y = Math.min(menu.y, window.innerHeight - 140);
 
   return (
     <div ref={ref} className="wk-ctxmenu" style={{ left: x, top: y }} role="menu">
-      {showCopy && (
+      {showCopyCols && (
         <button type="button" role="menuitem" onClick={doCopy}>
           {selCount > 1 ? `Copy ${selCount} columns` : 'Copy column'}
         </button>
       )}
-      {showPaste && (
+      {showCopyTable && (
+        <button type="button" role="menuitem" onClick={doCopyTable}>
+          Copy table
+        </button>
+      )}
+      {showPasteCols && (
         <button type="button" role="menuitem" onClick={doPaste}>
           Paste {clipCount} column{clipCount === 1 ? '' : 's'}
+        </button>
+      )}
+      {showPasteTable && (
+        <button type="button" role="menuitem" onClick={doPasteTable}>
+          Paste table ({tblClipName} as copy)
         </button>
       )}
     </div>

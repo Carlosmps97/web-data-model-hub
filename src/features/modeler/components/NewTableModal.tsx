@@ -173,8 +173,9 @@ export default function NewTableModal({ onClose, onCreate }: {
           </div>
           <div style={field}>
             <label style={lbl}>Schema</label>
-            {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
-            <SchemaSelect value={schema} onChange={setSchema} style={{ width: '100%' }} />
+            {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
+                de TABLAS; se crean desde Structure · Esquemas. */}
+            <SchemaSelect kind="tables" value={schema} onChange={setSchema} style={{ width: '100%' }} />
           </div>
           {error && (
             <div className="rd-small" role="alert" style={{ color: 'var(--error, #C4314B)', marginTop: 2 }}>

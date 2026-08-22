@@ -14,7 +14,8 @@ import DerivationEdge from './DerivationEdge';
 import CrowFootMarkers from './CrowFootMarkers';
 import RelationshipPopup from './RelationshipPopup';
 import RelationshipCreatePopup, { type RelDraft } from './RelationshipCreatePopup';
-import ColumnContextMenu, { copiedMessage } from './ColumnContextMenu';
+import ColumnContextMenu, { copiedMessage, copiedTableMessage } from './ColumnContextMenu';
+import { useUndoStore } from '@/store/useUndoStore';
 import PasteColumnsPopup from './PasteColumnsPopup';
 import ViewEditor from './ViewEditor';
 import { buildViewGraph } from '../lib/viewGraph';
@@ -215,11 +216,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     });
   }, [drawings, setNodes]);
 
-  // Atajos del copy/paste de columnas (doc 48): Ctrl/Cmd+C copia la selección
-  // de filas, Ctrl/Cmd+V abre la confirmación sobre la tabla SELECCIONADA y
-  // Esc limpia menú/selección. Guardas: cualquier modal abierto
-  // (.dmh-backdrop), foco en un campo editable, o texto seleccionado en la
-  // página (ahí manda el Ctrl+C nativo).
+  // Atajos del canvas (docs 48 + 50), agnósticos al SO (`metaKey || ctrlKey` =
+  // ⌘ en macOS, Ctrl en Windows/Linux): Ctrl/Cmd+C copia la selección de
+  // filas — o el BLOQUE seleccionado si no hay filas —, Ctrl/Cmd+V pega
+  // (clipboard de tabla → tabla nueva; de columnas → confirmación sobre la
+  // tabla seleccionada), Ctrl/Cmd+Z deshace la última acción y Esc limpia
+  // menú/selección. Guardas: cualquier modal abierto (.dmh-backdrop), foco en
+  // un campo editable (ahí mandan el copy/undo NATIVOS del input), o texto
+  // seleccionado en la página (ahí manda el Ctrl+C nativo).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector('.dmh-backdrop')) return;
@@ -231,14 +235,41 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       }
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k !== 'c' && k !== 'v') return;
+      if (k !== 'c' && k !== 'v' && k !== 'z') return;
       const t = e.target as HTMLElement | null;
       if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      if (k === 'z') {
+        // Doc 50: deshacer la última acción instrumentada. Shift+Z (redo) no
+        // existe; sin edición o sin pila, el atajo no hace nada.
+        if (e.shiftKey || readonly || !activeChangeset) return;
+        const undo = useUndoStore.getState();
+        if (undo.busy || !undo.stack.length) return;
+        e.preventDefault();
+        void undo.undoLast()
+          .then((label) => { if (label) pushToast(`Undid: ${label}`); })
+          .catch((err) => pushToast(err instanceof Error && err.message ? err.message : "Couldn't undo", 'err'));
+        return;
+      }
       if (k === 'c') {
         const sel = window.getSelection();
         if (sel && !sel.isCollapsed) return;
         const n = st.copySelectedColumns();
-        if (n > 0) pushToast(copiedMessage(n));
+        if (n > 0) { pushToast(copiedMessage(n)); return; }
+        // Doc 50: sin filas seleccionadas, con un bloque seleccionado el copy
+        // toma la TABLA completa (columnas + metadata; sin relaciones).
+        if (st.selectedTableId) {
+          const name = st.copyTable(st.selectedTableId);
+          if (name) pushToast(copiedTableMessage(name));
+        }
+        return;
+      }
+      // Doc 50: el clipboard de TABLA tiene prioridad (son excluyentes) y no
+      // necesita destino — pega una tabla NUEVA en este canvas.
+      if (st.tblClipboard) {
+        if (readonly || !activeChangeset) { pushToast('Open the model in edit mode to paste', 'err'); return; }
+        void st.pasteTable()
+          .then((name) => { if (name) pushToast(`Table pasted as ${name}`); })
+          .catch((err) => pushToast(err instanceof Error && err.message ? err.message : "Couldn't paste the table", 'err'));
         return;
       }
       if (!st.colClipboard?.cols.length) return;
@@ -353,13 +384,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           const st = useModelerStore.getState();
           st.clearColSel(); st.closeColMenu();
         }}
-        // Doc 48: menú contextual del BLOQUE (paste). Solo cuando hay algo que
-        // pegar y se puede editar — si no, el menú nativo queda intacto. El
-        // menú de FILA (copy) lo abre TableNode con stopPropagation.
+        // Docs 48 + 50: menú contextual del BLOQUE — siempre ofrece "Copy
+        // table" (copiar es lectura, vale también en readonly) y, si hay
+        // clipboard + edición, las entradas de paste. El menú de FILA (copy de
+        // columnas) lo abre TableNode con stopPropagation.
         onNodeContextMenu={(e, node) => {
-          if (node.type !== 'table' || readonly || !activeChangeset) return;
+          if (node.type !== 'table') return;
           const st = useModelerStore.getState();
-          if (!st.colClipboard?.cols.length || st.relPreset) return;
+          if (st.relPreset) return;
           e.preventDefault();
           st.openColMenu({ x: e.clientX, y: e.clientY, tableId: node.id, colId: null });
         }}

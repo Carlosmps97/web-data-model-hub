@@ -9,12 +9,17 @@ import * as schemasSvc from '@/features/modeler/services/schemas.service';
 import type { DbSchema } from '@/features/modeler/services/schemas.service';
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
 import * as gov from '@/features/governance/services/governance.service';
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
 import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
-import { syncNewColumnToMirrorViews, syncRemovedColumnFromViews } from '@/features/modeler/lib/viewSync';
+import {
+  removeColumnSource, syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews,
+} from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
+import type { View } from '@/services/views.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useChangesetStore } from '@/store/useChangesetStore';
+import { pushUndo, useUndoStore } from '@/store/useUndoStore';
 
 // ── Árbol del Model Explorer ──────────────────────────────────────────
 // Nodo recursivo: una carpeta con sus subcarpetas y los canvases que cuelgan
@@ -90,6 +95,20 @@ interface ModelerState {
   colClipboard: { source: { logicalName: string; physicalName: string }; cols: CanonicalColumn[] } | null;
   /** Copia la selección actual al clipboard. Devuelve cuántas columnas. */
   copySelectedColumns: () => number;
+  /** Clipboard de TABLA completa (doc 50): snapshot por valor (tabla + sus
+   *  columnas en orden físico). Mutuamente excluyente con `colClipboard` —
+   *  un solo "contenido copiado", Ctrl/Cmd+V nunca es ambiguo. Mismo ciclo de
+   *  vida doc 48: sobrevive al cambio de canvas, muere con proyecto/changeset. */
+  tblClipboard: { table: CanonicalTable; cols: CanonicalColumn[] } | null;
+  /** Copia el bloque al clipboard de tabla. Devuelve el nombre a mostrar, o
+   *  null si la tabla no está en el diagrama. Copiar es lectura (vale en
+   *  readonly), igual que el copy de columnas. */
+  copyTable: (tableId: string) => string | null;
+  /** Pega el clipboard de tabla como tabla NUEVA en el canvas activo (doc 50):
+   *  nombres `_copy_n` libres GLOBALMENTE (§2), misma metadata, SIN relaciones
+   *  ni flag FK, en UN lote. Devuelve el físico creado, o null si ya hay un
+   *  paste en vuelo. */
+  pasteTable: () => Promise<string | null>;
   /** Menú contextual del canvas (fila: colId; bloque: colId null). */
   colMenu: { x: number; y: number; tableId: string; colId: string | null } | null;
   openColMenu: (m: { x: number; y: number; tableId: string; colId: string | null }) => void;
@@ -97,13 +116,21 @@ interface ModelerState {
   /** Tabla destino del paste en confirmación (monta PasteColumnsPopup). */
   pasteTarget: string | null;
   setPasteTarget: (id: string | null) => void;
-  /** Deep-link del panel (fix prueba viva doc 48): columna a abrir EXPANDIDA
-   *  en Properties · Columns tras un click simple en la fila del canvas. El
-   *  panel la consume (vuelve a null) al navegar — una sola vez. */
+  /** Deep-link del panel de TABLA (doc 48, ajustado en doc 49): columna a
+   *  poner A LA VISTA en Properties · Columns (pestaña + scroll, sin expandir
+   *  — la edición vive en el panel de columna). Su productor es el botón Back
+   *  del ColumnPropertiesPanel; el panel de tabla la consume (vuelve a null)
+   *  al navegar — una sola vez. */
   panelFocusColId: string | null;
   setPanelFocusCol: (id: string | null) => void;
-  /** Click simple en una fila del canvas: selecciona la tabla y deja la
-   *  columna pendiente de foco para el panel (pestaña Columns, expandida). */
+  /** Columna con su Properties abierto (doc 49): cuando no es null, el sidebar
+   *  muestra el ColumnPropertiesPanel en lugar del panel de tabla. Siempre
+   *  pertenece a `selectedTableId` (los gestos que la setean parten de una
+   *  tabla concreta). */
+  selectedColumnId: string | null;
+  setSelectedColumn: (id: string | null) => void;
+  /** Click simple en una fila del canvas (doc 49): selecciona la tabla y abre
+   *  DIRECTO el Properties de esa columna (antes navegaba el panel de tabla). */
   focusColumnInPanel: (tableId: string, colId: string) => void;
   /** Instancia de React Flow del canvas activo (la setea ModelerCanvas en onInit). */
   flow: ReactFlowInstance | null;
@@ -187,7 +214,9 @@ interface ModelerState {
   updateRelationship: (r: gov.Relationship) => Promise<void>;
   deleteRelationship: (id: string) => Promise<void>;
   addExistingTables: (tableIds: string[]) => Promise<void>;
-  createTableFromSources: (input: { logicalName: string; schema?: string; columns: CanonicalColumn[] }) => Promise<void>;
+  // `sourceTable` (doc 51, opcional por columna): nombre de la tabla dueña en
+  // el ORIGEN — procedencia para el historial de auditoría; no viaja al payload.
+  createTableFromSources: (input: { logicalName: string; schema?: string; columns: (CanonicalColumn & { sourceTable?: string })[] }) => Promise<void>;
   setColumnTarget: (id: string | null) => void;
   setSelectedTable: (id: string | null) => void;
   setSelectedEdge: (id: string | null) => void;
@@ -224,6 +253,8 @@ const raf = (cb: () => void) =>
 
 // Debounce de la persistencia de drawings (PUT del array completo).
 let _drawingsTimer: ReturnType<typeof setTimeout> | null = null;
+// Paste de tabla en vuelo (doc 50): un Ctrl+V repetido no dispara otro.
+let _pasteTableBusy = false;
 // Secuencia de cargas del diagrama: descarta respuestas fuera de orden (dos
 // clicks rápidos en el explorer, reload en vuelo al cambiar de canvas).
 let _loadSeq = 0;
@@ -291,11 +322,81 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (!cols.length) return 0;
     // Copiar DESELECCIONA (fix prueba viva): tras el copy el estado que
     // importa es el clipboard; dejar las filas marcadas leía como "pegado".
+    // tblClipboard se limpia: los clipboards son excluyentes (doc 50).
     set({
       colClipboard: { source: { logicalName: t?.logicalName ?? '', physicalName: t?.physicalName ?? '' }, cols },
       colSel: null,
+      tblClipboard: null,
     });
     return cols.length;
+  },
+  tblClipboard: null,
+  copyTable: (tableId) => {
+    const d = get().diagram;
+    const t = d?.tables.find((x) => x.id === tableId);
+    if (!d || !t) return null;
+    // Snapshot POR VALOR en orden físico (contrato doc 48): editar o borrar el
+    // original después no altera lo ya copiado.
+    const cols = d.columns
+      .filter((c) => c.tableId === tableId)
+      .slice().sort((a, b) => a.ordinal - b.ordinal)
+      .map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
+    set({
+      tblClipboard: { table: { ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) }, cols },
+      colClipboard: null, colSel: null,   // excluyentes (doc 50)
+    });
+    return t.physicalName || t.logicalName;
+  },
+  pasteTable: async () => {
+    if (_pasteTableBusy) return null;   // Ctrl+V repetido con el paste en vuelo
+    const clip = get().tblClipboard;
+    const saId = get().activeSaId;
+    if (!clip) throw new Error('Nothing to paste');
+    if (!saId) throw new Error('Pick a Subject Area');
+    _pasteTableBusy = true;
+    try {
+      get().markDirty();
+      const basePhys = copyNameBase(clip.table.physicalName, 'physical');
+      const baseLog = copyNameBase(clip.table.logicalName || clip.table.physicalName, 'logical');
+      // Reintentos ante carrera multiusuario: si otro draft ganó el nombre
+      // (409 del guard global, doc 50 §2), se recalcula `n` y se reintenta.
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        // Nombres tomados: pool GLOBAL efectivo (búsqueda server-side, doc 43)
+        // + el diagrama local (por si un alta propia aún no entró al índice).
+        const pool = await gov.searchTables(`${basePhys}_copy_`, 500).catch(() => [] as CanonicalTable[]);
+        const taken = [
+          ...pool.map((t) => t.physicalName),
+          ...(get().diagram?.tables ?? []).map((t) => t.physicalName),
+        ];
+        const { physicalName, logicalName } = nextCopyNames(basePhys, baseLog, taken);
+        const id = crypto.randomUUID();
+        try {
+          await gov.recordChangesBulk(copyTableToBulk({ table: clip.table, cols: clip.cols, id, physicalName, logicalName }));
+        } catch (e) {
+          lastErr = e;
+          if (e instanceof Error && /already exists/i.test(e.message)) continue;
+          throw e;
+        }
+        // Alta en el canvas + bloque al costado del original (si está acá);
+        // si no, al centro del viewport.
+        const sa = await struct.getSubjectArea(saId);
+        await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
+        const rf = get().flow;
+        const src = rf?.getNode(clip.table.id);
+        const pos = src
+          ? { x: Math.round(src.position.x + 36), y: Math.round(src.position.y + 36) }
+          : rf
+            ? (() => { const c = rf.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }); return { x: Math.round(c.x), y: Math.round(c.y) }; })()
+            : { x: 120, y: 120 };
+        await struct.setSubjectAreaLayout(saId, { [id]: pos });
+        await get().reload();
+        set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null });   // al frente + visible
+        pushUndo(`Paste table ${physicalName}`, () => get().deleteTable(id));
+        return physicalName;
+      }
+      throw lastErr instanceof Error ? lastErr : new Error("Couldn't paste the table");
+    } finally { _pasteTableBusy = false; }
   },
   colMenu: null,
   openColMenu: (m) => set({ colMenu: m }),
@@ -304,8 +405,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   setPasteTarget: (id) => set({ pasteTarget: id }),
   panelFocusColId: null,
   setPanelFocusCol: (id) => set({ panelFocusColId: id }),
+  selectedColumnId: null,
+  setSelectedColumn: (id) => set({ selectedColumnId: id }),
   focusColumnInPanel: (tableId, colId) =>
-    set({ selectedTableId: tableId, selectedEdgeId: null, panelFocusColId: colId }),
+    set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: colId }),
   flow: null,
   setFlow: (rf) => set({ flow: rf }),
   lod: true,
@@ -384,7 +487,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Nodos VISTA (F3) nunca abren el panel (spec §3-5) y en solo-lectura se
     // centra sin seleccionar (viewer-lock).
     if (node.type !== 'view' && useSessionStore.getState().openMode !== 'readonly') {
-      set({ selectedTableId: tableId, selectedEdgeId: null });
+      set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: null });
     }
     // Centrar DESPUÉS de que el layout se asiente (doble rAF). setCenter en
     // vez de fitView: con onlyRenderVisibleElements un nodo fuera del viewport
@@ -416,7 +519,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       activeProjectId: pid, folders, subjectAreas, activeFolderId: null, activeSaId: null,
       diagram: null, selectedTableId: null, drawings: [],
       // Doc 48: cambiar de PROYECTO invalida también el clipboard de columnas.
-      colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, colClipboard: null,
+      colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, colClipboard: null, tblClipboard: null,
       trees: { ...s.trees, [pid]: { folders, subjectAreas } },
     }));
   },
@@ -441,7 +544,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       pid = null;
       set({ activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null,
             activeSaId: null, diagram: null, selectedTableId: null, drawings: [],
-            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, colClipboard: null });
+            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, colClipboard: null, tblClipboard: null });
     }
     // Re-hidrata los árboles que ya estaban cargados (los proyectos expandidos
     // del explorer siguen mostrando su contenido, ahora bajo el overlay nuevo).
@@ -453,7 +556,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // El canvas sobrevive al cambio de contexto: re-cargarlo COMPLETO
       // (diagrama + drawings) bajo el overlay de la versión nueva.
       try { await get().selectSubjectArea(saId); }
-      catch { set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null }); }
+      catch { set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null }); }
     }
   },
   selectSubjectArea: async (saId, projectId) => {
@@ -488,7 +591,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // Doc 48: la selección/menú/popup son del canvas anterior; el CLIPBOARD
       // sobrevive al cambio de canvas (copiar en A, pegar en B — decisión iii).
       set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null,
-            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
+            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null,
             drawings: diagram.subjectArea.drawings ?? [] });
     } finally {
       // Sólo la llamada MÁS RECIENTE limpia el spinner: una vieja descartada
@@ -547,7 +650,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       projects: get().projects.filter((p) => p.id !== id),
       trees,
       ...(wasActive ? { activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null, activeSaId: null, diagram: null, selectedTableId: null,
-                        colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, colClipboard: null } : {}),
+                        colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, colClipboard: null, tblClipboard: null } : {}),
     });
   },
   // Helper interno: recarga folders+canvases del proyecto al cache `trees` y,
@@ -563,7 +666,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({
       ...treesPatch,
       folders, subjectAreas, activeFolderId,
-      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null }),
+      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null }),
     });
   },
   reload: async () => {
@@ -577,7 +680,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // tras cambiar de changeset): limpiar la selección en vez de dejar el
       // diagrama viejo pegado.
       if (seq === _loadSeq && get().activeSaId === id) {
-        set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null });
+        set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null });
       }
       return;
     }
@@ -641,7 +744,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await get().reload();
     // La tabla nueva queda SELECCIONADA → sube al frente (zIndex) y no cae oculta
     // detrás de un bloque que ya estaba en el canvas (pedido owner).
-    set({ selectedTableId: id, selectedEdgeId: null });
+    set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null });
+    // Undo (doc 50): tabla recién creada — la cascada del delete es trivial.
+    pushUndo(`Create table ${physical}`, () => get().deleteTable(id));
   },
   addColumn: async (tableId: string, input: AddColumnInput) => {
     get().markDirty();
@@ -684,11 +789,25 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       if (touched) toast.success(`Column also added to ${touched} mirror view(s)`);
     } catch { /* la vista se alinea después con "Match physical order" */ }
     await get().reload();
+    // Undo (doc 50): la inversa es el delete del store — limpia también las
+    // vistas espejo y el panel de columna si quedó abierto sobre ella.
+    pushUndo(`Add column ${physical}`, () => get().deleteColumn(id));
   },
-  updateRelationship: async (r) => { get().markDirty(); await gov.updateRelationship(r); await get().reload(); },
+  updateRelationship: async (r) => {
+    get().markDirty();
+    const pre0 = get().diagram?.relationships.find((x) => x.id === r.id);
+    const pre = pre0 ? { ...pre0, pairs: pre0.pairs.map((p) => ({ ...p })) } : null;
+    await gov.updateRelationship(r);
+    if (pre) pushUndo('Edit relationship', async () => { await gov.updateRelationship(pre); await get().reload(); });
+    await get().reload();
+  },
   deleteRelationship: async (id) => {
     get().markDirty();
     const rel = get().diagram?.relationships.find((r) => r.id === id);
+    // Pre-imágenes para el Undo (doc 50): la relación por valor + las FKs que
+    // la limpieza de abajo apaga.
+    const relPre = rel ? { ...rel, pairs: rel.pairs.map((p) => ({ ...p })) } : null;
+    const fkClearedPre: CanonicalColumn[] = [];
     await gov.deleteRelationship(id);
     // Limpieza del flag FK (inverso de markForeignKey en create): si una columna
     // HIJA de algún par de la relación borrada ya NO es hija en NINGUNA otra
@@ -702,8 +821,20 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         // columna (una relación siempre referencia la tabla de sus columnas).
         const near = (await gov.listRelationships(col.tableId)).filter((r) => r.id !== id);
         const stillLinked = near.some((r) => r.pairs.some((p) => p.childColumnId === colId));
-        if (!stillLinked) await gov.updateColumn({ ...col, isForeignKey: false });
+        if (!stillLinked) {
+          fkClearedPre.push({ ...col });
+          await gov.updateColumn({ ...col, isForeignKey: false });
+        }
       }
+    }
+    if (relPre) {
+      pushUndo('Delete relationship', async () => {
+        await gov.recordChangesBulk([
+          ...fkClearedPre.map((c) => gov.bulk.createColumn(c)),
+          gov.bulk.upsertRelationship(relPre),
+        ]);
+        await get().reload();
+      });
     }
     await get().reload();
   },
@@ -711,11 +842,20 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const saId = get().activeSaId; if (!saId || tableIds.length === 0) return;
     get().markDirty();
     const sa = await struct.getSubjectArea(saId);
+    // Solo las REALMENTE agregadas (el merge ignora las que ya estaban): la
+    // inversa del Undo no debe sacar del canvas una tabla que ya vivía acá.
+    const added = tableIds.filter((t) => !sa.tableIds.includes(t));
     const merged = Array.from(new Set([...sa.tableIds, ...tableIds]));
     await struct.setSubjectAreaTables(saId, merged);
     await get().reload();
     // Selecciona la primera importada → al frente (zIndex) y visible (owner).
-    set({ selectedTableId: tableIds[0], selectedEdgeId: null });
+    set({ selectedTableId: tableIds[0], selectedEdgeId: null, selectedColumnId: null });
+    if (added.length) {
+      pushUndo(`Add ${added.length} table${added.length === 1 ? '' : 's'} to canvas`, async () => {
+        for (const tid of added) await struct.removeTableFromCanvas(saId, tid);
+        await get().reload();
+      });
+    }
   },
   createTableFromSources: async ({ logicalName, schema, columns }) => {
     const saId = get().activeSaId; if (!saId) throw new Error('Pick a Subject Area');
@@ -736,7 +876,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     let ordinal = 0;
     let pk = 0;
     await gov.recordChangesBulk([
-      gov.bulk.createTable({ id, logicalName, physicalName: physical, schema: schema?.trim() || undefined }),
+      gov.bulk.createTable(
+        { id, logicalName, physicalName: physical, schema: schema?.trim() || undefined },
+        { kind: 'ctas' }),
       ...columns.map((c) => {
         const description = (c.description ?? '').trim();
         const pkPosition = c.isPrimaryKey ? pk++ : null;
@@ -751,22 +893,36 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           ...(c.isPartition ? { isPartition: true } : {}),
           ...(c.udpValues && Object.keys(c.udpValues).length ? { udpValues: { ...c.udpValues } } : {}),
           ...(pkPosition != null ? { pkPosition } : {}),
-        });
+        // Procedencia (doc 51): "Created from source <tabla>.<col> (CTAS)".
+        }, { kind: 'ctas', ...(c.sourceTable ? { sourceTable: c.sourceTable } : {}), sourceColumn: c.physicalName });
       }),
     ]);
     const sa = await struct.getSubjectArea(saId);
     await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
     await get().reload();
-    set({ selectedTableId: id, selectedEdgeId: null });   // al frente + visible (owner)
+    set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null });   // al frente + visible (owner)
+    pushUndo(`Create table ${physical}`, () => get().deleteTable(id));
   },
   setColumnTarget: (id: string | null) => set({ columnTarget: id }),
-  setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null }),
-  setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedTableId: null }),
+  // Seleccionar tabla o edge cambia de contexto: cierra el panel de columna.
+  setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null }),
+  setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedTableId: null, selectedColumnId: null }),
   removeTableFromArea: async (tableId) => {
     get().markDirty();
     const saId = get().activeSaId; if (!saId) return;
+    // Para el Undo (doc 50): nombre y posición ANTES de quitarla (el remove
+    // también borra su entrada del layout).
+    const name = get().diagram?.tables.find((t) => t.id === tableId)?.physicalName ?? 'table';
+    const node = get().flow?.getNode(tableId);
+    const pos = node ? { x: Math.round(node.position.x), y: Math.round(node.position.y) } : null;
     await struct.removeTableFromCanvas(saId, tableId);   // quita de tableIds + layout
-    if (get().selectedTableId === tableId) set({ selectedTableId: null });
+    pushUndo(`Remove ${name} from canvas`, async () => {
+      const sa = await struct.getSubjectArea(saId);
+      if (!sa.tableIds.includes(tableId)) await struct.setSubjectAreaTables(saId, [...sa.tableIds, tableId]);
+      if (pos) { try { await struct.setSubjectAreaLayout(saId, { [tableId]: pos }); } catch { /* layout best-effort */ } }
+      await get().reload();
+    });
+    if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null });
     await get().reload();
   },
   deleteTable: async (tableId) => {
@@ -785,6 +941,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       gov.listRelationships(tableId).catch(() => []),
       gov.listColumns(tableId).catch(() => []),
     ]);
+    // Pre-imágenes para el Undo (doc 50): las lecturas de arriba YA traen el
+    // estado pre-borrado — se congelan por valor antes de tocar nada.
+    const t0 = get().diagram?.tables.find((x) => x.id === tableId);
+    const tPre = t0 ? { ...t0, ...(t0.udpValues ? { udpValues: { ...t0.udpValues } } : {}) } : null;
+    const undoSaId = get().activeSaId;
+    const undoNode = get().flow?.getNode(tableId);
+    const undoPos = undoNode ? { x: Math.round(undoNode.position.x), y: Math.round(undoNode.position.y) } : null;
+    const colsPre = cols.map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
+    const relsPre = rels.map((r) => ({ ...r, pairs: r.pairs.map((p) => ({ ...p })) }));
+    const viewsPre = views.map((v) => JSON.parse(JSON.stringify(v)) as View);
+    const fkClearedPre: CanonicalColumn[] = [];
     // Columnas HIJA de la OTRA tabla (sobrevive): FK huérfano a limpiar después.
     const orphanFk: { colId: string; tableId: string }[] = [];
     for (const r of rels) {
@@ -805,14 +972,40 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const near = await gov.listRelationships(ctid).catch(() => []);
       if (near.some((r) => r.pairs.some((p) => p.childColumnId === colId))) continue;
       const c = (await gov.listColumns(ctid).catch(() => [])).find((x) => x.id === colId);
-      if (c?.isForeignKey) await gov.updateColumn({ ...c, isForeignKey: false });
+      if (c?.isForeignKey) {
+        fkClearedPre.push({ ...c });
+        await gov.updateColumn({ ...c, isForeignKey: false });
+      }
     }
     // Sacar de TODOS los canvases que la contienen (tableIds + layout).
     const usage = await gov.tableUsage(tableId).then((u) => u.usage).catch(() => []);
     for (const u of usage) await struct.removeTableFromCanvas(u.canvasId, tableId);
     // La tabla.
     await gov.deleteTable(tableId);
-    if (get().selectedTableId === tableId) set({ selectedTableId: null });
+    // Undo (doc 50): UN lote restaura tabla + columnas + FKs limpiadas +
+    // relaciones + vistas (el guard N=N resuelve la llave con las columnas del
+    // mismo lote), y después las membresías de canvas. La posición solo se
+    // restaura en el canvas ACTIVO (las demás vuelven con layout default).
+    if (tPre) {
+      pushUndo(`Delete table ${tPre.physicalName}`, async () => {
+        await gov.recordChangesBulk([
+          gov.bulk.createTable(tPre),
+          ...colsPre.map((c) => gov.bulk.createColumn(c)),
+          ...fkClearedPre.map((c) => gov.bulk.createColumn(c)),
+          ...relsPre.map((r) => gov.bulk.upsertRelationship(r)),
+          ...viewsPre.map((v) => gov.bulk.upsertView(v)),
+        ]);
+        for (const u of usage) {
+          try {
+            const sa = await struct.getSubjectArea(u.canvasId);
+            if (!sa.tableIds.includes(tableId)) await struct.setSubjectAreaTables(u.canvasId, [...sa.tableIds, tableId]);
+          } catch { /* el canvas pudo desaparecer */ }
+        }
+        if (undoSaId && undoPos) { try { await struct.setSubjectAreaLayout(undoSaId, { [tableId]: undoPos }); } catch { /* best-effort */ } }
+        await get().reload();
+      });
+    }
+    if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null });
     await get().reload();
   },
   updateTable: async (id, fields) => {
@@ -826,12 +1019,30 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const c = get().diagram?.columns.find((x) => x.id === colId);
     if (!c) return;
     get().markDirty();
+    // Pre-imagen POR VALOR para el Undo (doc 50).
+    const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
     await gov.updateColumn({ ...c, ...fields }); // upsert por id = update (merge)
+    pushUndo(`Edit column ${pre.physicalName}`, async () => {
+      await gov.updateColumn(pre);
+      // Si el cambio renombró el FÍSICO, las vistas quedaron re-apuntadas al
+      // nombre nuevo (sync del panel): deshacer las devuelve al viejo.
+      if (typeof fields.physicalName === 'string' && fields.physicalName !== pre.physicalName) {
+        try {
+          await syncRenamedColumnInViews(
+            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+            pre.tableId, fields.physicalName, pre.physicalName);
+        } catch { /* best-effort */ }
+      }
+      await get().reload();
+    });
     await get().reload();
   },
   reorderColumns: async (tableId, orderedIds) => {
     get().markDirty();
     const dia = get().diagram; if (!dia) return;
+    // Orden PREVIO para el Undo (doc 50): la inversa re-usa esta misma acción.
+    const prevIds = dia.columns.filter((c) => c.tableId === tableId)
+      .slice().sort((a, b) => a.ordinal - b.ordinal).map((c) => c.id);
     const byId = new Map(dia.columns.filter((c) => c.tableId === tableId).map((c) => [c.id, c]));
     // OPTIMISTA: la UI reordena al soltar (ordinal = índice nuevo, local); la
     // persistencia corre detrás y el reload final reconcilia con el overlay.
@@ -854,6 +1065,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     for (let i = 0; i < changed.length; i += 5) {
       await Promise.all(changed.slice(i, i + 5).map(({ c, ordinal }) => gov.updateColumn({ ...c, ordinal })));
     }
+    if (changed.length) pushUndo('Reorder columns', () => get().reorderColumns(tableId, prevIds));
     await get().reload();
   },
   deleteColumn: async (colId, relIds = []) => {
@@ -864,6 +1076,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // se quita el par de esta columna; si era el último, se borra completa.
     const col = get().diagram?.columns.find((c) => c.id === colId);
     const pool = relIds.length && col ? await gov.listRelationships(col.tableId) : [];
+    // Pre-imágenes para el Undo (doc 50): columna, relaciones afectadas (por
+    // valor), FKs que se limpian abajo y vistas que referencian la columna.
+    const colPre = col ? { ...col, ...(col.udpValues ? { udpValues: { ...col.udpValues } } : {}) } : null;
+    const relsPre = pool.filter((r) => relIds.includes(r.id))
+      .map((r) => ({ ...r, pairs: r.pairs.map((p) => ({ ...p })) }));
+    const fkClearedPre: CanonicalColumn[] = [];
+    const viewsPre: View[] = col
+      ? (await viewsSvc.listViews(col.tableId).catch(() => [] as View[]))
+          .filter((v) => removeColumnSource(v, col.tableId, col.physicalName) != null)
+          .map((v) => JSON.parse(JSON.stringify(v)) as View)
+      : [];
     // Columnas HIJAS del otro extremo de los pares afectados: al caer el
     // par/relación pueden quedar con un isForeignKey huérfano (misma limpieza
     // conservadora que deleteRelationship — isPrimaryKey nunca se toca).
@@ -886,9 +1109,30 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       if (!c?.isForeignKey) continue;
       const near = await gov.listRelationships(c.tableId);
       const still = near.some((r) => r.pairs.some((p) => p.childColumnId === cid));
-      if (!still) await gov.updateColumn({ ...c, isForeignKey: false });
+      if (!still) {
+        fkClearedPre.push({ ...c });
+        await gov.updateColumn({ ...c, isForeignKey: false });
+      }
     }
     await gov.deleteColumn(colId);
+    // Undo (doc 50): UN lote restaura columna + FKs limpiadas + relaciones
+    // (la columna va PRIMERO — el guard N=N del backend resuelve la llave del
+    // padre con las columnas del MISMO lote); las vistas capturadas vuelven a
+    // su doc previo (best-effort).
+    if (colPre) {
+      pushUndo(`Delete column ${colPre.physicalName}`, async () => {
+        await gov.recordChangesBulk([
+          gov.bulk.createColumn(colPre),
+          ...fkClearedPre.map((c) => gov.bulk.createColumn(c)),
+          ...relsPre.map((r) => gov.bulk.upsertRelationship(r)),
+        ]);
+        for (const v of viewsPre) { try { await viewsSvc.updateView(v.id, v); } catch { /* best-effort */ } }
+        await get().reload();
+      });
+    }
+    // Si la columna borrada tenía su Properties abierto (doc 49), se cierra —
+    // el sidebar vuelve al Properties de la tabla.
+    if (get().selectedColumnId === colId) set({ selectedColumnId: null });
     // La columna eliminada sale de los sources de TODA vista que la
     // referenciaba (espejo o curada) — best-effort, no bloquea el borrado.
     if (col) {
@@ -918,11 +1162,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
 
 // Doc 48: el clipboard de columnas pertenece al changeset donde se copió —
 // cambiar de changeset (o soltarlo) lo invalida, junto con la selección y el
-// popup. Suscripción a nivel de módulo (useChangesetStore no importa este
-// store, así que no hay ciclo).
+// popup. Doc 50: ídem el clipboard de TABLA y la pila de Undo (las inversas
+// apuntan al draft anterior). Suscripción a nivel de módulo (useChangesetStore
+// no importa este store, así que no hay ciclo).
 useChangesetStore.subscribe((s, prev) => {
   if (s.activeId === prev.activeId) return;
-  useModelerStore.setState({ colClipboard: null, colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null });
+  useModelerStore.setState({ colClipboard: null, tblClipboard: null, colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null });
+  useUndoStore.getState().clear();
 });
 
 /**

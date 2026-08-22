@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { useModelerStore } from '@/store/useModelerStore';
+import { pushUndo } from '@/store/useUndoStore';
 import * as gov from '@/features/governance/services/governance.service';
 import type { Cardinality } from '@/features/governance/services/governance.service';
 import {
   buildKeyMapping, mappingToBulk, type MappingResolution,
 } from '@/features/modeler/lib/relationshipPairs';
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
-import { syncNewColumnToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
+import { invertBulk, preKey } from '@/features/modeler/lib/undoInvert';
+import { syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 import { CARDS } from './RelationshipPopup';
@@ -75,6 +77,39 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
         rows: resolutions, childCols,
       });
       await gov.recordChangesBulk(changes);
+      // Undo (doc 50): inversa genérica del lote — cae la relación, se borran
+      // las columnas CREADAS y las existentes modificadas vuelven a su
+      // pre-imagen (snapshot por valor de las columnas del hijo); las vistas
+      // espejo se corrigen best-effort (retiro de creadas + renames de vuelta).
+      const pre = new Map(childCols.map((c) => [
+        preKey('canonical_columns', c.id),
+        { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) } as Record<string, unknown>,
+      ]));
+      const inverse = invertBulk(changes, pre);
+      const renamesBack: { from: string; to: string }[] = [];
+      for (const r of resolutions) {
+        if (r.target.kind === 'existing' && r.target.rename) {
+          renamesBack.push({ from: r.target.rename.physicalName, to: r.target.col.physicalName });
+        }
+      }
+      const undoCreated = createdCols.map((c) => c.physicalName);
+      const undoChildId = draft.childTableId;
+      pushUndo('Create relationship', async () => {
+        await gov.recordChangesBulk(inverse);
+        for (const name of undoCreated) {
+          try {
+            await syncRemovedColumnFromViews(
+              { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView }, undoChildId, name);
+          } catch { /* best-effort */ }
+        }
+        for (const r of renamesBack) {
+          try {
+            await syncRenamedColumnInViews(
+              { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView }, undoChildId, r.from, r.to);
+          } catch { /* best-effort */ }
+        }
+        await useModelerStore.getState().reload();
+      });
       // V1: las columnas migradas entran también a las vistas ESPEJO del hijo;
       // los renames por role name re-apuntan los sources de las vistas.
       for (const c of createdCols) {

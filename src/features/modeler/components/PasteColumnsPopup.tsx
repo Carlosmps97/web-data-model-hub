@@ -3,10 +3,12 @@ import { KeyRound, Link2 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import * as gov from '@/features/governance/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
+import { pushUndo } from '@/store/useUndoStore';
 import * as viewsSvc from '@/services/views.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 import { pasteColumnsToBulk, pastePlan } from '../lib/pasteColumns';
-import { syncNewColumnToMirrorViews } from '../lib/viewSync';
+import { invertBulk } from '../lib/undoInvert';
+import { syncNewColumnToMirrorViews, syncRemovedColumnFromViews } from '../lib/viewSync';
 
 /**
  * Confirmación del PASTE de columnas (doc 48): staging local — nada persiste
@@ -42,7 +44,25 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
     setSaving(true);
     try {
       const cols = pasteable.map((r) => r.col);
-      await gov.recordChangesBulk(pasteColumnsToBulk({ targetTableId: targetId, cols, targetCols }));
+      const changes = pasteColumnsToBulk({
+        targetTableId: targetId, cols, targetCols,
+        // Procedencia (doc 51): la tabla fuente viaja en el clipboard.
+        sourceTable: clipboard.source.physicalName || clipboard.source.logicalName || undefined,
+      });
+      await gov.recordChangesBulk(changes);
+      // Undo (doc 50): todas las columnas del lote son NUEVAS → la inversa es
+      // el delete del lote (+ retirarlas de las vistas espejo, best-effort).
+      pushUndo(`Paste ${cols.length} column${cols.length === 1 ? '' : 's'}`, async () => {
+        await gov.recordChangesBulk(invertBulk(changes, new Map()));
+        for (const c of cols) {
+          try {
+            await syncRemovedColumnFromViews(
+              { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+              targetId, c.physicalName);
+          } catch { /* best-effort */ }
+        }
+        await useModelerStore.getState().reload();
+      });
       // V1 (decisión owner i): las columnas pegadas entran también a las
       // vistas ESPEJO del destino — misma baseline para todas las columnas
       // del lote (patrón RelationshipCreatePopup), best-effort.
