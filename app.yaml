@@ -1,44 +1,30 @@
-# App spec de Databricks Apps (frontend SPA · server.mjs).
+# App spec de Databricks Apps — frontend (SPA Vite/React · server.mjs).
 #
-# NO BORRAR este archivo. Databricks lo lee EN CADA ARRANQUE de la app —
-# tanto en el deploy como al apagar/prender desde la UI o en un reinicio del
-# runtime. Es la ÚNICA fuente del `command` y las `env` que sobrevive a un
-# stop/start.
+# NO BORRAR este archivo: Databricks lo lee en CADA arranque de la app (deploy,
+# stop/start desde la UI o reinicio del runtime) y es la única fuente del
+# `command` y las `env`. El bloque `config:` de databricks.yml no lo reemplaza:
+# el CLI lo ignora en silencio (bug databricks/cli #4901).
 #
-# Historia: el doc 28 eliminó este app.yaml apostando al bloque `config:` de
-# databricks.yml, pero `databricks bundle deploy` lo IGNORA en silencio (bug
-# databricks/cli #4901). Sin app.yaml la app arrancaba sin BACKEND_API_URL y,
-# al prenderla, "Failed to load app spec / No command to run". Por eso el
-# command+env viven ACÁ. Los permisos siguen en databricks.yml (el bundle sí
-# los aplica).
+# Los `value` van vacíos a propósito: el workflow de deploy los llena con la
+# GitHub Variable HOMÓNIMA del environment elegido antes de subir el código
+# (si falta alguna, el deploy se corta). Los `valueFrom` referencian recursos
+# `secret` de databricks.yml y los resuelve la propia app al arrancar.
 #
-# `npm run start` dispara `prestart` (tsc + vite build → dist/) y luego
-# `node server.mjs`: server propio que sirve dist/ y PROXYA /api al backend
-# servidor-a-servidor con el token M2M del service principal del front
-# (Databricks inyecta DATABRICKS_HOST y CLIENT_ID/SECRET; el server lee
-# DATABRICKS_APP_PORT). El navegador habla con UN solo origen: sin CORS, sin
-# doble SSO (doc 36).
-#
-# NO setear NODE_ENV=production (rompería el `npm install` de devDeps →
-# vite/tsc se necesitan para el build).
-# NO definir VITE_API_URL: API_BASE queda vacío en el build y el front usa
-# rutas RELATIVAS /api (mismo origen). Definirla reactivaría el cruce
-# navegador→backend (el bug del doble SSO).
+# `npm run start` compila (tsc + vite build → dist/) y levanta `node
+# server.mjs`, que sirve dist/ y proxya /api al backend servidor-a-servidor con
+# el token M2M del service principal del front: el navegador habla con un solo
+# origen (sin CORS y sin doble SSO).
+# No definir NODE_ENV=production (el build necesita devDependencies) ni
+# VITE_API_URL (reactivaría el cruce directo navegador→backend).
 command: ["npm", "run", "start"]
 
 env:
-  # Runtime (server.mjs): destino del proxy /api. Valor por-workspace; el de acá
-  # es el DEFAULT. Para apuntar a OTRO backend NO se edita este archivo: se define
-  # la GitHub Variable BACKEND_API_URL en el repo destino y el deploy workflow
-  # (paso "Env del app.yaml desde GitHub Variables") reemplaza el value antes del
-  # deploy. Sin esa Variable definida, queda este default.
+  # URL de la app backend a la que server.mjs proxya /api — ej.
+  # https://bknd-data-model-hub-<workspace-id>.<n>.azure.databricksapps.com
   - name: BACKEND_API_URL
-    value: https://bknd-data-model-hub-3871428306507680.0.azure.databricksapps.com
-  # Secreto compartido con el backend (doc 38): server.mjs lo adjunta como
-  # `x-dmh-proxy-secret` para autenticar el relay de identidad SSO
-  # (x-dmh-sso-*). MISMO secret del scope que lee el backend (recurso
-  # `proxy_secret` en databricks.yml). Se administra A MANO (igual que
-  # session-secret-key); el workflow solo VERIFICA que exista antes del
-  # deploy (paso "Verificar el secreto del proxy").
+    value: ""
+
+  # Secreto compartido con el backend que autentica el relay de identidad SSO:
+  # sale del recurso `proxy_secret` (databricks.yml).
   - name: PROXY_SHARED_SECRET
     valueFrom: proxy_secret
