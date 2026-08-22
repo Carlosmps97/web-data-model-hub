@@ -1,0 +1,23 @@
+/* Aurora design system — split into feature-owned stylesheets, @imported here
+   in cascade order: tokens + base + shared UI first, then per-feature styles.
+   When you add a feature, create features/<name>/<name>.css and @import it
+   below. All styles stay GLOBAL (no CSS Modules). See doc/architecture.md. */
+@import '../styles/tokens.css';
+@import '../styles/base.css';
+@import '../styles/ui.css';
+@import '../styles/components.css';
+@import '../styles/topnav.css';
+@import '../styles/shell.css';
+@import '../styles/home.css';
+@import '../styles/review.css';
+@import '../styles/reporting.css';
+@import '../features/auth/auth.css';
+@import '../features/governance/governance.css';
+@import '../features/modeler/modeler.css';
+
+/* Fuentes — Geist (UI) + Geist Mono (data/SQL), self-hosted vía @fontsource-variable.
+   Los archivos .woff2 los importa main.tsx; acá solo nombramos las familias. */
+:root {
+  --font-geist: 'Geist Variable', system-ui, sans-serif;
+  --font-geist-mono: 'Geist Mono Variable', ui-monospace, monospace;
+}

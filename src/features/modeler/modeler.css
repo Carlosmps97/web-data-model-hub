@@ -1,0 +1,853 @@
+/* Workspace shell estilo Erwin (wk-*). Light only, navy via tokens. */
+.wk { display: grid; height: 100vh; grid-template-rows: 84px 1fr 34px;
+  grid-template-columns: var(--expl-w, 264px) 1fr;
+  grid-template-areas: "toolbar toolbar" "explorer canvas" "explorer status";
+  background: var(--bg); overflow: hidden; }
+
+/* ── Toolbar por secciones (Screen 04 "B": 64px, grupos con divisor + caption) ── */
+.wk-toolbar { grid-area: toolbar; display: flex; align-items: stretch; gap: 0; padding: 0 12px;
+  background: var(--surface); border-bottom: 1px solid var(--border-soft); z-index: 20;
+  overflow-x: auto; overflow-y: visible; white-space: nowrap; }
+.wk-toolbar::-webkit-scrollbar { height: 0; }
+
+/* Grupo: contenido centrado + caption SIEMPRE abajo (todas a la misma altura) */
+.wk-grp { display: grid; grid-template-rows: 1fr auto; align-items: center; justify-items: center;
+  row-gap: 2px; padding: 7px 8px 6px; flex-shrink: 0; }
+.wk-grp-row { display: flex; align-items: center; gap: 2px; }
+.wk-grp-cap { align-self: end; font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-muted-3); line-height: 1; }
+/* DRAWING en 2 filas (4 columnas) para mantener el alto armónico con Relationships */
+.wk-drawgrid { display: grid; grid-template-columns: repeat(4, auto); gap: 2px; }
+.wk-drawbtn { width: 34px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer;
+  transition: background .12s, color .12s; }
+.wk-drawbtn:hover:not(:disabled) { background: var(--fill-4); }
+.wk-drawbtn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* Divisor entre grupos */
+.wk-div { width: 1px; align-self: center; height: 56px; background: var(--border-soft); flex-shrink: 0; margin: 0 2px; }
+
+/* Botón-icono 38×38 radius 9; hover #EFF2F7; activo .on #EAF0FF + #2E5BFF */
+.wk-tic { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--ink-2);
+  cursor: pointer; flex-shrink: 0; transition: background .12s, color .12s; }
+.wk-tic:hover:not(:disabled) { background: var(--fill-4); }                    /* #F0F2F6 ≈ #EFF2F7 */
+.wk-tic:disabled { opacity: .4; cursor: not-allowed; }
+.wk-tic.on { background: var(--blue-tint); color: var(--primary); }            /* #EAF0FF + #2E5BFF */
+
+/* Segmented selector (Logical / Physical) en el grupo Actions */
+.wk-seg { display: inline-flex; align-items: center; height: 32px; padding: 2px; gap: 2px;
+  background: var(--fill-4); border-radius: 9px; flex-shrink: 0; }
+.wk-seg-btn { height: 28px; padding: 0 10px; border: none; background: transparent; border-radius: 7px;
+  font-family: var(--ui); font-size: 11.5px; font-weight: 600; color: var(--text-muted); cursor: pointer;
+  transition: background .12s, color .12s; }
+.wk-seg-btn.on { background: var(--surface); color: var(--primary); box-shadow: 0 1px 2px rgba(16,27,48,.12); }
+.wk-seg-btn:not(.on):not(:disabled):hover { color: var(--ink); }
+.wk-seg-btn:disabled { opacity: .5; cursor: not-allowed; }
+.wk-seg-row { display: flex; justify-content: center; margin-top: 4px; }
+
+/* RELATIONSHIPS — selectores de extremo crow's-foot (Parent/Child) + las dos
+   herramientas de dibujo estilo Erwin (Identifying sólida / Non-id. punteada) */
+.wk-relwrap { display: flex; align-items: center; gap: 6px; }
+.wk-reldraw2 { display: flex; flex-direction: column; gap: 3px; }
+.wk-reldraw2 .wk-reldraw { width: 40px; height: 26px; }
+.wk-relbuild { display: flex; flex-direction: column; gap: 3px; }
+.wk-relrow { display: flex; align-items: center; gap: 2px; }
+.wk-rellbl { width: 46px; flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted-3); text-align: right; padding-right: 5px; }
+.wk-relend { width: 36px; height: 26px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink-2); cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s; }
+.wk-relend:hover:not(:disabled) { background: var(--fill-4); }
+.wk-relend.on { background: var(--blue-tint); color: var(--primary); border-color: var(--blue-border); }
+.wk-relend:disabled { opacity: .4; cursor: not-allowed; }
+.wk-reldraw { width: 40px; height: 40px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-soft); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-2); cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s; }
+.wk-reldraw:hover:not(:disabled) { background: var(--fill-4); }
+.wk-reldraw.on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
+.wk-reldraw:disabled { opacity: .4; cursor: not-allowed; }
+
+/* "Used in" (V3) — proyecto › carpeta › canvas en Metadata. Cada canvas es un
+   BLOQUE delimitado (borde+fondo): con 2+ rutas largas, las filas sueltas se
+   leían como una sopa sin saber dónde empezaba/terminaba cada una. */
+.wk-pp-usage { display: flex; align-items: baseline; gap: 6px; min-width: 0; flex-wrap: wrap;
+  padding: 5px 9px; margin-bottom: 5px; border: 1px solid var(--border-soft);
+  border-radius: 7px; background: var(--fill-5, var(--surface-2)); overflow-wrap: anywhere; }
+.wk-pp-usage > span { min-width: 0; }
+.wk-pp-usep { color: var(--text-muted-3); flex: none; }
+
+/* Orden de la LLAVE primaria (pkPosition) — strip en PropertiesPanel · Columns */
+.wk-pp-keyorder { margin: 2px 0 10px; padding: 7px 8px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--fill-5, transparent); }
+/* Doc 42: lista VERTICAL de alto fijo con scroll — homogénea sin importar
+   cuántas columnas tenga la llave (los chips en flujo crecían disparejo). */
+.wk-pp-keylist { height: 128px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
+.wk-pp-keyrow { display: flex; align-items: center; gap: 8px; padding: 3px 7px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--surface); flex-shrink: 0; }
+.wk-pp-keyname { flex: 1; min-width: 0; font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-pp-keyn { min-width: 16px; text-align: center; font-size: 9.5px; font-weight: 700; color: var(--k-pk, #b58a00); }
+.wk-pp-keymv { display: inline-flex; gap: 2px; }
+.wk-pp-keymv button { width: 18px; height: 18px; border: 1px solid var(--border-soft); border-radius: 4px; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 11px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
+.wk-pp-keymv button:hover:not(:disabled) { background: var(--fill-4); }
+.wk-pp-keymv button:disabled { opacity: .35; cursor: not-allowed; }
+
+/* Buscador de columnas (doc 42) — icono embebido + botón de limpiar. */
+.wk-pp-colfind { position: relative; margin: 2px 0 8px; }
+.wk-pp-colfind-ico { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text-muted-3); pointer-events: none; }
+.wk-pp-colfind .rd-input { width: 100%; padding-left: 28px; padding-right: 26px; }
+.wk-pp-colfind-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: var(--text-muted-2); cursor: pointer; display: inline-flex; padding: 2px; border-radius: 4px; }
+.wk-pp-colfind-clear:hover { background: var(--fill-4); color: var(--ink-2); }
+/* Grip con el reorder apagado (filtro activo): visible pero inerte. */
+.wk-pp-grip.nodrag { opacity: .35; cursor: default; }
+
+/* Popup de relación v2 (doc 19) — grid de pares migrados + role name */
+.wk-relpairs { display: flex; flex-direction: column; gap: 8px; }
+.wk-relpair { border: 1px solid var(--border-soft); border-radius: 8px; padding: 7px 8px; display: flex; flex-direction: column; gap: 6px; background: var(--fill-5, transparent); }
+.wk-relpair-cols { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+/* Nombres largos: la PK del padre (y el destino fijo en filas locked) truncan
+   con ellipsis + title; el SearchSelect ya maneja el suyo (flex:1 min-width:0). */
+.wk-relpair-cols > .rd-mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-relpair-role { display: flex; align-items: center; gap: 6px; }
+.wk-relpair-role .rd-input { flex: 1; height: 28px; font-size: 12px; }
+/* "Inherit: Yes/No" POR FILA (feedback prueba viva 2026-08-15). */
+.wk-relpair-role select.wk-relpair-inherit { flex: none; width: 132px; height: 28px; font-size: 12px; }
+.wk-relpair-add { display: flex; align-items: center; gap: 6px; }
+.wk-relpair-add .rd-input { flex: 1; height: 30px; font-size: 12px; min-width: 0; }
+
+/* LOCATE & CENTER — input "Find a table…" con dropdown de coincidencias */
+.wk-find-wrap { position: relative; }
+.wk-find-ico { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text-muted-3); pointer-events: none; }
+.wk-find { width: 188px; height: 32px; padding: 0 10px 0 28px; border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm); background: var(--fill-2); color: var(--ink-2); font-family: var(--ui); font-size: 12.5px; }
+.wk-find::placeholder { color: var(--text-muted-3); }
+.wk-find:focus { outline: none; border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 2px var(--primary-muted); }
+.wk-find:disabled { opacity: .5; cursor: not-allowed; }
+.wk-find-menu { position: absolute; top: 36px; left: 0; min-width: 100%; z-index: 40;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow-md); padding: 4px; max-height: 260px; overflow: auto; }
+.wk-find-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%;
+  padding: 6px 8px; border: none; background: transparent; border-radius: 7px; cursor: pointer; text-align: left; }
+.wk-find-item:hover { background: var(--fill-4); }
+.wk-find-lname { font-size: 12.5px; color: var(--ink); font-weight: 600; }
+.wk-find-pname { font-size: 10.5px; color: var(--text-muted-2); }
+
+/* ── SearchSelect (doc 41): combobox con buscador embebido — mismo lenguaje
+   visual que el dropdown "Find a Table" (lista acotada + scroll + item con
+   etiqueta y detalle a la derecha). Lo usan Parent Domain y Type override. */
+.wk-ss-wrap { position: relative; min-width: 0; }
+.wk-ss-caret { position: absolute; right: 9px; top: 50%; transform: translateY(-50%); color: var(--text-muted-3); pointer-events: none; }
+.wk-ss-menu { position: absolute; top: calc(100% + 4px); left: 0; min-width: 100%; z-index: 40;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: var(--shadow-md); padding: 4px; max-height: 240px; overflow: auto; }
+.wk-ss-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px;
+  border: none; background: transparent; border-radius: 7px; cursor: pointer; text-align: left; }
+.wk-ss-item.hi { background: var(--fill-4); }
+.wk-ss-label { flex: 1; font-size: 12.5px; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-ss-detail { font-size: 10.5px; color: var(--text-muted-2); flex-shrink: 0; }
+.wk-ss-empty { padding: 8px; font-size: 12px; color: var(--text-muted-2); }
+/* Argumentos puntuales de tipos parametrizados — DECIMAL(p,s), VARCHAR(n) …
+   (el ancho va inline en TypePicker: gana a `.wk-pp-typewrap .rd-input`). */
+.wk-ss-args { display: flex; gap: 6px; margin-top: 6px; }
+.wk-ss-args .rd-input { height: 30px; font-size: 12px; }
+
+/* Cluster derecho: version pill + Save + Publish */
+.wk-right { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px; flex-shrink: 0; }
+.wk-vpill { display: inline-flex; align-items: center; height: 26px; padding: 0 11px; border-radius: var(--r-full);
+  font-size: 11.5px; font-weight: 600; letter-spacing: -.005em; white-space: nowrap;
+  background: var(--blue-tint); color: var(--primary); border: 1px solid var(--blue-border); }  /* #EAF0FF/#D4E0FF/#2E5BFF */
+.wk-vpill.viewer { background: var(--fill-4); color: var(--text-muted); border-color: var(--border-soft); }
+.wk-save, .wk-publish { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 13px;
+  border-radius: var(--r-sm); font-family: var(--ui); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  flex-shrink: 0; transition: background .12s, border-color .12s, opacity .12s; }
+.wk-save { background: var(--surface); color: var(--text-body); border: 1px solid var(--border-strong); }  /* #DDE2EC */
+.wk-save:hover:not(:disabled) { background: var(--fill-2); }
+.wk-publish { background: var(--green); color: #fff; border: 1px solid var(--green); }                    /* #16A37B */
+.wk-publish:hover:not(:disabled) { background: var(--green-deep); border-color: var(--green-deep); }
+.wk-save:disabled, .wk-publish:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── PublishModal (Screen 04b — request approval) ── */
+.ppub { display: flex; flex-direction: column; gap: 14px; }
+.ppub-hint { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--amber-tint); color: var(--amber-deep); border: 1px solid var(--amber-tint-2); font-size: 12.5px; }
+.ppub-field { display: grid; gap: 6px; }
+.ppub-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.ppub-req { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text-muted-3); margin-left: 6px; }
+.ppub-textarea { resize: vertical; min-height: 64px; line-height: 1.45; }
+.ppub-loading { font-size: 12.5px; color: var(--text-muted-2); padding: 4px 2px; }
+
+/* Reviewers — toggle chips with avatar + name (multi-select) */
+.ppub-reviewers { display: flex; flex-wrap: wrap; gap: 8px; }
+.ppub-reviewer { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 7px;
+  border: 1px solid var(--border-strong); border-radius: var(--r-full); background: var(--surface);
+  color: var(--text-body); font-family: var(--ui); font-size: 12.5px; font-weight: 600; cursor: pointer;
+  transition: background .12s, border-color .12s, color .12s; }
+.ppub-reviewer:hover:not(:disabled) { border-color: var(--blue-border); background: var(--blue-soft); }
+.ppub-reviewer.is-selected { background: var(--blue-tint); border-color: var(--blue); color: var(--primary-700); }
+.ppub-reviewer:disabled { opacity: .5; cursor: not-allowed; }
+.ppub-reviewer-name { line-height: 1; }
+.ppub-reviewer-check { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px;
+  margin-left: 1px; border-radius: var(--r-full); background: var(--blue); color: #fff; }
+
+/* Info note */
+.ppub-info { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: var(--r-sm);
+  background: var(--blue-soft); border: 1px solid var(--blue-border-2); color: var(--text-muted); font-size: 12px; line-height: 1.45; }
+.ppub-info > svg { flex-shrink: 0; margin-top: 1px; color: var(--blue); }
+
+/* Abajo y centrado (pedido owner 07-17): arriba tapaba los botones del menú;
+   el centro-inferior queda libre (Controls abajo-izq, MiniMap abajo-der). */
+.wk-relhint { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 30;
+  background: var(--primary); color: var(--on-primary); font-size: 12px; padding: 5px 12px;
+  border-radius: var(--r-full); box-shadow: var(--shadow-md); display: flex; align-items: center; gap: 8px; }
+.wk-relhint .wk-tic { color: var(--on-primary); }
+
+/* ── Sidebar apilado (doc 18): Model Explorer + Database Explorer ── */
+.wk-expl-stack { grid-area: explorer; position: relative; display: flex; flex-direction: column; min-height: 0;
+  background: var(--surface); border-right: 1px solid var(--border-soft); }
+/* Handle de resize del explorer (solo-vista) sobre su borde derecho. */
+.wk-expl-resizer { position: absolute; right: -3px; top: 0; bottom: 0; width: 7px; z-index: 6;
+  cursor: col-resize; touch-action: none; }
+.wk-expl-resizer::before { content: ''; position: absolute; right: 3px; top: 0; bottom: 0; width: 1px;
+  background: transparent; transition: background .12s; }
+.wk-expl-resizer:hover::before, .wk-expl-resizer.dragging::before { background: var(--primary); }
+.wk-explorer { flex: 1 1 auto; min-height: 0; background: var(--surface); overflow-y: auto; padding: 6px; }
+
+/* Database Explorer (producción publicada, solo lectura) */
+.wk-dbx { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
+  border-top: 1px solid var(--border-soft); }
+.wk-dbx.open { flex: 0 1 50%; }
+.wk-dbx-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 10px; border: none;
+  background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--subtle); font-family: inherit; }
+.wk-dbx-head:hover { background: var(--fill-4); }
+.wk-dbx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 6px 6px; }
+.wk-dbx-search { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; padding: 0 8px;
+  background: var(--fill-3, #F4F6F9); border-radius: 8px; color: var(--muted); }
+.wk-dbx-search input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+  padding: 7px 0; font-size: 12px; color: var(--ink); font-family: inherit; }
+.wk-dbx-search button { border: none; background: transparent; color: var(--muted); cursor: pointer;
+  display: inline-flex; padding: 2px; }
+.wk-dbx-badge { margin-left: auto; flex-shrink: 0; font-size: 10px; color: var(--text-muted-3); }
+.wk-dbx-type { flex-shrink: 0; max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; color: var(--text-muted-3); margin-left: auto; }
+.wk-dbx-badge + .wk-dbx-type { margin-left: 6px; }
+.wk-dbx-col:hover { background: transparent; }
+
+/* Búsqueda: encabezados de sección (Tables / Columns) + hits de columna a dos
+   líneas (columna arriba, esquema.tabla debajo) */
+.wk-dbx-sect { margin: 6px 0 2px; padding: 0 6px; font-size: 10px; font-weight: 700;
+  letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted-3); }
+.wk-dbx-colhit { height: auto; padding: 3px 4px 3px 6px; cursor: default; }
+.wk-dbx-sub { font-size: 10px; color: var(--text-muted-3); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+
+/* Gestor de esquemas (doc 18 v2): línea de impacto bajo un cambio pendiente */
+.wk-schx-impact { color: var(--text-muted, #56607A); margin-top: 2px; }
+.wk-exp-head { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--subtle); padding: 6px 6px 6px; display: flex; align-items: center; justify-content: space-between; }
+.wk-exp-headbtn { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--muted); border-radius: var(--r-sm); cursor: pointer; }
+.wk-exp-headbtn:hover { background: var(--fill-4); color: var(--primary); }
+
+/* Fila genérica del árbol (project / folder / canvas) */
+.wk-exp-row { position: relative; display: flex; align-items: center; gap: 5px; height: 28px; padding-right: 4px;
+  border-radius: var(--r-sm); cursor: pointer; color: var(--ink-2); font-size: 13px; user-select: none; }
+.wk-exp-row > svg { flex-shrink: 0; color: var(--text-muted-3); }            /* chevron */
+.wk-exp-row.strong { color: var(--ink); font-weight: 700; }
+.wk-exp-row:hover { background: var(--fill-4); }                              /* #F0F2F6 */
+.wk-exp-row.active { background: var(--blue-tint); color: var(--primary-700); font-weight: 600; }  /* #EAF0FF */
+.wk-exp-row.active .wk-exp-ico { color: var(--primary); }
+.wk-exp-ico { flex-shrink: 0; display: inline-flex; align-items: center; color: var(--muted); }
+.wk-exp-row[data-kind="project"] .wk-exp-ico { color: var(--navy); }
+.wk-exp-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Botón 3-puntos: aparece al hover de la fila (o cuando su menú está abierto) */
+.wk-exp-dots { flex-shrink: 0; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--muted); border-radius: var(--r-sm); cursor: pointer;
+  opacity: 0; transition: opacity .12s, background .12s; }
+.wk-exp-row:hover .wk-exp-dots { opacity: 1; }
+.wk-exp-dots:hover { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-xs); }
+
+/* Input inline (crear / renombrar) */
+.wk-exp-edit { background: var(--blue-soft); }
+.wk-exp-input { flex: 1; min-width: 0; height: 22px; padding: 0 6px; font-size: 13px; font-family: var(--ui);
+  color: var(--ink); background: var(--surface); border: 1px solid var(--primary); border-radius: var(--r-sm); outline: none; }
+.wk-exp-input:focus { box-shadow: 0 0 0 2px var(--primary-muted); }
+
+.wk-exp-empty { font-size: 12px; color: var(--text-muted-3); padding: 4px 6px; }
+
+/* El menú contextual reusa .rd-menu; sólo ajustamos ancho mínimo en este contexto */
+.wk-exp-menu { min-width: 176px; }
+
+.wk-canvas { grid-area: canvas; min-width: 0; min-height: 0; position: relative;
+  display: flex; flex-direction: column; }
+
+/* Franja inferior del canvas: a un lado el toggle Logical / Physical */
+.wk-status { grid-area: status; display: flex; align-items: center; gap: 10px; padding: 0 14px;
+  border-top: 1px solid var(--border-soft); background: var(--surface); }
+.wk-status-spacer { flex: 1; }
+
+/* Panel de Propiedades (derecha) — 3ª columna al seleccionar un bloque (diseño p8: 472px) */
+/* El ancho del panel de propiedades es resizable (solo-vista): `--props-w` lo
+   fija WorkspaceScreen desde el drag; sin valor cae al default original. */
+.wk.has-props { grid-template-columns: var(--expl-w, 264px) minmax(0, 1fr) var(--props-w, min(472px, 38vw));
+  grid-template-areas: "toolbar toolbar toolbar" "explorer canvas props" "explorer status props"; }
+.wk-props { grid-area: props; position: relative; display: flex; flex-direction: column; min-height: 0; min-width: 0;
+  background: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(16,27,48,.04); }
+/* Handle de resize sobre el borde izquierdo del panel (col-resize). */
+.wk-props-resizer { position: absolute; left: -3px; top: 0; bottom: 0; width: 7px; z-index: 6;
+  cursor: col-resize; touch-action: none; }
+.wk-props-resizer::before { content: ''; position: absolute; left: 3px; top: 0; bottom: 0; width: 1px;
+  background: transparent; transition: background .12s; }
+.wk-props-resizer:hover::before, .wk-props-resizer.dragging::before { background: var(--primary); }
+
+/* Header fijo: glyph navy 34px + nombre 16/700 + "schema x · table" + close */
+.wk-props-top { flex: none; padding: 16px 18px 0; }
+.wk-props-head { display: flex; align-items: center; gap: 11px; }
+.wk-props-glyph { width: 34px; height: 34px; flex: none; border-radius: 9px; background: var(--navy); color: #fff;
+  display: flex; align-items: center; justify-content: center; }
+.wk-props-id { flex: 1; min-width: 0; }
+.wk-props-title { font-size: 16px; font-weight: 700; color: var(--ink); letter-spacing: -.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wk-props-sub { font-size: 12px; color: var(--subtle); }
+.wk-props-ro { margin-left: 7px; font-size: 10px; font-weight: 700; color: var(--amber-deep);
+  background: var(--amber-tint); border-radius: 999px; padding: 1px 7px; vertical-align: 1px; }
+.wk-props-close { width: 30px; height: 30px; flex: none; border: none; border-radius: 8px; background: var(--fill-4);
+  color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background .12s, color .12s; }
+.wk-props-close:hover { background: var(--border-2); color: var(--ink); }
+/* Back del panel de columna (doc 49): mismo look que el close, pegado al glyph. */
+.wk-props-back { margin-right: -3px; }
+
+/* Cuerpo scrolleable (el header y las tabs quedan fijos) */
+.wk-props-body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 18px; }
+
+.wk-props-sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--text-muted-3); margin: 14px 0 9px; }
+.wk-props-field { display: grid; gap: 6px; margin-bottom: 12px; }
+.wk-props-field label { font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--text-muted-3); }
+.wk-props-col { display: flex; align-items: center; gap: 6px; padding: 3px 0; border-top: 1px solid var(--border-soft); font-size: 12px; }
+
+/* ── PropertiesPanel · pestañas SUBRAYADAS (diseño p8: underline, no pill) ── */
+.wk-pp-tabs { display: flex; gap: 2px; margin-top: 14px; border-bottom: 1px solid var(--border-2); overflow-x: auto; }
+.wk-pp-tabs::-webkit-scrollbar { height: 0; }
+.wk-pp-tab { display: inline-flex; align-items: center; gap: 6px; padding: 9px 12px; margin-bottom: -1px;
+  font-family: var(--ui); font-size: 12.5px; font-weight: 600; color: var(--subtle); background: none; border: none;
+  border-bottom: 2px solid transparent; cursor: pointer; white-space: nowrap; transition: color .12s, border-color .12s; }
+.wk-pp-tab:hover { color: var(--text-body); }
+.wk-pp-tab.active { color: var(--primary); font-weight: 700; border-bottom-color: var(--primary); }
+.wk-pp-tab-count { font-size: 10.5px; font-weight: 600; color: inherit; background: var(--fill-4);
+  border-radius: 999px; padding: 0 6px; line-height: 16px; }
+.wk-pp-tab.active .wk-pp-tab-count { background: var(--blue-tint); }
+
+.wk-pp-cap { font-size: 11px; color: var(--muted); margin: 0 0 8px; }
+.wk-pp-textarea { font: inherit; font-size: 12.5px; line-height: 1.45; width: 100%; min-height: 64px; resize: vertical;
+  padding: 7px 9px; color: var(--text-body); background: var(--surface); border: 1px solid var(--border-3); border-radius: var(--r-sm); }
+.wk-pp-textarea:focus { outline: none; border-color: var(--blue-border); box-shadow: 0 0 0 3px var(--primary-muted); }
+
+/* ── Columns: fila COMPACTA por default (diseño p8) + card expandida al click ── */
+.wk-pp-collist { display: flex; flex-direction: column; gap: 7px; }
+
+/* Fila colapsada: grip · icono PK/FK/PART · lógico · físico (azul) · tipo · badges */
+.wk-pp-colrow { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 9px 11px;
+  background: var(--surface); border: 1px solid var(--border-4); border-radius: 9px; font-size: 12.5px;
+  cursor: pointer; transition: border-color .12s, box-shadow .12s, opacity .12s; }
+.wk-pp-colrow:hover { border-color: var(--blue-border); box-shadow: var(--shadow-xs); }
+.wk-pp-colrow.pt { border-color: #C3EAD7; background: #F4FBF7; }                  /* fila partition (diseño) */
+.wk-pp-colrow-ic { width: 14px; flex: none; display: inline-flex; justify-content: center; }
+.wk-pp-colrow-name { flex: 1; min-width: 0; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-pp-colrow-name.pk { font-weight: 600; color: var(--ink); }
+.wk-pp-colrow-phys { flex: none; font-size: 10.5px; color: var(--primary); }
+.wk-pp-colrow-dt { flex: none; font-size: 10.5px; color: var(--subtle); }
+.wk-pp-badge { flex: none; font-size: 9.5px; font-weight: 700; border-radius: 5px; padding: 1px 6px; }
+.wk-pp-badge.pk { color: var(--amber-deep); background: var(--amber-tint); }
+.wk-pp-badge.fk { color: var(--primary); background: var(--blue-tint); }
+.wk-pp-badge.pt { color: var(--green-deep); background: var(--green-tint); }
+
+/* Estados DnD de la fila (la card expandida "Editing column" se retiró en el
+   doc 49 — la edición vive en el ColumnPropertiesPanel) */
+.wk-pp-colrow.dragging { opacity: .55; }
+.wk-pp-colrow.dropbefore { box-shadow: 0 -2px 0 0 var(--blue); } /* drop-indicator (top) */
+.wk-pp-colrow.dropafter  { box-shadow: 0 2px 0 0 var(--blue); }  /* drop-indicator (bottom) */
+.wk-pp-grip { display: inline-flex; align-items: center; justify-content: center; flex: none;
+  color: var(--text-muted-3); cursor: grab; user-select: none; }
+.wk-pp-grip:active { cursor: grabbing; }
+.wk-pp-grip svg { display: block; }
+
+/* Spinner del input de tipo mientras aplica el cambio de Parent Domain */
+.wk-pp-typewrap { position: relative; display: block; min-width: 0; }
+.wk-pp-typewrap .rd-input { width: 100%; padding-right: 26px; }
+.wk-spin { position: absolute; right: 8px; top: 50%; width: 12px; height: 12px; margin-top: -6px;
+  border-radius: 50%; border: 2px solid var(--blue-border); border-top-color: var(--primary);
+  animation: wk-spin .7s linear infinite; pointer-events: none; }
+@keyframes wk-spin { to { transform: rotate(360deg); } }
+.wk-pp-flags { display: flex; flex-wrap: wrap; gap: 4px; }
+.wk-pp-flag { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 600; padding: 3px 7px;
+  border-radius: 999px; cursor: pointer; color: var(--muted); background: var(--fill-2); border: 1px solid var(--border-1); user-select: none; transition: all .12s; }
+.wk-pp-flag input { display: none; }
+.wk-pp-flag.on.pk { color: var(--k-pk); background: var(--k-pk-soft); border-color: var(--amber-tint-2); }
+.wk-pp-flag.on.fk { color: var(--k-fk); background: var(--k-fk-soft); border-color: var(--blue-border); }
+.wk-pp-flag.on.pt { color: var(--k-pt); background: var(--k-pt-soft); border-color: var(--green-tint); }
+.wk-pp-flag.on.nl { color: var(--primary); background: var(--blue-tint); border-color: var(--blue-border); }
+
+/* ── Links (diseño pp3: cards con badge PARENT/CHILD + "on col" + "1 : N") ── */
+.wk-pp-link { padding: 12px 13px; border: 1px solid var(--border-4); border-radius: var(--r); margin-bottom: 10px; font-size: 12px; }
+.wk-pp-link-head { display: flex; align-items: center; gap: 9px; color: var(--ink); font-weight: 600; margin-bottom: 7px; font-size: 13px; min-width: 0; }
+.wk-pp-link-head .rd-mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-pp-role { font-size: 10px; font-weight: 700; border-radius: 6px; padding: 2px 7px; flex: none; }
+.wk-pp-role.parent { color: var(--green-deep); background: var(--green-tint); }
+.wk-pp-role.child { color: var(--primary); background: var(--blue-tint); }
+.wk-pp-link-card { display: flex; align-items: center; gap: 9px; font-size: 11px; color: var(--subtle); }
+.wk-pp-link-card .rd-mono { color: var(--text-body); }
+.wk-pp-card-lbl { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
+
+/* ── Metadata (diseño pp4: label 104px + valor) ── */
+.wk-pp-meta { display: grid; grid-template-columns: 104px 1fr; gap: 12px 10px; font-size: 12.5px; align-items: start; }
+.wk-pp-meta dt { font-size: 12px; font-weight: 600; color: var(--text-muted-3); }
+.wk-pp-meta dd { margin: 0; color: var(--text-body); word-break: break-word; }
+
+/* ── Historial de auditoría en Metadata (doc 51): filas compactas usuario ·
+   acción · versión · fecha, con el detalle de campos expandible bajo demanda. */
+.wk-pp-hist { display: flex; flex-direction: column; gap: 4px; }
+.wk-pp-histrow { border: 1px solid var(--border-2); border-radius: 7px; background: var(--surface); }
+.wk-pp-histhead { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px;
+  background: none; border: none; cursor: pointer; font-family: var(--ui); font-size: 11.5px;
+  color: var(--text-body); text-align: left; }
+.wk-pp-histact { flex: none; font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  padding: 1px 6px; border-radius: 999px; }
+.wk-pp-histact.created { color: #1F7A4D; background: #E7F5EC; }
+.wk-pp-histact.edited { color: #8A5A00; background: #FFF3DB; }
+.wk-pp-histact.deleted { color: #C4314B; background: #FDECEF; }
+.wk-pp-histuser { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-weight: 600; }
+.wk-pp-histver { flex: none; font-size: 10.5px; color: var(--primary); background: var(--blue-tint);
+  border-radius: 999px; padding: 0 6px; line-height: 16px; }
+.wk-pp-histwhen { flex: none; font-size: 10.5px; color: var(--muted); }
+.wk-pp-histcaret { flex: none; color: var(--muted); transition: transform .12s; }
+.wk-pp-histrow.open .wk-pp-histcaret { transform: rotate(180deg); }
+.wk-pp-histdetail { padding: 7px 10px 9px; border-top: 1px dashed var(--border-2);
+  font-size: 11px; color: var(--text-body); display: flex; flex-direction: column; gap: 5px; }
+.wk-pp-histmeta { color: var(--muted); overflow-wrap: anywhere; }
+.wk-pp-histfields { display: flex; flex-direction: column; gap: 3px; max-height: 190px;
+  overflow: auto; padding-top: 2px; }
+.wk-pp-histfield { display: flex; gap: 8px; align-items: baseline; }
+.wk-pp-histflabel { flex: none; width: 108px; color: var(--text-muted-3); font-weight: 600; }
+.wk-pp-histfvals { min-width: 0; overflow-wrap: anywhere; }
+.wk-pp-histarrow { color: var(--text-muted-3); }
+
+.wk-tabs { grid-area: tabs; display: flex; align-items: center; gap: 4px; padding: 0 8px;
+  background: var(--surface); border-top: 1px solid var(--border); }
+.wk-tab { font-size: 12.5px; padding: 4px 12px; border-radius: var(--r-sm) var(--r-sm) 0 0;
+  cursor: pointer; color: var(--muted); border: 1px solid transparent; border-bottom: none; }
+.wk-tab:hover { background: var(--surface-2); }
+.wk-tab.active { background: var(--canvas); color: var(--primary-700); font-weight: 600; border-color: var(--border); }
+.wk-tabs-spacer { flex: 1; }
+
+/* Nodo-entidad estilo Erwin (table card, Screen 04) — navy header, dotted tokens */
+/* Ancho DINÁMICO: el nodo mide `max-content` (el ancho de su fila más larga) para
+   que entre el naming completo (schema.tabla) y cada columna con su dataType sin
+   truncar — en ambos modos (lógico y físico). El alto NUNCA crece por texto:
+   todo lo textual es nowrap; solo crece por nº de filas. max-width alto = solo
+   guarda contra casos patológicos; ELK usa el ancho MEDIDO (measured). */
+.wk-node { min-width: 220px; max-width: 880px; width: max-content;
+  background: var(--surface); border: 1px solid var(--border-1);   /* #E2E6EE */
+  border-radius: var(--r); box-shadow: var(--shadow-table); font-size: 12px; overflow: hidden;  /* radius 11 */
+  transition: border-color .12s, box-shadow .12s; }
+.wk-node.sel { border: 1.5px solid var(--blue); box-shadow: 0 0 0 3px var(--primary-muted), var(--shadow-table); }  /* 1.5px #2E5BFF */
+.wk-node-head { position: relative; padding: 6px 11px; background: var(--navy); color: var(--on-primary);  /* #1A2B4A */
+  font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.wk-node-head .wk-node-glyph { flex-shrink: 0; opacity: .9; }
+/* schema.tabla en una sola línea → empuja el ancho del nodo (max-content). */
+.wk-node-head .wk-node-title { white-space: nowrap; }
+.wk-node-head .wk-node-schema { font-weight: 500; opacity: .62; }
+.wk-node-head .wk-node-add { margin-left: auto; color: var(--on-primary); opacity: .85; background: transparent; border: none; cursor: pointer; padding: 0 2px; }
+.wk-node-pk { background: var(--blue-soft-2); box-shadow: inset 0 -1px 0 #D6E0F5; }  /* doc 47: llave resaltada */
+.wk-node-div { border-top: 1px solid #F2F4F8; }
+.wk-node-div + .wk-node-row { border-top: none; }
+.wk-node-row { position: relative; display: flex; gap: 7px; align-items: center; padding: 6px 11px; border-top: 1px solid #F2F4F8; }
+.wk-node-pk .wk-node-row:first-child { border-top: none; }
+/* Hover/selección de un wire: además del edge se resaltan las columnas de sus
+   pares (los dos extremos, incl. relaciones compuestas). Mismo azul del wire. */
+.wk-node-row.hot { background: var(--blue-tint); box-shadow: inset 2.5px 0 0 var(--primary); }
+.wk-node-row.hot .wk-node-name { color: var(--primary-700); font-weight: 600; }
+/* Doc 48: filas seleccionadas para copy/paste (click / Ctrl+click / Shift+click). */
+.wk-node-row.selcol { background: var(--blue-tint); box-shadow: inset 0 0 0 1.5px var(--primary); }
+.wk-node-row.selcol.hot { box-shadow: inset 0 0 0 1.5px var(--primary), inset 2.5px 0 0 var(--primary); }
+/* Hover TENUE de fila (fix prueba viva): feedback de que la fila es
+   clickeable/copiable. SOLO CSS — cero estado React, cero re-renders (lo
+   pinta el compositor). No pisa .hot/.selcol y se apaga mientras se dibuja
+   una relación (.rel-armed en la raíz del nodo). */
+.wk-node:not(.rel-armed) .wk-node-row:hover { cursor: pointer; }
+.wk-node:not(.rel-armed) .wk-node-row:not(.hot):not(.selcol):hover { background: #F5F7FB; }
+.wk-node-key { display: inline-flex; align-items: center; justify-content: center; min-width: 14px; }
+/* flex-basis auto (no 0%): la columna aporta su ancho de contenido → el nodo
+   crece para que entre "nombre  TIPO"; recién al tocar max-width del nodo,
+   shrink+ellipsis recortan el nombre (el tipo nunca se recorta). */
+.wk-node-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-body); }
+.wk-node-name.fk { color: var(--k-fk); }                                                          /* FK name blue */
+/* Tipos: los complejos llegan colapsados (STRUCT<…>) con tooltip; max-width +
+   ellipsis protege además contra tipos simples patológicamente largos. */
+.wk-node-dt { flex: 0 0 auto; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted-2); font-size: 10px; }  /* #8A93A5 Geist Mono */
+.wk-node-empty { padding: 6px 11px; color: var(--muted); }
+
+/* ── ComplexTypeBuilder: cajita para declarar STRUCT/ARRAY/MAP en bonito ──
+   Aparece bajo el input de tipo (ColumnEditor modal + card del panel) cuando
+   el texto arranca como complejo; recompone el string canónico al editar. */
+.wk-ctb { margin-top: 8px; border: 1px solid var(--border-1, #E2E6EE); border-radius: 10px;
+  padding: 10px 11px; background: #F8FAFD; display: grid; gap: 6px; }
+.wk-ctb-head { font-size: 10.5px; font-weight: 700; color: #8A93A5; text-transform: uppercase; letter-spacing: .04em; }
+.wk-ctb-row { display: flex; gap: 6px; align-items: center; }
+.wk-ctb-in { flex: 1; min-width: 0; height: 30px; font-size: 12px; }
+.wk-ctb-add { justify-self: start; }
+.wk-ctb-empty { color: var(--muted, #8A93A5); }
+.wk-ctb-warn { color: #8A6D1A; background: #FFF8E6; border-color: #F0E2B6; }
+
+/* Handles de conexión por columna (id único __src/__tgt) — doc 47: ya NO
+   inician wires (el origen es la cabecera del padre), así que en reposo son
+   invisibles; se encienden SOLO como candidatos de drop mientras hay una
+   conexión en curso (clase connectionindicator de React Flow v12), y se
+   pintan de azul cuando el wire está encima (valid ⇒ connectingto). */
+.wk-handle { width: 7px; height: 7px; background: var(--subtle); border: 1.5px solid var(--surface); opacity: 0; transition: opacity .12s; }
+.wk-handle.connectionindicator { opacity: 1; }
+.wk-handle.valid { background: var(--primary); }
+
+/* Anclas header-a-header del wire de derivación (F3): invisibles y NO
+   interactivas — solo posicionan los extremos del edge 'derivation'. */
+.wk-hdr-handle { width: 1px; height: 1px; min-width: 0; min-height: 0;
+  opacity: 0; pointer-events: none; border: none; background: transparent; }
+
+/* Cabecera ARMADA (doc 47): el header entero es el origen del wire — hit-area
+   invisible a lo ancho del head, cursor de mira; sólo con la herramienta armada. */
+.wk-hdr-handle.armed { width: 100%; height: 100%; left: 0; top: 0; right: auto; min-width: 0;
+  transform: none; border-radius: 0; opacity: 0; pointer-events: all; cursor: crosshair; }
+/* Affordance del origen (feedback prueba viva 2026-08-15): con la herramienta
+   armada la cabecera se marca visiblemente (anillo primario + mira) y el "+"
+   se oculta (el overlay lo tapa igual). El veil blanco se pinta cuando el
+   wire en curso está SOBRE una cabecera destino (clase connectingto). */
+.wk-node-head.armed { box-shadow: inset 0 0 0 2px var(--primary); cursor: crosshair; }
+.wk-node-head.armed .wk-node-add { visibility: hidden; }
+.wk-hdr-handle.armed.connectingto { opacity: 1; background: rgba(255, 255, 255, .2); }
+
+/* ── LOD (doc 33): caja COMPACTA bajo el umbral de zoom ──────────────────
+   Mismo card (header, colores, franja PK, hatch de vista) con width/height
+   explícitos = las métricas del nodo detallado — de lejos se ve idéntico;
+   solo dejan de pintarse las filas, que a ese zoom miden <1px. */
+.wk-lod { display: flex; flex-direction: column; contain: layout paint; }
+.wk-lod .wk-node-head, .wk-lod .wk-vnode-head { flex-shrink: 0; }
+.wk-lod .wk-node-pk { flex-shrink: 0; }
+.wk-lod-body { flex: 1; }
+
+/* ── Nodo VISTA (F3, spec §3-5 · mock 2026-07-12) ────────────────────────
+   Mismo card dinámico que .wk-node pero "medio plomo": header gris pizarra,
+   borde PUNTEADO envolvente (sin franja izquierda) y cuerpo con hatch
+   diagonal tenue a 45°. Grayscale a propósito — se distingue de las tablas
+   por textura/borde, no por color de acento. */
+.wk-vnode { min-width: 220px; max-width: 880px; width: max-content;
+  background: var(--surface); border: 2px dashed #C5CCD8;
+  border-radius: 12px; box-shadow: var(--shadow-table); font-size: 12px; overflow: hidden;
+  transition: border-color .12s, box-shadow .12s; }
+.wk-vnode.sel { border-color: var(--blue);
+  box-shadow: 0 0 0 3px var(--primary-muted), var(--shadow-table); }
+.wk-vnode-head { position: relative; padding: 7px 12px; background: #5D6675; color: #fff;
+  font-weight: 700; display: flex; align-items: center; gap: 7px; }
+.wk-vnode-title { white-space: nowrap; }
+.wk-vnode-badge { flex: none; font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  color: #CBD1DA; }
+.wk-vnode-edit { margin-left: auto; display: inline-flex; align-items: center;
+  color: #fff; opacity: .8; background: transparent; border: none; cursor: pointer; padding: 0 2px; }
+.wk-vnode-edit:hover { opacity: 1; }
+/* Cuerpo "medio plomo": base gris + hatch diagonal a 45° sobre el CONTENEDOR
+   de filas (por-fila el patrón reinicia el offset y se ven costuras). El wire
+   punteado tabla→vista comunica la derivación — el nodo ya NO lleva footer
+   "Origen/Deriva de" (mock 2026-07-14). */
+.wk-vnode-body { background-color: #EDEFF4; background-image: repeating-linear-gradient(45deg,
+  rgba(90,102,117,.11) 0 1px, transparent 1px 8px); }
+.wk-vnode-body .wk-node-row { border-top: 1px solid rgba(90,102,117,.13); }
+.wk-vnode-body .wk-node-row:first-child { border-top: none; }
+.wk-vnode-fx { display: inline-flex; justify-content: center; align-items: center;
+  min-width: 16px; height: 13px; flex: none; font-size: 9px; font-style: italic;
+  font-weight: 800; color: #7A8598; background: rgba(255,255,255,.75);
+  border: 1px solid #D5DBE4; border-radius: 4px; }
+.wk-vnode-fx-sp { min-width: 16px; flex: none; }
+
+/* Vista COMPARTIDA (2+ fuentes) en Properties→Views (F3): tinte + badge. */
+.wk-pp-link.shared { background: #F8F5FF; border-color: #E1D4FB; }
+/* Relación visible sólo en OTRO canvas (Links · Other canvases): card plomo,
+   solo lectura — la blanca queda para las del canvas abierto. */
+.wk-pp-link.other { background: var(--fill-4, #F1F3F6); border-color: var(--border-soft); }
+.wk-pp-link.other .wk-pp-link-head { color: var(--ink-2); }
+.wk-pp-shared { display: inline-flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700;
+  color: #6D3FC4; background: #EFE7FD; border-radius: var(--r-full); padding: 2px 8px; }
+
+/* ── UDP popup (Screen 08a per-column / 08b per-table) ─────────────────── */
+.udp { display: flex; flex-direction: column; gap: 14px; }
+
+.udp-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.udp-hint { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-muted);
+  background: var(--blue-soft); border: 1px solid var(--blue-border); border-radius: var(--r-sm);
+  padding: 4px 9px; }
+.udp-hint svg { color: var(--primary); flex-shrink: 0; }
+
+/* separator + case */
+.udp-rules { display: flex; gap: 18px; flex-wrap: wrap; }
+.udp-field { display: flex; flex-direction: column; gap: 6px; }
+.udp-lbl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted-2); }
+
+/* live preview */
+.udp-preview { display: flex; align-items: center; gap: 10px; padding: 11px 13px;
+  background: var(--fill-2); border: 1px solid var(--border-soft); border-radius: var(--r-md); }
+.udp-preview-ico { color: var(--primary); flex-shrink: 0; }
+.udp-preview-in { flex: 1; min-width: 0; height: 30px; border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface); padding: 0 10px; font-family: var(--ui); font-size: 13px; color: var(--ink-2); }
+.udp-preview-in::placeholder { color: var(--text-placeholder); }
+.udp-preview-in:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-muted); }
+.udp-preview-arrow { color: var(--text-muted-3); font-size: 15px; flex-shrink: 0; }
+.udp-preview-out { font-family: var(--mono); font-size: 13.5px; font-weight: 600; color: var(--flow-700);
+  min-width: 120px; flex-shrink: 0; }
+
+/* terms header */
+.udp-tablehead { display: flex; align-items: center; justify-content: space-between; }
+.udp-section { font-size: 13.5px; font-weight: 700; color: var(--ink); display: inline-flex; align-items: center; gap: 8px; }
+.udp-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 18px; padding: 0 6px;
+  font-size: 11px; font-weight: 600; border-radius: var(--r-full); background: var(--blue-tint); color: var(--primary); }
+.udp-add { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 11px; cursor: pointer;
+  font-family: var(--ui); font-size: 12.5px; font-weight: 600; color: var(--primary);
+  background: var(--blue-tint); border: 1px solid var(--blue-border); border-radius: var(--r-sm); transition: background .12s; }
+.udp-add:hover:not(:disabled) { background: var(--blue-border); }
+.udp-add:disabled { opacity: .5; cursor: not-allowed; }
+
+/* inline editor row */
+.udp-editor { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 11px;
+  background: var(--blue-soft); border: 1px solid var(--blue-border); border-radius: var(--r-md); }
+.udp-in { height: 32px; border: 1px solid var(--border-strong); border-radius: var(--r-sm);
+  background: var(--surface); padding: 0 10px; font-family: var(--ui); font-size: 13px; color: var(--ink-2); min-width: 0; flex: 1; }
+.udp-in::placeholder { color: var(--text-placeholder); }
+.udp-in:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 2px var(--primary-muted); }
+.udp-mono { font-family: var(--mono); }
+.udp-editor-actions { display: flex; gap: 6px; margin-left: auto; }
+.udp-btn { display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 0 12px; cursor: pointer;
+  font-family: var(--ui); font-size: 12.5px; font-weight: 600; border-radius: var(--r-sm); border: 1px solid transparent; transition: background .12s, border-color .12s; }
+.udp-btn:disabled { opacity: .55; cursor: not-allowed; }
+.udp-btn-ghost { background: transparent; color: var(--text-body); border-color: var(--border-strong); }
+.udp-btn-ghost:hover:not(:disabled) { background: var(--fill-4); }
+.udp-btn-primary { background: var(--primary); color: #fff; }
+.udp-btn-primary:hover:not(:disabled) { background: var(--primary-700); }
+
+/* terms table (Term / Abbrev / Word type / actions) */
+.udp-table { border: 1px solid var(--border-soft); border-radius: var(--r-md); overflow: hidden; }
+.udp-tr { display: grid; grid-template-columns: 1.4fr 1fr 1fr 64px; align-items: center; gap: 10px;
+  padding: 9px 13px; border-bottom: 1px solid var(--border-2); }
+.udp-tr:last-child { border-bottom: none; }
+.udp-tr-head { background: var(--fill-2); font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .05em; color: var(--text-muted-2); padding-top: 8px; padding-bottom: 8px; }
+.udp-term { font-size: 13px; color: var(--ink); font-weight: 500; }
+.udp-abbr { font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.udp-row-actions { display: flex; gap: 2px; justify-content: flex-end; }
+.udp-iconbtn { width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--text-muted); cursor: pointer; transition: background .12s, color .12s; }
+.udp-iconbtn:hover:not(:disabled) { background: var(--fill-4); color: var(--ink-2); }
+.udp-iconbtn-danger:hover:not(:disabled) { color: var(--red); }
+.udp-iconbtn:disabled { opacity: .45; cursor: not-allowed; }
+.udp-empty { padding: 18px 13px; text-align: center; font-size: 12.5px; color: var(--text-muted-2); }
+
+/* ── Export DDL popup (Screen 10 — `#pd`) ─────────────────────────────── */
+.exd { display: flex; flex-direction: column; gap: 16px; }
+.exd-field { display: flex; flex-direction: column; gap: 6px; }
+.exd-lbl { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted-2); }
+.exd-sublbl { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.exd-section { font-size: 12.5px; font-weight: 700; color: var(--ink); }
+.exd-locked { font-size: 11.5px; color: var(--text-muted); }
+
+.exd-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 16px; align-items: stretch; }
+@media (max-width: 760px) { .exd-cols { grid-template-columns: 1fr; } }
+
+.exd-opts { display: flex; flex-direction: column; gap: 11px; min-width: 0; }
+.exd-toggles { display: flex; flex-direction: column; gap: 6px; }
+.exd-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.exd-input { height: 34px; font-size: 13px; }
+select.exd-input { padding: 0 10px; }
+/* Deshabilitado (p.ej. Catalog cuando Unity Catalog está apagado): se ve gris,
+   con el placeholder atenuado, para leerse como "no editable". */
+.exd-input:disabled { background: #F0F2F6; color: #9AA3B2; border-color: #E6EAF0; cursor: not-allowed; }
+.exd-input:disabled::placeholder { color: #C4CBD6; }
+.exd-mono { font-family: var(--mono); font-size: 12.5px; }
+
+/* Checkbox-style toggle row (shared by options + table rows) */
+.exd-toggle, .exd-tablerow {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; cursor: pointer;
+  padding: 8px 10px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r-sm);
+  transition: background .12s, border-color .12s;
+}
+.exd-toggle:hover, .exd-tablerow:hover { background: var(--fill-3); }
+.exd-toggle.is-on, .exd-tablerow.is-on { background: var(--blue-soft); border-color: var(--blue-border); }
+.exd-toggle-box {
+  width: 17px; height: 17px; flex-shrink: 0; border-radius: 5px; border: 1.5px solid var(--border-strong);
+  background: var(--surface); color: var(--on-primary); display: inline-flex; align-items: center; justify-content: center;
+}
+.exd-toggle.is-on .exd-toggle-box, .exd-tablerow.is-on .exd-toggle-box { background: var(--primary); border-color: var(--primary); }
+.exd-toggle-txt { display: flex; flex-direction: column; min-width: 0; }
+.exd-toggle-label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.exd-toggle-hint { font-size: 11px; color: var(--text-muted-2); }
+
+.exd-tblprops-head, .exd-tables-head { display: flex; align-items: center; justify-content: space-between; }
+.exd-add, .exd-selall {
+  display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; cursor: pointer;
+  font-family: var(--ui); font-size: 12px; font-weight: 600; color: var(--primary);
+  background: var(--blue-tint); border: 1px solid var(--blue-border); border-radius: var(--r-sm); transition: background .12s;
+}
+.exd-add:hover:not(:disabled), .exd-selall:hover:not(:disabled) { background: var(--blue-border); }
+.exd-selall:disabled { opacity: .5; cursor: not-allowed; }
+.exd-prop { display: grid; grid-template-columns: 1fr 1fr 32px; gap: 7px; align-items: center; }
+.exd-iconbtn {
+  width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--text-muted); cursor: pointer; transition: color .12s, background .12s;
+}
+.exd-iconbtn:hover { color: var(--red); background: var(--fill-4); }
+.exd-empty { font-size: 12px; color: var(--text-muted-2); padding: 4px 2px; }
+
+.exd-tables { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.exd-tablelist {
+  display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow-y: auto;
+  padding: 2px; border: 1px solid var(--border-soft); border-radius: var(--r-md); background: var(--fill-3);
+}
+.exd-tablerow { background: var(--surface); }
+.exd-tablerow-txt { display: flex; flex-direction: column; min-width: 0; }
+.exd-tablerow-name { font-weight: 600; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exd-tablerow-sub { font-size: 11px; color: var(--text-muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Live preview — dark code box (Geist Mono) */
+.exd-code {
+  margin: 0; max-height: 320px; overflow: auto; padding: 14px 16px;
+  background: var(--navy); color: #DCE3F2; border-radius: var(--r-md);
+  font-family: var(--mono); font-size: 12.5px; line-height: 1.55; white-space: pre; tab-size: 2;
+}
+.exd-foot-count { font-size: 12px; color: var(--text-muted); font-weight: 600; }
+
+/* Tables-to-export panel (top of the modal) + dark preview column */
+.exd-tablesx { display: flex; flex-direction: column; gap: 9px; }
+.exd-tablesx-head { display: flex; align-items: center; gap: 8px; }
+.exd-tablesx-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted-2); }
+.exd-tablesx-sub { font-size: 11px; color: var(--text-muted-2); }
+.exd-tablesx-spacer { flex: 1; }
+.exd-tablesx-count { font-size: 11px; font-weight: 600; color: var(--primary); background: var(--blue-tint); border-radius: var(--r-full); padding: 2px 9px; }
+.exd-tablesx-filter { display: flex; align-items: center; gap: 9px; height: 36px; padding: 0 11px; background: var(--surface); border: 1px solid var(--border-soft); border-radius: 9px; }
+.exd-tablesx-filter-ico { color: var(--text-muted-2); flex: none; }
+.exd-tablesx-filter-input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; font-family: var(--ui); font-size: 12.5px; color: var(--ink); }
+.exd-tablesx-filter-input::placeholder { color: var(--text-placeholder); }
+.exd-tablesx-link { border: none; background: none; cursor: pointer; font-family: var(--ui); font-size: 11.5px; font-weight: 600; color: var(--primary); padding: 2px; }
+.exd-tablesx-link.is-muted { color: var(--text-muted); }
+.exd-tablesx-link:hover:not(:disabled) { text-decoration: underline; }
+.exd-tablesx-link:disabled { opacity: .5; cursor: not-allowed; }
+.exd-tablesx-dot { color: var(--border-strong); }
+.exd-tablesx-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; border: 1px solid var(--border-soft); border-radius: 11px; }
+.exd-tablesx-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer; padding: 9px 12px; background: var(--surface); border: none; border-bottom: 1px solid var(--fill-2); font-family: var(--ui); }
+.exd-tablesx-row:last-child { border-bottom: none; }
+.exd-tablesx-row:hover { background: var(--fill-3); }
+.exd-cbox { width: 18px; height: 18px; flex: none; border-radius: 5px; border: 1.5px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; color: var(--on-primary); }
+.exd-cbox.is-on { background: var(--primary); border-color: var(--primary); }
+.exd-tablesx-row-ico { color: var(--text-muted); flex: none; }
+/* esquema.tabla completo y legible: envuelve en 2 líneas si hace falta (nunca
+   se trunca — dos tablas homónimas solo se distinguen por el esquema). */
+.exd-tablesx-row-name { flex: 1; min-width: 0; font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; text-align: left; }
+.exd-tablesx-row-name.is-off { color: var(--text-muted-2); }
+.exd-tablesx-row-schema { font-weight: 500; opacity: .62; }
+.exd-tablesx-row-cols { flex: none; font-size: 11px; color: var(--text-muted-2); }
+.exd-previewcol { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.exd-previewcol .exd-code { flex: 1; min-height: 260px; max-height: 520px; }
+
+/* dialect cards */
+.exd-dialects { display: flex; gap: 10px; }
+.exd-dialect { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--border-soft); border-radius: 11px; background: var(--surface); cursor: pointer; font-family: var(--ui); text-align: left; transition: border-color .12s, box-shadow .12s, background .12s; }
+.exd-dialect:hover:not(:disabled):not(.is-on) { border-color: var(--blue-border); }
+.exd-dialect:disabled { opacity: .7; cursor: not-allowed; }
+.exd-dialect.is-on { border: 1.5px solid var(--primary); background: #F6F9FF; box-shadow: 0 0 0 3px var(--primary-muted); }
+.exd-dialect-ico { width: 30px; height: 30px; flex: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.exd-dialect-ico--oracle { background: #FCEEEA; color: #C74634; }
+.exd-dialect-ico--dbx { background: #FDEEE3; color: #E8612C; }
+.exd-dialect-txt { display: flex; flex-direction: column; min-width: 0; }
+.exd-dialect-name { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.exd-dialect-sub { font-size: 11px; color: var(--text-muted-2); }
+.exd-dialect.is-on .exd-dialect-sub { color: var(--primary); }
+.exd-dialect-lock { margin-left: auto; color: var(--text-muted-3); flex: none; }
+
+/* include / databricks switches */
+.exd-switches { display: flex; flex-direction: column; gap: 13px; }
+.exd-swrow { display: flex; align-items: center; gap: 12px; }
+.exd-swrow-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.exd-swrow-label { font-size: 13px; font-weight: 600; color: var(--ink-2); }
+.exd-swrow-hint { font-size: 11.5px; color: var(--text-muted-2); }
+.exd-swt { width: 38px; height: 22px; flex: none; border-radius: 999px; border: none; background: #CBD2DE; position: relative; cursor: pointer; transition: background .15s; padding: 0; }
+.exd-swt::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(16,27,48,.25); transition: left .15s; }
+.exd-swt.on { background: var(--primary); }
+.exd-swt.on::after { left: 18px; }
+
+/* table-format chips */
+.exd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.exd-chip { font-size: 12px; font-weight: 500; color: var(--text-muted); background: var(--surface); border: 1px solid var(--border-strong); border-radius: 7px; padding: 5px 11px; cursor: pointer; font-family: var(--ui); transition: border-color .12s, background .12s, color .12s; }
+.exd-chip:hover:not(.is-on) { border-color: var(--blue-border); }
+.exd-chip.is-on { font-weight: 600; color: var(--primary); background: var(--blue-tint); border: 1.5px solid var(--primary); }
+/* Switch triple de casing de identificadores (Tal cual / lower / UPPER) */
+.exd-caseseg { align-self: flex-start; }
+.exd-caseseg button { font-family: var(--mono); font-size: 11.5px; padding: 5px 11px; }
+
+/* ── Capa DRAWING (R6d): formas libres detrás de las tablas (nodeType 'shape') ── */
+.wk-shape { position: relative; box-sizing: border-box; }
+/* Anillo de selección consistente con las tablas (.wk-node.sel) pero más sutil. */
+.wk-shape.sel { outline: 1.5px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
+.wk-shape-box { width: 100%; height: 100%; box-sizing: border-box; border: 2px solid var(--blue); }
+.wk-shape-svg { display: block; width: 100%; height: 100%; overflow: visible; }
+/* Texto libre */
+.wk-shape-text { width: 100%; height: 100%; display: flex; align-items: center; padding: 2px 4px;
+  font-size: 14px; font-weight: 600; line-height: 1.3; white-space: pre-wrap; word-break: break-word;
+  cursor: text; }
+.wk-shape-textedit { width: 100%; height: 100%; box-sizing: border-box; resize: none; padding: 2px 4px;
+  border: 1.5px solid var(--blue); border-radius: 5px; background: var(--surface);
+  font-size: 14px; font-weight: 600; line-height: 1.3; outline: none; }
+/* Mini-control flotante sobre la forma seleccionada */
+.wk-shape-bar { position: absolute; top: -34px; left: 0; display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px; background: var(--surface); border: 1px solid var(--border-1); border-radius: var(--r-sm);
+  box-shadow: var(--shadow-table); z-index: 5; }
+.wk-shape-sw { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid rgba(16,27,48,.12);
+  padding: 0; cursor: pointer; flex-shrink: 0; }
+.wk-shape-sw.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--blue); }
+.wk-shape-bar-div { width: 1px; height: 16px; background: var(--border-soft); }
+.wk-shape-del { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--text-muted); font-size: 16px; line-height: 1; cursor: pointer;
+  border-radius: 4px; }
+.wk-shape-del:hover { background: #F0C9C4; color: var(--danger, #C0392B); }
+
+/* View editor (PropertiesPanel · tab Views): lista de source tables + preview
+   SQL. Clases usadas por ViewEditor.tsx que nunca tuvieron definición. */
+.wk-ve-srclist { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; border: 1px solid var(--border-soft, #EAEDF2); border-radius: 8px; padding: 6px; }
+.wk-ve-srchead { display: flex; gap: 8px; font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted, #8A93A5); padding: 2px 4px; }
+.wk-ve-srcrow { display: flex; gap: 8px; align-items: center; padding: 3px 4px; font-size: 12px; border-radius: 6px; }
+.wk-ve-srcrow:hover { background: var(--fill-3, #F4F6F9); }
+.wk-ve-preview { margin: 6px 0 0; padding: 10px; background: #101828; color: #D7E3F4; font-size: 11.5px; line-height: 1.5; border-radius: 8px; overflow: auto; max-height: 220px; white-space: pre-wrap; }
+
+/* ── Copy/paste de columnas (doc 48) ─────────────────────────────────────── */
+/* Menú contextual del canvas (fila: Copy · bloque: Paste). position: fixed —
+   lo monta ModelerCanvas FUERA del viewport transformado de React Flow. */
+.wk-ctxmenu { position: fixed; z-index: 300; min-width: 200px; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border-1, #E3E8F0); border-radius: 9px;
+  box-shadow: 0 10px 28px rgba(20, 30, 55, .16); }
+.wk-ctxmenu button { display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 10px; border: 0; border-radius: 6px; background: none;
+  font-family: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.wk-ctxmenu button:hover { background: var(--blue-tint); }
+
+/* Popup de confirmación del paste: lista con nombre lógico+físico, tipo y el
+   estado por fila (New / Logical name exists / Name exists — skipped). */
+.wk-paste-list { display: flex; flex-direction: column; max-height: 320px; overflow: auto;
+  border: 1px solid #E8ECF3; border-radius: 8px; margin: 4px 0 10px; }
+.wk-paste-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border-top: 1px solid #F2F4F8; font-size: 12.5px; }
+.wk-paste-row:first-child { border-top: none; }
+.wk-paste-row.blocked { opacity: .55; }
+.wk-paste-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.wk-paste-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-paste-phys { color: var(--muted); font-size: 11px; }
+.wk-paste-dt { flex: none; max-width: 150px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; color: var(--muted); font-size: 11px; }
+.wk-paste-tag { flex: none; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.wk-paste-tag.ok { color: var(--primary-700, #1E4FD6); background: var(--blue-tint); }
+.wk-paste-tag.warn { color: #8A5B00; background: #FFF3D6; }
+.wk-paste-tag.blocked { color: #6B7688; background: #EEF1F6; }

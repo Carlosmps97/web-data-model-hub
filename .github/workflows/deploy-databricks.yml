@@ -1,0 +1,29 @@
+# Deploy del frontend a Databricks Apps.
+#
+# Mapeo rama → GitHub Environment (Variables y Secrets salen del environment,
+# con fallback a los del repositorio):
+#   · deploy-dev → dev   · develop → qa   · main → prod
+# SOLO esas tres ramas despliegan: el push únicamente dispara en ellas y el
+# disparo manual desde cualquier otra rama se omite (guard del job).
+# Toda la mecánica vive en reusable-databricks-deploy.yml; acá solo se declara
+# la topología de la solución: esta app consume la app backend vía el proxy
+# /api de server.mjs, así que su service principal necesita CAN_USE sobre ella.
+
+name: Deploy to Databricks Apps (frontend)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [deploy-dev, develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    if: contains(fromJSON('["deploy-dev", "develop", "main"]'), github.ref_name)
+    uses: ./.github/workflows/reusable-databricks-deploy.yml
+    with:
+      environment: ${{ github.ref_name == 'main' && 'prod' || github.ref_name == 'develop' && 'qa' || 'dev' }}
+      provider_app: bknd-data-model-hub
+    secrets: inherit

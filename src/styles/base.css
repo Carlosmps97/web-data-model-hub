@@ -1,0 +1,35 @@
+/* Global element resets + tiny utilities (app-wide). Part of the Aurora system — see doc/architecture.md. */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+body {
+  font-family: var(--ui);
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Geist Mono trae sus ligaduras de código en la feature `liga` (verificado
+     en el GSUB del woff2: `less+greater -> less_greater.liga`, etc.) — "<>"
+     se dibuja como UN glifo traslapado (botones STRUCT<>/ARRAY<>/MAP<>).
+     `liga` está ON por defecto y NO la apaga `no-contextual` (eso es calt,
+     que esta fuente ni tiene). Acá se muestran identificadores y DDL → todas
+     las ligaduras OFF, con el override de más bajo nivel (font-feature-
+     settings le gana a text-rendering: optimizeLegibility). */
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'clig' 0, 'dlig' 0, 'calt' 0;
+}
+/* Los form controls NO heredan los font-* del body: el UA stylesheet los
+   resetea con el shorthand `font` (por eso el apagado de ligaduras de arriba
+   no llegaba a los BOTONES — STRUCT<>/ARRAY<>/MAP<> seguían ligando). Se
+   re-hereda explícito. */
+button, input, textarea, select {
+  font-family: inherit;
+  font-variant-ligatures: inherit;
+  font-feature-settings: inherit;
+}
+a { color: inherit; text-decoration: none; }
+
+/* utility */
+.flex-1 { flex: 1; }
+.nodrag { }

@@ -1,0 +1,32 @@
+/* App shell: rail + top bar + page + project cards (dmh-). Part of the Aurora system — see doc/architecture.md. */
+
+/* ============================================================ App shell */
+.dmh { height: 100vh; display: flex; overflow: hidden; background: var(--bg); }
+.dmh-rail { width: 64px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 6px; z-index: 20; }
+.dmh-rail-logo { width: 38px; height: 38px; border-radius: var(--r); background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }
+.dmh-rail-btn { width: 42px; height: 42px; border-radius: var(--r-sm); border: none; background: transparent; color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all .14s; position: relative; }
+.dmh-rail-btn:hover { background: var(--primary-muted); color: var(--primary); }
+.dmh-rail-btn.active { background: var(--primary-soft); color: var(--primary-700); }
+.dmh-rail-spacer { flex: 1; }
+.dmh-rail-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--primary-soft); color: var(--primary-700); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; cursor: pointer; }
+
+.dmh-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+.dmh-top { height: 56px; flex-shrink: 0; display: flex; align-items: center; gap: 12px; padding: 0 18px; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 12; }
+.dmh-crumbs { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.dmh-crumb { color: var(--muted); font-weight: 600; cursor: pointer; }
+.dmh-crumb:hover { color: var(--primary); }
+.dmh-crumb.current { color: var(--ink); font-weight: 700; cursor: default; }
+.dmh-sep { width: 1px; height: 26px; background: var(--border); }
+
+.dmh-page { flex: 1; overflow-y: auto; padding: 30px 36px; }
+.dmh-page-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 22px; gap: 16px; }
+.dmh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; }
+.dmh-pcard { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 20px; cursor: pointer; transition: all .18s; overflow: hidden; box-shadow: var(--shadow-xs); }
+.dmh-pcard::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: linear-gradient(90deg, var(--primary), var(--flow)); opacity: 0; transition: opacity .18s; }
+.dmh-pcard:hover { border-color: var(--primary); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.dmh-pcard:hover::before { opacity: 1; }
+.dmh-pcard-title { font-size: 16px; font-weight: 800; margin-bottom: 6px; letter-spacing: -.01em; }
+.dmh-pcard-desc { font-size: 13px; color: var(--muted); line-height: 1.5; margin-bottom: 16px; min-height: 39px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dmh-pcard-foot { display: flex; align-items: center; gap: 8px; }
+.dmh-pcard-del { position: absolute; top: 14px; right: 14px; opacity: 0; transition: opacity .14s; }
+.dmh-pcard:hover .dmh-pcard-del { opacity: 1; }

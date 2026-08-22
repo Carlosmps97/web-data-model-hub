@@ -1,0 +1,49 @@
+// API request/response types
+
+import type {
+  Project,
+  EngineId,
+  ModelLevel,
+  Domain,
+} from './model';
+
+// Generic API response wrapper
+export interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+// ─── Project endpoints ───────────────────────────────────────────────────────
+export type ProjectListResponse = ApiResponse<Project[]>;
+export type ProjectResponse = ApiResponse<Project>;
+
+export interface CreateProjectRequest {
+  name: string;
+  description?: string;
+  engines?: EngineId[];
+  layers?: ModelLevel[];
+  domains?: Domain[];
+}
+
+export interface UpdateProjectRequest {
+  name?: string;
+  description?: string;
+  engines?: EngineId[];
+  layers?: ModelLevel[];
+  domains?: Domain[];
+}
+
+// (Los tipos legacy CanvasResponse/CanvasReplaceRequest se eliminaron junto
+// con el Relationship viejo de types/model — el canvas real usa el diagrama
+// canónico de modeler.service + governance.service.)
+
+// ─── Chat endpoint (AI agent — decoupled, kept) ──────────────────────────────
+export interface ChatRequest {
+  message: string;
+  attachments?: { name: string; type: string; data: string }[];
+}
+export interface ChatResponse {
+  message: string;
+  timestamp: string;
+}

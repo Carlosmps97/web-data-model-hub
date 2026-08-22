@@ -1,0 +1,61 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js (legado)
+/.next/
+/out/
+
+# vite (build de la SPA — se regenera con `npm run build`; NO se commitea.
+# OJO: dist/ quedó trackeado de un build viejo → al próximo commit correr
+# `git rm -r --cached dist` para des-trackearlo.)
+/dist
+
+# Databricks Asset Bundle: artefactos de deploy (bundle.tf.json, estado); se
+# regeneran con `databricks bundle validate/deploy`, NO se commitean.
+/.databricks
+
+# production
+/build
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+# (VITE_API_URL de producción ya NO vive en un .env: llega como env del app
+# desde databricks.yml → variable `backend_api_url`.)
+!.env.example
+
+# local data storage
+/data/
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts

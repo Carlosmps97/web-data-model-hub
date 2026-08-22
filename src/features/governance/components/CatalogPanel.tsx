@@ -1,0 +1,140 @@
+import { useEffect, useState } from 'react';
+import Icon from '@/components/ui/Icon';
+import * as gov from '../services/governance.service';
+import type { CanonicalTable, CanonicalColumn, ParentDomain } from '../services/governance.service';
+
+// Página server-side: el backend matchea por nombre y devuelve las primeras 50
+// — el catálogo a 15k tablas no se baja completo para filtrar en el cliente.
+const PAGE = 50;
+
+export default function CatalogPanel({ pushToast, canEdit }: { pushToast: (m: string, k?: 'err') => void; canEdit: boolean }) {
+  const [tables, setTables] = useState<CanonicalTable[]>([]);
+  const [domains, setDomains] = useState<ParentDomain[]>([]);
+  const [openTable, setOpenTable] = useState(false);
+  const [tForm, setTForm] = useState({ logicalName: '', schema: '' });
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [columns, setColumns] = useState<CanonicalColumn[]>([]);
+  const [cForm, setCForm] = useState({ logicalName: '', parentDomainId: '', dataType: '', isPrimaryKey: false });
+  const [q, setQ] = useState('');
+  const [reloadKey, setReloadKey] = useState(0); // fuerza re-búsqueda tras crear tabla
+
+  useEffect(() => {
+    gov.listDomains().then(setDomains).catch(() => pushToast("Couldn't load the domains", 'err'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Búsqueda server-side con debounce (300ms: el regex-scan server-side es caro
+  // sobre colecciones grandes — no disparar por tecla); `alive` descarta respuestas fuera de orden.
+  useEffect(() => {
+    let alive = true;
+    const h = setTimeout(() => {
+      gov.searchTables(q.trim(), PAGE)
+        .then((t) => { if (alive) setTables(t); })
+        .catch(() => pushToast("Couldn't load the catalog", 'err'));
+    }, q ? 300 : 0);
+    return () => { alive = false; clearTimeout(h); };
+  }, [q, reloadKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const visible = tables;
+
+  const saveTable = async () => {
+    if (!tForm.logicalName.trim()) { pushToast('The logical name is required', 'err'); return; }
+    try {
+      const id = crypto.randomUUID();
+      const physical = (await gov.physicalize(tForm.logicalName.trim())).physical;
+      await gov.createTable({ id, logicalName: tForm.logicalName.trim(), physicalName: physical, schema: tForm.schema.trim() || undefined });
+      setOpenTable(false); setTForm({ logicalName: '', schema: '' }); setReloadKey((k) => k + 1); pushToast('Canonical table created (in draft)');
+    } catch { pushToast("Couldn't create the table", 'err'); }
+  };
+  const toggle = async (t: CanonicalTable) => {
+    if (expanded === t.id) { setExpanded(null); return; }
+    setExpanded(t.id);
+    try { setColumns(await gov.listColumns(t.id)); } catch { pushToast("Couldn't load the columns", 'err'); }
+  };
+  const addColumn = async (tableId: string) => {
+    if (!cForm.logicalName.trim()) { pushToast('The logical name is required', 'err'); return; }
+    try {
+      const id = crypto.randomUUID();
+      const physical = (await gov.physicalize(cForm.logicalName.trim())).physical;
+      const dom = domains.find((d) => d.id === cForm.parentDomainId);
+      const override = cForm.dataType.trim();
+      const dataType = override || dom?.defaultDataType || '';
+      await gov.createColumn({
+        id, tableId, logicalName: cForm.logicalName.trim(), physicalName: physical,
+        parentDomainId: cForm.parentDomainId || undefined, dataType, typeOverridden: !!override,
+        isPrimaryKey: cForm.isPrimaryKey || undefined, ordinal: columns.length,
+      });
+      setCForm({ logicalName: '', parentDomainId: '', dataType: '', isPrimaryKey: false });
+      setColumns(await gov.listColumns(tableId)); pushToast('Columna agregada (en draft)');
+    } catch { pushToast("Couldn't add the column", 'err'); }
+  };
+
+  return (
+    <div className="rd-card mc-panel">
+      <div className="mc-cardhead">
+        <span className="mc-cardlbl"><Icon name="grid" size={13} />Canonical tables</span>
+        <span className="mc-pill">{tables.length >= PAGE ? `${PAGE}+` : tables.length}</span>
+        {canEdit && <button className="rd-btn rd-btn-secondary rd-btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setOpenTable(!openTable)}><Icon name="plus" size={13} sw={2.6} />Nueva tabla</button>}
+      </div>
+      {canEdit && openTable && (
+        <div className="rd-card" style={{ padding: 10, margin: '8px 0', display: 'grid', gap: 6 }}>
+          <input className="rd-input" placeholder="Logical name (e.g. deuda cliente)" value={tForm.logicalName} onChange={(e) => setTForm({ ...tForm, logicalName: e.target.value })} />
+          <input className="rd-input" placeholder="Schema (opcional, ej. riesgos)" value={tForm.schema} onChange={(e) => setTForm({ ...tForm, schema: e.target.value })} />
+          <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+            <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setOpenTable(false)}>Cancelar</button>
+            <button className="rd-btn rd-btn-primary rd-btn-sm" onClick={saveTable}>Crear</button>
+          </div>
+        </div>
+      )}
+      {!canEdit && <div className="rd-small" style={{ padding: '4px 2px', color: 'var(--muted)' }}>Published view (read-only). Create or select a changeset to edit.</div>}
+      <input
+        className="rd-input"
+        placeholder="Search table (physical or logical)…"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        style={{ width: '100%', margin: '6px 0' }}
+      />
+      <div className="meta-list">
+        {visible.map((t) => (
+          <div key={t.id}>
+            <div className="meta-item" style={{ cursor: 'pointer' }} onClick={() => toggle(t)}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="meta-name"><span className="rd-mono">{t.physicalName}</span></div>
+                <div className="meta-sub">{t.logicalName}{t.schema ? ` · ${t.schema}` : ''}</div>
+              </div>
+              <Icon name="chevR" size={13} style={{ transform: expanded === t.id ? 'rotate(90deg)' : 'none' }} />
+            </div>
+            {expanded === t.id && (
+              <div style={{ padding: '4px 0 8px 12px', display: 'grid', gap: 4 }}>
+                {columns.map((c) => (
+                  <div key={c.id} className="rd-small" style={{ display: 'flex', gap: 8 }}>
+                    <span className="rd-mono" style={{ minWidth: 160 }}>{c.physicalName}</span>
+                    <span style={{ flex: 1, color: 'var(--muted)' }}>{c.logicalName}</span>
+                    <span className="rd-mono" style={{ color: c.typeOverridden ? 'var(--warning)' : 'var(--flow-700)' }}>{c.dataType}{c.typeOverridden ? ' *' : ''}</span>
+                  </div>
+                ))}
+                {canEdit && (
+                  <div style={{ display: 'grid', gap: 6, gridTemplateColumns: '1fr 1fr', marginTop: 6 }}>
+                    <input className="rd-input" placeholder="Logical column (e.g. monto deuda)" value={cForm.logicalName} onChange={(e) => setCForm({ ...cForm, logicalName: e.target.value })} />
+                    <select className="rd-input" value={cForm.parentDomainId} onChange={(e) => setCForm({ ...cForm, parentDomainId: e.target.value })}>
+                      <option value="">— Parent Domain —</option>
+                      {domains.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.defaultDataType})</option>)}
+                    </select>
+                    <input className="rd-input rd-mono" placeholder="Tipo override (opcional)" value={cForm.dataType} onChange={(e) => setCForm({ ...cForm, dataType: e.target.value })} />
+                    <label className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 4 }}><input type="checkbox" checked={cForm.isPrimaryKey} onChange={(e) => setCForm({ ...cForm, isPrimaryKey: e.target.checked })} /> PK</label>
+                    <button className="rd-btn rd-btn-secondary rd-btn-sm" style={{ gridColumn: '1 / -1' }} onClick={() => addColumn(t.id)}><Icon name="plus" size={12} sw={2.6} />Agregar columna</button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+        {tables.length >= PAGE && (
+          <div className="rd-small" style={{ padding: '8px 2px', color: 'var(--muted)' }}>
+            Mostrando las primeras {PAGE} coincidencias — refiná la búsqueda.
+          </div>
+        )}
+        {tables.length === 0 && <div className="rd-small" style={{ padding: '8px 2px' }}>No canonical tables. Create one (its physical name derives from the glossary).</div>}
+      </div>
+    </div>
+  );
+}

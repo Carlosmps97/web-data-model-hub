@@ -1,0 +1,30 @@
+# App spec de Databricks Apps — frontend (SPA Vite/React · server.mjs).
+#
+# NO BORRAR este archivo: Databricks lo lee en CADA arranque de la app (deploy,
+# stop/start desde la UI o reinicio del runtime) y es la única fuente del
+# `command` y las `env`. El bloque `config:` de databricks.yml no lo reemplaza:
+# el CLI lo ignora en silencio (bug databricks/cli #4901).
+#
+# Los `value` van vacíos a propósito: el workflow de deploy los llena con la
+# GitHub Variable HOMÓNIMA del environment elegido antes de subir el código
+# (si falta alguna, el deploy se corta). Los `valueFrom` referencian recursos
+# `secret` de databricks.yml y los resuelve la propia app al arrancar.
+#
+# `npm run start` compila (tsc + vite build → dist/) y levanta `node
+# server.mjs`, que sirve dist/ y proxya /api al backend servidor-a-servidor con
+# el token M2M del service principal del front: el navegador habla con un solo
+# origen (sin CORS y sin doble SSO).
+# No definir NODE_ENV=production (el build necesita devDependencies) ni
+# VITE_API_URL (reactivaría el cruce directo navegador→backend).
+command: ["npm", "run", "start"]
+
+env:
+  # URL de la app backend a la que server.mjs proxya /api — ej.
+  # https://bknd-data-model-hub-<workspace-id>.<n>.azure.databricksapps.com
+  - name: BACKEND_API_URL
+    value: ""
+
+  # Secreto compartido con el backend que autentica el relay de identidad SSO:
+  # sale del recurso `proxy_secret` (databricks.yml).
+  - name: PROXY_SHARED_SECRET
+    valueFrom: proxy_secret
