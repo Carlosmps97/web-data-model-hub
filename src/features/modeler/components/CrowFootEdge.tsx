@@ -58,10 +58,11 @@ function CrowFootEdge(props: EdgeProps) {
   });
 
   // Resaltado (dbdiagram): activa la relación bajo el mouse o las conectadas a la
-  // tabla bajo el mouse; atenúa el resto. Drift (doc 47) → ámbar.
+  // tabla bajo el mouse; atenúa el resto. Drift (doc 47) → ROJO: incongruencia
+  // de llave que el modelador debe corregir (owner 2026-08-23).
   const dimmed = anyHover && !active;
   const stroke = d.pending ? 'var(--primary)'
-    : d.drifted ? 'var(--warning)'
+    : d.drifted ? 'var(--red)'
     : active ? 'var(--primary)' : 'var(--ink-2)';
 
   return (

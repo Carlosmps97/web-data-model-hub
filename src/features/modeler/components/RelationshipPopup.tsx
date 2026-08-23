@@ -275,15 +275,23 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         <span className="rd-mono">{childTable?.physicalName ?? rel.childTableId}</span>
       </div>
 
-      {/* Drift (doc 47): la llave del padre cambió después de crear la relación. */}
+      {/* Drift (doc 47): la llave migrada no calza con la PK actual del padre.
+          Rojo (owner 2026-08-23) — es una incongruencia a corregir. Sin PK en
+          el padre no hay contra qué sincronizar: el Sync se oculta. */}
       {drift && canEdit && !syncing && (
         <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
-          background: 'var(--warning-soft)', border: '1px solid var(--warning)', borderRadius: 8, padding: '8px 12px' }}>
+          background: 'var(--red-tint)', border: '1px solid var(--red-border)', borderRadius: 8, padding: '8px 12px' }}>
           <span style={{ flex: 1 }}>
-            Parent key changed — this relationship is out of sync
-            ({drift.missing.length} missing / {drift.extra.length} stale pair{drift.extra.length === 1 ? '' : 's'}).
+            {parentPksNow.length > 0 ? (
+              <>Key drift — this relationship is out of sync with the parent key
+                ({drift.missing.length} missing / {drift.extra.length} stale pair{drift.extra.length === 1 ? '' : 's'}).</>
+            ) : (
+              <>Key drift — the parent table has NO primary key. Define the parent&apos;s key first, then sync.</>
+            )}
           </span>
-          <button type="button" className="rd-btn rd-btn-sm" disabled={locked} onClick={startSync}>Sync with parent key</button>
+          {parentPksNow.length > 0 && (
+            <button type="button" className="rd-btn rd-btn-sm" disabled={locked} onClick={startSync}>Sync with parent key</button>
+          )}
         </div>
       )}
 

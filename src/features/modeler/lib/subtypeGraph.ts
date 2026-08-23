@@ -13,8 +13,8 @@
 import type { Edge, Node } from '@xyflow/react';
 import type { Relationship } from '@/features/governance/services/governance.service';
 
-/** Diámetro del círculo del símbolo (px). */
-export const SYMBOL_SIZE = 26;
+/** Lado del rombo del símbolo (px). */
+export const SYMBOL_SIZE = 28;
 
 export interface SubtypeGroup {
   symbolId: string;

@@ -198,7 +198,9 @@ export function mappingToBulk(input: MappingBulkInput): {
 }
 
 /** Drift de una relación vs la llave EFECTIVA del padre: `missing` = PKs sin
- *  par; `extra` = pares cuya columna padre ya no es PK. null = en sync. Pura. */
+ *  par; `extra` = pares cuya columna padre ya no es PK. null = en sync. Pura.
+ *  Padre SIN PK ⇒ todos los pares son `extra` ⇒ drift: delata la llave
+ *  faltante al validar con los modeladores (owner 2026-08-23). */
 export function relationshipDrift(rel: Relationship, parentPkIds: string[]):
     { missing: string[]; extra: string[] } | null {
   const inPairs = new Set(rel.pairs.map((p) => p.parentColumnId));

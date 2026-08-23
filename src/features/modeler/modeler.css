@@ -51,6 +51,8 @@
 .wk-relwrap { display: flex; align-items: center; gap: 6px; }
 .wk-reldraw2 { display: flex; flex-direction: column; gap: 3px; }
 .wk-reldraw2 .wk-reldraw { width: 40px; height: 26px; }
+.wk-relsep { width: 1px; height: 40px; flex: none; align-self: center; background: var(--border-soft); margin: 0 2px; }
+.wk-subcatcol { justify-content: center; }
 .wk-relbuild { display: flex; flex-direction: column; gap: 3px; }
 .wk-relrow { display: flex; align-items: center; gap: 2px; }
 .wk-rellbl { width: 46px; flex: none; font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted-3); text-align: right; padding-right: 5px; }

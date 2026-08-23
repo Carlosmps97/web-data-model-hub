@@ -100,7 +100,7 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
                 </span>
                 {drifted && (
                   <span title="Key out of sync with the supertype — remove and re-add this subtype to repair"
-                    style={{ color: 'var(--warning)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                    style={{ color: 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                     <AlertTriangle size={13} aria-hidden /> key drift
                   </span>
                 )}

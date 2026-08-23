@@ -59,17 +59,17 @@ export function RelLineIcon({ dashed = false, size = 17 }: { dashed?: boolean; s
   );
 }
 
-/** Ícono de la herramienta SUBCATEGORÍA (doc 53): el símbolo de Erwin — línea
- *  del supertipo, círculo con subrayado (incompleta) y patas a los subtipos. */
+/** Ícono de la herramienta SUBCATEGORÍA (doc 53): línea del supertipo, ROMBO
+ *  con barra discriminadora (rediseño 2026-08-23) y patas a los subtipos. */
 export function SubcatIcon({ size = 17 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 18 18" fill="none" stroke="currentColor"
-      strokeWidth={1.5} strokeLinecap="round" aria-hidden>
-      <line x1="9" y1="1.5" x2="9" y2="4" />
-      <circle cx="9" cy="8" r="4" />
-      <line x1="5.8" y1="10" x2="12.2" y2="10" />
-      <line x1="9" y1="12" x2="3.5" y2="16.5" />
-      <line x1="9" y1="12" x2="14.5" y2="16.5" />
+      strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="9" y1="1.2" x2="9" y2="3.2" />
+      <path d="M9 3.2 L14.2 8.4 L9 13.6 L3.8 8.4 Z" />
+      <line x1="6.4" y1="8.4" x2="11.6" y2="8.4" />
+      <line x1="9" y1="13.6" x2="3.6" y2="17" />
+      <line x1="9" y1="13.6" x2="14.4" y2="17" />
     </svg>
   );
 }

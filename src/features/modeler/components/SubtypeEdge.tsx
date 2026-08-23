@@ -7,15 +7,19 @@ import { SYMBOL_SIZE } from '../lib/subtypeGraph';
 // resuelve CSS vars fuera del documento (mismo criterio que DerivationEdge).
 const INK = '#3A4658';       // --ink-2
 const PRIMARY = '#2E5BFF';   // --primary
-const WARNING = '#9A6B00';   // --warning
+const DANGER = '#C0392B';    // --red
+const CANVAS = '#FBFCFD';    // --canvas-bg — carve central del trazo doble
 
 /**
- * Arista de SUBCATEGORÍA (doc 53): línea SÓLIDA SIN crow's-foot (la semántica
- * ES-UN no tiene cardinalidades que dibujar). Dos variantes con el mismo tipo:
- * tronco supertipo→símbolo (`data.trunk`) y símbolo→subtipo (id = rel.id).
- * Igual que CrowFootEdge, el lado de salida/entrada se recalcula por posición
- * de los nodos; la Y de anclaje en tablas usa la del handle real y en el
- * símbolo su centro. Drift (llave fuera de sync) → ámbar; pending = fantasma.
+ * Arista de SUBCATEGORÍA (doc 53): TRAZO DOBLE sólido sin crow's-foot — el
+ * rasgo distintivo frente a identifying (sólida simple), non-identifying
+ * (punteada) y derivación de vistas (oblicua ploma). El doble se dibuja con
+ * un trazo ancho del color de la arista más un carve central del color del
+ * canvas. Dos variantes con el mismo tipo: tronco supertipo→símbolo
+ * (`data.trunk`) y símbolo→subtipo (id = rel.id). El lado de salida/entrada
+ * se recalcula por posición de los nodos; la Y de anclaje en tablas usa la
+ * del handle real y en el símbolo su centro. Drift (llave fuera de sync) →
+ * rojo; pending = fantasma punteado simple.
  */
 function SubtypeEdge(props: EdgeProps) {
   const { id, source, target, sourceY, targetY, data } = props;
@@ -55,21 +59,30 @@ function SubtypeEdge(props: EdgeProps) {
   });
 
   const dimmed = anyHover && !active;
-  const stroke = d.pending ? PRIMARY
-    : d.drifted ? WARNING
-    : active ? PRIMARY : INK;
+  const color = d.pending ? PRIMARY : d.drifted ? DANGER : active ? PRIMARY : INK;
+  const opacity = d.pending ? 0.5 : dimmed ? 0.22 : 1;
+  const fx = { transition: 'opacity .12s, stroke .12s, stroke-width .12s' };
 
+  if (d.pending) {
+    return (
+      <BaseEdge
+        path={path}
+        style={{ stroke: color, strokeWidth: 1.6, strokeDasharray: '6 5', opacity, ...fx }}
+      />
+    );
+  }
   return (
-    <BaseEdge
-      path={path}
-      style={{
-        stroke,
-        strokeWidth: active ? 2.4 : 1.5,
-        strokeDasharray: d.pending ? '6 5' : undefined,   // ES-UN: línea sólida
-        opacity: d.pending ? 0.5 : dimmed ? 0.22 : 1,
-        transition: 'opacity .12s, stroke .12s, stroke-width .12s',
-      }}
-    />
+    <>
+      <BaseEdge
+        path={path}
+        style={{ stroke: color, strokeWidth: active ? 5.4 : 4.4, opacity, ...fx }}
+      />
+      <BaseEdge
+        path={path}
+        style={{ stroke: CANVAS, strokeWidth: active ? 2.4 : 1.8, opacity,
+                 pointerEvents: 'none' as const, ...fx }}
+      />
+    </>
   );
 }
 

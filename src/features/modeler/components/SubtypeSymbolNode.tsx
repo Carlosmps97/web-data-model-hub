@@ -6,11 +6,11 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { SYMBOL_SIZE } from '../lib/subtypeGraph';
 
 /**
- * Símbolo de SUBCATEGORÍA (doc 53): el círculo intermedio del grupo
- * supertipo→subtipos (notación Erwin; subrayado simple = incompleta, lo que
- * produce el equipo). Es un nodo DERIVADO de las relaciones del grupo — no se
- * persiste como entidad; su posición vive en layout[symbolId]. Con la
- * herramienta Subcategory armada, el círculo entero inicia el drag hacia un
+ * Símbolo de SUBCATEGORÍA (doc 53): el nodo intermedio del grupo
+ * supertipo→subtipos — ROMBO con barra discriminadora (rediseño 2026-08-23
+ * sobre la notación Erwin). Es un nodo DERIVADO de las relaciones del grupo —
+ * no se persiste como entidad; su posición vive en layout[symbolId]. Con la
+ * herramienta Subcategory armada, el símbolo entero inicia el drag hacia un
  * subtipo nuevo (flujo Erwin "click en el símbolo"). Doble click → popup de
  * gestión del grupo (lo maneja ModelerCanvas).
  *
@@ -35,9 +35,10 @@ function SubtypeSymbolNode({ id }: NodeProps) {
         ? 'Drag from this symbol onto a table to add another subtype'
         : 'Subcategory — double-click to manage its subtypes'}
     >
-      <svg viewBox="0 0 26 26" width={SYMBOL_SIZE} height={SYMBOL_SIZE} aria-hidden>
-        <circle cx="13" cy="13" r="10.5" fill="#FBFCFD" stroke={stroke} strokeWidth="1.7" />
-        <line x1="5.5" y1="17" x2="20.5" y2="17" stroke={stroke} strokeWidth="1.7" />
+      <svg viewBox="0 0 28 28" width={SYMBOL_SIZE} height={SYMBOL_SIZE} aria-hidden>
+        <path d="M14 2.4 L25.6 14 L14 25.6 L2.4 14 Z" fill="#FBFCFD" stroke={stroke}
+          strokeWidth="1.8" strokeLinejoin="round" />
+        <line x1="8.8" y1="14" x2="19.2" y2="14" stroke={stroke} strokeWidth="1.8" />
       </svg>
       <Handle type="target" position={Position.Top} id="__sym_tgt" isConnectable={false} className="wk-sym-handle" />
       <Handle type="source" position={Position.Bottom} id="__sym_src" isConnectable={connectable}

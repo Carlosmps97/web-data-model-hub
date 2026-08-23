@@ -318,6 +318,11 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
                 <RelLineIcon dashed />
               </button>
             </Tooltip>
+          </div>
+          {/* Subcategoría aparte: es supertipo/subtipo (doc 53), no un tercer
+              estilo de línea identifying/non-identifying */}
+          <span className="wk-relsep" />
+          <div className="wk-reldraw2 wk-subcatcol">
             <Tooltip label={readonly ? VIEWER_TIP
               : viewMode !== 'logical' ? 'Subcategory — available in the Logical view only'
               : subcatArmed ? 'Exit subcategory mode'
