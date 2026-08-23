@@ -254,7 +254,8 @@
 .wk-exp-row > svg { flex-shrink: 0; color: var(--text-muted-3); }            /* chevron */
 .wk-exp-row.strong { color: var(--ink); font-weight: 700; }
 .wk-exp-row:hover { background: var(--fill-4); }                              /* #F0F2F6 */
-.wk-exp-row.active { background: var(--blue-tint); color: var(--primary-700); font-weight: 600; }  /* #EAF0FF */
+.wk-exp-row.active { background: var(--blue-tint); color: var(--primary-700); font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--primary); }  /* #EAF0FF + barra-guía del canvas abierto */
 .wk-exp-row.active .wk-exp-ico { color: var(--primary); }
 .wk-exp-ico { flex-shrink: 0; display: inline-flex; align-items: center; color: var(--muted); }
 .wk-exp-row[data-kind="project"] .wk-exp-ico { color: var(--navy); }

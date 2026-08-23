@@ -84,6 +84,41 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   // El proyecto del canvas abierto queda expandido (aditivo: no colapsa otros).
   useEffect(() => { if (activeProjectId) ensureProjectOpen(activeProjectId); }, [activeProjectId, ensureProjectOpen]);
 
+  // Revela el canvas ABIERTO (owner 2026-08-23): expande su cadena de carpetas
+  // — con la capa de origen (doc 54 §9) puede estar 2 niveles adentro — y lo
+  // trae a la vista. Solo reacciona al cambio de canvas/árbol: colapsar a mano
+  // después sigue libre (expandedF no es dependencia).
+  const revealedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeSaId || !activeProjectId) return;
+    const tree = trees[activeProjectId];
+    if (!tree) return;
+    const sa = tree.subjectAreas.find((s) => s.id === activeSaId);
+    if (!sa) return;
+    const byId = new Map(tree.folders.map((f) => [f.id, f]));
+    const path: string[] = [];
+    let fid = sa.folderId ?? null;
+    while (fid && byId.has(fid) && !path.includes(fid)) {
+      path.push(fid);
+      fid = byId.get(fid)!.parentFolderId ?? null;
+    }
+    if (path.length) {
+      setExpandedF((s) => {
+        if (path.every((id) => s.has(id))) return s;
+        const n = new Set(s);
+        path.forEach((id) => n.add(id));
+        return n;
+      });
+    }
+    if (revealedRef.current !== activeSaId) {
+      revealedRef.current = activeSaId;
+      requestAnimationFrame(() => {
+        document.querySelector(`.wk-exp-row[data-kind="canvas"][data-id="${activeSaId}"]`)
+          ?.scrollIntoView({ block: 'nearest' });
+      });
+    }
+  }, [activeSaId, activeProjectId, trees]);
+
   // Cerrar el menú contextual al clicar fuera o con Escape.
   useEffect(() => {
     if (!menu) return;
@@ -168,7 +203,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     }
     const opening = openingSaId === sa.id;
     return (
-      <Row key={sa.id} depth={depth} active={sa.id === activeSaId} kind="canvas"
+      <Row key={sa.id} depth={depth} active={sa.id === activeSaId} kind="canvas" dataId={sa.id}
         icon={opening ? <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden /> : <LayoutGrid size={14} />}
         label={sa.name}
         onClick={() => {
@@ -311,11 +346,11 @@ function nameOf(
 
 // ── Fila de árbol genérica ───────────────────────────────────────────────
 function Row({
-  depth, active, strong, kind, chevron, icon, label, onClick, onMenu,
+  depth, active, strong, kind, chevron, icon, label, onClick, onMenu, dataId,
 }: {
   depth: number; active?: boolean; strong?: boolean; kind: NodeKind;
   chevron?: React.ReactNode; icon: React.ReactNode; label: string;
-  onClick: () => void; onMenu?: (e: React.MouseEvent) => void;
+  onClick: () => void; onMenu?: (e: React.MouseEvent) => void; dataId?: string;
 }) {
   return (
     <div
@@ -323,6 +358,7 @@ function Row({
       style={{ paddingLeft: PAD_BASE + depth * INDENT }}
       onClick={onClick}
       data-kind={kind}
+      data-id={dataId}
     >
       {chevron ?? <span style={{ width: 13 }} />}
       <span className="wk-exp-ico">{icon}</span>
