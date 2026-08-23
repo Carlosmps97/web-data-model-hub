@@ -5,7 +5,7 @@ import {
   FileCode2, ImageDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
-import { EndIcon, RelLineIcon } from './RelIcon';
+import { EndIcon, RelLineIcon, SubcatIcon } from './RelIcon';
 import type { Cardinality } from '@/features/governance/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useUndoStore } from '@/store/useUndoStore';
@@ -81,6 +81,11 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const diagram = useModelerStore((s) => s.diagram);
   const relPreset = useModelerStore((s) => s.relPreset);
   const setRelPreset = useModelerStore((s) => s.setRelPreset);
+  // Doc 53: la herramienta Subcategory SOLO vive en modelo lógico — en físico
+  // el botón se deshabilita y el store la desarma al cambiar de modo.
+  const viewMode = useModelerStore((s) => s.viewMode);
+  const subcatArmed = useModelerStore((s) => s.subcatArmed);
+  const setSubcatArmed = useModelerStore((s) => s.setSubcatArmed);
   const autoOrganize = useModelerStore((s) => s.autoOrganize);
   const createTable = useModelerStore((s) => s.createTable);
   const focusTable = useModelerStore((s) => s.focusTable);
@@ -313,6 +318,19 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
                 <RelLineIcon dashed />
               </button>
             </Tooltip>
+            <Tooltip label={readonly ? VIEWER_TIP
+              : viewMode !== 'logical' ? 'Subcategory — available in the Logical view only'
+              : subcatArmed ? 'Exit subcategory mode'
+              : "Subcategory (supertype/subtype): drag from the SUPERTYPE header onto the subtype table — the supertype's key becomes the subtype's key. Logical model only"}>
+              <button
+                type="button"
+                className={`wk-reldraw${subcatArmed ? ' on' : ''}`}
+                disabled={!canEdit || viewMode !== 'logical'}
+                onClick={() => setSubcatArmed(!subcatArmed)}
+              >
+                <SubcatIcon />
+              </button>
+            </Tooltip>
           </div>
         </div>
         <span className="wk-grp-cap">Relationships</span>
@@ -394,6 +412,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       <ExportDdlModal open={ddlOpen} diagram={diagram} modelName={diagram?.subjectArea.name ?? 'model'} onClose={() => setDdlOpen(false)} />
 
       {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT table header (blue ring) onto a child column or the child header — the parent's whole primary key is migrated. <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setRelPreset(null)}>exit</button></div>}
+      {subcatArmed && <div className="wk-relhint">Draw the subcategory: drag from the SUPERTYPE table header (blue ring) — or from an existing subcategory symbol — onto the subtype table. The supertype's key becomes the subtype's key (is-a, 1:1). <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setSubcatArmed(false)}>exit</button></div>}
     </div>
   );
 }

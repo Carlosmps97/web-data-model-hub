@@ -124,6 +124,9 @@ export interface MappingBulkInput {
   rows: MappingResolution[];
   /** Columnas ACTUALES del hijo (ordinal / nextPkPosition). */
   childCols: CanonicalColumn[];
+  /** Doc 53: presencia = la relación es una SUBCATEGORÍA del símbolo dado
+   *  (el caller pasa identifying=true y cardinalidades one/one). */
+  subcategory?: { symbolId: string };
 }
 
 /**
@@ -188,6 +191,7 @@ export function mappingToBulk(input: MappingBulkInput): {
     id: input.relId, parentTableId: input.parentTableId, childTableId: input.childTableId,
     pairs, parentCardinality: input.parentCardinality, childCardinality: input.childCardinality,
     identifying,
+    ...(input.subcategory ? { subcategory: true, subtypeSymbolId: input.subcategory.symbolId } : {}),
   };
   changes.push(bulk.upsertRelationship(relationship));
   return { changes, createdCols, relationship };

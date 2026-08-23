@@ -9,23 +9,28 @@ import { useSessionStore } from '@/store/useSessionStore';
 import TableNode from './TableNode';
 import ShapeNode from './ShapeNode';
 import ViewNode from './ViewNode';
+import SubtypeSymbolNode from './SubtypeSymbolNode';
 import CrowFootEdge from './CrowFootEdge';
 import DerivationEdge from './DerivationEdge';
+import SubtypeEdge from './SubtypeEdge';
 import CrowFootMarkers from './CrowFootMarkers';
 import RelationshipPopup from './RelationshipPopup';
 import RelationshipCreatePopup, { type RelDraft } from './RelationshipCreatePopup';
+import SubcategoryCreatePopup, { type SubcatDraft } from './SubcategoryCreatePopup';
+import SubcategoryPopup from './SubcategoryPopup';
 import ColumnContextMenu, { copiedMessage, copiedTableMessage } from './ColumnContextMenu';
 import { useUndoStore } from '@/store/useUndoStore';
 import PasteColumnsPopup from './PasteColumnsPopup';
 import ViewEditor from './ViewEditor';
 import { buildViewGraph } from '../lib/viewGraph';
+import { buildSubtypeGraph, childSubtypeMembership, isSubcategory, subtypeGroups } from '../lib/subtypeGraph';
 import { nextLod } from '../lib/lodSize';
 import { pkInKeyOrder } from '../lib/keyOrder';
 import { relationshipDrift } from '../lib/relationshipPairs';
-import { fanSlots } from '../lib/edgeFanout';
+import { fanSlots, HEADER_H, ROW_H } from '../lib/edgeFanout';
 
-const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode };
-const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge };
+const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode, subcat: SubtypeSymbolNode };
+const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge, subcat: SubtypeEdge };
 
 export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const diagram = useModelerStore((s) => s.diagram);
@@ -56,6 +61,13 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // Borrador de relación en confirmación (doc 47): drop hecho, popup abierto,
   // NADA persistido — el edge fantasma `ghostId` vive mientras se decide.
   const [relDraft, setRelDraft] = useState<RelDraft | null>(null);
+  // Doc 53: borrador de SUBCATEGORÍA en confirmación (mismo patrón fantasma) y
+  // símbolo cuyo popup de gestión está abierto (doble click).
+  const [subcatDraft, setSubcatDraft] = useState<SubcatDraft | null>(null);
+  const [subcatManage, setSubcatManage] = useState<string | null>(null);
+  // Doc 53: las subcategorías existen SOLO en el modelo lógico — en físico ni
+  // el símbolo ni sus aristas se construyen (el efecto de abajo depende de esto).
+  const viewMode = useModelerStore((s) => s.viewMode);
   // Vista en edición desde el lápiz del ViewNode (F3). El editor vive acá y no
   // en el PropertiesPanel: el click en un nodo view NO abre el panel.
   const [editViewId, setEditViewId] = useState<string | null>(null);
@@ -103,8 +115,11 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     const tablePos = new Map(tableNodes.map((n) => [n.id, n.position]));
     const views = buildViewGraph(diagram.views ?? [], diagram.tables, diagram.columns, layout, tablePos, onEditView);
     const viewNodes = views.nodes.map((n) => ({ ...n, data: { ...n.data, lod: lodNow } }));
-    // Preserva los nodos de shapes ya presentes (los repuebla el efecto de drawings).
-    setNodes((prev) => [...prev.filter((n) => n.type === 'shape'), ...tableNodes, ...viewNodes]);
+    // Doc 53: las SUBCATEGORÍAS van por su propio subgrafo (símbolo + aristas
+    // sólidas sin crow's-foot) y SOLO en modelo lógico; el resto de relaciones
+    // sigue el camino crowfoot de siempre.
+    const stdRels = diagram.relationships.filter((r) => !isSubcategory(r));
+    const subRels = viewMode === 'logical' ? diagram.relationships.filter(isSubcategory) : [];
     // Fan-out (doc 47): slot/count por relación agrupando por PADRE, orden por
     // posición del hijo (menos cruces). Drift: pares vs llave efectiva del padre.
     const pkIdsByTable = new Map<string, Set<string>>();
@@ -113,7 +128,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       const s = pkIdsByTable.get(c.tableId);
       if (s) s.add(c.id); else pkIdsByTable.set(c.tableId, new Set([c.id]));
     });
-    const slots = fanSlots(diagram.relationships.map((r) => {
+    const sub = buildSubtypeGraph(
+      subRels, layout, tablePos,
+      (tid) => ({ w: 230, h: HEADER_H + Math.max(1, colsByTable.get(tid)?.length ?? 1) * ROW_H }),
+      (r) => relationshipDrift(r, [...(pkIdsByTable.get(r.parentTableId) ?? new Set<string>())]) != null,
+    );
+    // Preserva los nodos de shapes ya presentes (los repuebla el efecto de drawings).
+    setNodes((prev) => [...prev.filter((n) => n.type === 'shape'), ...tableNodes, ...viewNodes, ...sub.nodes]);
+    const slots = fanSlots(stdRels.map((r) => {
       const tp = tablePos.get(r.childTableId) ?? { x: 0, y: 0 };
       return { id: r.id, parentId: r.parentTableId, targetY: tp.y, targetX: tp.x };
     }));
@@ -121,7 +143,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       // v2 (doc 19) + doc 47: el edge SIEMPRE va padre → hijo; SALE de la
       // cabecera del padre (fan-out en la zona de llave) y ENTRA por la
       // columna del PRIMER par (orden de llave). Los pares viven en el popup.
-      ...diagram.relationships.map((r) => {
+      ...stdRels.map((r) => {
         const fan = slots.get(r.id);
         const pkIds = pkIdsByTable.get(r.parentTableId) ?? new Set<string>();
         return {
@@ -138,8 +160,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         };
       }),
       ...views.edges,
+      ...sub.edges,
     ]);
-  }, [diagram, setNodes, setEdges, onEditView]);
+  }, [diagram, viewMode, setNodes, setEdges, onEditView]);
 
   // LOD (doc 33): al cruzar el umbral de zoom se parchea SOLO data.lod de los
   // nodos (posiciones y edges intactos — los handles fantasma del modo
@@ -147,8 +170,10 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // wires existen en ambos modos y el cambio es atómico en un commit).
   const lod = useModelerStore((s) => s.lod);
   useEffect(() => {
+    // Los shapes y el símbolo de subcategoría (doc 53) quedan FUERA del LOD:
+    // son chicos y de tamaño fijo — no tienen filas que colapsar.
     setNodes((prev) => prev.map((n) =>
-      n.type === 'shape' || (n.data as { lod?: boolean }).lod === lod
+      n.type === 'shape' || n.type === 'subcat' || (n.data as { lod?: boolean }).lod === lod
         ? n
         : { ...n, data: { ...n.data, lod } }));
   }, [lod, setNodes]);
@@ -294,11 +319,65 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     // El changeset activo viene del Open model (modo `editing`) vía el bridge
     // session → changeset. Si falta, es read-only o una sesión inconsistente.
     if (!activeChangeset) { pushToast('Open the model in edit mode to create relationships', 'err'); return; }
+    if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return;
+    // ── Doc 53: herramienta SUBCATEGORÍA armada — flujo propio ──────────────
+    if (useModelerStore.getState().subcatArmed) {
+      const st = useModelerStore.getState();
+      const dia = st.diagram;
+      if (!dia) return;
+      const start = connectStart.current;
+      const startedAtSource = !start || (conn.source === start.nodeId && conn.sourceHandle === start.handleId);
+      const startId = startedAtSource ? conn.source : conn.target;
+      const startHandle = startedAtSource ? conn.sourceHandle : conn.targetHandle;
+      const childId = startedAtSource ? conn.target : conn.source;
+      const endHandle = startedAtSource ? conn.targetHandle : conn.sourceHandle;
+      // Drag desde el SÍMBOLO (flujo Erwin "click en el círculo"): agrega otro
+      // subtipo al grupo existente; desde la cabecera, supertipo = esa tabla.
+      const fromSymbol = startHandle === '__sym_src';
+      const symbolId = fromSymbol ? startId : null;
+      const group = symbolId ? subtypeGroups(dia.relationships).find((g) => g.symbolId === symbolId) : null;
+      if (fromSymbol && !group) return;
+      const parentId = fromSymbol ? group!.parentTableId : startId;
+      if (!dia.tables.some((t) => t.id === childId)) {
+        pushToast('A subtype must be a table on this canvas', 'err');
+        return;
+      }
+      if (parentId === childId) {
+        pushToast('A table cannot be a subtype of itself', 'err');
+        return;
+      }
+      const parentTable = dia.tables.find((t) => t.id === parentId);
+      // Guard D1 (doc 47): sin llave en el supertipo no hay nada que heredar.
+      if (!pkInKeyOrder(dia.columns.filter((c) => c.tableId === parentId)).length) {
+        pushToast(`"${parentTable?.physicalName ?? parentId}" has no primary key — define the supertype's key first`, 'err');
+        return;
+      }
+      // Regla Erwin: un subtipo pertenece a UN solo grupo (chequeo local; el
+      // popup repite el chequeo GLOBAL draft-aware antes de habilitar Confirm).
+      if (childSubtypeMembership(dia.relationships, childId)) {
+        const c = dia.tables.find((t) => t.id === childId);
+        pushToast(`"${c?.physicalName ?? childId}" is already a subtype in another subcategory group`, 'err');
+        return;
+      }
+      const dropColumnId = endHandle === '__hdr_src' || endHandle === '__sym_tgt'
+        ? null : endHandle.replace(/__src$|__tgt$/, '');
+      const ghostId = `pending-${crypto.randomUUID()}`;
+      setEdges((eds) => [...eds, {
+        id: ghostId,
+        source: fromSymbol ? (symbolId as string) : parentId,
+        target: childId,
+        sourceHandle: fromSymbol ? '__sym_src' : '__hdr_src',
+        targetHandle: dropColumnId ? `${dropColumnId}__tgt` : '__hdr_src',
+        type: 'subcat',
+        data: { pending: true },
+      }]);
+      setSubcatDraft({ parentTableId: parentId, childTableId: childId, dropColumnId, symbolId, ghostId });
+      return;
+    }
     // Guard defensivo: sin la herramienta "Dibujar relación" armada, los handles
     // no son conectables (TableNode) — si algo llega igual, no crear nada.
     const preset = useModelerStore.getState().relPreset;
     if (!preset) { pushToast('Arm "Draw relationship" in the toolbar to create relationships', 'err'); return; }
-    if (!conn.source || !conn.target || !conn.sourceHandle || !conn.targetHandle) return;
     // Doc 47: el gesto SIEMPRE nace en la CABECERA del padre (las columnas ya
     // no inician conexiones); si React Flow normalizó al revés, se reorienta.
     const start = connectStart.current;
@@ -372,13 +451,24 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           // Nodo VISTA: click = selección visual solamente (selected nativo de
           // React Flow) — NUNCA abre el PropertiesPanel (spec §3-5, pedido 5).
           // También cierra el panel si estaba abierto sobre una tabla.
-          if (node.type === 'view') { setSelectedTable(null); return; }
+          // Ídem el símbolo de subcategoría (doc 53): su gestión es doble click.
+          if (node.type === 'view' || node.type === 'subcat') { setSelectedTable(null); return; }
           if (node.type !== 'shape') setSelectedTable(node.id);
+        }}
+        onNodeDoubleClick={(_e, node) => {
+          if (node.type === 'subcat') setSubcatManage(node.id);
         }}
         onEdgeClick={(_e, edge) => setSelectedEdge(edge.id)}
         // El popup de relación es SOLO para wires crowfoot (una derivación no
-        // tiene cardinalidades que editar).
-        onEdgeDoubleClick={(_e, edge) => { if (edge.type === 'crowfoot') setEditRelId(edge.id); }}
+        // tiene cardinalidades que editar); las aristas de subcategoría abren
+        // el popup de gestión de su grupo (doc 53).
+        onEdgeDoubleClick={(_e, edge) => {
+          if (edge.type === 'crowfoot') setEditRelId(edge.id);
+          else if (edge.type === 'subcat') {
+            const sid = (edge.data as { symbolId?: string } | undefined)?.symbolId;
+            if (sid) setSubcatManage(sid);
+          }
+        }}
         onPaneClick={() => {
           setSelectedTable(null); setSelectedEdge(null);
           const st = useModelerStore.getState();
@@ -454,6 +544,19 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           }}
           pushToast={pushToast}
         />
+      )}
+      {subcatDraft && (
+        <SubcategoryCreatePopup
+          draft={subcatDraft}
+          onClose={(created) => {
+            if (!created) setEdges((eds) => eds.filter((e) => e.id !== subcatDraft.ghostId));
+            setSubcatDraft(null);
+          }}
+          pushToast={pushToast}
+        />
+      )}
+      {subcatManage && (
+        <SubcategoryPopup symbolId={subcatManage} onClose={() => setSubcatManage(null)} pushToast={pushToast} />
       )}
       {editView && <ViewEditor view={editView} onClose={() => setEditViewId(null)} onSaved={() => void reload()} pushToast={pushToast} />}
       <ColumnContextMenu pushToast={pushToast} />

@@ -27,9 +27,10 @@ function TableNode({ data }: NodeProps) {
   // conectables ni affordances de edición.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
-  // Los handles sólo conectan con la herramienta "Dibujar relación" armada
-  // (relPreset != null) — sin armar, el drag desde una columna no crea wires.
-  const relArmed = useModelerStore((s) => s.relPreset != null);
+  // Los handles sólo conectan con una herramienta de dibujo armada — relación
+  // (relPreset, doc 47) o subcategoría (doc 53); sin armar, el drag desde una
+  // columna no crea wires.
+  const relArmed = useModelerStore((s) => s.relPreset != null || s.subcatArmed);
   const connectable = canEdit && relArmed;
   const setColumnTarget = useModelerStore((s) => s.setColumnTarget);
   const viewMode = useModelerStore((s) => s.viewMode);

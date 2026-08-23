@@ -79,6 +79,12 @@ interface ModelerState {
   viewMode: 'logical' | 'physical';
   relPreset: { parent: gov.Cardinality; child: gov.Cardinality; identifying: boolean } | null;
   setRelPreset: (p: ModelerState['relPreset']) => void;
+  /** Herramienta SUBCATEGORÍA armada (doc 53): drag desde la cabecera del
+   *  supertipo (o desde un símbolo existente) hacia el subtipo. Exclusión
+   *  mutua con `relPreset`; SOLO tiene sentido en modelo lógico — pasar a
+   *  físico la desarma (setViewMode). */
+  subcatArmed: boolean;
+  setSubcatArmed: (on: boolean) => void;
   hoverEdgeId: string | null;
   hoverNodeId: string | null;
   setHoverEdge: (id: string | null) => void;
@@ -276,7 +282,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   selectedEdgeId: null,
   viewMode: 'physical',
   relPreset: null,
-  setRelPreset: (p) => set({ relPreset: p }),
+  // Armar una herramienta desarma la otra (un solo gesto de dibujo a la vez).
+  setRelPreset: (p) => set(p ? { relPreset: p, subcatArmed: false } : { relPreset: p }),
+  subcatArmed: false,
+  setSubcatArmed: (on) => set(on ? { subcatArmed: true, relPreset: null } : { subcatArmed: false }),
   hoverEdgeId: null,
   hoverNodeId: null,
   setHoverEdge: (id) => set({ hoverEdgeId: id }),
@@ -698,8 +707,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (!saId || !rf) return;
     const layout: Record<string, { x: number; y: number }> = {};
     // Tablas Y vistas (F3: la posición de una vista vive en layout[viewId],
-    // misma estructura); los shapes NO — sus posiciones viven en `drawings`.
-    for (const n of rf.getNodes()) if (n.type === 'table' || n.type === 'view') layout[n.id] = { x: n.position.x, y: n.position.y };
+    // misma estructura) Y símbolos de subcategoría (doc 53: layout[symbolId]);
+    // los shapes NO — sus posiciones viven en `drawings`.
+    for (const n of rf.getNodes()) if (n.type === 'table' || n.type === 'view' || n.type === 'subcat') layout[n.id] = { x: n.position.x, y: n.position.y };
     await struct.setSubjectAreaLayout(saId, layout); // MERGEA en backend (M3a)
   },
   autoOrganize: async () => {
@@ -725,6 +735,18 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         .map((tid) => ({ id: `deriv__${v.id}__${tid}`, source: tid, target: v.id }))),
     ] as never;
     const pos = await elkLayout(nodes, edges);
+    // Doc 53: los símbolos de subcategoría NO van a ELK — tras el arrange se
+    // re-derivan al punto medio de sus nuevas posiciones (el merge M3a dejaría
+    // pegada la posición vieja del símbolo, huérfana del layout nuevo).
+    const { subtypeGroups, symbolDefaultPos, SYMBOL_SIZE } = await import('@/features/modeler/lib/subtypeGraph');
+    for (const g of subtypeGroups(dia.relationships)) {
+      const p = pos[g.parentTableId];
+      if (!p) continue;
+      const m = measured.get(g.parentTableId);
+      const kids = g.rels.map((r) => pos[r.childTableId]).filter((c): c is { x: number; y: number } => !!c);
+      pos[g.symbolId] = symbolDefaultPos(
+        { x: p.x, y: p.y, w: m?.width ?? 230, h: m?.height ?? SYMBOL_SIZE * 4 }, kids);
+    }
     await struct.setSubjectAreaLayout(saId, pos);   // setSubjectAreaLayout MERGEA (M3a)
     await get().reload();
   },
@@ -1145,7 +1167,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     await get().reload();
   },
-  setViewMode: (m: 'logical' | 'physical') => set({ viewMode: m }),
+  // Doc 53: la subcategoría es exclusiva del modelo lógico — pasar a físico
+  // desarma la herramienta (el botón del toolbar también se deshabilita).
+  setViewMode: (m: 'logical' | 'physical') =>
+    set(m === 'physical' ? { viewMode: m, subcatArmed: false } : { viewMode: m }),
   createProject: async (name: string) => {
     const p = await struct.createProject(name);
     set({ projects: [...get().projects, p] });

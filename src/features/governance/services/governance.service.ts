@@ -156,6 +156,12 @@ export interface Relationship {
   id: string; parentTableId: string; childTableId: string;
   pairs: RelationshipPair[];
   parentCardinality: Cardinality; childCardinality: Cardinality; identifying: boolean;
+  /** Doc 53: relación de SUBCATEGORÍA (supertipo→subtipo, "ES-UN"). El backend
+   *  normaliza: subcategory ⇒ identifying=true y cardinalidades one/one. */
+  subcategory?: boolean;
+  /** Doc 53: aristas del mismo grupo comparten símbolo (círculo DERIVADO en el
+   *  canvas — no es una entidad persistida; su posición vive en layout[id]). */
+  subtypeSymbolId?: string | null;
 }
 /** Con `tableId`, sólo las relaciones que tocan esa tabla (slice server-side
  *  en ambos modos) — el pool global de relaciones no se baja entero. */
