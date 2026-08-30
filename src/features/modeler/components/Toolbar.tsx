@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, ImageDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
+  FileCode2, FileSpreadsheet, ImageDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
 import { EndIcon, RelLineIcon, SubcatIcon } from './RelIcon';
@@ -12,6 +12,8 @@ import { useUndoStore } from '@/store/useUndoStore';
 import { UNDO_KEY_LABEL } from './ColumnContextMenu';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
+import { useChangesetStore } from '@/store/useChangesetStore';
+import { UploadModal } from '@/features/upload';
 import NewTableModal from './NewTableModal';
 import CtasModal from './CtasModal';
 import SchemaManagerModal from './SchemaManagerModal';
@@ -96,6 +98,10 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const openMode = useSessionStore((s) => s.openMode);
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
   const readonly = openMode === 'readonly';
+  // Doc 55: la carga masiva escribe en el draft activo — no exige canvas
+  // abierto (crea proyectos/canvases), sí sesión de edición con changeset.
+  const activeCsId = useChangesetStore((s) => s.activeId);
+  const canUpload = openMode === 'editing' && !!activeCsId;
 
   // Undo (doc 50): el tooltip muestra QUÉ se va a deshacer; el botón se apaga
   // sin pila, con una inversa en vuelo o en solo-lectura.
@@ -108,7 +114,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       .catch((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't undo", 'err'));
   };
 
-  const [modal, setModal] = useState<'table' | 'ctas' | 'view' | 'schema' | null>(null);
+  const [modal, setModal] = useState<'table' | 'ctas' | 'view' | 'schema' | 'upload' | null>(null);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
   const [modelPropsOpen, setModelPropsOpen] = useState(false);
@@ -229,6 +235,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           {ic('CTAS — create from existing', <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit, lockTip: true })}
           {ic('Create view', <Eye size={17} />, () => setModal('view'), { disabled: !canEdit, lockTip: true })}
           {ic('Schemas — create & manage', <FolderCog size={17} />, () => setModal('schema'), { disabled: !canEdit, lockTip: true })}
+          {ic('Upload from Excel — create or update tables, columns and structure in bulk', <FileSpreadsheet size={17} />, () => setModal('upload'), { disabled: !canUpload, lockTip: true })}
         </div>
         <span className="wk-grp-cap">Structure</span>
       </div>
@@ -402,6 +409,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}
       {modal === 'view' && <ViewEditor onClose={() => setModal(null)} onSaved={() => void reload()} pushToast={pushToast} />}
       {modal === 'schema' && <SchemaManagerModal onClose={() => setModal(null)} pushToast={pushToast} />}
+      {modal === 'upload' && <UploadModal onClose={() => setModal(null)} pushToast={pushToast} />}
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
 

@@ -716,37 +716,16 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const dia = get().diagram; const saId = get().activeSaId;
     if (!dia || !saId) return;
     get().markDirty();
-    const { elkLayout } = await import('@/features/modeler/lib/elkLayout');
-    const { viewSourceIds } = await import('@/features/modeler/lib/viewGraph');
-    // Tamaños MEDIDOS de los nodos vivos: ELK con tamaño fijo superponía las
-    // tablas altas (30 columnas ≈ 700px).
+    // Grafo + ELK + símbolos de subcategoría en `arrangeGraph.ts` (doc 55:
+    // lo comparte el arrange headless de la carga masiva). Tamaños MEDIDOS de
+    // los nodos vivos: ELK con tamaño fijo superponía las tablas altas (30
+    // columnas ≈ 700px); un nodo sin medir cae a la estimación LOD.
+    const { arrangeDiagram } = await import('@/features/modeler/lib/arrangeGraph');
     const measured = new Map((get().flow?.getNodes() ?? []).map((n) => [n.id, n.measured]));
-    // F3: las vistas visibles se auto-organizan como nodos normales; sus
-    // derivaciones entran como edges para que ELK las ubique junto a sus fuentes.
-    const tableIds = new Set(dia.tables.map((t) => t.id));
-    const views = (dia.views ?? []).filter((v) => viewSourceIds(v).some((id) => tableIds.has(id)));
-    const nodes = [
-      ...dia.tables.map((t) => ({ id: t.id, position: { x: 0, y: 0 }, data: {}, measured: measured.get(t.id) })),
-      ...views.map((v) => ({ id: v.id, position: { x: 0, y: 0 }, data: {}, measured: measured.get(v.id) })),
-    ] as never;
-    const edges = [
-      ...dia.relationships.map((r) => ({ id: r.id, source: r.parentTableId, target: r.childTableId })),
-      ...views.flatMap((v) => viewSourceIds(v).filter((id) => tableIds.has(id))
-        .map((tid) => ({ id: `deriv__${v.id}__${tid}`, source: tid, target: v.id }))),
-    ] as never;
-    const pos = await elkLayout(nodes, edges);
-    // Doc 53: los símbolos de subcategoría NO van a ELK — tras el arrange se
-    // re-derivan al punto medio de sus nuevas posiciones (el merge M3a dejaría
-    // pegada la posición vieja del símbolo, huérfana del layout nuevo).
-    const { subtypeGroups, symbolDefaultPos, SYMBOL_SIZE } = await import('@/features/modeler/lib/subtypeGraph');
-    for (const g of subtypeGroups(dia.relationships)) {
-      const p = pos[g.parentTableId];
-      if (!p) continue;
-      const m = measured.get(g.parentTableId);
-      const kids = g.rels.map((r) => pos[r.childTableId]).filter((c): c is { x: number; y: number } => !!c);
-      pos[g.symbolId] = symbolDefaultPos(
-        { x: p.x, y: p.y, w: m?.width ?? 230, h: m?.height ?? SYMBOL_SIZE * 4 }, kids);
-    }
+    const pos = await arrangeDiagram(dia, (id) => {
+      const m = measured.get(id);
+      return m?.width != null && m?.height != null ? { width: m.width, height: m.height } : undefined;
+    }, get().viewMode);
     await struct.setSubjectAreaLayout(saId, pos);   // setSubjectAreaLayout MERGEA (M3a)
     await get().reload();
   },

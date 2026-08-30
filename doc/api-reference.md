@@ -691,6 +691,20 @@ El Database Explorer es **draft-aware** (doc 25): con versión activa muestra el
 
 La búsqueda por COLUMNA (doc 29, pedido de los modelers) devuelve cada hit con su `esquema.tabla` resuelto: en producción el join lo hace el backend (`GET /api/catalog/columns`, `q` mínimo 1 carácter, `limit` 1–500 default 50); en draft el service resuelve las tablas con una segunda llamada `/effective/canonical_tables?ids=` y descarta columnas cuya tabla no existe en el estado efectivo.
 
+#### 3.3.6. Carga masiva desde Excel (`features/upload/upload.service.ts`, doc 55)
+
+El popup «Upload from Excel» del toolbar parsea el `.xlsx` en el navegador (`lib/parseWorkbook.ts`, SheetJS) y manda el JSON por hoja al backend, que valida y aplica dentro del draft como **job asíncrono**; el front hace polling hasta un estado terminal.
+
+| Función | Método | Ruta | Body | Respuesta |
+|---|---|---|---|---|
+| `startUpload(csId, body)` | POST | `/api/changesets/{cs}/uploads` | `{ fileName, sheets: { tables?, columns? } }` (`Sheet = { headers, rows: [{ row, cells }] }`) | `UploadJob` (202, `validating`) |
+| `getUploadJob(csId, jobId)` | GET | `/api/changesets/{cs}/uploads/{job}` | — | `UploadJob` (`status`, `progress`, `report`, `result`, `error`); 404 = expiró |
+| `pollUploadJob(csId, jobId, { onTick, intervalMs, signal })` | GET (cada 800 ms) | ídem | — | `UploadJob` terminal (`validated` / `applied` / `failed`) |
+| `applyUpload(csId, jobId)` | POST | `/api/changesets/{cs}/uploads/{job}/apply` | — | `UploadJob` (202, `applying`); 409 sin validar / con errores / otro apply en curso |
+| `discardUpload(csId, jobId)` | DELETE | `/api/changesets/{cs}/uploads/{job}` | — | `{ deleted }`; 409 mientras aplica |
+
+`UploadJob.report` trae `summary` (create/update/unchanged por proyectos, carpetas, canvases, esquemas, tablas y columnas), `tables[]` (desglose por fila de `Tablas`), `errors[]`/`warnings[]` (`{ severity, sheet, row, column, code, message }`, hasta 500 por severidad) y los totales. Con `errorCount > 0` el botón Upload queda deshabilitado. `result.affectedCanvasIds` (solo `applied`) alimenta `arrangeCanvases.ts`, que corre ELK sobre esos canvases y persiste el layout con `structure.setSubjectAreaLayout`. La plantilla se descarga de `public/templates/dmh-upload-template.xlsx` (estático, sin API).
+
 ### 3.4. Reporting (Screen 11)
 
 El reporting tiene dos capas: (a) la grilla tabular "clásica" (`reporting.service`) y (b) el motor de consulta configurable + insights (`query.service`).
@@ -974,6 +988,11 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Changesets | POST | `/api/changesets/snapshot` | model.edit | versioning.service |
 | Changesets | GET | `/api/changesets/{id}` | sesión | changeset / versioning |
 | Changesets | PUT | `/api/changesets/{id}/changes` | model.edit | changeset.service (vía governance/structure/schemas/views) |
+| Changesets | PUT | `/api/changesets/{id}/changes/bulk` | model.edit | changeset.service (`recordChangesBulk`, doc 39) |
+| Upload | POST | `/api/changesets/{id}/uploads` | model.edit + owner del draft | upload.service (`startUpload`, doc 55) |
+| Upload | GET | `/api/changesets/{id}/uploads/{job}` | model.edit + owner | upload.service (`getUploadJob` / `pollUploadJob`) |
+| Upload | POST | `/api/changesets/{id}/uploads/{job}/apply` | model.edit + owner | upload.service (`applyUpload`) |
+| Upload | DELETE | `/api/changesets/{id}/uploads/{job}` | model.edit + owner | upload.service (`discardUpload`) |
 | Changesets | GET | `/api/changesets/{id}/effective/{collection}` | sesión | changeset.service (ídem) |
 | Changesets | GET | `/api/changesets/{id}/diff` | sesión | versioning.service |
 | Changesets | POST | `/api/changesets/{id}/diff/details` | sesión | versioning.service |

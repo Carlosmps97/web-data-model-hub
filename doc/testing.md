@@ -46,7 +46,7 @@ test: {
 
 ### 1.3 Qué se testea hoy
 
-La suite al 2026-07-31: **166 tests en 24 archivos**, todos verdes (verificable con `npx vitest run`). Los 24 archivos son 23 `*.test.ts` bajo `src/` más `server.test.mjs` en la raíz del repo:
+La suite al 2026-08-28: **344 tests en 51 archivos**, todos verdes (verificable con `npx vitest run`); los últimos 17 son los de la carga masiva desde Excel (doc 55: `features/upload/lib/parseWorkbook.test.ts`, `features/upload/upload.service.test.ts`, `features/upload/arrangeCanvases.test.ts` y `features/modeler/lib/arrangeGraph.test.ts`). La foto de 2026-07-31 que sigue (**166 tests en 24 archivos**: 23 `*.test.ts` bajo `src/` más `server.test.mjs` en la raíz del repo) se conserva como inventario de referencia:
 
 | Área | Archivos de test |
 |---|---|
@@ -150,7 +150,7 @@ flowchart TD
     A --> D[npm run build]
     B --> B1[eslint . - recommended + ts + react-hooks + guard de barrels]
     C --> C1[vitest run - entorno node]
-    C1 --> C2[166 tests en 24 archivos - 23 en src + server.test.mjs]
+    C1 --> C2[344 tests en 51 archivos - 50 en src + server.test.mjs]
     D --> D1[tsc --noEmit - tipos estrictos]
     D1 --> D2[vite build - bundle a dist/]
     D1 -->|error de tipos| X[Build abortado]
