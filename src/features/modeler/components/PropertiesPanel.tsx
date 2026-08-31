@@ -109,7 +109,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // (hooks ANTES del early-return de abajo — el orden de hooks es fijo)
   const keyPks = useMemo(() => pkInKeyOrder(cols), [cols]);
   const [keyBusy, setKeyBusy] = useState(false);
-  // Buscador de columnas (doc 42): empieza-por CI sobre lógico/físico. Con
+  // Buscador de columnas (doc 42): contiene CI sobre lógico/físico. Con
   // filtro activo el drag&drop se desactiva (ver comentario en el render).
   const [colQuery, setColQuery] = useState('');
   const colFiltering = colQuery.trim() !== '';
@@ -496,7 +496,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
               </div>
             )}
             {cols.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No columns yet.{canEdit ? ' Use “Add column”.' : ''}</div>}
-            {/* Buscador de columnas (doc 42): empieza-por CI sobre lógico o
+            {/* Buscador de columnas (doc 42): contiene CI sobre lógico o
                 físico. Con filtro activo el drag&drop SE DESACTIVA — el drop
                 se resuelve contra la lista completa y reordenar viendo un
                 subconjunto corrompería el orden físico. */}
@@ -505,7 +505,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 <Icon name="search" size={12} className="wk-pp-colfind-ico" />
                 <input
                   className="rd-input"
-                  placeholder="Find a column (starts with…)"
+                  placeholder="Find a column (contains…)"
                   value={colQuery}
                   onChange={(e) => setColQuery(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setColQuery(''); } }}

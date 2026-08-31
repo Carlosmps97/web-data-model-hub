@@ -1,26 +1,30 @@
-// Lógica pura del selector de tipos (doc 41): búsqueda "empieza por" sin
-// distinción de mayúsculas, catálogo alfabético en MAYÚSCULAS (convención del
-// DDV) y tipos parametrizados — DECIMAL(p,s), VARCHAR(n), … — editados por
-// argumentos puntuales en vez de texto libre (pedido de los modeladores:
-// el texto libre era fuente de errores).
+// Lógica pura del selector de tipos (doc 41): búsqueda "contiene" sin
+// distinción de mayúsculas (pedido 2026-08-30 — reemplaza al "empieza por"
+// original), catálogo alfabético en MAYÚSCULAS (convención del DDV) y tipos
+// parametrizados — DECIMAL(p,s), VARCHAR(n), … — editados por argumentos
+// puntuales en vez de texto libre (pedido de los modeladores: el texto libre
+// era fuente de errores).
 import { describe, it, expect } from 'vitest';
-import { TYPE_OPTIONS, argSpecFor, composeParamType, parseParamType, startsWithCI } from './typePick';
+import { TYPE_OPTIONS, argSpecFor, composeParamType, parseParamType, containsCI } from './typePick';
 
-describe('startsWithCI (búsqueda empieza-por, case-insensitive)', () => {
-  it('matchea por prefijo sin importar mayúsculas', () => {
-    expect(startsWithCI('DECIMAL', 'dec')).toBe(true);
-    expect(startsWithCI('decimal', 'DEC')).toBe(true);
-    expect(startsWithCI('Fecha Contable', 'fech')).toBe(true);
+describe('containsCI (búsqueda contiene, case-insensitive)', () => {
+  it('matchea por substring sin importar mayúsculas ni posición', () => {
+    expect(containsCI('DECIMAL', 'dec')).toBe(true);
+    expect(containsCI('decimal', 'DEC')).toBe(true);
+    expect(containsCI('TIMESTAMPTZ', 'stamp')).toBe(true);
+    expect(containsCI('Monto Deuda', 'deuda')).toBe(true);
+    expect(containsCI('Fecha Contable', 'conta')).toBe(true);
   });
 
-  it('NO matchea por "contiene"', () => {
-    expect(startsWithCI('TIMESTAMPTZ', 'stamp')).toBe(false);
-    expect(startsWithCI('Monto Deuda', 'deuda')).toBe(false);
+  it('NO matchea lo que no aparece en el texto', () => {
+    expect(containsCI('TIMESTAMPTZ', 'fecha')).toBe(false);
+    expect(containsCI('Monto Deuda', 'usd')).toBe(false);
   });
 
   it('query vacía o con espacios alrededor', () => {
-    expect(startsWithCI('BIGINT', '')).toBe(true);
-    expect(startsWithCI('BIGINT', '  big')).toBe(true);
+    expect(containsCI('BIGINT', '')).toBe(true);
+    expect(containsCI('BIGINT', '  big')).toBe(true);
+    expect(containsCI('BIGINT', ' gin ')).toBe(true);
   });
 });
 

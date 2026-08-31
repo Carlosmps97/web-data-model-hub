@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, FileSpreadsheet, ImageDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
+  FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
 import { EndIcon, RelLineIcon, SubcatIcon } from './RelIcon';
@@ -21,7 +22,6 @@ import PublishModal from './PublishModal';
 import { ExportDdlModal } from '@/features/ddl';
 import ViewEditor from './ViewEditor';
 import ModelPropertiesModal from './ModelPropertiesModal';
-import { nextLod } from '../lib/lodSize';
 
 // Las 4 cardinalidades crow's-foot del preset por extremo (el popup de la
 // relación ofrece las 6, incluyendo 'many' pelado y 'one-only').
@@ -50,33 +50,6 @@ const SHAPES: { id: DrawingType; tip: string; icon: ReactNode }[] = [
 
 const VIEWER_TIP = 'Read-only — published version';
 
-/**
- * Inyecta los `<defs>` de los markers crow's-foot (cf-*) en el SVG exportado.
- * Esos markers viven en un `<svg>` aparte (CrowFootMarkers) que NO está dentro
- * del `.react-flow__viewport` capturado, así que sin esto el SVG referencia
- * `url(#cf-*)` sin definición y sólo se ven los wires, no la cardinalidad.
- * Además resuelve las CSS vars (var(--ink-2)/var(--surface)) a color literal,
- * porque en el SVG standalone no existen esas variables.
- */
-function injectCrowFootDefs(dataUrl: string): string {
-  try {
-    if (!dataUrl.startsWith('data:image/svg+xml')) return dataUrl;
-    const cfDefs = document.querySelector('marker[id^="cf-"]')?.closest('defs');
-    if (!cfDefs) return dataUrl;
-    const cs = getComputedStyle(document.documentElement);
-    const ink = cs.getPropertyValue('--ink-2').trim() || '#48526A';
-    const surface = cs.getPropertyValue('--surface').trim() || '#ffffff';
-    const defsHtml = cfDefs.outerHTML
-      .replace(/var\(--ink-2\)/g, ink)
-      .replace(/var\(--surface\)/g, surface);
-    const comma = dataUrl.indexOf(',');
-    let svg = decodeURIComponent(dataUrl.slice(comma + 1));
-    svg = svg.replace(/(<svg[^>]*>)/, `$1${defsHtml}`);
-    return dataUrl.slice(0, comma + 1) + encodeURIComponent(svg);
-  } catch {
-    return dataUrl; // ante cualquier problema, exportar el SVG sin markers
-  }
-}
 
 export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: string, k?: 'err') => void; onOpenModel?: () => void }) {
   const activeSaId = useModelerStore((s) => s.activeSaId);
@@ -118,6 +91,11 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
   const [modelPropsOpen, setModelPropsOpen] = useState(false);
+  // Doc 59: menú del botón ÚNICO de export (SVG / HTML / PDF). Portal fixed:
+  // el toolbar scrollea horizontal y un menú absoluto se recortaría (doc 52).
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportPos, setExportPos] = useState<{ left: number; top: number } | null>(null);
+  const exportBtnRef = useRef<HTMLSpanElement | null>(null);
   const [find, setFind] = useState('');
   const [findOpen, setFindOpen] = useState(false);
   const findRef = useRef<HTMLInputElement>(null);
@@ -181,41 +159,48 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     finally { setArranging(false); }
   };
 
-  // Export image: ajusta la vista a todo el modelo y captura el viewport a SVG.
-  // SVG (vectorial) en vez de PNG: se mantiene NÍTIDO a cualquier zoom y es
-  // navegable en el browser; además NO rasteriza un bitmap gigante, así que en
-  // canvases grandes no congela la pestaña como el PNG con pixelRatio 2.
-  const exportImage = async () => {
-    const rf = useModelerStore.getState().flow;
-    const el = document.querySelector('.react-flow__viewport') as HTMLElement | null;
-    if (!rf || !el) { pushToast('Nothing to export', 'err'); return; }
-    // LOD (doc 33): la captura va SIEMPRE con detalle completo — candado para
-    // que el fitView del export (zoom bajo) no re-active el modo compacto. En
-    // canvases gigantes tarda unos segundos: precio de la foto completa.
-    const st = useModelerStore.getState();
-    st.setLodLock(true);
-    st.setLod(false);
+  // Doc 59: export SIN captura de DOM. html-to-image clonaba ~450k elementos
+  // con getComputedStyle (minutos + RangeError en Analytics) y el data URL
+  // gigante producía descargas VACÍAS (límite ~2MB de Chrome). Ahora la
+  // escena se dibuja desde el MODELO (solo diagrama: columnas, relaciones,
+  // pintados) y todo baja por Blob; los módulos pesados cargan lazy.
+  const download = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.download = filename;
+    a.href = url;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  };
+
+  const exportDiagram = async (kind: 'svg' | 'html' | 'pdf') => {
+    setExportOpen(false);
     try {
-      // fitView devuelve promesa en React Flow 12: esperarla + doble rAF evita la
-      // carrera del sleep fijo (a 100 tablas el re-layout tardaba más de 250ms y
-      // la captura salía cortada). Con onlyRenderVisibleElements, el fitView además
-      // monta en el DOM todos los nodos para que entren en la captura.
-      await rf.fitView({ padding: 0.15, duration: 0 });
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-      const { toSvg } = await import('html-to-image');
-      const dataUrl = await toSvg(el, { backgroundColor: '#FBFCFD', cacheBust: true });
-      const a = document.createElement('a');
-      a.download = `${diagram?.subjectArea.name ?? 'canvas'}.svg`;
-      a.href = injectCrowFootDefs(dataUrl);
-      a.click();
-      pushToast('SVG image exported');
+      const st = useModelerStore.getState();
+      if (!st.diagram) { pushToast('Nothing to export', 'err'); return; }
+      const name = st.diagram.subjectArea.name || 'canvas';
+      const [{ buildDiagramScene }, { buildDiagramSvg }] = await Promise.all([
+        import('../lib/exportScene'), import('../lib/sceneSvg'),
+      ]);
+      const scene = buildDiagramScene({ diagram: st.diagram, drawings: st.drawings, viewMode: st.viewMode });
+      if (kind === 'pdf') {
+        const { buildDiagramPdf } = await import('../lib/scenePdf');
+        download(new Blob([buildDiagramPdf(scene)], { type: 'application/pdf' }), `${name}.pdf`);
+        pushToast('PDF exported');
+        return;
+      }
+      const { EXPORT_FONT_CSS } = await import('../lib/exportFonts');
+      const svg = buildDiagramSvg(scene, { fontCss: EXPORT_FONT_CSS });
+      if (kind === 'svg') {
+        download(new Blob([svg], { type: 'image/svg+xml' }), `${name}.svg`);
+        pushToast('SVG image exported');
+      } else {
+        const { buildInteractiveHtml } = await import('../lib/exportHtml');
+        download(new Blob([buildInteractiveHtml({ title: name, svgMarkup: svg })], { type: 'text/html' }), `${name}.html`);
+        pushToast('Interactive HTML exported');
+      }
     } catch {
-      pushToast("Couldn't export the image", 'err');
-    } finally {
-      const s2 = useModelerStore.getState();
-      s2.setLodLock(false);
-      // Re-evalúa contra el viewport FINAL (el export deja la vista en fit).
-      s2.setLod(nextLod(false, rf.getViewport().zoom));
+      pushToast("Couldn't export the diagram", 'err');
     }
   };
 
@@ -379,7 +364,13 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           )}
           {ic('Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !canEdit || arranging, lockTip: true })}
           {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas })}
-          {ic('Export image', <ImageDown size={17} />, exportImage, { disabled: !hasCanvas })}
+          <span ref={exportBtnRef} style={{ display: 'inline-flex' }}>
+            {ic('Export diagram — SVG · interactive HTML · PDF', <ImageDown size={17} />, () => {
+              const r = exportBtnRef.current?.getBoundingClientRect();
+              setExportPos(r ? { left: r.left, top: r.bottom + 6 } : null);
+              setExportOpen((v) => !v);
+            }, { disabled: !hasCanvas, on: exportOpen })}
+          </span>
           {ic('Model properties — model-level UDPs', <Tags size={17} />, () => setModelPropsOpen(true), { disabled: !canEdit, lockTip: true })}
         </div>
         <span className="wk-grp-cap">Actions</span>
@@ -422,6 +413,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         />
       )}
 
+      {exportOpen && exportPos && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 299 }} onClick={() => setExportOpen(false)} />
+          <div className="wk-ctxmenu" style={{ left: exportPos.left, top: exportPos.top }}>
+            <button onClick={() => void exportDiagram('svg')}><ImageDown size={14} /> SVG image (.svg)</button>
+            <button onClick={() => void exportDiagram('html')}><AppWindow size={14} /> Interactive HTML — deep zoom (.html)</button>
+            <button onClick={() => void exportDiagram('pdf')}><FileDown size={14} /> PDF document (.pdf)</button>
+          </div>
+        </>, document.body)}
       <ExportDdlModal open={ddlOpen} diagram={diagram} modelName={diagram?.subjectArea.name ?? 'model'} onClose={() => setDdlOpen(false)} />
 
       {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT table header (blue ring) onto a child column or the child header — the parent's whole primary key is migrated. <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setRelPreset(null)}>exit</button></div>}

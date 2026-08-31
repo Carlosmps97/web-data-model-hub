@@ -48,7 +48,7 @@ export function buildCandidates(sourceIds: string[], colsByTable: ReadonlyMap<st
   return out;
 }
 
-/** Buscador de candidatas: empieza-por CI sobre lógico O físico (doc 42). */
+/** Buscador de candidatas: contiene CI sobre lógico O físico (doc 42). */
 export function filterColumns(cands: CanonicalColumn[], q: string): CanonicalColumn[] {
   return q.trim() ? cands.filter((c) => matchesColumn(c, q)) : cands;
 }

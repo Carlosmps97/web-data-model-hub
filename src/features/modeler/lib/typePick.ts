@@ -1,14 +1,15 @@
 // Lógica pura del selector de tipos y dominios (doc 41). El combobox de
 // "Type override" dejó de ser texto libre (fuente de errores según los
 // modeladores): catálogo cerrado en MAYÚSCULAS (convención del DDV, y los
-// defaults de dominio se comparan por string exacto), búsqueda "empieza por"
+// defaults de dominio se comparan por string exacto), búsqueda "contiene"
 // case-insensitive, y tipos parametrizados editados por argumentos puntuales.
 import { COLUMN_DATA_TYPES } from '@/types/model';
 
-/** ¿`text` empieza con `query`? (case-insensitive; query vacía matchea todo).
- *  Deliberadamente "empieza por" y NO "contiene" (pedido de los modeladores). */
-export function startsWithCI(text: string, query: string): boolean {
-  return text.toLowerCase().startsWith(query.trim().toLowerCase());
+/** ¿`text` contiene `query`? (case-insensitive; query vacía matchea todo).
+ *  "Contiene" desde 2026-08-30 (pedido del owner) — reemplaza al "empieza
+ *  por" original del doc 41 en TODAS las listas buscables del módulo Model. */
+export function containsCI(text: string, query: string): boolean {
+  return text.toLowerCase().includes(query.trim().toLowerCase());
 }
 
 /** Catálogo del combobox: canónico en MAYÚSCULAS, orden alfabético. Incluye

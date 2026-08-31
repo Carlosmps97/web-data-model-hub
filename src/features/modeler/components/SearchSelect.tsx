@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '@/components/ui/Icon';
-import { startsWithCI } from '../lib/typePick';
+import { containsCI } from '../lib/typePick';
 
 export interface SearchOption { value: string; label: string; detail?: string }
 
@@ -22,7 +22,7 @@ interface MenuPos {
  * etiqueta + detalle a la derecha).
  *
  * Comportamiento: al abrir, la búsqueda arranca VACÍA y la lista muestra todo
- * (el valor actual queda como placeholder) — tipear filtra por "empieza por"
+ * (el valor actual queda como placeholder) — tipear filtra por "contiene"
  * case-insensitive y REEMPLAZA al elegir. Esto corrige el bloqueo del datalist
  * nativo: con un valor puesto ya no hace falta borrarlo para ver la lista.
  * Teclado: ↑/↓ navegan, Enter elige, Esc cierra sin cambiar.
@@ -58,7 +58,7 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const base: SearchOption[] = emptyLabel != null ? [{ value: '', label: emptyLabel }, ...options] : options;
-  const filtered = query.trim() === '' ? base : base.filter((o) => startsWithCI(o.label, query));
+  const filtered = query.trim() === '' ? base : base.filter((o) => containsCI(o.label, query));
 
   useEffect(() => {
     if (!open) return;

@@ -6,7 +6,7 @@ const COMPLEX = ['ARRAY', 'MAP', 'STRUCT'];
 
 /**
  * Selector de tipo de dato (doc 41): catálogo cerrado con buscador
- * "empieza por" en vez de texto libre (pedido de los modeladores: tipear el
+ * "contiene" en vez de texto libre (pedido de los modeladores: tipear el
  * tipo a mano era fuente de errores). Los tipos parametrizados —
  * DECIMAL(p,s), VARCHAR(n), … — se completan con argumentos puntuales, y
  * STRUCT/ARRAY/MAP viven EN la lista (elegirlos emite `X<>` y el caller abre

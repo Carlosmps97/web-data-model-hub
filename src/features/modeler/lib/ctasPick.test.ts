@@ -45,10 +45,12 @@ describe('filterColumns · buscador de candidatas', () => {
     expect(filterColumns(cands, '  ')).toEqual(cands);
   });
 
-  it('empieza-por CI sobre lógico o físico', () => {
+  it('contiene CI sobre lógico o físico', () => {
     expect(filterColumns(cands, 'fec').map((c) => c.id)).toEqual(['c2']);
     expect(filterColumns(cands, 'código').map((c) => c.id)).toEqual(['c1']);
-    expect(filterColumns(cands, 'ALTA')).toHaveLength(0);
+    expect(filterColumns(cands, 'ALTA').map((c) => c.id)).toEqual(['c2']);
+    expect(filterColumns(cands, 'cliente').map((c) => c.id)).toEqual(['c1']);
+    expect(filterColumns(cands, 'saldo')).toHaveLength(0);
   });
 });
 

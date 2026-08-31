@@ -94,7 +94,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Words (e.g. monto deuda dólares)' : 'Physical name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
       {mode === 'logical' && preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
       <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-        {/* Combobox con buscador (doc 41): empieza-por, lista acotada con
+        {/* Combobox con buscador (doc 41): contiene, lista acotada con
             scroll, nombre + tipo default a la derecha. */}
         <SearchSelect
           options={domainOptions(domains)}

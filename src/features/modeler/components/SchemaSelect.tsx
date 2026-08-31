@@ -6,7 +6,7 @@ import SearchSelect from './SearchSelect';
 /**
  * Combobox de esquemas (doc 18, reconstruido en doc 52 sobre SearchSelect):
  * mismo contrato externo que el `<select>` que reemplaza, ahora con buscador
- * embebido (empieza-por CI) y menú flotante por portal — consistente con los
+ * embebido (contiene CI) y menú flotante por portal — consistente con los
  * combos de dominio/tipo y con el filtro de esquemas de Import existing/CTAS.
  *
  * Opciones = esquemas EFECTIVOS de la versión activa (los creados en el draft

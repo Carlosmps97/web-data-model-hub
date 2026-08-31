@@ -1,6 +1,6 @@
 // Buscador de columnas de Properties · Columns (doc 42): mismo paradigma que
-// los combobox del doc 41 — "empieza por", sin distinción de mayúsculas —
-// matcheando por nombre LÓGICO o FÍSICO. Con el filtro activo el drag&drop se
+// los combobox del doc 41 — "contiene", sin distinción de mayúsculas (pedido
+// 2026-08-30) — matcheando por nombre LÓGICO o FÍSICO. Con el filtro activo el drag&drop se
 // desactiva (reordenar una lista parcial corrompería el orden físico).
 import { describe, it, expect } from 'vitest';
 import { matchesColumn } from './columnSearch';
@@ -8,18 +8,21 @@ import { matchesColumn } from './columnSearch';
 const col = (logical: string, physical: string) => ({ logicalName: logical, physicalName: physical });
 
 describe('matchesColumn', () => {
-  it('matchea por el inicio del nombre lógico O del físico (case-insensitive)', () => {
+  it('matchea por substring del nombre lógico O del físico (case-insensitive)', () => {
     const c = col('monto deuda dólares', 'MTO_DEU_USD');
     expect(matchesColumn(c, 'monto')).toBe(true);
     expect(matchesColumn(c, 'MON')).toBe(true);
     expect(matchesColumn(c, 'mto_')).toBe(true);
     expect(matchesColumn(c, 'MTO_DEU')).toBe(true);
+    expect(matchesColumn(c, 'deuda')).toBe(true);
+    expect(matchesColumn(c, 'USD')).toBe(true);
+    expect(matchesColumn(c, 'deu_usd')).toBe(true);
   });
 
-  it('NO matchea por "contiene" (paradigma empieza-por del doc 41)', () => {
+  it('NO matchea lo que no aparece en ninguno de los dos nombres', () => {
     const c = col('monto deuda dólares', 'MTO_DEU_USD');
-    expect(matchesColumn(c, 'deuda')).toBe(false);
-    expect(matchesColumn(c, 'USD')).toBe(false);
+    expect(matchesColumn(c, 'saldo')).toBe(false);
+    expect(matchesColumn(c, 'FEC')).toBe(false);
   });
 
   it('query vacía o de espacios matchea todo (lista completa)', () => {
