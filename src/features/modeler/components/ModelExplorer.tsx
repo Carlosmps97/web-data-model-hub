@@ -166,7 +166,8 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   }, [menu]);
 
   const openMenu = (kind: NodeKind, id: string, projectId: string, e: React.MouseEvent) => {
-    if (readonly) return; // visor: sin menú contextual (rename/delete/create)
+    // Doc 66 r2: el menú TAMBIÉN abre en readonly (ContextMenu decide qué
+    // mostrar ahí: solo «Export HTML»). El guard viejo dejaba el click muerto.
     e.preventDefault(); e.stopPropagation();
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setMenu({ kind, id, projectId, x: r.right, y: r.bottom + 2 });
