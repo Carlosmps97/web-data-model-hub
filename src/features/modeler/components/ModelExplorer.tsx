@@ -14,9 +14,10 @@ import type { CancelFlag, ExportOutcome, ExportProgress } from '../exportPackage
 /* ──────────────────────────────────────────────────────────────────────────
    Model Explorer — árbol jerárquico Projects → Folders (anidadas) → Canvas.
    Cada nodo muestra al hover un botón "3 puntos" que abre un menú contextual:
-     · project: New folder · New canvas · Rename · Delete
-     · folder:  New folder · New canvas · Rename · Delete
-     · canvas:  Rename · Delete
+     · project: New folder · New canvas · Export HTML · Rename · Delete
+     · folder:  New folder · New canvas · Export HTML · Rename · Delete
+     · canvas:  Export HTML · Rename · Delete
+   En readonly el menú muestra SOLO Export HTML (exportar no muta — doc 66 r2).
    Crear/renombrar = input inline. Borrar = ConfirmDialog. Carpetas con chevron.
 
    Navegación tipo file-tree: expandir/colapsar proyectos y carpetas es SÓLO
@@ -53,7 +54,8 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   const deleteCanvas = useModelerStore((s) => s.deleteCanvas);
   // En modo visor el explorer es SOLO navegación: su CRUD (projects/folders/
   // canvases) son escrituras REST directas no versionadas que no pasan por el
-  // choke-point del changeset — se ocultan las affordances de mutación.
+  // choke-point del changeset — se ocultan las affordances de MUTACIÓN. El
+  // menú de 3 puntos sí se abre: queda únicamente «Export HTML» (doc 66 r2).
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
 
   const [expandedF, setExpandedF] = useState<Set<string>>(new Set()); // ids de folders EXPANDIDAS (default: TODAS colapsadas — pedido owner)
@@ -245,7 +247,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
           if (sa.id === activeSaId || openingSaId) return;
           selectSubjectArea(sa.id, projectId).catch(() => pushToast("Couldn't open the canvas", 'err'));
         }}
-        onMenu={readonly ? undefined : (e) => openMenu('canvas', sa.id, projectId, e)} />
+        onMenu={(e) => openMenu('canvas', sa.id, projectId, e)} />
     );
   };
 
@@ -262,7 +264,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
           <Row depth={depth} kind="folder"
             chevron={childCount > 0 ? (open ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span style={{ width: 13 }} />}
             icon={open ? <FolderOpen size={14} /> : <FolderIcon size={14} />} label={folder.name}
-            onClick={() => toggle(folder.id)} onMenu={readonly ? undefined : (e) => openMenu('folder', folder.id, projectId, e)} />
+            onClick={() => toggle(folder.id)} onMenu={(e) => openMenu('folder', folder.id, projectId, e)} />
         )}
         {open && (
           <>
@@ -294,7 +296,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
             chevron={open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
             icon={<Database size={14} />} label={p.name}
             onClick={() => toggleProject(p.id)}
-            onMenu={readonly ? undefined : (e) => openMenu('project', p.id, p.id, e)} />
+            onMenu={(e) => openMenu('project', p.id, p.id, e)} />
         )}
         {open && loadingTree && !cached && (
           <div className="wk-exp-empty" style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: PAD_BASE + INDENT + 13 }}>
@@ -335,7 +337,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
         <div className="wk-exp-empty" style={{ padding: 8 }}>No projects. Create one with +.</div>}
 
       {menu && (
-        <ContextMenu menu={menu}
+        <ContextMenu menu={menu} readonly={readonly}
           onNewFolder={() => startCreate('folder', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
           onNewCanvas={() => startCreate('canvas', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
           onExport={() => { void startExport(menu.kind, menu.id, menu.projectId); }}
@@ -446,13 +448,16 @@ function InlineInput({
 
 // ── Menú contextual (popover anclado a la fila) ──────────────────────────
 function ContextMenu({
-  menu, onNewFolder, onNewCanvas, onExport, onRename, onDelete,
+  menu, readonly, onNewFolder, onNewCanvas, onExport, onRename, onDelete,
 }: {
-  menu: MenuState;
+  menu: MenuState; readonly: boolean;
   onNewFolder: () => void; onNewCanvas: () => void; onExport: () => void;
   onRename: () => void; onDelete: () => void;
 }) {
-  const showCreate = menu.kind === 'project' || menu.kind === 'folder';
+  // Readonly (doc 66 r2): exportar NO muta — el menú aparece igual, pero solo
+  // con «Export HTML»; crear/renombrar/borrar siguen ocultos en modo visor.
+  const showMutations = !readonly;
+  const showCreate = showMutations && (menu.kind === 'project' || menu.kind === 'folder');
   // Mantener el menú dentro del viewport horizontalmente.
   const left = Math.min(menu.x, window.innerWidth - 200);
   return (
@@ -467,9 +472,9 @@ function ContextMenu({
       {showCreate && <div className="rd-menu-sep" />}
       {/* Doc 66: export HTML del nodo (proyecto/folder → ZIP; canvas → .html). */}
       <button className="rd-menu-item" onClick={onExport}><FileDown size={15} /> Export HTML</button>
-      <div className="rd-menu-sep" />
-      <button className="rd-menu-item" onClick={onRename}><Pencil size={15} /> Rename</button>
-      <button className="rd-menu-item danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>
+      {showMutations && <div className="rd-menu-sep" />}
+      {showMutations && <button className="rd-menu-item" onClick={onRename}><Pencil size={15} /> Rename</button>}
+      {showMutations && <button className="rd-menu-item danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
     </div>
   );
 }
