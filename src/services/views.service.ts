@@ -64,7 +64,19 @@ export interface View {
   expression?: string;
   sql?: string;
   description?: string;
+  /** Doc 61: script SQL custom — NO vacío ⇒ la vista es "Personalizada" (el
+   *  cuerpo del CREATE VIEW ES este script); ausente ⇒ "Regular" (DDL generado
+   *  de sources/filter/joinOverride). Distinto de `sql` (preview congelado). */
+  customSql?: string;
+  /** Doc 61: columnas de salida DERIVADAS del parse del customSql — las
+   *  re-deriva el backend al escribir; pintan el bloque del canvas. */
+  customColumns?: ViewCustomColumn[];
+  /** Doc 61: valores UDP de la vista ({defId: value}) — keys de level='view'. */
+  udpValues?: Record<string, string>;
 }
+
+/** Una columna de salida de una vista Personalizada (doc 61). */
+export interface ViewCustomColumn { name: string; expression?: string; }
 
 /** Body de creación/actualización (sin `id`, lo asigna/usa el backend). */
 export interface ViewInput {
@@ -81,6 +93,9 @@ export interface ViewInput {
   expression?: string;
   sql?: string;
   description?: string;
+  customSql?: string;
+  customColumns?: ViewCustomColumn[];
+  udpValues?: Record<string, string>;
 }
 
 /** Normaliza el doc para el changeset (espejo de la normalización del apply):
@@ -124,6 +139,31 @@ export function updateView(id: string, body: ViewInput): Promise<View> {
   if (!a) return apiPut<View>(`${VIEWS}/${encodeURIComponent(id)}`, body);
   const doc = { ...normalizeInput(body), id } as View;
   return csvc.recordChange(a, 'views', id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
+}
+
+/** Resultado del parse/validación del SQL custom (doc 61). */
+export interface ViewSqlParse { columns: ViewCustomColumn[]; tables: string[]; }
+/** Error estructurado del sandbox (el backend manda {message, line, col}). */
+export interface ViewSqlError { message: string; line: number; col: number; }
+
+/** Valida e interpreta el SQL custom SIN guardar (sandbox de Query SQL).
+ *  Stateless: siempre REST directo (no participa del changeset). El 422 del
+ *  backend llega como Error cuyo `message` es el JSON del detail — usar
+ *  `parseSqlError` para extraer {message, line, col}. */
+export function parseViewSql(sql: string): Promise<ViewSqlParse> {
+  return apiPost<ViewSqlParse>(`${VIEWS}/sql/parse`, { sql });
+}
+
+/** Extrae el error estructurado de un fallo de `parseViewSql` (best-effort). */
+export function parseSqlError(e: unknown): ViewSqlError {
+  const raw = e instanceof Error ? e.message : String(e);
+  try {
+    const d = JSON.parse(raw) as Partial<ViewSqlError>;
+    if (d && typeof d.message === 'string') {
+      return { message: d.message, line: d.line ?? 1, col: d.col ?? 1 };
+    }
+  } catch { /* texto plano */ }
+  return { message: raw || 'Invalid SQL.', line: 1, col: 1 };
 }
 
 export function deleteView(id: string): Promise<{ deleted: boolean }> {

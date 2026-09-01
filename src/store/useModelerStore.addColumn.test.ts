@@ -91,3 +91,75 @@ describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
     expect(payload.udpValues).toBeUndefined();
   });
 });
+
+describe('useModelerStore.addColumn — typeOverridden vs default del dominio (doc 64 §1)', () => {
+  // El popup ahora muestra el default del dominio EN el campo de tipo y lo
+  // manda tal cual: "vino dataType" ya no equivale a override — el override
+  // real es tipo ≠ default del dominio elegido (regla doc 46).
+  const DOM = [{ id: 'd1', name: 'monto6D', defaultDataType: 'DECIMAL(18,6)' }];
+
+  it('tipo IGUAL al default del dominio ⇒ typeOverridden false', async () => {
+    vi.mocked(gov.listDomains).mockResolvedValueOnce(DOM as never);
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'COL', mode: 'physical', parentDomainId: 'd1', dataType: 'DECIMAL(18,6)',
+    });
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({
+      dataType: 'DECIMAL(18,6)', typeOverridden: false,
+    });
+  });
+
+  it('tipo DISTINTO al default ⇒ typeOverridden true', async () => {
+    vi.mocked(gov.listDomains).mockResolvedValueOnce(DOM as never);
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'COL', mode: 'physical', parentDomainId: 'd1', dataType: 'DECIMAL(18,2)',
+    });
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({
+      dataType: 'DECIMAL(18,2)', typeOverridden: true,
+    });
+  });
+
+  it('dominio SIN tipo mandado ⇒ hereda el default con typeOverridden false (regresión)', async () => {
+    vi.mocked(gov.listDomains).mockResolvedValueOnce(DOM as never);
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'COL', mode: 'physical', parentDomainId: 'd1',
+    });
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({
+      dataType: 'DECIMAL(18,6)', typeOverridden: false,
+    });
+  });
+
+  it('sin dominio, un tipo tipeado sigue marcando override (semántica previa)', async () => {
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'COL', mode: 'physical', dataType: 'STRING',
+    });
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({
+      dataType: 'STRING', typeOverridden: true,
+    });
+  });
+});
+
+describe('useModelerStore.addColumn — default LEGACY del dominio homologado (doc 64 r2)', () => {
+  // La BD puede traer dominios sin homologar (`Array`, `BIG INTEGER`): el
+  // store consume el default vía canonicalDefaultType (espejo del back doc 62).
+  const LEGACY = [{ id: 'd2', name: 'ColArray', defaultDataType: 'Array' }];
+
+  it('dominio `Array` (crudo en BD) hereda `ARRAY<>` sin override', async () => {
+    vi.mocked(gov.listDomains).mockResolvedValueOnce(LEGACY as never);
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'COL', mode: 'physical', parentDomainId: 'd2',
+    });
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({
+      dataType: 'ARRAY<>', typeOverridden: false,
+    });
+  });
+
+  it('declarar el elemento del ARRAY heredado sí es override', async () => {
+    vi.mocked(gov.listDomains).mockResolvedValueOnce(LEGACY as never);
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'COL', mode: 'physical', parentDomainId: 'd2', dataType: 'ARRAY<INTEGER>',
+    });
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({
+      dataType: 'ARRAY<INTEGER>', typeOverridden: true,
+    });
+  });
+});

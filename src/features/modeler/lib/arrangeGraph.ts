@@ -33,7 +33,11 @@ export function buildArrangeGraph(dia: Diagram, sizeOf: SizeOf, viewMode: 'logic
   });
   // F3: las vistas visibles se auto-organizan como nodos normales; sus
   // derivaciones entran como edges para que ELK las ubique junto a sus fuentes.
-  const views = (dia.views ?? []).filter((v) => viewSourceIds(v).some((id) => tableIds.has(id)));
+  // Doc 63: vistas SOLO en modelo físico — en lógico no están en el canvas,
+  // así que el arrange no las mueve ni les reserva sitio.
+  const views = viewMode === 'physical'
+    ? (dia.views ?? []).filter((v) => viewSourceIds(v).some((id) => tableIds.has(id)))
+    : [];
   for (const v of views) {
     const m = sizeOf(v.id);
     if (m) { nodes.push({ id: v.id, ...m }); continue; }

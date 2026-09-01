@@ -5,7 +5,9 @@ import {
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
   FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
 } from 'lucide-react';
+import Dialog from '@/components/ui/Dialog';
 import Tooltip from '@/components/ui/Tooltip';
+import { findMatches, type FindMatch } from '../lib/findMatches';
 import { EndIcon, RelLineIcon, SubcatIcon } from './RelIcon';
 import type { Cardinality } from '@/features/governance/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
@@ -99,6 +101,16 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const [find, setFind] = useState('');
   const [findOpen, setFindOpen] = useState(false);
   const findRef = useRef<HTMLInputElement>(null);
+  // Doc 64 §5: el dropdown va por PORTAL fixed (como el menú de export) — un
+  // menú absoluto dentro del toolbar (overflow-x: auto) quedaba recortado bajo
+  // el canvas. `findPos` se computa del rect del input al abrir/tipear.
+  const [findPos, setFindPos] = useState<{ left: number; top: number; width: number } | null>(null);
+  // Popup de coincidencias (Enter con 2+ matches): elegir cuál centrar.
+  const [findResultsOpen, setFindResultsOpen] = useState(false);
+  const placeFind = () => {
+    const r = findRef.current?.getBoundingClientRect();
+    setFindPos(r ? { left: r.left, top: r.bottom + 4, width: r.width } : null);
+  };
   // Selección de cardinalidad por extremo (crow's-foot), en términos
   // PARENT (lado PK) / CHILD (lado FK) — doc 19. Default Erwin: one → zero-many.
   const [relSel, setRelSel] = useState<{ parent: Cardinality; child: Cardinality }>({ parent: 'one', child: 'zero-many' });
@@ -128,20 +140,29 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Coincidencias del buscador: tablas (nombre lógico/físico) + vistas del
-  // canvas (F3 — diagram.views ya viene filtrado a las visibles). El pick usa
+  // Coincidencias del buscador (doc 64 §5): lógica pura en lib/findMatches —
+  // tablas (lógico/físico) + vistas del canvas, "contiene" CI, SIN tope (el
+  // dropdown corta a 8; el popup de Enter lista todas). El pick usa
   // focusTable, que para nodos view centra sin abrir el PropertiesPanel.
-  const matches = useMemo(() => {
-    const q = find.trim().toLowerCase();
-    if (!q) return [];
-    const tables = (diagram?.tables ?? [])
-      .filter((t) => t.logicalName.toLowerCase().includes(q) || t.physicalName.toLowerCase().includes(q))
-      .map((t) => ({ id: t.id, kind: 'table' as const, primary: t.logicalName, secondary: t.physicalName }));
-    const views = (diagram?.views ?? [])
-      .filter((v) => v.name.toLowerCase().includes(q))
-      .map((v) => ({ id: v.id, kind: 'view' as const, primary: v.name, secondary: 'view' }));
-    return [...tables, ...views].slice(0, 8);
-  }, [find, diagram]);
+  const allMatches = useMemo(
+    () => findMatches(find, diagram?.tables ?? [], diagram?.views ?? []),
+    [find, diagram],
+  );
+  const DROP_MAX = 8;
+  const dropMatches = allMatches.slice(0, DROP_MAX);
+
+  // Dropdown fixed abierto: un scroll (toolbar/página) o resize lo cierra —
+  // patrón select nativo (no se re-posiciona), mismo criterio que SearchSelect.
+  useEffect(() => {
+    if (!findOpen) return;
+    const close = () => setFindOpen(false);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+    };
+  }, [findOpen]);
 
   const pickTable = (id: string) => { focusTable(id); setFind(''); setFindOpen(false); findRef.current?.blur(); };
 
@@ -236,17 +257,31 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             placeholder="Find a Table"
             value={find}
             disabled={!hasCanvas}
-            onChange={(e) => { setFind(e.target.value); setFindOpen(true); }}
-            onFocus={() => setFindOpen(true)}
+            onChange={(e) => { setFind(e.target.value); placeFind(); setFindOpen(true); }}
+            onFocus={() => { placeFind(); setFindOpen(true); }}
             onBlur={() => setTimeout(() => setFindOpen(false), 120)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && matches[0]) pickTable(matches[0].id);
+              if (e.key === 'Enter') {
+                // Doc 64 §5: 1 coincidencia → centra directo; 2+ → popup con la
+                // lista completa para ELEGIR (antes saltaba al primero a ciegas).
+                if (allMatches.length === 1) pickTable(allMatches[0].id);
+                else if (allMatches.length > 1) { setFindOpen(false); setFindResultsOpen(true); findRef.current?.blur(); }
+              }
               if (e.key === 'Escape') { setFind(''); setFindOpen(false); findRef.current?.blur(); }
             }}
           />
-          {findOpen && matches.length > 0 && (
-            <div className="wk-find-menu">
-              {matches.map((m) => (
+          {/* Portal fixed (doc 64 §5): el toolbar tiene overflow-x auto y un
+              menú absoluto quedaba clipeado bajo el canvas. */}
+          {findOpen && dropMatches.length > 0 && findPos && createPortal(
+            <div
+              className="wk-find-menu"
+              style={{
+                position: 'fixed', zIndex: 320, left: findPos.left, top: findPos.top,
+                minWidth: Math.max(findPos.width, 230), maxWidth: 400,
+                maxHeight: Math.max(120, window.innerHeight - findPos.top - 12),
+              }}
+            >
+              {dropMatches.map((m) => (
                 <button key={m.id} className="wk-find-item" onMouseDown={(e) => { e.preventDefault(); pickTable(m.id); }}>
                   <span className="wk-find-lname">
                     {m.kind === 'view' && <Eye size={11} style={{ marginRight: 5, verticalAlign: -1, color: 'var(--purple)' }} aria-hidden />}
@@ -255,7 +290,16 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
                   <span className="wk-find-pname rd-mono">{m.secondary}</span>
                 </button>
               ))}
-            </div>
+              {allMatches.length > DROP_MAX && (
+                <button
+                  className="wk-find-item wk-find-more"
+                  onMouseDown={(e) => { e.preventDefault(); setFindOpen(false); setFindResultsOpen(true); }}
+                >
+                  +{allMatches.length - DROP_MAX} more — press Enter to see all
+                </button>
+              )}
+            </div>,
+            document.body,
           )}
         </div>
         <span className="wk-grp-cap">Locate &amp; center</span>
@@ -402,6 +446,17 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {modal === 'schema' && <SchemaManagerModal onClose={() => setModal(null)} pushToast={pushToast} />}
       {modal === 'upload' && <UploadModal onClose={() => setModal(null)} pushToast={pushToast} />}
 
+      {/* Doc 64 §5: popup de coincidencias (Enter con 2+ matches). */}
+      {findResultsOpen && (
+        <FindResultsModal
+          query={find}
+          matches={allMatches}
+          onQuery={setFind}
+          onPick={(id) => { pickTable(id); setFindResultsOpen(false); }}
+          onClose={() => setFindResultsOpen(false)}
+        />
+      )}
+
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
 
       {modelPropsOpen && diagram && (
@@ -427,5 +482,46 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT table header (blue ring) onto a child column or the child header — the parent's whole primary key is migrated. <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setRelPreset(null)}>exit</button></div>}
       {subcatArmed && <div className="wk-relhint">Draw the subcategory: drag from the SUPERTYPE table header (blue ring) — or from an existing subcategory symbol — onto the subtype table. The supertype's key becomes the subtype's key (is-a, 1:1). <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setSubcatArmed(false)}>exit</button></div>}
     </div>
+  );
+}
+
+/** Doc 64 §5: popup de coincidencias del buscador — Enter con 2+ matches lo
+ *  abre para ELEGIR qué tabla/vista centrar (lista COMPLETA, refinable). */
+function FindResultsModal({ query, matches, onQuery, onPick, onClose }: {
+  query: string;
+  matches: FindMatch[];
+  onQuery: (q: string) => void;
+  onPick: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <Dialog
+      open
+      title="Locate &amp; center"
+      subtitle={`Pick which object to center — ${matches.length} match${matches.length === 1 ? '' : 'es'}`}
+      icon={Search}
+      backdrop="canvas"
+      canvasTop={136}
+      width={520}
+      onClose={onClose}
+      footer={<button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Close</button>}
+    >
+      <div className="wk-findres-search">
+        <Search size={14} aria-hidden />
+        <input autoFocus value={query} placeholder="Refine the search…" onChange={(e) => onQuery(e.target.value)} />
+      </div>
+      <div className="wk-findres-list">
+        {matches.length === 0 && <div className="wk-findres-empty rd-small">No matches on this canvas.</div>}
+        {matches.map((m) => (
+          <button key={m.id} type="button" className="wk-find-item" onClick={() => onPick(m.id)}>
+            <span className="wk-find-lname">
+              {m.kind === 'view' && <Eye size={11} style={{ marginRight: 5, verticalAlign: -1, color: 'var(--purple)' }} aria-hidden />}
+              {m.primary}
+            </span>
+            <span className="wk-find-pname rd-mono">{m.secondary}</span>
+          </button>
+        ))}
+      </div>
+    </Dialog>
   );
 }

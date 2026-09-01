@@ -113,7 +113,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     // showOnCanvas con ≥1 fuente en el canvas — ya filtradas por el backend).
     // Posición: layout[viewId] o default junto a su primera fuente presente.
     const tablePos = new Map(tableNodes.map((n) => [n.id, n.position]));
-    const views = buildViewGraph(diagram.views ?? [], diagram.tables, diagram.columns, layout, tablePos, onEditView);
+    // Doc 63: vistas SOLO en modelo físico — en lógico ni bloques ni wires
+    // de derivación (el toggle re-arma el diagrama: viewMode está en deps).
+    const views = buildViewGraph(viewMode === 'physical' ? diagram.views ?? [] : [], diagram.tables, diagram.columns, layout, tablePos, onEditView);
     const viewNodes = views.nodes.map((n) => ({ ...n, data: { ...n.data, lod: lodNow } }));
     // Doc 53: las SUBCATEGORÍAS van por su propio subgrafo (símbolo + aristas
     // sólidas sin crow's-foot) y SOLO en modelo lógico; el resto de relaciones
@@ -448,11 +450,12 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           // llegan cuerpo/cabecera del nodo) — deseleccionar es trivial.
           const st = useModelerStore.getState();
           st.clearColSel(); st.closeColMenu();
-          // Nodo VISTA: click = selección visual solamente (selected nativo de
-          // React Flow) — NUNCA abre el PropertiesPanel (spec §3-5, pedido 5).
-          // También cierra el panel si estaba abierto sobre una tabla.
-          // Ídem el símbolo de subcategoría (doc 53): su gestión es doble click.
-          if (node.type === 'view' || node.type === 'subcat') { setSelectedTable(null); return; }
+          // Nodo VISTA (doc 61): abre su Properties — paridad con tablas.
+          // (Antes era selección visual solamente; el lápiz del header sigue
+          // abriendo el ViewEditor.)
+          if (node.type === 'view') { st.setSelectedView(node.id); return; }
+          // Símbolo de subcategoría (doc 53): su gestión es doble click.
+          if (node.type === 'subcat') { setSelectedTable(null); return; }
           if (node.type !== 'shape') setSelectedTable(node.id);
         }}
         onNodeDoubleClick={(_e, node) => {

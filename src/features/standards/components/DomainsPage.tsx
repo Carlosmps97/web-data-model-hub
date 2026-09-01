@@ -5,6 +5,9 @@ import type { StandardsSnapshot, SnapshotDomain } from '../standards.service';
 import { applyStandards } from '../standards.service';
 import { getDomainImpact, type DomainImpact } from '@/services/naming.service';
 import { impactWarning, visibleImpactTables, tableLabel } from '../domainImpact';
+import TypePicker from '@/features/modeler/components/TypePicker';
+import ComplexTypeBuilder from '@/features/modeler/components/ComplexTypeBuilder';
+import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
 
 type Mode = 'view' | 'edit' | 'create';
 
@@ -133,8 +136,18 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
               : <div style={fieldRO}>{form.name}</div>}
 
             <label style={lbl}>Default data type</label>
-            {editable ? <input className="rd-input" style={{ ...field, fontFamily: 'var(--mono, monospace)' }} value={form.defaultDataType} onChange={(e) => setForm({ ...form, defaultDataType: e.target.value })} placeholder="DECIMAL(18,2)" />
-              : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.defaultDataType}</div>}
+            {/* Doc 62: catálogo cerrado con buscador (mismo TypePicker de columnas,
+                doc 41) en vez de texto libre — el texto libre sembró dominios con
+                tipos des-homologados (`Array`, `BIG INTEGER`). STRUCT/ARRAY/MAP
+                abren el builder para declarar la estructura. */}
+            {editable ? (
+              <div style={{ marginBottom: 18 }}>
+                <TypePicker value={form.defaultDataType} onChange={(v) => setForm({ ...form, defaultDataType: v })} placeholder="Data type" />
+                {isComplexTypeStart(form.defaultDataType) && (
+                  <ComplexTypeBuilder value={form.defaultDataType} onChange={(v) => setForm({ ...form, defaultDataType: v })} />
+                )}
+              </div>
+            ) : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.defaultDataType}</div>}
             {editable && <div style={{ fontSize: 12, color: '#8A93A5', margin: '-10px 0 18px' }}>On apply, columns of this domain WITHOUT an override are re-typed.</div>}
 
             <label style={lbl}>Description</label>

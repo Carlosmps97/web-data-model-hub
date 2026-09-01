@@ -27,6 +27,16 @@
 /* Divisor entre grupos */
 .wk-div { width: 1px; align-self: center; height: 56px; background: var(--border-soft); flex-shrink: 0; margin: 0 2px; }
 
+/* Doc 64 §5 — responsive: bajo ~1480px el toolbar se REDISTRIBUYE en 2 filas
+   (flex-wrap) en vez de esconder herramientas tras un scroll horizontal. La
+   fila del grid pasa a `auto` SOLO acá: por encima del breakpoint el layout
+   original (84px, una fila) queda idéntico. */
+@media (max-width: 1480px) {
+  .wk { grid-template-rows: auto 1fr 34px; }
+  .wk-toolbar { flex-wrap: wrap; overflow-x: visible; padding: 2px 12px 4px; }
+  .wk-right { padding: 7px 0 6px 12px; }
+}
+
 /* Botón-icono 38×38 radius 9; hover #EFF2F7; activo .on #EAF0FF + #2E5BFF */
 .wk-tic { width: 38px; height: 38px; display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid transparent; border-radius: var(--r-sm); background: transparent; color: var(--ink-2);
@@ -131,6 +141,16 @@
 .wk-find-lname { font-size: 12.5px; color: var(--ink); font-weight: 600; }
 .wk-find-pname { font-size: 10.5px; color: var(--text-muted-2); }
 
+/* Doc 64 §5: fila "+N more" del dropdown + popup de coincidencias (Enter) */
+.wk-find-more { color: var(--primary); font-size: 11.5px; font-weight: 600; }
+.wk-findres-search { display: flex; align-items: center; gap: 7px; padding: 0 10px; margin-bottom: 10px;
+  background: var(--fill-3, #F4F6F9); border-radius: 9px; color: var(--text-muted-2); }
+.wk-findres-search input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+  padding: 9px 0; font-size: 13px; font-family: var(--ui); color: var(--ink); }
+.wk-findres-list { display: flex; flex-direction: column; gap: 2px; max-height: 340px; overflow-y: auto;
+  border: 1px solid var(--border-soft, #EAEDF2); border-radius: 10px; padding: 4px; }
+.wk-findres-empty { padding: 10px; color: var(--text-muted-2); }
+
 /* ── SearchSelect (doc 41): combobox con buscador embebido — mismo lenguaje
    visual que el dropdown "Find a Table" (lista acotada + scroll + item con
    etiqueta y detalle a la derecha). Lo usan Parent Domain y Type override. */
@@ -212,9 +232,19 @@
 .wk-explorer { flex: 1 1 auto; min-height: 0; background: var(--surface); overflow-y: auto; padding: 6px; }
 
 /* Database Explorer (producción publicada, solo lectura) */
-.wk-dbx { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
+.wk-dbx { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
   border-top: 1px solid var(--border-soft); }
-.wk-dbx.open { flex: 0 1 50%; }
+/* Abierto ocupa una FRACCIÓN fija del alto del sidebar (doc 60): la basis
+   exacta la fija el inline style con el split persistido; 50% es el default. */
+.wk-dbx.open { flex: 0 0 50%; }
+/* Handle del split vertical Model Explorer ⇄ Database Explorer, sobre el borde
+   superior del panel (solo con el panel abierto). Mismo look que los resizers
+   de ancho: línea 1px que se pinta al hover/drag. */
+.wk-dbx-vsplit { position: absolute; left: 0; right: 0; top: -4px; height: 8px; z-index: 6;
+  cursor: row-resize; touch-action: none; }
+.wk-dbx-vsplit::before { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 1px;
+  background: transparent; transition: background .12s; }
+.wk-dbx-vsplit:hover::before, .wk-dbx-vsplit.dragging::before { background: var(--primary); }
 .wk-dbx-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 10px; border: none;
   background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .04em; color: var(--subtle); font-family: inherit; }
@@ -231,6 +261,10 @@
   font-size: 10px; color: var(--text-muted-3); margin-left: auto; }
 .wk-dbx-badge + .wk-dbx-type { margin-left: 6px; }
 .wk-dbx-col:hover { background: transparent; }
+
+/* Grupos "Canonical Tables" / "Views" dentro del Database Explorer (doc 60) */
+.wk-dbx-group { font-weight: 700; color: var(--ink); }
+.wk-dbx-group .wk-exp-ico { color: var(--navy); }
 
 /* Búsqueda: encabezados de sección (Tables / Columns) + hits de columna a dos
    líneas (columna arriba, esquema.tabla debajo) */
@@ -491,17 +525,51 @@
 .wk-node-dt { flex: 0 0 auto; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted-2); font-size: 10px; }  /* #8A93A5 Geist Mono */
 .wk-node-empty { padding: 6px 11px; color: var(--muted); }
 
-/* ── ComplexTypeBuilder: cajita para declarar STRUCT/ARRAY/MAP en bonito ──
-   Aparece bajo el input de tipo (ColumnEditor modal + card del panel) cuando
-   el texto arranca como complejo; recompone el string canónico al editar. */
+/* ── ComplexTypeBuilder (doc 64 §2): declarador HÍBRIDO de STRUCT/ARRAY/MAP ──
+   Aparece bajo el input de tipo cuando el texto arranca como complejo.
+   Dropdown (TypePicker) por slot + sub-builder ANIDADO + toggle a código por
+   slot y a nivel raíz (Builder | Code) + preview del string canónico. */
 .wk-ctb { margin-top: 8px; border: 1px solid var(--border-1, #E2E6EE); border-radius: 10px;
-  padding: 10px 11px; background: #F8FAFD; display: grid; gap: 6px; }
-.wk-ctb-head { font-size: 10.5px; font-weight: 700; color: #8A93A5; text-transform: uppercase; letter-spacing: .04em; }
-.wk-ctb-row { display: flex; gap: 6px; align-items: center; }
+  padding: 10px 11px; background: #F8FAFD; display: grid; gap: 8px; }
+.wk-ctb-head { display: flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 700;
+  color: #8A93A5; text-transform: uppercase; letter-spacing: .04em; }
+.wk-ctb-headtools { margin-left: auto; display: inline-flex; gap: 2px; background: var(--fill-4, #F0F2F6);
+  border-radius: 7px; padding: 2px; }
+.wk-ctb-headtools button { border: none; background: transparent; font-family: inherit; font-size: 10px;
+  font-weight: 700; letter-spacing: .03em; text-transform: uppercase; padding: 3px 9px; border-radius: 5px;
+  color: var(--text-muted, #8A93A5); cursor: pointer; transition: background .12s, color .12s; }
+.wk-ctb-headtools button.on { background: var(--surface, #fff); color: var(--primary, #2E5BFF);
+  box-shadow: 0 1px 2px rgba(16,27,48,.12); }
+.wk-ctb-rows { display: grid; gap: 6px; }
+.wk-ctb-row { display: flex; gap: 6px; align-items: flex-start; }
+.wk-ctb-lbl { flex: none; width: 56px; padding-top: 8px; font-size: 9.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em; color: #8A93A5; }
+.wk-ctb-name { flex: 0 0 112px; min-width: 0; height: 30px; font-size: 12px; }
+.wk-ctb-slot { flex: 1; min-width: 0; display: grid; gap: 6px; }
+.wk-ctb-slotrow { display: flex; gap: 6px; align-items: center; }
+.wk-ctb-slotpick { flex: 1; min-width: 0; }
+.wk-ctb-mode { flex: none; width: 26px; height: 26px; display: inline-flex; align-items: center;
+  justify-content: center; border: 1px solid var(--border-1, #E2E6EE); border-radius: 6px;
+  background: var(--surface, #fff); color: var(--text-muted, #8A93A5); cursor: pointer;
+  transition: background .12s, color .12s, border-color .12s; }
+.wk-ctb-mode:hover:not(:disabled) { color: var(--ink-2, #3A4658); background: var(--fill-4, #F0F2F6); }
+.wk-ctb-mode.on { background: var(--blue-tint, #EAF0FF); color: var(--primary, #2E5BFF); border-color: var(--blue-border, #D4E0FF); }
+.wk-ctb-mode:disabled { opacity: .45; cursor: not-allowed; }
+.wk-ctb-nest { border-left: 2px solid var(--blue-border, #D4E0FF); padding-left: 9px; display: grid; gap: 6px; }
+.wk-ctb-del { align-self: center; }
 .wk-ctb-in { flex: 1; min-width: 0; height: 30px; font-size: 12px; }
 .wk-ctb-add { justify-self: start; }
 .wk-ctb-empty { color: var(--muted, #8A93A5); }
+.wk-ctb-code { width: 100%; min-height: 64px; resize: vertical; box-sizing: border-box; font-size: 12px;
+  line-height: 1.5; padding: 8px 10px; color: var(--ink, #1A2B4A); background: var(--surface, #fff);
+  border: 1px solid var(--border-1, #E2E6EE); border-radius: 8px; outline: none; }
+.wk-ctb-code:focus { border-color: var(--primary, #2E5BFF); box-shadow: 0 0 0 2px var(--primary-muted, rgba(46,91,255,.18)); }
+.wk-ctb-warn2 { color: #8A6D1A; background: #FFF8E6; border: 1px solid #F0E2B6; border-radius: 8px; padding: 6px 9px; }
 .wk-ctb-warn { color: #8A6D1A; background: #FFF8E6; border-color: #F0E2B6; }
+.wk-ctb-preview { display: flex; gap: 8px; align-items: baseline; border-top: 1px dashed var(--border-1, #E2E6EE);
+  padding-top: 7px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #8A93A5; }
+.wk-ctb-preview code { font-family: var(--mono); font-size: 11px; font-weight: 500; text-transform: none;
+  letter-spacing: 0; color: var(--flow-700, #1E4FD6); min-width: 0; overflow-wrap: anywhere; }
 
 /* Handles de conexión por columna (id único __src/__tgt) — doc 47: ya NO
    inician wires (el origen es la cabecera del padre), así que en reposo son

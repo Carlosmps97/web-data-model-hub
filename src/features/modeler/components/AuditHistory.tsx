@@ -11,7 +11,7 @@ import { ACTION_LABEL, fieldValue, formatWhen, originText, refLabel, userLabel }
  * Se monta solo con Metadata activa ⇒ el fetch es bajo demanda; cambiar de
  * entidad re-consulta. Read-only puro: no toca changeset ni versionamiento.
  */
-export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'column'; entityId: string }) {
+export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'column' | 'view'; entityId: string }) {
   const [items, setItems] = useState<HistoryItem[] | null>(null);
   const [error, setError] = useState(false);
   const [openIdx, setOpenIdx] = useState<number | null>(null);
@@ -20,7 +20,7 @@ export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'colu
   useEffect(() => {
     let alive = true;
     setItems(null); setError(false); setOpenIdx(null);
-    const fetcher = kind === 'table' ? gov.tableHistory : gov.columnHistory;
+    const fetcher = kind === 'table' ? gov.tableHistory : kind === 'view' ? gov.viewHistory : gov.columnHistory;
     fetcher(entityId)
       .then((r) => { if (alive) setItems(r.items); })
       .catch(() => { if (alive) { setError(true); setItems([]); } });
@@ -56,6 +56,14 @@ export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'colu
                   <span className={`wk-pp-histact ${it.action}`}>{ACTION_LABEL[it.action]}</span>
                   <span className="wk-pp-histuser" title={it.user?.email ?? undefined}>{userLabel(it)}</span>
                   {it.version && <span className="wk-pp-histver rd-mono">{it.version}</span>}
+                  {it.restoredFrom && (
+                    <span
+                      className="wk-pp-histver rd-mono"
+                      title={`This version restored the model to ${it.restoredFrom.versionLabel ?? 'a previous version'}`}
+                    >
+                      ↩{it.restoredFrom.versionLabel ?? '—'}
+                    </span>
+                  )}
                   <span className="wk-pp-histwhen">{formatWhen(it.at)}</span>
                   <ChevronDown size={12} className="wk-pp-histcaret" aria-hidden />
                 </button>
@@ -71,6 +79,11 @@ export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'colu
                     )}
                     {it.versionTitle && (
                       <div className="wk-pp-histmeta">Version {it.version ?? '—'} — “{it.versionTitle}”</div>
+                    )}
+                    {it.restoredFrom && (
+                      <div className="wk-pp-histmeta">
+                        Restore of {it.restoredFrom.versionLabel ?? '—'} — publishing that version put the entity back to that state.
+                      </div>
                     )}
                     {!it.synthetic && it.editedAt && (
                       <div className="wk-pp-histmeta">Drafted {formatWhen(it.editedAt)}</div>

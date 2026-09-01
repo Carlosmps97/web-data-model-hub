@@ -138,6 +138,20 @@ describe('buildDiagramScene — vistas, subcategorías y shapes', () => {
     expect(items(s).some((i) => i.k === 'path' && i.stroke === '#94A3B8')).toBe(true);
   });
 
+  it('vista SOLO en físico: el modo lógico no la dibuja (doc 63)', () => {
+    const inp = base();
+    inp.diagram.views = [{
+      id: 'v1', name: 'V_ORDERS', schema: 'dw_VU', sourceTableIds: ['t1'],
+      sources: [{ tableId: 't1', column: 'TOTAL', outputAlias: 'total_amt', expression: 'SUM(TOTAL)' }],
+    }];
+    const sLog = buildDiagramScene({ ...inp, viewMode: 'logical' });
+    expect(texts(sLog).some((t) => t.s === 'VISTA')).toBe(false);
+    expect(texts(sLog).some((t) => t.s.includes('V_ORDERS'))).toBe(false);
+    expect(items(sLog).some((i) => i.k === 'hatch')).toBe(false);
+    const sPhys = buildDiagramScene({ ...inp, viewMode: 'physical' });
+    expect(texts(sPhys).some((t) => t.s === 'VISTA')).toBe(true);
+  });
+
   it('subcategoría: rombo + doble trazo SOLO en modo lógico', () => {
     const inp = base();
     inp.viewMode = 'logical';

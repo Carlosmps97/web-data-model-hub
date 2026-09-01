@@ -1,9 +1,10 @@
 /**
- * ChangesSummary (doc 31) — card de resumen que reemplaza al árbol inline en
- * el panel del request: proyectos/modelos afectados (nombres reales) + matriz
- * de conteos por tipo de entidad × Added/Modified/Deleted (verde/ámbar/rojo).
- * Todo sale del `GET /diff` ya cargado — cero requests extra. El detalle fino
- * vive en el popup (CTA "Open change details").
+ * ChangesSummary (doc 64 §7 — v2; nace en doc 31) — card de resumen del
+ * request: totales por verbo como 3 stat-pills, chips de proyectos/modelos
+ * afectados y la matriz por tipo de entidad como filas con chips de conteo
+ * (solo los ≠ 0). El detalle fino vive en el popup rediseñado (CTA "Review
+ * changes in detail"). Todo sale del `GET /diff` ya cargado — cero requests
+ * extra.
  */
 import { ListTree } from 'lucide-react';
 import { summarizeDiff } from '@/services/versioning.service';
@@ -61,35 +62,35 @@ export default function ChangesSummary({ diff, onOpenDetails }: {
         <span className="dmh-rvs-title">Changes summary</span>
         <span className="dmh-rvs-total">{s.total} change{s.total === 1 ? '' : 's'}</span>
         <span className="dmh-rvs-spacer" />
-        <button type="button" className="dmh-rv-act dmh-rvs-open" onClick={onOpenDetails}>
+        <button type="button" className="dmh-rvs-cta" onClick={onOpenDetails}>
           <ListTree size={14} strokeWidth={1.6} aria-hidden />
-          Open change details
+          Review changes in detail
         </button>
+      </div>
+
+      {/* Totales por verbo — 3 stat-pills. */}
+      <div className="dmh-rvs-stats">
+        <div className="dmh-rvs-stat is-added"><span className="n">+{s.added}</span><span className="t">added</span></div>
+        <div className="dmh-rvs-stat is-edited"><span className="n">~{s.edited}</span><span className="t">modified</span></div>
+        <div className="dmh-rvs-stat is-deleted"><span className="n">−{s.deleted}</span><span className="t">deleted</span></div>
       </div>
 
       <ChipsRow label="Projects" names={s.projects} />
       <ChipsRow label="Models" names={s.models} />
 
-      <table className="dmh-rvs-table">
-        <thead>
-          <tr>
-            <th aria-label="Entity" />
-            <th className="is-added"><span className="sq" />Added</th>
-            <th className="is-edited"><span className="sq" />Modified</th>
-            <th className="is-deleted"><span className="sq" />Deleted</th>
-          </tr>
-        </thead>
-        <tbody>
-          {s.rows.map((r) => (
-            <tr key={r.collection}>
-              <td className="dmh-rvs-rowlbl">{r.label}</td>
-              <td className={r.added ? 'is-added' : 'is-zero'}>{r.added || '—'}</td>
-              <td className={r.edited ? 'is-edited' : 'is-zero'}>{r.edited || '—'}</td>
-              <td className={r.deleted ? 'is-deleted' : 'is-zero'}>{r.deleted || '—'}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      {/* Matriz por tipo de entidad: filas con chips de conteo (solo ≠ 0). */}
+      <div className="dmh-rvs-rows">
+        {s.rows.map((r) => (
+          <div key={r.collection} className="dmh-rvs-row">
+            <span className="dmh-rvs-rowlbl">{r.label}</span>
+            <span className="dmh-rvs-rowchips">
+              {r.added > 0 && <span className="dmh-rvs-cnt is-added">+{r.added}</span>}
+              {r.edited > 0 && <span className="dmh-rvs-cnt is-edited">~{r.edited}</span>}
+              {r.deleted > 0 && <span className="dmh-rvs-cnt is-deleted">−{r.deleted}</span>}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

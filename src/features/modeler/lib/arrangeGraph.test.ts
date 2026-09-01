@@ -54,4 +54,11 @@ describe('buildArrangeGraph', () => {
     ]);
     expect(g.viewIds).toEqual(['v1']);
   });
+
+  it('leaves views OUT of the graph in logical mode (doc 63)', () => {
+    const g = buildArrangeGraph(diagram(), () => undefined, 'logical');
+    expect(g.nodes.map((n) => n.id)).toEqual(['a', 'b']);
+    expect(g.edges).toEqual([{ id: 'r1', source: 'a', target: 'b' }]);
+    expect(g.viewIds).toEqual([]);
+  });
 });

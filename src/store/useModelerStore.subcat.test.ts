@@ -50,3 +50,21 @@ describe('useModelerStore — subcatArmed (doc 53)', () => {
     expect(useModelerStore.getState().subcatArmed).toBe(true);
   });
 });
+
+/** Doc 63: vistas exclusivas del modelo físico — entrar a lógico cierra el
+ *  panel de vista (su bloque ya no está en el canvas). */
+describe('useModelerStore — setViewMode y vistas (doc 63)', () => {
+  it('pasar a lógico limpia selectedViewId; volver a físico no re-selecciona', () => {
+    useModelerStore.setState({ viewMode: 'physical', selectedViewId: 'v1', subcatArmed: false, relPreset: null });
+    useModelerStore.getState().setViewMode('logical');
+    expect(useModelerStore.getState().selectedViewId).toBeNull();
+    useModelerStore.getState().setViewMode('physical');
+    expect(useModelerStore.getState().selectedViewId).toBeNull();
+  });
+
+  it('pasar a físico conserva una vista seleccionada', () => {
+    useModelerStore.setState({ viewMode: 'physical', selectedViewId: 'v2' });
+    useModelerStore.getState().setViewMode('physical');
+    expect(useModelerStore.getState().selectedViewId).toBe('v2');
+  });
+});

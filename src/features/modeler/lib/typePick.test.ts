@@ -102,3 +102,25 @@ describe('composeParamType', () => {
     }
   });
 });
+
+describe('doc 62 — VARIANT + tipos Oracle de la data real', () => {
+  it('el catálogo incluye VARIANT (JSON libre), NUMBER y VARCHAR2', () => {
+    for (const t of ['VARIANT', 'NUMBER', 'VARCHAR2']) expect(TYPE_OPTIONS).toContain(t);
+  });
+
+  it('NUMBER lleva precision/scale y VARCHAR2 lleva length', () => {
+    expect(argSpecFor('NUMBER')).toEqual(['precision', 'scale']);
+    expect(argSpecFor('number')).toEqual(['precision', 'scale']);
+    expect(argSpecFor('VARCHAR2')).toEqual(['length']);
+  });
+
+  it('parsea los defaults reales de los parent domains', () => {
+    expect(parseParamType('NUMBER(22,3)')).toEqual({ base: 'NUMBER', args: ['22', '3'] });
+    expect(parseParamType('VARCHAR2(10)')).toEqual({ base: 'VARCHAR2', args: ['10'] });
+    expect(parseParamType('VARIANT')).toEqual({ base: 'VARIANT', args: [] });
+  });
+
+  it('VARIANT no lleva argumentos', () => {
+    expect(argSpecFor('VARIANT')).toBeNull();
+  });
+});

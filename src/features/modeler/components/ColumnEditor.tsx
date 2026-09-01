@@ -5,6 +5,8 @@ import * as gov from '@/features/governance/services/governance.service';
 import type { ParentDomain, CanonicalColumn } from '@/features/governance/services/governance.service';
 import { apiErrorMessage } from '@/services/http';
 import { isComplexTypeStart } from '../lib/complexTypes';
+import { applyDomainPick } from '../lib/domainType';
+import { canonicalDefaultType } from '../lib/typePick';
 import type { AddColumnInput } from '@/store/useModelerStore';
 import ComplexTypeBuilder from './ComplexTypeBuilder';
 import SearchSelect from './SearchSelect';
@@ -12,11 +14,12 @@ import TypePicker from './TypePicker';
 import UdpAssign from './UdpAssign';
 
 /** Opciones del combobox de Parent Domain: alfabético, con el tipo por defecto
- *  como detalle a la derecha (doc 41). */
+ *  como detalle a la derecha (doc 41) — HOMOLOGADO a la grafía canónica
+ *  (doc 64 r2: un dominio legacy con `Array` se muestra como `ARRAY<>`). */
 export const domainOptions = (domains: ParentDomain[]) =>
   [...domains]
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((d) => ({ value: d.id, label: d.name, detail: d.defaultDataType }));
+    .map((d) => ({ value: d.id, label: d.name, detail: canonicalDefaultType(d.defaultDataType) }));
 
 export default function ColumnEditor({ tableId, onClose, onAdd }: {
   tableId: string;
@@ -28,6 +31,9 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const [preview, setPreview] = useState('');
   const [parentDomainId, setParentDomainId] = useState('');
   const [dataType, setDataType] = useState('');
+  // Doc 64 §1: override local vivo — misma regla del panel (doc 46). El campo
+  // de tipo SIEMPRE muestra el vigente (default del dominio u override manual).
+  const [typeOverridden, setTypeOverridden] = useState(false);
   const [domains, setDomains] = useState<ParentDomain[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +66,35 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     }, 220);
     return () => clearTimeout(t);
   }, [mode, name]);
+
+  // Doc 64 §1: dupla dominio+tipo como Properties · Data Type — elegir el
+  // dominio muestra su default AL INSTANTE (argumentos puntuales y builder de
+  // complejos editables de frente); editar el tipo deslinda (applyDomainPick,
+  // regla doc 46: OTRO dominio re-aplica su default aunque hubiera override).
+  const activeDomain = domains.find((d) => d.id === parentDomainId);
+  // Doc 64 r2: el default se consume HOMOLOGADO (canonicalDefaultType) — un
+  // dominio legacy con `Array` hereda `ARRAY<>` (y abre el builder), no el
+  // texto crudo de la BD sin homologar.
+  const domainDefault = canonicalDefaultType(activeDomain?.defaultDataType);
+  const onDomainPick = (id: string) => {
+    const dom = domains.find((d) => d.id === id);
+    const next = applyDomainPick({
+      currentDomainId: parentDomainId,
+      typeOverridden,
+      currentType: dataType,
+      nextDomainId: id,
+      nextDefault: dom?.defaultDataType != null ? canonicalDefaultType(dom.defaultDataType) : undefined,
+    });
+    setParentDomainId(id);
+    setDataType(next.dataType);
+    setTypeOverridden(next.typeOverridden);
+  };
+  const onTypeChange = (v: string) => {
+    // '' desde "(domain default)": limpia el override y repone el default.
+    const next = v === '' && activeDomain ? domainDefault : v;
+    setDataType(next);
+    setTypeOverridden(activeDomain ? next.trim() !== domainDefault : next.trim() !== '');
+  };
 
   const submit = async () => {
     if (!name.trim()) return;
@@ -101,21 +136,29 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
           valueLabel={domains.find((d) => d.id === parentDomainId)?.name ?? ''}
           placeholder="— Parent Domain (type) —"
           emptyLabel="(none)"
-          onPick={setParentDomainId}
+          onPick={onDomainPick}
         />
         <div>
-          {/* Catálogo cerrado con argumentos puntuales; STRUCT/ARRAY/MAP están
-              EN la lista (los botones-plantilla se retiraron, doc 41). */}
+          {/* Doc 64 §1: el tipo SIEMPRE visible (default del dominio u
+              override) — catálogo cerrado con argumentos puntuales;
+              STRUCT/ARRAY/MAP están EN la lista (doc 41). */}
           <TypePicker
             value={dataType}
-            onChange={setDataType}
-            placeholder="Type override (optional)"
-            emptyLabel="(none — domain default)"
+            onChange={onTypeChange}
+            placeholder={parentDomainId ? 'Data type' : 'Data type (or pick a Parent Domain)'}
+            emptyLabel={parentDomainId ? '(domain default)' : '(none)'}
           />
-          {/* Builder visual: al elegir STRUCT/ARRAY/MAP se abre la cajita para
-              declarar la estructura campo a campo (recompone el texto). */}
+          {parentDomainId && dataType.trim() !== '' && (
+            <div className="rd-small" style={{ marginTop: 4, color: typeOverridden ? 'var(--amber-deep, #8A5A00)' : 'var(--text-muted, #8A93A5)' }}>
+              {typeOverridden
+                ? <>Override — the domain default is <span className="rd-mono">{domainDefault || '—'}</span></>
+                : 'Domain default — edit to override'}
+            </div>
+          )}
+          {/* Builder visual: STRUCT/ARRAY/MAP se declaran campo a campo
+              (recompone el texto; híbrido doc 64 §2). */}
           {isComplexTypeStart(dataType) && (
-            <ComplexTypeBuilder value={dataType} onChange={setDataType} />
+            <ComplexTypeBuilder value={dataType} onChange={onTypeChange} />
           )}
         </div>
         <input className="rd-input" placeholder="Functional definition (optional)" value={description}

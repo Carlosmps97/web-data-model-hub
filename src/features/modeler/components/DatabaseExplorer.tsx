@@ -1,12 +1,16 @@
-import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import {
+  useEffect, useRef, useState,
+  type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode,
+} from 'react';
 import { toast } from 'sonner';
 import {
   ChevronDown, ChevronRight, Columns3, Crosshair, Database, EllipsisVertical, Eye, KeyRound,
   Link as LinkIcon, RefreshCw, Search, Table2, X,
 } from 'lucide-react';
 import {
-  explorerColumns, explorerSchemas, explorerSearch, explorerSearchColumns, explorerTables, explorerViews,
-  type DbxColumn, type DbxColumnHit, type DbxHit, type DbxSchema, type DbxTable, type DbxView,
+  clampDbxSplit, explorerColumns, explorerSchemas, explorerSearch, explorerSearchColumns,
+  explorerTables, explorerViews, schemasForSection,
+  type DbxColumn, type DbxColumnHit, type DbxHit, type DbxSchema, type DbxSection, type DbxTable, type DbxView,
 } from '@/features/modeler/services/explorer.service';
 import * as gov from '@/features/governance/services/governance.service';
 import { useChangesetStore } from '@/store/useChangesetStore';
@@ -18,11 +22,17 @@ const PAD_BASE = 6;
 /** Tope de tablas por esquema (aviso si se alcanza). */
 const TABLES_CAP = 500;
 
+/** Key namespaced de esquema expandido: un esquema sin `kind` aparece en las
+ *  DOS secciones y su expansión debe ser independiente por sección. */
+const schKey = (section: DbxSection, name: string) => `${section === 'tables' ? 't' : 'v'}:${name}`;
+
 /**
- * Database Explorer (doc 18 §5 · draft-aware doc 25): navegación SOLO LECTURA
- * de la BD — esquemas → tablas (→ columnas) y vistas (→ columnas) — con
- * búsqueda server-side por nombre. Segunda sección del sidebar, apilada bajo el
- * Model Explorer, colapsada por defecto.
+ * Database Explorer (doc 18 §5 · draft-aware doc 25 · secciones + split doc 60):
+ * navegación SOLO LECTURA de la BD en DOS secciones — "Canonical Tables"
+ * (esquemas → tablas → columnas) y "Views" (esquemas → vistas → columnas) —
+ * con búsqueda server-side por nombre. Segunda mitad del sidebar, apilada bajo
+ * el Model Explorer: abierta ocupa una FRACCIÓN fija del alto (default 50%,
+ * persistida) ajustable con un handle de drag sobre su borde superior.
  *
  * Cuando hay una VERSIÓN activa (draft) muestra su estado EFECTIVO (publicado +
  * overlay del changeset): las tablas/vistas/columnas creadas, renombradas o
@@ -31,10 +41,58 @@ const TABLES_CAP = 500;
  * Sin acciones de edición, visible para todos los roles (lectores incluidos).
  */
 export default function DatabaseExplorer() {
-  const [open, setOpen] = useState(false);
+  // Abierto por DEFAULT (doc 60: el Database Explorer vive a la mitad del
+  // sidebar); el estado y el split persisten por browser como los anchos.
+  const [open, setOpenRaw] = useState<boolean>(() => {
+    try { return localStorage.getItem('dmh:dbxOpen') !== '0'; } catch { return true; }
+  });
+  const toggleOpen = () => setOpenRaw((o) => {
+    const next = !o;
+    try { localStorage.setItem('dmh:dbxOpen', next ? '1' : '0'); } catch { /* ignore */ }
+    return next;
+  });
+
+  // Split vertical Model Explorer ⇄ Database Explorer: fracción del alto del
+  // stack que ocupa este panel (clamp 15%–85%), draggable desde su borde
+  // superior. El parent (.wk-expl-stack) da la métrica; la basis va inline.
+  const sectionRef = useRef<HTMLElement>(null);
+  const [split, setSplitRaw] = useState<number>(() => {
+    try { return clampDbxSplit(Number(localStorage.getItem('dmh:dbxSplit') ?? '0.5')); } catch { return 0.5; }
+  });
+  const [splitDragging, setSplitDragging] = useState(false);
+  const setSplit = (f: number) => {
+    const c = Math.round(clampDbxSplit(f) * 1000) / 1000;
+    setSplitRaw(c);
+    try { localStorage.setItem('dmh:dbxSplit', String(c)); } catch { /* ignore */ }
+  };
+  const startVSplit = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const stack = sectionRef.current?.parentElement;   // .wk-expl-stack
+    if (!stack) return;
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    setSplitDragging(true);
+    document.body.style.userSelect = 'none';
+    const move = (ev: PointerEvent) => {
+      const r = stack.getBoundingClientRect();
+      if (r.height > 0) setSplit((r.bottom - ev.clientY) / r.height);
+    };
+    const up = () => {
+      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      document.body.style.userSelect = '';
+      setSplitDragging(false);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
+
   const activeId = useChangesetStore((s) => s.activeId);
   const draft = activeId !== null;
   const [schemas, setSchemas] = useState<DbxSchema[] | null>(null);
+  // Grupos "Canonical Tables" / "Views": ambos expandidos por default.
+  const [expGroups, setExpGroups] = useState<Set<DbxSection>>(new Set(['tables', 'views']));
   const [expSchemas, setExpSchemas] = useState<Set<string>>(new Set());
   const [expTables, setExpTables] = useState<Set<string>>(new Set());
   const [expViews, setExpViews] = useState<Set<string>>(new Set());
@@ -110,31 +168,43 @@ export default function DatabaseExplorer() {
   // quedan obsoletas → resetear y, si el panel está abierto, recargar.
   useEffect(() => {
     setTablesBySchema({}); setViewsBySchema({}); setColsByTable({});
-    setExpTables(new Set()); setExpViews(new Set()); setHits(null); setColHits(null); setQ('');
+    setExpSchemas(new Set()); setExpTables(new Set()); setExpViews(new Set());
+    setHits(null); setColHits(null); setQ('');
     setSchemas(null);
     if (open) void loadSchemas(true);
   }, [activeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refresh = () => {
-    // Recarga la vista actual (versión activa o producción).
+    // Recarga la vista actual (versión activa o producción). Colapsa esquemas:
+    // sus cachés se vacían y una expansión vieja quedaría mostrando vacío.
     setTablesBySchema({}); setViewsBySchema({}); setColsByTable({});
-    setExpTables(new Set()); setExpViews(new Set());
+    setExpSchemas(new Set()); setExpTables(new Set()); setExpViews(new Set());
     void loadSchemas(true);
   };
 
-  const toggleSchema = (name: string) => {
+  const toggleGroup = (g: DbxSection) => setExpGroups((s) => {
+    const next = new Set(s);
+    if (next.has(g)) next.delete(g); else next.add(g);
+    return next;
+  });
+
+  // Expandir un esquema carga SOLO lo de su sección (tablas O vistas): antes se
+  // pedían ambas siempre; con las secciones separadas la mitad era en vano.
+  const toggleSchema = (section: DbxSection, name: string) => {
+    const key = schKey(section, name);
     const next = new Set(expSchemas);
-    if (next.has(name)) { next.delete(name); setExpSchemas(next); return; }
-    next.add(name); setExpSchemas(next);
-    if (!tablesBySchema[name]) {
-      mark(`sch:${name}`, true);
-      void Promise.all([
-        explorerTables(name).catch(() => [] as DbxTable[]),
-        explorerViews(name).catch(() => [] as DbxView[]),
-      ]).then(([tables, views]) => {
-        setTablesBySchema((m) => ({ ...m, [name]: tables }));
-        setViewsBySchema((m) => ({ ...m, [name]: views }));
-      }).finally(() => mark(`sch:${name}`, false));
+    if (next.has(key)) { next.delete(key); setExpSchemas(next); return; }
+    next.add(key); setExpSchemas(next);
+    if (section === 'tables' && !tablesBySchema[name]) {
+      mark(`sch:${key}`, true);
+      void explorerTables(name).catch(() => [] as DbxTable[])
+        .then((tables) => setTablesBySchema((m) => ({ ...m, [name]: tables })))
+        .finally(() => mark(`sch:${key}`, false));
+    } else if (section === 'views' && !viewsBySchema[name]) {
+      mark(`sch:${key}`, true);
+      void explorerViews(name).catch(() => [] as DbxView[])
+        .then((views) => setViewsBySchema((m) => ({ ...m, [name]: views })))
+        .finally(() => mark(`sch:${key}`, false));
     }
   };
 
@@ -257,41 +327,74 @@ export default function DatabaseExplorer() {
     </div>
   );
 
-  const schemaNode = (s: DbxSchema) => {
-    const openSch = expSchemas.has(s.name);
-    const tables = tablesBySchema[s.name];
-    const views = viewsBySchema[s.name] ?? [];
+  // Esquema DENTRO de una sección: expandirlo lista sus tablas (sección
+  // Canonical Tables) o sus vistas (sección Views), nunca mezcladas.
+  const schemaNode = (s: DbxSchema, section: DbxSection) => {
+    const key = schKey(section, s.name);
+    const openSch = expSchemas.has(key);
+    const loaded = section === 'tables' ? tablesBySchema[s.name] : viewsBySchema[s.name];
     return (
-      <div key={s.id}>
-        <div className="wk-exp-row" style={{ paddingLeft: PAD_BASE }} title={s.description || undefined}
-          onClick={() => toggleSchema(s.name)}>
+      <div key={`${section}:${s.id}`}>
+        <div className="wk-exp-row" style={{ paddingLeft: PAD_BASE + INDENT }} title={s.description || undefined}
+          onClick={() => toggleSchema(section, s.name)}>
           {openSch ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
           <span className="wk-exp-ico"><Database size={13} style={{ color: 'var(--navy)' }} /></span>
           <span className="wk-exp-label rd-mono" style={{ fontSize: 12.5 }}>{s.name}</span>
-          {tables && <span className="wk-dbx-badge">{tables.length + views.length}</span>}
-          {loading.has(`sch:${s.name}`) && spin}
+          {loaded && <span className="wk-dbx-badge">{loaded.length}</span>}
+          {loading.has(`sch:${key}`) && spin}
         </div>
-        {openSch && tables && (
+        {openSch && loaded && (
           <>
-            {tables.length === 0 && views.length === 0 && (
-              <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + INDENT }}>Empty schema.</div>
+            {loaded.length === 0 && (
+              <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + 2 * INDENT }}>
+                {section === 'tables' ? 'No tables.' : 'No views.'}
+              </div>
             )}
-            {tables.map((t) => tableRow(t, 1))}
-            {tables.length >= TABLES_CAP && (
-              <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + INDENT }}>
+            {section === 'tables'
+              ? (loaded as DbxTable[]).map((t) => tableRow(t, 2))
+              : (loaded as DbxView[]).map((v) => viewRow(v, 2))}
+            {section === 'tables' && loaded.length >= TABLES_CAP && (
+              <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + 2 * INDENT }}>
                 Showing the first {TABLES_CAP} tables — use the search.
               </div>
             )}
-            {views.map((v) => viewRow(v, 1))}
           </>
         )}
       </div>
     );
   };
 
+  // Grupo colapsable de la sección (Canonical Tables / Views) con sus esquemas
+  // (filtrados por `schemas.kind`; sin clasificar entra en ambos — doc 44/52).
+  const groupNode = (section: DbxSection, label: string, icon: ReactNode) => {
+    const openG = expGroups.has(section);
+    const list = schemasForSection(schemas ?? [], section);
+    return (
+      <div>
+        <div className="wk-exp-row wk-dbx-group" style={{ paddingLeft: PAD_BASE }}
+          onClick={() => toggleGroup(section)}>
+          {openG ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          <span className="wk-exp-ico">{icon}</span>
+          <span className="wk-exp-label">{label}</span>
+          {schemas !== null && <span className="wk-dbx-badge">{list.length}</span>}
+        </div>
+        {openG && schemas !== null && schemas.length > 0 && list.length === 0 && (
+          <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + INDENT }}>No schemas.</div>
+        )}
+        {openG && list.map((s) => schemaNode(s, section))}
+      </div>
+    );
+  };
+
   return (
-    <section className={`wk-dbx${open ? ' open' : ''}`} aria-label="Database Explorer">
-      <button type="button" className="wk-dbx-head" onClick={() => setOpen((o) => !o)}
+    <section ref={sectionRef} className={`wk-dbx${open ? ' open' : ''}`}
+      style={open ? { flexBasis: `${(split * 100).toFixed(1)}%` } : undefined}
+      aria-label="Database Explorer">
+      {open && (
+        <div className={`wk-dbx-vsplit${splitDragging ? ' dragging' : ''}`}
+          onPointerDown={startVSplit} title="Drag to resize" />
+      )}
+      <button type="button" className="wk-dbx-head" onClick={toggleOpen}
         title={draft ? 'Active version (draft) — read-only' : 'Published production database (read-only)'}>
         {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         <Database size={13} />
@@ -364,7 +467,8 @@ export default function DatabaseExplorer() {
               {schemas !== null && schemas.length === 0 && !loading.has('root') && (
                 <div className="wk-exp-empty">No published schemas.</div>
               )}
-              {(schemas ?? []).map(schemaNode)}
+              {groupNode('tables', 'Canonical Tables', <Table2 size={13} />)}
+              {groupNode('views', 'Views', <Eye size={13} style={{ color: 'var(--purple)' }} />)}
             </>
           )}
         </div>

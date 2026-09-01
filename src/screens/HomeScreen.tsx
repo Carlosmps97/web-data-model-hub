@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Database, GitBranch, Inbox, Info, Undo2 } from 'lucide-react';
+import { Database, GitBranch, GitCompare, Inbox, Info, Undo2 } from 'lucide-react';
 
 import { Avatar } from '@/components/ui';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
@@ -33,6 +33,7 @@ import {
   rollbackVersion,
 } from '@/services/versioning.service';
 import { listProjects } from '@/services/projects.service';
+import VersionToolsModal from './home/VersionToolsModal';
 import type { Project } from '@/types/model';
 import type {
   DashboardSummary,
@@ -135,6 +136,11 @@ export default function HomeScreen() {
   const [requests, setRequests] = useState<VersionRow[]>([]);
   const [users, setUsers] = useState<SimUserDto[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
+
+  // Doc 65: popup "Version tools" (Compare + Details). `versionId` preselecciona
+  // la versión en la pestaña Details (botón ⓘ de la fila).
+  const [toolsOpen, setToolsOpen] =
+    useState<{ tab: 'compare' | 'details'; versionId?: string | null } | null>(null);
 
   // Rollback: restaura el modelo a CUALQUIER versión publicada pasada (crea un
   // draft que deshace las versiones posteriores). Permiso propio `rollback`.
@@ -440,6 +446,18 @@ export default function HomeScreen() {
                 <div className="dmh-vside-title">Versions</div>
                 <div className="dmh-vside-sub">{versionRows.length} total · all projects</div>
               </div>
+              <div className="dmh-vside-actions">
+                {/* Doc 65: herramientas READ-ONLY sobre versiones (comparar / detalle). */}
+                <button
+                  type="button"
+                  className="dmh-vside-tools"
+                  title="Compare versions and inspect owner, approvals and dates"
+                  onClick={() => setToolsOpen({ tab: 'compare' })}
+                >
+                  <GitCompare size={13} strokeWidth={1.7} aria-hidden />
+                  Version tools
+                </button>
+              </div>
             </div>
 
             <div className="dmh-vside-body">
@@ -459,10 +477,28 @@ export default function HomeScreen() {
                       <span className={`dmh-vside-label ${labelTone(row.status, isProduction)}`}>
                         {row.versionLabel ?? '—'}
                       </span>
+                      {/* Doc 65: la versión nació de una restauración — queda
+                          ligada a la versión restaurada sin parsear títulos. */}
+                      {row.restoredFrom && (
+                        <span
+                          className="dmh-vside-restored"
+                          title={`Restored from ${row.restoredFrom.versionLabel ?? 'a previous version'}`}
+                        >
+                          ↩{row.restoredFrom.versionLabel ?? '—'}
+                        </span>
+                      )}
                       <span className="dmh-vside-meta">
                         {proj ? `${proj} · ` : ''}
                         {userName(row.owner)}
                       </span>
+                      <button
+                        type="button"
+                        className="dmh-vside-info"
+                        title="Version details (owner, approvals, dates)"
+                        onClick={() => setToolsOpen({ tab: 'details', versionId: row.id })}
+                      >
+                        <Info size={12} strokeWidth={1.8} aria-hidden />
+                      </button>
                       {/* Rollback a CUALQUIER versión publicada pasada: restaura
                           el modelo a ese estado (deshace las posteriores). La
                           producción actual no se ofrece (ya es ese estado).
@@ -492,6 +528,18 @@ export default function HomeScreen() {
               <Info size={13} strokeWidth={1.5} aria-hidden />
               Read-only · manage versions inside Model
             </div>
+
+            {toolsOpen && (
+              <VersionToolsModal
+                versions={versions}
+                published={published}
+                users={users}
+                projects={projects}
+                initialTab={toolsOpen.tab}
+                initialVersionId={toolsOpen.versionId ?? null}
+                onClose={() => setToolsOpen(null)}
+              />
+            )}
 
             {rollbackTarget && (
               <ConfirmDialog

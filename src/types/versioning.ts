@@ -13,6 +13,13 @@
 /** Estado de un changeset/versión. Coincide 1:1 con el backend. */
 export type VersionStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
 
+/** Referencia a la versión restaurada (doc 65) — la estampa el rollback. */
+export interface RestoredFrom {
+  csId: string;
+  versionLabel?: string | null;
+  appliedAt?: string | null;
+}
+
 /**
  * Fila de versión cross-project (tabla de Review + lista del Home + requests).
  * Proyección de un changeset SIN el `changes` crudo. `versionLabel`/`title`/
@@ -32,6 +39,8 @@ export interface VersionRow {
   /** Timestamp del apply COMPLETO a producción. `approved` sin appliedAt =
    *  publish interrumpido (el backend lo excluye de la fila de producción). */
   appliedAt?: string | null;
+  /** Doc 65: presente cuando esta versión nació de una restauración. */
+  restoredFrom?: RestoredFrom | null;
 }
 
 /** Los 5 contadores del Home (global o acotado a un proyecto). */
@@ -104,6 +113,13 @@ export interface ChangesetDetail {
   submittedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
+  /** Decisor final + publicación (el backend siempre los sirve; doc 65 los tipa
+   *  para la pestaña Details del popup de herramientas de versiones). */
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  appliedAt?: string | null;
+  /** Doc 65: presente cuando esta versión nació de una restauración. */
+  restoredFrom?: RestoredFrom | null;
 }
 
 /** Una entidad tocada por el diff (tabla/columna). `collection` la agrupa. */
@@ -191,4 +207,40 @@ export interface DiffEntityDetail {
   action: 'created' | 'modified' | 'deleted';
   name: string | null;
   fields: DiffFieldRow[];
+}
+
+// ─── Version compare (doc 65 — popup "Version tools" del Home) ───────────────
+
+/** Extremo del compare: cabecera mínima de una versión publicada. */
+export interface CompareVersionRef {
+  id: string;
+  versionLabel?: string | null;
+  title?: string | null;
+  appliedAt?: string | null;
+}
+
+/** Una entidad con cambio NETO entre las dos versiones comparadas. */
+export interface CompareEntity {
+  id: string;
+  name: string | null;
+  collection: string;
+}
+
+/** Buckets por verbo de una colección dentro del compare. */
+export interface CompareBucket {
+  added: CompareEntity[];
+  edited: CompareEntity[];
+  deleted: CompareEntity[];
+}
+
+/** Respuesta de `GET /api/versions/compare` (doc 65). El backend normaliza
+ *  `from`/`to` al orden cronológico; `unreconstructed` lista entidades sin
+ *  imagen previa (publicadas antes de la captura) EXCLUIDAS del diff. */
+export interface VersionCompare {
+  from: CompareVersionRef;
+  to: CompareVersionRef;
+  versionsSpanned: number;
+  collections: Record<string, CompareBucket>;
+  counts: { added: number; edited: number; deleted: number; total: number };
+  unreconstructed: { collection: string; id: string; name: string | null }[];
 }

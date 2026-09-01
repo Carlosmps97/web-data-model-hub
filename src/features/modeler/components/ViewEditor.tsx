@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Check, ChevronDown, ChevronUp, Eye, Lock, Plus, Search, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import TagEditor from '@/components/ui/TagEditor';
@@ -6,9 +6,11 @@ import type { Tag } from '@/types/model';
 import { COLUMN_DATA_TYPES } from '@/types/model';
 import { useModelerStore } from '@/store/useModelerStore';
 import * as viewsSvc from '@/services/views.service';
-import type { View } from '@/services/views.service';
+import type { View, ViewSqlError, ViewSqlParse } from '@/services/views.service';
 import { DEFAULT_DATABRICKS_OPTS, inferJoin, viewDDL, type DdlView } from '@/features/ddl';
-import { colKey, splitColKey, serializeSources, resolveJoinOverride, type ColCfg } from '../lib/viewEditorLogic';
+import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
+import { colKey, splitColKey, serializeSources, resolveJoinOverride, inferNameJoin, type ColCfg } from '../lib/viewEditorLogic';
+import { extractDdlBody, syncViewTypeUdp } from '../lib/viewPanelLogic';
 import { defaultViewSchema } from '../lib/schemaPick';
 import SchemaSelect from './SchemaSelect';
 
@@ -19,7 +21,6 @@ const idField: React.CSSProperties = { width: '100%', height: 42, padding: '0 13
 const cellInput: React.CSSProperties = { width: '100%', height: 32, padding: '0 10px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 7, fontFamily: MONO, fontSize: 11.5, color: NAVY, outline: 'none', boxSizing: 'border-box' };
 const link: React.CSSProperties = { border: 'none', background: 'transparent', color: BLUE, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 };
 const updn = (dis: boolean): React.CSSProperties => ({ height: 13, border: 'none', background: 'transparent', cursor: dis ? 'default' : 'pointer', color: dis ? '#D6DCE6' : '#8A93A5', padding: 0, lineHeight: 0 });
-const GRID = '20px 24px 0.9fr 0.72fr 1fr 0.62fr 1.15fr';
 
 /**
  * ViewEditor multi-fuente (F3, spec §3-5). Una vista nace de 1..N tablas del
@@ -101,6 +102,50 @@ export default function ViewEditor({
   const [srcSearch, setSrcSearch] = useState('');
   const [busy, setBusy] = useState(false);
 
+  // ── Doc 64 §4b: modo Custom SQL (crear/editar una vista Personalizada).
+  // Editar una vista con customSql abre DIRECTO en este modo con su script. ──
+  const [sqlMode, setSqlMode] = useState(() => !!(view?.customSql ?? '').trim());
+  const [sqlDraft, setSqlDraft] = useState(() => (view?.customSql ?? '').trim());
+  const [sqlBusy, setSqlBusy] = useState(false);
+  const [sqlParse, setSqlParse] = useState<ViewSqlParse | null>(null);
+  const [sqlError, setSqlError] = useState<ViewSqlError | null>(null);
+  // Def "Tipo de Vista" (doc 61 §2.3): al guardar se sincroniza con el modo.
+  const [viewTypeDef, setViewTypeDef] = useState<UdpDefinition | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getUdpDefs()
+      .then((d) => { if (alive) setViewTypeDef(d.find((x) => x.level === 'view' && x.name.trim().toLowerCase() === 'tipo de vista') ?? null); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  // ── Doc 64 §3: ancho de "Source column" redimensionable (drag del header;
+  // persiste por browser — nombres largos se leen sin agrandar todo). ──
+  const [srcW, setSrcWRaw] = useState<number>(() => {
+    try { const v = Number(localStorage.getItem('dmh:veSrcW')); return v >= 140 && v <= 480 ? v : 200; } catch { return 200; }
+  });
+  const setSrcW = (w: number) => {
+    const clamped = Math.round(Math.max(140, Math.min(480, w)));
+    setSrcWRaw(clamped);
+    try { localStorage.setItem('dmh:veSrcW', String(clamped)); } catch { /* ignore */ }
+  };
+  const startSrcResize = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    const el = e.currentTarget as HTMLElement;
+    el.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const start = srcW;
+    const move = (ev: PointerEvent) => setSrcW(start + (ev.clientX - startX));
+    const up = () => {
+      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+  };
+  const grid = `20px 24px ${srcW}px 0.72fr 1fr 0.62fr 1.15fr`;
+
   // ── Grilla: orden global + config por `${tableId}::${column}` ──
   const [{ order, cfg }, setGrid] = useState(() => {
     const srcItems = (view?.sources ?? []).filter((s) => s.column);
@@ -144,13 +189,17 @@ export default function ViewEditor({
     return s;
   }, [colMeta, order, canvasTables]);
 
-  // ── JOIN (D2): inferido de las relaciones del canvas; editable ──
+  // ── JOIN (D2 + doc 64 §4a): inferido de las relaciones del canvas; para
+  // fuentes SIN relación se SUGIERE igualdad por columnas homónimas (persiste
+  // como override por diferir de la inferida — el DDL la emite verbatim). ──
   const inferred = useMemo(() => inferJoin(sourceIds, relationships, allColumns), [sourceIds, relationships, allColumns]);
+  const nameJoin = useMemo(() => inferNameJoin(sourceIds, relationships, allColumns), [sourceIds, relationships, allColumns]);
+  const suggested = useMemo(() => [inferred, nameJoin].filter(Boolean).join(' AND '), [inferred, nameJoin]);
   const [joinText, setJoinText] = useState(view?.joinOverride ?? '');
   const [joinDirty, setJoinDirty] = useState(!!view?.joinOverride);
-  // Precarga y re-sincroniza la condición inferida mientras el usuario no tocó
-  // el textarea (agregar/quitar fuentes re-infiere).
-  useEffect(() => { if (!joinDirty) setJoinText(inferred); }, [inferred, joinDirty]);
+  // Precarga y re-sincroniza la sugerencia mientras el usuario no tocó el
+  // textarea (agregar/quitar fuentes re-infiere/re-sugiere).
+  useEffect(() => { if (!joinDirty) setJoinText(suggested); }, [suggested, joinDirty]);
 
   const patch = (k: string, p: Partial<ColCfg>) => setGrid((g) => ({ ...g, cfg: { ...g.cfg, [k]: { ...g.cfg[k], ...p } } }));
   const setAll = (included: boolean) => setGrid((g) => {
@@ -173,6 +222,18 @@ export default function ViewEditor({
 
   const addSource = (tid: string) => {
     if (sourceIds.includes(tid)) return;
+    // Doc 64 r2: New view desde el toolbar arranca SIN fuentes ⇒ sin nombre
+    // (el botón quedaba deshabilitado y se leía como culpa del JOIN). Al
+    // agregar la PRIMERA fuente, nombre y esquema se precargan como en el
+    // flujo pre-amarrado (físico tal cual + `_VU` si existe, doc 52 §4) —
+    // solo si el usuario no los tocó.
+    if (sourceIds.length === 0) {
+      const t = tableById.get(tid);
+      if (t) {
+        if (!name.trim()) setName(t.physicalName);
+        if (!schema.trim()) setSchema(defaultViewSchema(t.schema, storeSchemas) || t.schema || '');
+      }
+    }
     setSourceIds((s) => [...s, tid]);
     setGrid((g) => {
       const order = [...g.order];
@@ -228,14 +289,31 @@ export default function ViewEditor({
       || (r.parentTableId === tid && prev.has(r.childTableId)));
   }), [sourceIds, relationships]);
   const needsJoin = sourceIds.length >= 2;
-  // Guardable si TODAS las fuentes conectan (JOIN derivado vivo) O hay override
-  // manual (texto ≠ inferido ⇒ se emite verbatim y cubre lo que falte).
-  const joinOk = !needsJoin || !!resolveJoinOverride(joinText, inferred) || (allConnected && !!joinText.trim());
-  const canSave = !!name.trim() && sourceIds.length > 0 && includedCount > 0 && joinOk && !busy;
+  // Doc 64 §4a: el JOIN ya NO bloquea el guardado — sin condición alguna el
+  // DDL emite un FULL OUTER JOIN explícito (ON 1 = 1). El estado solo informa:
+  // 'rel' (inferido de relaciones) · 'name' (sugerido por homónimas / manual)
+  // · 'none' (sin condición → FULL JOIN por defecto).
+  const joinState: 'rel' | 'name' | 'none' = !needsJoin || (allConnected && !!joinText.trim()) ? 'rel'
+    : joinText.trim() ? 'name' : 'none';
+  // Doc 64 §4b: en modo Custom SQL las columnas salen del script (la grilla no
+  // participa) — exige nombre + fuentes + script; el parse valida al guardar.
+  const canSave = !!name.trim() && sourceIds.length > 0 && !busy
+    && (sqlMode ? !!sqlDraft.trim() : includedCount > 0);
+  // Doc 64 r2: motivo VISIBLE del bloqueo — en la prueba viva el botón gris
+  // era por el NOMBRE vacío y se leía como si el JOIN siguiera bloqueando
+  // (el JOIN ya NO participa de canSave).
+  const disabledReason = busy ? undefined
+    : !name.trim() ? 'Give the view a name (section 1)'
+      : sourceIds.length === 0 ? 'Add at least one source table'
+        : sqlMode
+          ? (!sqlDraft.trim() ? 'Write the SQL of the view' : undefined)
+          : includedCount === 0 ? 'Select at least one column' : undefined;
 
   // Preview con el MISMO generador del Export DDL — una sola fuente de verdad.
+  // En modo Custom SQL el script ES el cuerpo (viewDDL ya resuelve el modo).
   const preview = useMemo(() => {
-    if (includedCount === 0) return '-- Select at least one column for the view.';
+    if (!sqlMode && includedCount === 0) return '-- Select at least one column for the view.';
+    if (sqlMode && !sqlDraft.trim()) return '-- Write the SELECT of the view (Custom SQL).';
     const dv: DdlView = {
       id: view?.id ?? 'new',
       name: name.trim() || 'view',
@@ -245,15 +323,40 @@ export default function ViewEditor({
       sourceTableIds: sourceIds,
       joinOverride: resolveJoinOverride(joinText, inferred),
       sources: serializeSources(order, cfg, validKeys),
+      customSql: sqlMode ? sqlDraft : undefined,
     };
     return viewDDL(dv, { ...DEFAULT_DATABRICKS_OPTS, includeComments: false },
       new Map(tables.map((t) => [t.id, t])), relationships, allColumns).trim();
-  }, [includedCount, view, name, schema, filter, sourceIds, joinText, inferred, order, cfg, validKeys, tables, relationships, allColumns]);
+  }, [sqlMode, sqlDraft, includedCount, view, name, schema, filter, sourceIds, joinText, inferred, order, cfg, validKeys, tables, relationships, allColumns]);
+
+  // Sandbox de validación (doc 61 §2.4 — mismo contrato que el panel).
+  const validateSql = async () => {
+    setSqlBusy(true); setSqlParse(null); setSqlError(null);
+    try { setSqlParse(await viewsSvc.parseViewSql(sqlDraft)); }
+    catch (e) { setSqlError(viewsSvc.parseSqlError(e)); }
+    finally { setSqlBusy(false); }
+  };
 
   const save = async () => {
     if (!canSave || ro) return;
     setBusy(true);
     try {
+      // Doc 64 §4b — modo Custom SQL: valida contra el sandbox (mismo contrato
+      // del panel doc 61) y persiste el script + columnas DERIVADAS del parse;
+      // el UDP "Tipo de Vista" se sincroniza con el modo (§2.3). Guardar desde
+      // el builder una vista que ERA Personalizada la revierte a Regular.
+      let custom: { customSql: string; customColumns: viewsSvc.ViewCustomColumn[] } | null = null;
+      if (sqlMode) {
+        try {
+          const parsed = await viewsSvc.parseViewSql(sqlDraft);
+          custom = { customSql: sqlDraft.trim(), customColumns: parsed.columns };
+          setSqlParse(parsed); setSqlError(null);
+        } catch (e) {
+          setSqlError(viewsSvc.parseSqlError(e));
+          return; // script inválido: error inline, el modal sigue abierto
+        }
+      }
+      const wasCustom = !!(view?.customSql ?? '').trim();
       const body: viewsSvc.ViewInput = {
         name: name.trim(),
         schema: schema.trim() || undefined,
@@ -268,10 +371,17 @@ export default function ViewEditor({
         // F5: definición funcional de la vista, ahora EDITABLE (panel izq).
         // Vacío ⇒ undefined (no persistimos cadena vacía).
         description: description.trim() || undefined,
+        // El payload del changeset es el DOC COMPLETO: preservar los UDP de la
+        // vista al editarla (antes se perdían) y resolver el modo custom.
+        ...(custom
+          ? { ...custom, udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, true) }
+          : wasCustom
+            ? { customSql: undefined, customColumns: [], udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, false) }
+            : { udpValues: view?.udpValues }),
       };
       if (editing && view) await viewsSvc.updateView(view.id, body);
       else await viewsSvc.createView(body);
-      pushToast(editing ? 'Vista actualizada' : 'Vista creada');
+      pushToast(editing ? 'View updated' : 'View created');
       onSaved();
       onClose();
     } catch (e) {
@@ -293,7 +403,7 @@ export default function ViewEditor({
       icon={Eye}
       backdrop="canvas"
       canvasTop={136}
-      width={1320}
+      width={1460}
       onClose={onClose}
       footer={
         ro ? (
@@ -303,12 +413,14 @@ export default function ViewEditor({
           </>
         ) : (
           <>
-            <span style={{ flex: 1, fontSize: 11.5, color: '#56607A' }}>
-              A view never copies data — it derives from {sourceIds.length === 1 ? 'its source table' : `its ${sourceIds.length} source tables`}.
+            <span style={{ flex: 1, fontSize: 11.5, color: disabledReason ? '#B45309' : '#56607A', fontWeight: disabledReason ? 600 : 400 }}>
+              {disabledReason
+                ? <>To {editing ? 'save' : 'create'} the view: {disabledReason}.</>
+                : <>A view never copies data — it derives from {sourceIds.length === 1 ? 'its source table' : `its ${sourceIds.length} source tables`}.</>}
             </span>
             <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
             <button className="rd-btn rd-btn-sm" disabled={!canSave} onClick={save}
-              title={!joinOk ? 'Define the JOIN condition between the sources' : includedCount === 0 ? 'Select at least one column' : undefined}
+              title={disabledReason}
               style={{ background: canSave ? PURPLE : '#CBD2DE', color: '#fff', border: 'none' }}>
               {editing ? 'Save changes' : 'Create view'}
             </button>
@@ -413,9 +525,27 @@ export default function ViewEditor({
           <div style={{ padding: '14px 20px 12px', borderBottom: '1px solid #EEF1F5' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <span style={{ width: 22, height: 22, borderRadius: 6, background: '#F3EEFF', color: PURPLE, fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
-              <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: NAVY }}>Columns — include, rename, express &amp; cast</h2>
-              <span style={{ marginLeft: 'auto', fontSize: 11.5, color: includedCount === 0 ? '#C0392B' : MUTED, fontWeight: includedCount === 0 ? 700 : 400 }}>{includedCount}/{validKeys.size} included</span>
+              <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: NAVY }}>
+                {sqlMode ? 'Custom SQL — the script defines the view' : <>Columns — include, rename, express &amp; cast</>}
+              </h2>
+              {/* Doc 64 §4b: modo del cuerpo de la vista — builder o script. */}
+              <div className="rd-seg" style={{ marginLeft: 'auto' }}>
+                <button type="button" className={!sqlMode ? 'active' : ''} onClick={() => setSqlMode(false)}>Pick columns</button>
+                <button type="button" className={sqlMode ? 'active' : ''}
+                  onClick={() => {
+                    // Primer pase a Custom SQL: precarga el cuerpo del DDL
+                    // generado (mismo criterio del panel doc 61).
+                    if (!sqlDraft.trim() && includedCount > 0) setSqlDraft(extractDdlBody(preview));
+                    setSqlMode(true);
+                  }}>
+                  Custom SQL
+                </button>
+              </div>
+              {!sqlMode && (
+                <span style={{ fontSize: 11.5, color: includedCount === 0 ? '#C0392B' : MUTED, fontWeight: includedCount === 0 ? 700 : 400 }}>{includedCount}/{validKeys.size} included</span>
+              )}
             </div>
+            {!sqlMode && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
               <div style={{ position: 'relative', flex: 1, maxWidth: 320 }}>
                 <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: MUTED }} />
@@ -427,13 +557,22 @@ export default function ViewEditor({
               <span style={{ color: '#D6DCE6' }}>·</span>
               <button type="button" style={{ ...link, color: MUTED }} onClick={() => setAll(false)}>Clear</button>
             </div>
+            )}
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px', minHeight: 0 }}>
+            {/* Doc 64 §4b: dos cuerpos — builder de columnas o Custom SQL. */}
+            {!sqlMode && (<>
             {/* grilla de columnas AGRUPADA por tabla fuente */}
             <div style={{ border: '1px solid #EAEDF2', borderRadius: 12, overflow: 'hidden' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: GRID, gap: 10, padding: '9px 13px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
-                <span /><span /><span>Source column</span><span>Output name</span><span>Expression · free SQL</span><span>Cast · type</span><span>Definition</span>
+              <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 10, padding: '9px 13px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
+                <span /><span />
+                {/* Doc 64 §3: columna redimensionable (drag del borde derecho). */}
+                <span style={{ position: 'relative', paddingRight: 12 }}>Source column
+                  <span title="Drag to resize this column" onPointerDown={startSrcResize}
+                    style={{ position: 'absolute', right: 2, top: -9, bottom: -9, width: 9, cursor: 'col-resize', borderRight: '2px solid #D9DFEA' }} />
+                </span>
+                <span>Output name</span><span>Expression · free SQL</span><span>Cast · type</span><span>Definition</span>
               </div>
               {sourceIds.length === 0 && <div style={{ padding: '14px 13px', fontSize: 12.5, color: MUTED }}>Add a source table to pick columns.</div>}
               {sourceIds.map((tid) => {
@@ -451,7 +590,7 @@ export default function ViewEditor({
                       const meta = colMeta.get(k) ?? { name: splitColKey(k).column, dataType: '', description: '' };
                       const cc = cfg[k] ?? { included: false, output: meta.name, expression: '', castType: '' };
                       return (
-                        <div key={k} style={{ display: 'grid', gridTemplateColumns: GRID, alignItems: 'center', gap: 10, padding: '7px 13px', borderBottom: '1px solid #F2F4F8' }}>
+                        <div key={k} style={{ display: 'grid', gridTemplateColumns: grid, alignItems: 'center', gap: 10, padding: '7px 13px', borderBottom: '1px solid #F2F4F8' }}>
                           <button type="button" onClick={() => patch(k, { included: !cc.included })} aria-pressed={cc.included} title={cc.included ? 'Incluida' : 'Excluida'}
                             style={{ width: 18, height: 18, borderRadius: 5, border: cc.included ? 'none' : '1.5px solid #CBD2DE', background: cc.included ? BLUE : '#fff', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0 }}>
                             {cc.included && <Check size={11} strokeWidth={2.6} color="#fff" />}
@@ -460,7 +599,10 @@ export default function ViewEditor({
                             <button type="button" onClick={() => move(k, -1)} disabled={searching} title="Subir" style={updn(searching)}><ChevronUp size={13} /></button>
                             <button type="button" onClick={() => move(k, 1)} disabled={searching} title="Bajar" style={updn(searching)}><ChevronDown size={13} /></button>
                           </span>
-                          <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 600, color: cc.included ? NAVY : '#A9B1BE', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {/* Doc 64 §3: title = nombre completo · tipo (lectura
+                              inmediata de nombres largos sin redimensionar). */}
+                          <span title={`${meta.name}${meta.dataType ? ` · ${meta.dataType}` : ''}`}
+                            style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 600, color: cc.included ? NAVY : '#A9B1BE', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {meta.name}<span style={{ fontWeight: 400, color: MUTED, fontSize: 11 }}>  {meta.dataType}</span>
                           </span>
                           <input style={{ ...cellInput, opacity: cc.included ? 1 : 0.5 }} value={cc.output} disabled={!cc.included}
@@ -487,14 +629,15 @@ export default function ViewEditor({
             </div>
             {searching && <div style={{ marginTop: 7, fontSize: 11, color: MUTED }}>Clear the search to reorder columns.</div>}
 
-            {/* ── JOIN (2+ fuentes): inferido de relaciones (D2), editable ── */}
+            {/* ── JOIN (2+ fuentes, doc 64 §4a): inferido de relaciones (D2),
+                sugerido por columnas homónimas o manual — YA NO bloquea. ── */}
             {needsJoin && (
-              <div style={{ marginTop: 14, border: `1px solid ${joinOk ? '#DDE2EC' : '#F3C1B8'}`, borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ marginTop: 14, border: `1px solid ${joinState === 'none' ? '#F0DDB0' : joinState === 'name' ? '#E1D4FB' : '#DDE2EC'}`, borderRadius: 12, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
                   JOIN · condition between sources
-                  {allConnected
-                    ? <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#1E7F4F' }}>inferred from the model relationships</span>
-                    : <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#C0392B' }}>{inferred ? 'some sources have no modeled relationship — complete the condition' : 'no modeled relationship — write it manually'}</span>}
+                  {joinState === 'rel' && <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#1E7F4F' }}>inferred from the model relationships</span>}
+                  {joinState === 'name' && <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: PURPLE_DK }}>{nameJoin && !joinDirty ? 'suggested by matching column names — review it' : 'manual condition — emitted verbatim'}</span>}
+                  {joinState === 'none' && <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#8A5B00' }}>optional — empty saves as FULL OUTER JOIN (1 = 1)</span>}
                 </div>
                 <textarea
                   value={joinText}
@@ -502,13 +645,61 @@ export default function ViewEditor({
                   placeholder="t1.column = t2.column"
                   style={{ display: 'block', width: '100%', minHeight: 64, padding: '11px 13px', border: 'none', fontFamily: MONO, fontSize: 12, lineHeight: 1.6, color: NAVY, resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
                 />
-                {!joinOk && (
-                  <div style={{ padding: '0 14px 10px', fontSize: 11.5, color: '#C0392B', fontWeight: 600 }}>
-                    {joinText.trim()
-                      ? 'Some sources have no modeled relationship: edit the JOIN condition to cover them before saving.'
-                      : 'Define the JOIN condition to save: there is no modeled relationship between the sources.'}
+                {joinState === 'none' && (
+                  <div style={{ padding: '0 14px 10px', fontSize: 11.5, color: '#8A5B00', fontWeight: 600 }}>
+                    No modeled relationship and no matching column names between the sources — you can still save:
+                    the DDL defaults to a FULL OUTER JOIN (ON 1 = 1). Write the condition here if you need a real key match.
                   </div>
                 )}
+              </div>
+            )}
+            </>)}
+
+            {/* ── Custom SQL (doc 64 §4b): el script ES el cuerpo del CREATE VIEW ── */}
+            {sqlMode && (
+              <div style={{ border: '1px solid #E1D4FB', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F8F5FF', borderBottom: '1px solid #EEE7FB', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: PURPLE }}>
+                  Body of CREATE OR REPLACE VIEW · Databricks SQL
+                  <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: MUTED }}>
+                    WITH … / joins / subqueries supported — name every output column (no SELECT *)
+                  </span>
+                </div>
+                <textarea
+                  value={sqlDraft}
+                  spellCheck={false}
+                  onChange={(e) => { setSqlDraft(e.target.value); setSqlParse(null); setSqlError(null); }}
+                  placeholder={'WITH base AS (\n  SELECT …\n)\nSELECT col1, col2 FROM base'}
+                  style={{ display: 'block', width: '100%', minHeight: 240, padding: '12px 14px', border: 'none', fontFamily: MONO, fontSize: 12.5, lineHeight: 1.6, color: NAVY, resize: 'vertical', outline: 'none', boxSizing: 'border-box', whiteSpace: 'pre' }}
+                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderTop: '1px solid #EEE7FB', background: '#FCFBFF', flexWrap: 'wrap' }}>
+                  <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={sqlBusy || !sqlDraft.trim()} onClick={() => void validateSql()}>
+                    {sqlBusy && <span className="rd-spin" aria-hidden />} Validate
+                  </button>
+                  {sqlError && (
+                    <span style={{ fontSize: 11.5, color: '#C0392B', fontWeight: 600 }}>
+                      Line {sqlError.line}, col {sqlError.col} — {sqlError.message}
+                    </span>
+                  )}
+                  {sqlParse && !sqlError && (
+                    <span style={{ fontSize: 11.5, color: '#1E7F4F', fontWeight: 600 }}>
+                      ✓ Valid — {sqlParse.columns.length} column{sqlParse.columns.length === 1 ? '' : 's'}
+                      {sqlParse.tables.length > 0 ? ` · reads ${sqlParse.tables.join(', ')}` : ''}
+                    </span>
+                  )}
+                  {!sqlError && !sqlParse && (
+                    <span style={{ fontSize: 11, color: MUTED }}>The script is validated again on save; the output columns are derived from it.</span>
+                  )}
+                </div>
+              </div>
+            )}
+            {sqlMode && editing && !(view?.customSql ?? '').trim() && (
+              <div style={{ marginTop: 8, fontSize: 11.5, color: '#8A5B00', background: '#FFF3D6', border: '1px solid #F0E2B6', borderRadius: 8, padding: '6px 10px' }}>
+                Saving switches this view to <strong>Personalizada</strong> — the script becomes the source of truth (the column picks stay stored but inactive).
+              </div>
+            )}
+            {!sqlMode && editing && !!(view?.customSql ?? '').trim() && (
+              <div style={{ marginTop: 8, fontSize: 11.5, color: '#8A5B00', background: '#FFF3D6', border: '1px solid #F0E2B6', borderRadius: 8, padding: '6px 10px' }}>
+                This view is <strong>Personalizada</strong> — saving from the column builder discards the custom script and reverts it to Regular.
               </div>
             )}
 

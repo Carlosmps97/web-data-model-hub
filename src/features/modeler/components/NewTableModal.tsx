@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Table2, Search, Plus, Check } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import * as gov from '@/features/governance/services/governance.service';
@@ -7,6 +7,7 @@ import { useModelerStore } from '@/store/useModelerStore';
 import { apiErrorMessage } from '@/services/http';
 import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
+import UdpAssign from './UdpAssign';
 import { tableSchemasCached } from '../services/schemaPartition';
 
 type Mode = 'blank' | 'import';
@@ -21,7 +22,7 @@ type Mode = 'blank' | 'import';
  */
 export default function NewTableModal({ onClose, onCreate }: {
   onClose: () => void;
-  onCreate: (input: { logicalName: string; physicalName?: string; schema?: string }) => Promise<void>;
+  onCreate: (input: { logicalName: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
 }) {
   const [mode, setMode] = useState<Mode>('blank');
 
@@ -32,6 +33,15 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [schema, setSchema] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Doc 64 §6: metadata del alta — definición funcional + UDPs en el MISMO
+  // popup (antes había que crear y luego ir a Properties). Ref espejo de los
+  // UDP: el blur del input (commit de UdpAssign) dispara en el MISMO gesto que
+  // el click en "Create table" — el submit lee el ref (sincrónico) para no
+  // perder ese último valor contra el batching del estado (patrón doc 40).
+  const [description, setDescription] = useState('');
+  const [udpValues, setUdpValues] = useState<Record<string, string>>({});
+  const udpRef = useRef<Record<string, string>>({});
+  const setUdp = (next: Record<string, string>) => { udpRef.current = next; setUdpValues(next); };
 
   // Auto-physicalize (scope 'table') con debounce, salvo override manual.
   // `alive` descarta la respuesta si el efecto ya se limpió (el usuario siguió
@@ -54,7 +64,10 @@ export default function NewTableModal({ onClose, onCreate }: {
     setBusy(true);
     setError(null);
     try {
-      await onCreate({ logicalName: ln, physicalName: physical.trim() || undefined, schema: schema.trim() || undefined });
+      await onCreate({
+        logicalName: ln, physicalName: physical.trim() || undefined, schema: schema.trim() || undefined,
+        description: description.trim() || undefined, udpValues: udpRef.current,
+      });
       onClose();
     } catch (e) {
       // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
@@ -176,6 +189,17 @@ export default function NewTableModal({ onClose, onCreate }: {
             {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
                 de TABLAS; se crean desde Structure · Esquemas. */}
             <SchemaSelect kind="tables" value={schema} onChange={setSchema} style={{ width: '100%' }} />
+          </div>
+          {/* Doc 64 §6: definición funcional + UDPs en el alta (como el popup
+              de New column, doc 40). */}
+          <div style={field}>
+            <label style={lbl}>Functional definition</label>
+            <textarea className="wk-pp-textarea" placeholder="What this table represents (business definition)…"
+              value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+          <div style={{ ...field, paddingTop: 12, borderTop: '1px solid #EEF1F6' }}>
+            <label style={lbl}>User Defined Properties</label>
+            <UdpAssign level="table" values={udpValues} onChange={setUdp} />
           </div>
           {error && (
             <div className="rd-small" role="alert" style={{ color: 'var(--error, #C4314B)', marginTop: 2 }}>

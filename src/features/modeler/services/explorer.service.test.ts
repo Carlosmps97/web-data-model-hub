@@ -18,7 +18,7 @@ vi.mock('@/features/governance/services/changeset.service', () => ({
 import { apiGet } from '@/services/http';
 import * as csvc from '@/features/governance/services/changeset.service';
 import { useChangesetStore } from '@/store/useChangesetStore';
-import { explorerSearchColumns } from './explorer.service';
+import { clampDbxSplit, explorerSearchColumns, schemasForSection } from './explorer.service';
 
 describe('explorerSearchColumns (búsqueda por columna del Database Explorer)', () => {
   beforeEach(() => {
@@ -63,5 +63,47 @@ describe('explorerSearchColumns (búsqueda por columna del Database Explorer)', 
     const out = await explorerSearchColumns('nada', 50);
     expect(out).toEqual([]);
     expect(csvc.effective).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('schemasForSection (secciones Canonical Tables / Views del Database Explorer)', () => {
+  const schemas = [
+    { id: 's1', name: 'ddv_cliente', kind: 'tables' as const },
+    { id: 's2', name: 'ddv_cliente_vu', kind: 'views' as const },
+    { id: 's3', name: 'legacy_sin_kind', kind: null },
+    { id: 's4', name: 'otro_sin_kind' }, // kind ausente (docs viejos)
+  ];
+
+  it("sección 'tables' = kind tables + sin clasificar (regla doc 52)", () => {
+    expect(schemasForSection(schemas, 'tables').map((s) => s.id)).toEqual(['s1', 's3', 's4']);
+  });
+
+  it("sección 'views' = kind views + sin clasificar", () => {
+    expect(schemasForSection(schemas, 'views').map((s) => s.id)).toEqual(['s2', 's3', 's4']);
+  });
+
+  it('no muta la lista de entrada', () => {
+    const copia = [...schemas];
+    schemasForSection(schemas, 'views');
+    expect(schemas).toEqual(copia);
+  });
+});
+
+describe('clampDbxSplit (fracción de alto del Database Explorer en el sidebar)', () => {
+  it('respeta valores dentro del rango', () => {
+    expect(clampDbxSplit(0.5)).toBe(0.5);
+    expect(clampDbxSplit(0.15)).toBe(0.15);
+    expect(clampDbxSplit(0.85)).toBe(0.85);
+  });
+
+  it('recorta a los límites 15%–85%', () => {
+    expect(clampDbxSplit(0.05)).toBe(0.15);
+    expect(clampDbxSplit(0.99)).toBe(0.85);
+    expect(clampDbxSplit(-1)).toBe(0.15);
+  });
+
+  it('valores no finitos (localStorage corrupto) caen al default 50%', () => {
+    expect(clampDbxSplit(Number.NaN)).toBe(0.5);
+    expect(clampDbxSplit(Number.POSITIVE_INFINITY)).toBe(0.5);
   });
 });

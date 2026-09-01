@@ -110,6 +110,7 @@ export const searchTables = (q: string, limit = 50, schema?: string) => {
 export type { HistoryField, HistoryItem, HistoryUser } from './changeset.service';
 export const tableHistory = (id: string, limit = 50) => csvc.entityHistory('canonical_tables', id, limit);
 export const columnHistory = (id: string, limit = 50) => csvc.entityHistory('canonical_columns', id, limit);
+export const viewHistory = (id: string, limit = 50) => csvc.entityHistory('views', id, limit);
 
 export const createTable = (t: CanonicalTable) => rec('canonical_tables', t.id, 'upsert', { ...t });
 /** Borra la tabla en el changeset (soft-delete VERSIONADO). El cascade

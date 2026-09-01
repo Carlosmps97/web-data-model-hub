@@ -161,7 +161,8 @@ export function buildDiagramScene(input: SceneInput): Scene {
 
   interface ViewBox extends Box { v: View; rows: ReturnType<typeof viewNodeRows>; present: string[] }
   const viewBoxes: ViewBox[] = [];
-  for (const v of diagram?.views ?? []) {
+  // Doc 63: vistas SOLO en modelo físico — paridad export ↔ canvas.
+  for (const v of (viewMode === 'physical' ? diagram?.views ?? [] : [])) {
     const present = viewSourceIds(v).filter((id) => tableBoxes.has(id));
     if (!present.length) continue;
     const rows = viewNodeRows(v, colTypes);

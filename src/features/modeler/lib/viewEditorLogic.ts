@@ -43,3 +43,49 @@ export function resolveJoinOverride(joinText: string, inferred: string): string 
   const t = joinText.trim();
   return t && t !== inferred.trim() ? t : undefined;
 }
+
+/** Doc 64 §4a — condición de JOIN sugerida por COLUMNAS HOMÓNIMAS para las
+ *  fuentes SIN relación modelada con las previas. Para cada fuente k>0 no
+ *  conectada, toma la PRIMERA fuente previa con columnas de igual physicalName
+ *  (case-insensitive) y emite `tPrev.COL = tK.COL` por cada homónima —
+ *  priorizando las que son PK en ALGUNO de los dos lados (si ninguna es PK,
+ *  usa todas las homónimas). Devuelve '' si no hay nada que sugerir. Pura;
+ *  alias posicionales t1, t2… (mismo contrato que inferJoin). La sugerencia se
+ *  precarga en el textarea del editor y persiste como joinOverride (difiere de
+ *  la inferida por relaciones), así el DDL la emite verbatim. */
+export function inferNameJoin(
+  sourceTableIds: string[],
+  relationships: { parentTableId: string; childTableId: string }[],
+  columns: { tableId: string; physicalName: string; isPrimaryKey?: boolean }[],
+): string {
+  if (sourceTableIds.length < 2) return '';
+  const alias = new Map(sourceTableIds.map((id, i) => [id, `t${i + 1}`]));
+  const byTable = new Map<string, { physicalName: string; isPrimaryKey?: boolean }[]>();
+  for (const c of columns) {
+    if (!alias.has(c.tableId)) continue;
+    const a = byTable.get(c.tableId) ?? [];
+    a.push(c);
+    byTable.set(c.tableId, a);
+  }
+  const conds: string[] = [];
+  for (let k = 1; k < sourceTableIds.length; k++) {
+    const cur = sourceTableIds[k];
+    const prevIds = sourceTableIds.slice(0, k);
+    const connected = relationships.some((r) =>
+      (r.childTableId === cur && prevIds.includes(r.parentTableId))
+      || (r.parentTableId === cur && prevIds.includes(r.childTableId)));
+    if (connected) continue;                       // esa fuente ya la cubre inferJoin
+    const curByName = new Map((byTable.get(cur) ?? []).map((c) => [c.physicalName.toLowerCase(), c]));
+    for (const p of prevIds) {
+      const shared = (byTable.get(p) ?? []).filter((c) => curByName.has(c.physicalName.toLowerCase()));
+      if (!shared.length) continue;
+      const keyish = shared.filter((c) => c.isPrimaryKey || curByName.get(c.physicalName.toLowerCase())?.isPrimaryKey);
+      for (const c of (keyish.length ? keyish : shared)) {
+        const curCol = curByName.get(c.physicalName.toLowerCase())!;
+        conds.push(`${alias.get(p)}.${c.physicalName} = ${alias.get(cur)}.${curCol.physicalName}`);
+      }
+      break;                                       // una fuente previa alcanza
+    }
+  }
+  return conds.join(' AND ');
+}

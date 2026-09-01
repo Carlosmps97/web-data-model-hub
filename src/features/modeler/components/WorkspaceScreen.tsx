@@ -12,6 +12,7 @@ import ModelExplorer from './ModelExplorer';
 import DatabaseExplorer from './DatabaseExplorer';
 import ColumnEditor from './ColumnEditor';
 import ColumnPropertiesPanel from './ColumnPropertiesPanel';
+import ViewPropertiesPanel from '@/features/modeler/components/ViewPropertiesPanel';
 import PropertiesPanel from './PropertiesPanel';
 
 export const pushToast = (m: string, k?: 'err') => (k === 'err' ? toast.error(m) : toast.success(m));
@@ -25,6 +26,7 @@ export default function WorkspaceScreen() {
   const addColumn = useModelerStore((s) => s.addColumn);
   const selectedTableId = useModelerStore((s) => s.selectedTableId);
   const selectedColumnId = useModelerStore((s) => s.selectedColumnId);
+  const selectedViewId = useModelerStore((s) => s.selectedViewId);
   const viewMode = useModelerStore((s) => s.viewMode);
   const setViewMode = useModelerStore((s) => s.setViewMode);
   const openMode = useSessionStore((s) => s.openMode);
@@ -159,7 +161,7 @@ export default function WorkspaceScreen() {
   };
 
   return (
-    <div className={`wk${(selectedTableId || selectedColumnId) && openMode ? ' has-props' : ''}`}
+    <div className={`wk${(selectedTableId || selectedColumnId || selectedViewId) && openMode ? ' has-props' : ''}`}
       style={{
         ...(propsWidth ? { ['--props-w']: `${propsWidth}px` } : {}),
         ...(explWidth ? { ['--expl-w']: `${explWidth}px` } : {}),
@@ -211,7 +213,9 @@ export default function WorkspaceScreen() {
           columna seleccionada, su Properties reemplaza al de la tabla. */}
       {selectedColumnId && openMode
         ? <ColumnPropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />
-        : selectedTableId && openMode && <PropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />}
+        : selectedViewId && openMode
+          ? <ViewPropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />
+          : selectedTableId && openMode && <PropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />}
       {columnTarget && <ColumnEditor tableId={columnTarget} onClose={() => setColumnTarget(null)} onAdd={addColumn} />}
       <OpenModelModal open={openModelShown} onClose={closeOpenModel} published={published} users={users} />
       {/* El <Toaster> ahora es global (App.tsx): uno solo para toda la app. */}

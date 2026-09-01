@@ -9,6 +9,7 @@ import * as gov from '@/features/governance/services/governance.service';
 import type { CanonicalColumn, CanonicalTable, ParentDomain } from '@/features/governance/services/governance.service';
 import { isComplexTypeStart } from '../lib/complexTypes';
 import { applyDomainPick } from '../lib/domainType';
+import { canonicalDefaultType } from '../lib/typePick';
 import { nextPkPosition, pkInKeyOrder } from '../lib/keyOrder';
 import { createNameSync, type NameSync } from '../lib/nameSync';
 import { syncRenamedColumnInViews } from '../lib/viewSync';
@@ -286,7 +287,9 @@ function ColumnPropsBody({ col, table, cols, tab, domains, canEdit, onPatch, onD
   const onDataType = (v: string) => {
     setDataType(v);
     const dom = domains.find((d) => d.id === domainId);
-    debounced('dataType', { dataType: v, typeOverridden: !!dom && v.trim() !== (dom.defaultDataType ?? '') });
+    // Doc 64 r2: el override se compara contra el default HOMOLOGADO (un
+    // dominio legacy `Array` equivale a `ARRAY<>` en la plataforma).
+    debounced('dataType', { dataType: v, typeOverridden: !!dom && v.trim() !== canonicalDefaultType(dom.defaultDataType) });
   };
   const onDomain = (id: string) => {
     // El select refleja el cambio AL INSTANTE (estado local); el reload del
@@ -295,13 +298,14 @@ function ColumnPropsBody({ col, table, cols, tab, domains, canEdit, onPatch, onD
     const dom = domains.find((d) => d.id === id);
     // Regla dominio→tipo (doc 46, applyDomainPick): elegir OTRO dominio
     // RE-APLICA su default aunque hubiera override manual; re-elegir el MISMO
-    // dominio respeta el override; quitar el dominio conserva el tipo.
+    // dominio respeta el override; quitar el dominio conserva el tipo. El
+    // default viaja HOMOLOGADO (doc 64 r2).
     const next = applyDomainPick({
       currentDomainId: col.parentDomainId ?? '',
       typeOverridden: !!col.typeOverridden,
       currentType: dataType,
       nextDomainId: id,
-      nextDefault: dom?.defaultDataType,
+      nextDefault: dom?.defaultDataType != null ? canonicalDefaultType(dom.defaultDataType) : undefined,
     });
     // Un tipeo de tipo aún en debounce quedó obsoleto: si volara después,
     // pisaría el default re-aplicado con el tipo viejo (lost-update).

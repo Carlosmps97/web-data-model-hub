@@ -24,6 +24,7 @@ import type {
   SimUserDto,
   SnapshotBody,
   SubmitBody,
+  VersionCompare,
   VersionRow,
 } from '@/types/versioning';
 import { ApiError, apiGet, apiPost } from './http';
@@ -128,8 +129,9 @@ export interface DiffSummary {
   models: string[];
 }
 
-/** Orden y labels EN INGLÉS de la matriz del resumen (regla UI). */
-const SUMMARY_ROWS: [string, string][] = [
+/** Orden y labels EN INGLÉS de la matriz del resumen (regla UI). Exportado:
+ *  el popup de compare (doc 65) reusa el mismo orden/labels. */
+export const SUMMARY_ROWS: [string, string][] = [
   ['canonical_tables', 'Tables'],
   ['canonical_columns', 'Columns'],
   ['views', 'Views'],
@@ -211,6 +213,36 @@ export function rollbackVersion(id: string): Promise<VersionRow> {
 /** Agrega un comentario al hilo del changeset; devuelve el changeset refrescado. */
 export function addComment(id: string, body: { text: string }): Promise<ChangesetDetail> {
   return apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/comments`, body);
+}
+
+// ─── Version compare (doc 65 — popup "Version tools" del Home) ───────────────
+
+/** Label EN INGLÉS de una colección versionada (misma tabla del resumen). */
+export function collectionLabel(collection: string): string {
+  return SUMMARY_ROWS.find(([c]) => c === collection)?.[1] ?? collection;
+}
+
+/**
+ * Diferencias NETAS entre dos versiones publicadas (cualquier orden de ids —
+ * el backend normaliza a cronológico). READ-ONLY: deriva del mismo ledger del
+ * historial/rollback, no toca el flujo de aprobación.
+ */
+export function compareVersions(fromId: string, toId: string): Promise<VersionCompare> {
+  const qs = new URLSearchParams({ fromId, toId });
+  return apiGet<VersionCompare>(`${API_BASE}/api/versions/compare?${qs.toString()}`);
+}
+
+/** Diff de campos antes→después de entidades puntuales del rango comparado
+ *  (shape del popup doc 31 — mismo renderer). Máx. 200 items por llamada. */
+export function compareVersionDetails(
+  fromId: string,
+  toId: string,
+  items: { collection: string; entityId: string }[],
+): Promise<{ items: DiffEntityDetail[] }> {
+  return apiPost<{ items: DiffEntityDetail[] }>(
+    `${API_BASE}/api/versions/compare/details`,
+    { fromId, toId, items },
+  );
 }
 
 /**

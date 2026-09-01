@@ -146,3 +146,22 @@ export async function explorerSearchColumns(q: string, limit = 50): Promise<DbxC
     }];
   });
 }
+
+// ── Secciones del Explorer (doc 60) ─────────────────────────────────────────
+
+/** Sección del Database Explorer: "Canonical Tables" o "Views". */
+export type DbxSection = 'tables' | 'views';
+
+/** Esquemas visibles en una sección, por `schemas.kind` (doc 44). Un esquema
+ *  SIN clasificar entra en AMBAS secciones (misma regla que los combos doc 52). */
+export const schemasForSection = (schemas: DbxSchema[], section: DbxSection): DbxSchema[] =>
+  schemas.filter((s) => !s.kind || s.kind === section);
+
+/** Límites del split vertical Model Explorer ⇄ Database Explorer. */
+export const DBX_SPLIT_MIN = 0.15;
+export const DBX_SPLIT_MAX = 0.85;
+
+/** Clamp de la fracción de alto del Database Explorer dentro del sidebar.
+ *  No-finito (localStorage corrupto) → default 50%. */
+export const clampDbxSplit = (f: number): number =>
+  Number.isFinite(f) ? Math.min(DBX_SPLIT_MAX, Math.max(DBX_SPLIT_MIN, f)) : 0.5;

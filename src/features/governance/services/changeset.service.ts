@@ -84,11 +84,13 @@ export interface HistoryItem {
   publishedBy?: HistoryUser | null;
   approvedBy: HistoryUser[];
   origin?: HistoryOrigin | null;
+  /** Doc 65: presente cuando la versión del evento fue una RESTAURACIÓN. */
+  restoredFrom?: { csId: string; versionLabel?: string | null; appliedAt?: string | null } | null;
   name?: string | null;
   fields: HistoryField[];
   synthetic: boolean;
 }
 /** Historial publicado de una entidad — read-only, deriva del ledger de
  *  changesets aplicados (no existe para drafts nunca publicados). */
-export const entityHistory = (collection: 'canonical_tables' | 'canonical_columns', entityId: string, limit = 50) =>
+export const entityHistory = (collection: 'canonical_tables' | 'canonical_columns' | 'views', entityId: string, limit = 50) =>
   apiGet<{ items: HistoryItem[] }>(`${CS}/history/${collection}/${encodeURIComponent(entityId)}?limit=${limit}`);

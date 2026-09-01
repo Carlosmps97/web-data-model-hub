@@ -12,6 +12,40 @@ const BASE = {
 };
 const withView = (v: DdlView): DatabricksDdlInput => ({ ...BASE, views: [v] });
 
+describe('viewDDL — vista Personalizada (doc 61)', () => {
+  const custom: DdlView = {
+    id: 'v', tableId: 't1', name: 'v_custom', schema: 'core',
+    customSql: 'WITH b AS (SELECT ID FROM core.CLIENTE)\nSELECT ID FROM b;',
+    // La config Regular queda INACTIVA mientras el script gobierna:
+    sources: [{ column: 'NOMBRE' }], filter: "estado = 'A'",
+  };
+
+  it('el script ES el cuerpo del CREATE VIEW (gana a sources/filter)', () => {
+    // Asertar sobre el statement de la VISTA (el export completo también trae
+    // el CREATE TABLE de la fuente, que sí lista NOMBRE).
+    const ddl = viewDDL(custom, { ...DEF, includeViews: true }, new Map(BASE.tables.map((t) => [t.id, t as DdlTable])));
+    expect(ddl).toContain('CREATE OR REPLACE VIEW `core`.`v_custom` AS\nWITH b AS (SELECT ID FROM core.CLIENTE)\nSELECT ID FROM b;');
+    expect(ddl).not.toContain('NOMBRE');
+    expect(ddl).not.toContain('WHERE');
+  });
+
+  it('quita el ; final del script (el generador agrega el suyo)', () => {
+    const ddl = viewDDL(custom, { ...DEF, includeViews: true }, new Map(BASE.tables.map((t) => [t.id, t as DdlTable])));
+    expect(ddl).not.toContain(';;');
+  });
+
+  it('COMMENT de la definición funcional sigue funcionando', () => {
+    const ddl = databricksDdl(withView({ ...custom, description: 'vista custom' }), { ...DEF, includeViews: true, includeComments: true });
+    expect(ddl).toContain("COMMENT 'vista custom' AS");
+  });
+
+  it('customSql vacío/espacios cae al camino Regular', () => {
+    const ddl = databricksDdl(withView({ ...custom, customSql: '   ' }), { ...DEF, includeViews: true });
+    expect(ddl).toContain('NOMBRE');
+    expect(ddl).toContain("WHERE estado = 'A'");
+  });
+});
+
 describe('databricksDdl — vistas (editor 07b-2)', () => {
   it('NO emite vistas cuando includeViews=false', () => {
     expect(databricksDdl(withView({ id: 'v', tableId: 't1', name: 'v_c', schema: 'core' }), { ...DEF, includeViews: false })).not.toContain('VIEW');
@@ -143,9 +177,11 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     expect(ddl).toContain('ON t1.ID = t2.CLIENTE_ID AND t2.SALDO > 0');
   });
 
-  it('sin relación ni joinOverride ⇒ fallback explícito 1 = 1 comentado', () => {
+  it('sin relación ni joinOverride ⇒ FULL OUTER JOIN con 1 = 1 comentado (doc 64 §4a)', () => {
     const ddl = databricksDdl({ ...TWO, relationships: [], views: [V] }, { ...DEF, includeViews: true });
-    expect(ddl).toContain('ON 1 = 1 /* no modeled relationship between the sources */');
+    expect(ddl).toContain('FULL OUTER JOIN');
+    expect(ddl).toContain('ON 1 = 1 /* no join condition defined — defaulted to FULL OUTER JOIN */');
+    expect(ddl).not.toContain('INNER JOIN');
   });
 
   it('UNA fuente: sin alias ni cualificación (regresión legacy); CAST sin alias conserva el nombre', () => {
@@ -166,7 +202,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
   it('fuente FUERA del contexto (tabla desconocida): id backtickeado visible', () => {
     const v: DdlView = { ...V, sourceTableIds: ['t1', 'tx'], sources: [{ column: 'ID', tableId: 't1' }] };
     const ddl = databricksDdl({ ...TWO, views: [v] }, { ...DEF, includeViews: true });
-    expect(ddl).toContain('INNER JOIN `tx` t2');
+    expect(ddl).toContain('FULL OUTER JOIN `tx` t2');
   });
 
   it('expression se emite VERBATIM también con 2+ fuentes (sin cualificar)', () => {

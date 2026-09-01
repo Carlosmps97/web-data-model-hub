@@ -23,6 +23,14 @@ export interface ViewNodeRow { name: string; type: string; fx: boolean; }
  *  marca `fx` si hay expresión o cast (pedido 5). `colTypes` viene indexado
  *  por `${tableId}::${physicalName}` (lo arma buildViewGraph). */
 export function viewNodeRows(view: View, colTypes: Record<string, string>): ViewNodeRow[] {
+  // Doc 61 — vista PERSONALIZADA: las filas salen de customColumns (derivadas
+  // del parse del script por el backend); el tipo no se conoce (expresión
+  // libre) y `fx` marca las salidas que no son columna directa.
+  if ((view.customSql ?? '').trim()) {
+    return (view.customColumns ?? []).map((c) => ({
+      name: c.name, type: '', fx: !!(c.expression ?? '').trim(),
+    }));
+  }
   const first = viewSourceIds(view)[0] ?? '';
   return (view.sources ?? [])
     .filter((s) => s.column || s.expression)

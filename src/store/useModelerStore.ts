@@ -12,6 +12,7 @@ import * as gov from '@/features/governance/services/governance.service';
 import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
 import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
 import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
+import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
 import {
   removeColumnSource, syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews,
 } from '@/features/modeler/lib/viewSync';
@@ -135,6 +136,11 @@ interface ModelerState {
    *  tabla concreta). */
   selectedColumnId: string | null;
   setSelectedColumn: (id: string | null) => void;
+  /** Vista con su Properties abierto (doc 61): cuando no es null, el sidebar
+   *  muestra el ViewPropertiesPanel (exclusión mutua con tabla/columna/edge —
+   *  los setters cruzados se limpian entre sí). */
+  selectedViewId: string | null;
+  setSelectedView: (id: string | null) => void;
   /** Click simple en una fila del canvas (doc 49): selecciona la tabla y abre
    *  DIRECTO el Properties de esa columna (antes navegaba el panel de tabla). */
   focusColumnInPanel: (tableId: string, colId: string) => void;
@@ -213,7 +219,7 @@ interface ModelerState {
   /** Persiste la posición de TODOS los nodos del canvas activo (botón Save del toolbar). */
   saveAllLayout: () => Promise<void>;
   autoOrganize: () => Promise<void>;
-  createTable: (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical' }) => Promise<void>;
+  createTable: (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical'; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
   addColumn: (tableId: string, input: AddColumnInput) => Promise<void>;
   // createRelationship se retiró (doc 47): la creación es popup-gated — el
   // RelationshipCreatePopup graba el lote (columnas + relación) directamente.
@@ -400,7 +406,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
             : { x: 120, y: 120 };
         await struct.setSubjectAreaLayout(saId, { [id]: pos });
         await get().reload();
-        set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null });   // al frente + visible
+        set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible
         pushUndo(`Paste table ${physicalName}`, () => get().deleteTable(id));
         return physicalName;
       }
@@ -414,10 +420,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   setPasteTarget: (id) => set({ pasteTarget: id }),
   panelFocusColId: null,
   setPanelFocusCol: (id) => set({ panelFocusColId: id }),
-  selectedColumnId: null,
+  selectedColumnId: null, selectedViewId: null,
   setSelectedColumn: (id) => set({ selectedColumnId: id }),
+  // Doc 61: click en un nodo VISTA abre su panel; cierra los demás contextos.
+  setSelectedView: (id) => set({ selectedViewId: id, selectedTableId: null, selectedEdgeId: null, selectedColumnId: null }),
   focusColumnInPanel: (tableId, colId) =>
-    set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: colId }),
+    set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: colId, selectedViewId: null }),
   flow: null,
   setFlow: (rf) => set({ flow: rf }),
   lod: true,
@@ -496,7 +504,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Nodos VISTA (F3) nunca abren el panel (spec §3-5) y en solo-lectura se
     // centra sin seleccionar (viewer-lock).
     if (node.type !== 'view' && useSessionStore.getState().openMode !== 'readonly') {
-      set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: null });
+      set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
     }
     // Centrar DESPUÉS de que el layout se asiente (doble rAF). setCenter en
     // vez de fitView: con onlyRenderVisibleElements un nodo fuera del viewport
@@ -528,7 +536,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       activeProjectId: pid, folders, subjectAreas, activeFolderId: null, activeSaId: null,
       diagram: null, selectedTableId: null, drawings: [],
       // Doc 48: cambiar de PROYECTO invalida también el clipboard de columnas.
-      colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, colClipboard: null, tblClipboard: null,
+      colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null,
       trees: { ...s.trees, [pid]: { folders, subjectAreas } },
     }));
   },
@@ -553,7 +561,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       pid = null;
       set({ activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null,
             activeSaId: null, diagram: null, selectedTableId: null, drawings: [],
-            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, colClipboard: null, tblClipboard: null });
+            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null });
     }
     // Re-hidrata los árboles que ya estaban cargados (los proyectos expandidos
     // del explorer siguen mostrando su contenido, ahora bajo el overlay nuevo).
@@ -565,7 +573,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // El canvas sobrevive al cambio de contexto: re-cargarlo COMPLETO
       // (diagrama + drawings) bajo el overlay de la versión nueva.
       try { await get().selectSubjectArea(saId); }
-      catch { set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null }); }
+      catch { set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null }); }
     }
   },
   selectSubjectArea: async (saId, projectId) => {
@@ -600,7 +608,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // Doc 48: la selección/menú/popup son del canvas anterior; el CLIPBOARD
       // sobrevive al cambio de canvas (copiar en A, pegar en B — decisión iii).
       set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null,
-            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null,
+            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
             drawings: diagram.subjectArea.drawings ?? [] });
     } finally {
       // Sólo la llamada MÁS RECIENTE limpia el spinner: una vieja descartada
@@ -659,7 +667,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       projects: get().projects.filter((p) => p.id !== id),
       trees,
       ...(wasActive ? { activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null, activeSaId: null, diagram: null, selectedTableId: null,
-                        colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, colClipboard: null, tblClipboard: null } : {}),
+                        colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null } : {}),
     });
   },
   // Helper interno: recarga folders+canvases del proyecto al cache `trees` y,
@@ -675,7 +683,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({
       ...treesPatch,
       folders, subjectAreas, activeFolderId,
-      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null }),
+      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null }),
     });
   },
   reload: async () => {
@@ -689,7 +697,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // tras cambiar de changeset): limpiar la selección en vez de dejar el
       // diagrama viejo pegado.
       if (seq === _loadSeq && get().activeSaId === id) {
-        set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null });
+        set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
       }
       return;
     }
@@ -729,7 +737,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await struct.setSubjectAreaLayout(saId, pos);   // setSubjectAreaLayout MERGEA (M3a)
     await get().reload();
   },
-  createTable: async (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical' }) => {
+  createTable: async (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical'; description?: string; udpValues?: Record<string, string> }) => {
     const saId = get().activeSaId; if (!saId) throw new Error('Pick a Subject Area');
     get().markDirty();
     const id = crypto.randomUUID();
@@ -738,14 +746,22 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const physical = (input.physicalName?.trim())
       || (input.mode === 'physical' ? input.logicalName : (await gov.physicalize(input.logicalName, 'table')).physical);
     const schema = input.schema?.trim() || undefined;
-    await gov.createTable({ id, logicalName: input.logicalName, physicalName: physical, schema });
+    // Doc 64 §6: el alta captura definición funcional y UDPs (payload limpio,
+    // solo con contenido — mismo criterio del alta de columna, doc 40).
+    const description = input.description?.trim() || undefined;
+    const udpValues = input.udpValues && Object.keys(input.udpValues).length ? input.udpValues : undefined;
+    await gov.createTable({
+      id, logicalName: input.logicalName, physicalName: physical, schema,
+      ...(description ? { description } : {}),
+      ...(udpValues ? { udpValues } : {}),
+    });
     // referenciar la nueva tabla en la Subject Area
     const sa = await struct.getSubjectArea(saId);
     await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
     await get().reload();
     // La tabla nueva queda SELECCIONADA → sube al frente (zIndex) y no cae oculta
     // detrás de un bloque que ya estaba en el canvas (pedido owner).
-    set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null });
+    set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
     // Undo (doc 50): tabla recién creada — la cascada del delete es trivial.
     pushUndo(`Create table ${physical}`, () => get().deleteTable(id));
   },
@@ -756,7 +772,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const domains = await gov.listDomains();
     const dom = domains.find((d) => d.id === input.parentDomainId);
     const override = (input.dataType ?? '').trim();
-    const dataType = override || dom?.defaultDataType || '';
+    // Doc 64 r2: el default del dominio se HOMOLOGA a la grafía canónica
+    // (espejo de canonicalize_default_type, doc 62) — un dominio legacy con
+    // `Array` hereda `ARRAY<>`, no el texto crudo de la BD sin homologar.
+    const domDefault = canonicalDefaultType(dom?.defaultDataType);
+    const dataType = override || domDefault || '';
     // Al FINAL del orden físico (antes: ordinal 0 → la columna nueva caía al
     // INICIO de la tabla) — coherente con la propagación a vistas de abajo.
     const siblings = (get().diagram?.columns ?? []).filter((c) => c.tableId === tableId);
@@ -769,7 +789,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const pkPosition = input.isPrimaryKey ? nextPkPosition(siblings) : null;
     await gov.createColumn({
       id, tableId, logicalName: input.logicalName, physicalName: physical,
-      parentDomainId: input.parentDomainId || undefined, dataType, typeOverridden: !!override, ordinal,
+      // Doc 64 §1: el popup ahora muestra el default del dominio en el campo de
+      // tipo — "mandaron dataType" ya no equivale a override. Con dominio, el
+      // override real es tipo ≠ default (regla doc 46); sin dominio, un tipo
+      // tipeado conserva la semántica previa (override).
+      parentDomainId: input.parentDomainId || undefined, dataType,
+      typeOverridden: dom ? dataType.trim() !== domDefault : !!override,
+      ordinal,
       ...(description ? { description } : {}),
       ...(input.isPrimaryKey ? { isPrimaryKey: true } : {}),
       ...(input.isForeignKey ? { isForeignKey: true } : {}),
@@ -850,7 +876,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await struct.setSubjectAreaTables(saId, merged);
     await get().reload();
     // Selecciona la primera importada → al frente (zIndex) y visible (owner).
-    set({ selectedTableId: tableIds[0], selectedEdgeId: null, selectedColumnId: null });
+    set({ selectedTableId: tableIds[0], selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
     if (added.length) {
       pushUndo(`Add ${added.length} table${added.length === 1 ? '' : 's'} to canvas`, async () => {
         for (const tid of added) await struct.removeTableFromCanvas(saId, tid);
@@ -901,13 +927,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const sa = await struct.getSubjectArea(saId);
     await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
     await get().reload();
-    set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null });   // al frente + visible (owner)
+    set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible (owner)
     pushUndo(`Create table ${physical}`, () => get().deleteTable(id));
   },
   setColumnTarget: (id: string | null) => set({ columnTarget: id }),
   // Seleccionar tabla o edge cambia de contexto: cierra el panel de columna.
-  setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null }),
-  setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedTableId: null, selectedColumnId: null }),
+  setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null }),
+  setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedTableId: null, selectedColumnId: null, selectedViewId: null }),
   removeTableFromArea: async (tableId) => {
     get().markDirty();
     const saId = get().activeSaId; if (!saId) return;
@@ -923,7 +949,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       if (pos) { try { await struct.setSubjectAreaLayout(saId, { [tableId]: pos }); } catch { /* layout best-effort */ } }
       await get().reload();
     });
-    if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null });
+    if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
   },
   deleteTable: async (tableId) => {
@@ -1006,7 +1032,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         await get().reload();
       });
     }
-    if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null });
+    if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
   },
   updateTable: async (id, fields) => {
@@ -1133,7 +1159,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     // Si la columna borrada tenía su Properties abierto (doc 49), se cierra —
     // el sidebar vuelve al Properties de la tabla.
-    if (get().selectedColumnId === colId) set({ selectedColumnId: null });
+    if (get().selectedColumnId === colId) set({ selectedColumnId: null, selectedViewId: null });
     // La columna eliminada sale de los sources de TODA vista que la
     // referenciaba (espejo o curada) — best-effort, no bloquea el borrado.
     if (col) {
@@ -1148,8 +1174,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   // Doc 53: la subcategoría es exclusiva del modelo lógico — pasar a físico
   // desarma la herramienta (el botón del toolbar también se deshabilita).
+  // Doc 63: las vistas son exclusivas del físico — entrar a lógico cierra
+  // el panel de vista (su bloque desaparece del canvas).
   setViewMode: (m: 'logical' | 'physical') =>
-    set(m === 'physical' ? { viewMode: m, subcatArmed: false } : { viewMode: m }),
+    set(m === 'physical' ? { viewMode: m, subcatArmed: false } : { viewMode: m, selectedViewId: null }),
   createProject: async (name: string) => {
     const p = await struct.createProject(name);
     set({ projects: [...get().projects, p] });
@@ -1171,7 +1199,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
 // no importa este store, así que no hay ciclo).
 useChangesetStore.subscribe((s, prev) => {
   if (s.activeId === prev.activeId) return;
-  useModelerStore.setState({ colClipboard: null, tblClipboard: null, colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null });
+  useModelerStore.setState({ colClipboard: null, tblClipboard: null, colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
   useUndoStore.getState().clear();
 });
 

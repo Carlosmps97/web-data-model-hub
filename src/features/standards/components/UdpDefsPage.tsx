@@ -9,9 +9,10 @@ const TYPES: UdpDataType[] = ['string', 'number', 'boolean', 'date', 'list'];
 const LEVELS: { id: UdpLevel; label: string }[] = [
   { id: 'table', label: 'Table' },
   { id: 'column', label: 'Column' },
+  { id: 'view', label: 'View' },
   { id: 'canvas', label: 'Model' },
 ];
-const LEVEL_NOUN: Record<UdpLevel, string> = { table: 'Table', column: 'Column', canvas: 'Data Model' };
+const LEVEL_NOUN: Record<UdpLevel, string> = { table: 'Table', column: 'Column', view: 'View', canvas: 'Data Model' };
 const TYPE_LABEL: Record<UdpDataType, string> = { string: 'Text', number: 'Number', boolean: 'Boolean', date: 'Date', list: 'List' };
 const NEW = '__new__';
 

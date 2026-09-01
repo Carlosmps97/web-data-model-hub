@@ -100,7 +100,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     listViewsForTables(diagram.tables.map((t) => t.id))
       // F3: sourceTableIds/joinOverride viajan al generador (multi-fuente).
       // showOnCanvas NO se mapea a propósito: no afecta el export.
-      .then((vs) => { if (alive) setViews(vs.map((v) => ({ id: v.id, tableId: v.tableId, sourceTableIds: v.sourceTableIds, joinOverride: v.joinOverride, name: v.name, schema: v.schema, sql: v.sql, filter: v.filter, description: v.description, sources: v.sources, showOnCanvas: v.showOnCanvas }))); })
+      .then((vs) => { if (alive) setViews(vs.map((v) => ({ id: v.id, tableId: v.tableId, sourceTableIds: v.sourceTableIds, joinOverride: v.joinOverride, name: v.name, schema: v.schema, sql: v.sql, filter: v.filter, description: v.description, sources: v.sources, showOnCanvas: v.showOnCanvas, customSql: v.customSql }))); })
       .catch(() => { if (alive) setViews([]); });
     return () => { alive = false; };
   }, [open, diagram]);

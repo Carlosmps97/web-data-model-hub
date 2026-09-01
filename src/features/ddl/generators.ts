@@ -150,6 +150,9 @@ export interface DdlView {
   schema?: string;
   /** Definición SQL libre (fallback cuando no hay estructura). */
   sql?: string;
+  /** Doc 61: script custom (vista "Personalizada") — si está presente, el
+   *  cuerpo del CREATE VIEW ES este script (gana a sources/filter/join). */
+  customSql?: string;
   /** Filtro (WHERE). */
   filter?: string;
   description?: string;
@@ -389,8 +392,10 @@ export function inferJoin(
  *  cualifican con alias posicionales t1, t2… — RAW, nunca via ident(): no son
  *  identificadores del modelo (coordinación F4) — y el FROM encadena
  *  `INNER JOIN` con UNA condición: `joinOverride` VERBATIM si está seteado,
- *  si no la inferida de `relationships` (inferJoin), con fallback explícito
- *  `1 = 1` comentado. Sin proyecciones ⇒ `SELECT *` (fallback legacy).
+ *  si no la inferida de `relationships` (inferJoin); sin condición ALGUNA la
+ *  cadena se emite como `FULL OUTER JOIN` con `ON 1 = 1` comentado (doc 64
+ *  §4a — el editor ya no bloquea el guardado sin JOIN). Sin proyecciones ⇒
+ *  `SELECT *` (fallback legacy).
  *  `showOnCanvas` NO participa del export. Exportada: el ViewEditor la usa
  *  para el preview (mismo SQL que el export). */
 export function viewDDL(
@@ -427,16 +432,29 @@ export function viewDDL(
   const srcs = (v.sources ?? []).filter((s) => (s.column ?? '').trim() || (s.expression ?? '').trim());
   const where = (v.filter ?? '').trim();
 
+  // Doc 61 — vista PERSONALIZADA: el script ES el cuerpo del CREATE VIEW.
+  // Gana a sources/filter/joinOverride (que quedan inactivos mientras el modo
+  // custom esté activo); el backend ya validó/derivó columnas al guardar.
+  const custom = (v.customSql ?? '').trim();
+  if (custom) {
+    let out = `CREATE OR REPLACE VIEW ${full}`;
+    if (o.includeComments && v.description?.trim()) out += ` COMMENT ${lit(v.description.trim())}`;
+    return out + ` AS\n${custom.replace(/;\s*$/, '')};\n`;
+  }
+
   // FROM: 1 fuente = igual que siempre; 2+ = cadena INNER JOIN con UNA condición.
   let from: string;
   if (!srcIds.length) from = `${ident(schema)}.${ident(v.name)}`; // legacy sin tabla
   else if (!aliased) from = refOf(srcIds[0]);
   else {
-    const on = (v.joinOverride ?? '').trim()
-      || inferJoin(srcIds, relationships, columns)
-      || '1 = 1 /* no modeled relationship between the sources */';
+    // Doc 64 §4a: sin condición ALGUNA (ni override ni inferible) la vista se
+    // emite como FULL OUTER JOIN explícito (ON 1 = 1) — el editor ya no
+    // bloquea el guardado; con condición sigue siendo INNER JOIN como siempre.
+    const cond = (v.joinOverride ?? '').trim() || inferJoin(srcIds, relationships, columns);
+    const joinKw = cond ? 'INNER JOIN' : 'FULL OUTER JOIN';
+    const on = cond || '1 = 1 /* no join condition defined — defaulted to FULL OUTER JOIN */';
     from = `${refOf(srcIds[0])} t1\n`
-      + srcIds.slice(1).map((id) => `  INNER JOIN ${refOf(id)} ${aliasOf.get(id)}`).join('\n')
+      + srcIds.slice(1).map((id) => `  ${joinKw} ${refOf(id)} ${aliasOf.get(id)}`).join('\n')
       + `\n  ON ${on}`;
   }
 

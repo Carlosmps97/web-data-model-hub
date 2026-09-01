@@ -249,12 +249,12 @@ export interface Project {
 // Canonical column data types (Databricks-flavored superset).
 export const COLUMN_DATA_TYPES = [
   'integer', 'bigint', 'smallint', 'tinyint',
-  'float', 'double', 'real', 'decimal', 'numeric', 'money',
-  'varchar', 'char', 'text', 'nvarchar', 'string',
+  'float', 'double', 'real', 'decimal', 'numeric', 'number', 'money',
+  'varchar', 'varchar2', 'char', 'text', 'nvarchar', 'string',
   'boolean',
   'date', 'datetime', 'timestamp', 'timestamptz', 'time',
   'binary', 'varbinary', 'blob', 'bytes',
-  'json', 'jsonb', 'xml', 'uuid',
+  'json', 'jsonb', 'xml', 'uuid', 'variant',
   'array', 'map', 'struct',
 ] as const;
 

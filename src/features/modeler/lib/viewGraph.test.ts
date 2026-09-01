@@ -33,6 +33,23 @@ describe('viewSourceIds', () => {
 });
 
 describe('viewNodeRows', () => {
+  it('vista Personalizada (doc 61): filas desde customColumns, fx = expresión', () => {
+    const rows = viewNodeRows({
+      ...view,
+      customSql: 'SELECT ID, CURRENT_DATE() AS foto FROM t',
+      customColumns: [{ name: 'ID' }, { name: 'foto', expression: 'CURRENT_DATE()' }],
+    }, { 't1::ID': 'bigint' });
+    expect(rows).toEqual([
+      { name: 'ID', type: '', fx: false },
+      { name: 'foto', type: '', fx: true },
+    ]);
+  });
+
+  it('customSql vacío ⇒ camino Regular (sources)', () => {
+    const rows = viewNodeRows({ ...view, customSql: '  ', customColumns: [{ name: 'zombi' }] }, { 't1::ID': 'bigint' });
+    expect(rows[0]).toEqual({ name: 'ID', type: 'bigint', fx: false });
+  });
+
   it('outputAlias||column + castType||tipo origen + marca fx', () => {
     const rows = viewNodeRows(view, { 't1::ID': 'bigint' });
     expect(rows[0]).toEqual({ name: 'ID', type: 'bigint', fx: false });

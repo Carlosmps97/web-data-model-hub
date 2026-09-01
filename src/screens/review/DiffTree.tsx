@@ -1,18 +1,25 @@
 /**
- * DiffTree (doc 31) — jerarquía de cambios de un request para el popup
- * "Change details". Extraído del viejo DiffBody inline de ReviewScreen y
- * enriquecido: filas TINTADAS por verbo (verde/ámbar/rojo, como las cards del
- * diseño original), selección para el panel de detalle, y secciones
- * RELATIONSHIPS (antes invisibles en modo jerárquico), Structure changes y
- * Not on any canvas. Con backend sin jerarquía cae al listado plano.
+ * DiffTree (doc 64 §7 — v2; nace en doc 31) — jerarquía navegable de los
+ * cambios de un request para el popup "Change details". Rediseño: icono por
+ * tipo de entidad, verbo como pill discreta, filas tintadas suaves, filtros
+ * por VERBO + BÚSQUEDA por nombre (una fila es visible si matchea ella o algún
+ * descendiente; buscar auto-expande las tablas) y contadores por sección. La
+ * selección lleva además el `path` de ancestros (breadcrumb del panel) y el
+ * `iconType` crudo. Con backend sin jerarquía cae al listado plano (mismo
+ * contrato de siempre).
  */
-import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
+import {
+  Boxes, ChevronDown, ChevronRight, Columns3, Database, Eye, Folder, Layers,
+  Link2, Table2, Tags,
+} from 'lucide-react';
 import type {
   ChangesetDiff,
   DiffEntity,
   DiffTreeNode,
 } from '@/types/versioning';
+
+export type DiffVerb = 'added' | 'edited' | 'deleted';
 
 /** Selección de una fila del árbol (alimenta el panel derecho del modal). */
 export interface TreeSelection {
@@ -22,14 +29,29 @@ export interface TreeSelection {
   name: string;
   /** Label de tipo para el header del detalle (Table / Column / …). */
   type: string;
-  change?: 'added' | 'edited' | 'deleted' | null;
+  /** Tipo crudo para el icono (table / column / view / …). */
+  iconType?: string;
+  change?: DiffVerb | null;
   /** Ids de columnas cambiadas bajo una tabla (para el fetch por lote). */
   childColumnIds?: string[];
+  /** Ruta de ancestros (Proyecto › Folder › Canvas) para el breadcrumb. */
+  path?: string[];
 }
 
 export const TYPE_LABEL: Record<string, string> = {
   project: 'Project', folder: 'Folder', canvas: 'Canvas', schema: 'Schema',
-  table: 'Table', view: 'View', column: 'Column',
+  table: 'Table', view: 'View', column: 'Column', relationship: 'Relationship',
+};
+export const TYPE_ICON: Record<string, ReactNode> = {
+  project: <Boxes size={13} strokeWidth={1.7} />,
+  folder: <Folder size={13} strokeWidth={1.7} />,
+  canvas: <Layers size={13} strokeWidth={1.7} />,
+  schema: <Database size={13} strokeWidth={1.7} />,
+  table: <Table2 size={13} strokeWidth={1.7} />,
+  view: <Eye size={13} strokeWidth={1.7} />,
+  column: <Columns3 size={13} strokeWidth={1.7} />,
+  relationship: <Link2 size={13} strokeWidth={1.7} />,
+  other: <Tags size={13} strokeWidth={1.7} />,
 };
 const NODE_COLLECTION: Record<string, string> = {
   table: 'canonical_tables', column: 'canonical_columns', view: 'views',
@@ -42,21 +64,40 @@ const COLL_LBL: Record<string, string> = {
   folders: 'Folder', subject_areas: 'Canvas', parent_domains: 'Parent Domain',
   abbreviation_dict: 'Glossary term',
 };
+/** Colección → tipo crudo del icono (para structure y el fallback plano). */
+const COLL_TYPE: Record<string, string> = {
+  canonical_tables: 'table', canonical_columns: 'column', views: 'view',
+  relationships: 'relationship', schemas: 'schema', projects: 'project',
+  folders: 'folder', subject_areas: 'canvas',
+};
 
 const FLAT_PAGE = 150;
 
 interface RelRow {
   entity: DiffEntity;
-  change: 'added' | 'edited' | 'deleted';
+  change: DiffVerb;
+  name: string;
 }
 
-export default function DiffTree({ diff, relationshipNames, selectedKey, onSelect }: {
+/** ¿El nodo (o algún descendiente) sobrevive búsqueda + filtro de verbos? */
+function nodeVisible(n: DiffTreeNode, q: string, verbs: Set<DiffVerb>): boolean {
+  const selfHit = !!n.change && verbs.has(n.change) && (!q || n.name.toLowerCase().includes(q));
+  if (selfHit) return true;
+  return (n.children ?? []).some((c) => nodeVisible(c, q, verbs));
+}
+
+export default function DiffTree({ diff, relationshipNames, selectedKey, onSelect, search, verbs }: {
   diff: ChangesetDiff;
   /** entityId → "PARENT → CHILD" (resuelto por el prefetch del modal). */
   relationshipNames: Record<string, string | undefined>;
   selectedKey: string | null;
   onSelect: (sel: TreeSelection) => void;
+  /** Doc 64 §7: búsqueda por nombre (contiene, CI). */
+  search: string;
+  /** Doc 64 §7: verbos visibles (chips del modal). */
+  verbs: Set<DiffVerb>;
 }) {
+  const q = search.trim().toLowerCase();
   const [openTables, setOpenTables] = useState<Set<string>>(new Set());
   const [shown, setShown] = useState(FLAT_PAGE);
   const toggle = (k: string) =>
@@ -69,23 +110,30 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
 
   const tree = diff.tree ?? [];
   const orphans = diff.orphans ?? [];
-  const structure = diff.structure ?? [];
+  const structure = (diff.structure ?? [])
+    .filter((s) => verbs.has(s.change) && (!q || s.name.toLowerCase().includes(q)));
   const relRows = useMemo<RelRow[]>(() => {
     const b = diff.collections.relationships;
     if (!b) return [];
-    return (['added', 'edited', 'deleted'] as const).flatMap((v) =>
-      b[v].map((entity) => ({ entity, change: v })),
-    );
-  }, [diff]);
-  const hasHierarchy = tree.length > 0 || orphans.length > 0 || structure.length > 0;
+    return (['added', 'edited', 'deleted'] as const)
+      .filter((v) => verbs.has(v))
+      .flatMap((v) => b[v].map((entity) => ({
+        entity, change: v,
+        name: relationshipNames[entity.id] ?? entity.name ?? 'Relationship',
+      })))
+      .filter((r) => !q || r.name.toLowerCase().includes(q));
+  }, [diff, relationshipNames, verbs, q]);
+  const hasHierarchy = tree.length > 0 || orphans.length > 0 || (diff.structure ?? []).length > 0;
 
   const row = (opts: {
     key: string;
     depth: number;
-    typeLabel: string;
+    /** Tipo crudo (table/column/…) para icono + tooltip. */
+    iconType: string;
     name: string;
-    change?: 'added' | 'edited' | 'deleted' | null;
+    change?: DiffVerb | null;
     selectable: boolean;
+    mono?: boolean;
     onClick?: () => void;
     chevron?: 'open' | 'closed' | null;
     onChevron?: () => void;
@@ -99,7 +147,7 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
         selectedKey === opts.key ? 'is-selected' : '',
         opts.selectable ? 'is-selectable' : '',
       ].filter(Boolean).join(' ')}
-      style={{ paddingLeft: 8 + opts.depth * 15 }}
+      style={{ paddingLeft: 6 + opts.depth * 14 }}
       onClick={opts.selectable ? opts.onClick : opts.onChevron}
       role={opts.selectable || opts.chevron ? 'button' : undefined}
     >
@@ -115,25 +163,30 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
             : <ChevronRight size={13} aria-hidden />}
         </button>
       ) : (
-        <span style={{ width: 17, flex: 'none' }} />
+        <span className="dmh-rvd-chevsp" />
       )}
-      <span className="dmh-rvd-type">{opts.typeLabel}</span>
-      <span className={`dmh-rvd-name mono${opts.change === 'deleted' ? ' strike' : ''}`}>
+      <span className="dmh-rvd-ico" title={TYPE_LABEL[opts.iconType] ?? opts.iconType} aria-hidden>
+        {TYPE_ICON[opts.iconType] ?? TYPE_ICON.other}
+      </span>
+      <span className={`dmh-rvd-name${opts.mono ? ' mono' : ''}${opts.change === 'deleted' ? ' strike' : ''}`}>
         {opts.name}
       </span>
-      {opts.change && <span className={`dmh-rv-diffrow-pill is-${opts.change}`}>{PILL[opts.change]}</span>}
+      {opts.change && <span className="dmh-rvd-verb">{PILL[opts.change]}</span>}
       {opts.right}
     </div>
   );
 
-  const renderNode = (node: DiffTreeNode, depth: number, path: string): React.ReactNode => {
-    const key = `${path}/${node.type}:${node.id}`;
+  const renderNode = (node: DiffTreeNode, depth: number, keyPath: string, namePath: string[]): React.ReactNode => {
+    if (!nodeVisible(node, q, verbs)) return null;
+    const key = `${keyPath}/${node.type}:${node.id}`;
     const kids = node.children ?? [];
+    const visKids = kids.filter((c) => nodeVisible(c, q, verbs));
     const isTable = node.type === 'table';
-    const expanded = !isTable || openTables.has(key);
+    // Buscar/filtrar auto-expande: el hit puede estar en una columna interna.
+    const expanded = !isTable || openTables.has(key) || q !== '';
     const collection = NODE_COLLECTION[node.type];
     const changedCols = isTable
-      ? kids.filter((c) => c.type === 'column' && c.change).map((c) => c.id)
+      ? kids.filter((c) => c.type === 'column' && c.change && verbs.has(c.change)).map((c) => c.id)
       : undefined;
     const selectable = Boolean(collection && (node.change || (changedCols?.length ?? 0) > 0));
     return (
@@ -141,95 +194,109 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
         {row({
           key,
           depth,
-          typeLabel: TYPE_LABEL[node.type] ?? node.type,
+          iconType: node.type,
           name: node.name,
           change: node.change,
           selectable,
+          mono: node.type === 'table' || node.type === 'column' || node.type === 'view' || node.type === 'schema',
           onClick: () => {
             if (isTable && !expanded) toggle(key);
             if (collection) {
               onSelect({
                 key, collection, entityId: node.id, name: node.name,
-                type: TYPE_LABEL[node.type] ?? node.type, change: node.change,
-                childColumnIds: changedCols,
+                type: TYPE_LABEL[node.type] ?? node.type, iconType: node.type,
+                change: node.change, childColumnIds: changedCols, path: namePath,
               });
             }
           },
-          chevron: isTable && kids.length > 0 ? (expanded ? 'open' : 'closed') : null,
+          chevron: isTable && visKids.length > 0 ? (expanded ? 'open' : 'closed') : null,
           onChevron: isTable ? () => toggle(key) : undefined,
-          right: isTable && kids.length > 0 ? (
-            <span className="dmh-rvd-count">{kids.length} col{kids.length === 1 ? '' : 's'}</span>
+          right: isTable && visKids.length > 0 ? (
+            <span className="dmh-rvd-count">{visKids.length} col{visKids.length === 1 ? '' : 's'}</span>
           ) : undefined,
         })}
-        {expanded && kids.map((c) => renderNode(c, depth + 1, key))}
+        {expanded && visKids.map((c) => renderNode(c, depth + 1, key, [...namePath, node.name]))}
       </div>
     );
   };
 
-  const section = (label: string) => (
-    <div className="dmh-rvd-section" key={`section-${label}`}>{label}</div>
+  const section = (label: string, count: number) => (
+    <div className="dmh-rvd-section" key={`section-${label}`}>
+      {label}
+      <span className="dmh-rvd-seccount">{count}</span>
+    </div>
   );
 
   if (hasHierarchy || relRows.length > 0) {
+    const treeVisible = tree.filter((n) => nodeVisible(n, q, verbs));
+    const orphVisible = orphans.filter((n) => nodeVisible(n, q, verbs));
+    const nothing = treeVisible.length === 0 && orphVisible.length === 0
+      && relRows.length === 0 && structure.length === 0;
     return (
       <div className="dmh-rvd-tree">
-        {tree.map((n) => renderNode(n, 0, ''))}
-        {orphans.length > 0 && (
+        {treeVisible.map((n) => renderNode(n, 0, '', []))}
+        {orphVisible.length > 0 && (
           <>
-            {section('Not on any canvas')}
-            {orphans.map((n) => renderNode(n, 0, 'orphan'))}
+            {section('Not on any canvas', orphVisible.length)}
+            {orphVisible.map((n) => renderNode(n, 0, 'orphan', []))}
           </>
         )}
         {relRows.length > 0 && (
           <>
-            {section('Relationships')}
-            {relRows.map(({ entity, change }) =>
+            {section('Relationships', relRows.length)}
+            {relRows.map(({ entity, change, name }) =>
               row({
                 key: `rel:${entity.id}`,
                 depth: 0,
-                typeLabel: 'Rel',
-                name: relationshipNames[entity.id] ?? entity.name ?? 'Relationship',
+                iconType: 'relationship',
+                name,
                 change,
                 selectable: true,
+                mono: true,
                 onClick: () => onSelect({
                   key: `rel:${entity.id}`, collection: 'relationships', entityId: entity.id,
-                  name: relationshipNames[entity.id] ?? 'Relationship',
-                  type: 'Relationship', change,
+                  name, type: 'Relationship', iconType: 'relationship', change,
                 }),
               }))}
           </>
         )}
         {structure.length > 0 && (
           <>
-            {section('Structure changes')}
+            {section('Structure changes', structure.length)}
             {structure.map((s) =>
               row({
                 key: `struct:${s.type}:${s.id}`,
                 depth: 0,
-                typeLabel: s.kind,
+                iconType: COLL_TYPE[s.type] ?? 'other',
                 name: s.name,
                 change: s.change,
                 selectable: true,
                 onClick: () => onSelect({
                   key: `struct:${s.type}:${s.id}`, collection: s.type, entityId: s.id,
-                  name: s.name, type: s.kind, change: s.change,
+                  name: s.name, type: s.kind, iconType: COLL_TYPE[s.type] ?? 'other', change: s.change,
                 }),
               }))}
           </>
         )}
+        {nothing && <div className="dmh-rvd-noresults">No changes match the current filters.</div>}
       </div>
     );
   }
 
   // ── Fallback plano (backend sin jerarquía) ──
-  const flat: { change: 'added' | 'edited' | 'deleted'; entity: DiffEntity; collection: string }[] = [];
+  const flat: { change: DiffVerb; entity: DiffEntity; collection: string }[] = [];
   Object.entries(diff.collections).forEach(([collection, bucket]) => {
     (['added', 'edited', 'deleted'] as const).forEach((v) => {
-      bucket[v].forEach((entity) => flat.push({ change: v, entity, collection }));
+      if (!verbs.has(v)) return;
+      bucket[v].forEach((entity) => {
+        const nm = entity.name ?? entity.id;
+        if (q && !nm.toLowerCase().includes(q)) return;
+        flat.push({ change: v, entity, collection });
+      });
     });
   });
   if (flat.length === 0) {
-    return <div className="dmh-rv-diff-empty">No structural changes in this request.</div>;
+    return <div className="dmh-rvd-noresults">No changes match the current filters.</div>;
   }
   return (
     <div className="dmh-rvd-tree">
@@ -237,13 +304,15 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
         row({
           key: `flat:${collection}:${entity.id}`,
           depth: 0,
-          typeLabel: COLL_LBL[collection] ?? collection,
+          iconType: COLL_TYPE[collection] ?? 'other',
           name: entity.name ?? entity.id,
           change,
           selectable: true,
+          mono: true,
           onClick: () => onSelect({
             key: `flat:${collection}:${entity.id}`, collection, entityId: entity.id,
-            name: entity.name ?? entity.id, type: COLL_LBL[collection] ?? collection, change,
+            name: entity.name ?? entity.id, type: COLL_LBL[collection] ?? collection,
+            iconType: COLL_TYPE[collection] ?? 'other', change,
           }),
         }))}
       {flat.length > shown && (
