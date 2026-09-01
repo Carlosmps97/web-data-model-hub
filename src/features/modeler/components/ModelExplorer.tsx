@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   EllipsisVertical, ChevronRight, ChevronDown, Folder as FolderIcon,
-  FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid,
+  FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid, FileDown,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useModelerStore, buildProjectTree } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { FolderNode } from '@/store/useModelerStore';
 import type { Folder, Project, SubjectArea } from '../services/modeler.service';
+import { exportNodeHtml } from '../exportPackage';
+import type { CancelFlag, ExportOutcome, ExportProgress } from '../exportPackage';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Model Explorer — árbol jerárquico Projects → Folders (anidadas) → Canvas.
@@ -61,6 +63,38 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   const [editing, setEditing] = useState<{ kind: NodeKind; id: string; projectId: string } | null>(null);
   const [creating, setCreating] = useState<CreateState | null>(null);
   const [toDelete, setToDelete] = useState<DeleteState | null>(null);
+
+  // Doc 66 — Export HTML: modal de progreso + flag de cancelación compartido
+  // con la orquestación (mutable: la UI lo pone en true, el pool lo lee).
+  const [exporting, setExporting] = useState<{ title: string } | null>(null);
+  const [exportProg, setExportProg] = useState<ExportProgress | null>(null);
+  const [exportResult, setExportResult] = useState<ExportOutcome | null>(null);
+  const exportCancelRef = useRef<CancelFlag>({ cancelled: false });
+
+  const startExport = useCallback(async (kind: NodeKind, id: string, projectId: string) => {
+    setMenu(null);
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return;
+    // `nameOf` exige un MenuState completo; x/y son inocuos (solo lee ids).
+    const title = kind === 'project' ? project.name : nameOf({ kind, id, projectId, x: 0, y: 0 }, trees, projects);
+    exportCancelRef.current = { cancelled: false };
+    setExportResult(null);
+    setExportProg(null);
+    setExporting({ title: title || 'Export' });
+    try {
+      const out = await exportNodeHtml({
+        kind, nodeId: id, projectId, projectName: project.name,
+        onProgress: setExportProg, cancel: exportCancelRef.current,
+      });
+      if (out.cancelled) { setExporting(null); return; }
+      if (out.failed.length) { setExportResult(out); return; }   // el modal muestra el resumen
+      setExporting(null);
+      pushToast('Exported');
+    } catch (e) {
+      setExporting(null);
+      pushToast(e instanceof Error && e.message ? e.message : "Couldn't export", 'err');
+    }
+  }, [projects, trees, pushToast]);
 
   const isOpen = (id: string) => expandedF.has(id);
   const toggle = (id: string) => setExpandedF((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -304,8 +338,19 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
         <ContextMenu menu={menu}
           onNewFolder={() => startCreate('folder', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
           onNewCanvas={() => startCreate('canvas', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
+          onExport={() => { void startExport(menu.kind, menu.id, menu.projectId); }}
           onRename={() => startRename(menu.kind, menu.id, menu.projectId)}
           onDelete={() => askDelete(menu.kind, menu.id, nameOf(menu, trees, projects), menu.projectId)} />
+      )}
+
+      {exporting && (
+        <ExportModal
+          title={exporting.title}
+          prog={exportProg}
+          result={exportResult}
+          onCancel={() => { exportCancelRef.current.cancelled = true; }}
+          onClose={() => setExporting(null)}
+        />
       )}
 
       {toDelete && (
@@ -401,10 +446,11 @@ function InlineInput({
 
 // ── Menú contextual (popover anclado a la fila) ──────────────────────────
 function ContextMenu({
-  menu, onNewFolder, onNewCanvas, onRename, onDelete,
+  menu, onNewFolder, onNewCanvas, onExport, onRename, onDelete,
 }: {
   menu: MenuState;
-  onNewFolder: () => void; onNewCanvas: () => void; onRename: () => void; onDelete: () => void;
+  onNewFolder: () => void; onNewCanvas: () => void; onExport: () => void;
+  onRename: () => void; onDelete: () => void;
 }) {
   const showCreate = menu.kind === 'project' || menu.kind === 'folder';
   // Mantener el menú dentro del viewport horizontalmente.
@@ -419,8 +465,53 @@ function ContextMenu({
       {showCreate && <button className="rd-menu-item" onClick={onNewFolder}><FolderPlus size={15} /> New folder</button>}
       {showCreate && <button className="rd-menu-item" onClick={onNewCanvas}><Plus size={15} /> New canvas</button>}
       {showCreate && <div className="rd-menu-sep" />}
+      {/* Doc 66: export HTML del nodo (proyecto/folder → ZIP; canvas → .html). */}
+      <button className="rd-menu-item" onClick={onExport}><FileDown size={15} /> Export HTML</button>
+      <div className="rd-menu-sep" />
       <button className="rd-menu-item" onClick={onRename}><Pencil size={15} /> Rename</button>
       <button className="rd-menu-item danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>
+    </div>
+  );
+}
+
+// ── Modal de progreso del export HTML (doc 66) ───────────────────────────
+// Patrón visual de ConfirmDialog (backdrop --top + dmh-modal). Mientras corre:
+// barra determinada + Cancel; si terminó con fallos: resumen + Close.
+function ExportModal({
+  title, prog, result, onCancel, onClose,
+}: {
+  title: string; prog: ExportProgress | null; result: ExportOutcome | null;
+  onCancel: () => void; onClose: () => void;
+}) {
+  const pct = prog && prog.total > 0 ? Math.round((prog.done / prog.total) * 100) : 0;
+  const finished = result !== null;
+  return (
+    <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
+      <div className="dmh-modal" style={{ width: 440 }} role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+        <div className="m-body">
+          <h3 id="export-modal-title" className="rd-h3" style={{ marginBottom: 10 }}>Export HTML — {title}</h3>
+          {!finished && (
+            <>
+              <div className="rd-small" style={{ marginBottom: 8 }}>
+                {prog ? `Exporting… ${prog.done}/${prog.total}${prog.current ? ` — ${prog.current}` : ''}` : 'Preparing…'}
+              </div>
+              <div style={{ height: 6, borderRadius: 3, background: 'var(--primary-soft, #E3EBFF)', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${pct}%`, background: 'var(--primary-700, #35507E)', transition: 'width .2s' }} />
+              </div>
+            </>
+          )}
+          {finished && result && (
+            <div className="rd-small" style={{ lineHeight: 1.6 }}>
+              Exported {result.exported}/{result.total}.<br />
+              Failed: {result.failed.join(', ')}
+            </div>
+          )}
+        </div>
+        <div className="m-foot">
+          {!finished && <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onCancel}>Cancel</button>}
+          {finished && <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" onClick={onClose}>Close</button>}
+        </div>
+      </div>
     </div>
   );
 }
