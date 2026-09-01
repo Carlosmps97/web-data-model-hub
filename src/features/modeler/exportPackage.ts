@@ -5,6 +5,7 @@
 // (escena/SVG/fuentes/fflate) cargan lazy, patrón del Toolbar (doc 59).
 import { listFolders, listSubjectAreas, loadDiagram } from './services/modeler.service';
 import type { Diagram } from './services/modeler.service';
+import type { PdfPageInput } from './lib/scenePdf';
 import { listDomains } from '@/features/governance/services/governance.service';
 import { getUdpDefs } from '@/features/standards/standards.service';
 import {
@@ -159,5 +160,77 @@ export async function exportNodeHtml(opts: {
   for (const p of built) files[p.path] = strToU8(p.html);
   const zipped = zipSync(files, { level: 6 });
   download(new Blob([zipped as unknown as BlobPart], { type: 'application/zip' }), `${layout.rootName}.zip`);
+  return outcome;
+}
+
+// ── Doc 66 r3: export PDF multipágina (una página por canvas y modo) ──────
+export async function exportNodePdf(opts: {
+  kind: 'project' | 'folder' | 'canvas';
+  nodeId: string;
+  projectId: string;
+  projectName: string;
+  onProgress?: (p: ExportProgress) => void;
+  cancel?: CancelFlag;
+  download?: (blob: Blob, filename: string) => void;
+}): Promise<ExportOutcome> {
+  const download = opts.download ?? domDownload;
+  const cancelled = () => opts.cancel?.cancelled === true;
+  const [{ buildDiagramScene }, { buildMultiDiagramPdf }, { zlibSync }] = await Promise.all([
+    import('./lib/exportScene'), import('./lib/scenePdf'), import('fflate'),
+  ]);
+
+  // Dos páginas por canvas (decisión r3): lógico primero, físico después.
+  const pagesOf = (diagram: Diagram, baseTitle: string): PdfPageInput[] => {
+    const drawings = diagram.subjectArea.drawings ?? [];
+    return [
+      { scene: buildDiagramScene({ diagram, drawings, viewMode: 'logical' }), title: `${baseTitle} — Logical` },
+      { scene: buildDiagramScene({ diagram, drawings, viewMode: 'physical' }), title: `${baseTitle} — Physical` },
+    ];
+  };
+  // Streams comprimidos: /FlateDecode espera zlib (RFC 1950) — zlibSync, no deflateSync.
+  const toPdfBlob = (pages: PdfPageInput[]) =>
+    new Blob([buildMultiDiagramPdf(pages, { compress: zlibSync }) as unknown as BlobPart], { type: 'application/pdf' });
+
+  if (opts.kind === 'canvas') {
+    const outcome: ExportOutcome = { exported: 0, total: 1, failed: [], cancelled: false };
+    opts.onProgress?.({ done: 0, total: 1, current: '' });
+    const diagram = await loadDiagram(opts.nodeId);
+    if (cancelled()) return { ...outcome, cancelled: true };
+    const name = diagram.subjectArea.name;
+    download(toPdfBlob(pagesOf(diagram, name)), `${sanitizeFileName(name)}.pdf`);
+    opts.onProgress?.({ done: 1, total: 1, current: name });
+    return { ...outcome, exported: 1 };
+  }
+
+  const [folders, sas] = await Promise.all([listFolders(opts.projectId), listSubjectAreas(opts.projectId)]);
+  const layout = packageLayout(opts.kind, opts.nodeId, opts.projectName, folders, sas);
+  const total = layout.canvases.length;
+  const outcome: ExportOutcome = { exported: 0, total, failed: [], cancelled: false };
+  if (cancelled()) return { ...outcome, cancelled: true };
+
+  const byIndex = new Array<PdfPageInput[] | null>(total).fill(null);
+  let done = 0;
+  await runPool(layout.canvases, FETCH_CONCURRENCY, async (entry: LayoutCanvas, i: number) => {
+    if (cancelled()) return;
+    opts.onProgress?.({ done, total, current: entry.sa.name });
+    try {
+      const diagram = await loadDiagram(entry.sa.id);
+      if (cancelled()) return;
+      // Título del bookmark: ruta RELATIVA al nodo exportado (sin repetirlo).
+      const baseTitle = [...entry.crumb.slice(1), entry.sa.name].join(' / ');
+      byIndex[i] = pagesOf(diagram, baseTitle);
+      outcome.exported += 1;
+    } catch {
+      outcome.failed.push(entry.sa.name);
+    } finally {
+      done += 1;
+      opts.onProgress?.({ done, total, current: entry.sa.name });
+    }
+  });
+
+  if (cancelled()) return { ...outcome, cancelled: true };
+  const pages = byIndex.filter((p): p is PdfPageInput[] => p !== null).flat();
+  if (!pages.length) return outcome;   // nada exportable (todo falló o folder vacío)
+  download(toPdfBlob(pages), `${layout.rootName}.pdf`);
   return outcome;
 }

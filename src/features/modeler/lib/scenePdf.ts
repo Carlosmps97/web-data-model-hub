@@ -70,7 +70,10 @@ const fontOf = (i: Extract<SceneItem, { k: 'text' }>): { f: string; wf: number }
   return { f: 'F1', wf: 0.55 };
 };
 
-export function buildDiagramPdf(scene: Scene): Uint8Array<ArrayBuffer> {
+/** Contenido de UNA página: content stream + tamaño en puntos (px→pt 0.75,
+ *  capado al techo ISO de 14400pt). Extraído de buildDiagramPdf para que el
+ *  multipágina (doc 66 r3) reuse el MISMO dibujo. */
+function sceneContent(scene: Scene): { stream: string; W: number; H: number } {
   const S = Math.min(0.75, 14400 / scene.w, 14400 / scene.h);
   const W = scene.w * S, H = scene.h * S;
   const X = (v: number) => n2(v * S);
@@ -179,16 +182,11 @@ export function buildDiagramPdf(scene: Scene): Uint8Array<ArrayBuffer> {
       }
     }
   }
+  return { stream: ops.join('\n'), W, H };
+}
 
-  // ── Ensamblado: objetos 1..10, xref con offsets EXACTOS, trailer ────────
-  const stream = ops.join('\n');
-  const objs: string[] = [
-    '<< /Type /Catalog /Pages 2 0 R >>',
-    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n2(W)} ${n2(H)}] /Resources << /Font << ${FONTS.map((_, k) => `/F${k + 1} ${k + 5} 0 R`).join(' ')} >> >> /Contents 4 0 R >>`,
-    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
-    ...FONTS.map((f) => `<< /Type /Font /Subtype /Type1 /BaseFont /${f} /Encoding /WinAnsiEncoding >>`),
-  ];
+/** Serializa objetos 1..N + xref con offsets EXACTOS + trailer → bytes. */
+function assemble(objs: string[]): Uint8Array<ArrayBuffer> {
   let out = `%PDF-1.4\n%${String.fromCharCode(0xE2, 0xE3, 0xCF, 0xD3)}\n`;
   const offsets: number[] = [];
   objs.forEach((body, k) => {
@@ -203,4 +201,67 @@ export function buildDiagramPdf(scene: Scene): Uint8Array<ArrayBuffer> {
   const bytes = new Uint8Array(out.length);
   for (let k = 0; k < out.length; k++) bytes[k] = out.charCodeAt(k) & 0xFF;
   return bytes;
+}
+
+export function buildDiagramPdf(scene: Scene): Uint8Array<ArrayBuffer> {
+  const { stream, W, H } = sceneContent(scene);
+  // ── Ensamblado: objetos 1..10 (layout HISTÓRICO del doc 59, intacto) ────
+  const objs: string[] = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n2(W)} ${n2(H)}] /Resources << /Font << ${FONTS.map((_, k) => `/F${k + 1} ${k + 5} 0 R`).join(' ')} >> >> /Contents 4 0 R >>`,
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    ...FONTS.map((f) => `<< /Type /Font /Subtype /Type1 /BaseFont /${f} /Encoding /WinAnsiEncoding >>`),
+  ];
+  return assemble(objs);
+}
+
+// ── Doc 66 r3: PDF MULTIPÁGINA (una página por escena) con bookmarks ──────
+// Numeración: 1 catálogo · 2 pages · 3..2+N páginas · 3+N..2+2N streams ·
+// 3+2N outlines root · 4+2N..3+3N items · 4+3N..9+3N fuentes (compartidas).
+export interface PdfPageInput { scene: Scene; title: string }
+
+export function buildMultiDiagramPdf(
+  pages: PdfPageInput[],
+  opts?: { compress?: (raw: Uint8Array) => Uint8Array },
+): Uint8Array<ArrayBuffer> {
+  if (!pages.length) throw new Error('buildMultiDiagramPdf: no pages');
+  const N = pages.length;
+  const contents = pages.map((p) => sceneContent(p.scene));
+  const pageObj = (i: number) => 3 + i;
+  const streamObj = (i: number) => 3 + N + i;
+  const outRoot = 3 + 2 * N;
+  const itemObj = (i: number) => 4 + 2 * N + i;
+  const fontObj = (k: number) => 4 + 3 * N + k;
+  const fontRes = `/Font << ${FONTS.map((_, k) => `/F${k + 1} ${fontObj(k)} 0 R`).join(' ')} >>`;
+
+  const objs: string[] = [];
+  objs.push(`<< /Type /Catalog /Pages 2 0 R /Outlines ${outRoot} 0 R /PageMode /UseOutlines >>`);
+  objs.push(`<< /Type /Pages /Kids [${pages.map((_, i) => `${pageObj(i)} 0 R`).join(' ')}] /Count ${N} >>`);
+  contents.forEach((c, i) => objs.push(
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n2(c.W)} ${n2(c.H)}] /Resources << ${fontRes} >> /Contents ${streamObj(i)} 0 R >>`,
+  ));
+  // Streams: crudos, o zlib (RFC 1950 — lo que espera /FlateDecode) si llega
+  // compresor (la orquestación pasa zlibSync de fflate; el motor no depende).
+  for (const c of contents) {
+    if (opts?.compress) {
+      const raw = new Uint8Array(c.stream.length);
+      for (let k = 0; k < c.stream.length; k++) raw[k] = c.stream.charCodeAt(k) & 0xFF;
+      const z = opts.compress(raw);
+      let zs = '';
+      for (let k = 0; k < z.length; k++) zs += String.fromCharCode(z[k]);
+      objs.push(`<< /Length ${z.length} /Filter /FlateDecode >>\nstream\n${zs}\nendstream`);
+    } else {
+      objs.push(`<< /Length ${c.stream.length} >>\nstream\n${c.stream}\nendstream`);
+    }
+  }
+  objs.push(`<< /Type /Outlines /First ${itemObj(0)} 0 R /Last ${itemObj(N - 1)} 0 R /Count ${N} >>`);
+  pages.forEach((p, i) => {
+    let it = `<< /Title (${escText(winAnsiEncode(p.title))}) /Parent ${outRoot} 0 R /Dest [${pageObj(i)} 0 R /Fit]`;
+    if (i > 0) it += ` /Prev ${itemObj(i - 1)} 0 R`;
+    if (i < N - 1) it += ` /Next ${itemObj(i + 1)} 0 R`;
+    objs.push(`${it} >>`);
+  });
+  FONTS.forEach((f) => objs.push(`<< /Type /Font /Subtype /Type1 /BaseFont /${f} /Encoding /WinAnsiEncoding >>`));
+  return assemble(objs);
 }

@@ -109,3 +109,71 @@ describe('exportNodeHtml', () => {
     expect(vi.mocked(listFolders)).not.toHaveBeenCalled();
   });
 });
+
+import { exportNodePdf } from './exportPackage';
+
+const pdfText = async (blob: Blob): Promise<string> => {
+  const u8 = new Uint8Array(await blob.arrayBuffer());
+  return new TextDecoder('latin1').decode(u8);
+};
+
+describe('exportNodePdf', () => {
+  it('folder → UN PDF multipágina (2 páginas por canvas: L+P) con bookmarks', async () => {
+    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'CPYBCA'), F('f2', 'f1', 'CPYBCAPYM')]);
+    const sas = [SA('s1', 'f2', 'Datamart PYME'), SA('s2', 'f1', 'Suelto')];
+    vi.mocked(listSubjectAreas).mockResolvedValue(sas);
+    vi.mocked(loadDiagram).mockImplementation(async (id: string) => dia(sas.find((s) => s.id === id)!));
+
+    const download = vi.fn();
+    const out = await exportNodePdf({ kind: 'folder', nodeId: 'f1', projectId: 'p1', projectName: 'Modelo DDV', download });
+
+    expect(out).toMatchObject({ exported: 2, total: 2, failed: [], cancelled: false });
+    const [blob, filename] = download.mock.calls[0];
+    expect(filename).toBe('CPYBCA.pdf');
+    expect(blob.type).toBe('application/pdf');
+    const s = await pdfText(blob);
+    expect(s.startsWith('%PDF-1.4')).toBe(true);
+    expect(s).toContain('/Count 4');                       // 2 canvases × (Logical+Physical)
+    expect(s).toContain('CPYBCAPYM / Datamart PYME');      // bookmark con ruta relativa al root
+    expect(s).toContain('/Filter /FlateDecode');           // streams comprimidos
+  });
+
+  it('canvas suelto → PDF directo de 2 páginas', async () => {
+    const sa = SA('s1', null, 'Mi Canvas: v1');
+    vi.mocked(loadDiagram).mockResolvedValue(dia(sa));
+    const download = vi.fn();
+    const out = await exportNodePdf({ kind: 'canvas', nodeId: 's1', projectId: 'p1', projectName: 'P', download });
+    expect(out).toMatchObject({ exported: 1, total: 1, failed: [] });
+    const [blob, filename] = download.mock.calls[0];
+    expect(filename).toBe('Mi Canvas_ v1.pdf');
+    const s = await pdfText(blob);
+    expect(s).toContain('/Count 2');
+    expect(vi.mocked(listFolders)).not.toHaveBeenCalled();
+  });
+
+  it('canvas que falla → sus 2 páginas se omiten y queda en failed[]', async () => {
+    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'CPYBCA')]);
+    const sas = [SA('s1', 'f1', 'Bueno'), SA('s2', 'f1', 'Malo')];
+    vi.mocked(listSubjectAreas).mockResolvedValue(sas);
+    vi.mocked(loadDiagram).mockImplementation(async (id: string) => {
+      if (id === 's2') throw new Error('boom');
+      return dia(sas[0]);
+    });
+    const download = vi.fn();
+    const out = await exportNodePdf({ kind: 'folder', nodeId: 'f1', projectId: 'p1', projectName: 'P', download });
+    expect(out.failed).toEqual(['Malo']);
+    const s = await pdfText(download.mock.calls[0][0]);
+    expect(s).toContain('/Count 2');
+    expect(s).not.toContain('(Malo');
+  });
+
+  it('cancel antes de empezar → no descarga nada', async () => {
+    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'C')]);
+    vi.mocked(listSubjectAreas).mockResolvedValue([SA('s1', 'f1', 'X')]);
+    vi.mocked(loadDiagram).mockResolvedValue(dia(SA('s1', 'f1', 'X')));
+    const download = vi.fn();
+    const out = await exportNodePdf({ kind: 'folder', nodeId: 'f1', projectId: 'p1', projectName: 'P', cancel: { cancelled: true }, download });
+    expect(out.cancelled).toBe(true);
+    expect(download).not.toHaveBeenCalled();
+  });
+});

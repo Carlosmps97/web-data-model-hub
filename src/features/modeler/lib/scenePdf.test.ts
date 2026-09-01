@@ -70,3 +70,55 @@ describe('buildDiagramPdf', () => {
     expect(s).toContain('0.884 0.887 0.891 rg');
   });
 });
+
+import { strFromU8, strToU8, unzlibSync, zlibSync } from 'fflate';
+import { buildMultiDiagramPdf } from './scenePdf';
+
+describe('buildMultiDiagramPdf', () => {
+  const pages = [
+    { scene: scene([{ k: 'rect' as const, x: 0, y: 0, w: 10, h: 10, fill: '#ffffff' }]), title: 'CPYBCAPYM / Datamart PYME — Logical' },
+    { scene: scene([{ k: 'line' as const, x1: 0, y1: 0, x2: 5, y2: 5, stroke: '#000000', sw: 1 }], 320, 200), title: 'Suelto — Physical' },
+  ];
+
+  it('N páginas: /Count, Kids y un MediaBox por página (tamaños propios)', () => {
+    const s = dec(buildMultiDiagramPdf(pages));
+    expect(s.startsWith('%PDF-1.4')).toBe(true);
+    expect(s).toContain('/Kids [3 0 R 4 0 R] /Count 2');
+    expect(s).toContain('/MediaBox [0 0 480 300]');
+    expect(s).toContain('/MediaBox [0 0 240 150]');
+    expect(s.trimEnd().endsWith('%%EOF')).toBe(true);
+  });
+
+  it('bookmarks: /Outlines con un item por página y títulos WinAnsi', () => {
+    const s = dec(buildMultiDiagramPdf(pages));
+    expect(s).toContain('/Outlines');
+    expect(s).toContain('/PageMode /UseOutlines');
+    expect(s).toContain('/Count 2 >>');
+    expect(s).toContain('(CPYBCAPYM / Datamart PYME');   // el em-dash va como byte 0x97
+    expect(s).toContain('(Suelto');
+    expect(s).toContain('/Fit]');
+  });
+
+  it('xref: cada offset apunta a su `N 0 obj` (9+3N objetos)', () => {
+    const s = dec(buildMultiDiagramPdf(pages));
+    const xrefAt = Number(/startxref\n(\d+)\n%%EOF/.exec(s)![1]);
+    expect(s.slice(xrefAt, xrefAt + 4)).toBe('xref');
+    const entries = [...s.matchAll(/^(\d{10}) 00000 n /gm)].map((m) => Number(m[1]));
+    expect(entries.length).toBe(9 + 3 * 2);
+    entries.forEach((off, i) => expect(s.slice(off, off + String(i + 1).length + 6)).toBe(`${i + 1} 0 obj`));
+  });
+
+  it('compress: streams con /FlateDecode, /Length exacto y contenido recuperable', () => {
+    const s = dec(buildMultiDiagramPdf(pages, { compress: (raw) => zlibSync(raw) }));
+    expect(s).toContain('/Filter /FlateDecode');
+    const m = /\/Length (\d+) \/Filter \/FlateDecode >>\nstream\n/.exec(s)!;
+    const start = m.index + m[0].length;
+    const body = s.slice(start, start + Number(m[1]));
+    const raw = strFromU8(unzlibSync(strToU8(body, true)), true);
+    expect(raw).toContain(' re');                 // operadores PDF del rect
+  });
+
+  it('sin páginas → throw', () => {
+    expect(() => buildMultiDiagramPdf([])).toThrow();
+  });
+});

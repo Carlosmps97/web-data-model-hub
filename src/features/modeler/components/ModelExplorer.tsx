@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   EllipsisVertical, ChevronRight, ChevronDown, Folder as FolderIcon,
-  FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid, FileDown,
+  FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid, FileDown, FileText,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useModelerStore, buildProjectTree } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { FolderNode } from '@/store/useModelerStore';
 import type { Folder, Project, SubjectArea } from '../services/modeler.service';
-import { exportNodeHtml } from '../exportPackage';
+import { exportNodeHtml, exportNodePdf } from '../exportPackage';
 import type { CancelFlag, ExportOutcome, ExportProgress } from '../exportPackage';
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -68,12 +68,12 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
 
   // Doc 66 — Export HTML: modal de progreso + flag de cancelación compartido
   // con la orquestación (mutable: la UI lo pone en true, el pool lo lee).
-  const [exporting, setExporting] = useState<{ title: string } | null>(null);
+  const [exporting, setExporting] = useState<{ title: string; format: 'html' | 'pdf' } | null>(null);
   const [exportProg, setExportProg] = useState<ExportProgress | null>(null);
   const [exportResult, setExportResult] = useState<ExportOutcome | null>(null);
   const exportCancelRef = useRef<CancelFlag>({ cancelled: false });
 
-  const startExport = useCallback(async (kind: NodeKind, id: string, projectId: string) => {
+  const startExport = useCallback(async (kind: NodeKind, id: string, projectId: string, format: 'html' | 'pdf') => {
     setMenu(null);
     const project = projects.find((p) => p.id === projectId);
     if (!project) return;
@@ -82,9 +82,10 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     exportCancelRef.current = { cancelled: false };
     setExportResult(null);
     setExportProg(null);
-    setExporting({ title: title || 'Export' });
+    setExporting({ title: title || 'Export', format });
     try {
-      const out = await exportNodeHtml({
+      const run = format === 'pdf' ? exportNodePdf : exportNodeHtml;
+      const out = await run({
         kind, nodeId: id, projectId, projectName: project.name,
         onProgress: setExportProg, cancel: exportCancelRef.current,
       });
@@ -341,7 +342,8 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
         <ContextMenu menu={menu} readonly={readonly}
           onNewFolder={() => startCreate('folder', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
           onNewCanvas={() => startCreate('canvas', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
-          onExport={() => { void startExport(menu.kind, menu.id, menu.projectId); }}
+          onExport={() => { void startExport(menu.kind, menu.id, menu.projectId, 'html'); }}
+          onExportPdf={() => { void startExport(menu.kind, menu.id, menu.projectId, 'pdf'); }}
           onRename={() => startRename(menu.kind, menu.id, menu.projectId)}
           onDelete={() => askDelete(menu.kind, menu.id, nameOf(menu, trees, projects), menu.projectId)} />
       )}
@@ -349,6 +351,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
       {exporting && (
         <ExportModal
           title={exporting.title}
+          format={exporting.format}
           prog={exportProg}
           result={exportResult}
           onCancel={() => { exportCancelRef.current.cancelled = true; }}
@@ -449,10 +452,10 @@ function InlineInput({
 
 // ── Menú contextual (popover anclado a la fila) ──────────────────────────
 function ContextMenu({
-  menu, readonly, onNewFolder, onNewCanvas, onExport, onRename, onDelete,
+  menu, readonly, onNewFolder, onNewCanvas, onExport, onExportPdf, onRename, onDelete,
 }: {
   menu: MenuState; readonly: boolean;
-  onNewFolder: () => void; onNewCanvas: () => void; onExport: () => void;
+  onNewFolder: () => void; onNewCanvas: () => void; onExport: () => void; onExportPdf: () => void;
   onRename: () => void; onDelete: () => void;
 }) {
   // Readonly (doc 66 r2): exportar NO muta — el menú aparece igual, pero solo
@@ -473,6 +476,8 @@ function ContextMenu({
       {showCreate && <div className="rd-menu-sep" />}
       {/* Doc 66: export HTML del nodo (proyecto/folder → ZIP; canvas → .html). */}
       <button className="rd-menu-item" onClick={onExport}><FileDown size={15} /> Export HTML</button>
+      {/* Doc 66 r3: UN PDF multipágina del nodo (2 páginas por canvas: L+P). */}
+      <button className="rd-menu-item" onClick={onExportPdf}><FileText size={15} /> Export PDF</button>
       {showMutations && <div className="rd-menu-sep" />}
       {showMutations && <button className="rd-menu-item" onClick={onRename}><Pencil size={15} /> Rename</button>}
       {showMutations && <button className="rd-menu-item danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
@@ -484,9 +489,9 @@ function ContextMenu({
 // Patrón visual de ConfirmDialog (backdrop --top + dmh-modal). Mientras corre:
 // barra determinada + Cancel; si terminó con fallos: resumen + Close.
 function ExportModal({
-  title, prog, result, onCancel, onClose,
+  title, format, prog, result, onCancel, onClose,
 }: {
-  title: string; prog: ExportProgress | null; result: ExportOutcome | null;
+  title: string; format: 'html' | 'pdf'; prog: ExportProgress | null; result: ExportOutcome | null;
   onCancel: () => void; onClose: () => void;
 }) {
   const pct = prog && prog.total > 0 ? Math.round((prog.done / prog.total) * 100) : 0;
@@ -495,7 +500,7 @@ function ExportModal({
     <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
       <div className="dmh-modal" style={{ width: 440 }} role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
         <div className="m-body">
-          <h3 id="export-modal-title" className="rd-h3" style={{ marginBottom: 10 }}>Export HTML — {title}</h3>
+          <h3 id="export-modal-title" className="rd-h3" style={{ marginBottom: 10 }}>Export {format === 'pdf' ? 'PDF' : 'HTML'} — {title}</h3>
           {!finished && (
             <>
               <div className="rd-small" style={{ marginBottom: 8 }}>
