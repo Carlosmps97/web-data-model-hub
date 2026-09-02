@@ -118,7 +118,7 @@ const pdfText = async (blob: Blob): Promise<string> => {
 };
 
 describe('exportNodePdf', () => {
-  it('folder → UN PDF multipágina (2 páginas por canvas: L+P) con bookmarks', async () => {
+  it('folder → UN reporte estilo Erwin: A4, TOC, bookmarks jerárquicos, index', async () => {
     vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'CPYBCA'), F('f2', 'f1', 'CPYBCAPYM')]);
     const sas = [SA('s1', 'f2', 'Datamart PYME'), SA('s2', 'f1', 'Suelto')];
     vi.mocked(listSubjectAreas).mockResolvedValue(sas);
@@ -133,12 +133,19 @@ describe('exportNodePdf', () => {
     expect(blob.type).toBe('application/pdf');
     const s = await pdfText(blob);
     expect(s.startsWith('%PDF-1.4')).toBe(true);
-    expect(s).toContain('/Count 4');                       // 2 canvases × (Logical+Physical)
-    expect(s).toContain('CPYBCAPYM / Datamart PYME');      // bookmark con ruta relativa al root
-    expect(s).toContain('/Filter /FlateDecode');           // streams comprimidos
+    // Streams comprimidos ⇒ se verifica ESTRUCTURA: outline + páginas A4.
+    expect(s).toContain('/Filter /FlateDecode');
+    expect(s).toContain('/MediaBox [0 0 595 842]');
+    expect(s).toContain('(CPYBCA)');                        // bookmark raíz
+    expect(s).toContain('(Table Of Contents)');
+    expect(s).toContain('(Datamart PYME)');                 // bookmark del canvas
+    expect(s).toContain('(PH_S1)');                         // bookmark de la tabla
+    expect(s).toContain('(Index)');
+    const count = Number(/\/Kids \[[^\]]*\] \/Count (\d+)/.exec(s)![1]);
+    expect(count).toBeGreaterThanOrEqual(8);                // portada+toc+secciones+4 diagramas+index
   });
 
-  it('canvas suelto → PDF directo de 2 páginas', async () => {
+  it('canvas suelto → reporte del canvas en PDF directo', async () => {
     const sa = SA('s1', null, 'Mi Canvas: v1');
     vi.mocked(loadDiagram).mockResolvedValue(dia(sa));
     const download = vi.fn();
@@ -147,11 +154,12 @@ describe('exportNodePdf', () => {
     const [blob, filename] = download.mock.calls[0];
     expect(filename).toBe('Mi Canvas_ v1.pdf');
     const s = await pdfText(blob);
-    expect(s).toContain('/Count 2');
+    expect(s).toContain('(Mi Canvas: v1)');
+    expect(s).toContain('(Table Of Contents)');
     expect(vi.mocked(listFolders)).not.toHaveBeenCalled();
   });
 
-  it('canvas que falla → sus 2 páginas se omiten y queda en failed[]', async () => {
+  it('canvas que falla → fuera del reporte y en failed[]', async () => {
     vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'CPYBCA')]);
     const sas = [SA('s1', 'f1', 'Bueno'), SA('s2', 'f1', 'Malo')];
     vi.mocked(listSubjectAreas).mockResolvedValue(sas);
@@ -163,8 +171,8 @@ describe('exportNodePdf', () => {
     const out = await exportNodePdf({ kind: 'folder', nodeId: 'f1', projectId: 'p1', projectName: 'P', download });
     expect(out.failed).toEqual(['Malo']);
     const s = await pdfText(download.mock.calls[0][0]);
-    expect(s).toContain('/Count 2');
-    expect(s).not.toContain('(Malo');
+    expect(s).toContain('(Bueno)');
+    expect(s).not.toContain('(Malo)');
   });
 
   it('cancel antes de empezar → no descarga nada', async () => {

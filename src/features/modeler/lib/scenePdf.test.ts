@@ -122,3 +122,47 @@ describe('buildMultiDiagramPdf', () => {
     expect(() => buildMultiDiagramPdf([])).toThrow();
   });
 });
+
+import { buildReportPdf } from './scenePdf';
+
+describe('buildReportPdf', () => {
+  const pages = [
+    { scene: scene([{ k: 'text' as const, x: 40, y: 60, s: 'Report cover', size: 22, color: '#000000' }], 595, 842), scale: 1 },
+    { scene: scene([{ k: 'rect' as const, x: 0, y: 0, w: 10, h: 10, fill: '#ffffff' }]) },   // sin scale → regla 0.75
+  ];
+  const bookmarks = [
+    { title: 'Root doc', pageIndex: 0, children: [
+      { title: 'Canvas A', pageIndex: 1, children: [{ title: 'T1', pageIndex: 1 }] },
+    ] },
+  ];
+
+  it('scale 1 → la página queda en puntos A4 exactos; sin scale → regla 0.75', () => {
+    const s = dec(buildReportPdf(pages, bookmarks));
+    expect(s).toContain('/MediaBox [0 0 595 842]');
+    expect(s).toContain('/MediaBox [0 0 480 300]');
+  });
+
+  it('outline JERÁRQUICO: títulos, /Count de descendientes y /Dest a la página', () => {
+    const s = dec(buildReportPdf(pages, bookmarks));
+    expect(s).toContain('(Root doc)');
+    expect(s).toContain('(Canvas A)');
+    expect(s).toContain('(T1)');
+    expect(s).toContain('/Dest [3 0 R /Fit]');       // Root doc → página 0 (obj 3)
+    expect(s).toContain('/Dest [4 0 R /Fit]');       // Canvas A y T1 → página 1 (obj 4)
+    expect(s).toMatch(/\(Canvas A\)[^(]*\/Count 1/); // Canvas A tiene 1 descendiente
+  });
+
+  it('xref exacto con 9+2N+M objetos (N=2 páginas, M=3 bookmarks)', () => {
+    const s = dec(buildReportPdf(pages, bookmarks));
+    const xrefAt = Number(/startxref\n(\d+)\n%%EOF/.exec(s)![1]);
+    expect(s.slice(xrefAt, xrefAt + 4)).toBe('xref');
+    const entries = [...s.matchAll(/^(\d{10}) 00000 n /gm)].map((m) => Number(m[1]));
+    expect(entries.length).toBe(9 + 2 * 2 + 3);
+    entries.forEach((off, i) => expect(s.slice(off, off + String(i + 1).length + 6)).toBe(`${i + 1} 0 obj`));
+  });
+
+  it('acepta compresor de streams', () => {
+    const s = dec(buildReportPdf(pages, bookmarks, { compress: (raw) => zlibSync(raw) }));
+    expect(s).toContain('/Filter /FlateDecode');
+  });
+});

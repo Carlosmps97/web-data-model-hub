@@ -5,7 +5,7 @@
 // (escena/SVG/fuentes/fflate) cargan lazy, patrón del Toolbar (doc 59).
 import { listFolders, listSubjectAreas, loadDiagram } from './services/modeler.service';
 import type { Diagram } from './services/modeler.service';
-import type { PdfPageInput } from './lib/scenePdf';
+import type { ReportCanvasInput } from './lib/reportPdf';
 import { listDomains } from '@/features/governance/services/governance.service';
 import { getUdpDefs } from '@/features/standards/standards.service';
 import {
@@ -163,7 +163,10 @@ export async function exportNodeHtml(opts: {
   return outcome;
 }
 
-// ── Doc 66 r3: export PDF multipágina (una página por canvas y modo) ──────
+// ── Doc 67: export PDF = REPORTE completo estilo Erwin ────────────────────
+// Portada · TOC · Subject Areas · por canvas (diagramas L+P vectoriales +
+// Table(s) + Column(s)) · Index alfabético · bookmarks jerárquicos.
+// Reemplaza al multipágina de solo-diagramas del doc 66 r3.
 export async function exportNodePdf(opts: {
   kind: 'project' | 'folder' | 'canvas';
   nodeId: string;
@@ -175,40 +178,45 @@ export async function exportNodePdf(opts: {
 }): Promise<ExportOutcome> {
   const download = opts.download ?? domDownload;
   const cancelled = () => opts.cancel?.cancelled === true;
-  const [{ buildDiagramScene }, { buildMultiDiagramPdf }, { zlibSync }] = await Promise.all([
-    import('./lib/exportScene'), import('./lib/scenePdf'), import('fflate'),
+  const [{ buildDiagramScene }, { buildReportPdf }, { buildModelReport }, { zlibSync }, lookups] = await Promise.all([
+    import('./lib/exportScene'), import('./lib/scenePdf'), import('./lib/reportPdf'), import('fflate'), fetchLookups(),
   ]);
 
-  // Dos páginas por canvas (decisión r3): lógico primero, físico después.
-  const pagesOf = (diagram: Diagram, baseTitle: string): PdfPageInput[] => {
+  const canvasInput = (diagram: Diagram, location: string): ReportCanvasInput => {
     const drawings = diagram.subjectArea.drawings ?? [];
-    return [
-      { scene: buildDiagramScene({ diagram, drawings, viewMode: 'logical' }), title: `${baseTitle} — Logical` },
-      { scene: buildDiagramScene({ diagram, drawings, viewMode: 'physical' }), title: `${baseTitle} — Physical` },
-    ];
+    return {
+      name: diagram.subjectArea.name,
+      location,
+      diagram,
+      logicalScene: buildDiagramScene({ diagram, drawings, viewMode: 'logical' }),
+      physicalScene: buildDiagramScene({ diagram, drawings, viewMode: 'physical' }),
+    };
   };
-  // Streams comprimidos: /FlateDecode espera zlib (RFC 1950) — zlibSync, no deflateSync.
-  const toPdfBlob = (pages: PdfPageInput[]) =>
-    new Blob([buildMultiDiagramPdf(pages, { compress: zlibSync }) as unknown as BlobPart], { type: 'application/pdf' });
+  const downloadReport = (rootName: string, canvases: ReportCanvasInput[]) => {
+    const { pages, bookmarks } = buildModelReport({ rootName, canvases, domainsById: lookups.domainsById });
+    const pdf = buildReportPdf(pages, bookmarks, { compress: zlibSync });
+    download(new Blob([pdf as unknown as BlobPart], { type: 'application/pdf' }), `${sanitizeFileName(rootName)}.pdf`);
+  };
 
+  // ── Canvas suelto: reporte del canvas (portada + TOC + su sección + index) ──
   if (opts.kind === 'canvas') {
     const outcome: ExportOutcome = { exported: 0, total: 1, failed: [], cancelled: false };
     opts.onProgress?.({ done: 0, total: 1, current: '' });
     const diagram = await loadDiagram(opts.nodeId);
     if (cancelled()) return { ...outcome, cancelled: true };
-    const name = diagram.subjectArea.name;
-    download(toPdfBlob(pagesOf(diagram, name)), `${sanitizeFileName(name)}.pdf`);
-    opts.onProgress?.({ done: 1, total: 1, current: name });
+    downloadReport(diagram.subjectArea.name, [canvasInput(diagram, '')]);
+    opts.onProgress?.({ done: 1, total: 1, current: diagram.subjectArea.name });
     return { ...outcome, exported: 1 };
   }
 
+  // ── Folder / proyecto ──
   const [folders, sas] = await Promise.all([listFolders(opts.projectId), listSubjectAreas(opts.projectId)]);
   const layout = packageLayout(opts.kind, opts.nodeId, opts.projectName, folders, sas);
   const total = layout.canvases.length;
   const outcome: ExportOutcome = { exported: 0, total, failed: [], cancelled: false };
   if (cancelled()) return { ...outcome, cancelled: true };
 
-  const byIndex = new Array<PdfPageInput[] | null>(total).fill(null);
+  const byIndex = new Array<ReportCanvasInput | null>(total).fill(null);
   let done = 0;
   await runPool(layout.canvases, FETCH_CONCURRENCY, async (entry: LayoutCanvas, i: number) => {
     if (cancelled()) return;
@@ -216,9 +224,8 @@ export async function exportNodePdf(opts: {
     try {
       const diagram = await loadDiagram(entry.sa.id);
       if (cancelled()) return;
-      // Título del bookmark: ruta RELATIVA al nodo exportado (sin repetirlo).
-      const baseTitle = [...entry.crumb.slice(1), entry.sa.name].join(' / ');
-      byIndex[i] = pagesOf(diagram, baseTitle);
+      // Location = ruta de carpetas RELATIVA al nodo exportado.
+      byIndex[i] = canvasInput(diagram, entry.crumb.slice(1).join(' / '));
       outcome.exported += 1;
     } catch {
       outcome.failed.push(entry.sa.name);
@@ -229,8 +236,8 @@ export async function exportNodePdf(opts: {
   });
 
   if (cancelled()) return { ...outcome, cancelled: true };
-  const pages = byIndex.filter((p): p is PdfPageInput[] => p !== null).flat();
-  if (!pages.length) return outcome;   // nada exportable (todo falló o folder vacío)
-  download(toPdfBlob(pages), `${layout.rootName}.pdf`);
+  const canvases = byIndex.filter((c): c is ReportCanvasInput => c !== null);
+  if (!canvases.length) return outcome;   // nada exportable (todo falló o folder vacío)
+  downloadReport(layout.rootName, canvases);
   return outcome;
 }

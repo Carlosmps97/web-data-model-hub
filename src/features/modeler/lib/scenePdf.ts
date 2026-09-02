@@ -73,8 +73,8 @@ const fontOf = (i: Extract<SceneItem, { k: 'text' }>): { f: string; wf: number }
 /** Contenido de UNA página: content stream + tamaño en puntos (px→pt 0.75,
  *  capado al techo ISO de 14400pt). Extraído de buildDiagramPdf para que el
  *  multipágina (doc 66 r3) reuse el MISMO dibujo. */
-function sceneContent(scene: Scene): { stream: string; W: number; H: number } {
-  const S = Math.min(0.75, 14400 / scene.w, 14400 / scene.h);
+function sceneContent(scene: Scene, scale?: number): { stream: string; W: number; H: number } {
+  const S = scale ?? Math.min(0.75, 14400 / scene.w, 14400 / scene.h);
   const W = scene.w * S, H = scene.h * S;
   const X = (v: number) => n2(v * S);
   const Y = (v: number) => n2(H - v * S);
@@ -260,6 +260,80 @@ export function buildMultiDiagramPdf(
     let it = `<< /Title (${escText(winAnsiEncode(p.title))}) /Parent ${outRoot} 0 R /Dest [${pageObj(i)} 0 R /Fit]`;
     if (i > 0) it += ` /Prev ${itemObj(i - 1)} 0 R`;
     if (i < N - 1) it += ` /Next ${itemObj(i + 1)} 0 R`;
+    objs.push(`${it} >>`);
+  });
+  FONTS.forEach((f) => objs.push(`<< /Type /Font /Subtype /Type1 /BaseFont /${f} /Encoding /WinAnsiEncoding >>`));
+  return assemble(objs);
+}
+
+// ── Doc 67: PDF de REPORTE — páginas con escala propia + outline jerárquico ─
+export interface ReportPage { scene: Scene; scale?: number }
+export interface PdfBookmark { title: string; pageIndex: number; children?: PdfBookmark[] }
+
+/** Objeto de content stream (crudo o comprimido a zlib para /FlateDecode). */
+function contentObj(stream: string, compress?: (raw: Uint8Array) => Uint8Array): string {
+  if (!compress) return `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`;
+  const raw = new Uint8Array(stream.length);
+  for (let k = 0; k < stream.length; k++) raw[k] = stream.charCodeAt(k) & 0xFF;
+  const z = compress(raw);
+  let zs = '';
+  for (let k = 0; k < z.length; k++) zs += String.fromCharCode(z[k]);
+  return `<< /Length ${z.length} /Filter /FlateDecode >>\nstream\n${zs}\nendstream`;
+}
+
+export function buildReportPdf(
+  pages: ReportPage[],
+  bookmarks: PdfBookmark[],
+  opts?: { compress?: (raw: Uint8Array) => Uint8Array },
+): Uint8Array<ArrayBuffer> {
+  if (!pages.length) throw new Error('buildReportPdf: no pages');
+  const N = pages.length;
+
+  // Aplana el árbol de bookmarks en PREORDEN con parent/hermanos/counts.
+  interface Flat { title: string; pageIndex: number; parent: number; prev: number; next: number; first: number; last: number; count: number }
+  const flat: Flat[] = [];
+  const walk = (nodes: PdfBookmark[], parent: number): number[] => {
+    const ids: number[] = [];
+    for (const b of nodes) {
+      const id = flat.length;
+      flat.push({ title: b.title, pageIndex: b.pageIndex, parent, prev: -1, next: -1, first: -1, last: -1, count: 0 });
+      ids.push(id);
+      const kids = walk(b.children ?? [], id);
+      if (kids.length) { flat[id].first = kids[0]; flat[id].last = kids[kids.length - 1]; }
+      flat[id].count = flat.length - id - 1;   // descendientes (preorden contiguo)
+    }
+    ids.forEach((id, k) => {
+      flat[id].prev = k > 0 ? ids[k - 1] : -1;
+      flat[id].next = k < ids.length - 1 ? ids[k + 1] : -1;
+    });
+    return ids;
+  };
+  const roots = walk(bookmarks, -1);
+  const M = flat.length;
+
+  // Numeración: 1 catálogo · 2 pages · 3..2+N páginas · 3+N..2+2N streams ·
+  // 3+2N outlines root · 4+2N..3+2N+M items · después las 6 fuentes.
+  const pageObj = (i: number) => 3 + i;
+  const streamObj = (i: number) => 3 + N + i;
+  const outRoot = 3 + 2 * N;
+  const itemObj = (j: number) => 4 + 2 * N + j;
+  const fontObj = (k: number) => 4 + 2 * N + M + k;
+  const fontRes = `/Font << ${FONTS.map((_, k) => `/F${k + 1} ${fontObj(k)} 0 R`).join(' ')} >>`;
+
+  const contents = pages.map((p) => sceneContent(p.scene, p.scale));
+  const objs: string[] = [];
+  objs.push(`<< /Type /Catalog /Pages 2 0 R /Outlines ${outRoot} 0 R /PageMode /UseOutlines >>`);
+  objs.push(`<< /Type /Pages /Kids [${pages.map((_, i) => `${pageObj(i)} 0 R`).join(' ')}] /Count ${N} >>`);
+  contents.forEach((c, i) => objs.push(
+    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n2(c.W)} ${n2(c.H)}] /Resources << ${fontRes} >> /Contents ${streamObj(i)} 0 R >>`,
+  ));
+  for (const c of contents) objs.push(contentObj(c.stream, opts?.compress));
+  objs.push(`<< /Type /Outlines${roots.length ? ` /First ${itemObj(roots[0])} 0 R /Last ${itemObj(roots[roots.length - 1])} 0 R` : ''} /Count ${M} >>`);
+  flat.forEach((b) => {
+    let it = `<< /Title (${escText(winAnsiEncode(b.title))}) /Parent ${b.parent === -1 ? outRoot : itemObj(b.parent)} 0 R /Dest [${pageObj(b.pageIndex)} 0 R /Fit]`;
+    if (b.prev !== -1) it += ` /Prev ${itemObj(b.prev)} 0 R`;
+    if (b.next !== -1) it += ` /Next ${itemObj(b.next)} 0 R`;
+    if (b.first !== -1) it += ` /First ${itemObj(b.first)} 0 R /Last ${itemObj(b.last)} 0 R /Count ${b.count}`;
     objs.push(`${it} >>`);
   });
   FONTS.forEach((f) => objs.push(`<< /Type /Font /Subtype /Type1 /BaseFont /${f} /Encoding /WinAnsiEncoding >>`));
