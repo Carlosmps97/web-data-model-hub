@@ -267,7 +267,9 @@ export function buildMultiDiagramPdf(
 }
 
 // ── Doc 67: PDF de REPORTE — páginas con escala propia + outline jerárquico ─
-export interface ReportPage { scene: Scene; scale?: number }
+/** Zona clicable en coordenadas de la ESCENA (se transforma con su escala). */
+export interface PdfLink { x: number; y: number; w: number; h: number; pageIndex: number }
+export interface ReportPage { scene: Scene; scale?: number; links?: PdfLink[] }
 export interface PdfBookmark { title: string; pageIndex: number; children?: PdfBookmark[] }
 
 /** Objeto de content stream (crudo o comprimido a zlib para /FlateDecode). */
@@ -311,23 +313,44 @@ export function buildReportPdf(
   const roots = walk(bookmarks, -1);
   const M = flat.length;
 
+  // Anotaciones /Link por página (r2 doc 67): rects en unidades de la escena
+  // transformados con SU escala; A = total de links del documento.
+  const pageLinks = pages.map((p) => p.links ?? []);
+  const A = pageLinks.reduce((acc, l) => acc + l.length, 0);
+
   // Numeración: 1 catálogo · 2 pages · 3..2+N páginas · 3+N..2+2N streams ·
-  // 3+2N outlines root · 4+2N..3+2N+M items · después las 6 fuentes.
+  // 3+2N.. annots (A) · luego outline root · M items · 6 fuentes.
   const pageObj = (i: number) => 3 + i;
   const streamObj = (i: number) => 3 + N + i;
-  const outRoot = 3 + 2 * N;
-  const itemObj = (j: number) => 4 + 2 * N + j;
-  const fontObj = (k: number) => 4 + 2 * N + M + k;
+  const annotBase = 3 + 2 * N;
+  const outRoot = annotBase + A;
+  const itemObj = (j: number) => outRoot + 1 + j;
+  const fontObj = (k: number) => outRoot + 1 + M + k;
   const fontRes = `/Font << ${FONTS.map((_, k) => `/F${k + 1} ${fontObj(k)} 0 R`).join(' ')} >>`;
 
   const contents = pages.map((p) => sceneContent(p.scene, p.scale));
+  // Ids de annots por página (consecutivos en orden de página).
+  const annotIds: number[][] = [];
+  let nextAnnot = annotBase;
+  for (const links of pageLinks) {
+    annotIds.push(links.map(() => nextAnnot++));
+  }
+
   const objs: string[] = [];
   objs.push(`<< /Type /Catalog /Pages 2 0 R /Outlines ${outRoot} 0 R /PageMode /UseOutlines >>`);
   objs.push(`<< /Type /Pages /Kids [${pages.map((_, i) => `${pageObj(i)} 0 R`).join(' ')}] /Count ${N} >>`);
-  contents.forEach((c, i) => objs.push(
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n2(c.W)} ${n2(c.H)}] /Resources << ${fontRes} >> /Contents ${streamObj(i)} 0 R >>`,
-  ));
+  contents.forEach((c, i) => {
+    const annots = annotIds[i].length ? ` /Annots [${annotIds[i].map((id) => `${id} 0 R`).join(' ')}]` : '';
+    objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${n2(c.W)} ${n2(c.H)}] /Resources << ${fontRes} >>${annots} /Contents ${streamObj(i)} 0 R >>`);
+  });
   for (const c of contents) objs.push(contentObj(c.stream, opts?.compress));
+  pages.forEach((p, i) => {
+    const S = p.scale ?? Math.min(0.75, 14400 / p.scene.w, 14400 / p.scene.h);
+    const H = contents[i].H;
+    for (const l of pageLinks[i]) {
+      objs.push(`<< /Type /Annot /Subtype /Link /Rect [${n2(l.x * S)} ${n2(H - (l.y + l.h) * S)} ${n2((l.x + l.w) * S)} ${n2(H - l.y * S)}] /Border [0 0 0] /Dest [${pageObj(l.pageIndex)} 0 R /Fit] >>`);
+    }
+  });
   objs.push(`<< /Type /Outlines${roots.length ? ` /First ${itemObj(roots[0])} 0 R /Last ${itemObj(roots[roots.length - 1])} 0 R` : ''} /Count ${M} >>`);
   flat.forEach((b) => {
     let it = `<< /Title (${escText(winAnsiEncode(b.title))}) /Parent ${b.parent === -1 ? outRoot : itemObj(b.parent)} 0 R /Dest [${pageObj(b.pageIndex)} 0 R /Fit]`;

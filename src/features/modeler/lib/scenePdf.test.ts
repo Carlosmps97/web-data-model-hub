@@ -166,3 +166,22 @@ describe('buildReportPdf', () => {
     expect(s).toContain('/Filter /FlateDecode');
   });
 });
+
+describe('buildReportPdf · links', () => {
+  it('página con links → /Annots /Link con /Rect transformado y /Dest', () => {
+    const pgs = [
+      { scene: scene([], 595, 842), scale: 1, links: [{ x: 56, y: 100, w: 400, h: 10, pageIndex: 1 }] },
+      { scene: scene([], 595, 842), scale: 1 },
+    ];
+    const s = dec(buildReportPdf(pgs, [{ title: 'X', pageIndex: 0 }]));
+    expect(s).toContain('/Annots');
+    expect(s).toContain('/Subtype /Link');
+    expect(s).toContain('/Rect [56 732 456 742]');     // y PDF invertida: 842-110 / 842-100
+    expect(s).toContain('/Dest [4 0 R /Fit]');         // página 1 → obj 4
+    const xrefAt = Number(/startxref\n(\d+)\n%%EOF/.exec(s)![1]);
+    expect(s.slice(xrefAt, xrefAt + 4)).toBe('xref');
+    const entries = [...s.matchAll(/^(\d{10}) 00000 n /gm)].map((m) => Number(m[1]));
+    expect(entries.length).toBe(9 + 2 * 2 + 1 + 1);    // 9+2N+M+A
+    entries.forEach((off, i) => expect(s.slice(off, off + String(i + 1).length + 6)).toBe(`${i + 1} 0 obj`));
+  });
+});

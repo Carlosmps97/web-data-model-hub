@@ -178,20 +178,13 @@ export async function exportNodePdf(opts: {
 }): Promise<ExportOutcome> {
   const download = opts.download ?? domDownload;
   const cancelled = () => opts.cancel?.cancelled === true;
-  const [{ buildDiagramScene }, { buildReportPdf }, { buildModelReport }, { zlibSync }, lookups] = await Promise.all([
-    import('./lib/exportScene'), import('./lib/scenePdf'), import('./lib/reportPdf'), import('fflate'), fetchLookups(),
+  const [{ buildReportPdf }, { buildModelReport }, { zlibSync }, lookups] = await Promise.all([
+    import('./lib/scenePdf'), import('./lib/reportPdf'), import('fflate'), fetchLookups(),
   ]);
 
-  const canvasInput = (diagram: Diagram, location: string): ReportCanvasInput => {
-    const drawings = diagram.subjectArea.drawings ?? [];
-    return {
-      name: diagram.subjectArea.name,
-      location,
-      diagram,
-      logicalScene: buildDiagramScene({ diagram, drawings, viewMode: 'logical' }),
-      physicalScene: buildDiagramScene({ diagram, drawings, viewMode: 'physical' }),
-    };
-  };
+  // r2: el reporte ya no lleva diagramas — no se construyen escenas.
+  const canvasInput = (diagram: Diagram, location: string): ReportCanvasInput =>
+    ({ name: diagram.subjectArea.name, location, diagram });
   const downloadReport = (rootName: string, canvases: ReportCanvasInput[]) => {
     const { pages, bookmarks } = buildModelReport({ rootName, canvases, domainsById: lookups.domainsById });
     const pdf = buildReportPdf(pages, bookmarks, { compress: zlibSync });

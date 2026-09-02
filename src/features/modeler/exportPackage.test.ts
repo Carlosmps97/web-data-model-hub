@@ -136,13 +136,14 @@ describe('exportNodePdf', () => {
     // Streams comprimidos ⇒ se verifica ESTRUCTURA: outline + páginas A4.
     expect(s).toContain('/Filter /FlateDecode');
     expect(s).toContain('/MediaBox [0 0 595 842]');
+    expect(s).toContain('/Annots');                         // hipervínculos del TOC/Index
     expect(s).toContain('(CPYBCA)');                        // bookmark raíz
     expect(s).toContain('(Table Of Contents)');
     expect(s).toContain('(Datamart PYME)');                 // bookmark del canvas
     expect(s).toContain('(PH_S1)');                         // bookmark de la tabla
     expect(s).toContain('(Index)');
     const count = Number(/\/Kids \[[^\]]*\] \/Count (\d+)/.exec(s)![1]);
-    expect(count).toBeGreaterThanOrEqual(8);                // portada+toc+secciones+4 diagramas+index
+    expect(count).toBeGreaterThanOrEqual(4);                // portada+toc+contenido+index (r2: sin diagramas)
   });
 
   it('canvas suelto → reporte del canvas en PDF directo', async () => {

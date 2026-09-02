@@ -47,12 +47,12 @@ export function wrapText(s: string, maxW: number, size: number, bold?: boolean):
 }
 
 // ═══ Reporte completo (doc 67) ═══════════════════════════════════════════
-import type { Scene, SceneItem } from './exportScene';
+import type { SceneItem } from './exportScene';
 import type { Diagram } from '../services/modeler.service';
 import type { CanonicalColumn } from '@/features/governance/services/governance.service';
 import type { PdfBookmark, ReportPage } from './scenePdf';
 
-export interface ReportCanvasInput { name: string; location: string; diagram: Diagram; logicalScene: Scene; physicalScene: Scene }
+export interface ReportCanvasInput { name: string; location: string; diagram: Diagram }
 export interface ModelReportInput { rootName: string; canvases: ReportCanvasInput[]; domainsById: Record<string, string> }
 
 // Colores (aproximación visual de la referencia Erwin — ver doc 67 supuestos).
@@ -68,7 +68,7 @@ const newFlow = (): Flow => ({ pages: [], items: null, y: 0 });
 function openPage(f: Flow): void {
   const items: SceneItem[] = [];
   f.items = items;
-  f.pages.push({ scene: { w: A4.w, h: A4.h, bg: '#FFFFFF', items }, scale: 1 });
+  f.pages.push({ scene: { w: A4.w, h: A4.h, bg: '#FFFFFF', items }, scale: 1, links: [] });
   f.y = A4.mt;
 }
 function ensure(f: Flow, h: number): void {
@@ -139,7 +139,7 @@ function gridRow(f: Flow, cells: string[], widths: number[]): number {
 /** Página(s) del TOC. `numberFor` devuelve el número YA desplazado (o '' en
  *  la pasada de conteo — el número no altera el layout: columna reservada). */
 interface TocEntry { title: string; level: number; cIdx: number }
-function buildTocPages(entries: TocEntry[], numberFor: (cIdx: number) => string): Flow {
+function buildTocPages(entries: TocEntry[], numberFor: (cIdx: number) => string, targetFor?: (cIdx: number) => number): Flow {
   const f = newFlow();
   openPage(f);
   text(f, A4.w / 2, f.y + 8, 'Table Of Contents', 11, { bold: true, anchor: 'middle' });
@@ -154,6 +154,8 @@ function buildTocPages(entries: TocEntry[], numberFor: (cIdx: number) => string)
       if (k === 0) {
         const num = numberFor(e.cIdx);
         if (num) text(f, A4.w - A4.mr, f.y + 8, num, 8, { anchor: 'end' });
+        // Hipervínculo (r2): toda la línea de la entrada salta a su página.
+        if (targetFor) f.pages[f.pages.length - 1].links!.push({ x: A4.ml + indent, y: f.y, w: CONTENT_W - indent, h: 10.5, pageIndex: targetFor(e.cIdx) });
       }
       f.y += 10.5;
     });
@@ -170,7 +172,7 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
   const f = newFlow();
   const tocEntries: TocEntry[] = [];
   const indexMap = new Map<string, Set<number>>();       // physName → cIdx set
-  interface CanvasMarks { name: string; erPage: number; tables: { name: string; page: number }[] }
+  interface CanvasMarks { name: string; page: number; tables: { name: string; page: number }[] }
   const marks: CanvasMarks[] = [];
 
   const saBand = band(f, `Subject Area(s) of Model "${rootName}"`);
@@ -179,18 +181,12 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
   for (const cv of canvases) gridRow(f, [cv.name, cv.location], [190, 293]);
 
   for (const cv of canvases) {
-    const erPage = band(f, `ER Diagram(s) of Subject Area "${cv.name}"`);
-    tocEntries.push({ title: cv.name, level: 0, cIdx: erPage });
-    const mark: CanvasMarks = { name: cv.name, erPage, tables: [] };
-    marks.push(mark);
-    for (const scene of [cv.logicalScene, cv.physicalScene]) {
-      const fit = Math.min(0.75, (A4.w - 16) / Math.max(1, scene.w), (A4.h - 100) / Math.max(1, scene.h));
-      f.items = null;                                     // cierra la página builder
-      f.pages.push({ scene, scale: fit });
-    }
-
+    // r2 (pedido owner): SIN páginas de diagrama — el canvas apunta a su Table(s).
     const tables = [...cv.diagram.tables].sort((a, b) => a.physicalName.localeCompare(b.physicalName));
     const tBand = band(f, `Table(s) of Subject Area "${cv.name}"`);
+    tocEntries.push({ title: cv.name, level: 0, cIdx: tBand });
+    const mark: CanvasMarks = { name: cv.name, page: tBand, tables: [] };
+    marks.push(mark);
     tocEntries.push({ title: `Table(s) of Subject Area "${cv.name}"`, level: 1, cIdx: tBand });
     gridHeader(f, ['Physical Name', 'Comments'], [190, 293]);
     for (const t of tables) gridRow(f, [t.physicalName, t.description ?? ''], [190, 293]);
@@ -222,7 +218,7 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
   const tocCount = buildTocPages(tocEntries, () => '').pages.length;
   const offset = 1 + tocCount;                            // portada + TOC
   const display = (cIdx: number) => String(offset + cIdx + 1);
-  const tocFlow = buildTocPages(tocEntries, display);
+  const tocFlow = buildTocPages(tocEntries, display, (cIdx) => offset + cIdx);
 
   // ── Index alfabético de columnas (después de conocer offset) ──
   const g = newFlow();
@@ -240,10 +236,26 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
       text(g, A4.ml, g.y + 10, letter, 11, { bold: true });
       g.y += 16;
     }
-    const pagesList = [...indexMap.get(name)!].sort((a, b) => a - b).map(display).join(', ');
-    const lines = wrapText(`${name}   ${pagesList}`, CONTENT_W, ROW_SIZE);
-    ensure(g, lines.length * LH + 1);
-    for (const s of lines) { text(g, A4.ml, g.y + 8, s, ROW_SIZE); g.y += LH; }
+    // r2: cada número de página es un LINK individual (números en azul, como
+    // la referencia Erwin — sus números cyan son hipervínculos).
+    ensure(g, LH + 1);
+    text(g, A4.ml, g.y + 8, name, ROW_SIZE);
+    let x = A4.ml + estWidth(name, ROW_SIZE) + 8;
+    const targets = [...indexMap.get(name)!].sort((a, b) => a - b);
+    targets.forEach((cIdx, k) => {
+      const numStr = display(cIdx);
+      const wNum = estWidth(numStr, ROW_SIZE);
+      if (x + wNum > A4.w - A4.mr) {
+        g.y += LH;
+        if (g.y + LH > A4.h - A4.mb) openPage(g);
+        x = A4.ml + 14;
+      }
+      g.items!.push({ k: 'text', x, y: g.y + 8, s: numStr, size: ROW_SIZE, color: '#1F7AC4' });
+      g.pages[g.pages.length - 1].links!.push({ x, y: g.y, w: wNum, h: LH, pageIndex: offset + cIdx });
+      x += wNum;
+      if (k < targets.length - 1) { text(g, x, g.y + 8, ',', ROW_SIZE); x += estWidth(', ', ROW_SIZE); }
+    });
+    g.y += LH;
   }
   const indexPages = g.pages;
 
@@ -257,13 +269,9 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
   // ── Header/footer en TODAS las páginas (diagramas: coords ÷ escala) ──
   const total = pages.length;
   pages.forEach((p, i) => {
-    const s = p.scale === 1 ? 1 : (p.scale ?? 1);
-    const W = p.scale === 1 ? A4.w : p.scene.w;
-    const H = p.scale === 1 ? A4.h : p.scene.h;
-    const sz = 7 / s;
     p.scene.items.push(
-      { k: 'text', x: p.scale === 1 ? A4.ml : 12 / s, y: 30 / s > H ? 10 : 30 / s, s: rootName, size: sz, color: C.dim },
-      { k: 'text', x: W / 2, y: H - 22 / s, s: `Page ${i + 1} of ${total}`, size: sz, color: C.dim, anchor: 'middle' },
+      { k: 'text', x: A4.ml, y: 30, s: rootName, size: 7, color: C.dim },
+      { k: 'text', x: A4.w / 2, y: A4.h - 22, s: `Page ${i + 1} of ${total}`, size: 7, color: C.dim, anchor: 'middle' },
     );
   });
 
@@ -275,7 +283,7 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
       { title: 'Table Of Contents', pageIndex: 1 },
       { title: `Subject Area(s) of Model "${rootName}"`, pageIndex: shift(saBand) },
       ...marks.map((m) => ({
-        title: m.name, pageIndex: shift(m.erPage),
+        title: m.name, pageIndex: shift(m.page),
         children: m.tables.map((t) => ({ title: t.name, pageIndex: shift(t.page) })),
       })),
       { title: 'Index', pageIndex: idxStart },
