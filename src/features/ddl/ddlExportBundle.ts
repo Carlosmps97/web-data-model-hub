@@ -23,9 +23,12 @@ export interface DdlObject {
 
 // Artefactos del motor de reglas (doc 30) que el pipeline emite (backend).
 const PHYSICAL = 'ddl.tabla_fisica';
-const PHYSICAL_TAGS = 'ddl.tabla_fisica.tags';
 const VIEW_BUSINESS = 'ddl.vista_negocio';
 const VIEW_PASSIVE = 'ddl.vista';
+// Doc 76: anexos de CUALQUIER objeto (`<artefacto>.tags` = ALTER … SET TAGS,
+// `<artefacto>.extra` = sentencias libres `after`) — se pliegan al archivo del
+// objeto (tabla física, generado o vista).
+const ADDENDUM_RX = /^(.*)\.(tags|extra)$/;
 
 const ROOT_VIEWS = '_views';
 
@@ -78,9 +81,10 @@ export function statementsToObjects(args: {
   const { statements, viewSources, tablesById } = args;
   const objects: DdlObject[] = [];
   let currentPhysical: DdlObject | null = null;
-  let currentKey = '';
-  const keyOf = (s: { schema?: string | null; name?: string | null }) =>
-    JSON.stringify([s.schema ?? '', s.name ?? '']);
+  // Objeto por (artefacto, esquema, nombre) para plegarle sus anexos.
+  const byKey = new Map<string, DdlObject>();
+  const keyOf = (artifact: string, s: { schema?: string | null; name?: string | null }) =>
+    JSON.stringify([artifact, s.schema ?? '', s.name ?? '']);
 
   const resolveHome = (s: { schema?: string | null; name?: string | null }) => {
     const src = viewSources.get(viewKey(s.schema, s.name ?? '')) ?? [];
@@ -90,34 +94,48 @@ export function statementsToObjects(args: {
   };
 
   for (const s of statements) {
+    const addendum = ADDENDUM_RX.exec(s.artifact);
+    if (addendum) {
+      // `.tags` / `.extra`: al archivo de su objeto (ya emitido justo antes).
+      // Sin objeto previo (p.ej. sólo tags de una física sin CREATE) se abre
+      // uno vacío con su nombre.
+      const base = addendum[1];
+      const existing = byKey.get(keyOf(base, s));
+      let target: DdlObject;
+      if (existing) {
+        target = existing;
+      } else {
+        const home = base === VIEW_BUSINESS || base === VIEW_PASSIVE
+          ? resolveHome(s)
+          : { tableName: base === PHYSICAL ? (s.name ?? '') : (currentPhysical?.tableName ?? ''),
+              tableSchema: base === PHYSICAL ? (s.schema ?? undefined) : currentPhysical?.tableSchema };
+        target = { ...home, kind: /vista/.test(base) ? 'view' : 'table', name: s.name ?? '', sql: '' };
+        byKey.set(keyOf(base, s), target);
+        objects.push(target);
+        if (base === PHYSICAL) currentPhysical = target;
+      }
+      target.sql = target.sql ? `${target.sql}\n\n${s.sql}` : s.sql;
+      continue;
+    }
+    let obj: DdlObject;
     if (s.artifact === PHYSICAL) {
-      currentKey = keyOf(s);
-      currentPhysical = {
+      obj = {
         tableName: s.name ?? '', tableSchema: s.schema ?? undefined,
         kind: 'table', name: s.name ?? '', sql: s.sql,
       };
-      objects.push(currentPhysical);
-    } else if (s.artifact === PHYSICAL_TAGS) {
-      if (!currentPhysical || currentKey !== keyOf(s)) {
-        currentKey = keyOf(s);
-        currentPhysical = {
-          tableName: s.name ?? '', tableSchema: s.schema ?? undefined,
-          kind: 'table', name: s.name ?? '', sql: '',
-        };
-        objects.push(currentPhysical);
-      }
-      currentPhysical.sql = currentPhysical.sql ? `${currentPhysical.sql}\n\n${s.sql}` : s.sql;
+      currentPhysical = obj;
     } else if (s.artifact === VIEW_BUSINESS || s.artifact === VIEW_PASSIVE) {
-      const home = resolveHome(s);
-      objects.push({ ...home, kind: 'view', name: s.name ?? '', sql: s.sql });
+      obj = { ...resolveHome(s), kind: 'view', name: s.name ?? '', sql: s.sql };
     } else {
       // Artefacto generado (p.ej. _rej, vista técnica): archivo propio en la
       // carpeta de la tabla que lo originó (la del grupo actual).
-      objects.push({
+      obj = {
         tableName: currentPhysical?.tableName ?? '', tableSchema: currentPhysical?.tableSchema,
         kind: isViewSql(s.sql) ? 'view' : 'table', name: s.name ?? '', sql: s.sql,
-      });
+      };
     }
+    byKey.set(keyOf(s.artifact, s), obj);
+    objects.push(obj);
   }
   return objects;
 }

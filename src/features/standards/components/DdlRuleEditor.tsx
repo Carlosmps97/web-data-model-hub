@@ -164,9 +164,10 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
 
   const errCount = report?.errors?.length ?? 0;
   const action = draft.action as Record<string, unknown>;
-  const actionKind: 'expression' | 'tags' | 'tblproperties' | 'layout' | 'emit' =
+  const actionKind: RuleActionKind | 'emit' =
     draft.kind === 'generator' ? 'emit'
-      : action.tags ? 'tags' : action.tblproperties ? 'tblproperties' : action.layout ? 'layout' : 'expression';
+      : action.tags ? 'tags' : action.tblproperties ? 'tblproperties' : action.layout ? 'layout'
+        : action.exclude === true ? 'exclude' : action.statements ? 'statements' : 'expression';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -301,7 +302,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
 
                 {draft.kind === 'rule' ? (
                   <RuleAction action={action} actionKind={actionKind} canEdit={canEdit} target={draft.target ?? 'column'}
-                    onChange={(a) => patch({ action: a })} />
+                    udpDefs={udpDefs} onChange={(a) => patch({ action: a })} />
                 ) : (
                   <EmitAction action={action} canEdit={canEdit} onChange={(a) => patch({ action: a })} />
                 )}
@@ -518,35 +519,52 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
 
 // ── sub-editores de action ─────────────────────────────────────────────────
 
-function RuleAction({ action, actionKind, canEdit, target, onChange }: {
+/** Acciones de una regla (doc 30 §6.6 · doc 76): por COLUMNA — expression,
+ *  exclude (quita la proyección), tags; por TABLA — tags, TBLPROPERTIES,
+ *  statements (sentencias libres before/after) y column layout. */
+type RuleActionKind = 'expression' | 'exclude' | 'tags' | 'tblproperties' | 'statements' | 'layout';
+
+const COLUMN_ACTIONS: [RuleActionKind, string][] = [['expression', 'Expression'], ['exclude', 'Exclude column'], ['tags', 'Tags']];
+const TABLE_ACTIONS: [RuleActionKind, string][] = [['tags', 'Tags'], ['tblproperties', 'Properties'], ['statements', 'Statements'], ['layout', 'Column layout']];
+
+function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: {
   action: Record<string, unknown>;
-  actionKind: 'expression' | 'tags' | 'tblproperties' | 'layout' | 'emit';
+  actionKind: RuleActionKind | 'emit';
   canEdit: boolean;
-  /** Doc 73: «Column layout» sólo existe para reglas de TABLA (sobre la física). */
+  /** Doc 73: «Column layout» y «Statements» sólo existen para reglas de TABLA. */
   target: 'column' | 'table';
+  udpDefs: UdpDefinition[];
   onChange: (a: Record<string, unknown>) => void;
 }) {
-  const [kind, setKind] = useState<'expression' | 'tags' | 'tblproperties' | 'layout'>(actionKind === 'emit' ? 'expression' : actionKind);
-  const layout = (action.layout as { partitionColumns?: string } | undefined) ?? {};
+  const [kind, setKind] = useState<RuleActionKind>(actionKind === 'emit' ? 'expression' : actionKind);
+  const layout = (action.layout as { partitionColumns?: string; partitionOrderUdp?: string } | undefined) ?? {};
+  const statements = (action.statements as { before?: string[]; after?: string[] } | undefined) ?? {};
   const pairs = (k: 'tags' | 'tblproperties') =>
     Object.entries((action[k] as Record<string, string>) ?? {});
   const setPairs = (k: 'tags' | 'tblproperties', entries: [string, string][]) =>
     onChange({ [k]: Object.fromEntries(entries.filter(([a]) => a.trim())) });
+  // UDP de columna (faceta física) para «Order partitions by UDP».
+  const columnUdps = udpDefs.filter((d) => d.level === 'column' && d.view !== 'logical').map((d) => d.name);
+  const setStatements = (pos: 'before' | 'after', text: string) =>
+    onChange({ statements: { ...statements, [pos]: text.split('\n') } });
+  const options = target === 'table' ? TABLE_ACTIONS : COLUMN_ACTIONS;
 
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Action</label>
         <div style={{ flex: 1 }} />
-        <Segmented small options={[['expression', 'Expression'], ['tags', 'Tags'], ['tblproperties', 'Properties'],
-          ...(target === 'table' ? [['layout', 'Column layout'] as [string, string]] : [])]}
+        <Segmented small options={options}
           value={kind} disabled={!canEdit}
           onPick={(v) => {
-            setKind(v as typeof kind);
-            onChange(v === 'expression' ? { expression: (action.expression as string) ?? '', alias: (action.alias as string) ?? '{columna.nombre}' }
-              : v === 'tags' ? { tags: (action.tags as object) ?? {} }
-                : v === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last' } }
-                  : { tblproperties: (action.tblproperties as object) ?? {} });
+            const k = v as RuleActionKind;
+            setKind(k);
+            onChange(k === 'expression' ? { expression: (action.expression as string) ?? '', alias: (action.alias as string) ?? '{columna.nombre}' }
+              : k === 'exclude' ? { exclude: true }
+                : k === 'tags' ? { tags: (action.tags as object) ?? {} }
+                  : k === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last', partitionOrderUdp: 'Particion' } }
+                    : k === 'statements' ? { statements: (action.statements as object) ?? { before: ['-- DROP TABLE IF EXISTS {artefacto.ref};'] } }
+                      : { tblproperties: (action.tblproperties as object) ?? {} });
           }} />
       </div>
       {kind === 'layout' ? (
@@ -560,21 +578,52 @@ function RuleAction({ action, actionKind, canEdit, target, onChange }: {
               <option value="keep">Keep the physical order</option>
             </select>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
+            <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Order partitions by UDP</label>
+            <input list="ddl-column-udps" value={layout.partitionOrderUdp ?? ''} disabled={!canEdit} placeholder="Particion"
+              onChange={(e) => onChange({ layout: { ...layout, partitionOrderUdp: e.target.value || undefined } })}
+              style={{ ...inp, height: 32, fontSize: 12, flex: 1, fontFamily: 'var(--mono, monospace)' }} />
+            <datalist id="ddl-column-udps">{columnUdps.map((n) => <option key={n} value={n} />)}</datalist>
+          </div>
           <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
             Applies to every physical table of the export (leave the condition empty). The model’s physical
-            order, the PARTITIONED BY clause and the PRIMARY KEY don’t change; generated tables already emit
-            their partition columns last.
+            order and the PRIMARY KEY don’t change. With a column UDP, PARTITIONED BY and the trailing block
+            follow its PART_01, PART_02… values; partitions without a value go last, in physical order.
+            Generated tables mirror the same layout.
+          </div>
+        </div>
+      ) : kind === 'exclude' ? (
+        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16, fontSize: 11.5, color: '#56607A', lineHeight: 1.5 }}>
+          The matching columns are <strong>removed from the SELECT</strong> of the target view artifacts
+          (e.g. the DAC columns of the NoDAC technical view). Tags for those columns are not emitted there.
+        </div>
+      ) : kind === 'statements' ? (
+        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16 }}>
+          {(['before', 'after'] as const).map((pos) => (
+            <div key={pos} style={{ marginBottom: pos === 'before' ? 10 : 0 }}>
+              <label style={lbl}>{pos === 'before' ? 'Before the CREATE' : 'After the tags'} · one statement per line</label>
+              <textarea value={(statements[pos] ?? []).join('\n')} disabled={!canEdit} spellCheck={false}
+                onChange={(e) => setStatements(pos, e.target.value)}
+                placeholder={pos === 'before' ? '-- DROP TABLE IF EXISTS {artefacto.ref};' : 'OPTIMIZE {artefacto.ref};'}
+                style={{ ...inp, height: 64, padding: '8px 12px', fontFamily: 'var(--mono, monospace)', fontSize: 12, resize: 'vertical' }} />
+            </div>
+          ))}
+          <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
+            Free SQL text with placeholders: <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{artefacto.ref}'}</span> (the
+            object being emitted, qualified), <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{tabla.nombre}'}</span>,{' '}
+            <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{udp:…}'}</span>, <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{lookup:…}'}</span>.
+            Applies to the table AND view artifacts you target.
           </div>
         </div>
       ) : kind === 'expression' ? (
         <>
           <input value={(action.expression as string) ?? ''} disabled={!canEdit} spellCheck={false}
             onChange={(e) => onChange({ ...action, expression: e.target.value })}
-            placeholder="sha2({col}, 512)"
+            placeholder="bcp_encrypt_function.decrypt_column_view({col}, '{lookup:dac_map}')"
             style={{ ...inp, fontFamily: 'var(--mono, monospace)' }} />
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, margin: '8px 0 16px' }}>
             <span style={{ fontSize: 11, color: '#9AA3B2', fontWeight: 600, marginRight: 2 }}>Insert</span>
-            {['{col}', '{columna.nombre}', '{columna.tipo}', '{tabla.nombre}', '{tabla.esquema}'].map((t) => (
+            {['{col}', '{columna.nombre}', '{columna.tipo}', '{tabla.nombre}', '{tabla.esquema}', '{lookup:dac_map}'].map((t) => (
               <button key={t} disabled={!canEdit}
                 onClick={() => onChange({ ...action, expression: `${(action.expression as string) ?? ''}${t}` })}
                 style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#56607A', background: '#F2F4F8', border: '1px solid #E6EAF0', borderRadius: 6, padding: '3px 8px', cursor: 'pointer' }}>
@@ -602,6 +651,12 @@ function RuleAction({ action, actionKind, canEdit, target, onChange }: {
               style={{ height: 28, padding: '0 10px', border: '1px dashed #C9D2E0', background: '#fff', color: '#8A93A5', borderRadius: 7, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
               + Add pair
             </button>
+          )}
+          {kind === 'tags' && (
+            <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
+              Tags are emitted as <span style={{ fontFamily: 'var(--mono, monospace)' }}>ALTER TABLE|VIEW … SET TAGS</span> — one
+              statement per rule on tables and views; column rules emit one statement per matching column.
+            </div>
           )}
         </div>
       )}
@@ -679,6 +734,16 @@ function EmitAction({ action, canEdit, onChange }: {
                 </button>
               );
             })}
+          </div>
+
+          <label style={lbl}>Partition columns</label>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+            <button disabled={!canEdit}
+              onClick={() => setCols({ keep_partition_type: !cols.keep_partition_type })}
+              title="Doc 76: the rejected table keeps the partition columns' data type (force type only applies to the rest)"
+              style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, padding: '3px 9px', borderRadius: 999, border: `1px solid ${cols.keep_partition_type ? '#D4E0FF' : '#E6EAF0'}`, background: cols.keep_partition_type ? '#EAF0FF' : '#fff', color: cols.keep_partition_type ? '#2E5BFF' : '#8A93A5', cursor: canEdit ? 'pointer' : 'default', fontWeight: 600 }}>
+              keep_partition_type{cols.keep_partition_type ? ' ✓' : ''}
+            </button>
           </div>
 
           <label style={lbl}>Added columns · appended after the inherited ones, before any partition column</label>

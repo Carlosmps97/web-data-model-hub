@@ -108,6 +108,35 @@ describe('statementsToObjects (rules path)', () => {
     expect(byPath['CLIENTE/[TABLE] CLIENTE.sql']).toContain('ALTER TABLE cliente SET TAGS');
   });
 
+  it('folds view tags/extra (doc 76) into the view file — generated and business views', () => {
+    const objs = statementsToObjects({
+      statements: [
+        { artifact: 'ddl.tabla_fisica', schema: 'v', name: 'T', sql: 'CREATE TABLE t;' },
+        { artifact: 'ddl.tabla_fisica.tags', schema: 'v', name: 'T', sql: 'ALTER TABLE t SET TAGS (a=1);' },
+        { artifact: 'ddl.tabla_fisica.extra', schema: 'v', name: 'T', sql: 'OPTIMIZE t;' },
+        { artifact: 'ddl.vista_tecnica', schema: 'v_v', name: 'T', sql: 'CREATE OR REPLACE VIEW t AS SELECT 1;' },
+        { artifact: 'ddl.vista_tecnica.tags', schema: 'v_v', name: 'T', sql: 'ALTER VIEW t SET TAGS (b=2);' },
+        { artifact: 'ddl.vista_tecnica_dac', schema: 'v_v', name: 'Tdac', sql: 'CREATE OR REPLACE VIEW tdac AS SELECT 1;' },
+        { artifact: 'ddl.vista_tecnica_dac.tags', schema: 'v_v', name: 'Tdac', sql: 'ALTER VIEW tdac SET TAGS (c=3);' },
+        { artifact: 'ddl.vista_negocio', schema: 'u', name: 'VW', sql: 'CREATE OR REPLACE VIEW vw AS SELECT 1;' },
+        { artifact: 'ddl.vista_negocio.tags', schema: 'u', name: 'VW', sql: 'ALTER VIEW vw SET TAGS (d=4);' },
+      ],
+      viewSources: new Map([[viewKey('u', 'VW'), ['t1']]]),
+      tablesById: new Map([['t1', { physicalName: 'T', schema: 'v' }]]),
+    });
+    const byPath = Object.fromEntries(objectsToEntries(objs).map((e) => [e.path, e.content]));
+    expect(Object.keys(byPath).sort()).toEqual([
+      'T/[TABLE] T.sql',
+      'T/[VIEW] T.sql',
+      'T/[VIEW] Tdac.sql',
+      'T/[VIEW] VW.sql',
+    ]);
+    expect(byPath['T/[TABLE] T.sql']).toBe('CREATE TABLE t;\n\nALTER TABLE t SET TAGS (a=1);\n\nOPTIMIZE t;\n');
+    expect(byPath['T/[VIEW] T.sql']).toContain('ALTER VIEW t SET TAGS (b=2);');
+    expect(byPath['T/[VIEW] Tdac.sql']).toContain('ALTER VIEW tdac SET TAGS (c=3);');
+    expect(byPath['T/[VIEW] VW.sql']).toBe('CREATE OR REPLACE VIEW vw AS SELECT 1;\n\nALTER VIEW vw SET TAGS (d=4);\n');
+  });
+
   it('classifies a generated VIEW artifact as [VIEW] by its SQL', () => {
     const objs = statementsToObjects({
       statements: [

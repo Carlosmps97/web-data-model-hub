@@ -5,6 +5,12 @@
 // (`Diagram.tables/columns/relationships`), as thin local interfaces so the
 // generator is pure and unit-testable (doc 75 D14: the legacy `genDDL` path
 // and the «Aurora» model types were retired).
+//
+// Doc 76 (macro BCP): defaults = identifiers in lowercase, external table with
+// the ADLS `abfss://…` location and the folder name in UPPERCASE; partition
+// columns can be ordered by the UDP correlative (PART_01, PART_02…) declared
+// by the ruleset's layout rule; column projections of views are emitted as
+// `col AS alias` with the export casing.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Dialects offered by the Export DDL modal. Only `databricks` is implemented;
@@ -39,6 +45,11 @@ export interface DdlColumn {
   isNullable?: boolean;
   /** Column marked as a partition key. */
   isPartition?: boolean;
+  /** Doc 76 D3 — correlativo de partición (PART_01 → 1) leído del UDP que
+   *  declara la regla de layout (`rulesBridge.withPartitionOrder`). Ordena las
+   *  columnas de partición en el bloque final del CREATE y en PARTITIONED BY;
+   *  las particiones sin correlativo van después, en orden físico. */
+  partitionOrder?: number | null;
   /** Functional definition → emitted as a column `COMMENT`. */
   description?: string;
 }
@@ -112,6 +123,10 @@ export interface DatabricksDdlOptions {
   external: boolean;
   /** Base storage path (S3/ADLS/…) for external tables. */
   location: string;
+  /** Doc 76 D9 — casing de la CARPETA del LOCATION (`<base>/<TABLE>`): la
+   *  convención ADLS de la macro es MAYÚSCULA. Es un literal de path, ajeno a
+   *  `identifierCase`. Ausente ⇒ 'upper'. */
+  locationFolderCase?: IdentifierCase;
   /** Optional `TBLPROPERTIES (…)` key/value pairs. */
   tblProperties: { key: string; value: string }[];
   /** Doc 73 — regla de layout del ruleset («Partition columns last»): las
@@ -119,9 +134,10 @@ export interface DatabricksDdlOptions {
    *  modelo, el PARTITIONED BY y el PRIMARY KEY no cambian. La fija el modal
    *  desde las reglas seleccionadas (rulesBridge.layoutFromRules), nunca a mano. */
   partitionsLast?: boolean;
-  /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_).
-   *  NUNCA aplica a: literales, COMMENTs, tipos de datos, expresiones de
-   *  vistas, joinOverride ni alias generados (t1, t2, …). */
+  /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_ y
+   *  columnas/alias de las proyecciones de vistas). NUNCA aplica a: literales,
+   *  COMMENTs, tipos de datos, expresiones/castType/joinOverride/filter/
+   *  customSql de vistas ni alias generados (t1, t2, …). */
   identifierCase: IdentifierCase;
 }
 
@@ -136,10 +152,13 @@ export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
   unityCatalog: false,
   catalog: 'main',
   defaultSchema: 'default',
-  external: false,
-  location: 's3://my-bucket/warehouse',
+  // Doc 76 D9: la macro BCP escribe todo en minúscula sobre ADLS con LOCATION
+  // por default y la carpeta en MAYÚSCULA.
+  external: true,
+  location: 'abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>',
+  locationFolderCase: 'upper',
   tblProperties: [],
-  identifierCase: 'as-is',
+  identifierCase: 'lower',
 };
 
 // Casing activo del export en curso. `databricksDdl` (único entry point
@@ -149,14 +168,38 @@ export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
 // enhebrar la opción por call-site. El generador es síncrono ⇒ sin carreras.
 let activeCase: IdentifierCase = 'as-is';
 
-const applyCase = (s: string): string =>
-  activeCase === 'lower' ? s.toLowerCase() : activeCase === 'upper' ? s.toUpperCase() : s;
+const caseWith = (s: string, mode: IdentifierCase): string =>
+  mode === 'lower' ? s.toLowerCase() : mode === 'upper' ? s.toUpperCase() : s;
+
+const applyCase = (s: string): string => caseWith(s, activeCase);
 
 /** Backtick-quote a Databricks identifier (aplica el casing del export). */
 const ident = (s: string) => `\`${applyCase(s)}\``;
 
 /** SQL string literal with single-quote escaping. */
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
+
+/** Carpeta del LOCATION: nombre del objeto con el casing de carpeta (doc 76 D9). */
+export const locationFolder = (name: string, o: Pick<DatabricksDdlOptions, 'locationFolderCase'>): string =>
+  caseWith(name, o.locationFolderCase ?? 'upper');
+
+/** Orden de emisión de las columnas de partición (doc 76 D3): primero las que
+ *  traen correlativo (PART_01 < PART_02…), después las demás en orden físico
+ *  (sort estable). Espejo de `ordered_partitions` del motor. */
+export function orderedPartitions(cols: DdlColumn[]): DdlColumn[] {
+  return cols
+    .filter((c) => c.isPartition)
+    .map((c, i) => ({ c, i }))
+    .sort((a, b) => {
+      const ao = a.c.partitionOrder ?? null;
+      const bo = b.c.partitionOrder ?? null;
+      if (ao === null && bo === null) return a.i - b.i;
+      if (ao === null) return 1;
+      if (bo === null) return -1;
+      return ao - bo || a.i - b.i;
+    })
+    .map(({ c }) => c);
+}
 
 /** Fully-qualified, backtick-quoted table name honoring Unity Catalog. */
 function qualify(t: DdlTable, o: DatabricksDdlOptions): string {
@@ -202,10 +245,12 @@ function tableDDL(
 ): string {
   const full = qualify(t, o);
   const ordered = [...cols].sort((a, b) => a.ordinal - b.ordinal);
-  // Doc 73: con la regla de layout, las particiones se emiten al final; el
-  // resto conserva el orden físico (espejo de `layout_columns` del motor).
+  // Doc 73/76: con la regla de layout, las particiones se emiten al final y
+  // ordenadas por su correlativo; el resto conserva el orden físico (espejo de
+  // `layout_columns` del motor).
+  const partitions = orderedPartitions(ordered);
   const emitted = o.partitionsLast
-    ? [...ordered.filter((c) => !c.isPartition), ...ordered.filter((c) => c.isPartition)]
+    ? [...ordered.filter((c) => !c.isPartition), ...partitions]
     : ordered;
 
   const colLines = emitted.map((c) => {
@@ -231,7 +276,9 @@ function tableDDL(
   out += `\nUSING ${o.tableFormat}`;
 
   if (o.includePartitions) {
-    const parts = ordered.filter((c) => c.isPartition).map((c) => ident(c.physicalName));
+    // Doc 76 D3: PARTITIONED BY sigue el correlativo del UDP cuando la regla
+    // de layout lo declara; sin correlativos, el orden físico de siempre.
+    const parts = partitions.map((c) => ident(c.physicalName));
     if (parts.length) out += `\nPARTITIONED BY (${parts.join(', ')})`;
   }
 
@@ -239,7 +286,7 @@ function tableDDL(
 
   if (o.external) {
     const base = (o.location || '').replace(/\/+$/, '');
-    out += `\nLOCATION ${lit(`${base}/${t.physicalName}`)}`;
+    out += `\nLOCATION ${lit(`${base}/${locationFolder(t.physicalName, o)}`)}`;
   }
 
   if (o.tblProperties.length) {
@@ -317,14 +364,15 @@ export function inferJoin(
 }
 
 /** Un `CREATE OR REPLACE VIEW` desde una vista canónica (F3: multi-fuente).
- *  Reglas por columna: `expression` VERBATIM > `CAST(col AS castType) AS alias`
- *  > `col AS alias` (si difiere) > `col`. Con 2+ fuentes las columnas se
- *  cualifican con alias posicionales t1, t2… — RAW, nunca via ident(): no son
- *  identificadores del modelo (coordinación F4) — y el FROM encadena
- *  `INNER JOIN` con UNA condición: `joinOverride` VERBATIM si está seteado,
- *  si no la inferida de `relationships` (inferJoin); sin condición ALGUNA la
- *  cadena se emite como `FULL OUTER JOIN` con `ON 1 = 1` comentado (doc 64
- *  §4a — el editor ya no bloquea el guardado sin JOIN). Sin proyecciones ⇒
+ *  Reglas por columna (doc 76 D10): `expression` VERBATIM (con su alias tal
+ *  cual) > `CAST(col AS castType) AS alias` > `col AS alias` SIEMPRE explícito
+ *  (alias = outputAlias o la misma columna) — como escribe la macro. Las
+ *  columnas y alias de proyección son identificadores del modelo y respetan
+ *  `identifierCase`; con 2+ fuentes se cualifican con alias posicionales t1,
+ *  t2… — RAW, nunca via ident() — y el FROM encadena `INNER JOIN` con UNA
+ *  condición: `joinOverride` VERBATIM si está seteado, si no la inferida de
+ *  `relationships` (inferJoin); sin condición ALGUNA la cadena se emite como
+ *  `FULL OUTER JOIN` con `ON 1 = 1` comentado (doc 64 §4a). Sin proyecciones ⇒
  *  `SELECT *` (fallback legacy).
  *  `showOnCanvas` NO participa del export. Exportada: el ViewEditor la usa
  *  para el preview (mismo SQL que el export). */
@@ -397,15 +445,20 @@ export function viewDDL(
       : `SELECT *\nFROM ${from}`;
   } else {
     const projections = srcs.map((s) => {
-      const alias = (s.outputAlias ?? '').trim();
+      const rawAlias = (s.outputAlias ?? '').trim();
       const cast = (s.castType ?? '').trim();
       const expr = (s.expression ?? '').trim();
-      if (expr) return alias && alias !== expr ? `${expr} AS ${alias}` : expr;
-      // Cualificada con su alias de fuente cuando hay 2+ (sin tableId ⇒ t1,
-      // ítems legacy de vistas de una sola tabla).
-      const col = aliased ? `${aliasOf.get(s.tableId ?? '') ?? 't1'}.${s.column}` : s.column!;
-      if (cast) return `CAST(${col} AS ${cast}) AS ${alias || s.column}`;
-      return alias && alias !== s.column ? `${col} AS ${alias}` : col;
+      // Expresión libre: VERBATIM, alias incluido (lo tipeó el modelador junto
+      // con la expresión).
+      if (expr) return rawAlias && rawAlias !== expr ? `${expr} AS ${rawAlias}` : expr;
+      // Columna del modelo: identificador ⇒ casing del export (sin backticks,
+      // como siempre en las proyecciones). Cualificada con su alias de fuente
+      // cuando hay 2+ (sin tableId ⇒ t1, ítems legacy de una sola tabla).
+      const colName = applyCase(s.column!);
+      const col = aliased ? `${aliasOf.get(s.tableId ?? '') ?? 't1'}.${colName}` : colName;
+      const alias = applyCase(rawAlias || s.column!);
+      if (cast) return `CAST(${col} AS ${cast}) AS ${alias}`;
+      return `${col} AS ${alias}`;
     });
     body = `SELECT\n  ${projections.join(',\n  ')}\nFROM ${from}`;
   }

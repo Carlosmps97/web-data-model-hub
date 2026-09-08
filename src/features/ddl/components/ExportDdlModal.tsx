@@ -37,7 +37,10 @@ import {
   DEFAULT_DATABRICKS_OPTS,
   type DatabricksDdlOptions, type DdlDialect, type DdlTableFormat, type DdlTable, type DdlView,
 } from '../generators';
-import { fetchExportRules, layoutFromRules, renderWithRules, selectableRules, type ExportRule } from '../rulesBridge';
+import {
+  fetchExportRules, fetchUdpDefs, layoutFromRules, renderWithRules, selectableRules, withPartitionOrder,
+  type ExportRule, type UdpDefLite,
+} from '../rulesBridge';
 import { sessionProjectId } from '@/store/useSessionStore';
 import { runBlocking } from '@/store/useBusyStore';
 import { buildZip } from '@/lib/zip';
@@ -113,12 +116,18 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const [exportRules, setExportRules] = useState<ExportRule[]>([]);
   const [selRules, setSelRules] = useState<Set<string> | null>(null);
   const [rendering, setRendering] = useState(false);
+  // Doc 76 D3: defs UDP del proyecto — resuelven por nombre el UDP de columna
+  // que ordena las particiones (regla de layout `partitionOrderUdp`).
+  const [udpDefs, setUdpDefs] = useState<UdpDefLite[]>([]);
   useEffect(() => {
     if (!open) return;
     let alive = true;
     fetchExportRules(sessionProjectId())
       .then((rs) => { if (alive) { setExportRules(selectableRules(rs)); setSelRules(null); } })
       .catch(() => { if (alive) setExportRules([]); });
+    fetchUdpDefs(sessionProjectId())
+      .then((ds) => { if (alive) setUdpDefs(ds); })
+      .catch(() => { if (alive) setUdpDefs([]); });
     return () => { alive = false; };
   }, [open]);
   const selRuleIds = useMemo(
@@ -161,10 +170,16 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   // Doc 73: el layout de columnas (regla «Partition columns last») lo dictan las
   // reglas SELECCIONADAS — sólo el export con reglas lo aplica; sin reglas el
   // DDL base sigue byte-idéntico.
-  const effOpts = useMemo(() => ({ ...opts, ...layoutFromRules(exportRules, selRuleIds) }), [opts, exportRules, selRuleIds]);
+  const layout = useMemo(() => layoutFromRules(exportRules, selRuleIds), [exportRules, selRuleIds]);
+  const effOpts = useMemo(() => ({ ...opts, partitionsLast: layout.partitionsLast }), [opts, layout]);
+  // Doc 76 D3: las columnas viajan con el correlativo PART_nn del UDP que
+  // declara la regla de layout → el CREATE físico ordena sus particiones.
+  const rulesInput = useMemo(() => (ddlInput
+    ? { ...ddlInput, columns: withPartitionOrder(ddlInput.columns, udpDefs, layout.partitionOrderUdp) }
+    : null), [ddlInput, udpDefs, layout]);
 
   // Todo lo que cambia el resultado invalida el preview renderizado.
-  useEffect(() => { setRulesPreview(null); }, [ddlInput, opts, selRuleIds]);
+  useEffect(() => { setRulesPreview(null); }, [ddlInput, opts, selRuleIds, udpDefs]);
 
   /** El `.sql` final: con reglas seleccionadas pasa por el motor del backend
    *  (`POST /api/ddl-rules/render`); sin reglas, el texto base tal cual. */
@@ -174,7 +189,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     setRendering(true);
     try {
       const { sql } = await runBlocking('Applying export rules…', () => renderWithRules({
-        projectId: sessionProjectId(), diagram, input: ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
+        projectId: sessionProjectId(), diagram, input: rulesInput ?? ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
       }));
       return sql;
     } finally { setRendering(false); }
@@ -186,7 +201,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     setRendering(true);
     try {
       const { sql, rendered } = await runBlocking('Applying export rules…', () => renderWithRules({
-        projectId: sessionProjectId(), diagram, input: ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
+        projectId: sessionProjectId(), diagram, input: rulesInput ?? ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
       }));
       setRulesPreview({ sql, applied: rendered.applied, version: rendered.rulesetVersion });
     } catch (e) {
@@ -256,7 +271,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
       } else {
         // Con reglas: el motor devuelve una sentencia por objeto.
         const { rendered } = await runBlocking('Applying export rules…', () => renderWithRules({
-          projectId: sessionProjectId(), diagram, input: ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
+          projectId: sessionProjectId(), diagram, input: rulesInput ?? ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
         }));
         const viewSources = new Map<string, string[]>();
         views.forEach((v) => viewSources.set(
@@ -500,8 +515,27 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
             <SwitchRow on={opts.external} onClick={() => set('external', !opts.external)} label="External table" hint="CREATE EXTERNAL TABLE … LOCATION" />
             {opts.external && (
               <div className="exd-field">
-                <span className="exd-sublbl">Location (S3 / ADLS)</span>
-                <input className="rd-input exd-input" value={opts.location} onChange={(e) => set('location', e.target.value)} placeholder="s3://bucket/path" />
+                <span className="exd-sublbl">Location (ADLS / S3)</span>
+                <input className="rd-input exd-input" value={opts.location} onChange={(e) => set('location', e.target.value)} placeholder="abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>" />
+                {/* Doc 76 D9: la carpeta del LOCATION es un literal de path — su
+                    casing es independiente del de los identificadores. */}
+                <span className="exd-sublbl">Folder name · LOCATION '&lt;base&gt;/&lt;table&gt;'</span>
+                <div className="rd-seg exd-caseseg" role="group" aria-label="Location folder casing">
+                  {(['as-is', 'lower', 'upper'] as const).map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      className={(opts.locationFolderCase ?? 'upper') === c ? 'active' : ''}
+                      onClick={() => set('locationFolderCase', c)}
+                      aria-pressed={(opts.locationFolderCase ?? 'upper') === c}
+                      title={c === 'as-is'
+                        ? 'Folder named exactly like the physical name'
+                        : c === 'lower' ? 'Folder name in lowercase' : 'Folder name in UPPERCASE'}
+                    >
+                      {c === 'as-is' ? 'As-is' : c === 'lower' ? 'lower' : 'UPPER'}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
 

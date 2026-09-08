@@ -94,7 +94,18 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
     if (typeof a.expression === 'string') return a.expression;
     if (a.tags) return `SET TAGS (${Object.keys(a.tags as object).join(', ')})`;
     if (a.tblproperties) return `TBLPROPERTIES (${Object.keys(a.tblproperties as object).join(', ')})`;
-    if (a.layout) return `Column layout: partition columns ${((a.layout as { partitionColumns?: string }).partitionColumns ?? 'keep') === 'last' ? 'last' : 'in physical order'}`;
+    if (a.exclude === true) return 'Exclude column from the SELECT';
+    if (a.statements) {
+      const st = a.statements as { before?: string[]; after?: string[] };
+      const n = (st.before?.length ?? 0) + (st.after?.length ?? 0);
+      return `Statements: ${(st.before?.[0] ?? st.after?.[0] ?? '').slice(0, 48)}${n > 1 ? ` (+${n - 1})` : ''}`;
+    }
+    if (a.layout) {
+      const lay = a.layout as { partitionColumns?: string; partitionOrderUdp?: string };
+      const order = (lay.partitionOrderUdp ?? '').trim();
+      return `Column layout: partition columns ${(lay.partitionColumns ?? 'keep') === 'last' ? 'last' : 'in physical order'}`
+        + (order ? ` · ordered by UDP "${order}"` : '');
+    }
     const emit = a.emit as Record<string, unknown> | undefined;
     if (emit) return `+ ${emit.type === 'view' ? 'view' : 'tbl'} "${emit.schema}.${emit.name}"`;
     return '—';
@@ -159,9 +170,10 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
           <Sparkles size={22} color="#8B5CF6" />
           <div style={{ fontSize: 14, fontWeight: 700, color: '#1A2B4A', marginTop: 8 }}>No export rules yet</div>
           <div style={{ fontSize: 12.5, color: '#8A93A5', margin: '6px auto 14px', maxWidth: 460, lineHeight: 1.5 }}>
-            Restore the base rule set — technical-view DAC masking, business-view DAC decryption,
-            governance tags, vacuum TBLPROPERTIES, rejected table and technical views. You can edit
-            or disable any of them later.
+            Restore the base rule set — the DDL set of the BCP macro: commented DROP, vacuum
+            TBLPROPERTIES, updateFrecuency / isDAC / DAC tags, rejected table, NoDAC and DAC technical
+            and rejected views, and DAC decryption on business views. You can edit or disable any of
+            them later.
           </div>
           {canEdit && (
             <button onClick={doSeed} disabled={seeding}

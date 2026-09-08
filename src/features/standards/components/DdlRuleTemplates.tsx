@@ -4,19 +4,25 @@
  * la plantilla elegida (todo editable después).
  */
 import { useEffect, useState } from 'react';
-import { Eye, Plus, ShieldBan, Table2, Tag, X } from 'lucide-react';
+import { Columns3, Eye, EyeOff, FileCode2, KeyRound, Plus, Table2, Tag, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { getDdlTemplates, type DdlTemplate } from '../ddlRules.service';
 import type { DdlRule } from '../standards.service';
 
+// Doc 76: plantillas del ruleset base (macro BCP). Cualquier id nuevo del
+// backend cae en el icono genérico.
 const ICONS: Record<string, React.ReactNode> = {
-  'mask-by-udp': <ShieldBan size={17} color="#2E5BFF" />,
+  'decrypt-dac': <KeyRound size={17} color="#2E5BFF" />,
+  'exclude-dac': <EyeOff size={17} color="#2E5BFF" />,
   'rejected-table': <Table2 size={17} color="#8B5CF6" />,
   'technical-view': <Eye size={17} color="#8B5CF6" />,
   'governance-tags': <Tag size={17} color="#2E5BFF" />,
+  'free-statements': <FileCode2 size={17} color="#2E5BFF" />,
+  'partitions-last': <Columns3 size={17} color="#2E5BFF" />,
   blank: <Plus size={16} color="#8A93A5" />,
 };
+const GENERATOR_IDS = new Set(['rejected-table', 'technical-view']);
 
 export default function DdlRuleTemplates({ projectId, onClose, onPick }: {
   projectId: string;
@@ -24,7 +30,7 @@ export default function DdlRuleTemplates({ projectId, onClose, onPick }: {
   onPick: (draft: Partial<DdlRule>) => void;
 }) {
   const [templates, setTemplates] = useState<DdlTemplate[]>([]);
-  const [sel, setSel] = useState<string>('mask-by-udp');
+  const [sel, setSel] = useState<string>('decrypt-dac');
 
   useEffect(() => {
     getDdlTemplates(projectId).then((t) => setTemplates(t.templates))
@@ -54,7 +60,7 @@ export default function DdlRuleTemplates({ projectId, onClose, onPick }: {
               <button key={t.id} onClick={() => setSel(t.id)}
                 style={{ border: sel === t.id ? '1.5px solid #2E5BFF' : '1px solid #E6EAF0', borderRadius: 12, padding: 14, background: '#fff', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left', boxShadow: sel === t.id ? '0 0 0 3px rgba(46,91,255,0.1)' : 'none' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                  <span style={{ width: 32, height: 32, borderRadius: 9, background: t.id.startsWith('mask') || t.id.startsWith('gov') ? '#EAF0FF' : '#F3EEFF', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>{ICONS[t.id]}</span>
+                  <span style={{ width: 32, height: 32, borderRadius: 9, background: GENERATOR_IDS.has(t.id) ? '#F3EEFF' : '#EAF0FF', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>{ICONS[t.id] ?? ICONS.blank}</span>
                   <span style={{ flex: 1, fontSize: 13.5, fontWeight: 700, color: '#1A2B4A' }}>{t.title}</span>
                   <Radio on={sel === t.id} />
                 </div>

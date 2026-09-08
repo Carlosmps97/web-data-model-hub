@@ -558,9 +558,9 @@ El Export DDL genera el `.sql` en el **cliente** y, si hay DDL Export Rules sele
 ### 7.1 Secuencia
 
 1. El botón **Export DDL** del `Toolbar` abre `ExportDdlModal` (`src/features/ddl/components/ExportDdlModal.tsx`), que carga las vistas de las tablas del canvas y el catálogo de reglas con `fetchExportRules()` → `GET /api/ddl-rules`. `selectableRules()` deja las habilitadas y no-inválidas (las `stale` corren igual — solo avisan); por default quedan **todas marcadas**.
-2. El DDL **base** se genera client-side en `src/features/ddl/generators.ts`: `databricksDdl(input, opts)` para el preview y `tableStatements`/`viewStatements` (statement por statement) para el puente de reglas. Opciones del modal con defaults Views/Comments/Partitions ON, PK&FK/Indexes OFF, `tableFormat: 'delta'`, `identifierCase: 'as-is'`.
+2. El DDL **base** se genera client-side en `src/features/ddl/generators.ts`: `databricksDdl(input, opts)` para el preview y `tableStatements`/`viewStatements` (statement por statement) para el puente de reglas. Opciones del modal con defaults Views/Comments/Partitions ON, PK&FK/Indexes OFF, `tableFormat: 'delta'`, y (doc 76 D9, la macro BCP) `identifierCase: 'lower'`, `external: true` con `location` = `abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>` y `locationFolderCase: 'upper'` (carpeta del LOCATION en MAYÚSCULA). Las proyecciones de las vistas salen `col AS alias` con el casing del export; con la regla de layout, las particiones se ordenan por el correlativo PART_nn del UDP que declara (`withPartitionOrder`).
 3. Con reglas seleccionadas, Download/Copy llaman `buildFinalSql()` → `renderWithRules()` (`src/features/ddl/rulesBridge.ts`): arma el payload con el estado **efectivo** que el canvas exporta (drafts incluidos) — cada tabla con sus columnas y `udpValues` más su CREATE base (`baseSql`), cada vista con su SQL y el flag `businessView` (= `showOnCanvas`: solo esas se decoran como vista de negocio) — y hace `POST /api/ddl-rules/render` (permiso `export`). El motor del backend es **puro**: no lee BD en el render, todo el contexto viaja en el body.
-4. `assemble()` ensambla el `.sql` final: header con el **sello** `-- Export rules: vN · N applied · M skipped` (la evidencia de por qué el DDL de marzo salió distinto al de junio) + los statements en el orden del motor (por tabla: física → tags → generados; luego vistas), con los `ALTER ... SET TAGS` consecutivos compactos.
+4. `assemble()` ensambla el `.sql` final: header con el **sello** `-- Export rules: vN · N applied · M skipped` (la evidencia de por qué el DDL de marzo salió distinto al de junio) + los statements en el orden del motor (por tabla: [sentencias `before`] física → tags de tabla → tags de columna → sentencias `after` → generados, cada uno con sus propios anexos; luego vistas de negocio con sus `ALTER VIEW … SET TAGS`), con los anexos `.tags`/`.extra` consecutivos compactos.
 5. **Sin reglas seleccionadas el export no pasa por el puente**: sale byte-idéntico al flujo previo a las reglas (cero regresión). El botón "Apply N rules" del preview usa el mismo motor bajo demanda — nunca en vivo — y produce el mismo texto que el download; cualquier cambio de opciones o selección lo invalida.
 
 Payload real del puente (condensado del código de `rulesBridge.ts`):
@@ -570,8 +570,9 @@ Payload real del puente (condensado del código de `rulesBridge.ts`):
 {
   "ruleIds": ["<uuid-regla-1>", "<uuid-regla-2>"],
   "model": { "name": "Analytics", "udpValues": {} },
-  "options": { "identifierCase": "as-is", "tableFormat": "delta", "external": false,
-               "location": "s3://my-bucket/warehouse", "includePartitions": true },
+  "options": { "identifierCase": "lower", "tableFormat": "delta", "external": true,
+               "location": "abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>",
+               "locationFolderCase": "upper", "includePartitions": true, "partitionsLast": true },
   "tables": [{
     "table": { "id": "t1", "physicalName": "MD_CLIENTE", "schema": "bcp_ddv",
                "description": null, "udpValues": { "<udpId>": "CUSTOM_30 days" } },
