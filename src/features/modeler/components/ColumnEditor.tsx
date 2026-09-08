@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import Icon from '@/components/ui/Icon';
-import * as gov from '@/features/governance/services/governance.service';
-import type { ParentDomain, CanonicalColumn } from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
+import type { ParentDomain, CanonicalColumn } from '@/services/governance.service';
 import { apiErrorMessage } from '@/services/http';
 import { isComplexTypeStart } from '../lib/complexTypes';
+import { applyDomainDefaults } from '../lib/domainDefaults';
 import { applyDomainPick } from '../lib/domainType';
 import { canonicalDefaultType } from '../lib/typePick';
-import type { AddColumnInput } from '@/store/useModelerStore';
+import { useModelerStore, type AddColumnInput } from '@/store/useModelerStore';
+import { FACET_CAPTION } from '@/lib/facets';
 import ComplexTypeBuilder from './ComplexTypeBuilder';
 import SearchSelect from './SearchSelect';
 import TypePicker from './TypePicker';
@@ -54,6 +56,8 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   // orden → "colcomplicado2" mostraba "COLCOMPLIC"). Debounce + guarda: solo
   // la respuesta del ÚLTIMO input actualiza el preview.
   const previewSeq = useRef(0);
+  // Doc 69: los UDPs del alta siguen la faceta activa del canvas.
+  const viewMode = useModelerStore((s) => s.viewMode);
 
   useEffect(() => { gov.listDomains().then(setDomains).catch(() => {}); }, []);
   useEffect(() => {
@@ -78,6 +82,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const domainDefault = canonicalDefaultType(activeDomain?.defaultDataType);
   const onDomainPick = (id: string) => {
     const dom = domains.find((d) => d.id === id);
+    const prev = domains.find((d) => d.id === parentDomainId);
     const next = applyDomainPick({
       currentDomainId: parentDomainId,
       typeOverridden,
@@ -85,6 +90,15 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       nextDomainId: id,
       nextDefault: dom?.defaultDataType != null ? canonicalDefaultType(dom.defaultDataType) : undefined,
     });
+    // Doc 69 §4.7 (ajuste owner): elegir OTRO dominio re-aplica nombre lógico y
+    // definición del dominio (como Erwin); re-elegir el MISMO respeta lo
+    // tipeado. En modo «Physical» el input es un físico: el nombre no aplica.
+    const defaults = applyDomainDefaults({
+      prevDomain: prev, nextDomain: dom,
+      current: { logicalName: mode === 'logical' ? name : '', description },
+    });
+    if (mode === 'logical' && defaults.logicalName !== undefined) setName(defaults.logicalName);
+    if (defaults.description !== undefined) setDescription(defaults.description);
     setParentDomainId(id);
     setDataType(next.dataType);
     setTypeOverridden(next.typeOverridden);
@@ -174,8 +188,8 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
         {/* UDP a nivel columna: BUFFER local (como el modal de Model properties)
             — nada viaja hasta el Add; el alta va en un solo payload. */}
         <div style={{ paddingTop: 10, borderTop: '1px solid #EEF1F6' }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A93A5', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 8 }}>User Defined Properties</div>
-          <UdpAssign level="column" values={udpValues} onChange={setUdp} />
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A93A5', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 8 }}>{FACET_CAPTION.column[viewMode]}</div>
+          <UdpAssign level="column" view={viewMode} values={udpValues} onChange={setUdp} />
         </div>
       </div>
       {error && (

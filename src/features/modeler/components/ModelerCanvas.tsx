@@ -4,7 +4,6 @@ import {
   useNodesState, useEdgesState, type Node, type Edge, type Connection,
 } from '@xyflow/react';
 import { useModelerStore } from '@/store/useModelerStore';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import TableNode from './TableNode';
 import ShapeNode from './ShapeNode';
@@ -49,7 +48,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const focusTable = useModelerStore((s) => s.focusTable);
   const pendingFocusTableId = useModelerStore((s) => s.pendingFocusTableId);
   const setPendingFocus = useModelerStore((s) => s.setPendingFocus);
-  const activeChangeset = useChangesetStore((s) => s.activeId);
+  const activeChangeset = useSessionStore((s) => s.activeChangesetId);
   // Viewer-lock: en read-only se puede VER (click abre PropertiesPanel en modo
   // reader) pero no mutar: sin drag de nodos y sin conexiones; las escrituras
   // del panel ya están gateadas por el changeset activo (canEdit).
@@ -211,7 +210,13 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     let handle = 0;
     const tryFocus = () => {
       const rf = useModelerStore.getState().flow;
-      if (rf?.getNode(id)) { focusTable(id); setPendingFocus(null); return; }
+      if (rf?.getNode(id)) {
+        // Doc 70 §11: un hit de COLUMNA del buscador centra la tabla y abre la columna.
+        const colId = useModelerStore.getState().pendingFocusColId;
+        if (colId) useModelerStore.getState().focusColumn(id, colId); else focusTable(id);
+        setPendingFocus(null);
+        return;
+      }
       if (tries++ < 40) handle = requestAnimationFrame(tryFocus);   // ~0.6s techo
       else setPendingFocus(null);
     };

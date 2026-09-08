@@ -11,7 +11,8 @@ import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
 
 type Mode = 'view' | 'edit' | 'create';
 
-export default function DomainsPage({ snapshot, canEdit, onApplied }: {
+export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }: {
+  projectId: string;
   snapshot: StandardsSnapshot;
   canEdit: boolean;
   onApplied: () => void;
@@ -34,12 +35,12 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
     const d = domains.find((x) => x.name === pendingName);
     if (d) { setSelId(d.id); setPendingName(null); }
   }, [domains, pendingName]);
-  const [form, setForm] = useState<SnapshotDomain>({ id: '', name: '', defaultDataType: '', namingTerm: '', description: '' });
+  const [form, setForm] = useState<SnapshotDomain>({ id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '' });
 
   useEffect(() => {
     setMode('view'); setConfirm(null); setImpact(null);
     if (selected) setForm({ ...selected });
-    if (selId && selId !== '__new__') getDomainImpact(selId).then(setImpact).catch(() => setImpact(null));
+    if (selId && selId !== '__new__') getDomainImpact(projectId, selId).then(setImpact).catch(() => setImpact(null));
   }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
@@ -47,7 +48,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
     return !n ? domains : domains.filter((d) => d.name.toLowerCase().includes(n));
   }, [domains, q]);
 
-  const startCreate = () => { setSelId('__new__'); setForm({ id: '', name: '', defaultDataType: '', namingTerm: '', description: '' }); setMode('create'); setImpact(null); };
+  const startCreate = () => { setSelId('__new__'); setForm({ id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '' }); setMode('create'); setImpact(null); };
   const startEdit = () => { if (selected) { setForm({ ...selected }); setMode('edit'); } };
   const cancel = () => { setMode('view'); setConfirm(null); if (selected) setForm({ ...selected }); };
 
@@ -69,7 +70,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
     if (confirm !== 'apply' || !typeChanged || !selId || selId === '__new__') return;
     let alive = true;
     const h = setTimeout(() => {
-      getDomainImpact(selId, { q: dlgQ.trim() || undefined, limit: 200 })
+      getDomainImpact(projectId, selId, { q: dlgQ.trim() || undefined, limit: 200 })
         .then((i) => { if (alive) setDlgImpact(i); })
         .catch(() => { if (alive) setDlgImpact(null); });
     }, 300);
@@ -80,9 +81,10 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
     setBusy(true);
     try {
       const creating = mode === 'create';
-      const v = await applyStandards({
+      const v = await applyStandards(projectId, {
         kind: 'domain',
-        domainsUpsert: [{ id: creating ? undefined : form.id, name: form.name.trim(), defaultDataType: form.defaultDataType.trim(), namingTerm: form.namingTerm || undefined, description: form.description || undefined }],
+        // Doc 69: tipo físico (defaultDataType) + tipo lógico + nombre de atributo sugerido.
+        domainsUpsert: [{ id: creating ? undefined : form.id, name: form.name.trim(), defaultDataType: form.defaultDataType.trim(), logicalDataType: form.logicalDataType?.trim() || undefined, namingTerm: form.namingTerm?.trim() || undefined, description: form.description || undefined }],
       });
       toast.success(`Applied · ${v.label} · ${v.impact.columns} columns re-typed`);
       if (creating) setPendingName(form.name.trim());   // seleccionarlo al recargar
@@ -93,7 +95,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
     if (!selected) return;
     setBusy(true);
     try {
-      const v = await applyStandards({ kind: 'domain', domainsDelete: [selected.id] });
+      const v = await applyStandards(projectId, { kind: 'domain', domainsDelete: [selected.id] });
       toast.success(`Domain deleted · ${v.label}`);
       setConfirm(null); setSelId(domains.find((d) => d.id !== selected.id)?.id ?? null); onApplied();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete"); } finally { setBusy(false); }
@@ -116,7 +118,10 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
         {filtered.map((d) => (
           <div key={d.id} onClick={() => { if (!editable) setSelId(d.id); }} style={{ ...domCard(d.id === selId && mode !== 'create'), marginBottom: 8, cursor: editable ? 'default' : 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Boxes size={15} color="#8B5CF6" /><span style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>{d.name}</span></div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8 }}><span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '2px 7px' }}>{d.defaultDataType}</span></div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8 }}>
+              <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '2px 7px' }} title="Physical default type">{d.defaultDataType}</span>
+              {d.logicalDataType && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#5B3FA0', background: '#F4EEFF', borderRadius: 6, padding: '2px 7px' }} title="Logical data type">{d.logicalDataType}</span>}
+            </div>
           </div>
         ))}
       </div>
@@ -135,7 +140,7 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
             {editable ? <input className="rd-input" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Importe" />
               : <div style={fieldRO}>{form.name}</div>}
 
-            <label style={lbl}>Default data type</label>
+            <label style={lbl}>Physical default type</label>
             {/* Doc 62: catálogo cerrado con buscador (mismo TypePicker de columnas,
                 doc 41) en vez de texto libre — el texto libre sembró dominios con
                 tipos des-homologados (`Array`, `BIG INTEGER`). STRUCT/ARRAY/MAP
@@ -148,7 +153,25 @@ export default function DomainsPage({ snapshot, canEdit, onApplied }: {
                 )}
               </div>
             ) : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.defaultDataType}</div>}
-            {editable && <div style={{ fontSize: 12, color: '#8A93A5', margin: '-10px 0 18px' }}>On apply, columns of this domain WITHOUT an override are re-typed.</div>}
+            {editable && <div style={{ fontSize: 12, color: '#8A93A5', margin: '-10px 0 18px' }}>On apply, columns of this domain WITHOUT an override (per facet) are re-typed.</div>}
+
+            <label style={lbl}>Logical data type</label>
+            {/* Doc 69 §4.9: Erwin trae Logical_Data_Type y Physical_Data_Type por
+                dominio («Codigo»: VARCHAR(20) lógico / VARCHAR(30) físico). */}
+            {editable ? (
+              <div style={{ marginBottom: 18 }}>
+                <TypePicker value={form.logicalDataType ?? ''} onChange={(v) => setForm({ ...form, logicalDataType: v })} placeholder="Same as physical" />
+                {isComplexTypeStart(form.logicalDataType ?? '') && (
+                  <ComplexTypeBuilder value={form.logicalDataType ?? ''} onChange={(v) => setForm({ ...form, logicalDataType: v })} />
+                )}
+              </div>
+            ) : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.logicalDataType || '—'}</div>}
+
+            <label style={lbl}>Suggested attribute name</label>
+            {/* Doc 69 §4.7: al asignar el dominio, la columna toma este nombre
+                lógico (default: el nombre del dominio, como Erwin). */}
+            {editable ? <input className="rd-input" style={field} value={form.namingTerm ?? ''} onChange={(e) => setForm({ ...form, namingTerm: e.target.value })} placeholder={`Defaults to the domain name${form.name ? ` (${form.name})` : ''}`} />
+              : <div style={fieldRO}>{form.namingTerm || form.name}</div>}
 
             <label style={lbl}>Description</label>
             {editable ? <textarea className="rd-input" style={{ ...field, minHeight: 64, resize: 'vertical' }} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />

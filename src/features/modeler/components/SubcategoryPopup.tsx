@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import { confirmDialog } from '@/components/ui/dialogs';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
@@ -23,7 +22,7 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
   const deleteRelationship = useModelerStore((s) => s.deleteRelationship);
   const viewMode = useModelerStore((s) => s.viewMode);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
-  const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
+  const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const [busy, setBusy] = useState(false);
 
   const rels = useMemo(

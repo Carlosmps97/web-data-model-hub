@@ -19,19 +19,23 @@ const VIEW_LABELS: Record<ViewKey, string> = {
 };
 const btn: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 14px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
 
-export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
+/** Doc 75 D13: el diseñador consulta UN proyecto (`projectId`); `projectPicker`
+ *  es el selector compartido con la pantalla de Reporting. */
+export default function ReportDesigner({ projectId, projectPicker, onClose }: {
+  projectId: string; projectPicker?: React.ReactNode; onClose?: () => void;
+}) {
   const [from, setFrom] = useState<ViewKey>('columns');
   const [catalog, setCatalog] = useState<FieldDef[]>([]);
-  const [spec, setSpec] = useState<ReportSpec>(emptySpec('columns'));
+  const [spec, setSpec] = useState<ReportSpec>(emptySpec(projectId, 'columns'));
   const [mode, setMode] = useState<Mode>('builder');
   const [sqlText, setSqlText] = useState('');
   const [result, setResult] = useState<QueryResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [saved, setSaved] = useState<SavedReport[]>([]);
 
-  useEffect(() => { getCatalog(from).then(setCatalog).catch(() => toast.error("Couldn't load the catalog")); }, [from]);
-  useEffect(() => { listReports().then(setSaved).catch(() => {}); }, []);
-  useEffect(() => { setSpec((s) => ({ ...emptySpec(from), select: [] })); setResult(null); }, [from]);
+  useEffect(() => { getCatalog(projectId, from).then(setCatalog).catch(() => toast.error("Couldn't load the catalog")); }, [projectId, from]);
+  useEffect(() => { listReports(projectId).then(setSaved).catch(() => {}); }, [projectId]);
+  useEffect(() => { setSpec(emptySpec(projectId, from)); setResult(null); }, [projectId, from]);
 
   const sortState = spec.orderBy[0] ? { field: spec.orderBy[0].field, dir: spec.orderBy[0].dir } : null;
   const groupable = useMemo(() => catalog.filter((f) => f.groupable), [catalog]);
@@ -39,18 +43,18 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
   const run = useCallback(async () => {
     setLoading(true);
     try {
-      const res = mode === 'sql' ? await runSql(sqlText) : await runQuery(spec);
+      const res = mode === 'sql' ? await runSql(projectId, sqlText) : await runQuery(spec);
       setResult(res);
       res.meta?.warnings?.forEach((w) => toast.warning(w));
     } catch (e) { toast.error(e instanceof Error ? e.message : 'The query failed'); }
     finally { setLoading(false); }
-  }, [mode, spec, sqlText]);
+  }, [mode, spec, sqlText, projectId]);
 
   const loadMore = async () => {
     if (!result?.nextCursor || loading) return;
     setLoading(true);
     try {
-      const res = mode === 'sql' ? await runSql(sqlText, result.nextCursor) : await runQuery(spec, result.nextCursor);
+      const res = mode === 'sql' ? await runSql(projectId, sqlText, result.nextCursor) : await runQuery(spec, result.nextCursor);
       setResult((prev) => (prev ? { ...res, rows: [...prev.rows, ...res.rows] } : res));
     } finally { setLoading(false); }
   };
@@ -71,15 +75,15 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
   });
 
   const doExport = async () => {
-    try { await exportCsv(spec); toast.success('Export CSV iniciado'); }
+    try { await exportCsv(spec); toast.success('CSV export started'); }
     catch (e) { toast.error(e instanceof Error ? e.message : 'Export failed'); }
   };
   const doSave = async () => {
     const name = window.prompt('Report name'); if (!name?.trim()) return;
-    try { await createReport({ name: name.trim(), spec, shared: false }); setSaved(await listReports()); toast.success('Reporte guardado'); }
+    try { await createReport({ projectId, name: name.trim(), spec, shared: false }); setSaved(await listReports(projectId)); toast.success('Report saved'); }
     catch { toast.error("Couldn't save"); }
   };
-  const loadReport = (r: SavedReport) => { setFrom(r.spec.from); setTimeout(() => { setSpec(r.spec); setMode('builder'); }, 0); toast.success(`Cargado: ${r.name}`); };
+  const loadReport = (r: SavedReport) => { setFrom(r.spec.from); setTimeout(() => { setSpec({ ...r.spec, projectId }); setMode('builder'); }, 0); toast.success(`Loaded: ${r.name}`); };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#fff' }}>
@@ -87,6 +91,7 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
       <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', borderBottom: '1px solid #EAEDF2' }}>
         <Table2 size={18} color="#2E5BFF" />
         <span style={{ fontSize: 15, fontWeight: 700, color: '#1A2B4A' }}>Report Designer</span>
+        {projectPicker}
         <select value={from} onChange={(e) => setFrom(e.target.value as ViewKey)} style={{ height: 32, padding: '0 10px', border: '1px solid #DCE1EA', borderRadius: 8, fontSize: 13, fontFamily: 'inherit', color: '#1A2B4A' }}>
           {VIEWS.map((v) => <option key={v} value={v}>{VIEW_LABELS[v]}</option>)}
         </select>
@@ -112,7 +117,7 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
       <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 'none', maxHeight: '46%', overflowY: 'auto', padding: '14px 20px', borderBottom: '1px solid #EAEDF2' }}>
           {mode === 'sql' ? (
-            <SqlEditor text={sqlText} onText={setSqlText} onValidated={(s) => { setSpec(s); setMode('builder'); }} />
+            <SqlEditor projectId={projectId} text={sqlText} onText={setSqlText} onValidated={(s) => { setSpec({ ...s, projectId }); setMode('builder'); }} />
           ) : (
             <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', gap: 20 }}>
               {/* field picker */}
@@ -131,7 +136,7 @@ export default function ReportDesigner({ onClose }: { onClose?: () => void }) {
               {/* filters */}
               <div>
                 <div style={{ fontSize: 11.5, fontWeight: 700, color: '#8A93A5', textTransform: 'uppercase', marginBottom: 8 }}>Filters</div>
-                {catalog.length > 0 && <FilterBuilder group={spec.where ?? { op: 'and', conditions: [] }} catalog={catalog} from={from} onChange={(g) => setSpec((s) => ({ ...s, where: g }))} />}
+                {catalog.length > 0 && <FilterBuilder projectId={projectId} group={spec.where ?? { op: 'and', conditions: [] }} catalog={catalog} from={from} onChange={(g) => setSpec((s) => ({ ...s, where: g }))} />}
               </div>
             </div>
           )}

@@ -9,24 +9,35 @@
  *     entidades irreconstruibles (publicadas antes de las before-images).
  *   · Version details — cabecera completa de UNA versión: owner, revisores y
  *     sus decisiones (fecha + nota), fechas clave, procedencia de restauración
- *     y comentarios, vía `GET /api/changesets/{id}`.
+ *     y comentarios, vía `GET /api/changesets/{id}`. Doc 70: botón «Open in
+ *     canvas» — una versión PUBLICADA abre el Model en modo visor con el
+ *     changeset virtual `asof:<versionId>` (snapshot exacto reconstruido del
+ *     ledger: producción + inverso de las versiones posteriores); la producción
+ *     actual abre el visor normal; un draft/request abre su overlay en visor.
  *
  * READ-ONLY: no toca el flujo de aprobación ni el rollback (el Restore sigue
  * viviendo en la fila de la caja Versions).
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeftRight, ChevronDown, ChevronRight, GitCompare, TriangleAlert, Undo2, X,
+  ArrowLeftRight, ChevronDown, ChevronRight, GitCompare, PanelsTopLeft, TriangleAlert, Undo2, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar } from '@/components/ui';
 import {
+  OPEN_VERSION_DENIED,
   SUMMARY_ROWS,
+  asOfChangesetId,
+  canOpenVersion,
   collectionLabel,
   compareVersionDetails,
   compareVersions,
   getChangeset,
 } from '@/services/versioning.service';
+import { useAuthStore } from '@/store/useAuthStore';
+import { useSessionStore } from '@/store/useSessionStore';
+import { projectMeta, sortProjects } from '@/lib/projects';
 import type { Project } from '@/types/model';
 import type {
   ChangesetDetail,
@@ -72,17 +83,31 @@ const STATUS_TEXT: Record<VersionRow['status'], string> = {
 };
 
 export default function VersionToolsModal({
-  versions, published, users, projects, initialTab = 'compare', initialVersionId = null, onClose,
+  versions, users, projects, initialTab = 'compare', initialVersionId = null, initialProjectId = null, onClose,
 }: {
   versions: VersionRow[];
-  published: VersionRow | null;
   users: SimUserDto[];
   projects: Project[];
   initialTab?: Tab;
   initialVersionId?: string | null;
+  /** Doc 75: proyecto preseleccionado (el de la fila que abrió el popup). */
+  initialProjectId?: string | null;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
+  // Doc 75: las versiones son por proyecto — el selector acota Compare y Details.
+  const sortedProjects = useMemo(() => sortProjects(projects), [projects]);
+  const [projectId, setProjectId] = useState<string>(() =>
+    initialProjectId
+    ?? versions.find((v) => v.id === initialVersionId)?.projectId
+    ?? sortedProjects[0]?.id ?? '');
+  const projectVersions = useMemo(() => versions.filter((v) => v.projectId === projectId), [versions, projectId]);
+  const published = useMemo(() => projectMeta(projectVersions, null)[projectId]?.productionRow ?? null, [projectVersions, projectId]);
+  const navigate = useNavigate();
+  const openModel = useSessionStore((s) => s.openModel);
+  // Doc 70 §12: quién puede abrir qué versión en el canvas (espejo del backend).
+  const me = useAuthStore((s) => s.user?.username ?? null);
+  const has = useAuthStore((s) => s.has);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -101,10 +126,10 @@ export default function VersionToolsModal({
 
   // ── Compare: solo versiones PUBLICADAS, en orden cronológico ──────────────
   const publishedRows = useMemo(
-    () => versions
+    () => projectVersions
       .filter((v) => v.status === 'approved' && !!v.appliedAt)
       .sort((a, b) => String(a.appliedAt).localeCompare(String(b.appliedAt))),
-    [versions],
+    [projectVersions],
   );
   const [fromId, setFromId] = useState<string>(
     () => (publishedRows.length >= 2
@@ -170,11 +195,23 @@ export default function VersionToolsModal({
   // ── Details: cualquier versión (draft/review/publicada) ───────────────────
   const detailRows = useMemo(() => {
     const ts = (v: VersionRow) => Date.parse(v.submittedAt ?? v.updatedAt ?? v.createdAt ?? '') || 0;
-    return [...versions].sort((a, b) => ts(b) - ts(a));
-  }, [versions]);
+    return [...projectVersions].sort((a, b) => ts(b) - ts(a));
+  }, [projectVersions]);
   const [selId, setSelId] = useState<string>(
     initialVersionId ?? published?.id ?? detailRows[0]?.id ?? '',
   );
+  // Cambiar de proyecto re-apunta los selectores a las versiones de ESE proyecto.
+  const pickProject = (pid: string) => {
+    setProjectId(pid);
+    const rows = versions.filter((v) => v.projectId === pid);
+    const pub = rows.filter((v) => v.status === 'approved' && !!v.appliedAt)
+      .sort((a, b) => String(a.appliedAt).localeCompare(String(b.appliedAt)));
+    setFromId(pub.length >= 2 ? pub[pub.length - 2].id : pub[0]?.id ?? '');
+    setToId(pub[pub.length - 1]?.id ?? '');
+    setCmp(null);
+    const ts = (v: VersionRow) => Date.parse(v.submittedAt ?? v.updatedAt ?? v.createdAt ?? '') || 0;
+    setSelId(pub[pub.length - 1]?.id ?? [...rows].sort((a, b) => ts(b) - ts(a))[0]?.id ?? '');
+  };
   const [detail, setDetail] = useState<ChangesetDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
@@ -193,9 +230,40 @@ export default function VersionToolsModal({
   }, [tab, selId]);
 
   const isProduction = published?.id === selId;
-  const projectNames = (detail?.projectIds ?? [])
-    .map((id) => projects.find((p) => p.id === id)?.name ?? null)
-    .filter((n): n is string => !!n);
+  const isPublished = detail?.status === 'approved' && !!detail?.appliedAt;
+  const canOpen = !!detail && canOpenVersion(detail, me, has);
+
+  /** Doc 70: abre la versión en el canvas, SIEMPRE en modo visor. Publicada
+   *  pasada → snapshot `asof:` (el backend compone el inverso de las versiones
+   *  posteriores); producción → visor normal; draft/request → su overlay. */
+  const openInCanvas = () => {
+    if (!detail) return;
+    const label = detail.versionLabel ?? null;
+    if (isProduction) {
+      openModel({ projectId: detail.projectId, mode: 'readonly', versionLabel: label });
+    } else if (isPublished) {
+      openModel({
+        projectId: detail.projectId,
+        mode: 'readonly',
+        changesetId: asOfChangesetId(detail.id),
+        versionLabel: label ? `${label} · as published` : 'as published',
+      });
+    } else {
+      openModel({ projectId: detail.projectId, mode: 'readonly', changesetId: detail.id, versionLabel: label });
+    }
+    onClose();
+    navigate('/model');
+  };
+  const openHint = !canOpen
+    ? OPEN_VERSION_DENIED
+    : isProduction
+      ? 'Opens the current production model in read-only mode.'
+      : isPublished
+        ? 'Opens a read-only snapshot of the model exactly as it was published in this version. It is rebuilt from the change ledger (before/after images of every change), so canvases, tables, columns, views and relationships reflect that moment.'
+        : 'Opens the model in read-only mode with the changes of this version overlaid on production.';
+  const projectNames = detail
+    ? [projects.find((p) => p.id === detail.projectId)?.name ?? null].filter((n): n is string => !!n)
+    : [];
 
   return (
     <div className="dmh-rvd-overlay" role="presentation">
@@ -234,6 +302,14 @@ export default function VersionToolsModal({
           >
             Version details
           </button>
+          <span style={{ flex: 1 }} />
+          {/* Doc 75: versiones por proyecto. */}
+          <div className="dmh-vt-picker dmh-vt-project">
+            <label htmlFor="dmh-vt-project">Project</label>
+            <select id="dmh-vt-project" value={projectId} onChange={(e) => pickProject(e.target.value)}>
+              {sortedProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            </select>
+          </div>
         </div>
 
         <div className="dmh-vt-body">
@@ -407,7 +483,19 @@ export default function VersionToolsModal({
                       <span className="dot" />
                       {isProduction ? 'Production' : STATUS_TEXT[detail.status]}
                     </span>
+                    <span style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      className="dmh-btn dmh-btn--primary"
+                      title={openHint}
+                      disabled={!canOpen}
+                      onClick={openInCanvas}
+                    >
+                      <PanelsTopLeft size={13} strokeWidth={1.7} aria-hidden />
+                      Open in canvas
+                    </button>
                   </div>
+                  <p className="dmh-vt-desc" style={{ marginTop: 4 }}>{openHint}</p>
 
                   {detail.restoredFrom && (
                     <div className="dmh-vt-restored">

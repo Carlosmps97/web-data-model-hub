@@ -12,7 +12,8 @@ import { saveDdlConfig } from '../ddlRules.service';
 import { getUdpDefs, type DdlLookup, type DdlRulesetConfig, type UdpDefinition } from '../standards.service';
 import { useEffect } from 'react';
 
-export default function DdlLookupsEditor({ config, canEdit, onClose, onApplied }: {
+export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, onApplied }: {
+  projectId: string;
   config: DdlRulesetConfig;
   canEdit: boolean;
   onClose: () => void;
@@ -25,7 +26,7 @@ export default function DdlLookupsEditor({ config, canEdit, onClose, onApplied }
   const [selected, setSelected] = useState<string | null>(Object.keys(config.lookups)[0] ?? null);
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { getUdpDefs().then(setDefs).catch(() => setDefs([])); }, []);
+  useEffect(() => { getUdpDefs(projectId).then(setDefs).catch(() => setDefs([])); }, [projectId]);
 
   const defById = useMemo(() => new Map(defs.map((d) => [d.id, d])), [defs]);
   const listDefs = useMemo(() => defs.filter((d) => d.dataType === 'list'), [defs]);
@@ -58,7 +59,7 @@ export default function DdlLookupsEditor({ config, canEdit, onClose, onApplied }
   const doSave = async () => {
     setSaving(true);
     try {
-      await saveDdlConfig({ lookups, functions });
+      await saveDdlConfig(projectId, { lookups, functions });
       toast.success('Lookups & functions saved');
       await onApplied(); onClose();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save"); }

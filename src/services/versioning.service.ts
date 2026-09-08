@@ -5,8 +5,8 @@
  * identity (`/api/users`). Todas las llamadas pasan por `apiGet`/`apiPost`, que
  * desempaquetan el envelope `{success,data}` y propagan `ApiError`.
  *
- *   listVersions()              → GET  /api/versions
- *   getPublished()              → GET  /api/versions/published   (fila verde o null)
+ *   listVersions(projectId?)    → GET  /api/versions[?projectId=]   (todas o las del proyecto)
+ *   getPublished(projectId)     → GET  /api/projects/{pid}/versions/published (fila verde o null)
  *   listRequests({reviewer,owner}) → GET /api/requests?…         (submitted)
  *   snapshot(body)              → POST /api/changesets/snapshot   (crea draft)
  *   listUsers()                 → GET  /api/users
@@ -26,19 +26,22 @@ import type {
   SubmitBody,
   VersionCompare,
   VersionRow,
+  VersionStatus,
 } from '@/types/versioning';
-import { ApiError, apiGet, apiPost } from './http';
+import { ApiError, apiGet, apiPost, LONG_TIMEOUT_MS } from './http';
 
 import { API_BASE } from '@/services/apiBase';
 
-/** Lista cross-project de versiones (filas para la tabla de Review y el Home). */
-export function listVersions(): Promise<VersionRow[]> {
-  return apiGet<VersionRow[]>(`${API_BASE}/api/versions`);
+/** Versiones (filas para la tabla de Review y el Home): todas las visibles
+ *  para el actor o, con `projectId`, sólo las de ese proyecto (doc 75). */
+export function listVersions(projectId?: string): Promise<VersionRow[]> {
+  const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
+  return apiGet<VersionRow[]>(`${API_BASE}/api/versions${qs}`);
 }
 
-/** Versión de producción actual (última approved) o `null` si aún no hay ninguna. */
-export function getPublished(): Promise<VersionRow | null> {
-  return apiGet<VersionRow | null>(`${API_BASE}/api/versions/published`);
+/** Producción actual DEL PROYECTO (última approved aplicada) o `null` si aún no hay. */
+export function getPublished(projectId: string): Promise<VersionRow | null> {
+  return apiGet<VersionRow | null>(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/versions/published`);
 }
 
 /**
@@ -56,12 +59,12 @@ export function listRequests(
 }
 
 /**
- * Crea un draft (working copy) a partir del estado publicado — el "Snapshot
- * desde producción" del Open model. Devuelve el changeset creado (con `id` y
- * `versionLabel` autogenerado si no se pasó).
+ * Crea un draft (working copy) DEL PROYECTO a partir de su estado publicado —
+ * el "Snapshot from production" del Open model. Devuelve el changeset creado
+ * (con `id` y `versionLabel` autogenerado por proyecto si no se pasó).
  */
-export function snapshot(body: SnapshotBody = {}): Promise<VersionRow> {
-  return apiPost<VersionRow>(`${API_BASE}/api/changesets/snapshot`, body);
+export function snapshot(body: SnapshotBody): Promise<VersionRow> {
+  return apiPost<VersionRow>(`${API_BASE}/api/changesets/snapshot`, body, { timeoutMs: LONG_TIMEOUT_MS });
 }
 
 /** Usuarios (id/name/initials). Con `can` (p.ej. 'review.decide'), sólo los
@@ -77,7 +80,7 @@ export function listUsers(can?: string): Promise<SimUserDto[]> {
  * `POST /api/changesets/{id}/submit` (SubmitBody). Devuelve la fila actualizada.
  */
 export function submit(id: string, body: SubmitBody): Promise<VersionRow> {
-  return apiPost<VersionRow>(`${API_BASE}/api/changesets/${id}/submit`, body);
+  return apiPost<VersionRow>(`${API_BASE}/api/changesets/${id}/submit`, body, { timeoutMs: LONG_TIMEOUT_MS });
 }
 
 // ─── Review detail (p5) ──────────────────────────────────────────────────────
@@ -194,7 +197,8 @@ export function summarizeDiff(diff: ChangesetDiff): DiffSummary {
  */
 export async function review(id: string, body: ReviewBody): Promise<ChangesetDetail> {
   try {
-    return await apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/review`, body);
+    // Aprobar publica (apply + cascada si borra el proyecto): acción larga.
+    return await apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/review`, body, { timeoutMs: LONG_TIMEOUT_MS });
   } catch (err) {
     if (err instanceof ApiError && err.status === 403) {
       throw new ApiError(err.message || 'You are not assigned as a reviewer of this change.', 403);
@@ -207,13 +211,40 @@ export async function review(id: string, body: ReviewBody): Promise<ChangesetDet
  *  cambios INVERSOS (restaura las imágenes previas capturadas en el publish).
  *  Producción no cambia hasta que ese draft pase submit → review → approve. */
 export function rollbackVersion(id: string): Promise<VersionRow> {
-  return apiPost<VersionRow>(`${API_BASE}/api/changesets/${id}/rollback`, {});
+  return apiPost<VersionRow>(`${API_BASE}/api/changesets/${id}/rollback`, {}, { timeoutMs: LONG_TIMEOUT_MS });
 }
 
 /** Agrega un comentario al hilo del changeset; devuelve el changeset refrescado. */
 export function addComment(id: string, body: { text: string }): Promise<ChangesetDetail> {
   return apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/comments`, body);
 }
+
+// ─── Snapshot de una versión publicada (doc 70 §3) ───────────────────────────
+
+/** Prefijo del changeset VIRTUAL que el backend resuelve como el inverso de
+ *  las versiones publicadas después de la objetivo: abrir el canvas en
+ *  readonly con `changesetId = asof:<versionId>` muestra el modelo EXACTO de
+ *  esa versión (canvas, explorer, DBX, links) sin tocar producción. */
+export const AS_OF_PREFIX = 'asof:';
+export const asOfChangesetId = (versionId: string): string => `${AS_OF_PREFIX}${versionId}`;
+export const isAsOfChangesetId = (id: string | null | undefined): boolean =>
+  typeof id === 'string' && id.startsWith(AS_OF_PREFIX) && id.length > AS_OF_PREFIX.length;
+
+/** Doc 70 §12 — ¿el actor puede ABRIR esta versión en el canvas? Publicadas
+ *  (pasadas y actual) → todos; propias (draft / en revisión / rechazada) → su
+ *  owner; requests → sus revisores asignados; el resto sólo con
+ *  `versions.view_all` (o `admin.manage`). Espejo de la regla del backend
+ *  (`changesets/access.py`) para deshabilitar el botón con el motivo. */
+export function canOpenVersion(
+  v: { status: VersionStatus; appliedAt?: string | null; owner?: string | null; reviewers?: string[] },
+  me: string | null | undefined,
+  has: (perm: 'versions.view_all' | 'admin.manage') => boolean,
+): boolean {
+  if (v.status === 'approved' && !!v.appliedAt) return true;
+  if (me && (v.owner === me || (v.reviewers ?? []).includes(me))) return true;
+  return has('versions.view_all') || has('admin.manage');
+}
+export const OPEN_VERSION_DENIED = 'Only published versions and your own drafts can be opened in the canvas. Administrators can open any version.';
 
 // ─── Version compare (doc 65 — popup "Version tools" del Home) ───────────────
 

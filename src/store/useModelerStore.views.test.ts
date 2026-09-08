@@ -1,6 +1,6 @@
 // Vistas en el canvas (F3): saveAllLayout persiste layout[viewId] y focusTable
 // sobre un nodo 'view' centra SIN seleccionar (nunca abre el PropertiesPanel).
-// Mock del service (patrón useIdentityStore.test.ts): `import * as mod` accede
+// Mock del service: `import * as mod` accede
 // a las funciones recién al invocarlas, así el mock parcial alcanza.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 

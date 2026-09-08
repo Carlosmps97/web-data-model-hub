@@ -16,7 +16,8 @@ import type { DdlRule, DdlRulesetConfig } from '../standards.service';
 import DdlLookupsEditor from './DdlLookupsEditor';
 import DdlRuleTemplates from './DdlRuleTemplates';
 
-export default function DdlRuleCatalog({ rules, config, artifacts, canEdit, initialAttention, onBack, onOpen, onNew, onApplied }: {
+export default function DdlRuleCatalog({ projectId, rules, config, artifacts, canEdit, initialAttention, onBack, onOpen, onNew, onApplied }: {
+  projectId: string;
   rules: DdlRule[];
   config: DdlRulesetConfig;
   artifacts: DdlArtifact[];
@@ -76,14 +77,14 @@ export default function DdlRuleCatalog({ rules, config, artifacts, canEdit, init
 
   const doToggle = async (rule: DdlRule, enabled: boolean) => {
     setBusyId(rule.id);
-    try { await toggleDdlRule(rule, enabled); await onApplied(); }
+    try { await toggleDdlRule(projectId, rule, enabled); await onApplied(); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't update the rule"); }
     finally { setBusyId(null); }
   };
 
   const doSeed = async () => {
     setSeeding(true);
-    try { await seedStarterRules(); await onApplied(); toast.success('Starter rules added'); }
+    try { await seedStarterRules(projectId); await onApplied(); toast.success('Starter rules added'); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't add the starter rules"); }
     finally { setSeeding(false); }
   };
@@ -93,6 +94,7 @@ export default function DdlRuleCatalog({ rules, config, artifacts, canEdit, init
     if (typeof a.expression === 'string') return a.expression;
     if (a.tags) return `SET TAGS (${Object.keys(a.tags as object).join(', ')})`;
     if (a.tblproperties) return `TBLPROPERTIES (${Object.keys(a.tblproperties as object).join(', ')})`;
+    if (a.layout) return `Column layout: partition columns ${((a.layout as { partitionColumns?: string }).partitionColumns ?? 'keep') === 'last' ? 'last' : 'in physical order'}`;
     const emit = a.emit as Record<string, unknown> | undefined;
     if (emit) return `+ ${emit.type === 'view' ? 'view' : 'tbl'} "${emit.schema}.${emit.name}"`;
     return '—';
@@ -131,7 +133,7 @@ export default function DdlRuleCatalog({ rules, config, artifacts, canEdit, init
         </select>
         <select value={artifact} onChange={(e) => setArtifact(e.target.value)} style={sel}>
           <option value="all">Artifact: All</option>
-          {artifacts.map((a) => <option key={a.id} value={a.id}>{a.id}</option>)}
+          {artifacts.map((a) => <option key={a.id} value={a.id}>{a.id}{a.kind ? ` · ${a.kind}` : ''}</option>)}
         </select>
         {needsAttention > 0 && (
           <button onClick={() => setAttention(!attention)}
@@ -230,11 +232,11 @@ export default function DdlRuleCatalog({ rules, config, artifacts, canEdit, init
       </div>
 
       {templates && (
-        <DdlRuleTemplates onClose={() => setTemplates(false)}
+        <DdlRuleTemplates projectId={projectId} onClose={() => setTemplates(false)}
           onPick={(draft) => { setTemplates(false); onNew(draft); }} />
       )}
       {lookups && (
-        <DdlLookupsEditor config={config} canEdit={canEdit}
+        <DdlLookupsEditor projectId={projectId} config={config} canEdit={canEdit}
           onClose={() => setLookups(false)} onApplied={onApplied} />
       )}
     </div>

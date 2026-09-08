@@ -18,7 +18,8 @@ const ICONS: Record<string, React.ReactNode> = {
   blank: <Plus size={16} color="#8A93A5" />,
 };
 
-export default function DdlRuleTemplates({ onClose, onPick }: {
+export default function DdlRuleTemplates({ projectId, onClose, onPick }: {
+  projectId: string;
   onClose: () => void;
   onPick: (draft: Partial<DdlRule>) => void;
 }) {
@@ -26,9 +27,9 @@ export default function DdlRuleTemplates({ onClose, onPick }: {
   const [sel, setSel] = useState<string>('mask-by-udp');
 
   useEffect(() => {
-    getDdlTemplates().then((t) => setTemplates(t.templates))
+    getDdlTemplates(projectId).then((t) => setTemplates(t.templates))
       .catch(() => toast.error("Couldn't load the rule templates"));
-  }, []);
+  }, [projectId]);
 
   const grid = templates.filter((t) => t.id !== 'blank');
   const blank = templates.find((t) => t.id === 'blank');

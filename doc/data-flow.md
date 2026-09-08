@@ -1,6 +1,6 @@
 # Flujos de datos del frontend — Data Model Hub
 
-Última actualización: 2026-07-31 (original 2026-07-06).
+Última actualización: 2026-09-08 (doc 75: proyectos independientes; original 2026-07-06).
 
 Este documento describe, con base en el **código real** del frontend (Vite + React + Zustand + React Flow/xyflow), cómo circulan los datos en los seis flujos centrales de la aplicación: autenticación y arranque, apertura de un canvas, edición gobernada (changeset → review → publish), auto-organización del layout (ELK), el motor de reporting y el Export DDL con reglas. Se explican además dos patrones transversales: el **estado optimista** y el **viewer-lock (solo lectura)**.
 
@@ -17,20 +17,19 @@ Todo el estado del cliente vive en stores de Zustand. Cada uno tiene una respons
 | Store | Archivo | Responsabilidad | Persistencia |
 |---|---|---|---|
 | `useAuthStore` | `src/store/useAuthStore.ts` | Identidad **autoritativa** (usuario + permisos), login/logout/restore | Token en `localStorage['dmh.token']` |
-| `useSessionStore` | `src/store/useSessionStore.ts` | Actor simulado (`X-Dev-User`) + intención de apertura del canvas (`openMode`, `activeChangesetId`, `activeVersionLabel`) | En memoria |
-| `useChangesetStore` | `src/store/useChangesetStore.ts` | Changeset activo (working copy) que consumen todos los lectores/escritores del modelo | En memoria |
-| `useModelerStore` | `src/store/useModelerStore.ts` | Árbol del explorer, `diagram` cargado, drawings, `dirty`, `viewMode` lógico/físico, **`lod` (default `true`) + `lodLock`** (zoom semántico del canvas), focus cross-canvas (`openCanvasAndFocus`/`pendingFocusTableId`), acciones de edición | En memoria |
-| `useIdentityStore` | `src/store/useIdentityStore.ts` | Identidad legacy vía `/api/me` (MVP, tolerante a fallos) | En memoria |
+| `useSessionStore` | `src/store/useSessionStore.ts` | Actor (`X-Dev-User` en dev) + **proyecto y versión activos** (`activeProjectId`, `openMode`, `activeChangesetId`, `activeVersionLabel`; `openModel`/`closeModel`; helper `sessionProjectId()`) — la ÚNICA fuente del changeset activo (doc 75) | En memoria (+ `dmh:lastProject` en `localStorage`) |
+| `useModelerStore` | `src/store/useModelerStore.ts` | Árbol del explorer del proyecto, `diagram` cargado, drawings, `dirty`, `viewMode` lógico/físico, **`lod` (default `true`) + `lodLock`** (zoom semántico del canvas), focus cross-canvas (`openCanvasAndFocus`/`pendingFocusTableId`), `projectDeletionPending`, acciones de edición | En memoria |
+| `useUndoStore` | `src/store/useUndoStore.ts` | Pila de inversas (Ctrl+Z) | En memoria |
+| `useBusyStore` | `src/store/useBusyStore.ts` | `runBlocking(label, fn)`: overlay bloqueante por sesión durante acciones largas (doc 75 D18) | En memoria |
 
-El **puente** `installSessionChangesetBridge()` (`src/store/sessionChangesetBridge.ts`) es clave: propaga de forma **unidireccional** `useSessionStore.activeChangesetId` → `useChangesetStore.setActive(id)`. Se monta una sola vez desde `App.tsx`. Sin él, editar en el canvas no encontraría changeset activo y lanzaría "Se requiere un changeset activo para editar".
+Todos los lectores/escritores del modelo (`governance.service`, `structure.service`, `schemas.service`, el canvas, los paneles) leen `useSessionStore.getState().activeChangesetId` y arman las rutas de proyecto con `sessionProjectId()`; sin sesión, `rec()` lanza "An active changeset is required to edit.". (El `useChangesetStore` + puente `sessionChangesetBridge` y la identidad legacy `useIdentityStore` se retiraron en el doc 75 D14.)
 
-El reset transversal `resetAppState()` (`src/store/resetAppState.ts`) borra en un solo punto todo el estado de trabajo ligado al usuario: la intención de apertura del canvas (`openMode`/`activeChangesetId`), el workspace completo del modeler (selección, diagrama, árboles, drawings, instancia de React Flow), los changesets, la identidad legacy, el header `X-Dev-User` y las preferencias "don't ask again" de `sessionStorage`. Se invoca en **tres** puntos: logout, 401 global y justo antes de un login nuevo (defensa contra sesiones que murieron sin logout). Sin él, el logout — que es navegación SPA, sin reload — dejaba al siguiente usuario heredando el canvas del anterior y saltándose el modal "Open model".
+El reset transversal `resetAppState()` (`src/store/resetAppState.ts`) borra en un solo punto todo el estado de trabajo ligado al usuario: la intención de apertura del canvas (`activeProjectId`/`openMode`/`activeChangesetId`), el workspace completo del modeler (selección, diagrama, árboles, drawings, instancia de React Flow), la pila de Undo, el header `X-Dev-User` y las preferencias "don't ask again" de `sessionStorage`. Se invoca en **tres** puntos: logout, 401 global y justo antes de un login nuevo (defensa contra sesiones que murieron sin logout). Sin él, el logout — que es navegación SPA, sin reload — dejaba al siguiente usuario heredando el canvas del anterior y saltándose el modal "Open model".
 
 ```mermaid
 flowchart TD
-  Auth["useAuthStore<br/>identidad + permisos"] -->|mirror| Session["useSessionStore<br/>actor + openMode"]
-  Session -->|installSessionChangesetBridge| Changeset["useChangesetStore<br/>activeId"]
-  Changeset -->|active| Gov["governance.service<br/>rec / effective"]
+  Auth["useAuthStore<br/>identidad + permisos"] -->|mirror| Session["useSessionStore<br/>actor + activeProjectId + openMode + activeChangesetId"]
+  Session -->|activeChangesetId / sessionProjectId| Gov["governance.service<br/>rec / effective"]
   Session -->|openMode readonly| Gov
   Modeler["useModelerStore<br/>diagram + acciones"] --> Gov
   Modeler --> ModSvc["modeler.service<br/>subject-areas / diagram"]
@@ -159,11 +158,11 @@ El canvas nunca se abre "en producción" implícitamente. Al entrar a `/model` s
 
 | Opción | Acción | Efecto en sesión |
 |---|---|---|
-| View production (read-only) | — | `openModel({mode:'readonly', versionLabel})` |
-| Create new version from production | `POST /api/changesets/snapshot` | `openModel({mode:'editing', changesetId, versionLabel})` |
-| Continue a working version | elige un draft propio | `openModel({mode:'editing', changesetId})` |
+| View production (read-only) | — | `openModel({projectId, mode:'readonly', versionLabel})` |
+| Create new version from production | `POST /api/changesets/snapshot` (`{ projectId }`, bajo `runBlocking('Creating working copy…')`) | `openModel({projectId, mode:'editing', changesetId, versionLabel})` |
+| Continue a working version | elige un draft propio del proyecto | `openModel({projectId, mode:'editing', changesetId})` |
 
-`openModel()` en `useSessionStore` fija `openMode`, `activeChangesetId` y `activeVersionLabel`; el bridge propaga el `changesetId` a `useChangesetStore.activeId`.
+El Open model es de **dos pasos** (doc 75 D8): primero el proyecto (`ProjectPicker`, con «New project…»), después la versión/modo de ESE proyecto. `openModel()` en `useSessionStore` fija `activeProjectId`, `openMode`, `activeChangesetId` y `activeVersionLabel`; los servicios leen de ahí.
 
 ### 3.2 Carga del diagrama
 
@@ -172,7 +171,7 @@ Al seleccionar un canvas en el `ModelExplorer`, `useModelerStore.selectSubjectAr
 ```ts
 // src/features/modeler/services/modeler.service.ts
 export async function loadDiagram(saId: string): Promise<Diagram> {
-  const cs = useChangesetStore.getState().activeId;
+  const cs = useSessionStore.getState().activeChangesetId;
   const qs = cs ? `?changesetId=${encodeURIComponent(cs)}` : '';
   return apiGet<Diagram>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}/diagram${qs}`);
 }
@@ -227,20 +226,16 @@ sequenceDiagram
   participant U as Usuario
   participant OM as OpenModelModal
   participant SS as useSessionStore
-  participant Br as sessionChangesetBridge
-  participant CS as useChangesetStore
   participant MS as useModelerStore
   participant Svc as modeler.service
   participant API as Backend
   participant RF as ModelerCanvas (xyflow)
 
-  U->>OM: elige modo (readonly / snapshot / continue)
-  OM->>SS: openModel({mode, changesetId, versionLabel})
-  SS-->>Br: cambia activeChangesetId
-  Br->>CS: setActive(changesetId)
+  U->>OM: elige proyecto y modo (readonly / snapshot / continue)
+  OM->>SS: openModel({projectId, mode, changesetId, versionLabel})
   U->>MS: selectSubjectArea(saId)
   MS->>Svc: loadDiagram(saId)
-  Svc->>CS: getState().activeId
+  Svc->>SS: getState().activeChangesetId
   Svc->>API: GET /subject-areas/{saId}/diagram?changesetId=...
   API-->>Svc: { subjectArea, tables, columns, relationships }
   Svc-->>MS: Diagram (guard _loadSeq)
@@ -258,17 +253,19 @@ sequenceDiagram
 
 ### 4.1 El choke-point de escritura
 
-Toda mutación del modelo pasa por `governance.service.rec()` (`src/features/governance/services/governance.service.ts`):
+Toda mutación del modelo pasa por `governance.service.rec()` (`src/services/governance.service.ts`):
 
 ```ts
 const rec = (collection, id, op, payload?) => {
   if (useSessionStore.getState().openMode === 'readonly')
-    throw new Error('El modelo está abierto en solo lectura: no admite cambios.');
-  const a = active();                       // useChangesetStore.activeId
-  if (!a) throw new Error('Se requiere un changeset activo para editar.');
+    throw new Error('The model is open read-only: it does not accept changes.');
+  const a = useSessionStore.getState().activeChangesetId;   // única fuente del changeset activo
+  if (!a) throw new Error('An active changeset is required to edit.');
   return csvc.recordChange(a, collection, id, op, payload);
 };
 ```
+
+El `projectId` de cada payload NO lo pone el front: el backend lo estampa con el del changeset (doc 75 I1) y rechaza con 409 cualquier referencia a una entidad de otro proyecto (I2).
 
 `recordChange` (`changeset.service.ts`) hace `PUT /api/changesets/{id}/changes` con `{collection, entityId, op, payload}`. Cada cambio se persiste como un documento en la colección `changeset_changes` del backend (un doc por cambio). Las **lecturas** con changeset activo van por `effective` → `GET /api/changesets/{id}/effective/{collection}?tableId=&ids=&q=&limit=` (slices server-side, nunca baja la colección completa).
 
@@ -297,7 +294,7 @@ Tras el submit, la modal hace dos cosas importantes: limpia `dirty` (checkpoint)
 
 ### 4.3 Review y decisión
 
-`ReviewScreen.tsx` (`src/screens/ReviewScreen.tsx`) es cross-project. Lista requests (`listVersions` filtrados por `submitted/approved/rejected`), y al seleccionar uno carga detalle + diff (`getChangeset`, `getDiff`). El diff trae impacto (tablas/columnas tocadas), entidades added/edited/deleted por colección y marca **conflictos** (`entity.conflict`: modificado en producción después de que esta versión lo editó).
+`ReviewScreen.tsx` (`src/screens/ReviewScreen.tsx`) es una bandeja global con chip y filtro de proyecto (doc 75 D20). Lista requests (`listVersions` filtrados por `submitted/approved/rejected`), y al seleccionar uno carga detalle + diff (`getChangeset`, `getDiff`). El diff trae impacto (tablas/columnas tocadas), entidades added/edited/deleted por colección y marca **conflictos** (`entity.conflict`: modificado en producción después de que esta versión lo editó).
 
 La presentación de los cambios es la del doc 31 (2026-07-24):
 
@@ -728,9 +725,11 @@ La BD productiva es **Databricks Lakebase Postgres**, consumida a través de un 
 | Editar (changeset) | PUT `/api/changesets/{id}/changes` · GET `/api/changesets/{id}/effective/{collection}` |
 | Snapshot / submit | POST `/api/changesets/snapshot` · POST `/api/changesets/{id}/submit` |
 | Review / decisión | GET `/api/changesets/{id}` · GET `/api/changesets/{id}/diff` · POST `/api/changesets/{id}/diff/details` · POST `/api/changesets/{id}/review` · POST `.../withdraw` · POST `.../reopen` · POST `.../comments` |
-| Versiones / rollback | GET `/api/versions` · GET `/api/versions/published` · GET `/api/requests` · GET `/api/users?can=` · POST `/api/changesets/{id}/rollback` |
+| Proyectos | GET/POST `/api/projects` · GET `/api/projects/{pid}/counts` (borrar/renombrar: cambio `projects/{pid}` en el draft) |
+| Versiones / rollback | GET `/api/versions[?projectId=]` · GET `/api/projects/{pid}/versions/published` · GET `/api/versions/compare` · GET `/api/requests` · GET `/api/users?can=` · POST `/api/changesets/{id}/rollback` |
 | Layout / drawings | PUT `/api/subject-areas/{saId}/layout` · PUT `/api/subject-areas/{saId}/drawings` · PUT `/api/subject-areas/{saId}/tables` |
 | Reporting | GET `/api/reporting/catalog` · POST `/api/reporting/query` · POST `/api/reporting/query/sql` · POST `/api/reporting/query/validate` · GET `/api/reporting/facets` · POST `/api/reporting/export` · GET/POST/PUT/DELETE `/api/reporting/reports` · GET `/api/reporting/insights/*` |
-| Export DDL con reglas | GET `/api/ddl-rules` · POST `/api/ddl-rules/render` (autoría: GET `/api/ddl-rules/config` · `/templates` · `/artifacts` · POST `/api/ddl-rules/validate` · `/test` · `/impact` · POST `/api/standards/apply`) |
+| Export DDL con reglas | GET `/api/projects/{pid}/ddl-rules` · POST `/api/projects/{pid}/ddl-rules/render` (autoría: GET `…/ddl-rules/config` · `/templates` · `/artifacts` · POST `…/ddl-rules/validate` · `/test` · `/impact` · POST `/api/projects/{pid}/standards/apply`) |
+| Reporting (todo con `projectId`) | GET `/api/reporting/tables` · `/filters` · `/columns` · `/views` |
 
 En producción (Databricks Apps) TODAS estas rutas son relativas al origen del front: el navegador nunca habla con el backend directo — `server.mjs` proxya `/api/*` con el token M2M del service principal (ver 2.4).

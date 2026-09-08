@@ -18,21 +18,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { Database, GitBranch, GitCompare, Inbox, Info, Undo2 } from 'lucide-react';
+import { ChevronDown, ChevronRight, Database, FolderPlus, GitBranch, GitCompare, Inbox, Info, Undo2 } from 'lucide-react';
 
 import { Avatar } from '@/components/ui';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import NewProjectModal from '@/components/NewProjectModal';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useSessionStore } from '@/store/useSessionStore';
+import { runBlocking } from '@/store/useBusyStore';
 import { getSummary } from '@/services/dashboard.service';
 import {
-  getPublished,
   listRequests,
   listUsers,
   listVersions,
   rollbackVersion,
 } from '@/services/versioning.service';
 import { listProjects } from '@/services/projects.service';
+import { projectMeta, sortProjects } from '@/lib/projects';
 import VersionToolsModal from './home/VersionToolsModal';
 import type { Project } from '@/types/model';
 import type {
@@ -132,15 +134,18 @@ export default function HomeScreen() {
   const [summaryLoading, setSummaryLoading] = useState(true);
 
   const [versions, setVersions] = useState<VersionRow[]>([]);
-  const [published, setPublished] = useState<VersionRow | null>(null);
   const [requests, setRequests] = useState<VersionRow[]>([]);
+  // Doc 75 D15: alta de proyecto desde el Home (vacío o copiando estándares).
+  const [newProjectOpen, setNewProjectOpen] = useState(false);
+  // Grupos de versiones por proyecto colapsados por el usuario.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [users, setUsers] = useState<SimUserDto[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
 
   // Doc 65: popup "Version tools" (Compare + Details). `versionId` preselecciona
   // la versión en la pestaña Details (botón ⓘ de la fila).
   const [toolsOpen, setToolsOpen] =
-    useState<{ tab: 'compare' | 'details'; versionId?: string | null } | null>(null);
+    useState<{ tab: 'compare' | 'details'; versionId?: string | null; projectId?: string | null } | null>(null);
 
   // Rollback: restaura el modelo a CUALQUIER versión publicada pasada (crea un
   // draft que deshace las versiones posteriores). Permiso propio `rollback`.
@@ -151,7 +156,7 @@ export default function HomeScreen() {
     if (!rollbackTarget) return;
     setRollingBack(true);
     try {
-      const draft = await rollbackVersion(rollbackTarget.id);
+      const draft = await runBlocking('Creating rollback draft…', () => rollbackVersion(rollbackTarget.id));
       toast.success(`Draft "${draft.title ?? 'Rollback'}" created — open it in Model (Open model) `
         + 'to review it and send it for approval. Production does not change until the approve.');
       setRollbackTarget(null);
@@ -192,15 +197,13 @@ export default function HomeScreen() {
     Promise.all([
       listProjects(),
       listVersions(),
-      getPublished(),
       listRequests({ reviewer: user.id }),
       listUsers(),
     ])
-      .then(([proj, vers, pub, reqs, us]) => {
+      .then(([proj, vers, reqs, us]) => {
         if (cancelled) return;
         setProjects(proj);
         setVersions(vers);
-        setPublished(pub);
         setRequests(reqs);
         setUsers(us);
       })
@@ -243,23 +246,32 @@ export default function HomeScreen() {
     };
   }, [projectFilterKey]);
 
-  /** Read-only version list: production first, then everything else by recency. */
-  const versionRows = useMemo(() => {
-    const rows: { row: VersionRow; isProduction: boolean }[] = [];
-    const seen = new Set<string>();
-    if (published) {
-      rows.push({ row: published, isProduction: true });
-      seen.add(published.id);
-    }
-    [...versions]
-      .filter((v) => !seen.has(v.id))
-      .sort((a, b) => rowTs(b) - rowTs(a))
-      .forEach((v) => {
-        rows.push({ row: v, isProduction: false });
-        seen.add(v.id);
-      });
-    return rows;
-  }, [versions, published]);
+  /** Doc 75: versiones agrupadas POR PROYECTO (A–Z); en cada grupo la
+   *  producción del proyecto va primero y el resto por recencia. */
+  const versionGroups = useMemo(() => {
+    const meta = projectMeta(versions, user.id);
+    const byProject = new Map<string, VersionRow[]>();
+    for (const v of versions) (byProject.get(v.projectId) ?? byProject.set(v.projectId, []).get(v.projectId)!).push(v);
+    const named = sortProjects(projects).filter((p) => byProject.has(p.id));
+    const orphan = [...byProject.keys()].filter((pid) => !projects.some((p) => p.id === pid));
+    const groups = [...named.map((p) => ({ id: p.id, name: p.name })), ...orphan.map((pid) => ({ id: pid, name: pid }))];
+    return groups.map((g) => {
+      const prod = meta[g.id]?.productionRow ?? null;
+      const rows: { row: VersionRow; isProduction: boolean }[] = [];
+      if (prod) rows.push({ row: prod, isProduction: true });
+      (byProject.get(g.id) ?? [])
+        .filter((v) => v.id !== prod?.id)
+        .sort((a, b) => rowTs(b) - rowTs(a))
+        .forEach((v) => rows.push({ row: v, isProduction: false }));
+      return { ...g, production: prod?.versionLabel ?? null, rows };
+    });
+  }, [versions, projects, user.id]);
+  const versionCount = versions.length;
+  const toggleGroup = (id: string) => setCollapsedGroups((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
 
   const shownProjects = showAllProjects ? projects : projects.slice(0, MAX_PROJECT_CHIPS);
   const hiddenProjects = Math.max(0, projects.length - MAX_PROJECT_CHIPS);
@@ -287,6 +299,10 @@ export default function HomeScreen() {
             <br />
             or create a version.
           </div>
+          <button type="button" className="dmh-home-newproj" onClick={() => setNewProjectOpen(true)} title="Create an independent project">
+            <FolderPlus size={14} strokeWidth={1.7} aria-hidden />
+            New project
+          </button>
         </div>
 
         {/* ── projects filter strip ──────────────────────────────── */}
@@ -400,7 +416,7 @@ export default function HomeScreen() {
                 </div>
               ) : (
                 requests.map((req) => {
-                  const proj = projectName(req.projectIds[0]);
+                  const proj = projectName(req.projectId);
                   return (
                     <button
                       key={req.id}
@@ -419,6 +435,7 @@ export default function HomeScreen() {
                             {req.title ?? req.versionLabel ?? 'Untitled request'}
                           </span>
                           {proj && <span className="dmh-reqitem-proj">{proj}</span>}
+                          {req.deletesProject && <span className="dmh-vpill dmh-vpill--critical">Deletes project</span>}
                         </span>
                         <span className="dmh-reqitem-m">
                           {userName(req.owner)}
@@ -444,7 +461,7 @@ export default function HomeScreen() {
               </div>
               <div>
                 <div className="dmh-vside-title">Versions</div>
-                <div className="dmh-vside-sub">{versionRows.length} total · all projects</div>
+                <div className="dmh-vside-sub">{versionCount} total · {versionGroups.length} project{versionGroups.length === 1 ? '' : 's'}</div>
               </div>
               <div className="dmh-vside-actions">
                 {/* Doc 65: herramientas READ-ONLY sobre versiones (comparar / detalle). */}
@@ -463,12 +480,25 @@ export default function HomeScreen() {
             <div className="dmh-vside-body">
               {listsLoading ? (
                 <div className="dmh-reqpanel-empty">Loading versions…</div>
-              ) : versionRows.length === 0 ? (
+              ) : versionCount === 0 ? (
                 <div className="dmh-reqpanel-empty">No versions yet.</div>
               ) : (
-                versionRows.map(({ row, isProduction }) => {
+                versionGroups.map((g) => (
+                  <div key={g.id}>
+                    <div className="dmh-vgroup-head" role="button" tabIndex={0}
+                      onClick={() => toggleGroup(g.id)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGroup(g.id); } }}
+                      aria-expanded={!collapsedGroups.has(g.id)}>
+                      {collapsedGroups.has(g.id) ? <ChevronRight size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
+                      <Database size={13} strokeWidth={1.5} aria-hidden />
+                      <span className="dmh-vgroup-name">«{g.name}»</span>
+                      <span className="dmh-vgroup-meta">
+                        {g.production ? <>Production <b>{g.production}</b></> : 'No production'} · {g.rows.length} version{g.rows.length === 1 ? '' : 's'}
+                      </span>
+                      <span className="dmh-vgroup-spacer" />
+                    </div>
+                    {!collapsedGroups.has(g.id) && g.rows.map(({ row, isProduction }) => {
                   const pill = statusPill(row.status, isProduction);
-                  const proj = projectName(row.projectIds[0]);
                   return (
                     <div
                       key={row.id}
@@ -488,14 +518,14 @@ export default function HomeScreen() {
                         </span>
                       )}
                       <span className="dmh-vside-meta">
-                        {proj ? `${proj} · ` : ''}
                         {userName(row.owner)}
                       </span>
+                      {row.deletesProject && <span className="dmh-vpill dmh-vpill--critical">Deletes project</span>}
                       <button
                         type="button"
                         className="dmh-vside-info"
                         title="Version details (owner, approvals, dates)"
-                        onClick={() => setToolsOpen({ tab: 'details', versionId: row.id })}
+                        onClick={() => setToolsOpen({ tab: 'details', versionId: row.id, projectId: row.projectId })}
                       >
                         <Info size={12} strokeWidth={1.8} aria-hidden />
                       </button>
@@ -520,7 +550,9 @@ export default function HomeScreen() {
                       </span>
                     </div>
                   );
-                })
+                })}
+                  </div>
+                ))
               )}
             </div>
 
@@ -532,11 +564,11 @@ export default function HomeScreen() {
             {toolsOpen && (
               <VersionToolsModal
                 versions={versions}
-                published={published}
                 users={users}
                 projects={projects}
                 initialTab={toolsOpen.tab}
                 initialVersionId={toolsOpen.versionId ?? null}
+                initialProjectId={toolsOpen.projectId ?? null}
                 onClose={() => setToolsOpen(null)}
               />
             )}
@@ -564,6 +596,14 @@ export default function HomeScreen() {
           </div>
         </div>
       </div>
+      <NewProjectModal
+        open={newProjectOpen}
+        onClose={() => setNewProjectOpen(false)}
+        onCreated={() => {
+          setNewProjectOpen(false);
+          listProjects().then(setProjects).catch(() => undefined);
+        }}
+      />
     </div>
   );
 }

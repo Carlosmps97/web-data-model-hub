@@ -6,7 +6,7 @@
 import { listFolders, listSubjectAreas, loadDiagram } from './services/modeler.service';
 import type { Diagram } from './services/modeler.service';
 import type { ReportCanvasInput } from './lib/reportPdf';
-import { listDomains } from '@/features/governance/services/governance.service';
+import { listDomainsGlobal } from '@/services/naming.service';
 import { getUdpDefs } from '@/features/standards/standards.service';
 import {
   buildCanvasPage, buildIndexPage, packageLayout, sanitizeFileName,
@@ -46,14 +46,14 @@ async function runPool<T>(items: T[], limit: number, worker: (item: T, i: number
 
 /** Catálogos para labels (dominios / UDP defs). Si fallan, el export sigue
  *  con labels vacíos — mejor un reporte sin nombres de dominio que ninguno. */
-async function fetchLookups(): Promise<ExportLookups> {
+async function fetchLookups(projectId: string): Promise<ExportLookups> {
   const [domains, defs] = await Promise.all([
-    listDomains().catch(() => []),
-    getUdpDefs().catch(() => []),
+    listDomainsGlobal(projectId).catch(() => []),
+    getUdpDefs(projectId).catch(() => []),
   ]);
   return {
     domainsById: Object.fromEntries(domains.map((d) => [d.id, d.name])),
-    udpDefsById: Object.fromEntries(defs.map((d) => [d.id, { name: d.name, level: d.level }])),
+    udpDefsById: Object.fromEntries(defs.map((d) => [d.id, { name: d.name, level: d.level, view: d.view }])),   // doc 69: faceta
   };
 }
 
@@ -97,7 +97,7 @@ export async function exportNodeHtml(opts: {
 }): Promise<ExportOutcome> {
   const download = opts.download ?? domDownload;
   const cancelled = () => opts.cancel?.cancelled === true;
-  const [builders, lookups] = await Promise.all([loadBuilders(), fetchLookups()]);
+  const [builders, lookups] = await Promise.all([loadBuilders(), fetchLookups(opts.projectId)]);
 
   // ── Canvas suelto: un solo HTML, sin ZIP ──
   if (opts.kind === 'canvas') {
@@ -179,7 +179,7 @@ export async function exportNodePdf(opts: {
   const download = opts.download ?? domDownload;
   const cancelled = () => opts.cancel?.cancelled === true;
   const [{ buildReportPdf }, { buildModelReport }, { zlibSync }, lookups] = await Promise.all([
-    import('./lib/scenePdf'), import('./lib/reportPdf'), import('fflate'), fetchLookups(),
+    import('./lib/scenePdf'), import('./lib/reportPdf'), import('fflate'), fetchLookups(opts.projectId),
   ]);
 
   // r2: el reporte ya no lleva diagramas — no se construyen escenas.

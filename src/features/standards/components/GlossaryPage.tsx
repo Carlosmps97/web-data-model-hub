@@ -43,7 +43,8 @@ const WORD_TONE: Record<string, { c: string; b: string }> = {
 // de texto para validarlos antes de aplicar (F2 #1, ver termsToValidate).
 type Draft = SnapshotTerm & { _new?: boolean; _deleted?: boolean; _orig?: string };
 
-export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
+export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }: {
+  projectId: string;
   snapshot: StandardsSnapshot;
   canEdit: boolean;
   onApplied: () => void;
@@ -122,7 +123,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
     if (!term) { toast.error('Type the term before validating'); return; }
     setChecking(t.id);
     try {
-      const v = await validateTerm(term, scope);
+      const v = await validateTerm(projectId, term, scope);
       if (v.ok) toast.success(`'${term}' no tiene conflictos`);
       else setConflicts({ term, lines: conflictLines(v) });
     } catch (e) {
@@ -132,7 +133,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
 
   const toggleLock = async (t: SnapshotTerm) => {
     try {
-      if (t.locked) await unlockTerm(t.id); else await lockTerm(t.id);
+      if (t.locked) await unlockTerm(projectId, t.id); else await lockTerm(projectId, t.id);
       toast.success(t.locked ? `'${t.term}' desbloqueado` : `'${t.term}' bloqueado`);
       onApplied();
     } catch (e) {
@@ -147,7 +148,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
       // contra el glosario y el corpus; el primero con conflictos corta el apply
       // (dialog con la lista de dónde aparece). El backend re-valida igual.
       for (const term of termsToValidate(terms)) {
-        const v = await validateTerm(term, scope);
+        const v = await validateTerm(projectId, term, scope);
         if (!v.ok) {
           setConflicts({ term, lines: conflictLines(v) });
           setConfirm(false);
@@ -169,7 +170,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
         .filter((t) => t.term && t.abbrev);
       body.termsDelete = terms.filter((t) => t._deleted && !t._new).map((t) => t.id);
       if (diff.cfgChanged) body.namingConfig = { [scope]: { separator: sep, case: casing, maxLength: maxLen } };
-      const v = await applyStandards(body);
+      const v = await applyStandards(projectId, body);
       toast.success(`Standards applied · ${v.label} · ${v.impact.columns} names re-derived`);
       setEditing(false); setConfirm(false); onApplied();
     } catch (e) {
@@ -211,7 +212,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
       {/* banner */}
       <div style={{ display: 'flex', gap: 12, background: editing ? '#EAF0FF' : '#F4F6F9', border: `1px solid ${editing ? '#D4E0FF' : '#E6EAF0'}`, borderRadius: 12, padding: '12px 15px', marginBottom: 20, fontSize: 12.5, color: '#56607A', lineHeight: 1.5 }}>
         {editing
-          ? <span><strong style={{ color: '#2E5BFF' }}>Edit mode.</strong> Add / edit / delete terms. The naming rule is fixed at <strong>join + UPPER</strong> (corporate standard). Nothing changes until you <strong>Save &amp; apply</strong> — then names re-derive catalog-wide.</span>
+          ? <span><strong style={{ color: '#2E5BFF' }}>Edit mode.</strong> Add / edit / delete terms. The naming rule is fixed at <strong>join + UPPER</strong> (corporate standard). Nothing changes until you <strong>Save &amp; apply</strong> — then names re-derive catalog-wide (manually overridden physical names are kept).</span>
           : <span><strong style={{ color: '#3A4658' }}>Read-only view.</strong> {canEdit ? 'Click Edit standards to change rules or terms.' : 'Your role can view the naming rules but not edit them.'}</span>}
       </div>
 
@@ -319,7 +320,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
           <div style={{ width: 560, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
               <div style={{ width: 42, height: 42, borderRadius: 11, background: '#EAF0FF', color: '#2E5BFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UploadCloud size={21} /></div>
-              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Apply naming rules to catalog</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>These edits re-derive physical names everywhere the rules apply.</p></div>
+              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Apply naming rules to catalog</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>These edits re-derive physical names everywhere the rules apply. Manually overridden names are kept.</p></div>
               <button onClick={() => setConfirm(false)} style={iconClose}><X size={13} /></button>
             </div>
             <div style={{ padding: '18px 24px' }}>
@@ -328,7 +329,7 @@ export default function GlossaryPage({ snapshot, canEdit, onApplied }: {
                 <div key={`${k}-${i}`} style={{ fontSize: 13, color: '#1A2B4A', padding: '4px 0' }}>· <span style={{ color: k === 'removed' ? '#C0392B' : k === 'added' ? '#0E8C6A' : '#56607A', fontWeight: 600 }}>{k}</span> {s}</div>
               )))}
               <div style={{ display: 'flex', gap: 12, background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '12px 15px', marginTop: 14, fontSize: 12.5, color: '#7A6220' }}>
-                The affected physical names are re-derived across the whole catalog. This cannot be partially undone (but you can roll back the version).
+                The affected physical names are re-derived across the whole catalog (manually overridden names are kept). This cannot be partially undone (but you can roll back the version).
               </div>
             </div>
             <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}>

@@ -10,9 +10,14 @@
  *   · right rail: "Export to Excel" checklist of detail levels → xlsx workbook
  *     (one sheet per checked level), then small KPI indicators
  *
- * Data: reporting.service (tables + columns) + projects.service (project filter
- * options). Search + chips filter the loaded rows client-side; Schema/Project
- * filters also re-query the backend so server-side narrowing stays authoritative.
+ * Data: reporting.service (tables + columns + filters), always for ONE project
+ * (doc 75 D13: the Project picker at the start of the bar is mandatory; the
+ * session's project, then the last opened one, is preselected). Search + chips
+ * filter the loaded rows client-side; the first filter applied loads the full set.
+ * Doc 70: the filter combos list the WHOLE catalog (`/reporting/filters`), not
+ * just the values of the 50 rows loaded up-front; a Show switch renders the
+ * grid as Tables · Columns · Tables + Columns (same pure row builders as the
+ * Excel export, `lib/reportRows`), and the export gains the joined sheet.
  * Loading → skeleton/placeholders; errors → sonner toast.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -23,7 +28,6 @@ import {
   ChevronDown,
   Download,
   FileSpreadsheet,
-  Filter,
   Layers,
   Search,
   SlidersHorizontal,
@@ -31,19 +35,32 @@ import {
 } from 'lucide-react';
 
 import ReportDesigner from '@/features/reporting/components/ReportDesigner';
+import SearchSelect from '@/features/modeler/components/SearchSelect';
 import { Button } from '@/components/ui';
+import { listProjects } from '@/services/projects.service';
+import { sortProjects } from '@/lib/projects';
+import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
+import type { Project } from '@/types/model';
 import {
   listReportColumns,
+  listReportFilters,
   listReportTables,
   listReportViews,
   type ReportColumnRow,
+  type ReportFilterOptions,
   type ReportTableRow,
 } from '@/services/reporting.service';
 import { getRelationshipsReport } from '@/features/reporting/query.service';
+import {
+  COLUMN_BATCH, chunk, columnSheetRow, joinedSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf, unionSorted,
+  type SheetRow,
+} from '@/features/reporting/lib/reportRows';
 
 // ── export levels ─────────────────────────────────────────────────────────────
 
-type LevelKey = 'tables' | 'columns' | 'relationships' | 'views' | 'definitions';
+type LevelKey = 'tables' | 'columns' | 'joined' | 'relationships' | 'views' | 'definitions';
+/** Doc 70 §4.2: qué muestra la grilla en pantalla. */
+type ShowMode = 'tables' | 'columns' | 'joined';
 
 interface LevelSpec {
   key: LevelKey;
@@ -53,24 +70,103 @@ interface LevelSpec {
 }
 
 const EXPORT_LEVELS: LevelSpec[] = [
-  { key: 'tables', name: 'Tables overview', hint: 'One row per table: schema, counts, subject areas, projects, UDPs.', sheet: 'Tables' },
-  { key: 'columns', name: 'Columns detail', hint: 'Every field: type, PK/FK, nullable, partition, parent domain, UDPs.', sheet: 'Columns' },
+  { key: 'tables', name: 'Tables overview', hint: 'One row per table: schema, counts, subject areas, projects, definition, flags, UDPs.', sheet: 'Tables' },
+  { key: 'columns', name: 'Columns detail', hint: 'Every field: physical & logical type, PK/FK, nullable, partition, domain, ordinals, overrides, UDPs.', sheet: 'Columns' },
+  { key: 'joined', name: 'Tables + Columns (joined)', hint: 'One row per column carrying its table metadata — everything in a single sheet.', sheet: 'Tables + Columns' },
   { key: 'relationships', name: 'Relationships', hint: 'One row per relationship: tables, columns and cardinality.', sheet: 'Relationships' },
   { key: 'views', name: 'Views detail', hint: 'Views derived from the selected tables: sources, filters, joins, per-column aliases, casts and expressions.', sheet: 'Views' },
   { key: 'definitions', name: 'Definitions', hint: 'Functional definition text per table.', sheet: 'Definitions' },
 ];
 
-/** Columnas Excel dinámicas "UDP · <def>" — una por cada UDP presente en las
- *  filas exportadas (union de claves, orden alfabético estable). */
-function udpSheetColumns(maps: Array<Record<string, string> | undefined>): string[] {
-  return Array.from(new Set(maps.flatMap((m) => Object.keys(m ?? {})))).sort();
+/** Columnas de un lote de tablas por tandas de 300 ids (largo de URL) — sin
+ *  el viejo fallback «más de 300 tablas ⇒ descarga completa capada». */
+async function fetchColumnsFor(projectId: string, ids: string[]): Promise<ReportColumnRow[]> {
+  if (ids.length === 0) return [];
+  const parts = await Promise.all(chunk(ids, COLUMN_BATCH).map((part) => listReportColumns(projectId, undefined, part)));
+  return parts.flat();
+}
+
+/** Proyecto inicial del módulo: el de la sesión de canvas → el último abierto → el primero A–Z. */
+function initialProjectId(projects: Project[]): string | null {
+  const session = useSessionStore.getState().activeProjectId;
+  if (session && projects.some((p) => p.id === session)) return session;
+  let last: string | null = null;
+  try { last = localStorage.getItem(LAST_PROJECT_KEY); } catch { /* storage ausente */ }
+  if (last && projects.some((p) => p.id === last)) return last;
+  return sortProjects(projects)[0]?.id ?? null;
+}
+
+/** Selector de proyecto (doc 75 D13): obligatorio, comparte estilo con el Standards. */
+function ProjectPick({ projects, projectId, onPick }: { projects: Project[]; projectId: string | null; onPick: (id: string) => void }) {
+  const name = projects.find((p) => p.id === projectId)?.name ?? '';
+  return (
+    <span className="dmh-rep-project" title="Project">
+      <SearchSelect
+        options={sortProjects(projects).map((p) => ({ value: p.id, label: p.name }))}
+        valueLabel={name}
+        placeholder={projects.length ? 'Project…' : 'No projects yet'}
+        onPick={(v) => { if (v) onPick(v); }}
+        disabled={projects.length === 0}
+      />
+    </span>
+  );
 }
 
 // ── multi-select filter popover ───────────────────────────────────────────────
 
+const GRID_ROW_CAP = 5000;
+
+/** Doc 70 §4.2 — grilla genérica de filas ya aplanadas por las mismas funciones
+ *  puras del Excel (`lib/reportRows`): encabezados = unión de claves, scroll
+ *  horizontal, tope de filas en pantalla (el export no lo tiene). */
+function MetaGrid({ rows, loading, notice, scopeLabel }: {
+  rows: SheetRow[]; loading: boolean; notice: string | null; scopeLabel: string;
+}) {
+  const headers = useMemo(() => sheetHeaders(rows), [rows]);
+  const shown = rows.length > GRID_ROW_CAP ? rows.slice(0, GRID_ROW_CAP) : rows;
+  if (notice) {
+    return (
+      <div className="dmh-rep-state">
+        <div className="dmh-rep-state-ico"><TableProperties size={26} strokeWidth={1.3} aria-hidden /></div>
+        <div className="dmh-rep-state-t">{notice}</div>
+      </div>
+    );
+  }
+  if (loading) return <div className="dmh-rep-state"><div className="dmh-rep-state-t">Loading columns…</div></div>;
+  if (rows.length === 0) {
+    return (
+      <div className="dmh-rep-state">
+        <div className="dmh-rep-state-t">No columns in scope</div>
+        <div className="dmh-rep-state-m">{scopeLabel}</div>
+      </div>
+    );
+  }
+  return (
+    <>
+      <div className="dmh-rep-gridnote">
+        {rows.length.toLocaleString()} row{rows.length === 1 ? '' : 's'} · {scopeLabel}
+        {rows.length > GRID_ROW_CAP && ` · showing the first ${GRID_ROW_CAP.toLocaleString()} — export to Excel for the full set`}
+      </div>
+      <table className="dmh-rep-table dmh-rep-table--wide">
+        <thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead>
+        <tbody>
+          {shown.map((r, i) => (
+            <tr key={i}>
+              {headers.map((h) => {
+                const v = r[h];
+                return <td key={h} title={typeof v === 'string' && v.length > 60 ? v : undefined}>{v === '' || v == null ? <span className="dmh-rep-chip-none">—</span> : String(v)}</td>;
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
 interface MultiFilterProps {
   label: string;
-  icon: typeof Filter;
+  icon: typeof TableProperties;
   options: string[];
   selected: Set<string>;
   onToggle: (value: string) => void;
@@ -143,21 +239,60 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
 
 export default function ReportingScreenWrapper() {
   const [designer, setDesigner] = useState(false);
-  if (designer) return <div style={{ height: '100%', minHeight: 0 }}><ReportDesigner onClose={() => setDesigner(false)} /></div>;
-  return <ReportingScreen onDesign={() => setDesigner(true)} />;
+  // Doc 75 D13: todo reporte es de UN proyecto — el wrapper lo elige y lo comparte.
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
+  useEffect(() => {
+    listProjects()
+      .then((ps) => { setProjects(ps); setProjectId(initialProjectId(ps)); })
+      .catch(() => toast.error("Couldn't load the projects"));
+  }, []);
+  const pick = <ProjectPick projects={projects} projectId={projectId} onPick={setProjectId} />;
+  if (!projectId) {
+    return (
+      <div className="dmh-rep"><div className="dmh-rep-inner">
+        <div className="dmh-rep-head"><div className="dmh-rep-eyebrow">Reporting</div><h1 className="dmh-rep-h1">Reporting</h1></div>
+        <div className="dmh-rep-state">
+          <div className="dmh-rep-state-t">{projects.length === 0 ? 'Create a project first to report on it.' : 'Loading…'}</div>
+          {projects.length > 0 && <div style={{ marginTop: 12 }}>{pick}</div>}
+        </div>
+      </div></div>
+    );
+  }
+  if (designer) {
+    return (
+      <div style={{ height: '100%', minHeight: 0 }}>
+        <ReportDesigner key={projectId} projectId={projectId} projectPicker={pick} onClose={() => setDesigner(false)} />
+      </div>
+    );
+  }
+  const projectName = projects.find((p) => p.id === projectId)?.name ?? '';
+  return <ReportingScreen key={projectId} projectId={projectId} projectName={projectName} projectPicker={pick} onDesign={() => setDesigner(true)} />;
 }
 
-function ReportingScreen({ onDesign }: { onDesign: () => void }) {
+function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
+  projectId: string; projectName: string; projectPicker: React.ReactNode; onDesign: () => void;
+}) {
   const [tables, setTables] = useState<ReportTableRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [search, setSearch] = useState('');
   const [schemaSel, setSchemaSel] = useState<Set<string>>(new Set());
-  const [projectSel, setProjectSel] = useState<Set<string>>(new Set());
   const [areaSel, setAreaSel] = useState<Set<string>>(new Set());
 
   const [levels, setLevels] = useState<Set<LevelKey>>(new Set<LevelKey>(['tables', 'columns']));
   const [exporting, setExporting] = useState(false);
+
+  // Doc 70 §4.1: universo COMPLETO de los filtros (no depende de las 50 filas
+  // de la carga inicial). Si falla, los combos caen a lo derivado de las filas.
+  const [serverFilters, setServerFilters] = useState<ReportFilterOptions | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    listReportFilters(projectId).then((f) => { if (!cancelled) setServerFilters(f); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [projectId]);
+  // Doc 70 §4.2: qué muestra la grilla — tablas, sus columnas o la fila unida.
+  const [show, setShow] = useState<ShowMode>('tables');
 
   // Lazy load: only the first 50 tables up-front; the full set loads the moment
   // a filter is applied (so faceting/filtering stays accurate over everything).
@@ -165,7 +300,7 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    listReportTables(fullLoad ? {} : { limit: 50 })
+    listReportTables(projectId, fullLoad ? {} : { limit: 50 })
       .then((rows) => {
         if (!cancelled) setTables(rows);
       })
@@ -180,7 +315,7 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
     return () => {
       cancelled = true;
     };
-  }, [fullLoad]);
+  }, [fullLoad, projectId]);
 
   // Per-facet predicates. Building a facet's options excludes its OWN selection,
   // so the filters narrow each other (cumulative / faceted).
@@ -195,10 +330,6 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
     (t: ReportTableRow) => schemaSel.size === 0 || schemaSel.has(t.schema),
     [schemaSel],
   );
-  const passProject = useCallback(
-    (t: ReportTableRow) => projectSel.size === 0 || t.projects.some((p) => projectSel.has(p)),
-    [projectSel],
-  );
   const passArea = useCallback(
     (t: ReportTableRow) => areaSel.size === 0 || t.subjectAreas.some((a) => areaSel.has(a)),
     [areaSel],
@@ -208,30 +339,23 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
   // values are always kept visible so they can be toggled off.
   const schemaOptions = useMemo(() => {
     const s = new Set(
-      tables.filter((t) => passSearch(t) && passProject(t) && passArea(t)).map((t) => t.schema).filter(Boolean),
+      tables.filter((t) => passSearch(t) && passArea(t)).map((t) => t.schema).filter(Boolean),
     );
     schemaSel.forEach((v) => s.add(v));
-    return [...s].sort();
-  }, [tables, passSearch, passProject, passArea, schemaSel]);
-  const projectOptions = useMemo(() => {
-    const s = new Set(
-      tables.filter((t) => passSearch(t) && passSchema(t) && passArea(t)).flatMap((t) => t.projects).filter(Boolean),
-    );
-    projectSel.forEach((v) => s.add(v));
-    return [...s].sort();
-  }, [tables, passSearch, passSchema, passArea, projectSel]);
+    return unionSorted(serverFilters?.schemas ?? [], s);   // doc 70: universo completo
+  }, [tables, passSearch, passArea, schemaSel, serverFilters]);
   const areaOptions = useMemo(() => {
     const s = new Set(
-      tables.filter((t) => passSearch(t) && passSchema(t) && passProject(t)).flatMap((t) => t.subjectAreas).filter(Boolean),
+      tables.filter((t) => passSearch(t) && passSchema(t)).flatMap((t) => t.subjectAreas).filter(Boolean),
     );
     areaSel.forEach((v) => s.add(v));
-    return [...s].sort();
-  }, [tables, passSearch, passSchema, passProject, areaSel]);
+    return unionSorted(serverFilters?.subjectAreas ?? [], s);
+  }, [tables, passSearch, passSchema, areaSel, serverFilters]);
 
   // Rows passing ALL filters.
   const filtered = useMemo(
-    () => tables.filter((t) => passSearch(t) && passSchema(t) && passProject(t) && passArea(t)),
-    [tables, passSearch, passSchema, passProject, passArea],
+    () => tables.filter((t) => passSearch(t) && passSchema(t) && passArea(t)),
+    [tables, passSearch, passSchema, passArea],
   );
 
   // ── row selection (drives the Excel export) ──────────────────────────────────
@@ -275,18 +399,48 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
   const mostRelated = useMemo(
     () =>
       [...filtered]
-        .sort(
-          (a, b) =>
-            b.relationshipCount - a.relationshipCount || b.projects.length - a.projects.length,
-        )
+        .sort((a, b) => b.relationshipCount - a.relationshipCount)
         .slice(0, 5),
     [filtered],
   );
 
+  // ── Doc 70 §4.2: columnas de las tablas en foco (selección, o las filtradas)
+  // para los modos Columns / Tables + Columns. Tope por consulta: 300 tablas
+  // (largo de URL); por encima se pide acotar (filtro o selección).
+  const colScope = useMemo(() => (selectedRows.length > 0 ? selectedRows : filtered), [selectedRows, filtered]);
+  const colScopeKey = useMemo(() => colScope.map((t) => t.id).join(','), [colScope]);
+  const colScopeTooBig = colScope.length > COLUMN_BATCH;
+  const [colRows, setColRows] = useState<ReportColumnRow[] | null>(null);
+  const [colLoading, setColLoading] = useState(false);
+  useEffect(() => {
+    if (show === 'tables' || colScopeTooBig || colScope.length === 0) { setColRows(null); return undefined; }
+    let cancelled = false;
+    setColLoading(true);
+    fetchColumnsFor(projectId, colScope.map((t) => t.id))
+      .then((rows) => { if (!cancelled) setColRows(rows); })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        toast.error(err instanceof Error ? err.message : 'Could not load the columns.');
+        setColRows([]);
+      })
+      .finally(() => { if (!cancelled) setColLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [show, colScopeKey, colScopeTooBig]);
+  const tableById = useMemo(() => new Map(tables.map((t) => [t.id, t] as const)), [tables]);
+  const gridRows = useMemo<SheetRow[]>(() => {
+    if (show === 'tables' || !colRows) return [];
+    const sorted = sortColumnRows(colRows, (id) => tableById.get(id)?.physicalName ?? id);
+    const colUdp = udpKeysOf(sorted.map((c) => c.udpValues));
+    if (show === 'columns') return sorted.map((c) => columnSheetRow(c, tableById.get(c.tableId), colUdp));
+    const tblUdp = udpKeysOf(colScope.map((t) => t.udpValues));
+    return sorted.map((c) => joinedSheetRow(c, tableById.get(c.tableId), tblUdp, colUdp));
+  }, [show, colRows, tableById, colScope]);
+
   // La búsqueda cuenta como filtro recién con 2+ caracteres: el PRIMER
   // keystroke no debe disparar la descarga del set completo (15k tablas).
   const anyFilter =
-    search.trim().length >= 2 || schemaSel.size > 0 || projectSel.size > 0 || areaSel.size > 0;
+    search.trim().length >= 2 || schemaSel.size > 0 || areaSel.size > 0;
 
   // The first time any filter is applied, load the full table set — con
   // debounce para que tipear rápido no encole la carga a mitad de palabra.
@@ -299,7 +453,6 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
   const clearFilters = () => {
     setSearch('');
     setSchemaSel(new Set());
-    setProjectSel(new Set());
     setAreaSel(new Set());
   };
 
@@ -328,57 +481,36 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
       const rows = selectedRows;
       const wb = XLSX.utils.book_new();
 
+      // UDPs como columnas dinámicas (una por def presente en la selección).
+      // Doc 70: las MISMAS funciones puras de la grilla (lib/reportRows) arman
+      // las hojas — metadata completa de tablas y columnas, por separado o unida.
+      const tableUdpKeys = udpKeysOf(rows.map((t) => t.udpValues));
       if (levels.has('tables')) {
-        // UDPs como columnas dinámicas (una por def presente en la selección).
-        const udpKeys = udpSheetColumns(rows.map((t) => t.udpValues));
-        const data = rows.map((t) => ({
-          Table: t.physicalName,
-          'Logical name': t.logicalName,
-          Schema: t.schema,
-          'Subject areas': t.subjectAreas.join(', '),
-          '#Columns': t.columnCount,
-          '#Relations': t.relationshipCount,
-          Projects: t.projects.join(', '),
-          ...Object.fromEntries(udpKeys.map((k) => [`UDP · ${k}`, t.udpValues?.[k] ?? ''])),
-        }));
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Tables');
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map((t) => tableSheetRow(t, tableUdpKeys))), 'Tables');
       }
 
-      if (levels.has('columns')) {
-        // Export ACOTADO server-side a las tablas seleccionadas (hasta 300 ids
-        // por la URL); por encima de eso, descarga completa como antes.
-        const ids = rows.map((t) => t.id);
-        const allCols: ReportColumnRow[] = await listReportColumns(
-          undefined,
-          ids.length > 0 && ids.length <= 300 ? ids : undefined,
-        );
-        const visibleIds = new Set(ids);
-        const nameById = new Map(rows.map((t) => [t.id, t.physicalName] as const));
-        const visibleCols = allCols.filter((c) => visibleIds.size === 0 || visibleIds.has(c.tableId));
-        const udpKeys = udpSheetColumns(visibleCols.map((c) => c.udpValues));
-        const data = visibleCols
-          .sort((a, b) => a.tableId.localeCompare(b.tableId) || a.ordinal - b.ordinal)
-          .map((c) => ({
-            Table: nameById.get(c.tableId) ?? c.tableId,
-            Column: c.physicalName,
-            'Logical name': c.logicalName,
-            'Data type': c.dataType,
-            'Parent domain': c.parentDomain ?? '',
-            PK: c.isPrimaryKey ? 'Y' : '',
-            FK: c.isForeignKey ? 'Y' : '',
-            Nullable: c.isNullable ? 'Y' : 'N',
-            Partition: c.isPartition ? 'Y' : '',
-            ...Object.fromEntries(udpKeys.map((k) => [`UDP · ${k}`, c.udpValues?.[k] ?? ''])),
-            Definition: c.description,
-          }));
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Columns');
+      if (levels.has('columns') || levels.has('joined')) {
+        // Columnas de las tablas seleccionadas por tandas de 300 ids (antes,
+        // más de 300 tablas caía a la descarga completa capada a 20k).
+        const byId = new Map(rows.map((t) => [t.id, t] as const));
+        const cols = sortColumnRows(await fetchColumnsFor(projectId, rows.map((t) => t.id)), (id) => byId.get(id)?.physicalName ?? id);
+        const colUdpKeys = udpKeysOf(cols.map((c) => c.udpValues));
+        if (levels.has('columns')) {
+          XLSX.utils.book_append_sheet(
+            wb, XLSX.utils.json_to_sheet(cols.map((c) => columnSheetRow(c, byId.get(c.tableId), colUdpKeys))), 'Columns');
+        }
+        if (levels.has('joined')) {
+          XLSX.utils.book_append_sheet(
+            wb, XLSX.utils.json_to_sheet(cols.map((c) => joinedSheetRow(c, byId.get(c.tableId), tableUdpKeys, colUdpKeys))),
+            'Tables + Columns');
+        }
       }
 
       if (levels.has('relationships')) {
         // Detalle POR PAR de columnas (v2, doc 19): una FK compuesta emite una
         // fila por par (mismo Rel id + Pair). Acotado a las tablas seleccionadas.
         const ids = new Set(rows.map((t) => t.id));
-        const rels = await getRelationshipsReport(5000);
+        const rels = await getRelationshipsReport(projectId, 5000);
         const data = rels
           .filter((r) => (r.parentTableId && ids.has(r.parentTableId))
             || (r.childTableId && ids.has(r.childTableId)))
@@ -405,7 +537,7 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
         // origen, casteo, transformación). Mismo patrón acotado que Columns.
         const ids = rows.map((t) => t.id);
         const idSet = new Set(ids);
-        const views = (await listReportViews(ids.length > 0 && ids.length <= 300 ? ids : undefined))
+        const views = (await listReportViews(projectId, ids.length > 0 && ids.length <= 300 ? ids : undefined))
           .filter((v) => v.sourceTableIds.some((tid) => idSet.has(tid)));
         const viewsData = views.map((v) => ({
           View: v.name,
@@ -415,6 +547,7 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
           Filter: v.filter ?? '',
           'Join override': v.joinOverride ?? '',
           'On canvas': v.showOnCanvas ? 'Y' : '',
+          Canvases: (v.canvases ?? []).join(', '),   // doc 70: membresía por canvas
           Description: v.description ?? '',
           SQL: v.sql ?? '',
         }));
@@ -443,7 +576,8 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
       }
 
       const stamp = new Date().toISOString().slice(0, 10);
-      XLSX.writeFile(wb, `data-model-hub-report-${stamp}.xlsx`);
+      const slug = projectName.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'project';
+      XLSX.writeFile(wb, `data-model-hub-report-${slug}-${stamp}.xlsx`);
       toast.success('Report exported to Excel.');
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not build the Excel file.');
@@ -460,8 +594,8 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
           <div className="dmh-rep-eyebrow">Reporting</div>
           <h1 className="dmh-rep-h1">Reporting</h1>
           <p className="dmh-rep-sub">
-            Tabular view of your model metadata — tables, columns, relationships and projects.
-            Filter the grid, then export the detail levels you need to Excel.
+            Tabular view of the metadata of one project — tables, columns, relationships and views.
+            Pick the project, filter the grid, then export the detail levels you need to Excel.
           </p>
         </div>
 
@@ -469,6 +603,14 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
           {/* ── left: filters + table ──────────────────────────────── */}
           <div className="dmh-rep-main">
             <div className="dmh-rep-bar">
+              {/* Doc 75 D13: proyecto del reporte (obligatorio). */}
+              {projectPicker}
+              {/* Doc 70 §4.2: qué muestra la grilla — tablas, sus columnas o la fila unida. */}
+              <div className="rd-seg" role="tablist" aria-label="Show">
+                <button type="button" role="tab" aria-selected={show === 'tables'} className={show === 'tables' ? 'active' : ''} onClick={() => setShow('tables')}>Tables</button>
+                <button type="button" role="tab" aria-selected={show === 'columns'} className={show === 'columns' ? 'active' : ''} onClick={() => setShow('columns')}>Columns</button>
+                <button type="button" role="tab" aria-selected={show === 'joined'} className={show === 'joined' ? 'active' : ''} onClick={() => setShow('joined')}>Tables + Columns</button>
+              </div>
               <div className="dmh-rep-search">
                 <Search strokeWidth={1.7} aria-hidden />
                 <input
@@ -485,13 +627,6 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
                 options={schemaOptions}
                 selected={schemaSel}
                 onToggle={(v) => toggleSet<string>(setSchemaSel, v)}
-              />
-              <MultiFilter
-                label="Project"
-                icon={Filter}
-                options={projectOptions}
-                selected={projectSel}
-                onToggle={(v) => toggleSet<string>(setProjectSel, v)}
               />
               <MultiFilter
                 label="Subject area"
@@ -514,6 +649,16 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
 
             <div className="dmh-rep-tablewrap">
               <div className="dmh-rep-tablescroll">
+                {show !== 'tables' ? (
+                  <MetaGrid
+                    rows={gridRows}
+                    loading={loading || colLoading}
+                    notice={colScopeTooBig
+                      ? `Narrow the tables to ${COLUMN_BATCH} or fewer (filter, or select rows in the Tables view) to browse their columns — ${colScope.length} in scope now.`
+                      : colScope.length === 0 ? 'No tables in scope.' : null}
+                    scopeLabel={`${selectedRows.length > 0 ? 'selected' : 'filtered'} table${colScope.length === 1 ? '' : 's'}: ${colScope.length}`}
+                  />
+                ) : (
                 <table className="dmh-rep-table">
                   <thead>
                     <tr>
@@ -624,6 +769,7 @@ function ReportingScreen({ onDesign }: { onDesign: () => void }) {
                     )}
                   </tbody>
                 </table>
+                )}
               </div>
             </div>
           </div>

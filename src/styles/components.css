@@ -126,3 +126,12 @@
 
 @keyframes dmh-dialog-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes dmh-dialog-pop { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: none; } }
+
+/* ── Busy overlay (doc 75 D18): bloqueo por sesión de acciones largas ──── */
+.dmh-busy-overlay { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: center;
+  justify-content: center; background: rgba(16, 27, 48, .35); backdrop-filter: blur(1px); }
+.dmh-busy-card { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: #fff;
+  border: 1px solid #E6EAF0; border-radius: 12px; box-shadow: 0 18px 50px rgba(16, 27, 48, .25); max-width: 460px; }
+.dmh-busy-card .rd-spin { color: var(--primary); width: 18px; height: 18px; }
+.dmh-busy-title { font-size: 13px; font-weight: 600; color: #1A2B4A; }
+.dmh-busy-detail { font-size: 12px; color: #8A93A5; margin-top: 2px; }

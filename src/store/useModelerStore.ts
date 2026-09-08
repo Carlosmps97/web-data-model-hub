@@ -8,19 +8,23 @@ import * as struct from '@/features/modeler/services/structure.service';
 import * as schemasSvc from '@/features/modeler/services/schemas.service';
 import type { DbSchema } from '@/features/modeler/services/schemas.service';
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
-import * as gov from '@/features/governance/services/governance.service';
-import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
 import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
+import { mergeIds, orphanViewIds, withoutIds } from '@/features/modeler/lib/canvasViews';
+import { persistReorder, reorderPlan, sortByOrdinal } from '@/features/modeler/lib/columnOrder';
+import type { CanvasDropPlan } from '@/features/modeler/lib/canvasDrop';
 import {
   removeColumnSource, syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews,
 } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import type { View } from '@/services/views.service';
 import { useSessionStore } from '@/store/useSessionStore';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { pushUndo, useUndoStore } from '@/store/useUndoStore';
+import { runBlocking } from '@/store/useBusyStore';
+import { ApiError } from '@/services/http';
 
 // ── Árbol del Model Explorer ──────────────────────────────────────────
 // Nodo recursivo: una carpeta con sus subcarpetas y los canvases que cuelgan
@@ -144,6 +148,17 @@ interface ModelerState {
   /** Click simple en una fila del canvas (doc 49): selecciona la tabla y abre
    *  DIRECTO el Properties de esa columna (antes navegaba el panel de tabla). */
   focusColumnInPanel: (tableId: string, colId: string) => void;
+  /** Doc 71: el buscador del Model (popup ⌘K) se abre desde el toolbar Y desde la
+   *  cabecera del Explorer — el estado vive acá para que ambos lo compartan. */
+  searchOpen: boolean;
+  setSearchOpen: (v: boolean) => void;
+  /** Doc 72 r2: navegación en curso hacia otro canvas (Locate): el Workspace
+   *  muestra un overlay bloqueante hasta que el canvas cargó y centró. */
+  navigating: { canvas: string; target?: string } | null;
+  /** Doc 72: objeto abierto en el Object Inspector (popup de solo lectura, sin canvas). */
+  inspect: InspectTarget | null;
+  openInspector: (t: InspectTarget) => void;
+  closeInspector: () => void;
   /** Instancia de React Flow del canvas activo (la setea ModelerCanvas en onInit). */
   flow: ReactFlowInstance | null;
   setFlow: (rf: ReactFlowInstance | null) => void;
@@ -158,13 +173,19 @@ interface ModelerState {
   setLodLock: (v: boolean) => void;
   /** Centra el canvas sobre la tabla (Find a table… del toolbar). No-op si no hay nodo. */
   focusTable: (tableId: string) => void;
-  /** Tabla a centrar en cuanto MONTE el canvas destino (Finder cross-canvas del
-   *  Database Explorer). Lo consume ModelerCanvas tras cargar el diagrama. */
+  /** Tabla (y opcionalmente columna, doc 70 §11) a centrar en cuanto MONTE el
+   *  canvas destino (Finder cross-canvas / buscador del Model). Lo consume
+   *  ModelerCanvas tras cargar el diagrama. */
   pendingFocusTableId: string | null;
-  setPendingFocus: (tableId: string | null) => void;
+  pendingFocusColId: string | null;
+  setPendingFocus: (tableId: string | null, colId?: string | null) => void;
+  /** Doc 70 §11: centra la tabla Y abre la columna — selecciona su fila en el
+   *  bloque y monta su Properties (mismo gesto que el click en la fila). */
+  focusColumn: (tableId: string, colId: string) => void;
   /** Abre el canvas `canvasId` (de `projectId`) y centra sobre `tableId` cuando
-   *  monte (Finder cross-canvas). Si ese canvas ya está abierto, centra directo. */
-  openCanvasAndFocus: (canvasId: string, projectId: string | null | undefined, tableId: string) => Promise<void>;
+   *  monte (Finder cross-canvas / buscador); con `colId` abre además la columna.
+   *  Si ese canvas ya está abierto, centra directo. */
+  openCanvasAndFocus: (canvasId: string, projectId: string | null | undefined, tableId: string, colId?: string, label?: string) => Promise<void>;
   // ── Capa DRAWING (R6d): formas libres detrás de las tablas ──
   drawings: Drawing[];
   /** Crea una forma con tamaño default en el centro del viewport actual. */
@@ -211,7 +232,11 @@ interface ModelerState {
   deleteCanvas: (id: string, projectId?: string) => Promise<void>;
   moveCanvas: (id: string, folderId: string | null) => Promise<void>;
   renameProject: (id: string, name: string) => Promise<void>;
+  /** Doc 75 D5: graba el borrado del proyecto en la working copy (UN cambio). */
   deleteProject: (id: string) => Promise<void>;
+  /** La working copy activa borra su proyecto: el canvas cede al panel «Deletion pending». */
+  projectDeletionPending: boolean;
+  undoProjectDeletion: () => Promise<void>;
   /** @internal recarga folders+canvases del proyecto y depura la selección. */
   _refreshProject: (projectId: string) => Promise<void>;
   reload: () => Promise<void>;
@@ -225,7 +250,16 @@ interface ModelerState {
   // RelationshipCreatePopup graba el lote (columnas + relación) directamente.
   updateRelationship: (r: gov.Relationship) => Promise<void>;
   deleteRelationship: (id: string) => Promise<void>;
-  addExistingTables: (tableIds: string[]) => Promise<void>;
+  /** Importa tablas EXISTENTES al canvas. Doc 70: la tabla entra SOLA — sus
+   *  vistas se suman sólo con `withViews` (checkbox del modal); la membresía
+   *  de vistas parte de `diagram.subjectArea.viewIds` (materializado). */
+  addExistingTables: (tableIds: string[], opts?: { withViews?: boolean }) => Promise<void>;
+  /** Doc 70: suma vistas (ya existentes en el modelo) a la membresía de ESTE
+   *  canvas — tab Views → «Add to this canvas», alta desde Create view. */
+  addViewsToCanvas: (viewIds: string[]) => Promise<void>;
+  /** Doc 70: saca una vista de ESTE canvas (membresía + layout); la vista
+   *  sigue en el modelo y en los demás canvases. */
+  removeViewFromCanvas: (viewId: string) => Promise<void>;
   // `sourceTable` (doc 51, opcional por columna): nombre de la tabla dueña en
   // el ORIGEN — procedencia para el historial de auditoría; no viaja al payload.
   createTableFromSources: (input: { logicalName: string; schema?: string; columns: (CanonicalColumn & { sourceTable?: string })[] }) => Promise<void>;
@@ -239,14 +273,18 @@ interface ModelerState {
   updateTable: (id: string, fields: { logicalName?: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
   /** Upsert changeset-aware de una columna (merge sobre la columna actual del diagrama) + reload. */
   updateColumn: (colId: string, fields: Partial<CanonicalColumn>) => Promise<void>;
-  /** Reordena columnas de una tabla al nuevo orden de ids: recomputa `ordinal` y persiste cada movida. */
+  /** Reordena las columnas de una tabla al nuevo orden de ids (doc 74: el
+   *  ÚNICO orden, `ordinal`, el mismo en lógico y físico) y persiste sólo las
+   *  que se movieron. */
   reorderColumns: (tableId: string, orderedIds: string[]) => Promise<void>;
+  /** Doc 73 §10.4: aplica el plan de un drop en el bloque del canvas — cambios
+   *  de llave (entrar/salir/reordenar) + reorden de columnas. */
+  applyCanvasDrop: (tableId: string, plan: CanvasDropPlan) => Promise<void>;
   /** Borra la columna en el changeset; con `relIds`, borra ANTES cada relación
    *  afectada (cascade del warning de impacto — spec 10 §8, cierra el caso
    *  columna del bug #21 de relaciones huérfanas). */
   deleteColumn: (colId: string, relIds?: string[]) => Promise<void>;
   setViewMode: (m: 'logical' | 'physical') => void;
-  createProject: (name: string) => Promise<void>;
   createSubjectArea: (name: string) => Promise<void>;
 }
 
@@ -362,7 +400,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     });
     return t.physicalName || t.logicalName;
   },
-  pasteTable: async () => {
+  pasteTable: () => runBlocking('Creating table…', async () => {
     if (_pasteTableBusy) return null;   // Ctrl+V repetido con el paste en vuelo
     const clip = get().tblClipboard;
     const saId = get().activeSaId;
@@ -412,7 +450,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       }
       throw lastErr instanceof Error ? lastErr : new Error("Couldn't paste the table");
     } finally { _pasteTableBusy = false; }
-  },
+  }),
   colMenu: null,
   openColMenu: (m) => set({ colMenu: m }),
   closeColMenu: () => { if (get().colMenu) set({ colMenu: null }); },
@@ -428,12 +466,27 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: colId, selectedViewId: null }),
   flow: null,
   setFlow: (rf) => set({ flow: rf }),
+  searchOpen: false,
+  setSearchOpen: (v) => set({ searchOpen: v }),
+  navigating: null,
+  inspect: null,
+  openInspector: (t) => set({ inspect: t }),
+  closeInspector: () => set({ inspect: null }),
   lod: true,
   setLod: (v) => { if (get().lod !== v) set({ lod: v }); },
   lodLock: false,
   setLodLock: (v) => set({ lodLock: v }),
   pendingFocusTableId: null,
-  setPendingFocus: (tableId) => set({ pendingFocusTableId: tableId }),
+  pendingFocusColId: null,
+  // Consumir/abandonar el foco pendiente cierra también el overlay de navegación (doc 72 r2).
+  setPendingFocus: (tableId, colId = null) => set({ pendingFocusTableId: tableId, pendingFocusColId: tableId ? colId : null, ...(tableId ? {} : { navigating: null }) }),
+  focusColumn: (tableId, colId) => {
+    get().focusTable(tableId);
+    const exists = get().diagram?.columns.some((c) => c.id === colId && c.tableId === tableId);
+    if (!exists) return;
+    get().toggleColSelect(tableId, colId, 'single');
+    get().focusColumnInPanel(tableId, colId);
+  },
   drawings: [],
   addDrawing: (type) => {
     const saId = get().activeSaId; if (!saId) return;
@@ -519,15 +572,29 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       void rf.setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom, duration: 420 });
     }));
   },
-  openCanvasAndFocus: async (canvasId, projectId, tableId) => {
+  openCanvasAndFocus: async (canvasId, projectId, tableId, colId, label) => {
     // Ya abierto → el nodo está montado, centrar directo (sin pending).
-    if (get().activeSaId === canvasId) { get().focusTable(tableId); return; }
+    if (get().activeSaId === canvasId) {
+      if (colId) get().focusColumn(tableId, colId); else get().focusTable(tableId);
+      return;
+    }
+    // Doc 72 r2: overlay bloqueante mientras se abre el canvas y se centra —
+    // sin él, cerrar el popup y esperar daba la sensación de que no pasó nada.
+    const canvasName = (projectId ? get().trees[projectId]?.subjectAreas : undefined)?.find((s) => s.id === canvasId)?.name
+      ?? get().subjectAreas.find((s) => s.id === canvasId)?.name ?? '';
+    set({ navigating: { canvas: canvasName, target: label } });
     // Cambio de canvas: primero cargamos el diagrama destino y RECIÉN dejamos la
     // tabla pendiente (el diagrama ya es el nuevo cuando el efecto de
     // ModelerCanvas la consume ⇒ no centra sobre una tabla homónima del canvas
     // viejo). Los nodos aún no montaron, así que el efecto poll-ea por rAF.
-    await get().selectSubjectArea(canvasId, projectId ?? undefined);
-    set({ pendingFocusTableId: tableId });
+    try {
+      await get().selectSubjectArea(canvasId, projectId ?? undefined);
+    } catch (e) {
+      set({ navigating: null });
+      throw e;
+    }
+    if (get().activeSaId !== canvasId) { set({ navigating: null }); return; }   // otro select ganó
+    set({ pendingFocusTableId: tableId, pendingFocusColId: colId ?? null });
   },
   loadProjects: async () => { set({ projects: await struct.listProjects() }); },
   selectProject: async (pid) => {
@@ -546,28 +613,41 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set((s) => ({ trees: { ...s.trees, [pid]: { folders, subjectAreas } } }));
   },
   refreshExplorer: async () => {
-    const st = get();
-    const prevTreeIds = Object.keys(st.trees);
-    const prevSaId = st.activeSaId;
-    set({ trees: {}, projects: [] });
+    const prevSaId = get().activeSaId;
+    // Doc 75 D8: la sesión de canvas es de UN proyecto — el explorer muestra
+    // ese y sólo ese; el resto de proyectos no se carga ni se lista.
+    const pid = useSessionStore.getState().activeProjectId;
+    set({ trees: {}, projects: [], projectDeletionPending: false });
     // Los dropdowns de esquema también dependen del overlay de la versión.
     void get().loadSchemas().catch(() => {});
-    await get().loadProjects();
+    const gone = (e: unknown) => e instanceof ApiError && (e.status === 404 || e.status === 409);
+    try {
+      await get().loadProjects();
+    } catch (e) {
+      if (!gone(e)) throw e;
+    }
     const valid = new Set(get().projects.map((p) => p.id));
-    let pid = get().activeProjectId;
-    // El proyecto activo no existe en este contexto (p.ej. era un draft de
-    // OTRA versión): limpiar la selección completa.
-    if (pid && !valid.has(pid)) {
-      pid = null;
+    if (!pid || !valid.has(pid)) {
+      // El proyecto fue borrado en una versión publicada (o no existe en este
+      // contexto): cerrar la sesión de canvas y volver al chooser.
       set({ activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null,
             activeSaId: null, diagram: null, selectedTableId: null, drawings: [],
             colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null });
+      if (pid) {
+        toast.error('This project was deleted in a published version.');
+        useSessionStore.getState().closeModel();
+      }
+      return;
     }
-    // Re-hidrata los árboles que ya estaban cargados (los proyectos expandidos
-    // del explorer siguen mostrando su contenido, ahora bajo el overlay nuevo).
-    await Promise.all(prevTreeIds.filter((tid) => valid.has(tid))
-      .map((tid) => get().loadProjectTree(tid).catch(() => {})));
-    if (pid) await get()._refreshProject(pid);   // depura activeSaId vs la nueva membresía
+    set({ activeProjectId: pid });
+    try {
+      await get()._refreshProject(pid);   // depura activeSaId vs la nueva membresía
+    } catch (e) {
+      if (!gone(e)) throw e;
+      toast.error('This project was deleted in a published version.');
+      useSessionStore.getState().closeModel();
+      return;
+    }
     const saId = get().activeSaId;
     if (saId && saId === prevSaId) {
       // El canvas sobrevive al cambio de contexto: re-cargarlo COMPLETO
@@ -659,24 +739,31 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({ projects: get().projects.map((p) => (p.id === id ? { ...p, name } : p)) });
   },
   deleteProject: async (id) => {
+    // Doc 75 D5: UN cambio en la working copy; la cascada la hace el servidor
+    // al aplicar la versión aprobada. El canvas cede al panel de borrado.
     await struct.deleteProject(id);
-    const wasActive = get().activeProjectId === id;
-    const trees = { ...get().trees };
-    delete trees[id];
-    set({
-      projects: get().projects.filter((p) => p.id !== id),
-      trees,
-      ...(wasActive ? { activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null, activeSaId: null, diagram: null, selectedTableId: null,
-                        colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null } : {}),
-    });
+    get().markDirty();
+    set({ projectDeletionPending: true, selectedTableId: null, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
+  },
+  projectDeletionPending: false,
+  undoProjectDeletion: async () => {
+    const pid = get().activeProjectId;
+    if (!pid) return;
+    const published = (await mod.listProjects()).find((p) => p.id === pid);
+    if (!published) throw new Error('The published project could not be read.');
+    await struct.reviveProject(pid, published);
+    set({ projectDeletionPending: false });
+    await get().refreshExplorer();
   },
   // Helper interno: recarga folders+canvases del proyecto al cache `trees` y,
   // si es el proyecto ACTIVO, espeja los campos legacy y depura la selección
   // (el canvas activo pudo haberse borrado).
   _refreshProject: async (projectId) => {
-    const [folders, subjectAreas] = await Promise.all([struct.listFolders(projectId), struct.listSubjectAreas(projectId)]);
+    const [folders, subjectAreas, projectDeletionPending] = await Promise.all([
+      struct.listFolders(projectId), struct.listSubjectAreas(projectId), struct.projectDeletionPending(projectId),
+    ]);
     const st = get();
-    const treesPatch = { trees: { ...st.trees, [projectId]: { folders, subjectAreas } } };
+    const treesPatch = { trees: { ...st.trees, [projectId]: { folders, subjectAreas } }, projectDeletionPending };
     if (projectId !== st.activeProjectId) { set(treesPatch); return; }
     const activeFolderId = st.activeFolderId && folders.some((f) => f.id === st.activeFolderId) ? st.activeFolderId : null;
     const saStillExists = st.activeSaId != null && subjectAreas.some((s) => s.id === st.activeSaId);
@@ -777,6 +864,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // `Array` hereda `ARRAY<>`, no el texto crudo de la BD sin homologar.
     const domDefault = canonicalDefaultType(dom?.defaultDataType);
     const dataType = override || domDefault || '';
+    // Doc 69 §4.9: faceta LÓGICA del tipo heredada del dominio (homologada).
+    const logicalType = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : '';
     // Al FINAL del orden físico (antes: ordinal 0 → la columna nueva caía al
     // INICIO de la tabla) — coherente con la propagación a vistas de abajo.
     const siblings = (get().diagram?.columns ?? []).filter((c) => c.tableId === tableId);
@@ -795,6 +884,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // tipeado conserva la semántica previa (override).
       parentDomainId: input.parentDomainId || undefined, dataType,
       typeOverridden: dom ? dataType.trim() !== domDefault : !!override,
+      ...(logicalType ? { logicalDataType: logicalType, logicalTypeOverridden: false } : {}),
       ordinal,
       ...(description ? { description } : {}),
       ...(input.isPrimaryKey ? { isPrimaryKey: true } : {}),
@@ -865,7 +955,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     await get().reload();
   },
-  addExistingTables: async (tableIds: string[]) => {
+  addExistingTables: async (tableIds: string[], opts) => {
     const saId = get().activeSaId; if (!saId || tableIds.length === 0) return;
     get().markDirty();
     const sa = await struct.getSubjectArea(saId);
@@ -873,18 +963,66 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // inversa del Undo no debe sacar del canvas una tabla que ya vivía acá.
     const added = tableIds.filter((t) => !sa.tableIds.includes(t));
     const merged = Array.from(new Set([...sa.tableIds, ...tableIds]));
-    await struct.setSubjectAreaTables(saId, merged);
+    // Doc 70: la membresía de vistas parte de la lista MATERIALIZADA del
+    // diagrama (un canvas legacy la recibe resuelta por el backend). Importar
+    // una tabla NO arrastra sus vistas — sólo si el usuario lo pide.
+    const baseViews = get().diagram?.subjectArea.viewIds ?? sa.viewIds ?? [];
+    let viewIds = baseViews;
+    if (opts?.withViews) {
+      const views = await viewsSvc.listViewsForTables(tableIds).catch(() => [] as View[]);
+      viewIds = mergeIds(baseViews, views.map((v) => v.id));
+    }
+    await struct.setSubjectAreaMembers(saId, { tableIds: merged, viewIds });
     await get().reload();
     // Selecciona la primera importada → al frente (zIndex) y visible (owner).
     set({ selectedTableId: tableIds[0], selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
-    if (added.length) {
-      pushUndo(`Add ${added.length} table${added.length === 1 ? '' : 's'} to canvas`, async () => {
+    const addedViews = withoutIds(viewIds, baseViews);
+    if (added.length || addedViews.length) {
+      const what = [
+        added.length ? `${added.length} table${added.length === 1 ? '' : 's'}` : '',
+        addedViews.length ? `${addedViews.length} view${addedViews.length === 1 ? '' : 's'}` : '',
+      ].filter(Boolean).join(' + ');
+      pushUndo(`Add ${what} to canvas`, async () => {
         for (const tid of added) await struct.removeTableFromCanvas(saId, tid);
+        if (addedViews.length) await struct.setSubjectAreaMembers(saId, { viewIds: baseViews });
         await get().reload();
       });
     }
   },
-  createTableFromSources: async ({ logicalName, schema, columns }) => {
+  addViewsToCanvas: async (viewIds) => {
+    const saId = get().activeSaId; if (!saId || viewIds.length === 0) return;
+    const base = get().diagram?.subjectArea.viewIds ?? [];
+    const next = mergeIds(base, viewIds);
+    if (next.length === base.length) return;          // ya eran miembros
+    get().markDirty();
+    await struct.setSubjectAreaViews(saId, next);
+    await get().reload();
+    const n = next.length - base.length;
+    pushUndo(`Add ${n} view${n === 1 ? '' : 's'} to canvas`, async () => {
+      await struct.setSubjectAreaViews(saId, base);
+      await get().reload();
+    });
+  },
+  removeViewFromCanvas: async (viewId) => {
+    const saId = get().activeSaId; if (!saId) return;
+    const base = get().diagram?.subjectArea.viewIds ?? [];
+    if (!base.includes(viewId)) return;
+    get().markDirty();
+    // Para el Undo (doc 50): nombre y posición ANTES de quitarla.
+    const name = get().diagram?.views.find((v) => v.id === viewId)?.name ?? 'view';
+    const node = get().flow?.getNode(viewId);
+    const pos = node ? { x: Math.round(node.position.x), y: Math.round(node.position.y) } : null;
+    await struct.removeViewFromCanvas(saId, viewId, withoutIds(base, [viewId]));
+    if (get().selectedViewId === viewId) set({ selectedViewId: null });
+    await get().reload();
+    pushUndo(`Remove ${name} from canvas`, async () => {
+      const cur = get().diagram?.subjectArea.viewIds ?? [];
+      await struct.setSubjectAreaViews(saId, mergeIds(cur, [viewId]));
+      if (pos) { try { await struct.setSubjectAreaLayout(saId, { [viewId]: pos }); } catch { /* layout best-effort */ } }
+      await get().reload();
+    });
+  },
+  createTableFromSources: ({ logicalName, schema, columns }) => runBlocking('Creating table…', async () => {
     const saId = get().activeSaId; if (!saId) throw new Error('Pick a Subject Area');
     get().markDirty();
     const id = crypto.randomUUID();
@@ -929,7 +1067,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await get().reload();
     set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible (owner)
     pushUndo(`Create table ${physical}`, () => get().deleteTable(id));
-  },
+  }),
   setColumnTarget: (id: string | null) => set({ columnTarget: id }),
   // Seleccionar tabla o edge cambia de contexto: cierra el panel de columna.
   setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null }),
@@ -939,20 +1077,34 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const saId = get().activeSaId; if (!saId) return;
     // Para el Undo (doc 50): nombre y posición ANTES de quitarla (el remove
     // también borra su entrada del layout).
-    const name = get().diagram?.tables.find((t) => t.id === tableId)?.physicalName ?? 'table';
-    const node = get().flow?.getNode(tableId);
-    const pos = node ? { x: Math.round(node.position.x), y: Math.round(node.position.y) } : null;
-    await struct.removeTableFromCanvas(saId, tableId);   // quita de tableIds + layout
+    const d = get().diagram;
+    const name = d?.tables.find((t) => t.id === tableId)?.physicalName ?? 'table';
+    const flow = get().flow;
+    const posOf = (id: string) => {
+      const n = flow?.getNode(id);
+      return n ? { x: Math.round(n.position.x), y: Math.round(n.position.y) } : null;
+    };
+    const pos = posOf(tableId);
+    // Doc 70: las vistas que quedan SIN fuente en el canvas salen con la tabla
+    // (siguen en el modelo). La membresía parte de la lista materializada.
+    const remaining = (d?.subjectArea.tableIds ?? []).filter((t) => t !== tableId);
+    const orphans = orphanViewIds(d?.views ?? [], remaining);
+    const baseViews = d?.subjectArea.viewIds ?? [];
+    const nextViews = orphans.length ? withoutIds(baseViews, orphans) : undefined;
+    const orphanPos = Object.fromEntries(orphans.map((vid) => [vid, posOf(vid)] as const).filter(([, p]) => p));
+    await struct.removeTableFromCanvas(saId, tableId, nextViews);   // quita de tableIds + layout (+ vistas huérfanas)
     pushUndo(`Remove ${name} from canvas`, async () => {
       const sa = await struct.getSubjectArea(saId);
       if (!sa.tableIds.includes(tableId)) await struct.setSubjectAreaTables(saId, [...sa.tableIds, tableId]);
-      if (pos) { try { await struct.setSubjectAreaLayout(saId, { [tableId]: pos }); } catch { /* layout best-effort */ } }
+      if (nextViews) await struct.setSubjectAreaViews(saId, baseViews);
+      const layout = { ...(pos ? { [tableId]: pos } : {}), ...orphanPos } as Record<string, { x: number; y: number }>;
+      if (Object.keys(layout).length) { try { await struct.setSubjectAreaLayout(saId, layout); } catch { /* layout best-effort */ } }
       await get().reload();
     });
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
   },
-  deleteTable: async (tableId) => {
+  deleteTable: (tableId) => runBlocking('Deleting table…', async () => {
     get().markDirty();
     // Cascada COMPLETA en el changeset (versionada), grabada EN LOTE (doc 39):
     // el camino cambio-por-cambio eran ~1 request por columna — a 4k columnas
@@ -1034,7 +1186,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
-  },
+  }),
   updateTable: async (id, fields) => {
     get().markDirty();
     const t = get().diagram?.tables.find((x) => x.id === id);
@@ -1067,11 +1219,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   reorderColumns: async (tableId, orderedIds) => {
     get().markDirty();
     const dia = get().diagram; if (!dia) return;
+    const mine = dia.columns.filter((c) => c.tableId === tableId);
     // Orden PREVIO para el Undo (doc 50): la inversa re-usa esta misma acción.
-    const prevIds = dia.columns.filter((c) => c.tableId === tableId)
-      .slice().sort((a, b) => a.ordinal - b.ordinal).map((c) => c.id);
-    const byId = new Map(dia.columns.filter((c) => c.tableId === tableId).map((c) => [c.id, c]));
-    // OPTIMISTA: la UI reordena al soltar (ordinal = índice nuevo, local); la
+    const prevIds = sortByOrdinal(mine).map((c) => c.id);
+    // OPTIMISTA: la UI reordena al soltar (posición = índice nuevo, local); la
     // persistencia corre detrás y el reload final reconcilia con el overlay.
     set({
       diagram: {
@@ -1082,18 +1233,37 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }),
       },
     });
-    // Persistí SOLO las columnas cuyo ordinal cambió, en TANDAS de 5: mover una
+    // Persistí SOLO las columnas cuya posición cambió, en TANDAS de 5: mover una
     // columna al tope de una tabla de 30 disparaba 30 PUT simultáneos (ráfaga
     // que con varios usuarios satura el backend). El backend graba cada
     // cambio con $set atómico por entidad, así que no se pisan entre sí.
-    const changed = orderedIds
-      .map((id, ordinal) => ({ c: byId.get(id), ordinal }))
-      .filter((x): x is { c: CanonicalColumn; ordinal: number } => !!x.c && x.c.ordinal !== x.ordinal);
-    for (let i = 0; i < changed.length; i += 5) {
-      await Promise.all(changed.slice(i, i + 5).map(({ c, ordinal }) => gov.updateColumn({ ...c, ordinal })));
+    const changed = reorderPlan(mine, orderedIds);
+    await persistReorder(changed, (c, idx) => gov.updateColumn({ ...c, ordinal: idx }));
+    if (changed.length) {
+      pushUndo('Reorder columns', () => get().reorderColumns(tableId, prevIds));
     }
-    if (changed.length) pushUndo('Reorder columns', () => get().reorderColumns(tableId, prevIds));
     await get().reload();
+  },
+  applyCanvasDrop: async (tableId, plan) => {
+    // Doc 73 §10.4 — drop de una fila en el bloque: los cambios de LLAVE van
+    // por el mismo camino que el panel (gov.updateColumn + Undo por valor,
+    // doc 50) y después el reorden de columnas (reorderColumns).
+    const dia = get().diagram; if (!dia) return;
+    if (plan.key.length) {
+      get().markDirty();
+      const pres: CanonicalColumn[] = [];
+      for (const step of plan.key) {
+        const col = dia.columns.find((c) => c.id === step.id);
+        if (!col) continue;
+        pres.push({ ...col });
+        await gov.updateColumn({ ...col, isPrimaryKey: step.isPrimaryKey, pkPosition: step.pkPosition });
+      }
+      if (pres.length) {
+        pushUndo('Edit key', async () => { for (const c of pres) await gov.updateColumn(c); await get().reload(); });
+      }
+      if (!plan.order) await get().reload();
+    }
+    if (plan.order) await get().reorderColumns(tableId, plan.order);
   },
   deleteColumn: async (colId, relIds = []) => {
     get().markDirty();
@@ -1178,11 +1348,6 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   // el panel de vista (su bloque desaparece del canvas).
   setViewMode: (m: 'logical' | 'physical') =>
     set(m === 'physical' ? { viewMode: m, subcatArmed: false } : { viewMode: m, selectedViewId: null }),
-  createProject: async (name: string) => {
-    const p = await struct.createProject(name);
-    set({ projects: [...get().projects, p] });
-    await get().selectProject(p.id);
-  },
   createSubjectArea: async (name: string) => {
     const pid = get().activeProjectId;
     if (!pid) throw new Error('Pick a Project first');
@@ -1195,10 +1360,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
 // Doc 48: el clipboard de columnas pertenece al changeset donde se copió —
 // cambiar de changeset (o soltarlo) lo invalida, junto con la selección y el
 // popup. Doc 50: ídem el clipboard de TABLA y la pila de Undo (las inversas
-// apuntan al draft anterior). Suscripción a nivel de módulo (useChangesetStore
-// no importa este store, así que no hay ciclo).
-useChangesetStore.subscribe((s, prev) => {
-  if (s.activeId === prev.activeId) return;
+// apuntan al draft anterior). Suscripción a nivel de módulo (useSessionStore
+// no importa este store, así que no hay ciclo). Doc 75 D14: la sesión es la
+// ÚNICA fuente del changeset activo.
+useSessionStore.subscribe((s, prev) => {
+  if (s.activeChangesetId === prev.activeChangesetId) return;
   useModelerStore.setState({ colClipboard: null, tblClipboard: null, colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
   useUndoStore.getState().clear();
 });
@@ -1244,3 +1410,8 @@ export function selectActiveTree(s: ModelerState): ProjectTree | null {
 
 // re-export para los componentes
 export { gov };
+
+/** Doc 72: objeto abierto en el Object Inspector (sin canvas). Una columna
+ *  abre el inspector de su tabla con la columna preseleccionada. */
+export interface InspectTarget { kind: 'table' | 'view'; id: string; colId?: string | null }
+

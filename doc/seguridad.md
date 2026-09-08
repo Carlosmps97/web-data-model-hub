@@ -147,7 +147,7 @@ setOnUnauthorized(() => {
 });
 ```
 
-**Aislamiento de estado por usuario — `resetAppState()`** (`src/store/resetAppState.ts`): un único punto que borra TODO el estado de trabajo ligado al usuario, invocado en los tres momentos del ciclo (login — antes de sentar al nuevo actor —, logout y 401 global). Limpia la intención de apertura del canvas (`useSessionStore`: `openMode`, `activeChangesetId`), el workspace completo del modeler (`useModelerStore`: proyectos/árboles cacheados, diagrama, selección, instancia de React Flow, drawings), los changesets (`useChangesetStore`), la identidad cacheada (`useIdentityStore` con `loaded=false` para forzar el re-fetch de `/api/me`), el header dev (`setDevUser('')`) y las preferencias "no volver a preguntar" de `ConfirmDialog` (`confirm-skip:*` en `sessionStorage`). Sin este reset, el siguiente usuario de la misma pestaña heredaba el canvas abierto del anterior y se saltaba el modal "Open model".
+**Aislamiento de estado por usuario — `resetAppState()`** (`src/store/resetAppState.ts`): un único punto que borra TODO el estado de trabajo ligado al usuario, invocado en los tres momentos del ciclo (login — antes de sentar al nuevo actor —, logout y 401 global). Limpia la intención de apertura del canvas (`useSessionStore`: `activeProjectId`, `openMode`, `activeChangesetId`), el workspace completo del modeler (`useModelerStore`: proyectos/árboles cacheados, diagrama, selección, instancia de React Flow, drawings), la pila de Undo (`useUndoStore`), el header dev (`setDevUser('')`) y las preferencias "no volver a preguntar" de `ConfirmDialog` (`confirm-skip:*` en `sessionStorage`). (Los stores legacy `useChangesetStore`/`useIdentityStore` se retiraron en el doc 75.) Sin este reset, el siguiente usuario de la misma pestaña heredaba el canvas abierto del anterior y se saltaba el modal "Open model".
 
 ### 1.4 Diagrama — restauración de sesión al boot
 
@@ -362,7 +362,7 @@ Los handles de conexión (los puntos desde donde se arrastran las relaciones) no
 
 ```ts
 const readonly = useSessionStore((s) => s.openMode === 'readonly');
-const canEdit  = useChangesetStore((s) => s.activeId) != null && !readonly;
+const canEdit  = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
 const relArmed = useModelerStore((s) => s.relPreset != null);
 const connectable = canEdit && relArmed;
 // ...

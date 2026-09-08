@@ -1,5 +1,5 @@
-import * as gov from '@/features/governance/services/governance.service';
-import { useChangesetStore } from '@/store/useChangesetStore';
+import * as gov from '@/services/governance.service';
+import { useSessionStore } from '@/store/useSessionStore';
 import { listSchemas } from './schemas.service';
 import { distinctTableSchemas, tableSchemasFromCatalog } from '../lib/ctasPick';
 
@@ -23,7 +23,8 @@ let cache: { key: string; value: string[] } | null = null;
 let inflight: { key: string; p: Promise<string[]> } | null = null;
 
 export function tableSchemasCached(): Promise<string[]> {
-  const key = useChangesetStore.getState().activeId ?? '';
+  // Doc 75: la foto es del proyecto Y la versión activos.
+  const key = `${useSessionStore.getState().activeProjectId ?? ''}|${useSessionStore.getState().activeChangesetId ?? ''}`;
   if (cache?.key === key) return Promise.resolve(cache.value);
   if (inflight?.key === key) return inflight.p;
   const p = listSchemas()

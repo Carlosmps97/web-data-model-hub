@@ -1,7 +1,8 @@
 /**
  * ddlRules.service — DDL Export Rules (doc 30, 5ta pestaña de Data Standards).
  *
- * Lectura + validación/test/impact van a `/api/ddl-rules/*` (stateless).
+ * Lectura + validación/test/impact van a `/api/projects/{pid}/ddl-rules/*`
+ * (stateless, por proyecto — doc 75).
  * Las MUTACIONES son versionadas: pasan por `applyStandards` (rulesUpsert /
  * rulesDelete / ddlConfigPatch) — cada guardado es una versión del historial,
  * con rollback incluido, igual que UDP/Glossary/Parent Domains.
@@ -17,9 +18,11 @@ import {
   type DdlValidationReport, type StandardsVersion,
 } from './standards.service';
 
-const DDL = `${API_BASE}/api/ddl-rules`;
+const DDL = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}/ddl-rules`;
 
-export interface DdlArtifact { id: string; label: string; root: boolean; generatedBy?: string; }
+/** Artefacto del catálogo. `kind` (doc 71 H4): table | view — el editor lo
+ *  muestra para elegir destinos compatibles con la acción. */
+export interface DdlArtifact { id: string; label: string; root: boolean; generatedBy?: string; kind?: 'table' | 'view'; }
 export interface DdlTestFragment { column?: string; label?: string; sql: string; why?: string | null; }
 export interface DdlTestResult { table: string; matched: number; total: number; fragments: DdlTestFragment[]; }
 export interface DdlImpact { columns: number; tables: number; }
@@ -35,49 +38,53 @@ export interface DdlValidateResult extends DdlValidationReport {
   condition: string;
 }
 
-export const listDdlRules = () => apiGet<DdlRule[]>(DDL);
-export const getDdlConfig = () => apiGet<DdlRulesetConfig>(`${DDL}/config`);
-export const getDdlArtifacts = () => apiGet<DdlArtifact[]>(`${DDL}/artifacts`);
-export const getDdlTemplates = () => apiGet<DdlTemplatesPayload>(`${DDL}/templates`);
-export const validateDdlRule = (rule: DdlRuleEditInput) => apiPost<DdlValidateResult>(`${DDL}/validate`, rule);
-export const testDdlRule = (rule: DdlRuleEditInput, tableId: string) =>
-  apiPost<DdlTestResult>(`${DDL}/test`, { rule, tableId });
-export const impactDdlRule = (rule: DdlRuleEditInput) => apiPost<DdlImpact>(`${DDL}/impact`, { rule });
+export const listDdlRules = (projectId: string) => apiGet<DdlRule[]>(DDL(projectId));
+export const getDdlConfig = (projectId: string) => apiGet<DdlRulesetConfig>(`${DDL(projectId)}/config`);
+export const getDdlArtifacts = (projectId: string) => apiGet<DdlArtifact[]>(`${DDL(projectId)}/artifacts`);
+export const getDdlTemplates = (projectId: string) => apiGet<DdlTemplatesPayload>(`${DDL(projectId)}/templates`);
+export const validateDdlRule = (projectId: string, rule: DdlRuleEditInput) =>
+  apiPost<DdlValidateResult>(`${DDL(projectId)}/validate`, rule);
+export const testDdlRule = (projectId: string, rule: DdlRuleEditInput, tableId: string) =>
+  apiPost<DdlTestResult>(`${DDL(projectId)}/test`, { rule, tableId });
+export const impactDdlRule = (projectId: string, rule: DdlRuleEditInput) =>
+  apiPost<DdlImpact>(`${DDL(projectId)}/impact`, { rule });
 
-// ── Mutaciones versionadas (una versión del historial por acción) ──────────
+// ── Mutaciones versionadas (una versión del historial del proyecto por acción) ──
 
-export const saveDdlRule = (rule: DdlRuleEditInput, isNew: boolean): Promise<StandardsVersion> =>
-  applyStandards({
+export const saveDdlRule = (projectId: string, rule: DdlRuleEditInput, isNew: boolean): Promise<StandardsVersion> =>
+  applyStandards(projectId, {
     kind: 'ddl',
     title: `${rule.kind === 'generator' ? 'Generator' : 'Rule'} ${rule.name} · ${isNew ? 'added' : 'edited'}`,
     rulesUpsert: [rule],
   });
 
-export const deleteDdlRule = (rule: DdlRule): Promise<StandardsVersion> =>
-  applyStandards({
+export const deleteDdlRule = (projectId: string, rule: DdlRule): Promise<StandardsVersion> =>
+  applyStandards(projectId, {
     kind: 'ddl',
     title: `${rule.kind === 'generator' ? 'Generator' : 'Rule'} ${rule.name} · deleted`,
     rulesDelete: [rule.id],
   });
 
-export const toggleDdlRule = (rule: DdlRule, enabled: boolean): Promise<StandardsVersion> =>
-  applyStandards({
+export const toggleDdlRule = (projectId: string, rule: DdlRule, enabled: boolean): Promise<StandardsVersion> =>
+  applyStandards(projectId, {
     kind: 'ddl',
     title: `Rule ${rule.name} · ${enabled ? 'enabled' : 'disabled'}`,
     rulesUpsert: [{ ...toEditInput(rule), enabled }],
   });
 
 export const saveDdlConfig = (
+  projectId: string,
   patch: { lookups?: Record<string, DdlLookup>; functions?: DdlRulesetConfig['functions'] },
 ): Promise<StandardsVersion> =>
-  applyStandards({ kind: 'ddl', title: 'DDL lookups & functions · edited', ddlConfigPatch: patch });
+  applyStandards(projectId, { kind: 'ddl', title: 'DDL lookups & functions · edited', ddlConfigPatch: patch });
 
 /** CTA del catálogo vacío: aplica el ruleset base (8 reglas + lookups) como
- *  UNA versión. En una BD nueva esto mismo lo corre
- *  `scripts/seed_ddl_export_rules.py` — acá queda para quien lo borró todo. */
-export const seedStarterRules = async (): Promise<StandardsVersion> => {
-  const t = await getDdlTemplates();
-  return applyStandards({
+ *  UNA versión del proyecto. En una BD nueva esto mismo lo corre
+ *  `scripts/seed_ddl_export_rules.py --all-projects` — acá queda para quien
+ *  lo borró todo. */
+export const seedStarterRules = async (projectId: string): Promise<StandardsVersion> => {
+  const t = await getDdlTemplates(projectId);
+  return applyStandards(projectId, {
     kind: 'ddl', title: `Base — DDL export rules · ${t.seedRules.length} rules + lookups`,
     rulesUpsert: t.seedRules, ddlConfigPatch: { lookups: t.seedLookups },
   });

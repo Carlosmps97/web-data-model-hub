@@ -12,7 +12,6 @@
 @import '../styles/review.css';
 @import '../styles/reporting.css';
 @import '../features/auth/auth.css';
-@import '../features/governance/governance.css';
 @import '../features/modeler/modeler.css';
 
 /* Fuentes — Geist (UI) + Geist Mono (data/SQL), self-hosted vía @fontsource-variable.

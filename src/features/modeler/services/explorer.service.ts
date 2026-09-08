@@ -1,34 +1,30 @@
 /**
- * explorer.service (doc 25) — fuente de datos del Database Explorer, con el
- * MISMO patrón changeset-aware que schemas/estructura/vistas:
- *   - CON versión activa (draft) → estado EFECTIVO (publicado + overlay del
- *     changeset), vía los endpoints `/effective`. Así una tabla/vista/columna
- *     creada, renombrada o borrada en la versión aparece al instante en el
- *     Explorer (pedido del owner: "el Explorer muestra la versión en que trabajo").
- *   - SIN versión (producción) → endpoints de reporting/catálogo (como antes).
+ * explorer.service (docs 25 · 71 · 72) — fuente de datos del Explorer unificado
+ * con el MISMO patrón changeset-aware que estructura/vistas: con versión activa
+ * (draft o `asof:`) el backend aplica el overlay vía `changesetId`; sin versión,
+ * producción publicada. El componente sólo consume las filas `Dbx*`.
  *
- * El componente sólo consume las filas `Dbx*` de acá y no sabe de qué fuente
- * vienen. El doc crudo del `/effective` NO trae `columnCount` (lo agrega el
- * reporting con un $group); en draft el badge se rellena perezosamente al
- * expandir la tabla (ver DatabaseExplorer).
+ * Doc 72 §1: el inventario del proyecto (tablas con `columnCount` + vistas de
+ * esas tablas) llega en UNA request server-side
+ * (`GET /api/projects/{id}/catalog/inventory`). Antes se componía en el cliente
+ * por tandas de ids — en draft eran miles de requests (una por tabla) para
+ * «Modelo DDV», saturaban el navegador y el log del backend.
  */
 import { apiGet } from '@/services/http';
-import {
-  listReportColumns, listReportTables, listReportViews,
-  type ReportColumnRow,
-} from '@/services/reporting.service';
-import { listSchemas, type DbSchema } from '@/features/modeler/services/schemas.service';
-import * as csvc from '@/features/governance/services/changeset.service';
-import type { View } from '@/services/views.service';
-import { useChangesetStore } from '@/store/useChangesetStore';
-
 import { API_BASE } from '@/services/apiBase';
-/** Tope de tablas por esquema (igual que el reporting per-schema del Explorer). */
-const TABLES_CAP = 500;
+import { listReportColumns, type ReportColumnRow } from '@/services/reporting.service';
+import * as csvc from '@/services/changeset.service';
+import type { View } from '@/services/views.service';
+import { useSessionStore } from '@/store/useSessionStore';
+import { sessionProjectId } from '@/store/useSessionStore';
 
-export type DbxSchema = DbSchema;
-export interface DbxTable { id: string; physicalName: string; logicalName?: string; columnCount?: number }
+export interface DbxTable {
+  id: string; physicalName: string; logicalName?: string; columnCount?: number;
+  schema?: string | null; description?: string | null;
+}
 export interface DbxColumn {
+  /** Doc 71: id de la columna (para centrar + abrir su Properties desde el Explorer). */
+  id?: string;
   physicalName: string; logicalName?: string; dataType: string;
   isPrimaryKey?: boolean; isForeignKey?: boolean; description?: string; ordinal: number;
 }
@@ -36,132 +32,101 @@ export interface DbxViewCol {
   outputAlias?: string | null; sourceTable?: string | null; sourceColumn?: string | null;
   castType?: string | null; expression?: string | null;
 }
-export interface DbxView { id: string; name: string; schema?: string | null; sourceTables: string[]; columns: DbxViewCol[] }
-export interface DbxHit { id: string; physicalName: string; logicalName?: string; schema?: string }
-/** Hit de búsqueda por COLUMNA: la columna + su tabla resuelta (esquema.tabla). */
-export interface DbxColumnHit {
-  id: string; physicalName: string; logicalName?: string; dataType?: string;
-  tableId: string; table: string; schema?: string | null;
+export interface DbxView {
+  id: string; name: string; schema?: string | null;
+  /** Nombres físicos de las tablas fuente (resueltos desde el inventario). */
+  sourceTables: string[];
+  sourceTableIds: string[];
+  columns: DbxViewCol[];
+  /** Doc 61: vista Personalizada (custom SQL) — sus columnas salen del parse. */
+  custom: boolean;
 }
 
-// Docs crudos que devuelve `/effective` (subconjunto que usa el Explorer).
-interface RawTable { id: string; physicalName: string; logicalName?: string; schema?: string }
+// Doc crudo de `/effective` (subconjunto que usa el Explorer).
 interface RawColumn {
   id: string; tableId: string; physicalName: string; logicalName?: string; dataType: string;
   isPrimaryKey?: boolean | null; isForeignKey?: boolean | null; description?: string | null; ordinal?: number;
 }
 
-/** Versión activa (draft) o `null` en producción. */
-const activeVersion = (): string | null => useChangesetStore.getState().activeId;
-
-/** ¿El Explorer está mostrando una versión (draft) en vez de producción? */
-export const explorerIsDraft = (): boolean => activeVersion() !== null;
+/** Versión activa (draft o `asof:`) o `null` en producción. */
+const activeVersion = (): string | null => useSessionStore.getState().activeChangesetId;
+const csQuery = (): string => {
+  const a = activeVersion();
+  return a ? `?changesetId=${encodeURIComponent(a)}` : '';
+};
 
 // ── Mappers ────────────────────────────────────────────────────────────────
 const mapReportCol = (c: ReportColumnRow): DbxColumn => ({
+  id: c.id,
   physicalName: c.physicalName, logicalName: c.logicalName, dataType: c.dataType,
   isPrimaryKey: c.isPrimaryKey, isForeignKey: c.isForeignKey, description: c.description, ordinal: c.ordinal,
 });
 const mapRawCol = (c: RawColumn): DbxColumn => ({
+  id: c.id,
   physicalName: c.physicalName, logicalName: c.logicalName, dataType: c.dataType,
   isPrimaryKey: !!c.isPrimaryKey, isForeignKey: !!c.isForeignKey,
   description: c.description ?? undefined, ordinal: c.ordinal ?? 0,
 });
-const mapDraftView = (v: View): DbxView => ({
-  id: v.id, name: v.name, schema: v.schema ?? null,
-  // En draft no resolvemos ids→"esquema.tabla" (evita N lookups); el tooltip de
-  // fuentes se omite. Las columnas salen de `sources` (editor de vista).
-  sourceTables: [],
-  columns: (v.sources ?? []).map((s) => ({
-    outputAlias: s.outputAlias ?? null,
-    sourceColumn: s.column ?? null,
-    sourceTable: s.tableId ?? s.table ?? null,
-    castType: s.castType ?? null,
-    expression: s.expression ?? null,
-  })),
-});
 
-// ── API del Explorer (conmuta efectivo/publicado) ───────────────────────────
-
-/** Esquemas: `listSchemas` ya conmuta efectivo/publicado según la versión activa. */
-export const explorerSchemas = (): Promise<DbxSchema[]> => listSchemas();
-
-/** Tablas de un esquema. Draft → efectivo (overlay); producción → reporting. */
-export async function explorerTables(schema: string): Promise<DbxTable[]> {
-  const cs = activeVersion();
-  if (!cs) {
-    const rows = await listReportTables({ schema, limit: TABLES_CAP });
-    return rows.map((t) => ({ id: t.id, physicalName: t.physicalName, logicalName: t.logicalName, columnCount: t.columnCount }));
-  }
-  const docs = await csvc.effective<RawTable>(cs, 'canonical_tables', { schema, limit: TABLES_CAP });
-  // columnCount lo rellena el Explorer al expandir (no viene en el doc crudo).
-  return docs.map((t) => ({ id: t.id, physicalName: t.physicalName, logicalName: t.logicalName }));
+/** Vista de la API → fila del Explorer. `nameOf` resuelve ids de tablas fuente
+ *  a su nombre físico (del propio inventario: cero lookups extra). Personalizada
+ *  (doc 61) → columnas derivadas del parse; Regular → `sources`. Pura. */
+export function mapView(v: View, nameOf: (id: string) => string | undefined): DbxView {
+  const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+  const custom = !!(v.customSql && v.customSql.trim());
+  const columns: DbxViewCol[] = custom
+    ? (v.customColumns ?? []).map((c) => ({ outputAlias: c.name, expression: c.expression ?? null, sourceTable: null, sourceColumn: null, castType: null }))
+    : (v.sources ?? []).map((s) => ({
+      outputAlias: s.outputAlias ?? null,
+      sourceColumn: s.column ?? null,
+      sourceTable: s.tableId ? (nameOf(s.tableId) ?? s.tableId) : (s.table ?? null),
+      castType: s.castType ?? null,
+      expression: s.expression ?? null,
+    }));
+  return {
+    id: v.id, name: v.name, schema: v.schema ?? null,
+    sourceTables: srcIds.map((id) => nameOf(id) ?? id), sourceTableIds: srcIds, columns, custom,
+  };
 }
 
-/** Vistas de un esquema. Draft → efectivo (overlay); producción → reporting. */
-export async function explorerViews(schema: string): Promise<DbxView[]> {
-  const cs = activeVersion();
-  if (!cs) {
-    const rows = await listReportViews(undefined, schema);
-    return rows.map((v) => ({ id: v.id, name: v.name, schema: v.schema, sourceTables: v.sourceTables, columns: v.columns }));
-  }
-  const docs = await csvc.effective<View>(cs, 'views', { schema });
-  return docs.map(mapDraftView);
-}
+// ── Columnas de una tabla (perezosas al expandir) ───────────────────────────
 
 /** Columnas de una tabla. Draft → efectivo (overlay); producción → reporting. */
 export async function explorerColumns(tableId: string): Promise<DbxColumn[]> {
   const cs = activeVersion();
-  if (!cs) return (await listReportColumns(tableId)).map(mapReportCol);
+  if (!cs) return (await listReportColumns(sessionProjectId(), tableId)).map(mapReportCol);
   const docs = await csvc.effective<RawColumn>(cs, 'canonical_columns', { tableId });
   return docs.map(mapRawCol).sort((a, b) => a.ordinal - b.ordinal);
 }
 
-/** Búsqueda por nombre. Draft → efectivo (overlay); producción → catálogo. */
-export async function explorerSearch(q: string, limit = 50): Promise<DbxHit[]> {
-  const cs = activeVersion();
-  if (!cs) return apiGet<DbxHit[]>(`${API_BASE}/api/catalog/tables?q=${encodeURIComponent(q)}&limit=${limit}`);
-  const docs = await csvc.effective<RawTable>(cs, 'canonical_tables', { q, limit });
-  return docs.map((t) => ({ id: t.id, physicalName: t.physicalName, logicalName: t.logicalName, schema: t.schema }));
+// ── Inventario por PROYECTO (doc 72 §1): UNA request ────────────────────────
+
+export interface InventoryTableRow {
+  id: string; physicalName: string; logicalName: string; schema?: string | null;
+  description?: string | null; columnCount: number;
+}
+/** Respuesta cruda de `GET /api/projects/{id}/catalog/inventory`. */
+export interface RawInventory {
+  tables: InventoryTableRow[];
+  views: View[];
+  canvases: number;
+  total: { tables: number; views: number };
+}
+export interface ProjectInventory { tables: DbxTable[]; views: DbxView[]; canvases: number }
+
+/** Inventario crudo → filas del Explorer (nombres de fuentes desde la misma respuesta). Pura. */
+export function mapInventory(raw: RawInventory): ProjectInventory {
+  const tables: DbxTable[] = raw.tables.map((t) => ({
+    id: t.id, physicalName: t.physicalName, logicalName: t.logicalName,
+    schema: t.schema ?? null, description: t.description ?? null, columnCount: t.columnCount,
+  }));
+  const names = new Map(tables.map((t) => [t.id, t.physicalName]));
+  return { tables, views: raw.views.map((v) => mapView(v, (id) => names.get(id))), canvases: raw.canvases };
 }
 
-/** Búsqueda por nombre de COLUMNA (pedido de los modelers): cada hit sale con
- *  su esquema.tabla. Producción → `/api/catalog/columns` (join server-side);
- *  draft → efectivo de `canonical_columns` + resolución de sus tablas por ids
- *  (una tabla renombrada/creada en la versión sale con su nombre del draft;
- *  una columna cuya tabla no existe en el efectivo se descarta). */
-export async function explorerSearchColumns(q: string, limit = 50): Promise<DbxColumnHit[]> {
-  const cs = activeVersion();
-  if (!cs) return apiGet<DbxColumnHit[]>(`${API_BASE}/api/catalog/columns?q=${encodeURIComponent(q)}&limit=${limit}`);
-  const cols = await csvc.effective<RawColumn>(cs, 'canonical_columns', { q, limit });
-  const ids = [...new Set(cols.map((c) => c.tableId).filter(Boolean))].sort();
-  const tables = ids.length ? await csvc.effective<RawTable>(cs, 'canonical_tables', { ids }) : [];
-  const byId = new Map(tables.map((t) => [t.id, t]));
-  return cols.flatMap((c) => {
-    const t = byId.get(c.tableId);
-    if (!t) return [];
-    return [{
-      id: c.id, physicalName: c.physicalName, logicalName: c.logicalName, dataType: c.dataType,
-      tableId: c.tableId, table: t.physicalName, schema: t.schema ?? null,
-    }];
-  });
+/** Tablas (con `columnCount`) y vistas de los canvases del proyecto — efectivo
+ *  con versión activa, publicado sin ella. */
+export async function projectInventory(projectId: string): Promise<ProjectInventory> {
+  const raw = await apiGet<RawInventory>(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/catalog/inventory${csQuery()}`);
+  return mapInventory(raw);
 }
-
-// ── Secciones del Explorer (doc 60) ─────────────────────────────────────────
-
-/** Sección del Database Explorer: "Canonical Tables" o "Views". */
-export type DbxSection = 'tables' | 'views';
-
-/** Esquemas visibles en una sección, por `schemas.kind` (doc 44). Un esquema
- *  SIN clasificar entra en AMBAS secciones (misma regla que los combos doc 52). */
-export const schemasForSection = (schemas: DbxSchema[], section: DbxSection): DbxSchema[] =>
-  schemas.filter((s) => !s.kind || s.kind === section);
-
-/** Límites del split vertical Model Explorer ⇄ Database Explorer. */
-export const DBX_SPLIT_MIN = 0.15;
-export const DBX_SPLIT_MAX = 0.85;
-
-/** Clamp de la fracción de alto del Database Explorer dentro del sidebar.
- *  No-finito (localStorage corrupto) → default 50%. */
-export const clampDbxSplit = (f: number): number =>
-  Number.isFinite(f) ? Math.min(DBX_SPLIT_MAX, Math.max(DBX_SPLIT_MIN, f)) : 0.5;

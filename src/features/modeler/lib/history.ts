@@ -1,7 +1,7 @@
 // Presentación del historial de auditoría (doc 51) — helpers PUROS que
 // consume AuditHistory (testeables sin DOM). El dato viene del backend tal
 // cual el ledger lo derivó; acá solo se vuelve legible (UI en inglés).
-import type { HistoryItem, HistoryUser } from '@/features/governance/services/changeset.service';
+import type { HistoryItem, HistoryUser } from '@/services/changeset.service';
 
 export const ACTION_LABEL: Record<HistoryItem['action'], string> = {
   created: 'Created',

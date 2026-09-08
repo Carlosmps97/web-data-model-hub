@@ -1,15 +1,9 @@
 /**
- * useSessionStore — usuario simulado actual de la sesión (sim auth Databricks).
- *
- * En local el backend corre con `AUTH_MODE=local` y resuelve el actor desde el
- * header `X-Dev-User`. Este store es la ÚNICA fuente de verdad del usuario
- * simulado en el frontend: el `UserMenu` del TopNav lo cambia y, en cada cambio,
- * empuja el id al cliente HTTP (`setDevUser`) para que TODA llamada lleve el
- * header correcto. En Databricks real el header lo pone el proxy (OBO) y este
- * switch se oculta (fuera de R0).
- *
- * NOTA: no consolida ni reemplaza `useChangesetStore`/`useIdentityStore`
- * (features legacy los importan). Es un store NUEVO que centraliza el actor.
+ * useSessionStore — sesión del frontend: el ACTOR (espejado desde `useAuthStore`
+ * tras el login; en dev viaja además como header `X-Dev-User`) y la sesión de
+ * CANVAS (proyecto + modo + changeset + etiqueta de versión, doc 75 D8/D14).
+ * Es la ÚNICA fuente del changeset activo: servicios y gates de UI leen
+ * `activeChangesetId` de acá.
  */
 
 import { create } from 'zustand';
@@ -21,23 +15,16 @@ export interface SimUser {
   initials: string;
 }
 
-/** Lista fija de usuarios simulados (espeja la lista del backend: ana/beto/carla/qa/mr). */
-export const SIM_USERS: SimUser[] = [
-  { id: 'ana',   name: 'Ana Rivas',     initials: 'AR' },
-  { id: 'beto',  name: 'Beto Núñez',    initials: 'BN' },
-  { id: 'carla', name: 'Carla Mendoza', initials: 'CM' },
-  { id: 'qa',    name: 'QA Reviewer',   initials: 'QA' },
-  { id: 'mr',    name: 'María Rey',      initials: 'MR' },
-];
-
-/** Usuario por defecto: "MR" (coincide con el avatar del diseño en el TopNav). */
-const DEFAULT_USER = SIM_USERS.find((u) => u.id === 'mr') ?? SIM_USERS[0];
-
 /** Cómo se abrió el modelo en el canvas: sólo-lectura (producción) o edición. */
 export type OpenMode = 'readonly' | 'editing';
 
+/** Clave de localStorage con el último proyecto abierto (preselección del Open model). */
+export const LAST_PROJECT_KEY = 'dmh:lastProject';
+
 /** Parámetros de apertura del modelo elegidos en el Open model modal (pg). */
 export interface OpenModelArgs {
+  /** Proyecto que se abre (doc 75 D8): TODA sesión de canvas es de un proyecto. */
+  projectId: string;
   mode: OpenMode;
   /**
    * Changeset asociado: en `editing` es la working copy a MUTAR; en `readonly`
@@ -51,15 +38,11 @@ export interface OpenModelArgs {
 }
 
 interface SessionState {
-  /** Usuario simulado activo. */
+  /** Actor de la sesión (`id` == username). Vacío hasta el login. */
   user: SimUser;
-  /** Lista de usuarios simulados disponibles para el switch. */
-  users: SimUser[];
-  /** Cambia el actor por id; propaga el header `X-Dev-User`. No-op si el id no existe. */
-  setUser: (id: string) => void;
-  /** Setea el actor REAL tras el login (usuario arbitrario, no de SIM_USERS).
-   *  La identidad autoritativa vive en `useAuthStore`; esto espeja el actor a
-   *  los lectores legacy (`user.id` == username) + el header X-Dev-User. */
+  /** Setea el actor REAL tras el login. La identidad autoritativa vive en
+   *  `useAuthStore`; esto espeja el actor a los lectores (`user.id`) + el
+   *  header X-Dev-User de desarrollo. */
   setSessionUser: (u: SimUser) => void;
 
   /** Modo con el que se abrió el modelo, o `null` si no hay sesión de canvas. */
@@ -68,27 +51,27 @@ interface SessionState {
   activeChangesetId: string | null;
   /** Etiqueta de versión activa en el canvas (readonly: la publicada; editing: la del draft). */
   activeVersionLabel: string | null;
+  /** Proyecto activo de la sesión de canvas (doc 75 D8), o `null` sin sesión. */
+  activeProjectId: string | null;
   /**
    * Setea la intención de apertura del modelo (la consume el canvas en R3).
    * No navega: el llamador (Open model modal) decide el `navigate('/model')`.
    */
   openModel: (args: OpenModelArgs) => void;
+  /** Cierra la sesión de canvas (sin changeset, etiqueta ni proyecto): vuelve al chooser. */
+  closeModel: () => void;
+}
+
+/** Proyecto activo o error explícito: ningún servicio del canvas busca «global». */
+export function sessionProjectId(): string {
+  const pid = useSessionStore.getState().activeProjectId;
+  if (!pid) throw new Error('Open a project first.');
+  return pid;
 }
 
 export const useSessionStore = create<SessionState>((set) => {
-  // Empuja el actor por defecto al cliente HTTP al inicializar el store, así el
-  // header `X-Dev-User` viaja desde la primera llamada (antes de tocar el menú).
-  setDevUser(DEFAULT_USER.id);
-
   return {
-    user: DEFAULT_USER,
-    users: SIM_USERS,
-    setUser: (id: string) => {
-      const next = SIM_USERS.find((u) => u.id === id);
-      if (!next) return;
-      setDevUser(next.id);
-      set({ user: next });
-    },
+    user: { id: '', name: '', initials: '' },
     setSessionUser: (u: SimUser) => {
       setDevUser(u.id);
       set({ user: u });
@@ -97,7 +80,9 @@ export const useSessionStore = create<SessionState>((set) => {
     openMode: null,
     activeChangesetId: null,
     activeVersionLabel: null,
-    openModel: ({ mode, changesetId, versionLabel }: OpenModelArgs) =>
+    activeProjectId: null,
+    openModel: ({ projectId, mode, changesetId, versionLabel }: OpenModelArgs) => {
+      try { localStorage.setItem(LAST_PROJECT_KEY, projectId); } catch { /* storage bloqueado o ausente (tests) */ }
       set({
         openMode: mode,
         // También en `readonly`: con changesetId el canvas LEE su overlay
@@ -105,6 +90,9 @@ export const useSessionStore = create<SessionState>((set) => {
         // bloqueadas por el gate de `openMode` (governance.service `rec()`).
         activeChangesetId: changesetId ?? null,
         activeVersionLabel: versionLabel ?? null,
-      }),
+        activeProjectId: projectId,
+      });
+    },
+    closeModel: () => set({ openMode: null, activeChangesetId: null, activeVersionLabel: null, activeProjectId: null }),
   };
 });

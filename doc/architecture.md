@@ -1,6 +1,6 @@
 # Arquitectura del Frontend — web-data-model-hub
 
-> **Actualizado 2026-07-31** — versiones de dependencias pineadas exactas (política de ambos repos), servidor de producción propio `server.mjs` (§3.1), LOD del canvas (§6.7), review con `ChangesSummary`/`ChangesDetailModal` y 5.ª pestaña "DDL Export rules" en Data Standards (§8), despliegue de un solo origen (§10).
+> **Actualizado 2026-09-08** — proyectos independientes (doc 75 de plan-implementacion/): la sesión es de UN proyecto (`useSessionStore.activeProjectId`), Data Standards / Reporting / versiones por proyecto, borrado de proyecto por draft con aviso crítico en Review, overlay bloqueante por sesión (`useBusyStore`) y limpieza del legado (`/governance`, `useChangesetStore`, `useIdentityStore`, `AppLayout`). Ediciones previas: dependencias pineadas exactas, `server.mjs` (§3.1), LOD del canvas (§6.7), review con `ChangesSummary`/`ChangesDetailModal`, 5.ª pestaña "DDL Export rules" (§8), despliegue de un solo origen (§10).
 
 ## 1. Visión
 
@@ -10,12 +10,12 @@ La aplicación se organiza como una *shell* con navegación superior persistente
 
 | Área | Ruta | Qué resuelve |
 |------|------|--------------|
-| **Home** | `/` | Panel de bienvenida: contadores del workspace, solicitudes asignadas al usuario y lista de versiones (solo lectura). |
-| **Reporting** | `/reporting` | Vista tabular de la metadata (tablas, columnas, relaciones), exportación a Excel y un **Report Designer** con motor de consulta y SQL. |
-| **Model** | `/model` | El **canvas** de modelado ER: proyectos → carpetas → canvases (subject areas), con tablas, columnas y relaciones editables. |
-| **Data Standards** | `/standards` | Glosario, Parent Domains y UDP versionados de forma independiente al canvas. |
+| **Home** | `/` | Panel de bienvenida: contadores del workspace, solicitudes asignadas al usuario y versiones agrupadas **por proyecto** (solo lectura), «New project» y «Version tools». |
+| **Reporting** | `/reporting` | Vista tabular de la metadata de **un proyecto** (tablas, columnas, relaciones), exportación a Excel y un **Report Designer** con motor de consulta y SQL. |
+| **Model** | `/model` | El **canvas** de modelado ER de **un proyecto** (Open model en 2 pasos: proyecto → versión): carpetas → canvases (subject areas), con tablas, columnas y relaciones editables. |
+| **Data Standards** | `/standards` | Glosario, Parent Domains, UDP, naming y reglas DDL **del proyecto elegido**, versionados de forma independiente al canvas. |
 | **Admin** | `/admin` | Usuarios, roles y matriz de permisos (RBAC). |
-| **Requests** | `/review` | Revisión y aprobación de solicitudes de cambio (governance), cruzando proyectos. |
+| **Requests** | `/review` | Bandeja global de solicitudes de cambio con chip y filtro de proyecto; aprobación con bloque crítico cuando el request borra su proyecto. |
 
 El diseño rector es **DMH-Erwin v20260625-2**: un sistema visual claro (light-only), de acento *navy* y azul, con tipografía Geist. Todo el estado de sesión, edición y gobernanza vive en el cliente mediante **Zustand**, y todas las escrituras de modelo pasan por un *choke-point* consciente del *changeset* activo (la unidad de versionado del backend).
 
@@ -36,7 +36,7 @@ El proyecto es 100% TypeScript, construido con **Vite** (que también sirve el d
 | UI runtime | **React** + **React DOM** | `19.2.4` | Componentes, `StrictMode`, hooks. |
 | Lenguaje | **TypeScript** | `5.9.3` | Tipado estricto (`strict: true`), alias `@ → ./src`. |
 | Routing | **react-router-dom** | `7.18.0` | `BrowserRouter`, rutas anidadas, guards, `useSearchParams`. |
-| Estado | **Zustand** | `5.0.12` | Los 5 stores globales de `src/store/` + `dialogs.tsx`. |
+| Estado | **Zustand** | `5.0.12` | Los 5 stores globales de `src/store/` (`useAuthStore`, `useSessionStore`, `useModelerStore`, `useUndoStore`, `useBusyStore`) + `dialogs.tsx`. |
 | Canvas ER | **@xyflow/react** (React Flow) | `12.11.0` | Nodos/aristas, viewport, minimapa, virtualización. |
 | Auto-layout | **elkjs** | `0.11.1` | Algoritmo `layered` (Sugiyama); único import en `lib/elkLayout.ts`. |
 | Grilla virtual | **@tanstack/react-virtual** | `3.14.5` | Render virtualizado del reporting; único uso en `ResultsGrid.tsx`. |
@@ -84,7 +84,7 @@ Una regla de ESLint (`no-restricted-imports`) refuerza los **límites de feature
 
 ## 3. Scaffolding de `src/`
 
-La estructura separa el *chrome* global (shell, layout, UI primitives) de las *features* verticales (modeler, reporting, standards, admin, governance, ddl, auth). Cada feature es autocontenida (componentes + servicios + estilos + barrel).
+La estructura separa el *chrome* global (shell, layout, UI primitives) de las *features* verticales (modeler, reporting, standards, admin, ddl, auth, upload). Cada feature es autocontenida (componentes + servicios + estilos + barrel).
 
 ```
 src/
@@ -96,11 +96,15 @@ src/
 │   ├── ui/                  # Design-system: Button, Dialog, Badge, Avatar, Icon,
 │   │                        #   SegmentedControl, Tooltip, Modal, ConfirmDialog,
 │   │                        #   TagEditor, dialogs (DialogHost), index (barrel)
-│   ├── layout/              # TopNav, UserMenu, Header, Sidebar, AppLayout
-│   └── OpenModelModal.tsx   # Selector de versión/modo al entrar al canvas
+│   ├── layout/              # TopNav, UserMenu
+│   ├── BusyOverlay.tsx      # Overlay bloqueante por sesión (useBusyStore, doc 75 D18)
+│   ├── ProjectPicker.tsx    # Selector de proyecto (Open model paso 1, Standards, Reporting)
+│   ├── NewProjectModal.tsx  # «New project»: vacío o copiando bloques de Data Standards de otro
+│   └── OpenModelModal.tsx   # Open model en 2 pasos: proyecto → versión/modo
 ├── features/
 │   ├── modeler/             # El canvas ER (ver §6)
 │   │   ├── components/      #   WorkspaceScreen, ModelerCanvas, TableNode, ViewNode,
+│   │   │                    #   ExplorerPanel, DeleteProjectDialog, DeletionPendingPanel,
 │   │   │                    #   ShapeNode, CrowFootEdge, DerivationEdge, CrowFootMarkers,
 │   │   │                    #   Toolbar, ModelExplorer, DatabaseExplorer, PropertiesPanel,
 │   │   │                    #   ColumnEditor, ViewEditor, ComplexTypeBuilder,
@@ -108,7 +112,7 @@ src/
 │   │   │                    #   KeyMappingRows, RelIcon, NewTableModal, CtasModal,
 │   │   │                    #   PublishModal, SchemaManagerModal, SchemaSelect,
 │   │   │                    #   ModelPropertiesModal, UdpAssign
-│   │   ├── lib/             #   elkLayout (auto-layout ELK), lodSize (LOD, §6.7),
+│   │   ├── lib/             #   elkLayout (auto-layout ELK), lodSize (LOD, §6.7), projectDeletion,
 │   │   │                    #   edgeFanout (fan-out de wires, doc 47), complexTypes,
 │   │   │                    #   keyOrder, nameSync, relationshipPairs,
 │   │   │                    #   schemaStaging, viewEditorLogic, viewGraph, viewSync
@@ -129,34 +133,31 @@ src/
 │   │   ├── components/      #   AdminScreen, UserModal, RoleModal, PermissionMatrix…
 │   │   ├── admin.service.ts
 │   │   └── index.ts
-│   ├── governance/          # Servicios changeset-aware + pantalla legacy
-│   │   ├── components/      #   GovernanceScreen y ApprovalInbox (legacy, fuera del rail),
-│   │   │                    #   ChangesetBar, CatalogPanel
-│   │   └── services/        #   changeset.service, governance.service
-│   ├── ddl/                 # generators (genDDL/genViewDDL), rulesBridge, ExportDdlModal
+│   ├── ddl/                 # generators (genViewDDL y helpers), rulesBridge, ExportDdlModal
 │   └── auth/                # LoginScreen, guards (RequireAuth/RequirePermission), auth.service
 ├── screens/                 # Pantallas de alto nivel montadas por el router
 │   ├── HomeScreen.tsx
 │   ├── ReportingScreen.tsx
 │   ├── ReviewScreen.tsx
-│   └── review/              #   ChangesSummary, ChangesDetailModal, DiffTree (ver §8)
-├── store/                   # Stores Zustand + bridge + reset (ver §4)
+│   ├── home/                #   VersionToolsModal (compare/details por proyecto)
+│   └── review/              #   ChangesSummary, ChangesDetailModal, DiffTree,
+│                            #   CriticalDeletionBlock, ApproveDeletionDialog (ver §8)
+├── store/                   # Stores Zustand + reset (ver §4)
 │   ├── useAuthStore.ts
-│   ├── useSessionStore.ts
-│   ├── useChangesetStore.ts
-│   ├── useIdentityStore.ts
+│   ├── useSessionStore.ts   #   proyecto + versión activos (única fuente del changeset activo)
 │   ├── useModelerStore.ts
-│   ├── sessionChangesetBridge.ts
+│   ├── useUndoStore.ts
+│   ├── useBusyStore.ts      #   runBlocking(): overlay bloqueante por sesión (doc 75 D18)
 │   └── resetAppState.ts     #   Limpia el estado de trabajo por usuario (logout/401/login)
 ├── services/                # Clientes HTTP transversales
 │   ├── http.ts              #   apiFetch + envelope + X-Session-Token + 401 global
 │   ├── apiBase.ts           #   API_BASE = import.meta.env.VITE_API_URL ?? ''
 │   ├── warmup.ts            #   Warm-up SSO cross-app (inerte con API_BASE vacía)
 │   ├── versioning.service.ts, dashboard.service.ts, projects.service.ts,
-│   ├── reporting.service.ts, views.service.ts, naming.service.ts, identity.service.ts
-├── hooks/                   # useIdentity (+ README de convenciones)
-├── lib/                     # Utilidades puras (tags.ts)
-├── types/                   # api.ts, model.ts, versioning.ts, identity.ts
+│   ├── reporting.service.ts, views.service.ts, naming.service.ts,
+│   ├── governance.service.ts, changeset.service.ts   # choke-point de escrituras + ledger
+├── lib/                     # Utilidades puras (tags, facets, projects, zip)
+├── types/                   # api.ts, model.ts, versioning.ts
 └── styles/                  # tokens, base, ui, components, topnav, shell, home,
                              #   review, reporting (CSS global, sin CSS Modules)
 ```
@@ -180,27 +181,24 @@ Variables de entorno: `BACKEND_API_URL` (destino del proxy; sin ella el proxy re
 
 ## 4. Gestión de estado (Zustand)
 
-El estado se reparte en cinco stores Zustand, cada uno con una responsabilidad clara, más un *bridge* que sincroniza dos de ellos y un módulo de limpieza (`resetAppState.ts`) que borra el estado de trabajo por usuario en logout/401/login — aísla la sesión entre usuarios en la misma máquina. No hay Context API ni Redux: los componentes leen con selectores (`useStore(s => s.campo)`) y los servicios leen/escriben con `getState()`.
+El estado se reparte en cinco stores Zustand, cada uno con una responsabilidad clara, más un módulo de limpieza (`resetAppState.ts`) que borra el estado de trabajo por usuario en logout/401/login — aísla la sesión entre usuarios en la misma máquina. No hay Context API ni Redux: los componentes leen con selectores (`useStore(s => s.campo)`) y los servicios leen/escriben con `getState()`. Desde el doc 75 `useSessionStore` es la **única fuente** del proyecto y del changeset activos (`activeProjectId` + `activeChangesetId`); el antiguo `useChangesetStore` y su puente `sessionChangesetBridge` se retiraron.
 
 ```mermaid
 flowchart TD
   subgraph Stores["Stores Zustand"]
     Auth["useAuthStore<br/>status, user, permissions<br/>login / logout / restore / has"]
-    Session["useSessionStore<br/>SimUser, openMode<br/>activeChangesetId, versionLabel<br/>openModel"]
-    Changeset["useChangesetStore<br/>activeId, changesets<br/>create / submit / approve / reject"]
-    Identity["useIdentityStore<br/>principal (legacy /api/me)"]
-    Modeler["useModelerStore<br/>projects, folders, diagram<br/>drawings, dirty, flow<br/>CRUD de tablas/columnas/relaciones"]
+    Session["useSessionStore<br/>user, openMode<br/>activeProjectId, activeChangesetId, versionLabel<br/>openModel / closeModel"]
+    Modeler["useModelerStore<br/>projects, folders, diagram<br/>drawings, dirty, flow, projectDeletionPending<br/>CRUD de tablas/columnas/relaciones"]
+    Undo["useUndoStore<br/>pila de inversas (Ctrl+Z)"]
+    Busy["useBusyStore<br/>runBlocking(label, fn) -> BusyOverlay"]
   end
 
-  Bridge["sessionChangesetBridge<br/>espeja activeChangesetId -> setActive"]
-
   Auth -- "mirror(user)" --> Session
-  Session -- "subscribe (session -> changeset)" --> Bridge
-  Bridge --> Changeset
-  Modeler -- "lee activeId" --> Changeset
+  Modeler -- "lee activeProjectId / activeChangesetId" --> Session
   Modeler -- "gate openMode/readonly" --> Session
+  Modeler -- "acciones largas" --> Busy
 
-  Http["services/http.ts<br/>setAuthToken / setDevUser / onUnauthorized"]
+  Http["services/http.ts<br/>setAuthToken / setDevUser / onUnauthorized / timeoutMs"]
   Auth -- "setAuthToken(token)" --> Http
   Session -- "setDevUser(id)" --> Http
 ```
@@ -216,57 +214,52 @@ Fuente de verdad del usuario logueado y sus permisos, con **auth propia por toke
 
 Al montarse, registra el *handler* global de 401: si el backend responde `401`, cierra sesión y el guard redirige a `/login`.
 
-### 4.2 `useSessionStore` — actor simulado + intención de apertura del canvas
+### 4.2 `useSessionStore` — proyecto + versión activos (la sesión es de UN proyecto)
 
-Centraliza el actor de la sesión (para el header `X-Dev-User` en modo local) y la intención con la que se abre el modelo:
+Centraliza el actor de la sesión (para el header `X-Dev-User` en modo local) y la intención con la que se abre el modelo — desde el doc 75 D8 siempre de **un proyecto**:
 
 ```ts
 export type OpenMode = 'readonly' | 'editing';
 
-openModel({ mode, changesetId, versionLabel }: OpenModelArgs) => void;
-// setea openMode, activeChangesetId y activeVersionLabel
+openModel({ projectId, mode, changesetId, versionLabel }: OpenModelArgs) => void;
+// setea activeProjectId, openMode, activeChangesetId y activeVersionLabel;
+// recuerda el último proyecto en localStorage ('dmh:lastProject')
+closeModel() => void;   // vuelve al estado sin modelo abierto (p. ej. el proyecto fue borrado: 404/409)
+sessionProjectId(): string;   // helper de módulo: el proyecto activo, o lanza si no hay sesión
 ```
 
-El `openModel` NO navega: quien lo invoca (el `OpenModelModal` o `ReviewScreen`) decide el `navigate('/model')`. En modo `editing` el changeset es la *working copy* a mutar; en `readonly` con changeset, el canvas LEE su overlay pero las escrituras quedan bloqueadas.
+El `openModel` NO navega: quien lo invoca (el `OpenModelModal` o `ReviewScreen`) decide el `navigate('/model')`. En modo `editing` el changeset es la *working copy* a mutar; en `readonly` con changeset, el canvas LEE su overlay pero las escrituras quedan bloqueadas. Todos los servicios de proyecto (`governance.service`, `schemas.service`, `structure.service`, `explorer.service`) arman sus rutas `/api/projects/{pid}/…` con `sessionProjectId()`; Standards y Reporting reciben el `projectId` explícito de su propio selector.
 
-### 4.3 `useChangesetStore` — changeset activo
+### 4.3 `useBusyStore` — overlay bloqueante por sesión (doc 75 D18)
 
-Mantiene `activeId` (el changeset que están leyendo/escribiendo los servicios de governance) y la lista de changesets con sus operaciones (`create`, `submit`, `approve`, `reject`). También conserva el `devUser` y lo propaga con `setDevUser`.
+`runBlocking(label, fn)` envuelve cualquier acción lenta (crear working copy, publicar, aprobar, restaurar, aplicar estándares, borrar tabla, pegar, crear proyecto) y monta `BusyOverlay` con el rótulo mientras la promesa está en vuelo. Es anidable (una llamada interna no apaga el overlay externo) y el cliente HTTP acepta `timeoutMs` (`LONG_TIMEOUT_MS = 120 s` para esas acciones).
 
-### 4.4 `useIdentityStore` — legado
+### 4.4 `useUndoStore` — deshacer por inversas
 
-Carga idempotente de `GET /api/me` (Principal). Es un store de compatibilidad; la identidad autoritativa vive en `useAuthStore`.
+Pila de inversas de las mutaciones del canvas (Ctrl+Z, doc 50); se vacía al cambiar de changeset o cerrar sesión.
 
 ### 4.5 `useModelerStore` — el corazón del canvas
 
 El store más grande (~600 líneas). Gestiona:
 
-- **Árbol del explorer**: `projects`, `folders`, `subjectAreas`, y un cache por-proyecto `trees` para expandir varios proyectos a la vez.
-- **Sesión de canvas**: `activeProjectId`, `activeFolderId`, `activeSaId`, `diagram`, `viewMode` (`logical`/`physical`).
+- **Árbol del explorer**: `projects`, `folders`, `subjectAreas` y el árbol del proyecto de la sesión (`ExplorerPanel`, doc 71/75: UN proyecto; «Switch…» reabre el Open model).
+- **Sesión de canvas**: `activeProjectId` (espejo del de `useSessionStore`), `activeFolderId`, `activeSaId`, `diagram`, `viewMode` (`logical`/`physical`).
+- **Ciclo de vida del proyecto (doc 75 D5)**: `projectDeletionPending` (el draft contiene `projects/<pid> delete`) alimenta el panel «Deletion pending» (Undo / Send for approval) y el chip del explorer; `undoProjectDeletion` revive el proyecto; `refreshExplorer` maneja 404/409 (proyecto borrado) con `closeModel()`.
 - **Selección e interacción**: `selectedTableId`, `selectedEdgeId`, `hoverEdgeId`, `hoverNodeId`, la instancia de React Flow (`flow`) y `focusTable`.
 - **LOD del canvas**: `lod` (default `true` — la primera pintura de un canvas grande ya sale compacta) y `lodLock` (candado que fuerza detalle completo durante el export SVG). Ver §6.7.
 - **Focus cross-canvas**: `openCanvasAndFocus` / `pendingFocusTableId` — el Finder del Database Explorer abre otro canvas y centra la tabla pedida.
 - **Capa DRAWING**: formas libres (`drawings`) persistidas con *debounce* de 500 ms por canvas.
 - **Checkpoint `dirty`**: alimenta el guard de salida (guardar y salir / salir sin guardar). `saveAll()` persiste layout + drawings y limpia `dirty`.
 - **CRUD de modelo**: `createTable`, `addColumn`, `updateColumn`, `reorderColumns`, `deleteColumn`, etc. Todas marcan `dirty`, escriben vía `governance.service` (changeset-aware) y hacen `reload()`. (Crear relaciones ya NO pasa por el store — doc 47: el `RelationshipCreatePopup` graba el lote directamente.)
-- **Copy/paste de columnas (doc 48)**: `colSel` (filas seleccionadas, una tabla fuente), `colClipboard` (snapshot por valor), `colMenu`, `pasteTarget` y `panelFocusColId` (deep-link del panel: click simple en fila → Columns con la columna expandida) viven en el store; la mutación la graba `PasteColumnsPopup` (bulk + vistas espejo + `reload`, patrón doc 47). Copiar deselecciona (`copySelectedColumns` limpia `colSel`). El clipboard se limpia al cambiar de proyecto o de changeset (subscribe a nivel de módulo sobre `useChangesetStore`); la selección/menú/popup/foco, además, al cambiar de canvas.
+- **Copy/paste de columnas (doc 48)**: `colSel` (filas seleccionadas, una tabla fuente), `colClipboard` (snapshot por valor), `colMenu`, `pasteTarget` y `panelFocusColId` (deep-link del panel: click simple en fila → Columns con la columna expandida) viven en el store; la mutación la graba `PasteColumnsPopup` (bulk + vistas espejo + `reload`, patrón doc 47). Copiar deselecciona (`copySelectedColumns` limpia `colSel`). El clipboard se limpia al cambiar de proyecto o de changeset (subscribe a nivel de módulo sobre `useSessionStore`); la selección/menú/popup/foco, además, al cambiar de canvas.
 
 Incluye protecciones de concurrencia notables: un contador de secuencia (`_loadSeq`) descarta respuestas de diagrama fuera de orden, y `reorderColumns` persiste en tandas de 5 para no saturar el backend con ráfagas de PUT.
 
 Los selectores derivados (`selectActiveTree`, `buildProjectTree`) arman el árbol anidado a partir del estado plano.
 
-### 4.6 `sessionChangesetBridge` — el puente sesión ↔ changeset
+### 4.6 Un solo origen del changeset activo
 
-Es la pieza que evita duplicar lógica. El flujo de "Open model" decide la *working copy* en `useSessionStore.activeChangesetId`, pero los lectores existentes (`governance.service`, el canvas, los paneles) leen `useChangesetStore.activeId`. El bridge **espeja unidireccionalmente** session → changeset:
-
-```ts
-useSessionStore.subscribe((state, prev) => {
-  if (state.activeChangesetId === prev.activeChangesetId) return;
-  useChangesetStore.getState().setActive(state.activeChangesetId);
-});
-```
-
-Se instala una sola vez desde `App.tsx` (`installSessionChangesetBridge()`), es idempotente y no genera ciclos de import ni de actualización.
+El flujo de "Open model" decide el proyecto y la *working copy* en `useSessionStore` (`activeProjectId`, `activeChangesetId`) y TODOS los lectores (`governance.service`, `structure.service`, el canvas, los paneles) leen de ahí con `getState()`. No hay espejo ni puente: el `useChangesetStore` + `sessionChangesetBridge` de las primeras iteraciones se retiraron en el doc 75 D14 (25 lectores migrados), junto con la identidad simulada (`useIdentityStore`, `identity.service`, `hooks/useIdentity`) — la identidad autoritativa es `useAuthStore`.
 
 ### 4.7 El cliente HTTP (`services/http.ts`)
 
@@ -324,7 +317,6 @@ El árbol de rutas vive completo en `App.tsx`. Usa `BrowserRouter` (rutas limpia
         <Route path="/review" element={<ReviewScreen />} />
         <Route path="/standards" element={<RequirePermission perm="model.view"><StandardsScreen /></RequirePermission>} />
         <Route path="/admin" element={<RequirePermission perm="admin.manage"><AdminScreen /></RequirePermission>} />
-        <Route path="/governance" element={<GovernanceScreen />} /> {/* legacy, fuera del rail */}
       </Route>
     </Route>
   </Routes>
@@ -333,7 +325,7 @@ El árbol de rutas vive completo en `App.tsx`. Usa `BrowserRouter` (rutas limpia
 </BrowserRouter>
 ```
 
-`App` también dispara `restore()` una vez al montar (para recuperar la sesión del token) y monta el bridge sesión↔changeset.
+`App` también dispara `restore()` una vez al montar (para recuperar la sesión del token) y monta `BusyOverlay` (el overlay bloqueante de `useBusyStore`).
 
 ### 5.1 Los guards (`features/auth/guards.tsx`)
 
@@ -581,15 +573,15 @@ flowchart TD
 
 Para completar el mapa funcional:
 
-- **Data Standards** (`features/standards`): `StandardsScreen` con cinco sub-tabs — *Overview / Glossary / Parent Domains / UDP / DDL Export rules*. El glosario, los Parent Domains, las definiciones UDP y las reglas DDL se versionan **independientemente** del canvas, todos en el mismo stream (`standards_versions`, snapshot + `apply` + `rollback` por `seq`). Ver requiere `model.view`; editar requiere `standards.edit`. El servicio (`standards.service.ts`) expone `getSnapshot`, `getVersions`, `applyStandards`, `rollbackStandards`, `getUdpDefs`.
-  - La 5.ª pestaña **"DDL Export rules"** (2026-07-20, doc 30 de plan-implementacion/) autora reglas que transforman el texto SQL del Export DDL según los valores de UDP del modelo (mask, tags, generación de tabla `_rej` y vista técnica), sin tocar el modelo ni la data. Componentes: `DdlRulesTab` (overview → catálogo → editor), `DdlRuleCatalog`, `DdlRuleEditor` (split Form ↔ YAML con 5 checks de validación y bloque Test/Impact), `DdlRuleTemplates`, `DdlLookupsEditor`. El servicio `ddlRules.service.ts` (con la dependencia `yaml 2.9.0` para el round-trip) consume los endpoints read-only `/api/ddl-rules/*` y el `POST /api/ddl-rules/render` (permiso `export`); las mutaciones van SOLO por `POST /api/standards/apply` extendido.
+- **Data Standards** (`features/standards`): `StandardsScreen` con un selector de proyecto (`SearchSelect`; `initialProjectId` = el de la sesión) y cinco sub-tabs — *Overview / Glossary / Parent Domains / UDP / DDL Export rules* — todas con la prop `projectId`. El glosario, los Parent Domains, las definiciones UDP, el naming y las reglas DDL son **del proyecto** (doc 75 D3) y se versionan **independientemente** del canvas, en el stream `standards_versions` de ese proyecto (snapshot + `apply` + `rollback` por `seq`; `applyStandards`/`rollbackStandards` corren bajo `runBlocking`). Ver requiere `model.view`; editar requiere `standards.edit`. El servicio (`standards.service.ts`) expone `getSnapshot(pid)`, `getVersions(pid)`, `getStandardsSummary(pid)`, `applyStandards(pid, body)`, `rollbackStandards(pid, seq)`, `getUdpDefs(pid)`; `STANDARDS_BLOCKS` son los bloques copiables al crear un proyecto.
+  - La 5.ª pestaña **"DDL Export rules"** (2026-07-20, doc 30 de plan-implementacion/) autora reglas que transforman el texto SQL del Export DDL según los valores de UDP del modelo (mask, tags, generación de tabla `_rej` y vista técnica), sin tocar el modelo ni la data. Componentes: `DdlRulesTab` (overview → catálogo → editor), `DdlRuleCatalog`, `DdlRuleEditor` (split Form ↔ YAML con 5 checks de validación y bloque Test/Impact), `DdlRuleTemplates`, `DdlLookupsEditor`. El servicio `ddlRules.service.ts` (con la dependencia `yaml 2.9.0` para el round-trip) consume los endpoints read-only `/api/projects/{pid}/ddl-rules/*` y el `POST /api/projects/{pid}/ddl-rules/render` (permiso `export`); las mutaciones van SOLO por `POST /api/projects/{pid}/standards/apply` extendido.
 - **Admin** (`features/admin`): `AdminScreen` con sidebar de roles + tabla de usuarios + `PermissionMatrix` editable en borrador (nada se persiste hasta Guardar). Todo bajo `admin.manage`. El servicio cubre CRUD de usuarios/roles, catálogo de permisos y auditoría (`getAudit`).
-- **Governance** (`features/governance`): hoy provee sobre todo los servicios `changeset.service` (cabecera del changeset, `recordChange`, `effective`, `submit`/`approve`/`reject`) y `governance.service` (el choke-point de escrituras). La `GovernanceScreen` — con su `ApprovalInbox` — es **legacy**: quedó parkeada fuera del rail (`/governance` sin entrada en el `TopNav`), pendiente de retiro; la revisión real vive en `ReviewScreen`.
-- **DDL** (`features/ddl`): `genDDL`/`genViewDDL` generan `CREATE TABLE`/`CREATE VIEW` con cláusula de partición según el engine (Databricks SQL, PostgreSQL, MySQL, SQL Server), expuestos por `ExportDdlModal`; `rulesBridge.ts` conecta con las DDL Export rules — el modal genera el DDL base y lo manda a `POST /api/ddl-rules/render` con las reglas marcadas (sin reglas seleccionadas, el export es byte-identical al flujo previo).
+- **Governance (servicios)** (`src/services/changeset.service.ts` + `src/services/governance.service.ts`): `changeset.service` habla con el ledger (`getChangeset`, `recordChange`, `recordChangesBulk`, `effective`, `entityHistory`) y `governance.service` es el choke-point de escrituras del canvas (`rec()` valida `openMode` + changeset activo; el `projectId` de cada payload lo estampa el backend con el del changeset). Sus rutas de proyecto (`/api/projects/{pid}/catalog/…`, `…/domains`, `…/glossary/physicalize`) salen de `sessionProjectId()`. La antigua `GovernanceScreen` (`/governance`) y `features/governance/` se eliminaron en el doc 75 D14; `src/architecture.test.ts` (vitest) garantiza que no vuelvan.
+- **DDL** (`features/ddl`): `generators.ts` (`genViewDDL` y helpers) genera `CREATE VIEW` y el DDL base que consume `ExportDdlModal`; `rulesBridge.ts` conecta con las DDL Export rules del proyecto — el modal genera el DDL base y lo manda a `POST /api/projects/{pid}/ddl-rules/render` con las reglas marcadas (sin reglas seleccionadas, el export es byte-identical al flujo previo).
 - **Auth** (`features/auth`): `LoginScreen` (dos caminos: SSO de Databricks + contraseña del admin, doc 38), los guards y `auth.service` (`ssoLogin`/`login`/`logout`/`fetchMe`).
 - **Upload** (`features/upload`, doc 55 de plan-implementacion/): botón «Upload from Excel» del toolbar del Model (solo en sesión de edición con changeset). `lib/parseWorkbook.ts` lee el `.xlsx` con SheetJS (hojas `Tablas`/`Atributos`, fila de cabecera por `TABLA_LOGICO`, celdas como texto) y arma el JSON que consume `POST /api/changesets/{cs}/uploads`; `upload.service.ts` hace el polling del job (`validating → validated → applying → applied | failed`); `UploadModal` (sobre `Dialog`) muestra el reporte — tiles de conteos create/update/unchanged, errores (bloquean Upload) y warnings con su referencia de celda `Hoja · row N · COLUMNA`, desglose por tabla — y al aplicar corre `arrangeCanvases.ts` (ELK «headless» sobre los canvases tocados, mismo motor que Autoarrange vía `modeler/lib/arrangeGraph.ts`), vacía la pila de Undo y refresca el explorer. La plantilla se sirve desde `public/templates/dmh-upload-template.xlsx`.
 
-El flujo de gobernanza (crear draft → editar en canvas → enviar a revisión → aprobar/rechazar/retirar/reabrir) se maneja en `ReviewScreen`, que consume `versioning.service` (`listVersions`, `getChangeset`, `getDiff`, `getDiffDetails`, `review`, `withdraw`, `reopen`, `addComment`) con detección de conflictos contra producción. Desde 2026-07-24 (doc 31 de plan-implementacion/) la presentación de cambios vive en `src/screens/review/`:
+El flujo de gobernanza (crear draft → editar en canvas → enviar a revisión → aprobar/rechazar/retirar/reabrir) se maneja en `ReviewScreen`, que consume `versioning.service` (`listVersions`, `getChangeset`, `getDiff`, `getDiffDetails`, `review`, `withdraw`, `reopen`, `addComment`) con detección de conflictos contra producción. Es una **bandeja global** con chip de proyecto en cada request y filtro Project (doc 75 D20); las decisiones corren bajo `runBlocking`. Cuando el request **borra su proyecto** (`deletesProject`), la pantalla muestra `CriticalDeletionBlock` (conteos de lo que desaparece, `GET /api/projects/{pid}/counts`) y `ApproveDeletionDialog` exige escribir el nombre del proyecto para aprobar (`lib/projectDeletion.ts`: `deletionSummary`, `nameMatches`, `criticalDeletionText`). Del lado del Workspace, `DeleteProjectDialog` registra el cambio `projects/<pid> delete` en el draft y `DeletionPendingPanel` ofrece Undo / Send for approval; `PublishModal` avisa antes de enviar. Desde 2026-07-24 (doc 31 de plan-implementacion/) la presentación de cambios vive en `src/screens/review/`:
 
 - **`ChangesSummary`**: card de resumen del request — chips de proyectos y modelos afectados + matriz de conteos Created/Modified/Deleted (verde/ámbar/rojo) por tipo de entidad (Tables, Columns, Views, Relationships, Schemas, Projects, Folders, Canvases; solo filas con conteo > 0). Todo derivado del `GET /diff` ya cargado (`summarizeDiff()`), cero backend nuevo.
 - **`ChangesDetailModal`**: popup master-detail con el árbol jerárquico tintado por verbo (`DiffTree`), sección propia de **Relationships** (antes invisibles en modo jerárquico) y panel de diff de campos ANTES→DESPUÉS bajo demanda vía el endpoint read-only `POST /api/changesets/{id}/diff/details`, con UDP, dominios y tablas resueltos a NOMBRE (no ids).
@@ -605,20 +597,17 @@ sequenceDiagram
   participant U as Usuario
   participant OM as OpenModelModal
   participant Sess as useSessionStore
-  participant Br as sessionChangesetBridge
-  participant Cs as useChangesetStore
   participant Mod as useModelerStore
   participant Gov as governance.service
   participant Http as http.apiFetch
   participant API as Backend FastAPI
 
-  U->>OM: elegir version + modo editing
-  OM->>Sess: openModel(mode, changesetId)
-  Sess-->>Br: subscribe (activeChangesetId cambio)
-  Br->>Cs: setActive(changesetId)
+  U->>OM: elegir proyecto, version + modo editing
+  OM->>Sess: openModel(projectId, mode, changesetId)
   U->>Mod: editar columna en PropertiesPanel
   Mod->>Gov: updateColumn(col)
-  Gov->>Gov: rec() valida openMode + activeId
+  Gov->>Sess: getState().openMode / activeChangesetId
+  Gov->>Gov: rec() valida openMode + changeset activo
   Gov->>Http: PUT /api/changesets/{id}/changes
   Http->>API: fetch (X-Session-Token + X-Dev-User)
   API-->>Http: { success, data }
@@ -638,7 +627,7 @@ En producción el frontend es una **Databricks App** (`frnt-data-model-hub`). El
 
 Arquitectura de **un solo origen** (desde 2026-07-31, doc 36 de plan-implementacion/): el navegador solo habla con el front; el cruce al backend lo hace `server.mjs` servidor-a-servidor. En desarrollo, el dev server de Vite (`:3000`) reenvía `/api` al FastAPI (`:8000`) vía proxy — mismo contrato de rutas relativas. La simulación local de producción es `BACKEND_API_URL=http://localhost:8000 node server.mjs` (sin credenciales de SP, el proxy va sin Bearer).
 
-La suite del repo, verificada 2026-08-28: `npx tsc --noEmit` limpio + `npx vitest run` = **344 tests en 51 archivos** (50 `*.test.ts` bajo `src/` + los 15 tests de `server.test.mjs`).
+La suite del repo, verificada 2026-09-08: `npx tsc --noEmit` limpio + `npx vitest run` = **570 tests en 78 archivos** (77 `*.test.ts` bajo `src/` + `server.test.mjs`) + `npm run build` OK.
 
 ### 10.2 Variables de entorno
 
@@ -668,7 +657,7 @@ Rutas de referencia (absolutas) de los archivos clave descritos:
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/server.mjs` y `server.test.mjs`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/App.tsx`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/http.ts` y `.../services/apiBase.ts`
-- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/store/` (`useAuthStore`, `useSessionStore`, `useChangesetStore`, `useIdentityStore`, `useModelerStore`, `sessionChangesetBridge`, `resetAppState`)
+- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/store/` (`useAuthStore`, `useSessionStore`, `useModelerStore`, `useUndoStore`, `useBusyStore`, `resetAppState`)
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/modeler/components/ModelerCanvas.tsx`, `.../TableNode.tsx`, `.../CrowFootEdge.tsx`, `.../lib/elkLayout.ts`, `.../lib/lodSize.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/reporting/query.service.ts` y `.../components/ReportDesigner.tsx`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/screens/review/` (`ChangesSummary`, `ChangesDetailModal`, `DiffTree`)

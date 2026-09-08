@@ -3,7 +3,6 @@ import { CircleAlert, CircleCheck, FileSpreadsheet, ListChecks, TriangleAlert, U
 import Dialog from '@/components/ui/Dialog';
 import Button from '@/components/ui/Button';
 import { apiErrorMessage } from '@/services/http';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useUndoStore } from '@/store/useUndoStore';
@@ -57,7 +56,7 @@ function summaryLine(c: UploadSummary | undefined): string {
 }
 
 export default function UploadModal({ onClose, pushToast }: { onClose: () => void; pushToast: (m: string, k?: 'err') => void }) {
-  const csId = useChangesetStore((s) => s.activeId);
+  const csId = useSessionStore((s) => s.activeChangesetId);
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
   const [phase, setPhase] = useState<Phase>('idle');
   const [file, setFile] = useState<DropzoneFile | null>(null);

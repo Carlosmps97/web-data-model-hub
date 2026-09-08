@@ -60,6 +60,9 @@ interface RequestOptions {
   headers?: Record<string, string>;
   /** AbortSignal from caller (e.g. useEffect cleanup). */
   signal?: AbortSignal;
+  /** Timeout de ESTA llamada (default `DEFAULT_TIMEOUT_MS`); las acciones
+   *  largas (publicar, copiar estándares, rollback) usan `LONG_TIMEOUT_MS`. */
+  timeoutMs?: number;
 }
 
 /**
@@ -71,12 +74,17 @@ interface RequestOptions {
 /** Timeout por defecto de toda llamada API: sin él, un backend colgado deja
  *  la UI en spinners eternos (fetch no tiene timeout propio). */
 const DEFAULT_TIMEOUT_MS = 30_000;
+/** Timeout de las acciones largas del servidor (doc 75 D18): publicar una
+ *  working copy, crear un proyecto copiando estándares, rollback, apply de
+ *  estándares — con el overlay bloqueante encendido en la sesión. */
+export const LONG_TIMEOUT_MS = 120_000;
 
 export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, signal } = opts;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  // Combina el signal del caller (cleanup de useEffect) con el timeout global.
-  const timeout = AbortSignal.timeout(DEFAULT_TIMEOUT_MS);
+  // Combina el signal del caller (cleanup de useEffect) con el timeout de la llamada.
+  const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
   // The Next.js frontend (`:3000`) and the FastAPI backend (`:8000`) live on
@@ -105,7 +113,7 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
   } catch (err) {
     // Red caída, timeout, aborto, DNS fail, etc.
     if (timeout.aborted && !(signal?.aborted)) {
-      throw new ApiError(`The server didn't respond within ${DEFAULT_TIMEOUT_MS / 1000}s — try again in a moment.`, 0);
+      throw new ApiError(`The server didn't respond within ${Math.round(timeoutMs / 1000)}s — try again in a moment.`, 0);
     }
     throw new ApiError(err instanceof Error ? err.message : 'Network error', 0);
   }

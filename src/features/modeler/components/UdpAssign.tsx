@@ -1,12 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
+import { sessionProjectId } from '@/store/useSessionStore';
 import { Tags } from 'lucide-react';
 import { getUdpDefs, type UdpDefinition, type UdpLevel } from '@/features/standards/standards.service';
+import { FACET_CLASS_LABEL, facetUdpDefs, type Facet } from '@/lib/facets';
 import { applyPending, commitValue, prunePending, type UdpValues } from '../lib/udpDraft';
 
 /** Asigna VALORES a las etiquetas UDP (definidas en Data Standards) de una
  *  tabla, columna o canvas. Muestra cada key con su input (select si es
  *  'list', input tipado si no) y llama `onChange(next)` con el mapa completo
- *  {defId: value}. Sólo lista las definiciones del `level` actual.
+ *  {defId: value}. Sólo lista las definiciones del `level` Y la faceta `view`
+ *  actual (doc 69: Entity/Attribute lógicos vs Table/Column físicos — los
+ *  paneles pasan el modo del canvas; View y Model son siempre físicos).
  *
  *  Guardado (doc 40): los selects commitean al elegir; los inputs de
  *  texto/número/fecha bufferean LOCAL y commitean al salir del campo (blur o
@@ -15,8 +19,10 @@ import { applyPending, commitValue, prunePending, type UdpValues } from '../lib/
  *  carácter, y el input (atado al prop del server) perdía teclas al tipear
  *  rápido. `pending` (udpDraft.ts) evita que un commit armado sobre el prop
  *  stale pise lo recién guardado en otro campo mientras el reload viaja. */
-export default function UdpAssign({ level, values, onChange, disabled, locked }: {
+export default function UdpAssign({ level, view = 'physical', values, onChange, disabled, locked }: {
   level: UdpLevel;
+  /** Doc 69: faceta cuyas defs se listan (los paneles pasan el modo del canvas). */
+  view?: Facet;
   values: UdpValues;
   onChange: (next: UdpValues) => void;
   disabled?: boolean;
@@ -36,9 +42,9 @@ export default function UdpAssign({ level, values, onChange, disabled, locked }:
 
   useEffect(() => {
     let alive = true;
-    getUdpDefs().then((d) => { if (alive) setDefs(d.filter((x) => x.level === level)); }).catch(() => {});
+    getUdpDefs(sessionProjectId()).then((d) => { if (alive) setDefs(facetUdpDefs(d, level, view)); }).catch(() => {});
     return () => { alive = false; };
-  }, [level]);
+  }, [level, view]);
 
   // Llegó un prop nuevo (reload): podar lo pendiente que ya está reflejado.
   useEffect(() => { pending.current = prunePending(values, pending.current); }, [values]);
@@ -58,8 +64,11 @@ export default function UdpAssign({ level, values, onChange, disabled, locked }:
   }, []);
 
   if (defs.length === 0) {
-    const noun = level === 'table' ? 'tablas' : level === 'canvas' ? 'modelos' : level === 'view' ? 'vistas' : 'columnas';
-    return <div style={{ fontSize: 12, color: '#9AA3B2', padding: '4px 0' }}>No hay UDP definidos para {noun}. Definilos en <b>Data Standards → UDP</b>.</div>;
+    return (
+      <div style={{ fontSize: 12, color: '#9AA3B2', padding: '4px 0' }}>
+        No UDPs defined for <b>{FACET_CLASS_LABEL[level][view]}</b>. Define them in <b>Data Standards → UDP</b>.
+      </div>
+    );
   }
 
   const base = applyPending(values, pending.current);

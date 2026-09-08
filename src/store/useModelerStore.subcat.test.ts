@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-vi.mock('@/features/governance/services/governance.service', () => ({}));
+vi.mock('@/services/governance.service', () => ({}));
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 import { useModelerStore } from './useModelerStore';
 

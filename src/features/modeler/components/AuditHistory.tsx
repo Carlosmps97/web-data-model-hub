@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import * as gov from '@/features/governance/services/governance.service';
-import type { HistoryItem } from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
+import type { HistoryItem } from '@/services/governance.service';
 import { ACTION_LABEL, fieldValue, formatWhen, originText, refLabel, userLabel } from '../lib/history';
 
 /**

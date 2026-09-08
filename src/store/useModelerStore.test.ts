@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/features/governance/services/governance.service', () => ({
+vi.mock('@/services/governance.service', () => ({
   deleteRelationship: vi.fn().mockResolvedValue({}),
   deleteColumn: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
-import * as gov from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
+import * as csvc from '@/services/changeset.service';
+import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from './useModelerStore';
 
 describe('useModelerStore.deleteColumn (cascade spec 10 §8)', () => {
@@ -28,5 +30,32 @@ describe('useModelerStore.deleteColumn (cascade spec 10 §8)', () => {
     await useModelerStore.getState().deleteColumn('c1');
     expect(gov.deleteRelationship).not.toHaveBeenCalled();
     expect(gov.deleteColumn).toHaveBeenCalledWith('c1');
+  });
+});
+
+
+describe('useModelerStore.deleteProject (doc 75 D5)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useSessionStore.setState({ openMode: 'editing', activeProjectId: 'p1', activeChangesetId: 'cs1' });
+    useSessionStore.setState({ activeChangesetId: 'cs1' });
+    useModelerStore.setState({ activeProjectId: 'p1', activeSaId: null, dirty: false, projectDeletionPending: false });
+  });
+
+  it('graba UN solo cambio y deja el draft en deletion pending', async () => {
+    const rec = vi.spyOn(csvc, 'recordChange').mockResolvedValue(undefined as never);
+    await useModelerStore.getState().deleteProject('p1');
+    expect(rec).toHaveBeenCalledTimes(1);
+    expect(rec).toHaveBeenCalledWith('cs1', 'projects', 'p1', 'delete');
+    expect(useModelerStore.getState().projectDeletionPending).toBe(true);
+    expect(useModelerStore.getState().dirty).toBe(true);
+  });
+
+  it('en solo lectura no graba nada', async () => {
+    useSessionStore.setState({ openMode: 'readonly' });
+    const rec = vi.spyOn(csvc, 'recordChange').mockResolvedValue(undefined as never);
+    await expect(useModelerStore.getState().deleteProject('p1')).rejects.toThrow('working copy in edit mode');
+    expect(rec).not.toHaveBeenCalled();
+    expect(useModelerStore.getState().projectDeletionPending).toBe(false);
   });
 });

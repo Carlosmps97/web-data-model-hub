@@ -95,6 +95,12 @@
 .dmh-rep-table tbody tr:nth-child(even) { background: var(--fill-3); }
 .dmh-rep-table tbody tr:hover { background: var(--blue-soft); }
 .dmh-rep-table td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--navy); font-weight: 600; }
+/* Doc 70 §4.2 — grilla ancha (Columns / Tables + Columns): scroll horizontal
+   dentro de .dmh-rep-tablescroll, celdas sin quiebre y con elipsis. */
+.dmh-rep-table--wide { width: max-content; min-width: 100%; }
+.dmh-rep-table--wide thead th, .dmh-rep-table--wide tbody td { white-space: nowrap; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+.dmh-rep-table--wide tbody td { padding: 8px 12px; font-size: 12.5px; }
+.dmh-rep-gridnote { padding: 8px 14px; font-size: 12px; color: var(--text-muted-2); border-bottom: 1px solid #F2F4F8; }
 
 /* row-selection checkbox column + "N selected" counter (export by selection) */
 .dmh-rep-selcount { margin-left: 4px; font-size: 12.5px; color: var(--text-muted-2); white-space: nowrap; }
@@ -193,3 +199,6 @@
   .dmh-rep-cols { flex-direction: column; }
   .dmh-rep-rail { width: 100%; position: static; }
 }
+
+/* ── Doc 75 D13: selector de proyecto del reporte ───────────────────────── */
+.dmh-rep-project { display: inline-block; width: 220px; flex: none; }

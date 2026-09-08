@@ -14,11 +14,12 @@
 // documento). Los rgba/opacity se PRE-MEZCLAN sobre su fondo real: la escena
 // no maneja transparencia (simplifica el PDF).
 import { Position, getBezierPath, getSmoothStepPath } from '@xyflow/react';
-import type { CanonicalColumn, Cardinality } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, Cardinality } from '@/services/governance.service';
 import type { Diagram, Drawing } from '@/features/modeler/services/modeler.service';
 import type { View } from '@/services/views.service';
 import { collapseComplexType } from './complexTypes';
 import { pkInKeyOrder } from './keyOrder';
+import { sortByOrdinal } from './columnOrder';
 import { HEADER_H, ROW_H, fanSlots, fanSourceY } from './edgeFanout';
 import { relationshipDrift } from './relationshipPairs';
 import { SYMBOL_SIZE, isSubcategory, subtypeGroups, symbolDefaultPos } from './subtypeGraph';
@@ -134,8 +135,10 @@ export function buildDiagramScene(input: SceneInput): Scene {
   });
 
   const tableBoxes = new Map<string, TableBox>();
+  // Mismas filas que el canvas (doc 74): bloque PK en orden de llave y el
+  // resto en el orden único de columnas (`ordinal`), en ambas facetas.
   (diagram?.tables ?? []).forEach((t, i) => {
-    const cols = colsByTable.get(t.id) ?? [];
+    const cols = sortByOrdinal(colsByTable.get(t.id) ?? []);
     const pks = pkInKeyOrder(cols);
     const rest = cols.filter((c) => !c.isPrimaryKey);
     const ordered = [...pks, ...rest];

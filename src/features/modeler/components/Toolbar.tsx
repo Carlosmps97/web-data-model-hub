@@ -1,21 +1,20 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
   FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
 } from 'lucide-react';
-import Dialog from '@/components/ui/Dialog';
 import Tooltip from '@/components/ui/Tooltip';
-import { findMatches, type FindMatch } from '../lib/findMatches';
 import { EndIcon, RelLineIcon, SubcatIcon } from './RelIcon';
-import type { Cardinality } from '@/features/governance/services/governance.service';
+import type { Cardinality } from '@/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import { UNDO_KEY_LABEL } from './ColumnContextMenu';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
-import { useChangesetStore } from '@/store/useChangesetStore';
+import { runBlocking } from '@/store/useBusyStore';
+import { isAsOfChangesetId } from '@/services/versioning.service';
 import { UploadModal } from '@/features/upload';
 import NewTableModal from './NewTableModal';
 import CtasModal from './CtasModal';
@@ -24,6 +23,7 @@ import PublishModal from './PublishModal';
 import { ExportDdlModal } from '@/features/ddl';
 import ViewEditor from './ViewEditor';
 import ModelPropertiesModal from './ModelPropertiesModal';
+import SearchModelPopup from './SearchModelPopup';
 
 // Las 4 cardinalidades crow's-foot del preset por extremo (el popup de la
 // relación ofrece las 6, incluyendo 'many' pelado y 'one-only').
@@ -65,17 +65,23 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const setSubcatArmed = useModelerStore((s) => s.setSubcatArmed);
   const autoOrganize = useModelerStore((s) => s.autoOrganize);
   const createTable = useModelerStore((s) => s.createTable);
-  const focusTable = useModelerStore((s) => s.focusTable);
   const addDrawing = useModelerStore((s) => s.addDrawing);
   const saveAll = useModelerStore((s) => s.saveAll);
   const reload = useModelerStore((s) => s.reload);
+  // Doc 70: una vista nueva se suma a la membresía de ESTE canvas.
+  const addViewsToCanvas = useModelerStore((s) => s.addViewsToCanvas);
 
   const openMode = useSessionStore((s) => s.openMode);
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
+  // Doc 75 D8: el chip nombra el proyecto de la sesión.
+  const projectName = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name ?? null);
   const readonly = openMode === 'readonly';
+  // Doc 70: visor de un snapshot (`asof:<versionId>`) — el modelo tal como se
+  // publicó en esa versión, reconstruido del ledger.
+  const snapshot = isAsOfChangesetId(useSessionStore((s) => s.activeChangesetId));
   // Doc 55: la carga masiva escribe en el draft activo — no exige canvas
   // abierto (crea proyectos/canvases), sí sesión de edición con changeset.
-  const activeCsId = useChangesetStore((s) => s.activeId);
+  const activeCsId = useSessionStore((s) => s.activeChangesetId);
   const canUpload = openMode === 'editing' && !!activeCsId;
 
   // Undo (doc 50): el tooltip muestra QUÉ se va a deshacer; el botón se apaga
@@ -90,6 +96,9 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   };
 
   const [modal, setModal] = useState<'table' | 'ctas' | 'view' | 'schema' | 'upload' | null>(null);
+  // Doc 71: el buscador se comparte con la cabecera del Explorer (estado en el store).
+  const searchOpen = useModelerStore((s) => s.searchOpen);
+  const setSearchOpen = useModelerStore((s) => s.setSearchOpen);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
   const [modelPropsOpen, setModelPropsOpen] = useState(false);
@@ -98,19 +107,6 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const [exportOpen, setExportOpen] = useState(false);
   const [exportPos, setExportPos] = useState<{ left: number; top: number } | null>(null);
   const exportBtnRef = useRef<HTMLSpanElement | null>(null);
-  const [find, setFind] = useState('');
-  const [findOpen, setFindOpen] = useState(false);
-  const findRef = useRef<HTMLInputElement>(null);
-  // Doc 64 §5: el dropdown va por PORTAL fixed (como el menú de export) — un
-  // menú absoluto dentro del toolbar (overflow-x: auto) quedaba recortado bajo
-  // el canvas. `findPos` se computa del rect del input al abrir/tipear.
-  const [findPos, setFindPos] = useState<{ left: number; top: number; width: number } | null>(null);
-  // Popup de coincidencias (Enter con 2+ matches): elegir cuál centrar.
-  const [findResultsOpen, setFindResultsOpen] = useState(false);
-  const placeFind = () => {
-    const r = findRef.current?.getBoundingClientRect();
-    setFindPos(r ? { left: r.left, top: r.bottom + 4, width: r.width } : null);
-  };
   // Selección de cardinalidad por extremo (crow's-foot), en términos
   // PARENT (lado PK) / CHILD (lado FK) — doc 19. Default Erwin: one → zero-many.
   const [relSel, setRelSel] = useState<{ parent: Cardinality; child: Cardinality }>({ parent: 'one', child: 'zero-many' });
@@ -131,44 +127,22 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Edición habilitada: hay canvas y NO es modo solo-lectura.
   const canEdit = hasCanvas && !readonly;
 
-  // ⌘K / Ctrl+K enfoca el buscador "Find a table…".
+  // ⌘K / Ctrl+K abre el buscador del Model (doc 70 §11) — con una sesión de
+  // canvas abierta (el popup redirige al canvas del hit).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); findRef.current?.focus(); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (useSessionStore.getState().openMode) useModelerStore.getState().setSearchOpen(true);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Coincidencias del buscador (doc 64 §5): lógica pura en lib/findMatches —
-  // tablas (lógico/físico) + vistas del canvas, "contiene" CI, SIN tope (el
-  // dropdown corta a 8; el popup de Enter lista todas). El pick usa
-  // focusTable, que para nodos view centra sin abrir el PropertiesPanel.
-  const allMatches = useMemo(
-    () => findMatches(find, diagram?.tables ?? [], diagram?.views ?? []),
-    [find, diagram],
-  );
-  const DROP_MAX = 8;
-  const dropMatches = allMatches.slice(0, DROP_MAX);
-
-  // Dropdown fixed abierto: un scroll (toolbar/página) o resize lo cierra —
-  // patrón select nativo (no se re-posiciona), mismo criterio que SearchSelect.
-  useEffect(() => {
-    if (!findOpen) return;
-    const close = () => setFindOpen(false);
-    window.addEventListener('scroll', close, true);
-    window.addEventListener('resize', close);
-    return () => {
-      window.removeEventListener('scroll', close, true);
-      window.removeEventListener('resize', close);
-    };
-  }, [findOpen]);
-
-  const pickTable = (id: string) => { focusTable(id); setFind(''); setFindOpen(false); findRef.current?.blur(); };
-
   const onSave = async () => {
     setSaving(true);
-    try { await saveAll(); pushToast('Saved'); }
+    try { await runBlocking('Saving working copy…', saveAll); pushToast('Saved'); }
     // Propaga el motivo real (p.ej. un 4xx del backend), no un genérico.
     catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
     finally { setSaving(false); }
@@ -247,62 +221,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       </div>
       <span className="wk-div" />
 
-      {/* LOCATE & CENTER */}
+      {/* SEARCH & INSPECT (docs 70 §11 · 72): UN popup busca (o navega por
+          filtros) tablas, columnas y definiciones en TODA la versión; cada hit
+          ofrece «Locate on canvas» (redirige/centra) e «Inspect metadata»
+          (Object Inspector, sin canvas). Reemplaza el input «Find a table…». */}
       <div className="wk-grp">
-        <div className="wk-grp-row wk-find-wrap">
-          <Search size={14} className="wk-find-ico" />
-          <input
-            ref={findRef}
-            className="wk-find"
-            placeholder="Find a Table"
-            value={find}
-            disabled={!hasCanvas}
-            onChange={(e) => { setFind(e.target.value); placeFind(); setFindOpen(true); }}
-            onFocus={() => { placeFind(); setFindOpen(true); }}
-            onBlur={() => setTimeout(() => setFindOpen(false), 120)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                // Doc 64 §5: 1 coincidencia → centra directo; 2+ → popup con la
-                // lista completa para ELEGIR (antes saltaba al primero a ciegas).
-                if (allMatches.length === 1) pickTable(allMatches[0].id);
-                else if (allMatches.length > 1) { setFindOpen(false); setFindResultsOpen(true); findRef.current?.blur(); }
-              }
-              if (e.key === 'Escape') { setFind(''); setFindOpen(false); findRef.current?.blur(); }
-            }}
-          />
-          {/* Portal fixed (doc 64 §5): el toolbar tiene overflow-x auto y un
-              menú absoluto quedaba clipeado bajo el canvas. */}
-          {findOpen && dropMatches.length > 0 && findPos && createPortal(
-            <div
-              className="wk-find-menu"
-              style={{
-                position: 'fixed', zIndex: 320, left: findPos.left, top: findPos.top,
-                minWidth: Math.max(findPos.width, 230), maxWidth: 400,
-                maxHeight: Math.max(120, window.innerHeight - findPos.top - 12),
-              }}
-            >
-              {dropMatches.map((m) => (
-                <button key={m.id} className="wk-find-item" onMouseDown={(e) => { e.preventDefault(); pickTable(m.id); }}>
-                  <span className="wk-find-lname">
-                    {m.kind === 'view' && <Eye size={11} style={{ marginRight: 5, verticalAlign: -1, color: 'var(--purple)' }} aria-hidden />}
-                    {m.primary}
-                  </span>
-                  <span className="wk-find-pname rd-mono">{m.secondary}</span>
-                </button>
-              ))}
-              {allMatches.length > DROP_MAX && (
-                <button
-                  className="wk-find-item wk-find-more"
-                  onMouseDown={(e) => { e.preventDefault(); setFindOpen(false); setFindResultsOpen(true); }}
-                >
-                  +{allMatches.length - DROP_MAX} more — press Enter to see all
-                </button>
-              )}
-            </div>,
-            document.body,
-          )}
+        <div className="wk-grp-row">
+          {ic('Search the model — locate a table, column or definition on its canvas, or inspect its metadata (⌘K)', <Search size={17} />, () => setSearchOpen(true), { disabled: !openMode })}
         </div>
-        <span className="wk-grp-cap">Locate &amp; center</span>
+        <span className="wk-grp-cap">Search &amp; inspect</span>
       </div>
       <span className="wk-div" />
 
@@ -428,8 +355,9 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           </Tooltip>
         )}
         {openMode && (
-          <span className={`wk-vpill${readonly ? ' viewer' : ''}`}>
-            {readonly ? 'Viewer' : 'Editing'} · {versionLabel ?? '—'}
+          <span className={`wk-vpill${readonly ? ' viewer' : ''}`}
+            title={snapshot ? 'Read-only snapshot of a published version, rebuilt from the change ledger' : undefined}>
+            {projectName ? `«${projectName}» · ` : ''}{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}
           </span>
         )}
         <Tooltip label={readonly ? VIEWER_TIP : 'Save working copy'}>
@@ -442,20 +370,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
 
       {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={createTable} />}
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}
-      {modal === 'view' && <ViewEditor onClose={() => setModal(null)} onSaved={() => void reload()} pushToast={pushToast} />}
+      {modal === 'view' && (
+        <ViewEditor onClose={() => setModal(null)} pushToast={pushToast}
+          onSaved={(v, created) => { if (created && v.showOnCanvas !== false) void addViewsToCanvas([v.id]); else void reload(); }} />
+      )}
       {modal === 'schema' && <SchemaManagerModal onClose={() => setModal(null)} pushToast={pushToast} />}
       {modal === 'upload' && <UploadModal onClose={() => setModal(null)} pushToast={pushToast} />}
 
-      {/* Doc 64 §5: popup de coincidencias (Enter con 2+ matches). */}
-      {findResultsOpen && (
-        <FindResultsModal
-          query={find}
-          matches={allMatches}
-          onQuery={setFind}
-          onPick={(id) => { pickTable(id); setFindResultsOpen(false); }}
-          onClose={() => setFindResultsOpen(false)}
-        />
-      )}
+      {/* Doc 70 §11: buscador del Model (tablas · columnas · definiciones). */}
+      {searchOpen && <SearchModelPopup onClose={() => setSearchOpen(false)} pushToast={pushToast} />}
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
 
@@ -482,46 +405,5 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT table header (blue ring) onto a child column or the child header — the parent's whole primary key is migrated. <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setRelPreset(null)}>exit</button></div>}
       {subcatArmed && <div className="wk-relhint">Draw the subcategory: drag from the SUPERTYPE table header (blue ring) — or from an existing subcategory symbol — onto the subtype table. The supertype's key becomes the subtype's key (is-a, 1:1). <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setSubcatArmed(false)}>exit</button></div>}
     </div>
-  );
-}
-
-/** Doc 64 §5: popup de coincidencias del buscador — Enter con 2+ matches lo
- *  abre para ELEGIR qué tabla/vista centrar (lista COMPLETA, refinable). */
-function FindResultsModal({ query, matches, onQuery, onPick, onClose }: {
-  query: string;
-  matches: FindMatch[];
-  onQuery: (q: string) => void;
-  onPick: (id: string) => void;
-  onClose: () => void;
-}) {
-  return (
-    <Dialog
-      open
-      title="Locate &amp; center"
-      subtitle={`Pick which object to center — ${matches.length} match${matches.length === 1 ? '' : 'es'}`}
-      icon={Search}
-      backdrop="canvas"
-      canvasTop={136}
-      width={520}
-      onClose={onClose}
-      footer={<button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Close</button>}
-    >
-      <div className="wk-findres-search">
-        <Search size={14} aria-hidden />
-        <input autoFocus value={query} placeholder="Refine the search…" onChange={(e) => onQuery(e.target.value)} />
-      </div>
-      <div className="wk-findres-list">
-        {matches.length === 0 && <div className="wk-findres-empty rd-small">No matches on this canvas.</div>}
-        {matches.map((m) => (
-          <button key={m.id} type="button" className="wk-find-item" onClick={() => onPick(m.id)}>
-            <span className="wk-find-lname">
-              {m.kind === 'view' && <Eye size={11} style={{ marginRight: 5, verticalAlign: -1, color: 'var(--purple)' }} aria-hidden />}
-              {m.primary}
-            </span>
-            <span className="wk-find-pname rd-mono">{m.secondary}</span>
-          </button>
-        ))}
-      </div>
-    </Dialog>
   );
 }

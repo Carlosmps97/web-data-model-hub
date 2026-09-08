@@ -1,12 +1,5 @@
 // API request/response types
 
-import type {
-  Project,
-  EngineId,
-  ModelLevel,
-  Domain,
-} from './model';
-
 // Generic API response wrapper
 export interface ApiResponse<T> {
   success: boolean;
@@ -15,35 +8,16 @@ export interface ApiResponse<T> {
 }
 
 // ─── Project endpoints ───────────────────────────────────────────────────────
-export type ProjectListResponse = ApiResponse<Project[]>;
-export type ProjectResponse = ApiResponse<Project>;
 
+/** Bloques de Data Standards que un proyecto nuevo puede copiar de otro (doc 75 D15).
+ *  Espeja `COPY_BLOCKS` del backend. */
+export type StandardsBlock = 'glossary' | 'domains' | 'udp' | 'naming' | 'ddl';
+
+/** `POST /api/projects` (doc 75 D15): la creación es la ÚNICA operación directa
+ *  sobre un proyecto (renombrar/borrar van por draft). `copyFrom` copia bloques
+ *  de Data Standards de otro proyecto; sin él, el proyecto nace vacío. */
 export interface CreateProjectRequest {
   name: string;
   description?: string;
-  engines?: EngineId[];
-  layers?: ModelLevel[];
-  domains?: Domain[];
-}
-
-export interface UpdateProjectRequest {
-  name?: string;
-  description?: string;
-  engines?: EngineId[];
-  layers?: ModelLevel[];
-  domains?: Domain[];
-}
-
-// (Los tipos legacy CanvasResponse/CanvasReplaceRequest se eliminaron junto
-// con el Relationship viejo de types/model — el canvas real usa el diagrama
-// canónico de modeler.service + governance.service.)
-
-// ─── Chat endpoint (AI agent — decoupled, kept) ──────────────────────────────
-export interface ChatRequest {
-  message: string;
-  attachments?: { name: string; type: string; data: string }[];
-}
-export interface ChatResponse {
-  message: string;
-  timestamp: string;
+  copyFrom?: { projectId: string; blocks: StandardsBlock[] };
 }

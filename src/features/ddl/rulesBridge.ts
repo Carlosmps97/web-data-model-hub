@@ -17,10 +17,10 @@ import type { Diagram } from '@/features/modeler/services/modeler.service';
 
 import {
   tableStatements, viewStatements,
-  type DatabricksDdlInput, type DatabricksDdlOptions, type DdlView,
+  type DatabricksDdlInput, type DatabricksDdlOptions,
 } from './generators';
 
-const DDL_RULES = `${API_BASE}/api/ddl-rules`;
+const DDL_RULES = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}/ddl-rules`;
 
 /** Vista liviana de una regla para el selector del modal. */
 export interface ExportRule {
@@ -44,7 +44,20 @@ export interface RenderedExport {
   skipped: number;
 }
 
-export const fetchExportRules = () => apiGet<ExportRule[]>(DDL_RULES);
+/** Reglas del PROYECTO (doc 75: cada proyecto tiene su ruleset). */
+export const fetchExportRules = (projectId: string) => apiGet<ExportRule[]>(DDL_RULES(projectId));
+
+/** Doc 73: layout de columnas dictado por el ruleset — una regla de TABLA
+ *  seleccionada sobre `ddl.tabla_fisica` con `action.layout.partitionColumns =
+ *  'last'` ⇒ el CREATE emite las particiones al final. Espejo de
+ *  `layout_from_rules` del motor (el backend la registra como aplicada). */
+export function layoutFromRules(rules: ExportRule[], selected: Iterable<string>): { partitionsLast: boolean } {
+  const sel = new Set(selected);
+  const partitionsLast = rules.some((r) => sel.has(r.id) && r.kind === 'rule'
+    && r.appliesTo.includes('ddl.tabla_fisica')
+    && (r.action.layout as { partitionColumns?: string } | undefined)?.partitionColumns === 'last');
+  return { partitionsLast };
+}
 
 /** Reglas seleccionables en el modal: habilitadas y no-inválidas (las stale
  *  corren igual — solo avisan). Default del modal: TODAS marcadas. */
@@ -53,13 +66,14 @@ export const selectableRules = (rules: ExportRule[]): ExportRule[] =>
 
 /** Aplica las reglas seleccionadas al export y devuelve el `.sql` final. */
 export async function renderWithRules(args: {
+  projectId: string;
   diagram: Diagram;
   input: DatabricksDdlInput;         // el mismo input que recibe databricksDdl
   opts: DatabricksDdlOptions;
   ruleIds: string[];
   modelName: string;
 }): Promise<{ sql: string; rendered: RenderedExport }> {
-  const { diagram, input, opts, ruleIds, modelName } = args;
+  const { projectId, diagram, input, opts, ruleIds, modelName } = args;
   const tables = tableStatements(input, opts);
   const views = opts.includeViews ? viewStatements(input, opts) : [];
   const colsByTable = new Map<string, typeof diagram.columns>();
@@ -79,6 +93,7 @@ export async function renderWithRules(args: {
       external: opts.external,
       location: opts.location,
       includePartitions: opts.includePartitions,
+      partitionsLast: !!opts.partitionsLast,       // doc 73: informativo (el motor lo deriva de las reglas)
     },
     tables: tables.map(({ table, sql }) => ({
       table: {
@@ -86,7 +101,8 @@ export async function renderWithRules(args: {
         description: table.description,
         udpValues: (diagram.tables.find((t) => t.id === table.id))?.udpValues ?? {},
       },
-      columns: (colsByTable.get(table.id) ?? []).map((c) => ({
+      // Orden FÍSICO explícito (doc 73 O2): el motor no depende del orden de llegada.
+      columns: [...(colsByTable.get(table.id) ?? [])].sort((a, b) => a.ordinal - b.ordinal).map((c) => ({
         physicalName: c.physicalName, dataType: c.dataType, ordinal: c.ordinal,
         isNullable: c.isNullable, isPrimaryKey: c.isPrimaryKey,
         // sin esto la _rej no hereda el PARTITIONED BY de la física
@@ -109,7 +125,7 @@ export async function renderWithRules(args: {
     })),
   };
 
-  const rendered = await apiPost<RenderedExport>(`${DDL_RULES}/render`, payload);
+  const rendered = await apiPost<RenderedExport>(`${DDL_RULES(projectId)}/render`, payload);
   return { sql: assemble(rendered, modelName, tables.length), rendered };
 }
 

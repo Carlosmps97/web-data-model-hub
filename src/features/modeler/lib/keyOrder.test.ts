@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn } from '@/services/governance.service';
 import { nextPkPosition, pkInKeyOrder, reorderKey, sortByKeyOrder } from './keyOrder';
 
 const col = (id: string, ordinal: number, pk: boolean, pkPosition?: number | null): CanonicalColumn => ({

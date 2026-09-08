@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { sessionProjectId } from '@/store/useSessionStore';
 import { Check, ChevronDown, ChevronUp, Eye, Lock, Plus, Search, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import TagEditor from '@/components/ui/TagEditor';
@@ -26,8 +27,9 @@ const updn = (dis: boolean): React.CSSProperties => ({ height: 13, border: 'none
  * ViewEditor multi-fuente (F3, spec §3-5). Una vista nace de 1..N tablas del
  * canvas: chips de fuentes (buscador sobre las tablas del canvas), grilla de
  * columnas AGRUPADA por tabla origen (incluir, alias de salida, expresión SQL,
- * castType con combobox de tipos + libre), switch global "Mostrar en canvas"
- * (D3 — NO afecta el export DDL) y sección JOIN (con 2+ fuentes) precargada
+ * castType con combobox de tipos + libre), switch "Show on this canvas" al
+ * crear (doc 70: membresía del canvas actual — NO afecta el export DDL) y
+ * sección JOIN (con 2+ fuentes) precargada
  * con la condición inferida de las relaciones del modelo (D2), editable →
  * joinOverride. Sin relación ni condición manual, el guardado se bloquea.
  * El preview usa el MISMO generador que el Export DDL (`viewDDL`).
@@ -40,7 +42,10 @@ export default function ViewEditor({
   /** Vista existente ⇒ modo edición; ausente ⇒ creación. */
   view?: View;
   onClose: () => void;
-  onSaved: () => void;
+  /** Doc 70: entrega el doc guardado y si fue una CREACIÓN — el llamador
+   *  decide la membresía del canvas (`addViewsToCanvas`) según el switch
+   *  «Show on this canvas» (viaja como `saved.showOnCanvas`). */
+  onSaved: (saved: View, created: boolean) => void;
   pushToast: (m: string, k?: 'err') => void;
   /** Modo VISOR (F5): abre la vista solo-lectura desde un canvas productivo
    *  (sin changeset) — muestra definiciones sin necesidad de crear versión. */
@@ -113,7 +118,7 @@ export default function ViewEditor({
   const [viewTypeDef, setViewTypeDef] = useState<UdpDefinition | null>(null);
   useEffect(() => {
     let alive = true;
-    getUdpDefs()
+    getUdpDefs(sessionProjectId())
       .then((d) => { if (alive) setViewTypeDef(d.find((x) => x.level === 'view' && x.name.trim().toLowerCase() === 'tipo de vista') ?? null); })
       .catch(() => {});
     return () => { alive = false; };
@@ -379,10 +384,11 @@ export default function ViewEditor({
             ? { customSql: undefined, customColumns: [], udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, false) }
             : { udpValues: view?.udpValues }),
       };
-      if (editing && view) await viewsSvc.updateView(view.id, body);
-      else await viewsSvc.createView(body);
+      const saved = editing && view
+        ? await viewsSvc.updateView(view.id, body)
+        : await viewsSvc.createView(body);
       pushToast(editing ? 'View updated' : 'View created');
-      onSaved();
+      onSaved(saved, !editing);
       onClose();
     } catch (e) {
       // Propaga el motivo real (p.ej. el 409 del backend F3a: vista sin fuentes).
@@ -497,15 +503,20 @@ export default function ViewEditor({
                 )}
               </div>
             </div>
-            {/* ── Mostrar en canvas (D3: flag GLOBAL; NO afecta el export DDL) ── */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <button type="button" role="switch" aria-checked={showOnCanvas} onClick={() => setShowOnCanvas((v) => !v)}
-                style={{ width: 34, height: 19, borderRadius: 999, border: 'none', cursor: 'pointer', position: 'relative', background: showOnCanvas ? PURPLE : '#CBD2DE', transition: 'background .12s', flex: 'none' }}>
-                <span style={{ position: 'absolute', top: 2, left: showOnCanvas ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left .12s' }} />
-              </button>
-              <span style={{ fontSize: 12.5, color: NAVY, fontWeight: 600 }}>Mostrar en canvas</span>
-              <span style={{ fontSize: 10.5, color: MUTED }}>global · doesn't affect the DDL export</span>
-            </div>
+            {/* ── Doc 70: al CREAR, la vista se suma a la membresía de ESTE
+                canvas (el llamador la agrega con addViewsToCanvas). Al editar
+                no se muestra: la membresía se maneja desde Properties → Views
+                («Add to this canvas» / «Remove from canvas»). ── */}
+            {!editing && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <button type="button" role="switch" aria-checked={showOnCanvas} onClick={() => setShowOnCanvas((v) => !v)}
+                  style={{ width: 34, height: 19, borderRadius: 999, border: 'none', cursor: 'pointer', position: 'relative', background: showOnCanvas ? PURPLE : '#CBD2DE', transition: 'background .12s', flex: 'none' }}>
+                  <span style={{ position: 'absolute', top: 2, left: showOnCanvas ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left .12s' }} />
+                </button>
+                <span style={{ fontSize: 12.5, color: NAVY, fontWeight: 600 }}>Show on this canvas</span>
+                <span style={{ fontSize: 10.5, color: MUTED }}>adds the new view to the current canvas · doesn't affect the DDL export</span>
+              </div>
+            )}
             <div>
               <label style={lbl}>Labels / tags</label>
               <TagEditor compact value={tags} onChange={setTags} keyPlaceholder="clave" valuePlaceholder="valor" />

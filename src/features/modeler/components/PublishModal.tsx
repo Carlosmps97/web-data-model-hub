@@ -18,11 +18,12 @@
  */
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { ArrowUpToLine, Check, Info } from 'lucide-react';
+import { AlertTriangle, ArrowUpToLine, Check, Info } from 'lucide-react';
 
 import { Avatar, Button, Dialog } from '@/components/ui';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
+import { runBlocking } from '@/store/useBusyStore';
 import { getPublished, listUsers, submit } from '@/services/versioning.service';
 import type { SimUserDto } from '@/types/versioning';
 
@@ -42,6 +43,10 @@ const toneFor = (id: string) => {
 export default function PublishModal({ open, onClose }: PublishModalProps) {
   const changesetId = useSessionStore((s) => s.activeChangesetId);
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
+  const projectId = useSessionStore((s) => s.activeProjectId);
+  // Doc 75 D5/D20: la working copy borra su proyecto — se avisa ANTES de enviar.
+  const deletesProject = useModelerStore((s) => s.projectDeletionPending);
+  const projectName = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name ?? null);
 
   const [users, setUsers] = useState<SimUserDto[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
@@ -86,21 +91,21 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
   const canSend = hasChangeset && reviewers.length > 0 && !submitting;
 
   const handleSend = async () => {
-    if (!changesetId || !canSend) return;
+    if (!changesetId || !canSend || !projectId) return;
     setSubmitting(true);
     try {
-      await submit(changesetId, {
+      await runBlocking('Sending for approval…', () => submit(changesetId, {
         title: title.trim() || undefined,
         description: description.trim() || undefined,
         reviewers,
-      });
+      }));
       // Publicado = checkpoint: ya no hay cambios "sin guardar" en la sesión.
       useModelerStore.getState().clearDirty();
       // La working copy salió de `draft` (submitted): el backend rechaza nuevas
-      // ediciones (409). Transiciona la sesión a SOLO LECTURA (producción) para
-      // no dejar al usuario "editando" una versión bloqueada en silencio.
-      const pub = await getPublished().catch(() => null);
-      useSessionStore.getState().openModel({ mode: 'readonly', versionLabel: pub?.versionLabel ?? null });
+      // ediciones (409). Transiciona la sesión a SOLO LECTURA (producción del
+      // proyecto) para no dejar al usuario "editando" una versión bloqueada.
+      const pub = await getPublished(projectId).catch(() => null);
+      useSessionStore.getState().openModel({ projectId, mode: 'readonly', versionLabel: pub?.versionLabel ?? null });
       toast.success('Request sent — the canvas is now read-only (production)');
       onClose();
     } catch (err: unknown) {
@@ -136,6 +141,15 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
         {!hasChangeset && (
           <div className="ppub-hint">
             Open an editable version (Open model) to publish.
+          </div>
+        )}
+        {deletesProject && (
+          <div className="dmh-rv-critical" role="alert">
+            <AlertTriangle size={16} strokeWidth={1.8} aria-hidden />
+            <div>
+              <strong>This working copy deletes project «{projectName ?? '…'}».</strong>{' '}
+              The reviewer will be asked to confirm the deletion explicitly.
+            </div>
           </div>
         )}
 

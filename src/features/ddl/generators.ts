@@ -1,90 +1,10 @@
-// DDL generators — ported from `data.js` (genDDL / genViewDDL).
-// Views are SQL projections embedded in their table; `includeViews` appends a
-// `CREATE VIEW` per role view.
-
-import type { Table, View, DatabaseEngine } from '@/types/model';
-
-/** `CREATE VIEW schema.name AS SELECT <exprs> FROM schema.table [WHERE …];`
- *  WHERE is a single free-text condition used verbatim (Feature 7). */
-export function genViewDDL(table: Table, v: View): string {
-  const full = `${table.schema}.${table.name}`;
-  const cols = (v.select ?? '').split('\n').map((s) => s.trim()).filter(Boolean);
-  const where = (v.where ?? '').trim();
-  let out = `CREATE VIEW ${table.schema}.${v.name} AS\nSELECT\n  ${cols.join(',\n  ') || '*'}\nFROM ${full}`;
-  if (where) out += `\nWHERE ${where}`;
-  return out + ';';
-}
-
-/** Engine-aware partition clause for a `CREATE TABLE`, from the columns the user
- *  marked as partition keys (Feature 6A). Emitted between `)` and `;`. */
-function partitionClause(engine: DatabaseEngine | undefined, cols: string[]): string {
-  if (!cols.length) return '';
-  const list = cols.join(', ');
-  switch (engine) {
-    case 'databricks_sql':
-      return `\nPARTITIONED BY (${list})`;
-    case 'postgresql':
-    case 'mysql':
-      return `\nPARTITION BY RANGE (${list})`;
-    case 'sqlserver':
-      return `\n-- Partition: define una PARTITION FUNCTION/SCHEME sobre (${list})`;
-    default:
-      return `\n-- Partition columns: ${list}`;
-  }
-}
-
-export interface GenDDLOptions {
-  name?: string;
-  engineLabel?: string;
-  /** Engine id — drives the partition clause syntax. */
-  engine?: DatabaseEngine;
-  includeViews?: boolean;
-  /** Emit PRIMARY KEY + FOREIGN KEY statements (combined switch). Default true. */
-  includeKeys?: boolean;
-}
-
-export function genDDL(tables: Table[], opts: GenDDLOptions = {}): string {
-  const includeKeys = opts.includeKeys !== false;
-  let out = `-- ${opts.name ?? 'model'} · ${opts.engineLabel ?? ''}\n\n`;
-  tables.forEach((t) => {
-    const full = `${t.schema}.${t.name}`;
-    const lines = t.columns.map((c) => {
-      let l = `  ${c.name} ${c.dataType.toUpperCase()}`;
-      if (c.isNullable === false) l += ' NOT NULL';
-      return l;
-    });
-    const pks = t.columns.filter((c) => c.isPrimaryKey).map((c) => c.name);
-    if (includeKeys && pks.length) lines.push(`  PRIMARY KEY (${pks.join(', ')})`);
-    const partCols = t.columns.filter((c) => c.isPartitionKey).map((c) => c.name);
-    out += `CREATE TABLE ${full} (\n${lines.join(',\n')}\n)${partitionClause(opts.engine, partCols)};\n`;
-    if (includeKeys) {
-      t.columns
-        .filter((c) => c.isForeignKey && c.foreignKeyRef)
-        .forEach((c) => {
-          out += `ALTER TABLE ${full} ADD FOREIGN KEY (${c.name}) REFERENCES ${c.foreignKeyRef!.table}(${c.foreignKeyRef!.column});\n`;
-        });
-    }
-    out += '\n';
-  });
-  if (opts.includeViews) {
-    tables.forEach((t) => (t.views ?? []).forEach((v) => {
-      out += `-- view · ${v.type} · ${v.role ?? ''}\n${genViewDDL(t, v)}\n\n`;
-    }));
-  }
-  return out.trim();
-}
-
-export function countViews(tables: Table[]): number {
-  return tables.reduce((a, t) => a + (t.views?.length ?? 0), 0);
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Databricks DDL generator (Screen 10 — Export DDL, `#pd`).
 //
-// Decoupled from `@/types/model`: works off the *canonical* diagram shape the
-// modeler store actually holds (`Diagram.tables/columns/relationships`). Kept as
-// thin local interfaces so the generator is pure and unit-testable, and so the
-// older `genDDL`/EditorScreen path above stays untouched.
+// Works off the *canonical* diagram shape the modeler store actually holds
+// (`Diagram.tables/columns/relationships`), as thin local interfaces so the
+// generator is pure and unit-testable (doc 75 D14: the legacy `genDDL` path
+// and the «Aurora» model types were retired).
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Dialects offered by the Export DDL modal. Only `databricks` is implemented;
@@ -194,6 +114,11 @@ export interface DatabricksDdlOptions {
   location: string;
   /** Optional `TBLPROPERTIES (…)` key/value pairs. */
   tblProperties: { key: string; value: string }[];
+  /** Doc 73 — regla de layout del ruleset («Partition columns last»): las
+   *  columnas de partición se EMITEN al final del CREATE. El orden físico del
+   *  modelo, el PARTITIONED BY y el PRIMARY KEY no cambian. La fija el modal
+   *  desde las reglas seleccionadas (rulesBridge.layoutFromRules), nunca a mano. */
+  partitionsLast?: boolean;
   /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_).
    *  NUNCA aplica a: literales, COMMENTs, tipos de datos, expresiones de
    *  vistas, joinOverride ni alias generados (t1, t2, …). */
@@ -277,8 +202,13 @@ function tableDDL(
 ): string {
   const full = qualify(t, o);
   const ordered = [...cols].sort((a, b) => a.ordinal - b.ordinal);
+  // Doc 73: con la regla de layout, las particiones se emiten al final; el
+  // resto conserva el orden físico (espejo de `layout_columns` del motor).
+  const emitted = o.partitionsLast
+    ? [...ordered.filter((c) => !c.isPartition), ...ordered.filter((c) => c.isPartition)]
+    : ordered;
 
-  const colLines = ordered.map((c) => {
+  const colLines = emitted.map((c) => {
     let l = `  ${ident(c.physicalName)} ${dbxType(c.dataType)}`;
     if (c.isNullable === false || c.isPrimaryKey) l += ' NOT NULL';
     if (o.includeComments && c.description?.trim()) l += ` COMMENT ${lit(c.description.trim())}`;

@@ -8,7 +8,10 @@
  *  3. lost-update → UN solo commit con AMBOS campos (nunca dos upserts
  *     read-modify-write concurrentes del mismo doc);
  *  4. override manual del físico → apaga el auto-physicalize (vaciar el
- *     físico lo re-enciende).
+ *     físico lo re-enciende). Doc 68: el override ahora PERSISTE
+ *     (`physicalNameOverridden` viaja en cada commit y `reset` lo re-siembra
+ *     desde el doc) — sin esto, recargar + renombrar el lógico re-derivaba y
+ *     pisaba el físico custom.
  * El commit del tramo auto se agenda recién al RESOLVER (o fallar) el
  * physicalize: un commit intermedio persistiría el físico viejo junto al
  * lógico nuevo.
@@ -19,14 +22,16 @@ export interface NameSyncOptions {
   physicalize: (logical: string) => Promise<{ physical: string }>;
   /** Refleja el estado en la UI (setState de los inputs). */
   onState: (s: NameSyncState) => void;
-  /** Persiste ambos campos juntos (un único upsert changeset-aware). */
-  onCommit: (fields: { logicalName: string; physicalName: string }) => void;
+  /** Persiste ambos campos juntos (un único upsert changeset-aware) más el
+   *  override del físico (doc 68). */
+  onCommit: (fields: { logicalName: string; physicalName: string; physicalNameOverridden: boolean }) => void;
   debounceMs?: number;
 }
 
 export interface NameSync {
-  /** Re-arma para otra identidad (cambio de fila/reload): invalida todo lo pendiente. */
-  reset(logical: string, physical: string): void;
+  /** Re-arma para otra identidad (cambio de fila/reload): invalida todo lo
+   *  pendiente. `overridden` re-siembra el flag persistido (doc 68). */
+  reset(logical: string, physical: string, overridden?: boolean): void;
   setLogical(v: string): void;
   setPhysical(v: string): void;
   dispose(): void;
@@ -45,13 +50,14 @@ export function createNameSync(opts: NameSyncOptions): NameSync {
   const scheduleCommit = () => {
     clearTimeout(commitTimer);
     commitTimer = setTimeout(
-      () => opts.onCommit({ logicalName: logical, physicalName: physical }), ms,
+      () => opts.onCommit({ logicalName: logical, physicalName: physical,
+                            physicalNameOverridden: physEdited }), ms,
     );
   };
 
   return {
-    reset(l, p) {
-      logical = l; physical = p; physEdited = false;
+    reset(l, p, overridden = false) {
+      logical = l; physical = p; physEdited = overridden;
       seq++; // invalida cualquier physicalize en vuelo del ciclo anterior
       clearTimeout(physTimer); clearTimeout(commitTimer);
     },
@@ -84,4 +90,27 @@ export function createNameSync(opts: NameSyncOptions): NameSync {
     },
     dispose() { clearTimeout(physTimer); clearTimeout(commitTimer); },
   };
+}
+
+/**
+ * Decisión de guardado del panel de TABLA (doc 68). Puro.
+ *
+ * `sessionOverride` = intención de ESTA edición: `true` (tipeó un físico),
+ * `false` (lo vació o usó el botón derive) o `null` (no lo tocó → manda el
+ * flag persistido). `derive: true` ⇒ el caller re-deriva del lógico (async):
+ * físico intacto + lógico renombrado (comportamiento previo, ahora gateado
+ * por el override) o físico vaciado (re-enciende el auto, como en columnas).
+ */
+export function tableNamePlan(args: {
+  logical: string;
+  physical: string;
+  prev: { logicalName: string; physicalName: string; physicalNameOverridden?: boolean };
+  sessionOverride: boolean | null;
+}): { physical: string; overridden: boolean; derive: boolean } {
+  const overridden = args.sessionOverride ?? args.prev.physicalNameOverridden ?? false;
+  const derive = !overridden && args.logical !== ''
+    && (args.physical === args.prev.physicalName
+      ? args.logical !== args.prev.logicalName
+      : args.physical === '');
+  return { physical: args.physical, overridden, derive };
 }

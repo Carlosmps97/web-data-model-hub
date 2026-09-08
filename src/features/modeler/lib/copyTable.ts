@@ -15,7 +15,7 @@ import {
   type BulkChange,
   type CanonicalColumn,
   type CanonicalTable,
-} from '@/features/governance/services/governance.service';
+} from '@/services/governance.service';
 import { pkInKeyOrder } from './keyOrder';
 
 const PHYS_SUFFIX = /_copy_\d+$/i;

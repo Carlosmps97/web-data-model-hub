@@ -3,9 +3,10 @@
 // export. The backend returns the `{ success, data }` envelope, which
 // `apiGet` already unwraps; these helpers only give types and build the URLs.
 //
-// Endpoints (per R1c contract):
-//   GET /api/reporting/tables?schema=&projectId=  → ReportTableRow[]
-//   GET /api/reporting/columns?tableId=           → ReportColumnRow[] (no id = all)
+// Doc 75: todo reporte es de UN proyecto (`projectId` obligatorio en cada
+// lectura).
+//   GET /api/reporting/tables?projectId=&schema=   → ReportTableRow[]
+//   GET /api/reporting/columns?projectId=&tableId= → ReportColumnRow[] (no id = all)
 
 import { apiGet } from './http';
 
@@ -21,20 +22,29 @@ export interface ReportTableRow {
   subjectAreas: string[];
   columnCount: number;
   relationshipCount: number;
-  /** Project names this table is referenced by (rendered as chips). */
+  /** Nombre del proyecto del reporte (columna de la hoja exportada). */
   projects: string[];
   /** UDPs de la tabla ya traducidos a {NOMBRE de la def: valor} (export). */
   udpValues?: Record<string, string>;
   description: string;
+  /** Doc 70 §4.2 — metadata completa (docs 68/69). */
+  physicalNameOverridden?: boolean;
+  logicalOnly?: boolean;
+  physicalOnly?: boolean;
 }
 
 /** One column row (field-level metadata), used for the "Columns detail" sheet. */
 export interface ReportColumnRow {
+  /** Doc 70: id de la columna (join con el catálogo). */
+  id?: string;
   tableId: string;
   physicalName: string;
   logicalName: string;
   dataType: string;
+  /** Doc 69: faceta lógica del tipo (null = no informado). */
+  logicalDataType?: string | null;
   parentDomain?: string;
+  parentDomainId?: string | null;
   isPrimaryKey: boolean;
   isForeignKey: boolean;
   isNullable: boolean;
@@ -43,6 +53,31 @@ export interface ReportColumnRow {
   udpValues?: Record<string, string>;
   description: string;
   ordinal: number;
+  /** Doc 70 §4.2 — metadata completa (docs 19/68/69). */
+  pkPosition?: number | null;
+  typeOverridden?: boolean;
+  logicalTypeOverridden?: boolean;
+  physicalNameOverridden?: boolean;
+  logicalOnly?: boolean;
+  physicalOnly?: boolean;
+}
+
+/** Universo COMPLETO de los filtros del reporte tabular (doc 70 §4.1) — no
+ *  depende de las filas cargadas en la grilla. */
+export interface ReportFilterOptions {
+  schemas: string[];
+  subjectAreas: string[];
+}
+
+const withProject = (projectId: string, qs: URLSearchParams): string => {
+  qs.set('projectId', projectId);
+  return `?${qs.toString()}`;
+};
+
+/** `GET /api/reporting/filters` — esquemas de tablas activas y canvases del
+ *  proyecto, sin tope. */
+export function listReportFilters(projectId: string): Promise<ReportFilterOptions> {
+  return apiGet<ReportFilterOptions>(`${API_BASE}/api/reporting/filters${withProject(projectId, new URLSearchParams())}`);
 }
 
 /** One view row for the "Views detail" sheets: resolved sources + per-column
@@ -59,6 +94,8 @@ export interface ReportViewRow {
   /** Condición de JOIN manual (multi-fuente). */
   joinOverride?: string | null;
   showOnCanvas: boolean;
+  /** Doc 70: canvases donde la vista es miembro (nombres). */
+  canvases?: string[];
   description?: string | null;
   sql?: string | null;
   columns: Array<{
@@ -73,38 +110,34 @@ export interface ReportViewRow {
 /** Optional server-side filters for the table list. Empty values are omitted. */
 export interface ReportTableFilters {
   schema?: string;
-  projectId?: string;
   /** Cap the number of rows (lighter initial load). */
   limit?: number;
 }
 
-/** Lists table-level reporting rows, optionally narrowed by schema / project. */
-export function listReportTables(filters: ReportTableFilters = {}): Promise<ReportTableRow[]> {
+/** Lists the project's table-level reporting rows, optionally narrowed by schema. */
+export function listReportTables(projectId: string, filters: ReportTableFilters = {}): Promise<ReportTableRow[]> {
   const qs = new URLSearchParams();
   if (filters.schema) qs.set('schema', filters.schema);
-  if (filters.projectId) qs.set('projectId', filters.projectId);
   if (filters.limit != null) qs.set('limit', String(filters.limit));
-  const suffix = qs.toString() ? `?${qs.toString()}` : '';
-  return apiGet<ReportTableRow[]>(`${API_BASE}/api/reporting/tables${suffix}`);
+  return apiGet<ReportTableRow[]>(`${API_BASE}/api/reporting/tables${withProject(projectId, qs)}`);
 }
 
-/** Lists column-level reporting rows. Pass `tableIds` to scope the export to a
- *  batch of tables (server-side `$in`); omit both to get every column. */
-export function listReportColumns(tableId?: string, tableIds?: string[]): Promise<ReportColumnRow[]> {
+/** Lists the project's column-level reporting rows. Pass `tableIds` to scope
+ *  the export to a batch of tables (server-side `$in`); omit both to get every
+ *  column (server-side cap). */
+export function listReportColumns(projectId: string, tableId?: string, tableIds?: string[]): Promise<ReportColumnRow[]> {
   const qs = new URLSearchParams();
   if (tableIds?.length) qs.set('tableIds', tableIds.join(','));
   else if (tableId) qs.set('tableId', tableId);
-  const suffix = qs.toString() ? `?${qs.toString()}` : '';
-  return apiGet<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns${suffix}`);
+  return apiGet<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns${withProject(projectId, qs)}`);
 }
 
-/** Lists view rows for the export. Pass `tableIds` to scope to the views
- *  derived from those tables (server-side `$in` over sourceTableIds), or
- *  `schema` to scope to one schema (Database Explorer, doc 18). */
-export function listReportViews(tableIds?: string[], schema?: string): Promise<ReportViewRow[]> {
+/** Lists the project's view rows for the export. Pass `tableIds` to scope to
+ *  the views derived from those tables (server-side `$in` over
+ *  sourceTableIds), or `schema` to scope to one schema (Database Explorer). */
+export function listReportViews(projectId: string, tableIds?: string[], schema?: string): Promise<ReportViewRow[]> {
   const qs = new URLSearchParams();
   if (tableIds?.length) qs.set('tableIds', tableIds.join(','));
   if (schema) qs.set('schema', schema);
-  const suffix = qs.toString() ? `?${qs.toString()}` : '';
-  return apiGet<ReportViewRow[]>(`${API_BASE}/api/reporting/views${suffix}`);
+  return apiGet<ReportViewRow[]>(`${API_BASE}/api/reporting/views${withProject(projectId, qs)}`);
 }

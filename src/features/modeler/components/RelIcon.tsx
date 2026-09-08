@@ -9,7 +9,7 @@
 //   one-many   → One or more          ─┼<
 //   zero-many  → Zero or many         ─○<
 import type { ReactNode } from 'react';
-import type { Cardinality } from '@/features/governance/services/governance.service';
+import type { Cardinality } from '@/services/governance.service';
 
 const S = 'currentColor';
 

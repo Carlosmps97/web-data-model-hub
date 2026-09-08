@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { buildCandidates, distinctTableSchemas, filterColumns, tableSchemasFromCatalog } from './ctasPick';
 
 const T = (id: string, physicalName: string, logicalName: string, schema?: string): CanonicalTable =>

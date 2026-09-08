@@ -20,10 +20,22 @@ export interface RestoredFrom {
   appliedAt?: string | null;
 }
 
+/** Conteos de activos de un proyecto (`GET /api/projects/{pid}/counts`, doc 75 D5). */
+export interface ScopeCounts {
+  tables: number;
+  columns: number;
+  views: number;
+  relationships: number;
+  schemas: number;
+  folders: number;
+  canvases: number;
+}
+
 /**
- * Fila de versión cross-project (tabla de Review + lista del Home + requests).
- * Proyección de un changeset SIN el `changes` crudo. `versionLabel`/`title`/
- * `owner` pueden venir `null` para drafts recién creados.
+ * Fila de versión (tabla de Review + lista del Home + requests). Proyección de
+ * un changeset SIN el `changes` crudo. `versionLabel`/`title`/`owner` pueden
+ * venir `null` para drafts recién creados. Doc 75: toda versión es de UN
+ * proyecto; `deletesProject` marca la que borra su proyecto (pill crítica).
  */
 export interface VersionRow {
   id: string;
@@ -31,7 +43,8 @@ export interface VersionRow {
   title: string | null;
   owner: string | null;
   status: VersionStatus;
-  projectIds: string[];
+  projectId: string;
+  deletesProject: boolean;
   reviewers: string[];
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -59,12 +72,12 @@ export interface SimUserDto {
   initials: string;
 }
 
-/** Body de `POST /api/changesets/snapshot` (todos los campos opcionales). */
+/** Body de `POST /api/changesets/snapshot`: la working copy es DEL proyecto (doc 75 D2). */
 export interface SnapshotBody {
+  projectId: string;
   title?: string;
   description?: string;
   versionLabel?: string;
-  projectIds?: string[];
 }
 
 /**
@@ -75,7 +88,6 @@ export interface SubmitBody {
   title?: string;
   description?: string;
   reviewers?: string[];
-  projectIds?: string[];
 }
 
 // ─── Review detail (Review p5) ───────────────────────────────────────────────
@@ -106,7 +118,8 @@ export interface ChangesetDetail {
   owner: string | null;
   status: VersionStatus;
   versionLabel?: string | null;
-  projectIds: string[];
+  /** Doc 75: proyecto de la versión. */
+  projectId: string;
   reviewers: string[];
   approvals: Record<string, Approval>;
   comments: ChangesetComment[];
@@ -144,8 +157,9 @@ export interface DiffImpact {
   tablesTouched: number;
   columnsTouched: number;
   affectedOtherTables: { id: string; name: string }[];
-  /** Proyectos distintos afectados (membership de canvas), computado del diff. */
-  projectsAffected?: number;
+  /** Doc 75 D5: presente cuando la versión BORRA su proyecto — el revisor ve un
+   *  aviso crítico con los conteos de lo que desaparece. */
+  deletesProject?: { id: string; name: string; counts: ScopeCounts } | null;
 }
 
 /** Nodo de la jerarquía del diff (Proyecto→Folder→Canvas→Esquema→Tabla→Columna).

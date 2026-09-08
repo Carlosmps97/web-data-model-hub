@@ -3,11 +3,10 @@ import { Check, Trash2 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { pushUndo } from '@/store/useUndoStore';
-import * as gov from '@/features/governance/services/governance.service';
-import type { Cardinality, CanonicalColumn } from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
+import type { Cardinality, CanonicalColumn } from '@/services/governance.service';
 import {
   buildKeyMapping, demotablePkChildren, mappingToBulk, relationshipDrift, roleNamePlan,
   type MappingResolution,
@@ -36,7 +35,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const reload = useModelerStore((s) => s.reload);
   // En modo visor puede haber changeset activo (viendo un request): reader-only.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
-  const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
+  const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const [saving, setSaving] = useState(false);
   const [roleDrafts, setRoleDrafts] = useState<Record<number, string>>({});
   // Modo SYNC (doc 47): re-mapeo de la llave tras un drift del padre.

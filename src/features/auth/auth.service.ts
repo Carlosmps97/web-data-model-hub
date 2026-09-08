@@ -17,7 +17,7 @@ import { API_BASE } from '@/services/apiBase';
 /** Permisos de la matriz (1:1 con el backend `PERMISSIONS`). */
 export type Permission =
   | 'model.view' | 'model.edit' | 'review.decide' | 'publish'
-  | 'rollback' | 'export' | 'standards.edit' | 'admin.manage';
+  | 'rollback' | 'versions.view_all' | 'export' | 'standards.edit' | 'admin.manage';
 
 /** Usuario en sesión enriquecido (rol + permisos efectivos) que devuelve /me. */
 export interface SessionUser {

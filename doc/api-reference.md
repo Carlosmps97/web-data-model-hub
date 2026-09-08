@@ -1,6 +1,6 @@
 # Referencia de API consumida por el frontend — Data Model Hub (DMH)
 
-Actualizado: 2026-07-31.
+Actualizado: 2026-09-08 (doc 75: proyectos independientes — `{pid}` en las rutas es `sessionProjectId()` para el Model y el `projectId` del selector en Standards/Reporting).
 
 Este documento describe, a partir del código real, cómo el frontend (Vite + React + Zustand) del Data Model Hub consume la API del backend (FastAPI). Cubre el cliente HTTP compartido y, pantalla por pantalla / feature por feature, qué endpoints se llaman, con qué método, qué body envían y qué devuelven. Todos los ejemplos y firmas provienen de `src/services/*` y `src/features/*/services/*`.
 
@@ -30,7 +30,7 @@ flowchart TD
   ERR --> UI
 ```
 
-El módulo **DDL** (`src/features/ddl`) genera el SQL base en el cliente a partir del modelo ya cargado; solo llama a la API cuando el usuario selecciona reglas de export en el modal: `rulesBridge.ts` → `POST /api/ddl-rules/render` (ver §3.5.3).
+El módulo **DDL** (`src/features/ddl`) genera el SQL base en el cliente a partir del modelo ya cargado; solo llama a la API cuando el usuario selecciona reglas de export en el modal: `rulesBridge.ts` → `POST /api/projects/{pid}/ddl-rules/render` (ver §3.5.3).
 
 ---
 
@@ -259,7 +259,7 @@ A continuación, el detalle por área funcional. En todas las tablas, la ruta es
 
 ### 3.1. Autenticación e identidad
 
-**Services:** `src/features/auth/auth.service.ts`, `src/services/identity.service.ts` y `src/services/warmup.ts`.
+**Services:** `src/features/auth/auth.service.ts` y `src/services/warmup.ts`. (El `identity.service` / `GET /api/me` se retiró en el doc 75 D14: la identidad autoritativa es `GET /api/auth/me`.)
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
@@ -267,7 +267,6 @@ A continuación, el detalle por área funcional. En todas las tablas, la ruta es
 | `login(username, password)` | POST | `/api/auth/login` | `{ username, password }` | `{ token, user: SessionUser }` |
 | `logout()` | POST | `/api/auth/logout` | — | `{ ok: boolean }` |
 | `fetchMe()` | GET | `/api/auth/me` | — | `SessionUser` |
-| `getMe()` | GET | `/api/me` | — | `Principal` |
 | `ensureBackendSession()` | GET | `/api/health` (probe) + `/api/auth/warmup/{next_b64}` (navegación) | — | — |
 
 `ssoLogin()` es el carril principal (doc 38): el botón "Continue with Databricks" hereda la identidad del SSO de la plataforma — el server del front la releva en headers `x-dmh-sso-*` con secreto compartido — y entra solo si el correo está asignado a un rol en Admin (403 con mensaje accionable si no). `login()` queda como carril del administrador (la UI pide solo la contraseña de la cuenta `admin`). Ambos emiten el mismo token y comparten el pipeline del store (`enterSession`: resetAppState → localStorage → mirror). El login por contraseña está rate-limited en el backend (`5/minute` por IP; el SSO a `10/minute`). `SessionUser` incluye el rol, `projectIds`, `initials` y el mapa de permisos efectivos:
@@ -350,10 +349,12 @@ curl "$BACKEND/api/summary?projectId=p1&projectId=p2" -H "X-Session-Token: eyJ..
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `listVersions()` | GET | `/api/versions` | — | `VersionRow[]` |
-| `getPublished()` | GET | `/api/versions/published` | — | `VersionRow \| null` |
+| `listVersions(projectId?)` | GET | `/api/versions[?projectId=]` | — | `VersionRow[]` (cada fila con `projectId` y `deletesProject`) |
+| `getPublished(projectId)` | GET | `/api/projects/{pid}/versions/published` | — | `VersionRow \| null` (producción DEL proyecto) |
+| `compareVersions(fromId, toId)` | GET | `/api/versions/compare?fromId=&toId=` | — | `VersionCompare` (doc 65; mismo proyecto) |
+| `compareVersionDetails(fromId, toId, items)` | POST | `/api/versions/compare/details` | `{ fromId, toId, items }` | detalle antes→después |
 | `listRequests({reviewer, owner})` | GET | `/api/requests?reviewer=&owner=` | — | `VersionRow[]` |
-| `snapshot(body)` | POST | `/api/changesets/snapshot` | `SnapshotBody` | `VersionRow` |
+| `snapshot(body)` | POST | `/api/changesets/snapshot` | `SnapshotBody` (`projectId` obligatorio) | `VersionRow` |
 | `listUsers(can?)` | GET | `/api/users?can=` | — | `SimUserDto[]` |
 | `submit(id, body)` | POST | `/api/changesets/{id}/submit` | `SubmitBody` | `VersionRow` |
 | `getChangeset(id)` | GET | `/api/changesets/{id}` | — | `ChangesetDetail` |
@@ -390,10 +391,11 @@ Bodies relevantes (de `src/types/versioning.ts`):
 
 ```ts
 export interface SnapshotBody {
-  title?: string; description?: string; versionLabel?: string; projectIds?: string[];
+  projectId: string;            // doc 75: la working copy es de UN proyecto
+  title?: string; description?: string; versionLabel?: string;
 }
 export interface SubmitBody {
-  title?: string; description?: string; reviewers?: string[]; projectIds?: string[];
+  title?: string; description?: string; reviewers?: string[];
 }
 ```
 
@@ -424,16 +426,18 @@ El editor de modelo se apoya en varios services complementarios: `modeler.servic
 - LECTURAS con changeset activo (edición O readonly de un request) → estado efectivo (`csvc.effective` de `projects` / `folders` / `subject_areas`), para que el dueño Y los revisores vean la estructura draft.
 - Sin changeset (producción) → los endpoints directos de `modeler.service.ts` que siguen.
 
-**Proyectos** (directos, `modeler.service.ts`)
+**Proyectos** (`projects.service.ts` para crear/listar; el ciclo de vida por draft en `structure.service.ts`, doc 75 D5)
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
 | `listProjects()` | GET | `/api/projects` | — | `Project[]` |
-| `createProject(name)` | POST | `/api/projects` | `{ name }` | `Project` |
-| `renameProject(id, name)` | PUT | `/api/projects/{id}` | `{ name }` | `Project` |
-| `deleteProject(id)` | DELETE | `/api/projects/{id}` | — | `{ deleted: boolean }` |
+| `createProject(data)` | POST | `/api/projects` | `CreateProjectRequest = { name, description?, copyFrom?: { projectId, blocks[] } }` | `Project` (nace con estándares vacíos o copiados + `v1`; timeout largo + overlay) |
+| `getProjectCounts(id)` | GET | `/api/projects/{id}/counts` | — | `ScopeCounts` (diálogo «Delete project…») |
+| `structure.renameProject(id, name)` | PUT (changeset) | `/api/changesets/{cs}/changes` | upsert `projects/{id}` | `Project` — sólo por draft |
+| `structure.deleteProject(id)` | PUT (changeset) | `/api/changesets/{cs}/changes` | delete `projects/{id}` | — (un solo cambio; «Deletion pending») |
+| `structure.reviveProject(id, published)` / `projectDeletionPending(id)` | PUT / GET (changeset) | `/api/changesets/{cs}/changes` · `/effective/projects` | — | deshace el borrado / detecta el pending |
 
-Nota: existe además `src/services/projects.service.ts`, un service paralelo legacy con tipos propios (`CreateProjectRequest` / `UpdateProjectRequest`) sobre las mismas rutas `/api/projects`.
+No existen `PUT/DELETE /api/projects/{id}` directos: renombrar, describir y borrar un proyecto van SIEMPRE por un draft del propio proyecto y se aplican al aprobar (el borrado con aviso crítico al revisor).
 
 **Carpetas** (jerarquía anidada del Model Explorer, vía `parentFolderId`)
 
@@ -473,7 +477,7 @@ Con changeset activo, `structure.service` reemplaza cada escritura de esta tabla
 
 ```ts
 export async function loadDiagram(saId: string): Promise<Diagram> {
-  const cs = useChangesetStore.getState().activeId;
+  const cs = useSessionStore.getState().activeChangesetId;
   const qs = cs ? `?changesetId=${encodeURIComponent(cs)}` : '';
   return apiGet<Diagram>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}/diagram${qs}`);
 }
@@ -492,18 +496,19 @@ export interface Diagram {
 
 #### 3.3.2. Catálogo, relaciones y escrituras versionadas (`governance.service.ts` + `changeset.service.ts`)
 
-La governance es "consciente del changeset activo": si hay un changeset activo, LEE del estado efectivo (`/effective`) y ESCRIBE al changeset (`/changes`); sin changeset activo, LEE lo publicado y la UI queda de solo lectura.
+La governance es "consciente del changeset activo": si hay un changeset activo, LEE del estado efectivo (`/effective`) y ESCRIBE al changeset (`/changes`); sin changeset activo, LEE lo publicado y la UI queda de solo lectura. Ambos servicios viven en `src/services/` (doc 75 D14: `features/governance/` se eliminó) y arman las rutas de proyecto con `sessionProjectId()` (`/api/projects/{pid}/…`); si no hay proyecto en sesión, las funciones rechazan.
 
 **Lecturas de catálogo (publicado, sin changeset)**
 
 | Función | Método | Ruta | Respuesta |
 |---|---|---|---|
-| `listTables()` (sin changeset) | GET | `/api/catalog/tables` | `CanonicalTable[]` |
-| `searchTables(q, limit)` (sin changeset) | GET | `/api/catalog/tables?q=&limit=` | `CanonicalTable[]` |
+| `listTables()` (sin changeset) | GET | `/api/projects/{pid}/catalog/tables` | `CanonicalTable[]` |
+| `searchTables(q, limit)` (sin changeset) | GET | `/api/projects/{pid}/catalog/tables?q=&limit=` | `CanonicalTable[]` |
 | `listColumns(tableId)` (sin changeset) | GET | `/api/catalog/tables/{tableId}/columns` | `CanonicalColumn[]` |
 | `listRelationships(tableId?)` (sin changeset) | GET | `/api/relationships?tableId=` | `Relationship[]` |
-| `listDomains()` | GET | `/api/domains` | `ParentDomain[]` (solo lectura para el dropdown) |
-| `physicalize(logical, scope?)` | POST | `/api/glossary/physicalize` | `{ physical }` |
+| `listDomains()` | GET | `/api/projects/{pid}/domains` | `ParentDomain[]` (solo lectura para el dropdown) |
+| `physicalize(logical, scope?)` | POST | `/api/projects/{pid}/glossary/physicalize` | `{ physical }` |
+| `searchModel(q, opts)` | GET | `/api/projects/{pid}/catalog/search?q=&limit=&offset=&scope=&folderId=&canvasId=&changesetId=` | hits de tablas/columnas/definiciones (⌘K, doc 70 §11) |
 
 **Lecturas globales overlay-aware** (pasan `changesetId` como query param cuando hay changeset activo, en vez de ir por `/effective`; el backend resuelve nombres server-side):
 
@@ -669,9 +674,9 @@ La entidad `schemas` (doc 18) también es changeset-aware. La particularidad: **
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `listSchemas()` | GET (o `/effective/schemas`) | `/api/schemas` | — | `DbSchema[]` |
-| `listPublishedSchemas()` | GET | `/api/schemas` | — | `DbSchema[]` (ignora el changeset activo) |
-| `createSchema(name, desc?)` | POST (o `recordChange` upsert) | `/api/schemas` | `{ name, description }` | `DbSchema` |
+| `listSchemas()` | GET (o `/effective/schemas`) | `/api/projects/{pid}/schemas` | — | `DbSchema[]` (los del proyecto en sesión) |
+| `listPublishedSchemas()` | GET | `/api/projects/{pid}/schemas` | — | `DbSchema[]` (ignora el changeset activo) |
+| `createSchema(name, desc?, kind?)` | POST (o `recordChange` upsert) | `/api/projects/{pid}/schemas` | `{ name, description, kind }` | `DbSchema` (nombre único POR proyecto) |
 | `schemaImpact(id)` | GET | `/api/changesets/{cs}/schemas/{id}/impact` | — | `{ name, tables, views, canvases }` — preview ANTES de guardar |
 | `renameSchema(id, newName)` | POST | `/api/changesets/{cs}/schemas/{id}/rename` | `{ newName }` | `{ tables, views }` — cuántas se propagaron dentro del draft |
 | `deleteSchema(id)` | POST (o DELETE directo sin changeset) | `/api/changesets/{cs}/schemas/{id}/delete` · `/api/schemas/{id}` | — | 409 si el esquema tiene tablas o vistas en su estado efectivo |
@@ -680,16 +685,13 @@ La entidad `schemas` (doc 18) también es changeset-aware. La particularidad: **
 
 El Database Explorer es **draft-aware** (doc 25): con versión activa muestra el estado EFECTIVO (publicado + overlay del changeset); sin versión, el estado publicado vía reporting/catálogo. El componente solo consume filas `Dbx*` y no sabe de qué fuente vienen.
 
-| Función | Producción (sin changeset) | Draft (con changeset) |
+| Función | Ruta | Nota |
 |---|---|---|
-| `explorerSchemas()` | `GET /api/schemas` | `/effective/schemas` |
-| `explorerTables(schema)` | `GET /api/reporting/tables?schema=&limit=500` | `/effective/canonical_tables?schema=&limit=500` |
-| `explorerViews(schema)` | `GET /api/reporting/views?schema=` | `/effective/views?schema=` |
-| `explorerColumns(tableId)` | `GET /api/reporting/columns?tableId=` | `/effective/canonical_columns?tableId=` |
-| `explorerSearch(q, limit)` | `GET /api/catalog/tables?q=&limit=` | `/effective/canonical_tables?q=&limit=` |
-| `explorerSearchColumns(q, limit)` | `GET /api/catalog/columns?q=&limit=` | `/effective/canonical_columns?q=&limit=` + resolución de tablas por `ids` |
+| `projectInventory(projectId)` | `GET /api/projects/{id}/catalog/inventory?changesetId=` | inventario del proyecto en UNA request (tablas con `columnCount` + vistas), con overlay del draft si hay changeset (doc 72; antes eran ~1 request por tabla) |
+| `explorerColumns(tableId)` | `listColumns` de governance (publicado o `/effective/canonical_columns?tableId=`) | columnas de un nodo al expandirlo |
+| `mapInventory` / `mapView` | — | puros: filas `Dbx*` del árbol |
 
-La búsqueda por COLUMNA (doc 29, pedido de los modelers) devuelve cada hit con su `esquema.tabla` resuelto: en producción el join lo hace el backend (`GET /api/catalog/columns`, `q` mínimo 1 carácter, `limit` 1–500 default 50); en draft el service resuelve las tablas con una segunda llamada `/effective/canonical_tables?ids=` y descarta columnas cuya tabla no existe en el estado efectivo.
+La búsqueda profunda del Model (tablas/columnas/definiciones) vive en `governance.searchModel()` (`GET /api/projects/{pid}/catalog/search`, doc 70 §11 / 72 r2) y el inspector de objetos en `GET /api/catalog/inspect/tables/{id}` · `/inspect/views/{id}` (doc 72).
 
 #### 3.3.6. Carga masiva desde Excel (`features/upload/upload.service.ts`, doc 55)
 
@@ -823,25 +825,25 @@ Este módulo combina tres services: `naming.service` (configuración global de n
 
 #### 3.5.1. Glosario, naming y dominios globales (`naming.service.ts`)
 
-Estos recursos son configuración a nivel de modelo (NO parte de un publish del canvas): editar un término o una regla de separador/casing re-fisicaliza nombres en todo el modelo de inmediato.
+Estos recursos son configuración **del proyecto** (doc 75 D3; NO parte de un publish del canvas): editar un término o una regla de separador/casing re-fisicaliza los nombres de ESE proyecto de inmediato. Todas las funciones de `naming.service.ts` reciben el `projectId` como primer argumento (el del selector de `StandardsScreen`).
 
 **Términos del glosario (Glossary)**
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `listTerms(scope)` | GET | `/api/glossary?scope=table\|column` | — | `DictTerm[]` |
-| `createTerm(x)` | POST | `/api/glossary` | `{ term, abbrev, scope, wordType? }` | `DictTerm` |
-| `updateTerm(id, x)` | PUT | `/api/glossary/{id}` | `{ term, abbrev, scope, wordType? }` | `DictTerm` |
-| `deleteTerm(id)` | DELETE | `/api/glossary/{id}` | — | `{ id }` |
-| `validateTerm(term, scope)` | POST | `/api/glossary/validate` | `{ term, scope }` | `GlossaryValidation` — duplicado en glosario + hits en el corpus de nombres lógicos (muestra capada a 50); cortesía de UX, el backend re-valida en cada write |
-| `lockTerm(id)` / `unlockTerm(id)` | POST | `/api/glossary/{id}/lock` · `/unlock` | `{}` | `DictTerm` — solo `admin.manage`; una entrada bloqueada queda intocable para todos |
+| `listTerms(projectId, scope)` | GET | `/api/projects/{pid}/glossary?scope=table\|column` | — | `DictTerm[]` |
+| `createTerm(projectId, x)` | POST | `/api/projects/{pid}/glossary` | `{ term, abbrev, scope, wordType? }` | `DictTerm` |
+| `updateTerm(projectId, id, x)` | PUT | `/api/projects/{pid}/glossary/{id}` | `{ term, abbrev, scope, wordType? }` | `DictTerm` |
+| `deleteTerm(projectId, id)` | DELETE | `/api/projects/{pid}/glossary/{id}` | — | `{ id }` |
+| `validateTerm(projectId, term, scope)` | POST | `/api/projects/{pid}/glossary/validate` | `{ term, scope }` | `GlossaryValidation` — duplicado en glosario + hits en el corpus de nombres lógicos (muestra capada a 50); cortesía de UX, el backend re-valida en cada write |
+| `lockTerm(projectId, id)` / `unlockTerm(projectId, id)` | POST | `/api/projects/{pid}/glossary/{id}/lock` · `/unlock` | `{}` | `DictTerm` — solo `admin.manage`; una entrada bloqueada queda intocable para todos |
 
 **Configuración de naming (separador / casing por scope)**
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `getNamingConfig()` | GET | `/api/settings/naming` | — | `{ column: NamingRule, table: NamingRule }` |
-| `setNamingConfig(scope, rule)` | PUT | `/api/settings/naming/{scope}` | `{ separator, case }` | `NamingRule` |
+| `getNamingConfig(projectId)` | GET | `/api/projects/{pid}/settings/naming` | — | `{ column: NamingRule, table: NamingRule }` |
+| `setNamingConfig(projectId, scope, rule)` | PUT | `/api/projects/{pid}/settings/naming/{scope}` | `{ separator, case }` | `NamingRule` |
 
 El `naming_config` incluye además `maxLength` por scope (doc 24), que el backend hace cumplir en cada `add_change` (§3.3.2); su edición va versionada por `applyStandards` (§3.5.2).
 
@@ -849,33 +851,34 @@ El `naming_config` incluye además `maxLength` por scope (doc 24), que el backen
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `physicalize(logical, scope)` | POST | `/api/glossary/physicalize` | `{ logical, scope }` | `{ physical }` |
-| `rephysicalize(scope?)` | POST | `/api/glossary/rephysicalize` | `{ scope? }` | `{ updated }` |
+| `physicalize(projectId, logical, scope)` | POST | `/api/projects/{pid}/glossary/physicalize` | `{ logical, scope }` | `{ physical }` |
+| `rephysicalize(projectId, scope?)` | POST | `/api/projects/{pid}/glossary/rephysicalize` | `{ scope? }` | `{ updated }` |
 
-**Parent Domains globales**
+**Parent Domains del proyecto**
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `listDomainsGlobal()` | GET | `/api/domains` | — | `ParentDomainFull[]` |
-| `createDomainGlobal(d)` | POST | `/api/domains` | `Omit<ParentDomainFull,'id'>` | `ParentDomainFull` |
-| `updateDomainGlobal(id, d)` | PUT | `/api/domains/{id}` | `Omit<ParentDomainFull,'id'>` | `ParentDomainFull` |
-| `deleteDomainGlobal(id)` | DELETE | `/api/domains/{id}` | — | `{ id }` |
-| `getDomainImpact(id, {q, offset, limit})` | GET | `/api/domains/{id}/impact?q=&offset=&limit=` | — | `DomainImpact` |
-| `propagateDomain(id)` | POST | `/api/domains/{id}/propagate` | — | `{ updated }` |
+| `listDomainsGlobal(projectId)` | GET | `/api/projects/{pid}/domains` | — | `ParentDomainFull[]` |
+| `createDomainGlobal(projectId, d)` | POST | `/api/projects/{pid}/domains` | `Omit<ParentDomainFull,'id'>` | `ParentDomainFull` |
+| `updateDomainGlobal(projectId, id, d)` | PUT | `/api/projects/{pid}/domains/{id}` | `Omit<ParentDomainFull,'id'>` | `ParentDomainFull` |
+| `deleteDomainGlobal(projectId, id)` | DELETE | `/api/projects/{pid}/domains/{id}` | — | `{ id }` |
+| `getDomainImpact(projectId, id, {q, offset, limit})` | GET | `/api/projects/{pid}/domains/{id}/impact?q=&offset=&limit=` | — | `DomainImpact` |
+| `propagateDomain(projectId, id)` | POST | `/api/projects/{pid}/domains/{id}/propagate` | — | `{ updated }` |
 
 `getDomainImpact` previsualiza el impacto de un cambio de tipo del dominio (totales globales + filas agrupadas por tabla, con búsqueda server-side por nombre de tabla y paginación; respeta overrides manuales); `propagateDomain` aplica el `defaultDataType` a las columnas sin override.
 
 #### 3.5.2. Snapshot + versionado + UDP (`standards.service.ts`)
 
-Backend `/api/standards/*`. Aquí se agrupa un batch de cambios y se aplica como UNA versión (con rollback e historial) sobre el stream `standards_versions`.
+Backend `/api/projects/{pid}/standards/*`. Aquí se agrupa un batch de cambios y se aplica como UNA versión (con rollback e historial) sobre el stream `standards_versions` **del proyecto** (`seq`/`vN` independientes por proyecto). `applyStandards`/`rollbackStandards` corren bajo `runBlocking` (overlay bloqueante).
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `getSnapshot()` | GET | `/api/standards/snapshot` | — | `StandardsSnapshot` (incluye `ddlRules` + `ddlConfig`) |
-| `getVersions()` | GET | `/api/standards/versions` | — | `StandardsVersion[]` |
-| `applyStandards(body)` | POST | `/api/standards/apply` | `ApplyStandardsBody` | `StandardsVersion` (permiso `standards.edit`) |
-| `rollbackStandards(targetSeq)` | POST | `/api/standards/rollback` | `{ targetSeq }` | `StandardsVersion` (permiso `rollback`) |
-| `getUdpDefs()` | GET | `/api/udp` | — | `UdpDefinition[]` |
+| `getSnapshot(projectId)` | GET | `/api/projects/{pid}/standards/snapshot` | — | `StandardsSnapshot` (incluye `ddlRules` + `ddlConfig`) |
+| `getVersions(projectId)` | GET | `/api/projects/{pid}/standards/versions` | — | `StandardsVersion[]` |
+| `applyStandards(projectId, body)` | POST | `/api/projects/{pid}/standards/apply` | `ApplyStandardsBody` | `StandardsVersion` (permiso `standards.edit`) |
+| `rollbackStandards(projectId, targetSeq)` | POST | `/api/projects/{pid}/standards/rollback` | `{ targetSeq }` | `StandardsVersion` (permiso `rollback`) |
+| `getUdpDefs(projectId)` | GET | `/api/projects/{pid}/udp` | — | `UdpDefinition[]` |
+| `getStandardsSummary(projectId)` | GET | `/api/projects/{pid}/standards/summary` | — | `{ glossary, domains, udp, rules, naming }` (asistente «New project», bloques `STANDARDS_BLOCKS`) |
 
 El `ApplyStandardsBody` permite mezclar upserts/deletes de términos, naming, dominios, UDP y reglas de DDL en una sola versión:
 
@@ -897,32 +900,32 @@ export interface ApplyStandardsBody {
 }
 ```
 
-Las definiciones UDP se LEEN por `GET /api/udp`, pero se MUTAN siempre por `applyStandards` con `kind='udp'` (para quedar versionadas). Los `UdpDefinition` cubren los niveles `table` | `column` | `canvas` y tipos `string` | `number` | `boolean` | `date` | `list` (enum vía `allowedValues`).
+Las definiciones UDP se LEEN por `GET /api/projects/{pid}/udp`, pero se MUTAN siempre por `applyStandards` con `kind='udp'` (para quedar versionadas). Los `UdpDefinition` cubren los niveles `table` | `column` | `canvas` | `view` (con faceta `view: logical | physical`, doc 69) y tipos `string` | `number` | `boolean` | `date` | `list` (enum vía `allowedValues`).
 
 #### 3.5.3. DDL Export Rules (`ddlRules.service.ts` + `features/ddl/rulesBridge.ts`)
 
-Motor de reglas del Export DDL (doc 30): reglas y generadores que transforman el DDL exportado según UDPs, con motor sqlglot en el backend. La lectura y las operaciones stateless van a `/api/ddl-rules/*`; las MUTACIONES son versionadas — pasan por `applyStandards` con `kind='ddl'` (`rulesUpsert` / `rulesDelete` / `ddlConfigPatch`), de modo que cada guardado es una versión del historial de Standards, con rollback incluido.
+Motor de reglas del Export DDL (doc 30): reglas y generadores que transforman el DDL exportado según UDPs, con motor sqlglot en el backend. La lectura y las operaciones stateless van a `/api/projects/{pid}/ddl-rules/*`; las MUTACIONES son versionadas — pasan por `applyStandards` con `kind='ddl'` (`rulesUpsert` / `rulesDelete` / `ddlConfigPatch`), de modo que cada guardado es una versión del historial de Standards, con rollback incluido.
 
 **Lectura + validación (pestaña "DDL export rules", `ddlRules.service.ts`)**
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `listDdlRules()` | GET | `/api/ddl-rules` | — | `DdlRule[]` |
-| `getDdlConfig()` | GET | `/api/ddl-rules/config` | — | `DdlRulesetConfig` (lookups + functions) |
-| `getDdlArtifacts()` | GET | `/api/ddl-rules/artifacts` | — | `DdlArtifact[]` |
-| `getDdlTemplates()` | GET | `/api/ddl-rules/templates` | — | `{ templates, seedRules, seedLookups }` |
-| `validateDdlRule(rule)` | POST | `/api/ddl-rules/validate` | `DdlRuleEditInput` | `DdlValidateResult` (los 5 checks + condición canonizada + `udpRefs`) |
-| `testDdlRule(rule, tableId)` | POST | `/api/ddl-rules/test` | `{ rule, tableId }` | `DdlTestResult` (fragmentos SQL sobre una tabla real) |
-| `impactDdlRule(rule)` | POST | `/api/ddl-rules/impact` | `{ rule }` | `{ columns, tables }` |
+| `listDdlRules(projectId)` | GET | `/api/projects/{pid}/ddl-rules` | — | `DdlRule[]` |
+| `getDdlConfig(projectId)` | GET | `/api/projects/{pid}/ddl-rules/config` | — | `DdlRulesetConfig` (lookups + functions) |
+| `getDdlArtifacts(projectId)` | GET | `/api/projects/{pid}/ddl-rules/artifacts` | — | `DdlArtifact[]` |
+| `getDdlTemplates(projectId)` | GET | `/api/projects/{pid}/ddl-rules/templates` | — | `{ templates, seedRules, seedLookups }` |
+| `validateDdlRule(projectId, rule)` | POST | `/api/projects/{pid}/ddl-rules/validate` | `DdlRuleEditInput` | `DdlValidateResult` (los 5 checks + condición canonizada + `udpRefs`) |
+| `testDdlRule(projectId, rule, tableId)` | POST | `/api/projects/{pid}/ddl-rules/test` | `{ rule, tableId }` | `DdlTestResult` (fragmentos SQL sobre una tabla real) |
+| `impactDdlRule(projectId, rule)` | POST | `/api/projects/{pid}/ddl-rules/impact` | `{ rule }` | `{ columns, tables }` |
 
-El editor serializa la regla a YAML y de vuelta client-side (`ruleToYaml` / `yamlToRule`, dependencia `yaml 2.9.0`); el YAML nunca viaja como tal a la API. El CTA del catálogo vacío (`seedStarterRules`) aplica el ruleset base (`seedRules` + `seedLookups` de `/templates`) como UNA versión vía `applyStandards`.
+El editor serializa la regla a YAML y de vuelta client-side (`ruleToYaml` / `yamlToRule`, dependencia `yaml 2.9.0`); el YAML nunca viaja como tal a la API. El CTA del catálogo vacío (`seedStarterRules(projectId)`) aplica el ruleset base (`seedRules` + `seedLookups` de `/templates`) como UNA versión vía `applyStandards`.
 
 **Render en el export (`rulesBridge.ts`, modal Export DDL)**
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `fetchExportRules()` | GET | `/api/ddl-rules` | — | `ExportRule[]` (vista liviana para el selector) |
-| `renderWithRules(args)` | POST | `/api/ddl-rules/render` | ver abajo | `RenderedExport` (permiso `export`) |
+| `fetchExportRules(projectId)` | GET | `/api/projects/{pid}/ddl-rules` | — | `ExportRule[]` (vista liviana para el selector) |
+| `renderWithRules(args)` | POST | `/api/projects/{pid}/ddl-rules/render` | ver abajo | `RenderedExport` (permiso `export`) |
 
 El payload del `render` se arma con el estado EFECTIVO que el canvas está exportando (drafts incluidos): `ruleIds`, `model` (nombre + `udpValues` del canvas), `options` del modal (`identifierCase`, `tableFormat`, `external`, `location`, `includePartitions`), `tables[]` (cada una con su doc, sus columnas con `udpValues` y su `baseSql` generado client-side) y `views[]` (con `sql`, `sourceTableIds` y el flag `businessView` = `showOnCanvas`). La respuesta trae `statements[]`, `log[]` (applied/skipped por regla), `rulesetVersion`, `applied` y `skipped`; el `.sql` final se ensambla en el cliente con el sello de la versión de reglas usada. Sin reglas seleccionadas, el export NO pasa por este endpoint y sale byte-idéntico al generador client-side.
 
@@ -977,11 +980,10 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Auth | GET | `/api/auth/me` | sesión | auth.service |
 | Auth | GET | `/api/auth/warmup/{next_b64}` | abierto | warmup.ts (navegación top-level) |
 | Salud | GET | `/api/health` | abierto | warmup.ts (probe con fetch crudo) |
-| Identidad | GET | `/api/me` | sesión | identity.service |
 | Identidad | GET | `/api/users?can=` | sesión | versioning.service |
 | Home | GET | `/api/summary` | sesión | dashboard.service |
-| Versiones | GET | `/api/versions` | sesión | versioning.service |
-| Versiones | GET | `/api/versions/published` | sesión | versioning.service |
+| Versiones | GET | `/api/versions[?projectId=]` · `/api/versions/compare` | sesión | versioning.service |
+| Versiones | GET | `/api/projects/{pid}/versions/published` | sesión | versioning.service |
 | Versiones | GET | `/api/requests` | sesión | versioning.service |
 | Changesets | GET | `/api/changesets` | sesión | changeset.service |
 | Changesets | POST | `/api/changesets` | model.edit | changeset.service |
@@ -1007,9 +1009,9 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Changesets | POST | `/api/changesets/{id}/schemas/{sid}/delete` | model.edit | schemas.service |
 | Changesets | POST | `/api/changesets/{id}/approve` (legacy) | review.decide | changeset.service |
 | Changesets | POST | `/api/changesets/{id}/reject` (legacy) | review.decide | changeset.service |
-| Proyectos | GET | `/api/projects` | sesión | modeler / structure / projects.service |
-| Proyectos | POST | `/api/projects` | model.edit | modeler / structure |
-| Proyectos | PUT/DELETE | `/api/projects/{id}` | model.edit | modeler / structure / projects.service |
+| Proyectos | GET | `/api/projects` | sesión | projects.service / modeler / structure |
+| Proyectos | POST | `/api/projects` | model.edit | projects.service (NewProjectModal) |
+| Proyectos | GET | `/api/projects/{id}/counts` | sesión | projects.service (DeleteProjectDialog, CriticalDeletionBlock) |
 | Carpetas | GET | `/api/projects/{projectId}/folders` | sesión | modeler / structure |
 | Carpetas | POST | `/api/folders` | model.edit | modeler / structure |
 | Carpetas | PATCH/DELETE | `/api/folders/{id}` | model.edit | modeler / structure |
@@ -1020,18 +1022,21 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Canvas | PUT | `/api/subject-areas/{id}/tables` | model.edit | modeler / structure |
 | Canvas | PUT | `/api/subject-areas/{id}/layout` | model.edit | modeler / structure |
 | Canvas | PUT | `/api/subject-areas/{id}/drawings` | model.edit | modeler / structure |
-| Canvas | PUT | `/api/subject-areas/{id}/udp` | model.edit | modeler / structure |
+| Canvas | PUT | `/api/subject-areas/{id}/views` | model.edit | modeler / structure |
 | Canvas | GET | `/api/subject-areas/{id}/diagram` | sesión | modeler.service |
-| Catálogo | GET | `/api/catalog/tables` | sesión | governance / explorer |
-| Catálogo | GET | `/api/catalog/columns` | sesión | explorer.service |
+| Catálogo | GET | `/api/projects/{pid}/catalog/tables` | sesión | governance.service |
+| Catálogo | GET | `/api/projects/{pid}/catalog/search` | sesión | governance.service (⌘K) |
+| Catálogo | GET | `/api/projects/{pid}/catalog/inventory` | sesión | explorer.service |
+| Catálogo | GET | `/api/catalog/inspect/tables/{id}` · `/inspect/views/{id}` | sesión | inspector (doc 72) |
 | Catálogo | GET | `/api/catalog/tables/{tableId}/columns` | sesión | governance.service |
 | Catálogo | GET | `/api/catalog/tables/{tableId}/usage` | sesión | governance.service |
 | Relaciones | GET | `/api/relationships` | sesión | governance.service |
 | Relaciones | GET | `/api/relationships/impact` | sesión | governance.service |
 | Relaciones | GET | `/api/relationships/links` | sesión | governance.service |
-| Esquemas | GET | `/api/schemas` | sesión | schemas.service |
-| Esquemas | POST | `/api/schemas` | model.edit | schemas.service |
+| Esquemas | GET | `/api/projects/{pid}/schemas` | sesión | schemas.service |
+| Esquemas | POST | `/api/projects/{pid}/schemas` | model.edit | schemas.service |
 | Esquemas | DELETE | `/api/schemas/{sid}` | model.edit | schemas.service (solo sin changeset) |
+| Standards | GET | `/api/projects/{pid}/standards/summary` | sesión | standards.service |
 | Vistas | GET | `/api/views` | sesión | views.service |
 | Vistas | POST | `/api/views` | model.edit | views.service (solo sin changeset) |
 | Vistas | PUT/DELETE | `/api/views/{id}` | model.edit | views.service (solo sin changeset) |
@@ -1051,33 +1056,33 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Reporting | GET/POST | `/api/reporting/reports` | sesión | query.service |
 | Reporting | PUT/DELETE | `/api/reporting/reports/{id}` | sesión (por-usuario) | query.service |
 | Reporting | POST | `/api/reporting/export` | sesión | query.service (fetch crudo) |
-| Standards | GET | `/api/glossary` | sesión | naming.service |
-| Standards | POST | `/api/glossary` | standards.edit | naming.service |
-| Standards | PUT/DELETE | `/api/glossary/{id}` | standards.edit | naming.service |
-| Standards | POST | `/api/glossary/validate` | sesión (cómputo) | naming.service |
-| Standards | POST | `/api/glossary/physicalize` | sesión (cómputo) | naming / governance |
-| Standards | POST | `/api/glossary/rephysicalize` | standards.edit | naming.service |
-| Standards | POST | `/api/glossary/{id}/lock` · `/unlock` | admin.manage | naming.service |
-| Standards | GET | `/api/settings/naming` | sesión | naming.service |
-| Standards | PUT | `/api/settings/naming/{scope}` | standards.edit | naming.service |
-| Standards | GET | `/api/domains` | sesión | naming / governance |
-| Standards | POST | `/api/domains` | standards.edit | naming.service |
-| Standards | PUT/DELETE | `/api/domains/{id}` | standards.edit | naming.service |
-| Standards | GET | `/api/domains/{id}/impact` | sesión | naming.service |
-| Standards | POST | `/api/domains/{id}/propagate` | standards.edit | naming.service |
-| Standards | GET | `/api/standards/snapshot` | sesión | standards.service |
-| Standards | GET | `/api/standards/versions` | sesión | standards.service |
-| Standards | POST | `/api/standards/apply` | standards.edit | standards / ddlRules.service |
-| Standards | POST | `/api/standards/rollback` | rollback | standards.service |
-| Standards | GET | `/api/udp` | sesión | standards.service |
-| DDL rules | GET | `/api/ddl-rules` | sesión | ddlRules.service / rulesBridge |
-| DDL rules | GET | `/api/ddl-rules/config` | sesión | ddlRules.service |
-| DDL rules | GET | `/api/ddl-rules/artifacts` | sesión | ddlRules.service |
-| DDL rules | GET | `/api/ddl-rules/templates` | sesión | ddlRules.service |
-| DDL rules | POST | `/api/ddl-rules/validate` | sesión (no escribe) | ddlRules.service |
-| DDL rules | POST | `/api/ddl-rules/test` | sesión (no escribe) | ddlRules.service |
-| DDL rules | POST | `/api/ddl-rules/impact` | sesión (no escribe) | ddlRules.service |
-| DDL rules | POST | `/api/ddl-rules/render` | export | rulesBridge (features/ddl) |
+| Standards | GET | `/api/projects/{pid}/glossary` | sesión | naming.service |
+| Standards | POST | `/api/projects/{pid}/glossary` | standards.edit | naming.service |
+| Standards | PUT/DELETE | `/api/projects/{pid}/glossary/{id}` | standards.edit | naming.service |
+| Standards | POST | `/api/projects/{pid}/glossary/validate` | sesión (cómputo) | naming.service |
+| Standards | POST | `/api/projects/{pid}/glossary/physicalize` | sesión (cómputo) | naming / governance |
+| Standards | POST | `/api/projects/{pid}/glossary/rephysicalize` | standards.edit | naming.service |
+| Standards | POST | `/api/projects/{pid}/glossary/{id}/lock` · `/unlock` | admin.manage | naming.service |
+| Standards | GET | `/api/projects/{pid}/settings/naming` | sesión | naming.service |
+| Standards | PUT | `/api/projects/{pid}/settings/naming/{scope}` | standards.edit | naming.service |
+| Standards | GET | `/api/projects/{pid}/domains` | sesión | naming / governance |
+| Standards | POST | `/api/projects/{pid}/domains` | standards.edit | naming.service |
+| Standards | PUT/DELETE | `/api/projects/{pid}/domains/{id}` | standards.edit | naming.service |
+| Standards | GET | `/api/projects/{pid}/domains/{id}/impact` | sesión | naming.service |
+| Standards | POST | `/api/projects/{pid}/domains/{id}/propagate` | standards.edit | naming.service |
+| Standards | GET | `/api/projects/{pid}/standards/snapshot` | sesión | standards.service |
+| Standards | GET | `/api/projects/{pid}/standards/versions` | sesión | standards.service |
+| Standards | POST | `/api/projects/{pid}/standards/apply` | standards.edit | standards / ddlRules.service |
+| Standards | POST | `/api/projects/{pid}/standards/rollback` | rollback | standards.service |
+| Standards | GET | `/api/projects/{pid}/udp` | sesión | standards.service |
+| DDL rules | GET | `/api/projects/{pid}/ddl-rules` | sesión | ddlRules.service / rulesBridge |
+| DDL rules | GET | `/api/projects/{pid}/ddl-rules/config` | sesión | ddlRules.service |
+| DDL rules | GET | `/api/projects/{pid}/ddl-rules/artifacts` | sesión | ddlRules.service |
+| DDL rules | GET | `/api/projects/{pid}/ddl-rules/templates` | sesión | ddlRules.service |
+| DDL rules | POST | `/api/projects/{pid}/ddl-rules/validate` | sesión (no escribe) | ddlRules.service |
+| DDL rules | POST | `/api/projects/{pid}/ddl-rules/test` | sesión (no escribe) | ddlRules.service |
+| DDL rules | POST | `/api/projects/{pid}/ddl-rules/impact` | sesión (no escribe) | ddlRules.service |
+| DDL rules | POST | `/api/projects/{pid}/ddl-rules/render` | export | rulesBridge (features/ddl) |
 | Admin | GET/POST | `/api/admin/users` | admin.manage | admin.service |
 | Admin | PUT/DELETE | `/api/admin/users/{username}` | admin.manage | admin.service |
 | Admin | GET | `/api/admin/roles` | admin.manage | admin.service |
@@ -1085,7 +1090,7 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Admin | GET | `/api/admin/permissions` | admin.manage | admin.service |
 | Admin | GET | `/api/admin/audit` | admin.manage | admin.service |
 
-Filas retiradas respecto de la edición 2026-07-06: `GET /api/projects/{id}` (la ruta no existe en el backend; `projects.service.getProject` apunta ahí pero ningún flujo la usa). Las escrituras directas de vistas/esquemas quedan anotadas "solo sin changeset" porque con versión activa esas mutaciones viajan como cambios del changeset (`PUT /{id}/changes`), no por su REST directo.
+Filas retiradas: `GET /api/projects/{id}` (2026-07-06; la ruta no existe en el backend) y, con el doc 75 (2026-09-08), `GET /api/me`, `POST …/glossary/logicalize`, `PUT /api/subject-areas/{id}/udp`, `PUT/DELETE /api/projects/{id}` y `GET /api/versions/published` global (ahora por proyecto). Las escrituras directas de vistas/esquemas quedan anotadas "solo sin changeset" porque con versión activa esas mutaciones viajan como cambios del changeset (`PUT /{id}/changes`), no por su REST directo.
 
 ---
 
@@ -1148,7 +1153,7 @@ Otras piezas de configuración del cliente son runtime, no variables de entorno:
 
 El backend persiste sobre **Databricks Lakebase Postgres**: un adaptador JSONB con superficie estilo pymongo traduce las operaciones a SQL/JSONB. Las decisiones de escala del contrato siguen vigentes:
 
-- **Nada de colecciones completas por request.** Endpoints como `GET /api/catalog/tables?q=&limit=`, `GET /api/changesets/{id}/effective/{collection}?tableId=` o `GET /api/reporting/columns?tableIds=` fuerzan filtros server-side. A escala real (2,108 tablas y ~96k columnas cargadas del modelo DDV) bajar la colección entera al cliente no es viable.
+- **Nada de colecciones completas por request.** Endpoints como `GET /api/projects/{pid}/catalog/tables?q=&limit=`, `GET /api/changesets/{id}/effective/{collection}?tableId=` o `GET /api/reporting/columns?tableIds=` fuerzan filtros server-side. A escala real (2,108 tablas y ~96k columnas cargadas del modelo DDV) bajar la colección entera al cliente no es viable.
 - **Cambios de modelo como documentos independientes.** Los cambios de un changeset se guardan uno por documento en la colección `changeset_changes` (decisión del versionado por changesets: updates chicos y diffs por slice). El cliente nunca recibe esos cambios crudos: los ve derivados vía `/effective` y `/diff`.
 - **Paginación por cursor en reporting.** `runQuery` / `runSql` devuelven `nextCursor` y `hasMore` (keyset/streaming), y el export es un stream (`POST /api/reporting/export`), pensados para no materializar resultados grandes en memoria.
 - **Envelope y errores estables.** El backend responde siempre `{ success, data, error }`, salvo los `HTTPException` de FastAPI que devuelven `{ detail }`; el cliente los reconoce en el path de error para no perder el mensaje real (por ejemplo, un `409` de conflicto de versión). Esto es independiente del motor de base y del entorno de despliegue.
@@ -1168,13 +1173,12 @@ Rutas absolutas de los archivos analizados:
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/views.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/naming.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/reporting.service.ts`
-- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/identity.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/modeler/services/modeler.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/modeler/services/structure.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/modeler/services/schemas.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/modeler/services/explorer.service.ts`
-- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/governance/services/governance.service.ts`
-- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/governance/services/changeset.service.ts`
+- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/governance.service.ts`
+- `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/services/changeset.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/reporting/query.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/standards/standards.service.ts`
 - `/Users/carlosperez/Desktop/Projects/Agentes/GitHub/WebApp/MODELER/web-data-model-hub/src/features/standards/ddlRules.service.ts`

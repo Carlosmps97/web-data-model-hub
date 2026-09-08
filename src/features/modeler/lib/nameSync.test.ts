@@ -53,7 +53,7 @@ describe('createNameSync', () => {
     h.sync.setLogical('');
     expect(h.state()).toEqual({ logical: '', physical: '' });
     await vi.advanceTimersByTimeAsync(400);
-    expect(h.onCommit).toHaveBeenLastCalledWith({ logicalName: '', physicalName: '' });
+    expect(h.onCommit).toHaveBeenLastCalledWith({ logicalName: '', physicalName: '', physicalNameOverridden: false });
 
     h.calls[0].d.resolve({ physical: 'B' });         // resuelve tras el borrado
     await flush();
@@ -90,7 +90,7 @@ describe('createNameSync', () => {
     await flush();
     await vi.advanceTimersByTimeAsync(400);
     expect(h.onCommit).toHaveBeenCalledTimes(1);
-    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'a', physicalName: 'A' });
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'a', physicalName: 'A', physicalNameOverridden: false });
   });
 
   it('physicalize que rechaza → commit igual (degradado, sin romper)', async () => {
@@ -105,7 +105,7 @@ describe('createNameSync', () => {
     await flush();
     await vi.advanceTimersByTimeAsync(400);
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit).toHaveBeenCalledWith({ logicalName: 'a', physicalName: '' });
+    expect(onCommit).toHaveBeenCalledWith({ logicalName: 'a', physicalName: '', physicalNameOverridden: false });
   });
 
   it('reset invalida fetchs en vuelo y timers pendientes', async () => {
@@ -117,5 +117,75 @@ describe('createNameSync', () => {
     await flush();
     await vi.advanceTimersByTimeAsync(1000);
     expect(h.onCommit).not.toHaveBeenCalled();       // nada del ciclo viejo persiste
+  });
+});
+
+describe('override persistido (doc 68)', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('reset con overridden=true: renombrar el lógico NO re-deriva el físico', async () => {
+    const h = harness();
+    h.sync.reset('base eeff', 'HD_BASEEEFF', true);
+    h.sync.setLogical('base eeff dos');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.physicalize).not.toHaveBeenCalled();            // auto apagado
+    expect(h.onCommit).toHaveBeenLastCalledWith({
+      logicalName: 'base eeff dos', physicalName: 'HD_BASEEEFF',
+      physicalNameOverridden: true,
+    });
+  });
+
+  it('tipear el físico commitea overridden=true; vaciarlo lo apaga', async () => {
+    const h = harness();
+    h.sync.reset('monto', 'MTO', false);
+    h.sync.setPhysical('MTO_X');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.onCommit).toHaveBeenLastCalledWith({
+      logicalName: 'monto', physicalName: 'MTO_X', physicalNameOverridden: true,
+    });
+    h.sync.setPhysical('');                                  // re-enciende el auto
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.onCommit).toHaveBeenLastCalledWith({
+      logicalName: 'monto', physicalName: '', physicalNameOverridden: false,
+    });
+  });
+});
+
+// ── tableNamePlan (doc 68): decisión de guardado del panel de TABLA ────────
+import { tableNamePlan } from './nameSync';
+
+describe('tableNamePlan', () => {
+  const prev = { logicalName: 'base eeff', physicalName: 'HD_BASEEEFF', physicalNameOverridden: true };
+
+  it('con override persistido, renombrar el lógico NO re-deriva y conserva el custom', () => {
+    const plan = tableNamePlan({ logical: 'base eeff dos', physical: 'HD_BASEEEFF', prev, sessionOverride: null });
+    expect(plan).toEqual({ physical: 'HD_BASEEEFF', overridden: true, derive: false });
+  });
+
+  it('sin override, renombrar el lógico con físico intacto SÍ re-deriva (comportamiento previo)', () => {
+    const plan = tableNamePlan({
+      logical: 'maestro dos', physical: 'MAESTRO',
+      prev: { logicalName: 'maestro', physicalName: 'MAESTRO' }, sessionOverride: null,
+    });
+    expect(plan).toEqual({ physical: 'MAESTRO', overridden: false, derive: true });
+  });
+
+  it('tipear un físico distinto en esta sesión marca override y no deriva', () => {
+    const plan = tableNamePlan({
+      logical: 'maestro', physical: 'MD_MAESTRO',
+      prev: { logicalName: 'maestro', physicalName: 'MAESTRO' }, sessionOverride: true,
+    });
+    expect(plan).toEqual({ physical: 'MD_MAESTRO', overridden: true, derive: false });
+  });
+
+  it('vaciar el físico (o usar el botón derive) apaga el override y re-deriva', () => {
+    const plan = tableNamePlan({ logical: 'base eeff', physical: '', prev, sessionOverride: false });
+    expect(plan).toEqual({ physical: '', overridden: false, derive: true });
+  });
+
+  it('sin lógico no hay derivación posible', () => {
+    const plan = tableNamePlan({ logical: '', physical: 'X', prev: { logicalName: '', physicalName: 'X' }, sessionOverride: null });
+    expect(plan.derive).toBe(false);
   });
 });

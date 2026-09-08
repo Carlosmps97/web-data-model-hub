@@ -2,7 +2,7 @@
  *  standards/apply (versionadas) y el CTA de semillas. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
+vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), LONG_TIMEOUT_MS: 120_000 }));
 
 import { apiGet, apiPost } from '@/services/http';
 import {
@@ -47,16 +47,16 @@ describe('YAML round-trip', () => {
 describe('mutaciones versionadas (standards/apply)', () => {
   it('saveDdlRule postea rulesUpsert con kind ddl y título legible', async () => {
     vi.mocked(apiPost).mockResolvedValue({ seq: 9 });
-    await saveDdlRule(toEditInput(RULE), false);
+    await saveDdlRule('p1', toEditInput(RULE), false);
     const [url, body] = vi.mocked(apiPost).mock.calls[0];
-    expect(String(url)).toContain('/api/standards/apply');
+    expect(String(url)).toContain('/api/projects/p1/standards/apply');
     expect(body).toMatchObject({ kind: 'ddl', title: 'Rule enmascarar_dac · edited' });
     expect((body as { rulesUpsert: unknown[] }).rulesUpsert).toHaveLength(1);
   });
 
   it('toggleDdlRule manda la regla entera con enabled flipped', async () => {
     vi.mocked(apiPost).mockResolvedValue({ seq: 10 });
-    await toggleDdlRule(RULE, false);
+    await toggleDdlRule('p1', RULE, false);
     const body = vi.mocked(apiPost).mock.calls[0][1] as {
       rulesUpsert: { id: string; enabled: boolean }[]; title: string;
     };
@@ -70,7 +70,7 @@ describe('mutaciones versionadas (standards/apply)', () => {
       seedLookups: { vacuum_map: { values: {} } },
     });
     vi.mocked(apiPost).mockResolvedValue({ seq: 11 });
-    await seedStarterRules();
+    await seedStarterRules('p1');
     const body = vi.mocked(apiPost).mock.calls[0][1] as {
       rulesUpsert: unknown[]; ddlConfigPatch: { lookups: Record<string, unknown> };
     };

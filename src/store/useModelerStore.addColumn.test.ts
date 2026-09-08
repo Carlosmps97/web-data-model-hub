@@ -4,8 +4,8 @@
 // a Properties · Columns después de crear).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/features/governance/services/governance.service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/governance/services/governance.service')>();
+vi.mock('@/services/governance.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/governance.service')>();
   return {
     ...actual,
     physicalize: vi.fn(async () => ({ physical: 'FIS' })),
@@ -19,7 +19,7 @@ vi.mock('@/services/views.service', () => ({
 }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 
-import * as gov from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
 import { useModelerStore } from './useModelerStore';
 
 const diagramWith = (columns: unknown[]) => ({ tables: [], columns, relationships: [], views: [] }) as never;

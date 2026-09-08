@@ -1,6 +1,6 @@
 # Testing y consideraciones/límites del frontend — Data Model Hub
 
-Actualizado al 2026-07-31.
+Actualizado al 2026-09-08 (doc 75: proyectos independientes — 570 tests en 78 archivos, verdes).
 
 Este documento describe cómo se verifica el frontend (SPA en Vite + React 19) y qué consideraciones de rendimiento y límites conocidos aplican al canvas del modelador y a la grilla del reporting. Está basado en el código real del repositorio `web-data-model-hub`.
 
@@ -46,49 +46,49 @@ test: {
 
 ### 1.3 Qué se testea hoy
 
-La suite al 2026-08-28: **344 tests en 51 archivos**, todos verdes (verificable con `npx vitest run`); los últimos 17 son los de la carga masiva desde Excel (doc 55: `features/upload/lib/parseWorkbook.test.ts`, `features/upload/upload.service.test.ts`, `features/upload/arrangeCanvases.test.ts` y `features/modeler/lib/arrangeGraph.test.ts`). La foto de 2026-07-31 que sigue (**166 tests en 24 archivos**: 23 `*.test.ts` bajo `src/` más `server.test.mjs` en la raíz del repo) se conserva como inventario de referencia:
+La suite al 2026-09-08: **570 tests en 78 archivos** (77 `*.test.ts` bajo `src/` más `server.test.mjs` en la raíz del repo), todos verdes (verificable con `npx vitest run`). Inventario por área:
 
 | Área | Archivos de test |
 |---|---|
-| Stores (`src/store/`) | `useIdentityStore.test.ts`, `useModelerStore.test.ts`, `useModelerStore.views.test.ts` |
-| Servicios base (`src/services/`) | `http.test.ts`, `warmup.test.ts`, `versioning.summarize.test.ts`, `views.service.types.test.ts` |
-| Modeler — lógica pura (`features/modeler/lib/`) | `complexTypes`, `keyOrder`, `lodSize`, `nameSync`, `relationshipPairs`, `schemaStaging`, `viewEditorLogic`, `viewGraph`, `viewSync` (todos `.test.ts`) |
-| Modeler — servicios | `explorer.service.test.ts` |
-| DDL (`features/ddl/`) | `generators.test.ts` |
-| Governance (`features/governance/services/`) | `governance.service.test.ts` |
+| Stores (`src/store/`) | `useSessionStore.test.ts` (proyecto + versión activos, `closeModel`, `dmh:lastProject`), `useBusyStore.test.ts` (`runBlocking` anidable), `useUndoStore.test.ts`, `useModelerStore.test.ts` (+ `.views`, `.addColumn`, `.bulk`, `.canvasViews`, `.columnPanel`, `.copyTable`, `.reorder`, `.subcat`, `.viewPanel`: incluye `deleteProject`/`undoProjectDeletion`) |
+| Servicios base (`src/services/`) | `http.test.ts`, `warmup.test.ts`, `versioning.summarize.test.ts`, `versioning.access.test.ts`, `views.service.types.test.ts`, `governance.service.test.ts`, `changeset.service.test.ts` |
+| Lib (`src/lib/`) | `projects.test.ts` (`sortProjects`, `projectMeta`), `facets.test.ts`, `zip.test.ts` |
+| Arquitectura (`src/architecture.test.ts`) | guard doc 75 D14: no existen `features/governance`, `components/layout/AppLayout.tsx`, `store/useChangesetStore.ts`, `store/useIdentityStore.ts` |
+| Modeler — lógica pura (`features/modeler/lib/`) | `complexTypes`, `keyOrder`, `lodSize`, `nameSync`, `relationshipPairs`, `schemaStaging`, `viewEditorLogic`, `viewGraph`, `viewSync`, `columnOrder`, `canvasDrop`, `arrangeGraph`, `projectDeletion` (`deletionSummary`, `nameMatches`, `criticalDeletionText`), entre otros (todos `.test.ts`) |
+| Modeler — servicios | `explorer.service.test.ts`, `schemaPartition.test.ts`, `structure.service.test.ts` |
+| DDL (`features/ddl/`) | `generators.test.ts`, `rulesBridge.test.ts` |
 | Reporting (`features/reporting/`) | `query.service.test.ts` |
 | Standards (`features/standards/`) | `ddlRules.service.test.ts`, `domainImpact.test.ts`, `glossaryValidation.test.ts` |
-| Servidor de producción (raíz) | `server.test.mjs` (12 tests) |
+| Upload (`features/upload/`) | `parseWorkbook.test.ts`, `upload.service.test.ts`, `arrangeCanvases.test.ts` |
+| Servidor de producción (raíz) | `server.test.mjs` |
+
+Todos los mocks de `@/services/http` exponen también `LONG_TIMEOUT_MS: 120_000` (los servicios de proyecto lo usan para las acciones largas).
 
 `server.test.mjs` cubre el servidor de producción `server.mjs` en dos planos. Unit: `safeJoin` (bloqueo de path traversal, `%2e%2e`, encoding inválido), `contentTypeFor`, `buildUpstreamHeaders` (descarta `host` y el `Authorization` entrante del cliente, pone el Bearer del service principal, conserva `X-Session-Token`, precedencia de `x-forwarded-for`) y `TokenCache` (un solo mint compartido entre llamadas concurrentes, cache, re-mint tras `invalidate()`, propagación de fallo). Integración contra un backend fake: asset con cache immutable, fallback SPA con `no-cache`, proxy con Bearer y query string, streaming de un POST de 50 KB, y retry ante 401 solo para GET (un POST no se reintenta porque su body ya se consumió del stream).
 
-El patrón de los tests de store/servicio queda ilustrado por `src/store/useIdentityStore.test.ts`, que cubre el store de identidad (Zustand) mockeando el servicio HTTP:
+El patrón de los tests de servicio queda ilustrado por `src/features/modeler/services/schemaPartition.test.ts`, que cubre el cache de esquemas-con-tablas por versión mockeando el servicio de catálogo y el store de sesión:
 
 ```ts
-// src/store/useIdentityStore.test.ts (esencia)
-vi.mock('@/services/identity.service', () => ({ getMe: vi.fn() }));
+// src/features/modeler/services/schemaPartition.test.ts (esencia)
+const csState = vi.hoisted(() => ({ activeId: null as string | null }));
+vi.mock('@/services/governance.service', () => ({ listTables: vi.fn() }));
+vi.mock('@/store/useSessionStore', () => ({
+  useSessionStore: { getState: () => ({ activeChangesetId: csState.activeId, activeProjectId: 'p1' }) },
+}));
 
-describe('useIdentityStore', () => {
-  it('carga el principal desde /api/me', async () => {
-    vi.mocked(getMe).mockResolvedValue(fake);
-    await useIdentityStore.getState().loadIdentity();
-    expect(useIdentityStore.getState().principal?.email).toBe('dev@local');
-    expect(getMe).toHaveBeenCalledTimes(1);
-  });
-
-  it('no re-fetchea una vez cargado', async () => {
-    vi.mocked(getMe).mockResolvedValue(fake);
-    await useIdentityStore.getState().loadIdentity();
-    await useIdentityStore.getState().loadIdentity();
-    expect(getMe).toHaveBeenCalledTimes(1);
-  });
+it('deriva los esquemas del pool y cachea: la segunda llamada no re-consulta', async () => {
+  csState.activeId = 'v1';
+  listTables.mockResolvedValue([T('DDV'), T('core'), T('DDV'), T(undefined)]);
+  expect(await tableSchemasCached()).toEqual(['core', 'DDV']);
+  expect(await tableSchemasCached()).toEqual(['core', 'DDV']);
+  expect(listTables).toHaveBeenCalledTimes(1);
 });
 ```
 
 Lo que valida:
 
-1. `loadIdentity()` llama a `getMe()` (el `GET /api/me`) y guarda el `principal` en el store.
-2. La memoización del cargado: una segunda llamada a `loadIdentity()` no vuelve a pegarle al backend (se apoya en el flag `loaded`).
+1. `tableSchemasCached()` deriva los esquemas del pool del proyecto (vía `listTables()`) y los ordena.
+2. La memoización por versión activa: una segunda llamada con el mismo changeset no vuelve a pegarle al backend.
 
 El patrón que siguen los tests de store/servicio:
 
@@ -150,7 +150,7 @@ flowchart TD
     A --> D[npm run build]
     B --> B1[eslint . - recommended + ts + react-hooks + guard de barrels]
     C --> C1[vitest run - entorno node]
-    C1 --> C2[344 tests en 51 archivos - 50 en src + server.test.mjs]
+    C1 --> C2[570 tests en 78 archivos - 77 en src + server.test.mjs]
     D --> D1[tsc --noEmit - tipos estrictos]
     D1 --> D2[vite build - bundle a dist/]
     D1 -->|error de tipos| X[Build abortado]
@@ -160,17 +160,18 @@ flowchart TD
 
 | Área | Estado de test |
 |---|---|
-| Stores (`useIdentityStore`, `useModelerStore` incl. vistas) | Cubiertos (unit). |
-| Otros stores (`useSessionStore`, `useChangesetStore`, `useAuthStore`) | Sin tests. |
-| Servicios base (`http`, `warmup`, resumen de diff de `versioning`, tipos de `views.service`) | Cubiertos (unit, red mockeada). |
-| Servicios de features (`explorer.service`, `query.service`, `governance.service`, `ddlRules.service`) | Cubiertos (unit, red mockeada). |
+| Stores (`useSessionStore`, `useBusyStore`, `useUndoStore`, `useModelerStore` incl. vistas y borrado de proyecto) | Cubiertos (unit). |
+| `useAuthStore` | Sin tests. |
+| Servicios base (`http`, `warmup`, resumen y acceso de `versioning`, tipos de `views.service`, `governance.service`, `changeset.service`) | Cubiertos (unit, red mockeada). |
+| Servicios de features (`explorer.service`, `schemaPartition`, `structure.service`, `query.service`, `ddlRules.service`, `rulesBridge`, `upload.service`) | Cubiertos (unit, red mockeada). |
+| Invariantes de arquitectura (`src/architecture.test.ts`: el legado del doc 75 no vuelve) | Cubierto. |
 | Lógica pura del modeler (`lib/`: complexTypes, keyOrder, lodSize, nameSync, relationshipPairs, schemaStaging, viewEditorLogic, viewGraph, viewSync) | Cubierta (unit). |
 | Generadores DDL (`generators.ts`) y validaciones de Standards (`domainImpact`, `glossaryValidation`) | Cubiertos (unit). |
 | Servidor de producción (`server.mjs`) | Cubierto (`server.test.mjs`: unit + integración con backend fake). |
 | Componentes React (canvas, grillas, modales) | Sin tests de render (entorno `node`, no `jsdom`). |
 | Lógica de layout ELK (`elkLayout.ts`) | Sin tests. |
 
-En la práctica, la red de seguridad son las compuertas estáticas (`tsc --noEmit` estricto + ESLint) más los 166 tests de Vitest (lógica pura, stores, servicios con red mockeada y el servidor de producción). Lo que sigue sin cobertura de frontend es el render de componentes (canvas, grillas): esa capa se valida del lado del backend (su propia suite pytest) y por pruebas de estrés a nivel de datos.
+En la práctica, la red de seguridad son las compuertas estáticas (`tsc --noEmit` estricto + ESLint) más los 570 tests de Vitest (lógica pura, stores, servicios con red mockeada y el servidor de producción). Lo que sigue sin cobertura de frontend es el render de componentes (canvas, grillas): esa capa se valida del lado del backend (su propia suite pytest) y por pruebas de estrés a nivel de datos.
 
 ---
 

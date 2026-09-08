@@ -5,17 +5,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const csState = vi.hoisted(() => ({ activeId: null as string | null }));
 
-vi.mock('@/features/governance/services/governance.service', () => ({
+vi.mock('@/services/governance.service', () => ({
   listTables: vi.fn(),
 }));
 vi.mock('./schemas.service', () => ({
   listSchemas: vi.fn(),
 }));
-vi.mock('@/store/useChangesetStore', () => ({
-  useChangesetStore: { getState: () => ({ activeId: csState.activeId }) },
+vi.mock('@/store/useSessionStore', () => ({
+  useSessionStore: { getState: () => ({ activeChangesetId: csState.activeId, activeProjectId: 'p1' }) },
 }));
 
-import * as gov from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
 import * as schemasSvc from './schemas.service';
 import { tableSchemasCached } from './schemaPartition';
 

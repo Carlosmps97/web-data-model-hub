@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   EllipsisVertical, ChevronRight, ChevronDown, Folder as FolderIcon,
   FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid, FileDown, FileText,
@@ -10,14 +10,19 @@ import type { FolderNode } from '@/store/useModelerStore';
 import type { Folder, Project, SubjectArea } from '../services/modeler.service';
 import { exportNodeHtml, exportNodePdf } from '../exportPackage';
 import type { CancelFlag, ExportOutcome, ExportProgress } from '../exportPackage';
+import DeleteProjectDialog from './DeleteProjectDialog';
 
 /* ──────────────────────────────────────────────────────────────────────────
-   Model Explorer — árbol jerárquico Projects → Folders (anidadas) → Canvas.
+   Model Explorer — árbol jerárquico Project → Folders (anidadas) → Canvas.
+   Doc 75 D8: se muestra SÓLO el proyecto de la sesión (crear proyectos va por
+   el Open model; renombrar/borrar el proyecto van por la working copy — D5:
+   «Delete project…» graba UN cambio y el revisor lo aprueba como crítico).
    Cada nodo muestra al hover un botón "3 puntos" que abre un menú contextual:
-     · project: New folder · New canvas · Export HTML · Rename · Delete
+     · project: New folder · New canvas · Export HTML · Rename · Delete project…
      · folder:  New folder · New canvas · Export HTML · Rename · Delete
      · canvas:  Export HTML · Rename · Delete
-   En readonly el menú muestra SOLO Export HTML (exportar no muta — doc 66 r2).
+   En readonly (o con el borrado del proyecto pendiente) el menú muestra SOLO
+   Export HTML/PDF (exportar no muta — doc 66 r2).
    Crear/renombrar = input inline. Borrar = ConfirmDialog. Carpetas con chevron.
 
    Navegación tipo file-tree: expandir/colapsar proyectos y carpetas es SÓLO
@@ -30,22 +35,30 @@ const INDENT = 14;            // px por nivel de profundidad
 const PAD_BASE = 6;           // padding-left base del primer nivel
 
 type NodeKind = 'project' | 'folder' | 'canvas';
+/** Filas del árbol: los nodos del explorer + la rama «Models» (doc 71). */
+type RowKind = NodeKind | 'branch';
 interface MenuState { kind: NodeKind; id: string; projectId: string; x: number; y: number; }
 // `create` = input transitorio para crear (folder/canvas) dentro de un padre.
 interface CreateState { type: 'folder' | 'canvas'; projectId: string; parentFolderId: string | null; }
 interface DeleteState { kind: NodeKind; id: string; name: string; projectId: string; }
 
-export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
-  const projects = useModelerStore((s) => s.projects);
+export default function ModelExplorer({ pushToast, filter = '', renderCatalog }: {
+  pushToast: (m: string, k?: 'err') => void;
+  /** Doc 71: filtro «contiene» de la cabecera del Explorer (carpetas/canvases). */
+  filter?: string;
+  /** Doc 71: ramas extra por proyecto (Tables · Views · Schemas), debajo de Models. */
+  renderCatalog?: (project: Project) => ReactNode;
+}) {
+  const q = filter.trim().toLowerCase();
+  const allProjects = useModelerStore((s) => s.projects);
   const trees = useModelerStore((s) => s.trees);
   const activeProjectId = useModelerStore((s) => s.activeProjectId);
   const activeSaId = useModelerStore((s) => s.activeSaId);
   const openingSaId = useModelerStore((s) => s.openingSaId);
   const loadProjectTree = useModelerStore((s) => s.loadProjectTree);
   const selectSubjectArea = useModelerStore((s) => s.selectSubjectArea);
-  const createProject = useModelerStore((s) => s.createProject);
   const renameProject = useModelerStore((s) => s.renameProject);
-  const deleteProject = useModelerStore((s) => s.deleteProject);
+  const deletionPending = useModelerStore((s) => s.projectDeletionPending);
   const createFolder = useModelerStore((s) => s.createFolder);
   const renameFolder = useModelerStore((s) => s.renameFolder);
   const deleteFolder = useModelerStore((s) => s.deleteFolder);
@@ -56,10 +69,18 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   // canvases) son escrituras REST directas no versionadas que no pasan por el
   // choke-point del changeset — se ocultan las affordances de MUTACIÓN. El
   // menú de 3 puntos sí se abre: queda únicamente «Export HTML» (doc 66 r2).
-  const readonly = useSessionStore((s) => s.openMode === 'readonly');
+  const readonlyMode = useSessionStore((s) => s.openMode === 'readonly');
+  // Doc 75 D5: con el borrado del proyecto pendiente en el draft, el explorer
+  // no ofrece mutaciones (mismo gate que el visor).
+  const readonly = readonlyMode || deletionPending;
+  // Doc 75 D8: el explorer es del proyecto de la sesión, nunca de todos.
+  const projects = useMemo(() => allProjects.filter((p) => p.id === activeProjectId), [allProjects, activeProjectId]);
+  const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
 
   const [expandedF, setExpandedF] = useState<Set<string>>(new Set()); // ids de folders EXPANDIDAS (default: TODAS colapsadas — pedido owner)
   const [expandedP, setExpandedP] = useState<Set<string>>(new Set()); // ids de proyectos expandidos (default: cerrados)
+  const [collapsedModels, setCollapsedModels] = useState<Set<string>>(new Set()); // rama Models colapsada (default: abierta)
+  const toggleModels = (pid: string) => setCollapsedModels((s) => { const n = new Set(s); if (n.has(pid)) n.delete(pid); else n.add(pid); return n; });
   const [loadingTrees, setLoadingTrees] = useState<Set<string>>(new Set()); // proyectos con árbol cargando
   const [menu, setMenu] = useState<MenuState | null>(null);
   const [editing, setEditing] = useState<{ kind: NodeKind; id: string; projectId: string } | null>(null);
@@ -182,7 +203,16 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     if (parentFolderId) expand(parentFolderId);
     setCreating({ type, projectId, parentFolderId });
   };
-  const askDelete = (kind: NodeKind, id: string, name: string, projectId: string) => { setMenu(null); setToDelete({ kind, id, name, projectId }); };
+  const askDelete = (kind: NodeKind, id: string, name: string, projectId: string) => {
+    setMenu(null);
+    if (kind === 'project') {
+      // Doc 75 D5: borrado por draft con confirmación tipeada y conteos.
+      const project = projects.find((p) => p.id === id);
+      if (project) setProjectToDelete(project);
+      return;
+    }
+    setToDelete({ kind, id, name, projectId });
+  };
 
   const commitRename = useCallback(async (kind: NodeKind, id: string, projectId: string, value: string) => {
     setEditing(null);
@@ -214,20 +244,11 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
     if (!d) return;
     setDeleting(true);
     try {
-      if (d.kind === 'project') await deleteProject(d.id);
-      else if (d.kind === 'folder') await deleteFolder(d.id, d.projectId);
+      if (d.kind === 'folder') await deleteFolder(d.id, d.projectId);
       else await deleteCanvas(d.id, d.projectId);
     } catch { pushToast("Couldn't delete", 'err'); }
     finally { setDeleting(false); setToDelete(null); }
-  }, [toDelete, deleteProject, deleteFolder, deleteCanvas, pushToast]);
-
-  const onNewProject = () => { setMenu(null); setEditing(null); setCreating({ type: 'folder', projectId: '__new_project__', parentFolderId: null }); };
-  const commitNewProject = useCallback(async (value: string) => {
-    setCreating(null);
-    const name = value.trim();
-    if (!name) return;
-    try { await createProject(name); } catch { pushToast("Couldn't create the Project", 'err'); }
-  }, [createProject, pushToast]);
+  }, [toDelete, deleteFolder, deleteCanvas, pushToast]);
 
   // ── Render helpers ─────────────────────────────────────────────────────
   const renderCreateInput = (depth: number, onCommit: (v: string) => void, placeholder: string, leading: React.ReactNode) => (
@@ -235,6 +256,7 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   );
 
   const renderCanvas = (sa: SubjectArea, depth: number, projectId: string) => {
+    if (q && !sa.name.toLowerCase().includes(q) && !(editing?.kind === 'canvas' && editing.id === sa.id)) return null;
     if (editing?.kind === 'canvas' && editing.id === sa.id) {
       return <InlineInput key={sa.id} depth={depth} defaultValue={sa.name} leading={<LayoutGrid size={14} />}
         onCommit={(v) => commitRename('canvas', sa.id, projectId, v)} onCancel={() => setEditing(null)} />;
@@ -255,7 +277,8 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
 
   const renderFolder = (node: FolderNode, depth: number, projectId: string) => {
     const { folder } = node;
-    const open = isOpen(folder.id);
+    if (q && !folderHasMatch(node, q)) return null;
+    const open = q ? true : isOpen(folder.id);
     const childCount = node.folders.length + node.canvases.length;
     return (
       <div key={folder.id}>
@@ -302,20 +325,32 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
         )}
         {open && loadingTree && !cached && (
           <div className="wk-exp-empty" style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: PAD_BASE + INDENT + 13 }}>
-            <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden /> Cargando…
+            <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden /> Loading…
           </div>
         )}
         {open && tree && (
           <>
-            {tree.folders.map((f) => renderFolder(f, 1, p.id))}
-            {tree.canvases.map((c) => renderCanvas(c, 1, p.id))}
-            {creating && creating.projectId === p.id && creating.parentFolderId === null &&
-              renderCreateInput(1, commitCreate,
-                creating.type === 'folder' ? 'Folder name' : 'Canvas name',
-                creating.type === 'folder' ? <FolderIcon size={14} /> : <LayoutGrid size={14} />)}
-            {tree.folders.length === 0 && tree.canvases.length === 0 && !(creating && creating.projectId === p.id) && (
-              <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + INDENT + 13 }}>Empty</div>
+            {/* Doc 71: la jerarquía de canvases (sub-proyectos › dominios › modelos)
+                vive en la rama «Models»; Tables · Views · Schemas las aporta
+                renderCatalog al mismo nivel. */}
+            <Row depth={1} kind="branch" active={false}
+              chevron={(q || !collapsedModels.has(p.id)) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              icon={<LayoutGrid size={14} />} label="Models" count={countCanvases(tree)}
+              onClick={() => toggleModels(p.id)} />
+            {(q || !collapsedModels.has(p.id)) && (
+              <>
+                {tree.folders.map((f) => renderFolder(f, 2, p.id))}
+                {tree.canvases.map((c) => renderCanvas(c, 2, p.id))}
+                {creating && creating.projectId === p.id && creating.parentFolderId === null &&
+                  renderCreateInput(2, commitCreate,
+                    creating.type === 'folder' ? 'Folder name' : 'Canvas name',
+                    creating.type === 'folder' ? <FolderIcon size={14} /> : <LayoutGrid size={14} />)}
+                {tree.folders.length === 0 && tree.canvases.length === 0 && !(creating && creating.projectId === p.id) && (
+                  <div className="wk-exp-empty" style={{ paddingLeft: PAD_BASE + 2 * INDENT + 13 }}>No models yet</div>
+                )}
+              </>
             )}
+            {renderCatalog?.(p)}
           </>
         )}
       </div>
@@ -323,20 +358,11 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
   };
 
   return (
-    <div className="wk-explorer">
-      <div className="wk-exp-head">
-        <span>Model Explorer</span>
-        {!readonly && <button className="wk-exp-headbtn" title="New project" onClick={onNewProject}><Plus size={13} /></button>}
-      </div>
-
-      {creating?.projectId === '__new_project__' &&
-        <InlineInput depth={0} placeholder="Project name" leading={<Database size={14} />}
-          onCommit={commitNewProject} onCancel={() => setCreating(null)} />}
-
+    <div className="wk-exp-tree">
       {projects.map(renderProject)}
 
       {projects.length === 0 && !creating &&
-        <div className="wk-exp-empty" style={{ padding: 8 }}>No projects. Create one with +.</div>}
+        <div className="wk-exp-empty" style={{ padding: 8 }}>Open a project to browse its models.</div>}
 
       {menu && (
         <ContextMenu menu={menu} readonly={readonly}
@@ -363,18 +389,24 @@ export default function ModelExplorer({ pushToast }: { pushToast: (m: string, k?
         <ConfirmDialog
           open
           variant="danger"
-          title={`Delete ${toDelete.kind === 'project' ? 'project' : toDelete.kind === 'folder' ? 'folder' : 'canvas'}`}
+          title={`Delete ${toDelete.kind === 'folder' ? 'folder' : 'canvas'}`}
           confirmLabel="Delete"
           message={
             toDelete.kind === 'folder'
               ? <>Folder <strong>{toDelete.name}</strong> and all its subfolders will be deleted. Any canvases inside will move to the project root.</>
-              : toDelete.kind === 'project'
-                ? <>Project <strong>{toDelete.name}</strong> will be deleted with all its folders and canvases. This action cannot be undone.</>
-                : <>Canvas <strong>{toDelete.name}</strong> will be deleted. This action cannot be undone.</>
+              : <>Canvas <strong>{toDelete.name}</strong> will be deleted. This action cannot be undone.</>
           }
           busy={deleting}
           onConfirm={confirmDelete}
           onCancel={() => { if (!deleting) setToDelete(null); }}
+        />
+      )}
+      {projectToDelete && (
+        <DeleteProjectDialog
+          open
+          project={projectToDelete}
+          onClose={() => setProjectToDelete(null)}
+          onDeleted={() => { setProjectToDelete(null); pushToast('Project deletion recorded in your working copy'); }}
         />
       )}
     </div>
@@ -397,10 +429,12 @@ function nameOf(
 
 // ── Fila de árbol genérica ───────────────────────────────────────────────
 function Row({
-  depth, active, strong, kind, chevron, icon, label, onClick, onMenu, dataId,
+  depth, active, strong, kind, chevron, icon, label, count, onClick, onMenu, dataId,
 }: {
-  depth: number; active?: boolean; strong?: boolean; kind: NodeKind;
+  depth: number; active?: boolean; strong?: boolean; kind: RowKind;
   chevron?: React.ReactNode; icon: React.ReactNode; label: string;
+  /** Doc 71: contador a la derecha (ramas del proyecto). */
+  count?: number;
   onClick: () => void; onMenu?: (e: React.MouseEvent) => void; dataId?: string;
 }) {
   return (
@@ -414,9 +448,23 @@ function Row({
       {chevron ?? <span style={{ width: 13 }} />}
       <span className="wk-exp-ico">{icon}</span>
       <span className="wk-exp-label">{label}</span>
-      {onMenu && <button className="wk-exp-dots" title="Opciones" onClick={onMenu}><EllipsisVertical size={15} /></button>}
+      {count != null && <span className="wk-exp-count">{count}</span>}
+      {onMenu && <button className="wk-exp-dots" title="Options" onClick={onMenu}><EllipsisVertical size={15} /></button>}
     </div>
   );
+}
+
+/** ¿La carpeta (o alguna descendiente / canvas) matchea el filtro? (doc 71) */
+function folderHasMatch(node: FolderNode, q: string): boolean {
+  if (node.folder.name.toLowerCase().includes(q)) return true;
+  if (node.canvases.some((c) => c.name.toLowerCase().includes(q))) return true;
+  return node.folders.some((f) => folderHasMatch(f, q));
+}
+
+/** Total de canvases de un proyecto (contador de la rama «Models»). */
+function countCanvases(tree: { folders: FolderNode[]; canvases: SubjectArea[] }): number {
+  const inFolder = (n: FolderNode): number => n.canvases.length + n.folders.reduce((s, f) => s + inFolder(f), 0);
+  return tree.canvases.length + tree.folders.reduce((s, f) => s + inFolder(f), 0);
 }
 
 // ── Input inline para crear / renombrar ──────────────────────────────────
@@ -480,7 +528,11 @@ function ContextMenu({
       <button className="rd-menu-item" onClick={onExportPdf}><FileText size={15} /> Export PDF</button>
       {showMutations && <div className="rd-menu-sep" />}
       {showMutations && <button className="rd-menu-item" onClick={onRename}><Pencil size={15} /> Rename</button>}
-      {showMutations && <button className="rd-menu-item danger" onClick={onDelete}><Trash2 size={15} /> Delete</button>}
+      {showMutations && (
+        <button className="rd-menu-item danger" onClick={onDelete}>
+          <Trash2 size={15} /> {menu.kind === 'project' ? 'Delete project…' : 'Delete'}
+        </button>
+      )}
     </div>
   );
 }

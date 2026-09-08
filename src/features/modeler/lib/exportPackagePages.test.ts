@@ -202,3 +202,25 @@ describe('buildIndexPage', () => {
     expect(out).toContain('id="q"');
   });
 });
+
+import { udpChipsHtml } from './exportPackagePages';
+
+describe('udpChipsHtml (doc 69 · facetas)', () => {
+  const lk = {
+    domainsById: {},
+    udpDefsById: {
+      p: { name: 'Universal', level: 'table' as const },
+      l: { name: 'Universal', level: 'table' as const, view: 'logical' as const },
+      c: { name: 'Campo Cross', level: 'column' as const },
+    },
+  };
+  it('físicas primero con nombre plano; lógicas marcadas', () => {
+    expect(udpChipsHtml({ l: 'Si', p: 'No', c: 'Si' }, 'table', lk)).toBe(
+      '<span class="chip" title="UDP">Universal: No</span>'
+      + '<span class="chip logical" title="Logical UDP (Entity/Attribute)">L · Universal: Si</span>',
+    );
+  });
+  it('omite valores vacíos, defs de otro nivel y defs desconocidas', () => {
+    expect(udpChipsHtml({ c: 'Si', p: '', zz: 'x' }, 'table', lk)).toBe('');
+  });
+});

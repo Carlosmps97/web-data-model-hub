@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { ArrowLeft, Eye, GripVertical, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Eye, GripVertical, Pencil, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
-import { useChangesetStore } from '@/store/useChangesetStore';
-import { useSessionStore } from '@/store/useSessionStore';
+import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import { pushUndo } from '@/store/useUndoStore';
 import { DEFAULT_DATABRICKS_OPTS, inferJoin, viewDDL, type DdlView } from '@/features/ddl';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
@@ -58,8 +57,10 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const selectedViewId = useModelerStore((s) => s.selectedViewId);
   const setSelectedView = useModelerStore((s) => s.setSelectedView);
   const reload = useModelerStore((s) => s.reload);
+  // Doc 70: la visibilidad es por CANVAS (membresía), no un flag global.
+  const removeViewFromCanvas = useModelerStore((s) => s.removeViewFromCanvas);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
-  const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
+  const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
 
   const view = diagram?.views.find((v) => v.id === selectedViewId) ?? null;
   const isCustom = !!(view?.customSql ?? '').trim();
@@ -103,10 +104,25 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view?.id]);
 
+  // Doc 70: canvases donde la vista es miembro (Metadata) — vía el listado
+  // global de su primera fuente (mismo endpoint del tab Views de la tabla).
+  const [canvasNames, setCanvasNames] = useState<string[] | null>(null);
+  useEffect(() => {
+    const first = view ? viewSourceIds(view)[0] : undefined;
+    if (!view || !first) { setCanvasNames([]); return undefined; }
+    let alive = true;
+    setCanvasNames(null);
+    viewsSvc.tableViews(first)
+      .then((r) => { if (alive) setCanvasNames((r.views.find((x) => x.id === view.id)?.canvases ?? []).map((c) => c.name)); })
+      .catch(() => { if (alive) setCanvasNames([]); });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view?.id, diagram]);
+
   // Def "View Type" (seed doc 61): gestionado — se cambia desde Query SQL.
   useEffect(() => {
     let alive = true;
-    getUdpDefs()
+    getUdpDefs(sessionProjectId())
       .then((d) => { if (alive) setViewTypeDef(d.find((x) => x.level === 'view' && x.name.trim().toLowerCase() === VIEW_TYPE_NAME) ?? null); })
       .catch(() => {});
     return () => { alive = false; };
@@ -339,11 +355,15 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
             <div className="wk-props-field"><label>Functional definition</label>
               <textarea className="wk-pp-textarea" disabled={!canEdit} placeholder="What this view represents…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} onBlur={() => void saveDescriptionOnBlur()} />
             </div>
-            <div className="wk-props-field" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <input id="vpp-oncanvas" type="checkbox" disabled={!canEdit} checked={view.showOnCanvas !== false}
-                onChange={(e) => { void saveView({ showOnCanvas: e.target.checked }, `Edit view ${view.name}`).catch(saveErr); }} />
-              <label htmlFor="vpp-oncanvas" style={{ margin: 0 }}>Show on canvas</label>
-            </div>
+            {/* Doc 70: quitarla de ESTE canvas no la borra del modelo ni de
+                otros canvases (antes: checkbox «Show on canvas», flag global). */}
+            {canEdit && (
+              <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', marginBottom: 8 }}
+                title="Remove this view from the current canvas (it stays in the model and in other canvases)"
+                onClick={() => void removeViewFromCanvas(view.id).then(() => pushToast('View removed from canvas')).catch(saveErr)}>
+                <Unlink size={12} /> Remove from this canvas
+              </button>
+            )}
             {canEdit && (
               <button className="rd-btn rd-btn-primary rd-btn-sm" style={{ width: '100%' }} disabled={savingDef} onClick={saveDef}>
                 {savingDef && <span className="rd-spin" aria-hidden />}{savingDef ? 'Saving…' : 'Save'}
@@ -539,7 +559,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
               <dt>Name</dt><dd className="rd-mono">{view.name}</dd>
               <dt>Schema</dt><dd className="rd-mono">{view.schema || '—'}</dd>
               <dt>Mode</dt><dd>{isCustom ? 'Personalizada (custom SQL)' : 'Regular (generated from sources)'}</dd>
-              <dt>On canvas</dt><dd>{view.showOnCanvas !== false ? 'Yes' : 'No'}</dd>
+              <dt>Canvases</dt><dd>{canvasNames === null ? '…' : canvasNames.length ? canvasNames.join(' · ') : '—'}</dd>
               <dt>Sources</dt><dd>{srcIds.length === 0 ? '—' : srcIds.map(tableName).join(' · ')}</dd>
               <dt>Columns</dt><dd>{rows.length}</dd>
               <dt>Tags</dt><dd>{view.tags?.length ? view.tags.length : '—'}</dd>

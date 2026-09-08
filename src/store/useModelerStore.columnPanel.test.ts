@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/features/governance/services/governance.service', () => ({
+vi.mock('@/services/governance.service', () => ({
   deleteColumn: vi.fn().mockResolvedValue({}),
   deleteRelationship: vi.fn().mockResolvedValue({}),
 }));

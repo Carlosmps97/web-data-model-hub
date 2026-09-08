@@ -10,7 +10,7 @@ import {
   type Cardinality,
   type Relationship,
   type RelationshipPair,
-} from '@/features/governance/services/governance.service';
+} from '@/services/governance.service';
 import { nextPkPosition } from './keyOrder';
 
 export type RoleNamePlan =

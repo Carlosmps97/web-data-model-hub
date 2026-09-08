@@ -10,14 +10,12 @@
  */
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
-import { useChangesetStore } from '@/store/useChangesetStore';
-import { useIdentityStore } from '@/store/useIdentityStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import { setDevUser } from '@/services/http';
 
 export function resetAppState(): void {
   // Intención de apertura del canvas — era el gate que saltaba el chooser.
-  useSessionStore.setState({ openMode: null, activeChangesetId: null, activeVersionLabel: null });
+  useSessionStore.setState({ openMode: null, activeChangesetId: null, activeVersionLabel: null, activeProjectId: null });
   // Workspace del modeler completo: selección, diagrama, árboles cacheados,
   // drawings y la instancia de React Flow del canvas desmontado.
   useModelerStore.setState({
@@ -35,10 +33,6 @@ export function resetAppState(): void {
   // La pila de Undo también es de la sesión (doc 50): las inversas del usuario
   // anterior no deben poder ejecutarse desde la sesión nueva.
   useUndoStore.getState().clear();
-  useChangesetStore.setState({ activeId: null, changesets: [] });
-  // `loaded=false` fuerza el re-fetch de /api/me para el próximo actor (el
-  // guard idempotente de loadIdentity dejaba pegado el principal anterior).
-  useIdentityStore.setState({ principal: null, loaded: false, loading: false });
   // Header X-Dev-User del actor anterior (el login del siguiente lo re-setea).
   setDevUser('');
   // Prefs "no volver a preguntar" de ConfirmDialog: son por-sesión-de-usuario.

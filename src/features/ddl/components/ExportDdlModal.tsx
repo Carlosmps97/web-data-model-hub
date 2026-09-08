@@ -37,7 +37,9 @@ import {
   DEFAULT_DATABRICKS_OPTS,
   type DatabricksDdlOptions, type DdlDialect, type DdlTableFormat, type DdlTable, type DdlView,
 } from '../generators';
-import { fetchExportRules, renderWithRules, selectableRules, type ExportRule } from '../rulesBridge';
+import { fetchExportRules, layoutFromRules, renderWithRules, selectableRules, type ExportRule } from '../rulesBridge';
+import { sessionProjectId } from '@/store/useSessionStore';
+import { runBlocking } from '@/store/useBusyStore';
 import { buildZip } from '@/lib/zip';
 import { plainToObjects, statementsToObjects, objectsToEntries, viewKey } from '../ddlExportBundle';
 
@@ -114,7 +116,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    fetchExportRules()
+    fetchExportRules(sessionProjectId())
       .then((rs) => { if (alive) { setExportRules(selectableRules(rs)); setSelRules(null); } })
       .catch(() => { if (alive) setExportRules([]); });
     return () => { alive = false; };
@@ -156,6 +158,10 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   } : null), [diagram, selectedIds, modelName, views]);
 
   const ddl = useMemo(() => (ddlInput ? databricksDdl(ddlInput, opts) : ''), [ddlInput, opts]);
+  // Doc 73: el layout de columnas (regla «Partition columns last») lo dictan las
+  // reglas SELECCIONADAS — sólo el export con reglas lo aplica; sin reglas el
+  // DDL base sigue byte-idéntico.
+  const effOpts = useMemo(() => ({ ...opts, ...layoutFromRules(exportRules, selRuleIds) }), [opts, exportRules, selRuleIds]);
 
   // Todo lo que cambia el resultado invalida el preview renderizado.
   useEffect(() => { setRulesPreview(null); }, [ddlInput, opts, selRuleIds]);
@@ -167,9 +173,9 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     if (rulesPreview) return rulesPreview.sql;        // ya renderizado, idéntico
     setRendering(true);
     try {
-      const { sql } = await renderWithRules({
-        diagram, input: ddlInput, opts, ruleIds: [...selRuleIds], modelName,
-      });
+      const { sql } = await runBlocking('Applying export rules…', () => renderWithRules({
+        projectId: sessionProjectId(), diagram, input: ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
+      }));
       return sql;
     } finally { setRendering(false); }
   };
@@ -179,9 +185,9 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     if (!diagram || !ddlInput || selRuleIds.size === 0) return;
     setRendering(true);
     try {
-      const { sql, rendered } = await renderWithRules({
-        diagram, input: ddlInput, opts, ruleIds: [...selRuleIds], modelName,
-      });
+      const { sql, rendered } = await runBlocking('Applying export rules…', () => renderWithRules({
+        projectId: sessionProjectId(), diagram, input: ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
+      }));
       setRulesPreview({ sql, applied: rendered.applied, version: rendered.rulesetVersion });
     } catch (e) {
       toast.error(e instanceof Error && e.message ? e.message : "Couldn't apply the export rules");
@@ -249,9 +255,9 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
         objects = plainToObjects({ tables: ts, views: vs });
       } else {
         // Con reglas: el motor devuelve una sentencia por objeto.
-        const { rendered } = await renderWithRules({
-          diagram, input: ddlInput, opts, ruleIds: [...selRuleIds], modelName,
-        });
+        const { rendered } = await runBlocking('Applying export rules…', () => renderWithRules({
+          projectId: sessionProjectId(), diagram, input: ddlInput, opts: effOpts, ruleIds: [...selRuleIds], modelName,
+        }));
         const viewSources = new Map<string, string[]>();
         views.forEach((v) => viewSources.set(
           viewKey(v.schema ?? null, v.name),

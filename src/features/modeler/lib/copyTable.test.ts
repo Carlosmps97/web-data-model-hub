@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { copyNameBase, copyTableToBulk, nextCopyNames } from './copyTable';
 
 const TABLE: CanonicalTable = {

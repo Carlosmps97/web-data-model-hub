@@ -1,5 +1,5 @@
 import { KeyRound } from 'lucide-react';
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn } from '@/services/governance.service';
 import type { MappingTarget } from '@/features/modeler/lib/relationshipPairs';
 import SearchSelect from './SearchSelect';
 

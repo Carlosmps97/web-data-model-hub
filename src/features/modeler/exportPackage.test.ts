@@ -8,12 +8,12 @@ vi.mock('@/features/modeler/services/modeler.service', () => ({
   listFolders: vi.fn(),
   listSubjectAreas: vi.fn(),
 }));
-vi.mock('@/features/governance/services/governance.service', () => ({ listDomains: vi.fn() }));
+vi.mock('@/services/naming.service', () => ({ listDomainsGlobal: vi.fn() }));
 vi.mock('@/features/standards/standards.service', () => ({ getUdpDefs: vi.fn() }));
 vi.mock('@/features/modeler/lib/exportFonts', () => ({ EXPORT_FONT_CSS: '' }));
 
 import { listFolders, listSubjectAreas, loadDiagram } from '@/features/modeler/services/modeler.service';
-import { listDomains } from '@/features/governance/services/governance.service';
+import { listDomainsGlobal } from '@/services/naming.service';
 import { getUdpDefs } from '@/features/standards/standards.service';
 import { exportNodeHtml } from './exportPackage';
 import type { Diagram, Folder, SubjectArea } from '@/features/modeler/services/modeler.service';
@@ -37,7 +37,7 @@ async function zipEntries(blob: Blob): Promise<Record<string, string>> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(listDomains).mockResolvedValue([]);
+  vi.mocked(listDomainsGlobal).mockResolvedValue([]);
   vi.mocked(getUdpDefs).mockResolvedValue([]);
 });
 

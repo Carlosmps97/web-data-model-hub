@@ -77,12 +77,14 @@ export function packageLayout(
 
 import { escapeHtml, jsStringLiteral } from './exportHtml';
 import type { Diagram } from '../services/modeler.service';
-import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
+import { udpView, type Facet } from '@/lib/facets';
 
 export type UdpLevel = 'table' | 'column' | 'canvas' | 'view';
 export interface ExportLookups {
   domainsById: Record<string, string>;
-  udpDefsById: Record<string, { name: string; level: UdpLevel }>;
+  /** `view` (doc 69): faceta de la def; ausente = physical. */
+  udpDefsById: Record<string, { name: string; level: UdpLevel; view?: Facet }>;
 }
 export interface CanvasPageInput {
   title: string;
@@ -98,14 +100,19 @@ export interface CanvasPageInput {
 const esc = escapeHtml;
 
 /** Chips `Nombre: valor` de las UDP asignadas cuyo def exista y sea del nivel
- *  pedido; defs desconocidas se omiten (catálogo pudo cambiar). */
-function udpChips(values: Record<string, string> | undefined, level: UdpLevel, lk: ExportLookups): string {
+ *  pedido (defs desconocidas se omiten). Doc 69: ambas facetas — físicas
+ *  primero con el nombre plano; las lógicas (Entity/Attribute) marcadas. */
+export function udpChipsHtml(values: Record<string, string> | undefined, level: UdpLevel, lk: ExportLookups): string {
   if (!values) return '';
+  type Def = { name: string; level: UdpLevel; view?: Facet };
+  const rank = (d: Def) => (udpView(d) === 'physical' ? 0 : 1);
   return Object.entries(values)
     .map(([defId, v]) => ({ def: lk.udpDefsById[defId], v }))
-    .filter((x): x is { def: { name: string; level: UdpLevel }; v: string } => !!x.def && x.def.level === level && x.v !== '')
-    .sort((a, b) => a.def.name.localeCompare(b.def.name))
-    .map(({ def, v }) => `<span class="chip" title="UDP">${esc(def.name)}: ${esc(v)}</span>`)
+    .filter((x): x is { def: Def; v: string } => !!x.def && x.def.level === level && x.v !== '')
+    .sort((a, b) => rank(a.def) - rank(b.def) || a.def.name.localeCompare(b.def.name))
+    .map(({ def, v }) => (udpView(def) === 'logical'
+      ? `<span class="chip logical" title="Logical UDP (Entity/Attribute)">L · ${esc(def.name)}: ${esc(v)}</span>`
+      : `<span class="chip" title="UDP">${esc(def.name)}: ${esc(v)}</span>`))
     .join('');
 }
 
@@ -117,13 +124,14 @@ function columnsRows(cols: CanonicalColumn[], lk: ExportLookups): string {
 <td>${esc(c.logicalName)}</td>
 <td><code>${esc(c.physicalName)}</code></td>
 <td><code>${esc(c.dataType)}</code></td>
+<td><code>${esc(c.logicalDataType ?? '')}</code></td>
 <td>${c.parentDomainId && lk.domainsById[c.parentDomainId] ? esc(lk.domainsById[c.parentDomainId]) : '—'}</td>
 <td class="flag">${pk}</td>
 <td class="flag">${c.isForeignKey ? 'FK' : ''}</td>
 <td class="flag">${c.isNullable === false ? 'NOT NULL' : 'NULL'}</td>
 <td class="flag">${c.isPartition ? '✓' : ''}</td>
 <td class="desc">${esc(c.description ?? '')}</td>
-<td>${udpChips(c.udpValues, 'column', lk)}</td>
+<td>${udpChipsHtml(c.udpValues, 'column', lk)}</td>
 </tr>`;
   }).join('\n');
 }
@@ -142,10 +150,10 @@ function tablesSectionHtml(diagram: Diagram, lk: ExportLookups): string {
   const sections = [...tables].sort((a, b) => a.physicalName.localeCompare(b.physicalName)).map((t) => {
     const cols = [...(colsByTable.get(t.id) ?? [])].sort((a, b) => a.ordinal - b.ordinal);
     return `<section class="tbl" id="t-${esc(t.physicalName)}">
-<h2>${esc(t.logicalName)} <code class="phys">${esc(t.physicalName)}</code>${t.schema ? ` <span class="chip schema">${esc(t.schema)}</span>` : ''}${udpChips(t.udpValues, 'table', lk)}</h2>
+<h2>${esc(t.logicalName)} <code class="phys">${esc(t.physicalName)}</code>${t.schema ? ` <span class="chip schema">${esc(t.schema)}</span>` : ''}${udpChipsHtml(t.udpValues, 'table', lk)}</h2>
 ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
 <div class="scroll"><table>
-<thead><tr><th>#</th><th>Logical name</th><th>Physical name</th><th>Type</th><th>Domain</th><th>PK</th><th>FK</th><th>Null</th><th>Partition</th><th>Description</th><th>UDPs</th></tr></thead>
+<thead><tr><th>#</th><th>Logical name</th><th>Physical name</th><th>Type</th><th>Logical type</th><th>Domain</th><th>PK</th><th>FK</th><th>Null</th><th>Partition</th><th>Description</th><th>UDPs</th></tr></thead>
 <tbody>${columnsRows(cols, lk)}</tbody>
 </table></div>
 </section>`;
@@ -177,7 +185,7 @@ ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
       .map((id) => tablesById.get(id)?.physicalName ?? id).map((n) => `<code>${esc(n)}</code>`).join(', ');
     const sql = v.customSql ?? v.sql ?? '(generated from sources)';
     return `<div class="view">
-<h3>${esc(v.name)}${v.schema ? ` <span class="chip schema">${esc(v.schema)}</span>` : ''} <span class="chip">${v.customSql ? 'Custom' : 'Regular'}</span>${udpChips(v.udpValues, 'view', lk)}</h3>
+<h3>${esc(v.name)}${v.schema ? ` <span class="chip schema">${esc(v.schema)}</span>` : ''} <span class="chip">${v.customSql ? 'Custom' : 'Regular'}</span>${udpChipsHtml(v.udpValues, 'view', lk)}</h3>
 ${srcs ? `<p class="dim">Sources: ${srcs}</p>` : ''}
 <pre>${esc(sql)}</pre>
 </div>`;
@@ -196,7 +204,7 @@ ${viewSection}`;
 export function buildCanvasPage(input: CanvasPageInput): string {
   const title = esc(input.title);
   const crumb = input.breadcrumb.map((b) => esc(b)).join(' / ');
-  const canvasChips = udpChips(input.diagram.subjectArea.udpValues, 'canvas', input.lookups);
+  const canvasChips = udpChipsHtml(input.diagram.subjectArea.udpValues, 'canvas', input.lookups);
   const indexLink = input.indexHref ? `<a class="idx-link" href="${esc(input.indexHref)}">&larr; Index</a>` : '';
   return `<!doctype html>
 <html lang="en">
@@ -234,6 +242,7 @@ button.on { background: #1A2B4A; color: #fff; border-color: #1A2B4A; }
 .phys { color: #35507E; }
 .chip { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 9px; background: #EDF1F7; color: #35507E; border: 1px solid #D7DEE9; }
 .chip.schema { background: #E3EBFF; }
+.chip.logical { border-style: dashed; background: #F4EEFF; color: #5B3FA0; }
 .desc { color: #444; margin: 4px 0 8px; max-width: 900px; }
 .dim { color: #68738A; }
 .scroll { overflow-x: auto; }

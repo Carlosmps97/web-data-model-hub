@@ -6,7 +6,7 @@
 //   - edge type 'derivation'; id = `deriv__{viewId}__{tableId}`,
 //     source=tableId (handle '__hdr_src'), target=viewId (handle '__hdr_tgt')
 import type { Edge, Node } from '@xyflow/react';
-import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import type { View } from '@/services/views.service';
 
 /** Offset del default: la vista aparece a la derecha de su primera fuente. */

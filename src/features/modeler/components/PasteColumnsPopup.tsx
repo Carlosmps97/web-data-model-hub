@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { KeyRound, Link2 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
-import * as gov from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
 import { pushUndo } from '@/store/useUndoStore';
 import * as viewsSvc from '@/services/views.service';

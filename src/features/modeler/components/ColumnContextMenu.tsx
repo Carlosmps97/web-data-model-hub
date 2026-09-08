@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 
@@ -29,7 +28,7 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   const clipCount = useModelerStore((s) => s.colClipboard?.cols.length ?? 0);
   const tblClipName = useModelerStore((s) => s.tblClipboard?.table.physicalName ?? null);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
-  const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
+  const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const ref = useRef<HTMLDivElement>(null);
 
   // Cierre por interacción global: click/pan fuera (mousedown), zoom/scroll

@@ -5,7 +5,7 @@
 // es puro; `arrangeDiagram` llama a ELK y re-deriva los símbolos de
 // subcategoría (doc 53), exactamente como lo hacía `autoOrganize`.
 import type { Diagram } from '@/features/modeler/services/modeler.service';
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn } from '@/services/governance.service';
 import { tableLodSize, viewLodSize } from './lodSize';
 import { viewSourceIds } from './viewGraph';
 import { subtypeGroups, symbolDefaultPos, SYMBOL_SIZE } from './subtypeGraph';

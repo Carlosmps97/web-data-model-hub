@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BookOpenText, Boxes, ChevronRight, History, RotateCcw, ShieldCheck, Tags, TriangleAlert, X } from 'lucide-react';
+import { BookOpenText, Boxes, ChevronRight, Database, History, RotateCcw, ShieldCheck, Tags, TriangleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
+import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
+import { listProjects } from '@/services/projects.service';
+import { sortProjects } from '@/lib/projects';
+import SearchSelect from '@/features/modeler/components/SearchSelect';
+import type { Project } from '@/types/model';
 import {
   getSnapshot, getVersions, rollbackStandards,
   type StandardsSnapshot, type StandardsVersion,
@@ -13,32 +18,55 @@ import DdlRulesTab from './DdlRulesTab';
 
 type Tab = 'overview' | 'glossary' | 'domains' | 'udp' | 'ddl';
 
+/** Proyecto inicial del módulo: el de la sesión de canvas → el último abierto → el primero A–Z. */
+function initialProjectId(projects: Project[]): string | null {
+  const session = useSessionStore.getState().activeProjectId;
+  if (session && projects.some((p) => p.id === session)) return session;
+  let last: string | null = null;
+  try { last = localStorage.getItem(LAST_PROJECT_KEY); } catch { /* storage ausente */ }
+  if (last && projects.some((p) => p.id === last)) return last;
+  return sortProjects(projects)[0]?.id ?? null;
+}
+
 export default function StandardsScreen() {
   const canEdit = useAuthStore((s) => s.has('standards.edit'));
   const me = useAuthStore((s) => s.user);
   const [tab, setTab] = useState<Tab>('overview');
+  // Doc 75: los Data Standards son POR PROYECTO — el selector decide de cuál.
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<StandardsSnapshot | null>(null);
   const [versions, setVersions] = useState<StandardsVersion[]>([]);
   const [loading, setLoading] = useState(true);
   const [history, setHistory] = useState(false);
   const [rollbackTarget, setRollbackTarget] = useState<StandardsVersion | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const reload = useCallback(async () => {
-    const [snap, vers] = await Promise.all([getSnapshot(), getVersions()]);
-    setSnapshot(snap); setVersions(vers);
-  }, []);
+  const project = useMemo(() => projects.find((p) => p.id === projectId) ?? null, [projects, projectId]);
 
   useEffect(() => {
-    setLoading(true);
+    listProjects()
+      .then((ps) => { setProjects(ps); setProjectId(initialProjectId(ps)); })
+      .catch(() => { toast.error("Couldn't load the projects"); setLoading(false); });
+  }, []);
+
+  const reload = useCallback(async () => {
+    if (!projectId) return;
+    const [snap, vers] = await Promise.all([getSnapshot(projectId), getVersions(projectId)]);
+    setSnapshot(snap); setVersions(vers);
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!projectId) return;
+    setLoading(true); setSnapshot(null); setVersions([]);
     reload().catch(() => toast.error("Couldn't load Data Standards")).finally(() => setLoading(false));
-  }, [reload]);
+  }, [reload, projectId]);
 
   const current = versions[0];
   const doRollback = async (target: StandardsVersion) => {
+    if (!projectId) return;
     setBusy(true);
     try {
-      const v = await rollbackStandards(target.seq);
+      const v = await rollbackStandards(projectId, target.seq);
       toast.success(`Rolled back to ${target.label} · new ${v.label}`);
       setRollbackTarget(null); setHistory(false); await reload();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't revert"); } finally { setBusy(false); }
@@ -58,23 +86,39 @@ export default function StandardsScreen() {
         {subTab('udp', 'UDP')}
         {subTab('ddl', 'DDL Export rules')}
         <span style={{ flex: 1 }} />
+        {/* Doc 75: proyecto cuyos estándares se ven/editan. */}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginRight: 10 }}>
+          <Database size={14} color="#8A93A5" aria-hidden />
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#56607A' }}>Project</span>
+          <span style={{ width: 240 }}>
+            <SearchSelect
+              options={sortProjects(projects).map((p) => ({ value: p.id, label: p.name }))}
+              valueLabel={project?.name ?? ''}
+              placeholder={projects.length ? 'Choose a project…' : 'No projects yet'}
+              onPick={(v) => { if (v) setProjectId(v); }}
+              disabled={projects.length === 0}
+            />
+          </span>
+        </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 30, padding: '0 12px', borderRadius: 999, background: '#F3EEFF', border: '1px solid #E3D6FB', color: '#7A4DD6', fontSize: 12, fontWeight: 600 }}><ShieldCheck size={13} />Restricted module</span>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-        {loading || !snapshot ? (
-          <div style={{ padding: 40, color: '#9AA3B2' }}>Cargando…</div>
+        {!projectId ? (
+          <div style={{ padding: 40, color: '#9AA3B2' }}>{projects.length === 0 && !loading ? 'Create a project first (Model › Open model › New project…).' : 'Loading…'}</div>
+        ) : loading || !snapshot ? (
+          <div style={{ padding: 40, color: '#9AA3B2' }}>Loading…</div>
         ) : tab === 'overview' ? (
           <Overview snapshot={snapshot} versions={versions} canEdit={canEdit} meName={me?.name ?? me?.username}
-            onGo={setTab} onHistory={() => setHistory(true)} />
+            projectName={project?.name ?? ''} onGo={setTab} onHistory={() => setHistory(true)} />
         ) : tab === 'glossary' ? (
-          <GlossaryPage snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
+          <GlossaryPage projectId={projectId} snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
         ) : tab === 'domains' ? (
-          <DomainsPage snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
+          <DomainsPage projectId={projectId} snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
         ) : tab === 'udp' ? (
-          <UdpDefsPage snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
+          <UdpDefsPage projectId={projectId} snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
         ) : (
-          <DdlRulesTab snapshot={snapshot} versions={versions} canEdit={canEdit}
+          <DdlRulesTab projectId={projectId} snapshot={snapshot} versions={versions} canEdit={canEdit}
             meName={me?.name ?? me?.username} onApplied={reload} />
         )}
       </div>
@@ -150,9 +194,9 @@ export default function StandardsScreen() {
 }
 
 // ── Overview ──
-function Overview({ snapshot, versions, canEdit, meName, onGo, onHistory }: {
+function Overview({ snapshot, versions, canEdit, meName, projectName, onGo, onHistory }: {
   snapshot: StandardsSnapshot; versions: StandardsVersion[]; canEdit: boolean; meName?: string | null;
-  onGo: (t: Tab) => void; onHistory: () => void;
+  projectName: string; onGo: (t: Tab) => void; onHistory: () => void;
 }) {
   const recent = useMemo(() => versions.slice(0, 3), [versions]);
   return (
@@ -163,7 +207,7 @@ function Overview({ snapshot, versions, canEdit, meName, onGo, onHistory }: {
 
         <div style={{ display: 'flex', gap: 12, background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 12, padding: '13px 16px', marginBottom: 22, fontSize: 12.5, color: '#7A6220', lineHeight: 1.5 }}>
           <TriangleAlert size={18} color="#B98600" style={{ flex: 'none', marginTop: 1 }} />
-          <div><strong style={{ color: '#8A6D1F' }}>Global scope.</strong> Editing a naming rule or a domain re-derives physical names and data types in <strong>every table of every project</strong> — it is not scoped to one model. That is why standards live in their own module, separate from the canvas and restricted.</div>
+          <div><strong style={{ color: '#8A6D1F' }}>Project scope.</strong> Editing a naming rule or a domain re-derives physical names and data types in every table of <strong>{projectName}</strong> only. Other projects are never affected. That is why standards live in their own module, separate from the canvas and restricted.</div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 26 }}>

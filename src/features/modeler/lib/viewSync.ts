@@ -11,7 +11,7 @@
  * Los helpers de decisión son PUROS; `syncNewColumnToMirrorViews` orquesta
  * con dependencias inyectadas (patrón nameSync) para ser testeable sin red.
  */
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn } from '@/services/governance.service';
 import type { View, ViewInput, ViewSource } from '@/services/views.service';
 
 const norm = (s?: string) => (s ?? '').trim().toLowerCase();

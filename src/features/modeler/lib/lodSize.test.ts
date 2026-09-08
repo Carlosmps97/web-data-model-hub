@@ -2,7 +2,7 @@
 // compacta (deben calzar con las métricas del nodo detallado — misma fórmula
 // que scripts/arrange_all.py del backend).
 import { describe, expect, it } from 'vitest';
-import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import type { View } from '@/services/views.service';
 import { LOD_ENTER, LOD_EXIT, nextLod, tableLodSize, viewLodSize } from './lodSize';
 

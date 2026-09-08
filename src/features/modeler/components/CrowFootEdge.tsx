@@ -1,7 +1,7 @@
 import { memo } from 'react';
 import { BaseEdge, getSmoothStepPath, useInternalNode, Position, type EdgeProps } from '@xyflow/react';
 import { useModelerStore } from '@/store/useModelerStore';
-import type { Cardinality } from '@/features/governance/services/governance.service';
+import type { Cardinality } from '@/services/governance.service';
 import { fanSourceY, HEADER_H, ROW_H } from '../lib/edgeFanout';
 
 function CrowFootEdge(props: EdgeProps) {

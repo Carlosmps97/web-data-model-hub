@@ -1,22 +1,26 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { ArrowDownUp, Eye, Pencil, Table2, Trash2 } from 'lucide-react';
+import { ArrowDownUp, Eye, Pencil, Plus, Table2, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { pushUndo } from '@/store/useUndoStore';
 import AuditHistory from './AuditHistory';
 import UdpAssign from './UdpAssign';
-import { useSessionStore } from '@/store/useSessionStore';
-import * as gov from '@/features/governance/services/governance.service';
+import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
+import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun } from '@/lib/facets';
+import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
+import * as gov from '@/services/governance.service';
 import { matchesColumn } from '../lib/columnSearch';
+import { sortByOrdinal } from '../lib/columnOrder';
 import { pkInKeyOrder, reorderKey } from '../lib/keyOrder';
 import { alignSourcesToPhysical } from '../lib/viewSync';
 import { ColumnRow } from './ColumnEditor';
+import { tableNamePlan } from '../lib/nameSync';
 import SchemaSelect from './SchemaSelect';
 import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
-import type { View } from '@/services/views.service';
+import type { TableViewRow, View } from '@/services/views.service';
+import { splitByCanvas } from '../lib/canvasViews';
 
 // Doc 51: los UDPs dejan Metadata y pasan a pestaña propia (paridad con el
 // panel de columna del doc 49); Metadata conserva el resto y suma History.
@@ -56,13 +60,27 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const deleteRelationship = useModelerStore((s) => s.deleteRelationship);
   const removeTableFromArea = useModelerStore((s) => s.removeTableFromArea);
   const deleteTable = useModelerStore((s) => s.deleteTable);
+  // Doc 70: membresía de vistas en ESTE canvas (tab Views).
+  const addViewsToCanvas = useModelerStore((s) => s.addViewsToCanvas);
+  const removeViewFromCanvas = useModelerStore((s) => s.removeViewFromCanvas);
   // En modo visor puede haber changeset activo (viendo un request desde Review):
   // el panel abre como reader igual que sin changeset.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
-  const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
+  const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
+  // Doc 69: la faceta activa la da el switch Logical/Physical del canvas —
+  // los UDPs (y los rótulos entity/table) siguen ese modo.
+  const viewMode = useModelerStore((s) => s.viewMode);
+  const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
+  useEffect(() => {
+    let alive = true;
+    getUdpDefs(sessionProjectId()).then((d) => { if (alive) setUdpDefs(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
   const table = diagram?.tables.find((t) => t.id === selectedTableId) ?? null;
+  // Doc 74: la lista sigue el ÚNICO orden de la tabla (`ordinal`, el mismo en
+  // ambas facetas); el drag&drop lo escribe.
   const cols = useMemo(
-    () => (diagram?.columns ?? []).filter((c) => c.tableId === selectedTableId).slice().sort((a, b) => a.ordinal - b.ordinal),
+    () => sortByOrdinal((diagram?.columns ?? []).filter((c) => c.tableId === selectedTableId)),
     [diagram, selectedTableId],
   );
   const links = useMemo(
@@ -74,9 +92,14 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
 
   // ── Definition: form local de la tabla ──
   const [form, setForm] = useState({ logicalName: '', physicalName: '', schema: '', description: '' });
+  // Doc 68: intención sobre el FÍSICO en esta sesión de edición — true (lo
+  // tipeó), false (lo vació / botón derive), null (no lo tocó → manda el
+  // flag persistido de la tabla). Ver tableNamePlan.
+  const [physTouched, setPhysTouched] = useState<boolean | null>(null);
   const [savingDef, setSavingDef] = useState(false);
   useEffect(() => {
     if (table) setForm({ logicalName: table.logicalName, physicalName: table.physicalName, schema: table.schema ?? '', description: table.description ?? '' });
+    setPhysTouched(null);
     setColQuery('');   // el buscador de columnas no arrastra el filtro a OTRA tabla
     // Re-sembrar SOLO al cambiar de tabla (doc 40): con deps por identidad,
     // cualquier reload del diagrama (guardar un UDP, blur de la definición)
@@ -96,14 +119,20 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // Drag del handle para ensanchar el panel (solo-vista; nombres largos).
   const [resizing, setResizing] = useState(false);
 
-  // ── Views (pp2) — se cargan al seleccionar la tabla para el contador del tab ──
-  const [views, setViews] = useState<View[]>([]);
+  // ── Views (pp2 → doc 70) — vistas GLOBALES de la tabla con sus canvases;
+  // se cargan al seleccionar la tabla (contador del tab) y se refrescan con el
+  // diagrama (agregar/quitar una vista acá la mueve entre secciones). ──
+  const [views, setViews] = useState<TableViewRow[]>([]);
   const [viewEditor, setViewEditor] = useState<{ view?: View; readOnly?: boolean } | null>(null);
-  const reloadViews = () => { if (selectedTableId) viewsSvc.listViews(selectedTableId).then(setViews).catch(() => {}); };
+  const reloadViews = () => { if (selectedTableId) viewsSvc.tableViews(selectedTableId).then((r) => setViews(r.views)).catch(() => {}); };
   useEffect(() => {
-    if (selectedTableId) viewsSvc.listViews(selectedTableId).then(setViews).catch(() => setViews([]));
-    else setViews([]);
-  }, [selectedTableId]);
+    if (!selectedTableId) { setViews([]); return undefined; }
+    let alive = true;
+    viewsSvc.tableViews(selectedTableId)
+      .then((r) => { if (alive) setViews(r.views); })
+      .catch(() => { if (alive) setViews([]); });
+    return () => { alive = false; };
+  }, [selectedTableId, diagram]);
 
   // ── Orden de la LLAVE (pkPosition, doc 19 §12b) + alineado de vistas (V2) ──
   // (hooks ANTES del early-return de abajo — el orden de hooks es fijo)
@@ -161,7 +190,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const lookup = (id: string) => diagram?.tables.find((t) => t.id === id);
   const tableName = (id: string) => { const t = lookup(id); return t?.physicalName || t?.logicalName || id; };
   const colName = (id: string) => diagram?.columns.find((c) => c.id === id)?.physicalName ?? id;
-  const counts: Partial<Record<Tab, number>> = { columns: cols.length, views: views.length };
+  const counts: Partial<Record<Tab, number>> = {
+    columns: cols.length, views: views.length,
+    udps: countFacetUdpValues(table.udpValues, udpDefs, 'table', viewMode),   // doc 69: solo la faceta activa
+  };
   // parents = relaciones donde esta tabla es HIJA (la otra es su padre).
   const parents = links.filter((r) => r.childTableId === table.id).length;
   const children = links.length - parents;
@@ -175,20 +207,22 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     const pre = tablePre();
     try {
       const logical = form.logicalName.trim();
-      let physical = form.physicalName.trim();
-      // Si cambió el LÓGICO y el físico NO se editó a mano (sigue igual al
-      // original), re-derivar el físico del nuevo lógico — consistente con las
-      // columnas y el alta de tabla (antes la tabla dejaba el físico obsoleto).
-      if (logical && logical !== table.logicalName && physical === table.physicalName) {
+      // Doc 68: la decisión (re-derivar vs conservar el custom + flag de
+      // override) vive en tableNamePlan — un físico con override NO se
+      // re-deriva al renombrar el lógico; vaciarlo re-enciende el auto.
+      const plan = tableNamePlan({ logical, physical: form.physicalName.trim(), prev: table, sessionOverride: physTouched });
+      let physical = plan.physical;
+      if (plan.derive) {
         try { physical = (await gov.physicalize(logical, 'table')).physical; } catch { /* mantener el actual */ }
       }
       // `updateTable` sólo cubre name/schema; un único upsert changeset-aware (merge
       // sobre la tabla actual) cubre además `description`, y luego reload.
-      await gov.createTable({ ...table, logicalName: logical, physicalName: physical, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
+      await gov.createTable({ ...table, logicalName: logical, physicalName: physical, physicalNameOverridden: plan.overridden, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
       pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); });
       // El form ya no se re-siembra en cada reload (solo al cambiar de tabla):
       // reflejar acá el físico derivado para que el input no quede stale.
       setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
+      setPhysTouched(null);
       await reload();
       pushToast('Table updated');
     // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador) en
@@ -197,8 +231,11 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     finally { setSavingDef(false); }
   };
   const derivePhysical = async () => {
-    try { const p = (await gov.physicalize(form.logicalName.trim(), 'table')).physical; setForm((f) => ({ ...f, physicalName: p })); }
-    catch { pushToast("Couldn't derive the physical name", 'err'); }
+    try {
+      const p = (await gov.physicalize(form.logicalName.trim(), 'table')).physical;
+      setForm((f) => ({ ...f, physicalName: p }));
+      setPhysTouched(false);  // doc 68: derivar = renunciar al override
+    } catch { pushToast("Couldn't derive the physical name", 'err'); }
   };
   // Definición funcional: auto-guardado al salir del campo (doc 40), mismo
   // paradigma que la definición de columna — antes cerrar el panel sin Save la
@@ -401,9 +438,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         <div className="wk-props-head">
           <div className="wk-props-glyph" aria-hidden><Table2 size={17} strokeWidth={1.6} /></div>
           <div className="wk-props-id">
-            <div className="wk-props-title">{table.physicalName || table.logicalName}</div>
+            {/* Doc 69: en Lógico el objeto es la ENTIDAD (nombre lógico); en Físico, la TABLA. */}
+            <div className="wk-props-title">{viewMode === 'logical' ? (table.logicalName || table.physicalName) : (table.physicalName || table.logicalName)}</div>
             <div className="wk-props-sub">
-              schema <span className="rd-mono">{table.schema || '—'}</span> · table
+              schema <span className="rd-mono">{table.schema || '—'}</span> · {facetNoun('table', viewMode)}
               {!canEdit && <span className="wk-props-ro">Read-only</span>}
             </div>
           </div>
@@ -429,7 +467,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
             </div>
             <div className="wk-props-field"><label>Physical name</label>
               <div style={{ display: 'flex', gap: 4 }}>
-                <input className="rd-input rd-mono" disabled={!canEdit} value={form.physicalName} onChange={(e) => setForm({ ...form, physicalName: e.target.value })} style={{ flex: 1, minWidth: 0 }} />
+                <input className="rd-input rd-mono" disabled={!canEdit} value={form.physicalName} onChange={(e) => { setForm({ ...form, physicalName: e.target.value }); setPhysTouched(e.target.value.trim() !== ''); }} style={{ flex: 1, minWidth: 0 }} />
                 {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" title="Derive from logical (glossary)" onClick={derivePhysical}><Icon name="bolt" size={12} /></button>}
               </div>
             </div>
@@ -499,7 +537,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
             {/* Buscador de columnas (doc 42): contiene CI sobre lógico o
                 físico. Con filtro activo el drag&drop SE DESACTIVA — el drop
                 se resuelve contra la lista completa y reordenar viendo un
-                subconjunto corrompería el orden físico. */}
+                subconjunto corrompería el orden. */}
+            {canEdit && cols.length > 1 && (
+              <p className="wk-pp-cap" style={{ marginTop: 0 }}>Drag a row to reorder the columns.</p>
+            )}
             {cols.length > 0 && (
               <div className="wk-pp-colfind">
                 <Icon name="search" size={12} className="wk-pp-colfind-ico" />
@@ -547,53 +588,102 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         )}
 
         {/* ── Views (pp2) ── */}
-        {tab === 'views' && (
-          <>
-            <div className="wk-props-sec" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 0 }}>
-              <span>Associated views</span>
-              {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setViewEditor({})}><Icon name="plus" size={12} sw={2.6} /> New view</button>}
-            </div>
-            {views.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No views for this table{canEdit ? '. Use “New view”.' : '.'}</div>}
-            {views.map((v) => {
-              // F3: fuentes canónicas (fallback tableId legacy). Compartida =
-              // 2+ fuentes ⇒ tinte violeta + badge con las OTRAS fuentes (los
-              // nombres se resuelven contra las tablas del canvas actual).
-              const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
-              const shared = srcIds.length > 1;
-              const others = srcIds
-                .filter((id) => id !== table.id)
-                .map((id) => diagram?.tables.find((t) => t.id === id)?.physicalName ?? 'another table');
-              return (
-                <div className={`wk-pp-link${shared ? ' shared' : ''}`} key={v.id}>
-                  <div className="wk-pp-link-head">
-                    <Eye size={13} style={{ color: 'var(--purple)', flex: 'none' }} />
-                    <span className="rd-mono">{v.schema ? `${v.schema}.` : ''}{v.name}</span>
-                    <span style={{ marginLeft: 'auto', display: 'flex', gap: 2 }}>
-                      {/* Ojo (F5): abre la vista SOLO-LECTURA — sirve en canvas
-                          productivo sin crear versión. Siempre visible. */}
-                      <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="View definition (read-only)" onClick={() => setViewEditor({ view: v, readOnly: true })}><Eye size={12} /></button>
-                      {canEdit && (
-                        <>
-                          <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Match the table's physical order" disabled={aligningId === v.id} onClick={() => alignView(v)}>
-                            {aligningId === v.id ? <span className="rd-spin" aria-hidden /> : <ArrowDownUp size={12} />}
-                          </button>
-                          <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Edit" onClick={() => setViewEditor({ view: v })}><Pencil size={12} /></button>
-                          <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title="Delete" onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete view', message: <>View <strong>“{v.name}”</strong> will be deleted.</>, confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
-                        </>
-                      )}
+        {tab === 'views' && (() => {
+          // Doc 70 §2.4 (paridad con Links): la tabla es canónica y sus vistas
+          // viven en canvases concretos. «This canvas» = miembros dibujados acá
+          // (editables); «Other canvases» = las demás (sólo lectura + «Add to
+          // this canvas»). El contador del tab sigue siendo el total.
+          const onCanvas = new Set((diagram?.views ?? []).map((v) => v.id));
+          const { here, elsewhere } = splitByCanvas(views, onCanvas);
+          // Doc 70 §10 (owner): las vistas están ligadas a la TABLA FÍSICA —
+          // en el modelo lógico se listan como referencia, sin acciones.
+          const physicalMode = viewMode === 'physical';
+          const canAct = canEdit && physicalMode;
+          const srcInfo = (v: View) => {
+            // F3: fuentes canónicas (fallback tableId legacy). Compartida = 2+
+            // fuentes ⇒ tinte violeta + badge con las OTRAS fuentes.
+            const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+            return {
+              shared: srcIds.length > 1,
+              others: srcIds.filter((id) => id !== table.id).map((id) => diagram?.tables.find((t) => t.id === id)?.physicalName ?? 'another table'),
+            };
+          };
+          const iconBtn = 'rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm';
+          const viewCard = (v: TableViewRow, other: boolean) => {
+            const { shared, others } = srcInfo(v);
+            const canvasNames = v.canvases.filter((c) => c.id !== diagram?.subjectArea.id).map((c) => c.name);
+            return (
+              <div className={`wk-pp-link${shared ? ' shared' : ''}${other ? ' other' : ''}`} key={v.id}>
+                <div className="wk-pp-link-head">
+                  <Eye size={13} style={{ color: 'var(--purple)', flex: 'none' }} />
+                  <span className="rd-mono">{v.schema ? `${v.schema}.` : ''}{v.name}</span>
+                  <span style={{ marginLeft: 'auto', display: 'flex', gap: 2, flex: 'none' }}>
+                    {/* Ojo (F5): abre la vista SOLO-LECTURA — sirve en canvas
+                        productivo sin crear versión. Siempre visible. */}
+                    <button className={iconBtn} title="View definition (read-only)" onClick={() => setViewEditor({ view: v, readOnly: true })}><Eye size={12} /></button>
+                    {canAct && !other && (
+                      <>
+                        <button className={iconBtn} title="Match the table's physical order" disabled={aligningId === v.id} onClick={() => alignView(v)}>
+                          {aligningId === v.id ? <span className="rd-spin" aria-hidden /> : <ArrowDownUp size={12} />}
+                        </button>
+                        <button className={iconBtn} title="Edit" onClick={() => setViewEditor({ view: v })}><Pencil size={12} /></button>
+                        <button className={iconBtn} title="Remove from this canvas (the view stays in the model)"
+                          onClick={() => void removeViewFromCanvas(v.id).then(() => pushToast('View removed from canvas')).catch(() => pushToast("Couldn't remove the view", 'err'))}>
+                          <Unlink size={12} />
+                        </button>
+                        <button className={iconBtn} title="Delete from the model" onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete view', message: <>View <strong>“{v.name}”</strong> will be deleted from the model (every canvas).</>, confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
+                      </>
+                    )}
+                    {canAct && other && (
+                      <button className="rd-btn rd-btn-ghost rd-btn-sm" title="Add this view to the current canvas"
+                        onClick={() => void addViewsToCanvas([v.id]).then(() => pushToast('View added to canvas')).catch(() => pushToast("Couldn't add the view", 'err'))}>
+                        <Plus size={12} /> Add to this canvas
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {shared && (
+                  <div className="wk-pp-link-card">
+                    <span className="wk-pp-shared">Shared with {others.join(' · ')}</span>
+                  </div>
+                )}
+                {other && (
+                  <div className="wk-pp-link-card">
+                    <span className="rd-small" style={{ color: 'var(--muted)' }}>
+                      {canvasNames.length > 0 ? `in ${canvasNames.join(' · ')}` : 'not on any canvas yet'}
                     </span>
                   </div>
-                  {shared && (
-                    <div className="wk-pp-link-card">
-                      <span className="wk-pp-shared">Shared with {others.join(' · ')}</span>
-                    </div>
-                  )}
-                  {v.tags && v.tags.length > 0 && <div className="wk-pp-link-card"><span className="rd-small" style={{ color: 'var(--muted)' }}>{v.tags.length} tag{v.tags.length === 1 ? '' : 's'}</span></div>}
+                )}
+                {v.tags && v.tags.length > 0 && <div className="wk-pp-link-card"><span className="rd-small" style={{ color: 'var(--muted)' }}>{v.tags.length} tag{v.tags.length === 1 ? '' : 's'}</span></div>}
+              </div>
+            );
+          };
+          return (
+            <>
+              {!physicalMode && (
+                <p className="wk-pp-cap" style={{ marginTop: 0 }}>
+                  Views belong to the <b>physical table</b>. Switch to the Physical model to add, edit or remove them.
+                </p>
+              )}
+              <div className="wk-props-sec" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: physicalMode ? 0 : undefined }}>
+                <span>This canvas · {here.length} view{here.length === 1 ? '' : 's'}</span>
+                {canAct && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setViewEditor({})}><Icon name="plus" size={12} sw={2.6} /> New view</button>}
+              </div>
+              {here.length === 0 && (
+                <div className="rd-small" style={{ color: 'var(--muted)' }}>
+                  {views.length === 0 ? `No views for this table${canAct ? '. Use “New view”.' : '.'}` : 'This table has no views on this canvas.'}
                 </div>
-              );
-            })}
-          </>
-        )}
+              )}
+              {here.map((v) => viewCard(v, false))}
+              {elsewhere.length > 0 && (
+                <>
+                  <div className="wk-props-sec">Other canvases · {elsewhere.length} view{elsewhere.length === 1 ? '' : 's'}</div>
+                  {elsewhere.map((v) => viewCard(v, true))}
+                </>
+              )}
+            </>
+          );
+        })()}
 
         {/* ── Links (pp3: cards PARENT/CHILD) — this canvas + other canvases ── */}
         {tab === 'links' && (
@@ -680,10 +770,12 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         {/* ── UDPs (doc 51: pestaña propia — antes vivían dentro de Metadata) ── */}
         {tab === 'udps' && (
           <>
-            <p className="wk-pp-cap" style={{ marginTop: 0 }}>User Defined Properties — governance tags for this table.</p>
-            {/* key por tabla: al cambiar de selección se resetean borradores
-                y pendientes del asignador (estado interno de UdpAssign). */}
-            <UdpAssign key={table.id} level="table" values={table.udpValues ?? {}} disabled={!canEdit} onChange={saveTableUdp} />
+            <p className="wk-pp-cap" style={{ marginTop: 0 }}>
+              <b>{FACET_CAPTION.table[viewMode]}</b> — governance tags of this facet. {FACET_SWITCH_HINT[viewMode]}
+            </p>
+            {/* key por tabla+faceta (doc 69): cambiar de selección o de modo
+                remonta el asignador (borradores/pendientes internos). */}
+            <UdpAssign key={`${table.id}:${viewMode}`} level="table" view={viewMode} values={table.udpValues ?? {}} disabled={!canEdit} onChange={saveTableUdp} />
           </>
         )}
 
@@ -732,7 +824,12 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
           view={viewEditor.view}
           readOnly={viewEditor.readOnly}
           onClose={() => setViewEditor(null)}
-          onSaved={() => { reloadViews(); void reload(); }}
+          onSaved={(v, created) => {
+            // Doc 70: una vista NUEVA con «Show on this canvas» entra a la
+            // membresía de este canvas; editar no cambia membresía.
+            if (created && v.showOnCanvas !== false) void addViewsToCanvas([v.id]);
+            reloadViews(); void reload();
+          }}
           pushToast={pushToast}
         />
       )}

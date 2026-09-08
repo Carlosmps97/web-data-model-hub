@@ -1,15 +1,16 @@
 /**
  * Utilidades PURAS del orden de la LLAVE primaria (`pkPosition`, doc 19 §12b).
  *
- * Dos órdenes conviven por tabla (paridad Erwin): el FÍSICO de columnas
- * (`ordinal` — panel y columnas del CREATE) y el de la LLAVE (`pkPosition` —
- * bloque PK del canvas y `PRIMARY KEY(...)` del DDL). Reglas:
+ * Dos órdenes conviven por tabla (paridad Erwin): el de COLUMNAS (`ordinal`,
+ * único para ambas facetas — panel y columnas del CREATE; `lib/columnOrder`)
+ * y el de la LLAVE (`pkPosition` — bloque PK del canvas y `PRIMARY KEY(...)`
+ * del DDL). Reglas:
  *  - pkPosition existe cuando el orden de llave es EXPLÍCITO (migración Erwin
- *    o llave reordenada en la plataforma); sin él, la llave sigue el físico.
+ *    o llave reordenada en la plataforma); sin él, la llave sigue el `ordinal`.
  *  - Entrar a la llave = agregarse AL FINAL del orden explícito (si lo hay).
  *  - Reordenar la llave NORMALIZA todas las posiciones (0..k-1).
  */
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn } from '@/services/governance.service';
 
 type KeySortable = { pkPosition?: number | null; ordinal: number };
 

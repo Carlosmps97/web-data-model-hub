@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { useModelerStore } from '@/store/useModelerStore';
 import { pushUndo } from '@/store/useUndoStore';
-import * as gov from '@/features/governance/services/governance.service';
-import type { Cardinality } from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
+import type { Cardinality } from '@/services/governance.service';
 import {
   buildKeyMapping, mappingToBulk, type MappingResolution,
 } from '@/features/modeler/lib/relationshipPairs';

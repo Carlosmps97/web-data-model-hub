@@ -5,7 +5,7 @@
  * catálogo y el impacto estimado). El panel derecho es un banco de validación
  * de la regla — NO un preview del export (doc 30 §2).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, ChevronLeft, Clock3, Lock, Minus, Save, Trash2, TriangleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -25,7 +25,8 @@ interface CatalogTable { id: string; physicalName: string; schema?: string | nul
 
 const LEVEL_OF = { columna: 'column', tabla: 'table', modelo: 'canvas' } as const;
 
-export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, udpDefs, artifacts, canEdit, onBack, onSaved }: {
+export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDefs, artifacts, canEdit, onBack, onSaved }: {
+  projectId: string;
   rule: DdlRule | null;                       // null = nueva
   draft?: Partial<DdlRule>;                   // pre-carga de plantilla (16d)
   rules: DdlRule[];
@@ -64,7 +65,7 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
   useEffect(() => {
     setChecking(true);
     const t = setTimeout(() => {
-      validateDdlRule(draft)
+      validateDdlRule(projectId, draft)
         .then((r) => { setReport(r); })
         .catch(() => setReport(null))
         .finally(() => setChecking(false));
@@ -78,8 +79,8 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
   useEffect(() => {
     if (!valid) { setImpact(null); setTestOut(null); return; }
     const t = setTimeout(() => {
-      impactDdlRule(draft).then(setImpact).catch(() => setImpact(null));
-      if (testTable) testDdlRule(draft, testTable.id).then(setTestOut).catch(() => setTestOut(null));
+      impactDdlRule(projectId, draft).then(setImpact).catch(() => setImpact(null));
+      if (testTable) testDdlRule(projectId, draft, testTable.id).then(setTestOut).catch(() => setTestOut(null));
     }, 250);
     return () => clearTimeout(t);
   }, [valid, draft, testTable]);
@@ -147,7 +148,7 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
     }
     setSaving(true);
     try {
-      await saveDdlRule(toSave, isNew);
+      await saveDdlRule(projectId, toSave, isNew);
       toast.success(`Rule ${toSave.name} saved`);
       await onSaved();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save the rule"); }
@@ -157,15 +158,15 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
   const doDelete = async () => {
     if (!rule) return;
     setSaving(true);
-    try { await deleteDdlRule(rule); toast.success(`Rule ${rule.name} deleted`); await onSaved(); }
+    try { await deleteDdlRule(projectId, rule); toast.success(`Rule ${rule.name} deleted`); await onSaved(); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete the rule"); setSaving(false); }
   };
 
   const errCount = report?.errors?.length ?? 0;
   const action = draft.action as Record<string, unknown>;
-  const actionKind: 'expression' | 'tags' | 'tblproperties' | 'emit' =
+  const actionKind: 'expression' | 'tags' | 'tblproperties' | 'layout' | 'emit' =
     draft.kind === 'generator' ? 'emit'
-      : action.tags ? 'tags' : action.tblproperties ? 'tblproperties' : 'expression';
+      : action.tags ? 'tags' : action.tblproperties ? 'tblproperties' : action.layout ? 'layout' : 'expression';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -248,7 +249,7 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
                           onChange={(e) => patch({ sourceArtifact: e.target.value || undefined })}
                           style={{ ...inp, cursor: 'pointer' }}>
                           <option value="">— pick a source —</option>
-                          {artifacts.map((a) => <option key={a.id} value={a.id}>{a.id}</option>)}
+                          {artifacts.map((a) => <option key={a.id} value={a.id}>{a.id}{a.kind ? ` · ${a.kind}` : ''}</option>)}
                         </select>
                       </>
                     )}
@@ -299,7 +300,7 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
                 </div>
 
                 {draft.kind === 'rule' ? (
-                  <RuleAction action={action} actionKind={actionKind} canEdit={canEdit}
+                  <RuleAction action={action} actionKind={actionKind} canEdit={canEdit} target={draft.target ?? 'column'}
                     onChange={(a) => patch({ action: a })} />
                 ) : (
                   <EmitAction action={action} canEdit={canEdit} onChange={(a) => patch({ action: a })} />
@@ -310,8 +311,14 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
                     <label style={lbl}>Target artifacts</label>
                     <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7, padding: 8, border: '1px solid #E2E6EE', borderRadius: 9, background: '#fff', marginBottom: 16 }}>
                       {draft.appliesTo.map((a) => (
-                        <span key={a} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--mono, monospace)', fontSize: 11.5, color: '#2E5BFF', background: '#EAF0FF', border: '1px solid #D4E0FF', borderRadius: 7, padding: '4px 8px' }}>
+                        <span key={a} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--mono, monospace)', fontSize: 11.5, color: '#2E5BFF', background: '#EAF0FF', border: '1px solid #D4E0FF', borderRadius: 7, padding: '4px 8px' }}
+                          title={artifacts.find((x) => x.id === a)?.kind ? `${artifacts.find((x) => x.id === a)?.kind} artifact` : undefined}>
                           {a}
+                          {artifacts.find((x) => x.id === a)?.kind && (
+                            <span style={{ fontFamily: 'inherit', fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: '#7FA0F0' }}>
+                              {artifacts.find((x) => x.id === a)?.kind}
+                            </span>
+                          )}
                           {canEdit && <button onClick={() => patch({ appliesTo: draft.appliesTo.filter((x) => x !== a) })} style={{ border: 'none', background: 'transparent', color: '#7FA0F0', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={10} /></button>}
                         </span>
                       ))}
@@ -319,7 +326,7 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
                         <select value="" onChange={(e) => { if (e.target.value) patch({ appliesTo: [...draft.appliesTo, e.target.value] }); }}
                           style={{ height: 28, padding: '0 10px', border: '1px dashed #C9D2E0', background: '#fff', color: '#8A93A5', borderRadius: 7, fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', outline: 'none', cursor: 'pointer' }}>
                           <option value="">+ Add</option>
-                          {artifacts.filter((a) => !draft.appliesTo.includes(a.id)).map((a) => <option key={a.id} value={a.id}>{a.id}</option>)}
+                          {artifacts.filter((a) => !draft.appliesTo.includes(a.id)).map((a) => <option key={a.id} value={a.id}>{a.id}{a.kind ? ` · ${a.kind}` : ''}</option>)}
                         </select>
                       )}
                     </div>
@@ -511,13 +518,16 @@ export default function DdlRuleEditor({ rule, draft: draftSeed, rules, config, u
 
 // ── sub-editores de action ─────────────────────────────────────────────────
 
-function RuleAction({ action, actionKind, canEdit, onChange }: {
+function RuleAction({ action, actionKind, canEdit, target, onChange }: {
   action: Record<string, unknown>;
-  actionKind: 'expression' | 'tags' | 'tblproperties' | 'emit';
+  actionKind: 'expression' | 'tags' | 'tblproperties' | 'layout' | 'emit';
   canEdit: boolean;
+  /** Doc 73: «Column layout» sólo existe para reglas de TABLA (sobre la física). */
+  target: 'column' | 'table';
   onChange: (a: Record<string, unknown>) => void;
 }) {
-  const [kind, setKind] = useState(actionKind === 'emit' ? 'expression' : actionKind);
+  const [kind, setKind] = useState<'expression' | 'tags' | 'tblproperties' | 'layout'>(actionKind === 'emit' ? 'expression' : actionKind);
+  const layout = (action.layout as { partitionColumns?: string } | undefined) ?? {};
   const pairs = (k: 'tags' | 'tblproperties') =>
     Object.entries((action[k] as Record<string, string>) ?? {});
   const setPairs = (k: 'tags' | 'tblproperties', entries: [string, string][]) =>
@@ -528,16 +538,35 @@ function RuleAction({ action, actionKind, canEdit, onChange }: {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Action</label>
         <div style={{ flex: 1 }} />
-        <Segmented small options={[['expression', 'Expression'], ['tags', 'Tags'], ['tblproperties', 'Properties']]}
+        <Segmented small options={[['expression', 'Expression'], ['tags', 'Tags'], ['tblproperties', 'Properties'],
+          ...(target === 'table' ? [['layout', 'Column layout'] as [string, string]] : [])]}
           value={kind} disabled={!canEdit}
           onPick={(v) => {
             setKind(v as typeof kind);
             onChange(v === 'expression' ? { expression: (action.expression as string) ?? '', alias: (action.alias as string) ?? '{columna.nombre}' }
               : v === 'tags' ? { tags: (action.tags as object) ?? {} }
-                : { tblproperties: (action.tblproperties as object) ?? {} });
+                : v === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last' } }
+                  : { tblproperties: (action.tblproperties as object) ?? {} });
           }} />
       </div>
-      {kind === 'expression' ? (
+      {kind === 'layout' ? (
+        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Partition columns</label>
+            <select value={layout.partitionColumns ?? 'last'} disabled={!canEdit}
+              onChange={(e) => onChange({ layout: { ...layout, partitionColumns: e.target.value } })}
+              style={{ ...inp, height: 32, fontSize: 12, flex: 1 }}>
+              <option value="last">Emit at the end of the CREATE TABLE</option>
+              <option value="keep">Keep the physical order</option>
+            </select>
+          </div>
+          <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
+            Applies to every physical table of the export (leave the condition empty). The model’s physical
+            order, the PARTITIONED BY clause and the PRIMARY KEY don’t change; generated tables already emit
+            their partition columns last.
+          </div>
+        </div>
+      ) : kind === 'expression' ? (
         <>
           <input value={(action.expression as string) ?? ''} disabled={!canEdit} spellCheck={false}
             onChange={(e) => onChange({ ...action, expression: e.target.value })}

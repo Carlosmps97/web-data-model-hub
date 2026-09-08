@@ -15,14 +15,13 @@
  *  - Sin changeset (producción/legacy) → endpoints directos de siempre.
  */
 import * as mod from './modeler.service';
-import * as csvc from '@/features/governance/services/changeset.service';
-import { useChangesetStore } from '@/store/useChangesetStore';
+import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { Drawing, Folder, Project, SubjectArea } from './modeler.service';
 
 /** Changeset para LECTURAS: cualquier modo con changeset activo (el visor
  *  readonly de un request también debe ver su estructura draft). */
-const readCs = (): string | null => useChangesetStore.getState().activeId;
+const readCs = (): string | null => useSessionStore.getState().activeChangesetId;
 
 /** Changeset para ESCRITURAS: solo sesión de edición (mismo gate que rec()). */
 const writeCs = (): string | null =>
@@ -72,19 +71,17 @@ async function fetchEffectiveSa(cs: string, saId: string): Promise<SubjectArea |
   return rows.find((s) => s.id === saId) ?? null;
 }
 
-// ── Projects ───────────────────────────────────────────────────────────────
+// ── Projects (doc 75 D5: se CREAN directo — projects.service — y se
+//    renombran/describen/borran SOLO por draft del propio proyecto) ──────────
 
-export const createProject = async (name: string): Promise<Project> => {
+const requireWriteCs = (what: string): string => {
   const cs = writeCs();
-  if (!cs) return mod.createProject(name);
-  const p: Project = { id: uid(), name };
-  await csvc.recordChange(cs, 'projects', p.id, 'upsert', { ...p });
-  return p;
+  if (!cs) throw new Error(`${what} requires a working copy in edit mode.`);
+  return cs;
 };
 
 export const renameProject = async (id: string, name: string): Promise<Project> => {
-  const cs = writeCs();
-  if (!cs) return mod.renameProject(id, name);
+  const cs = requireWriteCs('Renaming a project');
   const cur = (await csvc.effective<Project>(cs, 'projects', { ids: [id] }))
     .find((p) => p.id === id);
   const next: Project = { ...(cur ?? { id, name }), id, name };
@@ -92,22 +89,27 @@ export const renameProject = async (id: string, name: string): Promise<Project> 
   return next;
 };
 
-export const deleteProject = async (id: string): Promise<{ deleted: boolean }> => {
-  const cs = writeCs();
-  if (!cs) return mod.deleteProject(id);
-  // Cascada como el DELETE directo del backend: canvases y folders del proyecto.
-  const [folders, sas] = await Promise.all([
-    csvc.effective<Folder>(cs, 'folders'),
-    csvc.effective<SubjectArea>(cs, 'subject_areas'),
-  ]);
-  await Promise.all([
-    ...sas.filter((s) => s.projectId === id)
-      .map((s) => csvc.recordChange(cs, 'subject_areas', s.id, 'delete')),
-    ...folders.filter((f) => f.projectId === id)
-      .map((f) => csvc.recordChange(cs, 'folders', f.id, 'delete')),
-  ]);
+/** Graba UN solo cambio: el borrado del proyecto. La cascada (tablas,
+ *  columnas, vistas, relaciones, esquemas, carpetas, canvases y estándares)
+ *  la hace el servidor al APLICAR la versión aprobada (D5). */
+export const deleteProject = async (id: string): Promise<void> => {
+  const cs = requireWriteCs('Deleting a project');
   await csvc.recordChange(cs, 'projects', id, 'delete');
-  return { deleted: true };
+};
+
+/** Deshace el borrado pendiente: vuelve a grabar el doc PUBLICADO del proyecto. */
+export const reviveProject = async (id: string, published: Project): Promise<void> => {
+  const cs = requireWriteCs('Restoring a project');
+  await csvc.recordChange(cs, 'projects', id, 'upsert', { ...published });
+};
+
+/** ¿La working copy activa borra el proyecto? (el proyecto no está en su
+ *  estado efectivo). Sin sesión de edición nunca hay borrado pendiente. */
+export const projectDeletionPending = async (id: string): Promise<boolean> => {
+  const cs = writeCs();
+  if (!cs) return false;
+  const rows = await csvc.effective<Project>(cs, 'projects', { ids: [id] });
+  return !rows.some((p) => p.id === id);
 };
 
 // ── Folders ────────────────────────────────────────────────────────────────
@@ -192,10 +194,33 @@ export const setSubjectAreaTables = (saId: string, tableIds: string[]): Promise<
   return cs ? patchSa(cs, saId, { tableIds }) : mod.setSubjectAreaTables(saId, tableIds);
 };
 
+/** Doc 70: membresía de VISTAS del canvas (lista completa; el overlay
+ *  reemplaza). Changeset-aware como `setSubjectAreaTables`. */
+export const setSubjectAreaViews = (saId: string, viewIds: string[]): Promise<SubjectArea> => {
+  const cs = writeCs();
+  return cs ? patchSa(cs, saId, { viewIds }) : mod.setSubjectAreaViews(saId, viewIds);
+};
+
+/** Doc 70: tablas Y vistas del canvas en UNA escritura (import con vistas,
+ *  Undo del import). Con changeset es un solo upsert del doc completo; sin
+ *  changeset, un PUT por lista presente. */
+export const setSubjectAreaMembers = async (
+  saId: string, patch: { tableIds?: string[]; viewIds?: string[] },
+): Promise<SubjectArea> => {
+  const cs = writeCs();
+  if (cs) return patchSa(cs, saId, patch);
+  let sa: SubjectArea | null = null;
+  if (patch.tableIds) sa = await mod.setSubjectAreaTables(saId, patch.tableIds);
+  if (patch.viewIds) sa = await mod.setSubjectAreaViews(saId, patch.viewIds);
+  return sa ?? mod.getSubjectArea(saId);
+};
+
 /** Saca UNA tabla del canvas: la quita de `tableIds` Y del `layout` (si sólo se
  *  quitara de tableIds, quedaría un nodo fantasma en layout → audit C9b).
- *  Changeset-aware; requiere versión activa (la acción está gateada por canEdit). */
-export const removeTableFromCanvas = async (saId: string, tableId: string): Promise<void> => {
+ *  Doc 70: `viewIds` (opcional) fija la membresía de vistas resultante — el
+ *  store la calcula sin las vistas que quedan huérfanas — y limpia también su
+ *  layout. Changeset-aware; requiere versión activa (gateado por canEdit). */
+export const removeTableFromCanvas = async (saId: string, tableId: string, viewIds?: string[]): Promise<void> => {
   const cs = writeCs();
   if (!cs) throw new Error('An active version is required to remove a table.');
   const cur = await fetchEffectiveSa(cs, saId);
@@ -203,7 +228,25 @@ export const removeTableFromCanvas = async (saId: string, tableId: string): Prom
   const tableIds = (cur.tableIds ?? []).filter((t) => t !== tableId);
   const layout = { ...(cur.layout ?? {}) };
   delete layout[tableId];
-  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...cur, tableIds, layout, id: saId });
+  const next: SubjectArea = { ...cur, tableIds, layout, id: saId };
+  if (viewIds) {
+    const keep = new Set(viewIds);
+    for (const vid of cur.viewIds ?? []) if (!keep.has(vid)) delete layout[vid];
+    next.viewIds = viewIds;
+  }
+  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...next });
+};
+
+/** Doc 70: saca UNA vista del canvas (membresía + layout); la vista sigue
+ *  existiendo en el modelo y en los demás canvases. */
+export const removeViewFromCanvas = async (saId: string, viewId: string, viewIds: string[]): Promise<void> => {
+  const cs = writeCs();
+  if (!cs) throw new Error('An active version is required to remove a view.');
+  const cur = await fetchEffectiveSa(cs, saId);
+  if (!cur) return;
+  const layout = { ...(cur.layout ?? {}) };
+  delete layout[viewId];
+  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...cur, viewIds, layout, id: saId });
 };
 
 export const setSubjectAreaLayout = async (
@@ -224,7 +267,6 @@ export const setSubjectAreaDrawings = (saId: string, drawings: Drawing[]): Promi
   return cs ? patchSa(cs, saId, { drawings }) : mod.setSubjectAreaDrawings(saId, drawings);
 };
 
-export const setSubjectAreaUdp = (saId: string, udpValues: Record<string, string>): Promise<SubjectArea> => {
-  const cs = writeCs();
-  return cs ? patchSa(cs, saId, { udpValues }) : mod.setSubjectAreaUdp(saId, udpValues);
-};
+/** UDPs del canvas: SIEMPRE versionado (doc 75 D14: sin escritura directa). */
+export const setSubjectAreaUdp = (saId: string, udpValues: Record<string, string>): Promise<SubjectArea> =>
+  patchSa(requireWriteCs('Editing canvas properties'), saId, { udpValues });

@@ -11,10 +11,10 @@
 
 import type { Tag } from '@/types/model';
 import { apiGet, apiPost, apiPut, apiDelete } from './http';
-import * as csvc from '@/features/governance/services/changeset.service';
-import { useChangesetStore } from '@/store/useChangesetStore';
+import * as csvc from '@/services/changeset.service';
+import { useSessionStore } from '@/store/useSessionStore';
 
-const active = () => useChangesetStore.getState().activeId;
+const active = () => useSessionStore.getState().activeChangesetId;
 
 import { API_BASE } from '@/services/apiBase';
 const VIEWS = `${API_BASE}/api/views`;
@@ -125,6 +125,20 @@ export async function listViewsForTables(tableIds: string[]): Promise<View[]> {
   const byId = new Map<string, View>();
   perTable.flat().forEach((v) => byId.set(v.id, v));
   return [...byId.values()];
+}
+
+/** Una vista de la tabla con los canvases donde es MIEMBRO (doc 70 §2.4). */
+export interface TableViewRow extends View { canvases: { id: string; name: string }[]; }
+
+/** Vistas GLOBALES de una tabla (la tabla es canónica: incluye las que viven
+ *  sólo en otros canvases) con sus canvases — tab Views del panel («This
+ *  canvas» / «Other canvases»), espejo de `gov.tableLinks`. Con changeset
+ *  activo el backend aplica el overlay del draft. */
+export function tableViews(tableId: string): Promise<{ views: TableViewRow[]; total: number }> {
+  const params = new URLSearchParams({ tableId });
+  const a = active();
+  if (a) params.set('changesetId', a);
+  return apiGet<{ views: TableViewRow[]; total: number }>(`${VIEWS}/for-table?${params.toString()}`);
 }
 
 export function createView(body: ViewInput): Promise<View> {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { Relationship } from '@/features/governance/services/governance.service';
+import type { Relationship } from '@/services/governance.service';
 import {
   SYMBOL_SIZE, buildSubtypeGraph, childSubtypeMembership, isSubcategory,
   subtypeGroups, symbolDefaultPos, symbolsOfParent,

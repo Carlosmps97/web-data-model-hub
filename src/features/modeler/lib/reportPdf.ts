@@ -49,7 +49,7 @@ export function wrapText(s: string, maxW: number, size: number, bold?: boolean):
 // ═══ Reporte completo (doc 67) ═══════════════════════════════════════════
 import type { SceneItem } from './exportScene';
 import type { Diagram } from '../services/modeler.service';
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn } from '@/services/governance.service';
 import type { PdfBookmark, ReportPage } from './scenePdf';
 
 export interface ReportCanvasInput { name: string; location: string; diagram: Diagram }

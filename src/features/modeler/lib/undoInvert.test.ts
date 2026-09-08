@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { BulkChange } from '@/features/governance/services/governance.service';
+import type { BulkChange } from '@/services/governance.service';
 import { invertBulk, preKey } from './undoInvert';
 
 const up = (collection: string, entityId: string, payload: Record<string, unknown>): BulkChange =>

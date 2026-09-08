@@ -11,7 +11,7 @@
  * Asume que un lote toca cada entidad UNA sola vez (cierto para todos los
  * lotes de la plataforma: paste, relación, cascadas).
  */
-import type { BulkChange } from '@/features/governance/services/governance.service';
+import type { BulkChange } from '@/services/governance.service';
 
 /** Clave del mapa de pre-imágenes: `${collection}:${entityId}`. */
 export const preKey = (collection: string, entityId: string) => `${collection}:${entityId}`;

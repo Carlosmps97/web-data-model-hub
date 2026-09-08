@@ -72,6 +72,7 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'review.decide': 'Approve / reject requests',
   'publish': 'Publish to production',
   'rollback': 'Roll back to a published version',
+  'versions.view_all': "Open other users' drafts and requests in the canvas",
   'export': 'Export DDL / metadata',
   'standards.edit': 'Edit Data Standards',
   'admin.manage': 'Manage users and permissions',

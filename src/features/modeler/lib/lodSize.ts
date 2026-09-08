@@ -6,7 +6,7 @@
 // El nodo compacto DEBE medir lo mismo que el detallado: de lejos, la masa de
 // cada tabla y la franja PK son información visual — solo se dejan de pintar
 // las filas, que bajo el umbral miden menos de 1px.
-import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import type { View } from '@/services/views.service';
 import { collapseComplexType } from './complexTypes';
 import { viewNodeRows } from './viewGraph';

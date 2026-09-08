@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn } from '@/services/governance.service';
 import { mappingToBulk } from './relationshipPairs';
 
 const col = (id: string, tableId: string, name: string, over: Partial<CanonicalColumn> = {}): CanonicalColumn => ({

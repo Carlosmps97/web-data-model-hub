@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanonicalColumn, Relationship } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, Relationship } from '@/services/governance.service';
 import {
   buildKeyMapping, demotablePkChildren, mappingToBulk,
   relationshipDrift, roleNamePlan, type MappingResolution,

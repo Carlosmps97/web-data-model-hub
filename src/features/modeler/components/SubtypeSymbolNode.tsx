@@ -1,6 +1,5 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { SYMBOL_SIZE } from '../lib/subtypeGraph';
@@ -19,7 +18,7 @@ import { SYMBOL_SIZE } from '../lib/subtypeGraph';
  */
 function SubtypeSymbolNode({ id }: NodeProps) {
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
-  const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
+  const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const armed = useModelerStore((s) => s.subcatArmed);
   const connectable = canEdit && armed;
   const hot = useModelerStore(

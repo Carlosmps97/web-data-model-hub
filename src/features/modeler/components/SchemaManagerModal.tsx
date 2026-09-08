@@ -1,3 +1,4 @@
+import { runBlocking } from '@/store/useBusyStore';
 import { useState } from 'react';
 import { Check, FolderCog, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
@@ -112,12 +113,15 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     const done = new Set<string>();
     try {
       markDirty();
-      for (const op of ops) {
-        if (op.kind === 'create') await schemasSvc.createSchema(op.name, undefined, op.schemaKind);
-        else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
-        else await schemasSvc.deleteSchema(op.id);
-        done.add(op.key);
-      }
+      // Doc 75 D18: renombrar propaga a todas las tablas/vistas del esquema — bloqueante.
+      await runBlocking('Applying schema changes…', async () => {
+        for (const op of ops) {
+          if (op.kind === 'create') await schemasSvc.createSchema(op.name, undefined, op.schemaKind);
+          else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
+          else await schemasSvc.deleteSchema(op.id);
+          done.add(op.key);
+        }
+      });
       setStaged([]);
       setImpacts({});
       pushToast(`${ops.length} schema change(s) recorded in your version ${vLabel}`);

@@ -1,7 +1,9 @@
+// Doc 72 §1: inventario del proyecto en UNA request + columnas perezosas.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/services/http', () => ({
   apiGet: vi.fn(),
+  LONG_TIMEOUT_MS: 120_000,
   apiPost: vi.fn(),
   apiPut: vi.fn(),
   apiDelete: vi.fn(),
@@ -12,98 +14,95 @@ vi.mock('@/services/http', () => ({
   apiErrorMessage: vi.fn(),
   isConflictError: vi.fn(),
 }));
-vi.mock('@/features/governance/services/changeset.service', () => ({
+vi.mock('@/services/changeset.service', () => ({
   effective: vi.fn(),
 }));
+vi.mock('@/services/reporting.service', () => ({
+  listReportColumns: vi.fn(),
+}));
 import { apiGet } from '@/services/http';
-import * as csvc from '@/features/governance/services/changeset.service';
-import { useChangesetStore } from '@/store/useChangesetStore';
-import { clampDbxSplit, explorerSearchColumns, schemasForSection } from './explorer.service';
+import * as csvc from '@/services/changeset.service';
+import { listReportColumns } from '@/services/reporting.service';
+import { useSessionStore } from '@/store/useSessionStore';
+import { explorerColumns, mapInventory, mapView, projectInventory, type RawInventory } from './explorer.service';
 
-describe('explorerSearchColumns (búsqueda por columna del Database Explorer)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    useChangesetStore.setState({ activeId: null });
-  });
+const RAW: RawInventory = {
+  tables: [
+    { id: 't1', physicalName: 'M_CLIENTE', logicalName: 'Cliente', schema: 'core', columnCount: 12 },
+    { id: 't2', physicalName: 'M_CUENTA', logicalName: 'Cuenta', schema: null, columnCount: 0 },
+  ],
+  views: [
+    { id: 'v1', name: 'V_CLI', schema: 'core_vu', sourceTableIds: ['t1', 't9'],
+      sources: [{ tableId: 't1', column: 'COD', outputAlias: 'CODIGO', castType: 'STRING' }, { tableId: 't9', column: 'X' }] },
+    { id: 'v2', name: 'V_CUSTOM', tableId: 't2', customSql: 'SELECT 1 AS uno', customColumns: [{ name: 'uno', expression: '1' }],
+      sources: [{ tableId: 't2', column: 'IGNORADA' }] },
+  ],
+  canvases: 3,
+  total: { tables: 2, views: 2 },
+};
 
-  it('sin versión activa va al catálogo publicado (join server-side)', async () => {
-    vi.mocked(apiGet).mockResolvedValue([
-      { id: 'c1', physicalName: 'COD_CLIENTE', tableId: 't1', table: 'M_CLIENTE', schema: 'ddv' },
+describe('mapView / mapInventory (doc 72)', () => {
+  it('resuelve nombres de fuentes desde el inventario y mapea columnas Regular', () => {
+    const inv = mapInventory(RAW);
+    expect(inv.canvases).toBe(3);
+    expect(inv.tables[1].schema).toBeNull();
+    const v1 = inv.views[0];
+    expect(v1.sourceTables).toEqual(['M_CLIENTE', 't9']);            // t9 no está en el inventario → id
+    expect(v1.columns).toEqual([
+      { outputAlias: 'CODIGO', sourceColumn: 'COD', sourceTable: 'M_CLIENTE', castType: 'STRING', expression: null },
+      { outputAlias: null, sourceColumn: 'X', sourceTable: 't9', castType: null, expression: null },
     ]);
-    const out = await explorerSearchColumns('cod cli', 25);
-    expect(apiGet).toHaveBeenCalledWith('/api/catalog/columns?q=cod%20cli&limit=25');
-    expect(out[0].table).toBe('M_CLIENTE');
+    expect(v1.custom).toBe(false);
   });
 
-  it('con versión activa junta columnas efectivas + tablas del draft y descarta huérfanas', async () => {
-    useChangesetStore.setState({ activeId: 'cs1' });
-    vi.mocked(csvc.effective)
-      .mockResolvedValueOnce([
-        { id: 'c1', tableId: 't1', physicalName: 'COD_CLIENTE', dataType: 'STRING' },
-        { id: 'c2', tableId: 't2', physicalName: 'COD_CLIENTE_RIESGO', dataType: 'INT' },
-        { id: 'c9', tableId: 't-borrada', physicalName: 'COD_CLIENTE_OLD', dataType: 'STRING' },
-      ])
-      .mockResolvedValueOnce([
-        { id: 't1', physicalName: 'M_CLIENTE_DRAFT', schema: 'ddv_cliente' },
-        { id: 't2', physicalName: 'H_RIESGO', schema: 'ddv_riesgo' },
-        // t-borrada NO vuelve del efectivo (borrada en la versión) → c9 fuera
-      ]);
-    const out = await explorerSearchColumns('cod', 50);
-    expect(csvc.effective).toHaveBeenNthCalledWith(1, 'cs1', 'canonical_columns', { q: 'cod', limit: 50 });
-    expect(csvc.effective).toHaveBeenNthCalledWith(2, 'cs1', 'canonical_tables', { ids: ['t-borrada', 't1', 't2'] });
-    expect(out.map((c) => c.id)).toEqual(['c1', 'c2']);
-    // el nombre de la tabla es el del DRAFT (rename pendiente visible)
-    expect(out[0].table).toBe('M_CLIENTE_DRAFT');
-    expect(out[0].schema).toBe('ddv_cliente');
-  });
-
-  it('con versión activa y sin hits no consulta tablas', async () => {
-    useChangesetStore.setState({ activeId: 'cs1' });
-    vi.mocked(csvc.effective).mockResolvedValueOnce([]);
-    const out = await explorerSearchColumns('nada', 50);
-    expect(out).toEqual([]);
-    expect(csvc.effective).toHaveBeenCalledTimes(1);
+  it('vista Personalizada: columnas del parse, fuente legacy tableId', () => {
+    const v2 = mapView(RAW.views[1], (id) => (id === 't2' ? 'M_CUENTA' : undefined));
+    expect(v2.custom).toBe(true);
+    expect(v2.sourceTableIds).toEqual(['t2']);
+    expect(v2.sourceTables).toEqual(['M_CUENTA']);
+    expect(v2.columns).toEqual([{ outputAlias: 'uno', expression: '1', sourceTable: null, sourceColumn: null, castType: null }]);
   });
 });
 
-describe('schemasForSection (secciones Canonical Tables / Views del Database Explorer)', () => {
-  const schemas = [
-    { id: 's1', name: 'ddv_cliente', kind: 'tables' as const },
-    { id: 's2', name: 'ddv_cliente_vu', kind: 'views' as const },
-    { id: 's3', name: 'legacy_sin_kind', kind: null },
-    { id: 's4', name: 'otro_sin_kind' }, // kind ausente (docs viejos)
-  ];
-
-  it("sección 'tables' = kind tables + sin clasificar (regla doc 52)", () => {
-    expect(schemasForSection(schemas, 'tables').map((s) => s.id)).toEqual(['s1', 's3', 's4']);
+describe('projectInventory / explorerColumns conmutan por la versión activa', () => {
+  beforeEach(() => {
+    vi.mocked(apiGet).mockReset();
+    vi.mocked(csvc.effective).mockReset();
+    vi.mocked(listReportColumns).mockReset();
+    useSessionStore.setState({ activeProjectId: 'p1' });
   });
 
-  it("sección 'views' = kind views + sin clasificar", () => {
-    expect(schemasForSection(schemas, 'views').map((s) => s.id)).toEqual(['s2', 's3', 's4']);
+  it('producción: sin changesetId y columnas por reporting', async () => {
+    useSessionStore.setState({ activeChangesetId: null });
+    vi.mocked(apiGet).mockResolvedValueOnce(RAW);
+    const inv = await projectInventory('p 1');
+    expect(vi.mocked(apiGet).mock.calls[0][0]).toMatch(/\/api\/projects\/p%201\/catalog\/inventory$/);
+    expect(inv.tables).toHaveLength(2);
+
+    vi.mocked(listReportColumns).mockResolvedValueOnce([
+      { id: 'c1', physicalName: 'A', logicalName: 'a', dataType: 'INT', ordinal: 1 } as never,
+    ]);
+    const cols = await explorerColumns('t1');
+    expect(listReportColumns).toHaveBeenCalledWith('p1', 't1');     // doc 75: columnas del proyecto
+    expect(cols[0]).toMatchObject({ id: 'c1', physicalName: 'A', ordinal: 1 });
+    expect(csvc.effective).not.toHaveBeenCalled();
   });
 
-  it('no muta la lista de entrada', () => {
-    const copia = [...schemas];
-    schemasForSection(schemas, 'views');
-    expect(schemas).toEqual(copia);
-  });
-});
+  it('draft: changesetId en la URL y columnas efectivas ordenadas por ordinal', async () => {
+    useSessionStore.setState({ activeChangesetId: 'cs1' });
+    vi.mocked(apiGet).mockResolvedValueOnce(RAW);
+    await projectInventory('p1');
+    expect(vi.mocked(apiGet).mock.calls[0][0]).toMatch(/\/inventory\?changesetId=cs1$/);
 
-describe('clampDbxSplit (fracción de alto del Database Explorer en el sidebar)', () => {
-  it('respeta valores dentro del rango', () => {
-    expect(clampDbxSplit(0.5)).toBe(0.5);
-    expect(clampDbxSplit(0.15)).toBe(0.15);
-    expect(clampDbxSplit(0.85)).toBe(0.85);
-  });
-
-  it('recorta a los límites 15%–85%', () => {
-    expect(clampDbxSplit(0.05)).toBe(0.15);
-    expect(clampDbxSplit(0.99)).toBe(0.85);
-    expect(clampDbxSplit(-1)).toBe(0.15);
-  });
-
-  it('valores no finitos (localStorage corrupto) caen al default 50%', () => {
-    expect(clampDbxSplit(Number.NaN)).toBe(0.5);
-    expect(clampDbxSplit(Number.POSITIVE_INFINITY)).toBe(0.5);
+    vi.mocked(csvc.effective).mockResolvedValueOnce([
+      { id: 'c2', tableId: 't1', physicalName: 'B', dataType: 'INT', ordinal: 2, isPrimaryKey: null },
+      { id: 'c1', tableId: 't1', physicalName: 'A', dataType: 'INT', ordinal: 1, isPrimaryKey: true },
+    ]);
+    const cols = await explorerColumns('t1');
+    expect(csvc.effective).toHaveBeenCalledWith('cs1', 'canonical_columns', { tableId: 't1' });
+    expect(cols.map((c) => c.id)).toEqual(['c1', 'c2']);
+    expect(cols[0].isPrimaryKey).toBe(true);
+    expect(listReportColumns).not.toHaveBeenCalled();
+    useSessionStore.setState({ activeChangesetId: null });
   });
 });

@@ -8,17 +8,11 @@ import ReviewScreen from '@/screens/ReviewScreen';
 import LoginScreen from '@/features/auth/LoginScreen';
 import { RequireAuth, RequirePermission } from '@/features/auth/guards';
 import { WorkspaceScreen } from '@/features/modeler';
-import { GovernanceScreen } from '@/features/governance';
 import { StandardsScreen } from '@/features/standards';
 import { AdminScreen } from '@/features/admin';
 import { useAuthStore } from '@/store/useAuthStore';
 import { DialogHost } from '@/components/ui/dialogs';
-import { installSessionChangesetBridge } from '@/store/sessionChangesetBridge';
-
-// Espeja `useSessionStore.activeChangesetId` → `useChangesetStore.activeId` para
-// que el changeset que elige Open model (R2) alimente a TODOS los lectores del
-// changeset activo (escrituras de governance.service + gates del canvas).
-installSessionChangesetBridge();
+import BusyOverlay from '@/components/BusyOverlay';
 
 /**
  * Global shell: the persistent <TopNav/> over the routed page (<Outlet/>).
@@ -56,13 +50,13 @@ export default function App() {
             <Route path="/standards" element={<RequirePermission perm="model.view"><StandardsScreen /></RequirePermission>} />
             {/* Admin — solo Administradores */}
             <Route path="/admin" element={<RequirePermission perm="admin.manage"><AdminScreen /></RequirePermission>} />
-            {/* Legacy (parkeada, fuera del rail). */}
-            <Route path="/governance" element={<GovernanceScreen />} />
           </Route>
         </Route>
       </Routes>
       {/* Host global de confirm/prompt estilizados. */}
       <DialogHost />
+      {/* Overlay bloqueante de acciones largas de ESTA sesión (doc 75 D18). */}
+      <BusyOverlay />
       {/* Toaster GLOBAL. closeButton = la "x" para cerrarlo sin esperar. */}
       <Toaster richColors closeButton position="bottom-center" toastOptions={{ style: { fontFamily: 'var(--ui)' } }} />
     </BrowserRouter>

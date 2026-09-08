@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildViewGraph, viewNodeRows, viewSourceIds } from './viewGraph';
 import type { View } from '@/services/views.service';
-import type { CanonicalColumn, CanonicalTable } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 
 const tables: CanonicalTable[] = [
   { id: 't1', physicalName: 'CLIENTE', logicalName: 'Cliente' },

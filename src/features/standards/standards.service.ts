@@ -1,28 +1,53 @@
 /**
  * standards.service — módulo Data Standards (versionado independiente de UDP +
- * Parent Domains). Backend `/api/standards/*` (envelope `{success,data}`).
+ * Parent Domains), POR PROYECTO (doc 75): cada proyecto tiene su glosario,
+ * dominios, UDPs, naming, reglas DDL y su propio historial. Backend
+ * `/api/projects/{pid}/standards/*` (envelope `{success,data}`).
  *
  * Las MUTACIONES puntuales de preview (physicalize, impacto de dominio) siguen
  * usando `@/services/naming.service`; este servicio agrega el snapshot + el
  * versionado (apply/rollback/history), que es lo nuevo del módulo.
  */
-import { apiGet, apiPost } from '@/services/http';
+import { apiGet, apiPost, LONG_TIMEOUT_MS } from '@/services/http';
+import { runBlocking } from '@/store/useBusyStore';
 import type { UdpScope, WordType, Separator, Casing } from '@/services/naming.service';
 
 import { API_BASE } from '@/services/apiBase';
-const STD = `${API_BASE}/api/standards`;
+const PROJECT = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}`;
+const STD = (pid: string) => `${PROJECT(pid)}/standards`;
+
+import type { StandardsBlock } from '@/types/api';
+export type { StandardsBlock };
+/** Bloques copiables, con su etiqueta de UI (asistente «New project», doc 75 D15). */
+export const STANDARDS_BLOCKS: { key: StandardsBlock; label: string }[] = [
+  { key: 'glossary', label: 'Glossary' },
+  { key: 'domains', label: 'Parent domains' },
+  { key: 'udp', label: 'UDP definitions' },
+  { key: 'naming', label: 'Naming rules' },
+  { key: 'ddl', label: 'DDL export rules' },
+];
+/** Conteos por bloque del proyecto fuente (`GET …/standards/summary`). */
+export interface StandardsSummary { glossary: number; domains: number; udp: number; rules: number; naming: boolean }
 
 export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType | null; locked?: boolean; lockedBy?: string | null; lockedAt?: string | null; }
-export interface SnapshotDomain { id: string; name: string; defaultDataType: string; namingTerm?: string | null; description?: string | null; }
+export interface SnapshotDomain {
+  id: string; name: string;
+  /** Doc 69: `defaultDataType` = tipo FÍSICO por defecto; `logicalDataType` = faceta lógica. */
+  defaultDataType: string; logicalDataType?: string | null;
+  namingTerm?: string | null; description?: string | null;
+}
 export interface NamingRuleSnap { separator: Separator | string | null; case: Casing | string | null; maxLength?: number | null; }
 /** Definición de un UDP (User Defined Property): la KEY + su tipo + default +
  *  valores permitidos (enum si dataType='list') + niveles donde aplica. */
 export type UdpDataType = 'string' | 'number' | 'boolean' | 'date' | 'list';
 export type UdpLevel = 'table' | 'column' | 'canvas' | 'view';
+/** Faceta Erwin (doc 69): 'logical' = Entity/Attribute · 'physical' = Table/Column/View/Model. */
+export type UdpView = 'logical' | 'physical';
 export interface UdpDefinition {
   id: string;
   name: string;
   level: UdpLevel;              // Class: 'table' | 'column' | 'canvas' (Modelo de Datos) | 'view'
+  view?: UdpView;               // faceta (doc 69): ausente = physical (defs previas)
   dataType: UdpDataType;
   defaultValue?: string | null;
   allowedValues: string[];
@@ -98,12 +123,13 @@ export interface StandardsVersion {
 
 // ── Batch de cambios que se aplica como UNA versión (15d/15e) ──
 export interface TermEditInput { id?: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType; }
-export interface DomainEditInput { id?: string; name: string; defaultDataType: string; namingTerm?: string; description?: string; }
+export interface DomainEditInput { id?: string; name: string; defaultDataType: string; logicalDataType?: string; namingTerm?: string; description?: string; }
 export interface NamingEditInput { separator: string; case: string; maxLength: number; }
 export interface UdpEditInput {
   id?: string;
   name: string;
   level: UdpLevel;
+  view?: UdpView;               // faceta (doc 69); el backend asume physical si falta
   dataType: UdpDataType;
   defaultValue?: string;
   allowedValues?: string[];
@@ -140,12 +166,19 @@ export interface ApplyStandardsBody {
   ddlConfigPatch?: { lookups?: Record<string, DdlLookup>; functions?: DdlRulesetConfig['functions'] };
 }
 
-export const getSnapshot = () => apiGet<StandardsSnapshot>(`${STD}/snapshot`);
-export const getVersions = () => apiGet<StandardsVersion[]>(`${STD}/versions`);
-export const applyStandards = (body: ApplyStandardsBody) => apiPost<StandardsVersion>(`${STD}/apply`, body);
-export const rollbackStandards = (targetSeq: number) => apiPost<StandardsVersion>(`${STD}/rollback`, { targetSeq });
+export const getSnapshot = (projectId: string) => apiGet<StandardsSnapshot>(`${STD(projectId)}/snapshot`);
+export const getVersions = (projectId: string) => apiGet<StandardsVersion[]>(`${STD(projectId)}/versions`);
+export const getStandardsSummary = (projectId: string) => apiGet<StandardsSummary>(`${STD(projectId)}/summary`);
+/** Aplica un batch como UNA versión del proyecto: re-deriva nombres/tipos en
+ *  sus tablas — acción larga (doc 75 D18). */
+export const applyStandards = (projectId: string, body: ApplyStandardsBody) =>
+  runBlocking('Applying standards…', () =>
+    apiPost<StandardsVersion>(`${STD(projectId)}/apply`, body, { timeoutMs: LONG_TIMEOUT_MS }));
+export const rollbackStandards = (projectId: string, targetSeq: number) =>
+  runBlocking('Rolling back standards…', () =>
+    apiPost<StandardsVersion>(`${STD(projectId)}/rollback`, { targetSeq }, { timeoutMs: LONG_TIMEOUT_MS }));
 
-/** Definiciones UDP activas (para el módulo Data Standards y el panel de
- *  Properties). GET abierto (`/api/udp`); las mutaciones van por applyStandards
- *  con kind='udp' (versionado). */
-export const getUdpDefs = () => apiGet<UdpDefinition[]>(`${API_BASE}/api/udp`);
+/** Definiciones UDP activas DEL PROYECTO (módulo Data Standards y panel de
+ *  Properties). GET abierto; las mutaciones van por applyStandards con
+ *  kind='udp' (versionado). */
+export const getUdpDefs = (projectId: string) => apiGet<UdpDefinition[]>(`${PROJECT(projectId)}/udp`);

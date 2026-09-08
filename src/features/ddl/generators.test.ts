@@ -472,6 +472,33 @@ describe('PRIMARY KEY compuesta — orden de la LLAVE (pkPosition), no orden fí
   });
 });
 
+describe('partitionsLast — regla de layout del ruleset (doc 73)', () => {
+  const input: DatabricksDdlInput = {
+    tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
+    columns: [
+      { id: 'a', tableId: 't1', physicalName: 'CODMES', dataType: 'int', ordinal: 0, isPartition: true, isPrimaryKey: true, pkPosition: 0 },
+      { id: 'b', tableId: 't1', physicalName: 'COD', dataType: 'string', ordinal: 1 },
+      { id: 'c', tableId: 't1', physicalName: 'FECDIA', dataType: 'date', ordinal: 2, isPartition: true },
+      { id: 'd', tableId: 't1', physicalName: 'MTO', dataType: 'decimal(18,2)', ordinal: 3 },
+    ],
+    relationships: [],
+    modelName: 'm',
+  };
+  it('sin la opción: orden físico puro (byte-idéntico al de siempre)', () => {
+    const ddl = databricksDdl(input, { ...DEF, includeKeys: true });
+    expect(ddl.indexOf('`CODMES` INT')).toBeLessThan(ddl.indexOf('`COD` STRING'));
+    expect(ddl).toContain('PARTITIONED BY (`CODMES`, `FECDIA`)');
+  });
+  it('con la opción: las particiones se emiten al final; PARTITIONED BY y PRIMARY KEY no cambian', () => {
+    const ddl = databricksDdl(input, { ...DEF, includeKeys: true, partitionsLast: true });
+    const body = ddl.slice(ddl.indexOf('(\n') + 2, ddl.indexOf('\n)'));
+    const names = body.split(',\n').map((l) => l.trim().split(' ')[0]).filter((n) => n.startsWith('`'));
+    expect(names).toEqual(['`COD`', '`MTO`', '`CODMES`', '`FECDIA`']);
+    expect(ddl).toContain('PARTITIONED BY (`CODMES`, `FECDIA`)');
+    expect(ddl).toContain('PRIMARY KEY (`CODMES`)');
+  });
+});
+
 describe('ddlZipName', () => {
   it('one table → that table name .zip', () => {
     expect(ddlZipName([{ id: '1', physicalName: 'CLIENTE' }], 'M')).toBe('CLIENTE.zip');

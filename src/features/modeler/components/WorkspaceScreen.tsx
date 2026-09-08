@@ -2,18 +2,23 @@ import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPoin
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useModelerStore } from '@/store/useModelerStore';
-import { useSessionStore } from '@/store/useSessionStore';
+import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
 import OpenModelModal from '@/components/OpenModelModal';
-import { getChangeset, getPublished, listUsers } from '@/services/versioning.service';
-import type { SimUserDto, VersionRow } from '@/types/versioning';
+import NewProjectModal from '@/components/NewProjectModal';
+import { getChangeset, listUsers } from '@/services/versioning.service';
+import type { SimUserDto } from '@/types/versioning';
 import ModelerCanvas from './ModelerCanvas';
 import Toolbar from './Toolbar';
-import ModelExplorer from './ModelExplorer';
-import DatabaseExplorer from './DatabaseExplorer';
+import ExplorerPanel from './ExplorerPanel';
 import ColumnEditor from './ColumnEditor';
 import ColumnPropertiesPanel from './ColumnPropertiesPanel';
 import ViewPropertiesPanel from '@/features/modeler/components/ViewPropertiesPanel';
 import PropertiesPanel from './PropertiesPanel';
+import ObjectInspector from './ObjectInspector';
+import NavigatingOverlay from './NavigatingOverlay';
+import DeletionPendingPanel from './DeletionPendingPanel';
+import PublishModal from './PublishModal';
+import { runBlocking } from '@/store/useBusyStore';
 
 export const pushToast = (m: string, k?: 'err') => (k === 'err' ? toast.error(m) : toast.success(m));
 
@@ -29,13 +34,21 @@ export default function WorkspaceScreen() {
   const selectedViewId = useModelerStore((s) => s.selectedViewId);
   const viewMode = useModelerStore((s) => s.viewMode);
   const setViewMode = useModelerStore((s) => s.setViewMode);
+  // Doc 75 D5: la working copy borra su proyecto → el canvas cede al panel.
+  const deletionPending = useModelerStore((s) => s.projectDeletionPending);
+  const activeProject = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const undoProjectDeletion = useModelerStore((s) => s.undoProjectDeletion);
+  const [publishFromPanel, setPublishFromPanel] = useState(false);
   const openMode = useSessionStore((s) => s.openMode);
   const activeChangesetId = useSessionStore((s) => s.activeChangesetId);
   const user = useSessionStore((s) => s.user);
 
-  // Open-model entry (also the version chooser forced on first entry).
+  // Open-model entry (also the version chooser forced on first entry). Doc 75:
+  // el modal elige PROYECTO y luego modo; «New project…» abre el alta y
+  // reabre el chooser con el proyecto nuevo preseleccionado.
   const [openModelShown, setOpenModelShown] = useState(false);
-  const [published, setPublished] = useState<VersionRow | null>(null);
+  const [newProjectShown, setNewProjectShown] = useState(false);
+  const [presetProjectId, setPresetProjectId] = useState<string | null>(null);
   const [users, setUsers] = useState<SimUserDto[]>([]);
 
   // Ancho resizable del panel de propiedades (solo-vista, persiste por browser).
@@ -80,15 +93,12 @@ export default function WorkspaceScreen() {
 
   useEffect(() => { loadProjects().catch(() => pushToast("Couldn't load the projects", 'err')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Data the Open-model modal needs (production label + draft owners).
+  // Data the Open-model modal needs (draft owners); production is per project
+  // and the modal resolves it from the version list (doc 75).
   useEffect(() => {
     let cancelled = false;
-    Promise.all([getPublished(), listUsers()])
-      .then(([pub, us]) => {
-        if (cancelled) return;
-        setPublished(pub);
-        setUsers(us);
-      })
+    listUsers()
+      .then((us) => { if (!cancelled) setUsers(us); })
       .catch(() => { /* the modal still works with defaults */ });
     return () => { cancelled = true; };
   }, []);
@@ -124,6 +134,7 @@ export default function WorkspaceScreen() {
       .then((cs) => {
         if (cancelled || (cs.status === 'draft' && cs.owner === user.id)) return;
         useSessionStore.getState().openModel({
+          projectId: cs.projectId,
           mode: 'readonly',
           changesetId: activeChangesetId,
           versionLabel: cs.versionLabel ?? null,
@@ -159,6 +170,11 @@ export default function WorkspaceScreen() {
     // canvas; send them back Home.
     if (!useSessionStore.getState().openMode) navigate('/');
   };
+  const lastProjectId = (): string | null => {
+    const active = useSessionStore.getState().activeProjectId;
+    if (active) return active;
+    try { return localStorage.getItem(LAST_PROJECT_KEY); } catch { return null; }
+  };
 
   return (
     <div className={`wk${(selectedTableId || selectedColumnId || selectedViewId) && openMode ? ' has-props' : ''}`}
@@ -167,11 +183,10 @@ export default function WorkspaceScreen() {
         ...(explWidth ? { ['--expl-w']: `${explWidth}px` } : {}),
       } as CSSProperties}>
       <Toolbar pushToast={pushToast} onOpenModel={() => setOpenModelShown(true)} />
-      {/* Sidebar apilado (doc 18): Model Explorer (versión activa) arriba +
-          Database Explorer (producción, solo lectura) abajo. */}
+      {/* Sidebar (docs 71/72): UN Explorer — por proyecto Models · Tables ·
+          Views · Schemas (el catálogo global se retiró; lo cubren ⌘K + Inspect). */}
       <div className="wk-expl-stack">
-        <ModelExplorer pushToast={pushToast} />
-        <DatabaseExplorer />
+        <ExplorerPanel pushToast={pushToast} onOpenModel={() => setOpenModelShown(true)} />
         <div className={`wk-expl-resizer${explResizing ? ' dragging' : ''}`}
           onPointerDown={startExplResize} title="Drag to resize" />
       </div>
@@ -180,6 +195,12 @@ export default function WorkspaceScreen() {
           <div className="rd-small" style={{ padding: 16, color: 'var(--muted)' }}>
             Pick a version to open the model.
           </div>
+        ) : deletionPending && activeProject ? (
+          <DeletionPendingPanel
+            project={activeProject}
+            onUndo={() => { void runBlocking('Restoring project…', undoProjectDeletion).catch((e) => pushToast(e instanceof Error ? e.message : "Couldn't restore the project", 'err')); }}
+            onSend={() => setPublishFromPanel(true)}
+          />
         ) : activeSaId ? (
           <ModelerCanvas pushToast={pushToast} />
         ) : (
@@ -217,7 +238,23 @@ export default function WorkspaceScreen() {
           ? <ViewPropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />
           : selectedTableId && openMode && <PropertiesPanel pushToast={pushToast} onResize={setPropsWidth} />}
       {columnTarget && <ColumnEditor tableId={columnTarget} onClose={() => setColumnTarget(null)} onAdd={addColumn} />}
-      <OpenModelModal open={openModelShown} onClose={closeOpenModel} published={published} users={users} />
+      <PublishModal open={publishFromPanel} onClose={() => setPublishFromPanel(false)} />
+      <OpenModelModal
+        open={openModelShown && !newProjectShown}
+        onClose={closeOpenModel}
+        defaultProjectId={presetProjectId ?? lastProjectId()}
+        users={users}
+        onNewProject={() => setNewProjectShown(true)}
+      />
+      <NewProjectModal
+        open={newProjectShown}
+        onClose={() => setNewProjectShown(false)}
+        onCreated={(p) => { setNewProjectShown(false); setPresetProjectId(p.id); setOpenModelShown(true); }}
+      />
+      {/* Doc 72 §3: Object Inspector — metadata de tabla/vista/columna sin canvas. */}
+      <ObjectInspector />
+      {/* Doc 72 r2: overlay bloqueante mientras Locate abre otro canvas y centra. */}
+      <NavigatingOverlay />
       {/* El <Toaster> ahora es global (App.tsx): uno solo para toda la app. */}
     </div>
   );

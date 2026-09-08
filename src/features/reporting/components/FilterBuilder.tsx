@@ -13,18 +13,18 @@ function isGroup(n: Condition | WhereGroup): n is WhereGroup {
   return (n as WhereGroup).conditions !== undefined;
 }
 
-function ValueEditor({ fd, cond, from, onChange }: { fd?: FieldDef; cond: Condition; from: ViewKey; onChange: (v: unknown) => void }) {
+function ValueEditor({ projectId, fd, cond, from, onChange }: { projectId: string; fd?: FieldDef; cond: Condition; from: ViewKey; onChange: (v: unknown) => void }) {
   const [facets, setFacets] = useState<{ value: string; label: string }[]>([]);
   useEffect(() => {
     // Carga opciones (typeahead server-side) para campos hidratados (dominio) o
     // facetables conocidos (schema/dataType). enum ya trae sus allowedValues; los
     // campos derived nunca facetan (ops=[]).
     if (fd && shouldFetchFacets(fd)) {
-      getFacets(from, fd.key).then(setFacets).catch(() => {});
+      getFacets(projectId, from, fd.key).then(setFacets).catch(() => {});
     } else {
       setFacets([]);
     }
-  }, [fd?.key, from]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fd?.key, from, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!fd || NO_VALUE.includes(cond.op)) return null;
   const opts = fd.enumValues?.map((v) => ({ value: v, label: v })) ?? facets;
   if (cond.op === 'in' || cond.op === 'nin') {
@@ -47,8 +47,8 @@ function ValueEditor({ fd, cond, from, onChange }: { fd?: FieldDef; cond: Condit
     value={String(cond.value ?? '')} onChange={(e) => onChange(e.target.value)} placeholder="valor" />;
 }
 
-function ConditionRow({ cond, catalog, from, onChange, onRemove }: {
-  cond: Condition; catalog: FieldDef[]; from: ViewKey; onChange: (c: Condition) => void; onRemove: () => void;
+function ConditionRow({ projectId, cond, catalog, from, onChange, onRemove }: {
+  projectId: string; cond: Condition; catalog: FieldDef[]; from: ViewKey; onChange: (c: Condition) => void; onRemove: () => void;
 }) {
   const fd = catalog.find((f) => f.key === cond.field);
   // Los campos derived (ops=[]) no son filtrables → fuera del selector.
@@ -64,14 +64,14 @@ function ConditionRow({ cond, catalog, from, onChange, onRemove }: {
       <select style={sel} value={cond.op} onChange={(e) => onChange({ ...cond, op: e.target.value as Op, value: undefined })}>
         {(fd?.ops ?? []).map((o) => <option key={o} value={o}>{OP_LABEL[o]}</option>)}
       </select>
-      <ValueEditor fd={fd} cond={cond} from={from} onChange={(v) => onChange({ ...cond, value: v })} />
+      <ValueEditor projectId={projectId} fd={fd} cond={cond} from={from} onChange={(v) => onChange({ ...cond, value: v })} />
       <button onClick={onRemove} style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: '#B6BECD' }}><X size={15} /></button>
     </div>
   );
 }
 
-export default function FilterBuilder({ group, catalog, from, onChange, depth = 0 }: {
-  group: WhereGroup; catalog: FieldDef[]; from: ViewKey; onChange: (g: WhereGroup) => void; depth?: number;
+export default function FilterBuilder({ projectId, group, catalog, from, onChange, depth = 0 }: {
+  projectId: string; group: WhereGroup; catalog: FieldDef[]; from: ViewKey; onChange: (g: WhereGroup) => void; depth?: number;
 }) {
   const set = (conditions: (Condition | WhereGroup)[]) => onChange({ ...group, conditions });
   const firstFilterable = catalog.find(isFilterableField);
@@ -91,10 +91,10 @@ export default function FilterBuilder({ group, catalog, from, onChange, depth = 
       </div>
       {group.conditions.map((c, i) => (
         isGroup(c)
-          ? <div key={i} style={{ marginBottom: 6 }}><FilterBuilder group={c} catalog={catalog} from={from} depth={depth + 1}
+          ? <div key={i} style={{ marginBottom: 6 }}><FilterBuilder projectId={projectId} group={c} catalog={catalog} from={from} depth={depth + 1}
               onChange={(g) => set(group.conditions.map((x, j) => (j === i ? g : x)))} />
               <button onClick={() => set(group.conditions.filter((_, j) => j !== i))} style={{ marginTop: 4, border: 'none', background: 'transparent', color: '#C0392B', fontSize: 11.5, cursor: 'pointer' }}>remove group</button></div>
-          : <ConditionRow key={i} cond={c} catalog={catalog} from={from}
+          : <ConditionRow key={i} projectId={projectId} cond={c} catalog={catalog} from={from}
               onChange={(nc) => set(group.conditions.map((x, j) => (j === i ? nc : x)))}
               onRemove={() => set(group.conditions.filter((_, j) => j !== i))} />
       ))}

@@ -1,7 +1,9 @@
 /**
  * query.service — cliente del motor de consulta del reporting (07). Todo gira
  * alrededor del `ReportSpec` (mismo IR que el backend): lo produce el builder
- * visual Y la caja SQL, y lo consumen la grilla, las queries guardadas y el export.
+ * visual Y la caja SQL, y lo consumen la grilla, las queries guardadas y el
+ * export. Doc 75: toda consulta, catálogo, faceta, insight y reporte guardado
+ * es de UN proyecto (`projectId`).
  */
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 
@@ -40,6 +42,8 @@ export interface Aggregation { fn: 'count' | 'countDistinct' | 'sum' | 'avg' | '
 export interface OrderBy { field: string; dir: 'asc' | 'desc'; }
 
 export interface ReportSpec {
+  /** Proyecto de la consulta (doc 75): el backend lo exige en el spec. */
+  projectId: string;
   from: ViewKey;
   select: string[];
   where?: WhereGroup | null;
@@ -58,7 +62,9 @@ export interface QueryResult {
   meta: { grouped: boolean; warnings: string[]; scan?: string };
 }
 export interface SqlValidation { spec: ReportSpec | null; errors: { line: number; col: number; message: string }[]; }
-export interface SavedReport { id: string; name: string; description?: string | null; spec: ReportSpec; owner: string; shared: boolean; folderId?: string | null; }
+export interface SavedReport { id: string; projectId: string; name: string; description?: string | null; spec: ReportSpec; owner: string; shared: boolean; folderId?: string | null; }
+/** Body de alta/edición de un reporte guardado (el spec lleva el mismo proyecto). */
+export interface SavedReportBody { projectId: string; name: string; description?: string; spec: ReportSpec; shared?: boolean; }
 
 // ── Vistas curadas / Insights (07 §3) ──
 export interface Scorecard {
@@ -90,34 +96,39 @@ export interface RelationshipRow {
   cardinality: string; identifying: boolean; isSelfReferencing: boolean; crossSchema: boolean; label: string;
 }
 
-export const getScorecard = () => apiGet<Scorecard>(`${R}/insights/scorecard`);
-export const getUdpCoverage = () => apiGet<UdpCoverage[]>(`${R}/insights/udp-coverage`);
-export const getDomainUsage = () => apiGet<DomainUsage[]>(`${R}/insights/domain-usage`);
-export const getGlossaryUsage = () => apiGet<GlossaryUsage[]>(`${R}/insights/glossary-usage`);
-export const getRelationshipsReport = (limit = 2000) => apiGet<RelationshipRow[]>(`${R}/insights/relationships?limit=${limit}`);
+const P = (projectId: string) => `projectId=${encodeURIComponent(projectId)}`;
 
-export const emptySpec = (from: ViewKey = 'columns'): ReportSpec => ({
-  from, select: [], groupBy: [], aggregations: [], orderBy: [], limit: 100, where: { op: 'and', conditions: [] },
+export const getScorecard = (projectId: string) => apiGet<Scorecard>(`${R}/insights/scorecard?${P(projectId)}`);
+export const getUdpCoverage = (projectId: string) => apiGet<UdpCoverage[]>(`${R}/insights/udp-coverage?${P(projectId)}`);
+export const getDomainUsage = (projectId: string) => apiGet<DomainUsage[]>(`${R}/insights/domain-usage?${P(projectId)}`);
+export const getGlossaryUsage = (projectId: string) => apiGet<GlossaryUsage[]>(`${R}/insights/glossary-usage?${P(projectId)}`);
+export const getRelationshipsReport = (projectId: string, limit = 2000) =>
+  apiGet<RelationshipRow[]>(`${R}/insights/relationships?${P(projectId)}&limit=${limit}`);
+
+export const emptySpec = (projectId: string, from: ViewKey = 'columns'): ReportSpec => ({
+  projectId, from, select: [], groupBy: [], aggregations: [], orderBy: [], limit: 100, where: { op: 'and', conditions: [] },
 });
 
 // ── API ──
-export const getCatalog = (from: ViewKey) =>
-  apiGet<{ from: ViewKey; fields: FieldDef[] }>(`${R}/catalog?from=${from}`).then((r) => r.fields);
+export const getCatalog = (projectId: string, from: ViewKey) =>
+  apiGet<{ from: ViewKey; fields: FieldDef[] }>(`${R}/catalog?from=${from}&${P(projectId)}`).then((r) => r.fields);
 
 export const runQuery = (spec: ReportSpec, cursor?: string) =>
   apiPost<QueryResult>(`${R}/query${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, spec);
 
-export const runSql = (text: string, cursor?: string) =>
-  apiPost<QueryResult>(`${R}/query/sql${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { text });
+export const runSql = (projectId: string, text: string, cursor?: string) =>
+  apiPost<QueryResult>(`${R}/query/sql${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { text, projectId });
 
-export const validateSql = (text: string) => apiPost<SqlValidation>(`${R}/query/validate`, { text });
+export const validateSql = (projectId: string, text: string) =>
+  apiPost<SqlValidation>(`${R}/query/validate`, { text, projectId });
 
-export const getFacets = (from: ViewKey, field: string, q?: string) =>
-  apiGet<{ value: string; label: string }[]>(`${R}/facets?from=${from}&field=${encodeURIComponent(field)}${q ? `&q=${encodeURIComponent(q)}` : ''}`);
+export const getFacets = (projectId: string, from: ViewKey, field: string, q?: string) =>
+  apiGet<{ value: string; label: string }[]>(
+    `${R}/facets?from=${from}&field=${encodeURIComponent(field)}&${P(projectId)}${q ? `&q=${encodeURIComponent(q)}` : ''}`);
 
-export const listReports = () => apiGet<SavedReport[]>(`${R}/reports`);
-export const createReport = (b: { name: string; description?: string; spec: ReportSpec; shared?: boolean }) => apiPost<SavedReport>(`${R}/reports`, b);
-export const updateReport = (id: string, b: { name: string; description?: string; spec: ReportSpec; shared?: boolean }) => apiPut<SavedReport>(`${R}/reports/${id}`, b);
+export const listReports = (projectId: string) => apiGet<SavedReport[]>(`${R}/reports?${P(projectId)}`);
+export const createReport = (b: SavedReportBody) => apiPost<SavedReport>(`${R}/reports`, b);
+export const updateReport = (id: string, b: SavedReportBody) => apiPut<SavedReport>(`${R}/reports/${id}`, b);
 export const deleteReport = (id: string) => apiDelete(`${R}/reports/${id}`);
 
 /** Export CSV por streaming: descarga directa (el stream no bufferea en JS). */

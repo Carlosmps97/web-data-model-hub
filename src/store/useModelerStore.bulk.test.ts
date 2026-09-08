@@ -6,8 +6,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const order: string[] = [];
 
-vi.mock('@/features/governance/services/governance.service', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/features/governance/services/governance.service')>();
+vi.mock('@/services/governance.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/governance.service')>();
   return {
     ...actual,
     listRelationships: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(async () => { throw new Error('sin canvas en el test'); }),
 }));
 
-import * as gov from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
 import * as viewsSvc from '@/services/views.service';
 import * as struct from '@/features/modeler/services/structure.service';
 import { useModelerStore } from './useModelerStore';

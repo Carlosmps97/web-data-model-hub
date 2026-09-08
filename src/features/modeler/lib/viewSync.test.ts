@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { CanonicalColumn } from '@/features/governance/services/governance.service';
+import type { CanonicalColumn } from '@/services/governance.service';
 import type { View } from '@/services/views.service';
 import { alignSourcesToPhysical, appendColumnSource, isMirrorOfTable, removeColumnSource, renameColumnSource, syncNewColumnToMirrorViews } from './viewSync';
 

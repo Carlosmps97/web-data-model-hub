@@ -1,9 +1,8 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { Eye, Pencil } from 'lucide-react';
-import { useChangesetStore } from '@/store/useChangesetStore';
 import { useSessionStore } from '@/store/useSessionStore';
-import type { CanonicalTable } from '@/features/governance/services/governance.service';
+import type { CanonicalTable } from '@/services/governance.service';
 import type { View } from '@/services/views.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 import { viewNodeRows } from '../lib/viewGraph';
@@ -35,7 +34,7 @@ function ViewNode({ data, selected }: NodeProps) {
   const { view, colTypes, onEdit, lod } = data as ViewNodeData;
   // Mismo gate que TableNode: en modo visor no hay affordances de edición.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
-  const canEdit = useChangesetStore((s) => s.activeId) != null && !readonly;
+  const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
 
   const rows = viewNodeRows(view, colTypes);
 

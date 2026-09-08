@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Table2, Search, Plus, Check } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
-import * as gov from '@/features/governance/services/governance.service';
-import type { CanonicalTable } from '@/features/governance/services/governance.service';
+import * as gov from '@/services/governance.service';
+import type { CanonicalTable } from '@/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
 import { apiErrorMessage } from '@/services/http';
 import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
 import UdpAssign from './UdpAssign';
+import { FACET_CAPTION } from '@/lib/facets';
 import { tableSchemasCached } from '../services/schemaPartition';
 
 type Mode = 'blank' | 'import';
@@ -39,6 +40,8 @@ export default function NewTableModal({ onClose, onCreate }: {
   // el click en "Create table" — el submit lee el ref (sincrónico) para no
   // perder ese último valor contra el batching del estado (patrón doc 40).
   const [description, setDescription] = useState('');
+  // Doc 69: los UDPs del alta siguen la faceta activa del canvas (Entity/Table).
+  const viewMode = useModelerStore((s) => s.viewMode);
   const [udpValues, setUdpValues] = useState<Record<string, string>>({});
   const udpRef = useRef<Record<string, string>>({});
   const setUdp = (next: Record<string, string>) => { udpRef.current = next; setUdpValues(next); };
@@ -86,6 +89,8 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [schemaFilter, setSchemaFilter] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
+  // Doc 70: la tabla entra SOLA; sus vistas se suman a este canvas a pedido.
+  const [withViews, setWithViews] = useState(false);
 
   // Búsqueda SERVER-SIDE con debounce: a 15k tablas el modal no baja el
   // catálogo completo — el backend matchea por nombre + esquema y devuelve la
@@ -137,7 +142,7 @@ export default function NewTableModal({ onClose, onCreate }: {
 
   const addOne = async (id: string) => {
     setAdding(id);
-    try { await addExistingTables([id]); setAdded((s) => new Set(s).add(id)); }
+    try { await addExistingTables([id], { withViews }); setAdded((s) => new Set(s).add(id)); }
     finally { setAdding(null); }
   };
 
@@ -198,8 +203,8 @@ export default function NewTableModal({ onClose, onCreate }: {
               value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
           <div style={{ ...field, paddingTop: 12, borderTop: '1px solid #EEF1F6' }}>
-            <label style={lbl}>User Defined Properties</label>
-            <UdpAssign level="table" values={udpValues} onChange={setUdp} />
+            <label style={lbl}>{FACET_CAPTION.table[viewMode]}</label>
+            <UdpAssign level="table" view={viewMode} values={udpValues} onChange={setUdp} />
           </div>
           {error && (
             <div className="rd-small" role="alert" style={{ color: 'var(--error, #C4314B)', marginTop: 2 }}>
@@ -220,6 +225,12 @@ export default function NewTableModal({ onClose, onCreate }: {
               <SearchSelect mono options={schemaOpts} valueLabel={schemaFilter} placeholder="All schemas" emptyLabel="All schemas" onPick={setSchemaFilter} />
             </div>
           </div>
+          {/* Doc 70: una tabla vive en muchos canvases y cada canvas modela sus
+              vistas — importar NO arrastra vistas salvo pedido explícito. */}
+          <label className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, color: 'var(--text-muted, #56607A)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={withViews} onChange={(e) => setWithViews(e.target.checked)} />
+            Also add the table's views to this canvas
+          </label>
           <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
             {visible.map((t) => {
               const already = inCanvas.has(t.id) || added.has(t.id);
@@ -250,6 +261,7 @@ export default function NewTableModal({ onClose, onCreate }: {
           </div>
           <div className="rd-small" style={{ marginTop: 12, color: 'var(--text-muted, #56607A)' }}>
             Imported tables are <strong>universal</strong> — editing structure propagates to every module that references them.
+            Views belong to each canvas: use the option above to bring the table's views along, or add them later from Properties → Views.
           </div>
         </div>
       )}

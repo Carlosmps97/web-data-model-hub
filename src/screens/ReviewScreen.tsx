@@ -22,8 +22,8 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   ArrowRight,
-  Boxes,
   Check,
+  Database,
   ExternalLink,
   Inbox,
   Lock,
@@ -37,11 +37,11 @@ import { confirmDialog } from '@/components/ui/dialogs';
 
 import { Avatar, Tooltip } from '@/components/ui';
 import { useSessionStore } from '@/store/useSessionStore';
+import { runBlocking } from '@/store/useBusyStore';
 import {
   addComment,
   getChangeset,
   getDiff,
-  getPublished,
   listUsers,
   listVersions,
   reopen,
@@ -49,8 +49,11 @@ import {
   withdraw,
 } from '@/services/versioning.service';
 import { listProjects } from '@/services/projects.service';
+import { sortProjects } from '@/lib/projects';
 import ChangesDetailModal from '@/screens/review/ChangesDetailModal';
 import ChangesSummary from '@/screens/review/ChangesSummary';
+import CriticalDeletionBlock from '@/screens/review/CriticalDeletionBlock';
+import ApproveDeletionDialog from '@/screens/review/ApproveDeletionDialog';
 import type { Project } from '@/types/model';
 import type {
   ChangesetDetail,
@@ -105,14 +108,17 @@ export default function ReviewScreen() {
   const openModel = useSessionStore((s) => s.openModel);
 
   const [versions, setVersions] = useState<VersionRow[]>([]);
-  const [published, setPublished] = useState<VersionRow | null>(null);
   const [users, setUsers] = useState<SimUserDto[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
 
-  // Filters: From (requester/owner) + Reviewer (defaults to "Me", the actor).
+  // Filters: From (requester/owner) + Reviewer (defaults to "Me", the actor)
+  // + Project (doc 75 D20: bandeja global, proyecto siempre diferenciado).
   const [ownerFilter, setOwnerFilter] = useState('');
   const [reviewerFilter, setReviewerFilter] = useState(user.id);
+  const [projectFilter, setProjectFilter] = useState('');
+  // Doc 75 D5: aprobar un request que borra su proyecto exige confirmación tipeada.
+  const [approveDeletionOpen, setApproveDeletionOpen] = useState(false);
 
   // Selection + detail.
   const selectedId = searchParams.get('id');
@@ -125,7 +131,7 @@ export default function ReviewScreen() {
   // Tras withdraw/reopen la versión volvió a draft y SALE de la lista: en vez de
   // auto-seleccionar en silencio otro request (que confunde: "Open in canvas"
   // abriría el request de OTRO), mostramos un empty-state con la vuelta al canvas.
-  const [draftHint, setDraftHint] = useState<{ id: string; label: string | null } | null>(null);
+  const [draftHint, setDraftHint] = useState<{ id: string; projectId: string; label: string | null } | null>(null);
 
   const [commentText, setCommentText] = useState('');
   const [commentSending, setCommentSending] = useState(false);
@@ -158,11 +164,10 @@ export default function ReviewScreen() {
   useEffect(() => {
     let cancelled = false;
     setListsLoading(true);
-    Promise.all([listVersions(), getPublished(), listUsers(), listProjects()])
-      .then(([vers, pub, us, proj]) => {
+    Promise.all([listVersions(), listUsers(), listProjects()])
+      .then(([vers, us, proj]) => {
         if (cancelled) return;
         setVersions(vers);
-        setPublished(pub);
         setUsers(us);
         setProjects(proj);
       })
@@ -229,18 +234,20 @@ export default function ReviewScreen() {
     [searchParams, setSearchParams],
   );
 
-  // ── the request list (submitted/approved/rejected, not the production base) ──
+  // ── the request list: submitted/rejected + approved NOT yet applied (an
+  //    applied version is production/history of its project, not a request) ──
   const requestRows = useMemo(() => {
     return versions
-      .filter((v) => v.status !== 'draft' && v.id !== published?.id)
+      .filter((v) => v.status !== 'draft' && !(v.status === 'approved' && v.appliedAt))
       .filter((v) => !ownerFilter || v.owner === ownerFilter)
       .filter((v) => !reviewerFilter || v.reviewers.includes(reviewerFilter))
+      .filter((v) => !projectFilter || v.projectId === projectFilter)
       .sort((a, b) => {
         const ta = Date.parse(a.submittedAt ?? a.updatedAt ?? a.createdAt ?? '') || 0;
         const tb = Date.parse(b.submittedAt ?? b.updatedAt ?? b.createdAt ?? '') || 0;
         return tb - ta;
       });
-  }, [versions, published, ownerFilter, reviewerFilter]);
+  }, [versions, ownerFilter, reviewerFilter, projectFilter]);
 
   // Auto-select the first request when nothing is selected (the design always
   // shows an open request on the right) — EXCEPT right after a withdraw/reopen,
@@ -292,19 +299,18 @@ export default function ReviewScreen() {
   }, [diff]);
 
   // ── actions ─────────────────────────────────────────────────────────────────
+  const deletesProject = diff?.impact.deletesProject ?? null;
   const doReview = async (decision: 'approve' | 'reject') => {
     if (!detail || acting) return;
     setActing(true);
     try {
-      const updated = await review(detail.id, { decision });
+      const title = decision === 'approve' && deletesProject
+        ? 'Applying decision… deleting the project'
+        : 'Applying decision…';
+      const updated = await runBlocking(title, () => review(detail.id, { decision }));
       setDetail(updated);
       toast.success(decision === 'approve' ? 'Request approved.' : 'Request rejected.');
-      void Promise.all([listVersions(), getPublished()])
-        .then(([vers, pub]) => {
-          setVersions(vers);
-          setPublished(pub);
-        })
-        .catch(() => undefined);
+      void listVersions().then(setVersions).catch(() => undefined);
       void getDiff(detail.id).then(setDiff).catch(() => undefined);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'The decision could not be recorded.');
@@ -321,6 +327,7 @@ export default function ReviewScreen() {
     // camino ligaba el canvas en `editing` a un changeset no-draft y producía
     // 409 persistentes o re-submits que pisaban el envío.
     openModel({
+      projectId: detail.projectId,
       mode: isOwnDraft ? 'editing' : 'readonly',
       changesetId: detail.id,
       versionLabel: detail.versionLabel,
@@ -330,26 +337,21 @@ export default function ReviewScreen() {
 
   /** Post-withdraw/reopen: la versión volvió a draft — limpia selección y
    *  listas, y deja el empty-state con la vuelta directa al canvas. */
-  const backToDraft = (id: string, label: string | null) => {
-    setDraftHint({ id, label });
+  const backToDraft = (id: string, projectId: string, label: string | null) => {
+    setDraftHint({ id, projectId, label });
     setDetail(null);
     setDiff(null);
     const next = new URLSearchParams(searchParams);
     next.delete('id');
     setSearchParams(next, { replace: true });
-    void Promise.all([listVersions(), getPublished()])
-      .then(([vers, pub]) => {
-        setVersions(vers);
-        setPublished(pub);
-      })
-      .catch(() => undefined);
+    void listVersions().then(setVersions).catch(() => undefined);
   };
 
   /** Owner retira su request en revisión: vuelve a draft (reaparece en Open
    *  model → "Continue a working version") y sale de la lista de requests. */
   const doWithdraw = async () => {
     if (!detail || acting) return;
-    const { id, versionLabel } = detail;
+    const { id, projectId, versionLabel } = detail;
     setActing(true);
     try {
       const ok = await confirmDialog({
@@ -361,19 +363,17 @@ export default function ReviewScreen() {
           </>
         ),
         confirmLabel: 'Withdraw', cancelLabel: 'Cancel',
-        action: () => withdraw(id),
+        action: () => runBlocking('Applying decision…', () => withdraw(id)),
       });
       if (!ok) return;
       toast.success('Request withdrawn — the version is a draft again.');
-      backToDraft(id, versionLabel ?? null);
+      backToDraft(id, projectId, versionLabel ?? null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not withdraw the request.');
       // El fallo típico es una carrera (409: un revisor decidió antes): refresca
       // el detalle y las listas para no dejar botones sobre un estado que ya no existe.
       void loadDetail(id);
-      void Promise.all([listVersions(), getPublished()])
-        .then(([vers, pub]) => { setVersions(vers); setPublished(pub); })
-        .catch(() => undefined);
+      void listVersions().then(setVersions).catch(() => undefined);
     } finally {
       setActing(false);
     }
@@ -383,7 +383,7 @@ export default function ReviewScreen() {
    *  re-enviar (el reject nunca elimina la versión). */
   const doReopen = async () => {
     if (!detail || acting) return;
-    const { id, versionLabel } = detail;
+    const { id, projectId, versionLabel } = detail;
     setActing(true);
     try {
       const ok = await confirmDialog({
@@ -395,17 +395,15 @@ export default function ReviewScreen() {
           </>
         ),
         confirmLabel: 'Reopen', cancelLabel: 'Cancel',
-        action: () => reopen(id),
+        action: () => runBlocking('Applying decision…', () => reopen(id)),
       });
       if (!ok) return;
       toast.success('Request reopened — the version is a draft again.');
-      backToDraft(id, versionLabel ?? null);
+      backToDraft(id, projectId, versionLabel ?? null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not reopen the request.');
       void loadDetail(id);
-      void Promise.all([listVersions(), getPublished()])
-        .then(([vers, pub]) => { setVersions(vers); setPublished(pub); })
-        .catch(() => undefined);
+      void listVersions().then(setVersions).catch(() => undefined);
     } finally {
       setActing(false);
     }
@@ -490,6 +488,22 @@ export default function ReviewScreen() {
                   ))}
                 </select>
               </label>
+              <label className="dmh-rv-flt">
+                <span className="lbl">Project:</span>
+                <select
+                  className="dmh-rv-flt-sel"
+                  value={projectFilter}
+                  onChange={(e) => setProjectFilter(e.target.value)}
+                  aria-label="Filter by project"
+                >
+                  <option value="">All projects</option>
+                  {sortProjects(projects).map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
 
             <div className="dmh-rv-list-body">
@@ -513,6 +527,7 @@ export default function ReviewScreen() {
                     >
                       <div className="dmh-rv-card-top">
                         <span className={`dmh-rv-spill ${badge.cls}`}>{badge.text}</span>
+                        {row.deletesProject && <span className="dmh-rv-spill dmh-rv-spill--critical">Deletes project</span>}
                         {assigned && <span className="dmh-rv-card-assigned">Assigned to you</span>}
                         <span className="dmh-rv-card-spacer" />
                         {row.versionLabel && (
@@ -540,9 +555,10 @@ export default function ReviewScreen() {
                           </>
                         )}
                         <span className="dmh-rv-card-spacer" />
-                        {row.projectIds[0] && (
-                          <span className="dmh-rv-pchip">{projectName(row.projectIds[0])}</span>
-                        )}
+                        <span className="dmh-rv-pchip" title="Project">
+                          <Database size={11} strokeWidth={1.6} aria-hidden />
+                          {projectName(row.projectId)}
+                        </span>
                       </div>
                     </button>
                   );
@@ -583,7 +599,7 @@ export default function ReviewScreen() {
                     className="dmh-rv-act dmh-rv-act--canvas"
                     style={{ marginTop: 12 }}
                     onClick={() => {
-                      openModel({ mode: 'editing', changesetId: draftHint.id, versionLabel: draftHint.label });
+                      openModel({ projectId: draftHint.projectId, mode: 'editing', changesetId: draftHint.id, versionLabel: draftHint.label });
                       navigate('/model');
                     }}
                   >
@@ -618,6 +634,10 @@ export default function ReviewScreen() {
                         />
                         <span>
                           From <strong>{userName(detail.owner)}</strong>
+                        </span>
+                        <span className="sep">·</span>
+                        <span>
+                          Project <strong>{projectName(detail.projectId)}</strong>
                         </span>
                         <span className="sep">·</span>
                         <span>snapshot of {detail.versionLabel ?? '—'}</span>
@@ -700,7 +720,7 @@ export default function ReviewScreen() {
                         <button
                           type="button"
                           className="dmh-rv-act dmh-rv-act--approve"
-                          onClick={() => doReview('approve')}
+                          onClick={() => (deletesProject ? setApproveDeletionOpen(true) : doReview('approve'))}
                           disabled={acting}
                         >
                           <Check size={14} strokeWidth={1.9} aria-hidden />
@@ -731,10 +751,6 @@ export default function ReviewScreen() {
                         {diff.impact.tablesTouched} tables
                       </span>
                       <span className="dmh-rv-impact-chip">{diff.impact.columnsTouched} columns</span>
-                      <span className="dmh-rv-impact-chip">
-                        <Boxes size={13} strokeWidth={1.5} aria-hidden />
-                        {diff.impact.projectsAffected ?? detail.projectIds.length} projects affected
-                      </span>
                       <span className="dmh-rv-impact-spacer" />
                       <span className="dmh-rv-impact-legend">
                         <span className="lg lg--add">
@@ -784,6 +800,9 @@ export default function ReviewScreen() {
                       </span>
                     </div>
                   )}
+
+                  {/* Doc 75 D5/D20: el request borra su proyecto — aviso crítico. */}
+                  {deletesProject && <CriticalDeletionBlock deletes={deletesProject} />}
 
                   {/* Resumen (doc 31) — el detalle fino vive en el popup */}
                   <ChangesSummary diff={diff} onOpenDetails={() => setDetailsOpen(true)} />
@@ -848,6 +867,14 @@ export default function ReviewScreen() {
           </div>
         </div>
       </div>
+      {deletesProject && (
+        <ApproveDeletionDialog
+          open={approveDeletionOpen}
+          deletes={deletesProject}
+          onCancel={() => setApproveDeletionOpen(false)}
+          onConfirm={() => { setApproveDeletionOpen(false); void doReview('approve'); }}
+        />
+      )}
     </div>
   );
 }

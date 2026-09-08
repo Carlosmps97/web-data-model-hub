@@ -3,8 +3,8 @@ import { validateSql, type ReportSpec } from '../query.service';
 
 /** Caja de texto SQL-like. El SERVER es la autoridad de la gramática: valida →
  *  QuerySpec (mismo IR que el builder). Errores con línea para el usuario. */
-export default function SqlEditor({ text, onText, onValidated }: {
-  text: string; onText: (t: string) => void; onValidated: (spec: ReportSpec) => void;
+export default function SqlEditor({ projectId, text, onText, onValidated }: {
+  projectId: string; text: string; onText: (t: string) => void; onValidated: (spec: ReportSpec) => void;
 }) {
   const [errors, setErrors] = useState<{ line: number; col: number; message: string }[]>([]);
   const [busy, setBusy] = useState(false);
@@ -12,7 +12,7 @@ export default function SqlEditor({ text, onText, onValidated }: {
   const check = async () => {
     setBusy(true);
     try {
-      const v = await validateSql(text);
+      const v = await validateSql(projectId, text);
       setErrors(v.errors);
       if (v.spec) onValidated(v.spec);
     } finally { setBusy(false); }

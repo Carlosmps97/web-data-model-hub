@@ -11,7 +11,7 @@
 //     símbolo (handles __hdr_src → __sym_tgt) + UNA arista por subtipo
 //     símbolo → hijo (id = rel.id, handles __sym_src → `{col}__tgt`).
 import type { Edge, Node } from '@xyflow/react';
-import type { Relationship } from '@/features/governance/services/governance.service';
+import type { Relationship } from '@/services/governance.service';
 
 /** Lado del rombo del símbolo (px). */
 export const SYMBOL_SIZE = 28;

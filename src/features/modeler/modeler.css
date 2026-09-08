@@ -124,25 +124,39 @@
 .wk-relpair-add { display: flex; align-items: center; gap: 6px; }
 .wk-relpair-add .rd-input { flex: 1; height: 30px; font-size: 12px; min-width: 0; }
 
-/* LOCATE & CENTER — input "Find a table…" con dropdown de coincidencias */
-.wk-find-wrap { position: relative; }
-.wk-find-ico { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text-muted-3); pointer-events: none; }
-.wk-find { width: 188px; height: 32px; padding: 0 10px 0 28px; border: 1px solid var(--border-soft);
-  border-radius: var(--r-sm); background: var(--fill-2); color: var(--ink-2); font-family: var(--ui); font-size: 12.5px; }
-.wk-find::placeholder { color: var(--text-muted-3); }
-.wk-find:focus { outline: none; border-color: var(--primary); background: var(--surface); box-shadow: 0 0 0 2px var(--primary-muted); }
-.wk-find:disabled { opacity: .5; cursor: not-allowed; }
-.wk-find-menu { position: absolute; top: 36px; left: 0; min-width: 100%; z-index: 40;
-  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-  box-shadow: var(--shadow-md); padding: 4px; max-height: 260px; overflow: auto; }
-.wk-find-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%;
-  padding: 6px 8px; border: none; background: transparent; border-radius: 7px; cursor: pointer; text-align: left; }
-.wk-find-item:hover { background: var(--fill-4); }
-.wk-find-lname { font-size: 12.5px; color: var(--ink); font-weight: 600; }
-.wk-find-pname { font-size: 10.5px; color: var(--text-muted-2); }
-
-/* Doc 64 §5: fila "+N more" del dropdown + popup de coincidencias (Enter) */
-.wk-find-more { color: var(--primary); font-size: 11.5px; font-weight: 600; }
+/* SEARCH & LOCATE (doc 70 §11) — popup del buscador del Model (tablas ·
+   columnas · definiciones); reemplaza el input «Find a table…» (doc 64 §5). */
+.wk-srch-sec { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; padding: 0 4px; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted-2); }
+.wk-srch-sec:first-child { margin-top: 0; }
+.wk-srch-count { font-weight: 600; color: var(--text-muted-3); text-transform: none; letter-spacing: 0; }
+.wk-srch-row { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+.wk-srch-row:hover, .wk-srch-row:focus-visible { background: var(--fill-4); outline: none; }
+.wk-srch-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.wk-srch-name { font-size: 12.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-srch-type { font-weight: 500; color: var(--text-muted-2); font-size: 11px; }
+.wk-srch-sub { font-size: 11px; color: var(--text-muted-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-srch-def { font-size: 11.5px; color: var(--text-body); white-space: normal; line-height: 1.35; }
+.wk-srch-row mark { background: #FFF1B8; color: inherit; border-radius: 3px; padding: 0 1px; }
+.wk-srch-chips { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 4px; max-width: 46%; flex: none; }
+.wk-srch-chip { font-size: 10.5px; font-weight: 600; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--border-soft);
+  background: var(--surface); color: var(--text-muted-2); cursor: pointer; font-family: var(--ui); white-space: nowrap; }
+.wk-srch-chip:hover { border-color: var(--primary); color: var(--primary); }
+.wk-srch-chip.here { background: var(--blue-tint); color: var(--primary); border-color: transparent; }
+.wk-srch-none { font-size: 10.5px; color: var(--text-muted-3); font-style: italic; }
+.wk-srch-hint { padding: 12px 10px; font-size: 12.5px; color: var(--text-muted-2); line-height: 1.45; }
+.wk-srch-scope { margin-bottom: 10px; }
+.wk-srch-scope button { font-size: 11.5px; padding: 5px 10px; }
+.wk-srch-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 8px; align-items: end; margin-bottom: 10px; }
+.wk-srch-filters label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.wk-srch-filters label > span { display: flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted-2); }
+/* Filtro BLOQUEADO hasta elegir el nivel anterior (Proyecto › Sub-proyecto › Dominio › Modelo):
+   fondo plomo + candado + texto atenuado (pedido owner). */
+.wk-srch-filters label.is-locked > span { color: var(--text-muted-3); }
+.wk-srch-filters label.is-locked .rd-input { background: var(--fill-3, #F4F6F9); border-color: var(--border-soft, #EAEDF2); color: var(--text-muted-3); cursor: not-allowed; }
+.wk-srch-filters label.is-locked .rd-input::placeholder { color: var(--text-muted-3); }
+.wk-srch-lockhint { font-size: 10.5px; color: var(--text-muted-3); font-style: italic; }
+.wk-srch-kbd { font-family: var(--mono); font-size: 10.5px; padding: 1px 5px; border: 1px solid var(--border-soft); border-radius: 5px; background: var(--fill-3); }
 .wk-findres-search { display: flex; align-items: center; gap: 7px; padding: 0 10px; margin-bottom: 10px;
   background: var(--fill-3, #F4F6F9); border-radius: 9px; color: var(--text-muted-2); }
 .wk-findres-search input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
@@ -220,7 +234,7 @@
   border-radius: var(--r-full); box-shadow: var(--shadow-md); display: flex; align-items: center; gap: 8px; }
 .wk-relhint .wk-tic { color: var(--on-primary); }
 
-/* ── Sidebar apilado (doc 18): Model Explorer + Database Explorer ── */
+/* ── Sidebar (doc 71): Explorer unificado — proyectos › Models · Tables · Views · Schemas + «Database — all schemas» ── */
 .wk-expl-stack { grid-area: explorer; position: relative; display: flex; flex-direction: column; min-height: 0;
   background: var(--surface); border-right: 1px solid var(--border-soft); }
 /* Handle de resize del explorer (solo-vista) sobre su borde derecho. */
@@ -230,32 +244,29 @@
   background: transparent; transition: background .12s; }
 .wk-expl-resizer:hover::before, .wk-expl-resizer.dragging::before { background: var(--primary); }
 .wk-explorer { flex: 1 1 auto; min-height: 0; background: var(--surface); overflow-y: auto; padding: 6px; }
+.wk-exp-tree { min-height: 0; }
 
-/* Database Explorer (producción publicada, solo lectura) */
-.wk-dbx { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0;
-  border-top: 1px solid var(--border-soft); }
-/* Abierto ocupa una FRACCIÓN fija del alto del sidebar (doc 60): la basis
-   exacta la fija el inline style con el split persistido; 50% es el default. */
-.wk-dbx.open { flex: 0 0 50%; }
-/* Handle del split vertical Model Explorer ⇄ Database Explorer, sobre el borde
-   superior del panel (solo con el panel abierto). Mismo look que los resizers
-   de ancho: línea 1px que se pinta al hover/drag. */
-.wk-dbx-vsplit { position: absolute; left: 0; right: 0; top: -4px; height: 8px; z-index: 6;
-  cursor: row-resize; touch-action: none; }
-.wk-dbx-vsplit::before { content: ''; position: absolute; left: 0; right: 0; top: 4px; height: 1px;
-  background: transparent; transition: background .12s; }
-.wk-dbx-vsplit:hover::before, .wk-dbx-vsplit.dragging::before { background: var(--primary); }
-.wk-dbx-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 8px 10px; border: none;
-  background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .04em; color: var(--subtle); font-family: inherit; }
-.wk-dbx-head:hover { background: var(--fill-4); }
-.wk-dbx-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 6px 6px; }
-.wk-dbx-search { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; padding: 0 8px;
+/* Explorer unificado (docs 71/72): cabecera, ramas por proyecto y filas del catálogo. */
+/* Cabecera del Explorer unificado: filtro «contiene» sobre lo cargado. */
+.wk-exp-filter { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; padding: 0 8px;
   background: var(--fill-3, #F4F6F9); border-radius: 8px; color: var(--muted); }
-.wk-dbx-search input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
+.wk-exp-filter input { flex: 1; min-width: 0; border: none; background: transparent; outline: none;
   padding: 7px 0; font-size: 12px; color: var(--ink); font-family: inherit; }
-.wk-dbx-search button { border: none; background: transparent; color: var(--muted); cursor: pointer;
-  display: inline-flex; padding: 2px; }
+.wk-exp-filter button { border: none; background: transparent; color: var(--muted); cursor: pointer; display: inline-flex; padding: 2px; }
+/* Ramas del proyecto (Models · Tables · Views · Schemas) y su contador. */
+.wk-exp-row[data-kind="branch"] { color: var(--ink); font-weight: 600; }
+.wk-exp-row[data-kind="branch"] .wk-exp-ico { color: var(--navy); }
+.wk-exp-count { margin-left: auto; flex-shrink: 0; font-size: 10px; font-weight: 600; color: var(--text-muted-3);
+  font-variant-numeric: tabular-nums; }
+.wk-exp-count + .wk-exp-dots { margin-left: 2px; }
+/* Tabla del proyecto dibujada en el canvas ABIERTO: marca sutil. */
+.wk-exp-row.here .wk-exp-ico { color: var(--primary); }
+.wk-exp-chev { display: inline-flex; align-items: center; flex-shrink: 0; color: var(--text-muted-3); cursor: pointer; }
+.wk-exp-clickable { cursor: pointer; }
+.wk-dbx-col.wk-exp-clickable:hover { background: var(--fill-4); }
+.wk-exp-newproj { color: var(--text-muted-2); margin-top: 4px; }
+.wk-exp-newproj:hover { color: var(--primary); }
+.wk-exp-newproj:hover .wk-exp-ico { color: var(--primary); }
 .wk-dbx-badge { margin-left: auto; flex-shrink: 0; font-size: 10px; color: var(--text-muted-3); }
 .wk-dbx-type { flex-shrink: 0; max-width: 88px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-size: 10px; color: var(--text-muted-3); margin-left: auto; }
@@ -263,16 +274,6 @@
 .wk-dbx-col:hover { background: transparent; }
 
 /* Grupos "Canonical Tables" / "Views" dentro del Database Explorer (doc 60) */
-.wk-dbx-group { font-weight: 700; color: var(--ink); }
-.wk-dbx-group .wk-exp-ico { color: var(--navy); }
-
-/* Búsqueda: encabezados de sección (Tables / Columns) + hits de columna a dos
-   líneas (columna arriba, esquema.tabla debajo) */
-.wk-dbx-sect { margin: 6px 0 2px; padding: 0 6px; font-size: 10px; font-weight: 700;
-  letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted-3); }
-.wk-dbx-colhit { height: auto; padding: 3px 4px 3px 6px; cursor: default; }
-.wk-dbx-sub { font-size: 10px; color: var(--text-muted-3); overflow: hidden;
-  text-overflow: ellipsis; white-space: nowrap; }
 
 /* Gestor de esquemas (doc 18 v2): línea de impacto bajo un cambio pendiente */
 .wk-schx-impact { color: var(--text-muted, #56607A); margin-top: 2px; }
@@ -281,6 +282,7 @@
 .wk-exp-headbtn { width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--muted); border-radius: var(--r-sm); cursor: pointer; }
 .wk-exp-headbtn:hover { background: var(--fill-4); color: var(--primary); }
+.wk-exp-headbtn:disabled { opacity: .4; cursor: default; pointer-events: none; }
 
 /* Fila genérica del árbol (project / folder / canvas) */
 .wk-exp-row { position: relative; display: flex; align-items: center; gap: 5px; height: 28px; padding-right: 4px;
@@ -512,6 +514,17 @@
    clickeable/copiable. SOLO CSS — cero estado React, cero re-renders (lo
    pinta el compositor). No pisa .hot/.selcol y se apaga mientras se dibuja
    una relación (.rel-armed en la raíz del nodo). */
+/* Doc 73 §10.4: drag&drop de filas en el bloque — grip en el padding izquierdo
+   (sólo en edición; `nodrag` para que React Flow no arrastre la tabla desde
+   ahí), indicador de drop y zona de llave resaltada. */
+.wk-node-grip { position: absolute; left: 1px; top: 50%; transform: translateY(-50%); display: none; align-items: center; justify-content: center; width: 10px; height: 16px; color: var(--text-muted-3); cursor: grab; }
+.wk-node-grip:active { cursor: grabbing; }
+.wk-node:not(.rel-armed) .wk-node-row:hover .wk-node-grip { display: inline-flex; }
+.wk-node-row.dragging { opacity: .45; }
+.wk-node-row.dropbefore { box-shadow: inset 0 2px 0 0 var(--primary); }
+.wk-node-row.dropafter { box-shadow: inset 0 -2px 0 0 var(--primary); }
+.wk-node-pk.dropzone { outline: 2px dashed var(--primary); outline-offset: -2px; }
+.wk-node-pkdrop { padding: 5px 11px; color: var(--primary); font-size: 10.5px; text-align: center; }
 .wk-node:not(.rel-armed) .wk-node-row:hover { cursor: pointer; }
 .wk-node:not(.rel-armed) .wk-node-row:not(.hot):not(.selcol):hover { background: #F5F7FB; }
 .wk-node-key { display: inline-flex; align-items: center; justify-content: center; min-width: 14px; }
@@ -934,3 +947,100 @@ select.exd-input { padding: 0 10px; }
   border: none; background: transparent; pointer-events: none; }
 .wk-sym-handle.armed { pointer-events: all; width: 100%; height: 100%;
   left: 0; top: 0; transform: none; border-radius: 50%; cursor: crosshair; }
+
+/* ── Menú ⋮ del Explorer (doc 72): Inspect metadata / Locate on canvas ── */
+.wk-exp-scrim { position: fixed; inset: 0; z-index: 999; }
+.wk-exp-menu-title { padding: 5px 10px 4px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; max-width: 250px; }
+
+/* ── Buscador (doc 72 r2): dos acciones SIEMPRE visibles por hit + paginación ── */
+.wk-srch-acts { display: inline-flex; gap: 4px; flex: none; align-self: center; }
+.wk-srch-act { height: 26px; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600;
+  border: 1px solid var(--border-soft); border-radius: 7px; background: var(--surface); color: var(--text-muted-2); cursor: pointer; white-space: nowrap; }
+.wk-srch-act:hover { color: var(--primary); border-color: var(--primary); }
+.wk-srch-act.primary { color: var(--primary); }
+.wk-srch-more { display: flex; justify-content: center; padding: 6px 0 4px; }
+.wk-srch-scopechip { display: flex; align-items: center; gap: 6px; margin: -2px 0 8px; padding: 5px 10px; font-size: 11.5px;
+  color: var(--primary); background: var(--blue-tint); border-radius: 8px; }
+.wk-srch-scopechip .rd-btn { margin-left: auto; }
+.wk-srch-loading { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 8px; color: var(--muted); font-size: 12px; }
+
+/* ── Overlay de navegación (doc 72 r2): Locate abre otro canvas y centra ── */
+.wk-nav-overlay { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: center; justify-content: center;
+  background: rgba(16, 27, 48, .28); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); cursor: progress; }
+.wk-nav-card { display: flex; align-items: center; gap: 12px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border-3);
+  border-radius: var(--r-xl); box-shadow: var(--shadow-popup); font-size: 13px; color: var(--ink); max-width: 480px; }
+.wk-nav-card .rd-spin { color: var(--primary); width: 18px; height: 18px; flex: none; }
+.wk-nav-card b { color: var(--navy); }
+
+/* ── Object Inspector: edición (doc 72 r2) ── */
+.wk-insp-ro { font-size: 11.5px; color: var(--text-muted-2); background: var(--fill-3); border: 1px dashed var(--border-soft);
+  border-radius: var(--r); padding: 8px 10px; margin-bottom: 12px; }
+.wk-insp-grid td.mv { width: 44px; white-space: nowrap; }
+.wk-insp-mv { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border-soft);
+  border-radius: 5px; background: var(--surface); color: var(--text-muted-2); cursor: pointer; font-size: 11px; line-height: 1; }
+.wk-insp-mv:hover:not(:disabled) { color: var(--primary); border-color: var(--primary); }
+.wk-insp-mv:disabled { opacity: .35; cursor: default; }
+.wk-insp-mv + .wk-insp-mv { margin-left: 2px; }
+.wk-insp-flags { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ── Object Inspector (doc 72 §3): popup de metadata, sin canvas ── */
+.wk-insp { display: flex; flex-direction: column; height: min(66vh, 660px); min-height: 380px; }
+.wk-insp-loading { display: flex; align-items: center; gap: 8px; padding: 28px 8px; color: var(--muted); font-size: 12.5px; }
+.wk-insp-head { display: flex; align-items: flex-start; gap: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-2); }
+.wk-insp-title { font-size: 17px; font-weight: 700; color: var(--navy); line-height: 1.25; word-break: break-word; }
+.wk-insp-other { font-size: 12.5px; color: var(--text-muted-2); margin-top: 3px; }
+.wk-insp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.wk-insp-chip { font-size: 10.5px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--fill-3); color: var(--text-muted-2);
+  border: 1px solid var(--border-soft); white-space: nowrap; }
+.wk-insp-chip.accent { background: var(--blue-tint); color: var(--primary); border-color: transparent; text-transform: capitalize; }
+.wk-insp .wk-pp-tabs { margin-top: 0; flex-shrink: 0; }
+.wk-insp-body { flex: 1; min-height: 0; overflow: auto; padding-top: 12px; }
+.wk-insp-find { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--muted); }
+.wk-insp-find input { flex: 1; }
+.wk-insp-grid { width: 100%; border-collapse: collapse; font-size: 12px; }
+.wk-insp-grid th { position: sticky; top: 0; z-index: 1; background: var(--surface); text-align: left; font-size: 10.5px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted-3); padding: 6px 8px; border-bottom: 1px solid var(--border-2); }
+.wk-insp-grid td { padding: 6px 8px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
+.wk-insp-grid tbody tr { cursor: pointer; }
+.wk-insp-grid tbody tr:hover { background: var(--fill-4); }
+.wk-insp-grid td.n { color: var(--text-muted-3); font-variant-numeric: tabular-nums; width: 28px; }
+.wk-insp-grid td.k { width: 34px; white-space: nowrap; }
+.wk-insp-grid td.k .pk { color: var(--k-pk); }
+.wk-insp-grid td.k .fk { color: var(--k-fk); margin-left: 2px; }
+.wk-insp-grid td.muted { color: var(--text-muted-2); }
+.wk-insp-grid td.def { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-body); }
+.wk-insp-only { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; margin-left: 6px; padding: 1px 5px;
+  border-radius: 4px; background: var(--fill-3); color: var(--text-muted-2); }
+.wk-insp-colhead { display: flex; align-items: center; gap: 8px; margin: 10px 0 12px; font-size: 15px; font-weight: 700; color: var(--navy); }
+.wk-insp-usage { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border-4); border-radius: var(--r);
+  margin-bottom: 6px; font-size: 12px; }
+.wk-insp-usage .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-insp-usage .sep { color: var(--text-muted-3); margin: 0 5px; }
+.wk-insp-view-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border-4); border-radius: var(--r);
+  margin-bottom: 6px; font-size: 12px; }
+.wk-insp-sql { margin: 0; padding: 10px 12px; background: var(--fill-3); border: 1px solid var(--border-soft); border-radius: var(--r);
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; }
+.wk-insp-foot-note { font-size: 11.5px; color: var(--text-muted-2); }
+.wk-insp-udps dt { display: inline-flex; align-items: center; gap: 5px; }
+.wk-insp-default { color: var(--text-muted-2); font-style: italic; }
+.wk-insp-empty { color: var(--text-muted-3); }
+
+
+/* ── Borrado de proyecto por draft (doc 75 D5) ──────────────────────────── */
+.dmh-delpending { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #F6F8FB; }
+.dmh-delpending-card { max-width: 460px; padding: 24px 28px; background: #fff; border: 1px solid #F3C7C7; border-radius: 12px;
+  box-shadow: 0 12px 40px rgba(16, 27, 48, .12); text-align: center; }
+.dmh-delpending-ico { display: inline-flex; width: 44px; height: 44px; border-radius: 50%; background: #FDECEC; color: #C0392B;
+  align-items: center; justify-content: center; margin-bottom: 10px; }
+.dmh-delpending-title { font-size: 15px; font-weight: 600; color: #1A2B4A; }
+.dmh-delpending-text { font-size: 13px; color: #4B5568; margin: 6px 0 14px; line-height: 1.5; }
+.dmh-delpending-actions { display: flex; gap: 8px; justify-content: center; }
+.dmh-explorer-delchip { margin-left: 6px; padding: 1px 6px; border-radius: 10px; background: #FDECEC; color: #C0392B; font-size: 11px; font-weight: 600; }
+.dmh-delproj-text { font-size: 13px; color: var(--ink); line-height: 1.5; margin: 0 0 10px; }
+.dmh-delproj-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--navy); margin-top: 4px; }
+.wk-exp-project-head { display: flex; align-items: center; gap: 8px; padding: 6px 8px 4px; }
+.wk-exp-project-name { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 700; color: var(--navy); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-exp-switch { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-3); background: var(--surface); border-radius: var(--r-sm);
+  padding: 2px 7px; font-size: 11px; font-weight: 600; color: var(--primary); cursor: pointer; }
+.wk-exp-switch:hover { border-color: var(--primary); }

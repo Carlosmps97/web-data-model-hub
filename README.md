@@ -46,7 +46,6 @@ flowchart TD
   Shell --> Review["/review (Solicitudes)"]
   Shell --> Standards["/standards (Data Standards, perm model.view)"]
   Shell --> Admin["/admin (Admin, perm admin.manage)"]
-  Shell --> Gov["/governance (legacy, fuera del rail)"]
 ```
 
 ---
@@ -58,10 +57,9 @@ flowchart TD
 | `/` | `HomeScreen` | Landing del workspace: contadores (tablas, vistas, relaciones, subject areas, proyectos), solicitudes asignadas y versiones (solo lectura). | sesión |
 | `/model` | `WorkspaceScreen` | Canvas ER completo: explorador de proyecto/carpetas/canvases, edición de tablas/columnas/vistas/relaciones, auto-layout, publicación. | sesión |
 | `/reporting` | `ReportingScreen` + `ReportDesigner` | Reporte tabular de metadata + diseñador de reportes (builder visual y SQL) con exportación. | sesión / `export` |
-| `/review` | `ReviewScreen` | Bandeja de solicitudes cross-project: diff, impacto, aprobación/rechazo, comentarios. | `review.decide` para decidir |
-| `/standards` | `StandardsScreen` | Glosario, dominios padre, definiciones de UDP y nomenclatura, todo versionado con rollback. | `model.view` (editar: `standards.edit`) |
+| `/review` | `ReviewScreen` | Bandeja global de solicitudes con chip y filtro de proyecto: diff, impacto, aprobación/rechazo (con confirmación crítica si el request borra su proyecto), comentarios. | `review.decide` para decidir |
+| `/standards` | `StandardsScreen` | Glosario, dominios padre, definiciones de UDP, nomenclatura y reglas DDL **del proyecto elegido**, todo versionado con rollback por proyecto. | `model.view` (editar: `standards.edit`) |
 | `/admin` | `AdminScreen` | Usuarios, roles, matriz de permisos y auditoría. | `admin.manage` |
-| `/governance` | `GovernanceScreen` | Pantalla legacy parkeada (fuera del rail de navegación). | sesión |
 
 Permisos del sistema (matriz RBAC, 1:1 con el backend): `model.view`, `model.edit`, `review.decide`, `publish`, `rollback`, `export`, `standards.edit`, `admin.manage`.
 
@@ -75,7 +73,7 @@ Permisos del sistema (matriz RBAC, 1:1 con el backend): `model.view`, `model.edi
 | UI | **React** + React DOM | 19.2.4 | Librería de vistas (StrictMode). |
 | Lenguaje | **TypeScript** | 5.9.3 | Tipado estricto (`strict: true`). |
 | Ruteo | **React Router** (`react-router-dom`) | 7.18.0 | Rutas del shell, guards de auth/permiso. |
-| Estado | **Zustand** | 5.0.12 | Stores del canvas, sesión, auth, changeset e identidad. |
+| Estado | **Zustand** | 5.0.12 | Stores del canvas, sesión (proyecto + versión activos), auth, undo y overlay bloqueante. |
 | Canvas ER | **@xyflow/react** (React Flow 12) | 12.11.0 | Nodos (tablas/figuras) y aristas (relaciones). |
 | Auto-layout | **elkjs** | 0.11.1 | Distribución automática del diagrama (`layered`/Sugiyama). |
 | Grillas | **@tanstack/react-virtual** | 3.14.5 | Virtualización de resultados de reporting a gran escala. |
@@ -112,7 +110,7 @@ flowchart TD
     Modeler["useModelerStore"]
     Session["useSessionStore"]
     Auth["useAuthStore"]
-    Changeset["useChangesetStore"]
+    Busy["useBusyStore"]
   end
   subgraph Svc["Servicios (fetch tipado)"]
     Services["services/* + features/*/service.ts"]
@@ -125,15 +123,14 @@ flowchart TD
   State --> Services
   Services --> HTTP
   HTTP --> Backend
-  Bridge["sessionChangesetBridge"] -.espeja.-> Changeset
-  Session -.activeChangesetId.-> Bridge
+  Session -.activeProjectId / activeChangesetId.-> Services
 ```
 
 Puntos de diseño relevantes:
 
 - **Cliente HTTP único** (`src/services/http.ts`): `apiFetch<T>()` desempaqueta el envelope `{ success, data?, error? }` que devuelve toda la API, adjunta el token de sesión como `X-Session-Token: <token>` (y `X-Dev-User` solo en desarrollo; en Databricks Apps el header `Authorization: Bearer` le pertenece al proxy SSO de la plataforma), aplica un timeout global de 30 s (`AbortSignal.timeout`), usa `credentials: 'include'` para la cookie de sesión cross-origin y despacha un handler global ante `401` (logout + redirección a `/login`). Los errores se propagan como `ApiError` tipado con `status`.
 - **Auth token-first** (`useAuthStore`): al arrancar, `restore()` lee el token de `localStorage` y valida contra `/api/auth/me`; mientras `status === 'loading'` los guards muestran un splash. Los guards `RequireAuth` y `RequirePermission` protegen las rutas.
-- **Puente sesión → changeset** (`installSessionChangesetBridge`): espeja `useSessionStore.activeChangesetId` hacia `useChangesetStore.activeId` para que el changeset elegido al abrir un modelo alimente a todos los lectores del changeset activo (escrituras de gobernanza y gates del canvas).
+- **Sesión de UN proyecto** (doc 75): `useSessionStore` guarda `activeProjectId` + `activeChangesetId` y es la única fuente que leen los servicios (`sessionProjectId()` arma las rutas `/api/projects/{pid}/…`) y los gates del canvas. Las acciones largas corren bajo `runBlocking()` (`useBusyStore`), que muestra un overlay bloqueante por sesión.
 - **Base de la API configurable**: cada servicio construye sus URLs con `const API_BASE = import.meta.env.VITE_API_URL ?? ''`. Con `VITE_API_URL` vacío, las llamadas van al mismo origen y en dev el proxy de Vite las reenvía al backend.
 
 ---
@@ -162,7 +159,7 @@ Conceptos clave del dominio:
 - **SubjectArea (Canvas)**: vista temática que agrupa `tableIds`, guarda `layout` (posiciones) y `drawings` (figuras: rectángulos, círculos, texto, etc.). Las tablas se organizan en carpetas (`Folder`) dentro del proyecto.
 - **Table / TableColumn**: la columna tiene `id` estable (sobrevive renames — las relaciones y los handles de React Flow se referencian por `id`, nunca por `name`), flags de clave (PK, surrogate, partition, FK con `fkManual`), `semanticTypeId`/`semanticValues` (tipo semántico transversal), `udpValues` (propiedades definidas por el usuario) y `tags`.
 - **View**: proyección SQL por rol embebida en la tabla (`select` multilínea, `where` AND-joined), renderizada en el inspector y exportable como `CREATE VIEW`.
-- **Relationship** (`src/features/governance/services/governance.service.ts`): modelo v2 parent/child — `parentTableId`/`childTableId` + `pairs[]` (los pares de columnas de la FK), con `parentCardinality`/`childCardinality` (enum crow's foot por extremo) e `identifying`.
+- **Relationship** (`src/services/governance.service.ts`): modelo v2 parent/child — `parentTableId`/`childTableId` + `pairs[]` (los pares de columnas de la FK), con `parentCardinality`/`childCardinality` (enum crow's foot por extremo) e `identifying`.
 - **Versionado** (`src/types/versioning.ts`): un changeset tiene estado `draft → submitted → approved/rejected`; expone `diff` (buckets added/edited/deleted por colección), `impact` (tablas/columnas tocadas) y `approvals`/`comments`.
 
 ---
@@ -182,7 +179,7 @@ Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCa
 ### Governance — sesiones, changesets y revisión (`/review`)
 
 - Toda edición corre bajo una sesión que se materializa en un changeset (colección `changeset_changes`, cambios solo vía `changes_map`).
-- `ReviewScreen` es cross-project: filtros From/Reviewer, tarjetas de solicitud, detalle con impacto, diff "Changes · N", aprobación/rechazo (deshabilitado si el actor no es el reviewer asignado) y hilo de comentarios.
+- `ReviewScreen` es una bandeja global con chip y filtro de proyecto (doc 75 D20): filtros Project/From/Reviewer, tarjetas de solicitud, detalle con impacto, diff "Changes · N", aprobación/rechazo (deshabilitado si el actor no es el reviewer asignado) y hilo de comentarios.
 - Servicios: `governance.service`, `changeset.service`, `versioning.service`.
 
 ### Reporting (`/reporting`)
@@ -276,17 +273,18 @@ web-data-model-hub/
     ├── App.tsx               # Router + shell (TopNav + Outlet), guards, Toaster
     ├── app/                  # globals.css (agrega los CSS de styles/)
     ├── screens/              # HomeScreen, ReportingScreen, ReviewScreen
-    ├── features/             # Módulos: admin, auth, ddl, governance, help,
-    │                         #   modeler, reporting, standards
+    ├── features/             # Módulos: admin, auth, ddl, modeler, reporting,
+    │                         #   standards, upload
     ├── components/
-    │   ├── layout/           # TopNav, AppLayout, Header, Sidebar, UserMenu
-    │   └── ui/               # Botones, diálogos, badges, tooltips, etc.
+    │   ├── layout/           # TopNav, UserMenu
+    │   ├── ui/               # Botones, diálogos, badges, tooltips, etc.
+    │   └── ProjectPicker, NewProjectModal, OpenModelModal, BusyOverlay
     ├── store/                # Zustand: useModelerStore, useSessionStore,
-    │                         #   useAuthStore, useChangesetStore, useIdentityStore,
-    │                         #   sessionChangesetBridge
+    │                         #   useAuthStore, useUndoStore, useBusyStore
     ├── services/             # Cliente http + servicios transversales
-    ├── types/                # model.ts, versioning.ts, api.ts, identity.ts
-    ├── hooks/, lib/          # Hooks e utilidades (tags, identidad)
+    │                         #   (governance, changeset, versioning, projects, …)
+    ├── types/                # model.ts, versioning.ts, api.ts
+    ├── lib/                  # Utilidades puras (tags, facets, projects, zip)
     └── styles/               # tokens.css, base.css, shell.css, topnav.css,
                               #   home.css, reporting.css, review.css, ui.css…
 ```

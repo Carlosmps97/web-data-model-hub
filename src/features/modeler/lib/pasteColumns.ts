@@ -11,7 +11,7 @@ import {
   bulk,
   type BulkChange,
   type CanonicalColumn,
-} from '@/features/governance/services/governance.service';
+} from '@/services/governance.service';
 import { nextPkPosition } from './keyOrder';
 
 export interface PasteRow {

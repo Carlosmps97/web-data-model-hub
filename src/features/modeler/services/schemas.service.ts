@@ -6,14 +6,15 @@
  *    a tablas/vistas y el guard de uso se computan server-side).
  *  - LECTURAS con changeset activo → estado efectivo (los esquemas creados en
  *    el draft aparecen al instante en los dropdowns).
- *  - Sin changeset → endpoints directos (`/api/schemas`).
+ *  - Sin changeset → endpoints directos del PROYECTO de la sesión (doc 75:
+ *    los esquemas están aislados por proyecto).
  */
 import { apiDelete, apiGet, apiPost } from '@/services/http';
-import * as csvc from '@/features/governance/services/changeset.service';
-import { useChangesetStore } from '@/store/useChangesetStore';
-import { useSessionStore } from '@/store/useSessionStore';
+import * as csvc from '@/services/changeset.service';
+import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 
 import { API_BASE } from '@/services/apiBase';
+const PROJECT_SCHEMAS = () => `${API_BASE}/api/projects/${encodeURIComponent(sessionProjectId())}/schemas`;
 const SCHEMAS = `${API_BASE}/api/schemas`;
 const CS = `${API_BASE}/api/changesets`;
 
@@ -29,7 +30,7 @@ export interface DbSchema { id: string; name: string; description?: string | nul
  *  con letra. Acepta mayúsculas — el legacy `No_Definido` debe validar. */
 export const SCHEMA_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
 
-const readCs = (): string | null => useChangesetStore.getState().activeId;
+const readCs = (): string | null => useSessionStore.getState().activeChangesetId;
 const writeCs = (): string | null =>
   useSessionStore.getState().openMode === 'editing' ? readCs() : null;
 
@@ -39,17 +40,17 @@ export const listSchemas = async (): Promise<DbSchema[]> => {
   const cs = readCs();
   const rows = cs
     ? await csvc.effective<DbSchema>(cs, 'schemas')
-    : await apiGet<DbSchema[]>(SCHEMAS);
+    : await apiGet<DbSchema[]>(PROJECT_SCHEMAS());
   return rows.sort(byName);
 };
 
-/** Lista SIEMPRE publicada (Database Explorer): ignora el changeset activo. */
+/** Lista SIEMPRE publicada del proyecto (Database Explorer): ignora el changeset activo. */
 export const listPublishedSchemas = async (): Promise<DbSchema[]> =>
-  (await apiGet<DbSchema[]>(SCHEMAS)).sort(byName);
+  (await apiGet<DbSchema[]>(PROJECT_SCHEMAS())).sort(byName);
 
 export const createSchema = async (name: string, description?: string, kind?: SchemaKind): Promise<DbSchema> => {
   const cs = writeCs();
-  if (!cs) return apiPost<DbSchema>(SCHEMAS, { name, description, kind });
+  if (!cs) return apiPost<DbSchema>(PROJECT_SCHEMAS(), { name, description, kind });
   // Camino changeset: el payload es el DOC COMPLETO — kind debe ir acá o se
   // publicaría sin él (invariante round-trip).
   const s: DbSchema = { id: crypto.randomUUID(), name, description: description || null, kind: kind ?? null };

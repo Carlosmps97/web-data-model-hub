@@ -19,7 +19,8 @@ type View =
   | { t: 'catalog'; attention?: boolean }
   | { t: 'editor'; rule: DdlRule | null; draft?: Partial<DdlRule> };
 
-export default function DdlRulesTab({ snapshot, versions, canEdit, meName, onApplied }: {
+export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, meName, onApplied }: {
+  projectId: string;
   snapshot: StandardsSnapshot;
   versions: StandardsVersion[];
   canEdit: boolean;
@@ -32,8 +33,8 @@ export default function DdlRulesTab({ snapshot, versions, canEdit, meName, onApp
   const [artifacts, setArtifacts] = useState<DdlArtifact[]>([]);
 
   const reloadArtifacts = useCallback(() => {
-    getDdlArtifacts().then(setArtifacts).catch(() => toast.error("Couldn't load DDL artifacts"));
-  }, []);
+    getDdlArtifacts(projectId).then(setArtifacts).catch(() => toast.error("Couldn't load DDL artifacts"));
+  }, [projectId]);
   useEffect(() => { reloadArtifacts(); }, [reloadArtifacts, rules]);
 
   const invalid = rules.filter((r) => r.validationState === 'invalid');
@@ -48,6 +49,7 @@ export default function DdlRulesTab({ snapshot, versions, canEdit, meName, onApp
   if (view.t === 'editor') {
     return (
       <DdlRuleEditor
+        projectId={projectId}
         rule={view.rule} draft={view.draft} rules={rules} config={config}
         udpDefs={snapshot.udp} artifacts={artifacts} canEdit={canEdit}
         onBack={() => setView({ t: 'catalog' })}
@@ -58,6 +60,7 @@ export default function DdlRulesTab({ snapshot, versions, canEdit, meName, onApp
   if (view.t === 'catalog') {
     return (
       <DdlRuleCatalog
+        projectId={projectId}
         rules={rules} config={config} artifacts={artifacts} canEdit={canEdit}
         initialAttention={view.attention}
         onBack={() => setView({ t: 'overview' })}
