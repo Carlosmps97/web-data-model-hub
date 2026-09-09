@@ -9,12 +9,17 @@
  * (`GET /api/projects/{id}/catalog/inventory`). Antes se componía en el cliente
  * por tandas de ids — en draft eran miles de requests (una por tabla) para
  * «Modelo DDV», saturaban el navegador y el log del backend.
+ *
+ * Perf 2026-09-08: el inventario trae SÓLO lo que el árbol dibuja. Tablas y
+ * vistas llegan con el CONTEO de columnas, nunca con las columnas, y las de un
+ * objeto se piden al expandirlo (`explorerColumns` / `explorerViewColumns`).
+ * Medido en «Modelo DDV»: 36.73 MB → 1.33 MB (el `sql` de las vistas, 22.2 MB,
+ * no lo pinta nadie; sus columnas, 12.6 MB, sólo al expandir).
  */
 import { apiGet } from '@/services/http';
 import { API_BASE } from '@/services/apiBase';
 import { listReportColumns, type ReportColumnRow } from '@/services/reporting.service';
 import * as csvc from '@/services/changeset.service';
-import type { View } from '@/services/views.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import { sessionProjectId } from '@/store/useSessionStore';
 
@@ -37,7 +42,10 @@ export interface DbxView {
   /** Nombres físicos de las tablas fuente (resueltos desde el inventario). */
   sourceTables: string[];
   sourceTableIds: string[];
-  columns: DbxViewCol[];
+  /** Badge de la fila. Las columnas EN SÍ se piden al expandir la vista
+   *  (`explorerViewColumns`), igual que las de una tabla: en «Modelo DDV» las
+   *  columnas de las 1 932 vistas eran 12.6 MB de los 36.7 MB del inventario. */
+  columnCount: number;
   /** Doc 61: vista Personalizada (custom SQL) — sus columnas salen del parse. */
   custom: boolean;
 }
@@ -68,25 +76,52 @@ const mapRawCol = (c: RawColumn): DbxColumn => ({
   description: c.description ?? undefined, ordinal: c.ordinal ?? 0,
 });
 
-/** Vista de la API → fila del Explorer. `nameOf` resuelve ids de tablas fuente
- *  a su nombre físico (del propio inventario: cero lookups extra). Personalizada
- *  (doc 61) → columnas derivadas del parse; Regular → `sources`. Pura. */
-export function mapView(v: View, nameOf: (id: string) => string | undefined): DbxView {
-  const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
-  const custom = !!(v.customSql && v.customSql.trim());
-  const columns: DbxViewCol[] = custom
-    ? (v.customColumns ?? []).map((c) => ({ outputAlias: c.name, expression: c.expression ?? null, sourceTable: null, sourceColumn: null, castType: null }))
-    : (v.sources ?? []).map((s) => ({
-      outputAlias: s.outputAlias ?? null,
-      sourceColumn: s.column ?? null,
-      sourceTable: s.tableId ? (nameOf(s.tableId) ?? s.tableId) : (s.table ?? null),
-      castType: s.castType ?? null,
-      expression: s.expression ?? null,
-    }));
+/** Fila SLIM de vista tal como llega en el inventario. */
+export interface InventoryViewRow {
+  id: string; name: string; schema?: string | null;
+  sourceTableIds?: string[]; columnCount?: number; custom?: boolean;
+}
+
+/** Fila de vista del inventario → fila del Explorer. `nameOf` resuelve ids de
+ *  tablas fuente a su nombre físico (del propio inventario: cero lookups
+ *  extra). Pura. */
+export function mapView(v: InventoryViewRow, nameOf: (id: string) => string | undefined): DbxView {
+  const srcIds = v.sourceTableIds ?? [];
   return {
     id: v.id, name: v.name, schema: v.schema ?? null,
-    sourceTables: srcIds.map((id) => nameOf(id) ?? id), sourceTableIds: srcIds, columns, custom,
+    sourceTables: srcIds.map((id) => nameOf(id) ?? id), sourceTableIds: srcIds,
+    columnCount: v.columnCount ?? 0, custom: !!v.custom,
   };
+}
+
+// ── Columnas de una VISTA (perezosas al expandir, como las de una tabla) ────
+
+/** Crudo de `GET /api/projects/{id}/catalog/views/{vid}/columns` — forma
+ *  uniforme para vistas Regular y Personalizada (doc 61). */
+export interface RawViewColumn {
+  outputAlias?: string | null; column?: string | null; tableId?: string | null;
+  table?: string | null; castType?: string | null; expression?: string | null;
+}
+
+/** Columnas crudas → filas del Explorer; `nameOf` resuelve la tabla fuente con
+ *  el inventario ya cargado (igual que antes lo hacía `mapView`). Pura. */
+export function mapViewCols(raw: RawViewColumn[], nameOf: (id: string) => string | undefined): DbxViewCol[] {
+  return raw.map((s) => ({
+    outputAlias: s.outputAlias ?? null,
+    sourceColumn: s.column ?? null,
+    sourceTable: s.tableId ? (nameOf(s.tableId) ?? s.tableId) : (s.table ?? null),
+    castType: s.castType ?? null,
+    expression: s.expression ?? null,
+  }));
+}
+
+/** Columnas de salida de UNA vista. Draft o publicado los resuelve el backend
+ *  (mismo `changesetId` que el resto del Explorer). */
+export async function explorerViewColumns(viewId: string): Promise<RawViewColumn[]> {
+  const pid = encodeURIComponent(sessionProjectId());
+  return apiGet<RawViewColumn[]>(
+    `${API_BASE}/api/projects/${pid}/catalog/views/${encodeURIComponent(viewId)}/columns${csQuery()}`,
+  );
 }
 
 // ── Columnas de una tabla (perezosas al expandir) ───────────────────────────
@@ -108,7 +143,7 @@ export interface InventoryTableRow {
 /** Respuesta cruda de `GET /api/projects/{id}/catalog/inventory`. */
 export interface RawInventory {
   tables: InventoryTableRow[];
-  views: View[];
+  views: InventoryViewRow[];
   canvases: number;
   total: { tables: number; views: number };
 }

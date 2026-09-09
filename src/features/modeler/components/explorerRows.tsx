@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from 'react';
 import { EllipsisVertical, KeyRound, Link as LinkIcon } from 'lucide-react';
-import type { DbxColumn, DbxView } from '../services/explorer.service';
+import type { DbxColumn, DbxViewCol } from '../services/explorer.service';
 
 /**
  * Filas compartidas del Explorer unificado (docs 71/72) — columnas de tabla y
@@ -52,13 +52,13 @@ export function ColumnLine({ col, depth, onClick, onMenu }: {
 
 /** Columnas de salida de una vista (alias · cast), solo lectura. `tableName`
  *  traduce el id de la tabla fuente para el tooltip. */
-export function ViewColumnLines({ view, depth, tableName }: {
-  view: DbxView; depth: number; tableName?: (id: string) => string;
+export function ViewColumnLines({ viewId, cols, depth, tableName }: {
+  viewId: string; cols: DbxViewCol[]; depth: number; tableName?: (id: string) => string;
 }) {
   return (
     <>
-      {view.columns.map((c, i) => (
-        <div key={`${view.id}:${i}`} className="wk-exp-row wk-dbx-col" style={{ paddingLeft: padFor(depth), cursor: 'default' }}
+      {cols.map((c, i) => (
+        <div key={`${viewId}:${i}`} className="wk-exp-row wk-dbx-col" style={{ paddingLeft: padFor(depth), cursor: 'default' }}
           title={c.expression || (c.sourceTable ? `${tableName ? tableName(c.sourceTable) : c.sourceTable}.${c.sourceColumn ?? ''}` : undefined)}>
           <span className="wk-exp-ico" style={{ width: 12 }} />
           <span className="wk-exp-label rd-mono" style={{ fontSize: 12 }}>{c.outputAlias || c.sourceColumn || '—'}</span>

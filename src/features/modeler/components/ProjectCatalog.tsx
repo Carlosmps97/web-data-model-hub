@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, Crosshair, Database, EllipsisVertical, Eye, Table2 } from 'lucide-react';
 import {
-  explorerColumns, projectInventory,
-  type DbxColumn, type DbxTable, type DbxView, type ProjectInventory,
+  explorerColumns, explorerViewColumns, mapViewCols, projectInventory,
+  type DbxColumn, type DbxTable, type DbxView, type DbxViewCol, type ProjectInventory,
 } from '../services/explorer.service';
 import type { Project } from '../services/modeler.service';
 import { useModelerStore, type InspectTarget } from '@/store/useModelerStore';
@@ -26,8 +26,8 @@ type RowMenuSpec = Omit<RowMenu, 'x' | 'y'>;
  * a las tablas de sus canvases. Doc 72 §1: el inventario (tablas con conteo de
  * columnas + vistas) llega en UNA request server-side, se carga al abrir
  * cualquiera de las ramas (o al filtrar) y se cachea hasta que cambie la
- * versión activa o la membresía de los canvases. Las columnas de una tabla se
- * cargan al expandirla. Click en tabla/columna/vista = ir al objeto (canvas
+ * versión activa o la membresía de los canvases. Tablas y vistas traen sólo el
+ * CONTEO de columnas: las columnas de una y otra se cargan al expandirlas. Click en tabla/columna/vista = ir al objeto (canvas
  * abierto → centrar; único canvas → abrirlo y centrar; varios → elegir); el
  * menú ⋮ ofrece además «Inspect metadata» (Object Inspector, sin canvas).
  */
@@ -62,15 +62,26 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   const loadingRef = useRef(false);
   const [cols, setCols] = useState<Record<string, DbxColumn[]>>({});
   const [colBusy, setColBusy] = useState<Set<string>>(new Set());
+  // Columnas de VISTA: como las de tabla, se piden al expandir (el inventario
+  // sólo trae el conteo — ver `explorer.service`).
+  const [viewCols, setViewCols] = useState<Record<string, DbxViewCol[]>>({});
+  const [viewColBusy, setViewColBusy] = useState<Set<string>>(new Set());
   const [expSchemas, setExpSchemas] = useState<Set<string>>(new Set());
   const [expTables, setExpTables] = useState<Set<string>>(new Set());
   const [expViews, setExpViews] = useState<Set<string>>(new Set());
   const [picker, setPicker] = useState<Picker | null>(null);
   const [menu, setMenu] = useState<RowMenu | null>(null);
 
+  // Nombres físicos del inventario: resuelven la tabla fuente de las columnas
+  // de vista, que el backend manda por id.
+  const tableNames = useMemo(
+    () => new Map((inv?.tables ?? []).map((t) => [t.id, t.physicalName])),
+    [inv],
+  );
+
   // Cambió la versión activa o la membresía de los canvases → inventario obsoleto.
   useEffect(() => {
-    setInv(null); setCols({});
+    setInv(null); setCols({}); setViewCols({});
     setExpSchemas(new Set()); setExpTables(new Set()); setExpViews(new Set());
   }, [activeCs, idsKey]);
 
@@ -103,6 +114,18 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
         .then((c) => setCols((m) => ({ ...m, [id]: c })))
         .catch(() => {})
         .finally(() => setColBusy((s) => { const n = new Set(s); n.delete(id); return n; }));
+    }
+  };
+  const toggleView = (id: string) => {
+    const next = new Set(expViews);
+    if (next.has(id)) { next.delete(id); setExpViews(next); return; }
+    next.add(id); setExpViews(next);
+    if (!viewCols[id]) {
+      setViewColBusy((s) => new Set(s).add(id));
+      explorerViewColumns(id)
+        .then((raw) => setViewCols((m) => ({ ...m, [id]: mapViewCols(raw, (tid) => tableNames.get(tid)) })))
+        .catch(() => {})
+        .finally(() => setViewColBusy((s) => { const n = new Set(s); n.delete(id); return n; }));
     }
   };
 
@@ -196,6 +219,13 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
     ));
   };
 
+  const viewColumnRows = (v: DbxView, depth: number) => {
+    if (viewColBusy.has(v.id)) return <EmptyLine depth={depth}>Loading…</EmptyLine>;
+    const list = viewCols[v.id] ?? [];
+    if (!list.length) return <EmptyLine depth={depth}>No columns.</EmptyLine>;
+    return <ViewColumnLines viewId={v.id} cols={list} depth={depth} />;
+  };
+
   const tableRow = (t: DbxTable, depth: number) => {
     const cnt = t.columnCount ?? cols[t.id]?.length;
     const here = activeCanvasTables.has(t.id);
@@ -220,15 +250,16 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
     <div key={v.id} className="wk-exp-cv">
       <div className="wk-exp-row" style={{ paddingLeft: padFor(depth) }}
         title={v.sourceTables.length ? `Sources: ${v.sourceTables.join(', ')}${v.custom ? ' · custom SQL' : ''}` : undefined}>
-        <span role="button" tabIndex={-1} className="wk-exp-chev" onClick={(e) => { e.stopPropagation(); toggleSet(expViews, setExpViews, v.id); }} aria-label="Toggle columns">
+        <span role="button" tabIndex={-1} className="wk-exp-chev" onClick={(e) => { e.stopPropagation(); toggleView(v.id); }} aria-label="Toggle columns">
           {expViews.has(v.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </span>
         <span className="wk-exp-ico" onClick={(e) => goView(e, v)}><Eye size={13} style={{ color: 'var(--purple)' }} /></span>
         <span className="wk-exp-label rd-mono" style={{ fontSize: 12.5 }} onClick={(e) => goView(e, v)}>{v.name}</span>
-        <span className="wk-dbx-badge">{v.columns.length}</span>
+        <span className="wk-dbx-badge">{v.columnCount}</span>
         {kebab(viewMenu(v))}
+        {viewColBusy.has(v.id) && <Spin />}
       </div>
-      {expViews.has(v.id) && <ViewColumnLines view={v} depth={depth + 1} />}
+      {expViews.has(v.id) && viewColumnRows(v, depth + 1)}
     </div>
   );
 
