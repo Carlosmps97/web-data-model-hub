@@ -35,6 +35,17 @@ describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro BCP (doc 76 D9)', () =>
     expect(ddl).toContain("LOCATION 'abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>/CLIENTE'");
   });
 
+  it('Comments OFF por default: el CREATE sale sin COMMENT hasta que se pidan', () => {
+    expect(DEF.includeComments).toBe(false);
+    const commented = {
+      ...BASE,
+      tables: [{ id: 't1', physicalName: 'CLIENTE', schema: 'core', description: 'Maestro de Clientes' }],
+      columns: [{ id: 'c1', tableId: 't1', physicalName: 'ID', dataType: 'bigint', ordinal: 0, description: 'Id del Cliente' }],
+    };
+    expect(databricksDdl(commented, DEF)).not.toContain('COMMENT');
+    expect(databricksDdl(commented, { ...DEF, includeComments: true })).toContain("COMMENT 'Id del Cliente'");
+  });
+
   it('locationFolder: casing de la carpeta independiente del de identificadores', () => {
     expect(locationFolder('Hd_Venta', { locationFolderCase: 'upper' })).toBe('HD_VENTA');
     expect(locationFolder('Hd_Venta', { locationFolderCase: 'lower' })).toBe('hd_venta');
@@ -309,7 +320,7 @@ describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', ()
   });
 
   it("'upper' NO toca literales de string ni COMMENTs", () => {
-    const ddl = databricksDdl(CASED, { ...CLASSIC, identifierCase: 'upper' });
+    const ddl = databricksDdl(CASED, { ...CLASSIC, identifierCase: 'upper', includeComments: true });
     expect(ddl).toContain("COMMENT 'Maestro de Clientes'");
     expect(ddl).toContain("COMMENT 'Id del Cliente'");
   });

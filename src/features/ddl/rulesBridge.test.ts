@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { isAddendum, layoutFromRules, partitionCorrelative, withPartitionOrder, type ExportRule } from './rulesBridge';
+import {
+  emitTarget, isAddendum, layoutFromRules, missingSource, partitionCorrelative, withPartitionOrder,
+  type ExportRule,
+} from './rulesBridge';
 
 const rule = (id: string, over: Partial<ExportRule> = {}): ExportRule => ({
   id, name: id, kind: 'rule', priority: 100, enabled: true, validationState: 'valid',
@@ -58,5 +61,49 @@ describe('isAddendum', () => {
     expect(isAddendum('ddl.tabla_fisica.tags')).toBe(true);
     expect(isAddendum('ddl.vista_negocio.extra')).toBe(true);
     expect(isAddendum('ddl.vista_tecnica')).toBe(false);
+  });
+});
+
+// Generadores tal como los siembra el kit (templates.py): el `emit` lleva el
+// artefacto, el tipo y el nombre CON PLACEHOLDERS del motor.
+const gen = (id: string, emit: Record<string, unknown>, over: Partial<ExportRule> = {}): ExportRule => ({
+  id, name: id, kind: 'generator', priority: 200, enabled: true, validationState: 'valid',
+  appliesTo: [], action: { emit }, ...over,
+});
+
+describe('emitTarget — qué objeto crea cada generador', () => {
+  it('traduce los placeholders del motor a un destino legible', () => {
+    expect(emitTarget(gen('vista_tecnica', {
+      artifact: 'ddl.vista_tecnica', type: 'view', schema: '{tabla.esquema}_v', name: '{tabla.nombre}',
+    }))).toEqual({ type: 'view', label: '<schema>_v.<table>' });
+    expect(emitTarget(gen('tabla_rechazos', {
+      artifact: 'ddl.tabla_rej', type: 'table', schema: '{tabla.esquema}', name: '{tabla.nombre}_rej',
+    }))).toEqual({ type: 'table', label: '<schema>.<table>_rej' });
+    expect(emitTarget(gen('vista_rechazos_dac', {
+      artifact: 'ddl.vista_rej_dac', type: 'view', schema: '{tabla.esquema}_v', name: '{tabla.nombre}dac_rej',
+    }))).toEqual({ type: 'view', label: '<schema>_v.<table>dac_rej' });
+  });
+  it('sin esquema usa solo el nombre; sin emit (o regla normal) devuelve null', () => {
+    expect(emitTarget(gen('g', { type: 'table', name: '{tabla.nombre}_x' })))
+      .toEqual({ type: 'table', label: '<table>_x' });
+    expect(emitTarget(gen('g', {}))).toBeNull();
+    expect(emitTarget(rule('r1'))).toBeNull();
+  });
+});
+
+describe('missingSource — cascada de generadores (spec §7.3)', () => {
+  const rej = gen('tabla_rechazos', { artifact: 'ddl.tabla_rej', type: 'table', name: '{tabla.nombre}_rej' },
+    { sourceArtifact: 'ddl.tabla_fisica' });
+  const vistaRej = gen('vista_rechazos', { artifact: 'ddl.vista_rej', type: 'view', name: '{tabla.nombre}_rej' },
+    { sourceArtifact: 'ddl.tabla_rej' });
+  const all = [rej, vistaRej];
+
+  it('el generador que come de otro NO seleccionado no emite nada: avisa de quién depende', () => {
+    expect(missingSource(vistaRej, all, new Set(['vista_rechazos']))).toBe('tabla_rechazos');
+  });
+  it('con su fuente seleccionada, o si la fuente es un artefacto raíz, no falta nada', () => {
+    expect(missingSource(vistaRej, all, new Set(['vista_rechazos', 'tabla_rechazos']))).toBeNull();
+    expect(missingSource(rej, all, new Set(['tabla_rechazos']))).toBeNull();
+    expect(missingSource(rule('r1'), all, new Set<string>())).toBeNull();
   });
 });

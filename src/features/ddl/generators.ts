@@ -142,10 +142,12 @@ export interface DatabricksDdlOptions {
 }
 
 export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
-  // Default pedido owner: Views + Comments + Partitions ON; PK&FK (keys) e Indexes OFF.
+  // Default pedido owner: Views + Partitions ON; Comments, PK&FK (keys) e
+  // Indexes OFF — los COMMENT de las definiciones funcionales son largos y
+  // ensucian el CREATE, así que se piden explícitamente.
   includeViews: true,
   includeKeys: false,
-  includeComments: true,
+  includeComments: false,
   includePartitions: true,
   includeIndexes: false,
   tableFormat: 'delta',

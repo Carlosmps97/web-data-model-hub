@@ -6,14 +6,16 @@
  * below the 64px toolbar is dimmed+blurred; the toolbar stays sharp).
  *
  * Generates **Databricks** DDL live from the active diagram (canonical
- * tables/columns/relationships) and a panel of options:
- *  - dialect selector (Databricks enabled · Oracle locked),
- *  - include views / pk·fk / comments / partitions / index,
- *  - table format (USING delta|parquet|avro|…),
- *  - Unity Catalog (catalog.schema.table) + catalog/default-schema,
- *  - External table (CREATE EXTERNAL TABLE … LOCATION '<path>'),
- *  - optional TBLPROPERTIES key/value pairs,
- *  - per-table selection (which tables to export).
+ * tables/columns/relationships), con la selección de tablas y el dialecto
+ * arriba (Databricks habilitado · Oracle bajo llave) y la columna de opciones
+ * partida en DOS PESTAÑAS:
+ *  - **Output** — cómo se escribe el DDL: include views / pk·fk / comments /
+ *    partitions / index, casing de identificadores, table format (USING
+ *    delta|parquet|…), Unity Catalog (catalog.schema.table), External table
+ *    (CREATE EXTERNAL TABLE … LOCATION '<path>') y TBLPROPERTIES.
+ *  - **Export rules** (`ExportRulesPanel`) — el ruleset del proyecto: qué
+ *    reglas corren al exportar. Van aparte porque no son formato — la mitad
+ *    son GENERADORES que agregan objetos al `.zip`.
  *
  * Footer: **Download** (a `.zip` with one `.sql` per object — `[TABLE] X.sql` /
  * `[VIEW] Y.sql` — each table and its views under a folder named after the
@@ -45,6 +47,7 @@ import { sessionProjectId } from '@/store/useSessionStore';
 import { runBlocking } from '@/store/useBusyStore';
 import { buildZip } from '@/lib/zip';
 import { plainToObjects, statementsToObjects, objectsToEntries, viewKey } from '../ddlExportBundle';
+import ExportRulesPanel from './ExportRulesPanel';
 
 export interface ExportDdlModalProps {
   open: boolean;
@@ -84,6 +87,8 @@ function SwitchRow({
 
 export default function ExportDdlModal({ open, diagram, modelName, onClose }: ExportDdlModalProps) {
   const [dialect, setDialect] = useState<DdlDialect>('databricks');
+  // Pestaña de la columna de opciones: formato del DDL vs ruleset del proyecto.
+  const [tab, setTab] = useState<'output' | 'rules'>('output');
   const [opts, setOpts] = useState<DatabricksDdlOptions>(DEFAULT_DATABRICKS_OPTS);
   const set = <K extends keyof DatabricksDdlOptions>(k: K, v: DatabricksDdlOptions[K]) =>
     setOpts((o) => ({ ...o, [k]: v }));
@@ -122,6 +127,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   useEffect(() => {
     if (!open) return;
     let alive = true;
+    setTab('output');
     fetchExportRules(sessionProjectId())
       .then((rs) => { if (alive) { setExportRules(selectableRules(rs)); setSelRules(null); } })
       .catch(() => { if (alive) setExportRules([]); });
@@ -301,6 +307,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     }
   };
 
+  const showRules = tab === 'rules' && exportRules.length > 0;
   const isDbx = dialect === 'databricks';
   const canExport = isDbx && exportTables.length > 0;
 
@@ -413,162 +420,152 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
         <div className="exd-cols">
           {/* ── Options column ── */}
           <div className="exd-opts">
-            <span className="exd-section">Include</span>
-            <div className="exd-switches">
-              <SwitchRow on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Views" hint={views.length ? `${views.length} view(s) on the canvas` : 'No views on the canvas'} />
-              <SwitchRow on={opts.includeKeys} onClick={() => set('includeKeys', !opts.includeKeys)} label="Primary & foreign keys" hint="PK / FK constraints" />
-              <SwitchRow on={opts.includeComments} onClick={() => set('includeComments', !opts.includeComments)} label="Comments" hint="Functional definitions" />
-              <SwitchRow on={opts.includePartitions} onClick={() => set('includePartitions', !opts.includePartitions)} label="Partitions" hint="PARTITIONED BY" />
-              <SwitchRow on={opts.includeIndexes} onClick={() => set('includeIndexes', !opts.includeIndexes)} label="Indexes" hint="Hint ZORDER" />
-            </div>
-
-            {/* ── Export rules (doc 30 §12): lista compacta, todas ON ── */}
+            {/* Las reglas NO son opciones de formato — la mitad GENERA objetos
+                nuevos (la _rej, las vistas _v/DAC): van en su propia pestaña, con
+                toda la altura de la columna. Proyecto sin reglas ⇒ sin pestañas. */}
             {exportRules.length > 0 && (
-              <>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 2 }}>
-                  <span className="exd-section" style={{ margin: 0 }}>Export rules</span>
-                  <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 10.5, color: '#8A93A5' }}>
-                    {selRuleIds.size}/{exportRules.length}
-                  </span>
-                  <span style={{ flex: 1 }} />
-                  <button type="button" className="exd-tablesx-link"
-                    onClick={() => setSelRules(new Set(exportRules.map((r) => r.id)))}>All</button>
-                  <span className="exd-tablesx-dot">·</span>
-                  <button type="button" className="exd-tablesx-link is-muted"
-                    onClick={() => setSelRules(new Set<string>())}>None</button>
-                </div>
-                <div style={{ border: '1px solid #E6EAF0', borderRadius: 9, padding: '4px 2px', margin: '6px 0 2px', maxHeight: 168, overflowY: 'auto' }}>
-                  {exportRules.map((r) => {
-                    const on = selRuleIds.has(r.id);
-                    return (
-                      <button key={r.id} type="button" onClick={() => toggleRule(r.id)} aria-pressed={on}
-                        style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', height: 26, padding: '0 8px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                        <span className={`exd-cbox${on ? ' is-on' : ''}`}>
-                          {on && <Check size={11} strokeWidth={2.6} aria-hidden />}
-                        </span>
-                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--mono, monospace)', fontSize: 11.5, color: on ? '#1A2B4A' : '#9AA3B2' }}>
-                          {r.name}
-                        </span>
-                        {r.validationState === 'stale' && (
-                          <span title="A UDP list value this rule uses was removed"
-                            style={{ width: 6, height: 6, borderRadius: '50%', background: '#E5A83B', flex: 'none' }} />
-                        )}
-                        <span style={{ flex: 'none', fontSize: 9.5, fontWeight: 700, letterSpacing: '0.04em', color: r.kind === 'generator' ? '#8B5CF6' : '#2E5BFF', background: r.kind === 'generator' ? '#F3EEFF' : '#EAF0FF', borderRadius: 4, padding: '1px 5px' }}>
-                          {r.kind === 'generator' ? 'GEN' : 'RULE'}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <span className="exd-empty">
-                  Applied on download/copy · manage in Data Standards → DDL Export rules.
-                </span>
-              </>
+              <div className="wk-pp-tabs exd-tabs" role="tablist">
+                <button
+                  type="button" role="tab" aria-selected={tab === 'output'}
+                  className={`wk-pp-tab${tab === 'output' ? ' active' : ''}`}
+                  onClick={() => setTab('output')}
+                >
+                  Output
+                </button>
+                <button
+                  type="button" role="tab" aria-selected={tab === 'rules'}
+                  className={`wk-pp-tab${tab === 'rules' ? ' active' : ''}`}
+                  onClick={() => setTab('rules')}
+                >
+                  Export rules
+                  <span className="wk-pp-tab-count">{selRuleIds.size}</span>
+                </button>
+              </div>
             )}
 
-            <span className="exd-section">Identifier casing</span>
-            <div className="rd-seg exd-caseseg" role="group" aria-label="Identifier casing">
-              {(['as-is', 'lower', 'upper'] as const).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  className={opts.identifierCase === c ? 'active' : ''}
-                  onClick={() => set('identifierCase', c)}
-                  aria-pressed={opts.identifierCase === c}
-                  title={c === 'as-is'
-                    ? 'Identifiers as they are in the model'
-                    : c === 'lower' ? 'Identifiers in lowercase' : 'Identifiers in UPPERCASE'}
-                >
-                  {c === 'as-is' ? 'As-is' : c === 'lower' ? 'lower' : 'UPPER'}
-                </button>
-              ))}
-            </div>
+            {showRules ? (
+              <ExportRulesPanel
+                rules={exportRules}
+                selected={selRuleIds}
+                onToggle={toggleRule}
+                onAll={() => setSelRules(new Set(exportRules.map((r) => r.id)))}
+                onNone={() => setSelRules(new Set<string>())}
+              />
+            ) : (
+              <>
+                <span className="exd-section">Include</span>
+                <div className="exd-switches">
+                  <SwitchRow on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Views" hint={views.length ? `${views.length} view(s) on the canvas` : 'No views on the canvas'} />
+                  <SwitchRow on={opts.includeKeys} onClick={() => set('includeKeys', !opts.includeKeys)} label="Primary & foreign keys" hint="PK / FK constraints" />
+                  <SwitchRow on={opts.includeComments} onClick={() => set('includeComments', !opts.includeComments)} label="Comments" hint="Functional definitions" />
+                  <SwitchRow on={opts.includePartitions} onClick={() => set('includePartitions', !opts.includePartitions)} label="Partitions" hint="PARTITIONED BY" />
+                  <SwitchRow on={opts.includeIndexes} onClick={() => set('includeIndexes', !opts.includeIndexes)} label="Indexes" hint="Hint ZORDER" />
+                </div>
 
-            <span className="exd-section">Table format · USING</span>
-            <div className="exd-chips">
-              {FORMATS.map((f) => (
-                <button
-                  key={f}
-                  type="button"
-                  className={`exd-chip${opts.tableFormat === f ? ' is-on' : ''}`}
-                  onClick={() => set('tableFormat', f)}
-                  aria-pressed={opts.tableFormat === f}
-                >
-                  {fmtLabel(f)}
-                </button>
-              ))}
-            </div>
-
-            <SwitchRow on={opts.unityCatalog} onClick={() => set('unityCatalog', !opts.unityCatalog)} label="Unity Catalog" hint="catalog.schema.table" />
-            <div className="exd-row2">
-              <div className="exd-field">
-                <span className="exd-sublbl">Catalog</span>
-                <input className="rd-input exd-input" value={opts.catalog} disabled={!opts.unityCatalog} onChange={(e) => set('catalog', e.target.value)} placeholder="main" />
-              </div>
-              <div className="exd-field">
-                <span className="exd-sublbl">Default schema</span>
-                {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
-                <SchemaSelect className="rd-input exd-input" value={opts.defaultSchema} onChange={(v) => set('defaultSchema', v)} />
-              </div>
-            </div>
-
-            <SwitchRow on={opts.external} onClick={() => set('external', !opts.external)} label="External table" hint="CREATE EXTERNAL TABLE … LOCATION" />
-            {opts.external && (
-              <div className="exd-field">
-                <span className="exd-sublbl">Location (ADLS / S3)</span>
-                <input className="rd-input exd-input" value={opts.location} onChange={(e) => set('location', e.target.value)} placeholder="abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>" />
-                {/* Doc 76 D9: la carpeta del LOCATION es un literal de path — su
-                    casing es independiente del de los identificadores. */}
-                <span className="exd-sublbl">Folder name · LOCATION '&lt;base&gt;/&lt;table&gt;'</span>
-                <div className="rd-seg exd-caseseg" role="group" aria-label="Location folder casing">
+                <span className="exd-section">Identifier casing</span>
+                <div className="rd-seg exd-caseseg" role="group" aria-label="Identifier casing">
                   {(['as-is', 'lower', 'upper'] as const).map((c) => (
                     <button
                       key={c}
                       type="button"
-                      className={(opts.locationFolderCase ?? 'upper') === c ? 'active' : ''}
-                      onClick={() => set('locationFolderCase', c)}
-                      aria-pressed={(opts.locationFolderCase ?? 'upper') === c}
+                      className={opts.identifierCase === c ? 'active' : ''}
+                      onClick={() => set('identifierCase', c)}
+                      aria-pressed={opts.identifierCase === c}
                       title={c === 'as-is'
-                        ? 'Folder named exactly like the physical name'
-                        : c === 'lower' ? 'Folder name in lowercase' : 'Folder name in UPPERCASE'}
+                        ? 'Identifiers as they are in the model'
+                        : c === 'lower' ? 'Identifiers in lowercase' : 'Identifiers in UPPERCASE'}
                     >
                       {c === 'as-is' ? 'As-is' : c === 'lower' ? 'lower' : 'UPPER'}
                     </button>
                   ))}
                 </div>
-              </div>
-            )}
 
-            <div className="exd-tblprops-head">
-              <span className="exd-section">TBLPROPERTIES</span>
-              <button type="button" className="exd-add" onClick={addProp}><Plus size={13} strokeWidth={2} />Add</button>
-            </div>
-            {opts.tblProperties.length === 0
-              ? <span className="exd-empty">No properties.</span>
-              : opts.tblProperties.map((p, i) => (
-                <div key={i} className="exd-prop">
-                  <input className="rd-input exd-input exd-mono" value={p.key} onChange={(e) => setProp(i, { key: e.target.value })} placeholder="delta.appendOnly" />
-                  <input className="rd-input exd-input exd-mono" value={p.value} onChange={(e) => setProp(i, { value: e.target.value })} placeholder="true" />
-                  <button type="button" className="exd-iconbtn" onClick={() => delProp(i)} aria-label="Remove"><Trash2 size={14} /></button>
+                <span className="exd-section">Table format · USING</span>
+                <div className="exd-chips">
+                  {FORMATS.map((f) => (
+                    <button
+                      key={f}
+                      type="button"
+                      className={`exd-chip${opts.tableFormat === f ? ' is-on' : ''}`}
+                      onClick={() => set('tableFormat', f)}
+                      aria-pressed={opts.tableFormat === f}
+                    >
+                      {fmtLabel(f)}
+                    </button>
+                  ))}
                 </div>
-              ))}
+
+                <SwitchRow on={opts.unityCatalog} onClick={() => set('unityCatalog', !opts.unityCatalog)} label="Unity Catalog" hint="catalog.schema.table" />
+                <div className="exd-row2">
+                  <div className="exd-field">
+                    <span className="exd-sublbl">Catalog</span>
+                    <input className="rd-input exd-input" value={opts.catalog} disabled={!opts.unityCatalog} onChange={(e) => set('catalog', e.target.value)} placeholder="main" />
+                  </div>
+                  <div className="exd-field">
+                    <span className="exd-sublbl">Default schema</span>
+                    {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
+                    <SchemaSelect className="rd-input exd-input" value={opts.defaultSchema} onChange={(v) => set('defaultSchema', v)} />
+                  </div>
+                </div>
+
+                <SwitchRow on={opts.external} onClick={() => set('external', !opts.external)} label="External table" hint="CREATE EXTERNAL TABLE … LOCATION" />
+                {opts.external && (
+                  <div className="exd-field">
+                    <span className="exd-sublbl">Location (ADLS / S3)</span>
+                    <input className="rd-input exd-input" value={opts.location} onChange={(e) => set('location', e.target.value)} placeholder="abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>" />
+                    {/* Doc 76 D9: la carpeta del LOCATION es un literal de path — su
+                        casing es independiente del de los identificadores. */}
+                    <span className="exd-sublbl">Folder name · LOCATION '&lt;base&gt;/&lt;table&gt;'</span>
+                    <div className="rd-seg exd-caseseg" role="group" aria-label="Location folder casing">
+                      {(['as-is', 'lower', 'upper'] as const).map((c) => (
+                        <button
+                          key={c}
+                          type="button"
+                          className={(opts.locationFolderCase ?? 'upper') === c ? 'active' : ''}
+                          onClick={() => set('locationFolderCase', c)}
+                          aria-pressed={(opts.locationFolderCase ?? 'upper') === c}
+                          title={c === 'as-is'
+                            ? 'Folder named exactly like the physical name'
+                            : c === 'lower' ? 'Folder name in lowercase' : 'Folder name in UPPERCASE'}
+                        >
+                          {c === 'as-is' ? 'As-is' : c === 'lower' ? 'lower' : 'UPPER'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="exd-tblprops-head">
+                  <span className="exd-section">TBLPROPERTIES</span>
+                  <button type="button" className="exd-add" onClick={addProp}><Plus size={13} strokeWidth={2} />Add</button>
+                </div>
+                {opts.tblProperties.length === 0
+                  ? <span className="exd-empty">No properties.</span>
+                  : opts.tblProperties.map((p, i) => (
+                    <div key={i} className="exd-prop">
+                      <input className="rd-input exd-input exd-mono" value={p.key} onChange={(e) => setProp(i, { key: e.target.value })} placeholder="delta.appendOnly" />
+                      <input className="rd-input exd-input exd-mono" value={p.value} onChange={(e) => setProp(i, { value: e.target.value })} placeholder="true" />
+                      <button type="button" className="exd-iconbtn" onClick={() => delProp(i)} aria-label="Remove"><Trash2 size={14} /></button>
+                    </div>
+                  ))}
+              </>
+            )}
           </div>
 
           {/* ── Preview column (dark) ── */}
           <div className="exd-previewcol">
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span className="exd-lbl" style={{ margin: 0 }}>
+            <div className="exd-previewhead">
+              <span className="exd-lbl">
                 Preview{selRuleIds.size > 0 ? (rulesPreview ? ` · with rules · ${rulesPreview.version}` : ' · base DDL') : ''}
               </span>
-              <span style={{ flex: 1 }} />
+              <span className="exd-tablesx-spacer" />
               {canExport && selRuleIds.size > 0 && !rulesPreview && (
-                <button type="button" onClick={applyRulesToPreview} disabled={rendering}
-                  style={{ height: 24, padding: '0 10px', border: '1px solid #D4E0FF', background: '#EAF0FF', color: '#2E5BFF', borderRadius: 6, fontSize: 11.5, fontWeight: 600, cursor: rendering ? 'default' : 'pointer', fontFamily: 'inherit', opacity: rendering ? 0.6 : 1 }}>
+                <button type="button" className="exd-applybtn" onClick={applyRulesToPreview} disabled={rendering}>
                   {rendering ? 'Applying…' : `Apply ${selRuleIds.size} rule${selRuleIds.size === 1 ? '' : 's'}`}
                 </button>
               )}
               {rulesPreview && (
-                <span style={{ fontSize: 10.5, color: '#8A93A5' }}>
+                <span className="exd-previewnote">
                   {rulesPreview.applied} applied — same text as the download
                 </span>
               )}

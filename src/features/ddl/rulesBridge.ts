@@ -27,12 +27,56 @@ const DDL_RULES = (pid: string) => `${PROJECT(pid)}/ddl-rules`;
 export interface ExportRule {
   id: string;
   name: string;
+  /** Qué hace la regla, en una línea (la escribe el autor en Data Standards). */
+  description?: string | null;
   kind: 'rule' | 'generator';
+  /** Artefacto de ENTRADA — solo generadores; encadena la cascada (spec §7.3). */
+  sourceArtifact?: string | null;
   priority: number;
   enabled: boolean;
   validationState: 'valid' | 'invalid' | 'stale';
   appliesTo: string[];
   action: Record<string, unknown>;
+}
+
+/** Artefactos que existen SIEMPRE: nadie los genera, son la entrada del motor. */
+const ROOT_ARTIFACTS = new Set(['ddl.tabla_fisica', 'ddl.vista_negocio']);
+
+/** El `emit` de un generador, tal como lo guarda el kit. */
+interface EmitSpec { artifact?: string; type?: string; schema?: string; name?: string }
+const emitOf = (rule: ExportRule): EmitSpec | null =>
+  (rule.kind === 'generator' ? (rule.action.emit as EmitSpec | undefined) ?? null : null);
+
+// Los placeholders del motor, en el lenguaje del modelador.
+const PLACEHOLDERS: [RegExp, string][] = [
+  [/\{tabla\.esquema\}/g, '<schema>'],
+  [/\{tabla\.nombre\}/g, '<table>'],
+];
+const readable = (tpl: string) => PLACEHOLDERS.reduce((acc, [re, to]) => acc.replace(re, to), tpl);
+
+/** Objeto que CREA un generador, legible: `{tabla.esquema}_v` + `{tabla.nombre}`
+ *  ⇒ `<schema>_v.<table>`. Null si la regla no genera nada. */
+export function emitTarget(rule: ExportRule): { type: 'table' | 'view'; label: string } | null {
+  const emit = emitOf(rule);
+  const name = (emit?.name ?? '').trim();
+  if (!name) return null;
+  const schema = (emit?.schema ?? '').trim();
+  return {
+    type: emit?.type === 'view' ? 'view' : 'table',
+    label: readable(schema ? `${schema}.${name}` : name),
+  };
+}
+
+/** Generador cuyo artefacto de ENTRADA lo produce otro generador que NO está
+ *  seleccionado: la regla queda marcada pero no emite nada. Devuelve el nombre
+ *  del generador que falta (null si no hay tal dependencia). */
+export function missingSource(
+  rule: ExportRule, rules: ExportRule[], selected: Set<string>,
+): string | null {
+  const src = rule.kind === 'generator' ? (rule.sourceArtifact ?? '') : '';
+  if (!src || ROOT_ARTIFACTS.has(src)) return null;
+  const producer = rules.find((r) => emitOf(r)?.artifact === src);
+  return producer && !selected.has(producer.id) ? producer.name : null;
 }
 
 /** Def UDP mínima para resolver el UDP de orden de particiones por nombre. */
