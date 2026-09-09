@@ -693,19 +693,24 @@ El Database Explorer es **draft-aware** (doc 25): con versión activa muestra el
 
 La búsqueda profunda del Model (tablas/columnas/definiciones) vive en `governance.searchModel()` (`GET /api/projects/{pid}/catalog/search`, doc 70 §11 / 72 r2) y el inspector de objetos en `GET /api/catalog/inspect/tables/{id}` · `/inspect/views/{id}` (doc 72).
 
-#### 3.3.6. Carga masiva desde Excel (`features/upload/upload.service.ts`, doc 55)
+#### 3.3.6. Carga masiva desde Excel y perfiles de carga (`features/upload/upload.service.ts`, docs 55 · 78)
 
-El popup «Upload from Excel» del toolbar parsea el `.xlsx` en el navegador (`lib/parseWorkbook.ts`, SheetJS) y manda el JSON por hoja al backend, que valida y aplica dentro del draft como **job asíncrono**; el front hace polling hasta un estado terminal.
+El popup «Upload from Excel» del toolbar lee el `.xlsx` en el navegador (`lib/parseWorkbook.ts`, SheetJS) como grillas CRUDAS de todas las hojas (`{name, rows: [{row, cells}]}`, con el origen forzado a A1 para que `row` sea la fila Excel absoluta) y las manda junto con el **perfil de carga** elegido; el backend aplica el perfil (hojas, fila de cabecera, mapeo cabecera → campo / UDP lógico y/o físico, reglas, políticas), valida y aplica dentro del draft como **job asíncrono**; el front hace polling hasta un estado terminal.
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `startUpload(csId, body)` | POST | `/api/changesets/{cs}/uploads` | `{ fileName, sheets: { tables?, columns? } }` (`Sheet = { headers, rows: [{ row, cells }] }`) | `UploadJob` (202, `validating`) |
-| `getUploadJob(csId, jobId)` | GET | `/api/changesets/{cs}/uploads/{job}` | — | `UploadJob` (`status`, `progress`, `report`, `result`, `error`); 404 = expiró |
-| `pollUploadJob(csId, jobId, { onTick, intervalMs, signal })` | GET (cada 800 ms) | ídem | — | `UploadJob` terminal (`validated` / `applied` / `failed`) |
+| `startUpload(csId, body)` | POST | `/api/changesets/{cs}/uploads` | `{ fileName, profileId, sheets: RawSheet[] }` | `UploadJob` (202, `validating`); 404 perfil inexistente; 413 topes |
+| `getUploadJob(csId, jobId)` | GET | `/api/changesets/{cs}/uploads/{job}` | — | `UploadJob` (`status`, `progress`, `report` con `profile` y `sheets`, `result`, `error`); 404 = expiró |
+| `pollUploadJob(csId, jobId, {onTick, intervalMs, signal})` | GET (×n) | ídem | — | Promesa que resuelve en `validated | applied | failed`; abortable |
 | `applyUpload(csId, jobId)` | POST | `/api/changesets/{cs}/uploads/{job}/apply` | — | `UploadJob` (202, `applying`); 409 sin validar / con errores / otro apply en curso |
 | `discardUpload(csId, jobId)` | DELETE | `/api/changesets/{cs}/uploads/{job}` | — | `{ deleted }`; 409 mientras aplica |
-
-`UploadJob.report` trae `summary` (create/update/unchanged por proyectos, carpetas, canvases, esquemas, tablas y columnas), `tables[]` (desglose por fila de `Tablas`), `errors[]`/`warnings[]` (`{ severity, sheet, row, column, code, message }`, hasta 500 por severidad) y los totales. Con `errorCount > 0` el botón Upload queda deshabilitado. `result.affectedCanvasIds` (solo `applied`) alimenta `arrangeCanvases.ts`, que corre ELK sobre esos canvases y persiste el layout con `structure.setSubjectAreaLayout`. La plantilla se descarga de `public/templates/dmh-upload-template.xlsx` (estático, sin API).
+| `listProfiles(pid)` | GET | `/api/projects/{pid}/upload-profiles` | — | `UploadProfile[]` (default primero) |
+| `createProfile(pid, body)` · `updateProfile(pid, id, body)` | POST · PUT | `…/upload-profiles[/{id}]` | `UploadProfileBody` | `UploadProfile`; 422 `{message, problems}` (→ `profileProblemsOf(e)`); 409 nombre repetido |
+| `getProfile(pid, id)` · `deleteProfile(pid, id)` · `setDefaultProfile(pid, id)` | GET · DELETE · POST | `…/upload-profiles/{id}[/default]` | — | `UploadProfile` · `{ deleted }` · `UploadProfile` |
+| `getProfileCatalog(pid)` | GET | `…/upload-profiles/catalog` | — | `ProfileCatalog` (campos por hoja, tipos de regla, políticas) |
+| `validateProfile(pid, body)` | POST | `…/upload-profiles/validate` | `UploadProfileBody` | `{ problems: ProfileProblem[] }` sin guardar |
+| `suggestMappings(pid, sheet, headers)` | POST | `…/upload-profiles/suggest` | `{ sheet, headers }` | `Suggestion[]` (mapeo propuesto por nombre) |
+| `createDefaultProfile(pid)` | POST | `…/upload-profiles/default` | — | `{ profile, warnings }` (built-in «Plantilla BCP»); 409 si ya existe |
 
 ### 3.4. Reporting (Screen 11)
 
@@ -991,7 +996,8 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Changesets | GET | `/api/changesets/{id}` | sesión | changeset / versioning |
 | Changesets | PUT | `/api/changesets/{id}/changes` | model.edit | changeset.service (vía governance/structure/schemas/views) |
 | Changesets | PUT | `/api/changesets/{id}/changes/bulk` | model.edit | changeset.service (`recordChangesBulk`, doc 39) |
-| Upload | POST | `/api/changesets/{id}/uploads` | model.edit + owner del draft | upload.service (`startUpload`, doc 55) |
+| Upload | POST | `/api/changesets/{id}/uploads` | model.edit + owner del draft | upload.service (`startUpload`, docs 55/78) |
+| Upload | GET/POST/PUT/DELETE | `/api/projects/{pid}/upload-profiles[/…]` | model.edit | upload.service (perfiles de carga: `listProfiles`, `createProfile`, `updateProfile`, `deleteProfile`, `setDefaultProfile`, `getProfileCatalog`, `validateProfile`, `suggestMappings`, `createDefaultProfile`, doc 78) |
 | Upload | GET | `/api/changesets/{id}/uploads/{job}` | model.edit + owner | upload.service (`getUploadJob` / `pollUploadJob`) |
 | Upload | POST | `/api/changesets/{id}/uploads/{job}/apply` | model.edit + owner | upload.service (`applyUpload`) |
 | Upload | DELETE | `/api/changesets/{id}/uploads/{job}` | model.edit + owner | upload.service (`discardUpload`) |

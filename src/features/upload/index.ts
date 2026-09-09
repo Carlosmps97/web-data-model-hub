@@ -1,5 +1,6 @@
-// Carga masiva desde Excel (doc 55): popup + servicio + parseo del workbook.
+// Carga masiva desde Excel (doc 55 · doc 78): popup + perfiles + servicio + lectura cruda del workbook.
 export { default as UploadModal } from './components/UploadModal';
-export { parseWorkbook } from './lib/parseWorkbook';
-export type { ParsedWorkbook, UploadWorkbookBody } from './lib/parseWorkbook';
+export { default as ProfileManagerModal } from './components/ProfileManagerModal';
+export { readWorkbook, findSheet, headersAt, sheetRowCount } from './lib/parseWorkbook';
+export type { RawWorkbook } from './lib/parseWorkbook';
 export * from './upload.service';

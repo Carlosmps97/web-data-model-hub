@@ -1,6 +1,6 @@
 # Testing y consideraciones/límites del frontend — Data Model Hub
 
-Actualizado al 2026-09-08 (doc 75: proyectos independientes — 570 tests en 78 archivos, verdes).
+Actualizado al 2026-09-09 (doc 78: perfiles de carga desde Excel — 597 tests en 81 archivos, verdes).
 
 Este documento describe cómo se verifica el frontend (SPA en Vite + React 19) y qué consideraciones de rendimiento y límites conocidos aplican al canvas del modelador y a la grilla del reporting. Está basado en el código real del repositorio `web-data-model-hub`.
 
@@ -46,7 +46,7 @@ test: {
 
 ### 1.3 Qué se testea hoy
 
-La suite al 2026-09-08: **570 tests en 78 archivos** (77 `*.test.ts` bajo `src/` más `server.test.mjs` en la raíz del repo), todos verdes (verificable con `npx vitest run`). Inventario por área:
+La suite al 2026-09-09: **597 tests en 81 archivos** (80 `*.test.ts` bajo `src/` más `server.test.mjs` en la raíz del repo), todos verdes (verificable con `npx vitest run`). Inventario por área:
 
 | Área | Archivos de test |
 |---|---|
@@ -59,7 +59,7 @@ La suite al 2026-09-08: **570 tests en 78 archivos** (77 `*.test.ts` bajo `src/`
 | DDL (`features/ddl/`) | `generators.test.ts`, `rulesBridge.test.ts` |
 | Reporting (`features/reporting/`) | `query.service.test.ts` |
 | Standards (`features/standards/`) | `ddlRules.service.test.ts`, `domainImpact.test.ts`, `glossaryValidation.test.ts` |
-| Upload (`features/upload/`) | `parseWorkbook.test.ts`, `upload.service.test.ts`, `arrangeCanvases.test.ts` |
+| Upload (`features/upload/`) | `parseWorkbook.test.ts` (lectura cruda con origen forzado a A1, helpers del editor), `profileDraft.test.ts` (merge de sugerencias, reglas, `localProblems`, `toBody`), `upload.service.test.ts` (rutas de uploads y de perfiles, `profileProblemsOf`), `arrangeCanvases.test.ts` |
 | Servidor de producción (raíz) | `server.test.mjs` |
 
 Todos los mocks de `@/services/http` exponen también `LONG_TIMEOUT_MS: 120_000` (los servicios de proyecto lo usan para las acciones largas).

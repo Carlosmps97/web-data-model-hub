@@ -44,10 +44,14 @@ export function setOnUnauthorized(cb: (() => void) | null): void { _onUnauthoriz
  *  devuelve un `success: false` o cuando el fetch falla. */
 export class ApiError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /** `detail` crudo de un HTTPException de FastAPI (string u objeto — p.ej. el
+   *  422 de perfiles de carga trae `{message, problems}`); null si no aplica. */
+  readonly detail: unknown;
+  constructor(message: string, status: number, detail: unknown = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -135,9 +139,15 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
     // genérico ilegible.
     const detail = (json as { detail?: unknown } | null)?.detail;
     if (!response.ok && typeof detail === 'string' && detail) {
-      throw new ApiError(detail, response.status);
+      throw new ApiError(detail, response.status, detail);
     }
-    throw new ApiError(`Unexpected response shape (HTTP ${response.status})`, response.status);
+    // `detail` estructurado (`{message, …}`): el mensaje va al usuario y el
+    // objeto completo queda en `ApiError.detail` para quien sepa leerlo.
+    const message = detail && typeof detail === 'object' ? (detail as { message?: unknown }).message : undefined;
+    if (!response.ok && typeof message === 'string' && message) {
+      throw new ApiError(message, response.status, detail);
+    }
+    throw new ApiError(`Unexpected response shape (HTTP ${response.status})`, response.status, detail ?? null);
   }
 
   if (!json.success) {

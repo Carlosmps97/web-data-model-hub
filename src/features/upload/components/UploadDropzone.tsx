@@ -2,12 +2,14 @@ import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { Download, FileSpreadsheet, UploadCloud } from 'lucide-react';
 
 /** Ruta pública de la plantilla (public/templates; la sirve Vite en dev y
- *  server.mjs en Databricks Apps). */
-export const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/dmh-upload-template.xlsx`;
-const TEMPLATE_NAME = 'dmh-upload-template.xlsx';
+ *  server.mjs en Databricks Apps). Doc 78: `Plantilla.xlsx` verbatim. */
+export const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/Plantilla.xlsx`;
+const TEMPLATE_NAME = 'Plantilla.xlsx';
 const ACCEPT = '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 export interface DropzoneFile { name: string; size: number; }
+/** Hoja del perfil vista desde el archivo cargado (solo informativo; la verdad la dice el reporte). */
+export interface DropzoneSheet { name: string; found: boolean; rows: number; }
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -17,12 +19,13 @@ function fmtSize(bytes: number): string {
 
 /**
  * Selector del workbook: zona de arrastre + botón de archivo (teclado: Enter /
- * Space). Con archivo cargado muestra la tarjeta (nombre, tamaño, filas por
- * hoja) y permite reemplazarlo; la plantilla siempre está a un click.
+ * Space). Con archivo cargado muestra la tarjeta (nombre, tamaño, hojas del
+ * perfil halladas o no) y permite reemplazarlo; la plantilla siempre está a
+ * un click.
  */
-export default function UploadDropzone({ file, counts, disabled, onFile }: {
+export default function UploadDropzone({ file, sheets, disabled, onFile }: {
   file: DropzoneFile | null;
-  counts: { tables: number; columns: number } | null;
+  sheets: DropzoneSheet[] | null;
   disabled?: boolean;
   onFile: (f: File) => void;
 }) {
@@ -56,12 +59,11 @@ export default function UploadDropzone({ file, counts, disabled, onFile }: {
           <span className="up-file-name" title={file.name}>{file.name}</span>
           <span className="up-file-meta">
             <span>{fmtSize(file.size)}</span>
-            {counts && (
-              <>
-                <code className="up-loc">Tablas · {counts.tables} row{counts.tables === 1 ? '' : 's'}</code>
-                <code className="up-loc">Atributos · {counts.columns} row{counts.columns === 1 ? '' : 's'}</code>
-              </>
-            )}
+            {sheets?.map((s) => (
+              <code className={`up-loc${s.found ? '' : ' is-missing'}`} key={s.name}>
+                {s.name} · {s.found ? `${s.rows} row${s.rows === 1 ? '' : 's'}` : 'missing'}
+              </code>
+            ))}
           </span>
         </div>
         <button type="button" className="up-file-replace" onClick={open} disabled={disabled}>Replace file</button>
@@ -82,7 +84,7 @@ export default function UploadDropzone({ file, counts, disabled, onFile }: {
         {input}
         <span className="up-drop-ico"><UploadCloud size={20} strokeWidth={1.6} aria-hidden /></span>
         <span className="up-drop-title">Drop your workbook here or <u>browse</u></span>
-        <span className="up-drop-sub">Excel file (.xlsx) based on the DMH upload template — sheets Tablas and Atributos</span>
+        <span className="up-drop-sub">Excel file (.xlsx) laid out as the selected upload profile expects</span>
       </div>
       <span className="up-template">
         Need the template?

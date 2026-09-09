@@ -5,14 +5,22 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 vi.mock('@/services/http', () => ({
   apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn(),
   setDevUser: vi.fn(), setAuthToken: vi.fn(), setOnUnauthorized: vi.fn(),
-  ApiError: class extends Error { status = 0; },
+  ApiError: class extends Error { status = 0; detail: unknown = null; constructor(m: string, status = 0, detail: unknown = null) { super(m); this.status = status; this.detail = detail; } },
   apiErrorMessage: vi.fn(), isConflictError: vi.fn(),
 }));
 
-import { apiGet, apiPost, apiDelete } from '@/services/http';
+import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '@/services/http';
 import {
-  startUpload, getUploadJob, applyUpload, discardUpload, pollUploadJob, isTerminal, type UploadJob,
+  startUpload, getUploadJob, applyUpload, discardUpload, pollUploadJob, isTerminal, profileProblemsOf,
+  listProfiles, createProfile, updateProfile, deleteProfile, setDefaultProfile, validateProfile, suggestMappings,
+  createDefaultProfile, getProfileCatalog, type UploadJob, type UploadProfileBody,
 } from './upload.service';
+
+const BODY: UploadProfileBody = {
+  name: 'P', isDefault: false,
+  sheets: { tables: { name: 'T', required: true, headerRow: 5, mappings: [] }, columns: { name: 'C', required: true, headerRow: 5, mappings: [] } },
+  policies: { onExistingTable: 'update', onExistingColumn: 'update', unknownHeaders: 'warn' },
+};
 
 const job = (status: UploadJob['status']): UploadJob => ({
   id: 'j1', csId: 'c1', fileName: 'f.xlsx', status,
@@ -26,8 +34,9 @@ afterEach(() => { vi.useRealTimers(); });
 describe('upload.service routes', () => {
   it('hang off the changeset uploads path', async () => {
     vi.mocked(apiPost).mockResolvedValue(job('validating'));
-    await startUpload('c 1', { fileName: 'f.xlsx', sheets: {} });
-    expect(apiPost).toHaveBeenCalledWith('/api/changesets/c%201/uploads', { fileName: 'f.xlsx', sheets: {} });
+    const raw = { fileName: 'f.xlsx', profileId: 'pf', sheets: [{ name: 'Cargar_Tablas', rows: [{ row: 5, cells: ['', 'TABLA_LOGICO'] }] }] };
+    await startUpload('c 1', raw);
+    expect(apiPost).toHaveBeenCalledWith('/api/changesets/c%201/uploads', raw);
     vi.mocked(apiGet).mockResolvedValue(job('validated'));
     await getUploadJob('c1', 'j1');
     expect(apiGet).toHaveBeenCalledWith('/api/changesets/c1/uploads/j1');
@@ -36,6 +45,30 @@ describe('upload.service routes', () => {
     vi.mocked(apiDelete).mockResolvedValue({ deleted: true });
     await discardUpload('c1', 'j1');
     expect(apiDelete).toHaveBeenCalledWith('/api/changesets/c1/uploads/j1');
+  });
+
+  it('profiles: project-scoped URLs and verbs', async () => {
+    vi.mocked(apiGet).mockResolvedValue([]); vi.mocked(apiPost).mockResolvedValue({}); vi.mocked(apiPut).mockResolvedValue({}); vi.mocked(apiDelete).mockResolvedValue({});
+    await listProfiles('p 1'); await createProfile('p1', BODY); await updateProfile('p1', 'a', BODY); await deleteProfile('p1', 'a');
+    await setDefaultProfile('p1', 'a'); await validateProfile('p1', BODY); await suggestMappings('p1', 'tables', ['X']);
+    await createDefaultProfile('p1'); await getProfileCatalog('p1');
+    expect(apiGet).toHaveBeenCalledWith('/api/projects/p%201/upload-profiles');
+    expect(apiPost).toHaveBeenCalledWith('/api/projects/p1/upload-profiles', BODY);
+    expect(apiPut).toHaveBeenCalledWith('/api/projects/p1/upload-profiles/a', BODY);
+    expect(apiDelete).toHaveBeenCalledWith('/api/projects/p1/upload-profiles/a');
+    expect(apiPost).toHaveBeenCalledWith('/api/projects/p1/upload-profiles/a/default');
+    expect(apiPost).toHaveBeenCalledWith('/api/projects/p1/upload-profiles/validate', BODY);
+    expect(apiPost).toHaveBeenCalledWith('/api/projects/p1/upload-profiles/suggest', { sheet: 'tables', headers: ['X'] });
+    expect(apiPost).toHaveBeenCalledWith('/api/projects/p1/upload-profiles/default');
+    expect(apiGet).toHaveBeenCalledWith('/api/projects/p1/upload-profiles/catalog');
+  });
+
+  it('profileProblemsOf reads the 422 detail and ignores other errors', () => {
+    const problems = [{ path: 'name', code: 'name-empty', message: 'm' }];
+    expect(profileProblemsOf(new ApiError('bad', 422, { message: 'x', problems }))).toEqual(problems);
+    expect(profileProblemsOf(new ApiError('conflict', 409, 'taken'))).toEqual([]);
+    expect(profileProblemsOf(new ApiError('bad', 422, 'plain text'))).toEqual([]);
+    expect(profileProblemsOf(new Error('boom'))).toEqual([]);
   });
 
   it('isTerminal covers validated / applied / failed only', () => {

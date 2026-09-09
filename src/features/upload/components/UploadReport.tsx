@@ -123,9 +123,25 @@ export function TablesLedger({ rows }: { rows: UploadTableRow[] }) {
   );
 }
 
+/** Perfil usado y hojas halladas (doc 78): la cabecera del reporte. */
+export function ReportHead({ report }: { report: UploadReport }) {
+  if (!report.profile && !report.sheets?.length) return null;
+  return (
+    <div className="up-report-head">
+      {report.profile && <span className="up-report-profile">Profile <strong>{report.profile.name}</strong></span>}
+      {report.sheets?.map((s) => (
+        <code className={`up-loc${s.found ? '' : ' is-missing'}`} key={s.role}>
+          {s.name} · {s.found ? `row ${s.headerRow ?? '?'} · ${s.rows} row${s.rows === 1 ? '' : 's'}` : 'missing'}
+        </code>
+      ))}
+    </div>
+  );
+}
+
 export default function UploadReportView({ report }: { report: UploadReport }) {
   return (
     <>
+      <ReportHead report={report} />
       <div className="up-grid">
         <SummaryTiles summary={report.summary} />
         <IssueList report={report} />
