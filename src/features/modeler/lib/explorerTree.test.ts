@@ -1,7 +1,8 @@
 // Doc 71 §1: helpers puros del Explorer unificado.
 import { describe, expect, it } from 'vitest';
 import {
-  canvasesWithTable, canvasesWithView, groupBySchema, matchesFilter, pickCanvas, projectTableIds, schemaSummary,
+  buildCanvasIndex, canvasesWithTable, canvasesWithView, groupBySchema, indexCanvasesWithTable,
+  indexCanvasesWithView, matchesFilter, pickCanvas, projectTableIds, schemaSummary,
 } from './explorerTree';
 
 const CANV = [
@@ -21,6 +22,30 @@ describe('explorerTree', () => {
     expect(canvasesWithView(CANV, 'v1', ['t3']).map((c) => c.id)).toEqual(['a']);          // membresía explícita manda
     expect(canvasesWithView(CANV, 'v9', ['t3']).map((c) => c.id)).toEqual(['b']);          // fallback por fuente
     expect(canvasesWithView(CANV, 'v9', ['t9'])).toEqual([]);
+  });
+
+  it('buildCanvasIndex: los lookups O(1) dan EXACTAMENTE lo mismo que el barrido', () => {
+    const idx = buildCanvasIndex(CANV);
+    const ids = (cs: { id: string }[]) => cs.map((c) => c.id);
+    // Paridad tabla: todos los ids conocidos + uno inexistente.
+    for (const t of ['t1', 't2', 't3', 't9']) {
+      expect(ids(indexCanvasesWithTable(idx, t))).toEqual(ids(canvasesWithTable(CANV, t)));
+    }
+    // Paridad vista: explícita, fallback por 1 fuente, fallback multi-fuente (orden + dedup), sin match.
+    const viewCases: [string, string[]][] = [
+      ['v1', ['t3']], ['v9', ['t3']], ['v9', ['t2', 't1']], ['v9', ['t1', 't2', 't3']], ['v9', ['t9']],
+    ];
+    for (const [v, srcs] of viewCases) {
+      expect(ids(indexCanvasesWithView(idx, v, srcs))).toEqual(ids(canvasesWithView(CANV, v, srcs)));
+    }
+    // El fallback multi-fuente respeta el orden de los canvases y no duplica.
+    expect(ids(indexCanvasesWithView(idx, 'v9', ['t2', 't1']))).toEqual(['a', 'b']);
+  });
+
+  it('buildCanvasIndex: vacío es seguro', () => {
+    const idx = buildCanvasIndex([]);
+    expect(indexCanvasesWithTable(idx, 't1')).toEqual([]);
+    expect(indexCanvasesWithView(idx, 'v1', ['t1'])).toEqual([]);
   });
 
   it('pickCanvas: activo > único > elegir (null) > ninguno (undefined)', () => {

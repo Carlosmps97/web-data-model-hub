@@ -284,6 +284,13 @@
 .wk-exp-headbtn:hover { background: var(--fill-4); color: var(--primary); }
 .wk-exp-headbtn:disabled { opacity: .4; cursor: default; pointer-events: none; }
 
+/* Virtualización NATIVA del navegador para las ramas largas del Explorer
+   (doc 72): «Modelo DDV» dibuja ~2.1k tablas; con `content-visibility: auto` el
+   navegador se salta el layout/paint de las filas fuera del viewport (la fila
+   colapsada mide 28px; `auto` recuerda el alto real de una tabla expandida tras
+   pintarla una vez). Degrada limpio donde no esté soportado (render normal). */
+.wk-exp-cv { content-visibility: auto; contain-intrinsic-size: auto 28px; }
+
 /* Fila genérica del árbol (project / folder / canvas) */
 .wk-exp-row { position: relative; display: flex; align-items: center; gap: 5px; height: 28px; padding-right: 4px;
   border-radius: var(--r-sm); cursor: pointer; color: var(--ink-2); font-size: 13px; user-select: none; }

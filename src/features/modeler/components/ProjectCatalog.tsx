@@ -8,8 +8,8 @@ import type { Project } from '../services/modeler.service';
 import { useModelerStore, type InspectTarget } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import {
-  canvasesWithTable, canvasesWithView, groupBySchema, matchesFilter, pickCanvas, projectTableIds, schemaSummary,
-  type CanvasLike,
+  buildCanvasIndex, groupBySchema, indexCanvasesWithTable, indexCanvasesWithView, matchesFilter, pickCanvas,
+  projectTableIds, schemaSummary, type CanvasLike,
 } from '../lib/explorerTree';
 import { ColumnLine, EmptyLine, Spin, ViewColumnLines, padFor } from './explorerRows';
 
@@ -46,6 +46,13 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
 
   const canvases: CanvasLike[] = useMemo(() => tree?.subjectAreas ?? [], [tree]);
   const tableIds = useMemo(() => projectTableIds(canvases), [canvases]);
+  // Perf (doc 72): índice inverso canvas→objeto UNA vez, en lugar de barrer los
+  // cientos de canvases por cada fila y en cada re-render (O(filas×canvases)).
+  const canvasIndex = useMemo(() => buildCanvasIndex(canvases), [canvases]);
+  const activeCanvasTables = useMemo(
+    () => new Set(canvases.find((c) => c.id === activeSaId)?.tableIds ?? []),
+    [canvases, activeSaId],
+  );
   const idsKey = tableIds.join(',');
   const filtering = filter.trim() !== '';
 
@@ -116,9 +123,9 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
     resolveAt(r.left + 24, r.bottom + 2, label, candidates, targetId, colId);
   };
   const goTable = (e: ReactMouseEvent, t: DbxTable, colId?: string, colName?: string) =>
-    resolve(e, colName ? `${t.physicalName} · ${colName}` : t.physicalName, canvasesWithTable(canvases, t.id), t.id, colId);
+    resolve(e, colName ? `${t.physicalName} · ${colName}` : t.physicalName, indexCanvasesWithTable(canvasIndex, t.id), t.id, colId);
   const goView = (e: ReactMouseEvent, v: DbxView) =>
-    resolve(e, v.name, canvasesWithView(canvases, v.id, v.sourceTableIds), v.id);
+    resolve(e, v.name, indexCanvasesWithView(canvasIndex, v.id, v.sourceTableIds), v.id);
 
   // ── Menú ⋮ (doc 72): Inspect metadata / Locate on canvas ──
   const openMenu = (e: ReactMouseEvent, spec: RowMenuSpec) => {
@@ -135,11 +142,11 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   const tableMenu = (t: DbxTable, c?: DbxColumn): RowMenuSpec => ({
     label: c ? `${t.physicalName} · ${c.physicalName}` : t.physicalName,
     inspect: { kind: 'table', id: t.id, colId: c?.id ?? null },
-    candidates: canvasesWithTable(canvases, t.id), targetId: t.id, colId: c?.id,
+    candidates: indexCanvasesWithTable(canvasIndex, t.id), targetId: t.id, colId: c?.id,
   });
   const viewMenu = (v: DbxView): RowMenuSpec => ({
     label: v.name, inspect: { kind: 'view', id: v.id },
-    candidates: canvasesWithView(canvases, v.id, v.sourceTableIds), targetId: v.id,
+    candidates: indexCanvasesWithView(canvasIndex, v.id, v.sourceTableIds), targetId: v.id,
   });
   const kebab = (spec: RowMenuSpec) => (
     <button type="button" className="wk-exp-dots" title="Inspect metadata · Locate on canvas" aria-label="Options" onClick={(e) => openMenu(e, spec)}>
@@ -191,9 +198,9 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
 
   const tableRow = (t: DbxTable, depth: number) => {
     const cnt = t.columnCount ?? cols[t.id]?.length;
-    const here = canvasesWithTable(canvases, t.id).some((c) => c.id === activeSaId);
+    const here = activeCanvasTables.has(t.id);
     return (
-      <div key={t.id}>
+      <div key={t.id} className="wk-exp-cv">
         <div className={`wk-exp-row${here ? ' here' : ''}`} style={{ paddingLeft: padFor(depth) }} title={t.logicalName || undefined}>
           <span role="button" tabIndex={-1} className="wk-exp-chev" onClick={(e) => { e.stopPropagation(); toggleTable(t.id); }} aria-label="Toggle columns">
             {expTables.has(t.id) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -210,7 +217,7 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   };
 
   const viewRow = (v: DbxView, depth: number) => (
-    <div key={v.id}>
+    <div key={v.id} className="wk-exp-cv">
       <div className="wk-exp-row" style={{ paddingLeft: padFor(depth) }}
         title={v.sourceTables.length ? `Sources: ${v.sourceTables.join(', ')}${v.custom ? ' · custom SQL' : ''}` : undefined}>
         <span role="button" tabIndex={-1} className="wk-exp-chev" onClick={(e) => { e.stopPropagation(); toggleSet(expViews, setExpViews, v.id); }} aria-label="Toggle columns">
@@ -225,7 +232,9 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
     </div>
   );
 
-  const schemaNode = (kind: 'tables' | 'views', schema: string, count: number, children: ReactNode) => {
+  // `children` es un thunk: sólo construimos las filas del esquema cuando está
+  // abierto (evita crear miles de elementos por un esquema colapsado).
+  const schemaNode = (kind: 'tables' | 'views', schema: string, count: number, children: () => ReactNode) => {
     const key = `${kind}:${schema}`;
     const openSch = expSchemas.has(key) || filtering;
     return (
@@ -236,7 +245,7 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
           <span className="wk-exp-label rd-mono" style={{ fontSize: 12.5 }}>{schema}</span>
           <span className="wk-dbx-badge">{count}</span>
         </div>
-        {openSch && children}
+        {openSch && children()}
       </div>
     );
   };
@@ -247,12 +256,12 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
       {body('tables', () => (
         tableIds.length === 0 ? empty('No tables on the canvases of this project yet.')
           : tableGroups.length === 0 ? empty(filtering ? 'No tables match the filter.' : 'No tables.')
-            : tableGroups.map((g) => schemaNode('tables', g.schema, g.items.length, g.items.map((t) => tableRow(t, 3))))
+            : tableGroups.map((g) => schemaNode('tables', g.schema, g.items.length, () => g.items.map((t) => tableRow(t, 3))))
       ))}
       {branchRow('views', <Eye size={14} style={{ color: 'var(--purple)' }} />, 'Views', views?.length)}
       {body('views', () => (
         viewGroups.length === 0 ? empty(filtering ? 'No views match the filter.' : 'No views on this project.')
-          : viewGroups.map((g) => schemaNode('views', g.schema, g.items.length, g.items.map((v) => viewRow(v, 3))))
+          : viewGroups.map((g) => schemaNode('views', g.schema, g.items.length, () => g.items.map((v) => viewRow(v, 3))))
       ))}
       {branchRow('schemas', <Database size={14} style={{ color: 'var(--navy)' }} />, 'Schemas', summary?.length)}
       {body('schemas', () => (

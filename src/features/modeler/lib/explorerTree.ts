@@ -26,6 +26,50 @@ export function canvasesWithView(canvases: CanvasLike[], viewId: string, sourceT
   return canvases.filter((sa) => sourceTableIds.some((t) => (sa.tableIds ?? []).includes(t)));
 }
 
+/**
+ * Índice inverso canvas→objeto (perf del Explorer, doc 72): en «Modelo DDV» hay
+ * ~2.1k tablas × cientos de canvases, y el render llamaba `canvasesWithTable`/
+ * `canvasesWithView` (un barrido de TODOS los canvases) por cada fila y en cada
+ * re-render — O(filas×canvases). Este índice se construye UNA vez por lista de
+ * canvases y deja cada lookup en O(1); `order` preserva el orden de los canvases
+ * para que el fallback por fuente sea idéntico a `canvasesWithView`.
+ */
+export interface CanvasIndex {
+  byTable: Map<string, CanvasLike[]>;
+  byView: Map<string, CanvasLike[]>;
+  order: Map<string, number>;
+}
+
+export function buildCanvasIndex(canvases: CanvasLike[]): CanvasIndex {
+  const byTable = new Map<string, CanvasLike[]>();
+  const byView = new Map<string, CanvasLike[]>();
+  const order = new Map<string, number>();
+  canvases.forEach((sa, i) => {
+    order.set(sa.id, i);
+    for (const t of sa.tableIds ?? []) { const a = byTable.get(t); if (a) a.push(sa); else byTable.set(t, [sa]); }
+    for (const v of sa.viewIds ?? []) { const a = byView.get(v); if (a) a.push(sa); else byView.set(v, [sa]); }
+  });
+  return { byTable, byView, order };
+}
+
+/** Igual que `canvasesWithTable`, desde el índice (O(1)). */
+export function indexCanvasesWithTable(idx: CanvasIndex, tableId: string): CanvasLike[] {
+  return idx.byTable.get(tableId) ?? [];
+}
+
+/** Igual que `canvasesWithView`, desde el índice: miembros explícitos (`viewIds`)
+ *  o, si ninguno, la unión (sin duplicados, en orden de canvas) de los canvases
+ *  de sus tablas fuente. */
+export function indexCanvasesWithView(idx: CanvasIndex, viewId: string, sourceTableIds: string[]): CanvasLike[] {
+  const explicit = idx.byView.get(viewId);
+  if (explicit && explicit.length) return explicit;
+  const seen = new Set<string>();
+  const out: CanvasLike[] = [];
+  for (const t of sourceTableIds) for (const sa of idx.byTable.get(t) ?? []) if (!seen.has(sa.id)) { seen.add(sa.id); out.push(sa); }
+  if (out.length > 1) out.sort((a, b) => (idx.order.get(a.id) ?? 0) - (idx.order.get(b.id) ?? 0));
+  return out;
+}
+
 /** Destino del click: el canvas ABIERTO si contiene el objeto; único canvas →
  *  ese; varios → null (el llamador ofrece elegir); ninguno → undefined. */
 export function pickCanvas<T extends { id: string }>(candidates: T[], activeSaId: string | null): T | null | undefined {

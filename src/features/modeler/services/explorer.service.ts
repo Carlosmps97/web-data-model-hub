@@ -124,9 +124,18 @@ export function mapInventory(raw: RawInventory): ProjectInventory {
   return { tables, views: raw.views.map((v) => mapView(v, (id) => names.get(id))), canvases: raw.canvases };
 }
 
+/** Colchón de timeout del inventario: un proyecto grande (miles de tablas/vistas)
+ *  puede tardar más que el default de 30 s y disparar «Couldn't load the project
+ *  catalog». Con el fix server-side (vistas por `projectId`) esto es sólo margen,
+ *  no la vía normal. */
+const INVENTORY_TIMEOUT_MS = 60_000;
+
 /** Tablas (con `columnCount`) y vistas de los canvases del proyecto — efectivo
  *  con versión activa, publicado sin ella. */
 export async function projectInventory(projectId: string): Promise<ProjectInventory> {
-  const raw = await apiGet<RawInventory>(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/catalog/inventory${csQuery()}`);
+  const raw = await apiGet<RawInventory>(
+    `${API_BASE}/api/projects/${encodeURIComponent(projectId)}/catalog/inventory${csQuery()}`,
+    { timeoutMs: INVENTORY_TIMEOUT_MS },
+  );
   return mapInventory(raw);
 }
