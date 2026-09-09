@@ -162,7 +162,7 @@ El canvas nunca se abre "en producción" implícitamente. Al entrar a `/model` s
 | Create new version from production | `POST /api/changesets/snapshot` (`{ projectId }`, bajo `runBlocking('Creating working copy…')`) | `openModel({projectId, mode:'editing', changesetId, versionLabel})` |
 | Continue a working version | elige un draft propio del proyecto | `openModel({projectId, mode:'editing', changesetId})` |
 
-El Open model es de **dos pasos** (doc 75 D8): primero el proyecto (`ProjectPicker`, con «New project…»), después la versión/modo de ESE proyecto. `openModel()` en `useSessionStore` fija `activeProjectId`, `openMode`, `activeChangesetId` y `activeVersionLabel`; los servicios leen de ahí.
+El Open model es de **dos pasos** (doc 75 D8): primero el proyecto (`ProjectPicker`, con «New project…»), después la versión/modo de ESE proyecto. `openModel()` en `useSessionStore` fija `activeProjectId`, `openMode`, `activeChangesetId` y `activeVersionLabel`; los servicios leen de ahí. `WorkspaceScreen` re-sincroniza el workspace (`refreshExplorer()`: proyecto activo del modeler, árbol, esquemas, canvas) cada vez que cambia la **clave de sesión** `canvasSessionKey` (`src/features/modeler/lib/canvasSession.ts` = modo|proyecto|changeset); así abrir OTRO proyecto en el mismo modo (readonly → readonly) también refresca explorer, toolbar y canvas sin recargar la página (bugfix 2026-09-08).
 
 ### 3.2 Carga del diagrama
 

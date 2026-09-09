@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useModelerStore } from '@/store/useModelerStore';
 import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
+import { canvasSessionKey } from '../lib/canvasSession';
 import OpenModelModal from '@/components/OpenModelModal';
 import NewProjectModal from '@/components/NewProjectModal';
 import { getChangeset, listUsers } from '@/services/versioning.service';
@@ -41,6 +42,10 @@ export default function WorkspaceScreen() {
   const [publishFromPanel, setPublishFromPanel] = useState(false);
   const openMode = useSessionStore((s) => s.openMode);
   const activeChangesetId = useSessionStore((s) => s.activeChangesetId);
+  // Clave de contexto de la sesión (proyecto + modo + changeset): cualquier
+  // cambio re-sincroniza el workspace. Sin el proyecto en la clave, abrir OTRO
+  // proyecto en el mismo modo dejaba el explorer/canvas en el anterior.
+  const sessionKey = useSessionStore((s) => canvasSessionKey(s));
   const user = useSessionStore((s) => s.user);
 
   // Open-model entry (also the version chooser forced on first entry). Doc 75:
@@ -113,6 +118,8 @@ export default function WorkspaceScreen() {
   // re-carga el canvas activo si sigue existiendo. Antes solo se recargaba el
   // diagrama y el árbol quedaba PEGADO a la versión anterior (doc 16).
   // Reabrir/cambiar de versión también resetea el checkpoint de cambios (dirty).
+  // La dependencia es la CLAVE de sesión (proyecto + modo + changeset): abrir
+  // otro proyecto en el mismo modo también re-sincroniza (owner 2026-09-08).
   useEffect(() => {
     if (openMode) void useModelerStore.getState().refreshExplorer().catch(() => {});
     useModelerStore.getState().clearDirty();
@@ -120,7 +127,7 @@ export default function WorkspaceScreen() {
     // edita) para que los cambios de naming lógico se vean de una; en solo-lectura
     // se mantiene el físico (nombres de producción). El toggle sigue disponible.
     if (openMode === 'editing') useModelerStore.getState().setViewMode('logical');
-  }, [openMode, activeChangesetId]);
+  }, [sessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Defensa en profundidad: una sesión `editing` sólo es válida sobre un draft
   // PROPIO. Si el changeset dejó de estar en draft (enviado desde otra pestaña,
