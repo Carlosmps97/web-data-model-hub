@@ -90,9 +90,10 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       nextDomainId: id,
       nextDefault: dom?.defaultDataType != null ? canonicalDefaultType(dom.defaultDataType) : undefined,
     });
-    // Doc 69 §4.7 (ajuste owner): elegir OTRO dominio re-aplica nombre lógico y
-    // definición del dominio (como Erwin); re-elegir el MISMO respeta lo
-    // tipeado. En modo «Physical» el input es un físico: el nombre no aplica.
+    // Doc 79: solo un dominio "atributo estándar" (Erwin `Attribute_Definition`
+    // ⇒ `inheritsName`) re-aplica nombre lógico y definición; los genéricos de
+    // tipo NO tocan nada. Re-elegir el MISMO respeta lo tipeado. En modo
+    // «Physical» el input es un físico: el nombre no aplica.
     const defaults = applyDomainDefaults({
       prevDomain: prev, nextDomain: dom,
       current: { logicalName: mode === 'logical' ? name : '', description },

@@ -14,6 +14,9 @@ export interface ParentDomain {
   id: string; name: string; defaultDataType: string; description?: string;
   /** Doc 69: nombre de atributo sugerido (default = name) y tipo LÓGICO del dominio. */
   namingTerm?: string | null; logicalDataType?: string | null;
+  /** Doc 79: dominio "atributo estándar" (Erwin `Attribute_Definition`) — solo
+   *  estos heredan su nombre y definición al atributo al asignarse. */
+  inheritsName?: boolean;
 }
 export interface CanonicalTable {
   id: string; physicalName: string; logicalName: string; schema?: string;

@@ -337,10 +337,11 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
       fields.logicalDataType = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : undefined;
       fields.logicalTypeOverridden = false;
     }
-    // Doc 69 §4.7 (ajuste owner 2026-09-05): cambiar de dominio es un cambio
-    // DIRECTO sobre el atributo ⇒ RE-APLICA nombre lógico y definición del
-    // dominio nuevo (misma filosofía del tipo, doc 46); el MISMO dominio
-    // respeta lo manual. Un solo upsert con TODO (evita lost-update).
+    // Doc 79: SOLO los dominios "atributo estándar" (Erwin `Attribute_Definition`,
+    // p.ej. FecRutina/CodMes ⇒ `inheritsName`) RE-APLICAN nombre lógico y
+    // definición al cambiar de dominio (misma filosofía del tipo, doc 46); el
+    // MISMO dominio respeta lo manual. Los genéricos de tipo NO tocan nada
+    // (applyDomainDefaults devuelve {}). Un solo upsert con TODO (evita lost-update).
     const defaults = applyDomainDefaults({ prevDomain: prev, nextDomain: dom, current: { logicalName: logical, description } });
     if (defaults.description !== undefined) {
       clearTimeout(timers.current['description']);
