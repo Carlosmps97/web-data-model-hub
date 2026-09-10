@@ -15,11 +15,11 @@ import { toast } from 'sonner';
 import { getDiffDetails } from '@/services/versioning.service';
 import type { ChangesetDiff, DiffEntityDetail, DiffFieldRow } from '@/types/versioning';
 import DiffTree, { TYPE_ICON, type DiffVerb, type TreeSelection } from './DiffTree';
-
-type CacheEntry = DiffEntityDetail | 'loading' | 'missing';
+import {
+  applyFailed, applyLoaded, keyOf, markLoading, type CacheMap, type DetailRef,
+} from './diffDetailCache';
 
 const BATCH = 200;
-const keyOf = (collection: string, entityId: string) => `${collection}::${entityId}`;
 /** Umbral de "valor largo" (customSql, JSON…): pasa a bloque colapsable. */
 const LONG = 120;
 
@@ -118,7 +118,7 @@ export default function ChangesDetailModal({ csId, title, versionLabel, diff, on
   onClose: () => void;
 }) {
   const [selection, setSelection] = useState<TreeSelection | null>(null);
-  const [cache, setCache] = useState<Record<string, CacheEntry>>({});
+  const [cache, setCache] = useState<CacheMap>({});
   const inFlight = useRef<Set<string>>(new Set());
   // Doc 64 §7: filtros del árbol (búsqueda por nombre + chips por verbo).
   const [search, setSearch] = useState('');
@@ -153,51 +153,29 @@ export default function ChangesDetailModal({ csId, title, versionLabel, diff, on
     return m;
   }, [diff]);
 
-  const ensure = useCallback((items: { collection: string; entityId: string }[]) => {
-    const missing = items.filter((it) => {
-      const k = keyOf(it.collection, it.entityId);
-      return !inFlight.current.has(k);
-    });
+  const ensure = useCallback((items: DetailRef[], force = false) => {
+    const missing = force ? items : items.filter((it) => !inFlight.current.has(keyOf(it.collection, it.entityId)));
     if (missing.length === 0) return;
     missing.forEach((it) => inFlight.current.add(keyOf(it.collection, it.entityId)));
-    setCache((prev) => {
-      const next = { ...prev };
-      missing.forEach((it) => {
-        const k = keyOf(it.collection, it.entityId);
-        if (!(k in next)) next[k] = 'loading';
-      });
-      return next;
-    });
-    const chunks: { collection: string; entityId: string }[][] = [];
+    setCache((prev) => markLoading(prev, missing));
+    const chunks: DetailRef[][] = [];
     for (let i = 0; i < missing.length; i += BATCH) chunks.push(missing.slice(i, i + BATCH));
     chunks.forEach((chunk) => {
       getDiffDetails(csId, chunk)
-        .then(({ items: got }) => {
-          setCache((prev) => {
-            const next = { ...prev };
-            const returned = new Set(got.map((d) => keyOf(d.collection, d.entityId)));
-            got.forEach((d) => { next[keyOf(d.collection, d.entityId)] = d; });
-            chunk.forEach((it) => {
-              const k = keyOf(it.collection, it.entityId);
-              if (!returned.has(k)) next[k] = 'missing';
-            });
-            return next;
-          });
-        })
+        .then(({ items: got }) => setCache((prev) => applyLoaded(prev, chunk, got)))
         .catch((err: unknown) => {
-          setCache((prev) => {
-            const next = { ...prev };
-            chunk.forEach((it) => {
-              const k = keyOf(it.collection, it.entityId);
-              inFlight.current.delete(k);
-              if (next[k] === 'loading') delete next[k];
-            });
-            return next;
-          });
+          // Doc 80 §8: el fallo se MARCA (antes se borraba la entrada y el
+          // panel volvía a "Loading diff…" para siempre — así se vio el 500
+          // de /diff/details: un spinner eterno en vez de un error).
+          chunk.forEach((it) => inFlight.current.delete(keyOf(it.collection, it.entityId)));
+          setCache((prev) => applyFailed(prev, chunk));
           toast.error(err instanceof Error ? err.message : 'Could not load the change detail.');
         });
     });
   }, [csId]);
+
+  /** Reintento puntual desde el estado de error. */
+  const retry = useCallback((items: DetailRef[]) => ensure(items, true), [ensure]);
 
   // Prefetch de RELACIONES al abrir: sus filas del árbol no tienen nombre
   // legible sin el detalle ("PADRE → HIJO" lo resuelve el backend).
@@ -359,6 +337,14 @@ export default function ChangesDetailModal({ csId, title, versionLabel, diff, on
                     <div className="dmh-rvd-nofields">Loading diff…</div>
                   ) : selectedEntry === 'missing' ? (
                     <div className="dmh-rvd-nofields">No detail available for this entity.</div>
+                  ) : selectedEntry === 'error' ? (
+                    <div className="dmh-rvd-nofields">
+                      Couldn't load this detail.{' '}
+                      <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm"
+                        onClick={() => retry([{ collection: selection.collection, entityId: selection.entityId }])}>
+                        Retry
+                      </button>
+                    </div>
                   ) : (
                     <FieldRows detail={selectedEntry} />
                   )}
@@ -389,16 +375,28 @@ export default function ChangesDetailModal({ csId, title, versionLabel, diff, on
                             >
                               {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
                               <span className={`dmh-rvd-colname${d?.action === 'deleted' ? ' strike' : ''}`}>
-                                {d?.name ?? (entry === 'missing' ? '(no detail)' : 'Loading…')}
+                                {d?.name ?? (entry === 'missing' ? '(no detail)'
+                                  : entry === 'error' ? '(failed to load)' : 'Loading…')}
                               </span>
                               {verb && <span className={`dmh-rvd-pill ${verb.cls}`} style={{ marginLeft: 0 }}>{verb.text}</span>}
                               {!open && d && <span className="dmh-rvd-colsum">{summaryLine(d)}</span>}
                             </button>
                             {open && (
                               <div className="dmh-rvd-colbody">
-                                {d
-                                  ? <FieldRows detail={d} />
-                                  : <div className="dmh-rvd-nofields">{entry === 'missing' ? 'No detail available.' : 'Loading diff…'}</div>}
+                                {d ? <FieldRows detail={d} /> : (
+                                  <div className="dmh-rvd-nofields">
+                                    {entry === 'missing' ? 'No detail available.'
+                                      : entry === 'error' ? (
+                                        <>
+                                          Couldn't load this detail.{' '}
+                                          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm"
+                                            onClick={() => retry([{ collection: 'canonical_columns', entityId: id }])}>
+                                            Retry
+                                          </button>
+                                        </>
+                                      ) : 'Loading diff…'}
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
