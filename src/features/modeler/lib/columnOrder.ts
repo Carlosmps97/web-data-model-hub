@@ -1,15 +1,29 @@
-// Orden de columnas (doc 74): UN solo orden por tabla — `ordinal`, el mismo en
-// el modelo lógico y en el físico. Helpers PUROS que comparten el canvas, el
-// panel de propiedades, el Object Inspector, los exports y el store: ordenar
-// por `ordinal`, qué columnas cambian de posición al reordenar y cómo mover
-// una dentro de la lista. El orden de la LLAVE (`pkPosition`) es otro dato y
-// vive en `keyOrder.ts`.
+// Orden de columnas (doc 74/81): UN solo orden de DISPLAY por tabla — bloque de
+// llaves primero (orden de llave, `pkPosition`) y el resto por `ordinal`, el
+// mismo en el modelo lógico y en el físico. Helpers PUROS que comparten el
+// canvas, el panel de propiedades, el Object Inspector, el panel de columna y
+// el store, para que NINGUNO diverja del canvas (doc 81: el properties mostraba
+// puro `ordinal` y con la carga Excel —PK no primero— se veía distinto). El
+// reorden de columnas escribe `ordinal`; el de la LLAVE (`pkPosition`) vive en
+// `keyOrder.ts`.
+import { sortByKeyOrder } from './keyOrder';
 
 export interface ReorderStep<T> { c: T; idx: number }
 
 /** Columnas por `ordinal` (sort estable; no muta la entrada). */
 export function sortByOrdinal<T extends { ordinal: number }>(cols: T[]): T[] {
   return [...cols].sort((a, b) => a.ordinal - b.ordinal);
+}
+
+/** Orden ÚNICO de display de una tabla (doc 81): PRIMERO el bloque de llaves,
+ *  en orden de llave (`pkPosition`; sin él, por ordinal — ver keyOrder), y
+ *  DESPUÉS el resto por `ordinal`. Es exactamente lo que dibuja el canvas
+ *  (`TableNode`): la única fuente de verdad del orden visible. `cols` debe venir
+ *  acotado a UNA tabla. Sort estable; no muta la entrada. */
+export function orderColumns<T extends { ordinal: number; isPrimaryKey?: boolean | null; pkPosition?: number | null }>(cols: T[]): T[] {
+  const pks = sortByKeyOrder(cols.filter((c) => !!c.isPrimaryKey));
+  const rest = sortByOrdinal(cols.filter((c) => !c.isPrimaryKey));
+  return [...pks, ...rest];
 }
 
 /** Columnas cuya posición cambia con `orderedIds` (índice nuevo = `ordinal`).

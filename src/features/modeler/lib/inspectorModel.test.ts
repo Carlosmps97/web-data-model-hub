@@ -19,11 +19,16 @@ describe('inspectorModel', () => {
     expect(facetType({ dataType: 'VARCHAR(30)', logicalDataType: 'X' }, 'physical')).toBe('VARCHAR(30)');
   });
 
-  it('positionIn usa el orden único de la tabla (doc 74)', () => {
+  it('positionIn sigue el orden de display canónico: bloque PK primero (doc 81)', () => {
     const cols = [col('a', 3), col('b', 1), col('c', 2)];
     expect(positionIn(cols, 'a')).toEqual({ pos: 3, of: 3 });
     expect(positionIn(cols, 'c')).toEqual({ pos: 2, of: 3 });
     expect(positionIn(cols, 'zzz')).toEqual({ pos: 0, of: 3 });
+    // Tabla legacy (Excel pre-doc-81, ordinal no PK-first): el badge acompaña
+    // a la lista — la PK se muestra 1.ª aunque su ordinal sea el último.
+    const legacy = [col('x', 0), col('y', 1), col('pk', 2, { isPrimaryKey: true })];
+    expect(positionIn(legacy, 'pk')).toEqual({ pos: 1, of: 3 });
+    expect(positionIn(legacy, 'x')).toEqual({ pos: 2, of: 3 });
   });
 
   it('keyLabel / facetOnly', () => {

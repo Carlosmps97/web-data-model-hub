@@ -2,7 +2,7 @@
 // tipos por faceta, posiciones, rótulos de relaciones y rutas de uso.
 import type { CanonicalColumn, TableLinkRow, TableUsageRow } from '@/services/governance.service';
 import type { Facet } from '@/lib/facets';
-import { sortByOrdinal } from './columnOrder';
+import { orderColumns } from './columnOrder';
 
 /** Etiqueta compacta por extremo (misma tabla del panel de propiedades). */
 export const CARD_LBL: Record<string, string> = {
@@ -20,9 +20,11 @@ export const facetName = (o: { logicalName?: string | null; physicalName?: strin
 export const facetType = (c: Pick<CanonicalColumn, 'dataType' | 'logicalDataType'>, facet: Facet): string =>
   (facet === 'logical' ? (c.logicalDataType || c.dataType || '') : (c.dataType || ''));
 
-/** Posición 1-based de la columna en el orden de la tabla («#3 of 12»); 0 si no está. */
+/** Posición 1-based de la columna en el orden de DISPLAY canónico de la
+ *  tabla («#3 of 12») — bloque PK primero, igual que la lista del inspector
+ *  (doc 81); 0 si no está. */
 export function positionIn(cols: CanonicalColumn[], colId: string): { pos: number; of: number } {
-  const list = sortByOrdinal(cols);
+  const list = orderColumns(cols);
   return { pos: list.findIndex((c) => c.id === colId) + 1, of: list.length };
 }
 

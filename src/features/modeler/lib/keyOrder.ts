@@ -22,8 +22,10 @@ export function sortByKeyOrder<T extends KeySortable>(pks: T[]): T[] {
     || (a.ordinal - b.ordinal));
 }
 
-/** PKs de la tabla en orden de llave. `cols` debe venir acotado a UNA tabla. */
-export function pkInKeyOrder(cols: CanonicalColumn[]): CanonicalColumn[] {
+/** PKs de la tabla en orden de llave. `cols` debe venir acotado a UNA tabla.
+ *  Genérico (doc 81): lo usan `orderColumns` y tests con formas mínimas, no sólo
+ *  `CanonicalColumn`. */
+export function pkInKeyOrder<T extends KeySortable & { isPrimaryKey?: boolean | null }>(cols: T[]): T[] {
   return sortByKeyOrder(cols.filter((c) => !!c.isPrimaryKey));
 }
 

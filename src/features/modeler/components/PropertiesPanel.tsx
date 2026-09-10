@@ -11,7 +11,7 @@ import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun } from
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/services/governance.service';
 import { matchesColumn } from '../lib/columnSearch';
-import { sortByOrdinal } from '../lib/columnOrder';
+import { orderColumns } from '../lib/columnOrder';
 import { pkInKeyOrder, reorderKey } from '../lib/keyOrder';
 import { alignSourcesToPhysical } from '../lib/viewSync';
 import { ColumnRow } from './ColumnEditor';
@@ -77,10 +77,12 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     return () => { alive = false; };
   }, []);
   const table = diagram?.tables.find((t) => t.id === selectedTableId) ?? null;
-  // Doc 74: la lista sigue el ÚNICO orden de la tabla (`ordinal`, el mismo en
-  // ambas facetas); el drag&drop lo escribe.
+  // Doc 81: la lista sigue el ÚNICO orden de display (bloque PK primero + resto
+  // por `ordinal`), el MISMO que dibuja el canvas — antes era puro `ordinal` y
+  // con la carga Excel (PK no primero) divergía del canvas. El drag&drop
+  // reordena las no-PK (el bloque PK se reordena en «Key order», más abajo).
   const cols = useMemo(
-    () => sortByOrdinal((diagram?.columns ?? []).filter((c) => c.tableId === selectedTableId)),
+    () => orderColumns((diagram?.columns ?? []).filter((c) => c.tableId === selectedTableId)),
     [diagram, selectedTableId],
   );
   const links = useMemo(
@@ -336,6 +338,13 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     // insertaría en una posición equivocada. El grip ya viene deshabilitado;
     // este guard es el cinturón por si un drag nació antes de filtrar.
     if (!src || src === targetId || reordering || colFiltering) return;
+    // Doc 81: el bloque PK queda fijo arriba. Ni se arrastra un PK (el grip
+    // viene apagado) ni se suelta sobre uno: reordenar cruzando la frontera
+    // dejaría el ordinal en un orden que el display (PK-first) volvería a
+    // re-agrupar — el movimiento "no se vería". El orden de llave se cambia en
+    // la sección «Key order».
+    const byId = new Map(cols.map((c) => [c.id, c]));
+    if (byId.get(src)?.isPrimaryKey || byId.get(targetId)?.isPrimaryKey) return;
     const ids = cols.map((c) => c.id).filter((x) => x !== src);
     let idx = ids.indexOf(targetId);
     if (idx < 0) return;
@@ -573,7 +582,8 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                   key={c.id}
                   col={c}
                   canEdit={canEdit}
-                  dragDisabled={colFiltering}
+                  dragDisabled={colFiltering || !!c.isPrimaryKey}
+                  dragDisabledReason={c.isPrimaryKey ? 'Reorder primary keys in the “Key order” section' : undefined}
                   onOpen={setSelectedColumn}
                   isDragging={dragId === c.id}
                   dropHint={overId === c.id ? (after ? 'after' : 'before') : null}

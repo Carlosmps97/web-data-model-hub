@@ -12,7 +12,7 @@ import { isAsOfChangesetId } from '@/services/versioning.service';
 import { FACET_CAPTION, facetNoun, type Facet } from '@/lib/facets';
 import { inspectTable, inspectView, type InspectTableResult, type InspectViewResult } from '../services/inspector.service';
 import { matchesColumn } from '../lib/columnSearch';
-import { moveId, persistReorder, reorderPlan, sortByOrdinal } from '../lib/columnOrder';
+import { moveId, orderColumns, persistReorder, reorderPlan } from '../lib/columnOrder';
 import {
   cardinalityLabel, facetName, facetOnly, facetType, keyLabel, linkRole, otherFacet, ownColumns,
   positionIn, primaryCanvas, usagePath,
@@ -177,7 +177,9 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   }, [target.id]);
 
   const table = data?.table;
-  const cols = useMemo(() => (data ? sortByOrdinal(data.columns) : []), [data]);
+  // Doc 81: mismo orden que el canvas y el properties — bloque PK primero +
+  // resto por ordinal (antes era puro ordinal y con la carga Excel divergía).
+  const cols = useMemo(() => (data ? orderColumns(data.columns) : []), [data]);
   const visible = useMemo(() => cols.filter((c) => matchesColumn(c, colQ)), [cols, colQ]);
   const col = selCol ? (data?.columns.find((c) => c.id === selCol) ?? null) : null;
   const domainName = (id?: string | null) => (id ? (std ? (std.domains.find((d) => d.id === id)?.name ?? id) : '…') : '—');
@@ -225,6 +227,10 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   const move = async (colId: string, delta: number) => {
     if (!data || reordering) return;
     const ids = cols.map((c) => c.id);
+    const from = ids.indexOf(colId), to = from + delta;
+    // Doc 81: el bloque PK queda fijo (su orden se cambia en el properties);
+    // un no-PK no puede cruzar hacia el bloque PK (el display lo re-agruparía).
+    if (cols[from]?.isPrimaryKey || cols[to]?.isPrimaryKey) return;
     const nextIds = moveId(ids, colId, delta);
     if (nextIds === ids) return;
     const plan = reorderPlan(data.columns, nextIds);
@@ -365,8 +371,8 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                                 <td className="n">{i + 1}</td>
                                 {canReorder && (
                                   <td className="mv" onClick={(e) => e.stopPropagation()}>
-                                    <button type="button" className="wk-insp-mv" title="Move up" disabled={i === 0} onClick={() => void move(c.id, -1)}>↑</button>
-                                    <button type="button" className="wk-insp-mv" title="Move down" disabled={i === cols.length - 1} onClick={() => void move(c.id, 1)}>↓</button>
+                                    <button type="button" className="wk-insp-mv" title={c.isPrimaryKey ? 'Reorder keys in the table properties' : 'Move up'} disabled={i === 0 || c.isPrimaryKey || !!cols[i - 1]?.isPrimaryKey} onClick={() => void move(c.id, -1)}>↑</button>
+                                    <button type="button" className="wk-insp-mv" title={c.isPrimaryKey ? 'Reorder keys in the table properties' : 'Move down'} disabled={i === cols.length - 1 || c.isPrimaryKey} onClick={() => void move(c.id, 1)}>↓</button>
                                   </td>
                                 )}
                                 <td className="k">{c.isPrimaryKey && <KeyRound size={11} className="pk" />}{c.isForeignKey && <LinkIcon size={11} className="fk" />}</td>

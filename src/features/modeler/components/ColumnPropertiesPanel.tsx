@@ -10,7 +10,7 @@ import { isComplexTypeStart } from '../lib/complexTypes';
 import { applyDomainDefaults } from '../lib/domainDefaults';
 import { applyDomainPick } from '../lib/domainType';
 import { canonicalDefaultType } from '../lib/typePick';
-import { sortByOrdinal } from '../lib/columnOrder';
+import { orderColumns } from '../lib/columnOrder';
 import { nextPkPosition, pkInKeyOrder } from '../lib/keyOrder';
 import { createNameSync, type NameSync } from '../lib/nameSync';
 import { syncRenamedColumnInViews } from '../lib/viewSync';
@@ -71,9 +71,11 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
 
   const col = diagram?.columns.find((c) => c.id === selectedColumnId) ?? null;
   const table = diagram?.tables.find((t) => t.id === col?.tableId) ?? null;
-  // Hermanas en el orden de la tabla: nextPkPosition (marcar PK) y la Metadata las usan.
+  // Hermanas en el ÚNICO orden de display (doc 81: PK primero + resto por
+  // ordinal, como el canvas): nextPkPosition (marcar PK), la Metadata y el
+  // «Position #N» las usan — así el N coincide con lo que se ve en el canvas.
   const cols = useMemo(
-    () => sortByOrdinal((diagram?.columns ?? []).filter((c) => c.tableId === col?.tableId)),
+    () => orderColumns((diagram?.columns ?? []).filter((c) => c.tableId === col?.tableId)),
     [diagram, col?.tableId],
   );
 

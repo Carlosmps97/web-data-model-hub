@@ -215,8 +215,12 @@ interface ColumnRowProps {
   col: CanonicalColumn;
   canEdit: boolean;
   /** Doc 42: con el buscador de columnas activo el reorder se apaga — el drop
-   *  se resuelve contra la lista COMPLETA y una lista filtrada lo corrompería. */
+   *  se resuelve contra la lista COMPLETA y una lista filtrada lo corrompería.
+   *  Doc 81: también se apaga en las filas PK (el bloque de llave queda fijo
+   *  arriba; su orden se cambia en la sección «Key order»). */
   dragDisabled?: boolean;
+  /** Doc 81: motivo del drag apagado (tooltip del grip). Sin él se asume filtro. */
+  dragDisabledReason?: string;
   /** Doc 49: el click abre el Properties de ESTA columna (sidebar propio) —
    *  la edición inline (fila expandida) se retiró de este listado. */
   onOpen: (id: string) => void;
@@ -236,7 +240,7 @@ interface ColumnRowProps {
  * retiró: la edición vive en ColumnPropertiesPanel. Drag por el grip para
  * reordenar (acción estructural, se queda en el panel de tabla).
  */
-export function ColumnRow({ col, canEdit, dragDisabled, onOpen, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
+export function ColumnRow({ col, canEdit, dragDisabled, dragDisabledReason, onOpen, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
   const canDrag = canEdit && !dragDisabled;
   const dndProps = {
     onDragOver: (e: React.DragEvent) => { if (canDrag) onDragOver(col.id, e); },
@@ -245,7 +249,7 @@ export function ColumnRow({ col, canEdit, dragDisabled, onOpen, isDragging, drop
   const grip = (
     <span
       className={`wk-pp-grip${canEdit && dragDisabled ? ' nodrag' : ''}`}
-      title={canDrag ? 'Drag to reorder' : (canEdit && dragDisabled ? 'Clear the search to reorder' : undefined)}
+      title={canDrag ? 'Drag to reorder' : (canEdit && dragDisabled ? (dragDisabledReason ?? 'Clear the search to reorder') : undefined)}
       draggable={canDrag}
       onClick={(e) => e.stopPropagation()}
       onDragStart={() => { if (canDrag) onDragStart(col.id); }}
