@@ -89,7 +89,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
   useEffect(() => {
     if (!tablePick) return;
     const t = setTimeout(() => {
-      apiGet<CatalogTable[]>(`${API_BASE}/api/catalog/tables?q=${encodeURIComponent(tableQ)}&limit=15`)
+      apiGet<CatalogTable[]>(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/catalog/tables?q=${encodeURIComponent(tableQ)}&limit=15`)
         .then(setTableHits).catch(() => setTableHits([]));
     }, 250);
     return () => clearTimeout(t);
