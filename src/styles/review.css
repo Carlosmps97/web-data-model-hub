@@ -373,3 +373,39 @@
 .dmh-rv-critical strong { color: #C0392B; }
 .dmh-rv-spill--critical { background: #FDECEC; color: #C0392B; border: 1px solid #F3C7C7; }
 .dmh-delproj-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--navy); margin-top: 4px; }
+
+/* ── Doc 84 A1 · Publish blocked (panel persistente en la revisión) ─────────── */
+.dmh-rvb { margin-bottom: 14px; border: 1px solid var(--red-border); border-left: 4px solid var(--red); border-radius: 11px; background: #FFF7F6; padding: 14px 16px; }
+.dmh-rvb-head { display: flex; align-items: flex-start; gap: 10px; }
+.dmh-rvb-head > svg { flex: none; color: var(--red); margin-top: 1px; }
+.dmh-rvb-title { font-size: 13.5px; font-weight: 700; color: var(--navy); line-height: 1.35; }
+.dmh-rvb-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+.dmh-rvb-close { margin-left: auto; flex: none; border: none; background: none; color: var(--text-muted-2); cursor: pointer; padding: 3px; border-radius: 6px; display: inline-flex; }
+.dmh-rvb-close:hover { background: var(--red-tint); color: var(--red); }
+.dmh-rvb-group { margin-top: 12px; }
+.dmh-rvb-glabel { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: var(--navy); margin-bottom: 5px; }
+.dmh-rvb-gcount { font-size: 10.5px; font-weight: 700; color: var(--red); background: var(--red-tint); border-radius: 999px; padding: 1px 7px; }
+.dmh-rvb-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.dmh-rvb-item { background: var(--surface); border: 1px solid var(--red-border); border-radius: 8px; padding: 7px 11px; }
+.dmh-rvb-item-name { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.dmh-rvb-item-name .mono { font-family: var(--mono); font-size: 12px; font-weight: 600; color: var(--navy); }
+.dmh-rvb-ctx { font-size: 11.5px; color: var(--text-muted-2); }
+.dmh-rvb-where { font-size: 11.5px; color: var(--text-body); margin-top: 2px; }
+.dmh-rvb-next { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--red-border); }
+.dmh-rvb-next-t { font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+.dmh-rvb-next ol { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--text-body); line-height: 1.5; }
+.dmh-rvb-next .dmh-rv-act { margin-top: 10px; }
+
+/* Doc 84 A2/A3 · resumen: último cambio + fila de conflictos */
+.dmh-rvs-last { font-size: 11px; color: var(--text-muted-2); margin-left: 8px; }
+.dmh-rvs-row.is-conflict { background: #FFFBF2; }
+.dmh-rvs-row.is-conflict .dmh-rvs-rowlbl { display: inline-flex; align-items: center; gap: 6px; color: var(--amber-deep); }
+
+/* Doc 84 B3/C2 · atribución del cambio bajo la cabecera del detalle */
+.dmh-rvd-attr { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-muted); margin-top: 8px; padding: 0 2px; }
+
+/* Doc 84 B4 · tipo de dato en las filas de columna del árbol */
+.dmh-rvd-dtype { margin-left: auto; flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--text-muted-2); }
+
+/* Doc 84 C1 · el explorer embebido en el popup de Version tools */
+.dmh-vt-explorer { height: min(560px, 62vh); display: flex; flex-direction: column; border: 1px solid var(--border-2); border-radius: 11px; overflow: hidden; background: var(--surface); }

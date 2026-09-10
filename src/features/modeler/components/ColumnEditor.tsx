@@ -7,6 +7,7 @@ import { apiErrorMessage } from '@/services/http';
 import { isComplexTypeStart } from '../lib/complexTypes';
 import { applyDomainDefaults } from '../lib/domainDefaults';
 import { applyDomainPick } from '../lib/domainType';
+import { applyNamingCase } from '../lib/physicalCase';
 import { canonicalDefaultType } from '../lib/typePick';
 import { useModelerStore, type AddColumnInput } from '@/store/useModelerStore';
 import { FACET_CAPTION } from '@/lib/facets';
@@ -58,10 +59,20 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const previewSeq = useRef(0);
   // Doc 69: los UDPs del alta siguen la faceta activa del canvas.
   const viewMode = useModelerStore((s) => s.viewMode);
+  // Doc 83: regla de case del scope column (naming config del proyecto).
+  const columnCase = useModelerStore((s) => s.naming?.column.case);
 
   useEffect(() => { gov.listDomains().then(setDomains).catch(() => {}); }, []);
   useEffect(() => {
-    if (mode !== 'logical' || !name.trim()) { setPreview(''); return; }
+    if (!name.trim()) { setPreview(''); return; }
+    if (mode === 'physical') {
+      // Doc 83: el físico tipeado se persiste con la regla de case del scope
+      // (store + backend); el preview avisa SOLO cuando cambia lo tipeado.
+      ++previewSeq.current;                       // anula un physicalize lógico en vuelo
+      const cased = applyNamingCase(name.trim(), columnCase);
+      setPreview(cased !== name.trim() ? cased : '');
+      return;
+    }
     const mySeq = ++previewSeq.current;
     const t = setTimeout(() => {
       gov.physicalize(name.trim())
@@ -69,7 +80,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
         .catch(() => {});
     }, 220);
     return () => clearTimeout(t);
-  }, [mode, name]);
+  }, [mode, name, columnCase]);
 
   // Doc 64 §1: dupla dominio+tipo como Properties · Data Type — elegir el
   // dominio muestra su default AL INSTANTE (argumentos puntuales y builder de
@@ -142,7 +153,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
         <button className={mode === 'physical' ? 'active' : ''} onClick={() => setMode('physical')}>Physical</button>
       </div>
       <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Words (e.g. monto deuda dólares)' : 'Physical name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
-      {mode === 'logical' && preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
+      {preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
       <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
         {/* Combobox con buscador (doc 41): contiene, lista acotada con
             scroll, nombre + tipo default a la derecha. */}

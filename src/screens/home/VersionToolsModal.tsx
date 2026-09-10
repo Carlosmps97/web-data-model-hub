@@ -18,19 +18,17 @@
  * READ-ONLY: no toca el flujo de aprobación ni el rollback (el Restore sigue
  * viviendo en la fila de la caja Versions).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeftRight, ChevronDown, ChevronRight, GitCompare, PanelsTopLeft, TriangleAlert, Undo2, X,
+  ArrowLeftRight, GitCompare, PanelsTopLeft, TriangleAlert, Undo2, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar } from '@/components/ui';
 import {
   OPEN_VERSION_DENIED,
-  SUMMARY_ROWS,
   asOfChangesetId,
   canOpenVersion,
-  collectionLabel,
   compareVersionDetails,
   compareVersions,
   getChangeset,
@@ -41,17 +39,15 @@ import { projectMeta, sortProjects } from '@/lib/projects';
 import type { Project } from '@/types/model';
 import type {
   ChangesetDetail,
-  DiffEntityDetail,
   SimUserDto,
   VersionCompare,
   VersionRow,
 } from '@/types/versioning';
-import { FieldRows } from '@/screens/review/ChangesDetailModal';
+import DiffExplorer from '@/screens/review/DiffExplorer';
+import type { DetailRef } from '@/screens/review/diffDetailCache';
+import type { TreeSelection } from '@/screens/review/DiffTree';
 
 type Tab = 'compare' | 'details';
-type CacheEntry = DiffEntityDetail | 'loading' | 'missing';
-
-const keyOf = (collection: string, id: string) => `${collection}::${id}`;
 
 /** Fecha legible corta ("Aug 31, 2026, 10:24") o '—'. */
 function fmtWhen(iso?: string | null): string {
@@ -68,12 +64,6 @@ function avatarTone(id: string): (typeof AVATAR_TONES)[number] {
   for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return AVATAR_TONES[h % AVATAR_TONES.length];
 }
-
-const VERBS = [
-  { verb: 'added', cls: 'is-added', pill: 'added' },
-  { verb: 'edited', cls: 'is-edited', pill: 'modified' },
-  { verb: 'deleted', cls: 'is-deleted', pill: 'deleted' },
-] as const;
 
 const STATUS_TEXT: Record<VersionRow['status'], string> = {
   draft: 'Editing (draft)',
@@ -139,8 +129,6 @@ export default function VersionToolsModal({
   const [toId, setToId] = useState<string>(() => publishedRows[publishedRows.length - 1]?.id ?? '');
   const [cmp, setCmp] = useState<VersionCompare | null>(null);
   const [cmpLoading, setCmpLoading] = useState(false);
-  const [openRows, setOpenRows] = useState<Set<string>>(new Set());
-  const [cache, setCache] = useState<Record<string, CacheEntry>>({});
 
   const optionLabel = (v: VersionRow): string => {
     const date = v.appliedAt ? new Date(v.appliedAt).toLocaleDateString() : '';
@@ -155,8 +143,6 @@ export default function VersionToolsModal({
     }
     setCmpLoading(true);
     setCmp(null);
-    setOpenRows(new Set());
-    setCache({});
     try {
       setCmp(await compareVersions(fromId, toId));
     } catch (err) {
@@ -166,31 +152,30 @@ export default function VersionToolsModal({
     }
   };
 
-  const toggleRow = (collection: string, id: string) => {
-    const key = keyOf(collection, id);
-    setOpenRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-    if (!cmp || cache[key]) return;
-    setCache((prev) => ({ ...prev, [key]: 'loading' }));
-    compareVersionDetails(cmp.from.id, cmp.to.id, [{ collection, entityId: id }])
-      .then((r) => setCache((prev) => ({ ...prev, [key]: r.items[0] ?? 'missing' })))
-      .catch(() => setCache((prev) => ({ ...prev, [key]: 'missing' })));
-  };
-
-  /** Colecciones del resultado en el orden canónico del resumen (doc 31). */
-  const orderedCollections = useMemo(() => {
-    if (!cmp) return [];
-    const known = SUMMARY_ROWS.map(([c]) => c);
-    return Object.keys(cmp.collections).sort((a, b) => {
-      const ia = known.indexOf(a);
-      const ib = known.indexOf(b);
-      return (ia === -1 ? known.length : ia) - (ib === -1 ? known.length : ib);
-    });
-  }, [cmp]);
+  // Doc 84 C1: el detalle de campos sale del rango comparado, bajo demanda
+  // (mismo explorer que el popup de revisión).
+  const loadCompareDetails = useCallback(
+    (items: DetailRef[]) => (cmp ? compareVersionDetails(cmp.from.id, cmp.to.id, items) : Promise.resolve({ items: [] })),
+    [cmp],
+  );
+  // Doc 84 C2: atribución por entidad — la ÚLTIMA versión del rango que la
+  // tocó (etiqueta, autor y fecha de publicación), del ledger compuesto.
+  const compareAttribution = useCallback((sel: TreeSelection) => {
+    const bucket = cmp?.collections[sel.collection];
+    if (!bucket) return null;
+    const hit = [...bucket.added, ...bucket.edited, ...bucket.deleted].find((e) => e.id === sel.entityId);
+    const lv = hit?.lastVersion ?? null;
+    if (!lv) return null;
+    return (
+      <div className="dmh-rvd-attr">
+        <span className="dmh-vt-vchip rd-mono">{lv.versionLabel ?? '—'}</span>
+        <span>
+          {lv.owner ? `published by ${userName(lv.owner)}` : 'published'}
+          {lv.appliedAt ? ` on ${fmtWhen(lv.appliedAt)}` : ''}
+        </span>
+      </div>
+    );
+  }, [cmp, users]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Details: cualquier versión (draft/review/publicada) ───────────────────
   const detailRows = useMemo(() => {
@@ -393,51 +378,19 @@ export default function VersionToolsModal({
                       <div className="dmh-vt-empty">No net differences between these two versions.</div>
                     )}
 
-                    {orderedCollections.map((coll) => {
-                      const bucket = cmp.collections[coll];
-                      const total = bucket.added.length + bucket.edited.length + bucket.deleted.length;
-                      if (total === 0) return null;
-                      return (
-                        <div key={coll} className="dmh-vt-sec">
-                          <div className="dmh-vt-sechead">
-                            {collectionLabel(coll)}
-                            <span className="dmh-rvs-rowchips" style={{ marginLeft: 'auto' }}>
-                              {bucket.added.length > 0 && <span className="dmh-rvs-cnt is-added">+{bucket.added.length}</span>}
-                              {bucket.edited.length > 0 && <span className="dmh-rvs-cnt is-edited">~{bucket.edited.length}</span>}
-                              {bucket.deleted.length > 0 && <span className="dmh-rvs-cnt is-deleted">−{bucket.deleted.length}</span>}
-                            </span>
-                          </div>
-                          {VERBS.map(({ verb, cls, pill }) => bucket[verb].map((ent) => {
-                            const key = keyOf(coll, ent.id);
-                            const open = openRows.has(key);
-                            const entry = cache[key];
-                            const d = typeof entry === 'object' ? entry : null;
-                            return (
-                              <div key={key} className="dmh-vt-row">
-                                <button type="button" className="dmh-vt-rowhead" onClick={() => toggleRow(coll, ent.id)}>
-                                  {open ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
-                                  <span className={`dmh-rvd-pill ${cls}`}>{pill}</span>
-                                  <span className={`dmh-vt-rowname${verb === 'deleted' ? ' strike' : ''}`}>
-                                    {ent.name ?? ent.id}
-                                  </span>
-                                </button>
-                                {open && (
-                                  <div className="dmh-vt-rowbody">
-                                    {d
-                                      ? <FieldRows detail={d} />
-                                      : (
-                                        <div className="dmh-rvd-nofields">
-                                          {entry === 'missing' ? 'No detail available for this entity.' : 'Loading diff…'}
-                                        </div>
-                                      )}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          }))}
-                        </div>
-                      );
-                    })}
+                    {cmp.counts.total > 0 && (
+                      <div className="dmh-vt-explorer">
+                        <DiffExplorer
+                          diff={cmp}
+                          loadDetails={loadCompareDetails}
+                          attribution={compareAttribution}
+                          hint={{
+                            title: 'Select a changed item',
+                            body: 'Pick a row on the left to see what changed between the two versions, field by field. Each item shows the version that last changed it.',
+                          }}
+                        />
+                      </div>
+                    )}
                   </>
                 )}
               </>

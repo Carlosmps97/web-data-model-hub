@@ -39,6 +39,7 @@ import { Avatar, Tooltip } from '@/components/ui';
 import { useSessionStore } from '@/store/useSessionStore';
 import { runBlocking } from '@/store/useBusyStore';
 import {
+  publishBlockedDetail,
   addComment,
   getChangeset,
   getDiff,
@@ -52,10 +53,12 @@ import { listProjects } from '@/services/projects.service';
 import { sortProjects } from '@/lib/projects';
 import ChangesDetailModal from '@/screens/review/ChangesDetailModal';
 import ChangesSummary from '@/screens/review/ChangesSummary';
+import PublishBlockedPanel from '@/screens/review/PublishBlockedPanel';
 import CriticalDeletionBlock from '@/screens/review/CriticalDeletionBlock';
 import ApproveDeletionDialog from '@/screens/review/ApproveDeletionDialog';
 import type { Project } from '@/types/model';
 import type {
+  PublishBlockedDetail,
   ChangesetDetail,
   ChangesetDiff,
   SimUserDto,
@@ -128,6 +131,10 @@ export default function ReviewScreen() {
   const [acting, setActing] = useState(false);
   // Popup "Change details" (doc 31) — se cierra solo al cambiar de request.
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // Doc 84 A1: publish bloqueado (409/422 estructurado del approve) — panel
+  // persistente con la lista completa; se limpia al cambiar de request.
+  const [blocked, setBlocked] = useState<PublishBlockedDetail | null>(null);
+  useEffect(() => { setBlocked(null); }, [selectedId]);
   // Tras withdraw/reopen la versión volvió a draft y SALE de la lista: en vez de
   // auto-seleccionar en silencio otro request (que confunde: "Open in canvas"
   // abriría el request de OTRO), mostramos un empty-state con la vuelta al canvas.
@@ -309,11 +316,20 @@ export default function ReviewScreen() {
         : 'Applying decision…';
       const updated = await runBlocking(title, () => review(detail.id, { decision }));
       setDetail(updated);
+      setBlocked(null);
       toast.success(decision === 'approve' ? 'Request approved.' : 'Request rejected.');
       void listVersions().then(setVersions).catch(() => undefined);
       void getDiff(detail.id).then(setDiff).catch(() => undefined);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'The decision could not be recorded.');
+      // Doc 84 A1: un publish bloqueado llega estructurado → panel persistente
+      // con la lista completa; el toast sólo avisa (el bloqueo en sí no cambió).
+      const blockedDetail = publishBlockedDetail(err);
+      if (blockedDetail) {
+        setBlocked(blockedDetail);
+        toast.error('Publish blocked — nothing was published. See the details on this page.');
+      } else {
+        toast.error(err instanceof Error ? err.message : 'The decision could not be recorded.');
+      }
     } finally {
       setActing(false);
     }
@@ -341,6 +357,7 @@ export default function ReviewScreen() {
     setDraftHint({ id, projectId, label });
     setDetail(null);
     setDiff(null);
+    setBlocked(null);
     const next = new URLSearchParams(searchParams);
     next.delete('id');
     setSearchParams(next, { replace: true });
@@ -641,6 +658,14 @@ export default function ReviewScreen() {
                         </span>
                         <span className="sep">·</span>
                         <span>snapshot of {detail.versionLabel ?? '—'}</span>
+                        {diff?.lastChangeAt && (
+                          <>
+                            <span className="sep">·</span>
+                            <span title="When the owner recorded the last change of this request">
+                              last change {fmtDate(diff.lastChangeAt)}
+                            </span>
+                          </>
+                        )}
                         <span className="sep">·</span>
                         <span>{fmtDate(detail.submittedAt ?? detail.createdAt)}</span>
                         <span className="sep">·</span>
@@ -772,6 +797,16 @@ export default function ReviewScreen() {
 
                 {/* detail body */}
                 <div className="dmh-rv-dbody">
+                  {blocked && (
+                    <PublishBlockedPanel
+                      detail={blocked}
+                      ownerName={userName(detail.owner)}
+                      isOwner={detail.owner === user.id}
+                      onWithdraw={canWithdraw ? () => void doWithdraw() : undefined}
+                      onDismiss={() => setBlocked(null)}
+                      userName={userName}
+                    />
+                  )}
                   {detail.description && (
                     <div className="dmh-rv-note-card">
                       <div className="dmh-rv-note-card-head">
@@ -813,6 +848,7 @@ export default function ReviewScreen() {
                       title={detail.title}
                       versionLabel={detail.versionLabel ?? null}
                       diff={diff}
+                      ownerName={userName(detail.owner)}
                       onClose={() => setDetailsOpen(false)}
                     />
                   )}

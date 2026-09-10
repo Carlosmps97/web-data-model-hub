@@ -13,11 +13,18 @@ import {
   Boxes, ChevronDown, ChevronRight, Columns3, Database, Eye, Folder, Layers,
   Link2, Table2, Tags,
 } from 'lucide-react';
-import type {
-  ChangesetDiff,
-  DiffEntity,
-  DiffTreeNode,
-} from '@/types/versioning';
+import type { DiffStructureEntry, DiffTreeNode } from '@/types/versioning';
+
+/** Doc 84 C1: lo que el árbol necesita de un diff — lo cumplen tanto el diff de
+ *  un request (`ChangesetDiff`) como el compare de versiones (`VersionCompare`). */
+export interface DiffEntityLike { id: string; name?: string | null; conflict?: boolean }
+export interface DiffBucketLike { added: DiffEntityLike[]; edited: DiffEntityLike[]; deleted: DiffEntityLike[] }
+export interface DiffLike {
+  collections: Record<string, DiffBucketLike>;
+  tree?: DiffTreeNode[];
+  orphans?: DiffTreeNode[];
+  structure?: DiffStructureEntry[];
+}
 
 export type DiffVerb = 'added' | 'edited' | 'deleted';
 
@@ -55,6 +62,9 @@ export const TYPE_ICON: Record<string, ReactNode> = {
 };
 const NODE_COLLECTION: Record<string, string> = {
   table: 'canonical_tables', column: 'canonical_columns', view: 'views',
+  // Doc 84 B2: los nodos de ESTRUCTURA que cambiaron en el request se marcan y
+  // se seleccionan en el árbol (su entidad versionada viaja en `entityId`).
+  folder: 'folders', canvas: 'subject_areas', schema: 'schemas', project: 'projects',
 };
 /** `structure[].type` YA es el nombre de colección (projects/folders/…). */
 const PILL: Record<string, string> = { added: 'added', edited: 'modified', deleted: 'deleted' };
@@ -74,7 +84,7 @@ const COLL_TYPE: Record<string, string> = {
 const FLAT_PAGE = 150;
 
 interface RelRow {
-  entity: DiffEntity;
+  entity: DiffEntityLike;
   change: DiffVerb;
   name: string;
 }
@@ -87,7 +97,7 @@ function nodeVisible(n: DiffTreeNode, q: string, verbs: Set<DiffVerb>): boolean 
 }
 
 export default function DiffTree({ diff, relationshipNames, selectedKey, onSelect, search, verbs }: {
-  diff: ChangesetDiff;
+  diff: DiffLike;
   /** entityId → "PARENT → CHILD" (resuelto por el prefetch del modal). */
   relationshipNames: Record<string, string | undefined>;
   selectedKey: string | null;
@@ -110,8 +120,9 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
 
   const tree = diff.tree ?? [];
   const orphans = diff.orphans ?? [];
+  // Doc 84 B2: lo que ya está en el árbol (con su pill) no se repite abajo.
   const structure = (diff.structure ?? [])
-    .filter((s) => verbs.has(s.change) && (!q || s.name.toLowerCase().includes(q)));
+    .filter((s) => !s.inTree && verbs.has(s.change) && (!q || s.name.toLowerCase().includes(q)));
   const relRows = useMemo<RelRow[]>(() => {
     const b = diff.collections.relationships;
     if (!b) return [];
@@ -203,7 +214,7 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
             if (isTable && !expanded) toggle(key);
             if (collection) {
               onSelect({
-                key, collection, entityId: node.id, name: node.name,
+                key, collection, entityId: node.entityId ?? node.id, name: node.name,
                 type: TYPE_LABEL[node.type] ?? node.type, iconType: node.type,
                 change: node.change, childColumnIds: changedCols, path: namePath,
               });
@@ -213,6 +224,9 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
           onChevron: isTable ? () => toggle(key) : undefined,
           right: isTable && visKids.length > 0 ? (
             <span className="dmh-rvd-count">{visKids.length} col{visKids.length === 1 ? '' : 's'}</span>
+          ) : node.type === 'column' && node.dataType ? (
+            // Doc 84 B4: el tipo se lee en la fila, sin abrir cada columna.
+            <span className="dmh-rvd-dtype" title="Data type">{node.dataType}</span>
           ) : undefined,
         })}
         {expanded && visKids.map((c) => renderNode(c, depth + 1, key, [...namePath, node.name]))}
@@ -284,7 +298,7 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
   }
 
   // ── Fallback plano (backend sin jerarquía) ──
-  const flat: { change: DiffVerb; entity: DiffEntity; collection: string }[] = [];
+  const flat: { change: DiffVerb; entity: DiffEntityLike; collection: string }[] = [];
   Object.entries(diff.collections).forEach(([collection, bucket]) => {
     (['added', 'edited', 'deleted'] as const).forEach((v) => {
       if (!verbs.has(v)) return;

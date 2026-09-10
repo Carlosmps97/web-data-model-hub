@@ -13,6 +13,7 @@ import { canonicalDefaultType } from '../lib/typePick';
 import { orderColumns } from '../lib/columnOrder';
 import { nextPkPosition, pkInKeyOrder } from '../lib/keyOrder';
 import { createNameSync, type NameSync } from '../lib/nameSync';
+import { applyNamingCase } from '../lib/physicalCase';
 import { syncRenamedColumnInViews } from '../lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import AuditHistory from './AuditHistory';
@@ -271,10 +272,16 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
   // del físico, y UN solo upsert con AMBOS campos.
   const onPatchRef = useRef(onPatch);
   onPatchRef.current = onPatch;
+  // Doc 83: la regla de case del scope column se aplica al físico TIPEADO —
+  // el input muestra lo que se va a persistir (el backend normaliza igual).
+  const columnCase = useModelerStore((s) => s.naming?.column.case);
+  const columnCaseRef = useRef(columnCase);
+  columnCaseRef.current = columnCase;
   const sync = useRef<NameSync | null>(null);
   if (!sync.current) {
     sync.current = createNameSync({
       physicalize: (l) => gov.physicalize(l),
+      normalizePhysical: (v) => applyNamingCase(v, columnCaseRef.current),
       onState: (s) => { setLogical(s.logical); setPhysical(s.physical); },
       // col.id es estable por instancia (el cuerpo se monta con key=col.id).
       onCommit: (fields) => { void onPatchRef.current(col.id, fields); },

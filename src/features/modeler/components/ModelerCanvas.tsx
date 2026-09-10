@@ -27,6 +27,7 @@ import { nextLod } from '../lib/lodSize';
 import { pkInKeyOrder } from '../lib/keyOrder';
 import { relationshipDrift } from '../lib/relationshipPairs';
 import { fanSlots, HEADER_H, ROW_H } from '../lib/edgeFanout';
+import { effectiveLayout } from '../lib/viewerLayout';
 
 const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode, subcat: SubtypeSymbolNode };
 const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge, subcat: SubtypeEdge };
@@ -36,6 +37,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const drawings = useModelerStore((s) => s.drawings);
   const updateDrawing = useModelerStore((s) => s.updateDrawing);
   const saveLayout = useModelerStore((s) => s.saveLayout);
+  // Doc 84 E: layout efímero del visor (mover/arreglar sin persistir).
+  const setViewerPos = useModelerStore((s) => s.setViewerPos);
+  const markViewerHint = useModelerStore((s) => s.markViewerHint);
   const setSelectedTable = useModelerStore((s) => s.setSelectedTable);
   const setSelectedEdge = useModelerStore((s) => s.setSelectedEdge);
   const setHoverEdge = useModelerStore((s) => s.setHoverEdge);
@@ -78,7 +82,12 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     if (!diagram) { setNodes([]); setEdges([]); return; }
     const colsByTable = new Map<string, typeof diagram.columns>();
     diagram.columns.forEach((c) => { const a = colsByTable.get(c.tableId) ?? []; a.push(c); colsByTable.set(c.tableId, a); });
-    const layout = diagram.subjectArea.layout || {};
+    // Doc 84 E: en modo visor, lo movido/arreglado en ESTA sesión pisa el layout
+    // publicado (viewerLayout, por canvas); en edición manda el persistido.
+    const layout = effectiveLayout(
+      diagram.subjectArea.layout,
+      readonly ? useModelerStore.getState().viewerLayout[diagram.subjectArea.id] : undefined,
+    );
     // LOD (doc 33): columnas ancladas por wires (par 0 de cada relación) por
     // tabla — el nodo compacto les deja handles fantasma con el MISMO id que
     // la fila detallada, así los edges no se re-arman al cruzar el umbral.
@@ -163,7 +172,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       ...views.edges,
       ...sub.edges,
     ]);
-  }, [diagram, viewMode, setNodes, setEdges, onEditView]);
+  }, [diagram, viewMode, readonly, setNodes, setEdges, onEditView]);
 
   // LOD (doc 33): al cruzar el umbral de zoom se parchea SOLO data.lod de los
   // nodos (posiciones y edges intactos — los handles fantasma del modo
@@ -237,6 +246,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           id: d.id,
           type: 'shape',
           position: existing?.position ?? { x: d.x, y: d.y },
+          draggable: !readonly,
           width: d.w,
           height: d.h,
           zIndex: -1,
@@ -246,7 +256,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       // Shapes primero ⇒ se pintan detrás de las tablas (refuerza el zIndex).
       return [...shapeNodes, ...others];
     });
-  }, [drawings, setNodes]);
+  }, [drawings, setNodes, readonly]);
 
   // Atajos del canvas (docs 48 + 50), agnósticos al SO (`metaKey || ctrlKey` =
   // ⌘ en macOS, Ctrl en Windows/Linux): Ctrl/Cmd+C copia la selección de
@@ -508,7 +518,10 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // ruteo del edge ya elige el mejor lado por posición (CrowFootEdge), y el
         // onConnect ya orienta padre/hijo por el gesto — nada más cambia.
         connectionMode={ConnectionMode.Loose}
-        nodesDraggable={!readonly}
+        // Doc 84 E: también en modo visor se pueden mover bloques (y auto-
+        // arreglar) para leer mejor el diagrama — sin persistir nunca (ver
+        // onNodeDragStop). Los shapes de dibujo siguen fijos en visor.
+        nodesDraggable
         // Sin delete por teclado: el default de React Flow (Backspace) borraba
         // tablas/wires SÓLO en pantalla (sin persistir, el reload los restaura)
         // — engañoso en edición y una violación del viewer-lock en readonly.
@@ -530,7 +543,17 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         fitView
         fitViewOptions={{ padding: 0.12, minZoom: 0.02 }}
         onNodeDragStop={(_e, node) => {
-          if (readonly) return; // viewer-lock: no persistir movimientos
+          if (readonly) {
+            // Doc 84 E: modo visor — el movimiento vive sólo en esta sesión
+            // (viewerLayout); nada viaja al backend. Aviso una vez por sesión.
+            if (node.type === 'shape' || !diagram) return;
+            setViewerPos(diagram.subjectArea.id, node.id, node.position);
+            if (!useModelerStore.getState().viewerHintShown) {
+              markViewerHint();
+              pushToast('Moves in view mode are not saved. Open the model for editing to keep a layout.');
+            }
+            return;
+          }
           if (node.type === 'shape') updateDrawing(node.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) });
           else void saveLayout(node.id, node.position);
         }}

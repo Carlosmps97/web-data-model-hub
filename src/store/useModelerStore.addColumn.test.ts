@@ -26,7 +26,7 @@ const diagramWith = (columns: unknown[]) => ({ tables: [], columns, relationship
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useModelerStore.setState({ activeSaId: null, dirty: false, diagram: diagramWith([]) });
+  useModelerStore.setState({ activeSaId: null, dirty: false, diagram: diagramWith([]), naming: null });
 });
 
 describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
@@ -161,5 +161,40 @@ describe('useModelerStore.addColumn — default LEGACY del dominio homologado (d
     expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({
       dataType: 'ARRAY<INTEGER>', typeOverridden: true,
     });
+  });
+});
+
+// Doc 83: la regla de case del scope (`naming_config.column.case`) se cumple
+// también cuando el físico se TIPEA directo (modo Physical del popup), no sólo
+// al derivarlo desde el lógico.
+const NAMING = (c: 'upper' | 'lower' | 'camel') =>
+  ({ column: { separator: '_', case: c }, table: { separator: '_', case: 'upper' } }) as const;
+
+describe('useModelerStore.addColumn — case del físico en modo Physical (doc 83)', () => {
+  it('lo tipeado en minúscula se persiste con la regla del scope; el lógico queda tal cual', async () => {
+    useModelerStore.setState({ naming: NAMING('upper') });
+    await useModelerStore.getState().addColumn('t1', { logicalName: 'monto_deuda', mode: 'physical' });
+    const payload = vi.mocked(gov.createColumn).mock.calls[0][0];
+    expect(payload).toMatchObject({ physicalName: 'MONTO_DEUDA', logicalName: 'monto_deuda' });
+    expect(gov.physicalize).not.toHaveBeenCalled();
+  });
+
+  it('regla lower ⇒ minúscula', async () => {
+    useModelerStore.setState({ naming: NAMING('lower') });
+    await useModelerStore.getState().addColumn('t1', { logicalName: 'MTO_DEU', mode: 'physical' });
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({ physicalName: 'mto_deu' });
+  });
+
+  it('sin naming cargado ⇒ upper (default sembrado por el backend)', async () => {
+    useModelerStore.setState({ naming: null });
+    await useModelerStore.getState().addColumn('t1', { logicalName: 'monto', mode: 'physical' });
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({ physicalName: 'MONTO' });
+  });
+
+  it('modo Logical sigue derivando por physicalize y NO re-normaliza la respuesta', async () => {
+    useModelerStore.setState({ naming: NAMING('lower') });
+    await useModelerStore.getState().addColumn('t1', { logicalName: 'monto', mode: 'logical' });
+    expect(gov.physicalize).toHaveBeenCalledWith('monto');
+    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({ physicalName: 'FIS' });
   });
 });

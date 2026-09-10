@@ -11,7 +11,11 @@
  *     físico lo re-enciende). Doc 68: el override ahora PERSISTE
  *     (`physicalNameOverridden` viaja en cada commit y `reset` lo re-siembra
  *     desde el doc) — sin esto, recargar + renombrar el lógico re-derivaba y
- *     pisaba el físico custom.
+ *     pisaba el físico custom;
+ *  5. regla de case del scope (doc 83) → `normalizePhysical` se aplica a lo
+ *     TIPEADO en el físico (estado + commit), no al derivado (ya viene con la
+ *     regla) ni a lo re-sembrado por `reset` (el backend sana lo legacy al
+ *     escribir).
  * El commit del tramo auto se agenda recién al RESOLVER (o fallar) el
  * physicalize: un commit intermedio persistiría el físico viejo junto al
  * lógico nuevo.
@@ -25,6 +29,9 @@ export interface NameSyncOptions {
   /** Persiste ambos campos juntos (un único upsert changeset-aware) más el
    *  override del físico (doc 68). */
   onCommit: (fields: { logicalName: string; physicalName: string; physicalNameOverridden: boolean }) => void;
+  /** Doc 83: normaliza el físico TIPEADO a la regla de case del scope
+   *  (`applyNamingCase`). Ausente ⇒ identidad. */
+  normalizePhysical?: (v: string) => string;
   debounceMs?: number;
 }
 
@@ -39,6 +46,7 @@ export interface NameSync {
 
 export function createNameSync(opts: NameSyncOptions): NameSync {
   const ms = opts.debounceMs ?? 400;
+  const normalize = opts.normalizePhysical ?? ((v: string) => v);
   let logical = '';
   let physical = '';
   let physEdited = false;
@@ -82,8 +90,8 @@ export function createNameSync(opts: NameSyncOptions): NameSync {
       }, ms);
     },
     setPhysical(v) {
-      physical = v;
-      physEdited = v.trim() !== ''; // vaciarlo re-enciende el auto
+      physical = normalize(v);      // doc 83: la UI muestra lo que se persiste
+      physEdited = physical.trim() !== ''; // vaciarlo re-enciende el auto
       seq++; // una edición manual invalida cualquier physicalize en vuelo
       emit();
       scheduleCommit();

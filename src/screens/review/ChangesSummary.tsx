@@ -4,13 +4,30 @@
  * afectados y la matriz por tipo de entidad como filas con chips de conteo
  * (solo los ≠ 0). El detalle fino vive en el popup rediseñado (CTA "Review
  * changes in detail"). Todo sale del `GET /diff` ya cargado — cero requests
- * extra.
+ * extra. Doc 84 A2: los chips dicen la palabra («+6 added», «1 modified»),
+ * la fila «Conflicts with production» entra a la matriz y la cabecera muestra
+ * cuándo fue el último cambio del request (A3).
  */
-import { ListTree } from 'lucide-react';
+import { ListTree, TriangleAlert } from 'lucide-react';
 import { summarizeDiff } from '@/services/versioning.service';
 import type { ChangesetDiff } from '@/types/versioning';
 
 const MAX_CHIPS = 6;
+
+function fmtWhen(iso: string): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  return new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+/** Entidades del diff que producción modificó DESPUÉS de que este request las editó. */
+export function countConflicts(diff: ChangesetDiff): number {
+  let n = 0;
+  Object.values(diff.collections).forEach((b) => {
+    n += [...b.added, ...b.edited, ...b.deleted].filter((e) => e.conflict).length;
+  });
+  return n;
+}
 
 function ChipsRow({ label, names }: { label: string; names: string[] }) {
   if (names.length === 0) return null;
@@ -56,11 +73,17 @@ export default function ChangesSummary({ diff, onOpenDetails }: {
       </div>
     );
   }
+  const conflicts = countConflicts(diff);
   return (
     <div className="dmh-rvs-card">
       <div className="dmh-rvs-head">
         <span className="dmh-rvs-title">Changes summary</span>
         <span className="dmh-rvs-total">{s.total} change{s.total === 1 ? '' : 's'}</span>
+        {diff.lastChangeAt && (
+          <span className="dmh-rvs-last" title="When the owner recorded the last change of this request">
+            last change {fmtWhen(diff.lastChangeAt)}
+          </span>
+        )}
         <span className="dmh-rvs-spacer" />
         <button type="button" className="dmh-rvs-cta" onClick={onOpenDetails}>
           <ListTree size={14} strokeWidth={1.6} aria-hidden />
@@ -71,7 +94,7 @@ export default function ChangesSummary({ diff, onOpenDetails }: {
       {/* Totales por verbo — 3 stat-pills. */}
       <div className="dmh-rvs-stats">
         <div className="dmh-rvs-stat is-added"><span className="n">+{s.added}</span><span className="t">added</span></div>
-        <div className="dmh-rvs-stat is-edited"><span className="n">~{s.edited}</span><span className="t">modified</span></div>
+        <div className="dmh-rvs-stat is-edited"><span className="n">{s.edited}</span><span className="t">modified</span></div>
         <div className="dmh-rvs-stat is-deleted"><span className="n">−{s.deleted}</span><span className="t">deleted</span></div>
       </div>
 
@@ -84,12 +107,23 @@ export default function ChangesSummary({ diff, onOpenDetails }: {
           <div key={r.collection} className="dmh-rvs-row">
             <span className="dmh-rvs-rowlbl">{r.label}</span>
             <span className="dmh-rvs-rowchips">
-              {r.added > 0 && <span className="dmh-rvs-cnt is-added">+{r.added}</span>}
-              {r.edited > 0 && <span className="dmh-rvs-cnt is-edited">~{r.edited}</span>}
-              {r.deleted > 0 && <span className="dmh-rvs-cnt is-deleted">−{r.deleted}</span>}
+              {r.added > 0 && <span className="dmh-rvs-cnt is-added">+{r.added} added</span>}
+              {r.edited > 0 && <span className="dmh-rvs-cnt is-edited">{r.edited} modified</span>}
+              {r.deleted > 0 && <span className="dmh-rvs-cnt is-deleted">−{r.deleted} deleted</span>}
             </span>
           </div>
         ))}
+        {conflicts > 0 && (
+          <div className="dmh-rvs-row is-conflict">
+            <span className="dmh-rvs-rowlbl">
+              <TriangleAlert size={13} strokeWidth={1.8} aria-hidden />
+              Conflicts with production
+            </span>
+            <span className="dmh-rvs-rowchips">
+              <span className="dmh-rvs-cnt is-edited">{conflicts} overwrite{conflicts === 1 ? '' : 's'} on approve</span>
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

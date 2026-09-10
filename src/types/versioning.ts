@@ -170,6 +170,11 @@ export interface DiffTreeNode {
   name: string;
   change?: 'added' | 'edited' | 'deleted' | null;
   children?: DiffTreeNode[];
+  /** Doc 84 B2: id de la entidad versionada cuando el nodo de ESTRUCTURA cambió
+   *  (carpeta/canvas/proyecto = su id; esquema = el uuid, el nodo lleva el nombre). */
+  entityId?: string;
+  /** Doc 84 B4: tipo de dato de una columna (se escanea sin abrir cada fila). */
+  dataType?: string | null;
 }
 
 /** Cambio de una entidad de ESTRUCTURA (proyecto/folder/canvas/esquema). */
@@ -179,6 +184,8 @@ export interface DiffStructureEntry {
   name: string;
   kind: string;
   change: 'added' | 'edited' | 'deleted';
+  /** Doc 84 B2: ya está representada (con su pill) en el árbol. */
+  inTree?: boolean;
 }
 
 /** Diff completo de `GET /api/changesets/{id}/diff`. */
@@ -191,6 +198,8 @@ export interface ChangesetDiff {
   orphans?: DiffTreeNode[];
   /** Cambios de estructura (proyectos/folders/canvases/esquemas). */
   structure?: DiffStructureEntry[];
+  /** Doc 84 A3: último cambio grabado en el request (el autor es el owner). */
+  lastChangeAt?: string | null;
 }
 
 /** Body de `POST /api/changesets/{id}/review`. */
@@ -221,6 +230,8 @@ export interface DiffEntityDetail {
   action: 'created' | 'modified' | 'deleted';
   name: string | null;
   fields: DiffFieldRow[];
+  /** Doc 84 B3: cuándo se grabó el cambio en el request (null en el compare). */
+  at?: string | null;
 }
 
 // ─── Version compare (doc 65 — popup "Version tools" del Home) ───────────────
@@ -233,11 +244,20 @@ export interface CompareVersionRef {
   appliedAt?: string | null;
 }
 
+/** Doc 84 C2: la ÚLTIMA versión del rango comparado que tocó una entidad. */
+export interface CompareLastVersion {
+  id: string | null;
+  versionLabel?: string | null;
+  owner?: string | null;
+  appliedAt?: string | null;
+}
+
 /** Una entidad con cambio NETO entre las dos versiones comparadas. */
 export interface CompareEntity {
   id: string;
   name: string | null;
   collection: string;
+  lastVersion?: CompareLastVersion | null;
 }
 
 /** Buckets por verbo de una colección dentro del compare. */
@@ -257,4 +277,42 @@ export interface VersionCompare {
   collections: Record<string, CompareBucket>;
   counts: { added: number; edited: number; deleted: number; total: number };
   unreconstructed: { collection: string; id: string; name: string | null }[];
+  /** Doc 84 C1: la misma jerarquía del popup de revisión. */
+  tree?: DiffTreeNode[];
+  orphans?: DiffTreeNode[];
+  structure?: DiffStructureEntry[];
+}
+
+// ─── Publish blocked (doc 84 D1/A1) ──────────────────────────────────────────
+
+/** Un choque reportado por el publish. `kind`: table | column | schema | change. */
+export interface PublishBlockedItem {
+  collection?: string;
+  kind: string;
+  entityId?: string;
+  name?: string;
+  schema?: string | null;
+  tableId?: string | null;
+  tableName?: string | null;
+  /** `production`: ya existe publicado · `request`: se repite dentro del request. */
+  where?: 'production' | 'request';
+  message: string;
+  existing?: {
+    id?: string | null;
+    name?: string | null;
+    schema?: string | null;
+    tableName?: string | null;
+    version?: string | null;
+    owner?: string | null;
+    publishedAt?: string | null;
+  } | null;
+}
+
+/** `detail` estructurado de un 409/422 del approve: el bloqueo no cambió, ahora
+ *  se explica entero (lista completa + qué hacer). */
+export interface PublishBlockedDetail {
+  code: string;
+  message: string;
+  items: PublishBlockedItem[];
+  next?: string | null;
 }

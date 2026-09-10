@@ -152,6 +152,63 @@ describe('override persistido (doc 68)', () => {
   });
 });
 
+describe('normalizePhysical — regla de case del scope (doc 83)', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  const upperHarness = () => {
+    const onState = vi.fn();
+    const onCommit = vi.fn();
+    const sync = createNameSync({
+      physicalize: async (l) => ({ physical: l.toUpperCase() }),
+      normalizePhysical: (v) => v.toUpperCase(),
+      onState, onCommit, debounceMs: 400,
+    });
+    return { sync, onState, onCommit, state: () => onState.mock.calls.at(-1)?.[0] as { logical: string; physical: string } };
+  };
+
+  it('tipear el físico en minúscula lo MUESTRA y lo commitea normalizado', async () => {
+    const h = upperHarness();
+    h.sync.reset('monto', 'MTO', false);
+    h.sync.setPhysical('monto_deuda');
+    expect(h.state().physical).toBe('MONTO_DEUDA');      // la UI refleja la regla al instante
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.onCommit).toHaveBeenLastCalledWith({
+      logicalName: 'monto', physicalName: 'MONTO_DEUDA', physicalNameOverridden: true,
+    });
+  });
+
+  it('vaciar el físico sigue re-encendiendo el auto (normalizar no inventa contenido)', async () => {
+    const h = upperHarness();
+    h.sync.reset('monto', 'MTO_X', true);
+    h.sync.setPhysical('');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.onCommit).toHaveBeenLastCalledWith({
+      logicalName: 'monto', physicalName: '', physicalNameOverridden: false,
+    });
+  });
+
+  it('reset NO normaliza lo persistido: un legacy en minúscula se muestra tal cual hasta editarlo', async () => {
+    const h = upperHarness();
+    h.sync.reset('monto', 'mto_legacy', true);
+    h.sync.setLogical('monto dos');                      // con override: commit sin re-derivar
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.onCommit).toHaveBeenLastCalledWith({
+      logicalName: 'monto dos', physicalName: 'mto_legacy', physicalNameOverridden: true,
+    });
+  });
+
+  it('sin normalizePhysical el físico pasa tal cual (compat)', async () => {
+    const h = harness();
+    h.sync.setPhysical('abc');
+    expect(h.state().physical).toBe('abc');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.onCommit).toHaveBeenLastCalledWith({
+      logicalName: '', physicalName: 'abc', physicalNameOverridden: true,
+    });
+  });
+});
+
 // ── tableNamePlan (doc 68): decisión de guardado del panel de TABLA ────────
 import { tableNamePlan } from './nameSync';
 

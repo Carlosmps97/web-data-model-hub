@@ -20,6 +20,8 @@ import type {
   ChangesetDetail,
   ChangesetDiff,
   DiffEntityDetail,
+  PublishBlockedDetail,
+  PublishBlockedItem,
   ReviewBody,
   SimUserDto,
   SnapshotBody,
@@ -88,6 +90,16 @@ export function submit(id: string, body: SubmitBody): Promise<VersionRow> {
 /** Changeset completo (cabecera, reviewers, approvals, comments) para el panel. */
 export function getChangeset(id: string): Promise<ChangesetDetail> {
   return apiGet<ChangesetDetail>(`${API_BASE}/api/changesets/${id}`);
+}
+
+/** Doc 84 D1: `detail` estructurado de un publish bloqueado (409/422 del
+ *  approve) — {code, message, items, next}; null si el error no es de ese tipo
+ *  (entonces vale el `message` de siempre). */
+export function publishBlockedDetail(e: unknown): PublishBlockedDetail | null {
+  if (!(e instanceof ApiError) || !e.detail || typeof e.detail !== 'object') return null;
+  const d = e.detail as Partial<PublishBlockedDetail>;
+  if (typeof d.code !== 'string' || typeof d.message !== 'string' || !Array.isArray(d.items)) return null;
+  return { code: d.code, message: d.message, items: d.items as PublishBlockedItem[], next: d.next ?? null };
 }
 
 /** Diff estructurado (added/edited/deleted por colección + resumen de impacto). */

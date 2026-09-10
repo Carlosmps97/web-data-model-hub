@@ -10,6 +10,8 @@ import type { DbSchema } from '@/features/modeler/services/schemas.service';
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
+import { getNamingConfig, type NamingConfig } from '@/services/naming.service';
+import { applyNamingCase } from '@/features/modeler/lib/physicalCase';
 import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
 import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
@@ -82,6 +84,10 @@ interface ModelerState {
   selectedTableId: string | null;
   selectedEdgeId: string | null;
   viewMode: 'logical' | 'physical';
+  /** Doc 83: naming config (separador/case por scope) del proyecto activo —
+   *  se carga al abrir un canvas; el popup New column y el panel Properties
+   *  aplican `column.case` al físico TIPEADO. null = aún no cargado. */
+  naming: NamingConfig | null;
   relPreset: { parent: gov.Cardinality; child: gov.Cardinality; identifying: boolean } | null;
   setRelPreset: (p: ModelerState['relPreset']) => void;
   /** Herramienta SUBCATEGORÍA armada (doc 53): drag desde la cabecera del
@@ -162,6 +168,14 @@ interface ModelerState {
   /** Instancia de React Flow del canvas activo (la setea ModelerCanvas en onInit). */
   flow: ReactFlowInstance | null;
   setFlow: (rf: ReactFlowInstance | null) => void;
+  /** Doc 84 E: movimientos/arrange hechos en modo VISOR, por canvas — viven sólo
+   *  en esta sesión (memoria) y jamás se persisten; el canvas los pinta encima
+   *  del layout publicado. Persistir sigue siendo cosa de una edición publicada. */
+  viewerLayout: Record<string, Record<string, { x: number; y: number }>>;
+  setViewerPos: (saId: string, nodeId: string, pos: { x: number; y: number }) => void;
+  /** Aviso «los movimientos en modo visor no se guardan»: una vez por sesión. */
+  viewerHintShown: boolean;
+  markViewerHint: () => void;
   /** LOD (doc 33): bajo el umbral de zoom los nodos se pintan COMPACTOS (misma
    *  caja, tamaño y colores; sin las filas, que a ese zoom miden <1px). Default
    *  true: el fitView inicial de un canvas grande arranca alejado y la primera
@@ -240,6 +254,9 @@ interface ModelerState {
   /** @internal recarga folders+canvases del proyecto y depura la selección. */
   _refreshProject: (projectId: string) => Promise<void>;
   reload: () => Promise<void>;
+  /** Doc 83: cachea el naming config de `projectId` (descarta respuestas de
+   *  un proyecto que dejó de ser el activo; un fallo no pisa lo cacheado). */
+  loadNaming: (projectId: string | null) => Promise<void>;
   saveLayout: (tableId: string, pos: { x: number; y: number }) => Promise<void>;
   /** Persiste la posición de TODOS los nodos del canvas activo (botón Save del toolbar). */
   saveAllLayout: () => Promise<void>;
@@ -325,6 +342,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   selectedTableId: null,
   selectedEdgeId: null,
   viewMode: 'physical',
+  naming: null,
   relPreset: null,
   // Armar una herramienta desarma la otra (un solo gesto de dibujo a la vez).
   setRelPreset: (p) => set(p ? { relPreset: p, subcatArmed: false } : { relPreset: p }),
@@ -466,6 +484,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: colId, selectedViewId: null }),
   flow: null,
   setFlow: (rf) => set({ flow: rf }),
+  viewerLayout: {},
+  setViewerPos: (saId, nodeId, pos) => set((st) => ({
+    viewerLayout: { ...st.viewerLayout, [saId]: { ...(st.viewerLayout[saId] ?? {}), [nodeId]: pos } },
+  })),
+  viewerHintShown: false,
+  markViewerHint: () => set({ viewerHintShown: true }),
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
   navigating: null,
@@ -690,6 +714,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null,
             colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
             drawings: diagram.subjectArea.drawings ?? [] });
+      // Doc 83: reglas de naming del proyecto del canvas (best-effort, no bloquea).
+      void get().loadNaming(pid ?? get().activeProjectId);
     } finally {
       // Sólo la llamada MÁS RECIENTE limpia el spinner: una vieja descartada
       // no debe apagar el openingSaId de la que sigue en vuelo.
@@ -773,6 +799,14 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null }),
     });
   },
+  loadNaming: async (projectId) => {
+    if (!projectId) return;
+    try {
+      const naming = await getNamingConfig(projectId);
+      // Cambio rápido de canvas entre proyectos: sólo aplica si sigue activo.
+      if (get().activeProjectId === projectId) set({ naming });
+    } catch { /* sin config el front asume upper (default del backend) */ }
+  },
   reload: async () => {
     const id = get().activeSaId; if (!id) return;
     const seq = ++_loadSeq;
@@ -810,7 +844,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   autoOrganize: async () => {
     const dia = get().diagram; const saId = get().activeSaId;
     if (!dia || !saId) return;
-    get().markDirty();
+    // Doc 84 E: en modo visor el arrange es de ESTA sesión — ni dirty ni persistencia.
+    const viewer = useSessionStore.getState().openMode === 'readonly';
+    if (!viewer) get().markDirty();
     // Grafo + ELK + símbolos de subcategoría en `arrangeGraph.ts` (doc 55:
     // lo comparte el arrange headless de la carga masiva). Tamaños MEDIDOS de
     // los nodos vivos: ELK con tamaño fijo superponía las tablas altas (30
@@ -821,6 +857,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const m = measured.get(id);
       return m?.width != null && m?.height != null ? { width: m.width, height: m.height } : undefined;
     }, get().viewMode);
+    if (viewer) {
+      // Se aplica a los nodos vivos y se recuerda por canvas (viewerLayout) para
+      // que un re-armado del diagrama no lo pierda; nunca viaja al backend.
+      set((st) => ({ viewerLayout: { ...st.viewerLayout, [saId]: { ...(st.viewerLayout[saId] ?? {}), ...pos } } }));
+      get().flow?.setNodes((nodes) => nodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)));
+      return;
+    }
     await struct.setSubjectAreaLayout(saId, pos);   // setSubjectAreaLayout MERGEA (M3a)
     await get().reload();
   },
@@ -855,7 +898,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   addColumn: async (tableId: string, input: AddColumnInput) => {
     get().markDirty();
     const id = crypto.randomUUID();
-    const physical = input.mode === 'logical' ? (await gov.physicalize(input.logicalName)).physical : input.logicalName;
+    // Doc 83: en modo Physical lo tipeado ES el físico → se persiste con la
+    // regla de case del scope (el backend la aplica igual en el choke point);
+    // el lógico queda tal cual. En modo Logical el motor ya la aplicó.
+    const physical = input.mode === 'logical'
+      ? (await gov.physicalize(input.logicalName)).physical
+      : applyNamingCase(input.logicalName, get().naming?.column.case);
     const domains = await gov.listDomains();
     const dom = domains.find((d) => d.id === input.parentDomainId);
     const override = (input.dataType ?? '').trim();

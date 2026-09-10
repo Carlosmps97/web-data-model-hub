@@ -333,7 +333,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             onUndo,
             { disabled: !canEdit || undoBusy || undoCount === 0, lockTip: true },
           )}
-          {ic('Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !canEdit || arranging, lockTip: true })}
+          {/* Doc 84 E: también en modo visor (sólo en esta sesión, no se guarda). */}
+          {ic(readonly ? 'Auto-arrange — view only, not saved' : 'Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !hasCanvas || arranging })}
           {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas })}
           <span ref={exportBtnRef} style={{ display: 'inline-flex' }}>
             {ic('Export diagram — SVG · interactive HTML · PDF', <ImageDown size={17} />, () => {
