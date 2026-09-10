@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { isTopDialog, pushDialog, removeDialog } from './dialogStack';
 
 export type DialogBackdrop = 'screen' | 'canvas';
 
@@ -53,12 +54,29 @@ export default function Dialog({
   backdrop = 'screen',
   canvasTop = 52,
 }: DialogProps) {
+  // ESC: lo consume SÓLO el diálogo del tope (doc 80 §1). Con el popup de
+  // Esquemas abierto encima del editor de vistas, un ESC cerraba los dos.
+  // El token es estable por instancia y el efecto depende sólo de `open`: si
+  // dependiera de `onClose` (los callers pasan arrows inline), cada render del
+  // diálogo de ABAJO lo re-registraría en el tope y le robaría el ESC.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const tokenRef = useRef<symbol | null>(null);
+  if (tokenRef.current === null) tokenRef.current = Symbol('dmh-dialog');
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const token = tokenRef.current as symbol;
+    pushDialog(token);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isTopDialog(token)) onCloseRef.current();
+    };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+    return () => {
+      removeDialog(token);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
 
   if (!open) return null;
 

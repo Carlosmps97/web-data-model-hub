@@ -33,3 +33,24 @@ export function defaultViewSchema(tableSchema: string | undefined | null, schema
   const hit = schemas.find((s) => s.kind !== 'tables' && s.name.trim().toLowerCase() === wanted);
   return hit ? hit.name : null;
 }
+
+/**
+ * Estado inicial del combo **Schema** al CREAR una vista con tabla fuente
+ * (doc 80 §1). Antes el fallback era el esquema de la TABLA: una vista nacía
+ * apuntando a un esquema de tablas — que ni siquiera figura en su propio combo
+ * (`SchemaSelect kind="views"` lo excluye y lo inyectaba como opción postiza).
+ *
+ * Ahora: si existe `<esquemaTabla>_VU` se pre-selecciona; si NO existe el campo
+ * queda VACÍO y se devuelve el nombre que habría que crear, para ofrecerlo.
+ * `suggest` es null cuando no hay nada que sugerir (sin tabla fuente) o cuando
+ * ya se resolvió el esquema.
+ */
+export function viewSchemaOnCreate(
+  tableSchema: string | undefined | null,
+  schemas: DbSchema[],
+): { schema: string; suggest: string | null } {
+  const base = (tableSchema ?? '').trim();
+  if (!base) return { schema: '', suggest: null };
+  const hit = defaultViewSchema(base, schemas);
+  return hit ? { schema: hit, suggest: null } : { schema: '', suggest: `${base}_VU` };
+}

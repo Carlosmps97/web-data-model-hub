@@ -64,3 +64,20 @@ export function orderedForSave(ops: StagedOp[]): StagedOp[] {
   const rank = { create: 0, rename: 1, delete: 2 } as const;
   return [...ops].sort((a, b) => rank[a.kind] - rank[b.kind]);
 }
+
+/**
+ * Filas visibles del gestor de esquemas (doc 80 §2). El campo "New schema"
+ * hace DOBLE trabajo: mientras escribes, filtra la lista de abajo por
+ * «contiene» case-insensitive (doc 57) — con ~390 esquemas, encontrar el que
+ * quieres renombrar o borrar era scrollear a ciegas — y si nada coincide, ese
+ * mismo texto es el nombre del esquema nuevo.
+ *
+ * Un esquema con cambio PENDIENTE se muestra siempre, coincida o no: trabajo
+ * sin guardar nunca se esconde detrás de un filtro.
+ */
+export function visibleSchemas<T extends DbSchemaLike>(schemas: T[], ops: StagedOp[], q: string): T[] {
+  const n = q.trim().toLowerCase();
+  if (!n) return schemas;
+  const touched = new Set(ops.filter((o) => o.kind !== 'create').map((o) => o.id));
+  return schemas.filter((s) => s.name.toLowerCase().includes(n) || touched.has(s.id));
+}

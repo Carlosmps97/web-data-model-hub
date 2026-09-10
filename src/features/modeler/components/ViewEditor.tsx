@@ -12,8 +12,9 @@ import { DEFAULT_DATABRICKS_OPTS, inferJoin, viewDDL, type DdlView } from '@/fea
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
 import { colKey, splitColKey, serializeSources, resolveJoinOverride, inferNameJoin, type ColCfg } from '../lib/viewEditorLogic';
 import { extractDdlBody, syncViewTypeUdp } from '../lib/viewPanelLogic';
-import { defaultViewSchema } from '../lib/schemaPick';
 import SchemaSelect from './SchemaSelect';
+import SchemaManagerModal from './SchemaManagerModal';
+import { viewSchemaOnCreate } from '../lib/schemaPick';
 
 const PURPLE = '#8B5CF6', PURPLE_DK = '#6D3FC4', BLUE = '#2E5BFF', NAVY = '#1A2B4A', MUTED = '#9AA3B2';
 const MONO = "var(--mono, 'Geist Mono', monospace)";
@@ -76,25 +77,40 @@ export default function ViewEditor({
 
   const [sourceIds, setSourceIds] = useState<string[]>(initialSourceIds);
   // Defaults de creación (doc 52 §4): nombre = el FÍSICO de la tabla origen
-  // tal cual (M_CLIENTE → M_CLIENTE; antes `v_<físico>`); esquema = el de la
-  // tabla como fallback, que el efecto de abajo upgradea a `<esquema>_VU` si
-  // esa convención existe en el catálogo de vistas.
+  // tal cual (M_CLIENTE → M_CLIENTE; antes `v_<físico>`). El esquema arranca
+  // VACÍO y lo resuelve el efecto de abajo (doc 80 §1).
   const [name, setName] = useState(view?.name ?? (firstTable ? firstTable.physicalName : ''));
-  const [schema, setSchema] = useState(view?.schema ?? firstTable?.schema ?? '');
-  // Convención `_VU` (doc 52 §4), solo al CREAR: cuando el catálogo llega, si
-  // existe `<esquemaTabla>_VU` (CI, kind vistas) se auto-selecciona UNA sola
-  // vez — y solo si el usuario no tocó el campo (se compara contra el fallback
-  // inicial; un valor editado no se pisa). Si no existe, queda el fallback.
+  const [schema, setSchema] = useState(view?.schema ?? '');
+  // Convención `_VU` (doc 52 §4, corregida por el doc 80 §1), solo al CREAR:
+  // cuando el catálogo llega, si existe `<esquemaTabla>_VU` (CI, kind vistas)
+  // se auto-selecciona UNA sola vez — y solo si el usuario no tocó el campo.
+  // Si NO existe, el campo queda VACÍO y se ofrece crearlo: el fallback viejo
+  // era el esquema de la TABLA, o sea una vista naciendo en un esquema de
+  // tablas que ni siquiera figura en su propio combo (`kind="views"`).
   const storeSchemas = useModelerStore((s) => s.schemas);
-  const schemaAutoRef = useRef<string | null>(view ? null : (firstTable?.schema ?? ''));
+  // Esquema de la fuente ACTUAL (no la de montaje): "New view" desde el toolbar
+  // arranca sin fuentes y la primera se elige adentro.
+  const firstSourceSchema = tableById.get(sourceIds[0] ?? '')?.schema;
+  const schemaAutoRef = useRef<string | null>(view ? null : '');
   useEffect(() => {
-    const initial = schemaAutoRef.current;
-    if (initial === null || ro) return;
-    const hit = defaultViewSchema(firstTable?.schema, storeSchemas);
-    if (!hit) return;
+    if (schemaAutoRef.current === null || ro) return;
+    const { schema: hit } = viewSchemaOnCreate(firstSourceSchema, storeSchemas);
+    if (!hit) return;                       // aún sin `_VU`: se ofrece crearlo
     schemaAutoRef.current = null;
-    setSchema((cur) => (cur === initial ? hit : cur));
-  }, [storeSchemas, ro, firstTable?.schema]);
+    setSchema((cur) => (cur === '' ? hit : cur));
+  }, [storeSchemas, ro, firstSourceSchema]);
+  // El `<ESQUEMA>_VU` que FALTA, derivado (no estado): con estado, cualquier
+  // recarga del catálogo con la fuente aún sin resolver lo dejaba en blanco y
+  // el aviso desaparecía sin que nada hubiera cambiado.
+  const suggestVU = useMemo(
+    () => (view || ro ? null : viewSchemaOnCreate(firstSourceSchema, storeSchemas).suggest),
+    [view, ro, firstSourceSchema, storeSchemas],
+  );
+
+  // Popup de Esquemas abierto DESDE acá (doc 80 §1): crea por el camino normal
+  // (staging → changeset activo), nunca escritura directa. Al volver, si el
+  // `_VU` ya existe queda seleccionado.
+  const [schemaModal, setSchemaModal] = useState(false);
   const [tags, setTags] = useState<Tag[]>(view?.tags ?? []);
   const [filter, setFilter] = useState(view?.filter ?? '');
   // "Show on this canvas" arranca ON al CREAR (doc 50 §5 — pedido del equipo);
@@ -230,14 +246,13 @@ export default function ViewEditor({
     // Doc 64 r2: New view desde el toolbar arranca SIN fuentes ⇒ sin nombre
     // (el botón quedaba deshabilitado y se leía como culpa del JOIN). Al
     // agregar la PRIMERA fuente, nombre y esquema se precargan como en el
-    // flujo pre-amarrado (físico tal cual + `_VU` si existe, doc 52 §4) —
-    // solo si el usuario no los tocó.
+    // flujo pre-amarrado (físico tal cual + `_VU` si existe, doc 52 §4).
+    // Doc 80 §1: el ESQUEMA ya no se toca acá — lo resuelve el efecto de
+    // arriba sobre la fuente actual (con `_VU` lo selecciona; sin `_VU` queda
+    // vacío y se ofrece crearlo). Antes caía al esquema de la TABLA.
     if (sourceIds.length === 0) {
       const t = tableById.get(tid);
-      if (t) {
-        if (!name.trim()) setName(t.physicalName);
-        if (!schema.trim()) setSchema(defaultViewSchema(t.schema, storeSchemas) || t.schema || '');
-      }
+      if (t && !name.trim()) setName(t.physicalName);
     }
     setSourceIds((s) => [...s, tid]);
     setGrid((g) => {
@@ -454,6 +469,19 @@ export default function ViewEditor({
               {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
                   de VISTAS; se crean desde Structure · Esquemas. */}
               <SchemaSelect kind="views" value={schema} onChange={setSchema} className="" inputStyle={idField} />
+              {/* Doc 80 §1: sin `<ESQUEMA>_VU` el campo queda vacío y se ofrece
+                  crearlo por el camino versionado (popup de Esquemas). */}
+              {!ro && !schema && suggestVU && (
+                <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-start' }}>
+                  <span style={{ fontSize: 11.5, color: '#B45309', fontWeight: 600 }}>
+                    No <span className="rd-mono">{suggestVU}</span> schema yet — pick one, or create it.
+                  </span>
+                  <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm"
+                    onClick={() => setSchemaModal(true)}>
+                    <Plus size={13} /> Create {suggestVU}
+                  </button>
+                </div>
+              )}
             </div>
             {/* F5: definición funcional de la VISTA (nivel vista, no de columna). */}
             <div>
@@ -724,6 +752,22 @@ export default function ViewEditor({
           </div>
         </div>
       </fieldset>
+      {/* Doc 80 §1: el popup de Esquemas montado ENCIMA de este diálogo. Crea
+          por el camino de siempre (staging → changeset activo), así el esquema
+          nuevo entra a TU versión y publica al aprobar — nada de escritura
+          directa. ESC lo consume sólo este popup (ver `dialogStack`). */}
+      {schemaModal && (
+        <SchemaManagerModal
+          initialName={suggestVU ?? ''}
+          initialKind="views"
+          pushToast={pushToast}
+          onCreated={(names) => {
+            const hit = names.find((n) => n.trim().toLowerCase() === (suggestVU ?? '').trim().toLowerCase());
+            if (hit) setSchema(hit);
+          }}
+          onClose={() => setSchemaModal(false)}
+        />
+      )}
     </Dialog>
   );
 }

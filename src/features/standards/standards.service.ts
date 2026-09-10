@@ -35,6 +35,11 @@ export interface SnapshotDomain {
   /** Doc 69: `defaultDataType` = tipo FÍSICO por defecto; `logicalDataType` = faceta lógica. */
   defaultDataType: string; logicalDataType?: string | null;
   namingTerm?: string | null; description?: string | null;
+  /** Doc 79/80: dominio «atributo estándar» (FecRutina, CodMes, TipIngresoLKDE…).
+   *  SOLO estos imponen su nombre lógico y su definición a la columna al
+   *  asignarse; el resto aporta únicamente el tipo de dato. El backend ya lo
+   *  proyectaba — sin el campo acá se perdía en cada round-trip de la UI. */
+  inheritsName?: boolean | null;
 }
 export interface NamingRuleSnap { separator: Separator | string | null; case: Casing | string | null; maxLength?: number | null; }
 /** Definición de un UDP (User Defined Property): la KEY + su tipo + default +
@@ -123,7 +128,7 @@ export interface StandardsVersion {
 
 // ── Batch de cambios que se aplica como UNA versión (15d/15e) ──
 export interface TermEditInput { id?: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType; }
-export interface DomainEditInput { id?: string; name: string; defaultDataType: string; logicalDataType?: string; namingTerm?: string; description?: string; }
+export interface DomainEditInput { id?: string; name: string; defaultDataType: string; logicalDataType?: string; namingTerm?: string; description?: string; inheritsName?: boolean; }
 export interface NamingEditInput { separator: string; case: string; maxLength: number; }
 export interface UdpEditInput {
   id?: string;

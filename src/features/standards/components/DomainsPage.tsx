@@ -35,7 +35,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
     const d = domains.find((x) => x.name === pendingName);
     if (d) { setSelId(d.id); setPendingName(null); }
   }, [domains, pendingName]);
-  const [form, setForm] = useState<SnapshotDomain>({ id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '' });
+  const [form, setForm] = useState<SnapshotDomain>({ id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '', inheritsName: false });
 
   useEffect(() => {
     setMode('view'); setConfirm(null); setImpact(null);
@@ -48,7 +48,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
     return !n ? domains : domains.filter((d) => d.name.toLowerCase().includes(n));
   }, [domains, q]);
 
-  const startCreate = () => { setSelId('__new__'); setForm({ id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '' }); setMode('create'); setImpact(null); };
+  const startCreate = () => { setSelId('__new__'); setForm({ id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '', inheritsName: false }); setMode('create'); setImpact(null); };
   const startEdit = () => { if (selected) { setForm({ ...selected }); setMode('edit'); } };
   const cancel = () => { setMode('view'); setConfirm(null); if (selected) setForm({ ...selected }); };
 
@@ -84,7 +84,10 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
       const v = await applyStandards(projectId, {
         kind: 'domain',
         // Doc 69: tipo físico (defaultDataType) + tipo lógico + nombre de atributo sugerido.
-        domainsUpsert: [{ id: creating ? undefined : form.id, name: form.name.trim(), defaultDataType: form.defaultDataType.trim(), logicalDataType: form.logicalDataType?.trim() || undefined, namingTerm: form.namingTerm?.trim() || undefined, description: form.description || undefined }],
+        // Doc 80 §4: `inheritsName` viaja SIEMPRE con su booleano (nunca
+        // undefined): el backend hace `exclude_none`, así que omitirlo dejaría
+        // el flag como estaba y desmarcar la casilla no tendría efecto.
+        domainsUpsert: [{ id: creating ? undefined : form.id, name: form.name.trim(), defaultDataType: form.defaultDataType.trim(), logicalDataType: form.logicalDataType?.trim() || undefined, namingTerm: form.namingTerm?.trim() || undefined, description: form.description || undefined, inheritsName: !!form.inheritsName }],
       });
       toast.success(`Applied · ${v.label} · ${v.impact.columns} columns re-typed`);
       if (creating) setPendingName(form.name.trim());   // seleccionarlo al recargar
@@ -121,6 +124,8 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8 }}>
               <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '2px 7px' }} title="Physical default type">{d.defaultDataType}</span>
               {d.logicalDataType && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#5B3FA0', background: '#F4EEFF', borderRadius: 6, padding: '2px 7px' }} title="Logical data type">{d.logicalDataType}</span>}
+              {/* Doc 80 §4: se ve de un vistazo cuáles imponen nombre+definición. */}
+              {d.inheritsName && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#0E8C6A', background: '#E8F7F1', border: '1px solid #C6EADC', borderRadius: 6, padding: '2px 7px' }} title="Standard attribute: its name and definition are inherited by the column">name + definition</span>}
             </div>
           </div>
         ))}
@@ -176,6 +181,25 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
             <label style={lbl}>Description</label>
             {editable ? <textarea className="rd-input" style={{ ...field, minHeight: 64, resize: 'vertical' }} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
               : <div style={{ ...fieldRO, minHeight: 44 }}>{form.description || '—'}</div>}
+
+            {/* Doc 79/80: el interruptor que separa un «atributo estándar»
+                (FecRutina, CodMes, TipIngresoLKDE… — 13 en el DDV) de un dominio
+                genérico de tipo (Codigo, Fecha, Monto). Sólo el estándar impone
+                su nombre lógico y su definición a la columna que lo adopta; el
+                genérico aporta el tipo y nada más. */}
+            <label style={lbl}>Inheritance to the column</label>
+            <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', padding: '13px 15px', background: form.inheritsName ? '#F2FBF7' : '#fff', border: `1px solid ${form.inheritsName ? '#C6EADC' : '#E2E6EE'}`, borderRadius: 10, marginBottom: 18 }}>
+              <input type="checkbox" id="dom-inherits-name" style={{ marginTop: 2, width: 15, height: 15, cursor: editable ? 'pointer' : 'default' }}
+                checked={!!form.inheritsName} disabled={!editable}
+                onChange={(e) => setForm({ ...form, inheritsName: e.target.checked })} />
+              <label htmlFor="dom-inherits-name" style={{ flex: 1, cursor: editable ? 'pointer' : 'default' }}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>Standard attribute — pushes its name and definition</div>
+                <div style={{ fontSize: 12.5, color: '#6B7689', lineHeight: 1.5, marginTop: 3 }}>
+                  On assigning this domain, the column takes its <strong>logical name</strong> and its <strong>description</strong> as the functional definition.
+                  Off (the default) the domain only sets the <strong>data type</strong> — the column keeps its own name and definition.
+                </div>
+              </label>
+            </div>
 
             {/* impact */}
             {impact && mode !== 'create' && (

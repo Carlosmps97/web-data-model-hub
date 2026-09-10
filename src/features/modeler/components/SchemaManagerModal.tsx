@@ -1,5 +1,5 @@
 import { runBlocking } from '@/store/useBusyStore';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Check, FolderCog, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import { confirmDialog } from '@/components/ui/dialogs';
@@ -10,7 +10,7 @@ import * as schemasSvc from '@/features/modeler/services/schemas.service';
 import { SCHEMA_NAME_RE, type SchemaImpact } from '@/features/modeler/services/schemas.service';
 import {
   editCreate, orderedForSave, pendingFor, stageCreate, stageDelete, stageRename,
-  takenNames, unstage, type SchemaKind, type StagedOp,
+  takenNames, unstage, visibleSchemas, type SchemaKind, type StagedOp,
 } from '../lib/schemaStaging';
 
 /**
@@ -23,10 +23,23 @@ import {
  * canvases). El rename propaga server-side a todas las tablas/vistas del
  * esquema dentro del draft; el delete se rechaza (409 legible) si tiene
  * tablas o vistas.
+ *
+ * Doc 80 §2: el campo "New schema" hace DOBLE trabajo — mientras escribes
+ * filtra la lista de abajo por «contiene» (con ~390 esquemas, buscar el que
+ * quieres renombrar era scrollear a ciegas) y, si nada coincide, ese texto es
+ * el nombre del esquema nuevo. Doc 80 §1: `initialName`/`initialKind` lo abren
+ * precargado desde el editor de vistas ("Create <ESQUEMA>_VU"), y `onCreated`
+ * avisa qué se creó para que el llamador lo seleccione.
  */
-export default function SchemaManagerModal({ onClose, pushToast }: {
+export default function SchemaManagerModal({ onClose, pushToast, initialName, initialKind, onCreated }: {
   onClose: () => void;
   pushToast: (m: string, k?: 'err') => void;
+  /** Nombre precargado en "New schema" (y por tanto filtro inicial). */
+  initialName?: string;
+  /** Qué contendrá el esquema precargado (doc 44). */
+  initialKind?: SchemaKind;
+  /** Nombres efectivamente creados al guardar — en el orden en que se aplicaron. */
+  onCreated?: (names: string[]) => void;
 }) {
   const schemas = useModelerStore((s) => s.schemas);
   const loadSchemas = useModelerStore((s) => s.loadSchemas);
@@ -35,9 +48,9 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
 
   const [staged, setStaged] = useState<StagedOp[]>([]);
-  const [newName, setNewName] = useState('');
+  const [newName, setNewName] = useState(initialName ?? '');
   // Qué contendrá el esquema nuevo (doc 44) — Erwin no trae este dato, nace acá.
-  const [newKind, setNewKind] = useState<SchemaKind>('tables');
+  const [newKind, setNewKind] = useState<SchemaKind>(initialKind ?? 'tables');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Edición inline de nombre: fila existente ({id}) o create pendiente ({key}).
@@ -111,13 +124,16 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     if (ops.length === 0) return;
     setBusy(true); setError(null);
     const done = new Set<string>();
+    const created: string[] = [];
     try {
       markDirty();
       // Doc 75 D18: renombrar propaga a todas las tablas/vistas del esquema — bloqueante.
       await runBlocking('Applying schema changes…', async () => {
         for (const op of ops) {
-          if (op.kind === 'create') await schemasSvc.createSchema(op.name, undefined, op.schemaKind);
-          else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
+          if (op.kind === 'create') {
+            await schemasSvc.createSchema(op.name, undefined, op.schemaKind);
+            created.push(op.name);
+          } else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
           else await schemasSvc.deleteSchema(op.id);
           done.add(op.key);
         }
@@ -133,6 +149,9 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
       setBusy(false);
       await loadSchemas().catch(() => {});
       void reload();
+      // Después de recargar el catálogo: el llamador (editor de vistas) ya
+      // puede seleccionar el esquema recién creado.
+      if (created.length) onCreated?.(created);
     }
   };
 
@@ -149,10 +168,10 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
   const impactLine = (id: string) => {
     const imp = impacts[id];
     if (!imp) return null;
-    if (imp === 'loading') return <div className="rd-small wk-schx-impact">Calculando impacto…</div>;
+    if (imp === 'loading') return <div className="rd-small wk-schx-impact">Calculating impact…</div>;
     return (
       <div className="rd-small wk-schx-impact">
-        Afecta <strong>{imp.tables}</strong> tabla(s) · <strong>{imp.views}</strong> vista(s) · en <strong>{imp.canvases}</strong> canvas(es)
+        Affects <strong>{imp.tables}</strong> table(s) · <strong>{imp.views}</strong> view(s) · in <strong>{imp.canvases}</strong> canvas(es)
       </div>
     );
   };
@@ -186,6 +205,11 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
   );
 
   const creates = staged.filter((o): o is Extract<StagedOp, { kind: 'create' }> => o.kind === 'create');
+  // Doc 80 §2: lo que escribes en "New schema" filtra la lista (contiene, CI).
+  // Los pendientes siguen visibles: trabajo sin guardar no se esconde.
+  const filter = newName.trim();
+  const visible = useMemo(() => visibleSchemas(schemas, staged, filter), [schemas, staged, filter]);
+  const hiddenCount = schemas.length - visible.length;
 
   return (
     <Dialog
@@ -210,9 +234,9 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
       }
     >
       <div style={{ marginBottom: 14 }}>
-        <label style={lbl}>Nuevo esquema</label>
+        <label style={lbl}>New schema · type to filter the list</label>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input className="rd-input rd-mono" autoFocus placeholder="ej. bcp_ddv_clientes" value={newName}
+          <input className="rd-input rd-mono" autoFocus placeholder="search or new name, e.g. bcp_ddv_clientes" value={newName}
             onChange={(e) => { setNewName(e.target.value); setError(null); }}
             onKeyDown={(e) => { if (e.key === 'Enter') addCreate(); }}
             style={{ flex: 1 }} />
@@ -222,9 +246,16 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
             <button type="button" className={newKind === 'views' ? 'active' : ''} onClick={() => setNewKind('views')}>Views</button>
           </div>
           <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy || !newName.trim()} onClick={addCreate}>
-            <Plus size={14} /> Agregar
+            <Plus size={14} /> Add
           </button>
         </div>
+        {filter !== '' && (
+          <div className="rd-small" style={{ marginTop: 6, color: 'var(--text-muted, #8A93A5)' }}>
+            {hiddenCount > 0
+              ? <>Showing <strong>{visible.length}</strong> of {schemas.length} schemas · {hiddenCount} hidden by the filter</>
+              : <>Showing all {schemas.length} schema(s)</>}
+          </div>
+        )}
       </div>
 
       <div style={{ maxHeight: 320, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -233,8 +264,13 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
             No schemas yet — add the first one above.
           </div>
         )}
+        {schemas.length > 0 && visible.length === 0 && (
+          <div className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)', padding: 8 }}>
+            No schema contains <strong className="rd-mono">{filter}</strong> — press <strong>Add</strong> to create it.
+          </div>
+        )}
 
-        {schemas.map((s) => {
+        {visible.map((s) => {
           const pending = pendingFor(staged, s.id);
           const isDelete = pending?.kind === 'delete';
           const isRename = pending?.kind === 'rename';
@@ -251,8 +287,8 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
                       </span>
                       {isRename && <span className="rd-mono" style={{ fontSize: 13, color: 'var(--primary-700, #2E5BFF)' }}>→ {pending.to}</span>}
                       {kindBadge(s.kind)}
-                      {isRename && pendingBadge('renombrar · pendiente', 'var(--primary-700, #2E5BFF)')}
-                      {isDelete && pendingBadge('eliminar · pendiente', 'var(--error, #C4314B)')}
+                      {isRename && pendingBadge('rename · pending', 'var(--primary-700, #2E5BFF)')}
+                      {isDelete && pendingBadge('delete · pending', 'var(--error, #C4314B)')}
                     </div>
                     {pending && impactLine(s.id)}
                     {deleteBlocked && (
@@ -262,7 +298,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
                     )}
                   </div>
                   {pending
-                    ? iconBtn('Deshacer este cambio', () => setStaged((ops) => unstage(ops, pending.key)), <Undo2 size={13} />)
+                    ? iconBtn('Undo this change', () => setStaged((ops) => unstage(ops, pending.key)), <Undo2 size={13} />)
                     : (
                       <>
                         {iconBtn('Rename (propagates to its tables and views on save)', () => { setError(null); ensureImpact(s.id); setEditing({ id: s.id, name: s.name }); }, <Pencil size={13} />)}
@@ -281,9 +317,9 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
               <>
                 <span className="rd-mono" style={{ flex: 1, fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{op.name}</span>
                 {kindBadge(op.schemaKind)}
-                {pendingBadge('crear · pendiente', 'var(--primary-700, #2E5BFF)')}
+                {pendingBadge('create · pending', 'var(--primary-700, #2E5BFF)')}
                 {iconBtn('Edit name', () => { setError(null); setEditing({ key: op.key, name: op.name }); }, <Pencil size={13} />)}
-                {iconBtn('Deshacer', () => setStaged((ops) => unstage(ops, op.key)), <Undo2 size={13} />)}
+                {iconBtn('Undo', () => setStaged((ops) => unstage(ops, op.key)), <Undo2 size={13} />)}
               </>
             )}
           </div>

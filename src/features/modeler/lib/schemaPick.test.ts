@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { DbSchema } from '../services/schemas.service';
-import { defaultViewSchema, schemasForKind } from './schemaPick';
+import { defaultViewSchema, schemasForKind, viewSchemaOnCreate } from './schemaPick';
 
 const sch = (name: string, kind?: 'tables' | 'views' | null): DbSchema =>
   ({ id: name, name, kind: kind ?? null });
@@ -44,5 +44,27 @@ describe('defaultViewSchema (doc 52 §4 — convención _VU)', () => {
   it('sin clasificar SÍ cuenta (BD pre-backfill)', () => {
     const catalog = [sch('ventas_vu', null)];
     expect(defaultViewSchema('VENTAS', catalog)).toBe('ventas_vu');
+  });
+});
+
+describe('viewSchemaOnCreate (doc 80 §1 — sin _VU el campo queda vacío)', () => {
+  it('pre-selecciona <esquema>_VU cuando existe (grafía exacta del catálogo)', () => {
+    expect(viewSchemaOnCreate('VENTAS', CATALOG)).toEqual({ schema: 'VENTAS_VU', suggest: null });
+    expect(viewSchemaOnCreate('ventas', CATALOG)).toEqual({ schema: 'VENTAS_VU', suggest: null });
+  });
+
+  it('sin _VU deja el campo VACÍO y sugiere el nombre a crear (ya NO cae al esquema de la tabla)', () => {
+    expect(viewSchemaOnCreate('LEGACY_X', CATALOG)).toEqual({ schema: '', suggest: 'LEGACY_X_VU' });
+  });
+
+  it('un esquema _VU catalogado como de TABLAS no sirve: sugiere crearlo', () => {
+    expect(viewSchemaOnCreate('VENTAS', [sch('VENTAS_VU', 'tables')]))
+      .toEqual({ schema: '', suggest: 'VENTAS_VU' });
+  });
+
+  it('sin tabla fuente no hay nada que sugerir', () => {
+    expect(viewSchemaOnCreate('', CATALOG)).toEqual({ schema: '', suggest: null });
+    expect(viewSchemaOnCreate(null, CATALOG)).toEqual({ schema: '', suggest: null });
+    expect(viewSchemaOnCreate(undefined, CATALOG)).toEqual({ schema: '', suggest: null });
   });
 });
