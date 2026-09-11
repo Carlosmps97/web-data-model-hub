@@ -4,7 +4,7 @@
 // defaults de dominio se comparan por string exacto), búsqueda "contiene"
 // case-insensitive, y tipos parametrizados editados por argumentos puntuales.
 import { COLUMN_DATA_TYPES } from '@/types/model';
-import { composeComplexType, parseComplexType } from './complexTypes';
+import { parseComplexType } from './complexTypes';
 
 /** ¿`text` contiene `query`? (case-insensitive; query vacía matchea todo).
  *  "Contiene" desde 2026-08-30 (pedido del owner) — reemplaza al "empieza

@@ -77,7 +77,7 @@ export default function SchemaManagerModal({ onClose, pushToast, initialName, in
     setImpacts((m) => ({ ...m, [id]: 'loading' }));
     schemasSvc.schemaImpact(id)
       .then((imp) => setImpacts((m) => ({ ...m, [id]: imp })))
-      .catch(() => setImpacts((m) => { const { [id]: _drop, ...rest } = m; return rest; }));
+      .catch(() => setImpacts((m) => { const rest = { ...m }; delete rest[id]; return rest; }));
   };
 
   const addCreate = () => {

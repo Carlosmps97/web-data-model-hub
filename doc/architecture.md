@@ -162,7 +162,7 @@ src/
                              #   review, reporting (CSS global, sin CSS Modules)
 ```
 
-Fuera de `src/`, en la raíz del repo, viven **`server.mjs`** (el servidor de producción, §3.1) y **`server.test.mjs`** (sus 12 tests, incluidos en el `include` de Vitest). `server.mjs` no está bajo `tsc` (el `tsconfig.json` solo incluye `src/`).
+Fuera de `src/`, en la raíz del repo, viven **`server.mjs`** (el servidor de producción, §3.1) y **`server.test.mjs`** (sus 15 tests, incluidos en el `include` de Vitest). `server.mjs` no está bajo `tsc` (el `tsconfig.json` solo incluye `src/`).
 
 **Convención de estilos**: el CSS es global y se compone en cascada desde `app/globals.css`, que hace `@import` de los tokens y de las hojas por feature. No hay CSS Modules ni CSS-in-JS por defecto (aunque algunos componentes usan estilos inline puntuales, como `AdminScreen` o `ReportDesigner`).
 

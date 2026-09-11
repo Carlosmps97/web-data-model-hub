@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalColumn, TableLinkRow } from '@/services/governance.service';
 import {
-  cardinalityLabel, facetName, facetOnly, facetType, keyLabel, linkRole, ownColumns, positionIn, primaryCanvas, usagePath,
+  cardinalityLabel, facetName, facetOnly, facetType, keyLabel, linkRole, ownColumns, positionIn, primaryCanvas, tableDeleteImpact, usagePath,
 } from './inspectorModel';
 
 const col = (id: string, ordinal: number, extra: Partial<CanonicalColumn> = {}): CanonicalColumn => ({
@@ -68,5 +68,27 @@ describe('inspectorModel', () => {
     expect(primaryCanvas([a, b], 'zzz')).toBeNull();
     expect(primaryCanvas([a], null)?.canvasId).toBe('a');
     expect(primaryCanvas([], 'a')).toBeNull();
+  });
+});
+
+// Doc 89 §3.2: conteos del diálogo «Delete table…» del inspector, calculados
+// del dossier ya cargado (sin re-consultar como hace Properties).
+describe('tableDeleteImpact (doc 89)', () => {
+  const link = (id: string, parent: string, child: string): TableLinkRow => ({
+    id, parentTableId: parent, parentTableName: parent, childTableId: child, childTableName: child,
+    parentCardinality: 'one', childCardinality: 'many', identifying: false, pairs: [], canvases: [],
+  });
+
+  it('cuenta canvases, tablas relacionadas ÚNICAS (sin la propia) y vistas', () => {
+    const impact = tableDeleteImpact('t1', {
+      usage: [{ canvasId: 'sa1' }, { canvasId: 'sa2' }],
+      links: [link('r1', 't1', 'tB'), link('r2', 'tC', 't1'), link('r3', 't1', 'tB'), link('r4', 't1', 't1')],
+      views: [{ id: 'v1' }, { id: 'v2' }, { id: 'v3' }],
+    });
+    expect(impact).toEqual({ canvases: 2, related: 2, views: 3 });
+  });
+
+  it('todo vacío → ceros', () => {
+    expect(tableDeleteImpact('t1', { usage: [], links: [], views: [] })).toEqual({ canvases: 0, related: 0, views: 0 });
   });
 });

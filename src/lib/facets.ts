@@ -62,6 +62,24 @@ export const FACET_NOUNS: Record<Facet, FacetNouns> = {
 };
 export const facetNouns = (facet: Facet): FacetNouns => FACET_NOUNS[facet];
 
+/** Doc 86 §2.2: herramientas de Structure por modelo. Views, CTAS y Schemas
+ *  son conceptos FÍSICOS; New entity/table y Upload viven en ambos. */
+export type StructureTool = 'new-table' | 'ctas' | 'view' | 'schema' | 'upload';
+const PHYSICAL_ONLY_TOOLS: ReadonlySet<StructureTool> = new Set<StructureTool>(['ctas', 'view', 'schema']);
+export const toolAvailableIn = (tool: StructureTool, facet: Facet): boolean =>
+  facet === 'physical' || !PHYSICAL_ONLY_TOOLS.has(tool);
+export const PHYSICAL_ONLY_TOOL_TIP: Record<StructureTool, string> = {
+  'new-table': '', upload: '',
+  ctas: 'CTAS belongs to the physical model — switch to Physical',
+  view: 'Views belong to the physical model — switch to Physical',
+  schema: 'Schemas belong to the physical model — switch to Physical',
+};
+/** Rótulo del modelo activo (barra de estado del canvas, doc 86 D1). */
+export const MODEL_MODE_CAPTION: Record<Facet, string> = {
+  logical: 'Logical model · entities & attributes',
+  physical: 'Physical model · tables, columns & views',
+};
+
 export const FACET_CLASS_LABEL: Record<UdpLevel, Record<Facet, string>> = {
   table: { logical: 'Entity (Logical)', physical: 'Table (Physical)' },
   column: { logical: 'Attribute (Logical)', physical: 'Column (Physical)' },

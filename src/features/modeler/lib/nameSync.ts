@@ -41,6 +41,9 @@ export interface NameSync {
   reset(logical: string, physical: string, overridden?: boolean): void;
   setLogical(v: string): void;
   setPhysical(v: string): void;
+  /** Doc 88 §3: re-deriva el físico desde el lógico (glosario) y APAGA el
+   *  override — el «rayo» del panel de atributo, par del de tabla (doc 68). */
+  derive(): void;
   dispose(): void;
 }
 
@@ -95,6 +98,16 @@ export function createNameSync(opts: NameSyncOptions): NameSync {
       seq++; // una edición manual invalida cualquier physicalize en vuelo
       emit();
       scheduleCommit();
+    },
+    derive() {
+      const v = logical.trim();
+      if (!v) return;
+      const mySeq = ++seq;          // invalida physicalize en vuelo; el nuestro manda
+      clearTimeout(physTimer);
+      opts.physicalize(v).then((r) => {
+        if (mySeq !== seq) return;  // el usuario tipeó algo después: se descarta
+        physical = r.physical; physEdited = false; emit(); scheduleCommit();
+      }).catch(() => { /* sin naming disponible el físico queda como está */ });
     },
     dispose() { clearTimeout(physTimer); clearTimeout(commitTimer); },
   };

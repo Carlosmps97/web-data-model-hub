@@ -22,6 +22,7 @@ import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
 import type { TableViewRow, View } from '@/services/views.service';
 import { splitByCanvas } from '../lib/canvasViews';
+import { confirmDeleteTable, confirmDeleteView } from './deleteConfirm';
 
 // Doc 51: los UDPs dejan Metadata y pasan a pestaña propia (paridad con el
 // panel de columna del doc 49); Metadata conserva el resto y suma History.
@@ -398,22 +399,12 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         related = new Set(rels.flatMap((r) => [r.parentTableId, r.childTableId]).filter((t) => t !== table.id)).size;
         nViews = vs.length;
       } catch { /* si falla el conteo se muestran ceros */ }
-      const ok = await confirmDialog({
-        title: `Delete ${nouns.one}`,
-        variant: 'danger',
-        confirmLabel: `Delete ${nouns.one}`,
-        cancelLabel: 'Cancel',
-        message: <>
-          {nouns.One} <strong>“{table.physicalName || table.logicalName}”</strong> will be deleted from the model. This affects:
-          <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
-            <li><strong>{canvases}</strong> canvas{canvases === 1 ? '' : 'es'} it appears on</li>
-            <li><strong>{related}</strong> related {related === 1 ? nouns.one : nouns.many} (their relationships are removed)</li>
-            <li><strong>{nViews}</strong> view{nViews === 1 ? '' : 's'} (also deleted)</li>
-          </ul>
-          <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--muted)' }}>Its columns and relationships go too. This change is part of the current version.</div>
-        </>,
-        // El borrado (cascada versionada) corre DENTRO del diálogo: queda con
-        // spinner y bloqueado hasta terminar (el owner reportó reclicks por el delay).
+      // Diálogo compartido con el Object Inspector (doc 89 §3.5). El borrado
+      // (cascada versionada) corre DENTRO del diálogo: queda con spinner y
+      // bloqueado hasta terminar (el owner reportó reclicks por el delay).
+      const ok = await confirmDeleteTable({
+        name: table.physicalName || table.logicalName, nouns,
+        impact: { canvases, related, views: nViews },
         action: async () => { await deleteTable(table.id); },
       });
       if (ok) pushToast(`${nouns.One} deleted`);
@@ -652,7 +643,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                           onClick={() => void removeViewFromCanvas(v.id).then(() => pushToast('View removed from canvas')).catch(() => pushToast("Couldn't remove the view", 'err'))}>
                           <Unlink size={12} />
                         </button>
-                        <button className={iconBtn} title="Delete from the model" onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete view', message: <>View <strong>“{v.name}”</strong> will be deleted from the model (every canvas).</>, confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
+                        <button className={iconBtn} title="Delete from the model" onClick={async () => { try { const ok = await confirmDeleteView({ name: v.name, action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
                       </>
                     )}
                     {canAct && other && (

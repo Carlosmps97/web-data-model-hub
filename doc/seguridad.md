@@ -460,7 +460,7 @@ El `.gitignore` ignora todos los `.env*` salvo `.env.example` (plantilla); la UR
 
 ### 5.3 Buenas prácticas del server de producción (`server.mjs`)
 
-El server propio del front (doc 36) aplica sus propias defensas, verificadas por los 12 tests de `server.test.mjs` (corren bajo vitest junto con la suite del front):
+El server propio del front (doc 36) aplica sus propias defensas, verificadas por los 15 tests de `server.test.mjs` (corren bajo vitest junto con la suite del front):
 
 | Práctica | Implementación |
 |----------|----------------|

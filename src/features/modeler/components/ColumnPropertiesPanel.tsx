@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
-import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/services/governance.service';
@@ -23,13 +22,14 @@ import SearchSelect from './SearchSelect';
 import TypePicker from './TypePicker';
 import UdpAssign from './UdpAssign';
 import DomainInheritPopup from './DomainInheritPopup';
+import { confirmDeleteColumn } from './deleteConfirm';
 import { facetEditable, type ColumnField } from '../lib/facetEditable';
 import { domainUdpOffer, mergeInheritedUdps, type DomainUdpOffer, type DomainUdpOfferItem } from '../lib/domainInherit';
 import { facetType } from '../lib/inspectorModel';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
 import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun, facetNouns, type Facet } from '@/lib/facets';
 
-type ColTab = 'definition' | 'datatype' | 'udps' | 'metadata';
+export type ColTab = 'definition' | 'datatype' | 'udps' | 'metadata';
 const TABS: { id: ColTab; label: string }[] = [
   { id: 'definition', label: 'Definition' },
   { id: 'datatype', label: 'Data Type' },
@@ -150,33 +150,11 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
       let impact: gov.RelationshipImpact = { relationships: [], total: 0 };
       try { impact = await gov.columnImpact(col.id); } catch { /* confirm genérico */ }
       const relIds = impact.relationships.map((r) => r.relId);
-      const ok = await confirmDialog({
-        title: `Delete ${facetNouns(viewMode).member}`,
-        message: impact.total > 0 ? (
-          <>
-            <p style={{ margin: 0 }}>
-              Column <strong>“{name}”</strong> participates in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} — each will lose this pair (or be deleted if it was the last one):
-            </p>
-            <ul style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 180, overflow: 'auto' }}>
-              {impact.relationships.map((r) => (
-                <li key={r.relId} style={{ marginBottom: 4 }}>
-                  <span className="rd-mono">{r.otherTableName}.{r.otherColumnName}</span>
-                  {r.canvases.length > 0 && (
-                    <span className="rd-small" style={{ color: 'var(--muted)' }}>
-                      {' '}— in {r.canvases.map((c) => c.name).join(', ')}
-                    </span>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </>
-        ) : (
-          <>Column <strong>“{name}”</strong> will be removed from this table.</>
-        ),
-        confirmLabel: impact.total > 0 ? 'Delete anyway' : 'Delete',
-        cancelLabel: 'Cancel', variant: 'danger',
-        // Cascade: el changeset registra el delete de la columna Y de cada
-        // relación afectada; el store cierra este panel al terminar.
+      // Diálogo compartido con el Object Inspector (doc 89 §3.5). Cascade: el
+      // changeset registra el delete de la columna Y de cada relación
+      // afectada; el store cierra este panel al terminar.
+      const ok = await confirmDeleteColumn({
+        name, nouns: facetNouns(viewMode), impact,
         action: () => deleteColumn(col.id, relIds),
       });
       if (ok) pushToast(impact.total > 0 ? `${facetNouns(viewMode).Member} and its relationships deleted` : `${facetNouns(viewMode).Member} deleted`);
@@ -250,8 +228,13 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
  * Cuerpo del panel (montado por columna vía `key`): estado de edición portado
  * 1:1 de la card expandida de ColumnRow. Todas las pestañas comparten esta
  * instancia — cambiar de pestaña NO pierde un tipeo en vuelo.
+ *
+ * Doc 89 §3.3: exportado — el Object Inspector lo monta tal cual (no lee el
+ * diagrama: sólo `naming` del store) para editar la columna SIN canvas con la
+ * misma mecánica. `switchHint` reemplaza el texto «Switch the canvas…» cuando
+ * el switch de faceta es el del propio popup.
  */
-function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdit, onPatch, onDelete }: {
+export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdit, onPatch, onDelete, switchHint }: {
   col: CanonicalColumn;
   table: CanonicalTable;
   cols: CanonicalColumn[];
@@ -264,7 +247,10 @@ function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdi
   canEdit: boolean;
   onPatch: (id: string, fields: Partial<CanonicalColumn>) => Promise<void>;
   onDelete: () => void;
+  /** Hint de la faceta de solo lectura (default: el del canvas). */
+  switchHint?: Record<Facet, string>;
 }) {
+  const hint = switchHint ?? FACET_SWITCH_HINT;
   const [logical, setLogical] = useState(col.logicalName);
   const [physical, setPhysical] = useState(col.physicalName);
   const [dataType, setDataType] = useState(col.dataType);
@@ -463,20 +449,28 @@ function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdi
       {tab === 'definition' && (
         <>
           <p className="wk-pp-cap" style={{ marginTop: 0 }}>
-            <b>{view === 'logical' ? 'Logical facet' : 'Physical facet'}</b> — fields of the other facet are read-only here. {FACET_SWITCH_HINT[view]}
+            <b>{view === 'logical' ? 'Logical facet' : 'Physical facet'}</b> — fields of the other facet are read-only here. {hint[view]}
           </p>
           <div className="wk-props-field"><label>Logical name</label>
-            <input className="rd-input" disabled={!canEdit || ro('logicalName')} title={ro('logicalName') ? FACET_SWITCH_HINT[view] : undefined} placeholder="Logical name" value={logical} onChange={(e) => onLogical(e.target.value)} />
+            <input className="rd-input" disabled={!canEdit || ro('logicalName')} title={ro('logicalName') ? hint[view] : undefined} placeholder="Logical name" value={logical} onChange={(e) => onLogical(e.target.value)} />
           </div>
           <div className="wk-props-field"><label>Physical name</label>
-            <input className="rd-input rd-mono" disabled={!canEdit || ro('physicalName')} title={ro('physicalName') ? FACET_SWITCH_HINT[view] : undefined} placeholder="Physical name" value={physical} onChange={(e) => onPhysical(e.target.value)} />
+            <div style={{ display: 'flex', gap: 4 }}>
+              <input className="rd-input rd-mono" disabled={!canEdit || ro('physicalName')} title={ro('physicalName') ? hint[view] : undefined} placeholder="Physical name" value={physical} onChange={(e) => onPhysical(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+              {/* Doc 88 §3: mismo «rayo» que en Properties de tabla — re-deriva del lógico (glosario) y apaga el override. */}
+              {canEdit && !ro('physicalName') && (
+                <button className="rd-btn rd-btn-ghost rd-btn-sm" title="Derive from logical (glossary)" disabled={!logical.trim()} onClick={() => sync.current?.derive()}>
+                  <Icon name="bolt" size={12} />
+                </button>
+              )}
+            </div>
           </div>
           <div className="wk-props-field"><label>Functional definition</label>
-            <textarea className="wk-pp-textarea" disabled={!canEdit || ro('description')} title={ro('description') ? FACET_SWITCH_HINT[view] : undefined} placeholder="What this attribute represents…" value={description} onChange={(e) => onDescription(e.target.value)} />
+            <textarea className="wk-pp-textarea" disabled={!canEdit || ro('description')} title={ro('description') ? hint[view] : undefined} placeholder="What this attribute represents…" value={description} onChange={(e) => onDescription(e.target.value)} />
           </div>
           {/* Doc 85: comment FÍSICO (Erwin Comment) — el DDL lo emite como COMMENT; vacío = igual a la definición. */}
           <div className="wk-props-field"><label>Comment (physical)</label>
-            <textarea className="wk-pp-textarea" disabled={!canEdit || ro('physicalDescription')} title={ro('physicalDescription') ? FACET_SWITCH_HINT[view] : undefined}
+            <textarea className="wk-pp-textarea" disabled={!canEdit || ro('physicalDescription')} title={ro('physicalDescription') ? hint[view] : undefined}
               placeholder={description.trim() ? `Same as the functional definition: ${description.trim()}` : 'Physical comment (defaults to the functional definition)'}
               value={physicalDescription} onChange={(e) => onPhysicalDescription(e.target.value)} />
           </div>
@@ -484,8 +478,8 @@ function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdi
             <div className="wk-pp-flags" style={flagsBusy ? { opacity: 0.7 } : undefined}>
               <label className={`wk-pp-flag pk${col.isPrimaryKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isPrimaryKey} onChange={toggle('isPrimaryKey', col.isPrimaryKey)} /><Icon name="key" size={11} /> PK</label>
               <label className={`wk-pp-flag fk${col.isForeignKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isForeignKey} onChange={toggle('isForeignKey', col.isForeignKey)} /><Icon name="link" size={11} /> FK</label>
-              <label className={`wk-pp-flag nl${col.isNullable !== false ? ' on' : ''}`} title={ro('isNullable') ? FACET_SWITCH_HINT[view] : undefined}><input type="checkbox" disabled={!canEdit || flagsBusy || ro('isNullable')} checked={col.isNullable !== false} onChange={toggle('isNullable', col.isNullable !== false)} /> Nullable</label>
-              <label className={`wk-pp-flag pt${col.isPartition ? ' on' : ''}`} title={ro('isPartition') ? FACET_SWITCH_HINT[view] : undefined}><input type="checkbox" disabled={!canEdit || flagsBusy || ro('isPartition')} checked={!!col.isPartition} onChange={toggle('isPartition', col.isPartition)} /><Icon name="grid" size={11} /> Partition</label>
+              <label className={`wk-pp-flag nl${col.isNullable !== false ? ' on' : ''}`} title={ro('isNullable') ? hint[view] : undefined}><input type="checkbox" disabled={!canEdit || flagsBusy || ro('isNullable')} checked={col.isNullable !== false} onChange={toggle('isNullable', col.isNullable !== false)} /> Nullable</label>
+              <label className={`wk-pp-flag pt${col.isPartition ? ' on' : ''}`} title={ro('isPartition') ? hint[view] : undefined}><input type="checkbox" disabled={!canEdit || flagsBusy || ro('isPartition')} checked={!!col.isPartition} onChange={toggle('isPartition', col.isPartition)} /><Icon name="grid" size={11} /> Partition</label>
               {flagsBusy && <span className="rd-spin" style={{ marginLeft: 'auto', color: 'var(--primary)' }} aria-hidden />}
             </div>
           </div>
@@ -504,7 +498,7 @@ function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdi
         <>
           <div className="wk-props-field"><label>Parent Domain</label>
             <SearchSelect
-              options={domainOptions(domains)}
+              options={domainOptions(domains, view)}
               valueLabel={domains.find((d) => d.id === domainId)?.name ?? ''}
               placeholder="— Parent Domain —"
               emptyLabel="(none)"
@@ -518,7 +512,7 @@ function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdi
               <TypePicker value={ro('logicalDataType') ? (logicalDataType || dataType) : logicalDataType} onChange={onLogicalDataType}
                 placeholder={dataType ? `Same as physical (${dataType})` : 'Logical data type'} disabled={!canEdit || typeBusy || ro('logicalDataType')} />
             </span>
-            {ro('logicalDataType') && <p className="wk-pp-cap">{FACET_SWITCH_HINT[view]}</p>}
+            {ro('logicalDataType') && <p className="wk-pp-cap">{hint[view]}</p>}
           </div>
           {!ro('logicalDataType') && isComplexTypeStart(logicalDataType) && (
             <ComplexTypeBuilder value={logicalDataType} onChange={onLogicalDataType} disabled={!canEdit || typeBusy} />
@@ -528,7 +522,7 @@ function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdi
               <TypePicker value={dataType} onChange={onDataType} placeholder="dataType" disabled={!canEdit || typeBusy || ro('dataType')} />
               {typeBusy && <span className="wk-spin" aria-hidden />}
             </span>
-            {ro('dataType') && <p className="wk-pp-cap">{FACET_SWITCH_HINT[view]}</p>}
+            {ro('dataType') && <p className="wk-pp-cap">{hint[view]}</p>}
           </div>
           {/* Builder visual de tipos complejos: edita STRUCT/ARRAY/MAP campo a
               campo (persiste vía onDataType). */}
@@ -542,7 +536,7 @@ function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdi
       {tab === 'udps' && (
         <>
           <p className="wk-pp-cap" style={{ marginTop: 0 }}>
-            <b>{FACET_CAPTION.column[view]}</b> — {FACET_SWITCH_HINT[view]}
+            <b>{FACET_CAPTION.column[view]}</b> — {hint[view]}
           </p>
           <UdpAssign key={view} level="column" view={view} values={col.udpValues ?? {}} disabled={!canEdit} onChange={(next) => onPatch(col.id, { udpValues: next })} />
         </>

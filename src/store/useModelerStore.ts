@@ -12,6 +12,7 @@ import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { getNamingConfig, type NamingConfig } from '@/services/naming.service';
 import { applyNamingCase } from '@/features/modeler/lib/physicalCase';
+import { diagramSignature } from '@/features/modeler/lib/diagramSignature';
 import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
 import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
@@ -51,6 +52,8 @@ export interface AddColumnInput {
   mode: 'logical' | 'physical';
   parentDomainId?: string;
   dataType?: string;
+  /** Doc 86 D4: tipo LÓGICO tipeado en modo Logical (override lógico explícito); ausente = el del dominio. */
+  logicalDataType?: string;
   description?: string;
   /** Doc 85: comment físico heredado del dominio estándar (se edita luego en Properties). */
   physicalDescription?: string;
@@ -73,6 +76,15 @@ interface ModelerState {
   trees: Record<string, { folders: Folder[]; subjectAreas: SubjectArea[] }>;
   /** Canvas cuya apertura está en vuelo (spinner en el explorer). */
   openingSaId: string | null;
+  /** Doc 88 §2: sube cuando cambia la ESTRUCTURA del canvas activo (tabla o
+   *  vista nueva, borrada o renombrada, columnas) o al pulsar Refresh — el
+   *  catálogo del Explorer (inventario cacheado, doc 72) lo usa para invalidarse. */
+  explorerTick: number;
+  bumpExplorer: () => void;
+  /** Doc 89 §3.6: tras un cambio ESTRUCTURAL ya persistido, refresca el Explorer
+   *  SOLO si el objeto NO está en el canvas activo — si está, `reload()` ya subió
+   *  el tick al cambiar la firma del diagrama (doc 88 §2). Nunca ambos. */
+  syncExplorer: (onActiveCanvas: boolean) => void;
   /** Esquemas EFECTIVOS de la versión activa (doc 18): alimenta los dropdowns
    *  de esquema y el SchemaManager. Se recarga con el contexto (refreshExplorer)
    *  y tras cada mutación de esquemas. */
@@ -288,7 +300,9 @@ interface ModelerState {
   removeTableFromArea: (tableId: string) => Promise<void>;
   /** Borra la tabla del MODELO con cascada versionada: vistas, relaciones,
    *  columnas, membresía en TODOS los canvases, y la tabla. Todo en el changeset. */
-  deleteTable: (tableId: string) => Promise<void>;
+  /** Doc 89 §3.1: `opts.pre` = pre-imagen para el Undo cuando la tabla NO está
+   *  en el diagrama (borrado desde el Object Inspector, sin canvas). */
+  deleteTable: (tableId: string, opts?: { pre?: CanonicalTable }) => Promise<void>;
   updateTable: (id: string, fields: { logicalName?: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
   /** Upsert changeset-aware de una columna (merge sobre la columna actual del diagrama) + reload. */
   updateColumn: (colId: string, fields: Partial<CanonicalColumn>) => Promise<void>;
@@ -302,7 +316,9 @@ interface ModelerState {
   /** Borra la columna en el changeset; con `relIds`, borra ANTES cada relación
    *  afectada (cascade del warning de impacto — spec 10 §8, cierra el caso
    *  columna del bug #21 de relaciones huérfanas). */
-  deleteColumn: (colId: string, relIds?: string[]) => Promise<void>;
+  /** Doc 89 §3.1: `opts.col` = la columna (estado efectivo) cuando NO está en el
+   *  diagrama — sin ella la cascada de relaciones/FK/vistas no se puede resolver. */
+  deleteColumn: (colId: string, relIds?: string[], opts?: { col?: CanonicalColumn }) => Promise<void>;
   setViewMode: (m: 'logical' | 'physical') => void;
   createSubjectArea: (name: string) => Promise<void>;
 }
@@ -334,6 +350,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   subjectAreas: [],
   trees: {},
   openingSaId: null,
+  explorerTick: 0,
+  bumpExplorer: () => set((s) => ({ explorerTick: s.explorerTick + 1 })),
+  syncExplorer: (onActiveCanvas) => { if (!onActiveCanvas) get().bumpExplorer(); },
   schemas: [],
   loadSchemas: async () => { set({ schemas: await schemasSvc.listSchemas() }); },
   activeProjectId: null,
@@ -806,7 +825,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     try {
       const naming = await getNamingConfig(projectId);
       // Cambio rápido de canvas entre proyectos: sólo aplica si sigue activo.
-      if (get().activeProjectId === projectId) set({ naming });
+      // Doc 89: sin canvas abierto (activeProjectId null) también se cachea —
+      // el Object Inspector aplica la regla de case al físico tipeado.
+      const active = get().activeProjectId;
+      if (active === projectId || active == null) set({ naming });
     } catch { /* sin config el front asume upper (default del backend) */ }
   },
   reload: async () => {
@@ -826,7 +848,14 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     // Descarta respuestas viejas (cambio de canvas o carga más nueva en vuelo).
     if (seq !== _loadSeq || get().activeSaId !== id) return;
+    const prev = get().diagram;
     set({ diagram });
+    // Doc 88 §2: un cambio ESTRUCTURAL del MISMO canvas (tabla/vista nueva,
+    // borrada o renombrada, columnas) invalida el catálogo del Explorer; cambiar
+    // de canvas no (el inventario es del proyecto, no del canvas).
+    if (prev && prev.subjectArea.id === diagram.subjectArea.id && diagramSignature(prev) !== diagramSignature(diagram)) {
+      get().bumpExplorer();
+    }
   },
   saveLayout: async (tableId, pos) => {
     const saId = get().activeSaId; if (!saId) return;
@@ -915,7 +944,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const domDefault = canonicalDefaultType(dom?.defaultDataType);
     const dataType = override || domDefault || '';
     // Doc 69 §4.9: faceta LÓGICA del tipo heredada del dominio (homologada).
-    const logicalType = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : '';
+    // Doc 86 D4: en modo Logical el popup manda el tipo lógico TIPEADO; si
+    // difiere del lógico del dominio es un override lógico (regla doc 46).
+    const domLogical = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : '';
+    const typedLogical = canonicalDefaultType(input.logicalDataType) || '';
+    const logicalType = typedLogical || domLogical;
+    const logicalOverridden = !!dom && !!typedLogical && typedLogical !== domLogical;
     // Al FINAL del orden físico (antes: ordinal 0 → la columna nueva caía al
     // INICIO de la tabla) — coherente con la propagación a vistas de abajo.
     const siblings = (get().diagram?.columns ?? []).filter((c) => c.tableId === tableId);
@@ -935,7 +969,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // tipeado conserva la semántica previa (override).
       parentDomainId: input.parentDomainId || undefined, dataType,
       typeOverridden: dom ? dataType.trim() !== domDefault : !!override,
-      ...(logicalType ? { logicalDataType: logicalType, logicalTypeOverridden: false } : {}),
+      ...(logicalType ? { logicalDataType: logicalType, logicalTypeOverridden: logicalOverridden } : {}),
       ordinal,
       ...(description ? { description } : {}),
       ...(physicalDescription ? { physicalDescription } : {}),   // doc 85
@@ -1156,7 +1190,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
   },
-  deleteTable: (tableId) => runBlocking('Deleting table…', async () => {
+  deleteTable: (tableId, opts) => runBlocking('Deleting table…', async () => {
     get().markDirty();
     // Cascada COMPLETA en el changeset (versionada), grabada EN LOTE (doc 39):
     // el camino cambio-por-cambio eran ~1 request por columna — a 4k columnas
@@ -1174,7 +1208,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     ]);
     // Pre-imágenes para el Undo (doc 50): las lecturas de arriba YA traen el
     // estado pre-borrado — se congelan por valor antes de tocar nada.
-    const t0 = get().diagram?.tables.find((x) => x.id === tableId);
+    // Doc 89: sin canvas (inspector) la pre-imagen viene del dossier efectivo.
+    const t0 = get().diagram?.tables.find((x) => x.id === tableId) ?? opts?.pre;
     const tPre = t0 ? { ...t0, ...(t0.udpValues ? { udpValues: { ...t0.udpValues } } : {}) } : null;
     const undoSaId = get().activeSaId;
     const undoNode = get().flow?.getNode(tableId);
@@ -1234,10 +1269,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }
         if (undoSaId && undoPos) { try { await struct.setSubjectAreaLayout(undoSaId, { [tableId]: undoPos }); } catch { /* best-effort */ } }
         await get().reload();
+        get().syncExplorer(usage.some((u) => u.canvasId === get().activeSaId));
       });
     }
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
+    // Doc 89 §3.6: si la tabla NO estaba en el canvas activo (o no hay canvas —
+    // borrado desde el Object Inspector), reload() no cambia ninguna firma → el
+    // Explorer se refresca a mano. Regla complementaria a la del doc 88 §2.
+    get().syncExplorer(usage.some((u) => u.canvasId === get().activeSaId));
   }),
   updateTable: async (id, fields) => {
     get().markDirty();
@@ -1317,13 +1357,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     if (plan.order) await get().reorderColumns(tableId, plan.order);
   },
-  deleteColumn: async (colId, relIds = []) => {
+  deleteColumn: async (colId, relIds = [], opts) => {
     get().markDirty();
     // Primero las relaciones (elegidas en el dialog de impacto), después la
     // columna: el changeset nunca queda con pares colgando de una columna
     // borrada (spec 10 §8). v2 (doc 19): si la relación tiene MÁS pares, sólo
     // se quita el par de esta columna; si era el último, se borra completa.
-    const col = get().diagram?.columns.find((c) => c.id === colId);
+    const col = get().diagram?.columns.find((c) => c.id === colId) ?? opts?.col;
     const pool = relIds.length && col ? await gov.listRelationships(col.tableId) : [];
     // Pre-imágenes para el Undo (doc 50): columna, relaciones afectadas (por
     // valor), FKs que se limpian abajo y vistas que referencian la columna.
@@ -1339,22 +1379,25 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Columnas HIJAS del otro extremo de los pares afectados: al caer el
     // par/relación pueden quedar con un isForeignKey huérfano (misma limpieza
     // conservadora que deleteRelationship — isPrimaryKey nunca se toca).
-    const fkCandidates = new Set<string>();
+    const fkCandidates = new Map<string, string>();   // childColumnId → childTableId
     for (const rid of relIds) {
       const rel = pool.find((r) => r.id === rid);
       const dropped = rel?.pairs.filter(
         (p) => p.parentColumnId === colId || p.childColumnId === colId) ?? [];
       const remaining = rel?.pairs.filter(
         (p) => p.parentColumnId !== colId && p.childColumnId !== colId) ?? [];
-      dropped.forEach((p) => { if (p.childColumnId !== colId) fkCandidates.add(p.childColumnId); });
+      dropped.forEach((p) => { if (p.childColumnId !== colId && rel) fkCandidates.set(p.childColumnId, rel.childTableId); });
       if (rel && remaining.length > 0 && remaining.length < rel.pairs.length) {
         await gov.updateRelationship({ ...rel, pairs: remaining });
       } else {
         await gov.deleteRelationship(rid);
       }
     }
-    for (const cid of fkCandidates) {
-      const c = get().diagram?.columns.find((x) => x.id === cid);
+    for (const [cid, ctid] of fkCandidates) {
+      // Doc 89: la hija puede no estar en el diagrama (inspector sin canvas u
+      // otra tabla fuera de este canvas) → se resuelve por API, como deleteTable.
+      const c = get().diagram?.columns.find((x) => x.id === cid)
+        ?? (await gov.listColumns(ctid).catch(() => [] as CanonicalColumn[])).find((x) => x.id === cid);
       if (!c?.isForeignKey) continue;
       const near = await gov.listRelationships(c.tableId);
       const still = near.some((r) => r.pairs.some((p) => p.childColumnId === cid));
@@ -1377,6 +1420,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         ]);
         for (const v of viewsPre) { try { await viewsSvc.updateView(v.id, v); } catch { /* best-effort */ } }
         await get().reload();
+        get().syncExplorer(!!get().diagram?.tables.some((t) => t.id === colPre.tableId));
       });
     }
     // Si la columna borrada tenía su Properties abierto (doc 49), se cierra —
@@ -1393,6 +1437,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       } catch { /* la vista se corrige a mano o con "Ordenar como la tabla" */ }
     }
     await get().reload();
+    // Doc 89 §3.6: tabla fuera del canvas activo (o sin canvas) → tick a mano.
+    get().syncExplorer(!!col && !!get().diagram?.tables.some((t) => t.id === col.tableId));
   },
   // Doc 53: la subcategoría es exclusiva del modelo lógico — pasar a físico
   // desarma la herramienta (el botón del toolbar también se deshabilita).

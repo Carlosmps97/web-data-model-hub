@@ -34,7 +34,28 @@
 @media (max-width: 1480px) {
   .wk { grid-template-rows: auto 1fr 34px; }
   .wk-toolbar { flex-wrap: wrap; overflow-x: visible; padding: 2px 12px 4px; }
-  .wk-right { padding: 7px 0 6px 12px; }
+  /* Fila de contexto a TODO el ancho cuando envuelve (2026-09-11): Open model +
+     pill a la izquierda, Save + Publish a la derecha — sin el hueco que dejaba
+     `margin-left: auto` en una fila propia. */
+  .wk-right { flex-basis: 100%; margin-left: 0; padding: 6px 0; justify-content: space-between;
+    border-top: 1px solid var(--border-soft); }
+}
+.wk-right-ctx, .wk-right-act { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* Nivel COMPACTO (≤1180px): sin captions, paddings y divisores más cortos,
+   iconos 34px y Drawing en una sola fila — la cabecera baja a dos filas y cada
+   una se llena. Por encima, el layout de escritorio queda idéntico. */
+@media (max-width: 1180px) {
+  .wk-toolbar { padding: 2px 8px; }
+  .wk-grp-cap { display: none; }
+  .wk-grp { padding: 4px 4px; row-gap: 0; }
+  .wk-div { height: 36px; }
+  .wk-tic { width: 34px; height: 34px; }
+  .wk-drawgrid { grid-template-columns: repeat(8, auto); }
+  .wk-right { padding: 4px 0; }
+}
+/* Nivel ANGOSTO (≤900px): la pill del contexto se acorta (el proyecto ya está en el Explorer). */
+@media (max-width: 900px) {
+  .wk-vpill-proj { display: none; }
 }
 
 /* Botón-icono 38×38 radius 9; hover #EFF2F7; activo .on #EAF0FF + #2E5BFF */

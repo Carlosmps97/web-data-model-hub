@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { facetNouns } from '@/lib/facets';
+import { facetNouns, PHYSICAL_ONLY_TOOL_TIP, toolAvailableIn } from '@/lib/facets';
 import { createPortal } from 'react-dom';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
@@ -62,6 +62,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Doc 53: la herramienta Subcategory SOLO vive en modelo lógico — en físico
   // el botón se deshabilita y el store la desarma al cambiar de modo.
   const viewMode = useModelerStore((s) => s.viewMode);
+  const setViewMode = useModelerStore((s) => s.setViewMode);
   const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const subcatArmed = useModelerStore((s) => s.subcatArmed);
   const setSubcatArmed = useModelerStore((s) => s.setSubcatArmed);
@@ -201,6 +202,10 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     }
   };
 
+  // Doc 86: cambiar de modelo con un popup de creación abierto lo cierra — un
+  // popup es de UNA faceta (entidad o tabla, atributo o columna).
+  useEffect(() => { setModal(null); }, [viewMode]);
+
   // Botón-icono de sección. `disabled` ya contempla viewer-lock en cada call.
   const ic = (label: string, node: ReactNode, onClick: () => void, opts?: { on?: boolean; disabled?: boolean; lockTip?: boolean }) => (
     <Tooltip label={opts?.lockTip && readonly ? VIEWER_TIP : label}>
@@ -210,13 +215,30 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
 
   return (
     <div className="wk-toolbar">
-      {/* STRUCTURE */}
+      {/* MODEL (doc 86): el «botón padre» lógico/físico estilo Erwin — gobierna
+          explorer, tools, popups, UDPs, dominios y labels del canvas. */}
+      <div className="wk-grp">
+        <div className="wk-grp-row">
+          <div className="wk-seg" role="group" aria-label="Model view">
+            <Tooltip label="Logical model — entities & attributes">
+              <button type="button" className={`wk-seg-btn${viewMode === 'logical' ? ' on' : ''}`} disabled={!openMode} onClick={() => setViewMode('logical')}>Logical</button>
+            </Tooltip>
+            <Tooltip label="Physical model — tables, columns & views">
+              <button type="button" className={`wk-seg-btn${viewMode === 'physical' ? ' on' : ''}`} disabled={!openMode} onClick={() => setViewMode('physical')}>Physical</button>
+            </Tooltip>
+          </div>
+        </div>
+        <span className="wk-grp-cap">Model</span>
+      </div>
+      <span className="wk-div" />
+
+      {/* STRUCTURE — Views, CTAS y Schemas son conceptos físicos (doc 86 D2). */}
       <div className="wk-grp">
         <div className="wk-grp-row">
           {ic(`New ${n.one}`, <Table2 size={17} />, () => setModal('table'), { disabled: !canEdit, lockTip: true })}
-          {ic('CTAS — create from existing', <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit, lockTip: true })}
-          {ic('Create view', <Eye size={17} />, () => setModal('view'), { disabled: !canEdit, lockTip: true })}
-          {ic('Schemas — create & manage', <FolderCog size={17} />, () => setModal('schema'), { disabled: !canEdit, lockTip: true })}
+          {ic(toolAvailableIn('ctas', viewMode) ? 'CTAS — create from existing' : PHYSICAL_ONLY_TOOL_TIP.ctas, <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit || !toolAvailableIn('ctas', viewMode), lockTip: true })}
+          {ic(toolAvailableIn('view', viewMode) ? 'Create view' : PHYSICAL_ONLY_TOOL_TIP.view, <Eye size={17} />, () => setModal('view'), { disabled: !canEdit || !toolAvailableIn('view', viewMode), lockTip: true })}
+          {ic(toolAvailableIn('schema', viewMode) ? 'Schemas — create & manage' : PHYSICAL_ONLY_TOOL_TIP.schema, <FolderCog size={17} />, () => setModal('schema'), { disabled: !canEdit || !toolAvailableIn('schema', viewMode), lockTip: true })}
           {ic('Upload from Excel — create or update tables, columns and structure in bulk', <FileSpreadsheet size={17} />, () => setModal('upload'), { disabled: !canUpload, lockTip: true })}
         </div>
         <span className="wk-grp-cap">Structure</span>
@@ -352,6 +374,10 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
 
       {/* ── Cluster derecho ── */}
       <div className="wk-right">
+        {/* Responsive (2026-09-11): en filas envueltas el contexto va a la
+            izquierda y las acciones a la derecha (space-between); la parte
+            «proyecto» de la pill se oculta en pantallas angostas. */}
+        <div className="wk-right-ctx">
         {onOpenModel && (
           <Tooltip label="Open or switch version">
             <button className="wk-save" onClick={onOpenModel}><FolderOpen size={15} />Open model</button>
@@ -360,15 +386,18 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         {openMode && (
           <span className={`wk-vpill${readonly ? ' viewer' : ''}`}
             title={snapshot ? 'Read-only snapshot of a published version, rebuilt from the change ledger' : undefined}>
-            {projectName ? `«${projectName}» · ` : ''}{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}
+            {projectName && <span className="wk-vpill-proj">{`«${projectName}» · `}</span>}{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}
           </span>
         )}
+        </div>
+        <div className="wk-right-act">
         <Tooltip label={readonly ? VIEWER_TIP : 'Save working copy'}>
           <button className="wk-save" disabled={!canEdit || saving} onClick={onSave}>{saving ? <span className="rd-spin" /> : <Save size={15} />}{saving ? 'Saving…' : 'Save'}</button>
         </Tooltip>
         <Tooltip label={readonly ? VIEWER_TIP : 'Publish version'}>
           <button className="wk-publish" disabled={!canEdit} onClick={() => setPublishOpen(true)}><ArrowUpToLine size={15} />Publish</button>
         </Tooltip>
+        </div>
       </div>
 
       {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={createTable} />}

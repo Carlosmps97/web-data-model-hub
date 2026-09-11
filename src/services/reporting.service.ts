@@ -18,8 +18,11 @@ export interface ReportTableRow {
   physicalName: string;
   logicalName: string;
   schema: string;
-  /** Subject area names this table belongs to (rendered as chips). */
+  /** Doc 88 §7: subject areas = FOLDERS that contain the canvases of this
+   *  table (DDV: the children of CPYBCA/Otros), rendered as chips. */
   subjectAreas: string[];
+  /** Doc 88 §7: names of the canvases (diagrams) that contain the table. */
+  diagrams?: string[];
   columnCount: number;
   relationshipCount: number;
   /** Nombre del proyecto del reporte (columna de la hoja exportada). */

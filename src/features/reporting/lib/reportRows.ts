@@ -31,6 +31,7 @@ export function tableSheetRow(t: ReportTableRow, udpKeys: string[]): SheetRow {
     'Logical name': t.logicalName,
     Schema: t.schema,
     'Subject areas': t.subjectAreas.join(', '),
+    Diagrams: (t.diagrams ?? []).join(', '),
     '#Columns': t.columnCount,
     '#Relations': t.relationshipCount,
     Projects: t.projects.join(', '),

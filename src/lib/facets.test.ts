@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countFacetUdpValues, facetNoun, facetNouns, facetUdpDefs, normalizeUdpView, UDP_CLASS_SEGMENTS, udpDisplayName } from './facets';
+import { countFacetUdpValues, facetNoun, facetNouns, facetUdpDefs, MODEL_MODE_CAPTION, normalizeUdpView, PHYSICAL_ONLY_TOOL_TIP, toolAvailableIn, UDP_CLASS_SEGMENTS, udpDisplayName } from './facets';
 
 const DEFS = [
   { id: 'p', name: 'Clasificacion del Dato', level: 'column' as const },
@@ -33,6 +33,13 @@ describe('facets (doc 69)', () => {
       .toEqual(['entity', 'table', 'attribute', 'column']);
     expect(UDP_CLASS_SEGMENTS.map((s) => s.label)).toEqual(['Entity (Logical)', 'Table (Physical)', 'Attribute (Logical)', 'Column (Physical)', 'View', 'Model']);
     expect(UDP_CLASS_SEGMENTS.filter((s) => s.level === 'view' || s.level === 'canvas').every((s) => s.view === 'physical')).toBe(true);
+  });
+  it('toolAvailableIn (doc 86): Views, CTAS y Schemas solo en físico; New table y Upload en ambos', () => {
+    expect(['view', 'ctas', 'schema'].every((t) => !toolAvailableIn(t as 'view', 'logical') && toolAvailableIn(t as 'view', 'physical'))).toBe(true);
+    expect(['new-table', 'upload'].every((t) => toolAvailableIn(t as 'upload', 'logical') && toolAvailableIn(t as 'upload', 'physical'))).toBe(true);
+    expect(PHYSICAL_ONLY_TOOL_TIP.view).toMatch(/physical model/);
+    expect(MODEL_MODE_CAPTION.logical).toMatch(/^Logical model/);
+    expect(MODEL_MODE_CAPTION.physical).toMatch(/^Physical model/);
   });
   it('facetNouns (doc 85): Entity/Attribute en lógico, Table/Column en físico', () => {
     expect(facetNouns('logical')).toEqual({ one: 'entity', many: 'entities', One: 'Entity', Many: 'Entities', a: 'an entity', member: 'attribute', members: 'attributes', Member: 'Attribute', Members: 'Attributes', aMember: 'an attribute' });

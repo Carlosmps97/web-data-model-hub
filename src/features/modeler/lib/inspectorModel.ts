@@ -67,3 +67,15 @@ export function primaryCanvas(usage: TableUsageRow[], activeSaId: string | null)
   if (here) return here;
   return usage.length === 1 ? usage[0] : null;
 }
+
+/** Doc 89 §3.2: conteos del diálogo «Delete table…» del inspector, calculados
+ *  del dossier ya cargado (Properties los re-consulta; acá ya están): canvases
+ *  donde aparece, tablas relacionadas ÚNICAS (la propia no cuenta) y vistas. */
+export function tableDeleteImpact(tableId: string, d: {
+  usage: Pick<TableUsageRow, 'canvasId'>[];
+  links: Pick<TableLinkRow, 'parentTableId' | 'childTableId'>[];
+  views: { id: string }[];
+}): { canvases: number; related: number; views: number } {
+  const related = new Set(d.links.flatMap((l) => [l.parentTableId, l.childTableId]).filter((t) => t !== tableId));
+  return { canvases: d.usage.length, related: related.size, views: d.views.length };
+}

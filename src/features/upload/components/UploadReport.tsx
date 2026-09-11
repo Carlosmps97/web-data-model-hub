@@ -4,6 +4,7 @@ import type { UploadCounts, UploadIssue, UploadReport, UploadTableRow } from '..
 const TILES: { key: keyof UploadReport['summary']; label: string }[] = [
   { key: 'tables', label: 'Tables' },
   { key: 'columns', label: 'Columns' },
+  { key: 'views', label: 'Views' },
   { key: 'canvases', label: 'Canvases' },
   { key: 'schemas', label: 'Schemas' },
   { key: 'projects', label: 'Projects' },
@@ -98,7 +99,7 @@ export function TablesLedger({ rows }: { rows: UploadTableRow[] }) {
       <div className="up-ledger-wrap">
         <table className="up-table">
           <thead>
-            <tr><th>Row</th><th>Action</th><th>Table</th><th>Schema</th><th>Canvas</th><th>Columns +new ~update =same</th><th>Issues</th></tr>
+            <tr><th>Row</th><th>Action</th><th>Table</th><th>Schema</th><th>Canvas</th><th>Columns +new ~update =same</th><th>Views +new =same</th><th>Issues</th></tr>
           </thead>
           <tbody>
             {shown.map((r, n) => {
@@ -111,6 +112,7 @@ export function TablesLedger({ rows }: { rows: UploadTableRow[] }) {
                   <td>{r.schema ?? '—'}</td>
                   <td>{r.canvas ?? '—'}</td>
                   <td>{cols(r.columns)}</td>
+                  <td>{r.views ? cols(r.views) : '—'}</td>
                   <td className="num">{r.issues || ''}</td>
                 </tr>
               );

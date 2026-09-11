@@ -16,6 +16,10 @@ export function moveSource(sources: ViewSource[], from: number, to: number): Vie
 /** Sincroniza el valor del UDP "View Type" con el MODO real de la vista
  *  (doc 61 §2.3): la verdad técnica es `customSql`; el UDP es el dato
  *  reportable. Sin def sembrado (defId null) devuelve los valores tal cual. */
+/** Nombre (CI) del UDP gestionado «Tipo de Vista» (seed doc 61): lo sincroniza
+ *  el modo Regular/Personalizada; el panel y el inspector lo bloquean. */
+export const VIEW_TYPE_NAME = 'tipo de vista';
+
 export function syncViewTypeUdp(
   values: Record<string, string> | undefined,
   defId: string | null | undefined,

@@ -9,6 +9,8 @@ import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
 import UdpAssign from './UdpAssign';
 import { FACET_CAPTION, facetNouns } from '@/lib/facets';
+import { tableCreateInput } from '../lib/createInputs';
+import { applyNamingCase } from '../lib/physicalCase';
 import { tableSchemasCached } from '../services/schemaPartition';
 
 type Mode = 'blank' | 'import';
@@ -23,14 +25,13 @@ type Mode = 'blank' | 'import';
  */
 export default function NewTableModal({ onClose, onCreate }: {
   onClose: () => void;
-  onCreate: (input: { logicalName: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
+  onCreate: (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical'; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
 }) {
   const [mode, setMode] = useState<Mode>('blank');
 
   // ── Blank ──────────────────────────────────────────────────────────────
   const [logical, setLogical] = useState('');
   const [physical, setPhysical] = useState('');
-  const [physEdited, setPhysEdited] = useState(false);
   const [schema, setSchema] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +44,11 @@ export default function NewTableModal({ onClose, onCreate }: {
   // Doc 69: los UDPs del alta siguen la faceta activa del canvas (Entity/Table).
   const viewMode = useModelerStore((s) => s.viewMode);
   const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
+  // Doc 86 D3: New entity (Logical) tipea el LÓGICO y muestra el físico
+  // derivado; New table (Physical) tipea el FÍSICO (regla de case del scope
+  // table) + Schema. `logical` guarda lo tipeado en ambos casos.
+  const tableCase = useModelerStore((s) => s.naming?.table.case);
+  const casedPhysical = viewMode === 'physical' ? applyNamingCase(logical.trim(), tableCase) : '';
   const [udpValues, setUdpValues] = useState<Record<string, string>>({});
   const udpRef = useRef<Record<string, string>>({});
   const setUdp = (next: Record<string, string>) => { udpRef.current = next; setUdpValues(next); };
@@ -52,7 +58,7 @@ export default function NewTableModal({ onClose, onCreate }: {
   // tipeando o tomó el override): sin esto una respuesta VIEJA que llegara
   // tarde pisaba el físico vigente con el derivado de un lógico anterior.
   useEffect(() => {
-    if (physEdited) return;
+    if (viewMode === 'physical') return;   // doc 86: el preview derivado es del modo Logical
     const t = logical.trim();
     if (!t) { setPhysical(''); return; }
     let alive = true;
@@ -60,7 +66,7 @@ export default function NewTableModal({ onClose, onCreate }: {
       gov.physicalize(t, 'table').then((r) => { if (alive) setPhysical(r.physical); }).catch(() => {});
     }, 300);
     return () => { alive = false; clearTimeout(h); };
-  }, [logical, physEdited]);
+  }, [logical, viewMode]);
 
   const submitBlank = async () => {
     const ln = logical.trim();
@@ -68,10 +74,9 @@ export default function NewTableModal({ onClose, onCreate }: {
     setBusy(true);
     setError(null);
     try {
-      await onCreate({
-        logicalName: ln, physicalName: physical.trim() || undefined, schema: schema.trim() || undefined,
-        description: description.trim() || undefined, udpValues: udpRef.current,
-      });
+      // Doc 86 §2.3: payload por faceta (createInputs, puro y testeado). En
+      // Logical el físico lo deriva el store por glosario (scope table).
+      await onCreate(tableCreateInput(viewMode, { name: ln, schema, description, udpValues: udpRef.current }, tableCase));
       onClose();
     } catch (e) {
       // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
@@ -163,44 +168,56 @@ export default function NewTableModal({ onClose, onCreate }: {
       footer={mode === 'blank' ? (
         <>
           <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
-          <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy || !logical.trim()} onClick={submitBlank}>Create table</button>
+          <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy || !logical.trim()} onClick={submitBlank}>Create {n.one}</button>
         </>
       ) : (
         <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Done</button>
       )}
     >
       <div className="rd-seg" style={{ marginBottom: 16 }}>
-        <button className={mode === 'blank' ? 'active' : ''} onClick={() => setMode('blank')}>Blank table</button>
+        <button className={mode === 'blank' ? 'active' : ''} onClick={() => setMode('blank')}>Blank {n.one}</button>
         <button className={mode === 'import' ? 'active' : ''} onClick={() => setMode('import')}>Import existing</button>
       </div>
 
       {mode === 'blank' ? (
         <div>
-          <div style={field}>
-            <label style={lbl}>Logical Name</label>
-            <input className="rd-input" autoFocus placeholder="e.g. cuenta cliente" value={logical}
-              onChange={(e) => setLogical(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitBlank(); }}
-              style={{ width: '100%' }} />
-          </div>
-          <div style={field}>
-            <label style={lbl}>Physical Name</label>
-            <input className="rd-input rd-mono" placeholder="schema-derived" value={physical}
-              onChange={(e) => { setPhysical(e.target.value); setPhysEdited(true); }} style={{ width: '100%' }} />
-            <span className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)', marginTop: 4, display: 'block' }}>
-              Auto-generated from UDP (per-table). You can override it.
-            </span>
-          </div>
-          <div style={field}>
-            <label style={lbl}>Schema</label>
-            {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
-                de TABLAS; se crean desde Structure · Esquemas. */}
-            <SchemaSelect kind="tables" value={schema} onChange={setSchema} style={{ width: '100%' }} />
-          </div>
+          {viewMode === 'logical' ? (
+            <div style={field}>
+              <label style={lbl}>Logical name</label>
+              <input className="rd-input" autoFocus placeholder="e.g. cuenta cliente" value={logical}
+                onChange={(e) => setLogical(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitBlank(); }}
+                style={{ width: '100%' }} />
+              {/* Doc 86 D3: el físico se deriva por glosario (scope table); se edita luego en Physical. */}
+              <span className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)', marginTop: 4, display: 'block' }}>
+                Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{physical || '—'}</span> — derived from the glossary; schema and physical name are set in the Physical model.
+              </span>
+            </div>
+          ) : (
+            <>
+              <div style={field}>
+                <label style={lbl}>Physical name</label>
+                <input className="rd-input rd-mono" autoFocus placeholder="e.g. HD_CLIENTE" value={logical}
+                  onChange={(e) => setLogical(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitBlank(); }}
+                  style={{ width: '100%' }} />
+                {casedPhysical && casedPhysical !== logical.trim() && (
+                  <span className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)', marginTop: 4, display: 'block' }}>
+                    Saved as <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{casedPhysical}</span> (naming rule of the table scope).
+                  </span>
+                )}
+              </div>
+              <div style={field}>
+                <label style={lbl}>Schema</label>
+                {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
+                    de TABLAS; se crean desde Structure · Esquemas. */}
+                <SchemaSelect kind="tables" value={schema} onChange={setSchema} style={{ width: '100%' }} />
+              </div>
+            </>
+          )}
           {/* Doc 64 §6: definición funcional + UDPs en el alta (como el popup
               de New column, doc 40). */}
           <div style={field}>
             <label style={lbl}>Functional definition</label>
-            <textarea className="wk-pp-textarea" placeholder="What this table represents (business definition)…"
+            <textarea className="wk-pp-textarea" placeholder={`What this ${n.one} represents (business definition)…`}
               value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
           <div style={{ ...field, paddingTop: 12, borderTop: '1px solid #EEF1F6' }}>
@@ -218,7 +235,7 @@ export default function NewTableModal({ onClose, onCreate }: {
           <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
             <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: 7, padding: '0 10px', background: 'var(--fill-3, #F4F6F9)', borderRadius: 9 }}>
               <Search size={15} color="var(--text-muted, #8A93A5)" />
-              <input placeholder="Search tables in the database…" value={q} onChange={(e) => setQ(e.target.value)}
+              <input placeholder={`Search ${n.many} in the database…`} value={q} onChange={(e) => setQ(e.target.value)}
                 style={{ flex: 1, border: 0, background: 'transparent', outline: 'none', padding: '10px 0', fontSize: 13 }} />
             </div>
             <div style={{ width: 168, flexShrink: 0 }}>
@@ -238,8 +255,9 @@ export default function NewTableModal({ onClose, onCreate }: {
               return (
                 <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--border-soft, #EAEDF2)', borderRadius: 10 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div className="rd-mono" style={{ fontWeight: 600, fontSize: 13 }}>{t.physicalName}</div>
-                    <div className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)' }}>{t.logicalName} · used in {usageOf(t.id)} modules</div>
+                    {/* Doc 86: el nombre de la faceta activa primero. */}
+                    <div className={viewMode === 'physical' ? 'rd-mono' : ''} style={{ fontWeight: 600, fontSize: 13 }}>{viewMode === 'physical' ? t.physicalName : (t.logicalName || t.physicalName)}</div>
+                    <div className={`rd-small${viewMode === 'logical' ? ' rd-mono' : ''}`} style={{ color: 'var(--text-muted, #8A93A5)' }}>{viewMode === 'physical' ? t.logicalName : t.physicalName} · used in {usageOf(t.id)} modules</div>
                   </div>
                   <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={already || adding === t.id} onClick={() => addOne(t.id)}>
                     {already ? <><Check size={14} /> Added</> : <><Plus size={14} /> Add</>}
@@ -255,8 +273,8 @@ export default function NewTableModal({ onClose, onCreate }: {
             {visible.length === 0 && (
               <div className="rd-small" style={{ padding: 10, color: 'var(--text-muted, #8A93A5)' }}>
                 {schemaFilter
-                  ? `No tables in schema "${schemaFilter}"${q.trim() ? ' match your search' : ''}.`
-                  : 'No tables match your search.'}
+                  ? `No ${n.many} in schema "${schemaFilter}"${q.trim() ? ' match your search' : ''}.`
+                  : `No ${n.many} match your search.`}
               </div>
             )}
           </div>

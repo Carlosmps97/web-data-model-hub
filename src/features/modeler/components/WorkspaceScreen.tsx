@@ -1,4 +1,5 @@
 import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { MODEL_MODE_CAPTION } from '@/lib/facets';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { useModelerStore } from '@/store/useModelerStore';
@@ -34,7 +35,6 @@ export default function WorkspaceScreen() {
   const selectedColumnId = useModelerStore((s) => s.selectedColumnId);
   const selectedViewId = useModelerStore((s) => s.selectedViewId);
   const viewMode = useModelerStore((s) => s.viewMode);
-  const setViewMode = useModelerStore((s) => s.setViewMode);
   // Doc 75 D5: la working copy borra su proyecto → el canvas cede al panel.
   const deletionPending = useModelerStore((s) => s.projectDeletionPending);
   const activeProject = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
@@ -218,24 +218,9 @@ export default function WorkspaceScreen() {
       </div>
       <div className="wk-status">
         <span className="wk-status-spacer" />
-        <div className="wk-seg" role="group" aria-label="Naming view">
-          <button
-            type="button"
-            className={`wk-seg-btn${viewMode === 'logical' ? ' on' : ''}`}
-            disabled={!openMode}
-            onClick={() => setViewMode('logical')}
-          >
-            Logical
-          </button>
-          <button
-            type="button"
-            className={`wk-seg-btn${viewMode === 'physical' ? ' on' : ''}`}
-            disabled={!openMode}
-            onClick={() => setViewMode('physical')}
-          >
-            Physical
-          </button>
-        </div>
+        {/* Doc 86 D1: el selector lógico/físico vive en la barra de tools (grupo
+            Model); acá queda el rótulo del modelo activo. */}
+        <span className="rd-small" style={{ color: 'var(--muted)' }}>{openMode ? MODEL_MODE_CAPTION[viewMode] : ''}</span>
       </div>
       {/* Doc 49: el área `props` del grid muestra UN panel a la vez — con una
           columna seleccionada, su Properties reemplaza al de la tabla. */}

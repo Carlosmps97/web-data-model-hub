@@ -19,10 +19,14 @@ import { applyPending, commitValue, prunePending, type UdpValues } from '../lib/
  *  carácter, y el input (atado al prop del server) perdía teclas al tipear
  *  rápido. `pending` (udpDraft.ts) evita que un commit armado sobre el prop
  *  stale pise lo recién guardado en otro campo mientras el reload viaja. */
-export default function UdpAssign({ level, view = 'physical', values, onChange, disabled, locked }: {
+export default function UdpAssign({ level, view = 'physical', values, onChange, disabled, locked, defs: defsProp }: {
   level: UdpLevel;
   /** Doc 69: faceta cuyas defs se listan (los paneles pasan el modo del canvas). */
   view?: Facet;
+  /** Doc 85: defs YA cargadas por el caller (p.ej. el snapshot de Data
+   *  Standards). Con esto no se consulta la sesión ni se hace fetch — Data
+   *  Standards es explícito por proyecto y puede no tener proyecto de sesión. */
+  defs?: UdpDefinition[];
   values: UdpValues;
   onChange: (next: UdpValues) => void;
   disabled?: boolean;
@@ -42,9 +46,14 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
 
   useEffect(() => {
     let alive = true;
-    getUdpDefs(sessionProjectId()).then((d) => { if (alive) setDefs(facetUdpDefs(d, level, view)); }).catch(() => {});
+    if (defsProp) { setDefs(facetUdpDefs(defsProp, level, view)); return () => { alive = false; }; }
+    // Un efecto JAMÁS lanza (React desmontaría todo el árbol): sin proyecto
+    // activo en la sesión no hay defs que listar.
+    let pid: string;
+    try { pid = sessionProjectId(); } catch { setDefs([]); return () => { alive = false; }; }
+    getUdpDefs(pid).then((d) => { if (alive) setDefs(facetUdpDefs(d, level, view)); }).catch(() => {});
     return () => { alive = false; };
-  }, [level, view]);
+  }, [level, view, defsProp]);
 
   // Llegó un prop nuevo (reload): podar lo pendiente que ya está reflejado.
   useEffect(() => { pending.current = prunePending(values, pending.current); }, [values]);

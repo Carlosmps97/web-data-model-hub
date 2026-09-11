@@ -3,13 +3,12 @@ import { Boxes, Pencil, Plus, Search, Trash2, UploadCloud, X } from 'lucide-reac
 import { toast } from 'sonner';
 import type { StandardsSnapshot, SnapshotDomain } from '../standards.service';
 import { applyStandards } from '../standards.service';
-import { getDomainImpact, type DomainImpact } from '@/services/naming.service';
+import { getDomainImpact, physicalize, type DomainImpact } from '@/services/naming.service';
 import { impactWarning, visibleImpactTables, tableLabel } from '../domainImpact';
 import TypePicker from '@/features/modeler/components/TypePicker';
 import ComplexTypeBuilder from '@/features/modeler/components/ComplexTypeBuilder';
 import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
 import UdpAssign from '@/features/modeler/components/UdpAssign';
-import { physicalize } from '@/services/governance.service';
 import type { Facet } from '@/lib/facets';
 
 type Mode = 'view' | 'edit' | 'create';
@@ -49,10 +48,10 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
     if (!logical) { setDerivedPhys(''); return; }
     let alive = true;
     const t = setTimeout(() => {
-      physicalize(logical, 'column').then((r) => { if (alive) setDerivedPhys(r.physical); }).catch(() => { if (alive) setDerivedPhys(''); });
+      physicalize(projectId, logical, 'column').then((r) => { if (alive) setDerivedPhys(r.physical); }).catch(() => { if (alive) setDerivedPhys(''); });
     }, 220);
     return () => { alive = false; clearTimeout(t); };
-  }, [form.name]);
+  }, [form.name, projectId]);
 
   useEffect(() => {
     setMode('view'); setConfirm(null); setImpact(null); setFacet('logical');
@@ -146,11 +145,11 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
         {filtered.map((d) => (
           <div key={d.id} onClick={() => { if (!editable) setSelId(d.id); }} style={{ ...domCard(d.id === selId && mode !== 'create'), marginBottom: 8, cursor: editable ? 'default' : 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Boxes size={15} color="#8B5CF6" /><span style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>{d.name}</span></div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8, flexWrap: 'wrap' }}>
               <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '2px 7px' }} title="Physical default type">{d.defaultDataType}</span>
               {d.logicalDataType && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#5B3FA0', background: '#F4EEFF', borderRadius: 6, padding: '2px 7px' }} title="Logical data type">{d.logicalDataType}</span>}
               {/* Doc 85: físico con override (vacío = derivado del lógico). */}
-              {d.physicalName && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#9A6B00', background: '#FFF6E5', borderRadius: 6, padding: '2px 7px' }} title="Physical name override">{d.physicalName}</span>}
+              {d.physicalName && d.physicalName !== d.name && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#9A6B00', background: '#FFF6E5', borderRadius: 6, padding: '2px 7px', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`Physical name override: ${d.physicalName}`}>{d.physicalName}</span>}
               {/* Doc 80 §4: se ve de un vistazo cuáles imponen nombre+definición. */}
               {d.inheritsName && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#0E8C6A', background: '#E8F7F1', border: '1px solid #C6EADC', borderRadius: 6, padding: '2px 7px' }} title="Standard attribute: its name and definition are inherited by the column">name + definition</span>}
             </div>
@@ -201,7 +200,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
 
                 <label style={lbl}>Attribute UDP defaults (Logical)</label>
                 <div style={{ padding: '12px 14px', background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, marginBottom: 18 }}>
-                  <UdpAssign key={`${selId}:logical`} level="column" view="logical" values={form.udpValues ?? {}} disabled={!editable}
+                  <UdpAssign key={`${selId}:logical`} level="column" view="logical" defs={snapshot.udp ?? []} values={form.udpValues ?? {}} disabled={!editable}
                     onChange={(next) => setForm((f) => ({ ...f, udpValues: next }))} />
                   <div style={{ fontSize: 11.5, color: '#8A93A5', marginTop: 8 }}>Offered to the modeler when this domain is assigned to a column — they pick which to inherit.</div>
                 </div>
@@ -244,7 +243,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
 
                 <label style={lbl}>Column UDP defaults (Physical)</label>
                 <div style={{ padding: '12px 14px', background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, marginBottom: 18 }}>
-                  <UdpAssign key={`${selId}:physical`} level="column" view="physical" values={form.udpValues ?? {}} disabled={!editable}
+                  <UdpAssign key={`${selId}:physical`} level="column" view="physical" defs={snapshot.udp ?? []} values={form.udpValues ?? {}} disabled={!editable}
                     onChange={(next) => setForm((f) => ({ ...f, udpValues: next }))} />
                   <div style={{ fontSize: 11.5, color: '#8A93A5', marginTop: 8 }}>Offered to the modeler when this domain is assigned to a column — they pick which to inherit.</div>
                 </div>

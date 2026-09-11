@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleAlert, CircleCheck, FileSpreadsheet, ListChecks, Plus, Settings2, TriangleAlert, UploadCloud, Wand2 } from 'lucide-react';
+import { CircleAlert, CircleCheck, FileSpreadsheet, FolderTree, ListChecks, Plus, Settings2, TriangleAlert, UploadCloud, Wand2 } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import Button from '@/components/ui/Button';
 import SearchSelect from '@/features/modeler/components/SearchSelect';
@@ -10,10 +10,11 @@ import { useModelerStore } from '@/store/useModelerStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import { findSheet, readWorkbook, sheetRowCount, type RawWorkbook } from '../lib/parseWorkbook';
 import {
-  applyUpload, createDefaultProfile, discardUpload, getProfileCatalog, listProfiles, pollUploadJob, startUpload,
-  type ProfileCatalog, type UploadJob, type UploadProfile, type UploadSummary,
+  applyUpload, createDefaultProfile, discardUpload, getProfileCatalog, getUploadTargets, listProfiles, pollUploadJob, startUpload,
+  type ProfileCatalog, type UploadJob, type UploadProfile, type UploadSummary, type UploadTargets,
 } from '../upload.service';
 import { arrangeCanvases } from '../arrangeCanvases';
+import { needsTarget, pickTarget, targetHint } from '../lib/uploadTarget';
 import UploadDropzone, { type DropzoneFile, type DropzoneSheet } from './UploadDropzone';
 import UploadReportView from './UploadReport';
 import ProfileManagerModal from './ProfileManagerModal';
@@ -29,11 +30,24 @@ import '../upload.css';
  * terminar el front arregla (ELK) los canvases tocados, refresca el explorer
  * y vacía la pila de Undo. Cerrar el popup descarta el job si aún no se
  * aplicó; mientras aplica/arregla no se cierra.
+ *
+ * Doc 87 §3.5: si el proyecto tiene una capa de «proyectos internos» (2+
+ * carpetas raíz con subcarpetas — DDV: CPYBCA / Otros) la fila Target project
+ * exige elegir una antes de validar; con una sola (UDV) se muestra dónde caerá
+ * la carga; sin capa la fila no aparece. La regla la decide el backend.
  */
 type Phase = 'idle' | 'parsed' | 'validating' | 'validated' | 'applying' | 'arranging' | 'done' | 'failed';
 
 const STEPS = ['Choose file', 'Validate', 'Upload'] as const;
 const LAST_PROFILE_KEY = (pid: string) => `dmh.upload.profile.${pid}`;
+const LAST_TARGET_KEY = (pid: string) => `dmh.upload.target.${pid}`;
+
+function remembered(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }   // storage bloqueado o ausente
+}
+function remember(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* storage bloqueado o ausente */ }
+}
 
 function stepState(phase: Phase): { current: number; done: number } {
   switch (phase) {
@@ -54,6 +68,7 @@ function summaryLine(c: UploadSummary | undefined): string {
   const n = (k: keyof UploadSummary) => (c[k]?.create ?? 0) + (c[k]?.update ?? 0);
   if (n('tables')) parts.push(plural(n('tables'), 'table'));
   if (n('columns')) parts.push(plural(n('columns'), 'column'));
+  if (n('views')) parts.push(plural(n('views'), 'view'));
   if (n('canvases')) parts.push(plural(n('canvases'), 'canvas').replace('canvass', 'canvases'));
   if (n('projects')) parts.push(plural(n('projects'), 'project'));
   if (n('folders')) parts.push(plural(n('folders'), 'folder'));
@@ -83,6 +98,8 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
   const [arrangeFailed, setArrangeFailed] = useState<string[]>([]);
   const [profiles, setProfiles] = useState<UploadProfile[] | null>(null);
   const [profileId, setProfileId] = useState<string | null>(null);
+  const [targets, setTargets] = useState<UploadTargets | null>(null);
+  const [targetId, setTargetId] = useState<string | null>(null);
   const [catalog, setCatalog] = useState<ProfileCatalog | null>(null);
   const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
   const [setupError, setSetupError] = useState<string | null>(null);
@@ -107,6 +124,20 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
       .catch((e) => { if (alive) setSetupError(apiErrorMessage(e, "Couldn't load the upload profiles.")); });
     return () => { alive = false; };
   }, [projectId]);
+
+  // Doc 87: capa de proyectos internos de la versión (estructura EFECTIVA del draft).
+  useEffect(() => {
+    if (!csId || !projectId) return;
+    let alive = true;
+    getUploadTargets(csId)
+      .then((t) => {
+        if (!alive) return;
+        setTargets(t);
+        setTargetId((cur) => pickTarget(t, remembered(LAST_TARGET_KEY(projectId)), cur));
+      })
+      .catch((e) => { if (alive) setSetupError(apiErrorMessage(e, "Couldn't load the project structure.")); });
+    return () => { alive = false; };
+  }, [csId, projectId]);
 
   const dropJob = useCallback(() => {
     abortRef.current?.abort();
@@ -135,7 +166,15 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
 
   const chooseProfile = (id: string) => {
     setProfileId(id);
-    if (projectId) { try { localStorage.setItem(LAST_PROFILE_KEY(projectId), id); } catch { /* storage bloqueado o ausente */ } }
+    if (projectId) remember(LAST_PROFILE_KEY(projectId), id);
+    if (phase === 'validated' || phase === 'failed') { resetToParsed(); setPhase(raw ? 'parsed' : 'idle'); }
+  };
+
+  // Cambiar el destino después de validar obliga a validar de nuevo (el plan
+  // de carpetas/canvases depende de él), igual que cambiar de perfil.
+  const chooseTarget = (id: string) => {
+    setTargetId(id || null);
+    if (projectId && id) remember(LAST_TARGET_KEY(projectId), id);
     if (phase === 'validated' || phase === 'failed') { resetToParsed(); setPhase(raw ? 'parsed' : 'idle'); }
   };
 
@@ -147,7 +186,10 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
     setError(null); setJob(null); setPhase('validating');
     const ac = new AbortController(); abortRef.current = ac;
     try {
-      track(await startUpload(csId, { fileName: raw.fileName, profileId, sheets: raw.sheets }));
+      track(await startUpload(csId, {
+        fileName: raw.fileName, profileId, sheets: raw.sheets,
+        targetFolderId: needsTarget(targets) ? targetId : null,
+      }));
       const final = await pollUploadJob(csId, jobRef.current!.id, { onTick: track, signal: ac.signal });
       if (final.status === 'validated') setPhase('validated');
       else { setPhase('failed'); setError(final.error ?? 'Validation failed.'); }
@@ -217,7 +259,9 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
   const report = job?.report ?? null;
   const errors = report?.errorCount ?? 0;
   const warnings = report?.warningCount ?? 0;
-  const canValidate = !!csId && !!raw && !!profileId && !working && phase !== 'done';
+  const target = targets?.candidates.find((c) => c.id === targetId) ?? null;
+  const targetPending = !targets || (needsTarget(targets) && !target);
+  const canValidate = !!csId && !!raw && !!profileId && !targetPending && !working && phase !== 'done';
   const canUpload = phase === 'validated' && errors === 0 && !working;
   const { current, done } = stepState(phase);
 
@@ -225,7 +269,9 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
   if (!csId) status = { text: 'Open a version in editing mode to upload.', tone: 'error' };
   else if (setupError) status = { text: setupError, tone: 'error' };
   else if (profiles && profiles.length === 0) status = { text: 'This project has no upload profiles yet.', tone: 'warn' };
-  else if (phase === 'parsed' && raw) {
+  else if (targets && needsTarget(targets) && !target && (phase === 'idle' || phase === 'parsed')) {
+    status = { text: 'Pick the target project to validate.', tone: 'warn' };
+  } else if (phase === 'parsed' && raw) {
     const missing = sheetsInfo?.filter((s) => !s.found) ?? [];
     status = missing.length
       ? { text: `Sheet ${missing.map((s) => `'${s.name}'`).join(', ')} not found in the workbook — validate to see the details.`, tone: 'warn' }
@@ -280,6 +326,11 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
   );
 
   const profileOptions = (profiles ?? []).map((p) => ({ value: p.id, label: p.name, detail: p.isDefault ? 'default' : undefined }));
+  const targetOptions = (targets?.candidates ?? []).map((c) => ({
+    value: c.id, label: c.name,
+    detail: `${plural(c.folders, 'folder')} · ${plural(c.canvases, 'canvas').replace('canvass', 'canvases')}`,
+  }));
+  const hint = targetHint(targets);
 
   return (
     <Dialog
@@ -324,6 +375,21 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
           </div>
         )}
         {profile?.description && phase !== 'done' && <div className="up-profile-desc">{profile.description}</div>}
+
+        {phase !== 'done' && targets && targets.mode !== 'none' && (
+          <div className="up-profile-row">
+            <span className="up-profile-label">Target project</span>
+            {needsTarget(targets) ? (
+              <SearchSelect
+                options={targetOptions} valueLabel={target?.name ?? ''}
+                placeholder="Pick the internal project to load into…" onPick={chooseTarget} disabled={working}
+                emptyLabel="No project matches" inputClassName="up-profile-select"
+              />
+            ) : (
+              <span className="up-target-hint"><FolderTree size={14} strokeWidth={1.8} aria-hidden />{hint}</span>
+            )}
+          </div>
+        )}
 
         {phase === 'done' ? (
           <div className="up-done">

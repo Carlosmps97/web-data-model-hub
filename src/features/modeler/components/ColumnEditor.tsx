@@ -13,6 +13,7 @@ import { applyNamingCase } from '../lib/physicalCase';
 import { canonicalDefaultType } from '../lib/typePick';
 import { useModelerStore, type AddColumnInput } from '@/store/useModelerStore';
 import { FACET_CAPTION, type Facet } from '@/lib/facets';
+import { columnCreateInput } from '../lib/createInputs';
 import { facetType } from '../lib/inspectorModel';
 import { domainUdpOffer, mergeInheritedUdps, type DomainUdpOffer, type DomainUdpOfferItem } from '../lib/domainInherit';
 import DomainInheritPopup from './DomainInheritPopup';
@@ -24,17 +25,21 @@ import UdpAssign from './UdpAssign';
 /** Opciones del combobox de Parent Domain: alfabético, con el tipo por defecto
  *  como detalle a la derecha (doc 41) — HOMOLOGADO a la grafía canónica
  *  (doc 64 r2: un dominio legacy con `Array` se muestra como `ARRAY<>`). */
-export const domainOptions = (domains: ParentDomain[]) =>
+export const domainOptions = (domains: ParentDomain[], facet: Facet = 'physical') =>
   [...domains]
     .sort((a, b) => a.name.localeCompare(b.name))
-    .map((d) => ({ value: d.id, label: d.name, detail: canonicalDefaultType(d.defaultDataType) }));
+    // Doc 86 §2.4: el detalle es el tipo de la FACETA activa (lógico en Logical).
+    .map((d) => ({ value: d.id, label: d.name, detail: facetDomainDefault(d, facet) }));
+
+/** Default de tipo del dominio en la faceta: lógico (con fallback al físico) o físico. Homologado. */
+export const facetDomainDefault = (d: { defaultDataType: string; logicalDataType?: string | null } | undefined, facet: Facet): string =>
+  canonicalDefaultType(facet === 'logical' ? (d?.logicalDataType || d?.defaultDataType) : d?.defaultDataType);
 
 export default function ColumnEditor({ tableId, onClose, onAdd }: {
   tableId: string;
   onClose: () => void;
   onAdd: (tableId: string, input: AddColumnInput) => Promise<void>;
 }) {
-  const [mode, setMode] = useState<'logical' | 'physical'>('logical');
   const [name, setName] = useState('');
   const [preview, setPreview] = useState('');
   const [parentDomainId, setParentDomainId] = useState('');
@@ -73,6 +78,10 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const previewSeq = useRef(0);
   // Doc 69: los UDPs del alta siguen la faceta activa del canvas.
   const viewMode = useModelerStore((s) => s.viewMode);
+  // Doc 86: el popup NO tiene selector propio — sigue el selector global. En
+  // Logical lo tipeado es el nombre lógico y el tipo es el LÓGICO; en Physical
+  // lo tipeado es el físico (regla de case, doc 83) y el tipo es el físico.
+  const mode = viewMode;
   // Doc 83: regla de case del scope column (naming config del proyecto).
   const columnCase = useModelerStore((s) => s.naming?.column.case);
 
@@ -104,7 +113,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   // Doc 64 r2: el default se consume HOMOLOGADO (canonicalDefaultType) — un
   // dominio legacy con `Array` hereda `ARRAY<>` (y abre el builder), no el
   // texto crudo de la BD sin homologar.
-  const domainDefault = canonicalDefaultType(activeDomain?.defaultDataType);
+  const domainDefault = facetDomainDefault(activeDomain, mode);
   const onDomainPick = (id: string) => {
     const dom = domains.find((d) => d.id === id);
     const prev = domains.find((d) => d.id === parentDomainId);
@@ -113,7 +122,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       typeOverridden,
       currentType: dataType,
       nextDomainId: id,
-      nextDefault: dom?.defaultDataType != null ? canonicalDefaultType(dom.defaultDataType) : undefined,
+      nextDefault: dom ? facetDomainDefault(dom, mode) : undefined,
     });
     // Doc 79: solo un dominio "atributo estándar" (Erwin `Attribute_Definition`
     // ⇒ `inheritsName`) re-aplica nombre lógico y definición; los genéricos de
@@ -152,13 +161,11 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     setBusy(true);
     setError(null);
     try {
-      await onAdd(tableId, {
-        logicalName: name.trim(), mode, parentDomainId: parentDomainId || undefined, dataType: dataType || undefined,
-        description: description.trim() || undefined,
-        physicalDescription: physicalDescription.trim() || undefined,   // doc 85
-        isPrimaryKey, isForeignKey, isNullable, isPartition,
-        udpValues: udpRef.current,
-      });
+      // Doc 86 §2.3: payload por faceta (createInputs, puro y testeado).
+      await onAdd(tableId, columnCreateInput(mode, {
+        name, parentDomainId, typeText: dataType, description, physicalDescription,
+        isPrimaryKey, isForeignKey, isNullable, isPartition, udpValues: udpRef.current,
+      }, activeDomain));
       onClose();
     } catch (e) {
       // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
@@ -174,19 +181,15 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
         <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
         <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={submit}>Add</button>
       </>}>
-      <div className="rd-seg" style={{ marginBottom: 10 }}>
-        <button className={mode === 'logical' ? 'active' : ''} onClick={() => setMode('logical')}>Logical</button>
-        <button className={mode === 'physical' ? 'active' : ''} onClick={() => setMode('physical')}>Physical</button>
-      </div>
-      <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Words (e.g. monto deuda dólares)' : 'Physical name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
+      <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Attribute name (e.g. monto deuda dólares)' : 'Column name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
       {preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
       <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
         {/* Combobox con buscador (doc 41): contiene, lista acotada con
             scroll, nombre + tipo default a la derecha. */}
         <SearchSelect
-          options={domainOptions(domains)}
+          options={domainOptions(domains, mode)}
           valueLabel={domains.find((d) => d.id === parentDomainId)?.name ?? ''}
-          placeholder="— Parent Domain (type) —"
+          placeholder={mode === 'logical' ? '— Parent Domain (logical type) —' : '— Parent Domain (type) —'}
           emptyLabel="(none)"
           onPick={onDomainPick}
         />
@@ -197,7 +200,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
           <TypePicker
             value={dataType}
             onChange={onTypeChange}
-            placeholder={parentDomainId ? 'Data type' : 'Data type (or pick a Parent Domain)'}
+            placeholder={parentDomainId ? (mode === 'logical' ? 'Logical data type' : 'Data type') : (mode === 'logical' ? 'Logical data type (or pick a Parent Domain)' : 'Data type (or pick a Parent Domain)')}
             emptyLabel={parentDomainId ? '(domain default)' : '(none)'}
           />
           {parentDomainId && dataType.trim() !== '' && (

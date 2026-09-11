@@ -409,3 +409,31 @@
 
 /* Doc 84 C1 · el explorer embebido en el popup de Version tools */
 .dmh-vt-explorer { height: min(560px, 62vh); display: flex; flex-direction: column; border: 1px solid var(--border-2); border-radius: 11px; overflow: hidden; background: var(--surface); }
+
+/* ── Doc 88 §5-6: chips de resultado, historial de solicitudes y diálogo de rechazo ── */
+.dmh-rv-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+.dmh-rv-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border-1); background: var(--surface); color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.dmh-rv-chip:hover { color: var(--navy); }
+.dmh-rv-chip.is-on { color: var(--navy); background: var(--fill-2); border-color: var(--navy); }
+.dmh-rv-chip-n { font-size: 10.5px; font-weight: 700; padding: 0 6px; border-radius: 999px; background: var(--fill-4); color: var(--text-muted); }
+.dmh-rv-chip.is-on .dmh-rv-chip-n { background: var(--navy); color: #fff; }
+.dmh-rv-hist { border: 1px solid var(--border-1); border-radius: var(--r-lg); background: var(--surface); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.dmh-rv-hist-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted-2); }
+.dmh-rv-hist-row { border-left: 3px solid var(--border-2); padding: 4px 0 4px 12px; display: flex; flex-direction: column; gap: 4px; }
+.dmh-rv-hist-row.is-rejected { border-left-color: var(--red); }
+.dmh-rv-hist-row.is-approved { border-left-color: var(--green-deep); }
+.dmh-rv-hist-row.is-pending { border-left-color: var(--blue, #2E5BFF); }
+.dmh-rv-hist-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dmh-rv-hist-cycle { font-size: 11px; font-weight: 700; color: var(--text-muted); font-family: var(--mono, monospace); }
+.dmh-rv-hist-meta { font-size: 12px; color: var(--text-muted); }
+.dmh-rv-hist-meta strong { color: var(--navy); font-weight: 600; }
+.dmh-rv-hist-t { font-size: 13px; font-weight: 600; color: var(--navy); }
+.dmh-rv-hist-desc { font-size: 12.5px; color: var(--text); white-space: pre-wrap; }
+.dmh-rv-hist-note { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--red); background: var(--red-tint); border: 1px solid var(--red-border); border-radius: var(--r-md, 8px); padding: 6px 10px; }
+.dmh-rv-hist-decisions { margin: 0; padding-left: 16px; font-size: 12px; color: var(--text-muted); }
+.dmh-rv-comments-closed { font-size: 12px; color: var(--text-muted); padding: 8px 0 0; }
+.dmh-rv-reject-label { display: block; font-size: 12px; font-weight: 700; color: var(--navy); margin-bottom: 6px; }
+.dmh-rv-reject-label .req { color: var(--red); font-weight: 600; }
+.dmh-rv-reject-text { width: 100%; box-sizing: border-box; border: 1px solid var(--border-1); border-radius: var(--r-md, 8px); padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; outline: none; }
+.dmh-rv-reject-text:focus { border-color: var(--navy); }
+.dmh-rv-reject-hint { font-size: 12px; color: var(--text-muted); }

@@ -39,6 +39,13 @@ export interface ScopeCounts {
  */
 export interface VersionRow {
   id: string;
+  /** Doc 88 §6: historial de solicitudes (un registro por ciclo de envío) y el
+   *  último ciclo — Review lista y etiqueta por él. */
+  requests?: RequestCycle[];
+  lastRequest?: RequestCycle | null;
+  reviewedBy?: string | null;
+  reviewedAt?: string | null;
+  reviewNote?: string | null;
   versionLabel: string | null;
   title: string | null;
   owner: string | null;
@@ -92,6 +99,28 @@ export interface SubmitBody {
 
 // ─── Review detail (Review p5) ───────────────────────────────────────────────
 
+/** Doc 88 §6: resultado de un ciclo de envío. `rejected` y `withdrawn` dejan la
+ *  versión en draft (el owner sigue editando); `approved` la publica. */
+export type RequestOutcome = 'pending' | 'approved' | 'rejected' | 'withdrawn';
+
+/** Un ciclo de solicitud de publicación (`requests[]` del changeset). Espejo
+ *  del dict del backend (`ChangesetDoc.requests`, invariante round-trip). */
+export interface RequestCycle {
+  id: string;
+  cycle: number;
+  submittedAt?: string | null;
+  submittedBy?: string | null;
+  title?: string | null;
+  description?: string | null;
+  reviewers: string[];
+  outcome: RequestOutcome;
+  decidedAt?: string | null;
+  decidedBy?: string | null;
+  /** Motivo del rechazo (obligatorio al rechazar, doc 88 §5). */
+  note?: string | null;
+  decisions?: Record<string, Approval>;
+}
+
 /** Veredicto de un reviewer sobre un changeset (`approvals[userId]`). */
 export interface Approval {
   status: 'approved' | 'rejected';
@@ -123,12 +152,16 @@ export interface ChangesetDetail {
   reviewers: string[];
   approvals: Record<string, Approval>;
   comments: ChangesetComment[];
+  /** Doc 88 §6: historial de solicitudes de esta versión. */
+  requests?: RequestCycle[];
   submittedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
   /** Decisor final + publicación (el backend siempre los sirve; doc 65 los tipa
    *  para la pestaña Details del popup de herramientas de versiones). */
   reviewedBy?: string | null;
+  /** Doc 88 §5: motivo del último rechazo (también en `requests[]`). */
+  reviewNote?: string | null;
   reviewedAt?: string | null;
   appliedAt?: string | null;
   /** Doc 65: presente cuando esta versión nació de una restauración. */

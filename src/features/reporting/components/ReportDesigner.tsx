@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Download, Play, Save, Table2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -38,7 +38,6 @@ export default function ReportDesigner({ projectId, projectPicker, onClose }: {
   useEffect(() => { setSpec(emptySpec(projectId, from)); setResult(null); }, [projectId, from]);
 
   const sortState = spec.orderBy[0] ? { field: spec.orderBy[0].field, dir: spec.orderBy[0].dir } : null;
-  const groupable = useMemo(() => catalog.filter((f) => f.groupable), [catalog]);
 
   const run = useCallback(async () => {
     setLoading(true);

@@ -56,14 +56,17 @@ import ChangesSummary from '@/screens/review/ChangesSummary';
 import PublishBlockedPanel from '@/screens/review/PublishBlockedPanel';
 import CriticalDeletionBlock from '@/screens/review/CriticalDeletionBlock';
 import ApproveDeletionDialog from '@/screens/review/ApproveDeletionDialog';
+import RejectDialog from '@/screens/review/RejectDialog';
+import RequestHistory from '@/screens/review/RequestHistory';
+import { activityAt, historyOf, isRequest, outcomeOf, requestBadge } from '@/screens/review/requestState';
 import type { Project } from '@/types/model';
 import type {
   PublishBlockedDetail,
   ChangesetDetail,
   ChangesetDiff,
+  RequestOutcome,
   SimUserDto,
   VersionRow,
-  VersionStatus,
 } from '@/types/versioning';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -84,23 +87,14 @@ function fmtDate(iso?: string | null): string {
   return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-interface StatusSpec {
-  cls: string;
-  text: string;
-}
-/** Maps a request status onto its badge (In review / Approved / Rejected). */
-function statusBadge(status: VersionStatus): StatusSpec {
-  switch (status) {
-    case 'submitted':
-      return { cls: 'dmh-rv-spill--review', text: 'In review' };
-    case 'approved':
-      return { cls: 'dmh-rv-spill--approved', text: 'Approved' };
-    case 'rejected':
-      return { cls: 'dmh-rv-spill--rejected', text: 'Rejected' };
-    default:
-      return { cls: 'dmh-rv-spill--draft', text: 'Editing' };
-  }
-}
+/** Doc 88 §6: chips de resultado de la bandeja (All por defecto). */
+const OUTCOME_CHIPS: { key: 'all' | RequestOutcome; label: string }[] = [
+  { key: 'all', label: 'All' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'approved', label: 'Approved' },
+  { key: 'rejected', label: 'Rejected' },
+  { key: 'withdrawn', label: 'Withdrawn' },
+];
 
 // ── component ────────────────────────────────────────────────────────────────
 
@@ -120,6 +114,11 @@ export default function ReviewScreen() {
   const [ownerFilter, setOwnerFilter] = useState('');
   const [reviewerFilter, setReviewerFilter] = useState(user.id);
   const [projectFilter, setProjectFilter] = useState('');
+  // Doc 88 §6: la bandeja muestra TODAS las solicitudes (cualquier resultado)
+  // por defecto; el chip acota por resultado del último ciclo.
+  const [outcomeFilter, setOutcomeFilter] = useState<'all' | RequestOutcome>('all');
+  // Doc 88 §5: rechazar pasa por un diálogo con el motivo obligatorio.
+  const [rejectOpen, setRejectOpen] = useState(false);
   // Doc 75 D5: aprobar un request que borra su proyecto exige confirmación tipeada.
   const [approveDeletionOpen, setApproveDeletionOpen] = useState(false);
 
@@ -241,20 +240,30 @@ export default function ReviewScreen() {
     [searchParams, setSearchParams],
   );
 
-  // ── the request list: submitted/rejected + approved NOT yet applied (an
-  //    applied version is production/history of its project, not a request) ──
-  const requestRows = useMemo(() => {
+  // ── the request list (doc 88 §6): every version that was EVER sent for
+  //    review (its history survives withdraw / reject / publish), filtered by
+  //    requester, reviewer, project and outcome; pending first, then by activity ──
+  const allRequests = useMemo(() => {
     return versions
-      .filter((v) => v.status !== 'draft' && !(v.status === 'approved' && v.appliedAt))
+      .filter(isRequest)
       .filter((v) => !ownerFilter || v.owner === ownerFilter)
       .filter((v) => !reviewerFilter || v.reviewers.includes(reviewerFilter))
-      .filter((v) => !projectFilter || v.projectId === projectFilter)
-      .sort((a, b) => {
-        const ta = Date.parse(a.submittedAt ?? a.updatedAt ?? a.createdAt ?? '') || 0;
-        const tb = Date.parse(b.submittedAt ?? b.updatedAt ?? b.createdAt ?? '') || 0;
-        return tb - ta;
-      });
+      .filter((v) => !projectFilter || v.projectId === projectFilter);
   }, [versions, ownerFilter, reviewerFilter, projectFilter]);
+  const outcomeCounts = useMemo(() => {
+    const m: Record<string, number> = { all: allRequests.length };
+    allRequests.forEach((v) => { const o = outcomeOf(v) ?? 'pending'; m[o] = (m[o] ?? 0) + 1; });
+    return m;
+  }, [allRequests]);
+  const requestRows = useMemo(() => {
+    return allRequests
+      .filter((v) => outcomeFilter === 'all' || (outcomeOf(v) ?? 'pending') === outcomeFilter)
+      .sort((a, b) => {
+        const pa = outcomeOf(a) === 'pending' ? 0 : 1;
+        const pb = outcomeOf(b) === 'pending' ? 0 : 1;
+        return pa - pb || activityAt(b) - activityAt(a);
+      });
+  }, [allRequests, outcomeFilter]);
 
   // Auto-select the first request when nothing is selected (the design always
   // shows an open request on the right) — EXCEPT right after a withdraw/reopen,
@@ -266,6 +275,9 @@ export default function ReviewScreen() {
   // ── derived detail bits ─────────────────────────────────────────────────────
   const isReviewer = Boolean(detail && user.id && detail.reviewers.includes(user.id));
   const alreadyVoted = Boolean(detail && user.id && detail.approvals[user.id]);
+  // Doc 88 §6: sólo un ciclo EN REVISIÓN admite acciones y comentarios; una
+  // solicitud cerrada (aprobada, rechazada → draft, retirada) se lee nomás.
+  const isOpenRequest = Boolean(detail && detail.status === 'submitted');
   const canAct = Boolean(detail && detail.status === 'submitted' && isReviewer && !alreadyVoted);
   // El OWNER puede retirar su request mientras siga en revisión (para seguir
   // editando la versión y re-enviarla después).
@@ -282,7 +294,13 @@ export default function ReviewScreen() {
   /** The assigned-reviewer note shown when the actor cannot act. */
   const noteText = useMemo(() => {
     if (!detail || canAct) return '';
-    if (detail.status !== 'submitted') return `This request is ${detail.status}.`;
+    if (detail.status !== 'submitted') {
+      const o = outcomeOf({ status: detail.status, lastRequest: detail.requests?.at(-1) ?? null, appliedAt: detail.appliedAt });
+      if (o === 'rejected' && detail.status === 'draft') return 'This request was rejected — the version is back in draft for its owner to fix and resubmit.';
+      if (o === 'withdrawn') return 'This request was withdrawn by its owner — the version is a draft again.';
+      if (o === 'approved') return detail.appliedAt ? 'This request was approved and published.' : 'This request was approved and is being published.';
+      return `This request is ${detail.status}.`;
+    }
     if (!isReviewer)
       return `Only the assigned reviewer ${reviewerNames} can approve or reject this request. You can still leave a comment.`;
     if (alreadyVoted) return 'You already recorded your decision on this request.';
@@ -307,17 +325,17 @@ export default function ReviewScreen() {
 
   // ── actions ─────────────────────────────────────────────────────────────────
   const deletesProject = diff?.impact.deletesProject ?? null;
-  const doReview = async (decision: 'approve' | 'reject') => {
+  const doReview = async (decision: 'approve' | 'reject', note?: string) => {
     if (!detail || acting) return;
     setActing(true);
     try {
       const title = decision === 'approve' && deletesProject
         ? 'Applying decision… deleting the project'
         : 'Applying decision…';
-      const updated = await runBlocking(title, () => review(detail.id, { decision }));
+      const updated = await runBlocking(title, () => review(detail.id, note ? { decision, note } : { decision }));
       setDetail(updated);
       setBlocked(null);
-      toast.success(decision === 'approve' ? 'Request approved.' : 'Request rejected.');
+      toast.success(decision === 'approve' ? 'Request approved.' : 'Request rejected — the version is back in draft for its owner.');
       void listVersions().then(setVersions).catch(() => undefined);
       void getDiff(detail.id).then(setDiff).catch(() => undefined);
     } catch (err) {
@@ -523,6 +541,19 @@ export default function ReviewScreen() {
               </label>
             </div>
 
+            {/* Doc 88 §6: resultado del último ciclo — All por defecto */}
+            <div className="dmh-rv-chips" role="tablist" aria-label="Filter by outcome">
+              {OUTCOME_CHIPS.map((c) => (
+                <button
+                  key={c.key} type="button" role="tab" aria-selected={outcomeFilter === c.key}
+                  className={`dmh-rv-chip${outcomeFilter === c.key ? ' is-on' : ''}`}
+                  onClick={() => setOutcomeFilter(c.key)}
+                >
+                  {c.label}<span className="dmh-rv-chip-n">{outcomeCounts[c.key] ?? 0}</span>
+                </button>
+              ))}
+            </div>
+
             <div className="dmh-rv-list-body">
               <div className="dmh-rv-list-count">{requestRows.length} requests</div>
               {listsLoading ? (
@@ -531,7 +562,7 @@ export default function ReviewScreen() {
                 <div className="dmh-rv-list-empty">No requests match these filters.</div>
               ) : (
                 requestRows.map((row) => {
-                  const badge = statusBadge(row.status);
+                  const badge = requestBadge(row);
                   const assigned = row.reviewers.includes(user.id);
                   const reviewer = row.reviewers[0];
                   const cls = `dmh-rv-card${row.id === selectedId ? ' is-selected' : ''}`;
@@ -639,7 +670,7 @@ export default function ReviewScreen() {
                       <div className="dmh-rv-dtitle-row">
                         <h1 className="dmh-rv-h1">{detail.title ?? 'Untitled request'}</h1>
                         {(() => {
-                          const b = statusBadge(detail.status);
+                          const b = requestBadge({ status: detail.status, lastRequest: detail.requests?.at(-1) ?? null, appliedAt: detail.appliedAt });
                           return <span className={`dmh-rv-spill ${b.cls}`}>{b.text}</span>;
                         })()}
                       </div>
@@ -675,15 +706,21 @@ export default function ReviewScreen() {
                       </div>
                     </div>
                     <div className="dmh-rv-dactions">
+                      {/* Doc 88 §6: una solicitud cerrada no se abre desde acá (evita
+                          conflictos con la versión que sigue su vida); el owner de un
+                          draft rechazado sí sigue editando la suya. */}
                       <Tooltip
                         label={isOwnDraft
                           ? 'Open your working copy for editing'
-                          : 'Opens read-only: the version is not a draft of yours — editing comes back with Withdraw / Reopen'}
+                          : isOpenRequest
+                            ? 'Opens read-only: the version is not a draft of yours — editing comes back with Withdraw'
+                            : 'This request is closed — open the version from Home › Versions'}
                       >
                         <button
                           type="button"
                           className="dmh-rv-act dmh-rv-act--canvas"
                           onClick={openInCanvas}
+                          disabled={!isOpenRequest && !isOwnDraft}
                         >
                           <ExternalLink size={14} strokeWidth={1.6} aria-hidden />
                           {isOwnDraft ? 'Open in canvas' : 'View in canvas'}
@@ -715,19 +752,21 @@ export default function ReviewScreen() {
                           </button>
                         </Tooltip>
                       )}
-                      <button
-                        type="button"
-                        className="dmh-rv-act dmh-rv-act--comment"
-                        onClick={() => document.getElementById('dmh-rv-comment-input')?.focus()}
-                      >
-                        <MessageSquare size={14} strokeWidth={1.6} aria-hidden />
-                        Comment
-                      </button>
+                      {isOpenRequest && (
+                        <button
+                          type="button"
+                          className="dmh-rv-act dmh-rv-act--comment"
+                          onClick={() => document.getElementById('dmh-rv-comment-input')?.focus()}
+                        >
+                          <MessageSquare size={14} strokeWidth={1.6} aria-hidden />
+                          Comment
+                        </button>
+                      )}
                       {canAct ? (
                         <button
                           type="button"
                           className="dmh-rv-act dmh-rv-act--reject"
-                          onClick={() => doReview('reject')}
+                          onClick={() => setRejectOpen(true)}
                           disabled={acting}
                         >
                           <X size={14} strokeWidth={1.7} aria-hidden />
@@ -826,6 +865,9 @@ export default function ReviewScreen() {
                     </div>
                   )}
 
+                  {/* Doc 88 §6: historial de ciclos (motivo del rechazo incluido) */}
+                  <RequestHistory rows={historyOf(detail)} userName={userName} userInitials={userInitials} avatarTone={avatarTone} />
+
                   {diffTotals.conflicts > 0 && (
                     <div className="dmh-rv-note" role="alert">
                       <TriangleAlert size={15} strokeWidth={1.7} aria-hidden />
@@ -872,6 +914,10 @@ export default function ReviewScreen() {
                         </div>
                       </div>
                     ))}
+                    {!isOpenRequest && (
+                      <div className="dmh-rv-comments-closed">This request is closed — the thread is read-only. Comments reopen with the next submission.</div>
+                    )}
+                    {isOpenRequest && (
                     <div className="dmh-rv-comment-form">
                       <Avatar initials={userInitials(user.id)} tone={avatarTone(user.id)} size={26} />
                       <input
@@ -896,6 +942,7 @@ export default function ReviewScreen() {
                         {commentSending ? 'Sending…' : 'Send'}
                       </button>
                     </div>
+                    )}
                   </div>
                 </div>
               </>
@@ -903,6 +950,11 @@ export default function ReviewScreen() {
           </div>
         </div>
       </div>
+      <RejectDialog
+        open={rejectOpen} title={detail?.title ?? detail?.versionLabel ?? null} busy={acting}
+        onCancel={() => setRejectOpen(false)}
+        onConfirm={(note) => { setRejectOpen(false); void doReview('reject', note); }}
+      />
       {deletesProject && (
         <ApproveDeletionDialog
           open={approveDeletionOpen}

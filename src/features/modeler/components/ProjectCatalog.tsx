@@ -46,6 +46,7 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   const focusTable = useModelerStore((s) => s.focusTable);
   const focusColumn = useModelerStore((s) => s.focusColumn);
   const activeCs = useSessionStore((s) => s.activeChangesetId);
+  const explorerTick = useModelerStore((s) => s.explorerTick);   // doc 88 §2
 
   const canvases: CanvasLike[] = useMemo(() => tree?.subjectAreas ?? [], [tree]);
   const tableIds = useMemo(() => projectTableIds(canvases), [canvases]);
@@ -82,11 +83,13 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
     [inv],
   );
 
-  // Cambió la versión activa o la membresía de los canvases → inventario obsoleto.
+  // Cambió la versión activa, la membresía de los canvases o la estructura del
+  // canvas activo (doc 88 §2: `explorerTick`) → inventario obsoleto. Se vuelve a
+  // pedir sólo si hay una rama abierta (carga perezosa).
   useEffect(() => {
     setInv(null); setCols({}); setViewCols({});
     setExpSchemas(new Set()); setExpTables(new Set()); setExpViews(new Set());
-  }, [activeCs, idsKey]);
+  }, [activeCs, idsKey, explorerTick]);
 
   // UNA request por proyecto (doc 72 §1) al abrir cualquier rama o al filtrar.
   const wanted = open.size > 0 || filtering;
@@ -292,8 +295,9 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
           : tableGroups.length === 0 ? empty(filtering ? `No ${n.many} match the filter.` : `No ${n.many}.`)
             : tableGroups.map((g) => schemaNode('tables', g.schema, g.items.length, () => g.items.map((t) => tableRow(t, 3))))
       ))}
-      {branchRow('views', <Eye size={14} style={{ color: 'var(--purple)' }} />, 'Views', views?.length)}
-      {body('views', () => (
+      {/* Doc 86 D5: las vistas son del modelo físico — la rama no se lista en Logical. */}
+      {viewMode === 'physical' && branchRow('views', <Eye size={14} style={{ color: 'var(--purple)' }} />, 'Views', views?.length)}
+      {viewMode === 'physical' && body('views', () => (
         viewGroups.length === 0 ? empty(filtering ? 'No views match the filter.' : 'No views on this project.')
           : viewGroups.map((g) => schemaNode('views', g.schema, g.items.length, () => g.items.map((v) => viewRow(v, 3))))
       ))}

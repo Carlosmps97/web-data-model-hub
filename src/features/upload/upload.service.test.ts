@@ -11,7 +11,7 @@ vi.mock('@/services/http', () => ({
 
 import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '@/services/http';
 import {
-  startUpload, getUploadJob, applyUpload, discardUpload, pollUploadJob, isTerminal, profileProblemsOf,
+  startUpload, getUploadJob, applyUpload, discardUpload, getUploadTargets, pollUploadJob, isTerminal, profileProblemsOf,
   listProfiles, createProfile, updateProfile, deleteProfile, setDefaultProfile, validateProfile, suggestMappings,
   createDefaultProfile, getProfileCatalog, type UploadJob, type UploadProfileBody,
 } from './upload.service';
@@ -32,6 +32,12 @@ beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe('upload.service routes', () => {
+  it('reads the target projects under the uploads path (doc 87)', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ mode: 'choose', candidates: [] });
+    await getUploadTargets('c 1');
+    expect(apiGet).toHaveBeenCalledWith('/api/changesets/c%201/uploads/targets');
+  });
+
   it('hang off the changeset uploads path', async () => {
     vi.mocked(apiPost).mockResolvedValue(job('validating'));
     const raw = { fileName: 'f.xlsx', profileId: 'pf', sheets: [{ name: 'Cargar_Tablas', rows: [{ row: 5, cells: ['', 'TABLA_LOGICO'] }] }] };

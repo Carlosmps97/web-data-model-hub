@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { facetNouns } from '@/lib/facets';
-import { Database, FolderOpen, Search, X } from 'lucide-react';
+import { Database, FolderOpen, RefreshCw, Search, X } from 'lucide-react';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import ModelExplorer from './ModelExplorer';
@@ -28,6 +28,8 @@ export default function ExplorerPanel({ pushToast, onOpenModel }: {
 }) {
   const [filter, setFilter] = useState('');
   const setSearchOpen = useModelerStore((s) => s.setSearchOpen);
+  const refreshExplorer = useModelerStore((s) => s.refreshExplorer);
+  const bumpExplorer = useModelerStore((s) => s.bumpExplorer);
   const viewMode = useModelerStore((s) => s.viewMode);
   const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const openMode = useSessionStore((s) => s.openMode);
@@ -41,6 +43,13 @@ export default function ExplorerPanel({ pushToast, onOpenModel }: {
         <button type="button" className="wk-exp-headbtn" title="Search the model — locate on canvas or inspect metadata (⌘K)"
           disabled={!openMode} onClick={() => setSearchOpen(true)} aria-label="Search the model">
           <Search size={13} />
+        </button>
+        {/* Doc 88 §2: válvula manual — el árbol, el catálogo y los esquemas se
+            recargan; el tiempo real cubre lo que pasa por el canvas activo. */}
+        <button type="button" className="wk-exp-headbtn" title="Refresh the explorer — tree, catalog and schemas"
+          disabled={!openMode} aria-label="Refresh the explorer"
+          onClick={() => { bumpExplorer(); void refreshExplorer().catch(() => pushToast("Couldn't refresh the explorer", 'err')); }}>
+          <RefreshCw size={13} />
         </button>
       </div>
       {openMode && (

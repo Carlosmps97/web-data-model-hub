@@ -10,7 +10,8 @@ import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.s
 import * as viewsSvc from '@/services/views.service';
 import type { View, ViewInput, ViewSqlParse, ViewSqlError } from '@/services/views.service';
 import { viewSourceIds } from '../lib/viewGraph';
-import { extractDdlBody, moveSource, syncViewTypeUdp } from '../lib/viewPanelLogic';
+import { VIEW_TYPE_NAME, extractDdlBody, moveSource, syncViewTypeUdp } from '../lib/viewPanelLogic';
+import { confirmDeleteView } from './deleteConfirm';
 import AuditHistory from './AuditHistory';
 import SchemaSelect from './SchemaSelect';
 import UdpAssign from './UdpAssign';
@@ -28,7 +29,6 @@ const TABS: { id: VTab; label: string }[] = [
 
 /** Nombre EXACTO (CI) del UDP gestionado que refleja el modo — "Tipo de
  *  Vista", del catálogo fijo del kit (doc 61 r2; la DATA va en español). */
-const VIEW_TYPE_NAME = 'tipo de vista';
 
 const mono: React.CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11.5,
@@ -204,10 +204,9 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   };
   const askDelete = async () => {
     try {
-      const ok = await confirmDialog({
-        title: 'Delete view',
-        message: <>View <strong>“{view.name}”</strong> will be deleted.</>,
-        confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger',
+      // Diálogo compartido con Properties › Views y el Object Inspector (doc 89 §3.5).
+      const ok = await confirmDeleteView({
+        name: view.name,
         action: async () => { await viewsSvc.deleteView(view.id); setSelectedView(null); await reload(); },
       });
       if (ok) pushToast('View deleted');

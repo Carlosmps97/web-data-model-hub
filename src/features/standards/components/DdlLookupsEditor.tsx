@@ -124,7 +124,7 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
                       </select>
                       {canEdit && selected && (
                         <button onClick={() => {
-                          const { [selected]: _gone, ...rest } = lookups;
+                          const rest = { ...lookups }; delete rest[selected];
                           setLookups(rest); setSelected(Object.keys(rest)[0] ?? null);
                         }} title="Delete lookup"
                           style={{ width: 32, height: 32, border: '1px solid #F1D9D5', background: '#FDF2F1', color: '#B23A2E', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>

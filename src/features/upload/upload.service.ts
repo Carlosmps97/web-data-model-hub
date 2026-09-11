@@ -14,7 +14,18 @@ import { API_BASE } from '@/services/apiBase';
 // ── Workbook crudo ────────────────────────────────────────────────────────
 export interface RawSheetRow { row: number; cells: string[] }
 export interface RawSheet { name: string; rows: RawSheetRow[] }
-export interface UploadWorkbookBody { fileName: string; profileId: string; sheets: RawSheet[] }
+/** Doc 87 §3.5: `targetFolderId` = carpeta «proyecto interno» destino; solo
+ *  viaja cuando el proyecto tiene 2+ (`mode: 'choose'`), el backend resuelve
+ *  el resto. */
+export interface UploadWorkbookBody { fileName: string; profileId: string; sheets: RawSheet[]; targetFolderId?: string | null }
+
+// ── Proyecto destino (doc 87 §3.5) ────────────────────────────────────────
+export type UploadTargetMode = 'none' | 'auto' | 'choose';
+export interface UploadTargetCandidate { id: string; name: string; folders: number; canvases: number }
+/** Capa de proyectos internos del proyecto de la versión: carpetas raíz con
+ *  subcarpetas. `none` = no hay capa (todo cuelga de la raíz) · `auto` = una
+ *  sola, el backend la toma solo · `choose` = 2+, hay que elegir. */
+export interface UploadTargets { mode: UploadTargetMode; candidates: UploadTargetCandidate[] }
 
 // ── Perfiles ──────────────────────────────────────────────────────────────
 export type SheetRole = 'tables' | 'columns';
@@ -70,7 +81,7 @@ export interface UploadIssue {
   message: string;
 }
 export interface UploadCounts { create: number; update: number; unchanged: number; }
-export type UploadSummary = Record<'projects' | 'folders' | 'canvases' | 'schemas' | 'tables' | 'columns', UploadCounts>;
+export type UploadSummary = Record<'projects' | 'folders' | 'canvases' | 'schemas' | 'tables' | 'columns' | 'views', UploadCounts>;
 export interface UploadTableRow {
   row: number | null;
   logicalName: string;
@@ -79,6 +90,8 @@ export interface UploadTableRow {
   action: 'create' | 'update' | 'unchanged' | 'error';
   canvas: string | null;
   columns: UploadCounts;
+  /** Doc 87: vistas `_vu` de la fila (create | unchanged). */
+  views?: UploadCounts;
   issues: number;
 }
 export interface UploadReportSheet { role: SheetRole; name: string; found: boolean; headerRow: number | null; rows: number }
@@ -113,6 +126,7 @@ export const startUpload = (csId: string, body: UploadWorkbookBody) => apiPost<U
 export const getUploadJob = (csId: string, jobId: string) => apiGet<UploadJob>(jobUrl(csId, jobId));
 export const applyUpload = (csId: string, jobId: string) => apiPost<UploadJob>(`${jobUrl(csId, jobId)}/apply`);
 export const discardUpload = (csId: string, jobId: string) => apiDelete<{ deleted: boolean }>(jobUrl(csId, jobId));
+export const getUploadTargets = (csId: string) => apiGet<UploadTargets>(`${base(csId)}/targets`);
 
 const PROFILES = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}/upload-profiles`;
 const profileUrl = (pid: string, id: string) => `${PROFILES(pid)}/${encodeURIComponent(id)}`;
