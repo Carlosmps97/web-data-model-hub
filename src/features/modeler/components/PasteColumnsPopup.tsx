@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { facetNouns } from '@/lib/facets';
 import { KeyRound, Link2 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import * as gov from '@/services/governance.service';
@@ -23,6 +24,8 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
 }) {
   const diagram = useModelerStore((s) => s.diagram);
   const clipboard = useModelerStore((s) => s.colClipboard);
+  const viewMode = useModelerStore((s) => s.viewMode);
+  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const [saving, setSaving] = useState(false);
 
   const target = diagram?.tables.find((t) => t.id === targetId);
@@ -75,17 +78,17 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
       }
       useModelerStore.getState().markDirty();
       await useModelerStore.getState().reload();
-      pushToast(`${cols.length} column${cols.length === 1 ? '' : 's'} pasted into ${target.physicalName}`);
+      pushToast(`${cols.length} ${cols.length === 1 ? n.member : n.members} pasted into ${target.physicalName}`);
       onClose();
     } catch (e) {
       // 409 por carrera multiusuario u otro error: el lote es atómico (nada
       // quedó a medias) — mensaje visible y el popup NO se cierra.
-      pushToast(e instanceof Error && e.message ? e.message : "Couldn't paste the columns", 'err');
+      pushToast(e instanceof Error && e.message ? e.message : `Couldn't paste the ${n.members}`, 'err');
     } finally { setSaving(false); }
   };
 
   return (
-    <Modal title="Paste columns" icon="columns" size="lg"
+    <Modal title={`Paste ${n.members}`} icon="columns" size="lg"
       subtitle={`${clipboard.source.physicalName} → ${target.physicalName}`}
       onClose={() => { if (!saving) onClose(); }}>
       <p className="wk-pp-cap" style={{ marginTop: 0 }}>
@@ -134,7 +137,7 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
         <button type="button" className="rd-btn rd-btn-primary rd-btn-sm"
           disabled={saving || pasteable.length === 0} onClick={() => void confirm()}>
           {saving && <span className="rd-spin" aria-hidden />}
-          {saving ? 'Pasting…' : `Paste ${pasteable.length} column${pasteable.length === 1 ? '' : 's'}`}
+          {saving ? 'Pasting…' : `Paste ${pasteable.length} ${pasteable.length === 1 ? n.member : n.members}`}
         </button>
       </div>
     </Modal>

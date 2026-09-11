@@ -8,7 +8,7 @@ import { apiErrorMessage } from '@/services/http';
 import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
 import UdpAssign from './UdpAssign';
-import { FACET_CAPTION } from '@/lib/facets';
+import { FACET_CAPTION, facetNouns } from '@/lib/facets';
 import { tableSchemasCached } from '../services/schemaPartition';
 
 type Mode = 'blank' | 'import';
@@ -42,6 +42,7 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [description, setDescription] = useState('');
   // Doc 69: los UDPs del alta siguen la faceta activa del canvas (Entity/Table).
   const viewMode = useModelerStore((s) => s.viewMode);
+  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const [udpValues, setUdpValues] = useState<Record<string, string>>({});
   const udpRef = useRef<Record<string, string>>({});
   const setUdp = (next: Record<string, string>) => { udpRef.current = next; setUdpValues(next); };
@@ -152,8 +153,8 @@ export default function NewTableModal({ onClose, onCreate }: {
   return (
     <Dialog
       open
-      title="New table"
-      subtitle="Create a blank entity or import an existing one"
+      title={`New ${n.one}`}
+      subtitle={`Create a blank ${n.one} or import an existing one`}
       icon={Table2}
       backdrop="canvas"
       canvasTop={136}

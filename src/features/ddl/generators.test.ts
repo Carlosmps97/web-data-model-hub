@@ -46,6 +46,17 @@ describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro BCP (doc 76 D9)', () =>
     expect(databricksDdl(commented, { ...DEF, includeComments: true })).toContain("COMMENT 'Id del Cliente'");
   });
 
+  it('doc 85: el COMMENT de columna prefiere la descripción física y cae a la lógica', () => {
+    const input = { ...BASE, columns: [
+      { id: 'c1', tableId: 't1', physicalName: 'ID', dataType: 'bigint', ordinal: 0, description: 'Id logico', physicalDescription: 'Id fisico' },
+      { id: 'c2', tableId: 't1', physicalName: 'NOMBRE', dataType: 'string', ordinal: 1, description: 'Nombre', physicalDescription: '  ' },
+    ] };
+    const ddl = databricksDdl(input, { ...CLASSIC, includeComments: true });
+    expect(ddl).toContain("COMMENT 'Id fisico'");
+    expect(ddl).not.toContain("COMMENT 'Id logico'");
+    expect(ddl).toContain("COMMENT 'Nombre'");
+  });
+
   it('locationFolder: casing de la carpeta independiente del de identificadores', () => {
     expect(locationFolder('Hd_Venta', { locationFolderCase: 'upper' })).toBe('HD_VENTA');
     expect(locationFolder('Hd_Venta', { locationFolderCase: 'lower' })).toBe('hd_venta');

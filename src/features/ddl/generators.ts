@@ -52,6 +52,8 @@ export interface DdlColumn {
   partitionOrder?: number | null;
   /** Functional definition → emitted as a column `COMMENT`. */
   description?: string;
+  /** Doc 85 D10: comment FÍSICO (Erwin Comment) — si existe, es el COMMENT; si no, `description`. */
+  physicalDescription?: string | null;
 }
 
 /** Minimal relationship shape (subset of governance `Relationship`, v2 doc 19:
@@ -258,7 +260,8 @@ function tableDDL(
   const colLines = emitted.map((c) => {
     let l = `  ${ident(c.physicalName)} ${dbxType(c.dataType)}`;
     if (c.isNullable === false || c.isPrimaryKey) l += ' NOT NULL';
-    if (o.includeComments && c.description?.trim()) l += ` COMMENT ${lit(c.description.trim())}`;
+    const comment = (c.physicalDescription ?? '').trim() || (c.description ?? '').trim();
+    if (o.includeComments && comment) l += ` COMMENT ${lit(comment)}`;
     return l;
   });
 

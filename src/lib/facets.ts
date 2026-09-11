@@ -46,6 +46,22 @@ export function countFacetUdpValues(
 export const facetNoun = (level: 'table' | 'column', facet: Facet): 'entity' | 'table' | 'attribute' | 'column' =>
   level === 'table' ? (facet === 'logical' ? 'entity' : 'table') : (facet === 'logical' ? 'attribute' : 'column');
 
+/** Sustantivos del objeto por faceta (doc 85 §3.8): ÚNICA fuente de los
+ *  rótulos «Entity/Attribute» (modelo lógico) y «Table/Column» (físico) que
+ *  usa el workspace Model — pestañas, botones, diálogos, toasts, Explorer, ⌘K.
+ *  Views no cambia de nombre (solo existen en físico). */
+export interface FacetNouns {
+  one: string; many: string; One: string; Many: string; a: string;
+  member: string; members: string; Member: string; Members: string; aMember: string;
+}
+export const FACET_NOUNS: Record<Facet, FacetNouns> = {
+  logical: { one: 'entity', many: 'entities', One: 'Entity', Many: 'Entities', a: 'an entity',
+    member: 'attribute', members: 'attributes', Member: 'Attribute', Members: 'Attributes', aMember: 'an attribute' },
+  physical: { one: 'table', many: 'tables', One: 'Table', Many: 'Tables', a: 'a table',
+    member: 'column', members: 'columns', Member: 'Column', Members: 'Columns', aMember: 'a column' },
+};
+export const facetNouns = (facet: Facet): FacetNouns => FACET_NOUNS[facet];
+
 export const FACET_CLASS_LABEL: Record<UdpLevel, Record<Facet, string>> = {
   table: { logical: 'Entity (Logical)', physical: 'Table (Physical)' },
   column: { logical: 'Attribute (Logical)', physical: 'Column (Physical)' },

@@ -27,6 +27,10 @@ export interface DomainLike {
   /** Doc 79: dominio "atributo estándar" (Erwin `Attribute_Definition`). Solo
    *  estos heredan nombre + definición al atributo; los genéricos, nunca. */
   inheritsName?: boolean | null;
+  /** Doc 85: faceta física del dominio — físico override (null = derivado) y
+   *  descripción física (null = igual a la lógica). */
+  physicalName?: string | null;
+  physicalDescription?: string | null;
 }
 
 export const suggestedName = (d?: DomainLike | null): string => (d?.namingTerm?.trim() || d?.name?.trim() || '');
@@ -35,9 +39,16 @@ export const suggestedDescription = (d?: DomainLike | null): string => d?.descri
 export interface DomainDefaultsInput {
   prevDomain: DomainLike | null | undefined;
   nextDomain: DomainLike | null | undefined;
-  current: { logicalName: string; description: string };
+  current: { logicalName: string; description: string; physicalName?: string; physicalDescription?: string | null };
 }
-export interface DomainDefaultsPatch { logicalName?: string; description?: string }
+export interface DomainDefaultsPatch {
+  logicalName?: string;
+  /** Doc 85 D2: físico override del dominio; AUSENTE = el caller lo deriva por glosario. */
+  physicalName?: string;
+  description?: string;
+  /** Doc 85: null = LIMPIAR (la física anterior pertenecía al dominio anterior). */
+  physicalDescription?: string | null;
+}
 
 const sameDomain = (a: DomainLike, b: DomainLike): boolean =>
   a.id != null && b.id != null ? a.id === b.id : a.name.trim().toLowerCase() === b.name.trim().toLowerCase();
@@ -52,6 +63,14 @@ export function applyDomainDefaults(i: DomainDefaultsInput): DomainDefaultsPatch
   const name = suggestedName(i.nextDomain);
   const desc = suggestedDescription(i.nextDomain);
   if (name && name !== i.current.logicalName.trim()) out.logicalName = name;
+  // Doc 85 D2: el físico del dominio (override) se hereda tal cual; sin
+  // override el caller deriva el físico del lógico nuevo por glosario.
+  const phys = i.nextDomain.physicalName?.trim();
+  if (phys && phys !== (i.current.physicalName ?? '').trim()) out.physicalName = phys;
   if (desc && desc !== i.current.description.trim()) out.description = desc;
+  // Doc 85: la descripción física va con la misma marca; si el dominio nuevo
+  // no tiene, se LIMPIA (null): la anterior pertenecía al dominio anterior.
+  const nextPhysDesc = i.nextDomain.physicalDescription?.trim() ?? '';
+  if (nextPhysDesc !== (i.current.physicalDescription ?? '').trim()) out.physicalDescription = nextPhysDesc || null;
   return out;
 }

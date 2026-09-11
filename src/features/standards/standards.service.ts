@@ -40,6 +40,8 @@ export interface SnapshotDomain {
    *  asignarse; el resto aporta únicamente el tipo de dato. El backend ya lo
    *  proyectaba — sin el campo acá se perdía en cada round-trip de la UI. */
   inheritsName?: boolean | null;
+  /** Doc 85: faceta física (null = derivado / igual a la lógica) + UDP por defecto de atributo/columna. */
+  physicalName?: string | null; physicalDescription?: string | null; udpValues?: Record<string, string> | null;
 }
 export interface NamingRuleSnap { separator: Separator | string | null; case: Casing | string | null; maxLength?: number | null; }
 /** Definición de un UDP (User Defined Property): la KEY + su tipo + default +
@@ -128,7 +130,7 @@ export interface StandardsVersion {
 
 // ── Batch de cambios que se aplica como UNA versión (15d/15e) ──
 export interface TermEditInput { id?: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType; }
-export interface DomainEditInput { id?: string; name: string; defaultDataType: string; logicalDataType?: string; namingTerm?: string; description?: string; inheritsName?: boolean; }
+export interface DomainEditInput { id?: string; name: string; defaultDataType: string; logicalDataType?: string; namingTerm?: string; description?: string; inheritsName?: boolean; physicalName?: string; physicalDescription?: string; udpValues?: Record<string, string>; }
 export interface NamingEditInput { separator: string; case: string; maxLength: number; }
 export interface UdpEditInput {
   id?: string;

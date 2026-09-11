@@ -7,7 +7,7 @@ import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable, ParentDomain } from '@/services/governance.service';
 import { isComplexTypeStart } from '../lib/complexTypes';
-import { applyDomainDefaults } from '../lib/domainDefaults';
+import { applyDomainDefaults, type DomainDefaultsPatch } from '../lib/domainDefaults';
 import { applyDomainPick } from '../lib/domainType';
 import { canonicalDefaultType } from '../lib/typePick';
 import { orderColumns } from '../lib/columnOrder';
@@ -22,8 +22,12 @@ import ComplexTypeBuilder from './ComplexTypeBuilder';
 import SearchSelect from './SearchSelect';
 import TypePicker from './TypePicker';
 import UdpAssign from './UdpAssign';
+import DomainInheritPopup from './DomainInheritPopup';
+import { facetEditable, type ColumnField } from '../lib/facetEditable';
+import { domainUdpOffer, mergeInheritedUdps, type DomainUdpOffer, type DomainUdpOfferItem } from '../lib/domainInherit';
+import { facetType } from '../lib/inspectorModel';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
-import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun, type Facet } from '@/lib/facets';
+import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun, facetNouns, type Facet } from '@/lib/facets';
 
 type ColTab = 'definition' | 'datatype' | 'udps' | 'metadata';
 const TABS: { id: ColTab; label: string }[] = [
@@ -147,7 +151,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
       try { impact = await gov.columnImpact(col.id); } catch { /* confirm genérico */ }
       const relIds = impact.relationships.map((r) => r.relId);
       const ok = await confirmDialog({
-        title: 'Delete column',
+        title: `Delete ${facetNouns(viewMode).member}`,
         message: impact.total > 0 ? (
           <>
             <p style={{ margin: 0 }}>
@@ -175,7 +179,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
         // relación afectada; el store cierra este panel al terminar.
         action: () => deleteColumn(col.id, relIds),
       });
-      if (ok) pushToast(impact.total > 0 ? 'Column and its relationships deleted' : 'Column deleted');
+      if (ok) pushToast(impact.total > 0 ? `${facetNouns(viewMode).Member} and its relationships deleted` : `${facetNouns(viewMode).Member} deleted`);
     } catch { pushToast("Couldn't delete", 'err'); }
   };
 
@@ -231,6 +235,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
           cols={cols}
           tab={tab}
           domains={domains}
+          udpDefs={udpDefs}
           view={viewMode}
           canEdit={canEdit}
           onPatch={patchCol}
@@ -246,12 +251,14 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
  * 1:1 de la card expandida de ColumnRow. Todas las pestañas comparten esta
  * instancia — cambiar de pestaña NO pierde un tipeo en vuelo.
  */
-function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatch, onDelete }: {
+function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdit, onPatch, onDelete }: {
   col: CanonicalColumn;
   table: CanonicalTable;
   cols: CanonicalColumn[];
   tab: ColTab;
   domains: ParentDomain[];
+  /** Doc 85: defs UDP del proyecto — oferta de UDP por defecto del dominio al asignarlo. */
+  udpDefs: UdpDefinition[];
   /** Doc 69: faceta activa del canvas (UDPs de Attribute vs Column). */
   view: Facet;
   canEdit: boolean;
@@ -263,6 +270,15 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
   const [dataType, setDataType] = useState(col.dataType);
   const [description, setDescription] = useState(col.description ?? '');
   const [domainId, setDomainId] = useState(col.parentDomainId ?? '');
+  // Doc 85: faceta física de la definición y faceta lógica del tipo.
+  const [physicalDescription, setPhysicalDescription] = useState(col.physicalDescription ?? '');
+  const [logicalDataType, setLogicalDataType] = useState(col.logicalDataType ?? '');
+  // Popup «Inherit from domain X» (doc 85 §3.6): guarda el patch armado por
+  // onDomain hasta que el modelador elija los UDP (Skip = aplicar sin UDP).
+  const [inherit, setInherit] = useState<{ domain: ParentDomain; offer: DomainUdpOffer; also: string[]; fields: Partial<CanonicalColumn>; defaults: DomainDefaultsPatch } | null>(null);
+  const nouns = facetNouns(view);
+  // Doc 85 §3.7: campo de la OTRA faceta ⇒ solo-lectura (input disabled + hint).
+  const ro = (field: ColumnField) => !facetEditable('column', field, view);
   // Spinner del tipo mientras el cambio de dominio viaja al changeset.
   const [typeBusy, setTypeBusy] = useState(false);
   // Flags (PK/FK/Nullable/Partition) en vuelo: bloquea la fila + spinner.
@@ -310,6 +326,14 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
   const onLogical = (v: string) => sync.current?.setLogical(v);
   const onPhysical = (v: string) => sync.current?.setPhysical(v);
   const onDescription = (v: string) => { setDescription(v); debounced('description', { description: v.trim() || undefined }); };
+  const onPhysicalDescription = (v: string) => { setPhysicalDescription(v); debounced('physicalDescription', { physicalDescription: v.trim() || undefined }); };
+  const onLogicalDataType = (v: string) => {
+    setLogicalDataType(v);
+    const dom = domains.find((d) => d.id === domainId);
+    // Doc 69/85: override LÓGICO contra el tipo lógico HOMOLOGADO del dominio (regla doc 46 por faceta).
+    const domLogical = canonicalDefaultType(dom?.logicalDataType ?? undefined);
+    debounced('logicalDataType', { logicalDataType: v.trim() || undefined, logicalTypeOverridden: !!dom && !!v.trim() && v.trim() !== domLogical });
+  };
   const onDataType = (v: string) => {
     setDataType(v);
     const dom = domains.find((d) => d.id === domainId);
@@ -340,37 +364,64 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
     delete pendingDeb.current['dataType'];
     setDataType(next.dataType);
     const fields: Partial<CanonicalColumn> = { parentDomainId: id || undefined, ...next };
-    // Doc 69 §4.9: faceta LÓGICA del tipo — al cambiar de dominio hereda su
-    // tipo lógico (sin UI de edición en Fase 1); el mismo dominio se respeta.
-    if (id && id !== (col.parentDomainId ?? '')) {
-      fields.logicalDataType = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : undefined;
+    const changed = !!id && id !== (col.parentDomainId ?? '');
+    // Doc 69 §4.9 / doc 85: faceta LÓGICA del tipo — al cambiar de dominio
+    // hereda su tipo lógico (override lógico off); el mismo dominio se respeta.
+    if (changed) {
+      const lt = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : '';
+      clearTimeout(timers.current['logicalDataType']);
+      delete pendingDeb.current['logicalDataType'];
+      setLogicalDataType(lt);
+      fields.logicalDataType = lt || undefined;
       fields.logicalTypeOverridden = false;
     }
-    // Doc 79: SOLO los dominios "atributo estándar" (Erwin `Attribute_Definition`,
-    // p.ej. FecRutina/CodMes ⇒ `inheritsName`) RE-APLICAN nombre lógico y
-    // definición al cambiar de dominio (misma filosofía del tipo, doc 46); el
-    // MISMO dominio respeta lo manual. Los genéricos de tipo NO tocan nada
-    // (applyDomainDefaults devuelve {}). Un solo upsert con TODO (evita lost-update).
-    const defaults = applyDomainDefaults({ prevDomain: prev, nextDomain: dom, current: { logicalName: logical, description } });
+    // Doc 79/85: SOLO los dominios "atributo estándar" (`inheritsName`) RE-APLICAN
+    // nombres (lógico y físico) y descripciones (lógica y física) al cambiar de
+    // dominio; el MISMO dominio respeta lo manual; los genéricos no tocan nada.
+    const defaults = applyDomainDefaults({
+      prevDomain: prev, nextDomain: dom,
+      current: { logicalName: logical, description, physicalName: physical, physicalDescription },
+    });
     if (defaults.description !== undefined) {
       clearTimeout(timers.current['description']);
       delete pendingDeb.current['description'];
       setDescription(defaults.description);
       fields.description = defaults.description;
     }
+    if (defaults.physicalDescription !== undefined) {
+      clearTimeout(timers.current['physicalDescription']);
+      delete pendingDeb.current['physicalDescription'];
+      setPhysicalDescription(defaults.physicalDescription ?? '');
+      fields.physicalDescription = defaults.physicalDescription ?? undefined;   // undefined = limpiar en el upsert
+    }
+    // Doc 85 §3.6: UDP por defecto del dominio nuevo → el modelador elige (popup).
+    const offer: DomainUdpOffer = changed ? domainUdpOffer(dom, udpDefs) : { logical: [], physical: [], total: 0 };
+    if (offer.total > 0 && dom) {
+      const also = [`type ${next.dataType || '—'}${fields.logicalDataType ? ` / ${fields.logicalDataType}` : ''}`];
+      if (dom.inheritsName) also.push('names + definitions (standard attribute)');
+      setInherit({ domain: dom, offer, also, fields, defaults });
+      return;
+    }
+    await commitDomain(fields, defaults);
+  };
+
+  /** Aplica el patch de dominio (un solo upsert: evita lost-update). Doc 85 D2:
+   *  el físico heredado es el override del dominio o el DERIVADO del lógico
+   *  nuevo por glosario; `physicalNameOverridden` = heredado ≠ derivado (así el
+   *  rephysicalize del Glosario respeta un físico custom y re-deriva uno derivable). */
+  const commitDomain = async (fields: Partial<CanonicalColumn>, defaults: DomainDefaultsPatch) => {
     setTypeBusy(true);
     try {
       if (defaults.logicalName !== undefined) {
-        // El físico se RE-DERIVA del lógico nuevo por el glosario: el override
-        // anterior (doc 68) pertenecía al nombre anterior — al re-aplicar la
-        // regla, el físico vuelve a ser derivable (flag off). Si el naming no
-        // responde, se conserva el físico actual.
         let phys = physical;
         let overridden = col.physicalNameOverridden ?? false;
         try {
-          phys = (await gov.physicalize(defaults.logicalName)).physical;
-          overridden = false;
-        } catch { /* mantener el actual */ }
+          const derived = (await gov.physicalize(defaults.logicalName)).physical;
+          phys = defaults.physicalName ?? derived;
+          overridden = phys !== derived;
+        } catch {
+          if (defaults.physicalName) { phys = defaults.physicalName; overridden = true; }
+        }
         sync.current?.reset(defaults.logicalName, phys, overridden);
         setLogical(defaults.logicalName);
         setPhysical(phys);
@@ -378,6 +429,19 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
       }
       await onPatch(col.id, fields);
     } finally { setTypeBusy(false); }
+  };
+  const confirmInherit = async (picked: DomainUdpOfferItem[]) => {
+    if (!inherit) return;
+    const fields = { ...inherit.fields };
+    if (picked.length) fields.udpValues = mergeInheritedUdps(col.udpValues, picked);
+    setInherit(null);
+    await commitDomain(fields, inherit.defaults);
+  };
+  const skipInherit = async () => {
+    if (!inherit) return;
+    const { fields, defaults } = inherit;
+    setInherit(null);
+    await commitDomain(fields, defaults);
   };
   const toggle = (field: 'isPrimaryKey' | 'isForeignKey' | 'isNullable' | 'isPartition', cur?: boolean) => () => {
     setFlagsBusy(true);
@@ -398,28 +462,37 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
       {/* ── Definition: nombres + definición funcional + flags ── */}
       {tab === 'definition' && (
         <>
+          <p className="wk-pp-cap" style={{ marginTop: 0 }}>
+            <b>{view === 'logical' ? 'Logical facet' : 'Physical facet'}</b> — fields of the other facet are read-only here. {FACET_SWITCH_HINT[view]}
+          </p>
           <div className="wk-props-field"><label>Logical name</label>
-            <input className="rd-input" disabled={!canEdit} placeholder="Logical name" value={logical} onChange={(e) => onLogical(e.target.value)} />
+            <input className="rd-input" disabled={!canEdit || ro('logicalName')} title={ro('logicalName') ? FACET_SWITCH_HINT[view] : undefined} placeholder="Logical name" value={logical} onChange={(e) => onLogical(e.target.value)} />
           </div>
           <div className="wk-props-field"><label>Physical name</label>
-            <input className="rd-input rd-mono" disabled={!canEdit} placeholder="Physical name" value={physical} onChange={(e) => onPhysical(e.target.value)} />
+            <input className="rd-input rd-mono" disabled={!canEdit || ro('physicalName')} title={ro('physicalName') ? FACET_SWITCH_HINT[view] : undefined} placeholder="Physical name" value={physical} onChange={(e) => onPhysical(e.target.value)} />
           </div>
           <div className="wk-props-field"><label>Functional definition</label>
-            <textarea className="wk-pp-textarea" disabled={!canEdit} placeholder="What this attribute represents…" value={description} onChange={(e) => onDescription(e.target.value)} />
+            <textarea className="wk-pp-textarea" disabled={!canEdit || ro('description')} title={ro('description') ? FACET_SWITCH_HINT[view] : undefined} placeholder="What this attribute represents…" value={description} onChange={(e) => onDescription(e.target.value)} />
+          </div>
+          {/* Doc 85: comment FÍSICO (Erwin Comment) — el DDL lo emite como COMMENT; vacío = igual a la definición. */}
+          <div className="wk-props-field"><label>Comment (physical)</label>
+            <textarea className="wk-pp-textarea" disabled={!canEdit || ro('physicalDescription')} title={ro('physicalDescription') ? FACET_SWITCH_HINT[view] : undefined}
+              placeholder={description.trim() ? `Same as the functional definition: ${description.trim()}` : 'Physical comment (defaults to the functional definition)'}
+              value={physicalDescription} onChange={(e) => onPhysicalDescription(e.target.value)} />
           </div>
           <div className="wk-props-field"><label>Flags</label>
             <div className="wk-pp-flags" style={flagsBusy ? { opacity: 0.7 } : undefined}>
               <label className={`wk-pp-flag pk${col.isPrimaryKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isPrimaryKey} onChange={toggle('isPrimaryKey', col.isPrimaryKey)} /><Icon name="key" size={11} /> PK</label>
               <label className={`wk-pp-flag fk${col.isForeignKey ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isForeignKey} onChange={toggle('isForeignKey', col.isForeignKey)} /><Icon name="link" size={11} /> FK</label>
-              <label className={`wk-pp-flag nl${col.isNullable !== false ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={col.isNullable !== false} onChange={toggle('isNullable', col.isNullable !== false)} /> Nullable</label>
-              <label className={`wk-pp-flag pt${col.isPartition ? ' on' : ''}`}><input type="checkbox" disabled={!canEdit || flagsBusy} checked={!!col.isPartition} onChange={toggle('isPartition', col.isPartition)} /><Icon name="grid" size={11} /> Partition</label>
+              <label className={`wk-pp-flag nl${col.isNullable !== false ? ' on' : ''}`} title={ro('isNullable') ? FACET_SWITCH_HINT[view] : undefined}><input type="checkbox" disabled={!canEdit || flagsBusy || ro('isNullable')} checked={col.isNullable !== false} onChange={toggle('isNullable', col.isNullable !== false)} /> Nullable</label>
+              <label className={`wk-pp-flag pt${col.isPartition ? ' on' : ''}`} title={ro('isPartition') ? FACET_SWITCH_HINT[view] : undefined}><input type="checkbox" disabled={!canEdit || flagsBusy || ro('isPartition')} checked={!!col.isPartition} onChange={toggle('isPartition', col.isPartition)} /><Icon name="grid" size={11} /> Partition</label>
               {flagsBusy && <span className="rd-spin" style={{ marginLeft: 'auto', color: 'var(--primary)' }} aria-hidden />}
             </div>
           </div>
           {canEdit && (
             <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5' }}>
               <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'var(--error, #C4314B)' }} disabled={flagsBusy} onClick={onDelete}>
-                <Icon name="trash" size={12} /> Delete column…
+                <Icon name="trash" size={12} /> Delete {nouns.member}…
               </button>
             </div>
           )}
@@ -439,15 +512,27 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
               onPick={onDomain}
             />
           </div>
-          <div className="wk-props-field"><label>Data type</label>
+          {/* Doc 85 §3.7: el tipo de la faceta activa se edita; el de la otra se ve en solo-lectura. */}
+          <div className="wk-props-field"><label>Logical data type</label>
             <span className="wk-pp-typewrap">
-              <TypePicker value={dataType} onChange={onDataType} placeholder="dataType" disabled={!canEdit || typeBusy} />
+              <TypePicker value={ro('logicalDataType') ? (logicalDataType || dataType) : logicalDataType} onChange={onLogicalDataType}
+                placeholder={dataType ? `Same as physical (${dataType})` : 'Logical data type'} disabled={!canEdit || typeBusy || ro('logicalDataType')} />
+            </span>
+            {ro('logicalDataType') && <p className="wk-pp-cap">{FACET_SWITCH_HINT[view]}</p>}
+          </div>
+          {!ro('logicalDataType') && isComplexTypeStart(logicalDataType) && (
+            <ComplexTypeBuilder value={logicalDataType} onChange={onLogicalDataType} disabled={!canEdit || typeBusy} />
+          )}
+          <div className="wk-props-field"><label>Physical data type</label>
+            <span className="wk-pp-typewrap">
+              <TypePicker value={dataType} onChange={onDataType} placeholder="dataType" disabled={!canEdit || typeBusy || ro('dataType')} />
               {typeBusy && <span className="wk-spin" aria-hidden />}
             </span>
+            {ro('dataType') && <p className="wk-pp-cap">{FACET_SWITCH_HINT[view]}</p>}
           </div>
           {/* Builder visual de tipos complejos: edita STRUCT/ARRAY/MAP campo a
               campo (persiste vía onDataType). */}
-          {isComplexTypeStart(dataType) && (
+          {!ro('dataType') && isComplexTypeStart(dataType) && (
             <ComplexTypeBuilder value={dataType} onChange={onDataType} disabled={!canEdit || typeBusy} />
           )}
         </>
@@ -469,8 +554,8 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
           <dl className="wk-pp-meta">
             <dt>Physical name</dt><dd className="rd-mono">{col.physicalName}</dd>
             <dt>Logical name</dt><dd>{col.logicalName}</dd>
-            <dt>Table</dt><dd className="rd-mono">{table.schema ? `${table.schema}.` : ''}{table.physicalName}</dd>
-            <dt>Data type</dt><dd className="rd-mono">{col.dataType || '—'}</dd>
+            <dt>{nouns.One}</dt><dd className="rd-mono">{table.schema ? `${table.schema}.` : ''}{table.physicalName}</dd>
+            <dt>Data type</dt><dd className="rd-mono">{facetType(col, view) || '—'}</dd>
             <dt>Parent Domain</dt><dd>{domainName ?? '—'}</dd>
             <dt>Keys</dt><dd>{col.isPrimaryKey || col.isForeignKey
               ? [col.isPrimaryKey ? `PK${keyPos ? ` · #${keyPos} of ${keyPks.length} in the key` : ''}` : null, col.isForeignKey ? 'FK' : null].filter(Boolean).join(' · ')
@@ -479,12 +564,17 @@ function ColumnPropsBody({ col, table, cols, tab, domains, view, canEdit, onPatc
             <dt>Partition</dt><dd>{col.isPartition ? 'Yes' : 'No'}</dd>
             <dt>Position</dt><dd>#{cols.findIndex((c) => c.id === col.id) + 1} <span style={{ color: 'var(--muted)' }}>of {cols.length}</span></dd>
             <dt>Definition</dt><dd>{col.description || '—'}</dd>
+            <dt>Physical comment</dt><dd>{col.physicalDescription || '—'}</dd>
             <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{col.id}</dd>
           </dl>
           {/* Historial de auditoría (doc 51): acciones PUBLICADAS sobre la
               columna — quién / qué / cuándo / qué versión, detalle bajo demanda. */}
           <AuditHistory kind="column" entityId={col.id} />
         </>
+      )}
+      {inherit && (
+        <DomainInheritPopup domain={inherit.domain} offer={inherit.offer} also={inherit.also}
+          onConfirm={(picked) => void confirmInherit(picked)} onSkip={() => void skipInherit()} />
       )}
     </>
   );

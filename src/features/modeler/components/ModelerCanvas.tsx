@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { facetNouns } from '@/lib/facets';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap, ConnectionMode,
   useNodesState, useEdgesState, type Node, type Edge, type Connection,
@@ -310,13 +311,13 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       if (st.tblClipboard) {
         if (readonly || !activeChangeset) { pushToast('Open the model in edit mode to paste', 'err'); return; }
         void st.pasteTable()
-          .then((name) => { if (name) pushToast(`Table pasted as ${name}`); })
+          .then((name) => { if (name) pushToast(`${facetNouns(useModelerStore.getState().viewMode).One} pasted as ${name}`); })
           .catch((err) => pushToast(err instanceof Error && err.message ? err.message : "Couldn't paste the table", 'err'));
         return;
       }
       if (!st.colClipboard?.cols.length) return;
       if (readonly || !activeChangeset) { pushToast('Open the model in edit mode to paste columns', 'err'); return; }
-      if (!st.selectedTableId) { pushToast('Select the target table, then paste', 'err'); return; }
+      if (!st.selectedTableId) { pushToast(`Select the target ${facetNouns(st.viewMode).one}, then paste`, 'err'); return; }
       st.setPasteTarget(st.selectedTableId);
     };
     window.addEventListener('keydown', onKey);

@@ -7,7 +7,7 @@ import { pushUndo } from '@/store/useUndoStore';
 import AuditHistory from './AuditHistory';
 import UdpAssign from './UdpAssign';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
-import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun } from '@/lib/facets';
+import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun, facetNouns } from '@/lib/facets';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/services/governance.service';
 import { matchesColumn } from '../lib/columnSearch';
@@ -16,6 +16,7 @@ import { pkInKeyOrder, reorderKey } from '../lib/keyOrder';
 import { alignSourcesToPhysical } from '../lib/viewSync';
 import { ColumnRow } from './ColumnEditor';
 import { tableNamePlan } from '../lib/nameSync';
+import { facetEditable } from '../lib/facetEditable';
 import SchemaSelect from './SchemaSelect';
 import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
@@ -70,6 +71,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // Doc 69: la faceta activa la da el switch Logical/Physical del canvas —
   // los UDPs (y los rótulos entity/table) siguen ese modo.
   const viewMode = useModelerStore((s) => s.viewMode);
+  const nouns = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
   useEffect(() => {
     let alive = true;
@@ -91,6 +93,11 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   );
 
   const [tab, setTab] = useState<Tab>('definition');
+  // Doc 85 §3.7: la pestaña Views solo existe en el modelo físico (doc 63/70);
+  // Columns se rotula Attributes en lógico (facetNouns).
+  const tabs = TABS.filter((t) => t.id !== 'views' || viewMode === 'physical')
+    .map((t) => (t.id === 'columns' ? { ...t, label: nouns.Members } : t));
+  useEffect(() => { if (tab === 'views' && viewMode !== 'physical') setTab('definition'); }, [tab, viewMode]);
 
   // ── Definition: form local de la tabla ──
   const [form, setForm] = useState({ logicalName: '', physicalName: '', schema: '', description: '' });
@@ -226,7 +233,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
       setPhysTouched(null);
       await reload();
-      pushToast('Table updated');
+      pushToast(`${nouns.One} updated`);
     // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador) en
     // vez de un "Couldn't save" genérico que esconde POR QUÉ no se guardó.
     } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
@@ -369,8 +376,8 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         // ni deja re-clickear mientras se aplica).
         action: async () => { await removeTableFromArea(table.id); },
       });
-      if (ok) pushToast('Table removed from this canvas');
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't remove the table", 'err'); }
+      if (ok) pushToast(`${nouns.One} removed from this canvas`);
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : `Couldn't remove the ${nouns.one}`, 'err'); }
     finally { setDelBusy(null); }
   };
   const askDeleteTable = async () => {
@@ -392,15 +399,15 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         nViews = vs.length;
       } catch { /* si falla el conteo se muestran ceros */ }
       const ok = await confirmDialog({
-        title: 'Delete table',
+        title: `Delete ${nouns.one}`,
         variant: 'danger',
-        confirmLabel: 'Delete table',
+        confirmLabel: `Delete ${nouns.one}`,
         cancelLabel: 'Cancel',
         message: <>
-          Table <strong>“{table.physicalName || table.logicalName}”</strong> will be deleted from the model. This affects:
+          {nouns.One} <strong>“{table.physicalName || table.logicalName}”</strong> will be deleted from the model. This affects:
           <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
             <li><strong>{canvases}</strong> canvas{canvases === 1 ? '' : 'es'} it appears on</li>
-            <li><strong>{related}</strong> related table{related === 1 ? '' : 's'} (their relationships are removed)</li>
+            <li><strong>{related}</strong> related {related === 1 ? nouns.one : nouns.many} (their relationships are removed)</li>
             <li><strong>{nViews}</strong> view{nViews === 1 ? '' : 's'} (also deleted)</li>
           </ul>
           <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--muted)' }}>Its columns and relationships go too. This change is part of the current version.</div>
@@ -409,8 +416,8 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         // spinner y bloqueado hasta terminar (el owner reportó reclicks por el delay).
         action: async () => { await deleteTable(table.id); },
       });
-      if (ok) pushToast('Table deleted');
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't delete the table", 'err'); }
+      if (ok) pushToast(`${nouns.One} deleted`);
+    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : `Couldn't delete the ${nouns.one}`, 'err'); }
     finally { setDelBusy(null); }
   };
 
@@ -458,7 +465,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         </div>
 
         <div className="wk-pp-tabs" role="tablist">
-          {TABS.map((t) => (
+          {tabs.map((t) => (
             <button key={t.id} role="tab" aria-selected={tab === t.id} className={`wk-pp-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
               {t.label}
               {counts[t.id] != null && <span className="wk-pp-tab-count">{counts[t.id]}</span>}
@@ -471,18 +478,22 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         {/* ── Definition (pp1) ── */}
         {tab === 'definition' && (
           <>
+            {/* Doc 85 §3.7: cada faceta edita SUS campos; los de la otra quedan en solo-lectura con el hint. */}
+            <p className="wk-pp-cap" style={{ marginTop: 0 }}>
+              <b>{viewMode === 'logical' ? 'Logical facet' : 'Physical facet'}</b> — fields of the other facet are read-only here. {FACET_SWITCH_HINT[viewMode]}
+            </p>
             <div className="wk-props-field"><label>Logical name</label>
-              <input className="rd-input" disabled={!canEdit} value={form.logicalName} onChange={(e) => setForm({ ...form, logicalName: e.target.value })} />
+              <input className="rd-input" disabled={!canEdit || !facetEditable('table', 'logicalName', viewMode)} title={facetEditable('table', 'logicalName', viewMode) ? undefined : FACET_SWITCH_HINT[viewMode]} value={form.logicalName} onChange={(e) => setForm({ ...form, logicalName: e.target.value })} />
             </div>
             <div className="wk-props-field"><label>Physical name</label>
               <div style={{ display: 'flex', gap: 4 }}>
-                <input className="rd-input rd-mono" disabled={!canEdit} value={form.physicalName} onChange={(e) => { setForm({ ...form, physicalName: e.target.value }); setPhysTouched(e.target.value.trim() !== ''); }} style={{ flex: 1, minWidth: 0 }} />
-                {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" title="Derive from logical (glossary)" onClick={derivePhysical}><Icon name="bolt" size={12} /></button>}
+                <input className="rd-input rd-mono" disabled={!canEdit || !facetEditable('table', 'physicalName', viewMode)} title={facetEditable('table', 'physicalName', viewMode) ? undefined : FACET_SWITCH_HINT[viewMode]} value={form.physicalName} onChange={(e) => { setForm({ ...form, physicalName: e.target.value }); setPhysTouched(e.target.value.trim() !== ''); }} style={{ flex: 1, minWidth: 0 }} />
+                {canEdit && facetEditable('table', 'physicalName', viewMode) && <button className="rd-btn rd-btn-ghost rd-btn-sm" title="Derive from logical (glossary)" onClick={derivePhysical}><Icon name="bolt" size={12} /></button>}
               </div>
             </div>
             <div className="wk-props-field"><label>Schema</label>
               {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
-              <SchemaSelect kind="tables" value={form.schema} onChange={(v) => setForm({ ...form, schema: v })} disabled={!canEdit} />
+              <SchemaSelect kind="tables" value={form.schema} onChange={(v) => setForm({ ...form, schema: v })} disabled={!canEdit || !facetEditable('table', 'schema', viewMode)} />
             </div>
             <div className="wk-props-field"><label>Functional definition</label>
               <textarea className="wk-pp-textarea" disabled={!canEdit} placeholder="What this entity represents…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} onBlur={() => void saveDescriptionOnBlur()} />
@@ -498,7 +509,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                   {delBusy === 'remove' ? <span className="rd-spin" aria-hidden /> : <Table2 size={12} />} Remove from this canvas
                 </button>
                 <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'var(--error, #C4314B)' }} disabled={delBusy !== null} onClick={askDeleteTable}>
-                  {delBusy === 'delete' ? <span className="rd-spin" aria-hidden /> : <Trash2 size={12} />} Delete table…
+                  {delBusy === 'delete' ? <span className="rd-spin" aria-hidden /> : <Trash2 size={12} />} Delete {nouns.one}…
                 </button>
               </div>
             )}
@@ -510,12 +521,12 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
           <>
             <div className="wk-props-sec" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 0 }}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                Table columns
+                {nouns.One} {nouns.members}
                 {reordering && <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden />}
               </span>
-              {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setColumnTarget(table.id)}><Icon name="plus" size={12} sw={2.6} /> Add column</button>}
+              {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setColumnTarget(table.id)}><Icon name="plus" size={12} sw={2.6} /> Add {nouns.member}</button>}
             </div>
-            <p className="wk-pp-cap">{canEdit ? 'Drag the handle to reorder · click a column to edit.' : 'Click a column to view its details.'}</p>
+            <p className="wk-pp-cap">{canEdit ? `Drag the handle to reorder · click ${nouns.aMember} to edit.` : `Click ${nouns.aMember} to view its details.`}</p>
             {/* Orden de la LLAVE (independiente del orden físico): manda el
                 bloque PK del canvas y el PRIMARY KEY(...) del Export DDL.
                 Doc 42: contenedor de ALTO FIJO con scroll y filas apiladas —
@@ -542,20 +553,20 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 </div>
               </div>
             )}
-            {cols.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No columns yet.{canEdit ? ' Use “Add column”.' : ''}</div>}
+            {cols.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No {nouns.members} yet.{canEdit ? ` Use “Add ${nouns.member}”.` : ''}</div>}
             {/* Buscador de columnas (doc 42): contiene CI sobre lógico o
                 físico. Con filtro activo el drag&drop SE DESACTIVA — el drop
                 se resuelve contra la lista completa y reordenar viendo un
                 subconjunto corrompería el orden. */}
             {canEdit && cols.length > 1 && (
-              <p className="wk-pp-cap" style={{ marginTop: 0 }}>Drag a row to reorder the columns.</p>
+              <p className="wk-pp-cap" style={{ marginTop: 0 }}>Drag a row to reorder the {nouns.members}.</p>
             )}
             {cols.length > 0 && (
               <div className="wk-pp-colfind">
                 <Icon name="search" size={12} className="wk-pp-colfind-ico" />
                 <input
                   className="rd-input"
-                  placeholder="Find a column (contains…)"
+                  placeholder={`Find ${nouns.aMember} (contains…)`}
                   value={colQuery}
                   onChange={(e) => setColQuery(e.target.value)}
                   onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setColQuery(''); } }}
@@ -578,7 +589,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
             )}
             <div className="wk-pp-collist">
               {visibleCols.map((c) => (
-                <ColumnRow
+                <ColumnRow facet={viewMode}
                   key={c.id}
                   col={c}
                   canEdit={canEdit}
@@ -796,7 +807,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
               <dt>Physical name</dt><dd className="rd-mono">{table.physicalName}</dd>
               <dt>Logical name</dt><dd>{table.logicalName}</dd>
               <dt>Schema</dt><dd className="rd-mono">{table.schema || '—'}</dd>
-              <dt>Columns</dt><dd>{cols.length}</dd>
+              <dt>{nouns.Members}</dt><dd>{cols.length}</dd>
               <dt>Relationships</dt><dd>{links.length === 0 ? '—' : `${links.length} link${links.length === 1 ? '' : 's'} · ${parents} parent${parents === 1 ? '' : 's'}, ${children} child${children === 1 ? '' : 'ren'}`}</dd>
               <dt>Definition</dt><dd>{table.description || '—'}</dd>
               <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{table.id}</dd>

@@ -23,6 +23,7 @@
 // «Finanzas»). Cada nivel queda BLOQUEADO (plomo + candado) hasta elegir el
 // anterior; el backend alcanza el subárbol completo de la carpeta elegida.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from 'react';
+import { facetNouns } from '@/lib/facets';
 import { Columns3, Crosshair, Eye, FileText, Lock, MapPin, Search, Table2 } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import * as gov from '@/services/governance.service';
@@ -90,6 +91,8 @@ export default function SearchModelPopup({ onClose, pushToast }: {
   pushToast: (m: string, k?: 'err') => void;
 }) {
   const activeSaId = useModelerStore((s) => s.activeSaId);
+  const viewMode = useModelerStore((s) => s.viewMode);
+  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   // Canvas abierto al abrir el popup (doc 72 r3): semilla de los filtros.
   const activeCanvas = useModelerStore((s) => (s.activeSaId ? (s.diagram?.subjectArea ?? null) : null));
   const openCanvasAndFocus = useModelerStore((s) => s.openCanvasAndFocus);
@@ -198,7 +201,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
 
   /** Locate: redirige (si hace falta) y centra; con `colId` abre además la columna. */
   const go = (canvas: ModelSearchCanvas | null, tableId: string, colId: string | undefined, label: string) => {
-    if (!canvas) { pushToast('This table is not placed on any canvas yet — use Inspect to read it', 'err'); return; }
+    if (!canvas) { pushToast(`This ${n.one} is not placed on any canvas yet — use Inspect to read it`, 'err'); return; }
     onClose();
     openCanvasAndFocus(canvas.id, canvas.projectId ?? undefined, tableId, colId, label)
       .catch(() => pushToast("Couldn't open the canvas", 'err'));
@@ -315,7 +318,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
     <Dialog
       open
       title="Search the model"
-      subtitle={`Tables, columns and column definitions across every canvas of ${projectName ? `«${projectName}»` : 'this project'} in this version — Locate opens the canvas and centers on the hit; Inspect reads its metadata without a canvas`}
+      subtitle={`${n.Many}, ${n.members} and ${n.member} definitions across every canvas of ${projectName ? `«${projectName}»` : 'this project'} in this version — Locate opens the canvas and centers on the hit; Inspect reads its metadata without a canvas`}
       icon={Search}
       backdrop="canvas"
       canvasTop={136}
@@ -356,7 +359,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
       <div className="wk-findres-list" style={{ maxHeight: 420 }} ref={listRef} onScroll={onScroll}>
         {!ready && (
           <div className="wk-srch-hint">
-            Search by <b>table</b> (logical or physical name), <b>column</b> (logical or physical name) or <b>column definition</b> —
+            Search by <b>{n.one}</b> (logical or physical name), <b>{n.member}</b> (logical or physical name) or <b>{n.member} definition</b> —
             or pick a filter (Sub-project › Domain › Model) or a scope to browse without typing.
             Results cover the whole project in this version, not just the open canvas; long lists load in blocks as you scroll.
             <b> Locate</b> opens the canvas and centers on the hit; <b>Inspect</b> shows its full metadata without any canvas.
@@ -372,9 +375,9 @@ export default function SearchModelPopup({ onClose, pushToast }: {
         )}
         {res && total > 0 && (
           <>
-            {showTables && section('tables', <Table2 size={12} aria-hidden />, 'Tables', res.tables.map(tableRow))}
-            {showCols && section('columns', <Columns3 size={12} aria-hidden />, 'Columns', res.columns.map(columnRow))}
-            {showDefs && section('definitions', <FileText size={12} aria-hidden />, 'Column definitions', res.definitions.map(definitionRow))}
+            {showTables && section('tables', <Table2 size={12} aria-hidden />, n.Many, res.tables.map(tableRow))}
+            {showCols && section('columns', <Columns3 size={12} aria-hidden />, n.Members, res.columns.map(columnRow))}
+            {showDefs && section('definitions', <FileText size={12} aria-hidden />, `${n.Member} definitions`, res.definitions.map(definitionRow))}
             {group && loadingMore && <div className="wk-srch-loading"><span className="rd-spin" aria-hidden /> Loading more…</div>}
             {group && !loadingMore && nextOffset != null && (
               <div className="wk-srch-more">

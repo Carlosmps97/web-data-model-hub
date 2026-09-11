@@ -1,4 +1,5 @@
 import { memo, useMemo, useState, type DragEvent } from 'react';
+import { facetNouns } from '@/lib/facets';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { GripVertical, KeyRound, Link2, Table2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -36,6 +37,7 @@ function TableNode({ data }: NodeProps) {
   const connectable = canEdit && relArmed;
   const setColumnTarget = useModelerStore((s) => s.setColumnTarget);
   const viewMode = useModelerStore((s) => s.viewMode);
+  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const applyCanvasDrop = useModelerStore((s) => s.applyCanvasDrop);
   // Selector BOOLEANO (no el id crudo): con el id, cambiar la selección
   // re-renderizaba los 100 nodos del canvas; con el booleano sólo los 2
@@ -214,7 +216,7 @@ function TableNode({ data }: NodeProps) {
           {table.schema && <span className="wk-node-schema">{table.schema}.</span>}
           {nameOf(table)}
         </span>
-        {canEdit && <button className="wk-node-add" title="Add column" onClick={() => setColumnTarget(table.id)}>+</button>}
+        {canEdit && <button className="wk-node-add" title={`Add ${n.member}`} onClick={() => setColumnTarget(table.id)}>+</button>}
         {/* Origen de RELACIONES (doc 47): con la herramienta armada, el header
             entero inicia el drag (hit-area .armed). Sin armar queda 1px
             invisible: sigue siendo el ancla de las derivaciones F3 y de los
@@ -231,7 +233,7 @@ function TableNode({ data }: NodeProps) {
       )}
       {pks.length > 0 && rest.length > 0 && <div className="wk-node-div" />}
       {rest.map(renderRow)}
-      {columns.length === 0 && <div className="wk-node-empty rd-small">No columns</div>}
+      {columns.length === 0 && <div className="wk-node-empty rd-small">No {n.members}</div>}
     </div>
   );
 }

@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { sessionProjectId } from '@/store/useSessionStore';
+import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
 import Modal from '@/components/ui/Modal';
 import Icon from '@/components/ui/Icon';
 import * as gov from '@/services/governance.service';
@@ -10,7 +12,10 @@ import { applyDomainPick } from '../lib/domainType';
 import { applyNamingCase } from '../lib/physicalCase';
 import { canonicalDefaultType } from '../lib/typePick';
 import { useModelerStore, type AddColumnInput } from '@/store/useModelerStore';
-import { FACET_CAPTION } from '@/lib/facets';
+import { FACET_CAPTION, type Facet } from '@/lib/facets';
+import { facetType } from '../lib/inspectorModel';
+import { domainUdpOffer, mergeInheritedUdps, type DomainUdpOffer, type DomainUdpOfferItem } from '../lib/domainInherit';
+import DomainInheritPopup from './DomainInheritPopup';
 import ComplexTypeBuilder from './ComplexTypeBuilder';
 import SearchSelect from './SearchSelect';
 import TypePicker from './TypePicker';
@@ -48,6 +53,15 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const [isNullable, setIsNullable] = useState(true);
   const [isPartition, setIsPartition] = useState(false);
   const [udpValues, setUdpValues] = useState<Record<string, string>>({});
+  // Doc 85: descripción física heredada del dominio estándar (viaja en el alta; se edita luego en Properties).
+  const [physicalDescription, setPhysicalDescription] = useState('');
+  const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
+  useEffect(() => {
+    let alive = true;
+    getUdpDefs(sessionProjectId()).then((d) => { if (alive) setUdpDefs(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const [inherit, setInherit] = useState<{ domain: ParentDomain; offer: DomainUdpOffer; also: string[] } | null>(null);
   // Ref espejo de los UDP: el blur del input (commit de UdpAssign) dispara en
   // el MISMO gesto que el click en "Add" — el submit lee el ref (sincrónico)
   // para no perder ese último valor contra el batching del estado.
@@ -107,13 +121,24 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     // «Physical» el input es un físico: el nombre no aplica.
     const defaults = applyDomainDefaults({
       prevDomain: prev, nextDomain: dom,
-      current: { logicalName: mode === 'logical' ? name : '', description },
+      current: { logicalName: mode === 'logical' ? name : '', description, physicalName: mode === 'physical' ? name : undefined, physicalDescription },
     });
     if (mode === 'logical' && defaults.logicalName !== undefined) setName(defaults.logicalName);
     if (defaults.description !== undefined) setDescription(defaults.description);
+    // Doc 85: la descripción física va con la misma marca (`defaults.physicalName` se
+    // ignora en el alta: el store deriva/casea el físico — D8).
+    if (defaults.physicalDescription !== undefined) setPhysicalDescription(defaults.physicalDescription ?? '');
     setParentDomainId(id);
     setDataType(next.dataType);
     setTypeOverridden(next.typeOverridden);
+    // Doc 85 §3.6: UDP por defecto del dominio nuevo → el modelador elige (popup);
+    // lo elegido entra al buffer local y viaja en el mismo alta.
+    const offer = dom && id !== parentDomainId ? domainUdpOffer(dom, udpDefs) : null;
+    if (dom && offer && offer.total > 0) {
+      const also = [`type ${next.dataType || '—'}`];
+      if (dom.inheritsName) also.push('names + definitions (standard attribute)');
+      setInherit({ domain: dom, offer, also });
+    }
   };
   const onTypeChange = (v: string) => {
     // '' desde "(domain default)": limpia el override y repone el default.
@@ -130,6 +155,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       await onAdd(tableId, {
         logicalName: name.trim(), mode, parentDomainId: parentDomainId || undefined, dataType: dataType || undefined,
         description: description.trim() || undefined,
+        physicalDescription: physicalDescription.trim() || undefined,   // doc 85
         isPrimaryKey, isForeignKey, isNullable, isPartition,
         udpValues: udpRef.current,
       });
@@ -143,7 +169,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const setUdp = (next: Record<string, string>) => { udpRef.current = next; setUdpValues(next); };
 
   return (
-    <Modal title="New column (Attribute)" icon="columns" onClose={onClose}
+    <Modal title={viewMode === 'logical' ? 'New attribute' : 'New column'} icon="columns" onClose={onClose}
       footer={<>
         <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
         <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={submit}>Add</button>
@@ -209,6 +235,11 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
           {error}
         </div>
       )}
+      {inherit && (
+        <DomainInheritPopup domain={inherit.domain} offer={inherit.offer} also={inherit.also}
+          onConfirm={(picked: DomainUdpOfferItem[]) => { setUdp(mergeInheritedUdps(udpRef.current, picked)); setInherit(null); }}
+          onSkip={() => setInherit(null)} />
+      )}
     </Modal>
   );
 }
@@ -225,6 +256,8 @@ function Grip() {
 interface ColumnRowProps {
   col: CanonicalColumn;
   canEdit: boolean;
+  /** Doc 85: faceta activa — la celda de tipo muestra el tipo de ESA faceta (default physical). */
+  facet?: Facet;
   /** Doc 42: con el buscador de columnas activo el reorder se apaga — el drop
    *  se resuelve contra la lista COMPLETA y una lista filtrada lo corrompería.
    *  Doc 81: también se apaga en las filas PK (el bloque de llave queda fijo
@@ -251,7 +284,7 @@ interface ColumnRowProps {
  * retiró: la edición vive en ColumnPropertiesPanel. Drag por el grip para
  * reordenar (acción estructural, se queda en el panel de tabla).
  */
-export function ColumnRow({ col, canEdit, dragDisabled, dragDisabledReason, onOpen, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
+export function ColumnRow({ col, canEdit, facet, dragDisabled, dragDisabledReason, onOpen, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
   const canDrag = canEdit && !dragDisabled;
   const dndProps = {
     onDragOver: (e: React.DragEvent) => { if (canDrag) onDragOver(col.id, e); },
@@ -285,7 +318,7 @@ export function ColumnRow({ col, canEdit, dragDisabled, dragDisabledReason, onOp
       </span>
       <span className={`wk-pp-colrow-name${col.isPrimaryKey ? ' pk' : ''}`}>{col.logicalName || col.physicalName}</span>
       <span className="wk-pp-colrow-phys rd-mono">{col.physicalName}</span>
-      <span className="wk-pp-colrow-dt rd-mono">{col.dataType}</span>
+      <span className="wk-pp-colrow-dt rd-mono">{facetType(col, facet ?? 'physical')}</span>
       {col.isPrimaryKey && <span className="wk-pp-badge pk">PK</span>}
       {col.isForeignKey && <span className="wk-pp-badge fk">FK</span>}
       {col.isPartition && <span className="wk-pp-badge pt">PART</span>}

@@ -17,6 +17,11 @@ export interface ParentDomain {
   /** Doc 79: dominio "atributo estándar" (Erwin `Attribute_Definition`) — solo
    *  estos heredan su nombre y definición al atributo al asignarse. */
   inheritsName?: boolean;
+  /** Doc 85: faceta física — null/undefined = físico DERIVADO del lógico por la regla
+   *  de naming del scope column; texto = override. `physicalDescription` null = igual
+   *  a la lógica. `udpValues` = UDP por defecto de atributo/columna (ambas facetas). */
+  physicalName?: string | null; physicalDescription?: string | null;
+  udpValues?: Record<string, string> | null;
 }
 export interface CanonicalTable {
   id: string; physicalName: string; logicalName: string; schema?: string;
@@ -42,6 +47,9 @@ export interface CanonicalColumn {
   pkPosition?: number | null;
   // R1a (backend) — persistidos; deben existir en el tipo o se pierden al recargar.
   isNullable?: boolean; isPartition?: boolean; description?: string;
+  /** Doc 85: comment FÍSICO (Erwin Comment) — el DDL lo emite como COMMENT con
+   *  fallback a `description`. Debe existir acá Y en el Pydantic CanonicalColumnDoc. */
+  physicalDescription?: string | null;
   // UDP: valores de las etiquetas key-value asignadas ({udpDefId: value}).
   udpValues?: Record<string, string>;
   // Doc 69 §4.9 — faceta LÓGICA (dataType sigue siendo el físico).

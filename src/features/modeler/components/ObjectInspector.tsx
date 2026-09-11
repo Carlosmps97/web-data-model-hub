@@ -9,7 +9,7 @@ import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, TableUsageRow } from '@/services/governance.service';
 import { getSnapshot, type SnapshotDomain, type UdpDefinition } from '@/features/standards/standards.service';
 import { isAsOfChangesetId } from '@/services/versioning.service';
-import { FACET_CAPTION, facetNoun, type Facet } from '@/lib/facets';
+import { FACET_CAPTION, facetNoun, facetNouns, type Facet } from '@/lib/facets';
 import { inspectTable, inspectView, type InspectTableResult, type InspectViewResult } from '../services/inspector.service';
 import { matchesColumn } from '../lib/columnSearch';
 import { moveId, orderColumns, persistReorder, reorderPlan } from '../lib/columnOrder';
@@ -184,6 +184,11 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   const col = selCol ? (data?.columns.find((c) => c.id === selCol) ?? null) : null;
   const domainName = (id?: string | null) => (id ? (std ? (std.domains.find((d) => d.id === id)?.name ?? id) : '…') : '—');
   const noun = facetNoun('table', facet);
+  const nouns = facetNouns(facet);
+  // Doc 85 §3.7: Views solo en físico; Columns se rotula Attributes en lógico.
+  const tTabs = T_TABS.filter((t) => t.id !== 'views' || facet === 'physical')
+    .map((t) => (t.id === 'columns' ? { ...t, label: nouns.Members } : t));
+  useEffect(() => { if (tab === 'views' && facet !== 'physical') setTab('definition'); }, [tab, facet]);
 
   // ── Escritura versionada (r2): mismo camino que el sidebar + refresco ──
   const refresh = async () => { setData(await inspectTable(target.id)); };
@@ -202,7 +207,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       await gov.createTable(next);
       pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterSave(); });
       await afterSave();
-      toast.success('Table updated');
+      toast.success(`${nouns.One} updated`);
     } catch (e) { toast.error(errMsg(e, "Couldn't save")); }
     finally { setSaving(false); }
   };
@@ -284,7 +289,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                   <span className="wk-insp-chip accent">{noun}</span>
                   <span className="wk-insp-chip rd-mono">schema {table.schema || '—'}</span>
                   {facetOnly(table) && <span className="wk-insp-chip">{facetOnly(table)} only</span>}
-                  <span className="wk-insp-chip">{data.columns.length} column{data.columns.length === 1 ? '' : 's'}</span>
+                  <span className="wk-insp-chip">{data.columns.length} {data.columns.length === 1 ? nouns.member : nouns.members}</span>
                   <span className="wk-insp-chip">{data.usage.length === 0 ? 'not on any canvas' : `${data.usage.length} canvas${data.usage.length === 1 ? '' : 'es'}`}</span>
                   {canEdit && <span className="wk-insp-chip">editable</span>}
                 </div>
@@ -292,7 +297,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
               <FacetSwitch facet={facet} onChange={setFacet} />
             </div>
             <div className="wk-pp-tabs" role="tablist">
-              {T_TABS.map((t) => (
+              {tTabs.map((t) => (
                 <button key={t.id} role="tab" aria-selected={tab === t.id} className={`wk-pp-tab${tab === t.id ? ' active' : ''}`} onClick={() => setTab(t.id)}>
                   {t.label}{counts[t.id] != null && <span className="wk-pp-tab-count">{counts[t.id]}</span>}
                 </button>
@@ -315,7 +320,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                       ? <textarea className="wk-pp-textarea" placeholder="What this entity represents…" value={form.description}
                         onChange={(e) => setForm({ ...form, description: e.target.value })} onBlur={() => void saveTableDef()} disabled={saving} />
                       : (table.description || '—')}</dd>
-                    <dt>Columns</dt><dd>{data.columns.length}</dd>
+                    <dt>{nouns.Members}</dt><dd>{data.columns.length}</dd>
                     <dt>Relationships</dt><dd>{data.links.length === 0 ? '—' : `${data.links.length} link${data.links.length === 1 ? '' : 's'} · ${parents} parent${parents === 1 ? '' : 's'}, ${children} child${children === 1 ? '' : 'ren'}`}</dd>
                     <dt>Views</dt><dd>{data.views.length || '—'}</dd>
                     <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{table.id}</dd>
@@ -344,7 +349,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                   {cols.length > 0 && (
                     <div className="wk-insp-find">
                       <Search size={12} aria-hidden />
-                      <input className="rd-input" placeholder="Find a column (contains…)" value={colQ} onChange={(e) => setColQ(e.target.value)} aria-label="Find a column" />
+                      <input className="rd-input" placeholder={`Find ${nouns.aMember} (contains…)`} value={colQ} onChange={(e) => setColQ(e.target.value)} aria-label={`Find ${nouns.aMember}`} />
                     </div>
                   )}
                   {canEdit && colQ.trim() && cols.length > 0 && <p className="wk-pp-cap">Reordering is disabled while filtering.</p>}
@@ -474,6 +479,7 @@ function ColumnDetail({ col, cols, facet, std, canEdit, tableLabel, domainName, 
 }) {
   const position = positionIn(cols, col.id);
   const only = facetOnly(col);
+  const nouns = facetNouns(facet);
   const [desc, setDesc] = useState(col.description ?? '');
   const [busy, setBusy] = useState(false);
   useEffect(() => { setDesc(col.description ?? ''); }, [col.id, col.description]);
@@ -489,7 +495,7 @@ function ColumnDetail({ col, cols, facet, std, canEdit, tableLabel, domainName, 
   };
   return (
     <>
-      <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onBack}><ArrowLeft size={12} /> All columns</button>
+      <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onBack}><ArrowLeft size={12} /> All {nouns.members}</button>
       <div className="wk-insp-colhead">
         {col.isPrimaryKey && <KeyRound size={14} style={{ color: 'var(--k-pk)' }} />}
         {col.isForeignKey && <LinkIcon size={14} style={{ color: 'var(--k-fk)' }} />}
@@ -502,7 +508,7 @@ function ColumnDetail({ col, cols, facet, std, canEdit, tableLabel, domainName, 
       <dl className="wk-pp-meta">
         <dt>Logical name</dt><dd>{col.logicalName || '—'}</dd>
         <dt>Physical name</dt><dd className="rd-mono">{col.physicalName || '—'}</dd>
-        <dt>Table</dt><dd className="rd-mono">{tableLabel}</dd>
+        <dt>{nouns.One}</dt><dd className="rd-mono">{tableLabel}</dd>
         <dt>Logical type</dt><dd className="rd-mono">{col.logicalDataType || <span className="wk-insp-default">{col.dataType || '—'} (physical)</span>}</dd>
         <dt>Physical type</dt><dd className="rd-mono">{col.dataType || '—'}</dd>
         <dt>Parent Domain</dt><dd>{domainName}</dd>
@@ -521,6 +527,7 @@ function ColumnDetail({ col, cols, facet, std, canEdit, tableLabel, domainName, 
           ? <textarea className="wk-pp-textarea" placeholder="What this column holds…" value={desc} disabled={busy}
             onChange={(e) => setDesc(e.target.value)} onBlur={() => void saveDesc()} />
           : (col.description || '—')}</dd>
+        <dt>Physical comment</dt><dd>{col.physicalDescription || <span className="wk-insp-default">same as the definition</span>}</dd>
         <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{col.id}</dd>
       </dl>
       <div className="wk-props-sec">{FACET_CAPTION.column[facet]}</div>

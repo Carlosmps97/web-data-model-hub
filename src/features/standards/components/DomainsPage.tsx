@@ -8,8 +8,12 @@ import { impactWarning, visibleImpactTables, tableLabel } from '../domainImpact'
 import TypePicker from '@/features/modeler/components/TypePicker';
 import ComplexTypeBuilder from '@/features/modeler/components/ComplexTypeBuilder';
 import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
+import UdpAssign from '@/features/modeler/components/UdpAssign';
+import { physicalize } from '@/services/governance.service';
+import type { Facet } from '@/lib/facets';
 
 type Mode = 'view' | 'edit' | 'create';
+const EMPTY: SnapshotDomain = { id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '', inheritsName: false, physicalName: '', physicalDescription: '', udpValues: {} };
 
 export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }: {
   projectId: string;
@@ -35,10 +39,23 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
     const d = domains.find((x) => x.name === pendingName);
     if (d) { setSelId(d.id); setPendingName(null); }
   }, [domains, pendingName]);
-  const [form, setForm] = useState<SnapshotDomain>({ id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '', inheritsName: false });
+  const [form, setForm] = useState<SnapshotDomain>(EMPTY);
+  // Doc 85 §3.5: la página muestra UNA faceta a la vez, como Data Standards → UDP.
+  const [facet, setFacet] = useState<Facet>('logical');
+  // Físico DERIVADO del lógico por la regla del scope column (placeholder / valor cuando no hay override).
+  const [derivedPhys, setDerivedPhys] = useState('');
+  useEffect(() => {
+    const logical = form.name.trim();
+    if (!logical) { setDerivedPhys(''); return; }
+    let alive = true;
+    const t = setTimeout(() => {
+      physicalize(logical, 'column').then((r) => { if (alive) setDerivedPhys(r.physical); }).catch(() => { if (alive) setDerivedPhys(''); });
+    }, 220);
+    return () => { alive = false; clearTimeout(t); };
+  }, [form.name]);
 
   useEffect(() => {
-    setMode('view'); setConfirm(null); setImpact(null);
+    setMode('view'); setConfirm(null); setImpact(null); setFacet('logical');
     if (selected) setForm({ ...selected });
     if (selId && selId !== '__new__') getDomainImpact(projectId, selId).then(setImpact).catch(() => setImpact(null));
   }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -48,7 +65,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
     return !n ? domains : domains.filter((d) => d.name.toLowerCase().includes(n));
   }, [domains, q]);
 
-  const startCreate = () => { setSelId('__new__'); setForm({ id: '', name: '', defaultDataType: '', logicalDataType: '', namingTerm: '', description: '', inheritsName: false }); setMode('create'); setImpact(null); };
+  const startCreate = () => { setSelId('__new__'); setForm(EMPTY); setFacet('logical'); setMode('create'); setImpact(null); };
   const startEdit = () => { if (selected) { setForm({ ...selected }); setMode('edit'); } };
   const cancel = () => { setMode('view'); setConfirm(null); if (selected) setForm({ ...selected }); };
 
@@ -87,7 +104,15 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
         // Doc 80 §4: `inheritsName` viaja SIEMPRE con su booleano (nunca
         // undefined): el backend hace `exclude_none`, así que omitirlo dejaría
         // el flag como estaba y desmarcar la casilla no tendría efecto.
-        domainsUpsert: [{ id: creating ? undefined : form.id, name: form.name.trim(), defaultDataType: form.defaultDataType.trim(), logicalDataType: form.logicalDataType?.trim() || undefined, namingTerm: form.namingTerm?.trim() || undefined, description: form.description || undefined, inheritsName: !!form.inheritsName }],
+        domainsUpsert: [{
+          id: creating ? undefined : form.id, name: form.name.trim(), defaultDataType: form.defaultDataType.trim(),
+          logicalDataType: form.logicalDataType?.trim() || undefined, namingTerm: form.namingTerm?.trim() || undefined,
+          description: form.description || undefined,
+          // Doc 85: '' = volver al derivado / igual a la lógica (el backend lo lee como None); {} = sin UDP por defecto.
+          physicalName: form.physicalName?.trim() ?? '', physicalDescription: form.physicalDescription?.trim() ?? '',
+          udpValues: form.udpValues ?? {},
+          inheritsName: !!form.inheritsName,
+        }],
       });
       toast.success(`Applied · ${v.label} · ${v.impact.columns} columns re-typed`);
       if (creating) setPendingName(form.name.trim());   // seleccionarlo al recargar
@@ -124,6 +149,8 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8 }}>
               <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '2px 7px' }} title="Physical default type">{d.defaultDataType}</span>
               {d.logicalDataType && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#5B3FA0', background: '#F4EEFF', borderRadius: 6, padding: '2px 7px' }} title="Logical data type">{d.logicalDataType}</span>}
+              {/* Doc 85: físico con override (vacío = derivado del lógico). */}
+              {d.physicalName && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#9A6B00', background: '#FFF6E5', borderRadius: 6, padding: '2px 7px' }} title="Physical name override">{d.physicalName}</span>}
               {/* Doc 80 §4: se ve de un vistazo cuáles imponen nombre+definición. */}
               {d.inheritsName && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#0E8C6A', background: '#E8F7F1', border: '1px solid #C6EADC', borderRadius: 6, padding: '2px 7px' }} title="Standard attribute: its name and definition are inherited by the column">name + definition</span>}
             </div>
@@ -139,64 +166,102 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
               <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#1A2B4A' }}>{mode === 'create' ? 'New domain' : mode === 'edit' ? 'Edit domain' : form.name}</h1>
               {editable && <span style={{ fontSize: 11.5, fontWeight: 600, color: '#2E5BFF', background: '#EAF0FF', border: '1px solid #D4E0FF', borderRadius: 999, padding: '3px 10px' }}>Edit mode</span>}
             </div>
-            {!editable && form.description && <p style={{ margin: '0 0 22px', fontSize: 13, color: '#6B7689', lineHeight: 1.5 }}>{form.description}</p>}
+            {!editable && form.description && <p style={{ margin: '0 0 18px', fontSize: 13, color: '#6B7689', lineHeight: 1.5 }}>{form.description}</p>}
 
-            <label style={lbl}>Domain name</label>
-            {editable ? <input className="rd-input" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Importe" />
-              : <div style={fieldRO}>{form.name}</div>}
-
-            <label style={lbl}>Physical default type</label>
-            {/* Doc 62: catálogo cerrado con buscador (mismo TypePicker de columnas,
-                doc 41) en vez de texto libre — el texto libre sembró dominios con
-                tipos des-homologados (`Array`, `BIG INTEGER`). STRUCT/ARRAY/MAP
-                abren el builder para declarar la estructura. */}
-            {editable ? (
-              <div style={{ marginBottom: 18 }}>
-                <TypePicker value={form.defaultDataType} onChange={(v) => setForm({ ...form, defaultDataType: v })} placeholder="Data type" />
-                {isComplexTypeStart(form.defaultDataType) && (
-                  <ComplexTypeBuilder value={form.defaultDataType} onChange={(v) => setForm({ ...form, defaultDataType: v })} />
-                )}
+            {/* Doc 85 §3.5: switch de faceta (mismo rd-seg de Data Standards → UDP). */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
+              <div className="rd-seg" role="tablist" aria-label="Facet">
+                <button type="button" role="tab" aria-selected={facet === 'logical'} className={facet === 'logical' ? 'active' : ''} onClick={() => setFacet('logical')}>Logical · Attribute</button>
+                <button type="button" role="tab" aria-selected={facet === 'physical'} className={facet === 'physical' ? 'active' : ''} onClick={() => setFacet('physical')}>Physical · Column</button>
               </div>
-            ) : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.defaultDataType}</div>}
-            {editable && <div style={{ fontSize: 12, color: '#8A93A5', margin: '-10px 0 18px' }}>On apply, columns of this domain WITHOUT an override (per facet) are re-typed.</div>}
+              <span style={{ fontSize: 12, color: facet === 'logical' ? '#6D3FC4' : '#1F4FD8' }}>
+                {facet === 'logical' ? 'What the attribute inherits in the Logical model.' : 'What the column inherits in the Physical model (DDL).'}
+              </span>
+            </div>
 
-            <label style={lbl}>Logical data type</label>
-            {/* Doc 69 §4.9: Erwin trae Logical_Data_Type y Physical_Data_Type por
-                dominio («Codigo»: VARCHAR(20) lógico / VARCHAR(30) físico). */}
-            {editable ? (
-              <div style={{ marginBottom: 18 }}>
-                <TypePicker value={form.logicalDataType ?? ''} onChange={(v) => setForm({ ...form, logicalDataType: v })} placeholder="Same as physical" />
-                {isComplexTypeStart(form.logicalDataType ?? '') && (
-                  <ComplexTypeBuilder value={form.logicalDataType ?? ''} onChange={(v) => setForm({ ...form, logicalDataType: v })} />
+            {facet === 'logical' && (
+              <>
+                <label style={lbl}>Logical name</label>
+                {editable ? <input className="rd-input" style={field} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Codigo Clave" />
+                  : <div style={fieldRO}>{form.name}</div>}
+
+                <label style={lbl}>Logical data type</label>
+                {editable ? (
+                  <div style={{ marginBottom: 18 }}>
+                    <TypePicker value={form.logicalDataType ?? ''} onChange={(v) => setForm({ ...form, logicalDataType: v })} placeholder="Same as physical" />
+                    {isComplexTypeStart(form.logicalDataType ?? '') && (
+                      <ComplexTypeBuilder value={form.logicalDataType ?? ''} onChange={(v) => setForm({ ...form, logicalDataType: v })} />
+                    )}
+                  </div>
+                ) : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.logicalDataType || '—'}</div>}
+
+                <label style={lbl}>Description</label>
+                {editable ? <textarea className="rd-input" style={{ ...field, minHeight: 64, resize: 'vertical' }} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+                  : <div style={{ ...fieldRO, minHeight: 44 }}>{form.description || '—'}</div>}
+
+                <label style={lbl}>Attribute UDP defaults (Logical)</label>
+                <div style={{ padding: '12px 14px', background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, marginBottom: 18 }}>
+                  <UdpAssign key={`${selId}:logical`} level="column" view="logical" values={form.udpValues ?? {}} disabled={!editable}
+                    onChange={(next) => setForm((f) => ({ ...f, udpValues: next }))} />
+                  <div style={{ fontSize: 11.5, color: '#8A93A5', marginTop: 8 }}>Offered to the modeler when this domain is assigned to a column — they pick which to inherit.</div>
+                </div>
+              </>
+            )}
+
+            {facet === 'physical' && (
+              <>
+                <label style={lbl}>Physical name</label>
+                {/* Doc 85 D1: vacío = DERIVADO del lógico por la regla del scope column; texto = override. */}
+                {editable ? (
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
+                    <input className="rd-input" style={{ ...field, marginBottom: 0, fontFamily: 'var(--mono, monospace)' }} value={form.physicalName ?? ''}
+                      onChange={(e) => setForm({ ...form, physicalName: e.target.value })} placeholder={derivedPhys ? `Derived: ${derivedPhys}` : 'Derived from the logical name'} />
+                    <button type="button" title="Derive from the logical name (naming rule)" onClick={() => setForm({ ...form, physicalName: '' })}
+                      style={{ ...btnGhost, height: 44, padding: '0 12px' }}>⚡</button>
+                  </div>
+                ) : (
+                  <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600, gap: 8 }}>
+                    {form.physicalName || derivedPhys || '—'}
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: form.physicalName ? '#9A6B00' : '#0E8C6A' }}>{form.physicalName ? 'override' : 'derived'}</span>
+                  </div>
                 )}
-              </div>
-            ) : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.logicalDataType || '—'}</div>}
 
-            <label style={lbl}>Suggested attribute name</label>
-            {/* Doc 69 §4.7: al asignar el dominio, la columna toma este nombre
-                lógico (default: el nombre del dominio, como Erwin). */}
-            {editable ? <input className="rd-input" style={field} value={form.namingTerm ?? ''} onChange={(e) => setForm({ ...form, namingTerm: e.target.value })} placeholder={`Defaults to the domain name${form.name ? ` (${form.name})` : ''}`} />
-              : <div style={fieldRO}>{form.namingTerm || form.name}</div>}
+                <label style={lbl}>Physical data type</label>
+                {editable ? (
+                  <div style={{ marginBottom: 18 }}>
+                    <TypePicker value={form.defaultDataType} onChange={(v) => setForm({ ...form, defaultDataType: v })} placeholder="Data type" />
+                    {isComplexTypeStart(form.defaultDataType) && (
+                      <ComplexTypeBuilder value={form.defaultDataType} onChange={(v) => setForm({ ...form, defaultDataType: v })} />
+                    )}
+                  </div>
+                ) : <div style={{ ...fieldRO, fontFamily: 'var(--mono, monospace)', fontWeight: 600 }}>{form.defaultDataType}</div>}
+                {editable && <div style={{ fontSize: 12, color: '#8A93A5', margin: '-10px 0 18px' }}>On apply, columns of this domain WITHOUT an override (per facet) are re-typed.</div>}
 
-            <label style={lbl}>Description</label>
-            {editable ? <textarea className="rd-input" style={{ ...field, minHeight: 64, resize: 'vertical' }} value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} />
-              : <div style={{ ...fieldRO, minHeight: 44 }}>{form.description || '—'}</div>}
+                <label style={lbl}>Physical description</label>
+                {editable ? <textarea className="rd-input" style={{ ...field, minHeight: 64, resize: 'vertical' }} value={form.physicalDescription ?? ''}
+                  onChange={(e) => setForm({ ...form, physicalDescription: e.target.value })} placeholder={form.description ? `Same as logical: ${form.description}` : 'Same as the logical description'} />
+                  : <div style={{ ...fieldRO, minHeight: 44, color: form.physicalDescription ? '#1A2B4A' : '#8A93A5' }}>{form.physicalDescription || (form.description ? `Same as logical: ${form.description}` : '—')}</div>}
 
-            {/* Doc 79/80: el interruptor que separa un «atributo estándar»
-                (FecRutina, CodMes, TipIngresoLKDE… — 13 en el DDV) de un dominio
-                genérico de tipo (Codigo, Fecha, Monto). Sólo el estándar impone
-                su nombre lógico y su definición a la columna que lo adopta; el
-                genérico aporta el tipo y nada más. */}
-            <label style={lbl}>Inheritance to the column</label>
+                <label style={lbl}>Column UDP defaults (Physical)</label>
+                <div style={{ padding: '12px 14px', background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, marginBottom: 18 }}>
+                  <UdpAssign key={`${selId}:physical`} level="column" view="physical" values={form.udpValues ?? {}} disabled={!editable}
+                    onChange={(next) => setForm((f) => ({ ...f, udpValues: next }))} />
+                  <div style={{ fontSize: 11.5, color: '#8A93A5', marginTop: 8 }}>Offered to the modeler when this domain is assigned to a column — they pick which to inherit.</div>
+                </div>
+              </>
+            )}
+
+            {/* ── Both models ── */}
+            <div style={{ ...lbl, marginTop: 6 }}>Both models</div>
             <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', padding: '13px 15px', background: form.inheritsName ? '#F2FBF7' : '#fff', border: `1px solid ${form.inheritsName ? '#C6EADC' : '#E2E6EE'}`, borderRadius: 10, marginBottom: 18 }}>
               <input type="checkbox" id="dom-inherits-name" style={{ marginTop: 2, width: 15, height: 15, cursor: editable ? 'pointer' : 'default' }}
                 checked={!!form.inheritsName} disabled={!editable}
                 onChange={(e) => setForm({ ...form, inheritsName: e.target.checked })} />
               <label htmlFor="dom-inherits-name" style={{ flex: 1, cursor: editable ? 'pointer' : 'default' }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>Standard attribute — pushes its name and definition</div>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>Standard attribute — pushes its names and descriptions</div>
                 <div style={{ fontSize: 12.5, color: '#6B7689', lineHeight: 1.5, marginTop: 3 }}>
-                  On assigning this domain, the column takes its <strong>logical name</strong> and its <strong>description</strong> as the functional definition.
-                  Off (the default) the domain only sets the <strong>data type</strong> — the column keeps its own name and definition.
+                  On assigning this domain, the column takes its <strong>logical and physical names</strong> and its <strong>logical and physical descriptions</strong>.
+                  Off (the default) the domain only sets the <strong>data types</strong> and offers its <strong>UDP defaults</strong> — the column keeps its own names and descriptions.
                 </div>
               </label>
             </div>

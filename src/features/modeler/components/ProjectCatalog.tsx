@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { facetNouns } from '@/lib/facets';
 import { ChevronDown, ChevronRight, Crosshair, Database, EllipsisVertical, Eye, Table2 } from 'lucide-react';
 import {
   explorerColumns, explorerViewColumns, mapViewCols, projectInventory,
@@ -38,6 +39,8 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
 }) {
   const tree = useModelerStore((s) => s.trees[project.id]);
   const activeSaId = useModelerStore((s) => s.activeSaId);
+  const viewMode = useModelerStore((s) => s.viewMode);
+  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const openCanvasAndFocus = useModelerStore((s) => s.openCanvasAndFocus);
   const openInspector = useModelerStore((s) => s.openInspector);
   const focusTable = useModelerStore((s) => s.focusTable);
@@ -212,7 +215,7 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   const columnRows = (t: DbxTable, depth: number) => {
     if (colBusy.has(t.id)) return <EmptyLine depth={depth}>Loading…</EmptyLine>;
     const list = cols[t.id] ?? [];
-    if (!list.length) return <EmptyLine depth={depth}>No columns.</EmptyLine>;
+    if (!list.length) return <EmptyLine depth={depth}>No {n.members}.</EmptyLine>;
     return list.map((c) => (
       <ColumnLine key={`${t.id}:${c.id ?? c.physicalName}`} col={c} depth={depth}
         onClick={(e) => goTable(e, t, c.id, c.physicalName)} onMenu={(e) => openMenu(e, tableMenu(t, c))} />
@@ -283,10 +286,10 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
 
   return (
     <>
-      {branchRow('tables', <Table2 size={14} />, 'Tables', tables?.length)}
+      {branchRow('tables', <Table2 size={14} />, n.Many, tables?.length)}
       {body('tables', () => (
-        tableIds.length === 0 ? empty('No tables on the canvases of this project yet.')
-          : tableGroups.length === 0 ? empty(filtering ? 'No tables match the filter.' : 'No tables.')
+        tableIds.length === 0 ? empty(`No ${n.many} on the canvases of this project yet.`)
+          : tableGroups.length === 0 ? empty(filtering ? `No ${n.many} match the filter.` : `No ${n.many}.`)
             : tableGroups.map((g) => schemaNode('tables', g.schema, g.items.length, () => g.items.map((t) => tableRow(t, 3))))
       ))}
       {branchRow('views', <Eye size={14} style={{ color: 'var(--purple)' }} />, 'Views', views?.length)}

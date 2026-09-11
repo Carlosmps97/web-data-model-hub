@@ -37,6 +37,9 @@ describe('reportRows', () => {
       PK: 'Y', 'PK position': 0, FK: '', Nullable: 'N', 'Type overridden': 'Y', 'Logical type overridden': '',
       'UDP · Particion': 'No Definido', Definition: 'Identificador', 'Column ID': 'c1', 'Table ID': 't1',
     });
+    // Doc 85: comment físico al lado de la definición (vacío si no hay)
+    expect(columnSheetRow({ ...C, physicalDescription: 'Comentario fisico' }, T, [])['Physical comment']).toBe('Comentario fisico');
+    expect(row['Physical comment']).toBe('');
     // sin tabla resuelta cae al id; opcionales ausentes → vacío
     const bare = columnSheetRow({ ...C, id: undefined, pkPosition: null }, undefined, []);
     expect(bare.Table).toBe('t1');

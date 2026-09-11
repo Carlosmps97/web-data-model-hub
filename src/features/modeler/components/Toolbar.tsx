@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { facetNouns } from '@/lib/facets';
 import { createPortal } from 'react-dom';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine,
@@ -61,6 +62,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Doc 53: la herramienta Subcategory SOLO vive en modelo lógico — en físico
   // el botón se deshabilita y el store la desarma al cambiar de modo.
   const viewMode = useModelerStore((s) => s.viewMode);
+  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const subcatArmed = useModelerStore((s) => s.subcatArmed);
   const setSubcatArmed = useModelerStore((s) => s.setSubcatArmed);
   const autoOrganize = useModelerStore((s) => s.autoOrganize);
@@ -211,7 +213,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {/* STRUCTURE */}
       <div className="wk-grp">
         <div className="wk-grp-row">
-          {ic('New table', <Table2 size={17} />, () => setModal('table'), { disabled: !canEdit, lockTip: true })}
+          {ic(`New ${n.one}`, <Table2 size={17} />, () => setModal('table'), { disabled: !canEdit, lockTip: true })}
           {ic('CTAS — create from existing', <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit, lockTip: true })}
           {ic('Create view', <Eye size={17} />, () => setModal('view'), { disabled: !canEdit, lockTip: true })}
           {ic('Schemas — create & manage', <FolderCog size={17} />, () => setModal('schema'), { disabled: !canEdit, lockTip: true })}

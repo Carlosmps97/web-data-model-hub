@@ -58,4 +58,25 @@ describe('applyDomainDefaults · dominio → nombre + definición SOLO si es atr
     expect(applyDomainDefaults({ prevDomain: CODMES, nextDomain: FEC, current: { logicalName: 'FecRutina', description: 'Fecha de la rutina.' } }))
       .toEqual({});
   });
+
+  // — Doc 85: las dos facetas —
+  const FEC85 = { id: 'd-fec', name: 'FecRutina', description: 'Fecha de la rutina.', inheritsName: true, physicalName: 'FecRutina', physicalDescription: 'Fecha rutina (fisico).' };
+  it('doc 85: dominio estándar con físico propio y descripción física los hereda', () => {
+    expect(applyDomainDefaults({ prevDomain: undefined, nextDomain: FEC85, current: { logicalName: '', description: '' } }))
+      .toEqual({ logicalName: 'FecRutina', physicalName: 'FecRutina', description: 'Fecha de la rutina.', physicalDescription: 'Fecha rutina (fisico).' });
+  });
+  it('doc 85: sin físico propio NO emite physicalName (el caller deriva) y sin descripción física LIMPIA la anterior', () => {
+    expect(applyDomainDefaults({ prevDomain: FEC85, nextDomain: CODMES, current: { logicalName: 'FecRutina', description: 'x', physicalName: 'FecRutina', physicalDescription: 'Fecha rutina (fisico).' } }))
+      .toEqual({ logicalName: 'CodMes', description: 'Codigo del mes.', physicalDescription: null });
+  });
+  it('doc 85: no repite el físico si ya coincide ni limpia lo que ya está vacío', () => {
+    expect(applyDomainDefaults({ prevDomain: CODMES, nextDomain: FEC85, current: { logicalName: 'FecRutina', description: 'Fecha de la rutina.', physicalName: 'FecRutina', physicalDescription: 'Fecha rutina (fisico).' } }))
+      .toEqual({});
+    expect(applyDomainDefaults({ prevDomain: FEC85, nextDomain: CODMES, current: { logicalName: 'CodMes', description: 'Codigo del mes.' } }))
+      .toEqual({});
+  });
+  it('doc 85: dominio GENÉRICO con físico y descripción física no toca nada (la marca gobierna nombres y descripciones)', () => {
+    expect(applyDomainDefaults({ prevDomain: undefined, nextDomain: { ...GEN, physicalName: 'COD', physicalDescription: 'x' }, current: { logicalName: 'Codigo Moneda', description: 'Codigo de la Moneda' } }))
+      .toEqual({});
+  });
 });

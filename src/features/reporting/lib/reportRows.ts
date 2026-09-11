@@ -66,6 +66,7 @@ export function columnSheetRow(c: ReportColumnRow, table: ReportTableRow | undef
     'Physical only': yn(c.physicalOnly),
     ...udpCells(c.udpValues, udpKeys),
     Definition: str(c.description),
+    'Physical comment': str(c.physicalDescription),   // doc 85
     'Column ID': str(c.id),
     'Table ID': c.tableId,
   };

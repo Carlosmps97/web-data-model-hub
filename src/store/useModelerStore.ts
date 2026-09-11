@@ -52,6 +52,8 @@ export interface AddColumnInput {
   parentDomainId?: string;
   dataType?: string;
   description?: string;
+  /** Doc 85: comment físico heredado del dominio estándar (se edita luego en Properties). */
+  physicalDescription?: string;
   isPrimaryKey?: boolean;
   isForeignKey?: boolean;
   isNullable?: boolean;
@@ -923,6 +925,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // description/udpValues solo con contenido. Una PK nueva entra AL FINAL de
     // la llave si la tabla maneja orden explícito (doc 19 §12b, como patchCol).
     const description = (input.description ?? '').trim();
+    const physicalDescription = (input.physicalDescription ?? '').trim();
     const pkPosition = input.isPrimaryKey ? nextPkPosition(siblings) : null;
     await gov.createColumn({
       id, tableId, logicalName: input.logicalName, physicalName: physical,
@@ -935,6 +938,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       ...(logicalType ? { logicalDataType: logicalType, logicalTypeOverridden: false } : {}),
       ordinal,
       ...(description ? { description } : {}),
+      ...(physicalDescription ? { physicalDescription } : {}),   // doc 85
       ...(input.isPrimaryKey ? { isPrimaryKey: true } : {}),
       ...(input.isForeignKey ? { isForeignKey: true } : {}),
       ...(input.isNullable === false ? { isNullable: false } : {}),

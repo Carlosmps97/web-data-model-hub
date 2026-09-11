@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countFacetUdpValues, facetNoun, facetUdpDefs, normalizeUdpView, UDP_CLASS_SEGMENTS, udpDisplayName } from './facets';
+import { countFacetUdpValues, facetNoun, facetNouns, facetUdpDefs, normalizeUdpView, UDP_CLASS_SEGMENTS, udpDisplayName } from './facets';
 
 const DEFS = [
   { id: 'p', name: 'Clasificacion del Dato', level: 'column' as const },
@@ -33,5 +33,9 @@ describe('facets (doc 69)', () => {
       .toEqual(['entity', 'table', 'attribute', 'column']);
     expect(UDP_CLASS_SEGMENTS.map((s) => s.label)).toEqual(['Entity (Logical)', 'Table (Physical)', 'Attribute (Logical)', 'Column (Physical)', 'View', 'Model']);
     expect(UDP_CLASS_SEGMENTS.filter((s) => s.level === 'view' || s.level === 'canvas').every((s) => s.view === 'physical')).toBe(true);
+  });
+  it('facetNouns (doc 85): Entity/Attribute en lógico, Table/Column en físico', () => {
+    expect(facetNouns('logical')).toEqual({ one: 'entity', many: 'entities', One: 'Entity', Many: 'Entities', a: 'an entity', member: 'attribute', members: 'attributes', Member: 'Attribute', Members: 'Attributes', aMember: 'an attribute' });
+    expect(facetNouns('physical')).toEqual({ one: 'table', many: 'tables', One: 'Table', Many: 'Tables', a: 'a table', member: 'column', members: 'columns', Member: 'Column', Members: 'Columns', aMember: 'a column' });
   });
 });

@@ -43,6 +43,8 @@ export interface ReportColumnRow {
   dataType: string;
   /** Doc 69: faceta lógica del tipo (null = no informado). */
   logicalDataType?: string | null;
+  /** Doc 85: comment físico (Erwin Comment). */
+  physicalDescription?: string | null;
   parentDomain?: string;
   parentDomainId?: string | null;
   isPrimaryKey: boolean;

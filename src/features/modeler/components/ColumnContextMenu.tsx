@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { facetNouns } from '@/lib/facets';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 
@@ -23,6 +24,8 @@ export const copiedTableMessage = (name: string) =>
  */
 export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const menu = useModelerStore((s) => s.colMenu);
+  const viewMode = useModelerStore((s) => s.viewMode);
+  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const closeColMenu = useModelerStore((s) => s.closeColMenu);
   const selCount = useModelerStore((s) => s.colSel?.ids.length ?? 0);
   const clipCount = useModelerStore((s) => s.colClipboard?.cols.length ?? 0);
@@ -98,7 +101,7 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
     <div ref={ref} className="wk-ctxmenu" style={{ left: x, top: y }} role="menu">
       {showCopyCols && (
         <button type="button" role="menuitem" onClick={doCopy}>
-          {selCount > 1 ? `Copy ${selCount} columns` : 'Copy column'}
+          {selCount > 1 ? `Copy ${selCount} ${n.members}` : `Copy ${n.member}`}
         </button>
       )}
       {showCopyTable && (

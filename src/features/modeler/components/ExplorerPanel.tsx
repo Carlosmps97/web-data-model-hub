@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { facetNouns } from '@/lib/facets';
 import { Database, FolderOpen, Search, X } from 'lucide-react';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -27,6 +28,8 @@ export default function ExplorerPanel({ pushToast, onOpenModel }: {
 }) {
   const [filter, setFilter] = useState('');
   const setSearchOpen = useModelerStore((s) => s.setSearchOpen);
+  const viewMode = useModelerStore((s) => s.viewMode);
+  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
   const openMode = useSessionStore((s) => s.openMode);
   const projectName = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name ?? null);
   const deletionPending = useModelerStore((s) => s.projectDeletionPending);
@@ -56,7 +59,7 @@ export default function ExplorerPanel({ pushToast, onOpenModel }: {
       )}
       <div className="wk-exp-filter">
         <Search size={12} aria-hidden />
-        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter models, tables, views…"
+        <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={`Filter models, ${n.many}, views…`}
           aria-label="Filter the explorer" onKeyDown={(e) => { if (e.key === 'Escape') setFilter(''); }} />
         {filter && <button type="button" title="Clear filter" onClick={() => setFilter('')}><X size={11} /></button>}
       </div>
