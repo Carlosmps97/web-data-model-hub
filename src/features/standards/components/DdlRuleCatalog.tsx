@@ -106,6 +106,10 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
       return `Column layout: partition columns ${(lay.partitionColumns ?? 'keep') === 'last' ? 'last' : 'in physical order'}`
         + (order ? ` · ordered by UDP "${order}"` : '');
     }
+    if (a.types) {
+      const map = Object.entries(a.types as Record<string, string>).map(([k, v]) => `${k} → ${v}`).join(', ');
+      return `Data types: ${map}`;
+    }
     const emit = a.emit as Record<string, unknown> | undefined;
     if (emit) return `+ ${emit.type === 'view' ? 'view' : 'tbl'} "${emit.schema}.${emit.name}"`;
     return '—';

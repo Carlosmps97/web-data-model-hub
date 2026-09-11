@@ -167,7 +167,8 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
   const actionKind: RuleActionKind | 'emit' =
     draft.kind === 'generator' ? 'emit'
       : action.tags ? 'tags' : action.tblproperties ? 'tblproperties' : action.layout ? 'layout'
-        : action.exclude === true ? 'exclude' : action.statements ? 'statements' : 'expression';
+        : action.types ? 'types'
+          : action.exclude === true ? 'exclude' : action.statements ? 'statements' : 'expression';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
@@ -519,12 +520,13 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
 
 // ── sub-editores de action ─────────────────────────────────────────────────
 
-/** Acciones de una regla (doc 30 §6.6 · doc 76): por COLUMNA — expression,
- *  exclude (quita la proyección), tags; por TABLA — tags, TBLPROPERTIES,
- *  statements (sentencias libres before/after) y column layout. */
-type RuleActionKind = 'expression' | 'exclude' | 'tags' | 'tblproperties' | 'statements' | 'layout';
+/** Acciones de una regla (doc 30 §6.6 · doc 76 · doc 90): por COLUMNA — expression,
+ *  exclude (quita la proyección), tags y data types (renombra el tipo base al
+ *  exportar, CHAR → VARCHAR); por TABLA — tags, TBLPROPERTIES, statements
+ *  (sentencias libres before/after) y column layout. */
+type RuleActionKind = 'expression' | 'exclude' | 'tags' | 'types' | 'tblproperties' | 'statements' | 'layout';
 
-const COLUMN_ACTIONS: [RuleActionKind, string][] = [['expression', 'Expression'], ['exclude', 'Exclude column'], ['tags', 'Tags']];
+const COLUMN_ACTIONS: [RuleActionKind, string][] = [['expression', 'Expression'], ['exclude', 'Exclude column'], ['tags', 'Tags'], ['types', 'Data types']];
 const TABLE_ACTIONS: [RuleActionKind, string][] = [['tags', 'Tags'], ['tblproperties', 'Properties'], ['statements', 'Statements'], ['layout', 'Column layout']];
 
 function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: {
@@ -539,9 +541,9 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
   const [kind, setKind] = useState<RuleActionKind>(actionKind === 'emit' ? 'expression' : actionKind);
   const layout = (action.layout as { partitionColumns?: string; partitionOrderUdp?: string } | undefined) ?? {};
   const statements = (action.statements as { before?: string[]; after?: string[] } | undefined) ?? {};
-  const pairs = (k: 'tags' | 'tblproperties') =>
+  const pairs = (k: 'tags' | 'tblproperties' | 'types') =>
     Object.entries((action[k] as Record<string, string>) ?? {});
-  const setPairs = (k: 'tags' | 'tblproperties', entries: [string, string][]) =>
+  const setPairs = (k: 'tags' | 'tblproperties' | 'types', entries: [string, string][]) =>
     onChange({ [k]: Object.fromEntries(entries.filter(([a]) => a.trim())) });
   // UDP de columna (faceta física) para «Order partitions by UDP».
   const columnUdps = udpDefs.filter((d) => d.level === 'column' && d.view !== 'logical').map((d) => d.name);
@@ -562,6 +564,7 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
             onChange(k === 'expression' ? { expression: (action.expression as string) ?? '', alias: (action.alias as string) ?? '{columna.nombre}' }
               : k === 'exclude' ? { exclude: true }
                 : k === 'tags' ? { tags: (action.tags as object) ?? {} }
+                  : k === 'types' ? { types: (action.types as object) ?? { CHAR: 'VARCHAR' } }
                   : k === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last', partitionOrderUdp: 'Particion' } }
                     : k === 'statements' ? { statements: (action.statements as object) ?? { before: ['-- DROP TABLE IF EXISTS {artefacto.ref};'] } }
                       : { tblproperties: (action.tblproperties as object) ?? {} });
@@ -636,10 +639,10 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
         <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16 }}>
           {pairs(kind).map(([k, v], i) => (
             <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <input value={k} disabled={!canEdit} placeholder="key"
+              <input value={k} disabled={!canEdit} placeholder={kind === 'types' ? 'from type · CHAR' : 'key'}
                 onChange={(e) => { const es = pairs(kind); es[i] = [e.target.value, v]; setPairs(kind, es); }}
                 style={{ ...inp, height: 32, fontSize: 12, fontFamily: 'var(--mono, monospace)', flex: 1 }} />
-              <input value={v} disabled={!canEdit} placeholder="{udp:…} · {lookup:…} · text"
+              <input value={v} disabled={!canEdit} placeholder={kind === 'types' ? 'to type · VARCHAR' : '{udp:…} · {lookup:…} · text'}
                 onChange={(e) => { const es = pairs(kind); es[i] = [k, e.target.value]; setPairs(kind, es); }}
                 style={{ ...inp, height: 32, fontSize: 12, fontFamily: 'var(--mono, monospace)', flex: 1.4 }} />
               {canEdit && <button onClick={() => setPairs(kind, pairs(kind).filter((_, j) => j !== i))}
@@ -656,6 +659,15 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
             <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
               Tags are emitted as <span style={{ fontFamily: 'var(--mono, monospace)' }}>ALTER TABLE|VIEW … SET TAGS</span> — one
               statement per rule on tables and views; column rules emit one statement per matching column.
+            </div>
+          )}
+          {kind === 'types' && (
+            <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
+              Base type → base type, case-insensitive (<span style={{ fontFamily: 'var(--mono, monospace)' }}>CHAR → VARCHAR</span>).
+              Each matching column keeps its own length/precision when the target type takes arguments
+              (<span style={{ fontFamily: 'var(--mono, monospace)' }}>CHAR(10) → VARCHAR(10)</span>); otherwise they are dropped
+              (<span style={{ fontFamily: 'var(--mono, monospace)' }}>CHAR(10) → STRING</span>). Applies to the table artifacts you
+              target — the physical CREATE and generated tables; views declare no types. Comments and column names are never touched.
             </div>
           )}
         </div>
