@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { sanitizeLogicalName } from '@/lib/logicalName';
 import { toast } from 'sonner';
 import { ArrowLeft, Crosshair, Eye, KeyRound, Link as LinkIcon, MapPin, Search, Table2, Trash2 } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
@@ -123,10 +124,8 @@ const muted = (text: ReactNode) => <div className="rd-small" style={{ color: 'va
 function viewPre(v: View): View {
   const copy: View & { canvases?: unknown } = {
     ...v,
-    tags: v.tags ? [...v.tags] : undefined,
     sources: v.sources?.map((s) => ({ ...s })),
     sourceTableIds: v.sourceTableIds ? [...v.sourceTableIds] : undefined,
-    customColumns: v.customColumns?.map((c) => ({ ...c })),
     udpValues: v.udpValues ? { ...v.udpValues } : undefined,
   };
   delete copy.canvases;
@@ -520,7 +519,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                   </p>
                   <div className="wk-insp-ro">{CANVAS_ONLY_HINT}</div>
                   <div className="wk-props-field"><label>Logical name</label>
-                    <input className="rd-input" disabled={saving || ro('logicalName')} title={ro('logicalName') ? INSPECTOR_SWITCH_HINT[facet] : undefined} value={form.logicalName} onChange={(e) => setForm({ ...form, logicalName: e.target.value })} />
+                    <input className="rd-input" disabled={saving || ro('logicalName')} title={ro('logicalName') ? INSPECTOR_SWITCH_HINT[facet] : undefined} value={form.logicalName} onChange={(e) => setForm({ ...form, logicalName: sanitizeLogicalName(e.target.value) })} />
                   </div>
                   <div className="wk-props-field"><label>Physical name</label>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -914,7 +913,8 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     const c = primaryCanvas(data.usage, activeSaId);
     if (c) goCanvas(c); else setTab('usage');
   };
-  const nCols = view ? (custom ? (view.customColumns ?? []).length : (view.sources ?? []).length) : 0;
+  // Doc 91 D7: en ambos modos las columnas son `sources`.
+  const nCols = view ? (view.sources ?? []).length : 0;
   const counts: Partial<Record<VTab, number>> = data ? { columns: nCols, usage: data.usage.length } : {};
 
   return (
@@ -933,7 +933,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                 <div className="wk-insp-chips">
                   <span className="wk-insp-chip accent">view</span>
                   <span className="wk-insp-chip rd-mono">schema {view.schema || '—'}</span>
-                  <span className="wk-insp-chip">{custom ? 'Custom SQL' : 'Regular (generated from sources)'}</span>
+                  <span className="wk-insp-chip">{custom ? 'User-Defined SQL' : 'Regular (generated from sources)'}</span>
                   <span className="wk-insp-chip">{data.sources.length} source{data.sources.length === 1 ? '' : 's'}</span>
                   <span className="wk-insp-chip">{data.usage.length === 0 ? 'not on any canvas' : `${data.usage.length} canvas${data.usage.length === 1 ? '' : 'es'}`}</span>
                   {canEdit && <span className="wk-insp-chip">editable</span>}
@@ -964,10 +964,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                           onChange={(e) => setForm({ ...form, description: e.target.value })} onBlur={() => void saveDescriptionOnBlur()} />
                       </div>
                       <dl className="wk-pp-meta">
-                        <dt>Mode</dt><dd>{custom ? 'Personalizada (custom SQL governs the view)' : 'Regular (generated from sources, join and filter)'}</dd>
-                        <dt>Join</dt><dd className="rd-mono">{view.joinOverride?.trim() || <span className="wk-insp-default">inferred from relationships</span>}</dd>
-                        <dt>Filter</dt><dd className="rd-mono">{view.filter?.trim() || '—'}</dd>
-                        <dt>Tags</dt><dd>{view.tags?.length ? view.tags.map((t) => `${t.key}${t.value ? `=${t.value}` : ''}`).join(' · ') : '—'}</dd>
+                        <dt>Mode</dt><dd>{custom ? 'Personalizada (User-Defined SQL governs the view)' : 'Regular (generated from sources)'}</dd>
                         <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{view.id}</dd>
                       </dl>
                       <button className="rd-btn rd-btn-primary rd-btn-sm" style={{ width: '100%', marginTop: 4 }} disabled={saving} onClick={() => void saveDef()}>
@@ -983,11 +980,8 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                     <dl className="wk-pp-meta">
                       <dt>Name</dt><dd className="rd-mono">{view.name}</dd>
                       <dt>Schema</dt><dd className="rd-mono">{view.schema || '—'}</dd>
-                      <dt>Mode</dt><dd>{custom ? 'Personalizada (custom SQL governs the view)' : 'Regular (generated from sources, join and filter)'}</dd>
+                      <dt>Mode</dt><dd>{custom ? 'Personalizada (User-Defined SQL governs the view)' : 'Regular (generated from sources)'}</dd>
                       <dt>Definition</dt><dd>{view.description || '—'}</dd>
-                      <dt>Join</dt><dd className="rd-mono">{view.joinOverride?.trim() || <span className="wk-insp-default">inferred from relationships</span>}</dd>
-                      <dt>Filter</dt><dd className="rd-mono">{view.filter?.trim() || '—'}</dd>
-                      <dt>Tags</dt><dd>{view.tags?.length ? view.tags.map((t) => `${t.key}${t.value ? `=${t.value}` : ''}`).join(' · ') : '—'}</dd>
                       <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{view.id}</dd>
                     </dl>
                   )}
@@ -1010,20 +1004,10 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                 nCols === 0 ? muted('No output columns.') : (
                   <table className="wk-insp-grid">
                     <thead>
-                      {custom
-                        ? <tr><th>#</th><th>Output</th><th>Expression</th></tr>
-                        : <tr><th>#</th><th>Output</th><th>Source</th><th>Type</th><th>Expression</th><th>Definition</th></tr>}
+                      <tr><th>#</th><th>Output</th><th>Source</th><th>Type</th><th>Expression</th><th>Definition</th></tr>
                     </thead>
                     <tbody>
-                      {custom
-                        ? (view.customColumns ?? []).map((c, i) => (
-                          <tr key={`${c.name}:${i}`} style={{ cursor: 'default' }}>
-                            <td className="n">{i + 1}</td>
-                            <td className="rd-mono">{c.name}</td>
-                            <td className="rd-mono def" title={c.expression ?? undefined}>{c.expression || '—'}</td>
-                          </tr>
-                        ))
-                        : (view.sources ?? []).map((s, i) => (
+                      {(view.sources ?? []).map((s, i) => (
                           <tr key={`${s.tableId ?? s.table ?? ''}:${s.column ?? ''}:${i}`} style={{ cursor: 'default' }}>
                             <td className="n">{i + 1}</td>
                             <td className="rd-mono">{s.outputAlias || s.column || '—'}</td>
@@ -1040,7 +1024,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
 
               {tab === 'sql' && (
                 <>
-                  <p className="wk-pp-cap" style={{ marginTop: 0 }}>{custom ? 'Custom SQL script — the body of the CREATE VIEW.' : 'Stored DDL preview (generated from sources; regenerate it from the View Editor).'}</p>
+                  <p className="wk-pp-cap" style={{ marginTop: 0 }}>{custom ? 'User-Defined SQL — emitted verbatim in the DDL export (never validated).' : 'Stored DDL preview (generated from sources; regenerate it from the View Editor).'}</p>
                   <pre className="wk-insp-sql">{view.customSql?.trim() || view.sql?.trim() || 'No SQL stored for this view yet.'}</pre>
                 </>
               )}

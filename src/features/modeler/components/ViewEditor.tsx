@@ -2,17 +2,16 @@ import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointer
 import { sessionProjectId } from '@/store/useSessionStore';
 import { Check, ChevronDown, ChevronUp, Eye, Lock, Plus, Search, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
-import TagEditor from '@/components/ui/TagEditor';
-import type { Tag } from '@/types/model';
 import { COLUMN_DATA_TYPES } from '@/types/model';
 import { useModelerStore } from '@/store/useModelerStore';
 import * as viewsSvc from '@/services/views.service';
-import type { View, ViewSqlError, ViewSqlParse } from '@/services/views.service';
-import { DEFAULT_DATABRICKS_OPTS, inferJoin, viewDDL, type DdlView } from '@/features/ddl';
+import type { View } from '@/services/views.service';
+import { DEFAULT_DATABRICKS_OPTS, viewDDL, type DdlView } from '@/features/ddl';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
-import { colKey, splitColKey, serializeSources, resolveJoinOverride, inferNameJoin, type ColCfg } from '../lib/viewEditorLogic';
-import { extractDdlBody, syncViewTypeUdp } from '../lib/viewPanelLogic';
+import { colKey, splitColKey, serializeSources, allSourceColumns, type ColCfg } from '../lib/viewEditorLogic';
+import { syncViewTypeUdp } from '../lib/viewPanelLogic';
 import SchemaSelect from './SchemaSelect';
+import SearchSelect from './SearchSelect';
 import SchemaManagerModal from './SchemaManagerModal';
 import { viewSchemaOnCreate } from '../lib/schemaPick';
 
@@ -25,14 +24,16 @@ const link: React.CSSProperties = { border: 'none', background: 'transparent', c
 const updn = (dis: boolean): React.CSSProperties => ({ height: 13, border: 'none', background: 'transparent', cursor: dis ? 'default' : 'pointer', color: dis ? '#D6DCE6' : '#8A93A5', padding: 0, lineHeight: 0 });
 
 /**
- * ViewEditor multi-fuente (F3, spec §3-5). Una vista nace de 1..N tablas del
- * canvas: chips de fuentes (buscador sobre las tablas del canvas), grilla de
- * columnas AGRUPADA por tabla origen (incluir, alias de salida, expresión SQL,
- * castType con combobox de tipos + libre), switch "Show on this canvas" al
- * crear (doc 70: membresía del canvas actual — NO afecta el export DDL) y
- * sección JOIN (con 2+ fuentes) precargada
- * con la condición inferida de las relaciones del modelo (D2), editable →
- * joinOverride. Sin relación ni condición manual, el guardado se bloquea.
+ * ViewEditor multi-fuente (F3, spec §3-5; doc 91). Una vista nace de 1..N
+ * tablas del canvas: combobox de fuentes con filtro «contiene» (doc 91 D4) y
+ * lista vertical de las elegidas (nombres largos envuelven, nunca se cortan),
+ * grilla de columnas AGRUPADA por tabla origen (incluir, alias de salida,
+ * expresión SQL, castType con combobox de tipos + libre), switch "Show on this
+ * canvas" al crear (doc 70: membresía del canvas actual — NO afecta el export
+ * DDL). Con 2+ fuentes el DDL las lista `FROM t1, t2` sin JOIN (doc 91 D5,
+ * como Erwin); un join o un WHERE se escriben en el modo «User-Defined SQL»
+ * (doc 91 D6): la sentencia completa, guardada VERBATIM y sin validación —
+ * en ese modo el canvas lista todas las columnas de las fuentes (D7).
  * El preview usa el MISMO generador que el Export DDL (`viewDDL`).
  */
 export default function ViewEditor({
@@ -57,7 +58,6 @@ export default function ViewEditor({
   const diagram = useModelerStore((s) => s.diagram);
   const tables = useMemo(() => diagram?.tables ?? [], [diagram]);
   const allColumns = useMemo(() => diagram?.columns ?? [], [diagram]);
-  const relationships = useMemo(() => diagram?.relationships ?? [], [diagram]);
   const tableById = useMemo(() => new Map(tables.map((t) => [t.id, t])), [tables]);
   const canvasTables = useMemo(() => new Set(tables.map((t) => t.id)), [tables]);
   const colsByTable = useMemo(() => {
@@ -111,8 +111,6 @@ export default function ViewEditor({
   // (staging → changeset activo), nunca escritura directa. Al volver, si el
   // `_VU` ya existe queda seleccionado.
   const [schemaModal, setSchemaModal] = useState(false);
-  const [tags, setTags] = useState<Tag[]>(view?.tags ?? []);
-  const [filter, setFilter] = useState(view?.filter ?? '');
   // "Show on this canvas" arranca ON al CREAR (doc 50 §5 — pedido del equipo);
   // al editar una existente se respeta lo persistido (un `?? true` pelado
   // habría "encendido" vistas legacy sin el campo).
@@ -120,16 +118,13 @@ export default function ViewEditor({
   // F5: definición funcional de la vista (nivel vista). Editable en el panel izq.
   const [description, setDescription] = useState(view?.description ?? '');
   const [search, setSearch] = useState('');
-  const [srcSearch, setSrcSearch] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // ── Doc 64 §4b: modo Custom SQL (crear/editar una vista Personalizada).
-  // Editar una vista con customSql abre DIRECTO en este modo con su script. ──
+  // ── Doc 64 §4b → doc 91 D6: modo User-Defined SQL (crear/editar una vista
+  // Personalizada). Editar una vista con customSql abre DIRECTO en este modo
+  // con su texto. Sin validación: se guarda lo que el modelador escribió. ──
   const [sqlMode, setSqlMode] = useState(() => !!(view?.customSql ?? '').trim());
   const [sqlDraft, setSqlDraft] = useState(() => (view?.customSql ?? '').trim());
-  const [sqlBusy, setSqlBusy] = useState(false);
-  const [sqlParse, setSqlParse] = useState<ViewSqlParse | null>(null);
-  const [sqlError, setSqlError] = useState<ViewSqlError | null>(null);
   // Def "Tipo de Vista" (doc 61 §2.3): al guardar se sincroniza con el modo.
   const [viewTypeDef, setViewTypeDef] = useState<UdpDefinition | null>(null);
   useEffect(() => {
@@ -210,18 +205,6 @@ export default function ViewEditor({
     return s;
   }, [colMeta, order, canvasTables]);
 
-  // ── JOIN (D2 + doc 64 §4a): inferido de las relaciones del canvas; para
-  // fuentes SIN relación se SUGIERE igualdad por columnas homónimas (persiste
-  // como override por diferir de la inferida — el DDL la emite verbatim). ──
-  const inferred = useMemo(() => inferJoin(sourceIds, relationships, allColumns), [sourceIds, relationships, allColumns]);
-  const nameJoin = useMemo(() => inferNameJoin(sourceIds, relationships, allColumns), [sourceIds, relationships, allColumns]);
-  const suggested = useMemo(() => [inferred, nameJoin].filter(Boolean).join(' AND '), [inferred, nameJoin]);
-  const [joinText, setJoinText] = useState(view?.joinOverride ?? '');
-  const [joinDirty, setJoinDirty] = useState(!!view?.joinOverride);
-  // Precarga y re-sincroniza la sugerencia mientras el usuario no tocó el
-  // textarea (agregar/quitar fuentes re-infiere/re-sugiere).
-  useEffect(() => { if (!joinDirty) setJoinText(suggested); }, [suggested, joinDirty]);
-
   const patch = (k: string, p: Partial<ColCfg>) => setGrid((g) => ({ ...g, cfg: { ...g.cfg, [k]: { ...g.cfg[k], ...p } } }));
   const setAll = (included: boolean) => setGrid((g) => {
     const next = { ...g.cfg };
@@ -242,7 +225,7 @@ export default function ViewEditor({
   });
 
   const addSource = (tid: string) => {
-    if (sourceIds.includes(tid)) return;
+    if (!tid || sourceIds.includes(tid)) return;
     // Doc 64 r2: New view desde el toolbar arranca SIN fuentes ⇒ sin nombre
     // (el botón quedaba deshabilitado y se leía como culpa del JOIN). Al
     // agregar la PRIMERA fuente, nombre y esquema se precargan como en el
@@ -268,7 +251,6 @@ export default function ViewEditor({
       }
       return { order, cfg };
     });
-    setSrcSearch('');
   };
   const removeSource = (tid: string) => {
     if (tid === lockedTableId) return; // pre-amarrada: no removible
@@ -279,124 +261,78 @@ export default function ViewEditor({
     }));
   };
 
-  const candidates = useMemo(() => {
-    const q = srcSearch.trim().toLowerCase();
-    if (!q) return [];
-    // Matchea nombre físico/lógico, ESQUEMA y el naming completo "esquema.tabla":
-    // sin el esquema, escribir "bcp_ddv_…" devolvía 0 resultados aunque todas
-    // las tablas del canvas colgaran de ese esquema.
-    return tables
-      .filter((t) => !sourceIds.includes(t.id) && (
-        t.physicalName.toLowerCase().includes(q)
-        || t.logicalName.toLowerCase().includes(q)
-        || (t.schema ?? '').toLowerCase().includes(q)
-        || `${t.schema ?? ''}.${t.physicalName}`.toLowerCase().includes(q)))
-      .slice(0, 8);
-  }, [tables, sourceIds, srcSearch]);
+  // Doc 91 D4: combobox de fuentes — TODAS las tablas del canvas aún no
+  // elegidas (`schema.físico` + lógico a la derecha); el filtro «contiene» del
+  // SearchSelect mira ambos (`matchDetail`).
+  const sourceOptions = useMemo(() => tables
+    .filter((t) => !sourceIds.includes(t.id))
+    .map((t) => ({ value: t.id, label: `${t.schema ? `${t.schema}.` : ''}${t.physicalName}`, detail: t.logicalName }))
+    .sort((a, b) => a.label.localeCompare(b.label)), [tables, sourceIds]);
 
   const includedCount = useMemo(
     () => order.filter((k) => validKeys.has(k) && cfg[k]?.included).length,
     [order, cfg, validKeys],
   );
-  // Conectividad POR FUENTE: `inferred !== ''` NO alcanza — con 3+ fuentes una
-  // intermedia sin relación aporta '' al AND y desaparece en silencio (producto
-  // cartesiano). Cada fuente no-primera debe conectar con alguna ANTERIOR
-  // (mismo predicado que inferJoin) o el usuario debe escribir un override.
-  const allConnected = useMemo(() => sourceIds.every((tid, i) => {
-    if (i === 0) return true;
-    const prev = new Set(sourceIds.slice(0, i));
-    return relationships.some((r) => (r.childTableId === tid && prev.has(r.parentTableId))
-      || (r.parentTableId === tid && prev.has(r.childTableId)));
-  }), [sourceIds, relationships]);
-  const needsJoin = sourceIds.length >= 2;
-  // Doc 64 §4a: el JOIN ya NO bloquea el guardado — sin condición alguna el
-  // DDL emite un FULL OUTER JOIN explícito (ON 1 = 1). El estado solo informa:
-  // 'rel' (inferido de relaciones) · 'name' (sugerido por homónimas / manual)
-  // · 'none' (sin condición → FULL JOIN por defecto).
-  const joinState: 'rel' | 'name' | 'none' = !needsJoin || (allConnected && !!joinText.trim()) ? 'rel'
-    : joinText.trim() ? 'name' : 'none';
-  // Doc 64 §4b: en modo Custom SQL las columnas salen del script (la grilla no
-  // participa) — exige nombre + fuentes + script; el parse valida al guardar.
+  // Doc 91 D6: en modo User-Defined SQL las columnas del canvas son TODAS las
+  // de las fuentes (la grilla no participa) — exige nombre + fuentes + texto;
+  // NO se valida el SQL.
   const canSave = !!name.trim() && sourceIds.length > 0 && !busy
     && (sqlMode ? !!sqlDraft.trim() : includedCount > 0);
-  // Doc 64 r2: motivo VISIBLE del bloqueo — en la prueba viva el botón gris
-  // era por el NOMBRE vacío y se leía como si el JOIN siguiera bloqueando
-  // (el JOIN ya NO participa de canSave).
+  // Doc 64 r2: motivo VISIBLE del bloqueo.
   const disabledReason = busy ? undefined
     : !name.trim() ? 'Give the view a name (section 1)'
       : sourceIds.length === 0 ? 'Add at least one source table'
         : sqlMode
-          ? (!sqlDraft.trim() ? 'Write the SQL of the view' : undefined)
+          ? (!sqlDraft.trim() ? 'Write the User-Defined SQL of the view' : undefined)
           : includedCount === 0 ? 'Select at least one column' : undefined;
 
   // Preview con el MISMO generador del Export DDL — una sola fuente de verdad.
-  // En modo Custom SQL el script ES el cuerpo (viewDDL ya resuelve el modo).
+  // En modo User-Defined SQL el texto ES la sentencia (viewDDL ya resuelve el modo).
   const preview = useMemo(() => {
     if (!sqlMode && includedCount === 0) return '-- Select at least one column for the view.';
-    if (sqlMode && !sqlDraft.trim()) return '-- Write the SELECT of the view (Custom SQL).';
+    if (sqlMode && !sqlDraft.trim()) return '-- Write the CREATE VIEW statement (User-Defined SQL).';
     const dv: DdlView = {
       id: view?.id ?? 'new',
       name: name.trim() || 'view',
       schema: schema.trim() || undefined,
-      filter: filter.trim() || undefined,
       tableId: sourceIds[0],
       sourceTableIds: sourceIds,
-      joinOverride: resolveJoinOverride(joinText, inferred),
       sources: serializeSources(order, cfg, validKeys),
       customSql: sqlMode ? sqlDraft : undefined,
     };
     return viewDDL(dv, { ...DEFAULT_DATABRICKS_OPTS, includeComments: false },
-      new Map(tables.map((t) => [t.id, t])), relationships, allColumns).trim();
-  }, [sqlMode, sqlDraft, includedCount, view, name, schema, filter, sourceIds, joinText, inferred, order, cfg, validKeys, tables, relationships, allColumns]);
-
-  // Sandbox de validación (doc 61 §2.4 — mismo contrato que el panel).
-  const validateSql = async () => {
-    setSqlBusy(true); setSqlParse(null); setSqlError(null);
-    try { setSqlParse(await viewsSvc.parseViewSql(sqlDraft)); }
-    catch (e) { setSqlError(viewsSvc.parseSqlError(e)); }
-    finally { setSqlBusy(false); }
-  };
+      new Map(tables.map((t) => [t.id, t]))).trim();
+  }, [sqlMode, sqlDraft, includedCount, view, name, schema, sourceIds, order, cfg, validKeys, tables]);
 
   const save = async () => {
     if (!canSave || ro) return;
     setBusy(true);
     try {
-      // Doc 64 §4b — modo Custom SQL: valida contra el sandbox (mismo contrato
-      // del panel doc 61) y persiste el script + columnas DERIVADAS del parse;
-      // el UDP "Tipo de Vista" se sincroniza con el modo (§2.3). Guardar desde
-      // el builder una vista que ERA Personalizada la revierte a Regular.
-      let custom: { customSql: string; customColumns: viewsSvc.ViewCustomColumn[] } | null = null;
-      if (sqlMode) {
-        try {
-          const parsed = await viewsSvc.parseViewSql(sqlDraft);
-          custom = { customSql: sqlDraft.trim(), customColumns: parsed.columns };
-          setSqlParse(parsed); setSqlError(null);
-        } catch (e) {
-          setSqlError(viewsSvc.parseSqlError(e));
-          return; // script inválido: error inline, el modal sigue abierto
-        }
-      }
+      // Doc 91 D6/D7 — modo User-Defined SQL: persiste el texto VERBATIM (sin
+      // validar) y `sources` = TODAS las columnas de las fuentes (lo que pinta
+      // el canvas); el UDP "Tipo de Vista" se sincroniza con el modo (§2.3).
+      // Guardar desde el builder una vista que ERA Personalizada la revierte a
+      // Regular.
       const wasCustom = !!(view?.customSql ?? '').trim();
       const body: viewsSvc.ViewInput = {
         name: name.trim(),
         schema: schema.trim() || undefined,
-        tags: tags.length ? tags : undefined,
-        filter: filter.trim() || undefined,
-        sources: serializeSources(order, cfg, validKeys),
+        sources: sqlMode
+          ? allSourceColumns(sourceIds, colsByTable, view?.sources ?? [])
+          : serializeSources(order, cfg, validKeys),
         sourceTableIds: sourceIds,
         tableId: sourceIds[0],            // compat legacy = primera fuente
         showOnCanvas,
-        joinOverride: resolveJoinOverride(joinText, inferred),
         sql: preview,
         // F5: definición funcional de la vista, ahora EDITABLE (panel izq).
         // Vacío ⇒ undefined (no persistimos cadena vacía).
         description: description.trim() || undefined,
         // El payload del changeset es el DOC COMPLETO: preservar los UDP de la
         // vista al editarla (antes se perdían) y resolver el modo custom.
-        ...(custom
-          ? { ...custom, udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, true) }
+        ...(sqlMode
+          ? { customSql: sqlDraft.trim(), udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, true) }
           : wasCustom
-            ? { customSql: undefined, customColumns: [], udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, false) }
+            ? { customSql: undefined, udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, false) }
             : { udpValues: view?.udpValues }),
       };
       const saved = editing && view
@@ -420,7 +356,7 @@ export default function ViewEditor({
     <Dialog
       open
       title={ro ? `View · ${view?.name}` : editing ? `Edit view · ${view?.name}` : 'New view'}
-      subtitle={ro ? 'Read-only — definitions and structure as stored (create a version to edit)' : 'Define a view over one or more source tables — columns, aliases, CAST and JOIN'}
+      subtitle={ro ? 'Read-only — definitions and structure as stored (create a version to edit)' : 'Define a view over one or more source tables — columns, aliases and CAST; joins and filters go in the User-Defined SQL'}
       icon={Eye}
       backdrop="canvas"
       canvasTop={136}
@@ -490,46 +426,42 @@ export default function ViewEditor({
                 placeholder="What this view represents (business definition)…"
                 style={{ width: '100%', minHeight: 66, padding: '10px 13px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 10, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.55, color: NAVY, resize: 'vertical', outline: 'none', boxSizing: 'border-box' }} />
             </div>
-            {/* ── Fuentes: chips + buscador de tablas del canvas ── */}
+            {/* ── Fuentes (doc 91 D4): lista vertical de las elegidas + combobox
+                con filtro «contiene» sobre todas las tablas del canvas. ── */}
             <div>
               <label style={lbl}>Source tables</label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {sourceIds.length === 0 && <span style={{ fontSize: 12, color: '#C0392B', fontWeight: 600 }}>Add at least one source table.</span>}
-                {sourceIds.map((tid, i) => {
-                  const t = tableById.get(tid);
-                  const locked = tid === lockedTableId;
-                  return (
-                    <span key={tid} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 9px', borderRadius: 8, background: i === 0 ? '#EFE7FD' : '#EEF2FB', border: `1px solid ${i === 0 ? '#E1D4FB' : '#DDE2EC'}`, fontFamily: MONO, fontSize: 11.5, color: NAVY }}>
-                      <span style={{ color: PURPLE_DK, fontWeight: 700 }}>t{i + 1}</span>
-                      {t ? `${t.schema ? `${t.schema}.` : ''}${t.physicalName}` : tid}
-                      {locked
-                        ? <Lock size={10} style={{ color: MUTED }} aria-label="Fixed source (opened from this table)" />
-                        : (
-                          <button type="button" title="Remove source" onClick={() => removeSource(tid)}
-                            style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, display: 'inline-flex', color: MUTED }}>
-                            <X size={11} />
-                          </button>
-                        )}
-                    </span>
-                  );
-                })}
-              </div>
-              <div style={{ position: 'relative', marginTop: 8 }}>
-                <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: MUTED }} />
-                <input value={srcSearch} onChange={(e) => setSrcSearch(e.target.value)} placeholder="Add source table (from the canvas)…"
-                  style={{ width: '100%', height: 32, padding: '0 10px 0 30px', border: '1px solid #DDE2EC', borderRadius: 8, fontSize: 12, color: NAVY, outline: 'none', background: '#fff', boxSizing: 'border-box' }} />
-                {srcSearch.trim() && (
-                  <div style={{ position: 'absolute', top: 34, left: 0, right: 0, zIndex: 5, background: '#fff', border: '1px solid #DDE2EC', borderRadius: 8, boxShadow: '0 8px 22px rgba(20,30,60,.12)', maxHeight: 180, overflowY: 'auto' }}>
-                    {candidates.length === 0 && <div style={{ padding: '8px 12px', fontSize: 12, color: MUTED }}>No matches on this canvas.</div>}
-                    {candidates.map((t) => (
-                      <button key={t.id} type="button" onClick={() => addSource(t.id)}
-                        style={{ display: 'flex', width: '100%', gap: 8, alignItems: 'center', padding: '7px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: MONO, fontSize: 12, color: NAVY }}>
-                        <Plus size={12} style={{ color: BLUE }} />{t.schema ? `${t.schema}.` : ''}{t.physicalName}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
+              {sourceIds.length === 0 && <div style={{ fontSize: 12, color: '#C0392B', fontWeight: 600, marginBottom: 8 }}>Add at least one source table.</div>}
+              {sourceIds.length > 0 && (
+                <div className="wk-ve-srcs" style={{ marginBottom: 8 }}>
+                  {sourceIds.map((tid, i) => {
+                    const t = tableById.get(tid);
+                    const locked = tid === lockedTableId;
+                    const fullName = t ? `${t.schema ? `${t.schema}.` : ''}${t.physicalName}` : tid;
+                    return (
+                      <div key={tid} className={`wk-ve-src${i === 0 ? ' first' : ''}`} title={fullName}>
+                        <span className="wk-ve-src-alias">t{i + 1}</span>
+                        <span className="wk-ve-src-name">
+                          {t?.schema && <span className="wk-ve-src-schema">{t.schema}.</span>}
+                          <span className="wk-ve-src-table">{t ? t.physicalName : tid}</span>
+                          {t?.logicalName && <span className="wk-ve-src-sub">{t.logicalName}</span>}
+                          {!t && <span className="wk-ve-src-sub">outside this canvas — columns preserved</span>}
+                        </span>
+                        {locked
+                          ? <Lock size={11} className="wk-ve-src-lock" aria-label="Fixed source (opened from this table)" />
+                          : (
+                            <button type="button" className="wk-ve-src-x" title="Remove source" onClick={() => removeSource(tid)}>
+                              <X size={12} />
+                            </button>
+                          )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <SearchSelect mono matchDetail options={sourceOptions} valueLabel=""
+                placeholder={sourceOptions.length ? 'Add source table (from this canvas)…' : 'Every table of this canvas is already a source'}
+                disabled={ro || sourceOptions.length === 0} onPick={addSource} />
+              <div style={{ marginTop: 6, fontSize: 11, color: MUTED }}>Type to filter by schema, table or logical name (contains).</div>
             </div>
             {/* ── Doc 70: al CREAR, la vista se suma a la membresía de ESTE
                 canvas (el llamador la agrega con addViewsToCanvas). Al editar
@@ -545,39 +477,30 @@ export default function ViewEditor({
                 <span style={{ fontSize: 10.5, color: MUTED }}>adds the new view to the current canvas · doesn't affect the DDL export</span>
               </div>
             )}
-            <div>
-              <label style={lbl}>Labels / tags</label>
-              <TagEditor compact value={tags} onChange={setTags} keyPlaceholder="clave" valuePlaceholder="valor" />
-            </div>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 110 }}>
-              <label style={lbl}>Filter · free SQL (WHERE)</label>
-              <textarea value={filter} onChange={(e) => setFilter(e.target.value)}
-                placeholder="estado = 'ACTIVA' AND saldo > 0"
-                style={{ flex: 1, minHeight: 90, padding: '11px 13px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 10, fontFamily: MONO, fontSize: 12.5, lineHeight: 1.6, color: NAVY, resize: 'none', outline: 'none', boxSizing: 'border-box' }} />
-              <div style={{ marginTop: 7, fontSize: 11, color: MUTED }}>Any boolean SQL expression — without the WHERE keyword.</div>
-            </div>
+            {/* Doc 91 D1/D2: sin «Labels / tags» (los UDP de vista los reemplazan)
+                ni caja Filter (un WHERE se escribe en el User-Defined SQL). */}
           </div>
         </div>
 
-        {/* ── RIGHT · columnas por fuente + JOIN + preview ── */}
+        {/* ── RIGHT · columnas por fuente + preview ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <div style={{ padding: '14px 20px 12px', borderBottom: '1px solid #EEF1F5' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <span style={{ width: 22, height: 22, borderRadius: 6, background: '#F3EEFF', color: PURPLE, fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
               <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: NAVY }}>
-                {sqlMode ? 'Custom SQL — the script defines the view' : <>Columns — include, rename, express &amp; cast</>}
+                {sqlMode ? 'User-Defined SQL — the statement defines the view' : <>Columns — include, rename, express &amp; cast</>}
               </h2>
-              {/* Doc 64 §4b: modo del cuerpo de la vista — builder o script. */}
+              {/* Doc 64 §4b / doc 91 D3: modo del cuerpo de la vista — builder o sentencia. */}
               <div className="rd-seg" style={{ marginLeft: 'auto' }}>
                 <button type="button" className={!sqlMode ? 'active' : ''} onClick={() => setSqlMode(false)}>Pick columns</button>
                 <button type="button" className={sqlMode ? 'active' : ''}
                   onClick={() => {
-                    // Primer pase a Custom SQL: precarga el cuerpo del DDL
-                    // generado (mismo criterio del panel doc 61).
-                    if (!sqlDraft.trim() && includedCount > 0) setSqlDraft(extractDdlBody(preview));
+                    // Primer pase a User-Defined SQL: precarga la sentencia
+                    // COMPLETA generada (doc 91 D6 — como hace Erwin).
+                    if (!sqlDraft.trim() && includedCount > 0) setSqlDraft(preview);
                     setSqlMode(true);
                   }}>
-                  Custom SQL
+                  User-Defined SQL
                 </button>
               </div>
               {!sqlMode && (
@@ -600,7 +523,7 @@ export default function ViewEditor({
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px', minHeight: 0 }}>
-            {/* Doc 64 §4b: dos cuerpos — builder de columnas o Custom SQL. */}
+            {/* Doc 64 §4b: dos cuerpos — builder de columnas o User-Defined SQL. */}
             {!sqlMode && (<>
             {/* grilla de columnas AGRUPADA por tabla fuente */}
             <div style={{ border: '1px solid #EAEDF2', borderRadius: 12, overflow: 'hidden' }}>
@@ -620,9 +543,9 @@ export default function ViewEditor({
                   && (!q || splitColKey(k).column.toLowerCase().includes(q)));
                 return (
                   <div key={tid}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 13px', background: '#F3F5FA', borderTop: '1px solid #EAEDF2', borderBottom: '1px solid #EAEDF2', fontFamily: MONO, fontSize: 11, fontWeight: 700, color: '#56607A' }}>
-                      <span style={{ color: PURPLE_DK }}>t{sourceIds.indexOf(tid) + 1}</span>
-                      {t ? `${t.schema ? `${t.schema}.` : ''}${t.physicalName}` : `${tid} (outside this canvas — columns preserved)`}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '7px 13px', background: '#F3F5FA', borderTop: '1px solid #EAEDF2', borderBottom: '1px solid #EAEDF2', fontFamily: MONO, fontSize: 11, fontWeight: 700, color: '#56607A', minWidth: 0 }}>
+                      <span style={{ color: PURPLE_DK, flex: 'none' }}>t{sourceIds.indexOf(tid) + 1}</span>
+                      <span style={{ minWidth: 0, wordBreak: 'break-all' }}>{t ? `${t.schema ? `${t.schema}.` : ''}${t.physicalName}` : `${tid} (outside this canvas — columns preserved)`}</span>
                     </div>
                     {keys.length === 0 && <div style={{ padding: '10px 13px', fontSize: 12, color: MUTED }}>{q ? 'No column matches the search.' : 'The table has no columns.'}</div>}
                     {keys.map((k) => {
@@ -667,78 +590,46 @@ export default function ViewEditor({
               })}
             </div>
             {searching && <div style={{ marginTop: 7, fontSize: 11, color: MUTED }}>Clear the search to reorder columns.</div>}
-
-            {/* ── JOIN (2+ fuentes, doc 64 §4a): inferido de relaciones (D2),
-                sugerido por columnas homónimas o manual — YA NO bloquea. ── */}
-            {needsJoin && (
-              <div style={{ marginTop: 14, border: `1px solid ${joinState === 'none' ? '#F0DDB0' : joinState === 'name' ? '#E1D4FB' : '#DDE2EC'}`, borderRadius: 12, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
-                  JOIN · condition between sources
-                  {joinState === 'rel' && <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#1E7F4F' }}>inferred from the model relationships</span>}
-                  {joinState === 'name' && <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: PURPLE_DK }}>{nameJoin && !joinDirty ? 'suggested by matching column names — review it' : 'manual condition — emitted verbatim'}</span>}
-                  {joinState === 'none' && <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: '#8A5B00' }}>optional — empty saves as FULL OUTER JOIN (1 = 1)</span>}
-                </div>
-                <textarea
-                  value={joinText}
-                  onChange={(e) => { setJoinText(e.target.value); setJoinDirty(true); }}
-                  placeholder="t1.column = t2.column"
-                  style={{ display: 'block', width: '100%', minHeight: 64, padding: '11px 13px', border: 'none', fontFamily: MONO, fontSize: 12, lineHeight: 1.6, color: NAVY, resize: 'vertical', outline: 'none', boxSizing: 'border-box' }}
-                />
-                {joinState === 'none' && (
-                  <div style={{ padding: '0 14px 10px', fontSize: 11.5, color: '#8A5B00', fontWeight: 600 }}>
-                    No modeled relationship and no matching column names between the sources — you can still save:
-                    the DDL defaults to a FULL OUTER JOIN (ON 1 = 1). Write the condition here if you need a real key match.
-                  </div>
-                )}
+            {/* Doc 91 D5: con 2+ fuentes el DDL las lista `FROM t1, t2` (como
+                Erwin), sin JOIN — la caja JOIN del doc 64 §4a se retiró. */}
+            {sourceIds.length >= 2 && (
+              <div style={{ marginTop: 10, fontSize: 11.5, color: '#56607A', background: '#F7F9FC', border: '1px solid #EAEDF2', borderRadius: 8, padding: '7px 10px' }}>
+                {sourceIds.length} sources — the DDL lists them as <span className="rd-mono">FROM t1, t2…</span> with no JOIN (Erwin default). Need a join or a WHERE? Switch to <strong>User-Defined SQL</strong>.
               </div>
             )}
             </>)}
 
-            {/* ── Custom SQL (doc 64 §4b): el script ES el cuerpo del CREATE VIEW ── */}
+            {/* ── User-Defined SQL (doc 91 D6): la sentencia completa, verbatim, sin validar ── */}
             {sqlMode && (
               <div style={{ border: '1px solid #E1D4FB', borderRadius: 12, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F8F5FF', borderBottom: '1px solid #EEE7FB', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: PURPLE }}>
-                  Body of CREATE OR REPLACE VIEW · Databricks SQL
+                  User-Defined SQL · Databricks SQL
                   <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: MUTED }}>
-                    WITH … / joins / subqueries supported — name every output column (no SELECT *)
+                    The full CREATE VIEW statement — exported verbatim, never validated (as in Erwin)
                   </span>
                 </div>
                 <textarea
                   value={sqlDraft}
                   spellCheck={false}
-                  onChange={(e) => { setSqlDraft(e.target.value); setSqlParse(null); setSqlError(null); }}
-                  placeholder={'WITH base AS (\n  SELECT …\n)\nSELECT col1, col2 FROM base'}
+                  onChange={(e) => setSqlDraft(e.target.value)}
+                  placeholder={'CREATE OR REPLACE VIEW schema.view_name AS\nSELECT t1.col1, t2.col2\nFROM schema.tabla1 t1\n  INNER JOIN schema.tabla2 t2 ON t1.k = t2.k\nWHERE …'}
                   style={{ display: 'block', width: '100%', minHeight: 240, padding: '12px 14px', border: 'none', fontFamily: MONO, fontSize: 12.5, lineHeight: 1.6, color: NAVY, resize: 'vertical', outline: 'none', boxSizing: 'border-box', whiteSpace: 'pre' }}
                 />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderTop: '1px solid #EEE7FB', background: '#FCFBFF', flexWrap: 'wrap' }}>
-                  <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={sqlBusy || !sqlDraft.trim()} onClick={() => void validateSql()}>
-                    {sqlBusy && <span className="rd-spin" aria-hidden />} Validate
-                  </button>
-                  {sqlError && (
-                    <span style={{ fontSize: 11.5, color: '#C0392B', fontWeight: 600 }}>
-                      Line {sqlError.line}, col {sqlError.col} — {sqlError.message}
-                    </span>
-                  )}
-                  {sqlParse && !sqlError && (
-                    <span style={{ fontSize: 11.5, color: '#1E7F4F', fontWeight: 600 }}>
-                      ✓ Valid — {sqlParse.columns.length} column{sqlParse.columns.length === 1 ? '' : 's'}
-                      {sqlParse.tables.length > 0 ? ` · reads ${sqlParse.tables.join(', ')}` : ''}
-                    </span>
-                  )}
-                  {!sqlError && !sqlParse && (
-                    <span style={{ fontSize: 11, color: MUTED }}>The script is validated again on save; the output columns are derived from it.</span>
-                  )}
+                  <span style={{ fontSize: 11, color: MUTED }}>
+                    Saved exactly as written (no syntax check). A bare SELECT body is wrapped automatically. On the canvas the view lists every column of its source tables.
+                  </span>
                 </div>
               </div>
             )}
             {sqlMode && editing && !(view?.customSql ?? '').trim() && (
               <div style={{ marginTop: 8, fontSize: 11.5, color: '#8A5B00', background: '#FFF3D6', border: '1px solid #F0E2B6', borderRadius: 8, padding: '6px 10px' }}>
-                Saving switches this view to <strong>Personalizada</strong> — the script becomes the source of truth (the column picks stay stored but inactive).
+                Saving switches this view to <strong>Personalizada</strong> — the statement becomes the source of truth and the canvas lists every column of the source tables.
               </div>
             )}
             {!sqlMode && editing && !!(view?.customSql ?? '').trim() && (
               <div style={{ marginTop: 8, fontSize: 11.5, color: '#8A5B00', background: '#FFF3D6', border: '1px solid #F0E2B6', borderRadius: 8, padding: '6px 10px' }}>
-                This view is <strong>Personalizada</strong> — saving from the column builder discards the custom script and reverts it to Regular.
+                This view is <strong>Personalizada</strong> — saving from the column builder discards the User-Defined SQL and reverts it to Regular.
               </div>
             )}
 
@@ -747,7 +638,7 @@ export default function ViewEditor({
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F8F5FF', borderBottom: '1px solid #EEE7FB', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: PURPLE }}>
                 Resulting DDL · preview
               </div>
-              <pre style={{ margin: 0, padding: '13px 15px', fontFamily: MONO, fontSize: 12, lineHeight: 1.7, color: includedCount === 0 ? '#C0392B' : '#3A4658', background: '#fff', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{preview}</pre>
+              <pre style={{ margin: 0, padding: '13px 15px', fontFamily: MONO, fontSize: 12, lineHeight: 1.7, color: (!sqlMode && includedCount === 0) ? '#C0392B' : '#3A4658', background: '#fff', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{preview}</pre>
             </div>
           </div>
         </div>

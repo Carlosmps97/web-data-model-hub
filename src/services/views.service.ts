@@ -9,7 +9,6 @@
 // Producción se toca SOLO en el apply del approve; el ROLLBACK las revierte.
 // Sin changeset (scripts/compat), sigue el REST directo.
 
-import type { Tag } from '@/types/model';
 import { apiGet, apiPost, apiPut, apiDelete } from './http';
 import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -53,48 +52,42 @@ export interface View {
   /** F3 (D3): flag GLOBAL — la vista aparece en todo canvas con ≥1 fuente.
    *  NO afecta el export DDL. */
   showOnCanvas?: boolean;
-  /** F3 (D2): condición de JOIN manual (override de la inferida de relaciones). */
-  joinOverride?: string;
   name: string;
   schema?: string;
-  tags?: Tag[];
-  filter?: string;
+  /** Doc 91 D1/D2/D5: `tags`, `filter` y `joinOverride` se RETIRARON (los UDP
+   *  de vista reemplazan a las etiquetas; WHERE/JOIN viven en el User-Defined
+   *  SQL; con 2+ fuentes el DDL lista `FROM t1, t2` como Erwin). */
+  /** Proyección columna a columna. Doc 91 D7: en modo User-Defined SQL lista
+   *  TODAS las columnas de TODAS las fuentes (lo que pinta el canvas). */
   sources?: ViewSource[];
   outputAlias?: string;
   expression?: string;
   sql?: string;
   description?: string;
-  /** Doc 61: script SQL custom — NO vacío ⇒ la vista es "Personalizada" (el
-   *  cuerpo del CREATE VIEW ES este script); ausente ⇒ "Regular" (DDL generado
-   *  de sources/filter/joinOverride). Distinto de `sql` (preview congelado). */
+  /** Doc 61 → doc 91: «User-Defined SQL» — NO vacío ⇒ la vista es
+   *  "Personalizada": el export emite este texto VERBATIM (sentencia
+   *  `CREATE VIEW …` completa, como el User_Defined_SQL de Erwin; un cuerpo
+   *  suelto legacy se envuelve). Sin validación: se guarda lo que el modelador
+   *  escribió. Ausente ⇒ "Regular" (DDL generado de `sources`). Distinto de
+   *  `sql` (preview congelado). */
   customSql?: string;
-  /** Doc 61: columnas de salida DERIVADAS del parse del customSql — las
-   *  re-deriva el backend al escribir; pintan el bloque del canvas. */
-  customColumns?: ViewCustomColumn[];
   /** Doc 61: valores UDP de la vista ({defId: value}) — keys de level='view'. */
   udpValues?: Record<string, string>;
 }
-
-/** Una columna de salida de una vista Personalizada (doc 61). */
-export interface ViewCustomColumn { name: string; expression?: string; }
 
 /** Body de creación/actualización (sin `id`, lo asigna/usa el backend). */
 export interface ViewInput {
   tableId?: string;
   sourceTableIds?: string[];
   showOnCanvas?: boolean;
-  joinOverride?: string;
   name: string;
   schema?: string;
-  tags?: Tag[];
-  filter?: string;
   sources?: ViewSource[];
   outputAlias?: string;
   expression?: string;
   sql?: string;
   description?: string;
   customSql?: string;
-  customColumns?: ViewCustomColumn[];
   udpValues?: Record<string, string>;
 }
 
@@ -155,30 +148,8 @@ export function updateView(id: string, body: ViewInput): Promise<View> {
   return csvc.recordChange(a, 'views', id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
 }
 
-/** Resultado del parse/validación del SQL custom (doc 61). */
-export interface ViewSqlParse { columns: ViewCustomColumn[]; tables: string[]; }
-/** Error estructurado del sandbox (el backend manda {message, line, col}). */
-export interface ViewSqlError { message: string; line: number; col: number; }
-
-/** Valida e interpreta el SQL custom SIN guardar (sandbox de Query SQL).
- *  Stateless: siempre REST directo (no participa del changeset). El 422 del
- *  backend llega como Error cuyo `message` es el JSON del detail — usar
- *  `parseSqlError` para extraer {message, line, col}. */
-export function parseViewSql(sql: string): Promise<ViewSqlParse> {
-  return apiPost<ViewSqlParse>(`${VIEWS}/sql/parse`, { sql });
-}
-
-/** Extrae el error estructurado de un fallo de `parseViewSql` (best-effort). */
-export function parseSqlError(e: unknown): ViewSqlError {
-  const raw = e instanceof Error ? e.message : String(e);
-  try {
-    const d = JSON.parse(raw) as Partial<ViewSqlError>;
-    if (d && typeof d.message === 'string') {
-      return { message: d.message, line: d.line ?? 1, col: d.col ?? 1 };
-    }
-  } catch { /* texto plano */ }
-  return { message: raw || 'Invalid SQL.', line: 1, col: 1 };
-}
+// Doc 91 D6: el sandbox `POST /api/views/sql/parse` (Validate) se RETIRÓ — el
+// User-Defined SQL se guarda verbatim, sin validar.
 
 export function deleteView(id: string): Promise<{ deleted: boolean }> {
   const a = active();

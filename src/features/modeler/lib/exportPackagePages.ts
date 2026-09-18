@@ -33,8 +33,8 @@ export interface LayoutCanvas { sa: SubjectArea; dir: string[]; crumb: string[];
 export interface PackageLayout { rootName: string; canvases: LayoutCanvas[] }
 
 /** Resuelve el SCOPE del export a rutas del ZIP. Espejo del orden del
- *  explorer (`buildProjectTree`): carpetas por `order`/nombre, canvases por
- *  nombre. Carpetas sin canvases (directa o transitivamente) no generan
+ *  explorer (`buildProjectTree`, doc 92 D1): carpetas y canvases A–Z
+ *  (case-insensitive; `order` sólo desempata). Carpetas sin canvases (directa o transitivamente) no generan
  *  entradas — un ZIP no tiene directorios vacíos. */
 export function packageLayout(
   kind: 'project' | 'folder', nodeId: string, projectName: string,
@@ -50,8 +50,9 @@ export function packageLayout(
     const k = sa.folderId ?? null;
     const arr = byFolder.get(k); if (arr) arr.push(sa); else byFolder.set(k, [sa]);
   }
-  const sortF = (a: Folder, b: Folder) => a.order - b.order || a.name.localeCompare(b.name);
-  const sortC = (a: SubjectArea, b: SubjectArea) => a.name.localeCompare(b.name);
+  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || a.localeCompare(b);
+  const sortF = (a: Folder, b: Folder) => byName(a.name, b.name) || a.order - b.order;
+  const sortC = (a: SubjectArea, b: SubjectArea) => byName(a.name, b.name);
 
   const out: LayoutCanvas[] = [];
   const walk = (folderId: string | null, dir: string[], crumb: string[]) => {
@@ -185,7 +186,7 @@ ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
       .map((id) => tablesById.get(id)?.physicalName ?? id).map((n) => `<code>${esc(n)}</code>`).join(', ');
     const sql = v.customSql ?? v.sql ?? '(generated from sources)';
     return `<div class="view">
-<h3>${esc(v.name)}${v.schema ? ` <span class="chip schema">${esc(v.schema)}</span>` : ''} <span class="chip">${v.customSql ? 'Custom' : 'Regular'}</span>${udpChipsHtml(v.udpValues, 'view', lk)}</h3>
+<h3>${esc(v.name)}${v.schema ? ` <span class="chip schema">${esc(v.schema)}</span>` : ''} <span class="chip">${v.customSql ? 'User-Defined SQL' : 'Regular'}</span>${udpChipsHtml(v.udpValues, 'view', lk)}</h3>
 ${srcs ? `<p class="dim">Sources: ${srcs}</p>` : ''}
 <pre>${esc(sql)}</pre>
 </div>`;

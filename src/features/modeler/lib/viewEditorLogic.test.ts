@@ -1,7 +1,8 @@
 // Lógica pura del ViewEditor multi-fuente (F3): claves de grilla, serialización
-// de sources y regla de persistencia del joinOverride.
+// de sources y (doc 91 D7) todas las columnas de las fuentes en modo
+// User-Defined SQL.
 import { describe, expect, it } from 'vitest';
-import { colKey, splitColKey, serializeSources, resolveJoinOverride, inferNameJoin, type ColCfg } from './viewEditorLogic';
+import { colKey, splitColKey, serializeSources, allSourceColumns, type ColCfg } from './viewEditorLogic';
 
 describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
   const cfg: Record<string, ColCfg> = {
@@ -36,52 +37,31 @@ describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
     expect(out[0].description).toBe('Business key');   // t1::ID
     expect(out[2].description).toBeUndefined();          // t2::SALDO = '  ' → trim → undefined
   });
-
-  it('resolveJoinOverride: persiste solo si difiere de la inferida (derivación viva)', () => {
-    expect(resolveJoinOverride('t1.ID = t2.CLIENTE_ID', 't1.ID = t2.CLIENTE_ID')).toBeUndefined();
-    expect(resolveJoinOverride('   ', 'x = y')).toBeUndefined();
-    expect(resolveJoinOverride('t1.ID = t2.X', 't1.ID = t2.CLIENTE_ID')).toBe('t1.ID = t2.X');
-  });
 });
 
-describe('inferNameJoin (doc 64 §4a — sugerencia por columnas homónimas)', () => {
-  const COLS = [
-    { tableId: 't1', physicalName: 'ID_CLIENTE', isPrimaryKey: true },
-    { tableId: 't1', physicalName: 'NOMBRE' },
-    { tableId: 't2', physicalName: 'ID_CLIENTE' },
-    { tableId: 't2', physicalName: 'SALDO' },
-  ];
+describe('allSourceColumns (doc 91 D7 — User-Defined SQL ⇒ todas las columnas de las fuentes)', () => {
+  const cols = new Map([
+    ['t1', [{ physicalName: 'ID' }, { physicalName: 'NOMBRE' }]],
+    ['t2', [{ physicalName: 'SALDO' }]],
+  ]);
 
-  it('sin relación modelada, sugiere igualdad por homónimas priorizando PK', () => {
-    expect(inferNameJoin(['t1', 't2'], [], COLS)).toBe('t1.ID_CLIENTE = t2.ID_CLIENTE');
+  it('lista todas las columnas de cada fuente, en orden de fuentes y orden físico, planas', () => {
+    expect(allSourceColumns(['t2', 't1'], cols)).toEqual([
+      { column: 'SALDO', tableId: 't2' },
+      { column: 'ID', tableId: 't1' },
+      { column: 'NOMBRE', tableId: 't1' },
+    ]);
   });
 
-  it('fuente CONECTADA por relación no aporta sugerencia (la cubre inferJoin)', () => {
-    const rels = [{ parentTableId: 't1', childTableId: 't2' }];
-    expect(inferNameJoin(['t1', 't2'], rels, COLS)).toBe('');
+  it('fuente sin columnas a mano (fuera del canvas): conserva las entradas previas de esa tabla', () => {
+    const prev = [{ column: 'X', tableId: 't9', outputAlias: 'x_alias' }, { column: 'ID', tableId: 't1', outputAlias: 'viejo' }];
+    expect(allSourceColumns(['t1', 't9'], cols, prev)).toEqual([
+      { column: 'ID', tableId: 't1' }, { column: 'NOMBRE', tableId: 't1' },
+      { column: 'X', tableId: 't9', outputAlias: 'x_alias' },
+    ]);
   });
 
-  it('sin PK homónimas usa TODAS las homónimas; sin homónimas, nada', () => {
-    const cols = [
-      { tableId: 't1', physicalName: 'COD' }, { tableId: 't1', physicalName: 'FECHA' },
-      { tableId: 't2', physicalName: 'COD' }, { tableId: 't2', physicalName: 'FECHA' },
-      { tableId: 't3', physicalName: 'OTRA' },
-    ];
-    expect(inferNameJoin(['t1', 't2'], [], cols)).toBe('t1.COD = t2.COD AND t1.FECHA = t2.FECHA');
-    expect(inferNameJoin(['t1', 't3'], [], cols)).toBe('');
-  });
-
-  it('match case-insensitive emitiendo cada lado con SU casing', () => {
-    const cols = [
-      { tableId: 't1', physicalName: 'id_cliente' },
-      { tableId: 't2', physicalName: 'ID_CLIENTE' },
-    ];
-    expect(inferNameJoin(['t1', 't2'], [], cols)).toBe('t1.id_cliente = t2.ID_CLIENTE');
-  });
-
-  it('una sola fuente ⇒ vacío; columnas de tablas ajenas se ignoran', () => {
-    expect(inferNameJoin(['t1'], [], COLS)).toBe('');
-    const noisy = [...COLS, { tableId: 'tX', physicalName: 'ID_CLIENTE' }];
-    expect(inferNameJoin(['t1', 't2'], [], noisy)).toBe('t1.ID_CLIENTE = t2.ID_CLIENTE');
+  it('sin fuentes ⇒ vacío', () => {
+    expect(allSourceColumns([], cols)).toEqual([]);
   });
 });

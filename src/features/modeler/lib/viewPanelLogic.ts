@@ -28,13 +28,3 @@ export function syncViewTypeUdp(
   if (!defId) return values;
   return { ...(values ?? {}), [defId]: custom ? 'Personalizada' : 'Regular' };
 }
-
-/** Cuerpo (SELECT…) de un `CREATE OR REPLACE VIEW … AS\n<body>;` generado —
- *  para prellenar el sandbox al pasar a Personalizada. Best-effort: si el DDL
- *  no tiene el marcador ` AS\n`, devuelve el texto tal cual (sin `;` final). */
-export function extractDdlBody(ddl: string): string {
-  const marker = ' AS\n';
-  const i = ddl.indexOf(marker);
-  const body = i >= 0 ? ddl.slice(i + marker.length) : ddl;
-  return body.trim().replace(/;\s*$/, '');
-}

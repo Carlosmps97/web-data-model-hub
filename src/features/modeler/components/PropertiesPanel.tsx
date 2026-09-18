@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { sanitizeLogicalName } from '@/lib/logicalName';
 import { ArrowDownUp, Eye, Pencil, Plus, Table2, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
@@ -474,7 +475,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
               <b>{viewMode === 'logical' ? 'Logical facet' : 'Physical facet'}</b> — fields of the other facet are read-only here. {FACET_SWITCH_HINT[viewMode]}
             </p>
             <div className="wk-props-field"><label>Logical name</label>
-              <input className="rd-input" disabled={!canEdit || !facetEditable('table', 'logicalName', viewMode)} title={facetEditable('table', 'logicalName', viewMode) ? undefined : FACET_SWITCH_HINT[viewMode]} value={form.logicalName} onChange={(e) => setForm({ ...form, logicalName: e.target.value })} />
+              <input className="rd-input" disabled={!canEdit || !facetEditable('table', 'logicalName', viewMode)} title={facetEditable('table', 'logicalName', viewMode) ? undefined : FACET_SWITCH_HINT[viewMode]} value={form.logicalName} onChange={(e) => setForm({ ...form, logicalName: sanitizeLogicalName(e.target.value) })} />
             </div>
             <div className="wk-props-field"><label>Physical name</label>
               <div style={{ display: 'flex', gap: 4 }}>
@@ -666,7 +667,6 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                     </span>
                   </div>
                 )}
-                {v.tags && v.tags.length > 0 && <div className="wk-pp-link-card"><span className="rd-small" style={{ color: 'var(--muted)' }}>{v.tags.length} tag{v.tags.length === 1 ? '' : 's'}</span></div>}
               </div>
             );
           };

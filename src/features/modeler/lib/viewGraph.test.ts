@@ -33,21 +33,16 @@ describe('viewSourceIds', () => {
 });
 
 describe('viewNodeRows', () => {
-  it('vista Personalizada (doc 61): filas desde customColumns, fx = expresión', () => {
+  it('vista User-Defined SQL (doc 91 D7): las filas salen de sources igual que en Regular', () => {
     const rows = viewNodeRows({
       ...view,
-      customSql: 'SELECT ID, CURRENT_DATE() AS foto FROM t',
-      customColumns: [{ name: 'ID' }, { name: 'foto', expression: 'CURRENT_DATE()' }],
-    }, { 't1::ID': 'bigint' });
+      customSql: 'CREATE VIEW s.v_cc AS SELEC ID FRM t',
+      sources: [{ column: 'ID', tableId: 't1' }, { column: 'SALDO', tableId: 't2' }],
+    }, { 't1::ID': 'bigint', 't2::SALDO': 'decimal' });
     expect(rows).toEqual([
-      { name: 'ID', type: '', fx: false },
-      { name: 'foto', type: '', fx: true },
+      { name: 'ID', type: 'bigint', fx: false },
+      { name: 'SALDO', type: 'decimal', fx: false },
     ]);
-  });
-
-  it('customSql vacío ⇒ camino Regular (sources)', () => {
-    const rows = viewNodeRows({ ...view, customSql: '  ', customColumns: [{ name: 'zombi' }] }, { 't1::ID': 'bigint' });
-    expect(rows[0]).toEqual({ name: 'ID', type: 'bigint', fx: false });
   });
 
   it('outputAlias||column + castType||tipo origen + marca fx', () => {

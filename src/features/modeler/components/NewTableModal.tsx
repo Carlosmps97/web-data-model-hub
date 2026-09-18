@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { sanitizeLogicalName } from '@/lib/logicalName';
 import { Table2, Search, Plus, Check } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import * as gov from '@/services/governance.service';
@@ -185,7 +186,7 @@ export default function NewTableModal({ onClose, onCreate }: {
             <div style={field}>
               <label style={lbl}>Logical name</label>
               <input className="rd-input" autoFocus placeholder="e.g. cuenta cliente" value={logical}
-                onChange={(e) => setLogical(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitBlank(); }}
+                onChange={(e) => setLogical(sanitizeLogicalName(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') submitBlank(); }}
                 style={{ width: '100%' }} />
               {/* Doc 86 D3: el físico se deriva por glosario (scope table); se edita luego en Physical. */}
               <span className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)', marginTop: 4, display: 'block' }}>

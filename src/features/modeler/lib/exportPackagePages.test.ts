@@ -60,6 +60,13 @@ describe('packageLayout', () => {
     expect(out.canvases.some((c) => c.sa.id === 's5' || c.sa.id === 's4')).toBe(false);
   });
 
+  it('doc 92 D1: carpetas y canvases A–Z sin importar `order` ni mayúsculas', () => {
+    const f = [F('a', null, 'zeta', 0), F('b', null, 'Alfa', 5), F('c', null, 'beta', 1)];
+    const c = [SA('s1', 'a', 'x'), SA('s2', null, 'Beta canvas'), SA('s3', null, 'alfa canvas')];
+    const out = packageLayout('project', 'p1', 'P', f, c);
+    expect(out.canvases.map((x) => [...x.dir, x.file].join('/'))).toEqual(['alfa canvas.html', 'Beta canvas.html', 'zeta/x.html']);
+  });
+
   it('folder: crumb arranca en el folder exportado con nombres ORIGINALES', () => {
     const out = packageLayout('folder', 'f1', 'Modelo DDV', folders, sas);
     const dm = out.canvases.find((c) => c.sa.id === 's1');
@@ -161,9 +168,9 @@ describe('buildCanvasPage', () => {
     expect(out).toContain('one → zero-many');
     expect(out).toContain('CODMES → CODMES');
   });
-  it('vista Custom con su SQL escapado', () => {
+  it('vista User-Defined SQL con su SQL escapado', () => {
     expect(out).toContain('VW_VENTA');
-    expect(out).toContain('Custom');
+    expect(out).toContain('User-Defined SQL');
     expect(out).toContain('WHERE x &lt; 1');
   });
   it('canvas suelto (indexHref null) no pinta link al index', () => {

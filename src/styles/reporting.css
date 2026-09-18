@@ -56,6 +56,15 @@
   border: 1px solid var(--border-2); border-radius: var(--r); box-shadow: var(--shadow-popup);
 }
 .dmh-rep-menu-empty { padding: 10px 10px; font-size: 12.5px; color: var(--text-muted-3); }
+/* Doc 92 D2: buscador «contiene» del popover. */
+.dmh-rep-menu-search { position: sticky; top: -6px; z-index: 1; display: flex; align-items: center; gap: 7px; margin: -6px -6px 4px;
+  padding: 8px 10px; background: var(--surface); border-bottom: 1px solid var(--border-2); }
+.dmh-rep-menu-search svg { width: 13px; height: 13px; color: var(--text-muted-3); flex: none; }
+.dmh-rep-menu-search input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; font-family: var(--ui);
+  font-size: 13px; color: var(--text-body); }
+.dmh-rep-menu-search input::placeholder { color: var(--text-placeholder); }
+/* Doc 92 D3: centinela del scroll infinito. */
+.dmh-rep-sentinel td { padding: 10px 14px; font-size: 12px; color: var(--text-muted-3); text-align: center; }
 .dmh-rep-opt {
   display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border: none;
   background: none; border-radius: 7px; cursor: pointer; font-family: var(--ui); font-size: 13px;

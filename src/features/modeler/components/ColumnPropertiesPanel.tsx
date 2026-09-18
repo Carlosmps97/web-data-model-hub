@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { sanitizeLogicalName } from '@/lib/logicalName';
 import { ArrowLeft } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { useModelerStore } from '@/store/useModelerStore';
@@ -309,7 +310,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
     sync.current?.dispose();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onLogical = (v: string) => sync.current?.setLogical(v);
+  const onLogical = (v: string) => sync.current?.setLogical(sanitizeLogicalName(v));   // doc 92 D8
   const onPhysical = (v: string) => sync.current?.setPhysical(v);
   const onDescription = (v: string) => { setDescription(v); debounced('description', { description: v.trim() || undefined }); };
   const onPhysicalDescription = (v: string) => { setPhysicalDescription(v); debounced('physicalDescription', { physicalDescription: v.trim() || undefined }); };

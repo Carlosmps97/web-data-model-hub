@@ -14,6 +14,11 @@
  * (doc 75 D13: the Project picker at the start of the bar is mandatory; the
  * session's project, then the last opened one, is preselected). Search + chips
  * filter the loaded rows client-side; the first filter applied loads the full set.
+ * Doc 92 D3–D5: without filters the grid loads pages of 50 and fetches the next
+ * one when the sentinel row scrolls into view; the bar shows the REAL total
+ * (`/tables/count`) and «Select all» selects every table of the project (loaded
+ * or not) — the export then downloads the full set. Doc 92 D2: the Schema and
+ * Subject area popovers have a «contains» search box.
  * Doc 70: the filter combos list the WHOLE catalog (`/reporting/filters`), not
  * just the values of the 50 rows loaded up-front; a Show switch renders the
  * grid as Tables · Columns · Tables + Columns (same pure row builders as the
@@ -42,6 +47,7 @@ import { sortProjects } from '@/lib/projects';
 import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
 import type { Project } from '@/types/model';
 import {
+  countReportTables,
   listReportColumns,
   listReportFilters,
   listReportTables,
@@ -74,7 +80,7 @@ const EXPORT_LEVELS: LevelSpec[] = [
   { key: 'columns', name: 'Columns detail', hint: 'Every field: physical & logical type, PK/FK, nullable, partition, domain, ordinals, overrides, UDPs.', sheet: 'Columns' },
   { key: 'joined', name: 'Tables + Columns (joined)', hint: 'One row per column carrying its table metadata — everything in a single sheet.', sheet: 'Tables + Columns' },
   { key: 'relationships', name: 'Relationships', hint: 'One row per relationship: tables, columns and cardinality.', sheet: 'Relationships' },
-  { key: 'views', name: 'Views detail', hint: 'Views derived from the selected tables: sources, filters, joins, per-column aliases, casts and expressions.', sheet: 'Views' },
+  { key: 'views', name: 'Views detail', hint: 'Views derived from the selected tables: sources, User-Defined SQL, per-column aliases, casts and expressions.', sheet: 'Views' },
   { key: 'definitions', name: 'Definitions', hint: 'Functional definition text per table.', sheet: 'Definitions' },
 ];
 
@@ -115,6 +121,8 @@ function ProjectPick({ projects, projectId, onPick }: { projects: Project[]; pro
 // ── multi-select filter popover ───────────────────────────────────────────────
 
 const GRID_ROW_CAP = 5000;
+/** Doc 92 D3: tamaño de página del scroll infinito de la grilla de tablas. */
+const TABLE_PAGE = 50;
 
 /** Doc 70 §4.2 — grilla genérica de filas ya aplanadas por las mismas funciones
  *  puras del Excel (`lib/reportRows`): encabezados = unión de claves, scroll
@@ -174,7 +182,11 @@ interface MultiFilterProps {
 
 function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFilterProps) {
   const [open, setOpen] = useState(false);
+  // Doc 92 D2: filtro «contiene» (case-insensitive) sobre las opciones del popover.
+  const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+  const needle = q.trim().toLowerCase();
+  const visible = needle ? options.filter((o) => o.toLowerCase().includes(needle)) : options;
 
   useEffect(() => {
     if (!open) return;
@@ -191,6 +203,7 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+  useEffect(() => { if (!open) setQ(''); }, [open]);
 
   const count = selected.size;
   return (
@@ -209,10 +222,23 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
       </button>
       {open && (
         <div className="dmh-rep-menu" role="listbox">
+          <div className="dmh-rep-menu-search">
+            <Search strokeWidth={1.7} aria-hidden />
+            <input
+              type="text"
+              autoFocus
+              value={q}
+              placeholder={`Filter ${label.toLowerCase()}… (contains)`}
+              onChange={(e) => setQ(e.target.value)}
+              aria-label={`Filter ${label.toLowerCase()}`}
+            />
+          </div>
           {options.length === 0 ? (
             <div className="dmh-rep-menu-empty">No options</div>
+          ) : visible.length === 0 ? (
+            <div className="dmh-rep-menu-empty">No matches</div>
           ) : (
-            options.map((opt) => {
+            visible.map((opt) => {
               const on = selected.has(opt);
               return (
                 <button
@@ -294,20 +320,54 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
   // Doc 70 §4.2: qué muestra la grilla — tablas, sus columnas o la fila unida.
   const [show, setShow] = useState<ShowMode>('tables');
 
-  // Lazy load: only the first 50 tables up-front; the full set loads the moment
-  // a filter is applied (so faceting/filtering stays accurate over everything).
+  // Doc 92 D3: sin filtros la grilla se carga por PÁGINAS (orden físico) y pide
+  // la siguiente cuando el centinela entra al viewport; con un filtro se
+  // descarga el set completo (facetas/conteos exactos sobre todo).
   const [fullLoad, setFullLoad] = useState(false);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // Doc 92 D4: total REAL de tablas del proyecto (null = aún no llegó).
+  const [total, setTotal] = useState<number | null>(null);
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    listReportTables(projectId, fullLoad ? {} : { limit: 50 })
-      .then((rows) => {
-        if (!cancelled) setTables(rows);
+    Promise.all([
+      listReportTables(projectId, { limit: TABLE_PAGE, offset: 0 }),
+      countReportTables(projectId).catch(() => null),
+    ])
+      .then(([rows, n]) => {
+        if (cancelled) return;
+        setTables(rows);
+        setHasMore(rows.length === TABLE_PAGE);
+        setTotal(n);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         toast.error(err instanceof Error ? err.message : 'Could not load the reporting tables.');
         setTables([]);
+        setHasMore(false);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+  useEffect(() => {
+    if (!fullLoad) return undefined;
+    let cancelled = false;
+    setLoading(true);
+    listReportTables(projectId, {})
+      .then((rows) => {
+        if (cancelled) return;
+        setTables(rows);
+        setHasMore(false);
+        setTotal(rows.length);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        toast.error(err instanceof Error ? err.message : 'Could not load the reporting tables.');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -316,6 +376,41 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
       cancelled = true;
     };
   }, [fullLoad, projectId]);
+  const loadMore = useCallback(() => {
+    if (fullLoad || !hasMore || loadingMore || loading) return;
+    setLoadingMore(true);
+    listReportTables(projectId, { limit: TABLE_PAGE, offset: tables.length })
+      .then((rows) => {
+        setTables((prev) => {
+          const seen = new Set(prev.map((t) => t.id));
+          return [...prev, ...rows.filter((r) => !seen.has(r.id))];
+        });
+        setHasMore(rows.length === TABLE_PAGE);
+      })
+      .catch((err: unknown) => {
+        toast.error(err instanceof Error ? err.message : 'Could not load more tables.');
+        setHasMore(false);
+      })
+      .finally(() => setLoadingMore(false));
+  }, [fullLoad, hasMore, loadingMore, loading, projectId, tables.length]);
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const sentinelRef = useRef<HTMLTableRowElement>(null);
+  // Centinela al final de la tabla: al asomar (200 px antes) pide la página
+  // siguiente. Se re-arma cuando cambia lo cargado o el modo de la grilla.
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || fullLoad || !hasMore || typeof IntersectionObserver === 'undefined') return undefined;
+    const obs = new IntersectionObserver(
+      (entries) => { if (entries.some((e) => e.isIntersecting)) loadMoreRef.current(); },
+      { root: scrollRef.current, rootMargin: '200px' },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [fullLoad, hasMore, show, loading, tables.length]);
+  // Hay tablas del proyecto que la grilla aún no cargó (sin filtros).
+  const partial = !fullLoad && hasMore;
 
   // Per-facet predicates. Building a facet's options excludes its OWN selection,
   // so the filters narrow each other (cumulative / faceted).
@@ -360,34 +455,46 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
 
   // ── row selection (drives the Excel export) ──────────────────────────────────
   // Explicit set; starts EMPTY (nothing selected). Only ids among the visible
-  // (filtered) rows count toward the export.
+  // (filtered) rows count toward the export. Doc 92 D5: `allSelected` = TODAS
+  // las tablas del proyecto (cargadas o no) — el export baja el set completo.
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [allSelected, setAllSelected] = useState(false);
   const filteredIds = useMemo(() => filtered.map((t) => t.id), [filtered]);
   const selectedIds = useMemo(
-    () => new Set(filteredIds.filter((id) => selected.has(id))),
-    [selected, filteredIds],
+    () => (allSelected ? new Set(filteredIds) : new Set(filteredIds.filter((id) => selected.has(id)))),
+    [allSelected, selected, filteredIds],
   );
   const selectedRows = useMemo(
     () => filtered.filter((t) => selectedIds.has(t.id)),
     [filtered, selectedIds],
   );
-  const selectedCount = selectedIds.size;
-  const allRowsSelected = filtered.length > 0 && selectedCount === filtered.length;
+  const selectedCount = allSelected && partial && total != null ? total : selectedIds.size;
+  const allRowsSelected = allSelected || (filtered.length > 0 && selectedIds.size === filtered.length);
 
-  const toggleRow = (id: string) =>
+  const toggleRow = (id: string) => {
+    if (allSelected) {
+      // Desmarcar una fila con todo seleccionado: modo explícito sobre lo cargado (S3).
+      setAllSelected(false);
+      setSelected(new Set(filteredIds.filter((x) => x !== id)));
+      return;
+    }
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  const toggleAllRows = () =>
+  };
+  const toggleAllRows = () => {
+    if (allSelected) { setAllSelected(false); setSelected(new Set()); return; }
+    if (partial) { setAllSelected(true); setSelected(new Set(filteredIds)); return; }
     setSelected((prev) => {
       const next = new Set(prev);
       if (allRowsSelected) filteredIds.forEach((id) => next.delete(id));
       else filteredIds.forEach((id) => next.add(id));
       return next;
     });
+  };
 
   // Right-rail summaries derive from the (filtered) rows.
   const bySubjectArea = useMemo(() => {
@@ -472,13 +579,21 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
       toast.error('Pick at least one detail level to export.');
       return;
     }
-    if (selectedRows.length === 0) {
+    if (selectedRows.length === 0 && !(allSelected && partial)) {
       toast.error('Select at least one row to export.');
       return;
     }
     setExporting(true);
     try {
-      const rows = selectedRows;
+      // Doc 92 D5: Select all con páginas pendientes ⇒ TODAS las tablas del
+      // proyecto (se bajan completas para el Excel, sin tocar la grilla).
+      const rows = allSelected && partial
+        ? (await listReportTables(projectId, {})).filter((t) => passSearch(t) && passSchema(t) && passArea(t))
+        : selectedRows;
+      if (rows.length === 0) {
+        toast.error('Select at least one row to export.');
+        return;
+      }
       const wb = XLSX.utils.book_new();
 
       // UDPs como columnas dinámicas (una por def presente en la selección).
@@ -533,8 +648,8 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
 
       if (levels.has('views')) {
         // Vistas derivadas de las tablas seleccionadas: 2 hojas — la vista en
-        // sí (fuentes/filtro/join/SQL) y su detalle columna a columna (alias,
-        // origen, casteo, transformación). Mismo patrón acotado que Columns.
+        // sí (fuentes/SQL/User-Defined SQL) y su detalle columna a columna
+        // (alias, origen, casteo, transformación). Mismo patrón acotado que Columns.
         const ids = rows.map((t) => t.id);
         const idSet = new Set(ids);
         const views = (await listReportViews(projectId, ids.length > 0 && ids.length <= 300 ? ids : undefined))
@@ -544,12 +659,12 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
           Schema: v.schema ?? '',
           'Source tables': v.sourceTables.join(', '),
           '#Columns': v.columns.length,
-          Filter: v.filter ?? '',
-          'Join override': v.joinOverride ?? '',
+          Mode: v.customSql ? 'Personalizada' : 'Regular',
           'On canvas': v.showOnCanvas ? 'Y' : '',
           Canvases: (v.canvases ?? []).join(', '),   // doc 70: membresía por canvas
           Description: v.description ?? '',
           SQL: v.sql ?? '',
+          'User-Defined SQL': v.customSql ?? '',
         }));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(viewsData), 'Views');
         const colsData = views.flatMap((v) =>
@@ -641,14 +756,16 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
                 </button>
               )}
               <span className="dmh-rep-selcount">
-                <strong>{selectedCount} selected</strong> · {filtered.length} table
-                {filtered.length === 1 ? '' : 's'}
-                {!fullLoad && <em className="dmh-rep-selcount-hint"> · first 50 — filter to load all</em>}
+                <strong>{selectedCount.toLocaleString()} selected</strong> ·{' '}
+                {partial
+                  ? <>{tables.length.toLocaleString()} of {total == null ? '…' : total.toLocaleString()} tables</>
+                  : <>{filtered.length.toLocaleString()} table{filtered.length === 1 ? '' : 's'}</>}
+                {partial && <em className="dmh-rep-selcount-hint"> · scroll to load more</em>}
               </span>
             </div>
 
             <div className="dmh-rep-tablewrap">
-              <div className="dmh-rep-tablescroll">
+              <div className="dmh-rep-tablescroll" ref={scrollRef}>
                 {show !== 'tables' ? (
                   <MetaGrid
                     rows={gridRows}
@@ -766,6 +883,12 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
                           </td>
                         </tr>
                       ))
+                    )}
+                    {/* Doc 92 D3: centinela del scroll infinito (sólo sin filtros y con páginas pendientes). */}
+                    {!loading && partial && (
+                      <tr ref={sentinelRef} className="dmh-rep-sentinel">
+                        <td colSpan={8}>{loadingMore ? 'Loading more tables…' : 'Scroll to load more'}</td>
+                      </tr>
                     )}
                   </tbody>
                 </table>

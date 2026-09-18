@@ -651,22 +651,23 @@ Las vistas son **VERSIONADAS** desde el doc 20 (tras la auditoría integral de l
 ```ts
 export interface ViewInput {
   tableId?: string;            // legacy: primera fuente (= sourceTableIds[0])
-  sourceTableIds?: string[];   // F3: fuentes canónicas en orden (alias t1, t2…)
+  sourceTableIds?: string[];   // F3: fuentes canónicas en orden (alias t1, t2…); 2+ ⇒ `FROM t1, t2` (doc 91 D5)
   showOnCanvas?: boolean;      // F3 (D3): la vista aparece en todo canvas con ≥1 fuente
-  joinOverride?: string;       // F3 (D2): condición de JOIN manual
   name: string;
   schema?: string;
-  tags?: Tag[];
-  filter?: string;
-  sources?: ViewSource[];      // proyección columna por columna (07b-2)
+  sources?: ViewSource[];      // proyección columna por columna (07b-2); en User-Defined SQL = todas las columnas de las fuentes (doc 91 D7)
   outputAlias?: string;
   expression?: string;
-  sql?: string;
+  sql?: string;                // referencia congelada (preview / SQL de Erwin)
   description?: string;        // F5: definición a nivel VISTA
+  customSql?: string;          // doc 91 D6: User-Defined SQL — sentencia completa, VERBATIM, sin validar
+  udpValues?: Record<string, string>;  // doc 61: UDPs de nivel 'view'
 }
 ```
 
 Cada `ViewSource` admite además `description` propia (F5, doc 22: definición re-contextualizada de la columna en la vista; vacía = hereda la de la columna física). Antes de registrar el cambio, el service normaliza `tableId` ↔ `sourceTableIds` para que queden coherentes (espejo de la normalización del apply).
+
+> Doc 91 (2026-09-17): `tags`, `filter`, `joinOverride` y `customColumns` se **retiraron** del contrato (los UDP de vista reemplazan a las etiquetas; WHERE/JOIN viven en el User-Defined SQL; las columnas de salida son siempre `sources`). El sandbox `parseViewSql` (`POST /api/views/sql/parse`, Validate) también se eliminó: el User-Defined SQL se guarda tal cual. El generador `viewDDL(view, opts, tableById)` emite `FROM a t1,\n  b t2` con 2+ fuentes y, si `customSql` empieza con `CREATE`, lo devuelve verbatim (`isFullCreateStatement`).
 
 #### 3.3.4. Esquemas (`schemas.service.ts`)
 
@@ -723,6 +724,7 @@ Metadata tabular de solo lectura para la grilla y el export a Excel (también la
 | Función | Método | Ruta | Respuesta |
 |---|---|---|---|
 | `listReportTables(filters)` | GET | `/api/reporting/tables?schema=&projectId=&limit=` | `ReportTableRow[]` |
+> Doc 92: `listReportTables(projectId, { limit, offset })` pagina el scroll infinito (sólo sin filtros) y `countReportTables(projectId)` (`GET /api/reporting/tables/count`) trae el total real de tablas del proyecto.
 | `listReportColumns(tableId?, tableIds?)` | GET | `/api/reporting/columns?tableId=` o `?tableIds=a,b,c` | `ReportColumnRow[]` |
 | `listReportViews(tableIds?, schema?)` | GET | `/api/reporting/views?tableIds=&schema=` | `ReportViewRow[]` — fuentes resueltas + detalle por columna del editor de vistas |
 

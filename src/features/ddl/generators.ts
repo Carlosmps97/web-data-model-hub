@@ -12,6 +12,7 @@
 // by the ruleset's layout rule; column projections of views are emitted as
 // `col AS alias` with the export casing.
 // ─────────────────────────────────────────────────────────────────────────────
+import { foldComplexType } from '@/lib/typeText';
 
 /** Dialects offered by the Export DDL modal. Only `databricks` is implemented;
  *  `oracle` is surfaced as a locked/disabled option per the design. */
@@ -75,19 +76,19 @@ export interface DdlView {
   id: string;
   /** Legacy: primera fuente (compat). El canónico F3 es `sourceTableIds`. */
   tableId?: string;
-  /** F3: fuentes de la vista, en orden — definen los alias posicionales t1, t2… */
+  /** F3: fuentes de la vista, en orden — definen los alias posicionales t1, t2…
+   *  Doc 91 D5: con 2+ fuentes el FROM las lista separadas por coma (como
+   *  Erwin), sin JOIN: `joinOverride`/`filter` ya no existen. */
   sourceTableIds?: string[];
-  /** F3: condición de JOIN manual — se emite VERBATIM (gana a la inferida). */
-  joinOverride?: string;
   name: string;
   schema?: string;
   /** Definición SQL libre (fallback cuando no hay estructura). */
   sql?: string;
-  /** Doc 61: script custom (vista "Personalizada") — si está presente, el
-   *  cuerpo del CREATE VIEW ES este script (gana a sources/filter/join). */
+  /** Doc 61 → doc 91: «User-Defined SQL» (vista "Personalizada") — si está
+   *  presente gana a `sources`: si empieza con `CREATE` es la sentencia
+   *  completa y se emite VERBATIM (User_Defined_SQL de Erwin); si no, es un
+   *  cuerpo suelto legacy y se envuelve en `CREATE OR REPLACE VIEW … AS`. */
   customSql?: string;
-  /** Filtro (WHERE). */
-  filter?: string;
   description?: string;
   /** "On canvas": define la VISTA DE NEGOCIO para las Export rules (doc 30).
    *  NO afecta qué se exporta — solo qué reglas la decoran. */
@@ -138,8 +139,8 @@ export interface DatabricksDdlOptions {
   partitionsLast?: boolean;
   /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_ y
    *  columnas/alias de las proyecciones de vistas). NUNCA aplica a: literales,
-   *  COMMENTs, tipos de datos, expresiones/castType/joinOverride/filter/
-   *  customSql de vistas ni alias generados (t1, t2, …). */
+   *  COMMENTs, tipos de datos, expresiones/castType/customSql de vistas ni
+   *  alias generados (t1, t2, …). */
   identifierCase: IdentifierCase;
 }
 
@@ -167,8 +168,8 @@ export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
 
 // Casing activo del export en curso. `databricksDdl` (único entry point
 // exportado que usa `ident`/`qualify`) lo fija al entrar; así TODO
-// identificador — incluidos los del FROM/JOIN de las vistas multi-fuente
-// (F3b) y los nombres de constraint pk_/fk_ — pasa por el mismo funnel sin
+// identificador — incluidos los del FROM de las vistas multi-fuente (F3b) y
+// los nombres de constraint pk_/fk_ — pasa por el mismo funnel sin
 // enhebrar la opción por call-site. El generador es síncrono ⇒ sin carreras.
 let activeCase: IdentifierCase = 'as-is';
 
@@ -219,8 +220,10 @@ function dbxType(raw: string): string {
   const t0 = (raw || 'string').trim();
   // Tipos complejos (contienen '<'): VERBATIM (F4 #6). Upper-casear rompería
   // la sintaxis interna (campos del STRUCT, tipos anidados). El switch de
-  // casing (identifierCase) tampoco aplica: no son identificadores.
-  if (t0.includes('<')) return t0;
+  // casing (identifierCase) tampoco aplica: no son identificadores. Doc 92
+  // D6: los saltos de línea/tabs que trae Erwin se pliegan a un espacio para
+  // que la definición de la columna salga en UNA línea.
+  if (t0.includes('<')) return foldComplexType(t0);
   const t = t0.toLowerCase();
   const map: Record<string, string> = {
     integer: 'INT', int: 'INT', smallint: 'SMALLINT', tinyint: 'TINYINT', bigint: 'BIGINT',
@@ -330,42 +333,11 @@ function tableDDL(
   return out;
 }
 
-/** Condición de JOIN inferida de las relaciones modeladas entre las fuentes de
- *  una vista (D2, spec §3-5). Para cada fuente después de la primera toma la
- *  PRIMERA relación que la conecte con alguna fuente ANTERIOR y emite
- *  `tA.col = tB.col` con alias POSICIONALES (t1, t2… por orden en
- *  sourceTableIds; la fuente anterior a la izquierda). Une las condiciones con
- *  ' AND '; devuelve '' si ninguna fuente nueva conecta con las previas (el
- *  ViewEditor entonces exige joinOverride). Los alias y nombres de columna se
- *  emiten RAW (sin ident(): no deben casearse — coordinación F4).
- *  Pura — la usan viewDDL y la sección JOIN del ViewEditor. */
-export function inferJoin(
-  sourceTableIds: string[],
-  relationships: DdlRelationship[],
-  columns: DdlColumn[],
-): string {
-  if (sourceTableIds.length < 2) return '';
-  const alias = new Map(sourceTableIds.map((id, i) => [id, `t${i + 1}`]));
-  const colName = new Map(columns.map((c) => [c.id, c.physicalName]));
-  const conds: string[] = [];
-  for (let k = 1; k < sourceTableIds.length; k++) {
-    const cur = sourceTableIds[k];
-    const prev = new Set(sourceTableIds.slice(0, k));
-    const rel = relationships.find(
-      (r) => (r.childTableId === cur && prev.has(r.parentTableId))
-        || (r.parentTableId === cur && prev.has(r.childTableId)),
-    );
-    if (!rel) continue;
-    // TODOS los pares de la relación entran al ON (FK compuesta = AND de pares).
-    for (const p of rel.pairs) {
-      // Extremo de la fuente ANTERIOR primero (se lee izquierda→derecha).
-      const [aTid, aCol, bTid, bCol] = rel.childTableId === cur
-        ? [rel.parentTableId, p.parentColumnId, rel.childTableId, p.childColumnId]
-        : [rel.childTableId, p.childColumnId, rel.parentTableId, p.parentColumnId];
-      conds.push(`${alias.get(aTid)}.${colName.get(aCol) ?? aCol} = ${alias.get(bTid)}.${colName.get(bCol) ?? bCol}`);
-    }
-  }
-  return conds.join(' AND ');
+/** Doc 91 D6: un User-Defined SQL que empieza con CREATE es la sentencia
+ *  completa (User_Defined_SQL de Erwin) y se emite verbatim; cualquier otro
+ *  texto es un cuerpo suelto (docs 61/64) que se envuelve. Pura. */
+export function isFullCreateStatement(sql: string): boolean {
+  return /^\s*create\b/i.test(sql);
 }
 
 /** Un `CREATE OR REPLACE VIEW` desde una vista canónica (F3: multi-fuente).
@@ -374,19 +346,18 @@ export function inferJoin(
  *  (alias = outputAlias o la misma columna) — como escribe la macro. Las
  *  columnas y alias de proyección son identificadores del modelo y respetan
  *  `identifierCase`; con 2+ fuentes se cualifican con alias posicionales t1,
- *  t2… — RAW, nunca via ident() — y el FROM encadena `INNER JOIN` con UNA
- *  condición: `joinOverride` VERBATIM si está seteado, si no la inferida de
- *  `relationships` (inferJoin); sin condición ALGUNA la cadena se emite como
- *  `FULL OUTER JOIN` con `ON 1 = 1` comentado (doc 64 §4a). Sin proyecciones ⇒
- *  `SELECT *` (fallback legacy).
+ *  t2… — RAW, nunca via ident() — y el FROM las lista separadas por COMA, sin
+ *  JOIN ni ON (doc 91 D5, el default de Erwin: `from tabla1, tabla2`); un join
+ *  real se escribe en el User-Defined SQL. Sin proyecciones ⇒ `SELECT *`
+ *  (fallback legacy). User-Defined SQL (doc 91 D6): si empieza con CREATE sale
+ *  VERBATIM (solo se garantiza el `;` final); si es un cuerpo suelto legacy se
+ *  envuelve como antes.
  *  `showOnCanvas` NO participa del export. Exportada: el ViewEditor la usa
  *  para el preview (mismo SQL que el export). */
 export function viewDDL(
   v: DdlView,
   o: DatabricksDdlOptions,
   tableById: Map<string, DdlTable>,
-  relationships: DdlRelationship[] = [],
-  columns: DdlColumn[] = [],
 ): string {
   // Funnel de casing (F4 #7): fija activeCase desde LAS OPCIONES DE ESTA vista.
   // - Como entry point DIRECTO (ViewEditor → viewDDL(...), nunca databricksDdl):
@@ -402,6 +373,18 @@ export function viewDDL(
   const parts = o.unityCatalog ? [o.catalog || 'main', schema, v.name] : [schema, v.name];
   const full = parts.map(ident).join('.');
 
+  // Doc 91 D6 — User-Defined SQL: gana a `sources`. Sentencia completa ⇒
+  // verbatim (nombre/esquema/casing los gobierna el texto, como en Erwin);
+  // cuerpo suelto legacy ⇒ se envuelve (docs 61/64). Sin validación alguna.
+  const custom = (v.customSql ?? '').trim();
+  if (custom) {
+    const stmt = custom.replace(/;\s*$/, '');
+    if (isFullCreateStatement(stmt)) return `${stmt};\n`;
+    let out = `CREATE OR REPLACE VIEW ${full}`;
+    if (o.includeComments && v.description?.trim()) out += ` COMMENT ${lit(v.description.trim())}`;
+    return out + ` AS\n${stmt};\n`;
+  }
+
   const aliased = srcIds.length > 1;
   // Alias POSICIONAL por fuente (t1, t2, …): raw, nunca via ident() (F4).
   const aliasOf = new Map(srcIds.map((id, i) => [id, `t${i + 1}`]));
@@ -413,45 +396,25 @@ export function viewDDL(
   // table-only cae al fallback SELECT *). Trim: una expression solo-espacios
   // es ausencia (evita proyectar `t1.undefined` con payloads directos a la API).
   const srcs = (v.sources ?? []).filter((s) => (s.column ?? '').trim() || (s.expression ?? '').trim());
-  const where = (v.filter ?? '').trim();
 
-  // Doc 61 — vista PERSONALIZADA: el script ES el cuerpo del CREATE VIEW.
-  // Gana a sources/filter/joinOverride (que quedan inactivos mientras el modo
-  // custom esté activo); el backend ya validó/derivó columnas al guardar.
-  const custom = (v.customSql ?? '').trim();
-  if (custom) {
-    let out = `CREATE OR REPLACE VIEW ${full}`;
-    if (o.includeComments && v.description?.trim()) out += ` COMMENT ${lit(v.description.trim())}`;
-    return out + ` AS\n${custom.replace(/;\s*$/, '')};\n`;
-  }
-
-  // FROM: 1 fuente = igual que siempre; 2+ = cadena INNER JOIN con UNA condición.
+  // FROM: 1 fuente = igual que siempre; 2+ = lista separada por coma con alias
+  // posicionales (doc 91 D5 — `from tabla1, tabla2` de Erwin; sin JOIN/ON).
   let from: string;
   if (!srcIds.length) from = `${ident(schema)}.${ident(v.name)}`; // legacy sin tabla
   else if (!aliased) from = refOf(srcIds[0]);
-  else {
-    // Doc 64 §4a: sin condición ALGUNA (ni override ni inferible) la vista se
-    // emite como FULL OUTER JOIN explícito (ON 1 = 1) — el editor ya no
-    // bloquea el guardado; con condición sigue siendo INNER JOIN como siempre.
-    const cond = (v.joinOverride ?? '').trim() || inferJoin(srcIds, relationships, columns);
-    const joinKw = cond ? 'INNER JOIN' : 'FULL OUTER JOIN';
-    const on = cond || '1 = 1 /* no join condition defined — defaulted to FULL OUTER JOIN */';
-    from = `${refOf(srcIds[0])} t1\n`
-      + srcIds.slice(1).map((id) => `  ${joinKw} ${refOf(id)} ${aliasOf.get(id)}`).join('\n')
-      + `\n  ON ${on}`;
-  }
+  else from = srcIds.map((id) => `${refOf(id)} ${aliasOf.get(id)}`).join(',\n  ');
 
   // La vista LISTA sus columnas explícitas (una por línea) en el orden definido.
   // `SELECT *` solo como fallback si la vista no tiene proyección por columna.
   let body: string;
   if (srcs.length === 0) {
-    body = (!base && v.sql?.trim() && !where)
+    body = (!base && v.sql?.trim())
       ? v.sql.trim().replace(/;\s*$/, '')
       : `SELECT *\nFROM ${from}`;
   } else {
     const projections = srcs.map((s) => {
       const rawAlias = (s.outputAlias ?? '').trim();
-      const cast = (s.castType ?? '').trim();
+      const cast = foldComplexType((s.castType ?? '').trim());   // doc 92 D6: una sola línea
       const expr = (s.expression ?? '').trim();
       // Expresión libre: VERBATIM, alias incluido (lo tipeó el modelador junto
       // con la expresión).
@@ -467,7 +430,6 @@ export function viewDDL(
     });
     body = `SELECT\n  ${projections.join(',\n  ')}\nFROM ${from}`;
   }
-  if (where) body += `\nWHERE ${where}`;
 
   let out = `CREATE OR REPLACE VIEW ${full}`;
   if (o.includeComments && v.description?.trim()) out += ` COMMENT ${lit(v.description.trim())}`;
@@ -524,7 +486,7 @@ export function viewStatements(
     const src = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
     return src.length === 0 || src.some((id) => ids.has(id));
   });
-  return exportViews.map((v) => ({ view: v, sql: viewDDL(v, o, tableById, input.relationships, input.columns) }));
+  return exportViews.map((v) => ({ view: v, sql: viewDDL(v, o, tableById) }));
 }
 
 /** Generate Databricks DDL for the selected tables of a diagram. */
@@ -540,9 +502,7 @@ export function databricksDdl(input: DatabricksDdlInput, o: DatabricksDdlOptions
 
   // Vistas (F3): entra toda vista con ALGUNA fuente dentro del set exportado
   // (misma semántica que Properties→Views: la vista "pertenece" a cada fuente).
-  // showOnCanvas NO participa del export. Las relaciones/columnas van SIN
-  // filtrar por el set: el JOIN de la vista es el que es, esté o no exportada
-  // la otra fuente.
+  // showOnCanvas NO participa del export.
   let viewsOut = '';
   if (o.includeViews && input.views?.length) {
     const vs = viewStatements(input, o);

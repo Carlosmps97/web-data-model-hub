@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { sanitizeLogicalName } from '@/lib/logicalName';
 import { sessionProjectId } from '@/store/useSessionStore';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
 import Modal from '@/components/ui/Modal';
@@ -181,7 +182,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
         <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
         <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={submit}>Add</button>
       </>}>
-      <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Attribute name (e.g. monto deuda dólares)' : 'Column name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
+      <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Attribute name (e.g. monto deuda dólares)' : 'Column name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(mode === 'logical' ? sanitizeLogicalName(e.target.value) : e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
       {preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
       <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
         {/* Combobox con buscador (doc 41): contiene, lista acotada con

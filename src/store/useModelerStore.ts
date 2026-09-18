@@ -1470,8 +1470,10 @@ useSessionStore.subscribe((s, prev) => {
 /**
  * Arma el árbol del Model Explorer del proyecto activo a partir del estado plano
  * `folders`/`subjectAreas`: project → carpetas anidadas (por `parentFolderId`) →
- * canvases (por `folderId`; los de `folderId == null` cuelgan de la raíz). Las
- * carpetas y los canvases se ordenan por `order`/nombre para un render estable.
+ * canvases (por `folderId`; los de `folderId == null` cuelgan de la raíz). Doc
+ * 92 D1: carpetas (= subject areas de Erwin, doc 88 §7) y canvases se ordenan
+ * ALFABÉTICAMENTE (case-insensitive); `order` (el orden de Erwin que estampa
+ * el kit) queda sólo como desempate.
  */
 export function buildProjectTree(project: Project, folders: Folder[], canvases: SubjectArea[]): ProjectTree {
   const byParent = new Map<string | null, Folder[]>();
@@ -1484,8 +1486,9 @@ export function buildProjectTree(project: Project, folders: Folder[], canvases: 
     const key = c.folderId ?? null;
     (byFolder.get(key) ?? byFolder.set(key, []).get(key)!).push(c);
   }
-  const sortF = (a: Folder, b: Folder) => a.order - b.order || a.name.localeCompare(b.name);
-  const sortC = (a: SubjectArea, b: SubjectArea) => a.name.localeCompare(b.name);
+  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || a.localeCompare(b);
+  const sortF = (a: Folder, b: Folder) => byName(a.name, b.name) || a.order - b.order;
+  const sortC = (a: SubjectArea, b: SubjectArea) => byName(a.name, b.name);
   const build = (parentId: string | null): FolderNode[] =>
     [...(byParent.get(parentId) ?? [])].sort(sortF).map((folder) => ({
       folder,

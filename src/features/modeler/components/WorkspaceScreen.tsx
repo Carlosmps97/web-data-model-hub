@@ -21,6 +21,8 @@ import NavigatingOverlay from './NavigatingOverlay';
 import DeletionPendingPanel from './DeletionPendingPanel';
 import PublishModal from './PublishModal';
 import { runBlocking } from '@/store/useBusyStore';
+import { useUiStore } from '@/store/useUiStore';
+import { ChevronsRight } from 'lucide-react';
 
 export const pushToast = (m: string, k?: 'err') => (k === 'err' ? toast.error(m) : toast.success(m));
 
@@ -69,6 +71,9 @@ export default function WorkspaceScreen() {
 
   // Ancho resizable del sidebar IZQUIERDO (explorer): mismo patrón, para árboles
   // con nombres largos. El handle vive en el borde derecho de .wk-expl-stack.
+  // Doc 92 D7: Explorer colapsado a un riel de 30 px (más canvas).
+  const explorerCollapsed = useUiStore((s) => s.explorerCollapsed);
+  const toggleExplorer = useUiStore((s) => s.toggleExplorer);
   const [explWidth, setExplWidthRaw] = useState<number | null>(() => {
     try { const v = localStorage.getItem('dmh:explWidth'); return v ? Number(v) : null; } catch { return null; }
   });
@@ -187,16 +192,26 @@ export default function WorkspaceScreen() {
     <div className={`wk${(selectedTableId || selectedColumnId || selectedViewId) && openMode ? ' has-props' : ''}`}
       style={{
         ...(propsWidth ? { ['--props-w']: `${propsWidth}px` } : {}),
-        ...(explWidth ? { ['--expl-w']: `${explWidth}px` } : {}),
+        ...(explorerCollapsed ? { ['--expl-w']: '30px' } : explWidth ? { ['--expl-w']: `${explWidth}px` } : {}),
       } as CSSProperties}>
       <Toolbar pushToast={pushToast} onOpenModel={() => setOpenModelShown(true)} />
       {/* Sidebar (docs 71/72): UN Explorer — por proyecto Models · Tables ·
           Views · Schemas (el catálogo global se retiró; lo cubren ⌘K + Inspect). */}
-      <div className="wk-expl-stack">
-        <ExplorerPanel pushToast={pushToast} onOpenModel={() => setOpenModelShown(true)} />
-        <div className={`wk-expl-resizer${explResizing ? ' dragging' : ''}`}
-          onPointerDown={startExplResize} title="Drag to resize" />
-      </div>
+      {explorerCollapsed ? (
+        <div className="wk-expl-stack wk-expl-rail">
+          <button type="button" className="wk-expl-rail-btn" onClick={toggleExplorer}
+            title="Show the Explorer" aria-label="Show the Explorer" aria-expanded={false}>
+            <ChevronsRight size={14} />
+          </button>
+          <span className="wk-expl-rail-label" aria-hidden>Explorer</span>
+        </div>
+      ) : (
+        <div className="wk-expl-stack">
+          <ExplorerPanel pushToast={pushToast} onOpenModel={() => setOpenModelShown(true)} />
+          <div className={`wk-expl-resizer${explResizing ? ' dragging' : ''}`}
+            onPointerDown={startExplResize} title="Drag to resize" />
+        </div>
+      )}
       <div className="wk-canvas">
         {!openMode ? (
           <div className="rd-small" style={{ padding: 16, color: 'var(--muted)' }}>

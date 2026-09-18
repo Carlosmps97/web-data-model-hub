@@ -5,12 +5,13 @@ import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import { pushUndo } from '@/store/useUndoStore';
-import { DEFAULT_DATABRICKS_OPTS, inferJoin, viewDDL, type DdlView } from '@/features/ddl';
+import { DEFAULT_DATABRICKS_OPTS, viewDDL, type DdlView } from '@/features/ddl';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
 import * as viewsSvc from '@/services/views.service';
-import type { View, ViewInput, ViewSqlParse, ViewSqlError } from '@/services/views.service';
+import type { View, ViewInput } from '@/services/views.service';
 import { viewSourceIds } from '../lib/viewGraph';
-import { VIEW_TYPE_NAME, extractDdlBody, moveSource, syncViewTypeUdp } from '../lib/viewPanelLogic';
+import { allSourceColumns } from '../lib/viewEditorLogic';
+import { VIEW_TYPE_NAME, moveSource, syncViewTypeUdp } from '../lib/viewPanelLogic';
 import { confirmDeleteView } from './deleteConfirm';
 import AuditHistory from './AuditHistory';
 import SchemaSelect from './SchemaSelect';
@@ -37,17 +38,18 @@ const mono: React.CSSProperties = {
 };
 
 /**
- * Panel lateral de propiedades de una VISTA (doc 61) — paridad con el panel de
- * tabla: click al bloque 'view' del canvas lo abre (selectedViewId). Seis
- * pestañas: Definition · Columns (reorden drag&drop + detalle por columna) ·
- * Sources (join/where inline + editor completo) · Query SQL (sandbox del modo
+ * Panel lateral de propiedades de una VISTA (doc 61, doc 91) — paridad con el
+ * panel de tabla: click al bloque 'view' del canvas lo abre (selectedViewId).
+ * Seis pestañas: Definition · Columns (reorden drag&drop + detalle por columna)
+ * · Sources (fuentes + editor completo) · Query SQL (User-Defined SQL, modo
  * Personalizada) · UDP · Metadata (+ historial doc 51).
  *
- * Modo: `customSql` NO vacío = "Personalizada" (el script gobierna columnas y
- * DDL; Sources/reorden quedan inactivos) — la verdad técnica es el campo, el
- * UDP "View Type" se sincroniza como dato reportable (§2.3). Todas las
- * escrituras van por viewsSvc.updateView (changeset-aware, doc completo) con
- * pre-imagen en el Undo (doc 50).
+ * Modo: `customSql` NO vacío = "Personalizada" (la sentencia gobierna el DDL,
+ * verbatim y sin validar — doc 91 D6; `sources` lista todas las columnas de
+ * las fuentes, D7; reorden/edición por columna quedan inactivos) — la verdad
+ * técnica es el campo, el UDP "View Type" se sincroniza como dato reportable
+ * (§2.3). Todas las escrituras van por viewsSvc.updateView (changeset-aware,
+ * doc completo) con pre-imagen en el Undo (doc 50).
  */
 export default function ViewPropertiesPanel({ pushToast, onResize }: {
   pushToast: (m: string, k?: 'err') => void;
@@ -70,15 +72,10 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const [savingDef, setSavingDef] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
-  // Sandbox de Query SQL (doc 61 §2.4): borrador + resultado de validación.
+  // User-Defined SQL (doc 61 §2.4 → doc 91 D6): borrador, sin validación.
   const [sqlDraft, setSqlDraft] = useState('');
   const [customEditing, setCustomEditing] = useState(false);
   const [sqlBusy, setSqlBusy] = useState(false);
-  const [parse, setParse] = useState<ViewSqlParse | null>(null);
-  const [sqlError, setSqlError] = useState<ViewSqlError | null>(null);
-  // Sources inline (join/where): blur-commit, doc 40.
-  const [joinText, setJoinText] = useState('');
-  const [whereText, setWhereText] = useState('');
   const [viewTypeDef, setViewTypeDef] = useState<UdpDefinition | null>(null);
   const [resizing, setResizing] = useState(false);
   // DnD del reorden de columnas (HTML5 nativo — patrón PropertiesPanel).
@@ -98,9 +95,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   useEffect(() => {
     if (!view) return;
     setForm({ name: view.name, schema: view.schema ?? '', description: view.description ?? '' });
-    setWhereText(view.filter ?? '');
     setSqlDraft((view.customSql ?? '').trim());
-    setCustomEditing(false); setParse(null); setSqlError(null); setFocusedIdx(null);
+    setCustomEditing(false); setFocusedIdx(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view?.id]);
 
@@ -128,30 +124,33 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     return () => { alive = false; };
   }, []);
 
-  const tables = diagram?.tables ?? [];
-  const columns = diagram?.columns ?? [];
-  const relationships = diagram?.relationships ?? [];
+  const tables = useMemo(() => diagram?.tables ?? [], [diagram]);
+  const columns = useMemo(() => diagram?.columns ?? [], [diagram]);
   const srcIds = view ? viewSourceIds(view) : [];
   const tableName = (id: string) => tables.find((t) => t.id === id)?.physicalName ?? id;
-  const inferred = useMemo(
-    () => (srcIds.length > 1 ? inferJoin(srcIds, relationships, columns) : ''),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [view?.id, view?.sourceTableIds, relationships, columns]);
-  useEffect(() => { setJoinText(view?.joinOverride ?? inferred); }, [view?.id, view?.joinOverride, inferred]);
+  // Columnas por tabla (orden físico) — doc 91 D7: al pasar a User-Defined SQL
+  // `sources` pasa a ser TODAS las columnas de las fuentes.
+  const colsByTable = useMemo(() => {
+    const m = new Map<string, typeof columns>();
+    for (const c of columns) { const a = m.get(c.tableId) ?? []; a.push(c); m.set(c.tableId, a); }
+    for (const a of m.values()) a.sort((x, y) => x.ordinal - y.ordinal);
+    return m;
+  }, [columns]);
 
   // DDL efectivo con el MISMO generador del Export (una sola fuente de verdad;
-  // viewDDL ya resuelve el modo: customSql gana a sources/filter/join).
+  // viewDDL ya resuelve el modo: customSql gana a sources; doc 91 D5: con 2+
+  // fuentes `FROM t1, t2`).
   const effectiveDdl = useMemo(() => {
     if (!view) return '';
     const dv: DdlView = {
-      id: view.id, name: view.name, schema: view.schema, filter: view.filter,
+      id: view.id, name: view.name, schema: view.schema,
       tableId: view.tableId, sourceTableIds: view.sourceTableIds,
-      joinOverride: view.joinOverride, sources: view.sources, sql: view.sql,
+      sources: view.sources, sql: view.sql,
       customSql: view.customSql, description: view.description,
     };
     return viewDDL(dv, { ...DEFAULT_DATABRICKS_OPTS, includeComments: false },
-      new Map(tables.map((t) => [t.id, t])), relationships, columns).trim();
-  }, [view, tables, relationships, columns]);
+      new Map(tables.map((t) => [t.id, t]))).trim();
+  }, [view, tables]);
 
   // ── Resize (mismo contrato que los otros paneles) ──
   const startResize = (e: ReactPointerEvent) => {
@@ -167,10 +166,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   // Pre-imagen POR VALOR para el Undo (doc 50) — el payload es el doc completo.
   const viewPre = (): View => ({
     ...view,
-    tags: view.tags ? [...view.tags] : undefined,
     sources: view.sources?.map((s) => ({ ...s })),
     sourceTableIds: view.sourceTableIds ? [...view.sourceTableIds] : undefined,
-    customColumns: view.customColumns?.map((c) => ({ ...c })),
     udpValues: view.udpValues ? { ...view.udpValues } : undefined,
   });
 
@@ -213,22 +210,19 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     } catch { pushToast("Couldn't delete", 'err'); }
   };
 
-  // ── Columns: filas visibles (custom: derivadas del script; regular: sources) ──
+  // ── Columns: filas visibles — SIEMPRE desde `sources` (doc 91 D7: en modo
+  // User-Defined SQL son todas las columnas de las fuentes) ──
   const entries = (view.sources ?? [])
     .map((s, i) => ({ s, i }))
     .filter(({ s }) => (s.column ?? '').trim() || (s.expression ?? '').trim());
   const colTypeOf = (tableId: string | undefined, column: string | undefined) =>
     columns.find((c) => c.tableId === (tableId ?? srcIds[0]) && c.physicalName === column);
-  const rows = isCustom
-    ? (view.customColumns ?? []).map((c, i) => ({
-        key: `cc${i}`, idx: i, name: c.name, type: '', fx: !!(c.expression ?? '').trim(),
-      }))
-    : entries.map(({ s, i }) => ({
-        key: `s${i}`, idx: i,
-        name: (s.outputAlias ?? '').trim() || s.column || s.expression || '',
-        type: (s.castType ?? '').trim() || colTypeOf(s.tableId, s.column)?.dataType || '',
-        fx: !!((s.expression ?? '').trim() || (s.castType ?? '').trim()),
-      }));
+  const rows = entries.map(({ s, i }) => ({
+    key: `s${i}`, idx: i,
+    name: (s.outputAlias ?? '').trim() || s.column || s.expression || '',
+    type: (s.castType ?? '').trim() || colTypeOf(s.tableId, s.column)?.dataType || '',
+    fx: !!((s.expression ?? '').trim() || (s.castType ?? '').trim()),
+  }));
   const canDrag = canEdit && !isCustom;
 
   const handleDrop = async (targetIdx: number) => {
@@ -246,53 +240,30 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     try { await saveView({ sources: next }, `Edit view column`); } catch (e) { saveErr(e); }
   };
 
-  // ── Sources inline: join / where (blur-commit) ──
-  const commitJoin = async () => {
-    if (!canEdit || isCustom) return;
-    const next = joinText.trim() && joinText.trim() !== inferred.trim() ? joinText.trim() : undefined;
-    if ((view.joinOverride ?? undefined) === next) return;
-    try { await saveView({ joinOverride: next }, `Edit view ${view.name}`); } catch (e) { saveErr(e); }
-  };
-  const commitWhere = async () => {
-    if (!canEdit || isCustom) return;
-    const next = whereText.trim() || undefined;
-    if ((view.filter ?? undefined) === next) return;
-    try { await saveView({ filter: next }, `Edit view ${view.name}`); } catch (e) { saveErr(e); }
-  };
-
-  // ── Query SQL (sandbox) ──
-  const validateSql = async () => {
-    setSqlBusy(true); setParse(null); setSqlError(null);
-    try { setParse(await viewsSvc.parseViewSql(sqlDraft)); }
-    catch (e) { setSqlError(viewsSvc.parseSqlError(e)); }
-    finally { setSqlBusy(false); }
-  };
+  // ── Query SQL (User-Defined SQL, doc 91 D6/D7): se guarda VERBATIM, sin
+  // validar; `sources` = todas las columnas de las fuentes (lo que pinta el canvas). ──
   const saveCustom = async () => {
-    setSqlBusy(true); setSqlError(null);
+    setSqlBusy(true);
     try {
-      const parsed = await viewsSvc.parseViewSql(sqlDraft);
       await saveView({
-        customSql: sqlDraft.trim(), customColumns: parsed.columns,
+        customSql: sqlDraft.trim(),
+        sources: allSourceColumns(srcIds, colsByTable, view.sources ?? []),
         udpValues: syncViewTypeUdp(view.udpValues, viewTypeDef?.id, true),
       }, `Edit view SQL ${view.name}`, 'Saved — the view is now Personalizada');
-      setParse(parsed); setCustomEditing(false);
-    } catch (e) {
-      const err = viewsSvc.parseSqlError(e);
-      setSqlError(err);
-      if (!err.message) saveErr(e);
-    } finally { setSqlBusy(false); }
+      setCustomEditing(false);
+    } catch (e) { saveErr(e); } finally { setSqlBusy(false); }
   };
   const revertToRegular = async () => {
     const ok = await confirmDialog({
       title: 'Back to Regular',
-      message: <>The custom SQL script will be <strong>discarded</strong> and the view will be generated from its Sources again.</>,
-      confirmLabel: 'Discard script', cancelLabel: 'Cancel', variant: 'danger',
+      message: <>The User-Defined SQL will be <strong>discarded</strong> and the view will be generated from its Sources again (every column of the source tables — prune them in the View Editor).</>,
+      confirmLabel: 'Discard SQL', cancelLabel: 'Cancel', variant: 'danger',
       action: async () => {
         await saveView({
-          customSql: undefined, customColumns: [],
+          customSql: undefined,
           udpValues: syncViewTypeUdp(view.udpValues, viewTypeDef?.id, false),
         }, `Edit view SQL ${view.name}`, 'The view is Regular again');
-        setSqlDraft(''); setCustomEditing(false); setParse(null); setSqlError(null);
+        setSqlDraft(''); setCustomEditing(false);
       },
     }).catch(() => false);
     return ok;
@@ -308,8 +279,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
 
   const udpCount = Object.keys(view.udpValues ?? {}).length;
   const counts: Partial<Record<VTab, number>> = { columns: rows.length, udps: udpCount || undefined };
-  const focused = focusedIdx !== null && !isCustom ? (view.sources ?? [])[focusedIdx] : null;
-  const focusedCustom = focusedIdx !== null && isCustom ? (view.customColumns ?? [])[focusedIdx] : null;
+  const focused = focusedIdx !== null ? (view.sources ?? [])[focusedIdx] : null;
   const editingSql = customEditing || isCustom;
 
   return (
@@ -389,7 +359,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
             </div>
             {isCustom && (
               <p className="wk-pp-cap" style={{ margin: '0 0 6px' }}>
-                Personalizada — the columns come from the custom SQL (Query SQL tab); reordering is disabled.
+                Personalizada — the User-Defined SQL governs the DDL; the canvas lists every column of the source tables. Reordering and per-column edits are disabled.
               </p>
             )}
             {rows.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No columns yet.</div>}
@@ -436,16 +406,9 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
                 <ColumnDetail key={`${view.id}:${focusedIdx}`} src={focused} idx={focusedIdx}
                   sourceTable={tableName(focused.tableId ?? srcIds[0] ?? '')}
                   inheritedType={phys?.dataType ?? ''} inheritedDef={phys?.description ?? ''}
-                  canEdit={canEdit} onSave={saveSourcePatch} />
+                  canEdit={canEdit && !isCustom} onSave={saveSourcePatch} />
               );
             })()}
-            {focusedCustom && (
-              <dl className="wk-pp-meta">
-                <dt>Output name</dt><dd className="rd-mono">{focusedCustom.name}</dd>
-                <dt>Expression</dt><dd className="rd-mono">{focusedCustom.expression ?? '— (direct column)'}</dd>
-                <dt>Origin</dt><dd>Custom SQL (Query SQL tab)</dd>
-              </dl>
-            )}
           </>
         )}
 
@@ -454,7 +417,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
           <>
             {isCustom && (
               <p className="wk-pp-cap" style={{ marginTop: 0 }}>
-                Personalizada — the custom SQL governs this view; the sources configuration below is inactive until you revert to Regular (Query SQL tab).
+                Personalizada — the User-Defined SQL governs this view; the sources below only feed the canvas until you revert to Regular (Query SQL tab).
               </p>
             )}
             <div className="wk-props-sec" style={{ marginTop: 0 }}>Source tables</div>
@@ -466,18 +429,11 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
                 </span>
               ))}
             </div>
-            {srcIds.length > 1 && (
-              <div className="wk-props-field"><label>Join condition{view.joinOverride ? '' : ' (inferred)'}</label>
-                <textarea className="wk-pp-textarea" style={{ minHeight: 54 }} disabled={!canEdit || isCustom}
-                  value={joinText} placeholder={inferred || 't1.ID = t2.ID'}
-                  onChange={(e) => setJoinText(e.target.value)} onBlur={() => void commitJoin()} />
-              </div>
+            {/* Doc 91 D2/D5: sin Join/Where — con 2+ fuentes el DDL las lista
+                `FROM t1, t2` (Erwin); un join o un WHERE viven en el User-Defined SQL. */}
+            {srcIds.length > 1 && !isCustom && (
+              <p className="wk-pp-cap">The DDL lists the sources as <span className="rd-mono">FROM t1, t2…</span> with no JOIN (Erwin default). Need a join or a WHERE? Use User-Defined SQL (Query SQL tab).</p>
             )}
-            <div className="wk-props-field"><label>Filter (WHERE)</label>
-              <textarea className="wk-pp-textarea" style={{ minHeight: 54 }} disabled={!canEdit || isCustom}
-                value={whereText} placeholder="estado = 'A'"
-                onChange={(e) => setWhereText(e.target.value)} onBlur={() => void commitWhere()} />
-            </div>
             <p className="wk-pp-cap">Column participation, aliases and expressions are edited per column (Columns tab) or in the full editor.</p>
             <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={isCustom && canEdit} onClick={() => setEditorOpen(true)}>
               {canEdit ? <Pencil size={12} /> : <Eye size={12} />} Open in View Editor
@@ -490,15 +446,15 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
           <>
             <p className="wk-pp-cap" style={{ marginTop: 0 }}>
               Body of <span className="rd-mono">CREATE OR REPLACE VIEW {view.schema ? `${view.schema}.` : ''}{view.name}</span>.
-              Mode: <strong>{isCustom ? 'Personalizada' : 'Regular'}</strong>{isCustom ? ' (custom script)' : ' (generated from Sources)'}.
+              Mode: <strong>{isCustom ? 'Personalizada' : 'Regular'}</strong>{isCustom ? ' (User-Defined SQL, emitted verbatim)' : ' (generated from Sources)'}.
             </p>
             {!editingSql && (
               <>
                 <pre style={mono}>{effectiveDdl}</pre>
                 {canEdit && (
                   <button className="rd-btn rd-btn-primary rd-btn-sm" style={{ width: '100%', marginTop: 10 }}
-                    onClick={() => { setSqlDraft(extractDdlBody(effectiveDdl)); setCustomEditing(true); setParse(null); setSqlError(null); }}>
-                    Customize SQL (switch to Personalizada)
+                    onClick={() => { setSqlDraft(effectiveDdl); setCustomEditing(true); }}>
+                    User-Defined SQL (switch to Personalizada)
                   </button>
                 )}
               </>
@@ -507,33 +463,19 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
               <>
                 <textarea className="wk-pp-textarea rd-mono" spellCheck={false} disabled={!canEdit}
                   style={{ minHeight: 220, fontSize: 11.5, whiteSpace: 'pre', lineHeight: 1.45 }}
-                  value={sqlDraft} placeholder={'WITH base AS (\n  SELECT …\n)\nSELECT col1, col2 FROM base'}
-                  onChange={(e) => { setSqlDraft(e.target.value); setParse(null); setSqlError(null); }} />
+                  value={sqlDraft} placeholder={'CREATE OR REPLACE VIEW schema.view_name AS\nSELECT t1.col1, t2.col2\nFROM schema.tabla1 t1\n  INNER JOIN schema.tabla2 t2 ON t1.k = t2.k'}
+                  onChange={(e) => setSqlDraft(e.target.value)} />
                 <p className="wk-pp-cap" style={{ margin: '6px 0' }}>
-                  Supports <span className="rd-mono">WITH … AS (…)</span>, joins and subqueries (Databricks SQL). Name every output column — <span className="rd-mono">SELECT *</span> is not allowed.
+                  The full <span className="rd-mono">CREATE VIEW</span> statement (Databricks SQL), saved exactly as written and emitted verbatim in the DDL export — never validated, as in Erwin. On the canvas the view lists every column of its source tables.
                 </p>
-                {sqlError && (
-                  <div className="rd-small" style={{ color: 'var(--error, #C4314B)', marginBottom: 6 }}>
-                    Line {sqlError.line}, col {sqlError.col} — {sqlError.message}
-                  </div>
-                )}
-                {parse && !sqlError && (
-                  <div className="rd-small" style={{ color: 'var(--ok, #1F7A4D)', marginBottom: 6 }}>
-                    ✓ Valid — {parse.columns.length} column{parse.columns.length === 1 ? '' : 's'}
-                    {parse.tables.length > 0 ? <> · reads <span className="rd-mono">{parse.tables.join(', ')}</span></> : null}
-                  </div>
-                )}
                 {canEdit && (
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={sqlBusy || !sqlDraft.trim()} onClick={() => void validateSql()}>
-                      {sqlBusy && <span className="rd-spin" aria-hidden />} Validate
-                    </button>
                     <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={sqlBusy || !sqlDraft.trim()} onClick={() => void saveCustom()}>
-                      Save as Personalizada
+                      {sqlBusy && <span className="rd-spin" aria-hidden />} Save as Personalizada
                     </button>
                     {isCustom
                       ? <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={sqlBusy} onClick={() => void revertToRegular()}>Back to Regular…</button>
-                      : <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={sqlBusy} onClick={() => { setCustomEditing(false); setSqlError(null); setParse(null); }}>Cancel</button>}
+                      : <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={sqlBusy} onClick={() => setCustomEditing(false)}>Cancel</button>}
                   </div>
                 )}
               </>
@@ -557,11 +499,10 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
             <dl className="wk-pp-meta">
               <dt>Name</dt><dd className="rd-mono">{view.name}</dd>
               <dt>Schema</dt><dd className="rd-mono">{view.schema || '—'}</dd>
-              <dt>Mode</dt><dd>{isCustom ? 'Personalizada (custom SQL)' : 'Regular (generated from sources)'}</dd>
+              <dt>Mode</dt><dd>{isCustom ? 'Personalizada (User-Defined SQL)' : 'Regular (generated from sources)'}</dd>
               <dt>Canvases</dt><dd>{canvasNames === null ? '…' : canvasNames.length ? canvasNames.join(' · ') : '—'}</dd>
               <dt>Sources</dt><dd>{srcIds.length === 0 ? '—' : srcIds.map(tableName).join(' · ')}</dd>
               <dt>Columns</dt><dd>{rows.length}</dd>
-              <dt>Tags</dt><dd>{view.tags?.length ? view.tags.length : '—'}</dd>
               <dt>Definition</dt><dd>{view.description || '—'}</dd>
               <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{view.id}</dd>
             </dl>

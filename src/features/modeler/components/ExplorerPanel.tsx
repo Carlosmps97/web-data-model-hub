@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { facetNouns } from '@/lib/facets';
-import { Database, FolderOpen, RefreshCw, Search, X } from 'lucide-react';
+import { Database, FolderOpen, PanelLeftClose, RefreshCw, Search, X } from 'lucide-react';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
+import { useUiStore } from '@/store/useUiStore';
 import ModelExplorer from './ModelExplorer';
 import ProjectCatalog from './ProjectCatalog';
 
@@ -35,6 +36,7 @@ export default function ExplorerPanel({ pushToast, onOpenModel }: {
   const openMode = useSessionStore((s) => s.openMode);
   const projectName = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name ?? null);
   const deletionPending = useModelerStore((s) => s.projectDeletionPending);
+  const toggleExplorer = useUiStore((s) => s.toggleExplorer);
 
   return (
     <div className="wk-explorer" aria-label="Explorer">
@@ -50,6 +52,11 @@ export default function ExplorerPanel({ pushToast, onOpenModel }: {
           disabled={!openMode} aria-label="Refresh the explorer"
           onClick={() => { bumpExplorer(); void refreshExplorer().catch(() => pushToast("Couldn't refresh the explorer", 'err')); }}>
           <RefreshCw size={13} />
+        </button>
+        {/* Doc 92 D7: colapsa el Explorer a un riel (más espacio de canvas). */}
+        <button type="button" className="wk-exp-headbtn" title="Hide the Explorer — more room for the canvas"
+          aria-label="Hide the Explorer" aria-expanded={true} onClick={toggleExplorer}>
+          <PanelLeftClose size={13} />
         </button>
       </div>
       {openMode && (

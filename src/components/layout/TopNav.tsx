@@ -1,10 +1,11 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Database, Search, TriangleAlert } from 'lucide-react';
+import { ChevronDown, ChevronUp, Database, Search, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { useUiStore } from '@/store/useUiStore';
 import type { Permission } from '@/features/auth/auth.service';
 import UserMenu from './UserMenu';
 
@@ -50,6 +51,9 @@ export default function TopNav() {
   // Destino de navegación interceptado por el guard (null = sin popup).
   const [leaveTo, setLeaveTo] = useState<string | null>(null);
   const [savingLeave, setSavingLeave] = useState(false);
+  // Doc 92 D7: el menú principal se colapsa a una franja mínima (más canvas).
+  const navCollapsed = useUiStore((s) => s.navCollapsed);
+  const toggleNav = useUiStore((s) => s.toggleNav);
 
   /** true si interceptó la navegación (hay cambios sin guardar en /model). */
   const intercept = (to: string): boolean => {
@@ -81,6 +85,17 @@ export default function TopNav() {
       setSavingLeave(false);
     }
   };
+
+  if (navCollapsed) {
+    return (
+      <header className="dmh-topnav dmh-topnav--collapsed">
+        <button type="button" className="dmh-topnav-expand" onClick={toggleNav}
+          title="Show the main menu" aria-label="Show the main menu" aria-expanded={false}>
+          <ChevronDown aria-hidden /> Menu
+        </button>
+      </header>
+    );
+  }
 
   return (
     <header className="dmh-topnav">
@@ -117,6 +132,10 @@ export default function TopNav() {
           />
         </div>
         <UserMenu />
+        <button type="button" className="dmh-topnav-collapse" onClick={toggleNav}
+          title="Hide the main menu — more room for the canvas" aria-label="Hide the main menu" aria-expanded={true}>
+          <ChevronUp aria-hidden />
+        </button>
       </div>
 
       {/* ── Popup de cambios sin guardar (guard de salida del modeler) ──

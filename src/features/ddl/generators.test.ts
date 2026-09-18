@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  databricksDdl, viewDDL, inferJoin, orderedPartitions, locationFolder,
+  databricksDdl, viewDDL, isFullCreateStatement, orderedPartitions, locationFolder,
   DEFAULT_DATABRICKS_OPTS as DEF, type DatabricksDdlInput, type DatabricksDdlOptions, type DdlTable, type DdlView, ddlZipName,
 } from './generators';
 
@@ -67,35 +67,59 @@ describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro BCP (doc 76 D9)', () =>
   });
 });
 
-describe('viewDDL — vista Personalizada (doc 61)', () => {
-  const custom: DdlView = {
+describe('viewDDL — User-Defined SQL (doc 61 → doc 91 D6)', () => {
+  const tbl = () => new Map(BASE.tables.map((t) => [t.id, t as DdlTable]));
+  const bodyOnly: DdlView = {
     id: 'v', tableId: 't1', name: 'v_custom', schema: 'core',
     customSql: 'WITH b AS (SELECT ID FROM core.CLIENTE)\nSELECT ID FROM b;',
-    // La config Regular queda INACTIVA mientras el script gobierna:
-    sources: [{ column: 'NOMBRE' }], filter: "estado = 'A'",
+    // `sources` queda INACTIVO para el DDL mientras el script gobierna:
+    sources: [{ column: 'NOMBRE' }],
   };
 
-  it('el script ES el cuerpo del CREATE VIEW (gana a sources/filter) y sale VERBATIM', () => {
-    const ddl = viewDDL(custom, { ...DEF, includeViews: true }, new Map(BASE.tables.map((t) => [t.id, t as DdlTable])));
-    expect(ddl).toContain('CREATE OR REPLACE VIEW `core`.`v_custom` AS\nWITH b AS (SELECT ID FROM core.CLIENTE)\nSELECT ID FROM b;');
-    expect(ddl).not.toContain('NOMBRE');
-    expect(ddl).not.toContain('WHERE');
+  it('isFullCreateStatement: CREATE al inicio (cualquier casing/espacios) vs cuerpo suelto', () => {
+    expect(isFullCreateStatement('CREATE VIEW s.v AS SELECT 1')).toBe(true);
+    expect(isFullCreateStatement('  create or replace view s.v as select 1')).toBe(true);
+    expect(isFullCreateStatement('SELECT 1')).toBe(false);
+    expect(isFullCreateStatement('WITH b AS (SELECT 1) SELECT * FROM b')).toBe(false);
+    expect(isFullCreateStatement('created_at')).toBe(false);
   });
 
-  it('quita el ; final del script (el generador agrega el suyo)', () => {
-    const ddl = viewDDL(custom, { ...DEF, includeViews: true }, new Map(BASE.tables.map((t) => [t.id, t as DdlTable])));
+  it('sentencia completa (User_Defined_SQL de Erwin): sale VERBATIM, sin casing ni COMMENT, con ; garantizado', () => {
+    const uds = "create view  bcp_ddv_x_vm.hm_score\n as select cli.codcli, base.codmes\nFROM bcp_ddv_x.hm_score base\ninner join bcp_udv_int.m_cli cli on base.k = cli.k\nwhere cli.flg = 'SI'";
+    const v: DdlView = { id: 'v', tableId: 't1', name: 'HM_SCORE', schema: 'core', customSql: uds, description: 'desc' };
+    const ddl = viewDDL(v, { ...DEF, includeComments: true, identifierCase: 'upper' }, tbl());
+    expect(ddl).toBe(`${uds};\n`);
+    // el generador NO envuelve, NO casea, NO agrega COMMENT
+    expect(ddl).not.toContain('CREATE OR REPLACE VIEW `');
+    expect(ddl).not.toContain('COMMENT');
+  });
+
+  it('sentencia completa con ; final: no duplica el ;', () => {
+    const v: DdlView = { id: 'v', tableId: 't1', name: 'v', schema: 'core', customSql: 'CREATE VIEW core.v AS SELECT 1;  ' };
+    expect(viewDDL(v, DEF, tbl())).toBe('CREATE VIEW core.v AS SELECT 1;\n');
+  });
+
+  it('se guarda y emite aunque NO sea SQL válido (sin validación, doc 91 D6)', () => {
+    const v: DdlView = { id: 'v', tableId: 't1', name: 'v', schema: 'core', customSql: 'CREATE VIEW core.v AS SELEC x FRM t' };
+    expect(viewDDL(v, DEF, tbl())).toBe('CREATE VIEW core.v AS SELEC x FRM t;\n');
+  });
+
+  it('cuerpo suelto (legacy docs 61/64): se envuelve en CREATE OR REPLACE VIEW … AS y gana a sources', () => {
+    const ddl = viewDDL(bodyOnly, { ...DEF, includeViews: true }, tbl());
+    expect(ddl).toContain('CREATE OR REPLACE VIEW `core`.`v_custom` AS\nWITH b AS (SELECT ID FROM core.CLIENTE)\nSELECT ID FROM b;');
+    expect(ddl).not.toContain('NOMBRE');
     expect(ddl).not.toContain(';;');
   });
 
-  it('COMMENT de la definición funcional sigue funcionando', () => {
-    const ddl = databricksDdl(withView({ ...custom, description: 'vista custom' }), { ...DEF, includeViews: true, includeComments: true });
+  it('cuerpo suelto: COMMENT de la definición funcional sigue funcionando', () => {
+    const ddl = databricksDdl(withView({ ...bodyOnly, description: 'vista custom' }), { ...DEF, includeViews: true, includeComments: true });
     expect(ddl).toContain("COMMENT 'vista custom' AS");
   });
 
   it('customSql vacío/espacios cae al camino Regular', () => {
-    const ddl = databricksDdl(withView({ ...custom, customSql: '   ' }), { ...DEF, includeViews: true });
+    const ddl = databricksDdl(withView({ ...bodyOnly, customSql: '   ' }), { ...DEF, includeViews: true });
     expect(ddl).toContain('nombre AS nombre');
-    expect(ddl).toContain("WHERE estado = 'A'");
+    expect(ddl).not.toContain('WITH b AS');
   });
 });
 
@@ -104,12 +128,12 @@ describe('databricksDdl — vistas (editor 07b-2)', () => {
     expect(databricksDdl(withView({ id: 'v', tableId: 't1', name: 'v_c', schema: 'core' }), { ...DEF, includeViews: false })).not.toContain('VIEW');
   });
 
-  it('SELECT * (fallback) solo cuando la vista NO tiene proyección (legacy) + WHERE', () => {
-    const ddl = databricksDdl(withView({ id: 'v', tableId: 't1', name: 'v_cliente', schema: 'core', filter: "estado = 'A'" }), { ...DEF, includeViews: true });
+  it('SELECT * (fallback) solo cuando la vista NO tiene proyección (legacy); sin WHERE (doc 91 D2)', () => {
+    const ddl = databricksDdl(withView({ id: 'v', tableId: 't1', name: 'v_cliente', schema: 'core' }), { ...DEF, includeViews: true });
     expect(ddl).toContain('CREATE OR REPLACE VIEW `core`.`v_cliente`');
     expect(ddl).toContain('SELECT *');
     expect(ddl).toContain('FROM `core`.`cliente`');
-    expect(ddl).toContain("WHERE estado = 'A'");
+    expect(ddl).not.toContain('WHERE');
   });
 
   it('con TODAS las columnas como sources => las LISTA explícitas `col AS col` (doc 76 D10)', () => {
@@ -150,47 +174,6 @@ describe('databricksDdl — vistas (editor 07b-2)', () => {
   });
 });
 
-describe('inferJoin — condición de JOIN inferida (F3, spec §3-5 D2)', () => {
-  const COLS = [
-    { id: 'c1', tableId: 't1', physicalName: 'ID', dataType: 'bigint', ordinal: 0 },
-    { id: 'c2', tableId: 't2', physicalName: 'CLIENTE_ID', dataType: 'bigint', ordinal: 0 },
-    { id: 'c3', tableId: 't2', physicalName: 'ID', dataType: 'bigint', ordinal: 1 },
-    { id: 'c4', tableId: 't3', physicalName: 'CUENTA_ID', dataType: 'bigint', ordinal: 0 },
-  ];
-  const R = (id: string, pT: string, pC: string, cT: string, cC: string) =>
-    ({ id, parentTableId: pT, childTableId: cT, pairs: [{ parentColumnId: pC, childColumnId: cC }] });
-
-  it('2 fuentes con FK hija→padre: fuente ANTERIOR primero (t1.pk = t2.fk)', () => {
-    expect(inferJoin(['t1', 't2'], [R('r1', 't1', 'c1', 't2', 'c2')], COLS))
-      .toBe('t1.ID = t2.CLIENTE_ID');
-  });
-
-  it('orientación de la relación indistinta (padre/hijo invertidos, mismo resultado)', () => {
-    expect(inferJoin(['t1', 't2'], [R('r1', 't2', 'c2', 't1', 'c1')], COLS))
-      .toBe('t1.ID = t2.CLIENTE_ID');
-  });
-
-  it('3 fuentes encadenadas: condiciones unidas con AND', () => {
-    const rels = [R('r1', 't1', 'c1', 't2', 'c2'), R('r2', 't2', 'c3', 't3', 'c4')];
-    expect(inferJoin(['t1', 't2', 't3'], rels, COLS))
-      .toBe('t1.ID = t2.CLIENTE_ID AND t2.ID = t3.CUENTA_ID');
-  });
-
-  it('sin relación entre las fuentes ⇒ cadena vacía (el editor exige joinOverride)', () => {
-    expect(inferJoin(['t1', 't3'], [R('r1', 't1', 'c1', 't2', 'c2')], COLS)).toBe('');
-  });
-
-  it('menos de 2 fuentes ⇒ cadena vacía', () => {
-    expect(inferJoin(['t1'], [], COLS)).toBe('');
-    expect(inferJoin([], [], COLS)).toBe('');
-  });
-
-  it('ids de columna desconocidos degradan al id crudo (no revienta)', () => {
-    expect(inferJoin(['t1', 't2'], [R('r1', 't1', 'cy', 't2', 'cx')], COLS))
-      .toBe('t1.cy = t2.cx');
-  });
-});
-
 describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () => {
   const TWO: DatabricksDdlInput = {
     tables: [
@@ -214,11 +197,19 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     ],
   };
 
-  it('FROM primera fuente t1 + INNER JOIN resto ON inferido de relationships', () => {
+  it('doc 91 D5: FROM lista las fuentes separadas por coma con alias posicionales, SIN JOIN ni ON (aunque haya relación)', () => {
     const ddl = databricksDdl({ ...TWO, views: [V] }, { ...DEF, includeViews: true });
-    expect(ddl).toContain('FROM `core`.`cliente` t1');
-    expect(ddl).toContain('INNER JOIN `core`.`cuenta` t2');
-    expect(ddl).toContain('ON t1.ID = t2.CLIENTE_ID');
+    expect(ddl).toContain('FROM `core`.`cliente` t1,\n  `core`.`cuenta` t2;');
+    expect(ddl).not.toMatch(/\bJOIN\b/);
+    expect(ddl).not.toMatch(/\bON\b/);
+    expect(ddl).not.toContain('WHERE');
+  });
+
+  it('3 fuentes: t1, t2, t3 en el orden de sourceTableIds', () => {
+    const three: DatabricksDdlInput = { ...TWO, tables: [...TWO.tables, { id: 't3', physicalName: 'MOVIMIENTO', schema: 'core' }] };
+    const v: DdlView = { ...V, sourceTableIds: ['t1', 't2', 't3'], sources: [{ column: 'ID', tableId: 't1' }] };
+    const ddl = databricksDdl({ ...three, views: [v] }, { ...DEF, includeViews: true });
+    expect(ddl).toContain('FROM `core`.`cliente` t1,\n  `core`.`cuenta` t2,\n  `core`.`movimiento` t3;');
   });
 
   it('columnas cualificadas con alias posicional + CAST(col AS tipo) AS alias', () => {
@@ -227,19 +218,10 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     expect(ddl).toContain('CAST(t2.saldo AS STRING) AS saldo_txt');
   });
 
-  it('joinOverride gana sobre la condición inferida y se emite VERBATIM', () => {
-    const ddl = databricksDdl(
-      { ...TWO, views: [{ ...V, joinOverride: 't1.ID = t2.CLIENTE_ID AND t2.SALDO > 0' }] },
-      { ...DEF, includeViews: true },
-    );
-    expect(ddl).toContain('ON t1.ID = t2.CLIENTE_ID AND t2.SALDO > 0');
-  });
-
-  it('sin relación ni joinOverride ⇒ FULL OUTER JOIN con 1 = 1 comentado (doc 64 §4a)', () => {
+  it('sin relación modelada el FROM es el mismo (el join, si hace falta, va en el User-Defined SQL)', () => {
     const ddl = databricksDdl({ ...TWO, relationships: [], views: [V] }, { ...DEF, includeViews: true });
-    expect(ddl).toContain('FULL OUTER JOIN');
-    expect(ddl).toContain('ON 1 = 1 /* no join condition defined — defaulted to FULL OUTER JOIN */');
-    expect(ddl).not.toContain('INNER JOIN');
+    expect(ddl).toContain('FROM `core`.`cliente` t1,\n  `core`.`cuenta` t2;');
+    expect(ddl).not.toMatch(/\bJOIN\b/);
   });
 
   it('UNA fuente: sin alias ni cualificación (regresión legacy); CAST sin alias conserva el nombre', () => {
@@ -260,7 +242,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
   it('fuente FUERA del contexto (tabla desconocida): id backtickeado visible', () => {
     const v: DdlView = { ...V, sourceTableIds: ['t1', 'tx'], sources: [{ column: 'ID', tableId: 't1' }] };
     const ddl = databricksDdl({ ...TWO, views: [v] }, { ...DEF, includeViews: true });
-    expect(ddl).toContain('FULL OUTER JOIN `tx` t2');
+    expect(ddl).toContain('FROM `core`.`cliente` t1,\n  `tx` t2;');
   });
 
   it('expression se emite VERBATIM también con 2+ fuentes (sin cualificar)', () => {
@@ -380,26 +362,16 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
    *  contra los CREATE TABLE de arriba. */
   const viewPart = (ddl: string) => ddl.slice(ddl.indexOf('CREATE OR REPLACE VIEW'));
 
-  it("'upper' casea nombre de vista, tablas del FROM/JOIN y columnas/alias de proyección; alias generados t1/t2 quedan tal cual", () => {
+  it("'upper' casea nombre de vista, tablas del FROM y columnas/alias de proyección; alias generados t1/t2 quedan tal cual", () => {
     const vp = viewPart(databricksDdl(MULTI, { ...CLASSIC, includeViews: true, identifierCase: 'upper' }));
     expect(vp).toContain('CREATE OR REPLACE VIEW `CORE`.`V_CLIENTE_CUENTA`');
-    expect(vp).toContain('`CORE`.`CLIENTE`');
-    expect(vp).toContain('`CORE`.`CUENTA`');
+    expect(vp).toContain('FROM `CORE`.`CLIENTE` t1,\n  `CORE`.`CUENTA` t2;');
     expect(vp).toContain('t1.ID AS ID');
     expect(vp).toContain('t2.CLIENTEID AS CUENTA_ID');
     expect(vp).toMatch(/\bt1\b/);      // alias generado: minúscula intacta
     expect(vp).not.toMatch(/\bT1\b/);
     expect(vp).toMatch(/\bt2\b/);
     expect(vp).not.toMatch(/\bT2\b/);
-  });
-
-  it('joinOverride se emite VERBATIM (sin casing)', () => {
-    const input: DatabricksDdlInput = {
-      ...MULTI,
-      views: [{ ...MULTI.views![0], joinOverride: 't1.Id = t2.ClienteId' }],
-    };
-    const vp = viewPart(databricksDdl(input, { ...CLASSIC, includeViews: true, identifierCase: 'upper' }));
-    expect(vp).toContain('t1.Id = t2.ClienteId');
   });
 
   it('expresiones de vista se emiten VERBATIM (sin casing)', () => {
@@ -425,11 +397,10 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
 
   // ── Criterio obligatorio #2 (controller): 2 fuentes bajo 'upper' — un solo
   //    caso que congela TODAS las reglas verbatim junto al casing del FROM/JOIN.
-  it("2 fuentes bajo 'upper': FROM/JOIN caseados; alias/joinOverride/expression/castType VERBATIM", () => {
+  it("2 fuentes bajo 'upper': FROM caseado; alias/expression/castType VERBATIM", () => {
     const v: DdlView = {
       id: 'v', tableId: 't1', name: 'v_multi', schema: 'Core',
       sourceTableIds: ['t1', 't2'],
-      joinOverride: 't1.Id = t2.ClienteId',
       sources: [
         { column: 'Id', tableId: 't1' },
         { column: 'Saldo', tableId: 't2', expression: 'ROUND(t2.saldo, 2)', outputAlias: 'saldo_r' },
@@ -437,14 +408,11 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
       ],
     };
     const vp = viewPart(databricksDdl({ ...MULTI, views: [v] }, { ...CLASSIC, includeViews: true, identifierCase: 'upper' }));
-    // FROM/JOIN: nombres del modelo caseados.
-    expect(vp).toContain('FROM `CORE`.`CLIENTE` t1');
-    expect(vp).toContain('INNER JOIN `CORE`.`CUENTA` t2');
+    // FROM: nombres del modelo caseados, fuentes separadas por coma (doc 91 D5).
+    expect(vp).toContain('FROM `CORE`.`CLIENTE` t1,\n  `CORE`.`CUENTA` t2;');
     // Alias generados: minúscula intacta (no `T1`/`T2`).
     expect(vp).not.toMatch(/\bT1\b/);
     expect(vp).not.toMatch(/\bT2\b/);
-    // joinOverride: VERBATIM (gana a la inferida, sin casing).
-    expect(vp).toContain('ON t1.Id = t2.ClienteId');
     // expression: VERBATIM, alias incluido.
     expect(vp).toContain('ROUND(t2.saldo, 2) AS saldo_r');
     // castType: VERBATIM (tipo de dato, no identificador); columna y alias caseados.
@@ -459,7 +427,7 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
     databricksDdl(MULTI, { ...CLASSIC, includeViews: true, identifierCase: 'upper' });
     // Ahora el ViewEditor llama viewDDL directo con el perfil clásico ('as-is').
     const tableById = new Map<string, DdlTable>(MULTI.tables.map((t) => [t.id, t]));
-    const out = viewDDL(MULTI.views![0], CLASSIC, tableById, MULTI.relationships, MULTI.columns);
+    const out = viewDDL(MULTI.views![0], CLASSIC, tableById);
     // Identificadores del modelo: tal cual (no caseados por el export previo).
     expect(out).toContain('CREATE OR REPLACE VIEW `Core`.`v_cliente_cuenta`');
     expect(out).toContain('`Core`.`Cliente`');
@@ -491,6 +459,13 @@ describe('databricksDdl — tipos complejos verbatim (F4 #6)', () => {
     const t = 'STRUCT<Nombre:STRING>';
     expect(databricksDdl(complex(t), { ...DEF, identifierCase: 'upper' })).toContain(t);
     expect(databricksDdl(complex(t), { ...DEF, identifierCase: 'lower' })).toContain(t);
+  });
+
+  it('doc 92 D6: un tipo complejo multilínea (como lo trae Erwin) sale en UNA línea, verbatim en casing', () => {
+    const erwin = 'Array \n<\n\tstruct <\n\tcodcampania: varchar(30),\n\tfecsolicitud: date\n\t>\n>';
+    const ddl = databricksDdl(complex(erwin), DEF);
+    expect(ddl).toContain('`payload` Array < struct < codcampania: varchar(30), fecsolicitud: date > >');
+    expect(ddl.split('\n').filter((l) => l.includes('codcampania'))).toHaveLength(1);
   });
 
   it('los tipos simples siguen mapeando igual que antes', () => {

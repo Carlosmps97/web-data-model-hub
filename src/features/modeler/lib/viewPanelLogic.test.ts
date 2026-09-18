@@ -1,6 +1,6 @@
 // Doc 61: helpers puros del panel de Properties de vista.
 import { describe, expect, it } from 'vitest';
-import { extractDdlBody, moveSource, syncViewTypeUdp } from './viewPanelLogic';
+import { moveSource, syncViewTypeUdp } from './viewPanelLogic';
 import type { ViewSource } from '@/services/views.service';
 
 const srcs: ViewSource[] = [
@@ -31,15 +31,5 @@ describe('syncViewTypeUdp', () => {
     const vals = { x: '1' };
     expect(syncViewTypeUdp(vals, null, true)).toBe(vals);
     expect(syncViewTypeUdp(undefined, undefined, true)).toBeUndefined();
-  });
-});
-
-describe('extractDdlBody', () => {
-  it('extrae el SELECT del CREATE VIEW generado', () => {
-    const ddl = 'CREATE OR REPLACE VIEW `s`.`v` AS\nSELECT\n  ID\nFROM `s`.`T`;\n';
-    expect(extractDdlBody(ddl)).toBe('SELECT\n  ID\nFROM `s`.`T`');
-  });
-  it('sin marcador devuelve el texto sin ; final', () => {
-    expect(extractDdlBody('SELECT 1;')).toBe('SELECT 1');
   });
 });

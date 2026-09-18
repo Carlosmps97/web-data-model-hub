@@ -94,15 +94,13 @@ export interface ReportViewRow {
   sourceTableIds: string[];
   /** Fuentes resueltas a `schema.tabla` legible. */
   sourceTables: string[];
-  /** WHERE de la vista (si tiene). */
-  filter?: string | null;
-  /** Condición de JOIN manual (multi-fuente). */
-  joinOverride?: string | null;
   showOnCanvas: boolean;
   /** Doc 70: canvases donde la vista es miembro (nombres). */
   canvases?: string[];
   description?: string | null;
   sql?: string | null;
+  /** Doc 91: User-Defined SQL (verbatim) cuando la vista es Personalizada. */
+  customSql?: string | null;
   columns: Array<{
     outputAlias?: string | null;
     sourceTable?: string | null;
@@ -117,6 +115,8 @@ export interface ReportTableFilters {
   schema?: string;
   /** Cap the number of rows (lighter initial load). */
   limit?: number;
+  /** Doc 92 D3: página del scroll infinito (sólo sin filtros, orden físico). */
+  offset?: number;
 }
 
 /** Lists the project's table-level reporting rows, optionally narrowed by schema. */
@@ -124,7 +124,15 @@ export function listReportTables(projectId: string, filters: ReportTableFilters 
   const qs = new URLSearchParams();
   if (filters.schema) qs.set('schema', filters.schema);
   if (filters.limit != null) qs.set('limit', String(filters.limit));
+  if (filters.offset) qs.set('offset', String(filters.offset));
   return apiGet<ReportTableRow[]>(`${API_BASE}/api/reporting/tables${withProject(projectId, qs)}`);
+}
+
+/** Doc 92 D4: total de tablas activas del proyecto (conteo real de la barra y
+ *  del Select all, aunque la grilla tenga cargada sólo una página). */
+export function countReportTables(projectId: string): Promise<number> {
+  return apiGet<{ total: number }>(`${API_BASE}/api/reporting/tables/count${withProject(projectId, new URLSearchParams())}`)
+    .then((r) => r.total);
 }
 
 /** Lists the project's column-level reporting rows. Pass `tableIds` to scope

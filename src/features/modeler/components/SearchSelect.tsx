@@ -34,7 +34,7 @@ interface MenuPos {
  * contenedor; flip hacia arriba si abajo no entra; un scroll FUERA del menú o
  * un resize lo cierran (patrón select nativo — no se re-posiciona).
  */
-export default function SearchSelect({ options, valueLabel, placeholder, onPick, disabled, mono, emptyLabel, inputClassName, inputStyle }: {
+export default function SearchSelect({ options, valueLabel, placeholder, onPick, disabled, mono, emptyLabel, inputClassName, inputStyle, matchDetail }: {
   options: SearchOption[];
   /** Etiqueta del valor actual ('' si no hay). */
   valueLabel: string;
@@ -49,6 +49,9 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
   /** Estilos extra del INPUT (doc 52 — SchemaSelect reenvía acá su `style`);
    *  el padding derecho del caret se re-impone después. */
   inputStyle?: React.CSSProperties;
+  /** Doc 91 D4: el filtro «contiene» también mira `detail` (p.ej. el nombre
+   *  lógico de una tabla junto a su `schema.físico`). */
+  matchDetail?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -58,7 +61,8 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const base: SearchOption[] = emptyLabel != null ? [{ value: '', label: emptyLabel }, ...options] : options;
-  const filtered = query.trim() === '' ? base : base.filter((o) => containsCI(o.label, query));
+  const filtered = query.trim() === '' ? base
+    : base.filter((o) => containsCI(o.label, query) || (!!matchDetail && !!o.detail && containsCI(o.detail, query)));
 
   useEffect(() => {
     if (!open) return;
