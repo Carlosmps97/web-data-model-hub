@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { facetNouns, PHYSICAL_ONLY_TOOL_TIP, toolAvailableIn } from '@/lib/facets';
 import { createPortal } from 'react-dom';
 import {
-  Table2, Combine, Network, Search, Save, ArrowUpToLine,
+  Table2, Combine, Network, Search, Save, ArrowUpToLine, ChevronDown, ChevronUp,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
   FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
 } from 'lucide-react';
@@ -14,6 +14,7 @@ import { useUndoStore } from '@/store/useUndoStore';
 import { UNDO_KEY_LABEL } from './ColumnContextMenu';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
+import { useUiStore } from '@/store/useUiStore';
 import { runBlocking } from '@/store/useBusyStore';
 import { isAsOfChangesetId } from '@/services/versioning.service';
 import { UploadModal } from '@/features/upload';
@@ -55,6 +56,9 @@ const VIEWER_TIP = 'Read-only — published version';
 
 
 export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: string, k?: 'err') => void; onOpenModel?: () => void }) {
+  // Doc 92 D7: barra de herramientas colapsable (la navegación de módulos no).
+  const toolbarCollapsed = useUiStore((st) => st.toolbarCollapsed);
+  const toggleToolbar = useUiStore((st) => st.toggleToolbar);
   const activeSaId = useModelerStore((s) => s.activeSaId);
   const diagram = useModelerStore((s) => s.diagram);
   const relPreset = useModelerStore((s) => s.relPreset);
@@ -214,7 +218,23 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   );
 
   return (
-    <div className="wk-toolbar">
+    <div className={`wk-toolbar${toolbarCollapsed ? ' wk-toolbar--collapsed' : ''}`}>
+      {/* Doc 92 D7: barra colapsada a una franja — sólo el botón para mostrarla
+          y el contexto de la versión; los popups (abajo) siguen montados. */}
+      {toolbarCollapsed && (
+        <div className="wk-tb-strip">
+          <button type="button" className="wk-tb-expand" onClick={toggleToolbar}
+            title="Show the tools bar" aria-label="Show the tools bar" aria-expanded={false}>
+            <ChevronDown size={13} /> Tools
+          </button>
+          {openMode && (
+            <span className="wk-tb-strip-ctx">
+              {projectName ? `«${projectName}» · ` : ''}{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}
+            </span>
+          )}
+        </div>
+      )}
+      {!toolbarCollapsed && (<>
       {/* MODEL (doc 86): el «botón padre» lógico/físico estilo Erwin — gobierna
           explorer, tools, popups, UDPs, dominios y labels del canvas. */}
       <div className="wk-grp">
@@ -397,8 +417,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         <Tooltip label={readonly ? VIEWER_TIP : 'Publish version'}>
           <button className="wk-publish" disabled={!canEdit} onClick={() => setPublishOpen(true)}><ArrowUpToLine size={15} />Publish</button>
         </Tooltip>
+        {/* Doc 92 D7: colapsa la barra de herramientas (más espacio de canvas). */}
+        <Tooltip label="Hide the tools bar — more room for the canvas">
+          <button type="button" className="wk-tb-collapse" onClick={toggleToolbar} aria-label="Hide the tools bar" aria-expanded={true}>
+            <ChevronUp size={15} />
+          </button>
+        </Tooltip>
         </div>
       </div>
+      </>)}
 
       {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={createTable} />}
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}

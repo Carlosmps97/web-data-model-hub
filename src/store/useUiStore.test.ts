@@ -16,12 +16,12 @@ const { useUiStore } = await import('./useUiStore');
 describe('useUiStore (doc 92 D7 — chrome colapsable)', () => {
   beforeEach(() => {
     mem.clear();
-    useUiStore.setState({ navCollapsed: false, explorerCollapsed: false });
+    useUiStore.setState({ toolbarCollapsed: false, explorerCollapsed: false });
   });
   it('toggles y persiste en localStorage', () => {
-    useUiStore.getState().toggleNav();
-    expect(useUiStore.getState().navCollapsed).toBe(true);
-    expect(localStorage.getItem('dmh:ui:navCollapsed')).toBe('1');
+    useUiStore.getState().toggleToolbar();
+    expect(useUiStore.getState().toolbarCollapsed).toBe(true);
+    expect(localStorage.getItem('dmh:ui:toolbarCollapsed')).toBe('1');
     useUiStore.getState().toggleExplorer();
     useUiStore.getState().toggleExplorer();
     expect(useUiStore.getState().explorerCollapsed).toBe(false);

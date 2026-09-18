@@ -74,6 +74,7 @@ export default function WorkspaceScreen() {
   // Doc 92 D7: Explorer colapsado a un riel de 30 px (más canvas).
   const explorerCollapsed = useUiStore((s) => s.explorerCollapsed);
   const toggleExplorer = useUiStore((s) => s.toggleExplorer);
+  const toolbarCollapsed = useUiStore((s) => s.toolbarCollapsed);
   const [explWidth, setExplWidthRaw] = useState<number | null>(() => {
     try { const v = localStorage.getItem('dmh:explWidth'); return v ? Number(v) : null; } catch { return null; }
   });
@@ -189,7 +190,7 @@ export default function WorkspaceScreen() {
   };
 
   return (
-    <div className={`wk${(selectedTableId || selectedColumnId || selectedViewId) && openMode ? ' has-props' : ''}`}
+    <div className={`wk${(selectedTableId || selectedColumnId || selectedViewId) && openMode ? ' has-props' : ''}${toolbarCollapsed ? ' tb-collapsed' : ''}`}
       style={{
         ...(propsWidth ? { ['--props-w']: `${propsWidth}px` } : {}),
         ...(explorerCollapsed ? { ['--expl-w']: '30px' } : explWidth ? { ['--expl-w']: `${explWidth}px` } : {}),

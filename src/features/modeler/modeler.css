@@ -219,6 +219,18 @@
 .wk-publish { background: var(--green); color: #fff; border: 1px solid var(--green); }                    /* #16A37B */
 .wk-publish:hover:not(:disabled) { background: var(--green-deep); border-color: var(--green-deep); }
 .wk-save:disabled, .wk-publish:disabled { opacity: .45; cursor: not-allowed; }
+/* Doc 92 D7: barra de herramientas colapsada a una franja de 24 px (más canvas). */
+.wk.tb-collapsed { grid-template-rows: 24px 1fr 34px; }
+.wk-toolbar--collapsed { height: 24px; min-height: 24px; align-items: center; padding: 0 10px; overflow: hidden; flex-wrap: nowrap; }
+.wk-tb-strip { display: flex; align-items: center; gap: 10px; min-width: 0; height: 100%; }
+.wk-tb-expand { height: 18px; display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; flex: none;
+  border: 1px solid var(--border-soft); border-radius: 6px; background: var(--fill-3, #F4F6F9); font-family: inherit;
+  font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted-2); cursor: pointer; }
+.wk-tb-expand:hover { background: var(--fill-4); color: var(--primary); }
+.wk-tb-strip-ctx { font-size: 11px; color: var(--text-muted-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-tb-collapse { width: 30px; height: 36px; display: inline-flex; align-items: center; justify-content: center; flex: none;
+  border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text-muted-2); cursor: pointer; }
+.wk-tb-collapse:hover { background: var(--fill-2); color: var(--primary); }
 
 /* ── PublishModal (Screen 04b — request approval) ── */
 .ppub { display: flex; flex-direction: column; gap: 14px; }

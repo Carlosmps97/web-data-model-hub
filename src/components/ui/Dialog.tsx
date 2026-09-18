@@ -81,8 +81,14 @@ export default function Dialog({
   if (!open) return null;
 
   const isCanvas = backdrop === 'canvas';
+  // Doc 92 D7: el borde superior del canvas se MIDE del DOM cuando existe —
+  // con la barra de herramientas colapsada (o envuelta en 2 filas, doc 64 §5)
+  // el 136 fijo de los callers ya no coincide; `canvasTop` queda de fallback.
+  const measuredTop = isCanvas && typeof document !== 'undefined'
+    ? document.querySelector<HTMLElement>('.wk-canvas')?.getBoundingClientRect().top
+    : undefined;
   const overlayStyle: React.CSSProperties = isCanvas
-    ? { top: canvasTop, left: 0, right: 0, bottom: 0 }
+    ? { top: measuredTop != null && measuredTop > 0 ? Math.round(measuredTop) : canvasTop, left: 0, right: 0, bottom: 0 }
     : { inset: 0 };
 
   return createPortal(
