@@ -207,7 +207,7 @@ function Overview({ snapshot, versions, canEdit, meName, projectName, onGo, onHi
 
         <div style={{ display: 'flex', gap: 12, background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 12, padding: '13px 16px', marginBottom: 22, fontSize: 12.5, color: '#7A6220', lineHeight: 1.5 }}>
           <TriangleAlert size={18} color="#B98600" style={{ flex: 'none', marginTop: 1 }} />
-          <div><strong style={{ color: '#8A6D1F' }}>Project scope.</strong> Editing a naming rule or a domain re-derives physical names and data types in every table of <strong>{projectName}</strong> only. Other projects are never affected. That is why standards live in their own module, separate from the canvas and restricted.</div>
+          <div><strong style={{ color: '#8A6D1F' }}>Project scope.</strong> Editing a glossary term, a naming rule or a domain can re-derive physical names and data types in <strong>{projectName}</strong> only — glossary changes show you exactly which names change before applying. Other projects are never affected. That is why standards live in their own module, separate from the canvas and restricted.</div>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 26 }}>

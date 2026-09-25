@@ -586,8 +586,6 @@ Operaciones de modelo mapeadas a `PUT /api/changesets/{id}/changes`:
 | `deleteTable(id)` — soft-delete versionado; el cascade (columnas/relaciones/vistas/membresías) lo orquesta el store, doc 23; desde doc 39 vistas+relaciones+columnas viajan EN LOTE (`recordChangesBulk`) y la tabla cierra la cascada | `canonical_tables` | `delete` |
 | `createColumn(c)` / `updateColumn(c)` | `canonical_columns` | `upsert` |
 | `deleteColumn(id)` | `canonical_columns` | `delete` |
-| `markForeignKey(col, identifying, pkPosition?)` | `canonical_columns` | `upsert` |
-| `markPrimaryKey(col, pkPosition?)` — el extremo padre de un wire se vuelve PK, doc 19 | `canonical_columns` | `upsert` |
 | `createRelationship(r)` / `updateRelationship(r)` | `relationships` | `upsert` |
 | `deleteRelationship(id)` | `relationships` | `delete` |
 
@@ -839,10 +837,11 @@ Estos recursos son configuración **del proyecto** (doc 75 D3; NO parte de un pu
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
 | `listTerms(projectId, scope)` | GET | `/api/projects/{pid}/glossary?scope=table\|column` | — | `DictTerm[]` |
-| `createTerm(projectId, x)` | POST | `/api/projects/{pid}/glossary` | `{ term, abbrev, scope, wordType? }` | `DictTerm` |
-| `updateTerm(projectId, id, x)` | PUT | `/api/projects/{pid}/glossary/{id}` | `{ term, abbrev, scope, wordType? }` | `DictTerm` |
+| `createTerm(projectId, x)` | POST | `/api/projects/{pid}/glossary` | `{ term, abbrev, scope }` | `DictTerm` |
+| `updateTerm(projectId, id, x)` | PUT | `/api/projects/{pid}/glossary/{id}` | `{ term, abbrev, scope }` | `DictTerm` |
 | `deleteTerm(projectId, id)` | DELETE | `/api/projects/{pid}/glossary/{id}` | — | `{ id }` |
-| `validateTerm(projectId, term, scope)` | POST | `/api/projects/{pid}/glossary/validate` | `{ term, scope }` | `GlossaryValidation` — duplicado en glosario + hits en el corpus de nombres lógicos (muestra capada a 50); cortesía de UX, el backend re-valida en cada write |
+| `validateTerm(projectId, term, scope)` | POST | `/api/projects/{pid}/glossary/validate` | `{ term, scope }` | `GlossaryValidation` — duplicado en glosario + hits en el corpus de nombres lógicos DEL SCOPE (muestra capada a 50); cortesía de UX, el backend re-valida en cada write |
+| `glossaryImpact(projectId, body)` | POST | `/api/projects/{pid}/glossary/impact` | `{ scope, termsUpsert, termsDelete, namingConfig? }` | `GlossaryImpact` `{ columns, columnTables, tables, sample }` — dry-run (doc 94 D7): «Save & apply» del glosario aplica directo si da 0 y solo con impacto muestra el aviso con los números |
 | `lockTerm(projectId, id)` / `unlockTerm(projectId, id)` | POST | `/api/projects/{pid}/glossary/{id}/lock` · `/unlock` | `{}` | `DictTerm` — solo `admin.manage`; una entrada bloqueada queda intocable para todos |
 
 **Configuración de naming (separador / casing por scope)**
@@ -918,23 +917,24 @@ Motor de reglas del Export DDL (doc 30): reglas y generadores que transforman el
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
 | `listDdlRules(projectId)` | GET | `/api/projects/{pid}/ddl-rules` | — | `DdlRule[]` |
-| `getDdlConfig(projectId)` | GET | `/api/projects/{pid}/ddl-rules/config` | — | `DdlRulesetConfig` (lookups + functions) |
+| `getDdlConfig(projectId)` | GET | `/api/projects/{pid}/ddl-rules/config` | — | `DdlRulesetConfig` (lookups + functions + `output` = Output settings, doc 93) |
 | `getDdlArtifacts(projectId)` | GET | `/api/projects/{pid}/ddl-rules/artifacts` | — | `DdlArtifact[]` |
-| `getDdlTemplates(projectId)` | GET | `/api/projects/{pid}/ddl-rules/templates` | — | `{ templates, seedRules, seedLookups }` |
+| `getDdlTemplates(projectId)` | GET | `/api/projects/{pid}/ddl-rules/templates` | — | `{ templates, seedRules, seedLookups, seedOutput }` |
 | `validateDdlRule(projectId, rule)` | POST | `/api/projects/{pid}/ddl-rules/validate` | `DdlRuleEditInput` | `DdlValidateResult` (los 5 checks + condición canonizada + `udpRefs`) |
 | `testDdlRule(projectId, rule, tableId)` | POST | `/api/projects/{pid}/ddl-rules/test` | `{ rule, tableId }` | `DdlTestResult` (fragmentos SQL sobre una tabla real) |
 | `impactDdlRule(projectId, rule)` | POST | `/api/projects/{pid}/ddl-rules/impact` | `{ rule }` | `{ columns, tables }` |
 
-El editor serializa la regla a YAML y de vuelta client-side (`ruleToYaml` / `yamlToRule`, dependencia `yaml 2.9.0`); el YAML nunca viaja como tal a la API. El CTA del catálogo vacío (`seedStarterRules(projectId)`) aplica el ruleset base (`seedRules` + `seedLookups` de `/templates`) como UNA versión vía `applyStandards`.
+El editor serializa la regla a YAML y de vuelta client-side (`ruleToYaml` / `yamlToRule`, dependencia `yaml 2.9.0`); el YAML nunca viaja como tal a la API. El CTA del catálogo vacío (`seedStarterRules(projectId)`) aplica el ruleset base (`seedRules` + `seedLookups` + `seedOutput` de `/templates`) como UNA versión vía `applyStandards`. `saveDdlOutput(projectId, output)` guarda las Output settings del proyecto (doc 93) como una versión (`ddlConfigPatch.output`; un valor inválido responde 422).
 
 **Render en el export (`rulesBridge.ts`, modal Export DDL)**
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
 | `fetchExportRules(projectId)` | GET | `/api/projects/{pid}/ddl-rules` | — | `ExportRule[]` (vista liviana para el selector) |
+| `fetchDdlConfig(projectId)` | GET | `/api/projects/{pid}/ddl-rules/config` | — | `{ output? }` — el modal arranca desde las Output settings del proyecto (doc 93) |
 | `renderWithRules(args)` | POST | `/api/projects/{pid}/ddl-rules/render` | ver abajo | `RenderedExport` (permiso `export`) |
 
-El payload del `render` se arma con el estado EFECTIVO que el canvas está exportando (drafts incluidos): `ruleIds`, `model` (nombre + `udpValues` del canvas), `options` del modal (`identifierCase`, `tableFormat`, `external`, `location`, `locationFolderCase`, `includePartitions`, `partitionsLast`), `tables[]` (cada una con su doc, sus columnas con `udpValues` y su `baseSql` generado client-side) y `views[]` (con `sql`, `sourceTableIds` y el flag `businessView` = `showOnCanvas`). La respuesta trae `statements[]`, `log[]` (applied/skipped por regla), `rulesetVersion`, `applied` y `skipped`; el `.sql` final se ensambla en el cliente con el sello de la versión de reglas usada. Sin reglas seleccionadas, el export NO pasa por este endpoint y sale byte-idéntico al generador client-side.
+El payload del `render` se arma con el estado EFECTIVO que el canvas está exportando (drafts incluidos): `ruleIds`, `model` (nombre + `udpValues` del canvas), `options` del modal (`identifierCase`, `quoteIdentifiers`, `typeCase`, `createTable`, `viewTagsAs`, `includeKeys`, `tableFormat`, `external`, `location`, `locationFolderCase`, `includePartitions`, `partitionsLast` — doc 93), `tables[]` (cada una con su doc, sus columnas con `udpValues` y `ddlType`, y su `baseSql` generado client-side) y `views[]` (con `sql`, `sourceTableIds` y el flag `businessView` = `showOnCanvas`). La respuesta trae `statements[]`, `log[]` (applied/skipped por regla), `rulesetVersion`, `applied` y `skipped`; el `.sql` final se ensambla en el cliente con el sello de la versión de reglas usada. Sin reglas seleccionadas, el export NO pasa por este endpoint y sale byte-idéntico al generador client-side.
 
 ### 3.6. Admin / RBAC (Screen 14)
 
@@ -1068,6 +1068,7 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Standards | POST | `/api/projects/{pid}/glossary` | standards.edit | naming.service |
 | Standards | PUT/DELETE | `/api/projects/{pid}/glossary/{id}` | standards.edit | naming.service |
 | Standards | POST | `/api/projects/{pid}/glossary/validate` | sesión (cómputo) | naming.service |
+| Standards | POST | `/api/projects/{pid}/glossary/impact` | sesión (cómputo) | naming.service |
 | Standards | POST | `/api/projects/{pid}/glossary/physicalize` | sesión (cómputo) | naming / governance |
 | Standards | POST | `/api/projects/{pid}/glossary/rephysicalize` | standards.edit | naming.service |
 | Standards | POST | `/api/projects/{pid}/glossary/{id}/lock` · `/unlock` | admin.manage | naming.service |

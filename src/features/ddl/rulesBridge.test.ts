@@ -1,27 +1,33 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
+
+import { apiPost } from '@/services/http';
+import { DEFAULT_DATABRICKS_OPTS } from './generators';
 import {
-  emitTarget, isAddendum, layoutFromRules, missingSource, partitionCorrelative, withPartitionOrder,
+  emitTarget, isAddendum, layoutFromRules, missingSource, partitionCorrelative, renderWithRules, withUdpPartitions,
   type ExportRule,
 } from './rulesBridge';
+
+beforeEach(() => vi.clearAllMocks());
 
 const rule = (id: string, over: Partial<ExportRule> = {}): ExportRule => ({
   id, name: id, kind: 'rule', priority: 100, enabled: true, validationState: 'valid',
   appliesTo: ['ddl.tabla_fisica'], action: { layout: { partitionColumns: 'last' } }, ...over,
 });
 
-describe('layoutFromRules (doc 73 / doc 76)', () => {
+describe('layoutFromRules (doc 73 / doc 76 / doc 93)', () => {
   it('regla de layout seleccionada sobre la física ⇒ partitionsLast', () => {
-    expect(layoutFromRules([rule('l1')], ['l1'])).toEqual({ partitionsLast: true, partitionOrderUdp: null });
+    expect(layoutFromRules([rule('l1')], ['l1'])).toEqual({ partitionsLast: true, partitionUdp: null });
   });
-  it('partitionOrderUdp de la regla ⇒ nombre del UDP que ordena las particiones', () => {
-    expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'last', partitionOrderUdp: 'Particion' } } })], ['l1']))
-      .toEqual({ partitionsLast: true, partitionOrderUdp: 'Particion' });
-    // solo orden (sin mover al final) también vale
+  it('partitionUdp (o su alias legado partitionOrderUdp) ⇒ UDP que define las particiones', () => {
+    expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'last', partitionUdp: 'Particion' } } })], ['l1']))
+      .toEqual({ partitionsLast: true, partitionUdp: 'Particion' });
     expect(layoutFromRules([rule('l1', { action: { layout: { partitionOrderUdp: ' Particion ' } } })], ['l1']))
-      .toEqual({ partitionsLast: false, partitionOrderUdp: 'Particion' });
+      .toEqual({ partitionsLast: false, partitionUdp: 'Particion' });
   });
   it('no seleccionada, keep, otro artefacto o generador ⇒ false', () => {
-    const off = { partitionsLast: false, partitionOrderUdp: null };
+    const off = { partitionsLast: false, partitionUdp: null };
     expect(layoutFromRules([rule('l1')], [])).toEqual(off);
     expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'keep' } } })], ['l1'])).toEqual(off);
     expect(layoutFromRules([rule('l1', { appliesTo: ['ddl.tabla_rej'] })], ['l1'])).toEqual(off);
@@ -30,14 +36,14 @@ describe('layoutFromRules (doc 73 / doc 76)', () => {
   });
 });
 
-describe('partitionCorrelative / withPartitionOrder (doc 76 D3)', () => {
+describe('partitionCorrelative / withUdpPartitions (doc 93 D10)', () => {
   it('PART_01 → 1; valores fuera de la convención → null', () => {
     expect(partitionCorrelative('PART_01')).toBe(1);
     expect(partitionCorrelative('part-12')).toBe(12);
     expect(partitionCorrelative('No Definido')).toBeNull();
     expect(partitionCorrelative(undefined)).toBeNull();
   });
-  it('estampa partitionOrder SOLO en las particiones, leyendo el UDP físico de columna por nombre', () => {
+  it('el UDP DEFINE las particiones: PART_nn ⇒ partición ordenada; el flag de la plataforma se ignora', () => {
     const defs = [
       { id: 'u-log', name: 'Particion', level: 'column', view: 'logical' },     // homónimo lógico: no cuenta
       { id: 'u-part', name: 'Particion', level: 'column', view: 'physical' },
@@ -47,12 +53,10 @@ describe('partitionCorrelative / withPartitionOrder (doc 76 D3)', () => {
       { id: 'b', isPartition: false, udpValues: { 'u-part': 'PART_01' } },
       { id: 'c', isPartition: true, udpValues: {} },
     ];
-    const out = withPartitionOrder(cols, defs, 'Particion');
-    // b no es partición ⇒ sin campo; c es partición sin valor ⇒ null (va al final, orden físico)
-    expect(out.map((c) => (c.partitionOrder === undefined ? 'none' : c.partitionOrder))).toEqual([2, 'none', null]);
-    // sin UDP / sin def ⇒ intactas
-    expect(withPartitionOrder(cols, defs, null)).toBe(cols);
-    expect(withPartitionOrder(cols, [], 'Particion')).toBe(cols);
+    const out = withUdpPartitions(cols, defs, 'Particion');
+    expect(out.map((c) => [c.id, c.isPartition, c.partitionOrder])).toEqual([['a', true, 2], ['b', true, 1], ['c', false, null]]);
+    expect(withUdpPartitions(cols, defs, null)).toBe(cols);
+    expect(withUdpPartitions(cols, [], 'Particion')).toBe(cols);    // UDP inexistente ⇒ flag (Review Focus #3)
   });
 });
 
@@ -105,5 +109,36 @@ describe('missingSource — cascada de generadores (spec §7.3)', () => {
     expect(missingSource(vistaRej, all, new Set(['vista_rechazos', 'tabla_rechazos']))).toBeNull();
     expect(missingSource(rej, all, new Set(['tabla_rechazos']))).toBeNull();
     expect(missingSource(rule('r1'), all, new Set<string>())).toBeNull();
+  });
+});
+
+describe('renderWithRules — payload y ensamblado (doc 93)', () => {
+  it('manda las opciones de estilo y el ddlType; el .sql pega los ALTER a su objeto', async () => {
+    vi.mocked(apiPost).mockResolvedValue({
+      statements: [
+        { artifact: 'ddl.tabla_fisica', schema: 'core', name: 'T', sql: 'CREATE OR REPLACE TABLE core.t (a int);' },
+        { artifact: 'ddl.tabla_fisica.tags', schema: 'core', name: 'T', sql: "ALTER TABLE core.t SET TAGS ('k' = 'v');" },
+        { artifact: 'ddl.vista_tecnica', schema: 'core_v', name: 'T', sql: 'CREATE OR REPLACE VIEW core_v.t AS SELECT a AS a FROM core.t;' },
+      ],
+      log: [], rulesetVersion: 'v3', applied: 1, skipped: 0,
+    });
+    const diagram = { tables: [{ id: 't1', udpValues: {} }], columns: [{ id: 'c1', udpValues: {} }], subjectArea: null };
+    const input = {
+      tables: [{ id: 't1', physicalName: 'T', schema: 'core' }],
+      columns: [{ id: 'c1', tableId: 't1', physicalName: 'A', dataType: 'INTEGER', ordinal: 0 }],
+      relationships: [], views: [], modelName: 'm',
+    };
+    const { sql } = await renderWithRules({
+      projectId: 'p1', diagram: diagram as unknown as Parameters<typeof renderWithRules>[0]['diagram'],
+      input, opts: DEFAULT_DATABRICKS_OPTS, ruleIds: ['r1'], modelName: 'm',
+    });
+    const body = vi.mocked(apiPost).mock.calls[0][1] as {
+      options: Record<string, unknown>; tables: { columns: { ddlType: string }[] }[];
+    };
+    expect(body.options).toMatchObject({
+      quoteIdentifiers: 'when-needed', typeCase: 'lower', createTable: 'or-replace', viewTagsAs: 'table', includeKeys: false,
+    });
+    expect(body.tables[0].columns[0].ddlType).toBe('int');
+    expect(sql).toContain("CREATE OR REPLACE TABLE core.t (a int);\nALTER TABLE core.t SET TAGS ('k' = 'v');\n\nCREATE OR REPLACE VIEW");
   });
 });

@@ -11,7 +11,7 @@ import {
   type Relationship,
   type RelationshipPair,
 } from '@/services/governance.service';
-import { nextPkPosition } from './keyOrder';
+import { pkFirstOrdinals } from './columnOrder';
 
 export type RoleNamePlan =
   | { kind: 'rename'; columnId: string }
@@ -122,7 +122,7 @@ export interface MappingBulkInput {
   childCardinality: Cardinality;
   /** En orden de llave del padre. */
   rows: MappingResolution[];
-  /** Columnas ACTUALES del hijo (ordinal / nextPkPosition). */
+  /** Columnas ACTUALES del hijo (orden único, doc 94). */
   childCols: CanonicalColumn[];
   /** Doc 53: presencia = la relación es una SUBCATEGORÍA del símbolo dado
    *  (el caller pasa identifying=true y cardinalidades one/one). */
@@ -136,19 +136,28 @@ export interface MappingBulkInput {
  * una FK); `inherit` va POR FILA y gobierna definición/UDPs (en existentes
  * también tipo/dominio). Role name en existentes = `target.rename` (rename in
  * place, mismo semántico que el Apply del popup de edición). `preexisting`
- * (sync): el par ya existía — la columna no se re-emite. Pura — `physicalize`
- * corre ANTES (los nombres llegan resueltos).
+ * (sync): el par ya existía — la columna no se re-emite. Doc 94 D2: en una
+ * identificante, las columnas que ENTRAN a la llave (creadas o promovidas, en
+ * el orden de las filas) quedan tras la última PK del hijo y las no-PK se
+ * corren en el MISMO lote (cada columna viaja una sola vez); en una
+ * no-identificante las creadas van al final. Pura — `physicalize` corre ANTES
+ * (los nombres llegan resueltos).
  */
 export function mappingToBulk(input: MappingBulkInput): {
   changes: BulkChange[]; createdCols: CanonicalColumn[]; relationship: Relationship;
 } {
   const { identifying, childCols } = input;
-  let nextPos = nextPkPosition(childCols);
-  const takePos = (): number | null => (nextPos == null ? null : nextPos++);
   const createdCols: CanonicalColumn[] = [];
   const changes: BulkChange[] = [];
   const pairs: RelationshipPair[] = [];
+  const toKey = identifying
+    ? input.rows.flatMap((r) => (r.target.kind === 'create' ? [r.target.id]
+      : !r.target.preexisting && !r.target.col.isPrimaryKey ? [r.target.col.id] : []))
+    : [];
+  const created = input.rows.flatMap((r) => (r.target.kind === 'create' ? [{ id: r.target.id }] : []));
+  const ord = identifying ? pkFirstOrdinals(childCols, { toKey, add: created }) : null;
   let ordinal = childCols.length;
+  const touched = new Set<string>();
 
   for (const row of input.rows) {
     const p = row.parentCol;
@@ -159,10 +168,9 @@ export function mappingToBulk(input: MappingBulkInput): {
         id: row.target.id, tableId: input.childTableId,
         logicalName: row.target.logicalName, physicalName: row.target.physicalName,
         dataType: p.dataType, parentDomainId: p.parentDomainId, typeOverridden: p.typeOverridden,
-        ordinal: ordinal++,
+        ordinal: ord ? ord.get(row.target.id)! : ordinal++,
         isForeignKey: true, isPrimaryKey: identifying,
         isNullable: identifying ? false : true,
-        pkPosition: identifying ? takePos() : null,
         ...(row.inherit ? { description: p.description, udpValues: p.udpValues ? { ...p.udpValues } : undefined } : {}),
       };
       createdCols.push(colNew);
@@ -171,13 +179,12 @@ export function mappingToBulk(input: MappingBulkInput): {
     } else {
       const colOld = row.target.col;
       if (!row.target.preexisting) {
+        touched.add(colOld.id);
         changes.push(bulk.createColumn({
           ...colOld, isForeignKey: true,
           ...(row.target.rename ?? {}),
-          ...(identifying ? {
-            isPrimaryKey: true, isNullable: false,
-            ...(colOld.pkPosition == null ? { pkPosition: takePos() } : {}),
-          } : {}),
+          ...(identifying ? { isPrimaryKey: true, isNullable: false } : {}),
+          ...(ord?.has(colOld.id) ? { ordinal: ord.get(colOld.id)! } : {}),
           ...(row.inherit ? {
             dataType: p.dataType, parentDomainId: p.parentDomainId, typeOverridden: p.typeOverridden,
             description: p.description, udpValues: p.udpValues ? { ...p.udpValues } : undefined,
@@ -185,6 +192,12 @@ export function mappingToBulk(input: MappingBulkInput): {
         }));
       }
       pairs.push(pair(colOld.id));
+    }
+  }
+  // Corridas del orden único: existentes que se mueven y no viajaron ya.
+  if (ord) {
+    for (const c of childCols) {
+      if (ord.has(c.id) && !touched.has(c.id)) changes.push(bulk.createColumn({ ...c, ordinal: ord.get(c.id)! }));
     }
   }
   const relationship: Relationship = {

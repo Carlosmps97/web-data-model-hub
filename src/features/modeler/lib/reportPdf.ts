@@ -51,6 +51,7 @@ import type { SceneItem } from './exportScene';
 import type { Diagram } from '../services/modeler.service';
 import type { CanonicalColumn } from '@/services/governance.service';
 import type { PdfBookmark, ReportPage } from './scenePdf';
+import { orderColumns } from './columnOrder';
 
 export interface ReportCanvasInput { name: string; location: string; diagram: Diagram }
 export interface ModelReportInput { rootName: string; canvases: ReportCanvasInput[]; domainsById: Record<string, string> }
@@ -201,7 +202,7 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
       tocEntries.push({ title: `Column(s) of Table "${t.physicalName}"`, level: 2, cIdx: cBand });
       mark.tables.push({ name: t.physicalName, page: cBand });
       gridHeader(f, ['Physical Name', 'Logical Name', 'Comments', 'Is PK', 'Physical Data Type', 'Domain'], W);
-      const cols = [...(colsByTable.get(t.id) ?? [])].sort((a, b) => a.ordinal - b.ordinal);
+      const cols = orderColumns(colsByTable.get(t.id) ?? []);   // doc 94: orden único, PK primero
       for (const c of cols) {
         const pg = gridRow(f, [
           c.physicalName, c.logicalName, c.description ?? '',

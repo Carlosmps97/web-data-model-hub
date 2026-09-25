@@ -27,7 +27,7 @@ export function crc32(bytes: Uint8Array): number {
 }
 
 export interface ZipEntry {
-  /** Path inside the archive, `/`-separated (e.g. `CLIENTE/[TABLE] X.sql`). */
+  /** Path inside the archive, `/`-separated (e.g. `CLIENTE/TABLE-CLIENTE.sql`). */
   path: string;
   content: string;
 }

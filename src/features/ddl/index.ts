@@ -8,3 +8,8 @@ export { default as ExportDdlModal } from './components/ExportDdlModal';
 // retiró (con 2+ fuentes el DDL lista `FROM t1, t2`, como Erwin).
 export { DEFAULT_DATABRICKS_OPTS, viewDDL } from './generators';
 export type { DdlView } from './generators';
+
+// Doc 93 D1: Output settings — el mismo formulario lo usa Data Standards.
+export { default as DdlOutputForm } from './components/DdlOutputForm';
+export { DEFAULT_OUTPUT_SETTINGS, mergeOutputSettings } from './outputSettings';
+export type { DdlOutputSettings } from './outputSettings';

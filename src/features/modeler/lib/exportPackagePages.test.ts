@@ -110,7 +110,7 @@ function fixtureDiagram(): Diagram {
       { id: 't2', physicalName: 'HD_VENTA', logicalName: 'Venta', schema: 'gold' },
     ],
     columns: [
-      { id: 'c1', tableId: 't1', physicalName: 'CODMES', logicalName: 'Código de Mes', dataType: 'INT', typeOverridden: false, isPrimaryKey: true, pkPosition: 0, ordinal: 0, isNullable: false, description: 'AAAAMM', udpValues: { uCol: 'SI' } },
+      { id: 'c1', tableId: 't1', physicalName: 'CODMES', logicalName: 'Código de Mes', dataType: 'INT', typeOverridden: false, isPrimaryKey: true, ordinal: 0, isNullable: false, description: 'AAAAMM', udpValues: { uCol: 'SI' } },
       { id: 'c2', tableId: 't1', physicalName: 'DESPARAM', logicalName: 'Descripción', dataType: 'VARCHAR(200)', typeOverridden: false, ordinal: 1, isNullable: true, parentDomainId: 'd1' },
       { id: 'c3', tableId: 't2', physicalName: 'CODMES', logicalName: 'Código de Mes', dataType: 'INT', typeOverridden: false, isForeignKey: true, ordinal: 0, isPartition: true },
     ],

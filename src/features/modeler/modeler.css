@@ -109,19 +109,6 @@
 .wk-pp-usage > span { min-width: 0; }
 .wk-pp-usep { color: var(--text-muted-3); flex: none; }
 
-/* Orden de la LLAVE primaria (pkPosition) — strip en PropertiesPanel · Columns */
-.wk-pp-keyorder { margin: 2px 0 10px; padding: 7px 8px; border: 1px solid var(--border-soft); border-radius: 8px; background: var(--fill-5, transparent); }
-/* Doc 42: lista VERTICAL de alto fijo con scroll — homogénea sin importar
-   cuántas columnas tenga la llave (los chips en flujo crecían disparejo). */
-.wk-pp-keylist { height: 128px; overflow-y: auto; display: flex; flex-direction: column; gap: 3px; }
-.wk-pp-keyrow { display: flex; align-items: center; gap: 8px; padding: 3px 7px; border: 1px solid var(--border-soft); border-radius: 6px; background: var(--surface); flex-shrink: 0; }
-.wk-pp-keyname { flex: 1; min-width: 0; font-size: 11px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wk-pp-keyn { min-width: 16px; text-align: center; font-size: 9.5px; font-weight: 700; color: var(--k-pk, #b58a00); }
-.wk-pp-keymv { display: inline-flex; gap: 2px; }
-.wk-pp-keymv button { width: 18px; height: 18px; border: 1px solid var(--border-soft); border-radius: 4px; background: transparent; color: var(--ink-2); cursor: pointer; font-size: 11px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; }
-.wk-pp-keymv button:hover:not(:disabled) { background: var(--fill-4); }
-.wk-pp-keymv button:disabled { opacity: .35; cursor: not-allowed; }
-
 /* Buscador de columnas (doc 42) — icono embebido + botón de limpiar. */
 .wk-pp-colfind { position: relative; margin: 2px 0 8px; }
 .wk-pp-colfind-ico { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text-muted-3); pointer-events: none; }
@@ -762,7 +749,7 @@
 .udp-btn-primary { background: var(--primary); color: #fff; }
 .udp-btn-primary:hover:not(:disabled) { background: var(--primary-700); }
 
-/* terms table (Term / Abbrev / Word type / actions) */
+/* terms table (Term / Abbrev / actions) */
 .udp-table { border: 1px solid var(--border-soft); border-radius: var(--r-md); overflow: hidden; }
 .udp-tr { display: grid; grid-template-columns: 1.4fr 1fr 1fr 64px; align-items: center; gap: 10px;
   padding: 9px 13px; border-bottom: 1px solid var(--border-2); }
@@ -793,6 +780,8 @@
 .exd-opts { display: flex; flex-direction: column; gap: 11px; min-width: 0; }
 .exd-toggles { display: flex; flex-direction: column; gap: 6px; }
 .exd-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.exd-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: end; }
+.exd-example { font-family: var(--mono); font-size: 11px; color: var(--text-muted); }
 
 .exd-input { height: 34px; font-size: 13px; }
 select.exd-input { padding: 0 10px; }

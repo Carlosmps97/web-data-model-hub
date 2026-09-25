@@ -6,7 +6,7 @@ vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), LONG_TIME
 
 import { apiGet, apiPost } from '@/services/http';
 import {
-  ruleToYaml, saveDdlRule, seedStarterRules, toEditInput, toggleDdlRule, yamlToRule,
+  ruleToYaml, saveDdlOutput, saveDdlRule, seedStarterRules, toEditInput, toggleDdlRule, yamlToRule,
 } from './ddlRules.service';
 import type { DdlRule } from './standards.service';
 
@@ -64,10 +64,11 @@ describe('mutaciones versionadas (standards/apply)', () => {
     expect(body.title).toContain('disabled');
   });
 
-  it('seedStarterRules aplica las 7 semillas + lookups como UNA versión', async () => {
+  it('seedStarterRules aplica las semillas + lookups + Output settings como UNA versión', async () => {
     vi.mocked(apiGet).mockResolvedValue({
       templates: [], seedRules: [{ name: 'a' }, { name: 'b' }],
       seedLookups: { vacuum_map: { values: {} } },
+      seedOutput: { typeCase: 'lower' },
     });
     vi.mocked(apiPost).mockResolvedValue({ seq: 11 });
     await seedStarterRules('p1');
@@ -76,5 +77,14 @@ describe('mutaciones versionadas (standards/apply)', () => {
     };
     expect(body.rulesUpsert).toHaveLength(2);
     expect(body.ddlConfigPatch.lookups.vacuum_map).toBeDefined();
+    expect((body as { ddlConfigPatch: { output?: unknown } }).ddlConfigPatch.output).toEqual({ typeCase: 'lower' });
+  });
+
+  it('saveDdlOutput guarda las Output settings como UNA versión (ddlConfigPatch.output)', async () => {
+    vi.mocked(apiPost).mockResolvedValue({ seq: 12 });
+    await saveDdlOutput('p1', { viewTagsAs: 'view' } as unknown as Parameters<typeof saveDdlOutput>[1]);
+    const [url, body] = vi.mocked(apiPost).mock.calls[0];
+    expect(String(url)).toContain('/api/projects/p1/standards/apply');
+    expect(body).toMatchObject({ kind: 'ddl', title: 'DDL output settings · edited', ddlConfigPatch: { output: { viewTagsAs: 'view' } } });
   });
 });

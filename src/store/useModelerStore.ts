@@ -14,10 +14,10 @@ import { getNamingConfig, type NamingConfig } from '@/services/naming.service';
 import { applyNamingCase } from '@/features/modeler/lib/physicalCase';
 import { diagramSignature } from '@/features/modeler/lib/diagramSignature';
 import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
-import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
+import { keyLayoutBulk } from '@/features/modeler/lib/keyLayout';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
 import { mergeIds, orphanViewIds, withoutIds } from '@/features/modeler/lib/canvasViews';
-import { persistReorder, reorderPlan, sortByOrdinal } from '@/features/modeler/lib/columnOrder';
+import { isPkFirst, orderColumns, persistReorder, pkFirstOrdinals, reorderPlan, sortByOrdinal } from '@/features/modeler/lib/columnOrder';
 import type { CanvasDropPlan } from '@/features/modeler/lib/canvasDrop';
 import {
   removeColumnSource, syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews,
@@ -387,10 +387,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       set({ colSel: ids.length ? { tableId, ids, anchor: colId } : null });
       return;
     }
-    // range: contra el orden VISUAL del nodo (bloque PK en orden de llave,
-    // luego el resto) — es lo que el usuario ve al Shift-clickear.
+    // range: contra el orden VISUAL del nodo (el orden único, doc 94: PK
+    // primero y cada bloque por ordinal) — es lo que el usuario ve al
+    // Shift-clickear.
     const tcols = (get().diagram?.columns ?? []).filter((c) => c.tableId === tableId);
-    const visual = [...pkInKeyOrder(tcols), ...tcols.filter((c) => !c.isPrimaryKey)].map((c) => c.id);
+    const visual = orderColumns(tcols).map((c) => c.id);
     const a = visual.indexOf(cur.anchor);
     const b = visual.indexOf(colId);
     if (a < 0 || b < 0) { set({ colSel: { tableId, ids: [colId], anchor: colId } }); return; }
@@ -405,11 +406,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (!sel || !d || !sel.ids.length) return 0;
     const t = d.tables.find((x) => x.id === sel.tableId);
     const wanted = new Set(sel.ids);
-    // Snapshot por VALOR en el ORDEN FÍSICO de la fuente (contrato doc 48):
-    // editar o borrar la fuente después no altera lo ya copiado.
-    const cols = d.columns
-      .filter((c) => c.tableId === sel.tableId && wanted.has(c.id))
-      .sort((x, y) => x.ordinal - y.ordinal)
+    // Snapshot por VALOR en el ORDEN ÚNICO de la fuente (contrato doc 48; doc
+    // 94: PK primero): editar o borrar la fuente después no altera lo copiado.
+    const cols = orderColumns(d.columns.filter((c) => c.tableId === sel.tableId && wanted.has(c.id)))
       .map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
     if (!cols.length) return 0;
     // Copiar DESELECCIONA (fix prueba viva): tras el copy el estado que
@@ -427,11 +426,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const d = get().diagram;
     const t = d?.tables.find((x) => x.id === tableId);
     if (!d || !t) return null;
-    // Snapshot POR VALOR en orden físico (contrato doc 48): editar o borrar el
-    // original después no altera lo ya copiado.
-    const cols = d.columns
-      .filter((c) => c.tableId === tableId)
-      .slice().sort((a, b) => a.ordinal - b.ordinal)
+    // Snapshot POR VALOR en el orden único (contrato doc 48; doc 94: PK
+    // primero): editar o borrar el original después no altera lo ya copiado.
+    const cols = orderColumns(d.columns.filter((c) => c.tableId === tableId))
       .map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
     set({
       tblClipboard: { table: { ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) }, cols },
@@ -952,16 +949,19 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const logicalOverridden = !!dom && !!typedLogical && typedLogical !== domLogical;
     // Al FINAL del orden físico (antes: ordinal 0 → la columna nueva caía al
     // INICIO de la tabla) — coherente con la propagación a vistas de abajo.
+    // Doc 94 D2: una PK nueva entra tras la ÚLTIMA PK y las no-PK se corren en
+    // el MISMO lote (la tabla queda PK primero).
     const siblings = (get().diagram?.columns ?? []).filter((c) => c.tableId === tableId);
-    const ordinal = siblings.length ? Math.max(...siblings.map((c) => c.ordinal)) + 1 : 0;
+    const layout = input.isPrimaryKey ? pkFirstOrdinals(siblings, { toKey: [id], add: [{ id }] }) : null;
+    const ordinal = layout ? layout.get(id)!
+      : siblings.length ? Math.max(...siblings.map((c) => c.ordinal)) + 1 : 0;
+    const shifts = siblings.filter((c) => layout?.has(c.id)).map((c) => gov.bulk.createColumn({ ...c, ordinal: layout!.get(c.id)! }));
     // Metadata del alta (doc 40): payload LIMPIO como en edición — flags solo
     // cuando se apartan del default (nullable true ES el default: no viaja),
-    // description/udpValues solo con contenido. Una PK nueva entra AL FINAL de
-    // la llave si la tabla maneja orden explícito (doc 19 §12b, como patchCol).
+    // description/udpValues solo con contenido.
     const description = (input.description ?? '').trim();
     const physicalDescription = (input.physicalDescription ?? '').trim();
-    const pkPosition = input.isPrimaryKey ? nextPkPosition(siblings) : null;
-    await gov.createColumn({
+    const payload: CanonicalColumn = {
       id, tableId, logicalName: input.logicalName, physicalName: physical,
       // Doc 64 §1: el popup ahora muestra el default del dominio en el campo de
       // tipo — "mandaron dataType" ya no equivale a override. Con dominio, el
@@ -978,16 +978,18 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       ...(input.isNullable === false ? { isNullable: false } : {}),
       ...(input.isPartition ? { isPartition: true } : {}),
       ...(input.udpValues && Object.keys(input.udpValues).length ? { udpValues: input.udpValues } : {}),
-      ...(pkPosition != null ? { pkPosition } : {}),
-    });
+    };
+    if (shifts.length) await gov.recordChangesBulk([gov.bulk.createColumn(payload), ...shifts]);
+    else await gov.createColumn(payload);
     // V1 (doc 19 §12b): la columna nueva entra AUTOMÁTICAMENTE a las vistas
-    // ESPEJO de la tabla (las que reflejan TODAS sus columnas), al final. Las
-    // vistas curadas (subset deliberado) no se tocan. Best-effort: un fallo
-    // acá no bloquea el alta (queda "Match physical order" para alinear).
+    // ESPEJO de la tabla (las que reflejan TODAS sus columnas) — al final, o
+    // tras las PK si es PK (doc 94 D4). Las vistas curadas (subset deliberado)
+    // no se tocan. Best-effort: un fallo acá no bloquea el alta (queda "Match
+    // physical order" para alinear).
     try {
       const touched = await syncNewColumnToMirrorViews(
         { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-        tableId, physical, siblings,
+        tableId, physical, siblings, !!input.isPrimaryKey,
       );
       if (touched) toast.success(`Column also added to ${touched} mirror view(s)`);
     } catch { /* la vista se alinea después con "Match physical order" */ }
@@ -1120,19 +1122,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Cada columna hereda su metadata INDIVIDUAL del origen (doc 45):
     // definición, PK/FK/nullable/partition, UDPs, dominio y tipo. Lo que NO
     // se arrastra: relaciones (isForeignKey queda como marca individual, sin
-    // relationship en la tabla nueva) ni vistas. pkPosition se RE-NUMERA
-    // secuencial en el orden heredado — los del origen podrían chocar entre
-    // fuentes distintas. Claves opcionales solo si aportan (payload limpio,
-    // patrón addColumn del doc 40).
+    // relationship en la tabla nueva) ni vistas. Doc 94: ordinal secuencial en
+    // el orden elegido con las PK PRIMERO (sort estable). Claves opcionales
+    // solo si aportan (payload limpio, patrón addColumn del doc 40).
     let ordinal = 0;
-    let pk = 0;
+    const pkFirst = [...columns.filter((c) => c.isPrimaryKey), ...columns.filter((c) => !c.isPrimaryKey)];
     await gov.recordChangesBulk([
       gov.bulk.createTable(
         { id, logicalName, physicalName: physical, schema: schema?.trim() || undefined },
         { kind: 'ctas' }),
-      ...columns.map((c) => {
+      ...pkFirst.map((c) => {
         const description = (c.description ?? '').trim();
-        const pkPosition = c.isPrimaryKey ? pk++ : null;
         return gov.bulk.createColumn({
           id: crypto.randomUUID(), tableId: id,
           logicalName: c.logicalName, physicalName: c.physicalName,
@@ -1143,7 +1143,6 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           ...(c.isNullable === false ? { isNullable: false } : {}),
           ...(c.isPartition ? { isPartition: true } : {}),
           ...(c.udpValues && Object.keys(c.udpValues).length ? { udpValues: { ...c.udpValues } } : {}),
-          ...(pkPosition != null ? { pkPosition } : {}),
         // Procedencia (doc 51): "Created from source <tabla>.<col> (CTAS)".
         }, { kind: 'ctas', ...(c.sourceTable ? { sourceTable: c.sourceTable } : {}), sourceColumn: c.physicalName });
       }),
@@ -1290,6 +1289,19 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const c = get().diagram?.columns.find((x) => x.id === colId);
     if (!c) return;
     get().markDirty();
+    // Doc 94 D2: entrar o salir de la llave re-ubica la columna en la frontera
+    // del bloque de PK — ella y las que se corren viajan en UN lote, con UN Undo.
+    if (fields.isPrimaryKey !== undefined && !!fields.isPrimaryKey !== !!c.isPrimaryKey) {
+      const mine = (get().diagram?.columns ?? []).filter((x) => x.tableId === c.tableId);
+      const { changes, pres } = keyLayoutBulk(mine, { [colId]: fields });
+      await gov.recordChangesBulk(changes);
+      pushUndo(`Edit column ${c.physicalName}`, async () => {
+        await gov.recordChangesBulk(pres.map((p) => gov.bulk.createColumn(p)));
+        await get().reload();
+      });
+      await get().reload();
+      return;
+    }
     // Pre-imagen POR VALOR para el Undo (doc 50).
     const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
     await gov.updateColumn({ ...c, ...fields }); // upsert por id = update (merge)
@@ -1309,11 +1321,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await get().reload();
   },
   reorderColumns: async (tableId, orderedIds) => {
-    get().markDirty();
     const dia = get().diagram; if (!dia) return;
     const mine = dia.columns.filter((c) => c.tableId === tableId);
-    // Orden PREVIO para el Undo (doc 50): la inversa re-usa esta misma acción.
-    const prevIds = sortByOrdinal(mine).map((c) => c.id);
+    // Doc 94 D3: una PK nunca queda debajo de una no-PK (guard final: los
+    // paneles ya lo impiden al arrastrar).
+    if (!isPkFirst(mine, orderedIds)) {
+      toast.error("A primary key column can't go below a column that isn't part of the key.");
+      return;
+    }
+    get().markDirty();
     // OPTIMISTA: la UI reordena al soltar (posición = índice nuevo, local); la
     // persistencia corre detrás y el reload final reconcilia con el overlay.
     set({
@@ -1332,7 +1348,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const changed = reorderPlan(mine, orderedIds);
     await persistReorder(changed, (c, idx) => gov.updateColumn({ ...c, ordinal: idx }));
     if (changed.length) {
-      pushUndo('Reorder columns', () => get().reorderColumns(tableId, prevIds));
+      // Undo POR VALOR (doc 50): las pre-imágenes de las columnas movidas
+      // vuelven a su ordinal tal cual, SIN pasar por la guarda «PK primero» —
+      // el estado previo pudo ser un dato viejo desordenado, o la llave pudo
+      // cambiar en el medio (drop en el canvas: llave + reorden).
+      const pres = sortByOrdinal(changed.map(({ c }) => ({ ...c })));
+      pushUndo('Reorder columns', async () => {
+        await persistReorder(pres.map((c) => ({ c, idx: c.ordinal })), (c) => gov.updateColumn(c));
+        await get().reload();
+      });
     }
     await get().reload();
   },
@@ -1344,12 +1368,16 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (plan.key.length) {
       get().markDirty();
       const pres: CanonicalColumn[] = [];
+      const flags = new Map(plan.key.map((k) => [k.id, k.isPrimaryKey]));
       for (const step of plan.key) {
         const col = dia.columns.find((c) => c.id === step.id);
         if (!col) continue;
         pres.push({ ...col });
-        await gov.updateColumn({ ...col, isPrimaryKey: step.isPrimaryKey, pkPosition: step.pkPosition });
+        await gov.updateColumn({ ...col, isPrimaryKey: step.isPrimaryKey });
       }
+      // OPTIMISTA (doc 94): la llave nueva ya en el diagrama local, así el
+      // reorden de abajo valida «PK primero» contra ella.
+      set({ diagram: { ...dia, columns: dia.columns.map((c) => (flags.has(c.id) ? { ...c, isPrimaryKey: flags.get(c.id) } : c)) } });
       if (pres.length) {
         pushUndo('Edit key', async () => { for (const c of pres) await gov.updateColumn(c); await get().reload(); });
       }

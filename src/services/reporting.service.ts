@@ -59,7 +59,6 @@ export interface ReportColumnRow {
   description: string;
   ordinal: number;
   /** Doc 70 §4.2 — metadata completa (docs 19/68/69). */
-  pkPosition?: number | null;
   typeOverridden?: boolean;
   logicalTypeOverridden?: boolean;
   physicalNameOverridden?: boolean;

@@ -17,6 +17,7 @@ import AuditHistory from './AuditHistory';
 import SchemaSelect from './SchemaSelect';
 import UdpAssign from './UdpAssign';
 import ViewEditor from './ViewEditor';
+import { orderColumns } from '../lib/columnOrder';
 
 type VTab = 'definition' | 'columns' | 'sources' | 'sql' | 'udps' | 'metadata';
 const TABS: { id: VTab; label: string }[] = [
@@ -128,12 +129,12 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const columns = useMemo(() => diagram?.columns ?? [], [diagram]);
   const srcIds = view ? viewSourceIds(view) : [];
   const tableName = (id: string) => tables.find((t) => t.id === id)?.physicalName ?? id;
-  // Columnas por tabla (orden físico) — doc 91 D7: al pasar a User-Defined SQL
-  // `sources` pasa a ser TODAS las columnas de las fuentes.
+  // Columnas por tabla (orden único, doc 94: PK primero) — doc 91 D7: al pasar
+  // a User-Defined SQL `sources` pasa a ser TODAS las columnas de las fuentes.
   const colsByTable = useMemo(() => {
     const m = new Map<string, typeof columns>();
     for (const c of columns) { const a = m.get(c.tableId) ?? []; a.push(c); m.set(c.tableId, a); }
-    for (const a of m.values()) a.sort((x, y) => x.ordinal - y.ordinal);
+    for (const [k, a] of m) m.set(k, orderColumns(a));
     return m;
   }, [columns]);
 

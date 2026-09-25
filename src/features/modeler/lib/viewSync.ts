@@ -6,13 +6,16 @@
  *    curada (subset deliberado de columnas) NO se toca — auto-extenderla
  *    rompería la curaduría del modelador.
  *  - V2: "ordenar como la tabla física" — reordena los sources de la vista
- *    según el `ordinal` de cada tabla fuente.
+ *    según el orden ÚNICO de cada tabla fuente (doc 94: PK primero, cada
+ *    bloque por `ordinal`).
  *
  * Los helpers de decisión son PUROS; `syncNewColumnToMirrorViews` orquesta
  * con dependencias inyectadas (patrón nameSync) para ser testeable sin red.
  */
 import type { CanonicalColumn } from '@/services/governance.service';
 import type { View, ViewInput, ViewSource } from '@/services/views.service';
+
+import { orderColumns } from './columnOrder';
 
 const norm = (s?: string) => (s ?? '').trim().toLowerCase();
 
@@ -28,27 +31,39 @@ export function isMirrorOfTable(view: View, tableId: string, tableCols: Canonica
   return tableCols.length > 0 && tableCols.every((c) => have.has(norm(c.physicalName)));
 }
 
-/** Sources con la columna nueva AL FINAL (alias = nombre físico, como las _vu);
- *  null si ya estaba (idempotente). */
-export function appendColumnSource(view: View, tableId: string, physicalName: string): ViewSource[] | null {
+/** Sources con la columna nueva (alias = nombre físico, como las _vu); null si
+ *  ya estaba (idempotente). Una no-PK entra AL FINAL. Doc 94 D4: si la nueva es
+ *  PK (`pkNames` = físicos de las PK de su tabla), entra tras la última PK de
+ *  su tabla en la vista — o primera de su tabla si la vista no tiene PK. */
+export function appendColumnSource(view: View, tableId: string, physicalName: string, pkNames?: string[]): ViewSource[] | null {
   const sources = view.sources ?? [];
-  const dup = sources.some((s) => (s.tableId ?? view.tableId) === tableId && norm(s.column) === norm(physicalName));
-  if (dup) return null;
-  return [...sources, { tableId, column: physicalName, outputAlias: physicalName }];
+  const mine = (s: ViewSource) => (s.tableId ?? view.tableId) === tableId;
+  if (sources.some((s) => mine(s) && norm(s.column) === norm(physicalName))) return null;
+  const added: ViewSource = { tableId, column: physicalName, outputAlias: physicalName };
+  if (!pkNames) return [...sources, added];
+  const pks = new Set(pkNames.map(norm));
+  let at = -1;
+  sources.forEach((s, i) => { if (mine(s) && pks.has(norm(s.column))) at = i + 1; });
+  if (at < 0) at = sources.findIndex(mine);
+  if (at < 0) return [...sources, added];
+  return [...sources.slice(0, at), added, ...sources.slice(at)];
 }
 
 /** Reordena los sources al ORDEN FÍSICO: grupos por tabla en el orden de
- *  `sourceTableIds` y, dentro de cada grupo, por el ordinal físico de la
- *  columna. Columnas no resolubles (expresiones / nombres desconocidos)
- *  conservan su orden relativo al final del grupo. `colsByTable` con las
- *  columnas de cada fuente YA ordenadas por ordinal. Puro. */
+ *  `sourceTableIds` y, dentro de cada grupo, por el orden ÚNICO de la tabla
+ *  (doc 94 D4: PK primero, cada bloque por `ordinal` — lo aplica acá, así una
+ *  PK recién marcada con ordinal alto no queda abajo). Columnas no resolubles
+ *  (expresiones / nombres desconocidos) conservan su orden relativo al final
+ *  del grupo. `colsByTable`: las columnas de cada fuente, en cualquier orden.
+ *  Puro. */
 export function alignSourcesToPhysical(view: View, colsByTable: Map<string, CanonicalColumn[]>): ViewSource[] {
   const sources = view.sources ?? [];
   const groupOrder = view.sourceTableIds?.length ? view.sourceTableIds : [view.tableId ?? ''];
   const groupIdx = new Map(groupOrder.map((t, i) => [t, i]));
+  const ordered = new Map([...colsByTable].map(([tid, cols]) => [tid, orderColumns(cols)]));
   const keyed = sources.map((s, i) => {
     const tid = s.tableId ?? view.tableId ?? '';
-    const cols = colsByTable.get(tid) ?? [];
+    const cols = ordered.get(tid) ?? [];
     const pos = s.column ? cols.findIndex((c) => norm(c.physicalName) === norm(s.column)) : -1;
     return { s, i, g: groupIdx.get(tid) ?? groupOrder.length, pos: pos >= 0 ? pos : Number.MAX_SAFE_INTEGER };
   });
@@ -87,20 +102,44 @@ type SyncDeps = {
   updateView: (id: string, body: ViewInput) => Promise<unknown>;
 };
 
-/** V1: propaga una columna recién creada a las vistas ESPEJO de su tabla.
- *  Devuelve cuántas vistas se extendieron. Best-effort del caller (no debe
- *  bloquear el alta de la columna). */
+/** V1: propaga una columna recién creada a las vistas ESPEJO de su tabla
+ *  (`isPrimaryKey`: la nueva es PK ⇒ entra tras las PK, doc 94 D4). Devuelve
+ *  cuántas vistas se extendieron. Best-effort del caller (no debe bloquear el
+ *  alta de la columna). */
 export async function syncNewColumnToMirrorViews(
   deps: SyncDeps, tableId: string, physicalName: string, previousCols: CanonicalColumn[],
+  isPrimaryKey = false,
 ): Promise<number> {
   const views = await deps.listViews(tableId);
+  const pkNames = isPrimaryKey ? previousCols.filter((c) => c.isPrimaryKey).map((c) => c.physicalName) : undefined;
   let touched = 0;
   for (const v of views) {
     if (!isMirrorOfTable(v, tableId, previousCols)) continue;
-    const next = appendColumnSource(v, tableId, physicalName);
+    const next = appendColumnSource(v, tableId, physicalName, pkNames);
     if (!next) continue;
     await deps.updateView(v.id, { ...v, sources: next });
     touched += 1;
+  }
+  return touched;
+}
+
+/** V1 para VARIAS columnas nuevas de un mismo lote (paste, relación, split):
+ *  las propaga en orden, ampliando la línea base con cada una — así varias PK
+ *  nuevas entran tras las PK en SU orden (doc 94 D4) y una vista espejo sigue
+ *  siéndolo para la siguiente. Devuelve cuántas propagaciones se hicieron;
+ *  best-effort por columna. */
+export async function syncNewColumnsToMirrorViews(
+  deps: SyncDeps, tableId: string,
+  newCols: { physicalName: string; isPrimaryKey?: boolean | null }[],
+  previousCols: CanonicalColumn[],
+): Promise<number> {
+  let base = previousCols;
+  let touched = 0;
+  for (const c of newCols) {
+    try { touched += await syncNewColumnToMirrorViews(deps, tableId, c.physicalName, base, !!c.isPrimaryKey); }
+    catch { /* best-effort: la vista se alinea después con "Match physical order" */ }
+    base = [...base, { id: `new:${c.physicalName}`, tableId, physicalName: c.physicalName, logicalName: c.physicalName,
+      dataType: '', typeOverridden: false, ordinal: base.length, isPrimaryKey: !!c.isPrimaryKey }];
   }
   return touched;
 }

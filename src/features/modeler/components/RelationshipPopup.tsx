@@ -11,8 +11,10 @@ import {
   buildKeyMapping, demotablePkChildren, mappingToBulk, relationshipDrift, roleNamePlan,
   type MappingResolution,
 } from '@/features/modeler/lib/relationshipPairs';
-import { nextPkPosition, pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
-import { syncNewColumnToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
+import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
+import { pkFirstOrdinals } from '../lib/columnOrder';
+import { keyLayoutBulk } from '../lib/keyLayout';
+import { syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 
@@ -73,32 +75,31 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         .filter((c): c is CanonicalColumn => !!c)
         .map((c) => ({ ...c }));
       await gov.updateRelationship({ ...rel, identifying });
+      // Doc 94 D2: los hijos que entran/salen de la llave quedan en la frontera
+      // del bloque de PK y las columnas que se corren viajan en el MISMO lote.
+      const patches: Record<string, Partial<CanonicalColumn>> = {};
       if (identifying) {
-        // Erwin: la FK entra a la PK del hijo — se promueven TODOS los pares,
-        // entrando AL FINAL de la llave si el hijo maneja orden explícito.
-        let nextPos = nextPkPosition(childOpts);
+        // Erwin: la FK entra a la PK del hijo — se promueven TODOS los pares.
         for (const p of rel.pairs) {
           const c = colById.get(p.childColumnId);
-          if (c && (!c.isPrimaryKey || c.isNullable !== false)) {
-            const pos = !c.isPrimaryKey && nextPos != null ? nextPos++ : undefined;
-            await gov.markForeignKey(c, true, pos);
-          }
+          if (c && (!c.isPrimaryKey || c.isNullable !== false)) patches[c.id] = { isForeignKey: true, isPrimaryKey: true, isNullable: false };
         }
-        pushToast('Identifying: child columns promoted to PK');
       } else {
         // Demote conservador: no pisa PKs sostenidas por OTRA rel identifying.
         const near = await gov.listRelationships(rel.childTableId);
-        const demote = demotablePkChildren(rel, near.filter((r) => r.id !== rel.id));
-        let n = 0;
-        for (const cid of demote) {
-          const c = colById.get(cid);
-          if (c?.isPrimaryKey) { await gov.updateColumn({ ...c, isPrimaryKey: false, pkPosition: null }); n += 1; }
+        for (const cid of demotablePkChildren(rel, near.filter((r) => r.id !== rel.id))) {
+          if (colById.get(cid)?.isPrimaryKey) patches[cid] = { isPrimaryKey: false };
         }
-        pushToast(n ? `Non-identifying: ${n} child column(s) leave the PK` : 'Non-identifying');
       }
+      const { changes: keyChanges, pres: keyPres } = keyLayoutBulk(childOpts, patches);
+      if (keyChanges.length) await gov.recordChangesBulk(keyChanges);
+      const n = Object.keys(patches).length;
+      pushToast(identifying ? 'Identifying: child columns promoted to PK'
+        : n ? `Non-identifying: ${n} child column(s) leave the PK` : 'Non-identifying');
+      const undoCols = [...colPres, ...keyPres.filter((p) => !colPres.some((c) => c.id === p.id))];
       pushUndo('Edit relationship', async () => {
         await gov.recordChangesBulk([
-          ...colPres.map((c) => gov.bulk.createColumn(c)),
+          ...undoCols.map((c) => gov.bulk.createColumn(c)),
           gov.bulk.upsertRelationship(relPre),
         ]);
         await reload();
@@ -142,20 +143,24 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       } else {
         // SPLIT: la columna está compartida (unificada) — se crea una nueva
         // con el role name y ESTE par se repunta; la vieja queda para el resto.
-        // pkPosition NO se hereda del spread (posición propia al final de la llave).
+        // Doc 94 D2: en una identificante la nueva es PK y entra tras la última
+        // PK del hijo (las no-PK se corren en el MISMO lote).
         const newId = crypto.randomUUID();
-        await gov.createColumn({
+        const layout = rel.identifying ? pkFirstOrdinals(childOpts, { toKey: [newId], add: [{ id: newId }] }) : null;
+        const created: CanonicalColumn = {
           ...cur, id: newId, logicalName: name, physicalName: physical,
           isForeignKey: true, isPrimaryKey: rel.identifying,
-          pkPosition: rel.identifying ? nextPkPosition(childOpts) : null,
           isNullable: rel.identifying ? false : cur.isNullable,
-          ordinal: childOpts.length,
-        });
+          ordinal: layout ? layout.get(newId)! : childOpts.length,
+        };
+        const shifts = childOpts.filter((c) => layout?.has(c.id)).map((c) => gov.bulk.createColumn({ ...c, ordinal: layout!.get(c.id)! }));
+        if (shifts.length) await gov.recordChangesBulk([gov.bulk.createColumn(created), ...shifts]);
+        else await gov.createColumn(created);
         // V1: la columna del split entra también a las vistas ESPEJO del hijo.
         try {
           await syncNewColumnToMirrorViews(
             { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            rel.childTableId, physical, childOpts);
+            rel.childTableId, physical, childOpts, rel.identifying);
         } catch { /* best-effort */ }
         await gov.updateRelationship({
           ...rel,
@@ -225,16 +230,17 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       const c = colById.get(p.childColumnId);
       if (!c?.isForeignKey) continue;
       const still = near.some((r2) => r2.id !== rel.id && r2.pairs.some((q) => q.childColumnId === c.id));
-      if (!still) changes.push(gov.bulk.createColumn({ ...c, isForeignKey: false }));
+      if (still) continue;
+      // Una columna viaja UNA sola vez por lote (doc 85): si el orden único ya
+      // la corrió (doc 94), el flag se suma a ese mismo cambio.
+      const prev = changes.find((ch) => ch.collection === 'canonical_columns' && ch.entityId === c.id);
+      if (prev) prev.payload = { ...prev.payload, isForeignKey: false };
+      else changes.push(gov.bulk.createColumn({ ...c, isForeignKey: false }));
     }
     await gov.recordChangesBulk(changes);
-    for (const c of createdCols) {
-      try {
-        await syncNewColumnToMirrorViews(
-          { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-          rel.childTableId, c.physicalName, childOpts);
-      } catch { /* best-effort */ }
-    }
+    await syncNewColumnsToMirrorViews(
+      { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+      rel.childTableId, createdCols, childOpts);
     for (const r of resolutions) {
       if (r.target.kind !== 'existing' || !r.target.rename) continue;
       try {

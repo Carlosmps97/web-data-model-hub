@@ -12,7 +12,8 @@ import {
   type BulkChange,
   type CanonicalColumn,
 } from '@/services/governance.service';
-import { nextPkPosition } from './keyOrder';
+import { pkFirstOrdinals } from './columnOrder';
+import { preKey } from './undoInvert';
 
 export interface PasteRow {
   /** Snapshot fuente (por valor, tomado al copiar). */
@@ -44,9 +45,12 @@ export function pastePlan(clipboard: CanonicalColumn[], targetCols: CanonicalCol
  * `cols` debe venir YA filtrado (sin blocked) y en el orden del clipboard
  * (orden físico de la fuente). Reglas de createTableFromSources adaptadas:
  *  - ordinal: al FINAL del físico del destino (max+1, no length — hay huecos);
- *  - PK pegada: entra al FINAL de la llave si el destino maneja orden
- *    explícito (nextPkPosition, doc 19 §12b); si no, rige el orden físico;
+ *  - doc 94 D2: si se pegan PK, entran tras la última PK del destino (en el
+ *    orden del clipboard) y las no-PK del destino se corren en el MISMO lote
+ *    (upsert del doc completo con el ordinal nuevo) — la tabla queda PK primero;
  *  - payload limpio: flags solo cuando se apartan del default.
+ * Undo: `invertBulk(changes, pastePreImages(targetCols))` — borra las pegadas y
+ * devuelve las corridas a su ordinal.
  */
 export function pasteColumnsToBulk(input: {
   targetTableId: string;
@@ -59,26 +63,43 @@ export function pasteColumnsToBulk(input: {
   newId?: () => string;
 }): BulkChange[] {
   const newId = input.newId ?? (() => crypto.randomUUID());
-  let ordinal = input.targetCols.length
-    ? Math.max(...input.targetCols.map((c) => c.ordinal)) + 1
-    : 0;
-  let pkPos = nextPkPosition(input.targetCols);
-  return input.cols.map((c) => {
+  const created = input.cols.map((c) => ({ c, id: newId() }));
+  const pkIds = created.filter(({ c }) => !!c.isPrimaryKey).map(({ id }) => id);
+  let ordinalOf: Map<string, number>;
+  let shifts: BulkChange[] = [];
+  if (pkIds.length) {
+    ordinalOf = pkFirstOrdinals(input.targetCols, { toKey: pkIds, add: created.map(({ id }) => ({ id })) });
+    shifts = input.targetCols
+      .filter((c) => ordinalOf.has(c.id))
+      .map((c) => bulk.createColumn({ ...c, ordinal: ordinalOf.get(c.id)! }));
+  } else {
+    let next = input.targetCols.length ? Math.max(...input.targetCols.map((c) => c.ordinal)) + 1 : 0;
+    ordinalOf = new Map(created.map(({ id }) => [id, next++]));
+  }
+  const creates = created.map(({ c, id }) => {
     const description = (c.description ?? '').trim();
-    const pkPosition = c.isPrimaryKey && pkPos != null ? pkPos++ : null;
     return bulk.createColumn({
-      id: newId(), tableId: input.targetTableId,
+      id, tableId: input.targetTableId,
       logicalName: c.logicalName, physicalName: c.physicalName,
       parentDomainId: c.parentDomainId, dataType: c.dataType, typeOverridden: c.typeOverridden,
-      isPrimaryKey: c.isPrimaryKey, ordinal: ordinal++,
+      isPrimaryKey: c.isPrimaryKey, ordinal: ordinalOf.get(id)!,
       ...(description ? { description } : {}),
       ...(c.isForeignKey ? { isForeignKey: true } : {}),
       ...(c.isNullable === false ? { isNullable: false } : {}),
       ...(c.isPartition ? { isPartition: true } : {}),
       ...(c.udpValues && Object.keys(c.udpValues).length ? { udpValues: { ...c.udpValues } } : {}),
-      ...(pkPosition != null ? { pkPosition } : {}),
     }, input.sourceTable
       ? { kind: 'paste-columns', sourceTable: input.sourceTable, sourceColumn: c.physicalName }
       : undefined);
   });
+  return [...creates, ...shifts];
+}
+
+/** Pre-imágenes del destino para el Undo del paste (doc 50 + doc 94): las
+ *  columnas existentes corridas vuelven a su ordinal; las pegadas se borran. */
+export function pastePreImages(targetCols: CanonicalColumn[]): Map<string, Record<string, unknown>> {
+  return new Map(targetCols.map((c) => [
+    preKey('canonical_columns', c.id),
+    { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) } as Record<string, unknown>,
+  ]));
 }

@@ -15,7 +15,7 @@ const C: ReportColumnRow = {
   id: 'c1', tableId: 't1', physicalName: 'CODCLI', logicalName: 'Codigo Cliente', dataType: 'VARCHAR(30)',
   logicalDataType: 'VARCHAR(20)', parentDomain: 'Codigo', isPrimaryKey: true, isForeignKey: false, isNullable: false,
   isPartition: false, udpValues: { Particion: 'No Definido' }, description: 'Identificador', ordinal: 0,
-  pkPosition: 0, typeOverridden: true,
+  typeOverridden: true,
 };
 
 describe('reportRows', () => {
@@ -34,17 +34,17 @@ describe('reportRows', () => {
     expect(row).toMatchObject({
       Table: 'M_CLIENTE', Schema: 'core', Column: 'CODCLI', Ordinal: 0,
       'Data type': 'VARCHAR(30)', 'Logical type': 'VARCHAR(20)', 'Parent domain': 'Codigo',
-      PK: 'Y', 'PK position': 0, FK: '', Nullable: 'N', 'Type overridden': 'Y', 'Logical type overridden': '',
+      PK: 'Y', FK: '', Nullable: 'N', 'Type overridden': 'Y', 'Logical type overridden': '',
       'UDP · Particion': 'No Definido', Definition: 'Identificador', 'Column ID': 'c1', 'Table ID': 't1',
     });
     // Doc 85: comment físico al lado de la definición (vacío si no hay)
     expect(columnSheetRow({ ...C, physicalDescription: 'Comentario fisico' }, T, [])['Physical comment']).toBe('Comentario fisico');
     expect(row['Physical comment']).toBe('');
     // sin tabla resuelta cae al id; opcionales ausentes → vacío
-    const bare = columnSheetRow({ ...C, id: undefined, pkPosition: null }, undefined, []);
+    const bare = columnSheetRow({ ...C, id: undefined }, undefined, []);
     expect(bare.Table).toBe('t1');
     expect(Object.keys(bare)).not.toContain('Logical ordinal');   // doc 74: un solo orden
-    expect(bare['PK position']).toBe('');
+    expect(Object.keys(bare)).not.toContain('PK position');   // doc 94: sin orden de llave aparte
     expect(bare['Column ID']).toBe('');
   });
 
@@ -74,5 +74,8 @@ describe('reportRows', () => {
     const names: Record<string, string> = { t1: 'B_TABLE', t2: 'A_TABLE' };
     expect(sortColumnRows(rows, (id) => names[id] ?? id).map((r) => `${r.tableId}:${r.ordinal}`))
       .toEqual(['t2:0', 't1:0', 't1:1']);
+    // Doc 94: dentro de la tabla, el orden único — PK primero aunque su ordinal sea mayor
+    const legacy = [{ ...C, id: 'x', isPrimaryKey: false, ordinal: 0 }, { ...C, id: 'k', isPrimaryKey: true, ordinal: 5 }];
+    expect(sortColumnRows(legacy, () => 'T').map((r) => r.id)).toEqual(['k', 'x']);
   });
 });

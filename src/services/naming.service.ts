@@ -10,13 +10,14 @@
  *
  * Backend contract (envelope `{ success, data }`):
  *   - GET    …/glossary?scope=table|column   → DictTerm[]
- *   - POST   …/glossary                       {term, abbrev, scope, wordType?}
- *   - PUT    …/glossary/{id}                  {term, abbrev, scope, wordType?}
+ *   - POST   …/glossary                       {term, abbrev, scope}
+ *   - PUT    …/glossary/{id}                  {term, abbrev, scope}
  *   - DELETE …/glossary/{id}
  *   - GET    …/settings/naming                → {column:NamingRule, table:NamingRule}
  *   - PUT    …/settings/naming/{scope}        {separator, case}
  *   - POST   …/glossary/physicalize           {logical, scope} → {physical}
  *   - POST   …/glossary/rephysicalize         {scope?}         → {updated}
+ *   - POST   …/glossary/impact                {scope, termsUpsert, termsDelete, namingConfig?} → GlossaryImpact
  */
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 
@@ -26,7 +27,6 @@ const DICT = (pid: string) => `${PROJECT(pid)}/glossary`;
 const NAMING = (pid: string) => `${PROJECT(pid)}/settings/naming`;
 
 export type UdpScope = 'column' | 'table';
-export type WordType = 'prime' | 'class' | 'modifier';
 export type Separator = '_' | '' | '-';
 export type Casing = 'upper' | 'lower' | 'camel';
 
@@ -35,7 +35,6 @@ export interface DictTerm {
   term: string;
   abbrev: string;
   scope: UdpScope;
-  wordType?: WordType;
   // F2 #1 (round-trip TS ↔ Pydantic): lock por ADMIN. También en SnapshotTerm.
   locked?: boolean;
   lockedBy?: string | null;
@@ -52,7 +51,7 @@ export interface NamingConfig {
   table: NamingRule;
 }
 
-// ── Dictionary terms (scoped, with word type) ──
+// ── Dictionary terms (scoped) ──
 export const listTerms = (projectId: string, scope: UdpScope) =>
   apiGet<DictTerm[]>(`${DICT(projectId)}?scope=${encodeURIComponent(scope)}`);
 
@@ -85,6 +84,37 @@ export interface GlossaryValidation {
  *  lógicos publicados. Cortesía de UX: el backend re-valida en cada write. */
 export const validateTerm = (projectId: string, term: string, scope: UdpScope) =>
   apiPost<GlossaryValidation>(`${DICT(projectId)}/validate`, { term, scope });
+
+// ── Dry-run del re-derivado (doc 94 D7): el aviso sale solo con impacto real ──
+export interface GlossaryImpactSample {
+  entity: 'column' | 'table';
+  /** Tabla (físico) de la columna, o la tabla misma si `entity` = 'table'. */
+  table: string;
+  from: string;
+  to: string;
+}
+
+export interface GlossaryImpact {
+  /** Nombres físicos de COLUMNAS (campos) que cambiarían. */
+  columns: number;
+  /** Tablas distintas a las que pertenecen esas columnas. */
+  columnTables: number;
+  /** Nombres físicos de TABLAS que cambiarían. */
+  tables: number;
+  /** Muestra (cap 20). */
+  sample: GlossaryImpactSample[];
+}
+
+export interface GlossaryImpactBody {
+  scope: UdpScope;
+  termsUpsert: { id?: string; term: string; abbrev: string }[];
+  termsDelete: string[];
+  namingConfig?: { separator?: string; case?: string };
+}
+
+/** Cuántos nombres físicos cambiaría aplicar el borrador del glosario. No escribe. */
+export const glossaryImpact = (projectId: string, body: GlossaryImpactBody) =>
+  apiPost<GlossaryImpact>(`${DICT(projectId)}/impact`, body);
 
 /** Bloquea/desbloquea una entrada (solo admin.manage; D4: intocable para todos). */
 export const lockTerm = (projectId: string, id: string) =>

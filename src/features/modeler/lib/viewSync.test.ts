@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CanonicalColumn } from '@/services/governance.service';
 import type { View } from '@/services/views.service';
-import { alignSourcesToPhysical, appendColumnSource, isMirrorOfTable, removeColumnSource, renameColumnSource, syncNewColumnToMirrorViews } from './viewSync';
+import { alignSourcesToPhysical, appendColumnSource, isMirrorOfTable, removeColumnSource, renameColumnSource, syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews } from './viewSync';
 
 const col = (physicalName: string, ordinal: number): CanonicalColumn => ({
   id: physicalName.toLowerCase(), tableId: 't1', physicalName, logicalName: physicalName.toLowerCase(),
@@ -98,5 +98,57 @@ describe('syncNewColumnToMirrorViews', () => {
     expect(updateView.mock.calls[0][0]).toBe('v1');
     expect(updateView.mock.calls[0][1].sources.map((s: { column?: string }) => s.column))
       .toEqual(['COD', 'FEC', 'NUEVA']);
+  });
+});
+
+// ── Doc 94 D4: el bug del owner — «Match the table's physical order» dejaba la
+// PK nueva abajo porque ordenaba por `ordinal` crudo (la PK recién marcada
+// conserva el ordinal del final). El orden de la vista es el ÚNICO: PK primero.
+describe('doc 94 — vistas en el orden único (PK primero)', () => {
+  const pk = (physicalName: string, ordinal: number): CanonicalColumn => ({ ...col(physicalName, ordinal), isPrimaryKey: true });
+
+  it('alignSourcesToPhysical: una PK con ordinal alto queda con las PK, arriba', () => {
+    const v: View = { ...mirror, sources: [
+      { tableId: 't1', column: 'COD' }, { tableId: 't1', column: 'FEC' }, { tableId: 't1', column: 'NUEVA_PK' },
+    ] };
+    // la lista llega en ordinal crudo (como la armaba alignView): igual sale PK primero
+    const cols = [pk('COD', 0), col('FEC', 1), pk('NUEVA_PK', 2)];
+    expect(alignSourcesToPhysical(v, new Map([['t1', cols]])).map((s) => s.column)).toEqual(['COD', 'NUEVA_PK', 'FEC']);
+  });
+
+  it('appendColumnSource: una columna nueva que es PK entra tras la última PK de su tabla', () => {
+    const next = appendColumnSource(mirror, 't1', 'NUEVA_PK', ['COD']);
+    expect(next?.map((s) => s.column)).toEqual(['COD', 'NUEVA_PK', 'FEC']);
+  });
+
+  it('appendColumnSource: PK sin otras PK en la vista ⇒ primera de su tabla', () => {
+    const next = appendColumnSource(mirror, 't1', 'NUEVA_PK', []);
+    expect(next?.map((s) => s.column)).toEqual(['NUEVA_PK', 'COD', 'FEC']);
+  });
+
+  it('syncNewColumnToMirrorViews: la PK nueva entra a la espejo tras las PK', async () => {
+    const updateView = vi.fn().mockResolvedValue({});
+    await syncNewColumnToMirrorViews(
+      { listViews: vi.fn().mockResolvedValue([mirror]), updateView },
+      't1', 'NUEVA_PK', [pk('COD', 0), col('FEC', 1)], true,
+    );
+    expect(updateView.mock.calls[0][1].sources.map((s: { column?: string }) => s.column))
+      .toEqual(['COD', 'NUEVA_PK', 'FEC']);
+  });
+});
+
+describe('syncNewColumnsToMirrorViews — varias columnas nuevas (doc 94 D4)', () => {
+  it('varias PK nuevas entran tras las PK EN SU ORDEN; las no-PK al final', async () => {
+    let current: View = { ...mirror, sources: [...(mirror.sources ?? [])] };
+    const deps = {
+      listViews: vi.fn(async () => [current]),
+      updateView: vi.fn(async (_id: string, body: { sources?: View['sources'] }) => { current = { ...current, sources: body.sources }; return {}; }),
+    };
+    const pk = (n: string, o: number): CanonicalColumn => ({ ...col(n, o), isPrimaryKey: true });
+    const n = await syncNewColumnsToMirrorViews(deps, 't1',
+      [{ physicalName: 'PK_A', isPrimaryKey: true }, { physicalName: 'PK_B', isPrimaryKey: true }, { physicalName: 'DATO', isPrimaryKey: false }],
+      [pk('COD', 0), col('FEC', 1)]);
+    expect(n).toBe(3);
+    expect(current.sources?.map((s) => s.column)).toEqual(['COD', 'PK_A', 'PK_B', 'FEC', 'DATO']);
   });
 });

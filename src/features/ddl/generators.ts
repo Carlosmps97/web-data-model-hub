@@ -11,6 +11,11 @@
 // columns can be ordered by the UDP correlative (PART_01, PART_02…) declared
 // by the ruleset's layout rule; column projections of views are emitted as
 // `col AS alias` with the export casing.
+//
+// Doc 93: sin comillas salvo que el nombre las necesite (`quoteIdentifiers`),
+// tipos con `typeCase`, CREATE según `createTable`, `USING` en mayúscula,
+// `NOT NULL` solo con keys. Los defaults son las convenciones de la macro; el
+// proyecto las cambia en Data Standards (Output settings).
 // ─────────────────────────────────────────────────────────────────────────────
 import { foldComplexType } from '@/lib/typeText';
 
@@ -40,8 +45,6 @@ export interface DdlColumn {
   dataType: string;
   ordinal: number;
   isPrimaryKey?: boolean;
-  /** Posición dentro de la llave (0-based) — ordena el PRIMARY KEY(...). */
-  pkPosition?: number | null;
   isForeignKey?: boolean;
   isNullable?: boolean;
   /** Column marked as a partition key. */
@@ -103,10 +106,19 @@ export interface DdlView {
  *  TEXTO exportado (ADLS es case-sensitive) — nunca la base de datos. */
 export type IdentifierCase = 'as-is' | 'lower' | 'upper';
 
+/** Doc 93 D2: comillas solo si el nombre las necesita, o siempre (estilo anterior). */
+export type QuoteMode = 'when-needed' | 'always';
+/** Doc 93 D3: casing de los tipos de dato simples. */
+export type TypeCase = 'lower' | 'upper';
+/** Doc 93 D5: forma del CREATE TABLE. */
+export type CreateTableMode = 'or-replace' | 'if-not-exists';
+/** Doc 93 D6: keyword de los SET TAGS sobre vistas (lo aplica el motor de reglas). */
+export type ViewTagsAs = 'table' | 'view';
+
 export interface DatabricksDdlOptions {
   /** Emite `CREATE OR REPLACE VIEW` por cada vista del canvas exportado. */
   includeViews: boolean;
-  /** Emit PRIMARY KEY / FOREIGN KEY constraints. */
+  /** Emit PRIMARY KEY / FOREIGN KEY constraints and NOT NULL (doc 93 D5: una PK en Databricks exige NOT NULL). */
   includeKeys: boolean;
   /** Emit `COMMENT` clauses from functional definitions. */
   includeComments: boolean;
@@ -122,7 +134,7 @@ export interface DatabricksDdlOptions {
   catalog: string;
   /** Default schema when a table has none. */
   defaultSchema: string;
-  /** External table → `CREATE EXTERNAL TABLE … LOCATION '<base>/<table>'`. */
+  /** External table → `LOCATION '<base>/<TABLE>'` (con `createTable = if-not-exists` además `CREATE EXTERNAL TABLE`). */
   external: boolean;
   /** Base storage path (S3/ADLS/…) for external tables. */
   location: string;
@@ -142,12 +154,21 @@ export interface DatabricksDdlOptions {
    *  COMMENTs, tipos de datos, expresiones/castType/customSql de vistas ni
    *  alias generados (t1, t2, …). */
   identifierCase: IdentifierCase;
+  /** Doc 93 D2 — comillas de los identificadores. */
+  quoteIdentifiers: QuoteMode;
+  /** Doc 93 D3 — casing de los tipos simples (complejos y CAST de vistas: tal cual). */
+  typeCase: TypeCase;
+  /** Doc 93 D5 — `or-replace` ⇒ CREATE OR REPLACE TABLE; `if-not-exists` ⇒ forma anterior. */
+  createTable: CreateTableMode;
+  /** Doc 93 D6 — tags sobre vistas: `ALTER TABLE` (macro) o `ALTER VIEW`. Viaja al motor. */
+  viewTagsAs: ViewTagsAs;
 }
 
 export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
-  // Default pedido owner: Views + Partitions ON; Comments, PK&FK (keys) e
-  // Indexes OFF — los COMMENT de las definiciones funcionales son largos y
-  // ensucian el CREATE, así que se piden explícitamente.
+  // Doc 93: convenciones de la macro BCP; el proyecto las cambia en Data
+  // Standards → Output settings. Default pedido owner: Views + Partitions ON;
+  // Comments, PK&FK (keys) e Indexes OFF — los COMMENT de las definiciones
+  // funcionales son largos y ensucian el CREATE, así que se piden explícitamente.
   includeViews: true,
   includeKeys: false,
   includeComments: false,
@@ -164,22 +185,61 @@ export const DEFAULT_DATABRICKS_OPTS: DatabricksDdlOptions = {
   locationFolderCase: 'upper',
   tblProperties: [],
   identifierCase: 'lower',
+  quoteIdentifiers: 'when-needed',
+  typeCase: 'lower',
+  createTable: 'or-replace',
+  viewTagsAs: 'table',
 };
 
-// Casing activo del export en curso. `databricksDdl` (único entry point
-// exportado que usa `ident`/`qualify`) lo fija al entrar; así TODO
-// identificador — incluidos los del FROM de las vistas multi-fuente (F3b) y
-// los nombres de constraint pk_/fk_ — pasa por el mismo funnel sin
-// enhebrar la opción por call-site. El generador es síncrono ⇒ sin carreras.
-let activeCase: IdentifierCase = 'as-is';
+// Estilo activo del export en curso (doc 93): casing, comillas y tipos. Lo fijan
+// los entry points (`tableStatements`/`viewStatements`/`viewDDL`) desde SUS
+// opciones; así TODO identificador — incluidos los del FROM de las vistas
+// multi-fuente (F3b) y los nombres de constraint pk_/fk_ — pasa por el mismo
+// funnel sin enhebrar la opción por call-site. El generador es síncrono ⇒ sin
+// carreras.
+interface ActiveStyle { idCase: IdentifierCase; quote: QuoteMode; typeCase: TypeCase }
+let active: ActiveStyle = { idCase: 'as-is', quote: 'when-needed', typeCase: 'lower' };
+const useStyle = (o: DatabricksDdlOptions): void => {
+  active = { idCase: o.identifierCase ?? 'as-is', quote: o.quoteIdentifiers ?? 'when-needed', typeCase: o.typeCase ?? 'lower' };
+};
 
 const caseWith = (s: string, mode: IdentifierCase): string =>
   mode === 'lower' ? s.toLowerCase() : mode === 'upper' ? s.toUpperCase() : s;
 
-const applyCase = (s: string): string => caseWith(s, activeCase);
+const applyCase = (s: string): string => caseWith(s, active.idCase);
 
-/** Backtick-quote a Databricks identifier (aplica el casing del export). */
-const ident = (s: string) => `\`${applyCase(s)}\``;
+/** Palabras que no pueden ir sin comillas como identificador. ESPEJO EXACTO de
+ *  `RESERVED_WORDS` del motor (backend engine/render.py). */
+export const RESERVED_WORDS: ReadonlySet<string> = new Set(`
+all alter and anti any as authorization between both by case cast check collate column
+constraint create cross current_date current_time current_timestamp current_user delete
+describe distinct drop else end escape except exists external false fetch filter for foreign
+from full function global grant group having in inner insert intersect interval into is join
+lateral leading left like local minus natural no not null of on only or order out outer
+overlaps position primary range references revoke right rollback rollup row rows select semi
+session_user set some start table tablesample then time to trailing true truncate union
+unique unknown update user using values when where window with
+`.split(/\s+/).filter(Boolean));
+
+const SAFE_IDENT = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Doc 93 D2: true si el nombre NO compila sin backticks (caracteres fuera de
+ *  [A-Za-z0-9_], empieza con dígito o es palabra reservada). */
+export const needsQuote = (s: string): boolean => !SAFE_IDENT.test(s) || RESERVED_WORDS.has(s.toLowerCase());
+
+const quote = (s: string): string => `\`${s.replace(/`/g, '``')}\``;
+
+/** Identificador del modelo: casing del export + comillas según `quoteIdentifiers`. */
+const ident = (s: string): string => {
+  const c = applyCase(s);
+  return active.quote === 'always' || needsQuote(c) ? quote(c) : c;
+};
+
+/** Proyección de vista (`col AS col`): casing del export; comillas SOLO si hacen falta. */
+const projIdent = (s: string): string => {
+  const c = applyCase(s);
+  return needsQuote(c) ? quote(c) : c;
+};
 
 /** SQL string literal with single-quote escaping. */
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
@@ -187,6 +247,15 @@ const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 /** Carpeta del LOCATION: nombre del objeto con el casing de carpeta (doc 76 D9). */
 export const locationFolder = (name: string, o: Pick<DatabricksDdlOptions, 'locationFolderCase'>): string =>
   caseWith(name, o.locationFolderCase ?? 'upper');
+
+/** Orden ÚNICO de las columnas de una tabla (doc 94 D1): PK primero y cada
+ *  bloque por `ordinal` — sin orden de llave aparte. Espejo de `orderColumns`
+ *  del modeler y de `display_order` del motor (el generador es puro y no
+ *  importa internos de otra feature). */
+export function pkFirstColumns<C extends { ordinal: number; isPrimaryKey?: boolean }>(cols: C[]): C[] {
+  const byOrdinal = [...cols].sort((a, b) => a.ordinal - b.ordinal);
+  return [...byOrdinal.filter((c) => c.isPrimaryKey), ...byOrdinal.filter((c) => !c.isPrimaryKey)];
+}
 
 /** Orden de emisión de las columnas de partición (doc 76 D3): primero las que
  *  traen correlativo (PART_01 < PART_02…), después las demás en orden físico
@@ -206,7 +275,7 @@ export function orderedPartitions(cols: DdlColumn[]): DdlColumn[] {
     .map(({ c }) => c);
 }
 
-/** Fully-qualified, backtick-quoted table name honoring Unity Catalog. */
+/** Fully-qualified table name honoring Unity Catalog (comillas según `quoteIdentifiers`). */
 function qualify(t: DdlTable, o: DatabricksDdlOptions): string {
   const schema = (t.schema?.trim() || o.defaultSchema || 'default');
   const parts = o.unityCatalog
@@ -215,30 +284,38 @@ function qualify(t: DdlTable, o: DatabricksDdlOptions): string {
   return parts.map(ident).join('.');
 }
 
-/** Map a canonical/logical data type to a Databricks SQL type. */
-function dbxType(raw: string): string {
+/** Tipo Databricks de una columna tal como sale en el CREATE (doc 93 D3/D4):
+ *  simples mapeados y con el casing `typeCase`; complejos (con `<`) tal cual,
+ *  plegados a una línea (doc 92 D6). El motor lo recibe como `ddlType` para que
+ *  la `_rej` salga con el MISMO tipo que la física. */
+export function ddlType(raw: string, typeCase: TypeCase = 'lower'): string {
   const t0 = (raw || 'string').trim();
-  // Tipos complejos (contienen '<'): VERBATIM (F4 #6). Upper-casear rompería
-  // la sintaxis interna (campos del STRUCT, tipos anidados). El switch de
-  // casing (identifierCase) tampoco aplica: no son identificadores. Doc 92
+  // Tipos complejos (contienen '<'): VERBATIM (F4 #6). Cambiarles el casing
+  // rompería la sintaxis interna (campos del STRUCT, tipos anidados). Doc 92
   // D6: los saltos de línea/tabs que trae Erwin se pliegan a un espacio para
   // que la definición de la columna salga en UNA línea.
   if (t0.includes('<')) return foldComplexType(t0);
   const t = t0.toLowerCase();
   const map: Record<string, string> = {
-    integer: 'INT', int: 'INT', smallint: 'SMALLINT', tinyint: 'TINYINT', bigint: 'BIGINT',
-    float: 'FLOAT', real: 'FLOAT', double: 'DOUBLE',
-    decimal: 'DECIMAL(38,18)', numeric: 'DECIMAL(38,18)', money: 'DECIMAL(19,4)',
-    varchar: 'STRING', nvarchar: 'STRING', char: 'STRING', text: 'STRING', string: 'STRING', uuid: 'STRING',
-    boolean: 'BOOLEAN', bool: 'BOOLEAN',
-    date: 'DATE', datetime: 'TIMESTAMP', timestamp: 'TIMESTAMP', timestamptz: 'TIMESTAMP', time: 'STRING',
-    binary: 'BINARY', varbinary: 'BINARY', blob: 'BINARY', bytes: 'BINARY',
-    json: 'STRING', jsonb: 'STRING', xml: 'STRING',
-    array: 'ARRAY<STRING>', map: 'MAP<STRING,STRING>', struct: 'STRUCT<>',
+    integer: 'int', int: 'int', smallint: 'smallint', tinyint: 'tinyint', bigint: 'bigint',
+    float: 'float', real: 'float', double: 'double',
+    decimal: 'decimal(38,18)', numeric: 'decimal(38,18)', money: 'decimal(19,4)',
+    varchar: 'string', nvarchar: 'string', char: 'string', text: 'string', string: 'string', uuid: 'string',
+    boolean: 'boolean', bool: 'boolean',
+    date: 'date', datetime: 'timestamp', timestamp: 'timestamp', timestamptz: 'timestamp', time: 'string',
+    binary: 'binary', varbinary: 'binary', blob: 'binary', bytes: 'binary',
+    json: 'string', jsonb: 'string', xml: 'string',
+    array: 'array<string>', map: 'map<string,string>', struct: 'struct<>',
   };
-  // Preserve explicit params like decimal(10,2) verbatim (upper-cased).
-  if (/\(.*\)/.test(t)) return t.toUpperCase();
-  return map[t] ?? t.toUpperCase();
+  // Parámetros explícitos (decimal(10,2), char(20)) se conservan verbatim.
+  const out = /\(.*\)/.test(t) ? t : (map[t] ?? t);
+  return typeCase === 'upper' ? out.toUpperCase() : out;
+}
+
+/** Encabezado del CREATE TABLE (doc 93 D5) — espejo de `create_table_sql` del motor. */
+export function createTableSql(o: Pick<DatabricksDdlOptions, 'createTable' | 'external'>): string {
+  if (o.createTable === 'if-not-exists') return o.external ? 'CREATE EXTERNAL TABLE IF NOT EXISTS' : 'CREATE TABLE IF NOT EXISTS';
+  return 'CREATE OR REPLACE TABLE';
 }
 
 /** One `CREATE TABLE` statement for a single table. */
@@ -251,7 +328,8 @@ function tableDDL(
   colName: Map<string, string>,
 ): string {
   const full = qualify(t, o);
-  const ordered = [...cols].sort((a, b) => a.ordinal - b.ordinal);
+  // Doc 94: el orden único — PK primero y cada bloque por ordinal.
+  const ordered = pkFirstColumns(cols);
   // Doc 73/76: con la regla de layout, las particiones se emiten al final y
   // ordenadas por su correlativo; el resto conserva el orden físico (espejo de
   // `layout_columns` del motor).
@@ -261,8 +339,8 @@ function tableDDL(
     : ordered;
 
   const colLines = emitted.map((c) => {
-    let l = `  ${ident(c.physicalName)} ${dbxType(c.dataType)}`;
-    if (c.isNullable === false || c.isPrimaryKey) l += ' NOT NULL';
+    let l = `  ${ident(c.physicalName)} ${ddlType(c.dataType, active.typeCase)}`;
+    if (o.includeKeys && (c.isNullable === false || c.isPrimaryKey)) l += ' NOT NULL';
     const comment = (c.physicalDescription ?? '').trim() || (c.description ?? '').trim();
     if (o.includeComments && comment) l += ` COMMENT ${lit(comment)}`;
     return l;
@@ -270,18 +348,14 @@ function tableDDL(
 
   const inner: string[] = [...colLines];
   if (o.includeKeys) {
-    // El PRIMARY KEY(...) va en el ORDEN DE LA LLAVE (pkPosition), que es
-    // independiente del orden físico de columnas — convención Erwin (doc 19
-    // §12b). Sin pkPosition cae al ordinal (sort estable sobre `ordered`).
-    const pks = ordered.filter((c) => c.isPrimaryKey)
-      .sort((a, b) => (a.pkPosition ?? Number.MAX_SAFE_INTEGER) - (b.pkPosition ?? Number.MAX_SAFE_INTEGER))
-      .map((c) => ident(c.physicalName));
+    // Doc 94 D1: el PRIMARY KEY(...) sigue el orden único (las PK por
+    // ordinal) — ya no existe un orden de llave aparte.
+    const pks = ordered.filter((c) => c.isPrimaryKey).map((c) => ident(c.physicalName));
     if (pks.length) inner.push(`  CONSTRAINT ${ident(`pk_${t.physicalName}`)} PRIMARY KEY (${pks.join(', ')})`);
   }
 
-  const create = o.external ? 'CREATE EXTERNAL TABLE' : 'CREATE TABLE';
-  let out = `${create} IF NOT EXISTS ${full} (\n${inner.join(',\n')}\n)`;
-  out += `\nUSING ${o.tableFormat}`;
+  let out = `${createTableSql(o)} ${full} (\n${inner.join(',\n')}\n)`;
+  out += `\nUSING ${o.tableFormat.toUpperCase()}`;
 
   if (o.includePartitions) {
     // Doc 76 D3: PARTITIONED BY sigue el correlativo del UDP cuando la regla
@@ -345,7 +419,8 @@ export function isFullCreateStatement(sql: string): boolean {
  *  cual) > `CAST(col AS castType) AS alias` > `col AS alias` SIEMPRE explícito
  *  (alias = outputAlias o la misma columna) — como escribe la macro. Las
  *  columnas y alias de proyección son identificadores del modelo y respetan
- *  `identifierCase`; con 2+ fuentes se cualifican con alias posicionales t1,
+ *  `identifierCase`, con comillas solo si el nombre las necesita (doc 93 D2);
+ *  con 2+ fuentes se cualifican con alias posicionales t1,
  *  t2… — RAW, nunca via ident() — y el FROM las lista separadas por COMA, sin
  *  JOIN ni ON (doc 91 D5, el default de Erwin: `from tabla1, tabla2`); un join
  *  real se escribe en el User-Defined SQL. Sin proyecciones ⇒ `SELECT *`
@@ -359,13 +434,13 @@ export function viewDDL(
   o: DatabricksDdlOptions,
   tableById: Map<string, DdlTable>,
 ): string {
-  // Funnel de casing (F4 #7): fija activeCase desde LAS OPCIONES DE ESTA vista.
+  // Funnel de estilo (F4 #7 + doc 93): fija el estilo activo desde SUS opciones.
   // - Como entry point DIRECTO (ViewEditor → viewDDL(...), nunca databricksDdl):
-  //   deriva el casing de SUS opciones en vez de heredar el activeCase que dejó
-  //   el último export → el preview del editor no arrastra un 'upper'/'lower'.
-  // - Desde databricksDdl: idempotente (databricksDdl ya lo fijó al mismo valor
-  //   y pasa `o` tal cual) ⇒ respeta el casing del export en curso.
-  activeCase = o.identifierCase ?? 'as-is';
+  //   deriva casing/comillas de SUS opciones en vez de heredar el estilo que
+  //   dejó el último export → el preview del editor no arrastra un 'upper'.
+  // - Desde databricksDdl: idempotente (ya se fijó al mismo valor y pasa `o`
+  //   tal cual) ⇒ respeta el estilo del export en curso.
+  useStyle(o);
   // Fuentes canónicas con fallback al tableId legacy (docs pre-F3a).
   const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
   const base = srcIds.length ? tableById.get(srcIds[0]) : undefined;
@@ -388,8 +463,8 @@ export function viewDDL(
   const aliased = srcIds.length > 1;
   // Alias POSICIONAL por fuente (t1, t2, …): raw, nunca via ident() (F4).
   const aliasOf = new Map(srcIds.map((id, i) => [id, `t${i + 1}`]));
-  // Fuente fuera del contexto exportado (tabla no resuelta): id backtickeado
-  // visible — señal explícita en el DDL en vez de inventar un nombre.
+  // Fuente fuera del contexto exportado (tabla no resuelta): id visible —
+  // señal explícita en el DDL en vez de inventar un nombre.
   const refOf = (id: string) => { const t = tableById.get(id); return t ? qualify(t, o) : ident(id); };
 
   // Solo cuentan proyecciones por COLUMNA o EXPRESIÓN (el formato legacy
@@ -419,12 +494,12 @@ export function viewDDL(
       // Expresión libre: VERBATIM, alias incluido (lo tipeó el modelador junto
       // con la expresión).
       if (expr) return rawAlias && rawAlias !== expr ? `${expr} AS ${rawAlias}` : expr;
-      // Columna del modelo: identificador ⇒ casing del export (sin backticks,
-      // como siempre en las proyecciones). Cualificada con su alias de fuente
+      // Columna del modelo: identificador ⇒ casing del export, comillas solo si
+      // el nombre las necesita (doc 93 D2). Cualificada con su alias de fuente
       // cuando hay 2+ (sin tableId ⇒ t1, ítems legacy de una sola tabla).
-      const colName = applyCase(s.column!);
+      const colName = projIdent(s.column!);
       const col = aliased ? `${aliasOf.get(s.tableId ?? '') ?? 't1'}.${colName}` : colName;
-      const alias = applyCase(rawAlias || s.column!);
+      const alias = projIdent(rawAlias || s.column!);
       if (cast) return `CAST(${col} AS ${cast}) AS ${alias}`;
       return `${col} AS ${alias}`;
     });
@@ -453,7 +528,7 @@ export interface DatabricksDdlInput {
 export function tableStatements(
   input: DatabricksDdlInput, o: DatabricksDdlOptions,
 ): { table: DdlTable; sql: string }[] {
-  activeCase = o.identifierCase ?? 'as-is';
+  useStyle(o);
   const wanted = input.tableIds && input.tableIds.length
     ? new Set(input.tableIds)
     : null;
@@ -476,7 +551,7 @@ export function tableStatements(
 export function viewStatements(
   input: DatabricksDdlInput, o: DatabricksDdlOptions,
 ): { view: DdlView; sql: string }[] {
-  activeCase = o.identifierCase ?? 'as-is';
+  useStyle(o);
   const wanted = input.tableIds && input.tableIds.length
     ? new Set(input.tableIds)
     : null;

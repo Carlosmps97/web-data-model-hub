@@ -3,6 +3,7 @@
 import type { CanonicalColumn, TableLinkRow, TableUsageRow } from '@/services/governance.service';
 import type { Facet } from '@/lib/facets';
 import { orderColumns } from './columnOrder';
+import { pkInKeyOrder } from './keyOrder';
 
 /** Etiqueta compacta por extremo (misma tabla del panel de propiedades). */
 export const CARD_LBL: Record<string, string> = {
@@ -32,12 +33,14 @@ export function positionIn(cols: CanonicalColumn[], colId: string): { pos: numbe
 export const facetOnly = (c: { logicalOnly?: boolean; physicalOnly?: boolean }): 'logical' | 'physical' | null =>
   (c.logicalOnly ? 'logical' : c.physicalOnly ? 'physical' : null);
 
-/** Rótulo de llaves: «PK · #2 of 3 in the key» / «FK» / «—». */
+/** Rótulo de llaves: «PK · #2 of 3 in the key» / «FK» / «—». La posición en
+ *  la llave es la de la PK en el orden único (doc 94: por `ordinal`). */
 export function keyLabel(c: CanonicalColumn, cols: CanonicalColumn[]): string {
   const parts: string[] = [];
   if (c.isPrimaryKey) {
-    const pks = cols.filter((x) => x.isPrimaryKey).length;
-    parts.push(c.pkPosition != null && pks > 1 ? `PK · #${c.pkPosition + 1} of ${pks} in the key` : 'PK');
+    const pks = pkInKeyOrder(cols);
+    const k = pks.findIndex((x) => x.id === c.id);
+    parts.push(k >= 0 && pks.length > 1 ? `PK · #${k + 1} of ${pks.length} in the key` : 'PK');
   }
   if (c.isForeignKey) parts.push('FK');
   return parts.length ? parts.join(' · ') : '—';

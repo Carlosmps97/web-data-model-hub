@@ -16,7 +16,7 @@ import { API_BASE } from '@/services/apiBase';
 import type { Diagram } from '@/features/modeler/services/modeler.service';
 
 import {
-  tableStatements, viewStatements,
+  tableStatements, viewStatements, ddlType, pkFirstColumns,
   type DatabricksDdlInput, type DatabricksDdlOptions, type DdlColumn,
 } from './generators';
 
@@ -79,7 +79,7 @@ export function missingSource(
   return producer && !selected.has(producer.id) ? producer.name : null;
 }
 
-/** Def UDP mínima para resolver el UDP de orden de particiones por nombre. */
+/** Def UDP mínima para resolver por nombre el UDP que define las particiones. */
 export interface UdpDefLite { id: string; name: string; level: string; view?: string | null; }
 
 export interface RenderedStatement { artifact: string; schema?: string | null; name?: string | null; sql: string; }
@@ -95,33 +95,37 @@ export interface RenderedExport {
 /** Reglas del PROYECTO (doc 75: cada proyecto tiene su ruleset). */
 export const fetchExportRules = (projectId: string) => apiGet<ExportRule[]>(DDL_RULES(projectId));
 
-/** Defs UDP del proyecto (para `withPartitionOrder`). */
+/** Defs UDP del proyecto (para `withUdpPartitions`). */
 export const fetchUdpDefs = (projectId: string) => apiGet<UdpDefLite[]>(`${PROJECT(projectId)}/udp`);
+
+/** Config del ruleset del proyecto: el modal toma de acá las Output settings (doc 93 D1). */
+export const fetchDdlConfig = (projectId: string) =>
+  apiGet<{ output?: Record<string, unknown> | null }>(`${DDL_RULES(projectId)}/config`);
 
 export interface ExportLayout {
   partitionsLast: boolean;
-  /** Doc 76 D3: nombre del UDP de columna cuyos valores PART_nn ordenan las
-   *  particiones (null = orden físico). */
-  partitionOrderUdp: string | null;
+  /** Doc 93 D10: UDP de columna cuyos valores PART_nn DEFINEN las particiones
+   *  (qué columnas y en qué orden). null = el flag de la plataforma. */
+  partitionUdp: string | null;
 }
 
-/** Doc 73/76: layout de columnas dictado por el ruleset — reglas de TABLA
+/** Doc 73/76/93: layout de columnas dictado por el ruleset — reglas de TABLA
  *  seleccionadas sobre `ddl.tabla_fisica` con `action.layout`:
- *  `partitionColumns = 'last'` ⇒ el CREATE emite las particiones al final;
- *  `partitionOrderUdp` ⇒ ordenadas por el correlativo de ese UDP. Espejo de
- *  `layout_from_rules` del motor (el backend la registra como aplicada). */
+ *  `partitionColumns = 'last'` ⇒ particiones al final del CREATE;
+ *  `partitionUdp` (alias legado `partitionOrderUdp`) ⇒ particiones desde ese
+ *  UDP. Espejo de `layout_from_rules` del motor. */
 export function layoutFromRules(rules: ExportRule[], selected: Iterable<string>): ExportLayout {
   const sel = new Set(selected);
-  const out: ExportLayout = { partitionsLast: false, partitionOrderUdp: null };
+  const out: ExportLayout = { partitionsLast: false, partitionUdp: null };
   const ordered = [...rules]
     .filter((r) => sel.has(r.id) && r.kind === 'rule' && r.appliesTo.includes('ddl.tabla_fisica'))
     .sort((a, b) => b.priority - a.priority || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
   for (const r of ordered) {
-    const lay = r.action.layout as { partitionColumns?: string; partitionOrderUdp?: string } | undefined;
+    const lay = r.action.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string } | undefined;
     if (!lay) continue;
     if (lay.partitionColumns === 'last') out.partitionsLast = true;
-    const udp = (lay.partitionOrderUdp ?? '').trim();
-    if (udp && !out.partitionOrderUdp) out.partitionOrderUdp = udp;
+    const udp = (lay.partitionUdp ?? lay.partitionOrderUdp ?? '').trim();
+    if (udp && !out.partitionUdp) out.partitionUdp = udp;
   }
   return out;
 }
@@ -136,18 +140,21 @@ export function partitionCorrelative(value: string | null | undefined): number |
   return m ? Number(m[1]) : null;
 }
 
-/** Estampa `partitionOrder` en las columnas leyendo el UDP de columna (faceta
- *  física) que nombra la regla de layout. Sin UDP (o sin regla) las columnas
- *  vuelven intactas. Puro. */
-export function withPartitionOrder<C extends { udpValues?: Record<string, string> | null; isPartition?: boolean }>(
+/** Doc 93 D10 — particiones DESDE el UDP (espejo de `physical_columns` del
+ *  motor): una columna es de partición si y solo si su valor es PART_nn,
+ *  ordenada por nn; el flag `isPartition` de la plataforma se ignora. Sin UDP
+ *  (o si el UDP no existe en el proyecto) las columnas vuelven intactas y rige
+ *  el flag (export nativo). Puro. */
+export function withUdpPartitions<C extends { udpValues?: Record<string, string> | null; isPartition?: boolean }>(
   columns: C[], udpDefs: UdpDefLite[], udpName: string | null,
 ): (C & { partitionOrder?: number | null })[] {
   if (!udpName) return columns;
   const def = udpDefs.find((d) => d.level === 'column' && d.view !== 'logical' && d.name === udpName);
   if (!def) return columns;
-  return columns.map((c) => (c.isPartition
-    ? { ...c, partitionOrder: partitionCorrelative(c.udpValues?.[def.id]) }
-    : c));
+  return columns.map((c) => {
+    const order = partitionCorrelative(c.udpValues?.[def.id]);
+    return { ...c, isPartition: order !== null, partitionOrder: order };
+  });
 }
 
 /** Reglas seleccionables en el modal: habilitadas y no-inválidas (las stale
@@ -181,12 +188,17 @@ export async function renderWithRules(args: {
     // (carpeta = nombre final con su sufijo y el casing de carpeta).
     options: {
       identifierCase: opts.identifierCase,
+      quoteIdentifiers: opts.quoteIdentifiers,          // doc 93 D2
+      typeCase: opts.typeCase,                          // doc 93 D3
+      createTable: opts.createTable,                    // doc 93 D5
+      viewTagsAs: opts.viewTagsAs,                      // doc 93 D6
+      includeKeys: opts.includeKeys,                    // doc 93 D5: NOT NULL de las tablas generadas
       tableFormat: opts.tableFormat,
       external: opts.external,
       location: opts.location,
       locationFolderCase: opts.locationFolderCase ?? 'upper',
       includePartitions: opts.includePartitions,
-      partitionsLast: !!opts.partitionsLast,       // doc 73: informativo (el motor lo deriva de las reglas)
+      partitionsLast: !!opts.partitionsLast,            // doc 73: informativo (el motor lo deriva de las reglas)
     },
     tables: tables.map(({ table, sql }) => ({
       table: {
@@ -194,11 +206,13 @@ export async function renderWithRules(args: {
         description: table.description,
         udpValues: (diagram.tables.find((t) => t.id === table.id))?.udpValues ?? {},
       },
-      // Orden FÍSICO explícito (doc 73 O2): el motor no depende del orden de llegada.
-      columns: [...(colsByTable.get(table.id) ?? [])].sort((a, b) => a.ordinal - b.ordinal).map((c) => {
+      // Orden ÚNICO explícito (doc 73 O2 · doc 94: PK primero y cada bloque por
+      // ordinal): el motor no depende del orden de llegada.
+      columns: pkFirstColumns(colsByTable.get(table.id) ?? []).map((c) => {
         const canon = udpOfColumn.get(c.id);
         return {
           physicalName: c.physicalName, dataType: c.dataType, ordinal: c.ordinal,
+          ddlType: ddlType(c.dataType, opts.typeCase ?? 'lower'),   // doc 93 D4: la _rej sale con el tipo de la física
           isNullable: c.isNullable, isPrimaryKey: c.isPrimaryKey,
           // sin esto la _rej no hereda el PARTITIONED BY de la física
           isPartition: c.isPartition,
@@ -229,20 +243,18 @@ export async function renderWithRules(args: {
 export const isAddendum = (artifact: string): boolean => /\.(tags|extra)$/.test(artifact);
 
 /** Ensambla el archivo: header con el sello de reglas + statements en el orden
- *  del motor (por tabla: física → tags → generados; luego vistas). Los ALTER
- *  de tags/extra consecutivos van compactos (una línea en blanco entre bloques). */
+ *  del motor (por tabla: física → tags → generados; luego vistas). Doc 93 D12:
+ *  los ALTER/anexos van PEGADOS a su objeto; una línea en blanco solo entre
+ *  objetos. */
 function assemble(rendered: RenderedExport, modelName: string, tableCount: number): string {
   const header = `-- ${modelName || 'model'} · Databricks · ${tableCount} table(s)\n`
     + `-- Generated by Data Model Hub\n`
     + `-- Export rules: ${rendered.rulesetVersion} · ${rendered.applied} applied`
     + (rendered.skipped ? ` · ${rendered.skipped} skipped` : '') + `\n`;
   const parts: string[] = [];
-  let prevAddendum = false;
   for (const s of rendered.statements) {
-    const addendum = isAddendum(s.artifact);
-    if (addendum && prevAddendum) parts.push(s.sql);      // anexos consecutivos, compactos
-    else parts.push((parts.length ? '\n' : '') + s.sql);  // bloque nuevo
-    prevAddendum = addendum;
+    if (isAddendum(s.artifact)) parts.push(s.sql);                  // pegado a su objeto
+    else parts.push((parts.length ? '\n' : '') + s.sql);            // objeto nuevo
   }
   return `${header}\n${parts.join('\n')}`.trimEnd() + '\n';
 }

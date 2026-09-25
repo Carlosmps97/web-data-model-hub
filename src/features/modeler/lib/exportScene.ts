@@ -18,8 +18,7 @@ import type { CanonicalColumn, Cardinality } from '@/services/governance.service
 import type { Diagram, Drawing } from '@/features/modeler/services/modeler.service';
 import type { View } from '@/services/views.service';
 import { collapseComplexType } from './complexTypes';
-import { pkInKeyOrder } from './keyOrder';
-import { sortByOrdinal } from './columnOrder';
+import { orderColumns } from './columnOrder';
 import { HEADER_H, ROW_H, fanSlots, fanSourceY } from './edgeFanout';
 import { relationshipDrift } from './relationshipPairs';
 import { SYMBOL_SIZE, isSubcategory, subtypeGroups, symbolDefaultPos } from './subtypeGraph';
@@ -135,13 +134,11 @@ export function buildDiagramScene(input: SceneInput): Scene {
   });
 
   const tableBoxes = new Map<string, TableBox>();
-  // Mismas filas que el canvas (doc 74): bloque PK en orden de llave y el
-  // resto en el orden único de columnas (`ordinal`), en ambas facetas.
+  // Mismas filas que el canvas (doc 74/94): el orden único — PK primero y cada
+  // bloque por `ordinal` — en ambas facetas.
   (diagram?.tables ?? []).forEach((t, i) => {
-    const cols = sortByOrdinal(colsByTable.get(t.id) ?? []);
-    const pks = pkInKeyOrder(cols);
-    const rest = cols.filter((c) => !c.isPrimaryKey);
-    const ordered = [...pks, ...rest];
+    const cols = colsByTable.get(t.id) ?? [];
+    const ordered = orderColumns(cols);
     const header = t.schema ? `${t.schema}.${name(t)}` : name(t);
     let maxcol = 12;
     for (const c of cols) {
@@ -153,7 +150,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
       t, x: pos.x, y: pos.y,
       w: clampW(Math.max(header.length, maxcol + 3)),
       h: HEADER_H + Math.max(1, cols.length) * ROW_H,
-      ordered, pkRows: pks.length,
+      ordered, pkRows: ordered.filter((c) => c.isPrimaryKey).length,
       rowIdx: new Map(ordered.map((c, idx) => [c.id, idx])),
     });
   });

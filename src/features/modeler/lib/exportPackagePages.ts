@@ -80,6 +80,7 @@ import { escapeHtml, jsStringLiteral } from './exportHtml';
 import type { Diagram } from '../services/modeler.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { udpView, type Facet } from '@/lib/facets';
+import { orderColumns } from './columnOrder';
 
 export type UdpLevel = 'table' | 'column' | 'canvas' | 'view';
 export interface ExportLookups {
@@ -117,9 +118,12 @@ export function udpChipsHtml(values: Record<string, string> | undefined, level: 
     .join('');
 }
 
+/** Filas de columnas en el orden único (doc 94: PK primero, por `ordinal`);
+ *  «PK #k» = posición de la PK en ese orden. */
 function columnsRows(cols: CanonicalColumn[], lk: ExportLookups): string {
+  let k = 0;
   return cols.map((c, i) => {
-    const pk = c.isPrimaryKey ? (c.pkPosition != null ? `PK #${c.pkPosition + 1}` : 'PK') : '';
+    const pk = c.isPrimaryKey ? `PK #${++k}` : '';
     return `<tr>
 <td class="num">${i + 1}</td>
 <td>${esc(c.logicalName)}</td>
@@ -149,7 +153,7 @@ function tablesSectionHtml(diagram: Diagram, lk: ExportLookups): string {
   }
 
   const sections = [...tables].sort((a, b) => a.physicalName.localeCompare(b.physicalName)).map((t) => {
-    const cols = [...(colsByTable.get(t.id) ?? [])].sort((a, b) => a.ordinal - b.ordinal);
+    const cols = orderColumns(colsByTable.get(t.id) ?? []);
     return `<section class="tbl" id="t-${esc(t.physicalName)}">
 <h2>${esc(t.logicalName)} <code class="phys">${esc(t.physicalName)}</code>${t.schema ? ` <span class="chip schema">${esc(t.schema)}</span>` : ''}${udpChipsHtml(t.udpValues, 'table', lk)}</h2>
 ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}

@@ -16,7 +16,7 @@ import {
   type CanonicalColumn,
   type CanonicalTable,
 } from '@/services/governance.service';
-import { pkInKeyOrder } from './keyOrder';
+import { orderColumns } from './columnOrder';
 
 const PHYS_SUFFIX = /_copy_\d+$/i;
 const LOGI_SUFFIX = / copy \d+$/i;
@@ -57,9 +57,9 @@ export function nextCopyNames(
  * Cambios del lote (UN recordChangesBulk) de la tabla pegada. Reglas de
  * createTableFromSources adaptadas al snapshot:
  *  - ids SIEMPRE nuevos (tabla `input.id`, columnas `newId()`);
- *  - ordinal secuencial 0.. en el orden físico del snapshot;
- *  - pkPosition re-numerado 0..n-1 en el ORDEN DE LA LLAVE del original
- *    (pkInKeyOrder — no el orden físico);
+ *  - ordinal secuencial 0.. en el ORDEN ÚNICO del snapshot (doc 94: PK
+ *    primero, cada bloque por ordinal — un dato viejo desordenado se copia
+ *    normalizado);
  *  - `isForeignKey` NO viaja (doc 50: las relaciones no se copian);
  *  - payload limpio: claves opcionales solo cuando aportan (patrón doc 40).
  */
@@ -77,8 +77,7 @@ export function copyTableToBulk(input: {
   // Procedencia (doc 51): el historial de auditoría muestra de qué tabla/
   // columna nació cada entidad pegada ("Copied from …").
   const srcTable = t.physicalName || t.logicalName;
-  const ordered = [...input.cols].sort((a, b) => a.ordinal - b.ordinal);
-  const keyOrder = new Map(pkInKeyOrder(ordered).map((c, i) => [c.id, i]));
+  const ordered = orderColumns(input.cols);
   const changes: BulkChange[] = [
     bulk.createTable({
       id: input.id,
@@ -92,7 +91,6 @@ export function copyTableToBulk(input: {
   let ordinal = 0;
   for (const c of ordered) {
     const description = (c.description ?? '').trim();
-    const pkPosition = keyOrder.get(c.id);
     changes.push(bulk.createColumn({
       id: newId(), tableId: input.id,
       logicalName: c.logicalName, physicalName: c.physicalName,
@@ -102,7 +100,6 @@ export function copyTableToBulk(input: {
       ...(c.isNullable === false ? { isNullable: false } : {}),
       ...(c.isPartition ? { isPartition: true } : {}),
       ...(c.udpValues && Object.keys(c.udpValues).length ? { udpValues: { ...c.udpValues } } : {}),
-      ...(pkPosition != null ? { pkPosition } : {}),
     }, { kind: 'paste-table', sourceTable: srcTable, sourceColumn: c.physicalName }));
   }
   return changes;

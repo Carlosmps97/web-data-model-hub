@@ -9,7 +9,7 @@ import {
 } from '@/features/modeler/lib/relationshipPairs';
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { invertBulk, preKey } from '@/features/modeler/lib/undoInvert';
-import { syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
+import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 import { CARDS } from './RelationshipPopup';
@@ -112,13 +112,10 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
       });
       // V1: las columnas migradas entran también a las vistas ESPEJO del hijo;
       // los renames por role name re-apuntan los sources de las vistas.
-      for (const c of createdCols) {
-        try {
-          await syncNewColumnToMirrorViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            draft.childTableId, c.physicalName, childCols);
-        } catch { /* best-effort */ }
-      }
+      // Doc 94 D4: en una identificante las nuevas son PK y entran tras las PK.
+      await syncNewColumnsToMirrorViews(
+        { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+        draft.childTableId, createdCols, childCols);
       for (const r of resolutions) {
         if (r.target.kind !== 'existing' || !r.target.rename) continue;
         try {

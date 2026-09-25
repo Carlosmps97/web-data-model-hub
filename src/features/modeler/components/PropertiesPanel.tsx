@@ -12,8 +12,7 @@ import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun, facet
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/services/governance.service';
 import { matchesColumn } from '../lib/columnSearch';
-import { orderColumns } from '../lib/columnOrder';
-import { pkInKeyOrder, reorderKey } from '../lib/keyOrder';
+import { isPkFirst, orderColumns } from '../lib/columnOrder';
 import { alignSourcesToPhysical } from '../lib/viewSync';
 import { ColumnRow } from './ColumnEditor';
 import { tableNamePlan } from '../lib/nameSync';
@@ -145,10 +144,6 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     return () => { alive = false; };
   }, [selectedTableId, diagram]);
 
-  // ── Orden de la LLAVE (pkPosition, doc 19 §12b) + alineado de vistas (V2) ──
-  // (hooks ANTES del early-return de abajo — el orden de hooks es fijo)
-  const keyPks = useMemo(() => pkInKeyOrder(cols), [cols]);
-  const [keyBusy, setKeyBusy] = useState(false);
   // Buscador de columnas (doc 42): contiene CI sobre lógico/físico. Con
   // filtro activo el drag&drop se desactiva (ver comentario en el render).
   const [colQuery, setColQuery] = useState('');
@@ -275,37 +270,11 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save UDP", 'err'); }
   };
 
-  // ── Orden de la LLAVE (pkPosition) — mover una PK dentro de la llave ──
-  const moveKey = async (id: string, dir: -1 | 1) => {
-    const plan = reorderKey(cols, id, dir);
-    if (!plan.length) return;
-    setKeyBusy(true);
-    try {
-      const byId = new Map(cols.map((c) => [c.id, c]));
-      // Pre-imágenes de las columnas tocadas, para el Undo (doc 50).
-      const pres: typeof cols = [];
-      for (const step of plan) {
-        const col = byId.get(step.id);
-        if (col && (col.pkPosition ?? null) !== step.pkPosition) {
-          pres.push({ ...col });
-          await gov.updateColumn({ ...col, pkPosition: step.pkPosition });
-        }
-      }
-      if (pres.length) {
-        pushUndo('Reorder key', async () => {
-          for (const c of pres) await gov.updateColumn(c);
-          await reload();
-        });
-      }
-      await reload();
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't reorder the key", 'err'); }
-    finally { setKeyBusy(false); }
-  };
-
   // ── V2 (doc 19 §12b): "Match physical order" — reordena los sources de la
-  // vista según el orden físico (ordinal) de cada tabla fuente. Idea del
-  // equipo (Erwin no lo tiene). Las columnas no resolubles (expresiones)
-  // conservan su orden relativo al final de su grupo.
+  // vista según el orden ÚNICO de cada tabla fuente (doc 94 D4: PK primero —
+  // antes ordenaba por ordinal crudo y una PK recién marcada quedaba abajo).
+  // Idea del equipo (Erwin no lo tiene). Las columnas no resolubles
+  // (expresiones) conservan su orden relativo al final de su grupo.
   const alignView = async (v: View) => {
     // Confirmación previa (pedido owner): reordenar reescribe la definición de
     // la vista → popup Aceptar/Cancelar antes de ejecutar.
@@ -322,7 +291,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       const colsByTable = new Map<string, gov.CanonicalColumn[]>();
       for (const tid of srcIds) {
         const list = tid === table.id ? cols : await gov.listColumns(tid);
-        colsByTable.set(tid, list.slice().sort((a, b) => a.ordinal - b.ordinal));
+        colsByTable.set(tid, orderColumns(list));
       }
       await viewsSvc.updateView(v.id, { ...v, sources: alignSourcesToPhysical(v, colsByTable) });
       reloadViews();
@@ -347,18 +316,18 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     // insertaría en una posición equivocada. El grip ya viene deshabilitado;
     // este guard es el cinturón por si un drag nació antes de filtrar.
     if (!src || src === targetId || reordering || colFiltering) return;
-    // Doc 81: el bloque PK queda fijo arriba. Ni se arrastra un PK (el grip
-    // viene apagado) ni se suelta sobre uno: reordenar cruzando la frontera
-    // dejaría el ordinal en un orden que el display (PK-first) volvería a
-    // re-agrupar — el movimiento "no se vería". El orden de llave se cambia en
-    // la sección «Key order».
-    const byId = new Map(cols.map((c) => [c.id, c]));
-    if (byId.get(src)?.isPrimaryKey || byId.get(targetId)?.isPrimaryKey) return;
+    // Doc 94 D3: UN solo orden — las PK se arrastran como cualquier columna,
+    // pero dentro de su bloque: una PK nunca queda debajo de una no-PK (ni una
+    // no-PK arriba de una PK). Un drop que cruza la frontera se rechaza.
     const ids = cols.map((c) => c.id).filter((x) => x !== src);
     let idx = ids.indexOf(targetId);
     if (idx < 0) return;
     if (wasAfter) idx += 1;
     ids.splice(idx, 0, src);
+    if (!isPkFirst(cols, ids)) {
+      pushToast("A primary key column can't go below a column that isn't part of the key.", 'err');
+      return;
+    }
     setReordering(true);
     try { await reorderColumns(table.id, ids); }
     catch { pushToast("Couldn't reorder", 'err'); }
@@ -519,32 +488,6 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
               {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setColumnTarget(table.id)}><Icon name="plus" size={12} sw={2.6} /> Add {nouns.member}</button>}
             </div>
             <p className="wk-pp-cap">{canEdit ? `Drag the handle to reorder · click ${nouns.aMember} to edit.` : `Click ${nouns.aMember} to view its details.`}</p>
-            {/* Orden de la LLAVE (independiente del orden físico): manda el
-                bloque PK del canvas y el PRIMARY KEY(...) del Export DDL.
-                Doc 42: contenedor de ALTO FIJO con scroll y filas apiladas —
-                el flujo de chips a la derecha crecía disparejo con la llave. */}
-            {keyPks.length >= 2 && (
-              <div className="wk-pp-keyorder">
-                <div className="wk-pp-cap" style={{ margin: '0 0 4px' }}>
-                  Primary key — key order (PK block &amp; DDL constraint)
-                  {keyBusy && <span className="rd-spin" style={{ marginLeft: 6, color: 'var(--primary)' }} aria-hidden />}
-                </div>
-                <div className="wk-pp-keylist">
-                  {keyPks.map((c, i) => (
-                    <div className="wk-pp-keyrow" key={c.id} title={c.logicalName}>
-                      <span className="wk-pp-keyn">{i + 1}</span>
-                      <span className="wk-pp-keyname rd-mono">{c.physicalName}</span>
-                      {canEdit && (
-                        <span className="wk-pp-keymv">
-                          <button type="button" disabled={keyBusy || i === 0} title="Move up in the key" onClick={() => moveKey(c.id, -1)}>↑</button>
-                          <button type="button" disabled={keyBusy || i === keyPks.length - 1} title="Move down in the key" onClick={() => moveKey(c.id, 1)}>↓</button>
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
             {cols.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No {nouns.members} yet.{canEdit ? ` Use “Add ${nouns.member}”.` : ''}</div>}
             {/* Buscador de columnas (doc 42): contiene CI sobre lógico o
                 físico. Con filtro activo el drag&drop SE DESACTIVA — el drop
@@ -585,8 +528,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                   key={c.id}
                   col={c}
                   canEdit={canEdit}
-                  dragDisabled={colFiltering || !!c.isPrimaryKey}
-                  dragDisabledReason={c.isPrimaryKey ? 'Reorder primary keys in the “Key order” section' : undefined}
+                  dragDisabled={colFiltering}
                   onOpen={setSelectedColumn}
                   isDragging={dragId === c.id}
                   dropHint={overId === c.id ? (after ? 'after' : 'before') : null}

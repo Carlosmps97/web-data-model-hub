@@ -110,6 +110,15 @@ describe('projectInventory / explorerColumns conmutan por la versión activa', (
     expect(vi.mocked(apiGet).mock.calls[1][0]).toMatch(/\/api\/projects\/p1\/catalog\/views\/v%201\/columns$/);
   });
 
+  it('producción: las columnas salen en el orden único — PK primero (final review #6)', async () => {
+    useSessionStore.setState({ activeChangesetId: null });
+    vi.mocked(listReportColumns).mockResolvedValueOnce([
+      { id: 'x', physicalName: 'X', logicalName: 'x', dataType: 'INT', ordinal: 0, isPrimaryKey: false } as never,
+      { id: 'k', physicalName: 'K', logicalName: 'k', dataType: 'INT', ordinal: 5, isPrimaryKey: true } as never,
+    ]);
+    expect((await explorerColumns('t1')).map((c) => c.id)).toEqual(['k', 'x']);
+  });
+
   it('draft: changesetId en la URL y columnas efectivas ordenadas por ordinal', async () => {
     useSessionStore.setState({ activeChangesetId: 'cs1' });
     vi.mocked(apiGet).mockResolvedValueOnce(RAW);

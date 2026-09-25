@@ -38,13 +38,11 @@ export interface CanonicalColumn {
   /** Doc 68: override manual del NOMBRE físico (paridad con typeOverridden). */
   physicalNameOverridden?: boolean;
   isPrimaryKey?: boolean; isForeignKey?: boolean;
-  /** Orden ÚNICO de la columna en la tabla (doc 74): el mismo en el modelo
-   *  lógico y en el físico; canvas, paneles, exports y DDL ordenan por él. */
+  /** Orden ÚNICO de la columna en la tabla (doc 74/94): el mismo en el modelo
+   *  lógico y en el físico, con las PK siempre primero; entre PK también manda
+   *  (no hay orden de llave aparte). Canvas, paneles, vistas, exports y DDL
+   *  ordenan con `orderColumns`. */
   ordinal: number;
-  /** Posición dentro de la LLAVE primaria (0-based) — independiente del
-   *  `ordinal`. Ordena el bloque PK del canvas y el PRIMARY KEY(...) del DDL,
-   *  como Erwin (doc 19 §12b). */
-  pkPosition?: number | null;
   // R1a (backend) — persistidos; deben existir en el tipo o se pierden al recargar.
   isNullable?: boolean; isPartition?: boolean; description?: string;
   /** Doc 85: comment FÍSICO (Erwin Comment) — el DDL lo emite como COMMENT con
@@ -208,21 +206,10 @@ export const createColumn = (c: CanonicalColumn) => rec('canonical_columns', c.i
 // columna completa + los campos a cambiar). NO borra+recrea.
 export const updateColumn = (c: CanonicalColumn) => rec('canonical_columns', c.id, 'upsert', { ...c });
 export const deleteColumn = (id: string) => rec('canonical_columns', id, 'delete');
-// Marca la columna hija de una relación como FK; si la relación es
-// identificadora, la FK entra a la PK del hijo (y una PK no es nullable).
-// `pkPosition` (opcional): posición AL FINAL de la llave cuando la tabla
-// maneja orden explícito — no pisa una posición ya existente (doc 19 §12b).
-export const markForeignKey = (col: CanonicalColumn, identifying: boolean, pkPosition?: number | null) =>
-  rec('canonical_columns', col.id, 'upsert', {
-    ...col, isForeignKey: true,
-    ...(identifying ? {
-      isPrimaryKey: true, isNullable: false,
-      ...(pkPosition != null && col.pkPosition == null ? { pkPosition } : {}),
-    } : {}),
-  });
-
 // markPrimaryKey se retiró (doc 47): la relación ya no promueve la columna
 // padre — el gesto exige que el padre TENGA llave (guard en el canvas).
+// markForeignKey se retiró (doc 94): la promoción de los hijos de una
+// identificante va por `keyLayoutBulk` (orden único con PK primero, un lote).
 
 // ── Relationships (ER) — changeset-aware ──
 // v2 (doc 19): orientación EXPLÍCITA parent (lado PK) / child (lado FK) +

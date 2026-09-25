@@ -272,9 +272,9 @@ El `projectId` de cada payload NO lo pone el front: el backend lo estampa con el
 Ejemplos de operaciones (todas terminan en un `reload()` que reconcilia con el overlay):
 
 - `createTable` → `gov.createTable` (upsert en `canonical_tables`) + `setSubjectAreaTables` para referenciarla.
-- `addColumn` → `physicalize` (lógico→físico) + `createColumn`.
-- `createRelationship` → `gov.createRelationship` + `markForeignKey` sobre la columna hija.
-- `updateColumn` / `reorderColumns` / `deleteColumn` → upsert/delete por id.
+- `addColumn` → `physicalize` (lógico→físico) + `createColumn`; una PK nueva entra tras la última PK y las no-PK se corren en el MISMO lote (`recordChangesBulk`, doc 94).
+- Relaciones: popup-gated (doc 47) — `mappingToBulk` graba columnas + relación en UN lote; en una identificante las columnas que entran a la llave quedan tras la última PK del hijo (doc 94).
+- `updateColumn` / `reorderColumns` / `deleteColumn` → upsert/delete por id. Doc 94: marcar/desmarcar PK re-ubica la columna en la frontera del bloque de PK (`keyLayoutBulk`, un lote y un Undo) y `reorderColumns` rechaza dejar una PK debajo de una no-PK — hay UN solo orden (`ordinal`, PK primero), sin orden de llave aparte.
 
 Cada acción llama `markDirty()` en `useModelerStore`, que alimenta el guard de salida (aviso "cambios sin guardar").
 
@@ -558,10 +558,11 @@ El Export DDL genera el `.sql` en el **cliente** y, si hay DDL Export Rules sele
 ### 7.1 Secuencia
 
 1. El botón **Export DDL** del `Toolbar` abre `ExportDdlModal` (`src/features/ddl/components/ExportDdlModal.tsx`), que carga las vistas de las tablas del canvas y el catálogo de reglas con `fetchExportRules()` → `GET /api/ddl-rules`. `selectableRules()` deja las habilitadas y no-inválidas (las `stale` corren igual — solo avisan); por default quedan **todas marcadas**.
-2. El DDL **base** se genera client-side en `src/features/ddl/generators.ts`: `databricksDdl(input, opts)` para el preview y `tableStatements`/`viewStatements` (statement por statement) para el puente de reglas. Opciones del modal con defaults Views/Comments/Partitions ON, PK&FK/Indexes OFF, `tableFormat: 'delta'`, y (doc 76 D9, la macro BCP) `identifierCase: 'lower'`, `external: true` con `location` = `abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>` y `locationFolderCase: 'upper'` (carpeta del LOCATION en MAYÚSCULA). Las proyecciones de las vistas salen `col AS alias` con el casing del export; con la regla de layout, las particiones se ordenan por el correlativo PART_nn del UDP que declara (`withPartitionOrder`).
+2. El DDL **base** se genera client-side en `src/features/ddl/generators.ts`: `databricksDdl(input, opts)` para el preview y `tableStatements`/`viewStatements` (statement por statement) para el puente de reglas. Opciones del modal con defaults Views/Comments/Partitions ON, PK&FK/Indexes OFF, `tableFormat: 'delta'`, y (doc 76 D9, la macro BCP) `identifierCase: 'lower'`, `external: true` con `location` = `abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>` y `locationFolderCase: 'upper'` (carpeta del LOCATION en MAYÚSCULA). Doc 93: identificadores sin comillas salvo que el nombre las necesite (palabra reservada o carácter fuera de `[a-z0-9_]`), tipos en minúscula, `CREATE OR REPLACE TABLE` (el `LOCATION` la hace externa) y `NOT NULL` solo con PK&FK. Las proyecciones de las vistas salen `col AS alias` con el casing del export; con la regla de layout, las particiones salen del UDP que declara (`withUdpPartitions`: `PART_nn` = columna de partición y su orden; el flag de la plataforma se ignora) y el `PARTITIONED BY` lista sus nombres en ese orden.
 3. Con reglas seleccionadas, Download/Copy llaman `buildFinalSql()` → `renderWithRules()` (`src/features/ddl/rulesBridge.ts`): arma el payload con el estado **efectivo** que el canvas exporta (drafts incluidos) — cada tabla con sus columnas y `udpValues` más su CREATE base (`baseSql`), cada vista con su SQL y el flag `businessView` (= `showOnCanvas`: solo esas se decoran como vista de negocio) — y hace `POST /api/ddl-rules/render` (permiso `export`). El motor del backend es **puro**: no lee BD en el render, todo el contexto viaja en el body.
-4. `assemble()` ensambla el `.sql` final: header con el **sello** `-- Export rules: vN · N applied · M skipped` (la evidencia de por qué el DDL de marzo salió distinto al de junio) + los statements en el orden del motor (por tabla: [sentencias `before`] física → tags de tabla → tags de columna → sentencias `after` → generados, cada uno con sus propios anexos; luego vistas de negocio con sus `ALTER VIEW … SET TAGS`), con los anexos `.tags`/`.extra` consecutivos compactos.
-5. **Sin reglas seleccionadas el export no pasa por el puente**: sale byte-idéntico al flujo previo a las reglas (cero regresión). El botón "Apply N rules" del preview usa el mismo motor bajo demanda — nunca en vivo — y produce el mismo texto que el download; cualquier cambio de opciones o selección lo invalida.
+4. `assemble()` ensambla el `.sql` final: header con el **sello** `-- Export rules: vN · N applied · M skipped` (la evidencia de por qué el DDL de marzo salió distinto al de junio) + los statements en el orden del motor (por tabla: [sentencias `before`] física → tags de tabla → tags de columna → sentencias `after` → generados, cada uno con sus propios anexos; luego vistas de negocio con sus `ALTER TABLE … SET TAGS` — como la macro; `viewTagsAs: view` los escribe `ALTER VIEW`), con los anexos `.tags`/`.extra` pegados a su objeto: sin línea en blanco entre un CREATE y sus ALTER, una línea en blanco solo entre objetos (doc 93 D12).
+5. **Download** arma un `.zip` con un `.sql` por objeto (`ddlExportBundle.ts`): una carpeta por tabla (`{TABLA}/`) con `TABLE-{TABLA}.sql` (física y tablas generadas como la `_rej`), `VIEW_NEG-{VISTA}.sql` (vistas modeladas en Erwin/canvas) y `VIEW_TEC-{VISTA}.sql` (vistas que generan las reglas), el nombre en MAYÚSCULA y sin corchetes. El esquema entra al nombre (`VIEW_TEC-BCP_V.H_X.sql`) solo si dos archivos de la carpeta chocan sin distinguir mayúsculas; nunca `_2`. Prefijos, separador, casing y esquema salen de `fileNames` de las Output settings (doc 93 D11).
+6. **Sin reglas seleccionadas el export no pasa por el puente**: sale byte-idéntico al flujo previo a las reglas (cero regresión). El botón "Apply N rules" del preview usa el mismo motor bajo demanda — nunca en vivo — y produce el mismo texto que el download; cualquier cambio de opciones o selección lo invalida.
 
 Payload real del puente (condensado del código de `rulesBridge.ts`):
 
@@ -570,17 +571,19 @@ Payload real del puente (condensado del código de `rulesBridge.ts`):
 {
   "ruleIds": ["<uuid-regla-1>", "<uuid-regla-2>"],
   "model": { "name": "Analytics", "udpValues": {} },
-  "options": { "identifierCase": "lower", "tableFormat": "delta", "external": true,
+  "options": { "identifierCase": "lower", "quoteIdentifiers": "when-needed", "typeCase": "lower",
+               "createTable": "or-replace", "viewTagsAs": "table", "includeKeys": false,
+               "tableFormat": "delta", "external": true,
                "location": "abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>",
                "locationFolderCase": "upper", "includePartitions": true, "partitionsLast": true },
   "tables": [{
     "table": { "id": "t1", "physicalName": "MD_CLIENTE", "schema": "bcp_ddv",
                "description": null, "udpValues": { "<udpId>": "CUSTOM_30 days" } },
-    "columns": [{ "physicalName": "CODCLAVECLI", "dataType": "STRING", "ordinal": 0,
+    "columns": [{ "physicalName": "CODCLAVECLI", "dataType": "STRING", "ddlType": "string", "ordinal": 0,
                   "isNullable": false, "isPrimaryKey": true, "isPartition": false,
                   "parentDomainId": null, "description": null,
                   "udpValues": { "<udpId>": "DAC-013" } }],
-    "baseSql": "CREATE TABLE bcp_ddv.MD_CLIENTE (...)"
+    "baseSql": "CREATE OR REPLACE TABLE bcp_ddv.md_cliente (...)"
   }],
   "views": [{ "name": "MD_CLIENTE_VU", "schema": "bcp_ddv", "sql": "CREATE VIEW ...",
               "sourceTableIds": ["t1"], "businessView": true }]
@@ -591,7 +594,9 @@ Payload real del puente (condensado del código de `rulesBridge.ts`):
 //     "rulesetVersion": "v2", "applied": 5, "skipped": 1 }
 ```
 
-`isPartition` viaja a propósito: sin él, los artefactos generados (p. ej. la tabla `_rej`) no heredarían el `PARTITIONED BY` de la física — salen **espejo** del CREATE físico (mismo casing, `USING`, particiones y `LOCATION` con el sufijo del artefacto).
+`isPartition` viaja a propósito: sin él, los artefactos generados (p. ej. la tabla `_rej`) no heredarían el `PARTITIONED BY` de la física — salen **espejo** del CREATE físico (mismo casing, `USING`, particiones y `LOCATION` con el sufijo del artefacto). `ddlType` es el tipo tal como el front lo escribió en el CREATE (`ddlType()` de `generators.ts`, con el `typeCase` del export): la `_rej` conserva el tipo de sus particiones con ese mismo texto.
+
+**Output settings (doc 93).** Cómo se escribe el DDL y cómo se nombran los archivos es dato del PROYECTO (`ddl_ruleset_config.output`, versionado en Data Standards). Al abrir, el modal pide `GET /api/projects/{pid}/ddl-rules/config`; `mergeOutputSettings()` (`src/features/ddl/outputSettings.ts`) completa lo guardado con los defaults de la macro y descarta claves o valores inválidos sin romper. La pestaña Output es el formulario compartido `DdlOutputForm`, el mismo del editor «Output settings» de Data Standards: lo que se cambie en el modal vale solo para ese export. `splitOutputSettings()` separa las opciones del generador (que viajan al `/render` junto con el `ddlType` de cada columna) de los `fileNames` del zip.
 
 ### 7.2 Autoría de las reglas
 

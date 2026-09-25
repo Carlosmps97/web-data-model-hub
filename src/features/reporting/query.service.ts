@@ -84,7 +84,7 @@ export interface DomainUsage {
   columnCount: number; tableCount: number; overrideCount: number; overridePct: number;
   distinctDataTypes: string[]; isUnused: boolean;
 }
-export interface GlossaryUsage { term: string; abbrev?: string; scope?: string; wordType?: string; columnUsage: number; isUnused: boolean; }
+export interface GlossaryUsage { term: string; abbrev?: string; scope?: string; columnUsage: number; isUnused: boolean; }
 export interface RelationshipRow {
   /** v2 (doc 19): UNA fila POR PAR de columnas — una FK compuesta repite `id`
    *  con `pairIndex` incremental. parent = lado PK, child = lado FK. */

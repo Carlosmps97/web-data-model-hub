@@ -14,6 +14,7 @@ import {
 } from '../ddlRules.service';
 import type { DdlRule, DdlRulesetConfig } from '../standards.service';
 import DdlLookupsEditor from './DdlLookupsEditor';
+import DdlOutputSettingsEditor from './DdlOutputSettingsEditor';
 import DdlRuleTemplates from './DdlRuleTemplates';
 
 export default function DdlRuleCatalog({ projectId, rules, config, artifacts, canEdit, initialAttention, onBack, onOpen, onNew, onApplied }: {
@@ -34,6 +35,7 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
   const [attention, setAttention] = useState(!!initialAttention);
   const [templates, setTemplates] = useState(false);
   const [lookups, setLookups] = useState(false);
+  const [output, setOutput] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [seeding, setSeeding] = useState(false);
 
@@ -101,10 +103,10 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
       return `Statements: ${(st.before?.[0] ?? st.after?.[0] ?? '').slice(0, 48)}${n > 1 ? ` (+${n - 1})` : ''}`;
     }
     if (a.layout) {
-      const lay = a.layout as { partitionColumns?: string; partitionOrderUdp?: string };
-      const order = (lay.partitionOrderUdp ?? '').trim();
+      const lay = a.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string };
+      const udp = (lay.partitionUdp ?? lay.partitionOrderUdp ?? '').trim();
       return `Column layout: partition columns ${(lay.partitionColumns ?? 'keep') === 'last' ? 'last' : 'in physical order'}`
-        + (order ? ` · ordered by UDP "${order}"` : '');
+        + (udp ? ` · partitions from UDP "${udp}"` : '');
     }
     if (a.types) {
       const map = Object.entries(a.types as Record<string, string>).map(([k, v]) => `${k} → ${v}`).join(', ');
@@ -158,6 +160,9 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
           </button>
         )}
         <span style={{ flex: 1 }} />
+        <button onClick={() => setOutput(true)} style={{ ...sel, cursor: 'pointer' } as React.CSSProperties}>
+          Output settings
+        </button>
         <button onClick={() => setLookups(true)} style={{ ...sel, cursor: 'pointer' } as React.CSSProperties}>
           Lookups &amp; Functions · {Object.keys(config.lookups).length + config.functions.length}
         </button>
@@ -175,9 +180,9 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
           <div style={{ fontSize: 14, fontWeight: 700, color: '#1A2B4A', marginTop: 8 }}>No export rules yet</div>
           <div style={{ fontSize: 12.5, color: '#8A93A5', margin: '6px auto 14px', maxWidth: 460, lineHeight: 1.5 }}>
             Restore the base rule set — the DDL set of the BCP macro: commented DROP, vacuum
-            TBLPROPERTIES, updateFrecuency / isDAC / DAC tags, rejected table, NoDAC and DAC technical
-            and rejected views, and DAC decryption on business views. You can edit or disable any of
-            them later.
+            TBLPROPERTIES, updateFrequency / isDAC / DAC tags, rejected table, NoDAC and DAC technical
+            and rejected views, and DAC decryption on business views — and the output settings
+            (quoting, casing, file names). You can edit or disable any of them later.
           </div>
           {canEdit && (
             <button onClick={doSeed} disabled={seeding}
@@ -254,6 +259,10 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
       {lookups && (
         <DdlLookupsEditor projectId={projectId} config={config} canEdit={canEdit}
           onClose={() => setLookups(false)} onApplied={onApplied} />
+      )}
+      {output && (
+        <DdlOutputSettingsEditor projectId={projectId} config={config} canEdit={canEdit}
+          onClose={() => setOutput(false)} onApplied={onApplied} />
       )}
     </div>
   );

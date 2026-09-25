@@ -126,12 +126,17 @@ export async function explorerViewColumns(viewId: string): Promise<RawViewColumn
 
 // ── Columnas de una tabla (perezosas al expandir) ───────────────────────────
 
-/** Columnas de una tabla. Draft → efectivo (overlay); producción → reporting. */
+/** Doc 94: el orden único de una tabla — PK primero y cada bloque por ordinal. */
+const pkFirst = (cols: DbxColumn[]): DbxColumn[] =>
+  [...cols].sort((a, b) => Number(!!b.isPrimaryKey) - Number(!!a.isPrimaryKey) || a.ordinal - b.ordinal);
+
+/** Columnas de una tabla en el orden único (en ambos modos). Draft → efectivo
+ *  (overlay); producción → reporting. */
 export async function explorerColumns(tableId: string): Promise<DbxColumn[]> {
   const cs = activeVersion();
-  if (!cs) return (await listReportColumns(sessionProjectId(), tableId)).map(mapReportCol);
+  if (!cs) return pkFirst((await listReportColumns(sessionProjectId(), tableId)).map(mapReportCol));
   const docs = await csvc.effective<RawColumn>(cs, 'canonical_columns', { tableId });
-  return docs.map(mapRawCol).sort((a, b) => a.ordinal - b.ordinal);
+  return pkFirst(docs.map(mapRawCol));
 }
 
 // ── Inventario por PROYECTO (doc 72 §1): UNA request ────────────────────────

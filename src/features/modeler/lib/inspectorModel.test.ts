@@ -32,7 +32,9 @@ describe('inspectorModel', () => {
   });
 
   it('keyLabel / facetOnly', () => {
-    const cols = [col('a', 1, { isPrimaryKey: true, pkPosition: 0 }), col('b', 2, { isPrimaryKey: true, pkPosition: 1, isForeignKey: true }), col('c', 3)];
+    // Doc 94: la posición en la llave sale del orden único (ordinal), no de un pkPosition viejo.
+    const stale = (pkPosition: number) => ({ pkPosition }) as Partial<CanonicalColumn>;   // campo retirado, dato viejo
+    const cols = [col('a', 1, { isPrimaryKey: true, ...stale(1) }), col('b', 2, { isPrimaryKey: true, ...stale(0), isForeignKey: true }), col('c', 3)];
     expect(keyLabel(cols[0], cols)).toBe('PK · #1 of 2 in the key');
     expect(keyLabel(cols[1], cols)).toBe('PK · #2 of 2 in the key · FK');
     expect(keyLabel(cols[2], cols)).toBe('—');

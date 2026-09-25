@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalColumn } from '@/services/governance.service';
-import { pasteColumnsToBulk, pastePlan } from './pasteColumns';
+import { pasteColumnsToBulk, pastePlan, pastePreImages } from './pasteColumns';
+import { invertBulk } from './undoInvert';
 
 const col = (id: string, over: Partial<CanonicalColumn> = {}): CanonicalColumn => ({
   id, tableId: 'tSrc', logicalName: id, physicalName: id.toUpperCase(),
@@ -73,10 +74,10 @@ describe('pasteColumnsToBulk (variante de createTableFromSources sobre tabla exi
     expect('pkPosition' in p).toBe(false);
   });
 
-  it('PK pegada con orden de llave EXPLÍCITO en el destino: entra al final, secuencial', () => {
+  it('doc 94: PK pegada entra tras la última PK del destino y corre las no-PK en el MISMO lote', () => {
     const target = [
-      col('t1', { tableId: 'tTgt', isPrimaryKey: true, pkPosition: 0, ordinal: 0 }),
-      col('t2', { tableId: 'tTgt', physicalName: 'T2X', isPrimaryKey: true, pkPosition: 1, ordinal: 1 }),
+      col('t1', { tableId: 'tTgt', physicalName: 'T1X', isPrimaryKey: true, ordinal: 0 }),
+      col('t2', { tableId: 'tTgt', physicalName: 'T2X', ordinal: 1 }),
     ];
     const clip = [
       col('pk1', { physicalName: 'PK1X', isPrimaryKey: true }),
@@ -84,17 +85,22 @@ describe('pasteColumnsToBulk (variante de createTableFromSources sobre tabla exi
       col('pk2', { physicalName: 'PK2X', isPrimaryKey: true }),
     ];
     const changes = pasteColumnsToBulk({ targetTableId: 'tTgt', cols: clip, targetCols: target, newId: ids() });
-    expect(changes.map((c) => c.payload?.pkPosition)).toEqual([2, undefined, 3]);
-    expect(changes.map((c) => c.payload?.ordinal)).toEqual([2, 3, 4]);
-    expect(changes[0].payload?.isPrimaryKey).toBe(true);
+    const byPhys = Object.fromEntries(changes.map((c) => [c.payload?.physicalName, c.payload?.ordinal]));
+    // orden único: T1X(PK) · PK1X · PK2X · T2X · DATAX
+    expect(byPhys).toEqual({ PK1X: 1, DATAX: 4, PK2X: 2, T2X: 3 });
+    expect(changes.filter((c) => c.entityId === 't2')).toHaveLength(1);          // la corrida viaja una vez
+    expect(changes.find((c) => c.entityId === 't2')?.payload?.physicalName).toBe('T2X');  // doc completo
+    expect(changes.every((c) => !('pkPosition' in (c.payload ?? {})))).toBe(true);
+    // Undo: las pegadas se borran y la corrida vuelve a su ordinal (NUNCA se borra una existente)
+    const inverse = invertBulk(changes, pastePreImages(target));
+    expect(inverse.find((c) => c.entityId === 't2')).toMatchObject({ op: 'upsert', payload: { ordinal: 1, physicalName: 'T2X' } });
+    expect(inverse.filter((c) => c.op === 'delete').map((c) => c.entityId).sort()).toEqual(['n1', 'n2', 'n3']);
   });
 
-  it('PK pegada SIN orden explícito en el destino: sin pkPosition (rige el orden físico)', () => {
-    const target = [col('t1', { tableId: 'tTgt', isPrimaryKey: true, ordinal: 0 })]; // PK a mano, sin pkPosition
-    const clip = [col('pk1', { physicalName: 'PK1X', isPrimaryKey: true })];
-    const changes = pasteColumnsToBulk({ targetTableId: 'tTgt', cols: clip, targetCols: target, newId: ids() });
-    expect('pkPosition' in (changes[0].payload ?? {})).toBe(false);
-    expect(changes[0].payload?.isPrimaryKey).toBe(true);
+  it('sin PK pegadas: sin corridas, al final como siempre', () => {
+    const target = [col('t1', { tableId: 'tTgt', isPrimaryKey: true, ordinal: 0 }), col('t2', { tableId: 'tTgt', physicalName: 'T2X', ordinal: 1 })];
+    const changes = pasteColumnsToBulk({ targetTableId: 'tTgt', cols: [col('data', { physicalName: 'DATAX' })], targetCols: target, newId: ids() });
+    expect(changes.map((c) => [c.entityId, c.payload?.ordinal])).toEqual([['n1', 2]]);
   });
 
   it('origin de auditoría (doc 51): con sourceTable viaja por columna; sin él, no', () => {

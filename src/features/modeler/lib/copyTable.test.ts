@@ -43,10 +43,11 @@ describe('nextCopyNames', () => {
 
 describe('copyTableToBulk', () => {
   const cols: CanonicalColumn[] = [
-    // Orden físico: ID (pk key-pos 1), COD (pk key-pos 0), DES (fk suelta).
-    col({ id: 'c1', physicalName: 'ID', isPrimaryKey: true, pkPosition: 1 }),
-    col({ id: 'c2', physicalName: 'COD', logicalName: 'cod', ordinal: 1, isPrimaryKey: true, pkPosition: 0, description: ' des ' }),
-    col({ id: 'c3', physicalName: 'DES', logicalName: 'des', ordinal: 2, isForeignKey: true, isNullable: false, isPartition: true, udpValues: { u2: 'x' } }),
+    // Doc 94: orden único con ordinal DESORDENADO a propósito (dato viejo): la
+    // no-PK DES quedó con ordinal 0 y las PK después — la copia sale PK primero.
+    col({ id: 'c3', physicalName: 'DES', logicalName: 'des', ordinal: 0, isForeignKey: true, isNullable: false, isPartition: true, udpValues: { u2: 'x' } }),
+    col({ id: 'c1', physicalName: 'ID', ordinal: 1, isPrimaryKey: true }),
+    col({ id: 'c2', physicalName: 'COD', logicalName: 'cod', ordinal: 2, isPrimaryKey: true, description: ' des ' }),
   ];
   let seq = 0;
   const changes = copyTableToBulk({
@@ -60,18 +61,14 @@ describe('copyTableToBulk', () => {
       payload: { id: 'NEW', physicalName: 'M_CLIENTE_copy_1', logicalName: 'Cliente copy 1', schema: 'core', description: 'maestro', udpValues: { u1: 'v1' } },
     });
   });
-  it('columnas con id nuevo, ordinal secuencial y metadata heredada', () => {
+  it('columnas con id nuevo, ordinal secuencial en el ORDEN ÚNICO (PK primero) y metadata heredada', () => {
     const paylo = changes.slice(1).map((c) => c.payload as Record<string, unknown>);
+    expect(paylo.map((p) => p.physicalName)).toEqual(['ID', 'COD', 'DES']);
     expect(paylo.map((p) => p.id)).toEqual(['n1', 'n2', 'n3']);
     expect(paylo.map((p) => p.ordinal)).toEqual([0, 1, 2]);
     expect(paylo[1]).toMatchObject({ description: 'des' });
     expect(paylo[2]).toMatchObject({ isNullable: false, isPartition: true, udpValues: { u2: 'x' } });
-  });
-  it('pkPosition re-numerado en el ORDEN DE LA LLAVE (no el físico)', () => {
-    const paylo = changes.slice(1).map((c) => c.payload as Record<string, unknown>);
-    expect(paylo[0].pkPosition).toBe(1);   // ID era la 2da de la llave
-    expect(paylo[1].pkPosition).toBe(0);   // COD encabezaba la llave
-    expect(paylo[2].pkPosition).toBeUndefined();
+    expect(paylo.every((p) => !('pkPosition' in p))).toBe(true);   // doc 94: sin orden de llave aparte
   });
   it('isForeignKey NO viaja (las relaciones no se copian)', () => {
     const paylo = changes.slice(1).map((c) => c.payload as Record<string, unknown>);

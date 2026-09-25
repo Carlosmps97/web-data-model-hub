@@ -11,6 +11,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
 import { apiGet, apiPost } from '@/services/http';
 import { API_BASE } from '@/services/apiBase';
+import type { DdlOutputSettings } from '@/features/ddl';
 
 import {
   applyStandards,
@@ -31,6 +32,8 @@ export interface DdlTemplatesPayload {
   templates: DdlTemplate[];
   seedRules: DdlRuleEditInput[];
   seedLookups: Record<string, DdlLookup>;
+  /** Doc 93 D1: Output settings por defecto (las convenciones de la macro BCP). */
+  seedOutput?: Record<string, unknown>;
 }
 /** El /validate devuelve además la condición canonizada y los udpRefs. */
 export interface DdlValidateResult extends DdlValidationReport {
@@ -78,15 +81,23 @@ export const saveDdlConfig = (
 ): Promise<StandardsVersion> =>
   applyStandards(projectId, { kind: 'ddl', title: 'DDL lookups & functions · edited', ddlConfigPatch: patch });
 
-/** CTA del catálogo vacío: aplica el ruleset base (8 reglas + lookups) como
- *  UNA versión del proyecto. En una BD nueva esto mismo lo corre
- *  `scripts/seed_ddl_export_rules.py --all-projects` — acá queda para quien
- *  lo borró todo. */
+/** Doc 93 D1: guarda las Output settings del proyecto (una versión del historial). */
+export const saveDdlOutput = (projectId: string, output: DdlOutputSettings): Promise<StandardsVersion> =>
+  applyStandards(projectId, {
+    kind: 'ddl', title: 'DDL output settings · edited',
+    ddlConfigPatch: { output: output as unknown as Record<string, unknown> },
+  });
+
+/** CTA del catálogo vacío: aplica el ruleset base (doc 93: 12 reglas + 5
+ *  generadores + lookups + Output settings) como UNA versión del proyecto. En
+ *  una BD nueva esto mismo lo corre `scripts/seed_ddl_export_rules.py
+ *  --all-projects` — acá queda para quien lo borró todo. */
 export const seedStarterRules = async (projectId: string): Promise<StandardsVersion> => {
   const t = await getDdlTemplates(projectId);
   return applyStandards(projectId, {
-    kind: 'ddl', title: `Base — DDL export rules · ${t.seedRules.length} rules + lookups`,
-    rulesUpsert: t.seedRules, ddlConfigPatch: { lookups: t.seedLookups },
+    kind: 'ddl', title: `Base — DDL export rules · ${t.seedRules.length} rules + lookups + output`,
+    rulesUpsert: t.seedRules,
+    ddlConfigPatch: { lookups: t.seedLookups, ...(t.seedOutput ? { output: t.seedOutput } : {}) },
   });
 };
 

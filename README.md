@@ -189,7 +189,7 @@ Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCa
 
 ### Data Standards (`/standards`)
 
-- `GlossaryPage` (términos/abreviaturas y tipo de palabra prime/class/modifier), `DomainsPage` (dominios padre = plantillas de tipo de dato con cascada por-dato que respeta overrides manuales), `UdpDefsPage` (definiciones de UDP key-value: texto/número/booleano/fecha/lista).
+- `GlossaryPage` (términos y abreviaturas por columna o por tabla), `DomainsPage` (dominios padre = plantillas de tipo de dato con cascada por-dato que respeta overrides manuales), `UdpDefsPage` (definiciones de UDP key-value: texto/número/booleano/fecha/lista).
 - Nomenclatura global (separador y casing por scope) que re-*physicaliza* nombres físicos a partir de los lógicos.
 - Versionado independiente con snapshot, apply, history y **rollback** (`standards.service`).
 

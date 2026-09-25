@@ -539,13 +539,16 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
   onChange: (a: Record<string, unknown>) => void;
 }) {
   const [kind, setKind] = useState<RuleActionKind>(actionKind === 'emit' ? 'expression' : actionKind);
-  const layout = (action.layout as { partitionColumns?: string; partitionOrderUdp?: string } | undefined) ?? {};
+  const layout = (action.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string } | undefined) ?? {};
+  // Doc 93 D10: `partitionUdp` (alias legado `partitionOrderUdp`, que se
+  // descarta al editar).
+  const partitionUdp = layout.partitionUdp ?? layout.partitionOrderUdp ?? '';
   const statements = (action.statements as { before?: string[]; after?: string[] } | undefined) ?? {};
   const pairs = (k: 'tags' | 'tblproperties' | 'types') =>
     Object.entries((action[k] as Record<string, string>) ?? {});
   const setPairs = (k: 'tags' | 'tblproperties' | 'types', entries: [string, string][]) =>
     onChange({ [k]: Object.fromEntries(entries.filter(([a]) => a.trim())) });
-  // UDP de columna (faceta física) para «Order partitions by UDP».
+  // UDP de columna (faceta física) para «Partition columns from UDP».
   const columnUdps = udpDefs.filter((d) => d.level === 'column' && d.view !== 'logical').map((d) => d.name);
   const setStatements = (pos: 'before' | 'after', text: string) =>
     onChange({ statements: { ...statements, [pos]: text.split('\n') } });
@@ -565,7 +568,7 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
               : k === 'exclude' ? { exclude: true }
                 : k === 'tags' ? { tags: (action.tags as object) ?? {} }
                   : k === 'types' ? { types: (action.types as object) ?? { CHAR: 'VARCHAR' } }
-                  : k === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last', partitionOrderUdp: 'Particion' } }
+                  : k === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last', partitionUdp: 'Particion' } }
                     : k === 'statements' ? { statements: (action.statements as object) ?? { before: ['-- DROP TABLE IF EXISTS {artefacto.ref};'] } }
                       : { tblproperties: (action.tblproperties as object) ?? {} });
           }} />
@@ -575,24 +578,24 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Partition columns</label>
             <select value={layout.partitionColumns ?? 'last'} disabled={!canEdit}
-              onChange={(e) => onChange({ layout: { ...layout, partitionColumns: e.target.value } })}
+              onChange={(e) => onChange({ layout: { partitionColumns: e.target.value, ...(partitionUdp ? { partitionUdp } : {}) } })}
               style={{ ...inp, height: 32, fontSize: 12, flex: 1 }}>
               <option value="last">Emit at the end of the CREATE TABLE</option>
               <option value="keep">Keep the physical order</option>
             </select>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-            <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Order partitions by UDP</label>
-            <input list="ddl-column-udps" value={layout.partitionOrderUdp ?? ''} disabled={!canEdit} placeholder="Particion"
-              onChange={(e) => onChange({ layout: { ...layout, partitionOrderUdp: e.target.value || undefined } })}
+            <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Partition columns from UDP</label>
+            <input list="ddl-column-udps" value={partitionUdp} disabled={!canEdit} placeholder="Particion"
+              onChange={(e) => onChange({ layout: { partitionColumns: layout.partitionColumns ?? 'last', partitionUdp: e.target.value || undefined } })}
               style={{ ...inp, height: 32, fontSize: 12, flex: 1, fontFamily: 'var(--mono, monospace)' }} />
             <datalist id="ddl-column-udps">{columnUdps.map((n) => <option key={n} value={n} />)}</datalist>
           </div>
           <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
-            Applies to every physical table of the export (leave the condition empty). The model’s physical
-            order and the PRIMARY KEY don’t change. With a column UDP, PARTITIONED BY and the trailing block
-            follow its PART_01, PART_02… values; partitions without a value go last, in physical order.
-            Generated tables mirror the same layout.
+            Applies to every physical table of the export (leave the condition empty). With a column UDP,
+            the partition columns ARE the ones whose value is PART_01, PART_02… (the platform’s partition
+            flag is ignored), in that order — at the end of the CREATE TABLE, and PARTITIONED BY lists
+            their names. Without a UDP, the partition flag decides. Generated tables mirror the same layout.
           </div>
         </div>
       ) : kind === 'exclude' ? (

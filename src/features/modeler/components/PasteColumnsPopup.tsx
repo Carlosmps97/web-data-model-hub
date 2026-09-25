@@ -7,9 +7,9 @@ import { useModelerStore } from '@/store/useModelerStore';
 import { pushUndo } from '@/store/useUndoStore';
 import * as viewsSvc from '@/services/views.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
-import { pasteColumnsToBulk, pastePlan } from '../lib/pasteColumns';
+import { pasteColumnsToBulk, pastePlan, pastePreImages } from '../lib/pasteColumns';
 import { invertBulk } from '../lib/undoInvert';
-import { syncNewColumnToMirrorViews, syncRemovedColumnFromViews } from '../lib/viewSync';
+import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews } from '../lib/viewSync';
 
 /**
  * Confirmación del PASTE de columnas (doc 48): staging local — nada persiste
@@ -53,10 +53,12 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
         sourceTable: clipboard.source.physicalName || clipboard.source.logicalName || undefined,
       });
       await gov.recordChangesBulk(changes);
-      // Undo (doc 50): todas las columnas del lote son NUEVAS → la inversa es
-      // el delete del lote (+ retirarlas de las vistas espejo, best-effort).
+      // Undo (doc 50): las columnas pegadas se borran y las del destino que el
+      // lote corrió (doc 94: PK pegadas ⇒ PK primero) vuelven a su ordinal
+      // (+ retirar las pegadas de las vistas espejo, best-effort).
+      const inverse = invertBulk(changes, pastePreImages(targetCols));
       pushUndo(`Paste ${cols.length} column${cols.length === 1 ? '' : 's'}`, async () => {
-        await gov.recordChangesBulk(invertBulk(changes, new Map()));
+        await gov.recordChangesBulk(inverse);
         for (const c of cols) {
           try {
             await syncRemovedColumnFromViews(
@@ -69,13 +71,10 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
       // V1 (decisión owner i): las columnas pegadas entran también a las
       // vistas ESPEJO del destino — misma baseline para todas las columnas
       // del lote (patrón RelationshipCreatePopup), best-effort.
-      for (const c of cols) {
-        try {
-          await syncNewColumnToMirrorViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            targetId, c.physicalName, targetCols);
-        } catch { /* best-effort */ }
-      }
+      // Doc 94 D4: las PK pegadas entran tras las PK del destino, en su orden.
+      await syncNewColumnsToMirrorViews(
+        { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+        targetId, cols, targetCols);
       useModelerStore.getState().markDirty();
       await useModelerStore.getState().reload();
       pushToast(`${cols.length} ${cols.length === 1 ? n.member : n.members} pasted into ${target.physicalName}`);

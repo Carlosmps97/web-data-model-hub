@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { planCanvasDrop } from './canvasDrop';
 
-// orden: k1(0) k2(1) a(2) b(3) c(4) · llave: k2 (pos 0), k1 (pos 1)
-const col = (id: string, ordinal: number, pk = false, pkPosition: number | null = null) =>
-  ({ id, ordinal, isPrimaryKey: pk, pkPosition });
-const COLS = [col('k1', 0, true, 1), col('k2', 1, true, 0), col('a', 2), col('b', 3), col('c', 4)];
+// Doc 94: UN solo orden (PK primero, cada bloque por ordinal) — sin pkPosition.
+// orden: k1(0) k2(1) · a(2) b(3) c(4)
+const col = (id: string, ordinal: number, pk = false) => ({ id, ordinal, isPrimaryKey: pk });
+const COLS = [col('k1', 0, true), col('k2', 1, true), col('a', 2), col('b', 3), col('c', 4)];
 
-describe('planCanvasDrop (doc 73 §10.4 · doc 74)', () => {
+describe('planCanvasDrop (doc 73 §10.4 · doc 94)', () => {
   it('entre filas no-llave: reordena las columnas', () => {
     const plan = planCanvasDrop(COLS, 'c', { kind: 'row', id: 'a', after: false });
     expect(plan.order).toEqual(['k1', 'k2', 'c', 'a', 'b']);
@@ -15,29 +15,28 @@ describe('planCanvasDrop (doc 73 §10.4 · doc 74)', () => {
   it('sin cambio efectivo → nada', () => {
     expect(planCanvasDrop(COLS, 'b', { kind: 'row', id: 'a', after: true })).toEqual({ order: null, key: [] });
     expect(planCanvasDrop(COLS, 'b', { kind: 'row', id: 'b', after: true })).toEqual({ order: null, key: [] });
+    expect(planCanvasDrop(COLS, 'k1', { kind: 'row', id: 'k2', after: false })).toEqual({ order: null, key: [] });
     expect(planCanvasDrop(COLS, 'zz', { kind: 'pkzone' })).toEqual({ order: null, key: [] });
   });
-  it('soltar en la zona de llave: entra al FINAL de la llave, el orden no se toca', () => {
+  it('soltar en la zona de llave: entra a la llave y queda al FINAL del bloque de PK', () => {
     const plan = planCanvasDrop(COLS, 'b', { kind: 'pkzone' });
-    expect(plan).toEqual({ order: null, key: [{ id: 'b', isPrimaryKey: true, pkPosition: 2 }] });
-    expect(planCanvasDrop(COLS, 'k1', { kind: 'pkzone' }).key).toEqual([]);   // ya es PK
+    expect(plan).toEqual({ order: ['k1', 'k2', 'b', 'a', 'c'], key: [{ id: 'b', isPrimaryKey: true }] });
+    expect(planCanvasDrop(COLS, 'k1', { kind: 'pkzone' })).toEqual({ order: null, key: [] });   // ya es PK
   });
-  it('soltar sobre una PK: entra en esa posición de la llave y renumera las demás', () => {
+  it('soltar sobre una PK: entra a la llave en ESA posición del bloque', () => {
     const plan = planCanvasDrop(COLS, 'a', { kind: 'row', id: 'k2', after: false });
-    expect(plan.order).toBeNull();
-    expect(plan.key).toEqual([
-      { id: 'a', isPrimaryKey: true, pkPosition: 0 },
-      { id: 'k2', isPrimaryKey: true, pkPosition: 1 },
-      { id: 'k1', isPrimaryKey: true, pkPosition: 2 },
-    ]);
+    expect(plan).toEqual({ order: ['k1', 'a', 'k2', 'b', 'c'], key: [{ id: 'a', isPrimaryKey: true }] });
   });
-  it('PK sobre otra PK: reordena la llave (k1 antes de k2)', () => {
-    const plan = planCanvasDrop(COLS, 'k1', { kind: 'row', id: 'k2', after: false });
-    expect(plan.key).toEqual([{ id: 'k1', isPrimaryKey: true, pkPosition: 0 }, { id: 'k2', isPrimaryKey: true, pkPosition: 1 }]);
+  it('PK sobre otra PK: reordena dentro del bloque (orden normal, sin orden de llave aparte)', () => {
+    const plan = planCanvasDrop(COLS, 'k2', { kind: 'row', id: 'k1', after: false });
+    expect(plan).toEqual({ order: ['k2', 'k1', 'a', 'b', 'c'], key: [] });
   });
-  it('PK arrastrada a la lista: sale de la llave, renumera y se ubica donde cayó', () => {
+  it('PK arrastrada a la lista: sale de la llave y se ubica donde cayó (nunca queda una PK debajo de una no-PK)', () => {
     const plan = planCanvasDrop(COLS, 'k2', { kind: 'row', id: 'b', after: true });
-    expect(plan.order).toEqual(['k1', 'a', 'b', 'k2', 'c']);
-    expect(plan.key).toEqual([{ id: 'k1', isPrimaryKey: true, pkPosition: 0 }, { id: 'k2', isPrimaryKey: false, pkPosition: null }]);
+    expect(plan).toEqual({ order: ['k1', 'a', 'b', 'k2', 'c'], key: [{ id: 'k2', isPrimaryKey: false }] });
+  });
+  it('datos viejos con ordinal desordenado: el plan sale PK primero', () => {
+    const legacy = [col('a', 0), col('k', 1, true), col('b', 2)];
+    expect(planCanvasDrop(legacy, 'b', { kind: 'row', id: 'a', after: false }).order).toEqual(['k', 'b', 'a']);
   });
 });

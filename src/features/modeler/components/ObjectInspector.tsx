@@ -21,7 +21,7 @@ import { matchesColumn } from '../lib/columnSearch';
 import { moveId, orderColumns, persistReorder, reorderPlan } from '../lib/columnOrder';
 import { facetEditable, type TableField } from '../lib/facetEditable';
 import { inspectorRefreshPlan } from '../lib/inspectorRefresh';
-import { nextPkPosition } from '../lib/keyOrder';
+import { keyLayoutBulk } from '../lib/keyLayout';
 import { tableNamePlan } from '../lib/nameSync';
 import { VIEW_TYPE_NAME, syncViewTypeUdp } from '../lib/viewPanelLogic';
 import { viewRestorePlan } from '../lib/viewRestore';
@@ -378,10 +378,19 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   const patchColumn = async (id: string, fields: Partial<CanonicalColumn>) => {
     const c = data?.columns.find((x) => x.id === id);
     if (!c) return;
-    // PK nueva entra al final de la llave si hay orden explícito (doc 19 §12b).
-    if (fields.isPrimaryKey === true && fields.pkPosition === undefined) {
-      const pos = nextPkPosition(cols, id);
-      if (pos != null) fields = { ...fields, pkPosition: pos };
+    // Doc 94 D2: entrar o salir de la llave la re-ubica en la frontera del
+    // bloque de PK — ella y las que se corren viajan en UN lote, con UN Undo.
+    if (fields.isPrimaryKey !== undefined && !!fields.isPrimaryKey !== !!c.isPrimaryKey) {
+      try {
+        const { changes, pres } = keyLayoutBulk(data!.columns, { [id]: fields });
+        await gov.recordChangesBulk(changes);
+        pushUndo(`Edit column ${c.physicalName}`, async () => {
+          await gov.recordChangesBulk(pres.map((p) => gov.bulk.createColumn(p)));
+          await afterEdit(true);
+        });
+        await afterEdit(true);
+      } catch (e) { toast.error(errMsg(e, "Couldn't save the column")); }
+      return;
     }
     const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
     const renamed = typeof fields.physicalName === 'string' && fields.physicalName !== c.physicalName;
@@ -428,9 +437,9 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     if (!data || reordering) return;
     const ids = cols.map((c) => c.id);
     const from = ids.indexOf(colId), to = from + delta;
-    // Doc 81: el bloque PK queda fijo (su orden se cambia en el properties);
-    // un no-PK no puede cruzar hacia el bloque PK (el display lo re-agruparía).
-    if (cols[from]?.isPrimaryKey || cols[to]?.isPrimaryKey) return;
+    // Doc 94 D3: se reordena dentro de cada bloque (las PK entre ellas, como
+    // cualquier columna); nadie cruza la frontera del bloque de PK.
+    if (!cols[from] || !cols[to] || !!cols[from].isPrimaryKey !== !!cols[to].isPrimaryKey) return;
     const nextIds = moveId(ids, colId, delta);
     if (nextIds === ids) return;
     const plan = reorderPlan(data.columns, nextIds);
@@ -610,8 +619,8 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                                 <td className="n">{i + 1}</td>
                                 {canReorder && (
                                   <td className="mv" onClick={(e) => e.stopPropagation()}>
-                                    <button type="button" className="wk-insp-mv" title={c.isPrimaryKey ? 'Reorder keys in the table properties' : 'Move up'} disabled={i === 0 || c.isPrimaryKey || !!cols[i - 1]?.isPrimaryKey} onClick={() => void move(c.id, -1)}>↑</button>
-                                    <button type="button" className="wk-insp-mv" title={c.isPrimaryKey ? 'Reorder keys in the table properties' : 'Move down'} disabled={i === cols.length - 1 || c.isPrimaryKey} onClick={() => void move(c.id, 1)}>↓</button>
+                                    <button type="button" className="wk-insp-mv" title="Move up" disabled={i === 0 || !!cols[i - 1]?.isPrimaryKey !== !!c.isPrimaryKey} onClick={() => void move(c.id, -1)}>↑</button>
+                                    <button type="button" className="wk-insp-mv" title="Move down" disabled={i === cols.length - 1 || !!cols[i + 1]?.isPrimaryKey !== !!c.isPrimaryKey} onClick={() => void move(c.id, 1)}>↓</button>
                                   </td>
                                 )}
                                 <td className="k">{c.isPrimaryKey && <KeyRound size={11} className="pk" />}{c.isForeignKey && <LinkIcon size={11} className="fk" />}</td>

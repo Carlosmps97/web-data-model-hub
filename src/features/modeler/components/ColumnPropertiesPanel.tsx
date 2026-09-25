@@ -11,7 +11,7 @@ import { applyDomainDefaults, type DomainDefaultsPatch } from '../lib/domainDefa
 import { applyDomainPick } from '../lib/domainType';
 import { canonicalDefaultType } from '../lib/typePick';
 import { orderColumns } from '../lib/columnOrder';
-import { nextPkPosition, pkInKeyOrder } from '../lib/keyOrder';
+import { pkInKeyOrder } from '../lib/keyOrder';
 import { createNameSync, type NameSync } from '../lib/nameSync';
 import { applyNamingCase } from '../lib/physicalCase';
 import { syncRenamedColumnInViews } from '../lib/viewSync';
@@ -48,9 +48,10 @@ const TABS: { id: ColTab; label: string }[] = [
  * La edición reutiliza EXACTAMENTE la mecánica de la card expandida que
  * reemplaza (ColumnRow, hoy retirada): nameSync anti-carreras para los
  * nombres (doc 18 §6), debounce 400ms con flush al desmontar para
- * definición/tipo (doc 40), regla dominio→tipo del doc 46 y flags con
- * pkPosition (doc 19 §12b). Las acciones ESTRUCTURALES (reorden físico,
- * orden de la llave, alta) siguen en el Properties de la tabla.
+ * definición/tipo (doc 40), regla dominio→tipo del doc 46 y flags (doc 94:
+ * marcar/desmarcar PK re-ubica la columna en el orden único — lo hace el
+ * store). Las acciones ESTRUCTURALES (reorden, alta) siguen en el Properties
+ * de la tabla.
  */
 export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   pushToast: (m: string, k?: 'err') => void;
@@ -77,9 +78,9 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
 
   const col = diagram?.columns.find((c) => c.id === selectedColumnId) ?? null;
   const table = diagram?.tables.find((t) => t.id === col?.tableId) ?? null;
-  // Hermanas en el ÚNICO orden de display (doc 81: PK primero + resto por
-  // ordinal, como el canvas): nextPkPosition (marcar PK), la Metadata y el
-  // «Position #N» las usan — así el N coincide con lo que se ve en el canvas.
+  // Hermanas en el ÚNICO orden (doc 81/94: PK primero y cada bloque por
+  // ordinal, como el canvas): la Metadata y el «Position #N» las usan — así el
+  // N coincide con lo que se ve en el canvas.
   const cols = useMemo(
     () => orderColumns((diagram?.columns ?? []).filter((c) => c.tableId === col?.tableId)),
     [diagram, col?.tableId],
@@ -121,14 +122,10 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
 
   if (!col || !table) return null;
 
-  // Upsert changeset-aware (mismo patchCol que tenía el panel de tabla): PK
-  // nueva entra al final de la llave si hay orden explícito (doc 19 §12b) y un
-  // rename FÍSICO re-apunta las vistas que referencian el nombre viejo.
+  // Upsert changeset-aware (mismo patchCol que tenía el panel de tabla): un
+  // cambio de PK lo re-ubica el store (doc 94 D2) y un rename FÍSICO re-apunta
+  // las vistas que referencian el nombre viejo.
   const patchCol = async (id: string, fields: Partial<CanonicalColumn>) => {
-    if (fields.isPrimaryKey === true && fields.pkPosition === undefined) {
-      const pos = nextPkPosition(cols, id);
-      if (pos != null) fields = { ...fields, pkPosition: pos };
-    }
     const before = cols.find((c) => c.id === id);
     try {
       await updateColumn(id, fields);
@@ -432,11 +429,9 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   };
   const toggle = (field: 'isPrimaryKey' | 'isForeignKey' | 'isNullable' | 'isPartition', cur?: boolean) => () => {
     setFlagsBusy(true);
-    // Al SACAR una columna de la PK se limpia su posición de llave (pkPosition):
-    // si la vuelven a marcar, ordena por el orden físico (doc 19 §12b).
-    const patch = field === 'isPrimaryKey' && cur
-      ? { isPrimaryKey: false, pkPosition: null }
-      : { [field]: !cur };
+    // Doc 94 D2: entrar/salir de la llave la re-ubica en la frontera del bloque
+    // de PK (lo hace el store, en un solo lote con Undo).
+    const patch = { [field]: !cur };
     onPatch(col.id, patch).finally(() => setFlagsBusy(false));
   };
 

@@ -67,10 +67,10 @@ describe('buildDiagramScene — tablas', () => {
     expect(boxes.some((b) => b.h === 32 + 3 * 28)).toBe(true);      // t1: 3 columnas
   });
 
-  it('bloque PK primero y EN ORDEN DE LLAVE (pkPosition manda sobre ordinal)', () => {
+  it('doc 94: bloque PK primero y, entre PK, el ordinal (un pkPosition viejo NO manda)', () => {
     const rows = texts(scene).filter((t) => ['ORDER_ID', 'COUNTRY', 'TOTAL'].includes(t.s));
     const inT1 = rows.filter((t) => t.x < 400).sort((a, b) => a.y - b.y);
-    expect(inT1.map((t) => t.s)).toEqual(['COUNTRY', 'ORDER_ID', 'TOTAL']);
+    expect(inT1.map((t) => t.s)).toEqual(['ORDER_ID', 'COUNTRY', 'TOTAL']);
   });
 
   it('modo lógico usa logicalName', () => {

@@ -14,6 +14,7 @@ import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
 import SchemaManagerModal from './SchemaManagerModal';
 import { viewSchemaOnCreate } from '../lib/schemaPick';
+import { orderColumns } from '../lib/columnOrder';
 
 const PURPLE = '#8B5CF6', PURPLE_DK = '#6D3FC4', BLUE = '#2E5BFF', NAVY = '#1A2B4A', MUTED = '#9AA3B2';
 const MONO = "var(--mono, 'Geist Mono', monospace)";
@@ -63,7 +64,8 @@ export default function ViewEditor({
   const colsByTable = useMemo(() => {
     const m = new Map<string, typeof allColumns>();
     for (const c of allColumns) { const a = m.get(c.tableId) ?? []; a.push(c); m.set(c.tableId, a); }
-    for (const a of m.values()) a.sort((x, y) => x.ordinal - y.ordinal);
+    // Doc 94: el orden único de cada fuente — PK primero y cada bloque por ordinal.
+    for (const [k, a] of m) m.set(k, orderColumns(a));
     return m;
   }, [allColumns]);
 

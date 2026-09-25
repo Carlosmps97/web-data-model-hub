@@ -4,7 +4,7 @@
  * transforman el TEXTO del Export DDL según UDPs; nunca tocan el modelo.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Braces, ChevronRight, PackagePlus, TriangleAlert } from 'lucide-react';
+import { Braces, ChevronRight, FileCode2, PackagePlus, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -13,6 +13,7 @@ import {
 import type { DdlRule, StandardsSnapshot, StandardsVersion } from '../standards.service';
 import DdlRuleCatalog from './DdlRuleCatalog';
 import DdlRuleEditor from './DdlRuleEditor';
+import DdlOutputSettingsEditor from './DdlOutputSettingsEditor';
 
 type View =
   | { t: 'overview' }
@@ -28,8 +29,10 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
   onApplied: () => Promise<void> | void;
 }) {
   const rules = useMemo(() => snapshot.ddlRules ?? [], [snapshot.ddlRules]);
-  const config = useMemo(() => snapshot.ddlConfig ?? { lookups: {}, functions: [] }, [snapshot.ddlConfig]);
+  const config = useMemo(() => snapshot.ddlConfig ?? { lookups: {}, functions: [], output: {} }, [snapshot.ddlConfig]);
   const [view, setView] = useState<View>({ t: 'overview' });
+  // Doc 93 D1: editor de las Output settings del proyecto.
+  const [outputOpen, setOutputOpen] = useState(false);
   const [artifacts, setArtifacts] = useState<DdlArtifact[]>([]);
 
   const reloadArtifacts = useCallback(() => {
@@ -108,7 +111,7 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
           </button>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, marginBottom: 26 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 18, marginBottom: 26 }}>
           <button onClick={() => setView({ t: 'catalog' })} style={card}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 13 }}>
               <div style={{ width: 44, height: 44, borderRadius: 12, background: '#F3EEFF', color: '#8B5CF6', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><PackagePlus size={22} /></div>
@@ -138,6 +141,21 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
               masking and hashing applied as the DDL is written.
             </p>
             <span style={mono}>{plain.length} rules</span>
+          </button>
+          <button onClick={() => setOutputOpen(true)} style={card}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 13 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: '#EAF6F1', color: '#0E8C6A', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><FileCode2 size={22} /></div>
+              <div style={{ flex: 1, textAlign: 'left' }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#1A2B4A' }}>Output</div>
+                <div style={{ fontSize: 12, color: '#8A93A5' }}>How the DDL is written</div>
+              </div>
+              <ChevronRight size={16} color="#B6BECD" />
+            </div>
+            <p style={{ margin: '0 0 14px', fontSize: 12.5, color: '#6B7689', lineHeight: 1.5, textAlign: 'left' }}>
+              Quoting, data type casing, CREATE statement, tags on views, location and file names — the
+              defaults of every export, changed here without a deploy.
+            </p>
+            <span style={mono}>{Object.keys(config.output ?? {}).length ? 'project settings' : 'defaults'}</span>
           </button>
         </div>
 
@@ -179,6 +197,10 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
           </div>
         </div>
       </div>
+      {outputOpen && (
+        <DdlOutputSettingsEditor projectId={projectId} config={config} canEdit={canEdit}
+          onClose={() => setOutputOpen(false)} onApplied={applied} />
+      )}
     </div>
   );
 }

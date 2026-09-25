@@ -17,8 +17,8 @@ describe('crc32', () => {
 describe('buildZip', () => {
   it('produces a well-formed STORE archive for multiple entries', async () => {
     const blob = buildZip([
-      { path: 'CLIENTE/[TABLE] CLIENTE.sql', content: 'CREATE TABLE cliente;' },
-      { path: 'CLIENTE/[VIEW] VW_X.sql', content: 'CREATE VIEW vw_x;' },
+      { path: 'CLIENTE/TABLE-CLIENTE.sql', content: 'CREATE TABLE cliente;' },
+      { path: 'CLIENTE/VIEW_NEG-VW_X.sql', content: 'CREATE VIEW vw_x;' },
     ]);
     const buf = new Uint8Array(await blob.arrayBuffer());
     // Local file header signature at the very start.
@@ -29,8 +29,8 @@ describe('buildZip', () => {
     expect(u16(eocd, 10)).toBe(2); // total entries
     // Both paths appear verbatim in the archive bytes.
     const whole = new TextDecoder().decode(buf);
-    expect(whole).toContain('CLIENTE/[TABLE] CLIENTE.sql');
-    expect(whole).toContain('CLIENTE/[VIEW] VW_X.sql');
+    expect(whole).toContain('CLIENTE/TABLE-CLIENTE.sql');
+    expect(whole).toContain('CLIENTE/VIEW_NEG-VW_X.sql');
     expect(whole).toContain('CREATE TABLE cliente;');
   });
 

@@ -9,7 +9,7 @@ import {
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { symbolsOfParent } from '@/features/modeler/lib/subtypeGraph';
 import { invertBulk, preKey } from '@/features/modeler/lib/undoInvert';
-import { syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
+import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 
@@ -152,13 +152,11 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
         await useModelerStore.getState().reload();
       });
       // V1: las columnas migradas entran también a las vistas ESPEJO del hijo.
-      for (const c of createdCols) {
-        try {
-          await syncNewColumnToMirrorViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            draft.childTableId, c.physicalName, childCols);
-        } catch { /* best-effort */ }
-      }
+      // Doc 94 D4: la subcategoría es identificante — las nuevas son PK y
+      // entran tras las PK del subtipo.
+      await syncNewColumnsToMirrorViews(
+        { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
+        draft.childTableId, createdCols, childCols);
       for (const r of resolutions) {
         if (r.target.kind !== 'existing' || !r.target.rename) continue;
         try {

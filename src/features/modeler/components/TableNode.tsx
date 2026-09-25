@@ -88,10 +88,9 @@ function TableNode({ data }: NodeProps) {
 
   const nameOf = (o: { logicalName: string; physicalName: string }) =>
     viewMode === 'logical' ? o.logicalName : o.physicalName;
-  // Bloque PK en el ORDEN DE LA LLAVE (pkPosition), como Erwin; sin pkPosition
-  // (PK marcada a mano) cae al ordinal. Misma regla que el PRIMARY KEY(...) del
-  // DDL (lib/keyOrder). El resto sigue el ÚNICO orden de columnas (`ordinal`,
-  // doc 74), el mismo en ambas facetas.
+  // Doc 94: el orden único — bloque PK primero y cada bloque por `ordinal`
+  // (sin orden de llave aparte; el mismo del PRIMARY KEY(...) del DDL), igual
+  // en ambas facetas.
   const ordered = sortByOrdinal(columns);
   const pks = pkInKeyOrder(ordered);
   const rest = ordered.filter((c) => !c.isPrimaryKey);

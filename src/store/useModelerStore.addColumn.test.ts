@@ -11,6 +11,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
     physicalize: vi.fn(async () => ({ physical: 'FIS' })),
     listDomains: vi.fn(async () => []),
     createColumn: vi.fn(async () => ({})),
+    recordChangesBulk: vi.fn(async () => ({})),
   };
 });
 vi.mock('@/services/views.service', () => ({
@@ -62,25 +63,35 @@ describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
     expect(payload.udpValues).toBeUndefined();
   });
 
-  it('PK nueva entra AL FINAL de la llave cuando la tabla maneja orden explícito', async () => {
+  it('doc 94: PK nueva entra tras la última PK y corre las no-PK en el MISMO lote', async () => {
     useModelerStore.setState({ diagram: diagramWith([
-      { id: 'c1', tableId: 't1', isPrimaryKey: true, pkPosition: 0, ordinal: 0 },
-      { id: 'c2', tableId: 't1', isPrimaryKey: true, pkPosition: 1, ordinal: 1 },
+      { id: 'c1', tableId: 't1', physicalName: 'C1', isPrimaryKey: true, ordinal: 0 },
+      { id: 'c2', tableId: 't1', physicalName: 'C2', ordinal: 1 },
+      { id: 'c3', tableId: 't1', physicalName: 'C3', ordinal: 2 },
     ]) });
     await useModelerStore.getState().addColumn('t1', {
       logicalName: 'COL_C', mode: 'physical', isPrimaryKey: true,
     });
-    expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({ pkPosition: 2 });
+    expect(gov.createColumn).not.toHaveBeenCalled();
+    const sent = vi.mocked(gov.recordChangesBulk).mock.calls[0][0];
+    const created = sent.find((ch) => (ch.payload as { physicalName?: string }).physicalName === 'COL_C')!.payload as Record<string, unknown>;
+    expect(created).toMatchObject({ isPrimaryKey: true, ordinal: 1 });
+    expect('pkPosition' in created).toBe(false);
+    expect(sent.filter((ch) => ch.entityId !== created.id).map((ch) => [ch.entityId, (ch.payload as { ordinal: number }).ordinal]))
+      .toEqual([['c2', 2], ['c3', 3]]);
   });
 
-  it('sin orden explícito de llave, la PK nueva queda SIN pkPosition (rige el físico)', async () => {
+  it('doc 94: PK nueva sin no-PK que correr: alta simple, tras las PK', async () => {
     useModelerStore.setState({ diagram: diagramWith([
       { id: 'c1', tableId: 't1', isPrimaryKey: true, ordinal: 0 },
     ]) });
     await useModelerStore.getState().addColumn('t1', {
       logicalName: 'COL_D', mode: 'physical', isPrimaryKey: true,
     });
-    expect(vi.mocked(gov.createColumn).mock.calls[0][0].pkPosition).toBeUndefined();
+    expect(gov.recordChangesBulk).not.toHaveBeenCalled();
+    const payload = vi.mocked(gov.createColumn).mock.calls[0][0];
+    expect(payload).toMatchObject({ isPrimaryKey: true, ordinal: 1 });
+    expect('pkPosition' in payload).toBe(false);
   });
 
   it('el alta sin metadata conserva el contrato anterior (regresión)', async () => {

@@ -13,7 +13,6 @@ export const COLUMN_BATCH = 300;
 
 const yn = (b: boolean | null | undefined): string => (b ? 'Y' : '');
 const str = (v: string | null | undefined): string => v ?? '';
-const num = (v: number | null | undefined): string | number => (v == null ? '' : v);
 
 /** Columnas Excel dinámicas «UDP · <def>» — una por cada UDP presente en las
  *  filas (unión de claves, orden alfabético estable). */
@@ -56,7 +55,6 @@ export function columnSheetRow(c: ReportColumnRow, table: ReportTableRow | undef
     'Logical type': str(c.logicalDataType),
     'Parent domain': str(c.parentDomain),
     PK: yn(c.isPrimaryKey),
-    'PK position': num(c.pkPosition),
     FK: yn(c.isForeignKey),
     Nullable: c.isNullable ? 'Y' : 'N',
     Partition: yn(c.isPartition),
@@ -115,8 +113,10 @@ export function chunk<T>(xs: T[], n: number): T[][] {
   return out;
 }
 
-/** Orden de presentación de las columnas: tabla (físico) y ordinal físico. */
+/** Orden de presentación de las columnas: tabla (físico) y, dentro de ella,
+ *  el orden único (doc 94: PK primero y cada bloque por ordinal). */
 export function sortColumnRows(rows: ReportColumnRow[], tableName: (id: string) => string): ReportColumnRow[] {
   return [...rows].sort((a, b) =>
-    tableName(a.tableId).localeCompare(tableName(b.tableId)) || a.tableId.localeCompare(b.tableId) || a.ordinal - b.ordinal);
+    tableName(a.tableId).localeCompare(tableName(b.tableId)) || a.tableId.localeCompare(b.tableId)
+    || Number(!!b.isPrimaryKey) - Number(!!a.isPrimaryKey) || a.ordinal - b.ordinal);
 }

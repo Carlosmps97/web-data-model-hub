@@ -9,45 +9,48 @@
  * tables/columns/relationships), con la selección de tablas y el dialecto
  * arriba (Databricks habilitado · Oracle bajo llave) y la columna de opciones
  * partida en DOS PESTAÑAS:
- *  - **Output** — cómo se escribe el DDL: include views / pk·fk / comments /
- *    partitions / index, casing de identificadores, table format (USING
- *    delta|parquet|…), Unity Catalog (catalog.schema.table), External table
- *    (CREATE EXTERNAL TABLE … LOCATION '<path>') y TBLPROPERTIES.
+ *  - **Output** — cómo se escribe el DDL y cómo se nombran los archivos: el
+ *    formulario compartido `DdlOutputForm` (doc 93 D1). Arranca desde las
+ *    Output settings del proyecto (Data Standards) y se puede ajustar para
+ *    este export.
  *  - **Export rules** (`ExportRulesPanel`) — el ruleset del proyecto: qué
  *    reglas corren al exportar. Van aparte porque no son formato — la mitad
  *    son GENERADORES que agregan objetos al `.zip`.
  *
- * Footer: **Download** (a `.zip` with one `.sql` per object — `[TABLE] X.sql` /
- * `[VIEW] Y.sql` — each table and its views under a folder named after the
- * table) and **Copy to clipboard** (single concatenated SQL). UI-only — no
- * persistence.
+ * Footer: **Download** (a `.zip` with one `.sql` per object — `TABLE-X.sql` /
+ * `VIEW_NEG-Y.sql` / `VIEW_TEC-Z.sql`, doc 93 D11 — each table and its views
+ * under a folder named after the table) and **Copy to clipboard** (single
+ * concatenated SQL). UI-only — no persistence.
  */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import {
-  FileCode2, Download, Copy, Lock, Plus, Trash2, Check, Search, Table2, Database, Hexagon,
+  FileCode2, Download, Copy, Lock, Check, Search, Table2, Database, Hexagon,
 } from 'lucide-react';
 
 import { Button, Dialog } from '@/components/ui';
-import SchemaSelect from '@/features/modeler/components/SchemaSelect';
 import type { Diagram } from '@/features/modeler/services/modeler.service';
 import { listViewsForTables } from '@/services/views.service';
 import {
   databricksDdl, ddlZipName, tableStatements, viewStatements,
-  DEFAULT_DATABRICKS_OPTS,
-  type DatabricksDdlOptions, type DdlDialect, type DdlTableFormat, type DdlTable, type DdlView,
+  type DdlDialect, type DdlTable, type DdlView,
 } from '../generators';
 import {
-  fetchExportRules, fetchUdpDefs, layoutFromRules, renderWithRules, selectableRules, withPartitionOrder,
+  fetchDdlConfig, fetchExportRules, fetchUdpDefs, layoutFromRules, renderWithRules, selectableRules, withUdpPartitions,
   type ExportRule, type UdpDefLite,
 } from '../rulesBridge';
+import {
+  DEFAULT_OUTPUT_SETTINGS, mergeOutputSettings, splitOutputSettings, type DdlOutputSettings,
+} from '../outputSettings';
 import { sessionProjectId } from '@/store/useSessionStore';
 import { runBlocking } from '@/store/useBusyStore';
 import { buildZip } from '@/lib/zip';
 import { plainToObjects, statementsToObjects, objectsToEntries, viewKey } from '../ddlExportBundle';
 import ExportRulesPanel from './ExportRulesPanel';
+import DdlOutputForm from './DdlOutputForm';
+import { exportGate } from '../exportGate';
 
 export interface ExportDdlModalProps {
   open: boolean;
@@ -56,42 +59,15 @@ export interface ExportDdlModalProps {
   onClose: () => void;
 }
 
-const FORMATS: DdlTableFormat[] = ['delta', 'parquet', 'avro', 'orc', 'csv', 'json'];
-
-/** Display label for a format chip (ORC/CSV/JSON upper, rest capitalised). */
-function fmtLabel(f: DdlTableFormat): string {
-  return f === 'orc' || f === 'csv' || f === 'json' ? f.toUpperCase() : f.charAt(0).toUpperCase() + f.slice(1);
-}
-
-/** A labelled switch row (on/off slider) used for the boolean options. */
-function SwitchRow({
-  on, onClick, label, hint,
-}: { on: boolean; onClick: () => void; label: string; hint?: string }) {
-  return (
-    <div className="exd-swrow">
-      <span className="exd-swrow-txt">
-        <span className="exd-swrow-label">{label}</span>
-        {hint && <span className="exd-swrow-hint">{hint}</span>}
-      </span>
-      <button
-        type="button"
-        role="switch"
-        aria-checked={on}
-        aria-label={label}
-        className={`exd-swt${on ? ' on' : ''}`}
-        onClick={onClick}
-      />
-    </div>
-  );
-}
-
 export default function ExportDdlModal({ open, diagram, modelName, onClose }: ExportDdlModalProps) {
   const [dialect, setDialect] = useState<DdlDialect>('databricks');
   // Pestaña de la columna de opciones: formato del DDL vs ruleset del proyecto.
   const [tab, setTab] = useState<'output' | 'rules'>('output');
-  const [opts, setOpts] = useState<DatabricksDdlOptions>(DEFAULT_DATABRICKS_OPTS);
-  const set = <K extends keyof DatabricksDdlOptions>(k: K, v: DatabricksDdlOptions[K]) =>
-    setOpts((o) => ({ ...o, [k]: v }));
+  // Doc 93 D1: las Output settings del proyecto son el punto de partida; lo
+  // que se cambie acá vale solo para este export.
+  const [settings, setSettings] = useState<DdlOutputSettings>(DEFAULT_OUTPUT_SETTINGS);
+  const [settingsReady, setSettingsReady] = useState(false);
+  const { opts, fileNames } = useMemo(() => splitOutputSettings(settings), [settings]);
 
   // All tables of the diagram, sorted for a stable checklist.
   const allTables = useMemo<DdlTable[]>(
@@ -121,19 +97,24 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const [exportRules, setExportRules] = useState<ExportRule[]>([]);
   const [selRules, setSelRules] = useState<Set<string> | null>(null);
   const [rendering, setRendering] = useState(false);
-  // Doc 76 D3: defs UDP del proyecto — resuelven por nombre el UDP de columna
-  // que ordena las particiones (regla de layout `partitionOrderUdp`).
-  const [udpDefs, setUdpDefs] = useState<UdpDefLite[]>([]);
+  // Doc 93 D10: defs UDP del proyecto — resuelven por nombre el UDP de columna
+  // que DEFINE las particiones (regla de layout `partitionUdp`). null = cargando.
+  const [udpDefs, setUdpDefs] = useState<UdpDefLite[] | null>(null);
+  const [udpFailed, setUdpFailed] = useState(false);
   useEffect(() => {
     if (!open) return;
     let alive = true;
     setTab('output');
+    setUdpDefs(null); setUdpFailed(false); setSettingsReady(false);
     fetchExportRules(sessionProjectId())
       .then((rs) => { if (alive) { setExportRules(selectableRules(rs)); setSelRules(null); } })
       .catch(() => { if (alive) setExportRules([]); });
     fetchUdpDefs(sessionProjectId())
       .then((ds) => { if (alive) setUdpDefs(ds); })
-      .catch(() => { if (alive) setUdpDefs([]); });
+      .catch(() => { if (alive) { setUdpDefs([]); setUdpFailed(true); } });
+    fetchDdlConfig(sessionProjectId())
+      .then((cfg) => { if (alive) { setSettings(mergeOutputSettings(cfg?.output ?? null)); setSettingsReady(true); } })
+      .catch(() => { if (alive) { setSettings(DEFAULT_OUTPUT_SETTINGS); setSettingsReady(true); } });
     return () => { alive = false; };
   }, [open]);
   const selRuleIds = useMemo(
@@ -178,10 +159,11 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   // DDL base sigue byte-idéntico.
   const layout = useMemo(() => layoutFromRules(exportRules, selRuleIds), [exportRules, selRuleIds]);
   const effOpts = useMemo(() => ({ ...opts, partitionsLast: layout.partitionsLast }), [opts, layout]);
-  // Doc 76 D3: las columnas viajan con el correlativo PART_nn del UDP que
-  // declara la regla de layout → el CREATE físico ordena sus particiones.
+  // Doc 93 D10: con la regla de layout, las particiones salen del UDP que ella
+  // nombra (PART_nn = partición y su orden) → el CREATE físico y el motor
+  // coinciden; sin esa regla (o sin el UDP) rige el flag de la plataforma.
   const rulesInput = useMemo(() => (ddlInput
-    ? { ...ddlInput, columns: withPartitionOrder(ddlInput.columns, udpDefs, layout.partitionOrderUdp) }
+    ? { ...ddlInput, columns: withUdpPartitions(ddlInput.columns, udpDefs ?? [], layout.partitionUdp) }
     : null), [ddlInput, udpDefs, layout]);
 
   // Todo lo que cambia el resultado invalida el preview renderizado.
@@ -242,11 +224,6 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     );
   }, [allTables, tableFilter]);
 
-  const addProp = () => set('tblProperties', [...opts.tblProperties, { key: '', value: '' }]);
-  const setProp = (i: number, patch: Partial<{ key: string; value: string }>) =>
-    set('tblProperties', opts.tblProperties.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
-  const delProp = (i: number) => set('tblProperties', opts.tblProperties.filter((_, idx) => idx !== i));
-
   const copy = async () => {
     if (!exportTables.length) return;
     try {
@@ -288,7 +265,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
         objects = statementsToObjects({ statements: rendered.statements, viewSources, tablesById });
       }
 
-      const entries = objectsToEntries(objects);
+      const entries = objectsToEntries(objects, fileNames);
       const zipName = ddlZipName(exportTables, modelName);
       const blob = buildZip(entries);
       const url = URL.createObjectURL(blob);
@@ -309,13 +286,17 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
 
   const showRules = tab === 'rules' && exportRules.length > 0;
   const isDbx = dialect === 'databricks';
-  const canExport = isDbx && exportTables.length > 0;
+  // Final review #7/#15: sin las Output settings y las defs UDP cargadas no se
+  // exporta (la física y la _rej podían diferir en particiones).
+  const gate = exportGate({ settingsReady, udpDefsReady: udpDefs !== null, udpDefsFailed: udpFailed, rulesSelected: selRuleIds.size });
+  const canExport = isDbx && exportTables.length > 0 && gate.ready;
 
   const footer = (
     <>
       <span className="dmh-dialog-foot-left exd-foot-count">
         {exportTables.length}/{allTables.length} tables
         {selRuleIds.size > 0 && ` · ${selRuleIds.size} rule${selRuleIds.size === 1 ? '' : 's'}`}
+        {gate.note && ` · ${gate.note}`}
       </span>
       <Button variant="secondary" onClick={onClose}>Close</Button>
       <Button variant="secondary" icon={Copy} onClick={copy} disabled={!canExport || rendering}>Copy</Button>
@@ -452,103 +433,12 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
                 onNone={() => setSelRules(new Set<string>())}
               />
             ) : (
-              <>
-                <span className="exd-section">Include</span>
-                <div className="exd-switches">
-                  <SwitchRow on={opts.includeViews} onClick={() => set('includeViews', !opts.includeViews)} label="Views" hint={views.length ? `${views.length} view(s) on the canvas` : 'No views on the canvas'} />
-                  <SwitchRow on={opts.includeKeys} onClick={() => set('includeKeys', !opts.includeKeys)} label="Primary & foreign keys" hint="PK / FK constraints" />
-                  <SwitchRow on={opts.includeComments} onClick={() => set('includeComments', !opts.includeComments)} label="Comments" hint="Functional definitions" />
-                  <SwitchRow on={opts.includePartitions} onClick={() => set('includePartitions', !opts.includePartitions)} label="Partitions" hint="PARTITIONED BY" />
-                  <SwitchRow on={opts.includeIndexes} onClick={() => set('includeIndexes', !opts.includeIndexes)} label="Indexes" hint="Hint ZORDER" />
-                </div>
-
-                <span className="exd-section">Identifier casing</span>
-                <div className="rd-seg exd-caseseg" role="group" aria-label="Identifier casing">
-                  {(['as-is', 'lower', 'upper'] as const).map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      className={opts.identifierCase === c ? 'active' : ''}
-                      onClick={() => set('identifierCase', c)}
-                      aria-pressed={opts.identifierCase === c}
-                      title={c === 'as-is'
-                        ? 'Identifiers as they are in the model'
-                        : c === 'lower' ? 'Identifiers in lowercase' : 'Identifiers in UPPERCASE'}
-                    >
-                      {c === 'as-is' ? 'As-is' : c === 'lower' ? 'lower' : 'UPPER'}
-                    </button>
-                  ))}
-                </div>
-
-                <span className="exd-section">Table format · USING</span>
-                <div className="exd-chips">
-                  {FORMATS.map((f) => (
-                    <button
-                      key={f}
-                      type="button"
-                      className={`exd-chip${opts.tableFormat === f ? ' is-on' : ''}`}
-                      onClick={() => set('tableFormat', f)}
-                      aria-pressed={opts.tableFormat === f}
-                    >
-                      {fmtLabel(f)}
-                    </button>
-                  ))}
-                </div>
-
-                <SwitchRow on={opts.unityCatalog} onClick={() => set('unityCatalog', !opts.unityCatalog)} label="Unity Catalog" hint="catalog.schema.table" />
-                <div className="exd-row2">
-                  <div className="exd-field">
-                    <span className="exd-sublbl">Catalog</span>
-                    <input className="rd-input exd-input" value={opts.catalog} disabled={!opts.unityCatalog} onChange={(e) => set('catalog', e.target.value)} placeholder="main" />
-                  </div>
-                  <div className="exd-field">
-                    <span className="exd-sublbl">Default schema</span>
-                    {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
-                    <SchemaSelect className="rd-input exd-input" value={opts.defaultSchema} onChange={(v) => set('defaultSchema', v)} />
-                  </div>
-                </div>
-
-                <SwitchRow on={opts.external} onClick={() => set('external', !opts.external)} label="External table" hint="CREATE EXTERNAL TABLE … LOCATION" />
-                {opts.external && (
-                  <div className="exd-field">
-                    <span className="exd-sublbl">Location (ADLS / S3)</span>
-                    <input className="rd-input exd-input" value={opts.location} onChange={(e) => set('location', e.target.value)} placeholder="abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>" />
-                    {/* Doc 76 D9: la carpeta del LOCATION es un literal de path — su
-                        casing es independiente del de los identificadores. */}
-                    <span className="exd-sublbl">Folder name · LOCATION '&lt;base&gt;/&lt;table&gt;'</span>
-                    <div className="rd-seg exd-caseseg" role="group" aria-label="Location folder casing">
-                      {(['as-is', 'lower', 'upper'] as const).map((c) => (
-                        <button
-                          key={c}
-                          type="button"
-                          className={(opts.locationFolderCase ?? 'upper') === c ? 'active' : ''}
-                          onClick={() => set('locationFolderCase', c)}
-                          aria-pressed={(opts.locationFolderCase ?? 'upper') === c}
-                          title={c === 'as-is'
-                            ? 'Folder named exactly like the physical name'
-                            : c === 'lower' ? 'Folder name in lowercase' : 'Folder name in UPPERCASE'}
-                        >
-                          {c === 'as-is' ? 'As-is' : c === 'lower' ? 'lower' : 'UPPER'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="exd-tblprops-head">
-                  <span className="exd-section">TBLPROPERTIES</span>
-                  <button type="button" className="exd-add" onClick={addProp}><Plus size={13} strokeWidth={2} />Add</button>
-                </div>
-                {opts.tblProperties.length === 0
-                  ? <span className="exd-empty">No properties.</span>
-                  : opts.tblProperties.map((p, i) => (
-                    <div key={i} className="exd-prop">
-                      <input className="rd-input exd-input exd-mono" value={p.key} onChange={(e) => setProp(i, { key: e.target.value })} placeholder="delta.appendOnly" />
-                      <input className="rd-input exd-input exd-mono" value={p.value} onChange={(e) => setProp(i, { value: e.target.value })} placeholder="true" />
-                      <button type="button" className="exd-iconbtn" onClick={() => delProp(i)} aria-label="Remove"><Trash2 size={14} /></button>
-                    </div>
-                  ))}
-              </>
+              <DdlOutputForm
+                value={settings}
+                onChange={setSettings}
+                disabled={!settingsReady}
+                viewsHint={views.length ? `${views.length} view(s) on the canvas` : 'No views on the canvas'}
+              />
             )}
           </div>
 
@@ -573,7 +463,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
             <pre className="exd-code" aria-label="DDL preview">
               {canExport
                 ? (rulesPreview ? rulesPreview.sql : ddl)
-                : '-- Select at least one table (Databricks dialect).'}
+                : gate.note ? `-- ${gate.note}` : '-- Select at least one table (Databricks dialect).'}
             </pre>
           </div>
         </div>

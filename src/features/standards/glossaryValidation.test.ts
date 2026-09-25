@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { termsToValidate, conflictLines } from './glossaryValidation';
+import { termsToValidate, conflictLines, impactTotal, impactSummary, impactSampleLines, impactNote } from './glossaryValidation';
 import type { GlossaryValidation } from '@/services/naming.service';
 
 describe('termsToValidate', () => {
@@ -67,5 +67,54 @@ describe('conflictLines', () => {
     const lines = conflictLines(v);
     // total 60 − 1 duplicado = 59 de corpus; muestra 2 → 57 más.
     expect(lines[lines.length - 1]).toBe('… and 57 more matches');
+  });
+});
+
+// Doc 94 D7/D8 — el aviso del glosario solo con impacto real, con números.
+describe('textos del impacto del glosario', () => {
+  const none = { columns: 0, columnTables: 0, tables: 0, sample: [] };
+  it('sin cambios de nombres ⇒ total 0 (se aplica sin aviso)', () => {
+    expect(impactTotal(none)).toBe(0);
+    expect(impactTotal({ ...none, columns: 2, tables: 1 })).toBe(3);
+  });
+  it('columnas (campos) y tablas por separado, en singular o plural', () => {
+    expect(impactSummary({ ...none, columns: 2, columnTables: 1 })).toEqual(['2 column (field) names in 1 table']);
+    expect(impactSummary({ ...none, columns: 1, columnTables: 1, tables: 3 }))
+      .toEqual(['1 column (field) name in 1 table', '3 table names']);
+    expect(impactSummary({ ...none, tables: 1 })).toEqual(['1 table name']);
+    expect(impactSummary(none)).toEqual([]);
+  });
+  it('muestra legible: TABLA · antes → después (columnas) y Table antes → después', () => {
+    expect(impactSampleLines({
+      ...none, columns: 1, tables: 1,
+      sample: [
+        { entity: 'column', table: 'MAESTROCLIENTES', from: 'CODCLI', to: 'CODCLTE' },
+        { entity: 'table', table: 'VIEJO', from: 'VIEJO', to: 'MAESTROCLIENTES' },
+      ],
+    })).toEqual(['MAESTROCLIENTES · CODCLI → CODCLTE', 'Table VIEJO → MAESTROCLIENTES']);
+  });
+  it('avisa cuántos más hay fuera de la muestra', () => {
+    const sample = [{ entity: 'column' as const, table: 'T', from: 'A', to: 'B' }];
+    expect(impactSampleLines({ ...none, columns: 5, columnTables: 1, sample }).at(-1)).toBe('… and 4 more');
+  });
+});
+
+// Final review #10: la nota del diálogo depende del scope editado (y avisa si el
+// otro scope también se re-deriva por nombres ya desfasados).
+describe('impactNote', () => {
+  const none = { columns: 0, columnTables: 0, tables: 0, sample: [] };
+  it('términos de columna: nunca renombran tablas', () => {
+    expect(impactNote('column', { ...none, columns: 2, columnTables: 1 }))
+      .toBe('Column terms only rename column (field) names — never table names. You can roll back this version from the history.');
+  });
+  it('términos de tabla: nunca renombran columnas', () => {
+    expect(impactNote('table', { ...none, tables: 1 }))
+      .toBe('Table terms only rename table names — never column names. You can roll back this version from the history.');
+  });
+  it('si el otro scope también cambia, lo explica (nombres ya desfasados)', () => {
+    expect(impactNote('column', { ...none, columns: 1, columnTables: 1, tables: 2 }))
+      .toContain('Some table names that are already out of sync with the current rules are re-derived too.');
+    expect(impactNote('table', { ...none, tables: 1, columns: 3, columnTables: 1 }))
+      .toContain('Some column names that are already out of sync with the current rules are re-derived too.');
   });
 });

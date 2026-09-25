@@ -94,7 +94,7 @@ describe('mappingToBulk (doc 47)', () => {
   const parent1 = col('p1', 'P', 'CUSTOMER_ID', {
     parentDomainId: 'domA', description: 'Id del cliente', udpValues: { u1: 'oro' } });
   const parent2 = col('p2', 'P', 'REGION_CD');
-  const existing = col('h1', 'H', 'REGION_CD', { isPrimaryKey: true, pkPosition: 0, isNullable: false });
+  const existing = col('h1', 'H', 'REGION_CD', { isPrimaryKey: true, isNullable: false });
   const childColsBulk = [existing, col('h2', 'H', 'AMOUNT', { ordinal: 1 })];
   const base = {
     relId: 'r9', parentTableId: 'P', childTableId: 'H',
@@ -105,18 +105,23 @@ describe('mappingToBulk (doc 47)', () => {
     { parentCol: parent2, target: { kind: 'existing', col: existing }, inherit: true },
   ];
 
-  it('identifying + inherit: crea con metadata del padre, PK al final de la llave, y no pisa pkPosition existente', () => {
+  it('identifying + inherit: crea con metadata del padre; doc 94: la PK nueva entra tras la última PK y la no-PK se corre en el MISMO lote', () => {
     const { changes, createdCols, relationship } = mappingToBulk({ ...base, identifying: true, rows, childCols: childColsBulk });
     expect(createdCols).toHaveLength(1);
     const nueva = createdCols[0];
     expect(nueva).toMatchObject({
       id: 'n1', tableId: 'H', physicalName: 'CUSTOMER_ID', dataType: 'BIGINT', parentDomainId: 'domA',
-      isForeignKey: true, isPrimaryKey: true, isNullable: false, pkPosition: 1, ordinal: 2,
+      isForeignKey: true, isPrimaryKey: true, isNullable: false, ordinal: 1,
       description: 'Id del cliente', udpValues: { u1: 'oro' },
     });
-    // la existente: gana FK, conserva su pkPosition 0, hereda metadata del padre
+    expect('pkPosition' in nueva).toBe(false);
+    // la existente: gana FK, conserva su ordinal (ya era PK), hereda metadata del padre
     const upd = changes.find((c) => c.entityId === 'h1')!.payload as unknown as CanonicalColumn;
-    expect(upd).toMatchObject({ isForeignKey: true, isPrimaryKey: true, pkPosition: 0, dataType: 'BIGINT' });
+    expect(upd).toMatchObject({ isForeignKey: true, isPrimaryKey: true, ordinal: 0, dataType: 'BIGINT' });
+    // la no-PK se corre (orden único: REGION_CD · CUSTOMER_ID · AMOUNT) — una sola vez, doc completo
+    const shifted = changes.filter((c) => c.entityId === 'h2');
+    expect(shifted).toHaveLength(1);
+    expect(shifted[0].payload).toMatchObject({ physicalName: 'AMOUNT', ordinal: 2 });
     // relación al final del lote, pares en orden de llave
     expect(changes[changes.length - 1]).toMatchObject({ collection: 'relationships', entityId: 'r9', op: 'upsert' });
     expect(relationship.pairs).toEqual([
@@ -128,7 +133,8 @@ describe('mappingToBulk (doc 47)', () => {
   it('non-identifying + inherit=No: la nueva queda FK nullable en blanco; la PK existente del hijo CONSERVA su PK', () => {
     const rowsNo = rows.map((r) => ({ ...r, inherit: false }));
     const { changes, createdCols } = mappingToBulk({ ...base, identifying: false, rows: rowsNo, childCols: childColsBulk });
-    expect(createdCols[0]).toMatchObject({ isForeignKey: true, isPrimaryKey: false, isNullable: true, pkPosition: null });
+    expect(createdCols[0]).toMatchObject({ isForeignKey: true, isPrimaryKey: false, isNullable: true, ordinal: 2 });
+    expect(changes.some((c) => c.entityId === 'h2')).toBe(false);   // non-identifying: al final, sin corridas
     expect(createdCols[0].description).toBeUndefined();
     const upd = changes.find((c) => c.entityId === 'h1')!.payload as unknown as CanonicalColumn;
     expect(upd).toMatchObject({ isForeignKey: true, isPrimaryKey: true, isNullable: false });
@@ -148,13 +154,16 @@ describe('mappingToBulk (doc 47)', () => {
     ]);
   });
 
-  it('hijo sin orden explícito de llave: pkPosition null también en identifying', () => {
-    const plainChild = [col('h3', 'H', 'OTRA', { isPrimaryKey: true })];   // PK sin pkPosition
-    const { createdCols } = mappingToBulk({
-      ...base, identifying: true, childCols: plainChild,
-      rows: [{ parentCol: parent1, target: { kind: 'create', id: 'n3', logicalName: 'x', physicalName: 'X' }, inherit: false }],
+  it('doc 94: identifying que PROMUEVE una no-PK existente: sube al bloque de PK (un solo cambio por columna)', () => {
+    const child = [col('k', 'H', 'K', { isPrimaryKey: true }), col('a', 'H', 'A', { ordinal: 1 }), col('b', 'H', 'B', { ordinal: 2 })];
+    const { changes } = mappingToBulk({
+      ...base, identifying: true, childCols: child,
+      rows: [{ parentCol: parent1, target: { kind: 'existing', col: child[2] }, inherit: false }],
     });
-    expect(createdCols[0].pkPosition).toBeNull();
+    const byId = Object.fromEntries(changes.filter((c) => c.collection === 'canonical_columns')
+      .map((c) => [c.entityId, c.payload as unknown as CanonicalColumn]));
+    expect([byId.b.isPrimaryKey, byId.b.ordinal, byId.a.ordinal]).toEqual([true, 1, 2]);
+    expect(changes.filter((c) => c.entityId === 'b')).toHaveLength(1);
   });
 
   it('inherit POR FILA: una fila en blanco y otra heredando en el MISMO lote', () => {

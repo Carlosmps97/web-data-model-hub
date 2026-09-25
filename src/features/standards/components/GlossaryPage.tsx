@@ -3,10 +3,10 @@ import { BookOpenText, Lock, Pencil, Plus, Search, ShieldCheck, Trash2, Unlock, 
 import { toast } from 'sonner';
 import type { StandardsSnapshot, SnapshotTerm, ApplyStandardsBody } from '../standards.service';
 import { applyStandards } from '../standards.service';
-import { validateTerm, lockTerm, unlockTerm } from '@/services/naming.service';
-import type { UdpScope, WordType } from '@/services/naming.service';
+import { validateTerm, lockTerm, unlockTerm, glossaryImpact } from '@/services/naming.service';
+import type { GlossaryImpact, UdpScope } from '@/services/naming.service';
 import { useAuthStore } from '@/store/useAuthStore';
-import { termsToValidate, conflictLines } from '../glossaryValidation';
+import { termsToValidate, conflictLines, impactTotal, impactSummary, impactSampleLines, impactNote } from '../glossaryValidation';
 
 // ── Preview físico client-side (para el edit en vivo, antes de aplicar) ──
 // Réplica mínima del motor: longest-match sobre los términos del scope + case + separador.
@@ -33,12 +33,6 @@ function previewPhysical(logical: string, terms: SnapshotTerm[], sep: string, ca
     : cased.join(sep);
 }
 
-const WORD_TONE: Record<string, { c: string; b: string }> = {
-  prime: { c: '#2E5BFF', b: '#EAF0FF' },
-  class: { c: '#0E8C6A', b: '#E4F6EF' },
-  modifier: { c: '#8B5CF6', b: '#F3EEFF' },
-};
-
 // _orig: término original al entrar en edición — permite detectar renombres
 // de texto para validarlos antes de aplicar (F2 #1, ver termsToValidate).
 type Draft = SnapshotTerm & { _new?: boolean; _deleted?: boolean; _orig?: string };
@@ -59,6 +53,8 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
   const isAdmin = useAuthStore((s) => s.has('admin.manage'));
   const [conflicts, setConflicts] = useState<{ term: string; lines: string[] } | null>(null);
   const [checking, setChecking] = useState<string | null>(null); // id de la fila validándose
+  // Doc 94 D7: impacto REAL del apply (dry-run); el aviso solo sale si > 0.
+  const [impact, setImpact] = useState<GlossaryImpact | null>(null);
 
   // Config del scope. La REGLA CORPORATIVA está bloqueada en join + UPPER
   // (así se derivan los físicos reales del catálogo: CODCLAVESUJETOCLI); los
@@ -91,7 +87,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     setMaxLen(Number(snapshot.namingConfig[scope].maxLength ?? 150));
     setEditing(true);
   };
-  const cancel = () => { setEditing(false); setConfirm(false); };
+  const cancel = () => { setEditing(false); setConfirm(false); setImpact(null); };
   const switchScope = (s: UdpScope) => { if (editing) return; setScope(s); };
 
   const live: Draft[] = editing ? terms.filter((t) => !t._deleted) : snapshot.dict.filter((t) => t.scope === scope);
@@ -109,7 +105,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     for (const t of terms) {
       if (t._deleted) { if (!t._new) removed.push(`${t.term} → ${t.abbrev}`); continue; }
       if (t._new) added.push(`${t.term} → ${t.abbrev}`);
-      else { const b = before.get(t.id); if (b && (b.term !== t.term || b.abbrev !== t.abbrev || b.wordType !== t.wordType)) edited.push(`${t.term} → ${t.abbrev}`); }
+      else { const b = before.get(t.id); if (b && (b.term !== t.term || b.abbrev !== t.abbrev)) edited.push(`${t.term} → ${t.abbrev}`); }
     }
     const cfgChanged = sep !== String(cfg0.separator ?? '') || casing !== String(cfg0.case ?? 'upper') || maxLen !== Number(cfg0.maxLength ?? 150);
     if (cfgChanged) edited.push(`${scope === 'column' ? 'Column' : 'Table'} naming · sep '${sep || '(none)'}' · ${casing} · max ${maxLen}`);
@@ -124,7 +120,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     setChecking(t.id);
     try {
       const v = await validateTerm(projectId, term, scope);
-      if (v.ok) toast.success(`'${term}' no tiene conflictos`);
+      if (v.ok) toast.success(`'${term}' has no conflicts`);
       else setConflicts({ term, lines: conflictLines(v) });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't validate");
@@ -134,45 +130,73 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
   const toggleLock = async (t: SnapshotTerm) => {
     try {
       if (t.locked) await unlockTerm(projectId, t.id); else await lockTerm(projectId, t.id);
-      toast.success(t.locked ? `'${t.term}' desbloqueado` : `'${t.term}' bloqueado`);
+      toast.success(t.locked ? `'${t.term}' unlocked` : `'${t.term}' locked`);
       onApplied();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't toggle the lock");
     }
   };
 
+  // Batch del borrador: solo términos NUEVOS o realmente EDITADOS (antes se
+  // reenviaban TODOS como upsert → inflaba el diff/impacto y re-derivaba de más).
+  const buildBody = (): ApplyStandardsBody => {
+    const body: ApplyStandardsBody = { kind: 'glossary' };
+    const before = new Map(snapshot.dict.filter((t) => t.scope === scope).map((t) => [t.id, t]));
+    const changed = (t: Draft) => {
+      if (t._new) return true;
+      const b = before.get(t.id);
+      return !b || b.term !== t.term || b.abbrev !== t.abbrev;
+    };
+    body.termsUpsert = terms
+      .filter((t) => !t._deleted && changed(t))
+      .map((t) => ({ id: t._new ? undefined : t.id, term: t.term.trim(), abbrev: t.abbrev.trim(), scope }))
+      .filter((t) => t.term && t.abbrev);
+    body.termsDelete = terms.filter((t) => t._deleted && !t._new).map((t) => t.id);
+    if (diff.cfgChanged) body.namingConfig = { [scope]: { separator: sep, case: casing, maxLength: maxLen } };
+    return body;
+  };
+
+  const commit = async (body: ApplyStandardsBody) => {
+    const v = await applyStandards(projectId, body);
+    const renamed = v.impact.columns + v.impact.tables;
+    toast.success(renamed
+      ? `Standards applied · ${v.label} · ${renamed} physical name${renamed === 1 ? '' : 's'} changed`
+      : `Saved · ${v.label} — no physical names change`);
+    setEditing(false); setConfirm(false); setImpact(null); onApplied();
+  };
+
+  /** «Save & apply» (doc 94 D7): valida los términos nuevos/renombrados, mide el
+   *  impacto REAL (dry-run del mismo re-derivado que corre el apply) y SOLO si
+   *  algún nombre físico cambia pide confirmación, con los números. */
+  const saveAndApply = async () => {
+    setBusy(true);
+    try {
+      // F2 #1: cada término NUEVO o renombrado se chequea contra el glosario y
+      // el corpus; el primero con conflictos corta (el backend re-valida igual).
+      for (const term of termsToValidate(terms)) {
+        const v = await validateTerm(projectId, term, scope);
+        if (!v.ok) { setConflicts({ term, lines: conflictLines(v) }); return; }
+      }
+      const body = buildBody();
+      const cfg = body.namingConfig?.[scope];
+      const imp = await glossaryImpact(projectId, {
+        scope,
+        termsUpsert: (body.termsUpsert ?? []).map(({ id, term, abbrev }) => ({ id, term, abbrev })),
+        termsDelete: body.termsDelete ?? [],
+        ...(cfg ? { namingConfig: { separator: cfg.separator, case: cfg.case } } : {}),
+      });
+      if (impactTotal(imp) === 0) { await commit(body); return; }
+      setImpact(imp); setConfirm(true);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't apply");
+    } finally { setBusy(false); }
+  };
+
+  /** Botón del diálogo: el usuario ya vio qué nombres cambian. */
   const apply = async () => {
     setBusy(true);
     try {
-      // F2 #1: validación automática al guardar — cada término NUEVO se chequea
-      // contra el glosario y el corpus; el primero con conflictos corta el apply
-      // (dialog con la lista de dónde aparece). El backend re-valida igual.
-      for (const term of termsToValidate(terms)) {
-        const v = await validateTerm(projectId, term, scope);
-        if (!v.ok) {
-          setConflicts({ term, lines: conflictLines(v) });
-          setConfirm(false);
-          return;
-        }
-      }
-      const body: ApplyStandardsBody = { kind: 'glossary' };
-      // Solo se envían términos NUEVOS o realmente EDITADOS (antes se reenviaban
-      // TODOS como upsert → inflaba el diff/impacto y re-derivaba de más).
-      const before = new Map(snapshot.dict.filter((t) => t.scope === scope).map((t) => [t.id, t]));
-      const changed = (t: Draft) => {
-        if (t._new) return true;
-        const b = before.get(t.id);
-        return !b || b.term !== t.term || b.abbrev !== t.abbrev || (b.wordType ?? null) !== (t.wordType ?? null);
-      };
-      body.termsUpsert = terms
-        .filter((t) => !t._deleted && changed(t))
-        .map((t) => ({ id: t._new ? undefined : t.id, term: t.term.trim(), abbrev: t.abbrev.trim(), scope, wordType: t.wordType ?? undefined }))
-        .filter((t) => t.term && t.abbrev);
-      body.termsDelete = terms.filter((t) => t._deleted && !t._new).map((t) => t.id);
-      if (diff.cfgChanged) body.namingConfig = { [scope]: { separator: sep, case: casing, maxLength: maxLen } };
-      const v = await applyStandards(projectId, body);
-      toast.success(`Standards applied · ${v.label} · ${v.impact.columns} names re-derived`);
-      setEditing(false); setConfirm(false); onApplied();
+      await commit(buildBody());
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't apply");
     } finally { setBusy(false); }
@@ -184,7 +208,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
 
   // Columnas de la grilla: en edición hay celda de acciones (validar + borrar);
   // en lectura, el admin ve la celda del candado.
-  const gridCols = editing ? '1.4fr 1fr 1.3fr 76px' : isAdmin ? '1.4fr 1fr 1.3fr 40px' : '1.4fr 1fr 1.3fr';
+  const gridCols = editing ? '1.4fr 1fr 76px' : isAdmin ? '1.4fr 1fr 40px' : '1.4fr 1fr';
 
   return (
     <div style={{ padding: '24px 34px', maxWidth: 1000 }}>
@@ -193,7 +217,9 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
         <div style={{ width: 40, height: 40, borderRadius: 11, background: '#EAF0FF', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2E5BFF' }}><BookOpenText size={20} /></div>
         <div style={{ flex: 1 }}>
           <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, color: '#1A2B4A' }}>Glossary — Terms &amp; Abbreviations</h1>
-          <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#8A93A5' }}>Naming rules and abbreviations applied to every physical name</p>
+          <p style={{ margin: '2px 0 0', fontSize: 12.5, color: '#8A93A5' }}>{scope === 'column'
+            ? 'Terms and abbreviations that derive column (field) physical names — they never rename tables'
+            : 'Terms and abbreviations that derive table physical names — they never rename columns'}</p>
         </div>
         <div style={{ display: 'flex', background: '#EFF1F5', border: '1px solid #E4E8EF', borderRadius: 10, padding: 3 }}>
           {(['column', 'table'] as UdpScope[]).map((s) => (
@@ -212,7 +238,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
       {/* banner */}
       <div style={{ display: 'flex', gap: 12, background: editing ? '#EAF0FF' : '#F4F6F9', border: `1px solid ${editing ? '#D4E0FF' : '#E6EAF0'}`, borderRadius: 12, padding: '12px 15px', marginBottom: 20, fontSize: 12.5, color: '#56607A', lineHeight: 1.5 }}>
         {editing
-          ? <span><strong style={{ color: '#2E5BFF' }}>Edit mode.</strong> Add / edit / delete terms. The naming rule is fixed at <strong>join + UPPER</strong> (corporate standard). Nothing changes until you <strong>Save &amp; apply</strong> — then names re-derive catalog-wide (manually overridden physical names are kept).</span>
+          ? <span><strong style={{ color: '#2E5BFF' }}>Edit mode.</strong> Add / edit / delete terms. The naming rule is fixed at <strong>join + UPPER</strong> (corporate standard). Nothing changes until you <strong>Save &amp; apply</strong>. If your changes rename existing {scope === 'column' ? 'column (field)' : 'table'} names, you'll see which ones before applying (manually overridden names are kept).</span>
           : <span><strong style={{ color: '#3A4658' }}>Read-only view.</strong> {canEdit ? 'Click Edit standards to change rules or terms.' : 'Your role can view the naming rules but not edit them.'}</span>}
       </div>
 
@@ -258,23 +284,19 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 11px', background: '#fff', border: '1px solid #E6EAF0', borderRadius: 9, width: 240 }}>
           <Search size={14} color="#9AA3B2" /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search terms…" style={{ flex: 1, border: 0, outline: 'none', fontSize: 12.5, background: 'transparent' }} />
         </div>
-        {editing && <button onClick={() => setTerms((ts) => [{ id: `new-${Date.now()}`, term: '', abbrev: '', scope, wordType: 'prime', _new: true }, ...ts])} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', border: '1px solid #D4E0FF', background: '#EAF0FF', color: '#2E5BFF', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}><Plus size={14} />Add term</button>}
+        {editing && <button onClick={() => setTerms((ts) => [{ id: `new-${Date.now()}`, term: '', abbrev: '', scope, _new: true }, ...ts])} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 34, padding: '0 12px', border: '1px solid #D4E0FF', background: '#EAF0FF', color: '#2E5BFF', borderRadius: 9, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}><Plus size={14} />Add term</button>}
       </div>
       <div style={{ border: '1px solid #EAEDF2', borderRadius: 12, overflow: 'hidden', background: '#fff' }}>
         <div style={{ display: 'grid', gridTemplateColumns: gridCols, background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', padding: '10px 16px', ...th }}>
-          <div>Term</div><div>Abbrev.</div><div>Word type</div>{(editing || isAdmin) && <div />}
+          <div>Term</div><div>Abbrev.</div>{(editing || isAdmin) && <div />}
         </div>
         {shown.map((t) => {
-          const tone = WORD_TONE[t.wordType ?? 'prime'] ?? WORD_TONE.prime;
           const locked = Boolean(t.locked);
           return (
             <div key={t.id} style={{ display: 'grid', gridTemplateColumns: gridCols, alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #F2F4F8', fontSize: 13, background: locked ? '#F1F3F6' : undefined }}>
               {editing && !locked ? <>
                 <input className="rd-input" style={inp} value={t.term} onChange={(e) => upd(setTerms, t.id, { term: e.target.value })} placeholder="term" />
                 <input className="rd-input" style={{ ...inp, fontFamily: 'var(--mono, monospace)' }} value={t.abbrev} onChange={(e) => upd(setTerms, t.id, { abbrev: e.target.value })} placeholder="ABR" />
-                <select className="rd-input" style={inp} value={t.wordType ?? 'prime'} onChange={(e) => upd(setTerms, t.id, { wordType: e.target.value as WordType })}>
-                  <option value="prime">prime</option><option value="class">class</option><option value="modifier">modifier</option>
-                </select>
                 <div style={{ display: 'flex', gap: 6 }}>
                   {t._new && (
                     <button onClick={() => validateDraft(t)} disabled={checking === t.id} title="Validate against glossary and catalog"
@@ -289,7 +311,6 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
                   {locked && <Lock size={12} color="#9AA3B2" />}{t.term}
                 </div>
                 <div style={{ fontFamily: 'var(--mono, monospace)', fontWeight: 600, color: locked ? '#9AA3B2' : '#2E5BFF' }}>{t.abbrev}</div>
-                <div><span style={{ fontSize: 11, fontWeight: 600, color: locked ? '#9AA3B2' : tone.c, background: locked ? '#E7EAEF' : tone.b, borderRadius: 999, padding: '3px 10px' }}>{t.wordType ?? 'prime'}</span></div>
                 {editing && locked && <div />}
                 {!editing && isAdmin && (
                   <button onClick={() => toggleLock(t)} title={locked ? `Locked by ${t.lockedBy ?? 'ADMIN'} — unlock` : 'Lock term'}
@@ -310,32 +331,41 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
           <span style={{ fontSize: 12.5, color: diff.count ? '#9A6B00' : '#8A93A5' }}>{diff.count ? `${diff.count} unsaved change${diff.count > 1 ? 's' : ''}` : 'No changes yet'}</span>
           <span style={{ flex: 1 }} />
           <button onClick={cancel} style={btnGhost}>Cancel</button>
-          <button onClick={() => setConfirm(true)} disabled={!diff.count} style={{ ...btnPrimary, opacity: diff.count ? 1 : 0.5 }}><UploadCloud size={15} />Save &amp; apply</button>
+          <button onClick={saveAndApply} disabled={!diff.count || busy} style={{ ...btnPrimary, opacity: diff.count ? 1 : 0.5 }}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Checking…' : 'Save & apply'}</button>
         </div>
       )}
 
-      {/* confirm dialog (15d) */}
-      {confirm && (
+      {/* confirm dialog (15d) — doc 94 D7: solo cuando algún nombre físico cambia */}
+      {confirm && impact && (
         <div style={backdrop}>
           <div style={{ width: 560, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
               <div style={{ width: 42, height: 42, borderRadius: 11, background: '#EAF0FF', color: '#2E5BFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UploadCloud size={21} /></div>
-              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Apply naming rules to catalog</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>These edits re-derive physical names everywhere the rules apply. Manually overridden names are kept.</p></div>
-              <button onClick={() => setConfirm(false)} style={iconClose}><X size={13} /></button>
+              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Rename {impactTotal(impact)} physical name{impactTotal(impact) === 1 ? '' : 's'}?</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>Your changes rename names that already exist. Manually overridden names are kept.</p></div>
+              <button onClick={() => { setConfirm(false); setImpact(null); }} style={iconClose}><X size={13} /></button>
             </div>
             <div style={{ padding: '18px 24px' }}>
               <div style={{ ...th, marginBottom: 10 }}>What changes</div>
               {[['added', diff.added], ['edited', diff.edited], ['removed', diff.removed]].map(([k, list]) => (list as string[]).map((s, i) => (
                 <div key={`${k}-${i}`} style={{ fontSize: 13, color: '#1A2B4A', padding: '4px 0' }}>· <span style={{ color: k === 'removed' ? '#C0392B' : k === 'added' ? '#0E8C6A' : '#56607A', fontWeight: 600 }}>{k}</span> {s}</div>
               )))}
+              <div style={{ ...th, margin: '16px 0 8px' }}>Names that change</div>
+              {impactSummary(impact).map((line) => (
+                <div key={line} style={{ fontSize: 13, fontWeight: 600, color: '#1A2B4A', padding: '2px 0' }}>{line}</div>
+              ))}
+              <div style={{ maxHeight: 160, overflowY: 'auto', marginTop: 6 }}>
+                {impactSampleLines(impact).map((line, i) => (
+                  <div key={i} style={{ fontSize: 12, fontFamily: 'var(--mono, monospace)', color: '#56607A', padding: '2px 0' }}>{line}</div>
+                ))}
+              </div>
               <div style={{ display: 'flex', gap: 12, background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '12px 15px', marginTop: 14, fontSize: 12.5, color: '#7A6220' }}>
-                The affected physical names are re-derived across the whole catalog (manually overridden names are kept). This cannot be partially undone (but you can roll back the version).
+                {impactNote(scope, impact)}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}>
               <span style={{ flex: 1 }} />
-              <button onClick={() => setConfirm(false)} disabled={busy} style={btnGhost}>Cancel</button>
-              <button onClick={apply} disabled={busy} style={btnPrimary}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Applying…' : 'Apply to catalog'}</button>
+              <button onClick={() => { setConfirm(false); setImpact(null); }} disabled={busy} style={btnGhost}>Cancel</button>
+              <button onClick={apply} disabled={busy} style={btnPrimary}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Applying…' : 'Apply & rename'}</button>
             </div>
           </div>
         </div>
@@ -349,7 +379,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
               <div style={{ width: 42, height: 42, borderRadius: 11, background: '#FBEEF0', color: '#D6455D', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ShieldCheck size={21} /></div>
               <div style={{ flex: 1 }}>
                 <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>The term &lsquo;{conflicts.term}&rsquo; has conflicts</h2>
-                <p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>It already exists in the glossary or appears as a full phrase in catalog logical names. It cannot be applied.</p>
+                <p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>It already exists in the glossary or appears as a full phrase in the logical name of existing {scope === 'table' ? 'tables' : 'columns'} — adding it would rename them. It can&apos;t be added.</p>
               </div>
               <button onClick={() => setConflicts(null)} style={iconClose}><X size={13} /></button>
             </div>
@@ -360,7 +390,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
             </div>
             <div style={{ display: 'flex', gap: 10, padding: '14px 24px 20px' }}>
               <span style={{ flex: 1 }} />
-              <button onClick={() => setConflicts(null)} style={btnPrimary}>Entendido</button>
+              <button onClick={() => setConflicts(null)} style={btnPrimary}>Got it</button>
             </div>
           </div>
         </div>

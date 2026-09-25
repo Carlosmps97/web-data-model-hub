@@ -10,7 +10,7 @@
  */
 import { apiGet, apiPost, LONG_TIMEOUT_MS } from '@/services/http';
 import { runBlocking } from '@/store/useBusyStore';
-import type { UdpScope, WordType, Separator, Casing } from '@/services/naming.service';
+import type { UdpScope, Separator, Casing } from '@/services/naming.service';
 
 import { API_BASE } from '@/services/apiBase';
 const PROJECT = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}`;
@@ -29,7 +29,7 @@ export const STANDARDS_BLOCKS: { key: StandardsBlock; label: string }[] = [
 /** Conteos por bloque del proyecto fuente (`GET …/standards/summary`). */
 export interface StandardsSummary { glossary: number; domains: number; udp: number; rules: number; naming: boolean }
 
-export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType | null; locked?: boolean; lockedBy?: string | null; lockedAt?: string | null; }
+export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; locked?: boolean; lockedBy?: string | null; lockedAt?: string | null; }
 export interface SnapshotDomain {
   id: string; name: string;
   /** Doc 69: `defaultDataType` = tipo FÍSICO por defecto; `logicalDataType` = faceta lógica. */
@@ -101,6 +101,8 @@ export interface DdlLookup {
 export interface DdlRulesetConfig {
   lookups: Record<string, DdlLookup>;
   functions: { name: string; params: string[]; body: string }[];
+  /** Doc 93 D1: Output settings del Export DDL (ver features/ddl/outputSettings). */
+  output?: Record<string, unknown>;
 }
 
 export interface StandardsSnapshot {
@@ -129,7 +131,7 @@ export interface StandardsVersion {
 }
 
 // ── Batch de cambios que se aplica como UNA versión (15d/15e) ──
-export interface TermEditInput { id?: string; term: string; abbrev: string; scope: UdpScope; wordType?: WordType; }
+export interface TermEditInput { id?: string; term: string; abbrev: string; scope: UdpScope; }
 export interface DomainEditInput { id?: string; name: string; defaultDataType: string; logicalDataType?: string; namingTerm?: string; description?: string; inheritsName?: boolean; physicalName?: string; physicalDescription?: string; udpValues?: Record<string, string>; }
 export interface NamingEditInput { separator: string; case: string; maxLength: number; }
 export interface UdpEditInput {
@@ -170,7 +172,7 @@ export interface ApplyStandardsBody {
   udpDelete?: string[];
   rulesUpsert?: DdlRuleEditInput[];
   rulesDelete?: string[];
-  ddlConfigPatch?: { lookups?: Record<string, DdlLookup>; functions?: DdlRulesetConfig['functions'] };
+  ddlConfigPatch?: { lookups?: Record<string, DdlLookup>; functions?: DdlRulesetConfig['functions']; output?: Record<string, unknown> };
 }
 
 export const getSnapshot = (projectId: string) => apiGet<StandardsSnapshot>(`${STD(projectId)}/snapshot`);
