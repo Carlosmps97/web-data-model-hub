@@ -168,6 +168,18 @@ describe('buildCanvasPage', () => {
     expect(out).toContain('one → zero-many');
     expect(out).toContain('CODMES → CODMES');
   });
+  it('final review #3 (doc 96 D6): la vista muestra su DDL generado y la User-Defined SQL como informativa aparte', () => {
+    const page = buildCanvasPage({
+      title: 'Datamart PYME', breadcrumb: ['Modelo DDV', 'CPYBCA'], indexHref: '../index.html',
+      svgLogical: svgL, svgPhysical: svgP, diagram: fixtureDiagram(), lookups: LOOKUPS,
+      viewDdl: { v1: 'CREATE OR REPLACE VIEW gold_vu.VW_VENTA AS SELECT t1.CODMES AS CODMES FROM gold.HD_VENTA t1;' },
+    });
+    const card = page.slice(page.indexOf('VW_VENTA'));
+    expect(card).toContain('CREATE OR REPLACE VIEW gold_vu.VW_VENTA AS SELECT t1.CODMES');
+    expect(card).toContain('User-Defined SQL — informational, not exported');
+    expect(card.indexOf('SELECT t1.CODMES')).toBeLessThan(card.indexOf('WHERE x &lt; 1'));
+    expect(page).not.toContain('<span class="chip">Regular</span>');
+  });
   it('vista User-Defined SQL con su SQL escapado', () => {
     expect(out).toContain('VW_VENTA');
     expect(out).toContain('User-Defined SQL');

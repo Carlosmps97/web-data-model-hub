@@ -1,6 +1,6 @@
 // Doc 61: helpers puros del panel de Properties de vista.
 import { describe, expect, it } from 'vitest';
-import { moveSource, syncViewTypeUdp } from './viewPanelLogic';
+import { moveSource, reseedDraft } from './viewPanelLogic';
 import type { ViewSource } from '@/services/views.service';
 
 const srcs: ViewSource[] = [
@@ -22,14 +22,12 @@ describe('moveSource', () => {
   });
 });
 
-describe('syncViewTypeUdp', () => {
-  it('setea Personalizada/Regular en la key del def', () => {
-    expect(syncViewTypeUdp({ x: '1' }, 'vt', true)).toEqual({ x: '1', vt: 'Personalizada' });
-    expect(syncViewTypeUdp(undefined, 'vt', false)).toEqual({ vt: 'Regular' });
+describe('reseedDraft (minor #10: la SQL cambió por fuera, p. ej. en el View Editor)', () => {
+  it('sin cambios locales sin guardar, el borrador toma el texto nuevo', () => {
+    expect(reseedDraft('SELECT 1', 'SELECT 1', 'SELECT 2')).toBe('SELECT 2');
+    expect(reseedDraft('', null, 'SELECT 2')).toBe('SELECT 2');
   });
-  it('sin def sembrado devuelve los valores tal cual', () => {
-    const vals = { x: '1' };
-    expect(syncViewTypeUdp(vals, null, true)).toBe(vals);
-    expect(syncViewTypeUdp(undefined, undefined, true)).toBeUndefined();
+  it('con cambios locales sin guardar, se conservan', () => {
+    expect(reseedDraft('mi texto', 'SELECT 1', 'SELECT 2')).toBe('mi texto');
   });
 });

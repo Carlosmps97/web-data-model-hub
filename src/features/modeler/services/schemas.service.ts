@@ -26,9 +26,8 @@ export type SchemaKind = 'tables' | 'views';
 
 export interface DbSchema { id: string; name: string; description?: string | null; kind?: SchemaKind | null }
 
-/** Regla de nombre (espeja el backend): letras/números/guión bajo empezando
- *  con letra. Acepta mayúsculas — el legacy `No_Definido` debe validar. */
-export const SCHEMA_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+/** Regla de nombre del esquema (vive en la lib pura; se re-exporta acá). */
+export { SCHEMA_NAME_RE } from '../lib/schemaStaging';
 
 const readCs = (): string | null => useSessionStore.getState().activeChangesetId;
 const writeCs = (): string | null =>
@@ -56,6 +55,15 @@ export const createSchema = async (name: string, description?: string, kind?: Sc
   const s: DbSchema = { id: crypto.randomUUID(), name, description: description || null, kind: kind ?? null };
   await csvc.recordChange(cs, 'schemas', s.id, 'upsert', { ...s });
   return s;
+};
+
+/** Doc 96 (final review): alta de UN esquema desde un combo — SOLO dentro de
+ *  una versión en edición (cambio `schemas` en el changeset activo, como
+ *  Structure · Schemas). Sin versión en edición rechaza: jamás escribe directo
+ *  a producción (p. ej. si la sesión salió de edición con el popup abierto). */
+export const createSchemaInVersion = async (name: string, kind: SchemaKind): Promise<DbSchema> => {
+  if (!writeCs()) throw new Error('Creating a schema here requires a version in edit mode.');
+  return createSchema(name, undefined, kind);
 };
 
 export interface SchemaImpact { name: string; tables: number; views: number; canvases: number }

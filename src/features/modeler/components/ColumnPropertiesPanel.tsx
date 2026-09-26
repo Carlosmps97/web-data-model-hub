@@ -7,6 +7,7 @@ import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable, ParentDomain } from '@/services/governance.service';
 import { isComplexTypeStart } from '../lib/complexTypes';
+import { mirrorComplex, syncedOtherFacet, typeFacetPatch } from '../lib/facetTypes';
 import { applyDomainDefaults, type DomainDefaultsPatch } from '../lib/domainDefaults';
 import { applyDomainPick } from '../lib/domainType';
 import { canonicalDefaultType } from '../lib/typePick';
@@ -251,12 +252,14 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   const hint = switchHint ?? FACET_SWITCH_HINT;
   const [logical, setLogical] = useState(col.logicalName);
   const [physical, setPhysical] = useState(col.physicalName);
-  const [dataType, setDataType] = useState(col.dataType);
+  // Doc 96 D8: un complejo es el mismo en las dos facetas — datos cargados antes
+  // de la regla (lógico `ARRAY<>` de Erwin) se muestran ya alineados.
+  const [dataType, setDataType] = useState(() => mirrorComplex(col.logicalDataType ?? '', col.dataType ?? ''));
   const [description, setDescription] = useState(col.description ?? '');
   const [domainId, setDomainId] = useState(col.parentDomainId ?? '');
   // Doc 85: faceta física de la definición y faceta lógica del tipo.
   const [physicalDescription, setPhysicalDescription] = useState(col.physicalDescription ?? '');
-  const [logicalDataType, setLogicalDataType] = useState(col.logicalDataType ?? '');
+  const [logicalDataType, setLogicalDataType] = useState(() => mirrorComplex(col.dataType ?? '', col.logicalDataType ?? ''));
   // Popup «Inherit from domain X» (doc 85 §3.6): guarda el patch armado por
   // onDomain hasta que el modelador elija los UDP (Skip = aplicar sin UDP).
   const [inherit, setInherit] = useState<{ domain: ParentDomain; offer: DomainUdpOffer; also: string[]; fields: Partial<CanonicalColumn>; defaults: DomainDefaultsPatch } | null>(null);
@@ -311,19 +314,23 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   const onPhysical = (v: string) => sync.current?.setPhysical(v);
   const onDescription = (v: string) => { setDescription(v); debounced('description', { description: v.trim() || undefined }); };
   const onPhysicalDescription = (v: string) => { setPhysicalDescription(v); debounced('physicalDescription', { physicalDescription: v.trim() || undefined }); };
+  // Doc 96 D8: los DOS tipos viajan juntos en un solo parche ('types'): un
+  // complejo es el mismo en las dos facetas y dos upserts separados podrían
+  // pisarse. El flag de override se recalcula solo en la faceta que cambia
+  // respecto de lo guardado (`typeFacetPatch`).
+  const typeFields = (phys: string, logi: string): Partial<CanonicalColumn> =>
+    typeFacetPatch(phys, logi, col, domains.find((d) => d.id === domainId));
   const onLogicalDataType = (v: string) => {
+    const phys = syncedOtherFacet(v, logicalDataType, dataType);
     setLogicalDataType(v);
-    const dom = domains.find((d) => d.id === domainId);
-    // Doc 69/85: override LÓGICO contra el tipo lógico HOMOLOGADO del dominio (regla doc 46 por faceta).
-    const domLogical = canonicalDefaultType(dom?.logicalDataType ?? undefined);
-    debounced('logicalDataType', { logicalDataType: v.trim() || undefined, logicalTypeOverridden: !!dom && !!v.trim() && v.trim() !== domLogical });
+    setDataType(phys);
+    debounced('types', typeFields(phys, v));
   };
   const onDataType = (v: string) => {
+    const logi = syncedOtherFacet(v, dataType, logicalDataType);
     setDataType(v);
-    const dom = domains.find((d) => d.id === domainId);
-    // Doc 64 r2: el override se compara contra el default HOMOLOGADO (un
-    // dominio legacy `Array` equivale a `ARRAY<>` en la plataforma).
-    debounced('dataType', { dataType: v, typeOverridden: !!dom && v.trim() !== canonicalDefaultType(dom.defaultDataType) });
+    setLogicalDataType(logi);
+    debounced('types', typeFields(v, logi));
   };
   const onDomain = async (id: string) => {
     // El select refleja el cambio AL INSTANTE (estado local); el reload del
@@ -343,9 +350,10 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
       nextDefault: dom?.defaultDataType != null ? canonicalDefaultType(dom.defaultDataType) : undefined,
     });
     // Un tipeo de tipo aún en debounce quedó obsoleto: si volara después,
-    // pisaría el default re-aplicado con el tipo viejo (lost-update).
-    clearTimeout(timers.current['dataType']);
-    delete pendingDeb.current['dataType'];
+    // pisaría el default re-aplicado con el tipo viejo (lost-update). Doc 96:
+    // los dos tipos viajan juntos ('types'); el lógico en pantalla se re-envía abajo.
+    clearTimeout(timers.current['types']);
+    delete pendingDeb.current['types'];
     setDataType(next.dataType);
     const fields: Partial<CanonicalColumn> = { parentDomainId: id || undefined, ...next };
     const changed = !!id && id !== (col.parentDomainId ?? '');
@@ -353,11 +361,16 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
     // hereda su tipo lógico (override lógico off); el mismo dominio se respeta.
     if (changed) {
       const lt = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : '';
-      clearTimeout(timers.current['logicalDataType']);
-      delete pendingDeb.current['logicalDataType'];
       setLogicalDataType(lt);
       fields.logicalDataType = lt || undefined;
       fields.logicalTypeOverridden = false;
+    } else {
+      // Mismo dominio (o sin dominio): el lógico en pantalla —quizá un tipeo que
+      // estaba en el parche 'types' descartado arriba— viaja igual; su flag solo
+      // se recalcula si el valor cambió (minor #5).
+      const lp = typeFacetPatch(next.dataType, logicalDataType, col, dom);
+      fields.logicalDataType = lp.logicalDataType;
+      fields.logicalTypeOverridden = lp.logicalTypeOverridden;
     }
     // Doc 79/85: SOLO los dominios "atributo estándar" (`inheritsName`) RE-APLICAN
     // nombres (lógico y físico) y descripciones (lógica y física) al cambiar de

@@ -7,7 +7,8 @@ import { apiErrorMessage } from '@/services/http';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import * as schemasSvc from '@/features/modeler/services/schemas.service';
-import { SCHEMA_NAME_RE, type SchemaImpact } from '@/features/modeler/services/schemas.service';
+import type { SchemaImpact } from '@/features/modeler/services/schemas.service';
+import { schemaNameError } from '../lib/schemaCreate';
 import {
   editCreate, orderedForSave, pendingFor, stageCreate, stageDelete, stageRename,
   takenNames, unstage, visibleSchemas, type SchemaKind, type StagedOp,
@@ -27,19 +28,12 @@ import {
  * Doc 80 §2: el campo "New schema" hace DOBLE trabajo — mientras escribes
  * filtra la lista de abajo por «contiene» (con ~390 esquemas, buscar el que
  * quieres renombrar era scrollear a ciegas) y, si nada coincide, ese texto es
- * el nombre del esquema nuevo. Doc 80 §1: `initialName`/`initialKind` lo abren
- * precargado desde el editor de vistas ("Create <ESQUEMA>_VU"), y `onCreated`
- * avisa qué se creó para que el llamador lo seleccione.
+ * el nombre del esquema nuevo. El alta de UN esquema desde un combo (antes el
+ * atajo `_VU` del doc 80 §1) va por `SchemaCreateDialog` (doc 96).
  */
-export default function SchemaManagerModal({ onClose, pushToast, initialName, initialKind, onCreated }: {
+export default function SchemaManagerModal({ onClose, pushToast }: {
   onClose: () => void;
   pushToast: (m: string, k?: 'err') => void;
-  /** Nombre precargado en "New schema" (y por tanto filtro inicial). */
-  initialName?: string;
-  /** Qué contendrá el esquema precargado (doc 44). */
-  initialKind?: SchemaKind;
-  /** Nombres efectivamente creados al guardar — en el orden en que se aplicaron. */
-  onCreated?: (names: string[]) => void;
 }) {
   const schemas = useModelerStore((s) => s.schemas);
   const loadSchemas = useModelerStore((s) => s.loadSchemas);
@@ -48,9 +42,9 @@ export default function SchemaManagerModal({ onClose, pushToast, initialName, in
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
 
   const [staged, setStaged] = useState<StagedOp[]>([]);
-  const [newName, setNewName] = useState(initialName ?? '');
+  const [newName, setNewName] = useState('');
   // Qué contendrá el esquema nuevo (doc 44) — Erwin no trae este dato, nace acá.
-  const [newKind, setNewKind] = useState<SchemaKind>(initialKind ?? 'tables');
+  const [newKind, setNewKind] = useState<SchemaKind>('tables');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Edición inline de nombre: fila existente ({id}) o create pendiente ({key}).
@@ -60,16 +54,11 @@ export default function SchemaManagerModal({ onClose, pushToast, initialName, in
 
   const vLabel = versionLabel ?? 'current';
 
+  // Doc 96: la MISMA validación que el alta desde un combo (schemaNameError).
   const nameError = (name: string, exclude?: string): string | null => {
-    const n = name.trim();
-    if (!n) return 'The schema name is required.';
-    if (!SCHEMA_NAME_RE.test(n)) {
-      return 'Invalid name: letters, numbers and underscore, starting with a letter (e.g. bcp_ddv_clientes).';
-    }
     const names = takenNames(schemas, staged);
     if (exclude) names.delete(exclude.toLowerCase());
-    if (names.has(n.toLowerCase())) return `Schema ${n} already exists`;
-    return null;
+    return schemaNameError(name, names);
   };
 
   const ensureImpact = (id: string) => {
@@ -124,7 +113,6 @@ export default function SchemaManagerModal({ onClose, pushToast, initialName, in
     if (ops.length === 0) return;
     setBusy(true); setError(null);
     const done = new Set<string>();
-    const created: string[] = [];
     try {
       markDirty();
       // Doc 75 D18: renombrar propaga a todas las tablas/vistas del esquema — bloqueante.
@@ -132,7 +120,6 @@ export default function SchemaManagerModal({ onClose, pushToast, initialName, in
         for (const op of ops) {
           if (op.kind === 'create') {
             await schemasSvc.createSchema(op.name, undefined, op.schemaKind);
-            created.push(op.name);
           } else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
           else await schemasSvc.deleteSchema(op.id);
           done.add(op.key);
@@ -149,9 +136,6 @@ export default function SchemaManagerModal({ onClose, pushToast, initialName, in
       setBusy(false);
       await loadSchemas().catch(() => {});
       void reload();
-      // Después de recargar el catálogo: el llamador (editor de vistas) ya
-      // puede seleccionar el esquema recién creado.
-      if (created.length) onCreated?.(created);
     }
   };
 

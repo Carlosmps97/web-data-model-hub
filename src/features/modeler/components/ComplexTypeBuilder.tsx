@@ -207,7 +207,8 @@ function SpecEditor({ spec, onSpec, disabled, depth }: {
 
 export default function ComplexTypeBuilder({ value, onChange, disabled }: Props) {
   const { spec, push } = useSpecState(value, onChange);
-  const [mode, setMode] = useState<'builder' | 'code'>(() => (parseComplexType(value) ? 'builder' : 'code'));
+  // Doc 96 D9: abre en Code — el día a día es pegar la estructura; el Builder es ayuda.
+  const [mode, setMode] = useState<'builder' | 'code'>('code');
   const header = spec?.kind === 'array' ? 'ARRAY · element type'
     : spec?.kind === 'map' ? 'MAP · key and value'
       : spec?.kind === 'struct' ? 'STRUCT · subfields (name + type)'

@@ -66,20 +66,28 @@ export default function SheetTemplateCard({ projectId, selectedCount, disabled, 
       <div className="dmh-rep-card-desc">
         A saved fixed format: one sheet with its own name and columns. Uses the same selection and filters.
       </div>
-      {templates.length === 0
-        ? <div className="dmh-rep-card-desc">No templates in this project yet.</div>
-        : (
-          <select className="rd-input" value={selId} onChange={(e) => setSelId(e.target.value)} aria-label="Template"
-            style={{ width: '100%', height: 34 }}>
-            {templates.map((t) => <option key={t.id} value={t.id}>{t.name} · sheet {t.sheetName}</option>)}
-          </select>
-        )}
+      {/* Doc 96 D10: misma distribución que la card «Export to Excel». */}
+      <div className="dmh-rep-card-body">
+        {templates.length === 0
+          ? <div className="dmh-rep-card-empty">No templates in this project yet.</div>
+          : (
+            <select className="rd-input" value={selId} onChange={(e) => setSelId(e.target.value)} aria-label="Template"
+              style={{ width: '100%', height: 34 }}>
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.name} · sheet {t.sheetName}</option>)}
+            </select>
+          )}
+      </div>
       <div className="dmh-rep-card-foot">
         <Button variant="success" icon={Download} className="dmh-rep-export-btn" onClick={exportTemplate}
           disabled={busy || disabled || !selected || selectedCount === 0}>
           {busy ? 'Exporting…' : 'Download .xlsx'}
         </Button>
-        <Button variant="secondary" size="sm" onClick={() => setManaging(true)}>Manage templates…</Button>
+        <div className="dmh-rep-export-note">
+          Only the <strong>{selectedCount} selected</strong> row{selectedCount === 1 ? '' : 's'} will be exported.
+        </div>
+        <div className="dmh-rep-card-links">
+          <button type="button" className="dmh-rep-link" onClick={() => setManaging(true)}>Manage templates…</button>
+        </div>
       </div>
       {managing && (
         <SheetTemplateEditor projectId={projectId} templates={templates} me={me} isAdmin={isAdmin}

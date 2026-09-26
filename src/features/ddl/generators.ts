@@ -87,11 +87,6 @@ export interface DdlView {
   schema?: string;
   /** Definición SQL libre (fallback cuando no hay estructura). */
   sql?: string;
-  /** Doc 61 → doc 91: «User-Defined SQL» (vista "Personalizada") — si está
-   *  presente gana a `sources`: si empieza con `CREATE` es la sentencia
-   *  completa y se emite VERBATIM (User_Defined_SQL de Erwin); si no, es un
-   *  cuerpo suelto legacy y se envuelve en `CREATE OR REPLACE VIEW … AS`. */
-  customSql?: string;
   description?: string;
   /** "On canvas": define la VISTA DE NEGOCIO para las Export rules (doc 30).
    *  NO afecta qué se exporta — solo qué reglas la decoran. */
@@ -151,7 +146,7 @@ export interface DatabricksDdlOptions {
   partitionsLast?: boolean;
   /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_ y
    *  columnas/alias de las proyecciones de vistas). NUNCA aplica a: literales,
-   *  COMMENTs, tipos de datos, expresiones/castType/customSql de vistas ni
+   *  COMMENTs, tipos de datos, expresiones/castType de vistas ni
    *  alias generados (t1, t2, …). */
   identifierCase: IdentifierCase;
   /** Doc 93 D2 — comillas de los identificadores. */
@@ -407,13 +402,6 @@ function tableDDL(
   return out;
 }
 
-/** Doc 91 D6: un User-Defined SQL que empieza con CREATE es la sentencia
- *  completa (User_Defined_SQL de Erwin) y se emite verbatim; cualquier otro
- *  texto es un cuerpo suelto (docs 61/64) que se envuelve. Pura. */
-export function isFullCreateStatement(sql: string): boolean {
-  return /^\s*create\b/i.test(sql);
-}
-
 /** Un `CREATE OR REPLACE VIEW` desde una vista canónica (F3: multi-fuente).
  *  Reglas por columna (doc 76 D10): `expression` VERBATIM (con su alias tal
  *  cual) > `CAST(col AS castType) AS alias` > `col AS alias` SIEMPRE explícito
@@ -448,18 +436,9 @@ export function viewDDL(
   const parts = o.unityCatalog ? [o.catalog || 'main', schema, v.name] : [schema, v.name];
   const full = parts.map(ident).join('.');
 
-  // Doc 91 D6 — User-Defined SQL: gana a `sources`. Sentencia completa ⇒
-  // verbatim (nombre/esquema/casing los gobierna el texto, como en Erwin);
-  // cuerpo suelto legacy ⇒ se envuelve (docs 61/64). Sin validación alguna.
-  const custom = (v.customSql ?? '').trim();
-  if (custom) {
-    const stmt = custom.replace(/;\s*$/, '');
-    if (isFullCreateStatement(stmt)) return `${stmt};\n`;
-    let out = `CREATE OR REPLACE VIEW ${full}`;
-    if (o.includeComments && v.description?.trim()) out += ` COMMENT ${lit(v.description.trim())}`;
-    return out + ` AS\n${stmt};\n`;
-  }
-
+  // Doc 96 D6 (decisión del owner): la User-Defined SQL de una vista es texto
+  // INFORMATIVO — el DDL sale SIEMPRE de su estructura (`sources`), con
+  // `FROM t1, t2` sin JOIN si hay 2 o más fuentes. Este generador no la conoce.
   const aliased = srcIds.length > 1;
   // Alias POSICIONAL por fuente (t1, t2, …): raw, nunca via ident() (F4).
   const aliasOf = new Map(srcIds.map((id, i) => [id, `t${i + 1}`]));

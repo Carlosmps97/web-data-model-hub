@@ -55,21 +55,17 @@ export interface View {
   name: string;
   schema?: string;
   /** Doc 91 D1/D2/D5: `tags`, `filter` y `joinOverride` se RETIRARON (los UDP
-   *  de vista reemplazan a las etiquetas; WHERE/JOIN viven en el User-Defined
-   *  SQL; con 2+ fuentes el DDL lista `FROM t1, t2` como Erwin). */
-  /** Proyección columna a columna. Doc 91 D7: en modo User-Defined SQL lista
-   *  TODAS las columnas de TODAS las fuentes (lo que pinta el canvas). */
+   *  de vista reemplazan a las etiquetas; con 2+ fuentes el DDL lista
+   *  `FROM t1, t2` como Erwin; un JOIN/WHERE se anota en la User-Defined SQL). */
+  /** Proyección columna a columna — de acá sale el DDL (doc 96 D6). */
   sources?: ViewSource[];
   outputAlias?: string;
   expression?: string;
   sql?: string;
   description?: string;
-  /** Doc 61 → doc 91: «User-Defined SQL» — NO vacío ⇒ la vista es
-   *  "Personalizada": el export emite este texto VERBATIM (sentencia
-   *  `CREATE VIEW …` completa, como el User_Defined_SQL de Erwin; un cuerpo
-   *  suelto legacy se envuelve). Sin validación: se guarda lo que el modelador
-   *  escribió. Ausente ⇒ "Regular" (DDL generado de `sources`). Distinto de
-   *  `sql` (preview congelado). */
+  /** Doc 61 → 91 → doc 96 D6: «User-Defined SQL», texto INFORMATIVO — se
+   *  guarda tal cual, sin validar, y NO se exporta: el DDL se genera siempre de
+   *  `sources`. Distinto de `sql` (preview congelado). */
   customSql?: string;
   /** Doc 61: valores UDP de la vista ({defId: value}) — keys de level='view'. */
   udpValues?: Record<string, string>;

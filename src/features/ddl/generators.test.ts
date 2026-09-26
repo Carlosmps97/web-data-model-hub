@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  databricksDdl, viewDDL, isFullCreateStatement, orderedPartitions, locationFolder,
+  databricksDdl, viewDDL, orderedPartitions, locationFolder,
   needsQuote, ddlType, createTableSql, tableStatements,
   DEFAULT_DATABRICKS_OPTS as DEF, type DatabricksDdlInput, type DatabricksDdlOptions, type DdlTable, type DdlView, ddlZipName,
 } from './generators';
@@ -74,59 +74,24 @@ describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro BCP (doc 76 D9)', () =>
   });
 });
 
-describe('viewDDL — User-Defined SQL (doc 61 → doc 91 D6)', () => {
-  const tbl = () => new Map(BASE.tables.map((t) => [t.id, t as DdlTable]));
-  const bodyOnly: DdlView = {
-    id: 'v', tableId: 't1', name: 'v_custom', schema: 'core',
-    customSql: 'WITH b AS (SELECT ID FROM core.CLIENTE)\nSELECT ID FROM b;',
-    // `sources` queda INACTIVO para el DDL mientras el script gobierna:
-    sources: [{ column: 'NOMBRE' }],
-  };
+describe('viewDDL — la User-Defined SQL es informativa (doc 96 D6)', () => {
+  const tables = new Map<string, DdlTable>([
+    ['t1', { id: 't1', physicalName: 'CLIENTE', schema: 'core' } as DdlTable],
+    ['t2', { id: 't2', physicalName: 'CUENTA', schema: 'core' } as DdlTable],
+  ]);
+  const regular: DdlView = { id: 'v', tableId: 't1', sourceTableIds: ['t1', 't2'], name: 'v_cc', schema: 'core',
+    sources: [{ tableId: 't1', column: 'ID' }, { tableId: 't2', column: 'SALDO' }] };
 
-  it('isFullCreateStatement: CREATE al inicio (cualquier casing/espacios) vs cuerpo suelto', () => {
-    expect(isFullCreateStatement('CREATE VIEW s.v AS SELECT 1')).toBe(true);
-    expect(isFullCreateStatement('  create or replace view s.v as select 1')).toBe(true);
-    expect(isFullCreateStatement('SELECT 1')).toBe(false);
-    expect(isFullCreateStatement('WITH b AS (SELECT 1) SELECT * FROM b')).toBe(false);
-    expect(isFullCreateStatement('created_at')).toBe(false);
+  it('con customSql el DDL es el MISMO que sin ella: sale de las columnas y la query no aparece', () => {
+    const withSql = { ...regular, customSql: 'CREATE VIEW core.otra AS SELECT 1 FROM x JOIN y ON 1=1 WHERE secreto = 1' };
+    expect(viewDDL(withSql, DEF, tables)).toBe(viewDDL(regular, DEF, tables));
+    expect(viewDDL(withSql, DEF, tables)).not.toContain('secreto');
   });
 
-  it('sentencia completa (User_Defined_SQL de Erwin): sale VERBATIM, sin casing ni COMMENT, con ; garantizado', () => {
-    const uds = "create view  bcp_ddv_x_vm.hm_score\n as select cli.codcli, base.codmes\nFROM bcp_ddv_x.hm_score base\ninner join bcp_udv_int.m_cli cli on base.k = cli.k\nwhere cli.flg = 'SI'";
-    const v: DdlView = { id: 'v', tableId: 't1', name: 'HM_SCORE', schema: 'core', customSql: uds, description: 'desc' };
-    const ddl = viewDDL(v, { ...DEF, includeComments: true, identifierCase: 'upper' }, tbl());
-    expect(ddl).toBe(`${uds};\n`);
-    // el generador NO envuelve, NO casea, NO agrega COMMENT
-    expect(ddl).not.toContain('CREATE OR REPLACE VIEW `');
-    expect(ddl).not.toContain('COMMENT');
-  });
-
-  it('sentencia completa con ; final: no duplica el ;', () => {
-    const v: DdlView = { id: 'v', tableId: 't1', name: 'v', schema: 'core', customSql: 'CREATE VIEW core.v AS SELECT 1;  ' };
-    expect(viewDDL(v, DEF, tbl())).toBe('CREATE VIEW core.v AS SELECT 1;\n');
-  });
-
-  it('se guarda y emite aunque NO sea SQL válido (sin validación, doc 91 D6)', () => {
-    const v: DdlView = { id: 'v', tableId: 't1', name: 'v', schema: 'core', customSql: 'CREATE VIEW core.v AS SELEC x FRM t' };
-    expect(viewDDL(v, DEF, tbl())).toBe('CREATE VIEW core.v AS SELEC x FRM t;\n');
-  });
-
-  it('cuerpo suelto (legacy docs 61/64): se envuelve en CREATE OR REPLACE VIEW … AS y gana a sources', () => {
-    const ddl = viewDDL(bodyOnly, { ...DEF, includeViews: true }, tbl());
-    expect(ddl).toContain('CREATE OR REPLACE VIEW core.v_custom AS\nWITH b AS (SELECT ID FROM core.CLIENTE)\nSELECT ID FROM b;');
-    expect(ddl).not.toContain('NOMBRE');
-    expect(ddl).not.toContain(';;');
-  });
-
-  it('cuerpo suelto: COMMENT de la definición funcional sigue funcionando', () => {
-    const ddl = databricksDdl(withView({ ...bodyOnly, description: 'vista custom' }), { ...DEF, includeViews: true, includeComments: true });
-    expect(ddl).toContain("COMMENT 'vista custom' AS");
-  });
-
-  it('customSql vacío/espacios cae al camino Regular', () => {
-    const ddl = databricksDdl(withView({ ...bodyOnly, customSql: '   ' }), { ...DEF, includeViews: true });
-    expect(ddl).toContain('nombre AS nombre');
-    expect(ddl).not.toContain('WITH b AS');
+  it('2 fuentes: FROM t1, t2 separado por coma, sin JOIN', () => {
+    const ddl = viewDDL(regular, DEF, tables);
+    expect(ddl).toMatch(/FROM\s+core\.cliente\s+t1,\s+core\.cuenta\s+t2/i);
+    expect(ddl).not.toMatch(/\bJOIN\b/i);
   });
 });
 

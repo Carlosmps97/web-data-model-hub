@@ -6,6 +6,7 @@
 import { listFolders, listSubjectAreas, loadDiagram } from './services/modeler.service';
 import type { Diagram } from './services/modeler.service';
 import type { ReportCanvasInput } from './lib/reportPdf';
+import { generatedViewDdl } from './lib/viewDdl';
 import { listDomainsGlobal } from '@/services/naming.service';
 import { getUdpDefs } from '@/features/standards/standards.service';
 import {
@@ -79,9 +80,11 @@ function canvasHtml(
   const drawings = diagram.subjectArea.drawings ?? [];
   const svgLogical = b.buildDiagramSvg(b.buildDiagramScene({ diagram, drawings, viewMode: 'logical' }), { fontCss: b.fontCss });
   const svgPhysical = b.buildDiagramSvg(b.buildDiagramScene({ diagram, drawings, viewMode: 'physical' }), { fontCss: b.fontCss });
+  // Doc 96 D6: el SQL de cada vista es el DDL que escribe el Export (de sus columnas).
+  const viewDdl = Object.fromEntries(diagram.views.map((v) => [v.id, generatedViewDdl(v, diagram.tables)]));
   return buildCanvasPage({
     title: diagram.subjectArea.name, breadcrumb, indexHref,
-    svgLogical, svgPhysical, diagram, lookups, fontCss: b.fontCss,
+    svgLogical, svgPhysical, diagram, lookups, fontCss: b.fontCss, viewDdl,
   });
 }
 

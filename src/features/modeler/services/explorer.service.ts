@@ -46,7 +46,8 @@ export interface DbxView {
    *  (`explorerViewColumns`), igual que las de una tabla: en «Modelo DDV» las
    *  columnas de las 1 932 vistas eran 12.6 MB de los 36.7 MB del inventario. */
   columnCount: number;
-  /** Doc 61: vista Personalizada (custom SQL) — sus columnas salen del parse. */
+  /** La vista tiene User-Defined SQL (doc 96 D6: texto informativo; sus columnas
+   *  son igual las de `sources`). */
   custom: boolean;
 }
 
@@ -97,7 +98,7 @@ export function mapView(v: InventoryViewRow, nameOf: (id: string) => string | un
 // ── Columnas de una VISTA (perezosas al expandir, como las de una tabla) ────
 
 /** Crudo de `GET /api/projects/{id}/catalog/views/{vid}/columns` — forma
- *  uniforme para vistas Regular y Personalizada (doc 61). */
+ *  uniforme para toda vista: las columnas de `sources` (doc 96 D6). */
 export interface RawViewColumn {
   outputAlias?: string | null; column?: string | null; tableId?: string | null;
   table?: string | null; castType?: string | null; expression?: string | null;

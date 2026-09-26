@@ -19,7 +19,7 @@ import { applyPending, commitValue, prunePending, type UdpValues } from '../lib/
  *  carácter, y el input (atado al prop del server) perdía teclas al tipear
  *  rápido. `pending` (udpDraft.ts) evita que un commit armado sobre el prop
  *  stale pise lo recién guardado en otro campo mientras el reload viaja. */
-export default function UdpAssign({ level, view = 'physical', values, onChange, disabled, locked, defs: defsProp }: {
+export default function UdpAssign({ level, view = 'physical', values, onChange, disabled, defs: defsProp }: {
   level: UdpLevel;
   /** Doc 69: faceta cuyas defs se listan (los paneles pasan el modo del canvas). */
   view?: Facet;
@@ -30,10 +30,6 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
   values: UdpValues;
   onChange: (next: UdpValues) => void;
   disabled?: boolean;
-  /** Doc 61: defs gestionados por la plataforma (defId → hint). Se muestran
-   *  deshabilitados con el hint como title (p.ej. "View Type" se cambia desde
-   *  la pestaña Query SQL, no acá). */
-  locked?: Record<string, string>;
 }) {
   const [defs, setDefs] = useState<UdpDefinition[]>([]);
   // Borrador por campo (solo mientras se tipea); undefined = sin edición viva.
@@ -99,19 +95,18 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {defs.map((d) => {
         const val = draft[d.id] ?? base[d.id] ?? '';
-        const lockHint = locked?.[d.id];
         return (
-          <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }} title={lockHint}>
-            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1, fontSize: 12.5, color: '#48526A' }} title={lockHint ?? d.description ?? undefined}>
+          <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1, fontSize: 12.5, color: '#48526A' }} title={d.description ?? undefined}>
               <Tags size={12} color="#7A4DD6" />{d.name}
             </span>
             {d.dataType === 'list' ? (
-              <select style={inp} value={val} disabled={disabled || !!lockHint} onChange={(e) => setListVal(d.id, e.target.value)}>
+              <select style={inp} value={val} disabled={disabled} onChange={(e) => setListVal(d.id, e.target.value)}>
                 <option value="">{d.defaultValue ? `${d.defaultValue} (default)` : '—'}</option>
                 {d.allowedValues.map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
             ) : (
-              <input style={inp} value={val} disabled={disabled || !!lockHint}
+              <input style={inp} value={val} disabled={disabled}
                 type={d.dataType === 'number' ? 'number' : d.dataType === 'date' ? 'date' : 'text'}
                 placeholder={d.defaultValue ?? ''}
                 onChange={(e) => setDraft((prev) => ({ ...prev, [d.id]: e.target.value }))}

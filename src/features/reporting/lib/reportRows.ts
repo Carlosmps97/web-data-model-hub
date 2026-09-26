@@ -3,7 +3,7 @@
 // columnas, por separado (`tableSheetRow` / `columnSheetRow`) o unida en una
 // fila por columna con la metadata de su tabla (`joinedSheetRow`). Los UDPs
 // salen como columnas dinámicas «UDP · <def>» (unión de claves, orden estable).
-import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
+import type { ReportColumnRow, ReportTableRow, ReportViewRow } from '@/services/reporting.service';
 
 export type SheetRow = Record<string, string | number>;
 
@@ -119,4 +119,21 @@ export function sortColumnRows(rows: ReportColumnRow[], tableName: (id: string) 
   return [...rows].sort((a, b) =>
     tableName(a.tableId).localeCompare(tableName(b.tableId)) || a.tableId.localeCompare(b.tableId)
     || Number(!!b.isPrimaryKey) - Number(!!a.isPrimaryKey) || a.ordinal - b.ordinal);
+}
+
+/** Fila de la hoja «Views» del export tabular. Doc 96 D6: sin «Mode» — la
+ *  User-Defined SQL es texto informativo y va en su propia columna; el DDL de
+ *  la vista sale de sus columnas. */
+export function viewSheetRow(v: ReportViewRow): SheetRow {
+  return {
+    View: v.name,
+    Schema: v.schema ?? '',
+    'Source tables': v.sourceTables.join(', '),
+    '#Columns': v.columns.length,
+    'On canvas': v.showOnCanvas ? 'Y' : '',
+    Canvases: (v.canvases ?? []).join(', '),   // doc 70: membresía por canvas
+    Description: v.description ?? '',
+    SQL: v.sql ?? '',
+    'User-Defined SQL': v.customSql ?? '',
+  };
 }

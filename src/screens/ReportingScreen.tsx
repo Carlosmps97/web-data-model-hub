@@ -60,7 +60,7 @@ import {
 import { getRelationshipsReport } from '@/features/reporting/query.service';
 import {
   COLUMN_BATCH, chunk, columnSheetRow, joinedSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf, unionSorted,
-  type SheetRow,
+  viewSheetRow, type SheetRow,
 } from '@/features/reporting/lib/reportRows';
 
 // ── export levels ─────────────────────────────────────────────────────────────
@@ -663,18 +663,7 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
         const idSet = new Set(ids);
         const views = (await listReportViews(projectId, ids.length > 0 && ids.length <= 300 ? ids : undefined))
           .filter((v) => v.sourceTableIds.some((tid) => idSet.has(tid)));
-        const viewsData = views.map((v) => ({
-          View: v.name,
-          Schema: v.schema ?? '',
-          'Source tables': v.sourceTables.join(', '),
-          '#Columns': v.columns.length,
-          Mode: v.customSql ? 'Personalizada' : 'Regular',
-          'On canvas': v.showOnCanvas ? 'Y' : '',
-          Canvases: (v.canvases ?? []).join(', '),   // doc 70: membresía por canvas
-          Description: v.description ?? '',
-          SQL: v.sql ?? '',
-          'User-Defined SQL': v.customSql ?? '',
-        }));
+        const viewsData = views.map(viewSheetRow);   // doc 96 D6: sin «Mode»
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(viewsData), 'Views');
         const colsData = views.flatMap((v) =>
           v.columns.map((c) => ({

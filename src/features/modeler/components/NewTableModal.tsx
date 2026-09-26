@@ -209,7 +209,7 @@ export default function NewTableModal({ onClose, onCreate }: {
               <div style={field}>
                 <label style={lbl}>Schema</label>
                 {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
-                    de TABLAS; se crean desde Structure · Esquemas. */}
+                    de TABLAS; «+ Create schema…» los crea desde el combo (doc 96). */}
                 <SchemaSelect kind="tables" value={schema} onChange={setSchema} style={{ width: '100%' }} />
               </div>
             </>

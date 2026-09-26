@@ -209,3 +209,50 @@ describe('useModelerStore.addColumn — case del físico en modo Physical (doc 8
     expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({ physicalName: 'FIS' });
   });
 });
+
+describe('addColumn — tipos complejos (doc 96 D8)', () => {
+  const colArray = { id: 'd4', name: 'ColArray', defaultDataType: 'ARRAY<>', logicalDataType: 'ARRAY<>' };
+  it('en Logical, un complejo tipeado con un dominio genérico también es el físico', async () => {
+    vi.mocked(gov.listDomains).mockResolvedValueOnce([colArray] as never);
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'Coleccion', mode: 'logical', parentDomainId: 'd4', logicalDataType: 'ARRAY<STRUCT<a:STRING>>',
+    });
+    const payload = vi.mocked(gov.createColumn).mock.calls[0][0];
+    expect(payload.dataType).toBe('ARRAY<STRUCT<a:STRING>>');
+    expect(payload.logicalDataType).toBe('ARRAY<STRUCT<a:STRING>>');
+  });
+  it('en Physical, un complejo tipeado también es el lógico', async () => {
+    vi.mocked(gov.listDomains).mockResolvedValueOnce([colArray] as never);
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'COLECCION', mode: 'physical', parentDomainId: 'd4', dataType: 'ARRAY<STRING>',
+    });
+    const payload = vi.mocked(gov.createColumn).mock.calls[0][0];
+    expect(payload.dataType).toBe('ARRAY<STRING>');
+    expect(payload.logicalDataType).toBe('ARRAY<STRING>');
+  });
+});
+
+describe('addColumn — un complejo TIPEADO es el mismo en las dos facetas (minor #6)', () => {
+  it('gana al default complejo completo del dominio', async () => {
+    vi.mocked(gov.listDomains).mockResolvedValueOnce([
+      { id: 'd5', name: 'ColStruct', defaultDataType: 'ARRAY<STRING>', logicalDataType: 'ARRAY<STRING>' },
+    ] as never);
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'Coleccion', mode: 'logical', parentDomainId: 'd5', logicalDataType: 'ARRAY<BIGINT>',
+    });
+    const payload = vi.mocked(gov.createColumn).mock.calls[0][0];
+    expect([payload.dataType, payload.logicalDataType]).toEqual(['ARRAY<BIGINT>', 'ARRAY<BIGINT>']);
+  });
+  it('un ARRAY<> tipeado en Physical también es el lógico', async () => {
+    await useModelerStore.getState().addColumn('t1', { logicalName: 'COLECCION', mode: 'physical', dataType: 'ARRAY<>' });
+    const payload = vi.mocked(gov.createColumn).mock.calls[0][0];
+    expect([payload.dataType, payload.logicalDataType]).toEqual(['ARRAY<>', 'ARRAY<>']);
+  });
+  it('sin dominio en Logical: la misma grafía en las dos facetas', async () => {
+    await useModelerStore.getState().addColumn('t1', {
+      logicalName: 'Coleccion', mode: 'logical', dataType: 'array<string>', logicalDataType: 'array<string>',
+    });
+    const payload = vi.mocked(gov.createColumn).mock.calls[0][0];
+    expect([payload.dataType, payload.logicalDataType]).toEqual(['ARRAY<STRING>', 'ARRAY<STRING>']);
+  });
+});

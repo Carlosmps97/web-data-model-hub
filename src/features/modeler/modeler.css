@@ -187,6 +187,11 @@
 .wk-ss-label { flex: 1; font-size: 12.5px; color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wk-ss-detail { font-size: 10.5px; color: var(--text-muted-2); flex-shrink: 0; }
 .wk-ss-empty { padding: 8px; font-size: 12px; color: var(--text-muted-2); }
+/* Doc 96 D1: acción al pie del menú (p. ej. «+ Create schema…»). */
+.wk-ss-action { border-top: 1px solid var(--border-soft, #EAEDF2); margin-top: 2px;
+  /* Final review: fija al pie del menú — con ~390 esquemas no queda escondida al fondo del scroll. */
+  position: sticky; bottom: -4px; z-index: 1; background: var(--surface); border-radius: 0 0 7px 7px; }
+.wk-ss-action .wk-ss-label { color: var(--primary-700, #2E5BFF); font-weight: 600; }
 /* Argumentos puntuales de tipos parametrizados — DECIMAL(p,s), VARCHAR(n) …
    (el ancho va inline en TypePicker: gana a `.wk-pp-typewrap .rd-input`). */
 .wk-ss-args { display: flex; gap: 6px; margin-top: 6px; }

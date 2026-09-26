@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { sessionProjectId } from '@/store/useSessionStore';
 import { Check, ChevronDown, ChevronUp, Eye, Lock, Plus, Search, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import { COLUMN_DATA_TYPES } from '@/types/model';
@@ -7,12 +6,10 @@ import { useModelerStore } from '@/store/useModelerStore';
 import * as viewsSvc from '@/services/views.service';
 import type { View } from '@/services/views.service';
 import { DEFAULT_DATABRICKS_OPTS, viewDDL, type DdlView } from '@/features/ddl';
-import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
-import { colKey, splitColKey, serializeSources, allSourceColumns, type ColCfg } from '../lib/viewEditorLogic';
-import { syncViewTypeUdp } from '../lib/viewPanelLogic';
+import { colKey, duplicateOutputNames, splitColKey, serializeSources, viewSaveBody, type ColCfg } from '../lib/viewEditorLogic';
 import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
-import SchemaManagerModal from './SchemaManagerModal';
+import SchemaCreateDialog from './SchemaCreateDialog';
 import { viewSchemaOnCreate } from '../lib/schemaPick';
 import { orderColumns } from '../lib/columnOrder';
 
@@ -109,9 +106,9 @@ export default function ViewEditor({
     [view, ro, firstSourceSchema, storeSchemas],
   );
 
-  // Popup de Esquemas abierto DESDE acá (doc 80 §1): crea por el camino normal
-  // (staging → changeset activo), nunca escritura directa. Al volver, si el
-  // `_VU` ya existe queda seleccionado.
+  // Alta del `_VU` DESDE acá (doc 80 §1 → doc 96 D5): el mismo popup del combo,
+  // por el camino normal (changeset activo), nunca escritura directa; al crear
+  // queda seleccionado.
   const [schemaModal, setSchemaModal] = useState(false);
   // "Show on this canvas" arranca ON al CREAR (doc 50 §5 — pedido del equipo);
   // al editar una existente se respeta lo persistido (un `?? true` pelado
@@ -122,20 +119,12 @@ export default function ViewEditor({
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // ── Doc 64 §4b → doc 91 D6: modo User-Defined SQL (crear/editar una vista
-  // Personalizada). Editar una vista con customSql abre DIRECTO en este modo
-  // con su texto. Sin validación: se guarda lo que el modelador escribió. ──
-  const [sqlMode, setSqlMode] = useState(() => !!(view?.customSql ?? '').trim());
+  // ── Doc 96 D6 (decisión del owner): la User-Defined SQL es texto INFORMATIVO
+  // de la vista — se guarda con ella, sin validar, pero el DDL sale SIEMPRE de
+  // las columnas. `sqlMode` es solo la pestaña visible de la sección 2
+  // (Columns | User-Defined SQL): no es un modo de la vista. ──
+  const [sqlMode, setSqlMode] = useState(false);
   const [sqlDraft, setSqlDraft] = useState(() => (view?.customSql ?? '').trim());
-  // Def "Tipo de Vista" (doc 61 §2.3): al guardar se sincroniza con el modo.
-  const [viewTypeDef, setViewTypeDef] = useState<UdpDefinition | null>(null);
-  useEffect(() => {
-    let alive = true;
-    getUdpDefs(sessionProjectId())
-      .then((d) => { if (alive) setViewTypeDef(d.find((x) => x.level === 'view' && x.name.trim().toLowerCase() === 'tipo de vista') ?? null); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, []);
 
   // ── Doc 64 §3: ancho de "Source column" redimensionable (drag del header;
   // persiste por browser — nombres largos se leen sin agrandar todo). ──
@@ -275,24 +264,22 @@ export default function ViewEditor({
     () => order.filter((k) => validKeys.has(k) && cfg[k]?.included).length,
     [order, cfg, validKeys],
   );
-  // Doc 91 D6: en modo User-Defined SQL las columnas del canvas son TODAS las
-  // de las fuentes (la grilla no participa) — exige nombre + fuentes + texto;
-  // NO se valida el SQL.
-  const canSave = !!name.trim() && sourceIds.length > 0 && !busy
-    && (sqlMode ? !!sqlDraft.trim() : includedCount > 0);
+  // Minor #12 (doc 96): nombres de salida repetidos harían inválido el DDL.
+  const dupNames = useMemo(() => duplicateOutputNames(serializeSources(order, cfg, validKeys)), [order, cfg, validKeys]);
+  // Doc 96 D6: la vista SIEMPRE necesita columnas (el DDL sale de ellas); la
+  // User-Defined SQL es opcional e informativa.
+  const canSave = !!name.trim() && sourceIds.length > 0 && !busy && includedCount > 0 && dupNames.length === 0;
   // Doc 64 r2: motivo VISIBLE del bloqueo.
   const disabledReason = busy ? undefined
     : !name.trim() ? 'Give the view a name (section 1)'
       : sourceIds.length === 0 ? 'Add at least one source table'
-        : sqlMode
-          ? (!sqlDraft.trim() ? 'Write the User-Defined SQL of the view' : undefined)
-          : includedCount === 0 ? 'Select at least one column' : undefined;
+        : includedCount === 0 ? 'Select at least one column'
+          : dupNames.length ? `Output name ${dupNames[0]} is repeated — rename one (the DDL would be invalid)` : undefined;
 
-  // Preview con el MISMO generador del Export DDL — una sola fuente de verdad.
-  // En modo User-Defined SQL el texto ES la sentencia (viewDDL ya resuelve el modo).
+  // Preview con el MISMO generador del Export DDL — una sola fuente de verdad:
+  // sale de las columnas (doc 96 D6), nunca de la User-Defined SQL.
   const preview = useMemo(() => {
-    if (!sqlMode && includedCount === 0) return '-- Select at least one column for the view.';
-    if (sqlMode && !sqlDraft.trim()) return '-- Write the CREATE VIEW statement (User-Defined SQL).';
+    if (includedCount === 0) return '-- Select at least one column for the view.';
     const dv: DdlView = {
       id: view?.id ?? 'new',
       name: name.trim() || 'view',
@@ -300,43 +287,22 @@ export default function ViewEditor({
       tableId: sourceIds[0],
       sourceTableIds: sourceIds,
       sources: serializeSources(order, cfg, validKeys),
-      customSql: sqlMode ? sqlDraft : undefined,
     };
     return viewDDL(dv, { ...DEFAULT_DATABRICKS_OPTS, includeComments: false },
       new Map(tables.map((t) => [t.id, t]))).trim();
-  }, [sqlMode, sqlDraft, includedCount, view, name, schema, sourceIds, order, cfg, validKeys, tables]);
+  }, [includedCount, view, name, schema, sourceIds, order, cfg, validKeys, tables]);
 
   const save = async () => {
     if (!canSave || ro) return;
     setBusy(true);
     try {
-      // Doc 91 D6/D7 — modo User-Defined SQL: persiste el texto VERBATIM (sin
-      // validar) y `sources` = TODAS las columnas de las fuentes (lo que pinta
-      // el canvas); el UDP "Tipo de Vista" se sincroniza con el modo (§2.3).
-      // Guardar desde el builder una vista que ERA Personalizada la revierte a
-      // Regular.
-      const wasCustom = !!(view?.customSql ?? '').trim();
-      const body: viewsSvc.ViewInput = {
-        name: name.trim(),
-        schema: schema.trim() || undefined,
-        sources: sqlMode
-          ? allSourceColumns(sourceIds, colsByTable, view?.sources ?? [])
-          : serializeSources(order, cfg, validKeys),
-        sourceTableIds: sourceIds,
-        tableId: sourceIds[0],            // compat legacy = primera fuente
-        showOnCanvas,
-        sql: preview,
-        // F5: definición funcional de la vista, ahora EDITABLE (panel izq).
-        // Vacío ⇒ undefined (no persistimos cadena vacía).
-        description: description.trim() || undefined,
-        // El payload del changeset es el DOC COMPLETO: preservar los UDP de la
-        // vista al editarla (antes se perdían) y resolver el modo custom.
-        ...(sqlMode
-          ? { customSql: sqlDraft.trim(), udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, true) }
-          : wasCustom
-            ? { customSql: undefined, udpValues: syncViewTypeUdp(view?.udpValues, viewTypeDef?.id, false) }
-            : { udpValues: view?.udpValues }),
-      };
+      // Doc 96 D6: las columnas del builder son la verdad (el DDL sale de ahí);
+      // la User-Defined SQL viaja como texto informativo. El payload del
+      // changeset es el DOC COMPLETO: los UDP de la vista se conservan.
+      const body = viewSaveBody({
+        name, schema, sourceIds, sources: serializeSources(order, cfg, validKeys), showOnCanvas,
+        sql: preview, description, sqlText: sqlDraft, udpValues: view?.udpValues,
+      });
       const saved = editing && view
         ? await viewsSvc.updateView(view.id, body)
         : await viewsSvc.createView(body);
@@ -358,7 +324,7 @@ export default function ViewEditor({
     <Dialog
       open
       title={ro ? `View · ${view?.name}` : editing ? `Edit view · ${view?.name}` : 'New view'}
-      subtitle={ro ? 'Read-only — definitions and structure as stored (create a version to edit)' : 'Define a view over one or more source tables — columns, aliases and CAST; joins and filters go in the User-Defined SQL'}
+      subtitle={ro ? 'Read-only — definitions and structure as stored (create a version to edit)' : 'Define a view over one or more source tables — columns, aliases and CAST. The DDL is generated from these columns; the User-Defined SQL is informational.'}
       icon={Eye}
       backdrop="canvas"
       canvasTop={136}
@@ -405,7 +371,7 @@ export default function ViewEditor({
             <div>
               <label style={lbl}>Schema</label>
               {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
-                  de VISTAS; se crean desde Structure · Esquemas. */}
+                  de VISTAS; «+ Create schema…» los crea desde el mismo combo (doc 96). */}
               <SchemaSelect kind="views" value={schema} onChange={setSchema} className="" inputStyle={idField} />
               {/* Doc 80 §1: sin `<ESQUEMA>_VU` el campo queda vacío y se ofrece
                   crearlo por el camino versionado (popup de Esquemas). */}
@@ -490,20 +456,13 @@ export default function ViewEditor({
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <span style={{ width: 22, height: 22, borderRadius: 6, background: '#F3EEFF', color: PURPLE, fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>2</span>
               <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: NAVY }}>
-                {sqlMode ? 'User-Defined SQL — the statement defines the view' : <>Columns — include, rename, express &amp; cast</>}
+                {sqlMode ? 'User-Defined SQL — informational' : <>Columns — include, rename, express &amp; cast</>}
               </h2>
-              {/* Doc 64 §4b / doc 91 D3: modo del cuerpo de la vista — builder o sentencia. */}
+              {/* Doc 96 D6: dos pestañas de la MISMA vista — las columnas (de ahí sale
+                  el DDL) y la User-Defined SQL informativa. */}
               <div className="rd-seg" style={{ marginLeft: 'auto' }}>
-                <button type="button" className={!sqlMode ? 'active' : ''} onClick={() => setSqlMode(false)}>Pick columns</button>
-                <button type="button" className={sqlMode ? 'active' : ''}
-                  onClick={() => {
-                    // Primer pase a User-Defined SQL: precarga la sentencia
-                    // COMPLETA generada (doc 91 D6 — como hace Erwin).
-                    if (!sqlDraft.trim() && includedCount > 0) setSqlDraft(preview);
-                    setSqlMode(true);
-                  }}>
-                  User-Defined SQL
-                </button>
+                <button type="button" className={!sqlMode ? 'active' : ''} onClick={() => setSqlMode(false)}>Columns</button>
+                <button type="button" className={sqlMode ? 'active' : ''} onClick={() => setSqlMode(true)}>User-Defined SQL</button>
               </div>
               {!sqlMode && (
                 <span style={{ fontSize: 11.5, color: includedCount === 0 ? '#C0392B' : MUTED, fontWeight: includedCount === 0 ? 700 : 400 }}>{includedCount}/{validKeys.size} included</span>
@@ -596,18 +555,18 @@ export default function ViewEditor({
                 Erwin), sin JOIN — la caja JOIN del doc 64 §4a se retiró. */}
             {sourceIds.length >= 2 && (
               <div style={{ marginTop: 10, fontSize: 11.5, color: '#56607A', background: '#F7F9FC', border: '1px solid #EAEDF2', borderRadius: 8, padding: '7px 10px' }}>
-                {sourceIds.length} sources — the DDL lists them as <span className="rd-mono">FROM t1, t2…</span> with no JOIN (Erwin default). Need a join or a WHERE? Switch to <strong>User-Defined SQL</strong>.
+                {sourceIds.length} sources — the DDL lists them as <span className="rd-mono">FROM t1, t2…</span> with no JOIN (Erwin default). A join or a WHERE can be noted in the <strong>User-Defined SQL</strong> (informational).
               </div>
             )}
             </>)}
 
-            {/* ── User-Defined SQL (doc 91 D6): la sentencia completa, verbatim, sin validar ── */}
+            {/* ── User-Defined SQL (doc 96 D6): texto informativo, sin validar, no se exporta ── */}
             {sqlMode && (
               <div style={{ border: '1px solid #E1D4FB', borderRadius: 12, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F8F5FF', borderBottom: '1px solid #EEE7FB', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: PURPLE }}>
                   User-Defined SQL · Databricks SQL
                   <span style={{ marginLeft: 'auto', fontSize: 10.5, textTransform: 'none', fontWeight: 600, color: MUTED }}>
-                    The full CREATE VIEW statement — exported verbatim, never validated (as in Erwin)
+                    Informational — stored with the view as text, never validated, not exported
                   </span>
                 </div>
                 <textarea
@@ -619,47 +578,26 @@ export default function ViewEditor({
                 />
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 14px', borderTop: '1px solid #EEE7FB', background: '#FCFBFF', flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 11, color: MUTED }}>
-                    Saved exactly as written (no syntax check). A bare SELECT body is wrapped automatically. On the canvas the view lists every column of its source tables.
+                    Saved exactly as written. The DDL is always generated from the columns (Columns tab).
                   </span>
                 </div>
               </div>
             )}
-            {sqlMode && editing && !(view?.customSql ?? '').trim() && (
-              <div style={{ marginTop: 8, fontSize: 11.5, color: '#8A5B00', background: '#FFF3D6', border: '1px solid #F0E2B6', borderRadius: 8, padding: '6px 10px' }}>
-                Saving switches this view to <strong>Personalizada</strong> — the statement becomes the source of truth and the canvas lists every column of the source tables.
-              </div>
-            )}
-            {!sqlMode && editing && !!(view?.customSql ?? '').trim() && (
-              <div style={{ marginTop: 8, fontSize: 11.5, color: '#8A5B00', background: '#FFF3D6', border: '1px solid #F0E2B6', borderRadius: 8, padding: '6px 10px' }}>
-                This view is <strong>Personalizada</strong> — saving from the column builder discards the User-Defined SQL and reverts it to Regular.
-              </div>
-            )}
-
             {/* preview DDL — mismo generador que el Export DDL */}
             <div style={{ marginTop: 14, border: '1px solid #E1D4FB', borderRadius: 12, overflow: 'hidden' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F8F5FF', borderBottom: '1px solid #EEE7FB', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: PURPLE }}>
                 Resulting DDL · preview
               </div>
-              <pre style={{ margin: 0, padding: '13px 15px', fontFamily: MONO, fontSize: 12, lineHeight: 1.7, color: (!sqlMode && includedCount === 0) ? '#C0392B' : '#3A4658', background: '#fff', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{preview}</pre>
+              <pre style={{ margin: 0, padding: '13px 15px', fontFamily: MONO, fontSize: 12, lineHeight: 1.7, color: includedCount === 0 ? '#C0392B' : '#3A4658', background: '#fff', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{preview}</pre>
             </div>
           </div>
         </div>
       </fieldset>
-      {/* Doc 80 §1: el popup de Esquemas montado ENCIMA de este diálogo. Crea
-          por el camino de siempre (staging → changeset activo), así el esquema
-          nuevo entra a TU versión y publica al aprobar — nada de escritura
-          directa. ESC lo consume sólo este popup (ver `dialogStack`). */}
+      {/* Doc 80 §1 → doc 96 D5: el popup de alta montado ENCIMA de este diálogo
+          (mismo que usa el combo); ESC lo consume sólo este popup. */}
       {schemaModal && (
-        <SchemaManagerModal
-          initialName={suggestVU ?? ''}
-          initialKind="views"
-          pushToast={pushToast}
-          onCreated={(names) => {
-            const hit = names.find((n) => n.trim().toLowerCase() === (suggestVU ?? '').trim().toLowerCase());
-            if (hit) setSchema(hit);
-          }}
-          onClose={() => setSchemaModal(false)}
-        />
+        <SchemaCreateDialog kind="views" initialName={suggestVU ?? ''}
+          onCreated={(n) => setSchema(n)} onClose={() => setSchemaModal(false)} />
       )}
     </Dialog>
   );

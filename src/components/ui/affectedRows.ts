@@ -62,3 +62,17 @@ export function countLabel(shown: number, total: number): string {
   if (shown < total) return `Showing ${n(shown)} of ${n(total)}`;
   return `${n(total)} row${total === 1 ? '' : 's'}`;
 }
+
+/** Doc 96 D7: mueve el borde entre la columna `index` y la siguiente `dx` px —
+ *  una crece y la vecina se achica en lo mismo (el total no cambia: el popup no
+ *  se ensancha ni desborda), sin bajar de `min` y sin empujar al revés. */
+export function resizeColumns(widths: number[], index: number, dx: number, min: number): number[] {
+  if (index < 0 || index >= widths.length - 1) return widths;
+  const a = widths[index], b = widths[index + 1];
+  const d = dx < 0 ? Math.min(0, Math.max(dx, min - a)) : Math.max(0, Math.min(dx, b - min));
+  if (d === 0) return widths;
+  const out = [...widths];
+  out[index] = a + d;
+  out[index + 1] = b - d;
+  return out;
+}

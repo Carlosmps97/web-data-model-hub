@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   collapseComplexType,
   composeComplexType,
+  hasComplexContent,
   isComplexType,
   isComplexTypeStart,
   parseComplexType,
@@ -96,5 +97,13 @@ describe('parseComplexType / composeComplexType (ComplexTypeBuilder)', () => {
     expect(isComplexTypeStart('  array <int>')).toBe(true);
     expect(isComplexTypeStart('VARCHAR(30)')).toBe(false);
     expect(isComplexTypeStart('FOO<bar>')).toBe(false);
+  });
+});
+
+describe('hasComplexContent (doc 96 D8)', () => {
+  it('complejo con estructura vs genérico vacío', () => {
+    expect(hasComplexContent('ARRAY<STRUCT<a:VARCHAR(30)>>')).toBe(true);
+    expect(hasComplexContent('ARRAY<>')).toBe(false);
+    expect(hasComplexContent('CHAR(18)')).toBe(false);
   });
 });

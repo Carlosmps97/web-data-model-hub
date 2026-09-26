@@ -11,6 +11,10 @@ export interface DbSchemaLike { id: string; name: string; description?: string |
  *  de operación — el del esquema viaja como `schemaKind`. */
 export type SchemaKind = 'tables' | 'views';
 
+/** Regla de nombre (espeja el backend): letras/números/guión bajo empezando
+ *  con letra. Acepta mayúsculas — el legacy `No_Definido` debe validar. */
+export const SCHEMA_NAME_RE = /^[A-Za-z][A-Za-z0-9_]*$/;
+
 export type StagedOp =
   | { kind: 'create'; key: string; name: string; schemaKind: SchemaKind }
   | { kind: 'rename'; key: string; id: string; from: string; to: string }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countLabel, filterRows, invisibleChars, mergePage, showInvisible } from './affectedRows';
+import { countLabel, filterRows, invisibleChars, mergePage, resizeColumns, showInvisible } from './affectedRows';
 
 describe('mergePage (final review #9: paginado del servidor)', () => {
   it('la primera página reemplaza; la siguiente se agrega donde termina lo cargado', () => {
@@ -41,5 +41,20 @@ describe('countLabel', () => {
     expect(countLabel(200, 17756)).toBe('Showing 200 of 17,756');
     expect(countLabel(19, 19)).toBe('19 rows');
     expect(countLabel(1, 1)).toBe('1 row');
+  });
+});
+
+describe('resizeColumns (doc 96 D7)', () => {
+  it('una crece y la vecina se achica en lo mismo; el total no cambia', () => {
+    expect(resizeColumns([100, 100, 100], 0, 20, 72)).toEqual([120, 80, 100]);
+  });
+  it('respeta el mínimo de las dos columnas del borde', () => {
+    expect(resizeColumns([100, 100, 100], 0, 60, 72)).toEqual([128, 72, 100]);
+    expect(resizeColumns([100, 100, 100], 1, -50, 72)).toEqual([100, 72, 128]);
+  });
+  it('nunca empuja al revés ni toca fuera de rango', () => {
+    expect(resizeColumns([60, 200], 0, -10, 72)).toEqual([60, 200]);
+    expect(resizeColumns([100, 100], 1, 10, 72)).toEqual([100, 100]);
+    expect(resizeColumns([100, 100], -1, 10, 72)).toEqual([100, 100]);
   });
 });

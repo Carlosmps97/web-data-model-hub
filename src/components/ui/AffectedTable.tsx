@@ -3,11 +3,15 @@
  * buscador, filas virtualizadas (decenas de miles sin congelar el navegador) y
  * pie con el conteo. Presentacional: el padre decide si filtra en memoria
  * (`filterRows`) o pagina en el servidor (`total` + `onEndReached`).
+ *
+ * Doc 96 D7: los bordes del encabezado se arrastran — una columna crece y la
+ * vecina se achica en lo mismo (el ancho total no cambia, sin scroll
+ * horizontal); doble clic en el borde vuelve a los anchos declarados.
  */
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Search } from 'lucide-react';
-import { countLabel } from './affectedRows';
+import { countLabel, resizeColumns } from './affectedRows';
 
 export interface AffectedColumn<T> {
   key: string;
@@ -40,16 +44,49 @@ export interface AffectedTableProps<T> {
 }
 
 const ROW_H = 36;
+/** Ancho mínimo de una columna al arrastrar su borde (px). */
+const MIN_COL = 72;
 
 export default function AffectedTable<T>({
   rows, columns, rowKey, total, query, onQuery, searchPlaceholder = 'Search…', toolbar,
   onEndReached, loading = false, emptyText = 'Nothing to show.', height = 320,
 }: AffectedTableProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Anchos arrastrados en px (null = los declarados por el popup).
+  const headRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const [widths, setWidths] = useState<number[] | null>(null);
+  const colKeys = columns.map((c) => c.key).join('|');
+  useEffect(() => { setWidths(null); }, [colKeys]);
+  const startResize = (i: number) => (e: React.PointerEvent<HTMLSpanElement>) => {
+    if (e.button !== 0) return;                 // solo botón principal (el derecho no arrastra)
+    e.preventDefault();
+    e.stopPropagation();
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    // Solo las columnas actuales (si el popup cambió sus columnas, sobran refs viejas).
+    const start = columns.map((_, j) => headRefs.current[j]?.getBoundingClientRect().width ?? 0);
+    const x0 = e.clientX;
+    const move = (ev: PointerEvent) => setWidths(resizeColumns(start, i, ev.clientX - x0, MIN_COL));
+    const end = () => {
+      try { el.releasePointerCapture(e.pointerId); } catch { /* ya liberado */ }
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', end);
+      el.removeEventListener('pointercancel', end);
+      el.removeEventListener('lostpointercapture', end);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', end);
+    el.addEventListener('pointercancel', end);
+    el.addEventListener('lostpointercapture', end);
+  };
   const virt = useVirtualizer({
     count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: () => ROW_H, overscan: 12,
   });
-  const grid = columns.map((c) => c.width).join(' ');
+  // `fr` proporcionales a los px medidos: la grilla sigue fluida si cambia el
+  // ancho del popup y nunca suma más que el contenedor.
+  const grid = widths && widths.length === columns.length
+    ? widths.map((w) => `${Math.max(1, Math.round(w))}fr`).join(' ')
+    : columns.map((c) => c.width).join(' ');
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget;
     if (onEndReached && !loading && el.scrollHeight - el.scrollTop - el.clientHeight < ROW_H * 8) onEndReached();
@@ -73,7 +110,15 @@ export default function AffectedTable<T>({
         style={{ height, overflow: 'auto', border: '1px solid #E6EAF0', borderRadius: 10, background: '#fff' }}>
         <div style={{ position: 'sticky', top: 0, zIndex: 1, display: 'grid', gridTemplateColumns: grid,
           background: '#F7F9FC', borderBottom: '1px solid #E6EAF0' }}>
-          {columns.map((c) => <div key={c.key} style={headCell}>{c.header}</div>)}
+          {columns.map((c, i) => (
+            <div key={c.key} ref={(el) => { headRefs.current[i] = el; }} style={headCell} title={c.header}>
+              {c.header}
+              {i < columns.length - 1 && (
+                <span role="separator" aria-orientation="vertical" title="Drag to resize · double-click to reset"
+                  onPointerDown={startResize(i)} onDoubleClick={() => setWidths(null)} style={resizeHandle} />
+              )}
+            </div>
+          ))}
         </div>
         {rows.length === 0 ? (
           <div style={{ padding: 14, fontSize: 12.5, color: '#9AA3B2' }}>{loading ? 'Loading…' : emptyText}</div>
@@ -108,5 +153,6 @@ export default function AffectedTable<T>({
 
 const searchBox: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 10px', background: '#fff', border: '1px solid #E6EAF0', borderRadius: 8, flex: 1 };
 const searchInput: React.CSSProperties = { flex: 1, border: 0, outline: 'none', fontSize: 12.5, background: 'transparent', fontFamily: 'inherit' };
-const headCell: React.CSSProperties = { padding: '9px 10px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#8A93A5' };
+const headCell: React.CSSProperties = { position: 'relative', padding: '9px 10px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#8A93A5', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
+const resizeHandle: React.CSSProperties = { position: 'absolute', top: 0, right: 0, bottom: 0, width: 8, cursor: 'col-resize', borderRight: '2px solid #DDE3EC', touchAction: 'none' };
 const cell: React.CSSProperties = { padding: '0 10px', fontSize: 12.5, color: '#1A2B4A', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 };

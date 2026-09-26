@@ -91,3 +91,11 @@ export function composeComplexType(spec: ComplexSpec): string {
   if (spec.kind === 'map') return `MAP<${spec.key.trim()},${spec.value.trim()}>`;
   return `STRUCT<${spec.fields.map((f) => `${f.name.trim()}:${f.type.trim()}`).join(',')}>`;
 }
+
+// ── Doc 96 D8: un tipo complejo es el MISMO en las dos facetas ─────────────
+// (su estructura es propia de cada columna). Espejo de `mirror_complex` del kit.
+
+/** ¿STRUCT/ARRAY/MAP con estructura adentro? `ARRAY<>` no (genérico vacío). */
+export function hasComplexContent(t: string | null | undefined): boolean {
+  return /^\s*(STRUCT|ARRAY|MAP)\s*<\s*[^\s>]/i.test(t ?? '');
+}

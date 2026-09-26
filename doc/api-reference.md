@@ -653,19 +653,19 @@ export interface ViewInput {
   showOnCanvas?: boolean;      // F3 (D3): la vista aparece en todo canvas con ≥1 fuente
   name: string;
   schema?: string;
-  sources?: ViewSource[];      // proyección columna por columna (07b-2); en User-Defined SQL = todas las columnas de las fuentes (doc 91 D7)
+  sources?: ViewSource[];      // proyección columna por columna (07b-2); el DDL sale SIEMPRE de acá (doc 96 D6)
   outputAlias?: string;
   expression?: string;
   sql?: string;                // referencia congelada (preview / SQL de Erwin)
   description?: string;        // F5: definición a nivel VISTA
-  customSql?: string;          // doc 91 D6: User-Defined SQL — sentencia completa, VERBATIM, sin validar
+  customSql?: string;          // doc 96 D6: User-Defined SQL — texto INFORMATIVO, sin validar, NO se exporta
   udpValues?: Record<string, string>;  // doc 61: UDPs de nivel 'view'
 }
 ```
 
 Cada `ViewSource` admite además `description` propia (F5, doc 22: definición re-contextualizada de la columna en la vista; vacía = hereda la de la columna física). Antes de registrar el cambio, el service normaliza `tableId` ↔ `sourceTableIds` para que queden coherentes (espejo de la normalización del apply).
 
-> Doc 91 (2026-09-17): `tags`, `filter`, `joinOverride` y `customColumns` se **retiraron** del contrato (los UDP de vista reemplazan a las etiquetas; WHERE/JOIN viven en el User-Defined SQL; las columnas de salida son siempre `sources`). El sandbox `parseViewSql` (`POST /api/views/sql/parse`, Validate) también se eliminó: el User-Defined SQL se guarda tal cual. El generador `viewDDL(view, opts, tableById)` emite `FROM a t1,\n  b t2` con 2+ fuentes y, si `customSql` empieza con `CREATE`, lo devuelve verbatim (`isFullCreateStatement`).
+> Doc 91 (2026-09-17): `tags`, `filter`, `joinOverride` y `customColumns` se **retiraron** del contrato (los UDP de vista reemplazan a las etiquetas; WHERE/JOIN viven en el User-Defined SQL; las columnas de salida son siempre `sources`). El sandbox `parseViewSql` (`POST /api/views/sql/parse`, Validate) también se eliminó: el User-Defined SQL se guarda tal cual. El generador `viewDDL(view, opts, tableById)` emite `FROM a t1,\n  b t2` con 2+ fuentes. Doc 96 D6 (decisión del owner): la User-Defined SQL es texto informativo — el generador ya no la conoce (`DdlView` no tiene `customSql`); toda vista sale de `sources`, y el editor, Properties e Inspector permiten editar fuentes y columnas siempre.
 
 #### 3.3.4. Esquemas (`schemas.service.ts`)
 
@@ -679,6 +679,8 @@ La entidad `schemas` (doc 18) también es changeset-aware. La particularidad: **
 | `schemaImpact(id)` | GET | `/api/changesets/{cs}/schemas/{id}/impact` | — | `{ name, tables, views, canvases }` — preview ANTES de guardar |
 | `renameSchema(id, newName)` | POST | `/api/changesets/{cs}/schemas/{id}/rename` | `{ newName }` | `{ tables, views }` — cuántas se propagaron dentro del draft |
 | `deleteSchema(id)` | POST (o DELETE directo sin changeset) | `/api/changesets/{cs}/schemas/{id}/delete` · `/api/schemas/{id}` | — | 409 si el esquema tiene tablas o vistas en su estado efectivo |
+
+**Alta desde un combo (doc 96 D1-D5).** Todo combo que elige el esquema de una tabla o una vista (`SchemaSelect`: New Table, New View / View Editor, CTAS paso 2, Properties e Inspector) ofrece al pie del menú «+ Create schema…» cuando la sesión está en una versión en edición (no histórica); nunca en solo lectura ni en `kind="all"` (Output settings del DDL). Abre `SchemaCreateDialog` con lo tipeado y el `kind` del contexto, valida con `schemaNameError` (la misma regla del gestor) y sigue un orden fijo (`createSchemaAndPick`, puro y testeado): `createSchema` registra el cambio en el changeset activo → `loadSchemas()` recarga el catálogo del combo → recién entonces se selecciona. Si la creación falla (nombre repetido, red), no se selecciona nada y el popup muestra el error; no recarga el canvas, así que el formulario de origen conserva sus demás campos. El esquema queda en la versión aunque se cancele el formulario de origen (se ve en el Review y se borra desde Schemas). La fila de acción es genérica: `SearchSelect` acepta `action = { label(query), onRun(query) }`.
 
 #### 3.3.5. Database Explorer (`explorer.service.ts`)
 
@@ -887,7 +889,7 @@ El `naming_config` incluye además `maxLength` por scope (doc 24), que el backen
 | `getDomainColumnImpact(projectId, id, {physicalTo, logicalTo, q, status, offset, limit})` | GET | `/api/projects/{pid}/domains/{id}/impact/columns?…` | — | `DomainColumnImpact` `{ domain, targets, totals, matched, rows }` |
 | `propagateDomain(projectId, id)` | POST | `/api/projects/{pid}/domains/{id}/propagate` | — | `{ updated }` |
 
-`getDomainColumnImpact` (doc 95 D7; reemplaza a `getDomainImpact`, retirado del front) devuelve el impacto EXACTO por columna con la misma regla que la cascada del apply (`cascade.py`): `totals` globales `{ columns, tables, change, changeTables, override, differs, models }` y una fila por columna (`DomainColumnImpactRow`: tabla, columna, atributo, tipos actuales, estado por faceta y `status` `change` \| `override` \| `differs`), con búsqueda (`q`) y filtro (`status`) server-side y paginación (`limit` ≤ 2000; `limit=0` = solo totales, para el panel del dominio: «Used by N columns in M tables across K data models»). Lo pinta `DomainCascadeDialog` con `AffectedTable` (§3.5.3); cada página se une con `mergePage` (una respuesta repetida o fuera de orden se descarta) y hay una sola en vuelo. `propagateDomain` aplica el `defaultDataType` a las columnas sin override.
+`getDomainColumnImpact` (doc 95 D7; reemplaza a `getDomainImpact`, retirado del front) devuelve el impacto EXACTO por columna con la misma regla que la cascada del apply (`cascade.py`): `totals` globales `{ columns, tables, change, changeTables, override, differs, models }` y una fila por columna (`DomainColumnImpactRow`: tabla, columna, atributo, tipos actuales, estado por faceta y `status` `change` \| `override` \| `differs`), con búsqueda (`q`) y filtro (`status`) server-side y paginación (`limit` ≤ 2000; `limit=0` = solo totales, para el panel del dominio: «Used by N columns in M tables across K data models»). Lo pinta `DomainCascadeDialog` con `AffectedTable` (§3.5.4); cada página se une con `mergePage` (una respuesta repetida o fuera de orden se descarta) y hay una sola en vuelo. `propagateDomain` aplica el `defaultDataType` a las columnas sin override.
 
 #### 3.5.2. Snapshot + versionado + UDP (`standards.service.ts`)
 
@@ -954,9 +956,11 @@ El editor serializa la regla a YAML y de vuelta client-side (`ruleToYaml` / `yam
 
 El payload del `render` se arma con el estado EFECTIVO que el canvas está exportando (drafts incluidos): `ruleIds`, `model` (nombre + `udpValues` del canvas), `options` del modal (`identifierCase`, `quoteIdentifiers`, `typeCase`, `createTable`, `viewTagsAs`, `includeKeys`, `tableFormat`, `external`, `location`, `locationFolderCase`, `includePartitions`, `partitionsLast` — doc 93), `tables[]` (cada una con su doc, sus columnas con `udpValues` y `ddlType`, y su `baseSql` generado client-side) y `views[]` (con `sql`, `sourceTableIds` y el flag `businessView` = `showOnCanvas`). La respuesta trae `statements[]`, `log[]` (applied/skipped por regla), `rulesetVersion`, `applied` y `skipped`; el `.sql` final se ensambla en el cliente con el sello de la versión de reglas usada. Sin reglas seleccionadas, el export NO pasa por este endpoint y sale byte-idéntico al generador client-side.
 
-#### 3.5.3. Listas de afectados (`AffectedTable`, doc 95 D4)
+#### 3.5.4. Listas de afectados (`AffectedTable`, doc 95 D4)
 
 Componente genérico del design system (`@/components/ui`: `AffectedTable` + tipos `AffectedColumn<T>` / `AffectedTableProps<T>`) para toda lista de «a qué afecta» dentro de un popup: tabla virtualizada (`@tanstack/react-virtual`, miles de filas sin costo), encabezado fijo, buscador, contador «N of M», `toolbar` opcional y `onEndReached` para paginar en el servidor. Las columnas se declaran como dato (`{ key, header, width, mono?, render, title? }`). La lógica pura vive en `components/ui/affectedRows.ts` (`showInvisible` —pinta cada NBSP o carácter de ancho cero como `⍽`— e `invisibleChars` —los nombra, p. ej. `U+00A0 no-break space`—, `filterRows` «contiene» sin tildes ni mayúsculas, `countLabel` y `mergePage` para el paginado del servidor), testeada con vitest. Lo usan: conflictos y apply del glosario (`GlossaryConflictDialog`, `GlossaryApplyDialog`), borrado de un término usado, la cascada de un dominio (`DomainCascadeDialog`) y el confirm del rollback de Data Standards.
+
+Doc 96 D7: los bordes del encabezado se arrastran — una columna crece y la vecina se achica en lo mismo (`resizeColumns`, puro y testeado; el ancho total no cambia, sin scroll horizontal) y doble clic en el borde vuelve a los anchos declarados. Doc 95 (final review #9): el paginado del servidor une cada página con `mergePage` y hay una sola en vuelo. Doc 96: el borde solo se arrastra con el botón principal y el encabezado muestra su texto completo como tooltip.
 
 ### 3.6. Admin / RBAC (Screen 14)
 

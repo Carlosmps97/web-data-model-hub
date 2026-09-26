@@ -97,6 +97,9 @@ export interface CanvasPageInput {
   diagram: Diagram;
   lookups: ExportLookups;
   fontCss?: string;
+  /** Doc 96 D6: DDL generado de cada vista (id → texto), el que escribe el Export
+   *  DDL. Sin él se muestra el SQL guardado. */
+  viewDdl?: Record<string, string>;
 }
 
 const esc = escapeHtml;
@@ -143,7 +146,7 @@ function columnsRows(cols: CanonicalColumn[], lk: ExportLookups): string {
 
 /** Cuerpo estático de la pestaña Tables: secciones por tabla (ancla
  *  `t-<physicalName>`), relaciones del canvas y vistas. Todo escapado. */
-function tablesSectionHtml(diagram: Diagram, lk: ExportLookups): string {
+function tablesSectionHtml(diagram: Diagram, lk: ExportLookups, viewDdl?: Record<string, string>): string {
   const { tables, columns, relationships, views } = diagram;
   const tablesById = new Map<string, CanonicalTable>(tables.map((t) => [t.id, t]));
   const colsById = new Map<string, CanonicalColumn>(columns.map((c) => [c.id, c]));
@@ -188,11 +191,15 @@ ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
   const viewCards = views.map((v) => {
     const srcs = (v.sourceTableIds ?? (v.tableId ? [v.tableId] : []))
       .map((id) => tablesById.get(id)?.physicalName ?? id).map((n) => `<code>${esc(n)}</code>`).join(', ');
-    const sql = v.customSql ?? v.sql ?? '(generated from sources)';
+    // Doc 96 D6: el SQL de la vista es el DDL generado de sus columnas; la
+    // User-Defined SQL va aparte, marcada como informativa (no se exporta).
+    const ddl = viewDdl?.[v.id] ?? v.sql ?? '(generated from sources)';
+    const custom = v.customSql?.trim();
+    const info = custom ? `\n<p class="dim">User-Defined SQL — informational, not exported</p>\n<pre>${esc(custom)}</pre>` : '';
     return `<div class="view">
-<h3>${esc(v.name)}${v.schema ? ` <span class="chip schema">${esc(v.schema)}</span>` : ''} <span class="chip">${v.customSql ? 'User-Defined SQL' : 'Regular'}</span>${udpChipsHtml(v.udpValues, 'view', lk)}</h3>
+<h3>${esc(v.name)}${v.schema ? ` <span class="chip schema">${esc(v.schema)}</span>` : ''}${udpChipsHtml(v.udpValues, 'view', lk)}</h3>
 ${srcs ? `<p class="dim">Sources: ${srcs}</p>` : ''}
-<pre>${esc(sql)}</pre>
+<pre>${esc(ddl)}</pre>${info}
 </div>`;
   }).join('\n');
   const viewSection = views.length ? `<section class="tbl"><h2>Views</h2>${viewCards}</section>` : '';
@@ -285,7 +292,7 @@ tbody tr:nth-child(even) { background: #FAFBFD; }
 </header>
 <div id="stage"><div id="vp"></div><div id="err" hidden>Couldn&#39;t render the embedded diagram.</div></div>
 <div id="tables" hidden>
-${tablesSectionHtml(input.diagram, input.lookups)}
+${tablesSectionHtml(input.diagram, input.lookups, input.viewDdl)}
 </div>
 <script>
 (function () {

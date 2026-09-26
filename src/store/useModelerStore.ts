@@ -16,6 +16,8 @@ import { diagramSignature } from '@/features/modeler/lib/diagramSignature';
 import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
 import { keyLayoutBulk } from '@/features/modeler/lib/keyLayout';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
+import { mirrorComplex } from '@/features/modeler/lib/facetTypes';
+import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
 import { mergeIds, orphanViewIds, withoutIds } from '@/features/modeler/lib/canvasViews';
 import { isPkFirst, orderColumns, persistReorder, pkFirstOrdinals, reorderPlan, sortByOrdinal } from '@/features/modeler/lib/columnOrder';
 import type { CanvasDropPlan } from '@/features/modeler/lib/canvasDrop';
@@ -939,14 +941,22 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // (espejo de canonicalize_default_type, doc 62) — un dominio legacy con
     // `Array` hereda `ARRAY<>`, no el texto crudo de la BD sin homologar.
     const domDefault = canonicalDefaultType(dom?.defaultDataType);
-    const dataType = override || domDefault || '';
+    const dataTypeBase = override || domDefault || '';
     // Doc 69 §4.9: faceta LÓGICA del tipo heredada del dominio (homologada).
     // Doc 86 D4: en modo Logical el popup manda el tipo lógico TIPEADO; si
     // difiere del lógico del dominio es un override lógico (regla doc 46).
     const domLogical = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : '';
     const typedLogical = canonicalDefaultType(input.logicalDataType) || '';
-    const logicalType = typedLogical || domLogical;
-    const logicalOverridden = !!dom && !!typedLogical && typedLogical !== domLogical;
+    const logicalBase = typedLogical || domLogical;
+    // Doc 96 D8: un complejo es el mismo en las dos facetas. Un complejo TIPEADO
+    // va a las dos con la misma grafía homologada (gana al default del dominio,
+    // `ARRAY<>` incluido); si no, el complejo con estructura de una faceta
+    // completa a la otra (p. ej. el `ARRAY<>` genérico de un dominio).
+    const typed = input.mode === 'logical' ? (input.logicalDataType ?? '').trim() : override;
+    const typedComplex = isComplexTypeStart(typed) ? canonicalDefaultType(typed) : '';
+    const dataType = typedComplex || (input.mode === 'logical' ? mirrorComplex(typedLogical, dataTypeBase) : dataTypeBase);
+    const logicalType = typedComplex || (input.mode === 'physical' ? mirrorComplex(override, logicalBase) : logicalBase);
+    const logicalOverridden = !!dom && !!logicalType && logicalType !== domLogical;
     // Al FINAL del orden físico (antes: ordinal 0 → la columna nueva caía al
     // INICIO de la tabla) — coherente con la propagación a vistas de abajo.
     // Doc 94 D2: una PK nueva entra tras la ÚLTIMA PK y las no-PK se corren en

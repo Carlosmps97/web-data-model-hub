@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import {
-  chunk, columnSheetRow, joinedSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf, unionSorted,
+  chunk, columnSheetRow, joinedSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf, unionSorted, viewSheetRow,
 } from './reportRows';
 
 const T: ReportTableRow = {
@@ -77,5 +77,17 @@ describe('reportRows', () => {
     // Doc 94: dentro de la tabla, el orden único — PK primero aunque su ordinal sea mayor
     const legacy = [{ ...C, id: 'x', isPrimaryKey: false, ordinal: 0 }, { ...C, id: 'k', isPrimaryKey: true, ordinal: 5 }];
     expect(sortColumnRows(legacy, () => 'T').map((r) => r.id)).toEqual(['k', 'x']);
+  });
+});
+
+
+describe('viewSheetRow (final review #3 — doc 96 D6)', () => {
+  it('sin columna «Mode»: la User-Defined SQL va como texto informativo', () => {
+    const row = viewSheetRow({
+      id: 'v1', name: 'VW', schema: 'gold_vu', sourceTableIds: ['t1'], sourceTables: ['gold.HD'], showOnCanvas: true,
+      canvases: ['C1'], description: 'd', sql: 'CREATE VIEW …', customSql: 'SELECT 1', columns: [],
+    });
+    expect(Object.keys(row)).not.toContain('Mode');
+    expect(row).toMatchObject({ View: 'VW', Schema: 'gold_vu', '#Columns': 0, 'User-Defined SQL': 'SELECT 1', SQL: 'CREATE VIEW …' });
   });
 });

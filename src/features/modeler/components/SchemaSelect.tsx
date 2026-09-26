@@ -1,6 +1,10 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useModelerStore } from '@/store/useModelerStore';
+import { useSessionStore } from '@/store/useSessionStore';
+import { isAsOfChangesetId } from '@/services/versioning.service';
 import { schemasForKind, type SchemaKindFilter } from '../lib/schemaPick';
+import { canCreateSchema, createActionLabel } from '../lib/schemaCreate';
+import SchemaCreateDialog from './SchemaCreateDialog';
 import SearchSelect from './SearchSelect';
 
 /**
@@ -14,6 +18,11 @@ import SearchSelect from './SearchSelect';
  * tablas no muestra esquemas de vistas ni viceversa; los sin clasificar entran
  * en ambos. '' = sin esquema. Un valor actual no catalogado (tabla legacy) o
  * de otro kind se muestra igual como opción extra para no romper la edición.
+ *
+ * Doc 96 D2: al elegir el esquema de una tabla o una vista en una versión en
+ * edición, el menú ofrece «+ Create schema…»: abre `SchemaCreateDialog`, el
+ * esquema entra a la versión (como Structure · Schemas) y recién entonces
+ * queda seleccionado acá. Nunca en solo lectura ni en `kind="all"`.
  */
 export default function SchemaSelect({ value, onChange, disabled, className, style, inputStyle, kind = 'all' }: {
   value: string;
@@ -30,6 +39,11 @@ export default function SchemaSelect({ value, onChange, disabled, className, sty
 }) {
   const schemas = useModelerStore((s) => s.schemas);
   const loadSchemas = useModelerStore((s) => s.loadSchemas);
+  const openMode = useSessionStore((s) => s.openMode);
+  const changesetId = useSessionStore((s) => s.activeChangesetId);
+  // Lo tipeado al pedir «+ Create schema…» (null = popup cerrado).
+  const [creating, setCreating] = useState<string | null>(null);
+  const canCreate = canCreateSchema({ disabled, kind, openMode, changesetId, asOf: isAsOfChangesetId(changesetId) });
   useEffect(() => {
     if (useModelerStore.getState().schemas.length === 0) void loadSchemas().catch(() => {});
   }, [loadSchemas]);
@@ -53,7 +67,11 @@ export default function SchemaSelect({ value, onChange, disabled, className, sty
         disabled={disabled}
         inputClassName={className ?? 'rd-input'}
         inputStyle={inputStyle}
+        action={canCreate ? { label: createActionLabel, onRun: (q) => setCreating(q.trim()) } : undefined}
       />
+      {creating !== null && kind !== 'all' && (
+        <SchemaCreateDialog kind={kind} initialName={creating} onCreated={onChange} onClose={() => setCreating(null)} />
+      )}
     </div>
   );
 }

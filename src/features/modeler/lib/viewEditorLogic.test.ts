@@ -1,8 +1,8 @@
 // Lógica pura del ViewEditor multi-fuente (F3): claves de grilla, serialización
-// de sources y (doc 91 D7) todas las columnas de las fuentes en modo
-// User-Defined SQL.
+// de sources y (doc 96 D6) el cuerpo del guardado — la estructura manda y la
+// User-Defined SQL viaja como texto informativo.
 import { describe, expect, it } from 'vitest';
-import { colKey, splitColKey, serializeSources, allSourceColumns, type ColCfg } from './viewEditorLogic';
+import { colKey, duplicateOutputNames, splitColKey, serializeSources, viewSaveBody, type ColCfg } from './viewEditorLogic';
 
 describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
   const cfg: Record<string, ColCfg> = {
@@ -39,29 +39,29 @@ describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
   });
 });
 
-describe('allSourceColumns (doc 91 D7 — User-Defined SQL ⇒ todas las columnas de las fuentes)', () => {
-  const cols = new Map([
-    ['t1', [{ physicalName: 'ID' }, { physicalName: 'NOMBRE' }]],
-    ['t2', [{ physicalName: 'SALDO' }]],
-  ]);
-
-  it('lista todas las columnas de cada fuente, en orden de fuentes y orden físico, planas', () => {
-    expect(allSourceColumns(['t2', 't1'], cols)).toEqual([
-      { column: 'SALDO', tableId: 't2' },
-      { column: 'ID', tableId: 't1' },
-      { column: 'NOMBRE', tableId: 't1' },
-    ]);
+describe('viewSaveBody (doc 96 D6)', () => {
+  const base = { name: ' V ', schema: '', sourceIds: ['t1', 't2'], sources: [{ column: 'ID', tableId: 't1' }],
+    showOnCanvas: true, sql: 'CREATE VIEW …', description: '  ', sqlText: '', udpValues: { u: 'x' } };
+  it('las columnas vienen del builder aunque haya query personalizada', () => {
+    const b = viewSaveBody({ ...base, sqlText: '  SELECT * FROM a JOIN b  ' });
+    expect(b.sources).toEqual(base.sources);
+    expect(b.customSql).toBe('SELECT * FROM a JOIN b');
+    expect(b).toMatchObject({ name: 'V', schema: undefined, tableId: 't1', sourceTableIds: ['t1', 't2'], description: undefined, udpValues: { u: 'x' } });
   });
-
-  it('fuente sin columnas a mano (fuera del canvas): conserva las entradas previas de esa tabla', () => {
-    const prev = [{ column: 'X', tableId: 't9', outputAlias: 'x_alias' }, { column: 'ID', tableId: 't1', outputAlias: 'viejo' }];
-    expect(allSourceColumns(['t1', 't9'], cols, prev)).toEqual([
-      { column: 'ID', tableId: 't1' }, { column: 'NOMBRE', tableId: 't1' },
-      { column: 'X', tableId: 't9', outputAlias: 'x_alias' },
-    ]);
+  it('query vacía ⇒ se quita', () => {
+    expect(viewSaveBody(base).customSql).toBeUndefined();
   });
+});
 
-  it('sin fuentes ⇒ vacío', () => {
-    expect(allSourceColumns([], cols)).toEqual([]);
+describe('duplicateOutputNames (minor #12: el DDL sería inválido con alias repetidos)', () => {
+  it('la misma columna de dos fuentes sin alias se repite', () => {
+    expect(duplicateOutputNames([{ column: 'CODMES', tableId: 't1' }, { column: 'CODMES', tableId: 't2' }])).toEqual(['CODMES']);
+  });
+  it('un alias lo resuelve; la comparación no distingue mayúsculas', () => {
+    expect(duplicateOutputNames([{ column: 'CODMES', tableId: 't1' }, { column: 'CODMES', tableId: 't2', outputAlias: 'CODMES_CTA' }])).toEqual([]);
+    expect(duplicateOutputNames([{ column: 'Codmes', tableId: 't1' }, { column: 'X', tableId: 't2', outputAlias: 'CODMES' }])).toEqual(['Codmes']);
+  });
+  it('las expresiones sin alias no cuentan (su alias va dentro del texto)', () => {
+    expect(duplicateOutputNames([{ expression: 'UPPER(t1.A) AS A' }, { expression: 'UPPER(t2.A) AS A' }])).toEqual([]);
   });
 });

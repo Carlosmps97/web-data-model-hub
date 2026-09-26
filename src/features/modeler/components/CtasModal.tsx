@@ -4,6 +4,7 @@ import Dialog from '@/components/ui/Dialog';
 import { useModelerStore } from '@/store/useModelerStore';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
+import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
 import { tableSchemasCached } from '../services/schemaPartition';
 import { buildCandidates, filterColumns } from '../lib/ctasPick';
@@ -335,9 +336,9 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <label style={lbl}>Schema</label>
-              {/* Combobox buscable (doc 41) acotado a esquemas de TABLAS: los
-                  usados sólo por vistas no aplican a una tabla nueva (doc 43). */}
-              <SearchSelect mono options={schemaOpts} valueLabel={schema} placeholder="(no schema)" emptyLabel="(no schema)" onPick={setSchema} />
+              {/* Doc 96 D5: el MISMO combo de esquemas de tablas que New Table
+                  (con «+ Create schema…» en una versión en edición). */}
+              <SchemaSelect kind="tables" value={schema} onChange={setSchema} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <label style={lbl}>Table Name</label>

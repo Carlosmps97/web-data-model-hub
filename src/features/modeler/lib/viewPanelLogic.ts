@@ -13,18 +13,10 @@ export function moveSource(sources: ViewSource[], from: number, to: number): Vie
   return next;
 }
 
-/** Sincroniza el valor del UDP "View Type" con el MODO real de la vista
- *  (doc 61 §2.3): la verdad técnica es `customSql`; el UDP es el dato
- *  reportable. Sin def sembrado (defId null) devuelve los valores tal cual. */
-/** Nombre (CI) del UDP gestionado «Tipo de Vista» (seed doc 61): lo sincroniza
- *  el modo Regular/Personalizada; el panel y el inspector lo bloquean. */
-export const VIEW_TYPE_NAME = 'tipo de vista';
-
-export function syncViewTypeUdp(
-  values: Record<string, string> | undefined,
-  defId: string | null | undefined,
-  custom: boolean,
-): Record<string, string> | undefined {
-  if (!defId) return values;
-  return { ...(values ?? {}), [defId]: custom ? 'Personalizada' : 'Regular' };
+/** Borrador de la User-Defined SQL del panel cuando la SQL guardada cambia por
+ *  fuera (p. ej. se editó en el View Editor): sin cambios locales sin guardar,
+ *  toma el texto nuevo; con cambios locales, se conservan (minor #10 del doc 96).
+ *  Pura. */
+export function reseedDraft(draft: string, prevStored: string | null | undefined, nextStored: string | null | undefined): string {
+  return draft.trim() === (prevStored ?? '').trim() ? (nextStored ?? '').trim() : draft;
 }

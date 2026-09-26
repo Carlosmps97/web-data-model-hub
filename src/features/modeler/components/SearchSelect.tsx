@@ -2,8 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '@/components/ui/Icon';
 import { containsCI } from '../lib/typePick';
+import { enterTarget, moveHighlight } from '../lib/searchSelectNav';
 
 export interface SearchOption { value: string; label: string; detail?: string }
+
+/** Doc 96 D1: acción al pie del menú (p. ej. «+ Create schema…»). Recibe lo
+ *  tipeado; se alcanza también con ↑/↓ y Enter. */
+export interface SearchAction { label: (query: string) => string; onRun: (query: string) => void }
 
 /** Posición del menú flotante (doc 52): fixed contra el viewport. */
 interface MenuPos {
@@ -34,7 +39,7 @@ interface MenuPos {
  * contenedor; flip hacia arriba si abajo no entra; un scroll FUERA del menú o
  * un resize lo cierran (patrón select nativo — no se re-posiciona).
  */
-export default function SearchSelect({ options, valueLabel, placeholder, onPick, disabled, mono, emptyLabel, inputClassName, inputStyle, matchDetail }: {
+export default function SearchSelect({ options, valueLabel, placeholder, onPick, disabled, mono, emptyLabel, inputClassName, inputStyle, matchDetail, action }: {
   options: SearchOption[];
   /** Etiqueta del valor actual ('' si no hay). */
   valueLabel: string;
@@ -52,6 +57,8 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
   /** Doc 91 D4: el filtro «contiene» también mira `detail` (p.ej. el nombre
    *  lógico de una tabla junto a su `schema.físico`). */
   matchDetail?: boolean;
+  /** Doc 96 D1: fila de acción fija al pie del menú (sin ella, nada cambia). */
+  action?: SearchAction;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -108,6 +115,9 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
   const openList = () => { if (disabled) return; setPos(place()); setOpen(true); setQuery(''); setHi(0); };
   const close = () => { setOpen(false); setQuery(''); };
   const pick = (v: string) => { onPick(v); close(); inputRef.current?.blur(); };
+  // Índice de la acción = justo después de las opciones filtradas.
+  const actionIdx = action ? filtered.length : -1;
+  const runAction = () => { const q = query; close(); inputRef.current?.blur(); action?.onRun(q); };
 
   return (
     <div className="wk-ss-wrap">
@@ -124,9 +134,13 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
         onBlur={close}
         onKeyDown={(e) => {
           if (!open) return;
-          if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => Math.min(h + 1, filtered.length - 1)); }
-          else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => Math.max(h - 1, 0)); }
-          else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (filtered[hi]) pick(filtered[hi].value); }
+          if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => moveHighlight(h, 1, filtered.length, !!action)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => moveHighlight(h, -1, filtered.length, !!action)); }
+          else if (e.key === 'Enter') {
+            e.preventDefault(); e.stopPropagation();
+            const target = enterTarget(hi, filtered.length, !!action);
+            if (target === 'action') runAction(); else if (target === 'option') pick(filtered[hi].value);
+          }
           else if (e.key === 'Escape') { e.stopPropagation(); close(); inputRef.current?.blur(); }
         }}
       />
@@ -150,6 +164,13 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
               {o.detail && <span className="wk-ss-detail rd-mono">{o.detail}</span>}
             </button>
           ))}
+          {action && (
+            <button type="button" className={`wk-ss-item wk-ss-action${hi === actionIdx ? ' hi' : ''}`}
+              onMouseDown={(e) => { e.preventDefault(); runAction(); }}
+              onMouseEnter={() => setHi(actionIdx)}>
+              <span className="wk-ss-label">{action.label(query)}</span>
+            </button>
+          )}
         </div>,
         document.body,
       )}

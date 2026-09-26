@@ -15,6 +15,7 @@ import { getSnapshot, getUdpDefs, type SnapshotDomain, type UdpDefinition } from
 import { isAsOfChangesetId } from '@/services/versioning.service';
 import { FACET_CAPTION, facetNoun, facetNouns, type Facet } from '@/lib/facets';
 import { inspectTable, inspectView, type InspectTableResult, type InspectViewResult } from '../services/inspector.service';
+import { generatedViewDdl } from '../lib/viewDdl';
 import * as struct from '../services/structure.service';
 import type { SubjectArea } from '../services/modeler.service';
 import { matchesColumn } from '../lib/columnSearch';
@@ -23,7 +24,6 @@ import { facetEditable, type TableField } from '../lib/facetEditable';
 import { inspectorRefreshPlan } from '../lib/inspectorRefresh';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { tableNamePlan } from '../lib/nameSync';
-import { VIEW_TYPE_NAME, syncViewTypeUdp } from '../lib/viewPanelLogic';
 import { viewRestorePlan } from '../lib/viewRestore';
 import { syncRenamedColumnInViews } from '../lib/viewSync';
 import {
@@ -681,7 +681,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                       <span className="rd-mono" style={{ fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {v.schema ? `${v.schema}.` : ''}{v.name}
                       </span>
-                      {v.customSql?.trim() ? <span className="wk-insp-chip">custom SQL</span> : null}
+                      {v.customSql?.trim() ? <span className="wk-insp-chip">User-Defined SQL (info)</span> : null}
                       <span className="wk-srch-chips" style={{ marginLeft: 'auto', maxWidth: '45%' }}>
                         {v.canvases.length === 0 && <span className="wk-srch-none">not on any canvas</span>}
                         {v.canvases.slice(0, 4).map((c) => <span key={c.id} className="wk-srch-chip">{c.name}</span>)}
@@ -822,8 +822,6 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
   const [form, setForm] = useState({ name: '', schema: '', description: '' });
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  // Def «Tipo de Vista» (seed doc 61): gestionado — lo fija el modo Regular/Personalizada.
-  const [viewTypeDef, setViewTypeDef] = useState<UdpDefinition | null>(null);
   const std = useStandards();
 
   useEffect(() => {
@@ -837,17 +835,9 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
       .catch((e: unknown) => { if (alive) setError(errMsg(e, "Couldn't load the view")); });
     return () => { alive = false; };
   }, [target.id]);
-  useEffect(() => {
-    if (!canEdit) return undefined;
-    let alive = true;
-    getUdpDefs(sessionProjectId())
-      .then((d) => { if (alive) setViewTypeDef(d.find((x) => x.level === 'view' && x.name.trim().toLowerCase() === VIEW_TYPE_NAME) ?? null); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [canEdit]);
-
   const view = data?.view;
-  const custom = !!(view?.customSql && view.customSql.trim());
+  // Doc 96 D6: la User-Defined SQL es solo informativa (el DDL sale de las columnas).
+  const hasSql = !!(view?.customSql && view.customSql.trim());
   const srcName = (id?: string | null) => (id ? (data?.sources.find((s) => s.id === id)?.physicalName ?? id) : '—');
 
   // ── Escritura versionada (doc 89 §3.4): el mismo saveView del panel de vista ──
@@ -889,9 +879,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
   };
   const saveUdp = async (next: Record<string, string>) => {
     if (!data) return;
-    // «Tipo de Vista» es gestionado (doc 61 §2.3): preserva el valor del modo pase lo que pase.
-    const guarded = viewTypeDef ? (syncViewTypeUdp(next, viewTypeDef.id, custom) ?? next) : next;
-    try { await saveView({ udpValues: guarded }, `Edit view ${data.view.name}`, false); } catch (e) { toast.error(errMsg(e, "Couldn't save UDP")); }
+    try { await saveView({ udpValues: next }, `Edit view ${data.view.name}`, false); } catch (e) { toast.error(errMsg(e, "Couldn't save UDP")); }
   };
   /** Doc 89 §3.4: borra la vista (cualquiera sea su origen: botón View del
    *  toolbar o Properties › Views — misma colección) y cierra el popup. */
@@ -942,7 +930,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                 <div className="wk-insp-chips">
                   <span className="wk-insp-chip accent">view</span>
                   <span className="wk-insp-chip rd-mono">schema {view.schema || '—'}</span>
-                  <span className="wk-insp-chip">{custom ? 'User-Defined SQL' : 'Regular (generated from sources)'}</span>
+                  {hasSql && <span className="wk-insp-chip">User-Defined SQL (info)</span>}
                   <span className="wk-insp-chip">{data.sources.length} source{data.sources.length === 1 ? '' : 's'}</span>
                   <span className="wk-insp-chip">{data.usage.length === 0 ? 'not on any canvas' : `${data.usage.length} canvas${data.usage.length === 1 ? '' : 'es'}`}</span>
                   {canEdit && <span className="wk-insp-chip">editable</span>}
@@ -973,7 +961,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                           onChange={(e) => setForm({ ...form, description: e.target.value })} onBlur={() => void saveDescriptionOnBlur()} />
                       </div>
                       <dl className="wk-pp-meta">
-                        <dt>Mode</dt><dd>{custom ? 'Personalizada (User-Defined SQL governs the view)' : 'Regular (generated from sources)'}</dd>
+                        <dt>User-Defined SQL</dt><dd>{hasSql ? 'Informational — not exported' : '—'}</dd>
                         <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{view.id}</dd>
                       </dl>
                       <button className="rd-btn rd-btn-primary rd-btn-sm" style={{ width: '100%', marginTop: 4 }} disabled={saving} onClick={() => void saveDef()}>
@@ -989,7 +977,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                     <dl className="wk-pp-meta">
                       <dt>Name</dt><dd className="rd-mono">{view.name}</dd>
                       <dt>Schema</dt><dd className="rd-mono">{view.schema || '—'}</dd>
-                      <dt>Mode</dt><dd>{custom ? 'Personalizada (User-Defined SQL governs the view)' : 'Regular (generated from sources)'}</dd>
+                      <dt>User-Defined SQL</dt><dd>{hasSql ? 'Informational — not exported' : '—'}</dd>
                       <dt>Definition</dt><dd>{view.description || '—'}</dd>
                       <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{view.id}</dd>
                     </dl>
@@ -1033,8 +1021,14 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
 
               {tab === 'sql' && (
                 <>
-                  <p className="wk-pp-cap" style={{ marginTop: 0 }}>{custom ? 'User-Defined SQL — emitted verbatim in the DDL export (never validated).' : 'Stored DDL preview (generated from sources; regenerate it from the View Editor).'}</p>
-                  <pre className="wk-insp-sql">{view.customSql?.trim() || view.sql?.trim() || 'No SQL stored for this view yet.'}</pre>
+                  <p className="wk-pp-cap" style={{ marginTop: 0 }}>Generated DDL — from the columns, exactly what the DDL export writes.</p>
+                  <pre className="wk-insp-sql">{generatedViewDdl(view, data.sources)}</pre>
+                  {hasSql && (
+                    <>
+                      <p className="wk-pp-cap">User-Defined SQL — informational, stored with the view and not exported.</p>
+                      <pre className="wk-insp-sql">{view.customSql?.trim()}</pre>
+                    </>
+                  )}
                 </>
               )}
 
@@ -1043,7 +1037,6 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                   <p className="wk-pp-cap" style={{ marginTop: 0 }}><b>View UDPs</b> — governance tags of the view{canEdit ? '' : ' (read-only here; open the model in edit mode to change them)'}.</p>
                   {canEdit
                     ? <UdpAssign key={view.id} level="view" values={view.udpValues ?? {}}
-                      locked={viewTypeDef ? { [viewTypeDef.id]: 'Managed — the view mode is set from the Query SQL tab.' } : undefined}
                       onChange={(next) => void saveUdp(next)} />
                     : std ? <UdpReadonly defs={std.udp} level="view" facet="physical" values={view.udpValues ?? {}} /> : muted('Loading…')}
                 </>

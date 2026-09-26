@@ -98,7 +98,7 @@ export interface ReportViewRow {
   canvases?: string[];
   description?: string | null;
   sql?: string | null;
-  /** Doc 91: User-Defined SQL (verbatim) cuando la vista es Personalizada. */
+  /** Doc 96 D6: User-Defined SQL — texto informativo (el DDL sale de las columnas). */
   customSql?: string | null;
   columns: Array<{
     outputAlias?: string | null;
