@@ -252,7 +252,7 @@ Solo se expone al browser lo prefijado con `VITE_` (Vite las inlinea en build ti
 | `dev` | `vite` | Servidor de desarrollo con HMR (`:3000`). |
 | `build` | `tsc --noEmit && vite build` | Chequeo de tipos + bundle de producción en `dist/`. |
 | `preview` | `vite preview` | Sirve el build de `dist/` para verificación local. |
-| `start` | `node server.mjs` | Runtime en Databricks Apps: sirve `dist/` y proxya `/api` al backend con token M2M; lo invoca el `command` de `app.yaml`. `prestart` corre `npm run build` antes. |
+| `start` | `node server.mjs` | Runtime en Databricks Apps: sirve `dist/` y proxya `/api` al backend con token M2M; lo invoca el `command` de `app.yaml`. En Apps, Databricks corre `npm run build` antes del `command`; en local, correr `npm run build` primero. |
 | `test` | `vitest run` | Corre los tests unitarios (`src/**/*.test.ts(x)`). |
 | `lint` | `eslint .` | Linter sobre todo el proyecto. |
 

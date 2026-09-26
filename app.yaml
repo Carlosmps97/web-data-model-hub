@@ -10,10 +10,12 @@
 # (si falta alguna, el deploy se corta). Los `valueFrom` referencian recursos
 # `secret` de databricks.yml y los resuelve la propia app al arrancar.
 #
-# `npm run start` compila (tsc + vite build → dist/) y levanta `node
-# server.mjs`, que sirve dist/ y proxya /api al backend servidor-a-servidor con
-# el token M2M del service principal del front: el navegador habla con un solo
-# origen (sin CORS y sin doble SSO).
+# Antes de este `command`, Databricks instala las dependencias (`npm install`)
+# y corre el script `build` de package.json (tsc + vite build → dist/) en cada
+# deploy o arranque. `npm run start` solo levanta `node server.mjs`, que sirve
+# dist/ y proxya /api al backend servidor-a-servidor con el token M2M del
+# service principal del front: el navegador habla con un solo origen (sin CORS
+# y sin doble SSO).
 # No definir NODE_ENV=production (el build necesita devDependencies) ni
 # VITE_API_URL (reactivaría el cruce directo navegador→backend).
 command: ["npm", "run", "start"]

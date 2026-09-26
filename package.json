@@ -7,7 +7,6 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "prestart": "npm run build",
     "start": "node server.mjs",
     "test": "vitest run",
     "lint": "eslint ."

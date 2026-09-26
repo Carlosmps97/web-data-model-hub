@@ -38,13 +38,12 @@ Definidos en `package.json`:
 |---|---|
 | `npm run dev` | Levanta el dev server de Vite en el puerto **3000** con hot reload. |
 | `npm run build` | Ejecuta `tsc --noEmit && vite build`. Primero valida tipos, luego compila a `dist/`. |
-| `npm run prestart` | Hook automático de `start`: corre `npm run build` (tsc + `vite build` → `dist/`). |
-| `npm run start` | **Runtime de producción**: `node server.mjs` (npm dispara `prestart` antes). |
+| `npm run start` | **Runtime de producción**: `node server.mjs` (sirve el `dist/` que dejó el build; en local, correr `npm run build` antes). |
 | `npm run preview` | Sirve `dist/` con el preview de Vite. **Solo inspección local**; ya no se usa en producción. |
 | `npm test` | Corre los tests con Vitest (`vitest run`) — incluye `server.test.mjs`. |
 | `npm run lint` | Corre ESLint sobre todo el proyecto. |
 
-En producción (Databricks Apps) el comando de la app es `npm run start`: `prestart` compila y `start` levanta `server.mjs`, que sirve `dist/` y proxya `/api` al backend (sección 5). El artefacto sigue siendo la carpeta de estáticos `dist/`, pero ahora la sirve un servidor propio en vez de un host genérico.
+En producción (Databricks Apps), en cada deploy o arranque Databricks corre `npm install` y luego el script `build` de `package.json` (tsc + `vite build` → `dist/`); recién después ejecuta el `command` de la app, `npm run start`, que levanta `server.mjs`: sirve `dist/` y proxya `/api` al backend (sección 5). Hasta el 2026-09-26 un hook `prestart` repetía ese build (el front compilaba dos veces en cada arranque); se quitó. El artefacto sigue siendo la carpeta de estáticos `dist/`, pero ahora la sirve un servidor propio en vez de un host genérico.
 
 ---
 
@@ -206,7 +205,7 @@ Vite **inlinea** las variables `VITE_*` en el bundle al compilar (`vite build`);
 Dos advertencias (comentadas en el propio `app.yaml`):
 
 1. **NO definir `VITE_API_URL` en Apps** — `API_BASE` debe quedar vacío para que el front use rutas relativas `/api` (mismo origen).
-2. **NO setear `NODE_ENV=production`** — rompería el `npm install` de devDependencies, y `vite`/`tsc` se necesitan para el build que corre en el arranque de la app (`prestart`).
+2. **NO setear `NODE_ENV=production`** — rompería el `npm install` de devDependencies, y `vite`/`tsc` se necesitan para el build que Databricks corre en cada deploy o arranque (script `build`).
 
 ### Topologías
 
@@ -239,7 +238,7 @@ El destino productivo es **Databricks Apps**: la app **`frnt-data-model-hub`** d
 
 - **`variables:`** — parámetros por entorno, ninguno se edita en el repo:
   - `app_admin_user` ← GitHub Variable `APP_ADMIN_USER` (opcional; default `${workspace.current_user.userName}`). Cuando el deploy lo hace un service principal de CI, `mode: production` le da `CAN_MANAGE` solo a ese SP; esta variable devuelve el control (stop/start/logs) al humano en cada deploy.
-- **`resources.apps.frontend`** — `name: frnt-data-model-hub`, `source_code_path: .` y el bloque `permissions:`. El `command` (`npm run start`, que dispara `prestart` = tsc + `vite build` → `dist/`, y luego `node server.mjs`) y las `env` (incluida `BACKEND_API_URL`) **no** van en el bundle: viven en `app.yaml` (el bloque `config:` lo ignora el CLI, bug #4901).
+- **`resources.apps.frontend`** — `name: frnt-data-model-hub`, `source_code_path: .` y el bloque `permissions:`. El `command` (`npm run start` → `node server.mjs`; el build tsc + `vite build` → `dist/` lo corre Databricks justo antes, con el script `build`) y las `env` (incluida `BACKEND_API_URL`) **no** van en el bundle: viven en `app.yaml` (el bloque `config:` lo ignora el CLI, bug #4901).
 - **`permissions:`** — declarativo y **autoritativo** (se re-aplica en cada deploy; los grants manuales hechos en la UI se pierden): `CAN_MANAGE` → `${var.app_admin_user}`, `CAN_USE` → grupo `users`. Para apps los únicos niveles válidos son exactamente esos dos.
 - **`targets:`** — solo `prod` (`mode: production`, `default: true`). El bundle **NO declara `workspace.host`**: el workspace destino sale de la variable `DATABRICKS_HOST` que usa el CLI (un `host:` hardcodeado ganaría sobre la variable y podía desplegar callado al workspace equivocado).
 
@@ -247,24 +246,30 @@ El destino productivo es **Databricks Apps**: la app **`frnt-data-model-hub`** d
 
 Corre en cada push a `main` (o a mano por `workflow_dispatch`). Configuración por repositorio (Settings → Secrets and variables → Actions):
 
-| Tipo | Nombre en GitHub | Variable del bundle | Si no se define |
-|---|---|---|---|
-| Variable | `DATABRICKS_HOST` | (la usa el CLI) | falla |
-| Secret | `DATABRICKS_TOKEN` | (la usa el CLI) | falla |
-| Variable | `BUNDLE_TARGET` | (target) | `prod` |
-| Variable | `BACKEND_API_URL` | `env` de `app.yaml` (paso `yq`) | default commiteado en `app.yaml` |
-| Variable | `APP_ADMIN_USER` | `app_admin_user` | solo el SP que despliega queda con CAN_MANAGE |
-| Variable | `BACKEND_APP_NAME` | (paso del grant) | `bknd-data-model-hub` |
+Toda la mecánica vive en `reusable-databricks-deploy.yml` (idéntico en los dos repos); el caller solo declara ramas, environment y la app que consume (`provider_app: bknd-data-model-hub`). Referencia completa para DevOps: `GUIA-GITHUB-ACTIONS-DATABRICKS.md` en la raíz de MODELER.
+
+Configuración por GitHub Environment (`dev`/`qa`/`prod`, con fallback a las del repositorio). Todas son obligatorias: si falta una, el run se corta antes de tocar la app y lista cuáles faltan.
+
+| Tipo | Nombre en GitHub | Uso |
+|---|---|---|
+| Variable | `DATABRICKS_HOST` | workspace destino (lo usa el CLI) |
+| Secret | `DATABRICKS_TOKEN` | token del workspace (lo usa el CLI) |
+| Variable | `BUNDLE_TARGET` | target del bundle (`prod`) |
+| Variable | `SECRET_SCOPE` | variable `secret_scope` del bundle |
+| Variable | `PROXY_SECRET_KEY` | variable `proxy_secret_key` del bundle |
+| Variable | `APP_ADMIN_USER` | variable `app_admin_user` del bundle (CAN_MANAGE del humano) |
+| Variable | `BACKEND_API_URL` | `env` de `app.yaml` (paso `yq`) |
 
 Pasos del workflow, en orden:
 
-1. **Exportar parámetros**: cada GitHub Variable se exporta como `BUNDLE_VAR_<variable del bundle>` **solo si trae valor** — una variable vacía PISARÍA el default del `databricks.yml` (verificado); "no definida en GitHub" = "usa el default del repo".
-2. **Mirror local del provider Terraform** (`scripts/ci/tf-provider-mirror.sh`): OpenTofu falla verificando la firma del provider de Databricks en el runner; el mirror local la omite. Es solo tooling del deploy.
-3. **`bundle validate`**.
-4. **Bind de la app pre-creada** (evita el `409 ALREADY_EXISTS`): en workspaces corporativos con **cupo de apps**, la app se crea a mano en la UI para reservar el slot antes del primer deploy; Terraform no la tiene en su estado, así que `bundle deploy` intentaría CREARLA y la API respondería 409. El paso `databricks bundle deployment bind frontend <app-name> --target prod --auto-approve` la importa al estado y desde ahí el deploy la actualiza en su sitio. Idempotente (si la app no existe, no hace nada). Condiciones: el nombre creado a mano debe ser **idéntico** al del bundle, y la identidad del `DATABRICKS_TOKEN` necesita `CAN_MANAGE` sobre esa app.
-5. **`bundle deploy`**: sube el código y aplica config y permisos.
-6. **Grant del SP del front sobre la app backend** (requisito del proxy `/api`, doc 36 §6.3): el workflow resuelve el SP de la app front (`databricks apps get` → `service_principal_client_id`) y aplica `databricks api patch /api/2.0/permissions/apps/<backend>` con `CAN_USE`. PATCH **agrega sin pisar** el resto de la ACL; idempotente. El workflow del backend re-aplica el mismo grant tras cada deploy suyo (su bloque `permissions:` resetea la ACL del backend), y este paso del front cubre el arranque inicial — el resultado no depende del orden de los deploys. Un grant manual NO sirve: el siguiente deploy del backend lo borraría.
-7. **`bundle run frontend`** (re)arranca la app y el workflow espera el estado `RUNNING` (hasta ~5 min).
+1. **Verificación fail-fast**: host, target y token no vacíos + `databricks current-user me`.
+2. **Variables del bundle y `env` de `app.yaml`** desde las GitHub Variables homónimas; se estampan `BUILD_SHA`/`BUILD_TIME`.
+3. **`bundle validate`** e identificación de la única app del bundle.
+4. **Bind de la app pre-creada** (evita el `409 ALREADY_EXISTS`): en workspaces corporativos con **cupo de apps**, la app se crea a mano en la UI para reservar el slot antes del primer deploy; el estado del bundle no la conoce, así que `bundle deploy` intentaría CREARLA y la API respondería 409. `databricks bundle deployment bind` la adopta y desde ahí el deploy la actualiza en su sitio (si ya estaba adoptada, el paso avisa y sigue). Condiciones: el nombre creado a mano debe ser **idéntico** al del bundle, y la identidad del `DATABRICKS_TOKEN` necesita `CAN_MANAGE` sobre esa app.
+5. **`bundle plan`** (desde 2026-09-26): lista qué va a cambiar, campo por campo. Si la app aparece con cambios que no son su código (descripción, recursos, tamaño de cómputo), el deploy dispara un «App update» de Databricks — la operación que en el workspace corporativo falló con *"Unexpectedly failed to update app's compute size"* (doc 97).
+6. **`bundle deploy`**: sube el código y aplica config y permisos. Motor `direct` (API de Databricks, sin Terraform) y CLI con versión fija (`databricks/setup-cli@v1.18.0`).
+7. **Grant del SP del front sobre la app backend** (requisito del proxy `/api`, doc 36 §6.3): el workflow resuelve el SP de la app front (`databricks apps get` → `service_principal_client_id`) y aplica `databricks api patch /api/2.0/permissions/apps/<backend>` con `CAN_USE`. PATCH **agrega sin pisar** el resto de la ACL; idempotente. El workflow del backend re-aplica el mismo grant tras cada deploy suyo (su bloque `permissions:` resetea la ACL del backend), y este paso del front cubre el arranque inicial — el resultado no depende del orden de los deploys. Un grant manual NO sirve: el siguiente deploy del backend lo borraría.
+8. **`bundle run frontend`** (re)despliega la app y el workflow espera el estado `RUNNING` (hasta ~5 min).
 
 Orden entre repos en un workspace nuevo: **backend primero** → copiar su URL pública → GitHub Variable `BACKEND_API_URL` del repo del front → deploy del front.
 
@@ -372,14 +377,15 @@ Los artefactos que quedaron de la migración Next.js → Vite ya fueron alineado
 flowchart TD
     A["Push a main (o workflow_dispatch)"] --> B["GitHub Actions: deploy-databricks.yml"]
     B --> C["GitHub Variables a BUNDLE_VAR_* (solo si traen valor)"]
-    C --> D["Mirror local del provider Terraform + bundle validate"]
+    C --> D["bundle validate"]
     D --> E["Bind de la app pre-creada (evita 409 ALREADY_EXISTS)"]
-    E --> F["bundle deploy: sube codigo, aplica config y permisos"]
+    E --> P["bundle plan: lista que va a cambiar"]
+    P --> F["bundle deploy (motor direct): sube codigo, aplica config y permisos"]
     F --> G["Grant CAN_USE del SP del front sobre la app backend"]
     G --> H["bundle run frontend + espera del estado RUNNING"]
-    H --> I["La app corre npm run start"]
-    I --> J["prestart: tsc --noEmit + vite build generan dist/"]
-    J --> K["start: node server.mjs sirve dist/ y proxya /api con token M2M"]
+    H --> I["Databricks: npm install + script build (tsc --noEmit + vite build generan dist/)"]
+    I --> J["command npm run start"]
+    J --> K["node server.mjs sirve dist/ y proxya /api con token M2M"]
     K --> L["El navegador habla con UN solo origen; el backend recibe Bearer del SP"]
 ```
 
@@ -387,7 +393,7 @@ flowchart TD
 
 ## 11. Checklist de despliegue
 
-- [ ] GitHub Variables/Secrets del repo configuradas: variable `DATABRICKS_HOST`, secret `DATABRICKS_TOKEN`, variable `BACKEND_API_URL` (obligatoria en un workspace nuevo); opcionales `BUNDLE_TARGET`, `APP_ADMIN_USER`, `BACKEND_APP_NAME`.
+- [ ] GitHub Environment configurado (sección 7.2): variables `DATABRICKS_HOST`, `BUNDLE_TARGET`, `SECRET_SCOPE`, `PROXY_SECRET_KEY`, `APP_ADMIN_USER`, `BACKEND_API_URL` y secret `DATABRICKS_TOKEN` — todas obligatorias.
 - [ ] El **backend está desplegado PRIMERO** y su URL pública quedó en la GitHub Variable `BACKEND_API_URL` del repo del front.
 - [ ] En un workspace con cupo de apps: la app `frnt-data-model-hub` fue pre-creada a mano con el nombre EXACTO del bundle (el paso de bind del workflow la adopta).
 - [ ] `npm install` y `npm run build` terminan limpios en local (tipos + bundle) antes de pushear.

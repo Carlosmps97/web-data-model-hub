@@ -478,7 +478,7 @@ El token M2M se cachea hasta su expiración menos 5 minutos y `TokenCache` dedup
 
 ## 6. Despliegue (dónde corre y configuración)
 
-El frontend corre como la Databricks App **`frnt-data-model-hub`** (workspace corporativo): `npm run start` compila (el `prestart` ejecuta `tsc --noEmit && vite build` → `dist/`) y levanta **`server.mjs`**, que sirve la SPA y proxya `/api` a la app backend **`bknd-data-model-hub`**. El navegador habla con **un solo origen** — nunca con el backend directamente (ver la sección "Autenticación en producción" al inicio). El esquema anterior — SPA de archivos estáticos (hospedable p. ej. en Azure App Service) con `VITE_API_URL` apuntando al backend — quedó descartado en Databricks Apps: reintroduciría el cruce navegador→backend y el doble SSO.
+El frontend corre como la Databricks App **`frnt-data-model-hub`** (workspace corporativo): Databricks compila en cada deploy o arranque (script `build`: `tsc --noEmit && vite build` → `dist/`) y `npm run start` levanta **`server.mjs`**, que sirve la SPA y proxya `/api` a la app backend **`bknd-data-model-hub`**. El navegador habla con **un solo origen** — nunca con el backend directamente (ver la sección "Autenticación en producción" al inicio). El esquema anterior — SPA de archivos estáticos (hospedable p. ej. en Azure App Service) con `VITE_API_URL` apuntando al backend — quedó descartado en Databricks Apps: reintroduciría el cruce navegador→backend y el doble SSO.
 
 ### 6.1 Variables de entorno
 

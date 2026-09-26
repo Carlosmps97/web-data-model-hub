@@ -696,7 +696,7 @@ Las pantallas de review presentan cada cambio con el mismo código de color verd
 
 ## 9. Despliegue
 
-El frontend es una SPA de **Vite**: `npm run build` corre `tsc --noEmit && vite build` y deja el estático en `dist/`. En producción (**Databricks Apps**) la app arranca con `npm run start`: el `prestart` hace ese build y luego **`server.mjs`** — servidor Node propio, cero dependencias — sirve `dist/` (fallback SPA, cache inmutable de `/assets/`) y **proxya `/api` al backend** con un token OAuth M2M del service principal del front. El navegador habla con **un solo origen**; el detalle operativo (bundle, workflow, variables) está en [deployment.md](deployment.md).
+El frontend es una SPA de **Vite**: `npm run build` corre `tsc --noEmit && vite build` y deja el estático en `dist/`. En producción (**Databricks Apps**) Databricks corre ese build en cada deploy o arranque y luego la app arranca con `npm run start`: **`server.mjs`** — servidor Node propio, cero dependencias — sirve `dist/` (fallback SPA, cache inmutable de `/assets/`) y **proxya `/api` al backend** con un token OAuth M2M del service principal del front. El navegador habla con **un solo origen**; el detalle operativo (bundle, workflow, variables) está en [deployment.md](deployment.md).
 
 ### Variables de entorno
 

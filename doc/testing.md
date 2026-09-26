@@ -19,7 +19,7 @@ El proyecto expone siete scripts de npm. No hay más automatización local que e
 | `npm run dev` | `vite` | Servidor de desarrollo en `:3000` con HMR y proxy `/api` → backend `:8000`. |
 | `npm run build` | `tsc --noEmit && vite build` | Verificación de tipos (sin emitir) y luego bundle de producción a `dist/`. |
 | `npm run preview` | `vite preview` | Sirve el `dist/` ya construido para revisarlo localmente. |
-| `npm run start` | `node server.mjs` | Runtime en Databricks Apps (lo invoca el `command` de `app.yaml`): el servidor de producción propio sirve `dist/` y proxya `/api` al backend; `prestart` corre `npm run build` antes. |
+| `npm run start` | `node server.mjs` | Runtime en Databricks Apps (lo invoca el `command` de `app.yaml`): el servidor de producción propio sirve `dist/` y proxya `/api` al backend. En Apps el build lo corre Databricks antes del `command`; en local, `npm run build` primero. |
 | `npm test` | `vitest run` | Corre la suite de tests una sola vez (no watch). |
 | `npm run lint` | `eslint .` | Linting de todo el árbol con la config flat de ESLint. |
 
