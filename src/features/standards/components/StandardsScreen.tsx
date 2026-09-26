@@ -8,9 +8,11 @@ import { sortProjects } from '@/lib/projects';
 import SearchSelect from '@/features/modeler/components/SearchSelect';
 import type { Project } from '@/types/model';
 import {
-  getSnapshot, getVersions, rollbackStandards,
-  type StandardsSnapshot, type StandardsVersion,
+  getRollbackPreview, getSnapshot, getVersions, rollbackStandards,
+  type RollbackPreview, type StandardsSnapshot, type StandardsVersion,
 } from '../standards.service';
+import { AffectedTable, Button, Dialog, type AffectedColumn } from '@/components/ui';
+import { rollbackDomainRows, rollbackSummary, type RollbackDomainRow } from '../rollbackPreview';
 import GlossaryPage from './GlossaryPage';
 import DomainsPage from './DomainsPage';
 import UdpDefsPage from './UdpDefsPage';
@@ -41,6 +43,19 @@ export default function StandardsScreen() {
   const [history, setHistory] = useState(false);
   const [rollbackTarget, setRollbackTarget] = useState<StandardsVersion | null>(null);
   const [busy, setBusy] = useState(false);
+  // Doc 95 D9: qué re-tipa y qué re-deriva el rollback elegido, antes de confirmarlo.
+  const [preview, setPreview] = useState<RollbackPreview | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  useEffect(() => {
+    setPreview(null);
+    setPreviewError(null);
+    if (!rollbackTarget || !projectId) return undefined;
+    let alive = true;
+    getRollbackPreview(projectId, rollbackTarget.seq)
+      .then((p) => { if (alive) setPreview(p); })
+      .catch((e) => { if (alive) setPreviewError(e instanceof Error ? e.message : "Couldn't calculate the preview"); });
+    return () => { alive = false; };
+  }, [rollbackTarget, projectId]);
   const project = useMemo(() => projects.find((p) => p.id === projectId) ?? null, [projects, projectId]);
 
   useEffect(() => {
@@ -171,23 +186,29 @@ export default function StandardsScreen() {
         </div>
       )}
 
-      {/* 15g · rollback confirm */}
+      {/* 15g · rollback confirm — doc 95 D9: con la vista previa de lo que re-tipa */}
       {rollbackTarget && (
-        <div style={backdrop}>
-          <div style={{ width: 520, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
-              <div style={{ width: 42, height: 42, borderRadius: 11, background: '#FBEEF0', color: '#D6455D', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><TriangleAlert size={20} /></div>
-              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Roll back to {rollbackTarget.label}?</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5', lineHeight: 1.5 }}>Restores the standards state of <strong>{rollbackTarget.label}</strong> and re-derives the affected names/types. Recorded as a new version.</p></div>
-            </div>
-            <div style={{ padding: '16px 24px', fontSize: 12.5, color: '#7A6220', background: '#FFF9EE', borderTop: '1px solid #F1E2BD', borderBottom: '1px solid #F1E2BD' }}>
-              Columns edited since then keep their newer names/types if they have an override.
-            </div>
-            <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}>
-              <span style={{ flex: 1 }} /><button onClick={() => setRollbackTarget(null)} disabled={busy} style={btnGhost}>Cancel</button>
-              <button onClick={() => doRollback(rollbackTarget)} disabled={busy} style={{ ...btnPrimary, background: '#D6455D' }}>{busy ? <span className="rd-spin" /> : <RotateCcw size={15} />}{busy ? 'Rolling back…' : 'Roll back this change'}</button>
+        <Dialog open title={`Roll back to ${rollbackTarget.label}?`} icon={TriangleAlert} width={760}
+          onClose={() => setRollbackTarget(null)}
+          subtitle="Restores ALL Data Standards (glossary, domains, UDPs, DDL rules, naming) to that version. Recorded as a new version."
+          footer={<>
+            <Button variant="secondary" onClick={() => setRollbackTarget(null)} disabled={busy}>Cancel</Button>
+            <Button variant="danger" icon={RotateCcw} onClick={() => doRollback(rollbackTarget)}
+              disabled={busy || (!preview && !previewError)}>{busy ? 'Rolling back…' : 'Roll back'}</Button>
+          </>}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {!preview && !previewError && <div style={{ fontSize: 13, color: '#8A93A5' }}>Calculating what changes…</div>}
+            {previewError && <div style={{ fontSize: 12.5, color: '#C0392B' }}>{previewError}</div>}
+            {preview && rollbackSummary(preview).map((l) => <div key={l} style={{ fontSize: 13, color: '#1A2B4A' }}>{l}</div>)}
+            {preview && preview.domains.length > 0 && (
+              <AffectedTable rows={rollbackDomainRows(preview)} columns={ROLLBACK_COLUMNS} rowKey={(r) => r.id}
+                height={Math.min(280, 44 + preview.domains.length * 36)} />
+            )}
+            <div style={{ fontSize: 12.5, color: '#7A6220', background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '12px 15px' }}>
+              Columns with an overridden type keep it. To undo a single domain, open it in Parent domains → History → Revert.
             </div>
           </div>
-        </div>
+        </Dialog>
       )}
     </div>
   );
@@ -255,4 +276,10 @@ const ovCard: React.CSSProperties = { display: 'block', background: '#fff', bord
 const backdrop: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(20,28,45,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
 const iconClose: React.CSSProperties = { width: 30, height: 30, borderRadius: 8, border: '1px solid #E6EAF0', background: '#fff', color: '#8A93A5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 const btnGhost: React.CSSProperties = { height: 40, padding: '0 18px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
-const btnPrimary: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
+
+const ROLLBACK_COLUMNS: AffectedColumn<RollbackDomainRow>[] = [
+  { key: 'name', header: 'Domain', width: '1.4fr', render: (r) => r.name },
+  { key: 'physical', header: 'Physical type', width: '1.2fr', mono: true, render: (r) => r.physical },
+  { key: 'logical', header: 'Logical type', width: '1.2fr', mono: true, render: (r) => r.logical },
+  { key: 'columns', header: 'Columns re-typed', width: '140px', render: (r) => r.columns },
+];

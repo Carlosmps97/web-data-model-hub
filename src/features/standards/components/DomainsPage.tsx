@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Boxes, Pencil, Plus, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { Boxes, Pencil, Plus, RotateCcw, Search, Trash2, UploadCloud } from 'lucide-react';
 import { toast } from 'sonner';
-import type { StandardsSnapshot, SnapshotDomain } from '../standards.service';
+import { Button, Dialog } from '@/components/ui';
+import type { StandardsSnapshot, SnapshotDomain, DomainHistoryEntry } from '../standards.service';
 import { applyStandards } from '../standards.service';
-import { getDomainImpact, physicalize, type DomainImpact } from '@/services/naming.service';
-import { impactWarning, visibleImpactTables, tableLabel } from '../domainImpact';
+import { getDomainColumnImpact, physicalize, type DomainColumnImpact } from '@/services/naming.service';
+import { typeTargets, usageLines } from '../domainImpact';
+import { revertForm } from '../domainHistory';
+import { domainEditInput } from '../domainForm';
+import DomainCascadeDialog from './DomainCascadeDialog';
+import DomainHistory from './DomainHistory';
 import TypePicker from '@/features/modeler/components/TypePicker';
 import ComplexTypeBuilder from '@/features/modeler/components/ComplexTypeBuilder';
 import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
@@ -26,7 +31,10 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<null | 'apply' | 'delete'>(null);
-  const [impact, setImpact] = useState<DomainImpact | null>(null);
+  // Doc 95 D7: el panel usa la MISMA regla que la cascada (quién sigue hoy al dominio).
+  const [usage, setUsage] = useState<DomainColumnImpact | null>(null);
+  // Doc 95 D8: versión desde la que se está revirtiendo (null = edición normal).
+  const [revertFrom, setRevertFrom] = useState<string | null>(null);
   // Tras crear un dominio, el id lo genera el backend; guardamos el nombre para
   // seleccionarlo cuando la recarga lo traiga (si no, selId quedaba en '__new__').
   const [pendingName, setPendingName] = useState<string | null>(null);
@@ -54,44 +62,38 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
   }, [form.name, projectId]);
 
   useEffect(() => {
-    setMode('view'); setConfirm(null); setImpact(null); setFacet('logical');
+    setMode('view'); setConfirm(null); setFacet('logical'); setRevertFrom(null);
     if (selected) setForm({ ...selected });
-    if (selId && selId !== '__new__') getDomainImpact(projectId, selId).then(setImpact).catch(() => setImpact(null));
   }, [selId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Panel del dominio: se recalcula al cambiar de dominio y tras aplicar un tipo nuevo.
+  useEffect(() => {
+    setUsage(null);
+    if (!selId || selId === '__new__') return undefined;
+    let alive = true;
+    getDomainColumnImpact(projectId, selId, { limit: 0 })
+      .then((u) => { if (alive) setUsage(u); })
+      .catch(() => { if (alive) setUsage(null); });
+    return () => { alive = false; };
+  }, [projectId, selId, selected?.defaultDataType, selected?.logicalDataType]);
 
   const filtered = useMemo(() => {
     const n = q.trim().toLowerCase();
     return !n ? domains : domains.filter((d) => d.name.toLowerCase().includes(n));
   }, [domains, q]);
 
-  const startCreate = () => { setSelId('__new__'); setForm(EMPTY); setFacet('logical'); setMode('create'); setImpact(null); };
-  const startEdit = () => { if (selected) { setForm({ ...selected }); setMode('edit'); } };
-  const cancel = () => { setMode('view'); setConfirm(null); if (selected) setForm({ ...selected }); };
+  const startCreate = () => { setSelId('__new__'); setForm(EMPTY); setFacet('logical'); setRevertFrom(null); setMode('create'); };
+  const startEdit = () => { if (selected) { setForm({ ...selected }); setRevertFrom(null); setMode('edit'); } };
+  const cancel = () => { setMode('view'); setConfirm(null); setRevertFrom(null); if (selected) setForm({ ...selected }); };
+  // Doc 95 D8: revertir = cargar en el editor los valores de esa versión; se
+  // aplican con el mismo popup de cascada (misma regla, versión nueva auditada).
+  const startRevert = (entry: DomainHistoryEntry) => {
+    if (!selected) return;
+    setForm(revertForm(selected, entry)); setRevertFrom(entry.label); setFacet('physical'); setMode('edit');
+  };
 
-  const typeChanged = mode === 'edit' && selected && selected.defaultDataType !== form.defaultDataType;
-
-  // F2 #2: estado del dialog de impacto detallado (búsqueda server-side + toggle).
-  const [dlgQ, setDlgQ] = useState('');
-  const [showOverridden, setShowOverridden] = useState(false);
-  const [dlgImpact, setDlgImpact] = useState<DomainImpact | null>(null);
-
-  // Reset del dialog de impacto al abrirlo.
-  useEffect(() => {
-    if (confirm === 'apply') { setDlgQ(''); setShowOverridden(false); setDlgImpact(null); }
-  }, [confirm]);
-
-  // Búsqueda server-side (q) con debounce 300ms dentro del dialog (F2 #2);
-  // `alive` descarta respuestas fuera de orden (patrón CatalogPanel).
-  useEffect(() => {
-    if (confirm !== 'apply' || !typeChanged || !selId || selId === '__new__') return;
-    let alive = true;
-    const h = setTimeout(() => {
-      getDomainImpact(projectId, selId, { q: dlgQ.trim() || undefined, limit: 200 })
-        .then((i) => { if (alive) setDlgImpact(i); })
-        .catch(() => { if (alive) setDlgImpact(null); });
-    }, 300);
-    return () => { alive = false; clearTimeout(h); };
-  }, [confirm, dlgQ, selId, typeChanged]);
+  // Doc 95 D7: tipos que el borrador CAMBIA (física y/o lógica).
+  const targets = useMemo(() => (mode === 'edit' ? typeTargets(selected, form) : {}), [mode, selected, form]);
 
   const apply = async () => {
     setBusy(true);
@@ -99,23 +101,13 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
       const creating = mode === 'create';
       const v = await applyStandards(projectId, {
         kind: 'domain',
-        // Doc 69: tipo físico (defaultDataType) + tipo lógico + nombre de atributo sugerido.
-        // Doc 80 §4: `inheritsName` viaja SIEMPRE con su booleano (nunca
-        // undefined): el backend hace `exclude_none`, así que omitirlo dejaría
-        // el flag como estaba y desmarcar la casilla no tendría efecto.
-        domainsUpsert: [{
-          id: creating ? undefined : form.id, name: form.name.trim(), defaultDataType: form.defaultDataType.trim(),
-          logicalDataType: form.logicalDataType?.trim() || undefined, namingTerm: form.namingTerm?.trim() || undefined,
-          description: form.description || undefined,
-          // Doc 85: '' = volver al derivado / igual a la lógica (el backend lo lee como None); {} = sin UDP por defecto.
-          physicalName: form.physicalName?.trim() ?? '', physicalDescription: form.physicalDescription?.trim() ?? '',
-          udpValues: form.udpValues ?? {},
-          inheritsName: !!form.inheritsName,
-        }],
+        // Doc 95 D8: el revert queda como una versión nueva con título propio.
+        title: revertFrom ? `Revert ${form.name.trim()} to ${revertFrom}` : undefined,
+        domainsUpsert: [domainEditInput(form, creating ? null : selected)],
       });
       toast.success(`Applied · ${v.label} · ${v.impact.columns} columns re-typed`);
       if (creating) setPendingName(form.name.trim());   // seleccionarlo al recargar
-      setMode('view'); setConfirm(null); onApplied();
+      setMode('view'); setConfirm(null); setRevertFrom(null); onApplied();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't apply"); } finally { setBusy(false); }
   };
   const del = async () => {
@@ -129,6 +121,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
   };
 
   const editable = mode === 'edit' || mode === 'create';
+  const u = usage ? usageLines(usage) : null;
 
   return (
     <div style={{ display: 'flex', minHeight: 0, flex: 1 }}>
@@ -165,6 +158,12 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
               <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#1A2B4A' }}>{mode === 'create' ? 'New domain' : mode === 'edit' ? 'Edit domain' : form.name}</h1>
               {editable && <span style={{ fontSize: 11.5, fontWeight: 600, color: '#2E5BFF', background: '#EAF0FF', border: '1px solid #D4E0FF', borderRadius: 999, padding: '3px 10px' }}>Edit mode</span>}
             </div>
+            {revertFrom && mode === 'edit' && (
+              <div style={revertBanner}>
+                <RotateCcw size={14} style={{ flex: 'none', marginTop: 2 }} />
+                <span>Reverting to <strong>{revertFrom}</strong>: the form now has that version&apos;s values. Review them and apply — the columns that follow this domain are re-typed with the same rule as any change.</span>
+              </div>
+            )}
             {!editable && form.description && <p style={{ margin: '0 0 18px', fontSize: 13, color: '#6B7689', lineHeight: 1.5 }}>{form.description}</p>}
 
             {/* Doc 85 §3.5: switch de faceta (mismo rd-seg de Data Standards → UDP). */}
@@ -265,17 +264,21 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
               </label>
             </div>
 
-            {/* impact */}
-            {impact && mode !== 'create' && (
-              <div style={{ background: 'linear-gradient(180deg,#F4F7FF,#FAFBFF)', border: '1px solid #D9E3FB', borderRadius: 12, padding: '15px 17px', margin: '4px 0 18px' }}>
-                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>
-                  Usado por <strong style={{ color: '#2E5BFF' }}>{impact.columnsUsing} columnas</strong> en <strong>{impact.totalTables} tablas</strong> de <strong>{impact.modelsAffected} modelos</strong>.
-                </div>
-                <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
-                  <span style={{ fontSize: 13, color: '#0E8C6A', fontWeight: 600 }}>● {impact.willUpdate} se actualizan</span>
-                  <span style={{ fontSize: 13, color: '#9A6B00', fontWeight: 600 }}>● {impact.overridden} con override (skip)</span>
+            {/* Doc 95 D7: quién sigue hoy al dominio — en inglés y con la regla de la cascada */}
+            {u && mode !== 'create' && (
+              <div style={usageBox}>
+                <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>{u.headline}</div>
+                <div style={{ display: 'flex', gap: 20, marginTop: 12, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: 13, color: '#0E8C6A', fontWeight: 600 }} title="Re-typed when the domain type changes">● {u.follow}</span>
+                  <span style={{ fontSize: 13, color: '#9A6B00', fontWeight: 600 }}>● {u.override}</span>
+                  <span style={{ fontSize: 13, color: '#8A93A5', fontWeight: 600 }}>● {u.differs}</span>
                 </div>
               </div>
+            )}
+
+            {/* Doc 95 D8: historial de este dominio, con Revert */}
+            {mode === 'view' && selected && (
+              <DomainHistory projectId={projectId} domainId={selected.id} canEdit={canEdit} onRevert={startRevert} />
             )}
 
             {/* actions */}
@@ -296,71 +299,30 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
         )}
       </div>
 
-      {/* confirm apply (15e) */}
-      {confirm === 'apply' && (
-        <div style={backdrop}>
-          <div style={dialog} onClick={(e) => e.stopPropagation()}>
-            <div style={dlgHead}><div style={{ ...dlgIcon, background: '#F3EEFF', color: '#8B5CF6' }}><Boxes size={21} /></div>
-              <div style={{ flex: 1 }}><h2 style={dlgTitle}>{mode === 'create' ? `Create domain ${form.name}` : `Apply changes · ${form.name}`}</h2><p style={dlgSub}>{typeChanged ? 'Cascada el nuevo tipo a las columnas sin override.' : 'Nada se aplica hasta confirmar.'}</p></div>
-              <button onClick={() => setConfirm(null)} style={iconClose}><X size={13} /></button>
-            </div>
-            <div style={{ padding: '18px 24px' }}>
-              {typeChanged && selected && <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontFamily: 'var(--mono, monospace)', fontSize: 13, marginBottom: 12 }}><span style={{ color: '#8A93A5', textDecoration: 'line-through' }}>{selected.defaultDataType}</span> → <span style={{ fontWeight: 600, color: '#1A2B4A' }}>{form.defaultDataType}</span></div>}
-              {typeChanged && (
-                <>
-                  {/* Warning explícito (spec #2) — números GLOBALES (impact sin q). */}
-                  <div style={{ background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '12px 15px', fontSize: 13, fontWeight: 600, color: '#7A6220', marginBottom: 12 }}>
-                    {impact ? impactWarning(impact) : 'Calculando impacto…'}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 32, padding: '0 10px', background: '#fff', border: '1px solid #E6EAF0', borderRadius: 8, flex: 1 }}>
-                      <Search size={13} color="#9AA3B2" />
-                      <input value={dlgQ} onChange={(e) => setDlgQ(e.target.value)} placeholder="Is a table affected? Search by name…" style={{ flex: 1, border: 0, outline: 'none', fontSize: 12.5, background: 'transparent' }} />
-                    </div>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#56607A', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                      <input type="checkbox" checked={showOverridden} onChange={(e) => setShowOverridden(e.target.checked)} />
-                      Show overridden columns
-                    </label>
-                  </div>
-                  <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #EAEDF2', borderRadius: 10 }}>
-                    {visibleImpactTables((dlgImpact ?? impact)?.tables ?? [], showOverridden).map((t) => (
-                      <div key={t.tableId} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderBottom: '1px solid #F2F4F8', fontSize: 12.5 }}>
-                        <span style={{ fontFamily: 'var(--mono, monospace)', fontWeight: 600, color: '#1A2B4A' }}>{tableLabel(t)}</span>
-                        <span style={{ color: '#8A93A5', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.logicalName}</span>
-                        <span style={{ color: '#0E8C6A', fontWeight: 600, whiteSpace: 'nowrap' }}>{t.columns - t.overridden} col.</span>
-                        {t.overridden > 0 && <span style={{ color: '#9A6B00', fontWeight: 600, whiteSpace: 'nowrap' }}>{t.overridden} override</span>}
-                      </div>
-                    ))}
-                    {visibleImpactTables((dlgImpact ?? impact)?.tables ?? [], showOverridden).length === 0 && (
-                      <div style={{ padding: 14, fontSize: 12.5, color: '#9AA3B2' }}>
-                        {dlgQ.trim() ? 'No affected table matches the search.' : 'No affected tables.'}
-                      </div>
-                    )}
-                  </div>
-                  {(dlgImpact ?? impact) && (dlgImpact ?? impact)!.totalTables > ((dlgImpact ?? impact)!.tables.length) && (
-                    <div style={{ fontSize: 11.5, color: '#9AA3B2', marginTop: 6 }}>
-                      Showing {(dlgImpact ?? impact)!.tables.length} of {(dlgImpact ?? impact)!.totalTables} tables
-                    </div>
-                  )}
-                </>
-              )}
-              {mode === 'create' && <div style={{ fontSize: 13, color: '#56607A' }}>Domain <strong>{form.name}</strong> will be created with type <span style={{ fontFamily: 'var(--mono, monospace)' }}>{form.defaultDataType}</span>.</div>}
-            </div>
-            <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}><span style={{ flex: 1 }} /><button onClick={() => setConfirm(null)} disabled={busy} style={btnGhost}>Cancel</button><button onClick={apply} disabled={busy} style={btnPrimary}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Applying…' : mode === 'create' ? 'Create' : 'Apply cascade'}</button></div>
-          </div>
-        </div>
+      {/* Doc 95 D7: popup de cascada con la lista exacta por columna */}
+      {confirm === 'apply' && mode === 'edit' && selected && (
+        <DomainCascadeDialog projectId={projectId} domainId={selected.id} domainName={form.name} targets={targets}
+          busy={busy} title={revertFrom ? `Revert ${form.name} to ${revertFrom}` : undefined}
+          onCancel={() => setConfirm(null)} onApply={apply} />
       )}
-
-      {/* confirm delete */}
+      {confirm === 'apply' && mode === 'create' && (
+        <Dialog open title={`Create domain ${form.name}`} icon={Boxes} onClose={() => setConfirm(null)} width={520}
+          footer={<>
+            <Button variant="secondary" onClick={() => setConfirm(null)} disabled={busy}>Cancel</Button>
+            <Button variant="primary" icon={UploadCloud} onClick={apply} disabled={busy}>{busy ? 'Applying…' : 'Create'}</Button>
+          </>}>
+          <div style={{ fontSize: 13, color: '#56607A' }}>Domain <strong>{form.name}</strong> will be created with type <span style={{ fontFamily: 'var(--mono, monospace)' }}>{form.defaultDataType}</span>.</div>
+        </Dialog>
+      )}
       {confirm === 'delete' && selected && (
-        <div style={backdrop}>
-          <div style={{ ...dialog, width: 480 }} onClick={(e) => e.stopPropagation()}>
-            <div style={dlgHead}><div style={{ ...dlgIcon, background: '#FBEEF0', color: '#D6455D' }}><Trash2 size={20} /></div>
-              <div style={{ flex: 1 }}><h2 style={dlgTitle}>Delete domain {selected.name}?</h2><p style={dlgSub}>Columns keep their current type but lose the link to the domain.</p></div>
-            </div>
-            <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}><span style={{ flex: 1 }} /><button onClick={() => setConfirm(null)} disabled={busy} style={btnGhost}>Cancel</button><button onClick={del} disabled={busy} style={{ ...btnPrimary, background: '#D6455D' }}>{busy ? <span className="rd-spin" /> : <Trash2 size={15} />}Delete</button></div>
-          </div>
-        </div>
+        <Dialog open title={`Delete domain ${selected.name}?`} icon={Trash2} onClose={() => setConfirm(null)} width={480}
+          subtitle="Columns keep their current type but lose the link to the domain."
+          footer={<>
+            <Button variant="secondary" onClick={() => setConfirm(null)} disabled={busy}>Cancel</Button>
+            <Button variant="danger" icon={Trash2} onClick={del} disabled={busy}>Delete</Button>
+          </>}>
+          <div style={{ fontSize: 13, color: '#56607A' }}>Recorded as a new Data Standards version — it can be rolled back from the history.</div>
+        </Dialog>
       )}
     </div>
   );
@@ -370,12 +332,7 @@ const domCard = (active: boolean): React.CSSProperties => ({ background: '#fff',
 const lbl: React.CSSProperties = { display: 'block', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2', marginBottom: 7 };
 const field: React.CSSProperties = { width: '100%', height: 44, marginBottom: 18, fontSize: 14 };
 const fieldRO: React.CSSProperties = { display: 'flex', alignItems: 'center', minHeight: 44, padding: '0 14px', background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, fontSize: 14, color: '#1A2B4A', marginBottom: 18 };
-const backdrop: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(20,28,45,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
-const dialog: React.CSSProperties = { width: 560, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' };
-const dlgHead: React.CSSProperties = { display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' };
-const dlgIcon: React.CSSProperties = { width: 42, height: 42, borderRadius: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' };
-const dlgTitle: React.CSSProperties = { margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' };
-const dlgSub: React.CSSProperties = { margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5', lineHeight: 1.5 };
-const iconClose: React.CSSProperties = { width: 30, height: 30, borderRadius: 8, border: '1px solid #E6EAF0', background: '#fff', color: '#8A93A5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const usageBox: React.CSSProperties = { background: 'linear-gradient(180deg,#F4F7FF,#FAFBFF)', border: '1px solid #D9E3FB', borderRadius: 12, padding: '15px 17px', margin: '4px 0 18px' };
+const revertBanner: React.CSSProperties = { display: 'flex', gap: 10, background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '11px 14px', margin: '4px 0 16px', fontSize: 12.5, color: '#7A6220', lineHeight: 1.5 };
 const btnGhost: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 7, height: 40, padding: '0 18px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
 const btnPrimary: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };

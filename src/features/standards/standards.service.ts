@@ -187,6 +187,40 @@ export const rollbackStandards = (projectId: string, targetSeq: number) =>
   runBlocking('Rolling back standards…', () =>
     apiPost<StandardsVersion>(`${STD(projectId)}/rollback`, { targetSeq }, { timeoutMs: LONG_TIMEOUT_MS }));
 
+/** Doc 95 D8: una versión de Data Standards donde cambió UN dominio. */
+export interface DomainHistoryEntry {
+  seq: number;
+  label: string;
+  title: string;
+  author: string;
+  createdAt?: string | null;
+  kind: StandardsVersion['kind'];
+  /** Estado del dominio en esa versión (null = no existía o estaba borrado). */
+  state: Omit<SnapshotDomain, 'id'> | null;
+  /** Campos que cambiaron respecto de la entrada anterior. */
+  changed: string[];
+}
+export const getDomainHistory = (projectId: string, domainId: string) =>
+  apiGet<DomainHistoryEntry[]>(`${STD(projectId)}/domains/${encodeURIComponent(domainId)}/history`);
+
+/** Doc 95 D9: vista previa del rollback de Data Standards. */
+export interface RollbackPreviewDomain {
+  id: string;
+  name: string;
+  physical: { from: string | null; to: string } | null;
+  logical: { from: string | null; to: string } | null;
+  /** Columnas que se re-tipan (las que siguen al dominio). */
+  columns: number;
+}
+export interface RollbackPreview {
+  target: { seq: number; label: string };
+  domains: RollbackPreviewDomain[];
+  /** Glosario o naming distintos ⇒ se re-derivan nombres físicos. */
+  namesRederived: boolean;
+}
+export const getRollbackPreview = (projectId: string, targetSeq: number) =>
+  apiGet<RollbackPreview>(`${STD(projectId)}/rollback-preview?targetSeq=${targetSeq}`);
+
 /** Definiciones UDP activas DEL PROYECTO (módulo Data Standards y panel de
  *  Properties). GET abierto; las mutaciones van por applyStandards con
  *  kind='udp' (versionado). */

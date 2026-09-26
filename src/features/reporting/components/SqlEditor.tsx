@@ -25,7 +25,7 @@ export default function SqlEditor({ projectId, text, onText, onValidated }: {
       </div>
       <textarea value={text} onChange={(e) => onText(e.target.value)} spellCheck={false}
         style={{ width: '100%', height: 130, padding: 12, border: `1px solid ${errors.length ? '#E5B4B4' : '#DCE1EA'}`, borderRadius: 9, fontFamily: 'var(--mono, monospace)', fontSize: 13, color: '#1A2B4A', resize: 'vertical', boxSizing: 'border-box' }}
-        placeholder={"SELECT physicalName, dataType, udp.\"Clasificación del Dato\"\nFROM columns\nWHERE schema = 'core' AND udp.\"Clasificación del Dato\" IN ('DAC','Sensible')\nORDER BY physicalName\nLIMIT 100"} />
+        placeholder={"SELECT physicalName, dataType, udp.\"Clasificacion del Dato\"\nFROM columns\nWHERE schema = 'core' AND udp.\"Clasificacion del Dato\" IN ('DAC','Sensible')\nORDER BY physicalName\nLIMIT 100"} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <button onClick={check} disabled={busy} style={{ height: 32, padding: '0 14px', border: '1px solid #DCE1EA', background: '#fff', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', color: '#48526A' }}>{busy ? 'Validating…' : 'Validate → builder'}</button>
         {errors.length === 0 && text.trim() && <span style={{ fontSize: 12, color: '#2E9E5B' }}>✓ Valid SQL</span>}

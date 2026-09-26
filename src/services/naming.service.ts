@@ -17,7 +17,7 @@
  *   - PUT    …/settings/naming/{scope}        {separator, case}
  *   - POST   …/glossary/physicalize           {logical, scope} → {physical}
  *   - POST   …/glossary/rephysicalize         {scope?}         → {updated}
- *   - POST   …/glossary/impact                {scope, termsUpsert, termsDelete, namingConfig?} → GlossaryImpact
+ *   - POST   …/glossary/impact                {scope, termsUpsert, termsDelete, namingConfig?} → GlossaryImpact {renamed, outOfSync}
  */
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 
@@ -75,7 +75,7 @@ export interface GlossaryValidation {
   ok: boolean;
   conflicts: {
     glossaryDuplicate: { id: string; term: string; abbrev: string } | null;
-    corpus: GlossaryCorpusHit[]; // muestra capada a 50
+    corpus: GlossaryCorpusHit[]; // doc 95 D1: la lista COMPLETA (antes muestra de 50)
     total: number;               // corpus total + 1 si hay duplicado
   };
 }
@@ -85,24 +85,22 @@ export interface GlossaryValidation {
 export const validateTerm = (projectId: string, term: string, scope: UdpScope) =>
   apiPost<GlossaryValidation>(`${DICT(projectId)}/validate`, { term, scope });
 
-// ── Dry-run del re-derivado (doc 94 D7): el aviso sale solo con impacto real ──
-export interface GlossaryImpactSample {
+// ── Dry-run del re-derivado (docs 94 D7 · 95 D3): qué renombra el borrador y qué ya estaba desfasado ──
+export interface GlossaryImpactRow {
   entity: 'column' | 'table';
-  /** Tabla (físico) de la columna, o la tabla misma si `entity` = 'table'. */
+  /** Tabla de la columna, o la tabla misma si `entity` = 'table'. */
+  tableId: string;
+  /** Nombre físico de esa tabla. */
   table: string;
   from: string;
   to: string;
 }
 
 export interface GlossaryImpact {
-  /** Nombres físicos de COLUMNAS (campos) que cambiarían. */
-  columns: number;
-  /** Tablas distintas a las que pertenecen esas columnas. */
-  columnTables: number;
-  /** Nombres físicos de TABLAS que cambiarían. */
-  tables: number;
-  /** Muestra (cap 20). */
-  sample: GlossaryImpactSample[];
+  /** Nombres que renombra el borrador (lista completa). */
+  renamed: GlossaryImpactRow[];
+  /** Nombres ya desfasados de la regla vigente que el apply repara de paso. */
+  outOfSync: GlossaryImpactRow[];
 }
 
 export interface GlossaryImpactBody {
@@ -147,23 +145,35 @@ export interface ParentDomainFull {
   description?: string;
 }
 
-/** Fila del impacto agrupado por tabla (F2 #2). */
-export interface DomainImpactTable {
+// ── Doc 95 D7: impacto EXACTO por columna (la misma regla que aplica la cascada) ──
+export type DomainColumnStatus = 'change' | 'override' | 'differs';
+
+export interface DomainColumnImpactRow {
+  columnId: string;
   tableId: string;
   schema: string | null;
-  physicalName: string;
-  logicalName: string;
-  columns: number;    // columnas del dominio en esta tabla
-  overridden: number; // de esas, con override manual (NO cambian)
+  table: string;
+  tableLogical: string;
+  column: string;
+  attribute: string;
+  physicalType: string | null;
+  logicalType: string | null;
+  /** Estado por faceta que cambia (null = esa faceta no cambia). */
+  physical: DomainColumnStatus | null;
+  logical: DomainColumnStatus | null;
+  status: DomainColumnStatus;
 }
 
-export interface DomainImpact {
-  columnsUsing: number;
-  willUpdate: number;
-  overridden: number;
-  totalTables: number;    // tablas que matchean q (sin q = todas)
-  modelsAffected: number; // canvases cuyos tableIds intersectan las afectadas
-  tables: DomainImpactTable[];
+export interface DomainColumnImpact {
+  /** Tipos ACTUALES del dominio. */
+  domain: { physical: string | null; logical: string | null };
+  /** Tipos nuevos (homologados) de las facetas que cambian. */
+  targets: { physical?: string | null; logical?: string | null };
+  /** Globales (no dependen de q/status). `tables` = todas; `changeTables` = las que cambian; `models` = modelos de las que cambian (sin tipos nuevos, de todas). */
+  totals: { columns: number; tables: number; change: number; changeTables: number; override: number; differs: number; models: number };
+  /** Filas que matchean q/status (para paginar). */
+  matched: number;
+  rows: DomainColumnImpactRow[];
 }
 
 export const listDomainsGlobal = (projectId: string) => apiGet<ParentDomainFull[]>(DOMAINS(projectId));
@@ -173,19 +183,17 @@ export const updateDomainGlobal = (projectId: string, id: string, d: Omit<Parent
   apiPut<ParentDomainFull>(`${DOMAINS(projectId)}/${encodeURIComponent(id)}`, d);
 export const deleteDomainGlobal = (projectId: string, id: string) =>
   apiDelete<{ id: string }>(`${DOMAINS(projectId)}/${encodeURIComponent(id)}`);
-/** Impacto detallado de un cambio de tipo del dominio (F2 #2): totales del
- *  proyecto + tablas agrupadas; `q` busca por nombre de tabla server-side. */
-export const getDomainImpact = (
+/** Doc 95 D7: vista previa por columna de re-tipar el dominio (`physicalTo`/`logicalTo`);
+ *  sin tipos nuevos mide quién lo sigue hoy. `limit: 0` = solo totales. */
+export const getDomainColumnImpact = (
   projectId: string,
   id: string,
-  opts: { q?: string; offset?: number; limit?: number } = {},
+  opts: { physicalTo?: string; logicalTo?: string; q?: string; status?: DomainColumnStatus; offset?: number; limit?: number } = {},
 ) => {
   const params = new URLSearchParams();
-  if (opts.q) params.set('q', opts.q);
-  if (opts.offset != null) params.set('offset', String(opts.offset));
-  if (opts.limit != null) params.set('limit', String(opts.limit));
+  for (const [k, v] of Object.entries(opts)) if (v !== undefined && v !== '') params.set(k, String(v));
   const qs = params.toString();
-  return apiGet<DomainImpact>(`${DOMAINS(projectId)}/${encodeURIComponent(id)}/impact${qs ? `?${qs}` : ''}`);
+  return apiGet<DomainColumnImpact>(`${DOMAINS(projectId)}/${encodeURIComponent(id)}/impact/columns${qs ? `?${qs}` : ''}`);
 };
 /** Aplica el `defaultDataType` actual del dominio a las columnas sin override. */
 export const propagateDomain = (projectId: string, id: string) =>

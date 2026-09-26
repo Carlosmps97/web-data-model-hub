@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 
 import ReportDesigner from '@/features/reporting/components/ReportDesigner';
+import SheetTemplateCard from '@/features/reporting/components/SheetTemplateCard';
 import SearchSelect from '@/features/modeler/components/SearchSelect';
 import { Button } from '@/components/ui';
 import { listProjects } from '@/services/projects.service';
@@ -471,6 +472,16 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
   const selectedCount = allSelected && partial && total != null ? total : selectedIds.size;
   const allRowsSelected = allSelected || (filtered.length > 0 && selectedIds.size === filtered.length);
 
+  // Filas a exportar: la selección, o TODAS las del proyecto (filtradas) con
+  // «Select all» y páginas pendientes (doc 92 D5). Las comparten el export por
+  // niveles y el de plantilla (doc 95 D11).
+  const resolveExportRows = useCallback(async (): Promise<ReportTableRow[]> => (
+    allSelected && partial
+      ? (await listReportTables(projectId, {})).filter((t) => passSearch(t) && passSchema(t) && passArea(t))
+      : selectedRows
+  ), [allSelected, partial, projectId, passSearch, passSchema, passArea, selectedRows]);
+  const fetchColumns = useCallback((ids: string[]) => fetchColumnsFor(projectId, ids), [projectId]);
+
   const toggleRow = (id: string) => {
     if (allSelected) {
       // Desmarcar una fila con todo seleccionado: modo explícito sobre lo cargado (S3).
@@ -587,9 +598,7 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
     try {
       // Doc 92 D5: Select all con páginas pendientes ⇒ TODAS las tablas del
       // proyecto (se bajan completas para el Excel, sin tocar la grilla).
-      const rows = allSelected && partial
-        ? (await listReportTables(projectId, {})).filter((t) => passSearch(t) && passSchema(t) && passArea(t))
-        : selectedRows;
+      const rows = await resolveExportRows();
       if (rows.length === 0) {
         toast.error('Select at least one row to export.');
         return;
@@ -946,6 +955,10 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
                 </div>
               </div>
             </div>
+
+            {/* Doc 95 D11: formatos fijos guardados (p. ej. QA_MODELO) */}
+            <SheetTemplateCard projectId={projectId} selectedCount={selectedCount} disabled={loading}
+              resolveTables={resolveExportRows} fetchColumns={fetchColumns} />
 
             <div className="dmh-rep-card dmh-rep-sumcard">
               <div className="dmh-rep-sumcard-title">Tables by subject area</div>

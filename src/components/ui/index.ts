@@ -25,3 +25,7 @@ export type { SegmentedControlProps, SegmentOption } from './SegmentedControl';
 export { default as Tooltip } from './Tooltip';
 export { default as Modal } from './Modal';
 export { default as ConfirmDialog } from './ConfirmDialog';
+
+// Doc 95 D4: lista de afectados compartida (virtualizada, con buscador).
+export { default as AffectedTable } from './AffectedTable';
+export type { AffectedColumn, AffectedTableProps } from './AffectedTable';

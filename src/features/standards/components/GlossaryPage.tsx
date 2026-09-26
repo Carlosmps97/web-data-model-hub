@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookOpenText, Lock, Pencil, Plus, Search, ShieldCheck, Trash2, Unlock, UploadCloud, X } from 'lucide-react';
+import { BookOpenText, Lock, Pencil, Plus, Search, ShieldCheck, Trash2, Unlock, UploadCloud } from 'lucide-react';
 import { toast } from 'sonner';
 import type { StandardsSnapshot, SnapshotTerm, ApplyStandardsBody } from '../standards.service';
 import { applyStandards } from '../standards.service';
 import { validateTerm, lockTerm, unlockTerm, glossaryImpact } from '@/services/naming.service';
-import type { GlossaryImpact, UdpScope } from '@/services/naming.service';
+import type { GlossaryImpact, GlossaryValidation, UdpScope } from '@/services/naming.service';
 import { useAuthStore } from '@/store/useAuthStore';
-import { termsToValidate, conflictLines, impactTotal, impactSummary, impactSampleLines, impactNote } from '../glossaryValidation';
+import { termsToValidate, needsConfirm } from '../glossaryValidation';
+import GlossaryApplyDialog from './GlossaryApplyDialog';
+import GlossaryConflictDialog from './GlossaryConflictDialog';
 
 // ── Preview físico client-side (para el edit en vivo, antes de aplicar) ──
 // Réplica mínima del motor: longest-match sobre los términos del scope + case + separador.
@@ -51,7 +53,9 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
 
   // F2 #1: candado admin + dialog de conflictos de validación.
   const isAdmin = useAuthStore((s) => s.has('admin.manage'));
-  const [conflicts, setConflicts] = useState<{ term: string; lines: string[] } | null>(null);
+  const [conflicts, setConflicts] = useState<{ term: string; validation: GlossaryValidation } | null>(null);
+  // Doc 95 D5: resultado de Validate por fila (id → término que pasó sin conflictos).
+  const [validated, setValidated] = useState<Record<string, string>>({});
   const [checking, setChecking] = useState<string | null>(null); // id de la fila validándose
   // Doc 94 D7: impacto REAL del apply (dry-run); el aviso solo sale si > 0.
   const [impact, setImpact] = useState<GlossaryImpact | null>(null);
@@ -87,7 +91,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     setMaxLen(Number(snapshot.namingConfig[scope].maxLength ?? 150));
     setEditing(true);
   };
-  const cancel = () => { setEditing(false); setConfirm(false); setImpact(null); };
+  const cancel = () => { setEditing(false); setConfirm(false); setImpact(null); setValidated({}); };
   const switchScope = (s: UdpScope) => { if (editing) return; setScope(s); };
 
   const live: Draft[] = editing ? terms.filter((t) => !t._deleted) : snapshot.dict.filter((t) => t.scope === scope);
@@ -113,15 +117,16 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
   }, [terms, sep, casing, maxLen, snapshot.dict, scope, cfg0]);
 
   // Validación on-demand de una fila NUEVA (botón junto al alta). El backend
-  // igual re-valida al guardar: esto es cortesía de UX.
+  // igual re-valida al guardar: esto es cortesía de UX. Doc 95 D5: el resultado
+  // queda visible en la fila (chip), no en un toast que se pierde.
   const validateDraft = async (t: Draft) => {
     const term = t.term.trim();
     if (!term) { toast.error('Type the term before validating'); return; }
     setChecking(t.id);
     try {
       const v = await validateTerm(projectId, term, scope);
-      if (v.ok) toast.success(`'${term}' has no conflicts`);
-      else setConflicts({ term, lines: conflictLines(v) });
+      if (v.ok) setValidated((m) => ({ ...m, [t.id]: term }));
+      else setConflicts({ term, validation: v });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't validate");
     } finally { setChecking(null); }
@@ -162,7 +167,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     toast.success(renamed
       ? `Standards applied · ${v.label} · ${renamed} physical name${renamed === 1 ? '' : 's'} changed`
       : `Saved · ${v.label} — no physical names change`);
-    setEditing(false); setConfirm(false); setImpact(null); onApplied();
+    setEditing(false); setConfirm(false); setImpact(null); setValidated({}); onApplied();
   };
 
   /** «Save & apply» (doc 94 D7): valida los términos nuevos/renombrados, mide el
@@ -175,7 +180,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
       // el corpus; el primero con conflictos corta (el backend re-valida igual).
       for (const term of termsToValidate(terms)) {
         const v = await validateTerm(projectId, term, scope);
-        if (!v.ok) { setConflicts({ term, lines: conflictLines(v) }); return; }
+        if (!v.ok) { setConflicts({ term, validation: v }); return; }
       }
       const body = buildBody();
       const cfg = body.namingConfig?.[scope];
@@ -185,7 +190,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
         termsDelete: body.termsDelete ?? [],
         ...(cfg ? { namingConfig: { separator: cfg.separator, case: cfg.case } } : {}),
       });
-      if (impactTotal(imp) === 0) { await commit(body); return; }
+      if (!needsConfirm(imp)) { await commit(body); return; }
       setImpact(imp); setConfirm(true);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't apply");
@@ -295,11 +300,16 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
           return (
             <div key={t.id} style={{ display: 'grid', gridTemplateColumns: gridCols, alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #F2F4F8', fontSize: 13, background: locked ? '#F1F3F6' : undefined }}>
               {editing && !locked ? <>
-                <input className="rd-input" style={inp} value={t.term} onChange={(e) => upd(setTerms, t.id, { term: e.target.value })} placeholder="term" />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                  <input className="rd-input" style={inp} value={t.term} onChange={(e) => upd(setTerms, t.id, { term: e.target.value })} placeholder="term" />
+                  {t._new && t.term.trim() !== '' && validated[t.id] === t.term.trim() && (
+                    <span style={okChip}>✓ No conflicts — renames nothing</span>
+                  )}
+                </div>
                 <input className="rd-input" style={{ ...inp, fontFamily: 'var(--mono, monospace)' }} value={t.abbrev} onChange={(e) => upd(setTerms, t.id, { abbrev: e.target.value })} placeholder="ABR" />
                 <div style={{ display: 'flex', gap: 6 }}>
                   {t._new && (
-                    <button onClick={() => validateDraft(t)} disabled={checking === t.id} title="Validate against glossary and catalog"
+                    <button onClick={() => validateDraft(t)} disabled={checking === t.id} title="Check conflicts (glossary and logical names)"
                       style={{ width: 28, height: 28, border: '1px solid #D4E0FF', background: '#EAF0FF', borderRadius: 7, color: '#2E5BFF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {checking === t.id ? <span className="rd-spin" /> : <ShieldCheck size={13} />}
                     </button>
@@ -335,65 +345,16 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
         </div>
       )}
 
-      {/* confirm dialog (15d) — doc 94 D7: solo cuando algún nombre físico cambia */}
+      {/* Doc 95 D3/D4: qué renombra el borrador y qué ya estaba desfasado, completo */}
       {confirm && impact && (
-        <div style={backdrop}>
-          <div style={{ width: 560, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
-              <div style={{ width: 42, height: 42, borderRadius: 11, background: '#EAF0FF', color: '#2E5BFF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><UploadCloud size={21} /></div>
-              <div style={{ flex: 1 }}><h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Rename {impactTotal(impact)} physical name{impactTotal(impact) === 1 ? '' : 's'}?</h2><p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>Your changes rename names that already exist. Manually overridden names are kept.</p></div>
-              <button onClick={() => { setConfirm(false); setImpact(null); }} style={iconClose}><X size={13} /></button>
-            </div>
-            <div style={{ padding: '18px 24px' }}>
-              <div style={{ ...th, marginBottom: 10 }}>What changes</div>
-              {[['added', diff.added], ['edited', diff.edited], ['removed', diff.removed]].map(([k, list]) => (list as string[]).map((s, i) => (
-                <div key={`${k}-${i}`} style={{ fontSize: 13, color: '#1A2B4A', padding: '4px 0' }}>· <span style={{ color: k === 'removed' ? '#C0392B' : k === 'added' ? '#0E8C6A' : '#56607A', fontWeight: 600 }}>{k}</span> {s}</div>
-              )))}
-              <div style={{ ...th, margin: '16px 0 8px' }}>Names that change</div>
-              {impactSummary(impact).map((line) => (
-                <div key={line} style={{ fontSize: 13, fontWeight: 600, color: '#1A2B4A', padding: '2px 0' }}>{line}</div>
-              ))}
-              <div style={{ maxHeight: 160, overflowY: 'auto', marginTop: 6 }}>
-                {impactSampleLines(impact).map((line, i) => (
-                  <div key={i} style={{ fontSize: 12, fontFamily: 'var(--mono, monospace)', color: '#56607A', padding: '2px 0' }}>{line}</div>
-                ))}
-              </div>
-              <div style={{ display: 'flex', gap: 12, background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '12px 15px', marginTop: 14, fontSize: 12.5, color: '#7A6220' }}>
-                {impactNote(scope, impact)}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 10, padding: '16px 24px 20px' }}>
-              <span style={{ flex: 1 }} />
-              <button onClick={() => { setConfirm(false); setImpact(null); }} disabled={busy} style={btnGhost}>Cancel</button>
-              <button onClick={apply} disabled={busy} style={btnPrimary}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Applying…' : 'Apply & rename'}</button>
-            </div>
-          </div>
-        </div>
+        <GlossaryApplyDialog scope={scope} impact={impact} diff={diff} busy={busy}
+          onCancel={() => { setConfirm(false); setImpact(null); }} onApply={apply} />
       )}
 
-      {/* dialog de conflictos de validación (F2 #1) */}
+      {/* Doc 95 D1: el término no se puede agregar — por qué y todas las columnas */}
       {conflicts && (
-        <div style={backdrop}>
-          <div style={{ width: 560, maxHeight: '78vh', display: 'flex', flexDirection: 'column', background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden' }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ display: 'flex', gap: 14, padding: '22px 24px 18px', borderBottom: '1px solid #EEF1F6' }}>
-              <div style={{ width: 42, height: 42, borderRadius: 11, background: '#FBEEF0', color: '#D6455D', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><ShieldCheck size={21} /></div>
-              <div style={{ flex: 1 }}>
-                <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>The term &lsquo;{conflicts.term}&rsquo; has conflicts</h2>
-                <p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5' }}>It already exists in the glossary or appears as a full phrase in the logical name of existing {scope === 'table' ? 'tables' : 'columns'} — adding it would rename them. It can&apos;t be added.</p>
-              </div>
-              <button onClick={() => setConflicts(null)} style={iconClose}><X size={13} /></button>
-            </div>
-            <div style={{ padding: '16px 24px', overflowY: 'auto' }}>
-              {conflicts.lines.map((line, i) => (
-                <div key={i} style={{ fontSize: 13, color: '#1A2B4A', padding: '5px 0', borderBottom: '1px solid #F5F7FA' }}>· {line}</div>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 10, padding: '14px 24px 20px' }}>
-              <span style={{ flex: 1 }} />
-              <button onClick={() => setConflicts(null)} style={btnPrimary}>Got it</button>
-            </div>
-          </div>
-        </div>
+        <GlossaryConflictDialog term={conflicts.term} scope={scope} validation={conflicts.validation}
+          onClose={() => setConflicts(null)} />
       )}
     </div>
   );
@@ -409,7 +370,6 @@ function del(set: React.Dispatch<React.SetStateAction<Draft[]>>, id: string) {
 
 const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', height: 36, padding: '0 14px', border: '1px solid #E2E6EE', background: '#F7F9FC', color: '#1A2B4A', borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--mono, monospace)' };
 const inp: React.CSSProperties = { height: 32, fontSize: 13, marginRight: 8 };
-const backdrop: React.CSSProperties = { position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(20,28,45,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
-const iconClose: React.CSSProperties = { width: 30, height: 30, borderRadius: 8, border: '1px solid #E6EAF0', background: '#fff', color: '#8A93A5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const okChip: React.CSSProperties = { alignSelf: 'flex-start', fontSize: 11, fontWeight: 600, color: '#0E8C6A', background: '#E8F7F1', border: '1px solid #C6EADC', borderRadius: 6, padding: '1px 7px' };
 const btnGhost: React.CSSProperties = { height: 40, padding: '0 18px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
 const btnPrimary: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };

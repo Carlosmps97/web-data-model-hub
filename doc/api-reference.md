@@ -824,6 +824,22 @@ export async function exportCsv(spec: ReportSpec): Promise<void> {
 
 Endpoint: `POST /api/reporting/export` con body `ReportSpec`, respuesta `text/csv` en streaming.
 
+#### 3.4.3. Plantillas de hoja Excel (`sheetTemplates.service.ts`, doc 95 D11)
+
+Formato Excel FIJO guardado como dato del proyecto (nombre de hoja + columnas encabezado → dato del modelo). La card «Export with a template» de Reporting (`SheetTemplateCard`) baja UNA hoja con la plantilla elegida sobre la MISMA selección y filtros que el export por niveles; «Manage templates…» (`SheetTemplateEditor`) las crea y edita sin redesplegar. Permisos de los saved reports (spec D11): cada uno ve las suyas + las compartidas y crea las suyas; edita y borra el dueño y un admin (`admin.manage`) también las compartidas (`canEditTemplate`, espejo del backend); una compartida ajena se ve en solo lectura y se puede duplicar («Duplicate»). La built-in «QA_MODELO» (14 columnas) la siembra el one-shot (compartida, dueño `system`) o el botón «Create QA_MODELO template».
+
+| Función | Método | Ruta | Body | Respuesta |
+|---|---|---|---|---|
+| `listSheetTemplates(pid)` | GET | `/api/projects/{pid}/sheet-templates` | — | `SheetTemplate[]` (las suyas + las compartidas, por nombre; cada una con `owner` y `shared`) |
+| `createSheetTemplate(pid, body)` | POST | `…/sheet-templates` | `SheetTemplateBody` `{ name, sheetName, description?, columns: [{header, source}], shared }` | `SheetTemplate` (dueño = quien la crea); 422 forma; 409 nombre repetido |
+| `updateSheetTemplate(pid, id, body)` | PUT | `…/sheet-templates/{id}` | `SheetTemplateBody` | `SheetTemplate`; 404 (no existe o no es tuya) · 409 · 422 |
+| `deleteSheetTemplate(pid, id)` | DELETE | `…/sheet-templates/{id}` | — | `{ deleted }` |
+| `createDefaultSheetTemplate(pid)` | POST | `…/sheet-templates/default` | — | `SheetTemplate` «QA_MODELO»; 409 si ya la tiene |
+
+La lógica pura vive en `features/reporting/lib/sheetTemplates.ts` (testeada con vitest): el catálogo `SHEET_SOURCES` (`table.<campo>` · `column.<campo>`; los UDP van como `table.udp:<nombre>` · `column.udp:<nombre>`), `sourceOptions`, `templateRows` (arma las filas con las MISMAS filas ordenadas del export tabular, `reportRows`; un `source` desconocido deja la celda vacía), `templateProblems` (validación del editor, espejo de la del backend) y `templateFileName` (`<plantilla>-<AAAA-MM-DD>.xlsx`). Sumar un dato nuevo al catálogo es solo front: el backend valida únicamente la FORMA del `source`.
+
+Doc 95 D12: el botón CSV del Report Designer exporta, en modo SQL, la SQL escrita (validada por el servidor a `QuerySpec`, `lib/exportSpec.ts` `specForExport`), no el spec que quedó del Builder.
+
 ### 3.5. Data Standards (Glossary + Parent Domains + UDP + Naming + DDL Export Rules)
 
 Este módulo combina tres services: `naming.service` (configuración global de nombres y dominios, escritura directa e inmediata), `standards.service` (snapshot + versionado independiente con apply/rollback/history) y `ddlRules.service` (5ta pestaña "DDL export rules", doc 30).
@@ -840,8 +856,8 @@ Estos recursos son configuración **del proyecto** (doc 75 D3; NO parte de un pu
 | `createTerm(projectId, x)` | POST | `/api/projects/{pid}/glossary` | `{ term, abbrev, scope }` | `DictTerm` |
 | `updateTerm(projectId, id, x)` | PUT | `/api/projects/{pid}/glossary/{id}` | `{ term, abbrev, scope }` | `DictTerm` |
 | `deleteTerm(projectId, id)` | DELETE | `/api/projects/{pid}/glossary/{id}` | — | `{ id }` |
-| `validateTerm(projectId, term, scope)` | POST | `/api/projects/{pid}/glossary/validate` | `{ term, scope }` | `GlossaryValidation` — duplicado en glosario + hits en el corpus de nombres lógicos DEL SCOPE (muestra capada a 50); cortesía de UX, el backend re-valida en cada write |
-| `glossaryImpact(projectId, body)` | POST | `/api/projects/{pid}/glossary/impact` | `{ scope, termsUpsert, termsDelete, namingConfig? }` | `GlossaryImpact` `{ columns, columnTables, tables, sample }` — dry-run (doc 94 D7): «Save & apply» del glosario aplica directo si da 0 y solo con impacto muestra el aviso con los números |
+| `validateTerm(projectId, term, scope)` | POST | `/api/projects/{pid}/glossary/validate` | `{ term, scope }` | `GlossaryValidation` — duplicado en glosario + hits en el corpus de nombres lógicos DEL SCOPE (lista COMPLETA desde el doc 95 D1; antes muestra de 50); cortesía de UX, el backend re-valida en cada write. La pinta `GlossaryConflictDialog` (columnas vs tablas, «blocked») |
+| `glossaryImpact(projectId, body)` | POST | `/api/projects/{pid}/glossary/impact` | `{ scope, termsUpsert, termsDelete, namingConfig? }` | `GlossaryImpact` `{ renamed, outOfSync }` — dry-run (docs 94 D7 · 95 D3): listas COMPLETAS de `GlossaryImpactRow` `{ entity: 'column' \| 'table', tableId, table, from, to }`; `renamed` = lo que renombra el borrador, `outOfSync` = nombres ya desfasados de la regla vigente que el apply repara de paso. «Save & apply» aplica directo si ambas vienen vacías; si no, `GlossaryApplyDialog` las muestra en tablas separadas (caracteres invisibles visibles) |
 | `lockTerm(projectId, id)` / `unlockTerm(projectId, id)` | POST | `/api/projects/{pid}/glossary/{id}/lock` · `/unlock` | `{}` | `DictTerm` — solo `admin.manage`; una entrada bloqueada queda intocable para todos |
 
 **Configuración de naming (separador / casing por scope)**
@@ -868,10 +884,10 @@ El `naming_config` incluye además `maxLength` por scope (doc 24), que el backen
 | `createDomainGlobal(projectId, d)` | POST | `/api/projects/{pid}/domains` | `Omit<ParentDomainFull,'id'>` | `ParentDomainFull` |
 | `updateDomainGlobal(projectId, id, d)` | PUT | `/api/projects/{pid}/domains/{id}` | `Omit<ParentDomainFull,'id'>` | `ParentDomainFull` |
 | `deleteDomainGlobal(projectId, id)` | DELETE | `/api/projects/{pid}/domains/{id}` | — | `{ id }` |
-| `getDomainImpact(projectId, id, {q, offset, limit})` | GET | `/api/projects/{pid}/domains/{id}/impact?q=&offset=&limit=` | — | `DomainImpact` |
+| `getDomainColumnImpact(projectId, id, {physicalTo, logicalTo, q, status, offset, limit})` | GET | `/api/projects/{pid}/domains/{id}/impact/columns?…` | — | `DomainColumnImpact` `{ domain, targets, totals, matched, rows }` |
 | `propagateDomain(projectId, id)` | POST | `/api/projects/{pid}/domains/{id}/propagate` | — | `{ updated }` |
 
-`getDomainImpact` previsualiza el impacto de un cambio de tipo del dominio (totales globales + filas agrupadas por tabla, con búsqueda server-side por nombre de tabla y paginación; respeta overrides manuales); `propagateDomain` aplica el `defaultDataType` a las columnas sin override.
+`getDomainColumnImpact` (doc 95 D7; reemplaza a `getDomainImpact`, retirado del front) devuelve el impacto EXACTO por columna con la misma regla que la cascada del apply (`cascade.py`): `totals` globales `{ columns, tables, change, changeTables, override, differs, models }` y una fila por columna (`DomainColumnImpactRow`: tabla, columna, atributo, tipos actuales, estado por faceta y `status` `change` \| `override` \| `differs`), con búsqueda (`q`) y filtro (`status`) server-side y paginación (`limit` ≤ 2000; `limit=0` = solo totales, para el panel del dominio: «Used by N columns in M tables across K data models»). Lo pinta `DomainCascadeDialog` con `AffectedTable` (§3.5.3); cada página se une con `mergePage` (una respuesta repetida o fuera de orden se descarta) y hay una sola en vuelo. `propagateDomain` aplica el `defaultDataType` a las columnas sin override.
 
 #### 3.5.2. Snapshot + versionado + UDP (`standards.service.ts`)
 
@@ -883,6 +899,8 @@ Backend `/api/projects/{pid}/standards/*`. Aquí se agrupa un batch de cambios y
 | `getVersions(projectId)` | GET | `/api/projects/{pid}/standards/versions` | — | `StandardsVersion[]` |
 | `applyStandards(projectId, body)` | POST | `/api/projects/{pid}/standards/apply` | `ApplyStandardsBody` | `StandardsVersion` (permiso `standards.edit`) |
 | `rollbackStandards(projectId, targetSeq)` | POST | `/api/projects/{pid}/standards/rollback` | `{ targetSeq }` | `StandardsVersion` (permiso `rollback`) |
+| `getRollbackPreview(projectId, targetSeq)` | GET | `/api/projects/{pid}/standards/rollback-preview?targetSeq=N` | — | `RollbackPreview` `{ target: {seq, label}, domains: RollbackPreviewDomain[], namesRederived }` — doc 95 D9: qué dominios re-tipa (`{id, name, physical: {from,to}\|null, logical: {from,to}\|null, columns}`) y si re-deriva nombres; lo muestra el confirm del rollback en `StandardsScreen` |
+| `getDomainHistory(projectId, domainId)` | GET | `/api/projects/{pid}/standards/domains/{domainId}/history` | — | `DomainHistoryEntry[]` `{ seq, label, title, author, createdAt, kind, state, changed }`, más reciente primero — doc 95 D8: panel «History» del dominio con «Revert to vN» (carga `state` en el editor; se aplica con el popup de cascada) |
 | `getUdpDefs(projectId)` | GET | `/api/projects/{pid}/udp` | — | `UdpDefinition[]` |
 | `getStandardsSummary(projectId)` | GET | `/api/projects/{pid}/standards/summary` | — | `{ glossary, domains, udp, rules, naming }` (asistente «New project», bloques `STANDARDS_BLOCKS`) |
 
@@ -935,6 +953,10 @@ El editor serializa la regla a YAML y de vuelta client-side (`ruleToYaml` / `yam
 | `renderWithRules(args)` | POST | `/api/projects/{pid}/ddl-rules/render` | ver abajo | `RenderedExport` (permiso `export`) |
 
 El payload del `render` se arma con el estado EFECTIVO que el canvas está exportando (drafts incluidos): `ruleIds`, `model` (nombre + `udpValues` del canvas), `options` del modal (`identifierCase`, `quoteIdentifiers`, `typeCase`, `createTable`, `viewTagsAs`, `includeKeys`, `tableFormat`, `external`, `location`, `locationFolderCase`, `includePartitions`, `partitionsLast` — doc 93), `tables[]` (cada una con su doc, sus columnas con `udpValues` y `ddlType`, y su `baseSql` generado client-side) y `views[]` (con `sql`, `sourceTableIds` y el flag `businessView` = `showOnCanvas`). La respuesta trae `statements[]`, `log[]` (applied/skipped por regla), `rulesetVersion`, `applied` y `skipped`; el `.sql` final se ensambla en el cliente con el sello de la versión de reglas usada. Sin reglas seleccionadas, el export NO pasa por este endpoint y sale byte-idéntico al generador client-side.
+
+#### 3.5.3. Listas de afectados (`AffectedTable`, doc 95 D4)
+
+Componente genérico del design system (`@/components/ui`: `AffectedTable` + tipos `AffectedColumn<T>` / `AffectedTableProps<T>`) para toda lista de «a qué afecta» dentro de un popup: tabla virtualizada (`@tanstack/react-virtual`, miles de filas sin costo), encabezado fijo, buscador, contador «N of M», `toolbar` opcional y `onEndReached` para paginar en el servidor. Las columnas se declaran como dato (`{ key, header, width, mono?, render, title? }`). La lógica pura vive en `components/ui/affectedRows.ts` (`showInvisible` —pinta cada NBSP o carácter de ancho cero como `⍽`— e `invisibleChars` —los nombra, p. ej. `U+00A0 no-break space`—, `filterRows` «contiene» sin tildes ni mayúsculas, `countLabel` y `mergePage` para el paginado del servidor), testeada con vitest. Lo usan: conflictos y apply del glosario (`GlossaryConflictDialog`, `GlossaryApplyDialog`), borrado de un término usado, la cascada de un dominio (`DomainCascadeDialog`) y el confirm del rollback de Data Standards.
 
 ### 3.6. Admin / RBAC (Screen 14)
 
@@ -1064,6 +1086,8 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Reporting | GET/POST | `/api/reporting/reports` | sesión | query.service |
 | Reporting | PUT/DELETE | `/api/reporting/reports/{id}` | sesión (por-usuario) | query.service |
 | Reporting | POST | `/api/reporting/export` | sesión | query.service (fetch crudo) |
+| Reporting | GET | `/api/projects/{pid}/sheet-templates` | sesión | sheetTemplates.service (doc 95) |
+| Reporting | POST/PUT/DELETE | `/api/projects/{pid}/sheet-templates[/default \| /{id}]` | sesión (dueño; admin.manage en las compartidas) | sheetTemplates.service (doc 95) |
 | Standards | GET | `/api/projects/{pid}/glossary` | sesión | naming.service |
 | Standards | POST | `/api/projects/{pid}/glossary` | standards.edit | naming.service |
 | Standards | PUT/DELETE | `/api/projects/{pid}/glossary/{id}` | standards.edit | naming.service |
@@ -1077,12 +1101,14 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Standards | GET | `/api/projects/{pid}/domains` | sesión | naming / governance |
 | Standards | POST | `/api/projects/{pid}/domains` | standards.edit | naming.service |
 | Standards | PUT/DELETE | `/api/projects/{pid}/domains/{id}` | standards.edit | naming.service |
-| Standards | GET | `/api/projects/{pid}/domains/{id}/impact` | sesión | naming.service |
+| Standards | GET | `/api/projects/{pid}/domains/{id}/impact/columns` | sesión | naming.service (`getDomainColumnImpact`, doc 95) |
 | Standards | POST | `/api/projects/{pid}/domains/{id}/propagate` | standards.edit | naming.service |
 | Standards | GET | `/api/projects/{pid}/standards/snapshot` | sesión | standards.service |
 | Standards | GET | `/api/projects/{pid}/standards/versions` | sesión | standards.service |
 | Standards | POST | `/api/projects/{pid}/standards/apply` | standards.edit | standards / ddlRules.service |
 | Standards | POST | `/api/projects/{pid}/standards/rollback` | rollback | standards.service |
+| Standards | GET | `/api/projects/{pid}/standards/rollback-preview` | sesión | standards.service (`getRollbackPreview`, doc 95) |
+| Standards | GET | `/api/projects/{pid}/standards/domains/{id}/history` | sesión | standards.service (`getDomainHistory`, doc 95) |
 | Standards | GET | `/api/projects/{pid}/udp` | sesión | standards.service |
 | DDL rules | GET | `/api/projects/{pid}/ddl-rules` | sesión | ddlRules.service / rulesBridge |
 | DDL rules | GET | `/api/projects/{pid}/ddl-rules/config` | sesión | ddlRules.service |
@@ -1099,7 +1125,7 @@ Consolidado de todo lo que el frontend consume, con el guard que exige el backen
 | Admin | GET | `/api/admin/permissions` | admin.manage | admin.service |
 | Admin | GET | `/api/admin/audit` | admin.manage | admin.service |
 
-Filas retiradas: `GET /api/projects/{id}` (2026-07-06; la ruta no existe en el backend) y, con el doc 75 (2026-09-08), `GET /api/me`, `POST …/glossary/logicalize`, `PUT /api/subject-areas/{id}/udp`, `PUT/DELETE /api/projects/{id}` y `GET /api/versions/published` global (ahora por proyecto). Las escrituras directas de vistas/esquemas quedan anotadas "solo sin changeset" porque con versión activa esas mutaciones viajan como cambios del changeset (`PUT /{id}/changes`), no por su REST directo.
+Filas retiradas: `GET /api/projects/{id}` (2026-07-06; la ruta no existe en el backend) y, con el doc 75 (2026-09-08), `GET /api/me`, `POST …/glossary/logicalize`, `PUT /api/subject-areas/{id}/udp`, `PUT/DELETE /api/projects/{id}` y `GET /api/versions/published` global (ahora por proyecto). Con el doc 95 (2026-09-25), `GET /api/projects/{pid}/domains/{id}/impact` (agrupado por tabla): el front usa `…/impact/columns`; la ruta vieja sigue en el backend. Las escrituras directas de vistas/esquemas quedan anotadas "solo sin changeset" porque con versión activa esas mutaciones viajan como cambios del changeset (`PUT /{id}/changes`), no por su REST directo.
 
 ---
 

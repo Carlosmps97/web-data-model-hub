@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { termsToValidate, conflictLines, impactTotal, impactSummary, impactSampleLines, impactNote } from './glossaryValidation';
-import type { GlossaryValidation } from '@/services/naming.service';
+import {
+  termsToValidate, conflictRows, conflictMessage, highlightParts, needsConfirm, impactSummary, applyTitle,
+  outOfSyncReason, impactNote,
+} from './glossaryValidation';
+import type { GlossaryImpact, GlossaryImpactRow, GlossaryValidation } from '@/services/naming.service';
 
 describe('termsToValidate', () => {
   it('devuelve solo filas nuevas, vivas y con texto (trim aplicado)', () => {
@@ -17,104 +20,97 @@ describe('termsToValidate', () => {
     expect(termsToValidate([])).toEqual([]);
   });
 
-  // Controller resolution (2026-07-11): el backend valida TAMBIÉN los términos
-  // renombrados por texto (con exclude_id). Una fila existente cuyo `term`
-  // cambió vs `_orig` (case/espacios-insensible) debe validarse.
   it('incluye filas existentes cuyo texto cambió vs el original', () => {
     const drafts = [
-      { term: 'codigo nuevo', _orig: 'codigo viejo' },        // renombrada → valida
-      { term: '  Codigo  ', _orig: 'codigo' },                // solo case/espacios → NO valida
-      { term: 'sin cambios', _orig: 'sin cambios' },          // idéntica → NO valida
-      { term: 'nueva', _new: true },                          // nueva → valida
-      { term: 'renombrada borrada', _orig: 'orig', _deleted: true }, // borrada → NO valida
-      { term: '   ', _orig: 'algo' },                         // renombrada a vacío → NO valida
+      { term: 'codigo nuevo', _orig: 'codigo viejo' },
+      { term: '  Codigo  ', _orig: 'codigo' },
+      { term: 'sin cambios', _orig: 'sin cambios' },
+      { term: 'nueva', _new: true },
+      { term: 'renombrada borrada', _orig: 'orig', _deleted: true },
+      { term: '   ', _orig: 'algo' },
     ];
     expect(termsToValidate(drafts)).toEqual(['codigo nuevo', 'nueva']);
   });
 });
 
-describe('conflictLines', () => {
+// Doc 95 D1 — el popup de conflictos dice QUÉ se bloquea y lista todo.
+describe('popup de conflictos', () => {
   const base: GlossaryValidation = {
     ok: false,
     conflicts: {
-      glossaryDuplicate: { id: 't1', term: 'codigo', abbrev: 'COD' },
+      glossaryDuplicate: null,
       corpus: [
-        { entity: 'table', tableName: 'CLIENTE', columnName: null, logicalName: 'codigo cliente' },
-        { entity: 'column', tableName: 'CTA', columnName: 'CODIGOCTAPEN', logicalName: 'codigo cuenta en soles' },
+        { entity: 'column', tableName: 'HM_A', columnName: 'NUMXBCONSOLIDADO', logicalName: 'Numero XB Consolidado' },
+        { entity: 'column', tableName: 'HM_A', columnName: 'FLGCONSOLIDADO', logicalName: 'Flag Consolidado' },
+        { entity: 'column', tableName: 'HM_B', columnName: 'COLCONSOLIDADO', logicalName: 'Coleccion Consolidado' },
       ],
       total: 3,
     },
   };
 
-  it('lista duplicado + corpus distinguiendo tabla/columna', () => {
-    expect(conflictLines(base)).toEqual([
-      'Already in the glossary: codigo → COD',
-      'Table CLIENTE · "codigo cliente"',
-      'Column CTA.CODIGOCTAPEN · "codigo cuenta en soles"',
+  it('filas completas: tabla · columna · nombre lógico', () => {
+    expect(conflictRows(base)).toHaveLength(3);
+    expect(conflictRows(base)[0]).toEqual({ table: 'HM_A', column: 'NUMXBCONSOLIDADO', logical: 'Numero XB Consolidado' });
+  });
+
+  it('dice que son COLUMNAS, cuántas, en cuántas tablas y que no se permite', () => {
+    expect(conflictMessage(base, 'column')).toEqual([
+      "It already appears in the logical name of 3 columns in 2 tables. Adding it would change their physical names, so it's not allowed.",
+      'Column terms only look at column names — tables are never renamed.',
     ]);
   });
 
-  it('sin duplicado no agrega la línea del glosario', () => {
-    const v: GlossaryValidation = {
-      ...base,
-      conflicts: { ...base.conflicts, glossaryDuplicate: null, total: 2 },
-    };
-    expect(conflictLines(v)[0]).toBe('Table CLIENTE · "codigo cliente"');
+  it('duplicado en el glosario', () => {
+    const v: GlossaryValidation = { ok: false, conflicts: { glossaryDuplicate: { id: 't1', term: 'Consolidado', abbrev: 'CONS' }, corpus: [], total: 1 } };
+    expect(conflictMessage(v, 'column')).toEqual(["It's already in the glossary: Consolidado → CONS."]);
   });
 
-  it('agrega el remanente cuando la muestra viene capada (total > muestra)', () => {
-    const v: GlossaryValidation = { ...base, conflicts: { ...base.conflicts, total: 60 } };
-    const lines = conflictLines(v);
-    // total 60 − 1 duplicado = 59 de corpus; muestra 2 → 57 más.
-    expect(lines[lines.length - 1]).toBe('… and 57 more matches');
+  it('término de tabla: habla de tablas', () => {
+    const v: GlossaryValidation = { ok: false, conflicts: { glossaryDuplicate: null, total: 1,
+      corpus: [{ entity: 'table', tableName: 'HM_CONSOLIDADO', columnName: null, logicalName: 'hm consolidado' }] } };
+    expect(conflictMessage(v, 'table')).toEqual([
+      "It already appears in the logical name of 1 table. Adding it would change their physical names, so it's not allowed.",
+    ]);
+  });
+
+  it('marca la frase completa en el nombre lógico, sin mayúsculas y no dentro de otra palabra', () => {
+    expect(highlightParts('Numero XB Cliente Score Covid Consolidado', 'consolidado')).toEqual([
+      { text: 'Numero XB Cliente Score Covid ', hit: false }, { text: 'Consolidado', hit: true }]);
+    expect(highlightParts('Consolidados totales', 'consolidado')).toEqual([{ text: 'Consolidados totales', hit: false }]);
   });
 });
 
-// Doc 94 D7/D8 — el aviso del glosario solo con impacto real, con números.
-describe('textos del impacto del glosario', () => {
-  const none = { columns: 0, columnTables: 0, tables: 0, sample: [] };
-  it('sin cambios de nombres ⇒ total 0 (se aplica sin aviso)', () => {
-    expect(impactTotal(none)).toBe(0);
-    expect(impactTotal({ ...none, columns: 2, tables: 1 })).toBe(3);
-  });
-  it('columnas (campos) y tablas por separado, en singular o plural', () => {
-    expect(impactSummary({ ...none, columns: 2, columnTables: 1 })).toEqual(['2 column (field) names in 1 table']);
-    expect(impactSummary({ ...none, columns: 1, columnTables: 1, tables: 3 }))
-      .toEqual(['1 column (field) name in 1 table', '3 table names']);
-    expect(impactSummary({ ...none, tables: 1 })).toEqual(['1 table name']);
-    expect(impactSummary(none)).toEqual([]);
-  });
-  it('muestra legible: TABLA · antes → después (columnas) y Table antes → después', () => {
-    expect(impactSampleLines({
-      ...none, columns: 1, tables: 1,
-      sample: [
-        { entity: 'column', table: 'MAESTROCLIENTES', from: 'CODCLI', to: 'CODCLTE' },
-        { entity: 'table', table: 'VIEJO', from: 'VIEJO', to: 'MAESTROCLIENTES' },
-      ],
-    })).toEqual(['MAESTROCLIENTES · CODCLI → CODCLTE', 'Table VIEJO → MAESTROCLIENTES']);
-  });
-  it('avisa cuántos más hay fuera de la muestra', () => {
-    const sample = [{ entity: 'column' as const, table: 'T', from: 'A', to: 'B' }];
-    expect(impactSampleLines({ ...none, columns: 5, columnTables: 1, sample }).at(-1)).toBe('… and 4 more');
-  });
-});
+// Doc 95 D3 — renombres del borrador vs nombres ya desfasados.
+describe('popup de apply', () => {
+  const col = (table: string, from: string, to: string, tableId = table): GlossaryImpactRow =>
+    ({ entity: 'column', tableId, table, from, to });
+  const none: GlossaryImpact = { renamed: [], outOfSync: [] };
 
-// Final review #10: la nota del diálogo depende del scope editado (y avisa si el
-// otro scope también se re-deriva por nombres ya desfasados).
-describe('impactNote', () => {
-  const none = { columns: 0, columnTables: 0, tables: 0, sample: [] };
-  it('términos de columna: nunca renombran tablas', () => {
-    expect(impactNote('column', { ...none, columns: 2, columnTables: 1 }))
-      .toBe('Column terms only rename column (field) names — never table names. You can roll back this version from the history.');
+  it('sin filas no hay nada que confirmar', () => {
+    expect(needsConfirm(none)).toBe(false);
+    expect(needsConfirm({ ...none, outOfSync: [col('T', 'A\u00a0', 'A')] })).toBe(true);
   });
-  it('términos de tabla: nunca renombran columnas', () => {
-    expect(impactNote('table', { ...none, tables: 1 }))
-      .toBe('Table terms only rename table names — never column names. You can roll back this version from the history.');
+
+  it('resume columnas (por tabla) y tablas, en singular o plural', () => {
+    expect(impactSummary([col('T1', 'A', 'B'), col('T1', 'C', 'D')])).toEqual(['2 column (field) names in 1 table']);
+    expect(impactSummary([col('T1', 'A', 'B'), { entity: 'table', tableId: 't9', table: 'X', from: 'X', to: 'Y' }]))
+      .toEqual(['1 column (field) name in 1 table', '1 table name']);
+    expect(impactSummary([])).toEqual([]);
   });
-  it('si el otro scope también cambia, lo explica (nombres ya desfasados)', () => {
-    expect(impactNote('column', { ...none, columns: 1, columnTables: 1, tables: 2 }))
-      .toContain('Some table names that are already out of sync with the current rules are re-derived too.');
-    expect(impactNote('table', { ...none, tables: 1, columns: 3, columnTables: 1 }))
-      .toContain('Some column names that are already out of sync with the current rules are re-derived too.');
+
+  it('título: renombra o solo aplica', () => {
+    expect(applyTitle({ renamed: [col('T', 'A', 'B')], outOfSync: [] })).toBe('Rename 1 physical name?');
+    expect(applyTitle({ renamed: [], outOfSync: [col('T', 'A\u00a0', 'A')] })).toBe('Apply glossary changes?');
+  });
+
+  it('explica el desfase: carácter invisible o regla distinta', () => {
+    expect(outOfSyncReason(col('T', 'DESGRUPOPRODUCTORBMPER\u00a0', 'DESGRUPOPRODUCTORBMPER')))
+      .toBe('Invisible character (U+00A0 no-break space)');
+    expect(outOfSyncReason(col('T', 'VIEJO', 'NUEVO'))).toBe('Differs from the naming rules');
+  });
+
+  it('nota según el scope', () => {
+    expect(impactNote('column')).toBe('Column terms only rename column (field) names — never table names. You can roll back this version from the history.');
+    expect(impactNote('table')).toBe('Table terms only rename table names — never column names. You can roll back this version from the history.');
   });
 });

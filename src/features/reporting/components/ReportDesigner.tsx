@@ -2,9 +2,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { Download, Play, Save, Table2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  createReport, emptySpec, exportCsv, getCatalog, listReports, runQuery, runSql,
+  createReport, emptySpec, exportCsv, getCatalog, listReports, runQuery, runSql, validateSql,
   type FieldDef, type QueryResult, type ReportSpec, type SavedReport, type ViewKey,
 } from '../query.service';
+import { specForExport } from '../lib/exportSpec';
 import FilterBuilder from './FilterBuilder';
 import ResultsGrid from './ResultsGrid';
 import SqlEditor from './SqlEditor';
@@ -73,9 +74,12 @@ export default function ReportDesigner({ projectId, projectPicker, onClose }: {
     return { ...s, groupBy, aggregations: groupBy.length ? [{ fn: 'count', as: 'count' }] : [] };
   });
 
+  // Doc 95 D12: en modo SQL se exporta la SQL (validada), no el spec del Builder.
   const doExport = async () => {
-    try { await exportCsv(spec); toast.success('CSV export started'); }
-    catch (e) { toast.error(e instanceof Error ? e.message : 'Export failed'); }
+    try {
+      await exportCsv(await specForExport(mode, spec, sqlText, (text) => validateSql(projectId, text)));
+      toast.success('CSV export started');
+    } catch (e) { toast.error(e instanceof Error ? e.message : 'Export failed'); }
   };
   const doSave = async () => {
     const name = window.prompt('Report name'); if (!name?.trim()) return;
