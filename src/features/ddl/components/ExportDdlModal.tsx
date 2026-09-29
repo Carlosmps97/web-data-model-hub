@@ -24,6 +24,7 @@
  * `VIEW_NEG-Y.sql` / `VIEW_TEC-Z.sql`, doc 93 D11 — each table and its views
  * under a folder named after the table) and **Copy to clipboard** (single
  * concatenated SQL). UI-only — no persistence.
+ * Doc 102: solo las vistas del canvas (`diagram.views`), no todas las de sus tablas.
  */
 'use client';
 
@@ -35,10 +36,10 @@ import {
 
 import { Button, Dialog } from '@/components/ui';
 import type { Diagram } from '@/features/modeler/services/modeler.service';
-import { listViewsForTables } from '@/services/views.service';
+import { canvasDdlViews } from '../canvasDdlViews';
 import {
   databricksDdl, ddlZipName, tableStatements, viewStatements,
-  type DdlDialect, type DdlTable, type DdlView,
+  type DdlDialect, type DdlTable,
 } from '../generators';
 import { oracleDdl, oracleForeignKeysFile, oracleTableStatements, oracleViewStatements } from '../oracle';
 import {
@@ -88,19 +89,10 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     [diagram],
   );
 
-  // Vistas del canvas (las tablas no traen sus vistas en el Diagram) — se cargan
-  // al abrir el modal, en UNA request por tableIds, y alimentan `includeViews`.
-  const [views, setViews] = useState<DdlView[]>([]);
-  useEffect(() => {
-    if (!open || !diagram?.tables.length) { setViews([]); return; }
-    let alive = true;
-    listViewsForTables(diagram.tables.map((t) => t.id))
-      // F3: sourceTableIds viajan al generador (multi-fuente, `FROM t1, t2`).
-      // showOnCanvas NO se mapea a propósito: no afecta el export.
-      .then((vs) => { if (alive) setViews(vs.map((v) => ({ id: v.id, tableId: v.tableId, sourceTableIds: v.sourceTableIds, name: v.name, schema: v.schema, sql: v.sql, description: v.description, sources: v.sources, showOnCanvas: v.showOnCanvas }))); })
-      .catch(() => { if (alive) setViews([]); });
-    return () => { alive = false; };
-  }, [open, diagram]);
+  // Doc 102: vistas del export = las MIEMBRO de este canvas (`diagram.views`, la
+  // misma lista que el canvas dibuja), no todas las vistas de sus tablas. F3:
+  // sourceTableIds viajan al generador (multi-fuente, `FROM t1, t2`).
+  const views = useMemo(() => canvasDdlViews(diagram), [diagram]);
 
   // DDL Export rules (doc 30 F10): habilitadas+válidas del catálogo, TODAS
   // marcadas por default. Sin selección el export sale byte-idéntico al de

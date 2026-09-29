@@ -8,9 +8,14 @@ import type { ReportColumnRow, ReportTableRow, ReportViewRow } from '@/services/
 
 export type SheetRow = Record<string, string | number>;
 
-/** Tope de ids de tabla por request al backend (largo de URL, mismo que el
- *  export histórico); lotes más grandes se parten con `chunk`. */
+/** Tope de tablas por pedido de COLUMNAS (doc 102: los ids van en el CUERPO;
+ *  el lote acota el tamaño de cada respuesta y permite pedirlos en paralelo);
+ *  lotes más grandes se parten con `chunk`. */
 export const COLUMN_BATCH = 300;
+
+/** Doc 102: tope de ids por pedido de VISTAS (van en el cuerpo; el backend
+ *  acepta hasta 5 000). */
+export const VIEW_BATCH = 2000;
 
 const yn = (b: boolean | null | undefined): string => (b ? 'Y' : '');
 const str = (v: string | null | undefined): string => v ?? '';
@@ -30,6 +35,7 @@ export function tableSheetRow(t: ReportTableRow, udpKeys: string[]): SheetRow {
     Table: t.physicalName,
     'Logical name': t.logicalName,
     Schema: t.schema,
+    Space: (t.spaces ?? []).join(', '),   // doc 102: carpeta raíz (sub-proyecto)
     'Subject areas': t.subjectAreas.join(', '),
     Diagrams: (t.diagrams ?? []).join(', '),
     '#Columns': t.columnCount,

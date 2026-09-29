@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import {
-  canEditTemplate, isKnownSource, moveItem, sourceLabel, sourceOptions, templateFileName, templateProblems, templateRows,
+  canEditTemplate, cleanFileName, fileNameProblem, isKnownSource, moveItem, sourceLabel, sourceOptions, templateFileName,
+  templateProblems, templateRows,
 } from './sheetTemplates';
 
 describe('canEditTemplate (final review #1: dueño + compartida, como los saved reports)', () => {
@@ -92,6 +93,46 @@ describe('editor de plantillas', () => {
   it('mover columnas y nombre de archivo', () => {
     expect(moveItem(['a', 'b', 'c'], 2, -1)).toEqual(['a', 'c', 'b']);
     expect(moveItem(['a'], 0, -1)).toEqual(['a']);
-    expect(templateFileName('QA_MODELO', new Date('2026-09-25T12:00:00Z'))).toBe('QA_MODELO-2026-09-25.xlsx');
+    expect(templateFileName({ name: 'QA_MODELO' }, new Date(2026, 8, 25, 12, 0, 0))).toBe('QA_MODELO-2026-09-25.xlsx');
+  });
+});
+
+describe('nombre del archivo (doc 102)', () => {
+  const QA = 'QA_REPORTE_{yyyy}-{MM}-{dd} {HH}{mm}{ss}';
+  it('resuelve los marcadores con la hora LOCAL (también a las 23:59)', () => {
+    expect(templateFileName({ name: 'QA_MODELO', fileName: QA }, new Date(2026, 8, 28, 15, 30, 45)))
+      .toBe('QA_REPORTE_2026-09-28 153045.xlsx');
+    expect(templateFileName({ name: 'QA_MODELO', fileName: QA }, new Date(2026, 8, 28, 23, 59, 59)))
+      .toBe('QA_REPORTE_2026-09-28 235959.xlsx');
+    expect(templateFileName({ name: 'X', fileName: 'Mes {MM}.xlsx' }, new Date(2026, 0, 5, 1, 2, 3))).toBe('Mes 01.xlsx');
+  });
+  it('sin nombre propio o con uno inválido cae a <plantilla>-<fecha local>', () => {
+    expect(templateFileName({ name: 'Mi plantilla', fileName: null }, new Date(2026, 8, 28, 23, 59, 0))).toBe('Mi_plantilla-2026-09-28.xlsx');
+    expect(templateFileName({ name: 'QA', fileName: 'A/B {yyyy}' }, new Date(2026, 8, 28))).toBe('QA-2026-09-28.xlsx');
+  });
+  it('limpia y valida como el backend', () => {
+    expect(cleanFileName('  QA {yyyy}.XLSX ')).toBe('QA {yyyy}');
+    expect(cleanFileName('.xlsx')).toBeNull();
+    expect(cleanFileName('   ')).toBeNull();
+    expect(fileNameProblem(null)).toBeNull();
+    expect(fileNameProblem(QA)).toBeNull();
+    expect(fileNameProblem('A/B')).toBe('The file name can\'t contain \\ / : * ? " < > |.');
+    expect(fileNameProblem('x'.repeat(121))).toBe('The file name can have at most 120 characters.');
+    expect(fileNameProblem('QA_{fecha}')).toBe('Unknown placeholder {fecha} in the file name — use {yyyy} {MM} {dd} {HH} {mm} {ss}.');
+    expect(fileNameProblem('QA_{yyyy')).toBe('Unbalanced braces in the file name — placeholders look like {yyyy}.');
+    expect(templateProblems({ name: 'QA', sheetName: 'QA', fileName: 'A:B', columns: [{ header: 'A', source: 'table.schema' }] }))
+      .toEqual(['The file name can\'t contain \\ / : * ? " < > |.']);
+  });
+});
+
+describe('campos Subject / Diagram / Space (doc 102)', () => {
+  it('salen en el grupo de tabla y se llenan desde la fila (separados por coma)', () => {
+    const groups = sourceOptions([]);
+    expect(groups[0].options.slice(0, 3).map((o) => o.value)).toEqual(['table.space', 'table.subject', 'table.diagram']);
+    const t: ReportTableRow = { ...T, spaces: ['CPYBCA'], subjectAreas: ['Despriorizado', 'Riesgos'], diagrams: ['D1'] };
+    const rows = templateRows({ columns: [{ header: 'SPACE', source: 'table.space' }, { header: 'SUBJECT', source: 'table.subject' },
+      { header: 'DIAGRAMA', source: 'table.diagram' }] }, [t], [COLS[0]]);
+    expect(rows[0]).toEqual({ SPACE: 'CPYBCA', SUBJECT: 'Despriorizado, Riesgos', DIAGRAMA: 'D1' });
+    expect(templateRows({ columns: [{ header: 'S', source: 'table.space' }] }, [T], [COLS[0]])[0]).toEqual({ S: '' });
   });
 });

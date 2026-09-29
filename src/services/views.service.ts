@@ -103,16 +103,26 @@ export function listViews(tableId: string): Promise<View[]> {
   return apiGet<View[]>(`${VIEWS}?tableId=${encodeURIComponent(tableId)}`);
 }
 
-/** Vistas de VARIAS tablas en UNA request (p.ej. todas las tablas de un canvas
- *  para el Export DDL) — evita N llamadas por tabla. Con changeset activo se
- *  resuelve por tabla contra el estado efectivo y se dedup-ea por id. */
+/** Doc 102 (431): ids por GET — 100 uuid ≈ 4 KB de URL, lejos del tope de
+ *  16 KB (línea de pedido + cabeceras) del servidor Node del front. */
+export const VIEW_IDS_PER_GET = 100;
+
+/** Vistas de VARIAS tablas (p.ej. «Import existing tables» con sus vistas) —
+ *  sin draft, en tandas de `VIEW_IDS_PER_GET` ids por request; con changeset
+ *  activo se resuelve por tabla contra el estado efectivo. Dedup por id. */
 export async function listViewsForTables(tableIds: string[]): Promise<View[]> {
-  if (!tableIds.length) return Promise.resolve([]);
+  if (!tableIds.length) return [];
   const a = active();
-  if (!a) return apiGet<View[]>(`${VIEWS}?tableIds=${encodeURIComponent(tableIds.join(','))}`);
-  const perTable = await Promise.all(tableIds.map((t) => csvc.effective<View>(a, 'views', { tableId: t })));
+  let parts: View[][];
+  if (a) {
+    parts = await Promise.all(tableIds.map((t) => csvc.effective<View>(a, 'views', { tableId: t })));
+  } else {
+    const lots: string[][] = [];
+    for (let i = 0; i < tableIds.length; i += VIEW_IDS_PER_GET) lots.push(tableIds.slice(i, i + VIEW_IDS_PER_GET));
+    parts = await Promise.all(lots.map((lot) => apiGet<View[]>(`${VIEWS}?tableIds=${encodeURIComponent(lot.join(','))}`)));
+  }
   const byId = new Map<string, View>();
-  perTable.flat().forEach((v) => byId.set(v.id, v));
+  parts.flat().forEach((v) => byId.set(v.id, v));
   return [...byId.values()];
 }
 

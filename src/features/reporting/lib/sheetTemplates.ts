@@ -13,6 +13,9 @@ export interface SheetTemplateBody {
   name: string; sheetName: string; description?: string | null; columns: SheetTemplateColumn[];
   /** Spec D11 («dueño + compartida, como los saved reports»): la ven todos en el proyecto. */
   shared: boolean;
+  /** Doc 102: nombre del archivo con marcadores {yyyy} {MM} {dd} {HH} {mm} {ss}
+   *  (hora LOCAL de quien exporta); vacío ⇒ `<plantilla>-<AAAA-MM-DD>.xlsx`. */
+  fileName?: string | null;
 }
 export interface SheetTemplate extends SheetTemplateBody { id: string; projectId: string; origin: string; owner?: string | null }
 
@@ -31,9 +34,14 @@ export interface SheetSource { key: string; label: string; group: 'Table fields'
 
 const x = (b: boolean | null | undefined) => (b ? 'X' : '');
 const s = (v: string | null | undefined) => v ?? '';
+const list = (xs: string[] | undefined) => (xs ?? []).join(', ');
 
 /** Datos del modelo disponibles para una columna de la hoja (los UDP van aparte). */
 export const SHEET_SOURCES: SheetSource[] = [
+  // Doc 102: la jerarquía del modelador (plantilla Excel: SPACE › SUBJECT › DIAGRAMA).
+  { key: 'table.space', label: 'Space (sub-project)', group: 'Table fields', get: (_c, t) => list(t?.spaces) },
+  { key: 'table.subject', label: 'Subject (folder)', group: 'Table fields', get: (_c, t) => list(t?.subjectAreas) },
+  { key: 'table.diagram', label: 'Diagram (canvas)', group: 'Table fields', get: (_c, t) => list(t?.diagrams) },
   { key: 'table.schema', label: 'Schema (database)', group: 'Table fields', get: (_c, t) => s(t?.schema) },
   { key: 'table.physicalName', label: 'Table physical name', group: 'Table fields', get: (c, t) => t?.physicalName ?? c.tableId },
   { key: 'table.logicalName', label: 'Table logical name', group: 'Table fields', get: (_c, t) => s(t?.logicalName) },
@@ -115,7 +123,7 @@ export function templateRows(tpl: Pick<SheetTemplateBody, 'columns'>, tables: Re
 const BAD_SHEET = /[:\\/?*[\]]/;
 
 /** Problemas del borrador del editor (las mismas reglas que valida el backend). */
-export function templateProblems(t: Pick<SheetTemplateBody, 'name' | 'sheetName' | 'columns'>): string[] {
+export function templateProblems(t: Pick<SheetTemplateBody, 'name' | 'sheetName' | 'columns' | 'fileName'>): string[] {
   const out: string[] = [];
   if (!t.name.trim()) out.push('Give the template a name.');
   const sheet = t.sheetName.trim();
@@ -130,6 +138,8 @@ export function templateProblems(t: Pick<SheetTemplateBody, 'name' | 'sheetName'
     else if (seen.has(h.toLowerCase())) out.push(`The header '${h}' is repeated.`);
     seen.add(h.toLowerCase());
   });
+  const file = fileNameProblem(t.fileName);
+  if (file) out.push(file);
   return out;
 }
 
@@ -142,8 +152,47 @@ export function moveItem<T>(list: T[], index: number, dir: -1 | 1): T[] {
   return next;
 }
 
-/** Archivo del export: `<plantilla>-<AAAA-MM-DD>.xlsx`. */
-export function templateFileName(name: string, date: Date): string {
-  const slug = name.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'template';
-  return `${slug}-${date.toISOString().slice(0, 10)}.xlsx`;
+/** Doc 102: marcadores del nombre del archivo (hora LOCAL de quien exporta). */
+export const FILE_NAME_TOKENS = ['yyyy', 'MM', 'dd', 'HH', 'mm', 'ss'] as const;
+const FILE_NAME_MAX = 120;
+// eslint-disable-next-line no-control-regex
+const BAD_FILE = /[\\/:*?"<>|\u0000-\u001f]/;
+const TOKEN = /\{([^{}]*)\}/g;
+
+/** Nombre guardado: sin blancos ni `.xlsx` final; vacío ⇒ null (espejo de `clean_file_name`). */
+export function cleanFileName(raw: string | null | undefined): string | null {
+  let text = (raw ?? '').trim();
+  if (text.toLowerCase().endsWith('.xlsx')) text = text.slice(0, -5).trimEnd();
+  return text || null;
+}
+
+/** Problema del nombre de archivo (mismas reglas y textos que el backend) o null. */
+export function fileNameProblem(raw: string | null | undefined): string | null {
+  const text = cleanFileName(raw);
+  if (!text) return null;
+  if (text.length > FILE_NAME_MAX) return `The file name can have at most ${FILE_NAME_MAX} characters.`;
+  if (BAD_FILE.test(text)) return 'The file name can\'t contain \\ / : * ? " < > |.';
+  const known: readonly string[] = FILE_NAME_TOKENS;
+  const unknown = [...text.matchAll(TOKEN)].map((m) => m[1]).find((k) => !known.includes(k));
+  if (unknown !== undefined) return `Unknown placeholder {${unknown}} in the file name — use {yyyy} {MM} {dd} {HH} {mm} {ss}.`;
+  if (/[{}]/.test(text.replace(TOKEN, ''))) return 'Unbalanced braces in the file name — placeholders look like {yyyy}.';
+  return null;
+}
+
+const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+
+/** Archivo del export (doc 102): el nombre de la plantilla con sus marcadores a
+ *  la hora LOCAL — la QA_MODELO sale `QA_REPORTE_2026-09-28 153045.xlsx`; sin
+ *  nombre propio (o con uno inválido), `<plantilla>-<AAAA-MM-DD>.xlsx`. */
+export function templateFileName(tpl: Pick<SheetTemplateBody, 'name' | 'fileName'>, date: Date): string {
+  const parts: Record<string, string> = {
+    yyyy: pad(date.getFullYear(), 4), MM: pad(date.getMonth() + 1), dd: pad(date.getDate()),
+    HH: pad(date.getHours()), mm: pad(date.getMinutes()), ss: pad(date.getSeconds()),
+  };
+  const pattern = cleanFileName(tpl.fileName);
+  if (pattern && !fileNameProblem(pattern)) {
+    return `${pattern.replace(TOKEN, (whole: string, key: string) => parts[key] ?? whole)}.xlsx`;
+  }
+  const slug = tpl.name.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'template';
+  return `${slug}-${parts.yyyy}-${parts.MM}-${parts.dd}.xlsx`;
 }

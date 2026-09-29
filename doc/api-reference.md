@@ -723,18 +723,18 @@ Metadata tabular de solo lectura para la grilla y el export a Excel (también la
 
 | Función | Método | Ruta | Respuesta |
 |---|---|---|---|
-| `listReportTables(filters)` | GET | `/api/reporting/tables?schema=&projectId=&limit=` | `ReportTableRow[]` |
-> Doc 92: `listReportTables(projectId, { limit, offset })` pagina el scroll infinito (sólo sin filtros) y `countReportTables(projectId)` (`GET /api/reporting/tables/count`) trae el total real de tablas del proyecto.
-| `listReportColumns(tableId?, tableIds?)` | GET | `/api/reporting/columns?tableId=` o `?tableIds=a,b,c` | `ReportColumnRow[]` |
-| `listReportViews(tableIds?, schema?)` | GET | `/api/reporting/views?tableIds=&schema=` | `ReportViewRow[]` — fuentes resueltas + detalle por columna del editor de vistas |
+| `listReportTables(projectId, filters?, changesetId?)` | GET | `/api/reporting/tables?projectId=&schema=&limit=&offset=&changesetId=` | `ReportTableRow[]` |
+> Doc 92: `listReportTables(projectId, { limit, offset })` pagina el scroll infinito (sólo sin filtros) y `countReportTables(projectId, changesetId?)` (`GET /api/reporting/tables/count`) trae el total real de tablas.
+| `listReportColumns(projectId, tableId?)` | GET | `/api/reporting/columns?projectId=&tableId=` | `ReportColumnRow[]` (una tabla: Database Explorer) |
+| `queryReportColumns(projectId, tableIds, changesetId?)` | POST | `/api/reporting/columns/query` | `ReportColumnRow[]` — doc 102: ids en el CUERPO |
+| `queryReportViews(projectId, tableIds, changesetId?)` | POST | `/api/reporting/views/query` | `ReportViewRow[]` — doc 102: ids en el CUERPO; fuentes resueltas + detalle por columna del editor de vistas |
+
+> **Doc 102.** `changesetId` = una versión PROPIA sin publicar (combo *Version* de la pantalla); sin él, producción. Los lotes van por POST: con 300 ids en la URL el servidor del front (`server.mjs`, 16 KB de línea de pedido + cabeceras) respondía **431** sin cuerpo («Invalid JSON response (HTTP 431)»). La pantalla usa `fetchColumnsFor` (tandas de 300 tablas) y `fetchViewsFor` (tandas de 2 000, sin repetir) de `features/reporting/lib/reportFetch.ts`, por el barrel `@/features/reporting`. `ReportTableRow.spaces` = carpetas raíz (sub-proyecto) de sus canvases.
 
 ```ts
-export function listReportColumns(tableId?: string, tableIds?: string[]): Promise<ReportColumnRow[]> {
-  const qs = new URLSearchParams();
-  if (tableIds?.length) qs.set('tableIds', tableIds.join(','));
-  else if (tableId) qs.set('tableId', tableId);
-  const suffix = qs.toString() ? `?${qs.toString()}` : '';
-  return apiGet<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns${suffix}`);
+export function queryReportColumns(projectId: string, tableIds: string[], changesetId?: string | null): Promise<ReportColumnRow[]> {
+  if (tableIds.length === 0) return Promise.resolve([]);
+  return apiPost<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns/query`, lotBody(projectId, tableIds, changesetId));
 }
 ```
 
@@ -792,7 +792,7 @@ export interface QueryResult {
 | `getUdpCoverage()` | GET | `/api/reporting/insights/udp-coverage` | `UdpCoverage[]` |
 | `getDomainUsage()` | GET | `/api/reporting/insights/domain-usage` | `DomainUsage[]` |
 | `getGlossaryUsage()` | GET | `/api/reporting/insights/glossary-usage` | `GlossaryUsage[]` |
-| `getRelationshipsReport(limit)` | GET | `/api/reporting/insights/relationships?limit=` | `RelationshipRow[]` |
+| `getRelationshipsReport(projectId, limit, changesetId?)` | GET | `/api/reporting/insights/relationships?limit=&changesetId=` | `RelationshipRow[]` (doc 102: con `changesetId`, las de la versión propia) |
 
 **Queries guardadas (Saved Reports)**
 
@@ -833,12 +833,12 @@ Formato Excel FIJO guardado como dato del proyecto (nombre de hoja + columnas en
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
 | `listSheetTemplates(pid)` | GET | `/api/projects/{pid}/sheet-templates` | — | `SheetTemplate[]` (las suyas + las compartidas, por nombre; cada una con `owner` y `shared`) |
-| `createSheetTemplate(pid, body)` | POST | `…/sheet-templates` | `SheetTemplateBody` `{ name, sheetName, description?, columns: [{header, source}], shared }` | `SheetTemplate` (dueño = quien la crea); 422 forma; 409 nombre repetido |
+| `createSheetTemplate(pid, body)` | POST | `…/sheet-templates` | `SheetTemplateBody` `{ name, sheetName, description?, columns: [{header, source}], shared, fileName? }` | `SheetTemplate` (dueño = quien la crea); 422 forma; 409 nombre repetido |
 | `updateSheetTemplate(pid, id, body)` | PUT | `…/sheet-templates/{id}` | `SheetTemplateBody` | `SheetTemplate`; 404 (no existe o no es tuya) · 409 · 422 |
 | `deleteSheetTemplate(pid, id)` | DELETE | `…/sheet-templates/{id}` | — | `{ deleted }` |
 | `createDefaultSheetTemplate(pid)` | POST | `…/sheet-templates/default` | — | `SheetTemplate` «QA_MODELO»; 409 si ya la tiene |
 
-La lógica pura vive en `features/reporting/lib/sheetTemplates.ts` (testeada con vitest): el catálogo `SHEET_SOURCES` (`table.<campo>` · `column.<campo>`; los UDP van como `table.udp:<nombre>` · `column.udp:<nombre>`), `sourceOptions`, `templateRows` (arma las filas con las MISMAS filas ordenadas del export tabular, `reportRows`; un `source` desconocido deja la celda vacía), `templateProblems` (validación del editor, espejo de la del backend) y `templateFileName` (`<plantilla>-<AAAA-MM-DD>.xlsx`). Sumar un dato nuevo al catálogo es solo front: el backend valida únicamente la FORMA del `source`.
+La lógica pura vive en `features/reporting/lib/sheetTemplates.ts` (testeada con vitest): el catálogo `SHEET_SOURCES` (`table.<campo>` · `column.<campo>`; los UDP van como `table.udp:<nombre>` · `column.udp:<nombre>`), `sourceOptions`, `templateRows` (arma las filas con las MISMAS filas ordenadas del export tabular, `reportRows`; un `source` desconocido deja la celda vacía), `templateProblems` (validación del editor, espejo de la del backend) y `templateFileName(tpl, date)` (doc 102: el `fileName` de la plantilla con los marcadores `{yyyy}` `{MM}` `{dd}` `{HH}` `{mm}` `{ss}` a la hora LOCAL — la QA_MODELO sale `QA_REPORTE_2026-09-28 153045.xlsx`; sin `fileName`, `<plantilla>-<AAAA-MM-DD>.xlsx`), `cleanFileName` / `fileNameProblem` (espejo del backend) y los campos `table.space` / `table.subject` / `table.diagram` (Space · Subject · Diagram). Sumar un dato nuevo al catálogo es solo front: el backend valida únicamente la FORMA del `source`.
 
 Doc 95 D12: el botón CSV del Report Designer exporta, en modo SQL, la SQL escrita (validada por el servidor a `QuerySpec`, `lib/exportSpec.ts` `specForExport`), no el spec que quedó del Builder.
 

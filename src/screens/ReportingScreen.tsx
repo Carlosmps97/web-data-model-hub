@@ -23,6 +23,9 @@
  * just the values of the 50 rows loaded up-front; a Show switch renders the
  * grid as Tables · Columns · Tables + Columns (same pure row builders as the
  * Excel export, `lib/reportRows`), and the export gains the joined sheet.
+ * Doc 102: combo Version (producción o una versión propia sin publicar) — con
+ * una versión propia la grilla, los filtros y los dos exports son de esa
+ * versión; los lotes de ids van por POST (fin del 431).
  * Loading → skeleton/placeholders; errors → sonner toast.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -39,29 +42,24 @@ import {
   TableProperties,
 } from 'lucide-react';
 
-import ReportDesigner from '@/features/reporting/components/ReportDesigner';
-import SheetTemplateCard from '@/features/reporting/components/SheetTemplateCard';
+import {
+  COLUMN_BATCH, ReportDesigner, SheetTemplateCard, columnSheetRow, fetchColumnsFor, fetchViewsFor, getRelationshipsReport,
+  joinedSheetRow, levelsFileName, ownOpenVersions, productionLabel, relationshipSheetRow, sheetHeaders, sortColumnRows,
+  tableSheetRow, udpKeysOf, unionSorted, versionOptionLabel, viewSheetRow, type SheetRow,
+} from '@/features/reporting';
 import SearchSelect from '@/features/modeler/components/SearchSelect';
 import { Button } from '@/components/ui';
 import { listProjects } from '@/services/projects.service';
-import { sortProjects } from '@/lib/projects';
+import { listVersions } from '@/services/versioning.service';
+import { projectMeta, sortProjects } from '@/lib/projects';
 import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
+import { useAuthStore } from '@/store/useAuthStore';
 import type { Project } from '@/types/model';
+import type { VersionRow } from '@/types/versioning';
 import {
-  countReportTables,
-  listReportColumns,
-  listReportFilters,
-  listReportTables,
-  listReportViews,
-  type ReportColumnRow,
-  type ReportFilterOptions,
-  type ReportTableRow,
+  countReportTables, listReportFilters, listReportTables,
+  type ReportColumnRow, type ReportFilterOptions, type ReportTableRow,
 } from '@/services/reporting.service';
-import { getRelationshipsReport } from '@/features/reporting/query.service';
-import {
-  COLUMN_BATCH, chunk, columnSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows, tableSheetRow,
-  udpKeysOf, unionSorted, viewSheetRow, type SheetRow,
-} from '@/features/reporting/lib/reportRows';
 
 // ── export levels ─────────────────────────────────────────────────────────────
 
@@ -85,14 +83,6 @@ const EXPORT_LEVELS: LevelSpec[] = [
   { key: 'definitions', name: 'Definitions', hint: 'Functional definition text per table.', sheet: 'Definitions' },
 ];
 
-/** Columnas de un lote de tablas por tandas de 300 ids (largo de URL) — sin
- *  el viejo fallback «más de 300 tablas ⇒ descarga completa capada». */
-async function fetchColumnsFor(projectId: string, ids: string[]): Promise<ReportColumnRow[]> {
-  if (ids.length === 0) return [];
-  const parts = await Promise.all(chunk(ids, COLUMN_BATCH).map((part) => listReportColumns(projectId, undefined, part)));
-  return parts.flat();
-}
-
 /** Proyecto inicial del módulo: el de la sesión de canvas → el último abierto → el primero A–Z. */
 function initialProjectId(projects: Project[]): string | null {
   const session = useSessionStore.getState().activeProjectId;
@@ -115,6 +105,26 @@ function ProjectPick({ projects, projectId, onPick }: { projects: Project[]; pro
         onPick={(v) => { if (v) onPick(v); }}
         disabled={projects.length === 0}
       />
+    </span>
+  );
+}
+
+/** Doc 102 (D1): valor del combo Version para producción. */
+const PRODUCTION = '__production__';
+
+/** Combo Version: producción o una de MIS versiones sin publicar del proyecto. */
+function VersionPick({ production, own, versionId, onPick }: {
+  production: VersionRow | null; own: VersionRow[]; versionId: string | null; onPick: (id: string | null) => void;
+}) {
+  const options = [
+    { value: PRODUCTION, label: productionLabel(production) },
+    ...own.map((r) => ({ value: r.id, label: versionOptionLabel(r) })),
+  ];
+  const current = options.find((o) => o.value === (versionId ?? PRODUCTION)) ?? options[0];
+  return (
+    <span className="dmh-rep-version" title="Version — production or one of your unpublished versions">
+      <SearchSelect options={options} valueLabel={current.label} placeholder="Version…"
+        onPick={(v) => onPick(v === PRODUCTION ? null : v)} />
     </span>
   );
 }
@@ -274,6 +284,47 @@ export default function ReportingScreenWrapper() {
       .then((ps) => { setProjects(ps); setProjectId(initialProjectId(ps)); })
       .catch(() => toast.error("Couldn't load the projects"));
   }, []);
+  // Doc 102 (D1): versión del reporte — null = producción; si no, una versión
+  // PROPIA sin publicar (borrador o en revisión) del proyecto.
+  const me = useAuthStore((s) => s.user?.username ?? null);
+  const [versions, setVersions] = useState<VersionRow[]>([]);
+  const [versionId, setVersionId] = useState<string | null>(null);
+  useEffect(() => {
+    setVersionId(null);
+    setVersions([]);
+    if (!projectId) return undefined;
+    let cancelled = false;
+    listVersions(projectId)
+      .then((vs) => { if (!cancelled) setVersions(vs); })
+      .catch(() => { if (!cancelled) setVersions([]); });
+    return () => { cancelled = true; };
+  }, [projectId]);
+  const production = useMemo(() => (projectId ? projectMeta(versions, me)[projectId]?.productionRow ?? null : null),
+    [versions, me, projectId]);
+  const own = useMemo(() => (projectId ? ownOpenVersions(versions, projectId, me) : []), [versions, projectId, me]);
+  const version = own.find((r) => r.id === versionId) ?? null;
+  // Doc 102: si una lectura de la versión falla (p. ej. se publicó o se cerró en
+  // otra pestaña), se vuelve a pedir la lista: si ya no está abierta, el combo
+  // deja de ofrecerla y la pantalla vuelve a producción, con aviso.
+  const liveProject = useRef<string | null>(null);
+  const liveVersion = useRef<string | null>(null);
+  useEffect(() => { liveProject.current = projectId; }, [projectId]);
+  useEffect(() => { liveVersion.current = version?.id ?? null; }, [version]);
+  const recheckVersions = useCallback(() => {
+    const pid = liveProject.current;
+    if (!pid) return;
+    listVersions(pid)
+      .then((vs) => {
+        if (liveProject.current !== pid) return;
+        setVersions(vs);
+        const cur = liveVersion.current;
+        if (cur && !ownOpenVersions(vs, pid, me).some((r) => r.id === cur)) {
+          setVersionId(null);
+          toast.warning('That version is no longer open — showing Production.');
+        }
+      })
+      .catch(() => { /* sin cambios: la versión sigue elegida */ });
+  }, [me]);
   const pick = <ProjectPick projects={projects} projectId={projectId} onPick={setProjectId} />;
   if (!projectId) {
     return (
@@ -294,12 +345,25 @@ export default function ReportingScreenWrapper() {
     );
   }
   const projectName = projects.find((p) => p.id === projectId)?.name ?? '';
-  return <ReportingScreen key={projectId} projectId={projectId} projectName={projectName} projectPicker={pick} onDesign={() => setDesigner(true)} />;
+  const versionPick = <VersionPick production={production} own={own} versionId={version?.id ?? null} onPick={setVersionId} />;
+  return (
+    <ReportingScreen key={`${projectId}:${version?.id ?? 'production'}`} projectId={projectId} projectName={projectName}
+      changesetId={version?.id ?? null} versionLabel={version?.versionLabel ?? null} onVersionError={recheckVersions}
+      projectPicker={pick} versionPicker={versionPick} onDesign={() => setDesigner(true)} />
+  );
 }
 
-function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
-  projectId: string; projectName: string; projectPicker: React.ReactNode; onDesign: () => void;
+function ReportingScreen({ projectId, projectName, changesetId, versionLabel, onVersionError, projectPicker, versionPicker, onDesign }: {
+  projectId: string; projectName: string;
+  /** Doc 102 (D1): versión PROPIA sin publicar del reporte; null = producción. */
+  changesetId: string | null; versionLabel: string | null;
+  /** Doc 102: falló una lectura de la versión — el wrapper revisa si sigue abierta. */
+  onVersionError: () => void;
+  projectPicker: React.ReactNode; versionPicker: React.ReactNode; onDesign: () => void;
 }) {
+  // Doc 102: con una versión propia el reporte es ESA versión (producción + sus
+  // cambios): la grilla la carga completa y toda lectura lleva su id.
+  const draftMode = changesetId !== null;
   const [tables, setTables] = useState<ReportTableRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -315,21 +379,22 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
   const [serverFilters, setServerFilters] = useState<ReportFilterOptions | null>(null);
   useEffect(() => {
     let cancelled = false;
-    listReportFilters(projectId).then((f) => { if (!cancelled) setServerFilters(f); }).catch(() => {});
+    listReportFilters(projectId, changesetId).then((f) => { if (!cancelled) setServerFilters(f); }).catch(() => {});
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, changesetId]);
   // Doc 70 §4.2: qué muestra la grilla — tablas, sus columnas o la fila unida.
   const [show, setShow] = useState<ShowMode>('tables');
 
   // Doc 92 D3: sin filtros la grilla se carga por PÁGINAS (orden físico) y pide
   // la siguiente cuando el centinela entra al viewport; con un filtro se
   // descarga el set completo (facetas/conteos exactos sobre todo).
-  const [fullLoad, setFullLoad] = useState(false);
+  const [fullLoad, setFullLoad] = useState(draftMode);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   // Doc 92 D4: total REAL de tablas del proyecto (null = aún no llegó).
   const [total, setTotal] = useState<number | null>(null);
   useEffect(() => {
+    if (draftMode) return undefined;   // doc 102: la versión propia la carga completa el efecto de abajo
     let cancelled = false;
     setLoading(true);
     Promise.all([
@@ -354,12 +419,12 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
     return () => {
       cancelled = true;
     };
-  }, [projectId]);
+  }, [projectId, draftMode]);
   useEffect(() => {
     if (!fullLoad) return undefined;
     let cancelled = false;
     setLoading(true);
-    listReportTables(projectId, {})
+    listReportTables(projectId, {}, changesetId)
       .then((rows) => {
         if (cancelled) return;
         setTables(rows);
@@ -369,6 +434,7 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
       .catch((err: unknown) => {
         if (cancelled) return;
         toast.error(err instanceof Error ? err.message : 'Could not load the reporting tables.');
+        if (changesetId) onVersionError();
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -376,7 +442,7 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
     return () => {
       cancelled = true;
     };
-  }, [fullLoad, projectId]);
+  }, [fullLoad, projectId, changesetId, onVersionError]);
   const loadMore = useCallback(() => {
     if (fullLoad || !hasMore || loadingMore || loading) return;
     setLoadingMore(true);
@@ -477,10 +543,13 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
   // niveles y el de plantilla (doc 95 D11).
   const resolveExportRows = useCallback(async (): Promise<ReportTableRow[]> => (
     allSelected && partial
-      ? (await listReportTables(projectId, {})).filter((t) => passSearch(t) && passSchema(t) && passArea(t))
+      ? (await listReportTables(projectId, {}, changesetId)).filter((t) => passSearch(t) && passSchema(t) && passArea(t))
       : selectedRows
-  ), [allSelected, partial, projectId, passSearch, passSchema, passArea, selectedRows]);
-  const fetchColumns = useCallback((ids: string[]) => fetchColumnsFor(projectId, ids), [projectId]);
+  ), [allSelected, partial, projectId, changesetId, passSearch, passSchema, passArea, selectedRows]);
+  const fetchColumns = useCallback((ids: string[]) => {
+    const read = fetchColumnsFor(projectId, ids, changesetId);
+    return changesetId ? read.catch((err: unknown) => { onVersionError(); throw err; }) : read;
+  }, [projectId, changesetId, onVersionError]);
 
   const toggleRow = (id: string) => {
     if (allSelected) {
@@ -534,12 +603,13 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
     if (show === 'tables' || colScopeTooBig || colScope.length === 0) { setColRows(null); return undefined; }
     let cancelled = false;
     setColLoading(true);
-    fetchColumnsFor(projectId, colScope.map((t) => t.id))
+    fetchColumnsFor(projectId, colScope.map((t) => t.id), changesetId)
       .then((rows) => { if (!cancelled) setColRows(rows); })
       .catch((err: unknown) => {
         if (cancelled) return;
         toast.error(err instanceof Error ? err.message : 'Could not load the columns.');
         setColRows([]);
+        if (changesetId) onVersionError();
       })
       .finally(() => { if (!cancelled) setColLoading(false); });
     return () => { cancelled = true; };
@@ -617,7 +687,7 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
         // Columnas de las tablas seleccionadas por tandas de 300 ids (antes,
         // más de 300 tablas caía a la descarga completa capada a 20k).
         const byId = new Map(rows.map((t) => [t.id, t] as const));
-        const cols = sortColumnRows(await fetchColumnsFor(projectId, rows.map((t) => t.id)), (id) => byId.get(id)?.physicalName ?? id);
+        const cols = sortColumnRows(await fetchColumnsFor(projectId, rows.map((t) => t.id), changesetId), (id) => byId.get(id)?.physicalName ?? id);
         const colUdpKeys = udpKeysOf(cols.map((c) => c.udpValues));
         if (levels.has('columns')) {
           XLSX.utils.book_append_sheet(
@@ -634,7 +704,7 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
         // Detalle POR PAR de columnas (v2, doc 19): una FK compuesta emite una
         // fila por par (mismo Rel id + Pair). Acotado a las tablas seleccionadas.
         const ids = new Set(rows.map((t) => t.id));
-        const rels = await getRelationshipsReport(projectId, 5000);
+        const rels = await getRelationshipsReport(projectId, 5000, changesetId);
         const data = rels
           .filter((r) => (r.parentTableId && ids.has(r.parentTableId))
             || (r.childTableId && ids.has(r.childTableId)))
@@ -648,7 +718,8 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
         // (alias, origen, casteo, transformación). Mismo patrón acotado que Columns.
         const ids = rows.map((t) => t.id);
         const idSet = new Set(ids);
-        const views = (await listReportViews(projectId, ids.length > 0 && ids.length <= 300 ? ids : undefined))
+        // Doc 102: ids en el CUERPO, en tandas (antes >300 tablas bajaban TODAS las vistas del proyecto).
+        const views = (await fetchViewsFor(projectId, ids, changesetId))
           .filter((v) => v.sourceTableIds.some((tid) => idSet.has(tid)));
         const viewsData = views.map(viewSheetRow);   // doc 96 D6: sin «Mode»
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(viewsData), 'Views');
@@ -675,12 +746,12 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Definitions');
       }
 
-      const stamp = new Date().toISOString().slice(0, 10);
-      const slug = projectName.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '') || 'project';
-      XLSX.writeFile(wb, `data-model-hub-report-${slug}-${stamp}.xlsx`);
+      // Doc 102: con una versión propia, su etiqueta va en el nombre del archivo.
+      XLSX.writeFile(wb, levelsFileName(projectName, draftMode ? (versionLabel ?? 'draft') : null, new Date()));
       toast.success('Report exported to Excel.');
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not build the Excel file.');
+      if (changesetId) onVersionError();
     } finally {
       setExporting(false);
     }
@@ -703,8 +774,9 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
           {/* ── left: filters + table ──────────────────────────────── */}
           <div className="dmh-rep-main">
             <div className="dmh-rep-bar">
-              {/* Doc 75 D13: proyecto del reporte (obligatorio). */}
+              {/* Doc 75 D13: proyecto del reporte (obligatorio). Doc 102: y su versión. */}
               {projectPicker}
+              {versionPicker}
               {/* Doc 70 §4.2: qué muestra la grilla — tablas, sus columnas o la fila unida. */}
               <div className="rd-seg" role="tablist" aria-label="Show">
                 <button type="button" role="tab" aria-selected={show === 'tables'} className={show === 'tables' ? 'active' : ''} onClick={() => setShow('tables')}>Tables</button>
@@ -748,6 +820,11 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
                 {partial && <em className="dmh-rep-selcount-hint"> · scroll to load more</em>}
               </span>
             </div>
+            {draftMode && (
+              <div className="dmh-rep-wc" role="status">
+                Working copy <strong>{versionLabel ?? 'draft'}</strong> — the grid and both exports include your unpublished changes.
+              </div>
+            )}
 
             <div className="dmh-rep-tablewrap">
               <div className="dmh-rep-tablescroll" ref={scrollRef}>
@@ -983,11 +1060,13 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
 
             {/* Report Designer — motor de consulta (SQL + filtros UDP). Bajo el rail. */}
             <div className="dmh-rep-card" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <Button variant="primary" icon={SlidersHorizontal} onClick={onDesign} style={{ width: '100%', justifyContent: 'center' }}>
+              {/* Doc 102: el motor de consultas lee producción. */}
+              <Button variant="primary" icon={SlidersHorizontal} onClick={onDesign} disabled={draftMode}
+                style={{ width: '100%', justifyContent: 'center' }}>
                 Design report
               </Button>
               <span style={{ fontSize: 11.5, color: 'var(--text-muted-2)', textAlign: 'center' }}>
-                Query engine · SQL &amp; UDP filters
+                {draftMode ? 'The query engine reads production — switch Version to Production to use it.' : <>Query engine · SQL &amp; UDP filters</>}
               </span>
             </div>
           </div>

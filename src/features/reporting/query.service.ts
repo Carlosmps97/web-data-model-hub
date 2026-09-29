@@ -105,8 +105,9 @@ export const getScorecard = (projectId: string) => apiGet<Scorecard>(`${R}/insig
 export const getUdpCoverage = (projectId: string) => apiGet<UdpCoverage[]>(`${R}/insights/udp-coverage?${P(projectId)}`);
 export const getDomainUsage = (projectId: string) => apiGet<DomainUsage[]>(`${R}/insights/domain-usage?${P(projectId)}`);
 export const getGlossaryUsage = (projectId: string) => apiGet<GlossaryUsage[]>(`${R}/insights/glossary-usage?${P(projectId)}`);
-export const getRelationshipsReport = (projectId: string, limit = 2000) =>
-  apiGet<RelationshipRow[]>(`${R}/insights/relationships?${P(projectId)}&limit=${limit}`);
+/** Doc 102: con `changesetId`, las relaciones de una versión PROPIA sin publicar. */
+export const getRelationshipsReport = (projectId: string, limit = 2000, changesetId?: string | null) =>
+  apiGet<RelationshipRow[]>(`${R}/insights/relationships?${P(projectId)}&limit=${limit}${changesetId ? `&changesetId=${encodeURIComponent(changesetId)}` : ''}`);
 
 export const emptySpec = (projectId: string, from: ViewKey = 'columns'): ReportSpec => ({
   projectId, from, select: [], groupBy: [], aggregations: [], orderBy: [], limit: 100, where: { op: 'and', conditions: [] },

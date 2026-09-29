@@ -115,3 +115,40 @@ export function impactNote(scope: UdpScope): string {
     : 'Column terms only rename column (field) names — never table names.';
   return `${base} You can roll back this version from the history.`;
 }
+
+// ── Filas incompletas (doc 102) ──
+
+/** Qué le falta a una fila del glosario (null = completa). */
+export type TermGap = 'term' | 'abbrev' | 'both';
+export function termGap(t: { term: string; abbrev: string }): TermGap | null {
+  const noTerm = t.term.trim() === '';
+  const noAbbrev = t.abbrev.trim() === '';
+  if (noTerm && noAbbrev) return 'both';
+  if (noTerm) return 'term';
+  return noAbbrev ? 'abbrev' : null;
+}
+
+/** Filas NUEVAS o EDITADAS (vivas) con término o abreviatura vacíos: bloquean
+ *  el Save & apply (antes se descartaban en silencio y salía «Saved»). Una fila
+ *  existente sin tocar no cuenta aunque venga incompleta de antes. */
+export function incompleteRows<T extends { id: string; term: string; abbrev: string; _new?: boolean; _deleted?: boolean }>(
+  drafts: T[], before: Map<string, { term: string; abbrev: string }>,
+): T[] {
+  return drafts.filter((d) => {
+    if (d._deleted || termGap(d) === null) return false;
+    if (d._new) return true;
+    const b = before.get(d.id);
+    return !b || b.term !== d.term || b.abbrev !== d.abbrev;
+  });
+}
+
+/** Pie del editor con filas incompletas. */
+export const incompleteMessage = (n: number): string =>
+  (n === 1 ? '1 row needs a term and an abbreviation.' : `${fmt(n)} rows need a term and an abbreviation.`);
+
+/** Aviso del botón Validar según lo que falta. */
+export function gapToast(gap: TermGap): string {
+  if (gap === 'abbrev') return 'Type the abbreviation before validating';
+  if (gap === 'term') return 'Type the term before validating';
+  return 'Type the term and the abbreviation before validating';
+}

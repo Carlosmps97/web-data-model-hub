@@ -6,7 +6,7 @@ import { applyStandards } from '../standards.service';
 import { validateTerm, lockTerm, unlockTerm, glossaryImpact } from '@/services/naming.service';
 import type { GlossaryImpact, GlossaryValidation, UdpScope } from '@/services/naming.service';
 import { useAuthStore } from '@/store/useAuthStore';
-import { termsToValidate, needsConfirm } from '../glossaryValidation';
+import { termsToValidate, needsConfirm, incompleteRows, incompleteMessage, termGap, gapToast } from '../glossaryValidation';
 import GlossaryApplyDialog from './GlossaryApplyDialog';
 import GlossaryConflictDialog from './GlossaryConflictDialog';
 
@@ -59,6 +59,8 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
   const [checking, setChecking] = useState<string | null>(null); // id de la fila validándose
   // Doc 94 D7: impacto REAL del apply (dry-run); el aviso solo sale si > 0.
   const [impact, setImpact] = useState<GlossaryImpact | null>(null);
+  // Doc 102: filas donde el usuario pidió Validar (se marcan en rojo aunque estén vacías).
+  const [flagged, setFlagged] = useState<Set<string>>(new Set());
 
   // Config del scope. La REGLA CORPORATIVA está bloqueada en join + UPPER
   // (así se derivan los físicos reales del catálogo: CODCLAVESUJETOCLI); los
@@ -91,7 +93,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     setMaxLen(Number(snapshot.namingConfig[scope].maxLength ?? 150));
     setEditing(true);
   };
-  const cancel = () => { setEditing(false); setConfirm(false); setImpact(null); setValidated({}); };
+  const cancel = () => { setEditing(false); setConfirm(false); setImpact(null); setValidated({}); setFlagged(new Set()); };
   const switchScope = (s: UdpScope) => { if (editing) return; setScope(s); };
 
   const live: Draft[] = editing ? terms.filter((t) => !t._deleted) : snapshot.dict.filter((t) => t.scope === scope);
@@ -116,12 +118,26 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     return { added, edited, removed, cfgChanged, count: added.length + edited.length + removed.length };
   }, [terms, sep, casing, maxLen, snapshot.dict, scope, cfg0]);
 
+  // Doc 102: término Y abreviatura obligatorios en toda fila nueva o editada.
+  const before = useMemo(() => new Map(snapshot.dict.filter((t) => t.scope === scope).map((t) => [t.id, t])), [snapshot.dict, scope]);
+  const incomplete = useMemo(() => (editing ? incompleteRows(terms, before) : []), [editing, terms, before]);
+  const incompleteIds = useMemo(() => new Set(incomplete.map((t) => t.id)), [incomplete]);
+  /** ¿Marcar en rojo ese campo? Fila incompleta con el campo vacío, si ya tiene algo escrito o se pidió validar. */
+  const showGap = (t: Draft, field: 'term' | 'abbrev') =>
+    incompleteIds.has(t.id) && t[field].trim() === ''
+    && (flagged.has(t.id) || t.term.trim() !== '' || t.abbrev.trim() !== '');
+
   // Validación on-demand de una fila NUEVA (botón junto al alta). El backend
   // igual re-valida al guardar: esto es cortesía de UX. Doc 95 D5: el resultado
   // queda visible en la fila (chip), no en un toast que se pierde.
   const validateDraft = async (t: Draft) => {
     const term = t.term.trim();
-    if (!term) { toast.error('Type the term before validating'); return; }
+    const gap = termGap(t);
+    if (gap) {
+      setFlagged((s) => new Set(s).add(t.id));
+      toast.error(gapToast(gap));
+      return;
+    }
     setChecking(t.id);
     try {
       const v = await validateTerm(projectId, term, scope);
@@ -154,8 +170,8 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     };
     body.termsUpsert = terms
       .filter((t) => !t._deleted && changed(t))
-      .map((t) => ({ id: t._new ? undefined : t.id, term: t.term.trim(), abbrev: t.abbrev.trim(), scope }))
-      .filter((t) => t.term && t.abbrev);
+      // Doc 102: sin descarte silencioso — el guard de filas incompletas garantiza término y abreviatura.
+      .map((t) => ({ id: t._new ? undefined : t.id, term: t.term.trim(), abbrev: t.abbrev.trim(), scope }));
     body.termsDelete = terms.filter((t) => t._deleted && !t._new).map((t) => t.id);
     if (diff.cfgChanged) body.namingConfig = { [scope]: { separator: sep, case: casing, maxLength: maxLen } };
     return body;
@@ -167,7 +183,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     toast.success(renamed
       ? `Standards applied · ${v.label} · ${renamed} physical name${renamed === 1 ? '' : 's'} changed`
       : `Saved · ${v.label} — no physical names change`);
-    setEditing(false); setConfirm(false); setImpact(null); setValidated({}); onApplied();
+    setEditing(false); setConfirm(false); setImpact(null); setValidated({}); setFlagged(new Set()); onApplied();
   };
 
   /** «Save & apply» (doc 94 D7): valida los términos nuevos/renombrados, mide el
@@ -176,6 +192,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
   const saveAndApply = async () => {
     setBusy(true);
     try {
+      if (incomplete.length) { toast.error(incompleteMessage(incomplete.length)); return; }   // doc 102
       // F2 #1: cada término NUEVO o renombrado se chequea contra el glosario y
       // el corpus; el primero con conflictos corta (el backend re-valida igual).
       for (const term of termsToValidate(terms)) {
@@ -301,12 +318,14 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
             <div key={t.id} style={{ display: 'grid', gridTemplateColumns: gridCols, alignItems: 'center', padding: '10px 16px', borderBottom: '1px solid #F2F4F8', fontSize: 13, background: locked ? '#F1F3F6' : undefined }}>
               {editing && !locked ? <>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
-                  <input className="rd-input" style={inp} value={t.term} onChange={(e) => upd(setTerms, t.id, { term: e.target.value })} placeholder="term" />
-                  {t._new && t.term.trim() !== '' && validated[t.id] === t.term.trim() && (
+                  <input className="rd-input" style={{ ...inp, ...(showGap(t, 'term') ? invalidInp : {}) }} aria-invalid={showGap(t, 'term')}
+                    value={t.term} onChange={(e) => upd(setTerms, t.id, { term: e.target.value })} placeholder="term" />
+                  {t._new && t.term.trim() !== '' && t.abbrev.trim() !== '' && validated[t.id] === t.term.trim() && (
                     <span style={okChip}>✓ No conflicts — renames nothing</span>
                   )}
                 </div>
-                <input className="rd-input" style={{ ...inp, fontFamily: 'var(--mono, monospace)' }} value={t.abbrev} onChange={(e) => upd(setTerms, t.id, { abbrev: e.target.value })} placeholder="ABR" />
+                <input className="rd-input" style={{ ...inp, fontFamily: 'var(--mono, monospace)', ...(showGap(t, 'abbrev') ? invalidInp : {}) }}
+                  aria-invalid={showGap(t, 'abbrev')} value={t.abbrev} onChange={(e) => upd(setTerms, t.id, { abbrev: e.target.value })} placeholder="ABR" />
                 <div style={{ display: 'flex', gap: 6 }}>
                   {t._new && (
                     <button onClick={() => validateDraft(t)} disabled={checking === t.id} title="Check conflicts (glossary and logical names)"
@@ -338,10 +357,15 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
       {/* footer edit actions */}
       {editing && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 18, paddingTop: 16, borderTop: '1px solid #EAEDF2' }}>
-          <span style={{ fontSize: 12.5, color: diff.count ? '#9A6B00' : '#8A93A5' }}>{diff.count ? `${diff.count} unsaved change${diff.count > 1 ? 's' : ''}` : 'No changes yet'}</span>
+          {/* Doc 102: con filas incompletas el pie dice por qué no se puede guardar. */}
+          <span style={{ fontSize: 12.5, color: incomplete.length ? '#C0392B' : diff.count ? '#9A6B00' : '#8A93A5' }}>
+            {incomplete.length ? incompleteMessage(incomplete.length)
+              : diff.count ? `${diff.count} unsaved change${diff.count > 1 ? 's' : ''}` : 'No changes yet'}
+          </span>
           <span style={{ flex: 1 }} />
           <button onClick={cancel} style={btnGhost}>Cancel</button>
-          <button onClick={saveAndApply} disabled={!diff.count || busy} style={{ ...btnPrimary, opacity: diff.count ? 1 : 0.5 }}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Checking…' : 'Save & apply'}</button>
+          <button onClick={saveAndApply} disabled={!diff.count || busy || incomplete.length > 0}
+            style={{ ...btnPrimary, opacity: diff.count && !incomplete.length ? 1 : 0.5 }}>{busy ? <span className="rd-spin" /> : <UploadCloud size={15} />}{busy ? 'Checking…' : 'Save & apply'}</button>
         </div>
       )}
 
@@ -370,6 +394,7 @@ function del(set: React.Dispatch<React.SetStateAction<Draft[]>>, id: string) {
 
 const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', height: 36, padding: '0 14px', border: '1px solid #E2E6EE', background: '#F7F9FC', color: '#1A2B4A', borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--mono, monospace)' };
 const inp: React.CSSProperties = { height: 32, fontSize: 13, marginRight: 8 };
+const invalidInp: React.CSSProperties = { borderColor: '#E0A39B', background: '#FFF6F5' };   // doc 102: campo obligatorio vacío
 const okChip: React.CSSProperties = { alignSelf: 'flex-start', fontSize: 11, fontWeight: 600, color: '#0E8C6A', background: '#E8F7F1', border: '1px solid #C6EADC', borderRadius: 6, padding: '1px 7px' };
 const btnGhost: React.CSSProperties = { height: 40, padding: '0 18px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
 const btnPrimary: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };

@@ -29,6 +29,10 @@ describe('reportRows', () => {
       'UDP · Tipo de Tabla': 'Maestro', 'UDP · Otro': '', 'Table ID': 't1',
     });
     expect(Object.keys(row).at(-1)).toBe('Table ID');
+    // Doc 102: Space (carpeta raíz, sub-proyecto) junto a los subject areas.
+    expect(row.Space).toBe('');
+    expect(tableSheetRow({ ...T, spaces: ['CPYBCA', 'Otros'] }, [])['Space']).toBe('CPYBCA, Otros');
+    expect(Object.keys(row).slice(0, 5)).toEqual(['Table', 'Logical name', 'Schema', 'Space', 'Subject areas']);
   });
 
   it('columnSheetRow: resuelve la tabla y expone facetas/overrides/posiciones', () => {

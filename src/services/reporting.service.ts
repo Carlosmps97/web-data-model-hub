@@ -7,8 +7,10 @@
 // lectura).
 //   GET /api/reporting/tables?projectId=&schema=   → ReportTableRow[]
 //   GET /api/reporting/columns?projectId=&tableId= → ReportColumnRow[] (no id = all)
+//   POST /api/reporting/columns/query · /views/query → lotes de ids en el CUERPO (doc 102)
+// Doc 102: `changesetId` = una versión PROPIA sin publicar (sin él, producción).
 
-import { apiGet } from './http';
+import { apiGet, apiPost } from './http';
 
 import { API_BASE } from '@/services/apiBase';
 
@@ -23,6 +25,9 @@ export interface ReportTableRow {
   subjectAreas: string[];
   /** Doc 88 §7: names of the canvases (diagrams) that contain the table. */
   diagrams?: string[];
+  /** Doc 102: carpetas RAÍZ (sub-proyecto) de esos canvases — MODELO DDV:
+   *  «CPYBCA» / «Otros». Campo «Space» de las plantillas. */
+  spaces?: string[];
   columnCount: number;
   relationshipCount: number;
   /** Nombre del proyecto del reporte (columna de la hoja exportada). */
@@ -73,15 +78,18 @@ export interface ReportFilterOptions {
   subjectAreas: string[];
 }
 
-const withProject = (projectId: string, qs: URLSearchParams): string => {
+/** Doc 102: `projectId` siempre y `changesetId` solo con una versión PROPIA
+ *  sin publicar (sin él, producción). */
+const withScope = (projectId: string, qs: URLSearchParams, changesetId?: string | null): string => {
   qs.set('projectId', projectId);
+  if (changesetId) qs.set('changesetId', changesetId);
   return `?${qs.toString()}`;
 };
 
 /** `GET /api/reporting/filters` — esquemas de tablas activas y canvases del
- *  proyecto, sin tope. */
-export function listReportFilters(projectId: string): Promise<ReportFilterOptions> {
-  return apiGet<ReportFilterOptions>(`${API_BASE}/api/reporting/filters${withProject(projectId, new URLSearchParams())}`);
+ *  proyecto (o de la versión propia), sin tope. */
+export function listReportFilters(projectId: string, changesetId?: string | null): Promise<ReportFilterOptions> {
+  return apiGet<ReportFilterOptions>(`${API_BASE}/api/reporting/filters${withScope(projectId, new URLSearchParams(), changesetId)}`);
 }
 
 /** One view row for the "Views detail" sheets: resolved sources + per-column
@@ -119,37 +127,43 @@ export interface ReportTableFilters {
 }
 
 /** Lists the project's table-level reporting rows, optionally narrowed by schema. */
-export function listReportTables(projectId: string, filters: ReportTableFilters = {}): Promise<ReportTableRow[]> {
+export function listReportTables(projectId: string, filters: ReportTableFilters = {}, changesetId?: string | null): Promise<ReportTableRow[]> {
   const qs = new URLSearchParams();
   if (filters.schema) qs.set('schema', filters.schema);
   if (filters.limit != null) qs.set('limit', String(filters.limit));
   if (filters.offset) qs.set('offset', String(filters.offset));
-  return apiGet<ReportTableRow[]>(`${API_BASE}/api/reporting/tables${withProject(projectId, qs)}`);
+  return apiGet<ReportTableRow[]>(`${API_BASE}/api/reporting/tables${withScope(projectId, qs, changesetId)}`);
 }
 
 /** Doc 92 D4: total de tablas activas del proyecto (conteo real de la barra y
  *  del Select all, aunque la grilla tenga cargada sólo una página). */
-export function countReportTables(projectId: string): Promise<number> {
-  return apiGet<{ total: number }>(`${API_BASE}/api/reporting/tables/count${withProject(projectId, new URLSearchParams())}`)
+export function countReportTables(projectId: string, changesetId?: string | null): Promise<number> {
+  return apiGet<{ total: number }>(`${API_BASE}/api/reporting/tables/count${withScope(projectId, new URLSearchParams(), changesetId)}`)
     .then((r) => r.total);
 }
 
-/** Lists the project's column-level reporting rows. Pass `tableIds` to scope
- *  the export to a batch of tables (server-side `$in`); omit both to get every
- *  column (server-side cap). */
-export function listReportColumns(projectId: string, tableId?: string, tableIds?: string[]): Promise<ReportColumnRow[]> {
+/** Columnas de UNA tabla (Database Explorer en producción). Los LOTES van por
+ *  `queryReportColumns` (doc 102). */
+export function listReportColumns(projectId: string, tableId?: string): Promise<ReportColumnRow[]> {
   const qs = new URLSearchParams();
-  if (tableIds?.length) qs.set('tableIds', tableIds.join(','));
-  else if (tableId) qs.set('tableId', tableId);
-  return apiGet<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns${withProject(projectId, qs)}`);
+  if (tableId) qs.set('tableId', tableId);
+  return apiGet<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns${withScope(projectId, qs)}`);
 }
 
-/** Lists the project's view rows for the export. Pass `tableIds` to scope to
- *  the views derived from those tables (server-side `$in` over
- *  sourceTableIds), or `schema` to scope to one schema (Database Explorer). */
-export function listReportViews(projectId: string, tableIds?: string[], schema?: string): Promise<ReportViewRow[]> {
-  const qs = new URLSearchParams();
-  if (tableIds?.length) qs.set('tableIds', tableIds.join(','));
-  if (schema) qs.set('schema', schema);
-  return apiGet<ReportViewRow[]>(`${API_BASE}/api/reporting/views${withProject(projectId, qs)}`);
+/** Cuerpo de un lote (doc 102): los ids viajan en el CUERPO — en la URL, 300
+ *  uuid (~12 KB) más las cabeceras de Databricks pasaban el tope de 16 KB del
+ *  servidor del front y volvía 431 sin cuerpo. */
+const lotBody = (projectId: string, tableIds: string[], changesetId?: string | null) =>
+  (changesetId ? { projectId, tableIds, changesetId } : { projectId, tableIds });
+
+/** `POST /api/reporting/columns/query` — columnas de un LOTE de tablas. */
+export function queryReportColumns(projectId: string, tableIds: string[], changesetId?: string | null): Promise<ReportColumnRow[]> {
+  if (tableIds.length === 0) return Promise.resolve([]);
+  return apiPost<ReportColumnRow[]>(`${API_BASE}/api/reporting/columns/query`, lotBody(projectId, tableIds, changesetId));
+}
+
+/** `POST /api/reporting/views/query` — vistas derivadas de un LOTE de tablas. */
+export function queryReportViews(projectId: string, tableIds: string[], changesetId?: string | null): Promise<ReportViewRow[]> {
+  if (tableIds.length === 0) return Promise.resolve([]);
+  return apiPost<ReportViewRow[]>(`${API_BASE}/api/reporting/views/query`, lotBody(projectId, tableIds, changesetId));
 }

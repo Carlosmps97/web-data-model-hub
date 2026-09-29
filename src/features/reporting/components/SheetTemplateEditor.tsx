@@ -12,18 +12,18 @@ import { Button, Dialog } from '@/components/ui';
 import { apiErrorMessage } from '@/services/http';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
 import {
-  BUILTIN_ORIGIN, canEditTemplate, isKnownSource, moveItem, sourceLabel, sourceOptions, templateProblems,
-  type SheetTemplate, type SheetTemplateBody,
+  BUILTIN_ORIGIN, canEditTemplate, cleanFileName, isKnownSource, moveItem, sourceLabel, sourceOptions, templateFileName,
+  templateProblems, type SheetTemplate, type SheetTemplateBody,
 } from '../lib/sheetTemplates';
 import {
   createDefaultSheetTemplate, createSheetTemplate, deleteSheetTemplate, updateSheetTemplate,
 } from '../sheetTemplates.service';
 
 type Draft = SheetTemplateBody & { id?: string };
-const EMPTY: Draft = { name: '', sheetName: '', description: '', shared: false, columns: [{ header: '', source: 'column.physicalName' }] };
+const EMPTY: Draft = { name: '', sheetName: '', description: '', shared: false, fileName: '', columns: [{ header: '', source: 'column.physicalName' }] };
 const toDraft = (t: SheetTemplate): Draft => ({
   id: t.id, name: t.name, sheetName: t.sheetName, description: t.description ?? '', shared: t.shared,
-  columns: t.columns.map((c) => ({ ...c })),
+  fileName: t.fileName ?? '', columns: t.columns.map((c) => ({ ...c })),
 });
 
 export default function SheetTemplateEditor({ projectId, templates, me, isAdmin, onClose, onChanged }: {
@@ -63,6 +63,7 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
       const body: SheetTemplateBody = {
         name: draft.name.trim(), sheetName: draft.sheetName.trim(), description: draft.description?.trim() || null,
         shared: foreign || draft.shared, columns: draft.columns.map((c) => ({ header: c.header.trim(), source: c.source })),
+        fileName: cleanFileName(draft.fileName),   // doc 102
       };
       const saved = draft.id
         ? await updateSheetTemplate(projectId, draft.id, body)
@@ -150,6 +151,16 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
           <label style={fieldLabel}>Description
             <input className="rd-input" value={draft.description ?? ''} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="What this format is for" />
           </label>
+          {/* Doc 102: nombre del archivo del export — dato de la plantilla, sin redesplegar. */}
+          <label style={fieldLabel}>File name
+            <input className="rd-input" value={draft.fileName ?? ''} aria-label="File name"
+              onChange={(e) => { const fileName = e.target.value; setDraft((d) => ({ ...d, fileName })); }}
+              placeholder="e.g. QA_REPORTE_{yyyy}-{MM}-{dd} {HH}{mm}{ss}" />
+            <span style={hint}>
+              Placeholders {'{yyyy} {MM} {dd} {HH} {mm} {ss}'} use your local time; empty = template name + date.
+              Next export: <strong>{templateFileName(draft, new Date())}</strong>
+            </span>
+          </label>
           <label style={checkLabel}>
             <input type="checkbox" checked={foreign || draft.shared} disabled={foreign}
               onChange={(e) => setDraft({ ...draft, shared: e.target.checked })} />
@@ -214,5 +225,6 @@ const note: React.CSSProperties = { fontSize: 12, color: '#7A6220', background: 
 const checkLabel: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#56607A' };
 const listItem = (active: boolean): React.CSSProperties => ({ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left', padding: '8px 10px', border: `1px solid ${active ? '#2E5BFF' : '#E6EAF0'}`, background: active ? '#F4F7FF' : '#fff', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' });
 const fieldLabel: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11.5, fontWeight: 600, color: '#56607A' };
+const hint: React.CSSProperties = { fontSize: 11.5, fontWeight: 400, color: '#8A93A5' };
 const sectionTitle: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2', marginTop: 4 };
 const iconBtn: React.CSSProperties = { width: 28, height: 28, border: '1px solid #E6EAF0', background: '#fff', borderRadius: 7, color: '#56607A', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };

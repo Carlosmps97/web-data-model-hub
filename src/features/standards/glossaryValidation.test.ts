@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   termsToValidate, conflictRows, conflictMessage, highlightParts, needsConfirm, impactSummary, applyTitle,
-  outOfSyncReason, impactNote,
+  outOfSyncReason, impactNote, termGap, incompleteRows, incompleteMessage, gapToast,
 } from './glossaryValidation';
 import type { GlossaryImpact, GlossaryImpactRow, GlossaryValidation } from '@/services/naming.service';
 
@@ -112,5 +112,33 @@ describe('popup de apply', () => {
   it('nota según el scope', () => {
     expect(impactNote('column')).toBe('Column terms only rename column (field) names — never table names. You can roll back this version from the history.');
     expect(impactNote('table')).toBe('Table terms only rename table names — never column names. You can roll back this version from the history.');
+  });
+});
+
+describe('filas incompletas (doc 102)', () => {
+  const before = new Map([['e1', { term: 'codigo', abbrev: 'COD' }], ['e2', { term: 'viejo', abbrev: '' }]]);
+  it('termGap', () => {
+    expect(termGap({ term: 'a', abbrev: 'A' })).toBeNull();
+    expect(termGap({ term: 'a', abbrev: '   ' })).toBe('abbrev');
+    expect(termGap({ term: ' ', abbrev: 'A' })).toBe('term');
+    expect(termGap({ term: '', abbrev: '' })).toBe('both');
+  });
+  it('cuenta nuevas y editadas vivas; no las borradas ni las no tocadas', () => {
+    const drafts = [
+      { id: 'n1', term: 'monto', abbrev: '', _new: true },            // nueva sin abreviatura
+      { id: 'n2', term: '', abbrev: '', _new: true },                 // nueva vacía
+      { id: 'n3', term: 'ok', abbrev: 'OK', _new: true },
+      { id: 'e1', term: 'codigo', abbrev: ' ' },                      // editada: borró la abreviatura
+      { id: 'e2', term: 'viejo', abbrev: '' },                        // incompleta de antes, sin tocar
+      { id: 'e3', term: 'x', abbrev: '', _deleted: true },
+    ];
+    expect(incompleteRows(drafts, before).map((d) => d.id)).toEqual(['n1', 'n2', 'e1']);
+  });
+  it('mensajes', () => {
+    expect(incompleteMessage(1)).toBe('1 row needs a term and an abbreviation.');
+    expect(incompleteMessage(3)).toBe('3 rows need a term and an abbreviation.');
+    expect(gapToast('abbrev')).toBe('Type the abbreviation before validating');
+    expect(gapToast('term')).toBe('Type the term before validating');
+    expect(gapToast('both')).toBe('Type the term and the abbreviation before validating');
   });
 });

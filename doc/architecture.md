@@ -120,8 +120,11 @@ src/
 │   │   │                    #   explorer.service (Database Explorer draft-aware)
 │   │   └── index.ts         #   Barrel: exporta WorkspaceScreen
 │   ├── reporting/           # Grilla + Report Designer (ver §7)
-│   │   ├── components/      #   ReportDesigner, FilterBuilder, ResultsGrid, SqlEditor
-│   │   └── query.service.ts #   ReportSpec, runQuery/runSql, insights, export
+│   │   ├── components/      #   ReportDesigner, FilterBuilder, ResultsGrid, SqlEditor,
+│   │   │                    #   SheetTemplateCard, SheetTemplateEditor
+│   │   ├── lib/             #   reportRows, sheetTemplates, reportFetch (lotes POST), reportVersions (doc 102)
+│   │   ├── query.service.ts #   ReportSpec, runQuery/runSql, insights, export
+│   │   └── index.ts         #   Barrel (doc 102): lo que usa ReportingScreen
 │   ├── standards/           # Glossary / Parent Domains / UDP / DDL Export rules (ver §8)
 │   │   ├── components/      #   StandardsScreen, GlossaryPage, DomainsPage, UdpDefsPage,
 │   │   │                    #   DdlRulesTab, DdlRuleCatalog, DdlRuleEditor,
@@ -521,6 +524,8 @@ La ruta `/reporting` tiene dos modos, controlados por `ReportingScreenWrapper`:
 1. **Grilla de metadata** (default): tabla de tablas del modelo con búsqueda por nombre y **filtros facetados** (Schema · Project · Subject area) que se acotan mutuamente. Cada faceta calcula sus opciones excluyendo su propia selección. La carga es perezosa: primero 50 tablas; al aplicar el primer filtro (con *debounce*) se descarga el set completo para que el *faceting* sea exacto sobre todo. La exportación arma un **workbook Excel** con `xlsx`, una hoja por nivel de detalle marcado (Tables / Columns / Relationships / Definitions) y solo con las filas seleccionadas.
 
 2. **Report Designer** (`onDesign`): un constructor de consultas con dos modos, `builder` y `sql`, sobre un IR común `ReportSpec`.
+
+**Doc 102 — versión del reporte.** Junto al combo de proyecto hay un combo **Version**: producción (default) o una versión PROPIA sin publicar del proyecto (borrador o en revisión, `ownOpenVersions`). Con una versión propia, la grilla (cargada completa), los filtros y los dos exports (por niveles y con plantilla) leen el estado de esa versión — todas las lecturas mandan `changesetId` y el backend superpone sus cambios a producción. El Report Designer sigue sobre producción (el botón queda deshabilitado con una nota). Si una lectura de la versión falla (p. ej. se publicó o se cerró en otra pestaña), el wrapper vuelve a pedir la lista de versiones: si ya no está abierta, el combo deja de ofrecerla y la pantalla vuelve a producción con el aviso «That version is no longer open — showing Production.». Las lecturas por lote (columnas y vistas de muchas tablas) viajan por `POST` con los ids en el cuerpo (antes, con 300 ids en la URL, `server.mjs` respondía 431).
 
 ### 7.1 El motor de consulta (`query.service.ts`)
 

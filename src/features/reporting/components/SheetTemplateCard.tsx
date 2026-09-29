@@ -50,7 +50,7 @@ export default function SheetTemplateCard({ projectId, selectedCount, disabled, 
       const ws = XLSX.utils.json_to_sheet(templateRows(selected, tables, columns),
         { header: selected.columns.map((c) => c.header) });
       XLSX.utils.book_append_sheet(wb, ws, selected.sheetName);
-      XLSX.writeFile(wb, templateFileName(selected.name, new Date()));
+      XLSX.writeFile(wb, templateFileName(selected, new Date()));   // doc 102: nombre de la plantilla
       toast.success(`Exported with the ${selected.name} template.`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not build the Excel file.');
