@@ -11,6 +11,7 @@
 import { ListTree, TriangleAlert } from 'lucide-react';
 import { summarizeDiff } from '@/services/versioning.service';
 import type { ChangesetDiff } from '@/types/versioning';
+import { conflictCounts } from './conflicts';
 
 const MAX_CHIPS = 6;
 
@@ -18,15 +19,6 @@ function fmtWhen(iso: string): string {
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return iso;
   return new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-}
-
-/** Entidades del diff que producción modificó DESPUÉS de que este request las editó. */
-export function countConflicts(diff: ChangesetDiff): number {
-  let n = 0;
-  Object.values(diff.collections).forEach((b) => {
-    n += [...b.added, ...b.edited, ...b.deleted].filter((e) => e.conflict).length;
-  });
-  return n;
 }
 
 function ChipsRow({ label, names }: { label: string; names: string[] }) {
@@ -73,7 +65,7 @@ export default function ChangesSummary({ diff, onOpenDetails }: {
       </div>
     );
   }
-  const conflicts = countConflicts(diff);
+  const conflicts = conflictCounts(diff);
   return (
     <div className="dmh-rvs-card">
       <div className="dmh-rvs-head">
@@ -113,14 +105,20 @@ export default function ChangesSummary({ diff, onOpenDetails }: {
             </span>
           </div>
         ))}
-        {conflicts > 0 && (
+        {conflicts.total > 0 && (
           <div className="dmh-rvs-row is-conflict">
             <span className="dmh-rvs-rowlbl">
               <TriangleAlert size={13} strokeWidth={1.8} aria-hidden />
               Conflicts with production
             </span>
             <span className="dmh-rvs-rowchips">
-              <span className="dmh-rvs-cnt is-edited">{conflicts} overwrite{conflicts === 1 ? '' : 's'} on approve</span>
+              {conflicts.overwrites > 0 && (
+                <span className="dmh-rvs-cnt is-edited">{conflicts.overwrites} overwrite{conflicts.overwrites === 1 ? '' : 's'} on approve</span>
+              )}
+              {/* Doc 100 (P3): lo que producción borró vuelve al aprobar. */}
+              {conflicts.restores > 0 && (
+                <span className="dmh-rvs-cnt is-edited">{conflicts.restores} restore{conflicts.restores === 1 ? '' : 's'} on approve</span>
+              )}
             </span>
           </div>
         )}

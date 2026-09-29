@@ -7,9 +7,10 @@ import {
   FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
-import { EndIcon, RelLineIcon, SubcatIcon } from './RelIcon';
+import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { EndIcon, RelLabelIcon, RelLineIcon, SubcatIcon } from './RelIcon';
 import type { Cardinality } from '@/services/governance.service';
-import { useModelerStore } from '@/store/useModelerStore';
+import { manualRouteCount, useModelerStore } from '@/store/useModelerStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import { UNDO_KEY_LABEL } from './ColumnContextMenu';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
@@ -26,6 +27,8 @@ import { ExportDdlModal } from '@/features/ddl';
 import ViewEditor from './ViewEditor';
 import ModelPropertiesModal from './ModelPropertiesModal';
 import SearchModelPopup from './SearchModelPopup';
+import { liveLayout } from '../lib/viewerLayout';
+import { arrangeResetWarning } from '../lib/wireRoute';
 
 // Las 4 cardinalidades crow's-foot del preset por extremo (el popup de la
 // relación ofrece las 6, incluyendo 'many' pelado y 'one-only').
@@ -59,6 +62,9 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Doc 92 D7: barra de herramientas colapsable (la navegación de módulos no).
   const toolbarCollapsed = useUiStore((st) => st.toolbarCollapsed);
   const toggleToolbar = useUiStore((st) => st.toggleToolbar);
+  // Doc 98: mostrar/ocultar las etiquetas de relación (por navegador).
+  const relLabelsHidden = useUiStore((st) => st.relLabelsHidden);
+  const toggleRelLabels = useUiStore((st) => st.toggleRelLabels);
   const activeSaId = useModelerStore((s) => s.activeSaId);
   const diagram = useModelerStore((s) => s.diagram);
   const relPreset = useModelerStore((s) => s.relPreset);
@@ -120,6 +126,12 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Acciones largas del toolbar en vuelo (feedback de "en proceso").
   const [saving, setSaving] = useState(false);
   const [arranging, setArranging] = useState(false);
+  // Doc 99: trazos manuales de wires del canvas — el auto-arrange en edición
+  // los reinicia, así que confirma antes diciendo cuántos son.
+  const routeCount = useModelerStore(manualRouteCount);
+  // La pregunta es sobre UN canvas: si mientras está abierta cambia el canvas
+  // (buscador, Explorer), deja de valer.
+  const [arrangeAsk, setArrangeAsk] = useState<string | null>(null);
   const setRelEnd = (end: 'parent' | 'child', c: Cardinality) => {
     const next = { ...relSel, [end]: c };
     setRelSel(next);
@@ -154,11 +166,16 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
     finally { setSaving(false); }
   };
-  const onArrange = async () => {
+  const runArrange = async () => {
     setArranging(true);
     try { await autoOrganize(); }
     catch { pushToast("Couldn't auto-arrange", 'err'); }
     finally { setArranging(false); }
+  };
+  const onArrange = () => {
+    // En visor el arrange es de la sesión (nada se guarda): no hay qué confirmar.
+    if (!readonly && routeCount > 0) { setArrangeAsk(activeSaId); return; }
+    void runArrange();
   };
 
   // Doc 59: export SIN captura de DOM. html-to-image clonaba ~450k elementos
@@ -184,7 +201,23 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       const [{ buildDiagramScene }, { buildDiagramSvg }] = await Promise.all([
         import('../lib/exportScene'), import('../lib/sceneSvg'),
       ]);
-      const scene = buildDiagramScene({ diagram: st.diagram, drawings: st.drawings, viewMode: st.viewMode });
+      // Doc 99: los trazos manuales están referidos a donde los bloques están
+      // AHORA. En edición el export toma las posiciones vivas (el diagrama del
+      // store guarda las de su última carga: sin esto un trazo recién hecho
+      // saldría unido a la tabla en su sitio viejo) y los trazos vivos. En
+      // visor exporta lo publicado, como siempre: posiciones Y trazos
+      // publicados, sin los movimientos efímeros de la sesión.
+      const viewer = useSessionStore.getState().openMode === 'readonly';
+      const sa = st.diagram.subjectArea;
+      const diagram = viewer || !st.flow
+        ? st.diagram
+        : { ...st.diagram, subjectArea: { ...sa, layout: liveLayout(sa.layout, st.flow.getNodes()) } };
+      // Doc 98: el export respeta el botón Show/Hide relationship labels.
+      const scene = buildDiagramScene({
+        diagram, drawings: st.drawings, viewMode: st.viewMode,
+        relLabels: !useUiStore.getState().relLabelsHidden,
+        routes: st.canvasRoutes,
+      });
       if (kind === 'pdf') {
         const { buildDiagramPdf } = await import('../lib/scenePdf');
         download(new Blob([buildDiagramPdf(scene)], { type: 'application/pdf' }), `${name}.pdf`);
@@ -343,6 +376,22 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
                 <SubcatIcon />
               </button>
             </Tooltip>
+            {/* Doc 98: etiquetas de relación (frases) — preferencia de
+                VISUALIZACIÓN, así que también vale en modo visor. */}
+            <Tooltip label={relLabelsHidden
+              ? 'Show relationship labels (verb phrases)'
+              : 'Hide relationship labels (verb phrases)'}>
+              <button
+                type="button"
+                className={`wk-reldraw wk-rellabel${relLabelsHidden ? '' : ' on'}`}
+                aria-label="Relationship labels"
+                aria-pressed={!relLabelsHidden}
+                disabled={!hasCanvas}
+                onClick={toggleRelLabels}
+              >
+                <RelLabelIcon />
+              </button>
+            </Tooltip>
           </div>
         </div>
         <span className="wk-grp-cap">Relationships</span>
@@ -427,6 +476,21 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       </div>
       </>)}
 
+      {/* Por portal: dentro del toolbar heredaría su `white-space: nowrap` y el
+          aviso saldría cortado en una sola línea. */}
+      {arrangeAsk != null && arrangeAsk === activeSaId && createPortal(
+        <ConfirmDialog
+          open
+          title="Auto-arrange this canvas?"
+          confirmLabel="Auto-arrange"
+          message={arrangeResetWarning(routeCount) ?? 'Auto-arrange moves every block on this canvas.'}
+          onConfirm={() => {
+            const asked = arrangeAsk;
+            setArrangeAsk(null);
+            if (asked === useModelerStore.getState().activeSaId) void runArrange();
+          }}
+          onCancel={() => setArrangeAsk(null)}
+        />, document.body)}
       {modal === 'table' && <NewTableModal onClose={() => setModal(null)} onCreate={createTable} />}
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}
       {modal === 'view' && (

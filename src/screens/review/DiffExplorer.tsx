@@ -163,12 +163,15 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
     return { added, edited, deleted };
   }, [diff]);
 
-  // conflicto por entidad — ya viene en el /diff, no se recomputa.
+  // conflicto por entidad — ya viene en el /diff, no se recomputa. Doc 100
+  // (P3): `restore` = producción la borró y aprobar la vuelve a la vida.
   const conflictBy = useMemo(() => {
-    const m: Record<string, boolean> = {};
+    const m: Record<string, 'overwrite' | 'restore'> = {};
     Object.entries(diff.collections).forEach(([collection, bucket]) => {
       (['added', 'edited', 'deleted'] as const).forEach((v) => {
-        bucket[v].forEach((e) => { if (e.conflict) m[keyOf(collection, e.id)] = true; });
+        bucket[v].forEach((e) => {
+          if (e.conflict) m[keyOf(collection, e.id)] = e.restores ? 'restore' : 'overwrite';
+        });
       });
     });
     return m;
@@ -317,7 +320,9 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
               {selectedConflict && (
                 <div className="dmh-rv-note" role="alert" style={{ marginTop: 10 }}>
                   <TriangleAlert size={15} strokeWidth={1.7} aria-hidden />
-                  <span>Modified in production after this version edited it — approving overwrites that.</span>
+                  <span>{selectedConflict === 'restore'
+                    ? 'Deleted in production after this version was opened — approving restores it.'
+                    : 'Modified in production after this version edited it — approving overwrites that.'}</span>
                 </div>
               )}
               <div className="dmh-rvd-dbody">

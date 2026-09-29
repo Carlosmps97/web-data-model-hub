@@ -8,7 +8,7 @@ import { pushUndo } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import type { Cardinality, CanonicalColumn } from '@/services/governance.service';
 import {
-  buildKeyMapping, demotablePkChildren, mappingToBulk, relationshipDrift, roleNamePlan,
+  buildKeyMapping, demotablePkChildren, mappingToBulk, relationshipDrift, roleNamePlan, syncMappingInput,
   type MappingResolution,
 } from '@/features/modeler/lib/relationshipPairs';
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
@@ -16,7 +16,9 @@ import { pkFirstOrdinals } from '../lib/columnOrder';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
+import { phraseEdits } from '../lib/relationshipLabel';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
+import RelationshipPhraseFields, { type PhraseKey } from './RelationshipPhraseFields';
 
 export const CARDS: { v: Cardinality; lbl: string }[] = [
   { v: 'one', lbl: 'One' }, { v: 'many', lbl: 'Many' }, { v: 'one-only', lbl: 'Exactly one' },
@@ -29,6 +31,7 @@ export const CARDS: { v: Cardinality; lbl: string }[] = [
  * (N=N por construcción — el alta manual de pares murió con doc 47) con Role
  * name por par (rename in place, o SPLIT si la columna está unificada), y el
  * banner de DRIFT con "Sync with parent key" cuando la llave del padre cambió.
+ * Doc 98: frases de relación (la etiqueta del wire), con su botón Apply.
  */
 export default function RelationshipPopup({ relId, onClose, pushToast }: { relId: string; onClose: () => void; pushToast: (m: string, k?: 'err') => void }) {
   const diagram = useModelerStore((s) => s.diagram);
@@ -40,6 +43,8 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const [saving, setSaving] = useState(false);
   const [roleDrafts, setRoleDrafts] = useState<Record<number, string>>({});
+  // Doc 98: borradores de las frases (ausente = sin tocar → se ve la vigente).
+  const [phraseDrafts, setPhraseDrafts] = useState<Partial<Record<PhraseKey, string>>>({});
   // Modo SYNC (doc 47): re-mapeo de la llave tras un drift del padre.
   const [syncing, setSyncing] = useState(false);
   const [syncRows, setSyncRows] = useState<KeyRowState[]>([]);
@@ -113,6 +118,18 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       await updateRelationship(end === 'parent'
         ? { ...rel, parentCardinality: v } : { ...rel, childCardinality: v });
     }, "Couldn't update");
+
+  // ── Frases de relación (doc 98): Apply graba las DOS en un guardado ──
+  const pendingPhrases = phraseEdits(rel, phraseDrafts);
+  const applyPhrases = () => {
+    if (!pendingPhrases) return;               // sin cambio real: cero requests
+    void run(async () => {
+      // Por el store: marca dirty, deja el Undo y recarga el diagrama. Si
+      // falla, los borradores quedan en las cajas y Apply sigue activo.
+      await updateRelationship({ ...rel, ...pendingPhrases });
+      setPhraseDrafts({});
+    }, "Couldn't update");
+  };
 
   // ── Role name (Erwin): rename in place, o SPLIT si está unificada ──
   const applyRole = (i: number) => {
@@ -218,11 +235,9 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
                target: { kind: 'create' as const, id: crypto.randomUUID(), logicalName: logical, physicalName: physical },
                ...(r.roleName.trim() ? { roleName: r.roleName.trim() } : {}) };
     }));
-    const { changes, createdCols } = mappingToBulk({
-      relId: rel.id, parentTableId: rel.parentTableId, childTableId: rel.childTableId,
-      identifying: rel.identifying, parentCardinality: rel.parentCardinality, childCardinality: rel.childCardinality,
-      rows: resolutions, childCols: childOpts,
-    });
+    // Doc 98: el Sync re-emite la relación campo por campo — syncMappingInput
+    // lleva todo lo que vive a nivel de relación (frases incluidas).
+    const { changes, createdCols } = mappingToBulk(syncMappingInput(rel, resolutions, childOpts));
     // Pares retirados (su PK ya no existe en el padre): limpieza conservadora
     // del flag FK — misma regla que el delete de relación.
     const near = await gov.listRelationships(rel.childTableId);
@@ -324,6 +339,17 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
           {CARDS.map((c) => <option key={c.v} value={c.v}>{c.lbl}</option>)}
         </select>
       </div>
+
+      <RelationshipPhraseFields
+        values={{
+          parentToChildPhrase: phraseDrafts.parentToChildPhrase ?? rel.parentToChildPhrase ?? '',
+          childToParentPhrase: phraseDrafts.childToParentPhrase ?? rel.childToParentPhrase ?? '',
+        }}
+        onChange={(key, value) => setPhraseDrafts((d) => ({ ...d, [key]: value }))}
+        onApply={applyPhrases}
+        canApply={pendingPhrases != null}
+        locked={locked}
+      />
 
       {syncing ? (
         /* ── Modo SYNC: re-mapeo N=N contra la llave vigente del padre ── */

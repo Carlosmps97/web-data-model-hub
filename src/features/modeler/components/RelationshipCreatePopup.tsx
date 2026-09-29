@@ -12,6 +12,7 @@ import { invertBulk, preKey } from '@/features/modeler/lib/undoInvert';
 import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
+import RelationshipPhraseFields, { type PhraseValues } from './RelationshipPhraseFields';
 import { CARDS } from './RelationshipPopup';
 
 export interface RelDraft {
@@ -24,6 +25,7 @@ export interface RelDraft {
  * Popup de CONFIRMACIÓN de relación (doc 47): staging local — nada persiste
  * hasta Confirm. N filas fijas = PKs del padre (orden de llave); Confirm arma
  * UN PUT /changes/bulk (columnas + relación). Cancel = cero requests.
+ * Doc 98: las frases de relación (opcionales) nacen en ese mismo lote.
  */
 export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
   draft: RelDraft; onClose: (created: boolean) => void; pushToast: (m: string, k?: 'err') => void;
@@ -31,6 +33,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
   const diagram = useModelerStore((s) => s.diagram);
   const [saving, setSaving] = useState(false);
   const [cards, setCards] = useState({ parent: draft.parentCardinality, child: draft.childCardinality });
+  const [phrases, setPhrases] = useState<PhraseValues>({ parentToChildPhrase: '', childToParentPhrase: '' });
 
   const cols = useMemo(() => diagram?.columns ?? [], [diagram]);
   const parentTable = diagram?.tables.find((t) => t.id === draft.parentTableId);
@@ -75,6 +78,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
         parentTableId: draft.parentTableId, childTableId: draft.childTableId,
         identifying: draft.identifying, parentCardinality: cards.parent, childCardinality: cards.child,
         rows: resolutions, childCols,
+        ...phrases,   // doc 98: mappingToBulk las limpia (en blanco no viajan)
       });
       await gov.recordChangesBulk(changes);
       // Undo (doc 50): inversa genérica del lote — cae la relación, se borran
@@ -158,6 +162,12 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
           {CARDS.map((c) => <option key={c.v} value={c.v}>{c.lbl}</option>)}
         </select>
       </div>
+
+      <RelationshipPhraseFields
+        values={phrases}
+        onChange={(key, value) => setPhrases((p) => ({ ...p, [key]: value }))}
+        locked={saving}
+      />
 
       <div className="wk-props-field">
         <label>Key migration · parent key has {parentPks.length} column{parentPks.length === 1 ? '' : 's'} · "Inherit" copies the parent's definition, UDPs and metadata</label>

@@ -12,6 +12,8 @@ beforeAll(() => {
 });
 
 const { useUiStore } = await import('./useUiStore');
+// Estado con el que NACE el store en un navegador sin preferencias guardadas.
+const bornRelLabelsHidden = useUiStore.getState().relLabelsHidden;
 
 describe('useUiStore (doc 92 D7 — chrome colapsable)', () => {
   beforeEach(() => {
@@ -30,5 +32,29 @@ describe('useUiStore (doc 92 D7 — chrome colapsable)', () => {
   it('setters explícitos', () => {
     useUiStore.getState().setExplorerCollapsed(true);
     expect(useUiStore.getState().explorerCollapsed).toBe(true);
+  });
+});
+
+describe('useUiStore · etiquetas de relación (doc 98)', () => {
+  beforeEach(() => {
+    mem.clear();
+    useUiStore.setState({ relLabelsHidden: false });
+  });
+  it('por defecto las etiquetas se ven', () => {
+    expect(bornRelLabelsHidden).toBe(false);
+  });
+  it('un navegador que las dejó ocultas las encuentra ocultas al volver', async () => {
+    localStorage.setItem('dmh:ui:relLabelsHidden', '1');
+    vi.resetModules();                                   // store recién creado
+    const fresh = await import('./useUiStore');
+    expect(fresh.useUiStore.getState().relLabelsHidden).toBe(true);
+  });
+  it('ocultar y volver a mostrar persiste por navegador', () => {
+    useUiStore.getState().toggleRelLabels();
+    expect(useUiStore.getState().relLabelsHidden).toBe(true);
+    expect(localStorage.getItem('dmh:ui:relLabelsHidden')).toBe('1');
+    useUiStore.getState().toggleRelLabels();
+    expect(useUiStore.getState().relLabelsHidden).toBe(false);
+    expect(localStorage.getItem('dmh:ui:relLabelsHidden')).toBe('0');
   });
 });

@@ -24,7 +24,12 @@ export interface Drawing { id: string; type: DrawingType; x: number; y: number; 
 // nunca materializó su lista (el backend aplica la regla vieja showOnCanvas ∧
 // fuentes y devuelve en /diagram la lista materializada). Invariante
 // round-trip: declarado acá Y en `SubjectAreaDoc`.
-export interface SubjectArea { id: string; projectId: string; name: string; folderId?: string | null; tableIds: string[]; viewIds?: string[] | null; layout: Record<string, { x: number; y: number }>; drawings?: Drawing[]; udpValues?: Record<string, string>; }
+// Doc 99: `routes` = trazos MANUALES de wires — puntos de quiebre por wire, en
+// coordenadas del canvas, padre → hijo. La llave es el id del wire en el
+// canvas: el de la relación (wire crow's-foot y rama de subcategoría) o
+// `subsym-{símbolo}` (tronco). Sin entrada, el wire usa el camino automático.
+// Invariante round-trip: declarado acá Y en `SubjectAreaDoc`.
+export interface SubjectArea { id: string; projectId: string; name: string; folderId?: string | null; tableIds: string[]; viewIds?: string[] | null; layout: Record<string, { x: number; y: number }>; drawings?: Drawing[]; udpValues?: Record<string, string>; routes?: Record<string, { x: number; y: number }[]>; }
 // F3: `views` = vistas showOnCanvas con ≥1 fuente en este canvas (las filtra
 // el backend en /diagram; el front solo las dibuja — nodos 'view' + wires).
 export interface Diagram { subjectArea: SubjectArea; tables: CanonicalTable[]; columns: CanonicalColumn[]; relationships: Relationship[]; views: View[]; }

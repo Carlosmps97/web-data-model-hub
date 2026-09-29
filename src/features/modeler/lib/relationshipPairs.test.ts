@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { CanonicalColumn, Relationship } from '@/services/governance.service';
 import {
   buildKeyMapping, demotablePkChildren, mappingToBulk,
-  relationshipDrift, roleNamePlan, type MappingResolution,
+  relationshipDrift, roleNamePlan, syncMappingInput, type MappingResolution,
 } from './relationshipPairs';
 
 const rel = (over: Partial<Relationship> = {}): Relationship => ({
@@ -188,6 +188,75 @@ describe('mappingToBulk (doc 47)', () => {
     const upd = changes.find((c) => c.entityId === 'h1')!.payload as unknown as CanonicalColumn;
     expect(upd).toMatchObject({ logicalName: 'region venta', physicalName: 'REGION_VENTA', isForeignKey: true });
     expect(relationship.pairs[0]).toEqual({ parentColumnId: 'p1', childColumnId: 'h1', roleName: 'region venta' });
+  });
+});
+
+describe('mappingToBulk · frases de relación (doc 98)', () => {
+  const parent = col('p1', 'P', 'CUSTOMER_ID', { isPrimaryKey: true });
+  const child = col('h1', 'H', 'CUSTOMER_ID');
+  const input = {
+    relId: 'r9', parentTableId: 'P', childTableId: 'H', identifying: false,
+    parentCardinality: 'one' as const, childCardinality: 'zero-many' as const,
+    rows: [{ parentCol: parent, target: { kind: 'existing' as const, col: child, preexisting: true }, inherit: true }],
+    childCols: [child],
+  };
+
+  it('las frases viajan en la relación del lote (crear, y Sync que la re-emite)', () => {
+    const { changes, relationship } = mappingToBulk({
+      ...input, parentToChildPhrase: 'Cliente tiene', childToParentPhrase: 'pertenece a un Cliente',
+    });
+    expect(relationship.parentToChildPhrase).toBe('Cliente tiene');
+    expect(relationship.childToParentPhrase).toBe('pertenece a un Cliente');
+    expect(changes[changes.length - 1].payload).toMatchObject({
+      id: 'r9', parentToChildPhrase: 'Cliente tiene', childToParentPhrase: 'pertenece a un Cliente',
+    });
+  });
+
+  it('se graban limpias: recortadas, y una en blanco no viaja', () => {
+    const { relationship } = mappingToBulk({
+      ...input, parentToChildPhrase: '  Cliente tiene ', childToParentPhrase: '   ',
+    });
+    expect(relationship.parentToChildPhrase).toBe('Cliente tiene');
+    expect('childToParentPhrase' in relationship).toBe(false);
+  });
+
+  it('sin frases: la relación sale como siempre, sin llaves nuevas', () => {
+    const { relationship } = mappingToBulk(input);
+    expect('parentToChildPhrase' in relationship).toBe(false);
+    expect('childToParentPhrase' in relationship).toBe(false);
+  });
+});
+
+describe('syncMappingInput (doc 98 — «Sync with parent key» re-emite la relación)', () => {
+  const parent = col('p1', 'P', 'CUSTOMER_ID', { isPrimaryKey: true });
+  const child = col('h1', 'H', 'CUSTOMER_ID');
+  const rows: MappingResolution[] = [
+    { parentCol: parent, target: { kind: 'existing', col: child, preexisting: true }, inherit: true },
+  ];
+  const existing: Relationship = {
+    id: 'r7', parentTableId: 'P', childTableId: 'H',
+    pairs: [{ parentColumnId: 'pOld', childColumnId: 'h1' }],
+    parentCardinality: 'zero-one', childCardinality: 'one-many', identifying: false,
+    parentToChildPhrase: 'Cliente tiene', childToParentPhrase: 'pertenece a un Cliente',
+  };
+
+  it('todo lo que vive a nivel de RELACIÓN sale intacto; solo cambian los pares', () => {
+    const { relationship } = mappingToBulk(syncMappingInput(existing, rows, [child]));
+    expect(relationship).toEqual({
+      id: 'r7', parentTableId: 'P', childTableId: 'H',
+      pairs: [{ parentColumnId: 'p1', childColumnId: 'h1' }],
+      parentCardinality: 'zero-one', childCardinality: 'one-many', identifying: false,
+      parentToChildPhrase: 'Cliente tiene', childToParentPhrase: 'pertenece a un Cliente',
+    });
+  });
+
+  it('una subcategoría conserva su símbolo', () => {
+    const sub: Relationship = {
+      ...existing, identifying: true, parentCardinality: 'one', childCardinality: 'one',
+      subcategory: true, subtypeSymbolId: 'sym-3',
+    };
+    const { relationship } = mappingToBulk(syncMappingInput(sub, rows, [child]));
+    expect(relationship).toMatchObject({ subcategory: true, subtypeSymbolId: 'sym-3' });
   });
 });
 

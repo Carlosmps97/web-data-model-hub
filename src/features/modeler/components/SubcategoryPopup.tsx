@@ -6,6 +6,8 @@ import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { relationshipDrift } from '@/features/modeler/lib/relationshipPairs';
+import { phraseEdits } from '../lib/relationshipLabel';
+import RelationshipPhraseFields, { type PhraseKey } from './RelationshipPhraseFields';
 
 /**
  * Popup de GESTIÓN de un grupo de subcategoría (doc 53) — doble click en el
@@ -14,16 +16,21 @@ import { relationshipDrift } from '@/features/modeler/lib/relationshipPairs';
  * completo. Los borrados van por el MISMO camino que el resto (store →
  * changeset + Undo por relación); quitar la última arista elimina el símbolo
  * solo (es derivado — regla Erwin). Reparar drift v1 = quitar y re-agregar.
+ * Doc 98: cada subtipo es UNA relación con sus propias frases (la etiqueta de
+ * su rama) — se editan por fila, con su Apply.
  */
 export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
   symbolId: string; onClose: () => void; pushToast: (m: string, k?: 'err') => void;
 }) {
   const diagram = useModelerStore((s) => s.diagram);
   const deleteRelationship = useModelerStore((s) => s.deleteRelationship);
+  const updateRelationship = useModelerStore((s) => s.updateRelationship);
   const viewMode = useModelerStore((s) => s.viewMode);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const [busy, setBusy] = useState(false);
+  // Doc 98: borradores de frases por relación (ausente = sin tocar).
+  const [phraseDrafts, setPhraseDrafts] = useState<Record<string, Partial<Record<PhraseKey, string>>>>({});
 
   const rels = useMemo(
     () => (diagram?.relationships ?? []).filter((r) => r.subcategory && r.subtypeSymbolId === symbolId),
@@ -59,6 +66,21 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
     finally { setBusy(false); }
   };
 
+  // Frases de UNA rama (doc 98): un guardado con lo que cambió, por el store
+  // (changeset + Undo). Si falla, el borrador queda en las cajas.
+  const applyPhrases = async (relId: string) => {
+    const r = rels.find((x) => x.id === relId);
+    const edits = r ? phraseEdits(r, phraseDrafts[relId] ?? {}) : null;
+    if (!r || !edits) return;
+    setBusy(true);
+    try {
+      await updateRelationship({ ...r, ...edits });
+      setPhraseDrafts((d) => { const rest = { ...d }; delete rest[relId]; return rest; });
+    } catch (e) {
+      pushToast(e instanceof Error && e.message ? e.message : "Couldn't update", 'err');
+    } finally { setBusy(false); }
+  };
+
   const removeAll = async () => {
     setBusy(true);
     try {
@@ -77,7 +99,7 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
   };
 
   return (
-    <Modal title="Subcategory" icon="link" onClose={() => { if (!busy) onClose(); }}>
+    <Modal title="Subcategory" icon="link" size="lg" onClose={() => { if (!busy) onClose(); }}>
       <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="wk-pp-role parent">SUPERTYPE</span>
         <span className="rd-mono">{parent ? nameOf(parent.id) : '—'}</span>
@@ -87,13 +109,15 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
       </div>
 
       <div className="wk-props-field">
-        <label>Subtypes</label>
-        <div style={{ display: 'grid', gap: 6 }}>
+        <label>Subtypes · each one has its own verb phrases (the label on its branch)</label>
+        <div className="wk-relpairs">
           {rels.map((r) => {
             const drifted = relationshipDrift(r, parentPkIds) != null;
             const childName = nameOf(r.childTableId);
+            const drafts = phraseDrafts[r.id] ?? {};
             return (
-              <div key={r.id} className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div key={r.id} className="wk-relpair">
+              <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span className="rd-mono" style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                   {childName}
                 </span>
@@ -112,6 +136,18 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
                     Remove
                   </button>
                 )}
+              </div>
+              <RelationshipPhraseFields
+                bare
+                values={{
+                  parentToChildPhrase: drafts.parentToChildPhrase ?? r.parentToChildPhrase ?? '',
+                  childToParentPhrase: drafts.childToParentPhrase ?? r.childToParentPhrase ?? '',
+                }}
+                onChange={(key, value) => setPhraseDrafts((d) => ({ ...d, [r.id]: { ...(d[r.id] ?? {}), [key]: value } }))}
+                onApply={canEdit ? () => void applyPhrases(r.id) : undefined}
+                canApply={phraseEdits(r, drafts) != null}
+                locked={!canEdit || busy}
+              />
               </div>
             );
           })}

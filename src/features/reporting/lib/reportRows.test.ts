@@ -1,8 +1,10 @@
 // Doc 70 §4.2: filas puras del reporte tabular (pantalla + Excel).
 import { describe, expect, it } from 'vitest';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
+import type { RelationshipRow } from '../query.service';
 import {
-  chunk, columnSheetRow, joinedSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf, unionSorted, viewSheetRow,
+  chunk, columnSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf,
+  unionSorted, viewSheetRow,
 } from './reportRows';
 
 const T: ReportTableRow = {
@@ -89,5 +91,53 @@ describe('viewSheetRow (final review #3 — doc 96 D6)', () => {
     });
     expect(Object.keys(row)).not.toContain('Mode');
     expect(row).toMatchObject({ View: 'VW', Schema: 'gold_vu', '#Columns': 0, 'User-Defined SQL': 'SELECT 1', SQL: 'CREATE VIEW …' });
+  });
+});
+
+describe('relationshipSheetRow (doc 98 — hoja Relationships)', () => {
+  const R: RelationshipRow = {
+    id: 'r1', pairIndex: 1, pairCount: 2,
+    parent: 'M_CLIENTE.CODCLI', parentSchema: 'core', child: 'M_CUENTA.CODCLI', childSchema: 'stg',
+    parentTableId: 't1', childTableId: 't2',
+    parentTable: 'M_CLIENTE', parentColumn: 'CODCLI', childTable: 'M_CUENTA', childColumn: 'CODCLI',
+    roleName: 'titular', cardinality: '1 → 0..N', identifying: true,
+    isSelfReferencing: false, crossSchema: true, label: 'M_CLIENTE.CODCLI → M_CUENTA.CODCLI (1 → 0..N)',
+    parentToChildPhrase: 'Cliente tiene', childToParentPhrase: 'pertenece a un Cliente',
+  };
+
+  it('las columnas de siempre, con las dos frases junto a los datos de la relación', () => {
+    expect(relationshipSheetRow(R)).toEqual({
+      'Parent schema': 'core', 'Parent table': 'M_CLIENTE', 'Parent column': 'CODCLI',
+      'Child schema': 'stg', 'Child table': 'M_CUENTA', 'Child column': 'CODCLI',
+      'Role name': 'titular', Pair: '2/2', Cardinality: '1 → 0..N', Identifying: 'Y',
+      'Parent-to-child phrase': 'Cliente tiene', 'Child-to-parent phrase': 'pertenece a un Cliente',
+      'Self-referencing': '', 'Cross-schema': 'Y',
+    });
+  });
+
+  it('el orden de las columnas del Excel es estable', () => {
+    expect(Object.keys(relationshipSheetRow(R))).toEqual([
+      'Parent schema', 'Parent table', 'Parent column', 'Child schema', 'Child table', 'Child column',
+      'Role name', 'Pair', 'Cardinality', 'Identifying',
+      'Parent-to-child phrase', 'Child-to-parent phrase', 'Self-referencing', 'Cross-schema',
+    ]);
+  });
+
+  it('relación sin frases y de un solo par: celdas vacías', () => {
+    const row = relationshipSheetRow({
+      ...R, pairIndex: 0, pairCount: 1, roleName: null, parentToChildPhrase: null, childToParentPhrase: undefined,
+    });
+    expect(row).toMatchObject({
+      'Role name': '', Pair: '', 'Parent-to-child phrase': '', 'Child-to-parent phrase': '',
+    });
+  });
+
+  it('respuesta de un backend viejo (sin tabla/columna separadas): cae al extremo combinado', () => {
+    const row = relationshipSheetRow({
+      ...R, parentTable: undefined, parentColumn: undefined, childTable: undefined, childColumn: undefined,
+    });
+    expect(row).toMatchObject({
+      'Parent table': 'M_CLIENTE.CODCLI', 'Parent column': '', 'Child table': 'M_CUENTA.CODCLI', 'Child column': '',
+    });
   });
 });

@@ -9,9 +9,12 @@
 //   - node type 'subcat'; id = subtypeSymbolId;
 //   - edge type 'subcat': UNA arista tronco `subsym-{symbolId}` supertipo →
 //     símbolo (handles __hdr_src → __sym_tgt) + UNA arista por subtipo
-//     símbolo → hijo (id = rel.id, handles __sym_src → `{col}__tgt`).
+//     símbolo → hijo (id = rel.id, handles __sym_src → `{col}__tgt`);
+//   - doc 98: las frases son de cada RELACIÓN, así que la etiqueta va en la
+//     rama de su subtipo (el tronco no es una relación: no lleva).
 import type { Edge, Node } from '@xyflow/react';
 import type { Relationship } from '@/services/governance.service';
+import { relationshipLabel } from './relationshipLabel';
 
 /** Lado del rombo del símbolo (px). */
 export const SYMBOL_SIZE = 28;
@@ -119,7 +122,10 @@ export function buildSubtypeGraph(
         sourceHandle: '__sym_src',
         targetHandle: `${r.pairs[0]?.childColumnId}__tgt`,
         type: 'subcat',
-        data: { symbolId: g.symbolId, drifted: driftOf(r) },
+        data: {
+          symbolId: g.symbolId, drifted: driftOf(r),
+          label: relationshipLabel(r), labelTitle: relationshipLabel(r, Infinity),
+        },
       });
     }
   }

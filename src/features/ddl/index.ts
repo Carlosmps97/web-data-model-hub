@@ -13,3 +13,5 @@ export type { DdlView } from './generators';
 export { default as DdlOutputForm } from './components/DdlOutputForm';
 export { DEFAULT_OUTPUT_SETTINGS, mergeOutputSettings } from './outputSettings';
 export type { DdlOutputSettings } from './outputSettings';
+// Doc 101: el dialecto por default del proyecto (Databricks | Oracle).
+export type { DdlDialect } from './generators';

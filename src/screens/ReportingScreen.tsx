@@ -59,8 +59,8 @@ import {
 } from '@/services/reporting.service';
 import { getRelationshipsReport } from '@/features/reporting/query.service';
 import {
-  COLUMN_BATCH, chunk, columnSheetRow, joinedSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf, unionSorted,
-  viewSheetRow, type SheetRow,
+  COLUMN_BATCH, chunk, columnSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows, tableSheetRow,
+  udpKeysOf, unionSorted, viewSheetRow, type SheetRow,
 } from '@/features/reporting/lib/reportRows';
 
 // ── export levels ─────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ const EXPORT_LEVELS: LevelSpec[] = [
   { key: 'tables', name: 'Tables overview', hint: 'One row per table: schema, counts, subject areas, projects, definition, flags, UDPs.', sheet: 'Tables' },
   { key: 'columns', name: 'Columns detail', hint: 'Every field: physical & logical type, PK/FK, nullable, partition, domain, ordinals, overrides, UDPs.', sheet: 'Columns' },
   { key: 'joined', name: 'Tables + Columns (joined)', hint: 'One row per column carrying its table metadata — everything in a single sheet.', sheet: 'Tables + Columns' },
-  { key: 'relationships', name: 'Relationships', hint: 'One row per relationship: tables, columns and cardinality.', sheet: 'Relationships' },
+  { key: 'relationships', name: 'Relationships', hint: 'One row per relationship: tables, columns, cardinality and verb phrases.', sheet: 'Relationships' },
   { key: 'views', name: 'Views detail', hint: 'Views derived from the selected tables: sources, User-Defined SQL, per-column aliases, casts and expressions.', sheet: 'Views' },
   { key: 'definitions', name: 'Definitions', hint: 'Functional definition text per table.', sheet: 'Definitions' },
 ];
@@ -638,20 +638,7 @@ function ReportingScreen({ projectId, projectName, projectPicker, onDesign }: {
         const data = rels
           .filter((r) => (r.parentTableId && ids.has(r.parentTableId))
             || (r.childTableId && ids.has(r.childTableId)))
-          .map((r) => ({
-            'Parent schema': r.parentSchema ?? '',
-            'Parent table': r.parentTable ?? r.parent,
-            'Parent column': r.parentColumn ?? '',
-            'Child schema': r.childSchema ?? '',
-            'Child table': r.childTable ?? r.child,
-            'Child column': r.childColumn ?? '',
-            'Role name': r.roleName ?? '',
-            Pair: r.pairCount && r.pairCount > 1 ? `${(r.pairIndex ?? 0) + 1}/${r.pairCount}` : '',
-            Cardinality: r.cardinality,
-            Identifying: r.identifying ? 'Y' : '',
-            'Self-referencing': r.isSelfReferencing ? 'Y' : '',
-            'Cross-schema': r.crossSchema ? 'Y' : '',
-          }));
+          .map(relationshipSheetRow);   // doc 98: incluye las frases
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Relationships');
       }
 

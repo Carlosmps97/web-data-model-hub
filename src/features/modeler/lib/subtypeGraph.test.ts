@@ -96,3 +96,34 @@ describe('subtypeGraph (doc 53)', () => {
     expect(edges).toEqual([]);
   });
 });
+
+describe('subtypeGraph · frases de relación (doc 98)', () => {
+  const tablePos = new Map([['party', { x: 0, y: 0 }], ['individuo', { x: 0, y: 300 }], ['organizacion', { x: 300, y: 300 }]]);
+  const build = (rels: Relationship[]) => buildSubtypeGraph(rels, {}, tablePos, () => ({ w: 230, h: 100 }), () => false);
+
+  it('cada RAMA lleva la frase de SU relación; el tronco no lleva ninguna', () => {
+    const { edges } = build([
+      { ...rel('r1', 'party', 'individuo', 'sym1'), parentToChildPhrase: 'Party es un Individuo' },
+      { ...rel('r2', 'party', 'organizacion', 'sym1'),
+        parentToChildPhrase: 'Organizacion es un tipo de', childToParentPhrase: 'Party' },
+    ]);
+    const data = (id: string) => edges.find((e) => e.id === id)!.data as { label?: string | null };
+    expect(data('r1').label).toBe('Party es un Individuo');
+    expect(data('r2').label).toBe('Organizacion es un tipo de / Party');
+    expect(data('subsym-sym1').label).toBeUndefined();
+  });
+
+  it('rama sin frases: sin etiqueta', () => {
+    const { edges } = build([rel('r1', 'party', 'individuo', 'sym1')]);
+    expect((edges.find((e) => e.id === 'r1')!.data as { label?: string | null }).label).toBeNull();
+  });
+
+  it('el texto completo viaja aparte para el tooltip cuando el dibujo se corta', () => {
+    const largo = 'x'.repeat(90);
+    const { edges } = build([{ ...rel('r1', 'party', 'individuo', 'sym1'), parentToChildPhrase: largo }]);
+    const d = edges.find((e) => e.id === 'r1')!.data as { label: string; labelTitle: string };
+    expect(d.label).toBe(`${'x'.repeat(79)}…`);
+    expect(d.labelTitle).toBe(largo);
+  });
+});
+

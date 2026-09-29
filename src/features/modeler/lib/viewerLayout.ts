@@ -14,3 +14,22 @@ export function effectiveLayout(persisted: Layout | null | undefined, viewer: La
   if (!viewer || Object.keys(viewer).length === 0) return persisted ?? {};
   return { ...(persisted ?? {}), ...viewer };
 }
+
+/** Nodos cuya posición vive en `layout` (los dibujos van en `drawings`). */
+const LAYOUT_NODE_TYPES = new Set(['table', 'view', 'subcat']);
+
+/** Doc 99 — layout EN PANTALLA: el cargado con las posiciones vivas de los
+ *  nodos encima (enteras, como las guarda el canvas). Lo usa el export en
+ *  edición: el diagrama del store conserva el layout de su última carga, y un
+ *  trazo manual de wire está referido a donde los bloques están AHORA. */
+export function liveLayout(
+  persisted: Layout | null | undefined,
+  nodes: readonly { id: string; type?: string; position: NodePos }[],
+): Layout {
+  const out: Layout = { ...(persisted ?? {}) };
+  for (const n of nodes) {
+    if (!n.type || !LAYOUT_NODE_TYPES.has(n.type)) continue;
+    out[n.id] = { x: Math.round(n.position.x), y: Math.round(n.position.y) };
+  }
+  return out;
+}

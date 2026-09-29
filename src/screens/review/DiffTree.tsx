@@ -17,7 +17,7 @@ import type { DiffStructureEntry, DiffTreeNode } from '@/types/versioning';
 
 /** Doc 84 C1: lo que el árbol necesita de un diff — lo cumplen tanto el diff de
  *  un request (`ChangesetDiff`) como el compare de versiones (`VersionCompare`). */
-export interface DiffEntityLike { id: string; name?: string | null; conflict?: boolean }
+export interface DiffEntityLike { id: string; name?: string | null; conflict?: boolean; restores?: boolean }
 export interface DiffBucketLike { added: DiffEntityLike[]; edited: DiffEntityLike[]; deleted: DiffEntityLike[] }
 export interface DiffLike {
   collections: Record<string, DiffBucketLike>;

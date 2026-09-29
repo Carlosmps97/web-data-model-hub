@@ -73,3 +73,17 @@ export function SubcatIcon({ size = 17 }: { size?: number }) {
     </svg>
   );
 }
+
+/** Ícono del botón Show/Hide relationship labels (doc 98): el wire con su
+ *  etiqueta en el punto medio. */
+export function RelLabelIcon({ size = 17 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 18 18" fill="none" stroke="currentColor"
+      strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <line x1="1" y1="9" x2="4" y2="9" />
+      <rect x="4" y="5.2" width="10" height="7.6" rx="1.8" />
+      <line x1="14" y1="9" x2="17" y2="9" />
+      <line x1="6.6" y1="9" x2="11.4" y2="9" />
+    </svg>
+  );
+}

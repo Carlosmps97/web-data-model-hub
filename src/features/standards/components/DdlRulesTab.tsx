@@ -152,8 +152,8 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
               <ChevronRight size={16} color="#B6BECD" />
             </div>
             <p style={{ margin: '0 0 14px', fontSize: 12.5, color: '#6B7689', lineHeight: 1.5, textAlign: 'left' }}>
-              Quoting, data type casing, CREATE statement, tags on views, location and file names — the
-              defaults of every export, changed here without a deploy.
+              Default dialect (Databricks or Oracle), quoting, data type casing, CREATE statement, tags on
+              views, location and file names — the defaults of every export, changed here without a deploy.
             </p>
             <span style={mono}>{Object.keys(config.output ?? {}).length ? 'project settings' : 'defaults'}</span>
           </button>

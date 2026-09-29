@@ -185,3 +185,22 @@ describe('buildReportPdf · links', () => {
     entries.forEach((off, i) => expect(s.slice(off, off + String(i + 1).length + 6)).toBe(`${i + 1} 0 obj`));
   });
 });
+
+
+describe('buildDiagramPdf — factor de ancho por texto (doc 98)', () => {
+  const tdX = (pdf: string, text: string) => {
+    const m = new RegExp(`([\\d.]+) [\\d.]+ Td\\n\\(${text}\\) Tj`).exec(pdf);
+    return m ? Number(m[1]) : NaN;
+  };
+  const label = (wf?: number) => dec(buildDiagramPdf(scene([
+    { k: 'text', x: 200, y: 100, s: 'Persona tiene', size: 11, color: '#3A4658', anchor: 'middle', ...(wf ? { wf } : {}) },
+  ])));
+
+  it('sin factor propio usa el de la fuente (0.55): 13 caracteres × 11 × 0.55 / 2 a la izquierda', () => {
+    expect(tdX(label(), 'Persona tiene')).toBeCloseTo((200 - (13 * 11 * 0.55) / 2) * 0.75, 1);
+  });
+  it('con factor propio (0.5) el texto queda centrado con ESE ancho', () => {
+    expect(tdX(label(0.5), 'Persona tiene')).toBeCloseTo((200 - (13 * 11 * 0.5) / 2) * 0.75, 1);
+  });
+});
+

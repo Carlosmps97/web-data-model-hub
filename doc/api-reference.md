@@ -471,7 +471,7 @@ export const renameFolder = (id: string, name: string) =>
 | `setSubjectAreaUdp(saId, udpValues)` | PUT | `/api/subject-areas/{saId}/udp` | `{ udpValues }` | `SubjectArea` |
 | `loadDiagram(saId)` | GET | `/api/subject-areas/{saId}/diagram?changesetId=` | — | `Diagram` |
 
-Con changeset activo, `structure.service` reemplaza cada escritura de esta tabla por un `recordChange` sobre el doc efectivo completo (por ejemplo, `setSubjectAreaLayout` replica server-side el merge del PUT directo, y `removeTableFromCanvas` quita la tabla de `tableIds` Y de `layout` en un solo upsert, para no dejar nodos fantasma).
+Con changeset activo, `structure.service` reemplaza cada escritura de esta tabla por un `recordChange` sobre el doc efectivo completo (por ejemplo, `setSubjectAreaLayout` replica server-side el merge del PUT directo). Doc 99: las escrituras de un mismo canvas van **en fila** (cada una es «leer el doc efectivo + grabar el doc completo»; dos casi simultáneas se pisaban), y los **trazos manuales de wires** (`routes`) no tienen endpoint directo — `setWireRoute(saId, wireId, points \| null, validIds?)` y `arrangeSubjectArea(saId, layout, routes = {})` (posiciones + trazos en UNA escritura; el auto-arrange los reinicia) graban siempre por el changeset. Doc 100: los **miembros** del canvas se cambian con `addToCanvas(saId, { tableIds?, viewIds?, layout?, routes? }, shownViews?)` y `removeFromCanvas(saId, { tableIds?, viewIds?, dropRouteIds? }, shownViews?)` — «agrega / quita estos ids»: la lista completa la arma el servicio DENTRO de la cola, sobre el canvas de ese momento (armada afuera, otra escritura de miembros que cayera en medio se perdía). `addToCanvas` devuelve lo que realmente entró y aplica posiciones y trazos en la misma escritura (el Undo de sacar una tabla es UNA escritura); `removeFromCanvas` saca también su posición (sin ella quedaría un nodo fantasma) y los trazos pedidos. `shownViews` es la lista de vistas que el canvas MUESTRA: sólo se usa si el canvas todavía no tiene lista explícita (doc 70), cuya primera escritura la fija. Toda escritura del canvas graba las posiciones en píxeles enteros. Cada escritura del canvas deja anotado lo que grabó (`lib/canvasWrites.ts`, por working copy): el store lo usa para que un diagrama pedido ANTES de esa escritura no devuelva a la pantalla la posición o el trazo viejos. `setWireRoute` rechaza lo que no es una lista de puntos ni `null` (un `undefined` no borra un trazo) y más de 32 puntos.
 
 `loadDiagram` es la llamada clave de apertura de un canvas: en UNA sola request el backend arma tablas + columnas + relaciones + vistas aplicando el overlay del changeset activo del lado servidor. El `changesetId` sale del store:
 
@@ -515,7 +515,7 @@ La governance es "consciente del changeset activo": si hay un changeset activo, 
 | Función | Método | Ruta | Respuesta |
 |---|---|---|---|
 | `tableUsage(tableId)` | GET | `/api/catalog/tables/{tableId}/usage?changesetId=` | `{ usage: TableUsageRow[], total }` — canvases que referencian la tabla, con carpeta y proyecto |
-| `tableLinks(tableId)` | GET | `/api/relationships/links?tableId=&changesetId=` | `{ links: TableLinkRow[], total }` — relaciones GLOBALES de la tabla con los canvases donde son visibles (Properties · Links, doc 26) |
+| `tableLinks(tableId)` | GET | `/api/relationships/links?tableId=&changesetId=` | `{ links: TableLinkRow[], total }` — relaciones GLOBALES de la tabla con los canvases donde son visibles (Properties · Links, doc 26); cada link trae sus frases `parentToChildPhrase`/`childToParentPhrase` (doc 98) |
 | `columnImpact(columnId)` | GET | `/api/relationships/impact?columnId=&changesetId=` | `RelationshipImpact` — relaciones donde la columna es extremo; alimenta el warning del delete |
 
 La búsqueda de tablas es server-side por escala (a 15k tablas no se baja la colección completa):
@@ -586,7 +586,7 @@ Operaciones de modelo mapeadas a `PUT /api/changesets/{id}/changes`:
 | `deleteTable(id)` — soft-delete versionado; el cascade (columnas/relaciones/vistas/membresías) lo orquesta el store, doc 23; desde doc 39 vistas+relaciones+columnas viajan EN LOTE (`recordChangesBulk`) y la tabla cierra la cascada | `canonical_tables` | `delete` |
 | `createColumn(c)` / `updateColumn(c)` | `canonical_columns` | `upsert` |
 | `deleteColumn(id)` | `canonical_columns` | `delete` |
-| `createRelationship(r)` / `updateRelationship(r)` | `relationships` | `upsert` |
+| `createRelationship(r)` / `updateRelationship(r)` — el payload es el doc completo, incluidas las frases de relación `parentToChildPhrase`/`childToParentPhrase` (doc 98: etiqueta del wire) | `relationships` | `upsert` |
 | `deleteRelationship(id)` | `relationships` | `delete` |
 
 El backend valida en `add_change` el límite de longitud del nombre físico por scope (`maxLength` de `naming_config`, doc 24): crear/renombrar por encima del límite responde 400 (`NameTooLongError`) y la UI lo muestra como popup inline.
@@ -951,7 +951,7 @@ El editor serializa la regla a YAML y de vuelta client-side (`ruleToYaml` / `yam
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
 | `fetchExportRules(projectId)` | GET | `/api/projects/{pid}/ddl-rules` | — | `ExportRule[]` (vista liviana para el selector) |
-| `fetchDdlConfig(projectId)` | GET | `/api/projects/{pid}/ddl-rules/config` | — | `{ output? }` — el modal arranca desde las Output settings del proyecto (doc 93) |
+| `fetchDdlConfig(projectId)` | GET | `/api/projects/{pid}/ddl-rules/config` | — | `{ output? }` — el modal arranca desde las Output settings del proyecto (doc 93) y abre con su `output.dialect` (doc 101: `databricks` \| `oracle`) |
 | `renderWithRules(args)` | POST | `/api/projects/{pid}/ddl-rules/render` | ver abajo | `RenderedExport` (permiso `export`) |
 
 El payload del `render` se arma con el estado EFECTIVO que el canvas está exportando (drafts incluidos): `ruleIds`, `model` (nombre + `udpValues` del canvas), `options` del modal (`identifierCase`, `quoteIdentifiers`, `typeCase`, `createTable`, `viewTagsAs`, `includeKeys`, `tableFormat`, `external`, `location`, `locationFolderCase`, `includePartitions`, `partitionsLast` — doc 93), `tables[]` (cada una con su doc, sus columnas con `udpValues` y `ddlType`, y su `baseSql` generado client-side) y `views[]` (con `sql`, `sourceTableIds` y el flag `businessView` = `showOnCanvas`). La respuesta trae `statements[]`, `log[]` (applied/skipped por regla), `rulesetVersion`, `applied` y `skipped`; el `.sql` final se ensambla en el cliente con el sello de la versión de reglas usada. Sin reglas seleccionadas, el export NO pasa por este endpoint y sale byte-idéntico al generador client-side.
@@ -1154,7 +1154,7 @@ erDiagram
 
 Notas de mapeo relevantes:
 
-- `SUBJECT_AREA` guarda `tableIds`, `layout` (posiciones por tabla), `drawings` (formas libres del canvas) y `udpValues` (UDP a nivel Modelo de Datos).
+- `SUBJECT_AREA` guarda `tableIds`, `layout` (posiciones por tabla), `drawings` (formas libres del canvas), `udpValues` (UDP a nivel Modelo de Datos) y `routes` (trazos manuales de wires, doc 99).
 - Con changeset activo, TODO lo versionado se registra como `CHANGE` dentro del `CHANGESET` y se materializa al aplicar (publish): el modelo (`CANONICAL_TABLE`, `CANONICAL_COLUMN`, `RELATIONSHIP`), las vistas (`VIEW`, doc 20), los esquemas (`schemas`, doc 18) y la estructura (`PROJECT`, `FOLDER`, `SUBJECT_AREA`, doc 16).
 - `PARENT_DOMAIN`, glosario, UDP, naming y reglas de DDL export son configuración GLOBAL (fuera del changeset del canvas); su versionado vive en el módulo Data Standards (stream `standards_versions`, con apply/rollback propios).
 

@@ -80,6 +80,18 @@ describe('mutaciones versionadas (standards/apply)', () => {
     expect((body as { ddlConfigPatch: { output?: unknown } }).ddlConfigPatch.output).toEqual({ typeCase: 'lower' });
   });
 
+  it('doc 101: restaurar el ruleset base conserva el dialecto por default y la config Oracle del proyecto', async () => {
+    vi.mocked(apiGet).mockResolvedValue({
+      templates: [], seedRules: [{ name: 'a' }], seedLookups: {},
+      seedOutput: { typeCase: 'lower', dialect: 'databricks', oracle: { typeCase: 'upper' } },
+    });
+    vi.mocked(apiPost).mockResolvedValue({ seq: 13 });
+    await seedStarterRules('p1', { dialect: 'oracle', oracle: { includeComments: true }, typeCase: 'upper' });
+    const out = (vi.mocked(apiPost).mock.calls[0][1] as { ddlConfigPatch: { output: Record<string, unknown> } }).ddlConfigPatch.output;
+    // lo de Databricks vuelve a la semilla; el dialecto y Oracle quedan como estaban
+    expect(out).toEqual({ typeCase: 'lower', dialect: 'oracle', oracle: { includeComments: true } });
+  });
+
   it('saveDdlOutput guarda las Output settings como UNA versión (ddlConfigPatch.output)', async () => {
     vi.mocked(apiPost).mockResolvedValue({ seq: 12 });
     await saveDdlOutput('p1', { viewTagsAs: 'view' } as unknown as Parameters<typeof saveDdlOutput>[1]);

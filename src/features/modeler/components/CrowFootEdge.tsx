@@ -1,8 +1,14 @@
 import { memo } from 'react';
 import { BaseEdge, getSmoothStepPath, useInternalNode, Position, type EdgeProps } from '@xyflow/react';
 import { useModelerStore } from '@/store/useModelerStore';
+import { useUiStore } from '@/store/useUiStore';
 import type { Cardinality } from '@/services/governance.service';
 import { fanSourceY, HEADER_H, ROW_H } from '../lib/edgeFanout';
+import { labelPlacement } from '../lib/relationshipLabel';
+import { STUB_BLOCK, routedGeometry } from '../lib/wireRoute';
+import RelationshipEdgeLabel from './RelationshipEdgeLabel';
+import WireRouteHandles from './WireRouteHandles';
+import { useWireRoute } from './useWireRoute';
 
 function CrowFootEdge(props: EdgeProps) {
   const { id, source, target, sourceY, targetY, data } = props;
@@ -16,6 +22,11 @@ function CrowFootEdge(props: EdgeProps) {
       || (!!s.hoverNodeId && (source === s.hoverNodeId || target === s.hoverNodeId)),
   );
   const anyHover = useModelerStore((s) => !!s.hoverEdgeId || !!s.hoverNodeId);
+  // Doc 98: la etiqueta se oculta con el botón del toolbar y en zoom lejano
+  // (LOD compacto: a esa escala el texto es ilegible y solo ensucia).
+  const labelsHidden = useUiStore((s) => s.relLabelsHidden);
+  // Doc 99: trazo manual del wire (null = camino automático de siempre).
+  const { via, editable, lod, setDraft, commit } = useWireRoute(id, !!(data as { pending?: boolean } | undefined)?.pending);
 
   if (!sourceNode || !targetNode) return null;
   // `pending` = edge fantasma (drop hecho, popup de confirmación abierto).
@@ -26,6 +37,9 @@ function CrowFootEdge(props: EdgeProps) {
     parentCardinality: Cardinality; childCardinality: Cardinality;
     identifying: boolean; pending?: boolean; pairCount?: number;
     fanSlot?: number; fanCount?: number; parentPkRows?: number; drifted?: boolean;
+    // Doc 98: frases de relación ya compuestas («padre→hijo / hijo→padre»);
+    // `labelTitle` = texto completo, para el tooltip cuando el dibujo se cortó.
+    label?: string | null; labelTitle?: string | null;
   };
 
   // Lado que mira a la otra tabla (dbdiagram): si el centro del origen está a la
@@ -50,12 +64,20 @@ function CrowFootEdge(props: EdgeProps) {
     : sourceY;
 
   // Ruteo ortogonal (H/V) con esquinas redondeadas — lo provee React Flow
-  // (`getSmoothStepPath`), sin matemática manual de caminos.
-  const [path] = getSmoothStepPath({
-    sourceX: sx, sourceY: sy, sourcePosition: sPos,
-    targetX: tx, targetY, targetPosition: tPos,
-    borderRadius: 10,
+  // (`getSmoothStepPath`), sin matemática manual de caminos. Doc 99: con trazo
+  // manual el camino pasa por sus puntos (`routedGeometry`) y el lado de cada
+  // extremo lo decide el trazo, no la posición del otro bloque.
+  const manual = via && routedGeometry({
+    sBox: { x: sAbs.x, w: sw }, sy, sStub: STUB_BLOCK,
+    tBox: { x: tAbs.x, w: tw }, ty: targetY, tStub: STUB_BLOCK, via,
   });
+  const [path, labelX, labelY] = manual
+    ? [manual.path, manual.mid.x, manual.mid.y]
+    : getSmoothStepPath({
+      sourceX: sx, sourceY: sy, sourcePosition: sPos,
+      targetX: tx, targetY, targetPosition: tPos,
+      borderRadius: 10,
+    });
 
   // Resaltado (dbdiagram): activa la relación bajo el mouse o las conectadas a la
   // tabla bajo el mouse; atenúa el resto. Drift (doc 47) → ROJO: incongruencia
@@ -65,21 +87,51 @@ function CrowFootEdge(props: EdgeProps) {
     : d.drifted ? 'var(--red)'
     : active ? 'var(--primary)' : 'var(--ink-2)';
 
+  const showLabel = !!d.label && !d.pending && !labelsHidden && !lod;
+  // Misma regla que el export: centrada en el punto medio del wire y con el
+  // ancho que deja el hueco entre los bloques (si no cabe, parte línea); en
+  // una recursiva el wire corre bajo el bloque, así que va encima de él.
+  // Doc 99: con trazo la etiqueta sigue al camino, también en una recursiva.
+  const at = labelPlacement({
+    recursive: !manual && source === target,
+    facesRight: manual ? manual.s.dir === 1 : sourceFacesRight,
+    sx: manual ? manual.s.x : sx, tx: manual ? manual.t.x : tx,
+    midX: labelX, midY: labelY,
+    box: { x: sAbs.x, y: sAbs.y, w: sw },
+  });
+
   return (
-    <BaseEdge
-      path={path}
-      markerStart={`url(#cf-${d.parentCardinality ?? 'one'})`}
-      markerEnd={`url(#cf-${d.childCardinality ?? 'zero-many'})`}
-      style={{
-        stroke,
-        strokeWidth: active ? 2.4 : 1.5,
-        // Convención Erwin (doc 19): identifying = línea SÓLIDA (la FK entra a
-        // la PK del hijo); non-identifying = punteada. Pending: dash más aireado.
-        strokeDasharray: d.pending ? '6 5' : d.identifying ? undefined : '7 4',
-        opacity: d.pending ? 0.5 : dimmed ? 0.22 : 1,
-        transition: 'opacity .12s, stroke .12s, stroke-width .12s',
-      }}
-    />
+    <>
+      <BaseEdge
+        path={path}
+        markerStart={`url(#cf-${d.parentCardinality ?? 'one'})`}
+        markerEnd={`url(#cf-${d.childCardinality ?? 'zero-many'})`}
+        style={{
+          stroke,
+          strokeWidth: active ? 2.4 : 1.5,
+          // Convención Erwin (doc 19): identifying = línea SÓLIDA (la FK entra a
+          // la PK del hijo); non-identifying = punteada. Pending: dash más aireado.
+          strokeDasharray: d.pending ? '6 5' : d.identifying ? undefined : '7 4',
+          opacity: d.pending ? 0.5 : dimmed ? 0.22 : 1,
+          transition: 'opacity .12s, stroke .12s, stroke-width .12s',
+        }}
+      />
+      {showLabel && (
+        <RelationshipEdgeLabel text={d.label as string} title={d.labelTitle} at={at} active={active} dimmed={dimmed} editing={editable} />
+      )}
+      {editable && (
+        <WireRouteHandles
+          via={via ?? []}
+          segments={manual ? manual.segments : null}
+          center={{ x: labelX, y: labelY }}
+          ends={manual
+            ? { s: manual.sOut, t: manual.tOut }
+            : { s: { x: sx, y: sy }, t: { x: tx, y: targetY } }}
+          onDraft={setDraft}
+          onCommit={commit}
+        />
+      )}
+    </>
   );
 }
 

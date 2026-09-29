@@ -20,9 +20,14 @@ import type { View } from '@/services/views.service';
 import { collapseComplexType } from './complexTypes';
 import { orderColumns } from './columnOrder';
 import { HEADER_H, ROW_H, fanSlots, fanSourceY } from './edgeFanout';
+import { labelPlacement, relationshipLabel, wrapLabel } from './relationshipLabel';
 import { relationshipDrift } from './relationshipPairs';
 import { SYMBOL_SIZE, isSubcategory, subtypeGroups, symbolDefaultPos } from './subtypeGraph';
 import { viewNodeRows, viewSourceIds } from './viewGraph';
+import {
+  STUB_BLOCK, STUB_SYMBOL, cleanRoutes, roundedPath, routeOf, routedGeometry, trunkRouteId,
+  type RoutePoint, type RoutedGeometry, type WireRoutes,
+} from './wireRoute';
 
 // ── IR de la escena ────────────────────────────────────────────────────────
 export type SceneItem =
@@ -32,7 +37,10 @@ export type SceneItem =
   | { k: 'line'; x1: number; y1: number; x2: number; y2: number; stroke: string; sw: number; dash?: string; cap?: 'round' }
   | { k: 'poly'; pts: [number, number][]; fill?: string; stroke?: string; sw?: number; join?: 'round' }
   | { k: 'path'; d: string; stroke?: string; sw?: number; dash?: string; fill?: string }
-  | { k: 'text'; x: number; y: number; s: string; size: number; color: string; mono?: boolean; bold?: boolean; italic?: boolean; anchor?: 'start' | 'middle' | 'end'; ls?: number };
+  | { k: 'text'; x: number; y: number; s: string; size: number; color: string; mono?: boolean; bold?: boolean; italic?: boolean; anchor?: 'start' | 'middle' | 'end'; ls?: number;
+      /** Ancho medio por carácter (× size) para anclar `middle`/`end` en el PDF,
+       *  que no mide texto. Default: el de la fuente (scenePdf). */
+      wf?: number };
 
 export interface Scene { w: number; h: number; bg: string; items: SceneItem[] }
 
@@ -40,6 +48,13 @@ export interface SceneInput {
   diagram: Diagram | null;
   drawings: Drawing[];
   viewMode: 'logical' | 'physical';
+  /** Doc 98: dibujar las etiquetas de relación (frases). Default true; el
+   *  toolbar pasa false cuando el usuario las tiene ocultas en el canvas. */
+  relLabels?: boolean;
+  /** Doc 99: trazos manuales de wires a dibujar. Ausente = los del canvas
+   *  (`diagram.subjectArea.routes`); el toolbar pasa los VIVOS del store (en
+   *  edición pueden tener un guardado todavía en vuelo). */
+  routes?: WireRoutes;
 }
 
 // ── Tokens resueltos (tokens.css) y mezclas pre-calculadas ────────────────
@@ -76,6 +91,14 @@ const KEY_W = 14, GAP = 7;
 const CHAR_UI = 7.4;        // Geist 12px, nombres UPPER_SNAKE
 const CHAR_MONO = 6;        // Geist Mono 10px (tipos)
 const CHAR_HEAD = 7.2;      // header 12px bold mono-ish
+// Etiqueta de relación (doc 98): texto de 11px en oración (no UPPER_SNAKE).
+// Ancho medio por carácter = 0.5·size — Geist y Helvetica rondan 0.45 en
+// español; el margen evita que el texto se salga de su fondo. El MISMO factor
+// viaja en el item (`wf`) para que el PDF centre con él.
+const LABEL_SIZE = 11;
+const LABEL_WF = 0.5;
+const CHAR_LABEL = LABEL_WF * LABEL_SIZE;
+const LABEL_PADX = 5, LABEL_PADY = 2, LABEL_LINE_H = 14;
 const clampW = (chars: number) => Math.min(880, Math.max(240, Math.round(chars * 8 + 72)));
 
 const trunc = (s: string, maxChars: number): string =>
@@ -191,14 +214,170 @@ export function buildDiagramScene(input: SceneInput): Scene {
     symbolBoxes.set(g.symbolId, { x: pos.x, y: pos.y, w: SYMBOL_SIZE, h: SYMBOL_SIZE });
   }
 
+  // ── Wires crow-foot: geometría compartida por los bounds y el dibujo ────
+  const pkIdsByTable = new Map<string, Set<string>>();
+  (diagram?.columns ?? []).forEach((c) => {
+    if (!c.isPrimaryKey) return;
+    const s = pkIdsByTable.get(c.tableId); if (s) s.add(c.id); else pkIdsByTable.set(c.tableId, new Set([c.id]));
+  });
+  const stdRels = (diagram?.relationships ?? []).filter((r) => !isSubcategory(r) && tableBoxes.has(r.parentTableId) && tableBoxes.has(r.childTableId));
+  // Reparto de salidas por padre: depende del orden RELATIVO de los hijos, así
+  // que vale igual antes y después de la traslación.
+  const slots = fanSlots(stdRels.map((r) => {
+    const tp = tableBoxes.get(r.childTableId)!;
+    return { id: r.id, parentId: r.parentTableId, targetY: tp.y, targetX: tp.x };
+  }));
+
+  const sidesOf = (s: Box, t: Box) => {
+    const facesRight = s.x + s.w / 2 <= t.x + t.w / 2;
+    return {
+      facesRight,
+      sx: facesRight ? s.x + s.w : s.x,
+      tx: facesRight ? t.x : t.x + t.w,
+      sPos: facesRight ? Position.Right : Position.Left,
+      tPos: facesRight ? Position.Left : Position.Right,
+      awayS: (facesRight ? 1 : -1) as 1 | -1,
+      awayT: (facesRight ? -1 : 1) as 1 | -1,
+    };
+  };
+
+  // ── Doc 99: trazos manuales ─────────────────────────────────────────────
+  // El camino se calcula UNA vez, en coordenadas del CANVAS (la primera
+  // pasada, antes de la traslación de la fase 2), y después solo se traslada:
+  // es el mismo dibujo del canvas. Rutear de nuevo en las de la escena — con
+  // un origen que puede tener fracción — movía anclajes y puntos por separado.
+  const routes = cleanRoutes(input.routes ?? diagram?.subjectArea.routes);
+  const origin = { x: 0, y: 0 };
+  const viaOf = (wireId: string): RoutePoint[] | null => routeOf(routes, wireId) ?? null;
+  const routedCache = new Map<string, RoutedGeometry>();
+  /** Wire CON trazo entre dos cajas: mismo shape que `sidesOf` + camino. El
+   *  lado de cada extremo lo decide el trazo (misma geometría que el canvas). */
+  const routedWire = (
+    wireId: string, sBox: Box, sy: number, sStub: number, tBox: Box, ty: number, tStub: number, via: RoutePoint[],
+  ) => {
+    let g = routedCache.get(wireId);
+    if (!g) {
+      g = routedGeometry({
+        sBox: { x: sBox.x + origin.x, w: sBox.w }, sy: sy + origin.y, sStub,
+        tBox: { x: tBox.x + origin.x, w: tBox.w }, ty: ty + origin.y, tStub, via,
+      });
+      routedCache.set(wireId, g);
+    }
+    const corners = g.corners.map((c) => ({ x: c.x - origin.x, y: c.y - origin.y }));
+    return {
+      facesRight: g.s.dir === 1, awayS: g.s.dir, awayT: g.t.dir,
+      sx: g.s.x - origin.x, sy: g.s.y - origin.y, tx: g.t.x - origin.x, ty: g.t.y - origin.y,
+      d: roundedPath(corners), midX: g.mid.x - origin.x, midY: g.mid.y - origin.y, corners,
+    };
+  };
+  /** Caja que envuelve las esquinas de los wires trazados (para los bounds). */
+  const routedBoxes: Box[] = [];
+  const boundOf = (corners: RoutePoint[]) => {
+    const xs = corners.map((c) => c.x);
+    const ys = corners.map((c) => c.y);
+    routedBoxes.push({ x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) });
+  };
+
+  interface RelLabel { lines: string[]; cx: number; rect: Box }
+  type Rel = (typeof stdRels)[number];
+  /** Etiqueta de una relación (doc 98) para un tramo ya ruteado: misma regla
+   *  que el canvas (`labelPlacement`) y parte línea al ancho disponible.
+   *  `manual` (doc 99): con trazo la etiqueta sigue al camino, también en una
+   *  recursiva (su wire ya no corre necesariamente bajo el bloque). */
+  const labelFor = (
+    r: Rel, side: { facesRight: boolean; sx: number; tx: number }, midX: number, midY: number, from: Box, manual = false,
+  ): RelLabel | null => {
+    const text = input.relLabels === false ? null : relationshipLabel(r);
+    if (!text) return null;
+    const at = labelPlacement({
+      recursive: !manual && r.parentTableId === r.childTableId && !isSubcategory(r), facesRight: side.facesRight,
+      sx: side.sx, tx: side.tx, midX, midY, box: from,
+    });
+    const lines = wrapLabel(text, Math.floor((at.maxWidth - 2 * LABEL_PADX) / CHAR_LABEL));
+    const w = Math.max(...lines.map((l) => [...l].length)) * CHAR_LABEL + 2 * LABEL_PADX;
+    const h = lines.length * LABEL_LINE_H + 2 * LABEL_PADY;
+    return { lines, cx: at.x, rect: { x: at.x - w / 2, y: at.anchor === 'bottom' ? at.y - h : at.y - h / 2, w, h } };
+  };
+
+  /** Wire de una relación con las coordenadas ACTUALES de sus cajas: se llama
+   *  antes de la traslación (la etiqueta entra a los bounds) y después (dibujo). */
+  const wire = (r: Rel) => {
+    const p = tableBoxes.get(r.parentTableId)!;
+    const c = tableBoxes.get(r.childTableId)!;
+    const side = sidesOf(p, c);
+    const fan = slots.get(r.id);
+    const sy = fanSourceY(p.y, p.h, p.pkRows, fan?.slot ?? 0, fan?.count ?? 1);
+    const ty = rowCenterY(c, r.pairs[0]?.childColumnId);
+    const via = viaOf(r.id);
+    if (via) {
+      const g = routedWire(r.id, p, sy, STUB_BLOCK, c, ty, STUB_BLOCK, via);
+      return { ...g, label: labelFor(r, g, g.midX, g.midY, p, true) };
+    }
+    const [d, midX, midY] = getSmoothStepPath({ sourceX: side.sx, sourceY: sy, sourcePosition: side.sPos, targetX: side.tx, targetY: ty, targetPosition: side.tPos, borderRadius: 10 });
+    return { ...side, sy, ty, d, corners: null, label: labelFor(r, side, midX, midY, p) };
+  };
+
+  /** Rama símbolo → subtipo de una subcategoría (doc 53), con su etiqueta
+   *  (doc 98: la frase es de la relación de ESA rama). null si el subtipo no
+   *  está en el canvas. */
+  const branch = (sym: Box, r: Rel) => {
+    const c = tableBoxes.get(r.childTableId);
+    if (!c) return null;
+    const via = viaOf(r.id);
+    if (via) {
+      const g = routedWire(r.id, sym, sym.y + sym.h / 2, STUB_SYMBOL, c, rowCenterY(c, r.pairs[0]?.childColumnId), STUB_BLOCK, via);
+      return { d: g.d, corners: g.corners, label: labelFor(r, g, g.midX, g.midY, sym, true) };
+    }
+    const side = sidesOf(sym, c);
+    const [d, midX, midY] = getSmoothStepPath({ sourceX: side.sx, sourceY: sym.y + sym.h / 2, sourcePosition: side.sPos, targetX: side.tx, targetY: rowCenterY(c, r.pairs[0]?.childColumnId), targetPosition: side.tPos, borderRadius: 10 });
+    return { d, corners: null, label: labelFor(r, side, midX, midY, sym) };
+  };
+
+  /** Tronco supertipo → símbolo de una subcategoría (no es una relación: sin
+   *  etiqueta). Doc 99: su trazo manual va con la llave `subsym-{símbolo}`. */
+  const trunk = (p: TableBox, sym: Box, symbolId: string) => {
+    const sy = p.y + HEADER_H / 2;
+    const ty = sym.y + sym.h / 2;
+    const via = viaOf(trunkRouteId(symbolId));
+    if (via) {
+      const g = routedWire(trunkRouteId(symbolId), p, sy, STUB_BLOCK, sym, ty, STUB_SYMBOL, via);
+      return { d: g.d, corners: g.corners };
+    }
+    const { sx, tx, sPos, tPos } = sidesOf(p, sym);
+    const [d] = getSmoothStepPath({ sourceX: sx, sourceY: sy, sourcePosition: sPos, targetX: tx, targetY: ty, targetPosition: tPos, borderRadius: 10 });
+    return { d, corners: null };
+  };
+
   // ── Fase 2: bounds + traslación (padding 60) ────────────────────────────
-  const boxes: Box[] = [...tableBoxes.values(), ...viewBoxes, ...symbolBoxes.values(), ...drawings];
+  // Doc 99: los wires con trazo manual aportan sus esquinas a los bounds (un
+  // punto puede quedar fuera de la caja que envuelve a los bloques).
+  const labelBoxes = [
+    ...stdRels.map((r) => {
+      const g = wire(r);
+      if (g.corners) boundOf(g.corners);
+      return g.label;
+    }),
+    ...subtypeGroups(subRels).flatMap((g) => {
+      const sym = symbolBoxes.get(g.symbolId);
+      const p = tableBoxes.get(g.parentTableId);
+      if (!sym || !p) return [];
+      const t = trunk(p, sym, g.symbolId);
+      if (t.corners) boundOf(t.corners);
+      return g.rels.map((r) => {
+        const b = branch(sym, r);
+        if (b?.corners) boundOf(b.corners);
+        return b?.label ?? null;
+      });
+    }),
+  ].flatMap((l) => (l ? [l.rect] : []));
+  const boxes: Box[] = [...tableBoxes.values(), ...viewBoxes, ...symbolBoxes.values(), ...drawings, ...labelBoxes, ...routedBoxes];
   if (!boxes.length) return EMPTY_SCENE;
   const minX = Math.min(...boxes.map((b) => b.x)) - 60;
   const minY = Math.min(...boxes.map((b) => b.y)) - 60;
   const maxX = Math.max(...boxes.map((b) => b.x + b.w)) + 60;
   const maxY = Math.max(...boxes.map((b) => b.y + b.h)) + 60;
   for (const b of [...tableBoxes.values(), ...viewBoxes, ...symbolBoxes.values()]) { b.x -= minX; b.y -= minY; }
+  origin.x = minX; origin.y = minY;      // desde acá los trazos salen trasladados a la escena
   const dwx = (d: Drawing): Box => ({ x: d.x - minX, y: d.y - minY, w: d.w, h: d.h });
 
   // ── Fase 3: SHAPES (capa de fondo, zIndex -1 en el canvas) ──────────────
@@ -242,42 +421,18 @@ export function buildDiagramScene(input: SceneInput): Scene {
   }
 
   // ── Fase 4: EDGES (React Flow los pinta bajo los nodos) ─────────────────
-  const pkIdsByTable = new Map<string, Set<string>>();
-  (diagram?.columns ?? []).forEach((c) => {
-    if (!c.isPrimaryKey) return;
-    const s = pkIdsByTable.get(c.tableId); if (s) s.add(c.id); else pkIdsByTable.set(c.tableId, new Set([c.id]));
-  });
-  const stdRels = (diagram?.relationships ?? []).filter((r) => !isSubcategory(r) && tableBoxes.has(r.parentTableId) && tableBoxes.has(r.childTableId));
-  const slots = fanSlots(stdRels.map((r) => {
-    const tp = tableBoxes.get(r.childTableId)!;
-    return { id: r.id, parentId: r.parentTableId, targetY: tp.y, targetX: tp.x };
-  }));
-
-  const sidesOf = (s: Box, t: Box) => {
-    const facesRight = s.x + s.w / 2 <= t.x + t.w / 2;
-    return {
-      sx: facesRight ? s.x + s.w : s.x,
-      tx: facesRight ? t.x : t.x + t.w,
-      sPos: facesRight ? Position.Right : Position.Left,
-      tPos: facesRight ? Position.Left : Position.Right,
-      awayS: (facesRight ? 1 : -1) as 1 | -1,
-      awayT: (facesRight ? -1 : 1) as 1 | -1,
-    };
-  };
+  // Doc 98: las etiquetas se juntan acá y se dibujan al CIERRE de la fase —
+  // encima de todos los wires (ninguno las tacha) y debajo de los bloques.
+  const relLabels: RelLabel[] = [];
 
   for (const r of stdRels) {
-    const p = tableBoxes.get(r.parentTableId)!;
-    const c = tableBoxes.get(r.childTableId)!;
-    const { sx, tx, sPos, tPos, awayS, awayT } = sidesOf(p, c);
-    const fan = slots.get(r.id);
-    const sy = fanSourceY(p.y, p.h, p.pkRows, fan?.slot ?? 0, fan?.count ?? 1);
-    const ty = rowCenterY(c, r.pairs[0]?.childColumnId);
+    const g = wire(r);
     const pkIds = [...(pkIdsByTable.get(r.parentTableId) ?? new Set<string>())];
     const color = relationshipDrift(r, pkIds) != null ? C.red : C.text;
-    const [d] = getSmoothStepPath({ sourceX: sx, sourceY: sy, sourcePosition: sPos, targetX: tx, targetY: ty, targetPosition: tPos, borderRadius: 10 });
-    items.push({ k: 'path', d, stroke: color, sw: 1.5, dash: r.identifying ? undefined : '7 4' });
-    crowfoot(items, sx, sy, awayS, r.parentCardinality ?? 'one', color);
-    crowfoot(items, tx, ty, awayT, r.childCardinality ?? 'zero-many', color);
+    items.push({ k: 'path', d: g.d, stroke: color, sw: 1.5, dash: r.identifying ? undefined : '7 4' });
+    crowfoot(items, g.sx, g.sy, g.awayS, r.parentCardinality ?? 'one', color);
+    crowfoot(items, g.tx, g.ty, g.awayT, r.childCardinality ?? 'zero-many', color);
+    if (g.label) relLabels.push(g.label);
   }
 
   // Derivación tabla→vista: bezier libre gris + anillo hueco en la vista.
@@ -303,19 +458,24 @@ export function buildDiagramScene(input: SceneInput): Scene {
     const sym = symbolBoxes.get(g.symbolId);
     const p = tableBoxes.get(g.parentTableId);
     if (!sym || !p) continue;
-    {
-      const { sx, tx, sPos, tPos } = sidesOf(p, sym);
-      const [d] = getSmoothStepPath({ sourceX: sx, sourceY: p.y + HEADER_H / 2, sourcePosition: sPos, targetX: tx, targetY: sym.y + sym.h / 2, targetPosition: tPos, borderRadius: 10 });
-      dbl(d, C.text);
-    }
+    dbl(trunk(p, sym, g.symbolId).d, C.text);
     for (const r of g.rels) {
-      const c = tableBoxes.get(r.childTableId);
-      if (!c) continue;
-      const { sx, tx, sPos, tPos } = sidesOf(sym, c);
+      const b = branch(sym, r);
+      if (!b) continue;
       const pkIds = [...(pkIdsByTable.get(r.parentTableId) ?? new Set<string>())];
-      const [d] = getSmoothStepPath({ sourceX: sx, sourceY: sym.y + sym.h / 2, sourcePosition: sPos, targetX: tx, targetY: rowCenterY(c, r.pairs[0]?.childColumnId), targetPosition: tPos, borderRadius: 10 });
-      dbl(d, relationshipDrift(r, pkIds) != null ? C.red : C.text);
+      dbl(b.d, relationshipDrift(r, pkIds) != null ? C.red : C.text);
+      if (b.label) relLabels.push(b.label);
     }
+  }
+
+  // Etiquetas de relación (doc 98): fondo color canvas (tapa el tramo de wire
+  // bajo el texto) + una línea de texto centrada por renglón.
+  for (const l of relLabels) {
+    items.push({ k: 'rect', ...l.rect, rx: 4, fill: C.bg });
+    l.lines.forEach((line, i) => items.push({
+      k: 'text', x: l.cx, y: l.rect.y + LABEL_PADY + i * LABEL_LINE_H + 10.5, s: line,
+      size: LABEL_SIZE, color: C.text, anchor: 'middle', wf: LABEL_WF,
+    }));
   }
 
   // ── Fase 5: NODOS tabla ─────────────────────────────────────────────────

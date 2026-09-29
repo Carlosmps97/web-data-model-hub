@@ -17,14 +17,12 @@ import { FACET_CAPTION, facetNoun, facetNouns, type Facet } from '@/lib/facets';
 import { inspectTable, inspectView, type InspectTableResult, type InspectViewResult } from '../services/inspector.service';
 import { generatedViewDdl } from '../lib/viewDdl';
 import * as struct from '../services/structure.service';
-import type { SubjectArea } from '../services/modeler.service';
 import { matchesColumn } from '../lib/columnSearch';
 import { moveId, orderColumns, persistReorder, reorderPlan } from '../lib/columnOrder';
 import { facetEditable, type TableField } from '../lib/facetEditable';
 import { inspectorRefreshPlan } from '../lib/inspectorRefresh';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { tableNamePlan } from '../lib/nameSync';
-import { viewRestorePlan } from '../lib/viewRestore';
 import { syncRenamedColumnInViews } from '../lib/viewSync';
 import {
   cardinalityLabel, facetName, facetOnly, facetType, linkRole, otherFacet, ownColumns,
@@ -35,6 +33,7 @@ import { ColumnPropsBody, type ColTab } from './ColumnPropertiesPanel';
 import { confirmDeleteColumn, confirmDeleteTable, confirmDeleteView } from './deleteConfirm';
 import SchemaSelect from './SchemaSelect';
 import UdpAssign from './UdpAssign';
+import RelationshipPhraseLine from './RelationshipPhraseLine';
 import UdpReadonly from './UdpReadonly';
 
 /**
@@ -140,10 +139,12 @@ async function deleteViewVersioned(pre: View, canvasIds: string[], onActiveCanva
   await viewsSvc.deleteView(pre.id);
   pushUndo(`Delete view ${pre.name}`, async () => {
     await viewsSvc.updateView(pre.id, pre as ViewInput);
-    const canvases = (await Promise.all(canvasIds.map((id) => struct.getSubjectArea(id).catch(() => null))))
-      .filter((c): c is SubjectArea => !!c);
-    for (const p of viewRestorePlan(pre.id, canvases)) {
-      try { await struct.setSubjectAreaViews(p.canvasId, p.viewIds); } catch { /* el canvas pudo desaparecer */ }
+    // Doc 100 (P5): cada canvas la vuelve a listar DENTRO de su cola de
+    // escrituras, sobre su estado de ese momento. Uno sin lista explícita
+    // (legacy, doc 70) no se toca — su regla por fuentes la vuelve a mostrar
+    // sola —, ni uno que ya la lista.
+    for (const canvasId of new Set(canvasIds)) {
+      try { await struct.addToCanvas(canvasId, { viewIds: [pre.id] }); } catch { /* el canvas pudo desaparecer */ }
     }
     const store = useModelerStore.getState();
     await store.reload();
@@ -661,6 +662,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                           <span className="rd-mono">on {ownColumns(l, target.id).join(', ')}</span>
                           <span className="wk-pp-card-lbl">{cardinalityLabel(l)}</span>
                         </div>
+                        <RelationshipPhraseLine rel={l} />
                         <div className="wk-pp-link-card">
                           <span className="rd-small" style={{ color: 'var(--muted)' }}>
                             visible in {l.canvases.length > 0 ? l.canvases.map((c) => c.name).join(' · ') : 'no shared canvas'}

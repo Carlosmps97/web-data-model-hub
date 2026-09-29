@@ -81,6 +81,7 @@ import type { Diagram } from '../services/modeler.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { udpView, type Facet } from '@/lib/facets';
 import { orderColumns } from './columnOrder';
+import { relationshipLabel } from './relationshipLabel';
 
 export type UdpLevel = 'table' | 'column' | 'canvas' | 'view';
 export interface ExportLookups {
@@ -177,13 +178,15 @@ ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
     const flags = [r.identifying ? 'identifying' : '', r.subcategory ? 'subcategory' : ''].filter(Boolean)
       .map((f) => `<span class="chip">${f}</span>`).join('');
     const name = (t?: CanonicalTable) => t ? `<code>${esc(t.physicalName)}</code> <span class="dim">(${esc(t.logicalName)})</span>` : '—';
-    return `<tr><td>${name(p)}</td><td>${name(ch)}</td><td>${esc(r.parentCardinality)} → ${esc(r.childCardinality)}</td><td>${flags}</td><td>${pairs}</td></tr>`;
+    // Doc 98: frases de la relación — COMPLETAS (el corte con «…» es del canvas).
+    const phrase = esc(relationshipLabel(r, Infinity) ?? '');
+    return `<tr><td>${name(p)}</td><td>${name(ch)}</td><td>${esc(r.parentCardinality)} → ${esc(r.childCardinality)}</td><td>${flags}</td><td>${pairs}</td><td class="phrase">${phrase}</td></tr>`;
   }).join('\n');
 
   const relSection = relationships.length ? `<section class="tbl">
 <h2>Relationships</h2>
 <div class="scroll"><table>
-<thead><tr><th>Parent</th><th>Child</th><th>Cardinality</th><th>Flags</th><th>Key pairs</th></tr></thead>
+<thead><tr><th>Parent</th><th>Child</th><th>Cardinality</th><th>Flags</th><th>Key pairs</th><th>Verb phrases</th></tr></thead>
 <tbody>${relRows}</tbody>
 </table></div>
 </section>` : '';
@@ -264,6 +267,7 @@ th { background: #F4F6FA; font-weight: 600; white-space: nowrap; }
 td.num { color: #9AA3B2; text-align: right; }
 td.flag { white-space: nowrap; }
 td.desc { min-width: 220px; }
+td.phrase { min-width: 180px; }
 tbody tr:nth-child(even) { background: #FAFBFD; }
 .view pre { background: #F4F6FA; border: 1px solid #E3E8F0; border-radius: 6px; padding: 10px; overflow-x: auto; font-size: 12px; margin-top: 4px; }
 [hidden] { display: none !important; }

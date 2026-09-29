@@ -10,6 +10,7 @@ import { create } from 'zustand';
 
 const TOOLBAR_KEY = 'dmh:ui:toolbarCollapsed';
 const EXPLORER_KEY = 'dmh:ui:explorerCollapsed';
+const REL_LABELS_KEY = 'dmh:ui:relLabelsHidden';
 
 function readFlag(key: string): boolean {
   try { return localStorage.getItem(key) === '1'; } catch { return false; }
@@ -23,17 +24,27 @@ interface UiState {
   toolbarCollapsed: boolean;
   /** Explorer del Model colapsado a un riel con el botón para mostrarlo. */
   explorerCollapsed: boolean;
+  /** Doc 98: etiquetas de relación (frases) ocultas en el canvas y en el
+   *  export. Se guarda el «oculto» para que el default sea VERLAS. */
+  relLabelsHidden: boolean;
   setToolbarCollapsed: (v: boolean) => void;
   setExplorerCollapsed: (v: boolean) => void;
   toggleToolbar: () => void;
   toggleExplorer: () => void;
+  toggleRelLabels: () => void;
 }
 
 export const useUiStore = create<UiState>((set, get) => ({
   toolbarCollapsed: readFlag(TOOLBAR_KEY),
   explorerCollapsed: readFlag(EXPLORER_KEY),
+  relLabelsHidden: readFlag(REL_LABELS_KEY),
   setToolbarCollapsed: (v) => { writeFlag(TOOLBAR_KEY, v); set({ toolbarCollapsed: v }); },
   setExplorerCollapsed: (v) => { writeFlag(EXPLORER_KEY, v); set({ explorerCollapsed: v }); },
   toggleToolbar: () => get().setToolbarCollapsed(!get().toolbarCollapsed),
   toggleExplorer: () => get().setExplorerCollapsed(!get().explorerCollapsed),
+  toggleRelLabels: () => {
+    const v = !get().relLabelsHidden;
+    writeFlag(REL_LABELS_KEY, v);
+    set({ relLabelsHidden: v });
+  },
 }));

@@ -168,6 +168,23 @@ describe('buildCanvasPage', () => {
     expect(out).toContain('one → zero-many');
     expect(out).toContain('CODMES → CODMES');
   });
+  it('doc 98: la tabla Relationships lleva las frases (completas y escapadas)', () => {
+    const d = fixtureDiagram();
+    const largo = `Parametro <clasifica> ${'x'.repeat(90)}`;
+    Object.assign(d.relationships[0], { parentToChildPhrase: largo, childToParentPhrase: 'es de un Parametro' });
+    const page = buildCanvasPage({
+      title: 'Datamart PYME', breadcrumb: ['Modelo DDV'], indexHref: null,
+      svgLogical: svgL, svgPhysical: svgP, diagram: d, lookups: LOOKUPS,
+    });
+    expect(page).toContain('<th>Verb phrases</th>');
+    // Reporte = frase COMPLETA (sin el corte del canvas) y sin HTML crudo.
+    expect(page).toContain(`Parametro &lt;clasifica&gt; ${'x'.repeat(90)} / es de un Parametro`);
+    expect(page).not.toContain('<clasifica>');
+  });
+  it('doc 98: relación sin frases deja la celda vacía', () => {
+    expect(out).toContain('<th>Verb phrases</th>');
+    expect(out).toContain('<td class="phrase"></td>');
+  });
   it('final review #3 (doc 96 D6): la vista muestra su DDL generado y la User-Defined SQL como informativa aparte', () => {
     const page = buildCanvasPage({
       title: 'Datamart PYME', breadcrumb: ['Modelo DDV', 'CPYBCA'], indexHref: '../index.html',

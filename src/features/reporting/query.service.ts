@@ -93,6 +93,9 @@ export interface RelationshipRow {
   parentTableId?: string; childTableId?: string;
   parentTable?: string; parentColumn?: string; childTable?: string; childColumn?: string;
   roleName?: string | null;
+  /** Doc 98: frases de la RELACIÓN (se repiten en cada fila de par). */
+  parentToChildPhrase?: string | null;
+  childToParentPhrase?: string | null;
   cardinality: string; identifying: boolean; isSelfReferencing: boolean; crossSchema: boolean; label: string;
 }
 

@@ -3,14 +3,20 @@
  * proyecto y cómo se nombran sus archivos. Mismo formulario que la pestaña
  * Output del modal Export DDL, que arranca desde estos valores. Guardar
  * registra una versión de Data Standards (rollback disponible).
+ *
+ * Doc 101: el proyecto elige su dialecto por default (con el que abre el modal)
+ * y tiene una configuración por dialecto — Databricks y Oracle se editan en
+ * pestañas; los nombres de archivo son de los dos.
  */
 import { useState } from 'react';
 import { FileCode2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
-import { DdlOutputForm, mergeOutputSettings, type DdlOutputSettings } from '@/features/ddl';
+import { DdlOutputForm, mergeOutputSettings, type DdlDialect, type DdlOutputSettings } from '@/features/ddl';
 import { saveDdlOutput } from '../ddlRules.service';
 import type { DdlRulesetConfig } from '../standards.service';
+
+const DIALECTS: [DdlDialect, string][] = [['databricks', 'Databricks'], ['oracle', 'Oracle']];
 
 export default function DdlOutputSettingsEditor({ projectId, config, canEdit, onClose, onApplied }: {
   projectId: string;
@@ -20,6 +26,8 @@ export default function DdlOutputSettingsEditor({ projectId, config, canEdit, on
   onApplied: () => Promise<void> | void;
 }) {
   const [value, setValue] = useState<DdlOutputSettings>(() => mergeOutputSettings(config.output ?? null));
+  // Qué configuración se está editando (arranca en la del dialecto por default).
+  const [shown, setShown] = useState<DdlDialect>(() => value.dialect);
   const [saving, setSaving] = useState(false);
 
   const doSave = async () => {
@@ -46,7 +54,24 @@ export default function DdlOutputSettingsEditor({ projectId, config, canEdit, on
           <button onClick={onClose} aria-label="Close" style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #E6EAF0', background: '#fff', color: '#8A93A5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flex: 'none' }}><X size={13} /></button>
         </div>
         <div className="exd-opts" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 24px' }}>
-          <DdlOutputForm value={value} onChange={setValue} disabled={!canEdit} />
+          <span className="exd-section">Default dialect</span>
+          <div className="rd-seg exd-caseseg" role="group" aria-label="Default dialect">
+            {DIALECTS.map(([d, label]) => (
+              <button key={d} type="button" className={value.dialect === d ? 'active' : ''} aria-pressed={value.dialect === d}
+                disabled={!canEdit} onClick={() => { setValue({ ...value, dialect: d }); setShown(d); }}>{label}</button>
+            ))}
+          </div>
+          <span className="exd-swrow-hint">The Export DDL dialog opens with this dialect; it can still be changed for each export.</span>
+          <div className="wk-pp-tabs exd-tabs" role="tablist" aria-label="Settings of each dialect">
+            {DIALECTS.map(([d, label]) => (
+              <button key={d} type="button" role="tab" aria-selected={shown === d}
+                className={`wk-pp-tab${shown === d ? ' active' : ''}`} onClick={() => setShown(d)}>
+                {label} settings
+                {value.dialect === d && <span className="wk-pp-tab-count">default</span>}
+              </button>
+            ))}
+          </div>
+          <DdlOutputForm value={value} onChange={setValue} disabled={!canEdit} dialect={shown} />
         </div>
         <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 24px 18px', borderTop: '1px solid #EEF1F6' }}>
           <span style={{ flex: 1, fontSize: 11.5, color: '#9AA3B2' }}>Saving records a Data Standards version (rollback available).</span>

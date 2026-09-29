@@ -3,6 +3,7 @@
 // columnas, por separado (`tableSheetRow` / `columnSheetRow`) o unida en una
 // fila por columna con la metadata de su tabla (`joinedSheetRow`). Los UDPs
 // salen como columnas dinámicas «UDP · <def>» (unión de claves, orden estable).
+import type { RelationshipRow } from '../query.service';
 import type { ReportColumnRow, ReportTableRow, ReportViewRow } from '@/services/reporting.service';
 
 export type SheetRow = Record<string, string | number>;
@@ -135,5 +136,27 @@ export function viewSheetRow(v: ReportViewRow): SheetRow {
     Description: v.description ?? '',
     SQL: v.sql ?? '',
     'User-Defined SQL': v.customSql ?? '',
+  };
+}
+
+/** Fila de la hoja «Relationships»: detalle POR PAR de columnas (v2, doc 19 —
+ *  una FK compuesta emite una fila por par, con «Pair i/n»). Doc 98: las
+ *  frases de la relación van junto a sus otros datos de relación. */
+export function relationshipSheetRow(r: RelationshipRow): SheetRow {
+  return {
+    'Parent schema': str(r.parentSchema),
+    'Parent table': r.parentTable ?? r.parent,
+    'Parent column': str(r.parentColumn),
+    'Child schema': str(r.childSchema),
+    'Child table': r.childTable ?? r.child,
+    'Child column': str(r.childColumn),
+    'Role name': str(r.roleName),
+    Pair: r.pairCount && r.pairCount > 1 ? `${(r.pairIndex ?? 0) + 1}/${r.pairCount}` : '',
+    Cardinality: r.cardinality,
+    Identifying: yn(r.identifying),
+    'Parent-to-child phrase': str(r.parentToChildPhrase),
+    'Child-to-parent phrase': str(r.childToParentPhrase),
+    'Self-referencing': yn(r.isSelfReferencing),
+    'Cross-schema': yn(r.crossSchema),
   };
 }

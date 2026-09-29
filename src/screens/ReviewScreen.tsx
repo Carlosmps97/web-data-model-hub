@@ -59,6 +59,7 @@ import ApproveDeletionDialog from '@/screens/review/ApproveDeletionDialog';
 import RejectDialog from '@/screens/review/RejectDialog';
 import RequestHistory from '@/screens/review/RequestHistory';
 import { activityAt, historyOf, isRequest, outcomeOf, requestBadge } from '@/screens/review/requestState';
+import { conflictCounts } from '@/screens/review/conflicts';
 import type { Project } from '@/types/model';
 import type {
   PublishBlockedDetail,
@@ -312,14 +313,13 @@ export default function ReviewScreen() {
     let added = 0;
     let edited = 0;
     let deleted = 0;
-    let conflicts = 0;
     if (diff)
       Object.values(diff.collections).forEach((b) => {
         added += b.added.length;
         edited += b.edited.length;
         deleted += b.deleted.length;
-        conflicts += [...b.added, ...b.edited, ...b.deleted].filter((e) => e.conflict).length;
       });
+    const conflicts = diff ? conflictCounts(diff) : { overwrites: 0, restores: 0, total: 0 };
     return { added, edited, deleted, conflicts, total: added + edited + deleted };
   }, [diff]);
 
@@ -868,12 +868,24 @@ export default function ReviewScreen() {
                   {/* Doc 88 §6: historial de ciclos (motivo del rechazo incluido) */}
                   <RequestHistory rows={historyOf(detail)} userName={userName} userInitials={userInitials} avatarTone={avatarTone} />
 
-                  {diffTotals.conflicts > 0 && (
+                  {diffTotals.conflicts.total > 0 && (
                     <div className="dmh-rv-note" role="alert">
                       <TriangleAlert size={15} strokeWidth={1.7} aria-hidden />
                       <span>
-                        <strong>{diffTotals.conflicts}</strong> {diffTotals.conflicts === 1 ? 'entity in this request was' : 'entities in this request were'} modified
-                        in production after this version edited {diffTotals.conflicts === 1 ? 'it' : 'them'} — approving will overwrite those production changes.
+                        {diffTotals.conflicts.overwrites > 0 && (
+                          <>
+                            <strong>{diffTotals.conflicts.overwrites}</strong> {diffTotals.conflicts.overwrites === 1 ? 'entity in this request was' : 'entities in this request were'} modified
+                            in production after this version edited {diffTotals.conflicts.overwrites === 1 ? 'it' : 'them'} — approving will overwrite those production changes.
+                          </>
+                        )}
+                        {/* Doc 100 (P3): lo que otra versión borró vuelve al aprobar. */}
+                        {diffTotals.conflicts.restores > 0 && (
+                          <>
+                            {diffTotals.conflicts.overwrites > 0 ? ' ' : ''}
+                            <strong>{diffTotals.conflicts.restores}</strong> {diffTotals.conflicts.restores === 1 ? 'entity in this request was' : 'entities in this request were'} deleted
+                            in production after this version was opened — approving will restore {diffTotals.conflicts.restores === 1 ? 'it' : 'them'}.
+                          </>
+                        )}
                       </span>
                     </div>
                   )}

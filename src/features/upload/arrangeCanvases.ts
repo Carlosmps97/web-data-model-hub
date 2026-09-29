@@ -3,7 +3,10 @@
  * §3.5): mismo motor y configuración que el botón del toolbar (`arrangeDiagram`
  * → ELK), pero sin nodos medidos — los tamaños salen de la estimación LOD
  * (idéntica a `scripts/arrange_all.py`). Corre canvas por canvas y persiste
- * el layout con el servicio changeset-aware (`setSubjectAreaLayout` MERGEA).
+ * el layout con el servicio changeset-aware (`arrangeSubjectArea` MERGEA las
+ * posiciones). Doc 99: como el arrange mueve TODOS los bloques del canvas, la
+ * misma escritura reinicia sus trazos manuales de wires — en un canvas
+ * existente que ganó tablas ya no calzarían con los bloques.
  * Un canvas que falla no frena a los demás: se devuelve en `failed` para que
  * el popup lo avise (queda el botón Autoarrange manual).
  */
@@ -26,7 +29,7 @@ export async function arrangeCanvases(
       const dia = await mod.loadDiagram(id);
       if (dia.tables.length) {
         const pos = await arrangeDiagram(dia, () => undefined, viewMode);
-        await struct.setSubjectAreaLayout(id, pos);
+        await struct.arrangeSubjectArea(id, pos);
       }
       out.arranged += 1;
     } catch {

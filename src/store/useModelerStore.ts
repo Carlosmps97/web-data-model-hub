@@ -18,9 +18,14 @@ import { keyLayoutBulk } from '@/features/modeler/lib/keyLayout';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
 import { mirrorComplex } from '@/features/modeler/lib/facetTypes';
 import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
-import { mergeIds, orphanViewIds, withoutIds } from '@/features/modeler/lib/canvasViews';
+import { orphanViewIds } from '@/features/modeler/lib/canvasViews';
 import { isPkFirst, orderColumns, persistReorder, pkFirstOrdinals, reorderPlan, sortByOrdinal } from '@/features/modeler/lib/columnOrder';
 import type { CanvasDropPlan } from '@/features/modeler/lib/canvasDrop';
+import { canvasClock, wholePoint, writtenSince } from '@/features/modeler/lib/canvasWrites';
+import {
+  cleanRoute, cleanRoutes, pruneRoutes, routableWireIds, routeOf, sameRoute, wireIdsOfTable,
+} from '@/features/modeler/lib/wireRoute';
+import type { RoutePoint, WireRoutes } from '@/features/modeler/lib/wireRoute';
 import {
   removeColumnSource, syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews,
 } from '@/features/modeler/lib/viewSync';
@@ -192,6 +197,20 @@ interface ModelerState {
   /** Aviso «los movimientos en modo visor no se guardan»: una vez por sesión. */
   viewerHintShown: boolean;
   markViewerHint: () => void;
+  /** Doc 99: trazos MANUALES de los wires del canvas abierto (id del wire →
+   *  puntos de quiebre). Se siembran del diagrama cada vez que llega uno
+   *  (saneados, y solo de wires que existen) y cada wire lee el suyo por
+   *  selector: cambiar un trazo re-pinta ESE wire, no re-arma el canvas. */
+  canvasRoutes: WireRoutes;
+  /** Doc 99: canvases donde un auto-arrange en modo VISOR movió todos los
+   *  bloques en esta sesión — sus trazos publicados ya no calzan y se ocultan
+   *  (mismo alcance efímero que `viewerLayout`; nada se persiste). */
+  viewerRoutesOff: Record<string, true>;
+  /** Doc 99: fija el trazo de un wire del canvas abierto (null o lista vacía =
+   *  camino automático). Pinta al instante, graba UNA vez en la working copy
+   *  y apila su Undo; si el guardado falla, vuelve al trazo anterior y avisa.
+   *  Fuera de una sesión de edición no hace nada. */
+  setWireRoute: (wireId: string, points: RoutePoint[] | null) => Promise<void>;
   /** LOD (doc 33): bajo el umbral de zoom los nodos se pintan COMPACTOS (misma
    *  caja, tamaño y colores; sin las filas, que a ese zoom miden <1px). Default
    *  true: el fitView inicial de un canvas grande arranca alejado y la primera
@@ -470,9 +489,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           throw e;
         }
         // Alta en el canvas + bloque al costado del original (si está acá);
-        // si no, al centro del viewport.
-        const sa = await struct.getSubjectArea(saId);
-        await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
+        // si no, al centro del viewport. Doc 100: en UNA escritura, dentro de
+        // la cola del canvas.
         const rf = get().flow;
         const src = rf?.getNode(clip.table.id);
         const pos = src
@@ -480,7 +498,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           : rf
             ? (() => { const c = rf.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }); return { x: Math.round(c.x), y: Math.round(c.y) }; })()
             : { x: 120, y: 120 };
-        await struct.setSubjectAreaLayout(saId, { [id]: pos });
+        await struct.addToCanvas(saId, { tableIds: [id], layout: { [id]: pos } });
         await get().reload();
         set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible
         pushUndo(`Paste table ${physicalName}`, () => get().deleteTable(id));
@@ -510,6 +528,31 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   })),
   viewerHintShown: false,
   markViewerHint: () => set({ viewerHintShown: true }),
+  canvasRoutes: {},
+  viewerRoutesOff: {},
+  setWireRoute: async (wireId, points) => {
+    const saId = get().activeSaId;
+    const dia = get().diagram;
+    const session = useSessionStore.getState();
+    if (!saId || !dia || session.openMode !== 'editing' || !session.activeChangesetId) return;
+    // El diagrama tiene que ser el del canvas abierto: sus wires deciden qué
+    // trazos se podan al grabar.
+    if (dia.subjectArea.id !== saId) return;
+    // `null` o lista vacía = volver al camino automático. Lo que no es una
+    // lista de puntos válida ni se pinta ni se graba (ni quita el trazo).
+    const next = points === null ? [] : Array.isArray(points) ? (points.length ? cleanRoute(points) : []) : null;
+    if (next === null) return;
+    const prev = routeOf(get().canvasRoutes, wireId) ?? null;
+    if (sameRoute(prev, next)) return;               // sin cambio real: cero requests
+    get().markDirty();
+    try {
+      await writeWireRoute(saId, wireId, next.length ? next : null, routableWireIds(dia.relationships));
+    } catch (e) {
+      toast.error(e instanceof Error && e.message ? e.message : "Couldn't save the wire route");
+      return;
+    }
+    pushUndo('Reroute wire', () => writeWireRoute(saId, wireId, prev));
+  },
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
   navigating: null,
@@ -711,11 +754,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const seq = ++_loadSeq;
     set({ openingSaId: saId });
     try {
-      const diagram = await mod.loadDiagram(saId);
+      const asked = canvasClock();
+      const loaded = await mod.loadDiagram(saId);
       // Descarta respuestas VIEJAS: si mientras cargaba el usuario seleccionó
       // otro canvas (o corrió otro reload), pisar el diagrama con esta
       // respuesta dejaría el canvas mostrando un subject area ajeno.
       if (seq !== _loadSeq) return;
+      const diagram = withWrittenCanvas(loaded, asked);
       // Si el canvas es de OTRO proyecto, ése pasa a ser el activo y se espejan
       // los campos legacy (folders/subjectAreas) desde el cache del árbol.
       let crossProject = {};
@@ -731,7 +776,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       }
       // Doc 48: la selección/menú/popup son del canvas anterior; el CLIPBOARD
       // sobrevive al cambio de canvas (copiar en A, pegar en B — decisión iii).
-      set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null,
+      // Doc 99: también el wire seleccionado — la misma relación puede estar en
+      // el canvas nuevo y aparecería seleccionada, con sus tiradores a la vista.
+      set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null, selectedEdgeId: null,
             colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
             drawings: diagram.subjectArea.drawings ?? [] });
       // Doc 83: reglas de naming del proyecto del canvas (best-effort, no bloquea).
@@ -833,9 +880,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   reload: async () => {
     const id = get().activeSaId; if (!id) return;
     const seq = ++_loadSeq;
-    let diagram: Diagram;
+    const asked = canvasClock();
+    let loaded: Diagram;
     try {
-      diagram = await mod.loadDiagram(id);
+      loaded = await mod.loadDiagram(id);
     } catch {
       // El canvas no existe en el contexto actual (p.ej. draft de OTRA versión
       // tras cambiar de changeset): limpiar la selección en vez de dejar el
@@ -847,6 +895,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     // Descarta respuestas viejas (cambio de canvas o carga más nueva en vuelo).
     if (seq !== _loadSeq || get().activeSaId !== id) return;
+    // Doc 99: si algo del canvas se grabó después de pedir este diagrama, se
+    // repone (la foto puede ser de antes de ese guardado).
+    const diagram = withWrittenCanvas(loaded, asked);
     const prev = get().diagram;
     set({ diagram });
     // Doc 88 §2: un cambio ESTRUCTURAL del MISMO canvas (tabla/vista nueva,
@@ -859,7 +910,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   saveLayout: async (tableId, pos) => {
     const saId = get().activeSaId; if (!saId) return;
     get().markDirty();
-    await struct.setSubjectAreaLayout(saId, { [tableId]: pos });
+    // Doc 99: la posición queda también en el diagrama del store, EN SITIO (sin
+    // cambiar su identidad, que re-armaría el canvas). El diagrama guarda el
+    // layout de su última carga y el canvas se re-arma con él al pasar de
+    // Logical a Physical o al guardar Model properties: sin esto el bloque
+    // recién movido volvía a su sitio viejo hasta el siguiente reload — y un
+    // trazo manual quedaba referido a una posición que ya no era la de pantalla.
+    // Doc 100 (P6): en píxeles enteros, igual que lo que se graba.
+    const at = wholePoint({ x: pos.x, y: pos.y });
+    const sa = get().diagram?.subjectArea;
+    if (sa && sa.id === saId) sa.layout = { ...(sa.layout ?? {}), [tableId]: at };
+    await struct.setSubjectAreaLayout(saId, { [tableId]: at });
   },
   saveAllLayout: async () => {
     const saId = get().activeSaId; const rf = get().flow;
@@ -890,11 +951,34 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (viewer) {
       // Se aplica a los nodos vivos y se recuerda por canvas (viewerLayout) para
       // que un re-armado del diagrama no lo pierda; nunca viaja al backend.
-      set((st) => ({ viewerLayout: { ...st.viewerLayout, [saId]: { ...(st.viewerLayout[saId] ?? {}), ...pos } } }));
+      // Doc 99: con todos los bloques en otro sitio, los trazos manuales
+      // publicados ya no calzan — se ocultan en esta sesión (igual de efímero).
+      set((st) => ({
+        viewerLayout: { ...st.viewerLayout, [saId]: { ...(st.viewerLayout[saId] ?? {}), ...pos } },
+        viewerRoutesOff: { ...st.viewerRoutesOff, [saId]: true },
+      }));
       get().flow?.setNodes((nodes) => nodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)));
       return;
     }
-    await struct.setSubjectAreaLayout(saId, pos);   // setSubjectAreaLayout MERGEA (M3a)
+    // Doc 99: estado ANTES del arrange, para el Undo — posiciones de los nodos
+    // vivos (las mismas que guarda Save) y trazos manuales del canvas.
+    const prevRoutes = get().canvasRoutes;
+    const prevLayout: Record<string, { x: number; y: number }> = {};
+    for (const n of get().flow?.getNodes() ?? []) {
+      if (n.type === 'table' || n.type === 'view' || n.type === 'subcat') {
+        prevLayout[n.id] = { x: n.position.x, y: n.position.y };
+      }
+    }
+    // Posiciones nuevas (MERGEA, M3a) y trazos REINICIADOS en una sola
+    // escritura del canvas: nunca quedan posiciones nuevas con trazos viejos.
+    await struct.arrangeSubjectArea(saId, pos);
+    showRoutes(saId, () => ({}));
+    pushUndo('Auto-arrange', async () => {
+      await struct.arrangeSubjectArea(saId, prevLayout, prevRoutes);
+      if (get().activeSaId !== saId) return;
+      showRoutes(saId, () => prevRoutes);
+      await get().reload();
+    });
     await get().reload();
   },
   createTable: async (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical'; description?: string; udpValues?: Record<string, string> }) => {
@@ -916,8 +1000,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       ...(udpValues ? { udpValues } : {}),
     });
     // referenciar la nueva tabla en la Subject Area
-    const sa = await struct.getSubjectArea(saId);
-    await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
+    await struct.addToCanvas(saId, { tableIds: [id] });
     await get().reload();
     // La tabla nueva queda SELECCIONADA → sube al frente (zIndex) y no cae oculta
     // detrás de un bloque que ya estaba en el canvas (pedido owner).
@@ -1056,67 +1139,66 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   addExistingTables: async (tableIds: string[], opts) => {
     const saId = get().activeSaId; if (!saId || tableIds.length === 0) return;
     get().markDirty();
-    const sa = await struct.getSubjectArea(saId);
-    // Solo las REALMENTE agregadas (el merge ignora las que ya estaban): la
-    // inversa del Undo no debe sacar del canvas una tabla que ya vivía acá.
-    const added = tableIds.filter((t) => !sa.tableIds.includes(t));
-    const merged = Array.from(new Set([...sa.tableIds, ...tableIds]));
     // Doc 70: la membresía de vistas parte de la lista MATERIALIZADA del
     // diagrama (un canvas legacy la recibe resuelta por el backend). Importar
     // una tabla NO arrastra sus vistas — sólo si el usuario lo pide.
-    const baseViews = get().diagram?.subjectArea.viewIds ?? sa.viewIds ?? [];
-    let viewIds = baseViews;
-    if (opts?.withViews) {
-      const views = await viewsSvc.listViewsForTables(tableIds).catch(() => [] as View[]);
-      viewIds = mergeIds(baseViews, views.map((v) => v.id));
-    }
-    await struct.setSubjectAreaMembers(saId, { tableIds: merged, viewIds });
+    const shown = get().diagram?.subjectArea.viewIds;
+    const withViews = opts?.withViews
+      ? (await viewsSvc.listViewsForTables(tableIds).catch(() => [] as View[])).map((v) => v.id)
+      : [];
+    // Doc 100: la lista completa la arma el servicio DENTRO de la cola del
+    // canvas y devuelve lo REALMENTE agregado: la inversa del Undo no debe
+    // sacar del canvas una tabla o vista que ya vivía acá.
+    const added = await struct.addToCanvas(saId, { tableIds, viewIds: withViews }, shown);
     await get().reload();
     // Selecciona la primera importada → al frente (zIndex) y visible (owner).
     set({ selectedTableId: tableIds[0], selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
-    const addedViews = withoutIds(viewIds, baseViews);
-    if (added.length || addedViews.length) {
+    if (added.tableIds.length || added.viewIds.length) {
+      const nt = added.tableIds.length;
+      const nv = added.viewIds.length;
       const what = [
-        added.length ? `${added.length} table${added.length === 1 ? '' : 's'}` : '',
-        addedViews.length ? `${addedViews.length} view${addedViews.length === 1 ? '' : 's'}` : '',
+        nt ? `${nt} table${nt === 1 ? '' : 's'}` : '',
+        nv ? `${nv} view${nv === 1 ? '' : 's'}` : '',
       ].filter(Boolean).join(' + ');
+      // La lista de vistas es la de ESTE canvas al importar: el Undo puede
+      // correr con otro canvas abierto (la pila sobrevive al cambio de canvas).
       pushUndo(`Add ${what} to canvas`, async () => {
-        for (const tid of added) await struct.removeTableFromCanvas(saId, tid);
-        if (addedViews.length) await struct.setSubjectAreaMembers(saId, { viewIds: baseViews });
+        await struct.removeFromCanvas(saId, added, shown);
         await get().reload();
       });
     }
   },
   addViewsToCanvas: async (viewIds) => {
     const saId = get().activeSaId; if (!saId || viewIds.length === 0) return;
-    const base = get().diagram?.subjectArea.viewIds ?? [];
-    const next = mergeIds(base, viewIds);
-    if (next.length === base.length) return;          // ya eran miembros
+    const shown = get().diagram?.subjectArea.viewIds ?? [];
+    if (viewIds.every((v) => shown.includes(v))) return;          // ya eran miembros
     get().markDirty();
-    await struct.setSubjectAreaViews(saId, next);
+    // Doc 100: la lista completa la arma el servicio dentro de la cola.
+    const added = await struct.addToCanvas(saId, { viewIds }, shown);
     await get().reload();
-    const n = next.length - base.length;
+    const n = added.viewIds.length;
+    if (!n) return;
     pushUndo(`Add ${n} view${n === 1 ? '' : 's'} to canvas`, async () => {
-      await struct.setSubjectAreaViews(saId, base);
+      await struct.removeFromCanvas(saId, { viewIds: added.viewIds }, shown);
       await get().reload();
     });
   },
   removeViewFromCanvas: async (viewId) => {
     const saId = get().activeSaId; if (!saId) return;
-    const base = get().diagram?.subjectArea.viewIds ?? [];
-    if (!base.includes(viewId)) return;
+    const shown = get().diagram?.subjectArea.viewIds ?? [];
+    if (!shown.includes(viewId)) return;
     get().markDirty();
     // Para el Undo (doc 50): nombre y posición ANTES de quitarla.
     const name = get().diagram?.views.find((v) => v.id === viewId)?.name ?? 'view';
     const node = get().flow?.getNode(viewId);
     const pos = node ? { x: Math.round(node.position.x), y: Math.round(node.position.y) } : null;
-    await struct.removeViewFromCanvas(saId, viewId, withoutIds(base, [viewId]));
+    await struct.removeFromCanvas(saId, { viewIds: [viewId] }, shown);
     if (get().selectedViewId === viewId) set({ selectedViewId: null });
     await get().reload();
+    // Doc 100: vuelve con su posición en UNA escritura (lista de vistas de ESTE
+    // canvas, no la del que esté abierto al deshacer).
     pushUndo(`Remove ${name} from canvas`, async () => {
-      const cur = get().diagram?.subjectArea.viewIds ?? [];
-      await struct.setSubjectAreaViews(saId, mergeIds(cur, [viewId]));
-      if (pos) { try { await struct.setSubjectAreaLayout(saId, { [viewId]: pos }); } catch { /* layout best-effort */ } }
+      await struct.addToCanvas(saId, { viewIds: [viewId], ...(pos ? { layout: { [viewId]: pos } } : {}) }, shown);
       await get().reload();
     });
   },
@@ -1157,8 +1239,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }, { kind: 'ctas', ...(c.sourceTable ? { sourceTable: c.sourceTable } : {}), sourceColumn: c.physicalName });
       }),
     ]);
-    const sa = await struct.getSubjectArea(saId);
-    await struct.setSubjectAreaTables(saId, [...sa.tableIds, id]);
+    await struct.addToCanvas(saId, { tableIds: [id] });
     await get().reload();
     set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible (owner)
     pushUndo(`Create table ${physical}`, () => get().deleteTable(id));
@@ -1184,16 +1265,26 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // (siguen en el modelo). La membresía parte de la lista materializada.
     const remaining = (d?.subjectArea.tableIds ?? []).filter((t) => t !== tableId);
     const orphans = orphanViewIds(d?.views ?? [], remaining);
-    const baseViews = d?.subjectArea.viewIds ?? [];
-    const nextViews = orphans.length ? withoutIds(baseViews, orphans) : undefined;
     const orphanPos = Object.fromEntries(orphans.map((vid) => [vid, posOf(vid)] as const).filter(([, p]) => p));
-    await struct.removeTableFromCanvas(saId, tableId, nextViews);   // quita de tableIds + layout (+ vistas huérfanas)
+    // Doc 99: los trazos manuales de los wires de la tabla salen con ella (si
+    // vuelve al canvas en otra posición ya no calzarían); el Undo los repone.
+    const wireIds = wireIdsOfTable(d?.relationships ?? [], tableId);
+    const droppedRoutes = routesOf(get().canvasRoutes, wireIds);
+    // quita de tableIds + layout (+ vistas huérfanas) (+ trazos de sus wires).
+    // Doc 100: las listas las arma el servicio dentro de la cola del canvas.
+    const shown = d?.subjectArea.viewIds;
+    await struct.removeFromCanvas(saId, {
+      tableIds: [tableId], viewIds: orphans, ...(Object.keys(droppedRoutes).length ? { dropRouteIds: wireIds } : {}),
+    }, shown);
+    // Doc 100: la inversa es UNA escritura (antes hasta 4: tablas, vistas,
+    // posiciones y trazos, cada una leyendo el canvas por su cuenta). Las vistas
+    // son las de ESTE canvas al sacar la tabla (el Undo puede correr con otro
+    // canvas abierto) y sólo cuentan si salieron huérfanas: sin ellas, un canvas
+    // sin lista explícita (doc 70) sigue sin lista.
     pushUndo(`Remove ${name} from canvas`, async () => {
-      const sa = await struct.getSubjectArea(saId);
-      if (!sa.tableIds.includes(tableId)) await struct.setSubjectAreaTables(saId, [...sa.tableIds, tableId]);
-      if (nextViews) await struct.setSubjectAreaViews(saId, baseViews);
       const layout = { ...(pos ? { [tableId]: pos } : {}), ...orphanPos } as Record<string, { x: number; y: number }>;
-      if (Object.keys(layout).length) { try { await struct.setSubjectAreaLayout(saId, layout); } catch { /* layout best-effort */ } }
+      await struct.addToCanvas(saId, { tableIds: [tableId], viewIds: orphans, layout, routes: droppedRoutes },
+        orphans.length ? shown : undefined);
       await get().reload();
     });
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
@@ -1252,9 +1343,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         await gov.updateColumn({ ...c, isForeignKey: false });
       }
     }
-    // Sacar de TODOS los canvases que la contienen (tableIds + layout).
+    // Sacar de TODOS los canvases que la contienen (tableIds + layout). Doc 99:
+    // y con ella los trazos manuales de sus wires (las relaciones de arriba se
+    // borran; sus trazos quedarían huérfanos en cada canvas).
     const usage = await gov.tableUsage(tableId).then((u) => u.usage).catch(() => []);
-    for (const u of usage) await struct.removeTableFromCanvas(u.canvasId, tableId);
+    const wireIds = wireIdsOfTable(rels, tableId);
+    const droppedRoutes = routesOf(get().canvasRoutes, wireIds);   // del canvas ACTIVO, para el Undo
+    for (const u of usage) {
+      await struct.removeFromCanvas(u.canvasId, { tableIds: [tableId], ...(wireIds.length ? { dropRouteIds: wireIds } : {}) });
+    }
     // La tabla.
     await gov.deleteTable(tableId);
     // Undo (doc 50): UN lote restaura tabla + columnas + FKs limpiadas +
@@ -1270,13 +1367,18 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           ...relsPre.map((r) => gov.bulk.upsertRelationship(r)),
           ...viewsPre.map((v) => gov.bulk.upsertView(v)),
         ]);
+        // Doc 100: una escritura por canvas, dentro de su cola. La posición y
+        // los trazos (doc 99) sólo vuelven al canvas activo.
         for (const u of usage) {
+          const active = u.canvasId === undoSaId;
           try {
-            const sa = await struct.getSubjectArea(u.canvasId);
-            if (!sa.tableIds.includes(tableId)) await struct.setSubjectAreaTables(u.canvasId, [...sa.tableIds, tableId]);
+            await struct.addToCanvas(u.canvasId, {
+              tableIds: [tableId],
+              ...(active && undoPos ? { layout: { [tableId]: undoPos } } : {}),
+              ...(active ? { routes: droppedRoutes } : {}),
+            });
           } catch { /* el canvas pudo desaparecer */ }
         }
-        if (undoSaId && undoPos) { try { await struct.setSubjectAreaLayout(undoSaId, { [tableId]: undoPos }); } catch { /* best-effort */ } }
         await get().reload();
         get().syncExplorer(usage.some((u) => u.canvasId === get().activeSaId));
       });
@@ -1492,6 +1594,135 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await get().selectSubjectArea(sa.id);
   },
 }));
+
+// ── Doc 99: trazos manuales de wires ───────────────────────────────────────
+
+/** Cuántos wires del canvas abierto tienen trazo manual (aviso del auto-arrange). */
+export const manualRouteCount = (s: Pick<ModelerState, 'canvasRoutes'>): number =>
+  Object.keys(s.canvasRoutes).length;
+
+/** Los trazos de `ids` que existen en `routes`. */
+function routesOf(routes: WireRoutes, ids: string[]): WireRoutes {
+  const out: WireRoutes = {};
+  for (const id of ids) {
+    const route = routeOf(routes, id);
+    if (route) out[id] = route;
+  }
+  return out;
+}
+
+/** Un diagrama pedido ANTES de que terminara un guardado del canvas puede
+ *  traer la posición o el trazo de antes: se reponen los grabados. Las
+ *  posiciones se mezclan (lo grabado encima); los trazos se reemplazan — un
+ *  trazo recién quitado no tiene que volver. */
+function withWrittenCanvas(diagram: Diagram, asked: number): Diagram {
+  const session = useSessionStore.getState();
+  const cs = session.openMode === 'editing' ? session.activeChangesetId : null;
+  const fresh = writtenSince(cs, diagram.subjectArea.id, asked);
+  if (!fresh) return diagram;
+  const sa = diagram.subjectArea;
+  return { ...diagram, subjectArea: { ...sa, layout: { ...(sa.layout ?? {}), ...fresh.layout }, routes: fresh.routes } };
+}
+
+/** Guardado EN VUELO del trazo de un wire.
+ *  · `points` — lo que el usuario dejó en pantalla (null = lo quitó).
+ *  · `base`   — lo último GRABADO que se conoce de ese wire: a eso vuelve la
+ *               pantalla si el guardado falla. `undefined` = no se sabe (su
+ *               canvas no estaba abierto cuando se pidió el guardado). */
+interface RouteTicket { points: RoutePoint[] | null; base: RoutePoint[] | null | undefined }
+
+/** Guardados en vuelo, por canvas y por wire. Un diagrama que llega mientras
+ *  tanto puede traer todavía el trazo viejo — manda el pendiente, que es lo
+ *  que el usuario acaba de dejar en pantalla. Cada entrada es la ficha del
+ *  ÚLTIMO guardado pedido para ese wire: su identidad dice si un guardado que
+ *  termina sigue siendo el vigente. */
+const _pendingRoutes = new Map<string, Map<string, RouteTicket>>();
+
+/** Trazos a pintar para un diagrama recién llegado: los del canvas, saneados y
+ *  solo de wires que existen, con los guardados en vuelo encima. De paso, cada
+ *  guardado en vuelo se entera de qué hay grabado según ESTE diagrama. */
+function seedRoutes(diagram: Diagram | null): WireRoutes {
+  if (!diagram) return {};
+  const valid = new Set(routableWireIds(diagram.relationships));
+  const base = pruneRoutes(cleanRoutes(diagram.subjectArea.routes), valid);
+  const pending = _pendingRoutes.get(diagram.subjectArea.id);
+  if (!pending?.size) return base;
+  const out = { ...base };
+  for (const [id, ticket] of pending) {
+    ticket.base = routeOf(base, id) ?? null;
+    if (ticket.points && valid.has(id)) out[id] = ticket.points; else delete out[id];
+  }
+  return out;
+}
+
+/** Cambia los trazos EN PANTALLA del canvas `saId` (no hace nada si hay otro
+ *  abierto). El diagrama del store guarda el canvas de su última carga: se le
+ *  deja el trazo al día EN SITIO — sin cambiar su identidad, que re-armaría
+ *  todo el canvas — para que el código que copia ese canvas para cambiarle un
+ *  campo (guardar Model properties) no re-siembre trazos viejos. */
+function showRoutes(saId: string, change: (cur: WireRoutes) => WireRoutes): void {
+  useModelerStore.setState((st) => {
+    if (st.activeSaId !== saId) return {};
+    const routes = change(st.canvasRoutes);
+    if (st.diagram?.subjectArea.id === saId) st.diagram.subjectArea.routes = routes;
+    return { canvasRoutes: routes };
+  });
+}
+
+/** Pinta y graba el trazo de un wire. Si el guardado falla la pantalla vuelve
+ *  a lo último GRABADO — no a lo que se veía antes del gesto, que puede ser el
+ *  trazo de otro gesto cuyo guardado también falló — y re-lanza. El fallo de un
+ *  guardado VIEJO no pisa un trazo más nuevo del mismo wire (gana el último
+ *  pedido). Con otro canvas abierto graba igual, sin tocar la pantalla. */
+async function writeWireRoute(
+  saId: string, wireId: string, value: RoutePoint[] | null, validIds?: Iterable<string>,
+): Promise<void> {
+  const paint = (points: RoutePoint[] | null) => showRoutes(saId, (cur) => {
+    const routes = { ...cur };
+    if (points) routes[wireId] = points; else delete routes[wireId];
+    return routes;
+  });
+  const pending = _pendingRoutes.get(saId) ?? new Map<string, RouteTicket>();
+  _pendingRoutes.set(saId, pending);
+  const earlier = pending.get(wireId);
+  const st = useModelerStore.getState();
+  const ticket: RouteTicket = {
+    points: value,
+    // Con un guardado del mismo wire en vuelo, lo que se ve es SU trazo, aún
+    // sin grabar: la base es la de él. Sin ninguno, lo que se ve está grabado.
+    base: earlier ? earlier.base : st.activeSaId === saId ? routeOf(st.canvasRoutes, wireId) ?? null : undefined,
+  };
+  const latest = () => pending.get(wireId) === ticket;
+  pending.set(wireId, ticket);
+  try {
+    paint(value);
+    await struct.setWireRoute(saId, wireId, value, validIds);
+    // Grabado: pasa a ser la base de lo que siga en vuelo para este wire.
+    const next = pending.get(wireId);
+    if (next && next !== ticket) next.base = value;
+  } catch (e) {
+    if (latest() && ticket.base !== undefined) paint(ticket.base);
+    throw e;
+  } finally {
+    if (latest()) pending.delete(wireId);
+    if (!pending.size && _pendingRoutes.get(saId) === pending) _pendingRoutes.delete(saId);
+  }
+}
+
+// Siembra: cada vez que cambia el CANVAS del diagrama (abrir, recargar, cerrar)
+// los trazos se toman de él, y el canvas del diagrama queda con los mismos
+// trazos que la pantalla (EN SITIO, como en `showRoutes`). No re-siembran: un
+// cambio local del diagrama que conserva el mismo `subjectArea` (reorden
+// optimista de columnas) ni una COPIA local del canvas (guardar Model
+// properties), que trae los mismos trazos que ya están en pantalla.
+useModelerStore.subscribe((s, prev) => {
+  const sa = s.diagram?.subjectArea;
+  if (sa === prev.diagram?.subjectArea) return;
+  if (sa && sa.routes === s.canvasRoutes) return;
+  const routes = seedRoutes(s.diagram);
+  if (sa) sa.routes = routes;
+  useModelerStore.setState({ canvasRoutes: routes });
+});
 
 // Doc 48: el clipboard de columnas pertenece al changeset donde se copió —
 // cambiar de changeset (o soltarlo) lo invalida, junto con la selección y el

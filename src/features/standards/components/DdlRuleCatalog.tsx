@@ -86,7 +86,7 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
 
   const doSeed = async () => {
     setSeeding(true);
-    try { await seedStarterRules(projectId); await onApplied(); toast.success('Starter rules added'); }
+    try { await seedStarterRules(projectId, config.output); await onApplied(); toast.success('Starter rules added'); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't add the starter rules"); }
     finally { setSeeding(false); }
   };

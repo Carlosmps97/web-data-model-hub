@@ -91,13 +91,21 @@ export const saveDdlOutput = (projectId: string, output: DdlOutputSettings): Pro
 /** CTA del catálogo vacío: aplica el ruleset base (doc 93: 12 reglas + 5
  *  generadores + lookups + Output settings) como UNA versión del proyecto. En
  *  una BD nueva esto mismo lo corre `scripts/seed_ddl_export_rules.py
- *  --all-projects` — acá queda para quien lo borró todo. */
-export const seedStarterRules = async (projectId: string): Promise<StandardsVersion> => {
+ *  --all-projects` — acá queda para quien lo borró todo. Doc 101: el ruleset
+ *  base es de Databricks — el dialecto por default del proyecto y su
+ *  configuración de Oracle (`currentOutput`) se conservan: un proyecto Oracle
+ *  (catálogo vacío a propósito) no cambia de dialecto por sumar las reglas. */
+export const seedStarterRules = async (
+  projectId: string, currentOutput?: Record<string, unknown> | null,
+): Promise<StandardsVersion> => {
   const t = await getDdlTemplates(projectId);
+  const keep = Object.fromEntries(
+    (['dialect', 'oracle'] as const).filter((k) => currentOutput?.[k] != null).map((k) => [k, currentOutput![k]]),
+  );
   return applyStandards(projectId, {
     kind: 'ddl', title: `Base — DDL export rules · ${t.seedRules.length} rules + lookups + output`,
     rulesUpsert: t.seedRules,
-    ddlConfigPatch: { lookups: t.seedLookups, ...(t.seedOutput ? { output: t.seedOutput } : {}) },
+    ddlConfigPatch: { lookups: t.seedLookups, ...(t.seedOutput ? { output: { ...t.seedOutput, ...keep } } : {}) },
   });
 };
 

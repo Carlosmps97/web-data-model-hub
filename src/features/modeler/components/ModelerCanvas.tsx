@@ -27,6 +27,7 @@ import { buildSubtypeGraph, childSubtypeMembership, isSubcategory, subtypeGroups
 import { nextLod } from '../lib/lodSize';
 import { pkInKeyOrder } from '../lib/keyOrder';
 import { relationshipDrift } from '../lib/relationshipPairs';
+import { relationshipLabel } from '../lib/relationshipLabel';
 import { fanSlots, HEADER_H, ROW_H } from '../lib/edgeFanout';
 import { effectiveLayout } from '../lib/viewerLayout';
 
@@ -167,6 +168,8 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
             identifying: r.identifying, pairCount: r.pairs.length,
             fanSlot: fan?.slot ?? 0, fanCount: fan?.count ?? 1, parentPkRows: pkIds.size,
             drifted: relationshipDrift(r, [...pkIds]) != null,
+            // Doc 98: frases de relación (etiqueta del wire + texto completo).
+            label: relationshipLabel(r), labelTitle: relationshipLabel(r, Infinity),
           },
         };
       }),

@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 vi.mock('@/features/modeler/services/structure.service', () => ({
   setSubjectAreaLayout: vi.fn(async () => ({})),
+  arrangeSubjectArea: vi.fn(async () => ({})),
 }));
 vi.mock('@/features/modeler/lib/arrangeGraph', () => ({
   arrangeDiagram: vi.fn(async () => ({ t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } })),
@@ -46,6 +47,7 @@ describe('useModelerStore — layout efímero del visor (doc 84 E)', () => {
     const st = useModelerStore.getState();
     expect(st.viewerLayout.sa1).toEqual({ t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } });
     expect(struct.setSubjectAreaLayout).not.toHaveBeenCalled();
+    expect(struct.arrangeSubjectArea).not.toHaveBeenCalled();
     expect(st.dirty).toBe(false);
     expect((st.flow as unknown as { setNodes: ReturnType<typeof vi.fn> }).setNodes).toHaveBeenCalledTimes(1);
   });
@@ -54,7 +56,9 @@ describe('useModelerStore — layout efímero del visor (doc 84 E)', () => {
     useSessionStore.setState({ openMode: 'editing' });
     useModelerStore.setState({ reload: vi.fn(async () => undefined) } as never);
     await useModelerStore.getState().autoOrganize();
-    expect(struct.setSubjectAreaLayout).toHaveBeenCalledWith('sa1', { t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } });
+    // Doc 99: las posiciones se graban con `arrangeSubjectArea`, que en la
+    // MISMA escritura reinicia los trazos manuales de los wires.
+    expect(struct.arrangeSubjectArea).toHaveBeenCalledWith('sa1', { t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } });
     expect(useModelerStore.getState().viewerLayout).toEqual({});
   });
 });

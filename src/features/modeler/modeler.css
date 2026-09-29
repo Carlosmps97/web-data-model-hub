@@ -99,6 +99,10 @@
 .wk-reldraw:hover:not(:disabled) { background: var(--fill-4); }
 .wk-reldraw.on { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 .wk-reldraw:disabled { opacity: .4; cursor: not-allowed; }
+/* Doc 98: Show/Hide relationship labels — es un INTERRUPTOR de visualización,
+   no una herramienta armada: su «on» es el tinte suave de .wk-relend. */
+.wk-rellabel.on { background: var(--blue-tint); color: var(--primary); border-color: var(--blue-border); }
+.wk-rellabel.on:hover:not(:disabled) { background: var(--blue-tint); }
 
 /* "Used in" (V3) — proyecto › carpeta › canvas en Metadata. Cada canvas es un
    BLOQUE delimitado (borde+fondo): con 2+ rutas largas, las filas sueltas se
@@ -130,6 +134,13 @@
 /* "Inherit: Yes/No" POR FILA (feedback prueba viva 2026-08-15). */
 .wk-relpair-role select.wk-relpair-inherit { flex: none; width: 132px; height: 28px; font-size: 12px; }
 .wk-relpair-add { display: flex; align-items: center; gap: 6px; }
+/* Doc 98: frases de relación — etiqueta fija a la izquierda, caja elástica. */
+.wk-relphrases { display: grid; gap: 6px; }
+.wk-relphrase { display: grid; grid-template-columns: 150px minmax(0, 1fr); align-items: center; gap: 8px; }
+.wk-relphrase > .rd-small { color: var(--text-muted); }
+.wk-relphrase .rd-input { height: 30px; font-size: 12px; }
+.wk-relphrase-apply { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.wk-relphrase-apply > .rd-small { color: var(--text-muted); }
 .wk-relpair-add .rd-input { flex: 1; height: 30px; font-size: 12px; min-width: 0; }
 
 /* SEARCH & LOCATE (doc 70 §11) — popup del buscador del Model (tablas ·
@@ -251,6 +262,54 @@
 .ppub-info { display: flex; align-items: flex-start; gap: 8px; padding: 10px 12px; border-radius: var(--r-sm);
   background: var(--blue-soft); border: 1px solid var(--blue-border-2); color: var(--text-muted); font-size: 12px; line-height: 1.45; }
 .ppub-info > svg { flex-shrink: 0; margin-top: 1px; color: var(--blue); }
+
+/* Doc 98: etiqueta de relación (frases Erwin) en el punto medio del wire. Vive
+   en la capa HTML de etiquetas de React Flow (encima de los wires, debajo de
+   los bloques); el fondo color canvas evita que su propio wire tache el texto.
+   El ancho máximo llega inline (según el hueco entre los bloques): si el texto
+   no cabe, parte línea en vez de tapar la línea y sus marcadores. */
+.wk-rel-label { position: absolute; width: max-content; pointer-events: all; cursor: pointer;
+  white-space: normal; text-align: center; overflow-wrap: anywhere;
+  padding: 2px 5px; border-radius: 4px; background: var(--canvas-bg); color: var(--ink-2);
+  font-family: var(--ui); font-size: 11px; line-height: 14px;
+  transition: color .12s; }
+.wk-rel-label.on { color: var(--primary); }
+/* Atenuada: se apaga el TEXTO, no el fondo — con el fondo translúcido el wire
+   de la propia etiqueta se trasluciría y tacharía el texto. */
+.wk-rel-label.dim { color: color-mix(in srgb, var(--ink-2) 22%, transparent); }
+/* Doc 99: el wire muestra los tiradores de su trazo — la etiqueta se hace a un
+   lado (translúcida: se ve el wire completo y los tiradores) sin moverse ni
+   dejar de responder al clic / doble clic. */
+.wk-rel-label.edit { opacity: .3; }
+
+/* Tiradores del trazo manual de un wire (doc 99). Misma capa HTML que la
+   etiqueta; solo existen sobre el wire seleccionado, en edición. La posición y
+   la escala (tamaño constante en pantalla a cualquier zoom) llegan inline.
+   z-index: por encima de la etiqueta de su propio wire, que comparte el punto
+   medio con un tirador, y por encima de los BLOQUES (esa capa no arma su
+   propio apilamiento): un punto soltado sobre un bloque se puede volver a
+   agarrar. */
+.wk-wire-pt, .wk-wire-add, .wk-wire-reset { position: absolute; left: 0; top: 0; z-index: 2;
+  box-sizing: border-box; padding: 0; margin: 0; pointer-events: all;
+  touch-action: none; user-select: none; -webkit-user-select: none; }
+/* Punto de quiebre: lleno, se arrastra. */
+.wk-wire-pt { width: 12px; height: 12px; border-radius: 50%; cursor: move;
+  background: var(--primary); border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--primary), var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, .18)); }
+.wk-wire-pt:hover, .wk-wire-pt.on { box-shadow: 0 0 0 1px var(--primary), 0 0 0 4px color-mix(in srgb, var(--primary) 26%, transparent); }
+.wk-wire-pt:focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+/* «Crear punto»: hueco, en la mitad de cada tramo. */
+.wk-wire-add { width: 10px; height: 10px; border-radius: 50%; cursor: crosshair;
+  background: var(--surface); border: 1.5px solid var(--primary); opacity: .72;
+  transition: opacity .12s, box-shadow .12s; }
+.wk-wire-add:hover { opacity: 1; box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent); }
+/* Volver al camino automático. */
+.wk-wire-reset { width: 20px; height: 20px; border-radius: 50%; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--surface); color: var(--primary); border: 1px solid var(--border-1, #E2E6EE);
+  box-shadow: var(--shadow-sm, 0 1px 2px rgba(0, 0, 0, .18)); }
+.wk-wire-reset:hover { background: var(--primary); color: var(--on-primary, #fff); border-color: var(--primary); }
+.wk-wire-reset:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
 /* Abajo y centrado (pedido owner 07-17): arriba tapaba los botones del menú;
    el centro-inferior queda libre (Controls abajo-izq, MiniMap abajo-der). */
@@ -475,6 +534,8 @@
 .wk-pp-role.child { color: var(--primary); background: var(--blue-tint); }
 .wk-pp-link-card { display: flex; align-items: center; gap: 9px; font-size: 11px; color: var(--subtle); }
 .wk-pp-link-card .rd-mono { color: var(--text-body); }
+/* Doc 98: frase de la relación bajo el link (completa; puede partir línea). */
+.wk-pp-link-phrase { display: block; margin-top: 5px; color: var(--text-body); font-style: italic; overflow-wrap: anywhere; }
 .wk-pp-card-lbl { margin-left: auto; font-size: 11px; font-weight: 600; color: var(--text-muted); white-space: nowrap; }
 
 /* ── Metadata (diseño pp4: label 104px + valor) ── */
@@ -828,6 +889,17 @@ select.exd-input { padding: 0 10px; }
 }
 .exd-iconbtn:hover { color: var(--red); background: var(--fill-4); }
 .exd-empty { font-size: 12px; color: var(--text-muted-2); padding: 4px 2px; }
+/* Doc 101 · mapeo de tipos de Oracle: lista plegable (27 filas por default) */
+.exd-disclosure { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: none; background: none; cursor: pointer; font-family: var(--ui); color: var(--text-muted); }
+.exd-disclosure:hover .exd-section { color: var(--primary); }
+.exd-disclosure-count { font-size: 11px; font-weight: 600; color: var(--primary); background: var(--blue-tint); border-radius: var(--r-full); padding: 1px 8px; }
+.exd-typemap { display: flex; flex-direction: column; gap: 7px; }
+.exd-typemap-head { align-items: end; }
+.exd-typemap-issue { font-size: 11.5px; font-weight: 600; color: var(--red); }
+.exd-typemap .exd-input[aria-invalid="true"] { border-color: var(--red); }
+.exd-section-note { font-weight: 500; color: var(--text-muted-2); }
+/* Doc 101 · con Oracle las Export rules no corren (son de Databricks) */
+.exd-dialect-note { font-size: 11.5px; color: var(--text-muted); background: var(--fill-3); border: 1px solid var(--border-soft); border-radius: 9px; padding: 8px 11px; }
 
 .exd-tables { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .exd-tablelist {
@@ -914,8 +986,10 @@ select.exd-input { padding: 0 10px; }
 .exd-caseseg { align-self: flex-start; }
 .exd-caseseg button { font-family: var(--mono); font-size: 11.5px; padding: 5px 11px; }
 
-/* Pestañas de la columna de opciones: Output vs Export rules (patrón wk-pp-tabs) */
-.exd-tabs { margin-top: 0; }
+/* Pestañas de la columna de opciones: Output vs Export rules (patrón wk-pp-tabs).
+   Doc 101: sin encogerse — dentro de un contenedor con scroll y alto fijo (el
+   editor de Output settings) su `overflow-x` las dejaba en altura 0. */
+.exd-tabs { margin-top: 0; flex-shrink: 0; }
 
 /* ── Export rules · panel de la pestaña ───────────────────────────────────
    Dos grupos con encabezado pegajoso: los GENERADORES agregan objetos al .zip

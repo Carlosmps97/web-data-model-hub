@@ -12,6 +12,7 @@ import { invertBulk, preKey } from '@/features/modeler/lib/undoInvert';
 import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
+import RelationshipPhraseFields, { type PhraseValues } from './RelationshipPhraseFields';
 
 export interface SubcatDraft {
   parentTableId: string; childTableId: string; dropColumnId: string | null;
@@ -29,6 +30,8 @@ const NEW_SYMBOL = '__new__';
  * símbolo del grupo). ES-UN: identifying + 1:1 fijos (sin selects de
  * cardinalidad). Guard Erwin: una tabla es subtipo en UN solo grupo — el
  * chequeo corre draft-aware contra el pool global, no solo este canvas.
+ * Doc 98: las frases de relación (opcionales) de ESTA rama nacen en el mismo
+ * lote.
  */
 export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
   draft: SubcatDraft; onClose: (created: boolean) => void; pushToast: (m: string, k?: 'err') => void;
@@ -37,6 +40,7 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
   const [saving, setSaving] = useState(false);
   // null = chequeo global en vuelo; '' = libre; string = mensaje de bloqueo.
   const [blocked, setBlocked] = useState<string | null>(null);
+  const [phrases, setPhrases] = useState<PhraseValues>({ parentToChildPhrase: '', childToParentPhrase: '' });
 
   const cols = useMemo(() => diagram?.columns ?? [], [diagram]);
   const tables = useMemo(() => diagram?.tables ?? [], [diagram]);
@@ -117,6 +121,7 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
         identifying: true, parentCardinality: 'one', childCardinality: 'one',
         rows: resolutions, childCols,
         subcategory: { symbolId },
+        ...phrases,   // doc 98: mappingToBulk las limpia (en blanco no viajan)
       });
       await gov.recordChangesBulk(changes);
       // Undo (doc 50): misma inversa genérica del popup de relación (doc 47) —
@@ -222,6 +227,12 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
           </label>
         </div>
       </div>
+
+      <RelationshipPhraseFields
+        values={phrases}
+        onChange={(key, value) => setPhrases((p) => ({ ...p, [key]: value }))}
+        locked={saving}
+      />
 
       <div className="wk-props-field">
         <label>Key migration · the supertype's key becomes the subtype's key ({parentPks.length} column{parentPks.length === 1 ? '' : 's'}) · "Inherit" copies the parent's definition, UDPs and metadata</label>

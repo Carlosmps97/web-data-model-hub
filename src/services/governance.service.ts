@@ -230,6 +230,10 @@ export interface Relationship {
   /** Doc 53: aristas del mismo grupo comparten símbolo (círculo DERIVADO en el
    *  canvas — no es una entidad persistida; su posición vive en layout[id]). */
   subtypeSymbolId?: string | null;
+  /** Doc 98: frases de relación (Erwin: Parent-to-Child / Child-To-Parent
+   *  Phrase) — la etiqueta que el canvas dibuja sobre el wire. */
+  parentToChildPhrase?: string | null;
+  childToParentPhrase?: string | null;
 }
 /** Con `tableId`, sólo las relaciones que tocan esa tabla (slice server-side
  *  en ambos modos) — el pool global de relaciones no se baja entero. */
@@ -271,6 +275,9 @@ export interface TableLinkRow {
   childTableId: string; childTableName: string;
   parentCardinality: Cardinality; childCardinality: Cardinality;
   identifying: boolean;
+  /** Doc 98: frases de relación. */
+  parentToChildPhrase?: string | null;
+  childToParentPhrase?: string | null;
   pairs: TableLinkPair[];
   /** Canvases donde la relación es VISIBLE (contienen ambas tablas). */
   canvases: { id: string; name: string }[];

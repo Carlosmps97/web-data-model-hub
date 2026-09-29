@@ -13,10 +13,19 @@
  *    efectivo (`csvc.effective`), para que el dueño Y los revisores vean la
  *    estructura draft.
  *  - Sin changeset (producción/legacy) → endpoints directos de siempre.
+ *
+ * Doc 99 — escrituras del canvas EN FILA: cada guardado del canvas es «leer el
+ * doc efectivo + grabar el doc completo». Dos guardados casi simultáneos del
+ * mismo canvas (mover una tabla y trazar un wire) leían el mismo doc viejo y
+ * el segundo PUT borraba el cambio del primero. `inOrder` los encola por
+ * canvas: el segundo lee recién cuando el primero terminó de grabar.
  */
 import * as mod from './modeler.service';
 import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
+import { noteCanvasWrite, wholeLayout } from '../lib/canvasWrites';
+import { MAX_ROUTE_POINTS, cleanRoute, cleanRoutes, pruneRoutes, routeOf, validWireId } from '../lib/wireRoute';
+import type { RoutePoint, WireRoutes } from '../lib/wireRoute';
 import type { Drawing, Folder, Project, SubjectArea } from './modeler.service';
 
 /** Changeset para LECTURAS: cualquier modo con changeset activo (el visor
@@ -28,6 +37,37 @@ const writeCs = (): string | null =>
   useSessionStore.getState().openMode === 'editing' ? readCs() : null;
 
 const uid = () => crypto.randomUUID();
+
+/** Cola de escrituras POR canvas (doc 99). Un guardado que falla avisa a quien
+ *  lo pidió y no frena al siguiente; canvases distintos no se esperan. Toda
+ *  request lleva timeout (`apiFetch`), así que la cola no puede quedar colgada. */
+const saQueue = new Map<string, Promise<unknown>>();
+function inOrder<T>(saId: string, job: () => Promise<T>): Promise<T> {
+  const run = (saQueue.get(saId) ?? Promise.resolve()).then(job);
+  const tail = run.catch(() => undefined);
+  saQueue.set(saId, tail);
+  void tail.then(() => { if (saQueue.get(saId) === tail) saQueue.delete(saId); });
+  return run;
+}
+
+/** Graba el documento COMPLETO del canvas en la working copy y anota qué quedó
+ *  grabado: un diagrama pedido antes de esta escritura puede llegar con la
+ *  posición o el trazo viejos (`lib/canvasWrites`). Doc 100 (P6): con las
+ *  posiciones en píxeles enteros — también las que el canvas ya traía.
+ *  Devuelve lo grabado. */
+async function saveCanvas(cs: string, saId: string, doc: SubjectArea): Promise<SubjectArea> {
+  const out = doc.layout ? { ...doc, layout: wholeLayout(doc.layout) } : doc;
+  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...out });
+  noteCanvasWrite(cs, saId, out);
+  return out;
+}
+
+type Layout = SubjectArea['layout'];
+
+/** Avisos de algo que dejó de existir en la working copy. En inglés: llegan a
+ *  pantalla. */
+const CANVAS_GONE = 'This canvas is no longer in the working copy.';
+const FOLDER_GONE = 'This folder is no longer in the working copy.';
 
 // ── Lecturas efectivas ─────────────────────────────────────────────────────
 
@@ -62,7 +102,7 @@ export const getSubjectArea = async (saId: string): Promise<SubjectArea> => {
   const cs = readCs();
   if (!cs) return mod.getSubjectArea(saId);
   const sa = await fetchEffectiveSa(cs, saId);
-  if (!sa) throw new Error('Canvas no encontrado en el estado efectivo.');
+  if (!sa) throw new Error(CANVAS_GONE);
   return sa;
 };
 
@@ -127,7 +167,7 @@ export const createFolder = async (
 async function patchFolder(cs: string, id: string, patch: Partial<Folder>): Promise<Folder> {
   const cur = (await csvc.effective<Folder>(cs, 'folders', { ids: [id] }))
     .find((f) => f.id === id);
-  if (!cur) throw new Error('Folder no encontrado en el estado efectivo.');
+  if (!cur) throw new Error(FOLDER_GONE);
   const next = { ...cur, ...patch, id };
   await csvc.recordChange(cs, 'folders', id, 'upsert', { ...next });
   return next;
@@ -159,7 +199,7 @@ export const createSubjectArea = async (
   if (!cs) return mod.createSubjectArea(projectId, name, folderId);
   const sa: SubjectArea = {
     id: uid(), projectId, name, folderId,
-    tableIds: [], layout: {}, drawings: [], udpValues: {},
+    tableIds: [], layout: {}, drawings: [], udpValues: {}, routes: {},
   };
   await csvc.recordChange(cs, 'subject_areas', sa.id, 'upsert', { ...sa });
   return sa;
@@ -167,12 +207,12 @@ export const createSubjectArea = async (
 
 /** Upsert del canvas al changeset con el doc EFECTIVO completo + patch (el
  *  overlay reemplaza: un payload parcial perdería layout/tableIds al leer). */
-async function patchSa(cs: string, saId: string, patch: Partial<SubjectArea>): Promise<SubjectArea> {
-  const cur = await fetchEffectiveSa(cs, saId);
-  if (!cur) throw new Error('Canvas no encontrado en el estado efectivo.');
-  const next = { ...cur, ...patch, id: saId };
-  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...next });
-  return next;
+function patchSa(cs: string, saId: string, patch: Partial<SubjectArea>): Promise<SubjectArea> {
+  return inOrder(saId, async () => {
+    const cur = await fetchEffectiveSa(cs, saId);
+    if (!cur) throw new Error(CANVAS_GONE);
+    return saveCanvas(cs, saId, { ...cur, ...patch, id: saId });
+  });
 }
 
 export const updateSubjectArea = (
@@ -185,81 +225,164 @@ export const updateSubjectArea = (
 export const deleteSubjectArea = async (id: string): Promise<{ deleted: boolean }> => {
   const cs = writeCs();
   if (!cs) return mod.deleteSubjectArea(id);
-  await csvc.recordChange(cs, 'subject_areas', id, 'delete');
+  // En fila: un guardado pendiente del canvas que aterrizara DESPUÉS del
+  // borrado lo resucitaría (el cambio del draft volvería a ser un upsert).
+  await inOrder(id, async () => {
+    await csvc.recordChange(cs, 'subject_areas', id, 'delete');
+    noteCanvasWrite(cs, id, null);
+  });
   return { deleted: true };
 };
 
-export const setSubjectAreaTables = (saId: string, tableIds: string[]): Promise<SubjectArea> => {
-  const cs = writeCs();
-  return cs ? patchSa(cs, saId, { tableIds }) : mod.setSubjectAreaTables(saId, tableIds);
+// ── Miembros del canvas (doc 100, P5) ────────────────────────────────────
+// La lista COMPLETA de tablas y vistas se arma DENTRO de la cola, sobre el
+// canvas efectivo de ese momento. Armada afuera (con el diagrama en memoria o
+// una lectura previa), se perdía cualquier otra escritura de miembros que
+// cayera en medio: el Undo de sacar o borrar una tabla, o dos altas seguidas.
+
+export interface CanvasMembers { tableIds?: string[]; viewIds?: string[] }
+
+/** Vistas sobre las que se suma o se quita (doc 70): la lista EXPLÍCITA del
+ *  canvas; si todavía no tiene (canvas nuevo o legacy), la que se MUESTRA
+ *  (`shown`, la materializa el diagrama) — su primera escritura la vuelve
+ *  explícita, así una tabla que entra NO arrastra sus vistas. Sin ninguna de
+ *  las dos, las vistas no se tocan: la regla por fuentes las sigue mostrando. */
+const viewBase = (cur: SubjectArea, shown?: string[] | null): string[] | null =>
+  Array.isArray(cur.viewIds) ? cur.viewIds : (shown ?? null);
+
+/** SUMA miembros al canvas, con sus posiciones (`layout`) y trazos (`routes`)
+ *  en la MISMA escritura. Devuelve lo que REALMENTE entró: lo que ya estaba no
+ *  cuenta (la inversa del Undo no debe sacarlo). Sin nada que cambiar, no graba.
+ *  `shownViews` (ver `viewBase`): quien lo pasa fija la lista de vistas de un
+ *  canvas que todavía no la tiene. */
+export const addToCanvas = async (
+  saId: string, add: CanvasMembers & { layout?: Layout; routes?: WireRoutes }, shownViews?: string[] | null,
+): Promise<Required<CanvasMembers>> => {
+  const cs = requireWriteCs('Editing a canvas');
+  return inOrder(saId, async () => {
+    const cur = await fetchEffectiveSa(cs, saId);
+    if (!cur) throw new Error(CANVAS_GONE);
+    const tables = cur.tableIds ?? [];
+    const tableIds = [...new Set(add.tableIds ?? [])].filter((id) => !tables.includes(id));
+    const views = viewBase(cur, shownViews);
+    const viewIds = views ? [...new Set(add.viewIds ?? [])].filter((id) => !views.includes(id)) : [];
+    const layout = add.layout && Object.keys(add.layout).length ? add.layout : null;
+    const routes = cleanRoutes(add.routes);
+    const withRoutes = Object.keys(routes).length > 0;
+    if (!tableIds.length && !viewIds.length && !layout && !withRoutes) return { tableIds, viewIds };
+    const next: SubjectArea = { ...cur, id: saId };
+    if (tableIds.length) next.tableIds = [...tables, ...tableIds];
+    if (views && (viewIds.length || !Array.isArray(cur.viewIds))) next.viewIds = [...views, ...viewIds];
+    if (layout) next.layout = { ...(cur.layout ?? {}), ...layout };
+    if (withRoutes) next.routes = { ...cleanRoutes(cur.routes), ...routes };
+    await saveCanvas(cs, saId, next);
+    return { tableIds, viewIds };
+  });
 };
 
-/** Doc 70: membresía de VISTAS del canvas (lista completa; el overlay
- *  reemplaza). Changeset-aware como `setSubjectAreaTables`. */
-export const setSubjectAreaViews = (saId: string, viewIds: string[]): Promise<SubjectArea> => {
-  const cs = writeCs();
-  return cs ? patchSa(cs, saId, { viewIds }) : mod.setSubjectAreaViews(saId, viewIds);
-};
-
-/** Doc 70: tablas Y vistas del canvas en UNA escritura (import con vistas,
- *  Undo del import). Con changeset es un solo upsert del doc completo; sin
- *  changeset, un PUT por lista presente. */
-export const setSubjectAreaMembers = async (
-  saId: string, patch: { tableIds?: string[]; viewIds?: string[] },
-): Promise<SubjectArea> => {
-  const cs = writeCs();
-  if (cs) return patchSa(cs, saId, patch);
-  let sa: SubjectArea | null = null;
-  if (patch.tableIds) sa = await mod.setSubjectAreaTables(saId, patch.tableIds);
-  if (patch.viewIds) sa = await mod.setSubjectAreaViews(saId, patch.viewIds);
-  return sa ?? mod.getSubjectArea(saId);
-};
-
-/** Saca UNA tabla del canvas: la quita de `tableIds` Y del `layout` (si sólo se
- *  quitara de tableIds, quedaría un nodo fantasma en layout → audit C9b).
- *  Doc 70: `viewIds` (opcional) fija la membresía de vistas resultante — el
- *  store la calcula sin las vistas que quedan huérfanas — y limpia también su
- *  layout. Changeset-aware; requiere versión activa (gateado por canEdit). */
-export const removeTableFromCanvas = async (saId: string, tableId: string, viewIds?: string[]): Promise<void> => {
-  const cs = writeCs();
-  if (!cs) throw new Error('An active version is required to remove a table.');
-  const cur = await fetchEffectiveSa(cs, saId);
-  if (!cur) return;
-  const tableIds = (cur.tableIds ?? []).filter((t) => t !== tableId);
-  const layout = { ...(cur.layout ?? {}) };
-  delete layout[tableId];
-  const next: SubjectArea = { ...cur, tableIds, layout, id: saId };
-  if (viewIds) {
-    const keep = new Set(viewIds);
-    for (const vid of cur.viewIds ?? []) if (!keep.has(vid)) delete layout[vid];
-    next.viewIds = viewIds;
-  }
-  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...next });
-};
-
-/** Doc 70: saca UNA vista del canvas (membresía + layout); la vista sigue
- *  existiendo en el modelo y en los demás canvases. */
-export const removeViewFromCanvas = async (saId: string, viewId: string, viewIds: string[]): Promise<void> => {
-  const cs = writeCs();
-  if (!cs) throw new Error('An active version is required to remove a view.');
-  const cur = await fetchEffectiveSa(cs, saId);
-  if (!cur) return;
-  const layout = { ...(cur.layout ?? {}) };
-  delete layout[viewId];
-  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...cur, viewIds, layout, id: saId });
+/** SACA miembros del canvas CON su posición (sin ella quedaría un nodo
+ *  fantasma en el layout, audit C9b), y los trazos de `dropRouteIds` (los
+ *  wires de una tabla que sale: si vuelve en otra posición ya no calzarían,
+ *  doc 99). La tabla o vista sigue en el modelo y en los demás canvases. Un
+ *  canvas que ya no está en la working copy no se toca (borrar una tabla
+ *  recorre todos los canvases donde estaba). */
+export const removeFromCanvas = async (
+  saId: string, rm: CanvasMembers & { dropRouteIds?: string[] }, shownViews?: string[] | null,
+): Promise<void> => {
+  const cs = requireWriteCs('Editing a canvas');
+  await inOrder(saId, async () => {
+    const cur = await fetchEffectiveSa(cs, saId);
+    if (!cur) return;
+    const next: SubjectArea = { ...cur, id: saId };
+    const gone = new Set<string>();
+    const tables = cur.tableIds ?? [];
+    const outTables = (rm.tableIds ?? []).filter((id) => tables.includes(id));
+    if (outTables.length) {
+      next.tableIds = tables.filter((id) => !outTables.includes(id));
+      outTables.forEach((id) => gone.add(id));
+    }
+    const views = rm.viewIds?.length ? viewBase(cur, shownViews) : null;
+    const outViews = views ? rm.viewIds!.filter((id) => views.includes(id)) : [];
+    if (outViews.length) {
+      next.viewIds = views!.filter((id) => !outViews.includes(id));
+      outViews.forEach((id) => gone.add(id));
+    }
+    let changed = gone.size > 0;
+    if (gone.size && cur.layout) {
+      next.layout = Object.fromEntries(Object.entries(cur.layout).filter(([id]) => !gone.has(id)));
+    }
+    if (rm.dropRouteIds?.length && cur.routes) {
+      const routes = cleanRoutes(cur.routes);
+      for (const id of rm.dropRouteIds) if (routeOf(routes, id)) { delete routes[id]; changed = true; }
+      next.routes = routes;
+    }
+    if (changed) await saveCanvas(cs, saId, next);
+  });
 };
 
 export const setSubjectAreaLayout = async (
   saId: string, layout: Record<string, { x: number; y: number }>,
 ): Promise<SubjectArea> => {
   const cs = writeCs();
-  if (!cs) return mod.setSubjectAreaLayout(saId, layout);
-  // El PUT directo MERGEA (M3a): replicamos el merge sobre el layout efectivo.
-  const cur = await fetchEffectiveSa(cs, saId);
-  if (!cur) throw new Error('Canvas no encontrado en el estado efectivo.');
-  const next = { ...cur, layout: { ...(cur.layout ?? {}), ...layout }, id: saId };
-  await csvc.recordChange(cs, 'subject_areas', saId, 'upsert', { ...next });
-  return next;
+  if (!cs) return mod.setSubjectAreaLayout(saId, wholeLayout(layout));
+  return inOrder(saId, async () => {
+    // El PUT directo MERGEA (M3a): replicamos el merge sobre el layout efectivo.
+    const cur = await fetchEffectiveSa(cs, saId);
+    if (!cur) throw new Error(CANVAS_GONE);
+    return saveCanvas(cs, saId, { ...cur, layout: { ...(cur.layout ?? {}), ...layout }, id: saId });
+  });
+};
+
+// ── Trazos manuales de wires (doc 99) ──────────────────────────────────────
+// Viajan en el documento del canvas, SIEMPRE por la working copy (no hay
+// escritura directa): se versionan igual que las posiciones.
+
+/** Cambia los trazos sobre el canvas EFECTIVO (saneado: un trazo corrupto de
+ *  la BD no vuelve como payload) y graba el doc completo. */
+function patchRoutes(cs: string, saId: string, change: (cur: WireRoutes) => WireRoutes): Promise<SubjectArea> {
+  return inOrder(saId, async () => {
+    const cur = await fetchEffectiveSa(cs, saId);
+    if (!cur) throw new Error(CANVAS_GONE);
+    return saveCanvas(cs, saId, { ...cur, routes: change(cleanRoutes(cur.routes)), id: saId });
+  });
+}
+
+/** Trazo de UN wire del canvas. `null` o lista vacía lo quita (el wire vuelve
+ *  al camino automático); cualquier otra cosa que no sea una lista de puntos
+ *  se rechaza — un `undefined` que llegara por error no borra un trazo.
+ *  `validIds` = wires que existen hoy en el canvas: los trazos de los demás
+ *  (relación borrada) se podan en la misma escritura. */
+export const setWireRoute = async (
+  saId: string, wireId: string, points: RoutePoint[] | null, validIds?: Iterable<string>,
+): Promise<SubjectArea> => {
+  const cs = requireWriteCs('Editing a wire route');
+  if (!validWireId(wireId)) throw new Error('Invalid wire id.');
+  if (points !== null && !Array.isArray(points)) throw new Error('Invalid wire route: expected a list of points.');
+  if (points && points.length > MAX_ROUTE_POINTS) {
+    throw new Error(`Invalid wire route: a wire can have at most ${MAX_ROUTE_POINTS} points.`);
+  }
+  const route = points?.length ? cleanRoute(points) : [];
+  if (route === null) throw new Error('Invalid wire route: every point needs a finite x and y.');
+  return patchRoutes(cs, saId, (cur) => {
+    const next = { ...cur };
+    if (route.length) next[wireId] = route; else delete next[wireId];
+    return validIds ? pruneRoutes(next, validIds) : next;
+  });
+};
+
+/** Auto-arrange de un canvas: posiciones nuevas (MERGEA, M3a) y trazos en UNA
+ *  sola escritura. Por defecto los trazos se REINICIAN — con todos los bloques
+ *  en otro sitio ya no calzan —; el Undo pasa los anteriores para reponerlos. */
+export const arrangeSubjectArea = async (
+  saId: string, layout: Record<string, { x: number; y: number }>, routes: WireRoutes = {},
+): Promise<SubjectArea> => {
+  const cs = writeCs();
+  if (!cs) return mod.setSubjectAreaLayout(saId, wholeLayout(layout));
+  return inOrder(saId, async () => {
+    const cur = await fetchEffectiveSa(cs, saId);
+    if (!cur) throw new Error(CANVAS_GONE);
+    return saveCanvas(cs, saId, { ...cur, layout: { ...(cur.layout ?? {}), ...layout }, routes: cleanRoutes(routes), id: saId });
+  });
 };
 
 export const setSubjectAreaDrawings = (saId: string, drawings: Drawing[]): Promise<SubjectArea> => {

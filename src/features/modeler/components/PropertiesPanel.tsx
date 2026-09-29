@@ -7,6 +7,7 @@ import { useModelerStore } from '@/store/useModelerStore';
 import { pushUndo } from '@/store/useUndoStore';
 import AuditHistory from './AuditHistory';
 import UdpAssign from './UdpAssign';
+import RelationshipPhraseLine from './RelationshipPhraseLine';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
 import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun, facetNouns } from '@/lib/facets';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
@@ -675,6 +676,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                       {CARD_LBL[r.parentCardinality]} : {CARD_LBL[r.childCardinality]}{r.identifying ? ' · identifying' : ''}{r.pairs.length > 1 ? ` · ${r.pairs.length} pairs` : ''}
                     </span>
                   </div>
+                  <RelationshipPhraseLine rel={r} />
                 </div>
               );
             })}
@@ -707,6 +709,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                             {CARD_LBL[l.parentCardinality]} : {CARD_LBL[l.childCardinality]}{l.identifying ? ' · identifying' : ''}{l.pairs.length > 1 ? ` · ${l.pairs.length} pairs` : ''}
                           </span>
                         </div>
+                        <RelationshipPhraseLine rel={l} />
                         <div className="wk-pp-link-card">
                           <span className="rd-small" style={{ color: 'var(--muted)' }}>
                             in {l.canvases.length > 0 ? l.canvases.map((c) => c.name).join(' · ') : 'no shared canvas'}

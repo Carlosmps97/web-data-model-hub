@@ -28,9 +28,8 @@ vi.mock('@/services/views.service', () => ({
   deleteView: vi.fn(),
 }));
 vi.mock('@/features/modeler/services/structure.service', () => ({
-  removeTableFromCanvas: vi.fn(async (saId: string) => { order.push(`canvas:${saId}`); }),
-  getSubjectArea: vi.fn(async () => ({ id: 'sa1', tableIds: ['tX'], layout: {} })),
-  setSubjectAreaTables: vi.fn(async () => ({})),
+  removeFromCanvas: vi.fn(async (saId: string) => { order.push(`canvas:${saId}`); }),
+  addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
 }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(async () => { throw new Error('sin canvas en el test'); }),
@@ -125,7 +124,8 @@ describe('useModelerStore.createTableFromSources — tabla+columnas en lote', ()
     expect(cols.map((c) => (c.payload as { ordinal: number }).ordinal)).toEqual([0, 1]);
     expect(cols.every((c) => (c.payload as { tableId: string }).tableId === tabla.entityId)).toBe(true);
     // La membresía al canvas sigue igual (fuera del lote, colección de estructura).
-    expect(struct.setSubjectAreaTables).toHaveBeenCalledWith('sa1', ['tX', tabla.entityId]);
+    // Doc 100: «agrega esta tabla»; la lista completa la arma el servicio en su cola.
+    expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { tableIds: [tabla.entityId] });
     expect(useModelerStore.getState().selectedTableId).toBe(tabla.entityId);
   });
 });

@@ -12,6 +12,7 @@ import {
   type RelationshipPair,
 } from '@/services/governance.service';
 import { pkFirstOrdinals } from './columnOrder';
+import { cleanPhrase } from './relationshipLabel';
 
 export type RoleNamePlan =
   | { kind: 'rename'; columnId: string }
@@ -127,6 +128,10 @@ export interface MappingBulkInput {
   /** Doc 53: presencia = la relación es una SUBCATEGORÍA del símbolo dado
    *  (el caller pasa identifying=true y cardinalidades one/one). */
   subcategory?: { symbolId: string };
+  /** Doc 98: frases de relación. Crear las toma del popup; Sync pasa las
+   *  VIGENTES — el lote re-emite la relación campo por campo. */
+  parentToChildPhrase?: string | null;
+  childToParentPhrase?: string | null;
 }
 
 /**
@@ -200,14 +205,39 @@ export function mappingToBulk(input: MappingBulkInput): {
       if (ord.has(c.id) && !touched.has(c.id)) changes.push(bulk.createColumn({ ...c, ordinal: ord.get(c.id)! }));
     }
   }
+  // Doc 98: las frases viajan LIMPIAS y solo si existen (sin frase, la
+  // relación sale como siempre — el backend lee la llave ausente como null).
+  const p2c = cleanPhrase(input.parentToChildPhrase);
+  const c2p = cleanPhrase(input.childToParentPhrase);
   const relationship: Relationship = {
     id: input.relId, parentTableId: input.parentTableId, childTableId: input.childTableId,
     pairs, parentCardinality: input.parentCardinality, childCardinality: input.childCardinality,
     identifying,
     ...(input.subcategory ? { subcategory: true, subtypeSymbolId: input.subcategory.symbolId } : {}),
+    ...(p2c ? { parentToChildPhrase: p2c } : {}),
+    ...(c2p ? { childToParentPhrase: c2p } : {}),
   };
   changes.push(bulk.upsertRelationship(relationship));
   return { changes, createdCols, relationship };
+}
+
+/**
+ * Entrada de `mappingToBulk` para RE-EMITIR una relación que ya existe («Sync
+ * with parent key»): todo lo que vive a nivel de RELACIÓN sale de `rel` — id,
+ * extremos, tipo, cardinalidades, frases (doc 98) y símbolo de subcategoría —
+ * y solo los pares se rearman desde `rows`. Un campo nuevo de `Relationship`
+ * se agrega ACÁ: es el único punto que la reconstruye campo por campo. Pura.
+ */
+export function syncMappingInput(rel: Relationship, rows: MappingResolution[],
+                                 childCols: CanonicalColumn[]): MappingBulkInput {
+  return {
+    relId: rel.id, parentTableId: rel.parentTableId, childTableId: rel.childTableId,
+    identifying: rel.identifying,
+    parentCardinality: rel.parentCardinality, childCardinality: rel.childCardinality,
+    rows, childCols,
+    parentToChildPhrase: rel.parentToChildPhrase, childToParentPhrase: rel.childToParentPhrase,
+    ...(rel.subcategory && rel.subtypeSymbolId ? { subcategory: { symbolId: rel.subtypeSymbolId } } : {}),
+  };
 }
 
 /** Drift de una relación vs la llave EFECTIVA del padre: `missing` = PKs sin

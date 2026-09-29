@@ -27,9 +27,8 @@ vi.mock('@/services/views.service', () => ({
   deleteView: vi.fn(),
 }));
 vi.mock('@/features/modeler/services/structure.service', () => ({
-  removeTableFromCanvas: vi.fn(async () => {}),
-  getSubjectArea: vi.fn(async () => ({ id: 'sa1', tableIds: [], layout: {} })),
-  setSubjectAreaTables: vi.fn(async () => ({})),
+  removeFromCanvas: vi.fn(async () => {}),
+  addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
 }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(async () => { throw new Error('sin canvas en el test'); }),

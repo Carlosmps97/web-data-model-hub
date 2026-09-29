@@ -171,7 +171,8 @@ function sceneContent(scene: Scene, scale?: number): { stream: string; W: number
       case 'text': {
         const { f, wf } = fontOf(i);
         const len = [...i.s].length;
-        const width = (wf * i.size * len + (i.ls ?? 0) * Math.max(0, len - 1)) * S;
+        // Doc 98: `i.wf` = ancho medio propio del texto (frases en oración).
+        const width = ((i.wf ?? wf) * i.size * len + (i.ls ?? 0) * Math.max(0, len - 1)) * S;
         const dx = i.anchor === 'end' ? width : i.anchor === 'middle' ? width / 2 : 0;
         const bytes = escText(winAnsiEncode(i.s));
         let s = `q BT ${rgb(i.color, scene.bg)} rg /${f} ${n2(i.size * S)} Tf`;

@@ -176,6 +176,9 @@ export interface DiffEntity {
   /** true: la entidad cambió en PRODUCCIÓN después de que esta versión la editó
    *  (al publicar, este delta la pisaría). */
   conflict?: boolean;
+  /** Doc 100 (P3): producción la BORRÓ después de abrirse esta versión — al
+   *  publicar vuelve a la vida. Siempre acompañado de `conflict`. */
+  restores?: boolean;
 }
 
 /** Buckets de cambios de una colección dentro del diff. */
