@@ -22,7 +22,7 @@ type Mode = 'blank' | 'import';
  *    editable) + Schema (free-text, NO dropdown). Sin "Add a primary key".
  *  - **Import existing**: busca el pool universal con filtro por schema y agrega
  *    tablas al canvas (universal → propaga a todos los módulos que la referencian).
- * Usa el `Dialog` con backdrop "canvas" (blur solo del lienzo).
+ * Usa el `Dialog` con backdrop "canvas" (oscurece solo el lienzo).
  */
 export default function NewTableModal({ onClose, onCreate }: {
   onClose: () => void;

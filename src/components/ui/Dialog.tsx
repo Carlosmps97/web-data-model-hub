@@ -21,12 +21,12 @@ export interface DialogProps {
   /**
    * Backdrop coverage:
    *  - 'screen' (default): dims the whole viewport.
-   *  - 'canvas': dims+blurs ONLY the canvas region (below the chrome), leaving
+   *  - 'canvas': dims ONLY the canvas region (below the chrome), leaving
    *    the TopNav (and the canvas toolbar) sharp — the design's popup pattern.
    */
   backdrop?: DialogBackdrop;
   /**
-   * For backdrop='canvas': px from the top of the viewport where the blur
+   * For backdrop='canvas': px from the top of the viewport where the scrim
    * starts (the height of the sharp chrome above the canvas). Defaults to 52
    * (TopNav only). Pass 116 when a 64px canvas toolbar is also present.
    */
@@ -34,10 +34,12 @@ export interface DialogProps {
 }
 
 /**
- * Dialog — design-system modal (DMH-Erwin). Supports the **canvas-only blur**
- * pattern: with `backdrop="canvas"` the scrim (`rgba(16,27,48,.42)` +
- * `blur(2px)`) covers ONLY the canvas region below the chrome, so the TopNav and
- * toolbar stay crisp and faint table cards remain visible through the blur.
+ * Dialog — design-system modal (DMH-Erwin). Supports the **canvas-only scrim**
+ * pattern: with `backdrop="canvas"` the scrim (`rgba(16,27,48,.42)`) covers
+ * ONLY the canvas region below the chrome, so the TopNav and toolbar stay crisp
+ * and the table cards remain visible through it. No `backdrop-filter` blur
+ * (2026-09-29): re-blurring the canvas on every frame made the whole browser
+ * slow on machines without GPU acceleration.
  *
  * ESC, backdrop click and the close button all dismiss. Rendered via a portal
  * to document.body so it overlays regardless of where it's mounted.

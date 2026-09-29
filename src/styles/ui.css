@@ -101,7 +101,7 @@ select.rd-input { padding-top: 0; padding-bottom: 0; height: 38px; }
 .rd-swatch { border-radius: var(--r-sm); border: 1px solid rgba(0,0,0,.06); }
 
 /* ============================================================ Modal */
-.dmh-backdrop { position: fixed; inset: 0; background: rgba(20,22,40,.4); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; z-index: 200; animation: dmh-fade .15s ease; padding: 30px; }
+.dmh-backdrop { position: fixed; inset: 0; background: rgba(20,22,40,.4); display: flex; align-items: center; justify-content: center; z-index: 200; animation: dmh-fade .15s ease; padding: 30px; }
 /* Confirmaciones/prompts (DialogHost, ConfirmDialog): SIEMPRE por encima de
    cualquier modal, incluido el Dialog del design-system (z-index 300). */
 .dmh-backdrop--top { z-index: 400; }

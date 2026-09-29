@@ -3,7 +3,7 @@
  *
  * Opened from the canvas toolbar's **Export DDL** action. Renders over the
  * design-system Dialog with the **canvas** backdrop (only the modeling surface
- * below the 64px toolbar is dimmed+blurred; the toolbar stays sharp).
+ * below the 64px toolbar is dimmed; the toolbar stays sharp).
  *
  * Generates **Databricks** or **Oracle** DDL live from the active diagram
  * (canonical tables/columns/relationships), con la selección de tablas y el

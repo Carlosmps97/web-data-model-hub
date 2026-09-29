@@ -8,7 +8,7 @@
    (--primary, --ink, --bg, --border, --muted, --success, …) are KEPT
    STABLE and remapped to the new palette so every legacy class keeps
    working. New design tokens are ADDED below (raw hex aliases + the
-   card/popup shadows + the canvas/blur tokens).
+   card/popup shadows + the canvas/scrim tokens).
    Tokens live on :root so every class works without a wrapper.
    ============================================================ */
 
@@ -70,9 +70,8 @@
   --canvas-bg:       #FBFCFD;   /* modeling surface */
   --canvas-dot:      #D6DBE6;   /* dotted grid */
 
-  /* Popup backdrop — dims+blurs ONLY the canvas region */
+  /* Popup backdrop — dims ONLY the canvas region (no blur: see components.css) */
   --blur-overlay:    rgba(16,27,48,0.42);
-  --blur-amount:     2px;
 
   /* ── Legacy-compatible aliases (KEEP these names) ───────────────── */
 

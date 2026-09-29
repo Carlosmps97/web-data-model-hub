@@ -102,9 +102,10 @@
   background: var(--blur-overlay);
   animation: dmh-dialog-fade .15s ease;
 }
-/* canvas variant: backdrop-filter blurs ONLY the region it covers (set via inline
-   top/left/right/bottom), so the TopNav + toolbar above it stay sharp. */
-.dmh-dialog-backdrop--canvas { backdrop-filter: blur(var(--blur-amount)); -webkit-backdrop-filter: blur(var(--blur-amount)); }
+/* canvas variant: dims ONLY the region it covers (set via inline
+   top/left/right/bottom), so the TopNav + toolbar above it stay sharp.
+   2026-09-29: sin `backdrop-filter` — re-difuminar el canvas en cada cuadro
+   saturaba el navegador sin aceleración por GPU (popups lentos en Model). */
 
 .dmh-dialog {
   background: var(--surface); border: 1px solid var(--border-3);

@@ -15,7 +15,7 @@ interface ModalProps {
 }
 
 /**
- * Shared modal shell — blurred scrim + header (icon · title · subtitle · close)
+ * Shared modal shell — dimmed scrim (no blur, see Dialog) + header (icon · title · subtitle · close)
  * + scrollable body + right-aligned footer. Mirrors `.dmh-modal` from the
  * Aurora prototype (`app.css`). ESC closes.
  */

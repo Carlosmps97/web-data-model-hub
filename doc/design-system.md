@@ -147,8 +147,7 @@ Definidos en `src/styles/tokens.css`. Hay dos capas: la **paleta cruda** (hex ex
 | `--page-bg` | `#EDEFF3` | Fondo de la app |
 | `--canvas-bg` | `#FBFCFD` | Superficie de modelado |
 | `--canvas-dot` | `#D6DBE6` | Grilla punteada |
-| `--blur-overlay` | `rgba(16,27,48,0.42)` | Scrim de popup |
-| `--blur-amount` | `2px` | Blur del scrim |
+| `--blur-overlay` | `rgba(16,27,48,0.42)` | Scrim de popup (solo oscurece; el nombre es histórico) |
 
 ### 3.2 Alias legacy (nombres estables)
 
@@ -485,7 +484,7 @@ En pantallas con inline (Admin) el color se deriva por hash con `avatarColor(see
 
 ### 7.3 Dialog
 
-Modal del DS con un patrón distintivo: **blur solo del lienzo**. Renderiza vía `createPortal` a `document.body`. Cierra con ESC, click en el backdrop o el botón de cerrar.
+Modal del DS con un patrón distintivo: **scrim solo sobre el lienzo**. Renderiza vía `createPortal` a `document.body`. Cierra con ESC, click en el backdrop o el botón de cerrar.
 
 | Prop | Tipo | Default | Notas |
 |---|---|---|---|
@@ -496,10 +495,10 @@ Modal del DS con un patrón distintivo: **blur solo del lienzo**. Renderiza vía
 | `onClose` | `() => void` | — | ESC / backdrop / cerrar |
 | `footer` | `ReactNode` | — | Acciones alineadas a la derecha |
 | `width` | `number` | `560` | Ancho en px |
-| `backdrop` | `'screen' \| 'canvas'` | `'screen'` | screen=oscurece todo; canvas=oscurece+difumina solo el lienzo |
-| `canvasTop` | `number` | `52` | Px desde arriba donde arranca el blur (52 = solo TopNav; 116/136 si hay toolbar de canvas) |
+| `backdrop` | `'screen' \| 'canvas'` | `'screen'` | screen=oscurece todo; canvas=oscurece solo el lienzo |
+| `canvasTop` | `number` | `52` | Px desde arriba donde arranca el scrim (52 = solo TopNav; 116/136 si hay toolbar de canvas) |
 
-El modo `canvas` aplica `rgba(16,27,48,.42)` + `blur(2px)` **solo** en la región del lienzo, dejando el TopNav y la toolbar nítidos y las table-cards visibles a través del blur.
+El modo `canvas` aplica `rgba(16,27,48,.42)` **solo** en la región del lienzo, dejando el TopNav y la toolbar nítidos y las table-cards visibles a través del scrim. **Sin `backdrop-filter`** (2026-09-29): re-difuminar el lienzo en cada cuadro volvía lento todo el navegador en equipos sin aceleración por GPU; `src/architecture.test.ts` lo fija.
 
 ```tsx
 import { Dialog, Button } from '@/components/ui';
@@ -569,7 +568,7 @@ const [mode, setMode] = useState<'table' | 'column'>('table');
 
 ### 7.6 Modal (legacy)
 
-Shell de modal previo: scrim difuminado (`.dmh-backdrop`) + header (ícono · título · subtítulo · cerrar) + cuerpo scrolleable + footer a la derecha. Usa el set **Icon.tsx** por nombre. ESC cierra.
+Shell de modal previo: scrim que oscurece, sin difuminado (`.dmh-backdrop`, ver §7.3) + header (ícono · título · subtítulo · cerrar) + cuerpo scrolleable + footer a la derecha. Usa el set **Icon.tsx** por nombre. ESC cierra.
 
 | Prop | Tipo | Notas |
 |---|---|---|
@@ -589,7 +588,7 @@ import { Modal } from '@/components/ui';
 </Modal>
 ```
 
-> **Cuándo usar cuál:** para pantallas nuevas del DS se prefiere **`Dialog`** (icono lucide, patrón canvas-blur, tokens nuevos). **`Modal`** sigue vigente para pantallas que ya lo usan y para el set de íconos por nombre.
+> **Cuándo usar cuál:** para pantallas nuevas del DS se prefiere **`Dialog`** (icono lucide, patrón scrim de lienzo, tokens nuevos). **`Modal`** sigue vigente para pantallas que ya lo usan y para el set de íconos por nombre.
 
 ### 7.7 ConfirmDialog y diálogos imperativos
 

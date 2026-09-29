@@ -3,7 +3,7 @@
  *
  * Opened from the canvas toolbar's green **Publish** button. Renders over the
  * design-system Dialog with the **canvas** backdrop, so only the modeling
- * surface below the 64px toolbar is dimmed+blurred while the toolbar stays
+ * surface below the 64px toolbar is dimmed while the toolbar stays
  * sharp (the design's popup pattern). The user fills a Title + Description,
  * picks one or more **reviewers** (toggle chips with avatar + name), and sends
  * the working copy (`activeChangesetId`) for approval via
