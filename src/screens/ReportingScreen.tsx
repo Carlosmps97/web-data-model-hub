@@ -999,9 +999,9 @@ export function ReportingScreen({
                 onToggle={(v) => toggleSet<string>(setAreaSel, v)}
               />
               {anyFilter && (
-                <button type="button" className="dmh-rep-clear" onClick={clearFilters}>
+                <Button variant="secondary" onClick={clearFilters}>
                   Clear
-                </button>
+                </Button>
               )}
               <span className="dmh-rep-selcount">
                 <strong>{selectedCount.toLocaleString()} selected</strong> ·{' '}

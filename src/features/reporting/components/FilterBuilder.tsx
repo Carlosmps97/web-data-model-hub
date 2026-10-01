@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
+import { Button } from '@/components/ui';
 import { getFacets, isFilterableField, shouldFetchFacets, type Condition, type FieldDef, type Op, type ViewKey, type WhereGroup } from '../query.service';
 import { betweenPart, conditionDefaultValue } from '../lib/reportBuilder';
 
@@ -115,7 +116,7 @@ export default function FilterBuilder({ projectId, group, catalog, from, onChang
         isGroup(c)
           ? <div key={i} style={{ marginBottom: 6 }}><FilterBuilder projectId={projectId} group={c} catalog={catalog} from={from} depth={depth + 1}
               onChange={(g) => set(group.conditions.map((x, j) => (j === i ? g : x)))} />
-              <button onClick={() => set(group.conditions.filter((_, j) => j !== i))} style={{ marginTop: 4, border: 'none', background: 'transparent', color: '#C0392B', fontSize: 11.5, cursor: 'pointer' }}>remove group</button></div>
+              <Button variant="danger" size="sm" style={{ marginTop: 4 }} onClick={() => set(group.conditions.filter((_, j) => j !== i))}>Remove group</Button></div>
           : <ConditionRow key={i} projectId={projectId} cond={c} catalog={catalog} from={from}
               onChange={(nc) => set(group.conditions.map((x, j) => (j === i ? nc : x)))}
               onRemove={() => set(group.conditions.filter((_, j) => j !== i))} />

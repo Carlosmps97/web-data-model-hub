@@ -56,7 +56,7 @@ export default function ModelPropertiesModal({ subjectArea, canEdit, onClose, pu
       onClose={onClose}
       footer={(
         <>
-          <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
+          <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Cancel</button>
           <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={!canEdit || busy} onClick={() => void save()}>
             {busy ? 'Saving…' : 'Save'}
           </button>

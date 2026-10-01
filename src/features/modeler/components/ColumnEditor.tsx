@@ -183,7 +183,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   return (
     <Modal title={viewMode === 'logical' ? 'New attribute' : 'New column'} icon="columns" onClose={onClose}
       footer={<>
-        <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
+        <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Cancel</button>
         <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={submit}>Add</button>
       </>}>
       <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Attribute name (e.g. monto deuda dólares)' : 'Column name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(mode === 'logical' ? sanitizeLogicalName(e.target.value) : e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} style={{ width: '100%' }} />

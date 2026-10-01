@@ -214,3 +214,48 @@ function byLabel(tree: unknown, label: string) {
   if (!hit) throw new Error(`no button «${label}»`);
   return hit;
 }
+
+describe('Regla de layout (doc 107): particiones solo en el PARTITIONED BY', () => {
+  const LAYOUT: DdlRule = {
+    ...RULE, id: 'l1', name: 'particiones_en_partitioned_by', target: 'table', condition: '', udpRefs: [],
+    action: { layout: { partitionColumns: 'partitioned-by', partitionUdp: 'Particion' } }, appliesTo: ['ddl.tabla_fisica'],
+  };
+  /** El panel de la acción (sub-componente) renderizado con sus props reales. */
+  const actionPanel = (tree: unknown, onChange?: (a: Record<string, unknown>) => void) => {
+    const el = [...walk(tree)].find((e) => typeof e.type === 'function' && e.type.name === 'RuleAction')!;
+    const render = el.type as (p: unknown) => unknown;
+    resetFake(null, { keepRefs: true });            // sus hooks arrancan con sus valores iniciales
+    return render(onChange ? { ...el.props, onChange } : el.props);
+  };
+
+  it('ofrece «Only in PARTITIONED BY» (primera opción) y la muestra elegida', async () => {
+    const select = [...walk(actionPanel(await open(LAYOUT)))].find((e) => e.type === 'select')!;
+    expect(select.props.value).toBe('partitioned-by');
+    const opts = [...walk(select)].filter((e) => e.type === 'option').map((o) => [o.props.value, textOf(o)]);
+    expect(opts).toEqual([
+      ['partitioned-by', 'Only in PARTITIONED BY, with their data type'],
+      ['last', 'Emit at the end of the CREATE TABLE'],
+      ['keep', 'Keep the physical order'],
+    ]);
+  });
+
+  it('revisión: una regla sin «partitionColumns» se muestra y se guarda como el motor la aplica (orden físico)', async () => {
+    const onChange = vi.fn();
+    const legacy: DdlRule = { ...LAYOUT, action: { layout: { partitionOrderUdp: 'Particion' } } };
+    const panel = actionPanel(await open(legacy), onChange);
+    const select = [...walk(panel)].find((e) => e.type === 'select')!;
+    expect(select.props.value).toBe('keep');
+    const udp = [...walk(panel)].find((e) => e.type === 'input' && e.props.list === 'ddl-column-udps')!;
+    (udp.props.onChange as (e: { target: { value: string } }) => void)({ target: { value: 'Particion' } });
+    expect(onChange).toHaveBeenCalledWith({ layout: { partitionColumns: 'keep', partitionUdp: 'Particion' } });
+  });
+
+  it('una acción de layout nueva arranca con el formato de la semilla', async () => {
+    const onChange = vi.fn();
+    const tree = await open({ ...LAYOUT, action: { tblproperties: { a: 'b' } } });
+    const seg = [...walk(actionPanel(tree, onChange))].find((e) => typeof e.type === 'function' && e.type.name === 'Segmented')!;
+    (seg.props.onPick as (v: string) => void)('layout');
+    expect(onChange).toHaveBeenCalledWith({ layout: { partitionColumns: 'partitioned-by', partitionUdp: 'Particion' } });
+  });
+});
+

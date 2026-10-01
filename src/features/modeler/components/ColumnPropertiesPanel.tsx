@@ -517,7 +517,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
           </div>
           {canEdit && (
             <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5' }}>
-              <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'var(--error, #C4314B)' }} disabled={flagsBusy} onClick={onDelete}>
+              <button className="rd-btn rd-btn-danger rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={flagsBusy} onClick={onDelete}>
                 <Icon name="trash" size={12} /> Delete {nouns.member}…
               </button>
             </div>

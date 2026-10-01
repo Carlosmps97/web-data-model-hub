@@ -218,7 +218,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
       onClose={() => void close()}
       footer={
         <>
-          <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy} onClick={() => void close()}>
+          <button className="rd-btn rd-btn-secondary rd-btn-sm" disabled={busy} onClick={() => void close()}>
             {staged.length ? 'Cancel' : 'Close'}
           </button>
           <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy || staged.length === 0} onClick={() => void save()}>
@@ -240,7 +240,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
             <button type="button" className={newKind === 'tables' ? 'active' : ''} onClick={() => setNewKind('tables')}>Tables</button>
             <button type="button" className={newKind === 'views' ? 'active' : ''} onClick={() => setNewKind('views')}>Views</button>
           </div>
-          <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy || !newName.trim()} onClick={addCreate}>
+          <button className="rd-btn rd-btn-secondary rd-btn-sm" disabled={busy || !newName.trim()} onClick={addCreate}>
             <Plus size={14} /> Add
           </button>
         </div>

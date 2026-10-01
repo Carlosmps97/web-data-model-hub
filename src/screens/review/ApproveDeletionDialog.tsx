@@ -18,7 +18,7 @@ export default function ApproveDeletionDialog({ open, deletes, onCancel, onConfi
   return (
     <Dialog open={open} onClose={onCancel} title="Approve and delete project?" icon={AlertTriangle} width={540}
       footer={<>
-        <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onCancel}>Cancel</button>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onCancel}>Cancel</button>
         <button type="button" className="rd-btn rd-btn-danger rd-btn-sm" disabled={!ok} onClick={onConfirm}>Approve and delete project</button>
       </>}>
       <div className="dmh-rv-critical" role="alert">

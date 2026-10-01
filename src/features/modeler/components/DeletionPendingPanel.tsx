@@ -14,7 +14,7 @@ export default function DeletionPendingPanel({ project, onUndo, onSend }: {
           This working copy deletes project «{project.name}». Undo the deletion to keep editing, or send it for approval.
         </div>
         <div className="dmh-delpending-actions">
-          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onUndo}>Undo deletion</button>
+          <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onUndo}>Undo deletion</button>
           <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" onClick={onSend}>Send for approval</button>
         </div>
       </div>

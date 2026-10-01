@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Braces, ChevronRight, FileCode2, PackagePlus, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui';
 
 import {
   getDdlArtifacts, type DdlArtifact,
@@ -163,9 +164,9 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
           <div style={{ background: '#fff', border: '1px solid #E6EAF0', borderRadius: 14, padding: '18px 20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
               <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' }}>Recent rule changes</div>
-              <button onClick={() => setView({ t: 'catalog' })} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#2E5BFF', cursor: 'pointer', fontFamily: 'inherit' }}>
-                Open catalog <ChevronRight size={12} />
-              </button>
+              <Button variant="secondary" size="sm" iconRight={ChevronRight} onClick={() => setView({ t: 'catalog' })}>
+                Open catalog
+              </Button>
             </div>
             {recentDdl.map((v) => (
               <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #F2F4F8' }}>

@@ -58,7 +58,7 @@ export default function TagEditor({
         <input className="rd-input" value={k} placeholder={keyPlaceholder} onChange={(e) => setK(e.target.value)} onKeyDown={onKeyDown} />
         <span className="tag-eq">=</span>
         <input className="rd-input" value={v} placeholder={valuePlaceholder} onChange={(e) => setV(e.target.value)} onKeyDown={onKeyDown} />
-        <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={add} disabled={!k.trim() && !v.trim()}><Icon name="plus" size={13} sw={2.6} />Add</button>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={add} disabled={!k.trim() && !v.trim()}><Icon name="plus" size={13} sw={2.6} />Add</button>
       </div>
     </div>
   );

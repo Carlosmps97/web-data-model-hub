@@ -332,7 +332,7 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
       {flat.length > shown && (
         <button
           type="button"
-          className="dmh-rv-act"
+          className="dmh-rv-act dmh-rv-act--comment"
           style={{ margin: '8px auto' }}
           onClick={() => setShown((n) => n + FLAT_PAGE)}
         >

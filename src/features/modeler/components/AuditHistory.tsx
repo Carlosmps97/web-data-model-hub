@@ -36,7 +36,7 @@ export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'colu
       {error && (
         <div className="rd-small" style={{ color: 'var(--muted)' }}>
           Couldn’t load the history.{' '}
-          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setTick((t) => t + 1)}>Retry</button>
+          <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={() => setTick((t) => t + 1)}>Retry</button>
         </div>
       )}
       {items !== null && !error && items.length === 0 && (

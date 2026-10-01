@@ -79,12 +79,8 @@
 .dmh-rep-opt-box svg { width: 11px; height: 11px; }
 .dmh-rep-opt-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.dmh-rep-clear {
-  height: 38px; padding: 0 11px; border: none; background: none; color: var(--text-muted);
-  font-family: var(--ui); font-size: 12.5px; font-weight: 600; cursor: pointer; border-radius: var(--r-sm);
-  transition: color .14s, background .14s;
-}
-.dmh-rep-clear:hover { color: var(--blue); background: var(--blue-tint); }
+/* Doc 107: los botones de la barra de filtros miden lo mismo que sus controles. */
+.dmh-rep-bar .dmh-btn { height: 38px; }
 
 /* ── Metadata table ────────────────────────────────────────────────── */
 .dmh-rep-tablewrap {
@@ -199,9 +195,8 @@
 /* Doc 96 D10: card de plantillas con la misma distribución que la de Excel. */
 .dmh-rep-card-body { padding: 0 16px 4px; }
 .dmh-rep-card-empty { font-size: 12.5px; color: var(--text-muted); }
-.dmh-rep-card-links { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-2); display: flex; justify-content: center; }
-.dmh-rep-link { border: none; background: none; padding: 0; color: var(--blue); font-size: 12.5px; font-weight: 600; cursor: pointer; font-family: inherit; }
-.dmh-rep-link:hover { text-decoration: underline; }
+.dmh-rep-card-links { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-2); display: flex; }
+.dmh-rep-card-links .dmh-btn { flex: 1; }
 
 /* ── Indicators card ───────────────────────────────────────────────── */
 .dmh-rep-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border-2); border: 1px solid var(--border-2); border-radius: 13px; overflow: hidden; }

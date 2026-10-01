@@ -248,7 +248,7 @@ function Overview({ snapshot, versions, canEdit, meName, projectName, onGo, onHi
 
         <div style={{ display: 'grid', gridTemplateColumns: '1.55fr 1fr', gap: 18 }}>
           <div style={{ background: '#fff', border: '1px solid #E6EAF0', borderRadius: 14, padding: '18px 20px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' }}>Recent standard changes</div><button onClick={onHistory} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'transparent', fontSize: 12, fontWeight: 600, color: '#2E5BFF', cursor: 'pointer', fontFamily: 'inherit' }}><History size={13} />View all versions</button></div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}><div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' }}>Recent standard changes</div><Button variant="secondary" size="sm" icon={History} onClick={onHistory}>View all versions</Button></div>
             {recent.map((v) => (
               <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #F2F4F8' }}>
                 <span style={{ width: 28, height: 28, borderRadius: 8, background: v.kind === 'domain' ? '#F3EEFF' : '#EAF0FF', color: v.kind === 'domain' ? '#8B5CF6' : '#2E5BFF', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}>{v.kind === 'domain' ? <Boxes size={14} /> : <BookOpenText size={14} />}</span>

@@ -21,7 +21,7 @@ export default function RejectDialog({ open, title, busy, onCancel, onConfirm }:
   const footer = (
     <>
       <span className="dmh-dialog-foot-left dmh-rv-reject-hint">The reason is recorded in the request history and shown to the owner.</span>
-      <button type="button" className="dmh-rv-act" onClick={onCancel} disabled={busy}>Cancel</button>
+      <button type="button" className="dmh-rv-act dmh-rv-act--comment" onClick={onCancel} disabled={busy}>Cancel</button>
       <button type="button" className="dmh-rv-act dmh-rv-act--reject" onClick={() => onConfirm(text)} disabled={!text || busy}>
         <X size={14} strokeWidth={1.7} aria-hidden />
         {busy ? 'Rejecting…' : 'Reject request'}

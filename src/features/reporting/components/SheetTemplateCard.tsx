@@ -109,7 +109,7 @@ export default function SheetTemplateCard({
           Only the <strong>{selectedCount} selected</strong> row{selectedCount === 1 ? '' : 's'} will be exported.
         </div>
         <div className="dmh-rep-card-links">
-          <button type="button" className="dmh-rep-link" onClick={() => setManaging(true)}>Manage templates…</button>
+          <Button variant="secondary" size="sm" onClick={() => setManaging(true)}>Manage templates…</Button>
         </div>
       </div>
       {managing && (

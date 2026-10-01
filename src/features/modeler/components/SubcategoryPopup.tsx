@@ -141,7 +141,7 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
                   {r.pairs.length} key col{r.pairs.length === 1 ? '' : 's'}
                 </span>
                 {canEdit && (
-                  <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy}
+                  <button type="button" className="rd-btn rd-btn-danger rd-btn-sm" disabled={busy}
                     onClick={() => void removeOne(r.id, childName)}>
                     Remove
                   </button>
@@ -170,7 +170,7 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
             Delete subcategory ({rels.length})
           </button>
         )}
-        <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" style={{ marginLeft: 'auto' }} disabled={busy} onClick={onClose}>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" style={{ marginLeft: 'auto' }} disabled={busy} onClick={onClose}>
           Close
         </button>
       </div>

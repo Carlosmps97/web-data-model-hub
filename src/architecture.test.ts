@@ -108,3 +108,155 @@ describe('Export DDL: vistas del canvas, no las de sus tablas (doc 105)', () => 
     expect(readsViewsByTables(readFileSync(file, 'utf-8'))).toBe(false);
   });
 });
+
+// Doc 107 — botones que parecían texto (pedido owner 2026-10-01): «Remove from
+// this canvas», «Delete table…» o «Manage templates…» eran texto suelto o un
+// enlace azul. Toda acción con texto se ve como BOTÓN: `rd-btn-secondary` /
+// `<Button variant="secondary">` (borde, azul al pasar el mouse) o
+// `rd-btn-danger` si borra. `rd-btn-ghost` queda solo para botones de ícono
+// suelto y los «← All columns» de los paneles (navegación); las clases de enlace
+// que se usaban como botón se retiraron. No cubre estilos inline sueltos.
+/** ¿Un `/` en `i` abre un literal regex (y no es una división)? Mira el carácter previo. */
+const regexStart = (code: string, i: number): boolean => {
+  let j = i - 1;
+  while (j >= 0 && /\s/.test(code[j])) j -= 1;
+  return j < 0 || '(,=:[!&|?{};'.includes(code[j]);
+};
+/** Índice del `>` que cierra la etiqueta JSX que abre en `start`: salta strings,
+ *  comentarios, literales regex y expresiones `{…}` (con sus `=>`). -1 si no cierra. */
+const tagEnd = (code: string, start: number): number => {
+  let depth = 0;
+  for (let i = start + 1; i < code.length; i += 1) {
+    const ch = code[i];
+    if (ch === '"' || ch === "'" || ch === '`') {
+      let j = i + 1;
+      while (j < code.length && code[j] !== ch) j += depth > 0 && code[j] === '\\' ? 2 : 1;
+      i = j;
+    } else if (ch === '/' && code[i + 1] === '/') {
+      i = code.indexOf('\n', i);
+      if (i < 0) return -1;
+    } else if (ch === '/' && code[i + 1] === '*') {
+      i = code.indexOf('*/', i + 2) + 1;
+      if (i <= 0) return -1;
+    } else if (ch === '/' && depth > 0 && regexStart(code, i)) {
+      let j = i + 1;
+      let inClass = false;
+      while (j < code.length && (inClass || code[j] !== '/')) {
+        if (code[j] === '\\') j += 1;
+        else if (code[j] === '[') inClass = true;
+        else if (code[j] === ']') inClass = false;
+        j += 1;
+      }
+      i = j;
+    } else if (ch === '{') depth += 1;
+    else if (ch === '}') depth -= 1;
+    else if (ch === '>' && depth === 0) return i;
+  }
+  return -1;
+};
+interface JsxButton { start: number; end: number; line: number; open: string; kids: string }
+/** Los `<button>`/`<Button>` del código: etiqueta de apertura y contenido. */
+const jsxButtons = (code: string): JsxButton[] => {
+  const out: JsxButton[] = [];
+  for (const m of code.matchAll(/<(button|Button)\b/g)) {
+    const start = m.index ?? 0;
+    const end = tagEnd(code, start);
+    if (end < 0) continue;
+    const selfClosing = code[end - 1] === '/';
+    const kids = selfClosing ? '' : code.slice(end + 1, code.indexOf(`</${m[1]}>`, end)).trim();
+    out.push({ start, end, line: code.slice(0, start).split('\n').length, open: code.slice(start, end + 1), kids });
+  }
+  return out;
+};
+/** ¿El contenido es UN solo elemento JSX autocerrado (un ícono)? */
+const loneIcon = (kids: string) => kids.startsWith('<') && tagEnd(kids, 0) === kids.length - 1 && kids[kids.length - 2] === '/';
+/** Variantes de `rd-btn` que se ven como botón (fondo o borde). `icon` es solo tamaño. */
+const RD_LOOK = /\brd-btn-(primary|secondary|danger|ghost)\b/;
+/** Un `style` inline que le da al botón su propio fondo (no transparente). */
+const OWN_BG = /background:\s*(?!['"](?:transparent|none)['"])\S/;
+const short = (kids: string) => kids.replace(/\s+/g, ' ').slice(0, 40);
+/** Botones con texto que se verían como texto (vacío = bien): `rd-btn-ghost` que no
+ *  sea de ícono suelto ni un «← All columns» (cualquier otro contenido —texto o una
+ *  expresión— cuenta como texto), `<Button variant="ghost">` (o una variante que
+ *  pueda ser ghost) con contenido y `rd-btn` sin variante visible salvo que traiga
+ *  su propio fondo. */
+const buttonIssues = (code: string): string[] => {
+  const out: string[] = [];
+  const list = jsxButtons(code);
+  for (const m of code.matchAll(/rd-btn-ghost/g)) {
+    const at = m.index ?? 0;
+    const q0 = Math.max(code.lastIndexOf('"', at), code.lastIndexOf("'", at), code.lastIndexOf('`', at));
+    if (q0 < 0) continue;
+    const classes = code.slice(q0 + 1, code.indexOf(code[q0], at));
+    if (!/^[\w\- ]*$/.test(classes.replace(/\$\{[^}]*\}/g, ''))) continue;   // no es una lista de clases (p. ej. un comentario)
+    if (/\brd-btn-icon\b/.test(classes)) continue;
+    const b = list.find((x) => x.start < at && at < x.end);
+    if (!b) { out.push(`${code.slice(0, at).split('\n').length}: rd-btn-ghost fuera de un <button>`); continue; }
+    if (loneIcon(b.kids) || /^<ArrowLeft[\s/>]/.test(b.kids)) continue;
+    out.push(`${b.line}: ghost con texto «${short(b.kids)}»`);
+  }
+  for (const b of list) {
+    if (!b.kids || loneIcon(b.kids)) continue;
+    const v = /variant=(?:"([^"]*)"|'([^']*)'|\{([^}]*)\})/.exec(b.open);
+    if (v && /ghost/.test(v[1] ?? v[2] ?? v[3] ?? '')) out.push(`${b.line}: <Button variant="ghost"> con texto «${short(b.kids)}»`);
+    const cls = /className=(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`\})/.exec(b.open);
+    const c = cls ? (cls[1] ?? cls[2] ?? cls[3] ?? '') : '';
+    if (/\brd-btn\b/.test(c) && !RD_LOOK.test(c) && !OWN_BG.test(b.open)) out.push(`${b.line}: rd-btn sin variante «${short(b.kids)}»`);
+  }
+  return out;
+};
+describe('botones con texto se ven como botón (doc 107)', () => {
+  const sample = (open: string, kids: string) => `<button ${open}>${kids}</button>`;
+  it('detecta ghost con texto —también si el texto sale de una expresión— y deja pasar íconos y «← All columns»', () => {
+    const ghost = 'type="button" className="rd-btn rd-btn-ghost rd-btn-sm"';
+    expect(buttonIssues(sample(`${ghost} onClick={() => go(a > b)}`, '<Table2 size={12} /> Remove from this canvas'))).toHaveLength(1);
+    expect(buttonIssues(sample(`${ghost} onClick={onCancel}`, '{cancelLabel}'))).toHaveLength(1);
+    expect(buttonIssues(sample(`${ghost} onClick={() => onOpen(u)}`, "<Crosshair size={12} /> {here ? 'Center' : 'Open'}"))).toHaveLength(1);
+    expect(buttonIssues(sample(`${ghost} title="Parent > child" onClick={() => x('{')}`, '<Eye size={12} />'))).toEqual([]);
+    expect(buttonIssues(sample(ghost, '<ArrowLeft size={12} /> All {nouns.members}'))).toEqual([]);
+    expect(buttonIssues("const iconBtn = 'rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm';")).toEqual([]);
+    expect(buttonIssues("const cls = 'rd-btn rd-btn-ghost rd-btn-sm';")).toHaveLength(1);       // clase suelta: no se puede verificar
+  });
+  it('detecta <Button variant="ghost"> con texto y `rd-btn` sin variante (salvo con fondo propio)', () => {
+    expect(buttonIssues('<Button variant="ghost" onClick={x}>Clear</Button>')).toHaveLength(1);
+    expect(buttonIssues('<Button variant="ghost" icon={X} aria-label="Close" />')).toEqual([]);
+    expect(buttonIssues(sample('className="rd-btn rd-btn-sm" onClick={x}', 'Apply'))).toHaveLength(1);
+    expect(buttonIssues(sample("className=\"rd-btn rd-btn-sm\" style={{ background: PURPLE, color: '#fff' }}", 'Save'))).toEqual([]);
+    expect(buttonIssues(sample('className="rd-btn rd-btn-secondary rd-btn-sm" onClick={x}', '{label}'))).toEqual([]);
+  });
+  it('revisión 2: lo que dejaba pasar', () => {
+    const ghost = 'type="button" className="rd-btn rd-btn-ghost rd-btn-sm"';
+    expect(buttonIssues(sample(ghost, '<ArrowLeftRight size={12} /> Swap tables'))).toHaveLength(1);
+    expect(buttonIssues(sample("className=\"rd-btn rd-btn-sm\" style={{ background: 'transparent' }}", 'Apply'))).toHaveLength(1);
+    expect(buttonIssues(sample('className="rd-btn rd-btn-success"', 'Approve'))).toHaveLength(1);      // no existe
+    expect(buttonIssues(sample('className="rd-btn rd-btn-icon"', 'Delete'))).toHaveLength(1);          // solo tamaño
+    expect(buttonIssues(sample('className="rd-btn rd-btn-icon" title="Delete"', '<Trash2 size={12} />'))).toEqual([]);
+    expect(buttonIssues("<Button variant={c ? 'ghost' : 'secondary'} onClick={x}>Clear</Button>")).toHaveLength(1);
+    expect(buttonIssues(sample('className={`rd-btn rd-btn-sm ${x}`}', 'Apply'))).toHaveLength(1);
+    expect(buttonIssues(sample("className={`rd-btn ${on ? 'rd-btn-primary' : 'rd-btn-secondary'}`}", 'Apply'))).toEqual([]);
+    expect(buttonIssues(sample('className={`rd-btn rd-btn-ghost ${x}`}', 'Apply'))).toHaveLength(1);
+  });
+  it('revisión 2: lo que marcaba de más', () => {
+    expect(buttonIssues("<button\n  // it's an icon\n  className=\"rd-btn rd-btn-ghost\"><X /></button>")).toEqual([]);
+    expect(buttonIssues("<button className=\"rd-btn rd-btn-ghost\" onClick={() => setQ(q.replace(/'/g, ''))}><X /></button>")).toEqual([]);
+    expect(buttonIssues("// rd-btn-ghost queda solo para íconos\nconst a = 1;")).toEqual([]);
+  });
+  const tsxFiles = readdirSync(src('.'), { recursive: true, encoding: 'utf-8' })
+    .filter((f) => f.endsWith('.tsx') && !/\.test\.tsx$/.test(f))
+    .map((f) => join(src('.'), f));
+  it('hay componentes que revisar', () => { expect(tsxFiles.length).toBeGreaterThan(50); });
+  it.each(tsxFiles)('%s: ningún botón con texto se ve como texto', (file) => {
+    expect(buttonIssues(readFileSync(file, 'utf-8'))).toEqual([]);
+  });
+  const allCss = readdirSync(src('.'), { recursive: true, encoding: 'utf-8' })
+    .filter((f) => f.endsWith('.css'))
+    .map((f) => readFileSync(join(src('.'), f), 'utf-8'))
+    .join('\n');
+  const allTsx = tsxFiles.map((f) => readFileSync(f, 'utf-8')).join('\n');
+  it.each(['dmh-rep-link', 'exd-tablesx-link', 'dmh-openmodel-newlink', 'up-file-replace',
+    'dmh-home-projects-more', 'dmh-home-projects-clear', 'dmh-rep-clear'])(
+    'la clase de enlace %s ya no se usa como botón', (cls) => {
+      expect(allTsx).not.toMatch(new RegExp(`\\b${cls}\\b`));
+      expect(allCss).not.toMatch(new RegExp(`\\.${cls}\\b`));
+    });
+});

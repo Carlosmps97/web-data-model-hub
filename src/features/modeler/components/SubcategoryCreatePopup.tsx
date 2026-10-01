@@ -229,7 +229,7 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
       </div>
 
       <div className="m-foot">
-        <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={saving} onClick={() => onClose(false)}>Cancel</button>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={saving} onClick={() => onClose(false)}>Cancel</button>
         <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={saving || blocked !== ''} onClick={() => void confirm()}>
           {saving && <span className="rd-spin" aria-hidden />}
           {saving ? 'Creating…' : blocked === null ? 'Checking…' : 'Create subcategory'}

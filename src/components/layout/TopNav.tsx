@@ -141,7 +141,7 @@ export default function TopNav() {
               </div>
             </div>
             <div className="m-foot">
-              <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={savingLeave} onClick={stay}>Cancel</button>
+              <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={savingLeave} onClick={stay}>Cancel</button>
               <button type="button" className="rd-btn rd-btn-danger rd-btn-sm" disabled={savingLeave} onClick={leaveAnyway}>Leave without saving</button>
               <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={savingLeave} onClick={saveAndLeave}>
                 {savingLeave && <span className="rd-spin" aria-hidden />}

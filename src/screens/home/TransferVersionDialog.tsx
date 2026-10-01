@@ -182,7 +182,7 @@ export default function TransferVersionDialog({
           {error && <div className="dmh-vt-error" role="alert">{error}</div>}
         </div>
         <div className="m-foot">
-          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy} onClick={onClose}>Cancel</button>
+          <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={busy} onClick={onClose}>Cancel</button>
           <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={!to || busy} onClick={() => void submit()}>
             {busy ? <span className="rd-spin" aria-hidden /> : <ArrowRightLeft size={13} strokeWidth={1.8} aria-hidden />}
             Transfer

@@ -24,10 +24,6 @@
 /* Project chips reuse the design-system .dmh-chip, just height-locked to 30px. */
 .dmh-home-projects .dmh-chip { height: 30px; cursor: pointer; transition: border-color .14s, background .14s, color .14s; }
 .dmh-home-projects .dmh-chip:not(.is-active):hover { border-color: var(--blue-border); color: var(--blue); }
-.dmh-home-projects-more, .dmh-home-projects-clear { font-size: 12px; font-weight: 600; border: none; background: none; cursor: pointer; font-family: var(--ui); padding: 4px 7px; border-radius: 7px; transition: color .14s, background .14s; }
-.dmh-home-projects-more { color: var(--text-muted-3); }
-.dmh-home-projects-clear { color: var(--text-muted); margin-left: 2px; }
-.dmh-home-projects-more:hover, .dmh-home-projects-clear:hover { color: var(--blue); background: var(--blue-tint); }
 
 /* ── Stat cards (5) ───────────────────────────────────────────────── */
 .dmh-home-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
@@ -212,9 +208,7 @@
 .dmh-projpick-opt .dmh-openmodel-name { font-size: 14px; }
 .dmh-openmodel-step { display: flex; align-items: center; gap: 8px; margin: -4px 0 12px; font-size: 12px; color: var(--text-muted); }
 .dmh-openmodel-step b { color: var(--navy); font-weight: 600; }
-.dmh-openmodel-newlink { margin-top: 4px; align-self: flex-start; background: none; border: 0; padding: 0; font: inherit; font-size: 12.5px;
-  color: var(--blue); cursor: pointer; display: inline-flex; align-items: center; gap: 5px; }
-.dmh-openmodel-newlink:hover { text-decoration: underline; }
+.dmh-openmodel-new { margin-top: 4px; align-self: flex-start; }
 
 /* ── New project (doc 75 D15) ───────────────────────────────────────────── */
 .dmh-newproj { display: flex; flex-direction: column; gap: 12px; }

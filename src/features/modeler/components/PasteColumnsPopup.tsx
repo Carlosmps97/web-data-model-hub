@@ -130,7 +130,7 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
         </p>
       )}
       <div className="m-foot">
-        <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={saving} onClick={onClose}>Cancel</button>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={saving} onClick={onClose}>Cancel</button>
         <button type="button" className="rd-btn rd-btn-primary rd-btn-sm"
           disabled={saving || pasteable.length === 0} onClick={() => void confirm()}>
           {saving && <span className="rd-spin" aria-hidden />}

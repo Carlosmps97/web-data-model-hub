@@ -337,7 +337,7 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
                 ) : selectedEntry === 'error' ? (
                   <div className="dmh-rvd-nofields">
                     Couldn't load this detail.{' '}
-                    <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm"
+                    <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm"
                       onClick={() => retry([{ collection: selection.collection, entityId: selection.entityId }])}>
                       Retry
                     </button>
@@ -386,7 +386,7 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
                                     : entry === 'error' ? (
                                       <>
                                         Couldn't load this detail.{' '}
-                                        <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm"
+                                        <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm"
                                           onClick={() => retry([{ collection: 'canonical_columns', entityId: id }])}>
                                           Retry
                                         </button>

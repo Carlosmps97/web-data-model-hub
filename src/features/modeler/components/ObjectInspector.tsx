@@ -149,7 +149,7 @@ function Footer({ usage, canEdit, onOpen, onClose }: { usage: TableUsageRow[] | 
           ? 'Effective state of the open version. Edits and deletions made here join the version like any canvas edit (review, diff, history, undo).'
           : 'Read-only · effective state of the open version. Open the model in edit mode to change or delete objects here.'}
       </span>
-      <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Close</button>
+      <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Close</button>
       <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={!usage || n === 0} title={tip} onClick={onOpen}>
         <Crosshair size={12} /> Open in canvas{n > 1 ? '…' : ''}
       </button>
@@ -186,7 +186,7 @@ function UsageList({ usage, activeSaId, noun, onOpen }: {
               {u.project || '—'}<span className="sep">›</span>{u.folder || 'root'}<span className="sep">›</span><b className="rd-mono">{u.canvas}</b>
               {here && <span className="wk-insp-chip accent" style={{ marginLeft: 8 }}>open now</span>}
             </span>
-            <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => onOpen(u)}>
+            <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={() => onOpen(u)}>
               <Crosshair size={12} /> {here ? 'Center' : 'Open'}
             </button>
           </div>
@@ -573,7 +573,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                     {saving && <span className="rd-spin" aria-hidden />}{saving ? 'Saving…' : 'Save'}
                   </button>
                   <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5' }}>
-                    <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'var(--error, #C4314B)' }} disabled={deleting || saving} onClick={() => void askDeleteTable()}>
+                    <button className="rd-btn rd-btn-danger rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={deleting || saving} onClick={() => void askDeleteTable()}>
                       {deleting ? <span className="rd-spin" aria-hidden /> : <Trash2 size={12} />} Delete {nouns.one}…
                     </button>
                   </div>
@@ -704,7 +704,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
                         {v.canvases.slice(0, 4).map((c) => <span key={c.id} className="wk-srch-chip">{c.name}</span>)}
                         {v.canvases.length > 4 && <span className="wk-srch-none">+{v.canvases.length - 4} more</span>}
                       </span>
-                      <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" title="Inspect this view" onClick={() => openInspector({ kind: 'view', id: v.id })}>
+                      <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" title="Inspect this view" onClick={() => openInspector({ kind: 'view', id: v.id })}>
                         <Eye size={12} /> Inspect
                       </button>
                       {canEdit && (
@@ -992,7 +992,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                         {saving && <span className="rd-spin" aria-hidden />}{saving ? 'Saving…' : 'Save'}
                       </button>
                       <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5' }}>
-                        <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'var(--error, #C4314B)' }} disabled={deleting || saving} onClick={() => void askDelete()}>
+                        <button className="rd-btn rd-btn-danger rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={deleting || saving} onClick={() => void askDelete()}>
                           {deleting ? <span className="rd-spin" aria-hidden /> : <Trash2 size={12} />} Delete view…
                         </button>
                       </div>
@@ -1013,7 +1013,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
                       <Table2 size={13} style={{ flex: 'none' }} />
                       <span className="rd-mono" style={{ fontWeight: 600 }}>t{i + 1} · {s.schema ? `${s.schema}.` : ''}{s.physicalName}</span>
                       <span className="rd-small" style={{ color: 'var(--muted)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.logicalName}</span>
-                      <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" style={{ marginLeft: 'auto' }} title="Inspect this table" onClick={() => openInspector({ kind: 'table', id: s.id })}>
+                      <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" style={{ marginLeft: 'auto' }} title="Inspect this table" onClick={() => openInspector({ kind: 'table', id: s.id })}>
                         <Eye size={12} /> Inspect
                       </button>
                     </div>

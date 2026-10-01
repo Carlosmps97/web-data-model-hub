@@ -180,10 +180,9 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
             <ProjectPicker projects={projects} meta={meta} selectedId={projectId} onSelect={setProjectId} />
           )}
           {onNewProject && (
-            <button type="button" className="dmh-openmodel-newlink" onClick={onNewProject}>
-              <FolderPlus size={14} strokeWidth={1.7} aria-hidden />
+            <Button variant="secondary" size="sm" icon={FolderPlus} className="dmh-openmodel-new" onClick={onNewProject}>
               New project…
-            </button>
+            </Button>
           )}
         </div>
       ) : (

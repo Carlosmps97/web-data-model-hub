@@ -43,7 +43,7 @@ import {
 } from '../generators';
 import { oracleDdl, oracleForeignKeysFile, oracleTableStatements, oracleViewStatements } from '../oracle';
 import {
-  fetchDdlConfig, fetchExportRules, fetchUdpDefs, layoutFromRules, renderWithRules, selectableRules, withUdpPartitions,
+  fetchDdlConfig, fetchExportRules, fetchUdpDefs, layoutFromRules, renderWithRules, selectableRules, withLayout, withUdpPartitions,
   type ExportRule, type UdpDefLite,
 } from '../rulesBridge';
 import {
@@ -179,7 +179,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   // reglas SELECCIONADAS — sólo el export con reglas lo aplica; sin reglas el
   // DDL base sigue byte-idéntico.
   const layout = useMemo(() => layoutFromRules(exportRules, selRuleIds), [exportRules, selRuleIds]);
-  const effOpts = useMemo(() => ({ ...opts, partitionsLast: layout.partitionsLast }), [opts, layout]);
+  const effOpts = useMemo(() => withLayout(opts, layout), [opts, layout]);
   // Doc 93 D10: con la regla de layout, las particiones salen del UDP que ella
   // nombra (PART_nn = partición y su orden) → el CREATE físico y el motor
   // coinciden; sin esa regla (o sin el UDP) rige el flag de la plataforma.
@@ -375,9 +375,8 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
               onChange={(e) => setTableFilter(e.target.value)}
               aria-label="Filter tables"
             />
-            <button type="button" className="exd-tablesx-link" onClick={selectAll} disabled={allTables.length === 0}>All</button>
-            <span className="exd-tablesx-dot">·</span>
-            <button type="button" className="exd-tablesx-link is-muted" onClick={selectNone} disabled={allTables.length === 0}>None</button>
+            <button type="button" className="rd-btn rd-btn-secondary rd-btn-xs" onClick={selectAll} disabled={allTables.length === 0}>All</button>
+            <button type="button" className="rd-btn rd-btn-secondary rd-btn-xs" onClick={selectNone} disabled={allTables.length === 0}>None</button>
           </div>
           <div className="exd-tablesx-list">
             {allTables.length === 0 ? (

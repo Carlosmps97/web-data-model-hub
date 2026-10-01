@@ -22,7 +22,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { ChevronDown, ChevronRight, Database, FolderPlus, GitBranch, GitCompare, Inbox, Info, Undo2 } from 'lucide-react';
 
-import { Avatar } from '@/components/ui';
+import { Avatar, Button } from '@/components/ui';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import NewProjectModal from '@/components/NewProjectModal';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -342,31 +342,31 @@ export default function HomeScreen() {
             );
           })}
           {!showAllProjects && hiddenProjects > 0 && (
-            <button
-              type="button"
-              className="dmh-home-projects-more"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setShowAllProjects(true)}
             >
               +{hiddenProjects} more
-            </button>
+            </Button>
           )}
           {showAllProjects && projects.length > MAX_PROJECT_CHIPS && (
-            <button
-              type="button"
-              className="dmh-home-projects-more"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setShowAllProjects(false)}
             >
               Show less
-            </button>
+            </Button>
           )}
           {selectedProjectIds.size > 0 && (
-            <button
-              type="button"
-              className="dmh-home-projects-clear"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => setSelectedProjectIds(new Set())}
             >
               Clear
-            </button>
+            </Button>
           )}
         </div>
 

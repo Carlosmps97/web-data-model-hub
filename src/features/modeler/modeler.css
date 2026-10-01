@@ -168,6 +168,8 @@
 .wk-srch-scope button { font-size: 11.5px; padding: 5px 10px; }
 .wk-srch-filters { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)) auto; gap: 8px; align-items: end; margin-bottom: 10px; }
 .wk-srch-filters label { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+/* Doc 107: «Clear filters» con su ancho y la altura de los filtros (antes era texto y no se notaba). */
+.wk-srch-filters > .rd-btn { justify-self: start; height: 36px; }
 .wk-srch-filters label > span { display: flex; align-items: center; gap: 4px; font-size: 10.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted-2); }
 /* Filtro BLOQUEADO hasta elegir el nivel anterior (Proyecto › Sub-proyecto › Dominio › Modelo):
    fondo plomo + candado + texto atenuado (pedido owner). */
@@ -318,7 +320,11 @@
 .wk-relhint { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 30;
   background: var(--primary); color: var(--on-primary); font-size: 12px; padding: 5px 12px;
   border-radius: var(--r-full); box-shadow: var(--shadow-md); display: flex; align-items: center; gap: 8px; }
-.wk-relhint .wk-tic { color: var(--on-primary); }
+/* Doc 107: «Exit» se ve como botón sobre la píldora azul. */
+.wk-relhint-exit { flex: none; height: 24px; padding: 0 11px; border: 1px solid rgba(255,255,255,.7); border-radius: var(--r-full);
+  background: rgba(255,255,255,.14); color: var(--on-primary); font-family: var(--ui); font-size: 11.5px; font-weight: 600; cursor: pointer;
+  transition: background .12s; }
+.wk-relhint-exit:hover { background: rgba(255,255,255,.28); }
 
 /* ── Sidebar (doc 71): Explorer unificado — proyectos › Models · Tables · Views · Schemas + «Database — all schemas» ── */
 .wk-expl-stack { grid-area: explorer; position: relative; display: flex; flex-direction: column; min-height: 0;
@@ -924,11 +930,6 @@ select.exd-input { padding: 0 10px; }
 .exd-tablesx-filter-ico { color: var(--text-muted-2); flex: none; }
 .exd-tablesx-filter-input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; font-family: var(--ui); font-size: 12.5px; color: var(--ink); }
 .exd-tablesx-filter-input::placeholder { color: var(--text-placeholder); }
-.exd-tablesx-link { border: none; background: none; cursor: pointer; font-family: var(--ui); font-size: 11.5px; font-weight: 600; color: var(--primary); padding: 2px; }
-.exd-tablesx-link.is-muted { color: var(--text-muted); }
-.exd-tablesx-link:hover:not(:disabled) { text-decoration: underline; }
-.exd-tablesx-link:disabled { opacity: .5; cursor: not-allowed; }
-.exd-tablesx-dot { color: var(--border-strong); }
 .exd-tablesx-list { display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; border: 1px solid var(--border-soft); border-radius: 11px; }
 .exd-tablesx-row { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer; padding: 9px 12px; background: var(--surface); border: none; border-bottom: 1px solid var(--fill-2); font-family: var(--ui); }
 .exd-tablesx-row:last-child { border-bottom: none; }

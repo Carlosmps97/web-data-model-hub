@@ -297,7 +297,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
         {n === 0 ? <div className="wk-srch-none" style={{ padding: '2px 8px 6px' }}>No matches</div> : body}
         {more && scope === 'all' && (
           <div className="wk-srch-more">
-            <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setScope(g)}>
+            <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={() => setScope(g)}>
               Show all {GROUP_LABEL[g]} — first {n} shown
             </button>
           </div>
@@ -328,7 +328,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
       canvasTop={136}
       width={760}
       onClose={onClose}
-      footer={<button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Close</button>}
+      footer={<button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Close</button>}
     >
       {/* Alcance: qué se busca (owner: tablas/entidades, columnas/atributos, definiciones). */}
       <div className="rd-seg wk-srch-scope" role="tablist" aria-label="Search scope">
@@ -351,13 +351,13 @@ export default function SearchModelPopup({ onClose, pushToast }: {
         {filter('Domain', domainOpts, domainId, pickDomain, 'All domains', subprojectId ? undefined : 'sub-project')}
         {filter('Model', modelOpts, canvasId, setCanvasId, 'All models', subprojectId ? undefined : 'sub-project')}
         {anyFilter && (
-          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={clearFilters}>Clear filters</button>
+          <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={clearFilters}>Clear filters</button>
         )}
       </div>
       {scopedToOpenCanvas && activeCanvas && (
         <div className="wk-srch-scopechip">
           <MapPin size={12} aria-hidden /> Searching in the open canvas <b className="rd-mono">{activeCanvas.name}</b>
-          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={clearFilters}>Search everywhere</button>
+          <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={clearFilters}>Search everywhere</button>
         </div>
       )}
       <div className="wk-findres-list" style={{ maxHeight: 420 }} ref={listRef} onScroll={onScroll}>
@@ -385,7 +385,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
             {group && loadingMore && <div className="wk-srch-loading"><span className="rd-spin" aria-hidden /> Loading more…</div>}
             {group && !loadingMore && nextOffset != null && (
               <div className="wk-srch-more">
-                <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={loadMore}>Load more (scroll also loads)</button>
+                <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={loadMore}>Load more (scroll also loads)</button>
               </div>
             )}
             {group && nextOffset == null && res[group].length >= PAGE && (

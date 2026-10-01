@@ -1,5 +1,6 @@
 import { useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import { Download, FileSpreadsheet, UploadCloud } from 'lucide-react';
+import { Button } from '@/components/ui';
 
 /** Ruta pública de la plantilla (public/templates; la sirve Vite en dev y
  *  server.mjs en Databricks Apps). Doc 78: `Plantilla.xlsx` verbatim. */
@@ -66,7 +67,7 @@ export default function UploadDropzone({ file, sheets, disabled, onFile }: {
             ))}
           </span>
         </div>
-        <button type="button" className="up-file-replace" onClick={open} disabled={disabled}>Replace file</button>
+        <Button variant="secondary" size="sm" onClick={open} disabled={disabled}>Replace file</Button>
       </div>
     );
   }

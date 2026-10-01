@@ -177,11 +177,11 @@ export default function NewTableModal({ onClose, onCreate }: {
       onClose={onClose}
       footer={mode === 'blank' ? (
         <>
-          <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
+          <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Cancel</button>
           <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy || !logical.trim()} onClick={submitBlank}>Create {n.one}</button>
         </>
       ) : (
-        <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Done</button>
+        <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Done</button>
       )}
     >
       <div className="rd-seg" style={{ marginBottom: 16 }}>
@@ -269,7 +269,7 @@ export default function NewTableModal({ onClose, onCreate }: {
                     <div className={viewMode === 'physical' ? 'rd-mono' : ''} style={{ fontWeight: 600, fontSize: 13 }}>{viewMode === 'physical' ? t.physicalName : (t.logicalName || t.physicalName)}</div>
                     <div className={`rd-small${viewMode === 'logical' ? ' rd-mono' : ''}`} style={{ color: 'var(--text-muted, #8A93A5)' }}>{viewMode === 'physical' ? t.logicalName : t.physicalName} · used in {usageOf(t.id)} modules</div>
                   </div>
-                  <button className="rd-btn rd-btn-ghost rd-btn-sm" disabled={already || adding === t.id} onClick={() => addOne(t.id)}>
+                  <button className="rd-btn rd-btn-secondary rd-btn-sm" disabled={already || adding === t.id} onClick={() => addOne(t.id)}>
                     {already ? <><Check size={14} /> Added</> : <><Plus size={14} /> Add</>}
                   </button>
                 </div>

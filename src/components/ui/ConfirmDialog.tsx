@@ -166,7 +166,7 @@ export default function ConfirmDialog({
           </div>
         </div>
         <div className="m-foot">
-          <button ref={cancelBtnRef} type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
+          <button ref={cancelBtnRef} type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
           <button
             ref={confirmBtnRef}
             type="button"

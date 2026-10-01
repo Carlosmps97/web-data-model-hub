@@ -563,8 +563,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         </>, document.body)}
       <ExportDdlModal open={ddlOpen} diagram={diagram} modelName={diagram?.subjectArea.name ?? 'model'} onClose={() => setDdlOpen(false)} />
 
-      {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT table header (blue ring) onto a child column or the child header — the parent's whole primary key is migrated. <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setRelPreset(null)}>exit</button></div>}
-      {subcatArmed && <div className="wk-relhint">Draw the subcategory: drag from the SUPERTYPE table header (blue ring) — or from an existing subcategory symbol — onto the subtype table. The supertype's key becomes the subtype's key (is-a, 1:1). <button className="wk-tic" style={{ width: 'auto', padding: '0 8px', color: 'var(--on-primary)' }} onClick={() => setSubcatArmed(false)}>exit</button></div>}
+      {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT table header (blue ring) onto a child column or the child header — the parent's whole primary key is migrated. <button type="button" className="wk-relhint-exit" onClick={() => setRelPreset(null)}>Exit</button></div>}
+      {subcatArmed && <div className="wk-relhint">Draw the subcategory: drag from the SUPERTYPE table header (blue ring) — or from an existing subcategory symbol — onto the subtype table. The supertype's key becomes the subtype's key (is-a, 1:1). <button type="button" className="wk-relhint-exit" onClick={() => setSubcatArmed(false)}>Exit</button></div>}
     </div>
   );
 }

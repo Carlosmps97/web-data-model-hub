@@ -6,7 +6,7 @@ vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), LONG_TIME
 
 import { apiGet, apiPost } from '@/services/http';
 import {
-  ruleToYaml, saveDdlOutput, saveDdlRule, seedStarterRules, toEditInput, toggleDdlRule, yamlToRule,
+  ruleActionSummary, ruleToYaml, saveDdlOutput, saveDdlRule, seedStarterRules, toEditInput, toggleDdlRule, yamlToRule,
 } from './ddlRules.service';
 import type { DdlRule } from './standards.service';
 
@@ -100,3 +100,23 @@ describe('mutaciones versionadas (standards/apply)', () => {
     expect(body).toMatchObject({ kind: 'ddl', title: 'DDL output settings · edited', ddlConfigPatch: { output: { viewTagsAs: 'view' } } });
   });
 });
+
+describe('ruleActionSummary — resumen de la acción en el catálogo', () => {
+  const layout = (lay: Record<string, unknown>): DdlRule => ({ ...RULE, target: 'table', action: { layout: lay } });
+  it('doc 107: layout «partitioned-by» = particiones solo en el PARTITIONED BY', () => {
+    expect(ruleActionSummary(layout({ partitionColumns: 'partitioned-by', partitionUdp: 'Particion' })))
+      .toBe('Column layout: partition columns only in PARTITIONED BY · partitions from UDP "Particion"');
+  });
+  it('last / keep / sin valor, igual que antes', () => {
+    expect(ruleActionSummary(layout({ partitionColumns: 'last' }))).toBe('Column layout: partition columns last');
+    expect(ruleActionSummary(layout({ partitionColumns: 'keep' }))).toBe('Column layout: partition columns in physical order');
+    expect(ruleActionSummary(layout({ partitionUdp: 'Particion' })))
+      .toBe('Column layout: partition columns in physical order · partitions from UDP "Particion"');
+  });
+  it('las demás acciones', () => {
+    expect(ruleActionSummary(RULE)).toBe('sha2({col}, 512)');
+    expect(ruleActionSummary({ ...RULE, action: { types: { CHAR: 'VARCHAR' } } })).toBe('Data types: CHAR → VARCHAR');
+    expect(ruleActionSummary({ ...RULE, action: {} })).toBe('—');
+  });
+});
+

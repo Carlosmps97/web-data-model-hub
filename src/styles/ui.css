@@ -23,6 +23,8 @@
 .rd-btn-danger:hover { background: #f7dcdc; }
 .rd-btn-sm { padding: 6px 10px; font-size: 12px; }
 .rd-btn-lg { padding: 11px 18px; font-size: 14px; }
+/* Doc 107: compacto, para acciones dentro de un encabezado o de un buscador («All», «None»). */
+.rd-btn-xs { padding: 4px 9px; font-size: 11.5px; gap: 5px; }
 .rd-btn-icon { padding: 8px; width: 34px; height: 34px; }
 .rd-btn-icon.rd-btn-sm { padding: 6px; width: 30px; height: 30px; }
 

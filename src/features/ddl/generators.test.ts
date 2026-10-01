@@ -529,6 +529,41 @@ describe('partitionsLast + partitionOrder — regla de layout del ruleset (doc 7
   });
 });
 
+describe('doc 107 — particiones solo en el PARTITIONED BY (regla de layout «partitioned-by»)', () => {
+  const input: DatabricksDdlInput = {
+    tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
+    columns: [
+      { id: 'a', tableId: 't1', physicalName: 'CODMES', dataType: 'INTEGER', ordinal: 0, isPartition: true, partitionOrder: 2, isNullable: false, description: 'Mes' },
+      { id: 'b', tableId: 't1', physicalName: 'COD', dataType: 'string', ordinal: 1, isPrimaryKey: true },
+      { id: 'c', tableId: 't1', physicalName: 'FECDIA', dataType: 'date', ordinal: 2, isPartition: true, partitionOrder: 1 },
+      { id: 'd', tableId: 't1', physicalName: 'MTO', dataType: 'decimal(18,2)', ordinal: 3 },
+    ],
+    relationships: [],
+    modelName: 'm',
+  };
+  const opts: DatabricksDdlOptions = { ...DEF, external: false, partitionsInClause: true };
+  it('las particiones NO van en la lista: se declaran con su tipo en el PARTITIONED BY, en orden PART_nn', () => {
+    expect(tableStatements(input, opts)[0].sql).toBe(
+      'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  mto decimal(18,2)\n)\nUSING DELTA\nPARTITIONED BY (fecdia date, codmes int);\n');
+  });
+  it('la definición se mueve completa: NOT NULL (con keys) y COMMENT (con comments) van dentro del PARTITIONED BY', () => {
+    const sql = tableStatements(input, { ...opts, includeKeys: true, includeComments: true })[0].sql;
+    expect(sql).toBe([
+      'CREATE OR REPLACE TABLE s.t (', '  cod string NOT NULL,', '  mto decimal(18,2),',
+      '  CONSTRAINT pk_t PRIMARY KEY (cod)', ')', 'USING DELTA',
+      "PARTITIONED BY (fecdia date, codmes int NOT NULL COMMENT 'Mes');", '',
+    ].join('\n'));
+  });
+  it('sin PARTITIONED BY (Output setting «Partitions» apagada) las particiones vuelven al final de la lista', () => {
+    expect(tableStatements(input, { ...opts, includePartitions: false })[0].sql).toBe(
+      'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  mto decimal(18,2),\n  fecdia date,\n  codmes int\n)\nUSING DELTA;\n');
+  });
+  it('una tabla sin particiones sale igual que sin la regla', () => {
+    const plain: DatabricksDdlInput = { ...input, columns: input.columns.map((c) => ({ ...c, isPartition: false })) };
+    expect(tableStatements(plain, opts)[0].sql).toBe(tableStatements(plain, { ...opts, partitionsInClause: false })[0].sql);
+  });
+});
+
 describe('ddlZipName', () => {
   it('one table → that table name .zip', () => {
     expect(ddlZipName([{ id: '1', physicalName: 'CLIENTE' }], 'M')).toBe('CLIENTE.zip');
@@ -566,7 +601,7 @@ const SPEC_INPUT: DatabricksDdlInput = {
   })),
   relationships: [], modelName: 'UDV INT',
 };
-const SPEC_BASE_SQL = [
+const SPEC_LIST = [
   'CREATE OR REPLACE TABLE bcp_udv_int.h_saldocierreprocesobancaminorista (',
   '  codclavepartycli varchar(128),', '  tiprolcli char(20),', '  codclavecta varchar(128),',
   '  codproducto varchar(30),', '  codclaveunicocli varchar(128),', '  codinternocomputacional varchar(30),',
@@ -575,10 +610,18 @@ const SPEC_BASE_SQL = [
   '  codsectorfin varchar(30),', '  dessectorfin varchar(256),', '  desglosacierreproceso string,',
   '  mtosaldomediovigsol decimal(21,4),', '  mtosaldomediovigdol decimal(21,4),',
   '  mtosaldofinmesvigsol decimal(21,4),', '  mtosaldofinmesvigdol decimal(21,4),', '  fecrutina date,',
-  '  fecactualizacionregistro timestamp,', '  tipfrecuenciaregistro char(1),', '  fecdia date,',
-  '  codmes int,', '  nbrgrupoprocesobcaminorista varchar(120)', ')', 'USING DELTA',
-  'PARTITIONED BY (codmes, nbrgrupoprocesobcaminorista)',
-  "LOCATION 'abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>/H_SALDOCIERREPROCESOBANCAMINORISTA';",
+  '  fecactualizacionregistro timestamp,', '  tipfrecuenciaregistro char(1),',
+];
+const SPEC_LOCATION = "LOCATION 'abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>/H_SALDOCIERREPROCESOBANCAMINORISTA';";
+// Doc 107 (semilla `particiones_en_partitioned_by`): particiones solo en el PARTITIONED BY.
+const SPEC_BASE_SQL = [
+  ...SPEC_LIST, '  fecdia date', ')', 'USING DELTA',
+  'PARTITIONED BY (codmes int, nbrgrupoprocesobcaminorista varchar(120))', SPEC_LOCATION,
+].join('\n');
+// Layout `last` (el Anexo A original del doc 93).
+const SPEC_BASE_SQL_LAST = [
+  ...SPEC_LIST, '  fecdia date,', '  codmes int,', '  nbrgrupoprocesobcaminorista varchar(120)', ')', 'USING DELTA',
+  'PARTITIONED BY (codmes, nbrgrupoprocesobcaminorista)', SPEC_LOCATION,
 ].join('\n');
 
 describe('doc 93 — estilo de salida (comillas, tipos, CREATE, NOT NULL)', () => {
@@ -627,7 +670,8 @@ describe('doc 93 — estilo de salida (comillas, tipos, CREATE, NOT NULL)', () =
     expect(createTableSql({ createTable: 'if-not-exists', external: false })).toBe('CREATE TABLE IF NOT EXISTS');
   });
 
-  it('golden del spec-rule (doc 93 Anexo A): el CREATE físico que recibe el motor', () => {
-    expect(tableStatements(SPEC_INPUT, { ...DEF, partitionsLast: true })[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
+  it('golden del spec-rule (doc 93 Anexo A · doc 107): el CREATE físico que recibe el motor', () => {
+    expect(tableStatements(SPEC_INPUT, { ...DEF, partitionsInClause: true })[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
+    expect(tableStatements(SPEC_INPUT, { ...DEF, partitionsLast: true })[0].sql).toBe(`${SPEC_BASE_SQL_LAST}\n`);
   });
 });

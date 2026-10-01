@@ -175,7 +175,7 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
           />
         </div>
         <div className="m-foot">
-          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy} onClick={cancel}>{opts.cancelLabel ?? 'Cancel'}</button>
+          <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={busy} onClick={cancel}>{opts.cancelLabel ?? 'Cancel'}</button>
           <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={submit}>
             {busy && <span className="rd-spin" aria-hidden />}{opts.confirmLabel ?? 'OK'}
           </button>

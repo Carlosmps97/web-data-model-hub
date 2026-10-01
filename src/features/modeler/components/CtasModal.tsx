@@ -191,7 +191,6 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
 
   const step: React.CSSProperties = { fontSize: 12, fontWeight: 700, color: 'var(--ink, #1A2B4A)', marginBottom: 6 };
   const lbl: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--text-muted, #56607A)', marginBottom: 5, display: 'block' };
-  const link: React.CSSProperties = { border: 'none', background: 'transparent', color: 'var(--primary, #2F6BFF)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 };
   const listBox: React.CSSProperties = { overflow: 'auto', border: '1px solid var(--border-soft, #EAEDF2)', borderRadius: 9, padding: 4 };
   const row: React.CSSProperties = { display: 'flex', alignItems: 'flex-start', gap: 8, padding: '5px 7px', cursor: 'pointer', borderRadius: 6 };
   const sub: React.CSSProperties = { display: 'block', fontSize: 10, color: 'var(--text-muted-2, #8A93A5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
@@ -213,7 +212,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
       footer={(
         <>
           <div className="dmh-dialog-foot-left rd-small" style={{ color: 'var(--text-muted, #8A93A5)' }}>Added to the canvas as an unpublished change.</div>
-          <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
+          <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Cancel</button>
           <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={create}>Create table</button>
         </>
       )}
@@ -287,10 +286,9 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
           <div style={{ display: 'flex', alignItems: 'baseline' }}>
             <label style={lbl}>Columns to inherit</label>
             {candidates.length > 0 && (
-              <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
-                <button type="button" style={link} onClick={pickAll}>Select all</button>
-                <span style={{ color: '#D6DCE6' }}>·</span>
-                <button type="button" style={{ ...link, color: 'var(--text-muted, #8A93A5)' }} onClick={pickNone}>Clear</button>
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <button type="button" className="rd-btn rd-btn-secondary rd-btn-xs" onClick={pickAll}>Select all</button>
+                <button type="button" className="rd-btn rd-btn-secondary rd-btn-xs" onClick={pickNone}>Clear</button>
               </span>
             )}
           </div>

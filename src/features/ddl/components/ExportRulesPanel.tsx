@@ -45,9 +45,8 @@ export default function ExportRulesPanel({ rules, selected, onToggle, onAll, onN
           <strong>{selected.size}</strong> of {rules.length} selected
         </span>
         <span className="exd-tablesx-spacer" />
-        <button type="button" className="exd-tablesx-link" onClick={onAll}>All</button>
-        <span className="exd-tablesx-dot">·</span>
-        <button type="button" className="exd-tablesx-link is-muted" onClick={onNone}>None</button>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-xs" onClick={onAll}>All</button>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-xs" onClick={onNone}>None</button>
       </div>
 
       <div className="exd-rules-list">

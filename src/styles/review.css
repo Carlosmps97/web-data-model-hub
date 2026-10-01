@@ -106,7 +106,8 @@
 .dmh-rv-act--canvas { border-color: var(--blue-border); background: var(--blue-tint); color: var(--blue); }
 .dmh-rv-act--canvas:hover { background: #E0EAFF; }
 .dmh-rv-act--comment { border-color: var(--border-3); background: var(--surface); color: var(--text-body); }
-.dmh-rv-act--comment:hover { border-color: var(--blue-border); color: var(--blue); }
+.dmh-rv-act--comment:not(:disabled):hover { border-color: var(--blue-border); color: var(--blue); }
+.dmh-rv-act--comment:disabled { opacity: .5; }
 .dmh-rv-act--reject { border-color: var(--red-border); background: var(--surface); color: var(--red); }
 .dmh-rv-act--reject:not(:disabled):hover { background: var(--red-tint); }
 .dmh-rv-act--reject:disabled { border-color: #ECEFF3; background: #F7F8FA; color: #B6BECD; }

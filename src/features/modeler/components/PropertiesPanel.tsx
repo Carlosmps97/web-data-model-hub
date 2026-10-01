@@ -489,10 +489,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
             )}
             {canEdit && (
               <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={delBusy !== null} onClick={removeFromCanvas}>
+                <button className="rd-btn rd-btn-secondary rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={delBusy !== null} onClick={removeFromCanvas}>
                   {delBusy === 'remove' ? <span className="rd-spin" aria-hidden /> : <Table2 size={12} />} Remove from this canvas
                 </button>
-                <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'var(--error, #C4314B)' }} disabled={delBusy !== null} onClick={askDeleteTable}>
+                <button className="rd-btn rd-btn-danger rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={delBusy !== null} onClick={askDeleteTable}>
                   {delBusy === 'delete' ? <span className="rd-spin" aria-hidden /> : <Trash2 size={12} />} Delete {nouns.one}…
                 </button>
               </div>
@@ -508,7 +508,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 {nouns.One} {nouns.members}
                 {reordering && <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden />}
               </span>
-              {canEdit && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setColumnTarget(table.id)}><Icon name="plus" size={12} sw={2.6} /> Add {nouns.member}</button>}
+              {canEdit && <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={() => setColumnTarget(table.id)}><Icon name="plus" size={12} sw={2.6} /> Add {nouns.member}</button>}
             </div>
             <p className="wk-pp-cap">{canEdit ? `Drag the handle to reorder · click ${nouns.aMember} to edit.` : `Click ${nouns.aMember} to view its details.`}</p>
             {cols.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No {nouns.members} yet.{canEdit ? ` Use “Add ${nouns.member}”.` : ''}</div>}
@@ -625,7 +625,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                       </>
                     )}
                     {canAct && other && (
-                      <button className="rd-btn rd-btn-ghost rd-btn-sm" title="Add this view to the current canvas"
+                      <button className="rd-btn rd-btn-secondary rd-btn-sm" title="Add this view to the current canvas"
                         onClick={() => void addViewsToCanvas([v.id]).then(() => pushToast('View added to canvas'))
                           .catch(reportWriteError((e) => pushToast(failureText("Couldn't add the view to this canvas", e), 'err')))}>
                         <Plus size={12} /> Add to this canvas
@@ -657,7 +657,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
               )}
               <div className="wk-props-sec" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: physicalMode ? 0 : undefined }}>
                 <span>This canvas · {here.length} view{here.length === 1 ? '' : 's'}</span>
-                {canAct && <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={() => setViewEditor({})}><Icon name="plus" size={12} sw={2.6} /> New view</button>}
+                {canAct && <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={() => setViewEditor({})}><Icon name="plus" size={12} sw={2.6} /> New view</button>}
               </div>
               {here.length === 0 && (
                 <div className="rd-small" style={{ color: 'var(--muted)' }}>

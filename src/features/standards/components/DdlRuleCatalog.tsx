@@ -10,7 +10,7 @@ import { ChevronLeft, Info, Plus, Search, Sparkles, Table2 } from 'lucide-react'
 import { toast } from 'sonner';
 
 import {
-  seedStarterRules, toggleDdlRule, type DdlArtifact,
+  ruleActionSummary, seedStarterRules, toggleDdlRule, type DdlArtifact,
 } from '../ddlRules.service';
 import type { DdlRule, DdlRulesetConfig } from '../standards.service';
 import DdlLookupsEditor from './DdlLookupsEditor';
@@ -91,31 +91,6 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
     finally { setSeeding(false); }
   };
 
-  const actionSummary = (r: DdlRule): string => {
-    const a = r.action ?? {};
-    if (typeof a.expression === 'string') return a.expression;
-    if (a.tags) return `SET TAGS (${Object.keys(a.tags as object).join(', ')})`;
-    if (a.tblproperties) return `TBLPROPERTIES (${Object.keys(a.tblproperties as object).join(', ')})`;
-    if (a.exclude === true) return 'Exclude column from the SELECT';
-    if (a.statements) {
-      const st = a.statements as { before?: string[]; after?: string[] };
-      const n = (st.before?.length ?? 0) + (st.after?.length ?? 0);
-      return `Statements: ${(st.before?.[0] ?? st.after?.[0] ?? '').slice(0, 48)}${n > 1 ? ` (+${n - 1})` : ''}`;
-    }
-    if (a.layout) {
-      const lay = a.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string };
-      const udp = (lay.partitionUdp ?? lay.partitionOrderUdp ?? '').trim();
-      return `Column layout: partition columns ${(lay.partitionColumns ?? 'keep') === 'last' ? 'last' : 'in physical order'}`
-        + (udp ? ` · partitions from UDP "${udp}"` : '');
-    }
-    if (a.types) {
-      const map = Object.entries(a.types as Record<string, string>).map(([k, v]) => `${k} → ${v}`).join(', ');
-      return `Data types: ${map}`;
-    }
-    const emit = a.emit as Record<string, unknown> | undefined;
-    if (emit) return `+ ${emit.type === 'view' ? 'view' : 'tbl'} "${emit.schema}.${emit.name}"`;
-    return '—';
-  };
   const artifactChips = (r: DdlRule): string[] => (r.kind === 'generator'
     ? [(((r.action?.emit as Record<string, unknown> | undefined)?.artifact as string) ?? '')]
     : r.appliesTo);
@@ -213,7 +188,7 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
                     ? <ErrTok text={r.condition || '—'} token={r.validationReport.errors[0].token!} />
                     : (r.condition || 'true')}
                 </div>
-                <div style={{ ...cellMono, color: r.enabled ? '#1A2B4A' : '#8A93A5' }}>{actionSummary(r)}</div>
+                <div style={{ ...cellMono, color: r.enabled ? '#1A2B4A' : '#8A93A5' }}>{ruleActionSummary(r)}</div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, overflow: 'hidden' }}>
                   {chips[0]
                     ? <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 10, color: '#56607A', background: '#F2F4F8', borderRadius: 5, padding: '2px 6px', whiteSpace: 'nowrap' }}>{chips[0]}</span>

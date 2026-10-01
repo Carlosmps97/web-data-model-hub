@@ -16,7 +16,7 @@ import { DEFAULT_DATABRICKS_OPTS, type DatabricksDdlOptions, type DdlDialect } f
 import { DEFAULT_FILE_NAMES, type DdlFileNames } from './ddlExportBundle';
 import { DEFAULT_ORACLE_OPTS, type OracleDdlOptions } from './oracle';
 
-export type DdlOutputSettings = Omit<DatabricksDdlOptions, 'partitionsLast'> & {
+export type DdlOutputSettings = Omit<DatabricksDdlOptions, 'partitionsLast' | 'partitionsInClause'> & {
   fileNames: DdlFileNames;
   /** Doc 101: dialecto con el que abre el modal Export DDL. */
   dialect: DdlDialect;

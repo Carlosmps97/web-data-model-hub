@@ -195,7 +195,7 @@ function SpecEditor({ spec, onSpec, disabled, depth }: {
       {!disabled && (
         <button
           type="button"
-          className="rd-btn rd-btn-ghost rd-btn-sm wk-ctb-add"
+          className="rd-btn rd-btn-secondary rd-btn-sm wk-ctb-add"
           onClick={() => onSpec({ ...spec, fields: [...spec.fields, { name: '', type: '' }] })}
         >
           + Subfield

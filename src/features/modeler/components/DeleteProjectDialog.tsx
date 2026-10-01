@@ -67,7 +67,7 @@ export default function DeleteProjectDialog({ open, project, onClose, onDeleted 
   return (
     <Dialog open={open} onClose={onClose} title={`Delete project «${project.name}»?`} icon={AlertTriangle} width={520}
       footer={<>
-        <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Cancel</button>
         <button type="button" className="rd-btn rd-btn-danger rd-btn-sm" disabled={!ok} onClick={() => void confirm()}>Delete project</button>
       </>}>
       {/* Región viva (doc 105): el conteo, su error y el reintento se anuncian. */}
@@ -75,7 +75,7 @@ export default function DeleteProjectDialog({ open, project, onClose, onDeleted 
         {counts ? deletionSummary(project.name, counts)
           : countError ? <>Couldn't count the project contents: {countError}. Everything in the project will still be deleted.{' '}
             {/* Retry desaparece al pulsarlo: el foco pasa al nombre, no a <body>. */}
-            <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm"
+            <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm"
               onClick={() => { nameRef.current?.focus(); setAttempt((n) => n + 1); }}>Retry</button></>
             : 'Counting project contents…'}
       </p>

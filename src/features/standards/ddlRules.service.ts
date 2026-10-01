@@ -116,6 +116,35 @@ export const toEditInput = (r: DdlRule): DdlRuleEditInput => ({
   appliesTo: r.appliesTo, priority: r.priority, enabled: r.enabled,
 });
 
+/** Resumen de una línea de la acción de la regla (catálogo de reglas). */
+export function ruleActionSummary(r: DdlRule): string {
+  const a = r.action ?? {};
+  if (typeof a.expression === 'string') return a.expression;
+  if (a.tags) return `SET TAGS (${Object.keys(a.tags as object).join(', ')})`;
+  if (a.tblproperties) return `TBLPROPERTIES (${Object.keys(a.tblproperties as object).join(', ')})`;
+  if (a.exclude === true) return 'Exclude column from the SELECT';
+  if (a.statements) {
+    const st = a.statements as { before?: string[]; after?: string[] };
+    const n = (st.before?.length ?? 0) + (st.after?.length ?? 0);
+    return `Statements: ${(st.before?.[0] ?? st.after?.[0] ?? '').slice(0, 48)}${n > 1 ? ` (+${n - 1})` : ''}`;
+  }
+  if (a.layout) {
+    const lay = a.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string };
+    const udp = (lay.partitionUdp ?? lay.partitionOrderUdp ?? '').trim();
+    const where = lay.partitionColumns === 'last' ? 'last'
+      : lay.partitionColumns === 'partitioned-by' ? 'only in PARTITIONED BY'   // doc 107
+        : 'in physical order';
+    return `Column layout: partition columns ${where}` + (udp ? ` · partitions from UDP "${udp}"` : '');
+  }
+  if (a.types) {
+    const map = Object.entries(a.types as Record<string, string>).map(([k, v]) => `${k} → ${v}`).join(', ');
+    return `Data types: ${map}`;
+  }
+  const emit = a.emit as Record<string, unknown> | undefined;
+  if (emit) return `+ ${emit.type === 'view' ? 'view' : 'tbl'} "${emit.schema}.${emit.name}"`;
+  return '—';
+}
+
 // ── Form ↔ YAML (claves en inglés, 1:1 con el formulario — spec §6.1) ──────
 
 const YAML_KEYS = ['name', 'description', 'kind', 'target', 'sourceArtifact',

@@ -297,7 +297,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
             {/* Doc 70: quitarla de ESTE canvas no la borra del modelo ni de
                 otros canvases (antes: checkbox «Show on canvas», flag global). */}
             {canEdit && (
-              <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', marginBottom: 8 }}
+              <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" style={{ width: '100%', marginBottom: 8 }}
                 title="Remove this view from the current canvas (it stays in the model and in other canvases)"
                 onClick={() => void removeViewFromCanvas(view.id).then(() => pushToast('View removed from canvas'))
                   .catch(reportWriteError((e) => pushToast(failureText("Couldn't remove the view from this canvas", e), 'err')))}>
@@ -311,7 +311,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
             )}
             {canEdit && (
               <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5' }}>
-                <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center', color: 'var(--error, #C4314B)' }} onClick={askDelete}>
+                <button className="rd-btn rd-btn-danger rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={askDelete}>
                   <Trash2 size={12} /> Delete view…
                 </button>
               </div>
@@ -396,7 +396,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
               <p className="wk-pp-cap">The DDL lists the sources as <span className="rd-mono">FROM t1, t2…</span> with no JOIN (Erwin default). A join or a WHERE can be noted in the User-Defined SQL (Query SQL tab, informational).</p>
             )}
             <p className="wk-pp-cap">Column participation, aliases and expressions are edited per column (Columns tab) or in the full editor.</p>
-            <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setEditorOpen(true)}>
+            <button className="rd-btn rd-btn-secondary rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={() => setEditorOpen(true)}>
               {canEdit ? <Pencil size={12} /> : <Eye size={12} />} Open in View Editor
             </button>
           </>

@@ -588,7 +588,7 @@ function ExportModal({
           )}
         </div>
         <div className="m-foot">
-          {!finished && <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onCancel}>Cancel</button>}
+          {!finished && <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onCancel}>Cancel</button>}
           {finished && <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" onClick={onClose}>Close</button>}
         </div>
       </div>

@@ -37,7 +37,7 @@ export default function DomainInheritPopup({ domain, offer, also, onConfirm, onS
   return (
     <Modal title={`Inherit from domain ${domain.name}`} icon="columns" onClose={onSkip}
       footer={<>
-        <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onSkip}>Skip</button>
+        <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onSkip}>Skip</button>
         <button className="rd-btn rd-btn-primary rd-btn-sm" onClick={() => onConfirm(all.filter((i) => checked.has(i.def.id)))}>
           Inherit selected ({checked.size})
         </button>

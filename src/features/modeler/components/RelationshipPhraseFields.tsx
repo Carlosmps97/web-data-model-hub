@@ -51,7 +51,7 @@ export default function RelationshipPhraseFields({ values, onChange, locked, onA
         {onApply && (
           <div className="wk-relphrase-apply">
             {canApply && <span className="rd-small">Unsaved changes</span>}
-            <button type="button" className="rd-btn rd-btn-sm" disabled={locked || !canApply}
+            <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={locked || !canApply}
               title="Save both phrases" onClick={onApply}>
               <Check size={13} /> Apply
             </button>

@@ -314,7 +314,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
             )}
           </span>
           {parentPksNow.length > 0 && (
-            <button type="button" className="rd-btn rd-btn-sm" disabled={locked} onClick={startSync}>Sync with parent key</button>
+            <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={locked} onClick={startSync}>Sync with parent key</button>
           )}
         </div>
       )}
@@ -366,7 +366,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
             </div>
           ))}
           <div className="m-foot">
-            <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={locked} onClick={() => setSyncing(false)}>Cancel</button>
+            <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={locked} onClick={() => setSyncing(false)}>Cancel</button>
             <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={locked} onClick={applySync}>
               {saving && <span className="rd-spin" aria-hidden />}
               {saving ? 'Syncing…' : 'Apply sync'}
@@ -394,7 +394,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
                       value={roleDrafts[i] ?? p.roleName ?? ''}
                       onChange={(e) => setRoleDrafts((d) => ({ ...d, [i]: e.target.value }))}
                     />
-                    <button type="button" className="rd-btn rd-btn-sm" disabled={locked || !(roleDrafts[i] ?? '').trim()}
+                    <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={locked || !(roleDrafts[i] ?? '').trim()}
                       title="Apply role name: renames the child FK (or creates a new column if it is shared)"
                       onClick={() => applyRole(i)}>
                       <Check size={13} /> Apply

@@ -19,7 +19,6 @@ const MONO = "var(--mono, 'Geist Mono', monospace)";
 const lbl: React.CSSProperties = { display: 'block', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED, marginBottom: 6 };
 const idField: React.CSSProperties = { width: '100%', height: 42, padding: '0 13px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 10, fontFamily: MONO, fontSize: 13.5, color: NAVY, outline: 'none', boxSizing: 'border-box' };
 const cellInput: React.CSSProperties = { width: '100%', height: 32, padding: '0 10px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 7, fontFamily: MONO, fontSize: 11.5, color: NAVY, outline: 'none', boxSizing: 'border-box' };
-const link: React.CSSProperties = { border: 'none', background: 'transparent', color: BLUE, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 };
 const updn = (dis: boolean): React.CSSProperties => ({ height: 13, border: 'none', background: 'transparent', cursor: dis ? 'default' : 'pointer', color: dis ? '#D6DCE6' : '#8A93A5', padding: 0, lineHeight: 0 });
 
 /**
@@ -353,7 +352,7 @@ export default function ViewEditor({
                 ? <>To {editing ? 'save' : 'create'} the view: {disabledReason}.</>
                 : <>A view never copies data — it derives from {sourceIds.length === 1 ? 'its source table' : `its ${sourceIds.length} source tables`}.</>}
             </span>
-            <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
+            <button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Cancel</button>
             <button className="rd-btn rd-btn-sm" disabled={!canSave} onClick={save}
               title={disabledReason}
               style={{ background: canSave ? PURPLE : '#CBD2DE', color: '#fff', border: 'none' }}>
@@ -390,7 +389,7 @@ export default function ViewEditor({
                   <span style={{ fontSize: 11.5, color: '#B45309', fontWeight: 600 }}>
                     No <span className="rd-mono">{suggestVU}</span> schema yet — pick one, or create it.
                   </span>
-                  <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm"
+                  <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm"
                     onClick={() => setSchemaModal(true)}>
                     <Plus size={13} /> Create {suggestVU}
                   </button>
@@ -486,9 +485,8 @@ export default function ViewEditor({
                   style={{ width: '100%', height: 32, padding: '0 10px 0 30px', border: '1px solid #DDE2EC', borderRadius: 8, fontSize: 12.5, color: NAVY, outline: 'none', background: '#fff', boxSizing: 'border-box' }} />
               </div>
               <span style={{ flex: 1 }} />
-              <button type="button" style={link} onClick={() => setAll(true)}>Select all</button>
-              <span style={{ color: '#D6DCE6' }}>·</span>
-              <button type="button" style={{ ...link, color: MUTED }} onClick={() => setAll(false)}>Clear</button>
+              <button type="button" className="rd-btn rd-btn-secondary rd-btn-xs" onClick={() => setAll(true)}>Select all</button>
+              <button type="button" className="rd-btn rd-btn-secondary rd-btn-xs" onClick={() => setAll(false)}>Clear</button>
             </div>
             )}
           </div>

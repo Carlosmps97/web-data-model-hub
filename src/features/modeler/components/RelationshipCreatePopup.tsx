@@ -164,7 +164,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
       </div>
 
       <div className="m-foot">
-        <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={saving} onClick={() => onClose(false)}>Cancel</button>
+        <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={saving} onClick={() => onClose(false)}>Cancel</button>
         <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={saving} onClick={() => void confirm()}>
           {saving && <span className="rd-spin" aria-hidden />}
           {saving ? 'Creating…' : 'Create relationship'}
