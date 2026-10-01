@@ -20,6 +20,18 @@ export interface RestoredFrom {
   appliedAt?: string | null;
 }
 
+/** Doc 104: un traspaso de ownership de un draft (`transfers[]` del changeset,
+ *  espejo del dict del backend — invariante round-trip). `from` de la PRIMERA
+ *  transferencia = quien inició la versión; `owner` es siempre el dueño actual. */
+export interface OwnershipTransfer {
+  from: string;
+  to: string;
+  /** Quien la transfirió: el dueño de entonces o un administrador. */
+  by: string;
+  at: string;
+  note?: string | null;
+}
+
 /** Conteos de activos de un proyecto (`GET /api/projects/{pid}/counts`, doc 75 D5). */
 export interface ScopeCounts {
   tables: number;
@@ -61,6 +73,8 @@ export interface VersionRow {
   appliedAt?: string | null;
   /** Doc 65: presente cuando esta versión nació de una restauración. */
   restoredFrom?: RestoredFrom | null;
+  /** Doc 104: traspasos de ownership (vacío si nunca cambió de manos). */
+  transfers?: OwnershipTransfer[];
 }
 
 /** Los 5 contadores del Home (global o acotado a un proyecto). */
@@ -77,6 +91,9 @@ export interface SimUserDto {
   id: string;
   name: string;
   initials: string;
+  /** Doc 105: usuario deshabilitado — sólo viene en `listUserNames()` (para
+   *  resolver nombres); nunca se ofrece como revisor ni destino. */
+  disabled?: boolean;
 }
 
 /** Body de `POST /api/changesets/snapshot`: la working copy es DEL proyecto (doc 75 D2). */
@@ -166,6 +183,31 @@ export interface ChangesetDetail {
   appliedAt?: string | null;
   /** Doc 65: presente cuando esta versión nació de una restauración. */
   restoredFrom?: RestoredFrom | null;
+  /** Doc 104: traspasos de ownership (vacío si nunca cambió de manos). */
+  transfers?: OwnershipTransfer[];
+  /** Resumen compat M-series: ids que el draft agrega / modifica / borra
+   *  frente a producción, por colección. */
+  diff?: Record<string, VersionDiffSummary>;
+  /** Doc 104: TODOS los cambios del draft (también lo creado y borrado dentro
+   *  de él) — lo que se borra al eliminarlo. */
+  changeCount?: number;
+  /** Doc 104 (ronda 2): un approve falló cuando ya escribía en producción;
+   *  mientras exista, el backend no deja eliminar el draft (409). */
+  partialApplyAt?: string | null;
+  /** Doc 105: una carga Excel escribiendo en el draft (lock visible para los dos
+   *  procesos del backend; `heartbeat` en epoch). Transferir, eliminar y enviar a
+   *  revisión responden 409 mientras esté vivo. Espejo de `ChangesetDoc.uploadLock`. */
+  uploadLock?: { jobId: string; owner: string; at: number; heartbeat: number } | null;
+  /** Doc 105: draft de restauración a medias (el proceso murió armándolo): no se
+   *  puede enviar (409); se elimina y se restaura de nuevo. Espejo de `ChangesetDoc`. */
+  restoreIncomplete?: boolean | null;
+}
+
+/** Ids por verbo de una colección en el resumen compat de `GET /api/changesets/{id}`. */
+export interface VersionDiffSummary {
+  added: string[];
+  modified: string[];
+  removed: string[];
 }
 
 /** Una entidad tocada por el diff (tabla/columna). `collection` la agrupa. */

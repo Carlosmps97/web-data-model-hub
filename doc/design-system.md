@@ -484,7 +484,13 @@ En pantallas con inline (Admin) el color se deriva por hash con `avatarColor(see
 
 ### 7.3 Dialog
 
-Modal del DS con un patrón distintivo: **scrim solo sobre el lienzo**. Renderiza vía `createPortal` a `document.body`. Cierra con ESC, click en el backdrop o el botón de cerrar.
+Modal del DS con un patrón distintivo: **scrim solo sobre el lienzo**. Renderiza vía `createPortal` a `document.body`. Cierra con ESC —sólo el diálogo del tope de la pila (`dialogStack.ts`, doc 80 §1)— o con el botón de cerrar; el click en el backdrop NO cierra (pedido del owner: un click afuera perdía lo tipeado). Se anuncia con su título (`aria-label={title}`). Tab y Shift+Tab no salen del diálogo: del último control vuelven al primero y al revés (doc 105, F6 — `trapTab` de `components/ui/focusTrap.ts`, la misma trampa de `Modal`, `ConfirmDialog`, el prompt, Version tools y el diálogo de transferencia).
+
+**Foco (doc 105, F6)** — igual en `Dialog`, `Modal`, `ConfirmDialog` y el prompt de `dialogs.tsx` (`components/ui/focusTrap.ts`): quien lo abrió se captura en el render de apertura (`activeElementNow`, antes del commit: un `autoFocus` de adentro todavía no tomó el foco); al abrirse, el foco entra a la caja (`tabIndex={-1}`, sin outline) salvo que un control de adentro ya lo tenga; Tab y Shift+Tab no salen (`trapTab`, cuenta sólo controles habilitados y visibles); y al cerrarse, si el foco quedó huérfano en `<body>`, vuelve a quien lo abrió si sigue en pantalla y habilitado (si no, ver el párrafo siguiente) — nunca se lo quita a otro elemento (`focusInto(box, openedFrom)`, robusto al doble montaje de StrictMode con un `WeakMap` de «quién abrió cada caja»). Antes, abierto con el mouse, el foco quedaba en la página de atrás y Tab la recorría.
+
+**Foco perdido y a quién se devuelve (doc 105, R6).** Desde la ronda R6 también `ConfirmDialog` y el prompt de `dialogs.tsx` entran a la pila (`dialogStack.ts`; `Modal` entró antes, §7.6): con un confirm o un prompt encima, el `Dialog` o `Modal` de abajo deja de ser el tope y su ESC y su recuperación del foco quedan en pausa. Tras cada render, el `Dialog` o `Modal` del tope que perdió el foco —quedó en `<body>` porque un control suyo desapareció, o en un botón suyo que pasó a busy— lo devuelve a su caja (`keepFocusIn`); y un Tab con el foco perdido lo retoma la caja del diálogo del tope (`recoverTab`, en un listener de `window`: el `onKeyDown` de la caja no lo ve, el evento nace en `<body>`) — los cuatro lo tienen. `trapTab` cuenta sólo controles `tabbable`: habilitados (también dentro de un `fieldset` deshabilitado) y visibles (con caja y sin `visibility: hidden`). Al cerrarse, `returnTarget` elige adónde vuelve el foco, en este orden: a quien abrió el diálogo si todavía sirve (en pantalla y habilitado); si no, y estaba dentro de otro diálogo que sigue ABIERTO, a la caja de ése (antes iba a quien abrió ése, que quedó detrás del modal); si ese diálogo ya se cerró (confirmaciones encadenadas: el segundo se abrió desde el primero), a quien abrió ése, con la misma regla; y si tampoco, al último diálogo modal (`aria-modal`) que sigue en pantalla — antes, si quien abrió se había ido con su fila, el foco quedaba en `<body>`. Mientras dura esa devolución, `isFocusReturn(el)` es verdadero para quien la recibe: su `onFocus` distingue así el foco que devuelve un diálogo del que pone el usuario (doc 105). Un `SearchSelect` dentro de un diálogo no suelta el foco al elegir ni con ESC, y su acción del pie abre su diálogo sin blur previo, así ese diálogo le devuelve el foco al cerrarse; ese foco devuelto no le reabre el menú (`isFocusReturn`; ver `SearchSelect` en api-reference).
+
+**El Enter que cierra un diálogo (doc 105, R11/R14).** Un diálogo que se cierra en el keydown de un Enter —el prompt, el Locate de «Search the model», el alta de columna o de tabla— no devuelve el foco hasta el keyup de ese Enter: devuelto antes, el keypress del mismo Enter «clicaba» a quien lo abrió (un botón) y reabría el popup o repetía Undo. Sin keyup, la devolución igual ocurre: al `blur` de la ventana, o 1 s después del ÚLTIMO keydown del Enter —con el Enter sostenido el autorepeat sigue llegando y se espera—. ⌘Enter no deja la marca (en macOS no llega el keyup del Enter con ⌘ apretado, y con ⌘ no hay keypress que clique nada) y el keyup de Meta también la suelta. Esos Enter hacen además `preventDefault`, y el alta de columna y la de tabla («New column», «New table») crean UNA sola vez aunque lleguen dos Enter seguidos o uno sostenido (`inFlight`: `busy` sigue en false dentro del mismo render; si el alta falla, el Enter siguiente reintenta). Los atajos del canvas —Ctrl/Cmd+C, V y Z, y Esc— no actúan detrás de algo modal (`modalOpen()`): un `.dmh-backdrop`, cualquier `[aria-modal="true"]` (Dialog, Modal, confirmaciones, prompt, Version tools) y las esperas bloqueantes `.dmh-busy-overlay` (`runBlocking`: «Saving working copy…», «Creating table…») y `.wk-nav-overlay` (el Locate). Desde la ronda 6 (R17b) tampoco ⌘K / Ctrl+K, que abre «Search the model» (`onSearchShortcut` del `Toolbar`: lo abría DEBAJO de «Saving working copy…» y se llevaba el foco). Y la devolución pendiente de un Enter tiene dos casos más (R17b): un diálogo que se abre mientras está pendiente —el Enter que cerró otro todavía está abajo, el foco en `<body>`— toma como «quien lo abrió» el destino pendiente, así al cerrarse el foco vuelve ahí (F2); y un Tab con el foco en `<body>` durante la espera hace la devolución en el acto y el foco se queda en quien abrió —antes saltaba al inicio de la página— (F4).
 
 | Prop | Tipo | Default | Notas |
 |---|---|---|---|
@@ -492,7 +498,7 @@ Modal del DS con un patrón distintivo: **scrim solo sobre el lienzo**. Renderiz
 | `title` | `string` | — | Título del header |
 | `subtitle` | `string` | — | Subtítulo opcional |
 | `icon` | `LucideIcon` | — | Chip de ícono en el header |
-| `onClose` | `() => void` | — | ESC / backdrop / cerrar |
+| `onClose` | `() => void` | — | ESC (sólo el del tope) / botón de cerrar |
 | `footer` | `ReactNode` | — | Acciones alineadas a la derecha |
 | `width` | `number` | `560` | Ancho en px |
 | `backdrop` | `'screen' \| 'canvas'` | `'screen'` | screen=oscurece todo; canvas=oscurece solo el lienzo |
@@ -568,13 +574,13 @@ const [mode, setMode] = useState<'table' | 'column'>('table');
 
 ### 7.6 Modal (legacy)
 
-Shell de modal previo: scrim que oscurece, sin difuminado (`.dmh-backdrop`, ver §7.3) + header (ícono · título · subtítulo · cerrar) + cuerpo scrolleable + footer a la derecha. Usa el set **Icon.tsx** por nombre. ESC cierra.
+Shell de modal previo: scrim que oscurece, sin difuminado (`.dmh-backdrop`, ver §7.3) + header (ícono · título · subtítulo · cerrar) + cuerpo scrolleable + footer a la derecha. Usa el set **Icon.tsx** por nombre. ESC cierra — desde el doc 105 sólo el del tope: `Modal` entra a la misma pila de diálogos que `Dialog` (`dialogStack.ts`; antes, con «Inherit from domain» abierto sobre «New column», un ESC cerraba los dos y se perdía la columna nueva). El click en el scrim no cierra. Se anuncia con su título (`aria-label={title}`) y maneja el foco como `Dialog` (ver §7.3: captura de quien lo abrió, foco a la caja, `trapTab` y devolución al cerrar).
 
 | Prop | Tipo | Notas |
 |---|---|---|
 | `title` / `subtitle` | `string` | Header |
 | `icon` | `IconName` | Nombre del set propio |
-| `onClose` | `() => void` | ESC / backdrop |
+| `onClose` | `() => void` | ESC (sólo el del tope) / botón de cerrar |
 | `footer` | `ReactNode` | Acciones a la derecha (`.left` para contenido a la izquierda) |
 | `size` | `'md' \| 'lg'` | md=560px, lg=760px |
 
@@ -592,9 +598,9 @@ import { Modal } from '@/components/ui';
 
 ### 7.7 ConfirmDialog y diálogos imperativos
 
-`ConfirmDialog` reemplaza `window.confirm`: accesible por teclado (ESC cancela, el botón de confirmar se auto-enfoca), con opción "No volver a preguntar en esta sesión" persistida en `sessionStorage`. Variante `danger` (ícono `trash`, botón rojo) o `primary` (ícono `info`). Soporta `busy` para bloquear con spinner mientras corre una acción asíncrona.
+`ConfirmDialog` reemplaza `window.confirm`: accesible por teclado (ESC cancela; el botón de confirmar se auto-enfoca, salvo `initialFocus: 'cancel'` para lo que no se deshace — doc 104, eliminar una versión: un Enter doble no confirma; Tab y Shift+Tab no salen del diálogo — doc 105, F6, `trapTab`; el foco y su devolución al cerrar, como en §7.3), con opción "No volver a preguntar en esta sesión" persistida en `sessionStorage`. Variante `danger` (ícono `trash`, botón rojo) o `primary` (ícono `info`). Soporta `busy` para bloquear con spinner mientras corre una acción asíncrona; al confirmar, el foco pasa a la caja ANTES de quedar ocupado (doc 105: `busy` deshabilita los dos botones y el foco caía a `<body>`, donde Tab escapaba a la página de atrás). Desde la ronda R6 entra a la pila de diálogos —mientras está abierto es el tope— y un Tab con el foco perdido lo retoma su caja (`recoverTab`); su ESC sigue en fase de captura con `stopPropagation`, así un ESC cierra sólo el confirm. Doc 105 (R11): cada confirm tiene sus propios ids (`useId`: dos a la vez —el inline de un `Dialog` y el del `DialogHost`— compartían `confirm-dialog-title`) y el mensaje es su descripción accesible (`aria-describedby`): el lector decía sólo el título.
 
-Sobre él, `dialogs.tsx` expone **helpers basados en promesas** (`confirmDialog`, `promptDialog`) con una cola global renderizada por `<DialogHost/>` (se monta una vez al final de `App.tsx`). Con `action`, el diálogo no cierra al confirmar: queda con spinner hasta que la promesa resuelve.
+Sobre él, `dialogs.tsx` expone **helpers basados en promesas** (`confirmDialog`, `promptDialog`) con una cola global renderizada por `<DialogHost/>` (se monta una vez al final de `App.tsx`). Con `action`, el diálogo no cierra al confirmar: queda con spinner hasta que la promesa resuelve. El prompt también atrapa Tab, captura a quien lo abrió y le devuelve el foco al cerrarse; el foco inicial sigue en su input y, con `action`, pasa a la caja antes de quedar ocupado (doc 105). Desde la ronda R6 entra a la pila como `ConfirmDialog` (con `recoverTab`), la caja se nombra con su título (`aria-labelledby`, ids de `useId`) y el `label` es un `<label htmlFor>` de su input; sin `label`, el input se nombra con el título. El Enter del input hace `preventDefault` antes de aceptar (R11: su keypress «clicaba» al botón que abrió el prompt).
 
 ```mermaid
 sequenceDiagram
@@ -637,17 +643,17 @@ if (name) createChangeset(name);
 
 ### 7.8 TagEditor
 
-Editor de etiquetas clave/valor: chips + fila "clave = valor" para agregar. Usado en tres niveles (dominio, tabla, columna) del gobierno. `compact` para contextos densos (panel de columna). Renderiza `.tag-editor` (ui.css) con íconos del set propio.
+Editor de etiquetas clave/valor: chips + fila "key = value" para agregar. Usado en tres niveles (dominio, tabla, columna) del gobierno. `compact` para contextos densos (panel de columna). Renderiza `.tag-editor` (ui.css) con íconos del set propio. Los placeholders por defecto son «key» y «value» (`keyPlaceholder` / `valuePlaceholder`; doc 105, ronda 5: la UI va en inglés — decían «clave» / «valor»).
 
 ```tsx
 import TagEditor from '@/components/ui/TagEditor';
 
-<TagEditor value={tags} onChange={setTags} keyPlaceholder="clave" valuePlaceholder="valor" />
+<TagEditor value={tags} onChange={setTags} compact />
 ```
 
 ### 7.9 Tooltip
 
-Tooltip minimal por hover, posicionado con `getBoundingClientRect` y renderizado por portal a `document.body`. Fondo `--ink`, texto blanco 11px, `--shadow-md`.
+Tooltip minimal por hover, posicionado con `getBoundingClientRect` y renderizado por portal a `document.body`. Fondo `--ink`, texto blanco 11px, `--shadow-md`. Es sólo visual: un botón de ícono lleva además su `aria-label` (doc 105, ronda 5: los botones de ícono de la Toolbar del canvas no tenían nombre accesible —un lector anunciaba «button» sin más—; en solo lectura el nombre suma «— Read-only — published version», el motivo por el que están deshabilitados). Ronda 6 (R17b): el artículo sigue al sonido («Add an ellipse»; decía «Add a ellipse»), el atajo del buscador se rotula según el sistema (`SEARCH_KEY_LABEL`: ⌘K en macOS y Ctrl+K en el resto; decía «⌘K» fijo), también en el botón de búsqueda del Explorer, y Logical/Physical anuncian cuál está activa con `aria-pressed`.
 
 ```tsx
 import { Tooltip } from '@/components/ui';

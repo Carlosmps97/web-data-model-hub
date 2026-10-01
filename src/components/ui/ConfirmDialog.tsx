@@ -11,8 +11,10 @@
  *   - `clearSkipConfirm(key)`  — clear a flag.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Icon from './Icon';
+import { isTopDialog, pushDialog, removeDialog } from './dialogStack';
+import { activeElementNow, focusInto, recoverTab, trapTab } from './focusTrap';
 
 const SKIP_PREFIX = 'confirm-skip:';
 
@@ -36,6 +38,9 @@ interface ConfirmDialogProps {
   dontAskKey?: string;
   /** Acción en curso: deshabilita botones/ESC/backdrop y muestra spinner en confirmar. */
   busy?: boolean;
+  /** Botón con el foco al abrir (default «confirm»). «cancel» para lo que no
+   *  se deshace (doc 104: eliminar una versión) — un Enter doble no confirma. */
+  initialFocus?: 'confirm' | 'cancel';
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -49,6 +54,7 @@ export default function ConfirmDialog({
   variant = 'primary',
   dontAskKey,
   busy = false,
+  initialFocus = 'confirm',
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -58,22 +64,63 @@ export default function ConfirmDialog({
     setPrevOpen(open);
     if (open) setSkipNext(false);
   }
+  // Doc 105 (R11): ids propios (dos confirms a la vez —el inline de un Dialog y
+  // el del DialogHost— compartían «confirm-dialog-title»); el mensaje es la
+  // descripción accesible (el lector sólo decía el título).
+  const titleId = useId();
+  const messageId = useId();
   const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  // Quién tenía el foco al ABRIRSE: se lee en el render en que `open` pasa a
+  // true, antes del commit (sirve montado abierto o abierto después).
+  const openerRef = useRef<Element | null>(null);
+  const shownRef = useRef(false);
+  if (open !== shownRef.current) {
+    shownRef.current = open;
+    if (open) openerRef.current = activeElementNow();
+  }
+
+  const tokenRef = useRef<symbol | null>(null);
+  if (tokenRef.current === null) tokenRef.current = Symbol('dmh-confirm');
+
+  // Doc 105 (F6): el foco entra a la caja al abrirse (a los 30 ms lo toma su
+  // botón) y, al cerrarse, vuelve a quien lo abrió — sobre un Dialog o un Modal
+  // quedaba en <body> y Tab escapaba a la página de atrás. Ver `focusInto`.
+  // R6: entra a la pila de diálogos (es el tope mientras está abierto) y un Tab
+  // con el foco perdido lo retoma su caja (`recoverTab`).
+  useEffect(() => {
+    if (!open) return undefined;
+    const token = tokenRef.current as symbol;
+    pushDialog(token);
+    const restoreFocus = focusInto(boxRef.current, openerRef.current);
+    const onTab = (e: KeyboardEvent) => { if (isTopDialog(token)) recoverTab(e, boxRef.current); };
+    window.addEventListener('keydown', onTab);
+    return () => {
+      removeDialog(token);
+      window.removeEventListener('keydown', onTab);
+      restoreFocus();
+    };
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    const t = window.setTimeout(() => confirmBtnRef.current?.focus(), 30);
+    const t = window.setTimeout(() => (initialFocus === 'cancel' ? cancelBtnRef : confirmBtnRef).current?.focus(), 30);
     // Capture + stopPropagation: si el confirm se abre SOBRE un Modal (que
     // también escucha ESC en window), el ESC cierra sólo este diálogo.
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); if (!busy) onCancel(); } };
     window.addEventListener('keydown', onKey, true);
     return () => { window.clearTimeout(t); window.removeEventListener('keydown', onKey, true); };
-  }, [open, busy, onCancel]);
+  }, [open, busy, onCancel, initialFocus]);
 
   const handleConfirm = useCallback(() => {
     if (dontAskKey && skipNext) {
       try { window.sessionStorage.setItem(SKIP_PREFIX + dontAskKey, '1'); } catch { /* ignore */ }
     }
+    // Doc 105 (F6): confirmar suele pasar a busy, que deshabilita los dos
+    // botones; el enfocado soltaba el foco a <body> y Tab salía a la página de
+    // atrás. El foco queda en la caja (como en TransferVersionDialog).
+    boxRef.current?.focus();
     onConfirm();
   }, [dontAskKey, skipNext, onConfirm]);
 
@@ -88,10 +135,14 @@ export default function ConfirmDialog({
     <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
       <div
         className="dmh-modal"
-        style={{ width: 440 }}
+        style={{ width: 440, outline: 'none' }}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="confirm-dialog-title"
+        aria-labelledby={titleId}
+        aria-describedby={messageId}
+        ref={boxRef}
+        tabIndex={-1}
+        onKeyDown={(e) => trapTab(e, boxRef.current)}   // doc 105: Tab no sale del diálogo
       >
         <div className="m-body" style={{ display: 'flex', gap: 14 }}>
           <span
@@ -104,8 +155,8 @@ export default function ConfirmDialog({
             <Icon name={danger ? 'trash' : 'info'} size={18} />
           </span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <h3 id="confirm-dialog-title" className="rd-h3" style={{ marginBottom: 6 }}>{title}</h3>
-            <div className="rd-small" style={{ lineHeight: 1.6 }}>{message}</div>
+            <h3 id={titleId} className="rd-h3" style={{ marginBottom: 6 }}>{title}</h3>
+            <div id={messageId} className="rd-small" style={{ lineHeight: 1.6 }}>{message}</div>
             {dontAskKey && (
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, cursor: 'pointer' }}>
                 <input type="checkbox" checked={skipNext} onChange={(e) => setSkipNext(e.target.checked)} />
@@ -115,7 +166,7 @@ export default function ConfirmDialog({
           </div>
         </div>
         <div className="m-foot">
-          <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
+          <button ref={cancelBtnRef} type="button" className="rd-btn rd-btn-ghost rd-btn-sm" disabled={busy} onClick={onCancel}>{cancelLabel}</button>
           <button
             ref={confirmBtnRef}
             type="button"

@@ -1,0 +1,79 @@
+// Doc 105 (ronda 4, 6c) — pegar una tabla termina recargando el canvas; si
+// mientras recargaba se abrió otra versión, `pasteTable` igual devolvía el
+// nombre de la copia y el llamador (menú de la columna, Ctrl+V) avisaba
+// «… pasted as …» sobre la versión NUEVA. Ahora devuelve null: no se avisa.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
+vi.mock('@/services/governance.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/governance.service')>();
+  return { ...actual, searchTables: vi.fn(async () => []), recordChangesBulk: vi.fn(async () => ({})) };
+});
+vi.mock('../features/modeler/services/structure.service', () => ({ addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })) }));
+vi.mock('../features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
+vi.mock('@/services/naming.service', () => ({ getNamingConfig: vi.fn(async () => ({})) }));
+
+import * as mod from '../features/modeler/services/modeler.service';
+import { useModelerStore } from './useModelerStore';
+import { useSessionStore } from './useSessionStore';
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>((r) => { resolve = r; }); return { promise, resolve }; }
+const st = () => useModelerStore.getState();
+const T1 = { id: 't1', logicalName: 'cliente', physicalName: 'M_CLIENTE' };
+const C1 = { id: 'c1', tableId: 't1', logicalName: 'cod', physicalName: 'COD', dataType: 'STRING', typeOverridden: false, ordinal: 0 };
+const DIA = { subjectArea: { id: 'sa1', projectId: 'p1', name: 'C', tableIds: ['t1'], layout: {} }, tables: [T1], columns: [C1], relationships: [], views: [] };
+
+beforeEach(async () => {
+  vi.clearAllMocks();
+  useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1', activeProjectId: 'p1' });
+  vi.mocked(mod.loadDiagram).mockImplementation(async () => structuredClone(DIA) as never);
+  // La faceta la cambian algunos tests (los nombres siguen la faceta): cada uno arranca en Physical.
+  useModelerStore.setState({ activeProjectId: 'p1', activeSaId: null, diagram: null, openingSaId: null, flow: null, viewMode: 'physical' });
+  await st().selectSubjectArea('sa1');
+  useModelerStore.setState({ tblClipboard: { table: T1 as never, cols: [C1 as never] } });
+});
+afterEach(async () => { await sleep(5); });
+
+describe('pegar una tabla no avisa en otra versión (doc 105, ronda 4)', () => {
+  it('si mientras recargaba se abrió otra versión, no devuelve el nombre', async () => {
+    const late = deferred<unknown>();
+    vi.mocked(mod.loadDiagram).mockImplementationOnce(() => late.promise as never);
+    const paste = st().pasteTable();
+    await sleep(5);                                    // grabó; recarga
+    useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs2' });
+    late.resolve(structuredClone(DIA));
+    await expect(paste).resolves.toBeNull();
+  });
+
+  it('sin cambio de sesión, devuelve el nombre de la copia (como siempre)', async () => {
+    await expect(st().pasteTable()).resolves.toMatch(/^M_CLIENTE/);
+  });
+});
+
+// Doc 105 (ronda 5, R15-H9): el nombre que se muestra al copiar y pegar una
+// tabla es el de la faceta abierta — en Lógico decía «Entity pasted as» con el
+// nombre FÍSICO de la copia.
+describe('copiar y pegar dan el nombre según la faceta (doc 105, ronda 5)', () => {
+  it('en Lógico: el lógico del original y el de la copia', async () => {
+    useModelerStore.setState({ viewMode: 'logical' });
+    expect(st().copyTable('t1')).toBe('cliente');
+    await expect(st().pasteTable()).resolves.toMatch(/^cliente/);
+  });
+
+  // Doc 105 (ronda 6, R17a-11): la etiqueta del Undo también sigue la faceta.
+  it('en Lógico, el Undo dice «Paste entity <lógico>»', async () => {
+    const { useUndoStore } = await import('./useUndoStore');
+    useUndoStore.setState({ stack: [], busy: false });
+    useModelerStore.setState({ viewMode: 'logical' });
+    st().copyTable('t1');
+    const name = await st().pasteTable();
+    expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual([`Paste entity ${name}`]);
+  });
+
+  it('en Físico: los físicos (como siempre)', async () => {
+    useModelerStore.setState({ viewMode: 'physical' });
+    expect(st().copyTable('t1')).toBe('M_CLIENTE');
+    await expect(st().pasteTable()).resolves.toMatch(/^M_CLIENTE_copy/);
+  });
+});

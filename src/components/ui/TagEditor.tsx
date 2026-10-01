@@ -23,8 +23,8 @@ export default function TagEditor({
   value,
   onChange,
   compact,
-  keyPlaceholder = 'clave',
-  valuePlaceholder = 'valor',
+  keyPlaceholder = 'key',
+  valuePlaceholder = 'value',
 }: TagEditorProps) {
   const tags = normalizeTags(value) ?? [];
   const [k, setK] = useState('');

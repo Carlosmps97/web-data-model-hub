@@ -9,7 +9,9 @@
  *   · two columns: Requests assigned to you (left) + Versions read-only (right)
  *
  * Version creation / snapshot now lives INSIDE Model (the Open-model entry moved
- * to the canvas toolbar), so the Versions panel here is read-only.
+ * to the canvas toolbar). Doc 104: the Versions panel doesn't edit, but its
+ * "Version tools" popup lets the owner (or an administrator) transfer or delete
+ * a draft; the row shows ⇄ when a version changed hands.
  *
  * Data: dashboard.service.getSummary + versioning.service (versions, published,
  * requests, users) + projects.service.listProjects. The actor comes from
@@ -29,12 +31,13 @@ import { runBlocking } from '@/store/useBusyStore';
 import { getSummary } from '@/services/dashboard.service';
 import {
   listRequests,
-  listUsers,
+  listUserNames,
   listVersions,
   rollbackVersion,
 } from '@/services/versioning.service';
 import { listProjects } from '@/services/projects.service';
 import { projectMeta, sortProjects } from '@/lib/projects';
+import { startedBy } from '@/lib/versionAdmin';
 import VersionToolsModal from './home/VersionToolsModal';
 import type { Project } from '@/types/model';
 import type {
@@ -198,7 +201,8 @@ export default function HomeScreen() {
       listProjects(),
       listVersions(),
       listRequests({ reviewer: user.id }),
-      listUsers(),
+      // Sólo nombres (cosmético): si falla, se ven los ids — no deja el Home en blanco.
+      listUserNames().catch(() => []),
     ])
       .then(([proj, vers, reqs, us]) => {
         if (cancelled) return;
@@ -468,7 +472,7 @@ export default function HomeScreen() {
                 <button
                   type="button"
                   className="dmh-vside-tools"
-                  title="Compare versions and inspect owner, approvals and dates"
+                  title="Compare versions, inspect owner, approvals and dates, and transfer or delete drafts"
                   onClick={() => setToolsOpen({ tab: 'compare' })}
                 >
                   <GitCompare size={13} strokeWidth={1.7} aria-hidden />
@@ -520,11 +524,20 @@ export default function HomeScreen() {
                       <span className="dmh-vside-meta">
                         {userName(row.owner)}
                       </span>
+                      {/* Doc 104: la versión cambió de manos — quién la inició. */}
+                      {startedBy(row) && (
+                        <span
+                          className="dmh-vside-transferred"
+                          title={`Started by ${userName(startedBy(row))} · transferred ${row.transfers!.length} time${row.transfers!.length === 1 ? '' : 's'}`}
+                        >
+                          ⇄
+                        </span>
+                      )}
                       {row.deletesProject && <span className="dmh-vpill dmh-vpill--critical">Deletes project</span>}
                       <button
                         type="button"
                         className="dmh-vside-info"
-                        title="Version details (owner, approvals, dates)"
+                        title="Version details — owner, approvals and dates; transfer or delete a draft"
                         onClick={() => setToolsOpen({ tab: 'details', versionId: row.id, projectId: row.projectId })}
                       >
                         <Info size={12} strokeWidth={1.8} aria-hidden />
@@ -558,7 +571,7 @@ export default function HomeScreen() {
 
             <div className="dmh-vside-foot">
               <Info size={13} strokeWidth={1.5} aria-hidden />
-              Read-only · manage versions inside Model
+              Edit inside Model · transfer or delete drafts in Version tools
             </div>
 
             {toolsOpen && (
@@ -570,6 +583,7 @@ export default function HomeScreen() {
                 initialVersionId={toolsOpen.versionId ?? null}
                 initialProjectId={toolsOpen.projectId ?? null}
                 onClose={() => setToolsOpen(null)}
+                onChanged={() => { listVersions().then(setVersions).catch(() => {}); }}
               />
             )}
 

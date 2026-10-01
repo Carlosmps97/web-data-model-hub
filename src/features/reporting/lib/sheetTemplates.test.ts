@@ -123,6 +123,14 @@ describe('nombre del archivo (doc 102)', () => {
     expect(templateProblems({ name: 'QA', sheetName: 'QA', fileName: 'A:B', columns: [{ header: 'A', source: 'table.schema' }] }))
       .toEqual(['The file name can\'t contain \\ / : * ? " < > |.']);
   });
+  // Doc 105 (B7): el backend cuenta el largo con `len()` de Python (code
+  // points); el front contaba unidades UTF-16 y un emoji valía 2.
+  it('el largo se cuenta en caracteres (code points), como el backend', () => {
+    expect(fileNameProblem('😀'.repeat(61))).toBeNull();                 // 61 caracteres, 122 unidades UTF-16
+    expect(fileNameProblem(`${'😀'.repeat(60)}${'x'.repeat(60)}`)).toBeNull();   // justo 120
+    expect(fileNameProblem('😀'.repeat(121))).toBe('The file name can have at most 120 characters.');
+    expect(fileNameProblem('x'.repeat(120))).toBeNull();
+  });
 });
 
 describe('campos Subject / Diagram / Space (doc 102)', () => {

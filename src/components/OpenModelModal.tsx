@@ -273,6 +273,8 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
                           <span className="dmh-openmodel-draft-meta">
                             {d.title ? `${d.title} · ` : ''}
                             {userName(d.owner)}
+                            {/* Doc 104: draft recibido por una transferencia. */}
+                            {d.transfers?.length ? ` · received from ${userName(d.transfers[d.transfers.length - 1].from)}` : ''}
                           </span>
                           {selected ? (
                             <span className="dmh-openmodel-draft-check">

@@ -180,7 +180,9 @@ describe('server integrado (estaticos + proxy)', () => {
     expect(r.headers.get('x-req-id')).toBe('abc');
     expect((await r.json()).url).toBe('/api/projects?limit=5');
     const req = seen.at(-1);
-    expect(req.headers.authorization).toBe('Bearer tok-1');       // el del SP, no el del cliente
+    // El del SP, no el del cliente (sin fijar CUÁL: otro test de este bloque lo
+    // renueva y el orden de los tests no debe importar).
+    expect(req.headers.authorization).toMatch(/^Bearer tok-\d+$/);
     expect(req.headers['x-session-token']).toBe('jwt-user-1');
   });
 

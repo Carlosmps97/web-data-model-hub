@@ -15,24 +15,34 @@
  *     ledger: producción + inverso de las versiones posteriores); la producción
  *     actual abre el visor normal; un draft/request abre su overlay en visor.
  *
- * READ-ONLY: no toca el flujo de aprobación ni el rollback (el Restore sigue
- * viviendo en la fila de la caja Versions).
+ * Doc 104: Details también ADMINISTRA un draft — «Transfer» (pasa el
+ * ownership a otro usuario que edita modelos; la versión recuerda quién la
+ * inició) y «Delete» (lo elimina con sus cambios; producción no cambia). Los
+ * ve su dueño o un administrador; sólo sobre drafts (en revisión: retirar
+ * primero; publicadas: nunca). El resto del popup sigue siendo de lectura
+ * (el Restore vive en la fila de la caja Versions).
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  ArrowLeftRight, GitCompare, PanelsTopLeft, TriangleAlert, Undo2, X,
+  ArrowLeftRight, ArrowRightLeft, GitCompare, PanelsTopLeft, Trash2, TriangleAlert, Undo2, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar } from '@/components/ui';
+import { confirmDialog } from '@/components/ui/dialogs';
+import { ApiError, apiErrorMessage } from '@/services/http';
 import {
   OPEN_VERSION_DENIED,
   asOfChangesetId,
   canOpenVersion,
   compareVersionDetails,
   compareVersions,
+  deleteVersion,
   getChangeset,
 } from '@/services/versioning.service';
+import { canManageVersion, showStartedBy, versionActionBlock } from '@/lib/versionAdmin';
+import TransferVersionDialog from './TransferVersionDialog';
+import { trapTab } from '@/components/ui/focusTrap';
 import { useAuthStore } from '@/store/useAuthStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { projectMeta, sortProjects } from '@/lib/projects';
@@ -74,6 +84,7 @@ const STATUS_TEXT: Record<VersionRow['status'], string> = {
 
 export default function VersionToolsModal({
   versions, users, projects, initialTab = 'compare', initialVersionId = null, initialProjectId = null, onClose,
+  onChanged,
 }: {
   versions: VersionRow[];
   users: SimUserDto[];
@@ -83,6 +94,8 @@ export default function VersionToolsModal({
   /** Doc 75: proyecto preseleccionado (el de la fila que abrió el popup). */
   initialProjectId?: string | null;
   onClose: () => void;
+  /** Doc 104: una versión se transfirió o eliminó — el Home recarga la lista. */
+  onChanged?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   // Doc 75: las versiones son por proyecto — el selector acota Compare y Details.
@@ -91,13 +104,22 @@ export default function VersionToolsModal({
     initialProjectId
     ?? versions.find((v) => v.id === initialVersionId)?.projectId
     ?? sortedProjects[0]?.id ?? '');
-  const projectVersions = useMemo(() => versions.filter((v) => v.projectId === projectId), [versions, projectId]);
+  // Doc 104: versiones que ESTE popup vio eliminarse (acá o por un 404): salen
+  // de la lista al instante, sin esperar la recarga del Home.
+  const [goneIds, setGoneIds] = useState<ReadonlySet<string>>(() => new Set());
+  const markGone = (id: string) => setGoneIds((s) => (s.has(id) ? s : new Set(s).add(id)));
+  const projectVersions = useMemo(
+    () => versions.filter((v) => v.projectId === projectId && !goneIds.has(v.id)),
+    [versions, projectId, goneIds]);
   const published = useMemo(() => projectMeta(projectVersions, null)[projectId]?.productionRow ?? null, [projectVersions, projectId]);
   const navigate = useNavigate();
   const openModel = useSessionStore((s) => s.openModel);
   // Doc 70 §12: quién puede abrir qué versión en el canvas (espejo del backend).
   const me = useAuthStore((s) => s.user?.username ?? null);
-  const has = useAuthStore((s) => s.has);
+  // Doc 105 (F5): se suscribe a los PERMISOS (cambian con `refreshMe`): `s.has`
+  // es siempre la misma función y el popup no se enteraba de los nuevos.
+  const perms = useAuthStore((s) => s.user?.permissions);
+  const has = (perm: string) => Boolean(perms?.[perm]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -188,7 +210,7 @@ export default function VersionToolsModal({
   // Cambiar de proyecto re-apunta los selectores a las versiones de ESE proyecto.
   const pickProject = (pid: string) => {
     setProjectId(pid);
-    const rows = versions.filter((v) => v.projectId === pid);
+    const rows = versions.filter((v) => v.projectId === pid && !goneIds.has(v.id));
     const pub = rows.filter((v) => v.status === 'approved' && !!v.appliedAt)
       .sort((a, b) => String(a.appliedAt).localeCompare(String(b.appliedAt)));
     setFromId(pub.length >= 2 ? pub[pub.length - 2].id : pub[0]?.id ?? '');
@@ -199,6 +221,35 @@ export default function VersionToolsModal({
   };
   const [detail, setDetail] = useState<ChangesetDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  // Doc 104: re-leer la versión tras transferirla (o si cambió por fuera).
+  const [detailTick, setDetailTick] = useState(0);
+  // La versión que se está transfiriendo: el diálogo queda ligado a ELLA (no
+  // al detalle, que se recarga), así un error no lo cierra ni lo re-apunta.
+  const [transferFor, setTransferFor] = useState<ChangesetDetail | null>(null);
+  // Doc 105 (F6): con el confirm de Delete encima, el popup queda inerte (como
+  // con el de transferencia) y, al cerrarse, re-renderiza: el efecto de abajo
+  // le devuelve el foco (antes Cancel lo dejaba en <body>).
+  const [confirming, setConfirming] = useState(false);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  // Una recarga del detalle (tras transferir, eliminar o un 409) quita el
+  // botón que tenía el foco y el navegador lo manda a <body>: Tab saltaría a
+  // la página de atrás. Mientras este popup sea el de arriba, el foco vuelve a él.
+  useEffect(() => {
+    const box = boxRef.current;
+    const active = document.activeElement;
+    if (!box || transferFor || confirming || (active && active !== document.body)) return;
+    if ([...document.querySelectorAll('[aria-modal="true"]')].some((m) => m !== box)) return;
+    box.focus();
+  });
+
+  // Doc 104: si la versión elegida desaparece de la lista (se eliminó) o no
+  // hay ninguna elegida, el selector va a la producción o a la más reciente.
+  useEffect(() => {
+    if (detailRows.some((v) => v.id === selId)) return;
+    const next = published?.id ?? detailRows[0]?.id ?? '';
+    if (next !== selId) setSelId(next);
+  }, [detailRows, selId, published]);
 
   useEffect(() => {
     if (tab !== 'details' || !selId) return undefined;
@@ -208,15 +259,81 @@ export default function VersionToolsModal({
     getChangeset(selId)
       .then((d) => { if (alive) setDetail(d); })
       .catch((err: unknown) => {
-        if (alive) toast.error(err instanceof Error ? err.message : "Couldn't load the version.");
+        if (!alive) return;
+        toast.error(err instanceof Error ? err.message : "Couldn't load the version.");
+        // Eliminada en otra sesión: sale de la lista (y el selector de ella,
+        // efecto de arriba) y el Home se recarga.
+        if (err instanceof ApiError && err.status === 404) { markGone(selId); onChanged?.(); }
       })
       .finally(() => { if (alive) setDetailLoading(false); });
     return () => { alive = false; };
-  }, [tab, selId]);
+  }, [tab, selId, detailTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isProduction = published?.id === selId;
   const isPublished = detail?.status === 'approved' && !!detail?.appliedAt;
   const canOpen = !!detail && canOpenVersion(detail, me, has);
+  // Doc 104: administrar (transferir / eliminar) — dueño que edita o admin;
+  // una publicada es historia: ni se ofrece.
+  const canManage = !!detail && detail.status !== 'approved' && canManageVersion(detail, me, has);
+  const transferBlock = detail ? versionActionBlock(detail, 'transfer') : null;
+  const deleteBlock = detail ? versionActionBlock(detail, 'delete') : null;
+  const starter = detail ? showStartedBy(detail) : null;
+
+  /** La versión cambió por fuera (otra sesión la envió, transfirió o
+   *  eliminó): recarga la lista del Home y — si sigue existiendo — el detalle
+   *  (una eliminada sale sola del selector: releerla daría otro 404). */
+  const refreshAll = (status?: number) => {
+    onChanged?.();
+    if (status !== 404) setDetailTick((t) => t + 1);
+  };
+
+  const doDelete = async () => {
+    if (!detail || deleteBlock) return;
+    const target = detail;
+    const label = target.versionLabel ?? 'this version';
+    const n = target.changeCount ?? 0;
+    const mine = !!me && target.owner === me;
+    setConfirming(true);
+    try {
+      let removed = 0;
+      const ok = await confirmDialog({
+        title: `Delete version ${target.versionLabel ?? ''}`.trim(),
+        variant: 'danger',
+        confirmLabel: 'Delete version',
+        // Irreversible: el foco arranca en Cancel (un Enter doble no borra).
+        initialFocus: 'cancel',
+        message: (
+          <>
+            <strong>{label}</strong>{target.title && target.title !== target.versionLabel ? <> — “{target.title}”</> : null}
+            {' '}will be permanently deleted
+            {n > 0 ? <> with its <strong>{n}</strong> pending change{n === 1 ? '' : 's'}</> : <> (it has no pending changes)</>}.
+            {' '}Production doesn&apos;t change. This can&apos;t be undone.
+            {!mine && (
+              <>
+                {' '}It belongs to <strong>{userName(target.owner)}</strong>: if they have it open, their unsaved
+                changes are lost.
+              </>
+            )}
+          </>
+        ),
+        // Con el dueño que mostraba la pantalla: si otra sesión la transfirió
+        // en el medio, 409 — no se borra el draft de otra persona.
+        action: async () => { removed = (await deleteVersion(target.id, target.owner)).changes; },
+      });
+      if (!ok) return;
+      toast.success(`${target.versionLabel ? `Version ${target.versionLabel}` : 'The version'} deleted${removed ? ` with its ${removed} change${removed === 1 ? '' : 's'}` : ''}.`);
+      setDetail(null);
+      markGone(target.id);
+      setSelId(published?.id ?? detailRows.find((v) => v.id !== target.id)?.id ?? '');
+      onChanged?.();
+    } catch (err) {
+      toast.error(apiErrorMessage(err, "Couldn't delete the version."));
+      if (err instanceof ApiError && err.status === 404) markGone(target.id);
+      if (err instanceof ApiError && [403, 404, 409].includes(err.status)) refreshAll(err.status);
+    } finally {
+      setConfirming(false);
+    }
+  };
 
   /** Doc 70: abre la versión en el canvas, SIEMPRE en modo visor. Publicada
    *  pasada → snapshot `asof:` (el backend compone el inverso de las versiones
@@ -252,13 +369,17 @@ export default function VersionToolsModal({
 
   return (
     <div className="dmh-rvd-overlay" role="presentation">
-      <div className="dmh-vt-modal" role="dialog" aria-modal="true" aria-label="Version tools">
+      {/* Doc 104: con el diálogo de transferencia abierto, el popup queda
+          inerte (ni foco ni clics): no se puede cambiar la versión por detrás. */}
+      <div className="dmh-vt-modal" role="dialog" aria-modal="true" aria-label="Version tools"
+        ref={boxRef} tabIndex={-1} inert={transferFor || confirming ? true : undefined}
+        onKeyDown={(e) => trapTab(e, boxRef.current)}>
         <div className="dmh-rvd-head">
           <div className="dmh-rvd-head-ico"><GitCompare size={16} strokeWidth={1.7} aria-hidden /></div>
           <div className="dmh-rvd-head-text">
             <div className="dmh-rvd-head-title">Version tools</div>
             <div className="dmh-rvd-head-sub">
-              Compare published versions and inspect who changed, approved and published each one
+              Compare published versions, inspect who changed, approved and published each one, and transfer or delete drafts
             </div>
           </div>
           <span style={{ flex: 1 }} />
@@ -437,11 +558,41 @@ export default function VersionToolsModal({
                       {isProduction ? 'Production' : STATUS_TEXT[detail.status]}
                     </span>
                     <span style={{ flex: 1 }} />
+                    {canManage && (
+                      <span className="dmh-vt-manage">
+                        {/* Doc 105 (A5-o5): deshabilitado, el motivo va también en
+                            el nombre accesible (patrón de «View in canvas» en Review). */}
+                        <button
+                          type="button"
+                          className="dmh-btn dmh-btn--secondary"
+                          title={transferBlock ?? 'Give this draft to another user: they edit it, send it for approval and appear as its author'}
+                          disabled={!!transferBlock}
+                          aria-label={transferBlock ? `Transfer: ${transferBlock}` : undefined}
+                          data-vt-action="transfer"
+                          onClick={() => setTransferFor(detail)}
+                        >
+                          <ArrowRightLeft size={13} strokeWidth={1.7} aria-hidden />
+                          Transfer
+                        </button>
+                        <button
+                          type="button"
+                          className="dmh-btn dmh-btn--danger"
+                          title={deleteBlock ?? 'Delete this draft and all its changes (production does not change)'}
+                          disabled={!!deleteBlock}
+                          aria-label={deleteBlock ? `Delete: ${deleteBlock}` : undefined}
+                          onClick={() => void doDelete()}
+                        >
+                          <Trash2 size={13} strokeWidth={1.7} aria-hidden />
+                          Delete
+                        </button>
+                      </span>
+                    )}
                     <button
                       type="button"
                       className="dmh-btn dmh-btn--primary"
                       title={openHint}
                       disabled={!canOpen}
+                      aria-label={canOpen ? undefined : `Open in canvas: ${openHint}`}
                       onClick={openInCanvas}
                     >
                       <PanelsTopLeft size={13} strokeWidth={1.7} aria-hidden />
@@ -449,6 +600,9 @@ export default function VersionToolsModal({
                     </button>
                   </div>
                   <p className="dmh-vt-desc" style={{ marginTop: 4 }}>{openHint}</p>
+                  {canManage && transferBlock && (
+                    <p className="dmh-vt-desc" style={{ marginTop: -6 }}>{transferBlock}</p>
+                  )}
 
                   {detail.restoredFrom && (
                     <div className="dmh-vt-restored">
@@ -472,6 +626,13 @@ export default function VersionToolsModal({
                       />
                       {userName(detail.owner)}
                     </span>
+                    {/* Doc 104: la versión cambió de manos — quién la inició. */}
+                    {starter && (
+                      <>
+                        <span className="dmh-vt-glabel">Started by</span>
+                        <span>{userName(starter)}</span>
+                      </>
+                    )}
                     {projectNames.length > 0 && (
                       <>
                         <span className="dmh-vt-glabel">Projects</span>
@@ -494,6 +655,22 @@ export default function VersionToolsModal({
                       </>
                     )}
                   </div>
+
+                  {(detail.transfers?.length ?? 0) > 0 && (
+                    <>
+                      <div className="dmh-vt-subhead">Ownership transfers ({detail.transfers!.length})</div>
+                      {detail.transfers!.map((t, i) => (
+                        <div key={`${t.at}-${i}`} className="dmh-vt-transfer">
+                          <span className="dmh-vt-aname">{userName(t.from)}</span>
+                          <span className="dmh-vt-tarrow">→</span>
+                          <span className="dmh-vt-aname">{userName(t.to)}</span>
+                          {t.by !== t.from && <span className="dmh-vt-awhen">by {userName(t.by)}</span>}
+                          <span className="dmh-vt-awhen">{fmtWhen(t.at)}</span>
+                          {t.note && <span className="dmh-vt-anote" title={t.note}>“{t.note}”</span>}
+                        </div>
+                      ))}
+                    </>
+                  )}
 
                   <div className="dmh-vt-subhead">Reviewers &amp; approvals</div>
                   {detail.reviewers.length === 0 && (
@@ -537,6 +714,26 @@ export default function VersionToolsModal({
           )}
         </div>
       </div>
+      {transferFor && (
+        <TransferVersionDialog
+          version={transferFor}
+          me={me}
+          userName={userName}
+          onClose={() => setTransferFor(null)}
+          // Un 404 = otra sesión la eliminó: sale de la lista al instante,
+          // como al eliminarla acá (la recarga del Home puede demorar).
+          onStale={(status) => { if (status === 404) markGone(transferFor.id); refreshAll(status); }}
+          // Si el botón que lo abrió ya no está (el detalle se recargó), el
+          // foco vuelve al Transfer nuevo o, si no hay, a este popup.
+          returnFocus={() => boxRef.current?.querySelector<HTMLElement>('[data-vt-action="transfer"]:not(:disabled)')
+            ?? boxRef.current}
+          onTransferred={(updated) => {
+            setTransferFor(null);
+            toast.success(`${updated.versionLabel ? `Version ${updated.versionLabel}` : 'The version'} transferred to ${userName(updated.owner)}.`);
+            refreshAll();
+          }}
+        />
+      )}
     </div>
   );
 }

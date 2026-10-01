@@ -16,6 +16,7 @@ import type { CanonicalColumn } from '@/services/governance.service';
 import type { View, ViewInput, ViewSource } from '@/services/views.service';
 
 import { orderColumns } from './columnOrder';
+import { SessionChangedError } from './sessionGuard';
 
 const norm = (s?: string) => (s ?? '').trim().toLowerCase();
 
@@ -137,7 +138,12 @@ export async function syncNewColumnsToMirrorViews(
   let touched = 0;
   for (const c of newCols) {
     try { touched += await syncNewColumnToMirrorViews(deps, tableId, c.physicalName, base, !!c.isPrimaryKey); }
-    catch { /* best-effort: la vista se alinea después con "Match physical order" */ }
+    catch (e) {
+      // Doc 105 (ronda 3): el corte por cambio de sesión (deps con pin) no es un
+      // error de esta vista — corta el resto; lo demás, best-effort: la vista se
+      // alinea después con "Match physical order".
+      if (e instanceof SessionChangedError) throw e;
+    }
     base = [...base, { id: `new:${c.physicalName}`, tableId, physicalName: c.physicalName, logicalName: c.physicalName,
       dataType: '', typeOverridden: false, ordinal: base.length, isPrimaryKey: !!c.isPrimaryKey }];
   }

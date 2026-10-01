@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { CanonicalColumn } from '@/services/governance.service';
 import type { View } from '@/services/views.service';
 import { alignSourcesToPhysical, appendColumnSource, isMirrorOfTable, removeColumnSource, renameColumnSource, syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews } from './viewSync';
+import { SessionChangedError } from './sessionGuard';
 
 const col = (physicalName: string, ordinal: number): CanonicalColumn => ({
   id: physicalName.toLowerCase(), tableId: 't1', physicalName, logicalName: physicalName.toLowerCase(),
@@ -150,5 +151,26 @@ describe('syncNewColumnsToMirrorViews — varias columnas nuevas (doc 94 D4)', (
       [pk('COD', 0), col('FEC', 1)]);
     expect(n).toBe(3);
     expect(current.sources?.map((s) => s.column)).toEqual(['COD', 'PK_A', 'PK_B', 'FEC', 'DATO']);
+  });
+});
+
+// Doc 105 (ronda 3): cada columna es best-effort, pero el CORTE por cambio de
+// sesión (deps con pin: `pinnedViewDeps`) no es un error de esa vista — se
+// propaga y corta el resto (antes se tragaba y el lazo seguía).
+describe('syncNewColumnsToMirrorViews — corte por cambio de sesión (doc 105)', () => {
+  it('propaga SessionChangedError y no sigue con las demás columnas', async () => {
+    const updateView = vi.fn(async () => { throw new SessionChangedError(); });
+    const deps = { listViews: vi.fn(async () => [mirror]), updateView };
+    await expect(syncNewColumnsToMirrorViews(deps, 't1', [{ physicalName: 'A' }, { physicalName: 'B' }], [col('COD', 0), col('FEC', 1)]))
+      .rejects.toBeInstanceOf(SessionChangedError);
+    expect(updateView).toHaveBeenCalledTimes(1);
+  });
+
+  it('un error cualquiera de una columna sigue siendo best-effort (no rechaza)', async () => {
+    const updateView = vi.fn(async () => { throw new Error('sin red'); });
+    const deps = { listViews: vi.fn(async () => [mirror]), updateView };
+    await expect(syncNewColumnsToMirrorViews(deps, 't1', [{ physicalName: 'A' }], [col('COD', 0), col('FEC', 1)]))
+      .resolves.toBe(0);
+    expect(updateView).toHaveBeenCalledTimes(1);
   });
 });

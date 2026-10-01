@@ -7,14 +7,20 @@ import type { ScopeCounts } from '@/types/versioning';
  */
 const num = new Intl.NumberFormat('en-US');
 
+/** «1 folder» / «12 folders» (doc 105: decía «1 folders»). */
+const n = (count: number, one: string, many: string) => `${num.format(count)} ${count === 1 ? one : many}`;
+
 function countsList(c: ScopeCounts): string {
-  return `${num.format(c.tables)} tables, ${num.format(c.columns)} columns, ${num.format(c.views)} views, `
-    + `${num.format(c.relationships)} relationships, ${num.format(c.schemas)} schemas, `
-    + `${num.format(c.folders)} folders and ${num.format(c.canvases)} canvases`;
+  return `${n(c.tables, 'table', 'tables')}, ${n(c.columns, 'column', 'columns')}, ${n(c.views, 'view', 'views')}, `
+    + `${n(c.relationships, 'relationship', 'relationships')}, ${n(c.schemas, 'schema', 'schemas')}, `
+    + `${n(c.folders, 'folder', 'folders')} and ${n(c.canvases, 'canvas', 'canvases')}`;
 }
 
+// Doc 105: los conteos son de PRODUCCIÓN; al aprobar, el apply graba primero lo
+// que la working copy agregó y la cascada lo borra junto con el resto.
 export function deletionSummary(name: string, c: ScopeCounts): string {
-  return `This working copy will delete project «${name}» and everything in it: ${countsList(c)}, plus its Data Standards.`;
+  return `This working copy will delete project «${name}» and everything in it: ${countsList(c)} in production `
+    + '(plus anything this working copy adds), and its Data Standards.';
 }
 
 /** Confirmación tipeada: exacta (sensible a mayúsculas), sin espacios sobrantes. */
@@ -26,6 +32,7 @@ export function nameMatches(typed: string, name: string): boolean {
 export function criticalDeletionText(name: string, c: ScopeCounts): { title: string; body: string } {
   return {
     title: `Critical: this request deletes project «${name}».`,
-    body: `Approving it removes ${countsList(c)} from the platform, together with the project's Data Standards. This cannot be undone from the web.`,
+    body: `Approving it removes ${countsList(c)} (as published today, plus anything this request adds) from the platform, `
+      + "together with the project's Data Standards. This cannot be undone from the web.",
   };
 }

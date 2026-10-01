@@ -106,25 +106,45 @@ mirror(user);
 set({ user, status: 'authed', error: null });
 ```
 
-**Restore al boot** (`restore`): se ejecuta una sola vez en `App.tsx` (`useEffect(() => { void restore(); }, [restore])`). Lee el token de `localStorage`, lo empuja al cliente y valida la sesión contra `/api/auth/me`. Si `/me` no devuelve `permissions`, la sesión se considera inválida y se limpia:
+**Restore al boot** (`restore`): se ejecuta una sola vez en `App.tsx` (`useEffect(() => { void restore(); }, [restore])`). Lee el token de `localStorage`, lo empuja al cliente y valida la sesión contra `/api/auth/me`. Si `/me` no devuelve `permissions`, la sesión se considera inválida y se limpia; desde el doc 105 (ronda 3) además dice por qué (`notice`) y sólo descarta el token ante un 401: sin respuesta del servidor o con una falla suya (5xx, respuesta inválida) lo conserva:
 
 ```ts
 restore: async () => {
   const token = localStorage.getItem(TOKEN_KEY);
   if (!token) { set({ status: 'anon', user: null }); return; }
   setAuthToken(token);
-  try {
-    const user = await auth.fetchMe();
-    if (!user || !('permissions' in user)) throw new Error('invalid session');
-    mirror(user);
-    set({ user, status: 'authed' });
-  } catch {
+  const drop = (notice: string) => {
     localStorage.removeItem(TOKEN_KEY);
     setAuthToken('');
-    set({ status: 'anon', user: null });
+    set({ status: 'anon', user: null, notice });
+  };
+  // Doc 105 (ronda 5): si mientras /me demoraba el usuario entró de nuevo, la
+  // respuesta del token viejo ya no decide nada; si fue OTRA pestaña la que
+  // cambió el token (localStorage es compartido), se verifica el vigente.
+  const superseded = () => get().status !== 'loading';
+  const moved = () => localStorage.getItem(TOKEN_KEY) !== token;
+  try {
+    const user = await auth.fetchMe();
+    if (superseded()) return;
+    if (moved()) return get().restore();
+    if (!user || !('permissions' in user)) { drop(SESSION_REVOKED_TEXT); return; }
+    mirror(user);
+    set({ user, status: 'authed', notice: null });
+  } catch (e) {
+    if (superseded()) return;
+    if (moved()) return get().restore();
+    // Sólo un 401 dice que la sesión terminó. Sin respuesta (0), una falla del
+    // servidor (5xx, respuesta inválida) o del proxy: el token puede seguir
+    // siendo bueno — se conserva (recargar restaura la sesión) y se avisa.
+    const status = e instanceof ApiError ? e.status : -1;
+    if (status === 401) { drop(SESSION_ENDED_TEXT); return; }
+    setAuthToken('');
+    set({ status: 'anon', user: null, notice: status === 0 ? NETWORK_ERROR_TEXT : SERVER_CHECK_TEXT });
   }
 },
 ```
+
+Sin respuesta del servidor (red caída o tiempo agotado: `NETWORK_ERROR_TEXT`) o con una falla del servidor o del proxy (5xx, respuesta inválida: `SERVER_CHECK_TEXT` = «The server couldn't check your session right now — reload the page to try again.») el token queda en `localStorage` —recargar restaura la sesión— pero sale del cliente HTTP y la app queda `anon`: nada lo usa hasta que un `restore()` lo valide contra `/me`. Sólo un 401 lo descarta: antes, cualquier error que no fuera de red cerraba la sesión. Desde la ronda 5 un `restore()` tardío tampoco toca una sesión que empezó después: antes, si el usuario entraba de nuevo (SSO) mientras `/me` del token viejo demoraba, un fallo de red lo dejaba en `anon` y un 401 además borraba el token NUEVO.
 
 **Logout** (`logout`): hace el POST de logout en modo best-effort (si falla, igual sigue), borra el token de `localStorage`, lo limpia del cliente, ejecuta `resetAppState()` y pasa a `anon`. El reset es imprescindible: el logout es navegación SPA (sin reload de página) y los stores de Zustand son singletons de módulo — sin él, el siguiente usuario heredaría la sesión de canvas del anterior.
 
@@ -147,7 +167,17 @@ setOnUnauthorized(() => {
 });
 ```
 
-**Aislamiento de estado por usuario — `resetAppState()`** (`src/store/resetAppState.ts`): un único punto que borra TODO el estado de trabajo ligado al usuario, invocado en los tres momentos del ciclo (login — antes de sentar al nuevo actor —, logout y 401 global). Limpia la intención de apertura del canvas (`useSessionStore`: `activeProjectId`, `openMode`, `activeChangesetId`), el workspace completo del modeler (`useModelerStore`: proyectos/árboles cacheados, diagrama, selección, instancia de React Flow, drawings), la pila de Undo (`useUndoStore`), el header dev (`setDevUser('')`) y las preferencias "no volver a preguntar" de `ConfirmDialog` (`confirm-skip:*` en `sessionStorage`). (Los stores legacy `useChangesetStore`/`useIdentityStore` se retiraron en el doc 75.) Sin este reset, el siguiente usuario de la misma pestaña heredaba el canvas abierto del anterior y se saltaba el modal "Open model".
+**Permisos al día — `refreshMe()` (doc 105, F5)**: los permisos del `SessionUser` quedaban en caché hasta recargar la página (un rol cambiado en Admin no se veía; un usuario deshabilitado seguía viendo la app con sus permisos de antes — el backend ya le respondía 403 a cada escritura, pero la sesión del navegador no se cerraba). Ahora el store re-lee `/api/auth/me` cuando la pestaña vuelve al foco (`focus` y `visibilitychange`, que registra `App.tsx`) y ante un 403 de cualquier ruta fuera de `/api/auth/` (`http.ts` expone `setOnForbidden`, un observador que no cambia el error del llamador):
+
+```ts
+// Doc 105 (F5): un 403 (permiso perdido, o el proxy) → rol y permisos al día
+// (con el tope de refreshMe).
+setOnForbidden(() => { void useAuthStore.getState().refreshMe(); });
+```
+
+`refreshMe` tiene tope — una lectura en vuelo y como mucho una cada 10 s (`ME_GAP_MS`), también si falla: un proxy que responde 403 a todo no genera una tormenta — y nunca rechaza. Descarta la respuesta si en el medio cambió la sesión; sólo reemplaza el usuario si cambió su rol o algún permiso; si `/me` ya no trae `permissions` (el backend no resuelve a un usuario deshabilitado y degrada al Principal básico), cierra la sesión por el mismo camino que el 401 (token fuera, `resetAppState()`, `anon`). No degrada una sesión de edición: la autoridad sobre cada escritura sigue siendo el backend. Los componentes que gatean por permiso se suscriben a `s.user?.permissions` o a `s.has('x')` dentro del selector (suscribirse a `s.has` a secas no re-renderiza: es siempre la misma función). Doc 105 (O4): el login dice por qué terminó la sesión (`useAuthStore.notice`, mostrado con `role="status"`): «Your access to Data Model Hub was removed or disabled. Ask an administrator if you think this is a mistake.» si el usuario fue deshabilitado o «Your session ended. Please sign in again.» ante un 401; un logout propio o un login nuevo lo borran. Al abrir la app, `restore()` usa los mismos textos (y `NETWORK_ERROR_TEXT` o `SERVER_CHECK_TEXT` cuando no pudo validar el token: sin respuesta o con una falla del servidor), y el botón de SSO referencia el aviso con `aria-describedby` (ronda 3).
+
+**Aislamiento de estado por usuario — `resetAppState()`** (`src/store/resetAppState.ts`): un único punto que borra TODO el estado de trabajo ligado al usuario, invocado en los tres momentos del ciclo (login — antes de sentar al nuevo actor —, logout y 401 global). Limpia la intención de apertura del canvas (`useSessionStore`: `activeProjectId`, `openMode`, `activeChangesetId`), el workspace completo del modeler (`useModelerStore`: proyectos/árboles cacheados, diagrama, selección, instancia de React Flow, drawings), la pila de Undo (`useUndoStore`), el header dev (`setDevUser('')`) y las preferencias "no volver a preguntar" de `ConfirmDialog` (`confirm-skip:*` en `sessionStorage`). (Los stores legacy `useChangesetStore`/`useIdentityStore` se retiraron en el doc 75.) Sin este reset, el siguiente usuario de la misma pestaña heredaba el canvas abierto del anterior y se saltaba el modal "Open model". Una carga Excel que sigue corriendo cuando la sesión termina compara el usuario de cuando se pidió con el de ahora y, si cambió, no sigue arreglando canvases ni avisa una falla o un resultado sin confirmar, y un 401 de su polling no se avisa (doc 105, ronda 6, R17a-3).
 
 ### 1.4 Diagrama — restauración de sesión al boot
 
@@ -174,8 +204,12 @@ sequenceDiagram
         else token invalido / sin permissions
             API-->>Store: 401 o Principal basico
             Store->>LS: removeItem('dmh.token')
-            Store-->>App: status = anon
-            App->>B: redirige a /login
+            Store-->>App: status = anon + notice
+            App->>B: redirige a /login (con el porque)
+        else sin respuesta o falla del servidor - 5xx o respuesta invalida (doc 105)
+            Store->>Store: setAuthToken('') - el token queda en localStorage
+            Store-->>App: status = anon + NETWORK_ERROR_TEXT o SERVER_CHECK_TEXT
+            App->>B: redirige a /login (recargar restaura)
         end
     end
 ```
@@ -191,6 +225,8 @@ flowchart TD
     E -->|401| F[dispara onUnauthorized]
     F --> G[limpia token y pasa a anon]
     G --> H[guard redirige a /login]
+    E -->|403 fuera de /api/auth/| FB[dispara onForbidden: refreshMe con tope]
+    FB --> I
     E -->|success false| I[lanza ApiError con mensaje]
     E -->|success true| J[devuelve data desempaquetada]
     E -->|timeout 30s / red caida| K[lanza ApiError status 0]
@@ -209,7 +245,7 @@ Definidos en `auth.service.ts`, 1:1 con la matriz del backend (`PERMISSIONS`):
 ```ts
 export type Permission =
   | 'model.view' | 'model.edit' | 'review.decide' | 'publish'
-  | 'rollback' | 'export' | 'standards.edit' | 'admin.manage';
+  | 'rollback' | 'versions.view_all' | 'export' | 'standards.edit' | 'admin.manage';
 ```
 
 El `SessionUser` trae `permissions: Record<string, boolean>` (permisos efectivos ya resueltos por el backend según el rol). El helper del store resuelve un permiso puntual:
@@ -218,10 +254,11 @@ El `SessionUser` trae `permissions: Record<string, boolean>` (permisos efectivos
 has: (perm) => Boolean(get().user?.permissions?.[perm]),
 ```
 
-Dos permisos con presencia propia en la UI, además de los gates de ruta:
+Tres permisos con presencia propia en la UI, además de los gates de ruta:
 
 - **`rollback`** — Restore de versiones: en Home, el botón "Restore" de una versión publicada solo se muestra si `useAuthStore((s) => s.has('rollback'))` (`src/screens/HomeScreen.tsx`). El rollback crea un draft inverso que deshace las versiones posteriores; producción no cambia hasta el approve.
-- **`export`** — exportar DDL/metadata: lo exige el backend en `POST /api/ddl-rules/render` (aplicar las Export rules del Export DDL); figura en la matriz de permisos de Admin con la etiqueta "Exportar DDL / metadata" (`src/features/admin/admin.service.ts`). El modal Export DDL no lo gatea client-side: si el usuario no lo tiene, el render de reglas falla con el 403 del backend — la autoridad, como siempre, es el servidor.
+- **`versions.view_all`** (doc 70 §12; `admin.manage` lo implica) — abrir en el canvas un draft o un request de OTRO usuario. `canOpenVersion` (`src/services/versioning.service.ts`, espejo de `changesets/access.py`) lo consulta en Home › Version tools, en el «View in canvas» de Review (`canvasAction`, doc 105 U2: deshabilitado con el motivo) y al revalidar la sesión del canvas (`lib/sessionGuard.ts`: una versión transferida se sigue viendo en solo lectura sólo si todavía se puede abrir). El backend lo exige igual (`ensure_changeset_visible`, 403).
+- **`export`** — exportar DDL/metadata: lo exige el backend en `POST /api/projects/{pid}/ddl-rules/render` (aplicar las Export rules del Export DDL); figura en la matriz de permisos de Admin con la etiqueta "Export DDL / metadata" (`src/features/admin/admin.service.ts`). El modal Export DDL no lo gatea client-side: si el usuario no lo tiene, el render de reglas falla con el 403 del backend — la autoridad, como siempre, es el servidor.
 
 ### 2.2 Capa 1 — `RequireAuth` (autenticación)
 
@@ -237,7 +274,7 @@ export function RequireAuth() {
 }
 ```
 
-`LoginScreen` usa ese `from` para redirigir de vuelta al destino original: `navigate(location.state?.from ?? '/', { replace: true })`.
+`LoginScreen` usa ese `from` para redirigir de vuelta al destino original: `navigate(location.state?.from ?? '/', { replace: true })`. Doc 105 (ronda 5): si la sesión ya está restaurada al mostrarse (se recargó `/login` con un token válido, p. ej. tras el aviso de red o de servidor que pide recargar), redirige en el acto con `<Navigate to={location.state?.from ?? '/'} replace />` en vez de mostrar el formulario, y mientras se verifica muestra el mismo `Splash` (exportado de `guards.tsx`).
 
 ### 2.3 Capa 2 — `RequirePermission` (autorización por permiso)
 
@@ -330,20 +367,29 @@ El canvas del modeler tiene un modo de solo lectura llamado **viewer-lock**. Se 
 ### 3.1 Bloqueo a nivel de canvas (`ModelerCanvas.tsx`)
 
 ```ts
-// Viewer-lock: en read-only se puede VER (click abre PropertiesPanel en modo
-// reader) pero no mutar: sin drag de nodos y sin conexiones.
 const readonly = useSessionStore((s) => s.openMode === 'readonly');
 ```
 
-Efectos concretos en el componente `<ReactFlow>`:
+Efectos concretos en el componente `<ReactFlow>` (esencia del código; desde el doc 84 E los bloques se pueden mover también en solo lectura, para leer mejor el diagrama, pero ese movimiento NO se persiste; los dibujos quedan fijos):
 
 ```tsx
 <ReactFlow
-  nodesDraggable={!readonly}          // en readonly no se arrastran nodos
+  nodesDraggable                      // doc 84 E: también en modo visor — sin persistir nunca
   deleteKeyCode={null}                // sin borrar por teclado (Backspace/Delete)
-  onNodeDragStop={(_e, node) => {
-    if (readonly) return;             // viewer-lock: no persistir movimientos
-    /* ...persiste layout o posición de shape... */
+  onNodeDragStop={(_e, node, moved) => {
+    // Doc 105 (A4-o1): `moved` = TODOS los nodos arrastrados (varios con
+    // selección múltiple); antes sólo se guardaba el tomado con el mouse.
+    const { layout, shapes } = draggedPositions(moved.length ? moved : [node]);
+    if (readonly) {
+      // Doc 84 E: modo visor — el movimiento vive sólo en esta sesión
+      // (viewerLayout); nada viaja al backend. Aviso una vez por sesión.
+      if (!diagram || !Object.keys(layout).length) return;
+      for (const [id, pos] of Object.entries(layout)) setViewerPos(diagram.subjectArea.id, id, pos);
+      /* ...toast «Moves in view mode are not saved…» la primera vez... */
+      return;
+    }
+    for (const d of shapes) updateDrawing(d.id, { x: d.x, y: d.y });
+    if (Object.keys(layout).length) void saveNodePositions(layout);   // UNA escritura a la versión en edición
   }}
 />
 ```
@@ -374,13 +420,13 @@ En modo visor (readonly) los nodos no muestran handles conectables ni affordance
 
 ### 3.3 Relación entre viewer-lock y la autoridad del backend
 
-Igual que el RBAC, el viewer-lock es una defensa de UX. Impide que el usuario haga cambios accidentales o confusos en un modelo que está mirando en solo lectura, pero **la persistencia real la controla el backend**: cualquier mutación (mover una tabla, crear una relación, editar una columna) es un request autenticado que el servidor valida contra el permiso `model.edit` y el estado del changeset. Aunque alguien forzara `readonly = false` en el navegador, el backend rechazaría escribir sobre una versión que no está en borrador o para la que el usuario no tiene permiso.
+Igual que el RBAC, el viewer-lock es una defensa de UX. Impide que el usuario haga cambios accidentales o confusos en un modelo que está mirando en solo lectura, pero **la persistencia real la controla el backend**: cualquier mutación (mover una tabla, crear una relación, editar una columna) es un request autenticado que el servidor valida contra el permiso `model.edit` y el estado del changeset. Aunque alguien forzara `readonly = false` en el navegador, el backend rechazaría escribir sobre una versión que no está en borrador o para la que el usuario no tiene permiso. Y sin versión no hay atajo: desde el doc 105 (D1) el backend responde 409 «This change requires a version in edit mode.» a toda escritura DIRECTA del modelo a producción (carpetas, canvases, esquemas, vistas, relaciones, tablas y columnas del catálogo) — antes la aceptaba con sólo `model.edit`, sin pasar por revisión —, y 409 «Standards changes go through Data Standards (Save & apply) so they keep a version and can be rolled back.» a la de los estándares (D1b). Sólo crear un proyecto sigue siendo directo.
 
 ```mermaid
 flowchart TD
     O[openMode] -->|readonly| RO[Viewer-lock activo]
     O -->|editing| ED[Modo edicion]
-    RO --> NL[nodesDraggable false]
+    RO --> NL[mover bloques no persiste: viewerLayout]
     RO --> DL[deleteKeyCode null]
     RO --> NH[Handles no conectables]
     RO --> NR[createRelationship bloqueada con toast]
@@ -442,7 +488,8 @@ El `.gitignore` ignora todos los `.env*` salvo `.env.example` (plantilla); la UR
 | Envío consistente del token | `X-Session-Token` centralizado en `apiFetch`; ningún service arma su propio fetch |
 | Expulsión automática ante 401 | Handler global `onUnauthorized` limpia sesión, resetea el estado de trabajo y redirige a `/login` |
 | Aislamiento de estado por usuario | `resetAppState()` en login/logout/401 borra la sesión de canvas, los stores y las prefs por-usuario (§1.3) |
-| Validación de la sesión al boot | `restore()` re-consulta `/me` y exige `permissions`; no confía ciegamente en el token guardado |
+| Validación de la sesión al boot | `restore()` re-consulta `/me` y exige `permissions`; no confía ciegamente en el token guardado (sin respuesta o con una falla del servidor lo conserva, pero no lo usa hasta validarlo; sólo un 401 lo descarta — doc 105) |
+| Permisos al día sin recargar (doc 105) | `refreshMe()` re-lee `/me` al volver el foco y ante un 403 (tope: una en vuelo, como mucho una cada 10 s); un usuario deshabilitado pasa a `anon` (§1.3) |
 | Timeout de red | `DEFAULT_TIMEOUT_MS = 30_000` vía `AbortSignal.timeout`, evita spinners eternos si el backend cuelga |
 | Manejo de errores tipado | `ApiError` con `status`; los consumidores hacen `try/catch` en vez de inspeccionar `success` a mano |
 | Sin secretos en el bundle | En producción el bundle no lleva ni siquiera la URL del backend (`API_BASE` vacío, rutas relativas); las credenciales del SP viven solo en el proceso de `server.mjs` (§4) |

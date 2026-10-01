@@ -10,7 +10,7 @@ vi.mock('@/features/modeler/services/structure.service', () => ({
   setWireRoute: vi.fn(async () => ({})),
   arrangeSubjectArea: vi.fn(async () => ({})),
   addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
-  removeFromCanvas: vi.fn(async () => undefined),
+  removeFromCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [], layout: {} })),
   setSubjectAreaLayout: vi.fn(async () => ({})),
 }));
 vi.mock('@/features/modeler/lib/arrangeGraph', () => ({
@@ -33,10 +33,20 @@ vi.mock('@/services/views.service', () => ({ listViews: vi.fn(async () => []) })
 import { toast } from 'sonner';
 import * as struct from '@/features/modeler/services/structure.service';
 import * as mod from '@/features/modeler/services/modeler.service';
+import { arrangeDiagram } from '../features/modeler/lib/arrangeGraph';
 import * as gov from '@/services/governance.service';
+import { ApiError } from '@/services/http';
+import { trackRevalidation } from '@/features/modeler/lib/sessionGuard';
 import { useModelerStore, manualRouteCount } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+
+// El `reload` REAL del store. El describe «auto-arrange» lo reemplaza por un
+// mock con `setState` — y el reemplazo quedaba en el store para los tests que
+// corrían DESPUÉS: con orden aleatorio, «un reload que llega antes que el
+// guardado» nunca recargaba (se veía el trazo local en vez del del backend).
+// Se repone en cada test (doc 105, ronda 6).
+const realReload = useModelerStore.getState().reload;
 
 const R1 = [{ x: 200, y: 40 }, { x: 200, y: 160 }];
 const R2 = [{ x: 260, y: -30 }];
@@ -73,12 +83,19 @@ function deferred<T = unknown>() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  // `clearAllMocks` no vacía las colas de `…Once`: una que un test no consumió
+  // se filtraba al siguiente (y cuál es depende del orden). Se vacían y se
+  // reponen las implementaciones por defecto de las fábricas de arriba.
+  vi.mocked(mod.loadDiagram).mockReset();
+  vi.mocked(struct.setWireRoute).mockReset().mockImplementation(async () => ({}) as never);
+  vi.mocked(struct.arrangeSubjectArea).mockReset().mockImplementation(async () => ({}) as never);
+  vi.mocked(arrangeDiagram).mockReset().mockImplementation(async () => ({ t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } }) as never);
   await flush();
   useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
   useUndoStore.setState({ stack: [], busy: false });
   useModelerStore.setState({
     activeSaId: 'sa1', diagram: null, dirty: false, viewerLayout: {}, viewerRoutesOff: {},
-    selectedTableId: null, selectedEdgeId: null, flow: null,
+    selectedTableId: null, selectedEdgeId: null, flow: null, openingSaId: null, reload: realReload,
   });
   useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });
 });
@@ -150,8 +167,10 @@ describe('setWireRoute', () => {
 
   it('en visor o sin working copy no hace nada', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: 'cs1' });
+    useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });   // Doc 105 (R7-A): cambiar de sesión limpia el canvas — se carga DENTRO de ella.
     await useModelerStore.getState().setWireRoute('r2', R2);
     useSessionStore.setState({ openMode: 'editing', activeChangesetId: null });
+    useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });
     await useModelerStore.getState().setWireRoute('r2', R2);
     expect(struct.setWireRoute).not.toHaveBeenCalled();
     expect(routes()).toEqual({ r1: R1 });
@@ -167,7 +186,19 @@ describe('setWireRoute', () => {
     vi.mocked(struct.setWireRoute).mockRejectedValueOnce(new Error('sin red'));
     await useModelerStore.getState().setWireRoute('r1', R2);
     expect(routes()).toEqual({ r1: R1 });
-    expect(toast.error).toHaveBeenCalledWith('sin red');
+    expect(toast.error).toHaveBeenCalledWith("Couldn't save the wire route: sin red.");   // doc 105 (O1)
+    expect(useUndoStore.getState().stack).toEqual([]);
+  });
+
+  it('con la versión recién transferida, calla: espera la revalidación, que ya avisó (doc 105)', async () => {
+    vi.mocked(struct.setWireRoute).mockImplementationOnce(async () => {
+      trackRevalidation(new Promise<void>((r) => setTimeout(() => {
+        useSessionStore.getState().openModel({ projectId: 'p', mode: 'readonly', changesetId: 'cs1' }); r();
+      }, 10)));
+      throw new ApiError('Only the owner can edit this version.', 403, null, '/api/changesets/cs1/changes');
+    });
+    await useModelerStore.getState().setWireRoute('r1', R2);
+    expect(toast.error).not.toHaveBeenCalled();
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
@@ -361,7 +392,7 @@ describe('con la red fallando o lenta (revisión 2026-09-28)', () => {
     try {
       await useModelerStore.getState().setWireRoute('r2', R2);
     } finally { off(); }
-    expect(toast.error).toHaveBeenCalledWith('broken subscriber');
+    expect(toast.error).toHaveBeenCalledWith("Couldn't save the wire route: broken subscriber.");
     expect(struct.setWireRoute).not.toHaveBeenCalled();
     expect(routes()).toEqual({ r1: R1 });
     expectNothingPending();
@@ -513,8 +544,22 @@ describe('auto-arrange', () => {
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
+  it('la pre-imagen del Undo se toma ANTES de calcular: si mientras tanto cambian los nodos (otro canvas), vuelve a la de este', async () => {
+    const { arrangeDiagram } = await import('@/features/modeler/lib/arrangeGraph');
+    vi.mocked(arrangeDiagram).mockImplementationOnce(async () => {
+      // mientras ELK calcula, el usuario abre OTRO canvas: los nodos vivos ya son de él
+      useModelerStore.setState({ flow: { getNodes: () => [{ id: 'z9', type: 'table', position: { x: 99, y: 99 } }], setNodes: vi.fn() } as never });
+      return { t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } };
+    });
+    await useModelerStore.getState().autoOrganize();
+    await useUndoStore.getState().undoLast();
+    expect(struct.arrangeSubjectArea).toHaveBeenLastCalledWith(
+      'sa1', { t1: { x: 1, y: 2 }, sym1: { x: 5, y: 6 } }, { r1: R1 });   // antes: { z9: {99,99} }
+  });
+
   it('en visor es efímero: oculta los trazos de ESE canvas y no graba nada', async () => {
     useSessionStore.setState({ openMode: 'readonly' });
+    useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });   // Doc 105 (R7-A): cambiar de sesión limpia el canvas — se carga DENTRO de ella.
     await useModelerStore.getState().autoOrganize();
     const st = useModelerStore.getState();
     expect(st.viewerRoutesOff).toEqual({ sa1: true });

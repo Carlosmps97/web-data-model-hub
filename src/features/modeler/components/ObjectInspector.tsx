@@ -16,13 +16,14 @@ import { isAsOfChangesetId } from '@/services/versioning.service';
 import { FACET_CAPTION, facetNoun, facetNouns, type Facet } from '@/lib/facets';
 import { inspectTable, inspectView, type InspectTableResult, type InspectViewResult } from '../services/inspector.service';
 import { generatedViewDdl } from '../lib/viewDdl';
-import * as struct from '../services/structure.service';
 import { matchesColumn } from '../lib/columnSearch';
 import { moveId, orderColumns, persistReorder, reorderPlan } from '../lib/columnOrder';
 import { facetEditable, type TableField } from '../lib/facetEditable';
 import { inspectorRefreshPlan } from '../lib/inspectorRefresh';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { tableNamePlan } from '../lib/nameSync';
+import { bestEffort, pinned, pinnedViewDeps } from '../lib/pinnedWrites';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import { syncRenamedColumnInViews } from '../lib/viewSync';
 import {
   cardinalityLabel, facetName, facetOnly, facetType, linkRole, otherFacet, ownColumns,
@@ -132,25 +133,11 @@ function viewPre(v: View): View {
 }
 
 /** Doc 89 §3.4: borra la vista en el changeset (el backend poda sus membresías,
- *  doc 88 §4) y apila el Undo: re-graba el doc previo y vuelve a listarla en
- *  los canvases donde estaba (best-effort, mismo patrón del Undo de
- *  `deleteTable`). El refresco de la inversa sigue la regla del doc 89 §3.6. */
-async function deleteViewVersioned(pre: View, canvasIds: string[], onActiveCanvas: boolean): Promise<void> {
-  await viewsSvc.deleteView(pre.id);
-  pushUndo(`Delete view ${pre.name}`, async () => {
-    await viewsSvc.updateView(pre.id, pre as ViewInput);
-    // Doc 100 (P5): cada canvas la vuelve a listar DENTRO de su cola de
-    // escrituras, sobre su estado de ese momento. Uno sin lista explícita
-    // (legacy, doc 70) no se toca — su regla por fuentes la vuelve a mostrar
-    // sola —, ni uno que ya la lista.
-    for (const canvasId of new Set(canvasIds)) {
-      try { await struct.addToCanvas(canvasId, { viewIds: [pre.id] }); } catch { /* el canvas pudo desaparecer */ }
-    }
-    const store = useModelerStore.getState();
-    await store.reload();
-    store.syncExplorer(onActiveCanvas);
-  });
-}
+ *  doc 88 §4) con su Undo. Doc 105 (A4-o4): es la MISMA acción del store que
+ *  usan los paneles del canvas — el Undo repone el doc y la vuelve a listar, en
+ *  su posición, en cada canvas que la listaba. */
+const deleteViewVersioned = (pre: View, canvasIds: string[]): Promise<void> =>
+  useModelerStore.getState().deleteView(pre, { canvasIds });
 
 function Footer({ usage, canEdit, onOpen, onClose }: { usage: TableUsageRow[] | null; canEdit: boolean; onOpen: () => void; onClose: () => void }) {
   const n = usage?.length ?? 0;
@@ -295,8 +282,13 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   const tablePre = (t: CanonicalTable): CanonicalTable => ({ ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) });
 
   // ── Definition: nombres por faceta + rayo + esquema + definición (espejo de Properties) ──
+  // Doc 105: cada escritura del inspector es de la sesión donde empezó (H1:
+  // `pinSession`, su inversa se apila sólo ahí y corta si cambió) y su fallo
+  // espera la revalidación y calla si la sesión cambió (H5/H7: `reportWriteError`).
   const saveTableDef = async () => {
     if (!data) return;
+    const pin = pinSession();
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save")));
     const pre = tablePre(data.table);
     const logical = form.logicalName.trim();
     // Doc 68: la decisión (re-derivar vs conservar el custom + flag de override)
@@ -315,13 +307,14 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     if (!structural && (next.description ?? '') === (pre.description ?? '') && !!next.physicalNameOverridden === !!pre.physicalNameOverridden) return;
     setSaving(true);
     try {
+      pin.check();   // el físico pudo derivarse con un await
       await gov.createTable(next);   // upsert por id = update (merge sobre el doc efectivo)
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(true); });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(true); }, pin);
       setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
       setPhysTouched(null);
       await afterEdit(structural);
       toast.success(`${nouns.One} updated`);
-    } catch (e) { toast.error(errMsg(e, "Couldn't save")); }
+    } catch (e) { await onError(e); }
     finally { setSaving(false); }
   };
   // Definición funcional: auto-guardado al salir del campo (doc 40). Los
@@ -333,11 +326,13 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     const next = form.description.trim() || undefined;
     if ((data.table.description ?? undefined) === next) return;
     const pre = tablePre(data.table);
+    const pin = pinSession();
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save")));
     try {
       await gov.createTable({ ...data.table, description: next });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(false); });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(false); }, pin);
       await afterEdit(false);
-    } catch (e) { toast.error(errMsg(e, "Couldn't save")); }
+    } catch (e) { await onError(e); }
   };
   /** Rayo (doc 88 §3): re-deriva el físico desde el lógico por el glosario y apaga el override. */
   const derivePhysical = async () => {
@@ -350,11 +345,13 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   const saveTableUdp = async (next: Record<string, string>) => {
     if (!data) return;
     const pre = tablePre(data.table);
+    const pin = pinSession();
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save UDP")));
     try {
       await gov.createTable({ ...data.table, udpValues: next });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(false); });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(false); }, pin);
       await afterEdit(false);
-    } catch (e) { toast.error(errMsg(e, "Couldn't save UDP")); }
+    } catch (e) { await onError(e); }
   };
   /** Doc 89 §3.2: borrado con el diálogo de impacto de Properties (conteos del
    *  dossier) y la cascada versionada del store — la pre-imagen del Undo viene
@@ -364,21 +361,23 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     if (!data || deleting) return;
     setDeleting(true);
     const t = data.table;
+    const onError = reportWriteError((e) => toast.error(errMsg(e, `Couldn't delete the ${nouns.one}`)));
     try {
       const ok = await confirmDeleteTable({
         name: t.physicalName || t.logicalName, nouns, impact: tableDeleteImpact(target.id, data),
         action: async () => { await deleteTable(target.id, { pre: tablePre(t) }); },
       });
       if (ok) { toast.success(`${nouns.One} deleted`); onClose(); }
-    } catch (e) { toast.error(errMsg(e, `Couldn't delete the ${nouns.one}`)); }
+    } catch (e) { await onError(e); }
     finally { setDeleting(false); }
   };
 
   // ── Columna: mismo upsert changeset-aware que el sidebar (doc 89 §3.3) ──
-  const viewDeps = { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView };
   const patchColumn = async (id: string, fields: Partial<CanonicalColumn>) => {
     const c = data?.columns.find((x) => x.id === id);
     if (!c) return;
+    const pin = pinSession();
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save the column")));
     // Doc 94 D2: entrar o salir de la llave la re-ubica en la frontera del
     // bloque de PK — ella y las que se corren viajan en UN lote, con UN Undo.
     if (fields.isPrimaryKey !== undefined && !!fields.isPrimaryKey !== !!c.isPrimaryKey) {
@@ -388,9 +387,9 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
         pushUndo(`Edit column ${c.physicalName}`, async () => {
           await gov.recordChangesBulk(pres.map((p) => gov.bulk.createColumn(p)));
           await afterEdit(true);
-        });
+        }, pin);
         await afterEdit(true);
-      } catch (e) { toast.error(errMsg(e, "Couldn't save the column")); }
+      } catch (e) { await onError(e); }
       return;
     }
     const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
@@ -398,40 +397,54 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     const structural = renamed || (typeof fields.logicalName === 'string' && fields.logicalName !== c.logicalName);
     try {
       await gov.updateColumn({ ...c, ...fields });   // upsert por id = update (merge)
-      pushUndo(`Edit column ${pre.physicalName}`, async () => {
+      pushUndo(`Edit column ${pre.physicalName}`, async (undo) => {
         await gov.updateColumn(pre);
         // Si el cambio renombró el FÍSICO, las vistas quedaron re-apuntadas al
-        // nombre nuevo: deshacer las devuelve al viejo (best-effort).
-        if (renamed) { try { await syncRenamedColumnInViews(viewDeps, c.tableId, fields.physicalName as string, pre.physicalName); } catch { /* best-effort */ } }
+        // nombre nuevo: deshacer las devuelve al viejo (best-effort; doc 105:
+        // sólo mientras siga la sesión del Undo).
+        if (renamed) await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(undo), c.tableId, fields.physicalName as string, pre.physicalName));
         await afterEdit(structural);
-      });
+      }, pin);
       if (renamed) {
-        // Un rename FÍSICO re-apunta las vistas que referencian el nombre viejo (mismo sync del sidebar).
-        try {
-          const n = await syncRenamedColumnInViews(viewDeps, c.tableId, c.physicalName, fields.physicalName as string);
+        // Un rename FÍSICO re-apunta las vistas que referencian el nombre viejo
+        // (mismo sync del sidebar); la vista se corrige a mano si hiciera falta.
+        await bestEffort(async () => {
+          const n = await syncRenamedColumnInViews(pinnedViewDeps(pin), c.tableId, c.physicalName, fields.physicalName as string);
           if (n) toast.success(`Rename also applied to ${n} view(s)`);
-        } catch { /* la vista se corrige a mano si hiciera falta */ }
+        });
       }
       await afterEdit(structural);
-    } catch (e) { toast.error(errMsg(e, "Couldn't save the column")); }
+    } catch (e) { await onError(e); }
   };
   /** Doc 89 §3.3: impacto GLOBAL (spec 10 §8) + cascada versionada del store —
    *  la columna viaja desde el dossier (sin canvas no está en el diagrama). */
   const askDeleteColumn = async (c: CanonicalColumn) => {
-    let impact: gov.RelationshipImpact = { relationships: [], total: 0 };
-    try { impact = await gov.columnImpact(c.id); } catch { /* confirm genérico */ }
+    // Doc 105 (ronda 4, R10-A): el borrado es de la sesión donde se pidió — el
+    // pin y los avisos se toman ANTES de leer el impacto (creado después, el
+    // aviso avisaba «read-only» encima de la revalidación); si mientras lee se
+    // abre otra versión, el confirm no se abre en ella, y la acción verifica
+    // el pin al clic.
+    const pin = pinSession();
+    // Doc 105 (ronda 3): sin el impacto (relaciones donde es extremo) no se
+    // ofrece el borrado — con `relIds` vacío quedaban relaciones con pares
+    // hacia una columna borrada.
+    const onImpactError = reportWriteError(() => toast.error(`Couldn't check the relationships of this ${nouns.member}: nothing was deleted. Try again.`));
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
+    let impact: gov.RelationshipImpact;
+    try { impact = await gov.columnImpact(c.id); } catch (e) { await onImpactError(e); return; }
+    if (!pin.holds()) return;
     const relIds = impact.relationships.map((r) => r.relId);
     try {
       const ok = await confirmDeleteColumn({
         name: c.physicalName, nouns, impact,
-        action: () => deleteColumn(c.id, relIds, { col: c }),
+        action: () => { pin.check(); return deleteColumn(c.id, relIds, { col: c }); },
       });
       if (ok) {
         toast.success(impact.total > 0 ? `${nouns.Member} and its relationships deleted` : `${nouns.Member} deleted`);
         setSelCol(null);
         await refresh();   // el store ya recargó el canvas y sincronizó el Explorer
       }
-    } catch (e) { toast.error(errMsg(e, "Couldn't delete")); }
+    } catch (e) { await onError(e); }
   };
   /** Doc 74: mueve la columna en el único orden de la tabla (`ordinal`). */
   const move = async (colId: string, delta: number) => {
@@ -446,27 +459,29 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     const plan = reorderPlan(data.columns, nextIds);
     if (!plan.length) return;
     setReordering(true);
+    const pin = pinSession();   // doc 105 (H1): tandas de escrituras
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't reorder")));
     // Optimista: el inspector reordena ya; la persistencia corre detrás.
     setData((d) => d && ({ ...d, columns: d.columns.map((c) => { const s = plan.find((p) => p.c.id === c.id); return s ? { ...c, ordinal: s.idx } : c; }) }));
     try {
-      await persistReorder(plan, (c, idx) => gov.updateColumn({ ...c, ordinal: idx }));
+      await persistReorder(plan, (c, idx) => pinned(pin, gov.updateColumn)({ ...c, ordinal: idx }));
       pushUndo('Reorder columns',
-        async () => { await persistReorder(plan, (c) => gov.updateColumn(c)); await afterEdit(false); });
+        async (undo) => { await persistReorder(plan, (c) => pinned(undo, gov.updateColumn)(c)); await afterEdit(false); }, pin);
       await afterEdit(false);
-    } catch (e) { toast.error(errMsg(e, "Couldn't reorder")); await refresh().catch(() => {}); }
+    } catch (e) { await onError(e); await refresh().catch(() => {}); }
     finally { setReordering(false); }
   };
   /** Doc 89 §3.2: basurero de la pestaña Views (paridad con Properties › Views). */
   const askDeleteView = async (v: TableViewRow) => {
     const pre = viewPre(v);
-    const viewOnActive = onActiveCanvas || !!useModelerStore.getState().diagram?.views.some((x) => x.id === v.id);
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
     try {
       const ok = await confirmDeleteView({
         name: v.name,
-        action: () => deleteViewVersioned(pre, v.canvases.map((c) => c.id), viewOnActive),
+        action: () => deleteViewVersioned(pre, v.canvases.map((c) => c.id)),
       });
       if (ok) { toast.success('View deleted'); await afterEdit(true); }
-    } catch (e) { toast.error(errMsg(e, "Couldn't delete")); }
+    } catch (e) { await onError(e); }
   };
 
   const goCanvas = (u: TableUsageRow) => {
@@ -853,9 +868,10 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
   };
   const saveView = async (patch: Partial<ViewInput>, label: string, structural: boolean) => {
     if (!data) return;
+    const pin = pinSession();   // doc 105 (H1): su inversa se apila sólo en su sesión
     const pre = viewPre(data.view);
     await viewsSvc.updateView(pre.id, { ...data.view, ...patch } as ViewInput);   // doc completo (el overlay reemplaza)
-    pushUndo(label, async () => { await viewsSvc.updateView(pre.id, pre as ViewInput); await afterEdit(structural); });
+    pushUndo(label, async () => { await viewsSvc.updateView(pre.id, pre as ViewInput); await afterEdit(structural); }, pin);
     await afterEdit(structural);
   };
   const saveDef = async () => {
@@ -866,22 +882,25 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     const structural = name !== data.view.name || (schema ?? '') !== (data.view.schema ?? '');
     if (!structural && (description ?? '') === (data.view.description ?? '')) return;
     setSaving(true);
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save")));
     try {
       await saveView({ name, schema, description }, `Edit view ${data.view.name}`, structural);
       setForm((f) => ({ ...f, name }));
       toast.success('View updated');
-    } catch (e) { toast.error(errMsg(e, "Couldn't save")); }
+    } catch (e) { await onError(e); }
     finally { setSaving(false); }
   };
   const saveDescriptionOnBlur = async () => {
     if (!canEdit || !data) return;
     const next = form.description.trim() || undefined;
     if ((data.view.description ?? undefined) === next) return;
-    try { await saveView({ description: next }, `Edit view ${data.view.name}`, false); } catch (e) { toast.error(errMsg(e, "Couldn't save")); }
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save")));
+    try { await saveView({ description: next }, `Edit view ${data.view.name}`, false); } catch (e) { await onError(e); }
   };
   const saveUdp = async (next: Record<string, string>) => {
     if (!data) return;
-    try { await saveView({ udpValues: next }, `Edit view ${data.view.name}`, false); } catch (e) { toast.error(errMsg(e, "Couldn't save UDP")); }
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save UDP")));
+    try { await saveView({ udpValues: next }, `Edit view ${data.view.name}`, false); } catch (e) { await onError(e); }
   };
   /** Doc 89 §3.4: borra la vista (cualquiera sea su origen: botón View del
    *  toolbar o Properties › Views — misma colección) y cierra el popup. */
@@ -890,8 +909,11 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     setDeleting(true);
     const pre = viewPre(data.view);
     const canvasIds = data.usage.map((u) => u.canvasId);
+    // Doc 105 (H5): con la versión recién transferida el borrado termina con el
+    // error original — la revalidación ya avisó: acá se calla.
+    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
     try {
-      const ok = await confirmDeleteView({ name: pre.name, action: () => deleteViewVersioned(pre, canvasIds, onActiveCanvas) });
+      const ok = await confirmDeleteView({ name: pre.name, action: () => deleteViewVersioned(pre, canvasIds) });
       if (ok) {
         toast.success('View deleted');
         markDirty();
@@ -899,7 +921,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
         const plan = inspectorRefreshPlan({ onActiveCanvas, structural: true });
         if (plan === 'reload') await reloadDiagram(); else bumpExplorer();
       }
-    } catch (e) { toast.error(errMsg(e, "Couldn't delete")); }
+    } catch (e) { await onError(e); }
     finally { setDeleting(false); }
   };
 

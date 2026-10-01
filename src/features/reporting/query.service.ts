@@ -5,7 +5,7 @@
  * export. Doc 75: toda consulta, catálogo, faceta, insight y reporte guardado
  * es de UN proyecto (`projectId`).
  */
-import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
+import { apiGet, apiPost, apiPut, apiDelete, NETWORK_ERROR_TEXT } from '@/services/http';
 
 import { API_BASE } from '@/services/apiBase';
 const R = `${API_BASE}/api/reporting`;
@@ -50,7 +50,14 @@ export interface ReportSpec {
   groupBy: string[];
   aggregations: Aggregation[];
   orderBy: OrderBy[];
+  /** Tamaño de PÁGINA (1..5000). */
   limit: number;
+  /** Doc 105: tope del resultado TOTAL — lo arma el editor SQL con `LIMIT n`
+   *  (espejo de `QuerySpec.maxRows`); el Builder no lo usa (`toBuilderSpec`). */
+  maxRows?: number | null;
+  /** Doc 105 (ronda 5): columnas del resultado AGRUPADO en el orden del SELECT
+   *  del editor SQL (espejo de `QuerySpec.resultColumns`); el Builder no lo usa. */
+  resultColumns?: string[] | null;
 }
 
 export interface ResultColumn { key: string; label: string; type?: string; udp?: boolean; }
@@ -105,9 +112,15 @@ export const getScorecard = (projectId: string) => apiGet<Scorecard>(`${R}/insig
 export const getUdpCoverage = (projectId: string) => apiGet<UdpCoverage[]>(`${R}/insights/udp-coverage?${P(projectId)}`);
 export const getDomainUsage = (projectId: string) => apiGet<DomainUsage[]>(`${R}/insights/domain-usage?${P(projectId)}`);
 export const getGlossaryUsage = (projectId: string) => apiGet<GlossaryUsage[]>(`${R}/insights/glossary-usage?${P(projectId)}`);
-/** Doc 102: con `changesetId`, las relaciones de una versión PROPIA sin publicar. */
-export const getRelationshipsReport = (projectId: string, limit = 2000, changesetId?: string | null) =>
-  apiGet<RelationshipRow[]>(`${R}/insights/relationships?${P(projectId)}&limit=${limit}${changesetId ? `&changesetId=${encodeURIComponent(changesetId)}` : ''}`);
+/** Doc 105 (A3-o1): `POST /insights/relationships/query` — las filas del reporte
+ *  de relaciones (una por PAR de columnas), pero SÓLO de las relaciones con el
+ *  padre o el hijo en el LOTE de tablas (1..300 ids en el cuerpo). Con
+ *  `changesetId`, las de una versión PROPIA sin publicar (doc 102). Los lotes
+ *  los arma `fetchRelationshipsFor`; reemplaza al GET con tope de 5 000 del
+ *  proyecto (el front ya no lo llama). */
+export const queryRelationshipsReport = (projectId: string, tableIds: string[], changesetId?: string | null) =>
+  apiPost<RelationshipRow[]>(`${R}/insights/relationships/query`,
+    changesetId ? { projectId, tableIds, changesetId } : { projectId, tableIds });
 
 export const emptySpec = (projectId: string, from: ViewKey = 'columns'): ReportSpec => ({
   projectId, from, select: [], groupBy: [], aggregations: [], orderBy: [], limit: 100, where: { op: 'and', conditions: [] },
@@ -138,17 +151,34 @@ export const deleteReport = (id: string) => apiDelete(`${R}/reports/${id}`);
 /** Export CSV por streaming: descarga directa (el stream no bufferea en JS). */
 export async function exportCsv(spec: ReportSpec): Promise<void> {
   const token = localStorage.getItem('dmh.token');
-  const res = await fetch(`${R}/export`, {
-    method: 'POST',
-    // X-Session-Token (no Authorization) + credentials: mismo contrato que
-    // http.ts — en Databricks Apps el proxy SSO consume `Authorization` y
-    // exige su cookie de sesión en requests cross-app.
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Session-Token': token } : {}) },
-    body: JSON.stringify(spec),
-  });
-  if (!res.ok) throw new Error(`Export failed (${res.status})`);
-  const blob = await res.blob();
+  let res: Response;
+  try {
+    res = await fetch(`${R}/export`, {
+      method: 'POST',
+      // X-Session-Token (no Authorization) + credentials: mismo contrato que
+      // http.ts — en Databricks Apps el proxy SSO consume `Authorization` y
+      // exige su cookie de sesión en requests cross-app.
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Session-Token': token } : {}) },
+      body: JSON.stringify(spec),
+    });
+  } catch {
+    throw new Error(NETWORK_ERROR_TEXT);   // doc 105: no el «Failed to fetch» del navegador
+  }
+  if (!res.ok) {
+    // Doc 105: el motivo del backend, leído como `apiFetch` (`detail`, su
+    // `message` si es estructurado, o el `error` del envelope).
+    const body = (await res.json().catch(() => null)) as { detail?: unknown; error?: unknown } | null;
+    const d = body?.detail;
+    const msg = typeof d === 'string' ? d : (d && typeof d === 'object' ? (d as { message?: unknown }).message : undefined) ?? body?.error;
+    throw new Error(typeof msg === 'string' && msg ? msg : `Export failed (${res.status})`);
+  }
+  let blob: Blob;
+  try {
+    blob = await res.blob();
+  } catch {
+    throw new Error(NETWORK_ERROR_TEXT);   // doc 105 (ronda 3): corte a mitad de la descarga
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url; a.download = `report-${spec.from}.csv`;

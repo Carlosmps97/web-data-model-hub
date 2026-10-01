@@ -2,15 +2,27 @@
  * Lookups & Functions del ruleset (doc 30 §7, componentes que el diseño no
  * traía). El lookup es el BUSCARV de Excel: tabla de DOS columnas con la
  * izquierda PREcargada con los valores permitidos del UDP de origen — el
- * modelador solo llena la derecha (spec §6.7). Vacío = no emitir (null).
+ * modelador solo llena la derecha (spec §6.7). Cada fila tiene TRES estados
+ * (espejo de `_resolve_lookup`): un valor; «nada» (null: no se emite); y sin
+ * mapear (emite el default). Con default, los dos últimos NO son lo mismo
+ * (doc 105): el placeholder dice qué pasa y la fila ofrece pasar de uno al
+ * otro («Emit nothing» / «Unmap»). Vaciar la celda la deja sin mapear. Ver `lookupRow`.
  */
-import { useMemo, useState } from 'react';
-import { Plus, Table2, Trash2, X } from 'lucide-react';
+import { useMemo, useState, type CSSProperties } from 'react';
+import { Ban, Plus, RotateCcw, Table2, Trash2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { saveDdlConfig } from '../ddlRules.service';
+import { applyErrorNotice, ddlConfigChanged, lookupRow, NO_CHANGES_HINT } from '../standardsDiff';
 import { getUdpDefs, type DdlLookup, type DdlRulesetConfig, type UdpDefinition } from '../standards.service';
 import { useEffect } from 'react';
+
+/** Columnas de la tabla de un lookup: valor del UDP · valor emitido · acción de la fila. */
+const LK_COLS = '1fr 1fr 24px';
+const rowBtn: CSSProperties = {
+  width: 24, height: 24, padding: 0, border: '1px solid #E6EAF0', background: '#fff', color: '#8A93A5', borderRadius: 6,
+  display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+};
 
 export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, onApplied }: {
   projectId: string;
@@ -21,6 +33,11 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
 }) {
   const [tab, setTab] = useState<'lookups' | 'functions'>('lookups');
   const [lookups, setLookups] = useState<Record<string, DdlLookup>>(() => structuredClone(config.lookups));
+  // Doc 105 (R11/R14): claves de cada lookup en el config inicial — las stale
+  // siguen visibles hasta guardar; al BORRAR el lookup se descartan (uno nuevo
+  // con el mismo nombre no hereda sus filas).
+  const [initialKeys, setInitialKeys] = useState<Record<string, string[]>>(
+    () => Object.fromEntries(Object.entries(config.lookups).map(([name, l]) => [name, Object.keys(l.values ?? {})])));
   const [functions, setFunctions] = useState(() => structuredClone(config.functions));
   const [defs, setDefs] = useState<UdpDefinition[]>([]);
   const [selected, setSelected] = useState<string | null>(Object.keys(config.lookups)[0] ?? null);
@@ -31,16 +48,21 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
   const defById = useMemo(() => new Map(defs.map((d) => [d.id, d])), [defs]);
   const listDefs = useMemo(() => defs.filter((d) => d.dataType === 'list'), [defs]);
   const lk = selected ? lookups[selected] : undefined;
+  // Doc 105: sin un cambio real no se guarda (antes registraba una versión vacía).
+  const dirty = useMemo(() => ddlConfigChanged(lookups, functions, config), [lookups, functions, config]);
   const srcDef = lk?.fromUdpId ? defById.get(lk.fromUdpId) : undefined;
 
   // Filas = valores permitidos del UDP (izquierda precargada) + claves ya
-  // mapeadas que quedaron fuera de la lista (stale, se muestran igual).
+  // mapeadas que quedaron fuera de la lista (stale, se muestran igual). Doc 105
+  // (R11): las stale del config INICIAL siguen visibles hasta guardar — vaciar
+  // su celda las des-mapea y la fila desaparecía con el foco adentro.
   const rows = useMemo(() => {
     if (!lk) return [];
     const allowed = srcDef?.allowedValues ?? [];
-    const extra = Object.keys(lk.values).filter((k) => !allowed.includes(k));
+    const initial = selected ? initialKeys[selected] ?? [] : [];
+    const extra = [...new Set([...Object.keys(lk.values), ...initial])].filter((k) => !allowed.includes(k));
     return [...allowed, ...extra];
-  }, [lk, srcDef]);
+  }, [lk, srcDef, selected, initialKeys]);
 
   const patchLk = (p: Partial<DdlLookup>) => {
     if (!selected) return;
@@ -62,7 +84,7 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
       await saveDdlConfig(projectId, { lookups, functions });
       toast.success('Lookups & functions saved');
       await onApplied(); onClose();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save"); }
+    } catch (e) { const n = applyErrorNotice(e, "Couldn't save"); toast[n.kind](n.text); }
     finally { setSaving(false); }
   };
 
@@ -75,7 +97,7 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
             <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#1A2B4A' }}>Lookups &amp; Functions</h2>
             <p style={{ margin: '3px 0 0', fontSize: 12.5, color: '#8A93A5', lineHeight: 1.5 }}>
               A lookup is a VLOOKUP over a UDP's allowed values — used as{' '}
-              <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{lookup:name}'}</span>. Empty output = emit nothing.
+              <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{lookup:name}'}</span>. Unmapped values emit the default; a value set to “nothing” is not emitted.
             </p>
           </div>
           <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #E6EAF0', background: '#fff', color: '#8A93A5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flex: 'none' }}><X size={13} /></button>
@@ -126,6 +148,7 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
                         <button onClick={() => {
                           const rest = { ...lookups }; delete rest[selected];
                           setLookups(rest); setSelected(Object.keys(rest)[0] ?? null);
+                          setInitialKeys((m) => { const next = { ...m }; delete next[selected]; return next; });
                         }} title="Delete lookup"
                           style={{ width: 32, height: 32, border: '1px solid #F1D9D5', background: '#FDF2F1', color: '#B23A2E', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
                           <Trash2 size={13} />
@@ -133,22 +156,48 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
                       )}
                     </div>
                     <div style={{ border: '1px solid #EAEDF2', borderRadius: 10, overflow: 'hidden' }}>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', padding: '8px 12px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' }}>
-                        <div>{srcDef?.name ?? 'UDP value'}</div><div>Emitted value</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: LK_COLS, gap: 0, background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', padding: '8px 12px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' }}>
+                        <div>{srcDef?.name ?? 'UDP value'}</div><div>Emitted value</div><div />
                       </div>
-                      {rows.map((val) => (
-                        <div key={val} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', alignItems: 'center', borderBottom: '1px solid #F2F4F8', padding: '6px 12px', gap: 10 }}>
-                          <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12, color: (srcDef?.allowedValues ?? []).includes(val) ? '#1A2B4A' : '#B98600' }}>{val}</div>
-                          <input value={lk.values[val] ?? ''} disabled={!canEdit} placeholder="— nothing"
-                            onChange={(e) => patchLk({ values: { ...lk.values, [val]: e.target.value || null } })}
-                            style={{ height: 30, border: '1px solid #E6EAF0', borderRadius: 7, padding: '0 9px', fontFamily: 'var(--mono, monospace)', fontSize: 12, outline: 'none' }} />
-                        </div>
-                      ))}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', alignItems: 'center', padding: '6px 12px', gap: 10, background: '#FBFCFD' }}>
+                      {rows.map((val) => {
+                        // Doc 105: con default, «nada» y «sin mapear» emiten distinto —
+                        // el placeholder lo dice y la fila pasa de uno al otro.
+                        const row = lookupRow(lk, val);
+                        const unmap = lk.default != null
+                          ? `Unmap ${val} — emit the default (${lk.default === '' ? "''" : lk.default})` : `Unmap ${val}`;
+                        const nothing = `Emit nothing for ${val} (instead of the default)`;
+                        return (
+                          <div key={val} style={{ display: 'grid', gridTemplateColumns: LK_COLS, alignItems: 'center', borderBottom: '1px solid #F2F4F8', padding: '6px 12px', gap: 10 }}>
+                            <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12, color: (srcDef?.allowedValues ?? []).includes(val) ? '#1A2B4A' : '#B98600' }}>{val}</div>
+                            <input value={lk.values[val] ?? ''} disabled={!canEdit} placeholder={row.placeholder} aria-label={`Emitted value for ${val}`}
+                              onChange={(e) => {
+                                // Doc 105 (R6): vaciar la celda la vuelve a «sin mapear» (emite el
+                                // default); «nothing» (null) se elige sólo con «Emit nothing».
+                                const next = { ...lk.values, [val]: e.target.value };
+                                if (!e.target.value) delete next[val];
+                                patchLk({ values: next });
+                              }}
+                              style={{ height: 30, border: '1px solid #E6EAF0', borderRadius: 7, padding: '0 9px', fontFamily: 'var(--mono, monospace)', fontSize: 12, outline: 'none' }} />
+                            {canEdit && row.action === 'unmap' ? (
+                              <button type="button" title={unmap} aria-label={unmap} style={rowBtn}
+                                onClick={() => { const next = { ...lk.values }; delete next[val]; patchLk({ values: next }); }}>
+                                <RotateCcw size={12} aria-hidden />
+                              </button>
+                            ) : canEdit && row.action === 'nothing' ? (
+                              <button type="button" title={nothing} aria-label={nothing} style={rowBtn}
+                                onClick={() => patchLk({ values: { ...lk.values, [val]: null } })}>
+                                <Ban size={12} aria-hidden />
+                              </button>
+                            ) : <span />}
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: 'grid', gridTemplateColumns: LK_COLS, alignItems: 'center', padding: '6px 12px', gap: 10, background: '#FBFCFD' }}>
                         <div style={{ fontSize: 11.5, color: '#8A93A5', fontWeight: 600 }}>default (unmapped)</div>
-                        <input value={lk.default ?? ''} disabled={!canEdit} placeholder="— nothing (null)"
+                        <input value={lk.default ?? ''} disabled={!canEdit} placeholder="— nothing (not emitted)" aria-label="Default value (unmapped)"
                           onChange={(e) => patchLk({ default: e.target.value || null })}
                           style={{ height: 30, border: '1px solid #E6EAF0', borderRadius: 7, padding: '0 9px', fontFamily: 'var(--mono, monospace)', fontSize: 12, outline: 'none' }} />
+                        <span />
                       </div>
                     </div>
                   </>
@@ -191,11 +240,11 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
         </div>
 
         <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 24px 18px', borderTop: '1px solid #EEF1F6' }}>
-          <span style={{ flex: 1, fontSize: 11.5, color: '#9AA3B2' }}>Saving records a Data Standards version (rollback available).</span>
+          <span style={{ flex: 1, fontSize: 11.5, color: '#9AA3B2' }}>{dirty ? 'Saving records a Data Standards version (rollback available).' : NO_CHANGES_HINT}</span>
           <button onClick={onClose} style={{ height: 38, padding: '0 16px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
           {canEdit && (
-            <button onClick={doSave} disabled={saving}
-              style={{ height: 38, padding: '0 18px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button onClick={doSave} disabled={saving || !dirty} title={dirty ? undefined : NO_CHANGES_HINT}
+              style={{ height: 38, padding: '0 18px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: dirty ? 'pointer' : 'default', opacity: dirty ? 1 : 0.5, fontFamily: 'inherit' }}>
               {saving ? 'Saving…' : 'Save changes'}
             </button>
           )}

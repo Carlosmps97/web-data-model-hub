@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { EdgeLabelRenderer, useReactFlow, useStore } from '@xyflow/react';
+import { pinSession } from '../lib/sessionGuard';
 import { RotateCcw } from 'lucide-react';
 import {
   MAX_ROUTE_POINTS, MIN_HANDLE_SEGMENT, SNAP_PX,
@@ -201,7 +202,14 @@ export default function WireRouteHandles({ via, segments, center, ends, onDraft,
     e.stopPropagation();
     if (!nudged.current) return;
     if (nudgeTimer.current != null) window.clearTimeout(nudgeTimer.current);
-    nudgeTimer.current = window.setTimeout(() => { nudgeTimer.current = null; commitNudge(); }, NUDGE_SAVE_MS);
+    // Doc 105 (ronda 3): se graba con la sesión de cuándo se movió — si al
+    // dispararse ya es otra, el borrador se descarta (no va a otra versión).
+    const pin = pinSession();
+    nudgeTimer.current = window.setTimeout(() => {
+      nudgeTimer.current = null;
+      if (!pin.holds()) { nudged.current = null; live.current.onDraft(null); return; }
+      commitNudge();
+    }, NUDGE_SAVE_MS);
   };
 
   const place = (p: RoutePoint, extra = '') => ({

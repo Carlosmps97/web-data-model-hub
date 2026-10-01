@@ -4,6 +4,9 @@ import { Database, FolderOpen, PanelLeftClose, RefreshCw, Search, X } from 'luci
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useUiStore } from '@/store/useUiStore';
+import { canvasSessionKey } from '../lib/canvasSession';
+import { stillAskedSession } from '../lib/sessionGuard';
+import { SEARCH_KEY_LABEL } from './ColumnContextMenu';
 import ModelExplorer from './ModelExplorer';
 import ProjectCatalog from './ProjectCatalog';
 
@@ -42,7 +45,7 @@ export default function ExplorerPanel({ pushToast, onOpenModel }: {
     <div className="wk-explorer" aria-label="Explorer">
       <div className="wk-exp-head">
         <span>Explorer</span>
-        <button type="button" className="wk-exp-headbtn" title="Search the model — locate on canvas or inspect metadata (⌘K)"
+        <button type="button" className="wk-exp-headbtn" title={`Search the model — locate on canvas or inspect metadata (${SEARCH_KEY_LABEL})`}
           disabled={!openMode} onClick={() => setSearchOpen(true)} aria-label="Search the model">
           <Search size={13} />
         </button>
@@ -50,7 +53,17 @@ export default function ExplorerPanel({ pushToast, onOpenModel }: {
             recargan; el tiempo real cubre lo que pasa por el canvas activo. */}
         <button type="button" className="wk-exp-headbtn" title="Refresh the explorer — tree, catalog and schemas"
           disabled={!openMode} aria-label="Refresh the explorer"
-          onClick={() => { bumpExplorer(); void refreshExplorer().catch(() => pushToast("Couldn't refresh the explorer", 'err')); }}>
+          onClick={() => {
+            bumpExplorer();
+            // Doc 105 (ronda 3): un error de la versión espera la revalidación;
+            // si la sesión ya no es la de este clic, ella avisó (o se abrió otra).
+            const asked = useSessionStore.getState();
+            const askedKey = canvasSessionKey(asked);
+            void refreshExplorer().catch(async (e: unknown) => {
+              if (!(await stillAskedSession(e, asked.activeChangesetId, askedKey, () => canvasSessionKey(useSessionStore.getState())))) return;
+              pushToast(`Couldn't refresh the explorer${e instanceof Error && e.message ? `: ${e.message}` : ''}`, 'err');
+            });
+          }}>
           <RefreshCw size={13} />
         </button>
         {/* Doc 92 D7: colapsa el Explorer a un riel (más espacio de canvas). */}

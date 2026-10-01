@@ -85,15 +85,17 @@
 
 /* ── Detail header ─────────────────────────────────────────────────── */
 .dmh-rv-dhead { padding: 18px 24px; border-bottom: 1px solid var(--border-2); flex: none; }
-.dmh-rv-dhead-row { display: flex; align-items: flex-start; gap: 14px; }
-.dmh-rv-dhead-main { flex: 1; min-width: 0; }
+/* Doc 105: en anchos chicos (≈1024 px) las acciones bajan a su propia fila en vez de
+   aplastar título y metadatos (o recortar Approve); desde ≈1440 px no cambia nada. */
+.dmh-rv-dhead-row { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.dmh-rv-dhead-main { flex: 1 1 330px; min-width: 0; }
 .dmh-rv-dtitle-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .dmh-rv-h1 { margin: 0; font-size: 20px; font-weight: 700; color: var(--navy); letter-spacing: -.01em; }
 .dmh-rv-dmeta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 9px; font-size: 12.5px; color: var(--text-muted); }
 .dmh-rv-dmeta strong { color: var(--navy); font-weight: 600; }
 .dmh-rv-dmeta .sep { color: #C7CDD9; }
 
-.dmh-rv-dactions { display: flex; gap: 8px; flex: none; align-items: center; }
+.dmh-rv-dactions { display: flex; gap: 8px; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; align-items: center; }
 .dmh-rv-act {
   display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 14px; border-radius: 10px;
   font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--ui); border: 1px solid transparent;

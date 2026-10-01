@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
-import { facetNouns } from '@/lib/facets';
+import { facetNouns, type FacetNouns } from '@/lib/facets';
 import { useModelerStore } from '@/store/useModelerStore';
+import { reportWriteError } from '../lib/sessionGuard';
 import { useSessionStore } from '@/store/useSessionStore';
 
 // Etiquetas de atajos agnósticas al SO (Windows/Linux = Ctrl, macOS = ⌘) —
@@ -8,12 +9,15 @@ import { useSessionStore } from '@/store/useSessionStore';
 const IS_MAC = /Mac/i.test(typeof navigator === 'undefined' ? '' : navigator.platform);
 export const PASTE_KEY_LABEL = IS_MAC ? '⌘V' : 'Ctrl+V';
 export const UNDO_KEY_LABEL = IS_MAC ? '⌘Z' : 'Ctrl+Z';
+export const SEARCH_KEY_LABEL = IS_MAC ? '⌘K' : 'Ctrl+K';
 
-export const copiedMessage = (n: number) =>
-  `${n} column${n === 1 ? '' : 's'} copied — paste with ${PASTE_KEY_LABEL} on the target table`;
+// Doc 105 (ronda 5, R15-H9): con los sustantivos de la faceta abierta (en
+// Lógico decía «columns copied … on the target table» y «Table X copied»).
+export const copiedMessage = (n: number, nouns: FacetNouns) =>
+  `${n} ${n === 1 ? nouns.member : nouns.members} copied — paste with ${PASTE_KEY_LABEL} on the target ${nouns.one}`;
 
-export const copiedTableMessage = (name: string) =>
-  `Table ${name} copied — paste with ${PASTE_KEY_LABEL}`;
+export const copiedTableMessage = (name: string, nouns: FacetNouns) =>
+  `${nouns.One} ${name} copied — paste with ${PASTE_KEY_LABEL}`;
 
 /**
  * Menú contextual del canvas (docs 48 + 50): espejo DESCUBRIBLE de Ctrl/Cmd+C/V.
@@ -29,7 +33,11 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   const closeColMenu = useModelerStore((s) => s.closeColMenu);
   const selCount = useModelerStore((s) => s.colSel?.ids.length ?? 0);
   const clipCount = useModelerStore((s) => s.colClipboard?.cols.length ?? 0);
-  const tblClipName = useModelerStore((s) => s.tblClipboard?.table.physicalName ?? null);
+  // El nombre según la faceta (ronda 5, R15-H9: en Lógico mostraba el físico).
+  const tblClipName = useModelerStore((s) => {
+    const t = s.tblClipboard?.table;
+    return t ? (s.viewMode === 'logical' ? t.logicalName || t.physicalName : t.physicalName) : null;
+  });
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const ref = useRef<HTMLDivElement>(null);
@@ -69,8 +77,8 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
 
   const doCopy = () => {
     const st = useModelerStore.getState();
-    const n = st.copySelectedColumns();
-    if (n > 0) pushToast(copiedMessage(n));
+    const count = st.copySelectedColumns();
+    if (count > 0) pushToast(copiedMessage(count, n));
     st.closeColMenu();
   };
   const doPaste = () => {
@@ -82,15 +90,16 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   const doCopyTable = () => {
     const st = useModelerStore.getState();
     const name = st.copyTable(menu.tableId);
-    if (name) pushToast(copiedTableMessage(name));
+    if (name) pushToast(copiedTableMessage(name, n));
     st.closeColMenu();
   };
   const doPasteTable = () => {
     const st = useModelerStore.getState();
     st.closeColMenu();
     void st.pasteTable()
-      .then((name) => { if (name) pushToast(`Table pasted as ${name}`); })
-      .catch((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't paste the table", 'err'));
+      // Ronda 4 (6b): con el sustantivo del modelo, como Ctrl+V en el canvas.
+      .then((name) => { if (name) pushToast(`${n.One} pasted as ${name}`); })
+      .catch(reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't paste the ${n.one}`, 'err')));   // doc 105 (ronda 3)
   };
 
   // Clamp al viewport: el menú es chico (~200×~120), que no se corte en el borde.
@@ -106,17 +115,17 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
       )}
       {showCopyTable && (
         <button type="button" role="menuitem" onClick={doCopyTable}>
-          Copy table
+          {`Copy ${n.one}`}
         </button>
       )}
       {showPasteCols && (
         <button type="button" role="menuitem" onClick={doPaste}>
-          Paste {clipCount} column{clipCount === 1 ? '' : 's'}
+          {`Paste ${clipCount} ${clipCount === 1 ? n.member : n.members}`}
         </button>
       )}
       {showPasteTable && (
         <button type="button" role="menuitem" onClick={doPasteTable}>
-          Paste table ({tblClipName} as copy)
+          {`Paste ${n.one} (${tblClipName} as copy)`}
         </button>
       )}
     </div>

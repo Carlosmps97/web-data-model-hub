@@ -5,13 +5,36 @@
  * spinner y bloqueado hasta terminar (el owner reportó reclicks por el delay);
  * si `action` lanza, la promesa rechaza y el caller muestra el motivo.
  */
+import type { ReactNode } from 'react';
 import { confirmDialog } from '@/components/ui/dialogs';
+import * as gov from '@/services/governance.service';
 import type { RelationshipImpact } from '@/services/governance.service';
+import * as viewsSvc from '@/services/views.service';
 import type { FacetNouns } from '@/lib/facets';
 
 /** Conteos del impacto de borrar una tabla (Properties los consulta; el
- *  inspector los saca del dossier — `tableDeleteImpact`). */
-export interface TableDeleteCounts { canvases: number; related: number; views: number }
+ *  inspector los saca del dossier — `tableDeleteImpact`). Doc 105 (O2): null =
+ *  no se pudo contar (el diálogo lo dice; antes se mostraba «0»). */
+export interface TableDeleteCounts { canvases: number | null; related: number | null; views: number | null }
+
+/** Doc 105 (O2): el pre-conteo de Properties. Una lectura que falla queda en
+ *  null — no en 0: el borrado se llevaría igual lo que el diálogo no mostró. */
+export async function readTableDeleteCounts(tableId: string): Promise<TableDeleteCounts> {
+  const [usage, rels, views] = await Promise.all([
+    gov.tableUsage(tableId).then((u) => u.usage).catch(() => null),
+    gov.listRelationships(tableId).catch(() => null),
+    viewsSvc.listViews(tableId).catch(() => null),
+  ]);
+  return {
+    canvases: usage ? usage.length : null,
+    related: rels ? new Set(rels.flatMap((r) => [r.parentTableId, r.childTableId]).filter((t) => t !== tableId)).size : null,
+    views: views ? views.length : null,
+  };
+}
+
+/** Una línea del impacto: el número con su texto, o qué no se pudo contar. */
+const impactLine = (n: number | null, counted: (n: number) => ReactNode, uncounted: string) =>
+  n == null ? <li>{uncounted}</li> : <li><strong>{n}</strong> {counted(n)}</li>;
 
 export function confirmDeleteTable(o: {
   name: string; nouns: FacetNouns; impact: TableDeleteCounts; action: () => Promise<unknown>;
@@ -25,11 +48,14 @@ export function confirmDeleteTable(o: {
     message: <>
       {nouns.One} <strong>“{o.name}”</strong> will be deleted from the model. This affects:
       <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
-        <li><strong>{canvases}</strong> canvas{canvases === 1 ? '' : 'es'} it appears on</li>
-        <li><strong>{related}</strong> related {related === 1 ? nouns.one : nouns.many} (their relationships are removed)</li>
-        <li><strong>{nViews}</strong> view{nViews === 1 ? '' : 's'} (also deleted)</li>
+        {impactLine(canvases, (n) => `canvas${n === 1 ? '' : 'es'} it appears on`,
+          "Couldn't count the canvases it appears on")}
+        {impactLine(related, (n) => `related ${n === 1 ? nouns.one : nouns.many} (their relationships are removed)`,
+          `Couldn't count its related ${nouns.many} (their relationships are removed)`)}
+        {impactLine(nViews, (n) => `view${n === 1 ? '' : 's'} (also deleted)`,
+          "Couldn't count its views (they are deleted too)")}
       </ul>
-      <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--muted)' }}>Its columns and relationships go too. This change is part of the current version.</div>
+      <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--muted)' }}>Its {nouns.members} and relationships go too. This change is part of the current version.</div>
     </>,
     action: o.action,
   });
@@ -47,7 +73,7 @@ export function confirmDeleteColumn(o: {
     message: impact.total > 0 ? (
       <>
         <p style={{ margin: 0 }}>
-          Column <strong>“{o.name}”</strong> participates in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} — each will lose this pair (or be deleted if it was the last one):
+          {o.nouns.Member} <strong>“{o.name}”</strong> participates in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} — each will lose this pair (or be deleted if it was the last one):
         </p>
         <ul style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 180, overflow: 'auto' }}>
           {impact.relationships.map((r) => (
@@ -63,7 +89,7 @@ export function confirmDeleteColumn(o: {
         </ul>
       </>
     ) : (
-      <>Column <strong>“{o.name}”</strong> will be removed from this table.</>
+      <>{o.nouns.Member} <strong>“{o.name}”</strong> will be removed from this {o.nouns.one}.</>
     ),
     confirmLabel: impact.total > 0 ? 'Delete anyway' : 'Delete',
     cancelLabel: 'Cancel', variant: 'danger',

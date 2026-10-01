@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveLayout, liveLayout } from './viewerLayout';
+import { draggedPositions, effectiveLayout, liveLayout } from './viewerLayout';
 
 describe('effectiveLayout (doc 84 E)', () => {
   it('sin overrides devuelve el layout publicado tal cual', () => {
@@ -46,5 +46,29 @@ describe('liveLayout', () => {
     const persisted = { t1: { x: 1, y: 2 } };
     expect(liveLayout(persisted, [])).toEqual(persisted);
     expect(liveLayout(undefined, [])).toEqual({});
+  });
+});
+
+// Doc 105 (A4-o1): `onNodeDragStop` trae TODOS los nodos movidos (varios con
+// selección múltiple); antes se guardaba sólo el que se tomó con el mouse.
+describe('draggedPositions', () => {
+  it('reparte los nodos movidos: tablas, vistas y símbolos al layout; los dibujos aparte, enteros', () => {
+    const out = draggedPositions([
+      { id: 't1', type: 'table', position: { x: 10.4, y: 20.6 } },
+      { id: 'v1', type: 'view', position: { x: 300, y: 40 } },
+      { id: 'sym1', type: 'subcat', position: { x: 150, y: 90 } },
+      { id: 'd1', type: 'shape', position: { x: 1.6, y: 2.2 } },
+    ]);
+    expect(out.layout).toEqual({ t1: { x: 10.4, y: 20.6 }, v1: { x: 300, y: 40 }, sym1: { x: 150, y: 90 } });
+    expect(out.shapes).toEqual([{ id: 'd1', x: 2, y: 2 }]);
+  });
+
+  it('un solo nodo (arrastre simple) sigue siendo un solo nodo', () => {
+    expect(draggedPositions([{ id: 't1', type: 'table', position: { x: 5, y: 6 } }]))
+      .toEqual({ layout: { t1: { x: 5, y: 6 } }, shapes: [] });
+  });
+
+  it('sin nodos, nada', () => {
+    expect(draggedPositions([])).toEqual({ layout: {}, shapes: [] });
   });
 });

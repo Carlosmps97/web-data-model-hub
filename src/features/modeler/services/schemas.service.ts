@@ -9,13 +9,12 @@
  *  - Sin changeset → endpoints directos del PROYECTO de la sesión (doc 75:
  *    los esquemas están aislados por proyecto).
  */
-import { apiDelete, apiGet, apiPost } from '@/services/http';
+import { apiGet, apiPost } from '@/services/http';
 import * as csvc from '@/services/changeset.service';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 
 import { API_BASE } from '@/services/apiBase';
 const PROJECT_SCHEMAS = () => `${API_BASE}/api/projects/${encodeURIComponent(sessionProjectId())}/schemas`;
-const SCHEMAS = `${API_BASE}/api/schemas`;
 const CS = `${API_BASE}/api/changesets`;
 
 /** Qué contiene el esquema (doc 44): tablas o vistas. Erwin no trae este dato
@@ -47,9 +46,12 @@ export const listSchemas = async (): Promise<DbSchema[]> => {
 export const listPublishedSchemas = async (): Promise<DbSchema[]> =>
   (await apiGet<DbSchema[]>(PROJECT_SCHEMAS())).sort(byName);
 
+/** Doc 104 (ronda 2): SIEMPRE dentro de una versión en edición — el POST
+ *  directo de antes sólo lo alcanzaba el gestor de esquemas abierto cuando la
+ *  sesión se degradó (versión transferida, eliminada o enviada). */
 export const createSchema = async (name: string, description?: string, kind?: SchemaKind): Promise<DbSchema> => {
   const cs = writeCs();
-  if (!cs) return apiPost<DbSchema>(PROJECT_SCHEMAS(), { name, description, kind });
+  if (!cs) throw new Error('Creating a schema requires a version in edit mode.');
   // Camino changeset: el payload es el DOC COMPLETO — kind debe ir acá o se
   // publicaría sin él (invariante round-trip).
   const s: DbSchema = { id: crypto.randomUUID(), name, description: description || null, kind: kind ?? null };
@@ -88,9 +90,6 @@ export const renameSchema = (id: string, newName: string): Promise<{ tables: num
  *  vistas en su estado efectivo. */
 export const deleteSchema = async (id: string): Promise<void> => {
   const cs = writeCs();
-  if (cs) {
-    await apiPost(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/delete`);
-    return;
-  }
-  await apiDelete(`${SCHEMAS}/${encodeURIComponent(id)}`);
+  if (!cs) throw new Error('Deleting a schema requires a version in edit mode.');   // doc 104: sin DELETE directo
+  await apiPost(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/delete`);
 };

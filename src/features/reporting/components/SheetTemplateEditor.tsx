@@ -26,24 +26,55 @@ const toDraft = (t: SheetTemplate): Draft => ({
   fileName: t.fileName ?? '', columns: t.columns.map((c) => ({ ...c })),
 });
 
+/** Doc 105 (B6): «Next export:» con reloj propio de 1 s — calculado en el render
+ *  del editor, los segundos quedaban congelados hasta la siguiente tecla. */
+export function NextExportName({ draft }: { draft: Pick<SheetTemplateBody, 'name' | 'fileName'> }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const tick = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(tick);
+  }, []);
+  return <strong>{templateFileName(draft, now)}</strong>;
+}
+
 export default function SheetTemplateEditor({ projectId, templates, me, isAdmin, onClose, onChanged }: {
   projectId: string; templates: SheetTemplate[]; me: string | undefined; isAdmin: boolean;
   onClose: () => void; onChanged: () => Promise<void>;
 }) {
   const [selId, setSelId] = useState<string | null>(templates[0]?.id ?? null);
-  const [draft, setDraft] = useState<Draft>(EMPTY);
+  const [draft, setDraft] = useState<Draft>(() => (templates[0] ? toDraft(templates[0]) : EMPTY));
   const [defs, setDefs] = useState<UdpDefinition[]>([]);
   const [busy, setBusy] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const copyOf = useRef<Draft | null>(null);    // «Duplicate»: borrador que abre el alta
 
   useEffect(() => { getUdpDefs(projectId).then(setDefs).catch(() => setDefs([])); }, [projectId]);
+  // Re-sincroniza tras una recarga de la lista o una selección programática
+  // (guardar, borrar, crear la QA_MODELO). Los clics del usuario ya reinician
+  // el borrador en el mismo evento (`choose`); esto re-aplica lo mismo.
   useEffect(() => {
     const t = templates.find((x) => x.id === selId);
     setDraft(t ? toDraft(t) : copyOf.current ?? EMPTY);
     copyOf.current = null;
     setConfirmDelete(false);
   }, [selId, templates]);
+
+  /** Doc 105 (P3): elegir (lista, «New template», «Duplicate») reinicia el
+   *  borrador EN EL MISMO EVENTO — si llegaba sólo por el efecto, quedaba una
+   *  ventana con la plantilla anterior en pantalla. La misma selección no pisa
+   *  lo tecleado. */
+  const choose = (id: string | null, copy: Draft | null = null) => {
+    if (id === selId && !copy) return;
+    const t = templates.find((x) => x.id === id);
+    copyOf.current = copy;
+    setSelId(id);
+    setDraft(t ? toDraft(t) : copy ?? EMPTY);
+    setConfirmDelete(false);
+  };
+  /** Doc 105 (P3): todo campo actualiza sobre el ÚLTIMO borrador encolado — con
+   *  `{ ...draft, X }` una tecla tras un reinicio aún no renderizado revivía la
+   *  plantilla anterior con su id (y «Save changes» la pisaba). */
+  const patchDraft = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   const groups = useMemo(() => sourceOptions(defs), [defs]);
   const problems = useMemo(() => templateProblems(draft), [draft]);
@@ -86,10 +117,7 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
     } catch (e) { toast.error(apiErrorMessage(e, "Couldn't delete the template.")); } finally { setBusy(false); }
   };
 
-  const duplicate = () => {
-    copyOf.current = { ...draft, id: undefined, name: `${draft.name} (copy)`, shared: false };
-    setSelId(null);
-  };
+  const duplicate = () => choose(null, { ...draft, id: undefined, name: `${draft.name} (copy)`, shared: false });
 
   const createBuiltin = async () => {
     setBusy(true);
@@ -121,14 +149,14 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
       <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 18, minHeight: 360 }}>
         <div style={{ borderRight: '1px solid #EEF1F6', paddingRight: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {templates.map((t) => (
-            <button key={t.id} type="button" onClick={() => setSelId(t.id)} style={listItem(t.id === selId)}>
+            <button key={t.id} type="button" onClick={() => choose(t.id)} style={listItem(t.id === selId)}>
               <span style={{ fontWeight: 600, color: '#1A2B4A' }}>{t.name}</span>
               <span style={{ fontSize: 11, color: '#8A93A5' }}>
                 sheet {t.sheetName} · {t.columns.length} columns · {ownerLabel(t, me)}
               </span>
             </button>
           ))}
-          <Button variant="secondary" size="sm" icon={Plus} onClick={() => setSelId(null)}>New template</Button>
+          <Button variant="secondary" size="sm" icon={Plus} onClick={() => choose(null)}>New template</Button>
           {!hasBuiltin && (
             <Button variant="secondary" size="sm" onClick={createBuiltin} disabled={busy}>Create QA_MODELO template</Button>
           )}
@@ -142,28 +170,28 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
           )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 220px', gap: 10 }}>
             <label style={fieldLabel}>Template name
-              <input className="rd-input" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. QA_MODELO" />
+              <input className="rd-input" value={draft.name} onChange={(e) => patchDraft({ name: e.target.value })} placeholder="e.g. QA_MODELO" />
             </label>
             <label style={fieldLabel}>Sheet name
-              <input className="rd-input" value={draft.sheetName} maxLength={31} onChange={(e) => setDraft({ ...draft, sheetName: e.target.value })} placeholder="e.g. QA_MODELO" />
+              <input className="rd-input" value={draft.sheetName} maxLength={31} onChange={(e) => patchDraft({ sheetName: e.target.value })} placeholder="e.g. QA_MODELO" />
             </label>
           </div>
           <label style={fieldLabel}>Description
-            <input className="rd-input" value={draft.description ?? ''} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="What this format is for" />
+            <input className="rd-input" value={draft.description ?? ''} onChange={(e) => patchDraft({ description: e.target.value })} placeholder="What this format is for" />
           </label>
           {/* Doc 102: nombre del archivo del export — dato de la plantilla, sin redesplegar. */}
           <label style={fieldLabel}>File name
             <input className="rd-input" value={draft.fileName ?? ''} aria-label="File name"
-              onChange={(e) => { const fileName = e.target.value; setDraft((d) => ({ ...d, fileName })); }}
+              onChange={(e) => patchDraft({ fileName: e.target.value })}
               placeholder="e.g. QA_REPORTE_{yyyy}-{MM}-{dd} {HH}{mm}{ss}" />
             <span style={hint}>
               Placeholders {'{yyyy} {MM} {dd} {HH} {mm} {ss}'} use your local time; empty = template name + date.
-              Next export: <strong>{templateFileName(draft, new Date())}</strong>
+              Next export: <NextExportName draft={draft} />
             </span>
           </label>
           <label style={checkLabel}>
             <input type="checkbox" checked={foreign || draft.shared} disabled={foreign}
-              onChange={(e) => setDraft({ ...draft, shared: e.target.checked })} />
+              onChange={(e) => patchDraft({ shared: e.target.checked })} />
             Share with everyone in this project
           </label>
           <div style={sectionTitle}>Columns · one row per column of the model, ordered by table (PK first)</div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, X } from 'lucide-react';
 import { getFacets, isFilterableField, shouldFetchFacets, type Condition, type FieldDef, type Op, type ViewKey, type WhereGroup } from '../query.service';
+import { betweenPart, conditionDefaultValue } from '../lib/reportBuilder';
 
 const OP_LABEL: Record<Op, string> = {
   eq: '=', ne: '≠', in: 'in', nin: 'not in', contains: 'contains', startsWith: 'starts with',
@@ -26,6 +27,19 @@ function ValueEditor({ projectId, fd, cond, from, onChange }: { projectId: strin
     }
   }, [fd?.key, from, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!fd || NO_VALUE.includes(cond.op)) return null;
+  const inputType = fd.type === 'number' ? 'number' : fd.type === 'date' ? 'date' : 'text';
+  // Doc 105: `between` = [desde, hasta]; con una sola entrada siempre daba 400.
+  if (cond.op === 'between') {
+    const [lo, hi] = Array.isArray(cond.value) ? cond.value : ['', ''];
+    return (
+      <>
+        <input style={{ ...sel, width: 100 }} type={inputType} value={String(lo ?? '')} aria-label="From" placeholder="from"
+          onChange={(e) => onChange(betweenPart(cond.value, 0, e.target.value))} />
+        <input style={{ ...sel, width: 100 }} type={inputType} value={String(hi ?? '')} aria-label="To" placeholder="to"
+          onChange={(e) => onChange(betweenPart(cond.value, 1, e.target.value))} />
+      </>
+    );
+  }
   const opts = fd.enumValues?.map((v) => ({ value: v, label: v })) ?? facets;
   if (cond.op === 'in' || cond.op === 'nin') {
     const arr = Array.isArray(cond.value) ? cond.value as string[] : [];
@@ -43,8 +57,8 @@ function ValueEditor({ projectId, fd, cond, from, onChange }: { projectId: strin
   if (fd.type === 'boolean') {
     return <select style={sel} value={String(cond.value ?? 'true')} onChange={(e) => onChange(e.target.value === 'true')}><option value="true">true</option><option value="false">false</option></select>;
   }
-  return <input style={{ ...sel, minWidth: 130 }} type={fd.type === 'number' ? 'number' : fd.type === 'date' ? 'date' : 'text'}
-    value={String(cond.value ?? '')} onChange={(e) => onChange(e.target.value)} placeholder="valor" />;
+  return <input style={{ ...sel, minWidth: 130 }} type={inputType}
+    value={String(cond.value ?? '')} onChange={(e) => onChange(e.target.value)} placeholder="value" />;
 }
 
 function ConditionRow({ projectId, cond, catalog, from, onChange, onRemove }: {
@@ -57,11 +71,16 @@ function ConditionRow({ projectId, cond, catalog, from, onChange, onRemove }: {
     <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 6 }}>
       <select style={{ ...sel, minWidth: 150 }} value={cond.field} onChange={(e) => {
         const nf = catalog.find((f) => f.key === e.target.value);
-        onChange({ field: e.target.value, op: (nf?.ops[0] ?? 'eq'), value: undefined });
+        const op = nf?.ops[0] ?? 'eq';
+        // Doc 105: una booleana nace con el `true` que muestra su combo (sin valor filtraba `null`).
+        onChange({ field: e.target.value, op, value: conditionDefaultValue(nf, op) });
       }}>
         {fields.map((f) => <option key={f.key} value={f.key}>{f.udp ? '◆ ' : ''}{f.label}</option>)}
       </select>
-      <select style={sel} value={cond.op} onChange={(e) => onChange({ ...cond, op: e.target.value as Op, value: undefined })}>
+      <select style={sel} value={cond.op} onChange={(e) => {
+        const op = e.target.value as Op;
+        onChange({ ...cond, op, value: conditionDefaultValue(fd, op) });
+      }}>
         {(fd?.ops ?? []).map((o) => <option key={o} value={o}>{OP_LABEL[o]}</option>)}
       </select>
       <ValueEditor projectId={projectId} fd={fd} cond={cond} from={from} onChange={(v) => onChange({ ...cond, value: v })} />
@@ -75,7 +94,10 @@ export default function FilterBuilder({ projectId, group, catalog, from, onChang
 }) {
   const set = (conditions: (Condition | WhereGroup)[]) => onChange({ ...group, conditions });
   const firstFilterable = catalog.find(isFilterableField);
-  const addCond = () => set([...group.conditions, { field: firstFilterable?.key ?? '', op: firstFilterable?.ops[0] ?? 'eq', value: undefined }]);
+  const addCond = () => {
+    const op = firstFilterable?.ops[0] ?? 'eq';
+    set([...group.conditions, { field: firstFilterable?.key ?? '', op, value: conditionDefaultValue(firstFilterable, op) }]);
+  };
   const addGroup = () => set([...group.conditions, { op: 'and', conditions: [] }]);
 
   return (

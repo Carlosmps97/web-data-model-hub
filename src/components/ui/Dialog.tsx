@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { isTopDialog, pushDialog, removeDialog } from './dialogStack';
+import { activeElementNow, focusInto, keepFocusIn, recoverTab, trapTab } from './focusTrap';
 
 export type DialogBackdrop = 'screen' | 'canvas';
 
@@ -65,20 +66,40 @@ export default function Dialog({
   onCloseRef.current = onClose;
   const tokenRef = useRef<symbol | null>(null);
   if (tokenRef.current === null) tokenRef.current = Symbol('dmh-dialog');
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  // Quién tenía el foco al ABRIRSE: se lee en el render en que `open` pasa a
+  // true, antes del commit — un `autoFocus` de adentro todavía no lo tomó.
+  const openerRef = useRef<Element | null>(null);
+  const shownRef = useRef(false);
+  if (open !== shownRef.current) {
+    shownRef.current = open;
+    if (open) openerRef.current = activeElementNow();
+  }
 
   useEffect(() => {
     if (!open) return;
     const token = tokenRef.current as symbol;
     pushDialog(token);
+    // Doc 105 (F6): el foco entra a la caja (abierto con el mouse quedaba en la
+    // página de atrás y Tab la recorría); al cerrar vuelve a quien lo abrió.
+    const restoreFocus = focusInto(boxRef.current, openerRef.current);
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isTopDialog(token)) onCloseRef.current();
+      if (!isTopDialog(token)) return;
+      if (e.key === 'Escape') onCloseRef.current();
+      else recoverTab(e, boxRef.current);           // doc 105 (R6): Tab con el foco perdido
     };
     window.addEventListener('keydown', onKey);
     return () => {
       removeDialog(token);
       window.removeEventListener('keydown', onKey);
+      restoreFocus();
     };
   }, [open]);
+  // Doc 105 (R6): tras cada render, si el diálogo del tope perdió el foco —un
+  // botón suyo pasó a busy o desapareció—, vuelve a la caja (ver `keepFocusIn`).
+  useEffect(() => {
+    if (open && isTopDialog(tokenRef.current as symbol)) keepFocusIn(boxRef.current);
+  });
 
   if (!open) return null;
 
@@ -102,10 +123,13 @@ export default function Dialog({
     >
       <div
         className="dmh-dialog"
-        style={{ width }}
+        style={{ width, outline: 'none' }}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        ref={boxRef}
+        tabIndex={-1}
+        onKeyDown={(e) => trapTab(e, boxRef.current)}   // doc 105: Tab no sale del diálogo
       >
         <div className="dmh-dialog-head">
           {Icon && (

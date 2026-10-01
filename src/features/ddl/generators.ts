@@ -415,8 +415,10 @@ function tableDDL(
  *  (fallback legacy). User-Defined SQL (doc 91 D6): si empieza con CREATE sale
  *  VERBATIM (solo se garantiza el `;` final); si es un cuerpo suelto legacy se
  *  envuelve como antes.
- *  `showOnCanvas` NO participa del export. Exportada: el ViewEditor la usa
- *  para el preview (mismo SQL que el export). */
+ *  `showOnCanvas` no cambia este SQL (doc 105 C2: QUÉ vistas se exportan lo
+ *  decide la membresía del canvas — `canvasDdlViews`, doc 102 —; con Export
+ *  rules, `showOnCanvas` marca la vista de NEGOCIO — `rulesBridge`). Exportada:
+ *  el ViewEditor la usa para el preview (mismo SQL que el export). */
 export function viewDDL(
   v: DdlView,
   o: DatabricksDdlOptions,
@@ -554,9 +556,10 @@ export function databricksDdl(input: DatabricksDdlInput, o: DatabricksDdlOptions
 
   const body = stmts.map((s) => s.sql).join('\n');
 
-  // Vistas (F3): entra toda vista con ALGUNA fuente dentro del set exportado
-  // (misma semántica que Properties→Views: la vista "pertenece" a cada fuente).
-  // showOnCanvas NO participa del export.
+  // Vistas (F3): `input.views` ya son las MIEMBRO del canvas (doc 102,
+  // `canvasDdlViews`); de ellas entra toda vista con ALGUNA fuente dentro del
+  // set exportado (o sin fuentes). `showOnCanvas` no decide cuáles (doc 105 C2):
+  // con Export rules sólo marca la vista de NEGOCIO (`rulesBridge`).
   let viewsOut = '';
   if (o.includeViews && input.views?.length) {
     const vs = viewStatements(input, o);

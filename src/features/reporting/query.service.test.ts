@@ -1,8 +1,9 @@
 // F5 T7 review — los campos derived (calculados post-fetch, ops=[]) no deben
 // ofrecerse como filtro ni disparar facets. isFilterableField/shouldFetchFacets
 // son la lógica que usa el FilterBuilder para excluirlos.
-import { describe, expect, it } from 'vitest';
-import { isFilterableField, shouldFetchFacets, type FieldDef } from './query.service';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NETWORK_ERROR_TEXT } from '@/services/http';
+import { emptySpec, exportCsv, isFilterableField, shouldFetchFacets, type FieldDef } from './query.service';
 
 const fd = (over: Partial<FieldDef>): FieldDef => ({
   key: 'x', label: 'X', type: 'string', ops: ['eq'], sortable: false,
@@ -44,5 +45,30 @@ describe('shouldFetchFacets', () => {
   it('does not fire for plain string fields nor enum (enum has its own values)', () => {
     expect(shouldFetchFacets(name)).toBe(false);
     expect(shouldFetchFacets(enumField)).toBe(false);
+  });
+});
+
+describe('exportCsv: errores legibles (doc 105)', () => {
+  afterEach(() => { vi.unstubAllGlobals(); });
+  const noStorage = { getItem: () => null };
+
+  it('sin respuesta del servidor avisa lo mismo que el resto de la app (no «Failed to fetch»)', async () => {
+    vi.stubGlobal('localStorage', noStorage);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(exportCsv(emptySpec('p1', 'tables'))).rejects.toThrow(NETWORK_ERROR_TEXT);
+  });
+
+  it('un rechazo del backend muestra su motivo (detail), no sólo el código', async () => {
+    vi.stubGlobal('localStorage', noStorage);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: 'Unknown field: foo' }), { status: 422, headers: { 'Content-Type': 'application/json' } })));
+    await expect(exportCsv(emptySpec('p1', 'tables'))).rejects.toThrow('Unknown field: foo');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ detail: { message: 'Too many rows', limit: 5 } }), { status: 422 })));
+    await expect(exportCsv(emptySpec('p1', 'tables'))).rejects.toThrow('Too many rows');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: false, error: 'No access' }), { status: 403 })));
+    await expect(exportCsv(emptySpec('p1', 'tables'))).rejects.toThrow('No access');
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, blob: () => Promise.reject(new TypeError('network error')) })));
+    await expect(exportCsv(emptySpec('p1', 'tables'))).rejects.toThrow(NETWORK_ERROR_TEXT);   // corte a mitad de la descarga
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
+    await expect(exportCsv(emptySpec('p1', 'tables'))).rejects.toThrow('Export failed (500)');
   });
 });

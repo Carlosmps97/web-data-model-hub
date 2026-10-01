@@ -89,7 +89,7 @@ function ViewNode({ data, selected }: NodeProps) {
             </span>
           </div>
         ))}
-        {rows.length === 0 && <div className="wk-node-empty rd-small">Sin columnas</div>}
+        {rows.length === 0 && <div className="wk-node-empty rd-small">No columns</div>}
       </div>
     </div>
   );

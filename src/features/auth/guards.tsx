@@ -4,7 +4,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import type { Permission } from '@/features/auth/auth.service';
 
 /** Splash mientras se restaura la sesión (evita parpadeo login→app al boot). */
-function Splash() {
+export function Splash() {
   return (
     <div className="dmh-splash"><span className="rd-spin" aria-hidden /></div>
   );

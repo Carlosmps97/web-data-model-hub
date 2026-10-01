@@ -8,12 +8,13 @@
  * y tiene una configuración por dialecto — Databricks y Oracle se editan en
  * pestañas; los nombres de archivo son de los dos.
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { FileCode2, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { DdlOutputForm, mergeOutputSettings, type DdlDialect, type DdlOutputSettings } from '@/features/ddl';
 import { saveDdlOutput } from '../ddlRules.service';
+import { applyErrorNotice, NO_CHANGES_HINT, outputChanged } from '../standardsDiff';
 import type { DdlRulesetConfig } from '../standards.service';
 
 const DIALECTS: [DdlDialect, string][] = [['databricks', 'Databricks'], ['oracle', 'Oracle']];
@@ -29,6 +30,8 @@ export default function DdlOutputSettingsEditor({ projectId, config, canEdit, on
   // Qué configuración se está editando (arranca en la del dialecto por default).
   const [shown, setShown] = useState<DdlDialect>(() => value.dialect);
   const [saving, setSaving] = useState(false);
+  // Doc 105: sin un cambio real no se guarda (antes registraba una versión vacía).
+  const dirty = useMemo(() => outputChanged(value, config.output), [value, config.output]);
 
   const doSave = async () => {
     setSaving(true);
@@ -36,7 +39,7 @@ export default function DdlOutputSettingsEditor({ projectId, config, canEdit, on
       await saveDdlOutput(projectId, value);
       toast.success('Output settings saved');
       await onApplied(); onClose();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save"); }
+    } catch (e) { const n = applyErrorNotice(e, "Couldn't save"); toast[n.kind](n.text); }
     finally { setSaving(false); }
   };
 
@@ -74,11 +77,11 @@ export default function DdlOutputSettingsEditor({ projectId, config, canEdit, on
           <DdlOutputForm value={value} onChange={setValue} disabled={!canEdit} dialect={shown} />
         </div>
         <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '14px 24px 18px', borderTop: '1px solid #EEF1F6' }}>
-          <span style={{ flex: 1, fontSize: 11.5, color: '#9AA3B2' }}>Saving records a Data Standards version (rollback available).</span>
+          <span style={{ flex: 1, fontSize: 11.5, color: '#9AA3B2' }}>{dirty ? 'Saving records a Data Standards version (rollback available).' : NO_CHANGES_HINT}</span>
           <button onClick={onClose} style={{ height: 38, padding: '0 16px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>Cancel</button>
           {canEdit && (
-            <button onClick={doSave} disabled={saving}
-              style={{ height: 38, padding: '0 18px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+            <button onClick={doSave} disabled={saving || !dirty} title={dirty ? undefined : NO_CHANGES_HINT}
+              style={{ height: 38, padding: '0 18px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: dirty ? 'pointer' : 'default', opacity: dirty ? 1 : 0.5, fontFamily: 'inherit' }}>
               {saving ? 'Saving…' : 'Save changes'}
             </button>
           )}

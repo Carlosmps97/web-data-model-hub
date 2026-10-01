@@ -5,6 +5,7 @@ import UdpAssign from './UdpAssign';
 import type { SubjectArea } from '@/features/modeler/services/modeler.service';
 import { setSubjectAreaUdp } from '@/features/modeler/services/structure.service';
 import { useModelerStore } from '@/store/useModelerStore';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 
 /**
  * "Model properties" (F5): asigna los UDP level='canvas' al Modelo de Datos
@@ -24,8 +25,12 @@ export default function ModelPropertiesModal({ subjectArea, canEdit, onClose, pu
 
   const save = async () => {
     setBusy(true);
+    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió (`reportWriteError`).
+    const pin = pinSession();
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
     try {
       const sa = await setSubjectAreaUdp(subjectArea.id, values);
+      if (!pin.holds()) return;   // el diagrama en pantalla ya es de otra sesión
       const st = useModelerStore.getState();
       if (st.diagram && st.diagram.subjectArea.id === sa.id) {
         useModelerStore.setState({
@@ -35,7 +40,7 @@ export default function ModelPropertiesModal({ subjectArea, canEdit, onClose, pu
       pushToast('Model properties saved');
       onClose();
     } catch (e) {
-      pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err');
+      await onError(e);
     } finally { setBusy(false); }
   };
 

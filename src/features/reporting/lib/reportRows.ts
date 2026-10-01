@@ -17,6 +17,9 @@ export const COLUMN_BATCH = 300;
  *  acepta hasta 5 000). */
 export const VIEW_BATCH = 2000;
 
+/** Doc 105 (A3-o1): tope de ids por pedido de RELACIONES (el backend acepta 1..300). */
+export const RELATIONSHIP_BATCH = 300;
+
 const yn = (b: boolean | null | undefined): string => (b ? 'Y' : '');
 const str = (v: string | null | undefined): string => v ?? '';
 

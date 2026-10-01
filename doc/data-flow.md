@@ -16,10 +16,10 @@ Todo el estado del cliente vive en stores de Zustand. Cada uno tiene una respons
 
 | Store | Archivo | Responsabilidad | Persistencia |
 |---|---|---|---|
-| `useAuthStore` | `src/store/useAuthStore.ts` | Identidad **autoritativa** (usuario + permisos), login/logout/restore | Token en `localStorage['dmh.token']` |
+| `useAuthStore` | `src/store/useAuthStore.ts` | Identidad **autoritativa** (usuario + permisos), login/logout/restore y `refreshMe` (permisos al día sin recargar, doc 105) | Token en `localStorage['dmh.token']` |
 | `useSessionStore` | `src/store/useSessionStore.ts` | Actor (`X-Dev-User` en dev) + **proyecto y versión activos** (`activeProjectId`, `openMode`, `activeChangesetId`, `activeVersionLabel`; `openModel`/`closeModel`; helper `sessionProjectId()`) — la ÚNICA fuente del changeset activo (doc 75) | En memoria (+ `dmh:lastProject` en `localStorage`) |
 | `useModelerStore` | `src/store/useModelerStore.ts` | Árbol del explorer del proyecto, `diagram` cargado, drawings, `dirty`, `viewMode` lógico/físico, **`lod` (default `true`) + `lodLock`** (zoom semántico del canvas), focus cross-canvas (`openCanvasAndFocus`/`pendingFocusTableId`), `projectDeletionPending`, acciones de edición | En memoria |
-| `useUndoStore` | `src/store/useUndoStore.ts` | Pila de inversas (Ctrl+Z) | En memoria |
+| `useUndoStore` | `src/store/useUndoStore.ts` | Pila de inversas (Ctrl+Z) de la sesión de canvas: se vacía al cambiar de proyecto, modo o versión (doc 105, F3) y queda vacía y cerrada mientras se aplica una carga Excel en esa versión (doc 105, `clear({ until })`) | En memoria |
 | `useBusyStore` | `src/store/useBusyStore.ts` | `runBlocking(label, fn)`: overlay bloqueante por sesión durante acciones largas (doc 75 D18) | En memoria |
 
 Todos los lectores/escritores del modelo (`governance.service`, `structure.service`, `schemas.service`, el canvas, los paneles) leen `useSessionStore.getState().activeChangesetId` y arman las rutas de proyecto con `sessionProjectId()`; sin sesión, `rec()` lanza "An active changeset is required to edit.". (El `useChangesetStore` + puente `sessionChangesetBridge` y la identidad legacy `useIdentityStore` se retiraron en el doc 75 D14.)
@@ -45,8 +45,9 @@ flowchart TD
 - El token de sesión (auth propia) viaja como **`X-Session-Token`** en toda llamada — **NO** como `Authorization: Bearer`: en Databricks Apps ese header le pertenece al proxy SSO de la plataforma (lo consume para su propia auth y el backend nunca lo recibiría). El backend acepta ambos headers; `Authorization` queda para curl/dev.
 - `X-Dev-User: <id>` (actor simulado, seam local) viaja **solo en desarrollo** (`import.meta.env.DEV`): en producción la identidad es el token y el backend lo ignora — mandarlo solo servía para que el preflight CORS lo rechazara.
 - `credentials: 'include'` para que la cookie de sesión viaje cross-origin (front en un puerto, FastAPI en otro, en dev).
-- Timeout global de 30s vía `AbortSignal.timeout`, combinable con el `signal` del caller.
+- Timeout de 30 s vía `AbortSignal.timeout` (120 s en las acciones largas, `LONG_TIMEOUT_MS`), combinable con el `signal` del caller. Doc 105: sin respuesta del servidor el error es `NETWORK_ERROR_TEXT` («Couldn't reach the server — check your connection or reload the page.»), no el «Failed to fetch» del navegador; una llamada cancelada por su llamador conserva su error.
 - Un 401 dispara el callback global `_onUnauthorized` que registra `useAuthStore` (limpia el token, ejecuta `resetAppState()` y cierra sesión → el guard redirige a `/login`).
+- Un 403 de una ruta fuera de `/api/auth/` avisa al observador `_onForbidden` (doc 105, F5), que el store de auth usa para re-leer `/me` (`refreshMe`, §2.3); el error sigue su curso hacia el llamador.
 - Si la respuesta no trae envelope pero sí `{detail}` (HTTPException de FastAPI), propaga ese `detail` como mensaje real del `ApiError`.
 
 Ejemplo del shape de request/response:
@@ -70,7 +71,7 @@ curl -sS http://localhost:8000/api/projects \
 - `src/store/resetAppState.ts` — aislamiento por sesión: se ejecuta en login/logout/401.
 - `src/services/warmup.ts` — `ensureBackendSession()`: probe `GET /api/health`; **inerte con `API_BASE` vacío** (producción actual).
 - `src/features/auth/guards.tsx` — `RequireAuth` (splash mientras `loading`, redirige a `/login` si `anon`) y `RequirePermission`.
-- `src/App.tsx` — dispara `restore()` una sola vez al montar.
+- `src/App.tsx` — dispara `restore()` una sola vez al montar y registra los listeners de `focus` / `visibilitychange` que llaman a `refreshMe()` (doc 105, F5).
 
 ### 2.2 Endpoints
 
@@ -78,6 +79,7 @@ curl -sS http://localhost:8000/api/projects \
 |---|---|---|---|
 | Login | POST | `/api/auth/login` | `{username, password}` → `{token, user}` |
 | Restore | GET | `/api/auth/me` | → `SessionUser` (con `permissions`) |
+| Refresh de permisos (doc 105) | GET | `/api/auth/me` | foco de la pestaña o un 403 → `SessionUser` |
 | Logout | POST | `/api/auth/logout` | → `{ok}` |
 
 `SessionUser` incluye `permissions: Record<string, boolean>` con la matriz (`model.view`, `model.edit`, `review.decide`, `publish`, `rollback`, `export`, `standards.edit`, `admin.manage`). `useAuthStore.has(perm)` lee de ahí.
@@ -88,12 +90,16 @@ curl -sS http://localhost:8000/api/projects \
 
 1. Lee `localStorage['dmh.token']`. Si no hay → `status: 'anon'`.
 2. Si hay, lo empuja al cliente HTTP (`setAuthToken`) y llama `fetchMe()`.
-3. Si `/me` no devuelve `permissions` (degradó a Principal básico), lo considera sesión inválida: limpia token y queda `anon`.
+3. Si `/me` no devuelve `permissions` (degradó a Principal básico), lo considera sesión inválida: limpia token y queda `anon`, con el aviso de acceso quitado (`notice`, doc 105 ronda 3).
 4. Si es válida, `mirror(user)` espeja el actor a `useSessionStore` (id = username → header `X-Dev-User`) y deja `status: 'authed'`.
+5. Si `fetchMe()` falla (doc 105, ronda 3): SÓLO un 401 dice que la sesión terminó —limpia el token y el aviso es «Your session ended. Please sign in again.»—. Sin respuesta del servidor (red caída o tiempo agotado: `ApiError` con status 0) o con una falla del servidor o del proxy (5xx, respuesta inválida) el token puede seguir siendo bueno: queda `anon`, pero el token SIGUE en `localStorage` —recargar restaura la sesión— y el aviso es `NETWORK_ERROR_TEXT` (sin respuesta) o `SERVER_CHECK_TEXT`: «The server couldn't check your session right now — reload the page to try again.» (antes cualquier fallo que no fuera de red descartaba el token).
+6. Doc 105 (ronda 5): si mientras `/me` demoraba el usuario entró de nuevo (SSO en el login), la respuesta del token viejo ya no decide nada —`status` ya no es `'loading'`; antes cerraba la sesión nueva y, con un 401, borraba su token—; si fue OTRA pestaña la que cambió el token (`localStorage` es compartido), `restore()` verifica el vigente.
 
-Mientras `status === 'loading'`, `RequireAuth` muestra el `<Splash/>` para evitar el parpadeo login→app.
+Mientras `status === 'loading'`, `RequireAuth` muestra el `<Splash/>` para evitar el parpadeo login→app. `LoginScreen` hace lo mismo (doc 105, ronda 5): mientras se verifica muestra ese `Splash` (lo exporta `guards.tsx`) y, con la sesión ya restaurada —se recargó `/login` después del aviso de red o de servidor, que pide recargar—, sigue al destino que motivó el login (`state.from`, o Home) en vez de mostrar el formulario.
 
 En el login manual, `login()` ejecuta `resetAppState()` **antes** de sentar el token nuevo: si la sesión anterior murió sin logout (token expirado, tab reusada), el actor entrante arranca sin estado heredado. El logout y el 401 global hacen el mismo reset.
+
+**Permisos al día sin recargar (doc 105, F5).** Antes, un rol cambiado en Admin sólo se veía al recargar la página. `refreshMe()` re-lee `/api/auth/me` cuando la pestaña vuelve al foco (`focus`, `visibilitychange` a visible) y ante un 403 fuera de `/api/auth/`, con tope: una lectura en vuelo y como mucho una cada 10 s (`ME_GAP_MS`); nunca rechaza (un 401 lo cierra el handler global; un error de red o del proxy lo reintenta el próximo foco). Si cambió el rol o algún permiso, reemplaza el usuario y la UI se re-gatea (nav, botones); si no, no lo toca. Si `/me` ya no trae `permissions` (el usuario fue deshabilitado en Admin), cierra la sesión como `restore()`. Una sesión de edición no se degrada por permisos: cada escritura la sigue decidiendo el backend. Para re-gatearse, un componente se suscribe a `s.user?.permissions` o a `s.has('x')` dentro del selector — nunca a `s.has` a secas, que es siempre la misma función. Cuando la sesión termina sola, el login dice por qué (`useAuthStore.notice`, O4): «Your access to Data Model Hub was removed or disabled. Ask an administrator if you think this is a mistake.» (deshabilitado) o «Your session ended. Please sign in again.» (un 401); salir a propósito o entrar lo borra. En el login el aviso es un `role="status"` y el botón de SSO (con `autoFocus`) lo referencia con `aria-describedby`: el lector de pantalla lo lee al enfocarlo (ronda 3).
 
 ### 2.4 Producción: un solo origen vía `server.mjs` (doc 36)
 
@@ -146,6 +152,13 @@ sequenceDiagram
   HTTP->>AS: _onUnauthorized()
   AS->>LS: removeItem dmh.token
   AS->>AS: resetAppState() + status anon (guard va a /login)
+
+  Note over HTTP,API: 403 fuera de /api/auth/ o foco de la pestana (doc 105)
+  HTTP->>AS: _onForbidden() -> refreshMe()
+  AS->>Svc: fetchMe() (una en vuelo, max. una cada 10 s)
+  Svc->>API: GET /api/auth/me
+  API-->>AS: SessionUser
+  AS->>AS: cambio de rol/permisos -> set user · sin permissions -> anon
 ```
 
 ---
@@ -177,19 +190,22 @@ export async function loadDiagram(saId: string): Promise<Diagram> {
 }
 ```
 
-Es **una sola request**: el diagrama COMPLETO llega en una única respuesta de `GET /api/subject-areas/{sa_id}/diagram` — el backend lo arma con queries batched (`$in`) y aplica el overlay del changeset server-side. El `Diagram` trae `{ subjectArea, tables, columns, relationships }`.
+Es **una sola request**: el diagrama COMPLETO llega en una única respuesta de `GET /api/subject-areas/{sa_id}/diagram` — el backend lo arma con queries batched (`$in`) y aplica el overlay del changeset server-side. El `Diagram` (`modeler.service.ts`) trae `{ subjectArea, tables, columns, relationships, views }`: `views` son las vistas MIEMBRO del canvas (`viewIds`, doc 70; un canvas legacy sin lista usa `showOnCanvas` + ≥1 fuente), ya resueltas por el backend — el front sólo las dibuja.
 
-`selectSubjectArea` protege contra respuestas fuera de orden con un contador de secuencia `_loadSeq` (dos clicks rápidos en el explorer descartan la respuesta vieja), y hace flush inmediato de los drawings pendientes del canvas anterior antes de cambiar.
+`selectSubjectArea` protege contra respuestas fuera de orden con un contador de secuencia `_loadSeq` (dos clicks rápidos en el explorer descartan la respuesta vieja), y hace flush inmediato de los drawings pendientes del canvas anterior antes de cambiar. Si la apertura falla, `ModelExplorer` lo avisa con el motivo —«Couldn't open the canvas: <motivo>.»— por `reportWriteError` (doc 105, ronda 6: un error de la versión espera la revalidación y, si la sesión cambió, calla).
 
 ```bash
 curl -sS "http://localhost:8000/api/subject-areas/sa-42/diagram?changesetId=cs-7" \
   -H "Authorization: Bearer <jwt>" -H "X-Dev-User: mr"
 # → { "success": true, "data": {
-#     "subjectArea": { "id":"sa-42","tableIds":["t1","t2"],
-#                      "layout":{"t1":{"x":60,"y":60}}, "drawings":[] },
+#     "subjectArea": { "id":"sa-42","tableIds":["t1","t2"],"viewIds":["v1"],
+#                      "layout":{"t1":{"x":60,"y":60}}, "drawings":[], "routes":{} },
 #     "tables":[ {"id":"t1","physicalName":"dim_cliente","logicalName":"Cliente"} ],
 #     "columns":[ {"id":"c1","tableId":"t1","physicalName":"id_cliente","isPrimaryKey":true,"ordinal":0} ],
-#     "relationships":[ {"id":"r1","sourceTableId":"t1","targetTableId":"t2","sourceColumnId":"c1","targetColumnId":"c9","sourceCardinality":"one","targetCardinality":"many","identifying":false} ]
+#     "relationships":[ {"id":"r1","parentTableId":"t1","childTableId":"t2",
+#                        "pairs":[{"parentColumnId":"c1","childColumnId":"c9","roleName":null}],
+#                        "parentCardinality":"one","childCardinality":"zero-many","identifying":false} ],
+#     "views":[ {"id":"v1","name":"VW_CLIENTE","schema":"ventas_vu","sourceTableIds":["t1"],"showOnCanvas":true} ]
 # } }
 ```
 
@@ -197,15 +213,17 @@ curl -sS "http://localhost:8000/api/subject-areas/sa-42/diagram?changesetId=cs-7
 
 `ModelerCanvas.tsx` sincroniza `store.diagram` → estado interno de React Flow con un `useEffect`:
 
-- **Nodos tabla** (`type: 'table'`): posición desde `subjectArea.layout[t.id]`, con fallback a una grilla (`60 + (i%4)*260`). `data = { table, columns }`.
+- **Nodos tabla** (`type: 'table'`): posición desde `subjectArea.layout[t.id]` (en solo lectura, el efímero del visor encima — `viewerLayout`, doc 84 E), con fallback a una grilla (`60 + (i%4)*260`). `data = { table, columns, lod, refCols }`.
+- **Nodos vista** (`type: 'view'`) + edges `derivation` tabla → vista (`lib/viewGraph.ts`): desde `diagram.views`, SÓLO en modelo físico (doc 63).
 - **Nodos shape** (`type: 'shape'`, `zIndex: -1`): la capa DRAWING, se pinta detrás de las tablas.
-- **Edges** (`type: 'crowfoot'`): cada relación mapea a un edge con `sourceHandle = ${sourceColumnId}__src` y `targetHandle = ${targetColumnId}__tgt`. `data` lleva las cardinalidades e `identifying`.
+- **Edges** (`type: 'crowfoot'`, relaciones v2 — doc 19/47): cada relación va SIEMPRE padre → hijo: `source = parentTableId` con `sourceHandle = '__hdr_src'` (sale de la cabecera del padre, repartida en su zona de llave — fan-out) y `target = childTableId` con `targetHandle = ${pairs[0].childColumnId}__tgt` (entra por la columna del PRIMER par; los demás pares viven en el popup). `data` lleva `parentCardinality`/`childCardinality`, `identifying`, `pairCount`, el slot del fan-out, el `drifted` (llave incongruente, en rojo) y la frase de relación (doc 98).
+- **Subcategorías** (doc 53): en modelo lógico van por su propio subgrafo (`lib/subtypeGraph.ts`: nodo símbolo `type: 'subcat'` + edges `subcat`), no como crow's-foot.
 
-Los handles conectables viven por columna en `TableNode.tsx` (`Handle type="source" id="${c.id}__src"` a la derecha, `target ... __tgt` a la izquierda).
+Los handles viven en `TableNode.tsx`: `__hdr_src` en la cabecera y, por columna, `${c.id}__src` a la derecha y `${c.id}__tgt` a la izquierda (conectables sólo con la herramienta de relación armada).
 
 ### 3.4 Render crowfoot
 
-`CrowFootEdge.tsx` calcula el path con `getSmoothStepPath` (ruteo ortogonal, esquinas redondeadas — sin matemática manual). Decide de qué lado sale/entra el wire comparando los centros absolutos de ambos nodos (`sourceFacesRight`), de modo que la relación se "voltea" sola al mover las tablas. Los marcadores crow's-foot se resuelven por cardinalidad (`markerStart={url(#cf-${sourceCardinality})}`, `markerEnd={url(#cf-${targetCardinality})}`, definidos en `CrowFootMarkers.tsx`).
+`CrowFootEdge.tsx` calcula el path con `getSmoothStepPath` (ruteo ortogonal, esquinas redondeadas — sin matemática manual). Decide de qué lado sale/entra el wire comparando los centros absolutos de ambos nodos (`sourceFacesRight`), de modo que la relación se "voltea" sola al mover las tablas. Los marcadores crow's-foot se resuelven por cardinalidad (`markerStart={url(#cf-${parentCardinality})}`, `markerEnd={url(#cf-${childCardinality})}`, definidos en `CrowFootMarkers.tsx`). Doc 99: si el canvas tiene un trazo manual para ese wire (`subjectArea.routes`), el camino pasa por sus puntos (`routedGeometry`) y el lado de cada extremo lo decide el trazo.
 
 Optimizaciones de escala: `onlyRenderVisibleElements` (solo montan DOM los nodos visibles), `TableNode` y `CrowFootEdge` memoizados, y selectores **booleanos derivados** por nodo/edge para el hover (evita re-renderizar los 100 nodos al cambiar un id).
 
@@ -237,12 +255,13 @@ sequenceDiagram
   MS->>Svc: loadDiagram(saId)
   Svc->>SS: getState().activeChangesetId
   Svc->>API: GET /subject-areas/{saId}/diagram?changesetId=...
-  API-->>Svc: { subjectArea, tables, columns, relationships }
+  API-->>Svc: { subjectArea, tables, columns, relationships, views }
   Svc-->>MS: Diagram (guard _loadSeq)
   MS->>MS: set diagram + drawings
   MS-->>RF: diagram (useEffect)
   RF->>RF: tables -> nodes 'table' (layout)
-  RF->>RF: relationships -> edges 'crowfoot' (handles __src/__tgt)
+  RF->>RF: views -> nodes 'view' + edges 'derivation' (solo fisico)
+  RF->>RF: relationships -> edges 'crowfoot' (padre __hdr_src -> hijo col__tgt)
   RF->>RF: fitView + onlyRenderVisibleElements
   RF->>RF: 1a pintura en LOD (lod=true) · onMove cruza 0.10/0.20
 ```
@@ -253,16 +272,18 @@ sequenceDiagram
 
 ### 4.1 El choke-point de escritura
 
-Toda mutación del modelo pasa por `governance.service.rec()` (`src/services/governance.service.ts`):
+Toda mutación de tablas, columnas y relaciones pasa por el guard `writableCs()` de `governance.service` (`src/services/governance.service.ts`), que usan `rec()` (un cambio) y `recordChangesBulk` (un lote, doc 39). Carpetas, canvases, vistas y esquemas tienen su guard equivalente en `structure.service`, `views.service` y `schemas.service`: sin versión en edición fallan sin llamar al backend (doc 104), que además responde 409 a toda escritura directa del modelo (doc 105, D1).
 
 ```ts
-const rec = (collection, id, op, payload?) => {
+const writableCs = (): string => {
   if (useSessionStore.getState().openMode === 'readonly')
     throw new Error('The model is open read-only: it does not accept changes.');
-  const a = useSessionStore.getState().activeChangesetId;   // única fuente del changeset activo
+  const a = active();                        // useSessionStore: única fuente del changeset activo
   if (!a) throw new Error('An active changeset is required to edit.');
-  return csvc.recordChange(a, collection, id, op, payload);
+  return a;
 };
+const rec = (collection, id, op, payload?) => csvc.recordChange(writableCs(), collection, id, op, payload);
+export const recordChangesBulk = (changes) => csvc.recordChangesBulk(writableCs(), changes);
 ```
 
 El `projectId` de cada payload NO lo pone el front: el backend lo estampa con el del changeset (doc 75 I1) y rechaza con 409 cualquier referencia a una entidad de otro proyecto (I2).
@@ -288,7 +309,7 @@ curl -sS -X PUT http://localhost:8000/api/changesets/cs-7/changes \
 
 ### 4.2 Submit (Publish request)
 
-El botón **Publish** del `Toolbar` abre `PublishModal.tsx`. El usuario pone título, descripción y elige al menos un reviewer, y envía con `versioning.service.submit(changesetId, {title, description, reviewers})` → `POST /api/changesets/{id}/submit`. El changeset pasa de `draft` a `submitted`.
+El botón **Publish** del `Toolbar` abre `PublishModal.tsx`. El usuario pone título, descripción y elige al menos un reviewer, y envía con `versioning.service.submit(changesetId, {title, description, reviewers})` → `POST /api/changesets/{id}/submit`. El changeset pasa de `draft` a `submitted`. El selector ofrece sólo usuarios activos con `review.decide` (`listUsers('review.decide')`); si alguno se deshabilitó en el medio, el backend responde 400 «Disabled user(s) can't review: …» (doc 105, A5-o3) y un toast muestra el motivo.
 
 Tras el submit, la modal hace dos cosas importantes: limpia `dirty` (checkpoint) y, como la working copy ya salió de `draft` (el backend rechazaría más ediciones con 409), transiciona la sesión a **solo lectura** sobre producción con `openModel({mode:'readonly', versionLabel: pub?.versionLabel})`.
 
@@ -307,15 +328,35 @@ La decisión va por `review(id, {decision})` → `POST /api/changesets/{id}/revi
 - `canWithdraw` (owner, submitted) → `withdraw` vuelve a `draft`.
 - `canReopen` (owner, rejected) → `reopen` vuelve a `draft` (el reject nunca elimina la versión).
 
-**Approve = publish**: aprobar publica y sobrescribe producción ("last to publish wins", como advierte el snapshot). Un `getChangeset`/`getPublished` refrescan las listas tras la decisión.
+**Approve = publish**: aprobar publica y sobrescribe producción ("last to publish wins", como advierte el snapshot). Un `getChangeset`/`getPublished` refrescan las listas tras la decisión. Si el publish se bloquea, el backend responde un 409/422 estructurado (`{ code, message, items, next }`, `PublishBlockedDetail`) y Review lo muestra en el panel «Publish blocked» con la lista completa (doc 84); el doc 105 suma dos bloqueos que llegan igual: `table_in_use` («Publish blocked: the request deletes tables that are still referenced — …»: el draft borra una tabla que todavía tiene columnas, relaciones o vistas vivas) y `cross_project` («Publish blocked: the request writes entities of another project — …»).
+
+Doc 105 en Review:
+
+- **«Open/View in canvas» sólo para quien puede abrirlo (U2)**: `canvasAction(detail, me, has)` (`src/screens/review/requestState.ts`) decide rótulo, modo y motivo — el dueño de un DRAFT edita («Open in canvas»); un request en revisión se abre en solo lectura sólo si el actor puede verlo (`canOpenVersion`: dueño, revisor asignado, `versions.view_all` o `admin.manage`, espejo del backend); si no, el botón queda deshabilitado con «Only its owner, its assigned reviewers and administrators can open this request in the canvas.»; uno cerrado no se abre desde acá. El motivo viaja también como `aria-label` (A5-o5).
+- **Nombres y revisores deshabilitados (U1, A5-o3)**: los nombres salen de `listUserNames()` (incluye a los deshabilitados; si la lista falla, se ven los ids en vez de una pantalla en blanco). Un revisor deshabilitado que no votó se lista «(disabled)» y, al dueño, la nota dice «… can no longer review (disabled): withdraw the request and send it again with active reviewers.»; los filtros de la bandeja también marcan «(disabled)».
+- **Cabecera a 1024 px (U3)**: las acciones bajan a su propia fila en vez de aplastar el título (41 px, 0 px con Withdraw) y recortar Approve; desde ≈1440 px no cambia nada (`review.css`).
 
 ### 4.4 Rollback de versiones
 
 El rollback vive en el Home (`src/screens/HomeScreen.tsx`), gated por el permiso propio **`rollback`** (`useAuthStore.has('rollback')`). Apunta a **cualquier versión publicada pasada**: `rollbackVersion(id)` → `POST /api/changesets/{id}/rollback` y el backend crea un **draft con los cambios inversos** (restaura las imágenes previas capturadas en el publish, deshaciendo las versiones posteriores a la elegida). Producción **no cambia** en ese momento: el draft entra al mismo circuito submit → review → approve de cualquier otra versión — el rollback es gobernado, no un botón destructivo.
 
+### 4.4b Transferir y eliminar drafts (doc 104)
+
+En Home › Version tools › Version details, el owner de un draft (si su rol tiene `model.edit`) o un administrador (`admin.manage`) ve **Transfer** y **Delete** (`lib/versionAdmin.ts`). Transfer abre `TransferVersionDialog` (usuarios de `listUsers('model.edit')` sin el dueño actual + nota opcional) → `transferVersion`; el nuevo dueño edita, envía y figura como autor al publicarse, y la versión guarda `transfers[]` («Started by»). Delete confirma en rojo con el foco en Cancel (dice cuántos cambios se pierden — `changeCount` del detalle — y avisa si el draft es de otro) → `deleteVersion`. Ambas acciones mandan `expectedOwner` (el dueño que se mostró): si otra sesión lo cambió en el medio, 409 y no se actúa sobre el draft de otra persona. El diálogo queda ligado a la versión con la que se abrió (un 403/404/409 muestra el motivo sin cerrarlo) y el popup de abajo queda `inert`; el foco entra al diálogo y Tab no sale de él. Al cerrarse, el foco vuelve a Transfer — o, si el detalle se recargó y ese botón ya no está, al nuevo Transfer o al popup (que además recupera el foco si el elemento enfocado desaparece). Una versión que este popup vio eliminarse (Delete propio, o un 404 al cargarla o al transferirla) sale de su lista al instante, sin esperar la recarga del Home. En revisión los botones quedan deshabilitados con el motivo; en una publicada no aparecen. El motivo de un botón deshabilitado viaja también como `aria-label` —«Transfer: …», «Delete: …» y «Open in canvas: …»— para quien no usa el mouse (doc 105, A5-o5), y el popup se re-gatea sin recargar cuando `refreshMe` cambia los permisos (se suscribe a `s.user?.permissions`, F5). Tras cualquiera de los dos, el Home recarga la lista (`onChanged`). Doc 105 (F6): la trampa de Tab es la compartida `components/ui/focusTrap.ts` (`trapTab`) — la usan también el propio Version tools, `ConfirmDialog`, el prompt de `dialogs.tsx` y `Dialog` —; con el confirm de Delete encima, Version tools queda `inert` como con el de transferencia y, al cerrarse ese confirm (también con Cancel), el foco vuelve a quien lo abrió —el botón Delete— si sigue en pantalla y habilitado (`focusInto` del `ConfirmDialog`) y, si no, al popup (desde la ronda R6 lo hace el mismo `focusInto`: `returnTarget` va a la caja del diálogo abierto que contiene al botón —el popup— si el botón sigue ahí pero deshabilitado, o al último diálogo modal en pantalla si ya no está; ver design-system §7.3): el efecto propio de Version tools sólo actúa con el foco en `<body>`, así que no hay doble devolución (antes quedaba en `<body>` y Tab saltaba a la página de atrás). Los nombres de dueños, autores y revisores salen de `listUserNames()` (doc 105, U1): quien dejó la empresa se ve con su nombre.
+
 ### 4.5 Defensa en profundidad
 
-`WorkspaceScreen` re-valida una sesión `editing`: si el changeset dejó de estar en `draft` (enviado desde otra pestaña, decidido por un reviewer) o el actor ya no es el owner, degrada a `readonly` en vez de dejar un canvas que responde 409/403 en cada edición.
+`WorkspaceScreen` re-valida la sesión de canvas con `lib/sessionGuard.ts` (`sessionFate`): al entrar/cambiar de sesión y — doc 104 — cuando una respuesta 403/404/409 de ESA versión lo avisa (`http.setOnApiError` + `touchesChangeset`). Eliminada (404) → vuelve al chooser con aviso; transferida → solo lectura de la misma versión si todavía puede verla (revisor/administrador) o de producción si no; propia pero ya no en `draft` (enviada o decidida en otra pestaña) → solo lectura. Así un canvas nunca queda respondiendo 403/404 en cada edición ni mostrando producción como si fuera el draft. Los errores de ESA versión (`isVersionError`/`touchesVersion`, con la versión tomada al pedir) no se anuncian como «This project was deleted…»: quien los recibe (carga de Model, árbol y refresco del Explorer, guardado de dibujos) espera la revalidación en curso (`trackRevalidation`/`afterRevalidation`) y sólo calla si la sesión cambió — entonces el aviso correcto ya lo dio ella; si la sesión sigue igual (rol perdido, 403 del proxy sólo en lecturas, nombre duplicado) el error se muestra. La revalidación repite una revisión pedida mientras otra estaba en curso, y quien espera, espera también esa repetición. Las escrituras del canvas y del Explorer (posiciones, auto-arrange, dibujos, carpetas, canvases, esquemas y vistas) van SIEMPRE por la working copy: sin sesión de edición fallan en vez de escribir directo a producción, y un guardado agendado (dibujos, «Save and leave») se descarta si la sesión ya no edita esa versión. La lectura de la cabecera que hace la propia revalidación no la redispara (un 403 del proxy de la plataforma daba un bucle de peticiones): si falla con 403, un solo aviso por versión y sólo si la sesión sigue siendo esa.
+
+Doc 105 (F1, F2, A4-o3): lo que antes fallaba callado (o dejaba un rechazo sin manejar) ahora avisa, con el mismo criterio de sesión. El guardado de posiciones al soltar bloques (`saveNodePositions`) y el flush de dibujos al cambiar de canvas muestran el motivo real (o «Couldn't save the position» / «Couldn't save the drawings»), salvo que la revalidación haya cambiado la sesión. El confirm de «Delete project…» deja el diálogo abierto con «Couldn't record the project deletion: …» (o lo cierra si la sesión cambió). El refresco del Explorer al abrir una versión avisa «Couldn't load the explorer: … Use Refresh to try again.» en vez de quedar en «Open a project…», con `stillAskedSession` (`lib/sessionGuard.ts`): un error de la versión espera la revalidación y se calla si la sesión ya no es la pedida (la cambió la revalidación, que avisó, o el usuario abrió otra); un aviso por sesión (id del toast), no se apilan. Además, si la vista recién creada con «Show on this canvas» no entra al canvas, un toast dice por qué.
+
+Doc 105 (H1–H7, ver [architecture.md](architecture.md) §4.4 y §4.5): una acción de varias escrituras —y la inversa de un Undo— queda atada a la sesión donde empezó (`pinSession()`, `lib/pinnedWrites.ts`): si en el medio se abre otra versión, lo que falta no se escribe en ella y nadie lo avisa (la sesión en pantalla no es la suya). Los avisos de las escrituras de los componentes pasan por `reportWriteError`, con el criterio de revalidación de arriba. Una caída de red da UN aviso (H6): `WorkspaceScreen` ya no carga los proyectos al montar (los trae el refresco de la sesión) y el aviso de esquemas sólo sale si el resto del refresco anduvo. Y las respuestas tardías de la sesión anterior —la recarga del canvas de un refresco viejo, el árbol que relee una mutación del Explorer— ya no pisan la actual (H4: `_loadSeq`/`openingSaId` y `explorerRequest().isCurrent`).
+
+Doc 105 (ronda 3, R7): al cambiar la sesión, el canvas de la anterior se limpia EN EL ACTO (diagrama, dibujos, selección y popups; `activeSaId` queda para que el refresco lo reabra) y el Toolbar, el canvas y `WorkspaceScreen` cierran sus diálogos: nada de la versión anterior queda editable. Además el store no arma escrituras con un diagrama de otra sesión (`liveDiagram()`), `reload()` no invalida un canvas que se está abriendo (ronda 4: si es el mismo canvas, recarga al terminar la apertura; ronda 5: si es otro, el Explorer se entera cuando éste se instala y, si su apertura falla, se recarga el editado), las lecturas del árbol (expandir un proyecto, `selectProject`, `loadFolders`) descartan respuestas de otra sesión, la carga Excel y su auto-arrange son de la versión de la carga (desde la ronda 4 cerrar el popup ya no los corta; desde la ronda 7 el arrange sigue la VERSIÓN, `inVersion`: con otra abierta corta antes de escribir y, de vuelta en la misma, no salta canvases), borrar una columna o una tabla hace todas sus lecturas antes de la primera escritura, y una inversa del Undo que falla por timeout o red vuelve a la pila («… Press Undo to try again.»). Detalle en [architecture.md](architecture.md) §4.4 y §4.5.
+
+Doc 105 (ronda 4, R10): los borrados que leen el impacto antes de confirmar (la tabla en Properties; la columna en su panel y en el Object Inspector) toman el pin AL PEDIRLOS —si mientras leen se abre otra versión, el confirm no se abre en ella— y lo mismo «Reorder view columns» antes de su confirm; con un diagrama de otra sesión en pantalla las ediciones avisan «This canvas is from a version that is no longer open — open it again from the explorer.» (`StaleCanvasError`) y Save falla con ese motivo en vez de resolver como éxito; el auto-arrange en solo lectura aplica sólo en su sesión y su canvas; pegar una tabla y el CTAS no avisan su éxito sobre otra versión; lo tipeado en los UDP sin blur se descarta si el panel se cierra porque cambió la sesión; y los canvases que la carga Excel no arregló se avisan con un toast cuando el popup ya no los muestra (`notArrangedNotice`). Detalle en [architecture.md](architecture.md) §4.5 y §8.
+
+Doc 105 (rondas 5 a 7): un `reload()` que falla (red, tiempo agotado, 5xx) CIERRA el canvas con «Couldn't reload the canvas: <motivo>. Open it again from the explorer.», sin reintento automático —lo que quedaba en pantalla era de antes de la escritura que acababa de terminar, y editar desde ahí pisaba lo grabado—; antes de cerrar guarda los dibujos pendientes, un 404 tiene su propio aviso y, si también falló la apertura de otro canvas, la recarga no suma el suyo (queda el de la apertura; un 404, en cambio, avisa igual). El drop de una fila en el bloque (`applyCanvasDrop`) y el reorden graban el documento VIGENTE de cada columna (una borrada mientras tanto no revive) y `saveNodePositions` graba sólo los bloques del canvas en pantalla. La carga Excel deja el Undo vacío y cerrado desde antes del apply, en su versión; si el polling del job se rinde ante fallos transitorios (o recibe un 403), el resultado queda «unconfirmed» —«Couldn't confirm the result of the upload: …»— y no «failed», y un POST del apply sin respuesta lo decide el polling. «Save and leave» dice por qué no pudo guardar. Detalle en [architecture.md](architecture.md) §4.4, §4.5, §5.2 y §8.
 
 ### 4.6 Diagrama
 
@@ -389,7 +430,7 @@ El botón **Autoarrange** del `Toolbar` llama `useModelerStore.autoOrganize()`:
    'elk.layered.thoroughness': '10',
    ```
 
-5. Persiste con `setSubjectAreaLayout(saId, pos)` (que **mergea** en backend) y hace `reload()`.
+5. Persiste con `arrangeSubjectArea(saId, pos)` — posiciones **mergeadas** sobre el layout efectivo y trazos manuales reiniciados, en UNA escritura del canvas completo a la versión en edición (`PUT /api/changesets/{id}/changes`, docs 99 y 104) —, apila su Undo y hace `reload()`. La pre-imagen del Undo (posiciones de los nodos vivos y trazos) se toma ANTES de calcular —si mientras ELK trabaja se abre otro canvas, los nodos vivos ya serían de ése— y, si en el medio cambió la sesión, no se graba nada (`pin.check()`; doc 105, ronda 3). En solo lectura (doc 84 E) las posiciones quedan sólo en la sesión (`viewerLayout`).
 
 ELK no rutea los wires: solo asigna posiciones de nodos. El ruteo visual sigue siendo de React Flow (`getSmoothStepPath`).
 
@@ -397,17 +438,17 @@ ELK no rutea los wires: solo asigna posiciones de nodos. El ruteo visual sigue s
 
 ### 5.2 Guardar layout
 
-Hay tres caminos de persistencia de posición, todos hacia `PUT /api/subject-areas/{saId}/layout` (merge server-side):
+Hay tres caminos de persistencia de posición. Todos graban el documento COMPLETO del canvas en la versión en edición (`PUT /api/changesets/{id}/changes`, upsert de `subject_areas`), con las posiciones nuevas mergeadas sobre el layout efectivo (`structure.service`, doc 104). El `PUT /api/subject-areas/{saId}/layout` directo ya no se usa y el backend lo rechaza con 409 (doc 105, D1).
 
 | Disparador | Método del store | Alcance |
 |---|---|---|
-| Soltar un nodo tabla | `saveLayout(tableId, pos)` | Un solo nodo |
-| Botón Save / "Guardar y salir" | `saveAllLayout()` → dentro de `saveAll()` | Todos los nodos `type==='table'` |
-| Auto-arrange | `setSubjectAreaLayout(saId, pos)` | El mapa que devolvió ELK |
+| Soltar uno o varios nodos (selección múltiple) | `saveNodePositions(positions)` (`saveLayout(tableId, pos)` es el caso de uno) | Todos los bloques movidos — tablas, vistas y símbolos — en UNA escritura (doc 105, A4-o1: antes sólo el tomado con el mouse); sólo los del canvas en pantalla (ronda 5) |
+| Botón Save / "Guardar y salir" | `saveAllLayout()` → dentro de `saveAll()` | Todos los nodos `table`, `view` y `subcat` |
+| Auto-arrange | `arrangeSubjectArea(saId, pos)` | El mapa que devolvió ELK + trazos reiniciados |
 
-`saveAllLayout` filtra explícitamente **solo** nodos tabla: las posiciones de los shapes viven en `drawings` (persistidos aparte, debounced 500ms, vía `PUT .../drawings`). `saveAll` captura `saId` y `drawings` **antes** del await para no escribir dibujos del canvas nuevo bajo el `saId` viejo si el usuario cambia de canvas a mitad del guardado.
+`onNodeDragStop` recibe todos los nodos arrastrados y `draggedPositions` (`lib/viewerLayout.ts`) los separa: tablas, vistas y símbolos van a `saveNodePositions`; los shapes, a `drawings` (persistidos aparte, debounced 500 ms, §8.3). `saveNodePositions` corre en segundo plano: si falla, avisa con el motivo (doc 105, F1; criterio de §4.5). `saveAll` captura `saId` y `drawings` **antes** del await para no escribir dibujos del canvas nuevo bajo el `saId` viejo si el usuario cambia de canvas a mitad del guardado; sin sesión de edición no escribe nada (doc 104).
 
-En `readonly`, `onNodeDragStop` retorna temprano: no se persiste ningún movimiento (ver viewer-lock).
+En `readonly` los bloques se pueden mover para leer mejor el diagrama, pero `onNodeDragStop` manda sus posiciones a `viewerLayout` (sólo esta sesión, doc 84 E) y nada viaja al backend; un aviso lo dice una vez por sesión (ver viewer-lock).
 
 ### 5.3 Diagrama
 
@@ -418,7 +459,7 @@ sequenceDiagram
   participant MS as useModelerStore
   participant RF as React Flow (flow)
   participant ELK as elkLayout (elkjs)
-  participant Svc as modeler.service
+  participant Svc as structure.service
   participant API as Backend
 
   U->>TB: Autoarrange
@@ -427,15 +468,17 @@ sequenceDiagram
   MS->>ELK: elkLayout(nodes, edges)
   ELK->>ELK: layered / RIGHT / ortogonal / BRANDES_KOEPF
   ELK-->>MS: { id: {x,y} }
-  MS->>Svc: setSubjectAreaLayout(saId, pos)
-  Svc->>API: PUT /subject-areas/{saId}/layout (MERGE)
-  API-->>Svc: subjectArea actualizada
+  MS->>Svc: arrangeSubjectArea(saId, pos)
+  Svc->>API: GET /changesets/{id}/effective/subject_areas?ids=saId
+  Svc->>API: PUT /changesets/{id}/changes (canvas completo, layout MERGEADO)
+  API-->>Svc: ok
   MS->>MS: reload() (re-render nodos)
 
   Note over U,API: Guardado manual de posiciones
-  U->>RF: arrastra tabla (onNodeDragStop)
-  RF->>MS: saveLayout(tableId, pos)
-  MS->>Svc: PUT /subject-areas/{saId}/layout {tableId: pos}
+  U->>RF: suelta uno o varios nodos (onNodeDragStop)
+  RF->>MS: saveNodePositions({id: pos, ...}) - todos, una escritura
+  MS->>Svc: setSubjectAreaLayout(saId, positions)
+  Svc->>API: PUT /changesets/{id}/changes (canvas completo)
 ```
 
 ---
@@ -460,8 +503,8 @@ interface ReportSpec {
 
 `ReportDesigner.tsx` maneja dos modos:
 
-- **Builder**: `getCatalog(from)` (`GET /api/reporting/catalog?from=`) trae los `FieldDef[]` (label, tipo, ops, `groupable`, `indexed`, `udp`). El usuario marca columnas (`select`), agrupa (`groupBy` → agrega `count`) y arma filtros con `FilterBuilder`.
-- **SQL**: `SqlEditor` manda el texto a `validateSql(text)` (`POST /api/reporting/query/validate`). El **servidor es la autoridad de la gramática**: valida con sqlglot y devuelve `{spec, errors}`. Si es válido, el spec se vuelca al builder y se cambia de modo. Soporta UDP dinámico con la sintaxis `udp."Nombre"`; sin JOIN ni subqueries.
+- **Builder**: `getCatalog(from)` (`GET /api/reporting/catalog?from=`) trae los `FieldDef[]` (label, tipo, ops, `sortable`, `groupable`, `indexed`, `udp`). El usuario marca columnas (`select`), agrupa (`groupBy` → agrega `count`; doc 105: `regroup` quita el orden por fila que el agrupado ignoraría) y arma filtros con `FilterBuilder` (doc 105: una condición booleana nace con el `true` que muestra su combo y `between` tiene dos entradas, «From» y «To»). Las piezas puras del Builder viven en `lib/reportBuilder.ts`.
+- **SQL**: `SqlEditor` manda el texto a `validateSql(text)` (`POST /api/reporting/query/validate`). El **servidor es la autoridad de la gramática**: valida con sqlglot y devuelve `{spec, errors}`. Si es válido, el spec se vuelca al builder y se cambia de modo, con su vista y por `toBuilderSpec` (doc 105): sin `maxRows` —el tope total del `LIMIT n`, que el Builder no muestra— ni `resultColumns` —el orden del SELECT de un agrupado SQL—, con la página de 100; abrir un reporte guardado hace lo mismo. Una respuesta que llega con el texto ya cambiado o con el editor cerrado no decide nada (desde la ronda 7, una falla que llega así tampoco se avisa), una falla sin respuesta se avisa y «✓ Valid SQL» sale sólo para el texto que validó sin errores. Soporta UDP dinámico con la sintaxis `udp."Nombre"`; sin JOIN ni subqueries.
 
 ### 6.2 Ejecución y paginación keyset
 
@@ -477,7 +520,7 @@ interface QueryResult {
 }
 ```
 
-La paginación es **keyset** (cursor opaco), no offset: a 400k filas nunca se traen todas al browser. `loadMore()` reusa `spec`/`sqlText` con `result.nextCursor` y **concatena** las filas nuevas a las existentes (`rows: [...prev.rows, ...res.rows]`).
+La paginación es **keyset** (cursor opaco), no offset: a 400k filas nunca se traen todas al browser. `loadMore()` repite, con `result.nextCursor`, la consulta que produjo el resultado en pantalla (`shown`; doc 105: antes reusaba el `spec`/`sqlText` del formulario y, editado desde el Run, pegaba la página de otra consulta) y **concatena** las filas nuevas a las existentes (`rows: [...prev.rows, ...res.rows]`). Doc 105: cada consulta nueva —Run, ordenar, otra vista, abrir un spec— sube `seq` y deja viejas las que siguen en vuelo (su respuesta o su página ya no se muestran); `paging` evita que dos pedidos del mismo render (el scroll) traigan la página dos veces; y si la página falla, un toast da el motivo («Couldn't load more rows» si no hay otro).
 
 ```bash
 curl -sS -X POST "http://localhost:8000/api/reporting/query" \
@@ -500,11 +543,11 @@ if (result?.hasMore && !loading &&
     el.scrollHeight - el.scrollTop - el.clientHeight < 400) onLoadMore();
 ```
 
-El header permite ordenar **server-side** solo por campos indexados y no-UDP y no-agrupados (`sortable = !c.udp && !result.meta?.grouped`); al hacer click, se re-arma `orderBy` en el spec y un `useEffect` re-ejecuta la query. La celda muestra `meta.scan` (index vs collscan) como señal de rendimiento.
+El header permite ordenar **server-side** sólo por los campos que el catálogo marca `sortable` (doc 105: `canSort`; al resto el backend responde 422 «Can't sort by '…': it has no index. …»), no-UDP y no-agrupados (`sortable = !!onSort && (canSort?.(c.key) ?? true) && !c.udp && !result.meta?.grouped`); un resultado del editor SQL no se ordena (la grilla no recibe `onSort`). Al hacer click, `onSort` vuelve a correr la consulta EN PANTALLA con el `orderBy` nuevo, y el formulario lo toma para el próximo Run (doc 105: antes corría el formulario, editado o no desde el Run, y con un resultado SQL fallaba). Con un Run en vuelo no se ordena (`running`; el encabezado sigue siendo el mismo `<button>`, con `aria-disabled`: `sortDisabled`); los encabezados ordenables son `<button>` con `aria-label` «Sort by <campo>» —más « (sorted ascending)» o « (sorted descending)» en el del orden vigente—, y un orden por un campo sin índice (p. ej. de un reporte guardado antes) se quita con aviso al correr, exportar y guardar (`withoutUnsortableOrder`; doc 105, rondas 6 y 7). Cada consulta nueva vuelve la grilla arriba sin remontarla (`resetKey` → `scrollTop = 0`: conserva el scroll horizontal y el foco); la página siguiente no la mueve. La barra muestra «N rows · M columns» (singular con 1, «+» si hay más), `meta.scan` (index vs collscan) como señal de rendimiento y « · loading…» mientras corre; las celdas booleanas salen «✓» / «·» y un «false» guardado como texto (UDP) ya no sale «✓» (`cellText`).
 
 ### 6.4 Export CSV por streaming
 
-`exportCsv(spec)` hace `POST /api/reporting/export` con `fetch` directo (no `apiFetch`, porque el stream no bufferea el envelope JSON). Lee el token de `localStorage['dmh.token']` y lo manda como `X-Session-Token` (mismo contrato que `http.ts` — nunca `Authorization`), recibe el `blob` y fuerza la descarga con un `<a download>` sintético. Así se exportan datasets grandes sin materializarlos en memoria de JS como filas.
+`exportCsv(spec)` hace `POST /api/reporting/export` con `fetch` directo (no `apiFetch`, porque el stream no bufferea el envelope JSON). Lee el token de `localStorage['dmh.token']` y lo manda como `X-Session-Token` (mismo contrato que `http.ts` — nunca `Authorization`), recibe el `blob` y fuerza la descarga con un `<a download>` sintético. Doc 105: sin respuesta del servidor el error es el mismo `NETWORK_ERROR_TEXT` del resto de la app, y un rechazo muestra el motivo del backend (`detail`, su `message` si es estructurado, o el `error` del envelope) en vez de sólo «Export failed (…)», y un corte a mitad de la descarga (falla `res.blob()`) también da `NETWORK_ERROR_TEXT` (ronda 3). Así se exportan datasets grandes sin materializarlos en memoria de JS como filas.
 
 ### 6.5 Diagrama
 
@@ -557,9 +600,9 @@ El Export DDL genera el `.sql` en el **cliente** y, si hay DDL Export Rules sele
 
 ### 7.1 Secuencia
 
-1. El botón **Export DDL** del `Toolbar` abre `ExportDdlModal` (`src/features/ddl/components/ExportDdlModal.tsx`), que carga las vistas de las tablas del canvas y el catálogo de reglas con `fetchExportRules()` → `GET /api/ddl-rules`. `selectableRules()` deja las habilitadas y no-inválidas (las `stale` corren igual — solo avisan); por default quedan **todas marcadas**.
+1. El botón **Export DDL** del `Toolbar` abre `ExportDdlModal` (`src/features/ddl/components/ExportDdlModal.tsx`), que toma las vistas MIEMBRO del canvas del diagrama ya cargado (`canvasDdlViews(diagram)`, doc 102 — las mismas que el canvas dibuja, sin otro pedido; nunca «todas las vistas de sus tablas»: `src/architecture.test.ts` impide volver a `listViewsForTables` en `features/ddl`, doc 105 C3) y carga el catálogo de reglas con `fetchExportRules()` → `GET /api/projects/{pid}/ddl-rules`. `selectableRules()` deja las habilitadas y no-inválidas (las `stale` corren igual — solo avisan); por default quedan **todas marcadas**.
 2. El DDL **base** se genera client-side en `src/features/ddl/generators.ts`: `databricksDdl(input, opts)` para el preview y `tableStatements`/`viewStatements` (statement por statement) para el puente de reglas. Opciones del modal con defaults Views/Comments/Partitions ON, PK&FK/Indexes OFF, `tableFormat: 'delta'`, y (doc 76 D9, la macro BCP) `identifierCase: 'lower'`, `external: true` con `location` = `abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>` y `locationFolderCase: 'upper'` (carpeta del LOCATION en MAYÚSCULA). Doc 93: identificadores sin comillas salvo que el nombre las necesite (palabra reservada o carácter fuera de `[a-z0-9_]`), tipos en minúscula, `CREATE OR REPLACE TABLE` (el `LOCATION` la hace externa) y `NOT NULL` solo con PK&FK. Las proyecciones de las vistas salen `col AS alias` con el casing del export; con la regla de layout, las particiones salen del UDP que declara (`withUdpPartitions`: `PART_nn` = columna de partición y su orden; el flag de la plataforma se ignora) y el `PARTITIONED BY` lista sus nombres en ese orden.
-3. Con reglas seleccionadas, Download/Copy llaman `buildFinalSql()` → `renderWithRules()` (`src/features/ddl/rulesBridge.ts`): arma el payload con el estado **efectivo** que el canvas exporta (drafts incluidos) — cada tabla con sus columnas y `udpValues` más su CREATE base (`baseSql`), cada vista con su SQL y el flag `businessView` (= `showOnCanvas`: solo esas se decoran como vista de negocio) — y hace `POST /api/ddl-rules/render` (permiso `export`). El motor del backend es **puro**: no lee BD en el render, todo el contexto viaja en el body.
+3. Con reglas seleccionadas, Download/Copy llaman `buildFinalSql()` → `renderWithRules()` (`src/features/ddl/rulesBridge.ts`): arma el payload con el estado **efectivo** que el canvas exporta (drafts incluidos) — cada tabla con sus columnas y `udpValues` más su CREATE base (`baseSql`), cada vista con su SQL y el flag `businessView` (= `showOnCanvas`: solo esas se decoran como vista de negocio; no decide QUÉ vistas se exportan — eso ya lo decidió la membresía del canvas, doc 105 C2) — y hace `POST /api/projects/{pid}/ddl-rules/render` (permiso `export`). El motor del backend es **puro**: no lee BD en el render, todo el contexto viaja en el body.
 4. `assemble()` ensambla el `.sql` final: header con el **sello** `-- Export rules: vN · N applied · M skipped` (la evidencia de por qué el DDL de marzo salió distinto al de junio) + los statements en el orden del motor (por tabla: [sentencias `before`] física → tags de tabla → tags de columna → sentencias `after` → generados, cada uno con sus propios anexos; luego vistas de negocio con sus `ALTER TABLE … SET TAGS` — como la macro; `viewTagsAs: view` los escribe `ALTER VIEW`), con los anexos `.tags`/`.extra` pegados a su objeto: sin línea en blanco entre un CREATE y sus ALTER, una línea en blanco solo entre objetos (doc 93 D12).
 5. **Download** arma un `.zip` con un `.sql` por objeto (`ddlExportBundle.ts`): una carpeta por tabla (`{TABLA}/`) con `TABLE-{TABLA}.sql` (física y tablas generadas como la `_rej`), `VIEW_NEG-{VISTA}.sql` (vistas modeladas en Erwin/canvas) y `VIEW_TEC-{VISTA}.sql` (vistas que generan las reglas), el nombre en MAYÚSCULA y sin corchetes. El esquema entra al nombre (`VIEW_TEC-BCP_V.H_X.sql`) solo si dos archivos de la carpeta chocan sin distinguir mayúsculas; nunca `_2`. Prefijos, separador, casing y esquema salen de `fileNames` de las Output settings (doc 93 D11).
 6. **Sin reglas seleccionadas el export no pasa por el puente**: sale byte-idéntico al flujo previo a las reglas (cero regresión). El botón "Apply N rules" del preview usa el mismo motor bajo demanda — nunca en vivo — y produce el mismo texto que el download; cualquier cambio de opciones o selección lo invalida.
@@ -567,7 +610,7 @@ El Export DDL genera el `.sql` en el **cliente** y, si hay DDL Export Rules sele
 Payload real del puente (condensado del código de `rulesBridge.ts`):
 
 ```jsonc
-// POST /api/ddl-rules/render
+// POST /api/projects/{pid}/ddl-rules/render
 {
   "ruleIds": ["<uuid-regla-1>", "<uuid-regla-2>"],
   "model": { "name": "Analytics", "udpValues": {} },
@@ -602,7 +645,7 @@ Payload real del puente (condensado del código de `rulesBridge.ts`):
 
 ### 7.2 Autoría de las reglas
 
-Las reglas se autoran y versionan en **Data Standards → DDL Export rules** (`src/features/standards/`, servicio `ddlRules.service.ts`): lectura por `GET /api/ddl-rules(/config|/templates|/artifacts)`, checks por `POST /api/ddl-rules/validate|/test|/impact`, y toda mutación vía `POST /api/standards/apply` (stream único `standards_versions` — el router de reglas es read-only). El editor hace round-trip YAML con la dependencia `yaml 2.9.0`.
+Las reglas se autoran y versionan en **Data Standards → DDL Export rules** (`src/features/standards/`, servicio `ddlRules.service.ts`): lectura por `GET /api/projects/{pid}/ddl-rules(/config|/templates|/artifacts)`, checks por `POST /api/projects/{pid}/ddl-rules/validate|/test|/impact`, y toda mutación vía `POST /api/projects/{pid}/standards/apply` (`applyStandards`; stream único `standards_versions` del proyecto — el router de reglas es read-only). El editor hace round-trip YAML con la dependencia `yaml 2.9.0`.
 
 ### 7.3 Diagrama
 
@@ -613,7 +656,7 @@ sequenceDiagram
   participant EM as ExportDdlModal
   participant Gen as generators.ts
   participant Br as rulesBridge.ts
-  participant API as Backend /api/ddl-rules
+  participant API as Backend /api/projects/pid/ddl-rules
 
   U->>TB: Export DDL
   TB->>EM: open (diagram + modelName)
@@ -653,11 +696,11 @@ void createRelationship(rel).catch((err) => {
 
 ### 8.2 Reordenar columnas
 
-`useModelerStore.reorderColumns` primero reordena en el store (recomputa `ordinal = índice nuevo` localmente, render inmediato) y luego persiste **solo** las columnas cuyo `ordinal` cambió, en **tandas de 5** (mover una columna al tope de una tabla de 30 disparaba 30 PUT simultáneos). El backend graba cada cambio con `$set` atómico por entidad, así que no se pisan. Un `reload()` final reconcilia.
+`useModelerStore.reorderColumns` primero reordena en el store (recomputa `ordinal = índice nuevo` localmente, render inmediato) y luego persiste **solo** las columnas cuyo `ordinal` cambió, en **tandas de 5** (mover una columna al tope de una tabla de 30 disparaba 30 PUT simultáneos). El backend graba cada cambio con `$set` atómico por entidad, así que no se pisan. Un `reload()` final reconcilia. Doc 105 (rondas 5 a 7): cada escritura lleva el documento VIGENTE de la columna (`currentColumn`: una edición que terminó entre tandas no se pisa y una columna borrada no revive) y su Undo sólo devuelve el orden.
 
 ### 8.3 Drawings con debounce
 
-`addDrawing/updateDrawing/deleteDrawing` mutan el array local y agendan `persistDrawings()` con debounce de 500ms (`PUT .../drawings` del array completo). El flush captura el `saId` al **agendar**: si el usuario cambia de canvas dentro de la ventana, el disparo se cancela para no escribir dibujos ajenos. Al cambiar de canvas o hacer `saveAll`, se hace flush inmediato.
+`addDrawing/updateDrawing/deleteDrawing` mutan el array local y agendan `persistDrawings()` con debounce de 500ms (`setSubjectAreaDrawings`: el canvas completo con el array de dibujos, como cambio de la versión en edición — doc 104; el `PUT …/drawings` directo responde 409 desde el doc 105). El flush captura el `saId` y la versión al **agendar**: si el usuario cambia de canvas dentro de la ventana, el disparo se cancela para no escribir dibujos ajenos, y si la sesión ya no edita esa versión, se descarta. Al cambiar de canvas o hacer `saveAll`, se hace flush inmediato; si ese flush falla, avisa igual que el guardado con debounce (doc 105, F1 — antes callaba).
 
 ### 8.4 Reconciliación de respuestas fuera de orden
 
@@ -671,22 +714,22 @@ El modo `readonly` de `useSessionStore.openMode` bloquea toda escritura, con def
 
 | Capa | Archivo | Comportamiento en readonly |
 |---|---|---|
-| Choke-point de escritura | `governance.service.rec()` | Lanza "El modelo está abierto en solo lectura" antes de tocar el backend |
-| Canvas | `ModelerCanvas.tsx` | `nodesDraggable={!readonly}`; `onConnect` corta con toast; `onNodeDragStop` no persiste; `deleteKeyCode={null}` (nada de borrar por teclado) |
-| Nodo | `TableNode.tsx` | `canEdit = activeId != null && !readonly`; handles no conectables; sin botón "+" de columna |
-| Toolbar | `Toolbar.tsx` | `canEdit = hasCanvas && !readonly`; deshabilita New table/CTAS/Draw/Autoarrange/Save/Publish; tooltip "Solo lectura — versión publicada" |
+| Choke-point de escritura | `governance.service` (`writableCs()`, de `rec()` y `recordChangesBulk`) | Lanza «The model is open read-only: it does not accept changes.» antes de tocar el backend (carpetas/canvases, vistas y esquemas tienen su guard equivalente en `structure.service`, `views.service` y `schemas.service`) |
+| Canvas | `ModelerCanvas.tsx` | Los bloques se pueden mover (doc 84 E), pero `onNodeDragStop` manda las posiciones de TODOS los movidos a `viewerLayout` (sólo la sesión) y nada se persiste; los dibujos quedan fijos; `onConnect` corta con toast; `deleteKeyCode={null}` (nada de borrar por teclado) |
+| Nodo | `TableNode.tsx` | `canEdit = activeChangesetId != null && !readonly`; handles no conectables; sin botón "+" de columna |
+| Toolbar | `Toolbar.tsx` | `canEdit = hasCanvas && !readonly`; deshabilita New table, CTAS, Create view, Schemas, Upload from Excel, las herramientas de relación, subcategoría y dibujo, Undo, Model properties, Save y Publish; tooltip «Read-only — published version», que desde el doc 105 (ronda 5) también va en el nombre accesible de cada botón de ícono (`aria-label`: «<acción> — Read-only — published version»). Autoarrange sigue habilitado: en solo lectura ordena sólo la vista de la sesión («Auto-arrange — view only, not saved», doc 84 E) |
 | Store | `useModelerStore.focusTable` | En readonly centra la tabla pero no abre el PropertiesPanel |
 
 Un detalle importante: en `readonly` **puede** haber un `activeChangesetId` (por ejemplo, ver un request desde Review lee su overlay `/effective`), pero eso **nunca** habilita mutaciones — el gate de `openMode` corta antes, y el backend igual respondería 409. Por eso el gate de sesión precede al de changeset.
 
-`WorkspaceScreen` refuerza esto degradando `editing → readonly` cuando detecta que el changeset dejó de ser un draft propio (submit desde otra pestaña, decisión de un reviewer, o cambio de actor), evitando 409/403 silenciosos. El `PublishModal` hace la misma degradación tras un submit exitoso.
+`WorkspaceScreen` refuerza esto con la revalidación de la sesión (`lib/sessionGuard.ts`, `sessionFate`; ver §4.5): al entrar y cuando una respuesta 403/404/409 de ESA versión lo avisa, una versión eliminada vuelve al Open model con aviso; una transferida pasa a solo lectura de la misma versión si todavía puede verla (o de producción si no); una propia que dejó de estar en `draft` (enviada o decidida en otra pestaña) pasa a solo lectura — así el canvas no queda respondiendo 409/403 en cada edición. El `PublishModal`, tras un submit exitoso, reabre el modelo en solo lectura sobre PRODUCCIÓN («Request sent — the canvas is now read-only (production)»).
 
 ```mermaid
 flowchart TD
   Act["Intento de escritura<br/>(crear/editar/mover)"] --> Gate1{openMode<br/>readonly?}
   Gate1 -->|si| Block["Bloqueado:<br/>toast + rec() throw<br/>drag/handles off"]
   Gate1 -->|no| Gate2{changeset<br/>activo?}
-  Gate2 -->|no| Block2["throw: se requiere<br/>changeset activo"]
+  Gate2 -->|no| Block2["throw: An active changeset<br/>is required to edit."]
   Gate2 -->|si| Write["recordChange -> PUT /changes<br/>+ reload()"]
 ```
 
@@ -734,10 +777,10 @@ La BD productiva es **Databricks Lakebase Postgres**, consumida a través de un 
 | Snapshot / submit | POST `/api/changesets/snapshot` · POST `/api/changesets/{id}/submit` |
 | Review / decisión | GET `/api/changesets/{id}` · GET `/api/changesets/{id}/diff` · POST `/api/changesets/{id}/diff/details` · POST `/api/changesets/{id}/review` · POST `.../withdraw` · POST `.../reopen` · POST `.../comments` |
 | Proyectos | GET/POST `/api/projects` · GET `/api/projects/{pid}/counts` (borrar/renombrar: cambio `projects/{pid}` en el draft) |
-| Versiones / rollback | GET `/api/versions[?projectId=]` · GET `/api/projects/{pid}/versions/published` · GET `/api/versions/compare` · GET `/api/requests` · GET `/api/users?can=` · POST `/api/changesets/{id}/rollback` |
-| Layout / drawings | PUT `/api/subject-areas/{saId}/layout` · PUT `/api/subject-areas/{saId}/drawings` · PUT `/api/subject-areas/{saId}/tables` |
+| Versiones / rollback | GET `/api/versions[?projectId=]` · GET `/api/projects/{pid}/versions/published` · GET `/api/versions/compare` · GET `/api/requests` · GET `/api/users?can=` · GET `/api/users?includeDisabled=true` (nombres, doc 105) · POST `/api/changesets/{id}/rollback` |
+| Layout / drawings / miembros del canvas | PUT `/api/changesets/{id}/changes` (upsert del canvas completo, sobre GET `/api/changesets/{id}/effective/subject_areas?ids=`) — los PUT directos `/api/subject-areas/{saId}/layout` · `/drawings` · `/tables` responden 409 desde el doc 105 |
 | Reporting | GET `/api/reporting/catalog` · POST `/api/reporting/query` · POST `/api/reporting/query/sql` · POST `/api/reporting/query/validate` · GET `/api/reporting/facets` · POST `/api/reporting/export` · GET/POST/PUT/DELETE `/api/reporting/reports` · GET `/api/reporting/insights/*` |
 | Export DDL con reglas | GET `/api/projects/{pid}/ddl-rules` · POST `/api/projects/{pid}/ddl-rules/render` (autoría: GET `…/ddl-rules/config` · `/templates` · `/artifacts` · POST `…/ddl-rules/validate` · `/test` · `/impact` · POST `/api/projects/{pid}/standards/apply`) |
-| Reporting (todo con `projectId`) | GET `/api/reporting/tables` · `/filters` · `/columns` · `/views` |
+| Reporting (todo con `projectId`) | GET `/api/reporting/tables` · `/filters` · `/columns` · POST `/api/reporting/columns/query` · `/views/query` (lotes, doc 102) · POST `/api/reporting/insights/relationships/query` (hoja Relationships por lotes, doc 105) |
 
 En producción (Databricks Apps) TODAS estas rutas son relativas al origen del front: el navegador nunca habla con el backend directo — `server.mjs` proxya `/api/*` con el token M2M del service principal (ver 2.4).

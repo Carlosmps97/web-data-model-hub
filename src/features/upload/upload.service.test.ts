@@ -2,12 +2,16 @@
 // polling del job hasta un estado terminal, cancelable y sin tragarse errores.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-vi.mock('@/services/http', () => ({
-  apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn(),
-  setDevUser: vi.fn(), setAuthToken: vi.fn(), setOnUnauthorized: vi.fn(),
-  ApiError: class extends Error { status = 0; detail: unknown = null; constructor(m: string, status = 0, detail: unknown = null) { super(m); this.status = status; this.detail = detail; } },
-  apiErrorMessage: vi.fn(), isConflictError: vi.fn(),
-}));
+vi.mock('@/services/http', () => {
+  class ApiError extends Error { status = 0; detail: unknown = null; constructor(m: string, status = 0, detail: unknown = null) { super(m); this.status = status; this.detail = detail; } }
+  return {
+    apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn(),
+    setDevUser: vi.fn(), setAuthToken: vi.fn(), setOnUnauthorized: vi.fn(),
+    ApiError, apiErrorMessage: vi.fn(), isConflictError: vi.fn(),
+    // el real (doc 105, ronda 5): red, timeout o 5xx
+    isTransientError: (e: unknown) => e instanceof ApiError && (e.status === 0 || e.status >= 500),
+  };
+});
 
 import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '@/services/http';
 import {
@@ -51,6 +55,9 @@ describe('upload.service routes', () => {
     vi.mocked(apiDelete).mockResolvedValue({ deleted: true });
     await discardUpload('c1', 'j1');
     expect(apiDelete).toHaveBeenCalledWith('/api/changesets/c1/uploads/j1');
+    // Doc 105 (ronda 8): sólo si sigue validado (409 si la carga ya empezó o terminó).
+    await discardUpload('c1', 'j1', { onlyIfValidated: true });
+    expect(apiDelete).toHaveBeenLastCalledWith('/api/changesets/c1/uploads/j1?status=validated');
   });
 
   it('profiles: project-scoped URLs and verbs', async () => {
@@ -114,5 +121,52 @@ describe('pollUploadJob', () => {
   it('propagates API errors (e.g. the job expired → 404)', async () => {
     vi.mocked(apiGet).mockRejectedValue(new Error('Upload not found'));
     await expect(pollUploadJob('c1', 'j1', { intervalMs: 100 })).rejects.toThrow('Upload not found');
+  });
+});
+
+// Doc 105 (ronda 5, R15-H2): un GET caído mientras se aplica (red, timeout,
+// 5xx) NO es el resultado de la carga — el servidor la sigue aplicando. Antes
+// el polling lo propagaba y el popup la daba por fallida: sin arrange, sin
+// refresco del Explorer y sin vaciar el Undo (una inversa vieja pisaba lo
+// cargado). Ahora reintenta hasta un estado terminal; un 404 (el job ya no
+// está) sí es falla real; tras varios transitorios seguidos se rinde.
+describe('pollUploadJob reintenta los fallos transitorios (doc 105, ronda 5)', () => {
+  beforeEach(() => { vi.mocked(apiGet).mockReset(); });
+
+  it('red o timeout (status 0) y 5xx: sigue hasta el estado terminal', async () => {
+    vi.mocked(apiGet)
+      .mockResolvedValueOnce(job('applying'))
+      .mockRejectedValueOnce(new ApiError('timeout', 0))
+      .mockRejectedValueOnce(new ApiError('Bad gateway', 502))
+      .mockResolvedValueOnce(job('applied'));
+    const p = pollUploadJob('c1', 'j1', { intervalMs: 100 });
+    await vi.advanceTimersByTimeAsync(5000);
+    expect((await p).status).toBe('applied');
+    expect(apiGet).toHaveBeenCalledTimes(4);
+  });
+
+  it('un 404 (el job ya no está) es falla real: no reintenta', async () => {
+    vi.mocked(apiGet).mockRejectedValueOnce(new ApiError('Upload not found', 404));
+    await expect(pollUploadJob('c1', 'j1', { intervalMs: 100 })).rejects.toThrow('Upload not found');
+    expect(apiGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('se rinde tras varios transitorios SEGUIDOS (propaga el último)', async () => {
+    vi.mocked(apiGet).mockRejectedValue(new ApiError('timeout', 0));
+    const out = pollUploadJob('c1', 'j1', { intervalMs: 100, maxTransient: 3 }).catch((e: Error) => e.message);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(await out).toBe('timeout');
+    expect(apiGet).toHaveBeenCalledTimes(4);                  // 1 + 3 reintentos
+  });
+
+  it('una respuesta buena en el medio reinicia la cuenta', async () => {
+    vi.mocked(apiGet)
+      .mockRejectedValueOnce(new ApiError('timeout', 0)).mockRejectedValueOnce(new ApiError('timeout', 0))
+      .mockResolvedValueOnce(job('applying'))
+      .mockRejectedValueOnce(new ApiError('timeout', 0)).mockRejectedValueOnce(new ApiError('timeout', 0))
+      .mockResolvedValueOnce(job('applied'));
+    const p = pollUploadJob('c1', 'j1', { intervalMs: 100, maxTransient: 2 });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect((await p).status).toBe('applied');
   });
 });

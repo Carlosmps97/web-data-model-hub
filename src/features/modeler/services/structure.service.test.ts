@@ -5,13 +5,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/changeset.service', () => ({ effective: vi.fn(), recordChange: vi.fn() }));
-vi.mock('./modeler.service', () => ({ setSubjectAreaLayout: vi.fn(), setSubjectAreaDrawings: vi.fn() }));
+vi.mock('./modeler.service', () => ({
+  setSubjectAreaLayout: vi.fn(), setSubjectAreaDrawings: vi.fn(),
+  // Doc 104 (ronda 2): endpoints directos de producción — no deben llamarse.
+  createFolder: vi.fn(), renameFolder: vi.fn(), moveFolder: vi.fn(), deleteFolder: vi.fn(),
+  createSubjectArea: vi.fn(), updateSubjectArea: vi.fn(), deleteSubjectArea: vi.fn(),
+}));
 
 import * as csvc from '@/services/changeset.service';
 import * as mod from './modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import * as struct from './structure.service';
 import type { SubjectArea } from './modeler.service';
+
+// Doc 105: las escrituras directas ya no existen en modeler.service (el mock de
+// arriba las define igual: ningún camino debe llamar a un endpoint directo).
+const direct = mod as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
 const R1 = [{ x: 200, y: 40 }, { x: 200, y: 160 }];
 const R2 = [{ x: 260, y: -30 }];
@@ -270,11 +279,18 @@ describe('posiciones enteras (doc 100, P6)', () => {
     expect(Object.is(recorded()[0].layout.t1.x, 0) && Object.is(recorded()[0].layout.t1.y, 0)).toBe(true);
   });
 
-  it('sin working copy también redondea', async () => {
+  // Doc 104 (revisión): sin sesión de edición NO hay escritura directa a
+  // producción. El visor nunca persiste posiciones (doc 84 E); sólo llegaba
+  // acá un guardado pendiente de una sesión que se degradó a solo lectura
+  // (versión transferida, eliminada o enviada) — y publicaba sin revisión.
+  it('sin working copy NO escribe en producción (exige edición)', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: null });
-    vi.mocked(mod.setSubjectAreaLayout).mockResolvedValue(canvas() as never);
-    await struct.setSubjectAreaLayout('sa1', { t1: { x: 1.6, y: 2.2 } });
-    expect(mod.setSubjectAreaLayout).toHaveBeenCalledWith('sa1', { t1: { x: 2, y: 2 } });
+    await expect(struct.setSubjectAreaLayout('sa1', { t1: { x: 1.6, y: 2.2 } }))
+      .rejects.toThrow('requires a working copy in edit mode');
+    await expect(struct.setSubjectAreaDrawings('sa1', [])).rejects.toThrow('requires a working copy in edit mode');
+    expect(direct.setSubjectAreaLayout).not.toHaveBeenCalled();
+    expect(direct.setSubjectAreaDrawings).not.toHaveBeenCalled();
+    expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });
 
@@ -284,6 +300,28 @@ describe('mensajes en inglés (doc 100, P4)', () => {
     await expect(struct.updateSubjectArea('nope', { projectId: 'p1', name: 'x' })).rejects.toThrow('This canvas is no longer in the working copy.');
     await expect(struct.setSubjectAreaLayout('nope', { t1: { x: 1, y: 1 } })).rejects.toThrow('This canvas is no longer in the working copy.');
     await expect(struct.renameFolder('nope', 'x')).rejects.toThrow('This folder is no longer in the working copy.');
+  });
+});
+
+describe('acciones del Explorer sin sesión de edición (doc 104, ronda 2)', () => {
+  // Un confirm/inline del Explorer que quedó abierto cuando la sesión se
+  // degradó (versión transferida, eliminada o enviada) escribía DIRECTO a
+  // producción: carpetas y canvases van siempre por la working copy.
+  it('carpetas y canvases rechazan y no tocan producción', async () => {
+    useSessionStore.setState({ openMode: 'readonly', activeChangesetId: null });
+    const attempts = [
+      struct.createFolder('p1', null, 'F'),
+      struct.renameFolder('f1', 'F2'),
+      struct.moveFolder('f1', null),
+      struct.deleteFolder('f1'),
+      struct.createSubjectArea('p1', 'C', null),
+      struct.updateSubjectArea('sa1', { projectId: 'p1', name: 'C2' }),
+      struct.deleteSubjectArea('sa1'),
+    ];
+    for (const a of attempts) await expect(a).rejects.toThrow('requires a working copy in edit mode');
+    for (const fn of [direct.createFolder, direct.renameFolder, direct.moveFolder, direct.deleteFolder,
+      direct.createSubjectArea, direct.updateSubjectArea, direct.deleteSubjectArea]) expect(fn).not.toHaveBeenCalled();
+    expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });
 
@@ -303,11 +341,11 @@ describe('arrangeSubjectArea', () => {
     expect(recorded()[0].routes).toEqual({ r1: R1 });
   });
 
-  it('sin working copy usa el endpoint directo de posiciones (no hay trazos que reiniciar)', async () => {
+  it('sin working copy NO escribe en producción (exige edición, doc 104)', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: null });
-    vi.mocked(mod.setSubjectAreaLayout).mockResolvedValue(canvas() as never);
-    await struct.arrangeSubjectArea('sa1', { t1: { x: 1, y: 2 } });
-    expect(mod.setSubjectAreaLayout).toHaveBeenCalledWith('sa1', { t1: { x: 1, y: 2 } });
+    await expect(struct.arrangeSubjectArea('sa1', { t1: { x: 1, y: 2 } }))
+      .rejects.toThrow('requires a working copy in edit mode');
+    expect(direct.setSubjectAreaLayout).not.toHaveBeenCalled();
     expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });
@@ -384,5 +422,42 @@ describe('cola por canvas — dos guardados del mismo canvas van en fila', () =>
     ]);
     expect(calls).toEqual(['get:sa1', 'put:sa1', 'put:sa1']);
     expect(draft).not.toHaveProperty('sa1');
+  });
+});
+
+// Doc 105 (F4 / doc 100 P8): el Undo de borrar una tabla o una vista repone lo
+// que REALMENTE salió de cada canvas, con su posición.
+describe('lo que sale de un canvas, con su posición (doc 105, F4)', () => {
+  it('removeFromCanvas devuelve lo que REALMENTE salió: tablas, vistas y sus posiciones', async () => {
+    draft.sa1 = canvas({ viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } } });
+    const out = await struct.removeFromCanvas('sa1', { tableIds: ['t2', 't9'], viewIds: ['v1', 'v9'] });
+    expect(out).toEqual({ tableIds: ['t2'], viewIds: ['v1'], layout: { t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } } });
+  });
+
+  it('nada que sacar, canvas sin lista explícita o canvas que ya no está: vacío', async () => {
+    const none = { tableIds: [], viewIds: [], layout: {} };
+    expect(await struct.removeFromCanvas('sa1', { tableIds: ['t9'] })).toEqual(none);
+    draft.sa2 = canvas({ id: 'sa2', viewIds: undefined, layout: { t1: { x: 0, y: 0 }, v1: { x: 9, y: 9 } } });
+    expect(await struct.removeFromCanvas('sa2', { viewIds: ['v1'] })).toEqual(none);
+    expect(await struct.removeFromCanvas('nope', { tableIds: ['t1'] })).toEqual(none);
+  });
+
+  it('listedViews: cuáles de esas vistas lista EXPLÍCITAMENTE el canvas y dónde están, leído en su cola', async () => {
+    draft.sa1 = canvas({ viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, v1: { x: 7, y: 8 } } });
+    expect(await struct.listedViews('sa1', ['v1', 'v2', 'v9'])).toEqual({ viewIds: ['v1', 'v2'], layout: { v1: { x: 7, y: 8 } } });
+    // En la cola: se lee DESPUÉS de una escritura pendiente del mismo canvas.
+    const [, seen] = await Promise.all([
+      struct.removeFromCanvas('sa1', { viewIds: ['v2'] }),
+      struct.listedViews('sa1', ['v1', 'v2']),
+    ]);
+    expect(seen).toEqual({ viewIds: ['v1'], layout: { v1: { x: 7, y: 8 } } });
+  });
+
+  it('listedViews: un canvas sin lista explícita (legacy) o que ya no está no lista ninguna', async () => {
+    draft.sa2 = canvas({ id: 'sa2', viewIds: undefined, layout: { v1: { x: 9, y: 9 } } });
+    expect(await struct.listedViews('sa2', ['v1'])).toEqual({ viewIds: [], layout: {} });
+    expect(await struct.listedViews('nope', ['v1'])).toEqual({ viewIds: [], layout: {} });
+    expect(await struct.listedViews('sa1', [])).toEqual({ viewIds: [], layout: {} });
+    expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });

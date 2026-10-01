@@ -4,7 +4,7 @@
  * la MISMA selección y filtros que el export por niveles. Las plantillas son
  * dato: se crean y editan en «Manage templates…» sin redesplegar.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import { Download, FileSpreadsheet } from 'lucide-react';
@@ -13,14 +13,23 @@ import { useAuthStore } from '@/store/useAuthStore';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import { listSheetTemplates } from '../sheetTemplates.service';
 import { templateFileName, templateRows, type SheetTemplate } from '../lib/sheetTemplates';
+import { readErrorText } from '../lib/reportVersions';
 import SheetTemplateEditor from './SheetTemplateEditor';
 
-export default function SheetTemplateCard({ projectId, selectedCount, disabled, resolveTables, fetchColumns }: {
+export default function SheetTemplateCard({
+  projectId, selectedCount, disabled, resolveTables, fetchColumns, onBusyChange, versionToastId,
+}: {
   projectId: string;
   selectedCount: number;
   disabled: boolean;
   resolveTables: () => Promise<ReportTableRow[]>;
   fetchColumns: (tableIds: string[]) => Promise<ReportColumnRow[]>;
+  /** Doc 105 (B3): avisa si hay un export en curso (y `false` al desmontarse) —
+   *  el Reporting deshabilita Project / Version / Design report mientras tanto. */
+  onBusyChange?: (busy: boolean) => void;
+  /** Doc 105 (R2-B3/A5-o4): en modo versión, id del toast compartido con el aviso
+   *  «showing Production» del Reporting (y el texto de un 403/404 lo explica). */
+  versionToastId?: string;
 }) {
   // Spec D11: cualquiera en sesión gestiona las suyas; un admin, además, las compartidas.
   const me = useAuthStore((s) => s.user?.username);
@@ -29,6 +38,17 @@ export default function SheetTemplateCard({ projectId, selectedCount, disabled, 
   const [selId, setSelId] = useState('');
   const [busy, setBusy] = useState(false);
   const [managing, setManaging] = useState(false);
+  // Doc 105 (R2-B3): un export que falla DESPUÉS de desmontar la card (el Reporting
+  // volvió a Production) no avisa sobre la pantalla nueva.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
 
   const reload = useCallback(async () => {
     const list = await listSheetTemplates(projectId);
@@ -53,7 +73,10 @@ export default function SheetTemplateCard({ projectId, selectedCount, disabled, 
       XLSX.writeFile(wb, templateFileName(selected, new Date()));   // doc 102: nombre de la plantilla
       toast.success(`Exported with the ${selected.name} template.`);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Could not build the Excel file.');
+      if (!alive.current) return;
+      const text = readErrorText(err, 'Could not build the Excel file.', !!versionToastId);
+      if (versionToastId) toast.error(text, { id: versionToastId });
+      else toast.error(text);
     } finally { setBusy(false); }
   };
 

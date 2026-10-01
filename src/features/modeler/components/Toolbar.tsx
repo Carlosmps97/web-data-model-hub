@@ -10,14 +10,17 @@ import Tooltip from '@/components/ui/Tooltip';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { EndIcon, RelLabelIcon, RelLineIcon, SubcatIcon } from './RelIcon';
 import type { Cardinality } from '@/services/governance.service';
-import { manualRouteCount, useModelerStore } from '@/store/useModelerStore';
+import { failureText, manualRouteCount, useModelerStore } from '@/store/useModelerStore';
 import { useUndoStore } from '@/store/useUndoStore';
-import { UNDO_KEY_LABEL } from './ColumnContextMenu';
+import { SEARCH_KEY_LABEL, UNDO_KEY_LABEL } from './ColumnContextMenu';
+import { modalOpen } from '@/components/ui/focusTrap';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
+import { canvasSessionKey } from '../lib/canvasSession';
 import { useUiStore } from '@/store/useUiStore';
 import { runBlocking } from '@/store/useBusyStore';
 import { isAsOfChangesetId } from '@/services/versioning.service';
+import { reportWriteError } from '../lib/sessionGuard';
 import { UploadModal } from '@/features/upload';
 import NewTableModal from './NewTableModal';
 import CtasModal from './CtasModal';
@@ -57,6 +60,16 @@ const SHAPES: { id: DrawingType; tip: string; icon: ReactNode }[] = [
 
 const VIEWER_TIP = 'Read-only — published version';
 
+
+/** ⌘K / Ctrl+K: abre el buscador del Model con una sesión de canvas abierta.
+ *  Doc 105 (ronda 6): no con un modal o una espera en pantalla (`modalOpen`) —
+ *  abría el buscador DEBAJO de «Saving working copy…» y se llevaba el foco. */
+export function onSearchShortcut(e: KeyboardEvent, open: () => void): void {
+  if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) return;
+  e.preventDefault();
+  if (modalOpen() || !useSessionStore.getState().openMode) return;
+  open();
+}
 
 export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: string, k?: 'err') => void; onOpenModel?: () => void }) {
   // Doc 92 D7: barra de herramientas colapsable (la navegación de módulos no).
@@ -146,30 +159,28 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Edición habilitada: hay canvas y NO es modo solo-lectura.
   const canEdit = hasCanvas && !readonly;
 
-  // ⌘K / Ctrl+K abre el buscador del Model (doc 70 §11) — con una sesión de
-  // canvas abierta (el popup redirige al canvas del hit).
+  // ⌘K / Ctrl+K abre el buscador del Model (doc 70 §11).
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        if (useSessionStore.getState().openMode) useModelerStore.getState().setSearchOpen(true);
-      }
-    };
+    const onKey = (e: KeyboardEvent) => onSearchShortcut(e, () => useModelerStore.getState().setSearchOpen(true));
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // Doc 105 (H7): los fallos de una escritura esperan la revalidación y callan
+  // si la sesión cambió (`reportWriteError`: ella ya avisó).
   const onSave = async () => {
     setSaving(true);
-    try { await runBlocking('Saving working copy…', saveAll); pushToast('Saved'); }
     // Propaga el motivo real (p.ej. un 4xx del backend), no un genérico.
-    catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
+    try { await runBlocking('Saving working copy…', saveAll); pushToast('Saved'); }
+    catch (e) { await onError(e); }
     finally { setSaving(false); }
   };
   const runArrange = async () => {
     setArranging(true);
+    const onError = reportWriteError((e) => pushToast(failureText("Couldn't auto-arrange", e), 'err'));
     try { await autoOrganize(); }
-    catch { pushToast("Couldn't auto-arrange", 'err'); }
+    catch (e) { await onError(e); }
     finally { setArranging(false); }
   };
   const onArrange = () => {
@@ -242,11 +253,23 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Doc 86: cambiar de modelo con un popup de creación abierto lo cierra — un
   // popup es de UNA faceta (entidad o tabla, atributo o columna).
   useEffect(() => { setModal(null); }, [viewMode]);
+  // Doc 105 (ronda 3, R7-A): los diálogos con fondo de canvas dejan el Toolbar
+  // y el TopNav clicables — al cambiar la sesión (otra versión, modo o
+  // proyecto) se cierran todos: lo armado en una no se graba en la otra.
+  const sessionKey = useSessionStore((s) => canvasSessionKey(s));
+  useEffect(() => {
+    setModal(null); setPublishOpen(false); setDdlOpen(false); setModelPropsOpen(false); setExportOpen(false); setArrangeAsk(null);
+  }, [sessionKey]);
+
+  // Doc 105 (ronda 5): nombre accesible de un botón de ÍCONO — el tooltip sólo
+  // se ve con el mouse (el lector de pantalla anunciaba «button» sin más). En
+  // el visor dice además por qué está deshabilitado.
+  const named = (label: string, lockTip = true) => (lockTip && readonly ? `${label} — ${VIEWER_TIP}` : label);
 
   // Botón-icono de sección. `disabled` ya contempla viewer-lock en cada call.
   const ic = (label: string, node: ReactNode, onClick: () => void, opts?: { on?: boolean; disabled?: boolean; lockTip?: boolean }) => (
     <Tooltip label={opts?.lockTip && readonly ? VIEWER_TIP : label}>
-      <button className={`wk-tic${opts?.on ? ' on' : ''}`} disabled={opts?.disabled} onClick={onClick}>{node}</button>
+      <button className={`wk-tic${opts?.on ? ' on' : ''}`} aria-label={named(label, !!opts?.lockTip)} disabled={opts?.disabled} onClick={onClick}>{node}</button>
     </Tooltip>
   );
 
@@ -274,10 +297,10 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         <div className="wk-grp-row">
           <div className="wk-seg" role="group" aria-label="Model view">
             <Tooltip label="Logical model — entities & attributes">
-              <button type="button" className={`wk-seg-btn${viewMode === 'logical' ? ' on' : ''}`} disabled={!openMode} onClick={() => setViewMode('logical')}>Logical</button>
+              <button type="button" className={`wk-seg-btn${viewMode === 'logical' ? ' on' : ''}`} aria-pressed={viewMode === 'logical'} disabled={!openMode} onClick={() => setViewMode('logical')}>Logical</button>
             </Tooltip>
             <Tooltip label="Physical model — tables, columns & views">
-              <button type="button" className={`wk-seg-btn${viewMode === 'physical' ? ' on' : ''}`} disabled={!openMode} onClick={() => setViewMode('physical')}>Physical</button>
+              <button type="button" className={`wk-seg-btn${viewMode === 'physical' ? ' on' : ''}`} aria-pressed={viewMode === 'physical'} disabled={!openMode} onClick={() => setViewMode('physical')}>Physical</button>
             </Tooltip>
           </div>
         </div>
@@ -304,7 +327,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           (Object Inspector, sin canvas). Reemplaza el input «Find a table…». */}
       <div className="wk-grp">
         <div className="wk-grp-row">
-          {ic('Search the model — locate a table, column or definition on its canvas, or inspect its metadata (⌘K)', <Search size={17} />, () => setSearchOpen(true), { disabled: !openMode })}
+          {ic(`Search the model — locate a table, column or definition on its canvas, or inspect its metadata (${SEARCH_KEY_LABEL})`, <Search size={17} />, () => setSearchOpen(true), { disabled: !openMode })}
         </div>
         <span className="wk-grp-cap">Search &amp; inspect</span>
       </div>
@@ -323,6 +346,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
                     <button
                       type="button"
                       className={`wk-relend${relSel[end] === c.k ? ' on' : ''}`}
+                      aria-label={named(`${end === 'parent' ? 'Parent' : 'Child'} end: ${c.tip}`)}
+                      aria-pressed={relSel[end] === c.k}
                       disabled={!canEdit}
                       onClick={() => setRelEnd(end, c.k)}
                     >
@@ -340,6 +365,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
               <button
                 type="button"
                 className={`wk-reldraw${relPreset?.identifying ? ' on' : ''}`}
+                aria-label={named('Draw an identifying relationship (solid line)')}
+                aria-pressed={!!relPreset?.identifying}
                 disabled={!canEdit}
                 onClick={() => armRel(true)}
               >
@@ -352,6 +379,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
               <button
                 type="button"
                 className={`wk-reldraw${relPreset && !relPreset.identifying ? ' on' : ''}`}
+                aria-label={named('Draw a non-identifying relationship (dashed line)')}
+                aria-pressed={!!relPreset && !relPreset.identifying}
                 disabled={!canEdit}
                 onClick={() => armRel(false)}
               >
@@ -370,6 +399,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
               <button
                 type="button"
                 className={`wk-reldraw${subcatArmed ? ' on' : ''}`}
+                aria-label={named(viewMode !== 'logical' ? 'Draw a subcategory — available in the Logical view only' : 'Draw a subcategory (supertype/subtype)')}
+                aria-pressed={subcatArmed}
                 disabled={!canEdit || viewMode !== 'logical'}
                 onClick={() => setSubcatArmed(!subcatArmed)}
               >
@@ -403,7 +434,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         <div className="wk-drawgrid">
           {SHAPES.map((s) => (
             <Tooltip key={s.id} label={readonly ? VIEWER_TIP : s.tip}>
-              <button type="button" className="wk-drawbtn" disabled={!canEdit} onClick={() => addDrawing(s.id)}>
+              <button type="button" className="wk-drawbtn" aria-label={named(`Add ${/^[aeiou]/i.test(s.tip) ? 'an' : 'a'} ${s.tip.toLowerCase()}`)} disabled={!canEdit} onClick={() => addDrawing(s.id)}>
                 {s.icon}
               </button>
             </Tooltip>
@@ -495,7 +526,14 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {modal === 'ctas' && <CtasModal onClose={() => setModal(null)} pushToast={pushToast} />}
       {modal === 'view' && (
         <ViewEditor onClose={() => setModal(null)} pushToast={pushToast}
-          onSaved={(v, created) => { if (created && v.showOnCanvas !== false) void addViewsToCanvas([v.id]); else void reload(); }} />
+          onSaved={(v, created) => {
+            // Doc 105 (F1): si la vista nueva no entra al canvas, se dice por qué
+            // — y qué falló (O1); con la versión recién transferida, calla (H7).
+            if (created && v.showOnCanvas !== false) {
+              void addViewsToCanvas([v.id])
+                .catch(reportWriteError((e) => pushToast(failureText("Couldn't add the view to this canvas", e), 'err')));
+            } else void reload();
+          }} />
       )}
       {modal === 'schema' && <SchemaManagerModal onClose={() => setModal(null)} pushToast={pushToast} />}
       {modal === 'upload' && <UploadModal onClose={() => setModal(null)} pushToast={pushToast} />}

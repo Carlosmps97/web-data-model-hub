@@ -26,10 +26,14 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
 vi.mock('@/services/views.service', () => ({
   listViews: vi.fn(),
   deleteView: vi.fn(),
+  // Doc 105 (H2): canvases de sus vistas (una multi-fuente puede estar en uno sin la tabla).
+  tableViews: vi.fn(async () => ({ views: [], total: 0 })),
 }));
 vi.mock('@/features/modeler/services/structure.service', () => ({
-  removeFromCanvas: vi.fn(async (saId: string) => { order.push(`canvas:${saId}`); }),
+  removeFromCanvas: vi.fn(async (saId: string) => { order.push(`canvas:${saId}`); return { tableIds: [], viewIds: [], layout: {} }; }),
   addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
+  // Doc 105 (F4): dónde estaban sus vistas, leído ANTES del lote.
+  listedViews: vi.fn(async (saId: string) => { order.push(`listed:${saId}`); return { viewIds: [], layout: {} }; }),
 }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(async () => { throw new Error('sin canvas en el test'); }),
@@ -78,8 +82,9 @@ describe('useModelerStore.deleteTable — cascada en lote', () => {
     // FK huérfano de la tabla SOBREVIVIENTE (cc ya no participa en ninguna
     // relación) se desmarca igual que en el flujo viejo.
     expect(gov.updateColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'cc', isForeignKey: false }));
-    // Orden observable: lote → FK → canvases → tabla al final.
-    expect(order).toEqual(['bulk', 'fk:cc', 'canvas:sa1', 'canvas:sa2', 'table:t1']);
+    // Orden observable: lecturas (doc 105: también dónde estaban sus vistas) →
+    // lote → FK → canvases → tabla al final.
+    expect(order).toEqual(['listed:sa1', 'listed:sa2', 'bulk', 'fk:cc', 'canvas:sa1', 'canvas:sa2', 'table:t1']);
     expect(useModelerStore.getState().selectedTableId).toBeNull();
     expect(useModelerStore.getState().dirty).toBe(true);
   });

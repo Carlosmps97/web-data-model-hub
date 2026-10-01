@@ -40,6 +40,20 @@ export function setAuthToken(t: string): void { _token = t; }
 let _onUnauthorized: (() => void) | null = null;
 export function setOnUnauthorized(cb: (() => void) | null): void { _onUnauthorized = cb; }
 
+// Doc 104: observador de respuestas de error (salvo el 401, que ya tiene su
+// handler). El canvas lo usa para revalidar su versión cuando un 403/404/409
+// de ESA versión avisa que otra sesión la transfirió o la eliminó. Sólo
+// observa: nunca cambia el error que recibe el llamador.
+let _onApiError: ((status: number, url: string) => void) | null = null;
+export function setOnApiError(cb: ((status: number, url: string) => void) | null): void { _onApiError = cb; }
+
+// Doc 105 (F5): un 403 puede ser un permiso que ya no se tiene (rol cambiado en
+// Admin): el store de auth re-lee /me (con su propio tope). Las rutas de
+// /api/auth/ no lo disparan: el 403 de la propia lectura de /me no la repite.
+// Sólo observa, como `_onApiError`.
+let _onForbidden: (() => void) | null = null;
+export function setOnForbidden(cb: (() => void) | null): void { _onForbidden = cb; }
+
 /** Error tipado que propagan todos los helpers cuando el backend
  *  devuelve un `success: false` o cuando el fetch falla. */
 export class ApiError extends Error {
@@ -47,11 +61,15 @@ export class ApiError extends Error {
   /** `detail` crudo de un HTTPException de FastAPI (string u objeto — p.ej. el
    *  422 de perfiles de carga trae `{message, problems}`); null si no aplica. */
   readonly detail: unknown;
-  constructor(message: string, status: number, detail: unknown = null) {
+  /** URL pedida (doc 104): el canvas distingue si el error es de SU versión
+   *  (transferida/eliminada) o de otra cosa. null si no aplica. */
+  readonly url: string | null;
+  constructor(message: string, status: number, detail: unknown = null, url: string | null = null) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.detail = detail;
+    this.url = url;
   }
 }
 
@@ -82,6 +100,9 @@ const DEFAULT_TIMEOUT_MS = 30_000;
  *  working copy, crear un proyecto copiando estándares, rollback, apply de
  *  estándares — con el overlay bloqueante encendido en la sesión. */
 export const LONG_TIMEOUT_MS = 120_000;
+/** Sin respuesta del servidor (red caída, DNS, o en Apps la sesión con el
+ *  backend vencida — recargar hace el warm-up SSO, ver `warmup.ts`). */
+export const NETWORK_ERROR_TEXT = "Couldn't reach the server — check your connection or reload the page.";
 
 export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {}, signal } = opts;
@@ -111,26 +132,44 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
     init.headers = { 'Content-Type': 'application/json', ...init.headers };
   }
 
+  // Falla de transporte (antes de la respuesta o mientras llega el cuerpo):
+  // timeout, cancelación del llamador o red caída — cada una con su texto.
+  const transportError = (err: unknown): ApiError => {
+    if (timeout.aborted && !(signal?.aborted)) {
+      return new ApiError(`The server didn't respond within ${Math.round(timeoutMs / 1000)}s — try again in a moment.`, 0, null, url);
+    }
+    // Cancelada por su llamador (cleanup de un efecto): nadie la muestra.
+    if (signal?.aborted) return new ApiError(err instanceof Error ? err.message : 'Aborted', 0, null, url);
+    // Doc 105: el «Failed to fetch» del navegador llegaba tal cual a los avisos.
+    return new ApiError(NETWORK_ERROR_TEXT, 0, null, url);
+  };
+
   let response: Response;
   try {
     response = await fetch(url, init);
   } catch (err) {
     // Red caída, timeout, aborto, DNS fail, etc.
-    if (timeout.aborted && !(signal?.aborted)) {
-      throw new ApiError(`The server didn't respond within ${Math.round(timeoutMs / 1000)}s — try again in a moment.`, 0);
-    }
-    throw new ApiError(err instanceof Error ? err.message : 'Network error', 0);
+    throw transportError(err);
   }
 
   // Sesión inválida/expirada: dispara el handler global (logout + /login). Se
   // sigue lanzando ApiError para que el caller no continúe con datos vacíos.
   if (response.status === 401 && _onUnauthorized) _onUnauthorized();
+  if (!response.ok && response.status !== 401 && _onApiError) {
+    try { _onApiError(response.status, url); } catch { /* un observador roto no cambia el error */ }
+  }
+  if (response.status === 403 && _onForbidden && !url.includes('/api/auth/')) {
+    try { _onForbidden(); } catch { /* ídem */ }
+  }
 
   let json: ApiResponse<T> | null = null;
   try {
     json = (await response.json()) as ApiResponse<T>;
-  } catch {
-    throw new ApiError(`Invalid JSON response (HTTP ${response.status})`, response.status);
+  } catch (err) {
+    // Doc 105 (ronda 3): un corte MIENTRAS llega el cuerpo (timeout, cancelación,
+    // red) no es «JSON inválido»; sólo un SyntaxError lo es.
+    if (!(err instanceof SyntaxError)) throw transportError(err);
+    throw new ApiError(`Invalid JSON response (HTTP ${response.status})`, response.status, null, url);
   }
 
   if (!json || typeof json.success !== 'boolean') {
@@ -139,19 +178,19 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
     // genérico ilegible.
     const detail = (json as { detail?: unknown } | null)?.detail;
     if (!response.ok && typeof detail === 'string' && detail) {
-      throw new ApiError(detail, response.status, detail);
+      throw new ApiError(detail, response.status, detail, url);
     }
     // `detail` estructurado (`{message, …}`): el mensaje va al usuario y el
     // objeto completo queda en `ApiError.detail` para quien sepa leerlo.
     const message = detail && typeof detail === 'object' ? (detail as { message?: unknown }).message : undefined;
     if (!response.ok && typeof message === 'string' && message) {
-      throw new ApiError(message, response.status, detail);
+      throw new ApiError(message, response.status, detail, url);
     }
-    throw new ApiError(`Unexpected response shape (HTTP ${response.status})`, response.status, detail ?? null);
+    throw new ApiError(`Unexpected response shape (HTTP ${response.status})`, response.status, detail ?? null, url);
   }
 
   if (!json.success) {
-    throw new ApiError(json.error ?? `Request failed (HTTP ${response.status})`, response.status);
+    throw new ApiError(json.error ?? `Request failed (HTTP ${response.status})`, response.status, null, url);
   }
 
   return json.data as T;
@@ -181,6 +220,20 @@ export function apiDelete<T>(url: string, opts: Omit<RequestOptions, 'method' | 
  *  (ApiError lo conserva como `message`), o `fallback`. */
 export function apiErrorMessage(e: unknown, fallback: string): string {
   return e instanceof Error && e.message ? e.message : fallback;
+}
+
+/** Doc 105 (ronda 3): el motivo de un error para ir DENTRO de un aviso que ya
+ *  dice cómo reintentar — sin punto final ni el consejo «— try again…» del
+ *  texto de transporte (salía «…within 30s — try again in a moment. Use
+ *  Refresh to try again.»). */
+export function errorReason(e: unknown, fallback: string): string {
+  return apiErrorMessage(e, fallback).replace(/\s*[—-]\s*try again.*$/i, '').replace(/[.\s]+$/, '') || fallback;
+}
+
+/** Doc 105 (ronda 5, R15-H2): un fallo TRANSITORIO — red o timeout (status 0)
+ *  o un 5xx —: reintentar puede andar, y no dice que lo pedido no ocurrió. */
+export function isTransientError(e: unknown): boolean {
+  return e instanceof ApiError && (e.status === 0 || e.status >= 500);
 }
 
 /** ¿Es un 409 de negocio del backend (p.ej. nombre duplicado — spec 10 §9)? */

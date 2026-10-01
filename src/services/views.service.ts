@@ -7,9 +7,10 @@
 // estado EFECTIVO (publicado + overlay del draft) y las escrituras se
 // registran en el changeset con el DOC COMPLETO (el overlay REEMPLAZA).
 // Producción se toca SOLO en el apply del approve; el ROLLBACK las revierte.
-// Sin changeset (scripts/compat), sigue el REST directo.
+// Sin changeset, las LECTURAS van al REST directo; las ESCRITURAS exigen una
+// versión en edición (doc 104: sin escritura directa a producción).
 
-import { apiGet, apiPost, apiPut, apiDelete } from './http';
+import { apiGet } from './http';
 import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
 
@@ -50,7 +51,8 @@ export interface View {
   /** F3: fuentes canónicas de la vista, en orden (definen los alias t1, t2…). */
   sourceTableIds?: string[];
   /** F3 (D3): flag GLOBAL — la vista aparece en todo canvas con ≥1 fuente.
-   *  NO afecta el export DDL. */
+   *  No decide qué vistas se exportan (eso es la membresía del canvas, doc
+   *  102); para las reglas DDL marca la vista de NEGOCIO (doc 105, C2). */
   showOnCanvas?: boolean;
   name: string;
   schema?: string;
@@ -107,22 +109,26 @@ export function listViews(tableId: string): Promise<View[]> {
  *  16 KB (línea de pedido + cabeceras) del servidor Node del front. */
 export const VIEW_IDS_PER_GET = 100;
 
-/** Vistas de VARIAS tablas (p.ej. «Import existing tables» con sus vistas) —
- *  sin draft, en tandas de `VIEW_IDS_PER_GET` ids por request; con changeset
- *  activo se resuelve por tabla contra el estado efectivo. Dedup por id. */
+/** Vistas de VARIAS tablas (p.ej. «Import existing tables» con sus vistas), en
+ *  tandas de `VIEW_IDS_PER_GET` tablas por request — sin draft contra
+ *  producción; con changeset activo contra su estado efectivo (doc 105: antes
+ *  era UN pedido por tabla). Todo o nada: si una tanda falla, falla la lectura.
+ *  Dedup por id y filtro de respaldo por fuentes (un backend viejo ignora
+ *  `tableIds` en el estado efectivo y devolvería todas las vistas). */
 export async function listViewsForTables(tableIds: string[]): Promise<View[]> {
   if (!tableIds.length) return [];
   const a = active();
-  let parts: View[][];
-  if (a) {
-    parts = await Promise.all(tableIds.map((t) => csvc.effective<View>(a, 'views', { tableId: t })));
-  } else {
-    const lots: string[][] = [];
-    for (let i = 0; i < tableIds.length; i += VIEW_IDS_PER_GET) lots.push(tableIds.slice(i, i + VIEW_IDS_PER_GET));
-    parts = await Promise.all(lots.map((lot) => apiGet<View[]>(`${VIEWS}?tableIds=${encodeURIComponent(lot.join(','))}`)));
-  }
+  const lots: string[][] = [];
+  for (let i = 0; i < tableIds.length; i += VIEW_IDS_PER_GET) lots.push(tableIds.slice(i, i + VIEW_IDS_PER_GET));
+  const parts = await Promise.all(lots.map((lot) => (a
+    ? csvc.effective<View>(a, 'views', { tableIds: lot })
+    : apiGet<View[]>(`${VIEWS}?tableIds=${encodeURIComponent(lot.join(','))}`))));
+  const wanted = new Set(tableIds);
   const byId = new Map<string, View>();
-  parts.flat().forEach((v) => byId.set(v.id, v));
+  parts.flat().forEach((v) => {
+    const src = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+    if (src.some((t) => wanted.has(t))) byId.set(v.id, v);
+  });
   return [...byId.values()];
 }
 
@@ -140,16 +146,26 @@ export function tableViews(tableId: string): Promise<{ views: TableViewRow[]; to
   return apiGet<{ views: TableViewRow[]; total: number }>(`${VIEWS}/for-table?${params.toString()}`);
 }
 
-export function createView(body: ViewInput): Promise<View> {
-  const a = active();
-  if (!a) return apiPost<View>(VIEWS, body);
+/** Doc 104 (ronda 2): crear / editar / borrar una vista va SIEMPRE por la
+ *  versión en edición (como tablas y columnas en governance). El POST/PUT/
+ *  DELETE directo de antes sólo lo alcanzaba un popup abierto cuando la sesión
+ *  se degradó — y escribía producción sin revisión. */
+function editingCs(): string {
+  const s = useSessionStore.getState();
+  if (s.openMode !== 'editing' || !s.activeChangesetId) {
+    throw new Error('Editing a view requires a version in edit mode.');
+  }
+  return s.activeChangesetId;
+}
+
+export async function createView(body: ViewInput): Promise<View> {
+  const a = editingCs();
   const doc = { ...normalizeInput(body), id: crypto.randomUUID() } as View;
   return csvc.recordChange(a, 'views', doc.id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
 }
 
-export function updateView(id: string, body: ViewInput): Promise<View> {
-  const a = active();
-  if (!a) return apiPut<View>(`${VIEWS}/${encodeURIComponent(id)}`, body);
+export async function updateView(id: string, body: ViewInput): Promise<View> {
+  const a = editingCs();
   const doc = { ...normalizeInput(body), id } as View;
   return csvc.recordChange(a, 'views', id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
 }
@@ -157,8 +173,7 @@ export function updateView(id: string, body: ViewInput): Promise<View> {
 // Doc 91 D6: el sandbox `POST /api/views/sql/parse` (Validate) se RETIRÓ — el
 // User-Defined SQL se guarda verbatim, sin validar.
 
-export function deleteView(id: string): Promise<{ deleted: boolean }> {
-  const a = active();
-  if (!a) return apiDelete<{ deleted: boolean }>(`${VIEWS}/${encodeURIComponent(id)}`);
+export async function deleteView(id: string): Promise<{ deleted: boolean }> {
+  const a = editingCs();
   return csvc.recordChange(a, 'views', id, 'delete').then(() => ({ deleted: true }));
 }

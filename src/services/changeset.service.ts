@@ -46,9 +46,11 @@ export const recordChangesBulk = async (id: string, changes: BulkChange[], chunk
  *  (300k docs) mueve la colección completa por request. `opts.q`/`opts.limit`:
  *  búsqueda server-side por nombre (modales de catálogo). `opts.schema`:
  *  tablas/vistas de UN esquema, draft-aware (Database Explorer, doc 25). */
-export const effective = <T>(id: string, collection: string, opts?: { tableId?: string; ids?: string[]; q?: string; limit?: number; schema?: string }) => {
+export const effective = <T>(id: string, collection: string, opts?: { tableId?: string; ids?: string[]; q?: string; limit?: number; schema?: string; tableIds?: string[] }) => {
   const params = new URLSearchParams();
   if (opts?.tableId) params.set('tableId', opts.tableId);
+  // Doc 105 (P2): sólo vistas — las de un LOTE de tablas en una lectura.
+  if (opts?.tableIds?.length) params.set('tableIds', opts.tableIds.join(','));
   if (opts?.ids?.length) params.set('ids', opts.ids.join(','));
   if (opts?.q) params.set('q', opts.q);
   if (opts?.limit != null) params.set('limit', String(opts.limit));
@@ -76,6 +78,9 @@ export interface HistoryItem {
   version?: string | null;
   versionTitle?: string | null;
   user?: HistoryUser | null;
+  /** Doc 104: quién INICIÓ la versión si cambió de manos antes de publicarse
+   *  (`user` es el dueño final: quien la envió y figura como autor). */
+  startedBy?: HistoryUser | null;
   publishedBy?: HistoryUser | null;
   approvedBy: HistoryUser[];
   origin?: HistoryOrigin | null;

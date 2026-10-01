@@ -4,6 +4,9 @@ import { Tags } from 'lucide-react';
 import { getUdpDefs, type UdpDefinition, type UdpLevel } from '@/features/standards/standards.service';
 import { FACET_CLASS_LABEL, facetUdpDefs, type Facet } from '@/lib/facets';
 import { applyPending, commitValue, prunePending, type UdpValues } from '../lib/udpDraft';
+import { pinSession, type SessionPin } from '../lib/sessionGuard';
+import { udpChoices } from '@/lib/udpChoices';
+import { canonicalNumberText } from '@/lib/udpNumber';
 
 /** Asigna VALORES a las etiquetas UDP (definidas en Data Standards) de una
  *  tabla, columna o canvas. Muestra cada key con su input (select si es
@@ -37,8 +40,14 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
   // Commits que el server todavía no refleja (el reload del padre demora).
   const pending = useRef<UdpValues>({});
   // Refs para el flush de desmontaje (cleanup de efecto ve el primer render).
-  const latest = useRef({ values, onChange, draft });
-  latest.current = { values, onChange, draft };
+  const latest = useRef({ values, onChange, draft, defs });
+  latest.current = { values, onChange, draft, defs };
+  // Doc 105 (ronda 4, 6d): la sesión de la ÚLTIMA edición. Si el panel se
+  // cierra porque cambió (otra versión abierta, o la revalidación la bajó a solo
+  // lectura), lo tipeado se descarta: no se escribe en la nueva ni se avisa
+  // «read-only» encima del aviso de la revalidación.
+  const editPin = useRef<SessionPin | null>(null);
+  const sameSession = () => !editPin.current || editPin.current.holds();
 
   useEffect(() => {
     let alive = true;
@@ -54,14 +63,22 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
   // Llegó un prop nuevo (reload): podar lo pendiente que ya está reflejado.
   useEffect(() => { pending.current = prunePending(values, pending.current); }, [values]);
 
+  // Doc 105 (ronda 6): un número se guarda en su forma canónica («10.50» →
+  // «10.5»): el Reporting busca `= 10.5` por el literal y su forma canónica.
+  const typed = (list: UdpDefinition[], id: string, v: string) =>
+    (list.find((d) => d.id === id)?.dataType === 'number' ? canonicalNumberText(v) : v);
+
   // Flush al desmontar: lo tipeado sin blur (cerrar el panel / colapsar la
   // fila / cerrar el modal) se commitea en UN onChange con todos los borradores.
   useEffect(() => () => {
-    const { values: vals, onChange: emit, draft: d } = latest.current;
+    const { values: vals, onChange: emit, draft: d, defs: list } = latest.current;
+    if (!sameSession()) return;
     let base = applyPending(vals, pending.current);
     let dirty = false;
-    for (const [id, v] of Object.entries(d)) {
-      if (v === undefined || v === (base[id] ?? '')) continue;
+    for (const [id, raw] of Object.entries(d)) {
+      if (raw === undefined) continue;
+      const v = typed(list, id, raw);
+      if (v === (base[id] ?? '')) continue;
       base = commitValue(base, id, v);
       dirty = true;
     }
@@ -78,13 +95,15 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
 
   const base = applyPending(values, pending.current);
   const commit = (id: string) => {
-    const v = draft[id];
+    const raw = draft[id];
     setDraft((d) => ({ ...d, [id]: undefined }));
-    if (v === undefined || v === (base[id] ?? '')) return;
+    if (raw === undefined) return;
+    const v = typed(defs, id, raw);
+    if (v === (base[id] ?? '') || !sameSession()) return;
     pending.current = { ...pending.current, [id]: v };
     onChange(commitValue(base, id, v));
   };
-  // Select ('list'): acción discreta → commit inmediato, sin borrador.
+  // Select ('list' o 'boolean'): acción discreta → commit inmediato, sin borrador.
   const setListVal = (id: string, v: string) => {
     pending.current = { ...pending.current, [id]: v };
     onChange(commitValue(base, id, v));
@@ -100,16 +119,16 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flex: 1, fontSize: 12.5, color: '#48526A' }} title={d.description ?? undefined}>
               <Tags size={12} color="#7A4DD6" />{d.name}
             </span>
-            {d.dataType === 'list' ? (
+            {d.dataType === 'list' || d.dataType === 'boolean' ? (
               <select style={inp} value={val} disabled={disabled} onChange={(e) => setListVal(d.id, e.target.value)}>
                 <option value="">{d.defaultValue ? `${d.defaultValue} (default)` : '—'}</option>
-                {d.allowedValues.map((v) => <option key={v} value={v}>{v}</option>)}
+                {udpChoices(d, val).map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
             ) : (
               <input style={inp} value={val} disabled={disabled}
                 type={d.dataType === 'number' ? 'number' : d.dataType === 'date' ? 'date' : 'text'}
                 placeholder={d.defaultValue ?? ''}
-                onChange={(e) => setDraft((prev) => ({ ...prev, [d.id]: e.target.value }))}
+                onChange={(e) => { editPin.current = pinSession(); setDraft((prev) => ({ ...prev, [d.id]: e.target.value })); }}
                 onBlur={() => commit(d.id)}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
             )}

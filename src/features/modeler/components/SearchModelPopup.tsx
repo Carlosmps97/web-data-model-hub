@@ -223,7 +223,11 @@ export default function SearchModelPopup({ onClose, pushToast }: {
     return c ? { canvases: c.canvases, tableId: c.tableId, colId: c.id, label: `${c.tableName} · ${c.physicalName}` } : null;
   }, [res]);
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && first) locate(first.canvases, first.tableId, first.colId, first.label);
+    if (e.key !== 'Enter' || !first) return;
+    // Doc 105 (R11): cierra el popup en ESTE keydown — sin preventDefault, el
+    // keypress del mismo Enter «clicaba» al botón que lo abrió (se reabría, o Undo).
+    e.preventDefault();
+    locate(first.canvases, first.tableId, first.colId, first.label);
   };
 
   const chips = (canvases: ModelSearchCanvas[], tableId: string, colId: string | undefined, label: string) => (

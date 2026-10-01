@@ -4,10 +4,12 @@
 // a las funciones recién al invocarlas, así el mock parcial alcanza.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/features/modeler/services/modeler.service', () => ({
+// Doc 104: el layout se graba por la capa changeset-aware (sin escritura
+// directa a producción); acá sólo importa QUÉ posiciones arma saveAllLayout.
+vi.mock('@/features/modeler/services/structure.service', () => ({
   setSubjectAreaLayout: vi.fn().mockResolvedValue({}),
 }));
-import { setSubjectAreaLayout } from '@/features/modeler/services/modeler.service';
+import { setSubjectAreaLayout } from '@/features/modeler/services/structure.service';
 import { useModelerStore } from './useModelerStore';
 
 type FakeNode = { id: string; type: string; position: { x: number; y: number } };
@@ -29,6 +31,8 @@ beforeEach(() => {
 describe('useModelerStore — vistas en canvas (F3)', () => {
   it('saveAllLayout persiste tablas Y vistas (los shapes viven en drawings)', async () => {
     useModelerStore.setState({
+      // Doc 105 (R7-A): guarda el canvas abierto — sin diagrama no hay nada que guardar.
+      diagram: { subjectArea: { id: 'sa1', name: 'sa1', tableIds: [], layout: {} }, tables: [], columns: [], relationships: [], views: [] } as never,
       flow: fakeFlow([
         { id: 't1', type: 'table', position: { x: 1, y: 2 } },
         { id: 'v1', type: 'view', position: { x: 3, y: 4 } },

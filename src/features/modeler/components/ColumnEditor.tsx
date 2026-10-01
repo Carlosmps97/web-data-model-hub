@@ -157,8 +157,12 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     setTypeOverridden(activeDomain ? next.trim() !== domainDefault : next.trim() !== '');
   };
 
+  // Doc 105 (R14): un alta a la vez — `busy` sigue en false dentro del mismo
+  // render: un doble Enter (o uno sostenido) creaba varias columnas duplicadas.
+  const inFlight = useRef(false);
   const submit = async () => {
-    if (!name.trim()) return;
+    if (!name.trim() || inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -172,7 +176,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
       // detail real del backend — el modal NO se cierra.
       setError(apiErrorMessage(e, "Couldn't add the column"));
-    } finally { setBusy(false); }
+    } finally { inFlight.current = false; setBusy(false); }
   };
   const setUdp = (next: Record<string, string>) => { udpRef.current = next; setUdpValues(next); };
 
@@ -182,7 +186,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
         <button className="rd-btn rd-btn-ghost rd-btn-sm" onClick={onClose}>Cancel</button>
         <button className="rd-btn rd-btn-primary rd-btn-sm" disabled={busy} onClick={submit}>Add</button>
       </>}>
-      <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Attribute name (e.g. monto deuda dólares)' : 'Column name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(mode === 'logical' ? sanitizeLogicalName(e.target.value) : e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} style={{ width: '100%' }} />
+      <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Attribute name (e.g. monto deuda dólares)' : 'Column name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(mode === 'logical' ? sanitizeLogicalName(e.target.value) : e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} style={{ width: '100%' }} />
       {preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
       <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
         {/* Combobox con buscador (doc 41): contiene, lista acotada con

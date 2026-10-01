@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Combine, Search, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
-import { useModelerStore } from '@/store/useModelerStore';
+import { failureText, useModelerStore } from '@/store/useModelerStore';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import SchemaSelect from './SchemaSelect';
@@ -165,6 +166,11 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
     if (!name.trim()) { pushToast('Table name is required', 'err'); return; }
     if (pickedCols.length === 0) { pushToast('Pick at least one column', 'err'); return; }
     setBusy(true);
+    // Doc 105 (ronda 4, 6c): el aviso de éxito es de la sesión donde se pidió
+    // (el store recarga el canvas al final: se pudo abrir otra versión).
+    const pin = pinSession();
+    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió; dice por qué.
+    const onError = reportWriteError((e) => pushToast(failureText('Could not create the table', e), 'err'));
     try {
       await createTableFromSources({
         logicalName: name.trim(), schema: schema.trim() || undefined,
@@ -172,8 +178,9 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
         // el historial de auditoría; el store no la incluye en el payload.
         columns: pickedCols.map((c) => ({ ...c, sourceTable: selById.get(c.tableId)?.physicalName })),
       });
-      pushToast('Table created from sources'); onClose();
-    } catch { pushToast('Could not create the table', 'err'); } finally { setBusy(false); }
+      if (pin.holds()) pushToast('Table created from sources');
+      onClose();
+    } catch (e) { await onError(e); } finally { setBusy(false); }
   };
 
   // Esc en los buscadores: limpia la query SIN cerrar el Dialog (escucha

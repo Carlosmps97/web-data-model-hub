@@ -20,6 +20,7 @@ import {
 import type {
   DdlRule, DdlRuleEditInput, DdlRulesetConfig, UdpDefinition,
 } from '../standards.service';
+import { applyErrorNotice, NO_CHANGES_HINT, ruleChanged } from '../standardsDiff';
 
 interface CatalogTable { id: string; physicalName: string; schema?: string | null; }
 
@@ -62,38 +63,57 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
   const patch = (p: Partial<DdlRuleEditInput>) => setDraft((d) => ({ ...d, ...p }));
 
   // ── Validación en vivo (debounce) — los 5 checks del back ──
+  // Doc 105: la limpieza apaga la corrida entera, no sólo el debounce — la
+  // respuesta TARDÍA de un borrador (o proyecto) anterior pisaba la vigente.
+  // Lo mismo en el impacto/Test y en el buscador de tablas.
   useEffect(() => {
+    let alive = true;
     setChecking(true);
     const t = setTimeout(() => {
       validateDdlRule(projectId, draft)
-        .then((r) => { setReport(r); })
-        .catch(() => setReport(null))
-        .finally(() => setChecking(false));
+        .then((r) => { if (alive) setReport(r); })
+        .catch(() => { if (alive) setReport(null); })
+        .finally(() => { if (alive) setChecking(false); });
     }, 450);
-    return () => clearTimeout(t);
-  }, [draft]);
+    return () => { alive = false; clearTimeout(t); };
+  }, [projectId, draft]);
 
   const valid = report?.state === 'valid';
+  // Doc 105: ¿el guardado cambia algo? En YAML cuenta el YAML (si no parsea, se
+  // deja guardar para que Save muestre el error); sin cambios no se registra una
+  // versión vacía.
+  const pending = useMemo(() => {
+    if (mode !== 'yaml') return draft;
+    try { return yamlToRule(yamlText, draft); } catch { return null; }
+  }, [mode, yamlText, draft]);
+  const dirty = isNew || pending === null || ruleChanged(pending, rule);
+  const canSave = canEdit && valid && !!draft.name.trim() && dirty;
 
   // Impacto + Test se recalculan solo con regla válida.
   useEffect(() => {
     if (!valid) { setImpact(null); setTestOut(null); return; }
+    let alive = true;
     const t = setTimeout(() => {
-      impactDdlRule(projectId, draft).then(setImpact).catch(() => setImpact(null));
-      if (testTable) testDdlRule(projectId, draft, testTable.id).then(setTestOut).catch(() => setTestOut(null));
+      impactDdlRule(projectId, draft)
+        .then((r) => { if (alive) setImpact(r); }).catch(() => { if (alive) setImpact(null); });
+      if (testTable) {
+        testDdlRule(projectId, draft, testTable.id)
+          .then((r) => { if (alive) setTestOut(r); }).catch(() => { if (alive) setTestOut(null); });
+      }
     }, 250);
-    return () => clearTimeout(t);
-  }, [valid, draft, testTable]);
+    return () => { alive = false; clearTimeout(t); };
+  }, [projectId, valid, draft, testTable]);
 
   // Buscador de tablas reales del catálogo (spec 15.4).
   useEffect(() => {
     if (!tablePick) return;
+    let alive = true;
     const t = setTimeout(() => {
       apiGet<CatalogTable[]>(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/catalog/tables?q=${encodeURIComponent(tableQ)}&limit=15`)
-        .then(setTableHits).catch(() => setTableHits([]));
+        .then((hits) => { if (alive) setTableHits(hits); }).catch(() => { if (alive) setTableHits([]); });
     }, 250);
-    return () => clearTimeout(t);
-  }, [tableQ, tablePick]);
+    return () => { alive = false; clearTimeout(t); };
+  }, [projectId, tableQ, tablePick]);
 
   // ── Autocomplete de UDP (16c·2): agrupa por clase, filtra al target ──
   const acItems = useMemo(() => {
@@ -151,7 +171,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
       await saveDdlRule(projectId, toSave, isNew);
       toast.success(`Rule ${toSave.name} saved`);
       await onSaved();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save the rule"); }
+    } catch (e) { const n = applyErrorNotice(e, "Couldn't save the rule"); toast[n.kind](n.text); }
     finally { setSaving(false); }
   };
 
@@ -159,7 +179,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
     if (!rule) return;
     setSaving(true);
     try { await deleteDdlRule(projectId, rule); toast.success(`Rule ${rule.name} deleted`); await onSaved(); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete the rule"); setSaving(false); }
+    catch (e) { const n = applyErrorNotice(e, "Couldn't delete the rule"); toast[n.kind](n.text); setSaving(false); }
   };
 
   const errCount = report?.errors?.length ?? 0;
@@ -505,12 +525,12 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
       {/* footer */}
       <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', borderTop: '1px solid #EAEDF2', background: '#fff' }}>
         {valid
-          ? <span style={{ fontSize: 12, color: '#8A93A5', display: 'inline-flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16A37B' }} />Validated · draft not saved</span>
+          ? <span style={{ fontSize: 12, color: '#8A93A5', display: 'inline-flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16A37B' }} />{dirty ? 'Validated · draft not saved' : `Validated · ${NO_CHANGES_HINT.toLowerCase()}`}</span>
           : <span style={{ fontSize: 12, color: '#C0392B', display: 'inline-flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#D6455D' }} />{errCount || '—'} error{errCount === 1 ? '' : 's'} · can't save yet</span>}
         <span style={{ flex: 1 }} />
         <button onClick={onBack} style={ghostBtn}>Discard</button>
-        <button onClick={doSave} disabled={!canEdit || !valid || !draft.name.trim() || saving}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: (!canEdit || !valid || !draft.name.trim()) ? '#EAECF1' : '#2E5BFF', color: (!canEdit || !valid || !draft.name.trim()) ? '#A9B1BE' : '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: (!canEdit || !valid || !draft.name.trim()) ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: valid && canEdit ? '0 1px 2px rgba(46,91,255,0.35)' : 'none' }}>
+        <button onClick={doSave} disabled={!canSave || saving} title={dirty ? undefined : NO_CHANGES_HINT}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: !canSave ? '#EAECF1' : '#2E5BFF', color: !canSave ? '#A9B1BE' : '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: !canSave ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: canSave ? '0 1px 2px rgba(46,91,255,0.35)' : 'none' }}>
           <Save size={14} /> {saving ? 'Saving…' : 'Save rule'}
         </button>
       </div>

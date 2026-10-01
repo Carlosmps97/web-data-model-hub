@@ -10,10 +10,10 @@ vi.mock('@/services/http', () => ({
 }));
 vi.mock('@/services/changeset.service', () => ({ recordChange: vi.fn(async () => ({})), effective: vi.fn() }));
 
-import { apiPost } from '@/services/http';
+import { apiDelete, apiPost } from '@/services/http';
 import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
-import { createSchemaInVersion } from './schemas.service';
+import { createSchema, createSchemaInVersion, deleteSchema } from './schemas.service';
 
 beforeEach(() => { vi.clearAllMocks(); });
 
@@ -30,5 +30,16 @@ describe('createSchemaInVersion', () => {
     expect(s).toMatchObject({ name: 'bcp_x', kind: 'views' });
     expect(csvc.recordChange).toHaveBeenCalledWith('cs1', 'schemas', s.id, 'upsert', expect.objectContaining({ name: 'bcp_x', kind: 'views' }));
     expect(apiPost).not.toHaveBeenCalled();
+  });
+});
+
+describe('gestor de esquemas sin sesión de edición (doc 104, ronda 2)', () => {
+  it('crear y eliminar rechazan y no escriben directo a producción', async () => {
+    useSessionStore.setState({ openMode: 'readonly', activeChangesetId: null });
+    await expect(createSchema('bcp_x', undefined, 'tables')).rejects.toThrow('version in edit mode');
+    await expect(deleteSchema('s1')).rejects.toThrow('version in edit mode');
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(apiDelete).not.toHaveBeenCalled();
+    expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });

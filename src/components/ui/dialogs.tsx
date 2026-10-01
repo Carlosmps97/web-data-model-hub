@@ -15,9 +15,11 @@
  * para pintar por encima de cualquier modal abierto (mismo z-index, DOM
  * posterior). Los pedidos se encolan: se muestra de a uno.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { create } from 'zustand';
 import ConfirmDialog from './ConfirmDialog';
+import { isTopDialog, pushDialog, removeDialog } from './dialogStack';
+import { activeElementNow, focusInto, recoverTab, trapTab } from './focusTrap';
 
 export interface ConfirmOpts {
   title: string;
@@ -25,6 +27,8 @@ export interface ConfirmOpts {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'danger' | 'primary';
+  /** Botón con el foco al abrir (default «confirm»; «cancel» para lo irreversible). */
+  initialFocus?: 'confirm' | 'cancel';
   /** Trabajo a ejecutar al confirmar; el diálogo muestra busy hasta que resuelve. */
   action?: () => Promise<unknown>;
 }
@@ -81,6 +85,7 @@ function ConfirmHostView({ p, shift }: { p: Extract<Pending, { kind: 'confirm' }
       confirmLabel={o.confirmLabel ?? 'OK'}
       cancelLabel={o.cancelLabel ?? 'Cancel'}
       variant={o.variant ?? 'primary'}
+      initialFocus={o.initialFocus}
       onConfirm={() => {
         if (!o.action) { p.resolve(true); shift(); return; }
         setBusy(true);
@@ -98,11 +103,23 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
   const [value, setValue] = useState(opts.initial ?? '');
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  // Quién tenía el foco al abrirse: primer render, antes del commit (init perezoso).
+  const openerRef = useRef<Element | null | undefined>(undefined);
+  if (openerRef.current === undefined) openerRef.current = activeElementNow();
+  const tokenRef = useRef<symbol | null>(null);
+  if (tokenRef.current === null) tokenRef.current = Symbol('dmh-prompt');
+  // Doc 105 (R6): la caja se nombra con su título; el <label> nombra al input.
+  const titleId = useId();
+  const inputId = useId();
 
   const cancel = () => { if (!busy) { p.resolve(null); shift(); } };
   const submit = () => {
     if (busy) return;
     if (!opts.action) { p.resolve(value); shift(); return; }
+    // Doc 105 (F6): busy deshabilita el input y los botones — el foco caía a
+    // <body> y Tab salía a la página de atrás; queda en la caja (como ConfirmDialog).
+    boxRef.current?.focus();
     setBusy(true);
     opts.action(value)
       .then(() => { p.resolve(value); shift(); })
@@ -118,22 +135,43 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
     return () => { window.clearTimeout(t); window.removeEventListener('keydown', onKey, true); };
   }); // sin deps: cancel/submit capturan estado fresco; listener barato
 
+  // Doc 105 (F6): el foco entra a la caja al abrirse (a los 30 ms lo toma el
+  // input) y, al cerrarse, vuelve a quien abrió el prompt. Ver `focusInto`.
+  // R6: entra a la pila de diálogos y un Tab con el foco perdido lo retoma su caja.
+  useEffect(() => {
+    const token = tokenRef.current as symbol;
+    pushDialog(token);
+    const restoreFocus = focusInto(boxRef.current, openerRef.current);
+    const onTab = (e: KeyboardEvent) => { if (isTopDialog(token)) recoverTab(e, boxRef.current); };
+    window.addEventListener('keydown', onTab);
+    return () => {
+      removeDialog(token);
+      window.removeEventListener('keydown', onTab);
+      restoreFocus();
+    };
+  }, []);
+
   return (
     // --top: por encima de cualquier modal abierto (incl. Dialog, z-index 300).
     // El scrim NO cierra al click (pedido owner 07-17): sólo botones / ESC.
     <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
-      <div className="dmh-modal" style={{ width: 440 }} role="dialog" aria-modal="true">
+      <div className="dmh-modal" style={{ width: 440, outline: 'none' }} role="dialog" aria-modal="true" ref={boxRef}
+        aria-labelledby={titleId} tabIndex={-1} onKeyDown={(e) => trapTab(e, boxRef.current)}>
         <div className="m-body">
-          <h3 className="rd-h3" style={{ marginBottom: 10 }}>{opts.title}</h3>
-          {opts.label && <label className="rd-label">{opts.label}</label>}
+          <h3 id={titleId} className="rd-h3" style={{ marginBottom: 10 }}>{opts.title}</h3>
+          {opts.label && <label className="rd-label" htmlFor={inputId}>{opts.label}</label>}
           <input
             ref={inputRef}
+            id={inputId}
+            aria-labelledby={opts.label ? undefined : titleId}
             className="rd-input"
             disabled={busy}
             placeholder={opts.placeholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') submit(); }}
+            // Doc 105 (R11): sin preventDefault, el keypress de este Enter «clicaba»
+            // al botón que abrió el prompt (aparecía otro).
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
           />
         </div>
         <div className="m-foot">

@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  termsToValidate, conflictRows, conflictMessage, highlightParts, needsConfirm, impactSummary, applyTitle,
-  outOfSyncReason, impactNote, termGap, incompleteRows, incompleteMessage, gapToast,
-} from './glossaryValidation';
+import { applyTitle, conflictMessage, conflictRows, gapToast, highlightParts, impactNote, impactSummary, incompleteMessage, incompleteRows, maxLengthLabel, needsConfirm, outOfSyncReason, termEdited, termGap, termsToUpsert, termsToValidate } from './glossaryValidation';
 import type { GlossaryImpact, GlossaryImpactRow, GlossaryValidation } from '@/services/naming.service';
 
 describe('termsToValidate', () => {
@@ -140,5 +137,51 @@ describe('filas incompletas (doc 102)', () => {
     expect(gapToast('abbrev')).toBe('Type the abbreviation before validating');
     expect(gapToast('term')).toBe('Type the term before validating');
     expect(gapToast('both')).toBe('Type the term and the abbreviation before validating');
+  });
+});
+
+// Doc 105 (P1-bis): la edición se compara RECORTADA — «SUC␠» sobre «SUC» contaba
+// como cambio, viajaba idéntico y registraba una versión sin cambios reales
+// (y re-derivaba los físicos de todo el proyecto).
+describe('ediciones recortadas (doc 105 P1-bis)', () => {
+  const before = new Map([['1', { term: 'SUC', abbrev: 'SC' }], ['2', { term: 'monto', abbrev: 'MTO' }]]);
+
+  it('un blanco alrededor no es una edición; un cambio de texto o de mayúsculas sí', () => {
+    expect(termEdited({ term: 'SUC ', abbrev: ' SC' }, before.get('1')!)).toBe(false);
+    expect(termEdited({ term: 'SUC', abbrev: 'SC' }, before.get('1')!)).toBe(false);
+    expect(termEdited({ term: 'SUCURSAL', abbrev: 'SC' }, before.get('1')!)).toBe(true);
+    expect(termEdited({ term: 'SUC', abbrev: 'SUC' }, before.get('1')!)).toBe(true);
+    expect(termEdited({ term: 'suc', abbrev: 'SC' }, before.get('1')!)).toBe(true);
+    // un original con blancos (dato viejo) sin tocar tampoco cuenta
+    expect(termEdited({ term: 'SUC ', abbrev: 'SC' }, { term: 'SUC ', abbrev: 'SC' })).toBe(false);
+  });
+
+  it('viajan sólo las filas nuevas o editadas de verdad, recortadas', () => {
+    const drafts = [
+      { id: '1', term: 'SUC ', abbrev: 'SC', scope: 'column' as const },                    // blanco: no viaja
+      { id: '2', term: ' monto', abbrev: 'MNT ', scope: 'column' as const },                // editada: viaja recortada
+      { id: 'new-1', term: ' tasa ', abbrev: ' TS', scope: 'column' as const, _new: true }, // nueva: sin id
+      { id: '9', term: 'x', abbrev: 'X', scope: 'column' as const, _deleted: true },        // borrada: va por termsDelete
+      { id: '7', term: 'otro', abbrev: 'OT', scope: 'column' as const },                    // sin original: viaja
+    ];
+    expect(termsToUpsert(drafts, before, 'column')).toEqual([
+      { id: '2', term: 'monto', abbrev: 'MNT', scope: 'column' },
+      { id: undefined, term: 'tasa', abbrev: 'TS', scope: 'column' },
+      { id: '7', term: 'otro', abbrev: 'OT', scope: 'column' },
+    ]);
+  });
+
+  it('una fila incompleta de antes, tocada sólo con blancos, no bloquea el guardado', () => {
+    const b = new Map([['1', { term: 'SUC', abbrev: '' }]]);
+    expect(incompleteRows([{ id: '1', term: 'SUC ', abbrev: ' ' }], b)).toEqual([]);
+    expect(incompleteRows([{ id: '1', term: 'SUCURSAL', abbrev: '' }], b)).toHaveLength(1);
+  });
+});
+
+describe('maxLengthLabel (doc 105, ronda 4)', () => {
+  it('0 es límite DESACTIVADO (así lo aplica el motor): «No limit», no «0 chars»', () => {
+    expect(maxLengthLabel(0)).toBe('No limit');
+    expect(maxLengthLabel(150)).toBe('150 chars');
+    expect(maxLengthLabel(1)).toBe('1 char');
   });
 });

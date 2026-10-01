@@ -128,9 +128,35 @@ export function termGap(t: { term: string; abbrev: string }): TermGap | null {
   return noAbbrev ? 'abbrev' : null;
 }
 
+/** Doc 105 (P1-bis): ¿la fila existente cambió? Se compara RECORTADO — lo que
+ *  viaja al backend: «SUC␠» sobre «SUC» no es una edición (antes contaba,
+ *  viajaba idéntico y registraba una versión sin cambios reales). */
+export function termEdited(t: { term: string; abbrev: string }, before: { term: string; abbrev: string }): boolean {
+  return t.term.trim() !== before.term.trim() || t.abbrev.trim() !== before.abbrev.trim();
+}
+
+/** `termsUpsert` del apply: sólo filas vivas NUEVAS o EDITADAS de verdad
+ *  (`termEdited`), recortadas; una nueva viaja sin id. Las borradas van por
+ *  `termsDelete`. */
+export function termsToUpsert<S extends string>(
+  drafts: { id: string; term: string; abbrev: string; _new?: boolean; _deleted?: boolean }[],
+  before: Map<string, { term: string; abbrev: string }>, scope: S,
+): { id: string | undefined; term: string; abbrev: string; scope: S }[] {
+  return drafts
+    .filter((t) => {
+      if (t._deleted) return false;
+      if (t._new) return true;
+      const b = before.get(t.id);
+      return !b || termEdited(t, b);
+    })
+    // Doc 102: sin descarte silencioso — el guard de filas incompletas garantiza término y abreviatura.
+    .map((t) => ({ id: t._new ? undefined : t.id, term: t.term.trim(), abbrev: t.abbrev.trim(), scope }));
+}
+
 /** Filas NUEVAS o EDITADAS (vivas) con término o abreviatura vacíos: bloquean
  *  el Save & apply (antes se descartaban en silencio y salía «Saved»). Una fila
- *  existente sin tocar no cuenta aunque venga incompleta de antes. */
+ *  existente sin tocar no cuenta aunque venga incompleta de antes (tocarla sólo
+ *  con blancos tampoco: doc 105). */
 export function incompleteRows<T extends { id: string; term: string; abbrev: string; _new?: boolean; _deleted?: boolean }>(
   drafts: T[], before: Map<string, { term: string; abbrev: string }>,
 ): T[] {
@@ -138,7 +164,7 @@ export function incompleteRows<T extends { id: string; term: string; abbrev: str
     if (d._deleted || termGap(d) === null) return false;
     if (d._new) return true;
     const b = before.get(d.id);
-    return !b || b.term !== d.term || b.abbrev !== d.abbrev;
+    return !b || termEdited(d, b);
   });
 }
 
@@ -151,4 +177,11 @@ export function gapToast(gap: TermGap): string {
   if (gap === 'abbrev') return 'Type the abbreviation before validating';
   if (gap === 'term') return 'Type the term before validating';
   return 'Type the term and the abbreviation before validating';
+}
+
+/** Límite del físico tal como lo aplica el motor (doc 105, ronda 4): 0 =
+ *  límite DESACTIVADO (la pantalla decía «0 chars»). */
+export function maxLengthLabel(n: number): string {
+  if (!n || n <= 0) return 'No limit';
+  return `${n} ${n === 1 ? 'char' : 'chars'}`;
 }

@@ -43,6 +43,7 @@ describe('useModelerStore — layout efímero del visor (doc 84 E)', () => {
 
   it('autoOrganize en modo visor aplica a los nodos vivos y recuerda, pero NO persiste', async () => {
     useSessionStore.setState({ openMode: 'readonly' });
+    useModelerStore.setState({ diagram });   // Doc 105 (R7-A): cambiar de sesión limpia el canvas — se carga DENTRO de ella.
     await useModelerStore.getState().autoOrganize();
     const st = useModelerStore.getState();
     expect(st.viewerLayout.sa1).toEqual({ t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } });
@@ -54,6 +55,7 @@ describe('useModelerStore — layout efímero del visor (doc 84 E)', () => {
 
   it('autoOrganize en edición sigue persistiendo el layout', async () => {
     useSessionStore.setState({ openMode: 'editing' });
+    useModelerStore.setState({ diagram });   // Doc 105 (R7-A): cambiar de sesión limpia el canvas — se carga DENTRO de ella.
     useModelerStore.setState({ reload: vi.fn(async () => undefined) } as never);
     await useModelerStore.getState().autoOrganize();
     // Doc 99: las posiciones se graban con `arrangeSubjectArea`, que en la

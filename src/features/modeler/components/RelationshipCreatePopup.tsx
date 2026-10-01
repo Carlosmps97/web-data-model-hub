@@ -9,8 +9,9 @@ import {
 } from '@/features/modeler/lib/relationshipPairs';
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { invertBulk, preKey } from '@/features/modeler/lib/undoInvert';
-import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
-import * as viewsSvc from '@/services/views.service';
+import { syncNewColumnsToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
+import { bestEffort, pinnedViewDeps, undoColumnsBatch } from '../lib/pinnedWrites';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 import RelationshipPhraseFields, { type PhraseValues } from './RelationshipPhraseFields';
 import { CARDS } from './RelationshipPopup';
@@ -48,6 +49,10 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
 
   const confirm = async () => {
     setSaving(true);
+    // Doc 105 (H1): la acción es de la sesión donde empezó (sus escrituras y su
+    // inversa cortan si cambió); un fallo espera la revalidación (H7).
+    const pin = pinSession();
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't create the relationship", 'err'));
     try {
       const resolutions: MappingResolution[] = await Promise.all(rows.map(async (r) => {
         const parentCol = pkById.get(r.parentColumnId);
@@ -80,6 +85,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
         rows: resolutions, childCols,
         ...phrases,   // doc 98: mappingToBulk las limpia (en blanco no viajan)
       });
+      pin.check();
       await gov.recordChangesBulk(changes);
       // Undo (doc 50): inversa genérica del lote — cae la relación, se borran
       // las columnas CREADAS y las existentes modificadas vuelven a su
@@ -98,42 +104,25 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
       }
       const undoCreated = createdCols.map((c) => c.physicalName);
       const undoChildId = draft.childTableId;
-      pushUndo('Create relationship', async () => {
-        await gov.recordChangesBulk(inverse);
-        for (const name of undoCreated) {
-          try {
-            await syncRemovedColumnFromViews(
-              { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView }, undoChildId, name);
-          } catch { /* best-effort */ }
-        }
-        for (const r of renamesBack) {
-          try {
-            await syncRenamedColumnInViews(
-              { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView }, undoChildId, r.from, r.to);
-          } catch { /* best-effort */ }
-        }
-        await useModelerStore.getState().reload();
-      });
+      pushUndo('Create relationship', undoColumnsBatch({
+        inverse, tableId: undoChildId, created: undoCreated, renamesBack,
+        after: () => useModelerStore.getState().reload(),
+      }), pin);
       // V1: las columnas migradas entran también a las vistas ESPEJO del hijo;
       // los renames por role name re-apuntan los sources de las vistas.
       // Doc 94 D4: en una identificante las nuevas son PK y entran tras las PK.
-      await syncNewColumnsToMirrorViews(
-        { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-        draft.childTableId, createdCols, childCols);
+      await syncNewColumnsToMirrorViews(pinnedViewDeps(pin), draft.childTableId, createdCols, childCols);
       for (const r of resolutions) {
         if (r.target.kind !== 'existing' || !r.target.rename) continue;
-        try {
-          await syncRenamedColumnInViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            draft.childTableId, r.target.col.physicalName, r.target.rename.physicalName);
-        } catch { /* best-effort */ }
+        const { col, rename } = r.target;
+        await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), draft.childTableId, col.physicalName, rename.physicalName));
       }
       useModelerStore.getState().markDirty();
       await useModelerStore.getState().reload();
       pushToast(`Relationship created — ${resolutions.length} key column(s) migrated`);
       onClose(true);
     } catch (e) {
-      pushToast(e instanceof Error && e.message ? e.message : "Couldn't create the relationship", 'err');
+      await onError(e);
     } finally { setSaving(false); }
   };
 

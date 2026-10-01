@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Icon from '@/components/ui/Icon';
+import { isFocusReturn } from '@/components/ui/focusTrap';
 import { containsCI } from '../lib/typePick';
 import { enterTarget, moveHighlight } from '../lib/searchSelectNav';
 
@@ -30,7 +31,9 @@ interface MenuPos {
  * (el valor actual queda como placeholder) — tipear filtra por "contiene"
  * case-insensitive y REEMPLAZA al elegir. Esto corrige el bloqueo del datalist
  * nativo: con un valor puesto ya no hace falta borrarlo para ver la lista.
- * Teclado: ↑/↓ navegan, Enter elige, Esc cierra sin cambiar.
+ * Teclado: ↑/↓ navegan (con el menú cerrado, lo abren), Enter elige, Esc
+ * cierra sin cambiar. Dentro de un diálogo el foco queda en el input al
+ * cerrar el menú (doc 105, R6); fuera, el input lo suelta como siempre.
  *
  * Doc 52: el menú se renderiza por PORTAL a `document.body` con posición
  * `fixed` — un menú absoluto dentro de un contenedor con overflow (el cuerpo
@@ -39,7 +42,7 @@ interface MenuPos {
  * contenedor; flip hacia arriba si abajo no entra; un scroll FUERA del menú o
  * un resize lo cierran (patrón select nativo — no se re-posiciona).
  */
-export default function SearchSelect({ options, valueLabel, placeholder, onPick, disabled, mono, emptyLabel, inputClassName, inputStyle, matchDetail, action }: {
+export default function SearchSelect({ options, valueLabel, placeholder, onPick, disabled, mono, emptyLabel, inputClassName, inputStyle, matchDetail, action, ariaLabel, ariaDescribedBy }: {
   options: SearchOption[];
   /** Etiqueta del valor actual ('' si no hay). */
   valueLabel: string;
@@ -59,6 +62,11 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
   matchDetail?: boolean;
   /** Doc 96 D1: fila de acción fija al pie del menú (sin ella, nada cambia). */
   action?: SearchAction;
+  /** Doc 105 (B9): nombre accesible del input cuando no hay un <label> que lo nombre. */
+  ariaLabel?: string;
+  /** Doc 105: id del texto que DESCRIBE el input (p. ej. por qué está deshabilitado),
+   *  sin tocar su nombre accesible. */
+  ariaDescribedBy?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -66,6 +74,12 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
   const [pos, setPos] = useState<MenuPos | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Doc 105: patrón ARIA 1.2 de combobox — el input controla un listbox (su
+  // menú) y anuncia la opción resaltada con `aria-activedescendant`; antes un
+  // lector de pantalla lo leía como un campo de texto suelto.
+  const uid = useId();
+  const listId = `${uid}-list`;
+  const optionId = (i: number) => `${uid}-opt-${i}`;
 
   const base: SearchOption[] = emptyLabel != null ? [{ value: '', label: emptyLabel }, ...options] : options;
   const filtered = query.trim() === '' ? base
@@ -114,10 +128,18 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
 
   const openList = () => { if (disabled) return; setPos(place()); setOpen(true); setQuery(''); setHi(0); };
   const close = () => { setOpen(false); setQuery(''); };
-  const pick = (v: string) => { onPick(v); close(); inputRef.current?.blur(); };
+  const openOnInput = () => { if (!open) openList(); };
+  // Doc 105 (R6): dentro de un diálogo (`aria-modal`), cerrar el menú NO suelta
+  // el foco — el blur lo dejaba en <body> y Tab salía a la página de atrás.
+  // Fuera de un diálogo, como siempre: al elegir, el input suelta el foco.
+  const release = () => { if (!inputRef.current?.closest('[aria-modal="true"]')) inputRef.current?.blur(); };
+  const pick = (v: string) => { onPick(v); close(); release(); };
   // Índice de la acción = justo después de las opciones filtradas.
   const actionIdx = action ? filtered.length : -1;
-  const runAction = () => { const q = query; close(); inputRef.current?.blur(); action?.onRun(q); };
+  const activeOption = open && (hi < filtered.length || hi === actionIdx) ? optionId(hi) : undefined;
+  // Sin blur previo: el diálogo que abre la acción sabe quién lo abrió y, al
+  // cerrarse, le devuelve el foco a este input (sin reabrir el menú: `onFocus`).
+  const runAction = () => { const q = query; close(); action?.onRun(q); };
 
   return (
     <div className="wk-ss-wrap">
@@ -125,15 +147,42 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
         ref={inputRef}
         className={`${inputClassName ?? 'rd-input'}${mono ? ' rd-mono' : ''}`}
         style={{ width: '100%', ...inputStyle, paddingRight: 26 }}
+        role="combobox"
+        aria-expanded={open}
+        aria-controls={open ? listId : undefined}
+        aria-autocomplete="list"
+        aria-activedescendant={activeOption}
+        aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         disabled={disabled}
         value={open ? query : valueLabel}
         placeholder={open ? (valueLabel || placeholder) : placeholder}
-        onFocus={openList}
+        onFocus={(e) => {
+          // Doc 105: el foco que devuelve un diálogo al cerrarse (el de la acción
+          // del pie, o uno que abrió `onPick`, como «Inherit from domain») no
+          // reabre el menú — el usuario acaba de elegir; el foco del usuario, sí.
+          if (!isFocusReturn(e.currentTarget)) openList();
+        }}
         onClick={() => { if (!open) openList(); }}
         onChange={(e) => { setQuery(e.target.value); setHi(0); }}
         onBlur={close}
+        // Doc 105 (R14): con el menú cerrado, también abren lo que no entra por un
+        // keydown imprimible — pegar, IME/teclas muertas (composición) y dictado.
+        onPaste={openOnInput}
+        onCompositionStart={openOnInput}
+        onBeforeInput={openOnInput}
         onKeyDown={(e) => {
-          if (!open) return;
+          if (!open) {
+            // Menú cerrado con el foco en el input (tras elegir o ESC en un diálogo,
+            // o tras la acción del pie): ↓/↑ lo abren; tipear también (doc 105, R11)
+            // — SIN preventDefault, así lo tipeado cae en la búsqueda (antes se perdía).
+            // AltGr (Ctrl+Alt en Windows) también escribe (R14).
+            const altGr = e.getModifierState?.('AltGraph') ?? false;
+            const typing = (e.key.length === 1 && (altGr || (!e.ctrlKey && !e.metaKey))) || e.key === 'Backspace' || e.key === 'Delete';
+            if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openList(); }
+            else if (typing && !e.nativeEvent?.isComposing) openList();
+            return;
+          }
           if (e.key === 'ArrowDown') { e.preventDefault(); setHi((h) => moveHighlight(h, 1, filtered.length, !!action)); }
           else if (e.key === 'ArrowUp') { e.preventDefault(); setHi((h) => moveHighlight(h, -1, filtered.length, !!action)); }
           else if (e.key === 'Enter') {
@@ -141,7 +190,7 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
             const target = enterTarget(hi, filtered.length, !!action);
             if (target === 'action') runAction(); else if (target === 'option') pick(filtered[hi].value);
           }
-          else if (e.key === 'Escape') { e.stopPropagation(); close(); inputRef.current?.blur(); }
+          else if (e.key === 'Escape') { e.stopPropagation(); close(); release(); }
         }}
       />
       <Icon name="chevD" size={12} className="wk-ss-caret" />
@@ -150,14 +199,15 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
         // menú no debe blurear el input (cerraría la lista a media navegación).
         // position fixed + zIndex inline pisan el absolute del CSS (el menú
         // sigue usando .wk-ss-menu para el look).
-        <div className="wk-ss-menu" ref={menuRef} onMouseDown={(e) => e.preventDefault()}
+        <div className="wk-ss-menu" ref={menuRef} id={listId} role="listbox" onMouseDown={(e) => e.preventDefault()}
           style={{ position: 'fixed', zIndex: 500, left: pos.left, top: pos.top ?? 'auto',
                    bottom: pos.bottom, minWidth: pos.minWidth, maxWidth: pos.maxWidth, maxHeight: pos.maxHeight }}>
-          {filtered.length === 0 && <div className="wk-ss-empty">No matches</div>}
+          {filtered.length === 0 && <div className="wk-ss-empty" role="option" aria-disabled aria-selected={false}>No matches</div>}
           {filtered.map((o, i) => (
             // onMouseDown (no onClick): elige ANTES de que el blur del input
             // cierre la lista — mismo truco que el Find a Table del toolbar.
             <button key={o.value || '∅'} type="button" className={`wk-ss-item${i === hi ? ' hi' : ''}`}
+              id={optionId(i)} role="option" aria-selected={i === hi}
               onMouseDown={(e) => { e.preventDefault(); pick(o.value); }}
               onMouseEnter={() => setHi(i)}>
               <span className={`wk-ss-label${mono ? ' rd-mono' : ''}`}>{o.label}</span>
@@ -166,6 +216,7 @@ export default function SearchSelect({ options, valueLabel, placeholder, onPick,
           ))}
           {action && (
             <button type="button" className={`wk-ss-item wk-ss-action${hi === actionIdx ? ' hi' : ''}`}
+              id={optionId(actionIdx)} role="option" aria-selected={hi === actionIdx}
               onMouseDown={(e) => { e.preventDefault(); runAction(); }}
               onMouseEnter={() => setHi(actionIdx)}>
               <span className="wk-ss-label">{action.label(query)}</span>

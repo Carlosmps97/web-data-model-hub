@@ -7,6 +7,7 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { relationshipDrift } from '@/features/modeler/lib/relationshipPairs';
 import { phraseEdits } from '../lib/relationshipLabel';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import RelationshipPhraseFields, { type PhraseKey } from './RelationshipPhraseFields';
 
 /**
@@ -40,7 +41,7 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
   useEffect(() => { if (!rels.length) onClose(); }, [rels.length, onClose]);
 
   const tables = diagram?.tables ?? [];
-  const cols = diagram?.columns ?? [];
+  const cols = useMemo(() => diagram?.columns ?? [], [diagram]);   // estable: dep del memo de abajo
   const parent = tables.find((t) => t.id === rels[0]?.parentTableId);
   const parentPkIds = useMemo(
     () => pkInKeyOrder(cols.filter((c) => c.tableId === parent?.id)).map((c) => c.id),
@@ -52,8 +53,11 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
     return viewMode === 'logical' ? (t.logicalName || t.physicalName) : t.physicalName;
   };
 
+  // Doc 105 (H7): el fallo de una escritura espera la revalidación y calla si
+  // la sesión cambió (`reportWriteError`: ya avisó ella).
   const removeOne = async (relId: string, childName: string) => {
     setBusy(true);
+    const onError = reportWriteError(() => pushToast("Couldn't remove the subtype", 'err'));
     try {
       const ok = await confirmDialog({
         title: 'Remove subtype',
@@ -62,7 +66,7 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
         action: () => deleteRelationship(relId),
       });
       if (ok) pushToast(`Subtype removed: ${childName}`);
-    } catch { pushToast("Couldn't remove the subtype", 'err'); }
+    } catch (e) { await onError(e); }
     finally { setBusy(false); }
   };
 
@@ -73,16 +77,18 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
     const edits = r ? phraseEdits(r, phraseDrafts[relId] ?? {}) : null;
     if (!r || !edits) return;
     setBusy(true);
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't update", 'err'));
     try {
       await updateRelationship({ ...r, ...edits });
       setPhraseDrafts((d) => { const rest = { ...d }; delete rest[relId]; return rest; });
     } catch (e) {
-      pushToast(e instanceof Error && e.message ? e.message : "Couldn't update", 'err');
+      await onError(e);
     } finally { setBusy(false); }
   };
 
   const removeAll = async () => {
     setBusy(true);
+    const onError = reportWriteError(() => pushToast("Couldn't delete the subcategory", 'err'));
     try {
       const ids = rels.map((r) => ({ id: r.id }));
       const ok = await confirmDialog({
@@ -90,11 +96,15 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
         message: `The ${rels.length} subtype relationship(s) of this symbol will be removed. The tables and their columns stay in the model.`,
         confirmLabel: 'Delete subcategory', cancelLabel: 'Cancel', variant: 'danger',
         // Secuencial por el mismo camino changeset-aware (cada quitada deja su
-        // propia entrada de Undo, doc 50).
-        action: async () => { for (const r of ids) await deleteRelationship(r.id); },
+        // propia entrada de Undo, doc 50). Doc 105 (H1): todas en la sesión en
+        // que se confirmó — si cambia en el medio, las que faltan no se borran.
+        action: async () => {
+          const pin = pinSession();
+          for (const r of ids) { pin.check(); await deleteRelationship(r.id); }
+        },
       });
       if (ok) { pushToast('Subcategory deleted'); onClose(); }
-    } catch { pushToast("Couldn't delete the subcategory", 'err'); }
+    } catch (e) { await onError(e); }
     finally { setBusy(false); }
   };
 

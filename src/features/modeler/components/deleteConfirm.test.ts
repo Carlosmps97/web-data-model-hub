@@ -1,0 +1,82 @@
+// Doc 105 (O2, verificador de navegador): el pre-conteo de «Delete table» en
+// Properties tragaba los errores — con la lectura de vistas caída, el diálogo
+// decía «0 views» y el borrado se llevaba igual las vistas que no mostró. Lo
+// que no se pudo contar se dice (null), no se muestra como cero.
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { textOf } from '../../reporting/components/fakeReact.testutil';
+
+vi.mock('@/components/ui/dialogs', () => ({ confirmDialog: vi.fn(async () => true) }));
+vi.mock('@/services/governance.service', () => ({ tableUsage: vi.fn(), listRelationships: vi.fn() }));
+vi.mock('@/services/views.service', () => ({ listViews: vi.fn() }));
+
+import { confirmDialog } from '@/components/ui/dialogs';
+import * as gov from '@/services/governance.service';
+import * as viewsSvc from '@/services/views.service';
+import { facetNouns } from '@/lib/facets';
+import { confirmDeleteColumn, confirmDeleteTable, readTableDeleteCounts } from './deleteConfirm';
+
+const message = () => textOf(vi.mocked(confirmDialog).mock.calls[0][0].message);
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(gov.tableUsage).mockResolvedValue({ usage: [{ canvasId: 'sa1' }, { canvasId: 'sa2' }], total: 2 } as never);
+  vi.mocked(gov.listRelationships).mockResolvedValue([{ id: 'r1', parentTableId: 't1', childTableId: 't2', pairs: [] }] as never);
+  vi.mocked(viewsSvc.listViews).mockResolvedValue([{ id: 'v1' }] as never);
+});
+
+describe('conteo del impacto de borrar una tabla (doc 105, O2)', () => {
+  it('todo leído: los números', async () => {
+    expect(await readTableDeleteCounts('t1')).toEqual({ canvases: 2, related: 1, views: 1 });
+  });
+
+  it.each([
+    ['las vistas', () => vi.mocked(viewsSvc.listViews).mockRejectedValueOnce(new Error('sin red')), { canvases: 2, related: 1, views: null }],
+    ['las relaciones', () => vi.mocked(gov.listRelationships).mockRejectedValueOnce(new Error('sin red')), { canvases: 2, related: null, views: 1 }],
+    ['los canvases', () => vi.mocked(gov.tableUsage).mockRejectedValueOnce(new Error('sin red')), { canvases: null, related: 1, views: 1 }],
+  ])('si no se pudieron leer %s, queda en null (no en 0)', async (_label, fail, expected) => {
+    fail();
+    expect(await readTableDeleteCounts('t1')).toEqual(expected);
+  });
+
+  it('el diálogo dice qué no se pudo contar, en vez de «0»', async () => {
+    await confirmDeleteTable({ name: 'M_T1', nouns: facetNouns('physical'), impact: { canvases: 2, related: null, views: null }, action: async () => {} });
+    expect(message()).toContain("Couldn't count its views");
+    expect(message()).toContain("Couldn't count its related tables");
+    expect(message()).not.toMatch(/\b0 (views?|related)\b/);
+    expect(message()).toContain('2 canvases it appears on');
+  });
+
+  it('en el modelo lógico, con sus sustantivos', async () => {
+    await confirmDeleteTable({ name: 'E1', nouns: facetNouns('logical'), impact: { canvases: null, related: null, views: 0 }, action: async () => {} });
+    expect(message()).toContain("Couldn't count the canvases it appears on");
+    expect(message()).toContain("Couldn't count its related entities");
+    expect(message()).toContain('0 views');
+  });
+});
+
+// Doc 105 (ronda 3, cosmético): en el modelo lógico el texto decía «Column …
+// this table» y «Its columns …»: mismos sustantivos por modelo que el título.
+describe('los diálogos de borrado usan los sustantivos del modelo (doc 105, ronda 3)', () => {
+  const noImpact = { relationships: [], total: 0 };
+  const oneRel = { relationships: [{ relId: 'r1', otherTableName: 'T2', otherColumnName: 'C', canvases: [] }], total: 1 };
+
+  it('tabla / entidad: «Its attributes and relationships go too»', async () => {
+    await confirmDeleteTable({ name: 'E1', nouns: facetNouns('logical'), impact: { canvases: 1, related: 0, views: 0 }, action: async () => {} });
+    expect(message()).toContain('Its attributes and relationships go too.');
+  });
+
+  it('columna / atributo sin relaciones: «Attribute … will be removed from this entity»', async () => {
+    await confirmDeleteColumn({ name: 'COD', nouns: facetNouns('logical'), impact: noImpact as never, action: async () => {} });
+    expect(message()).toBe('Attribute “COD” will be removed from this entity.');
+  });
+
+  it('columna / atributo con relaciones: «Attribute … participates in …»', async () => {
+    await confirmDeleteColumn({ name: 'COD', nouns: facetNouns('logical'), impact: oneRel as never, action: async () => {} });
+    expect(message()).toMatch(/^Attribute “COD” participates in 1 relationship/);
+  });
+
+  it('en físico, como siempre', async () => {
+    await confirmDeleteColumn({ name: 'COD', nouns: facetNouns('physical'), impact: noImpact as never, action: async () => {} });
+    expect(message()).toBe('Column “COD” will be removed from this table.');
+  });
+});

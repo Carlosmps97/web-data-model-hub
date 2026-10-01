@@ -30,7 +30,7 @@ import type {
   VersionRow,
   VersionStatus,
 } from '@/types/versioning';
-import { ApiError, apiGet, apiPost, LONG_TIMEOUT_MS } from './http';
+import { ApiError, apiDelete, apiGet, apiPost, LONG_TIMEOUT_MS } from './http';
 
 import { API_BASE } from '@/services/apiBase';
 
@@ -74,6 +74,14 @@ export function snapshot(body: SnapshotBody): Promise<VersionRow> {
  *  para no ofrecer gente que nunca podría aprobar (request trabado). */
 export function listUsers(can?: string): Promise<SimUserDto[]> {
   return apiGet<SimUserDto[]>(`${API_BASE}/api/users${can ? `?can=${encodeURIComponent(can)}` : ''}`);
+}
+
+/** Doc 105: directorio para RESOLVER NOMBRES — incluye a los deshabilitados
+ *  (`disabled: true`): quien dejó la empresa sigue siendo dueño o autor de su
+ *  versión y debe verse con su nombre, no con su correo. Para ofrecer personas
+ *  (revisores, destinos de transferencia) se usa `listUsers`. */
+export function listUserNames(): Promise<SimUserDto[]> {
+  return apiGet<SimUserDto[]>(`${API_BASE}/api/users?includeDisabled=true`);
 }
 
 /**
@@ -304,4 +312,39 @@ export function withdraw(id: string): Promise<ChangesetDetail> {
  */
 export function reopen(id: string): Promise<ChangesetDetail> {
   return apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${id}/reopen`);
+}
+
+// ─── Administración de versiones (doc 104) ───────────────────────────────────
+
+/**
+ * Transfiere un DRAFT a otro usuario (su dueño o un administrador): desde ahí
+ * ese usuario lo edita, lo envía y figura como autor al publicarse; la versión
+ * recuerda quién la inició. `expectedOwner` = el dueño que mostraba la
+ * pantalla: si otra sesión lo cambió en el medio, 409 (no se mueve el draft de
+ * otra persona). 403 sin permiso · 409 si no está en draft / carga Excel en
+ * curso / cambió en el medio · 400 destino inválido.
+ */
+export function transferVersion(
+  id: string, body: { to: string; note?: string; expectedOwner?: string | null },
+): Promise<ChangesetDetail> {
+  return apiPost<ChangesetDetail>(`${API_BASE}/api/changesets/${encodeURIComponent(id)}/transfer`, body);
+}
+
+/** Resultado de eliminar un draft: cuántos cambios se borraron con él. */
+export interface DeletedVersion {
+  id: string;
+  deleted: true;
+  versionLabel: string | null;
+  title: string | null;
+  owner: string | null;
+  projectId: string;
+  changes: number;
+}
+
+/** Elimina un DRAFT con todos sus cambios (producción no cambia). Mismos
+ *  permisos que transferir; en revisión → retirar primero; publicada → nunca.
+ *  `expectedOwner`: como en `transferVersion`. */
+export function deleteVersion(id: string, expectedOwner?: string | null): Promise<DeletedVersion> {
+  const qs = expectedOwner ? `?expectedOwner=${encodeURIComponent(expectedOwner)}` : '';
+  return apiDelete<DeletedVersion>(`${API_BASE}/api/changesets/${encodeURIComponent(id)}${qs}`);
 }

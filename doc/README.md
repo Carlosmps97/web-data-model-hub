@@ -15,7 +15,7 @@ Actualizado: 2026-07-31.
 | 5 | [design-system.md](design-system.md) | Identidad visual: tokens, tipografía Geist/Geist Mono, convenciones de estilos, componentes UI y el vocabulario visual del canvas. |
 | 6 | [seguridad.md](seguridad.md) | Autenticación en producción (SSO de Databricks Apps + un solo origen), manejo del token de sesión, gating RBAC y ausencia de secretos en el bundle. |
 | 7 | [deployment.md](deployment.md) | Cómo y dónde corre: `server.mjs`, el bundle de Databricks Apps, GitHub Variables, `BACKEND_API_URL` vs `VITE_API_URL` y el checklist de despliegue. |
-| 8 | [testing.md](testing.md) | 166 tests con Vitest (incluidos los 12 del servidor de producción), gate de tipos con tsc, y los límites/consideraciones conocidos. |
+| 8 | [testing.md](testing.md) | 1 974 tests con Vitest en 210 archivos al 2026-09-30, verdes también en orden aleatorio (incluidos los 15 del servidor de producción), gate de tipos con tsc sin errores, ESLint sin errores, y los límites/consideraciones conocidos. |
 
 ## Stack en una mirada
 

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowLeft, Eye, GripVertical, Pencil, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
-import { useModelerStore } from '@/store/useModelerStore';
+import { failureText, useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { pushUndo } from '@/store/useUndoStore';
 import * as viewsSvc from '@/services/views.service';
 import type { View, ViewInput } from '@/services/views.service';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import { viewSourceIds } from '../lib/viewGraph';
 import { moveSource, reseedDraft } from '../lib/viewPanelLogic';
 import { generatedViewDdl } from '../lib/viewDdl';
@@ -57,6 +58,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const reload = useModelerStore((s) => s.reload);
   // Doc 70: la visibilidad es por CANVAS (membresía), no un flag global.
   const removeViewFromCanvas = useModelerStore((s) => s.removeViewFromCanvas);
+  const deleteView = useModelerStore((s) => s.deleteView);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
 
@@ -153,40 +155,49 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   /** Único camino de guardado del panel: updateView (changeset-aware) con el
    *  doc completo + inversa en el Undo + reload. */
   const saveView = async (patch: Partial<ViewInput>, label: string, toastMsg?: string) => {
+    const pin = pinSession();   // doc 105 (H1): su inversa se apila sólo en su sesión
     const pre = viewPre();
     await viewsSvc.updateView(view.id, { ...view, ...patch } as ViewInput);
-    pushUndo(label, async () => { await viewsSvc.updateView(pre.id, pre as ViewInput); await reload(); });
+    pushUndo(label, async () => { await viewsSvc.updateView(pre.id, pre as ViewInput); await reload(); }, pin);
     await reload();
     if (toastMsg) pushToast(toastMsg);
   };
-  const saveErr = (e: unknown) =>
-    pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err');
+  /** Doc 105 (H7): el `.catch` de un guardado, tomado AL PEDIRLO — con la
+   *  versión recién transferida calla (la revalidación ya avisó). */
+  const saveErr = () => reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
 
   const saveDef = async () => {
     setSavingDef(true);
+    const onError = saveErr();
     try {
       await saveView({
         name: form.name.trim() || view.name,
         schema: form.schema.trim() || undefined,
         description: form.description.trim() || undefined,
       }, `Edit view ${view.name}`, 'View updated');
-    } catch (e) { saveErr(e); } finally { setSavingDef(false); }
+    } catch (e) { await onError(e); } finally { setSavingDef(false); }
   };
   const saveDescriptionOnBlur = async () => {
     if (!canEdit) return;
     const next = form.description.trim() || undefined;
     if ((view.description ?? undefined) === next) return;
-    try { await saveView({ description: next }, `Edit view ${view.name}`); } catch (e) { saveErr(e); }
+    const onError = saveErr();
+    try { await saveView({ description: next }, `Edit view ${view.name}`); } catch (e) { await onError(e); }
   };
   const askDelete = async () => {
+    // Doc 105 (H5): con la versión recién transferida el borrado termina con el
+    // error original — la revalidación ya avisó: acá se calla.
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't delete", 'err'));
     try {
-      // Diálogo compartido con Properties › Views y el Object Inspector (doc 89 §3.5).
+      // Diálogo compartido con Properties › Views y el Object Inspector (doc 89
+      // §3.5). Doc 105 (A4-o4): y la misma acción del store — con Undo, que la
+      // repone en su sitio en cada canvas que la listaba.
       const ok = await confirmDeleteView({
         name: view.name,
-        action: async () => { await viewsSvc.deleteView(view.id); setSelectedView(null); await reload(); },
+        action: async () => { await deleteView(view); setSelectedView(null); await reload(); },
       });
       if (ok) pushToast('View deleted');
-    } catch { pushToast("Couldn't delete", 'err'); }
+    } catch (e) { await onError(e); }
   };
 
   // ── Columns: filas visibles — SIEMPRE desde `sources` (doc 91 D7: en modo
@@ -209,28 +220,32 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     let to = targetIdx + (after ? 1 : 0);
     if (dragIdx < to) to -= 1;
     setReordering(true);
+    const onError = saveErr();
     try {
       await saveView({ sources: moveSource(view.sources, dragIdx, to) }, `Reorder view ${view.name}`);
-    } catch (e) { saveErr(e); } finally { setReordering(false); }
+    } catch (e) { await onError(e); } finally { setReordering(false); }
   };
 
   const saveSourcePatch = async (idx: number, patch: Partial<viewsSvc.ViewSource>) => {
     const next = (view.sources ?? []).map((s, i) => (i === idx ? { ...s, ...patch } : { ...s }));
-    try { await saveView({ sources: next }, `Edit view column`); } catch (e) { saveErr(e); }
+    const onError = saveErr();
+    try { await saveView({ sources: next }, `Edit view column`); } catch (e) { await onError(e); }
   };
 
   // ── Query SQL (doc 96 D6): la User-Defined SQL se guarda como texto
   // INFORMATIVO ('' ⇒ se quita); no toca las columnas ni el DDL. ──
   const saveSql = async () => {
     setSqlBusy(true);
+    const onError = saveErr();
     try {
       await saveView({ customSql: sqlDraft.trim() || undefined }, `Edit view SQL ${view.name}`,
         sqlDraft.trim() ? 'User-Defined SQL saved (informational)' : 'User-Defined SQL removed');
-    } catch (e) { saveErr(e); } finally { setSqlBusy(false); }
+    } catch (e) { await onError(e); } finally { setSqlBusy(false); }
   };
 
   const saveViewUdp = async (next: Record<string, string>) => {
-    try { await saveView({ udpValues: next }, `Edit view ${view.name}`); } catch (e) { saveErr(e); }
+    const onError = saveErr();
+    try { await saveView({ udpValues: next }, `Edit view ${view.name}`); } catch (e) { await onError(e); }
   };
 
   const udpCount = Object.keys(view.udpValues ?? {}).length;
@@ -284,7 +299,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
             {canEdit && (
               <button type="button" className="rd-btn rd-btn-ghost rd-btn-sm" style={{ width: '100%', marginBottom: 8 }}
                 title="Remove this view from the current canvas (it stays in the model and in other canvases)"
-                onClick={() => void removeViewFromCanvas(view.id).then(() => pushToast('View removed from canvas')).catch(saveErr)}>
+                onClick={() => void removeViewFromCanvas(view.id).then(() => pushToast('View removed from canvas'))
+                  .catch(reportWriteError((e) => pushToast(failureText("Couldn't remove the view from this canvas", e), 'err')))}>
                 <Unlink size={12} /> Remove from this canvas
               </button>
             )}

@@ -1,7 +1,7 @@
 // Doc 88 §6: estado/badge/historial de una solicitud (puros).
 import { describe, it, expect } from 'vitest';
 import type { ChangesetDetail, RequestCycle } from '@/types/versioning';
-import { activityAt, historyOf, isRequest, outcomeOf, requestBadge } from './requestState';
+import { activityAt, canvasAction, historyOf, isRequest, outcomeOf, REVIEW_CANVAS_DENIED, requestBadge } from './requestState';
 
 const cycle = (n: number, outcome: RequestCycle['outcome'], extra: Partial<RequestCycle> = {}): RequestCycle =>
   ({ id: `r${n}`, cycle: n, reviewers: ['beto'], outcome, ...extra });
@@ -48,5 +48,35 @@ describe('activityAt', () => {
       .toBe(Date.parse('2026-09-11T10:00:00Z'));
     expect(activityAt({ submittedAt: '2026-09-09T10:00:00Z' })).toBe(Date.parse('2026-09-09T10:00:00Z'));
     expect(activityAt({})).toBe(0);
+  });
+});
+
+/** Doc 105 (U2): «View in canvas» sólo para quien PUEDE abrir el request —
+ *  antes cualquiera lo abría y la sesión se degradaba con un aviso. */
+describe('canvasAction (doc 105)', () => {
+  const none = () => false;
+  const admin = (p: string) => p === 'admin.manage';
+  const req = { status: 'submitted' as const, owner: 'ana', reviewers: ['beto'] };
+
+  it('un request ajeno sin ser revisor ni admin: deshabilitado con el motivo', () => {
+    const a = canvasAction(req, 'carla', none);
+    expect(a.enabled).toBe(false);
+    expect(a.hint).toBe(REVIEW_CANVAS_DENIED);
+  });
+
+  it('dueño, revisor asignado y admin lo abren en solo lectura', () => {
+    for (const [me, has] of [['ana', none], ['beto', none], ['dev', admin]] as const) {
+      const a = canvasAction(req, me, has);
+      expect(a.enabled).toBe(true);
+      expect(a.mode).toBe('readonly');
+      expect(a.label).toBe('View in canvas');
+    }
+  });
+
+  it('el draft propio se abre para editar; un request cerrado no se abre', () => {
+    const own = canvasAction({ status: 'draft', owner: 'ana', reviewers: [] }, 'ana', none);
+    expect([own.enabled, own.mode, own.label]).toEqual([true, 'editing', 'Open in canvas']);
+    expect(canvasAction({ status: 'approved', owner: 'ana', reviewers: ['beto'], appliedAt: 'x' }, 'beto', none).enabled)
+      .toBe(false);
   });
 });

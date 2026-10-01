@@ -11,6 +11,7 @@ import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { getNamingConfig, type NamingConfig } from '@/services/naming.service';
+import { facetNouns } from '@/lib/facets';
 import { applyNamingCase } from '@/features/modeler/lib/physicalCase';
 import { diagramSignature } from '@/features/modeler/lib/diagramSignature';
 import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
@@ -23,6 +24,10 @@ import { isPkFirst, orderColumns, persistReorder, pkFirstOrdinals, reorderPlan, 
 import type { CanvasDropPlan } from '@/features/modeler/lib/canvasDrop';
 import { canvasClock, wholePoint, writtenSince } from '@/features/modeler/lib/canvasWrites';
 import {
+  afterRevalidation, isVersionError, pinSession, stillAskedSession, touchesVersion, type SessionPin,
+} from '@/features/modeler/lib/sessionGuard';
+import { bestEffort, pinnedViewDeps } from '@/features/modeler/lib/pinnedWrites';
+import {
   cleanRoute, cleanRoutes, pruneRoutes, routableWireIds, routeOf, sameRoute, wireIdsOfTable,
 } from '@/features/modeler/lib/wireRoute';
 import type { RoutePoint, WireRoutes } from '@/features/modeler/lib/wireRoute';
@@ -30,11 +35,11 @@ import {
   removeColumnSource, syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews,
 } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
-import type { View } from '@/services/views.service';
+import type { View, ViewInput } from '@/services/views.service';
 import { useSessionStore } from '@/store/useSessionStore';
-import { pushUndo, useUndoStore } from '@/store/useUndoStore';
+import { NothingDoneError, pushUndo, useUndoStore } from '@/store/useUndoStore';
 import { runBlocking } from '@/store/useBusyStore';
-import { ApiError } from '@/services/http';
+import { ApiError, errorReason } from '@/services/http';
 
 // ── Árbol del Model Explorer ──────────────────────────────────────────
 // Nodo recursivo: una carpeta con sus subcarpetas y los canvases que cuelgan
@@ -286,13 +291,17 @@ interface ModelerState {
   /** La working copy activa borra su proyecto: el canvas cede al panel «Deletion pending». */
   projectDeletionPending: boolean;
   undoProjectDeletion: () => Promise<void>;
-  /** @internal recarga folders+canvases del proyecto y depura la selección. */
-  _refreshProject: (projectId: string) => Promise<void>;
+  /** @internal recarga folders+canvases del proyecto y depura la selección.
+   *  `isCurrent` (doc 105): si al llegar la respuesta devuelve false, no escribe. */
+  _refreshProject: (projectId: string, isCurrent?: () => boolean) => Promise<void>;
   reload: () => Promise<void>;
   /** Doc 83: cachea el naming config de `projectId` (descarta respuestas de
    *  un proyecto que dejó de ser el activo; un fallo no pisa lo cacheado). */
   loadNaming: (projectId: string | null) => Promise<void>;
   saveLayout: (tableId: string, pos: { x: number; y: number }) => Promise<void>;
+  /** Doc 105 (A4-o1): posiciones de VARIOS bloques movidos juntos (selección
+   *  múltiple) en UNA escritura. Corre en segundo plano: un fallo se avisa acá. */
+  saveNodePositions: (positions: Record<string, { x: number; y: number }>) => Promise<void>;
   /** Persiste la posición de TODOS los nodos del canvas activo (botón Save del toolbar). */
   saveAllLayout: () => Promise<void>;
   autoOrganize: () => Promise<void>;
@@ -312,6 +321,12 @@ interface ModelerState {
   /** Doc 70: saca una vista de ESTE canvas (membresía + layout); la vista
    *  sigue en el modelo y en los demás canvases. */
   removeViewFromCanvas: (viewId: string) => Promise<void>;
+  /** Doc 105 (A4-o4): borra la vista del MODELO (todos los canvases) con Undo —
+   *  el mismo desde los paneles del canvas y el Object Inspector: repone el doc
+   *  y la vuelve a listar, en su posición, en cada canvas que la listaba.
+   *  `canvasIds`: dónde se usa, si el llamador ya lo sabe (si no, se consulta).
+   *  El refresco posterior al borrado queda en manos del llamador. */
+  deleteView: (view: View, opts?: { canvasIds?: string[] }) => Promise<void>;
   // `sourceTable` (doc 51, opcional por columna): nombre de la tabla dueña en
   // el ORIGEN — procedencia para el historial de auditoría; no viaja al payload.
   createTableFromSources: (input: { logicalName: string; schema?: string; columns: (CanonicalColumn & { sourceTable?: string })[] }) => Promise<void>;
@@ -359,11 +374,141 @@ const raf = (cb: () => void) =>
 
 // Debounce de la persistencia de drawings (PUT del array completo).
 let _drawingsTimer: ReturnType<typeof setTimeout> | null = null;
+// Doc 104: la versión en edición cuando se AGENDÓ el guardado de dibujos. Si al
+// dispararse la sesión ya no edita esa versión (transferida, eliminada,
+// enviada a revisión), el guardado se descarta: ya no le corresponde.
+let _drawingsCs: string | null = null;
+/** ¿La sesión sigue EDITANDO la versión `cs`? */
+const stillEditing = (cs: string | null): boolean => {
+  const s = useSessionStore.getState();
+  return !!cs && s.openMode === 'editing' && s.activeChangesetId === cs;
+};
+/** Versión en edición AHORA (null fuera de una sesión de edición). */
+const editingCs = (): string | null => {
+  const s = useSessionStore.getState();
+  return s.openMode === 'editing' ? s.activeChangesetId : null;
+};
+/** Doc 105 (O1): «<qué falló>: <motivo>.» — el motivo solo (p. ej. «Internal
+ *  server error…», junto a «View created») no dice QUÉ falló. Sin motivo
+ *  legible, sólo el contexto; si el motivo ya empieza como el contexto, va solo. */
+export function failureText(context: string, e: unknown): string {
+  const reason = e instanceof Error ? e.message.trim() : '';
+  if (!reason) return context;
+  if (reason.toLowerCase().startsWith(context.toLowerCase())) return reason;
+  return `${context}: ${reason.replace(/[.\s]+$/, '')}.`;
+}
+
+/** Guarda YA los dibujos con el guardado pendiente (debounce de 500 ms) del
+ *  canvas `saId` — al cambiar de canvas o al cerrarlo, el disparo con debounce
+ *  ya no los escribiría (su canvas no es el abierto) y el último trazo se
+ *  perdía. Doc 105 (F1): si falla, el mismo aviso que el guardado con debounce. */
+function flushPendingDrawings(saId: string | null, drawings: Drawing[]): void {
+  if (!_drawingsTimer || !saId) return;
+  clearTimeout(_drawingsTimer); _drawingsTimer = null;
+  const cs = _drawingsCs;
+  if (stillEditing(cs)) {
+    void struct.setSubjectAreaDrawings(saId, drawings)
+      .catch((e: unknown) => reportCanvasSaveError(e, cs, "Couldn't save the drawings"));
+  }
+}
+
+/** Doc 104 (dibujos) / doc 105 (F1): aviso del fallo de un guardado del canvas
+ *  que corre en SEGUNDO PLANO (dibujos, posiciones), pedido editando `cs`. Un
+ *  403/404/409 de la versión puede ser que cambió por fuera (transferida,
+ *  eliminada, enviada): se espera la revalidación y, si la sesión ya no edita
+ *  esa versión, ella dio el aviso correcto. Si sigue igual (rol perdido, nombre
+ *  duplicado, proxy) o el error es otro (red), se muestra el motivo real. */
+async function reportCanvasSaveError(e: unknown, cs: string | null, fallback: string): Promise<void> {
+  if (touchesVersion(e, cs)) {
+    await afterRevalidation();
+    if (!stillEditing(cs)) return;
+  }
+  toast.error(failureText(fallback, e));   // doc 105 (O1): qué falló + el motivo
+}
 // Paste de tabla en vuelo (doc 50): un Ctrl+V repetido no dispara otro.
 let _pasteTableBusy = false;
 // Secuencia de cargas del diagrama: descarta respuestas fuera de orden (dos
 // clicks rápidos en el explorer, reload en vuelo al cambiar de canvas).
 let _loadSeq = 0;
+// Doc 105 (ronda 3, R7-D): la carga que puso `openingSaId` (el spinner del
+// Explorer) — sólo ella lo apaga.
+let _openingSeq = 0;
+// Doc 105 (ronda 4, R10-B): `reload()` pedido mientras se ABRÍA el mismo
+// canvas (el Refresh lo reabre y una edición termina): esa apertura pudo pedir
+// su foto antes del guardado — se recarga al terminarla. `prev`: el diagrama
+// que había al pedirlo (el Explorer se entera si el cambio fue estructural).
+// Ronda 5 (R15-H3): también si se abría OTRO canvas — `saId` es el editado.
+let _reloadAfterOpening: { saId: string; prev: Diagram | null } | null = null;
+// Doc 105 (ronda 7, R18a-6): la PRÓXIMA `reload()` cierra el canvas sin su
+// propio aviso si falla — la pide la apertura fallida de otro canvas, cuyo
+// llamador ya avisa la caída (una caída, un aviso). La consume la `reload()`
+// al empezar (así no queda armada si ésta termina antes).
+let _quietReloadFailure = false;
+// Doc 105 (A4-o2): lo mismo para los refrescos del Explorer — sólo el MÁS
+// RECIENTE escribe. La respuesta tardía de uno anterior (otra sesión: se abrió
+// otra versión, modo o proyecto mientras cargaba) no pisa proyectos, proyecto
+// activo, árbol, esquemas ni el canvas del vigente.
+let _explorerSeq = 0;
+/** Doc 105 (H4b): lo que relee el árbol tras una mutación del Explorer escribe
+ *  sólo si sigue la sesión en que se PIDIÓ la mutación y no empezó un refresco
+ *  más nuevo (que trae el árbol vigente). Se toma al empezar la mutación. */
+const explorerRequest = (): { isCurrent: () => boolean; pin: SessionPin } => {
+  const seq = _explorerSeq;
+  const pin = pinSession();
+  return { isCurrent: () => seq === _explorerSeq && pin.holds(), pin };
+};
+/** La sesión de canvas AHORA (proyecto + modo + versión): algo pedido antes
+ *  sólo se avisa si sigue siendo la misma (doc 105). */
+const sessionNow = (): string => {
+  const s = useSessionStore.getState();
+  return `${s.openMode ?? ''}|${s.activeProjectId ?? ''}|${s.activeChangesetId ?? ''}`;
+};
+/** Motivo legible de un error para intercalarlo en un aviso (sin punto final). */
+const reasonOf = (e: unknown): string => errorReason(e, 'unknown error');
+
+/** Doc 105 (A3/A5): alguna lectura previa al borrado falló — no se borró nada.
+ *  H3: como `NothingDoneError`, así el Undo que lo pidió vuelve a la pila. O3:
+ *  con el sustantivo del modelo abierto (entity / table), como el diálogo. */
+const dependentsUnreadable = (noun: string) => {
+  const reason = `Couldn't check what depends on this ${noun}`;
+  return new NothingDoneError(reason, `${reason}: nothing was deleted. Try again.`);
+};
+const VIEW_USAGE_UNREADABLE = "Couldn't check where this view is used: nothing was deleted. Try again.";
+
+/** Doc 105 (H5): el error con que termina un borrado cuya lectura previa falló
+ *  (no se borró nada). Un 403/404/409 de la versión puede ser que cambió de
+ *  manos: se espera la revalidación. Si la sesión cambió, sigue el error
+ *  ORIGINAL — la revalidación ya avisó y los llamadores del doc 104 lo callan;
+ *  «Try again» sería falso. Si no, `unreadable()`; fuera de una sesión de
+ *  edición, el motivo real (lo dice el error). */
+async function readFailure(e: unknown, askedCs: string | null, pin: SessionPin, unreadable: () => Error): Promise<unknown> {
+  if (touchesVersion(e, askedCs)) await afterRevalidation();
+  if (!pin.holds()) return e;
+  return editingCs() ? unreadable() : e;
+}
+
+type ListedViews = Awaited<ReturnType<typeof struct.listedViews>>;
+/** Doc 105 (H2): canvases donde es miembro alguna de `viewIds` (vistas de
+ *  `tableId`). Una vista MULTI-FUENTE puede estar en un canvas que no tiene la
+ *  tabla que se borra: la cascada del backend la saca también de ése. */
+async function canvasesOfViews(tableId: string, viewIds: string[]): Promise<string[]> {
+  const wanted = new Set(viewIds);
+  const { views } = await viewsSvc.tableViews(tableId);
+  return [...new Set(views.filter((v) => wanted.has(v.id)).flatMap((v) => v.canvases.map((c) => c.id)))];
+}
+
+/** Doc 105 (F4, A4-o4): de `viewIds`, cuáles lista cada canvas y dónde — se lee
+ *  ANTES de borrarlas: el backend las saca de toda lista en el mismo request
+ *  (doc 88 §4) y el Undo las repone con esto. Sólo quedan los canvases que
+ *  listan alguna (un canvas legacy no lista ninguna: su regla por fuentes las
+ *  vuelve a mostrar sola). Si una lectura falla, rechaza. */
+async function listedViewsBy(canvasIds: string[], viewIds: string[]): Promise<Map<string, ListedViews>> {
+  const out = new Map<string, ListedViews>();
+  if (!viewIds.length) return out;
+  const rows = await Promise.all([...new Set(canvasIds)].map(async (id) => [id, await struct.listedViews(id, viewIds)] as const));
+  for (const [id, listed] of rows) if (listed.viewIds.length) out.set(id, listed);
+  return out;
+}
 
 export const useModelerStore = create<ModelerState>((set, get) => ({
   projects: [],
@@ -375,7 +520,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   bumpExplorer: () => set((s) => ({ explorerTick: s.explorerTick + 1 })),
   syncExplorer: (onActiveCanvas) => { if (!onActiveCanvas) get().bumpExplorer(); },
   schemas: [],
-  loadSchemas: async () => { set({ schemas: await schemasSvc.listSchemas() }); },
+  loadSchemas: async () => {
+    // Doc 105 (A4-o2): si mientras cargaba empezó un refresco del Explorer (otra
+    // sesión), esta respuesta ya no le corresponde — el refresco trae la suya.
+    const seq = _explorerSeq;
+    const schemas = await schemasSvc.listSchemas();
+    if (seq === _explorerSeq) set({ schemas });
+  },
   activeProjectId: null,
   activeFolderId: null,
   activeSaId: null,
@@ -455,7 +606,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       tblClipboard: { table: { ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) }, cols },
       colClipboard: null, colSel: null,   // excluyentes (doc 50)
     });
-    return t.physicalName || t.logicalName;
+    // Doc 105 (ronda 5, R15-H9): el nombre que se muestra, según la faceta.
+    return get().viewMode === 'logical' ? t.logicalName || t.physicalName : t.physicalName || t.logicalName;
   },
   pasteTable: () => runBlocking('Creating table…', async () => {
     if (_pasteTableBusy) return null;   // Ctrl+V repetido con el paste en vuelo
@@ -463,6 +615,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const saId = get().activeSaId;
     if (!clip) throw new Error('Nothing to paste');
     if (!saId) throw new Error('Pick a Subject Area');
+    // Doc 105 (H1): la acción es de la sesión donde empezó (ver `pinSession`).
+    const pin = pinSession();
     _pasteTableBusy = true;
     try {
       get().markDirty();
@@ -481,6 +635,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         ];
         const { physicalName, logicalName } = nextCopyNames(basePhys, baseLog, taken);
         const id = crypto.randomUUID();
+        pin.check();
         try {
           await gov.recordChangesBulk(copyTableToBulk({ table: clip.table, cols: clip.cols, id, physicalName, logicalName }));
         } catch (e) {
@@ -498,11 +653,18 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           : rf
             ? (() => { const c = rf.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }); return { x: Math.round(c.x), y: Math.round(c.y) }; })()
             : { x: 120, y: 120 };
+        pin.check();
         await struct.addToCanvas(saId, { tableIds: [id], layout: { [id]: pos } });
         await get().reload();
+        // Doc 105 (R7-E): no selecciona en otra sesión; ronda 4 (6c): tampoco
+        // devuelve el nombre — el llamador avisaría «pasted as» en la nueva.
+        if (!pin.holds()) return null;
         set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible
-        pushUndo(`Paste table ${physicalName}`, () => get().deleteTable(id));
-        return physicalName;
+        // Ronda 5 (R15-H9): el nombre de la copia que se muestra, según la faceta —
+        // ronda 6 (R17a-11): también en la etiqueta del Undo.
+        const shown = get().viewMode === 'logical' ? logicalName || physicalName : physicalName;
+        pushUndo(`Paste ${facetNouns(get().viewMode).one} ${shown}`, () => get().deleteTable(id), pin);
+        return shown;
       }
       throw lastErr instanceof Error ? lastErr : new Error("Couldn't paste the table");
     } finally { _pasteTableBusy = false; }
@@ -532,8 +694,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   viewerRoutesOff: {},
   setWireRoute: async (wireId, points) => {
     const saId = get().activeSaId;
-    const dia = get().diagram;
     const session = useSessionStore.getState();
+    // Doc 105 (ronda 4): se dispara en segundo plano (`void`) — un diagrama de
+    // otra sesión en pantalla se avisa acá, nunca un rechazo sin manejar.
+    let dia: Diagram | null;
+    try { dia = editableDiagram(); } catch (e) { await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't save the wire route"); return; }
     if (!saId || !dia || session.openMode !== 'editing' || !session.activeChangesetId) return;
     // El diagrama tiene que ser el del canvas abierto: sus wires deciden qué
     // trazos se podan al grabar.
@@ -544,14 +709,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (next === null) return;
     const prev = routeOf(get().canvasRoutes, wireId) ?? null;
     if (sameRoute(prev, next)) return;               // sin cambio real: cero requests
+    const pin = pinSession();                        // doc 105 (H1)
     get().markDirty();
     try {
       await writeWireRoute(saId, wireId, next.length ? next : null, routableWireIds(dia.relationships));
     } catch (e) {
-      toast.error(e instanceof Error && e.message ? e.message : "Couldn't save the wire route");
+      // Doc 105: el criterio de los demás guardados del canvas (espera la
+      // revalidación ante un error de la versión; qué falló + el motivo).
+      await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't save the wire route");
       return;
     }
-    pushUndo('Reroute wire', () => writeWireRoute(saId, wireId, prev));
+    pushUndo('Reroute wire', () => writeWireRoute(saId, wireId, prev), pin);
   },
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
@@ -604,8 +772,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const saId = get().activeSaId; if (!saId) return;
     get().markDirty();
     if (_drawingsTimer) clearTimeout(_drawingsTimer);
+    const s = useSessionStore.getState();
+    _drawingsCs = s.openMode === 'editing' ? s.activeChangesetId : null;
     _drawingsTimer = setTimeout(() => {
       _drawingsTimer = null;
+      if (!stillEditing(_drawingsCs)) return;          // doc 104: la sesión cambió
       // Canvas capturado al AGENDAR el flush: si el usuario cambió de canvas
       // dentro del debounce, los drawings actuales ya son del canvas nuevo y
       // no deben escribirse con este disparo (selectSubjectArea hace el flush
@@ -613,16 +784,30 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       if (get().activeSaId !== saId) return;
       // El guardado es en background (debounce): si falla, avisar — un error
       // silencioso deja al usuario creyendo que sus dibujos persistieron.
-      void struct.setSubjectAreaDrawings(saId, get().drawings).catch((e: unknown) => {
-        toast.error(e instanceof Error && e.message ? e.message : "Couldn't save the drawings");
-      });
+      const cs = _drawingsCs;
+      void struct.setSubjectAreaDrawings(saId, get().drawings)
+        .catch((e: unknown) => reportCanvasSaveError(e, cs, "Couldn't save the drawings"));
     }, 500);
   },
   dirty: false,
   markDirty: () => { if (!get().dirty) set({ dirty: true }); },
   clearDirty: () => { if (get().dirty) set({ dirty: false }); },
   saveAll: async () => {
+    // Doc 104: sin sesión de edición no hay nada que guardar (la versión se
+    // transfirió, eliminó o envió mientras el aviso de «Save and leave» seguía
+    // abierto): no se escribe — antes caía a producción sin revisión.
+    if (useSessionStore.getState().openMode !== 'editing') {
+      if (_drawingsTimer) { clearTimeout(_drawingsTimer); _drawingsTimer = null; }
+      set({ dirty: false });
+      return;
+    }
     const saId = get().activeSaId;
+    // Doc 105 (R7-A): sin el canvas de ESTA sesión no hay nada que guardar (tras
+    // cambiar de versión, sus dibujos ya se limpiaron: grabarlos los borraría).
+    // Doc 105 (ronda 4): uno de otra sesión en pantalla FALLA (con el motivo):
+    // no pasa por un guardado exitoso.
+    if (!saId || !editableDiagram()) return;
+    const pin = pinSession();   // doc 105 (H1): dos escrituras seguidas
     // Capturados JUNTO con saId: si durante el await del layout el usuario
     // cambia de canvas, get().drawings ya sería el canvas NUEVO y el flush
     // los escribiría bajo el saId viejo (pisando sus dibujos persistidos).
@@ -631,6 +816,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Flush inmediato de drawings (cancela el debounce pendiente).
     if (saId) {
       if (_drawingsTimer) { clearTimeout(_drawingsTimer); _drawingsTimer = null; }
+      pin.check();
       await struct.setSubjectAreaDrawings(saId, drawings);
     }
     set({ dirty: false });
@@ -683,9 +869,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (get().activeSaId !== canvasId) { set({ navigating: null }); return; }   // otro select ganó
     set({ pendingFocusTableId: tableId, pendingFocusColId: colId ?? null });
   },
-  loadProjects: async () => { set({ projects: await struct.listProjects() }); },
+  loadProjects: async () => {
+    const seq = _explorerSeq;   // doc 105 (A4-o2): ídem loadSchemas
+    let projects: Project[];
+    try {
+      projects = await struct.listProjects();
+    } catch (e) {
+      // Doc 105 (H6): si un refresco más nuevo la dejó atrás, su error tampoco
+      // cuenta — el refresco trae (y avisa) lo suyo: una caída, un aviso.
+      if (seq !== _explorerSeq) return;
+      throw e;
+    }
+    if (seq === _explorerSeq) set({ projects });
+  },
   selectProject: async (pid) => {
+    const { isCurrent } = explorerRequest();   // doc 105 (R7-C): respuesta de otra sesión → no escribe
     const [folders, subjectAreas] = await Promise.all([struct.listFolders(pid), struct.listSubjectAreas(pid)]);
+    if (!isCurrent()) return;
     set((s) => ({
       activeProjectId: pid, folders, subjectAreas, activeFolderId: null, activeSaId: null,
       diagram: null, selectedTableId: null, drawings: [],
@@ -696,63 +896,128 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   selectFolder: (folderId) => set({ activeFolderId: folderId }),
   loadProjectTree: async (pid) => {
+    const { isCurrent } = explorerRequest();   // doc 105 (R7-C): respuesta de otra sesión → no escribe
     const [folders, subjectAreas] = await Promise.all([struct.listFolders(pid), struct.listSubjectAreas(pid)]);
+    if (!isCurrent()) return;
     set((s) => ({ trees: { ...s.trees, [pid]: { folders, subjectAreas } } }));
   },
   refreshExplorer: async () => {
+    // Doc 105 (A4-o2): sólo el refresco más reciente escribe (`_explorerSeq`).
+    const seq = ++_explorerSeq;
+    const stale = () => seq !== _explorerSeq;
+    // Doc 105 (H4a): toda carga del diagrama pedida ANTES (la recarga del
+    // refresco anterior, un clic en el Explorer, un reload) es de otra sesión o
+    // de un árbol viejo: se descarta al llegar — si el canvas no existe acá,
+    // este refresco no lo abre y nada más subiría `_loadSeq`. Su spinner, fuera.
+    _loadSeq += 1;
     const prevSaId = get().activeSaId;
+    // Doc 105 (ronda 3): un canvas que se estaba ABRIENDO (clic en el Explorer
+    // justo antes de Refresh) es el que el usuario quiere: se abre al final si
+    // sigue existiendo — antes esta invalidación lo perdía en silencio.
+    const openingTarget = get().openingSaId;
     // Doc 75 D8: la sesión de canvas es de UN proyecto — el explorer muestra
     // ese y sólo ese; el resto de proyectos no se carga ni se lista.
     const pid = useSessionStore.getState().activeProjectId;
-    set({ trees: {}, projects: [], projectDeletionPending: false });
-    // Los dropdowns de esquema también dependen del overlay de la versión.
-    void get().loadSchemas().catch(() => {});
+    set({ trees: {}, projects: [], projectDeletionPending: false, openingSaId: null });
     const gone = (e: unknown) => e instanceof ApiError && (e.status === 404 || e.status === 409);
-    try {
-      await get().loadProjects();
-    } catch (e) {
-      if (!gone(e)) throw e;
-    }
-    const valid = new Set(get().projects.map((p) => p.id));
-    if (!pid || !valid.has(pid)) {
-      // El proyecto fue borrado en una versión publicada (o no existe en este
-      // contexto): cerrar la sesión de canvas y volver al chooser.
-      set({ activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null,
-            activeSaId: null, diagram: null, selectedTableId: null, drawings: [],
-            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null });
-      if (pid) {
+    // Doc 104: un 403/404 de la VERSIÓN abierta no es un proyecto borrado.
+    // Se espera la revalidación de la sesión: si la cambió (transferida o
+    // eliminada), ella ya avisó y acá se termina en silencio; si no, el error
+    // es real y sigue al llamador. La versión se toma AL PEDIR: cuando el
+    // error llega, la revalidación pudo haber cerrado ya la sesión.
+    const askedCs = useSessionStore.getState().activeChangesetId;
+    const askedKey = sessionNow();
+    const versionError = (e: unknown) => isVersionError(e, askedCs);
+    const sessionMoved = async (e: unknown) => {
+      if (!versionError(e)) return false;
+      await afterRevalidation();
+      // Doc 105 (ronda 3): la SESIÓN (modo, proyecto y versión), no sólo la
+      // versión — pasar a solo lectura sobre la misma también es otra sesión.
+      return sessionNow() !== askedKey;
+    };
+    // Doc 105 (A4-o3): lo que no corta el refresco (esquemas, recarga del
+    // canvas) se avisa sólo si la sesión sigue siendo la pedida — mismo
+    // criterio que el Explorer (sessionGuard).
+    const stillAsked = async (e: unknown) =>
+      !stale() && (await stillAskedSession(e, askedCs, askedKey, sessionNow)) && !stale();
+    // Los dropdowns de esquema también dependen del overlay de la versión.
+    // Doc 105 (H6): su error se avisa sólo si el resto del refresco anduvo —
+    // si no, ya hay un aviso (el del refresco o el del canvas): una caída, un aviso.
+    const schemasLoad = get().loadSchemas().then(() => null, (e: unknown) => ({ e }));
+    /** El refresco; true si terminó completo (sin cortar ni avisar nada). */
+    const body = async (): Promise<boolean> => {
+      try {
+        await get().loadProjects();
+      } catch (e) {
+        if (stale() || await sessionMoved(e)) return false;
+        if (versionError(e) || !gone(e)) throw e;
+      }
+      if (stale()) return false;
+      const valid = new Set(get().projects.map((p) => p.id));
+      if (!pid || !valid.has(pid)) {
+        // El proyecto fue borrado en una versión publicada (o no existe en este
+        // contexto): cerrar la sesión de canvas y volver al chooser.
+        set({ activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null,
+              activeSaId: null, diagram: null, selectedTableId: null, drawings: [],
+              colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null });
+        if (pid) {
+          toast.error('This project was deleted in a published version.');
+          useSessionStore.getState().closeModel();
+        }
+        return false;
+      }
+      set({ activeProjectId: pid });
+      try {
+        // Depura activeSaId vs la nueva membresía (si el refresco sigue vigente).
+        await get()._refreshProject(pid, () => !stale());
+      } catch (e) {
+        if (stale() || await sessionMoved(e)) return false;
+        if (versionError(e) || !gone(e)) throw e;
         toast.error('This project was deleted in a published version.');
         useSessionStore.getState().closeModel();
+        return false;
       }
-      return;
-    }
-    set({ activeProjectId: pid });
-    try {
-      await get()._refreshProject(pid);   // depura activeSaId vs la nueva membresía
-    } catch (e) {
-      if (!gone(e)) throw e;
-      toast.error('This project was deleted in a published version.');
-      useSessionStore.getState().closeModel();
-      return;
-    }
-    const saId = get().activeSaId;
-    if (saId && saId === prevSaId) {
-      // El canvas sobrevive al cambio de contexto: re-cargarlo COMPLETO
-      // (diagrama + drawings) bajo el overlay de la versión nueva.
-      try { await get().selectSubjectArea(saId); }
-      catch { set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null }); }
-    }
+      if (stale()) return false;
+      const saId = get().activeSaId;
+      const reopen = openingTarget && get().subjectAreas.some((x) => x.id === openingTarget) ? openingTarget
+        : saId && saId === prevSaId ? saId : null;
+      // Ronda 5 (observación R15): sin reapertura, una recarga pendiente no
+      // tiene quién la resuelva — el canvas ya no está.
+      if (!reopen) _reloadAfterOpening = null;
+      if (reopen) {
+        // El canvas sobrevive al cambio de contexto: re-cargarlo COMPLETO
+        // (diagrama + drawings) bajo el overlay de la versión nueva.
+        try { await get().selectSubjectArea(reopen); }
+        catch (e) {
+          // Doc 105 (A4-o3): si la sesión cambió, el refresco de la nueva decide
+          // qué canvas queda; si no, se cierra (su diagrama es de la sesión
+          // anterior) y se dice por qué — antes se cerraba en silencio.
+          if (!(await stillAsked(e))) return false;
+          set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
+          toast.error(`Couldn't reload the canvas: ${reasonOf(e)}. Open it again from the explorer.`,
+            { id: `dmh-canvas-reload:${askedKey}` });
+          return false;
+        }
+      }
+      return true;
+    };
+    if (!(await body())) return;
+    void schemasLoad.then(async (failed) => {
+      if (!failed || !(await stillAsked(failed.e))) return;
+      toast.error(`Couldn't load the schemas: ${reasonOf(failed.e)}. Use Refresh in the explorer to try again.`,
+        { id: `dmh-schemas-load:${askedKey}` });
+    });
   },
   selectSubjectArea: async (saId, projectId) => {
     // Flush inmediato de drawings pendientes del canvas ANTERIOR: el debounce
     // de 500ms perdería el último trazo al cambiar de canvas.
-    const prevSa = get().activeSaId;
-    if (_drawingsTimer && prevSa) {
-      clearTimeout(_drawingsTimer); _drawingsTimer = null;
-      void struct.setSubjectAreaDrawings(prevSa, get().drawings).catch(() => {});
-    }
+    flushPendingDrawings(get().activeSaId, get().drawings);
     const seq = ++_loadSeq;
+    _openingSeq = seq;
+    const pin = pinSession();   // doc 105 (R7-A): el sello de la sesión del diagrama
     set({ openingSaId: saId });
+    let installed = false;
+    let threw = false;   // ronda 7 (R18a-6): la apertura falló — quien la pidió lo avisa
     try {
       const asked = canvasClock();
       const loaded = await mod.loadDiagram(saId);
@@ -760,7 +1025,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // otro canvas (o corrió otro reload), pisar el diagrama con esta
       // respuesta dejaría el canvas mostrando un subject area ajeno.
       if (seq !== _loadSeq) return;
-      const diagram = withWrittenCanvas(loaded, asked);
+      const diagram = sealDiagram(withWrittenCanvas(loaded, asked), pin);
       // Si el canvas es de OTRO proyecto, ése pasa a ser el activo y se espejan
       // los campos legacy (folders/subjectAreas) desde el cache del árbol.
       let crossProject = {};
@@ -778,54 +1043,90 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // sobrevive al cambio de canvas (copiar en A, pegar en B — decisión iii).
       // Doc 99: también el wire seleccionado — la misma relación puede estar en
       // el canvas nuevo y aparecería seleccionada, con sus tiradores a la vista.
+      installed = true;
       set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null, selectedEdgeId: null,
             colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
             drawings: diagram.subjectArea.drawings ?? [] });
       // Doc 83: reglas de naming del proyecto del canvas (best-effort, no bloquea).
       void get().loadNaming(pid ?? get().activeProjectId);
+    } catch (e) {
+      threw = true;
+      throw e;
     } finally {
-      // Sólo la llamada MÁS RECIENTE limpia el spinner: una vieja descartada
-      // no debe apagar el openingSaId de la que sigue en vuelo.
-      if (seq === _loadSeq) set({ openingSaId: null });
+      // Sólo la apertura que puso el spinner lo apaga: una vieja descartada no
+      // apaga el de la que sigue en vuelo (doc 105: y una invalidada por otra
+      // carga no lo deja pegado).
+      if (seq === _openingSeq && get().openingSaId === saId) {
+        set({ openingSaId: null });
+        // La recarga pedida durante ESTA apertura (ronda 4, R10-B / ronda 5, R15-H3).
+        const pending = _reloadAfterOpening;
+        _reloadAfterOpening = null;
+        if (pending?.saId === saId) {
+          if (installed) await reloadAfterOpening(pending.prev);   // el mismo: su foto pudo ser de antes
+        } else if (pending && installed) {
+          get().bumpExplorer();                                    // se abrió otro: el Explorer igual se entera
+        } else if (pending) {
+          // Falló: sigue el editado, con la foto de antes. Ronda 7 (R18a-6): si
+          // su recarga también falla, cierra el canvas sin otro aviso — el de la
+          // apertura ya cuenta la caída.
+          await reloadAfterOpening(pending.prev, threw);
+        }
+      }
     }
   },
   // ── Folders / Canvas / Projects (gestión del Model Explorer) ───────────
-  loadFolders: async (projectId) => { set({ folders: await struct.listFolders(projectId) }); },
+  loadFolders: async (projectId) => {
+    const { isCurrent } = explorerRequest();   // doc 105 (R7-C): respuesta de otra sesión → no escribe
+    const folders = await struct.listFolders(projectId);
+    if (isCurrent()) set({ folders });
+  },
   // Refresca folders+canvases del proyecto activo tras una mutación y deja
   // `activeSaId` inválido en null (su canvas pudo haberse borrado).
+  // Doc 105 (H4b): cada una relee el árbol sólo si sigue la sesión en que se
+  // pidió (`explorerRequest`): la respuesta tardía de un draft no pisa el
+  // Explorer de la versión que se abrió después.
   createFolder: async (projectId, parentFolderId, name) => {
+    const { isCurrent } = explorerRequest();
     await struct.createFolder(projectId, parentFolderId, name);
-    await get()._refreshProject(projectId);
+    await get()._refreshProject(projectId, isCurrent);
   },
   renameFolder: async (id, name, projectId) => {
+    const { isCurrent } = explorerRequest();
     await struct.renameFolder(id, name);
-    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid);
+    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid, isCurrent);
   },
   deleteFolder: async (id, projectId) => {
+    const { isCurrent } = explorerRequest();
     await struct.deleteFolder(id);
-    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid);
+    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid, isCurrent);
   },
   createCanvas: async (projectId, folderId, name) => {
+    const { isCurrent, pin } = explorerRequest();
     const sa = await struct.createSubjectArea(projectId, name, folderId);
-    await get()._refreshProject(projectId);
+    await get()._refreshProject(projectId, isCurrent);
+    // En otra sesión el canvas nuevo no existe (se creó en el draft anterior).
+    if (!pin.holds()) return;
     await get().selectSubjectArea(sa.id, projectId);
   },
   renameCanvas: async (id, name, projectId) => {
     const pid = projectId ?? get().activeProjectId; if (!pid) return;
+    const { isCurrent } = explorerRequest();
     const pool = get().trees[pid]?.subjectAreas ?? get().subjectAreas;
     const sa = pool.find((s) => s.id === id);
     await struct.updateSubjectArea(id, { projectId: pid, name, folderId: sa?.folderId ?? null });
-    await get()._refreshProject(pid);
+    await get()._refreshProject(pid, isCurrent);
   },
   deleteCanvas: async (id, projectId) => {
+    const { isCurrent } = explorerRequest();
     await struct.deleteSubjectArea(id);
-    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid);
+    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid, isCurrent);
   },
   moveCanvas: async (id, folderId) => {
     const pid = get().activeProjectId; if (!pid) return;
     const sa = get().subjectAreas.find((s) => s.id === id); if (!sa) return;
+    const { isCurrent } = explorerRequest();
     await struct.updateSubjectArea(id, { projectId: pid, name: sa.name, folderId });
-    await get()._refreshProject(pid);
+    await get()._refreshProject(pid, isCurrent);
   },
   renameProject: async (id, name) => {
     await struct.renameProject(id, name);
@@ -842,8 +1143,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   undoProjectDeletion: async () => {
     const pid = get().activeProjectId;
     if (!pid) return;
+    const pin = pinSession();   // doc 105 (H1): lee y después escribe
     const published = (await mod.listProjects()).find((p) => p.id === pid);
     if (!published) throw new Error('The published project could not be read.');
+    pin.check();
     await struct.reviveProject(pid, published);
     set({ projectDeletionPending: false });
     await get().refreshExplorer();
@@ -851,10 +1154,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   // Helper interno: recarga folders+canvases del proyecto al cache `trees` y,
   // si es el proyecto ACTIVO, espeja los campos legacy y depura la selección
   // (el canvas activo pudo haberse borrado).
-  _refreshProject: async (projectId) => {
+  _refreshProject: async (projectId, isCurrent) => {
     const [folders, subjectAreas, projectDeletionPending] = await Promise.all([
       struct.listFolders(projectId), struct.listSubjectAreas(projectId), struct.projectDeletionPending(projectId),
     ]);
+    if (isCurrent && !isCurrent()) return;   // doc 105 (A4-o2): respuesta de un refresco viejo
     const st = get();
     const treesPatch = { trees: { ...st.trees, [projectId]: { folders, subjectAreas } }, projectDeletionPending };
     if (projectId !== st.activeProjectId) { set(treesPatch); return; }
@@ -878,18 +1182,43 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     } catch { /* sin config el front asume upper (default del backend) */ }
   },
   reload: async () => {
+    const quiet = _quietReloadFailure;
+    _quietReloadFailure = false;
     const id = get().activeSaId; if (!id) return;
+    // Doc 105 (ronda 3, R7-D/E): con una APERTURA de canvas en vuelo (clic en
+    // el Explorer, reapertura del refresco) ésa trae el diagrama al día —
+    // recargar ahora la invalidaba y dejaba el spinner pegado.
+    if (get().openingSaId) {
+      // Ronda 4 (R10-B) / ronda 5 (R15-H3): lo resuelve esa apertura al terminar
+      // (con el diagrama de ahora para el aviso al Explorer).
+      _reloadAfterOpening ??= { saId: id, prev: get().diagram };
+      return;
+    }
     const seq = ++_loadSeq;
+    const pin = pinSession();   // doc 105 (R7-A): el sello de la sesión del diagrama
+    const askedCs = useSessionStore.getState().activeChangesetId;
     const asked = canvasClock();
     let loaded: Diagram;
     try {
       loaded = await mod.loadDiagram(id);
-    } catch {
-      // El canvas no existe en el contexto actual (p.ej. draft de OTRA versión
-      // tras cambiar de changeset): limpiar la selección en vez de dejar el
-      // diagrama viejo pegado.
-      if (seq === _loadSeq && get().activeSaId === id) {
-        set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
+    } catch (e) {
+      // Doc 105 (ronda 5, R15-H6): antes cerraba el canvas EN SILENCIO ante
+      // cualquier falla. Un error de la versión espera la revalidación (si la
+      // sesión cambió, ella avisó y el canvas ya se limpió). Ronda 7 (R18a-1):
+      // cualquier otra falla también lo CIERRA, y lo dice — lo que había en
+      // pantalla es de antes de la escritura que acaba de terminar y editar
+      // desde ahí (store, paneles, popups) pisaba lo grabado. Sin reintento
+      // automático: se reabre desde el Explorer. Un 404, con su propio aviso.
+      if (touchesVersion(e, askedCs)) await afterRevalidation();
+      if (seq !== _loadSeq || get().activeSaId !== id) return;   // otra carga (o la sesión cambió: sube `_loadSeq`)
+      // Ronda 7: un dibujo del debounce se guarda antes de cerrar (el canvas
+      // sigue existiendo); con el 404 ya no está.
+      if (!(e instanceof ApiError && e.status === 404)) flushPendingDrawings(id, get().drawings);
+      set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
+      if (e instanceof ApiError && e.status === 404) {
+        toast.error('This canvas is no longer in this version, so it was closed. Open another one from the explorer.', { id: `dmh-canvas-reload:${sessionNow()}` });
+      } else if (!quiet) {
+        toast.error(`Couldn't reload the canvas: ${reasonOf(e)}. Open it again from the explorer.`, { id: `dmh-canvas-reload:${sessionNow()}` });
       }
       return;
     }
@@ -897,7 +1226,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (seq !== _loadSeq || get().activeSaId !== id) return;
     // Doc 99: si algo del canvas se grabó después de pedir este diagrama, se
     // repone (la foto puede ser de antes de ese guardado).
-    const diagram = withWrittenCanvas(loaded, asked);
+    const diagram = sealDiagram(withWrittenCanvas(loaded, asked), pin);
     const prev = get().diagram;
     set({ diagram });
     // Doc 88 §2: un cambio ESTRUCTURAL del MISMO canvas (tabla/vista nueva,
@@ -907,24 +1236,44 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       get().bumpExplorer();
     }
   },
-  saveLayout: async (tableId, pos) => {
+  saveLayout: (tableId, pos) => get().saveNodePositions({ [tableId]: pos }),
+  saveNodePositions: async (positions) => {
     const saId = get().activeSaId; if (!saId) return;
+    // Doc 105 (R7-A / ronda 4): el canvas de ESTA sesión; uno de otra en
+    // pantalla se avisa acá (segundo plano: nunca un rechazo sin manejar).
+    let dia: Diagram | null;
+    try { dia = editableDiagram(); } catch (e) { await reportCanvasSaveError(e, editingCs(), "Couldn't save the position"); return; }
+    if (!dia) return;
+    // Doc 105 (ronda 5, R15-H1): sólo los bloques del canvas en pantalla — uno
+    // de otro canvas (pintado por error bajo éste) no entra a su layout.
+    const onCanvas = canvasNodeIds(dia);
+    const ids = Object.keys(positions).filter((id) => onCanvas.has(id));
+    if (!ids.length) return;
     get().markDirty();
-    // Doc 99: la posición queda también en el diagrama del store, EN SITIO (sin
-    // cambiar su identidad, que re-armaría el canvas). El diagrama guarda el
-    // layout de su última carga y el canvas se re-arma con él al pasar de
+    // Doc 99: las posiciones quedan también en el diagrama del store, EN SITIO
+    // (sin cambiar su identidad, que re-armaría el canvas). El diagrama guarda
+    // el layout de su última carga y el canvas se re-arma con él al pasar de
     // Logical a Physical o al guardar Model properties: sin esto el bloque
     // recién movido volvía a su sitio viejo hasta el siguiente reload — y un
     // trazo manual quedaba referido a una posición que ya no era la de pantalla.
     // Doc 100 (P6): en píxeles enteros, igual que lo que se graba.
-    const at = wholePoint({ x: pos.x, y: pos.y });
-    const sa = get().diagram?.subjectArea;
-    if (sa && sa.id === saId) sa.layout = { ...(sa.layout ?? {}), [tableId]: at };
-    await struct.setSubjectAreaLayout(saId, { [tableId]: at });
+    const at: Record<string, { x: number; y: number }> = {};
+    for (const id of ids) at[id] = wholePoint({ x: positions[id].x, y: positions[id].y });
+    const sa = liveDiagram()?.subjectArea;
+    if (sa && sa.id === saId) sa.layout = { ...(sa.layout ?? {}), ...at };
+    // Doc 105 (F1): el canvas lo dispara en segundo plano (`void`): un fallo se
+    // avisa acá, con el criterio de los dibujos — nunca un rechazo sin manejar.
+    // A4-o1: todos los bloques movidos juntos van en UNA escritura (MERGEA).
+    const cs = editingCs();
+    try {
+      await struct.setSubjectAreaLayout(saId, at);
+    } catch (e) {
+      await reportCanvasSaveError(e, cs, "Couldn't save the position");
+    }
   },
   saveAllLayout: async () => {
     const saId = get().activeSaId; const rf = get().flow;
-    if (!saId || !rf) return;
+    if (!saId || !rf || !editableDiagram()) return;   // doc 105 (R7-A / ronda 4)
     const layout: Record<string, { x: number; y: number }> = {};
     // Tablas Y vistas (F3: la posición de una vista vive en layout[viewId],
     // misma estructura) Y símbolos de subcategoría (doc 53: layout[symbolId]);
@@ -933,11 +1282,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await struct.setSubjectAreaLayout(saId, layout); // MERGEA en backend (M3a)
   },
   autoOrganize: async () => {
-    const dia = get().diagram; const saId = get().activeSaId;
+    const dia = editableDiagram(); const saId = get().activeSaId;   // doc 105 (ronda 4)
     if (!dia || !saId) return;
+    const pin = pinSession();   // doc 105 (H1): el cálculo de ELK es asíncrono
     // Doc 84 E: en modo visor el arrange es de ESTA sesión — ni dirty ni persistencia.
     const viewer = useSessionStore.getState().openMode === 'readonly';
     if (!viewer) get().markDirty();
+    // Doc 99: estado ANTES del arrange, para el Undo — posiciones de los nodos
+    // vivos (las mismas que guarda Save) y trazos manuales del canvas. Doc 105
+    // (ronda 3): se toman ANTES de calcular — si mientras ELK trabaja se abre
+    // otro canvas, los nodos vivos ya serían de ése.
+    const prevRoutes = get().canvasRoutes;
+    const prevLayout: Record<string, { x: number; y: number }> = {};
+    for (const n of get().flow?.getNodes() ?? []) {
+      if (n.type === 'table' || n.type === 'view' || n.type === 'subcat') {
+        prevLayout[n.id] = { x: n.position.x, y: n.position.y };
+      }
+    }
     // Grafo + ELK + símbolos de subcategoría en `arrangeGraph.ts` (doc 55:
     // lo comparte el arrange headless de la carga masiva). Tamaños MEDIDOS de
     // los nodos vivos: ELK con tamaño fijo superponía las tablas altas (30
@@ -949,6 +1310,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       return m?.width != null && m?.height != null ? { width: m.width, height: m.height } : undefined;
     }, get().viewMode);
     if (viewer) {
+      // Doc 105 (ronda 4, R10-C): sólo en la sesión y el canvas donde empezó —
+      // los nodos vivos pueden ser ya los del draft que se abrió mientras ELK
+      // calculaba (y un Save los grabaría) o los de otro canvas (tablas homónimas).
+      if (!pin.holds() || get().activeSaId !== saId) return;
       // Se aplica a los nodos vivos y se recuerda por canvas (viewerLayout) para
       // que un re-armado del diagrama no lo pierda; nunca viaja al backend.
       // Doc 99: con todos los bloques en otro sitio, los trazos manuales
@@ -960,17 +1325,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       get().flow?.setNodes((nodes) => nodes.map((n) => (pos[n.id] ? { ...n, position: pos[n.id] } : n)));
       return;
     }
-    // Doc 99: estado ANTES del arrange, para el Undo — posiciones de los nodos
-    // vivos (las mismas que guarda Save) y trazos manuales del canvas.
-    const prevRoutes = get().canvasRoutes;
-    const prevLayout: Record<string, { x: number; y: number }> = {};
-    for (const n of get().flow?.getNodes() ?? []) {
-      if (n.type === 'table' || n.type === 'view' || n.type === 'subcat') {
-        prevLayout[n.id] = { x: n.position.x, y: n.position.y };
-      }
-    }
     // Posiciones nuevas (MERGEA, M3a) y trazos REINICIADOS en una sola
     // escritura del canvas: nunca quedan posiciones nuevas con trazos viejos.
+    pin.check();
     await struct.arrangeSubjectArea(saId, pos);
     showRoutes(saId, () => ({}));
     pushUndo('Auto-arrange', async () => {
@@ -978,11 +1335,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       if (get().activeSaId !== saId) return;
       showRoutes(saId, () => prevRoutes);
       await get().reload();
-    });
+    }, pin);
     await get().reload();
   },
   createTable: async (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical'; description?: string; udpValues?: Record<string, string> }) => {
     const saId = get().activeSaId; if (!saId) throw new Error('Pick a Subject Area');
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
     const id = crypto.randomUUID();
     // Físico: explícito (New table modal, ya auto-physicalizado scope:'table') →
@@ -994,21 +1352,26 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // solo con contenido — mismo criterio del alta de columna, doc 40).
     const description = input.description?.trim() || undefined;
     const udpValues = input.udpValues && Object.keys(input.udpValues).length ? input.udpValues : undefined;
+    pin.check();
     await gov.createTable({
       id, logicalName: input.logicalName, physicalName: physical, schema,
       ...(description ? { description } : {}),
       ...(udpValues ? { udpValues } : {}),
     });
     // referenciar la nueva tabla en la Subject Area
+    pin.check();
     await struct.addToCanvas(saId, { tableIds: [id] });
     await get().reload();
+    if (!pin.holds()) return;   // doc 105 (R7-E): lo que sigue es de la sesión de la acción
     // La tabla nueva queda SELECCIONADA → sube al frente (zIndex) y no cae oculta
     // detrás de un bloque que ya estaba en el canvas (pedido owner).
     set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
     // Undo (doc 50): tabla recién creada — la cascada del delete es trivial.
-    pushUndo(`Create table ${physical}`, () => get().deleteTable(id));
+    pushUndo(`Create table ${physical}`, () => get().deleteTable(id), pin);
   },
   addColumn: async (tableId: string, input: AddColumnInput) => {
+    const dia = editableDiagram(); if (!dia) return;   // doc 105 (R7-A / ronda 4): el canvas de ESTA sesión
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
     const id = crypto.randomUUID();
     // Doc 83: en modo Physical lo tipeado ES el físico → se persiste con la
@@ -1044,7 +1407,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // INICIO de la tabla) — coherente con la propagación a vistas de abajo.
     // Doc 94 D2: una PK nueva entra tras la ÚLTIMA PK y las no-PK se corren en
     // el MISMO lote (la tabla queda PK primero).
-    const siblings = (get().diagram?.columns ?? []).filter((c) => c.tableId === tableId);
+    const siblings = dia.columns.filter((c) => c.tableId === tableId);
     const layout = input.isPrimaryKey ? pkFirstOrdinals(siblings, { toKey: [id], add: [{ id }] }) : null;
     const ordinal = layout ? layout.get(id)!
       : siblings.length ? Math.max(...siblings.map((c) => c.ordinal)) + 1 : 0;
@@ -1072,6 +1435,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       ...(input.isPartition ? { isPartition: true } : {}),
       ...(input.udpValues && Object.keys(input.udpValues).length ? { udpValues: input.udpValues } : {}),
     };
+    pin.check();
     if (shifts.length) await gov.recordChangesBulk([gov.bulk.createColumn(payload), ...shifts]);
     else await gov.createColumn(payload);
     // V1 (doc 19 §12b): la columna nueva entra AUTOMÁTICAMENTE a las vistas
@@ -1080,28 +1444,31 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // no se tocan. Best-effort: un fallo acá no bloquea el alta (queda "Match
     // physical order" para alinear).
     try {
-      const touched = await syncNewColumnToMirrorViews(
-        { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-        tableId, physical, siblings, !!input.isPrimaryKey,
-      );
-      if (touched) toast.success(`Column also added to ${touched} mirror view(s)`);
+      const touched = await syncNewColumnToMirrorViews(pinnedViewDeps(pin), tableId, physical, siblings, !!input.isPrimaryKey);
+      if (touched && pin.holds()) toast.success(`Column also added to ${touched} mirror view(s)`);
     } catch { /* la vista se alinea después con "Match physical order" */ }
+    // Doc 105 (ronda 3): si la sesión cambió mientras sincronizaba, lo que sigue ya no es de ésta.
+    if (!pin.holds()) return;
     await get().reload();
     // Undo (doc 50): la inversa es el delete del store — limpia también las
     // vistas espejo y el panel de columna si quedó abierto sobre ella.
-    pushUndo(`Add column ${physical}`, () => get().deleteColumn(id));
+    pushUndo(`Add column ${physical}`, () => get().deleteColumn(id), pin);
   },
   updateRelationship: async (r) => {
+    const dia = editableDiagram(); if (!dia) return;   // doc 105 (R7-A / ronda 4): el canvas de ESTA sesión
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
-    const pre0 = get().diagram?.relationships.find((x) => x.id === r.id);
+    const pre0 = dia.relationships.find((x) => x.id === r.id);
     const pre = pre0 ? { ...pre0, pairs: pre0.pairs.map((p) => ({ ...p })) } : null;
     await gov.updateRelationship(r);
-    if (pre) pushUndo('Edit relationship', async () => { await gov.updateRelationship(pre); await get().reload(); });
+    if (pre) pushUndo('Edit relationship', async () => { await gov.updateRelationship(pre); await get().reload(); }, pin);
     await get().reload();
   },
   deleteRelationship: async (id) => {
+    const dia = editableDiagram(); if (!dia) return;   // doc 105 (R7-A / ronda 4): el canvas de ESTA sesión
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
-    const rel = get().diagram?.relationships.find((r) => r.id === id);
+    const rel = dia.relationships.find((r) => r.id === id);
     // Pre-imágenes para el Undo (doc 50): la relación por valor + las FKs que
     // la limpieza de abajo apaga.
     const relPre = rel ? { ...rel, pairs: rel.pairs.map((p) => ({ ...p })) } : null;
@@ -1113,7 +1480,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // quita isForeignKey. Conservador a propósito; isPrimaryKey nunca se toca.
     if (rel) {
       for (const colId of rel.pairs.map((p) => p.childColumnId)) {
-        const col = get().diagram?.columns.find((c) => c.id === colId);
+        const col = dia.columns.find((c) => c.id === colId);
         if (!col?.isForeignKey) continue;
         // Slice server-side: sólo las relaciones que tocan la TABLA de la
         // columna (una relación siempre referencia la tabla de sus columnas).
@@ -1121,6 +1488,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         const stillLinked = near.some((r) => r.pairs.some((p) => p.childColumnId === colId));
         if (!stillLinked) {
           fkClearedPre.push({ ...col });
+          pin.check();
           await gov.updateColumn({ ...col, isForeignKey: false });
         }
       }
@@ -1132,27 +1500,39 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           gov.bulk.upsertRelationship(relPre),
         ]);
         await get().reload();
-      });
+      }, pin);
     }
     await get().reload();
   },
   addExistingTables: async (tableIds: string[], opts) => {
     const saId = get().activeSaId; if (!saId || tableIds.length === 0) return;
+    const dia = editableDiagram(); if (!dia) return;   // doc 105 (R7-A / ronda 4): el canvas de ESTA sesión
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
     // Doc 70: la membresía de vistas parte de la lista MATERIALIZADA del
     // diagrama (un canvas legacy la recibe resuelta por el backend). Importar
     // una tabla NO arrastra sus vistas — sólo si el usuario lo pide.
-    const shown = get().diagram?.subjectArea.viewIds;
+    const shown = dia.subjectArea.viewIds;
+    // Doc 105 (A5-o1): si las vistas no se pueden leer, las tablas entran igual
+    // (es lo principal) pero se avisa — antes entraban sin sus vistas, callado.
+    let viewsUnread = false;
     const withViews = opts?.withViews
-      ? (await viewsSvc.listViewsForTables(tableIds).catch(() => [] as View[])).map((v) => v.id)
+      ? (await viewsSvc.listViewsForTables(tableIds).catch(() => { viewsUnread = true; return [] as View[]; })).map((v) => v.id)
       : [];
     // Doc 100: la lista completa la arma el servicio DENTRO de la cola del
     // canvas y devuelve lo REALMENTE agregado: la inversa del Undo no debe
     // sacar del canvas una tabla o vista que ya vivía acá.
+    pin.check();
     const added = await struct.addToCanvas(saId, { tableIds, viewIds: withViews }, shown);
     await get().reload();
+    if (!pin.holds()) return;   // doc 105 (R7-E): lo que sigue es de la sesión de la acción
     // Selecciona la primera importada → al frente (zIndex) y visible (owner).
     set({ selectedTableId: tableIds[0], selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
+    if (viewsUnread) {
+      toast.warning(tableIds.length === 1
+        ? "The table was imported, but its views couldn't be loaded: add them from its Views tab (Properties)."
+        : "The tables were imported, but their views couldn't be loaded: add them from each table's Views tab (Properties).");
+    }
     if (added.tableIds.length || added.viewIds.length) {
       const nt = added.tableIds.length;
       const nv = added.viewIds.length;
@@ -1165,13 +1545,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       pushUndo(`Add ${what} to canvas`, async () => {
         await struct.removeFromCanvas(saId, added, shown);
         await get().reload();
-      });
+      }, pin);
     }
   },
   addViewsToCanvas: async (viewIds) => {
     const saId = get().activeSaId; if (!saId || viewIds.length === 0) return;
-    const shown = get().diagram?.subjectArea.viewIds ?? [];
+    const dia = editableDiagram(); if (!dia) return;   // doc 105 (R7-A / ronda 4): el canvas de ESTA sesión
+    const shown = dia.subjectArea.viewIds ?? [];
     if (viewIds.every((v) => shown.includes(v))) return;          // ya eran miembros
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
     // Doc 100: la lista completa la arma el servicio dentro de la cola.
     const added = await struct.addToCanvas(saId, { viewIds }, shown);
@@ -1181,15 +1563,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     pushUndo(`Add ${n} view${n === 1 ? '' : 's'} to canvas`, async () => {
       await struct.removeFromCanvas(saId, { viewIds: added.viewIds }, shown);
       await get().reload();
-    });
+    }, pin);
   },
   removeViewFromCanvas: async (viewId) => {
     const saId = get().activeSaId; if (!saId) return;
-    const shown = get().diagram?.subjectArea.viewIds ?? [];
+    const dia = editableDiagram(); if (!dia) return;   // doc 105 (R7-A / ronda 4): el canvas de ESTA sesión
+    const shown = dia.subjectArea.viewIds ?? [];
     if (!shown.includes(viewId)) return;
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
     // Para el Undo (doc 50): nombre y posición ANTES de quitarla.
-    const name = get().diagram?.views.find((v) => v.id === viewId)?.name ?? 'view';
+    const name = dia.views.find((v) => v.id === viewId)?.name ?? 'view';
     const node = get().flow?.getNode(viewId);
     const pos = node ? { x: Math.round(node.position.x), y: Math.round(node.position.y) } : null;
     await struct.removeFromCanvas(saId, { viewIds: [viewId] }, shown);
@@ -1200,10 +1584,56 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     pushUndo(`Remove ${name} from canvas`, async () => {
       await struct.addToCanvas(saId, { viewIds: [viewId], ...(pos ? { layout: { [viewId]: pos } } : {}) }, shown);
       await get().reload();
-    });
+    }, pin);
+  },
+  deleteView: async (view, opts) => {
+    const pin = pinSession();   // doc 105 (H1)
+    const askedCs = useSessionStore.getState().activeChangesetId;
+    const saId = get().activeSaId;
+    const onActive = !!saId && !!liveDiagram()?.views.some((v) => v.id === view.id);
+    // Pre-imagen POR VALOR (doc 50): el doc completo, sin `canvases` (la fila
+    // del panel o del inspector no es parte del doc).
+    const pre = JSON.parse(JSON.stringify(view)) as View & { canvases?: unknown };
+    delete pre.canvases;
+    // Dónde está ANTES de borrarla: el backend la saca de cada canvas que la
+    // lista, con su posición, en el mismo request (doc 88 §4). Si no se puede
+    // leer, no se borra (el Undo quedaría incompleto).
+    let placed: Map<string, ListedViews>;
+    try {
+      const src = view.sourceTableIds?.[0] ?? view.tableId;
+      const canvasIds = opts?.canvasIds ?? (src
+        ? ((await viewsSvc.tableViews(src)).views.find((v) => v.id === view.id)?.canvases ?? []).map((c) => c.id)
+        : []);
+      placed = await listedViewsBy([...canvasIds, ...(onActive && saId ? [saId] : [])], [view.id]);
+    } catch (e) {
+      throw await readFailure(e, askedCs, pin, () => new Error(VIEW_USAGE_UNREADABLE));   // ídem deleteTable
+    }
+    pin.check();
+    get().markDirty();
+    await viewsSvc.deleteView(view.id);
+    if (get().selectedViewId === view.id) set({ selectedViewId: null });
+    pushUndo(`Delete view ${pre.name}`, async (undo) => {
+      await viewsSvc.updateView(pre.id, pre as ViewInput);
+      // Doc 100 (P5): cada canvas la vuelve a listar DENTRO de su cola, en UNA
+      // escritura con su posición. Un canvas sin lista explícita (legacy) no se
+      // toca: su regla por fuentes la vuelve a mostrar (y conserva su sitio).
+      // Doc 105 (H1): sólo mientras siga la sesión del Undo.
+      for (const [canvasId, listed] of placed) {
+        undo.check();
+        try {
+          await struct.addToCanvas(canvasId, {
+            viewIds: listed.viewIds, ...(Object.keys(listed.layout).length ? { layout: listed.layout } : {}),
+          });
+        } catch { /* el canvas pudo desaparecer */ }
+      }
+      await get().reload();
+      // Doc 89 §3.6: si no volvió al canvas activo, el Explorer se refresca a mano.
+      get().syncExplorer(!!get().diagram?.views.some((v) => v.id === pre.id));
+    }, pin);
   },
   createTableFromSources: ({ logicalName, schema, columns }) => runBlocking('Creating table…', async () => {
     const saId = get().activeSaId; if (!saId) throw new Error('Pick a Subject Area');
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
     const id = crypto.randomUUID();
     const physical = (await gov.physicalize(logicalName, 'table')).physical;
@@ -1219,6 +1649,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // solo si aportan (payload limpio, patrón addColumn del doc 40).
     let ordinal = 0;
     const pkFirst = [...columns.filter((c) => c.isPrimaryKey), ...columns.filter((c) => !c.isPrimaryKey)];
+    pin.check();
     await gov.recordChangesBulk([
       gov.bulk.createTable(
         { id, logicalName, physicalName: physical, schema: schema?.trim() || undefined },
@@ -1239,10 +1670,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }, { kind: 'ctas', ...(c.sourceTable ? { sourceTable: c.sourceTable } : {}), sourceColumn: c.physicalName });
       }),
     ]);
+    pin.check();
     await struct.addToCanvas(saId, { tableIds: [id] });
     await get().reload();
+    if (!pin.holds()) return;   // doc 105 (R7-E): no selecciona en otra sesión
     set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible (owner)
-    pushUndo(`Create table ${physical}`, () => get().deleteTable(id));
+    pushUndo(`Create table ${physical}`, () => get().deleteTable(id), pin);
   }),
   setColumnTarget: (id: string | null) => set({ columnTarget: id }),
   // Seleccionar tabla o edge cambia de contexto: cierra el panel de columna.
@@ -1251,9 +1684,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   removeTableFromArea: async (tableId) => {
     get().markDirty();
     const saId = get().activeSaId; if (!saId) return;
+    const d = editableDiagram(); if (!d) return;   // doc 105 (R7-A / ronda 4): el canvas de ESTA sesión
+    const pin = pinSession();   // doc 105 (H1)
     // Para el Undo (doc 50): nombre y posición ANTES de quitarla (el remove
     // también borra su entrada del layout).
-    const d = get().diagram;
     const name = d?.tables.find((t) => t.id === tableId)?.physicalName ?? 'table';
     const flow = get().flow;
     const posOf = (id: string) => {
@@ -1286,12 +1720,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       await struct.addToCanvas(saId, { tableIds: [tableId], viewIds: orphans, layout, routes: droppedRoutes },
         orphans.length ? shown : undefined);
       await get().reload();
-    });
+    }, pin);
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
   },
   deleteTable: (tableId, opts) => runBlocking('Deleting table…', async () => {
-    get().markDirty();
     // Cascada COMPLETA en el changeset (versionada), grabada EN LOTE (doc 39):
     // el camino cambio-por-cambio eran ~1 request por columna — a 4k columnas
     // (tablas DDV reales) el borrado tomaba minutos. Las LECTURAS van primero
@@ -1299,17 +1732,69 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // luego UN bulk con vistas + relaciones + columnas, y la tabla AL FINAL
     // fuera del lote — mismo orden observable: si algo se interrumpe, la tabla
     // sigue viva y repetir el delete converge. Un solo reload al terminar.
-    const [views, rels, cols] = await Promise.all([
+    // Doc 105 (A3/A5): TODAS las lecturas tienen que llegar — antes cada una
+    // caía a `[]` y la tabla se borraba igual, dejando vistas y relaciones
+    // huérfanas en el draft. Si alguna falla, no se borra nada.
+    // Doc 105 (H1): todo es de la sesión donde empezó el borrado — también
+    // como inversa de «Create table» o «Paste table»; cada escritura lo verifica.
+    const pin = pinSession();
+    const askedCs = useSessionStore.getState().activeChangesetId;
+    const noun = facetNouns(get().viewMode).one;
+    let views: View[], rels: gov.Relationship[], cols: CanonicalColumn[], usage: gov.TableUsageRow[];
+    let viewCanvasIds: string[];
+    let viewsBack: Map<string, ListedViews>;
+    const fkClearedPre: CanonicalColumn[] = [];
+    try {
       // vistas que la usan (cualquier fuente: tableId o sourceTableIds)
-      viewsSvc.listViews(tableId).catch(() => []),
-      // relaciones donde es extremo (globales)
-      gov.listRelationships(tableId).catch(() => []),
-      gov.listColumns(tableId).catch(() => []),
-    ]);
+      const viewsRead = viewsSvc.listViews(tableId);
+      [views, rels, cols, usage, viewCanvasIds] = await Promise.all([
+        viewsRead,
+        // relaciones donde es extremo (globales)
+        gov.listRelationships(tableId),
+        gov.listColumns(tableId),
+        // canvases que la contienen
+        gov.tableUsage(tableId).then((u) => u.usage),
+        // Doc 105 (H2): y los de sus vistas (una multi-fuente puede estar en un
+        // canvas SIN esta tabla).
+        viewsRead.then((vs) => (vs.length ? canvasesOfViews(tableId, vs.map((v) => v.id)) : [])),
+      ]);
+      // Doc 105 (F4, doc 100 P8): el lote de abajo saca cada vista borrada de
+      // todo canvas que la lista (cascada del backend, doc 88 §4): ANTES se
+      // anota qué lista cada canvas y dónde, para que el Undo las reponga.
+      viewsBack = await listedViewsBy([...usage.map((u) => u.canvasId), ...viewCanvasIds], views.map((v) => v.id));
+      // Doc 105 (ronda 3): FK huérfano en columnas HIJA de la OTRA tabla (misma
+      // regla conservadora que deleteRelationship: si ya no participan en
+      // ninguna relación). Se decide AHORA, descontando las relaciones que este
+      // borrado se lleva — antes se leía después del lote con `.catch(() => [])`:
+      // una caída apagaba el FK de una hija que seguía en otra relación.
+      const gone = new Set(rels.map((r) => r.id));
+      const children = new Map<string, Set<string>>();   // childTableId → childColumnIds
+      for (const r of rels) {
+        if (r.parentTableId !== tableId || r.childTableId === tableId) continue;
+        const set = children.get(r.childTableId) ?? new Set<string>();
+        r.pairs.forEach((p) => set.add(p.childColumnId));
+        children.set(r.childTableId, set);
+      }
+      const childReads = await Promise.all([...children].map(async ([ctid, colIds]) => {
+        const [near, ccols] = await Promise.all([gov.listRelationships(ctid), gov.listColumns(ctid)]);
+        return { colIds, near, ccols };
+      }));
+      for (const { colIds, near, ccols } of childReads) {
+        for (const colId of colIds) {
+          if (near.some((r) => !gone.has(r.id) && r.pairs.some((p) => p.childColumnId === colId))) continue;
+          const c = ccols.find((x) => x.id === colId);
+          if (c?.isForeignKey) fkClearedPre.push({ ...c });
+        }
+      }
+    } catch (e) {
+      throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(noun));
+    }
+    pin.check();
+    get().markDirty();
     // Pre-imágenes para el Undo (doc 50): las lecturas de arriba YA traen el
     // estado pre-borrado — se congelan por valor antes de tocar nada.
     // Doc 89: sin canvas (inspector) la pre-imagen viene del dossier efectivo.
-    const t0 = get().diagram?.tables.find((x) => x.id === tableId) ?? opts?.pre;
+    const t0 = liveDiagram()?.tables.find((x) => x.id === tableId) ?? opts?.pre;
     const tPre = t0 ? { ...t0, ...(t0.udpValues ? { udpValues: { ...t0.udpValues } } : {}) } : null;
     const undoSaId = get().activeSaId;
     const undoNode = get().flow?.getNode(tableId);
@@ -1317,49 +1802,45 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const colsPre = cols.map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
     const relsPre = rels.map((r) => ({ ...r, pairs: r.pairs.map((p) => ({ ...p })) }));
     const viewsPre = views.map((v) => JSON.parse(JSON.stringify(v)) as View);
-    const fkClearedPre: CanonicalColumn[] = [];
-    // Columnas HIJA de la OTRA tabla (sobrevive): FK huérfano a limpiar después.
-    const orphanFk: { colId: string; tableId: string }[] = [];
-    for (const r of rels) {
-      if (r.parentTableId === tableId && r.childTableId !== tableId) {
-        r.pairs.forEach((p) => orphanFk.push({ colId: p.childColumnId, tableId: r.childTableId }));
-      }
-    }
     await gov.recordChangesBulk([
       ...views.map((v) => gov.bulk.deleteView(v.id)),
       ...rels.map((r) => gov.bulk.deleteRelationship(r.id)),
       ...cols.map((c) => gov.bulk.deleteColumn(c.id)),
     ]);
-    // FK huérfano en columnas HIJA sobrevivientes (misma regla conservadora
-    // que deleteRelationship: si ya no participan en ninguna relación).
-    const seen = new Set<string>();
-    for (const { colId, tableId: ctid } of orphanFk) {
-      if (seen.has(colId)) continue; seen.add(colId);
-      const near = await gov.listRelationships(ctid).catch(() => []);
-      if (near.some((r) => r.pairs.some((p) => p.childColumnId === colId))) continue;
-      const c = (await gov.listColumns(ctid).catch(() => [])).find((x) => x.id === colId);
-      if (c?.isForeignKey) {
-        fkClearedPre.push({ ...c });
-        await gov.updateColumn({ ...c, isForeignKey: false });
-      }
+    // FK huérfano en columnas HIJA sobrevivientes (decidido arriba, antes del lote).
+    for (const c of fkClearedPre) {
+      pin.check();
+      await gov.updateColumn({ ...c, isForeignKey: false });
     }
     // Sacar de TODOS los canvases que la contienen (tableIds + layout). Doc 99:
     // y con ella los trazos manuales de sus wires (las relaciones de arriba se
-    // borran; sus trazos quedarían huérfanos en cada canvas).
-    const usage = await gov.tableUsage(tableId).then((u) => u.usage).catch(() => []);
+    // borran; sus trazos quedarían huérfanos en cada canvas). Doc 105 (F4): y
+    // sus vistas, si el backend no las sacó ya; cada canvas dice qué salió.
     const wireIds = wireIdsOfTable(rels, tableId);
     const droppedRoutes = routesOf(get().canvasRoutes, wireIds);   // del canvas ACTIVO, para el Undo
-    for (const u of usage) {
-      await struct.removeFromCanvas(u.canvasId, { tableIds: [tableId], ...(wireIds.length ? { dropRouteIds: wireIds } : {}) });
+    const viewIdsOut = views.map((v) => v.id);
+    const removed = new Map<string, struct.CanvasMembersOut>();
+    // Doc 105 (H2): los canvases de la tabla y, además, los que sólo listaban
+    // alguna de sus vistas (multi-fuente): de ésos salen sólo las vistas.
+    const tableCanvases = new Set(usage.map((u) => u.canvasId));
+    const canvasIds = [...tableCanvases, ...[...viewsBack.keys()].filter((id) => !tableCanvases.has(id))];
+    for (const canvasId of canvasIds) {
+      pin.check();
+      const withTable = tableCanvases.has(canvasId);
+      removed.set(canvasId, await struct.removeFromCanvas(canvasId, {
+        ...(withTable ? { tableIds: [tableId] } : {}),
+        ...(viewIdsOut.length ? { viewIds: viewIdsOut } : {}),
+        ...(withTable && wireIds.length ? { dropRouteIds: wireIds } : {}),
+      }));
     }
     // La tabla.
+    pin.check();
     await gov.deleteTable(tableId);
     // Undo (doc 50): UN lote restaura tabla + columnas + FKs limpiadas +
     // relaciones + vistas (el guard N=N resuelve la llave con las columnas del
-    // mismo lote), y después las membresías de canvas. La posición solo se
-    // restaura en el canvas ACTIVO (las demás vuelven con layout default).
+    // mismo lote), y después las membresías de canvas.
     if (tPre) {
-      pushUndo(`Delete table ${tPre.physicalName}`, async () => {
+      pushUndo(`Delete table ${tPre.physicalName}`, async (undo) => {
         await gov.recordChangesBulk([
           gov.bulk.createTable(tPre),
           ...colsPre.map((c) => gov.bulk.createColumn(c)),
@@ -1367,74 +1848,97 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           ...relsPre.map((r) => gov.bulk.upsertRelationship(r)),
           ...viewsPre.map((v) => gov.bulk.upsertView(v)),
         ]);
-        // Doc 100: una escritura por canvas, dentro de su cola. La posición y
-        // los trazos (doc 99) sólo vuelven al canvas activo.
-        for (const u of usage) {
-          const active = u.canvasId === undoSaId;
+        // Doc 100: una escritura por canvas, dentro de su cola. Doc 105 (F4):
+        // la tabla vuelve a SU posición en cada canvas (en el activo, a la de
+        // pantalla) y las vistas que ese canvas listaba, a la suya; un canvas
+        // sin lista explícita (legacy) sigue sin lista. Los trazos (doc 99)
+        // sólo vuelven al canvas activo. Doc 105 (H1): mientras siga la sesión
+        // del Undo — si se abrió otra versión, lo que falta no va a ella.
+        // Doc 105 (H2): un canvas que sólo listaba sus vistas recupera ésas,
+        // no la tabla (nunca la tuvo).
+        for (const canvasId of canvasIds) {
+          undo.check();
+          const withTable = tableCanvases.has(canvasId);
+          const active = withTable && canvasId === undoSaId;
+          const out = removed.get(canvasId);
+          const back = viewsBack.get(canvasId);
+          const viewIds = [...new Set([...(back?.viewIds ?? []), ...(out?.viewIds ?? [])])];
+          const layout = {
+            ...(out?.layout ?? {}), ...(back?.layout ?? {}),
+            ...(active && undoPos ? { [tableId]: undoPos } : {}),
+          };
           try {
-            await struct.addToCanvas(u.canvasId, {
-              tableIds: [tableId],
-              ...(active && undoPos ? { layout: { [tableId]: undoPos } } : {}),
+            await struct.addToCanvas(canvasId, {
+              ...(withTable ? { tableIds: [tableId] } : {}),
+              ...(viewIds.length ? { viewIds } : {}),
+              ...(Object.keys(layout).length ? { layout } : {}),
               ...(active ? { routes: droppedRoutes } : {}),
             });
           } catch { /* el canvas pudo desaparecer */ }
         }
         await get().reload();
-        get().syncExplorer(usage.some((u) => u.canvasId === get().activeSaId));
-      });
+        get().syncExplorer(canvasIds.includes(get().activeSaId ?? ''));
+      }, pin);
     }
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
     // Doc 89 §3.6: si la tabla NO estaba en el canvas activo (o no hay canvas —
     // borrado desde el Object Inspector), reload() no cambia ninguna firma → el
     // Explorer se refresca a mano. Regla complementaria a la del doc 88 §2.
-    get().syncExplorer(usage.some((u) => u.canvasId === get().activeSaId));
+    // Doc 105 (H2): un canvas que listaba sus vistas también cambió de firma.
+    get().syncExplorer(canvasIds.includes(get().activeSaId ?? ''));
   }),
   updateTable: async (id, fields) => {
     get().markDirty();
-    const t = get().diagram?.tables.find((x) => x.id === id);
+    const t = editableDiagram()?.tables.find((x) => x.id === id);   // doc 105 (R7-A / ronda 4)
     if (!t) return;
     await gov.createTable({ ...t, ...fields }); // upsert por id = update
     await get().reload();
   },
   updateColumn: async (colId, fields) => {
-    const c = get().diagram?.columns.find((x) => x.id === colId);
-    if (!c) return;
+    const dia = editableDiagram();   // doc 105 (R7-A / ronda 4): el canvas de ESTA sesión
+    const c = dia?.columns.find((x) => x.id === colId);
+    if (!dia || !c) return;
+    const pin = pinSession();   // doc 105 (H1)
     get().markDirty();
     // Doc 94 D2: entrar o salir de la llave re-ubica la columna en la frontera
     // del bloque de PK — ella y las que se corren viajan en UN lote, con UN Undo.
     if (fields.isPrimaryKey !== undefined && !!fields.isPrimaryKey !== !!c.isPrimaryKey) {
-      const mine = (get().diagram?.columns ?? []).filter((x) => x.tableId === c.tableId);
+      const mine = dia.columns.filter((x) => x.tableId === c.tableId);
       const { changes, pres } = keyLayoutBulk(mine, { [colId]: fields });
       await gov.recordChangesBulk(changes);
       pushUndo(`Edit column ${c.physicalName}`, async () => {
         await gov.recordChangesBulk(pres.map((p) => gov.bulk.createColumn(p)));
         await get().reload();
-      });
+      }, pin);
       await get().reload();
       return;
     }
     // Pre-imagen POR VALOR para el Undo (doc 50).
     const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
     await gov.updateColumn({ ...c, ...fields }); // upsert por id = update (merge)
-    pushUndo(`Edit column ${pre.physicalName}`, async () => {
+    pushUndo(`Edit column ${pre.physicalName}`, async (undo) => {
       await gov.updateColumn(pre);
       // Si el cambio renombró el FÍSICO, las vistas quedaron re-apuntadas al
-      // nombre nuevo (sync del panel): deshacer las devuelve al viejo.
+      // nombre nuevo (sync del panel): deshacer las devuelve al viejo. Doc 105
+      // (H1): sólo mientras siga la sesión del Undo.
       if (typeof fields.physicalName === 'string' && fields.physicalName !== pre.physicalName) {
-        try {
-          await syncRenamedColumnInViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            pre.tableId, fields.physicalName, pre.physicalName);
-        } catch { /* best-effort */ }
+        const renamedTo = fields.physicalName;
+        await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(undo), pre.tableId, renamedTo, pre.physicalName));
       }
       await get().reload();
-    });
+    }, pin);
     await get().reload();
   },
   reorderColumns: async (tableId, orderedIds) => {
-    const dia = get().diagram; if (!dia) return;
-    const mine = dia.columns.filter((c) => c.tableId === tableId);
+    const dia = editableDiagram(); if (!dia) return;   // doc 105 (R7-A / ronda 4)
+    const pin = pinSession();   // doc 105 (H1): tandas de escrituras
+    const onCanvas = dia.columns.filter((c) => c.tableId === tableId);
+    // Doc 105 (ronda 5, R15-H1): la tabla no está en el canvas en pantalla (un
+    // drop que terminó con otro canvas abierto): el orden se arma con sus
+    // columnas VIGENTES del modelo — antes se perdía.
+    const mine = onCanvas.length ? onCanvas : await gov.listColumns(tableId);
+    pin.check();   // ronda 6 (R17a-10): si mientras leía cambió la sesión, nada se marca en la nueva
     // Doc 94 D3: una PK nunca queda debajo de una no-PK (guard final: los
     // paneles ya lo impiden al arrastrar).
     if (!isPkFirst(mine, orderedIds)) {
@@ -1444,31 +1948,49 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     get().markDirty();
     // OPTIMISTA: la UI reordena al soltar (posición = índice nuevo, local); la
     // persistencia corre detrás y el reload final reconcilia con el overlay.
-    set({
-      diagram: {
-        ...dia,
-        columns: dia.columns.map((c) => {
-          const idx = orderedIds.indexOf(c.id);
-          return idx >= 0 && c.ordinal !== idx ? { ...c, ordinal: idx } : c;
-        }),
-      },
-    });
+    if (onCanvas.length) {
+      set({
+        diagram: {
+          ...dia,
+          columns: dia.columns.map((c) => {
+            const idx = orderedIds.indexOf(c.id);
+            return idx >= 0 && c.ordinal !== idx ? { ...c, ordinal: idx } : c;
+          }),
+        },
+      });
+    }
     // Persistí SOLO las columnas cuya posición cambió, en TANDAS de 5: mover una
     // columna al tope de una tabla de 30 disparaba 30 PUT simultáneos (ráfaga
     // que con varios usuarios satura el backend). El backend graba cada
     // cambio con $set atómico por entidad, así que no se pisan entre sí.
     const changed = reorderPlan(mine, orderedIds);
-    await persistReorder(changed, (c, idx) => gov.updateColumn({ ...c, ordinal: idx }));
+    // Ronda 5 (R15-H1): el upsert es del documento COMPLETO — cada columna con
+    // su documento VIGENTE (otra edición pudo recargar el diagrama mientras se
+    // esperaba), nunca uno capturado antes: pisaría esa edición.
+    const reads: ColumnReads = new Map();   // ronda 7 (R18a-2): una lectura por tabla y tanda
+    await persistReorder(changed, async (c, idx) => {
+      const cur = await currentColumn(c, reads);   // ronda 6 (R17a-2): borrada mientras tanto → no se revive
+      if (!cur) return;
+      pin.check();
+      await gov.updateColumn({ ...cur, ordinal: idx });
+    });
     if (changed.length) {
       // Undo POR VALOR (doc 50): las pre-imágenes de las columnas movidas
       // vuelven a su ordinal tal cual, SIN pasar por la guarda «PK primero» —
       // el estado previo pudo ser un dato viejo desordenado, o la llave pudo
       // cambiar en el medio (drop en el canvas: llave + reorden).
       const pres = sortByOrdinal(changed.map(({ c }) => ({ ...c })));
-      pushUndo('Reorder columns', async () => {
-        await persistReorder(pres.map((c) => ({ c, idx: c.ordinal })), (c) => gov.updateColumn(c));
+      pushUndo('Reorder columns', async (undo) => {
+        // Sólo el orden vuelve atrás: sobre el documento vigente (ronda 5).
+        const undoReads: ColumnReads = new Map();
+        await persistReorder(pres.map((c) => ({ c, idx: c.ordinal })), async (c, idx) => {
+          const cur = await currentColumn(c, undoReads);
+          if (!cur) return;
+          undo.check();
+          await gov.updateColumn({ ...cur, ordinal: idx });
+        });
         await get().reload();
-      });
+      }, pin);
     }
     await get().reload();
   },
@@ -1476,92 +1998,143 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Doc 73 §10.4 — drop de una fila en el bloque: los cambios de LLAVE van
     // por el mismo camino que el panel (gov.updateColumn + Undo por valor,
     // doc 50) y después el reorden de columnas (reorderColumns).
-    const dia = get().diagram; if (!dia) return;
+    const dia = editableDiagram(); if (!dia) return;   // doc 105 (R7-A / ronda 4)
+    const pin = pinSession();   // doc 105 (H1)
     if (plan.key.length) {
       get().markDirty();
       const pres: CanonicalColumn[] = [];
       const flags = new Map(plan.key.map((k) => [k.id, k.isPrimaryKey]));
+      const reads: ColumnReads = new Map();   // ronda 7 (R18a-2)
       for (const step of plan.key) {
-        const col = dia.columns.find((c) => c.id === step.id);
+        const captured = dia.columns.find((c) => c.id === step.id);
+        if (!captured) continue;
+        // Ronda 5 (R15-H1): el documento VIGENTE — tras la primera escritura,
+        // otra edición pudo recargar el diagrama. Ronda 6 (R17a-2): o nada, si
+        // se borró mientras tanto.
+        const col = await currentColumn(captured, reads);
         if (!col) continue;
         pres.push({ ...col });
+        pin.check();
         await gov.updateColumn({ ...col, isPrimaryKey: step.isPrimaryKey });
       }
+      // Doc 105 (ronda 4, R10-D): si mientras escribía se abrió otra versión,
+      // el set de abajo reinstalaría en pantalla el diagrama de ésta (y el
+      // refresco ya reabrió el de la nueva): la acción termina acá.
+      if (!pin.holds()) return;
       // OPTIMISTA (doc 94): la llave nueva ya en el diagrama local, así el
-      // reorden de abajo valida «PK primero» contra ella.
-      set({ diagram: { ...dia, columns: dia.columns.map((c) => (flags.has(c.id) ? { ...c, isPrimaryKey: flags.get(c.id) } : c)) } });
+      // reorden de abajo valida «PK primero» contra ella. Ronda 5 (R15-H1):
+      // sobre el diagrama VIGENTE — el capturado al empezar reinstalaba lo de
+      // antes de otra edición que recargó mientras se grababa, o el canvas A
+      // bajo el B que se abrió (y un arrastre grababa sus bloques en B). Si el
+      // abierto es otro, sólo cambia si también tiene esta tabla.
+      const cur = get().diagram;
+      if (cur) set({ diagram: { ...cur, columns: cur.columns.map((c) => (flags.has(c.id) ? { ...c, isPrimaryKey: flags.get(c.id) } : c)) } });
       if (pres.length) {
-        pushUndo('Edit key', async () => { for (const c of pres) await gov.updateColumn(c); await get().reload(); });
+        pushUndo('Edit key', async (undo) => {
+          for (const c of pres) { undo.check(); await gov.updateColumn(c); }
+          await get().reload();
+        }, pin);
       }
       if (!plan.order) await get().reload();
     }
-    if (plan.order) await get().reorderColumns(tableId, plan.order);
+    if (plan.order) { pin.check(); await get().reorderColumns(tableId, plan.order); }
   },
   deleteColumn: async (colId, relIds = [], opts) => {
-    get().markDirty();
+    // Doc 105 (H1): de la sesión donde empezó — también como inversa de «Add column».
+    const pin = pinSession();
+    const askedCs = useSessionStore.getState().activeChangesetId;
+    const noun = facetNouns(get().viewMode).member;
     // Primero las relaciones (elegidas en el dialog de impacto), después la
     // columna: el changeset nunca queda con pares colgando de una columna
     // borrada (spec 10 §8). v2 (doc 19): si la relación tiene MÁS pares, sólo
     // se quita el par de esta columna; si era el último, se borra completa.
-    const col = get().diagram?.columns.find((c) => c.id === colId) ?? opts?.col;
-    const pool = relIds.length && col ? await gov.listRelationships(col.tableId) : [];
-    // Pre-imágenes para el Undo (doc 50): columna, relaciones afectadas (por
-    // valor), FKs que se limpian abajo y vistas que referencian la columna.
+    const col = liveDiagram()?.columns.find((c) => c.id === colId) ?? opts?.col;
+    // Doc 105 (ronda 3): TODAS las lecturas antes de la primera escritura — si
+    // alguna falla no se escribe nada (antes las relaciones de la hija se leían
+    // DESPUÉS de borrar las elegidas: una caída dejaba relaciones borradas con
+    // la columna viva y sin Undo). La FK huérfana se decide con lo leído AHORA,
+    // descontando lo que este borrado le hace a cada relación elegida.
+    let pool: gov.Relationship[];
+    let viewsPre: View[];
+    const fkClearedPre: CanonicalColumn[] = [];
+    /** Pares con que queda cada relación elegida (vacío = se borra entera). */
+    const after = new Map<string, gov.RelationshipPair[]>();
+    try {
+      let views: View[];
+      [pool, views] = await Promise.all([
+        relIds.length && col ? gov.listRelationships(col.tableId) : Promise.resolve([] as gov.Relationship[]),
+        col ? viewsSvc.listViews(col.tableId) : Promise.resolve([] as View[]),
+      ]);
+      // Pre-imágenes para el Undo (doc 50): vistas que referencian la columna.
+      viewsPre = col
+        ? views.filter((v) => removeColumnSource(v, col.tableId, col.physicalName) != null)
+          .map((v) => JSON.parse(JSON.stringify(v)) as View)
+        : [];
+      // Columnas HIJAS del otro extremo de los pares afectados: al caer el
+      // par/relación pueden quedar con un isForeignKey huérfano (misma limpieza
+      // conservadora que deleteRelationship — isPrimaryKey nunca se toca).
+      const fkCandidates = new Map<string, string>();   // childColumnId → childTableId
+      for (const rid of relIds) {
+        const rel = pool.find((r) => r.id === rid);
+        const dropped = rel?.pairs.filter((p) => p.parentColumnId === colId || p.childColumnId === colId) ?? [];
+        const remaining = rel?.pairs.filter((p) => p.parentColumnId !== colId && p.childColumnId !== colId) ?? [];
+        dropped.forEach((p) => { if (p.childColumnId !== colId && rel) fkCandidates.set(p.childColumnId, rel.childTableId); });
+        after.set(rid, rel && remaining.length > 0 && remaining.length < rel.pairs.length ? remaining : []);
+      }
+      for (const [cid, ctid] of fkCandidates) {
+        // Doc 89: la hija puede no estar en el diagrama (inspector sin canvas u
+        // otra tabla fuera de este canvas) → se resuelve por API, como deleteTable.
+        const [c, near] = await Promise.all([
+          liveDiagram()?.columns.find((x) => x.id === cid) ?? gov.listColumns(ctid).then((cs) => cs.find((x) => x.id === cid)),
+          gov.listRelationships(ctid),
+        ]);
+        if (!c?.isForeignKey) continue;
+        const still = near.some((r) => (after.get(r.id) ?? r.pairs).some((p) => p.childColumnId === cid));
+        if (!still) fkClearedPre.push({ ...c });
+      }
+    } catch (e) {
+      throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(noun));
+    }
+    pin.check();
+    get().markDirty();
+    // Pre-imágenes para el Undo (doc 50): columna y relaciones afectadas (por valor).
     const colPre = col ? { ...col, ...(col.udpValues ? { udpValues: { ...col.udpValues } } : {}) } : null;
     const relsPre = pool.filter((r) => relIds.includes(r.id))
       .map((r) => ({ ...r, pairs: r.pairs.map((p) => ({ ...p })) }));
-    const fkClearedPre: CanonicalColumn[] = [];
-    const viewsPre: View[] = col
-      ? (await viewsSvc.listViews(col.tableId).catch(() => [] as View[]))
-          .filter((v) => removeColumnSource(v, col.tableId, col.physicalName) != null)
-          .map((v) => JSON.parse(JSON.stringify(v)) as View)
-      : [];
-    // Columnas HIJAS del otro extremo de los pares afectados: al caer el
-    // par/relación pueden quedar con un isForeignKey huérfano (misma limpieza
-    // conservadora que deleteRelationship — isPrimaryKey nunca se toca).
-    const fkCandidates = new Map<string, string>();   // childColumnId → childTableId
     for (const rid of relIds) {
       const rel = pool.find((r) => r.id === rid);
-      const dropped = rel?.pairs.filter(
-        (p) => p.parentColumnId === colId || p.childColumnId === colId) ?? [];
-      const remaining = rel?.pairs.filter(
-        (p) => p.parentColumnId !== colId && p.childColumnId !== colId) ?? [];
-      dropped.forEach((p) => { if (p.childColumnId !== colId && rel) fkCandidates.set(p.childColumnId, rel.childTableId); });
-      if (rel && remaining.length > 0 && remaining.length < rel.pairs.length) {
+      const remaining = after.get(rid) ?? [];
+      pin.check();
+      if (rel && remaining.length) {
         await gov.updateRelationship({ ...rel, pairs: remaining });
       } else {
         await gov.deleteRelationship(rid);
       }
     }
-    for (const [cid, ctid] of fkCandidates) {
-      // Doc 89: la hija puede no estar en el diagrama (inspector sin canvas u
-      // otra tabla fuera de este canvas) → se resuelve por API, como deleteTable.
-      const c = get().diagram?.columns.find((x) => x.id === cid)
-        ?? (await gov.listColumns(ctid).catch(() => [] as CanonicalColumn[])).find((x) => x.id === cid);
-      if (!c?.isForeignKey) continue;
-      const near = await gov.listRelationships(c.tableId);
-      const still = near.some((r) => r.pairs.some((p) => p.childColumnId === cid));
-      if (!still) {
-        fkClearedPre.push({ ...c });
-        await gov.updateColumn({ ...c, isForeignKey: false });
-      }
+    for (const c of fkClearedPre) {
+      pin.check();
+      await gov.updateColumn({ ...c, isForeignKey: false });
     }
+    pin.check();
     await gov.deleteColumn(colId);
     // Undo (doc 50): UN lote restaura columna + FKs limpiadas + relaciones
     // (la columna va PRIMERO — el guard N=N del backend resuelve la llave del
     // padre con las columnas del MISMO lote); las vistas capturadas vuelven a
     // su doc previo (best-effort).
     if (colPre) {
-      pushUndo(`Delete column ${colPre.physicalName}`, async () => {
+      pushUndo(`Delete column ${colPre.physicalName}`, async (undo) => {
         await gov.recordChangesBulk([
           gov.bulk.createColumn(colPre),
           ...fkClearedPre.map((c) => gov.bulk.createColumn(c)),
           ...relsPre.map((r) => gov.bulk.upsertRelationship(r)),
         ]);
-        for (const v of viewsPre) { try { await viewsSvc.updateView(v.id, v); } catch { /* best-effort */ } }
+        for (const v of viewsPre) {
+          undo.check();   // doc 105 (H1)
+          try { await viewsSvc.updateView(v.id, v); } catch { /* best-effort */ }
+        }
         await get().reload();
         get().syncExplorer(!!get().diagram?.tables.some((t) => t.id === colPre.tableId));
-      });
+      }, pin);
     }
     // Si la columna borrada tenía su Properties abierto (doc 49), se cierra —
     // el sidebar vuelve al Properties de la tabla.
@@ -1570,12 +2143,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // referenciaba (espejo o curada) — best-effort, no bloquea el borrado.
     if (col) {
       try {
-        const n = await syncRemovedColumnFromViews(
-          { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-          col.tableId, col.physicalName);
-        if (n) toast.success(`Column also removed from ${n} view(s)`);
+        const n = await syncRemovedColumnFromViews(pinnedViewDeps(pin), col.tableId, col.physicalName);
+        if (n && pin.holds()) toast.success(`Column also removed from ${n} view(s)`);
       } catch { /* la vista se corrige a mano o con "Ordenar como la tabla" */ }
     }
+    // Doc 105 (ronda 3): si la sesión cambió mientras sincronizaba, lo que sigue ya no es de ésta.
+    if (!pin.holds()) return;
     await get().reload();
     // Doc 89 §3.6: tabla fuera del canvas activo (o sin canvas) → tick a mano.
     get().syncExplorer(!!col && !!get().diagram?.tables.some((t) => t.id === col.tableId));
@@ -1589,8 +2162,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   createSubjectArea: async (name: string) => {
     const pid = get().activeProjectId;
     if (!pid) throw new Error('Pick a Project first');
+    const { isCurrent, pin } = explorerRequest();   // doc 105 (H4b): ídem createCanvas
     const sa = await struct.createSubjectArea(pid, name);
-    await get()._refreshProject(pid);
+    await get()._refreshProject(pid, isCurrent);
+    if (!pin.holds()) return;
     await get().selectSubjectArea(sa.id);
   },
 }));
@@ -1609,6 +2184,102 @@ function routesOf(routes: WireRoutes, ids: string[]): WireRoutes {
     if (route) out[id] = route;
   }
   return out;
+}
+
+// ── Doc 105 (ronda 3, R7-A): el diagrama, sellado con su sesión ────────────
+// Cada carga sella el diagrama con el pin de la sesión en que se pidió (las
+// copias `{ ...diagram }` lo conservan). Al cambiar de sesión el store lo
+// limpia en el acto; como DEFENSA, las acciones que escriben leen el diagrama
+// por `liveDiagram()`: uno de otra sesión (reinstalado por error, p. ej. un set
+// optimista tardío) no sirve para armar escrituras.
+const DIAGRAM_PIN: unique symbol = Symbol('diagramSession');
+type SealedDiagram = Diagram & { [DIAGRAM_PIN]?: SessionPin };
+
+function sealDiagram(d: Diagram, pin: SessionPin): Diagram {
+  (d as SealedDiagram)[DIAGRAM_PIN] = pin;
+  return d;
+}
+
+/** El diagrama abierto si es de la sesión de AHORA (sin sello — armado a mano,
+ *  p. ej. en tests — cuenta como vigente); si no, null. */
+function liveDiagram(): Diagram | null {
+  const d = useModelerStore.getState().diagram;
+  const pin = d ? (d as SealedDiagram)[DIAGRAM_PIN] : undefined;
+  return d && (!pin || pin.holds()) ? d : null;
+}
+
+/** Doc 105 (ronda 5, R15-H1): los ids con posición en el layout de un canvas
+ *  — tablas, vistas y símbolos de subcategoría (doc 53: los de sus relaciones
+ *  `subcategory`, como `isSubcategory`). */
+function canvasNodeIds(d: Diagram): Set<string> {
+  return new Set([
+    ...d.tables.map((t) => t.id), ...d.views.map((v) => v.id),
+    ...(d.subjectArea.tableIds ?? []), ...(d.subjectArea.viewIds ?? []),
+    ...d.relationships.filter((r) => r.subcategory && r.subtypeSymbolId).map((r) => r.subtypeSymbolId as string),
+  ]);
+}
+
+/** Doc 105 (ronda 7, R18a-2): las lecturas de columnas de UNA acción, por
+ *  tabla. Cada entrada vive mientras su lectura está en vuelo: las columnas de
+ *  una tanda (que la piden juntas) comparten UNA lectura, y la tanda siguiente
+ *  relee — lo que cambió entre tandas (p. ej. una columna borrada) se ve. */
+type ColumnReads = Map<string, Promise<CanonicalColumn[]>>;
+
+/** Doc 105 (ronda 5, R15-H1): el documento VIGENTE de una columna para
+ *  re-grabarlo (el upsert es del documento COMPLETO): el del diagrama en
+ *  pantalla — otra edición pudo recargarlo mientras se esperaba —; si no está
+ *  (otro canvas), el que se tenía. */
+async function currentColumn(c: CanonicalColumn, reads: ColumnReads): Promise<CanonicalColumn | null> {
+  // Ronda 6 (R17a-2): «la que se tenía» revivía una columna BORRADA mientras
+  // se esperaba (el upsert la re-creaba). Con su tabla en el canvas en pantalla,
+  // lo que hay ahí — y si ya no está, se borró: null (no se escribe). Con la
+  // tabla fuera, se relee del servidor: ronda 7 (R18a-2), una vez por tabla y
+  // tanda — antes, la tabla COMPLETA por cada columna (N lecturas de N docs).
+  const d = liveDiagram();
+  if (d && d.tables.some((t) => t.id === c.tableId)) return d.columns.find((x) => x.id === c.id) ?? null;
+  let read = reads.get(c.tableId);
+  if (!read) {
+    const own = gov.listColumns(c.tableId);
+    reads.set(c.tableId, own);
+    const done = () => { if (reads.get(c.tableId) === own) reads.delete(c.tableId); };
+    own.then(done, done);
+    read = own;
+  }
+  return (await read).find((x) => x.id === c.id) ?? null;
+}
+
+/** Doc 105 (ronda 4, R10-B): la recarga pedida mientras se abría el mismo
+ *  canvas. `reload()` avisa al Explorer si el cambio es estructural respecto de
+ *  lo que abrió la apertura; si la apertura ya trajo lo nuevo, se compara con lo
+ *  que había cuando se pidió (`prev`) — un solo aviso. */
+async function reloadAfterOpening(prev: Diagram | null, quiet = false): Promise<void> {
+  const st = useModelerStore.getState;
+  const opened = st().diagram;
+  _quietReloadFailure = quiet;   // ronda 7 (R18a-6): la consume esta `reload()` al empezar
+  await st().reload();
+  const now = st().diagram;
+  if (prev && opened && now && prev.subjectArea.id === now.subjectArea.id
+      && diagramSignature(opened) === diagramSignature(now) && diagramSignature(prev) !== diagramSignature(now)) {
+    st().bumpExplorer();
+  }
+}
+
+/** Doc 105 (ronda 4, R10-D): el diagrama en pantalla es de una sesión que ya
+ *  no está abierta (no debería pasar: lo reinstaló un set tardío). */
+class StaleCanvasError extends Error {
+  constructor() {
+    super('This canvas is from a version that is no longer open — open it again from the explorer.');
+    this.name = 'StaleCanvasError';
+  }
+}
+
+/** El diagrama en pantalla para EDITARLO: `null` si no hay (nada que editar:
+ *  se calla); si es de otra sesión, `StaleCanvasError` — se avisa en vez de
+ *  callar, y Save no pasa por un guardado exitoso. */
+function editableDiagram(): Diagram | null {
+  const d = useModelerStore.getState().diagram;
+  if (d && !liveDiagram()) throw new StaleCanvasError();
+  return d;
 }
 
 /** Un diagrama pedido ANTES de que terminara un guardado del canvas puede
@@ -1726,14 +2397,35 @@ useModelerStore.subscribe((s, prev) => {
 
 // Doc 48: el clipboard de columnas pertenece al changeset donde se copió —
 // cambiar de changeset (o soltarlo) lo invalida, junto con la selección y el
-// popup. Doc 50: ídem el clipboard de TABLA y la pila de Undo (las inversas
-// apuntan al draft anterior). Suscripción a nivel de módulo (useSessionStore
-// no importa este store, así que no hay ciclo). Doc 75 D14: la sesión es la
-// ÚNICA fuente del changeset activo.
+// popup. Doc 50: ídem el clipboard de TABLA. Suscripción a nivel de módulo
+// (useSessionStore no importa este store, así que no hay ciclo). Doc 75 D14: la
+// sesión es la ÚNICA fuente del changeset activo.
 useSessionStore.subscribe((s, prev) => {
+  // Doc 105 (F3): la pila de Undo es de la SESIÓN — proyecto, modo y versión,
+  // como `canvasSessionKey` —, no sólo de la versión: editar → solo lectura →
+  // editar la MISMA versión (p. ej. transferida de ida y vuelta) no debe dejar
+  // inversas de antes.
+  const sessionChanged = s.openMode !== prev.openMode || s.activeProjectId !== prev.activeProjectId
+    || s.activeChangesetId !== prev.activeChangesetId;
+  if (sessionChanged) {
+    useUndoStore.getState().clear();
+    // Doc 105 (ronda 3, R7-A): el canvas de la sesión anterior se va EN EL ACTO
+    // — antes seguía vivo y editable hasta que el refresco lo reabría (varias
+    // idas y vueltas) y sus escrituras llevaban el doc de A a la versión B. Se
+    // conserva `activeSaId`: el refresco lo reabre si existe en la nueva. Las
+    // cargas en vuelo de la anterior se descartan al llegar (`_loadSeq`).
+    _loadSeq += 1;
+    _reloadAfterOpening = null;   // ronda 4: una recarga pendiente era de la anterior
+    useModelerStore.setState({
+      diagram: null, drawings: [], openingSaId: null,
+      selectedTableId: null, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null,
+      columnTarget: null, relPreset: null, subcatArmed: false, hoverEdgeId: null, hoverNodeId: null,
+      colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
+      inspect: null, searchOpen: false, navigating: null, pendingFocusTableId: null, pendingFocusColId: null,
+    });
+  }
   if (s.activeChangesetId === prev.activeChangesetId) return;
   useModelerStore.setState({ colClipboard: null, tblClipboard: null, colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
-  useUndoStore.getState().clear();
 });
 
 /**

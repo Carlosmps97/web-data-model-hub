@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Columns3, LayoutGrid, Plus, Table2, Tags, Trash2, X, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { applyStandards, type StandardsSnapshot, type UdpDataType, type UdpDefinition } from '../standards.service';
+import { udpChoices } from '@/lib/udpChoices';
 import { UDP_CLASS_SEGMENTS, udpView, type Facet, type UdpClassSegment } from '@/lib/facets';
+import { applyErrorNotice, NO_CHANGES_HINT, udpChanged, udpEditInput, udpFormOf, type UdpForm } from '../standardsDiff';
 
 /**
  * Data Standards → UDP (doc 71 §2). Las propiedades se organizan por OBJETO de
@@ -23,8 +25,7 @@ const TYPES: UdpDataType[] = ['string', 'number', 'boolean', 'date', 'list'];
 const TYPE_LABEL: Record<UdpDataType, string> = { string: 'Text', number: 'Number', boolean: 'Boolean', date: 'Date', list: 'List' };
 const NEW = '__new__';
 
-type Form = { id?: string; name: string; dataType: UdpDataType; defaultValue: string; allowedValues: string[]; description: string };
-const empty: Form = { name: '', dataType: 'string', defaultValue: '', allowedValues: [], description: '' };
+const empty: UdpForm = { name: '', dataType: 'string', defaultValue: '', allowedValues: [], description: '' };
 
 /** Un objeto del navegador: sus segmentos (1 o 2 facetas). */
 interface ObjectGroup {
@@ -65,7 +66,7 @@ export default function UdpDefsPage({ projectId, snapshot, canEdit, onApplied }:
     ? group.segments.find((s) => s.view === facet) ?? group.segments[1]
     : group.segments[0];
   const [selId, setSelId] = useState<string | null>(null);
-  const [form, setForm] = useState<Form>(empty);
+  const [form, setForm] = useState<UdpForm>(empty);
   const [busy, setBusy] = useState(false);
   const [confirmDel, setConfirmDel] = useState<UdpDefinition | null>(null);
 
@@ -83,11 +84,15 @@ export default function UdpDefsPage({ projectId, snapshot, canEdit, onApplied }:
     if (selId === NEW) setForm(empty);
     else if (selId) {
       const d = defs.find((x) => x.id === selId);
-      if (d) setForm({ id: d.id, name: d.name, dataType: d.dataType, defaultValue: d.defaultValue ?? '', allowedValues: [...d.allowedValues], description: d.description ?? '' });
+      if (d) setForm(udpFormOf(d));
     }
   }, [selId, defs]);
 
-  const set = (p: Partial<Form>) => setForm((f) => ({ ...f, ...p }));
+  const set = (p: Partial<UdpForm>) => setForm((f) => ({ ...f, ...p }));
+  // Doc 105: la definición guardada que se edita (null = alta) y si el guardado
+  // cambia algo — sin cambios no se registra una versión vacía.
+  const stored = selId && selId !== NEW ? defs.find((x) => x.id === selId) ?? null : null;
+  const dirty = selId === NEW || udpChanged(form, segment, stored);
 
   const save = async () => {
     if (!form.name.trim()) { toast.error('The name is required'); return; }
@@ -95,16 +100,11 @@ export default function UdpDefsPage({ projectId, snapshot, canEdit, onApplied }:
     try {
       const v = await applyStandards(projectId, {
         kind: 'udp', title: `UDP ${form.name.trim()}`,
-        udpUpsert: [{
-          id: selId === NEW ? undefined : form.id, name: form.name.trim(), level: segment.level, view: segment.view, dataType: form.dataType,
-          defaultValue: form.defaultValue.trim() || undefined,
-          allowedValues: form.dataType === 'list' ? form.allowedValues.map((x) => x.trim()).filter(Boolean) : [],
-          description: form.description.trim() || undefined,
-        }],
+        udpUpsert: [udpEditInput(form, segment, stored)],
       });
       toast.success(`Applied · ${v.label}`);
       setSelId(null); await onApplied();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't apply"); } finally { setBusy(false); }
+    } catch (e) { const n = applyErrorNotice(e, "Couldn't apply"); toast[n.kind](n.text); } finally { setBusy(false); }
   };
 
   const doDelete = async (d: UdpDefinition) => {
@@ -113,7 +113,7 @@ export default function UdpDefsPage({ projectId, snapshot, canEdit, onApplied }:
       const v = await applyStandards(projectId, { kind: 'udp', title: `Remove UDP ${d.name}`, udpDelete: [d.id] });
       toast.success(`Applied · ${v.label}`);
       setConfirmDel(null); if (selId === d.id) setSelId(null); await onApplied();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete"); } finally { setBusy(false); }
+    } catch (e) { const n = applyErrorNotice(e, "Couldn't delete"); toast[n.kind](n.text); } finally { setBusy(false); }
   };
 
   const twoFaced = group.segments.length === 2;
@@ -231,8 +231,12 @@ export default function UdpDefsPage({ projectId, snapshot, canEdit, onApplied }:
                   </div>
                   <div style={{ flex: 1 }}><label style={lbl}>Default</label>
                     {form.dataType === 'list'
-                      ? <select style={inp} value={form.defaultValue} onChange={(e) => set({ defaultValue: e.target.value })}><option value="">—</option>{form.allowedValues.map((v) => v.trim()).filter(Boolean).map((v) => <option key={v} value={v}>{v}</option>)}</select>
-                      : <input style={inp} value={form.defaultValue} onChange={(e) => set({ defaultValue: e.target.value })} placeholder="optional" />}
+                      // Doc 105 (ronda 5): un default que salió de la lista se sigue viendo (antes, «—»).
+                      ? <select style={inp} value={form.defaultValue} onChange={(e) => set({ defaultValue: e.target.value })}><option value="">—</option>{udpChoices({ dataType: 'list', allowedValues: form.allowedValues.map((v) => v.trim()).filter(Boolean) }, form.defaultValue).map((v) => <option key={v} value={v}>{v}</option>)}</select>
+                      : form.dataType === 'boolean'
+                        // Doc 105 (ronda 5): el booleano se elige (se tipeaba como texto libre).
+                        ? <select style={inp} value={form.defaultValue} onChange={(e) => set({ defaultValue: e.target.value })}><option value="">—</option>{udpChoices({ dataType: 'boolean', allowedValues: [] }, form.defaultValue).map((v) => <option key={v} value={v}>{v}</option>)}</select>
+                        : <input style={inp} value={form.defaultValue} onChange={(e) => set({ defaultValue: e.target.value })} placeholder="optional" />}
                   </div>
                 </div>
                 {form.dataType === 'list' && (
@@ -242,9 +246,11 @@ export default function UdpDefsPage({ projectId, snapshot, canEdit, onApplied }:
                 )}
                 <div style={{ marginBottom: 18 }}><label style={lbl}>Description</label><textarea style={{ ...inp, height: 64, padding: 9, resize: 'vertical' }} value={form.description} onChange={(e) => set({ description: e.target.value })} placeholder="optional" /></div>
                 {canEdit && (
-                  <div style={{ display: 'flex', gap: 10 }}>
-                    <button onClick={save} disabled={busy} style={{ height: 38, padding: '0 18px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>{busy ? 'Applying…' : 'Save & apply'}</button>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <button onClick={save} disabled={busy || !dirty} title={dirty ? undefined : NO_CHANGES_HINT}
+                      style={{ height: 38, padding: '0 18px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: dirty ? 'pointer' : 'default', opacity: dirty ? 1 : 0.5 }}>{busy ? 'Applying…' : 'Save & apply'}</button>
                     {selId !== NEW && form.id && <button onClick={() => setConfirmDel(defs.find((x) => x.id === form.id) ?? null)} disabled={busy} style={{ height: 38, padding: '0 14px', border: '1px solid #E5B4B4', background: '#fff', color: '#C0392B', borderRadius: 9, fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Trash2 size={14} />Delete</button>}
+                    {!dirty && <span style={{ fontSize: 12, color: '#8A93A5' }}>{NO_CHANGES_HINT}</span>}
                   </div>
                 )}
               </fieldset>

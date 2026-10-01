@@ -3,7 +3,7 @@ import { sanitizeLogicalName } from '@/lib/logicalName';
 import { ArrowDownUp, Eye, Pencil, Plus, Table2, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
-import { useModelerStore } from '@/store/useModelerStore';
+import { failureText, useModelerStore } from '@/store/useModelerStore';
 import { pushUndo } from '@/store/useUndoStore';
 import AuditHistory from './AuditHistory';
 import UdpAssign from './UdpAssign';
@@ -12,7 +12,9 @@ import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.s
 import { countFacetUdpValues, FACET_CAPTION, FACET_SWITCH_HINT, facetNoun, facetNouns } from '@/lib/facets';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import * as gov from '@/services/governance.service';
+import { apiErrorMessage } from '@/services/http';
 import { matchesColumn } from '../lib/columnSearch';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import { isPkFirst, orderColumns } from '../lib/columnOrder';
 import { alignSourcesToPhysical } from '../lib/viewSync';
 import { ColumnRow } from './ColumnEditor';
@@ -23,7 +25,7 @@ import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
 import type { TableViewRow, View } from '@/services/views.service';
 import { splitByCanvas } from '../lib/canvasViews';
-import { confirmDeleteTable, confirmDeleteView } from './deleteConfirm';
+import { confirmDeleteTable, confirmDeleteView, readTableDeleteCounts } from './deleteConfirm';
 
 // Doc 51: los UDPs dejan Metadata y pasan a pestaña propia (paridad con el
 // panel de columna del doc 49); Metadata conserva el resto y suma History.
@@ -66,6 +68,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // Doc 70: membresía de vistas en ESTE canvas (tab Views).
   const addViewsToCanvas = useModelerStore((s) => s.addViewsToCanvas);
   const removeViewFromCanvas = useModelerStore((s) => s.removeViewFromCanvas);
+  const deleteView = useModelerStore((s) => s.deleteView);
   // En modo visor puede haber changeset activo (viendo un request desde Review):
   // el panel abre como reader igual que sin changeset.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
@@ -209,9 +212,17 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // caminos de guardado de abajo (Save, blur de la definición, UDP).
   const tablePre = () => ({ ...table, ...(table.udpValues ? { udpValues: { ...table.udpValues } } : {}) });
 
+  // Doc 105 (H7): el fallo de cada escritura de este panel espera la
+  // revalidación y calla si la sesión cambió (`reportWriteError`: ya avisó
+  // ella). Se crea al PEDIR la escritura: toma esa sesión. H1: su inversa se
+  // apila sólo en la sesión donde empezó (`pinSession`).
   const saveDef = async () => {
     setSavingDef(true);
+    const pin = pinSession();
     const pre = tablePre();
+    // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador) en
+    // vez de un "Couldn't save" genérico que esconde POR QUÉ no se guardó.
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
     try {
       const logical = form.logicalName.trim();
       // Doc 68: la decisión (re-derivar vs conservar el custom + flag de
@@ -224,17 +235,16 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       }
       // `updateTable` sólo cubre name/schema; un único upsert changeset-aware (merge
       // sobre la tabla actual) cubre además `description`, y luego reload.
+      pin.check();   // el físico pudo derivarse con un await
       await gov.createTable({ ...table, logicalName: logical, physicalName: physical, physicalNameOverridden: plan.overridden, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); }, pin);
       // El form ya no se re-siembra en cada reload (solo al cambiar de tabla):
       // reflejar acá el físico derivado para que el input no quede stale.
       setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
       setPhysTouched(null);
       await reload();
       pushToast(`${nouns.One} updated`);
-    // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador) en
-    // vez de un "Couldn't save" genérico que esconde POR QUÉ no se guardó.
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
+    } catch (e) { await onError(e); }
     finally { setSavingDef(false); }
   };
   const derivePhysical = async () => {
@@ -255,20 +265,24 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     const next = form.description.trim() || undefined;
     if ((table.description ?? undefined) === next) return;
     const pre = tablePre();
+    const pin = pinSession();
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
     try {
       await gov.createTable({ ...table, description: next });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); }, pin);
       await reload();
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'); }
+    } catch (e) { await onError(e); }
   };
   const saveTableUdp = async (next: Record<string, string>) => {
     if (!table) return;
     const pre = tablePre();
+    const pin = pinSession();
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save UDP", 'err'));
     try {
       await gov.createTable({ ...table, udpValues: next });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); });
+      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); }, pin);
       await reload();
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't save UDP", 'err'); }
+    } catch (e) { await onError(e); }
   };
 
   // ── V2 (doc 19 §12b): "Match physical order" — reordena los sources de la
@@ -277,6 +291,11 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // Idea del equipo (Erwin no lo tiene). Las columnas no resolubles
   // (expresiones) conservan su orden relativo al final de su grupo.
   const alignView = async (v: View) => {
+    // Doc 105 (ronda 4): el pin y el aviso del error se toman AL PEDIRLO, antes
+    // del confirm — si mientras estaba abierto la revalidación bajó la versión
+    // a solo lectura, no se escribe ni se avisa encima de ella.
+    const pin = pinSession();   // doc 105 (H1): lee las columnas y después escribe
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't reorder the view", 'err'));
     // Confirmación previa (pedido owner): reordenar reescribe la definición de
     // la vista → popup Aceptar/Cancelar antes de ejecutar.
     const ok = await confirmDialog({
@@ -294,11 +313,12 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         const list = tid === table.id ? cols : await gov.listColumns(tid);
         colsByTable.set(tid, orderColumns(list));
       }
+      pin.check();
       await viewsSvc.updateView(v.id, { ...v, sources: alignSourcesToPhysical(v, colsByTable) });
       reloadViews();
       void reload();
       pushToast('View reordered to match the physical order of its table(s)');
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : "Couldn't reorder the view", 'err'); }
+    } catch (e) { await onError(e); }
     finally { setAligningId(null); }
   };
   // DnD: al pasar por encima decide si el drop va antes/después según la mitad del row.
@@ -330,8 +350,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       return;
     }
     setReordering(true);
+    const onError = reportWriteError(() => pushToast("Couldn't reorder", 'err'));
     try { await reorderColumns(table.id, ids); }
-    catch { pushToast("Couldn't reorder", 'err'); }
+    catch (e) { await onError(e); }
     finally { setReordering(false); }
   };
 
@@ -339,6 +360,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const removeFromCanvas = async () => {
     if (delBusy) return;
     setDelBusy('remove');
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't remove the ${nouns.one}`, 'err'));
     try {
       const ok = await confirmDialog({
         title: 'Remove from canvas',
@@ -349,37 +371,37 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         action: async () => { await removeTableFromArea(table.id); },
       });
       if (ok) pushToast(`${nouns.One} removed from this canvas`);
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : `Couldn't remove the ${nouns.one}`, 'err'); }
+    } catch (e) { await onError(e); }
     finally { setDelBusy(null); }
   };
   const askDeleteTable = async () => {
     if (delBusy) return;
     setDelBusy('delete');
+    // Doc 105 (ronda 4, R10-A): el borrado es de la sesión donde se pidió. El
+    // pre-conteo no tiene fondo: si mientras cuenta se abre otra versión, el
+    // confirm no se abre en ella, y la acción verifica el pin al clic (la del
+    // store tomaría el de ese momento).
+    const pin = pinSession();
+    // Doc 105 (H5): con la versión recién transferida el borrado termina con el
+    // error original de la versión — la revalidación ya avisó: acá se calla.
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't delete the ${nouns.one}`, 'err'));
     try {
       // Impacto: canvases donde aparece, tablas relacionadas (relaciones que se
       // van) y vistas que también se eliminan. Durante este pre-conteo el botón
-      // ya muestra el spinner (el diálogo todavía no abre).
-      let canvases = 0, related = 0, nViews = 0;
-      try {
-        const [usage, rels, vs] = await Promise.all([
-          gov.tableUsage(table.id).then((u) => u.usage).catch(() => []),
-          gov.listRelationships(table.id).catch(() => []),
-          viewsSvc.listViews(table.id).catch(() => []),
-        ]);
-        canvases = usage.length;
-        related = new Set(rels.flatMap((r) => [r.parentTableId, r.childTableId]).filter((t) => t !== table.id)).size;
-        nViews = vs.length;
-      } catch { /* si falla el conteo se muestran ceros */ }
+      // ya muestra el spinner (el diálogo todavía no abre). Doc 105 (O2): lo que
+      // no se pudo contar, el diálogo lo dice (antes mostraba «0»).
+      const impact = await readTableDeleteCounts(table.id);
+      if (!pin.holds()) return;
       // Diálogo compartido con el Object Inspector (doc 89 §3.5). El borrado
       // (cascada versionada) corre DENTRO del diálogo: queda con spinner y
       // bloqueado hasta terminar (el owner reportó reclicks por el delay).
       const ok = await confirmDeleteTable({
         name: table.physicalName || table.logicalName, nouns,
-        impact: { canvases, related, views: nViews },
-        action: async () => { await deleteTable(table.id); },
+        impact,
+        action: async () => { pin.check(); await deleteTable(table.id); },
       });
       if (ok) pushToast(`${nouns.One} deleted`);
-    } catch (e) { pushToast(e instanceof Error && e.message ? e.message : `Couldn't delete the ${nouns.one}`, 'err'); }
+    } catch (e) { await onError(e); }
     finally { setDelBusy(null); }
   };
 
@@ -584,15 +606,28 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                         </button>
                         <button className={iconBtn} title="Edit" onClick={() => setViewEditor({ view: v })}><Pencil size={12} /></button>
                         <button className={iconBtn} title="Remove from this canvas (the view stays in the model)"
-                          onClick={() => void removeViewFromCanvas(v.id).then(() => pushToast('View removed from canvas')).catch(() => pushToast("Couldn't remove the view", 'err'))}>
+                          onClick={() => void removeViewFromCanvas(v.id).then(() => pushToast('View removed from canvas'))
+                            .catch(reportWriteError((e) => pushToast(failureText("Couldn't remove the view from this canvas", e), 'err')))}>
                           <Unlink size={12} />
                         </button>
-                        <button className={iconBtn} title="Delete from the model" onClick={async () => { try { const ok = await confirmDeleteView({ name: v.name, action: async () => { await viewsSvc.deleteView(v.id); reloadViews(); void reload(); } }); if (ok) pushToast('View deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}><Trash2 size={12} /></button>
+                        {/* Doc 105 (A4-o4): la misma acción del store que el Object
+                            Inspector — con Undo que la repone en su sitio. */}
+                        <button className={iconBtn} title="Delete from the model" onClick={async () => {
+                          const onError = reportWriteError((e) => pushToast(apiErrorMessage(e, "Couldn't delete"), 'err'));
+                          try {
+                            const ok = await confirmDeleteView({
+                              name: v.name,
+                              action: async () => { await deleteView(v, { canvasIds: v.canvases.map((c) => c.id) }); reloadViews(); void reload(); },
+                            });
+                            if (ok) pushToast('View deleted');
+                          } catch (e) { await onError(e); }
+                        }}><Trash2 size={12} /></button>
                       </>
                     )}
                     {canAct && other && (
                       <button className="rd-btn rd-btn-ghost rd-btn-sm" title="Add this view to the current canvas"
-                        onClick={() => void addViewsToCanvas([v.id]).then(() => pushToast('View added to canvas')).catch(() => pushToast("Couldn't add the view", 'err'))}>
+                        onClick={() => void addViewsToCanvas([v.id]).then(() => pushToast('View added to canvas'))
+                          .catch(reportWriteError((e) => pushToast(failureText("Couldn't add the view to this canvas", e), 'err')))}>
                         <Plus size={12} /> Add to this canvas
                       </button>
                     )}
@@ -664,7 +699,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                         className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm"
                         style={{ marginLeft: 'auto' }}
                         title="Delete relationship"
-                        onClick={async () => { try { const ok = await confirmDialog({ title: 'Delete relationship', message: 'This relationship will be removed from the model.', confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: () => deleteRelationship(r.id) }); if (ok) pushToast('Relationship deleted'); } catch { pushToast("Couldn't delete", 'err'); } }}
+                        onClick={async () => {
+                          const onError = reportWriteError(() => pushToast("Couldn't delete", 'err'));
+                          try { const ok = await confirmDialog({ title: 'Delete relationship', message: 'This relationship will be removed from the model.', confirmLabel: 'Delete', cancelLabel: 'Cancel', variant: 'danger', action: () => deleteRelationship(r.id) }); if (ok) pushToast('Relationship deleted'); } catch (e) { await onError(e); }
+                        }}
                       >
                         <Trash2 size={12} />
                       </button>
@@ -783,8 +821,13 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
           onClose={() => setViewEditor(null)}
           onSaved={(v, created) => {
             // Doc 70: una vista NUEVA con «Show on this canvas» entra a la
-            // membresía de este canvas; editar no cambia membresía.
-            if (created && v.showOnCanvas !== false) void addViewsToCanvas([v.id]);
+            // membresía de este canvas; editar no cambia membresía. Doc 105
+            // (F1): si no entra, se dice por qué — y qué falló (O1); con la
+            // versión recién transferida, calla (H7: ya avisó la revalidación).
+            if (created && v.showOnCanvas !== false) {
+              void addViewsToCanvas([v.id])
+                .catch(reportWriteError((e) => pushToast(failureText("Couldn't add the view to this canvas", e), 'err')));
+            }
             reloadViews(); void reload();
           }}
           pushToast={pushToast}

@@ -5,11 +5,12 @@ import Modal from '@/components/ui/Modal';
 import * as gov from '@/services/governance.service';
 import { useModelerStore } from '@/store/useModelerStore';
 import { pushUndo } from '@/store/useUndoStore';
-import * as viewsSvc from '@/services/views.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 import { pasteColumnsToBulk, pastePlan, pastePreImages } from '../lib/pasteColumns';
+import { pinnedViewDeps, undoColumnsBatch } from '../lib/pinnedWrites';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import { invertBulk } from '../lib/undoInvert';
-import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews } from '../lib/viewSync';
+import { syncNewColumnsToMirrorViews } from '../lib/viewSync';
 
 /**
  * Confirmación del PASTE de columnas (doc 48): staging local — nada persiste
@@ -26,6 +27,8 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
   const clipboard = useModelerStore((s) => s.colClipboard);
   const viewMode = useModelerStore((s) => s.viewMode);
   const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
+  // Doc 105 (ronda 6, R17a-11): el nombre según la faceta (en Lógico mostraba el físico).
+  const shown = (t: { logicalName?: string; physicalName: string }) => (viewMode === 'logical' ? t.logicalName || t.physicalName : t.physicalName);
   const [saving, setSaving] = useState(false);
 
   const target = diagram?.tables.find((t) => t.id === targetId);
@@ -45,6 +48,12 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
 
   const confirm = async () => {
     setSaving(true);
+    // Doc 105 (H1): la acción es de la sesión donde empezó (sus escrituras y su
+    // inversa cortan si cambió); un fallo espera la revalidación (H7).
+    const pin = pinSession();
+    // 409 por carrera multiusuario u otro error: el lote es atómico (nada
+    // quedó a medias) — mensaje visible y el popup NO se cierra.
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't paste the ${n.members}`, 'err'));
     try {
       const cols = pasteable.map((r) => r.col);
       const changes = pasteColumnsToBulk({
@@ -57,41 +66,30 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
       // lote corrió (doc 94: PK pegadas ⇒ PK primero) vuelven a su ordinal
       // (+ retirar las pegadas de las vistas espejo, best-effort).
       const inverse = invertBulk(changes, pastePreImages(targetCols));
-      pushUndo(`Paste ${cols.length} column${cols.length === 1 ? '' : 's'}`, async () => {
-        await gov.recordChangesBulk(inverse);
-        for (const c of cols) {
-          try {
-            await syncRemovedColumnFromViews(
-              { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-              targetId, c.physicalName);
-          } catch { /* best-effort */ }
-        }
-        await useModelerStore.getState().reload();
-      });
+      pushUndo(`Paste ${cols.length} ${cols.length === 1 ? n.member : n.members}`, undoColumnsBatch({
+        inverse, tableId: targetId, created: cols.map((c) => c.physicalName),
+        after: () => useModelerStore.getState().reload(),
+      }), pin);
       // V1 (decisión owner i): las columnas pegadas entran también a las
       // vistas ESPEJO del destino — misma baseline para todas las columnas
       // del lote (patrón RelationshipCreatePopup), best-effort.
       // Doc 94 D4: las PK pegadas entran tras las PK del destino, en su orden.
-      await syncNewColumnsToMirrorViews(
-        { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-        targetId, cols, targetCols);
+      await syncNewColumnsToMirrorViews(pinnedViewDeps(pin), targetId, cols, targetCols);
       useModelerStore.getState().markDirty();
       await useModelerStore.getState().reload();
-      pushToast(`${cols.length} ${cols.length === 1 ? n.member : n.members} pasted into ${target.physicalName}`);
+      pushToast(`${cols.length} ${cols.length === 1 ? n.member : n.members} pasted into ${shown(target)}`);
       onClose();
     } catch (e) {
-      // 409 por carrera multiusuario u otro error: el lote es atómico (nada
-      // quedó a medias) — mensaje visible y el popup NO se cierra.
-      pushToast(e instanceof Error && e.message ? e.message : `Couldn't paste the ${n.members}`, 'err');
+      await onError(e);
     } finally { setSaving(false); }
   };
 
   return (
     <Modal title={`Paste ${n.members}`} icon="columns" size="lg"
-      subtitle={`${clipboard.source.physicalName} → ${target.physicalName}`}
+      subtitle={`${shown(clipboard.source)} → ${shown(target)}`}
       onClose={() => { if (!saving) onClose(); }}>
       <p className="wk-pp-cap" style={{ marginTop: 0 }}>
-        Each column is pasted with its full metadata — definition, PK/FK/nullable/partition flags,
+        Each {n.member} is pasted with its full metadata — definition, PK/FK/nullable/partition flags,
         UDPs, domain and type. Relationships are not copied. Rows whose physical name already
         exists in the target are skipped automatically.
       </p>
@@ -116,7 +114,7 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
               <span className="wk-paste-tag blocked">Name exists — skipped</span>
             ) : r.logicalDup ? (
               <span className="wk-paste-tag warn"
-                title="A column with the same logical name already exists in the target — it will be pasted anyway">
+                title={`${n.aMember[0].toUpperCase()}${n.aMember.slice(1)} with the same logical name already exists in the target — it will be pasted anyway`}>
                 Logical name exists
               </span>
             ) : (
@@ -127,7 +125,7 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
       </div>
       {bringsPk && (
         <p className="wk-pp-cap" style={{ marginBottom: 0 }}>
-          Includes key columns — they join the end of the target&apos;s primary key.
+          Includes key {n.members} — they join the end of the target&apos;s primary key.
           {targetIsParent ? ' Relationships born from this table will show drift (amber) until synced.' : ''}
         </p>
       )}

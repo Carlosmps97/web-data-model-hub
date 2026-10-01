@@ -1,9 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, Database, LogIn, ShieldCheck } from 'lucide-react';
 import { ApiError } from '@/services/http';
 import { ensureBackendSession } from '@/services/warmup';
 import { useAuthStore } from '@/store/useAuthStore';
+import { Splash } from './guards';
 
 /**
  * LoginScreen (doc 38) — dos caminos hacia la misma sesión por token:
@@ -17,6 +18,9 @@ export default function LoginScreen() {
   const location = useLocation() as { state?: { from?: string } };
   const doLogin = useAuthStore((s) => s.login);
   const doLoginSso = useAuthStore((s) => s.loginSso);
+  // Doc 105 (O4): por qué terminó la sesión anterior sin que el usuario saliera.
+  const notice = useAuthStore((s) => s.notice);
+  const status = useAuthStore((s) => s.status);
   const [adminMode, setAdminMode] = useState(false);
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState<null | 'sso' | 'admin'>(null);
@@ -29,6 +33,12 @@ export default function LoginScreen() {
   useEffect(() => { void ensureBackendSession(); }, []);
 
   const goHome = () => navigate(location.state?.from ?? '/', { replace: true });
+
+  // Doc 105 (ronda 5): con la red o el servidor caídos el token se conserva y el
+  // aviso pide recargar — al recargar AQUÍ la sesión se restaura: se sigue al
+  // destino en vez de pedir entrar otra vez; mientras se verifica, el splash.
+  if (status === 'authed') return <Navigate to={location.state?.from ?? '/'} replace />;
+  if (status === 'loading') return <Splash />;
 
   const ssoSignIn = async () => {
     setBusy('sso'); setError(null);
@@ -63,11 +73,12 @@ export default function LoginScreen() {
           <h1 className="dmh-login-title">Sign in</h1>
           <p className="dmh-login-sub">Data Model Hub</p>
         </div>
+        {notice && <div className="dmh-login-notice" role="status" id="dmh-login-notice">{notice}</div>}
 
         {!adminMode ? (
           <>
             <button type="button" className="dmh-login-btn" onClick={ssoSignIn}
-              disabled={busy !== null} autoFocus>
+              disabled={busy !== null} autoFocus aria-describedby={notice ? 'dmh-login-notice' : undefined}>
               {busy === 'sso' ? <span className="rd-spin" aria-hidden /> : <LogIn size={15} aria-hidden />}
               {busy === 'sso' ? 'Signing in…' : 'Continue with Databricks'}
             </button>

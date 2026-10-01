@@ -4,9 +4,10 @@ import {
   FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid, FileDown, FileText,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
-import { useModelerStore, buildProjectTree } from '@/store/useModelerStore';
+import { failureText, useModelerStore, buildProjectTree } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { FolderNode } from '@/store/useModelerStore';
+import { afterRevalidation, isVersionError, reportWriteError } from '../lib/sessionGuard';
 import type { Folder, Project, SubjectArea } from '../services/modeler.service';
 import { exportNodeHtml, exportNodePdf } from '../exportPackage';
 import type { CancelFlag, ExportOutcome, ExportProgress } from '../exportPackage';
@@ -129,8 +130,18 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     setExpandedP((s) => (s.has(pid) ? s : new Set(s).add(pid)));
     if (!useModelerStore.getState().trees[pid]) {
       setLoadingTrees((s) => new Set(s).add(pid));
+      // Doc 104: si es la versión abierta la que ya no está (transferida o
+      // eliminada), el aviso correcto lo da la revalidación de la sesión. La
+      // versión se toma al pedir (la sesión puede cerrarse antes del error).
+      const askedCs = useSessionStore.getState().activeChangesetId;
       loadProjectTree(pid)
-        .catch(() => pushToast("Couldn't load the project", 'err'))
+        .catch(async (e: unknown) => {
+          if (isVersionError(e, askedCs)) {
+            await afterRevalidation();
+            if (useSessionStore.getState().activeChangesetId !== askedCs) return;   // la revalidación ya avisó
+          }
+          pushToast("Couldn't load the project", 'err');
+        })
         .finally(() => setLoadingTrees((s) => { const n = new Set(s); n.delete(pid); return n; }));
     }
   }, [loadProjectTree, pushToast]);
@@ -218,11 +229,13 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     setEditing(null);
     const name = value.trim();
     if (!name) return;
+    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió (`reportWriteError`).
+    const onError = reportWriteError((e) => pushToast(failureText("Couldn't rename", e), 'err'));
     try {
       if (kind === 'project') await renameProject(id, name);
       else if (kind === 'folder') await renameFolder(id, name, projectId);
       else await renameCanvas(id, name, projectId);
-    } catch { pushToast("Couldn't rename", 'err'); }
+    } catch (e) { await onError(e); }
   }, [renameProject, renameFolder, renameCanvas, pushToast]);
 
   const commitCreate = useCallback(async (value: string) => {
@@ -230,10 +243,11 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     if (!c) return;
     const name = value.trim();
     if (!name) return;
+    const onError = reportWriteError((e) => pushToast(failureText(c.type === 'folder' ? "Couldn't create the folder" : "Couldn't create the canvas", e), 'err'));
     try {
       if (c.type === 'folder') await createFolder(c.projectId, c.parentFolderId, name);
       else await createCanvas(c.projectId, c.parentFolderId, name);
-    } catch { pushToast(c.type === 'folder' ? "Couldn't create the folder" : "Couldn't create the canvas", 'err'); }
+    } catch (e) { await onError(e); }
   }, [creating, createFolder, createCanvas, pushToast]);
 
   // El diálogo queda abierto y bloqueado (busy) hasta que el borrado termina —
@@ -243,10 +257,11 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     const d = toDelete;
     if (!d) return;
     setDeleting(true);
+    const onError = reportWriteError((e) => pushToast(failureText("Couldn't delete", e), 'err'));
     try {
       if (d.kind === 'folder') await deleteFolder(d.id, d.projectId);
       else await deleteCanvas(d.id, d.projectId);
-    } catch { pushToast("Couldn't delete", 'err'); }
+    } catch (e) { await onError(e); }
     finally { setDeleting(false); setToDelete(null); }
   }, [toDelete, deleteFolder, deleteCanvas, pushToast]);
 
@@ -269,7 +284,9 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
         onClick={() => {
           // Abrir sólo si no es el canvas ya abierto y no hay otra apertura en vuelo.
           if (sa.id === activeSaId || openingSaId) return;
-          selectSubjectArea(sa.id, projectId).catch(() => pushToast("Couldn't open the canvas", 'err'));
+          // Doc 105 (ronda 6): espera la revalidación — con la versión recién
+          // transferida o eliminada avisa ella (antes salían dos avisos) — y dice por qué.
+          selectSubjectArea(sa.id, projectId).catch(reportWriteError((e) => pushToast(failureText("Couldn't open the canvas", e), 'err')));
         }}
         onMenu={(e) => openMenu('canvas', sa.id, projectId, e)} />
     );

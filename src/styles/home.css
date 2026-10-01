@@ -145,9 +145,12 @@
 .dmh-vside-tools { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: var(--blue); background: var(--blue-tint); border: 1px solid var(--blue-border); border-radius: 7px; padding: 4px 9px; cursor: pointer; white-space: nowrap; }
 .dmh-vside-tools:hover { filter: brightness(.97); }
 .dmh-vside-restored { flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700; color: #7C5CC4; background: #F4EFFC; border: 1px solid #E4DAF6; border-radius: 6px; padding: 1px 5px; }
+/* Doc 104: versión que cambió de manos (⇄ = iniciada por otro usuario). */
+.dmh-vside-transferred { flex: none; font-size: 10.5px; font-weight: 700; color: #1F6A8A; background: #EAF5FA; border: 1px solid #CDE6F0; border-radius: 6px; padding: 0 5px; line-height: 16px; }
 .dmh-vside-info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--surface); color: var(--text-muted-2); cursor: pointer; }
 .dmh-vside-info:hover { color: var(--blue); border-color: var(--blue-border); }
 
+.dmh-vt-modal:focus { outline: none; }
 .dmh-vt-modal { width: min(980px, 94vw); height: min(720px, 90vh); background: var(--surface); border-radius: 14px; box-shadow: 0 24px 64px rgba(15, 23, 42, .28); display: flex; flex-direction: column; overflow: hidden; }
 .dmh-vt-tabs { display: flex; gap: 2px; padding: 0 18px; border-bottom: 1px solid var(--border-2); flex: none; }
 .dmh-vt-tab { border: none; background: none; padding: 10px 12px; font-size: 12.5px; font-weight: 600; color: var(--text-muted-2); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
@@ -178,6 +181,12 @@
 .dmh-vt-dtitle { font-size: 13.5px; font-weight: 700; color: var(--navy); }
 .dmh-vt-restored { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #5B4494; background: #F4EFFC; border: 1px solid #E4DAF6; border-radius: 9px; padding: 8px 11px; margin-bottom: 10px; }
 .dmh-vt-restored svg { flex: none; }
+/* Doc 104: administrar un draft (transferir / eliminar) en Version details. */
+.dmh-vt-manage { display: inline-flex; gap: 6px; }
+.dmh-vt-error { margin-top: 12px; font-size: 12px; color: var(--red); background: var(--red-tint); border: 1px solid var(--red-border); border-radius: 9px; padding: 8px 11px; }
+.dmh-vt-transfer { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; padding: 5px 0; font-size: 12.5px; color: var(--text-body); }
+.dmh-vt-transfer + .dmh-vt-transfer { border-top: 1px solid #F2F4F8; }
+.dmh-vt-tarrow { color: var(--text-muted-2); font-weight: 700; }
 .dmh-vt-desc { font-size: 12.5px; color: var(--text-body); margin: 0 0 12px; }
 .dmh-vt-grid { display: grid; grid-template-columns: 150px 1fr; gap: 7px 14px; font-size: 12.5px; color: var(--text-body); align-items: center; margin-bottom: 6px; }
 .dmh-vt-glabel { color: var(--text-muted-2); font-weight: 700; font-size: 11.5px; }

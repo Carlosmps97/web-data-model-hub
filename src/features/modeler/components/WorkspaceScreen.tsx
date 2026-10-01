@@ -1,14 +1,19 @@
-import { useEffect, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { MODEL_MODE_CAPTION } from '@/lib/facets';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { useModelerStore } from '@/store/useModelerStore';
+import { failureText, useModelerStore } from '@/store/useModelerStore';
 import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
 import { canvasSessionKey } from '../lib/canvasSession';
+import {
+  isVersionHeaderUrl, reportWriteError, sessionFate, stillAskedSession, touchesChangeset, trackRevalidation,
+} from '../lib/sessionGuard';
 import OpenModelModal from '@/components/OpenModelModal';
 import NewProjectModal from '@/components/NewProjectModal';
-import { getChangeset, listUsers } from '@/services/versioning.service';
-import type { SimUserDto } from '@/types/versioning';
+import { getChangeset, getPublished, isAsOfChangesetId, listUserNames } from '@/services/versioning.service';
+import { ApiError, errorReason, setOnApiError } from '@/services/http';
+import { useAuthStore } from '@/store/useAuthStore';
+import type { ChangesetDetail, SimUserDto } from '@/types/versioning';
 import ModelerCanvas from './ModelerCanvas';
 import Toolbar from './Toolbar';
 import ExplorerPanel from './ExplorerPanel';
@@ -29,7 +34,6 @@ export const pushToast = (m: string, k?: 'err') => (k === 'err' ? toast.error(m)
 export default function WorkspaceScreen() {
   const navigate = useNavigate();
   const activeSaId = useModelerStore((s) => s.activeSaId);
-  const loadProjects = useModelerStore((s) => s.loadProjects);
   const columnTarget = useModelerStore((s) => s.columnTarget);
   const setColumnTarget = useModelerStore((s) => s.setColumnTarget);
   const addColumn = useModelerStore((s) => s.addColumn);
@@ -102,13 +106,19 @@ export default function WorkspaceScreen() {
     el.addEventListener('pointerup', up);
   };
 
-  useEffect(() => { loadProjects().catch(() => pushToast("Couldn't load the projects", 'err')); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // Doc 105 (H6): los proyectos NO se cargan al montar. Con sesión los trae
+  // `refreshExplorer` (efecto de abajo); sin sesión nadie los lee (el Explorer
+  // muestra sólo el proyecto de la sesión y el chooser carga los suyos). La
+  // carga del montaje duplicaba la del refresco y, con la red caída, sumaba
+  // su propio aviso: una caída eran dos o tres avisos.
 
   // Data the Open-model modal needs (draft owners); production is per project
-  // and the modal resolves it from the version list (doc 75).
+  // and the modal resolves it from the version list (doc 75). Doc 105 (U1):
+  // sólo para NOMBRES — incluye a los deshabilitados (quien dejó la empresa
+  // sigue siendo dueño de su versión y se ve con su nombre, no con su correo).
   useEffect(() => {
     let cancelled = false;
-    listUsers()
+    listUserNames()
       .then((us) => { if (!cancelled) setUsers(us); })
       .catch(() => { /* the modal still works with defaults */ });
     return () => { cancelled = true; };
@@ -127,41 +137,140 @@ export default function WorkspaceScreen() {
   // La dependencia es la CLAVE de sesión (proyecto + modo + changeset): abrir
   // otro proyecto en el mismo modo también re-sincroniza (owner 2026-09-08).
   useEffect(() => {
-    if (openMode) void useModelerStore.getState().refreshExplorer().catch(() => {});
+    if (openMode) {
+      // Doc 105 (F2): un fallo ya no se traga (el Explorer quedaba en «Open a
+      // project…» sin aviso). Criterio de sessionGuard, con la sesión tomada AL
+      // PEDIR: un error de la versión espera la revalidación; si la sesión ya
+      // no es esta (la cambió la revalidación, que avisó, o el usuario abrió
+      // otra), se calla. Un aviso por sesión (id): no se apilan.
+      const asked = useSessionStore.getState();
+      const askedKey = canvasSessionKey(asked);
+      useModelerStore.getState().refreshExplorer().catch(async (e: unknown) => {
+        const current = () => canvasSessionKey(useSessionStore.getState());
+        if (!(await stillAskedSession(e, asked.activeChangesetId, askedKey, current))) return;
+        const reason = errorReason(e, 'unknown error');
+        toast.error(`Couldn't load the explorer: ${reason}. Use Refresh to try again.`, { id: `dmh-explorer-load:${askedKey}` });
+      });
+    }
     useModelerStore.getState().clearDirty();
+    setPublishFromPanel(false);   // doc 105 (R7-A): el Publish era de la sesión anterior
     // Al abrir una versión para EDITAR se muestra el modelo LÓGICO (es lo que se
     // edita) para que los cambios de naming lógico se vean de una; en solo-lectura
     // se mantiene el físico (nombres de producción). El toggle sigue disponible.
     if (openMode === 'editing') useModelerStore.getState().setViewMode('logical');
   }, [sessionKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Defensa en profundidad: una sesión `editing` sólo es válida sobre un draft
-  // PROPIO. Si el changeset dejó de estar en draft (enviado desde otra pestaña,
-  // decidido por un revisor a mitad de sesión, binding viejo) o el actor cambió
-  // a uno que no es el owner, degradamos a solo lectura en vez de dejar un
-  // canvas que responde 409/403 en cada edición.
+  // Defensa en profundidad: la versión abierta pudo cambiar POR FUERA — enviada
+  // o decidida en otra pestaña, binding viejo, o (doc 104) transferida a otro
+  // usuario o eliminada. Se revalida al entrar/cambiar de sesión y cuando una
+  // respuesta 403/404/409 de ESA versión lo avisa; `sessionFate` decide: seguir,
+  // solo lectura (la misma versión o producción) o volver al chooser — en vez
+  // de dejar un canvas que falla en cada guardado o que muestra otra cosa.
+  const usersRef = useRef<SimUserDto[]>([]);
+  usersRef.current = users;
+  // Revalidación en curso: una a la vez POR versión (otra sesión abierta en el
+  // medio se revisa igual). Un pedido que llega mientras corre no se pierde:
+  // marca `rerun`, la corrida se repite al terminar y quien pidió espera ambas
+  // (la promesa de la corrida). Se registra (`trackRevalidation`) para que el
+  // store y el Explorer esperen el veredicto antes de avisar un error propio.
+  type Run = { csId: string; rerun: boolean; promise: Promise<void> };
+  const revalidating = useRef<Run | null>(null);
+  const revalidateRef = useRef<() => Promise<void>>(async () => {});
+
+  const checkSession = useCallback(async (csId: string, start: ReturnType<typeof useSessionStore.getState>) => {
+    const same = () => {
+      const now = useSessionStore.getState();
+      return now.activeChangesetId === csId && now.openMode === start.openMode;
+    };
+    let cs: ChangesetDetail | null;
+    try {
+      cs = await getChangeset(csId);
+    } catch (e) {
+      // Sin respuesta no se degrada: el guard del backend sigue protegiendo.
+      // Y no se repite: si la cabecera no se puede leer (403 del proxy, red),
+      // reintentar ahora daría lo mismo — el siguiente error lo vuelve a pedir.
+      if (!(e instanceof ApiError && e.status === 404)) {
+        if (revalidating.current?.csId === csId) revalidating.current.rerun = false;
+        // Un 403 acá no viene del backend (la cabecera no exige permisos): es
+        // el proxy de la plataforma. Un aviso por versión (id: no se apilan) y
+        // sólo si la sesión sigue siendo esa.
+        if (e instanceof ApiError && e.status === 403 && same()) {
+          toast.error(`Couldn't check this version: ${e.message || 'access denied'}`, { id: `dmh-version-check:${csId}` });
+        }
+        return;
+      }
+      cs = null;
+    }
+    if (!same()) return;
+    const now = useSessionStore.getState();
+    const auth = useAuthStore.getState();
+    // Nombres para el aviso: al entrar a Model la lista puede no haber
+    // llegado todavía (el aviso saldría con el correo en vez del nombre).
+    if (!usersRef.current.length && cs?.owner && cs.owner !== now.user.id) {
+      usersRef.current = await listUserNames().catch(() => []);
+      if (!same()) return;
+    }
+    const fate = sessionFate({
+      mode: start.openMode!,
+      changesetId: csId,
+      versionLabel: now.activeVersionLabel ?? cs?.versionLabel ?? null,
+      me: now.user.id,
+      canViewAll: auth.has('versions.view_all') || auth.has('admin.manage'),
+      cs,
+      userName: (id) => usersRef.current.find((u) => u.id === id)?.name ?? id,
+    });
+    if (fate.kind === 'keep') return;
+    const projectId = cs?.projectId ?? now.activeProjectId;
+    if (fate.kind === 'close' || !projectId) {
+      now.closeModel();
+      pushToast(fate.message, 'err');
+      return;
+    }
+    const label = fate.changesetId
+      ? (cs?.versionLabel ?? null)
+      : ((await getPublished(projectId).catch(() => null))?.versionLabel ?? null);
+    if (!same()) return;
+    useSessionStore.getState().openModel({
+      projectId, mode: 'readonly', changesetId: fate.changesetId ?? undefined, versionLabel: label,
+    });
+    pushToast(fate.message, 'err');
+  }, []);
+
+  const revalidateSession = useCallback((): Promise<void> => {
+    const start = useSessionStore.getState();
+    const csId = start.activeChangesetId;
+    if (!start.openMode || !csId || isAsOfChangesetId(csId)) return Promise.resolve();
+    const running = revalidating.current;
+    if (running?.csId === csId) { running.rerun = true; return running.promise; }
+    const run: Run = { csId, rerun: false, promise: Promise.resolve() };
+    revalidating.current = run;
+    run.promise = (async () => {
+      try {
+        await checkSession(csId, start);
+      } finally {
+        const again = revalidating.current === run && run.rerun;
+        if (revalidating.current === run) revalidating.current = null;
+        if (again) await revalidateRef.current();
+      }
+    })();
+    return run.promise;
+  }, [checkSession]);
+  revalidateRef.current = revalidateSession;
+
+  useEffect(() => { trackRevalidation(revalidateSession()); }, [openMode, activeChangesetId, user.id, revalidateSession]);
+
+  // Doc 104: una respuesta 403/404/409 de la versión abierta (guardado o
+  // lectura) = pudo haberla transferido o eliminado otra sesión → revalidar.
   useEffect(() => {
-    if (openMode !== 'editing' || !activeChangesetId) return;
-    let cancelled = false;
-    getChangeset(activeChangesetId)
-      .then((cs) => {
-        if (cancelled || (cs.status === 'draft' && cs.owner === user.id)) return;
-        useSessionStore.getState().openModel({
-          projectId: cs.projectId,
-          mode: 'readonly',
-          changesetId: activeChangesetId,
-          versionLabel: cs.versionLabel ?? null,
-        });
-        pushToast(
-          cs.status !== 'draft'
-            ? `Version ${cs.versionLabel ?? ''} is no longer in draft (${cs.status}): the canvas is now read-only`
-            : 'The version belongs to another user: the canvas is now read-only',
-          'err',
-        );
-      })
-      .catch(() => { /* sin respuesta no degradamos: el guard del backend sigue protegiendo */ });
-    return () => { cancelled = true; };
-  }, [openMode, activeChangesetId, user.id]);
+    setOnApiError((status, url) => {
+      if (status !== 403 && status !== 404 && status !== 409) return;
+      const cs = useSessionStore.getState().activeChangesetId;
+      // La lectura de cabecera ES la revalidación: su propio error no la redispara.
+      if (!touchesChangeset(url, cs) || isVersionHeaderUrl(url, cs)) return;
+      trackRevalidation(revalidateSession());
+    });
+    return () => setOnApiError(null);
+  }, [revalidateSession]);
 
   // Cerrar/recargar la pestaña con cambios sin guardar → aviso NATIVO del
   // browser (la plataforma no permite popups propios en beforeunload; el popup
@@ -221,7 +330,7 @@ export default function WorkspaceScreen() {
         ) : deletionPending && activeProject ? (
           <DeletionPendingPanel
             project={activeProject}
-            onUndo={() => { void runBlocking('Restoring project…', undoProjectDeletion).catch((e) => pushToast(e instanceof Error ? e.message : "Couldn't restore the project", 'err')); }}
+            onUndo={() => { void runBlocking('Restoring project…', undoProjectDeletion).catch(reportWriteError((e) => pushToast(failureText("Couldn't restore the project", e), 'err'))); }}
             onSend={() => setPublishFromPanel(true)}
           />
         ) : activeSaId ? (

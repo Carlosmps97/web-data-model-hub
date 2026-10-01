@@ -28,7 +28,7 @@
  * versión; los lotes de ids van por POST (fin del 431).
  * Loading → skeleton/placeholders; errors → sonner toast.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import {
@@ -43,14 +43,15 @@ import {
 } from 'lucide-react';
 
 import {
-  COLUMN_BATCH, ReportDesigner, SheetTemplateCard, columnSheetRow, fetchColumnsFor, fetchViewsFor, getRelationshipsReport,
-  joinedSheetRow, levelsFileName, ownOpenVersions, productionLabel, relationshipSheetRow, sheetHeaders, sortColumnRows,
-  tableSheetRow, udpKeysOf, unionSorted, versionOptionLabel, viewSheetRow, type SheetRow,
+  COLUMN_BATCH, ReportDesigner, SheetTemplateCard, columnSheetRow, fetchColumnsFor, fetchRelationshipsFor, fetchViewsFor,
+  joinedSheetRow, levelsFileName, ownOpenVersions, productionLabel, readErrorText, relationshipSheetRow, sheetHeaders,
+  sortColumnRows, tableSheetRow, udpKeysOf, unionSorted, vanishedVersionText, VERSION_TOAST, versionGoneText,
+  versionOptionLabel, viewSheetRow, type SheetRow,
 } from '@/features/reporting';
 import SearchSelect from '@/features/modeler/components/SearchSelect';
 import { Button } from '@/components/ui';
 import { listProjects } from '@/services/projects.service';
-import { listVersions } from '@/services/versioning.service';
+import { getChangeset, listVersions } from '@/services/versioning.service';
 import { projectMeta, sortProjects } from '@/lib/projects';
 import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -93,18 +94,45 @@ function initialProjectId(projects: Project[]): string | null {
   return sortProjects(projects)[0]?.id ?? null;
 }
 
-/** Selector de proyecto (doc 75 D13): obligatorio, comparte estilo con el Standards. */
-function ProjectPick({ projects, projectId, onPick }: { projects: Project[]; projectId: string | null; onPick: (id: string) => void }) {
+/** Doc 105 (B3): por qué el proyecto, la versión y «Design report» no se
+ *  pueden cambiar mientras corre un export (terminaría igual y bajaría el
+ *  archivo de lo que ya no está en pantalla). */
+const EXPORT_BUSY_HINT = 'Wait for the export to finish';
+
+/** Doc 105 (B4): toast de «no se pudo listar tus versiones» (uno, aunque se repita). */
+const VERSIONS_TOAST = 'dmh-rep-versions';
+
+/** Texto sólo para lectores de pantalla (visualmente oculto). */
+const SR_ONLY: React.CSSProperties = {
+  position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden',
+  clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
+};
+
+/** Doc 105 (a11y): el motivo de un combo deshabilitado estaba sólo en `title`;
+ *  ahora también es la DESCRIPCIÓN accesible del input (su nombre no cambia). */
+function BusyHint({ id }: { id: string }) {
+  return <span id={id} style={SR_ONLY}>{EXPORT_BUSY_HINT}</span>;
+}
+
+/** Selector de proyecto (doc 75 D13): obligatorio, comparte estilo con el Standards.
+ *  `busy` (doc 105 B3): un export en curso lo deshabilita. */
+export function ProjectPick({ projects, projectId, onPick, busy = false }: {
+  projects: Project[]; projectId: string | null; onPick: (id: string) => void; busy?: boolean;
+}) {
   const name = projects.find((p) => p.id === projectId)?.name ?? '';
+  const hintId = useId();
   return (
-    <span className="dmh-rep-project" title="Project">
+    <span className="dmh-rep-project" title={busy ? EXPORT_BUSY_HINT : 'Project'}>
       <SearchSelect
         options={sortProjects(projects).map((p) => ({ value: p.id, label: p.name }))}
         valueLabel={name}
         placeholder={projects.length ? 'Project…' : 'No projects yet'}
         onPick={(v) => { if (v) onPick(v); }}
-        disabled={projects.length === 0}
+        disabled={busy || projects.length === 0}
+        ariaLabel="Project"
+        ariaDescribedBy={busy ? hintId : undefined}
       />
+      {busy && <BusyHint id={hintId} />}
     </span>
   );
 }
@@ -112,19 +140,24 @@ function ProjectPick({ projects, projectId, onPick }: { projects: Project[]; pro
 /** Doc 102 (D1): valor del combo Version para producción. */
 const PRODUCTION = '__production__';
 
-/** Combo Version: producción o una de MIS versiones sin publicar del proyecto. */
-function VersionPick({ production, own, versionId, onPick }: {
+/** Combo Version: producción o una de MIS versiones sin publicar del proyecto.
+ *  `busy` (doc 105 B3): un export en curso lo deshabilita. */
+export function VersionPick({ production, own, versionId, onPick, busy = false }: {
   production: VersionRow | null; own: VersionRow[]; versionId: string | null; onPick: (id: string | null) => void;
+  busy?: boolean;
 }) {
   const options = [
     { value: PRODUCTION, label: productionLabel(production) },
     ...own.map((r) => ({ value: r.id, label: versionOptionLabel(r) })),
   ];
   const current = options.find((o) => o.value === (versionId ?? PRODUCTION)) ?? options[0];
+  const hintId = useId();
   return (
-    <span className="dmh-rep-version" title="Version — production or one of your unpublished versions">
+    <span className="dmh-rep-version" title={busy ? EXPORT_BUSY_HINT : 'Version — production or one of your unpublished versions'}>
       <SearchSelect options={options} valueLabel={current.label} placeholder="Version…"
-        onPick={(v) => onPick(v === PRODUCTION ? null : v)} />
+        onPick={(v) => onPick(v === PRODUCTION ? null : v)} disabled={busy} ariaLabel="Version"
+        ariaDescribedBy={busy ? hintId : undefined} />
+      {busy && <BusyHint id={hintId} />}
     </span>
   );
 }
@@ -134,6 +167,31 @@ function VersionPick({ production, own, versionId, onPick }: {
 const GRID_ROW_CAP = 5000;
 /** Doc 92 D3: tamaño de página del scroll infinito de la grilla de tablas. */
 const TABLE_PAGE = 50;
+
+/** Doc 105 (R2-B4): la carga de tablas de la grilla falló — antes se veía «No
+ *  tables to report yet», como un proyecto vacío. Retry relanza SÓLO la carga
+ *  que falló (la paginada o la completa). */
+export function TablesLoadError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="dmh-rep-state" role="alert">
+      <div className="dmh-rep-state-ico"><TableProperties size={26} strokeWidth={1.3} aria-hidden /></div>
+      <div className="dmh-rep-state-t">Couldn&apos;t load the tables</div>
+      <div className="dmh-rep-state-m">Check your connection and try again.</div>
+      <div style={{ marginTop: 12 }}><Button variant="secondary" onClick={onRetry}>Retry</Button></div>
+    </div>
+  );
+}
+
+/** Doc 105: la página siguiente del scroll infinito falló — antes la lista se
+ *  daba por terminada («N tables», sin reintento). Retry pide LA MISMA página. */
+export function MoreTablesError({ onRetry }: { onRetry: () => void }) {
+  return (
+    <span role="alert" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+      Couldn&apos;t load more tables.
+      <Button variant="secondary" size="sm" onClick={onRetry}>Retry</Button>
+    </span>
+  );
+}
 
 /** Doc 70 §4.2 — grilla genérica de filas ya aplanadas por las mismas funciones
  *  puras del Excel (`lib/reportRows`): encabezados = unión de claves, scroll
@@ -289,16 +347,55 @@ export default function ReportingScreenWrapper() {
   const me = useAuthStore((s) => s.user?.username ?? null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [versionId, setVersionId] = useState<string | null>(null);
+  // Doc 105 (R2-B5): sólo se aplica el listado de versiones MÁS RECIENTE (el
+  // inicial o un re-listado): una respuesta vieja que llegaba tarde pisaba a la
+  // nueva — aviso falso «no longer open», vuelta a Production y el draft recién
+  // elegido fuera del combo. Mismo patrón que `_explorerSeq` del canvas.
+  // Doc 105 (R6): si el más reciente FALLA, vale la última lista buena que haya
+  // llegado desde el cambio de proyecto (aunque la trajera un pedido anterior);
+  // sin ninguna, se avisa (B4) — antes el fallo se callaba y el combo quedaba vacío.
+  // `warned`: el aviso B4 ya está en pantalla — re-emitirlo con el mismo id lo
+  // reemplaza y reinicia su vencimiento (se cerraba solo aun con el mouse encima);
+  // sale UNA vez por proyecto o por lista buena.
+  const versionsReq = useRef({ seq: 0, failed: 0, warned: false, good: null as { seq: number; list: VersionRow[] } | null });
+  /** Llegó una lista buena: la aplica si es la más reciente ('latest') o si la
+   *  más reciente falló y ésta es la mejor que hay ('fallback'); si no, null. */
+  const takeVersions = useCallback((seq: number, vs: VersionRow[]): 'latest' | 'fallback' | null => {
+    const r = versionsReq.current;
+    if (!r.good || seq > r.good.seq) r.good = { seq, list: vs };
+    const how = seq === r.seq ? 'latest' : r.failed === r.seq && r.good.seq === seq ? 'fallback' : null;
+    if (how) {
+      setVersions(vs);
+      if (r.warned) { toast.dismiss(VERSIONS_TOAST); r.warned = false; }   // B4: la lista volvió
+    }
+    return how;
+  }, []);
+  /** Falló un listado: si era el más reciente, vale la última lista buena; sin ninguna, el aviso B4. */
+  const versionsFailed = useCallback((seq: number) => {
+    const r = versionsReq.current;
+    if (seq !== r.seq) return;
+    r.failed = seq;
+    if (r.good) setVersions(r.good.list);
+    else if (!r.warned) {
+      // Doc 105 (B4): antes el combo quedaba en Production sin decir por qué.
+      r.warned = true;
+      toast.error("Couldn't load your versions of this project — only Production is available.", { id: VERSIONS_TOAST });
+    }
+  }, []);
   useEffect(() => {
     setVersionId(null);
     setVersions([]);
     if (!projectId) return undefined;
     let cancelled = false;
+    const r = versionsReq.current;
+    r.good = null;   // proyecto nuevo: todavía no llegó ninguna lista buena
+    if (r.warned) { toast.dismiss(VERSIONS_TOAST); r.warned = false; }   // el aviso era del proyecto anterior
+    const seq = ++r.seq;
     listVersions(projectId)
-      .then((vs) => { if (!cancelled) setVersions(vs); })
-      .catch(() => { if (!cancelled) setVersions([]); });
+      .then((vs) => { if (!cancelled) takeVersions(seq, vs); })
+      .catch(() => { if (!cancelled) versionsFailed(seq); });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, takeVersions, versionsFailed]);
   const production = useMemo(() => (projectId ? projectMeta(versions, me)[projectId]?.productionRow ?? null : null),
     [versions, me, projectId]);
   const own = useMemo(() => (projectId ? ownOpenVersions(versions, projectId, me) : []), [versions, projectId, me]);
@@ -306,26 +403,50 @@ export default function ReportingScreenWrapper() {
   // Doc 102: si una lectura de la versión falla (p. ej. se publicó o se cerró en
   // otra pestaña), se vuelve a pedir la lista: si ya no está abierta, el combo
   // deja de ofrecerla y la pantalla vuelve a producción, con aviso.
+  // Doc 105: el aviso comparte el id del toast del error (R2-B3: uno solo, no
+  // dos); un 403/404 (A5-o4: se transfirió o se eliminó) vuelve a producción
+  // sin esperar la lista — el backend ya lo dijo.
   const liveProject = useRef<string | null>(null);
   const liveVersion = useRef<string | null>(null);
   useEffect(() => { liveProject.current = projectId; }, [projectId]);
   useEffect(() => { liveVersion.current = version?.id ?? null; }, [version]);
-  const recheckVersions = useCallback(() => {
+  const recheckVersions = useCallback((err?: unknown) => {
     const pid = liveProject.current;
     if (!pid) return;
+    const was = liveVersion.current;
+    const gone = was ? versionGoneText(err) : null;
+    if (gone) {
+      setVersionId(null);
+      toast.warning(gone, { id: VERSION_TOAST });
+    }
+    const seq = ++versionsReq.current.seq;
     listVersions(pid)
       .then((vs) => {
-        if (liveProject.current !== pid) return;
-        setVersions(vs);
+        // Sólo la MÁS RECIENTE trae noticias sobre la versión elegida.
+        if (liveProject.current !== pid || takeVersions(seq, vs) !== 'latest') return;
         const cur = liveVersion.current;
-        if (cur && !ownOpenVersions(vs, pid, me).some((r) => r.id === cur)) {
+        if (cur && !(gone && cur === was) && !ownOpenVersions(vs, pid, me).some((r) => r.id === cur)) {
           setVersionId(null);
-          toast.warning('That version is no longer open — showing Production.');
+          // Doc 105 (A5-o4): ¿se eliminó, se transfirió o se publicó/cerró? Lo dice
+          // su cabecera — un pedido, sólo cuando la versión elegida desaparece.
+          getChangeset(cur)
+            .then((header) => ({ header }), (error: unknown) => ({ error }))
+            .then((read) => { toast.warning(vanishedVersionText(read, me), { id: VERSION_TOAST }); });
         }
       })
-      .catch(() => { /* sin cambios: la versión sigue elegida */ });
-  }, [me]);
-  const pick = <ProjectPick projects={projects} projectId={projectId} onPick={setProjectId} />;
+      .catch(() => { if (liveProject.current === pid) versionsFailed(seq); });   // la versión sigue elegida
+  }, [me, takeVersions, versionsFailed]);
+  // Doc 105 (R2-B5): la lista sólo se pedía al cambiar de proyecto — un draft
+  // creado (o publicado) en otra pestaña no aparecía (o seguía ofrecido).
+  useEffect(() => {
+    const onFocus = () => recheckVersions();
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [recheckVersions]);
+  // Doc 105 (B3): export en curso (por niveles o con plantilla) — Project,
+  // Version y Design report quedan deshabilitados hasta que termine.
+  const [exportBusy, setExportBusy] = useState(false);
+  const pick = <ProjectPick projects={projects} projectId={projectId} onPick={setProjectId} busy={exportBusy} />;
   if (!projectId) {
     return (
       <div className="dmh-rep"><div className="dmh-rep-inner">
@@ -345,20 +466,27 @@ export default function ReportingScreenWrapper() {
     );
   }
   const projectName = projects.find((p) => p.id === projectId)?.name ?? '';
-  const versionPick = <VersionPick production={production} own={own} versionId={version?.id ?? null} onPick={setVersionId} />;
+  const versionPick = (
+    <VersionPick production={production} own={own} versionId={version?.id ?? null} onPick={setVersionId} busy={exportBusy} />
+  );
   return (
     <ReportingScreen key={`${projectId}:${version?.id ?? 'production'}`} projectId={projectId} projectName={projectName}
       changesetId={version?.id ?? null} versionLabel={version?.versionLabel ?? null} onVersionError={recheckVersions}
-      projectPicker={pick} versionPicker={versionPick} onDesign={() => setDesigner(true)} />
+      onExportBusy={setExportBusy} projectPicker={pick} versionPicker={versionPick} onDesign={() => setDesigner(true)} />
   );
 }
 
-function ReportingScreen({ projectId, projectName, changesetId, versionLabel, onVersionError, projectPicker, versionPicker, onDesign }: {
+export function ReportingScreen({
+  projectId, projectName, changesetId, versionLabel, onVersionError, onExportBusy, projectPicker, versionPicker, onDesign,
+}: {
   projectId: string; projectName: string;
   /** Doc 102 (D1): versión PROPIA sin publicar del reporte; null = producción. */
   changesetId: string | null; versionLabel: string | null;
-  /** Doc 102: falló una lectura de la versión — el wrapper revisa si sigue abierta. */
-  onVersionError: () => void;
+  /** Doc 102: falló una lectura de la versión — el wrapper revisa si sigue abierta
+   *  (doc 105: con el error, para distinguir transferida/eliminada). */
+  onVersionError: (err?: unknown) => void;
+  /** Doc 105 (B3): hay un export en curso (`false` también al desmontarse). */
+  onExportBusy: (busy: boolean) => void;
   projectPicker: React.ReactNode; versionPicker: React.ReactNode; onDesign: () => void;
 }) {
   // Doc 102: con una versión propia el reporte es ESA versión (producción + sus
@@ -373,6 +501,29 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
 
   const [levels, setLevels] = useState<Set<LevelKey>>(new Set<LevelKey>(['tables', 'columns']));
   const [exporting, setExporting] = useState(false);
+  // Doc 105 (B3): la card de plantillas avisa si exporta; con cualquiera de los
+  // dos exports en curso el wrapper deshabilita Project / Version, y acá Design report.
+  const [templateBusy, setTemplateBusy] = useState(false);
+  const exportBusy = exporting || templateBusy;
+  useEffect(() => {
+    onExportBusy(exportBusy);
+    return () => onExportBusy(false);
+  }, [exportBusy, onExportBusy]);
+  // Doc 105 (R2-B3): un export que falla DESPUÉS de desmontar (el wrapper volvió
+  // a Production) no avisa sobre la pantalla nueva.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => { alive.current = false; };
+  }, []);
+  /** Doc 105 (R2-B3/A5-o4): aviso de una lectura fallida. En modo versión, UN
+   *  toast con el id del aviso «showing Production» del wrapper (un 403/404 dice
+   *  que la versión se transfirió o se eliminó) y el wrapper revisa la versión. */
+  const readFailed = useCallback((err: unknown, fallback: string) => {
+    if (!changesetId) { toast.error(readErrorText(err, fallback, false)); return; }
+    toast.error(readErrorText(err, fallback, true), { id: VERSION_TOAST });
+    onVersionError(err);
+  }, [changesetId, onVersionError]);
 
   // Doc 70 §4.1: universo COMPLETO de los filtros (no depende de las 50 filas
   // de la carga inicial). Si falla, los combos caen a lo derivado de las filas.
@@ -393,10 +544,30 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
   const [loadingMore, setLoadingMore] = useState(false);
   // Doc 92 D4: total REAL de tablas del proyecto (null = aún no llegó).
   const [total, setTotal] = useState<number | null>(null);
+  // Doc 105 (R2-B4): qué carga de la grilla falló (null = ninguna) y un contador
+  // de reintentos POR carga — uno compartido relanzaría las dos, que competirían
+  // por la grilla.
+  const [loadError, setLoadError] = useState<'page' | 'full' | null>(null);
+  const [pageTry, setPageTry] = useState(0);
+  const [fullTry, setFullTry] = useState(0);
+  const retryLoad = () => (loadError === 'full' ? setFullTry((n) => n + 1) : setPageTry((n) => n + 1));
+  // Doc 105: offset de la página del scroll infinito que falló (null = ninguna).
+  // Un fallo NO marca el fin: antes `setHasMore(false)` dejaba la barra en «N
+  // tables» como si estuviera completo, «Select all» cubría sólo lo cargado y no
+  // había reintento. Cada carga nueva (primera página o completa) sube la
+  // «época»: una página pedida antes ya no toca la grilla ni avisa.
+  const [moreError, setMoreError] = useState<number | null>(null);
+  const pagesEpoch = useRef(0);
   useEffect(() => {
-    if (draftMode) return undefined;   // doc 102: la versión propia la carga completa el efecto de abajo
+    // Doc 102: la versión propia la carga completa el efecto de abajo. Doc 105:
+    // al pasar a la carga completa, una página que llega tarde ya no la pisa.
+    if (draftMode || fullLoad) return undefined;
     let cancelled = false;
+    pagesEpoch.current += 1;   // doc 105: una página pedida antes ya no toca la grilla
+    setMoreError(null);
+    setLoadingMore(false);
     setLoading(true);
+    setLoadError(null);
     Promise.all([
       listReportTables(projectId, { limit: TABLE_PAGE, offset: 0 }),
       countReportTables(projectId).catch(() => null),
@@ -412,6 +583,7 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
         toast.error(err instanceof Error ? err.message : 'Could not load the reporting tables.');
         setTables([]);
         setHasMore(false);
+        setLoadError('page');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -419,11 +591,15 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
     return () => {
       cancelled = true;
     };
-  }, [projectId, draftMode]);
+  }, [projectId, draftMode, fullLoad, pageTry]);
   useEffect(() => {
     if (!fullLoad) return undefined;
     let cancelled = false;
+    pagesEpoch.current += 1;   // doc 105: una página pedida antes ya no toca la grilla
+    setMoreError(null);
+    setLoadingMore(false);
     setLoading(true);
+    setLoadError(null);
     listReportTables(projectId, {}, changesetId)
       .then((rows) => {
         if (cancelled) return;
@@ -433,8 +609,8 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        toast.error(err instanceof Error ? err.message : 'Could not load the reporting tables.');
-        if (changesetId) onVersionError();
+        readFailed(err, 'Could not load the reporting tables.');
+        setLoadError('full');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -442,12 +618,21 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
     return () => {
       cancelled = true;
     };
-  }, [fullLoad, projectId, changesetId, onVersionError]);
-  const loadMore = useCallback(() => {
+  }, [fullLoad, projectId, changesetId, readFailed, fullTry]);
+  /** Página siguiente del scroll infinito. Con una página fallida sólo `retry`
+   *  (el botón Retry) la vuelve a pedir — el mismo offset; el scroll no reintenta solo. */
+  const loadMore = useCallback((retry = false) => {
     if (fullLoad || !hasMore || loadingMore || loading) return;
+    if (moreError !== null && !retry) return;
+    const offset = moreError ?? tables.length;
+    const epoch = pagesEpoch.current;
+    // Vigente: la pantalla sigue montada y no empezó otra carga (doc 105).
+    const current = () => alive.current && epoch === pagesEpoch.current;
+    setMoreError(null);
     setLoadingMore(true);
-    listReportTables(projectId, { limit: TABLE_PAGE, offset: tables.length })
+    listReportTables(projectId, { limit: TABLE_PAGE, offset })
       .then((rows) => {
+        if (!current()) return;
         setTables((prev) => {
           const seen = new Set(prev.map((t) => t.id));
           return [...prev, ...rows.filter((r) => !seen.has(r.id))];
@@ -455,17 +640,19 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
         setHasMore(rows.length === TABLE_PAGE);
       })
       .catch((err: unknown) => {
+        if (!current()) return;
         toast.error(err instanceof Error ? err.message : 'Could not load more tables.');
-        setHasMore(false);
+        setMoreError(offset);   // `hasMore` queda como estaba: quedan tablas por cargar
       })
-      .finally(() => setLoadingMore(false));
-  }, [fullLoad, hasMore, loadingMore, loading, projectId, tables.length]);
+      .finally(() => { if (current()) setLoadingMore(false); });
+  }, [fullLoad, hasMore, loadingMore, loading, moreError, projectId, tables.length]);
   const loadMoreRef = useRef(loadMore);
   loadMoreRef.current = loadMore;
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLTableRowElement>(null);
   // Centinela al final de la tabla: al asomar (200 px antes) pide la página
-  // siguiente. Se re-arma cuando cambia lo cargado o el modo de la grilla.
+  // siguiente. Se re-arma cuando cambia lo cargado o el modo de la grilla (y al
+  // volver del error al centinela: doc 105).
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el || fullLoad || !hasMore || typeof IntersectionObserver === 'undefined') return undefined;
@@ -475,7 +662,7 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [fullLoad, hasMore, show, loading, tables.length]);
+  }, [fullLoad, hasMore, show, loading, tables.length, moreError]);
   // Hay tablas del proyecto que la grilla aún no cargó (sin filtros).
   const partial = !fullLoad && hasMore;
 
@@ -546,9 +733,15 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
       ? (await listReportTables(projectId, {}, changesetId)).filter((t) => passSearch(t) && passSchema(t) && passArea(t))
       : selectedRows
   ), [allSelected, partial, projectId, changesetId, passSearch, passSchema, passArea, selectedRows]);
+  // Columnas de la card de plantillas: en modo versión, un error avisa al wrapper
+  // (con el error: doc 105) — la card muestra su toast con el id compartido. Si
+  // esta pantalla ya se desmontó, el error es de una versión que ya no está en
+  // pantalla: no toca la que se eligió después.
   const fetchColumns = useCallback((ids: string[]) => {
     const read = fetchColumnsFor(projectId, ids, changesetId);
-    return changesetId ? read.catch((err: unknown) => { onVersionError(); throw err; }) : read;
+    return changesetId
+      ? read.catch((err: unknown) => { if (alive.current) onVersionError(err); throw err; })
+      : read;
   }, [projectId, changesetId, onVersionError]);
 
   const toggleRow = (id: string) => {
@@ -592,8 +785,9 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
   );
 
   // ── Doc 70 §4.2: columnas de las tablas en foco (selección, o las filtradas)
-  // para los modos Columns / Tables + Columns. Tope por consulta: 300 tablas
-  // (largo de URL); por encima se pide acotar (filtro o selección).
+  // para los modos Columns / Tables + Columns. Tope de UX: COLUMN_BATCH (300)
+  // tablas en pantalla (un solo lote; los ids ya van en el cuerpo, doc 102) —
+  // por encima se pide acotar (filtro o selección); el export no tiene tope.
   const colScope = useMemo(() => (selectedRows.length > 0 ? selectedRows : filtered), [selectedRows, filtered]);
   const colScopeKey = useMemo(() => colScope.map((t) => t.id).join(','), [colScope]);
   const colScopeTooBig = colScope.length > COLUMN_BATCH;
@@ -607,9 +801,8 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
       .then((rows) => { if (!cancelled) setColRows(rows); })
       .catch((err: unknown) => {
         if (cancelled) return;
-        toast.error(err instanceof Error ? err.message : 'Could not load the columns.');
+        readFailed(err, 'Could not load the columns.');
         setColRows([]);
-        if (changesetId) onVersionError();
       })
       .finally(() => { if (!cancelled) setColLoading(false); });
     return () => { cancelled = true; };
@@ -703,12 +896,10 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
       if (levels.has('relationships')) {
         // Detalle POR PAR de columnas (v2, doc 19): una FK compuesta emite una
         // fila por par (mismo Rel id + Pair). Acotado a las tablas seleccionadas.
-        const ids = new Set(rows.map((t) => t.id));
-        const rels = await getRelationshipsReport(projectId, 5000, changesetId);
-        const data = rels
-          .filter((r) => (r.parentTableId && ids.has(r.parentTableId))
-            || (r.childTableId && ids.has(r.childTableId)))
-          .map(relationshipSheetRow);   // doc 98: incluye las frases
+        // Doc 105 (A3-o1): por lotes de ids (antes, las primeras 5 000 del
+        // PROYECTO filtradas acá: en proyectos grandes faltaban relaciones).
+        const rels = await fetchRelationshipsFor(projectId, rows.map((t) => t.id), changesetId);
+        const data = rels.map(relationshipSheetRow);   // doc 98: incluye las frases
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Relationships');
       }
 
@@ -750,8 +941,8 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
       XLSX.writeFile(wb, levelsFileName(projectName, draftMode ? (versionLabel ?? 'draft') : null, new Date()));
       toast.success('Report exported to Excel.');
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Could not build the Excel file.');
-      if (changesetId) onVersionError();
+      if (!alive.current) return;   // doc 105 (R2-B3): la pantalla ya cambió (p. ej. volvió a Production)
+      readFailed(err, 'Could not build the Excel file.');
     } finally {
       setExporting(false);
     }
@@ -817,7 +1008,12 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
                 {partial
                   ? <>{tables.length.toLocaleString()} of {total == null ? '…' : total.toLocaleString()} tables</>
                   : <>{filtered.length.toLocaleString()} table{filtered.length === 1 ? '' : 's'}</>}
-                {partial && <em className="dmh-rep-selcount-hint"> · scroll to load more</em>}
+                {partial && (
+                  <em className="dmh-rep-selcount-hint">
+                    {/* Doc 105: tras un fallo el scroll ya no carga — sólo Retry, al pie. */}
+                    {moreError !== null ? " · couldn't load more (Retry below)" : ' · scroll to load more'}
+                  </em>
+                )}
               </span>
             </div>
             {draftMode && (
@@ -828,7 +1024,10 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
 
             <div className="dmh-rep-tablewrap">
               <div className="dmh-rep-tablescroll" ref={scrollRef}>
-                {show !== 'tables' ? (
+                {/* Doc 105 (R2-B4): una carga fallida no se disfraza de proyecto vacío. */}
+                {loadError && !loading ? (
+                  <TablesLoadError onRetry={retryLoad} />
+                ) : show !== 'tables' ? (
                   <MetaGrid
                     rows={gridRows}
                     loading={loading || colLoading}
@@ -946,12 +1145,17 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
                         </tr>
                       ))
                     )}
-                    {/* Doc 92 D3: centinela del scroll infinito (sólo sin filtros y con páginas pendientes). */}
-                    {!loading && partial && (
+                    {/* Doc 92 D3: centinela del scroll infinito (sólo sin filtros y con páginas pendientes).
+                        Doc 105: si la página siguiente falló, el pie lo dice y ofrece Retry. */}
+                    {!loading && partial && (moreError !== null ? (
+                      <tr className="dmh-rep-sentinel">
+                        <td colSpan={8}><MoreTablesError onRetry={() => loadMore(true)} /></td>
+                      </tr>
+                    ) : (
                       <tr ref={sentinelRef} className="dmh-rep-sentinel">
                         <td colSpan={8}>{loadingMore ? 'Loading more tables…' : 'Scroll to load more'}</td>
                       </tr>
-                    )}
+                    ))}
                   </tbody>
                 </table>
                 )}
@@ -1011,7 +1215,8 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
 
             {/* Doc 95 D11: formatos fijos guardados (p. ej. QA_MODELO) */}
             <SheetTemplateCard projectId={projectId} selectedCount={selectedCount} disabled={loading}
-              resolveTables={resolveExportRows} fetchColumns={fetchColumns} />
+              resolveTables={resolveExportRows} fetchColumns={fetchColumns} onBusyChange={setTemplateBusy}
+              versionToastId={changesetId ? VERSION_TOAST : undefined} />
 
             <div className="dmh-rep-card dmh-rep-sumcard">
               <div className="dmh-rep-sumcard-title">Tables by subject area</div>
@@ -1060,13 +1265,15 @@ function ReportingScreen({ projectId, projectName, changesetId, versionLabel, on
 
             {/* Report Designer — motor de consulta (SQL + filtros UDP). Bajo el rail. */}
             <div className="dmh-rep-card" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {/* Doc 102: el motor de consultas lee producción. */}
-              <Button variant="primary" icon={SlidersHorizontal} onClick={onDesign} disabled={draftMode}
-                style={{ width: '100%', justifyContent: 'center' }}>
+              {/* Doc 102: el motor de consultas lee producción. Doc 105 (B3): no durante un export. */}
+              <Button variant="primary" icon={SlidersHorizontal} onClick={onDesign} disabled={draftMode || exportBusy}
+                title={exportBusy ? EXPORT_BUSY_HINT : undefined} style={{ width: '100%', justifyContent: 'center' }}>
                 Design report
               </Button>
               <span style={{ fontSize: 11.5, color: 'var(--text-muted-2)', textAlign: 'center' }}>
-                {draftMode ? 'The query engine reads production — switch Version to Production to use it.' : <>Query engine · SQL &amp; UDP filters</>}
+                {exportBusy ? `${EXPORT_BUSY_HINT}.`
+                  : draftMode ? 'The query engine reads production — switch Version to Production to use it.'
+                    : <>Query engine · SQL &amp; UDP filters</>}
               </span>
             </div>
           </div>

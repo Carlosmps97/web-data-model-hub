@@ -4,6 +4,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { GripVertical, KeyRound, Link2, Table2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useModelerStore } from '@/store/useModelerStore';
+import { reportWriteError } from '../lib/sessionGuard';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
@@ -73,8 +74,10 @@ function TableNode({ data }: NodeProps) {
     if (!src) return;
     const plan = planCanvasDrop(columns, src, target);
     if (!plan.order && !plan.key.length) return;
+    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió (`reportWriteError`).
+    const onError = reportWriteError((e) => toast.error(e instanceof Error && e.message ? e.message : "Couldn't move the column"));
     try { await applyCanvasDrop(table.id, plan); }
-    catch (e) { toast.error(e instanceof Error && e.message ? e.message : "Couldn't move the column"); }
+    catch (e) { await onError(e); }
   };
   const afterHalf = (e: DragEvent<HTMLElement>) => { const r = e.currentTarget.getBoundingClientRect(); return e.clientY > r.top + r.height / 2; };
   // Selección de columnas para copy/paste (doc 48). Mismo patrón de clave

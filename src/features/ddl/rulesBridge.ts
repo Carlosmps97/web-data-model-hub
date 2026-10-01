@@ -229,8 +229,10 @@ export async function renderWithRules(args: {
       sourceTableIds: view.sourceTableIds?.length
         ? view.sourceTableIds
         : (view.tableId ? [view.tableId] : []),
-      // Vista de NEGOCIO = "on canvas": solo esas se decoran con
-      // ddl.vista_negocio; el resto pasa intacto (pedido owner 07-20).
+      // Vista de NEGOCIO = su `showOnCanvas` (el switch «Show on this canvas»
+      // guardado en la vista): solo esas se decoran con ddl.vista_negocio; el
+      // resto pasa intacto (pedido owner 07-20). No es la membresía del canvas:
+      // ésa ya decidió qué vistas llegan acá (`canvasDdlViews`, doc 102/105 C2).
       businessView: view.showOnCanvas !== false,
     })),
   };

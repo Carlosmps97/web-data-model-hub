@@ -64,6 +64,10 @@ export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'colu
                       ↩{it.restoredFrom.versionLabel ?? '—'}
                     </span>
                   )}
+                  {/* Doc 104: la versión cambió de manos antes de publicarse. */}
+                  {it.startedBy && it.startedBy.id !== it.user?.id && (
+                    <span className="wk-pp-histver" title={`Started by ${refLabel(it.startedBy)}`}>⇄</span>
+                  )}
                   <span className="wk-pp-histwhen">{formatWhen(it.at)}</span>
                   <ChevronDown size={12} className="wk-pp-histcaret" aria-hidden />
                 </button>
@@ -71,6 +75,11 @@ export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'colu
                   <div className="wk-pp-histdetail">
                     {origin && <div className="wk-pp-histmeta">{origin}</div>}
                     {it.user?.email && <div className="wk-pp-histmeta">By {refLabel(it.user)} · {it.user.email}</div>}
+                    {it.startedBy && it.startedBy.id !== it.user?.id && (
+                      <div className="wk-pp-histmeta">
+                        Started by {refLabel(it.startedBy)} — ownership was transferred before it was published.
+                      </div>
+                    )}
                     {it.approvedBy.length > 0 && (
                       <div className="wk-pp-histmeta">Approved by {it.approvedBy.map(refLabel).join(', ')}</div>
                     )}

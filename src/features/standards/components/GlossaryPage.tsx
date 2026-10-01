@@ -6,7 +6,9 @@ import { applyStandards } from '../standards.service';
 import { validateTerm, lockTerm, unlockTerm, glossaryImpact } from '@/services/naming.service';
 import type { GlossaryImpact, GlossaryValidation, UdpScope } from '@/services/naming.service';
 import { useAuthStore } from '@/store/useAuthStore';
-import { termsToValidate, needsConfirm, incompleteRows, incompleteMessage, termGap, gapToast } from '../glossaryValidation';
+import {
+  termsToValidate, needsConfirm, incompleteRows, incompleteMessage, termGap, gapToast, termEdited, termsToUpsert, maxLengthLabel,
+} from '../glossaryValidation';
 import GlossaryApplyDialog from './GlossaryApplyDialog';
 import GlossaryConflictDialog from './GlossaryConflictDialog';
 
@@ -111,7 +113,8 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     for (const t of terms) {
       if (t._deleted) { if (!t._new) removed.push(`${t.term} → ${t.abbrev}`); continue; }
       if (t._new) added.push(`${t.term} → ${t.abbrev}`);
-      else { const b = before.get(t.id); if (b && (b.term !== t.term || b.abbrev !== t.abbrev)) edited.push(`${t.term} → ${t.abbrev}`); }
+      // Doc 105 (P1-bis): recortado — un blanco alrededor no es una edición.
+      else { const b = before.get(t.id); if (b && termEdited(t, b)) edited.push(`${t.term} → ${t.abbrev}`); }
     }
     const cfgChanged = sep !== String(cfg0.separator ?? '') || casing !== String(cfg0.case ?? 'upper') || maxLen !== Number(cfg0.maxLength ?? 150);
     if (cfgChanged) edited.push(`${scope === 'column' ? 'Column' : 'Table'} naming · sep '${sep || '(none)'}' · ${casing} · max ${maxLen}`);
@@ -160,18 +163,11 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
 
   // Batch del borrador: solo términos NUEVOS o realmente EDITADOS (antes se
   // reenviaban TODOS como upsert → inflaba el diff/impacto y re-derivaba de más).
+  // Doc 105 (P1-bis): «realmente» = comparado recortado (`termsToUpsert`).
   const buildBody = (): ApplyStandardsBody => {
     const body: ApplyStandardsBody = { kind: 'glossary' };
     const before = new Map(snapshot.dict.filter((t) => t.scope === scope).map((t) => [t.id, t]));
-    const changed = (t: Draft) => {
-      if (t._new) return true;
-      const b = before.get(t.id);
-      return !b || b.term !== t.term || b.abbrev !== t.abbrev;
-    };
-    body.termsUpsert = terms
-      .filter((t) => !t._deleted && changed(t))
-      // Doc 102: sin descarte silencioso — el guard de filas incompletas garantiza término y abreviatura.
-      .map((t) => ({ id: t._new ? undefined : t.id, term: t.term.trim(), abbrev: t.abbrev.trim(), scope }));
+    body.termsUpsert = termsToUpsert(terms, before, scope);
     body.termsDelete = terms.filter((t) => t._deleted && !t._new).map((t) => t.id);
     if (diff.cfgChanged) body.namingConfig = { [scope]: { separator: sep, case: casing, maxLength: maxLen } };
     return body;
@@ -288,8 +284,8 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
             <input type="number" min={1} max={1000} value={maxLen}
               onChange={(e) => setMaxLen(Math.max(1, Number(e.target.value) || 0))}
               className="rd-input" style={{ height: 36 }}
-              title="Máximo de caracteres del nombre físico (tabla/columna). Al crear/renombrar, si el físico lo excede no se crea." />
-          ) : <div style={chip}>{maxLen} chars</div>}
+              title="Maximum characters of the physical name (table/column): a longer name is rejected on create or rename." />
+          ) : <div style={chip}>{maxLengthLabel(maxLen)}</div>}
         </div>
         <div style={{ width: 340, flex: 'none', background: '#1A2B4A', borderRadius: 12, padding: '16px 17px' }}>
           <div style={{ fontSize: 11, fontWeight: 600, color: '#9DB0D6', marginBottom: 10, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Preview · physical name</div>

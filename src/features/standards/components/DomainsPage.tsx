@@ -8,6 +8,7 @@ import { getDomainColumnImpact, physicalize, type DomainColumnImpact } from '@/s
 import { typeTargets, usageLines } from '../domainImpact';
 import { revertForm } from '../domainHistory';
 import { domainEditInput } from '../domainForm';
+import { applyErrorNotice, domainChanged, NO_CHANGES_HINT } from '../standardsDiff';
 import DomainCascadeDialog from './DomainCascadeDialog';
 import DomainHistory from './DomainHistory';
 import TypePicker from '@/features/modeler/components/TypePicker';
@@ -94,6 +95,10 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
 
   // Doc 95 D7: tipos que el borrador CAMBIA (física y/o lógica).
   const targets = useMemo(() => (mode === 'edit' ? typeTargets(selected, form) : {}), [mode, selected, form]);
+  // Doc 105: sin un cambio real no se aplica — tampoco al revertir a una versión
+  // igual a la vigente (antes registraba una versión vacía).
+  const dirty = mode === 'create' || domainChanged(form, selected);
+  const canApply = !!form.name.trim() && !!form.defaultDataType.trim() && dirty;
 
   const apply = async () => {
     setBusy(true);
@@ -108,7 +113,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
       toast.success(`Applied · ${v.label} · ${v.impact.columns} columns re-typed`);
       if (creating) setPendingName(form.name.trim());   // seleccionarlo al recargar
       setMode('view'); setConfirm(null); setRevertFrom(null); onApplied();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't apply"); } finally { setBusy(false); }
+    } catch (e) { const n = applyErrorNotice(e, "Couldn't apply"); toast[n.kind](n.text); } finally { setBusy(false); }
   };
   const del = async () => {
     if (!selected) return;
@@ -117,7 +122,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
       const v = await applyStandards(projectId, { kind: 'domain', domainsDelete: [selected.id] });
       toast.success(`Domain deleted · ${v.label}`);
       setConfirm(null); setSelId(domains.find((d) => d.id !== selected.id)?.id ?? null); onApplied();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete"); } finally { setBusy(false); }
+    } catch (e) { const n = applyErrorNotice(e, "Couldn't delete"); toast[n.kind](n.text); } finally { setBusy(false); }
   };
 
   const editable = mode === 'edit' || mode === 'create';
@@ -284,6 +289,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
             {/* actions */}
             {canEdit && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, paddingTop: 18, borderTop: '1px solid #EAEDF2' }}>
+                {editable && !dirty && <span style={{ fontSize: 12.5, color: '#8A93A5' }}>{NO_CHANGES_HINT}</span>}
                 <span style={{ flex: 1 }} />
                 {mode === 'view' && <>
                   <button onClick={() => setConfirm('delete')} style={{ ...btnGhost, color: '#D6455D', borderColor: '#F1D4D9' }}><Trash2 size={14} />Delete</button>
@@ -291,7 +297,8 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
                 </>}
                 {editable && <>
                   <button onClick={cancel} style={btnGhost}>Cancel</button>
-                  <button onClick={() => setConfirm('apply')} disabled={!form.name.trim() || !form.defaultDataType.trim()} style={{ ...btnPrimary, opacity: form.name.trim() && form.defaultDataType.trim() ? 1 : 0.5 }}><UploadCloud size={14} />{mode === 'create' ? 'Create domain' : 'Apply changes'}</button>
+                  <button onClick={() => setConfirm('apply')} disabled={!canApply} title={dirty ? undefined : NO_CHANGES_HINT}
+                    style={{ ...btnPrimary, opacity: canApply ? 1 : 0.5 }}><UploadCloud size={14} />{mode === 'create' ? 'Create domain' : 'Apply changes'}</button>
                 </>}
               </div>
             )}

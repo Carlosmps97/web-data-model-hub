@@ -89,10 +89,10 @@ Así los wires siguen a los nodos durante el drag sin re-ejecutar layout alguno:
 1. Importa `elkLayout` (y `viewSourceIds` de `viewGraph`) por **import dinámico** — primera carga del kernel bajo demanda.
 2. Toma los tamaños **medidos** de los nodos vivos vía la instancia de React Flow (`flow.getNodes()`).
 3. Arma el grafo con las tablas del diagrama Y las vistas visibles (las que tienen alguna fuente en el canvas), agregando por cada vista sus wires de derivación como edges — ELK las ubica junto a sus fuentes en la capa siguiente.
-4. Ejecuta `elkLayout(nodes, edges)` y persiste el resultado con `setSubjectAreaLayout(saId, pos)`: el backend MERGEA el layout sobre `subject_areas.layout` (mapa `nodeId → {x, y}`, mismo espacio de claves para tablas y vistas).
+4. Ejecuta `elkLayout(nodes, edges)` y persiste el resultado con `arrangeSubjectArea(saId, pos)`: `structure.service` MERGEA las posiciones sobre el `layout` del canvas EFECTIVO (mapa `nodeId → {x, y}`, mismo espacio de claves para tablas y vistas), reinicia los trazos manuales y graba el canvas completo como cambio de la versión en edición, en UNA escritura (docs 99 y 104; el `PUT …/layout` directo responde 409 desde el doc 105). En solo lectura el arrange queda sólo en la sesión (`viewerLayout`, doc 84 E).
 5. Recarga el diagrama (`reload()`); el botón muestra spinner mientras tanto (estado `arranging` del `Toolbar`).
 
-El movimiento manual de un nodo usa el mismo destino de persistencia: `onNodeDragStop` → `saveLayout(tableId, pos)` → merge sobre `subject_areas.layout`. Por eso arrange y ajustes manuales conviven sin pisarse entre sí más que en los nodos afectados.
+El movimiento manual usa el mismo destino de persistencia: `onNodeDragStop` recibe TODOS los nodos arrastrados (varios con selección múltiple) → `saveNodePositions(positions)` → merge sobre el `layout` efectivo, en UNA escritura (doc 105, A4-o1: antes sólo se guardaba el bloque tomado con el mouse y los demás volvían a su sitio; ronda 5: sólo entran los bloques del canvas en pantalla). Por eso arrange y ajustes manuales conviven sin pisarse entre sí más que en los nodos afectados.
 
 ### 1.6 Paridad front/backend: `arrange_all`
 
@@ -217,7 +217,7 @@ Además del LOD, el canvas acumula decisiones de rendimiento que aplican a cualq
 | `minZoom` | `0.02` | Los canvases enormes (un auto-arrange de 100 tablas ocupa ≈14,000×19,000 px) necesitan bajar del default 0.5 para verse completos. `fitViewOptions={{ padding: 0.12, minZoom: 0.02 }}` hace que el auto-fit inicial respete el mismo piso. |
 | `deleteKeyCode` | `null` | El default (Backspace) borraba tablas/wires solo en pantalla, sin persistir — engañoso en edición y una violación del viewer-lock en readonly. Los borrados reales van por la UI explícita (panel / popup de relación). |
 | `connectionMode` | `ConnectionMode.Loose` | (doc 27) Una relación puede empezar y terminar en cualquier lado del nodo — cada columna tiene handle a izquierda y derecha; `onConnect` reorienta padre/hijo según el gesto antes de persistir. |
-| `nodesDraggable` | `!readonly` | Viewer-lock: en modo lectura se navega pero no se mueve nada. |
+| `nodesDraggable` | `true` | Doc 84 E: también en solo lectura los bloques se pueden mover (y auto-arreglar) para leer mejor el diagrama, sin persistir nunca (`viewerLayout`); los dibujos sí quedan fijos (`draggable: !readonly` por nodo). `onNodeDragStop` recibe TODOS los nodos movidos (doc 105, A4-o1). |
 
 ### 3.3 Transporte: una respuesta y GZip
 

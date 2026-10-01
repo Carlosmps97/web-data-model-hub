@@ -11,7 +11,7 @@
  *     impact chips + legend, the requester note, "Changes · N" diff, and the
  *     reviewer comments thread + input.
  *
- * Data: versioning.service (listVersions / getPublished / listUsers /
+ * Data: versioning.service (listVersions / getPublished / listUserNames /
  * getChangeset / getDiff / review / addComment) + projects.service. The actor
  * comes from useSessionStore (injects X-Dev-User). Approve/Reject are disabled
  * when the actor is NOT the assigned reviewer; on 403 we toast. Lists + detail
@@ -36,6 +36,7 @@ import {
 import { confirmDialog } from '@/components/ui/dialogs';
 
 import { Avatar, Tooltip } from '@/components/ui';
+import { useAuthStore } from '@/store/useAuthStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { runBlocking } from '@/store/useBusyStore';
 import {
@@ -43,7 +44,7 @@ import {
   addComment,
   getChangeset,
   getDiff,
-  listUsers,
+  listUserNames,
   listVersions,
   reopen,
   review,
@@ -51,6 +52,7 @@ import {
 } from '@/services/versioning.service';
 import { listProjects } from '@/services/projects.service';
 import { sortProjects } from '@/lib/projects';
+import { startedBy } from '@/lib/versionAdmin';
 import ChangesDetailModal from '@/screens/review/ChangesDetailModal';
 import ChangesSummary from '@/screens/review/ChangesSummary';
 import PublishBlockedPanel from '@/screens/review/PublishBlockedPanel';
@@ -58,7 +60,7 @@ import CriticalDeletionBlock from '@/screens/review/CriticalDeletionBlock';
 import ApproveDeletionDialog from '@/screens/review/ApproveDeletionDialog';
 import RejectDialog from '@/screens/review/RejectDialog';
 import RequestHistory from '@/screens/review/RequestHistory';
-import { activityAt, historyOf, isRequest, outcomeOf, requestBadge } from '@/screens/review/requestState';
+import { activityAt, canvasAction, historyOf, isRequest, outcomeOf, requestBadge } from '@/screens/review/requestState';
 import { conflictCounts } from '@/screens/review/conflicts';
 import type { Project } from '@/types/model';
 import type {
@@ -171,7 +173,8 @@ export default function ReviewScreen() {
   useEffect(() => {
     let cancelled = false;
     setListsLoading(true);
-    Promise.all([listVersions(), listUsers(), listProjects()])
+    // Nombres (cosmético): si fallan, se ven los ids — no deja la pantalla en blanco.
+    Promise.all([listVersions(), listUserNames().catch(() => []), listProjects()])
       .then(([vers, us, proj]) => {
         if (cancelled) return;
         setVersions(vers);
@@ -287,10 +290,23 @@ export default function ReviewScreen() {
   // nunca elimina la versión, sólo rechaza la solicitud.
   const canReopen = Boolean(detail && detail.status === 'rejected' && user.id && detail.owner === user.id);
   // Sólo el dueño de un DRAFT edita en el canvas; cualquier otro caso se abre
-  // como visor (solo lectura) — la edición vuelve recién con Withdraw/Reopen.
-  const isOwnDraft = Boolean(detail && detail.status === 'draft' && user.id && detail.owner === user.id);
+  // como visor (solo lectura) — la edición vuelve recién con Withdraw/Reopen —
+  // y sólo si el actor puede verlo (doc 105 U2: espejo del backend). Se
+  // suscribe a los PERMISOS (cambian con `refreshMe`, F5): `s.has` es siempre
+  // la misma función y la pantalla no se enteraba de los nuevos.
+  const perms = useAuthStore((s) => s.user?.permissions);
+  const canvas = detail ? canvasAction(detail, user.id, (perm) => Boolean(perms?.[perm])) : null;
 
-  const reviewerNames = detail ? detail.reviewers.map(userName).join(', ') || '—' : '—';
+  // Doc 105: un revisor deshabilitado (dejó la empresa) nunca vota — se marca.
+  const disabledReviewers = useMemo(
+    () => (detail
+      ? detail.reviewers.filter((id) => users.find((u) => u.id === id)?.disabled && !detail.approvals?.[id])
+      : []),
+    [detail, users],
+  );
+  const reviewerNames = detail
+    ? detail.reviewers.map((id) => `${userName(id)}${disabledReviewers.includes(id) ? ' (disabled)' : ''}`).join(', ') || '—'
+    : '—';
 
   /** The assigned-reviewer note shown when the actor cannot act. */
   const noteText = useMemo(() => {
@@ -302,11 +318,14 @@ export default function ReviewScreen() {
       if (o === 'approved') return detail.appliedAt ? 'This request was approved and published.' : 'This request was approved and is being published.';
       return `This request is ${detail.status}.`;
     }
+    // Doc 105: la unanimidad no llegará nunca — el dueño retira y reasigna.
+    if (disabledReviewers.length && detail.owner === user.id)
+      return `${disabledReviewers.map(userName).join(', ')} can no longer review (disabled): withdraw the request and send it again with active reviewers.`;
     if (!isReviewer)
       return `Only the assigned reviewer ${reviewerNames} can approve or reject this request. You can still leave a comment.`;
     if (alreadyVoted) return 'You already recorded your decision on this request.';
     return '';
-  }, [detail, canAct, isReviewer, alreadyVoted, reviewerNames]);
+  }, [detail, canAct, isReviewer, alreadyVoted, reviewerNames, disabledReviewers, userName, user.id]);
 
   // Diff totals for the impact legend + "Changes · N" (+ conflictos vs producción).
   const diffTotals = useMemo(() => {
@@ -360,9 +379,10 @@ export default function ReviewScreen() {
     // contenido enviado, pero no se puede mutar ni re-publicar — antes este
     // camino ligaba el canvas en `editing` a un changeset no-draft y producía
     // 409 persistentes o re-submits que pisaban el envío.
+    if (!canvas?.enabled) return;
     openModel({
       projectId: detail.projectId,
-      mode: isOwnDraft ? 'editing' : 'readonly',
+      mode: canvas.mode,
       changesetId: detail.id,
       versionLabel: detail.versionLabel,
     });
@@ -501,7 +521,7 @@ export default function ReviewScreen() {
                   <option value="">Anyone</option>
                   {users.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.name}
+                      {u.name}{u.disabled ? ' (disabled)' : ''}
                     </option>
                   ))}
                 </select>
@@ -518,7 +538,7 @@ export default function ReviewScreen() {
                   <option value="">Anyone</option>
                   {otherUsers.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.name}
+                      {u.name}{u.disabled ? ' (disabled)' : ''}
                     </option>
                   ))}
                 </select>
@@ -682,6 +702,12 @@ export default function ReviewScreen() {
                         />
                         <span>
                           From <strong>{userName(detail.owner)}</strong>
+                          {/* Doc 104: la versión cambió de manos antes de enviarse. */}
+                          {startedBy(detail) && startedBy(detail) !== detail.owner && (
+                            <span title="Ownership was transferred: the current owner sent the request and will appear as its author">
+                              {' '}(started by {userName(startedBy(detail))})
+                            </span>
+                          )}
                         </span>
                         <span className="sep">·</span>
                         <span>
@@ -709,21 +735,16 @@ export default function ReviewScreen() {
                       {/* Doc 88 §6: una solicitud cerrada no se abre desde acá (evita
                           conflictos con la versión que sigue su vida); el owner de un
                           draft rechazado sí sigue editando la suya. */}
-                      <Tooltip
-                        label={isOwnDraft
-                          ? 'Open your working copy for editing'
-                          : isOpenRequest
-                            ? 'Opens read-only: the version is not a draft of yours — editing comes back with Withdraw'
-                            : 'This request is closed — open the version from Home › Versions'}
-                      >
+                      <Tooltip label={canvas?.hint ?? ''}>
                         <button
                           type="button"
                           className="dmh-rv-act dmh-rv-act--canvas"
                           onClick={openInCanvas}
-                          disabled={!isOpenRequest && !isOwnDraft}
+                          disabled={!canvas?.enabled}
+                          aria-label={canvas && !canvas.enabled ? `${canvas.label}: ${canvas.hint}` : undefined}
                         >
                           <ExternalLink size={14} strokeWidth={1.6} aria-hidden />
-                          {isOwnDraft ? 'Open in canvas' : 'View in canvas'}
+                          {canvas?.label ?? 'View in canvas'}
                         </button>
                       </Tooltip>
                       {canWithdraw && (

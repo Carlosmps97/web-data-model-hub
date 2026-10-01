@@ -34,6 +34,11 @@
   font-size: 12.5px; color: #C0392B; background: #FBEDEC; border: 1px solid #F1D4D0;
   border-radius: 8px; padding: 9px 12px; margin-bottom: 14px;
 }
+/* Doc 105: por qué terminó la sesión anterior (informativo, no error). */
+.dmh-login-notice {
+  font-size: 12.5px; color: #1A2B4A; background: #EEF3FF; border: 1px solid #D5E0FF;
+  border-radius: 8px; padding: 9px 12px; margin-bottom: 14px; line-height: 1.45;
+}
 .dmh-login-btn {
   display: flex; align-items: center; justify-content: center; gap: 8px; height: 47px; margin-top: 8px;
   border: none; border-radius: 10px; background: #2E5BFF; color: #fff; font-size: 14px; font-weight: 600;

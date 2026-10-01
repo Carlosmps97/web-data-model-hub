@@ -8,7 +8,7 @@
  * Perfiles de carga (doc 78 §7.1): CRUD por proyecto + catálogo del editor +
  * validación sin guardar + sugerencia de mapeo por nombre + built-in.
  */
-import { apiGet, apiPost, apiPut, apiDelete, ApiError } from '@/services/http';
+import { apiGet, apiPost, apiPut, apiDelete, ApiError, isTransientError } from '@/services/http';
 import { API_BASE } from '@/services/apiBase';
 
 // ── Workbook crudo ────────────────────────────────────────────────────────
@@ -125,7 +125,10 @@ const jobUrl = (csId: string, jobId: string) => `${base(csId)}/${encodeURICompon
 export const startUpload = (csId: string, body: UploadWorkbookBody) => apiPost<UploadJob>(base(csId), body);
 export const getUploadJob = (csId: string, jobId: string) => apiGet<UploadJob>(jobUrl(csId, jobId));
 export const applyUpload = (csId: string, jobId: string) => apiPost<UploadJob>(`${jobUrl(csId, jobId)}/apply`);
-export const discardUpload = (csId: string, jobId: string) => apiDelete<{ deleted: boolean }>(jobUrl(csId, jobId));
+/** Doc 105 (ronda 8): `onlyIfValidated` — sólo si sigue validado; si la carga
+ *  ya empezó o terminó, 409 (su resultado no se pierde). */
+export const discardUpload = (csId: string, jobId: string, opts: { onlyIfValidated?: boolean } = {}) =>
+  apiDelete<{ deleted: boolean }>(`${jobUrl(csId, jobId)}${opts.onlyIfValidated ? '?status=validated' : ''}`);
 export const getUploadTargets = (csId: string) => apiGet<UploadTargets>(`${base(csId)}/targets`);
 
 const PROFILES = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}/upload-profiles`;
@@ -168,18 +171,35 @@ const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, 
   signal?.addEventListener('abort', onAbort, { once: true });
 });
 
+/** Doc 105 (ronda 5, R15-H2): transitorios SEGUIDOS antes de rendirse (con
+ *  espera creciente) — un GET caído o un 5xx no es el resultado del job. */
+const DEFAULT_MAX_TRANSIENT = 10;
+
 /** Consulta el job hasta un estado terminal (validated / applied / failed).
  *  `onTick` recibe cada foto (progreso para la barra); `signal` corta el
- *  polling (cerrar el popup); los errores de API se propagan tal cual. */
+ *  polling (cerrar el popup). Doc 105 (ronda 5, R15-H2): un fallo transitorio
+ *  se reintenta — antes la carga se daba por fallida aunque el servidor la
+ *  terminara —; tras `maxTransient` seguidos se rinde y propaga el último. Los
+ *  demás errores (un 404: el job ya no está) se propagan tal cual. */
 export async function pollUploadJob(
   csId: string,
   jobId: string,
-  opts: { onTick?: (job: UploadJob) => void; intervalMs?: number; signal?: AbortSignal } = {},
+  opts: { onTick?: (job: UploadJob) => void; intervalMs?: number; signal?: AbortSignal; maxTransient?: number } = {},
 ): Promise<UploadJob> {
   const interval = opts.intervalMs ?? DEFAULT_INTERVAL_MS;
+  const maxTransient = opts.maxTransient ?? DEFAULT_MAX_TRANSIENT;
+  let transient = 0;
   for (;;) {
     if (opts.signal?.aborted) throw new Error('Polling aborted');
-    const job = await getUploadJob(csId, jobId);
+    let job: UploadJob;
+    try {
+      job = await getUploadJob(csId, jobId);
+    } catch (e) {
+      if (!isTransientError(e) || ++transient > maxTransient) throw e;
+      await sleep(interval * Math.min(transient + 1, 8), opts.signal);
+      continue;
+    }
+    transient = 0;
     opts.onTick?.(job);
     if (isTerminal(job.status)) return job;
     await sleep(interval, opts.signal);

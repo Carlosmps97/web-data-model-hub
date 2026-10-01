@@ -3,23 +3,19 @@
  *
  * Unlike `governance.service` (which routes model writes through the active
  * changeset overlay), glossary terms + naming config are project-wide
- * configuration: editing a term or a separator/case rule re-physicalizes
- * existing names in THAT project and is **not** part of a publish. So this
- * layer talks to the plain REST endpoints directly via `@/services/http`,
- * always under `/api/projects/{pid}/…`.
+ * configuration, always under `/api/projects/{pid}/…`. Doc 105: this layer
+ * only READS and computes (validate, impact, physicalize, lock/unlock) —
+ * every standards CHANGE goes through the versioned `standards/apply`
+ * (Data Standards › Save & apply, with history and rollback); the backend
+ * answers 409 to the old direct writes (glossary/domains/naming CRUD,
+ * propagate, rephysicalize).
  *
  * Backend contract (envelope `{ success, data }`):
- *   - GET    …/glossary?scope=table|column   → DictTerm[]
- *   - POST   …/glossary                       {term, abbrev, scope}
- *   - PUT    …/glossary/{id}                  {term, abbrev, scope}
- *   - DELETE …/glossary/{id}
  *   - GET    …/settings/naming                → {column:NamingRule, table:NamingRule}
- *   - PUT    …/settings/naming/{scope}        {separator, case}
  *   - POST   …/glossary/physicalize           {logical, scope} → {physical}
- *   - POST   …/glossary/rephysicalize         {scope?}         → {updated}
  *   - POST   …/glossary/impact                {scope, termsUpsert, termsDelete, namingConfig?} → GlossaryImpact {renamed, outOfSync}
  */
-import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
+import { apiGet, apiPost } from '@/services/http';
 
 import { API_BASE } from '@/services/apiBase';
 const PROJECT = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}`;
@@ -50,18 +46,6 @@ export interface NamingConfig {
   column: NamingRule;
   table: NamingRule;
 }
-
-// ── Dictionary terms (scoped) ──
-export const listTerms = (projectId: string, scope: UdpScope) =>
-  apiGet<DictTerm[]>(`${DICT(projectId)}?scope=${encodeURIComponent(scope)}`);
-
-export const createTerm = (projectId: string, x: Omit<DictTerm, 'id'>) => apiPost<DictTerm>(DICT(projectId), x);
-
-export const updateTerm = (projectId: string, id: string, x: Omit<DictTerm, 'id'>) =>
-  apiPut<DictTerm>(`${DICT(projectId)}/${encodeURIComponent(id)}`, x);
-
-export const deleteTerm = (projectId: string, id: string) =>
-  apiDelete<{ id: string }>(`${DICT(projectId)}/${encodeURIComponent(id)}`);
 
 // ── Validación de término nuevo + lock por ADMIN (F2 #1) ──
 export interface GlossaryCorpusHit {
@@ -123,18 +107,11 @@ export const unlockTerm = (projectId: string, id: string) =>
 // ── Naming config (separator / case per scope) ──
 export const getNamingConfig = (projectId: string) => apiGet<NamingConfig>(NAMING(projectId));
 
-export const setNamingConfig = (projectId: string, scope: UdpScope, rule: NamingRule) =>
-  apiPut<NamingRule>(`${NAMING(projectId)}/${encodeURIComponent(scope)}`, rule);
-
 // ── Physicalize / retroactive re-physicalize ──
 export const physicalize = (projectId: string, logical: string, scope: UdpScope) =>
   apiPost<{ physical: string }>(`${DICT(projectId)}/physicalize`, { logical, scope });
 
-/** Retroactive, project-wide propagation after a term/config change. */
-export const rephysicalize = (projectId: string, scope?: UdpScope) =>
-  apiPost<{ updated: number }>(`${DICT(projectId)}/rephysicalize`, scope ? { scope } : {});
-
-// ── Parent Domains (per project — direct REST, not changeset; not part of publish) ──
+// ── Parent Domains (per project; reads only — changes go through standards/apply, doc 105) ──
 const DOMAINS = (pid: string) => `${PROJECT(pid)}/domains`;
 
 export interface ParentDomainFull {
@@ -177,12 +154,6 @@ export interface DomainColumnImpact {
 }
 
 export const listDomainsGlobal = (projectId: string) => apiGet<ParentDomainFull[]>(DOMAINS(projectId));
-export const createDomainGlobal = (projectId: string, d: Omit<ParentDomainFull, 'id'>) =>
-  apiPost<ParentDomainFull>(DOMAINS(projectId), d);
-export const updateDomainGlobal = (projectId: string, id: string, d: Omit<ParentDomainFull, 'id'>) =>
-  apiPut<ParentDomainFull>(`${DOMAINS(projectId)}/${encodeURIComponent(id)}`, d);
-export const deleteDomainGlobal = (projectId: string, id: string) =>
-  apiDelete<{ id: string }>(`${DOMAINS(projectId)}/${encodeURIComponent(id)}`);
 /** Doc 95 D7: vista previa por columna de re-tipar el dominio (`physicalTo`/`logicalTo`);
  *  sin tipos nuevos mide quién lo sigue hoy. `limit: 0` = solo totales. */
 export const getDomainColumnImpact = (
@@ -195,6 +166,3 @@ export const getDomainColumnImpact = (
   const qs = params.toString();
   return apiGet<DomainColumnImpact>(`${DOMAINS(projectId)}/${encodeURIComponent(id)}/impact/columns${qs ? `?${qs}` : ''}`);
 };
-/** Aplica el `defaultDataType` actual del dominio a las columnas sin override. */
-export const propagateDomain = (projectId: string, id: string) =>
-  apiPost<{ updated: number }>(`${DOMAINS(projectId)}/${encodeURIComponent(id)}/propagate`);

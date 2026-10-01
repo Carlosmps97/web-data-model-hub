@@ -170,7 +170,8 @@ export function cleanFileName(raw: string | null | undefined): string | null {
 export function fileNameProblem(raw: string | null | undefined): string | null {
   const text = cleanFileName(raw);
   if (!text) return null;
-  if (text.length > FILE_NAME_MAX) return `The file name can have at most ${FILE_NAME_MAX} characters.`;
+  // Doc 105 (B7): en code points, como `len()` del backend (un emoji = 1, no 2).
+  if ([...text].length > FILE_NAME_MAX) return `The file name can have at most ${FILE_NAME_MAX} characters.`;
   if (BAD_FILE.test(text)) return 'The file name can\'t contain \\ / : * ? " < > |.';
   const known: readonly string[] = FILE_NAME_TOKENS;
   const unknown = [...text.matchAll(TOKEN)].map((m) => m[1]).find((k) => !known.includes(k));

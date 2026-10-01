@@ -6,7 +6,9 @@ const COUNTS = { tables: 2113, columns: 96004, views: 1902, relationships: 3410,
 describe('projectDeletion (doc 75 D5)', () => {
   it('resume los conteos con separador de miles y el nombre entre comillas', () => {
     const s = deletionSummary('Modelo DDV', COUNTS);
-    expect(s).toBe('This working copy will delete project «Modelo DDV» and everything in it: 2,113 tables, 96,004 columns, 1,902 views, 3,410 relationships, 388 schemas, 12 folders and 275 canvases, plus its Data Standards.');
+    // Doc 105: los conteos son de PRODUCCIÓN; al aprobar, la cascada borra además
+    // lo que la working copy agregó (se aplica primero) — el texto lo dice.
+    expect(s).toBe('This working copy will delete project «Modelo DDV» and everything in it: 2,113 tables, 96,004 columns, 1,902 views, 3,410 relationships, 388 schemas, 12 folders and 275 canvases in production (plus anything this working copy adds), and its Data Standards.');
   });
 
   it('el nombre debe coincidir exactamente (sin espacios sobrantes)', () => {
@@ -18,6 +20,13 @@ describe('projectDeletion (doc 75 D5)', () => {
   it('criticalDeletionText nombra el proyecto, los conteos y la irreversibilidad', () => {
     const t = criticalDeletionText('Modelo DDV', COUNTS);
     expect(t.title).toBe('Critical: this request deletes project «Modelo DDV».');
-    expect(t.body).toBe("Approving it removes 2,113 tables, 96,004 columns, 1,902 views, 3,410 relationships, 388 schemas, 12 folders and 275 canvases from the platform, together with the project's Data Standards. This cannot be undone from the web.");
+    expect(t.body).toBe("Approving it removes 2,113 tables, 96,004 columns, 1,902 views, 3,410 relationships, 388 schemas, 12 folders and 275 canvases (as published today, plus anything this request adds) from the platform, together with the project's Data Standards. This cannot be undone from the web.");
+  });
+});
+
+describe('singular (doc 105, ronda 3: decía «1 folders»)', () => {
+  it('cada conteo de 1 va en singular', () => {
+    const one = { tables: 1, columns: 1, views: 1, relationships: 1, schemas: 1, folders: 1, canvases: 1 };
+    expect(deletionSummary('P', one)).toContain('1 table, 1 column, 1 view, 1 relationship, 1 schema, 1 folder and 1 canvas in production');
   });
 });

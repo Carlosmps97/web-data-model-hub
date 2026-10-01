@@ -33,6 +33,19 @@ export default function App() {
   // el guard `RequireAuth` muestra un splash mientras `status === 'loading'`.
   const restore = useAuthStore((s) => s.restore);
   useEffect(() => { void restore(); }, [restore]);
+  // Doc 105 (F5): rol y permisos al día sin recargar — al volver a la pestaña
+  // se re-lee /me (refreshMe tiene su propio tope: una en vuelo, como mucho una
+  // cada 10 s). El otro disparador es un 403 (lo registra el store de auth).
+  useEffect(() => {
+    const refresh = () => { void useAuthStore.getState().refreshMe(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
 
   return (
     <BrowserRouter>

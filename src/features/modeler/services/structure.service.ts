@@ -12,7 +12,9 @@
  *  - LECTURAS con changeset activo (edición O readonly de un request) → estado
  *    efectivo (`csvc.effective`), para que el dueño Y los revisores vean la
  *    estructura draft.
- *  - Sin changeset (producción/legacy) → endpoints directos de siempre.
+ *  - Sin changeset (producción/legacy) → LECTURAS por los endpoints directos
+ *    de siempre. Las ESCRITURAS del canvas (posiciones, dibujos, trazos, UDPs)
+ *    exigen la working copy: no hay escritura directa a producción (doc 104).
  *
  * Doc 99 — escrituras del canvas EN FILA: cada guardado del canvas es «leer el
  * doc efectivo + grabar el doc completo». Dos guardados casi simultáneos del
@@ -153,12 +155,16 @@ export const projectDeletionPending = async (id: string): Promise<boolean> => {
 };
 
 // ── Folders ────────────────────────────────────────────────────────────────
+// Doc 104 (ronda 2): carpetas y canvases van SIEMPRE por la working copy. El
+// PUT/POST/DELETE directo de antes sólo lo alcanzaba un confirm o un input
+// del Explorer que quedó abierto cuando la sesión se degradó (versión
+// transferida, eliminada o enviada) — y borraba o editaba producción sin
+// revisión.
 
 export const createFolder = async (
   projectId: string, parentFolderId: string | null, name: string, order = 0,
 ): Promise<Folder> => {
-  const cs = writeCs();
-  if (!cs) return mod.createFolder(projectId, parentFolderId, name, order);
+  const cs = requireWriteCs('Creating a folder');
   const f: Folder = { id: uid(), projectId, parentFolderId, name, order };
   await csvc.recordChange(cs, 'folders', f.id, 'upsert', { ...f });
   return f;
@@ -173,19 +179,14 @@ async function patchFolder(cs: string, id: string, patch: Partial<Folder>): Prom
   return next;
 }
 
-export const renameFolder = (id: string, name: string): Promise<Folder> => {
-  const cs = writeCs();
-  return cs ? patchFolder(cs, id, { name }) : mod.renameFolder(id, name);
-};
+export const renameFolder = async (id: string, name: string): Promise<Folder> =>
+  patchFolder(requireWriteCs('Renaming a folder'), id, { name });
 
-export const moveFolder = (id: string, parentFolderId: string | null): Promise<Folder> => {
-  const cs = writeCs();
-  return cs ? patchFolder(cs, id, { parentFolderId }) : mod.moveFolder(id, parentFolderId);
-};
+export const moveFolder = async (id: string, parentFolderId: string | null): Promise<Folder> =>
+  patchFolder(requireWriteCs('Moving a folder'), id, { parentFolderId });
 
 export const deleteFolder = async (id: string): Promise<{ deleted: boolean }> => {
-  const cs = writeCs();
-  if (!cs) return mod.deleteFolder(id);
+  const cs = requireWriteCs('Deleting a folder');
   await csvc.recordChange(cs, 'folders', id, 'delete');
   return { deleted: true };
 };
@@ -195,8 +196,7 @@ export const deleteFolder = async (id: string): Promise<{ deleted: boolean }> =>
 export const createSubjectArea = async (
   projectId: string, name: string, folderId: string | null = null,
 ): Promise<SubjectArea> => {
-  const cs = writeCs();
-  if (!cs) return mod.createSubjectArea(projectId, name, folderId);
+  const cs = requireWriteCs('Creating a canvas');
   const sa: SubjectArea = {
     id: uid(), projectId, name, folderId,
     tableIds: [], layout: {}, drawings: [], udpValues: {}, routes: {},
@@ -215,16 +215,12 @@ function patchSa(cs: string, saId: string, patch: Partial<SubjectArea>): Promise
   });
 }
 
-export const updateSubjectArea = (
+export const updateSubjectArea = async (
   id: string, body: { projectId: string; name: string; folderId?: string | null },
-): Promise<SubjectArea> => {
-  const cs = writeCs();
-  return cs ? patchSa(cs, id, body) : mod.updateSubjectArea(id, body);
-};
+): Promise<SubjectArea> => patchSa(requireWriteCs('Editing a canvas'), id, body);
 
 export const deleteSubjectArea = async (id: string): Promise<{ deleted: boolean }> => {
-  const cs = writeCs();
-  if (!cs) return mod.deleteSubjectArea(id);
+  const cs = requireWriteCs('Deleting a canvas');
   // En fila: un guardado pendiente del canvas que aterrizara DESPUÉS del
   // borrado lo resucitaría (el cambio del draft volvería a ser un upsert).
   await inOrder(id, async () => {
@@ -280,19 +276,30 @@ export const addToCanvas = async (
   });
 };
 
+/** Lo que salió de un canvas (doc 105): miembros y sus posiciones. */
+export type CanvasMembersOut = Required<CanvasMembers> & { layout: NonNullable<Layout> };
+
+/** Las posiciones de `ids` en un layout (sólo las que tiene). */
+const positionsOf = (layout: Layout | undefined, ids: Iterable<string>): NonNullable<Layout> => {
+  const out: NonNullable<Layout> = {};
+  for (const id of ids) if (layout?.[id]) out[id] = { ...layout[id] };
+  return out;
+};
+
 /** SACA miembros del canvas CON su posición (sin ella quedaría un nodo
  *  fantasma en el layout, audit C9b), y los trazos de `dropRouteIds` (los
  *  wires de una tabla que sale: si vuelve en otra posición ya no calzarían,
  *  doc 99). La tabla o vista sigue en el modelo y en los demás canvases. Un
  *  canvas que ya no está en la working copy no se toca (borrar una tabla
- *  recorre todos los canvases donde estaba). */
+ *  recorre todos los canvases donde estaba). Doc 105 (F4): devuelve lo que
+ *  REALMENTE salió, con sus posiciones — el Undo lo repone tal cual. */
 export const removeFromCanvas = async (
   saId: string, rm: CanvasMembers & { dropRouteIds?: string[] }, shownViews?: string[] | null,
-): Promise<void> => {
+): Promise<CanvasMembersOut> => {
   const cs = requireWriteCs('Editing a canvas');
-  await inOrder(saId, async () => {
+  return inOrder(saId, async () => {
     const cur = await fetchEffectiveSa(cs, saId);
-    if (!cur) return;
+    if (!cur) return { tableIds: [], viewIds: [], layout: {} };
     const next: SubjectArea = { ...cur, id: saId };
     const gone = new Set<string>();
     const tables = cur.tableIds ?? [];
@@ -317,14 +324,38 @@ export const removeFromCanvas = async (
       next.routes = routes;
     }
     if (changed) await saveCanvas(cs, saId, next);
+    return { tableIds: outTables, viewIds: outViews, layout: positionsOf(cur.layout, gone) };
   });
 };
 
+/** Doc 105 (F4, A4-o4): de `viewIds`, cuáles lista EXPLÍCITAMENTE el canvas y
+ *  dónde están — leído en su cola (después de sus escrituras pendientes), sin
+ *  escribir. Borrar una vista (o la tabla de la que sale) la saca de todo canvas
+ *  que la lista, en el mismo request (cascada del backend, doc 88 §4): quien
+ *  borra lo anota ANTES para que su Undo la reponga en su sitio. Un canvas sin
+ *  lista explícita (legacy, doc 70) o que ya no está no lista ninguna: su regla
+ *  por fuentes la vuelve a mostrar sola (y el backend no le toca el layout). */
+export const listedViews = async (
+  saId: string, viewIds: string[],
+): Promise<{ viewIds: string[]; layout: NonNullable<Layout> }> => {
+  if (!viewIds.length) return { viewIds: [], layout: {} };
+  const cs = requireWriteCs('Editing a canvas');
+  return inOrder(saId, async () => {
+    const cur = await fetchEffectiveSa(cs, saId);
+    const listed = Array.isArray(cur?.viewIds) ? viewIds.filter((id) => cur!.viewIds!.includes(id)) : [];
+    return { viewIds: listed, layout: positionsOf(cur?.layout, listed) };
+  });
+};
+
+/* Doc 104: posiciones, auto-arrange y dibujos van SIEMPRE por la working copy
+ * (como trazos y UDPs). El PUT directo a producción de antes no tenía uso
+ * legítimo — el visor nunca persiste (doc 84 E) — y sólo lo alcanzaba un
+ * guardado pendiente de una sesión que se degradó a solo lectura (versión
+ * transferida, eliminada o enviada a revisión): publicaba sin revisión. */
 export const setSubjectAreaLayout = async (
   saId: string, layout: Record<string, { x: number; y: number }>,
 ): Promise<SubjectArea> => {
-  const cs = writeCs();
-  if (!cs) return mod.setSubjectAreaLayout(saId, wholeLayout(layout));
+  const cs = requireWriteCs('Saving the canvas layout');
   return inOrder(saId, async () => {
     // El PUT directo MERGEA (M3a): replicamos el merge sobre el layout efectivo.
     const cur = await fetchEffectiveSa(cs, saId);
@@ -376,8 +407,7 @@ export const setWireRoute = async (
 export const arrangeSubjectArea = async (
   saId: string, layout: Record<string, { x: number; y: number }>, routes: WireRoutes = {},
 ): Promise<SubjectArea> => {
-  const cs = writeCs();
-  if (!cs) return mod.setSubjectAreaLayout(saId, wholeLayout(layout));
+  const cs = requireWriteCs('Arranging the canvas');
   return inOrder(saId, async () => {
     const cur = await fetchEffectiveSa(cs, saId);
     if (!cur) throw new Error(CANVAS_GONE);
@@ -385,10 +415,8 @@ export const arrangeSubjectArea = async (
   });
 };
 
-export const setSubjectAreaDrawings = (saId: string, drawings: Drawing[]): Promise<SubjectArea> => {
-  const cs = writeCs();
-  return cs ? patchSa(cs, saId, { drawings }) : mod.setSubjectAreaDrawings(saId, drawings);
-};
+export const setSubjectAreaDrawings = async (saId: string, drawings: Drawing[]): Promise<SubjectArea> =>
+  patchSa(requireWriteCs('Saving the canvas drawings'), saId, { drawings });
 
 /** UDPs del canvas: SIEMPRE versionado (doc 75 D14: sin escritura directa). */
 export const setSubjectAreaUdp = (saId: string, udpValues: Record<string, string>): Promise<SubjectArea> =>

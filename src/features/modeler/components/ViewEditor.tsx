@@ -12,6 +12,7 @@ import SearchSelect from './SearchSelect';
 import SchemaCreateDialog from './SchemaCreateDialog';
 import { viewSchemaOnCreate } from '../lib/schemaPick';
 import { orderColumns } from '../lib/columnOrder';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 
 const PURPLE = '#8B5CF6', PURPLE_DK = '#6D3FC4', BLUE = '#2E5BFF', NAVY = '#1A2B4A', MUTED = '#9AA3B2';
 const MONO = "var(--mono, 'Geist Mono', monospace)";
@@ -27,8 +28,10 @@ const updn = (dis: boolean): React.CSSProperties => ({ height: 13, border: 'none
  * lista vertical de las elegidas (nombres largos envuelven, nunca se cortan),
  * grilla de columnas AGRUPADA por tabla origen (incluir, alias de salida,
  * expresión SQL, castType con combobox de tipos + libre), switch "Show on this
- * canvas" al crear (doc 70: membresía del canvas actual — NO afecta el export
- * DDL). Con 2+ fuentes el DDL las lista `FROM t1, t2` sin JOIN (doc 91 D5,
+ * canvas" al crear (doc 70: membresía del canvas actual — y la membresía decide
+ * qué vistas exporta el Export DDL de ese canvas, doc 102; el valor queda en la
+ * vista como `showOnCanvas`, que con Export rules marca la vista de NEGOCIO,
+ * doc 105 C2). Con 2+ fuentes el DDL las lista `FROM t1, t2` sin JOIN (doc 91 D5,
  * como Erwin); un join o un WHERE se escriben en el modo «User-Defined SQL»
  * (doc 91 D6): la sentencia completa, guardada VERBATIM y sin validación —
  * en ese modo el canvas lista todas las columnas de las fuentes (D7).
@@ -295,6 +298,11 @@ export default function ViewEditor({
   const save = async () => {
     if (!canSave || ro) return;
     setBusy(true);
+    // Doc 105: la vista se graba en la sesión donde se pidió (H1) y un fallo
+    // espera la revalidación (H7). Propaga el motivo real (p.ej. el 409 del
+    // backend F3a: vista sin fuentes).
+    const pin = pinSession();
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the view", 'err'));
     try {
       // Doc 96 D6: las columnas del builder son la verdad (el DDL sale de ahí);
       // la User-Defined SQL viaja como texto informativo. El payload del
@@ -306,12 +314,14 @@ export default function ViewEditor({
       const saved = editing && view
         ? await viewsSvc.updateView(view.id, body)
         : await viewsSvc.createView(body);
+      // Doc 105 (H1): lo que sigue (el llamador la suma al canvas) es otra
+      // escritura — si mientras se guardaba se abrió otra versión, ya no va.
+      if (!pin.holds()) { onClose(); return; }
       pushToast(editing ? 'View updated' : 'View created');
       onSaved(saved, !editing);
       onClose();
     } catch (e) {
-      // Propaga el motivo real (p.ej. el 409 del backend F3a: vista sin fuentes).
-      pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the view", 'err');
+      await onError(e);
     } finally {
       setBusy(false);
     }
@@ -442,7 +452,7 @@ export default function ViewEditor({
                   <span style={{ position: 'absolute', top: 2, left: showOnCanvas ? 17 : 2, width: 15, height: 15, borderRadius: '50%', background: '#fff', transition: 'left .12s' }} />
                 </button>
                 <span style={{ fontSize: 12.5, color: NAVY, fontWeight: 600 }}>Show on this canvas</span>
-                <span style={{ fontSize: 10.5, color: MUTED }}>adds the new view to the current canvas · doesn't affect the DDL export</span>
+                <span style={{ fontSize: 10.5, color: MUTED }}>adds the new view to the current canvas — and to its DDL export</span>
               </div>
             )}
             {/* Doc 91 D1/D2: sin «Labels / tags» (los UDP de vista los reemplazan)

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Database, Search, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
-import { useModelerStore } from '@/store/useModelerStore';
+import { failureText, useModelerStore } from '@/store/useModelerStore';
+import { reportWriteError } from '@/features/modeler/lib/sessionGuard';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import type { Permission } from '@/features/auth/auth.service';
@@ -71,12 +72,16 @@ export default function TopNav() {
   const saveAndLeave = async () => {
     const to = leaveTo;
     setSavingLeave(true);
+    // Doc 105 (H7): si mientras guardaba la versión cambió (transferida,
+    // eliminada, enviada), la revalidación ya avisó: acá se calla. Ronda 7
+    // (R18a-5): con el motivo — sin él, no se sabe qué pasó ni qué hacer.
+    const onError = reportWriteError((e) => toast.error(failureText("Couldn't save — you're still on the canvas", e)));
     try {
       await useModelerStore.getState().saveAll();
       setLeaveTo(null);
       if (to) navigate(to);
-    } catch {
-      toast.error("Couldn't save — you're still on the canvas");
+    } catch (e) {
+      await onError(e);
     } finally {
       setSavingLeave(false);
     }

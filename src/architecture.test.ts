@@ -83,3 +83,28 @@ describe('fondos de popup sin backdrop-filter', () => {
     expect(rules('.dmh-dialog-backdrop').join('')).toMatch(/background:/);
   });
 });
+
+// Doc 105 (C3c): el Export DDL exporta las vistas MIEMBRO del canvas
+// (`canvasDdlViews(diagram)`, doc 102), nunca «todas las vistas de sus tablas».
+// Nada impedía volver a `listViewsForTables` (lo que hacía el modal antes del
+// doc 102): el export volvería a sumar vistas que el canvas no muestra.
+describe('Export DDL: vistas del canvas, no las de sus tablas (doc 105)', () => {
+  const stripTsComments = (code: string) => code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
+  const readsViewsByTables = (code: string) => /\blistViewsForTables\b/.test(stripTsComments(code));
+  it('detecta la lectura por tablas (import o llamada), no un comentario', () => {
+    expect(readsViewsByTables("import { listViewsForTables } from '@/services/views.service';")).toBe(true);
+    expect(readsViewsByTables('const vs = await viewsSvc.listViewsForTables(ids);')).toBe(true);
+    expect(readsViewsByTables('// antes: listViewsForTables(ids)')).toBe(false);
+    expect(readsViewsByTables('/* listViewsForTables */ const views = canvasDdlViews(diagram);')).toBe(false);
+  });
+  const dir = src('features/ddl');
+  const files = readdirSync(dir, { recursive: true, encoding: 'utf-8' })
+    .filter((f) => /\.(ts|tsx)$/.test(f) && !/\.test\.tsx?$/.test(f))
+    .map((f) => join(dir, f));
+  it('el modal del Export DDL está entre los archivos revisados', () => {
+    expect(files.some((f) => f.endsWith(join('components', 'ExportDdlModal.tsx')))).toBe(true);
+  });
+  it.each(files)('%s no lee las vistas por tablas', (file) => {
+    expect(readsViewsByTables(readFileSync(file, 'utf-8'))).toBe(false);
+  });
+});

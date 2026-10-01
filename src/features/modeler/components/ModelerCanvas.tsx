@@ -6,6 +6,8 @@ import {
 } from '@xyflow/react';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
+import { canvasSessionKey } from '../lib/canvasSession';
+import { reportWriteError } from '../lib/sessionGuard';
 import TableNode from './TableNode';
 import ShapeNode from './ShapeNode';
 import ViewNode from './ViewNode';
@@ -20,6 +22,7 @@ import SubcategoryCreatePopup, { type SubcatDraft } from './SubcategoryCreatePop
 import SubcategoryPopup from './SubcategoryPopup';
 import ColumnContextMenu, { copiedMessage, copiedTableMessage } from './ColumnContextMenu';
 import { useUndoStore } from '@/store/useUndoStore';
+import { modalOpen } from '@/components/ui/focusTrap';
 import PasteColumnsPopup from './PasteColumnsPopup';
 import ViewEditor from './ViewEditor';
 import { buildViewGraph } from '../lib/viewGraph';
@@ -29,7 +32,7 @@ import { pkInKeyOrder } from '../lib/keyOrder';
 import { relationshipDrift } from '../lib/relationshipPairs';
 import { relationshipLabel } from '../lib/relationshipLabel';
 import { fanSlots, HEADER_H, ROW_H } from '../lib/edgeFanout';
-import { effectiveLayout } from '../lib/viewerLayout';
+import { draggedPositions, effectiveLayout } from '../lib/viewerLayout';
 
 const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode, subcat: SubtypeSymbolNode };
 const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge, subcat: SubtypeEdge };
@@ -38,7 +41,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const diagram = useModelerStore((s) => s.diagram);
   const drawings = useModelerStore((s) => s.drawings);
   const updateDrawing = useModelerStore((s) => s.updateDrawing);
-  const saveLayout = useModelerStore((s) => s.saveLayout);
+  const saveNodePositions = useModelerStore((s) => s.saveNodePositions);
   // Doc 84 E: layout efímero del visor (mover/arreglar sin persistir).
   const setViewerPos = useModelerStore((s) => s.setViewerPos);
   const markViewerHint = useModelerStore((s) => s.markViewerHint);
@@ -56,8 +59,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const setPendingFocus = useModelerStore((s) => s.setPendingFocus);
   const activeChangeset = useSessionStore((s) => s.activeChangesetId);
   // Viewer-lock: en read-only se puede VER (click abre PropertiesPanel en modo
-  // reader) pero no mutar: sin drag de nodos y sin conexiones; las escrituras
-  // del panel ya están gateadas por el changeset activo (canEdit).
+  // reader) y mover bloques sin persistir (doc 84 E, `viewerLayout`), pero no
+  // mutar: sin conexiones ni pegado; las escrituras del panel ya están gateadas
+  // por el changeset activo (canEdit).
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   // Estado interno de React Flow: con `onNodesChange` los nodos son arrastrables.
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
@@ -78,6 +82,13 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const [editViewId, setEditViewId] = useState<string | null>(null);
   // Callback ESTABLE para el data de los nodos view (evita rearmar el grafo).
   const onEditView = useCallback((id: string) => setEditViewId(id), []);
+  // Doc 105 (ronda 3, R7-A): al cambiar la sesión (otra versión, modo o
+  // proyecto) los popups del canvas se cierran — lo armado en una no se graba
+  // en la otra (el canvas se limpia en el acto y el refresco lo reabre).
+  const sessionKey = useSessionStore((s) => canvasSessionKey(s));
+  useEffect(() => {
+    setEditRelId(null); setRelDraft(null); setSubcatDraft(null); setSubcatManage(null); setEditViewId(null);
+  }, [sessionKey]);
 
   // Sincroniza el diagrama (store) → nodos/aristas de React Flow.
   useEffect(() => {
@@ -119,8 +130,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       zIndex: t.id === selNow ? 10 : 0,
       data: { table: t, columns: colsByTable.get(t.id) ?? [], lod: lodNow, refCols: refColsByTable.get(t.id) ?? [] },
     }));
-    // F3: nodos 'view' + edges 'derivation' desde diagram.views (solo vistas
-    // showOnCanvas con ≥1 fuente en el canvas — ya filtradas por el backend).
+    // F3: nodos 'view' + edges 'derivation' desde diagram.views: las vistas
+    // MIEMBRO del canvas (`viewIds`, doc 70; un canvas legacy sin lista usa
+    // showOnCanvas + ≥1 fuente) — ya resueltas por el backend.
     // Posición: layout[viewId] o default junto a su primera fuente presente.
     const tablePos = new Map(tableNodes.map((n) => [n.id, n.position]));
     // Doc 63: vistas SOLO en modelo físico — en lógico ni bloques ni wires
@@ -267,12 +279,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // filas — o el BLOQUE seleccionado si no hay filas —, Ctrl/Cmd+V pega
   // (clipboard de tabla → tabla nueva; de columnas → confirmación sobre la
   // tabla seleccionada), Ctrl/Cmd+Z deshace la última acción y Esc limpia
-  // menú/selección. Guardas: cualquier modal abierto (.dmh-backdrop), foco en
+  // menú/selección. Guardas: cualquier modal o espera en pantalla (`modalOpen`:
+  // un Dialog, Modal o confirm `aria-modal`, un scrim .dmh-backdrop, o los
+  // overlays de espera .dmh-busy-overlay / .wk-nav-overlay — doc 105), foco en
   // un campo editable (ahí mandan el copy/undo NATIVOS del input), o texto
   // seleccionado en la página (ahí manda el Ctrl+C nativo).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (document.querySelector('.dmh-backdrop')) return;
+      if (modalOpen()) return;
       const st = useModelerStore.getState();
       if (e.key === 'Escape') {
         if (st.colMenu) st.closeColMenu();
@@ -300,12 +314,12 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         const sel = window.getSelection();
         if (sel && !sel.isCollapsed) return;
         const n = st.copySelectedColumns();
-        if (n > 0) { pushToast(copiedMessage(n)); return; }
+        if (n > 0) { pushToast(copiedMessage(n, facetNouns(st.viewMode))); return; }
         // Doc 50: sin filas seleccionadas, con un bloque seleccionado el copy
         // toma la TABLA completa (columnas + metadata; sin relaciones).
         if (st.selectedTableId) {
           const name = st.copyTable(st.selectedTableId);
-          if (name) pushToast(copiedTableMessage(name));
+          if (name) pushToast(copiedTableMessage(name, facetNouns(st.viewMode)));
         }
         return;
       }
@@ -315,7 +329,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         if (readonly || !activeChangeset) { pushToast('Open the model in edit mode to paste', 'err'); return; }
         void st.pasteTable()
           .then((name) => { if (name) pushToast(`${facetNouns(useModelerStore.getState().viewMode).One} pasted as ${name}`); })
-          .catch((err) => pushToast(err instanceof Error && err.message ? err.message : "Couldn't paste the table", 'err'));
+          .catch(reportWriteError((err) => pushToast(err instanceof Error && err.message ? err.message : `Couldn't paste the ${facetNouns(useModelerStore.getState().viewMode).one}`, 'err')));   // doc 105 (ronda 3; ronda 5: faceta)
         return;
       }
       if (!st.colClipboard?.cols.length) return;
@@ -546,20 +560,23 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         minZoom={0.02}
         fitView
         fitViewOptions={{ padding: 0.12, minZoom: 0.02 }}
-        onNodeDragStop={(_e, node) => {
+        onNodeDragStop={(_e, node, moved) => {
+          // Doc 105 (A4-o1): `moved` = TODOS los nodos arrastrados (varios con
+          // selección múltiple); antes sólo se guardaba el tomado con el mouse.
+          const { layout, shapes } = draggedPositions(moved.length ? moved : [node]);
           if (readonly) {
             // Doc 84 E: modo visor — el movimiento vive sólo en esta sesión
             // (viewerLayout); nada viaja al backend. Aviso una vez por sesión.
-            if (node.type === 'shape' || !diagram) return;
-            setViewerPos(diagram.subjectArea.id, node.id, node.position);
+            if (!diagram || !Object.keys(layout).length) return;
+            for (const [id, pos] of Object.entries(layout)) setViewerPos(diagram.subjectArea.id, id, pos);
             if (!useModelerStore.getState().viewerHintShown) {
               markViewerHint();
               pushToast('Moves in view mode are not saved. Open the model for editing to keep a layout.');
             }
             return;
           }
-          if (node.type === 'shape') updateDrawing(node.id, { x: Math.round(node.position.x), y: Math.round(node.position.y) });
-          else void saveLayout(node.id, node.position);
+          for (const d of shapes) updateDrawing(d.id, { x: d.x, y: d.y });
+          if (Object.keys(layout).length) void saveNodePositions(layout);
         }}
       >
         {/* Dotted grid (Screen 04): #FBFCFD surface + #D6DBE6 dots, 22px gap. */}

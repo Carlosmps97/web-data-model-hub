@@ -15,8 +15,9 @@ import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { pkFirstOrdinals } from '../lib/columnOrder';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
-import * as viewsSvc from '@/services/views.service';
+import { bestEffort, pinnedViewDeps } from '../lib/pinnedWrites';
 import { phraseEdits } from '../lib/relationshipLabel';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 import RelationshipPhraseFields, { type PhraseKey } from './RelationshipPhraseFields';
 
@@ -61,9 +62,12 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const drift = relationshipDrift(rel, parentPksNow.map((c) => c.id));
   const locked = !canEdit || saving;
   const colName = (id: string) => colById.get(id)?.physicalName ?? id;
+  // Doc 105 (H7): el fallo de una escritura espera la revalidación y calla si
+  // la sesión cambió (`reportWriteError`: ya avisó ella).
   const run = async (fn: () => Promise<void>, err: string) => {
     setSaving(true);
-    try { await fn(); } catch (e) { pushToast(e instanceof Error && e.message ? e.message : err, 'err'); }
+    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : err, 'err'));
+    try { await fn(); } catch (e) { await onError(e); }
     finally { setSaving(false); }
   };
 
@@ -71,6 +75,8 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const setType = (identifying: boolean) => {
     if (identifying === rel.identifying) return;
     void run(async () => {
+      // Doc 105 (H1): la acción es de la sesión donde empezó.
+      const pin = pinSession();
       // Pre-imágenes para el Undo (doc 50): la relación + las columnas HIJAS
       // de sus pares (la propagación de abajo solo toca esas: promoción a PK
       // o demote conservador).
@@ -97,6 +103,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         }
       }
       const { changes: keyChanges, pres: keyPres } = keyLayoutBulk(childOpts, patches);
+      pin.check();
       if (keyChanges.length) await gov.recordChangesBulk(keyChanges);
       const n = Object.keys(patches).length;
       pushToast(identifying ? 'Identifying: child columns promoted to PK'
@@ -108,7 +115,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
           gov.bulk.upsertRelationship(relPre),
         ]);
         await reload();
-      });
+      }, pin);
       await reload();
     }, "Couldn't update");
   };
@@ -136,6 +143,9 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
     const name = (roleDrafts[i] ?? '').trim();
     if (!name) { pushToast('Type the role name', 'err'); return; }
     void run(async () => {
+      // Doc 105 (H1): lee y después escribe varias veces — todo en la sesión
+      // donde empezó: cada escritura verifica el pin.
+      const pin = pinSession();
       // Plan con el slice GLOBAL de la tabla hija (la unificación puede venir
       // de una relación de OTRO canvas).
       const near = await gov.listRelationships(rel.childTableId);
@@ -145,13 +155,11 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       if (!cur) throw new Error('Child column no longer exists');
       const physical = (await gov.physicalize(name)).physical;
       if (plan.kind === 'rename') {
+        pin.check();
         await gov.updateColumn({ ...cur, logicalName: name, physicalName: physical });
         // Las vistas referencian por nombre: re-apuntar sources al nuevo físico.
-        try {
-          await syncRenamedColumnInViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            rel.childTableId, cur.physicalName, physical);
-        } catch { /* best-effort */ }
+        await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), rel.childTableId, cur.physicalName, physical));
+        pin.check();
         await gov.updateRelationship({
           ...rel,
           pairs: rel.pairs.map((p, k) => (k === i ? { ...p, roleName: name } : p)),
@@ -171,14 +179,12 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
           ordinal: layout ? layout.get(newId)! : childOpts.length,
         };
         const shifts = childOpts.filter((c) => layout?.has(c.id)).map((c) => gov.bulk.createColumn({ ...c, ordinal: layout!.get(c.id)! }));
+        pin.check();
         if (shifts.length) await gov.recordChangesBulk([gov.bulk.createColumn(created), ...shifts]);
         else await gov.createColumn(created);
         // V1: la columna del split entra también a las vistas ESPEJO del hijo.
-        try {
-          await syncNewColumnToMirrorViews(
-            { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-            rel.childTableId, physical, childOpts, rel.identifying);
-        } catch { /* best-effort */ }
+        await bestEffort(() => syncNewColumnToMirrorViews(pinnedViewDeps(pin), rel.childTableId, physical, childOpts, rel.identifying));
+        pin.check();
         await gov.updateRelationship({
           ...rel,
           pairs: rel.pairs.map((p, k) => (k === i ? { ...p, childColumnId: newId, roleName: name } : p)),
@@ -206,6 +212,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   };
 
   const applySync = () => void run(async () => {
+    const pin = pinSession();   // doc 105 (H1): lee y después escribe varias veces
     const pkIdSet = new Set(parentPksNow.map((c) => c.id));
     const pkById = new Map(parentPksNow.map((c) => [c.id, c]));
     const keptRole = new Map(rel.pairs.map((p) => [p.parentColumnId, p.roleName ?? undefined]));
@@ -252,17 +259,13 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       if (prev) prev.payload = { ...prev.payload, isForeignKey: false };
       else changes.push(gov.bulk.createColumn({ ...c, isForeignKey: false }));
     }
+    pin.check();
     await gov.recordChangesBulk(changes);
-    await syncNewColumnsToMirrorViews(
-      { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-      rel.childTableId, createdCols, childOpts);
+    await syncNewColumnsToMirrorViews(pinnedViewDeps(pin), rel.childTableId, createdCols, childOpts);
     for (const r of resolutions) {
       if (r.target.kind !== 'existing' || !r.target.rename) continue;
-      try {
-        await syncRenamedColumnInViews(
-          { listViews: viewsSvc.listViews, updateView: viewsSvc.updateView },
-          rel.childTableId, r.target.col.physicalName, r.target.rename.physicalName);
-      } catch { /* best-effort */ }
+      const { col, rename } = r.target;
+      await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), rel.childTableId, col.physicalName, rename.physicalName));
     }
     setSyncing(false);
     useModelerStore.getState().markDirty();
@@ -271,6 +274,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   }, "Couldn't sync the relationship");
 
   const remove = async () => {
+    const onError = reportWriteError(() => pushToast("Couldn't delete the relationship", 'err'));
     try {
       const ok = await confirmDialog({
         title: 'Delete relationship',
@@ -279,7 +283,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         action: () => deleteRelationship(relId),
       });
       if (ok) { pushToast('Relationship deleted'); onClose(); }
-    } catch { pushToast("Couldn't delete the relationship", 'err'); }
+    } catch (e) { await onError(e); }
   };
 
   const removedPairs = rel.pairs.filter((p) => !parentPksNow.some((c) => c.id === p.parentColumnId));

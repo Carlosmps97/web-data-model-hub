@@ -4,7 +4,9 @@ import { Table2, Search, Plus, Check } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import * as gov from '@/services/governance.service';
 import type { CanonicalTable } from '@/services/governance.service';
-import { useModelerStore } from '@/store/useModelerStore';
+import { toast } from 'sonner';
+import { failureText, useModelerStore } from '@/store/useModelerStore';
+import { reportWriteError } from '../lib/sessionGuard';
 import { apiErrorMessage } from '@/services/http';
 import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
@@ -69,9 +71,13 @@ export default function NewTableModal({ onClose, onCreate }: {
     return () => { alive = false; clearTimeout(h); };
   }, [logical, viewMode]);
 
+  // Doc 105 (R14): un alta a la vez — `busy` sigue en false dentro del mismo
+  // render: un doble Enter (o uno sostenido) creaba varias tablas.
+  const inFlight = useRef(false);
   const submitBlank = async () => {
     const ln = logical.trim();
-    if (!ln) return;
+    if (!ln || inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -83,7 +89,7 @@ export default function NewTableModal({ onClose, onCreate }: {
       // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
       // detail real del backend — el modal NO se cierra.
       setError(apiErrorMessage(e, "Couldn't create the table"));
-    } finally { setBusy(false); }
+    } finally { inFlight.current = false; setBusy(false); }
   };
 
   // ── Import existing ────────────────────────────────────────────────────
@@ -149,7 +155,10 @@ export default function NewTableModal({ onClose, onCreate }: {
 
   const addOne = async (id: string) => {
     setAdding(id);
+    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió (`reportWriteError`). Antes no tenía catch: rechazo sin manejar.
+    const onError = reportWriteError((e) => toast.error(failureText(`Couldn't add the ${n.one} to this canvas`, e)));   // ronda 4 (6b): entity/table
     try { await addExistingTables([id], { withViews }); setAdded((s) => new Set(s).add(id)); }
+    catch (e) { await onError(e); }
     finally { setAdding(null); }
   };
 
@@ -186,7 +195,7 @@ export default function NewTableModal({ onClose, onCreate }: {
             <div style={field}>
               <label style={lbl}>Logical name</label>
               <input className="rd-input" autoFocus placeholder="e.g. cuenta cliente" value={logical}
-                onChange={(e) => setLogical(sanitizeLogicalName(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') submitBlank(); }}
+                onChange={(e) => setLogical(sanitizeLogicalName(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submitBlank(); } }}
                 style={{ width: '100%' }} />
               {/* Doc 86 D3: el físico se deriva por glosario (scope table); se edita luego en Physical. */}
               <span className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)', marginTop: 4, display: 'block' }}>
@@ -198,7 +207,7 @@ export default function NewTableModal({ onClose, onCreate }: {
               <div style={field}>
                 <label style={lbl}>Physical name</label>
                 <input className="rd-input rd-mono" autoFocus placeholder="e.g. HD_CLIENTE" value={logical}
-                  onChange={(e) => setLogical(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submitBlank(); }}
+                  onChange={(e) => setLogical(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submitBlank(); } }}
                   style={{ width: '100%' }} />
                 {casedPhysical && casedPhysical !== logical.trim() && (
                   <span className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)', marginTop: 4, display: 'block' }}>

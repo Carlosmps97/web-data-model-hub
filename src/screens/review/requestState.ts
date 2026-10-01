@@ -4,6 +4,7 @@
  * → corregir → re-enviar → aprobar); el badge y el filtro de la bandeja se
  * calculan por el estado de la versión + su último ciclo.
  */
+import { canOpenVersion } from '@/services/versioning.service';
 import type { ChangesetDetail, RequestCycle, RequestOutcome, VersionStatus } from '@/types/versioning';
 
 export interface RequestLike {
@@ -86,4 +87,32 @@ export function fmtDate(iso?: string | null): string {
 export function activityAt(v: { lastRequest?: RequestCycle | null; submittedAt?: string | null; updatedAt?: string | null; createdAt?: string | null }): number {
   const iso = v.lastRequest?.decidedAt ?? v.lastRequest?.submittedAt ?? v.submittedAt ?? v.updatedAt ?? v.createdAt ?? '';
   return Date.parse(iso) || 0;
+}
+
+/** Doc 105 (U2): motivo cuando el request no es del actor ni lo revisa. */
+export const REVIEW_CANVAS_DENIED =
+  'Only its owner, its assigned reviewers and administrators can open this request in the canvas.';
+
+/** Botón «Open/View in canvas» de Review: el dueño de un DRAFT edita; un
+ *  request en revisión se abre en solo lectura — sólo si el actor puede verlo
+ *  (`canOpenVersion`, espejo del backend: dueño, revisor asignado,
+ *  `versions.view_all` o `admin.manage`); cerrado, no se abre desde acá. */
+export function canvasAction(
+  d: { status: VersionStatus; owner?: string | null; reviewers?: string[]; appliedAt?: string | null },
+  me: string | null | undefined,
+  has: (perm: 'versions.view_all' | 'admin.manage') => boolean,
+): { enabled: boolean; mode: 'editing' | 'readonly'; label: string; hint: string } {
+  const ownDraft = d.status === 'draft' && !!me && d.owner === me;
+  const mode = ownDraft ? 'editing' : 'readonly';
+  const label = ownDraft ? 'Open in canvas' : 'View in canvas';
+  if (!ownDraft && d.status !== 'submitted') {
+    return { enabled: false, mode, label, hint: 'This request is closed — open the version from Home › Versions' };
+  }
+  if (!canOpenVersion(d, me, has)) return { enabled: false, mode, label, hint: REVIEW_CANVAS_DENIED };
+  return {
+    enabled: true, mode, label,
+    hint: ownDraft
+      ? 'Open your working copy for editing'
+      : 'Opens read-only: the version is not a draft of yours — editing comes back with Withdraw',
+  };
 }

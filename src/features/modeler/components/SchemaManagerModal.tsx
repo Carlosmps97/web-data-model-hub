@@ -9,6 +9,7 @@ import { useSessionStore } from '@/store/useSessionStore';
 import * as schemasSvc from '@/features/modeler/services/schemas.service';
 import type { SchemaImpact } from '@/features/modeler/services/schemas.service';
 import { schemaNameError } from '../lib/schemaCreate';
+import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import {
   editCreate, orderedForSave, pendingFor, stageCreate, stageDelete, stageRename,
   takenNames, unstage, visibleSchemas, type SchemaKind, type StagedOp,
@@ -113,11 +114,22 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     if (ops.length === 0) return;
     setBusy(true); setError(null);
     const done = new Set<string>();
+    // Doc 105 (H1): varias escrituras seguidas — todas en la sesión donde
+    // empezó: si en el medio se abrió otra versión (o la revalidación la
+    // degradó), lo que falta NO se aplica y el diálogo se cierra (ya no es de
+    // la versión en pantalla). Un fallo espera antes la revalidación (H7).
+    const pin = pinSession();
+    const onError = reportWriteError((e) => {
+      // Los ya aplicados salen del staging; el que falló (y los que siguen) quedan.
+      setStaged((s) => s.filter((o) => !done.has(o.key)));
+      setError(apiErrorMessage(e, "Couldn't save all the changes"));
+    });
     try {
       markDirty();
       // Doc 75 D18: renombrar propaga a todas las tablas/vistas del esquema — bloqueante.
       await runBlocking('Applying schema changes…', async () => {
         for (const op of ops) {
+          pin.check();
           if (op.kind === 'create') {
             await schemasSvc.createSchema(op.name, undefined, op.schemaKind);
           } else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
@@ -129,9 +141,8 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
       setImpacts({});
       pushToast(`${ops.length} schema change(s) recorded in your version ${vLabel}`);
     } catch (e) {
-      // Los ya aplicados salen del staging; el que falló (y los que siguen) quedan.
-      setStaged((s) => s.filter((o) => !done.has(o.key)));
-      setError(apiErrorMessage(e, "Couldn't save all the changes"));
+      await onError(e);
+      if (!pin.holds()) onClose();
     } finally {
       setBusy(false);
       await loadSchemas().catch(() => {});
