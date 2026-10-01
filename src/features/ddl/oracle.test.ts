@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_ORACLE_OPTS as ORA, DEFAULT_ORACLE_TYPE_MAP, ORACLE_MAX_COMMENT_BYTES,
+  DEFAULT_ORACLE_OPTS as ORA, ORACLE_MAX_COMMENT_BYTES,
   oracleComment, oracleDdl, oracleForeignKeysFile, oracleNeedsQuote, oracleTableStatements, oracleType,
-  oracleViewStatements, typeMapIssues, type OracleDdlOptions,
+  oracleViewStatements, type OracleDdlOptions,
 } from './oracle';
 import type { DatabricksDdlInput, DdlView } from './generators';
 
@@ -18,29 +18,12 @@ const BASE: DatabricksDdlInput = {
 };
 
 describe('DEFAULT_ORACLE_OPTS — lo pedido para el proyecto RDV (doc 101)', () => {
-  it('comentarios OFF, PK/FK ON, tipos e identificadores en MAYÚSCULA, sin esquema por default', () => {
-    expect(ORA.maxStringSize).toBe('standard');
-    expect(ORA.includeComments).toBe(false);
-    expect(ORA.includeKeys).toBe(true);
-    expect(ORA.includeViews).toBe(true);
-    expect(ORA.typeCase).toBe('upper');
-    expect(ORA.identifierCase).toBe('upper');
-    expect(ORA.quoteIdentifiers).toBe('when-needed');
-    expect(ORA.defaultSchema).toBe('');
-  });
-
-  it('el mapeo por default es el mismo que el del backend (output.py)', () => {
-    expect(DEFAULT_ORACLE_TYPE_MAP.map((m) => `${m.from}→${m.to}`)).toEqual([
-      'DATETIME→DATE', 'STRING→VARCHAR2(4000)', 'VARCHAR→VARCHAR(4000)', 'VARCHAR2→VARCHAR2(4000)',
-      'VARCHAR(MAX)→CLOB', 'NVARCHAR→NVARCHAR2(2000)', 'NVARCHAR(MAX)→NCLOB', 'TEXT→CLOB',
-      'DECIMAL→DECIMAL(38,18)', 'NUMERIC→NUMERIC(38,18)', 'BIGINT→NUMBER(19)', 'TINYINT→NUMBER(3)',
-      'DOUBLE→BINARY_DOUBLE', 'MONEY→NUMBER(19,4)', 'BOOLEAN→NUMBER(1)',
-      'TIMESTAMPTZ→TIMESTAMP WITH TIME ZONE', 'TIME→DATE', 'BINARY→BLOB', 'VARBINARY→RAW(2000)',
-      'VARBINARY(MAX)→BLOB', 'BYTES→BLOB', 'JSON→CLOB', 'JSONB→CLOB', 'VARIANT→CLOB', 'XML→XMLTYPE',
-      'UUID→VARCHAR2(36)', 'ARRAY→CLOB', 'MAP→CLOB', 'STRUCT→CLOB',
-    ]);
-    // la lista de las opciones es una COPIA (editarla no toca la constante)
-    expect(ORA.typeMap).not.toBe(DEFAULT_ORACLE_TYPE_MAP);
+  it('comentarios OFF, PK/FK ON, tipos e identificadores en MAYÚSCULA, sin esquema por default (espejo del backend)', () => {
+    // Doc 106: sin mapeo de tipos ni tamaño máximo de strings — los tipos salen tal cual.
+    expect(ORA).toEqual({
+      includeViews: true, includeKeys: true, includeComments: false,
+      identifierCase: 'upper', quoteIdentifiers: 'when-needed', typeCase: 'upper', defaultSchema: '',
+    });
   });
 });
 
@@ -53,7 +36,7 @@ describe('oracleDdl — forma del DDL', () => {
       + 'CREATE TABLE BCP_RDV_DE_LKDE.DE_PARAMETRO (\n'
       + '  CODPARAMETRO VARCHAR(30) NOT NULL,\n'
       + '  DESPARAMETRO VARCHAR(256),\n'
-      + '  FECACTUALIZACIONREGISTRO DATE NOT NULL,\n'
+      + '  FECACTUALIZACIONREGISTRO DATETIME NOT NULL,\n'
       + '  CONSTRAINT PK_DE_PARAMETRO PRIMARY KEY (CODPARAMETRO)\n'
       + ');\n',
     );
@@ -72,7 +55,7 @@ describe('oracleDdl — forma del DDL', () => {
     const asIs = oracleDdl(BASE, { ...ORA, identifierCase: 'as-is', typeCase: 'lower' });
     expect(asIs).toContain('CREATE TABLE bcp_rdv_de_lkde.DE_PARAMETRO (');
     expect(asIs).toContain('  CODPARAMETRO varchar(30) NOT NULL,');
-    expect(asIs).toContain('  FECACTUALIZACIONREGISTRO date NOT NULL,');
+    expect(asIs).toContain('  FECACTUALIZACIONREGISTRO datetime NOT NULL,');
     expect(asIs).toContain('CONSTRAINT pk_DE_PARAMETRO PRIMARY KEY');
     const lower = oracleDdl(BASE, { ...ORA, identifierCase: 'lower' });
     expect(lower).toContain('CREATE TABLE bcp_rdv_de_lkde.de_parametro (');
@@ -89,111 +72,42 @@ describe('oracleDdl — forma del DDL', () => {
   });
 });
 
-describe('oracleType — tipos tal cual, salvo los que Oracle no tiene (doc 101 §4.3)', () => {
+describe('oracleType — el tipo tal cual está en el modelo, solo con el casing (doc 106)', () => {
   const t = (raw: string, o: Partial<OracleDdlOptions> = {}) => oracleType(raw, { ...ORA, ...o });
 
-  it('los tipos válidos en Oracle salen como en el modelo (con el casing elegido)', () => {
+  it('cada tipo sale como en el modelo, con el casing elegido', () => {
     for (const [raw, out] of [
       ['VARCHAR(30)', 'VARCHAR(30)'], ['varchar(3)', 'VARCHAR(3)'], ['CHAR(7)', 'CHAR(7)'], ['CHAR', 'CHAR'],
       ['DECIMAL(19,8)', 'DECIMAL(19,8)'], ['INT', 'INT'], ['INTEGER', 'INTEGER'], ['DATE', 'DATE'],
       ['TIMESTAMP', 'TIMESTAMP'], ['Number', 'NUMBER'], ['NUMBER(22,3)', 'NUMBER(22,3)'], ['VARCHAR2(10)', 'VARCHAR2(10)'],
       ['FLOAT', 'FLOAT'], ['SMALLINT', 'SMALLINT'], ['BLOB', 'BLOB'], ['DOUBLE PRECISION', 'DOUBLE PRECISION'],
+      ['VARCHAR2(30 char)', 'VARCHAR2(30 CHAR)'], ['TIMESTAMP(6) WITH TIME ZONE', 'TIMESTAMP(6) WITH TIME ZONE'],
     ]) expect(t(raw)).toBe(out);
     expect(t('VARCHAR(30)', { typeCase: 'lower' })).toBe('varchar(30)');
   });
 
-  it('los que no existen en Oracle se reemplazan según el mapeo', () => {
+  it('un tipo que Oracle no acepta también sale tal cual (es del modelo, no del export)', () => {
     for (const [raw, out] of [
-      ['DATETIME', 'DATE'], ['datetime', 'DATE'], ['STRING', 'VARCHAR2(4000)'], ['VARCHAR', 'VARCHAR(4000)'],
-      ['VARCHAR2', 'VARCHAR2(4000)'], ['VARCHAR(MAX)', 'CLOB'], ['varchar (max)', 'CLOB'], ['NVARCHAR(MAX)', 'NCLOB'],
-      ['NVARCHAR(50)', 'NVARCHAR2(50)'], ['NVARCHAR', 'NVARCHAR2(2000)'],
-      ['DECIMAL', 'DECIMAL(38,18)'], ['BIGINT', 'NUMBER(19)'], ['BOOLEAN', 'NUMBER(1)'], ['DOUBLE', 'BINARY_DOUBLE'],
-      ['TIMESTAMPTZ', 'TIMESTAMP WITH TIME ZONE'], ['VARBINARY(16)', 'RAW(16)'], ['VARBINARY', 'RAW(2000)'],
-      ['VARBINARY(MAX)', 'BLOB'], ['XML', 'XMLTYPE'],
-      ['ARRAY', 'CLOB'], ['Array <VARCHAR(30)>', 'CLOB'], ['ARRAY<STRING>', 'CLOB'], ['STRUCT<a:INT,b:STRING>', 'CLOB'],
-      ['', 'VARCHAR2(4000)'],
+      // antes los reemplazaba el mapeo de tipos (doc 101)
+      ['DATETIME', 'DATETIME'], ['datetime', 'DATETIME'], ['STRING', 'STRING'], ['VARCHAR(MAX)', 'VARCHAR(MAX)'],
+      ['NVARCHAR(MAX)', 'NVARCHAR(MAX)'], ['DECIMAL', 'DECIMAL'], ['BIGINT', 'BIGINT'], ['BOOLEAN', 'BOOLEAN'],
+      ['TIMESTAMPTZ', 'TIMESTAMPTZ'], ['XML', 'XML'], ['ARRAY', 'ARRAY'], ['DATETIME(3)', 'DATETIME(3)'],
+      // antes los «ajustaba» el export (tamaño máximo de strings, argumentos)
+      ['VARCHAR(8000)', 'VARCHAR(8000)'], ['CHAR(3000)', 'CHAR(3000)'], ['NCHAR(1500)', 'NCHAR(1500)'],
+      ['INT(11)', 'INT(11)'], ['NUMBER(40,2)', 'NUMBER(40,2)'], ['TIMESTAMP(10)', 'TIMESTAMP(10)'],
     ]) expect(t(raw)).toBe(out);
-    expect(t('DATETIME', { typeCase: 'lower' })).toBe('date');
+    expect(t('DATETIME', { typeCase: 'lower' })).toBe('datetime');
   });
 
-  it('revisión: el largo de la columna solo va a un destino que lo admite (y en su lugar)', () => {
-    for (const [raw, out] of [
-      ['DATETIME(3)', 'DATE'], ['TIME(3)', 'DATE'], ['BINARY(16)', 'BLOB'], ['TEXT(100)', 'CLOB'],
-      ['DOUBLE(10,2)', 'BINARY_DOUBLE'], ['TIMESTAMPTZ(6)', 'TIMESTAMP(6) WITH TIME ZONE'],
-      ['BIGINT(20)', 'NUMBER(20)'], ['TINYINT(1)', 'NUMBER(1)'], ['STRING(50)', 'VARCHAR2(50)'],
-    ]) expect(t(raw)).toBe(out);
+  it('una columna sin tipo sale STRING, como en Databricks', () => {
+    expect(t('')).toBe('STRING');
+    expect(t('  ', { typeCase: 'lower' })).toBe('string');
   });
 
-  it('revisión: un largo que Oracle no admite pasa a LOB según MAX_STRING_SIZE', () => {
-    for (const [raw, out] of [
-      ['VARCHAR(8000)', 'CLOB'], ['VARCHAR(4000)', 'VARCHAR(4000)'], ['VARCHAR2(4001)', 'CLOB'],
-      ['VARCHAR2(4000 CHAR)', 'VARCHAR2(4000 CHAR)'], ['NVARCHAR(3000)', 'NCLOB'], ['CHAR(3000)', 'CLOB'],
-      ['NCHAR(1500)', 'NCLOB'], ['VARBINARY(3000)', 'BLOB'], ['CHAR(2000)', 'CHAR(2000)'],
-    ]) expect(t(raw)).toBe(out);
-    // EXTENDED (32 767): los largos «grandes» son válidos; CHAR sigue en 2 000
-    for (const [raw, out] of [
-      ['VARCHAR(8000)', 'VARCHAR(8000)'], ['NVARCHAR(3000)', 'NVARCHAR2(3000)'], ['VARBINARY(3000)', 'RAW(3000)'],
-      ['NVARCHAR(20000)', 'NCLOB'], ['VARCHAR(40000)', 'CLOB'], ['CHAR(3000)', 'CLOB'],
-    ]) expect(t(raw, { maxStringSize: 'extended' })).toBe(out);
-  });
-
-  it('el mapeo es dato: se edita, se vacía (tipos tal cual) y gana la primera fila', () => {
-    expect(t('DATETIME', { typeMap: [{ from: 'datetime', to: 'TIMESTAMP' }] })).toBe('TIMESTAMP');
-    expect(t('DATETIME', { typeMap: [] })).toBe('DATETIME');
-    expect(t('STRING', { typeMap: [{ from: 'STRING', to: 'CLOB' }, { from: 'STRING', to: 'VARCHAR2(10)' }] })).toBe('CLOB');
-    // una fila a medias no aplica
-    expect(t('DATETIME', { typeMap: [{ from: 'DATETIME', to: '  ' }] })).toBe('DATETIME');
-  });
-
-  it('typeMapIssues (revisión): fila a medias y origen repetido, como los rechaza el guardado', () => {
-    const { rows, messages } = typeMapIssues([
-      { from: 'DATETIME', to: 'DATE' }, { from: '', to: '' }, { from: 'STRING', to: '' },
-      { from: ' date time ', to: 'TIMESTAMP' }, { from: '', to: 'CLOB' },
-    ]);
-    expect([...rows]).toEqual([3, 4, 5]);
-    expect(messages).toEqual([
-      'Row 3: the Oracle type is missing.',
-      'Row 4: date time is already mapped in row 1 — only the first row applies.',
-      'Row 5: the model type is missing.',
-    ]);
-    expect(typeMapIssues(DEFAULT_ORACLE_TYPE_MAP.map((m) => ({ ...m }))).messages).toEqual([]);
-    // revisión 2: el mismo control de texto que el backend (caracteres y 100 como máximo)
-    expect(typeMapIssues([{ from: 'DATETIME', to: 'DATE; X' }]).messages).toEqual(["Row 1: 'DATE; X' isn't a valid data type."]);
-    expect(typeMapIssues([{ from: 'DATETIME', to: 'X'.repeat(101) }]).messages).toEqual(['Row 1: the Oracle type is longer than 100 characters.']);
-    expect(typeMapIssues([{ from: 'A -- B', to: 'DATE' }]).messages).toEqual(["Row 1: 'A -- B' isn't a valid data type."]);
-    expect(typeMapIssues([{ from: 'DECIMAL', to: 'NUMBER(*,2)' }, { from: 'XML', to: 'SYS.XMLTYPE' }]).messages).toEqual([]);
-  });
-
-  it('revisión 2: un destino con largo en CHAR/BYTE mantiene esa semántica en el largo de la columna', () => {
-    const map = [{ from: 'VARCHAR', to: 'VARCHAR2(4000 CHAR)' }, { from: 'STRING', to: 'VARCHAR2(4000 char)' }];
-    expect(t('VARCHAR(30)', { typeMap: map })).toBe('VARCHAR2(30 CHAR)');
-    expect(t('VARCHAR', { typeMap: map })).toBe('VARCHAR2(4000 CHAR)');
-    expect(t('VARCHAR(30 BYTE)', { typeMap: map })).toBe('VARCHAR2(30 BYTE)');
-    expect(t('STRING(50)', { typeMap: map })).toBe('VARCHAR2(50 CHAR)');
-    expect(t('VARCHAR(5000)', { typeMap: map })).toBe('CLOB');
-  });
-
-  it('revisión 2: argumentos que Oracle no admite (display width, precisión fuera de rango)', () => {
-    for (const [raw, out] of [
-      ['INT(11)', 'INT'], ['INTEGER(10)', 'INTEGER'], ['SMALLINT(5)', 'SMALLINT'], ['DATE(8)', 'DATE'],
-      ['NUMBER(40,2)', 'NUMBER(38,2)'], ['DECIMAL(39,18)', 'DECIMAL(38,18)'], ['TIMESTAMP(10)', 'TIMESTAMP(9)'],
-      ['FLOAT(127)', 'FLOAT(126)'], ['TIMESTAMP(10) WITH TIME ZONE', 'TIMESTAMP(9) WITH TIME ZONE'],
-      ['NUMBER(38,2)', 'NUMBER(38,2)'], ['NUMBER(*,2)', 'NUMBER(*,2)'], ['TIMESTAMP(6)', 'TIMESTAMP(6)'],
-    ]) expect(t(raw)).toBe(out);
-  });
-
-  it('el largo del destino es el de las columnas SIN largo; una columna con largo conserva el suyo', () => {
-    expect(t('VARCHAR(30)')).toBe('VARCHAR(30)');
-    expect(t('DECIMAL(21,4)')).toBe('DECIMAL(21,4)');
-    expect(t('VARCHAR2(10)')).toBe('VARCHAR2(10)');
-    // destino sin paréntesis que admite largo: lo conserva
-    expect(t('CHAR(10)', { typeMap: [{ from: 'CHAR', to: 'VARCHAR2' }] })).toBe('VARCHAR2(10)');
-  });
-
-  it('un complejo sin mapeo sale verbatim (sin casing), un tipo raro sin mapeo tal cual', () => {
-    expect(t('Array<struct<a:varchar(3)>>', { typeMap: [] })).toBe('Array<struct<a:varchar(3)>>');
-    expect(t('TIMESTAMP(6) WITH TIME ZONE')).toBe('TIMESTAMP(6) WITH TIME ZONE');
-    expect(t('Array\n<\n\tvarchar(30)>', { typeMap: [] })).toBe('Array < varchar(30)>');
+  it('un complejo sale tal cual (sin casing: los nombres de sus campos son del modelo), en una línea', () => {
+    expect(t('Array<struct<a:varchar(3)>>')).toBe('Array<struct<a:varchar(3)>>');
+    expect(t('ARRAY<STRING>')).toBe('ARRAY<STRING>');
+    expect(t('Array\n<\n\tvarchar(30)>')).toBe('Array < varchar(30)>');
   });
 });
 
@@ -455,13 +369,13 @@ describe('vistas Oracle', () => {
     expect(all.sql).toBe('CREATE OR REPLACE VIEW BCP_RDV_DE_LKDE.DE_PARAMETRO_VU AS\nSELECT *\nFROM BCP_RDV_DE_LKDE.DE_PARAMETRO;\n');
   });
 
-  it('revisión: el CAST de una vista pasa por el mapeo de tipos', () => {
+  it('el CAST de una vista lleva el tipo tal cual, con el casing de los tipos (doc 106)', () => {
     const [v] = oracleViewStatements({ ...BASE, views: [view({ sources: [
       { column: 'CODPARAMETRO', tableId: 't1', castType: 'STRING' },
       { column: 'DESPARAMETRO', tableId: 't1', castType: 'bigint' },
     ] })] }, ORA);
-    expect(v.sql).toContain('CAST(CODPARAMETRO AS VARCHAR2(4000)) AS CODPARAMETRO');
-    expect(v.sql).toContain('CAST(DESPARAMETRO AS NUMBER(19)) AS DESPARAMETRO');
+    expect(v.sql).toContain('CAST(CODPARAMETRO AS STRING) AS CODPARAMETRO');
+    expect(v.sql).toContain('CAST(DESPARAMETRO AS BIGINT) AS DESPARAMETRO');
   });
 
   it('revisión 2: dos columnas que solo difieren en mayúsculas — la vista usa la EXACTA', () => {

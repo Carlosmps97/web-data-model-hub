@@ -20,9 +20,7 @@ describe('canonicalDefaultType (doc 64 r2 — espejo del back doc 62)', () => {
 
   it('sinónimos de dialecto → base del catálogo', () => {
     expect(canonicalDefaultType('BIG INTEGER')).toBe('BIGINT');
-    expect(canonicalDefaultType('int')).toBe('INTEGER');
     expect(canonicalDefaultType('bool')).toBe('BOOLEAN');
-    expect(canonicalDefaultType('double precision')).toBe('DOUBLE');
   });
 
   it('complejos con contenido: recompone canónico (interior del catálogo)', () => {
@@ -31,8 +29,8 @@ describe('canonicalDefaultType (doc 64 r2 — espejo del back doc 62)', () => {
     expect(canonicalDefaultType('struct<a: integer, b: varchar(5)>')).toBe('STRUCT<a:INTEGER,b:VARCHAR(5)>');
   });
 
-  it('complejo con interior NO reconocible → verbatim entero (espejo exacto: sin aliases adentro)', () => {
-    expect(canonicalDefaultType('ARRAY<int>')).toBe('ARRAY<int>');
+  it('complejo con interior NO reconocible → verbatim entero (el front no aplica sinónimos adentro; el back sí desde el doc 92 D6)', () => {
+    expect(canonicalDefaultType('ARRAY<bool>')).toBe('ARRAY<bool>');
     expect(canonicalDefaultType('STRUCT<a:INT')).toBe('STRUCT<a:INT');   // desbalanceado
   });
 

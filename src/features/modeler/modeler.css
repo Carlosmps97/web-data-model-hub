@@ -207,6 +207,8 @@
    (el ancho va inline en TypePicker: gana a `.wk-pp-typewrap .rd-input`). */
 .wk-ss-args { display: flex; gap: 6px; margin-top: 6px; }
 .wk-ss-args .rd-input { height: 30px; font-size: 12px; }
+/* Doc 106: un argumento que no es válido (`18,2`, `--`) no viaja al tipo: se marca */
+.wk-ss-args .rd-input[aria-invalid="true"] { border-color: var(--red); }
 
 /* Cluster derecho: version pill + Save + Publish */
 .wk-right { display: flex; align-items: center; gap: 8px; margin-left: auto; padding-left: 12px; flex-shrink: 0; }
@@ -889,14 +891,6 @@ select.exd-input { padding: 0 10px; }
 }
 .exd-iconbtn:hover { color: var(--red); background: var(--fill-4); }
 .exd-empty { font-size: 12px; color: var(--text-muted-2); padding: 4px 2px; }
-/* Doc 101 · mapeo de tipos de Oracle: lista plegable (27 filas por default) */
-.exd-disclosure { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: none; background: none; cursor: pointer; font-family: var(--ui); color: var(--text-muted); }
-.exd-disclosure:hover .exd-section { color: var(--primary); }
-.exd-disclosure-count { font-size: 11px; font-weight: 600; color: var(--primary); background: var(--blue-tint); border-radius: var(--r-full); padding: 1px 8px; }
-.exd-typemap { display: flex; flex-direction: column; gap: 7px; }
-.exd-typemap-head { align-items: end; }
-.exd-typemap-issue { font-size: 11.5px; font-weight: 600; color: var(--red); }
-.exd-typemap .exd-input[aria-invalid="true"] { border-color: var(--red); }
 .exd-section-note { font-weight: 500; color: var(--text-muted-2); }
 /* Doc 101 · con Oracle las Export rules no corren (son de Databricks) */
 .exd-dialect-note { font-size: 11.5px; color: var(--text-muted); background: var(--fill-3); border: 1px solid var(--border-soft); border-radius: 9px; padding: 8px 11px; }

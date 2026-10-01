@@ -19,7 +19,8 @@ export const TYPE_OPTIONS: string[] = [...COLUMN_DATA_TYPES]
   .map((t) => t.toUpperCase())
   .sort();
 
-// Tipos que reciben argumentos y sus etiquetas, en orden posicional.
+// Tipos que reciben argumentos y sus etiquetas, en orden posicional (todos
+// opcionales). Espejo de `ARG_SPECS` del back (cantidad máxima por tipo).
 const ARG_SPECS: Record<string, string[]> = {
   DECIMAL: ['precision', 'scale'],
   NUMERIC: ['precision', 'scale'],
@@ -29,6 +30,20 @@ const ARG_SPECS: Record<string, string[]> = {
   NVARCHAR: ['length'],
   VARBINARY: ['length'],
   VARCHAR2: ['length'],             // doc 62: dominios Oracle (VARCHAR2(10))
+  // doc 106: Oracle / SQL Server / Databricks
+  NVARCHAR2: ['length'],
+  NCHAR: ['length'],
+  RAW: ['length'],
+  UROWID: ['length'],
+  BINARY: ['length'],
+  FLOAT: ['precision'],
+  TIMESTAMP: ['precision'],
+  TIME: ['precision'],
+  DATETIME2: ['precision'],
+  DATETIMEOFFSET: ['precision'],
+  VECTOR: ['dimensions', 'format'],
+  GEOGRAPHY: ['srid'],
+  GEOMETRY: ['srid'],
 };
 
 /** Etiquetas de argumentos del tipo (case-insensitive) o null si no lleva. */
@@ -40,31 +55,56 @@ export function argSpecFor(base: string): string[] | null {
  *  MAYÚSCULAS, tolerante a espacios/minúsculas). Solo bases del catálogo; los
  *  complejos (`<`) y los tipos fuera de catálogo devuelven null — el caller
  *  los muestra tal cual como opción extra (patrón SchemaSelect: un valor
- *  legacy no rompe la edición). */
+ *  legacy no rompe la edición). La base puede tener varias palabras
+ *  (`TIMESTAMP WITH TIME ZONE`, doc 106). */
 export function parseParamType(value: string): { base: string; args: string[] } | null {
   const t = (value ?? '').trim();
   if (!t || t.includes('<')) return null;
-  // Base con dígitos (VARCHAR2) — espejo de `_SIMPLE_RE` del back (doc 62).
-  const m = /^([A-Za-z][A-Za-z0-9_]*)\s*(?:\(([^)]*)\))?$/.exec(t);
+  // Base con dígitos (VARCHAR2) y de varias palabras — espejo de `_SIMPLE_RE` del back.
+  const m = /^([A-Za-z][A-Za-z0-9_]*(?:\s+[A-Za-z][A-Za-z0-9_]*)*)\s*(?:\(([^)]*)\))?$/.exec(t);
   if (!m) return null;
-  const base = m[1].toUpperCase();
+  const base = m[1].split(/\s+/).join(' ').toUpperCase();
   if (!TYPE_OPTIONS.includes(base)) return null;
-  const args = (m[2] ?? '').trim() === ''
-    ? []
-    : (m[2] as string).split(',').map((a) => a.trim()).filter((a) => a !== '');
+  if (m[2] === undefined) return { base, args: [] };
+  // Doc 106: la MISMA gramática que el back (`_simple`): entre paréntesis, de 1
+  // a N argumentos válidos (N = los del tipo). `INT(11)`, `DECIMAL()` o
+  // `DECIMAL(10.5)` no son del catálogo: se muestran tal cual (valor legado).
+  const args = m[2].split(',').map((a) => a.trim());
+  if (args.length > (ARG_SPECS[base]?.length ?? 0) || !args.every(isTypeArg)) return null;
   return { base, args };
 }
 
-/** Arma el tipo desde base + argumentos: toma el PREFIJO no vacío (un scale
- *  sin precision no tiene sentido) y omite el paréntesis si no queda nada. */
+// Doc 106: un argumento es un número o una palabra (`MAX`, `*`, `-2`, `FLOAT32`)
+// con una unidad opcional que es una PALABRA (`30 CHAR`; `18 2` no) — espejo de
+// `_ARG_RE` del back. Nada que rompa el texto del tipo ni el DDL (`--` es un
+// comentario SQL). Solo ASCII. No valida por motor.
+const TYPE_ARG = /^-?[A-Za-z0-9_*]+(?: [A-Za-z][A-Za-z0-9_]*)?$/;
+const normArg = (a: string): string => (a ?? '').trim().split(/\s+/).join(' ');
+
+/** ¿`a` es un argumento válido de un tipo? (espacios de más no importan). */
+export function isTypeArg(a: string): boolean {
+  return TYPE_ARG.test(normArg(a));
+}
+
+/** Arma el tipo desde base + argumentos: toma el PREFIJO de argumentos válidos
+ *  (un scale sin precision no tiene sentido; uno vacío o inválido corta), a lo
+ *  sumo los que el tipo admite, y omite el paréntesis si no queda nada. Cada
+ *  argumento sale en MAYÚSCULA y con un solo espacio (`30 char` → `30 CHAR`,
+ *  `max` → `MAX`), como el back. */
 export function composeParamType(base: string, args: string[]): string {
+  const max = ARG_SPECS[base.toUpperCase()]?.length ?? 0;
   const take: string[] = [];
-  for (const a of args) {
-    const v = (a ?? '').trim();
-    if (v === '') break;
-    take.push(v);
+  for (const a of args.slice(0, max)) {
+    if (!isTypeArg(a)) break;
+    take.push(normArg(a).toUpperCase());
   }
   return take.length ? `${base}(${take.join(',')})` : base;
+}
+
+/** Borrador de las cajas tras tipear `raw` en la caja `i`: exactamente una caja
+ *  por argumento del tipo — nada de un tipo anterior queda oculto. */
+export function editTypeArg(spec: string[], draft: string[], i: number, raw: string): string[] {
+  return spec.map((_, j) => (j === i ? raw : (draft[j] ?? '')));
 }
 
 // ── Homologación del default de un PARENT DOMAIN (doc 64 r2) ──────────────
@@ -77,9 +117,10 @@ export function composeParamType(base: string, args: string[]): string {
 // ARRAY en la lista.
 
 /** Sinónimos de dialecto → base del catálogo (solo para homologar defaults;
- *  espejo de `_BASE_ALIASES` del back). */
+ *  espejo de `_BASE_ALIASES` del back). Doc 106: `INT` y `DOUBLE PRECISION`
+ *  son del catálogo (quedan tal cual). */
 const BASE_ALIASES: Record<string, string> = {
-  BIGINTEGER: 'BIGINT', INT: 'INTEGER', BOOL: 'BOOLEAN', DOUBLEPRECISION: 'DOUBLE',
+  BIGINTEGER: 'BIGINT', BOOL: 'BOOLEAN',
 };
 const normKey = (s: string) => s.replace(/\s+/g, '').toUpperCase();
 

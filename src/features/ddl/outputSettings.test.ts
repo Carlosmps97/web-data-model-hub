@@ -53,37 +53,36 @@ describe('mergeOutputSettings — dialecto y configuración Oracle (doc 101)', (
   it('toma el dialecto y la config Oracle guardados, clave a clave', () => {
     const s = mergeOutputSettings({
       dialect: 'oracle',
-      oracle: { includeComments: true, identifierCase: 'as-is', defaultSchema: 'bcp', typeMap: [{ from: 'DATETIME', to: 'TIMESTAMP' }] },
+      oracle: { includeComments: true, identifierCase: 'as-is', defaultSchema: 'bcp' },
     });
     expect(s.dialect).toBe('oracle');
-    expect(s.oracle).toEqual({ ...DEFAULT_ORACLE_OPTS, includeComments: true, identifierCase: 'as-is', defaultSchema: 'bcp',
-      typeMap: [{ from: 'DATETIME', to: 'TIMESTAMP' }] });
-    // lista vacía guardada = sin mapeo (tipos tal cual)
-    expect(mergeOutputSettings({ oracle: { typeMap: [] } }).oracle.typeMap).toEqual([]);
+    expect(s.oracle).toEqual({ ...DEFAULT_ORACLE_OPTS, includeComments: true, identifierCase: 'as-is', defaultSchema: 'bcp' });
   });
-  it('maxStringSize (revisión): STANDARD por default, EXTENDED si se guardó, inválido se ignora', () => {
-    expect(mergeOutputSettings({}).oracle.maxStringSize).toBe('standard');
-    expect(mergeOutputSettings({ oracle: { maxStringSize: 'extended' } }).oracle.maxStringSize).toBe('extended');
-    expect(mergeOutputSettings({ oracle: { maxStringSize: 'huge' } }).oracle.maxStringSize).toBe('standard');
+  it('doc 106: el mapeo de tipos y el tamaño máximo que guardó una versión anterior se ignoran', () => {
+    const s = mergeOutputSettings({
+      dialect: 'oracle',
+      oracle: { typeCase: 'lower', typeMap: [{ from: 'DATETIME', to: 'DATE' }], maxStringSize: 'extended' },
+    });
+    expect(s.oracle).toEqual({
+      includeViews: true, includeKeys: true, includeComments: false,
+      identifierCase: 'upper', quoteIdentifiers: 'when-needed', typeCase: 'lower', defaultSchema: '',
+    });
   });
   it('valores inválidos se ignoran sin romper', () => {
     const s = mergeOutputSettings({
       dialect: 'postgres',
-      oracle: { typeCase: 'raro', includeKeys: 'si', zzz: 1, typeMap: [{ from: 'A', to: 'B' }, 'x', { from: 1, to: 'C' }] },
+      oracle: { typeCase: 'raro', includeKeys: 'si', zzz: 1 },
     });
     expect(s.dialect).toBe('databricks');
     expect(s.oracle.typeCase).toBe('upper');
     expect(s.oracle.includeKeys).toBe(true);
     expect('zzz' in s.oracle).toBe(false);
-    expect(s.oracle.typeMap).toEqual([{ from: 'A', to: 'B' }]);
     expect(mergeOutputSettings({ oracle: 'x' }).oracle).toEqual(DEFAULT_ORACLE_OPTS);
-    expect(mergeOutputSettings({ oracle: { typeMap: 'x' } }).oracle.typeMap).toEqual(DEFAULT_ORACLE_OPTS.typeMap);
   });
   it('no comparte referencias con los defaults de Oracle', () => {
     const s = mergeOutputSettings({});
-    s.oracle.typeMap[0].to = 'X';
-    s.oracle.typeMap.push({ from: 'Y', to: 'Z' });
-    expect(DEFAULT_OUTPUT_SETTINGS.oracle.typeMap[0].to).toBe('DATE');
-    expect(DEFAULT_ORACLE_OPTS.typeMap).toHaveLength(DEFAULT_OUTPUT_SETTINGS.oracle.typeMap.length);
+    s.oracle.typeCase = 'lower';
+    expect(DEFAULT_OUTPUT_SETTINGS.oracle.typeCase).toBe('upper');
+    expect(DEFAULT_ORACLE_OPTS.typeCase).toBe('upper');
   });
 });

@@ -1,6 +1,6 @@
 # Testing y consideraciones/límites del frontend — Data Model Hub
 
-Actualizado al 2026-09-30 (doc 105 — 1 974 tests en 210 archivos, todos verdes con `npx vitest run`, también en orden aleatorio con `--sequence.shuffle`; `npx tsc --noEmit` sin errores; `npx eslint .` con 0 errores y 114 warnings, todos de `no-restricted-imports`).
+Actualizado al 2026-09-30 (doc 106 — 1 998 tests en 213 archivos, todos verdes con `npx vitest run`, también en orden aleatorio con `--sequence.shuffle`; `npx tsc --noEmit` sin errores; `npx eslint .` con 0 errores y 114 warnings, todos de `no-restricted-imports`).
 
 Este documento describe cómo se verifica el frontend (SPA en Vite + React 19) y qué consideraciones de rendimiento y límites conocidos aplican al canvas del modelador y a la grilla del reporting. Está basado en el código real del repositorio `web-data-model-hub`.
 
@@ -46,7 +46,7 @@ test: {
 
 ### 1.3 Qué se testea hoy
 
-La suite al 2026-09-30: **1 974 tests en 210 archivos** (209 `*.test.ts`/`.tsx` bajo `src/` más `server.test.mjs` en la raíz del repo), contados y **verdes** con `npx vitest run` (210 archivos · 1 974 passed, ~9 s) y también con el orden aleatorio de `npx vitest run --sequence.shuffle` (ver al final del inventario). Inventario por área:
+La suite al 2026-09-30: **1 998 tests en 213 archivos** (212 `*.test.ts`/`.tsx` bajo `src/` más `server.test.mjs` en la raíz del repo), contados y **verdes** con `npx vitest run` (213 archivos · 1 998 passed, ~9 s) y también con el orden aleatorio de `npx vitest run --sequence.shuffle` (ver al final del inventario). Inventario por área:
 
 | Área | Archivos de test |
 |---|---|
@@ -156,7 +156,7 @@ flowchart TD
     A --> D[npm run build]
     B --> B1[eslint . - recommended + ts + react-hooks + guard de barrels]
     C --> C1[vitest run - entorno node]
-    C1 --> C2[1974 tests en 210 archivos - 209 en src + server.test.mjs]
+    C1 --> C2[1998 tests en 213 archivos - 212 en src + server.test.mjs]
     D --> D1[tsc --noEmit - tipos estrictos]
     D1 --> D2[vite build - bundle a dist/]
     D1 -->|error de tipos| X[Build abortado]
@@ -177,7 +177,7 @@ flowchart TD
 | Componentes React (canvas, grillas, modales) | Sin tests de render con DOM (entorno `node`, no `jsdom`). Doc 105: varios componentes se prueban sin DOM — markup estático (`renderToStaticMarkup`) o hooks de mentira (`fakeReact.testutil.ts`, §1.2): Reporting (también el Report Designer), Data Standards, Review, Version tools, Login, `SearchSelect`, `DeleteProjectDialog`, los diálogos de `components/ui`, la Toolbar del canvas, «New table», «New column», «Search the model», `UdpAssign`, `ViewNode`, `TagEditor`, `UploadModal`, el `TopNav` y los paneles de propiedades tras un reload fallido; y el fuente de los flujos de escritura se revisa estáticamente (`pinnedFlows`, `undoPins`, `workspaceWriteErrors`, §1.3). |
 | Lógica de layout ELK (`elkLayout.ts`) | Sin tests. |
 
-En la práctica, la red de seguridad son las compuertas estáticas (`tsc --noEmit` estricto + ESLint) más los 1 974 tests de Vitest (lógica pura, stores, servicios con red mockeada y el servidor de producción). Lo que sigue sin cobertura de frontend es el render de componentes con DOM (canvas, grillas; salvo los componentes que se prueban sin DOM desde el doc 105, §1.2): esa capa se valida del lado del backend (su propia suite pytest) y por pruebas de estrés a nivel de datos.
+En la práctica, la red de seguridad son las compuertas estáticas (`tsc --noEmit` estricto + ESLint) más los 1 998 tests de Vitest (lógica pura, stores, servicios con red mockeada y el servidor de producción). Lo que sigue sin cobertura de frontend es el render de componentes con DOM (canvas, grillas; salvo los componentes que se prueban sin DOM desde el doc 105, §1.2): esa capa se valida del lado del backend (su propia suite pytest) y por pruebas de estrés a nivel de datos.
 
 ---
 

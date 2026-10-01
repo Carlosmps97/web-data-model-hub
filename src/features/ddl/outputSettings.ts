@@ -8,10 +8,13 @@
  * Doc 101: `dialect` = con qué dialecto abre el modal (Databricks por default)
  * y `oracle` = la configuración PROPIA de Oracle. Las claves planas de siempre
  * son las de Databricks; `fileNames` es de los dos dialectos.
+ *
+ * Doc 106: Oracle ya no tiene mapeo de tipos (`typeMap`) ni tamaño máximo de
+ * strings (`maxStringSize`); si una versión anterior los guardó, se ignoran.
  */
 import { DEFAULT_DATABRICKS_OPTS, type DatabricksDdlOptions, type DdlDialect } from './generators';
 import { DEFAULT_FILE_NAMES, type DdlFileNames } from './ddlExportBundle';
-import { DEFAULT_ORACLE_OPTS, type OracleDdlOptions, type OracleTypeMapping } from './oracle';
+import { DEFAULT_ORACLE_OPTS, type OracleDdlOptions } from './oracle';
 
 export type DdlOutputSettings = Omit<DatabricksDdlOptions, 'partitionsLast'> & {
   fileNames: DdlFileNames;
@@ -25,7 +28,7 @@ export const DEFAULT_OUTPUT_SETTINGS: DdlOutputSettings = {
   ...DEFAULT_DATABRICKS_OPTS,
   fileNames: { ...DEFAULT_FILE_NAMES },
   dialect: 'databricks',
-  oracle: { ...DEFAULT_ORACLE_OPTS, typeMap: DEFAULT_ORACLE_OPTS.typeMap.map((m) => ({ ...m })) },
+  oracle: { ...DEFAULT_ORACLE_OPTS },
 };
 
 const ENUMS: Record<string, readonly string[]> = {
@@ -46,19 +49,9 @@ const ORACLE_ENUMS: Record<string, readonly string[]> = {
   identifierCase: ['as-is', 'lower', 'upper'],
   quoteIdentifiers: ['when-needed', 'always'],
   typeCase: ['lower', 'upper'],
-  maxStringSize: ['standard', 'extended'],
 };
 const ORACLE_BOOLS = ['includeViews', 'includeKeys', 'includeComments'];
 const ORACLE_TEXTS = ['defaultSchema'];
-
-/** Filas del mapeo de tipos guardadas: solo {from, to} de texto. */
-function typeMapOf(v: unknown): OracleTypeMapping[] | null {
-  if (!Array.isArray(v)) return null;
-  return v
-    .filter((m): m is { from: unknown; to: unknown } => !!m && typeof m === 'object')
-    .filter((m) => typeof m.from === 'string' && typeof m.to === 'string')
-    .map((m) => ({ from: m.from as string, to: m.to as string }));
-}
 
 function mergeOracle(target: Record<string, unknown>, raw: unknown): void {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return;
@@ -69,9 +62,6 @@ function mergeOracle(target: Record<string, unknown>, raw: unknown): void {
       if (typeof v === 'boolean') target[k] = v;
     } else if (ORACLE_TEXTS.includes(k)) {
       if (typeof v === 'string') target[k] = v;
-    } else if (k === 'typeMap') {
-      const map = typeMapOf(v);
-      if (map) target[k] = map;
     }
   }
 }

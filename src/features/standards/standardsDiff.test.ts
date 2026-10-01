@@ -204,6 +204,10 @@ describe('Output settings', () => {
     expect(outputChanged({ ...v, identifierCase: 'upper' }, stored)).toBe(true);
     expect(outputChanged({ ...v, dialect: 'oracle' }, stored)).toBe(true);
     expect(outputChanged({ ...v, fileNames: { ...v.fileNames, nameCase: 'lower' } }, stored)).toBe(true);
-    expect(outputChanged({ ...v, oracle: { ...v.oracle, typeMap: [] } }, stored)).toBe(true);
+    expect(outputChanged({ ...v, oracle: { ...v.oracle, includeComments: true } }, stored)).toBe(true);
+  });
+  it('doc 106: un proyecto con el mapeo de tipos o el tamaño máximo guardados no aparece «con cambios» al abrirlo', () => {
+    const viejo = { ...stored, oracle: { typeMap: [{ from: 'DATETIME', to: 'DATE' }], maxStringSize: 'extended' } };
+    expect(outputChanged(mergeOutputSettings(viejo), viejo)).toBe(false);
   });
 });

@@ -17,11 +17,9 @@
 //    siempre, si así se configura).
 //  - Sin particiones, LOCATION, TBLPROPERTIES, tags, USING ni Unity Catalog:
 //    no existen en Oracle. Las Export rules tampoco corren (son de Databricks).
-//  - Tipos: TAL CUAL el modelo, con el casing elegido; solo se reemplazan los
-//    que Oracle no tiene, según el mapeo de tipos de la configuración (dato
-//    del proyecto, editable en Data Standards), y un largo que la base no
-//    admite pasa a LOB según su MAX_STRING_SIZE. Defaults espejo de
-//    `app/features/ddl_rules/output.py` (backend).
+//  - Tipos: TAL CUAL el modelo, solo con el casing elegido (doc 106: sin mapeo
+//    de tipos ni ajustes — un tipo que Oracle no acepta es del modelo, no del
+//    export). Defaults espejo de `app/features/ddl_rules/output.py` (backend).
 // ─────────────────────────────────────────────────────────────────────────────
 import { foldComplexType } from '@/lib/typeText';
 import {
@@ -29,13 +27,6 @@ import {
   type DatabricksDdlInput, type DdlColumn, type DdlRelationship, type DdlTable, type DdlView,
   type IdentifierCase, type QuoteMode, type TypeCase,
 } from './generators';
-
-/** Una fila del mapeo de tipos: `from` (tipo del modelo) → `to` (tipo Oracle). */
-export interface OracleTypeMapping { from: string; to: string }
-
-/** MAX_STRING_SIZE de la base destino: `standard` = VARCHAR2 hasta 4 000 bytes
- *  (NVARCHAR2 2 000 caracteres, RAW 2 000); `extended` = 32 767. */
-export type MaxStringSize = 'standard' | 'extended';
 
 /** Configuración PROPIA de Oracle (doc 101 §4.1) — independiente de la de Databricks. */
 export interface OracleDdlOptions {
@@ -48,52 +39,12 @@ export interface OracleDdlOptions {
   identifierCase: IdentifierCase;
   quoteIdentifiers: QuoteMode;
   typeCase: TypeCase;
-  /** Largo máximo de los tipos de texto/binarios; lo que lo pase sale CLOB / NCLOB / BLOB. */
-  maxStringSize: MaxStringSize;
   /** Esquema de las tablas sin esquema; vacío = nombre sin calificar (el esquema del usuario). */
   defaultSchema: string;
-  /** Tipos que Oracle no tiene → su equivalente (ver `oracleType`). */
-  typeMap: OracleTypeMapping[];
 }
 
-/** Tipos del catálogo de la plataforma que NO existen en Oracle (o que Oracle
- *  no acepta sin largo) — doc 101 §4.3. Espejo de `ORACLE_TYPE_MAP_DEFAULT` del
- *  backend. */
-export const DEFAULT_ORACLE_TYPE_MAP: readonly OracleTypeMapping[] = [
-  { from: 'DATETIME', to: 'DATE' },
-  { from: 'STRING', to: 'VARCHAR2(4000)' },
-  { from: 'VARCHAR', to: 'VARCHAR(4000)' },
-  { from: 'VARCHAR2', to: 'VARCHAR2(4000)' },
-  { from: 'VARCHAR(MAX)', to: 'CLOB' },
-  { from: 'NVARCHAR', to: 'NVARCHAR2(2000)' },
-  { from: 'NVARCHAR(MAX)', to: 'NCLOB' },
-  { from: 'TEXT', to: 'CLOB' },
-  { from: 'DECIMAL', to: 'DECIMAL(38,18)' },
-  { from: 'NUMERIC', to: 'NUMERIC(38,18)' },
-  { from: 'BIGINT', to: 'NUMBER(19)' },
-  { from: 'TINYINT', to: 'NUMBER(3)' },
-  { from: 'DOUBLE', to: 'BINARY_DOUBLE' },
-  { from: 'MONEY', to: 'NUMBER(19,4)' },
-  { from: 'BOOLEAN', to: 'NUMBER(1)' },
-  { from: 'TIMESTAMPTZ', to: 'TIMESTAMP WITH TIME ZONE' },
-  { from: 'TIME', to: 'DATE' },
-  { from: 'BINARY', to: 'BLOB' },
-  { from: 'VARBINARY', to: 'RAW(2000)' },
-  { from: 'VARBINARY(MAX)', to: 'BLOB' },
-  { from: 'BYTES', to: 'BLOB' },
-  { from: 'JSON', to: 'CLOB' },
-  { from: 'JSONB', to: 'CLOB' },
-  { from: 'VARIANT', to: 'CLOB' },
-  { from: 'XML', to: 'XMLTYPE' },
-  { from: 'UUID', to: 'VARCHAR2(36)' },
-  { from: 'ARRAY', to: 'CLOB' },
-  { from: 'MAP', to: 'CLOB' },
-  { from: 'STRUCT', to: 'CLOB' },
-];
-
 /** Defaults de Oracle = lo pedido por el owner para el proyecto RDV (comentarios
- *  OFF, PK/FK ON, tipos en MAYÚSCULA) + identificadores en MAYÚSCULA y la base
- *  con MAX_STRING_SIZE estándar (lo que trae Oracle de fábrica). */
+ *  OFF, PK/FK ON, tipos en MAYÚSCULA) + identificadores en MAYÚSCULA. */
 export const DEFAULT_ORACLE_OPTS: OracleDdlOptions = {
   includeViews: true,
   includeKeys: true,
@@ -101,9 +52,7 @@ export const DEFAULT_ORACLE_OPTS: OracleDdlOptions = {
   identifierCase: 'upper',
   quoteIdentifiers: 'when-needed',
   typeCase: 'upper',
-  maxStringSize: 'standard',
   defaultSchema: '',
-  typeMap: DEFAULT_ORACLE_TYPE_MAP.map((m) => ({ ...m })),
 };
 
 /** Palabras reservadas de Oracle (SQL Language Reference, «Oracle SQL Reserved
@@ -148,166 +97,14 @@ const bytesOf = (s: string): number => utf8.encode(s).length;
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
-const normType = (s: string): string => s.replace(/\s+/g, '').toUpperCase();
-// `BASE` o `BASE(args)`; la base puede tener varias palabras (DOUBLE PRECISION).
-const SIMPLE_TYPE = /^([A-Za-z][A-Za-z0-9_ ]*?)\s*(\([^()]*\))?$/;
-// Complejo: `ARRAY<…>`, `MAP<…>`, `STRUCT<…>` (el `<…>` no es un largo).
-const COMPLEX_TYPE = /^([A-Za-z][A-Za-z0-9_]*)\s*<[\s\S]*>$/;
-// Tipos Oracle que llevan largo / precisión entre paréntesis.
-const TAKES_LENGTH: ReadonlySet<string> = new Set([
-  'VARCHAR2', 'VARCHAR', 'NVARCHAR2', 'CHAR', 'NCHAR', 'CHARACTER', 'RAW', 'NUMBER', 'FLOAT',
-  'DECIMAL', 'DEC', 'NUMERIC', 'TIMESTAMP', 'UROWID',
-]);
-// La precisión de un TIMESTAMP … TIME ZONE va después de TIMESTAMP.
-const WITH_TIME_ZONE = /^TIMESTAMP\s+(WITH\s+(?:LOCAL\s+)?TIME\s+ZONE)$/i;
-
-/** El destino de una fila aplicado a una columna: sin largo, el destino tal
- *  cual; con largo, el de la columna si el destino lo admite (y en su lugar),
- *  si no se descarta (DATETIME(3) → DATE). Si el largo del destino se mide en
- *  CHAR o BYTE y el de la columna es solo un número, lo hereda:
- *  `VARCHAR(30)` con destino `VARCHAR2(4000 CHAR)` → `VARCHAR2(30 CHAR)`. */
-function withColumnLength(to: string, colParams: string | null): string {
-  if (!colParams) return to;
-  const tz = WITH_TIME_ZONE.exec(to);
-  if (tz) return `TIMESTAMP${colParams} ${tz[1]}`;
-  const m = SIMPLE_TYPE.exec(to);
-  if (!m) return to;
-  const base = m[1].trim();
-  if (!m[2] && !TAKES_LENGTH.has(normType(base))) return base;
-  const unit = m[2] ? /\s(CHAR|BYTE)\s*\)$/i.exec(m[2])?.[1] : undefined;
-  const params = unit && /^\(\s*\d+\s*\)$/.test(colParams)
-    ? colParams.replace(/\s*\)$/, ` ${unit.toUpperCase()})`)
-    : colParams;
-  return `${base}${params}`;
-}
-
-/** Tipo Oracle según el mapeo, o null si ninguna fila aplica. Reglas (doc 101):
- *  1) una fila cuyo origen es el tipo COMPLETO de la columna (sin distinguir
- *     espacios ni mayúsculas) — un origen con paréntesis (`VARCHAR(MAX)`) solo
- *     aplica así —, y su destino sale tal cual;
- *  2) si no, la fila del tipo BASE (origen sin paréntesis): el largo del
- *     destino es el de las columnas SIN largo; una columna CON largo conserva
- *     el suyo si el destino lo admite (`NVARCHAR(50)` → `NVARCHAR2(50)`,
- *     `VARCHAR(30)` → `VARCHAR(30)`) y lo pierde si no (`DATETIME(3)` → `DATE`).
- *     Un complejo pierde su `<…>`. Gana la primera fila. */
-function mapType(src: string, map: readonly OracleTypeMapping[]): string | null {
-  const rows = map
-    .map((m) => ({ from: (m.from ?? '').trim(), to: (m.to ?? '').trim() }))
-    .filter((m) => m.from && m.to);
-  const key = normType(src);
-  const exact = rows.find((m) => normType(m.from) === key);
-  if (exact) return exact.to;
-  const simple = SIMPLE_TYPE.exec(src);
-  const complex = simple ? null : COMPLEX_TYPE.exec(src);
-  const baseText = simple?.[1] ?? complex?.[1];
-  if (!baseText) return null;
-  const base = normType(baseText);
-  const row = rows.find((m) => !/[(<]/.test(m.from) && normType(m.from) === base);
-  return row ? withColumnLength(row.to, simple?.[2] ?? null) : null;
-}
-
-// Texto de un tipo del mapeo — espejo de `_TYPE_TEXT` / `_TYPE_MAX` del backend
-// (sale TAL CUAL en el DDL: nada de `;`, comillas, saltos de línea ni `--`).
-const TYPE_TEXT = /^[A-Za-z][A-Za-z0-9_ (),<>:*.-]*$/;
-const TYPE_TEXT_MAX = 100;
-
-/** Problemas del mapeo de tipos que el guardado rechazaría (espejo de la
- *  validación del backend): una fila con un solo lado, un texto que no es un
- *  tipo (o de más de 100 caracteres) y un origen repetido (sin distinguir
- *  mayúsculas ni espacios — gana siempre la primera fila). Filas 1-based, como
- *  las ve el usuario. Pura. */
-export function typeMapIssues(map: OracleTypeMapping[]): { rows: Set<number>; messages: string[] } {
-  const rows = new Set<number>();
-  const messages: string[] = [];
-  const first = new Map<string, number>();
-  map.forEach((m, i) => {
-    const row = i + 1;
-    const from = (m.from ?? '').replace(/\s+/g, ' ').trim();
-    const to = (m.to ?? '').replace(/\s+/g, ' ').trim();
-    if (!from && !to) return;
-    if (!from || !to) {
-      rows.add(row);
-      messages.push(`Row ${row}: ${from ? 'the Oracle type' : 'the model type'} is missing.`);
-      return;
-    }
-    const bad = [[from, 'model type'], [to, 'Oracle type']].find(([text]) => text.length > TYPE_TEXT_MAX
-      || text.includes('--') || !TYPE_TEXT.test(text));
-    if (bad) {
-      rows.add(row);
-      messages.push(bad[0].length > TYPE_TEXT_MAX
-        ? `Row ${row}: the ${bad[1]} is longer than ${TYPE_TEXT_MAX} characters.`
-        : `Row ${row}: '${bad[0].slice(0, 40)}' isn't a valid data type.`);
-      return;
-    }
-    const key = normType(from);
-    const prev = first.get(key);
-    if (prev !== undefined) {
-      rows.add(row);
-      messages.push(`Row ${row}: ${from} is already mapped in row ${prev} — only the first row applies.`);
-    } else {
-      first.set(key, row);
-    }
-  });
-  return { rows, messages };
-}
-
-// Largos máximos (doc 101 · revisión): lo que los pasa no compila en Oracle.
-const LENGTH_TYPE = /^([A-Za-z][A-Za-z0-9_]*)\s*\(\s*(\d+)(?:\s+(?:CHAR|BYTE))?\s*\)$/i;
-const STRING_LIMITS: Record<MaxStringSize, Record<string, number>> = {
-  standard: { VARCHAR2: 4000, VARCHAR: 4000, NVARCHAR2: 2000, RAW: 2000 },
-  extended: { VARCHAR2: 32767, VARCHAR: 32767, NVARCHAR2: 16383, RAW: 32767 },
-};
-const FIXED_LIMITS: Record<string, number> = { CHAR: 2000, NCHAR: 1000 };
-const LOB_OF: Record<string, string> = {
-  VARCHAR2: 'CLOB', VARCHAR: 'CLOB', CHAR: 'CLOB', NVARCHAR2: 'NCLOB', NCHAR: 'NCLOB', RAW: 'BLOB',
-};
-
-// Tipos Oracle sin argumentos (`INT(11)` — display width de otros motores — no compila)
-// y precisión máxima de los que sí llevan.
-const NO_ARGS: ReadonlySet<string> = new Set([
-  'INT', 'INTEGER', 'SMALLINT', 'DATE', 'CLOB', 'NCLOB', 'BLOB', 'BFILE', 'LONG', 'BINARY_FLOAT',
-  'BINARY_DOUBLE', 'REAL', 'ROWID', 'XMLTYPE',
-]);
-const MAX_PRECISION: Record<string, number> = { NUMBER: 38, DECIMAL: 38, NUMERIC: 38, DEC: 38, FLOAT: 126, TIMESTAMP: 9 };
-const ARGS_TYPE = /^([A-Za-z][A-Za-z0-9_]*)\s*\(([^()]*)\)(.*)$/;
-
-/** Argumentos que Oracle no admite: se quitan de un tipo que no lleva
- *  (`INT(11)` → `INT`) y una precisión fuera de rango baja a la máxima
- *  (`NUMBER(40,2)` → `NUMBER(38,2)`, `TIMESTAMP(10)` → `TIMESTAMP(9)`). */
-function fitArgs(t: string): string {
-  const m = ARGS_TYPE.exec(t.trim());
-  if (!m) return t;
-  const base = m[1].toUpperCase();
-  if (NO_ARGS.has(base) && !m[3].trim()) return m[1];
-  const cap = MAX_PRECISION[base];
-  const args = m[2].split(',').map((a) => a.trim());
-  if (cap === undefined || !(Number(args[0]) > cap)) return t;
-  args[0] = String(cap);
-  return `${m[1]}(${args.join(',')})${m[3]}`;
-}
-
-/** Un tipo de texto/binario con un largo que la base no admite pasa a su LOB. */
-function fitLength(t: string, size: MaxStringSize): string {
-  const m = LENGTH_TYPE.exec(t.trim());
-  if (!m) return t;
-  const base = m[1].toUpperCase();
-  const max = FIXED_LIMITS[base] ?? STRING_LIMITS[size][base];
-  return max !== undefined && Number(m[2]) > max ? LOB_OF[base] : t;
-}
-
-/** Tipo de una columna tal como sale en el CREATE de Oracle: el del modelo con
- *  el casing `typeCase`, salvo que el mapeo lo reemplace o que su largo no
- *  quepa (→ LOB). Sin tipo = STRING (como en Databricks), que el mapeo por
- *  default lleva a VARCHAR2(4000). Un complejo sin mapeo sale verbatim (los
- *  nombres de sus campos son del modelo). */
-export function oracleType(
-  raw: string, o: Pick<OracleDdlOptions, 'typeCase' | 'typeMap'> & Partial<Pick<OracleDdlOptions, 'maxStringSize'>>,
-): string {
+/** Tipo de una columna tal como sale en el CREATE de Oracle (doc 106): el del
+ *  modelo TAL CUAL, con el casing `typeCase`. Sin tipo = STRING (como en
+ *  Databricks). Un complejo sale verbatim en una línea (los nombres de sus
+ *  campos son del modelo). */
+export function oracleType(raw: string, o: Pick<OracleDdlOptions, 'typeCase'>): string {
   const src = foldComplexType((raw ?? '').trim()) || 'STRING';
-  const mapped = mapType(src, o.typeMap ?? []);
-  if (mapped === null && src.includes('<')) return src;
-  const out = fitLength(fitArgs(mapped ?? src), o.maxStringSize ?? 'standard');
-  return o.typeCase === 'upper' ? out.toUpperCase() : out.toLowerCase();
+  if (src.includes('<')) return src;
+  return o.typeCase === 'upper' ? src.toUpperCase() : src.toLowerCase();
 }
 
 // ── Comentarios ─────────────────────────────────────────────────────────────
@@ -547,7 +344,8 @@ function foreignKeys(ctx: Ctx): string[] {
  *  alias`; con 2+ fuentes, alias posicionales t1, t2… y `FROM a t1, b t2`. Las
  *  columnas llevan el nombre REAL de la columna de su tabla y el MISMO casing y
  *  comillas que las columnas de la tabla (en Oracle, un nombre entre comillas
- *  distingue mayúsculas); el tipo del CAST pasa por el mapeo. */
+ *  distingue mayúsculas); el tipo del CAST sale tal cual (doc 106), con el
+ *  casing de los tipos. */
 function viewDDL(v: DdlView, ctx: Ctx): string {
   const { o, ident } = ctx;
   const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);

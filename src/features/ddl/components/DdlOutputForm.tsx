@@ -3,22 +3,22 @@
  * archivos (doc 93 D1). Un solo formulario para dos lugares: la pestaña Output
  * del modal Export DDL (ajuste de un export puntual) y el editor «Output
  * settings» de Data Standards (el estándar del proyecto, versionado).
- * Controlado y sin estado propio (salvo abrir/cerrar la lista del mapeo).
+ * Controlado y sin estado propio.
  *
  * Doc 101: `dialect` elige QUÉ configuración se edita. Databricks = el
  * formulario de siempre (claves planas). Oracle = su configuración propia
  * (`value.oracle`): solo lo que existe en Oracle — sin particiones, índices
  * ZORDER, CREATE OR REPLACE, tags, USING, Unity Catalog, LOCATION ni
- * TBLPROPERTIES — más el mapeo de tipos. Los nombres de archivo son de los dos.
+ * TBLPROPERTIES. Los nombres de archivo son de los dos. Doc 106: los tipos
+ * salen tal cual (sin mapeo de tipos ni tamaño máximo de strings).
  */
-import { useId, useState } from 'react';
-import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2 } from 'lucide-react';
 
 import SchemaSelect from '@/features/modeler/components/SchemaSelect';
 import type { DdlDialect, DdlTableFormat, IdentifierCase } from '../generators';
 import type { DdlFileNames } from '../ddlExportBundle';
 import type { DdlOutputSettings } from '../outputSettings';
-import { typeMapIssues, type OracleDdlOptions } from '../oracle';
+import type { OracleDdlOptions } from '../oracle';
 
 const FORMATS: DdlTableFormat[] = ['delta', 'parquet', 'avro', 'orc', 'csv', 'json'];
 
@@ -115,13 +115,6 @@ function OracleFields({ value, onChange, disabled, viewsHint }: {
   const o = value.oracle;
   const set = <K extends keyof OracleDdlOptions>(k: K, v: OracleDdlOptions[K]) =>
     onChange({ ...value, oracle: { ...value.oracle, [k]: v } });
-  const map = o.typeMap;
-  const setRow = (i: number, side: 'from' | 'to', text: string) =>
-    set('typeMap', map.map((m, j) => (j === i ? { ...m, [side]: text } : m)));
-  // La lista es larga (29 tipos por default): cerrada salvo que se pida.
-  const [mapOpen, setMapOpen] = useState(false);
-  const mapListId = useId();
-  const issues = typeMapIssues(map);
 
   return (
     <>
@@ -143,54 +136,6 @@ function OracleFields({ value, onChange, disabled, viewsHint }: {
       <span className="exd-section">Data types</span>
       <Seg label="Data types" disabled={disabled} value={o.typeCase} onPick={(v) => set('typeCase', v)}
         options={[['lower', 'lower', 'varchar(128), number(19,4), date'], ['upper', 'UPPER', 'VARCHAR(128), NUMBER(19,4), DATE']]} />
-
-      <span className="exd-section">Max string size</span>
-      <Seg label="Max string size" disabled={disabled} value={o.maxStringSize} onPick={(v) => set('maxStringSize', v)}
-        options={[['standard', 'STANDARD · 4,000', 'MAX_STRING_SIZE = STANDARD: VARCHAR2 up to 4,000 bytes (NVARCHAR2 2,000, RAW 2,000)'],
-                  ['extended', 'EXTENDED · 32,767', 'MAX_STRING_SIZE = EXTENDED: up to 32,767 bytes']]} />
-      <span className="exd-swrow-hint">Longer strings are exported as CLOB / NCLOB / BLOB.</span>
-
-      <div className="exd-tblprops-head">
-        <button type="button" className="exd-disclosure" aria-expanded={mapOpen} aria-controls={mapListId} onClick={() => setMapOpen(!mapOpen)}>
-          {mapOpen ? <ChevronDown size={14} strokeWidth={2} aria-hidden /> : <ChevronRight size={14} strokeWidth={2} aria-hidden />}
-          <span className="exd-section">Type mapping</span>
-          <span className="exd-disclosure-count">{map.length}</span>
-        </button>
-        {!disabled && mapOpen && (
-          <button type="button" className="exd-add" onClick={() => set('typeMap', [...map, { from: '', to: '' }])}>
-            <Plus size={13} strokeWidth={2} />Add
-          </button>
-        )}
-      </div>
-      <span className="exd-swrow-hint">
-        Model types Oracle doesn&apos;t have (e.g. DATETIME → DATE). Every other type is exported as modeled.
-      </span>
-      {issues.messages.slice(0, 3).map((m) => <span key={m} className="exd-typemap-issue" role="alert">{m}</span>)}
-      {mapOpen && (map.length === 0
-        ? <span className="exd-empty" id={mapListId}>No mapping — every type is exported as modeled.</span>
-        : (
-          <div className="exd-typemap" id={mapListId}>
-            <div className="exd-prop exd-typemap-head">
-              <span className="exd-sublbl">Model type</span>
-              <span className="exd-sublbl">Oracle type</span>
-              <span />
-            </div>
-            {map.map((m, i) => (
-              <div key={i} className="exd-prop">
-                <input className="rd-input exd-input exd-mono" value={m.from} disabled={disabled} placeholder="DATETIME"
-                  aria-label={`Model type ${i + 1}`} aria-invalid={issues.rows.has(i + 1) || undefined}
-                  onChange={(e) => setRow(i, 'from', e.target.value)} />
-                <input className="rd-input exd-input exd-mono" value={m.to} disabled={disabled} placeholder="DATE"
-                  aria-label={`Oracle type ${i + 1}`} aria-invalid={issues.rows.has(i + 1) || undefined}
-                  onChange={(e) => setRow(i, 'to', e.target.value)} />
-                {!disabled && (
-                  <button type="button" className="exd-iconbtn" aria-label={`Remove mapping ${i + 1}`}
-                    onClick={() => set('typeMap', map.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
-                )}
-              </div>
-            ))}
-          </div>
-        ))}
 
       <div className="exd-field">
         <span className="exd-sublbl">Default schema · tables without a schema (empty = unqualified)</span>

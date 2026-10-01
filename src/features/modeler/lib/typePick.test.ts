@@ -5,7 +5,7 @@
 // puntuales en vez de texto libre (pedido de los modeladores: el texto libre
 // era fuente de errores).
 import { describe, it, expect } from 'vitest';
-import { TYPE_OPTIONS, argSpecFor, composeParamType, parseParamType, containsCI } from './typePick';
+import { TYPE_OPTIONS, argSpecFor, canonicalDefaultType, composeParamType, isTypeArg, parseParamType, containsCI } from './typePick';
 
 describe('containsCI (búsqueda contiene, case-insensitive)', () => {
   it('matchea por substring sin importar mayúsculas ni posición', () => {
@@ -77,7 +77,7 @@ describe('parseParamType', () => {
 
   it('null para complejos, desconocidos y vacío (se muestran tal cual)', () => {
     expect(parseParamType('STRUCT<a:INT>')).toBeNull();
-    expect(parseParamType('GEOGRAPHY')).toBeNull();
+    expect(parseParamType('SDO_GEOMETRY')).toBeNull();
     expect(parseParamType('')).toBeNull();
   });
 });
@@ -122,5 +122,68 @@ describe('doc 62 — VARIANT + tipos Oracle de la data real', () => {
 
   it('VARIANT no lleva argumentos', () => {
     expect(argSpecFor('VARIANT')).toBeNull();
+  });
+});
+
+describe('doc 106 — catálogo de Databricks SQL / Hive, Oracle y SQL Server', () => {
+  it('el combobox ofrece los tipos de los cuatro motores, sin repetidos', () => {
+    const nuevos = [
+      'INT', 'TIMESTAMP_NTZ', 'DOUBLE PRECISION', 'GEOGRAPHY', 'GEOMETRY',
+      'NVARCHAR2', 'NCHAR', 'BINARY_FLOAT', 'BINARY_DOUBLE', 'LONG', 'LONG RAW', 'RAW', 'ROWID', 'UROWID',
+      'CLOB', 'NCLOB', 'BFILE', 'XMLTYPE', 'VECTOR', 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMP WITH LOCAL TIME ZONE',
+      'INTERVAL YEAR TO MONTH', 'INTERVAL DAY TO SECOND',
+      'BIT', 'SMALLMONEY', 'DATETIME2', 'DATETIMEOFFSET', 'SMALLDATETIME', 'NTEXT', 'IMAGE',
+      'UNIQUEIDENTIFIER', 'SQL_VARIANT', 'HIERARCHYID', 'ROWVERSION',
+    ];
+    for (const t of nuevos) expect(TYPE_OPTIONS).toContain(t);
+    expect(new Set(TYPE_OPTIONS).size).toBe(TYPE_OPTIONS.length);
+  });
+
+  it('argumentos de los tipos nuevos (todos opcionales)', () => {
+    for (const t of ['NVARCHAR2', 'NCHAR', 'RAW', 'UROWID', 'BINARY']) expect(argSpecFor(t)).toEqual(['length']);
+    for (const t of ['FLOAT', 'TIMESTAMP', 'TIME', 'DATETIME2', 'DATETIMEOFFSET']) expect(argSpecFor(t)).toEqual(['precision']);
+    expect(argSpecFor('VECTOR')).toEqual(['dimensions', 'format']);
+    expect(argSpecFor('GEOMETRY')).toEqual(['srid']);
+    expect(argSpecFor('TIMESTAMP WITH TIME ZONE')).toBeNull();   // varias palabras: sin argumentos
+  });
+
+  it('parsea los tipos de varias palabras como UNA base del catálogo', () => {
+    expect(parseParamType('timestamp  with time zone')).toEqual({ base: 'TIMESTAMP WITH TIME ZONE', args: [] });
+    expect(parseParamType('Long Raw')).toEqual({ base: 'LONG RAW', args: [] });
+    expect(parseParamType('TIMESTAMP WITH')).toBeNull();
+  });
+
+  it('los argumentos aceptan texto: MAX, 30 CHAR, *, -2', () => {
+    expect(parseParamType('VARCHAR(MAX)')).toEqual({ base: 'VARCHAR', args: ['MAX'] });
+    expect(composeParamType('VARCHAR', ['max'])).toBe('VARCHAR(MAX)');
+    expect(composeParamType('VARCHAR2', ['30  char'])).toBe('VARCHAR2(30 CHAR)');
+    expect(composeParamType('NUMBER', ['*', '-2'])).toBe('NUMBER(*,-2)');
+  });
+
+  it('isTypeArg: un número o una palabra, con una unidad opcional (espejo de `_ARG_RE` del back)', () => {
+    for (const ok of ['MAX', 'max', '30', ' 30  char ', '30 BYTE', '*', '-2', 'FLOAT32']) expect(isTypeArg(ok)).toBe(true);
+    for (const bad of ['', '-', '--', '18,2', '10.5', '30 CHAR BYTE', '1)', '30 *', "'x'", '1;2', '18 2', '1 0', 'ſ', 'ß']) expect(isTypeArg(bad)).toBe(false);
+  });
+
+  it('composeParamType: solo viaja el prefijo de argumentos válidos (revisión)', () => {
+    expect(composeParamType('DECIMAL', ['--'])).toBe('DECIMAL');
+    expect(composeParamType('DECIMAL', ['18,2'])).toBe('DECIMAL');
+    expect(composeParamType('NUMBER', ['10', '-'])).toBe('NUMBER(10)');
+    expect(composeParamType('VARCHAR2', ['30 CHAR BYTE'])).toBe('VARCHAR2');
+    expect(composeParamType('VARCHAR', ['10', '2'])).toBe('VARCHAR(10)');   // no más argumentos que los del tipo
+  });
+
+  it('parseParamType usa la misma gramática que el back: cantidad y contenido de los argumentos', () => {
+    for (const bad of ['INT(11)', 'VARCHAR(1,2)', 'DECIMAL(10.5)', 'DECIMAL()', 'DECIMAL(,2)', 'TIMESTAMP WITH TIME ZONE(6)']) {
+      expect(parseParamType(bad)).toBeNull();
+    }
+    expect(canonicalDefaultType('int(11)')).toBe('int(11)');                 // como el back: verbatim
+  });
+
+  it('INT y DOUBLE PRECISION quedan tal cual; VARCHAR(MAX) se homologa a MAYÚSCULA', () => {
+    expect(canonicalDefaultType('int')).toBe('INT');
+    expect(canonicalDefaultType('double precision')).toBe('DOUBLE PRECISION');
+    expect(canonicalDefaultType('varchar(max)')).toBe('VARCHAR(MAX)');
+    expect(canonicalDefaultType('Timestamp With Time Zone')).toBe('TIMESTAMP WITH TIME ZONE');
   });
 });
