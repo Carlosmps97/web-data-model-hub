@@ -478,7 +478,7 @@ describe('doc 94 — orden único: PK primero y PRIMARY KEY por ordinal (sin ord
   });
 });
 
-describe('partitionsLast + partitionOrder — regla de layout del ruleset (doc 73 / doc 76 D3)', () => {
+describe('particiones: PARTITIONED BY con su tipo, partitionsLast y partitionOrder (doc 73 / doc 76 D3 / doc 107)', () => {
   const input: DatabricksDdlInput = {
     tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
     columns: [
@@ -494,29 +494,27 @@ describe('partitionsLast + partitionOrder — regla de layout del ruleset (doc 7
     const body = ddl.slice(ddl.indexOf('(\n') + 2, ddl.indexOf('\n)'));
     return body.split(',\n').map((l) => l.trim().split(' ')[0]).filter((n) => n.startsWith('`'));
   };
-  it('sin la opción: orden físico puro (byte-idéntico al de siempre)', () => {
-    const ddl = databricksDdl(input, { ...CLASSIC, includeKeys: true });
-    expect(ddl.indexOf('`CODMES` INT')).toBeLessThan(ddl.indexOf('`COD` STRING'));
-    expect(ddl).toContain('PARTITIONED BY (`CODMES`, `FECDIA`)');
+  it('doc 107: con PARTITIONED BY las particiones salen de la lista y van ahí con su definición — con o sin la regla', () => {
+    for (const o of [{ ...CLASSIC, includeKeys: true }, { ...CLASSIC, includeKeys: true, partitionsLast: true }]) {
+      const ddl = databricksDdl(input, o);
+      expect(bodyNames(ddl)).toEqual(['`COD`', '`MTO`']);
+      expect(ddl).toContain('PARTITIONED BY (`CODMES` INT NOT NULL, `FECDIA` DATE)');
+      expect(ddl).toContain('PRIMARY KEY (`CODMES`)');
+    }
   });
-  it('con la opción: las particiones se emiten al final; PARTITIONED BY y PRIMARY KEY no cambian', () => {
-    const ddl = databricksDdl(input, { ...CLASSIC, includeKeys: true, partitionsLast: true });
-    expect(bodyNames(ddl)).toEqual(['`COD`', '`MTO`', '`CODMES`', '`FECDIA`']);
-    expect(ddl).toContain('PARTITIONED BY (`CODMES`, `FECDIA`)');
-    expect(ddl).toContain('PRIMARY KEY (`CODMES`)');
+  const ordered: DatabricksDdlInput = {
+    ...input,
+    columns: input.columns.map((c) => (c.id === 'a' ? { ...c, partitionOrder: 2 } : c.id === 'c' ? { ...c, partitionOrder: 1 } : c)),
+  };
+  it('con partitionOrder (UDP PART_nn) el PARTITIONED BY sigue el correlativo', () => {
+    expect(databricksDdl(ordered, { ...CLASSIC, partitionsLast: true })).toContain('PARTITIONED BY (`FECDIA` DATE, `CODMES` INT)');
+    expect(databricksDdl(ordered, CLASSIC)).toContain('PARTITIONED BY (`FECDIA` DATE, `CODMES` INT)');
   });
-  it('con partitionOrder (UDP PART_nn): el bloque final Y el PARTITIONED BY siguen el correlativo', () => {
-    const ordered: DatabricksDdlInput = {
-      ...input,
-      columns: input.columns.map((c) => (c.id === 'a' ? { ...c, partitionOrder: 2 } : c.id === 'c' ? { ...c, partitionOrder: 1 } : c)),
-    };
-    const ddl = databricksDdl(ordered, { ...CLASSIC, partitionsLast: true });
-    expect(bodyNames(ddl)).toEqual(['`COD`', '`MTO`', '`FECDIA`', '`CODMES`']);
-    expect(ddl).toContain('PARTITIONED BY (`FECDIA`, `CODMES`)');
-    // sin partitionsLast el orden físico del bloque se conserva, pero PARTITIONED BY sigue el UDP
-    const ddl2 = databricksDdl(ordered, CLASSIC);
-    expect(bodyNames(ddl2)).toEqual(['`CODMES`', '`COD`', '`FECDIA`', '`MTO`']);
-    expect(ddl2).toContain('PARTITIONED BY (`FECDIA`, `CODMES`)');
+  it('sin PARTITIONED BY (Partitions apagada) vuelven a la lista: al final con la regla, si no en orden físico', () => {
+    const off = { ...CLASSIC, includePartitions: false };
+    expect(bodyNames(databricksDdl(ordered, { ...off, partitionsLast: true }))).toEqual(['`COD`', '`MTO`', '`FECDIA`', '`CODMES`']);
+    expect(bodyNames(databricksDdl(ordered, off))).toEqual(['`CODMES`', '`COD`', '`FECDIA`', '`MTO`']);
+    expect(databricksDdl(ordered, off)).not.toContain('PARTITIONED BY');
   });
   it('orderedPartitions: correlativos primero, sin correlativo después en orden físico (estable)', () => {
     const cols = [
@@ -529,7 +527,7 @@ describe('partitionsLast + partitionOrder — regla de layout del ruleset (doc 7
   });
 });
 
-describe('doc 107 — particiones solo en el PARTITIONED BY (regla de layout «partitioned-by»)', () => {
+describe('doc 107 — particiones solo en el PARTITIONED BY (formato fijo, con o sin reglas)', () => {
   const input: DatabricksDdlInput = {
     tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
     columns: [
@@ -541,7 +539,7 @@ describe('doc 107 — particiones solo en el PARTITIONED BY (regla de layout «p
     relationships: [],
     modelName: 'm',
   };
-  const opts: DatabricksDdlOptions = { ...DEF, external: false, partitionsInClause: true };
+  const opts: DatabricksDdlOptions = { ...DEF, external: false };
   it('las particiones NO van en la lista: se declaran con su tipo en el PARTITIONED BY, en orden PART_nn', () => {
     expect(tableStatements(input, opts)[0].sql).toBe(
       'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  mto decimal(18,2)\n)\nUSING DELTA\nPARTITIONED BY (fecdia date, codmes int);\n');
@@ -554,13 +552,14 @@ describe('doc 107 — particiones solo en el PARTITIONED BY (regla de layout «p
       "PARTITIONED BY (fecdia date, codmes int NOT NULL COMMENT 'Mes');", '',
     ].join('\n'));
   });
-  it('sin PARTITIONED BY (Output setting «Partitions» apagada) las particiones vuelven al final de la lista', () => {
-    expect(tableStatements(input, { ...opts, includePartitions: false })[0].sql).toBe(
+  it('sin PARTITIONED BY (Output setting «Partitions» apagada) las particiones vuelven a la lista', () => {
+    expect(tableStatements(input, { ...opts, includePartitions: false, partitionsLast: true })[0].sql).toBe(
       'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  mto decimal(18,2),\n  fecdia date,\n  codmes int\n)\nUSING DELTA;\n');
   });
-  it('una tabla sin particiones sale igual que sin la regla', () => {
+  it('una tabla sin particiones sale sin PARTITIONED BY', () => {
     const plain: DatabricksDdlInput = { ...input, columns: input.columns.map((c) => ({ ...c, isPartition: false })) };
-    expect(tableStatements(plain, opts)[0].sql).toBe(tableStatements(plain, { ...opts, partitionsInClause: false })[0].sql);
+    expect(tableStatements(plain, opts)[0].sql).toBe(
+      'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  codmes int,\n  fecdia date,\n  mto decimal(18,2)\n)\nUSING DELTA;\n');
   });
 });
 
@@ -613,15 +612,10 @@ const SPEC_LIST = [
   '  fecactualizacionregistro timestamp,', '  tipfrecuenciaregistro char(1),',
 ];
 const SPEC_LOCATION = "LOCATION 'abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>/H_SALDOCIERREPROCESOBANCAMINORISTA';";
-// Doc 107 (semilla `particiones_en_partitioned_by`): particiones solo en el PARTITIONED BY.
+// Doc 107: particiones solo en el PARTITIONED BY, con su tipo (formato fijo).
 const SPEC_BASE_SQL = [
   ...SPEC_LIST, '  fecdia date', ')', 'USING DELTA',
   'PARTITIONED BY (codmes int, nbrgrupoprocesobcaminorista varchar(120))', SPEC_LOCATION,
-].join('\n');
-// Layout `last` (el Anexo A original del doc 93).
-const SPEC_BASE_SQL_LAST = [
-  ...SPEC_LIST, '  fecdia date,', '  codmes int,', '  nbrgrupoprocesobcaminorista varchar(120)', ')', 'USING DELTA',
-  'PARTITIONED BY (codmes, nbrgrupoprocesobcaminorista)', SPEC_LOCATION,
 ].join('\n');
 
 describe('doc 93 — estilo de salida (comillas, tipos, CREATE, NOT NULL)', () => {
@@ -670,8 +664,8 @@ describe('doc 93 — estilo de salida (comillas, tipos, CREATE, NOT NULL)', () =
     expect(createTableSql({ createTable: 'if-not-exists', external: false })).toBe('CREATE TABLE IF NOT EXISTS');
   });
 
-  it('golden del spec-rule (doc 93 Anexo A · doc 107): el CREATE físico que recibe el motor', () => {
-    expect(tableStatements(SPEC_INPUT, { ...DEF, partitionsInClause: true })[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
-    expect(tableStatements(SPEC_INPUT, { ...DEF, partitionsLast: true })[0].sql).toBe(`${SPEC_BASE_SQL_LAST}\n`);
+  it('golden del spec-rule (doc 93 Anexo A · doc 107): el CREATE físico que recibe el motor — igual con o sin la regla', () => {
+    expect(tableStatements(SPEC_INPUT, { ...DEF, partitionsLast: true })[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
+    expect(tableStatements(SPEC_INPUT, DEF)[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
   });
 });

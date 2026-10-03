@@ -16,6 +16,10 @@
 // tipos con `typeCase`, CREATE según `createTable`, `USING` en mayúscula,
 // `NOT NULL` solo con keys. Los defaults son las convenciones de la macro; el
 // proyecto las cambia en Data Standards (Output settings).
+//
+// Doc 107: con PARTITIONED BY las columnas de partición no van en la lista del
+// CREATE — se declaran ahí con su tipo (`PARTITIONED BY (codmes int)`). Formato
+// fijo, con o sin Export rules.
 // ─────────────────────────────────────────────────────────────────────────────
 import { foldComplexType } from '@/lib/typeText';
 
@@ -140,16 +144,11 @@ export interface DatabricksDdlOptions {
   /** Optional `TBLPROPERTIES (…)` key/value pairs. */
   tblProperties: { key: string; value: string }[];
   /** Doc 73 — regla de layout del ruleset («Partition columns last»): las
-   *  columnas de partición se EMITEN al final del CREATE. El orden físico del
-   *  modelo, el PARTITIONED BY y el PRIMARY KEY no cambian. La fija el modal
-   *  desde las reglas seleccionadas (rulesBridge.layoutFromRules), nunca a mano. */
+   *  columnas de partición se EMITEN al final de la lista del CREATE. Doc 107:
+   *  solo cuando NO hay PARTITIONED BY (con él van siempre ahí, con su tipo). El
+   *  orden físico del modelo y el PRIMARY KEY no cambian. La fija el modal desde
+   *  las reglas seleccionadas (rulesBridge.layoutFromRules), nunca a mano. */
   partitionsLast?: boolean;
-  /** Doc 107 — regla de layout «partitioned-by»: las columnas de partición NO
-   *  se declaran en la lista del CREATE; van con su tipo (y su NOT NULL/COMMENT,
-   *  si el export los emite) dentro del PARTITIONED BY, en el orden del UDP. Sin
-   *  PARTITIONED BY (`includePartitions` apagado) vuelven al final de la lista.
-   *  La fija el modal desde las reglas seleccionadas (rulesBridge.withLayout). */
-  partitionsInClause?: boolean;
   /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_ y
    *  columnas/alias de las proyecciones de vistas). NUNCA aplica a: literales,
    *  COMMENTs, tipos de datos, expresiones/castType de vistas ni
@@ -331,15 +330,16 @@ function tableDDL(
   const full = qualify(t, o);
   // Doc 94: el orden único — PK primero y cada bloque por ordinal.
   const ordered = pkFirstColumns(cols);
-  // Doc 73/76: con la regla de layout, las particiones se emiten al final y
-  // ordenadas por su correlativo; el resto conserva el orden físico (espejo de
-  // `layout_columns` del motor). Doc 107: con «partitioned-by» no van en la
-  // lista — se declaran en el PARTITIONED BY —, salvo que el export no lo emita.
+  // Doc 107: con PARTITIONED BY las particiones no van en la lista — se
+  // declaran ahí con su tipo (formato fijo, con o sin reglas). Sin él (Output
+  // setting «Partitions» apagada) van en la lista: al final y por su
+  // correlativo con la regla de layout (doc 73/76), si no en orden físico.
+  // Espejo de `partitions_in_clause`/`layout_columns` del motor.
   const partitions = orderedPartitions(ordered);
   const rest = ordered.filter((c) => !c.isPartition);
-  const inClause = !!o.partitionsInClause && o.includePartitions && partitions.length > 0;
+  const inClause = o.includePartitions && partitions.length > 0;
   const emitted = inClause ? rest
-    : o.partitionsLast || o.partitionsInClause ? [...rest, ...partitions]
+    : o.partitionsLast ? [...rest, ...partitions]
       : ordered;
 
   /** Definición de una columna: la misma en la lista o dentro del PARTITIONED BY. */
@@ -366,8 +366,8 @@ function tableDDL(
   if (o.includePartitions) {
     // Doc 76 D3: PARTITIONED BY sigue el correlativo del UDP cuando la regla
     // de layout lo declara; sin correlativos, el orden físico de siempre.
-    // Doc 107: con «partitioned-by» lleva la definición (`codmes int`), no solo el nombre.
-    const parts = partitions.map((c) => (inClause ? colDef(c) : ident(c.physicalName)));
+    // Doc 107: cada partición con su definición (`codmes int`), no solo el nombre.
+    const parts = partitions.map(colDef);
     if (parts.length) out += `\nPARTITIONED BY (${parts.join(', ')})`;
   }
 

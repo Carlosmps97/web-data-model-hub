@@ -121,7 +121,8 @@ function OracleFields({ value, onChange, disabled, viewsHint }: {
       <span className="exd-section">Include</span>
       <div className="exd-switches">
         <SwitchRow disabled={disabled} on={o.includeViews} onClick={() => set('includeViews', !o.includeViews)} label="Views" hint={viewsHint ?? 'Modeled views'} />
-        <SwitchRow disabled={disabled} on={o.includeKeys} onClick={() => set('includeKeys', !o.includeKeys)} label="Primary & foreign keys" hint="PK / FK / NOT NULL" />
+        <SwitchRow disabled={disabled} on={o.includeKeys} onClick={() => set('includeKeys', !o.includeKeys)} label="Primary & foreign keys" hint="PRIMARY KEY (…) DISABLE NOVALIDATE · FK" />
+        <SwitchRow disabled={disabled} on={o.includeNotNull} onClick={() => set('includeNotNull', !o.includeNotNull)} label="NOT NULL" hint="Required columns" />
         <SwitchRow disabled={disabled} on={o.includeComments} onClick={() => set('includeComments', !o.includeComments)} label="Comments" hint="COMMENT ON TABLE / COLUMN" />
       </div>
 
@@ -137,10 +138,17 @@ function OracleFields({ value, onChange, disabled, viewsHint }: {
       <Seg label="Data types" disabled={disabled} value={o.typeCase} onPick={(v) => set('typeCase', v)}
         options={[['lower', 'lower', 'varchar(128), number(19,4), date'], ['upper', 'UPPER', 'VARCHAR(128), NUMBER(19,4), DATE']]} />
 
-      <div className="exd-field">
-        <span className="exd-sublbl">Default schema · tables without a schema (empty = unqualified)</span>
-        <SchemaSelect className="rd-input exd-input" value={o.defaultSchema} disabled={disabled} onChange={(v) => set('defaultSchema', v)} />
-      </div>
+      {/* Doc 108: sin esquema por default (`CREATE TABLE DE_X`, como Erwin). */}
+      <span className="exd-section">Schema</span>
+      <Seg label="Schema" disabled={disabled} value={o.schemaMode} onPick={(v) => set('schemaMode', v)}
+        options={[['none', 'No schema', 'CREATE TABLE DE_X'], ['model', 'Model schema', 'Each object with its schema in the model'],
+                  ['custom', 'Custom', 'The same schema for every object']]} />
+      {o.schemaMode === 'custom' && (
+        <div className="exd-field">
+          <span className="exd-sublbl">Schema for every object (empty = no schema)</span>
+          <SchemaSelect className="rd-input exd-input" value={o.defaultSchema} disabled={disabled} onChange={(v) => set('defaultSchema', v)} />
+        </div>
+      )}
 
       <FileNamesFields value={value} onChange={onChange} disabled={disabled} />
     </>

@@ -589,7 +589,7 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
               : k === 'exclude' ? { exclude: true }
                 : k === 'tags' ? { tags: (action.tags as object) ?? {} }
                   : k === 'types' ? { types: (action.types as object) ?? { CHAR: 'VARCHAR' } }
-                  : k === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'partitioned-by', partitionUdp: 'Particion' } }
+                  : k === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last', partitionUdp: 'Particion' } }
                     : k === 'statements' ? { statements: (action.statements as object) ?? { before: ['-- DROP TABLE IF EXISTS {artefacto.ref};'] } }
                       : { tblproperties: (action.tblproperties as object) ?? {} });
           }} />
@@ -597,11 +597,10 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
       {kind === 'layout' ? (
         <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Partition columns</label>
+            <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Without PARTITIONED BY</label>
             <select value={layout.partitionColumns ?? 'keep'} disabled={!canEdit}
               onChange={(e) => onChange({ layout: { partitionColumns: e.target.value, ...(partitionUdp ? { partitionUdp } : {}) } })}
               style={{ ...inp, height: 32, fontSize: 12, flex: 1 }}>
-              <option value="partitioned-by">Only in PARTITIONED BY, with their data type</option>
               <option value="last">Emit at the end of the CREATE TABLE</option>
               <option value="keep">Keep the physical order</option>
             </select>
@@ -616,10 +615,10 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
           <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
             Applies to every physical table of the export (leave the condition empty). With a column UDP,
             the partition columns ARE the ones whose value is PART_01, PART_02… (the platform’s partition
-            flag is ignored), in that order. “Only in PARTITIONED BY” leaves them out of the column list and
-            declares them there with their type — PARTITIONED BY (codmes int, …); “At the end” lists them last
-            and PARTITIONED BY only names them. Without a UDP, the partition flag decides. Generated tables
-            mirror the same layout.
+            flag is ignored), in that order; without a UDP, the partition flag decides. The DDL always
+            declares them in PARTITIONED BY with their type — PARTITIONED BY (codmes int, …) — and not in the
+            column list; “Without PARTITIONED BY” only applies when the export doesn’t write it (Output
+            settings → Partitions off). Generated tables mirror the same layout.
           </div>
         </div>
       ) : kind === 'exclude' ? (

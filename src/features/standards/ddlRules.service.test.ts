@@ -103,15 +103,13 @@ describe('mutaciones versionadas (standards/apply)', () => {
 
 describe('ruleActionSummary — resumen de la acción en el catálogo', () => {
   const layout = (lay: Record<string, unknown>): DdlRule => ({ ...RULE, target: 'table', action: { layout: lay } });
-  it('doc 107: layout «partitioned-by» = particiones solo en el PARTITIONED BY', () => {
-    expect(ruleActionSummary(layout({ partitionColumns: 'partitioned-by', partitionUdp: 'Particion' })))
-      .toBe('Column layout: partition columns only in PARTITIONED BY · partitions from UDP "Particion"');
-  });
-  it('last / keep / sin valor, igual que antes', () => {
-    expect(ruleActionSummary(layout({ partitionColumns: 'last' }))).toBe('Column layout: partition columns last');
-    expect(ruleActionSummary(layout({ partitionColumns: 'keep' }))).toBe('Column layout: partition columns in physical order');
+  it('doc 107: el layout dice de dónde salen las particiones y qué pasa sin PARTITIONED BY', () => {
+    expect(ruleActionSummary(layout({ partitionColumns: 'last', partitionUdp: 'Particion' })))
+      .toBe('Column layout: partitions from UDP "Particion" · last when there is no PARTITIONED BY');
+    expect(ruleActionSummary(layout({ partitionColumns: 'keep' })))
+      .toBe('Column layout: partitions from the partition flag · in physical order when there is no PARTITIONED BY');
     expect(ruleActionSummary(layout({ partitionUdp: 'Particion' })))
-      .toBe('Column layout: partition columns in physical order · partitions from UDP "Particion"');
+      .toBe('Column layout: partitions from UDP "Particion" · in physical order when there is no PARTITIONED BY');
   });
   it('las demás acciones', () => {
     expect(ruleActionSummary(RULE)).toBe('sha2({col}, 512)');

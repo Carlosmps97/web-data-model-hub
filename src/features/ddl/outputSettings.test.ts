@@ -63,10 +63,8 @@ describe('mergeOutputSettings — dialecto y configuración Oracle (doc 101)', (
       dialect: 'oracle',
       oracle: { typeCase: 'lower', typeMap: [{ from: 'DATETIME', to: 'DATE' }], maxStringSize: 'extended' },
     });
-    expect(s.oracle).toEqual({
-      includeViews: true, includeKeys: true, includeComments: false,
-      identifierCase: 'upper', quoteIdentifiers: 'when-needed', typeCase: 'lower', defaultSchema: '',
-    });
+    expect(s.oracle).toEqual({ ...DEFAULT_ORACLE_OPTS, typeCase: 'lower' });
+    expect('typeMap' in s.oracle || 'maxStringSize' in s.oracle).toBe(false);
   });
   it('valores inválidos se ignoran sin romper', () => {
     const s = mergeOutputSettings({
@@ -78,6 +76,14 @@ describe('mergeOutputSettings — dialecto y configuración Oracle (doc 101)', (
     expect(s.oracle.includeKeys).toBe(true);
     expect('zzz' in s.oracle).toBe(false);
     expect(mergeOutputSettings({ oracle: 'x' }).oracle).toEqual(DEFAULT_ORACLE_OPTS);
+  });
+
+  it('doc 108: NOT NULL aparte y el esquema (sin / del modelo / elegido) se guardan; lo inválido cae a su default', () => {
+    const ok = mergeOutputSettings({ oracle: { includeNotNull: true, schemaMode: 'custom', defaultSchema: 'bcp' } });
+    expect(ok.oracle).toEqual({ ...DEFAULT_ORACLE_OPTS, includeNotNull: true, schemaMode: 'custom', defaultSchema: 'bcp' });
+    const bad = mergeOutputSettings({ oracle: { includeNotNull: 'si', schemaMode: 'raro' } });
+    expect(bad.oracle.includeNotNull).toBe(false);
+    expect(bad.oracle.schemaMode).toBe('none');
   });
   it('no comparte referencias con los defaults de Oracle', () => {
     const s = mergeOutputSettings({});

@@ -4,10 +4,15 @@
 // PURO y con el MISMO input que el generador de Databricks (`generators.ts`).
 // Lo que cambia es la sintaxis:
 //  - `CREATE TABLE` simple (Oracle no tiene OR REPLACE para tablas) con la PK
-//    adentro. Las FK son `ALTER TABLE … ADD CONSTRAINT` y van TODAS después de
-//    todas las tablas (en el script único) o en su propio archivo del `.zip`
-//    (`oracleForeignKeysFile`): así nunca corren antes que su tabla padre, ni
-//    con ciclos. Nombres de constraint únicos y de a lo sumo 128 bytes.
+//    adentro, como la escribe Erwin (doc 108): `PRIMARY KEY (…) DISABLE
+//    NOVALIDATE`, sin nombre. Las FK son `ALTER TABLE … ADD CONSTRAINT …
+//    DISABLE NOVALIDATE` (Oracle no admite una FK habilitada sobre una PK
+//    deshabilitada) y van TODAS después de todas las tablas (en el script
+//    único) o en su propio archivo del `.zip` (`oracleForeignKeysFile`): así
+//    nunca corren antes que su tabla padre, ni con ciclos. Nombres de FK únicos
+//    y de a lo sumo 128 bytes.
+//  - `NOT NULL` aparte de las llaves y apagado por default; sin esquema por
+//    default (`CREATE TABLE DE_X`) — o el del modelo, o uno elegido (doc 108).
 //  - Comentarios con `COMMENT ON TABLE / COLUMN` (Oracle no los acepta dentro
 //    del CREATE): recortados a 4 000 bytes y sin nada que corte la sentencia en
 //    SQL*Plus / SQL Developer (líneas en blanco, líneas que terminan en «;»,
@@ -28,30 +33,41 @@ import {
   type IdentifierCase, type QuoteMode, type TypeCase,
 } from './generators';
 
+/** Doc 108: esquema de los nombres — ninguno (`CREATE TABLE DE_X`, como Erwin), el
+ *  de cada objeto en el modelo, o uno elegido para todos (`defaultSchema`). */
+export type OracleSchemaMode = 'none' | 'model' | 'custom';
+
 /** Configuración PROPIA de Oracle (doc 101 §4.1) — independiente de la de Databricks. */
 export interface OracleDdlOptions {
   /** `CREATE OR REPLACE VIEW` por cada vista del canvas exportado. */
   includeViews: boolean;
-  /** PRIMARY KEY / FOREIGN KEY y NOT NULL. */
+  /** PRIMARY KEY (`… DISABLE NOVALIDATE`) y FOREIGN KEY. */
   includeKeys: boolean;
+  /** Doc 108: `NOT NULL` en las columnas obligatorias (y en las de la PK), aparte de las llaves. */
+  includeNotNull: boolean;
   /** `COMMENT ON TABLE / COLUMN` desde las definiciones. */
   includeComments: boolean;
   identifierCase: IdentifierCase;
   quoteIdentifiers: QuoteMode;
   typeCase: TypeCase;
-  /** Esquema de las tablas sin esquema; vacío = nombre sin calificar (el esquema del usuario). */
+  /** Doc 108: de dónde sale el esquema de los nombres. */
+  schemaMode: OracleSchemaMode;
+  /** El esquema elegido para todos los objetos (solo con `schemaMode = custom`; vacío = sin esquema). */
   defaultSchema: string;
 }
 
 /** Defaults de Oracle = lo pedido por el owner para el proyecto RDV (comentarios
- *  OFF, PK/FK ON, tipos en MAYÚSCULA) + identificadores en MAYÚSCULA. */
+ *  OFF, PK/FK ON, tipos en MAYÚSCULA) + identificadores en MAYÚSCULA; doc 108:
+ *  como Erwin — sin NOT NULL y sin esquema. */
 export const DEFAULT_ORACLE_OPTS: OracleDdlOptions = {
   includeViews: true,
   includeKeys: true,
+  includeNotNull: false,
   includeComments: false,
   identifierCase: 'upper',
   quoteIdentifiers: 'when-needed',
   typeCase: 'upper',
+  schemaMode: 'none',
   defaultSchema: '',
 };
 
@@ -222,7 +238,6 @@ interface Ctx {
   /** tabla → NOMBRE EN MAYÚSCULA → nombre físico real (las vistas lo usan). */
   realColumn: Map<string, Map<string, string>>;
   rels: DdlRelationship[];                             // FK con padre e hijo dentro del export
-  pkName: Map<string, string>;
   fkName: Map<string, string>;
 }
 
@@ -230,10 +245,17 @@ function qualifiedName(schema: string, name: string, ident: (s: string) => strin
   return schema ? `${ident(schema)}.${ident(name)}` : ident(name);
 }
 
-/** Nombre calificado de una tabla: su esquema, o el de por default, o nada. */
+/** Doc 108: esquema de un objeto según `schemaMode` — ninguno, el del modelo
+ *  (`own`) o el elegido para todos. */
+function schemaFor(own: string | undefined, o: OracleDdlOptions): string {
+  if (o.schemaMode === 'model') return (own ?? '').trim();
+  if (o.schemaMode === 'custom') return (o.defaultSchema ?? '').trim();
+  return '';
+}
+
+/** Nombre de una tabla con el esquema que corresponde (doc 108). */
 function qualify(t: DdlTable, ctx: Ctx): string {
-  const schema = t.schema?.trim() || (ctx.o.defaultSchema ?? '').trim();
-  return qualifiedName(schema, t.physicalName, ctx.ident);
+  return qualifiedName(schemaFor(t.schema, ctx.o), t.physicalName, ctx.ident);
 }
 
 /** Columnas de la FK en el hijo (null si algún par cae fuera del export). */
@@ -260,10 +282,10 @@ function contextOf(input: DatabricksDdlInput, o: OracleDdlOptions): Ctx {
     colName: new Map(input.columns.map((c) => [c.id, c.physicalName])),
     byTable, realColumn,
     rels: input.relationships.filter((r) => ids.has(r.parentTableId) && ids.has(r.childTableId)),
-    pkName: new Map(), fkName: new Map(),
+    fkName: new Map(),
   };
-  // Nombres de constraint: únicos en el export (sin distinguir mayúsculas) y
-  // deterministas — primero las PK en el orden de las tablas, después las FK.
+  // Nombres de FK: únicos en el export (sin distinguir mayúsculas) y
+  // deterministas, en el orden de las tablas. La PK va sin nombre (doc 108).
   const used = new Set<string>();
   const take = (raw: string): string => {
     let name = capName(raw);
@@ -272,9 +294,6 @@ function contextOf(input: DatabricksDdlInput, o: OracleDdlOptions): Ctx {
     return name;
   };
   if (o.includeKeys) {
-    for (const t of tables) {
-      if ((byTable.get(t.id) ?? []).some((c) => c.isPrimaryKey)) ctx.pkName.set(t.id, take(`pk_${t.physicalName}`));
-    }
     for (const t of tables) {
       for (const r of ctx.rels) {
         if (r.childTableId !== t.id) continue;
@@ -294,14 +313,12 @@ function tableDDL(t: DdlTable, ctx: Ctx): string {
   const ordered = pkFirstColumns(ctx.byTable.get(t.id) ?? []);
   const inner = ordered.map((c) => {
     let l = `  ${ident(c.physicalName)} ${oracleType(c.dataType, o)}`;
-    if (o.includeKeys && (c.isNullable === false || c.isPrimaryKey)) l += ' NOT NULL';
+    if (o.includeNotNull && (c.isNullable === false || c.isPrimaryKey)) l += ' NOT NULL';
     return l;
   });
-  const pk = ctx.pkName.get(t.id);
-  if (o.includeKeys && pk) {
-    const pks = ordered.filter((c) => c.isPrimaryKey).map((c) => ident(c.physicalName));
-    inner.push(`  CONSTRAINT ${ident(pk)} PRIMARY KEY (${pks.join(', ')})`);
-  }
+  // Doc 108: como Erwin — sin nombre de constraint y DISABLE NOVALIDATE.
+  const pks = ordered.filter((c) => c.isPrimaryKey).map((c) => ident(c.physicalName));
+  if (o.includeKeys && pks.length) inner.push(`  PRIMARY KEY (${pks.join(', ')}) DISABLE NOVALIDATE`);
   let out = `CREATE TABLE ${full} (\n${inner.join(',\n')}\n);\n`;
 
   if (o.includeComments) {
@@ -333,7 +350,7 @@ function foreignKeys(ctx: Ctx): string[] {
       const parentCols = r.pairs.map((p) => ctx.colName.get(p.parentColumnId) ?? p.parentColumnId);
       out.push(`ALTER TABLE ${qualify(t, ctx)} ADD CONSTRAINT ${ident(name)}`
         + ` FOREIGN KEY (${cols.map((c) => ident(c.physicalName)).join(', ')})`
-        + ` REFERENCES ${parentRef} (${parentCols.map((c) => ident(c)).join(', ')});`);
+        + ` REFERENCES ${parentRef} (${parentCols.map((c) => ident(c)).join(', ')}) DISABLE NOVALIDATE;`);
     }
   }
   return out;
@@ -350,7 +367,7 @@ function viewDDL(v: DdlView, ctx: Ctx): string {
   const { o, ident } = ctx;
   const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
   const base = srcIds.length ? ctx.tableById.get(srcIds[0]) : undefined;
-  const schema = v.schema?.trim() || base?.schema?.trim() || (o.defaultSchema ?? '').trim();
+  const schema = schemaFor(v.schema?.trim() || base?.schema, o);
   const full = qualifiedName(schema, v.name, ident);
 
   const aliased = srcIds.length > 1;

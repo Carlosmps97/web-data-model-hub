@@ -215,10 +215,10 @@ function byLabel(tree: unknown, label: string) {
   return hit;
 }
 
-describe('Regla de layout (doc 107): particiones solo en el PARTITIONED BY', () => {
+describe('Regla de layout (doc 107): las particiones van siempre en el PARTITIONED BY', () => {
   const LAYOUT: DdlRule = {
-    ...RULE, id: 'l1', name: 'particiones_en_partitioned_by', target: 'table', condition: '', udpRefs: [],
-    action: { layout: { partitionColumns: 'partitioned-by', partitionUdp: 'Particion' } }, appliesTo: ['ddl.tabla_fisica'],
+    ...RULE, id: 'l1', name: 'particiones_al_final', target: 'table', condition: '', udpRefs: [],
+    action: { layout: { partitionColumns: 'last', partitionUdp: 'Particion' } }, appliesTo: ['ddl.tabla_fisica'],
   };
   /** El panel de la acción (sub-componente) renderizado con sus props reales. */
   const actionPanel = (tree: unknown, onChange?: (a: Record<string, unknown>) => void) => {
@@ -228,15 +228,15 @@ describe('Regla de layout (doc 107): particiones solo en el PARTITIONED BY', () 
     return render(onChange ? { ...el.props, onChange } : el.props);
   };
 
-  it('ofrece «Only in PARTITIONED BY» (primera opción) y la muestra elegida', async () => {
-    const select = [...walk(actionPanel(await open(LAYOUT)))].find((e) => e.type === 'select')!;
-    expect(select.props.value).toBe('partitioned-by');
+  it('«Partition columns» solo decide qué pasa sin PARTITIONED BY, y la ayuda lo dice', async () => {
+    const panel = actionPanel(await open(LAYOUT));
+    const select = [...walk(panel)].find((e) => e.type === 'select')!;
+    expect(select.props.value).toBe('last');
     const opts = [...walk(select)].filter((e) => e.type === 'option').map((o) => [o.props.value, textOf(o)]);
-    expect(opts).toEqual([
-      ['partitioned-by', 'Only in PARTITIONED BY, with their data type'],
-      ['last', 'Emit at the end of the CREATE TABLE'],
-      ['keep', 'Keep the physical order'],
-    ]);
+    expect(opts).toEqual([['last', 'Emit at the end of the CREATE TABLE'], ['keep', 'Keep the physical order']]);
+    const text = textOf(panel);
+    expect(text).toContain('Without PARTITIONED BY');
+    expect(text).toContain('PARTITIONED BY (codmes int, …)');
   });
 
   it('revisión: una regla sin «partitionColumns» se muestra y se guarda como el motor la aplica (orden físico)', async () => {
@@ -255,7 +255,7 @@ describe('Regla de layout (doc 107): particiones solo en el PARTITIONED BY', () 
     const tree = await open({ ...LAYOUT, action: { tblproperties: { a: 'b' } } });
     const seg = [...walk(actionPanel(tree, onChange))].find((e) => typeof e.type === 'function' && e.type.name === 'Segmented')!;
     (seg.props.onPick as (v: string) => void)('layout');
-    expect(onChange).toHaveBeenCalledWith({ layout: { partitionColumns: 'partitioned-by', partitionUdp: 'Particion' } });
+    expect(onChange).toHaveBeenCalledWith({ layout: { partitionColumns: 'last', partitionUdp: 'Particion' } });
   });
 });
 

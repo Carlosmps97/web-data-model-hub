@@ -5,7 +5,7 @@ vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
 import { apiPost } from '@/services/http';
 import { DEFAULT_DATABRICKS_OPTS } from './generators';
 import {
-  emitTarget, isAddendum, layoutFromRules, missingSource, partitionCorrelative, renderWithRules, withLayout, withUdpPartitions,
+  emitTarget, isAddendum, layoutFromRules, missingSource, partitionCorrelative, renderWithRules, withUdpPartitions,
   type ExportRule,
 } from './rulesBridge';
 
@@ -16,29 +16,18 @@ const rule = (id: string, over: Partial<ExportRule> = {}): ExportRule => ({
   appliesTo: ['ddl.tabla_fisica'], action: { layout: { partitionColumns: 'last' } }, ...over,
 });
 
-describe('layoutFromRules (doc 73 / doc 76 / doc 93 / doc 107)', () => {
+describe('layoutFromRules (doc 73 / doc 76 / doc 93)', () => {
   it('regla de layout seleccionada sobre la física ⇒ partitionsLast', () => {
-    expect(layoutFromRules([rule('l1')], ['l1'])).toEqual({ partitionsLast: true, partitionsInClause: false, partitionUdp: null });
+    expect(layoutFromRules([rule('l1')], ['l1'])).toEqual({ partitionsLast: true, partitionUdp: null });
   });
   it('partitionUdp (o su alias legado partitionOrderUdp) ⇒ UDP que define las particiones', () => {
     expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'last', partitionUdp: 'Particion' } } })], ['l1']))
-      .toEqual({ partitionsLast: true, partitionsInClause: false, partitionUdp: 'Particion' });
+      .toEqual({ partitionsLast: true, partitionUdp: 'Particion' });
     expect(layoutFromRules([rule('l1', { action: { layout: { partitionOrderUdp: ' Particion ' } } })], ['l1']))
-      .toEqual({ partitionsLast: false, partitionsInClause: false, partitionUdp: 'Particion' });
-  });
-  it("doc 107: 'partitioned-by' ⇒ particiones solo en el PARTITIONED BY", () => {
-    expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'partitioned-by', partitionUdp: 'Particion' } } })], ['l1']))
-      .toEqual({ partitionsLast: false, partitionsInClause: true, partitionUdp: 'Particion' });
-  });
-  it('withLayout: el export toma de la regla dónde van las particiones (nunca de las Output settings)', () => {
-    const lay = { partitionsLast: false, partitionsInClause: true, partitionUdp: 'Particion' };
-    const out = withLayout({ ...DEFAULT_DATABRICKS_OPTS, partitionsLast: true }, lay);
-    expect(out.partitionsLast).toBe(false);
-    expect(out.partitionsInClause).toBe(true);
-    expect(out.includePartitions).toBe(DEFAULT_DATABRICKS_OPTS.includePartitions);
+      .toEqual({ partitionsLast: false, partitionUdp: 'Particion' });
   });
   it('no seleccionada, keep, otro artefacto o generador ⇒ false', () => {
-    const off = { partitionsLast: false, partitionsInClause: false, partitionUdp: null };
+    const off = { partitionsLast: false, partitionUdp: null };
     expect(layoutFromRules([rule('l1')], [])).toEqual(off);
     expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'keep' } } })], ['l1'])).toEqual(off);
     expect(layoutFromRules([rule('l1', { appliesTo: ['ddl.tabla_rej'] })], ['l1'])).toEqual(off);

@@ -19,7 +19,7 @@ const ICONS: Record<string, React.ReactNode> = {
   'technical-view': <Eye size={17} color="#8B5CF6" />,
   'governance-tags': <Tag size={17} color="#2E5BFF" />,
   'free-statements': <FileCode2 size={17} color="#2E5BFF" />,
-  'partitions-in-partitioned-by': <Columns3 size={17} color="#2E5BFF" />,
+  'partitions-last': <Columns3 size={17} color="#2E5BFF" />,
   blank: <Plus size={16} color="#8A93A5" />,
 };
 const GENERATOR_IDS = new Set(['rejected-table', 'technical-view']);

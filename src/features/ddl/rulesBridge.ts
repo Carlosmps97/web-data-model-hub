@@ -104,9 +104,6 @@ export const fetchDdlConfig = (projectId: string) =>
 
 export interface ExportLayout {
   partitionsLast: boolean;
-  /** Doc 107: `partitionColumns = 'partitioned-by'` ⇒ particiones solo dentro
-   *  del PARTITIONED BY, con su tipo. */
-  partitionsInClause: boolean;
   /** Doc 93 D10: UDP de columna cuyos valores PART_nn DEFINEN las particiones
    *  (qué columnas y en qué orden). null = el flag de la plataforma. */
   partitionUdp: string | null;
@@ -114,13 +111,13 @@ export interface ExportLayout {
 
 /** Doc 73/76/93: layout de columnas dictado por el ruleset — reglas de TABLA
  *  seleccionadas sobre `ddl.tabla_fisica` con `action.layout`:
- *  `partitionColumns = 'last'` ⇒ particiones al final del CREATE;
- *  `'partitioned-by'` (doc 107) ⇒ solo dentro del PARTITIONED BY, con su tipo;
+ *  `partitionColumns = 'last'` ⇒ particiones al final del CREATE (doc 107:
+ *  solo sin PARTITIONED BY — con él van siempre ahí, con su tipo);
  *  `partitionUdp` (alias legado `partitionOrderUdp`) ⇒ particiones desde ese
  *  UDP. Espejo de `layout_from_rules` del motor. */
 export function layoutFromRules(rules: ExportRule[], selected: Iterable<string>): ExportLayout {
   const sel = new Set(selected);
-  const out: ExportLayout = { partitionsLast: false, partitionsInClause: false, partitionUdp: null };
+  const out: ExportLayout = { partitionsLast: false, partitionUdp: null };
   const ordered = [...rules]
     .filter((r) => sel.has(r.id) && r.kind === 'rule' && r.appliesTo.includes('ddl.tabla_fisica'))
     .sort((a, b) => b.priority - a.priority || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
@@ -128,18 +125,12 @@ export function layoutFromRules(rules: ExportRule[], selected: Iterable<string>)
     const lay = r.action.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string } | undefined;
     if (!lay) continue;
     if (lay.partitionColumns === 'last') out.partitionsLast = true;
-    else if (lay.partitionColumns === 'partitioned-by') out.partitionsInClause = true;
     const udp = (lay.partitionUdp ?? lay.partitionOrderUdp ?? '').trim();
     if (udp && !out.partitionUdp) out.partitionUdp = udp;
   }
   return out;
 }
 
-/** Opciones del export con el layout de las reglas seleccionadas: dónde van las
- *  particiones lo decide la regla, nunca las Output settings. */
-export function withLayout(opts: DatabricksDdlOptions, layout: ExportLayout): DatabricksDdlOptions {
-  return { ...opts, partitionsLast: layout.partitionsLast, partitionsInClause: layout.partitionsInClause };
-}
 
 // Misma convención del kit y del motor: PART_01 → 1.
 const PARTITION_RE = /^PART[_-]?(\d+)$/i;

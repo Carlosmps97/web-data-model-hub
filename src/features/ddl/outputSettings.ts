@@ -16,7 +16,7 @@ import { DEFAULT_DATABRICKS_OPTS, type DatabricksDdlOptions, type DdlDialect } f
 import { DEFAULT_FILE_NAMES, type DdlFileNames } from './ddlExportBundle';
 import { DEFAULT_ORACLE_OPTS, type OracleDdlOptions } from './oracle';
 
-export type DdlOutputSettings = Omit<DatabricksDdlOptions, 'partitionsLast' | 'partitionsInClause'> & {
+export type DdlOutputSettings = Omit<DatabricksDdlOptions, 'partitionsLast'> & {
   fileNames: DdlFileNames;
   /** Doc 101: dialecto con el que abre el modal Export DDL. */
   dialect: DdlDialect;
@@ -49,8 +49,9 @@ const ORACLE_ENUMS: Record<string, readonly string[]> = {
   identifierCase: ['as-is', 'lower', 'upper'],
   quoteIdentifiers: ['when-needed', 'always'],
   typeCase: ['lower', 'upper'],
+  schemaMode: ['none', 'model', 'custom'],                  // doc 108
 };
-const ORACLE_BOOLS = ['includeViews', 'includeKeys', 'includeComments'];
+const ORACLE_BOOLS = ['includeViews', 'includeKeys', 'includeNotNull', 'includeComments'];
 const ORACLE_TEXTS = ['defaultSchema'];
 
 function mergeOracle(target: Record<string, unknown>, raw: unknown): void {

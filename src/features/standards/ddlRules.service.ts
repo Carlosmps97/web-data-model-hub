@@ -129,12 +129,13 @@ export function ruleActionSummary(r: DdlRule): string {
     return `Statements: ${(st.before?.[0] ?? st.after?.[0] ?? '').slice(0, 48)}${n > 1 ? ` (+${n - 1})` : ''}`;
   }
   if (a.layout) {
+    // Doc 107: con PARTITIONED BY las particiones van siempre ahí; la regla dice
+    // de dónde salen (UDP o flag) y dónde van cuando el export no lo escribe.
     const lay = a.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string };
     const udp = (lay.partitionUdp ?? lay.partitionOrderUdp ?? '').trim();
-    const where = lay.partitionColumns === 'last' ? 'last'
-      : lay.partitionColumns === 'partitioned-by' ? 'only in PARTITIONED BY'   // doc 107
-        : 'in physical order';
-    return `Column layout: partition columns ${where}` + (udp ? ` · partitions from UDP "${udp}"` : '');
+    const from = udp ? `partitions from UDP "${udp}"` : 'partitions from the partition flag';
+    const off = lay.partitionColumns === 'last' ? 'last' : 'in physical order';
+    return `Column layout: ${from} · ${off} when there is no PARTITIONED BY`;
   }
   if (a.types) {
     const map = Object.entries(a.types as Record<string, string>).map(([k, v]) => `${k} → ${v}`).join(', ');

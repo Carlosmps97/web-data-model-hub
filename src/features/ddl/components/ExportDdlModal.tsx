@@ -43,7 +43,7 @@ import {
 } from '../generators';
 import { oracleDdl, oracleForeignKeysFile, oracleTableStatements, oracleViewStatements } from '../oracle';
 import {
-  fetchDdlConfig, fetchExportRules, fetchUdpDefs, layoutFromRules, renderWithRules, selectableRules, withLayout, withUdpPartitions,
+  fetchDdlConfig, fetchExportRules, fetchUdpDefs, layoutFromRules, renderWithRules, selectableRules, withUdpPartitions,
   type ExportRule, type UdpDefLite,
 } from '../rulesBridge';
 import {
@@ -56,6 +56,7 @@ import { plainToObjects, statementsToObjects, objectsToEntries, viewKey } from '
 import ExportRulesPanel from './ExportRulesPanel';
 import DdlOutputForm from './DdlOutputForm';
 import { exportGate } from '../exportGate';
+import { pickedTableIds } from '../tableSelection';
 
 export interface ExportDdlModalProps {
   open: boolean;
@@ -111,6 +112,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     if (!open) return;
     let alive = true;
     setTab('output');
+    setSelected(null);
     setUdpDefs(null); setUdpFailed(false); setSettingsReady(false);
     const projectId = sessionProjectId();
     const last = lastLoaded.current?.projectId === projectId ? lastLoaded.current.settings : DEFAULT_OUTPUT_SETTINGS;
@@ -149,15 +151,11 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   // download. Cualquier cambio de opciones/selección lo invalida.
   const [rulesPreview, setRulesPreview] = useState<{ sql: string; applied: number; version: string } | null>(null);
 
-  // Which table ids to export — defaults to all; recomputed if the diagram changes.
+  // Tablas a exportar — doc 108: por default NINGUNA (antes, todas); cada vez que
+  // se abre el modal se vuelve a empezar sin elección. Una tabla que dejó el canvas sale de la elección.
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [tableFilter, setTableFilter] = useState('');
-  const selectedIds = useMemo(() => {
-    const all = new Set(allTables.map((t) => t.id));
-    if (!selected) return all;
-    // Drop ids no longer present (diagram changed under us).
-    return new Set([...selected].filter((id) => all.has(id)));
-  }, [selected, allTables]);
+  const selectedIds = useMemo(() => pickedTableIds(selected, allTables.map((t) => t.id)), [selected, allTables]);
 
   const exportTables = allTables.filter((t) => selectedIds.has(t.id));
 
@@ -179,7 +177,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   // reglas SELECCIONADAS — sólo el export con reglas lo aplica; sin reglas el
   // DDL base sigue byte-idéntico.
   const layout = useMemo(() => layoutFromRules(exportRules, selRuleIds), [exportRules, selRuleIds]);
-  const effOpts = useMemo(() => withLayout(opts, layout), [opts, layout]);
+  const effOpts = useMemo(() => ({ ...opts, partitionsLast: layout.partitionsLast }), [opts, layout]);
   // Doc 93 D10: con la regla de layout, las particiones salen del UDP que ella
   // nombra (PART_nn = partición y su orden) → el CREATE físico y el motor
   // coinciden; sin esa regla (o sin el UDP) rige el flag de la plataforma.
