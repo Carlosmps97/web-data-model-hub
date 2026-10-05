@@ -7,6 +7,8 @@ const MONO = "'Geist Mono Variable', ui-monospace, 'JetBrains Mono', monospace";
 const UI = "'Geist Variable', -apple-system, 'Segoe UI', sans-serif";
 
 const esc = (s: string) => s.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'));
+/** Valor de atributo: `"` y `&` escapados (la familia viene entre comillas). */
+const escAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 const n = (v: number) => String(Math.round(v * 100) / 100);
 
 /** Atributos con omisión de undefined. Los valores YA vienen saneados. */
@@ -44,13 +46,16 @@ function item(i: SceneItem, defs: { hatch: boolean }): string {
       return `<path d="${i.d}"${at({ fill: i.fill ?? 'none', ...strokeAt(i) })}/>`;
     case 'text':
       return `<text x="${n(i.x)}" y="${n(i.y)}"${at({
-        'font-family': i.mono ? MONO : UI,
+        // Doc 109: la familia elegida en un dibujo, con la de la app de respaldo.
+        'font-family': i.mono ? MONO : i.font ? `${escAttr(JSON.stringify(i.font))}, ${UI}` : UI,
         'font-size': n(i.size),
         'font-weight': i.bold ? 700 : undefined,
         'font-style': i.italic ? 'italic' : undefined,
+        'text-decoration': i.underline ? 'underline' : undefined,
         'text-anchor': i.anchor && i.anchor !== 'start' ? i.anchor : undefined,
         'letter-spacing': i.ls !== undefined ? n(i.ls) : undefined,
         fill: i.color,
+        'xml:space': /^\s|\s\s/.test(i.s) ? 'preserve' : undefined,
       })}>${esc(i.s)}</text>`;
   }
 }

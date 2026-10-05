@@ -11,9 +11,11 @@
  * copy: lo grabado en una no se le repone a otra ni a producción.
  */
 import { cleanRoutes, type WireRoutes } from './wireRoute';
+import { cleanColors } from '@/lib/colors';
 
 type Layout = Record<string, { x: number; y: number }>;
-export interface WrittenCanvas { layout: Layout; routes: WireRoutes }
+/** Doc 109: también los colores del canvas (excepciones por caja). */
+export interface WrittenCanvas { layout: Layout; routes: WireRoutes; colors: Record<string, string> }
 
 let clock = 0;
 const written = new Map<string, WrittenCanvas & { at: number }>();
@@ -46,19 +48,22 @@ export const canvasClock = (): number => clock;
 
 /** Anota el documento que se acaba de grabar (`null` = el canvas se borró). */
 export function noteCanvasWrite(
-  cs: string, saId: string, doc: { layout?: Layout | null; routes?: unknown } | null,
+  cs: string, saId: string, doc: { layout?: Layout | null; routes?: unknown; colors?: unknown } | null,
 ): void {
   clock += 1;
   if (!doc) { written.delete(key(cs, saId)); return; }
-  written.set(key(cs, saId), { at: clock, layout: copyLayout(doc.layout), routes: cleanRoutes(doc.routes) });
+  written.set(key(cs, saId), { at: clock, layout: copyLayout(doc.layout), routes: cleanRoutes(doc.routes),
+                               colors: cleanColors(doc.colors) });
 }
 
-/** Posiciones y trazos grabados DESPUÉS de la marca `asOf`; null si el diagrama
- *  pedido en esa marca ya los trae. */
+/** Posiciones, trazos y colores grabados DESPUÉS de la marca `asOf`; null si el
+ *  diagrama pedido en esa marca ya los trae. */
 export function writtenSince(cs: string | null, saId: string, asOf: number): WrittenCanvas | null {
   if (!cs) return null;
   const w = written.get(key(cs, saId));
-  return w && w.at > asOf ? { layout: copyLayout(w.layout), routes: cleanRoutes(w.routes) } : null;
+  return w && w.at > asOf
+    ? { layout: copyLayout(w.layout), routes: cleanRoutes(w.routes), colors: { ...w.colors } }
+    : null;
 }
 
 /** Olvida todo (pruebas). */

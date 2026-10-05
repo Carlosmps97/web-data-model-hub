@@ -63,7 +63,9 @@ function parsePath(d: string): Cmd[] {
 
 const FONTS = ['Helvetica', 'Helvetica-Bold', 'Courier', 'Courier-Bold', 'Helvetica-Oblique', 'Helvetica-BoldOblique'];
 const fontOf = (i: Extract<SceneItem, { k: 'text' }>): { f: string; wf: number } => {
-  if (i.mono) return i.bold ? { f: 'F4', wf: 0.6 } : { f: 'F3', wf: 0.6 };
+  // Doc 109: las familias de un dibujo se aproximan con las core del PDF
+  // (monoespaciadas → Courier; el resto → Helvetica).
+  if (i.mono || /courier|mono|consolas/i.test(i.font ?? '')) return i.bold ? { f: 'F4', wf: 0.6 } : { f: 'F3', wf: 0.6 };
   if (i.bold && i.italic) return { f: 'F6', wf: 0.58 };
   if (i.bold) return { f: 'F2', wf: 0.58 };
   if (i.italic) return { f: 'F5', wf: 0.55 };
@@ -178,6 +180,11 @@ function sceneContent(scene: Scene, scale?: number): { stream: string; W: number
         let s = `q BT ${rgb(i.color, scene.bg)} rg /${f} ${n2(i.size * S)} Tf`;
         if (i.ls) s += ` ${n2(i.ls * S)} Tc`;
         s += `\n${n2(i.x * S - dx)} ${Y(i.y)} Td\n(${bytes}) Tj\nET Q`;
+        if (i.underline) {
+          // Doc 109: subrayado = una línea bajo el texto, del ancho estimado.
+          const uy = Y(i.y + i.size * 0.12);
+          s += `\nq ${rgb(i.color, scene.bg)} RG ${n2(Math.max(0.5, i.size * 0.06) * S)} w ${n2(i.x * S - dx)} ${uy} m ${n2(i.x * S - dx + width)} ${uy} l S Q`;
+        }
         push(s);
         break;
       }

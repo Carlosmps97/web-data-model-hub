@@ -461,3 +461,41 @@ describe('lo que sale de un canvas, con su posición (doc 105, F4)', () => {
     expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });
+
+describe('setCanvasColors (doc 109)', () => {
+  it('mezcla el lote sobre los colores efectivos del canvas y graba el documento completo', async () => {
+    draft.sa1 = canvas({ colors: { t1: '#16A37B', t2: 'none' } });
+    await struct.setCanvasColors('sa1', { t1: 'theme:th1', t2: null, v1: '#ff0000' });
+    expect(vi.mocked(csvc.recordChange).mock.calls[0].slice(0, 4)).toEqual(['cs1', 'subject_areas', 'sa1', 'upsert']);
+    expect(recorded()[0]).toEqual(canvas({ colors: { t1: 'theme:th1', v1: '#FF0000' } }));
+  });
+
+  it('sanea lo que lee: un color corrupto del canvas no vuelve como payload', async () => {
+    draft.sa1 = canvas({ colors: { t1: 'rojo', t2: '#16A37B' } as never });
+    await struct.setCanvasColors('sa1', { v1: 'none' });
+    expect(recorded()[0].colors).toEqual({ t2: '#16A37B', v1: 'none' });
+  });
+
+  it('rechaza un color inválido ANTES de tocar el backend', async () => {
+    await expect(struct.setCanvasColors('sa1', { t1: 'rojo' })).rejects.toThrow(/Invalid color/);
+    expect(csvc.effective).not.toHaveBeenCalled();
+  });
+
+  it('dos escrituras del mismo canvas van en fila: la segunda lee lo de la primera', async () => {
+    await Promise.all([struct.setCanvasColors('sa1', { t1: '#111111' }), struct.setCanvasColors('sa1', { t2: '#222222' })]);
+    expect(calls).toEqual(['get:sa1', 'put:sa1', 'get:sa1', 'put:sa1']);
+    expect(draft.sa1.colors).toEqual({ t1: '#111111', t2: '#222222' });
+  });
+
+  it('los colores viajan intactos en las demás escrituras del canvas', async () => {
+    draft.sa1 = canvas({ colors: { t1: '#16A37B' } });
+    await struct.setWireRoute('sa1', 'r1', R1);
+    expect(recorded()[0].colors).toEqual({ t1: '#16A37B' });
+  });
+
+  it('sin working copy no graba', async () => {
+    useSessionStore.setState({ openMode: 'readonly', activeChangesetId: 'cs1' });
+    await expect(struct.setCanvasColors('sa1', { t1: '#111111' })).rejects.toThrow(/working copy/i);
+    expect(csvc.recordChange).not.toHaveBeenCalled();
+  });
+});

@@ -10,6 +10,7 @@ vi.mock('@/features/modeler/services/modeler.service', () => ({
 }));
 vi.mock('@/services/naming.service', () => ({ listDomainsGlobal: vi.fn() }));
 vi.mock('@/features/standards/standards.service', () => ({ getUdpDefs: vi.fn() }));
+vi.mock('@/services/themes.service', () => ({ listThemes: vi.fn(async () => []) }));
 vi.mock('@/features/modeler/lib/exportFonts', () => ({ EXPORT_FONT_CSS: '' }));
 
 import { listFolders, listSubjectAreas, loadDiagram } from '@/features/modeler/services/modeler.service';

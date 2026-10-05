@@ -11,6 +11,7 @@
 import { apiGet, apiPost, LONG_TIMEOUT_MS } from '@/services/http';
 import { runBlocking } from '@/store/useBusyStore';
 import type { UdpScope, Separator, Casing } from '@/services/naming.service';
+import type { Theme } from '@/lib/colors';
 
 import { API_BASE } from '@/services/apiBase';
 const PROJECT = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}`;
@@ -25,9 +26,10 @@ export const STANDARDS_BLOCKS: { key: StandardsBlock; label: string }[] = [
   { key: 'udp', label: 'UDP definitions' },
   { key: 'naming', label: 'Naming rules' },
   { key: 'ddl', label: 'DDL export rules' },
+  { key: 'themes', label: 'Color themes' },
 ];
 /** Conteos por bloque del proyecto fuente (`GET …/standards/summary`). */
-export interface StandardsSummary { glossary: number; domains: number; udp: number; rules: number; naming: boolean }
+export interface StandardsSummary { glossary: number; domains: number; udp: number; rules: number; naming: boolean; themes?: number }
 
 export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; locked?: boolean; lockedBy?: string | null; lockedAt?: string | null; }
 export interface SnapshotDomain {
@@ -112,13 +114,15 @@ export interface StandardsSnapshot {
   udp: UdpDefinition[];
   ddlRules?: DdlRule[];
   ddlConfig?: DdlRulesetConfig;
+  /** Doc 109: themes de color del proyecto (snapshots viejos no lo traen). */
+  themes?: Theme[];
 }
 
 export interface StandardsVersion {
   id: string;
   seq: number;
   label: string;
-  kind: 'glossary' | 'udp' | 'domain' | 'naming' | 'ddl' | 'batch' | 'baseline' | 'rollback';
+  kind: 'glossary' | 'udp' | 'domain' | 'naming' | 'ddl' | 'themes' | 'batch' | 'baseline' | 'rollback';
   title: string;
   description?: string | null;
   author: string;
@@ -159,8 +163,10 @@ export interface DdlRuleEditInput {
   priority: number;
   enabled: boolean;
 }
+/** Doc 109: alta/edición de un theme de color (sin `id` = alta). */
+export interface ThemeEditInput { id?: string; name: string; color: string; order?: number }
 export interface ApplyStandardsBody {
-  kind?: 'glossary' | 'udp' | 'domain' | 'naming' | 'ddl' | 'batch';
+  kind?: 'glossary' | 'udp' | 'domain' | 'naming' | 'ddl' | 'themes' | 'batch';
   title?: string;
   description?: string;
   termsUpsert?: TermEditInput[];
@@ -173,6 +179,8 @@ export interface ApplyStandardsBody {
   rulesUpsert?: DdlRuleEditInput[];
   rulesDelete?: string[];
   ddlConfigPatch?: { lookups?: Record<string, DdlLookup>; functions?: DdlRulesetConfig['functions']; output?: Record<string, unknown> };
+  themesUpsert?: ThemeEditInput[];
+  themesDelete?: string[];
 }
 
 export const getSnapshot = (projectId: string) => apiGet<StandardsSnapshot>(`${STD(projectId)}/snapshot`);

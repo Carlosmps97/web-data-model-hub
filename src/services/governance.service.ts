@@ -31,6 +31,10 @@ export interface CanonicalTable {
   description?: string; udpValues?: Record<string, string>;
   /** Doc 69 §4.9: existe en UNA sola faceta de Erwin (Is_Logical_Only / Is_Physical_Only). */
   logicalOnly?: boolean; physicalOnly?: boolean;
+  /** Doc 109: color de la tabla en TODOS sus canvases ('theme:<id>' o
+   *  '#RRGGBB', `lib/colors.ts`); null = sin color. Debe existir acá Y en el
+   *  Pydantic CanonicalTableDoc. */
+  color?: string | null;
 }
 export interface CanonicalColumn {
   id: string; tableId: string; physicalName: string; logicalName: string;
@@ -114,6 +118,15 @@ export const physicalize = async (logical: string, scope?: 'table' | 'column') =
 export const listDomains = async () => apiGet<ParentDomain[]>(`${PROJECT()}/domains`);
 
 // ── Catálogo canónico (del proyecto de la sesión) ──
+/** Doc 109: el documento VIGENTE de una tabla en la working copy (null = no
+ *  existe o no hay sesión de edición). Base de un guardado que no puede partir
+ *  del diagrama en pantalla: éste puede no tener todavía el último guardado. */
+export const currentTable = async (id: string): Promise<CanonicalTable | null> => {
+  const a = active();
+  if (!a) return null;
+  const [t] = await csvc.effective<CanonicalTable>(a, 'canonical_tables', { ids: [id] });
+  return t ?? null;
+};
 export const listTables = async () => {
   const a = active();
   return a ? csvc.effective<CanonicalTable>(a, 'canonical_tables') : apiGet<CanonicalTable[]>(`${PROJECT()}/catalog/tables`);

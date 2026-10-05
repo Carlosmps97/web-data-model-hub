@@ -24,6 +24,9 @@ import { labelPlacement, relationshipLabel, wrapLabel } from './relationshipLabe
 import { relationshipDrift } from './relationshipPairs';
 import { SYMBOL_SIZE, isSubcategory, subtypeGroups, symbolDefaultPos } from './subtypeGraph';
 import { viewNodeRows, viewSourceIds } from './viewGraph';
+import { boxHex } from './boxColor';
+import { boxTints, themeIndex, type Theme } from '@/lib/colors';
+import { drawingAlign, drawingFill, drawingFont, drawingStroke, hasText } from './drawingStyle';
 import {
   STUB_BLOCK, STUB_SYMBOL, cleanRoutes, roundedPath, routeOf, routedGeometry, trunkRouteId,
   type RoutePoint, type RoutedGeometry, type WireRoutes,
@@ -40,7 +43,10 @@ export type SceneItem =
   | { k: 'text'; x: number; y: number; s: string; size: number; color: string; mono?: boolean; bold?: boolean; italic?: boolean; anchor?: 'start' | 'middle' | 'end'; ls?: number;
       /** Ancho medio por carácter (× size) para anclar `middle`/`end` en el PDF,
        *  que no mide texto. Default: el de la fuente (scenePdf). */
-      wf?: number };
+      wf?: number;
+      /** Doc 109: familia elegida para el texto de un dibujo (null = la de la app)
+       *  y subrayado. */
+      font?: string | null; underline?: boolean };
 
 export interface Scene { w: number; h: number; bg: string; items: SceneItem[] }
 
@@ -55,6 +61,10 @@ export interface SceneInput {
    *  (`diagram.subjectArea.routes`); el toolbar pasa los VIVOS del store (en
    *  edición pueden tener un guardado todavía en vuelo). */
   routes?: WireRoutes;
+  /** Doc 109: colores de las cajas en el canvas (ausente = los del canvas,
+   *  `diagram.subjectArea.colors`) y los themes del proyecto para resolverlos. */
+  colors?: Record<string, string>;
+  themes?: Theme[];
 }
 
 // ── Tokens resueltos (tokens.css) y mezclas pre-calculadas ────────────────
@@ -104,7 +114,52 @@ const clampW = (chars: number) => Math.min(880, Math.max(240, Math.round(chars *
 const trunc = (s: string, maxChars: number): string =>
   s.length <= maxChars ? s : `${s.slice(0, Math.max(1, maxChars - 1))}…`;
 
+/** Doc 109: texto de un dibujo en líneas de a lo más `budget` caracteres —
+ *  respeta los saltos y corta por palabra (una palabra larga, por carácter).
+ *  Conserva los espacios al principio (Erwin los usa para centrar). Pura. */
+export function wrapText(text: string, budget: number): string[] {
+  const out: string[] = [];
+  for (const raw of text.split('\n')) {
+    let line = '';
+    for (const word of raw.split(/(\s+)/)) {
+      if (!word) continue;
+      if ((line + word).length <= budget) { line += word; continue; }
+      if (line.trim()) out.push(line.replace(/\s+$/, ''));
+      line = /^\s+$/.test(word) ? '' : word;
+      while (line.length > budget) { out.push(line.slice(0, budget)); line = line.slice(budget); }
+    }
+    out.push(line.replace(/\s+$/, ''));
+  }
+  return out;
+}
+
 interface Box { x: number; y: number; w: number; h: number }
+
+/** Doc 109: el bloque de texto de un dibujo (en las coordenadas del dibujo),
+ *  como lo pinta el canvas (`.wk-shape-text`): margen 2×4 px, interlineado 1.3,
+ *  corte por palabra al ancho de la caja y el texto que no entra se sigue
+ *  viendo. `box` = lo que ocupa (puede salirse de la caja: entra en los
+ *  límites del export). null = el dibujo no lleva texto. Pura. */
+function drawingTextLayout(d: Drawing) {
+  if (!hasText(d) || !(d.text || d.type === 'text')) return null;
+  const f = drawingFont(d);
+  const { align, valign } = drawingAlign(d);
+  const size = f.size * (4 / 3);
+  const lh = size * 1.3;
+  const padX = 4, padY = 2;
+  // Ancho medio por carácter de la letra con que el PDF la dibuja (`fontOf` de
+  // scenePdf: monoespaciada → Courier 0.6; negrita 0.58; el resto 0.55).
+  const wf = /courier|mono|consolas/i.test(f.family ?? '') ? 0.6 : f.bold ? 0.58 : 0.55;
+  const budget = Math.max(4, Math.floor((d.w - 2 * padX) / (size * wf)));
+  const lines = wrapText(d.text || 'Text', budget);
+  const block = lines.length * lh;
+  const top = valign === 'top' ? d.y + padY : valign === 'bottom' ? d.y + d.h - padY - block : d.y + (d.h - block) / 2;
+  const anchor: 'start' | 'middle' | 'end' = align === 'center' ? 'middle' : align === 'right' ? 'end' : 'start';
+  const x = align === 'center' ? d.x + d.w / 2 : align === 'right' ? d.x + d.w - padX : d.x + padX;
+  const width = Math.max(...lines.map((ln) => ln.length), 1) * size * wf;
+  const left = anchor === 'middle' ? x - width / 2 : anchor === 'end' ? x - width : x;
+  return { f, size, lh, wf, lines, top, anchor, x, box: { x: left, y: top, w: width, h: block } };
+}
 
 interface TableBox extends Box {
   t: Diagram['tables'][number];
@@ -146,6 +201,13 @@ const EMPTY_SCENE: Scene = { w: 640, h: 400, bg: C.bg, items: [] };
 export function buildDiagramScene(input: SceneInput): Scene {
   const { diagram, drawings, viewMode } = input;
   if (!diagram && !drawings.length) return EMPTY_SCENE;
+  // Doc 109: color de cada caja (excepción del canvas → color de la tabla).
+  const canvasColors = input.colors ?? diagram?.subjectArea.colors ?? {};
+  const themeIdx = themeIndex(input.themes ?? []);
+  const tintOf = (id: string, own: string | null | undefined) => {
+    const hex = boxHex(id, own, canvasColors, themeIdx);
+    return hex ? boxTints(hex) : null;
+  };
   const name = nameOf(viewMode);
   const items: SceneItem[] = [];
 
@@ -370,7 +432,10 @@ export function buildDiagramScene(input: SceneInput): Scene {
       });
     }),
   ].flatMap((l) => (l ? [l.rect] : []));
-  const boxes: Box[] = [...tableBoxes.values(), ...viewBoxes, ...symbolBoxes.values(), ...drawings, ...labelBoxes, ...routedBoxes];
+  // Doc 109: el texto de un dibujo que desborda su caja también entra en los límites.
+  const textBoxes = drawings.flatMap((d) => { const t = drawingTextLayout(d); return t ? [t.box] : []; });
+  const boxes: Box[] = [...tableBoxes.values(), ...viewBoxes, ...symbolBoxes.values(), ...drawings, ...textBoxes,
+    ...labelBoxes, ...routedBoxes];
   if (!boxes.length) return EMPTY_SCENE;
   const minX = Math.min(...boxes.map((b) => b.x)) - 60;
   const minY = Math.min(...boxes.map((b) => b.y)) - 60;
@@ -381,19 +446,28 @@ export function buildDiagramScene(input: SceneInput): Scene {
   const dwx = (d: Drawing): Box => ({ x: d.x - minX, y: d.y - minY, w: d.w, h: d.h });
 
   // ── Fase 3: SHAPES (capa de fondo, zIndex -1 en el canvas) ──────────────
+  // Doc 109: relleno, borde y texto con su formato (misma regla que el canvas,
+  // `drawingStyle.ts`); la letra va en puntos → px (× 4/3).
   for (const d of drawings) {
     const b = dwx(d);
-    const color = d.color ?? '#2E5BFF';
-    const soft = `${color}1A`;
+    const stroke = drawingStroke(d);
+    const fill = drawingFill(d) ?? undefined;    // `#RRGGBBAA`: SVG y PDF mezclan el alfa
     switch (d.type) {
       case 'rect': case 'square':
-        items.push({ k: 'rect', ...b, rx: 8, fill: soft, stroke: color, sw: 2 }); break;
+        items.push({ k: 'rect', ...b, rx: 8, fill, stroke: stroke ?? undefined, sw: stroke ? 2 : undefined }); break;
+      case 'text':
+        if (fill || stroke) items.push({ k: 'rect', ...b, rx: 3, fill, stroke: stroke ?? undefined, sw: stroke ? 1 : undefined });
+        break;
       case 'circle': case 'ellipse':
-        items.push({ k: 'ellipse', cx: b.x + b.w / 2, cy: b.y + b.h / 2, rx: b.w / 2, ry: b.h / 2, fill: soft, stroke: color, sw: 2 }); break;
-      case 'line':
-        items.push({ k: 'line', x1: b.x, y1: b.y + b.h / 2, x2: b.x + b.w, y2: b.y + b.h / 2, stroke: color, sw: 2.4, cap: 'round' }); break;
+        items.push({ k: 'ellipse', cx: b.x + b.w / 2, cy: b.y + b.h / 2, rx: b.w / 2, ry: b.h / 2, fill, stroke: stroke ?? undefined, sw: stroke ? 2 : undefined }); break;
+      case 'line': {
+        const c = stroke ?? '#56607A';
+        if (b.h > b.w) items.push({ k: 'line', x1: b.x + b.w / 2, y1: b.y, x2: b.x + b.w / 2, y2: b.y + b.h, stroke: c, sw: 2.4, cap: 'round' });
+        else items.push({ k: 'line', x1: b.x, y1: b.y + b.h / 2, x2: b.x + b.w, y2: b.y + b.h / 2, stroke: c, sw: 2.4, cap: 'round' });
+        break;
+      }
       case 'diamond':
-        items.push({ k: 'poly', pts: [[b.x + b.w / 2, b.y], [b.x + b.w, b.y + b.h / 2], [b.x + b.w / 2, b.y + b.h], [b.x, b.y + b.h / 2]], fill: soft, stroke: color, sw: 2 }); break;
+        items.push({ k: 'poly', pts: [[b.x + b.w / 2, b.y], [b.x + b.w, b.y + b.h / 2], [b.x + b.w / 2, b.y + b.h], [b.x, b.y + b.h / 2]], fill, stroke: stroke ?? undefined, sw: stroke ? 2 : undefined }); break;
       case 'star': {
         const pts: [number, number][] = [];
         for (let i = 0; i < 10; i++) {
@@ -401,23 +475,17 @@ export function buildDiagramScene(input: SceneInput): Scene {
           const a = (Math.PI / 5) * i - Math.PI / 2;
           pts.push([b.x + b.w / 2 + r * b.w * Math.cos(a), b.y + b.h / 2 + r * b.h * Math.sin(a)]);
         }
-        items.push({ k: 'poly', pts, fill: soft, stroke: color, sw: 2, join: 'round' });
-        break;
-      }
-      case 'text': {
-        const budget = Math.max(4, Math.floor((b.w - 8) / 8.4));
-        const lines = (d.text || 'Text').split('\n').flatMap((ln) => {
-          const out: string[] = [];
-          for (let s = ln; s.length > budget; s = s.slice(budget)) out.push(s.slice(0, budget));
-          out.push(...(ln.length > budget ? [ln.slice(Math.floor(ln.length / budget) * budget)] : [ln]));
-          return ln.length > budget ? out.slice(0, -1) : out;
-        });
-        const lh = 18.2;
-        const y0 = b.y + b.h / 2 - (lines.length * lh) / 2 + 13;
-        lines.forEach((s, i) => items.push({ k: 'text', x: b.x + 4, y: y0 + i * lh, s, size: 14, color, bold: true }));
+        items.push({ k: 'poly', pts, fill, stroke: stroke ?? undefined, sw: stroke ? 2 : undefined, join: 'round' });
         break;
       }
     }
+    const t = drawingTextLayout(d);
+    if (!t) continue;
+    const { f, size, lh, wf, anchor } = t;
+    t.lines.forEach((ln, i) => items.push({
+      k: 'text', x: t.x - minX, y: t.top - minY + i * lh + size * 0.92, s: ln, size, color: f.color,
+      bold: f.bold, italic: f.italic, underline: f.underline, font: f.family, anchor, wf,
+    }));
   }
 
   // ── Fase 4: EDGES (React Flow los pinta bajo los nodos) ─────────────────
@@ -481,10 +549,11 @@ export function buildDiagramScene(input: SceneInput): Scene {
   // ── Fase 5: NODOS tabla ─────────────────────────────────────────────────
   for (const b of tableBoxes.values()) {
     const { t, x, y, w, h } = b;
-    items.push({ k: 'rect', x, y, w, h, rx: 11, fill: C.surface });
+    const tinted = tintOf(t.id, t.color);   // doc 109
+    items.push({ k: 'rect', x, y, w, h, rx: 11, fill: tinted?.body ?? C.surface });
     items.push({ k: 'rect', x, y, w, h: HEADER_H, rx: 11, rtop: true, fill: C.navy });
     if (b.pkRows > 0) {
-      items.push({ k: 'rect', x, y: y + HEADER_H, w, h: b.pkRows * ROW_H, fill: C.pkZone });
+      items.push({ k: 'rect', x, y: y + HEADER_H, w, h: b.pkRows * ROW_H, fill: tinted?.key ?? C.pkZone });
       items.push({ k: 'line', x1: x, y1: y + HEADER_H + b.pkRows * ROW_H, x2: x + w, y2: y + HEADER_H + b.pkRows * ROW_H, stroke: C.pkInset, sw: 1 });
     }
     // Glyph de tabla (blanco tenue) + título `schema.` + nombre.
@@ -530,8 +599,9 @@ export function buildDiagramScene(input: SceneInput): Scene {
   // ── Fase 6: NODOS vista ─────────────────────────────────────────────────
   for (const vb of viewBoxes) {
     const { v, x, y, w, h } = vb;
+    const vTint = tintOf(v.id, v.color);   // doc 109
     items.push({ k: 'rect', x, y, w, h, rx: 12, fill: C.surface });
-    items.push({ k: 'rect', x, y: y + HEADER_H, w, h: h - HEADER_H, fill: C.vBody });
+    items.push({ k: 'rect', x, y: y + HEADER_H, w, h: h - HEADER_H, fill: vTint?.body ?? C.vBody });
     items.push({ k: 'hatch', x, y: y + HEADER_H, w, h: h - HEADER_H });
     items.push({ k: 'rect', x, y, w, h: HEADER_H, rx: 12, rtop: true, fill: C.vHead });
     // Ojo (glyph) + título + badge VISTA.

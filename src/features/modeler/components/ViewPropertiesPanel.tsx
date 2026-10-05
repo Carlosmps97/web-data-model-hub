@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowLeft, Eye, GripVertical, Pencil, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
-import { failureText, useModelerStore } from '@/store/useModelerStore';
+import { failureText, inObjectOrder, undoFields, useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { pushUndo } from '@/store/useUndoStore';
 import * as viewsSvc from '@/services/views.service';
@@ -13,6 +13,7 @@ import { generatedViewDdl } from '../lib/viewDdl';
 import { confirmDeleteView } from './deleteConfirm';
 import AuditHistory from './AuditHistory';
 import SchemaSelect from './SchemaSelect';
+import ColorField from './ColorField';
 import UdpAssign from './UdpAssign';
 import ViewEditor from './ViewEditor';
 
@@ -59,6 +60,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   // Doc 70: la visibilidad es por CANVAS (membresía), no un flag global.
   const removeViewFromCanvas = useModelerStore((s) => s.removeViewFromCanvas);
   const deleteView = useModelerStore((s) => s.deleteView);
+  const setObjectColor = useModelerStore((s) => s.setObjectColor);   // doc 109
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
 
@@ -145,22 +147,38 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   if (!view) return null;
 
   // Pre-imagen POR VALOR para el Undo (doc 50) — el payload es el doc completo.
-  const viewPre = (): View => ({
-    ...view,
-    sources: view.sources?.map((s) => ({ ...s })),
-    sourceTableIds: view.sourceTableIds ? [...view.sourceTableIds] : undefined,
-    udpValues: view.udpValues ? { ...view.udpValues } : undefined,
+  const viewPre = (v: View): View => ({
+    ...v,
+    sources: v.sources?.map((s) => ({ ...s })),
+    sourceTableIds: v.sourceTableIds ? [...v.sourceTableIds] : undefined,
+    udpValues: v.udpValues ? { ...v.udpValues } : undefined,
   });
 
   /** Único camino de guardado del panel: updateView (changeset-aware) con el
-   *  doc completo + inversa en el Undo + reload. */
+   *  doc completo + inversa en el Undo + reload. Doc 109 (revisión): en fila
+   *  con el color de la vista (`inObjectOrder`) y desde el documento VIGENTE de
+   *  la working copy (antes, el segundo guardado revertía al primero); si ya no
+   *  existe, avisa en vez de recrearla. */
   const saveView = async (patch: Partial<ViewInput>, label: string, toastMsg?: string) => {
     const pin = pinSession();   // doc 105 (H1): su inversa se apila sólo en su sesión
-    const pre = viewPre();
-    await viewsSvc.updateView(view.id, { ...view, ...patch } as ViewInput);
-    pushUndo(label, async () => { await viewsSvc.updateView(pre.id, pre as ViewInput); await reload(); }, pin);
-    await reload();
-    if (toastMsg) pushToast(toastMsg);
+    const id = view.id;
+    const wrote = await inObjectOrder(id, async () => {
+      pin.check();
+      const cur = await viewsSvc.currentView(id);
+      pin.check();
+      if (!cur) throw new Error('This view is no longer in the working copy.');
+      // Sin cambio respecto de lo VIGENTE: nada que grabar.
+      const keys = Object.keys(patch) as (keyof ViewInput)[];
+      const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+      if (keys.every((k) => same((cur as ViewInput)[k], patch[k]))) return false;
+      const pre = viewPre(cur) as unknown as Record<string, unknown>;
+      await viewsSvc.updateView(id, { ...cur, ...patch } as ViewInput);
+      // La inversa restaura sólo lo que este guardado cambió (sobre lo vigente).
+      pushUndo(label, undoFields('view', id, Object.fromEntries(keys.map((k) => [k, pre[k]])), pin, reload), pin);
+      await reload();
+      return true;
+    });
+    if (wrote && toastMsg) pushToast(toastMsg);
   };
   /** Doc 105 (H7): el `.catch` de un guardado, tomado AL PEDIRLO — con la
    *  versión recién transferida calla (la revalidación ya avisó). */
@@ -180,8 +198,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const saveDescriptionOnBlur = async () => {
     if (!canEdit) return;
     const next = form.description.trim() || undefined;
-    if ((view.description ?? undefined) === next) return;
-    const onError = saveErr();
+    const onError = saveErr();      // doc 109: «sin cambio» lo decide `saveView` contra lo vigente
     try { await saveView({ description: next }, `Edit view ${view.name}`); } catch (e) { await onError(e); }
   };
   const askDelete = async () => {
@@ -309,6 +326,14 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
                 {savingDef && <span className="rd-spin" aria-hidden />}{savingDef ? 'Saving…' : 'Save'}
               </button>
             )}
+            {/* Doc 109: color PROPIO de la vista (todos sus canvases), como las tablas. */}
+            <div className="wk-pp-section">
+              <ColorField id={view.id} own={view.color} canEdit={canEdit} noun="view"
+                onPick={(ref) => {
+                  const onError = reportWriteError((e) => pushToast(failureText("Couldn't change the color", e), 'err'));
+                  void setObjectColor(view.id, ref).catch(onError);
+                }} />
+            </div>
             {canEdit && (
               <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5' }}>
                 <button className="rd-btn rd-btn-danger rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} onClick={askDelete}>

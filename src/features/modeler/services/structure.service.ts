@@ -27,6 +27,7 @@ import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import { noteCanvasWrite, wholeLayout } from '../lib/canvasWrites';
 import { MAX_ROUTE_POINTS, cleanRoute, cleanRoutes, pruneRoutes, routeOf, validWireId } from '../lib/wireRoute';
+import { cleanColors, normalColor } from '@/lib/colors';
 import type { RoutePoint, WireRoutes } from '../lib/wireRoute';
 import type { Drawing, Folder, Project, SubjectArea } from './modeler.service';
 
@@ -417,6 +418,28 @@ export const arrangeSubjectArea = async (
 
 export const setSubjectAreaDrawings = async (saId: string, drawings: Drawing[]): Promise<SubjectArea> =>
   patchSa(requireWriteCs('Saving the canvas drawings'), saId, { drawings });
+
+/** Doc 109: color de cajas EN ESTE canvas. `patch` = {id de tabla o vista:
+ *  ColorRef} — `null` quita la excepción (la caja vuelve al color de su tabla).
+ *  Se mezcla, en la cola del canvas, sobre los colores EFECTIVOS de ese momento:
+ *  dos cambios seguidos no se pisan. Una referencia inválida se rechaza. */
+export const setCanvasColors = async (
+  saId: string, patch: Record<string, string | null>,
+): Promise<SubjectArea> => {
+  const cs = requireWriteCs('Editing the canvas colors');
+  for (const [id, ref] of Object.entries(patch)) {
+    if (!id || (ref !== null && normalColor(ref, true) === null)) throw new Error(`Invalid color for ${id || 'a box'}.`);
+  }
+  return inOrder(saId, async () => {
+    const cur = await fetchEffectiveSa(cs, saId);
+    if (!cur) throw new Error(CANVAS_GONE);
+    const colors = cleanColors(cur.colors);
+    for (const [id, ref] of Object.entries(patch)) {
+      if (ref === null) delete colors[id]; else colors[id] = normalColor(ref, true)!;
+    }
+    return saveCanvas(cs, saId, { ...cur, colors, id: saId });
+  });
+};
 
 /** UDPs del canvas: SIEMPRE versionado (doc 75 D14: sin escritura directa). */
 export const setSubjectAreaUdp = (saId: string, udpValues: Record<string, string>): Promise<SubjectArea> =>

@@ -42,12 +42,14 @@ export function serializeSources(order: string[], cfg: Record<string, ColCfg>, v
 export function viewSaveBody(a: {
   name: string; schema: string; sourceIds: string[]; sources: ViewSource[]; showOnCanvas: boolean;
   sql: string; description: string; sqlText: string; udpValues?: Record<string, string>;
+  /** Doc 109: el color de la vista (el editor no lo cambia: se conserva). */
+  color?: string | null;
 }): ViewInput {
   return {
     name: a.name.trim(), schema: a.schema.trim() || undefined, sources: a.sources,
     sourceTableIds: a.sourceIds, tableId: a.sourceIds[0], showOnCanvas: a.showOnCanvas, sql: a.sql,
     description: a.description.trim() || undefined, customSql: a.sqlText.trim() || undefined,
-    udpValues: a.udpValues,
+    udpValues: a.udpValues, color: a.color ?? null,
   };
 }
 

@@ -3,7 +3,7 @@ import { sanitizeLogicalName } from '@/lib/logicalName';
 import { ArrowDownUp, Eye, Pencil, Plus, Table2, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
-import { failureText, useModelerStore } from '@/store/useModelerStore';
+import { failureText, inObjectOrder, undoFields, useModelerStore } from '@/store/useModelerStore';
 import { pushUndo } from '@/store/useUndoStore';
 import AuditHistory from './AuditHistory';
 import UdpAssign from './UdpAssign';
@@ -21,6 +21,7 @@ import { ColumnRow } from './ColumnEditor';
 import { tableNamePlan } from '../lib/nameSync';
 import { facetEditable } from '../lib/facetEditable';
 import SchemaSelect from './SchemaSelect';
+import ColorField from './ColorField';
 import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
 import type { TableViewRow, View } from '@/services/views.service';
@@ -57,6 +58,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const selectedTableId = useModelerStore((s) => s.selectedTableId);
   const setSelectedTable = useModelerStore((s) => s.setSelectedTable);
   const reload = useModelerStore((s) => s.reload);
+  const setObjectColor = useModelerStore((s) => s.setObjectColor);   // doc 109
   const reorderColumns = useModelerStore((s) => s.reorderColumns);
   // Doc 49: el click en una fila abre el Properties de ESA columna (sidebar
   // propio) — la edición inline (fila expandida) se retiró de este panel.
@@ -210,7 +212,17 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
 
   // Pre-imagen POR VALOR de la tabla para el Undo (doc 50) — común a los tres
   // caminos de guardado de abajo (Save, blur de la definición, UDP).
-  const tablePre = () => ({ ...table, ...(table.udpValues ? { udpValues: { ...table.udpValues } } : {}) });
+  const tablePre = (t: gov.CanonicalTable = table) => ({ ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) });
+  // Doc 109 (revisión): los guardados de la tabla van EN FILA con el color
+  // (`inObjectOrder`) y cada uno parte del documento VIGENTE de la working copy
+  // — antes cada uno mandaba la tabla de su render y el segundo revertía al
+  // primero (definición al salir del campo + color enseguida). Si ya no existe
+  // (se borró), avisa en vez de recrearla.
+  const latestTable = async (): Promise<gov.CanonicalTable> => {
+    const cur = await gov.currentTable(table.id);
+    if (!cur) throw new Error(`This ${nouns.one} is no longer in the working copy.`);
+    return cur;
+  };
 
   // Doc 105 (H7): el fallo de cada escritura de este panel espera la
   // revalidación y calla si la sesión cambió (`reportWriteError`: ya avisó
@@ -219,11 +231,15 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const saveDef = async () => {
     setSavingDef(true);
     const pin = pinSession();
-    const pre = tablePre();
     // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador) en
     // vez de un "Couldn't save" genérico que esconde POR QUÉ no se guardó.
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
-    try {
+    const tid = table.id;
+    try { await inObjectOrder(tid, async () => {
+      pin.check();
+      const table = await latestTable();
+      pin.check();
+      const pre = tablePre(table);
       const logical = form.logicalName.trim();
       // Doc 68: la decisión (re-derivar vs conservar el custom + flag de
       // override) vive en tableNamePlan — un físico con override NO se
@@ -237,14 +253,21 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       // sobre la tabla actual) cubre además `description`, y luego reload.
       pin.check();   // el físico pudo derivarse con un await
       await gov.createTable({ ...table, logicalName: logical, physicalName: physical, physicalNameOverridden: plan.overridden, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); }, pin);
+      // Doc 109: la inversa restaura sólo lo que este Save cambió (sobre lo vigente).
+      pushUndo(`Edit table ${pre.physicalName}`, undoFields('table', tid, {
+        logicalName: pre.logicalName, physicalName: pre.physicalName, physicalNameOverridden: pre.physicalNameOverridden,
+        schema: pre.schema, description: pre.description,
+      }, pin, reload), pin);
       // El form ya no se re-siembra en cada reload (solo al cambiar de tabla):
-      // reflejar acá el físico derivado para que el input no quede stale.
-      setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
-      setPhysTouched(null);
+      // reflejar acá el físico derivado para que el input no quede stale — si
+      // sigue abierta ESTA tabla (el guardado pudo esperar su turno en la fila).
+      if (useModelerStore.getState().selectedTableId === tid) {
+        setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
+        setPhysTouched(null);
+      }
       await reload();
       pushToast(`${nouns.One} updated`);
-    } catch (e) { await onError(e); }
+    }); } catch (e) { await onError(e); }
     finally { setSavingDef(false); }
   };
   const derivePhysical = async () => {
@@ -263,25 +286,36 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const saveDescriptionOnBlur = async () => {
     if (!canEdit || !table) return;
     const next = form.description.trim() || undefined;
-    if ((table.description ?? undefined) === next) return;
-    const pre = tablePre();
+    // Doc 109: «sin cambio» se decide contra el documento VIGENTE, en la fila (el
+    // diagrama en pantalla puede no tener todavía el guardado anterior).
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
     try {
-      await gov.createTable({ ...table, description: next });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); }, pin);
-      await reload();
+      await inObjectOrder(table.id, async () => {
+        pin.check();
+        const cur = await latestTable();
+        pin.check();
+        if ((cur.description ?? undefined) === next) return;
+        await gov.createTable({ ...cur, description: next });
+        pushUndo(`Edit table ${cur.physicalName}`, undoFields('table', cur.id, { description: cur.description }, pin, reload), pin);
+        await reload();
+      });
     } catch (e) { await onError(e); }
   };
   const saveTableUdp = async (next: Record<string, string>) => {
     if (!table) return;
-    const pre = tablePre();
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save UDP", 'err'));
     try {
-      await gov.createTable({ ...table, udpValues: next });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await reload(); }, pin);
-      await reload();
+      await inObjectOrder(table.id, async () => {
+        pin.check();
+        const cur = await latestTable();
+        pin.check();
+        const pre = tablePre(cur);
+        await gov.createTable({ ...cur, udpValues: next });
+        pushUndo(`Edit table ${pre.physicalName}`, undoFields('table', cur.id, { udpValues: pre.udpValues }, pin, reload), pin);
+        await reload();
+      });
     } catch (e) { await onError(e); }
   };
 
@@ -487,6 +521,15 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 {savingDef && <span className="rd-spin" aria-hidden />}{savingDef ? 'Saving…' : 'Save'}
               </button>
             )}
+            {/* Doc 109: color PROPIO de la tabla (todos sus canvases). Se aplica al
+                elegirlo — va aparte del formulario de arriba, que se guarda con Save. */}
+            <div className="wk-pp-section">
+              <ColorField id={table.id} own={table.color} canEdit={canEdit} noun={nouns.one}
+                onPick={(ref) => {
+                  const onError = reportWriteError((e) => pushToast(failureText("Couldn't change the color", e), 'err'));
+                  void setObjectColor(table.id, ref).catch(onError);
+                }} />
+            </div>
             {canEdit && (
               <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #EEF1F5', display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <button className="rd-btn rd-btn-secondary rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={delBusy !== null} onClick={removeFromCanvas}>

@@ -12,6 +12,7 @@ import { pkInKeyOrder } from '../lib/keyOrder';
 import { sortByOrdinal } from '../lib/columnOrder';
 import { planCanvasDrop, type DropTarget } from '../lib/canvasDrop';
 import { tableLodSize } from '../lib/lodSize';
+import { boxHex, tintStyle } from '../lib/boxColor';
 
 export interface TableNodeData {
   table: CanonicalTable;
@@ -88,6 +89,10 @@ function TableNode({ data }: NodeProps) {
   const toggleColSelect = useModelerStore((s) => s.toggleColSelect);
   const openColMenu = useModelerStore((s) => s.openColMenu);
   const focusColumnInPanel = useModelerStore((s) => s.focusColumnInPanel);
+  // Doc 109: color de la caja en ESTE canvas (excepción del canvas → color de
+  // la tabla → sin color). Selector de string: un cambio re-pinta sólo esta caja.
+  const hex = useModelerStore((s) => boxHex(table.id, table.color, s.canvasColors, s.themeIdx));
+  const tint = tintStyle(hex);
 
   const nameOf = (o: { logicalName: string; physicalName: string }) =>
     viewMode === 'logical' ? o.logicalName : o.physicalName;
@@ -122,7 +127,7 @@ function TableNode({ data }: NodeProps) {
   if (lod) {
     const { w, h, pkRows } = tableLodSize(table as CanonicalTable, columns, viewMode);
     return (
-      <div className={`wk-node wk-lod${selected ? ' sel' : ''}`} style={{ width: w, height: h }}>
+      <div className={`wk-node wk-lod${selected ? ' sel' : ''}${hex ? ' tinted' : ''}`} style={{ width: w, height: h, ...tint }}>
         <div className="wk-node-head">
           <Table2 size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
           <span className="rd-mono wk-node-title">
@@ -208,7 +213,7 @@ function TableNode({ data }: NodeProps) {
 
   return (
     // rel-armed: apaga el hover de filas (CSS) mientras se dibuja una relación.
-    <div className={`wk-node${selected ? ' sel' : ''}${relArmed ? ' rel-armed' : ''}`}>
+    <div className={`wk-node${selected ? ' sel' : ''}${relArmed ? ' rel-armed' : ''}${hex ? ' tinted' : ''}`} style={tint}>
       <div className={`wk-node-head${connectable ? ' armed' : ''}`}>
         <Table2 size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
         {/* Header = SOLO esquema.nombre del modo activo (lógico o físico); el

@@ -71,6 +71,8 @@ export interface View {
   customSql?: string;
   /** Doc 61: valores UDP de la vista ({defId: value}) — keys de level='view'. */
   udpValues?: Record<string, string>;
+  /** Doc 109: color de la vista en todos sus canvases (como las tablas). */
+  color?: string | null;
 }
 
 /** Body de creación/actualización (sin `id`, lo asigna/usa el backend). */
@@ -87,6 +89,8 @@ export interface ViewInput {
   description?: string;
   customSql?: string;
   udpValues?: Record<string, string>;
+  /** Doc 109: el payload es el doc COMPLETO — quien edita una vista conserva su color. */
+  color?: string | null;
 }
 
 /** Normaliza el doc para el changeset (espejo de la normalización del apply):
@@ -96,6 +100,15 @@ function normalizeInput(body: ViewInput): ViewInput {
     ? body.sourceTableIds
     : (body.tableId ? [body.tableId] : []);
   return { ...body, sourceTableIds: src, tableId: src[0] ?? body.tableId };
+}
+
+/** Doc 109: el documento VIGENTE de una vista en la working copy (null = no
+ *  existe o no hay sesión de edición) — base de un guardado (ver `currentTable`). */
+export async function currentView(id: string): Promise<View | null> {
+  const a = active();
+  if (!a) return null;
+  const [v] = await csvc.effective<View>(a, 'views', { ids: [id] });
+  return v ?? null;
 }
 
 /** Vistas de una tabla concreta (con changeset: estado EFECTIVO). */

@@ -54,7 +54,7 @@ export default function NewProjectModal({ open, onClose, onCreated }: {
   const countOf = (b: StandardsBlock): string => {
     if (!summary) return '';
     if (b === 'naming') return summary.naming ? 'table + column rules' : '—';
-    const n = b === 'ddl' ? summary.rules : summary[b];
+    const n = (b === 'ddl' ? summary.rules : summary[b]) ?? 0;   // doc 109: `themes` puede faltar (backend viejo)
     return `${n.toLocaleString('en-US')} item${n === 1 ? '' : 's'}`;
   };
 

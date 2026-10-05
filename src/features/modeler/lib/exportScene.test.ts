@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { buildDiagramScene, type SceneInput } from './exportScene';
+import { buildDiagramScene, wrapText, type SceneInput } from './exportScene';
+import { boxTints } from '@/lib/colors';
 import { STUB_BLOCK, roundedPath, routedGeometry } from './wireRoute';
 
 type FixtureInput = SceneInput & { diagram: NonNullable<SceneInput['diagram']> };
@@ -529,5 +530,73 @@ describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
       const phys = buildDiagramScene({ ...subcat({ r1: [{ x: 520, y: 300 }], 'subsym-sym1': [{ x: 380, y: 300 }] }), viewMode: 'physical' });
       expect(doubles(phys)).toEqual([]);
     });
+  });
+});
+
+// ── Doc 109: colores de las cajas y texto de los dibujos con formato ───────
+describe('buildDiagramScene — colores y textos (doc 109)', () => {
+  const TH = [{ id: 'th1', name: 'Entidad Principal', color: '#FFFF80' }];
+  const fills = (s: ReturnType<typeof buildDiagramScene>) => items(s).flatMap((i) => (i.k === 'rect' && i.fill ? [i.fill] : []));
+
+  it('tinta el cuerpo y la franja de llave con el color efectivo (excepción del canvas → tabla)', () => {
+    const inp = base();
+    inp.diagram.tables[0].color = 'theme:th1';
+    inp.diagram.tables[1].color = '#00B050';
+    const s = buildDiagramScene({ ...inp, themes: TH, colors: { t2: 'none' } });
+    const yellow = boxTints('#FFFF80');
+    expect(fills(s)).toEqual(expect.arrayContaining([yellow.body, yellow.key]));
+    expect(fills(s)).not.toContain(boxTints('#00B050').body);     // el canvas le quita el color a t2
+  });
+
+  it('sin `colors` usa los del canvas; un theme que ya no existe = sin color', () => {
+    const inp = base();
+    inp.diagram.subjectArea.colors = { t1: '#00B050' };
+    inp.diagram.tables[1].color = 'theme:borrado';
+    const s = buildDiagramScene({ ...inp, themes: TH });
+    expect(fills(s)).toContain(boxTints('#00B050').body);
+    expect(fills(s).filter((f) => f === boxTints('#00B050').body)).toHaveLength(1);
+  });
+
+  it('el texto de un dibujo lleva su formato (pt → px, familia, B/I/U, alineación)', () => {
+    const inp = base();
+    inp.drawings = [{ id: 'd1', type: 'rect', x: 0, y: 0, w: 300, h: 120, fill: '#FFFF80', color: 'none',
+      text: 'Hola', font: { family: 'Arial', size: 12, bold: true, italic: true, underline: true, color: '#C00000' }, align: 'right', valign: 'top' }];
+    const s = buildDiagramScene(inp);
+    const t = texts(s).find((x) => x.s === 'Hola')!;
+    expect(t).toMatchObject({ size: 16, color: '#C00000', bold: true, italic: true, underline: true, font: 'Arial', anchor: 'end' });
+    expect(items(s).some((i) => i.k === 'rect' && i.fill === '#FFFF80' && i.stroke === undefined)).toBe(true);
+  });
+
+  it('un texto que no entra en su caja se exporta entero, como lo muestra el canvas', () => {
+    const inp = base();
+    inp.drawings = [{ id: 'd1', type: 'text', x: 0, y: 0, w: 180, h: 40, text: 'Line one\nLine two', color: '#8B5CF6' }];
+    const s = buildDiagramScene(inp);
+    expect(texts(s).filter((t) => t.s.startsWith('Line')).map((t) => t.s)).toEqual(['Line one', 'Line two']);
+  });
+
+  it('el texto que desborda su caja entra en los límites del export (no se recorta)', () => {
+    const text = Array.from({ length: 12 }, (_, i) => `linea ${i}`).join('\n');
+    const s = buildDiagramScene({ viewMode: 'physical', diagram: null,
+      drawings: [{ id: 'd1', type: 'text', x: 0, y: 0, w: 160, h: 40, text, font: {}, valign: 'middle' }] });
+    const ys = texts(s).filter((t) => t.s.startsWith('linea')).map((t) => t.y);
+    expect(ys).toHaveLength(12);
+    expect(Math.min(...ys)).toBeGreaterThan(0);
+    expect(Math.max(...ys)).toBeLessThan(s.h);
+  });
+
+  it('el ancho por carácter del texto sigue a la letra con que lo dibuja el PDF', () => {
+    const scene = (font: Record<string, unknown>) => buildDiagramScene({ viewMode: 'physical', diagram: null,
+      drawings: [{ id: 'd1', type: 'text', x: 0, y: 0, w: 200, h: 40, text: 'Hola', font }] });
+    const wfOf = (font: Record<string, unknown>) => texts(scene(font)).find((t) => t.s === 'Hola')!.wf;
+    expect(wfOf({})).toBe(0.55);
+    expect(wfOf({ bold: true })).toBe(0.58);
+    expect(wfOf({ family: 'Courier New' })).toBe(0.6);
+  });
+
+  it('wrapText: respeta saltos, corta por palabra y conserva la sangría', () => {
+    expect(wrapText('uno dos tres', 7)).toEqual(['uno dos', 'tres']);
+    expect(wrapText('a\nb', 10)).toEqual(['a', 'b']);
+    expect(wrapText('   centrado', 20)).toEqual(['   centrado']);
+    expect(wrapText('abcdefghij', 4)).toEqual(['abcd', 'efgh', 'ij']);
   });
 });

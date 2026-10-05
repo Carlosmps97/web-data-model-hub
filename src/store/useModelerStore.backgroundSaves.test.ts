@@ -112,6 +112,20 @@ describe('flush de dibujos al cambiar de canvas (doc 105, F1)', () => {
   });
 });
 
+describe('updateDrawing sin cambio real (doc 109)', () => {
+  it('no graba ni marca el canvas sucio; un cambio real, sí', async () => {
+    useModelerStore.setState({ drawings: [{ id: 'd1', type: 'text', x: 0, y: 0, w: 100, h: 40, align: 'center', font: { size: 11, bold: true } }], dirty: false });
+    useModelerStore.getState().updateDrawing('d1', { align: 'center', font: { size: 11, bold: true } });
+    useModelerStore.getState().updateDrawing('nope', { align: 'left' });
+    await sleep(800);
+    expect(struct.setSubjectAreaDrawings).not.toHaveBeenCalled();
+    expect(useModelerStore.getState().dirty).toBe(false);
+    useModelerStore.getState().updateDrawing('d1', { align: 'right' });
+    expect(useModelerStore.getState().drawings[0].align).toBe('right');
+    expect(useModelerStore.getState().dirty).toBe(true);
+  });
+});
+
 describe('mover VARIOS bloques a la vez (doc 105, A4-o1)', () => {
   it('UNA escritura del layout con todos los movidos, en píxeles enteros, y el diagrama al día en sitio', async () => {
     const before = useModelerStore.getState().diagram;

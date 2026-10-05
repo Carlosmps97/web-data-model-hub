@@ -266,6 +266,8 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           width: d.w,
           height: d.h,
           zIndex: -1,
+          // Doc 109: un cambio de formato (barra del dibujo) no lo deselecciona.
+          selected: existing?.selected ?? false,
           data: { drawing: d },
         };
       });
@@ -515,11 +517,13 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // clipboard + edición, las entradas de paste. El menú de FILA (copy de
         // columnas) lo abre TableNode con stopPropagation.
         onNodeContextMenu={(e, node) => {
-          if (node.type !== 'table') return;
+          // Doc 109: también las vistas (su menú sólo ofrece el color en este canvas).
+          if (node.type !== 'table' && node.type !== 'view') return;
           const st = useModelerStore.getState();
           if (st.relPreset) return;
           e.preventDefault();
-          st.openColMenu({ x: e.clientX, y: e.clientY, tableId: node.id, colId: null });
+          st.openColMenu({ x: e.clientX, y: e.clientY, tableId: node.id, colId: null,
+                           kind: node.type === 'view' ? 'view' : 'table' });
         }}
         onEdgeMouseEnter={(_e, edge) => setHoverEdge(edge.id)}
         onEdgeMouseLeave={() => setHoverEdge(null)}

@@ -228,6 +228,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         diagram, drawings: st.drawings, viewMode: st.viewMode,
         relLabels: !useUiStore.getState().relLabelsHidden,
         routes: st.canvasRoutes,
+        colors: st.canvasColors, themes: st.themes,   // doc 109: los vivos, como los trazos
       });
       if (kind === 'pdf') {
         const { buildDiagramPdf } = await import('../lib/scenePdf');

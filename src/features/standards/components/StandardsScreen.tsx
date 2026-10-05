@@ -3,6 +3,7 @@ import { BookOpenText, Boxes, ChevronRight, Database, History, RotateCcw, Shield
 import { toast } from 'sonner';
 import { useAuthStore } from '@/store/useAuthStore';
 import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
+import { useModelerStore } from '@/store/useModelerStore';
 import { listProjects } from '@/services/projects.service';
 import { sortProjects } from '@/lib/projects';
 import SearchSelect from '@/features/modeler/components/SearchSelect';
@@ -17,8 +18,9 @@ import GlossaryPage from './GlossaryPage';
 import DomainsPage from './DomainsPage';
 import UdpDefsPage from './UdpDefsPage';
 import DdlRulesTab from './DdlRulesTab';
+import ThemesPage from './ThemesPage';
 
-type Tab = 'overview' | 'glossary' | 'domains' | 'udp' | 'ddl';
+type Tab = 'overview' | 'glossary' | 'domains' | 'udp' | 'ddl' | 'themes';
 
 /** Proyecto inicial del módulo: el de la sesión de canvas → el último abierto → el primero A–Z. */
 function initialProjectId(projects: Project[]): string | null {
@@ -68,6 +70,10 @@ export default function StandardsScreen() {
     if (!projectId) return;
     const [snap, vers] = await Promise.all([getSnapshot(projectId), getVersions(projectId)]);
     setSnapshot(snap); setVersions(vers);
+    // Doc 109: un canvas abierto de este proyecto repinta con los themes vigentes
+    // (un apply o un rollback pudo cambiarlos).
+    const modeler = useModelerStore.getState();
+    if (modeler.activeProjectId === projectId) void modeler.loadThemes(projectId);
   }, [projectId]);
 
   useEffect(() => {
@@ -100,6 +106,7 @@ export default function StandardsScreen() {
         {subTab('domains', 'Parent Domains')}
         {subTab('udp', 'UDP')}
         {subTab('ddl', 'DDL Export rules')}
+        {subTab('themes', 'Color themes')}
         <span style={{ flex: 1 }} />
         {/* Doc 75: proyecto cuyos estándares se ven/editan. */}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginRight: 10 }}>
@@ -132,6 +139,8 @@ export default function StandardsScreen() {
           <DomainsPage projectId={projectId} snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
         ) : tab === 'udp' ? (
           <UdpDefsPage projectId={projectId} snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
+        ) : tab === 'themes' ? (
+          <ThemesPage projectId={projectId} snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
         ) : (
           <DdlRulesTab projectId={projectId} snapshot={snapshot} versions={versions} canEdit={canEdit}
             meName={me?.name ?? me?.username} onApplied={reload} />

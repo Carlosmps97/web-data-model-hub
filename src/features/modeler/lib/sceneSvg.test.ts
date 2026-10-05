@@ -67,3 +67,21 @@ describe('buildDiagramSvg', () => {
     expect(out).toContain('<style>@font-face { font-family: X; }</style>');
   });
 });
+
+describe('buildDiagramSvg — texto de dibujos (doc 109)', () => {
+  it('familia elegida (con la de la app de respaldo) y subrayado', () => {
+    const out = buildDiagramSvg(scene([{ k: 'text', x: 1, y: 2, s: 'Hola', size: 16, color: '#000000', font: 'Arial', underline: true }]));
+    expect(out).toContain('font-family="&quot;Arial&quot;, ');
+    expect(out).toContain('text-decoration="underline"');
+  });
+  it('sin familia ni subrayado, como siempre; la sangría de Erwin se conserva', () => {
+    const out = buildDiagramSvg(scene([{ k: 'text', x: 1, y: 2, s: '   Título', size: 16, color: '#000000' }]));
+    expect(out).not.toContain('text-decoration');
+    expect(out).not.toContain('&quot;');
+    expect(out).toContain('xml:space="preserve"');
+  });
+  it('una familia con comillas no rompe el atributo', () => {
+    const out = buildDiagramSvg(scene([{ k: 'text', x: 1, y: 2, s: 'x', size: 16, color: '#000000', font: 'Bad"<Font' }]));
+    expect(out).toMatch(/font-family="[^"]*Bad\\&quot;&lt;Font[^"]*"/);
+  });
+});

@@ -38,6 +38,8 @@ import * as viewsSvc from '@/services/views.service';
 import type { View, ViewInput } from '@/services/views.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import { NothingDoneError, pushUndo, useUndoStore } from '@/store/useUndoStore';
+import { cleanColors, normalColor, themeIndex, type Theme } from '@/lib/colors';
+import { listThemes } from '@/services/themes.service';
 import { runBlocking } from '@/store/useBusyStore';
 import { ApiError, errorReason } from '@/services/http';
 
@@ -153,8 +155,10 @@ interface ModelerState {
    *  paste en vuelo. */
   pasteTable: () => Promise<string | null>;
   /** Menú contextual del canvas (fila: colId; bloque: colId null). */
-  colMenu: { x: number; y: number; tableId: string; colId: string | null } | null;
-  openColMenu: (m: { x: number; y: number; tableId: string; colId: string | null }) => void;
+  /** Doc 109: `kind` = qué bloque abrió el menú (default tabla); una vista sólo
+   *  ofrece el color. */
+  colMenu: { x: number; y: number; tableId: string; colId: string | null; kind?: 'table' | 'view' } | null;
+  openColMenu: (m: { x: number; y: number; tableId: string; colId: string | null; kind?: 'table' | 'view' }) => void;
   closeColMenu: () => void;
   /** Tabla destino del paste en confirmación (monta PasteColumnsPopup). */
   pasteTarget: string | null;
@@ -216,6 +220,25 @@ interface ModelerState {
    *  y apila su Undo; si el guardado falla, vuelve al trazo anterior y avisa.
    *  Fuera de una sesión de edición no hace nada. */
   setWireRoute: (wireId: string, points: RoutePoint[] | null) => Promise<void>;
+  /** Doc 109: themes de color del proyecto activo (Data Standards → Themes) y
+   *  su índice por id. Las cajas los usan por referencia ('theme:<id>'). */
+  themes: Theme[];
+  themeIdx: Map<string, Theme>;
+  /** Carga los themes de `projectId` (best-effort; descarta respuestas de un
+   *  proyecto que dejó de ser el activo). */
+  loadThemes: (projectId: string | null) => Promise<void>;
+  /** Doc 109: colores de las cajas EN el canvas abierto (excepciones sobre el
+   *  color propio de cada tabla/vista: {id: ColorRef}). Se siembran del
+   *  diagrama; cada bloque lee el suyo por selector. */
+  canvasColors: Record<string, string>;
+  /** Doc 109: pinta las cajas `ids` EN ESTE canvas — `ref` = ColorRef ('none'
+   *  = sin color aquí), `null` = vuelven al color de su tabla/vista. Pinta al
+   *  instante, graba UNA vez en la working copy y apila su Undo; si falla,
+   *  vuelve a lo anterior y avisa. Fuera de una sesión de edición, nada. */
+  setBoxColors: (ids: string[], ref: string | null) => Promise<void>;
+  /** Doc 109: color PROPIO de una tabla o vista (todos sus canvases); null =
+   *  sin color. Un cambio del modelo (changeset), con Undo. */
+  setObjectColor: (id: string, ref: string | null) => Promise<void>;
   /** LOD (doc 33): bajo el umbral de zoom los nodos se pintan COMPACTOS (misma
    *  caja, tamaño y colores; sin las filas, que a ese zoom miden <1px). Default
    *  true: el fitView inicial de un canvas grande arranca alejado y la primera
@@ -721,6 +744,71 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     pushUndo('Reroute wire', () => writeWireRoute(saId, wireId, prev), pin);
   },
+  themes: [],
+  themeIdx: new Map(),
+  loadThemes: async (projectId) => {
+    if (!projectId) return;
+    try {
+      const themes = await listThemes(projectId);
+      const active = get().activeProjectId;
+      if (active === projectId || active == null) set({ themes, themeIdx: themeIndex(themes) });
+    } catch { /* sin themes las cajas con theme se ven sin color hasta el próximo intento */ }
+  },
+  canvasColors: {},
+  setBoxColors: async (ids, ref) => {
+    const saId = get().activeSaId;
+    const session = useSessionStore.getState();
+    let dia: Diagram | null;
+    try { dia = editableDiagram(); } catch (e) { await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't change the color"); return; }
+    if (!saId || !dia || session.openMode !== 'editing' || !session.activeChangesetId) return;
+    if (dia.subjectArea.id !== saId) return;
+    const value = ref === null ? null : normalColor(ref, true);
+    if (ref !== null && value === null) return;
+    // Sólo tablas y vistas de ESTE canvas (un selector del sistema que se
+    // cierra con otro canvas abierto no deja colores huérfanos).
+    const onCanvas = new Set([...dia.tables.map((t) => t.id), ...(dia.views ?? []).map((v) => v.id)]);
+    const targets = [...new Set(ids)].filter((id) => onCanvas.has(id));
+    const prev: Record<string, string | null> = {};
+    for (const id of targets) prev[id] = get().canvasColors[id] ?? null;
+    if (!targets.length || targets.every((id) => prev[id] === value)) return;   // sin cambio real: cero requests
+    const pin = pinSession();
+    get().markDirty();
+    try {
+      await writeCanvasColors(saId, Object.fromEntries(targets.map((id) => [id, value])));
+    } catch (e) {
+      await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't change the color");
+      return;
+    }
+    pushUndo(targets.length === 1 ? 'Change color' : `Change color of ${targets.length} boxes`,
+      () => writeCanvasColors(saId, prev), pin);
+  },
+  setObjectColor: (id, ref) => {
+    const value = ref === null ? null : normalColor(ref);
+    if (ref !== null && value === null) return Promise.resolve();
+    const pin = pinSession();
+    // En fila con las demás escrituras de la tabla/vista (Properties).
+    return inObjectOrder(id, async () => {
+      pin.check();
+      // El documento VIGENTE en la working copy — no el del diagrama: su
+      // recarga pudo fallar o quedar reemplazada por otra y no tener el guardado
+      // anterior (lo revertía). Ni el canvas abierto: el color es de la tabla.
+      const table = await gov.currentTable(id);
+      const view = table ? null : await viewsSvc.currentView(id);
+      pin.check();
+      if (!table && !view) throw new Error('This table or view is no longer in the working copy.');
+      if (((table ?? view)!.color ?? null) === value) return;
+      get().markDirty();
+      const reload = () => get().reload();
+      if (table) {
+        await gov.createTable({ ...table, color: value });
+        pushUndo(`Change color of ${table.physicalName}`, undoFields('table', id, { color: table.color ?? null }, pin, reload), pin);
+      } else if (view) {
+        await viewsSvc.updateView(view.id, { ...view, color: value } as ViewInput);
+        pushUndo(`Change color of ${view.name}`, undoFields('view', id, { color: view.color ?? null }, pin, reload), pin);
+      }
+      await get().reload();
+    });
+  },
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
   navigating: null,
@@ -751,16 +839,22 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const c = rf
       ? rf.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
       : { x: 120, y: 120 };
-    const drawing: Drawing = {
-      id: crypto.randomUUID(), type,
-      x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2),
-      w, h, color: DRAWING_DEFAULT_COLOR,
-      ...(type === 'text' ? { text: 'Text' } : {}),
-    };
+    // Doc 109: un texto nuevo nace con el modelo de formato (fuente, color del
+    // texto, sin borde ni relleno); las formas, con su borde de siempre.
+    const drawing: Drawing = type === 'text'
+      ? { id: crypto.randomUUID(), type, x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2), w, h,
+          text: 'Text', color: null, fill: 'none', font: { size: 11, bold: true, color: '#1A2B4A' },
+          align: 'left', valign: 'middle' }
+      : { id: crypto.randomUUID(), type, x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2), w, h,
+          color: DRAWING_DEFAULT_COLOR };
     set({ drawings: [...get().drawings, drawing] });
     get().persistDrawings();
   },
   updateDrawing: (id, patch) => {
+    // Doc 109: un patch que no cambia nada (elegir la alineación o el tamaño
+    // que ya tenía) no graba ni marca el canvas sucio.
+    const cur = get().drawings.find((d) => d.id === id);
+    if (!cur || Object.entries(patch).every(([k, v]) => JSON.stringify(cur[k as keyof Drawing]) === JSON.stringify(v))) return;
     set({ drawings: get().drawings.map((d) => (d.id === id ? { ...d, ...patch } : d)) });
     get().persistDrawings();
   },
@@ -1049,6 +1143,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
             drawings: diagram.subjectArea.drawings ?? [] });
       // Doc 83: reglas de naming del proyecto del canvas (best-effort, no bloquea).
       void get().loadNaming(pid ?? get().activeProjectId);
+      // Doc 109: themes de color del proyecto (best-effort, no bloquea).
+      void get().loadThemes(pid ?? get().activeProjectId);
     } catch (e) {
       threw = true;
       throw e;
@@ -2292,7 +2388,125 @@ function withWrittenCanvas(diagram: Diagram, asked: number): Diagram {
   const fresh = writtenSince(cs, diagram.subjectArea.id, asked);
   if (!fresh) return diagram;
   const sa = diagram.subjectArea;
-  return { ...diagram, subjectArea: { ...sa, layout: { ...(sa.layout ?? {}), ...fresh.layout }, routes: fresh.routes } };
+  return { ...diagram, subjectArea: { ...sa, layout: { ...(sa.layout ?? {}), ...fresh.layout }, routes: fresh.routes,
+                                      colors: fresh.colors } };
+}
+
+/** Doc 109: cambia los colores EN PANTALLA del canvas `saId` (no hace nada si
+ *  hay otro abierto, u otra versión) y deja el canvas del diagrama al día EN
+ *  SITIO, como `showRoutes`. `patch`: null quita la excepción. */
+function showColors(saId: string, patch: Record<string, string | null>, cs: string | null): void {
+  useModelerStore.setState((st) => {
+    if (st.activeSaId !== saId || editingCsNow() !== cs) return {};
+    const colors = { ...st.canvasColors };
+    for (const [id, ref] of Object.entries(patch)) {
+      if (ref === null) delete colors[id]; else colors[id] = ref;
+    }
+    if (st.diagram?.subjectArea.id === saId) st.diagram.subjectArea.colors = colors;
+    return { canvasColors: colors };
+  });
+}
+
+/** Doc 109: guardado EN VUELO del color de una caja (como `RouteTicket`):
+ *  `ref` = lo pedido (null = sin excepción); `base` = lo último GRABADO, a lo
+ *  que vuelve la pantalla si falla (`undefined` = no se sabe: su canvas no
+ *  estaba abierto al pedirlo). */
+interface ColorTicket { ref: string | null; base: string | null | undefined }
+
+/** Colores en vuelo, por versión + canvas y por caja: un diagrama que llega
+ *  mientras tanto puede traer todavía el color viejo — manda el pendiente (sólo
+ *  en SU versión: otra que abre el mismo canvas no lo hereda). Cada entrada es
+ *  la ficha del ÚLTIMO guardado pedido para esa caja. */
+const _pendingColors = new Map<string, Map<string, ColorTicket>>();
+const editingCsNow = (): string | null => {
+  const s = useSessionStore.getState();
+  return s.openMode === 'editing' ? s.activeChangesetId : null;
+};
+const colorKey = (cs: string | null, saId: string) => `${cs ?? ''}\n${saId}`;
+
+/** Colores a pintar para un diagrama recién llegado: los del canvas, saneados,
+ *  con los guardados en vuelo encima (y cada uno se entera de lo grabado). */
+function seedColors(diagram: Diagram | null): Record<string, string> {
+  if (!diagram) return {};
+  const base = cleanColors(diagram.subjectArea.colors);
+  const pending = _pendingColors.get(colorKey(editingCsNow(), diagram.subjectArea.id));
+  if (!pending?.size) return base;
+  const out = { ...base };
+  for (const [id, ticket] of pending) {
+    ticket.base = base[id] ?? null;
+    if (ticket.ref === null) delete out[id]; else out[id] = ticket.ref;
+  }
+  return out;
+}
+
+/** Doc 109: pinta y graba colores del canvas. Si el guardado falla, las cajas
+ *  vuelven a lo último grabado (un pedido más nuevo de la misma caja gana) y
+ *  se re-lanza. Con otro canvas abierto graba igual, sin tocar la pantalla. */
+async function writeCanvasColors(saId: string, patch: Record<string, string | null>): Promise<void> {
+  const st = useModelerStore.getState();
+  const cs = editingCsNow();
+  const key = colorKey(cs, saId);
+  const pending = _pendingColors.get(key) ?? new Map<string, ColorTicket>();
+  _pendingColors.set(key, pending);
+  const tickets = new Map<string, ColorTicket>();
+  for (const [id, ref] of Object.entries(patch)) {
+    const earlier = pending.get(id);
+    const ticket: ColorTicket = {
+      ref, base: earlier ? earlier.base : st.activeSaId === saId ? st.canvasColors[id] ?? null : undefined,
+    };
+    pending.set(id, ticket);
+    tickets.set(id, ticket);
+  }
+  const latest = (id: string) => pending.get(id) === tickets.get(id);
+  try {
+    showColors(saId, patch, cs);
+    await struct.setCanvasColors(saId, patch);
+    for (const [id, ticket] of tickets) {
+      const next = pending.get(id);
+      if (next && next !== ticket) next.base = ticket.ref;   // grabado: base de lo que siga en vuelo
+    }
+  } catch (e) {
+    const revert: Record<string, string | null> = {};
+    for (const [id, ticket] of tickets) if (latest(id) && ticket.base !== undefined) revert[id] = ticket.base;
+    if (Object.keys(revert).length) showColors(saId, revert, cs);
+    throw e;
+  } finally {
+    for (const id of tickets.keys()) if (latest(id)) pending.delete(id);
+    if (!pending.size && _pendingColors.get(key) === pending) _pendingColors.delete(key);
+  }
+}
+
+/** Doc 109 (revisión): escrituras del documento de UNA tabla o vista, en fila.
+ *  Cada una arma su payload al ejecutarse desde el documento VIGENTE de la
+ *  working copy (`gov.currentTable`/`viewsSvc.currentView`), no del diagrama:
+ *  el guardado de la definición al salir del campo y el color elegido enseguida
+ *  ya no se pisan, aunque una recarga falle o quede reemplazada. */
+const _objectWrites = new Map<string, Promise<unknown>>();
+/** Doc 109 (revisión): inversa de una escritura de UNA tabla o vista que
+ *  restaura SÓLO los campos que esa escritura cambió (`fields` = sus valores
+ *  de antes), sobre el documento VIGENTE y en la fila del objeto. Con la foto
+ *  completa, deshacer revertía también lo que otra escritura (el color, la
+ *  definición) grabó después. */
+export function undoFields(kind: 'table' | 'view', id: string, fields: Record<string, unknown>,
+  pin: SessionPin, reload: () => Promise<void>): () => Promise<void> {
+  return async () => {
+    await inObjectOrder(id, async () => {
+      const cur = kind === 'table' ? await gov.currentTable(id) : await viewsSvc.currentView(id);
+      pin.check();
+      if (!cur) throw new Error(`This ${kind} is no longer in the working copy.`);
+      if (kind === 'table') await gov.createTable({ ...(cur as CanonicalTable), ...fields });
+      else await viewsSvc.updateView(id, { ...(cur as View), ...fields } as ViewInput);
+    });
+    await reload();
+  };
+}
+
+export function inObjectOrder<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const run = (_objectWrites.get(id) ?? Promise.resolve()).then(fn, fn);
+  const tail = run.then(() => undefined, () => undefined);
+  _objectWrites.set(id, tail);
+  void tail.then(() => { if (_objectWrites.get(id) === tail) _objectWrites.delete(id); });
+  return run;
 }
 
 /** Guardado EN VUELO del trazo de un wire.
@@ -2393,6 +2607,18 @@ useModelerStore.subscribe((s, prev) => {
   const routes = seedRoutes(s.diagram);
   if (sa) sa.routes = routes;
   useModelerStore.setState({ canvasRoutes: routes });
+});
+
+// Doc 109: los colores del canvas se siembran igual — cada vez que cambia el
+// canvas del diagrama (abrir, recargar, cerrar), saneados y con los guardados
+// en vuelo encima; una copia local que trae el mismo objeto no re-siembra.
+useModelerStore.subscribe((s, prev) => {
+  const sa = s.diagram?.subjectArea;
+  if (sa === prev.diagram?.subjectArea) return;
+  if (sa && sa.colors === s.canvasColors) return;
+  const colors = seedColors(s.diagram);
+  if (sa) sa.colors = colors;
+  useModelerStore.setState({ canvasColors: colors });
 });
 
 // Doc 48: el clipboard de columnas pertenece al changeset donde se copió —

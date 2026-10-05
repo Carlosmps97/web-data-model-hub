@@ -204,3 +204,17 @@ describe('buildDiagramPdf — factor de ancho por texto (doc 98)', () => {
   });
 });
 
+
+describe('buildDiagramPdf — texto de dibujos (doc 109)', () => {
+  it('subrayado = una línea bajo el texto, del color del texto', () => {
+    const pdf = dec(buildDiagramPdf(scene([{ k: 'text', x: 10, y: 50, s: 'Hola', size: 16, color: '#C00000', underline: true }])));
+    // bajo la línea base (262.5) y del ancho estimado: 4 × 16 px × 0.55 × 0.75
+    expect(pdf).toContain('(Hola) Tj\nET Q\nq 0.753 0 0 RG 0.72 w 7.5 261.06 m 33.9 261.06 l S Q');
+  });
+  it('una familia monoespaciada sale en Courier; las demás en Helvetica', () => {
+    const mono = dec(buildDiagramPdf(scene([{ k: 'text', x: 10, y: 50, s: 'A', size: 16, color: '#000000', font: 'Courier New' }])));
+    const sans = dec(buildDiagramPdf(scene([{ k: 'text', x: 10, y: 50, s: 'A', size: 16, color: '#000000', font: 'Arial', bold: true }])));
+    expect(mono).toMatch(/\/F3 12 Tf/);
+    expect(sans).toMatch(/\/F2 12 Tf/);
+  });
+});

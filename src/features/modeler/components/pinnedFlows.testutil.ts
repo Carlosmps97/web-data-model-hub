@@ -58,7 +58,7 @@ const SERVICE_WRITES = new Set([
   'struct.arrangeSubjectArea', 'struct.setWireRoute', 'struct.setSubjectAreaUdp', 'struct.createFolder',
   'struct.renameFolder', 'struct.moveFolder', 'struct.deleteFolder', 'struct.createSubjectArea',
   'struct.updateSubjectArea', 'struct.deleteSubjectArea', 'struct.renameProject', 'struct.deleteProject',
-  'struct.reviveProject',
+  'struct.reviveProject', 'struct.setCanvasColors',
   // El ledger de la versión, directo (ronda 3).
   'csvc.recordChange', 'csvc.recordChangesBulk',
 ]);
@@ -75,6 +75,7 @@ export const STORE_WRITE_ACTIONS = new Set([
   'renameFolder', 'deleteFolder', 'createCanvas', 'renameCanvas', 'deleteCanvas', 'moveCanvas', 'renameProject',
   'deleteProject', 'undoProjectDeletion', 'saveAll',
   'addDrawing', 'updateDrawing', 'deleteDrawing', 'persistDrawings',
+  'setBoxColors', 'setObjectColor',   // doc 109
 ]);
 /** Callbacks que escriben (del padre): el cuerpo de columna (`onPatch`), el
  *  editor de vistas (`onSaved`: el llamador suma la vista al canvas), el alta

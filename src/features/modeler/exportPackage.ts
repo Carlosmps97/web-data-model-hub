@@ -9,6 +9,8 @@ import type { ReportCanvasInput } from './lib/reportPdf';
 import { generatedViewDdl } from './lib/viewDdl';
 import { listDomainsGlobal } from '@/services/naming.service';
 import { getUdpDefs } from '@/features/standards/standards.service';
+import { listThemes } from '@/services/themes.service';
+import type { Theme } from '@/lib/colors';
 import {
   buildCanvasPage, buildIndexPage, packageLayout, sanitizeFileName,
   type ExportLookups, type IndexCanvasEntry, type LayoutCanvas,
@@ -74,12 +76,13 @@ async function loadBuilders(): Promise<PageBuilders> {
 /** Página completa de un canvas: dos escenas (logical/physical) → dos SVGs →
  *  HTML con tabs. Los drawings persistidos del canvas entran a la escena. */
 function canvasHtml(
-  b: PageBuilders, diagram: Diagram, lookups: ExportLookups,
+  b: PageBuilders, diagram: Diagram, lookups: ExportLookups, themes: Theme[],
   breadcrumb: string[], indexHref: string | null,
 ): string {
   const drawings = diagram.subjectArea.drawings ?? [];
-  const svgLogical = b.buildDiagramSvg(b.buildDiagramScene({ diagram, drawings, viewMode: 'logical' }), { fontCss: b.fontCss });
-  const svgPhysical = b.buildDiagramSvg(b.buildDiagramScene({ diagram, drawings, viewMode: 'physical' }), { fontCss: b.fontCss });
+  // Doc 109: los colores del canvas salen de su diagrama; los themes, del proyecto.
+  const svgLogical = b.buildDiagramSvg(b.buildDiagramScene({ diagram, drawings, viewMode: 'logical', themes }), { fontCss: b.fontCss });
+  const svgPhysical = b.buildDiagramSvg(b.buildDiagramScene({ diagram, drawings, viewMode: 'physical', themes }), { fontCss: b.fontCss });
   // Doc 96 D6: el SQL de cada vista es el DDL que escribe el Export (de sus columnas).
   const viewDdl = Object.fromEntries(diagram.views.map((v) => [v.id, generatedViewDdl(v, diagram.tables)]));
   return buildCanvasPage({
@@ -100,7 +103,10 @@ export async function exportNodeHtml(opts: {
 }): Promise<ExportOutcome> {
   const download = opts.download ?? domDownload;
   const cancelled = () => opts.cancel?.cancelled === true;
-  const [builders, lookups] = await Promise.all([loadBuilders(), fetchLookups(opts.projectId)]);
+  // Sin themes el export sale igual, con las cajas sin color de theme.
+  const [builders, lookups, themes] = await Promise.all([
+    loadBuilders(), fetchLookups(opts.projectId), listThemes(opts.projectId).catch((): Theme[] => []),
+  ]);
 
   // ── Canvas suelto: un solo HTML, sin ZIP ──
   if (opts.kind === 'canvas') {
@@ -108,7 +114,7 @@ export async function exportNodeHtml(opts: {
     opts.onProgress?.({ done: 0, total: 1, current: '' });
     const diagram = await loadDiagram(opts.nodeId);
     if (cancelled()) return { ...outcome, cancelled: true };
-    const html = canvasHtml(builders, diagram, lookups, [opts.projectName], null);
+    const html = canvasHtml(builders, diagram, lookups, themes, [opts.projectName], null);
     download(new Blob([html], { type: 'text/html' }), `${sanitizeFileName(diagram.subjectArea.name)}.html`);
     opts.onProgress?.({ done: 1, total: 1, current: diagram.subjectArea.name });
     return { ...outcome, exported: 1 };
@@ -134,7 +140,7 @@ export async function exportNodeHtml(opts: {
       // El crumb del caso project YA arranca en el proyecto; en folder se
       // antepone para que el breadcrumb siempre lea Proyecto / …carpetas….
       const breadcrumb = opts.kind === 'project' ? entry.crumb : [opts.projectName, ...entry.crumb];
-      const html = canvasHtml(builders, diagram, lookups, breadcrumb, indexHref);
+      const html = canvasHtml(builders, diagram, lookups, themes, breadcrumb, indexHref);
       pages[i] = {
         path: [layout.rootName, ...entry.dir, entry.file].join('/'),
         html,

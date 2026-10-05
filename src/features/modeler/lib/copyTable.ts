@@ -4,8 +4,8 @@
  * `useModelerStore.pasteTable`.
  *
  * El paste es la variante "tabla NUEVA desde un snapshot" de
- * createTableFromSources (docs 43/45): la tabla hereda esquema, definición y
- * UDPs; cada columna hereda su metadata INDIVIDUAL completa con id NUEVO y el
+ * createTableFromSources (docs 43/45): la tabla hereda esquema, definición,
+ * UDPs y su color (doc 109, como Erwin); cada columna hereda su metadata INDIVIDUAL completa con id NUEVO y el
  * ORDEN DE LA LLAVE re-numerado. Lo que NO viaja: relaciones (pedido
  * explícito) ni el flag `isForeignKey` (sin relación sería una marca
  * huérfana — difiere del paste de columnas del doc 48) ni vistas.
@@ -86,6 +86,7 @@ export function copyTableToBulk(input: {
       ...(t.schema ? { schema: t.schema } : {}),
       ...(t.description ? { description: t.description } : {}),
       ...(t.udpValues && Object.keys(t.udpValues).length ? { udpValues: { ...t.udpValues } } : {}),
+      ...(t.color ? { color: t.color } : {}),
     }, { kind: 'paste-table', sourceTable: srcTable }),
   ];
   let ordinal = 0;

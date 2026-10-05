@@ -7,6 +7,8 @@ import type { View } from '@/services/views.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 import { viewNodeRows } from '../lib/viewGraph';
 import { viewLodSize } from '../lib/lodSize';
+import { boxHex, tintStyle } from '../lib/boxColor';
+import { useModelerStore } from '@/store/useModelerStore';
 
 export interface ViewNodeData {
   view: View;
@@ -37,6 +39,9 @@ function ViewNode({ data, selected }: NodeProps) {
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
 
   const rows = viewNodeRows(view, colTypes);
+  // Doc 109: color de la caja en ESTE canvas (misma regla que las tablas).
+  const hex = useModelerStore((s) => boxHex(view.id, view.color, s.canvasColors, s.themeIdx));
+  const tint = tintStyle(hex);
 
   // LOD (doc 33): misma caja "medio plomo" (borde punteado + hatch del body =
   // la identidad visual de VISTA a lo lejos) con el MISMO tamaño, sin filas.
@@ -44,7 +49,7 @@ function ViewNode({ data, selected }: NodeProps) {
   if (lod) {
     const { w, h } = viewLodSize(view, colTypes);
     return (
-      <div className={`wk-vnode wk-lod${selected ? ' sel' : ''}`} style={{ width: w, height: h }}>
+      <div className={`wk-vnode wk-lod${selected ? ' sel' : ''}${hex ? ' tinted' : ''}`} style={{ width: w, height: h, ...tint }}>
         <div className="wk-vnode-head">
           <Eye size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
           <span className="rd-mono wk-vnode-title">
@@ -60,7 +65,7 @@ function ViewNode({ data, selected }: NodeProps) {
   }
 
   return (
-    <div className={`wk-vnode${selected ? ' sel' : ''}`}>
+    <div className={`wk-vnode${selected ? ' sel' : ''}${hex ? ' tinted' : ''}`} style={tint}>
       <div className="wk-vnode-head">
         <Eye size={13} strokeWidth={1.9} className="wk-node-glyph" aria-hidden />
         <span className="rd-mono wk-vnode-title">

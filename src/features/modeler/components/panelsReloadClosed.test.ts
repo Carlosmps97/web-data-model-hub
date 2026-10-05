@@ -25,7 +25,13 @@ let server: Record<string, Doc> = {};
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(async () => []), recordChangesBulk: vi.fn(async () => ({})),
+    // Doc 109: los paneles leen el documento vigente por id antes de grabar —
+    // como el backend: de SU colección, y sin `ids` la colección entera.
+    ...actual, recordChangesBulk: vi.fn(async () => ({})),
+    effective: vi.fn(async (_cs: string, coll: string, opts?: { ids?: string[] }) =>
+      Object.values(server)
+        .filter((d) => (coll === 'views') === ('sources' in d) && (!opts?.ids || opts.ids.includes(d.id)))
+        .map((d) => ({ ...d }))),
     recordChange: vi.fn(async (_cs: string, _coll: string, id: string, op: string, payload: Doc) => {
       if (op === 'delete') delete server[id]; else server[id] = { ...payload };
       return {};

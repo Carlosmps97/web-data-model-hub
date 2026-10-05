@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { canvasClock, forgetCanvasWrites, noteCanvasWrite, writtenSince } from './canvasWrites';
 
 const doc = (over: Record<string, unknown> = {}) => ({
-  layout: { t1: { x: 1, y: 2 } }, routes: { r1: [{ x: 5, y: 6 }] }, ...over,
+  layout: { t1: { x: 1, y: 2 } }, routes: { r1: [{ x: 5, y: 6 }] }, colors: { t1: 'theme:th1' }, ...over,
 });
 
 beforeEach(() => forgetCanvasWrites());
@@ -46,10 +46,16 @@ describe('canvasWrites — lo último grabado de cada canvas', () => {
     expect(writtenSince('cs1', 'sa1', asked)).toBeNull();
   });
 
-  it('sin `layout` o sin `routes` en lo grabado devuelve mapas vacíos', () => {
+  it('sin `layout`, `routes` o `colors` en lo grabado devuelve mapas vacíos', () => {
     const asked = canvasClock();
     noteCanvasWrite('cs1', 'sa1', {});
-    expect(writtenSince('cs1', 'sa1', asked)).toEqual({ layout: {}, routes: {} });
+    expect(writtenSince('cs1', 'sa1', asked)).toEqual({ layout: {}, routes: {}, colors: {} });
+  });
+
+  it('doc 109: los colores del canvas pasan limpios (lo inválido se cae)', () => {
+    const asked = canvasClock();
+    noteCanvasWrite('cs1', 'sa1', doc({ colors: { t1: '#16a37b', t2: 'none', t3: 'rojo', t4: 7 } }));
+    expect(writtenSince('cs1', 'sa1', asked)?.colors).toEqual({ t1: '#16A37B', t2: 'none' });
   });
 
   it('no guarda referencia a lo que recibió', () => {
@@ -58,6 +64,7 @@ describe('canvasWrites — lo último grabado de cada canvas', () => {
     noteCanvasWrite('cs1', 'sa1', written);
     written.layout.t1.x = 999;
     (written.routes as Record<string, unknown>).r9 = [];
+    (written.colors as Record<string, unknown>).t9 = '#000000';
     expect(writtenSince('cs1', 'sa1', asked)).toEqual(doc());
   });
 });

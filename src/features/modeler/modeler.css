@@ -645,6 +645,15 @@
    ellipsis protege además contra tipos simples patológicamente largos. */
 .wk-node-dt { flex: 0 0 auto; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted-2); font-size: 10px; }  /* #8A93A5 Geist Mono */
 .wk-node-empty { padding: 6px 11px; color: var(--muted); }
+/* Doc 109: bloque PINTADO (theme o color de la tabla / del canvas). La cabecera
+   navy se mantiene; el cuerpo toma el color mezclado con blanco (45 %) y la
+   franja de la llave un tono más (62 %) — legible de cerca y reconocible de
+   lejos. Los realces de fila (hover, wire, selección) siguen encima. */
+.wk-node.tinted { background: var(--tint-body); }
+.wk-node.tinted .wk-node-pk { background: var(--tint-key); box-shadow: inset 0 -1px 0 rgba(16,27,48,.08); }
+.wk-node.tinted .wk-node-row, .wk-node.tinted .wk-node-div { border-top-color: rgba(16,27,48,.07); }
+.wk-node.tinted:not(.rel-armed) .wk-node-row:not(.hot):not(.selcol):hover { background: rgba(16,27,48,.05); }
+.wk-node.tinted .wk-node-dt { color: #5E677A; }
 
 /* ── ComplexTypeBuilder (doc 64 §2): declarador HÍBRIDO de STRUCT/ARRAY/MAP ──
    Aparece bajo el input de tipo cuando el texto arranca como complejo.
@@ -753,6 +762,9 @@
 .wk-vnode-body { background-color: #EDEFF4; background-image: repeating-linear-gradient(45deg,
   rgba(90,102,117,.11) 0 1px, transparent 1px 8px); }
 .wk-vnode-body .wk-node-row { border-top: 1px solid rgba(90,102,117,.13); }
+/* Doc 109: vista PINTADA — el tinte reemplaza el gris de base; la trama queda. */
+.wk-vnode.tinted .wk-vnode-body { background-color: var(--tint-body); }
+.wk-vnode.tinted .wk-node-dt { color: #5E677A; }
 .wk-vnode-body .wk-node-row:first-child { border-top: none; }
 .wk-vnode-fx { display: inline-flex; justify-content: center; align-items: center;
   min-width: 16px; height: 13px; flex: none; font-size: 9px; font-style: italic;
@@ -1059,27 +1071,42 @@ select.exd-input { padding: 0 10px; }
 .wk-shape { position: relative; box-sizing: border-box; }
 /* Anillo de selección consistente con las tablas (.wk-node.sel) pero más sutil. */
 .wk-shape.sel { outline: 1.5px solid var(--blue); outline-offset: 2px; border-radius: 4px; }
-.wk-shape-box { width: 100%; height: 100%; box-sizing: border-box; border: 2px solid var(--blue); }
-.wk-shape-svg { display: block; width: 100%; height: 100%; overflow: visible; }
-/* Texto libre */
-.wk-shape-text { width: 100%; height: 100%; display: flex; align-items: center; padding: 2px 4px;
-  font-size: 14px; font-weight: 600; line-height: 1.3; white-space: pre-wrap; word-break: break-word;
-  cursor: text; }
-.wk-shape-textedit { width: 100%; height: 100%; box-sizing: border-box; resize: none; padding: 2px 4px;
-  border: 1.5px solid var(--blue); border-radius: 5px; background: var(--surface);
-  font-size: 14px; font-weight: 600; line-height: 1.3; outline: none; }
-/* Mini-control flotante sobre la forma seleccionada */
-.wk-shape-bar { position: absolute; top: -34px; left: 0; display: flex; align-items: center; gap: 4px;
-  padding: 4px 6px; background: var(--surface); border: 1px solid var(--border-1); border-radius: var(--r-sm);
-  box-shadow: var(--shadow-table); z-index: 5; }
-.wk-shape-sw { width: 15px; height: 15px; border-radius: 50%; border: 1.5px solid rgba(16,27,48,.12);
-  padding: 0; cursor: pointer; flex-shrink: 0; }
-.wk-shape-sw.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--blue); }
-.wk-shape-bar-div { width: 1px; height: 16px; background: var(--border-soft); }
-.wk-shape-del { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--text-muted); font-size: 16px; line-height: 1; cursor: pointer;
-  border-radius: 4px; }
-.wk-shape-del:hover { background: #F0C9C4; color: var(--danger, #C0392B); }
+.wk-shape-box { position: absolute; inset: 0; box-sizing: border-box; }
+.wk-shape-svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; overflow: visible; }
+/* Doc 109: texto de cualquier dibujo (no sólo el de tipo texto), encima de la
+   forma; alineación horizontal por text-align y vertical por justify-content. */
+.wk-shape-text { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 2px 4px;
+  line-height: 1.3; white-space: pre-wrap; word-break: break-word; cursor: default; }
+.wk-shape-text.empty { opacity: .45; }
+.wk-shape-textin { display: block; }
+.wk-shape-textedit { position: absolute; inset: 0; width: 100%; height: 100%; box-sizing: border-box; resize: none;
+  padding: 2px 4px; border: 1.5px solid var(--blue); border-radius: 5px; background: transparent;
+  line-height: 1.3; outline: none; }
+/* Tiradores para redimensionar (NodeResizer): los del anillo de selección. */
+.react-flow__resize-control.handle.wk-shape-handle { width: 8px; height: 8px; border-radius: 2px;
+  background: var(--surface); border: 1.5px solid var(--blue); }
+.react-flow__resize-control.line.wk-shape-rline { border-color: transparent; }
+/* Barra de formato del dibujo seleccionado (NodeToolbar, a tamaño de pantalla). */
+.wk-dtb { display: flex; align-items: center; gap: 2px; padding: 4px; background: var(--surface);
+  border: 1px solid var(--border-1); border-radius: 9px; box-shadow: 0 6px 18px rgba(16, 27, 48, .14);
+  white-space: nowrap; }
+.wk-dtb-btn { height: 28px; min-width: 28px; padding: 0 6px; display: inline-flex; align-items: center;
+  justify-content: center; gap: 4px; border: 0; border-radius: 6px; background: none; color: var(--text-body);
+  font-family: inherit; font-size: 12px; cursor: pointer; }
+.wk-dtb-btn:hover { background: var(--fill-1); }
+.wk-dtb-btn.on { background: var(--blue-tint); color: var(--blue); }
+.wk-dtb-del:hover { background: var(--red-tint); color: var(--red); }
+.wk-dtb-caret { color: var(--text-muted-3); }
+.wk-dtb-div { width: 1px; height: 18px; margin: 0 3px; background: var(--border-4); }
+.wk-dtb-sw { display: inline-block; width: 13px; height: 13px; border-radius: 3px; border: 1px solid rgba(16, 27, 48, .2); box-sizing: border-box; }
+.wk-dtb-sw--outline { background: var(--surface); border-width: 2px; }
+.wk-dtb-font { max-width: 132px; overflow: hidden; text-overflow: ellipsis; }
+.wk-dtb-size { min-width: 18px; text-align: right; font-variant-numeric: tabular-nums; }
+.wk-dtb-a { font-weight: 700; line-height: 12px; border-bottom: 3px solid currentColor; padding: 0 1px; }
+.wk-dtb-row { display: flex; gap: 4px; padding: 0 6px 6px; }
+.wk-dtb-sizes { width: 120px; max-height: 300px; overflow-y: auto; }
+.wk-dtb-align { width: 150px; }
+/* (doc 109: el mini-control de 6 colores lo reemplazó la barra de formato .wk-dtb) */
 
 /* View editor (doc 91 D4): fuentes elegidas como LISTA vertical — una fila por
    fuente (alias tN · esquema en línea aparte · físico en mono que ENVUELVE con
@@ -1239,3 +1266,52 @@ select.exd-input { padding: 0 10px; }
 .wk-exp-switch { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border-3); background: var(--surface); border-radius: var(--r-sm);
   padding: 2px 7px; font-size: 11px; font-weight: 600; color: var(--primary); cursor: pointer; }
 .wk-exp-switch:hover { border-color: var(--primary); }
+
+/* ── Doc 109: selector de color (menú del canvas, Properties, dibujos) ──────── */
+.wk-float { position: fixed; z-index: 320; background: var(--surface); border: 1px solid var(--border-1, #E3E8F0);
+  border-radius: 10px; box-shadow: 0 10px 28px rgba(20, 30, 55, .16); }
+.wk-cpick { width: 248px; padding: 6px; box-sizing: border-box; }
+.wk-cpick-title { padding: 4px 6px 7px; font-size: 11.5px; font-weight: 600; color: var(--navy); }
+.wk-cpick-cap { padding: 6px 6px 4px; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text-muted-3); }
+.wk-cpick .wk-cpick-item { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 7px;
+  border: 0; border-radius: 6px; background: none; font-family: inherit; font-size: 12.5px; color: var(--navy);
+  text-align: left; cursor: pointer; }
+.wk-cpick .wk-cpick-item:hover { background: var(--blue-tint); }
+.wk-cpick .wk-cpick-item.on { background: var(--blue-tint); }
+.wk-cpick-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-cpick-check { flex: none; color: var(--blue); }
+.wk-cpick-ico { flex: none; color: var(--text-muted); }
+.wk-cpick-hex { flex: none; font-family: var(--mono, 'Geist Mono', monospace); font-size: 10.5px; color: var(--text-muted-3); }
+.wk-cpick-dot { flex: none; display: inline-block; width: 14px; height: 14px; border-radius: 50%;
+  border: 1px solid rgba(16, 27, 48, .18); box-sizing: border-box; }
+.wk-cpick-dot--sm { width: 11px; height: 11px; }
+.wk-cpick-dot--inline { width: 10px; height: 10px; vertical-align: -1px; }
+/* «sin color»: blanco con una barra diagonal roja */
+.wk-cpick-dot--none { background: linear-gradient(135deg, #fff 45%, #C0392B 46%, #C0392B 54%, #fff 55%); }
+.wk-cpick-swatches { display: grid; grid-template-columns: repeat(10, 1fr); gap: 4px; padding: 2px 6px 6px; }
+.wk-cpick .wk-cpick-sw { width: 18px; height: 18px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(16, 27, 48, .18); }
+.wk-cpick .wk-cpick-sw:hover { transform: scale(1.12); }
+.wk-cpick .wk-cpick-sw.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--blue); }
+.wk-cpick-sep { height: 1px; margin: 5px 2px; background: #EEF1F5; }
+
+/* Menú del canvas: separador, ítem con submenú y el flyout del color. */
+.wk-ctxmenu-sep { height: 1px; margin: 4px 2px; background: #EEF1F5; }
+.wk-ctxmenu-group { position: relative; }
+.wk-ctxmenu button.on { background: var(--blue-tint); }
+.wk-ctxmenu-chev { margin-left: auto; color: var(--text-muted-3); }
+.wk-ctxmenu-sub { position: absolute; z-index: 1; background: var(--surface); border: 1px solid var(--border-1, #E3E8F0);
+  border-radius: 10px; box-shadow: 0 10px 28px rgba(20, 30, 55, .16); }
+.wk-ctxmenu-note { padding: 0 12px 9px; font-size: 11px; color: var(--text-muted-2); }
+
+/* Campo «Color» de Properties: aspecto de input, con la muestra y el nombre. */
+.wk-colorfield { display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 10px;
+  border: 1px solid #DCE1EA; border-radius: 8px; background: var(--surface); font-family: inherit;
+  font-size: 13px; color: var(--navy); cursor: pointer; text-align: left; }
+.wk-colorfield:hover:not(:disabled) { border-color: var(--blue-border); }
+.wk-colorfield:disabled { cursor: default; background: #F7F9FC; color: var(--text-muted); }
+.wk-colorfield-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-colorfield-caret { flex: none; color: var(--text-muted-3); }
+.wk-colorfield-hint { margin: 6px 0 0; }
+.wk-pp-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #EEF1F5; }

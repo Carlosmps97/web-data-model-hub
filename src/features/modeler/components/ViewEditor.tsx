@@ -308,7 +308,7 @@ export default function ViewEditor({
       // changeset es el DOC COMPLETO: los UDP de la vista se conservan.
       const body = viewSaveBody({
         name, schema, sourceIds, sources: serializeSources(order, cfg, validKeys), showOnCanvas,
-        sql: preview, description, sqlText: sqlDraft, udpValues: view?.udpValues,
+        sql: preview, description, sqlText: sqlDraft, udpValues: view?.udpValues, color: view?.color,
       });
       const saved = editing && view
         ? await viewsSvc.updateView(view.id, body)

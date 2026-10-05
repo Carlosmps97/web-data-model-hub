@@ -4,7 +4,7 @@ import { copyNameBase, copyTableToBulk, nextCopyNames } from './copyTable';
 
 const TABLE: CanonicalTable = {
   id: 't1', physicalName: 'M_CLIENTE', logicalName: 'Cliente', schema: 'core',
-  description: 'maestro', udpValues: { u1: 'v1' },
+  description: 'maestro', udpValues: { u1: 'v1' }, color: 'theme:th1',
 };
 const col = (over: Partial<CanonicalColumn>): CanonicalColumn => ({
   id: 'c1', tableId: 't1', physicalName: 'ID', logicalName: 'id',
@@ -55,11 +55,15 @@ describe('copyTableToBulk', () => {
     newId: () => `n${++seq}`,
   });
 
-  it('la tabla hereda esquema, definición y UDPs con el nombre nuevo', () => {
+  it('la tabla hereda esquema, definición, UDPs y color (doc 109) con el nombre nuevo', () => {
     expect(changes[0]).toMatchObject({
       collection: 'canonical_tables', entityId: 'NEW', op: 'upsert',
-      payload: { id: 'NEW', physicalName: 'M_CLIENTE_copy_1', logicalName: 'Cliente copy 1', schema: 'core', description: 'maestro', udpValues: { u1: 'v1' } },
+      payload: { id: 'NEW', physicalName: 'M_CLIENTE_copy_1', logicalName: 'Cliente copy 1', schema: 'core', description: 'maestro', udpValues: { u1: 'v1' }, color: 'theme:th1' },
     });
+  });
+  it('doc 109: una tabla sin color pega sin la clave', () => {
+    const [t] = copyTableToBulk({ table: { ...TABLE, color: null }, cols: [], id: 'N2', physicalName: 'X', logicalName: 'x' });
+    expect('color' in (t.payload as object)).toBe(false);
   });
   it('columnas con id nuevo, ordinal secuencial en el ORDEN ÚNICO (PK primero) y metadata heredada', () => {
     const paylo = changes.slice(1).map((c) => c.payload as Record<string, unknown>);
