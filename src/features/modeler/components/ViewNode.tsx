@@ -40,7 +40,7 @@ function ViewNode({ data, selected }: NodeProps) {
 
   const rows = viewNodeRows(view, colTypes);
   // Doc 109: color de la caja en ESTE canvas (misma regla que las tablas).
-  const hex = useModelerStore((s) => boxHex(view.id, view.color, s.canvasColors, s.themeIdx));
+  const hex = useModelerStore((s) => boxHex(view.id, view.color, s.canvasColors, s.themeIdx, s.colorPreview));
   const tint = tintStyle(hex);
 
   // LOD (doc 33): misma caja "medio plomo" (borde punteado + hatch del body =

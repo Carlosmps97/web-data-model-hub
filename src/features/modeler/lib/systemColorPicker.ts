@@ -35,9 +35,12 @@ export function openSystemPicker(initial: string, at: DOMRect | null, apply: (he
   el.value = initial.toLowerCase();
   el.tabIndex = -1;
   el.setAttribute('aria-hidden', 'true');
+  // Encima del botón pulsado y de su tamaño: el selector del navegador se ancla
+  // a la caja del input (debajo de ella, o arriba si no entra).
   Object.assign(el.style, {
-    position: 'fixed', left: `${at?.left ?? 0}px`, top: `${at?.bottom ?? 0}px`,
-    width: '1px', height: '1px', opacity: '0', border: '0', padding: '0', pointerEvents: 'none',
+    position: 'fixed', left: `${at?.left ?? 0}px`, top: `${at?.top ?? 0}px`,
+    width: `${Math.max(1, Math.round(at?.width ?? 1))}px`, height: `${Math.max(1, Math.round(at?.height ?? 1))}px`,
+    opacity: '0', border: '0', padding: '0', margin: '0', pointerEvents: 'none',
   });
   let pending: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -73,6 +76,9 @@ export function openSystemPicker(initial: string, at: DOMRect | null, apply: (he
     finish();
   };
   systemPicker = { el, alive, discard: finish, flushNow };
+  // Doc 112: recién agregado, el input todavía no tiene posición calculada y
+  // Chrome abría su selector en la esquina superior izquierda de la pantalla.
+  el.getBoundingClientRect();
   el.click();
 }
 
@@ -82,4 +88,10 @@ export function openSystemPicker(initial: string, at: DOMRect | null, apply: (he
  *  (abierto con otro `alive`, o sin él) no se toca. */
 export function flushSystemPicker(alive: () => boolean): void {
   if (systemPicker && systemPicker.alive === alive) systemPicker.flushNow();
+}
+
+/** Doc 112: quien lo abrió con `alive` se cerró SIN guardar (Cancel de la
+ *  ficha): lo elegido no se aplica y el selector se suelta. Otro no se toca. */
+export function discardSystemPicker(alive: (() => boolean) | undefined): void {
+  if (systemPicker && systemPicker.alive === alive) systemPicker.discard();
 }

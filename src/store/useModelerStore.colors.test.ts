@@ -274,3 +274,55 @@ describe('ficha del canvas — un cierre tardío no cierra otra (doc 112, revisi
     expect(st().modelProps).toBeNull();
   });
 });
+
+describe('applyCanvasColors — la ficha del canvas graba sus colores al Save (doc 112)', () => {
+  it('graba UNA vez sólo lo que cambia, con UN Undo que repone todo, y devuelve true', async () => {
+    const ok = await st().applyCanvasColors({ t1: 'theme:th2', t2: null, v1: 'none', t9: '#000000' }, 'Change colors on this canvas');
+    expect(ok).toBe(true);
+    expect(struct.setCanvasColors).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(struct.setCanvasColors).mock.calls[0]).toEqual(['sa1', { t1: 'theme:th2', t2: null, v1: 'none' }]);
+    expect(colors()).toEqual({ t1: 'theme:th2', v1: 'none' });
+    expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['Change colors on this canvas']);
+    await useUndoStore.getState().undoLast();
+    expect(vi.mocked(struct.setCanvasColors).mock.calls[1]).toEqual(['sa1', { t1: null, t2: '#16A37B', v1: null }]);
+  });
+
+  it('sin cambios reales no graba nada y devuelve true (la ficha se cierra)', async () => {
+    expect(await st().applyCanvasColors({ t2: '#16a37b', t1: null })).toBe(true);
+    expect(struct.setCanvasColors).not.toHaveBeenCalled();
+    expect(useUndoStore.getState().stack).toEqual([]);
+  });
+
+  it('si el guardado falla: vuelve a lo anterior, avisa, no deja Undo y devuelve false (la ficha queda abierta)', async () => {
+    vi.mocked(struct.setCanvasColors).mockRejectedValueOnce(new Error('sin red'));
+    expect(await st().applyCanvasColors({ t1: '#000000' })).toBe(false);
+    expect(colors()).toEqual({ t2: '#16A37B' });
+    expect(toast.error).toHaveBeenCalled();
+    expect(useUndoStore.getState().stack).toEqual([]);
+  });
+
+  it('fuera de una sesión de edición no graba y devuelve false', async () => {
+    useSessionStore.setState({ openMode: 'readonly', activeChangesetId: 'cs1' });
+    useModelerStore.setState({ diagram: diagramWith({ t2: '#16A37B' }) });
+    expect(await st().applyCanvasColors({ t1: '#000000' })).toBe(false);
+    expect(struct.setCanvasColors).not.toHaveBeenCalled();
+  });
+});
+
+describe('vista previa de la ficha (doc 112)', () => {
+  it('setColorPreview la pone; vacía o null la quita', () => {
+    st().setColorPreview({ t1: '#FF0000' });
+    expect(st().colorPreview).toEqual({ t1: '#FF0000' });
+    st().setColorPreview({});
+    expect(st().colorPreview).toBeNull();
+    st().setColorPreview({ t1: null });
+    st().setColorPreview(null);
+    expect(st().colorPreview).toBeNull();
+  });
+
+  it('cambiar de sesión la descarta', () => {
+    st().setColorPreview({ t1: '#FF0000' });
+    useSessionStore.setState({ activeChangesetId: 'cs2' });
+    expect(st().colorPreview).toBeNull();
+  });
+});

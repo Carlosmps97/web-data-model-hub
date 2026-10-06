@@ -91,7 +91,7 @@ function TableNode({ data }: NodeProps) {
   const focusColumnInPanel = useModelerStore((s) => s.focusColumnInPanel);
   // Doc 109: color de la caja en ESTE canvas (excepción del canvas → color de
   // la tabla → sin color). Selector de string: un cambio re-pinta sólo esta caja.
-  const hex = useModelerStore((s) => boxHex(table.id, table.color, s.canvasColors, s.themeIdx));
+  const hex = useModelerStore((s) => boxHex(table.id, table.color, s.canvasColors, s.themeIdx, s.colorPreview));
   const tint = tintStyle(hex);
 
   const nameOf = (o: { logicalName: string; physicalName: string }) =>

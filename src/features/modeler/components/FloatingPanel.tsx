@@ -20,9 +20,12 @@ export interface FloatingPanelProps {
   /** El botón que lo abrió: su clic lo cierra él mismo (sin esto, el clic
    *  afuera lo cerraba y el mismo clic lo volvía a abrir). */
   owner?: Element | null;
+  /** Doc 112: dentro de un diálogo, se dibuja AHÍ (sin portal) para que su
+   *  trampa de Tab lo incluya; igual queda fijo encima (no agranda el diálogo). */
+  inPlace?: boolean;
 }
 
-export default function FloatingPanel({ anchor, onClose, children, side = 'below', owner }: FloatingPanelProps) {
+export default function FloatingPanel({ anchor, onClose, children, side = 'below', owner, inPlace }: FloatingPanelProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
@@ -61,12 +64,12 @@ export default function FloatingPanel({ anchor, onClose, children, side = 'below
     };
   }, [onClose, owner]);
 
-  return createPortal(
+  const panel = (
     <div ref={ref} className="wk-float nodrag nopan nowheel"
       style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 }}
       onMouseDown={(e) => e.stopPropagation()}>
       {children}
-    </div>,
-    document.body,
+    </div>
   );
+  return inPlace ? panel : createPortal(panel, document.body);
 }

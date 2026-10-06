@@ -2,7 +2,7 @@
 // Properties: qué cajas pinta distinto ESTE canvas, de dónde sale el color que
 // se ve en una caja, y a qué cajas se aplica «Paint on this canvas».
 import { describe, expect, it } from 'vitest';
-import { canvasBoxes, paintedHere, paintTargets, shownColor } from './canvasColors';
+import { canvasBoxes, paintedHere, paintTargets, pendingChanges, shownColor, stage, withPending } from './canvasColors';
 
 const diagram = {
   tables: [
@@ -70,5 +70,24 @@ describe('paintTargets — a qué cajas se aplica «Paint on this canvas»', () 
     expect(paintTargets([node('t1', 'table', false)], ['t2', null], visible)).toEqual(['t2']);
     expect(paintTargets([], [null, 'v1'], visible)).toEqual(['v1']);
     expect(paintTargets([], ['t9'], visible)).toEqual([]);
+  });
+});
+
+describe('cambios pendientes de la ficha (doc 112: Save graba, Cancel descarta)', () => {
+  const canvas = { t1: 'theme:pri', t2: 'none' };
+
+  it('withPending: los colores del canvas con lo pendiente encima (null = vuelve al de su tabla)', () => {
+    expect(withPending(canvas, { t1: null, t3: '#FF0000' })).toEqual({ t2: 'none', t3: '#FF0000' });
+    expect(withPending(canvas, {})).toEqual(canvas);
+  });
+
+  it('pendingChanges: sólo lo que de verdad cambia respecto de lo grabado', () => {
+    expect(pendingChanges(canvas, { t1: 'theme:pri', t2: null, t3: null, t4: '#00B050' })).toEqual({ t2: null, t4: '#00B050' });
+    expect(pendingChanges(canvas, {})).toEqual({});
+  });
+
+  it('stage: pinta o vuelve al color de su tabla varias cajas a la vez', () => {
+    expect(stage({ t1: '#000000' }, ['t2', 't3'], 'theme:sec')).toEqual({ t1: '#000000', t2: 'theme:sec', t3: 'theme:sec' });
+    expect(stage({ t1: '#000000' }, ['t1'], null)).toEqual({ t1: null });
   });
 });

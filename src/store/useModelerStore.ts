@@ -246,6 +246,16 @@ interface ModelerState {
    *  instante, graba UNA vez en la working copy y apila su Undo; si falla,
    *  vuelve a lo anterior y avisa. Fuera de una sesión de edición, nada. */
   setBoxColors: (ids: string[], ref: string | null) => Promise<void>;
+  /** Doc 112: graba de una vez varias cajas del canvas abierto con colores
+   *  distintos — `patch` = {id: ColorRef | null} (null = vuelve al color de su
+   *  tabla). La usa la ficha del canvas al Save: UN request y UN Undo (`label`).
+   *  Sólo lo que de verdad cambia; true si quedó grabado (o no había nada que
+   *  grabar), false si no se pudo (ya avisó). */
+  applyCanvasColors: (patch: Record<string, string | null>, label?: string) => Promise<boolean>;
+  /** Doc 112: colores PENDIENTES de la ficha del canvas abierta (sin grabar),
+   *  que las cajas muestran encima de los grabados; null = no hay. */
+  colorPreview: Record<string, string | null> | null;
+  setColorPreview: (p: Record<string, string | null> | null) => void;
   /** Doc 109: color PROPIO de una tabla o vista (todos sus canvases); null =
    *  sin color. Un cambio del modelo (changeset), con Undo. */
   setObjectColor: (id: string, ref: string | null) => Promise<void>;
@@ -769,33 +779,46 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     } catch { /* sin themes las cajas con theme se ven sin color hasta el próximo intento */ }
   },
   canvasColors: {},
-  setBoxColors: async (ids, ref) => {
+  applyCanvasColors: async (patch, label) => {
     const saId = get().activeSaId;
     const session = useSessionStore.getState();
     let dia: Diagram | null;
-    try { dia = editableDiagram(); } catch (e) { await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't change the color"); return; }
-    if (!saId || !dia || session.openMode !== 'editing' || !session.activeChangesetId) return;
-    if (dia.subjectArea.id !== saId) return;
-    const value = ref === null ? null : normalColor(ref, true);
-    if (ref !== null && value === null) return;
+    try { dia = editableDiagram(); } catch (e) { await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't change the color"); return false; }
+    if (!saId || !dia || session.openMode !== 'editing' || !session.activeChangesetId) return false;
+    if (dia.subjectArea.id !== saId) return false;
     // Sólo tablas y vistas de ESTE canvas (un selector del sistema que se
-    // cierra con otro canvas abierto no deja colores huérfanos).
+    // cierra con otro canvas abierto no deja colores huérfanos), con un color
+    // válido, y sólo lo que cambia.
     const onCanvas = new Set([...dia.tables.map((t) => t.id), ...(dia.views ?? []).map((v) => v.id)]);
-    const targets = [...new Set(ids)].filter((id) => onCanvas.has(id));
+    const next: Record<string, string | null> = {};
     const prev: Record<string, string | null> = {};
-    for (const id of targets) prev[id] = get().canvasColors[id] ?? null;
-    if (!targets.length || targets.every((id) => prev[id] === value)) return;   // sin cambio real: cero requests
+    for (const [id, ref] of Object.entries(patch)) {
+      const value = ref === null ? null : normalColor(ref, true);
+      if (!onCanvas.has(id) || (ref !== null && value === null)) continue;
+      const before = get().canvasColors[id] ?? null;
+      if (before === value) continue;
+      next[id] = value;
+      prev[id] = before;
+    }
+    const ids = Object.keys(next);
+    if (!ids.length) return true;   // sin cambio real: cero requests
     const pin = pinSession();
     get().markDirty();
     try {
-      await writeCanvasColors(saId, Object.fromEntries(targets.map((id) => [id, value])));
+      await writeCanvasColors(saId, next);
     } catch (e) {
       await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't change the color");
-      return;
+      return false;
     }
-    pushUndo(targets.length === 1 ? 'Change color' : `Change color of ${targets.length} boxes`,
+    pushUndo(label ?? (ids.length === 1 ? 'Change color' : `Change color of ${ids.length} boxes`),
       () => writeCanvasColors(saId, prev), pin);
+    return true;
   },
+  setBoxColors: async (ids, ref) => {
+    await get().applyCanvasColors(Object.fromEntries([...new Set(ids)].map((id) => [id, ref])));
+  },
+  colorPreview: null,
+  setColorPreview: (p) => set({ colorPreview: p && Object.keys(p).length ? p : null }),
   setObjectColor: (id, ref) => {
     const value = ref === null ? null : normalColor(ref);
     if (ref !== null && value === null) return Promise.resolve();
@@ -2685,7 +2708,7 @@ useSessionStore.subscribe((s, prev) => {
       columnTarget: null, relPreset: null, subcatArmed: false, hoverEdgeId: null, hoverNodeId: null,
       colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
       inspect: null, searchOpen: false, navigating: null, pendingFocusTableId: null, pendingFocusColId: null,
-      modelProps: null,
+      modelProps: null, colorPreview: null,
     });
   }
   if (s.activeChangesetId === prev.activeChangesetId) return;

@@ -1354,8 +1354,9 @@ select.exd-input { padding: 0 10px; }
 .wk-mp-sel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-body); }
 .wk-mp-sel b { font-weight: 600; color: var(--navy); }
 .wk-mp-sel--none { white-space: normal; color: var(--muted); line-height: 1.45; }
-/* El selector de color se abre DENTRO de la ficha (Tab llega; Escape cierra sólo él). */
-.wk-mp-picker { display: flex; justify-content: flex-end; margin-top: 8px; }
-.wk-mp-picker .wk-cpick { border: 1px solid var(--border-1); border-radius: 10px; background: var(--surface);
-  box-shadow: 0 6px 18px rgba(20, 30, 55, .10); }
+/* Cambios de color pendientes de la ficha (se graban con Save). */
+.wk-mp-unsaved { margin-left: 8px; padding: 1px 6px; border-radius: 999px; background: var(--amber-tint);
+  color: var(--amber-deep); font-size: 10px; font-weight: 700; letter-spacing: .02em; vertical-align: 1px; }
+.wk-mp-pending { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--amber-tint);
+  color: var(--amber-deep); font-size: 12px; line-height: 1.4; }
 .wk-pp-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #EEF1F5; }

@@ -76,6 +76,7 @@ export const STORE_WRITE_ACTIONS = new Set([
   'deleteProject', 'undoProjectDeletion', 'saveAll',
   'addDrawing', 'updateDrawing', 'deleteDrawing', 'persistDrawings',
   'setBoxColors', 'setObjectColor',   // doc 109
+  'applyCanvasColors',                // doc 112
 ]);
 /** Callbacks que escriben (del padre): el cuerpo de columna (`onPatch`), el
  *  editor de vistas (`onSaved`: el llamador suma la vista al canvas), el alta

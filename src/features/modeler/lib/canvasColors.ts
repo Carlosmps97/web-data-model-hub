@@ -64,3 +64,33 @@ export function paintTargets(nodes: { id: string; type?: string; selected?: bool
   const one = fallback.find((id): id is string => !!id && visible.has(id));
   return one ? [one] : [];
 }
+
+/** Doc 112: cambios PENDIENTES de la ficha del canvas — {id: ColorRef | null};
+ *  null = la caja vuelve al color de su tabla. Save los graba, Cancel los
+ *  descarta. */
+export type PendingColors = Record<string, string | null>;
+
+/** Los colores del canvas con lo pendiente encima. Pura. */
+export function withPending(canvas: Record<string, string>, pending: PendingColors): Record<string, string> {
+  const out = { ...canvas };
+  for (const [id, ref] of Object.entries(pending)) {
+    if (ref === null) delete out[id]; else out[id] = ref;
+  }
+  return out;
+}
+
+/** De lo pendiente, sólo lo que cambia respecto de lo grabado. Pura. */
+export function pendingChanges(canvas: Record<string, string>, pending: PendingColors): PendingColors {
+  const out: PendingColors = {};
+  for (const [id, ref] of Object.entries(pending)) {
+    if ((canvas[id] ?? null) !== ref) out[id] = ref;
+  }
+  return out;
+}
+
+/** Deja pendiente pintar `ids` con `ref` (null = volver al color de su tabla). Pura. */
+export function stage(pending: PendingColors, ids: string[], ref: string | null): PendingColors {
+  const out = { ...pending };
+  for (const id of ids) out[id] = ref;
+  return out;
+}
