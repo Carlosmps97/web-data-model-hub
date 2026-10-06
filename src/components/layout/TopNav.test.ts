@@ -4,7 +4,7 @@
 // «Leave without saving» sin saber qué pasó. Ahora lo lleva (`failureText`).
 // Sin DOM: hooks de mentira (ver reporting/components/fakeReact.testutil).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetFake, textOf, walk } from '../../features/reporting/components/fakeReact.testutil';
+import { nextStates, resetFake, runEffects, textOf, walk } from '../../features/reporting/components/fakeReact.testutil';
 
 vi.mock('react', async (orig) => (await import('../../features/reporting/components/fakeReact.testutil')).fakeReact(await orig<object>()));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -63,5 +63,50 @@ describe('«Save and leave» (doc 105, ronda 7, R18a-5)', () => {
     await ticks();
     expect(navigate).toHaveBeenCalledWith('/');
     expect(toast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe('aviso de cambios sin guardar por encima de los popups del canvas (doc 112)', () => {
+  it('va en la capa de confirmaciones: los popups del canvas dejan la barra clicable y lo tapaban', () => {
+    // Con un popup del canvas abierto (Model properties, New table…) el TopNav
+    // sigue clicable (doc 105, R7-A): el aviso quedaba DETRÁS del popup (z 200
+    // contra 300) y la pantalla parecía trabada.
+    resetFake((init, i) => (i === 1 ? '/' : init));
+    const isScrim = (el: { props: { className?: unknown } }) => /\bdmh-backdrop\b/.test(String(el.props.className ?? ''));
+    const tree = TopNav();
+    const scrim = [...walk(tree)].find(isScrim);
+    expect(String(scrim?.props.className)).toMatch(/\bdmh-backdrop--top\b/);
+    // Y FUERA del <header>: la barra tiene su propio z-index (40) y encerraba
+    // al aviso por debajo de los popups aunque tuviera la capa alta.
+    const header = [...walk(tree)].find((el) => el.type === 'header');
+    expect(header).toBeTruthy();
+    expect([...walk(header!.props.children)].some(isScrim)).toBe(false);
+  });
+});
+
+describe('aviso de cambios sin guardar: foco y Escape (doc 112)', () => {
+  it('se lleva el foco y Escape lo cierra a ÉL (quedarse), sin llegar al popup del canvas de atrás', () => {
+    const listeners: { type: string; fn: (e: unknown) => void; capture: unknown }[] = [];
+    vi.stubGlobal('window', {
+      addEventListener: (type: string, fn: (e: unknown) => void, capture: unknown) => { listeners.push({ type, fn, capture }); },
+      removeEventListener: vi.fn(),
+    });
+    try {
+      resetFake((init, i) => (i === 1 ? '/' : init));
+      const tree = TopNav();
+      const cancel = [...walk(tree)].find((el) => el.type === 'button' && textOf(el) === 'Cancel')!;
+      const focus = vi.fn();
+      (cancel.props.ref as { current: unknown }).current = { focus };
+      runEffects();
+      expect(focus).toHaveBeenCalledTimes(1);
+      const esc = listeners.find((l) => l.type === 'keydown');
+      expect(esc?.capture).toBe(true);                       // antes que el listener del popup de atrás
+      const ev = { key: 'Escape', preventDefault: vi.fn(), stopImmediatePropagation: vi.fn() };
+      esc!.fn(ev);
+      expect(ev.stopImmediatePropagation).toHaveBeenCalled();
+      expect(nextStates()[1]).toBeNull();                    // leaveTo = null: se queda en el canvas
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

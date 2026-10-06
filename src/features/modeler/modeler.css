@@ -50,6 +50,10 @@
   .wk-grp { padding: 4px 4px; row-gap: 0; }
   .wk-div { height: 36px; }
   .wk-tic { width: 34px; height: 34px; }
+  /* doc 112: en una fila, sólo el ícono (el tooltip lo nombra) */
+  .wk-modelcol { grid-auto-flow: column; align-items: center; }
+  .wk-modelcol .wk-mprops { width: 30px; height: 30px; padding: 0; }
+  .wk-mprops-txt { display: none; }
   .wk-drawgrid { grid-template-columns: repeat(8, auto); }
   .wk-right { padding: 4px 0; }
 }
@@ -76,6 +80,18 @@
 .wk-seg-btn:not(.on):not(:disabled):hover { color: var(--ink); }
 .wk-seg-btn:disabled { opacity: .5; cursor: not-allowed; }
 .wk-seg-row { display: flex; justify-content: center; margin-top: 4px; }
+/* Doc 112: la ficha del canvas (Model properties), DEBAJO del selector
+   Logical/Physical — misma sección MODEL sin ensanchar la barra. */
+.wk-modelcol { display: grid; gap: 4px; justify-items: stretch; }
+.wk-modelcol .wk-seg { height: 30px; }
+.wk-modelcol .wk-seg-btn { height: 26px; }
+.wk-mprops { height: 24px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 8px;
+  border: 1px solid var(--border-3); border-radius: 7px; background: var(--surface); font-family: var(--ui);
+  font-size: 11px; font-weight: 600; color: var(--text-body); cursor: pointer; white-space: nowrap;
+  transition: border-color .12s, color .12s; }
+.wk-mprops:hover:not(:disabled) { border-color: var(--primary); color: var(--primary); }
+.wk-mprops.on { background: var(--blue-tint); border-color: var(--blue-border); color: var(--primary); }
+.wk-mprops:disabled { opacity: .45; cursor: not-allowed; }
 
 /* RELATIONSHIPS — selectores de extremo crow's-foot (Parent/Child) + las dos
    herramientas de dibujo estilo Erwin (Identifying sólida / Non-id. punteada) */
@@ -275,12 +291,16 @@
 .wk-rel-label { position: absolute; width: max-content; pointer-events: all; cursor: pointer;
   white-space: normal; text-align: center; overflow-wrap: anywhere;
   padding: 2px 5px; border-radius: 4px; background: var(--canvas-bg); color: var(--ink-2);
-  font-family: var(--ui); font-size: 11px; line-height: 14px;
-  transition: color .12s; }
+  font-family: var(--ui); font-size: 11px; line-height: 14px; }
 .wk-rel-label.on { color: var(--primary); }
-/* Atenuada: se apaga el TEXTO, no el fondo — con el fondo translúcido el wire
-   de la propia etiqueta se trasluciría y tacharía el texto. */
-.wk-rel-label.dim { color: color-mix(in srgb, var(--ink-2) 22%, transparent); }
+/* Doc 111: mientras hay un bloque o un wire resaltado, el canvas lleva
+   `.wk-canvas--hover` (lib/hoverIntent) y el RESTO se atenúa acá — ningún wire
+   se re-renderiza por eso y el cambio es instantáneo (animar la opacidad de
+   cientos de wires en cada bloque que cruzaba el mouse trababa la selección).
+   La etiqueta apaga el TEXTO, no el fondo: con el fondo translúcido el wire de
+   la propia etiqueta se trasluciría y tacharía el texto. */
+.wk-canvas--hover .wk-edge:not(.wk-edge--hot) { opacity: .22; }
+.wk-canvas--hover .wk-rel-label:not(.on) { color: color-mix(in srgb, var(--ink-2) 22%, transparent); }
 /* Doc 99: el wire muestra los tiradores de su trazo — la etiqueta se hace a un
    lado (translúcida: se ve el wire completo y los tiradores) sin moverse ni
    dejar de responder al clic / doble clic. */
@@ -1296,15 +1316,6 @@ select.exd-input { padding: 0 10px; }
 .wk-cpick .wk-cpick-sw.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--blue); }
 .wk-cpick-sep { height: 1px; margin: 5px 2px; background: #EEF1F5; }
 
-/* Menú del canvas: separador, ítem con submenú y el flyout del color. */
-.wk-ctxmenu-sep { height: 1px; margin: 4px 2px; background: #EEF1F5; }
-.wk-ctxmenu-group { position: relative; }
-.wk-ctxmenu button.on { background: var(--blue-tint); }
-.wk-ctxmenu-chev { margin-left: auto; color: var(--text-muted-3); }
-.wk-ctxmenu-sub { position: absolute; z-index: 1; background: var(--surface); border: 1px solid var(--border-1, #E3E8F0);
-  border-radius: 10px; box-shadow: 0 10px 28px rgba(20, 30, 55, .16); }
-.wk-ctxmenu-note { padding: 0 12px 9px; font-size: 11px; color: var(--text-muted-2); }
-
 /* Campo «Color» de Properties: aspecto de input, con la muestra y el nombre. */
 .wk-colorfield { display: flex; align-items: center; gap: 9px; width: 100%; height: 34px; padding: 0 10px;
   border: 1px solid #DCE1EA; border-radius: 8px; background: var(--surface); font-family: inherit;
@@ -1313,5 +1324,38 @@ select.exd-input { padding: 0 10px; }
 .wk-colorfield:disabled { cursor: default; background: #F7F9FC; color: var(--text-muted); }
 .wk-colorfield-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wk-colorfield-caret { flex: none; color: var(--text-muted-3); }
-.wk-colorfield-hint { margin: 6px 0 0; }
+/* Doc 112: las dos capas del color — lo que se ve en ESTE canvas (y de dónde
+   sale) y el color propio de la tabla/vista (todos sus canvases). */
+.wk-colorfield-k { font-size: 11px; color: var(--muted); }
+.wk-colorhere { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.wk-colorhere-chip { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 10px;
+  border: 1px solid var(--border-2); border-radius: 8px; background: var(--fill-2); font-size: 13px; color: var(--navy); }
+.wk-colorhere-chip--canvas { border-color: var(--blue-border); background: var(--blue-soft); }
+.wk-colorhere-src { flex: none; font-size: 11px; color: var(--muted); white-space: nowrap; }
+
+/* Doc 112: ficha del canvas (Model properties) — UDPs y «Colors on this canvas». */
+.wk-mp-sec + .wk-mp-sec { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-2); }
+.wk-mp-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 28px; margin-bottom: 4px; }
+.wk-mp-title { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--text-muted-3); }
+.wk-mp-cap { margin-bottom: 10px; line-height: 1.45; }
+.wk-mp-sub { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; color: var(--navy); }
+.wk-mp-list { list-style: none; margin: 0; padding: 0; max-height: 264px; overflow-y: auto;
+  border: 1px solid var(--border-1); border-radius: 8px; }
+.wk-mp-row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; }
+.wk-mp-row + .wk-mp-row { border-top: 1px solid var(--border-2); }
+.wk-mp-txt { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.wk-mp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px; font-weight: 600; color: var(--navy); }
+.wk-mp-meta { display: flex; align-items: center; gap: 4px; overflow: hidden; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.wk-mp-meta b { font-weight: 600; color: var(--text-body); }
+.wk-mp-empty { margin: 0; padding: 10px 12px; border-radius: 8px; background: var(--fill-2); font-size: 12px; color: var(--muted); }
+.wk-mp-paint { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 9px 12px; border-radius: 8px;
+  background: var(--blue-soft); border: 1px solid var(--blue-border-2); }
+.wk-mp-sel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--text-body); }
+.wk-mp-sel b { font-weight: 600; color: var(--navy); }
+.wk-mp-sel--none { white-space: normal; color: var(--muted); line-height: 1.45; }
+/* El selector de color se abre DENTRO de la ficha (Tab llega; Escape cierra sólo él). */
+.wk-mp-picker { display: flex; justify-content: flex-end; margin-top: 8px; }
+.wk-mp-picker .wk-cpick { border: 1px solid var(--border-1); border-radius: 10px; background: var(--surface);
+  box-shadow: 0 6px 18px rgba(20, 30, 55, .10); }
 .wk-pp-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #EEF1F5; }

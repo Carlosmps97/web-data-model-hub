@@ -27,8 +27,17 @@ describe('cambiar de sesión cierra los diálogos del canvas (doc 105, R7-A)', (
     const src = code('Toolbar.tsx');
     expect(src).toMatch(/const sessionKey = useSessionStore\(\(s\) => canvasSessionKey\(s\)\)/);
     expect(closesAll(effectsOn(src, 'sessionKey'), [
-      'setModal', 'setPublishOpen', 'setDdlOpen', 'setModelPropsOpen', 'setExportOpen', 'setArrangeAsk',
+      'setModal', 'setPublishOpen', 'setDdlOpen', 'setExportOpen', 'setArrangeAsk',
     ])).toEqual([]);
+    // Doc 112: Model properties vive en el store (también la abre Properties);
+    // el store la cierra solo al cambiar de sesión o de canvas, y el Toolbar igual.
+    expect(effectsOn(src, 'sessionKey').some((b) => /\bcloseModelProps\(\)/.test(b))).toBe(true);
+  });
+
+  it('Toolbar: Model properties no queda abierta al salir del Model (doc 112, revisión)', () => {
+    // El estado vive en el store (también la abre Properties): sin esto, volver
+    // al Model la montaba de nuevo un instante (foco y una lectura de UDPs).
+    expect(code('Toolbar.tsx')).toMatch(/useEffect\(\(\) => \(\) => closeModelProps\(\), \[closeModelProps\]\)/);
   });
 
   it('ModelerCanvas: relación, subcategoría (alta y gestión) y editor de vistas', () => {

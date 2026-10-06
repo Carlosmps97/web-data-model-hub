@@ -431,11 +431,11 @@ describe('lo que sale de un canvas, con su posición (doc 105, F4)', () => {
   it('removeFromCanvas devuelve lo que REALMENTE salió: tablas, vistas y sus posiciones', async () => {
     draft.sa1 = canvas({ viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } } });
     const out = await struct.removeFromCanvas('sa1', { tableIds: ['t2', 't9'], viewIds: ['v1', 'v9'] });
-    expect(out).toEqual({ tableIds: ['t2'], viewIds: ['v1'], layout: { t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } } });
+    expect(out).toEqual({ tableIds: ['t2'], viewIds: ['v1'], layout: { t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } }, colors: {} });
   });
 
   it('nada que sacar, canvas sin lista explícita o canvas que ya no está: vacío', async () => {
-    const none = { tableIds: [], viewIds: [], layout: {} };
+    const none = { tableIds: [], viewIds: [], layout: {}, colors: {} };
     expect(await struct.removeFromCanvas('sa1', { tableIds: ['t9'] })).toEqual(none);
     draft.sa2 = canvas({ id: 'sa2', viewIds: undefined, layout: { t1: { x: 0, y: 0 }, v1: { x: 9, y: 9 } } });
     expect(await struct.removeFromCanvas('sa2', { viewIds: ['v1'] })).toEqual(none);
@@ -444,34 +444,34 @@ describe('lo que sale de un canvas, con su posición (doc 105, F4)', () => {
 
   it('listedViews: cuáles de esas vistas lista EXPLÍCITAMENTE el canvas y dónde están, leído en su cola', async () => {
     draft.sa1 = canvas({ viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, v1: { x: 7, y: 8 } } });
-    expect(await struct.listedViews('sa1', ['v1', 'v2', 'v9'])).toEqual({ viewIds: ['v1', 'v2'], layout: { v1: { x: 7, y: 8 } } });
+    expect(await struct.listedViews('sa1', ['v1', 'v2', 'v9'])).toEqual({ viewIds: ['v1', 'v2'], layout: { v1: { x: 7, y: 8 } }, colors: {} });
     // En la cola: se lee DESPUÉS de una escritura pendiente del mismo canvas.
     const [, seen] = await Promise.all([
       struct.removeFromCanvas('sa1', { viewIds: ['v2'] }),
       struct.listedViews('sa1', ['v1', 'v2']),
     ]);
-    expect(seen).toEqual({ viewIds: ['v1'], layout: { v1: { x: 7, y: 8 } } });
+    expect(seen).toEqual({ viewIds: ['v1'], layout: { v1: { x: 7, y: 8 } }, colors: {} });
   });
 
   it('listedViews: un canvas sin lista explícita (legacy) o que ya no está no lista ninguna', async () => {
     draft.sa2 = canvas({ id: 'sa2', viewIds: undefined, layout: { v1: { x: 9, y: 9 } } });
-    expect(await struct.listedViews('sa2', ['v1'])).toEqual({ viewIds: [], layout: {} });
-    expect(await struct.listedViews('nope', ['v1'])).toEqual({ viewIds: [], layout: {} });
-    expect(await struct.listedViews('sa1', [])).toEqual({ viewIds: [], layout: {} });
+    expect(await struct.listedViews('sa2', ['v1'])).toEqual({ viewIds: [], layout: {}, colors: {} });
+    expect(await struct.listedViews('nope', ['v1'])).toEqual({ viewIds: [], layout: {}, colors: {} });
+    expect(await struct.listedViews('sa1', [])).toEqual({ viewIds: [], layout: {}, colors: {} });
     expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });
 
 describe('setCanvasColors (doc 109)', () => {
   it('mezcla el lote sobre los colores efectivos del canvas y graba el documento completo', async () => {
-    draft.sa1 = canvas({ colors: { t1: '#16A37B', t2: 'none' } });
+    draft.sa1 = canvas({ viewIds: ['v1'], colors: { t1: '#16A37B', t2: 'none' } });
     await struct.setCanvasColors('sa1', { t1: 'theme:th1', t2: null, v1: '#ff0000' });
     expect(vi.mocked(csvc.recordChange).mock.calls[0].slice(0, 4)).toEqual(['cs1', 'subject_areas', 'sa1', 'upsert']);
-    expect(recorded()[0]).toEqual(canvas({ colors: { t1: 'theme:th1', v1: '#FF0000' } }));
+    expect(recorded()[0]).toEqual(canvas({ viewIds: ['v1'], colors: { t1: 'theme:th1', v1: '#FF0000' } }));
   });
 
   it('sanea lo que lee: un color corrupto del canvas no vuelve como payload', async () => {
-    draft.sa1 = canvas({ colors: { t1: 'rojo', t2: '#16A37B' } as never });
+    draft.sa1 = canvas({ viewIds: ['v1'], colors: { t1: 'rojo', t2: '#16A37B' } as never });
     await struct.setCanvasColors('sa1', { v1: 'none' });
     expect(recorded()[0].colors).toEqual({ t2: '#16A37B', v1: 'none' });
   });
@@ -496,6 +496,76 @@ describe('setCanvasColors (doc 109)', () => {
   it('sin working copy no graba', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: 'cs1' });
     await expect(struct.setCanvasColors('sa1', { t1: '#111111' })).rejects.toThrow(/working copy/i);
+    expect(csvc.recordChange).not.toHaveBeenCalled();
+  });
+});
+
+describe('el color de una caja en el canvas sale y entra con ella (doc 112)', () => {
+  it('removeFromCanvas quita el color de lo que sale y lo devuelve; el de las demás cajas queda', async () => {
+    draft.sa1 = canvas({ viewIds: ['v1'], colors: { t1: '#111111', t2: 'none', v1: 'theme:a' } });
+    const out = await struct.removeFromCanvas('sa1', { tableIds: ['t2'], viewIds: ['v1'] });
+    expect(out.colors).toEqual({ t2: 'none', v1: 'theme:a' });
+    expect(draft.sa1.colors).toEqual({ t1: '#111111' });
+  });
+
+  it('una caja que ENTRA llega con el color de su tabla: un color guardado de antes no revive', async () => {
+    draft.sa1 = canvas({ tableIds: ['t1'], viewIds: [], colors: { t1: '#111111', t2: '#FF0000', v1: 'none' } });
+    await struct.addToCanvas('sa1', { tableIds: ['t2'], viewIds: ['v1'] });
+    expect(draft.sa1.colors).toEqual({ t1: '#111111' });
+  });
+
+  it('el Undo repone el color de lo que vuelve a entrar; no pisa el de una caja que ya estaba', async () => {
+    draft.sa1 = canvas({ tableIds: ['t1'], colors: { t1: '#111111' } });
+    const added = await struct.addToCanvas('sa1', { tableIds: ['t1', 't2'], colors: { t1: '#999999', t2: 'none' } });
+    expect(added).toEqual({ tableIds: ['t2'], viewIds: [] });
+    expect(draft.sa1.colors).toEqual({ t1: '#111111', t2: 'none' });
+  });
+
+  it('sacar y volver a meter con lo que salió deja el canvas como estaba', async () => {
+    draft.sa1 = canvas({ viewIds: ['v1'], colors: { t1: '#111111', t2: 'theme:x' },
+                         layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 5, y: 5 } } });
+    const before = structuredClone(draft.sa1);
+    const out = await struct.removeFromCanvas('sa1', { tableIds: ['t2'] });
+    await struct.addToCanvas('sa1', { tableIds: out.tableIds, layout: out.layout, colors: out.colors });
+    expect(draft.sa1.colors).toEqual(before.colors);
+    expect(draft.sa1.layout).toEqual(before.layout);
+  });
+
+  it('no guarda el color de una caja que ya no está en el canvas (la sacaron mientras se pintaba)', async () => {
+    draft.sa1 = canvas({ tableIds: ['t1'], viewIds: ['v1'], colors: { t9: '#FFFFFF' } });
+    await struct.setCanvasColors('sa1', { t1: '#111111', t2: '#222222', v1: 'none', v9: '#333333', t9: null });
+    expect(draft.sa1.colors).toEqual({ t1: '#111111', v1: 'none' });   // quitar uno que sobraba sí vale
+  });
+
+  it('canvas sin lista explícita de vistas (legacy, doc 70): una vista que se muestra por sus fuentes se pinta', async () => {
+    draft.sa1 = canvas({ tableIds: ['t1'], viewIds: undefined, colors: {} });
+    await struct.setCanvasColors('sa1', { v1: '#123456' });
+    expect(draft.sa1.colors).toEqual({ v1: '#123456' });
+  });
+
+  it('listedViews devuelve también el color de esas vistas en el canvas', async () => {
+    draft.sa1 = canvas({ viewIds: ['v1', 'v2'], colors: { v1: '#123456', t1: '#111111' } });
+    expect((await struct.listedViews('sa1', ['v1', 'v2'])).colors).toEqual({ v1: '#123456' });
+  });
+});
+
+describe('UDPs del canvas por cambios (doc 112)', () => {
+  it('mezcla SÓLO lo cambiado sobre los valores vigentes: un guardado que aterrizó antes no se pisa', async () => {
+    draft.sa1 = canvas({ udpValues: { u1: 'NEW', u2: 'x' } });    // otro guardado ya dejó u1 = NEW
+    await struct.patchSubjectAreaUdp('sa1', { u3: 'y', u2: '' });
+    expect(draft.sa1.udpValues).toEqual({ u1: 'NEW', u3: 'y' });
+    expect(draft.sa1.tableIds).toEqual(['t1', 't2']);              // el documento completo
+  });
+
+  it('va en la cola del canvas: lee lo que dejó la escritura anterior', async () => {
+    draft.sa1 = canvas({ udpValues: {} });
+    await Promise.all([struct.patchSubjectAreaUdp('sa1', { u1: 'a' }), struct.patchSubjectAreaUdp('sa1', { u2: 'b' })]);
+    expect(draft.sa1.udpValues).toEqual({ u1: 'a', u2: 'b' });
+  });
+
+  it('sin working copy no graba', async () => {
+    useSessionStore.setState({ openMode: 'readonly', activeChangesetId: 'cs1' });
+    await expect(struct.patchSubjectAreaUdp('sa1', { u1: 'a' })).rejects.toThrow(/working copy/i);
     expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });

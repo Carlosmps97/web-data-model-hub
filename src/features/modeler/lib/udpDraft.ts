@@ -35,3 +35,15 @@ export function prunePending(values: UdpValues, pending: UdpValues): UdpValues {
   }
   return next;
 }
+
+/** Doc 112: lo que la ficha cambió respecto de cómo se abrió ('' = quitar). Se
+ *  graba SÓLO eso, sobre los valores vigentes del canvas: si mientras tanto
+ *  aterrizó otro guardado, la ficha abierta con los viejos no lo pisa. */
+export function udpChanges(initial: UdpValues, values: UdpValues): UdpValues {
+  const out: UdpValues = {};
+  for (const k of new Set([...Object.keys(initial), ...Object.keys(values)])) {
+    const v = values[k] ?? '';
+    if (v !== (initial[k] ?? '')) out[k] = v;
+  }
+  return out;
+}

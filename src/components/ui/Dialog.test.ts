@@ -116,3 +116,18 @@ describe('Dialog: el foco no se pierde con el diálogo abierto (doc 105, R6)', (
     expect(box.focus).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Dialog con fondo de canvas: entra entero debajo de la barra (doc 112)', () => {
+  it('su alto máximo descuenta dónde empieza el fondo (si no, el pie quedaba fuera de la pantalla)', () => {
+    vi.stubGlobal('document', { activeElement: null, body: {}, querySelector: () => null });
+    resetFake(null);
+    const tree = Dialog({ open: true, title: 'Model properties', onClose: vi.fn(), children: null as never,
+                          backdrop: 'canvas', canvasTop: 136 });
+    expect((boxOf(tree).props.style as { maxHeight?: string }).maxHeight).toBe('min(86vh, calc(100vh - 196px))');
+  });
+
+  it('con fondo de pantalla completa, el alto de siempre (CSS)', () => {
+    vi.stubGlobal('document', { activeElement: null, body: {} });
+    expect((boxOf(render(true)).props.style as { maxHeight?: string }).maxHeight).toBeUndefined();
+  });
+});

@@ -28,6 +28,7 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { noteCanvasWrite, wholeLayout } from '../lib/canvasWrites';
 import { MAX_ROUTE_POINTS, cleanRoute, cleanRoutes, pruneRoutes, routeOf, validWireId } from '../lib/wireRoute';
 import { cleanColors, normalColor } from '@/lib/colors';
+import { applyPending } from '../lib/udpDraft';
 import type { RoutePoint, WireRoutes } from '../lib/wireRoute';
 import type { Drawing, Folder, Project, SubjectArea } from './modeler.service';
 
@@ -251,9 +252,13 @@ const viewBase = (cur: SubjectArea, shown?: string[] | null): string[] | null =>
  *  en la MISMA escritura. Devuelve lo que REALMENTE entró: lo que ya estaba no
  *  cuenta (la inversa del Undo no debe sacarlo). Sin nada que cambiar, no graba.
  *  `shownViews` (ver `viewBase`): quien lo pasa fija la lista de vistas de un
- *  canvas que todavía no la tiene. */
+ *  canvas que todavía no la tiene. Doc 112: lo que ENTRA llega con el color de
+ *  su tabla — un color de este canvas guardado de antes para ese id no revive —
+ *  salvo el que trae `colors` (el Undo de sacarla o borrarla lo repone); el
+ *  color de una caja que ya estaba no se toca. */
 export const addToCanvas = async (
-  saId: string, add: CanvasMembers & { layout?: Layout; routes?: WireRoutes }, shownViews?: string[] | null,
+  saId: string, add: CanvasMembers & { layout?: Layout; routes?: WireRoutes; colors?: Record<string, string> },
+  shownViews?: string[] | null,
 ): Promise<Required<CanvasMembers>> => {
   const cs = requireWriteCs('Editing a canvas');
   return inOrder(saId, async () => {
@@ -272,13 +277,25 @@ export const addToCanvas = async (
     if (views && (viewIds.length || !Array.isArray(cur.viewIds))) next.viewIds = [...views, ...viewIds];
     if (layout) next.layout = { ...(cur.layout ?? {}), ...layout };
     if (withRoutes) next.routes = { ...cleanRoutes(cur.routes), ...routes };
+    const entering = [...tableIds, ...viewIds];
+    if (entering.length) {
+      const colors = cleanColors(cur.colors);
+      const back = cleanColors(add.colors);
+      let touched = false;
+      for (const id of entering) {
+        if (back[id]) { colors[id] = back[id]; touched = true; }
+        else if (id in colors) { delete colors[id]; touched = true; }
+      }
+      if (touched) next.colors = colors;
+    }
     await saveCanvas(cs, saId, next);
     return { tableIds, viewIds };
   });
 };
 
-/** Lo que salió de un canvas (doc 105): miembros y sus posiciones. */
-export type CanvasMembersOut = Required<CanvasMembers> & { layout: NonNullable<Layout> };
+/** Lo que salió de un canvas (doc 105): miembros, sus posiciones y (doc 112)
+ *  su color en ese canvas. */
+export type CanvasMembersOut = Required<CanvasMembers> & { layout: NonNullable<Layout>; colors: Record<string, string> };
 
 /** Las posiciones de `ids` en un layout (sólo las que tiene). */
 const positionsOf = (layout: Layout | undefined, ids: Iterable<string>): NonNullable<Layout> => {
@@ -287,20 +304,29 @@ const positionsOf = (layout: Layout | undefined, ids: Iterable<string>): NonNull
   return out;
 };
 
+/** Doc 112: el color en el canvas de `ids` (sólo los que tienen). */
+const colorsOf = (colors: unknown, ids: Iterable<string>): Record<string, string> => {
+  const all = cleanColors(colors);
+  const out: Record<string, string> = {};
+  for (const id of ids) if (all[id]) out[id] = all[id];
+  return out;
+};
+
 /** SACA miembros del canvas CON su posición (sin ella quedaría un nodo
- *  fantasma en el layout, audit C9b), y los trazos de `dropRouteIds` (los
+ *  fantasma en el layout, audit C9b), su color en este canvas (doc 112: si
+ *  vuelve, llega con el color de su tabla) y los trazos de `dropRouteIds` (los
  *  wires de una tabla que sale: si vuelve en otra posición ya no calzarían,
  *  doc 99). La tabla o vista sigue en el modelo y en los demás canvases. Un
  *  canvas que ya no está en la working copy no se toca (borrar una tabla
  *  recorre todos los canvases donde estaba). Doc 105 (F4): devuelve lo que
- *  REALMENTE salió, con sus posiciones — el Undo lo repone tal cual. */
+ *  REALMENTE salió, con sus posiciones y colores — el Undo lo repone tal cual. */
 export const removeFromCanvas = async (
   saId: string, rm: CanvasMembers & { dropRouteIds?: string[] }, shownViews?: string[] | null,
 ): Promise<CanvasMembersOut> => {
   const cs = requireWriteCs('Editing a canvas');
   return inOrder(saId, async () => {
     const cur = await fetchEffectiveSa(cs, saId);
-    if (!cur) return { tableIds: [], viewIds: [], layout: {} };
+    if (!cur) return { tableIds: [], viewIds: [], layout: {}, colors: {} };
     const next: SubjectArea = { ...cur, id: saId };
     const gone = new Set<string>();
     const tables = cur.tableIds ?? [];
@@ -319,32 +345,36 @@ export const removeFromCanvas = async (
     if (gone.size && cur.layout) {
       next.layout = Object.fromEntries(Object.entries(cur.layout).filter(([id]) => !gone.has(id)));
     }
+    const colors = colorsOf(cur.colors, gone);
+    if (Object.keys(colors).length) {
+      next.colors = Object.fromEntries(Object.entries(cleanColors(cur.colors)).filter(([id]) => !gone.has(id)));
+    }
     if (rm.dropRouteIds?.length && cur.routes) {
       const routes = cleanRoutes(cur.routes);
       for (const id of rm.dropRouteIds) if (routeOf(routes, id)) { delete routes[id]; changed = true; }
       next.routes = routes;
     }
     if (changed) await saveCanvas(cs, saId, next);
-    return { tableIds: outTables, viewIds: outViews, layout: positionsOf(cur.layout, gone) };
+    return { tableIds: outTables, viewIds: outViews, layout: positionsOf(cur.layout, gone), colors };
   });
 };
 
-/** Doc 105 (F4, A4-o4): de `viewIds`, cuáles lista EXPLÍCITAMENTE el canvas y
- *  dónde están — leído en su cola (después de sus escrituras pendientes), sin
- *  escribir. Borrar una vista (o la tabla de la que sale) la saca de todo canvas
+/** Doc 105 (F4, A4-o4): de `viewIds`, cuáles lista EXPLÍCITAMENTE el canvas,
+ *  dónde están y (doc 112) su color en él — leído en su cola (después de sus
+ *  escrituras pendientes), sin escribir. Borrar una vista (o la tabla de la que sale) la saca de todo canvas
  *  que la lista, en el mismo request (cascada del backend, doc 88 §4): quien
  *  borra lo anota ANTES para que su Undo la reponga en su sitio. Un canvas sin
  *  lista explícita (legacy, doc 70) o que ya no está no lista ninguna: su regla
  *  por fuentes la vuelve a mostrar sola (y el backend no le toca el layout). */
 export const listedViews = async (
   saId: string, viewIds: string[],
-): Promise<{ viewIds: string[]; layout: NonNullable<Layout> }> => {
-  if (!viewIds.length) return { viewIds: [], layout: {} };
+): Promise<{ viewIds: string[]; layout: NonNullable<Layout>; colors: Record<string, string> }> => {
+  if (!viewIds.length) return { viewIds: [], layout: {}, colors: {} };
   const cs = requireWriteCs('Editing a canvas');
   return inOrder(saId, async () => {
     const cur = await fetchEffectiveSa(cs, saId);
     const listed = Array.isArray(cur?.viewIds) ? viewIds.filter((id) => cur!.viewIds!.includes(id)) : [];
-    return { viewIds: listed, layout: positionsOf(cur?.layout, listed) };
+    return { viewIds: listed, layout: positionsOf(cur?.layout, listed), colors: colorsOf(cur?.colors, listed) };
   });
 };
 
@@ -422,7 +452,10 @@ export const setSubjectAreaDrawings = async (saId: string, drawings: Drawing[]):
 /** Doc 109: color de cajas EN ESTE canvas. `patch` = {id de tabla o vista:
  *  ColorRef} — `null` quita la excepción (la caja vuelve al color de su tabla).
  *  Se mezcla, en la cola del canvas, sobre los colores EFECTIVOS de ese momento:
- *  dos cambios seguidos no se pisan. Una referencia inválida se rechaza. */
+ *  dos cambios seguidos no se pisan. Una referencia inválida se rechaza. Doc 112:
+ *  no se pinta una caja que ya no está en el canvas (la sacaron mientras se
+ *  pintaba); en un canvas sin lista explícita de vistas (doc 70) un id que no es
+ *  tabla puede ser una vista que se muestra por sus fuentes: se pinta. */
 export const setCanvasColors = async (
   saId: string, patch: Record<string, string | null>,
 ): Promise<SubjectArea> => {
@@ -434,8 +467,10 @@ export const setCanvasColors = async (
     const cur = await fetchEffectiveSa(cs, saId);
     if (!cur) throw new Error(CANVAS_GONE);
     const colors = cleanColors(cur.colors);
+    const gone = (id: string) => !(cur.tableIds ?? []).includes(id)
+      && Array.isArray(cur.viewIds) && !cur.viewIds.includes(id);
     for (const [id, ref] of Object.entries(patch)) {
-      if (ref === null) delete colors[id]; else colors[id] = normalColor(ref, true)!;
+      if (ref === null) delete colors[id]; else if (!gone(id)) colors[id] = normalColor(ref, true)!;
     }
     return saveCanvas(cs, saId, { ...cur, colors, id: saId });
   });
@@ -444,3 +479,15 @@ export const setCanvasColors = async (
 /** UDPs del canvas: SIEMPRE versionado (doc 75 D14: sin escritura directa). */
 export const setSubjectAreaUdp = (saId: string, udpValues: Record<string, string>): Promise<SubjectArea> =>
   patchSa(requireWriteCs('Editing canvas properties'), saId, { udpValues });
+
+/** Doc 112: UDPs del canvas por CAMBIOS ({defId: valor}, '' = quitar), mezclados
+ *  en la cola del canvas sobre los VIGENTES: una ficha abierta antes de que
+ *  aterrizara otro guardado no lo pisa con sus valores viejos. */
+export const patchSubjectAreaUdp = async (saId: string, changes: Record<string, string>): Promise<SubjectArea> => {
+  const cs = requireWriteCs('Editing canvas properties');
+  return inOrder(saId, async () => {
+    const cur = await fetchEffectiveSa(cs, saId);
+    if (!cur) throw new Error(CANVAS_GONE);
+    return saveCanvas(cs, saId, { ...cur, udpValues: applyPending(cur.udpValues ?? {}, changes), id: saId });
+  });
+};

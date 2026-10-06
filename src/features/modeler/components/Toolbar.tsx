@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine, ChevronDown, ChevronUp,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Tags, Undo2,
+  FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Settings2, Undo2,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
@@ -59,6 +59,7 @@ const SHAPES: { id: DrawingType; tip: string; icon: ReactNode }[] = [
 ];
 
 const VIEWER_TIP = 'Read-only — published version';
+const MODEL_PROPS_TIP = 'Model properties — UDPs and colors of this canvas';
 
 
 /** ⌘K / Ctrl+K: abre el buscador del Model con una sesión de canvas abierta.
@@ -127,7 +128,14 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const setSearchOpen = useModelerStore((s) => s.setSearchOpen);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
-  const [modelPropsOpen, setModelPropsOpen] = useState(false);
+  // Doc 112: la ficha del canvas (Model properties) — también la abre el color
+  // en Properties; el estado vive en el store.
+  const modelProps = useModelerStore((s) => s.modelProps);
+  const openModelProps = useModelerStore((s) => s.openModelProps);
+  const closeModelProps = useModelerStore((s) => s.closeModelProps);
+  // Al salir del Model (Toolbar desmontado) la ficha no queda abierta en el
+  // store: volver la montaba un instante (foco y una lectura de UDPs).
+  useEffect(() => () => closeModelProps(), [closeModelProps]);
   // Doc 59: menú del botón ÚNICO de export (SVG / HTML / PDF). Portal fixed:
   // el toolbar scrollea horizontal y un menú absoluto se recortaría (doc 52).
   const [exportOpen, setExportOpen] = useState(false);
@@ -259,8 +267,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // proyecto) se cierran todos: lo armado en una no se graba en la otra.
   const sessionKey = useSessionStore((s) => canvasSessionKey(s));
   useEffect(() => {
-    setModal(null); setPublishOpen(false); setDdlOpen(false); setModelPropsOpen(false); setExportOpen(false); setArrangeAsk(null);
-  }, [sessionKey]);
+    setModal(null); setPublishOpen(false); setDdlOpen(false); closeModelProps(); setExportOpen(false); setArrangeAsk(null);
+  }, [sessionKey, closeModelProps]);
 
   // Doc 105 (ronda 5): nombre accesible de un botón de ÍCONO — el tooltip sólo
   // se ve con el mouse (el lector de pantalla anunciaba «button» sin más). En
@@ -293,9 +301,11 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       )}
       {!toolbarCollapsed && (<>
       {/* MODEL (doc 86): el «botón padre» lógico/físico estilo Erwin — gobierna
-          explorer, tools, popups, UDPs, dominios y labels del canvas. */}
+          explorer, tools, popups, UDPs, dominios y labels del canvas. Doc 112: y
+          la ficha del canvas abierto (Model properties: UDPs + colores), que
+          antes estaba en ACTIONS y el color de las cajas, en el clic derecho. */}
       <div className="wk-grp">
-        <div className="wk-grp-row">
+        <div className="wk-modelcol">
           <div className="wk-seg" role="group" aria-label="Model view">
             <Tooltip label="Logical model — entities & attributes">
               <button type="button" className={`wk-seg-btn${viewMode === 'logical' ? ' on' : ''}`} aria-pressed={viewMode === 'logical'} disabled={!openMode} onClick={() => setViewMode('logical')}>Logical</button>
@@ -304,6 +314,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
               <button type="button" className={`wk-seg-btn${viewMode === 'physical' ? ' on' : ''}`} aria-pressed={viewMode === 'physical'} disabled={!openMode} onClick={() => setViewMode('physical')}>Physical</button>
             </Tooltip>
           </div>
+          <Tooltip label={readonly ? `${MODEL_PROPS_TIP} — read-only` : MODEL_PROPS_TIP}>
+            {/* Alterna: la barra sigue clicable con la ficha abierta (fondo de
+                canvas) y abrirla de nuevo encima no tiene sentido. */}
+            <button type="button" className={`wk-mprops${modelProps ? ' on' : ''}`} aria-label={MODEL_PROPS_TIP}
+              aria-expanded={!!modelProps} disabled={!hasCanvas}
+              onClick={() => (modelProps ? closeModelProps() : openModelProps())}>
+              <Settings2 size={13} aria-hidden /><span className="wk-mprops-txt">Model properties</span>
+            </button>
+          </Tooltip>
         </div>
         <span className="wk-grp-cap">Model</span>
       </div>
@@ -468,7 +487,6 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
               setExportOpen((v) => !v);
             }, { disabled: !hasCanvas, on: exportOpen })}
           </span>
-          {ic('Model properties — model-level UDPs', <Tags size={17} />, () => setModelPropsOpen(true), { disabled: !canEdit, lockTip: true })}
         </div>
         <span className="wk-grp-cap">Actions</span>
       </div>
@@ -544,11 +562,12 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
 
-      {modelPropsOpen && diagram && (
+      {modelProps && diagram && modelProps.saId === diagram.subjectArea.id && (
         <ModelPropertiesModal
           subjectArea={diagram.subjectArea}
           canEdit={canEdit}
-          onClose={() => setModelPropsOpen(false)}
+          boxes={modelProps.boxes}
+          onClose={() => closeModelProps(modelProps)}
           pushToast={pushToast}
         />
       )}

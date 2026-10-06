@@ -14,19 +14,19 @@ import type { LabelPlacement } from '../lib/relationshipLabel';
  * caer justo en el punto medio) pero sigue en su sitio y sigue respondiendo:
  * un doble clic sobre ella abre el popup igual que siempre.
  */
-export default function RelationshipEdgeLabel({ text, title, at, active, dimmed, editing = false }: {
+export default function RelationshipEdgeLabel({ text, title, at, active, editing = false }: {
   text: string;
   /** Texto completo; solo se usa de tooltip si el dibujo se cortó. */
   title?: string | null;
   at: LabelPlacement;
+  /** Resaltada; atenuada la deja la clase del canvas (doc 111, `.wk-canvas--hover`). */
   active: boolean;
-  dimmed: boolean;
   editing?: boolean;
 }) {
   return (
     <EdgeLabelRenderer>
       <div
-        className={`wk-rel-label nodrag nopan${active ? ' on' : ''}${dimmed ? ' dim' : ''}${editing ? ' edit' : ''}`}
+        className={`wk-rel-label nodrag nopan${active ? ' on' : ''}${editing ? ' edit' : ''}`}
         style={{
           transform: `translate(-50%, ${at.anchor === 'bottom' ? '-100%' : '-50%'}) translate(${at.x}px, ${at.y}px)`,
           maxWidth: at.maxWidth,

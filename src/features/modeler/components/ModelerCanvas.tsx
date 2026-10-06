@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { facetNouns } from '@/lib/facets';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap, ConnectionMode,
@@ -33,6 +33,7 @@ import { relationshipDrift } from '../lib/relationshipPairs';
 import { relationshipLabel } from '../lib/relationshipLabel';
 import { fanSlots, HEADER_H, ROW_H } from '../lib/edgeFanout';
 import { draggedPositions, effectiveLayout } from '../lib/viewerLayout';
+import { bindHoverDim, createHoverIntent, hoverTargetOf } from '../lib/hoverIntent';
 
 const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode, subcat: SubtypeSymbolNode };
 const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge, subcat: SubtypeEdge };
@@ -89,6 +90,16 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   useEffect(() => {
     setEditRelId(null); setRelDraft(null); setSubcatDraft(null); setSubcatManage(null); setEditViewId(null);
   }, [sessionKey]);
+
+  // Doc 111: el resaltado sólo si el mouse se QUEDA sobre el bloque o el wire
+  // (pasar de largo no repinta los wires) y el atenuado del resto por una clase
+  // del canvas — antes cada cruce re-renderizaba y animaba TODOS los wires y
+  // la selección de otro objeto respondía tarde.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  useEffect(() => (wrapRef.current ? bindHoverDim(wrapRef.current) : undefined), []);
+  const nodeHover = useMemo(() => createHoverIntent(setHoverNode), [setHoverNode]);
+  const edgeHover = useMemo(() => createHoverIntent(setHoverEdge), [setHoverEdge]);
+  useEffect(() => () => { nodeHover.dispose(); edgeHover.dispose(); }, [nodeHover, edgeHover]);
 
   // Sincroniza el diagrama (store) → nodos/aristas de React Flow.
   useEffect(() => {
@@ -253,8 +264,12 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // Mantiene la posición que React Flow ya tenga del nodo (drag en curso) y sólo
   // refresca `data`/tamaño desde el store.
   useEffect(() => {
+    // Doc 111: el dibujo recién creado nace SELECCIONADO (al frente, con su
+    // barra de formato): detrás de la tabla del centro parecía no haberse creado.
+    const fresh = useModelerStore.getState().justAddedDrawingId;
     setNodes((prev) => {
-      const others = prev.filter((n) => n.type !== 'shape');
+      const others = prev.filter((n) => n.type !== 'shape')
+        .map((n) => (fresh && n.selected ? { ...n, selected: false } : n));
       const byId = new Map(prev.map((n) => [n.id, n]));
       const shapeNodes: Node[] = drawings.map((d) => {
         const existing = byId.get(d.id);
@@ -267,13 +282,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           height: d.h,
           zIndex: -1,
           // Doc 109: un cambio de formato (barra del dibujo) no lo deselecciona.
-          selected: existing?.selected ?? false,
+          selected: fresh ? d.id === fresh : (existing?.selected ?? false),
           data: { drawing: d },
         };
       });
       // Shapes primero ⇒ se pintan detrás de las tablas (refuerza el zIndex).
       return [...shapeNodes, ...others];
     });
+    if (fresh) useModelerStore.setState({ justAddedDrawingId: null });
   }, [drawings, setNodes, readonly]);
 
   // Atajos del canvas (docs 48 + 50), agnósticos al SO (`metaKey || ctrlKey` =
@@ -460,7 +476,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const editView = editViewId ? (diagram?.views ?? []).find((v) => v.id === editViewId) : undefined;
 
   return (
-    <div style={{ flex: 1, minHeight: 0 }}>
+    <div ref={wrapRef} style={{ flex: 1, minHeight: 0 }}>
       <CrowFootMarkers />
       <ReactFlow
         nodes={nodes}
@@ -517,18 +533,18 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // clipboard + edición, las entradas de paste. El menú de FILA (copy de
         // columnas) lo abre TableNode con stopPropagation.
         onNodeContextMenu={(e, node) => {
-          // Doc 109: también las vistas (su menú sólo ofrece el color en este canvas).
-          if (node.type !== 'table' && node.type !== 'view') return;
+          // Doc 112: sólo tablas — el color en este canvas (lo único que ofrecía
+          // el menú de una vista, doc 109) pasó a Model properties.
+          if (node.type !== 'table') return;
           const st = useModelerStore.getState();
           if (st.relPreset) return;
           e.preventDefault();
-          st.openColMenu({ x: e.clientX, y: e.clientY, tableId: node.id, colId: null,
-                           kind: node.type === 'view' ? 'view' : 'table' });
+          st.openColMenu({ x: e.clientX, y: e.clientY, tableId: node.id, colId: null, kind: 'table' });
         }}
-        onEdgeMouseEnter={(_e, edge) => setHoverEdge(edge.id)}
-        onEdgeMouseLeave={() => setHoverEdge(null)}
-        onNodeMouseEnter={(_e, node) => setHoverNode(node.id)}
-        onNodeMouseLeave={() => setHoverNode(null)}
+        onEdgeMouseEnter={(_e, edge) => edgeHover.enter(edge.id)}
+        onEdgeMouseLeave={() => edgeHover.leave()}
+        onNodeMouseEnter={(_e, node) => { const id = hoverTargetOf(node); if (id) nodeHover.enter(id); }}
+        onNodeMouseLeave={() => nodeHover.leave()}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         // Virtualización del viewport: con 100 tablas × ~30 columnas hay ~3.000

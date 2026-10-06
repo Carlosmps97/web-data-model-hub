@@ -39,7 +39,6 @@ function SubtypeEdge(props: EdgeProps) {
     (s) => s.hoverEdgeId === id || s.selectedEdgeId === id
       || (!!s.hoverNodeId && (source === s.hoverNodeId || target === s.hoverNodeId)),
   );
-  const anyHover = useModelerStore((s) => !!s.hoverEdgeId || !!s.hoverNodeId);
   const labelsHidden = useUiStore((s) => s.relLabelsHidden);
   const { via, editable, lod, setDraft, commit } = useWireRoute(id, !!(data as { pending?: boolean } | undefined)?.pending);
 
@@ -98,15 +97,17 @@ function SubtypeEdge(props: EdgeProps) {
     />
   );
 
-  const dimmed = anyHover && !active;
+  // Doc 111: el atenuado del resto lo hace la clase del canvas (CrowFootEdge).
+  const cls = active ? 'wk-edge wk-edge--hot' : 'wk-edge';
   const color = d.pending ? PRIMARY : d.drifted ? DANGER : active ? PRIMARY : INK;
-  const opacity = d.pending ? 0.5 : dimmed ? 0.22 : 1;
-  const fx = { transition: 'opacity .12s, stroke .12s, stroke-width .12s' };
+  const opacity = d.pending ? 0.5 : undefined;
+  const fx = { transition: 'stroke .12s, stroke-width .12s' };
 
   if (d.pending) {
     return (
       <BaseEdge
         path={path}
+        className={cls}
         style={{ stroke: color, strokeWidth: 1.6, strokeDasharray: '6 5', opacity, ...fx }}
       />
     );
@@ -115,15 +116,17 @@ function SubtypeEdge(props: EdgeProps) {
     <>
       <BaseEdge
         path={path}
+        className={cls}
         style={{ stroke: color, strokeWidth: active ? 5.4 : 4.4, opacity, ...fx }}
       />
       <BaseEdge
         path={path}
+        className={cls}
         style={{ stroke: CANVAS, strokeWidth: active ? 2.4 : 1.8, opacity,
                  pointerEvents: 'none' as const, ...fx }}
       />
       {showLabel && (
-        <RelationshipEdgeLabel text={d.label as string} title={d.labelTitle} at={at} active={active} dimmed={dimmed} editing={editable} />
+        <RelationshipEdgeLabel text={d.label as string} title={d.labelTitle} at={at} active={active} editing={editable} />
       )}
       {handles}
     </>

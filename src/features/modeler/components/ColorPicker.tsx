@@ -1,12 +1,12 @@
 import { useRef } from 'react';
 import { Check, Palette, RotateCcw } from 'lucide-react';
 import { NO_COLOR, STANDARD_COLORS, normalColor, themeRef, type Theme } from '@/lib/colors';
-import { useModelerStore } from '@/store/useModelerStore';
-import { pinSession } from '../lib/sessionGuard';
+import { openSystemPicker } from '../lib/systemColorPicker';
 
 /**
- * Doc 109 — selector de color (UN componente para los tres lugares: el menú
- * del canvas, el campo Color de Properties y la barra de formato de dibujos).
+ * Doc 109 — selector de color (UN componente para los lugares que pintan: la
+ * ficha del canvas, el campo Color de Properties y la barra de formato de
+ * dibujos). «More colors…» abre el del sistema (`lib/systemColorPicker`).
  *
  *   THEMES          los colores con nombre del proyecto (Data Standards)
  *   OTHER COLORS    10 colores estándar + «More colors…» (selector del sistema)
@@ -28,56 +28,17 @@ export interface ColorPickerProps {
   /** Canvas: «Use the table's color» (quita la excepción). `hex` = el color
    *  que la caja toma al elegirlo (null = sin color). */
   inherit?: { label: string; hex: string | null; current: boolean } | null;
+  /** Doc 112: mientras devuelva true, «More colors…» aplica lo elegido (el
+   *  selector del sistema puede seguir abierto después de cerrarse este panel,
+   *  y se sigue ajustando). Sin la prop, aplica mientras sigan la sesión y el
+   *  canvas donde se abrió. */
+  alive?: () => boolean;
 }
 
 const sameRef = (a: string | null | undefined, b: string | null | undefined) =>
   (normalColor(a, true) ?? null) === (normalColor(b, true) ?? null);
 
-/** «More colors…»: el selector del sistema sobre un <input type="color"> PROPIO,
- *  fuera de React. Abrirlo le quita el foco a la ventana y el menú que lo
- *  ofreció se cierra (el del canvas, al perder el foco): el input sigue vivo y
- *  aplica lo elegido igual. Según el navegador avisa con `input` en cada
- *  arrastre y con `change` al cerrarse: se aplica al `change` o tras una pausa
- *  sin cambios. Uno a la vez: abrir otro descarta el anterior. Sólo aplica en
- *  la sesión y el canvas donde se abrió (el selector del sistema puede seguir
- *  abierto mientras el usuario cambia de versión o de canvas). */
-let systemPicker: HTMLInputElement | null = null;
-function openSystemPicker(initial: string, at: DOMRect | null, apply: (hex: string) => void): void {
-  systemPicker?.remove();
-  const pin = pinSession();
-  const canvas = useModelerStore.getState().activeSaId;
-  const valid = () => pin.holds() && useModelerStore.getState().activeSaId === canvas;
-  const el = document.createElement('input');
-  el.type = 'color';
-  el.value = initial.toLowerCase();
-  el.tabIndex = -1;
-  el.setAttribute('aria-hidden', 'true');
-  Object.assign(el.style, {
-    position: 'fixed', left: `${at?.left ?? 0}px`, top: `${at?.bottom ?? 0}px`,
-    width: '1px', height: '1px', opacity: '0', border: '0', padding: '0', pointerEvents: 'none',
-  });
-  let pending: string | null = null;
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const flush = () => {
-    if (timer) { clearTimeout(timer); timer = null; }
-    if (!valid()) { pending = null; el.remove(); return; }
-    if (pending) { const v = pending; pending = null; apply(v); }
-  };
-  const onInput = () => {
-    pending = el.value.toUpperCase();
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(flush, 700);
-  };
-  el.addEventListener('input', onInput);
-  // Al cerrarse el selector se suelta el foco: los atajos (deshacer, borrar)
-  // vuelven al canvas, que ignora las teclas que caen en un input.
-  el.addEventListener('change', () => { onInput(); flush(); el.blur(); });
-  document.body.appendChild(el);
-  systemPicker = el;
-  el.click();
-}
-
-export default function ColorPicker({ title, value, themes = [], onPick, noneValue, inherit }: ColorPickerProps) {
+export default function ColorPicker({ title, value, themes = [], onPick, noneValue, inherit, alive }: ColorPickerProps) {
   const isCustom = !!value && value.startsWith('#') && !STANDARD_COLORS.some((c) => c.hex === value);
   // Lo elegido en el selector del sistema llega cuando este panel ya puede estar
   // cerrado: se aplica con el `onPick` del último render.
@@ -117,7 +78,7 @@ export default function ColorPicker({ title, value, themes = [], onPick, noneVal
       </div>
       <button type="button" role="menuitem" className={`wk-cpick-item${isCustom && !inherit?.current ? ' on' : ''}`}
         onClick={(e) => openSystemPicker(value && value.startsWith('#') ? value : '#4F7DF3',
-          e.currentTarget.getBoundingClientRect(), (hex) => pick.current(hex))}>
+          e.currentTarget.getBoundingClientRect(), (hex) => pick.current(hex), alive)}>
         {isCustom && !inherit?.current
           ? <span className="wk-cpick-dot" style={{ background: value! }} aria-hidden />
           : <Palette size={14} className="wk-cpick-ico" aria-hidden />}

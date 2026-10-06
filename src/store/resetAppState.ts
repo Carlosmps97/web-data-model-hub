@@ -22,7 +22,8 @@ export function resetAppState(): void {
     projects: [], folders: [], subjectAreas: [], trees: {}, openingSaId: null,
     activeProjectId: null, activeFolderId: null, activeSaId: null, diagram: null,
     columnTarget: null, selectedTableId: null, selectedEdgeId: null, selectedColumnId: null,
-    relPreset: null, subcatArmed: false, hoverEdgeId: null, hoverNodeId: null, flow: null, drawings: [],
+    relPreset: null, subcatArmed: false, hoverEdgeId: null, hoverNodeId: null, flow: null, drawings: [], justAddedDrawingId: null,
+    modelProps: null,
     // Aislamiento por sesión/usuario (doc 50 §4): los clipboards de copy/paste
     // (docs 48/50) y la selección/menú/deep-link viven en memoria del tab —
     // sin este reset, el SIGUIENTE usuario del mismo tab heredaba lo copiado

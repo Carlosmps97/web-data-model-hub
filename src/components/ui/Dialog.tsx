@@ -110,9 +110,14 @@ export default function Dialog({
   const measuredTop = isCanvas && typeof document !== 'undefined'
     ? document.querySelector<HTMLElement>('.wk-canvas')?.getBoundingClientRect().top
     : undefined;
+  const scrimTop = measuredTop != null && measuredTop > 0 ? Math.round(measuredTop) : canvasTop;
   const overlayStyle: React.CSSProperties = isCanvas
-    ? { top: measuredTop != null && measuredTop > 0 ? Math.round(measuredTop) : canvasTop, left: 0, right: 0, bottom: 0 }
+    ? { top: scrimTop, left: 0, right: 0, bottom: 0 }
     : { inset: 0 };
+  // Doc 112: debajo de la barra el alto disponible es menor que el 86vh del CSS
+  // (descontando el padding del fondo): sin esto, un contenido alto dejaba el
+  // pie (Cancel/Save) fuera de la pantalla en vez de hacer scroll en el cuerpo.
+  const boxHeight: React.CSSProperties = isCanvas ? { maxHeight: `min(86vh, calc(100vh - ${scrimTop + 60}px))` } : {};
 
   return createPortal(
     // El backdrop NO cierra al click (pedido owner 07-17): sólo X / acciones / ESC.
@@ -123,7 +128,7 @@ export default function Dialog({
     >
       <div
         className="dmh-dialog"
-        style={{ width, outline: 'none' }}
+        style={{ width, outline: 'none', ...boxHeight }}
         role="dialog"
         aria-modal="true"
         aria-label={title}

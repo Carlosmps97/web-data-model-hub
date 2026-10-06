@@ -14,14 +14,15 @@ function CrowFootEdge(props: EdgeProps) {
   const { id, source, target, sourceY, targetY, data } = props;
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
-  // Selectores DERIVADOS (booleanos por edge, no los ids crudos): con los ids,
-  // cada hover re-renderizaba TODOS los edges del canvas; así sólo cambian los
-  // afectados por el resaltado/atenuado.
+  // Selector DERIVADO (booleano por edge, no los ids crudos): un hover sólo
+  // re-renderiza los wires que se resaltan. Doc 111: el atenuado del RESTO lo
+  // hace una clase del canvas (`.wk-canvas--hover`, lib/hoverIntent) — con un
+  // «¿hay hover?» por wire, entrar o salir de cualquier bloque re-renderizaba
+  // y animaba TODOS los wires.
   const active = useModelerStore(
     (s) => s.hoverEdgeId === id || s.selectedEdgeId === id
       || (!!s.hoverNodeId && (source === s.hoverNodeId || target === s.hoverNodeId)),
   );
-  const anyHover = useModelerStore((s) => !!s.hoverEdgeId || !!s.hoverNodeId);
   // Doc 98: la etiqueta se oculta con el botón del toolbar y en zoom lejano
   // (LOD compacto: a esa escala el texto es ilegible y solo ensucia).
   const labelsHidden = useUiStore((s) => s.relLabelsHidden);
@@ -80,9 +81,9 @@ function CrowFootEdge(props: EdgeProps) {
     });
 
   // Resaltado (dbdiagram): activa la relación bajo el mouse o las conectadas a la
-  // tabla bajo el mouse; atenúa el resto. Drift (doc 47) → ROJO: incongruencia
-  // de llave que el modelador debe corregir (owner 2026-08-23).
-  const dimmed = anyHover && !active;
+  // tabla bajo el mouse; el resto se atenúa por CSS (`.wk-edge--hot`). Drift
+  // (doc 47) → ROJO: incongruencia de llave que el modelador debe corregir
+  // (owner 2026-08-23).
   const stroke = d.pending ? 'var(--primary)'
     : d.drifted ? 'var(--red)'
     : active ? 'var(--primary)' : 'var(--ink-2)';
@@ -104,6 +105,7 @@ function CrowFootEdge(props: EdgeProps) {
     <>
       <BaseEdge
         path={path}
+        className={active ? 'wk-edge wk-edge--hot' : 'wk-edge'}
         markerStart={`url(#cf-${d.parentCardinality ?? 'one'})`}
         markerEnd={`url(#cf-${d.childCardinality ?? 'zero-many'})`}
         style={{
@@ -112,12 +114,12 @@ function CrowFootEdge(props: EdgeProps) {
           // Convención Erwin (doc 19): identifying = línea SÓLIDA (la FK entra a
           // la PK del hijo); non-identifying = punteada. Pending: dash más aireado.
           strokeDasharray: d.pending ? '6 5' : d.identifying ? undefined : '7 4',
-          opacity: d.pending ? 0.5 : dimmed ? 0.22 : 1,
-          transition: 'opacity .12s, stroke .12s, stroke-width .12s',
+          opacity: d.pending ? 0.5 : undefined,
+          transition: 'stroke .12s, stroke-width .12s',
         }}
       />
       {showLabel && (
-        <RelationshipEdgeLabel text={d.label as string} title={d.labelTitle} at={at} active={active} dimmed={dimmed} editing={editable} />
+        <RelationshipEdgeLabel text={d.label as string} title={d.labelTitle} at={at} active={active} editing={editable} />
       )}
       {editable && (
         <WireRouteHandles

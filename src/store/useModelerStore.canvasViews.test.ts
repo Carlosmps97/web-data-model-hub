@@ -39,6 +39,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(mod.loadDiagram).mockResolvedValue(JSON.parse(JSON.stringify(DIAGRAM)));
   vi.mocked(struct.addToCanvas).mockResolvedValue({ tableIds: [], viewIds: [] });
+  // Lo que salió (doc 105) y su color en el canvas (doc 112): el Undo lo repone.
+  vi.mocked(struct.removeFromCanvas).mockResolvedValue({ tableIds: [], viewIds: [], layout: {}, colors: { v1: '#92D050' } });
   useModelerStore.setState({ activeSaId: 'sa1', flow: null, diagram: JSON.parse(JSON.stringify(DIAGRAM)), selectedViewId: null, dirty: false });
   useUndoStore.setState({ stack: [], busy: false });
 });
@@ -89,7 +91,7 @@ describe('useModelerStore — vistas como miembros del canvas (doc 70)', () => {
     expect(useModelerStore.getState().selectedViewId).toBeNull();
     const label = await useUndoStore.getState().undoLast();
     expect(label).toBe('Remove M_CLIENTE from canvas');
-    expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { viewIds: ['v1'] }, ['v1']);
+    expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { viewIds: ['v1'], colors: { v1: '#92D050' } }, ['v1']);
   });
 
   it('removeTableFromArea poda las vistas que quedan sin fuente y el Undo las restaura', async () => {
@@ -99,7 +101,7 @@ describe('useModelerStore — vistas como miembros del canvas (doc 70)', () => {
     expect(struct.removeFromCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t1'], viewIds: ['v1'] }, ['v1', 'v2']);
     await useUndoStore.getState().undoLast();
     // la lista de vistas es la de ESTE canvas al sacar la tabla (no la del diagrama al deshacer)
-    expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t1'], viewIds: ['v1'], layout: {}, routes: {} }, ['v1', 'v2']);
+    expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t1'], viewIds: ['v1'], layout: {}, routes: {}, colors: { v1: '#92D050' } }, ['v1', 'v2']);
   });
 
   it('removeTableFromArea sin huérfanas no toca la membresía de vistas', async () => {

@@ -3,7 +3,7 @@
 // server todavía no refleja (el reload demora): sin ese overlay, commitear el
 // campo B con el prop stale PISABA el campo A recién guardado (lost-update).
 import { describe, it, expect } from 'vitest';
-import { applyPending, commitValue, prunePending } from './udpDraft';
+import { applyPending, commitValue, prunePending, udpChanges } from './udpDraft';
 
 describe('commitValue', () => {
   it('setea el valor nuevo sobre la base', () => {
@@ -64,5 +64,17 @@ describe('escenario integrado: editar A y B seguidos con reload lento', () => {
     // llega el reload que refleja A → pending se poda solo
     pending = prunePending({ a: 'nueva', b: 'bb' }, { ...pending, b: 'bb' });
     expect(pending).toEqual({});
+  });
+});
+
+describe('udpChanges (doc 112: la ficha graba sólo lo que cambió)', () => {
+  it('sólo las keys que cambiaron respecto de cómo se abrió; cadena vacía = quitar', () => {
+    expect(udpChanges({ a: '1', b: 'x' }, { a: '1', b: 'y', c: 'z' })).toEqual({ b: 'y', c: 'z' });
+    expect(udpChanges({ a: '1', b: 'x' }, { a: '1' })).toEqual({ b: '' });
+  });
+
+  it('sin cambios, vacío (un valor vacío equivale a no tenerlo)', () => {
+    expect(udpChanges({ a: '1' }, { a: '1' })).toEqual({});
+    expect(udpChanges({ a: '' }, {})).toEqual({});
   });
 });

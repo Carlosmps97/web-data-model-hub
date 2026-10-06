@@ -178,6 +178,15 @@ describe('P5 — el Undo de sacar una tabla es UNA escritura y repone todo', () 
     expect(draft.sa1.routes).toEqual(before.routes);
   });
 
+  it('en el modelo lógico la vista huérfana vuelve a SU posición (ahí las vistas no son nodos, doc 63)', async () => {
+    const f = flowOf() as unknown as { getNode: (id: string) => unknown };
+    useModelerStore.setState({ flow: { ...f, getNode: (id: string) => (id.startsWith('v') ? undefined : f.getNode(id)) } as never });
+    await st().removeTableFromArea('t1');                  // v1 (sólo t1) sale huérfana
+    await useUndoStore.getState().undoLast();
+    expect(draft.sa1.viewIds).toContain('v1');
+    expect(draft.sa1.layout.v1).toEqual({ x: 0, y: 300 });
+  });
+
   it('borrar una tabla y deshacer: vuelve a cada canvas, con su posición y trazos en el activo', async () => {
     vi.mocked(gov.tableUsage).mockImplementation(async () => ({ usage: [{ canvasId: 'sa1' }, { canvasId: 'sa2' }], total: 2 }) as never);
     vi.mocked(gov.listRelationships).mockImplementation(async () => RELS as never);

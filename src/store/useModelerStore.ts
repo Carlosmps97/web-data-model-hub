@@ -188,6 +188,16 @@ interface ModelerState {
    *  cabecera del Explorer — el estado vive acá para que ambos lo compartan. */
   searchOpen: boolean;
   setSearchOpen: (v: boolean) => void;
+  /** Doc 112: la ficha del canvas abierto (Model properties: sus UDPs y sus
+   *  colores) se abre desde el toolbar Y desde el color en Properties. `boxes`
+   *  = las cajas a pintar en ese canvas (Properties pasa la suya); sin `boxes`,
+   *  las seleccionadas en el canvas. Se cierra sola al cambiar de canvas o de
+   *  sesión: lo que muestra y graba es de UN canvas. */
+  modelProps: { saId: string; boxes?: string[] } | null;
+  openModelProps: (boxes?: string[]) => void;
+  /** Cierra la ficha; con `only`, sólo si la abierta es ESA (un Save lento de
+   *  una ficha ya cerrada no cierra otra que se abrió después). */
+  closeModelProps: (only?: { saId: string; boxes?: string[] }) => void;
   /** Doc 72 r2: navegación en curso hacia otro canvas (Locate): el Workspace
    *  muestra un overlay bloqueante hasta que el canvas cargó y centró. */
   navigating: { canvas: string; target?: string } | null;
@@ -265,6 +275,10 @@ interface ModelerState {
   openCanvasAndFocus: (canvasId: string, projectId: string | null | undefined, tableId: string, colId?: string, label?: string) => Promise<void>;
   // ── Capa DRAWING (R6d): formas libres detrás de las tablas ──
   drawings: Drawing[];
+  /** Doc 111: el dibujo recién creado — el canvas lo deja SELECCIONADO (si no,
+   *  nacía detrás de la tabla del centro y parecía no haberse creado) y lo
+   *  limpia. */
+  justAddedDrawingId: string | null;
   /** Crea una forma con tamaño default en el centro del viewport actual. */
   addDrawing: (type: DrawingType) => void;
   updateDrawing: (id: string, patch: Partial<Drawing>) => void;
@@ -811,6 +825,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
+  modelProps: null,
+  openModelProps: (boxes) => {
+    const saId = get().activeSaId;
+    if (saId) set({ modelProps: boxes ? { saId, boxes: [...boxes] } : { saId } });
+  },
+  closeModelProps: (only) => { if (!only || get().modelProps === only) set({ modelProps: null }); },
   navigating: null,
   inspect: null,
   openInspector: (t) => set({ inspect: t }),
@@ -831,6 +851,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     get().focusColumnInPanel(tableId, colId);
   },
   drawings: [],
+  justAddedDrawingId: null,
   addDrawing: (type) => {
     const saId = get().activeSaId; if (!saId) return;
     const rf = get().flow;
@@ -847,7 +868,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           align: 'left', valign: 'middle' }
       : { id: crypto.randomUUID(), type, x: Math.round(c.x - w / 2), y: Math.round(c.y - h / 2), w, h,
           color: DRAWING_DEFAULT_COLOR };
-    set({ drawings: [...get().drawings, drawing] });
+    set({ drawings: [...get().drawings, drawing], justAddedDrawingId: drawing.id });
     get().persistDrawings();
   },
   updateDrawing: (id, patch) => {
@@ -1672,13 +1693,16 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const name = dia.views.find((v) => v.id === viewId)?.name ?? 'view';
     const node = get().flow?.getNode(viewId);
     const pos = node ? { x: Math.round(node.position.x), y: Math.round(node.position.y) } : null;
-    await struct.removeFromCanvas(saId, { viewIds: [viewId] }, shown);
+    const out = await struct.removeFromCanvas(saId, { viewIds: [viewId] }, shown);
     if (get().selectedViewId === viewId) set({ selectedViewId: null });
     await get().reload();
     // Doc 100: vuelve con su posición en UNA escritura (lista de vistas de ESTE
-    // canvas, no la del que esté abierto al deshacer).
+    // canvas, no la del que esté abierto al deshacer). Doc 112: y con su color
+    // en este canvas (salió con ella).
     pushUndo(`Remove ${name} from canvas`, async () => {
-      await struct.addToCanvas(saId, { viewIds: [viewId], ...(pos ? { layout: { [viewId]: pos } } : {}) }, shown);
+      await struct.addToCanvas(saId, {
+        viewIds: [viewId], ...(pos ? { layout: { [viewId]: pos } } : {}), colors: out.colors,
+      }, shown);
       await get().reload();
     }, pin);
   },
@@ -1719,6 +1743,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         try {
           await struct.addToCanvas(canvasId, {
             viewIds: listed.viewIds, ...(Object.keys(listed.layout).length ? { layout: listed.layout } : {}),
+            colors: listed.colors,   // doc 112: la cascada se llevó también su color en el canvas
           });
         } catch { /* el canvas pudo desaparecer */ }
       }
@@ -1803,7 +1828,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // quita de tableIds + layout (+ vistas huérfanas) (+ trazos de sus wires).
     // Doc 100: las listas las arma el servicio dentro de la cola del canvas.
     const shown = d?.subjectArea.viewIds;
-    await struct.removeFromCanvas(saId, {
+    const out = await struct.removeFromCanvas(saId, {
       tableIds: [tableId], viewIds: orphans, ...(Object.keys(droppedRoutes).length ? { dropRouteIds: wireIds } : {}),
     }, shown);
     // Doc 100: la inversa es UNA escritura (antes hasta 4: tablas, vistas,
@@ -1811,9 +1836,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // son las de ESTE canvas al sacar la tabla (el Undo puede correr con otro
     // canvas abierto) y sólo cuentan si salieron huérfanas: sin ellas, un canvas
     // sin lista explícita (doc 70) sigue sin lista.
+    // Doc 112: y su color en este canvas (y el de sus vistas huérfanas) vuelve con ella.
+    // Las posiciones, las de pantalla; si no hay nodo (en lógico las vistas no lo
+    // son, doc 63), las del canvas grabado que devolvió el servicio.
     pushUndo(`Remove ${name} from canvas`, async () => {
-      const layout = { ...(pos ? { [tableId]: pos } : {}), ...orphanPos } as Record<string, { x: number; y: number }>;
-      await struct.addToCanvas(saId, { tableIds: [tableId], viewIds: orphans, layout, routes: droppedRoutes },
+      const layout = { ...out.layout, ...(pos ? { [tableId]: pos } : {}), ...orphanPos } as Record<string, { x: number; y: number }>;
+      await struct.addToCanvas(saId, { tableIds: [tableId], viewIds: orphans, layout, routes: droppedRoutes, colors: out.colors },
         orphans.length ? shown : undefined);
       await get().reload();
     }, pin);
@@ -1963,12 +1991,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
             ...(out?.layout ?? {}), ...(back?.layout ?? {}),
             ...(active && undoPos ? { [tableId]: undoPos } : {}),
           };
+          // Doc 112: el color de cada caja en ESE canvas vuelve con ella.
+          const colors = { ...(out?.colors ?? {}), ...(back?.colors ?? {}) };
           try {
             await struct.addToCanvas(canvasId, {
               ...(withTable ? { tableIds: [tableId] } : {}),
               ...(viewIds.length ? { viewIds } : {}),
               ...(Object.keys(layout).length ? { layout } : {}),
               ...(active ? { routes: droppedRoutes } : {}),
+              colors,
             });
           } catch { /* el canvas pudo desaparecer */ }
         }
@@ -2609,6 +2640,12 @@ useModelerStore.subscribe((s, prev) => {
   useModelerStore.setState({ canvasRoutes: routes });
 });
 
+// Doc 112: la ficha de un canvas (Model properties) se cierra si se abre otro
+// canvas (o ninguno) — por el buscador, el Explorer o al borrarlo.
+useModelerStore.subscribe((s, prev) => {
+  if (s.modelProps && s.activeSaId !== prev.activeSaId) useModelerStore.setState({ modelProps: null });
+});
+
 // Doc 109: los colores del canvas se siembran igual — cada vez que cambia el
 // canvas del diagrama (abrir, recargar, cerrar), saneados y con los guardados
 // en vuelo encima; una copia local que trae el mismo objeto no re-siembra.
@@ -2648,6 +2685,7 @@ useSessionStore.subscribe((s, prev) => {
       columnTarget: null, relPreset: null, subcatArmed: false, hoverEdgeId: null, hoverNodeId: null,
       colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
       inspect: null, searchOpen: false, navigating: null, pendingFocusTableId: null, pendingFocusColId: null,
+      modelProps: null,
     });
   }
   if (s.activeChangesetId === prev.activeChangesetId) return;

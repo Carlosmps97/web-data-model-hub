@@ -234,3 +234,43 @@ describe('setObjectColor', () => {
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 });
+
+describe('ficha del canvas — Model properties (doc 112)', () => {
+  it('se abre sobre el canvas abierto; desde Properties, con la caja de ese panel', () => {
+    st().openModelProps();
+    expect(st().modelProps).toEqual({ saId: 'sa1' });
+    st().openModelProps(['t1']);
+    expect(st().modelProps).toEqual({ saId: 'sa1', boxes: ['t1'] });
+    st().closeModelProps();
+    expect(st().modelProps).toBeNull();
+  });
+
+  it('sin canvas abierto no se abre', () => {
+    useModelerStore.setState({ activeSaId: null });
+    st().openModelProps();
+    expect(st().modelProps).toBeNull();
+  });
+
+  it('se cierra al cambiar de canvas o de sesión (lo que muestra es de UN canvas)', () => {
+    st().openModelProps();
+    useModelerStore.setState({ activeSaId: 'sa2' });
+    expect(st().modelProps).toBeNull();
+    useModelerStore.setState({ activeSaId: 'sa1' });
+    st().openModelProps();
+    useSessionStore.setState({ activeChangesetId: 'cs2' });
+    expect(st().modelProps).toBeNull();
+  });
+});
+
+describe('ficha del canvas — un cierre tardío no cierra otra (doc 112, revisión)', () => {
+  it('el Save lento de la ficha anterior no cierra la que se abrió después', () => {
+    st().openModelProps();
+    const first = st().modelProps!;
+    st().closeModelProps();                 // Cancel mientras el Save viaja
+    st().openModelProps(['t1']);
+    st().closeModelProps(first);            // el Save de la primera termina tarde
+    expect(st().modelProps).toEqual({ saId: 'sa1', boxes: ['t1'] });
+    st().closeModelProps(st().modelProps!);
+    expect(st().modelProps).toBeNull();
+  });
+});

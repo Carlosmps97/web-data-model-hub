@@ -22,15 +22,14 @@ function DerivationEdge(props: EdgeProps) {
     (s) => s.hoverEdgeId === id || s.selectedEdgeId === id
       || (!!s.hoverNodeId && (source === s.hoverNodeId || target === s.hoverNodeId)),
   );
-  const anyHover = useModelerStore((s) => !!s.hoverEdgeId || !!s.hoverNodeId);
-  const dimmed = anyHover && !active;
 
   const [path] = getBezierPath({
     sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition, curvature: 0.35,
   });
 
   return (
-    <g style={{ opacity: dimmed ? 0.22 : 1, transition: 'opacity .12s' }}>
+    // Doc 111: el atenuado del resto lo hace la clase del canvas (CrowFootEdge).
+    <g className={active ? 'wk-edge wk-edge--hot' : 'wk-edge'}>
       <BaseEdge path={path} style={{ stroke: STROKE, strokeWidth: active ? 1.8 : 1.2 }} />
       {/* Anillo hueco en el extremo de la VISTA (target); fill literal por el
           export SVG (no resuelve CSS vars fuera del documento). */}

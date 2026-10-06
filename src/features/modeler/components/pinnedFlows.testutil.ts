@@ -52,10 +52,10 @@ const SERVICE_WRITES = new Set([
   'gov.deleteColumn', 'gov.updateRelationship', 'gov.deleteRelationship',
   'viewsSvc.createView', 'viewsSvc.updateView', 'viewsSvc.deleteView',
   'schemasSvc.createSchema', 'schemasSvc.createSchemaInVersion', 'schemasSvc.renameSchema', 'schemasSvc.deleteSchema',
-  'setSubjectAreaUdp',
+  'setSubjectAreaUdp', 'patchSubjectAreaUdp',
   // Estructura (canvas, carpetas, proyecto) — el store los llama como `struct.*`.
   'struct.addToCanvas', 'struct.removeFromCanvas', 'struct.setSubjectAreaLayout', 'struct.setSubjectAreaDrawings',
-  'struct.arrangeSubjectArea', 'struct.setWireRoute', 'struct.setSubjectAreaUdp', 'struct.createFolder',
+  'struct.arrangeSubjectArea', 'struct.setWireRoute', 'struct.setSubjectAreaUdp', 'struct.patchSubjectAreaUdp', 'struct.createFolder',
   'struct.renameFolder', 'struct.moveFolder', 'struct.deleteFolder', 'struct.createSubjectArea',
   'struct.updateSubjectArea', 'struct.deleteSubjectArea', 'struct.renameProject', 'struct.deleteProject',
   'struct.reviveProject', 'struct.setCanvasColors',

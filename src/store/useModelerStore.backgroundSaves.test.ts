@@ -173,3 +173,12 @@ describe('failureText (doc 105, O1)', () => {
       .toBe("Couldn't save the drawings: the canvas is gone.");
   });
 });
+
+describe('dibujo nuevo (doc 111)', () => {
+  it('queda marcado para nacer SELECCIONADO (si no, se pintaba detrás de una tabla y parecía no haberse creado)', () => {
+    useModelerStore.getState().addDrawing('rect');
+    const st = useModelerStore.getState();
+    const created = st.drawings[st.drawings.length - 1];
+    expect(st.justAddedDrawingId).toBe(created.id);
+  });
+});

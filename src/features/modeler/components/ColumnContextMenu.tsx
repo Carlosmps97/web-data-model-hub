@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 import { facetNouns, type FacetNouns } from '@/lib/facets';
 import { useModelerStore } from '@/store/useModelerStore';
 import { reportWriteError } from '../lib/sessionGuard';
 import { useSessionStore } from '@/store/useSessionStore';
-import { colorHex, colorLabel, effectiveRef, normalColor } from '@/lib/colors';
-import ColorPicker from './ColorPicker';
 
 // Etiquetas de atajos agnósticas al SO (Windows/Linux = Ctrl, macOS = ⌘) —
 // el handler real ya acepta ambos (`metaKey || ctrlKey`).
@@ -44,10 +41,6 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const ref = useRef<HTMLDivElement>(null);
-  // Doc 109: submenú «Color on this canvas» (flyout dentro del menú: un clic en
-  // él no cuenta como clic afuera). Se cierra al cambiar de menú.
-  const [colorOpen, setColorOpen] = useState(false);
-  useEffect(() => { setColorOpen(false); }, [menu]);
 
   // Cierre por interacción global: click/pan fuera (mousedown), zoom/scroll
   // (wheel), Esc o blur de la ventana. Capture: gana aunque el target frene el
@@ -81,9 +74,9 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   // clipboard de tabla + edición (crea una tabla NUEVA, no necesita destino).
   const showCopyTable = !isView && isBlock;
   const showPasteTable = !isView && isBlock && tblClipName != null && canEdit;
-  // Doc 109: color de la caja EN ESTE canvas — del bloque (tabla o vista), en edición.
-  const showColor = isBlock && canEdit;
-  if (!showCopyCols && !showPasteCols && !showCopyTable && !showPasteTable && !showColor) return null;
+  // Doc 112: el color de la caja EN ESTE canvas ya no está acá — es del canvas
+  // (Model properties → Colors on this canvas), no de la tabla.
+  if (!showCopyCols && !showPasteCols && !showCopyTable && !showPasteTable) return null;
 
   const doCopy = () => {
     const st = useModelerStore.getState();
@@ -116,58 +109,6 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   const x = Math.min(menu.x, window.innerWidth - 216);
   const y = Math.min(menu.y, window.innerHeight - 140);
 
-  // Doc 109: a qué cajas aplica el color — todas las seleccionadas si el clic
-  // fue sobre una de ellas; si no, sólo la del clic.
-  const colorTargets = (): string[] => {
-    const nodes = useModelerStore.getState().flow?.getNodes() ?? [];
-    const picked = nodes.filter((nd) => nd.selected && (nd.type === 'table' || nd.type === 'view')).map((nd) => nd.id);
-    return picked.length > 1 && picked.includes(menu.tableId) ? picked : [menu.tableId];
-  };
-  const colorSection = () => {
-    const st = useModelerStore.getState();
-    const targets = colorTargets();
-    const dia = st.diagram;
-    const ownOf = (id: string) => (dia?.tables.find((t) => t.id === id)?.color
-      ?? (dia?.views ?? []).find((v) => v.id === id)?.color ?? null);
-    const overrides = targets.map((id) => st.canvasColors[id] ?? null);
-    const allSame = overrides.every((o) => o === overrides[0]);
-    const single = targets.length === 1;
-    const own = single ? ownOf(targets[0]) : null;
-    const nouns = facetNouns(st.viewMode);
-    return (
-      <div className="wk-ctxmenu-sub" style={{
-        ...(x + 216 + 260 > window.innerWidth ? { right: '100%' } : { left: '100%' }),
-        ...(y + 440 > window.innerHeight ? { bottom: -5 } : { top: -5 }),
-      }}>
-        <ColorPicker
-          title={single ? 'Color on this canvas' : `Color on this canvas · ${targets.length} boxes`}
-          themes={st.themes}
-          value={allSame ? overrides[0] : '__mixed__'}
-          noneValue="none"
-          inherit={{
-            label: single ? `Use the ${isView ? 'view' : nouns.one}'s color` : 'Use each one\'s own color',
-            hex: single ? colorHex(normalColor(own) ? own : null, st.themeIdx) : null,
-            current: allSame && overrides[0] === null,
-          }}
-          onPick={(ref) => {
-            // el selector del sistema aplica después: no cerrar un menú más nuevo
-            if (useModelerStore.getState().colMenu === menu) st.closeColMenu();
-            void st.setBoxColors(targets, ref);
-          }}
-        />
-        {single && own && (
-          <div className="wk-ctxmenu-note">{`${isView ? 'View' : nouns.One} color: ${colorLabel(own, st.themeIdx)}`}</div>
-        )}
-      </div>
-    );
-  };
-  const currentHex = (() => {
-    const st = useModelerStore.getState();
-    const own = (st.diagram?.tables.find((t) => t.id === menu.tableId)?.color
-      ?? (st.diagram?.views ?? []).find((v) => v.id === menu.tableId)?.color ?? null);
-    return colorHex(effectiveRef(menu.tableId, own, st.canvasColors), st.themeIdx);
-  })();
-
   return (
     <div ref={ref} className="wk-ctxmenu" style={{ left: x, top: y }} role="menu">
       {showCopyCols && (
@@ -189,19 +130,6 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
         <button type="button" role="menuitem" onClick={doPasteTable}>
           {`Paste ${n.one} (${tblClipName} as copy)`}
         </button>
-      )}
-      {showColor && (showCopyTable || showPasteTable) && <div className="wk-ctxmenu-sep" />}
-      {showColor && (
-        <div className="wk-ctxmenu-group" onMouseEnter={() => setColorOpen(true)} onMouseLeave={() => setColorOpen(false)}>
-          <button type="button" role="menuitem" aria-haspopup="menu" aria-expanded={colorOpen}
-            className={colorOpen ? 'on' : undefined} onClick={() => setColorOpen((v) => !v)}>
-            <span className={`wk-cpick-dot wk-cpick-dot--sm${currentHex ? '' : ' wk-cpick-dot--none'}`}
-              style={currentHex ? { background: currentHex } : undefined} aria-hidden />
-            Color on this canvas
-            <ChevronRight size={13} className="wk-ctxmenu-chev" aria-hidden />
-          </button>
-          {colorOpen && colorSection()}
-        </div>
       )}
     </div>
   );

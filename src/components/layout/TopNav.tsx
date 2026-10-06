@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Database, Search, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
@@ -86,48 +86,72 @@ export default function TopNav() {
       setSavingLeave(false);
     }
   };
+  // Doc 112: el aviso se lleva el foco y Escape lo cierra a ÉL (quedarse). No
+  // está en la pila de diálogos: Escape cerraba el popup del canvas de atrás
+  // (Model properties, un editor a medio armar) y el aviso seguía arriba.
+  const stayBtn = useRef<HTMLButtonElement>(null);
+  const stayNow = useRef(stay);
+  stayNow.current = stay;
+  const guardOpen = leaveTo !== null;
+  useEffect(() => {
+    if (!guardOpen) return;
+    stayBtn.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      stayNow.current();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [guardOpen]);
 
   return (
-    <header className="dmh-topnav">
-      <button type="button" className="dmh-brand" onClick={() => { if (!intercept('/')) navigate('/'); }} aria-label="Data Model Hub — Home">
-        <span className="dmh-brand-logo"><Database size={16} strokeWidth={1.6} aria-hidden /></span>
-        <span className="dmh-brand-word">Data Model Hub</span>
-      </button>
+    <>
+      <header className="dmh-topnav">
+        <button type="button" className="dmh-brand" onClick={() => { if (!intercept('/')) navigate('/'); }} aria-label="Data Model Hub — Home">
+          <span className="dmh-brand-logo"><Database size={16} strokeWidth={1.6} aria-hidden /></span>
+          <span className="dmh-brand-word">Data Model Hub</span>
+        </button>
 
-      <nav className="dmh-nav" aria-label="Primary">
-        {NAV.filter((item) => !item.perm || perms?.[item.perm]).map((item) => (
-          <Link
-            key={item.to}
-            to={item.to}
-            className={`dmh-nav-link${item.match(pathname) ? ' is-active' : ''}`}
-            aria-current={item.match(pathname) ? 'page' : undefined}
-            onClick={(e) => { if (intercept(item.to)) e.preventDefault(); }}
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
+        <nav className="dmh-nav" aria-label="Primary">
+          {NAV.filter((item) => !item.perm || perms?.[item.perm]).map((item) => (
+            <Link
+              key={item.to}
+              to={item.to}
+              className={`dmh-nav-link${item.match(pathname) ? ' is-active' : ''}`}
+              aria-current={item.match(pathname) ? 'page' : undefined}
+              onClick={(e) => { if (intercept(item.to)) e.preventDefault(); }}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </nav>
 
-      <div className="dmh-nav-spacer" />
+        <div className="dmh-nav-spacer" />
 
-      <div className="dmh-topnav-right">
-        <div className="dmh-topnav-search">
-          <Search aria-hidden />
-          <input
-            type="search"
-            placeholder="Search…"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            aria-label="Search"
-          />
+        <div className="dmh-topnav-right">
+          <div className="dmh-topnav-search">
+            <Search aria-hidden />
+            <input
+              type="search"
+              placeholder="Search…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Search"
+            />
+          </div>
+          <UserMenu />
         </div>
-        <UserMenu />
-      </div>
+      </header>
 
       {/* ── Popup de cambios sin guardar (guard de salida del modeler) ──
-          El scrim NO cierra al click (pedido owner 07-17): sólo botones. */}
+          El scrim NO cierra al click (pedido owner 07-17): sólo botones. Doc
+          112: en la capa de confirmaciones (`--top`) y FUERA del <header> (su
+          z-index 40 lo encerraba): los popups del canvas dejan esta barra
+          clicable y el aviso quedaba DETRÁS de ellos. */}
       {leaveTo !== null && (
-        <div className="dmh-backdrop" role="presentation">
+        <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
           <div className="dmh-modal" style={{ width: 470 }} role="dialog" aria-modal="true" aria-labelledby="unsaved-title">
             <div className="m-body" style={{ display: 'flex', gap: 14 }}>
               <span className="ins-ico" style={{ background: 'var(--warning-soft)', color: 'var(--warning)' }}>
@@ -141,7 +165,7 @@ export default function TopNav() {
               </div>
             </div>
             <div className="m-foot">
-              <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={savingLeave} onClick={stay}>Cancel</button>
+              <button ref={stayBtn} type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={savingLeave} onClick={stay}>Cancel</button>
               <button type="button" className="rd-btn rd-btn-danger rd-btn-sm" disabled={savingLeave} onClick={leaveAnyway}>Leave without saving</button>
               <button type="button" className="rd-btn rd-btn-primary rd-btn-sm" disabled={savingLeave} onClick={saveAndLeave}>
                 {savingLeave && <span className="rd-spin" aria-hidden />}
@@ -151,6 +175,6 @@ export default function TopNav() {
           </div>
         </div>
       )}
-    </header>
+    </>
   );
 }
