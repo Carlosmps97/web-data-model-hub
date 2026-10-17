@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import { NodeResizer, NodeToolbar, Position, type NodeProps } from '@xyflow/react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { NodeResizer, NodeToolbar, Position, useStore, type NodeProps } from '@xyflow/react';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { Drawing, DrawingType } from '@/features/modeler/services/modeler.service';
 import { drawingFill, drawingStroke, hasText, textCss } from '../lib/drawingStyle';
 import DrawingToolbar from './DrawingToolbar';
+import { drawingToolbarSide, nodeTopOnScreen } from '../lib/toolbarSide';
 
 export interface ShapeNodeData {
   drawing: Drawing;
@@ -112,10 +113,10 @@ export default function ShapeNode({ id, data, selected, width, height }: NodePro
           })}
         />
       )}
-      {canEdit && (
-        <NodeToolbar isVisible={selected && !editing} position={Position.Top} offset={12}>
+      {canEdit && selected && !editing && (
+        <ShapeToolbar id={id}>
           <DrawingToolbar drawing={drawing} onChange={(patch) => updateDrawing(id, patch)} onDelete={() => deleteDrawing(id)} />
-        </NodeToolbar>
+        </ShapeToolbar>
       )}
       <div className={`wk-shape${selected ? ' sel' : ''}`} style={{ width: w, height: h }}
         onDoubleClick={() => { if (canEdit && withText) setEditing(true); }}>
@@ -147,5 +148,23 @@ export default function ShapeNode({ id, data, selected, width, height }: NodePro
         )}
       </div>
     </>
+  );
+}
+
+/** Doc 113 §5: la barra de formato arriba del dibujo; ABAJO si arriba se
+ *  cortaría contra el borde superior del canvas y abajo entra. Se monta sólo con
+ *  el dibujo seleccionado y del store de React Flow toma sólo el LADO: re-render
+ *  cuando cambia, no en cada cuadro de pan/zoom. */
+function ShapeToolbar({ id, children }: { id: string; children: ReactNode }) {
+  const side = useStore((s) => {
+    const n = s.nodeLookup.get(id);
+    if (!n) return 'top';
+    const top = nodeTopOnScreen(n.internals.positionAbsolute.y, s.transform);
+    return drawingToolbarSide(top, top + (n.measured?.height ?? n.height ?? 0) * s.transform[2], s.height);
+  });
+  return (
+    <NodeToolbar isVisible position={side === 'top' ? Position.Top : Position.Bottom} offset={12}>
+      {children}
+    </NodeToolbar>
   );
 }

@@ -89,7 +89,7 @@ const WRITE_CALLBACKS = new Set([
 ]);
 /** Helpers de otros módulos que escriben con la sesión de AHORA; con un pin
  *  entre sus argumentos, escriben con ése. */
-const WRITE_HELPERS = new Set(['arrangeCanvases', 'writeWireRoute']);
+const WRITE_HELPERS = new Set(['placeUploadedObjects', 'writeWireRoute']);
 
 /** Llamadas cuyo callback corre EN EL ACTO (parte del flujo que las llama). */
 const INLINE_METHODS = /^(forEach|map|flatMap|filter|some|every|reduce|reduceRight|find|findIndex|findLast|findLastIndex|sort|toSorted)$/;

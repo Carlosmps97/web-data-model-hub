@@ -7,10 +7,11 @@ import type { PublishBlockedDetail, PublishBlockedItem } from '@/types/versionin
 
 export interface BlockedGroup { kind: string; label: string; items: PublishBlockedItem[] }
 
+// Doc 113 §2: el nombre de vista también es único — su grupo va tras las tablas.
 const KIND_LABEL: Record<string, string> = {
-  table: 'Tables', column: 'Columns', schema: 'Schemas', change: 'Changes',
+  table: 'Tables', view: 'Views', column: 'Columns', schema: 'Schemas', change: 'Changes',
 };
-const KIND_ORDER = ['table', 'column', 'schema', 'change'];
+const KIND_ORDER = ['table', 'view', 'column', 'schema', 'change'];
 
 /** Título del panel: la cabecera del mensaje del backend, sin la cola de
  *  ejemplos (« — Table X already exists | …») — la lista completa va debajo. */
@@ -19,7 +20,7 @@ export function blockedTitle(detail: PublishBlockedDetail): string {
   return head || 'Publish blocked';
 }
 
-/** Ítems agrupados por tipo, en orden fijo (tablas, columnas, esquemas, otros). */
+/** Ítems agrupados por tipo, en orden fijo (tablas, vistas, columnas, esquemas, otros). */
 export function groupBlockedItems(items: PublishBlockedItem[]): BlockedGroup[] {
   const by = new Map<string, PublishBlockedItem[]>();
   items.forEach((it) => {
@@ -37,7 +38,7 @@ export function groupBlockedItems(items: PublishBlockedItem[]): BlockedGroup[] {
 /** Dónde vive el ítem dentro del request: «schema X» / «in table Y». */
 export function itemContext(it: PublishBlockedItem): string {
   if (it.kind === 'column') return it.tableName ? `in table ${it.tableName}` : '';
-  if (it.kind === 'table') return it.schema ? `schema ${it.schema}` : '';
+  if (it.kind === 'table' || it.kind === 'view') return it.schema ? `schema ${it.schema}` : '';
   return '';
 }
 
@@ -55,7 +56,7 @@ export function itemWhere(
   }
   if (it.where === 'production') {
     const where = ex?.tableName && it.kind === 'column' ? ` (table ${ex.tableName})`
-      : ex?.schema && it.kind === 'table' && ex.schema !== it.schema ? ` (schema ${ex.schema})` : '';
+      : ex?.schema && (it.kind === 'table' || it.kind === 'view') && ex.schema !== it.schema ? ` (schema ${ex.schema})` : '';
     if (!ex?.version && !ex?.owner && !ex?.publishedAt) return `Already in production${where}`;
     let out = 'In production';
     if (ex.version) out += ` since ${ex.version}`;

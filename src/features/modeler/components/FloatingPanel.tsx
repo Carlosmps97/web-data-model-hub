@@ -1,11 +1,14 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { placeAtPoint, placeNextTo } from '@/lib/floating';
+import { useFloating } from '@/components/ui/useFloating';
 
 /**
  * Doc 109 — panel flotante (selector de color, opciones de texto) anclado a un
  * botón o a un punto de la pantalla. Va por portal con `position: fixed` (el
  * toolbar y los paneles recortan lo absoluto — doc 52) y se acomoda para no
- * salirse de la ventana. Se cierra con un clic afuera, Esc o la rueda fuera
+ * salirse de la ventana con la regla única de flotantes (doc 113 §5: flip,
+ * corrimiento y alto máximo). Se cierra con un clic afuera, Esc o la rueda fuera
  * del panel. NO al perder la ventana el foco: el selector de color del sistema
  * (More colors…) abre su propia ventana y el panel tiene que seguir ahí.
  */
@@ -27,26 +30,14 @@ export interface FloatingPanelProps {
 
 export default function FloatingPanel({ anchor, onClose, children, side = 'below', owner, inPlace }: FloatingPanelProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const w = el.offsetWidth, h = el.offsetHeight;
-    const vw = window.innerWidth, vh = window.innerHeight;
-    let left: number, top: number;
-    if ('width' in anchor) {
-      if (side === 'right') {
-        left = anchor.right + 4 + w <= vw - 8 ? anchor.right + 4 : anchor.left - 4 - w;
-        top = anchor.top - 6;
-      } else {
-        left = anchor.left;
-        top = anchor.bottom + 6 + h <= vh - 8 ? anchor.bottom + 6 : anchor.top - 6 - h;
-      }
-    } else {
-      left = anchor.x; top = anchor.y;
+  const place = useFloating(ref, (box, bounds) => {
+    if (!('width' in anchor)) return placeAtPoint(anchor, box, bounds);
+    // Flyout de menú: a la derecha del ítem (a su izquierda si no entra), 6 px más arriba.
+    if (side === 'right') {
+      const item = { left: anchor.left, right: anchor.right, top: anchor.top - 6, bottom: anchor.bottom - 6 };
+      return placeNextTo(item, box, bounds, { side: 'right', align: 'start', gap: 4 });
     }
-    setPos({ left: Math.max(8, Math.min(left, vw - w - 8)), top: Math.max(8, Math.min(top, vh - h - 8)) });
+    return placeNextTo(anchor, box, bounds, { side: 'bottom', align: 'start', gap: 6 });
   }, [anchor, side]);
 
   useEffect(() => {
@@ -66,7 +57,7 @@ export default function FloatingPanel({ anchor, onClose, children, side = 'below
 
   const panel = (
     <div ref={ref} className="wk-float nodrag nopan nowheel"
-      style={pos ? { left: pos.left, top: pos.top } : { left: -9999, top: -9999 }}
+      style={place}
       onMouseDown={(e) => e.stopPropagation()}>
       {children}
     </div>

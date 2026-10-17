@@ -5,7 +5,9 @@
  * catálogo y el impacto estimado). El panel derecho es un banco de validación
  * de la regla — NO un preview del export (doc 30 §2).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { useFloating } from '@/components/ui/useFloating';
+import { clipRect, contentBounds, placeAnchored } from '@/lib/floating';
 import { Check, ChevronDown, ChevronLeft, Clock3, Lock, Minus, Save, Trash2, TriangleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -59,6 +61,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [ac, setAc] = useState<{ base: keyof typeof LEVEL_OF; partial: string; sel: number } | null>(null);
   const condRef = useRef<HTMLInputElement>(null);
+  const pickBtnRef = useRef<HTMLButtonElement>(null);
 
   const patch = (p: Partial<DdlRuleEditInput>) => setDraft((d) => ({ ...d, ...p }));
 
@@ -293,7 +296,8 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
                     spellCheck={false}
                     style={{ ...inp, fontFamily: 'var(--mono, monospace)', borderColor: errCount ? '#E0736A' : undefined, boxShadow: errCount ? '0 0 0 3px rgba(214,69,93,0.1)' : undefined }} />
                   {ac && acItems.length > 0 && (
-                    <div style={{ position: 'absolute', left: 0, right: 0, top: 'calc(100% + 6px)', zIndex: 30, background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, boxShadow: '0 16px 38px rgba(16,27,48,0.2)', overflow: 'hidden' }}>
+                    <AnchoredDropdown anchor={condRef} matchWidth size={acItems.length}
+                      style={{ zIndex: 30, background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, boxShadow: '0 16px 38px rgba(16,27,48,0.2)', overflowX: 'hidden', overflowY: 'hidden' }}>
                       <div style={{ padding: '8px 12px', borderBottom: '1px solid #F2F4F8', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' }}>
                         UDP catalog · {LEVEL_OF[ac.base]} <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: '#B6BECD' }}>· closed list · exhaustive</span>
                       </div>
@@ -311,7 +315,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
                       <div style={{ padding: '7px 12px', borderTop: '1px solid #F2F4F8', background: '#FBFCFD', fontSize: 10.5, color: '#9AA3B2' }}>
                         <span style={{ fontFamily: 'var(--mono, monospace)' }}>↵</span> insert · <span style={{ fontFamily: 'var(--mono, monospace)' }}>esc</span> dismiss
                       </div>
-                    </div>
+                    </AnchoredDropdown>
                   )}
                 </div>
                 <div style={{ margin: '0 0 16px', fontSize: 11, color: '#9AA3B2' }}>
@@ -450,7 +454,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
               <span style={cap}>Test</span>
               <div style={{ flex: 1 }} />
               <div style={{ position: 'relative' }}>
-                <button onClick={() => { setTablePick(!tablePick); setTableQ(''); }} disabled={!valid}
+                <button ref={pickBtnRef} onClick={() => { setTablePick(!tablePick); setTableQ(''); }} disabled={!valid}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 32, padding: '0 12px', border: '1px solid #E2E6EE', background: valid ? '#fff' : '#F4F6F9', borderRadius: 8, fontSize: 12, color: valid ? '#8A93A5' : '#A9B1BE', cursor: valid ? 'pointer' : 'default', fontFamily: 'inherit' }}>
                   Sample table{' '}
                   <span style={{ fontFamily: 'var(--mono, monospace)', fontWeight: 600, color: valid ? '#1A2B4A' : '#A9B1BE' }}>
@@ -459,7 +463,8 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
                   <ChevronDown size={12} color="#9AA3B2" />
                 </button>
                 {tablePick && (
-                  <div style={{ position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 30, width: 300, background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, boxShadow: '0 16px 38px rgba(16,27,48,0.2)', overflow: 'hidden' }}>
+                  <AnchoredDropdown anchor={pickBtnRef} align="end" size={tableHits.length}
+                    style={{ zIndex: 30, width: 300, background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, boxShadow: '0 16px 38px rgba(16,27,48,0.2)', overflowX: 'hidden', overflowY: 'hidden' }}>
                     <input autoFocus value={tableQ} onChange={(e) => setTableQ(e.target.value)} placeholder="Search tables…"
                       style={{ width: '100%', border: 'none', borderBottom: '1px solid #F0F2F6', outline: 'none', padding: '9px 12px', fontSize: 12.5, fontFamily: 'inherit' }} />
                     <div style={{ maxHeight: 220, overflowY: 'auto' }}>
@@ -472,7 +477,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
                       ))}
                       {tableHits.length === 0 && <div style={{ padding: '10px 12px', fontSize: 12, color: '#9AA3B2' }}>No results</div>}
                     </div>
-                  </div>
+                  </AnchoredDropdown>
                 )}
               </div>
             </div>
@@ -818,6 +823,34 @@ function EmitAction({ action, canEdit, onChange }: {
       </div>
     </div>
   );
+}
+
+/** Doc 113 §5: desplegable anclado a un control con la regla única de
+ *  flotantes — debajo, ARRIBA si no entra (y se queda de ese lado mientras
+ *  entre), siguiendo al control con el scroll. Se ubica en la ventana, debajo
+ *  de la barra superior de la app (`contentBounds`); si el control sale de la
+ *  vista de sus paneles, se oculta (`placeAnchored`). `matchWidth`: el ancho
+ *  del control; `size` re-ubica cuando cambia la lista. El `style` usa
+ *  `overflowX`/`overflowY`, no `overflow`: el alto máximo agrega `overflowY` y
+ *  mezclar la abreviada con la larga hace que React avise al quitarla. */
+function AnchoredDropdown({ anchor, align = 'start', matchWidth, size, style, children }: {
+  anchor: RefObject<HTMLElement | null>;
+  align?: 'start' | 'end';
+  matchWidth?: boolean;
+  size: number;
+  style: CSSProperties;
+  children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const place = useFloating(ref, (box, viewport, prev) => {
+    const el = anchor.current;
+    if (!el) return null;
+    return placeAnchored(el.getBoundingClientRect(), clipRect(el), box, contentBounds(viewport), { side: prev?.side ?? 'bottom', align, gap: 6 });
+  }, [anchor, align, size], {
+    follow: true,
+    matchWidth: matchWidth ? () => anchor.current?.getBoundingClientRect().width : undefined,
+  });
+  return <div ref={ref} style={{ ...style, ...place }}>{children}</div>;
 }
 
 function Segmented({ options, value, onPick, disabled, small }: {

@@ -157,7 +157,8 @@ export default function NewTableModal({ onClose, onCreate }: {
     setAdding(id);
     // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió (`reportWriteError`). Antes no tenía catch: rechazo sin manejar.
     const onError = reportWriteError((e) => toast.error(failureText(`Couldn't add the ${n.one} to this canvas`, e)));   // ronda 4 (6b): entity/table
-    try { await addExistingTables([id], { withViews }); setAdded((s) => new Set(s).add(id)); }
+    // Doc 113 §4: con la tabla, para estimar su bloque al ubicarlo en el centro de lo que se ve.
+    try { await addExistingTables([id], { withViews, tables: tables.filter((t) => t.id === id) }); setAdded((s) => new Set(s).add(id)); }
     catch (e) { await onError(e); }
     finally { setAdding(null); }
   };

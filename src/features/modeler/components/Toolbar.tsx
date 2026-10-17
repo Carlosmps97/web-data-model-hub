@@ -1,12 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState,
+  type Dispatch, type ReactNode, type SetStateAction,
+} from 'react';
 import { facetNouns, PHYSICAL_ONLY_TOOL_TIP, toolAvailableIn } from '@/lib/facets';
 import { createPortal } from 'react-dom';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine, ChevronDown, ChevronUp,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
   FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Settings2, Undo2,
+  MoreHorizontal, Shapes,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
+import { useFloating } from '@/components/ui/useFloating';
+import { placeNextTo, type RectLike } from '@/lib/floating';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { EndIcon, RelLabelIcon, RelLineIcon, SubcatIcon } from './RelIcon';
 import type { Cardinality } from '@/services/governance.service';
@@ -32,6 +38,9 @@ import ModelPropertiesModal from './ModelPropertiesModal';
 import SearchModelPopup from './SearchModelPopup';
 import { liveLayout } from '../lib/viewerLayout';
 import { arrangeResetWarning } from '../lib/wireRoute';
+import { TOOLBAR_STEPS, stepOn, type ToolbarStep } from '../lib/toolbarFit';
+import { blocksRepeat, nextIn, tabExit } from '../lib/toolbarKeys';
+import { useToolbarFit } from './useToolbarFit';
 
 // Las 4 cardinalidades crow's-foot del preset por extremo (el popup de la
 // relación ofrece las 6, incluyendo 'many' pelado y 'one-only').
@@ -139,7 +148,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   // Doc 59: menú del botón ÚNICO de export (SVG / HTML / PDF). Portal fixed:
   // el toolbar scrollea horizontal y un menú absoluto se recortaría (doc 52).
   const [exportOpen, setExportOpen] = useState(false);
-  const [exportPos, setExportPos] = useState<{ left: number; top: number } | null>(null);
+  const [exportPos, setExportPos] = useState<RectLike | null>(null);
   const exportBtnRef = useRef<HTMLSpanElement | null>(null);
   // Selección de cardinalidad por extremo (crow's-foot), en términos
   // PARENT (lado PK) / CHILD (lado FK) — doc 19. Default Erwin: one → zero-many.
@@ -166,6 +175,22 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const hasCanvas = activeSaId != null && diagram != null;
   // Edición habilitada: hay canvas y NO es modo solo-lectura.
   const canEdit = hasCanvas && !readonly;
+
+  // Doc 114: la barra se compacta por pasos hasta entrar en UNA fila (sin scroll
+  // horizontal ni filas desparejas); pasado el último, envuelve antes que
+  // esconder botones. Lo compactado de un grupo queda en un menú en su lugar.
+  const tbRef = useRef<HTMLDivElement | null>(null);
+  const pillText = `${projectName ? `«${projectName}» · ` : ''}${readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · ${versionLabel ?? '—'}`;
+  const level = useToolbarFit(tbRef, TOOLBAR_STEPS.length + 1,
+    `${openMode ? pillText : ''}|${saving}|${!!onOpenModel}|${toolbarCollapsed}`, !toolbarCollapsed);
+  const on = (step: ToolbarStep) => !toolbarCollapsed && stepOn(level, step);
+  const tbClass = toolbarCollapsed ? ' wk-toolbar--collapsed'
+    : TOOLBAR_STEPS.filter((st) => stepOn(level, st)).map((st) => ` tb-${st}`).join('') + (level > TOOLBAR_STEPS.length ? ' tb-wrap' : '');
+  const cardTip = (c: Cardinality) => CARDS.find((x) => x.k === c)?.tip ?? c;
+  // Revisión doc 114: un menú de grupo a la vez; si la barra cambia de nivel,
+  // los botones se movieron y el menú abierto se cierra.
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const menus = useMemo(() => ({ open: openMenu, setOpen: setOpenMenu, level }), [openMenu, level]);
 
   // ⌘K / Ctrl+K abre el buscador del Model (doc 70 §11).
   useEffect(() => {
@@ -276,14 +301,18 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const named = (label: string, lockTip = true) => (lockTip && readonly ? `${label} — ${VIEWER_TIP}` : label);
 
   // Botón-icono de sección. `disabled` ya contempla viewer-lock en cada call.
-  const ic = (label: string, node: ReactNode, onClick: () => void, opts?: { on?: boolean; disabled?: boolean; lockTip?: boolean }) => (
-    <Tooltip label={opts?.lockTip && readonly ? VIEWER_TIP : label}>
-      <button className={`wk-tic${opts?.on ? ' on' : ''}`} aria-label={named(label, !!opts?.lockTip)} disabled={opts?.disabled} onClick={onClick}>{node}</button>
-    </Tooltip>
+  // Doc 114: `text` = su nombre corto dentro del menú de un grupo compactado.
+  const ic = (label: string, node: ReactNode, onClick: () => void, opts?: { on?: boolean; disabled?: boolean; lockTip?: boolean; text?: string }) => (
+    <ToolBtn tip={opts?.lockTip && readonly ? VIEWER_TIP : label} name={named(label, !!opts?.lockTip)} text={opts?.text}
+      on={opts?.on} disabled={opts?.disabled} onClick={onClick}>{node}</ToolBtn>
   );
 
   return (
-    <div className={`wk-toolbar${toolbarCollapsed ? ' wk-toolbar--collapsed' : ''}`}>
+    <ToolMenus.Provider value={menus}>
+    {/* Revisión 2 doc 114: Enter o Espacio sostenidos no encadenan herramientas
+        (cada repetición activaba lo que tuviera el foco, hasta confirmar un Auto-arrange). */}
+    <div ref={tbRef} className={`wk-toolbar${tbClass}`}
+      onKeyDownCapture={(e) => { if (blocksRepeat({ repeat: e.repeat, key: e.key, target: e.target as HTMLElement }, tbRef.current)) e.preventDefault(); }}>
       {/* Doc 92 D7: barra colapsada a una franja — sólo el botón para mostrarla
           y el contexto de la versión; los popups (abajo) siguen montados. */}
       {toolbarCollapsed && (
@@ -328,14 +357,17 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       </div>
       <span className="wk-div" />
 
-      {/* STRUCTURE — Views, CTAS y Schemas son conceptos físicos (doc 86 D2). */}
+      {/* STRUCTURE — Views, CTAS, Schemas y la carga Excel son físicos (doc 86 D2, doc 113). */}
       <div className="wk-grp">
         <div className="wk-grp-row">
           {ic(`New ${n.one}`, <Table2 size={17} />, () => setModal('table'), { disabled: !canEdit, lockTip: true })}
-          {ic(toolAvailableIn('ctas', viewMode) ? 'CTAS — create from existing' : PHYSICAL_ONLY_TOOL_TIP.ctas, <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit || !toolAvailableIn('ctas', viewMode), lockTip: true })}
-          {ic(toolAvailableIn('view', viewMode) ? 'Create view' : PHYSICAL_ONLY_TOOL_TIP.view, <Eye size={17} />, () => setModal('view'), { disabled: !canEdit || !toolAvailableIn('view', viewMode), lockTip: true })}
-          {ic(toolAvailableIn('schema', viewMode) ? 'Schemas — create & manage' : PHYSICAL_ONLY_TOOL_TIP.schema, <FolderCog size={17} />, () => setModal('schema'), { disabled: !canEdit || !toolAvailableIn('schema', viewMode), lockTip: true })}
-          {ic('Upload from Excel — create or update tables, columns and structure in bulk', <FileSpreadsheet size={17} />, () => setModal('upload'), { disabled: !canUpload, lockTip: true })}
+          <Collapsible when={on('structure')} menu={{ name: 'More structure tools — CTAS, views, schemas and Excel upload', icon: <MoreHorizontal size={17} />, list: true, disabled: !openMode }}>
+            {ic(toolAvailableIn('ctas', viewMode) ? 'CTAS — create from existing' : PHYSICAL_ONLY_TOOL_TIP.ctas, <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit || !toolAvailableIn('ctas', viewMode), lockTip: true, text: 'CTAS' })}
+            {ic(toolAvailableIn('view', viewMode) ? 'Create view' : PHYSICAL_ONLY_TOOL_TIP.view, <Eye size={17} />, () => setModal('view'), { disabled: !canEdit || !toolAvailableIn('view', viewMode), lockTip: true, text: 'Create view' })}
+            {ic(toolAvailableIn('schema', viewMode) ? 'Schemas — create & manage' : PHYSICAL_ONLY_TOOL_TIP.schema, <FolderCog size={17} />, () => setModal('schema'), { disabled: !canEdit || !toolAvailableIn('schema', viewMode), lockTip: true, text: 'Schemas' })}
+            {/* Doc 113 §1.2: la carga Excel también es física (crea tablas con esquema y sus vistas). */}
+            {ic(toolAvailableIn('upload', viewMode) ? 'Upload from Excel — create or update tables, columns and structure in bulk' : PHYSICAL_ONLY_TOOL_TIP.upload, <FileSpreadsheet size={17} />, () => setModal('upload'), { disabled: !canUpload || !toolAvailableIn('upload', viewMode), lockTip: true, text: 'Upload from Excel' })}
+          </Collapsible>
         </div>
         <span className="wk-grp-cap">Structure</span>
       </div>
@@ -356,8 +388,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {/* RELATIONSHIPS — cardinalidad por extremo (crow's-foot, Parent/Child)
           + dos herramientas de dibujo estilo Erwin (doc 19) */}
       <div className="wk-grp">
+        {/* Doc 114: compactado, primero las cardinalidades (su botón muestra las
+            elegidas) y al final todo el grupo, cada parte en su menú. */}
+        <Collapsible when={on('rel')} menu={{ name: 'Relationships — cardinality, draw, subcategory and labels', icon: <RelLineIcon />, active: !!relPreset || subcatArmed, disabled: !openMode }}>
         <div className="wk-relwrap">
-          <div className="wk-relbuild">
+          <Collapsible when={on('ends') && !on('rel')} menu={{
+            name: `Relationship ends — Parent: ${cardTip(relSel.parent)} · Child: ${cardTip(relSel.child)}`, keepOpen: true, disabled: !openMode,
+            icon: <span className="wk-grpmenu-ends"><EndIcon cardinality={relSel.parent} size={14} /><EndIcon cardinality={relSel.child} size={14} /></span>,
+          }}>
+          <div className="wk-relbuild" data-keep-open>
             {(['parent', 'child'] as const).map((end) => (
               <div className="wk-relrow" key={end}>
                 <span className="wk-rellbl">{end === 'parent' ? 'Parent' : 'Child'}</span>
@@ -378,6 +417,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
               </div>
             ))}
           </div>
+          </Collapsible>
           <div className="wk-reldraw2">
             <Tooltip label={readonly ? VIEWER_TIP : relPreset?.identifying
               ? 'Exit drawing mode'
@@ -445,12 +485,14 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             </Tooltip>
           </div>
         </div>
+        </Collapsible>
         <span className="wk-grp-cap">Relationships</span>
       </div>
       <span className="wk-div" />
 
       {/* DRAWING (R6d): 2 filas × 4; cada botón crea una forma en el centro */}
       <div className="wk-grp">
+        <Collapsible when={on('drawing')} menu={{ name: 'Drawing — add a shape', icon: <Shapes size={17} />, disabled: !openMode }}>
         <div className="wk-drawgrid">
           {SHAPES.map((s) => (
             <Tooltip key={s.id} label={readonly ? VIEWER_TIP : s.tip}>
@@ -460,6 +502,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             </Tooltip>
           ))}
         </div>
+        </Collapsible>
         <span className="wk-grp-cap">Drawing</span>
       </div>
       <span className="wk-div" />
@@ -477,16 +520,22 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             onUndo,
             { disabled: !canEdit || undoBusy || undoCount === 0, lockTip: true },
           )}
+          <Collapsible when={on('actions')} menu={{
+            name: 'More actions — auto-arrange and exports', list: true, active: exportOpen, disabled: !openMode,
+            icon: arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <MoreHorizontal size={17} />,
+          }}>
           {/* Doc 84 E: también en modo visor (sólo en esta sesión, no se guarda). */}
-          {ic(readonly ? 'Auto-arrange — view only, not saved' : 'Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !hasCanvas || arranging })}
-          {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas })}
-          <span ref={exportBtnRef} style={{ display: 'inline-flex' }}>
+          {ic(readonly ? 'Auto-arrange — view only, not saved' : 'Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !hasCanvas || arranging, text: 'Auto-arrange' })}
+          {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas, text: 'Export DDL' })}
+          {/* En el menú de lista, a todo el ancho como las demás (revisión 2). */}
+          <span ref={exportBtnRef} style={{ display: 'flex', flexDirection: 'column' }}>
             {ic('Export diagram — SVG · interactive HTML · PDF', <ImageDown size={17} />, () => {
               const r = exportBtnRef.current?.getBoundingClientRect();
-              setExportPos(r ? { left: r.left, top: r.bottom + 6 } : null);
+              setExportPos(r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null);
               setExportOpen((v) => !v);
-            }, { disabled: !hasCanvas, on: exportOpen })}
+            }, { disabled: !hasCanvas, on: exportOpen, text: 'Export diagram' })}
           </span>
+          </Collapsible>
         </div>
         <span className="wk-grp-cap">Actions</span>
       </div>
@@ -499,22 +548,22 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         <div className="wk-right-ctx">
         {onOpenModel && (
           <Tooltip label="Open or switch version">
-            <button className="wk-save" onClick={onOpenModel}><FolderOpen size={15} />Open model</button>
+            <button className="wk-save wk-open" aria-label="Open model" onClick={onOpenModel}><FolderOpen size={15} /><span className="wk-btn-txt">Open model</span></button>
           </Tooltip>
         )}
         {openMode && (
           <span className={`wk-vpill${readonly ? ' viewer' : ''}`}
-            title={snapshot ? 'Read-only snapshot of a published version, rebuilt from the change ledger' : undefined}>
+            title={snapshot ? 'Read-only snapshot of a published version, rebuilt from the change ledger' : pillText}>
             {projectName && <span className="wk-vpill-proj">{`«${projectName}» · `}</span>}{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}
           </span>
         )}
         </div>
         <div className="wk-right-act">
         <Tooltip label={readonly ? VIEWER_TIP : 'Save working copy'}>
-          <button className="wk-save" disabled={!canEdit || saving} onClick={onSave}>{saving ? <span className="rd-spin" /> : <Save size={15} />}{saving ? 'Saving…' : 'Save'}</button>
+          <button className="wk-save" aria-label={saving ? 'Saving…' : 'Save'} disabled={!canEdit || saving} onClick={onSave}>{saving ? <span className="rd-spin" /> : <Save size={15} />}<span className="wk-btn-txt">{saving ? 'Saving…' : 'Save'}</span></button>
         </Tooltip>
         <Tooltip label={readonly ? VIEWER_TIP : 'Publish version'}>
-          <button className="wk-publish" disabled={!canEdit} onClick={() => setPublishOpen(true)}><ArrowUpToLine size={15} />Publish</button>
+          <button className="wk-publish" aria-label="Publish" disabled={!canEdit} onClick={() => setPublishOpen(true)}><ArrowUpToLine size={15} /><span className="wk-btn-txt">Publish</span></button>
         </Tooltip>
         {/* Doc 92 D7: colapsa la barra de herramientas (más espacio de canvas). */}
         <Tooltip label="Hide the tools bar — more room for the canvas">
@@ -575,16 +624,181 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {exportOpen && exportPos && createPortal(
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 299 }} onClick={() => setExportOpen(false)} />
-          <div className="wk-ctxmenu" style={{ left: exportPos.left, top: exportPos.top }}>
+          <MenuNextTo at={exportPos} onClose={() => setExportOpen(false)}>
             <button onClick={() => void exportDiagram('svg')}><ImageDown size={14} /> SVG image (.svg)</button>
             <button onClick={() => void exportDiagram('html')}><AppWindow size={14} /> Interactive HTML — deep zoom (.html)</button>
             <button onClick={() => void exportDiagram('pdf')}><FileDown size={14} /> PDF document (.pdf)</button>
-          </div>
+          </MenuNextTo>
         </>, document.body)}
       <ExportDdlModal open={ddlOpen} diagram={diagram} modelName={diagram?.subjectArea.name ?? 'model'} onClose={() => setDdlOpen(false)} />
 
-      {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT table header (blue ring) onto a child column or the child header — the parent's whole primary key is migrated. <button type="button" className="wk-relhint-exit" onClick={() => setRelPreset(null)}>Exit</button></div>}
-      {subcatArmed && <div className="wk-relhint">Draw the subcategory: drag from the SUPERTYPE table header (blue ring) — or from an existing subcategory symbol — onto the subtype table. The supertype's key becomes the subtype's key (is-a, 1:1). <button type="button" className="wk-relhint-exit" onClick={() => setSubcatArmed(false)}>Exit</button></div>}
+      {relPreset && <div className="wk-relhint">Draw the {relPreset.identifying ? 'identifying (solid)' : 'non-identifying (dashed)'} relationship: drag from the PARENT {n.one} header (blue ring) onto a child {n.member} or the child header — the parent's whole primary key is migrated. <button type="button" className="wk-relhint-exit" onClick={() => setRelPreset(null)}>Exit</button></div>}
+      {subcatArmed && <div className="wk-relhint">Draw the subcategory: drag from the SUPERTYPE {n.one} header (blue ring) — or from an existing subcategory symbol — onto the subtype {n.one}. The supertype&apos;s key becomes the subtype&apos;s key (is-a, 1:1). <button type="button" className="wk-relhint-exit" onClick={() => setSubcatArmed(false)}>Exit</button></div>}
+    </div>
+    </ToolMenus.Provider>
+  );
+}
+
+/** Doc 113 §5: menú de un botón del toolbar (Export diagram) — debajo del
+ *  botón, arriba si no entra y siempre dentro de la ventana. */
+function MenuNextTo({ at, onClose, children }: { at: RectLike; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const place = useFloating(ref, (box, bounds) => placeNextTo(at, box, bounds, { side: 'bottom', align: 'start', gap: 6 }), [at]);
+  useEscape(onClose);   // revisión doc 114: Esc lo cierra (antes sólo un clic afuera)
+  return <div ref={ref} className="wk-ctxmenu" style={place}>{children}</div>;
+}
+
+/** Doc 114: dentro del menú de un grupo compactado, cada herramienta muestra
+ *  también su nombre (en la barra, sólo el ícono con su tooltip). */
+const InToolMenu = createContext(false);
+
+function ToolBtn({ tip, name, text, on, disabled, onClick, children }: {
+  tip: string; name: string; text?: string; on?: boolean; disabled?: boolean; onClick: () => void; children: ReactNode;
+}) {
+  const inMenu = useContext(InToolMenu) && !!text;
+  return (
+    <Tooltip label={tip} side={inMenu ? 'right' : undefined}>
+      <button className={`wk-tic${inMenu ? ' wk-tic--menu' : ''}${on ? ' on' : ''}`} aria-label={name} disabled={disabled} onClick={onClick}>
+        {children}{inMenu && <span className="wk-tic-txt">{text}</span>}
+      </button>
+    </Tooltip>
+  );
+}
+
+/** Lo que recibe el foco con Tab dentro de la barra. */
+const FOCUSABLE = 'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+interface MenuSpec {
+  /** Nombre del grupo: el del botón (accesible y tooltip) y el del menú. */
+  name: string;
+  icon: ReactNode;
+  /** Las herramientas en lista, con su nombre (si no, tal cual: grilla o filas). */
+  list?: boolean;
+  /** Elegir no cierra el menú (las cardinalidades: se eligen las dos puntas). */
+  keepOpen?: boolean;
+  /** Una herramienta del grupo está activa (dibujando una relación, exportando). */
+  active?: boolean;
+  disabled?: boolean;
+}
+
+/** Doc 114: una parte de la barra que se compacta — `when` en false, tal cual;
+ *  en true, un botón en su lugar que la abre en un menú flotante. */
+function Collapsible({ when, menu, children }: { when: boolean; menu: MenuSpec; children: ReactNode }) {
+  return when ? <GroupMenu {...menu}>{children}</GroupMenu> : <>{children}</>;
+}
+
+/** Revisión doc 114: los menús de grupo de la barra — cuál está abierto (uno a
+ *  la vez) y el nivel de compactación (al cambiar, el menú abierto se cierra:
+ *  su botón se movió). */
+const ToolMenus = createContext<{ open: string | null; setOpen: Dispatch<SetStateAction<string | null>>; level: number }>(
+  { open: null, setOpen: () => {}, level: 0 });
+
+/** Esc (en el documento, en captura) mientras el menú está abierto: lo cierra
+ *  aunque el foco no esté adentro — Tab afuera, un clic en un rótulo. Revisión 2:
+ *  salvo con el foco en un diálogo (el buscador, Open model, New table…): ese Esc
+ *  es suyo — antes cerraba el menú de atrás y el diálogo seguía abierto. Con una
+ *  ficha abierta (Model properties) y el menú encima, el foco está en el menú. */
+function useEscape(onEscape: () => void): void {
+  const cb = useRef(onEscape);
+  cb.current = onEscape;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || (document.activeElement as Element | null)?.closest?.('[aria-modal="true"]')) return;
+      e.stopPropagation();
+      cb.current();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, []);
+}
+
+function GroupMenu({ name, icon, list, keepOpen, active, disabled, children }: MenuSpec & { children: ReactNode }) {
+  const menus = useContext(ToolMenus);
+  const [at, setAt] = useState<RectLike | null>(null);
+  const btn = useRef<HTMLButtonElement | null>(null);
+  const id = useId();
+  const close = useCallback((focusBack = false) => {
+    setAt(null);
+    menus.setOpen((cur) => (cur === id ? null : cur));
+    if (focusBack) btn.current?.focus();
+  }, [menus, id]);
+  // Uno a la vez (con teclado se podían abrir dos); y al cambiar el nivel, cerrado.
+  useEffect(() => { if (at && menus.open !== id) setAt(null); }, [at, menus.open, id]);
+  const level = useRef(menus.level);
+  useEffect(() => {
+    if (level.current === menus.level) return;
+    level.current = menus.level;
+    setAt(null);
+  }, [menus.level]);
+  return (
+    <>
+      <Tooltip label={name}>
+        {/* Patrón «disclosure» (revisión: `aria-haspopup` anunciaba un menú y el
+            panel es un grupo de botones). */}
+        <button ref={btn} type="button" className={`wk-tic wk-grpmenu${at || active ? ' on' : ''}`} aria-label={name}
+          aria-expanded={!!at} aria-controls={at ? id : undefined} disabled={disabled}
+          onClick={(e) => {
+            if (at) { close(); return; }
+            const r = e.currentTarget.getBoundingClientRect();
+            setAt({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+            menus.setOpen(id);
+          }}>
+          {icon}<ChevronDown size={10} className="wk-grpmenu-caret" aria-hidden />
+        </button>
+      </Tooltip>
+      {at && createPortal(
+        <>
+          <div style={{ position: 'fixed', inset: 0, zIndex: 299 }} onClick={() => close()} />
+          <ToolPopover id={id} at={at} name={name} list={list} keepOpen={keepOpen} onClose={close} button={btn}>{children}</ToolPopover>
+        </>, document.body)}
+    </>
+  );
+}
+
+/** El menú del grupo: debajo del botón (arriba si no entra, dentro de la
+ *  ventana — doc 113 §5). Al abrirse, el foco va a la primera herramienta (o al
+ *  propio menú si no hay ninguna habilitada); Esc lo cierra y vuelve al botón;
+ *  si el foco se va afuera, se cierra; usar una herramienta lo cierra y devuelve
+ *  el foco al botón — el modal que abra vuelve ahí al cerrarse (salvo `keepOpen`
+ *  o lo marcado `data-keep-open`, como las cardinalidades). Revisión 2: Tab en
+ *  sus bordes vuelve a la barra (el menú es un portal al final de la página). */
+function ToolPopover({ id, at, name, list, keepOpen, onClose, button, children }: {
+  id: string; at: RectLike; name: string; list?: boolean; keepOpen?: boolean; onClose: (focusBack?: boolean) => void;
+  button: { current: HTMLButtonElement | null }; children: ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const place = useFloating(ref, (box, bounds) => placeNextTo(at, box, bounds, { side: 'bottom', align: 'start', gap: 6 }), [at]);
+  useEffect(() => {
+    const first = ref.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    (first ?? ref.current)?.focus();
+  }, []);
+  useEscape(() => onClose(true));
+  return (
+    <div ref={ref} id={id} role="group" aria-label={name} tabIndex={-1} className={`wk-tbpop${list ? ' wk-tbpop--list' : ''}`} style={place}
+      onKeyDown={(e) => {
+        const panel = ref.current;
+        if (!panel) return;
+        const exit = tabExit(e, [...panel.querySelectorAll<HTMLElement>('button:not(:disabled)')], document.activeElement as HTMLElement | null, panel as HTMLElement);
+        if (!exit) return;
+        e.preventDefault();
+        if (exit === 'back') { onClose(true); return; }
+        // Lo que sigue al botón del grupo en la barra (o él mismo, si es el último).
+        const bar = button.current?.closest('.wk-toolbar');
+        const all = bar ? [...bar.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((x) => x.getClientRects().length > 0) : [];
+        const next = button.current ? nextIn(all, button.current as HTMLElement) : null;
+        onClose(!next);
+        next?.focus();
+      }}
+      onBlur={(e) => {
+        const to = e.relatedTarget as Node | null;
+        if (to ? ref.current?.contains(to) || to === button.current : !document.hasFocus()) return;
+        onClose();
+      }}
+      onClick={(e) => {
+        const b = (e.target as HTMLElement).closest('button');
+        if (b && !b.disabled && !keepOpen && !b.closest('[data-keep-open]')) onClose(true);
+      }}>
+      <InToolMenu.Provider value={!!list}>{children}</InToolMenu.Provider>
     </div>
   );
 }

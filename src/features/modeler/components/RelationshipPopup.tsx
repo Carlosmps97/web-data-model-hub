@@ -3,6 +3,7 @@ import { Check, Trash2 } from 'lucide-react';
 import Modal from '@/components/ui/Modal';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
+import { distinctNames, facetName, facetNouns } from '@/lib/facets';
 import { useSessionStore } from '@/store/useSessionStore';
 import { pushUndo } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
@@ -16,7 +17,7 @@ import { pkFirstOrdinals } from '../lib/columnOrder';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
 import { bestEffort, pinnedViewDeps } from '../lib/pinnedWrites';
-import { phraseEdits } from '../lib/relationshipLabel';
+import { phraseEdits, roleAppliedText } from '../lib/relationshipLabel';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 import RelationshipPhraseFields, { type PhraseKey } from './RelationshipPhraseFields';
@@ -39,6 +40,9 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const updateRelationship = useModelerStore((s) => s.updateRelationship);
   const deleteRelationship = useModelerStore((s) => s.deleteRelationship);
   const reload = useModelerStore((s) => s.reload);
+  // Doc 114: nombres del modelo del canvas (entidades/atributos en el lógico).
+  const viewMode = useModelerStore((s) => s.viewMode);
+  const nouns = facetNouns(viewMode);
   // En modo visor puede haber changeset activo (viendo un request): reader-only.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
@@ -61,7 +65,12 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
 
   const drift = relationshipDrift(rel, parentPksNow.map((c) => c.id));
   const locked = !canEdit || saving;
-  const colName = (id: string) => colById.get(id)?.physicalName ?? id;
+  // Revisión doc 114: por tabla — los lógicos repetidos se distinguen por su físico.
+  const shownCol = new Map([
+    ...distinctNames(cols.filter((c) => c.tableId === rel.parentTableId), viewMode),
+    ...distinctNames(childOpts, viewMode),
+  ]);
+  const colName = (id: string) => shownCol.get(id) ?? (colById.has(id) ? facetName(colById.get(id), viewMode) : id);
   // Doc 105 (H7): el fallo de una escritura espera la revalidación y calla si
   // la sesión cambió (`reportWriteError`: ya avisó ella).
   const run = async (fn: () => Promise<void>, err: string) => {
@@ -106,8 +115,8 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       pin.check();
       if (keyChanges.length) await gov.recordChangesBulk(keyChanges);
       const n = Object.keys(patches).length;
-      pushToast(identifying ? 'Identifying: child columns promoted to PK'
-        : n ? `Non-identifying: ${n} child column(s) leave the PK` : 'Non-identifying');
+      pushToast(identifying ? `Identifying: child ${nouns.members} promoted to PK`
+        : n ? `Non-identifying: ${n} child ${nouns.member}(s) leave the PK` : 'Non-identifying');
       const undoCols = [...colPres, ...keyPres.filter((p) => !colPres.some((c) => c.id === p.id))];
       pushUndo('Edit relationship', async () => {
         await gov.recordChangesBulk([
@@ -152,7 +161,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       const inNear = near.find((r) => r.id === rel.id);
       const plan = roleNamePlan(inNear ?? rel, i, near.length ? near : [rel]);
       const cur = colById.get(rel.pairs[i].childColumnId);
-      if (!cur) throw new Error('Child column no longer exists');
+      if (!cur) throw new Error(`Child ${nouns.member} no longer exists`);
       const physical = (await gov.physicalize(name)).physical;
       if (plan.kind === 'rename') {
         pin.check();
@@ -164,7 +173,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
           ...rel,
           pairs: rel.pairs.map((p, k) => (k === i ? { ...p, roleName: name } : p)),
         });
-        pushToast(`Role name applied: "${cur.physicalName}" renamed to "${physical}"`);
+        pushToast(roleAppliedText(cur, name, physical, viewMode));
       } else {
         // SPLIT: la columna está compartida (unificada) — se crea una nueva
         // con el role name y ESTE par se repunta; la vieja queda para el resto.
@@ -189,7 +198,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
           ...rel,
           pairs: rel.pairs.map((p, k) => (k === i ? { ...p, childColumnId: newId, roleName: name } : p)),
         });
-        pushToast(`Split: created "${physical}" in ${childTable?.physicalName ?? 'the child'} — this pair now points there`);
+        pushToast(`Split: created "${facetName({ logicalName: name, physicalName: physical }, viewMode)}" in ${childTable ? facetName(childTable, viewMode) : 'the child'} — this pair now points there`);
       }
       setRoleDrafts((d) => ({ ...d, [i]: '' }));
       await reload();
@@ -221,7 +230,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       if (!parentCol) throw new Error('Parent key changed — reopen the popup');
       if (r.target.kind === 'existing') {
         const c = colById.get(r.target.columnId);
-        if (!c) throw new Error('Child column no longer exists');
+        if (!c) throw new Error(`Child ${nouns.member} no longer exists`);
         if (r.locked) {
           const role = keptRole.get(r.parentColumnId);
           return { parentCol, inherit: r.inherit, target: { kind: 'existing' as const, col: c, preexisting: true },
@@ -293,10 +302,10 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       {/* Parent → Child */}
       <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="wk-pp-role parent">PARENT</span>
-        <span className="rd-mono">{parentTable?.physicalName ?? rel.parentTableId}</span>
+        <span className="rd-mono">{parentTable ? facetName(parentTable, viewMode) : rel.parentTableId}</span>
         <span style={{ color: 'var(--text-muted-3)' }}>→</span>
         <span className="wk-pp-role child">CHILD</span>
-        <span className="rd-mono">{childTable?.physicalName ?? rel.childTableId}</span>
+        <span className="rd-mono">{childTable ? facetName(childTable, viewMode) : rel.childTableId}</span>
       </div>
 
       {/* Drift (doc 47): la llave migrada no calza con la PK actual del padre.
@@ -310,7 +319,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
               <>Key drift — this relationship is out of sync with the parent key
                 ({drift.missing.length} missing / {drift.extra.length} stale pair{drift.extra.length === 1 ? '' : 's'}).</>
             ) : (
-              <>Key drift — the parent table has NO primary key. Define the parent&apos;s key first, then sync.</>
+              <>Key drift — the parent {nouns.one} has NO primary key. Define the parent&apos;s key first, then sync.</>
             )}
           </span>
           {parentPksNow.length > 0 && (
@@ -358,8 +367,8 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       {syncing ? (
         /* ── Modo SYNC: re-mapeo N=N contra la llave vigente del padre ── */
         <div className="wk-props-field">
-          <label>Sync with parent key · parent key has {parentPksNow.length} column{parentPksNow.length === 1 ? '' : 's'} · "Inherit" copies the parent's definition, UDPs and metadata</label>
-          <KeyMappingRows parentPks={parentPksNow} childCols={childOpts} rows={syncRows} onChange={setSyncRows} locked={locked} />
+          <label>Sync with parent key · parent key has {parentPksNow.length} {parentPksNow.length === 1 ? nouns.member : nouns.members} · "Inherit" copies the parent's definition, UDPs and metadata</label>
+          <KeyMappingRows parentPks={parentPksNow} childCols={childOpts} rows={syncRows} onChange={setSyncRows} locked={locked} mode={viewMode} />
           {removedPairs.map((p) => (
             <div key={p.childColumnId} className="rd-small" style={{ color: 'var(--red)', padding: '4px 2px' }}>
               {colName(p.parentColumnId)} → {colName(p.childColumnId)} — will be removed
@@ -380,9 +389,9 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
             {rel.pairs.map((p, i) => (
               <div className="wk-relpair" key={`${p.parentColumnId}-${p.childColumnId}`}>
                 <div className="wk-relpair-cols">
-                  <span className="rd-mono">{colName(p.parentColumnId)}</span>
+                  <span className="rd-mono" title={colName(p.parentColumnId)}>{colName(p.parentColumnId)}</span>
                   <span style={{ color: 'var(--text-muted-3)' }}>→</span>
-                  <span className="rd-mono">{colName(p.childColumnId)}</span>
+                  <span className="rd-mono" title={colName(p.childColumnId)}>{colName(p.childColumnId)}</span>
                   {p.roleName && <span className="rd-small" style={{ color: 'var(--muted)', marginLeft: 'auto' }}>role: {p.roleName}</span>}
                 </div>
                 {canEdit && (
@@ -395,7 +404,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
                       onChange={(e) => setRoleDrafts((d) => ({ ...d, [i]: e.target.value }))}
                     />
                     <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" disabled={locked || !(roleDrafts[i] ?? '').trim()}
-                      title="Apply role name: renames the child FK (or creates a new column if it is shared)"
+                      title={`Apply role name: renames the child FK (or creates a new ${nouns.member} if it is shared)`}
                       onClick={() => applyRole(i)}>
                       <Check size={13} /> Apply
                     </button>

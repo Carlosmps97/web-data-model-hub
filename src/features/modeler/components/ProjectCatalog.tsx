@@ -13,14 +13,33 @@ import {
   projectTableIds, schemaSummary, type CanvasLike,
 } from '../lib/explorerTree';
 import { ColumnLine, EmptyLine, Spin, ViewColumnLines, padFor } from './explorerRows';
+import { useFloating } from '@/components/ui/useFloating';
+import { placeNextTo, type RectLike } from '@/lib/floating';
 
 // Profundidades: ramas del proyecto a depth 1 (hermanas de «Models»); esquema 2 · objeto 3 · columna 4.
 type Branch = 'tables' | 'views' | 'schemas';
 
-interface Picker { x: number; y: number; label: string; candidates: CanvasLike[]; targetId: string; colId?: string }
+/** `at` (doc 113 §5): dónde se ancla — los dos menús se ubican con la regla
+ *  única de flotantes (antes, con topes fijos estimados que cortaban). */
+interface Picker { at: RectLike; label: string; candidates: CanvasLike[]; targetId: string; colId?: string }
 /** Menú ⋮ de una fila (doc 72): qué inspeccionar y cómo localizar. */
-interface RowMenu { x: number; y: number; label: string; inspect: InspectTarget; candidates: CanvasLike[]; targetId: string; colId?: string }
-type RowMenuSpec = Omit<RowMenu, 'x' | 'y'>;
+interface RowMenu { at: RectLike; label: string; inspect: InspectTarget; candidates: CanvasLike[]; targetId: string; colId?: string }
+type RowMenuSpec = Omit<RowMenu, 'at'>;
+
+/** Ancla de ancho cero en `x`, a la altura de la fila `r`. */
+const anchorAt = (x: number, r: RectLike): RectLike => ({ left: x, right: x, top: r.top, bottom: r.bottom });
+
+/** Menú flotante del Explorer: debajo del ancla, arriba si no entra, siempre
+ *  dentro de la ventana (con scroll si no entra en ningún lado). `cap`: alto
+ *  máximo propio (una lista larga hace scroll aunque entre en la ventana). */
+function FloatingMenu({ at, cap, children }: { at: RectLike; cap?: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const place = useFloating(ref, (box, bounds) => placeNextTo(
+    at, cap ? { width: box.width, height: Math.min(box.height, cap) } : box, bounds, { side: 'bottom', align: 'start', gap: 2 },
+  ), [at, cap]);
+  const capped = cap ? { maxHeight: Math.min(cap, typeof place.maxHeight === 'number' ? place.maxHeight : cap), overflowY: 'auto' as const } : {};
+  return <div ref={ref} className="rd-menu wk-exp-menu" role="menu" style={{ ...place, ...capped, zIndex: 1000 }}>{children}</div>;
+}
 
 /**
  * Ramas Tables · Views · Schemas de UN proyecto (doc 71 §1): el catálogo acotado
@@ -141,15 +160,15 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
     if (canvas.id === activeSaId) { if (colId) focusColumn(targetId, colId); else focusTable(targetId); return; }
     openCanvasAndFocus(canvas.id, project.id, targetId, colId, label).catch(() => pushToast("Couldn't open the canvas", 'err'));
   };
-  const resolveAt = (x: number, y: number, label: string, candidates: CanvasLike[], targetId: string, colId?: string) => {
+  const resolveAt = (at: RectLike, label: string, candidates: CanvasLike[], targetId: string, colId?: string) => {
     const pick = pickCanvas(candidates, activeSaId);
     if (pick === undefined) { pushToast('Not placed on any canvas of this project yet — use Inspect metadata to read it', 'err'); return; }
-    if (pick === null) { setPicker({ x, y, label, candidates, targetId, colId }); return; }
+    if (pick === null) { setPicker({ at, label, candidates, targetId, colId }); return; }
     go(pick, targetId, colId, label);
   };
   const resolve = (e: ReactMouseEvent, label: string, candidates: CanvasLike[], targetId: string, colId?: string) => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    resolveAt(r.left + 24, r.bottom + 2, label, candidates, targetId, colId);
+    resolveAt(anchorAt(r.left + 24, r), label, candidates, targetId, colId);
   };
   const goTable = (e: ReactMouseEvent, t: DbxTable, colId?: string, colName?: string) =>
     resolve(e, colName ? `${t.physicalName} · ${colName}` : t.physicalName, indexCanvasesWithTable(canvasIndex, t.id), t.id, colId);
@@ -160,13 +179,13 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   const openMenu = (e: ReactMouseEvent, spec: RowMenuSpec) => {
     e.stopPropagation();
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setMenu({ ...spec, x: r.right, y: r.bottom + 2 });
+    setMenu({ ...spec, at: anchorAt(r.right, r) });
   };
   const menuInspect = () => { if (!menu) return; const t = menu.inspect; setMenu(null); openInspector(t); };
   const menuLocate = () => {
     if (!menu) return;
     const m = menu; setMenu(null);
-    resolveAt(Math.max(8, m.x - 220), m.y, m.label, m.candidates, m.targetId, m.colId);
+    resolveAt(anchorAt(Math.max(8, m.at.left - 220), m.at), m.label, m.candidates, m.targetId, m.colId);
   };
   const tableMenu = (t: DbxTable, c?: DbxColumn): RowMenuSpec => ({
     label: c ? `${t.physicalName} · ${c.physicalName}` : t.physicalName,
@@ -317,21 +336,19 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
       {menu && (
         <>
           <div className="wk-exp-scrim" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
-          <div className="rd-menu wk-exp-menu" role="menu"
-            style={{ position: 'fixed', left: Math.min(menu.x, window.innerWidth - 236), top: Math.min(menu.y, window.innerHeight - 110), zIndex: 1000 }}>
+          <FloatingMenu at={menu.at}>
             <div className="rd-mono wk-exp-menu-title" title={menu.label}>{menu.label}</div>
             <div className="rd-menu-sep" />
             <button type="button" className="rd-menu-item" role="menuitem" onClick={menuInspect}><Eye /> Inspect metadata</button>
             <button type="button" className="rd-menu-item" role="menuitem" onClick={menuLocate}><Crosshair /> Locate on canvas</button>
-          </div>
+          </FloatingMenu>
         </>
       )}
 
       {picker && (
         <>
           <div className="wk-exp-scrim" onClick={() => setPicker(null)} onContextMenu={(e) => { e.preventDefault(); setPicker(null); }} />
-          <div className="rd-menu wk-exp-menu" role="menu"
-            style={{ position: 'fixed', left: Math.min(picker.x, window.innerWidth - 274), top: Math.min(picker.y, window.innerHeight - 264), zIndex: 1000, maxHeight: 260, overflowY: 'auto' }}>
+          <FloatingMenu at={picker.at} cap={260}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px 2px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: 'var(--subtle)' }}>
               <Crosshair size={12} /> Open on…
             </div>
@@ -342,7 +359,7 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
                 <Crosshair /> {c.name}
               </button>
             ))}
-          </div>
+          </FloatingMenu>
         </>
       )}
     </>

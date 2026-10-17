@@ -17,6 +17,8 @@ vi.mock('@/services/views.service', () => ({ listViewsForTables: vi.fn() }));
 import * as struct from '@/features/modeler/services/structure.service';
 import * as mod from '@/features/modeler/services/modeler.service';
 import * as viewsSvc from '@/services/views.service';
+import { gridSlot } from '@/features/modeler/lib/viewerLayout';
+import { defaultViewPosition } from '@/features/modeler/lib/viewGraph';
 import { useModelerStore } from './useModelerStore';
 import { useUndoStore } from './useUndoStore';
 
@@ -48,6 +50,7 @@ beforeEach(() => {
 describe('useModelerStore — vistas como miembros del canvas (doc 70)', () => {
   it('addExistingTables SIN opción: la tabla entra sola y la membresía de vistas se conserva', async () => {
     await useModelerStore.getState().addExistingTables(['t3']);
+    // Revisión doc 114: sin canvas medible la importada entra sin posición — entonces no se fija nada.
     expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t3'], viewIds: [] }, ['v1']);
     expect(viewsSvc.listViewsForTables).not.toHaveBeenCalled();
     expect(useModelerStore.getState().dirty).toBe(true);
@@ -98,7 +101,10 @@ describe('useModelerStore — vistas como miembros del canvas (doc 70)', () => {
     // quitar t1: v1 (sólo t1) queda huérfana; v2 sobrevive por t2
     useModelerStore.setState({ diagram: { ...JSON.parse(JSON.stringify(DIAGRAM)), subjectArea: { ...SA, viewIds: ['v1', 'v2'] } } as never });
     await useModelerStore.getState().removeTableFromArea('t1');
-    expect(struct.removeFromCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t1'], viewIds: ['v1'] }, ['v1', 'v2']);
+    // Revisión doc 114: t2 (sin posición) queda donde se ve y v2, que se re-anclaría a t2, también.
+    expect(struct.removeFromCanvas).toHaveBeenCalledWith('sa1', {
+      tableIds: ['t1'], viewIds: ['v1'], pins: { t2: gridSlot(1), v2: defaultViewPosition(gridSlot(0)) },
+    }, ['v1', 'v2']);
     await useUndoStore.getState().undoLast();
     // la lista de vistas es la de ESTE canvas al sacar la tabla (no la del diagrama al deshacer)
     expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t1'], viewIds: ['v1'], layout: {}, routes: {}, colors: { v1: '#92D050' } }, ['v1', 'v2']);
@@ -106,6 +112,6 @@ describe('useModelerStore — vistas como miembros del canvas (doc 70)', () => {
 
   it('removeTableFromArea sin huérfanas no toca la membresía de vistas', async () => {
     await useModelerStore.getState().removeTableFromArea('t2');   // v2 sobrevive por t1
-    expect(struct.removeFromCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t2'], viewIds: [] }, ['v1']);
+    expect(struct.removeFromCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t2'], viewIds: [], pins: { t1: gridSlot(0) } }, ['v1']);
   });
 });

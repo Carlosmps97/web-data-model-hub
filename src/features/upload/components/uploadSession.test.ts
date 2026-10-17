@@ -1,5 +1,6 @@
-// Doc 105 (ronda 3, R7-B) — la carga es de la versión donde se pidió: el
-// arrange de los canvases corre con su pin, y lo que sigue — vaciar la pila de
+// Doc 105 (ronda 3, R7-B) — la carga es de la versión donde se pidió: la
+// colocación de lo nuevo (doc 113: ya no el arrange completo) corre con su
+// pin, y lo que sigue — vaciar la pila de
 // Undo, refrescar el Explorer, avisar «Uploaded…» — no toca la sesión que se
 // abrió después. (Ronda 4: cerrar el popup ya no la corta; ver abajo.) Sin
 // DOM: se revisa el fuente de `upload()`.
@@ -12,15 +13,15 @@ const src = readFileSync(join(__dirname, 'UploadModal.tsx'), 'utf-8')
 const upload = /const upload = async \(\) => \{([\s\S]*?)\n {2}\};/.exec(src)?.[1] ?? '';
 
 describe('la carga no escribe ni avisa en otra versión (doc 105, R7-B)', () => {
-  it('toma el pin al empezar; el arrange corre con el de la VERSIÓN de la carga (ronda 7: A → B → A no salta canvases)', () => {
+  it('toma el pin al empezar; la colocación corre con el de la VERSIÓN de la carga (ronda 7: A → B → A no salta canvases)', () => {
     expect(upload).toMatch(/const pin = pinSession\(\);/);
-    expect(upload).toMatch(/arrangeCanvases\([^;]*\{ pin: inVersion \}\)/);
+    expect(upload).toMatch(/placeUploadedObjects\([^;]*\{ pin: inVersion \}\)/);
     expect(upload).toMatch(/const inVersion: SessionPin = \{\s*holds: \(\) => ours\(\) && sameUser\(\),/);
   });
   it('vaciar el Undo, refrescar y avisar sólo si sigue la sesión de la carga', () => {
     // la guarda que sigue al arrange (ronda 5: la de antes era la de `fail`;
     // ronda 6: por VERSIÓN — `ours()` —, no por la época de la sesión)
-    const arranged = upload.indexOf('await arrangeCanvases(');
+    const arranged = upload.indexOf('await placeUploadedObjects(');
     const gate = upload.indexOf('if (!ours()) {', arranged);
     expect(arranged).toBeGreaterThan(-1);
     expect(gate).toBeGreaterThan(arranged);
@@ -48,10 +49,10 @@ describe('cerrar el popup no corta una carga ya pedida (doc 105, ronda 4)', () =
   it('si la versión cambió a mitad, avisa qué canvases quedaron sin arreglar', () => {
     // ronda 6: la guarda es por VERSIÓN (`ours()`) y la lista, `missing` (fallidos + sin arreglar)
     expect(upload).toMatch(/const missing = \[\.\.\.failed, \.\.\.skipped\];/);
-    expect(upload).toMatch(/if \(!ours\(\)\) \{[^}]*pushToast\(notArrangedNotice\(missing, canvasName, \{ version: versionLabel \}\), 'err'\)/);
+    expect(upload).toMatch(/if \(!ours\(\)\) \{[^}]*pushToast\(notPlacedNotice\(missing, canvasName, \{ version: versionLabel \}\), 'err'\)/);
   });
   it('con el popup ya cerrado, los que fallaron se avisan con un toast', () => {
-    expect(upload).toMatch(/if \(!mounted\.current && missing\.length\) pushToast\(notArrangedNotice\(missing, canvasName\), 'err'\);/);
+    expect(upload).toMatch(/if \(!mounted\.current && missing\.length\) pushToast\(notPlacedNotice\(missing, canvasName\), 'err'\);/);
     expect(src).toMatch(/useEffect\(\(\) => \{ mounted\.current = true; return \(\) => \{ mounted\.current = false; \}; \}, \[\]\);/);
   });
 });

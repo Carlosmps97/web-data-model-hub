@@ -28,7 +28,7 @@
  * versión; los lotes de ids van por POST (fin del 431).
  * Loading → skeleton/placeholders; errors → sonner toast.
  */
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
 import {
@@ -50,6 +50,8 @@ import {
 } from '@/features/reporting';
 import SearchSelect from '@/features/modeler/components/SearchSelect';
 import { Button } from '@/components/ui';
+import { useFloating } from '@/components/ui/useFloating';
+import { clipRect, contentBounds, placeAnchored } from '@/lib/floating';
 import { listProjects } from '@/services/projects.service';
 import { getChangeset, listVersions } from '@/services/versioning.service';
 import { projectMeta, sortProjects } from '@/lib/projects';
@@ -249,11 +251,33 @@ interface MultiFilterProps {
   onToggle: (value: string) => void;
 }
 
+/** Alto máximo de la lista del filtro (el mismo 320 px de `.dmh-rep-menu`). */
+const FILTER_MENU_CAP = 320;
+
+/** Doc 113 §5: el popover del filtro con la regla única de flotantes — debajo
+ *  del botón; alineado dentro de la ventana o ARRIBA si no entra (y se queda de
+ *  ese lado mientras entre: no salta al filtrar), y sigue al botón con el
+ *  scroll. Si el botón sale de la vista de sus contenedores con scroll, el
+ *  popover se oculta (antes lo recortaba su panel; `placeAnchored`). `size`
+ *  re-ubica al filtrar la lista. */
+function FilterPopover({ anchor, size, children }: { anchor: RefObject<HTMLElement | null>; size: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const place = useFloating(ref, (box, viewport, prev) => {
+    const el = anchor.current;
+    if (!el) return null;
+    return placeAnchored(el.getBoundingClientRect(), clipRect(el), { width: box.width, height: Math.min(box.height, FILTER_MENU_CAP) },
+      contentBounds(viewport), { side: prev?.side ?? 'bottom', align: 'start', gap: 6 });
+  }, [anchor, size], { follow: true });
+  const maxHeight = Math.min(FILTER_MENU_CAP, typeof place.maxHeight === 'number' ? place.maxHeight : FILTER_MENU_CAP);
+  return <div ref={ref} className="dmh-rep-menu" role="listbox" style={{ ...place, maxHeight }}>{children}</div>;
+}
+
 function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFilterProps) {
   const [open, setOpen] = useState(false);
   // Doc 92 D2: filtro «contiene» (case-insensitive) sobre las opciones del popover.
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
   const needle = q.trim().toLowerCase();
   const visible = needle ? options.filter((o) => o.toLowerCase().includes(needle)) : options;
 
@@ -278,6 +302,7 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
   return (
     <div className="dmh-rep-filter" ref={ref}>
       <button
+        ref={btnRef}
         type="button"
         className={`dmh-rep-filter-btn${open ? ' is-open' : ''}`}
         onClick={() => setOpen((v) => !v)}
@@ -290,7 +315,7 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
         <ChevronDown className="chev" strokeWidth={1.7} aria-hidden />
       </button>
       {open && (
-        <div className="dmh-rep-menu" role="listbox">
+        <FilterPopover anchor={btnRef} size={visible.length}>
           <div className="dmh-rep-menu-search">
             <Search strokeWidth={1.7} aria-hidden />
             <input
@@ -324,7 +349,7 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
               );
             })
           )}
-        </div>
+        </FilterPopover>
       )}
     </div>
   );

@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { strFromU8, unzipSync } from 'fflate';
 
 // La orquestación se testea con los SERVICIOS mockeados (patrón
-// arrangeCanvases.test.ts) y los builders REALES (integración de verdad).
+// upload/placeUploaded.test.ts) y los builders REALES (integración de verdad).
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(),
   listFolders: vi.fn(),

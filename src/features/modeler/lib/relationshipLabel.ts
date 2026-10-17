@@ -5,6 +5,7 @@
  * y los paneles de Links.
  */
 import type { Relationship } from '@/services/governance.service';
+import { facetName, type Facet } from '@/lib/facets';
 
 /** Tope de ESCRITURA de cada frase (caja de texto de los popups). */
 export const PHRASE_MAX = 120;
@@ -137,4 +138,15 @@ export function phraseEdits(
     if (change) out[key] = change.value;
   }
   return Object.keys(out).length ? out : null;
+}
+
+/** Revisión doc 114 (H4): el aviso del role name aplicado sobre una columna del
+ *  hijo, con los nombres del modelo del canvas — salvo que el lógico no cambie
+ *  (sólo cambia el físico derivado): entonces nombra los físicos, también en el
+ *  lógico (decía «"X" renamed to "X"»). */
+export function roleAppliedText(
+  cur: { logicalName?: string | null; physicalName?: string | null }, name: string, physical: string, facet: Facet,
+): string {
+  const shown: Facet = name === cur.logicalName ? 'physical' : facet;
+  return `Role name applied: "${facetName(cur, shown)}" renamed to "${facetName({ logicalName: name, physicalName: physical }, shown)}"`;
 }

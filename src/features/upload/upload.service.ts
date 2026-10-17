@@ -105,7 +105,9 @@ export interface UploadReport {
   profile?: { id: string; name: string } | null;
   sheets?: UploadReportSheet[];
 }
-export interface UploadResult { affectedCanvasIds: string[]; counts: UploadSummary; }
+/** Doc 113 §1.3: `newMembers` = por canvas, las tablas y vistas que ENTRARON con
+ *  la carga (lo único que el front ubica; un backend anterior no lo manda). */
+export interface UploadResult { affectedCanvasIds: string[]; counts: UploadSummary; newMembers?: Record<string, string[]>; }
 export interface UploadJob {
   id: string;
   csId: string;

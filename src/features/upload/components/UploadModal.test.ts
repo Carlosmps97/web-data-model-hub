@@ -16,6 +16,9 @@
 // Ronda 7 (R18a): con otra versión abierta, la carga que termina BIEN también
 // se avisa (nombrando la versión); un POST sin respuesta se relee un par de
 // veces antes de darlo por no llegado; el arrange sigue la VERSIÓN (A → B → A).
+// Doc 113 §1.3: ya no hay arrange completo — se ubica SÓLO lo que entró a cada
+// canvas (`newMembers`), en el centro de lo que se ve si es el canvas abierto,
+// y se marca para pintarlo encima (`markFresh`).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import { fake, nextStates, resetFake, runEffects, textOf, unmount, walk } from '../../reporting/components/fakeReact.testutil';
@@ -32,7 +35,11 @@ const clearUndo = vi.fn();
 const undoState = { busy: false };
 vi.mock('@/store/useUndoStore', () => ({ useUndoStore: { getState: () => ({ clear: clearUndo, busy: undoState.busy }) } }));
 const refreshExplorer = vi.fn(async () => {});
-const mstate = { viewMode: 'logical', trees: {}, subjectAreas: [], refreshExplorer };
+const markFresh = vi.fn();
+const mstate = {
+  viewMode: 'logical', trees: {}, subjectAreas: [], refreshExplorer, markFresh,
+  activeSaId: null as string | null, diagram: null as { subjectArea: { id: string } } | null, flow: null,
+};
 vi.mock('@/store/useModelerStore', () => ({
   useModelerStore: Object.assign((sel: (s: unknown) => unknown) => sel(mstate), { getState: () => mstate }),
 }));
@@ -45,7 +52,8 @@ vi.mock('@/features/modeler/lib/sessionGuard', () => ({
   afterRevalidation: () => revalidation.run(),
 }));
 vi.mock('@/features/standards/standards.service', () => ({ getUdpDefs: vi.fn(async () => []) }));
-vi.mock('../arrangeCanvases', () => ({ arrangeCanvases: vi.fn(async () => ({ arranged: 1, failed: [], skipped: [] })) }));
+vi.mock('../placeUploaded', () => ({ placeUploadedObjects: vi.fn(async () => ({ placed: 1, failed: [], skipped: [] })) }));
+vi.mock('@/features/modeler/lib/canvasFocus', () => ({ canvasView: vi.fn(() => null) }));
 vi.mock('../upload.service', () => ({
   applyUpload: vi.fn(), createDefaultProfile: vi.fn(), discardUpload: vi.fn(async () => ({ deleted: true })),
   getProfileCatalog: vi.fn(async () => ({})), getUploadTargets: vi.fn(async () => ({ mode: 'none', candidates: [] })),
@@ -53,7 +61,8 @@ vi.mock('../upload.service', () => ({
 }));
 
 import { applyUpload, discardUpload, pollUploadJob } from '../upload.service';
-import { arrangeCanvases } from '../arrangeCanvases';
+import { placeUploadedObjects } from '../placeUploaded';
+import { canvasView } from '@/features/modeler/lib/canvasFocus';
 import UploadModal from './UploadModal';
 
 const JOB = { id: 'j1', status: 'validated', report: { errorCount: 0, warningCount: 0 }, progress: { phase: '', done: 0, total: 0 } };
@@ -92,6 +101,7 @@ const okToasts = () => vi.mocked(props.pushToast).mock.calls.filter(([, k]) => k
 
 beforeEach(() => {
   vi.clearAllMocks();
+  Object.assign(mstate, { activeSaId: null, diagram: null, flow: null });
   // Lo encolado con `…Once` que un test no consumió no pasa al siguiente.
   vi.mocked(applyUpload).mockReset();
   vi.mocked(pollUploadJob).mockReset();
@@ -141,7 +151,7 @@ describe('H2: la carga ya pedida y el Undo (doc 105, ronda 5)', () => {
     expect(phase()).toBe('unconfirmed');
     expect(error()).toBe("Couldn't confirm the result of the upload: The server didn't respond within 30s. It may still be applied — check the model before continuing.");
     expect(refreshExplorer).toHaveBeenCalled();
-    expect(arrangeCanvases).not.toHaveBeenCalled();
+    expect(placeUploadedObjects).not.toHaveBeenCalled();
     expect(clearUndo).toHaveBeenCalled();
   });
 
@@ -446,8 +456,8 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(phase()).toBe('arranging');                // ocupado: Done/ESC no lo cierran
     expect(okToasts()).toEqual([]);
     const shown = [...walk(rerender())].map(textOf).join('\n');
-    expect(shown).toContain('Updating the explorer');   // no «Arranging canvas 1 of 0»
-    expect(shown).not.toMatch(/Arranging canvas/);
+    expect(shown).toContain('Updating the explorer');   // no «Placing the new objects 1 of 0»
+    expect(shown).not.toMatch(/Placing the new objects/);
     refreshed();
     await ticks();
     expect(phase()).toBe('done');
@@ -601,7 +611,7 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
   });
 
   it('R18a-4 · con canvases sin arreglar: UN aviso (aplicada + lo que quedó sin arreglar)', async () => {
-    vi.mocked(arrangeCanvases).mockResolvedValueOnce({ arranged: 0, failed: ['sa9'], skipped: [] });
+    vi.mocked(placeUploadedObjects).mockResolvedValueOnce({ placed: 0, failed: ['sa9'], skipped: [] });
     const finish = await inFlight();
     unmount();
     pinState.holds = false;
@@ -610,7 +620,7 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
     await ticks();
     expect(okToasts()).toEqual([]);
     expect(errToasts()).toHaveLength(1);
-    expect(errToasts()[0]).toMatch(/^The upload to “v3” was applied, but 1 canvas wasn't auto-arranged/);
+    expect(errToasts()[0]).toMatch(/^The upload to “v3” was applied, but the new objects couldn't be placed on 1 canvas/);
   });
 
   it('R18a-4 · tras un logout (otro usuario): nada', async () => {
@@ -638,7 +648,7 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
 
   it('A → B → A: el arrange sigue la VERSIÓN — de vuelta en la misma no se salta canvases; con otra abierta, corta', async () => {
     let guard: { pin?: { holds: () => boolean; check: () => void } } = {};
-    vi.mocked(arrangeCanvases).mockImplementationOnce(async (_ids, _vm, _p, g) => { guard = g ?? {}; return { arranged: 1, failed: [], skipped: [] }; });
+    vi.mocked(placeUploadedObjects).mockImplementationOnce(async (_ids, _m, _f, _p, g) => { guard = g ?? {}; return { placed: 1, failed: [], skipped: [] }; });
     const finish = await inFlight();
     unmount();
     pinState.holds = false;                            // otra época de la sesión…
@@ -654,5 +664,78 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
     expect(guard.pin?.holds()).toBe(false);
     session.openMode = 'editing'; auth.user = { username: 'beto' };      // otro usuario: tampoco
     expect(guard.pin?.holds()).toBe(false);
+  });
+});
+
+// Doc 113 §1.3 — tras la carga NO se reacomoda el canvas: se ubica sólo lo que
+// entró a cada canvas (`newMembers` del backend), centrado en lo que el usuario
+// ve si es el canvas abierto, y queda marcado para pintarse encima.
+describe('doc 113: sólo lo nuevo, al centro de lo que se ve y encima', () => {
+  const MEMBERS = { sa1: ['t1', 'v1'], sa2: ['t2'] };
+  const DONE = { ...APPLIED, result: { affectedCanvasIds: ['sa1', 'sa2'], newMembers: MEMBERS, counts: {} } };
+  const VIEW = { center: { x: 5, y: 6 }, rect: { left: 0, top: 0, right: 10, bottom: 12 } };
+
+  async function uploadDone(result = DONE) {
+    const tree = mountValidated();
+    vi.mocked(applyUpload).mockResolvedValueOnce({ ...JOB, status: 'applying' } as never);
+    vi.mocked(pollUploadJob).mockResolvedValueOnce(result as never);
+    upload(tree);
+    await ticks(6);
+  }
+
+  it('pasa `newMembers` y el centro de lo que se ve del canvas ABIERTO (si la carga lo tocó)', async () => {
+    Object.assign(mstate, { activeSaId: 'sa1', diagram: { subjectArea: { id: 'sa1' } } });
+    vi.mocked(canvasView).mockReturnValueOnce(VIEW);
+    await uploadDone();
+    const call = vi.mocked(placeUploadedObjects).mock.calls[0];
+    expect(call[0]).toEqual(['sa1', 'sa2']);
+    expect(call[1]).toEqual(MEMBERS);
+    expect(call[2]).toEqual({ saId: 'sa1', point: { x: 5, y: 6 } });
+    expect(call[4]).toEqual({ pin: expect.objectContaining({ holds: expect.any(Function), check: expect.any(Function) }) });
+    // Revisión: el refresco reabre el canvas SIN selección (el panel de Properties
+    // se cierra): el centro se mide como quedará, con el panel cerrado.
+    expect(vi.mocked(canvasView).mock.calls[0][1]).toEqual({ panel: 'closes' });
+  });
+
+  it('si el canvas abierto no está entre los tocados, no hay foco (cada canvas va al centro de su contenido)', async () => {
+    Object.assign(mstate, { activeSaId: 'sa7', diagram: { subjectArea: { id: 'sa7' } } });
+    vi.mocked(canvasView).mockReturnValue(VIEW);
+    await uploadDone();
+    expect(vi.mocked(placeUploadedObjects).mock.calls[0][2]).toBeNull();
+    vi.mocked(canvasView).mockReset();
+    vi.mocked(canvasView).mockReturnValue(null);
+  });
+
+  it('marca lo ubicado para pintarlo encima (menos los canvases que fallaron), ANTES de refrescar', async () => {
+    vi.mocked(placeUploadedObjects).mockResolvedValueOnce({ placed: 1, failed: ['sa2'], skipped: [] });
+    const order: string[] = [];
+    markFresh.mockImplementationOnce(() => { order.push('fresh'); });
+    refreshExplorer.mockImplementationOnce(async () => { order.push('refresh'); });
+    await uploadDone();
+    expect(markFresh).toHaveBeenCalledWith({ sa1: ['t1', 'v1'] });
+    expect(order).toEqual(['fresh', 'refresh']);
+  });
+
+  it('el resumen final dice que lo existente no se movió; los que fallaron, que lo nuevo quedó debajo', async () => {
+    vi.mocked(placeUploadedObjects).mockResolvedValueOnce({ placed: 1, failed: ['sa2'], skipped: [] });
+    await uploadDone();
+    const shown = [...walk(rerender())].map(textOf).join('\n');
+    expect(shown).toContain('New objects placed on 1 canvas — existing blocks were not moved.');
+    expect(shown).toContain("Couldn't place the new objects on 1 canvas — they were left below the existing blocks.");
+    expect(shown).not.toMatch(/auto-arranged|Autoarrange/);
+  });
+
+  it('con otra versión abierta al terminar, no se marca nada en la sesión de ahora', async () => {
+    const tree = mountValidated();
+    vi.mocked(applyUpload).mockResolvedValueOnce({ ...JOB, status: 'applying' } as never);
+    let finish!: (j: unknown) => void;
+    vi.mocked(pollUploadJob).mockImplementationOnce(() => new Promise((r) => { finish = r; }) as never);
+    upload(tree);
+    await tick();
+    pinState.holds = false;
+    session.activeChangesetId = 'cs2';
+    finish(DONE);
+    await ticks(6);
+    expect(markFresh).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  cleanPhrase, labelMaxWidth, labelPlacement, phraseChange, phraseEdits, relationshipLabel, wrapLabel,
+  cleanPhrase, labelMaxWidth, labelPlacement, phraseChange, phraseEdits, relationshipLabel, roleAppliedText, wrapLabel,
 } from './relationshipLabel';
 
 describe('relationshipLabel (doc 98 — etiqueta del wire, formato Erwin)', () => {
@@ -158,5 +158,20 @@ describe('phraseEdits (Apply del popup: un solo guardado con lo que cambió)', (
 
   it('caja vaciada: graba null (borra la frase)', () => {
     expect(phraseEdits(rel, { parentToChildPhrase: '' })).toEqual({ parentToChildPhrase: null });
+  });
+});
+
+// Revisión doc 114 (H4): el aviso del role name en el modelo lógico decía
+// «"X" renamed to "X"» cuando sólo cambiaba el físico (lo escondía).
+describe('roleAppliedText (revisión doc 114)', () => {
+  const cur = { logicalName: 'Codigo Cliente', physicalName: 'COD_CLI_X' };
+  it('lógico: el nombre lógico de antes y el role name', () => {
+    expect(roleAppliedText(cur, 'Codigo Comprador', 'COD_COMPRADOR', 'logical')).toBe('Role name applied: "Codigo Cliente" renamed to "Codigo Comprador"');
+  });
+  it('físico: los físicos', () => {
+    expect(roleAppliedText(cur, 'Codigo Comprador', 'COD_COMPRADOR', 'physical')).toBe('Role name applied: "COD_CLI_X" renamed to "COD_COMPRADOR"');
+  });
+  it('mismo lógico (sólo cambia el físico): también en lógico nombra los físicos', () => {
+    expect(roleAppliedText(cur, 'Codigo Cliente', 'CODCLIENTE', 'logical')).toBe('Role name applied: "COD_CLI_X" renamed to "CODCLIENTE"');
   });
 });

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { useModelerStore } from '@/store/useModelerStore';
+import { facetName, facetNouns } from '@/lib/facets';
 import { pushUndo } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import {
@@ -38,6 +39,8 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
   draft: SubcatDraft; onClose: (created: boolean) => void; pushToast: (m: string, k?: 'err') => void;
 }) {
   const diagram = useModelerStore((s) => s.diagram);
+  // Doc 114: nombres del modelo del canvas (la subcategoría es del lógico).
+  const viewMode = useModelerStore((s) => s.viewMode);
   const [saving, setSaving] = useState(false);
   // null = chequeo global en vuelo; '' = libre; string = mensaje de bloqueo.
   const [blocked, setBlocked] = useState<string | null>(null);
@@ -72,6 +75,10 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
   // Regla Erwin (doc 53): una entidad NO es subtipo en dos grupos. El slice es
   // GLOBAL y draft-aware (effective) — cubre grupos visibles solo en otros
   // canvases. Best-effort: si el chequeo falla, no bloquea (el flujo sigue).
+  // Textos del bloqueo con el nombre del modelo del canvas (doc 114); como
+  // strings, el chequeo no se repite en cada recarga del diagrama.
+  const childShown = childTable ? facetName(childTable, viewMode) : draft.childTableId;
+  const childNoun = facetNouns(viewMode).a;
   useEffect(() => {
     let alive = true;
     setBlocked(null);
@@ -80,13 +87,13 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
         if (!alive) return;
         const hit = rels.find((r) => r.subcategory && r.childTableId === draft.childTableId);
         setBlocked(hit
-          ? `"${childTable?.logicalName ?? draft.childTableId}" is already a subtype in another subcategory group — a table can belong to only one.`
+          ? `"${childShown}" is already a subtype in another subcategory group — ${childNoun} can belong to only one.`
           : '');
       })
       .catch(() => { if (alive) setBlocked(''); });
     // StrictMode (doc 43): el cuerpo repone el guard; el cleanup solo lo apaga.
     return () => { alive = false; };
-  }, [draft.childTableId, childTable?.logicalName]);
+  }, [draft.childTableId, childShown, childNoun]);
 
   const confirm = async () => {
     setSaving(true);
@@ -101,7 +108,7 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
         const role = r.roleName.trim();
         if (r.target.kind === 'existing') {
           const c = colById.get(r.target.columnId);
-          if (!c) throw new Error('Child column no longer exists');
+          if (!c) throw new Error(`Child ${facetNouns(viewMode).member} no longer exists`);
           const rename = role && role !== c.logicalName
             ? { logicalName: role, physicalName: (await gov.physicalize(role)).physical }
             : undefined;
@@ -161,7 +168,7 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
       }
       useModelerStore.getState().markDirty();
       await useModelerStore.getState().reload();
-      pushToast(`Subcategory created — ${resolutions.length} key column(s) migrated`);
+      pushToast(`Subcategory created — ${resolutions.length} key ${facetNouns(useModelerStore.getState().viewMode).member}(s) migrated`);
       onClose(true);
     } catch (e) {
       await onError(e);
@@ -172,10 +179,10 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
     <Modal title="Create subcategory" icon="link" size="lg" onClose={() => { if (!saving) onClose(false); }}>
       <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="wk-pp-role parent">SUPERTYPE</span>
-        <span className="rd-mono">{parentTable?.physicalName ?? draft.parentTableId}</span>
+        <span className="rd-mono">{parentTable ? facetName(parentTable, viewMode) : draft.parentTableId}</span>
         <span style={{ color: 'var(--text-muted-3)' }}>→</span>
         <span className="wk-pp-role child">SUBTYPE</span>
-        <span className="rd-mono">{childTable?.physicalName ?? draft.childTableId}</span>
+        <span className="rd-mono">{childTable ? facetName(childTable, viewMode) : draft.childTableId}</span>
         <span style={{ marginLeft: 'auto', color: 'var(--muted)' }}>
           Subcategory (is-a) · 1:1 · logical model
         </span>
@@ -224,8 +231,8 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
       />
 
       <div className="wk-props-field">
-        <label>Key migration · the supertype's key becomes the subtype's key ({parentPks.length} column{parentPks.length === 1 ? '' : 's'}) · "Inherit" copies the parent's definition, UDPs and metadata</label>
-        <KeyMappingRows parentPks={parentPks} childCols={childCols} rows={rows} onChange={setRows} locked={saving} />
+        <label>Key migration · the supertype's key becomes the subtype's key ({parentPks.length} {parentPks.length === 1 ? facetNouns(viewMode).member : facetNouns(viewMode).members}) · "Inherit" copies the parent's definition, UDPs and metadata</label>
+        <KeyMappingRows parentPks={parentPks} childCols={childCols} rows={rows} onChange={setRows} locked={saving} mode={viewMode} />
       </div>
 
       <div className="m-foot">

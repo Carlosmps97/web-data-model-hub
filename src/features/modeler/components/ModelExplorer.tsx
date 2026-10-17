@@ -4,6 +4,8 @@ import {
   FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid, FileDown, FileText,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
+import { useFloating } from '@/components/ui/useFloating';
+import { placeNextTo, type RectLike } from '@/lib/floating';
 import { failureText, useModelerStore, buildProjectTree } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { FolderNode } from '@/store/useModelerStore';
@@ -38,7 +40,9 @@ const PAD_BASE = 6;           // padding-left base del primer nivel
 type NodeKind = 'project' | 'folder' | 'canvas';
 /** Filas del árbol: los nodos del explorer + la rama «Models» (doc 71). */
 type RowKind = NodeKind | 'branch';
-interface MenuState { kind: NodeKind; id: string; projectId: string; x: number; y: number; }
+/** `at`: el borde derecho de la fila / botón que lo abrió (doc 113 §5: el menú
+ *  se ubica con la regla única de flotantes, no con un tope fijo). */
+interface MenuState { kind: NodeKind; id: string; projectId: string; at: RectLike; }
 // `create` = input transitorio para crear (folder/canvas) dentro de un padre.
 interface CreateState { type: 'folder' | 'canvas'; projectId: string; parentFolderId: string | null; }
 interface DeleteState { kind: NodeKind; id: string; name: string; projectId: string; }
@@ -99,8 +103,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     setMenu(null);
     const project = projects.find((p) => p.id === projectId);
     if (!project) return;
-    // `nameOf` exige un MenuState completo; x/y son inocuos (solo lee ids).
-    const title = kind === 'project' ? project.name : nameOf({ kind, id, projectId, x: 0, y: 0 }, trees, projects);
+    const title = kind === 'project' ? project.name : nameOf({ kind, id, projectId }, trees, projects);
     exportCancelRef.current = { cancelled: false };
     setExportResult(null);
     setExportProg(null);
@@ -203,7 +206,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     // mostrar ahí: solo «Export HTML»). El guard viejo dejaba el click muerto.
     e.preventDefault(); e.stopPropagation();
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setMenu({ kind, id, projectId, x: r.right, y: r.bottom + 2 });
+    setMenu({ kind, id, projectId, at: { left: r.right, right: r.right, top: r.top, bottom: r.bottom } });
   };
 
   // ── Acciones del menú ──────────────────────────────────────────────────
@@ -433,7 +436,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
 // Busca el nombre del nodo del menú para el diálogo de borrado (en el cache
 // del árbol de SU proyecto — las listas planas alcanzan, sin recorrer nodos).
 function nameOf(
-  menu: MenuState,
+  menu: Pick<MenuState, 'kind' | 'id' | 'projectId'>,
   trees: Record<string, { folders: Folder[]; subjectAreas: SubjectArea[] }>,
   projects: Project[],
 ): string {
@@ -527,12 +530,16 @@ function ContextMenu({
   // con «Export HTML»; crear/renombrar/borrar siguen ocultos en modo visor.
   const showMutations = !readonly;
   const showCreate = showMutations && (menu.kind === 'project' || menu.kind === 'folder');
-  // Mantener el menú dentro del viewport horizontalmente.
-  const left = Math.min(menu.x, window.innerWidth - 200);
+  // Doc 113 §5: debajo de la fila (desde su borde derecho); ARRIBA si abajo no
+  // entra — en las últimas filas del Explorer se cortaba —, corrido para no
+  // salirse por la derecha y con scroll si no entra en ningún lado.
+  const ref = useRef<HTMLDivElement>(null);
+  const place = useFloating(ref, (box, bounds) => placeNextTo(menu.at, box, bounds, { side: 'bottom', align: 'start', gap: 2 }), [menu]);
   return (
     <div
+      ref={ref}
       className="rd-menu wk-exp-menu"
-      style={{ position: 'fixed', left, top: menu.y, zIndex: 1000 }}
+      style={{ ...place, zIndex: 1000 }}
       onMouseDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >

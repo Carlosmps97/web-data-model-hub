@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { toast } from 'sonner';
-import type { ReactFlowInstance } from '@xyflow/react';
+import type { Node, ReactFlowInstance } from '@xyflow/react';
 import * as mod from '@/features/modeler/services/modeler.service';
 // Estructura (projects/folders/canvases) changeset-aware (doc 16): en sesión
 // de edición registra al changeset; con changeset activo lee estado efectivo.
@@ -20,6 +20,12 @@ import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
 import { mirrorComplex } from '@/features/modeler/lib/facetTypes';
 import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
 import { orphanViewIds } from '@/features/modeler/lib/canvasViews';
+import { avoidStacking, blockSpot, canvasView, cascade, focusViewport, insideRect, paneSize, type FlowBox, type FlowViewport, type Point, type StackBox } from '@/features/modeler/lib/canvasFocus';
+import { dblClickShield } from '@/features/modeler/lib/dblClickShield';
+import { pinsForEntering, pinsForLeaving, seenAt } from '@/features/modeler/lib/placeNewMembers';
+import { FRESH_GENERATIONS } from '@/features/modeler/lib/nodeZ';
+import { tableLodSize, viewLodSize } from '@/features/modeler/lib/lodSize';
+import { viewSourceIds } from '@/features/modeler/lib/viewGraph';
 import { isPkFirst, orderColumns, persistReorder, pkFirstOrdinals, reorderPlan, sortByOrdinal } from '@/features/modeler/lib/columnOrder';
 import type { CanvasDropPlan } from '@/features/modeler/lib/canvasDrop';
 import { canvasClock, wholePoint, writtenSince } from '@/features/modeler/lib/canvasWrites';
@@ -183,7 +189,7 @@ interface ModelerState {
   setSelectedView: (id: string | null) => void;
   /** Click simple en una fila del canvas (doc 49): selecciona la tabla y abre
    *  DIRECTO el Properties de esa columna (antes navegaba el panel de tabla). */
-  focusColumnInPanel: (tableId: string, colId: string) => void;
+  focusColumnInPanel: (tableId: string, colId: string, opts?: { frame?: boolean }) => void;
   /** Doc 71: el buscador del Model (popup ⌘K) se abre desde el toolbar Y desde la
    *  cabecera del Explorer — el estado vive acá para que ambos lo compartan. */
   searchOpen: boolean;
@@ -268,8 +274,13 @@ interface ModelerState {
   setLod: (v: boolean) => void;
   lodLock: boolean;
   setLodLock: (v: boolean) => void;
-  /** Centra el canvas sobre la tabla (Find a table… del toolbar). No-op si no hay nodo. */
+  /** Centra el canvas sobre la tabla (Find a table… del toolbar). No-op si no hay nodo.
+   *  Doc 114: una tabla la selecciona y la enfoca con sus vistas (`frameTable`). */
   focusTable: (tableId: string) => void;
+  /** Doc 114 (piloto): acerca y centra la tabla con sus vistas en lo que se ve
+   *  del canvas (ya sin el panel de Properties) — después de que el panel se
+   *  monte. No-op sin el nodo o sin canvas. */
+  frameTable: (tableId: string, opts?: { afterClick?: boolean }) => void;
   /** Tabla (y opcionalmente columna, doc 70 §11) a centrar en cuanto MONTE el
    *  canvas destino (Finder cross-canvas / buscador del Model). Lo consume
    *  ModelerCanvas tras cargar el diagrama. */
@@ -289,6 +300,12 @@ interface ModelerState {
    *  nacía detrás de la tabla del centro y parecía no haberse creado) y lo
    *  limpia. */
   justAddedDrawingId: string | null;
+  /** Doc 113 §1.3: por canvas, las tandas de lo nuevo de esta sesión (lo que
+   *  trajo la carga Excel, lo creado, importado o pegado), de la más vieja a la
+   *  más nueva — el canvas las pinta ENCIMA de lo que ya había (sin moverlo),
+   *  cada una sobre las anteriores (`nodeZ`). */
+  freshNodes: Record<string, string[][]>;
+  markFresh: (byCanvas: Record<string, string[]>) => void;
   /** Crea una forma con tamaño default en el centro del viewport actual. */
   addDrawing: (type: DrawingType) => void;
   updateDrawing: (id: string, patch: Partial<Drawing>) => void;
@@ -361,7 +378,9 @@ interface ModelerState {
   /** Importa tablas EXISTENTES al canvas. Doc 70: la tabla entra SOLA — sus
    *  vistas se suman sólo con `withViews` (checkbox del modal); la membresía
    *  de vistas parte de `diagram.subjectArea.viewIds` (materializado). */
-  addExistingTables: (tableIds: string[], opts?: { withViews?: boolean }) => Promise<void>;
+  /** Doc 113 §4: `tables` (opcional) = las tablas importadas, para estimar el
+   *  tamaño de su bloque al ubicarlo en el centro de lo que se ve. */
+  addExistingTables: (tableIds: string[], opts?: { withViews?: boolean; tables?: CanonicalTable[] }) => Promise<void>;
   /** Doc 70: suma vistas (ya existentes en el modelo) a la membresía de ESTE
    *  canvas — tab Views → «Add to this canvas», alta desde Create view. */
   addViewsToCanvas: (viewIds: string[]) => Promise<void>;
@@ -379,6 +398,9 @@ interface ModelerState {
   createTableFromSources: (input: { logicalName: string; schema?: string; columns: (CanonicalColumn & { sourceTable?: string })[] }) => Promise<void>;
   setColumnTarget: (id: string | null) => void;
   setSelectedTable: (id: string | null) => void;
+  /** Doc 114: clic en una tabla del canvas — la selecciona y, si no lo estaba,
+   *  la enfoca con sus vistas (`frameTable`). */
+  selectTable: (id: string | null) => void;
   setSelectedEdge: (id: string | null) => void;
   removeTableFromArea: (tableId: string) => Promise<void>;
   /** Borra la tabla del MODELO con cascada versionada: vistas, relaciones,
@@ -418,6 +440,167 @@ const DRAWING_DEFAULT_COLOR = '#2E5BFF';
 // rAF con fallback: los tests del store corren en entorno node (sin DOM).
 const raf = (cb: () => void) =>
   (typeof requestAnimationFrame === 'function' ? requestAnimationFrame(cb) : setTimeout(cb, 16));
+
+/** Doc 113 §4: dónde nace el bloque de una tabla nueva — centrado en lo que el
+ *  usuario ve del canvas (la acción la selecciona: se descuenta el panel de
+ *  Properties que se abre). Antes entraba SIN posición y el canvas la ubicaba
+ *  por su número de orden: en modelos grandes, lejísimos. Con su ancho: el
+ *  llamador la marca EN VUELO (`holdSpots`) hasta que se pinte. null sin canvas
+ *  montado (entra sin posición, como antes). */
+function newTableSpot(
+  rf: ReactFlowInstance | null, saId: string, table: Pick<CanonicalTable, 'physicalName' | 'logicalName' | 'schema'>,
+  columns: Pick<CanonicalColumn, 'physicalName' | 'logicalName' | 'dataType' | 'isPrimaryKey'>[], facet: 'logical' | 'physical',
+): (Point & { w: number }) | null {
+  const view = canvasView(rf, { panel: 'opens' });
+  if (!view) return null;
+  const size = tableLodSize(table as CanonicalTable, columns as CanonicalColumn[], facet);
+  const spot = blockSpot(view, { w: size.w, h: size.h });
+  const others = nodeBoxes(rf), recent = recentBoxes(rf, saId);
+  const p = avoidStacking(spot, size, others, recent, view.rect) ?? cascade(spot, size, others, recent);
+  return { x: p.x, y: p.y, w: size.w };
+}
+
+/** Revisión doc 113: dónde están los bloques del canvas (tablas y vistas; los
+ *  dibujos no cuentan) — para que un alta seguida en el mismo centro baje en
+ *  cascada en vez de tapar entera a la anterior (`avoidStacking`). */
+function nodeBoxes(rf: ReactFlowInstance | null): (StackBox & { id: string })[] {
+  return (rf?.getNodes?.() ?? [])
+    .filter((n) => n.type === 'table' || n.type === 'view')
+    .map((n) => ({ id: n.id, x: n.position.x, y: n.position.y, w: n.measured?.width ?? (typeof n.width === 'number' ? n.width : undefined) }));
+}
+
+/** Doc 114: el encuadre en curso — uno nuevo (otra tabla) deja sin efecto la
+ *  corrección del anterior. */
+let _frameSeq = 0;
+/** Revisión 2 doc 114: el `seq` del encuadre que está animando (0: ninguno). */
+let _frameLive = 0;
+/** Revisión 2 doc 114 (H3): la tabla que se seleccionó con una herramienta armada
+ *  (sin encuadrar) — desarmada, otro clic en ella la encuadra. */
+let _unframed: string | null = null;
+/** Duración de la animación del encuadre. Revisión 2: trayecto directo
+ *  (`linear`) — cortado a mitad de camino nunca queda más lejos que al principio
+ *  (la interpolación «suave» de d3 se aleja en el medio de un trayecto largo). */
+const FRAME_MS = 400;
+/** Revisión 2 doc 114 (hallazgo 1): la promesa de `setViewport` con duración sólo
+ *  se resuelve al FINAL de la transición de d3 — si el usuario la interrumpe
+ *  (rueda, paneo, un clic) nunca: quien espera el final espera también esto. */
+const settle = (p: Promise<unknown>, ms: number) =>
+  Promise.race([p, new Promise<void>((r) => { setTimeout(r, ms); })]);
+/** Revisión 2 doc 114 (hallazgo 3): el usuario hace otra cosa en el canvas — un
+ *  menú contextual abierto o una herramienta armada — y el encuadre no la pisa:
+ *  no arranca ni corrige (si se arma una herramienta a mitad de la animación,
+ *  ésta termina — cortada, quedaba en un zoom intermedio —; un menú la corta). */
+const busyCanvas = (st: { colMenu: unknown; relPreset: unknown; subcatArmed: boolean }) =>
+  !!st.colMenu || !!st.relPreset || st.subcatArmed;
+/** Mismo viewport (a medio píxel y una milésima de zoom). */
+const sameViewport = (a: FlowViewport, b: FlowViewport) =>
+  Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.zoom - b.zoom) < 0.001;
+
+/** Revisión 2 doc 114: corta el encuadre que está animando, donde esté (un
+ *  setViewport inmediato interrumpe la transición de d3-zoom). */
+function cutFrame(flow: ReactFlowInstance | null): void {
+  if (!_frameLive) return;
+  _frameLive = 0;
+  ++_frameSeq;
+  if (flow) void flow.setViewport(flow.getViewport(), { duration: 0 });
+}
+
+/** Revisión 2 doc 114 (hallazgo 3): el usuario empezó a arrastrar un bloque — el
+ *  encuadre en curso se detiene (si no, el canvas se movía bajo el arrastre). */
+export function stopFraming(): void {
+  cutFrame(useModelerStore.getState().flow);
+}
+
+/** Doc 114: la caja de un nodo del canvas (flujo) — su tamaño medido o, si
+ *  todavía no se pintó (`onlyRenderVisibleElements`), el estimado LOD. */
+function flowBox(n: Node, facet: 'logical' | 'physical'): FlowBox {
+  const w = n.measured?.width ?? (typeof n.width === 'number' ? n.width : undefined);
+  const h = n.measured?.height ?? (typeof n.height === 'number' ? n.height : undefined);
+  if (w !== undefined && h !== undefined) return { x: n.position.x, y: n.position.y, w, h };
+  const d = n.data as { table?: CanonicalTable; columns?: CanonicalColumn[]; view?: View; colTypes?: Record<string, string> };
+  const est = n.type === 'view' && d.view?.sources ? viewLodSize(d.view, d.colTypes ?? {})
+    : d.table ? tableLodSize(d.table, d.columns ?? [], facet) : { w: 240, h: 140 };
+  return { x: n.position.x, y: n.position.y, w: w ?? est.w, h: h ?? est.h };
+}
+
+/** Ronda 2 (revisión doc 113): altas EN VUELO por canvas — su bloque todavía
+ *  no se pinta (la escritura y la recarga tardan), pero la siguiente alta (dos
+ *  «Add» del modal casi a la vez) ya debe esquivarlo. El alta las suelta al
+ *  terminar, también si falla. */
+const _inFlight = new Map<string, StackBox[]>();
+function holdSpots(saId: string, boxes: StackBox[]): () => void {
+  if (!boxes.length) return () => {};
+  _inFlight.set(saId, [...(_inFlight.get(saId) ?? []), ...boxes]);
+  return () => {
+    const rest = (_inFlight.get(saId) ?? []).filter((b) => !boxes.includes(b));
+    if (rest.length) _inFlight.set(saId, rest);
+    else _inFlight.delete(saId);
+  };
+}
+
+/** Doc 114: lo existente SIN posición guardada que el alta de las tablas
+ *  `entering` correría de casilla (el canvas lo pinta por número de orden, por
+ *  nombre), fijado donde se ve — sobre el diagrama de ANTES del alta. Viaja en
+ *  la misma escritura (`addToCanvas` sólo lo aplica a quien sigue sin posición).
+ *  Sin el diagrama de ese canvas, nada. */
+function pinsFor(saId: string, entering: string[]): { pins?: Record<string, Point> } {
+  const dia = useModelerStore.getState().diagram;
+  if (!dia || dia.subjectArea.id !== saId) return {};
+  // Revisión doc 114: lo que ya está en el diagrama (entró por otro camino
+  // mientras el alta esperaba) no cuenta como «entra».
+  const present = new Set(dia.tables.map((t) => t.id));
+  const { pins } = pinsForEntering(dia, entering.filter((id) => !present.has(id)));
+  return Object.keys(pins).length ? { pins } : {};
+}
+
+/** Revisión doc 114: al sacar o borrar tablas del canvas abierto, lo que sigue
+ *  sin posición queda donde se ve (`pinsForLeaving`) — sin esto, un Undo en
+ *  cadena (sacar → crear → deshacer → deshacer) dejaba una tabla tapando a otra.
+ *  Ronda 2 (R2-1): al borrar, también en los otros canvases de la tabla, sobre
+ *  el diagrama leído de cada uno (`other`, `diagramsBefore`). */
+function pinsOut(saId: string, leaving: string[], other?: Diagram): { pins?: Record<string, Point> } {
+  const open = useModelerStore.getState().diagram;
+  const dia = open?.subjectArea.id === saId ? open : other?.subjectArea.id === saId ? other : null;
+  if (!dia) return {};
+  const pins = pinsForLeaving(dia, leaving);
+  return Object.keys(pins).length ? { pins } : {};
+}
+
+/** Revisión 2 doc 114 (R2-1): el diagrama de ANTES de cada canvas de `canvasIds`
+ *  que no es el abierto — al borrar una tabla, ahí también queda donde se ve lo
+ *  que sigue sin posición, y el Undo la repone donde se veía. Una lectura por
+ *  canvas; la que falla queda sin diagrama (ese canvas, como antes: una posición
+ *  no frena el borrado). */
+async function diagramsBefore(canvasIds: string[]): Promise<Map<string, Diagram>> {
+  const open = useModelerStore.getState().diagram?.subjectArea.id;
+  const out = new Map<string, Diagram>();
+  await Promise.all(canvasIds.filter((id) => id !== open).map(async (id) => {
+    try { out.set(id, await mod.loadDiagram(id)); } catch { /* sin diagrama: como antes */ }
+  }));
+  return out;
+}
+
+/** Ronda 2: lo RECIENTE del canvas para la cascada — lo nuevo de esta sesión
+ *  (`freshNodes`) donde se pinta (o, si todavía no se pintó, donde lo dejó la
+ *  recarga) y lo que está en vuelo. Una CTAS más alta no tapa entera a la
+ *  tabla que se acaba de crear. Ronda 3: por su posición guardada sólo cuenta
+ *  lo que se dibuja en esta faceta (las vistas, sólo en Physical). */
+function recentBoxes(rf: ReactFlowInstance | null, saId: string): StackBox[] {
+  const st = useModelerStore.getState();
+  const drawn = new Map(nodeBoxes(rf).map((b) => [b.id, b]));
+  const dia = st.diagram?.subjectArea.id === saId ? st.diagram : null;
+  const layout = dia?.subjectArea.layout ?? {};
+  const drawable = new Set([
+    ...(dia?.tables ?? []).map((t) => t.id),
+    ...(st.viewMode === 'physical' ? (dia?.views ?? []).map((v) => v.id) : []),
+  ]);
+  const out: StackBox[] = [];
+  for (const id of new Set((st.freshNodes[saId] ?? []).flat())) {
+    const box = drawn.get(id) ?? (drawable.has(id) ? layout[id] : undefined);
+    if (box) out.push(box);
+  }
+  return [...out, ...(_inFlight.get(saId) ?? [])];
+}
 
 // Debounce de la persistencia de drawings (PUT del array completo).
 let _drawingsTimer: ReturnType<typeof setTimeout> | null = null;
@@ -690,23 +873,37 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           if (e instanceof Error && /already exists/i.test(e.message)) continue;
           throw e;
         }
-        // Alta en el canvas + bloque al costado del original (si está acá);
-        // si no, al centro del viewport. Doc 100: en UNA escritura, dentro de
-        // la cola del canvas.
+        // Alta en el canvas + bloque al costado del original si está A LA VISTA;
+        // si no (o no está en este canvas), en el centro de lo que se ve (doc
+        // 113 §4: antes caía junto al original aunque estuviera lejísimos).
+        // Doc 100: en UNA escritura, dentro de la cola del canvas.
         const rf = get().flow;
         const src = rf?.getNode(clip.table.id);
-        const pos = src
-          ? { x: Math.round(src.position.x + 36), y: Math.round(src.position.y + 36) }
-          : rf
-            ? (() => { const c = rf.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 }); return { x: Math.round(c.x), y: Math.round(c.y) }; })()
-            : { x: 120, y: 120 };
-        pin.check();
-        await struct.addToCanvas(saId, { tableIds: [id], layout: { [id]: pos } });
-        await get().reload();
+        const beside = src ? { x: Math.round(src.position.x + 36), y: Math.round(src.position.y + 36) } : null;
+        const view = canvasView(rf, { panel: 'opens' });
+        const size = tableLodSize({ ...clip.table, physicalName, logicalName }, clip.cols, get().viewMode);
+        const centered = view ? blockSpot(view, size) : null;
+        // «A la vista» = su CABECERA entera (ancho × 32 px) dentro de lo que se ve
+        // (revisión: con sólo la esquina, la copia podía quedar a 1 px de la vista).
+        const visible = (p: Point) => !view || (insideRect(p, view.rect) && insideRect({ x: p.x + size.w, y: p.y + 32 }, view.rect));
+        // Dos pegados seguidos no quedan uno encima del otro (cascada); ronda 2:
+        // si la cascada la sacaría de la vista, va al centro de lo que se ve.
+        const others = nodeBoxes(rf);
+        const recent = recentBoxes(rf, saId);
+        const free = (p: Point) => avoidStacking(p, size, others, recent, view?.rect);
+        const fallback = centered ?? beside ?? { x: 120, y: 120 };
+        const pos = (beside && visible(beside) ? free(beside) : null) ?? free(fallback) ?? cascade(fallback, size, others, recent);
+        const release = holdSpots(saId, [{ ...pos, w: size.w }]);
+        try {
+          pin.check();
+          await struct.addToCanvas(saId, { tableIds: [id], layout: { [id]: pos }, ...pinsFor(saId, [id]) });
+          await get().reload();
+        } finally { release(); }
         // Doc 105 (R7-E): no selecciona en otra sesión; ronda 4 (6c): tampoco
         // devuelve el nombre — el llamador avisaría «pasted as» en la nueva.
         if (!pin.holds()) return null;
         set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible
+        get().markFresh({ [saId]: [id] });   // revisión doc 113: y encima de lo demás aunque se deseleccione
         // Ronda 5 (R15-H9): el nombre de la copia que se muestra, según la faceta —
         // ronda 6 (R17a-11): también en la etiqueta del Undo.
         const shown = get().viewMode === 'logical' ? logicalName || physicalName : physicalName;
@@ -727,8 +924,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   setSelectedColumn: (id) => set({ selectedColumnId: id }),
   // Doc 61: click en un nodo VISTA abre su panel; cierra los demás contextos.
   setSelectedView: (id) => set({ selectedViewId: id, selectedTableId: null, selectedEdgeId: null, selectedColumnId: null }),
-  focusColumnInPanel: (tableId, colId) =>
-    set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: colId, selectedViewId: null }),
+  focusColumnInPanel: (tableId, colId, opts) => {
+    // Doc 114: una columna de OTRA tabla también la selecciona — se enfoca
+    // (revisión 2: salvo que quien llama ya la encuadró, como el Locate).
+    const changed = tableId !== get().selectedTableId;
+    set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: colId, selectedViewId: null });
+    if (changed && opts?.frame !== false) get().frameTable(tableId, { afterClick: true });
+  },
   flow: null,
   setFlow: (rf) => set({ flow: rf }),
   viewerLayout: {},
@@ -871,18 +1073,44 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const exists = get().diagram?.columns.some((c) => c.id === colId && c.tableId === tableId);
     if (!exists) return;
     get().toggleColSelect(tableId, colId, 'single');
-    get().focusColumnInPanel(tableId, colId);
+    // Revisión 2 doc 114 (hallazgo 5): focusTable ya la encuadró (en el visor no
+    // la selecciona: sin esto se encuadraba otra vez, tras la espera de un clic).
+    get().focusColumnInPanel(tableId, colId, { frame: false });
   },
   drawings: [],
   justAddedDrawingId: null,
+  freshNodes: {},
+  markFresh: (byCanvas) => {
+    // Revisión doc 113: cada llamada es una TANDA encima de las anteriores del
+    // canvas — una segunda carga, o una tabla creada después, queda sobre lo de
+    // la primera, que sigue sobre lo que ya había (ronda 2: antes la reemplazaba
+    // y lo de la carga quedaba empatado con lo existente). Un bloque que vuelve
+    // a marcarse sube a la tanda nueva; pasadas FRESH_GENERATIONS se funden las
+    // dos más viejas (ronda 3: descartarla devolvía lo de la carga a lo existente).
+    const next = { ...get().freshNodes };
+    let changed = false;
+    for (const [saId, ids] of Object.entries(byCanvas)) {
+      const gen = [...new Set(ids)];
+      if (!gen.length) continue;
+      const taken = new Set(gen);
+      const gens = [...(next[saId] ?? []).map((g) => g.filter((id) => !taken.has(id))).filter((g) => g.length), gen];
+      while (gens.length > FRESH_GENERATIONS) gens.splice(0, 2, [...gens[0], ...gens[1]]);
+      next[saId] = gens;
+      changed = true;
+    }
+    if (changed) set({ freshNodes: next });
+  },
   addDrawing: (type) => {
     const saId = get().activeSaId; if (!saId) return;
     const rf = get().flow;
     const { w, h } = DRAWING_DEFAULT_SIZE[type];
-    // Centro del viewport actual en coordenadas de flujo (cae al origen sin instancia).
-    const c = rf
-      ? rf.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
-      : { x: 120, y: 120 };
+    // Centro de lo que se ve del canvas, en coordenadas de flujo (doc 113 §4:
+    // el mismo cálculo que la tabla nueva — antes, el centro de la VENTANA,
+    // corrido por el Explorer y el toolbar). Sin canvas montado, cerca del origen.
+    const c = canvasView(rf)?.center
+      ?? (rf && typeof window !== 'undefined'
+        ? rf.screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 })
+        : { x: 120, y: 120 });
     // Doc 109: un texto nuevo nace con el modelo de formato (fuente, color del
     // texto, sin borde ni relleno); las formas, con su borde de siempre.
     const drawing: Drawing = type === 'text'
@@ -970,6 +1198,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (node.type !== 'view' && useSessionStore.getState().openMode !== 'readonly') {
       set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
     }
+    // Doc 114: una tabla se enfoca con sus vistas, como al seleccionarla con un clic.
+    if (node.type === 'table') { get().frameTable(tableId); return; }
     // Centrar DESPUÉS de que el layout se asiente (doble rAF). setCenter en
     // vez de fitView: con onlyRenderVisibleElements un nodo fuera del viewport
     // no está montado ⇒ no está MEDIDO ⇒ fitView (que usa node.measured) no
@@ -982,6 +1212,56 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const zoom = Math.min(1.2, Math.max(0.8, rf.getZoom()));
       void rf.setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom, duration: 420 });
     }));
+  },
+  frameTable: (tableId, opts) => {
+    const seq = ++_frameSeq;
+    // Revisión 2 doc 114: el 2.º clic de un doble clic — también uno lento — ya
+    // no llega a nada (lo ataja el escudo del canvas): el encuadre no espera.
+    if (opts?.afterClick) dblClickShield.arm();
+    const selected = get().selectedTableId === tableId;
+    const target = (area: { width: number; height: number } | null): FlowViewport | null => {
+      const rf = get().flow;
+      const node = rf?.getNode(tableId);
+      if (!rf || !area || node?.type !== 'table') return null;
+      const facet = get().viewMode;
+      const views = rf.getNodes().filter((n) => n.type === 'view'
+        && viewSourceIds((n.data as { view?: View }).view ?? ({} as View)).includes(tableId));
+      return focusViewport(flowBox(node, facet), views.map((v) => flowBox(v, facet)), area, rf.getZoom());
+    };
+    // La tabla dejó de estar seleccionada (se cerró el panel, se eligió otra cosa).
+    const dropped = () => selected && get().selectedTableId !== tableId;
+    const start = () => {
+      const area = paneSize();
+      const first = target(area);
+      const rf = get().flow;
+      if (!first || !rf || seq !== _frameSeq || dropped() || busyCanvas(get())
+        || rf.getNodes().some((n) => n.dragging)) return;
+      // Un encuadre anterior que todavía anima lo interrumpe éste (la transición
+      // nueva de d3-zoom corta la vigente).
+      _frameLive = seq;
+      // Revisión doc 114: deseleccionada con la animación en curso, se corta donde
+      // está. Ronda 2: también si se abre un menú contextual (queda junto a su
+      // tabla); y la suscripción se suelta siempre (`finish`, `settle`).
+      const unsub = useModelerStore.subscribe((st) => {
+        if (_frameLive !== seq) { unsub(); return; }
+        if ((selected && st.selectedTableId !== tableId) || st.colMenu) { unsub(); cutFrame(st.flow); }
+      });
+      const finish = () => { unsub(); if (_frameLive === seq) _frameLive = 0; };
+      void settle(rf.setViewport(first, { duration: FRAME_MS, interpolate: 'linear' }), FRAME_MS + 300).then(() => raf(() => raf(() => {
+        // Lejos, el canvas dibuja cajas compactas (LOD) de otro tamaño que el
+        // detalle: al acercarse cambian y el grupo quedaba corrido. Se corrige
+        // con lo medido — salvo que el usuario ya movió el canvas, eligió otra
+        // cosa o cerró el panel (revisión: el área cambió).
+        const now = get().flow;
+        const area2 = paneSize();
+        const fixed = now && seq === _frameSeq && _frameLive === seq && sameViewport(now.getViewport(), first) && !dropped()
+          && !busyCanvas(get()) && area2 && area && area2.width === area.width && area2.height === area.height ? target(area2) : null;
+        if (now && fixed && !sameViewport(fixed, first)) void settle(now.setViewport(fixed, { duration: 150, interpolate: 'linear' }), 150 + 300).then(finish);
+        else finish();
+      })));
+    };
+    // Después de que el panel de Properties se monte y el canvas se achique.
+    raf(() => raf(start));
   },
   openCanvasAndFocus: async (canvasId, projectId, tableId, colId, label) => {
     // Ya abierto → el nodo está montado, centrar directo (sin pending).
@@ -1498,14 +1778,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       ...(description ? { description } : {}),
       ...(udpValues ? { udpValues } : {}),
     });
-    // referenciar la nueva tabla en la Subject Area
-    pin.check();
-    await struct.addToCanvas(saId, { tableIds: [id] });
-    await get().reload();
+    // referenciar la nueva tabla en la Subject Area — doc 113 §4: CON su
+    // posición, en el centro de lo que se ve (misma escritura).
+    const spot = newTableSpot(get().flow, saId, { physicalName: physical, logicalName: input.logicalName, schema }, [], get().viewMode);
+    const release = holdSpots(saId, spot ? [spot] : []);
+    try {
+      pin.check();
+      // Revisión doc 114: sin posición para la nueva, no se fija nada (caería en
+      // su casilla por número de orden, encima de una tabla fijada).
+      await struct.addToCanvas(saId, { tableIds: [id], ...(spot ? { layout: { [id]: { x: spot.x, y: spot.y } }, ...pinsFor(saId, [id]) } : {}) });
+      await get().reload();
+    } finally { release(); }
     if (!pin.holds()) return;   // doc 105 (R7-E): lo que sigue es de la sesión de la acción
     // La tabla nueva queda SELECCIONADA → sube al frente (zIndex) y no cae oculta
-    // detrás de un bloque que ya estaba en el canvas (pedido owner).
+    // detrás de un bloque que ya estaba en el canvas (pedido owner). Doc 113
+    // (revisión): y sigue encima de lo demás aunque se deseleccione.
     set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
+    get().markFresh({ [saId]: [id] });
     // Undo (doc 50): tabla recién creada — la cascada del delete es trivial.
     pushUndo(`Create table ${physical}`, () => get().deleteTable(id), pin);
   },
@@ -1659,15 +1948,47 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const withViews = opts?.withViews
       ? (await viewsSvc.listViewsForTables(tableIds).catch(() => { viewsUnread = true; return [] as View[]; })).map((v) => v.id)
       : [];
+    // Doc 113 §4: las importadas nacen en el centro de lo que se ve (antes,
+    // sin posición: el canvas las ubicaba por número de orden, lejísimos en un
+    // modelo grande); varias a la vez, en cascada de 36 px. La que ya estaba en
+    // el canvas no se mueve (el servicio sólo suma lo que entra y su posición
+    // sólo cuenta para lo que entra).
+    const view = canvasView(get().flow, { panel: 'opens' });
+    const known = new Map((opts?.tables ?? []).map((t) => [t.id, t]));
+    const inCanvas = new Set(dia.subjectArea.tableIds ?? []);
+    const layout: Record<string, Point> = {};
+    const held: StackBox[] = [];
+    if (view) {
+      const others = nodeBoxes(get().flow);
+      const recent = recentBoxes(get().flow, saId);
+      for (const tid of tableIds.filter((id) => !inCanvas.has(id))) {
+        const t = known.get(tid);
+        const size = tableLodSize({ physicalName: t?.physicalName ?? '', logicalName: t?.logicalName ?? '', schema: t?.schema } as CanonicalTable, [], get().viewMode);
+        const centered = blockSpot(view, { w: size.w, h: size.h });
+        const spot = avoidStacking(centered, size, others, recent, view.rect) ?? cascade(centered, size, others, recent);
+        layout[tid] = spot;
+        recent.push({ ...spot, w: size.w });   // la siguiente del lote la esquiva
+        held.push({ ...spot, w: size.w });
+      }
+    }
     // Doc 100: la lista completa la arma el servicio DENTRO de la cola del
     // canvas y devuelve lo REALMENTE agregado: la inversa del Undo no debe
     // sacar del canvas una tabla o vista que ya vivía acá.
-    pin.check();
-    const added = await struct.addToCanvas(saId, { tableIds, viewIds: withViews }, shown);
-    await get().reload();
+    const release = holdSpots(saId, held);
+    let added: Required<struct.CanvasMembers>;
+    try {
+      pin.check();
+      added = await struct.addToCanvas(saId, {
+        tableIds, viewIds: withViews,
+        ...(Object.keys(layout).length ? { layout, ...pinsFor(saId, tableIds.filter((tid) => !inCanvas.has(tid))) } : {}),
+      }, shown);
+      await get().reload();
+    } finally { release(); }
     if (!pin.holds()) return;   // doc 105 (R7-E): lo que sigue es de la sesión de la acción
     // Selecciona la primera importada → al frente (zIndex) y visible (owner).
     set({ selectedTableId: tableIds[0], selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
+    // Doc 113 (revisión): lo que ENTRÓ queda encima de lo demás (lo que ya estaba, no).
+    get().markFresh({ [saId]: [...added.tableIds, ...added.viewIds] });
     if (viewsUnread) {
       toast.warning(tableIds.length === 1
         ? "The table was imported, but its views couldn't be loaded: add them from its Views tab (Properties)."
@@ -1814,16 +2135,32 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }, { kind: 'ctas', ...(c.sourceTable ? { sourceTable: c.sourceTable } : {}), sourceColumn: c.physicalName });
       }),
     ]);
-    pin.check();
-    await struct.addToCanvas(saId, { tableIds: [id] });
-    await get().reload();
+    // Doc 113 §4: en el centro de lo que se ve, con el tamaño de sus columnas.
+    const spot = newTableSpot(get().flow, saId, { physicalName: physical, logicalName, schema: schema?.trim() || undefined }, columns, get().viewMode);
+    const release = holdSpots(saId, spot ? [spot] : []);
+    try {
+      pin.check();
+      await struct.addToCanvas(saId, { tableIds: [id], ...(spot ? { layout: { [id]: { x: spot.x, y: spot.y } }, ...pinsFor(saId, [id]) } : {}) });
+      await get().reload();
+    } finally { release(); }
     if (!pin.holds()) return;   // doc 105 (R7-E): no selecciona en otra sesión
     set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible (owner)
+    get().markFresh({ [saId]: [id] });   // doc 113 (revisión): encima aunque se deseleccione
     pushUndo(`Create table ${physical}`, () => get().deleteTable(id), pin);
   }),
   setColumnTarget: (id: string | null) => set({ columnTarget: id }),
   // Seleccionar tabla o edge cambia de contexto: cierra el panel de columna.
   setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null }),
+  selectTable: (id) => {
+    const changed = id !== get().selectedTableId;
+    get().setSelectedTable(id);
+    if (!id) { _unframed = null; return; }
+    // Revisión doc 114 (H3): con la herramienta de relación o subcategoría
+    // armada, el canvas no se mueve (rompía el trazo clic en el padre → clic en
+    // el hijo). Ronda 2: desarmada, otro clic en esa tabla la encuadra.
+    if (get().relPreset || get().subcatArmed) { if (changed) _unframed = id; return; }
+    if (changed || _unframed === id) { _unframed = null; get().frameTable(id, { afterClick: true }); }
+  },
   setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedTableId: null, selectedColumnId: null, selectedViewId: null }),
   removeTableFromArea: async (tableId) => {
     get().markDirty();
@@ -1853,6 +2190,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const shown = d?.subjectArea.viewIds;
     const out = await struct.removeFromCanvas(saId, {
       tableIds: [tableId], viewIds: orphans, ...(Object.keys(droppedRoutes).length ? { dropRouteIds: wireIds } : {}),
+      ...pinsOut(saId, [tableId]),
     }, shown);
     // Doc 100: la inversa es UNA escritura (antes hasta 4: tablas, vistas,
     // posiciones y trazos, cada una leyendo el canvas por su cuenta). Las vistas
@@ -1890,6 +2228,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     let views: View[], rels: gov.Relationship[], cols: CanonicalColumn[], usage: gov.TableUsageRow[];
     let viewCanvasIds: string[];
     let viewsBack: Map<string, ListedViews>;
+    let others: Map<string, Diagram>;
     const fkClearedPre: CanonicalColumn[] = [];
     try {
       // vistas que la usan (cualquier fuente: tableId o sourceTableIds)
@@ -1908,7 +2247,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // Doc 105 (F4, doc 100 P8): el lote de abajo saca cada vista borrada de
       // todo canvas que la lista (cascada del backend, doc 88 §4): ANTES se
       // anota qué lista cada canvas y dónde, para que el Undo las reponga.
-      viewsBack = await listedViewsBy([...usage.map((u) => u.canvasId), ...viewCanvasIds], views.map((v) => v.id));
+      // Revisión 2 doc 114 (R2-1): y el diagrama de los otros canvases de la tabla.
+      [viewsBack, others] = await Promise.all([
+        listedViewsBy([...usage.map((u) => u.canvasId), ...viewCanvasIds], views.map((v) => v.id)),
+        diagramsBefore(usage.map((u) => u.canvasId)),
+      ]);
       // Doc 105 (ronda 3): FK huérfano en columnas HIJA de la OTRA tabla (misma
       // regla conservadora que deleteRelationship: si ya no participan en
       // ninguna relación). Se decide AHORA, descontando las relaciones que este
@@ -1949,6 +2292,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const colsPre = cols.map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
     const relsPre = rels.map((r) => ({ ...r, pairs: r.pairs.map((p) => ({ ...p })) }));
     const viewsPre = views.map((v) => JSON.parse(JSON.stringify(v)) as View);
+    // Revisión 2 doc 114 (R2-1): dónde se veía en cada canvas que no estaba abierto.
+    const seenPre = new Map([...others].map(([id, dia]) => [id, seenAt(dia, tableId)] as const));
     await gov.recordChangesBulk([
       ...views.map((v) => gov.bulk.deleteView(v.id)),
       ...rels.map((r) => gov.bulk.deleteRelationship(r.id)),
@@ -1978,6 +2323,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         ...(withTable ? { tableIds: [tableId] } : {}),
         ...(viewIdsOut.length ? { viewIds: viewIdsOut } : {}),
         ...(withTable && wireIds.length ? { dropRouteIds: wireIds } : {}),
+        ...(withTable ? pinsOut(canvasId, [tableId], others.get(canvasId)) : {}),   // revisión doc 114 (ronda 2: todos sus canvases)
       }));
     }
     // La tabla.
@@ -2010,9 +2356,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           const out = removed.get(canvasId);
           const back = viewsBack.get(canvasId);
           const viewIds = [...new Set([...(back?.viewIds ?? []), ...(out?.viewIds ?? [])])];
+          const seen = withTable && !active ? seenPre.get(canvasId) : null;
           const layout = {
             ...(out?.layout ?? {}), ...(back?.layout ?? {}),
             ...(active && undoPos ? { [tableId]: undoPos } : {}),
+            ...(seen ? { [tableId]: seen } : {}),
           };
           // Doc 112: el color de cada caja en ESE canvas vuelve con ella.
           const colors = { ...(out?.colors ?? {}), ...(back?.colors ?? {}) };
@@ -2708,7 +3056,7 @@ useSessionStore.subscribe((s, prev) => {
       columnTarget: null, relPreset: null, subcatArmed: false, hoverEdgeId: null, hoverNodeId: null,
       colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
       inspect: null, searchOpen: false, navigating: null, pendingFocusTableId: null, pendingFocusColId: null,
-      modelProps: null, colorPreview: null,
+      modelProps: null, colorPreview: null, freshNodes: {},
     });
   }
   if (s.activeChangesetId === prev.activeChangesetId) return;

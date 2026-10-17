@@ -8,6 +8,13 @@
 export interface NodePos { x: number; y: number }
 export type Layout = Record<string, NodePos>;
 
+/** Dónde pinta el canvas la tabla nº `i` del diagrama si no tiene posición
+ *  guardada (tablas que entraron sin layout). La colocación de lo nuevo de la
+ *  carga (doc 113) la cuenta igual. */
+export function gridSlot(i: number): NodePos {
+  return { x: 60 + (i % 4) * 260, y: 60 + Math.floor(i / 4) * 220 };
+}
+
 /** Layout que dibuja el canvas: el publicado con los movimientos de la sesión
  *  encima. Sin overrides (modo edición, o nada movido) devuelve el publicado. */
 export function effectiveLayout(persisted: Layout | null | undefined, viewer: Layout | null | undefined): Layout {

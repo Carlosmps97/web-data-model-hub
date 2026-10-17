@@ -1,5 +1,7 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
 import { facetNouns, type FacetNouns } from '@/lib/facets';
+import { placeAtPoint } from '@/lib/floating';
+import { useFloating } from '@/components/ui/useFloating';
 import { useModelerStore } from '@/store/useModelerStore';
 import { reportWriteError } from '../lib/sessionGuard';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -105,12 +107,8 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
       .catch(reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't paste the ${n.one}`, 'err')));   // doc 105 (ronda 3)
   };
 
-  // Clamp al viewport: el menú es chico (~200×~120), que no se corte en el borde.
-  const x = Math.min(menu.x, window.innerWidth - 216);
-  const y = Math.min(menu.y, window.innerHeight - 140);
-
   return (
-    <div ref={ref} className="wk-ctxmenu" style={{ left: x, top: y }} role="menu">
+    <MenuBox boxRef={ref} x={menu.x} y={menu.y}>
       {showCopyCols && (
         <button type="button" role="menuitem" onClick={doCopy}>
           {selCount > 1 ? `Copy ${selCount} ${n.members}` : `Copy ${n.member}`}
@@ -131,6 +129,14 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
           {`Paste ${n.one} (${tblClipName} as copy)`}
         </button>
       )}
-    </div>
+    </MenuBox>
   );
+}
+
+/** Doc 113 §5: el menú en el cursor con la regla única de flotantes — a la
+ *  izquierda o arriba del cursor si no entra (antes: un tope fijo estimado de
+ *  ~200×120 que cortaba los nombres largos y el último ítem). */
+function MenuBox({ boxRef, x, y, children }: { boxRef: RefObject<HTMLDivElement | null>; x: number; y: number; children: ReactNode }) {
+  const place = useFloating(boxRef, (box, bounds) => placeAtPoint({ x, y }, box, bounds), [x, y]);
+  return <div ref={boxRef} className="wk-ctxmenu" style={place} role="menu">{children}</div>;
 }

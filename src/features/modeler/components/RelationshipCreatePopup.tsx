@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { useModelerStore } from '@/store/useModelerStore';
+import { facetName, facetNouns } from '@/lib/facets';
 import { pushUndo } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import type { Cardinality } from '@/services/governance.service';
@@ -32,6 +33,8 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
   draft: RelDraft; onClose: (created: boolean) => void; pushToast: (m: string, k?: 'err') => void;
 }) {
   const diagram = useModelerStore((s) => s.diagram);
+  // Doc 114: nombres del modelo del canvas (entidades/atributos en el lógico).
+  const viewMode = useModelerStore((s) => s.viewMode);
   const [saving, setSaving] = useState(false);
   const [cards, setCards] = useState({ parent: draft.parentCardinality, child: draft.childCardinality });
   const [phrases, setPhrases] = useState<PhraseValues>({ parentToChildPhrase: '', childToParentPhrase: '' });
@@ -60,7 +63,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
         const role = r.roleName.trim();
         if (r.target.kind === 'existing') {
           const c = colById.get(r.target.columnId);
-          if (!c) throw new Error('Child column no longer exists');
+          if (!c) throw new Error(`Child ${facetNouns(viewMode).member} no longer exists`);
           // Role name sobre existente = rename in place (semántica del Apply
           // del popup de edición); mismo nombre lógico → no-op.
           const rename = role && role !== c.logicalName
@@ -119,7 +122,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
       }
       useModelerStore.getState().markDirty();
       await useModelerStore.getState().reload();
-      pushToast(`Relationship created — ${resolutions.length} key column(s) migrated`);
+      pushToast(`Relationship created — ${resolutions.length} key ${facetNouns(useModelerStore.getState().viewMode).member}(s) migrated`);
       onClose(true);
     } catch (e) {
       await onError(e);
@@ -130,10 +133,10 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
     <Modal title="Create relationship" icon="link" size="lg" onClose={() => { if (!saving) onClose(false); }}>
       <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="wk-pp-role parent">PARENT</span>
-        <span className="rd-mono">{parentTable?.physicalName ?? draft.parentTableId}</span>
+        <span className="rd-mono">{parentTable ? facetName(parentTable, viewMode) : draft.parentTableId}</span>
         <span style={{ color: 'var(--text-muted-3)' }}>→</span>
         <span className="wk-pp-role child">CHILD</span>
-        <span className="rd-mono">{childTable?.physicalName ?? draft.childTableId}</span>
+        <span className="rd-mono">{childTable ? facetName(childTable, viewMode) : draft.childTableId}</span>
         <span style={{ marginLeft: 'auto', color: 'var(--muted)' }}>
           {draft.identifying ? 'Identifying (solid)' : 'Non-identifying (dashed)'}
         </span>
@@ -159,8 +162,8 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
       />
 
       <div className="wk-props-field">
-        <label>Key migration · parent key has {parentPks.length} column{parentPks.length === 1 ? '' : 's'} · "Inherit" copies the parent's definition, UDPs and metadata</label>
-        <KeyMappingRows parentPks={parentPks} childCols={childCols} rows={rows} onChange={setRows} locked={saving} />
+        <label>Key migration · parent key has {parentPks.length} {parentPks.length === 1 ? facetNouns(viewMode).member : facetNouns(viewMode).members} · "Inherit" copies the parent's definition, UDPs and metadata</label>
+        <KeyMappingRows parentPks={parentPks} childCols={childCols} rows={rows} onChange={setRows} locked={saving} mode={viewMode} />
       </div>
 
       <div className="m-foot">

@@ -37,6 +37,7 @@ import { arrangeDiagram } from '../features/modeler/lib/arrangeGraph';
 import * as gov from '@/services/governance.service';
 import { ApiError } from '@/services/http';
 import { trackRevalidation } from '@/features/modeler/lib/sessionGuard';
+import { gridSlot } from '@/features/modeler/lib/viewerLayout';
 import { useModelerStore, manualRouteCount } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
@@ -260,10 +261,10 @@ describe('un wire con nombre de propiedad heredada (revisión 2026-09-28)', () =
     useModelerStore.setState({ diagram: odd() });
     vi.mocked(mod.loadDiagram).mockResolvedValue(odd());
     await useModelerStore.getState().removeTableFromArea('t3');
-    // nada que podar: sin lista de trazos
+    // nada que podar: sin lista de trazos (revisión doc 114: y t1/t2, sin posición, quedan fijas donde se ven)
     const [saId, rm] = vi.mocked(struct.removeFromCanvas).mock.calls[0];
     expect(saId).toBe('sa1');
-    expect(rm).toEqual({ tableIds: ['t3'], viewIds: [] });
+    expect(rm).toEqual({ tableIds: ['t3'], viewIds: [], pins: { t1: gridSlot(0), t2: gridSlot(1) } });
   });
 });
 
@@ -630,6 +631,9 @@ describe('borrar una tabla', () => {
   it('una tabla sin relaciones se borra sin lista de trazos', async () => {
     vi.mocked(gov.listRelationships).mockResolvedValue([]);
     await useModelerStore.getState().deleteTable('t2');
-    expect(vi.mocked(struct.removeFromCanvas).mock.calls).toEqual([['sa1', { tableIds: ['t2'] }], ['sa9', { tableIds: ['t2'] }]]);
+    // Revisión doc 114: en el canvas abierto las que quedan sin posición se fijan; en otro canvas no hay diagrama.
+    expect(vi.mocked(struct.removeFromCanvas).mock.calls).toEqual([
+      ['sa1', { tableIds: ['t2'], pins: { t1: gridSlot(0), t3: gridSlot(2) } }], ['sa9', { tableIds: ['t2'] }],
+    ]);
   });
 });

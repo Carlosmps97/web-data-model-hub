@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { facetNouns } from '@/lib/facets';
+import { facetName, facetNouns } from '@/lib/facets';
 import {
   ReactFlow, Background, BackgroundVariant, Controls, MiniMap, ConnectionMode,
   useNodesState, useEdgesState, type Node, type Edge, type Connection,
 } from '@xyflow/react';
-import { useModelerStore } from '@/store/useModelerStore';
+import { stopFraming, useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { canvasSessionKey } from '../lib/canvasSession';
 import { reportWriteError } from '../lib/sessionGuard';
@@ -32,11 +32,16 @@ import { pkInKeyOrder } from '../lib/keyOrder';
 import { relationshipDrift } from '../lib/relationshipPairs';
 import { relationshipLabel } from '../lib/relationshipLabel';
 import { fanSlots, HEADER_H, ROW_H } from '../lib/edgeFanout';
-import { draggedPositions, effectiveLayout } from '../lib/viewerLayout';
+import { draggedPositions, effectiveLayout, gridSlot } from '../lib/viewerLayout';
+import { dblClickShield, SHIELD_EVENTS } from '../lib/dblClickShield';
 import { bindHoverDim, createHoverIntent, hoverTargetOf } from '../lib/hoverIntent';
+import { freshRanks, nodeZ } from '../lib/nodeZ';
 
 const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode, subcat: SubtypeSymbolNode };
 const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge, subcat: SubtypeEdge };
+
+/** «an entity» → «An entity» (avisos del gesto con el sustantivo del modelo, doc 114). */
+const capitalize = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
 
 export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const diagram = useModelerStore((s) => s.diagram);
@@ -53,6 +58,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const setFlow = useModelerStore((s) => s.setFlow);
   const reload = useModelerStore((s) => s.reload);
   const selectedTableId = useModelerStore((s) => s.selectedTableId);
+  // Doc 113 §1.3: lo nuevo de esta sesión en ESTE canvas va por delante, cada
+  // tanda sobre las anteriores.
+  const freshGens = useModelerStore((s) => (s.activeSaId ? s.freshNodes[s.activeSaId] : undefined));
   const pasteTarget = useModelerStore((s) => s.pasteTarget);
   const setPasteTarget = useModelerStore((s) => s.setPasteTarget);
   const focusTable = useModelerStore((s) => s.focusTable);
@@ -132,13 +140,15 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     }
     // zIndex inicial desde la selección actual (getState evita re-armar el
     // diagrama en cada click; los cambios de selección los aplica el efecto de
-    // abajo). El seleccionado sube al frente para no quedar oculto.
+    // abajo). El seleccionado sube al frente para no quedar oculto; doc 113: lo
+    // que trajo la carga Excel, por delante de lo que ya estaba.
     const selNow = useModelerStore.getState().selectedTableId;
+    const freshNow = freshRanks(useModelerStore.getState().freshNodes[diagram.subjectArea.id]);
     const tableNodes: Node[] = diagram.tables.map((t, i) => ({
       id: t.id,
       type: 'table',
-      position: layout[t.id] ?? { x: 60 + (i % 4) * 260, y: 60 + Math.floor(i / 4) * 220 },
-      zIndex: t.id === selNow ? 10 : 0,
+      position: layout[t.id] ?? gridSlot(i),
+      zIndex: nodeZ(t.id, selNow, freshNow),
       data: { table: t, columns: colsByTable.get(t.id) ?? [], lod: lodNow, refCols: refColsByTable.get(t.id) ?? [] },
     }));
     // F3: nodos 'view' + edges 'derivation' desde diagram.views: las vistas
@@ -149,7 +159,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     // Doc 63: vistas SOLO en modelo físico — en lógico ni bloques ni wires
     // de derivación (el toggle re-arma el diagrama: viewMode está en deps).
     const views = buildViewGraph(viewMode === 'physical' ? diagram.views ?? [] : [], diagram.tables, diagram.columns, layout, tablePos, onEditView);
-    const viewNodes = views.nodes.map((n) => ({ ...n, data: { ...n.data, lod: lodNow } }));
+    const viewNodes = views.nodes.map((n) => ({ ...n, zIndex: nodeZ(n.id, null, freshNow), data: { ...n.data, lod: lodNow } }));
     // Doc 53: las SUBCATEGORÍAS van por su propio subgrafo (símbolo + aristas
     // sólidas sin crow's-foot) y SOLO en modelo lógico; el resto de relaciones
     // sigue el camino crowfoot de siempre.
@@ -226,14 +236,16 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
 
   // El nodo seleccionado (incl. una tabla recién creada/importada) sube al
   // frente: React Flow pinta por orden de array ⇒ una tabla nueva podía quedar
-  // DETRÁS de un bloque existente. Update liviano (sólo zIndex), sin re-armar.
+  // DETRÁS de un bloque existente. Doc 113: lo de la carga Excel, por delante
+  // del resto. Update liviano (sólo zIndex), sin re-armar.
   useEffect(() => {
+    const fresh = freshRanks(freshGens);
     setNodes((prev) => prev.map((n) => {
       if (n.type === 'shape') return n;               // shapes siempre atrás (zIndex -1)
-      const z = n.id === selectedTableId ? 10 : 0;
+      const z = nodeZ(n.id, selectedTableId, fresh);
       return n.zIndex === z ? n : { ...n, zIndex: z };
     }));
-  }, [selectedTableId, setNodes]);
+  }, [selectedTableId, freshGens, setNodes]);
 
   // Finder cross-canvas (Database Explorer): tras abrir el canvas destino,
   // centra sobre la tabla PENDIENTE en cuanto su nodo monta. selectSubjectArea
@@ -392,24 +404,24 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       if (fromSymbol && !group) return;
       const parentId = fromSymbol ? group!.parentTableId : startId;
       if (!dia.tables.some((t) => t.id === childId)) {
-        pushToast('A subtype must be a table on this canvas', 'err');
+        pushToast(`A subtype must be ${facetNouns(st.viewMode).a} on this canvas`, 'err');
         return;
       }
       if (parentId === childId) {
-        pushToast('A table cannot be a subtype of itself', 'err');
+        pushToast(`${capitalize(facetNouns(st.viewMode).a)} cannot be a subtype of itself`, 'err');
         return;
       }
       const parentTable = dia.tables.find((t) => t.id === parentId);
       // Guard D1 (doc 47): sin llave en el supertipo no hay nada que heredar.
       if (!pkInKeyOrder(dia.columns.filter((c) => c.tableId === parentId)).length) {
-        pushToast(`"${parentTable?.physicalName ?? parentId}" has no primary key — define the supertype's key first`, 'err');
+        pushToast(`"${parentTable ? facetName(parentTable, st.viewMode) : parentId}" has no primary key — define the supertype's key first`, 'err');
         return;
       }
       // Regla Erwin: un subtipo pertenece a UN solo grupo (chequeo local; el
       // popup repite el chequeo GLOBAL draft-aware antes de habilitar Confirm).
       if (childSubtypeMembership(dia.relationships, childId)) {
         const c = dia.tables.find((t) => t.id === childId);
-        pushToast(`"${c?.physicalName ?? childId}" is already a subtype in another subcategory group`, 'err');
+        pushToast(`"${c ? facetName(c, st.viewMode) : childId}" is already a subtype in another subcategory group`, 'err');
         return;
       }
       const dropColumnId = endHandle === '__hdr_src' || endHandle === '__sym_tgt'
@@ -444,12 +456,12 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     const parentTable = st.diagram?.tables.find((t) => t.id === parentId);
     // Guard doc 47 (D1): sin llave en el padre no hay nada que migrar.
     if (!pkInKeyOrder(cols.filter((c) => c.tableId === parentId)).length) {
-      pushToast(`"${parentTable?.physicalName ?? parentId}" has no primary key — define its key before drawing a relationship`, 'err');
+      pushToast(`"${parentTable ? facetName(parentTable, st.viewMode) : parentId}" has no primary key — define its key before drawing a relationship`, 'err');
       return;
     }
     // Recursivas: solo non-identifying (una llave no puede contenerse a sí misma).
     if (parentId === childId && preset.identifying) {
-      pushToast('A table cannot have an identifying relationship with itself', 'err');
+      pushToast(`${capitalize(facetNouns(st.viewMode).a)} cannot have an identifying relationship with itself`, 'err');
       return;
     }
     const dropColumnId = dropHandle === '__hdr_src' ? null : dropHandle.replace(/__src$|__tgt$/, '');
@@ -471,6 +483,17 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
 
   // Expone la instancia de React Flow al store (la usa el toolbar: focusTable / Save).
   useEffect(() => () => setFlow(null), [setFlow]);
+
+  // Revisión 2 doc 114 (H1): el 2.º clic de un doble clic sobre una tabla que se
+  // está encuadrando — también uno lento — no llega a nada (`dblClickShield`): en
+  // la captura, antes que React Flow (zoom del fondo, arrastre) y React (clics).
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onEvent = (e: MouseEvent) => dblClickShield.handle(e);
+    for (const t of SHIELD_EVENTS) el.addEventListener(t, onEvent, true);
+    return () => { for (const t of SHIELD_EVENTS) el.removeEventListener(t, onEvent, true); };
+  }, []);
 
   // Vista en edición (lápiz del ViewNode) resuelta contra el diagrama vivo.
   const editView = editViewId ? (diagram?.views ?? []).find((v) => v.id === editViewId) : undefined;
@@ -507,7 +530,9 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           if (node.type === 'view') { st.setSelectedView(node.id); return; }
           // Símbolo de subcategoría (doc 53): su gestión es doble click.
           if (node.type === 'subcat') { setSelectedTable(null); return; }
-          if (node.type !== 'shape') setSelectedTable(node.id);
+          // Doc 114: una tabla que se selecciona se enfoca con sus vistas.
+          if (node.type === 'table') st.selectTable(node.id);
+          else if (node.type !== 'shape') setSelectedTable(node.id);
         }}
         onNodeDoubleClick={(_e, node) => {
           if (node.type === 'subcat') setSubcatManage(node.id);
@@ -523,7 +548,10 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
             if (sid) setSubcatManage(sid);
           }
         }}
-        onPaneClick={() => {
+        onPaneClick={(e) => {
+          // Revisión doc 114 (H1): el 2.º clic de un doble clic no deselecciona
+          // (con la tabla moviéndose al encuadrarla, podía caer en el fondo).
+          if (e.detail > 1) return;
           setSelectedTable(null); setSelectedEdge(null);
           const st = useModelerStore.getState();
           st.clearColSel(); st.closeColMenu();
@@ -573,6 +601,10 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // layout por micro-drags accidentales). paneClickDistance hace
         // robusto el click en el fondo (deseleccionar).
         nodeDragThreshold={4}
+        // Revisión doc 114: el click de un NODO con ese mismo temblor también
+        // cuenta (sin esto, d3-drag lo descartaba con 1 px y el clic en una
+        // tabla «a veces no seleccionaba» — lo que el doc 48 ya pedía).
+        nodeClickDistance={4}
         paneClickDistance={4}
         // Zoom-out amplio: canvases enormes (auto-arrange de 100 tablas ≈
         // 14000×19000px) necesitan bajar del default minZoom 0.5 para verse
@@ -580,6 +612,8 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         minZoom={0.02}
         fitView
         fitViewOptions={{ padding: 0.12, minZoom: 0.02 }}
+        // Revisión 2 doc 114: arrastrar un bloque detiene el encuadre en curso.
+        onNodeDragStart={() => stopFraming()}
         onNodeDragStop={(_e, node, moved) => {
           // Doc 105 (A4-o1): `moved` = TODOS los nodos arrastrados (varios con
           // selección múltiple); antes sólo se guardaba el tomado con el mouse.

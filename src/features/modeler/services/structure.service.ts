@@ -250,14 +250,22 @@ const viewBase = (cur: SubjectArea, shown?: string[] | null): string[] | null =>
 
 /** SUMA miembros al canvas, con sus posiciones (`layout`) y trazos (`routes`)
  *  en la MISMA escritura. Devuelve lo que REALMENTE entró: lo que ya estaba no
- *  cuenta (la inversa del Undo no debe sacarlo). Sin nada que cambiar, no graba.
+ *  cuenta (la inversa del Undo no debe sacarlo) y su posición tampoco se toca
+ *  (revisión doc 113: un alta armada con un diagrama viejo movía un bloque que
+ *  ya estaba, sin Undo); los trazos, sólo si entra una tabla (ronda 2: con la
+ *  tabla ya en otro lugar, sus trazos viejos no calzan). Sin nada que cambiar,
+ *  no graba.
  *  `shownViews` (ver `viewBase`): quien lo pasa fija la lista de vistas de un
  *  canvas que todavía no la tiene. Doc 112: lo que ENTRA llega con el color de
  *  su tabla — un color de este canvas guardado de antes para ese id no revive —
  *  salvo el que trae `colors` (el Undo de sacarla o borrarla lo repone); el
- *  color de una caja que ya estaba no se toca. */
+ *  color de una caja que ya estaba no se toca.
+ *  Doc 114: `pins` — dónde se ven HOY los miembros sin posición guardada que la
+ *  tabla que entra correría de casilla (`pinsForEntering`): sólo si entra una
+ *  tabla y sólo a quien sigue sin posición en el canvas efectivo (nunca mueve
+ *  un bloque posicionado), en la misma escritura. */
 export const addToCanvas = async (
-  saId: string, add: CanvasMembers & { layout?: Layout; routes?: WireRoutes; colors?: Record<string, string> },
+  saId: string, add: CanvasMembers & { layout?: Layout; routes?: WireRoutes; colors?: Record<string, string>; pins?: Layout },
   shownViews?: string[] | null,
 ): Promise<Required<CanvasMembers>> => {
   const cs = requireWriteCs('Editing a canvas');
@@ -268,16 +276,21 @@ export const addToCanvas = async (
     const tableIds = [...new Set(add.tableIds ?? [])].filter((id) => !tables.includes(id));
     const views = viewBase(cur, shownViews);
     const viewIds = views ? [...new Set(add.viewIds ?? [])].filter((id) => !views.includes(id)) : [];
-    const layout = add.layout && Object.keys(add.layout).length ? add.layout : null;
+    const entering = [...tableIds, ...viewIds];
+    const placed = Object.fromEntries(Object.entries(add.layout ?? {}).filter(([id]) => entering.includes(id)));
+    const members = new Set([...tables, ...(views ?? [])]);
+    const pinned = tableIds.length
+      ? Object.entries(add.pins ?? {}).filter(([id]) => members.has(id) && !cur.layout?.[id])
+      : [];
+    const layout = Object.keys(placed).length || pinned.length ? { ...Object.fromEntries(pinned), ...placed } : null;
     const routes = cleanRoutes(add.routes);
-    const withRoutes = Object.keys(routes).length > 0;
+    const withRoutes = tableIds.length > 0 && Object.keys(routes).length > 0;
     if (!tableIds.length && !viewIds.length && !layout && !withRoutes) return { tableIds, viewIds };
     const next: SubjectArea = { ...cur, id: saId };
     if (tableIds.length) next.tableIds = [...tables, ...tableIds];
     if (views && (viewIds.length || !Array.isArray(cur.viewIds))) next.viewIds = [...views, ...viewIds];
     if (layout) next.layout = { ...(cur.layout ?? {}), ...layout };
     if (withRoutes) next.routes = { ...cleanRoutes(cur.routes), ...routes };
-    const entering = [...tableIds, ...viewIds];
     if (entering.length) {
       const colors = cleanColors(cur.colors);
       const back = cleanColors(add.colors);
@@ -321,7 +334,7 @@ const colorsOf = (colors: unknown, ids: Iterable<string>): Record<string, string
  *  recorre todos los canvases donde estaba). Doc 105 (F4): devuelve lo que
  *  REALMENTE salió, con sus posiciones y colores — el Undo lo repone tal cual. */
 export const removeFromCanvas = async (
-  saId: string, rm: CanvasMembers & { dropRouteIds?: string[] }, shownViews?: string[] | null,
+  saId: string, rm: CanvasMembers & { dropRouteIds?: string[]; pins?: Layout }, shownViews?: string[] | null,
 ): Promise<CanvasMembersOut> => {
   const cs = requireWriteCs('Editing a canvas');
   return inOrder(saId, async () => {
@@ -345,6 +358,14 @@ export const removeFromCanvas = async (
     if (gone.size && cur.layout) {
       next.layout = Object.fromEntries(Object.entries(cur.layout).filter(([id]) => !gone.has(id)));
     }
+    // Revisión doc 114: `pins` — dónde se ven HOY los que quedan sin posición
+    // (`pinsForLeaving`): sólo si sale una tabla y sólo a quien sigue sin
+    // posición en el canvas efectivo, en la misma escritura.
+    const stays = new Set([...(next.tableIds ?? tables), ...(viewBase(next, shownViews) ?? [])]);
+    const pinned = outTables.length
+      ? Object.entries(rm.pins ?? {}).filter(([id]) => stays.has(id) && !gone.has(id) && !cur.layout?.[id])
+      : [];
+    if (pinned.length) next.layout = { ...(next.layout ?? cur.layout ?? {}), ...Object.fromEntries(pinned) };
     const colors = colorsOf(cur.colors, gone);
     if (Object.keys(colors).length) {
       next.colors = Object.fromEntries(Object.entries(cleanColors(cur.colors)).filter(([id]) => !gone.has(id)));

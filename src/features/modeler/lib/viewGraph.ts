@@ -12,6 +12,12 @@ import type { View } from '@/services/views.service';
 /** Offset del default: la vista aparece a la derecha de su primera fuente. */
 const VIEW_OFFSET_X = 280;
 
+/** Dónde pinta el canvas una vista sin posición guardada: a la derecha de su
+ *  primera fuente presente (`anchor`). */
+export function defaultViewPosition(anchor: { x: number; y: number }): { x: number; y: number } {
+  return { x: anchor.x + VIEW_OFFSET_X, y: anchor.y };
+}
+
 /** Fuentes canónicas de una vista, con fallback al `tableId` legacy. */
 export function viewSourceIds(v: View): string[] {
   return v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
@@ -67,7 +73,7 @@ export function buildViewGraph(
     nodes.push({
       id: v.id,
       type: 'view',
-      position: layout[v.id] ?? { x: anchor.x + VIEW_OFFSET_X, y: anchor.y },
+      position: layout[v.id] ?? defaultViewPosition(anchor),
       data: {
         view: v,
         sourceTables: srcIds.map((id) => tableById.get(id)).filter((t): t is CanonicalTable => !!t),

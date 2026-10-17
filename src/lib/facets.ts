@@ -46,6 +46,28 @@ export function countFacetUdpValues(
 export const facetNoun = (level: 'table' | 'column', facet: Facet): 'entity' | 'table' | 'attribute' | 'column' =>
   level === 'table' ? (facet === 'logical' ? 'entity' : 'table') : (facet === 'logical' ? 'attribute' : 'column');
 
+/** Doc 114: el nombre de una tabla o columna en el modelo activo — lógico
+ *  (entidad/atributo) o físico (tabla/columna) —, con el otro de respaldo si
+ *  falta. Lo usan los popups de relación y subcategoría, como el canvas. */
+export const facetName = (o: { logicalName?: string | null; physicalName?: string | null } | null | undefined, facet: Facet): string =>
+  (facet === 'logical' ? (o?.logicalName || o?.physicalName) : (o?.physicalName || o?.logicalName)) ?? '';
+
+/** Revisión doc 114 (H1): los nombres del modelo activo de un conjunto (las
+ *  columnas de UNA tabla), por id — el lógico se puede repetir (el físico es el
+ *  único): los repetidos, sin mirar mayúsculas, bordes, espacios internos ni la
+ *  forma Unicode (ronda 2: la lista los dibuja iguales), llevan el nombre del
+ *  otro modelo entre paréntesis; el resto, tal cual. */
+export function distinctNames<T extends { id: string; logicalName?: string | null; physicalName?: string | null }>(
+  items: readonly T[], facet: Facet,
+): Map<string, string> {
+  const key = (o: T) => facetName(o, facet).normalize('NFC').replace(/\s+/g, ' ').trim().toLowerCase();
+  const count = new Map<string, number>();
+  for (const o of items) count.set(key(o), (count.get(key(o)) ?? 0) + 1);
+  const other: Facet = facet === 'logical' ? 'physical' : 'logical';
+  return new Map(items.map((o) => [o.id, (count.get(key(o)) ?? 0) > 1
+    ? `${facetName(o, facet).trim()} (${facetName(o, other).trim()})` : facetName(o, facet)]));
+}
+
 /** Sustantivos del objeto por faceta (doc 85 §3.8): ÚNICA fuente de los
  *  rótulos «Entity/Attribute» (modelo lógico) y «Table/Column» (físico) que
  *  usa el workspace Model — pestañas, botones, diálogos, toasts, Explorer, ⌘K.
@@ -63,13 +85,15 @@ export const FACET_NOUNS: Record<Facet, FacetNouns> = {
 export const facetNouns = (facet: Facet): FacetNouns => FACET_NOUNS[facet];
 
 /** Doc 86 §2.2: herramientas de Structure por modelo. Views, CTAS y Schemas
- *  son conceptos FÍSICOS; New entity/table y Upload viven en ambos. */
+ *  son conceptos FÍSICOS; New entity/table vive en ambos. Doc 113 §1.2: la
+ *  carga Excel también es física (crea tablas con esquema y sus vistas `_vu`). */
 export type StructureTool = 'new-table' | 'ctas' | 'view' | 'schema' | 'upload';
-const PHYSICAL_ONLY_TOOLS: ReadonlySet<StructureTool> = new Set<StructureTool>(['ctas', 'view', 'schema']);
+const PHYSICAL_ONLY_TOOLS: ReadonlySet<StructureTool> = new Set<StructureTool>(['ctas', 'view', 'schema', 'upload']);
 export const toolAvailableIn = (tool: StructureTool, facet: Facet): boolean =>
   facet === 'physical' || !PHYSICAL_ONLY_TOOLS.has(tool);
 export const PHYSICAL_ONLY_TOOL_TIP: Record<StructureTool, string> = {
-  'new-table': '', upload: '',
+  'new-table': '',
+  upload: 'Upload from Excel belongs to the physical model — switch to Physical',
   ctas: 'CTAS belongs to the physical model — switch to Physical',
   view: 'Views belong to the physical model — switch to Physical',
   schema: 'Schemas belong to the physical model — switch to Physical',

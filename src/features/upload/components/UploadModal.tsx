@@ -14,11 +14,12 @@ import {
   applyUpload, createDefaultProfile, discardUpload, getProfileCatalog, getUploadTargets, listProfiles, pollUploadJob, startUpload,
   type ProfileCatalog, type UploadJob, type UploadProfile, type UploadSummary, type UploadTargets,
 } from '../upload.service';
-import { arrangeCanvases } from '../arrangeCanvases';
+import { placeUploadedObjects } from '../placeUploaded';
+import { canvasView } from '@/features/modeler/lib/canvasFocus';
 // eslint-disable-next-line no-restricted-imports -- a propósito: por el barrel de modeler sería un ciclo (Toolbar → UploadModal → modeler); ver doc/architecture.md
 import { SessionChangedError, afterRevalidation, pinSession, touchesVersion, type SessionPin } from '@/features/modeler/lib/sessionGuard';
 import { needsTarget, pickTarget, targetHint } from '../lib/uploadTarget';
-import { notArrangedNotice } from '../lib/arrangeNotice';
+import { notPlacedNotice } from '../lib/arrangeNotice';
 import UploadDropzone, { type DropzoneFile, type DropzoneSheet } from './UploadDropzone';
 import UploadReportView from './UploadReport';
 import ProfileManagerModal from './ProfileManagerModal';
@@ -31,7 +32,10 @@ import '../upload.css';
  * El workbook se lee CRUDO (todas las hojas) y viaja con el perfil de carga
  * elegido; el backend aplica el perfil. Validate hace polling del job; Upload
  * solo se habilita con 0 errores; al aplicar, el backend RE-valida, y al
- * terminar el front arregla (ELK) los canvases tocados y refresca el explorer.
+ * terminar el front ubica lo nuevo y refresca el explorer. Doc 113 §1.3: ya no
+ * arregla (ELK) los canvases completos — en la fase `arranging` ubica SÓLO lo
+ * que entró a cada canvas, en el centro de lo que se ve si es el canvas abierto,
+ * y lo marca para pintarlo encima (lo existente no se mueve).
  * Doc 105: la pila de Undo se vacía al EMPEZAR el apply y queda cerrada (por
  * versión) hasta que termine; si el polling se rinde ante fallos transitorios
  * la fase es `unconfirmed` (la carga pudo quedar aplicada). Cerrar el popup
@@ -359,8 +363,19 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
         return;
       }
       const ids = final.result?.affectedCanvasIds ?? [];
-      setPhase('arranging'); setArrange({ done: 0, total: ids.length });
-      const { failed, skipped } = await arrangeCanvases(ids, useModelerStore.getState().viewMode,
+      // Doc 113 §1.3: qué entró a cada canvas (un backend anterior no lo manda:
+      // entonces nada se mueve y lo nuevo queda en su posición provisional).
+      const members = final.result?.newMembers;
+      const toPlace = ids.filter((id) => (members?.[id]?.length ?? 0) > 0);
+      // El canvas ABIERTO (de esta carga) ubica lo nuevo en el centro de lo que se
+      // ve — medido como quedará: el refresco lo reabre SIN selección y el panel
+      // de Properties, si estaba abierto, se cierra (revisión doc 113).
+      const m = useModelerStore.getState();
+      const openId = ours() && sameUser() && m.activeSaId && m.diagram?.subjectArea.id === m.activeSaId && ids.includes(m.activeSaId)
+        ? m.activeSaId : null;
+      const center = openId ? canvasView(m.flow, { panel: 'closes' })?.center : null;
+      setPhase('arranging'); setArrange({ done: 0, total: toPlace.length });
+      const { failed, skipped } = await placeUploadedObjects(ids, members, openId && center ? { saId: openId, point: center } : null,
         (done, total) => setArrange({ done, total }), { pin: inVersion });
       const missing = [...failed, ...skipped];
       const counts = final.result?.counts;
@@ -373,13 +388,13 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
           // Otra versión abierta: la carga quedó aplicada en la suya — se avisa
           // nombrándola (ronda 7, R18a-4: antes, sólo si algo quedó sin arreglar),
           // en UN aviso con lo que quedó sin arreglar; sin refrescar ni tocar la abierta.
-          if (missing.length) pushToast(notArrangedNotice(missing, canvasName, { version: versionLabel }), 'err');
+          if (missing.length) pushToast(notPlacedNotice(missing, canvasName, { version: versionLabel }), 'err');
           else pushToast(`Uploaded ${summaryLine(counts)} ${to}`);
           return;
         }
         pushToast(`Uploaded ${summaryLine(counts)}`);
         // Con el popup ya cerrado, los que no se arreglaron no se ven en él.
-        if (!mounted.current && missing.length) pushToast(notArrangedNotice(missing, canvasName), 'err');
+        if (!mounted.current && missing.length) pushToast(notPlacedNotice(missing, canvasName), 'err');
       };
       // Otra versión abierta, u otro usuario en el tab (aun con la misma versión):
       // sólo el aviso que corresponda — sin vaciar la pila de Undo de ESA sesión (la
@@ -387,6 +402,10 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
       // versión de la carga abierta como VISOR, su Explorer sí se refresca.
       if (!ours() || !sameUser()) { await refresh(); announce(); return; }
       setArrangeFailed(missing);
+      // Doc 113 §1.3: lo ubicado se pinta ENCIMA de lo que ya había (antes del
+      // refresco: el canvas abierto lo toma al recargarse).
+      useModelerStore.getState().markFresh(Object.fromEntries(
+        toPlace.filter((id) => !missing.includes(id)).map((id) => [id, members![id]])));
       // Los cambios del lote no están en la pila de Undo: una inversa vieja
       // podría pisarlos. Misma política que cambiar de changeset.
       useUndoStore.getState().clear();
@@ -461,8 +480,8 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
         : { text: 'No issues — ready to upload.', tone: 'ok' };
   } else if (phase === 'applying') status = { text: `${job?.progress.phase ?? 'Uploading'}…` };
   else if (phase === 'arranging') {
-    // Ronda 8: arreglados todos (o ninguno que arreglar), falta el refresco del Explorer.
-    status = { text: arrange && arrange.done < arrange.total ? `Arranging canvases ${arrange.done}/${arrange.total}…` : 'Updating the explorer…' };
+    // Ronda 8: ubicados todos (o nada que ubicar), falta el refresco del Explorer.
+    status = { text: arrange && arrange.done < arrange.total ? `Placing the new objects ${arrange.done}/${arrange.total}…` : 'Updating the explorer…' };
   }
   else if (phase === 'done') status = { text: 'Upload complete.', tone: 'ok' };
   else if (phase === 'failed') status = { text: error ?? 'Something went wrong.', tone: 'error' };
@@ -476,7 +495,7 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
     }
     if (phase === 'arranging' && arrange) {
       if (arrange.done >= arrange.total) return { label: 'Updating the explorer', pct: 100 };
-      return { label: `Arranging canvas ${arrange.done + 1} of ${arrange.total}`, pct: Math.round((arrange.done / arrange.total) * 100) };
+      return { label: `Placing the new objects on canvas ${arrange.done + 1} of ${arrange.total}`, pct: Math.round((arrange.done / arrange.total) * 100) };
     }
     return null;
   })();
@@ -578,11 +597,11 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
             <div>
               <div className="up-done-title">Upload complete</div>
               <div className="up-done-line">{file?.name} → {summaryLine(job?.result?.counts)} recorded in the working copy.</div>
-              {arrange && arrange.total > 0 && (
-                <div className="up-done-line">{plural(arrange.total - arrangeFailed.length, 'canvas').replace('canvass', 'canvases')} auto-arranged.</div>
+              {arrange && arrange.total - arrangeFailed.length > 0 && (
+                <div className="up-done-line">New objects placed on {plural(arrange.total - arrangeFailed.length, 'canvas').replace('canvass', 'canvases')} — existing blocks were not moved.</div>
               )}
               {arrangeFailed.length > 0 && (
-                <div className="up-done-line">Couldn't arrange {plural(arrangeFailed.length, 'canvas').replace('canvass', 'canvases')} — open them and use Autoarrange.</div>
+                <div className="up-done-line">Couldn't place the new objects on {plural(arrangeFailed.length, 'canvas').replace('canvass', 'canvases')} — they were left below the existing blocks.</div>
               )}
             </div>
           </div>

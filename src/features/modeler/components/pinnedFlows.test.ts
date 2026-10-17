@@ -117,9 +117,9 @@ describe('falsos negativos del análisis (doc 105, ronda 3)', () => {
     expect(check('const f = async () => { await read(); onClose(); onError(e); onChange(v); };')).toEqual([]);
   });
 
-  it('helpers que escriben: `arrangeCanvases` (con el pin, no), `writeWireRoute` y los locales', () => {
-    expect(check('const f = async () => { await read(); await arrangeCanvases(ids, mode); };')).toEqual(['f:arrangeCanvases']);
-    expect(check('const f = async () => { await read(); await arrangeCanvases(ids, mode, undefined, { pin, signal }); };')).toEqual([]);
+  it('helpers que escriben: `placeUploadedObjects` (con el pin, no), `writeWireRoute` y los locales', () => {
+    expect(check('const f = async () => { await read(); await placeUploadedObjects(ids, members, focus); };')).toEqual(['f:placeUploadedObjects']);
+    expect(check('const f = async () => { await read(); await placeUploadedObjects(ids, members, focus, undefined, { pin, signal }); };')).toEqual([]);
     expect(check('const f = async () => { await read(); await writeWireRoute(sa, w, null); };')).toEqual(['f:writeWireRoute']);
     // un helper local que escribe: llamarlo tras un await es escribir (aunque él verifique SU pin, tomado al llamarlo)
     expect(check('const save = async () => { await gov.updateColumn(c); };\nconst f = async () => { await read(); await save(); };')).toEqual(['f:save']);
@@ -216,9 +216,9 @@ describe('todos los flujos de escritura verifican el pin (doc 105, H1)', () => {
       .map((f) => join(SRC, d, f))),
     join(SRC, 'store/useModelerStore.ts'),
   ];
-  it('hay archivos que revisar (incluido el arrange de la carga)', () => {
+  it('hay archivos que revisar (incluida la colocación de lo nuevo de la carga, doc 113)', () => {
     expect(files.length).toBeGreaterThan(40);
-    expect(files).toContain(join(SRC, 'features/upload/arrangeCanvases.ts'));
+    expect(files).toContain(join(SRC, 'features/upload/placeUploaded.ts'));
   });
   it('ninguna escritura después de un await sin su check', () => {
     const found = files.flatMap((f) => unpinnedWrites(f, readFileSync(f, 'utf-8'))

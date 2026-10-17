@@ -37,9 +37,13 @@ const NOT_A_WRITE = [
   /"Couldn't load the project"/, /"Couldn't export"/, /'Could not load the tables'/, /'Could not load the columns of that table'/,
   /'Table name is required'/, /'Pick at least one column'/, /'Open the model in edit mode to paste/, /`Select the target /,
   /"The model is read-only: relationships can't be created"/, /'Open the model in edit mode to create relationships'/,
-  /'A subtype must be a table on this canvas'/, /'A table cannot be a subtype of itself'/, /has no primary key — define/,
+  /has no primary key — define/,
   /is already a subtype in another subcategory group/, /'Arm "Draw relationship" in the toolbar/,
-  /'A table cannot have an identifying relationship with itself'/,
+  // Doc 114: las validaciones del gesto llevan el sustantivo del modelo (entity/table)
+  // — reemplazan a sus textos fijos de antes (revisión 2: ya no quedaban en el código).
+  /`A subtype must be \$\{facetNouns\(st\.viewMode\)\.a\} on this canvas`/,
+  /`\$\{capitalize\(facetNouns\(st\.viewMode\)\.a\)\} cannot be a subtype of itself`/,
+  /`\$\{capitalize\(facetNouns\(st\.viewMode\)\.a\)\} cannot have an identifying relationship with itself`/,
 ];
 
 describe('avisos de escrituras del canvas: esperan la revalidación (doc 105, H7)', () => {

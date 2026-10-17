@@ -13,9 +13,9 @@ export const CARD_LBL: Record<string, string> = {
 export const otherFacet = (f: Facet): Facet => (f === 'logical' ? 'physical' : 'logical');
 
 /** Nombre del objeto en la faceta (entidad/atributo = lógico; tabla/columna =
- *  físico), con fallback al otro nombre si falta. */
-export const facetName = (o: { logicalName?: string | null; physicalName?: string | null }, facet: Facet): string =>
-  (facet === 'logical' ? (o.logicalName || o.physicalName || '') : (o.physicalName || o.logicalName || ''));
+ *  físico), con fallback al otro nombre si falta — revisión doc 114: la misma
+ *  función de `@/lib/facets` (estaba duplicada). */
+export { facetName } from '@/lib/facets';
 
 /** Tipo en la faceta: lógico con fallback al físico (doc 69 §4.9). */
 export const facetType = (c: Pick<CanonicalColumn, 'dataType' | 'logicalDataType'>, facet: Facet): string =>

@@ -172,6 +172,49 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     }));
   });
 
+  it('revisión doc 113: la posición sólo vale para lo que ENTRA — una tabla o vista que ya estaba no se mueve', async () => {
+    draft.sa1 = canvas({ viewIds: ['v1'], layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 9, y: 9 } } });
+    await struct.addToCanvas('sa1', {
+      tableIds: ['t2', 't3'], viewIds: ['v1'],
+      layout: { t2: { x: 880, y: 1970 }, t3: { x: 5, y: 6 }, v1: { x: 1, y: 1 } },
+    });
+    expect(draft.sa1.layout).toEqual({ t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 9, y: 9 }, t3: { x: 5, y: 6 } });
+    // Sin nada que entre, una posición sola no graba nada.
+    vi.mocked(csvc.recordChange).mockClear();
+    await struct.addToCanvas('sa1', { tableIds: ['t1'], layout: { t1: { x: 7, y: 7 } } });
+    expect(csvc.recordChange).not.toHaveBeenCalled();
+  });
+
+  it('doc 114: `pins` fija SÓLO a miembros que ya estaban y no tienen posición guardada, cuando entra una tabla', async () => {
+    draft.sa1 = canvas({ tableIds: ['t1', 't2', 't9'], viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, v2: { x: 3, y: 3 } } });
+    await struct.addToCanvas('sa1', {
+      tableIds: ['t3'], layout: { t3: { x: 5, y: 6 } },
+      pins: { t1: { x: 7, y: 7 }, t2: { x: 60, y: 60 }, v1: { x: 1, y: 1 }, v2: { x: 2, y: 2 }, t8: { x: 9, y: 9 }, t3: { x: 4, y: 4 } },
+    });
+    expect(draft.sa1.layout).toEqual({ t1: { x: 0, y: 0 }, v2: { x: 3, y: 3 }, t3: { x: 5, y: 6 }, t2: { x: 60, y: 60 }, v1: { x: 1, y: 1 } });
+  });
+
+  it('doc 114: sin una tabla que entre, `pins` no fija nada (el orden del canvas no cambia)', async () => {
+    draft.sa1 = canvas({ viewIds: [], layout: {} });
+    vi.mocked(csvc.recordChange).mockClear();
+    await struct.addToCanvas('sa1', { tableIds: ['t1'], pins: { t2: { x: 1, y: 1 } } });
+    expect(csvc.recordChange).not.toHaveBeenCalled();
+    await struct.addToCanvas('sa1', { viewIds: ['v5'], pins: { t2: { x: 1, y: 1 } } });
+    expect(draft.sa1.viewIds).toEqual(['v5']);
+    expect(draft.sa1.layout).toEqual({});
+  });
+
+  it('ronda 2: los trazos sólo acompañan a una tabla que ENTRA — con la tabla ya presente (en otro lugar) no vuelven', async () => {
+    // Undo de «sacar t2» mientras otra alta la repuso en otro lugar: sus trazos
+    // viejos ya no calzan con donde está.
+    draft.sa1 = canvas({ layout: { t1: { x: 0, y: 0 }, t2: { x: 880, y: 1970 } }, routes: {} });
+    vi.mocked(csvc.recordChange).mockClear();
+    await struct.addToCanvas('sa1', { tableIds: ['t2'], layout: { t2: { x: 400, y: 0 } }, routes: { r1: R1 } });
+    expect(csvc.recordChange).not.toHaveBeenCalled();
+    expect(draft.sa1.layout!.t2).toEqual({ x: 880, y: 1970 });
+    expect(draft.sa1.routes).toEqual({});
+  });
+
   it('dos altas casi a la vez no se pisan (antes cada una grababa la lista que leyó afuera)', async () => {
     await Promise.all([struct.addToCanvas('sa1', { tableIds: ['t3'] }), struct.addToCanvas('sa1', { tableIds: ['t4'] })]);
     expect(draft.sa1.tableIds).toEqual(['t1', 't2', 't3', 't4']);
@@ -236,6 +279,22 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(out.viewIds).toEqual(['v2']);
     expect(out.layout).toEqual({ t1: { x: 0, y: 0 } });
     expect(out.routes).toEqual({ r2: R2 });
+  });
+
+  it('revisión doc 114: removeFromCanvas con `pins` fija SÓLO a lo que queda sin posición, cuando sale una tabla', async () => {
+    draft.sa1 = canvas({ tableIds: ['t1', 't2', 't3'], viewIds: ['v1'], layout: { t2: { x: 4, y: 4 } } });
+    await struct.removeFromCanvas('sa1', {
+      tableIds: ['t1'], pins: { t1: { x: 1, y: 1 }, t2: { x: 2, y: 2 }, t3: { x: 320, y: 60 }, v1: { x: 7, y: 7 }, t9: { x: 9, y: 9 } },
+    });
+    expect(draft.sa1.tableIds).toEqual(['t2', 't3']);
+    expect(draft.sa1.layout).toEqual({ t2: { x: 4, y: 4 }, t3: { x: 320, y: 60 }, v1: { x: 7, y: 7 } });
+  });
+
+  it('revisión doc 114: sin una tabla que salga, `pins` no fija nada', async () => {
+    draft.sa1 = canvas({ tableIds: ['t1'], viewIds: ['v1', 'v2'], layout: {} });
+    await struct.removeFromCanvas('sa1', { viewIds: ['v2'], pins: { t1: { x: 1, y: 1 } } });
+    expect(draft.sa1.viewIds).toEqual(['v1']);
+    expect(draft.sa1.layout).toEqual({});
   });
 
   it('removeFromCanvas sin wires que podar deja los trazos como están', async () => {

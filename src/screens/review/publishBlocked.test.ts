@@ -44,3 +44,26 @@ describe('publishBlocked (doc 84 A1)', () => {
     expect(itemWhere({ kind: 'change', message: 'payload inválido' }, fmt, userName)).toBe('payload inválido');
   });
 });
+
+// Doc 113 §2: el nombre de VISTA también es único en el proyecto — el publish
+// bloqueado los lista en su propio grupo, con el esquema como las tablas.
+describe('publishBlocked: vistas con nombre repetido (doc 113)', () => {
+  const view: PublishBlockedItem = {
+    collection: 'views', kind: 'view', entityId: 'v9', name: 'CLIENTE', schema: 'b_vu',
+    where: 'production', message: 'View CLIENTE already exists (schema a_vu)',
+    existing: { id: 'vx', name: 'CLIENTE', schema: 'a_vu', version: 'v4', owner: 'admin', publishedAt: '2026-10-10T10:00:00+00:00' },
+  };
+
+  it('grupo «Views» después de las tablas', () => {
+    const col: PublishBlockedItem = { kind: 'column', name: 'ID', message: 'm', where: 'production' };
+    expect(groupBlockedItems([col, view, table]).map((x) => [x.kind, x.label])).toEqual([
+      ['table', 'Tables'], ['view', 'Views'], ['column', 'Columns'],
+    ]);
+  });
+
+  it('contexto y dónde choca: el esquema de la vista y el de la que ya existe', () => {
+    expect(itemContext(view)).toBe('schema b_vu');
+    expect(itemWhere(view, fmt, userName))
+      .toBe('In production since v4, published by Admin on D(2026-10-10T10:00:00+00:00) (schema a_vu)');
+  });
+});
