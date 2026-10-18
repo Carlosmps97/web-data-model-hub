@@ -10,9 +10,9 @@
  */
 import { mapPool } from '@/lib/pool';
 import {
-  queryReportColumns, queryReportViews, type ReportColumnRow, type ReportViewRow,
+  queryRelationshipsReport, queryReportColumns, queryReportViews, type RelationshipRow, type ReportColumnRow,
+  type ReportViewRow,
 } from '@/services/reporting.service';
-import { queryRelationshipsReport, type RelationshipRow } from '../query.service';
 import { chunk, COLUMN_BATCH, RELATIONSHIP_BATCH, VIEW_BATCH } from './reportRows';
 
 /** Lotes en vuelo a la vez por lectura. */

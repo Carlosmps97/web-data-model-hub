@@ -689,6 +689,9 @@ Para estilar por clase sin componente React:
 | `.dmh-rvs-card`, `.dmh-rvs-table` (`th/td.is-added/.is-edited/.is-deleted`) | Card y matriz de conteos del resumen de cambios | review.css |
 | `.dmh-rvd-row.is-added/.is-edited/.is-deleted` | Fila del árbol de cambios tintada por verbo | review.css |
 | `.wk-node-pk`, `.wk-vnode`, `.wk-lod` | Franja PK / nodo vista / caja LOD del canvas | modeler.css |
+| `.dmh-rep-rail`, `.dmh-rep-card` (`-head/-ico/-title/-desc/-body/-foot/-links`) | Rail derecho del Reporting y sus cards de export | reporting.css |
+| `.dmh-rep-level.is-on`, `.dmh-rep-export-btn`, `.dmh-rep-export-note` | Nivel marcado de «Export to Excel», botón de descarga y nota bajo él | reporting.css |
+| `.dmh-rep-sumcard`, `.dmh-rep-bars`, `.dmh-rep-related` | Cards de indicadores del Reporting | reporting.css |
 
 ### Review: cambios tintados por verbo
 
@@ -696,6 +699,17 @@ Las pantallas de review presentan cada cambio con el mismo código de color verd
 
 - **Matriz de conteos** (card `ChangesSummary`, `.dmh-rvs-table`): columnas **Added / Modified / Deleted** con encabezado y celdas tintados — verde `--green-deep`, ámbar `--amber-deep`, rojo `--red` — con cuadritos `.sq` en el header (`--green` / `--amber` / `#DC4234`), ceros como `—` en `--text-muted-3` y cifras con `font-variant-numeric: tabular-nums`. Solo se pintan las filas de entidad (Tables, Columns, Views, Relationships…) con conteo > 0.
 - **Árbol de cambios** (popup `ChangesDetailModal` + `DiffTree`, `.dmh-rvd-row`): cada fila cambiada lleva fondo suave + **borde izquierdo de 3px** según el verbo — `is-added`: fondo `--green-tint-2`, borde `--green-deep`; `is-edited`: fondo `#FFFAF0`, borde `--amber-deep`; `is-deleted`: fondo `#FDF1EF`, borde `--red` y nombre tachado (`.dmh-rvd-name.strike`). La fila seleccionada agrega `outline` de 2px en `--blue`; los ancestros sin cambio propio van con texto tenue (`--text-muted`, peso 400).
+
+### Reporting: rail de exports, plantillas e indicadores
+
+La pantalla Reporting (`src/styles/reporting.css`, prefijo `.dmh-rep-`) pone a la izquierda la grilla con sus filtros y su selección, y a la derecha un rail fijo (`.dmh-rep-rail`, 312 px, `position: sticky`; a todo el ancho bajo 1080 px) con cuatro cards apiladas:
+
+- **«Export to Excel»** y **«Export with a template»** comparten la misma distribución (`.dmh-rep-card`, radio 13px, `--shadow-sm`): cabecera con ícono `FileSpreadsheet` sobre `--green-tint` (`.dmh-rep-card-ico`) y título navy, descripción tenue, cuerpo y pie con el botón verde de ancho completo «Download .xlsx» (`Button variant="success"`, `.dmh-rep-export-btn`, 40px) y la nota centrada «Only the N selected rows will be exported.» (`.dmh-rep-export-note`, 11.5px, `--text-muted-3`). En la primera, cada nivel es un botón con casilla (`.dmh-rep-level`; marcado, `.is-on`: casilla `--green` con check blanco, y `aria-pressed`) con su nombre y una ayuda de una línea. En la de plantillas, el cuerpo es el combo de la plantilla (`.rd-input`) y, si la plantilla tiene filtros, una nota con el mismo estilo de `.dmh-rep-export-note`: «N filter(s) · only matching rows are exported»; el pie suma «Manage templates…» (`Button variant="secondary" size="sm"`) separado por un borde (`.dmh-rep-card-links`).
+- Los indicadores **«Tables by subject area»** y **«Most related / in most projects»** (`.dmh-rep-sumcard`): título en mayúsculas de 11px; barras azules (`.dmh-rep-bar-fill` en `--blue` sobre un riel de 6px) para las carpetas y, para las tablas, el nombre físico en `--mono` navy con «N rel.» en `--blue` y «· N proj.» tenue.
+
+**Editor de plantillas («Manage templates…»).** `SheetTemplateEditor` usa estilos inline con los hex de la paleta del DS (como Admin con su paleta `C`): lista de plantillas a la izquierda (la activa con borde azul primario `#2E5BFF` y fondo `#F4F7FF`; cada ítem dice «sheet X · N columns · yours» y, si la plantilla tiene filtros, cuántos: «· 2 filters») y el formulario a la derecha, con títulos de sección en mayúsculas de 10.5px (`#9AA3B2`). La sección «Filters · a row is exported only if it meets every filter» pinta cada filtro en una grilla de cuatro columnas (`1.3fr 0.9fr 1fr auto`): el combo del dato (agrupado en *Table fields*, *Table UDPs*, *Column fields* y *Column UDPs*), el combo del operador, la caja del valor (`.rd-input`) y el botón de ícono X «Remove filter» (28px); debajo, «Add filter» (`Button variant="secondary" size="sm"` con `Plus`). Sin filtros, un texto tenue de 11.5px dice «No filters: every column of the selected tables is exported.». A las banderas PK, FK, Partition y Nullable sólo se les ofrece «is marked» e «is not marked», y ni ellas ni «is empty» / «is not empty» muestran caja de valor (queda la celda vacía); «is one of» se escribe separado por comas, con el placeholder «e.g. STRING, VARCHAR» (el resto, «Value»). Un dato que el proyecto no tiene se lista como «— not found» y lleva debajo, en ámbar (`#9A6B00`, 11.5px), «This data doesn't exist in this project — the filter sees it empty.». El primer problema de validación se muestra al pie en rojo (`#C0392B`, 12px).
+
+**Avisos del export con plantilla** (toasts de `sonner`): si ninguna fila cumple los filtros, uno informativo —«No rows match the template filters — nothing was exported.»— y no hay descarga; si salen filas, el de éxito dice cuántas con filtros («Exported 12 rows with the QA_MODELO template.») o, sin filtros, «Exported with the QA_MODELO template.».
 
 ---
 
@@ -724,7 +738,7 @@ BACKEND_API_URL=http://localhost:8000 node server.mjs
 La persistencia la maneja el backend FastAPI contra **Databricks Lakebase Postgres** (la base productiva). El frontend nunca habla con la base directamente, siempre pasa por FastAPI. Consideraciones que impactan al DS/UI:
 
 - Los cambios de un changeset se guardan **solo** vía un `changes_map` (colección `changeset_changes`), no como un blob gigante — el versionado por changesets trata cada cambio como su propio documento (updates chicos, diffs por slice). La UI de gobierno/review consume esos cambios paginados desde el server.
-- Reporting y catálogo trabajan **server-side** (slices, conteos agregados, búsqueda paginada) para escalar a cientos de miles de columnas; el frontend virtualiza grillas y memoiza el canvas (más el modo LOD del §5). El DS provee para esto la grilla virtualizada del Report Designer y los primitivos de tabla/badge.
+- Reporting y catálogo trabajan **server-side** (slices, conteos agregados, búsqueda paginada, lotes de ids) para escalar a cientos de miles de columnas; el frontend pagina la grilla del Reporting, virtualiza las listas largas de los popups y memoiza el canvas (más el modo LOD del §5). El DS provee para esto la tabla virtualizada `AffectedTable` y los primitivos de tabla/badge.
 - El invariante de persistencia relevante para cualquier campo nuevo: debe existir en **el tipo TS y en el modelo Pydantic** del backend, o se pierde al recargar (el read-path revalida con `extra="ignore"`).
 
 ```mermaid

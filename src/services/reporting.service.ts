@@ -7,7 +7,8 @@
 // lectura).
 //   GET /api/reporting/tables?projectId=&schema=   → ReportTableRow[]
 //   GET /api/reporting/columns?projectId=&tableId= → ReportColumnRow[] (no id = all)
-//   POST /api/reporting/columns/query · /views/query → lotes de ids en el CUERPO (doc 102)
+//   POST /api/reporting/columns/query · /views/query · /insights/relationships/query
+//        → lotes de ids en el CUERPO (doc 102)
 // Doc 102: `changesetId` = una versión PROPIA sin publicar (sin él, producción).
 
 import { apiGet, apiPost } from './http';
@@ -166,4 +167,28 @@ export function queryReportColumns(projectId: string, tableIds: string[], change
 export function queryReportViews(projectId: string, tableIds: string[], changesetId?: string | null): Promise<ReportViewRow[]> {
   if (tableIds.length === 0) return Promise.resolve([]);
   return apiPost<ReportViewRow[]>(`${API_BASE}/api/reporting/views/query`, lotBody(projectId, tableIds, changesetId));
+}
+
+/** Una fila de la hoja Relationships del export por niveles. */
+export interface RelationshipRow {
+  /** v2 (doc 19): UNA fila POR PAR de columnas — una FK compuesta repite `id`
+   *  con `pairIndex` incremental. parent = lado PK, child = lado FK. */
+  id: string; pairIndex?: number; pairCount?: number;
+  parent: string; parentSchema?: string; child: string; childSchema?: string;
+  parentTableId?: string; childTableId?: string;
+  parentTable?: string; parentColumn?: string; childTable?: string; childColumn?: string;
+  roleName?: string | null;
+  /** Doc 98: frases de la RELACIÓN (se repiten en cada fila de par). */
+  parentToChildPhrase?: string | null;
+  childToParentPhrase?: string | null;
+  cardinality: string; identifying: boolean; isSelfReferencing: boolean; crossSchema: boolean; label: string;
+}
+
+/** `POST /api/reporting/insights/relationships/query` — las filas de la hoja
+ *  Relationships (una por PAR de columnas), sólo de las relaciones con el padre
+ *  o el hijo en el LOTE de tablas (1..300 ids en el cuerpo). Con `changesetId`,
+ *  las de una versión PROPIA sin publicar (doc 102). Los lotes los arma
+ *  `fetchRelationshipsFor`. */
+export function queryRelationshipsReport(projectId: string, tableIds: string[], changesetId?: string | null): Promise<RelationshipRow[]> {
+  return apiPost<RelationshipRow[]>(`${API_BASE}/api/reporting/insights/relationships/query`, lotBody(projectId, tableIds, changesetId));
 }

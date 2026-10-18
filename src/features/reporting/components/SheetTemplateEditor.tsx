@@ -1,9 +1,10 @@
 /**
  * SheetTemplateEditor — alta y edición de plantillas de hoja Excel (doc 95 D11):
- * nombre, nombre de hoja y columnas (encabezado → dato del modelo o UDP). Son
- * dato: se editan sin redesplegar. Permisos de los saved reports (spec D11): cada
- * uno edita las suyas y comparte las que quiera; las compartidas ajenas se ven en
- * solo lectura y se pueden duplicar; un admin gobierna las compartidas.
+ * nombre, nombre de hoja, columnas (encabezado → dato del modelo o UDP) y
+ * filtros de filas (sale la fila que cumple todos). Son dato: se editan sin
+ * redesplegar. Permisos (spec D11): cada uno edita las suyas y comparte las que
+ * quiera; las compartidas ajenas se ven en solo lectura y se pueden duplicar; un
+ * admin gobierna las compartidas.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -12,18 +13,19 @@ import { Button, Dialog } from '@/components/ui';
 import { apiErrorMessage } from '@/services/http';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
 import {
-  BUILTIN_ORIGIN, canEditTemplate, cleanFileName, isKnownSource, moveItem, sourceLabel, sourceOptions, templateFileName,
-  templateProblems, type SheetTemplate, type SheetTemplateBody,
+  BUILTIN_ORIGIN, canEditTemplate, cleanFileName, filterNeedsValue, filterOps, isKnownSource, moveItem, sourceLabel,
+  sourceOptions, templateFileName, templateProblems, toFilterBody, toFilterDraft, type FilterDraft, type SheetTemplate,
+  type SheetTemplateBody,
 } from '../lib/sheetTemplates';
 import {
   createDefaultSheetTemplate, createSheetTemplate, deleteSheetTemplate, updateSheetTemplate,
 } from '../sheetTemplates.service';
 
-type Draft = SheetTemplateBody & { id?: string };
-const EMPTY: Draft = { name: '', sheetName: '', description: '', shared: false, fileName: '', columns: [{ header: '', source: 'column.physicalName' }] };
+type Draft = Omit<SheetTemplateBody, 'filters'> & { id?: string; filters: FilterDraft[] };
+const EMPTY: Draft = { name: '', sheetName: '', description: '', shared: false, fileName: '', columns: [{ header: '', source: 'column.physicalName' }], filters: [] };
 const toDraft = (t: SheetTemplate): Draft => ({
   id: t.id, name: t.name, sheetName: t.sheetName, description: t.description ?? '', shared: t.shared,
-  fileName: t.fileName ?? '', columns: t.columns.map((c) => ({ ...c })),
+  fileName: t.fileName ?? '', columns: t.columns.map((c) => ({ ...c })), filters: (t.filters ?? []).map(toFilterDraft),
 });
 
 /** Doc 105 (B6): «Next export:» con reloj propio de 1 s — calculado en el render
@@ -77,7 +79,7 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
   const patchDraft = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   const groups = useMemo(() => sourceOptions(defs), [defs]);
-  const problems = useMemo(() => templateProblems(draft), [draft]);
+  const problems = useMemo(() => templateProblems({ ...draft, filters: draft.filters.map(toFilterBody) }), [draft]);
   const hasBuiltin = templates.some((t) => t.origin === BUILTIN_ORIGIN);
   const current = templates.find((t) => t.id === draft.id) ?? null;
   const editable = !draft.id || (current !== null && canEditTemplate(current, me, isAdmin));
@@ -86,6 +88,18 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
 
   const setColumn = (i: number, patch: Partial<Draft['columns'][number]>) =>
     setDraft((d) => ({ ...d, columns: d.columns.map((c, j) => (j === i ? { ...c, ...patch } : c)) }));
+  const setFilter = (i: number, patch: Partial<FilterDraft>) =>
+    setDraft((d) => ({ ...d, filters: d.filters.map((f, j) => (j === i ? { ...f, ...patch } : f)) }));
+  /** Otro dato: si su lista de operadores no tiene el elegido, toma el primero (bandera → «is marked»). */
+  const setFilterSource = (i: number, source: string) =>
+    setDraft((d) => ({
+      ...d,
+      filters: d.filters.map((f, j) => {
+        if (j !== i) return f;
+        const ops = filterOps(source);
+        return { ...f, source, op: ops.some((o) => o.value === f.op) ? f.op : ops[0].value };
+      }),
+    }));
 
   const save = async () => {
     if (problems.length) { toast.error(problems[0]); return; }
@@ -95,6 +109,7 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
         name: draft.name.trim(), sheetName: draft.sheetName.trim(), description: draft.description?.trim() || null,
         shared: foreign || draft.shared, columns: draft.columns.map((c) => ({ header: c.header.trim(), source: c.source })),
         fileName: cleanFileName(draft.fileName),   // doc 102
+        filters: draft.filters.map(toFilterBody),
       };
       const saved = draft.id
         ? await updateSheetTemplate(projectId, draft.id, body)
@@ -152,7 +167,7 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
             <button key={t.id} type="button" onClick={() => choose(t.id)} style={listItem(t.id === selId)}>
               <span style={{ fontWeight: 600, color: '#1A2B4A' }}>{t.name}</span>
               <span style={{ fontSize: 11, color: '#8A93A5' }}>
-                sheet {t.sheetName} · {t.columns.length} columns · {ownerLabel(t, me)}
+                sheet {t.sheetName} · {t.columns.length} columns{t.filters?.length ? ` · ${filtersLabel(t.filters.length)}` : ''} · {ownerLabel(t, me)}
               </span>
             </button>
           ))}
@@ -236,12 +251,69 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
               Add column
             </Button>
           </div>
+          <div style={sectionTitle}>Filters · a row is exported only if it meets every filter</div>
+          {draft.filters.length === 0 && (
+            <div style={hint}>No filters: every column of the selected tables is exported.</div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {draft.filters.map((f, i) => {
+              const known = isKnownSource(f.source, groups);
+              return (
+                <div key={i}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 0.9fr 1fr auto', gap: 8, alignItems: 'center' }}>
+                    <select className="rd-input" value={f.source} onChange={(e) => setFilterSource(i, e.target.value)}
+                      aria-label={`Filter data ${i + 1}`}>
+                      {!known && <option value={f.source}>{sourceLabel(f.source)} — not found</option>}
+                      {groups.map((g) => (
+                        <optgroup key={g.group} label={g.group}>
+                          {g.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </optgroup>
+                      ))}
+                    </select>
+                    <select className="rd-input" value={f.op} onChange={(e) => setFilter(i, { op: e.target.value as FilterDraft['op'] })}
+                      aria-label={`Filter operator ${i + 1}`}>
+                      {opsShown(f).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                    {filterNeedsValue(f.op)
+                      ? (
+                        <input className="rd-input" value={f.text} onChange={(e) => setFilter(i, { text: e.target.value })}
+                          placeholder={f.op === 'isOneOf' ? 'e.g. STRING, VARCHAR' : 'Value'} aria-label={`Filter value ${i + 1}`} />
+                      )
+                      : <span />}
+                    <button type="button" style={iconBtn} aria-label="Remove filter"
+                      onClick={() => setDraft((d) => ({ ...d, filters: d.filters.filter((_, j) => j !== i) }))}><X size={13} /></button>
+                  </div>
+                  {!known && (
+                    <div style={{ fontSize: 11.5, color: '#9A6B00', marginTop: 3 }}>
+                      This data doesn&apos;t exist in this project — the filter sees it empty.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div>
+            <Button variant="secondary" size="sm" icon={Plus}
+              onClick={() => setDraft((d) => ({ ...d, filters: [...d.filters, { source: 'column.physicalName', op: 'contains', text: '' }] }))}>
+              Add filter
+            </Button>
+          </div>
           {editable && problems.length > 0 && <div style={{ fontSize: 12, color: '#C0392B' }}>{problems[0]}</div>}
         </fieldset>
       </div>
     </Dialog>
   );
 }
+
+/** Operadores del dato; uno guardado que no es de esa lista (p. ej. por API) se muestra igual. */
+function opsShown(f: FilterDraft): { value: FilterDraft['op']; label: string }[] {
+  const ops = filterOps(f.source);
+  if (ops.some((o) => o.value === f.op)) return ops;
+  return [...ops, filterOps('').find((o) => o.value === f.op) ?? { value: f.op, label: f.op }];
+}
+
+/** «1 filter» / «3 filters». */
+export const filtersLabel = (n: number): string => `${n} filter${n === 1 ? '' : 's'}`;
 
 /** «yours» / «shared by ana» / «yours · shared». */
 function ownerLabel(t: SheetTemplate, me: string | undefined): string {

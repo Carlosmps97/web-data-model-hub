@@ -31,7 +31,7 @@ Data Model Hub resuelve el ciclo de vida completo de un modelo de datos empresar
 1. **Modelar** visualmente tablas, columnas, vistas y relaciones sobre un canvas ER con notación de pata de gallo (crow's foot), auto-layout y bandas por "modelo/nivel" (por ejemplo RDV, UDV, DDV de un Data Vault).
 2. **Gobernar** los cambios: cada edición ocurre dentro de una *sesión* que se materializa en un *changeset/solicitud*, se envía a revisión, un aprobador decide y recién ahí se publica a producción.
 3. **Estandarizar** con glosario de términos/abreviaturas, dominios padre (plantillas de tipo de dato con cascada), reglas de nomenclatura y propiedades definidas por el usuario (UDP), todo versionado de forma independiente.
-4. **Reportar** la metadata con un motor de consulta (builder visual + caja SQL) sobre columnas, tablas, relaciones y vistas, con exportación a Excel/CSV.
+4. **Reportar** la metadata de un proyecto —tablas, columnas, relaciones y vistas— en una grilla con filtros, con exportación a Excel por niveles o con plantillas de hoja (columnas fijas y filtros de filas).
 5. **Administrar** el acceso (whitelist de correos asignados a una matriz de rol, doc 38), los roles y la matriz de permisos (RBAC), con sesión por token y auditoría.
 
 La navegación global se organiza en un *shell* con una barra superior persistente (`TopNav`) sobre la pantalla ruteada:
@@ -56,10 +56,10 @@ flowchart TD
 |------|----------|-------------|---------|
 | `/` | `HomeScreen` | Landing del workspace: contadores (tablas, vistas, relaciones, subject areas, proyectos), solicitudes asignadas y versiones (solo lectura). | sesión |
 | `/model` | `WorkspaceScreen` | Canvas ER completo: explorador de proyecto/carpetas/canvases, edición de tablas/columnas/vistas/relaciones, auto-layout, publicación. | sesión |
-| `/reporting` | `ReportingScreen` + `ReportDesigner` | Reporte tabular de metadata + diseñador de reportes (builder visual y SQL) con exportación. | sesión / `export` |
+| `/reporting` | `ReportingScreen` | Grilla de metadata con filtros y selección, «Export to Excel» por niveles, «Export with a template» (plantillas de hoja con filtros de filas) e indicadores. | sesión |
 | `/review` | `ReviewScreen` | Bandeja global de solicitudes con chip y filtro de proyecto: diff, impacto, aprobación/rechazo (con confirmación crítica si el request borra su proyecto), comentarios. | `review.decide` para decidir |
 | `/standards` | `StandardsScreen` | Glosario, dominios padre, definiciones de UDP, nomenclatura y reglas DDL **del proyecto elegido**, todo versionado con rollback por proyecto. | `model.view` (editar: `standards.edit`) |
-| `/admin` | `AdminScreen` | Usuarios, roles, matriz de permisos y auditoría. | `admin.manage` |
+| `/admin` | `AdminScreen` | Usuarios, roles y matriz de permisos. | `admin.manage` |
 
 Permisos del sistema (matriz RBAC, 1:1 con el backend): `model.view`, `model.edit`, `review.decide`, `publish`, `rollback`, `export`, `standards.edit`, `admin.manage`.
 
@@ -76,9 +76,9 @@ Permisos del sistema (matriz RBAC, 1:1 con el backend): `model.view`, `model.edi
 | Estado | **Zustand** | 5.0.12 | Stores del canvas, sesión (proyecto + versión activos), auth, undo y overlay bloqueante. |
 | Canvas ER | **@xyflow/react** (React Flow 12) | 12.11.0 | Nodos (tablas/figuras) y aristas (relaciones). |
 | Auto-layout | **elkjs** | 0.11.1 | Distribución automática del diagrama (`layered`/Sugiyama). |
-| Grillas | **@tanstack/react-virtual** | 3.14.5 | Virtualización de resultados de reporting a gran escala. |
+| Listas virtuales | **@tanstack/react-virtual** | 3.14.5 | Virtualización de las listas de afectados de los popups (`AffectedTable`). |
 | Notificaciones | **sonner** | 2.0.7 | Toasts globales. |
-| Export Excel | **xlsx** (SheetJS) | 0.18.5 | Workbook multi-hoja desde el reporting. |
+| Excel | **xlsx** (SheetJS) | 0.18.5 | Exports del Reporting (por niveles y con plantilla) y lectura del libro de la carga masiva. |
 | Export imagen | **html-to-image** | 1.11.13 | Captura del canvas a **SVG** (`toSvg`). |
 | Reglas DDL | **yaml** | 2.9.0 | Editor y parseo YAML de las reglas del Export DDL. |
 | Íconos | **lucide-react** | 1.21.0 | Iconografía consistente. |
@@ -160,7 +160,7 @@ Conceptos clave del dominio:
 - **Table / TableColumn**: la columna tiene `id` estable (sobrevive renames — las relaciones y los handles de React Flow se referencian por `id`, nunca por `name`), flags de clave (PK, surrogate, partition, FK con `fkManual`), `semanticTypeId`/`semanticValues` (tipo semántico transversal), `udpValues` (propiedades definidas por el usuario) y `tags`.
 - **View**: proyección SQL por rol embebida en la tabla (`select` multilínea, `where` AND-joined), renderizada en el inspector y exportable como `CREATE VIEW`.
 - **Relationship** (`src/services/governance.service.ts`): modelo v2 parent/child — `parentTableId`/`childTableId` + `pairs[]` (los pares de columnas de la FK), con `parentCardinality`/`childCardinality` (enum crow's foot por extremo), `identifying` y las frases de relación `parentToChildPhrase`/`childToParentPhrase` (doc 98: la etiqueta que el canvas y el export dibujan sobre el wire, formato Erwin `padre→hijo / hijo→padre`; se ocultan con el botón *Show/Hide relationship labels* del toolbar).
-- **Versionado** (`src/types/versioning.ts`): un changeset tiene estado `draft → submitted → approved/rejected`; expone `diff` (buckets added/edited/deleted por colección), `impact` (tablas/columnas tocadas) y `approvals`/`comments`.
+- **Versionado** (`src/types/versioning.ts`): un changeset tiene estado `draft → submitted → approved | rejected`; expone `diff` (buckets added/edited/deleted por colección), `impact` (tablas/columnas tocadas) y `approvals`/`comments`.
 
 ---
 
@@ -185,8 +185,10 @@ Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCa
 
 ### Reporting (`/reporting`)
 
-- Reporte tabular de metadata (`ReportingScreen`) con filtros por nombre, schema, proyecto y subject area (client-side + re-query server-side autoritativo) y exportación a Excel multi-hoja con `xlsx`.
-- **Report Designer** (`features/reporting/components/`: `ReportDesigner`, `FilterBuilder`, `ResultsGrid`, `SqlEditor`): motor de consulta basado en un `ReportSpec` compartido con el backend, generado tanto por el builder visual como por la caja SQL. Grilla virtualizada (`react-virtual`), paginación por cursor (`nextCursor`/`hasMore`), export CSV por streaming, queries guardadas e *insights* (scorecard de calidad, cobertura de UDP, uso de dominios/glosario, reporte de relaciones).
+- Grilla de metadata de un proyecto (`ReportingScreen`) —o de una versión propia sin publicar— con búsqueda por nombre, filtros por schema, proyecto y subject area, el switch Show (Tables · Columns · Tables + Columns) y selección («Select all» cubre todo el proyecto).
+- **Export to Excel** por niveles con `xlsx`: una hoja por nivel marcado (tablas, columnas, tablas + columnas, relaciones, vistas, definiciones), armada en el navegador con lecturas por lotes.
+- **Export with a template** (`features/reporting/components/`: `SheetTemplateCard`, `SheetTemplateEditor`): una hoja con el formato fijo de una plantilla guardada del proyecto (p. ej. QA_MODELO) y sus filtros de filas — operadores «is», «is not», «is one of» (valores separados por comas), «contains», «does not contain», «starts with», «is empty» e «is not empty»; «is marked» / «is not marked» para las banderas PK, FK, Partition y Nullable.
+- Indicadores «Tables by subject area» y «Most related / in most projects».
 
 ### Data Standards (`/standards`)
 
@@ -196,7 +198,7 @@ Componentes en `src/features/modeler/components/`: `WorkspaceScreen`, `ModelerCa
 
 ### Admin / RBAC (`/admin`)
 
-- `AdminScreen`, `UserModal`, `RoleModal`, `PermissionMatrix`: **whitelist de acceso** (correos asignados a un rol — dan el login SSO; sin contraseñas, doc 38), roles y matriz de permisos, más auditoría (`AuditEntry`). La cuenta local `admin` convive en la lista (con reset de contraseña, `hasPassword`). Todo gated por `admin.manage` (`admin.service`).
+- `AdminScreen`, `UserModal`, `RoleModal`, `PermissionMatrix`: **whitelist de acceso** (correos asignados a un rol — dan el login SSO; sin contraseñas, doc 38), roles y matriz de permisos. La cuenta local `admin` convive en la lista (con reset de contraseña, `hasPassword`). Todo gated por `admin.manage` (`admin.service`).
 
 ### Auth (`/login`)
 
@@ -335,37 +337,7 @@ curl -s http://localhost:8000/api/projects \
 # → {"success":true,"data":[{"id":"...","name":"Core Banking"}]}
 ```
 
-### 3. `ReportSpec` — IR compartido del reporting
-
-El mismo objeto lo produce el builder visual y la caja SQL, y lo consumen la grilla y el export:
-
-```jsonc
-{
-  "from": "columns",
-  "select": ["table.name", "name", "dataType", "isPrimaryKey"],
-  "where": {
-    "op": "and",
-    "conditions": [
-      { "field": "isPrimaryKey", "op": "eq", "value": true },
-      { "field": "dataType", "op": "in", "value": ["varchar", "string"] }
-    ]
-  },
-  "groupBy": [],
-  "aggregations": [],
-  "orderBy": [{ "field": "table.name", "dir": "asc" }],
-  "limit": 100
-}
-```
-
-```ts
-// Ejecutar y paginar por cursor
-const page1 = await runQuery(spec);
-if (page1.hasMore) {
-  const page2 = await runQuery(spec, page1.nextCursor!);
-}
-```
-
-### 4. Flujo de gobernanza (editar → revisar → publicar)
+### 3. Flujo de gobernanza (editar → revisar → publicar)
 
 ```mermaid
 sequenceDiagram

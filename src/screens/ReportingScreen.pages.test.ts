@@ -45,7 +45,7 @@ function rerender() {
 async function mount() {
   props = {
     projectId: 'p1', projectName: 'P', changesetId: null, versionLabel: null, onVersionError: vi.fn(),
-    onExportBusy: vi.fn(), projectPicker: null, versionPicker: null, onDesign: vi.fn(),
+    onExportBusy: vi.fn(), projectPicker: null, versionPicker: null,
   };
   resetFake();
   ReportingScreen(props);

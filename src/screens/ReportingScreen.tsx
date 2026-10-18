@@ -38,12 +38,11 @@ import {
   FileSpreadsheet,
   Layers,
   Search,
-  SlidersHorizontal,
   TableProperties,
 } from 'lucide-react';
 
 import {
-  COLUMN_BATCH, ReportDesigner, SheetTemplateCard, columnSheetRow, fetchColumnsFor, fetchRelationshipsFor, fetchViewsFor,
+  COLUMN_BATCH, SheetTemplateCard, columnSheetRow, fetchColumnsFor, fetchRelationshipsFor, fetchViewsFor,
   joinedSheetRow, levelsFileName, ownOpenVersions, productionLabel, readErrorText, relationshipSheetRow, sheetHeaders,
   sortColumnRows, tableSheetRow, udpKeysOf, unionSorted, vanishedVersionText, VERSION_TOAST, versionGoneText,
   versionOptionLabel, viewSheetRow, type SheetRow,
@@ -96,9 +95,9 @@ function initialProjectId(projects: Project[]): string | null {
   return sortProjects(projects)[0]?.id ?? null;
 }
 
-/** Doc 105 (B3): por qué el proyecto, la versión y «Design report» no se
- *  pueden cambiar mientras corre un export (terminaría igual y bajaría el
- *  archivo de lo que ya no está en pantalla). */
+/** Doc 105 (B3): por qué el proyecto y la versión no se pueden cambiar
+ *  mientras corre un export (terminaría igual y bajaría el archivo de lo que
+ *  ya no está en pantalla). */
 const EXPORT_BUSY_HINT = 'Wait for the export to finish';
 
 /** Doc 105 (B4): toast de «no se pudo listar tus versiones» (uno, aunque se repita). */
@@ -358,7 +357,6 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
 // ── component ──────────────────────────────────────────────────────────────────
 
 export default function ReportingScreenWrapper() {
-  const [designer, setDesigner] = useState(false);
   // Doc 75 D13: todo reporte es de UN proyecto — el wrapper lo elige y lo comparte.
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
@@ -468,8 +466,8 @@ export default function ReportingScreenWrapper() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [recheckVersions]);
-  // Doc 105 (B3): export en curso (por niveles o con plantilla) — Project,
-  // Version y Design report quedan deshabilitados hasta que termine.
+  // Doc 105 (B3): export en curso (por niveles o con plantilla) — Project y
+  // Version quedan deshabilitados hasta que termine.
   const [exportBusy, setExportBusy] = useState(false);
   const pick = <ProjectPick projects={projects} projectId={projectId} onPick={setProjectId} busy={exportBusy} />;
   if (!projectId) {
@@ -483,13 +481,6 @@ export default function ReportingScreenWrapper() {
       </div></div>
     );
   }
-  if (designer) {
-    return (
-      <div style={{ height: '100%', minHeight: 0 }}>
-        <ReportDesigner key={projectId} projectId={projectId} projectPicker={pick} onClose={() => setDesigner(false)} />
-      </div>
-    );
-  }
   const projectName = projects.find((p) => p.id === projectId)?.name ?? '';
   const versionPick = (
     <VersionPick production={production} own={own} versionId={version?.id ?? null} onPick={setVersionId} busy={exportBusy} />
@@ -497,12 +488,12 @@ export default function ReportingScreenWrapper() {
   return (
     <ReportingScreen key={`${projectId}:${version?.id ?? 'production'}`} projectId={projectId} projectName={projectName}
       changesetId={version?.id ?? null} versionLabel={version?.versionLabel ?? null} onVersionError={recheckVersions}
-      onExportBusy={setExportBusy} projectPicker={pick} versionPicker={versionPick} onDesign={() => setDesigner(true)} />
+      onExportBusy={setExportBusy} projectPicker={pick} versionPicker={versionPick} />
   );
 }
 
 export function ReportingScreen({
-  projectId, projectName, changesetId, versionLabel, onVersionError, onExportBusy, projectPicker, versionPicker, onDesign,
+  projectId, projectName, changesetId, versionLabel, onVersionError, onExportBusy, projectPicker, versionPicker,
 }: {
   projectId: string; projectName: string;
   /** Doc 102 (D1): versión PROPIA sin publicar del reporte; null = producción. */
@@ -512,7 +503,7 @@ export function ReportingScreen({
   onVersionError: (err?: unknown) => void;
   /** Doc 105 (B3): hay un export en curso (`false` también al desmontarse). */
   onExportBusy: (busy: boolean) => void;
-  projectPicker: React.ReactNode; versionPicker: React.ReactNode; onDesign: () => void;
+  projectPicker: React.ReactNode; versionPicker: React.ReactNode;
 }) {
   // Doc 102: con una versión propia el reporte es ESA versión (producción + sus
   // cambios): la grilla la carga completa y toda lectura lleva su id.
@@ -527,7 +518,7 @@ export function ReportingScreen({
   const [levels, setLevels] = useState<Set<LevelKey>>(new Set<LevelKey>(['tables', 'columns']));
   const [exporting, setExporting] = useState(false);
   // Doc 105 (B3): la card de plantillas avisa si exporta; con cualquiera de los
-  // dos exports en curso el wrapper deshabilita Project / Version, y acá Design report.
+  // dos exports en curso el wrapper deshabilita Project / Version.
   const [templateBusy, setTemplateBusy] = useState(false);
   const exportBusy = exporting || templateBusy;
   useEffect(() => {
@@ -1286,20 +1277,6 @@ export function ReportingScreen({
                   ))}
                 </div>
               )}
-            </div>
-
-            {/* Report Designer — motor de consulta (SQL + filtros UDP). Bajo el rail. */}
-            <div className="dmh-rep-card" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {/* Doc 102: el motor de consultas lee producción. Doc 105 (B3): no durante un export. */}
-              <Button variant="primary" icon={SlidersHorizontal} onClick={onDesign} disabled={draftMode || exportBusy}
-                title={exportBusy ? EXPORT_BUSY_HINT : undefined} style={{ width: '100%', justifyContent: 'center' }}>
-                Design report
-              </Button>
-              <span style={{ fontSize: 11.5, color: 'var(--text-muted-2)', textAlign: 'center' }}>
-                {exportBusy ? `${EXPORT_BUSY_HINT}.`
-                  : draftMode ? 'The query engine reads production — switch Version to Production to use it.'
-                    : <>Query engine · SQL &amp; UDP filters</>}
-              </span>
             </div>
           </div>
         </div>

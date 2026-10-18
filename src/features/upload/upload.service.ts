@@ -137,7 +137,6 @@ const PROFILES = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent
 const profileUrl = (pid: string, id: string) => `${PROFILES(pid)}/${encodeURIComponent(id)}`;
 
 export const listProfiles = (pid: string) => apiGet<UploadProfile[]>(PROFILES(pid));
-export const getProfile = (pid: string, id: string) => apiGet<UploadProfile>(profileUrl(pid, id));
 export const createProfile = (pid: string, body: UploadProfileBody) => apiPost<UploadProfile>(PROFILES(pid), body);
 export const updateProfile = (pid: string, id: string, body: UploadProfileBody) => apiPut<UploadProfile>(profileUrl(pid, id), body);
 export const deleteProfile = (pid: string, id: string) => apiDelete<{ deleted: boolean }>(profileUrl(pid, id));

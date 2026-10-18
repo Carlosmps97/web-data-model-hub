@@ -229,22 +229,20 @@ Del lado del backend, `GZipMiddleware` (`minimum_size=1024`) comprime todo paylo
 
 ## 4. Escala fuera del canvas
 
-### 4.1 Grilla del reporting virtualizada
+### 4.1 Grilla del Reporting y listas virtualizadas
 
-`src/features/reporting/components/ResultsGrid.tsx` (Report Designer) usa `@tanstack/react-virtual` 3.14.5 — el único consumidor de esa dependencia:
+La grilla de la pantalla Reporting (`src/screens/ReportingScreen.tsx`) no se virtualiza: acota lo que trae. Sin filtros pide páginas de 50 tablas (`listReportTables(projectId, { limit: 50, offset })`) y la siguiente llega cuando la fila centinela del final entra en vista (`IntersectionObserver`); el primer filtro baja el proyecto completo para filtrar en el cliente. Las columnas, vistas y relaciones de la selección viajan en lotes de ids por POST (300 tablas por lote; 2 000 en vistas) con a lo sumo 4 lotes en vuelo (`mapPool`, `features/reporting/lib/reportFetch.ts`), y los dos exports a Excel se arman en el navegador sólo con la selección.
+
+La virtualización vive en `AffectedTable` (`src/components/ui/AffectedTable.tsx`), la tabla de las listas de «a qué afecta» de los popups de Data Standards (conflictos y apply del glosario, cascada de un dominio, confirm del rollback). Usa `@tanstack/react-virtual` 3.14.5 — el único consumidor de esa dependencia:
 
 ```ts
 const virt = useVirtualizer({
-  count: rows.length,
-  getScrollElement: () => parentRef.current,
-  estimateSize: () => 34,   // alto estimado por fila (px)
-  overscan: 12,             // filas de colchón fuera del viewport
+  count: rows.length, getScrollElement: () => scrollRef.current, estimateSize: () => ROW_H, overscan: 12,   // ROW_H = 36
 });
 ```
 
-- Solo montan DOM las filas visibles más el overscan; cada fila se posiciona con `translateY` absoluto sobre un contenedor de alto total `virt.getTotalSize()`.
-- **Scroll infinito por cursor keyset**: al quedar a menos de 400 px del fondo (`scrollHeight - scrollTop - clientHeight < 400`) se dispara `onLoadMore` y el backend entrega la página siguiente por cursor — la grilla nunca trae las 400 mil filas del catálogo al navegador.
-- **Sort server-side** por click en el header, solo sobre campos indexados (las columnas UDP y los resultados agrupados no son ordenables desde la grilla); el header es sticky.
+- Solo montan DOM las filas visibles más el overscan; cada fila se posiciona con `translateY` absoluto sobre un contenedor de alto total `virt.getTotalSize()`: miles de filas sin costo.
+- **Paginado en el servidor** opcional: con `onEndReached`, al quedar a menos de 8 filas del fondo se pide la página siguiente, y cada página se une con `mergePage` (una respuesta repetida o fuera de orden se descarta).
 
 ### 4.2 Export SVG con import dinámico
 

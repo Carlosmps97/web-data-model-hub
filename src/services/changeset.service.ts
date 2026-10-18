@@ -13,7 +13,6 @@ export interface Changeset {
   submittedAt?: string; reviewedBy?: string; reviewedAt?: string; reviewNote?: string;
 }
 
-export const getChangeset = (id: string) => apiGet<Changeset>(`${CS}/${encodeURIComponent(id)}`);
 export const recordChange = (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) =>
   apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
 /** Procedencia de un alta (doc 51): la muestra el historial de auditoría

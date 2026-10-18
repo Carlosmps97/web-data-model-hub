@@ -8,7 +8,7 @@
 // registran en el changeset con el DOC COMPLETO (el overlay REEMPLAZA).
 // Producción se toca SOLO en el apply del approve; el ROLLBACK las revierte.
 // Sin changeset, las LECTURAS van al REST directo; las ESCRITURAS exigen una
-// versión en edición (doc 104: sin escritura directa a producción).
+// versión en edición.
 
 import { apiGet } from './http';
 import * as csvc from '@/services/changeset.service';
@@ -159,10 +159,8 @@ export function tableViews(tableId: string): Promise<{ views: TableViewRow[]; to
   return apiGet<{ views: TableViewRow[]; total: number }>(`${VIEWS}/for-table?${params.toString()}`);
 }
 
-/** Doc 104 (ronda 2): crear / editar / borrar una vista va SIEMPRE por la
- *  versión en edición (como tablas y columnas en governance). El POST/PUT/
- *  DELETE directo de antes sólo lo alcanzaba un popup abierto cuando la sesión
- *  se degradó — y escribía producción sin revisión. */
+/** Crear / editar / borrar una vista va SIEMPRE por la versión en edición
+ *  (como tablas y columnas en governance): si la sesión se degradó, rechaza. */
 function editingCs(): string {
   const s = useSessionStore.getState();
   if (s.openMode !== 'editing' || !s.activeChangesetId) {

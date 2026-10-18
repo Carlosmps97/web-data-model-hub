@@ -14,7 +14,7 @@ vi.mock('@/services/changeset.service', async (importOriginal) => {
 });
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(), setSubjectAreaLayout: vi.fn(), setSubjectAreaDrawings: vi.fn(),
-  setSubjectAreaTables: vi.fn(), setSubjectAreaViews: vi.fn(), getSubjectArea: vi.fn(),
+  setSubjectAreaTables: vi.fn(), setSubjectAreaViews: vi.fn(),
   deleteSubjectArea: vi.fn(), createSubjectArea: vi.fn(), updateSubjectArea: vi.fn(),
   listFolders: vi.fn(async () => []), listSubjectAreas: vi.fn(async () => []), listProjects: vi.fn(async () => []),
 }));

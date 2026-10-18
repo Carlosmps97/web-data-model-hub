@@ -1,8 +1,9 @@
 /**
  * SheetTemplateCard — «Export with a template» (doc 95 D11): baja UNA hoja con el
  * formato fijo de una plantilla guardada del proyecto (p. ej. QA_MODELO), sobre
- * la MISMA selección y filtros que el export por niveles. Las plantillas son
- * dato: se crean y editan en «Manage templates…» sin redesplegar.
+ * la MISMA selección y filtros que el export por niveles; los filtros de la
+ * plantilla eligen, además, qué filas salen. Las plantillas son dato: se crean y
+ * editan en «Manage templates…» sin redesplegar.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -14,7 +15,7 @@ import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.servi
 import { listSheetTemplates } from '../sheetTemplates.service';
 import { templateFileName, templateRows, type SheetTemplate } from '../lib/sheetTemplates';
 import { readErrorText } from '../lib/reportVersions';
-import SheetTemplateEditor from './SheetTemplateEditor';
+import SheetTemplateEditor, { filtersLabel } from './SheetTemplateEditor';
 
 export default function SheetTemplateCard({
   projectId, selectedCount, disabled, resolveTables, fetchColumns, onBusyChange, versionToastId,
@@ -25,7 +26,7 @@ export default function SheetTemplateCard({
   resolveTables: () => Promise<ReportTableRow[]>;
   fetchColumns: (tableIds: string[]) => Promise<ReportColumnRow[]>;
   /** Doc 105 (B3): avisa si hay un export en curso (y `false` al desmontarse) —
-   *  el Reporting deshabilita Project / Version / Design report mientras tanto. */
+   *  el Reporting deshabilita Project / Version mientras tanto. */
   onBusyChange?: (busy: boolean) => void;
   /** Doc 105 (R2-B3/A5-o4): en modo versión, id del toast compartido con el aviso
    *  «showing Production» del Reporting (y el texto de un 403/404 lo explica). */
@@ -66,12 +67,19 @@ export default function SheetTemplateCard({
       const tables = await resolveTables();
       if (tables.length === 0) { toast.error('Select at least one row to export.'); return; }
       const columns = await fetchColumns(tables.map((t) => t.id));
+      const rows = templateRows(selected, tables, columns);
+      const filtered = (selected.filters?.length ?? 0) > 0;
+      if (filtered && rows.length === 0 && columns.length > 0) {
+        toast.info('No rows match the template filters — nothing was exported.');
+        return;
+      }
       const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(templateRows(selected, tables, columns),
-        { header: selected.columns.map((c) => c.header) });
+      const ws = XLSX.utils.json_to_sheet(rows, { header: selected.columns.map((c) => c.header) });
       XLSX.utils.book_append_sheet(wb, ws, selected.sheetName);
       XLSX.writeFile(wb, templateFileName(selected, new Date()));   // doc 102: nombre de la plantilla
-      toast.success(`Exported with the ${selected.name} template.`);
+      toast.success(filtered
+        ? `Exported ${rows.length} row${rows.length === 1 ? '' : 's'} with the ${selected.name} template.`
+        : `Exported with the ${selected.name} template.`);
     } catch (err: unknown) {
       if (!alive.current) return;
       const text = readErrorText(err, 'Could not build the Excel file.', !!versionToastId);
@@ -99,6 +107,9 @@ export default function SheetTemplateCard({
               {templates.map((t) => <option key={t.id} value={t.id}>{t.name} · sheet {t.sheetName}</option>)}
             </select>
           )}
+        {selected?.filters?.length ? (
+          <div className="dmh-rep-export-note">{filtersLabel(selected.filters.length)} · only matching rows are exported</div>
+        ) : null}
       </div>
       <div className="dmh-rep-card-foot">
         <Button variant="success" icon={Download} className="dmh-rep-export-btn" onClick={exportTemplate}

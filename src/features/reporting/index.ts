@@ -1,6 +1,5 @@
 // Public API of the `reporting` feature (doc 102). Import from `@/features/reporting`;
 // never reach into its subdirectories.
-export { default as ReportDesigner } from './components/ReportDesigner';
 export { default as SheetTemplateCard } from './components/SheetTemplateCard';
 export {
   COLUMN_BATCH, columnSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows, tableSheetRow,

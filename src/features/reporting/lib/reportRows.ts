@@ -3,7 +3,7 @@
 // columnas, por separado (`tableSheetRow` / `columnSheetRow`) o unida en una
 // fila por columna con la metadata de su tabla (`joinedSheetRow`). Los UDPs
 // salen como columnas dinámicas «UDP · <def>» (unión de claves, orden estable).
-import type { RelationshipRow } from '../query.service';
+import type { RelationshipRow } from '@/services/reporting.service';
 import type { ReportColumnRow, ReportTableRow, ReportViewRow } from '@/services/reporting.service';
 
 export type SheetRow = Record<string, string | number>;

@@ -41,8 +41,6 @@ export interface DdlValidateResult extends DdlValidationReport {
   condition: string;
 }
 
-export const listDdlRules = (projectId: string) => apiGet<DdlRule[]>(DDL(projectId));
-export const getDdlConfig = (projectId: string) => apiGet<DdlRulesetConfig>(`${DDL(projectId)}/config`);
 export const getDdlArtifacts = (projectId: string) => apiGet<DdlArtifact[]>(`${DDL(projectId)}/artifacts`);
 export const getDdlTemplates = (projectId: string) => apiGet<DdlTemplatesPayload>(`${DDL(projectId)}/templates`);
 export const validateDdlRule = (projectId: string, rule: DdlRuleEditInput) =>

@@ -6,12 +6,12 @@
 // Doc 105 (A5-o4): una versión transferida mostraba el texto del canvas.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
-import type { ReportTableRow } from '@/services/reporting.service';
+import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import type { SheetTemplate } from '../lib/sheetTemplates';
-import { byText, resetFake, runEffects } from './fakeReact.testutil';
+import { byText, resetFake, runEffects, textOf } from './fakeReact.testutil';
 
 vi.mock('react', async (orig) => (await import('./fakeReact.testutil')).fakeReact(await orig<object>()));
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
 vi.mock('xlsx', () => ({
   utils: { book_new: vi.fn(() => ({})), json_to_sheet: vi.fn(() => ({})), book_append_sheet: vi.fn() }, writeFile: vi.fn(),
 }));
@@ -33,9 +33,9 @@ const tick = () => new Promise((r) => setTimeout(r, 0));
 
 type Props = Parameters<typeof SheetTemplateCard>[0];
 /** La card con la plantilla ya cargada y elegida; `busy` = estado «exportando» en pantalla. */
-function render(over: Partial<Props> = {}, busy = false) {
+function render(over: Partial<Props> = {}, busy = false, tpl: SheetTemplate = TPL) {
   // useState en orden: templates, selId, busy, managing.
-  resetFake((init, i) => (i === 0 ? [TPL] : i === 1 ? 't1' : i === 2 ? busy : init));
+  resetFake((init, i) => (i === 0 ? [tpl] : i === 1 ? 't1' : i === 2 ? busy : init));
   return SheetTemplateCard({
     projectId: 'p1', selectedCount: 1, disabled: false,
     resolveTables: async () => [TABLE], fetchColumns: async () => [], ...over,
@@ -103,5 +103,42 @@ describe('SheetTemplateCard', () => {
     await clickExport(tree);
     expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
     expect(toast.success).toHaveBeenCalledWith('Exported with the QA template.');
+  });
+
+  describe('con filtros', () => {
+    const PK_ONLY: SheetTemplate = { ...TPL, columns: [{ header: 'CAMPO', source: 'column.physicalName' }],
+      filters: [{ source: 'column.isPrimaryKey', op: 'isNotEmpty' }] };
+    const column = (physicalName: string, isPrimaryKey: boolean) =>
+      ({ tableId: 'tb1', physicalName, isPrimaryKey, ordinal: 0 }) as ReportColumnRow;
+
+    it('la card dice cuántos filtros tiene la plantilla elegida', () => {
+      expect(textOf(render({}, false, PK_ONLY))).toContain('1 filter · only matching rows are exported');
+      expect(textOf(render())).not.toContain('only matching rows');
+    });
+
+    it('baja sólo las filas que cumplen y el aviso dice cuántas', async () => {
+      const tree = render({ fetchColumns: async () => [column('ID', true), column('NOMBRE', false)] }, false, PK_ONLY);
+      runEffects();
+      await clickExport(tree);
+      expect(vi.mocked(XLSX.utils.json_to_sheet).mock.calls[0][0]).toEqual([{ CAMPO: 'ID' }]);
+      expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
+      expect(toast.success).toHaveBeenCalledWith('Exported 1 row with the QA template.');
+    });
+
+    it('sin columnas en las tablas elegidas no culpa a los filtros: baja la hoja como sin filtros', async () => {
+      const tree = render({ fetchColumns: async () => [] }, false, PK_ONLY);
+      runEffects();
+      await clickExport(tree);
+      expect(toast.info).not.toHaveBeenCalled();
+      expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
+    });
+
+    it('si ninguna fila cumple, avisa y no baja nada', async () => {
+      const tree = render({ fetchColumns: async () => [column('NOMBRE', false)] }, false, PK_ONLY);
+      runEffects();
+      await clickExport(tree);
+      expect(XLSX.writeFile).not.toHaveBeenCalled();
+      expect(toast.info).toHaveBeenCalledWith('No rows match the template filters — nothing was exported.');
+    });
   });
 });

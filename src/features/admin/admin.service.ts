@@ -28,16 +28,6 @@ export interface Role {
   permissions: Record<string, boolean>;
 }
 
-export interface AuditEntry {
-  id: string;
-  at: string;
-  actor: string;
-  action: string;
-  target?: string;
-  targetType?: string;
-  meta?: Record<string, unknown>;
-}
-
 /** Alta en la whitelist (doc 38): correo + rol. `password` queda solo para
  *  cuentas locales (el backend la exige si el username no es un correo). */
 export interface CreateUserInput {
@@ -63,7 +53,6 @@ export const deleteRole = (key: string) => apiDelete<{ id: string }>(`${ADMIN}/r
 
 // ── Catálogo de permisos (columnas/filas de la matriz) + auditoría ──
 export const getPermissions = () => apiGet<Permission[]>(`${ADMIN}/permissions`);
-export const getAudit = (limit = 200) => apiGet<AuditEntry[]>(`${ADMIN}/audit?limit=${limit}`);
 
 /** Etiquetas legibles de cada permiso (filas de la matriz, pantalla 14 + R10). */
 export const PERMISSION_LABELS: Record<string, string> = {

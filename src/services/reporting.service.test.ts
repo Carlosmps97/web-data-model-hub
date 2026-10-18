@@ -5,7 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
 import { apiGet, apiPost } from '@/services/http';
 import {
-  countReportTables, listReportColumns, listReportFilters, listReportTables, queryReportColumns, queryReportViews,
+  countReportTables, listReportColumns, listReportFilters, listReportTables, queryRelationshipsReport, queryReportColumns,
+  queryReportViews,
 } from './reporting.service';
 
 beforeEach(() => {
@@ -37,6 +38,14 @@ describe('reporting.service (doc 102)', () => {
     expect(apiPost).toHaveBeenCalledWith('/api/reporting/columns/query', { projectId: 'p1', tableIds: ['t1', 't2'], changesetId: 'cs1' });
     await queryReportViews('p1', ['t1']);
     expect(apiPost).toHaveBeenLastCalledWith('/api/reporting/views/query', { projectId: 'p1', tableIds: ['t1'] });
+  });
+  it('relaciones del lote por POST (hoja Relationships), con la versión sólo si hay', async () => {
+    await queryRelationshipsReport('p1', ['t1'], 'cs1');
+    expect(apiPost).toHaveBeenCalledWith('/api/reporting/insights/relationships/query',
+      { projectId: 'p1', tableIds: ['t1'], changesetId: 'cs1' });
+    await queryRelationshipsReport('p1', ['t2'], null);
+    expect(apiPost).toHaveBeenLastCalledWith('/api/reporting/insights/relationships/query',
+      { projectId: 'p1', tableIds: ['t2'] });
   });
   it('lote vacío = cero pedidos', async () => {
     expect(await queryReportColumns('p1', [])).toEqual([]);

@@ -1,7 +1,7 @@
 // Doc 70 §4.2: filas puras del reporte tabular (pantalla + Excel).
 import { describe, expect, it } from 'vitest';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
-import type { RelationshipRow } from '../query.service';
+import type { RelationshipRow } from '@/services/reporting.service';
 import {
   chunk, columnSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf,
   unionSorted, viewSheetRow,

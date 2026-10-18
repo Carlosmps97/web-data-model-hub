@@ -5,22 +5,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/changeset.service', () => ({ effective: vi.fn(), recordChange: vi.fn() }));
-vi.mock('./modeler.service', () => ({
-  setSubjectAreaLayout: vi.fn(), setSubjectAreaDrawings: vi.fn(),
-  // Doc 104 (ronda 2): endpoints directos de producción — no deben llamarse.
-  createFolder: vi.fn(), renameFolder: vi.fn(), moveFolder: vi.fn(), deleteFolder: vi.fn(),
-  createSubjectArea: vi.fn(), updateSubjectArea: vi.fn(), deleteSubjectArea: vi.fn(),
-}));
+vi.mock('./modeler.service', () => ({}));
 
 import * as csvc from '@/services/changeset.service';
-import * as mod from './modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import * as struct from './structure.service';
 import type { SubjectArea } from './modeler.service';
-
-// Doc 105: las escrituras directas ya no existen en modeler.service (el mock de
-// arriba las define igual: ningún camino debe llamar a un endpoint directo).
-const direct = mod as unknown as Record<string, ReturnType<typeof vi.fn>>;
 
 const R1 = [{ x: 200, y: 40 }, { x: 200, y: 160 }];
 const R2 = [{ x: 260, y: -30 }];
@@ -347,15 +337,12 @@ describe('posiciones enteras (doc 100, P6)', () => {
     await expect(struct.setSubjectAreaLayout('sa1', { t1: { x: 1.6, y: 2.2 } }))
       .rejects.toThrow('requires a working copy in edit mode');
     await expect(struct.setSubjectAreaDrawings('sa1', [])).rejects.toThrow('requires a working copy in edit mode');
-    expect(direct.setSubjectAreaLayout).not.toHaveBeenCalled();
-    expect(direct.setSubjectAreaDrawings).not.toHaveBeenCalled();
     expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });
 
 describe('mensajes en inglés (doc 100, P4)', () => {
   it('un canvas o una carpeta que ya no están en la working copy', async () => {
-    await expect(struct.getSubjectArea('nope')).rejects.toThrow('This canvas is no longer in the working copy.');
     await expect(struct.updateSubjectArea('nope', { projectId: 'p1', name: 'x' })).rejects.toThrow('This canvas is no longer in the working copy.');
     await expect(struct.setSubjectAreaLayout('nope', { t1: { x: 1, y: 1 } })).rejects.toThrow('This canvas is no longer in the working copy.');
     await expect(struct.renameFolder('nope', 'x')).rejects.toThrow('This folder is no longer in the working copy.');
@@ -378,8 +365,6 @@ describe('acciones del Explorer sin sesión de edición (doc 104, ronda 2)', () 
       struct.deleteSubjectArea('sa1'),
     ];
     for (const a of attempts) await expect(a).rejects.toThrow('requires a working copy in edit mode');
-    for (const fn of [direct.createFolder, direct.renameFolder, direct.moveFolder, direct.deleteFolder,
-      direct.createSubjectArea, direct.updateSubjectArea, direct.deleteSubjectArea]) expect(fn).not.toHaveBeenCalled();
     expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });
@@ -400,11 +385,10 @@ describe('arrangeSubjectArea', () => {
     expect(recorded()[0].routes).toEqual({ r1: R1 });
   });
 
-  it('sin working copy NO escribe en producción (exige edición, doc 104)', async () => {
+  it('sin working copy no escribe (exige edición)', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: null });
     await expect(struct.arrangeSubjectArea('sa1', { t1: { x: 1, y: 2 } }))
       .rejects.toThrow('requires a working copy in edit mode');
-    expect(direct.setSubjectAreaLayout).not.toHaveBeenCalled();
     expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 });

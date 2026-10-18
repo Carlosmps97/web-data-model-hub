@@ -42,13 +42,8 @@ export const listSchemas = async (): Promise<DbSchema[]> => {
   return rows.sort(byName);
 };
 
-/** Lista SIEMPRE publicada del proyecto (Database Explorer): ignora el changeset activo. */
-export const listPublishedSchemas = async (): Promise<DbSchema[]> =>
-  (await apiGet<DbSchema[]>(PROJECT_SCHEMAS())).sort(byName);
-
-/** Doc 104 (ronda 2): SIEMPRE dentro de una versión en edición — el POST
- *  directo de antes sólo lo alcanzaba el gestor de esquemas abierto cuando la
- *  sesión se degradó (versión transferida, eliminada o enviada). */
+/** SIEMPRE dentro de una versión en edición: si la sesión se degradó (versión
+ *  transferida, eliminada o enviada) rechaza con un mensaje legible. */
 export const createSchema = async (name: string, description?: string, kind?: SchemaKind): Promise<DbSchema> => {
   const cs = writeCs();
   if (!cs) throw new Error('Creating a schema requires a version in edit mode.');
@@ -90,6 +85,6 @@ export const renameSchema = (id: string, newName: string): Promise<{ tables: num
  *  vistas en su estado efectivo. */
 export const deleteSchema = async (id: string): Promise<void> => {
   const cs = writeCs();
-  if (!cs) throw new Error('Deleting a schema requires a version in edit mode.');   // doc 104: sin DELETE directo
+  if (!cs) throw new Error('Deleting a schema requires a version in edit mode.');
   await apiPost(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/delete`);
 };

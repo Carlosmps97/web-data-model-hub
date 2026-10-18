@@ -1,17 +1,25 @@
 /**
  * sheetTemplates — plantillas de hoja Excel del Reporting (doc 95 D11): un
- * formato FIJO guardado como dato (nombre de hoja + columnas encabezado → dato).
- * Funciones PURAS: catálogo de datos, filas de la hoja (con las MISMAS filas del
- * export tabular, `reportRows`), validación del editor y nombre del archivo. El
- * backend solo valida la FORMA de `source`: sumar un dato nuevo es solo acá.
+ * formato FIJO guardado como dato (nombre de hoja + columnas encabezado → dato
+ * + filtros de filas). Funciones PURAS: catálogo de datos, filas de la hoja (con
+ * las MISMAS filas del export tabular, `reportRows`) y su filtrado, validación
+ * del editor y nombre del archivo. El backend solo valida la FORMA de `source`:
+ * sumar un dato nuevo es solo acá.
  */
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import { sortColumnRows, type SheetRow } from './reportRows';
 
 export interface SheetTemplateColumn { header: string; source: string }
+/** Operadores de un filtro (espejo de `FilterOp` del backend). */
+export type FilterOp = 'is' | 'isNot' | 'isOneOf' | 'contains' | 'notContains' | 'startsWith' | 'isEmpty' | 'isNotEmpty';
+/** Filtro de filas: sale la fila que cumple TODOS. `isOneOf` lleva `values`;
+ *  los «empty», nada; el resto, `value`. */
+export interface SheetTemplateFilter { source: string; op: FilterOp; value?: string | null; values?: string[] | null }
 export interface SheetTemplateBody {
   name: string; sheetName: string; description?: string | null; columns: SheetTemplateColumn[];
-  /** Spec D11 («dueño + compartida, como los saved reports»): la ven todos en el proyecto. */
+  /** Plantillas guardadas antes de los filtros llegan sin la clave. */
+  filters?: SheetTemplateFilter[];
+  /** Spec D11 (dueño + compartida): la compartida la ven todos en el proyecto. */
   shared: boolean;
   /** Doc 102: nombre del archivo con marcadores {yyyy} {MM} {dd} {HH} {mm} {ss}
    *  (hora LOCAL de quien exporta); vacío ⇒ `<plantilla>-<AAAA-MM-DD>.xlsx`. */
@@ -30,7 +38,11 @@ export function canEditTemplate(t: Pick<SheetTemplate, 'owner' | 'shared'>, user
 export const BUILTIN_ORIGIN = 'builtin:qa-modelo';
 
 type Getter = (c: ReportColumnRow, t: ReportTableRow | undefined, position: number) => string | number;
-export interface SheetSource { key: string; label: string; group: 'Table fields' | 'Column fields'; get: Getter }
+export interface SheetSource {
+  key: string; label: string; group: 'Table fields' | 'Column fields'; get: Getter;
+  /** Datos con VARIOS valores (la tabla está en varios canvases): el filtro mira cada uno. */
+  items?: (t: ReportTableRow | undefined) => string[];
+}
 
 const x = (b: boolean | null | undefined) => (b ? 'X' : '');
 const s = (v: string | null | undefined) => v ?? '';
@@ -39,9 +51,9 @@ const list = (xs: string[] | undefined) => (xs ?? []).join(', ');
 /** Datos del modelo disponibles para una columna de la hoja (los UDP van aparte). */
 export const SHEET_SOURCES: SheetSource[] = [
   // Doc 102: la jerarquía del modelador (plantilla Excel: SPACE › SUBJECT › DIAGRAMA).
-  { key: 'table.space', label: 'Space (sub-project)', group: 'Table fields', get: (_c, t) => list(t?.spaces) },
-  { key: 'table.subject', label: 'Subject (folder)', group: 'Table fields', get: (_c, t) => list(t?.subjectAreas) },
-  { key: 'table.diagram', label: 'Diagram (canvas)', group: 'Table fields', get: (_c, t) => list(t?.diagrams) },
+  { key: 'table.space', label: 'Space (sub-project)', group: 'Table fields', get: (_c, t) => list(t?.spaces), items: (t) => t?.spaces ?? [] },
+  { key: 'table.subject', label: 'Subject (folder)', group: 'Table fields', get: (_c, t) => list(t?.subjectAreas), items: (t) => t?.subjectAreas ?? [] },
+  { key: 'table.diagram', label: 'Diagram (canvas)', group: 'Table fields', get: (_c, t) => list(t?.diagrams), items: (t) => t?.diagrams ?? [] },
   { key: 'table.schema', label: 'Schema (database)', group: 'Table fields', get: (_c, t) => s(t?.schema) },
   { key: 'table.physicalName', label: 'Table physical name', group: 'Table fields', get: (c, t) => t?.physicalName ?? c.tableId },
   { key: 'table.logicalName', label: 'Table logical name', group: 'Table fields', get: (_c, t) => s(t?.logicalName) },
@@ -104,18 +116,108 @@ function cell(source: string, c: ReportColumnRow, t: ReportTableRow | undefined,
   return BY_KEY.get(source)?.get(c, t, position) ?? '';
 }
 
-/** Filas de la hoja: una por columna, ordenadas por tabla y orden único (PK
- *  primero), con la posición 1-based DENTRO de cada tabla. */
-export function templateRows(tpl: Pick<SheetTemplateBody, 'columns'>, tables: ReportTableRow[],
+// ── Filtros de filas ─────────────────────────────────────────────────────────
+const FLAG_SOURCES = new Set(['column.isPrimaryKey', 'column.isForeignKey', 'column.isPartition', 'column.isNullable']);
+const ALL_OPS: { value: FilterOp; label: string }[] = [
+  { value: 'is', label: 'is' }, { value: 'isNot', label: 'is not' }, { value: 'isOneOf', label: 'is one of' },
+  { value: 'contains', label: 'contains' }, { value: 'notContains', label: 'does not contain' },
+  { value: 'startsWith', label: 'starts with' }, { value: 'isEmpty', label: 'is empty' },
+  { value: 'isNotEmpty', label: 'is not empty' },
+];
+const FLAG_OPS: { value: FilterOp; label: string }[] = [
+  { value: 'isNotEmpty', label: 'is marked' }, { value: 'isEmpty', label: 'is not marked' },
+];
+export const FILTERS_MAX = 20;
+const FILTER_VALUE_MAX = 200;
+const FILTER_VALUES_MAX = 50;
+
+/** Operadores que se ofrecen para un dato: una bandera (X / vacío) sólo «marcada / no marcada». */
+export const filterOps = (source: string): { value: FilterOp; label: string }[] =>
+  (FLAG_SOURCES.has(source) ? FLAG_OPS : ALL_OPS);
+
+/** ¿El operador lleva valor? */
+export const filterNeedsValue = (op: FilterOp): boolean => op !== 'isEmpty' && op !== 'isNotEmpty';
+
+/** «a, b ,, c» → ['a', 'b', 'c'] (valores de «is one of»). La coma DENTRO de
+ *  () o <> es parte del valor: «DECIMAL(10,2), MAP<STRING, INT>» → 2 valores.
+ *  Si un ( o < queda sin cerrar, se corta en todas las comas. */
+export function splitValues(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let current = '';
+  for (const ch of text) {
+    if (ch === '(' || ch === '<') depth += 1;
+    else if (ch === ')' || ch === '>') depth = Math.max(0, depth - 1);
+    if (ch === ',' && depth === 0) { out.push(current); current = ''; } else current += ch;
+  }
+  out.push(current);
+  return (depth === 0 ? out : text.split(',')).map((v) => v.trim()).filter(Boolean);
+}
+
+/** Filtro en el editor: el valor es TEXTO (para «is one of», separado por comas). */
+export interface FilterDraft { source: string; op: FilterOp; text: string }
+
+export function toFilterDraft(f: SheetTemplateFilter): FilterDraft {
+  return { source: f.source, op: f.op, text: f.op === 'isOneOf' ? (f.values ?? []).join(', ') : f.value ?? '' };
+}
+
+/** Lo que se guarda: sin bordes y con la forma de cada operador. */
+export function toFilterBody(f: FilterDraft): SheetTemplateFilter {
+  if (!filterNeedsValue(f.op)) return { source: f.source, op: f.op };
+  if (f.op === 'isOneOf') return { source: f.source, op: f.op, values: splitValues(f.text) };
+  return { source: f.source, op: f.op, value: f.text.trim() };
+}
+
+const norm = (v: unknown): string => String(v ?? '').normalize('NFC').trim().toLowerCase();
+
+/** Valores del dato en la fila (varios para canvases/carpetas), normalizados y sin vacíos. */
+function filterItems(source: string, c: ReportColumnRow, t: ReportTableRow | undefined, position: number): string[] {
+  const src = UDP.test(source) ? undefined : BY_KEY.get(source);
+  const raw = src?.items ? src.items(t) : [cell(source, c, t, position)];
+  return raw.map(norm).filter((v) => v !== '');
+}
+
+type RowTest = (c: ReportColumnRow, t: ReportTableRow | undefined, position: number) => boolean;
+
+/** Los filtros preparados UNA vez (valores normalizados) para probar muchas
+ *  filas: la fila pasa si cumple TODOS, sin distinguir mayúsculas ni bordes. */
+export function compileFilters(filters: SheetTemplateFilter[] | undefined): RowTest {
+  const tests: RowTest[] = (filters ?? []).map((f) => {
+    const value = norm(f.value);
+    const wanted = new Set((f.values ?? []).map(norm));
+    return (c, t, position) => {
+      const items = filterItems(f.source, c, t, position);
+      switch (f.op) {
+        case 'isEmpty': return items.length === 0;
+        case 'isNotEmpty': return items.length > 0;
+        case 'is': return items.includes(value);
+        case 'isNot': return !items.includes(value);
+        case 'isOneOf': return items.some((v) => wanted.has(v));
+        case 'contains': return items.some((v) => v.includes(value));
+        case 'notContains': return !items.some((v) => v.includes(value));
+        case 'startsWith': return items.some((v) => v.startsWith(value));
+        default: return true;
+      }
+    };
+  });
+  return (c, t, position) => tests.every((test) => test(c, t, position));
+}
+
+/** Filas de la hoja: una por columna que cumple los filtros, ordenadas por tabla
+ *  y orden único (PK primero), con la posición 1-based REAL dentro de cada
+ *  tabla (filtrar no renumera). */
+export function templateRows(tpl: Pick<SheetTemplateBody, 'columns' | 'filters'>, tables: ReportTableRow[],
                              columns: ReportColumnRow[]): SheetRow[] {
   const byId = new Map(tables.map((t) => [t.id, t] as const));
   const sorted = sortColumnRows(columns, (id) => byId.get(id)?.physicalName ?? id);
   const pos = new Map<string, number>();
-  return sorted.map((c) => {
+  const keep = compileFilters(tpl.filters);
+  return sorted.flatMap((c) => {
     const p = (pos.get(c.tableId) ?? 0) + 1;
     pos.set(c.tableId, p);
     const t = byId.get(c.tableId);
-    return Object.fromEntries(tpl.columns.map((col) => [col.header, cell(col.source, c, t, p)]));
+    if (!keep(c, t, p)) return [];
+    return [Object.fromEntries(tpl.columns.map((col) => [col.header, cell(col.source, c, t, p)]))];
   });
 }
 
@@ -123,7 +225,7 @@ export function templateRows(tpl: Pick<SheetTemplateBody, 'columns'>, tables: Re
 const BAD_SHEET = /[:\\/?*[\]]/;
 
 /** Problemas del borrador del editor (las mismas reglas que valida el backend). */
-export function templateProblems(t: Pick<SheetTemplateBody, 'name' | 'sheetName' | 'columns' | 'fileName'>): string[] {
+export function templateProblems(t: Pick<SheetTemplateBody, 'name' | 'sheetName' | 'columns' | 'fileName' | 'filters'>): string[] {
   const out: string[] = [];
   if (!t.name.trim()) out.push('Give the template a name.');
   const sheet = t.sheetName.trim();
@@ -140,6 +242,19 @@ export function templateProblems(t: Pick<SheetTemplateBody, 'name' | 'sheetName'
   });
   const file = fileNameProblem(t.fileName);
   if (file) out.push(file);
+  const filters = t.filters ?? [];
+  if (filters.length > FILTERS_MAX) out.push(`A template can have at most ${FILTERS_MAX} filters.`);
+  filters.forEach((f, i) => {
+    if (f.op === 'isOneOf' && !(f.values ?? []).some((v) => v.trim())) out.push(`Filter ${i + 1} needs at least one value.`);
+    else if (f.op === 'isOneOf' && (f.values ?? []).filter((v) => v.trim()).length > FILTER_VALUES_MAX) {
+      out.push(`Filter ${i + 1} can have at most ${FILTER_VALUES_MAX} values.`);
+    }
+    else if (f.op !== 'isOneOf' && filterNeedsValue(f.op) && !(f.value ?? '').trim()) out.push(`Filter ${i + 1} needs a value.`);
+    // En code points, como `len()` del backend (un emoji = 1, no 2).
+    else if ([f.value, ...(f.values ?? [])].some((v) => [...(v ?? '').trim()].length > FILTER_VALUE_MAX)) {
+      out.push(`A filter value can have at most ${FILTER_VALUE_MAX} characters.`);
+    }
+  });
   return out;
 }
 

@@ -70,7 +70,6 @@ export const listFolders = (projectId: string) => apiGet<Folder[]>(`${API_BASE}/
 // ── Canvas (subject_areas) ──
 export const listSubjectAreas = (projectId: string, folderId?: string) =>
   apiGet<SubjectArea[]>(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/subject-areas${folderId !== undefined ? `?folderId=${encodeURIComponent(folderId)}` : ''}`);
-export const getSubjectArea = (saId: string) => apiGet<SubjectArea>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}`);
 
 // ── Relaciones (changeset-aware, sólo render en M3b-1) ──
 export const listRelationships = () => gov.listRelationships();

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import {
-  canEditTemplate, cleanFileName, fileNameProblem, isKnownSource, moveItem, sourceLabel, sourceOptions, templateFileName,
-  templateProblems, templateRows,
+  canEditTemplate, cleanFileName, compileFilters, fileNameProblem, filterOps, isKnownSource, moveItem, sourceLabel,
+  sourceOptions, splitValues, templateFileName, templateProblems, templateRows, toFilterBody, toFilterDraft,
+  type SheetTemplateFilter,
 } from './sheetTemplates';
 
-describe('canEditTemplate (final review #1: dueño + compartida, como los saved reports)', () => {
+describe('canEditTemplate (final review #1: dueño + compartida)', () => {
   it.each([
     [{ owner: 'ana', shared: false }, 'ana', false, true],       // la dueña
     [{ owner: 'ana', shared: true }, 'luis', false, false],      // compartida ajena: solo la usa
@@ -142,5 +143,106 @@ describe('campos Subject / Diagram / Space (doc 102)', () => {
       { header: 'DIAGRAMA', source: 'table.diagram' }] }, [t], [COLS[0]]);
     expect(rows[0]).toEqual({ SPACE: 'CPYBCA', SUBJECT: 'Despriorizado, Riesgos', DIAGRAMA: 'D1' });
     expect(templateRows({ columns: [{ header: 'S', source: 'table.space' }] }, [T], [COLS[0]])[0]).toEqual({ S: '' });
+  });
+});
+
+describe('filtros de la plantilla', () => {
+  const COLUMNS = [{ header: 'CAMPO', source: 'column.physicalName' }, { header: 'POS', source: 'column.position' }];
+  const rowsWith = (...filters: SheetTemplateFilter[]) =>
+    templateRows({ columns: COLUMNS, filters }, [T], COLS).map((r) => [r.CAMPO, r.POS]);
+
+  it('sin filtros salen todas las filas', () => {
+    expect(rowsWith()).toEqual([['CODCLAVEPARTYCLI', 1], ['CODMES', 2], ['TIPRANGOPOBLACION', 3]]);
+    expect(templateRows({ columns: COLUMNS }, [T], COLS)).toHaveLength(3);
+  });
+  it('sale la fila que cumple TODOS; la posición es la real en la tabla (no se renumera)', () => {
+    expect(rowsWith({ source: 'column.isPrimaryKey', op: 'isEmpty' })).toEqual([['TIPRANGOPOBLACION', 3]]);
+    expect(rowsWith({ source: 'column.isPrimaryKey', op: 'isNotEmpty' },
+      { source: 'column.parentDomain', op: 'startsWith', value: 'cod' })).toEqual([['CODCLAVEPARTYCLI', 1], ['CODMES', 2]]);
+    expect(rowsWith({ source: 'column.isPrimaryKey', op: 'isNotEmpty' },
+      { source: 'column.udp:Particion', op: 'isNotEmpty' })).toEqual([['CODMES', 2]]);
+  });
+  it('cada operador, sin distinguir mayúsculas ni espacios al borde', () => {
+    expect(rowsWith({ source: 'column.physicalName', op: 'is', value: ' codmes ' })).toEqual([['CODMES', 2]]);
+    expect(rowsWith({ source: 'column.physicalName', op: 'isNot', value: 'CODMES' })).toHaveLength(2);
+    expect(rowsWith({ source: 'column.physicalName', op: 'isOneOf', values: ['codmes', 'TIPRANGOPOBLACION'] }))
+      .toEqual([['CODMES', 2], ['TIPRANGOPOBLACION', 3]]);
+    expect(rowsWith({ source: 'column.physicalName', op: 'contains', value: 'clave' })).toEqual([['CODCLAVEPARTYCLI', 1]]);
+    expect(rowsWith({ source: 'column.physicalName', op: 'notContains', value: 'cod' })).toEqual([['TIPRANGOPOBLACION', 3]]);
+    expect(rowsWith({ source: 'column.udp:Clasificacion del Dato', op: 'is', value: 'no dac' })).toHaveLength(2);
+    expect(rowsWith({ source: 'table.udp:Dominio Principal', op: 'contains', value: 'pago' })).toHaveLength(3);
+    expect(rowsWith({ source: 'column.position', op: 'is', value: '2' })).toEqual([['CODMES', 2]]);
+  });
+  it('un dato con varios valores (canvases, carpetas) cumple si ALGUNO cumple', () => {
+    const t: ReportTableRow = { ...T, diagrams: ['Canvas Uno', 'Canvas Dos'] };
+    const rows = (f: SheetTemplateFilter) => templateRows({ columns: COLUMNS, filters: [f] }, [t], COLS).length;
+    expect(rows({ source: 'table.diagram', op: 'is', value: 'canvas dos' })).toBe(3);
+    expect(rows({ source: 'table.diagram', op: 'isNot', value: 'canvas dos' })).toBe(0);
+    expect(rows({ source: 'table.diagram', op: 'isOneOf', values: ['X', 'Canvas Uno'] })).toBe(3);
+    expect(rows({ source: 'table.diagram', op: 'startsWith', value: 'canvas d' })).toBe(3);
+    expect(rows({ source: 'table.space', op: 'isEmpty' })).toBe(3);                     // sin espacios
+  });
+  it('un dato que ya no existe (UDP borrado) se ve vacío', () => {
+    expect(rowsWith({ source: 'column.udp:No Existe', op: 'isEmpty' })).toHaveLength(3);
+    expect(rowsWith({ source: 'column.udp:No Existe', op: 'is', value: 'x' })).toEqual([]);
+  });
+  it('sin filtros siempre deja pasar', () => {
+    expect(compileFilters(undefined)(COLS[0], T, 1)).toBe(true);
+    expect(compileFilters([])(COLS[0], T, 1)).toBe(true);
+  });
+  it('los filtros se preparan UNA vez para todas las filas', () => {
+    let reads = 0;
+    const filter = { source: 'column.physicalName', op: 'isOneOf' as const, get values() { reads += 1; return ['codmes']; } };
+    const many = Array.from({ length: 50 }, (_, i) => ({ ...COLS[1], id: `c${i}`, physicalName: i ? `X${i}` : 'CODMES' }));
+    expect(templateRows({ columns: COLUMNS, filters: [filter] }, [T], many)).toHaveLength(1);
+    expect(reads).toBe(1);
+  });
+  it('operadores por dato: las banderas sólo «is marked» / «is not marked»', () => {
+    expect(filterOps('column.isPrimaryKey')).toEqual([{ value: 'isNotEmpty', label: 'is marked' }, { value: 'isEmpty', label: 'is not marked' }]);
+    expect(filterOps('column.dataType').map((o) => o.label)).toEqual(
+      ['is', 'is not', 'is one of', 'contains', 'does not contain', 'starts with', 'is empty', 'is not empty']);
+  });
+  it('«is one of» se escribe separado por comas', () => {
+    expect(splitValues(' STRING, varchar ,, ')).toEqual(['STRING', 'varchar']);
+    // Revisión: la coma DENTRO de paréntesis es parte del valor (tipos como DECIMAL(10,2)).
+    expect(splitValues('DECIMAL(10,2), DECIMAL(18, 2) ,STRING')).toEqual(['DECIMAL(10,2)', 'DECIMAL(18, 2)', 'STRING']);
+    // …y dentro de <> (tipos complejos de Databricks).
+    expect(splitValues('MAP<STRING, INT>, STRUCT<id: INT, name: STRING>, ARRAY<DECIMAL(10,2)>'))
+      .toEqual(['MAP<STRING, INT>', 'STRUCT<id: INT, name: STRING>', 'ARRAY<DECIMAL(10,2)>']);
+    // Un ( o < sin cerrar no se traga el resto: se corta en todas las comas.
+    expect(splitValues('DECIMAL(10, 2, STRING, INT')).toEqual(['DECIMAL(10', '2', 'STRING', 'INT']);
+    expect(splitValues(')(, a')).toEqual([')(', 'a']);
+    expect(splitValues('a<b, c')).toEqual(['a<b', 'c']);
+    expect(splitValues('a), b > c, d')).toEqual(['a)', 'b > c', 'd']);
+    expect(toFilterBody(toFilterDraft({ source: 'column.dataType', op: 'isOneOf', values: ['DECIMAL(10,2)', 'INT'] })))
+      .toEqual({ source: 'column.dataType', op: 'isOneOf', values: ['DECIMAL(10,2)', 'INT'] });
+    expect(toFilterBody({ source: 'column.dataType', op: 'isOneOf', text: 'STRING, VARCHAR' }))
+      .toEqual({ source: 'column.dataType', op: 'isOneOf', values: ['STRING', 'VARCHAR'] });
+    expect(toFilterBody({ source: 'column.dataType', op: 'is', text: ' DATE ' })).toEqual({ source: 'column.dataType', op: 'is', value: 'DATE' });
+    expect(toFilterBody({ source: 'column.isPrimaryKey', op: 'isNotEmpty', text: 'x' })).toEqual({ source: 'column.isPrimaryKey', op: 'isNotEmpty' });
+    expect(toFilterDraft({ source: 'column.dataType', op: 'isOneOf', values: ['STRING', 'VARCHAR'] }))
+      .toEqual({ source: 'column.dataType', op: 'isOneOf', text: 'STRING, VARCHAR' });
+    expect(toFilterDraft({ source: 'column.dataType', op: 'is', value: 'DATE' })).toEqual({ source: 'column.dataType', op: 'is', text: 'DATE' });
+  });
+  it('valida como el backend', () => {
+    const base = { name: 'X', sheetName: 'S', columns: [{ header: 'A', source: 'column.physicalName' }] };
+    expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'is', value: ' ' }] }))
+      .toEqual(['Filter 1 needs a value.']);
+    expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'isOneOf', values: [] }] }))
+      .toEqual(['Filter 1 needs at least one value.']);
+    expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'is', value: 'x'.repeat(201) }] }))
+      .toEqual(['A filter value can have at most 200 characters.']);
+    expect(templateProblems({ ...base, filters: Array.from({ length: 21 }, () => ({ source: 'column.dataType', op: 'isEmpty' as const })) }))
+      .toEqual(['A template can have at most 20 filters.']);
+    expect(templateProblems({ ...base, filters: [{ source: 'column.isPrimaryKey', op: 'isNotEmpty' }] })).toEqual([]);
+    // El tope se cuenta en caracteres (code points), como `len()` del backend: un emoji = 1.
+    expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'is', value: '😀'.repeat(200) }] })).toEqual([]);
+    expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'isOneOf', values: ['😀'.repeat(201)] }] }))
+      .toEqual(['A filter value can have at most 200 characters.']);
+    // Revisión: el backend pide hasta 50 valores en «is one of» (sin esto, el 422 se veía ilegible).
+    expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'isOneOf', values: Array.from({ length: 50 }, (_, i) => `T${i}`) }] }))
+      .toEqual([]);
+    expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'isOneOf', values: Array.from({ length: 51 }, (_, i) => `T${i}`) }] }))
+      .toEqual(['Filter 1 can have at most 50 values.']);
   });
 });

@@ -102,14 +102,6 @@ export const listSubjectAreas = async (projectId: string): Promise<SubjectArea[]
     .sort((a, b) => a.name.localeCompare(b.name));
 };
 
-export const getSubjectArea = async (saId: string): Promise<SubjectArea> => {
-  const cs = readCs();
-  if (!cs) return mod.getSubjectArea(saId);
-  const sa = await fetchEffectiveSa(cs, saId);
-  if (!sa) throw new Error(CANVAS_GONE);
-  return sa;
-};
-
 async function fetchEffectiveSa(cs: string, saId: string): Promise<SubjectArea | null> {
   const rows = await csvc.effective<SubjectArea>(cs, 'subject_areas', { ids: [saId] });
   return rows.find((s) => s.id === saId) ?? null;

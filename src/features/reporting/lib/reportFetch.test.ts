@@ -2,9 +2,14 @@
 // los ids en el cuerpo; una vista con fuentes en dos tandas sale una sola vez.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/services/reporting.service', () => ({ queryReportColumns: vi.fn(), queryReportViews: vi.fn() }));
-import { queryReportColumns, queryReportViews, type ReportViewRow } from '@/services/reporting.service';
-import type { RelationshipRow } from '../query.service';
+// Columnas y vistas, mockeadas; las relaciones van por el servicio real (contra `fetch`).
+vi.mock('@/services/reporting.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/reporting.service')>()),
+  queryReportColumns: vi.fn(), queryReportViews: vi.fn(),
+}));
+import {
+  queryReportColumns, queryReportViews, type RelationshipRow, type ReportViewRow,
+} from '@/services/reporting.service';
 import { fetchColumnsFor, fetchRelationshipsFor, fetchViewsFor } from './reportFetch';
 
 const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);

@@ -2,7 +2,7 @@
 
 Última actualización: 2026-09-08 (doc 75: proyectos independientes; original 2026-07-06).
 
-Este documento describe, con base en el **código real** del frontend (Vite + React + Zustand + React Flow/xyflow), cómo circulan los datos en los seis flujos centrales de la aplicación: autenticación y arranque, apertura de un canvas, edición gobernada (changeset → review → publish), auto-organización del layout (ELK), el motor de reporting y el Export DDL con reglas. Se explican además dos patrones transversales: el **estado optimista** y el **viewer-lock (solo lectura)**.
+Este documento describe, con base en el **código real** del frontend (Vite + React + Zustand + React Flow/xyflow), cómo circulan los datos en los seis flujos centrales de la aplicación: autenticación y arranque, apertura de un canvas, edición gobernada (changeset → review → publish), auto-organización del layout (ELK), el Reporting (grilla, export por niveles y export con plantilla) y el Export DDL con reglas. Se explican además dos patrones transversales: el **estado optimista** y el **viewer-lock (solo lectura)**.
 
 La audiencia es de desarrolladores y stakeholders técnicos. Las rutas de archivo son absolutas para que puedan ubicarse en el repositorio.
 
@@ -22,7 +22,7 @@ Todo el estado del cliente vive en stores de Zustand. Cada uno tiene una respons
 | `useUndoStore` | `src/store/useUndoStore.ts` | Pila de inversas (Ctrl+Z) de la sesión de canvas: se vacía al cambiar de proyecto, modo o versión (doc 105, F3) y queda vacía y cerrada mientras se aplica una carga Excel en esa versión (doc 105, `clear({ until })`) | En memoria |
 | `useBusyStore` | `src/store/useBusyStore.ts` | `runBlocking(label, fn)`: overlay bloqueante por sesión durante acciones largas (doc 75 D18) | En memoria |
 
-Todos los lectores/escritores del modelo (`governance.service`, `structure.service`, `schemas.service`, el canvas, los paneles) leen `useSessionStore.getState().activeChangesetId` y arman las rutas de proyecto con `sessionProjectId()`; sin sesión, `rec()` lanza "An active changeset is required to edit.". (El `useChangesetStore` + puente `sessionChangesetBridge` y la identidad legacy `useIdentityStore` se retiraron en el doc 75 D14.)
+Todos los lectores/escritores del modelo (`governance.service`, `structure.service`, `schemas.service`, el canvas, los paneles) leen `useSessionStore.getState().activeChangesetId` y arman las rutas de proyecto con `sessionProjectId()`; sin sesión, `rec()` lanza "An active changeset is required to edit.". No hay otro store del changeset activo ni una identidad simulada: la identidad autoritativa es `useAuthStore` (doc 75 D14).
 
 El reset transversal `resetAppState()` (`src/store/resetAppState.ts`) borra en un solo punto todo el estado de trabajo ligado al usuario: la intención de apertura del canvas (`activeProjectId`/`openMode`/`activeChangesetId`), el workspace completo del modeler (selección, diagrama, árboles, drawings, instancia de React Flow), la pila de Undo, el header `X-Dev-User` y las preferencias "don't ask again" de `sessionStorage`. Se invoca en **tres** puntos: logout, 401 global y justo antes de un login nuevo (defensa contra sesiones que murieron sin logout). Sin él, el logout — que es navegación SPA, sin reload — dejaba al siguiente usuario heredando el canvas del anterior y saltándose el modal "Open model".
 
@@ -272,7 +272,7 @@ sequenceDiagram
 
 ### 4.1 El choke-point de escritura
 
-Toda mutación de tablas, columnas y relaciones pasa por el guard `writableCs()` de `governance.service` (`src/services/governance.service.ts`), que usan `rec()` (un cambio) y `recordChangesBulk` (un lote, doc 39). Carpetas, canvases, vistas y esquemas tienen su guard equivalente en `structure.service`, `views.service` y `schemas.service`: sin versión en edición fallan sin llamar al backend (doc 104), que además responde 409 a toda escritura directa del modelo (doc 105, D1).
+Toda mutación de tablas, columnas y relaciones pasa por el guard `writableCs()` de `governance.service` (`src/services/governance.service.ts`), que usan `rec()` (un cambio) y `recordChangesBulk` (un lote, doc 39). Carpetas, canvases, vistas y esquemas tienen su guard equivalente en `structure.service`, `views.service` y `schemas.service`: sin versión en edición fallan sin llamar al backend (doc 104); el backend, por su lado, escribe el modelo sólo dentro de una versión.
 
 ```ts
 const writableCs = (): string => {
@@ -315,7 +315,7 @@ Tras el submit, la modal hace dos cosas importantes: limpia `dirty` (checkpoint)
 
 ### 4.3 Review y decisión
 
-`ReviewScreen.tsx` (`src/screens/ReviewScreen.tsx`) es una bandeja global con chip y filtro de proyecto (doc 75 D20). Lista requests (`listVersions` filtrados por `submitted/approved/rejected`), y al seleccionar uno carga detalle + diff (`getChangeset`, `getDiff`). El diff trae impacto (tablas/columnas tocadas), entidades added/edited/deleted por colección y marca **conflictos** (`entity.conflict`: modificado en producción después de que esta versión lo editó).
+`ReviewScreen.tsx` (`src/screens/ReviewScreen.tsx`) es una bandeja global con chip y filtro de proyecto (doc 75 D20). Lista requests (`listVersions` filtrados por `submitted`, `approved` y `rejected`), y al seleccionar uno carga detalle + diff (`getChangeset`, `getDiff`). El diff trae impacto (tablas/columnas tocadas), entidades added/edited/deleted por colección y marca **conflictos** (`entity.conflict`: modificado en producción después de que esta versión lo editó).
 
 La presentación de los cambios es la del doc 31 (2026-07-24):
 
@@ -438,7 +438,7 @@ ELK no rutea los wires: solo asigna posiciones de nodos. El ruteo visual sigue s
 
 ### 5.2 Guardar layout
 
-Hay tres caminos de persistencia de posición. Todos graban el documento COMPLETO del canvas en la versión en edición (`PUT /api/changesets/{id}/changes`, upsert de `subject_areas`), con las posiciones nuevas mergeadas sobre el layout efectivo (`structure.service`, doc 104). El `PUT /api/subject-areas/{saId}/layout` directo ya no se usa y el backend lo rechaza con 409 (doc 105, D1).
+Hay tres caminos de persistencia de posición. Todos graban el documento COMPLETO del canvas en la versión en edición (`PUT /api/changesets/{id}/changes`, upsert de `subject_areas`), con las posiciones nuevas mergeadas sobre el layout efectivo (`structure.service`, doc 104).
 
 | Disparador | Método del store | Alcance |
 |---|---|---|
@@ -483,113 +483,98 @@ sequenceDiagram
 
 ---
 
-## 6. Flujo 5 — Reporting: ReportSpec, /query, grilla virtualizada y export CSV
+## 6. Flujo 5 — Reporting: grilla, export por niveles y export con plantilla
 
-### 6.1 El IR compartido: ReportSpec
+### 6.1 Lecturas de la grilla
 
-`src/features/reporting/query.service.ts` define `ReportSpec`, el mismo IR que el backend. Lo producen **dos** entradas y lo consumen la grilla, las queries guardadas y el export:
+`ReportingScreenWrapper` (`src/screens/ReportingScreen.tsx`) fija el proyecto y la versión —producción o una versión propia sin publicar (doc 102)— y `ReportingScreen` lee todo por `src/services/reporting.service.ts`, siempre con `projectId` y, en modo versión, con `changesetId`:
 
-```ts
-interface ReportSpec {
-  from: 'columns' | 'tables' | 'relationships' | 'views';
-  select: string[];
-  where?: WhereGroup | null;      // and/or/not anidables con Condition[]
-  groupBy: string[];
-  aggregations: Aggregation[];    // count/sum/avg/min/max...
-  orderBy: OrderBy[];
-  limit: number;
-}
-```
+| Lectura | Endpoint | Uso |
+|---|---|---|
+| `listReportTables(projectId, { limit: 50, offset })` | GET `/api/reporting/tables` | Páginas de la grilla sin filtros (doc 92: la fila centinela pide la siguiente con un `IntersectionObserver`) |
+| `listReportTables(projectId, {})` | GET `/api/reporting/tables` | El set completo: al aplicar el primer filtro (con *debounce*), para «Select all» con páginas pendientes y, con una versión propia, desde el inicio (doc 102) |
+| `countReportTables(projectId)` | GET `/api/reporting/tables/count` | El total real de la barra y de «Select all» |
+| `listReportFilters(projectId)` | GET `/api/reporting/filters` | Esquemas y canvases de los combos: todo el catálogo, no sólo lo cargado (doc 70) |
+| `fetchColumnsFor` → `queryReportColumns` | POST `/api/reporting/columns/query` | Columnas de las tablas en foco (switch Show: Columns · Tables + Columns) y de los dos exports |
 
-`ReportDesigner.tsx` maneja dos modos:
+La búsqueda y los combos Schema · Project · Subject area filtran en el cliente las filas cargadas; cada faceta calcula sus opciones excluyendo su propia selección. Los indicadores «Tables by subject area» y «Most related / in most projects» se calculan sobre esas mismas filas filtradas: las 5 carpetas con más tablas y las 5 tablas con más relaciones.
 
-- **Builder**: `getCatalog(from)` (`GET /api/reporting/catalog?from=`) trae los `FieldDef[]` (label, tipo, ops, `sortable`, `groupable`, `indexed`, `udp`). El usuario marca columnas (`select`), agrupa (`groupBy` → agrega `count`; doc 105: `regroup` quita el orden por fila que el agrupado ignoraría) y arma filtros con `FilterBuilder` (doc 105: una condición booleana nace con el `true` que muestra su combo y `between` tiene dos entradas, «From» y «To»). Las piezas puras del Builder viven en `lib/reportBuilder.ts`.
-- **SQL**: `SqlEditor` manda el texto a `validateSql(text)` (`POST /api/reporting/query/validate`). El **servidor es la autoridad de la gramática**: valida con sqlglot y devuelve `{spec, errors}`. Si es válido, el spec se vuelca al builder y se cambia de modo, con su vista y por `toBuilderSpec` (doc 105): sin `maxRows` —el tope total del `LIMIT n`, que el Builder no muestra— ni `resultColumns` —el orden del SELECT de un agrupado SQL—, con la página de 100; abrir un reporte guardado hace lo mismo. Una respuesta que llega con el texto ya cambiado o con el editor cerrado no decide nada (desde la ronda 7, una falla que llega así tampoco se avisa), una falla sin respuesta se avisa y «✓ Valid SQL» sale sólo para el texto que validó sin errores. Soporta UDP dinámico con la sintaxis `udp."Nombre"`; sin JOIN ni subqueries.
+### 6.2 Lotes por POST
 
-### 6.2 Ejecución y paginación keyset
+Los ids de tablas viajan en el CUERPO (`{ projectId, tableIds, changesetId? }`, doc 102): en la URL, 300 ids más las cabeceras pasan el tope de 16 KB de `server.mjs`. `features/reporting/lib/reportFetch.ts` trocea y despacha con `mapPool` (`src/lib/pool.ts`), con a lo sumo 4 lotes en vuelo (doc 105, B8):
 
-`runQuery(spec, cursor?)` → `POST /api/reporting/query?cursor=`. La respuesta es `QueryResult`:
+- `fetchColumnsFor`: lotes de 300 tablas (`COLUMN_BATCH`) contra `POST /api/reporting/columns/query`.
+- `fetchViewsFor`: lotes de 2 000 (`VIEW_BATCH`) contra `POST /api/reporting/views/query`, sin repetir una vista que llega en dos lotes.
+- `fetchRelationshipsFor`: lotes de 300 (`RELATIONSHIP_BATCH`) contra `POST /api/reporting/insights/relationships/query` (`queryRelationshipsReport` de `src/services/reporting.service.ts`, filas `RelationshipRow`: una por par de columnas); una relación con el padre en un lote y el hijo en otro sale una vez, con todas sus filas de par.
 
-```ts
-interface QueryResult {
-  rows: Record<string, unknown>[];
-  columns: ResultColumn[];        // dinámicas, incluyen UDP
-  nextCursor: string | null;      // keyset
-  hasMore: boolean;
-  meta: { grouped: boolean; warnings: string[]; scan?: 'index' | ... };
-}
-```
-
-La paginación es **keyset** (cursor opaco), no offset: a 400k filas nunca se traen todas al browser. `loadMore()` repite, con `result.nextCursor`, la consulta que produjo el resultado en pantalla (`shown`; doc 105: antes reusaba el `spec`/`sqlText` del formulario y, editado desde el Run, pegaba la página de otra consulta) y **concatena** las filas nuevas a las existentes (`rows: [...prev.rows, ...res.rows]`). Doc 105: cada consulta nueva —Run, ordenar, otra vista, abrir un spec— sube `seq` y deja viejas las que siguen en vuelo (su respuesta o su página ya no se muestran); `paging` evita que dos pedidos del mismo render (el scroll) traigan la página dos veces; y si la página falla, un toast da el motivo («Couldn't load more rows» si no hay otro).
+El primer lote que falla corta la lectura con su error, y los resultados conservan el orden de los lotes.
 
 ```bash
-curl -sS -X POST "http://localhost:8000/api/reporting/query" \
+curl -sS -X POST "http://localhost:8000/api/reporting/insights/relationships/query" \
   -H "X-Session-Token: <jwt>" -H "Content-Type: application/json" \
-  -d '{"from":"columns","select":["physicalName","dataType"],
-       "where":{"op":"and","conditions":[{"field":"schema","op":"eq","value":"core"}]},
-       "groupBy":[],"aggregations":[],"orderBy":[{"field":"physicalName","dir":"asc"}],"limit":100}'
-# → { "success": true, "data": {
-#     "rows":[...], "columns":[{"key":"physicalName","label":"Physical","type":"string"}],
-#     "nextCursor":"eyJwaHlzaWNhbE5hbWUiOiJhX2NvbCJ9", "hasMore":true,
-#     "meta":{"grouped":false,"warnings":[],"scan":"index"} } }
+  -d '{"projectId":"p1","tableIds":["t1","t2"]}'
+# → { "success": true, "data": [ { "id": "r1", "pairIndex": 0, "parent": "...", "child": "...",
+#                                  "cardinality": "...", "identifying": false, ... } ] }
 ```
 
-### 6.3 Grilla virtualizada + scroll infinito
+### 6.3 Export to Excel (por niveles)
 
-`ResultsGrid.tsx` usa `@tanstack/react-virtual` (`useVirtualizer`) para montar solo las filas visibles (altura estimada 34px, `overscan: 12`). El `onScroll` dispara `onLoadMore()` cuando `hasMore`, no está `loading` y falta menos de 400px para el fondo:
+`handleExport` arma el workbook en el navegador con `xlsx` (SheetJS). Resuelve las filas a exportar —la selección o, con «Select all» y páginas pendientes, todas las del proyecto que pasan los filtros (`resolveExportRows`)—, lee por lotes sólo lo que piden los niveles marcados y agrega una hoja por nivel con las funciones puras de `lib/reportRows.ts`:
 
-```ts
-if (result?.hasMore && !loading &&
-    el.scrollHeight - el.scrollTop - el.clientHeight < 400) onLoadMore();
-```
+| Nivel | Hoja(s) | Fuente |
+|---|---|---|
+| Tables overview | Tables | filas de la grilla (`tableSheetRow`; los UDP salen como columnas `UDP · <def>`) |
+| Columns detail | Columns | `fetchColumnsFor` (`columnSheetRow`) |
+| Tables + Columns (joined) | Tables + Columns | `fetchColumnsFor` (`joinedSheetRow`) |
+| Relationships | Relationships | `fetchRelationshipsFor` (`relationshipSheetRow`: una fila por par, con cardinalidad y frases, doc 98) |
+| Views detail | Views + View columns | `fetchViewsFor` (`viewSheetRow` + el detalle por columna) |
+| Definitions | Definitions | filas de la grilla |
 
-El header permite ordenar **server-side** sólo por los campos que el catálogo marca `sortable` (doc 105: `canSort`; al resto el backend responde 422 «Can't sort by '…': it has no index. …»), no-UDP y no-agrupados (`sortable = !!onSort && (canSort?.(c.key) ?? true) && !c.udp && !result.meta?.grouped`); un resultado del editor SQL no se ordena (la grilla no recibe `onSort`). Al hacer click, `onSort` vuelve a correr la consulta EN PANTALLA con el `orderBy` nuevo, y el formulario lo toma para el próximo Run (doc 105: antes corría el formulario, editado o no desde el Run, y con un resultado SQL fallaba). Con un Run en vuelo no se ordena (`running`; el encabezado sigue siendo el mismo `<button>`, con `aria-disabled`: `sortDisabled`); los encabezados ordenables son `<button>` con `aria-label` «Sort by <campo>» —más « (sorted ascending)» o « (sorted descending)» en el del orden vigente—, y un orden por un campo sin índice (p. ej. de un reporte guardado antes) se quita con aviso al correr, exportar y guardar (`withoutUnsortableOrder`; doc 105, rondas 6 y 7). Cada consulta nueva vuelve la grilla arriba sin remontarla (`resetKey` → `scrollTop = 0`: conserva el scroll horizontal y el foco); la página siguiente no la mueve. La barra muestra «N rows · M columns» (singular con 1, «+» si hay más), `meta.scan` (index vs collscan) como señal de rendimiento y « · loading…» mientras corre; las celdas booleanas salen «✓» / «·» y un «false» guardado como texto (UDP) ya no sale «✓» (`cellText`).
+Sin nivel marcado avisa «Pick at least one detail level to export.»; sin filas, «Select at least one row to export.». El archivo se llama `data-model-hub-report-<proyecto>[-<versión>]-<AAAA-MM-DD>.xlsx` (`levelsFileName`) y el aviso final es «Report exported to Excel.».
 
-### 6.4 Export CSV por streaming
+### 6.4 Export with a template (con filtros de filas)
 
-`exportCsv(spec)` hace `POST /api/reporting/export` con `fetch` directo (no `apiFetch`, porque el stream no bufferea el envelope JSON). Lee el token de `localStorage['dmh.token']` y lo manda como `X-Session-Token` (mismo contrato que `http.ts` — nunca `Authorization`), recibe el `blob` y fuerza la descarga con un `<a download>` sintético. Doc 105: sin respuesta del servidor el error es el mismo `NETWORK_ERROR_TEXT` del resto de la app, y un rechazo muestra el motivo del backend (`detail`, su `message` si es estructurado, o el `error` del envelope) en vez de sólo «Export failed (…)», y un corte a mitad de la descarga (falla `res.blob()`) también da `NETWORK_ERROR_TEXT` (ronda 3). Así se exportan datasets grandes sin materializarlos en memoria de JS como filas.
+`SheetTemplateCard` (`features/reporting/components/`) usa las MISMAS filas a exportar y `fetchColumnsFor`; `templateRows(plantilla, tablas, columnas)` (`lib/sheetTemplates.ts`) arma una fila por columna, ordenada por tabla y orden único (PK primero), y deja sólo las que pasan los filtros (`compileFilters`):
+
+- sale la fila que cumple TODOS los filtros de la plantilla, sin distinguir mayúsculas ni espacios al borde;
+- en Space, Subject y Diagram (varios valores) basta que cumpla uno; «is not» y «does not contain» piden que no cumpla ninguno;
+- «Column position» es la posición real en la tabla: filtrar no renumera;
+- un dato que no existe (un UDP borrado) se ve vacío.
+
+No hay endpoint de filtrado: los filtros viajan con la plantilla (`filters` de `/api/projects/{pid}/sheet-templates`, ver [api-reference.md](api-reference.md) §3.4.2) y se aplican en el navegador. Con filtros, la card muestra «N filter(s) · only matching rows are exported»; si nada cumple, avisa «No rows match the template filters — nothing was exported.» y no descarga; si salen filas, el aviso dice cuántas (p. ej. «Exported 12 rows with the QA_MODELO template.»). El nombre del archivo sale de `templateFileName` (doc 102).
 
 ### 6.5 Diagrama
 
 ```mermaid
 sequenceDiagram
   participant U as Usuario
-  participant RD as ReportDesigner
-  participant SQL as SqlEditor
-  participant Svc as query.service
+  participant RS as ReportingScreen
+  participant Svc as reporting.service
   participant API as Backend reporting
-  participant Grid as ResultsGrid (virtual)
+  participant TC as SheetTemplateCard
 
-  Note over U,API: Armar la consulta
-  alt modo builder
-    RD->>Svc: getCatalog(from)
-    Svc->>API: GET /reporting/catalog?from=columns
-    API-->>RD: FieldDef[]
-    U->>RD: select / groupBy / filtros -> ReportSpec
-  else modo SQL
-    U->>SQL: texto SQL-like
-    SQL->>API: POST /reporting/query/validate
-    API-->>SQL: { spec, errors }
-    SQL->>RD: onValidated(spec)
+  RS->>Svc: listReportTables(limit 50) + countReportTables + listReportFilters
+  Svc->>API: GET /reporting/tables · /tables/count · /filters
+  API-->>RS: filas, total y opciones de los combos
+  U->>RS: filtros + seleccion
+
+  Note over U,API: Export to Excel (por niveles)
+  U->>RS: Download .xlsx
+  RS->>Svc: fetchColumnsFor / fetchViewsFor / fetchRelationshipsFor
+  Svc->>API: POST /reporting/columns/query · /views/query · /insights/relationships/query (lotes, max. 4 en vuelo)
+  API-->>RS: filas por lote
+  RS->>RS: xlsx: una hoja por nivel -> descarga
+
+  Note over U,API: Export with a template
+  U->>TC: elige plantilla + Download .xlsx
+  TC->>Svc: fetchColumnsFor(ids)
+  Svc->>API: POST /reporting/columns/query (lotes)
+  TC->>TC: templateRows + compileFilters (navegador)
+  alt ninguna fila cumple
+    TC-->>U: No rows match the template filters
+  else hay filas
+    TC-->>U: una hoja -> descarga + Exported N rows
   end
-
-  U->>RD: Run
-  RD->>Svc: runQuery(spec)
-  Svc->>API: POST /reporting/query
-  API-->>Grid: { rows, columns, nextCursor, hasMore, meta }
-
-  Note over Grid,API: Scroll infinito (keyset)
-  U->>Grid: scroll cerca del fondo
-  Grid->>RD: onLoadMore()
-  RD->>Svc: runQuery(spec, nextCursor)
-  Svc->>API: POST /reporting/query?cursor=...
-  API-->>RD: siguiente pagina (rows concatenadas)
-
-  Note over U,API: Export
-  U->>RD: CSV
-  RD->>Svc: exportCsv(spec)
-  Svc->>API: POST /reporting/export (stream)
-  API-->>U: blob -> descarga <a download>
 ```
 
 ---
@@ -645,7 +630,7 @@ Payload real del puente (condensado del código de `rulesBridge.ts`):
 
 ### 7.2 Autoría de las reglas
 
-Las reglas se autoran y versionan en **Data Standards → DDL Export rules** (`src/features/standards/`, servicio `ddlRules.service.ts`): lectura por `GET /api/projects/{pid}/ddl-rules(/config|/templates|/artifacts)`, checks por `POST /api/projects/{pid}/ddl-rules/validate|/test|/impact`, y toda mutación vía `POST /api/projects/{pid}/standards/apply` (`applyStandards`; stream único `standards_versions` del proyecto — el router de reglas es read-only). El editor hace round-trip YAML con la dependencia `yaml 2.9.0`.
+Las reglas se autoran y versionan en **Data Standards → DDL Export rules** (`src/features/standards/`, servicio `ddlRules.service.ts`): lectura de reglas y configuración desde el snapshot de Standards (`GET /api/projects/{pid}/standards/snapshot`: `ddlRules`, `ddlConfig`) más `GET /api/projects/{pid}/ddl-rules/templates|/artifacts`, checks por `POST /api/projects/{pid}/ddl-rules/validate|/test|/impact`, y toda mutación vía `POST /api/projects/{pid}/standards/apply` (`applyStandards`; stream único `standards_versions` del proyecto — el router de reglas es read-only). El editor hace round-trip YAML con la dependencia `yaml 2.9.0`.
 
 ### 7.3 Diagrama
 
@@ -700,7 +685,7 @@ void createRelationship(rel).catch((err) => {
 
 ### 8.3 Drawings con debounce
 
-`addDrawing/updateDrawing/deleteDrawing` mutan el array local y agendan `persistDrawings()` con debounce de 500ms (`setSubjectAreaDrawings`: el canvas completo con el array de dibujos, como cambio de la versión en edición — doc 104; el `PUT …/drawings` directo responde 409 desde el doc 105). El flush captura el `saId` y la versión al **agendar**: si el usuario cambia de canvas dentro de la ventana, el disparo se cancela para no escribir dibujos ajenos, y si la sesión ya no edita esa versión, se descarta. Al cambiar de canvas o hacer `saveAll`, se hace flush inmediato; si ese flush falla, avisa igual que el guardado con debounce (doc 105, F1 — antes callaba).
+`addDrawing/updateDrawing/deleteDrawing` mutan el array local y agendan `persistDrawings()` con debounce de 500ms (`setSubjectAreaDrawings`: el canvas completo con el array de dibujos, como cambio de la versión en edición — doc 104). El flush captura el `saId` y la versión al **agendar**: si el usuario cambia de canvas dentro de la ventana, el disparo se cancela para no escribir dibujos ajenos, y si la sesión ya no edita esa versión, se descarta. Al cambiar de canvas o hacer `saveAll`, se hace flush inmediato; si ese flush falla, avisa igual que el guardado con debounce (doc 105, F1 — antes callaba).
 
 ### 8.4 Reconciliación de respuestas fuera de orden
 
@@ -752,7 +737,7 @@ El frontend es una SPA de Vite (React) que consume la API FastAPI. No se cubren 
 | `BACKEND_API_URL` | Frontend (runtime, `server.mjs`) | Destino del proxy `/api`; llega vía la variable `backend_api_url` del bundle. Sin ella el proxy responde 502 |
 | `AUTH_MODE` | Backend | `local` resuelve el actor por `X-Dev-User`; en producción la identidad es el token de sesión propio |
 
-El token de sesión se guarda en `localStorage['dmh.token']` (constante `TOKEN_KEY` en `useAuthStore`, y leído directo en `query.service.exportCsv`).
+El token de sesión se guarda en `localStorage['dmh.token']` (constante `TOKEN_KEY` en `useAuthStore`, el único que lo lee y lo escribe).
 
 ### 10.3 Base de datos: Databricks Lakebase Postgres
 
@@ -761,7 +746,7 @@ La BD productiva es **Databricks Lakebase Postgres**, consumida a través de un 
 - El backend arma el diagrama con queries batched (`$in`) y aplica el overlay del changeset **server-side**: una sola request por apertura, en vez de mover el catálogo completo (a escala real: 2,108 tablas / 96,184 columnas publicadas al 2026-07-26).
 - Los cambios de un changeset viven en la colección `changeset_changes` (un documento por cambio) — diseño del versionado por changesets, con updates chicos y diffs por slice. Nunca viajan crudos al cliente: se consumen vía `/effective` (lectura), `/diff` (review) y `/diff/details` (popup de detalle).
 - Las lecturas grandes se acotan con slices server-side (`?tableId=`, `?ids=`, `?q=&limit=`) para no bajar colecciones enteras.
-- El reporting depende de **índices**: `meta.scan` (index vs collscan) es la señal que la grilla expone; el ordenamiento server-side se habilita solo sobre campos indexados. La paginación es keyset (cursor), apta para 400k filas sin offset.
+- El reporting acota cada lectura: sin filtros, la grilla pide páginas de 50 tablas (`limit`/`offset`, doc 92), y las columnas, vistas y relaciones de la selección viajan en lotes de ids por POST (doc 102) con a lo sumo 4 en vuelo (doc 105). Las hojas Excel se arman en el navegador sólo con las filas seleccionadas.
 - Las escrituras se hacen con `$set` atómico por entidad (por ejemplo, en el reorder de columnas en tandas de 5), de modo que operaciones concurrentes sobre entidades distintas no se pisan.
 
 ---
@@ -778,9 +763,8 @@ La BD productiva es **Databricks Lakebase Postgres**, consumida a través de un 
 | Review / decisión | GET `/api/changesets/{id}` · GET `/api/changesets/{id}/diff` · POST `/api/changesets/{id}/diff/details` · POST `/api/changesets/{id}/review` · POST `.../withdraw` · POST `.../reopen` · POST `.../comments` |
 | Proyectos | GET/POST `/api/projects` · GET `/api/projects/{pid}/counts` (borrar/renombrar: cambio `projects/{pid}` en el draft) |
 | Versiones / rollback | GET `/api/versions[?projectId=]` · GET `/api/projects/{pid}/versions/published` · GET `/api/versions/compare` · GET `/api/requests` · GET `/api/users?can=` · GET `/api/users?includeDisabled=true` (nombres, doc 105) · POST `/api/changesets/{id}/rollback` |
-| Layout / drawings / miembros del canvas | PUT `/api/changesets/{id}/changes` (upsert del canvas completo, sobre GET `/api/changesets/{id}/effective/subject_areas?ids=`) — los PUT directos `/api/subject-areas/{saId}/layout` · `/drawings` · `/tables` responden 409 desde el doc 105 |
-| Reporting | GET `/api/reporting/catalog` · POST `/api/reporting/query` · POST `/api/reporting/query/sql` · POST `/api/reporting/query/validate` · GET `/api/reporting/facets` · POST `/api/reporting/export` · GET/POST/PUT/DELETE `/api/reporting/reports` · GET `/api/reporting/insights/*` |
-| Export DDL con reglas | GET `/api/projects/{pid}/ddl-rules` · POST `/api/projects/{pid}/ddl-rules/render` (autoría: GET `…/ddl-rules/config` · `/templates` · `/artifacts` · POST `…/ddl-rules/validate` · `/test` · `/impact` · POST `/api/projects/{pid}/standards/apply`) |
-| Reporting (todo con `projectId`) | GET `/api/reporting/tables` · `/filters` · `/columns` · POST `/api/reporting/columns/query` · `/views/query` (lotes, doc 102) · POST `/api/reporting/insights/relationships/query` (hoja Relationships por lotes, doc 105) |
+| Layout / drawings / miembros del canvas | PUT `/api/changesets/{id}/changes` (upsert del canvas completo, sobre GET `/api/changesets/{id}/effective/subject_areas?ids=`) |
+| Export DDL con reglas | GET `/api/projects/{pid}/ddl-rules` · GET `…/ddl-rules/config` · POST `…/ddl-rules/render` (autoría: GET `/api/projects/{pid}/standards/snapshot` · GET `…/ddl-rules/templates` · `/artifacts` · POST `…/ddl-rules/validate` · `/test` · `/impact` · POST `/api/projects/{pid}/standards/apply`) |
+| Reporting (todo con `projectId`) | GET `/api/reporting/tables` · `/tables/count` · `/filters` · `/columns` · POST `/api/reporting/columns/query` · `/views/query` (lotes, doc 102) · POST `/api/reporting/insights/relationships/query` (hoja Relationships por lotes, doc 105) · plantillas de hoja: GET/POST `/api/projects/{pid}/sheet-templates` · PUT/DELETE `…/sheet-templates/{id}` · POST `…/sheet-templates/default` (doc 95) |
 
 En producción (Databricks Apps) TODAS estas rutas son relativas al origen del front: el navegador nunca habla con el backend directo — `server.mjs` proxya `/api/*` con el token M2M del service principal (ver 2.4).
