@@ -114,6 +114,10 @@ describe('flush de dibujos al cambiar de canvas (doc 105, F1)', () => {
 
 describe('updateDrawing sin cambio real (doc 109)', () => {
   it('no graba ni marca el canvas sucio; un cambio real, sí', async () => {
+    // El guardado de dibujos es un temporizador de módulo (debounce de 500 ms):
+    // el que otro test dejó agendado caería dentro de la ventana que se mide acá.
+    await sleep(600);
+    vi.mocked(struct.setSubjectAreaDrawings).mockClear();
     useModelerStore.setState({ drawings: [{ id: 'd1', type: 'text', x: 0, y: 0, w: 100, h: 40, align: 'center', font: { size: 11, bold: true } }], dirty: false });
     useModelerStore.getState().updateDrawing('d1', { align: 'center', font: { size: 11, bold: true } });
     useModelerStore.getState().updateDrawing('nope', { align: 'left' });

@@ -1,6 +1,6 @@
 # Testing y consideraciones/límites del frontend — Data Model Hub
 
-Actualizado al 2026-10-18 (2 615 tests en 242 archivos, todos verdes con `npx vitest run`, también en orden aleatorio con `--sequence.shuffle` salvo un test que depende del orden, ver §1.3; `npx tsc --noEmit` sin errores; `npx eslint .` con 0 errores y 155 warnings, todos de `no-restricted-imports`).
+Actualizado al 2026-10-18 (2 615 tests en 242 archivos, todos verdes con `npx vitest run`, también en orden aleatorio con `--sequence.shuffle`; `npx tsc --noEmit` sin errores; `npx eslint .` con 0 errores y 155 warnings, todos de `no-restricted-imports`).
 
 Este documento describe cómo se verifica el frontend (SPA en Vite + React 19) y qué consideraciones de rendimiento y límites conocidos aplican al canvas del modelador y a la grilla del reporting. Está basado en el código real del repositorio `web-data-model-hub`.
 
@@ -46,7 +46,7 @@ test: {
 
 ### 1.3 Qué se testea hoy
 
-La suite al 2026-10-18: **2 615 tests en 242 archivos** (241 `*.test.ts`/`.tsx` bajo `src/` más `server.test.mjs` en la raíz del repo), contados y **verdes** con `npx vitest run` (242 archivos · 2 615 passed, ~10 s) y también con el orden aleatorio de `npx vitest run --sequence.shuffle`, salvo el test que depende del orden (ver al final del inventario). Inventario por área:
+La suite al 2026-10-18: **2 615 tests en 242 archivos** (241 `*.test.ts`/`.tsx` bajo `src/` más `server.test.mjs` en la raíz del repo), contados y **verdes** con `npx vitest run` (242 archivos · 2 615 passed, ~10 s) y también con el orden aleatorio de `npx vitest run --sequence.shuffle` (ver al final del inventario). Inventario por área:
 
 | Área | Archivos de test |
 |---|---|
@@ -68,7 +68,7 @@ La suite al 2026-10-18: **2 615 tests en 242 archivos** (241 `*.test.ts`/`.tsx` 
 
 Todos los mocks de `@/services/http` exponen también `LONG_TIMEOUT_MS: 120_000` (los servicios de proyecto lo usan para las acciones largas).
 
-La suite pasa también con `npx vitest run --sequence.shuffle`, salvo `useModelerStore.backgroundSaves.test.ts` › «updateDrawing sin cambio real (doc 109)»: con algunas semillas (p. ej. `--sequence.seed=3`) un guardado diferido de los dibujos que dejó otro test del archivo cae dentro de su espera de 800 ms. Doc 105 corrigió los dos que dependían del orden: `server.test.mjs` (el test del proxy fijaba el Bearer de un token que otro test del bloque renueva) y `useModelerStore.wireRoutes.test.ts`, que ahora repone el `reload` real del store en cada test (ronda 6: el describe del auto-arrange lo reemplazaba por un mock, el reemplazo quedaba para los tests siguientes y, en orden aleatorio, «un reload que llega antes que el guardado» nunca recargaba).
+La suite no depende del orden de los tests: pasa también con `npx vitest run --sequence.shuffle`. En `useModelerStore.backgroundSaves.test.ts`, «updateDrawing sin cambio real (doc 109)» mide una ventana de 800 ms sin guardados; el guardado de dibujos es un temporizador de módulo (debounce de 500 ms), así que antes de medir deja pasar el que otro test del archivo haya dejado agendado. Doc 105 corrigió los dos que dependían del orden: `server.test.mjs` (el test del proxy fijaba el Bearer de un token que otro test del bloque renueva) y `useModelerStore.wireRoutes.test.ts`, que ahora repone el `reload` real del store en cada test (ronda 6: el describe del auto-arrange lo reemplazaba por un mock, el reemplazo quedaba para los tests siguientes y, en orden aleatorio, «un reload que llega antes que el guardado» nunca recargaba).
 
 `server.test.mjs` cubre el servidor de producción `server.mjs` en dos planos. Unit: `safeJoin` (bloqueo de path traversal, `%2e%2e`, encoding inválido), `contentTypeFor`, `buildUpstreamHeaders` (descarta `host` y el `Authorization` entrante del cliente, pone el Bearer del service principal, conserva `X-Session-Token`, precedencia de `x-forwarded-for`) y `TokenCache` (un solo mint compartido entre llamadas concurrentes, cache, re-mint tras `invalidate()`, propagación de fallo). Integración contra un backend fake: asset con cache immutable, fallback SPA con `no-cache`, proxy con Bearer y query string, streaming de un POST de 50 KB, y retry ante 401 solo para GET (un POST no se reintenta porque su body ya se consumió del stream).
 
