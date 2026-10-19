@@ -19,14 +19,14 @@ export function distinctTableSchemas(pool: CanonicalTable[]): string[] {
 }
 
 /** Fast-path del `kind` (doc 44): si TODO el catálogo está clasificado, los
- *  esquemas de tablas salen del propio catálogo (bajada chica) sin tocar el
- *  pool. Con catálogo vacío o algún esquema sin `kind` devuelve null y el
- *  caller cae al distinct del pool — las tablas pueden referenciar esquemas
- *  legacy que no están en el catálogo. */
+ *  esquemas de tablas (`tables` y `both`, doc 119) salen del propio catálogo
+ *  (bajada chica) sin tocar el pool. Con catálogo vacío o algún esquema sin
+ *  `kind` devuelve null y el caller cae al distinct del pool — las tablas
+ *  pueden referenciar esquemas legacy que no están en el catálogo. */
 export function tableSchemasFromCatalog(catalog: DbSchema[]): string[] | null {
   if (!catalog.length) return null;
-  if (catalog.some((s) => s.kind !== 'tables' && s.kind !== 'views')) return null;
-  return catalog.filter((s) => s.kind === 'tables').map((s) => s.name);
+  if (catalog.some((s) => s.kind !== 'tables' && s.kind !== 'views' && s.kind !== 'both')) return null;
+  return catalog.filter((s) => s.kind === 'tables' || s.kind === 'both').map((s) => s.name);
 }
 
 /** Candidatas a heredar: concatena las columnas de las fuentes EN ORDEN DE

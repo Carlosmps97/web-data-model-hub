@@ -17,11 +17,14 @@ import { API_BASE } from '@/services/apiBase';
 const PROJECT_SCHEMAS = () => `${API_BASE}/api/projects/${encodeURIComponent(sessionProjectId())}/schemas`;
 const CS = `${API_BASE}/api/changesets`;
 
-/** Qué contiene el esquema (doc 44): tablas o vistas. Erwin no trae este dato
- *  (los Hive_Database del XML no llevan ningún atributo/UDP que lo marque) —
- *  nace en la plataforma: la migración lo deriva de los miembros y la UI lo
- *  pide al crear. Opcional: esquemas pre-doc-44 pueden venir sin él. */
-export type SchemaKind = 'tables' | 'views';
+import type { SchemaKind } from '../lib/schemaStaging';
+
+/** Qué contiene el esquema (doc 44 / doc 119): sólo tablas, sólo vistas o
+ *  ambas (`both`). Es lo que filtran los combos de esquema. Erwin no trae este
+ *  dato: nace en la plataforma (la migración lo deriva de los miembros, la UI
+ *  lo pide al crear y Structure · Schemas lo deja cambiar). Opcional: esquemas
+ *  nunca clasificados vienen sin él. */
+export type { SchemaKind } from '../lib/schemaStaging';
 
 export interface DbSchema { id: string; name: string; description?: string | null; kind?: SchemaKind | null }
 
@@ -52,6 +55,16 @@ export const createSchema = async (name: string, description?: string, kind?: Sc
   const s: DbSchema = { id: crypto.randomUUID(), name, description: description || null, kind: kind ?? null };
   await csvc.recordChange(cs, 'schemas', s.id, 'upsert', { ...s });
   return s;
+};
+
+/** Doc 119: cambiar qué contiene un esquema EXISTENTE (lo declarado). Como el
+ *  rename, lo arma el servidor desde el doc efectivo de la versión: el cliente
+ *  nunca manda el doc de un esquema existente (un catálogo desactualizado
+ *  pisaría un rename pendiente). */
+export const setSchemaKind = async (id: string, kind: SchemaKind): Promise<void> => {
+  const cs = writeCs();
+  if (!cs) throw new Error('Changing what a schema holds requires a version in edit mode.');
+  await apiPost(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/kind`, { kind });
 };
 
 /** Doc 96 (final review): alta de UN esquema desde un combo — SOLO dentro de

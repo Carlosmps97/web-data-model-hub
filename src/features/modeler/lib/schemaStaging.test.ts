@@ -1,12 +1,59 @@
 import { describe, expect, it } from 'vitest';
 import {
-  editCreate, orderedForSave, pendingFor, stageCreate, stageDelete, stageRename,
-  takenNames, unstage, type StagedOp,
+  editCreate, orderedForSave, pendingFor, stageCreate, stageDelete, stageRename, stageSetKind,
+  takenNames, unstage, visibleSchemas, type StagedOp,
 } from './schemaStaging';
 
 const core = { id: 's1', name: 'core' };
 const temp = { id: 's2', name: 'temp_x' };
 const SCHEMAS = [core, temp];
+// Doc 119: un esquema guardado como de tablas que se pasa a vistas o a ambos.
+const mixto = { id: 's3', name: 'core_vu', kind: 'tables' as const };
+
+describe('setKind del esquema (doc 119)', () => {
+  it('stageSetKind guarda el kind nuevo y reemplaza uno previo del mismo esquema', () => {
+    let ops = stageSetKind([], mixto, 'views');
+    ops = stageSetKind(ops, mixto, 'both');
+    expect(ops).toHaveLength(1);
+    expect(ops[0]).toMatchObject({ kind: 'setKind', id: 's3', name: 'core_vu', from: 'tables', to: 'both' });
+  });
+
+  it('volver al kind actual deshace el pendiente', () => {
+    let ops = stageSetKind([], mixto, 'views');
+    ops = stageSetKind(ops, mixto, 'tables');
+    expect(ops).toHaveLength(0);
+    expect(stageSetKind([], mixto, 'both')).toHaveLength(1);
+  });
+
+  it('un esquema sin clasificar: cualquier kind es un cambio, desde null', () => {
+    expect(stageSetKind([], { id: 's9', name: 'x', kind: 'views' }, 'views')).toHaveLength(0);
+    expect(stageSetKind([], { id: 's9', name: 'x', kind: null }, 'tables'))
+      .toEqual([expect.objectContaining({ kind: 'setKind', from: null, to: 'tables' })]);
+    expect(stageSetKind([], { id: 's9', name: 'x' }, 'both')).toHaveLength(1);
+  });
+
+  it('setKind y rename del mismo esquema se excluyen: el último manda; delete descarta ambos', () => {
+    let ops = stageRename([], mixto, 'core_v2');
+    ops = stageSetKind(ops, mixto, 'views');
+    expect(ops.map((o) => o.kind)).toEqual(['setKind']);
+    ops = stageRename(ops, mixto, 'core_v3');
+    expect(ops.map((o) => o.kind)).toEqual(['rename']);
+    ops = stageSetKind(ops, mixto, 'views');
+    ops = stageDelete(ops, mixto);
+    expect(ops.map((o) => o.kind)).toEqual(['delete']);
+  });
+
+  it('orderedForSave: creates → setKind → renames → deletes; pendingFor y visibleSchemas lo ven', () => {
+    let ops: StagedOp[] = stageDelete([], temp);
+    ops = stageRename(ops, core, 'core_v2');
+    ops = stageSetKind(ops, mixto, 'views');
+    ops = stageCreate(ops, 'nuevo', 'both');
+    expect(orderedForSave(ops).map((o) => o.kind)).toEqual(['create', 'setKind', 'rename', 'delete']);
+    expect(pendingFor(ops, 's3')?.kind).toBe('setKind');
+    expect(takenNames([...SCHEMAS, mixto], ops).has('core_vu')).toBe(true);
+    expect(visibleSchemas([...SCHEMAS, mixto], ops, 'zzz').map((s) => s.id)).toEqual(['s1', 's2', 's3']);
+  });
+});
 
 describe('schemaStaging', () => {
   it('stageCreate agrega y takenNames lo cuenta (case-insensitive)', () => {

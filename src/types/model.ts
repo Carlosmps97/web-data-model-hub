@@ -20,6 +20,10 @@ export interface Project {
   updatedAt?: string;
 }
 
+/** Qué contiene un esquema de BD: sólo tablas, sólo vistas o ambas. Espeja
+ *  `SchemaKind` del backend (`app/features/schemas/models.py`). */
+export type SchemaKind = 'tables' | 'views' | 'both';
+
 // Canonical column data types: one list for every engine, no per-engine checks
 // (doc 106 adds Databricks SQL / Hive, Oracle and SQL Server). Mirror of
 // `CATALOG` in the backend (`app/core/datatypes.py`).

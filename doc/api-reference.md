@@ -701,17 +701,20 @@ Cada `ViewSource` admite además `description` propia (F5, doc 22: definición r
 
 #### 3.3.4. Esquemas (`schemas.service.ts`)
 
-La entidad `schemas` (doc 18) también es changeset-aware. La particularidad: **rename y delete van SIEMPRE por endpoints propios del changeset**, porque la propagación a tablas/vistas y el guard de uso se computan server-side.
+La entidad `schemas` (doc 18) también es changeset-aware. La particularidad: **rename, cambio de kind y delete van SIEMPRE por endpoints propios del changeset**, porque la propagación a tablas/vistas, el doc efectivo del esquema y el guard de uso se computan server-side.
 
 | Función | Método | Ruta | Body | Respuesta |
 |---|---|---|---|---|
-| `listSchemas()` | GET (o `/effective/schemas`) | `/api/projects/{pid}/schemas` | — | `DbSchema[]` (los del proyecto en sesión) |
-| `createSchema(name, desc?, kind?)` | `recordChange` upsert (sólo en edición) | `/api/changesets/{cs}/changes` | doc completo `{ id, name, description, kind }` | `DbSchema` (nombre único POR proyecto) |
+| `listSchemas()` | GET (o `/effective/schemas`) | `/api/projects/{pid}/schemas` | — | `DbSchema[]` (los del proyecto en sesión), cada uno con su `kind` guardado: `tables` \| `views` \| `both` \| sin clasificar |
+| `createSchema(name, desc?, kind?)` | `recordChange` upsert (sólo en edición) | `/api/changesets/{cs}/changes` | doc completo `{ id, name, description, kind }` (`kind`: `tables` \| `views` \| `both`) | `DbSchema` (nombre único POR proyecto) |
+| `setSchemaKind(id, kind)` | POST (sólo en edición) | `/api/changesets/{cs}/schemas/{id}/kind` | `{ kind }` (`tables` \| `views` \| `both`) | `{ kind }` — el servidor arma el upsert desde el doc efectivo de la versión (como el rename): el cliente nunca manda el doc de un esquema existente |
 | `schemaImpact(id)` | GET | `/api/changesets/{cs}/schemas/{id}/impact` | — | `{ name, tables, views, canvases }` — preview ANTES de guardar |
 | `renameSchema(id, newName)` | POST | `/api/changesets/{cs}/schemas/{id}/rename` | `{ newName }` | `{ tables, views }` — cuántas se propagaron dentro del draft |
 | `deleteSchema(id)` | POST (sólo en edición) | `/api/changesets/{cs}/schemas/{id}/delete` | — | 409 si el esquema tiene tablas o vistas en su estado efectivo |
 
-Sin versión en edición, `createSchema` y `deleteSchema` fallan en el cliente («Creating a schema requires a version in edit mode.» / «Deleting a schema requires a version in edit mode.», doc 104): un esquema se crea, renombra y borra sólo dentro de una versión, y `GET /api/projects/{pid}/schemas` es su única ruta fuera del changeset (lectura).
+Sin versión en edición, `createSchema`, `setSchemaKind` y `deleteSchema` fallan en el cliente («Creating a schema requires a version in edit mode.» / «Changing what a schema holds requires a version in edit mode.» / «Deleting a schema requires a version in edit mode.», doc 104): un esquema se crea, renombra, reclasifica y borra sólo dentro de una versión, y `GET /api/projects/{pid}/schemas` es su única ruta fuera del changeset (lectura).
+
+**Qué contiene un esquema (`kind`).** Los combos de esquema (`SchemaSelect kind="tables" | "views"`, `lib/schemaPick.schemasForKind`) ofrecen los del kind pedido, los `both` y los sin clasificar; la convención `_VU` de New View (`defaultViewSchema`) acepta un `_VU` que sea `both`; el fast-path de CTAS/New table (`lib/ctasPick.tableSchemasFromCatalog`) cuenta `both` como clasificado y como de tablas; pegar una tabla en un `both` no avisa. Structure · Schemas muestra el `kind` en un badge («tables + views» para `both`), ofrece «Both» al crear y deja cambiarlo desde la fila (Tables / Views / Both): la elección queda PENDIENTE en el gestor (`stageSetKind`; se excluye con un rename del mismo esquema y un delete la descarta) y al guardar se registra server-side (`POST …/schemas/{id}/kind`).
 
 **Alta desde un combo (doc 96 D1-D5).** Todo combo que elige el esquema de una tabla o una vista (`SchemaSelect`: New Table, New View / View Editor, CTAS paso 2, Properties e Inspector) ofrece al pie del menú «+ Create schema…» cuando la sesión está en una versión en edición (no histórica); nunca en solo lectura ni en `kind="all"` (Output settings del DDL). Abre `SchemaCreateDialog` con lo tipeado y el `kind` del contexto, valida con `schemaNameError` (la misma regla del gestor) y sigue un orden fijo (`createSchemaAndPick`, puro y testeado): `createSchema` registra el cambio en el changeset activo → `loadSchemas()` recarga el catálogo del combo → recién entonces se selecciona. Si la creación falla (nombre repetido, red), no se selecciona nada y el popup muestra el error; no recarga el canvas, así que el formulario de origen conserva sus demás campos. El esquema queda en la versión aunque se cancele el formulario de origen (se ve en el Review y se borra desde Schemas). La fila de acción es genérica: `SearchSelect` acepta `action = { label(query), onRun(query) }`.
 

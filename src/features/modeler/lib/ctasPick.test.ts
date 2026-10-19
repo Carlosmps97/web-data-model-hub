@@ -55,11 +55,16 @@ describe('filterColumns · buscador de candidatas', () => {
 });
 
 describe('tableSchemasFromCatalog · fast-path del kind (doc 44)', () => {
-  const S = (name: string, kind?: 'tables' | 'views' | null) => ({ id: `s-${name}`, name, kind });
+  const S = (name: string, kind?: 'tables' | 'views' | 'both' | null) => ({ id: `s-${name}`, name, kind });
 
   it('con todo el catálogo clasificado devuelve solo los esquemas de tablas', () => {
     const cat = [S('bcp_ddv_alm', 'tables'), S('bcp_ddv_alm_vu', 'views'), S('No_Definido', 'tables')];
     expect(tableSchemasFromCatalog(cat)).toEqual(['bcp_ddv_alm', 'No_Definido']);
+  });
+
+  it('un esquema con tablas y vistas (both) cuenta como clasificado y como de tablas (doc 119)', () => {
+    const cat = [S('bcp_ddv_cum', 'tables'), S('bcp_ddv_cum_vu', 'both'), S('bcp_ddv_cum_vu2', 'views')];
+    expect(tableSchemasFromCatalog(cat)).toEqual(['bcp_ddv_cum', 'bcp_ddv_cum_vu']);
   });
 
   it('con algún esquema sin clasificar devuelve null (fallback al pool)', () => {

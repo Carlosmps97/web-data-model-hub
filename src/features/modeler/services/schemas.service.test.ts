@@ -13,9 +13,25 @@ vi.mock('@/services/changeset.service', () => ({ recordChange: vi.fn(async () =>
 import { apiDelete, apiPost } from '@/services/http';
 import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
-import { createSchema, createSchemaInVersion, deleteSchema } from './schemas.service';
+import { createSchema, createSchemaInVersion, deleteSchema, setSchemaKind } from './schemas.service';
 
 beforeEach(() => { vi.clearAllMocks(); });
+
+describe('setSchemaKind (doc 119)', () => {
+  it('lo registra server-side con el kind declarado nuevo (la versión arma el doc efectivo; el cliente no manda el doc)', async () => {
+    useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
+    await setSchemaKind('s1', 'views');
+    expect(apiPost).toHaveBeenCalledWith(expect.stringMatching(/\/api\/changesets\/cs1\/schemas\/s1\/kind$/), { kind: 'views' });
+    expect(csvc.recordChange).not.toHaveBeenCalled();
+  });
+
+  it('sin una versión en edición rechaza y no escribe nada', async () => {
+    useSessionStore.setState({ openMode: 'readonly', activeChangesetId: 'cs1' });
+    await expect(setSchemaKind('s1', 'views')).rejects.toThrow('version in edit mode');
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(csvc.recordChange).not.toHaveBeenCalled();
+  });
+});
 
 describe('createSchemaInVersion', () => {
   it('sin una versión en edición rechaza y no escribe nada', async () => {

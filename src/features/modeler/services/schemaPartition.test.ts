@@ -17,7 +17,7 @@ vi.mock('@/store/useSessionStore', () => ({
 
 import * as gov from '@/services/governance.service';
 import * as schemasSvc from './schemas.service';
-import { tableSchemasCached } from './schemaPartition';
+import { invalidateTableSchemas, tableSchemasCached } from './schemaPartition';
 
 const listTables = vi.mocked(gov.listTables);
 const listSchemas = vi.mocked(schemasSvc.listSchemas);
@@ -90,5 +90,27 @@ describe('tableSchemasCached · esquemas con tablas, cacheados por versión', ()
     listSchemas.mockRejectedValue(new Error('x'));
     listTables.mockResolvedValue([T('C')]);
     expect(await tableSchemasCached()).toEqual(['C']);
+  });
+
+  it('invalidar (al guardar en Structure · Schemas, doc 119) re-consulta en la próxima llamada', async () => {
+    csState.activeId = 'v9';
+    listSchemas.mockResolvedValue([{ id: '1', name: 'mix', kind: 'views' }]);
+    expect(await tableSchemasCached()).toEqual([]);
+    listSchemas.mockResolvedValue([{ id: '1', name: 'mix', kind: 'both' }]);
+    expect(await tableSchemasCached()).toEqual([]);          // cacheado
+    invalidateTableSchemas();
+    expect(await tableSchemasCached()).toEqual(['mix']);
+  });
+
+  it('una respuesta en vuelo que llega después de invalidar no deja la foto vieja en el cache', async () => {
+    csState.activeId = 'v10';
+    let release!: (v: { id: string; name: string; kind: 'tables' | 'views' | 'both' }[]) => void;
+    listSchemas.mockReturnValueOnce(new Promise((res) => { release = res; }) as never);
+    const vieja = tableSchemasCached();
+    invalidateTableSchemas();
+    listSchemas.mockResolvedValue([{ id: '1', name: 'nuevo', kind: 'tables' }]);
+    release([{ id: '1', name: 'viejo', kind: 'tables' }]);
+    expect(await vieja).toEqual(['viejo']);
+    expect(await tableSchemasCached()).toEqual(['nuevo']);
   });
 });

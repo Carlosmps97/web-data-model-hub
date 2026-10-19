@@ -1,30 +1,35 @@
 import { runBlocking } from '@/store/useBusyStore';
 import { useMemo, useState } from 'react';
-import { Check, FolderCog, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
+import { Check, FolderCog, Layers, Pencil, Plus, Trash2, Undo2, X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { apiErrorMessage } from '@/services/http';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import * as schemasSvc from '@/features/modeler/services/schemas.service';
-import type { SchemaImpact } from '@/features/modeler/services/schemas.service';
+import type { DbSchema, SchemaImpact } from '@/features/modeler/services/schemas.service';
 import { schemaNameError } from '../lib/schemaCreate';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
+import { invalidateTableSchemas } from '../services/schemaPartition';
 import {
-  editCreate, orderedForSave, pendingFor, stageCreate, stageDelete, stageRename,
+  editCreate, orderedForSave, pendingFor, stageCreate, stageDelete, stageRename, stageSetKind,
   takenNames, unstage, visibleSchemas, type SchemaKind, type StagedOp,
 } from '../lib/schemaStaging';
 
 /**
  * Gestión de esquemas (doc 18 v2, botón "Esquemas" de Structure) con STAGING:
- * crear / renombrar / eliminar quedan como cambios PENDIENTES en el modal y
- * se registran TODOS JUNTOS en la versión activa con "Save" — igual que los
- * canvases: forman parte de TU versión y los demás los ven recién al publicar
- * (no hay una capa de versionado aparte). Antes de guardar, cada pendiente
- * sobre un esquema existente muestra su IMPACTO efectivo (tablas · vistas ·
- * canvases). El rename propaga server-side a todas las tablas/vistas del
- * esquema dentro del draft; el delete se rechaza (409 legible) si tiene
- * tablas o vistas.
+ * crear / renombrar / cambiar qué contiene / eliminar quedan como cambios
+ * PENDIENTES en el modal y se registran TODOS JUNTOS en la versión activa con
+ * "Save" — igual que los canvases: forman parte de TU versión y los demás los
+ * ven recién al publicar (no hay una capa de versionado aparte). Antes de
+ * guardar, cada pendiente sobre un esquema existente muestra su IMPACTO
+ * efectivo (tablas · vistas · canvases). El rename propaga server-side a todas
+ * las tablas/vistas del esquema dentro del draft; el delete se rechaza (409
+ * legible) si tiene tablas o vistas.
+ *
+ * Doc 119: un esquema contiene tablas, vistas o ambas (`both`, badge «tables +
+ * views»); se elige al crearlo y se puede cambiar desde la fila. Es lo que
+ * filtran los combos de esquema de tablas y de vistas.
  *
  * Doc 80 §2: el campo "New schema" hace DOBLE trabajo — mientras escribes
  * filtra la lista de abajo por «contiene» (con ~390 esquemas, buscar el que
@@ -50,6 +55,8 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
   const [busy, setBusy] = useState(false);
   // Edición inline de nombre: fila existente ({id}) o create pendiente ({key}).
   const [editing, setEditing] = useState<{ id?: string; key?: string; name: string } | null>(null);
+  // Fila con el selector de qué contiene abierto (doc 119).
+  const [kindEdit, setKindEdit] = useState<string | null>(null);
   // Impacto por esquema existente (se muestra en el pendiente, ANTES del Save).
   const [impacts, setImpacts] = useState<Record<string, SchemaImpact | 'loading'>>({});
 
@@ -132,19 +139,25 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
           pin.check();
           if (op.kind === 'create') {
             await schemasSvc.createSchema(op.name, undefined, op.schemaKind);
-          } else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
+          } else if (op.kind === 'setKind') await schemasSvc.setSchemaKind(op.id, op.to);
+          else if (op.kind === 'rename') await schemasSvc.renameSchema(op.id, op.to);
           else await schemasSvc.deleteSchema(op.id);
           done.add(op.key);
         }
       });
       setStaged([]);
       setImpacts({});
+      setKindEdit(null);
+      setEditing(null);
       pushToast(`${ops.length} schema change(s) recorded in your version ${vLabel}`);
     } catch (e) {
       await onError(e);
       if (!pin.holds()) onClose();
     } finally {
       setBusy(false);
+      // Lo guardado (o parte, si algo falló) cambia el catálogo: el filtro de
+      // esquemas de CTAS / Import existing vuelve a consultarlo.
+      invalidateTableSchemas();
       await loadSchemas().catch(() => {});
       void reload();
     }
@@ -181,12 +194,33 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title={title} disabled={busy} onClick={onClick}>{node}</button>
   );
 
-  // Badge del contenido del esquema (doc 44); los pre-doc-44 sin kind no lo muestran.
+  // Badge de lo que contiene el esquema (doc 44 / doc 119); sin kind no se muestra.
+  const kindLabel = (k: SchemaKind) => (k === 'both' ? 'tables + views' : k);
   const kindBadge = (k?: SchemaKind | null) => (k ? (
     <span className="rd-small rd-mono" style={{ flexShrink: 0, padding: '1px 7px', border: '1px solid var(--border-soft, #EAEDF2)', borderRadius: 999, color: 'var(--text-muted, #8A93A5)', background: 'var(--fill-4, #F7F9FC)' }}>
-      {k}
+      {kindLabel(k)}
     </span>
   ) : null);
+  const KINDS: readonly SchemaKind[] = ['tables', 'views', 'both'];
+  const segLabel = (k: SchemaKind) => (k === 'tables' ? 'Tables' : k === 'views' ? 'Views' : 'Both');
+  // Selector inline de qué contiene un esquema existente (doc 119): preselecciona
+  // su kind actual, elegir stagea y cierra; Escape sólo cierra el selector.
+  const kindRow = (s: DbSchema) => {
+    const current = s.kind ?? null;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}
+        onKeyDown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); setKindEdit(null); } }}>
+        <div className="rd-seg" role="group" aria-label="What the schema holds">
+          {KINDS.map((k) => (
+            <button key={k} type="button" className={current === k ? 'active' : ''} aria-pressed={current === k}
+              disabled={busy} autoFocus={k === (current ?? 'tables')}
+              onClick={() => { setStaged((ops) => stageSetKind(ops, s, k)); setKindEdit(null); }}>{segLabel(k)}</button>
+          ))}
+        </div>
+        {iconBtn('Cancel', () => setKindEdit(null), <X size={13} />)}
+      </div>
+    );
+  };
 
   const editRow = (onCancel: () => void) => (
     <>
@@ -203,7 +237,10 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
   // Doc 80 §2: lo que escribes en "New schema" filtra la lista (contiene, CI).
   // Los pendientes siguen visibles: trabajo sin guardar no se esconde.
   const filter = newName.trim();
-  const visible = useMemo(() => visibleSchemas(schemas, staged, filter), [schemas, staged, filter]);
+  // La fila con un editor abierto (nombre o kind) tampoco se esconde: si se
+  // desmontara, al reaparecer su editor volvería a tomar el foco mientras se tipea.
+  const open = useMemo(() => [kindEdit, editing?.id].filter((id): id is string => !!id), [kindEdit, editing?.id]);
+  const visible = useMemo(() => visibleSchemas(schemas, staged, filter, open), [schemas, staged, filter, open]);
   const hiddenCount = schemas.length - visible.length;
 
   return (
@@ -239,6 +276,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
           <div className="rd-seg" style={{ flexShrink: 0 }}>
             <button type="button" className={newKind === 'tables' ? 'active' : ''} onClick={() => setNewKind('tables')}>Tables</button>
             <button type="button" className={newKind === 'views' ? 'active' : ''} onClick={() => setNewKind('views')}>Views</button>
+            <button type="button" className={newKind === 'both' ? 'active' : ''} onClick={() => setNewKind('both')}>Both</button>
           </div>
           <button className="rd-btn rd-btn-secondary rd-btn-sm" disabled={busy || !newName.trim()} onClick={addCreate}>
             <Plus size={14} /> Add
@@ -282,6 +320,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
                       </span>
                       {isRename && <span className="rd-mono" style={{ fontSize: 13, color: 'var(--primary-700, #2E5BFF)' }}>→ {pending.to}</span>}
                       {kindBadge(s.kind)}
+                      {pending?.kind === 'setKind' && pendingBadge(`${kindLabel(pending.to)} · pending`, 'var(--primary-700, #2E5BFF)')}
                       {isRename && pendingBadge('rename · pending', 'var(--primary-700, #2E5BFF)')}
                       {isDelete && pendingBadge('delete · pending', 'var(--error, #C4314B)')}
                     </div>
@@ -292,11 +331,12 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
                       </div>
                     )}
                   </div>
-                  {pending
+                  {kindEdit === s.id ? kindRow(s) : pending
                     ? iconBtn('Undo this change', () => setStaged((ops) => unstage(ops, pending.key)), <Undo2 size={13} />)
                     : (
                       <>
-                        {iconBtn('Rename (propagates to its tables and views on save)', () => { setError(null); ensureImpact(s.id); setEditing({ id: s.id, name: s.name }); }, <Pencil size={13} />)}
+                        {iconBtn('Change what it holds: tables, views or both', () => { setError(null); setEditing(null); setKindEdit(s.id); }, <Layers size={13} />)}
+                        {iconBtn('Rename (propagates to its tables and views on save)', () => { setError(null); setKindEdit(null); ensureImpact(s.id); setEditing({ id: s.id, name: s.name }); }, <Pencil size={13} />)}
                         {iconBtn('Delete (only if empty)', () => removeSchema(s.id), <Trash2 size={13} style={{ color: 'var(--error, #C4314B)' }} />)}
                       </>
                     )}
@@ -313,7 +353,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
                 <span className="rd-mono" style={{ flex: 1, fontSize: 13, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{op.name}</span>
                 {kindBadge(op.schemaKind)}
                 {pendingBadge('create · pending', 'var(--primary-700, #2E5BFF)')}
-                {iconBtn('Edit name', () => { setError(null); setEditing({ key: op.key, name: op.name }); }, <Pencil size={13} />)}
+                {iconBtn('Edit name', () => { setError(null); setKindEdit(null); setEditing({ key: op.key, name: op.name }); }, <Pencil size={13} />)}
                 {iconBtn('Undo', () => setStaged((ops) => unstage(ops, op.key)), <Undo2 size={13} />)}
               </>
             )}

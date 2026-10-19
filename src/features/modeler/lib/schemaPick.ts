@@ -10,14 +10,14 @@ export type SchemaKindFilter = 'tables' | 'views' | 'all';
 
 /**
  * Esquemas válidos para un contexto (doc 52 §3). Con `kind` concreto entran
- * los de ESE kind y los SIN clasificar (`kind == null`): un esquema nunca
- * clasificado no "pertenece al otro tipo", y excluirlo dejaría pickers vacíos
- * en BDs sin backfill (la BD real tiene 0 sin kind — no cambia nada visible).
- * Los del kind contrario NUNCA entran: la separación tables/views se mantiene.
+ * los de ESE kind, los que contienen tablas y vistas (`both`, doc 119) y los
+ * SIN clasificar (`kind == null`): un esquema nunca clasificado no "pertenece
+ * al otro tipo", y excluirlo dejaría pickers vacíos. Los del kind contrario
+ * NUNCA entran: la separación tables/views se mantiene.
  */
 export function schemasForKind(schemas: DbSchema[], kind: SchemaKindFilter): DbSchema[] {
   if (kind === 'all') return schemas;
-  return schemas.filter((s) => s.kind == null || s.kind === kind);
+  return schemas.filter((s) => s.kind == null || s.kind === kind || s.kind === 'both');
 }
 
 /**

@@ -35,4 +35,10 @@ describe('visibleSchemas (doc 80 §2 — el placeholder de New schema filtra)', 
     expect(names(visibleSchemas(S, ops, 'CLIENTES')))
       .toEqual(['BCP_DDV_CLIENTES', 'BCP_DDV_CLIENTES_VU', 'PLANEAMIENTO', 'riesgos']);
   });
+
+  it('la fila con un editor inline abierto (`keep`) tampoco se esconde (doc 119)', () => {
+    expect(names(visibleSchemas(S, [], 'CLIENTES', ['s4']))).toEqual(['BCP_DDV_CLIENTES', 'BCP_DDV_CLIENTES_VU', 'riesgos']);
+    expect(names(visibleSchemas(S, [], 'NO_EXISTE', ['s3']))).toEqual(['PLANEAMIENTO']);
+    expect(visibleSchemas(S, [], '', ['s3'])).toHaveLength(4);
+  });
 });

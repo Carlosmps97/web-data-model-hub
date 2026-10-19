@@ -21,18 +21,30 @@ import { distinctTableSchemas, tableSchemasFromCatalog } from '../lib/ctasPick';
 
 let cache: { key: string; value: string[] } | null = null;
 let inflight: { key: string; p: Promise<string[]> } | null = null;
+let generation = 0;
+
+/** Doc 119: el catálogo cambió dentro de la versión (Structure · Schemas
+ *  guardó un alta, un rename, un cambio de kind o un borrado): la próxima
+ *  llamada vuelve a consultar. Una respuesta que ya estaba en vuelo no repone
+ *  la foto vieja. */
+export function invalidateTableSchemas(): void {
+  generation += 1;
+  cache = null;
+  inflight = null;
+}
 
 export function tableSchemasCached(): Promise<string[]> {
   // Doc 75: la foto es del proyecto Y la versión activos.
   const key = `${useSessionStore.getState().activeProjectId ?? ''}|${useSessionStore.getState().activeChangesetId ?? ''}`;
   if (cache?.key === key) return Promise.resolve(cache.value);
   if (inflight?.key === key) return inflight.p;
+  const gen = generation;
   const p = listSchemas()
     .then((catalog) => tableSchemasFromCatalog(catalog))
     .catch(() => null)
     .then((fast) => fast ?? gov.listTables().then(distinctTableSchemas))
     .then((value) => {
-      cache = { key, value };
+      if (gen === generation) cache = { key, value };
       return value;
     })
     .finally(() => { if (inflight?.p === p) inflight = null; });

@@ -51,7 +51,8 @@ const SERVICE_WRITES = new Set([
   'gov.recordChangesBulk', 'gov.createTable', 'gov.deleteTable', 'gov.createColumn', 'gov.updateColumn',
   'gov.deleteColumn', 'gov.updateRelationship', 'gov.deleteRelationship',
   'viewsSvc.createView', 'viewsSvc.updateView', 'viewsSvc.deleteView',
-  'schemasSvc.createSchema', 'schemasSvc.createSchemaInVersion', 'schemasSvc.renameSchema', 'schemasSvc.deleteSchema',
+  'schemasSvc.createSchema', 'schemasSvc.createSchemaInVersion', 'schemasSvc.renameSchema', 'schemasSvc.setSchemaKind',
+  'schemasSvc.deleteSchema',
   'setSubjectAreaUdp', 'patchSubjectAreaUdp',
   // Estructura (canvas, carpetas, proyecto) — el store los llama como `struct.*`.
   'struct.addToCanvas', 'struct.removeFromCanvas', 'struct.setSubjectAreaLayout', 'struct.setSubjectAreaDrawings',

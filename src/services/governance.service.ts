@@ -4,6 +4,7 @@
 // PROYECTO de la sesión (`sessionProjectId()`) — nunca «global».
 import { apiGet, apiPost } from '@/services/http';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
+import type { SchemaKind } from '@/types/model';
 import * as csvc from './changeset.service';
 
 import { API_BASE } from '@/services/apiBase';
@@ -103,8 +104,8 @@ export const bulk = {
   upsertView: (v: { id: string }): BulkChange => ({ collection: 'views', entityId: v.id, op: 'upsert', payload: { ...v } }),
   // Doc 118: el esquema que trae una tabla pegada y no existe en el destino nace
   // en el MISMO lote (doc completo, como schemas.service.createSchema).
-  createSchema: (s: { id: string; name: string; kind: 'tables' | 'views' }): BulkChange =>
-    ({ collection: 'schemas', entityId: s.id, op: 'upsert', payload: { ...s, description: null } }),
+  createSchema: (s: { id: string; name: string; kind: SchemaKind }): BulkChange =>
+    ({ collection: 'schemas', entityId: s.id, op: 'upsert', payload: { id: s.id, name: s.name, description: null, kind: s.kind } }),
 };
 
 // ── lectura helper público (siempre publicado): conversión lógico→físico ──

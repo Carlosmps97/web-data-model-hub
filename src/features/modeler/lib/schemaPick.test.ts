@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DbSchema } from '../services/schemas.service';
 import { defaultViewSchema, schemasForKind, viewSchemaOnCreate } from './schemaPick';
 
-const sch = (name: string, kind?: 'tables' | 'views' | null): DbSchema =>
+const sch = (name: string, kind?: 'tables' | 'views' | 'both' | null): DbSchema =>
   ({ id: name, name, kind: kind ?? null });
 
 const CATALOG: DbSchema[] = [
@@ -10,16 +10,17 @@ const CATALOG: DbSchema[] = [
   sch('RIESGOS', 'tables'),
   sch('VENTAS_VU', 'views'),
   sch('LEGACY_X', null),          // sin clasificar (pre-backfill)
+  sch('MIXTO', 'both'),           // doc 119: contiene tablas y vistas
 ];
 
 describe('schemasForKind (doc 52 §3)', () => {
-  it('tables: esquemas de tablas + sin clasificar; NUNCA los de vistas', () => {
+  it('tables: esquemas de tablas, los de ambos y sin clasificar; NUNCA los de vistas', () => {
     expect(schemasForKind(CATALOG, 'tables').map((s) => s.name))
-      .toEqual(['VENTAS', 'RIESGOS', 'LEGACY_X']);
+      .toEqual(['VENTAS', 'RIESGOS', 'LEGACY_X', 'MIXTO']);
   });
-  it('views: esquemas de vistas + sin clasificar; NUNCA los de tablas', () => {
+  it('views: esquemas de vistas, los de ambos y sin clasificar; NUNCA los de tablas', () => {
     expect(schemasForKind(CATALOG, 'views').map((s) => s.name))
-      .toEqual(['VENTAS_VU', 'LEGACY_X']);
+      .toEqual(['VENTAS_VU', 'LEGACY_X', 'MIXTO']);
   });
   it('all: catálogo completo tal cual', () => {
     expect(schemasForKind(CATALOG, 'all')).toEqual(CATALOG);
@@ -44,6 +45,11 @@ describe('defaultViewSchema (doc 52 §4 — convención _VU)', () => {
   it('sin clasificar SÍ cuenta (BD pre-backfill)', () => {
     const catalog = [sch('ventas_vu', null)];
     expect(defaultViewSchema('VENTAS', catalog)).toBe('ventas_vu');
+  });
+  it('un _VU que contiene tablas y vistas (both) SÍ cuenta (doc 119)', () => {
+    const catalog = [sch('bcp_ddv_cum_analytics_vu', 'both')];
+    expect(defaultViewSchema('bcp_ddv_cum_analytics', catalog)).toBe('bcp_ddv_cum_analytics_vu');
+    expect(viewSchemaOnCreate('bcp_ddv_cum_analytics', catalog)).toEqual({ schema: 'bcp_ddv_cum_analytics_vu', suggest: null });
   });
 });
 

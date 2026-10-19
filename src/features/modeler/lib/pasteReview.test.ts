@@ -11,7 +11,10 @@ const UDPS = [
   udp('uc-p', 'Particion', 'column', 'physical'), udp('uc-l', 'Clasificacion del Dato', 'column', 'logical'),
 ];
 const DOMAIN: ParentDomain = { id: 'd1', name: 'Fecha', defaultDataType: 'DATE', logicalDataType: 'DATE', physicalName: 'FEC' };
-const SCHEMAS: DbSchema[] = [{ id: 's1', name: 'Core', kind: 'tables' }, { id: 's2', name: 'VU', kind: 'views' }];
+const SCHEMAS: DbSchema[] = [
+  { id: 's1', name: 'Core', kind: 'tables' }, { id: 's2', name: 'VU', kind: 'views' },
+  { id: 's3', name: 'Mixto', kind: 'both' },   // doc 119: contiene tablas y vistas
+];
 const TARGET: PasteTarget = {
   udpDefs: UDPS, domains: [DOMAIN], themes: [{ id: 'th1', name: 'Azul', color: '#0070C0' }], schemas: SCHEMAS,
   naming: { column: { separator: '', case: 'upper', maxLength: 20 }, table: { separator: '', case: 'upper', maxLength: 30 } },
@@ -101,6 +104,10 @@ describe('reviewPaste — mismo proyecto (doc 118)', () => {
     expect(vistas.table?.schema).toEqual({ name: 'VU', create: false, viewsKind: true });
     expect(vistas.warnings).toContain('Schema «VU» exists in this project as a views schema — the table goes into it.');
     expect(review({ table: { ...TABLE, schema: '  ' } }).table?.schema).toBeNull();
+    // Doc 119: un esquema que contiene tablas y vistas recibe la tabla sin aviso.
+    const mixto = review({ table: { ...TABLE, schema: 'MIXTO' } });
+    expect(mixto.table?.schema).toEqual({ name: 'Mixto', create: false, viewsKind: false });
+    expect(mixto.warnings.some((w) => w.includes('views schema'))).toBe(false);
   });
 
   it('un esquema que no es un nombre válido no se crea: la tabla lo conserva como texto, con aviso', () => {
