@@ -54,9 +54,11 @@ describe('pasteColumnsToBulk (variante de createTableFromSources sobre tabla exi
     expect(ch.payload).toMatchObject({
       id: 'n1', tableId: 'tTgt', logicalName: 'customer id', physicalName: 'CUST_ID',
       dataType: 'DECIMAL(10,0)', parentDomainId: 'domA', typeOverridden: true,
-      isForeignKey: true, isNullable: false, isPartition: true,
+      isNullable: false, isPartition: true,
       description: 'Id del cliente', udpValues: { u1: 'oro' }, ordinal: 5,
     });
+    // Doc 118: la marca FK no viaja (la relación no se copia).
+    expect('isForeignKey' in (ch.payload ?? {})).toBe(false);
     // Snapshot por VALOR: los UDP del payload no comparten referencia con la fuente.
     expect(ch.payload?.udpValues).not.toBe(src.udpValues);
   });
@@ -113,5 +115,37 @@ describe('pasteColumnsToBulk (variante de createTableFromSources sobre tabla exi
     expect(withSrc.every((c) => !('origin' in (c.payload as object)))).toBe(true);
     const without = pasteColumnsToBulk({ targetTableId: 'tTgt', cols: clip, targetCols: [], newId: ids() });
     expect(without.every((c) => c.origin === undefined)).toBe(true);
+  });
+});
+
+describe('pasteColumnsToBulk: la procedencia nombra la columna de la FUENTE (doc 118)', () => {
+  it('con el físico de origen aunque la pegada salga con el case del destino', () => {
+    const [ch] = pasteColumnsToBulk({
+      targetTableId: 'tTgt', cols: [col('f', { physicalName: 'FEC_ALTA' })], targetCols: [], newId: () => 'n1',
+      sourceTable: 'T_SRC', sourceColumns: new Map([['f', 'fec_alta']]),
+    });
+    expect(ch.origin).toEqual({ kind: 'paste-columns', sourceTable: 'T_SRC', sourceColumn: 'fec_alta' });
+  });
+
+  it('desde otro proyecto, también lo nombra', () => {
+    const [ch] = pasteColumnsToBulk({
+      targetTableId: 'tTgt', cols: [col('f')], targetCols: [], newId: () => 'n1', sourceTable: 'T_SRC', sourceProject: 'UDV Piloto',
+    });
+    expect(ch.origin).toEqual({ kind: 'paste-columns', sourceTable: 'T_SRC', sourceColumn: 'F', sourceProject: 'UDV Piloto' });
+  });
+});
+
+describe('pasteColumnsToBulk lleva las DOS facetas (doc 118)', () => {
+  it('tipo lógico + override, comment físico, override del físico y marcas de faceta', () => {
+    const src = col('f', {
+      dataType: 'TIMESTAMP', logicalDataType: 'DATE', logicalTypeOverridden: true,
+      physicalDescription: 'Comentario físico', physicalNameOverridden: true, logicalOnly: true,
+    });
+    const [ch] = pasteColumnsToBulk({ targetTableId: 'tTgt', cols: [src], targetCols: [], newId: () => 'n1' });
+    expect(ch.payload).toMatchObject({
+      dataType: 'TIMESTAMP', logicalDataType: 'DATE', logicalTypeOverridden: true,
+      physicalDescription: 'Comentario físico', physicalNameOverridden: true, logicalOnly: true,
+    });
+    expect('physicalOnly' in (ch.payload ?? {})).toBe(false);
   });
 });

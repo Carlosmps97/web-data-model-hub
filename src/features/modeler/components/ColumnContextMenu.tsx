@@ -3,7 +3,6 @@ import { facetNouns, type FacetNouns } from '@/lib/facets';
 import { placeAtPoint } from '@/lib/floating';
 import { useFloating } from '@/components/ui/useFloating';
 import { useModelerStore } from '@/store/useModelerStore';
-import { reportWriteError } from '../lib/sessionGuard';
 import { useSessionStore } from '@/store/useSessionStore';
 
 // Etiquetas de atajos agnósticas al SO (Windows/Linux = Ctrl, macOS = ⌘) —
@@ -98,13 +97,11 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
     if (name) pushToast(copiedTableMessage(name, n));
     st.closeColMenu();
   };
+  // Doc 118: pegar la tabla abre el popup que muestra qué viaja (como Ctrl+V).
   const doPasteTable = () => {
     const st = useModelerStore.getState();
     st.closeColMenu();
-    void st.pasteTable()
-      // Ronda 4 (6b): con el sustantivo del modelo, como Ctrl+V en el canvas.
-      .then((name) => { if (name) pushToast(`${n.One} pasted as ${name}`); })
-      .catch(reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't paste the ${n.one}`, 'err')));   // doc 105 (ronda 3)
+    st.setTablePasteOpen(true);
   };
 
   return (
@@ -126,7 +123,7 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
       )}
       {showPasteTable && (
         <button type="button" role="menuitem" onClick={doPasteTable}>
-          {`Paste ${n.one} (${tblClipName} as copy)`}
+          {`Paste ${n.one} ${tblClipName}…`}
         </button>
       )}
     </MenuBox>

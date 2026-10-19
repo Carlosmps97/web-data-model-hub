@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
-import { copyNameBase, copyTableToBulk, nextCopyNames } from './copyTable';
+import { copyNameBase, copyTableToBulk, nextCopyNames, pasteNames } from './copyTable';
 
 const TABLE: CanonicalTable = {
   id: 't1', physicalName: 'M_CLIENTE', logicalName: 'Cliente', schema: 'core',
@@ -87,5 +87,56 @@ describe('copyTableToBulk', () => {
     ]);
     // El origin viaja EN EL CAMBIO, no en el payload (no ensucia el doc).
     expect(changes.every((c) => !('origin' in (c.payload as object)))).toBe(true);
+  });
+});
+
+describe('pasteNames (doc 118): el nombre se conserva si está libre en el destino', () => {
+  it('libre → tal cual, también si ya trae un _copy_n', () => {
+    expect(pasteNames({ physicalName: 'M_CLIENTE_copy_1', logicalName: 'Cliente copy 1' }, ['M_CLIENTE']))
+      .toEqual({ physicalName: 'M_CLIENTE_copy_1', logicalName: 'Cliente copy 1', renamed: false });
+  });
+  it('tomado (CI) → el primer copy_n libre, con el lógico alineado', () => {
+    expect(pasteNames({ physicalName: 'M_CLIENTE', logicalName: 'Cliente' }, ['m_cliente', 'M_CLIENTE_copy_1']))
+      .toEqual({ physicalName: 'M_CLIENTE_copy_2', logicalName: 'Cliente copy 2', renamed: true });
+  });
+  it('una copia tomada incrementa sobre la base (no anida)', () => {
+    expect(pasteNames({ physicalName: 'M_CLIENTE_copy_1', logicalName: 'Cliente copy 1' },
+      ['M_CLIENTE', 'M_CLIENTE_copy_1']).physicalName).toBe('M_CLIENTE_copy_2');
+  });
+  it('sin lógico, la base lógica es el físico', () => {
+    expect(pasteNames({ physicalName: 'T', logicalName: '' }, ['T']).logicalName).toBe('T copy 1');
+  });
+});
+
+describe('copyTableToBulk: procedencia desde otro proyecto (doc 118)', () => {
+  it('la tabla y sus columnas nombran el proyecto de origen', () => {
+    const [t, c] = copyTableToBulk({
+      table: { ...TABLE, physicalName: 'M_CLIENTE' }, cols: [col({ id: 'c1' })], id: 'N', physicalName: 'M_CLIENTE', logicalName: 'Cliente',
+      source: { table: 'M_CLIENTE', columns: new Map([['c1', 'id']]), project: 'UDV Piloto' }, newId: () => 'nc',
+    });
+    expect(t.origin).toEqual({ kind: 'paste-table', sourceTable: 'M_CLIENTE', sourceProject: 'UDV Piloto' });
+    expect(c.origin).toEqual({ kind: 'paste-table', sourceTable: 'M_CLIENTE', sourceColumn: 'id', sourceProject: 'UDV Piloto' });
+  });
+});
+
+describe('copyTableToBulk lleva las DOS facetas (doc 118)', () => {
+  const [t, c] = copyTableToBulk({
+    table: { ...TABLE, physicalNameOverridden: true, logicalOnly: true },
+    cols: [col({
+      logicalDataType: 'DATE', logicalTypeOverridden: true, physicalDescription: 'Comentario físico',
+      physicalNameOverridden: true, physicalOnly: true, dataType: 'TIMESTAMP',
+    })],
+    id: 'N', physicalName: 'X', logicalName: 'x', newId: () => 'nc',
+  });
+  it('tabla: override del físico y marca de faceta', () => {
+    expect(t.payload).toMatchObject({ physicalNameOverridden: true, logicalOnly: true });
+    expect('physicalOnly' in (t.payload as object)).toBe(false);
+  });
+  it('columna: tipo lógico + override, comment físico, override del físico y marca de faceta', () => {
+    expect(c.payload).toMatchObject({
+      dataType: 'TIMESTAMP', logicalDataType: 'DATE', logicalTypeOverridden: true,
+      physicalDescription: 'Comentario físico', physicalNameOverridden: true, physicalOnly: true,
+    });
+    expect('logicalOnly' in (c.payload as object)).toBe(false);
   });
 });

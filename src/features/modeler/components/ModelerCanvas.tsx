@@ -7,7 +7,6 @@ import {
 import { stopFraming, useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { canvasSessionKey } from '../lib/canvasSession';
-import { reportWriteError } from '../lib/sessionGuard';
 import TableNode from './TableNode';
 import ShapeNode from './ShapeNode';
 import ViewNode from './ViewNode';
@@ -24,6 +23,7 @@ import ColumnContextMenu, { copiedMessage, copiedTableMessage } from './ColumnCo
 import { useUndoStore } from '@/store/useUndoStore';
 import { modalOpen } from '@/components/ui/focusTrap';
 import PasteColumnsPopup from './PasteColumnsPopup';
+import PasteTablePopup from './PasteTablePopup';
 import ViewEditor from './ViewEditor';
 import { buildViewGraph } from '../lib/viewGraph';
 import { buildSubtypeGraph, childSubtypeMembership, isSubcategory, subtypeGroups } from '../lib/subtypeGraph';
@@ -62,6 +62,8 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // tanda sobre las anteriores.
   const freshGens = useModelerStore((s) => (s.activeSaId ? s.freshNodes[s.activeSaId] : undefined));
   const pasteTarget = useModelerStore((s) => s.pasteTarget);
+  const tablePasteOpen = useModelerStore((s) => s.tablePasteOpen);
+  const setTablePasteOpen = useModelerStore((s) => s.setTablePasteOpen);
   const setPasteTarget = useModelerStore((s) => s.setPasteTarget);
   const focusTable = useModelerStore((s) => s.focusTable);
   const pendingFocusTableId = useModelerStore((s) => s.pendingFocusTableId);
@@ -354,12 +356,11 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         return;
       }
       // Doc 50: el clipboard de TABLA tiene prioridad (son excluyentes) y no
-      // necesita destino — pega una tabla NUEVA en este canvas.
+      // necesita destino — pega una tabla NUEVA en este canvas, tras revisar
+      // en el popup qué viaja (doc 118).
       if (st.tblClipboard) {
         if (readonly || !activeChangeset) { pushToast('Open the model in edit mode to paste', 'err'); return; }
-        void st.pasteTable()
-          .then((name) => { if (name) pushToast(`${facetNouns(useModelerStore.getState().viewMode).One} pasted as ${name}`); })
-          .catch(reportWriteError((err) => pushToast(err instanceof Error && err.message ? err.message : `Couldn't paste the ${facetNouns(useModelerStore.getState().viewMode).one}`, 'err')));   // doc 105 (ronda 3; ronda 5: faceta)
+        st.setTablePasteOpen(true);
         return;
       }
       if (!st.colClipboard?.cols.length) return;
@@ -669,6 +670,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       {pasteTarget && (
         <PasteColumnsPopup targetId={pasteTarget} onClose={() => setPasteTarget(null)} pushToast={pushToast} />
       )}
+      {tablePasteOpen && <PasteTablePopup onClose={() => setTablePasteOpen(false)} pushToast={pushToast} />}
     </div>
   );
 }

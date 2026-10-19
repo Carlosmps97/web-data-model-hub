@@ -3,15 +3,17 @@
  * orquestación (bulk + vistas espejo + reload) vive en PasteColumnsPopup.
  *
  * El paste es la variante "sobre tabla EXISTENTE" de createTableFromSources
- * (docs 43/45): cada columna pegada hereda su metadata INDIVIDUAL completa
- * (definición, PK/FK/nullable/partition, UDPs, dominio y tipo) con id NUEVO;
- * lo que NO viaja: relaciones (isForeignKey queda como marca) ni vistas.
+ * (docs 43/45): cada columna pegada hereda su metadata INDIVIDUAL completa de
+ * las dos facetas (definición y comment físico, PK/nullable/partition, UDPs,
+ * dominio, tipos lógico y físico) con id NUEVO; lo que NO viaja: relaciones
+ * (tampoco la marca FK, doc 118) ni vistas.
  */
 import {
   bulk,
   type BulkChange,
   type CanonicalColumn,
 } from '@/services/governance.service';
+import { columnCopyFields } from './copyTable';
 import { pkFirstOrdinals } from './columnOrder';
 import { preKey } from './undoInvert';
 
@@ -59,6 +61,11 @@ export function pasteColumnsToBulk(input: {
   /** Tabla FUENTE del clipboard — procedencia para el historial de auditoría
    *  (doc 51: "Copied from column …"). */
   sourceTable?: string;
+  /** Físico de ORIGEN de cada columna por id (la pegada puede salir con el case
+   *  del destino, doc 118); sin él, el de `cols`. */
+  sourceColumns?: ReadonlyMap<string, string>;
+  /** Doc 118: pegado desde OTRO proyecto — su nombre. */
+  sourceProject?: string;
   /** Inyectable para tests; default crypto.randomUUID. */
   newId?: () => string;
 }): BulkChange[] {
@@ -76,22 +83,16 @@ export function pasteColumnsToBulk(input: {
     let next = input.targetCols.length ? Math.max(...input.targetCols.map((c) => c.ordinal)) + 1 : 0;
     ordinalOf = new Map(created.map(({ id }) => [id, next++]));
   }
-  const creates = created.map(({ c, id }) => {
-    const description = (c.description ?? '').trim();
-    return bulk.createColumn({
-      id, tableId: input.targetTableId,
-      logicalName: c.logicalName, physicalName: c.physicalName,
-      parentDomainId: c.parentDomainId, dataType: c.dataType, typeOverridden: c.typeOverridden,
-      isPrimaryKey: c.isPrimaryKey, ordinal: ordinalOf.get(id)!,
-      ...(description ? { description } : {}),
-      ...(c.isForeignKey ? { isForeignKey: true } : {}),
-      ...(c.isNullable === false ? { isNullable: false } : {}),
-      ...(c.isPartition ? { isPartition: true } : {}),
-      ...(c.udpValues && Object.keys(c.udpValues).length ? { udpValues: { ...c.udpValues } } : {}),
-    }, input.sourceTable
-      ? { kind: 'paste-columns', sourceTable: input.sourceTable, sourceColumn: c.physicalName }
-      : undefined);
-  });
+  const creates = created.map(({ c, id }) => bulk.createColumn({
+    id, tableId: input.targetTableId,
+    logicalName: c.logicalName, physicalName: c.physicalName,
+    parentDomainId: c.parentDomainId, dataType: c.dataType, typeOverridden: c.typeOverridden,
+    isPrimaryKey: c.isPrimaryKey, ordinal: ordinalOf.get(id)!,
+    ...columnCopyFields(c),
+  }, input.sourceTable
+    ? { kind: 'paste-columns', sourceTable: input.sourceTable, sourceColumn: input.sourceColumns?.get(c.id) ?? c.physicalName,
+      ...(input.sourceProject ? { sourceProject: input.sourceProject } : {}) }
+    : undefined));
   return [...creates, ...shifts];
 }
 

@@ -30,8 +30,10 @@ export function originText(item: Pick<HistoryItem, 'origin'>): string | null {
   const src = o.sourceTable && o.sourceColumn
     ? `${o.sourceTable}.${o.sourceColumn}`
     : o.sourceTable || o.sourceColumn || null;
-  if (o.kind === 'paste-table') return `Copied from table ${src ?? '…'}`;
-  if (o.kind === 'paste-columns') return `Copied from column ${src ?? '…'}`;
+  // Doc 118: desde OTRO proyecto, también su nombre.
+  const from = o.sourceProject ? ` (project ${o.sourceProject})` : '';
+  if (o.kind === 'paste-table') return `Copied from table ${src ?? '…'}${from}`;
+  if (o.kind === 'paste-columns') return `Copied from column ${src ?? '…'}${from}`;
   if (o.kind === 'ctas') return src ? `Created from source ${src} (CTAS)` : 'Created from sources (CTAS)';
   return null;
 }

@@ -1168,14 +1168,51 @@ select.exd-input { padding: 0 10px; }
   font-family: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
 .wk-ctxmenu button:hover { background: var(--blue-tint); }
 
-/* Popup de confirmación del paste: lista con nombre lógico+físico, tipo y el
-   estado por fila (New / Logical name exists / Name exists — skipped). */
+/* Popups de pegado (tabla y columnas, doc 118): checks por grupo, selector
+   Lógico | Físico, la tabla agrupada, la lista de columnas desplegables (10 por
+   página + buscador) con su estado (New / Logical name exists / Name exists —
+   skipped) y lo que no se puede copiar. */
+.wk-paste-details { display: flex; flex-direction: column; gap: 10px; }
+.wk-paste-checks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.wk-paste-checks-cap { margin-right: 2px; font-size: 11px; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--muted); }
+.wk-paste-check { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 999px; background: var(--surface);
+  font-size: 12px; font-weight: 600; color: var(--muted); }
+.wk-paste-check.on { color: var(--primary); border-color: var(--primary); background: var(--blue-tint); }
+.wk-paste-check input { margin: 0; accent-color: var(--primary); }
+.wk-paste-always { margin: 0; }
+.wk-paste-facet { align-self: flex-start; }
+.wk-paste-sec { display: flex; flex-direction: column; gap: 6px; }
+.wk-paste-sec h4 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12px; font-weight: 700; color: var(--ink); }
+.wk-paste-count { font-size: 11px; font-weight: 600; color: var(--muted); }
+.wk-paste-kv { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; }
+.wk-paste-kv > span:first-child,
+.wk-paste-udps li > span:first-child { flex: none; width: 150px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 11.5px; color: var(--muted); }
+.wk-paste-udps { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 0; list-style: none; }
+.wk-paste-udps li { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.wk-paste-udps li.off { opacity: .6; }
+.wk-paste-udpval { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-paste-none, .wk-paste-empty { margin: 0; font-size: 12px; color: var(--muted); }
+.wk-paste-empty { padding: 10px; }
+.wk-paste-search { margin-bottom: 0; }
 .wk-paste-list { display: flex; flex-direction: column; max-height: 320px; overflow: auto;
-  border: 1px solid #E8ECF3; border-radius: 8px; margin: 4px 0 10px; }
-.wk-paste-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-  border-top: 1px solid #F2F4F8; font-size: 12.5px; }
-.wk-paste-row:first-child { border-top: none; }
-.wk-paste-row.blocked { opacity: .55; }
+  border: 1px solid #E8ECF3; border-radius: 8px; }
+.wk-paste-item { border-top: 1px solid #F2F4F8; }
+.wk-paste-item:first-child { border-top: none; }
+.wk-paste-item.blocked { opacity: .55; }
+.wk-paste-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 7px 10px;
+  border: 0; background: none; color: inherit; font: inherit; font-size: 12.5px; text-align: left; cursor: pointer; }
+.wk-paste-row:hover { background: var(--fill-4, #F7F9FC); }
+.wk-paste-detail { display: flex; flex-direction: column; gap: 5px; padding: 4px 12px 10px 32px; }
+.wk-paste-more { align-self: center; }
+.wk-paste-note { padding: 8px 12px; border-radius: 8px; font-size: 12px; }
+.wk-paste-note ul { margin: 4px 0 0; padding-left: 18px; }
+.wk-paste-note.warn { color: #6B4A00; background: #FFF8E6; border: 1px solid #F5DFA6; }
+.wk-paste-note.err { color: #8A1F1F; background: #FDECEC; border: 1px solid #F3C2C2; }
+.wk-paste-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; font-size: 12.5px; }
+.wk-paste-head .rd-mono { font-weight: 700; color: var(--ink); }
 .wk-paste-name { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .wk-paste-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wk-paste-phys { color: var(--muted); font-size: 11px; }

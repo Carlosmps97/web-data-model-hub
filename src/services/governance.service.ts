@@ -101,6 +101,10 @@ export const bulk = {
   // Doc 50 (Undo): restaurar vistas de una cascada deshecha — el payload es el
   // doc COMPLETO que devolvió views.service (round-trip garantizado).
   upsertView: (v: { id: string }): BulkChange => ({ collection: 'views', entityId: v.id, op: 'upsert', payload: { ...v } }),
+  // Doc 118: el esquema que trae una tabla pegada y no existe en el destino nace
+  // en el MISMO lote (doc completo, como schemas.service.createSchema).
+  createSchema: (s: { id: string; name: string; kind: 'tables' | 'views' }): BulkChange =>
+    ({ collection: 'schemas', entityId: s.id, op: 'upsert', payload: { ...s, description: null } }),
 };
 
 // ── lectura helper público (siempre publicado): conversión lógico→físico ──

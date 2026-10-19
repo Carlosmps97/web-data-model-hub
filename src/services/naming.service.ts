@@ -40,6 +40,8 @@ export interface DictTerm {
 export interface NamingRule {
   separator: Separator;
   case: Casing;
+  /** Tope de largo del FÍSICO en caracteres (0 = sin tope); lo aplica el backend al crear o renombrar. */
+  maxLength?: number;
 }
 
 export interface NamingConfig {

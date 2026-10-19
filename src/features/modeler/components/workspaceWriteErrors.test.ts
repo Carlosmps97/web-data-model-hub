@@ -62,6 +62,8 @@ describe('avisos de escrituras del canvas: esperan la revalidación (doc 105, H7
     // Ronda 3 (R7): los que faltaban.
     'TableNode.tsx', 'ModelerCanvas.tsx', 'ColumnContextMenu.tsx', 'ModelExplorer.tsx', 'CtasModal.tsx',
     'ModelPropertiesModal.tsx', 'NewTableModal.tsx',
+    // Doc 118: el pegado de tabla se graba desde su popup.
+    'PasteTablePopup.tsx',
   ])('%s', (file) => {
     const rest = unguarded(source(file)).filter((l) => !NOT_A_WRITE.some((re) => re.test(l)));
     expect(rest).toEqual([]);

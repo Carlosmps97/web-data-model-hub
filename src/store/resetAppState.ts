@@ -28,7 +28,7 @@ export function resetAppState(): void {
     // (docs 48/50) y la selección/menú/deep-link viven en memoria del tab —
     // sin este reset, el SIGUIENTE usuario del mismo tab heredaba lo copiado
     // por el anterior y podía pegarlo sin querer.
-    colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
+    colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null,
     colClipboard: null, tblClipboard: null,
   });
   // La pila de Undo también es de la sesión (doc 50): las inversas del usuario

@@ -19,6 +19,11 @@ describe('history — presentación del historial de auditoría (doc 51)', () =>
     expect(originText({ origin: { kind: 'ctas', sourceTable: 'M_SRC', sourceColumn: 'COD' } }))
       .toBe('Created from source M_SRC.COD (CTAS)');
     expect(originText({ origin: { kind: 'ctas' } })).toBe('Created from sources (CTAS)');
+    // Doc 118: pegado desde OTRO proyecto.
+    expect(originText({ origin: { kind: 'paste-table', sourceTable: 'M_CLIENTE', sourceProject: 'UDV Piloto' } }))
+      .toBe('Copied from table M_CLIENTE (project UDV Piloto)');
+    expect(originText({ origin: { kind: 'paste-columns', sourceTable: 'M_CLIENTE', sourceColumn: 'ID_CLI', sourceProject: 'UDV Piloto' } }))
+      .toBe('Copied from column M_CLIENTE.ID_CLI (project UDV Piloto)');
     expect(originText({ origin: null })).toBeNull();
   });
 

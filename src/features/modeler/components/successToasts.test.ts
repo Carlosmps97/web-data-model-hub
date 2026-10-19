@@ -18,4 +18,10 @@ describe('los avisos de éxito, sólo en la sesión donde se pidió (doc 105, ro
     expect(pinAt).toBeLessThan(body.indexOf('await createTableFromSources('));
     expect(body).toMatch(/if \(pin\.holds\(\)\) pushToast\('Table created from sources'\);/);
   });
+
+  it('PasteColumnsPopup › Paste: el aviso mira que la sesión siga (doc 118)', () => {
+    const body = /const confirm = async \(\) => \{([\s\S]*?)\n {2}\};/.exec(code('PasteColumnsPopup.tsx'))?.[1] ?? '';
+    expect(body.indexOf('const pin = pinSession();')).toBeGreaterThan(-1);
+    expect(body).toMatch(/if \(pin\.holds\(\)\) pushToast\(`\$\{cols\.length\}/);
+  });
 });

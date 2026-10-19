@@ -21,6 +21,8 @@ export interface ChangeOrigin {
   kind: 'paste-table' | 'paste-columns' | 'ctas';
   sourceTable?: string;
   sourceColumn?: string;
+  /** Doc 118: pegado desde OTRO proyecto — su nombre. */
+  sourceProject?: string;
 }
 /** Un cambio del lote de `recordChangesBulk` (mismo shape que recordChange). */
 export interface BulkChange {
@@ -64,7 +66,7 @@ export interface HistoryUser { id: string; name?: string | null; email?: string 
 export interface HistoryField { key: string; label: string; before?: unknown; after?: unknown; }
 /** Procedencia mostrada por el historial: las de `ChangeOrigin` + la entrada
  *  sintética de la migración inicial. */
-export interface HistoryOrigin { kind: ChangeOrigin['kind'] | 'migration'; sourceTable?: string; sourceColumn?: string; }
+export interface HistoryOrigin { kind: ChangeOrigin['kind'] | 'migration'; sourceTable?: string; sourceColumn?: string; sourceProject?: string; }
 /** Un evento PUBLICADO del historial de una tabla/columna: quién (autor del
  *  draft), cuándo (appliedAt de la versión), qué acción, qué versión y qué
  *  campos cambiaron (mismo motor de diff del popup de revisión, doc 31).

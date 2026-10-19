@@ -14,7 +14,7 @@ import { getNamingConfig, type NamingConfig } from '@/services/naming.service';
 import { facetNouns } from '@/lib/facets';
 import { applyNamingCase } from '@/features/modeler/lib/physicalCase';
 import { diagramSignature } from '@/features/modeler/lib/diagramSignature';
-import { copyNameBase, copyTableToBulk, nextCopyNames } from '@/features/modeler/lib/copyTable';
+import { copyNameBase, copyTableToBulk, pasteNames } from '@/features/modeler/lib/copyTable';
 import { keyLayoutBulk } from '@/features/modeler/lib/keyLayout';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
 import { mirrorComplex } from '@/features/modeler/lib/facetTypes';
@@ -141,25 +141,31 @@ interface ModelerState {
   toggleColSelect: (tableId: string, colId: string, mode: 'single' | 'toggle' | 'range') => void;
   clearColSel: () => void;
   /** Clipboard EN MEMORIA (snapshot por VALOR, orden físico de la fuente) —
-   *  no es el portapapeles del SO. Sobrevive al cambio de canvas dentro del
-   *  proyecto (decisión owner iii); muere al cambiar de proyecto o changeset. */
-  colClipboard: { source: { logicalName: string; physicalName: string }; cols: CanonicalColumn[] } | null;
+   *  no es el portapapeles del SO. Sobrevive al cambio de canvas, de versión y
+   *  de proyecto (doc 118: se pega en otro proyecto tras su revisión); lo limpia
+   *  el logout. `source`: la tabla y el proyecto de donde se copió. */
+  colClipboard: { source: { logicalName: string; physicalName: string } & Partial<ClipSource>; cols: CanonicalColumn[] } | null;
   /** Copia la selección actual al clipboard. Devuelve cuántas columnas. */
   copySelectedColumns: () => number;
   /** Clipboard de TABLA completa (doc 50): snapshot por valor (tabla + sus
    *  columnas en orden físico). Mutuamente excluyente con `colClipboard` —
    *  un solo "contenido copiado", Ctrl/Cmd+V nunca es ambiguo. Mismo ciclo de
-   *  vida doc 48: sobrevive al cambio de canvas, muere con proyecto/changeset. */
-  tblClipboard: { table: CanonicalTable; cols: CanonicalColumn[] } | null;
+   *  vida que el de columnas; `source` = el proyecto de donde se copió. */
+  tblClipboard: { table: CanonicalTable; cols: CanonicalColumn[]; source?: ClipSource } | null;
   /** Copia el bloque al clipboard de tabla. Devuelve el nombre a mostrar, o
    *  null si la tabla no está en el diagrama. Copiar es lectura (vale en
    *  readonly), igual que el copy de columnas. */
   copyTable: (tableId: string) => string | null;
   /** Pega el clipboard de tabla como tabla NUEVA en el canvas activo (doc 50):
-   *  nombres `_copy_n` libres GLOBALMENTE (§2), misma metadata, SIN relaciones
-   *  ni flag FK, en UN lote. Devuelve el físico creado, o null si ya hay un
-   *  paste en vuelo. */
-  pasteTable: () => Promise<string | null>;
+   *  misma metadata de las dos facetas, SIN relaciones ni flag FK, en UN lote.
+   *  `prepared` (doc 118) = lo que mostró el popup de pegado (tabla, columnas y
+   *  el esquema a crear); sin él, el clipboard tal cual. Nombre: el original si
+   *  está libre en el proyecto; si no, `_copy_n`. Devuelve el nombre mostrado,
+   *  o null si ya hay un paste en vuelo. */
+  pasteTable: (prepared?: TablePastePrepared) => Promise<string | null>;
+  /** Doc 118: el popup de pegado de tabla está abierto (lo monta ModelerCanvas). */
+  tablePasteOpen: boolean;
+  setTablePasteOpen: (open: boolean) => void;
   /** Menú contextual del canvas (fila: colId; bloque: colId null). */
   /** Doc 109: `kind` = qué bloque abrió el menú (default tabla); una vista sólo
    *  ofrece el color. */
@@ -657,6 +663,36 @@ async function reportCanvasSaveError(e: unknown, cs: string | null, fallback: st
 }
 // Paste de tabla en vuelo (doc 50): un Ctrl+V repetido no dispara otro.
 let _pasteTableBusy = false;
+
+/** Doc 118: lo que el popup de pegado mostró y se graba tal cual. */
+export interface TablePastePrepared { table: CanonicalTable; cols: CanonicalColumn[]; createSchema?: { name: string } }
+/** Doc 118: el proyecto de donde se copió (pegar entre proyectos). */
+export interface ClipSource { projectId: string | null; projectName: string }
+
+/** Último nombre conocido de cada proyecto: `refreshExplorer` vacía `projects`
+ *  hasta que llega la lista (y, si falla, queda vacía) — lo copiado en ese rato
+ *  conserva el nombre de su proyecto. */
+const _projectNames = new Map<string, string>();
+
+/** El proyecto de la sesión de canvas, para el `source` del clipboard (doc 118). */
+function clipSource(): ClipSource {
+  const st = useModelerStore.getState();
+  const projectId = useSessionStore.getState().activeProjectId ?? st.activeProjectId;
+  const name = st.projects.find((p) => p.id === projectId)?.name || (projectId ? _projectNames.get(projectId) : undefined);
+  return { projectId, projectName: name ?? '' };
+}
+
+/** Físicos de tabla del proyecto de la sesión que pueden chocar con
+ *  `physicalName` o con sus copias: búsqueda server-side sobre la vista
+ *  efectiva de la versión (doc 43) + el diagrama local (un alta propia que aún
+ *  no entró al índice). La comparte la vista previa del popup y el paste. */
+export async function tableNamesTaken(physicalName: string): Promise<string[]> {
+  const pool = await gov.searchTables(copyNameBase(physicalName, 'physical'), 500).catch(() => [] as CanonicalTable[]);
+  return [
+    ...pool.map((t) => t.physicalName),
+    ...(useModelerStore.getState().diagram?.tables ?? []).map((t) => t.physicalName),
+  ];
+}
 // Secuencia de cargas del diagrama: descarta respuestas fuera de orden (dos
 // clicks rápidos en el explorer, reload en vuelo al cambiar de canvas).
 let _loadSeq = 0;
@@ -817,7 +853,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // importa es el clipboard; dejar las filas marcadas leía como "pegado".
     // tblClipboard se limpia: los clipboards son excluyentes (doc 50).
     set({
-      colClipboard: { source: { logicalName: t?.logicalName ?? '', physicalName: t?.physicalName ?? '' }, cols },
+      colClipboard: { source: { logicalName: t?.logicalName ?? '', physicalName: t?.physicalName ?? '', ...clipSource() }, cols },
       colSel: null,
       tblClipboard: null,
     });
@@ -833,44 +869,54 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const cols = orderColumns(d.columns.filter((c) => c.tableId === tableId))
       .map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
     set({
-      tblClipboard: { table: { ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) }, cols },
+      tblClipboard: { table: { ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) }, cols, source: clipSource() },
       colClipboard: null, colSel: null,   // excluyentes (doc 50)
     });
     // Doc 105 (ronda 5, R15-H9): el nombre que se muestra, según la faceta.
     return get().viewMode === 'logical' ? t.logicalName || t.physicalName : t.physicalName || t.logicalName;
   },
-  pasteTable: () => runBlocking('Creating table…', async () => {
+  pasteTable: (prepared) => runBlocking('Creating table…', async () => {
     if (_pasteTableBusy) return null;   // Ctrl+V repetido con el paste en vuelo
     const clip = get().tblClipboard;
     const saId = get().activeSaId;
     if (!clip) throw new Error('Nothing to paste');
     if (!saId) throw new Error('Pick a Subject Area');
+    // Lo copiado en OTRO proyecto lleva los ids de sus estándares (UDP, dominio,
+    // theme): sólo se pega lo que tradujo su revisión (`PasteTablePopup`).
+    const fromOther = !!clip.source?.projectId && clip.source.projectId !== useSessionStore.getState().activeProjectId;
+    if (fromOther && !prepared) throw new Error('Open the paste review to paste from another project.');
     // Doc 105 (H1): la acción es de la sesión donde empezó (ver `pinSession`).
     const pin = pinSession();
     _pasteTableBusy = true;
     try {
       get().markDirty();
-      const basePhys = copyNameBase(clip.table.physicalName, 'physical');
-      const baseLog = copyNameBase(clip.table.logicalName || clip.table.physicalName, 'logical');
-      // Reintentos ante carrera multiusuario: si otro draft ganó el nombre
-      // (409 del guard global, doc 50 §2), se recalcula `n` y se reintenta.
+      const table = prepared?.table ?? clip.table;
+      const cols = prepared?.cols ?? clip.cols;
+      // Procedencia (doc 51): la tabla y las columnas del clipboard, no los
+      // nombres finales de la copia que trae `prepared`.
+      const source = { table: clip.table.physicalName || clip.table.logicalName,
+        columns: new Map(clip.cols.map((c) => [c.id, c.physicalName])),
+        ...(fromOther ? { project: clip.source?.projectName || clip.source?.projectId || undefined } : {}) };
+      // Reintentos ante carrera multiusuario: si otro draft ganó el nombre (409
+      // de la unicidad por proyecto), ese nombre cuenta como tomado y se recalcula.
+      const lost: string[] = [];
       let lastErr: unknown = null;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        // Nombres tomados: pool GLOBAL efectivo (búsqueda server-side, doc 43)
-        // + el diagrama local (por si un alta propia aún no entró al índice).
-        const pool = await gov.searchTables(`${basePhys}_copy_`, 500).catch(() => [] as CanonicalTable[]);
-        const taken = [
-          ...pool.map((t) => t.physicalName),
-          ...(get().diagram?.tables ?? []).map((t) => t.physicalName),
-        ];
-        const { physicalName, logicalName } = nextCopyNames(basePhys, baseLog, taken);
+        const { physicalName, logicalName } = pasteNames(table, [...await tableNamesTaken(table.physicalName), ...lost]);
         const id = crypto.randomUUID();
+        const schema = prepared?.createSchema ? { id: crypto.randomUUID(), name: prepared.createSchema.name } : null;
         pin.check();
         try {
-          await gov.recordChangesBulk(copyTableToBulk({ table: clip.table, cols: clip.cols, id, physicalName, logicalName }));
+          await gov.recordChangesBulk([
+            ...(schema ? [gov.bulk.createSchema({ ...schema, kind: 'tables' })] : []),
+            ...copyTableToBulk({ table, cols, id, physicalName, logicalName, source }),
+          ]);
         } catch (e) {
           lastErr = e;
-          if (e instanceof Error && /already exists/i.test(e.message)) continue;
+          if (e instanceof Error && e.message.includes(`Table ${physicalName} already exists`)) {
+            lost.push(physicalName);
+            continue;
+          }
           throw e;
         }
         // Alta en el canvas + bloque al costado del original si está A LA VISTA;
@@ -881,7 +927,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         const src = rf?.getNode(clip.table.id);
         const beside = src ? { x: Math.round(src.position.x + 36), y: Math.round(src.position.y + 36) } : null;
         const view = canvasView(rf, { panel: 'opens' });
-        const size = tableLodSize({ ...clip.table, physicalName, logicalName }, clip.cols, get().viewMode);
+        const size = tableLodSize({ ...table, physicalName, logicalName }, cols, get().viewMode);
         const centered = view ? blockSpot(view, size) : null;
         // «A la vista» = su CABECERA entera (ancho × 32 px) dentro de lo que se ve
         // (revisión: con sólo la esquina, la copia podía quedar a 1 px de la vista).
@@ -902,17 +948,34 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         // Doc 105 (R7-E): no selecciona en otra sesión; ronda 4 (6c): tampoco
         // devuelve el nombre — el llamador avisaría «pasted as» en la nueva.
         if (!pin.holds()) return null;
+        // El esquema que nació con el pegado entra a los combos de esquema.
+        if (schema) void get().loadSchemas().catch(() => undefined);
         set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible
         get().markFresh({ [saId]: [id] });   // revisión doc 113: y encima de lo demás aunque se deseleccione
         // Ronda 5 (R15-H9): el nombre de la copia que se muestra, según la faceta —
         // ronda 6 (R17a-11): también en la etiqueta del Undo.
         const shown = get().viewMode === 'logical' ? logicalName || physicalName : physicalName;
-        pushUndo(`Paste ${facetNouns(get().viewMode).one} ${shown}`, () => get().deleteTable(id), pin);
+        // El esquema que nació con el pegado se va con él si ya nadie lo usa (una
+        // tabla legada pudo estar en ese esquema sin catalogar: entonces queda).
+        // Best-effort: un esquema sin uso que quede es inofensivo.
+        pushUndo(`Paste ${facetNouns(get().viewMode).one} ${shown}`, async () => {
+          await get().deleteTable(id);
+          if (!schema) return;
+          pin.check();
+          const use = await schemasSvc.schemaImpact(schema.id).catch(() => null);
+          if (!use || use.tables + use.views > 0) return;
+          pin.check();
+          await schemasSvc.deleteSchema(schema.id).catch(() => undefined);
+          void get().loadSchemas().catch(() => undefined);
+          get().bumpExplorer();
+        }, pin);
         return shown;
       }
       throw lastErr instanceof Error ? lastErr : new Error("Couldn't paste the table");
     } finally { _pasteTableBusy = false; }
   }),
+  tablePasteOpen: false,
+  setTablePasteOpen: (open) => set({ tablePasteOpen: open }),
   colMenu: null,
   openColMenu: (m) => set({ colMenu: m }),
   closeColMenu: () => { if (get().colMenu) set({ colMenu: null }); },
@@ -1298,7 +1361,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       if (seq !== _explorerSeq) return;
       throw e;
     }
-    if (seq === _explorerSeq) set({ projects });
+    if (seq !== _explorerSeq) return;
+    for (const p of projects) _projectNames.set(p.id, p.name);
+    set({ projects });
   },
   selectProject: async (pid) => {
     const { isCurrent } = explorerRequest();   // doc 105 (R7-C): respuesta de otra sesión → no escribe
@@ -1307,8 +1372,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set((s) => ({
       activeProjectId: pid, folders, subjectAreas, activeFolderId: null, activeSaId: null,
       diagram: null, selectedTableId: null, drawings: [],
-      // Doc 48: cambiar de PROYECTO invalida también el clipboard de columnas.
-      colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null,
+      // Doc 118: el clipboard sobrevive (se pega en otro proyecto); la selección y los popups no.
+      colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
       trees: { ...s.trees, [pid]: { folders, subjectAreas } },
     }));
   },
@@ -1377,7 +1442,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         // contexto): cerrar la sesión de canvas y volver al chooser.
         set({ activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null,
               activeSaId: null, diagram: null, selectedTableId: null, drawings: [],
-              colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null, colClipboard: null, tblClipboard: null });
+              colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
         if (pid) {
           toast.error('This project was deleted in a published version.');
           useSessionStore.getState().closeModel();
@@ -1411,7 +1476,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           // qué canvas queda; si no, se cierra (su diagrama es de la sesión
           // anterior) y se dice por qué — antes se cerraba en silencio.
           if (!(await stillAsked(e))) return false;
-          set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
+          set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
           toast.error(`Couldn't reload the canvas: ${reasonOf(e)}. Open it again from the explorer.`,
             { id: `dmh-canvas-reload:${askedKey}` });
           return false;
@@ -1463,7 +1528,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // el canvas nuevo y aparecería seleccionada, con sus tiradores a la vista.
       installed = true;
       set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null, selectedEdgeId: null,
-            colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
+            colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
             drawings: diagram.subjectArea.drawings ?? [] });
       // Doc 83: reglas de naming del proyecto del canvas (best-effort, no bloquea).
       void get().loadNaming(pid ?? get().activeProjectId);
@@ -1550,6 +1615,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   renameProject: async (id, name) => {
     await struct.renameProject(id, name);
+    _projectNames.set(id, name);
     set({ projects: get().projects.map((p) => (p.id === id ? { ...p, name } : p)) });
   },
   deleteProject: async (id) => {
@@ -1587,7 +1653,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({
       ...treesPatch,
       folders, subjectAreas, activeFolderId,
-      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null }),
+      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null }),
     });
   },
   loadNaming: async (projectId) => {
@@ -1634,7 +1700,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // Ronda 7: un dibujo del debounce se guarda antes de cerrar (el canvas
       // sigue existiendo); con el 404 ya no está.
       if (!(e instanceof ApiError && e.status === 404)) flushPendingDrawings(id, get().drawings);
-      set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
+      set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
       if (e instanceof ApiError && e.status === 404) {
         toast.error('This canvas is no longer in this version, so it was closed. Open another one from the explorer.', { id: `dmh-canvas-reload:${sessionNow()}` });
       } else if (!quiet) {
@@ -3029,11 +3095,11 @@ useModelerStore.subscribe((s, prev) => {
   useModelerStore.setState({ canvasColors: colors });
 });
 
-// Doc 48: el clipboard de columnas pertenece al changeset donde se copió —
-// cambiar de changeset (o soltarlo) lo invalida, junto con la selección y el
-// popup. Doc 50: ídem el clipboard de TABLA. Suscripción a nivel de módulo
-// (useSessionStore no importa este store, así que no hay ciclo). Doc 75 D14: la
-// sesión es la ÚNICA fuente del changeset activo.
+// Doc 118: al cambiar de sesión (proyecto, modo o versión) se van la selección,
+// el menú y los popups de pegado; el clipboard queda — se pega en otra versión u
+// otro proyecto tras su revisión—, y lo limpia el logout (`resetAppState`).
+// Suscripción a nivel de módulo (useSessionStore no importa este store, así que
+// no hay ciclo). Doc 75 D14: la sesión es la ÚNICA fuente del changeset activo.
 useSessionStore.subscribe((s, prev) => {
   // Doc 105 (F3): la pila de Undo es de la SESIÓN — proyecto, modo y versión,
   // como `canvasSessionKey` —, no sólo de la versión: editar → solo lectura →
@@ -3054,13 +3120,11 @@ useSessionStore.subscribe((s, prev) => {
       diagram: null, drawings: [], openingSaId: null,
       selectedTableId: null, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null,
       columnTarget: null, relPreset: null, subcatArmed: false, hoverEdgeId: null, hoverNodeId: null,
-      colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null,
+      colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null,
       inspect: null, searchOpen: false, navigating: null, pendingFocusTableId: null, pendingFocusColId: null,
       modelProps: null, colorPreview: null, freshNodes: {},
     });
   }
-  if (s.activeChangesetId === prev.activeChangesetId) return;
-  useModelerStore.setState({ colClipboard: null, tblClipboard: null, colSel: null, colMenu: null, pasteTarget: null, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
 });
 
 /**

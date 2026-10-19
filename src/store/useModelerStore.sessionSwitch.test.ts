@@ -177,11 +177,13 @@ describe('pila de Undo en los cambios de sesión (doc 105, F3)', () => {
     expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['x']);
   });
 
-  it('el clipboard de tabla sobrevive a un cambio de MODO de la misma versión (doc 48, sin cambio)', () => {
+  it('el clipboard de tabla sobrevive a los cambios de modo, versión y proyecto (doc 118: se pega en otro)', () => {
     useModelerStore.setState({ tblClipboard: { table: { id: 't' }, cols: [] } as never });
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'readonly', changesetId: 'cs1' });
     expect(useModelerStore.getState().tblClipboard).not.toBeNull();
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs2' });
-    expect(useModelerStore.getState().tblClipboard).toBeNull();
+    expect(useModelerStore.getState().tblClipboard).not.toBeNull();
+    useSessionStore.getState().openModel({ projectId: 'p2', mode: 'editing', changesetId: 'cs3' });
+    expect(useModelerStore.getState().tblClipboard).not.toBeNull();
   });
 });

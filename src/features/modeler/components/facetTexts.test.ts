@@ -13,8 +13,10 @@ const code = (name: string) => readFileSync(join(__dirname, name), 'utf-8')
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
 describe('avisos con el sustantivo del modelo (doc 105, ronda 4)', () => {
-  it('ColumnContextMenu › Paste table: como Ctrl+V', () => {
-    const src = code('ColumnContextMenu.tsx');
+  it('ColumnContextMenu › Paste table: como Ctrl+V, abre el popup que avisa con la faceta (doc 118)', () => {
+    expect(code('ColumnContextMenu.tsx')).toMatch(/st\.setTablePasteOpen\(true\)/);
+    expect(code('ModelerCanvas.tsx')).toMatch(/st\.setTablePasteOpen\(true\)/);
+    const src = code('PasteTablePopup.tsx');
     expect(src).not.toMatch(/`Table pasted as/);
     expect(src).toMatch(/`\$\{n\.One\} pasted as \$\{name\}`/);
     expect(src).toMatch(/`Couldn't paste the \$\{n\.one\}`/);
@@ -46,7 +48,7 @@ describe('copiar y pegar con los sustantivos de la faceta (doc 105, ronda 5)', (
     expect(src).not.toMatch(/Paste table \(/);
     expect(src).toMatch(/`Copy \$\{n\.one\}`/);
     expect(src).toMatch(/`Paste \$\{clipCount\} \$\{clipCount === 1 \? n\.member : n\.members\}`/);
-    expect(src).toMatch(/`Paste \$\{n\.one\} \(\$\{tblClipName\} as copy\)`/);
+    expect(src).toMatch(/`Paste \$\{n\.one\} \$\{tblClipName\}…`/);
     expect(src).toMatch(/s\.viewMode === 'logical' \? t\.logicalName \|\| t\.physicalName : t\.physicalName/);
   });
 
@@ -66,9 +68,9 @@ describe('pegar atributos/columnas con la faceta (doc 105, ronda 6)', () => {
 
   it('los nombres de origen y destino, según la faceta', () => {
     expect(src).toMatch(/const shown = \(t: \{ logicalName\?: string; physicalName: string \}\) => \(viewMode === 'logical' \? t\.logicalName \|\| t\.physicalName : t\.physicalName\);/);
-    expect(src).toMatch(/pasted into \$\{shown\(target\)\}`/);
-    expect(src).toMatch(/subtitle=\{`\$\{shown\(clipboard\.source\)\} → \$\{shown\(target\)\}`\}/);
-    expect(src).not.toMatch(/target\.physicalName\}`/);
+    expect(src).toMatch(/pasted into \$\{shown\(table\)\}`/);
+    expect(src).toMatch(/subtitle=\{`\$\{shown\(clipboard\.source\)\}\$\{fromName \? ` from «\$\{fromName\}»` : ''\} → \$\{shown\(table\)\}`\}/);
+    expect(src).not.toMatch(/table\.physicalName\}`/);
   });
 
   it('el Undo y los textos del popup, con los sustantivos de la faceta', () => {
