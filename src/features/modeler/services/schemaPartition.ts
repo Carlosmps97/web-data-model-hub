@@ -24,9 +24,10 @@ let inflight: { key: string; p: Promise<string[]> } | null = null;
 let generation = 0;
 
 /** Doc 119: el catálogo cambió dentro de la versión (Structure · Schemas
- *  guardó un alta, un rename, un cambio de kind o un borrado): la próxima
- *  llamada vuelve a consultar. Una respuesta que ya estaba en vuelo no repone
- *  la foto vieja. */
+ *  guardó un alta, un rename, un cambio de kind o un borrado, o `loadSchemas`
+ *  del store trajo un catálogo distinto: un alta desde un combo, un pegado que
+ *  crea su esquema, una carga Excel): la próxima llamada vuelve a consultar.
+ *  Una respuesta que ya estaba en vuelo no repone la foto vieja. */
 export function invalidateTableSchemas(): void {
   generation += 1;
   cache = null;

@@ -7,6 +7,7 @@ import * as mod from '@/features/modeler/services/modeler.service';
 import * as struct from '@/features/modeler/services/structure.service';
 import * as schemasSvc from '@/features/modeler/services/schemas.service';
 import type { DbSchema } from '@/features/modeler/services/schemas.service';
+import { invalidateTableSchemas } from '@/features/modeler/services/schemaPartition';
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
@@ -715,6 +716,8 @@ let _quietReloadFailure = false;
 // otra versión, modo o proyecto mientras cargaba) no pisa proyectos, proyecto
 // activo, árbol, esquemas ni el canvas del vigente.
 let _explorerSeq = 0;
+/** Lo que el filtro de esquemas de CTAS lee de cada esquema del catálogo. */
+const schemasSignature = (rows: DbSchema[]): string => rows.map((s) => `${s.id}|${s.name}|${s.kind ?? ''}`).join('\n');
 /** Doc 105 (H4b): lo que relee el árbol tras una mutación del Explorer escribe
  *  sólo si sigue la sesión en que se PIDIÓ la mutación y no empezó un refresco
  *  más nuevo (que trae el árbol vigente). Se toma al empezar la mutación. */
@@ -791,6 +794,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // sesión), esta respuesta ya no le corresponde — el refresco trae la suya.
     const seq = _explorerSeq;
     const schemas = await schemasSvc.listSchemas();
+    // El filtro de esquemas de CTAS / Import existing sale de este catálogo: si
+    // cambió (alta desde un combo, pegado, carga Excel), lo vuelve a consultar.
+    if (schemasSignature(schemas) !== schemasSignature(get().schemas)) invalidateTableSchemas();
     if (seq === _explorerSeq) set({ schemas });
   },
   activeProjectId: null,

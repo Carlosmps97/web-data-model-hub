@@ -32,7 +32,7 @@ vi.mock('@/store/useModelerStore', () => {
 vi.mock('@/store/useSessionStore', () => ({ useSessionStore: (pick: (s: unknown) => unknown) => pick({ activeVersionLabel: 'v3' }) }));
 vi.mock('@/store/useBusyStore', () => ({ runBlocking: async (_label: string, fn: () => Promise<void>) => fn() }));
 vi.mock('@/components/ui/dialogs', () => ({ confirmDialog: vi.fn(async () => true) }));
-vi.mock('@/features/modeler/services/schemas.service', () => svc);
+vi.mock('../services/schemas.service', () => svc);
 const { invalidateTableSchemas } = vi.hoisted(() => ({ invalidateTableSchemas: vi.fn() }));
 vi.mock('../services/schemaPartition', () => ({ invalidateTableSchemas }));
 vi.mock('../lib/sessionGuard', () => ({
