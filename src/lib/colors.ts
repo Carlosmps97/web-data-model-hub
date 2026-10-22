@@ -1,16 +1,16 @@
 /**
- * Doc 109 — colores de tablas, vistas y canvases. Espejo de
+ * Colores de tablas, vistas y canvases. Espejo de
  * `backend-data-model-hub/app/core/colors.py` (misma gramática).
  *
- * Un color se guarda como REFERENCIA (`ColorRef`, un string):
+ * Un color se guarda como referencia (`ColorRef`, un string):
  *   'theme:<id>'  un theme del proyecto (Data Standards → Themes): si cambia el
  *                 color del theme, cambian todas las cajas que lo usan
  *   '#RRGGBB'     un color fijo
- *   'none'        «sin color» — sólo como excepción de un canvas
+ *   'none'        «sin color» — solo como excepción de un canvas
  *
  * Dónde vive: `CanonicalTable.color` / `View.color` (todos los canvases de la
  * tabla o vista; null = sin color) y `SubjectArea.colors` = {id: ColorRef}
- * (excepciones de ESE canvas). Precedencia, como en Erwin: excepción del canvas
+ * (excepciones de ese canvas). Precedencia, como en Erwin: excepción del canvas
  * → color de la tabla → sin color.
  */
 
@@ -29,7 +29,7 @@ export const STANDARD_COLORS: { hex: string; name: string }[] = [
   { hex: '#002060', name: 'Dark blue' }, { hex: '#7030A0', name: 'Purple' },
 ];
 
-/** Referencia NORMALIZADA (hex en mayúsculas) o null si no es válida.
+/** Referencia normalizada (hex en mayúsculas) o null si no es válida.
  *  `allowNone`: si vale la palabra 'none' (excepción de canvas). Pura. */
 export function normalColor(value: unknown, allowNone = false): string | null {
   if (typeof value !== 'string') return null;
@@ -44,7 +44,7 @@ export const themeRef = (id: string): string => `theme:${id}`;
 export const themeIdOf = (ref: string | null | undefined): string | null =>
   ref && ref.startsWith('theme:') ? ref.slice(6) : null;
 
-/** Las excepciones de un canvas, sólo las válidas. Pura. */
+/** Las excepciones de un canvas, solo las válidas. Pura. */
 export function cleanColors(raw: unknown): Record<string, string> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const out: Record<string, string> = {};
@@ -55,7 +55,7 @@ export function cleanColors(raw: unknown): Record<string, string> {
   return out;
 }
 
-/** Hex de una referencia (null = sin color; un theme que ya no existe, también). */
+/** Hex de una referencia (null = sin color; un theme borrado, también). */
 export function colorHex(ref: string | null | undefined, themes: Record<string, Theme> | Map<string, Theme>): string | null {
   const v = normalColor(ref, true);
   if (!v || v === NO_COLOR) return null;
@@ -65,7 +65,7 @@ export function colorHex(ref: string | null | undefined, themes: Record<string, 
   return t ? normalColor(t.color) : null;
 }
 
-/** Referencia EFECTIVA de una caja en un canvas: su excepción del canvas o, si
+/** Referencia efectiva de una caja en un canvas: su excepción del canvas o, si
  *  no tiene, el color propio de la tabla/vista. Pura. */
 export function effectiveRef(id: string, own: string | null | undefined,
   canvas: Record<string, string> | null | undefined): string | null {

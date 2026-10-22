@@ -1,12 +1,11 @@
 /**
- * ChangesSummary (doc 64 §7 — v2; nace en doc 31) — card de resumen del
- * request: totales por verbo como 3 stat-pills, chips de proyectos/modelos
- * afectados y la matriz por tipo de entidad como filas con chips de conteo
- * (solo los ≠ 0). El detalle fino vive en el popup rediseñado (CTA "Review
- * changes in detail"). Todo sale del `GET /diff` ya cargado — cero requests
- * extra. Doc 84 A2: los chips dicen la palabra («+6 added», «1 modified»),
- * la fila «Conflicts with production» entra a la matriz y la cabecera muestra
- * cuándo fue el último cambio del request (A3).
+ * ChangesSummary: card de resumen del request: totales por verbo como 3
+ * stat-pills, chips de proyectos/modelos afectados y la matriz por tipo de
+ * entidad como filas con chips de conteo (solo los ≠ 0). El detalle fino vive
+ * en el popup "Change details" (CTA "Review changes in detail"). Todo sale del
+ * `GET /diff` ya cargado, sin requests extra. Los chips dicen la palabra
+ * («+6 added», «1 modified»), la fila «Conflicts with production» entra a la
+ * matriz y la cabecera muestra cuándo fue el último cambio del request.
  */
 import { ListTree, TriangleAlert } from 'lucide-react';
 import { summarizeDiff } from '@/services/versioning.service';
@@ -115,9 +114,13 @@ export default function ChangesSummary({ diff, onOpenDetails }: {
               {conflicts.overwrites > 0 && (
                 <span className="dmh-rvs-cnt is-edited">{conflicts.overwrites} overwrite{conflicts.overwrites === 1 ? '' : 's'} on approve</span>
               )}
-              {/* Doc 100 (P3): lo que producción borró vuelve al aprobar. */}
+              {/* Lo que producción borró vuelve al aprobar. */}
               {conflicts.restores > 0 && (
                 <span className="dmh-rvs-cnt is-edited">{conflicts.restores} restore{conflicts.restores === 1 ? '' : 's'} on approve</span>
+              )}
+              {/* Objetos que otra versión borró: bloquean el publish. */}
+              {conflicts.blocked > 0 && (
+                <span className="dmh-rvs-cnt is-deleted">{conflicts.blocked} deleted in production — blocks publishing</span>
               )}
             </span>
           </div>

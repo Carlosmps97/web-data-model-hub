@@ -1,13 +1,13 @@
 /**
- * Doc 112 — el color de las cajas EN un canvas, para la UI:
+ * Color de las cajas en un canvas, para la UI:
  *  - «Colors on this canvas» (ficha del canvas, Model properties): qué cajas
  *    pinta distinto este canvas y a cuáles se aplica «Paint on this canvas»;
  *  - Properties: el color que se ve en la caja y de dónde sale.
  *
- * Los niveles (doc 109): Data Standards → Themes es la LISTA de colores con
- * nombre del proyecto; el color de la tabla/vista se ve en todos sus canvases;
- * el de un canvas es una excepción de ESA caja en ESE canvas. Lo que se ve:
- * excepción del canvas → color de la tabla → sin color. Puro.
+ * Los niveles: Data Standards → Themes es la lista de colores con nombre del
+ * proyecto; el color de la tabla/vista se ve en todos sus canvases; el de un
+ * canvas es una excepción de esa caja en ese canvas. Lo que se ve: excepción
+ * del canvas → color de la tabla → sin color. Puro.
  */
 import type { Diagram } from '../services/modeler.service';
 import type { Facet } from '@/lib/facets';
@@ -16,7 +16,7 @@ import { normalColor } from '@/lib/colors';
 export interface CanvasBox { id: string; kind: 'table' | 'view'; name: string; own: string | null }
 
 /** Las cajas que se ven en el canvas abierto: las tablas (nombre según la
- *  faceta) y, en físico, las vistas (doc 63: en lógico no hay vistas). */
+ *  faceta) y, en físico, las vistas (en lógico no hay vistas). */
 export function canvasBoxes(diagram: Pick<Diagram, 'tables' | 'views'> | null, facet: Facet): CanvasBox[] {
   if (!diagram) return [];
   const own = (c: unknown) => normalColor(c) ?? null;
@@ -28,7 +28,7 @@ export function canvasBoxes(diagram: Pick<Diagram, 'tables' | 'views'> | null, f
   return [...tables, ...(diagram.views ?? []).map((v): CanvasBox => ({ id: v.id, kind: 'view', name: v.name, own: own(v.color) }))];
 }
 
-/** Las cajas que este canvas pinta distinto (sólo las que se ven y con una
+/** Las cajas que este canvas pinta distinto (solo las que se ven y con una
  *  excepción válida), ordenadas por nombre sin importar mayúsculas. */
 export function paintedHere(boxes: CanvasBox[], colors: Record<string, string>): (CanvasBox & { ref: string })[] {
   const out: (CanvasBox & { ref: string })[] = [];
@@ -53,7 +53,7 @@ export function shownColor(id: string, own: string | null | undefined,
 }
 
 /** A qué cajas se aplica «Paint on this canvas»: las tablas y vistas
- *  SELECCIONADAS en el canvas que se ven; sin ninguna, la del panel Properties
+ *  seleccionadas en el canvas que se ven; sin ninguna, la del panel Properties
  *  (`fallback`: tabla y vista seleccionadas). */
 export function paintTargets(nodes: { id: string; type?: string; selected?: boolean }[],
   fallback: (string | null)[], visible: Set<string>): string[] {
@@ -65,7 +65,7 @@ export function paintTargets(nodes: { id: string; type?: string; selected?: bool
   return one ? [one] : [];
 }
 
-/** Doc 112: cambios PENDIENTES de la ficha del canvas — {id: ColorRef | null};
+/** Cambios pendientes de la ficha del canvas: {id: ColorRef | null};
  *  null = la caja vuelve al color de su tabla. Save los graba, Cancel los
  *  descarta. */
 export type PendingColors = Record<string, string | null>;
@@ -79,7 +79,7 @@ export function withPending(canvas: Record<string, string>, pending: PendingColo
   return out;
 }
 
-/** De lo pendiente, sólo lo que cambia respecto de lo grabado. Pura. */
+/** De lo pendiente, solo lo que cambia respecto de lo grabado. Pura. */
 export function pendingChanges(canvas: Record<string, string>, pending: PendingColors): PendingColors {
   const out: PendingColors = {};
   for (const [id, ref] of Object.entries(pending)) {

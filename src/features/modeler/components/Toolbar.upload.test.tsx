@@ -1,10 +1,10 @@
-// Doc 113 §1.2: «Upload from Excel» sólo en el modelo físico (como Views, CTAS
-// y Schemas) — la carga crea tablas con esquema y sus vistas `_vu`; en Logical
-// queda deshabilitado y su nombre accesible dice por qué.
+// «Upload from Excel» solo en el modelo físico (como Views, CTAS y Schemas): la
+// carga crea tablas con esquema y sus vistas `_vu`; en Logical queda
+// deshabilitado y su nombre accesible dice por qué.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-// En un render del lado del servidor zustand lee el estado INICIAL de cada
+// En un render del lado del servidor zustand lee el estado inicial de cada
 // store: la sesión y la faceta salen de estos objetos (el resto, real).
 const session: Record<string, unknown> = { openMode: 'editing', activeChangesetId: 'cs1', activeProjectId: 'p1' };
 const modeler: Record<string, unknown> = {};
@@ -29,7 +29,7 @@ function uploadButton(): string {
   return btn;
 }
 
-describe('Toolbar: Upload from Excel sólo en Physical (doc 113)', () => {
+describe('Toolbar: Upload from Excel solo en Physical', () => {
   it('en Logical está deshabilitado y su nombre dice que es del modelo físico', () => {
     modeler.viewMode = 'logical';
     const btn = uploadButton();

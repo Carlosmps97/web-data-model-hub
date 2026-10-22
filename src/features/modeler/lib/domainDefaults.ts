@@ -1,21 +1,21 @@
 /**
- * domainDefaults (doc 69 §4.7 → afinado doc 79) — al asignar un parent domain,
- * Erwin autocompleta el nombre del atributo (= nombre del dominio) y su
- * definición SOLO para los dominios "atributo estándar": los que en Erwin
- * llevan `Attribute_Definition` (FecRutina, CodMes, FecDia, los de auditoría…)
- * y cuyos atributos heredan el nombre vía el macro `%AttDomain`. La migración
- * marca esos dominios con `inheritsName === true`.
+ * domainDefaults: al asignar un parent domain, Erwin autocompleta el nombre
+ * del atributo (= nombre del dominio) y su definición solo para los dominios
+ * "atributo estándar": los que en Erwin llevan `Attribute_Definition`
+ * (FecRutina, CodMes, FecDia, los de auditoría…) y cuyos atributos heredan el
+ * nombre vía el macro `%AttDomain`. La carga de modelos Erwin marca esos
+ * dominios con `inheritsName === true`.
  *
- * Los dominios GENÉRICOS de tipo (Codigo, Fecha, Number, Monto, Descripcion…)
- * NO llevan la marca: cada columna conserva SU nombre y SU definición — elegir
- * uno de ellos jamás los pisa (bug reportado por modelamiento, doc 79).
+ * Los dominios genéricos de tipo (Codigo, Fecha, Number, Monto, Descripcion…)
+ * no llevan la marca: cada columna conserva su nombre y su definición; elegir
+ * uno de ellos jamás los pisa.
  *
- * Con la marca puesta, la regla es la del tipo (doc 46):
- *  - elegir OTRO dominio estándar RE-APLICA: nombre lógico sugerido
+ * Con la marca puesta, la regla es la del tipo:
+ *  - elegir otro dominio estándar re-aplica: nombre lógico sugerido
  *    (`namingTerm` ?? `name`) y definición (`description`, si la tiene). Es un
- *    cambio DIRECTO sobre el atributo (la herencia anterior pertenecía al
+ *    cambio directo sobre el atributo (la herencia anterior pertenecía al
  *    dominio anterior);
- *  - re-elegir el MISMO dominio respeta lo que haya (no pisa lo manual);
+ *  - re-elegir el mismo dominio respeta lo que haya (no pisa lo manual);
  *  - quitar el dominio conserva todo. El físico lo deriva el glosario aparte.
  * Pura (testeable sin DOM).
  */
@@ -24,10 +24,10 @@ export interface DomainLike {
   name: string;
   namingTerm?: string | null;
   description?: string | null;
-  /** Doc 79: dominio "atributo estándar" (Erwin `Attribute_Definition`). Solo
+  /** Dominio "atributo estándar" (Erwin `Attribute_Definition`). Solo
    *  estos heredan nombre + definición al atributo; los genéricos, nunca. */
   inheritsName?: boolean | null;
-  /** Doc 85: faceta física del dominio — físico override (null = derivado) y
+  /** Faceta física del dominio: físico override (null = derivado) y
    *  descripción física (null = igual a la lógica). */
   physicalName?: string | null;
   physicalDescription?: string | null;
@@ -43,10 +43,10 @@ export interface DomainDefaultsInput {
 }
 export interface DomainDefaultsPatch {
   logicalName?: string;
-  /** Doc 85 D2: físico override del dominio; AUSENTE = el caller lo deriva por glosario. */
+  /** Físico override del dominio; ausente = el caller lo deriva por glosario. */
   physicalName?: string;
   description?: string;
-  /** Doc 85: null = LIMPIAR (la física anterior pertenecía al dominio anterior). */
+  /** null = limpiar (la física anterior pertenecía al dominio anterior). */
   physicalDescription?: string | null;
 }
 
@@ -56,20 +56,20 @@ const sameDomain = (a: DomainLike, b: DomainLike): boolean =>
 export function applyDomainDefaults(i: DomainDefaultsInput): DomainDefaultsPatch {
   if (!i.nextDomain) return {};
   if (i.prevDomain && sameDomain(i.prevDomain, i.nextDomain)) return {};
-  // Doc 79: solo los dominios "atributo estándar" empujan nombre y definición.
+  // Solo los dominios "atributo estándar" empujan nombre y definición.
   // Un dominio genérico de tipo nunca pisa el nombre/definición propios.
   if (!i.nextDomain.inheritsName) return {};
   const out: DomainDefaultsPatch = {};
   const name = suggestedName(i.nextDomain);
   const desc = suggestedDescription(i.nextDomain);
   if (name && name !== i.current.logicalName.trim()) out.logicalName = name;
-  // Doc 85 D2: el físico del dominio (override) se hereda tal cual; sin
-  // override el caller deriva el físico del lógico nuevo por glosario.
+  // El físico del dominio (override) se hereda tal cual; sin override el caller
+  // deriva el físico del lógico resultante por glosario.
   const phys = i.nextDomain.physicalName?.trim();
   if (phys && phys !== (i.current.physicalName ?? '').trim()) out.physicalName = phys;
   if (desc && desc !== i.current.description.trim()) out.description = desc;
-  // Doc 85: la descripción física va con la misma marca; si el dominio nuevo
-  // no tiene, se LIMPIA (null): la anterior pertenecía al dominio anterior.
+  // La descripción física va con la misma marca; si el dominio elegido no
+  // tiene, se limpia (null): la anterior pertenecía al dominio anterior.
   const nextPhysDesc = i.nextDomain.physicalDescription?.trim() ?? '';
   if (nextPhysDesc !== (i.current.physicalDescription ?? '').trim()) out.physicalDescription = nextPhysDesc || null;
   return out;

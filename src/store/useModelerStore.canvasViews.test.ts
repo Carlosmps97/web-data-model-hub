@@ -1,9 +1,9 @@
-// Doc 70 §2.3: membresía de vistas en el canvas desde el store — importar una
-// tabla NO arrastra sus vistas (salvo withViews), add/remove de vistas con
-// Undo, y poda de vistas huérfanas al quitar una tabla. Servicios mockeados.
-// Doc 100 (P5): el store pide «agrega / quita estos ids» (con la lista de vistas
-// que se MUESTRA, para un canvas sin lista explícita) y el servicio arma la
-// lista completa dentro de su cola — lo cubre la prueba integrada
+// Membresía de vistas en el canvas desde el store: importar una tabla no
+// arrastra sus vistas (salvo withViews), add/remove de vistas con Undo, y poda
+// de vistas huérfanas al quitar una tabla. Servicios mockeados.
+// El store pide «agrega / quita estos ids» (con la lista de vistas que se
+// muestra, para un canvas sin lista explícita) y el servicio arma la lista
+// completa dentro de su cola; eso lo cubre la prueba integrada
 // `useModelerStore.membership.integration.test.ts`.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -41,22 +41,22 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(mod.loadDiagram).mockResolvedValue(JSON.parse(JSON.stringify(DIAGRAM)));
   vi.mocked(struct.addToCanvas).mockResolvedValue({ tableIds: [], viewIds: [] });
-  // Lo que salió (doc 105) y su color en el canvas (doc 112): el Undo lo repone.
+  // Lo que salió y su color en el canvas: el Undo lo repone.
   vi.mocked(struct.removeFromCanvas).mockResolvedValue({ tableIds: [], viewIds: [], layout: {}, colors: { v1: '#92D050' } });
   useModelerStore.setState({ activeSaId: 'sa1', flow: null, diagram: JSON.parse(JSON.stringify(DIAGRAM)), selectedViewId: null, dirty: false });
   useUndoStore.setState({ stack: [], busy: false });
 });
 
-describe('useModelerStore — vistas como miembros del canvas (doc 70)', () => {
-  it('addExistingTables SIN opción: la tabla entra sola y la membresía de vistas se conserva', async () => {
+describe('useModelerStore — vistas como miembros del canvas', () => {
+  it('addExistingTables sin opción: la tabla entra sola y la membresía de vistas se conserva', async () => {
     await useModelerStore.getState().addExistingTables(['t3']);
-    // Revisión doc 114: sin canvas medible la importada entra sin posición — entonces no se fija nada.
+    // Sin canvas medible la importada entra sin posición; entonces no se fija nada.
     expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t3'], viewIds: [] }, ['v1']);
     expect(viewsSvc.listViewsForTables).not.toHaveBeenCalled();
     expect(useModelerStore.getState().dirty).toBe(true);
   });
 
-  it('addExistingTables con withViews suma las vistas de la tabla y el Undo retira SÓLO lo que entró', async () => {
+  it('addExistingTables con withViews suma las vistas de la tabla y el Undo retira solo lo que entró', async () => {
     vi.mocked(viewsSvc.listViewsForTables).mockResolvedValue([
       { id: 'v9', name: 'T3_VU', sourceTableIds: ['t3'] },
       { id: 'v1', name: 'dup', sourceTableIds: ['t1', 't3'] },   // ya miembro → el servicio no la duplica
@@ -98,20 +98,20 @@ describe('useModelerStore — vistas como miembros del canvas (doc 70)', () => {
   });
 
   it('removeTableFromArea poda las vistas que quedan sin fuente y el Undo las restaura', async () => {
-    // quitar t1: v1 (sólo t1) queda huérfana; v2 sobrevive por t2
+    // quitar `t1`: `v1` (solo `t1`) queda huérfana; `v2` sobrevive por `t2`
     useModelerStore.setState({ diagram: { ...JSON.parse(JSON.stringify(DIAGRAM)), subjectArea: { ...SA, viewIds: ['v1', 'v2'] } } as never });
     await useModelerStore.getState().removeTableFromArea('t1');
-    // Revisión doc 114: t2 (sin posición) queda donde se ve y v2, que se re-anclaría a t2, también.
+    // `t2` (sin posición) queda donde se ve y `v2`, que se re-anclaría a `t2`, también.
     expect(struct.removeFromCanvas).toHaveBeenCalledWith('sa1', {
       tableIds: ['t1'], viewIds: ['v1'], pins: { t2: gridSlot(1), v2: defaultViewPosition(gridSlot(0)) },
     }, ['v1', 'v2']);
     await useUndoStore.getState().undoLast();
-    // la lista de vistas es la de ESTE canvas al sacar la tabla (no la del diagrama al deshacer)
+    // la lista de vistas es la de este canvas al sacar la tabla (no la del diagrama al deshacer)
     expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t1'], viewIds: ['v1'], layout: {}, routes: {}, colors: { v1: '#92D050' } }, ['v1', 'v2']);
   });
 
   it('removeTableFromArea sin huérfanas no toca la membresía de vistas', async () => {
-    await useModelerStore.getState().removeTableFromArea('t2');   // v2 sobrevive por t1
+    await useModelerStore.getState().removeTableFromArea('t2');   // `v2` sobrevive por `t1`
     expect(struct.removeFromCanvas).toHaveBeenCalledWith('sa1', { tableIds: ['t2'], viewIds: [], pins: { t1: gridSlot(0) } }, ['v1']);
   });
 });

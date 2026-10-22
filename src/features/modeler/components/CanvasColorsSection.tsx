@@ -18,8 +18,8 @@ const Dot = ({ hex, sm }: { hex: string | null; sm?: boolean }) => (
 );
 
 /**
- * Doc 112 — «Colors on this canvas», en la ficha del canvas (Model properties).
- * El color de una caja en UN canvas es del canvas, no de la tabla (ése está en
+ * «Colors on this canvas», en la ficha del canvas (Model properties). El color
+ * de una caja en un canvas es del canvas, no de la tabla (ese está en
  * Properties).
  *
  *  - Qué cajas pinta distinto este canvas, cada una con «Reset» (vuelve al
@@ -27,10 +27,10 @@ const Dot = ({ hex, sm }: { hex: string | null; sm?: boolean }) => (
  *  - «Paint on this canvas» para las cajas elegidas: las seleccionadas en el
  *    canvas al abrir la ficha, o la del panel Properties si se abrió desde ahí.
  *
- * Todo queda PENDIENTE (`pending`, de la ficha) y se ve en el canvas como vista
- * previa: Save lo graba en la versión en edición, Cancel lo descarta. El
- * selector de color se abre encima (no agranda la ficha) y DENTRO de ella: se
- * llega con Tab y Escape cierra sólo el selector.
+ * Los cambios quedan pendientes (`pending`, de la ficha) y se ven en el canvas
+ * como vista previa: Save los graba en la versión en edición, Cancel los
+ * descarta. El selector de color se abre encima (no agranda la ficha) y dentro
+ * de ella: se llega con Tab y Escape cierra solo el selector.
  */
 export default function CanvasColorsSection({ canEdit, boxes: asked, pending, onStage, alive }: {
   canEdit: boolean;
@@ -60,7 +60,7 @@ export default function CanvasColorsSection({ canEdit, boxes: asked, pending, on
   const unsaved = useMemo(() => pendingChanges(saved, pending), [saved, pending]);
   const unsavedCount = Object.keys(unsaved).length;
   const rows = paintedHere(boxes, colors);
-  // A quién se pinta: se decide AL ABRIR la ficha (con ella abierta el canvas
+  // A quién se pinta: se decide al abrir la ficha (con ella abierta el canvas
   // no se puede tocar); las que dejaron de verse (otra faceta) no cuentan.
   const [targets] = useState<string[]>(() => {
     const st = useModelerStore.getState();
@@ -80,7 +80,7 @@ export default function CanvasColorsSection({ canEdit, boxes: asked, pending, on
     if (open) document.querySelector<HTMLButtonElement>('.wk-mp-float button')?.focus();
   }, [open]);
 
-  // Cerrar el selector devuelve el foco a su botón (sin esto caía al <body>).
+  // Cerrar el selector devuelve el foco a su botón (sin esto caería al <body>).
   // Un color que llega después del selector del sistema, con el menú ya
   // cerrado, no mueve el foco (la persona puede estar escribiendo un UDP).
   const closePicker = () => {

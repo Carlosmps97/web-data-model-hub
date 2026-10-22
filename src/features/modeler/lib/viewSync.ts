@@ -1,15 +1,15 @@
 /**
- * Sincronización tabla → vistas (doc 19 §12b, features V1/V2):
+ * Sincronización tabla → vistas:
  *
- *  - V1: una columna NUEVA de la tabla entra automáticamente a las vistas
- *    ESPEJO (las que contienen TODAS las columnas de la tabla). Una vista
- *    curada (subset deliberado de columnas) NO se toca — auto-extenderla
- *    rompería la curaduría del modelador.
- *  - V2: "ordenar como la tabla física" — reordena los sources de la vista
- *    según el orden ÚNICO de cada tabla fuente (doc 94: PK primero, cada
- *    bloque por `ordinal`).
+ *  - Una columna nueva de la tabla entra automáticamente a las vistas espejo
+ *    (las que contienen todas las columnas de la tabla). Una vista curada
+ *    (subset deliberado de columnas) no se toca: auto-extenderla rompería la
+ *    curaduría del modelador.
+ *  - "Ordenar como la tabla física": reordena los sources de la vista según
+ *    el orden único de cada tabla fuente (PK primero, cada bloque por
+ *    `ordinal`).
  *
- * Los helpers de decisión son PUROS; `syncNewColumnToMirrorViews` orquesta
+ * Los helpers de decisión son puros; `syncNewColumnToMirrorViews` orquesta
  * con dependencias inyectadas (patrón nameSync) para ser testeable sin red.
  */
 import type { CanonicalColumn } from '@/services/governance.service';
@@ -20,9 +20,9 @@ import { SessionChangedError } from './sessionGuard';
 
 const norm = (s?: string) => (s ?? '').trim().toLowerCase();
 
-/** ¿La vista es ESPEJO de la tabla? — sus sources incluyen TODAS las columnas
+/** ¿La vista es espejo de la tabla? — sus sources incluyen todas las columnas
  *  dadas de esa tabla (por physicalName, case-insensitive). `tableCols` deben
- *  ser las columnas PREVIAS al alta (la nueva obviamente aún no está). */
+ *  ser las columnas previas al alta (sin la columna que se agrega). */
 export function isMirrorOfTable(view: View, tableId: string, tableCols: CanonicalColumn[]): boolean {
   const have = new Set(
     (view.sources ?? [])
@@ -33,9 +33,9 @@ export function isMirrorOfTable(view: View, tableId: string, tableCols: Canonica
 }
 
 /** Sources con la columna nueva (alias = nombre físico, como las _vu); null si
- *  ya estaba (idempotente). Una no-PK entra AL FINAL. Doc 94 D4: si la nueva es
- *  PK (`pkNames` = físicos de las PK de su tabla), entra tras la última PK de
- *  su tabla en la vista — o primera de su tabla si la vista no tiene PK. */
+ *  ya estaba (idempotente). Una no-PK entra al final. Si la nueva es PK
+ *  (`pkNames` = físicos de las PK de su tabla), entra tras la última PK de su
+ *  tabla en la vista — o primera de su tabla si la vista no tiene PK. */
 export function appendColumnSource(view: View, tableId: string, physicalName: string, pkNames?: string[]): ViewSource[] | null {
   const sources = view.sources ?? [];
   const mine = (s: ViewSource) => (s.tableId ?? view.tableId) === tableId;
@@ -50,10 +50,10 @@ export function appendColumnSource(view: View, tableId: string, physicalName: st
   return [...sources.slice(0, at), added, ...sources.slice(at)];
 }
 
-/** Reordena los sources al ORDEN FÍSICO: grupos por tabla en el orden de
- *  `sourceTableIds` y, dentro de cada grupo, por el orden ÚNICO de la tabla
- *  (doc 94 D4: PK primero, cada bloque por `ordinal` — lo aplica acá, así una
- *  PK recién marcada con ordinal alto no queda abajo). Columnas no resolubles
+/** Reordena los sources al orden físico: grupos por tabla en el orden de
+ *  `sourceTableIds` y, dentro de cada grupo, por el orden único de la tabla
+ *  (PK primero, cada bloque por `ordinal` — se aplica acá, así una PK recién
+ *  marcada con ordinal alto no queda abajo). Columnas no resolubles
  *  (expresiones / nombres desconocidos) conservan su orden relativo al final
  *  del grupo. `colsByTable`: las columnas de cada fuente, en cualquier orden.
  *  Puro. */
@@ -72,8 +72,8 @@ export function alignSourcesToPhysical(view: View, colsByTable: Map<string, Cano
   return keyed.map((k) => k.s);
 }
 
-/** Sources SIN la columna (para un delete); null si la vista no la referencia.
- *  Aplica a TODA vista (espejo o curada): una columna eliminada no puede
+/** Sources sin la columna (para un delete); null si la vista no la referencia.
+ *  Aplica a toda vista (espejo o curada): una columna eliminada no puede
  *  quedar referenciada en ningún SELECT. */
 export function removeColumnSource(view: View, tableId: string, physicalName: string): ViewSource[] | null {
   const sources = view.sources ?? [];
@@ -81,8 +81,8 @@ export function removeColumnSource(view: View, tableId: string, physicalName: st
   return next.length === sources.length ? null : next;
 }
 
-/** Sources con la columna RENOMBRADA (rename físico); null si no la referencia.
- *  El alias sigue al nombre solo si era el default (== nombre viejo); un alias
+/** Sources con la columna renombrada (rename físico); null si no la referencia.
+ *  El alias sigue al nombre solo si era el default (== nombre anterior); un alias
  *  custom del modelador se respeta. */
 export function renameColumnSource(view: View, tableId: string, oldPhysical: string, newPhysical: string): ViewSource[] | null {
   let touched = false;
@@ -103,10 +103,10 @@ type SyncDeps = {
   updateView: (id: string, body: ViewInput) => Promise<unknown>;
 };
 
-/** V1: propaga una columna recién creada a las vistas ESPEJO de su tabla
- *  (`isPrimaryKey`: la nueva es PK ⇒ entra tras las PK, doc 94 D4). Devuelve
- *  cuántas vistas se extendieron. Best-effort del caller (no debe bloquear el
- *  alta de la columna). */
+/** Propaga una columna recién creada a las vistas espejo de su tabla
+ *  (`isPrimaryKey`: la nueva es PK ⇒ entra tras las PK). Devuelve cuántas
+ *  vistas se extendieron. Best-effort del caller (no debe bloquear el alta de
+ *  la columna). */
 export async function syncNewColumnToMirrorViews(
   deps: SyncDeps, tableId: string, physicalName: string, previousCols: CanonicalColumn[],
   isPrimaryKey = false,
@@ -124,9 +124,9 @@ export async function syncNewColumnToMirrorViews(
   return touched;
 }
 
-/** V1 para VARIAS columnas nuevas de un mismo lote (paste, relación, split):
- *  las propaga en orden, ampliando la línea base con cada una — así varias PK
- *  nuevas entran tras las PK en SU orden (doc 94 D4) y una vista espejo sigue
+/** Variante para varias columnas nuevas de un mismo lote (paste, relación,
+ *  split): las propaga en orden, ampliando la línea base con cada una — así
+ *  varias PK nuevas entran tras las PK en su orden y una vista espejo sigue
  *  siéndolo para la siguiente. Devuelve cuántas propagaciones se hicieron;
  *  best-effort por columna. */
 export async function syncNewColumnsToMirrorViews(
@@ -139,9 +139,9 @@ export async function syncNewColumnsToMirrorViews(
   for (const c of newCols) {
     try { touched += await syncNewColumnToMirrorViews(deps, tableId, c.physicalName, base, !!c.isPrimaryKey); }
     catch (e) {
-      // Doc 105 (ronda 3): el corte por cambio de sesión (deps con pin) no es un
-      // error de esta vista — corta el resto; lo demás, best-effort: la vista se
-      // alinea después con "Match physical order".
+      // El corte por cambio de sesión (deps con pin) no es un error de esta
+      // vista: corta el resto; lo demás, best-effort: la vista se alinea
+      // después con "Match physical order".
       if (e instanceof SessionChangedError) throw e;
     }
     base = [...base, { id: `new:${c.physicalName}`, tableId, physicalName: c.physicalName, logicalName: c.physicalName,
@@ -150,7 +150,7 @@ export async function syncNewColumnsToMirrorViews(
   return touched;
 }
 
-/** Columna ELIMINADA: sale de los sources de TODA vista que la referencie
+/** Columna eliminada: sale de los sources de toda vista que la referencie
  *  (espejo o curada). Devuelve cuántas vistas se tocaron. */
 export async function syncRemovedColumnFromViews(
   deps: SyncDeps, tableId: string, physicalName: string,
@@ -166,8 +166,8 @@ export async function syncRemovedColumnFromViews(
   return touched;
 }
 
-/** Columna RENOMBRADA (físico): re-apunta los sources de toda vista que la
- *  referenciaba por el nombre viejo. Devuelve cuántas vistas se tocaron. */
+/** Columna renombrada (físico): re-apunta los sources de toda vista que la
+ *  referenciaba por el nombre anterior. Devuelve cuántas vistas se tocaron. */
 export async function syncRenamedColumnInViews(
   deps: SyncDeps, tableId: string, oldPhysical: string, newPhysical: string,
 ): Promise<number> {

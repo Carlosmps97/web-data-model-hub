@@ -1,16 +1,16 @@
-// Core data model types shared across features. The canonical runtime shapes
-// (tables, columns, relationships, views) live next to their services
-// (`services/governance.service`, `services/views.service`,
-// `features/modeler/services/modeler.service`); this module keeps only the
-// cross-cutting contracts.
+// Tipos centrales del modelo de datos compartidos entre features. Las formas
+// canónicas en runtime (tablas, columnas, relaciones, vistas) viven junto a sus
+// servicios (`services/governance.service`, `services/views.service`,
+// `features/modeler/services/modeler.service`); este módulo guarda solo los
+// contratos transversales.
 
-/** Key-value metadata tag attached to tables and views. Both fields are free-text. */
+/** Tag de metadatos clave-valor asociado a tablas y vistas. Ambos campos son texto libre. */
 export interface Tag {
   key: string;
   value: string;
 }
 
-/** Proyecto (doc 75): raíz del alcance de todo el modelo y sus estándares.
+/** Proyecto: raíz del alcance de todo el modelo y sus estándares.
  *  Espeja `ProjectDoc` del backend. */
 export interface Project {
   id: string;
@@ -20,13 +20,13 @@ export interface Project {
   updatedAt?: string;
 }
 
-/** Qué contiene un esquema de BD: sólo tablas, sólo vistas o ambas. Espeja
+/** Qué contiene un esquema de BD: solo tablas, solo vistas o ambas. Espeja
  *  `SchemaKind` del backend (`app/features/schemas/models.py`). */
 export type SchemaKind = 'tables' | 'views' | 'both';
 
-// Canonical column data types: one list for every engine, no per-engine checks
-// (doc 106 adds Databricks SQL / Hive, Oracle and SQL Server). Mirror of
-// `CATALOG` in the backend (`app/core/datatypes.py`).
+// Tipos de dato canónicos de columna: una sola lista para todos los motores, sin
+// validaciones por motor (incluye Databricks SQL / Hive, Oracle y SQL Server).
+// Espejo de `CATALOG` del backend (`app/core/datatypes.py`).
 export const COLUMN_DATA_TYPES = [
   'integer', 'bigint', 'smallint', 'tinyint',
   'float', 'double', 'real', 'decimal', 'numeric', 'number', 'money',

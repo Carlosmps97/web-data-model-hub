@@ -43,10 +43,10 @@ const dia = (tables: object[], columns: object[]): Diagram => ({
 const bigCols = Array.from({ length: 60 }, (_, i) => col(`c${i}`, 'tb', `COL_${i}`, { description: 'Descripción larga que envuelve para dar altura a la fila del reporte y forzar paginación real de la sección. '.repeat(2) }));
 
 const INPUT = {
-  rootName: 'CPYBCA',
+  rootName: 'COMERCIAL',
   domainsById: { d1: 'Texto Corto' },
   canvases: [
-    { name: 'A', location: 'CPYBCAPYM', diagram: dia(
+    { name: 'A', location: 'COMERCIALNORTE', diagram: dia(
         [T('t1', 'HD_VENTA', 'Venta', 'Histórica diaria de ventas'), T('t2', 'MD_PARAMETRO', 'Parametro')],
         [col('c1', 't1', 'CODMES', { isPrimaryKey: true, parentDomainId: 'd1', description: 'Código de mes' }), col('c2', 't1', 'DESPARAM'), col('c3', 't2', 'CODMES')],
       ) },
@@ -59,18 +59,18 @@ const texts = rep.pages.map((p) => p.scene.items.filter((i) => i.k === 'text').m
 const toc = texts.findIndex((t) => t.includes('Table Of Contents'));
 const pageAfterToc = (needle: string) => texts.findIndex((t, i) => i > toc && t.includes(needle));
 
-describe('buildModelReport (r2: sin diagramas + hipervínculos)', () => {
-  it('portada con título y footer `Page N of M` en TODAS las páginas', () => {
-    expect(texts[0]).toContain("Report 'CPYBCA'");
+describe('buildModelReport (sin diagramas + hipervínculos)', () => {
+  it('portada con título y footer `Page N of M` en todas las páginas', () => {
+    expect(texts[0]).toContain("Report 'COMERCIAL'");
     texts.forEach((t, i) => expect(t).toContain(`Page ${i + 1} of ${rep.pages.length}`));
   });
 
-  it('SIN diagramas: todas las páginas son A4 (scale 1) y no hay banda ER', () => {
+  it('sin diagramas: todas las páginas son A4 (scale 1) y no hay banda ER', () => {
     expect(rep.pages.every((p) => p.scale === 1)).toBe(true);
     expect(texts.some((t) => t.includes('ER Diagram(s)'))).toBe(false);
   });
 
-  it('TOC en página 2, números correctos y LINK por entrada a su página', () => {
+  it('TOC en página 2, números correctos y link por entrada a su página', () => {
     expect(toc).toBe(1);
     const items = rep.pages[toc].scene.items.filter((i) => i.k === 'text') as { s: string; y: number; anchor?: string }[];
     const entry = items.find((i) => i.s.startsWith('Column(s) of Table "HD_VENTA"'));
@@ -85,7 +85,7 @@ describe('buildModelReport (r2: sin diagramas + hipervínculos)', () => {
   });
 
   it('secciones estilo Erwin con dominio resuelto e Is PK true/false', () => {
-    expect(pageAfterToc('Subject Area(s) of Model "CPYBCA"')).toBeGreaterThan(toc);
+    expect(pageAfterToc('Subject Area(s) of Model "COMERCIAL"')).toBeGreaterThan(toc);
     const p = pageAfterToc('Column(s) of Table "HD_VENTA"');
     expect(texts[p]).toContain('CODMES');
     expect(texts[p]).toContain('Texto Corto');
@@ -112,7 +112,7 @@ describe('buildModelReport (r2: sin diagramas + hipervínculos)', () => {
 
   it('bookmarks: root → canvas (a su Table(s)) → tablas', () => {
     const root = rep.bookmarks[0];
-    expect(root.title).toBe('CPYBCA');
+    expect(root.title).toBe('COMERCIAL');
     const canvasA = root.children!.find((c) => c.title === 'A');
     expect(canvasA!.pageIndex).toBe(pageAfterToc('Table(s) of Subject Area "A"'));
     const tblBm = canvasA!.children!.find((c) => c.title === 'HD_VENTA')!;

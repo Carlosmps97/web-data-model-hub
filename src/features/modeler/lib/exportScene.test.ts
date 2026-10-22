@@ -28,7 +28,7 @@ const base = (): FixtureInput => ({
       { id: 't2', physicalName: 'ITEMS', logicalName: 'Items', schema: 'dw' },
     ],
     columns: [
-      // t1: PK compuesta con orden de llave INVERTIDO al físico
+      // t1: PK compuesta con orden de llave invertido respecto al físico
       col('c1', 't1', 'ORDER_ID', 'BIGINT', { isPrimaryKey: true, pkPosition: 1, ordinal: 0 }),
       col('c2', 't1', 'COUNTRY', 'STRING', { isPrimaryKey: true, pkPosition: 0, ordinal: 1 }),
       col('c3', 't1', 'TOTAL', 'DECIMAL(10,2)', { ordinal: 2 }),
@@ -69,7 +69,7 @@ describe('buildDiagramScene — tablas', () => {
     expect(boxes.some((b) => b.h === 32 + 3 * 28)).toBe(true);      // t1: 3 columnas
   });
 
-  it('doc 94: bloque PK primero y, entre PK, el ordinal (un pkPosition viejo NO manda)', () => {
+  it('bloque PK primero y, entre PK, el ordinal (un pkPosition presente en los datos no manda)', () => {
     const rows = texts(scene).filter((t) => ['ORDER_ID', 'COUNTRY', 'TOTAL'].includes(t.s));
     const inT1 = rows.filter((t) => t.x < 400).sort((a, b) => a.y - b.y);
     expect(inT1.map((t) => t.s)).toEqual(['ORDER_ID', 'COUNTRY', 'TOTAL']);
@@ -95,7 +95,7 @@ describe('buildDiagramScene — relaciones crow-foot', () => {
   const scene = buildDiagramScene(base());
   const paths = items(scene).filter((i): i is Extract<SceneItem, { k: 'path' }> => i.k === 'path');
 
-  it('identifying = trazo SÓLIDO; el wire sale del lado correcto y existe', () => {
+  it('identifying = trazo sólido; el wire sale del lado correcto y existe', () => {
     const wire = paths.find((p) => p.d.startsWith('M') && p.stroke === '#3A4658' && !p.fill);
     expect(wire).toBeTruthy();
     expect(wire!.dash).toBeUndefined();
@@ -116,15 +116,15 @@ describe('buildDiagramScene — relaciones crow-foot', () => {
     expect(circles.length).toBeGreaterThanOrEqual(1); // el "cero" de zero-many
   });
 
-  it('ancla el target en la FILA de la columna del primer par', () => {
+  it('ancla el target en la fila de la columna del primer par', () => {
     // c5 = fila 2 de t2 (pk ITEM_ID primero): y esperado = top + 32 + 1·28 + 14
     const wire = paths.find((p) => p.stroke === '#3A4658');
-    // t2 quedó en x=600-100+60=560, y=220-200+60=80 ⇒ target y = 80+32+28+14=154
+    // t2 queda en x=600-100+60=560, y=220-200+60=80 ⇒ target y = 80+32+28+14=154
     expect(wire!.d).toContain('154');
   });
 });
 
-describe('buildDiagramScene — etiqueta de relación (doc 98)', () => {
+describe('buildDiagramScene — etiqueta de relación', () => {
   type TextItem = Extract<SceneItem, { k: 'text' }>;
   type RectItem = Extract<SceneItem, { k: 'rect' }>;
   type Rel = FixtureInput['diagram']['relationships'][number];
@@ -145,7 +145,7 @@ describe('buildDiagramScene — etiqueta de relación (doc 98)', () => {
     return { lines, bg, all };
   };
 
-  it('las dos frases en UNA línea, centrada en el punto medio del wire', () => {
+  it('las dos frases en una línea, centrada en el punto medio del wire', () => {
     const { lines } = labelOf(buildDiagramScene(withPhrases()));
     expect(lines.map((l) => l.s)).toEqual([SHORT]);
     // t1 → borde derecho x=60+240=300 · t2 → borde izquierdo x=560 ⇒ centro x=430.
@@ -165,7 +165,7 @@ describe('buildDiagramScene — etiqueta de relación (doc 98)', () => {
     expect(bg!.y + bg!.h).toBeGreaterThan(129);
   });
 
-  it('va ENCIMA de todos los wires y DEBAJO de los bloques', () => {
+  it('va encima de todos los wires y debajo de los bloques', () => {
     const { lines, all } = labelOf(buildDiagramScene(withPhrases()));
     const at = all.indexOf(lines[0]);
     const lastWire = Math.max(...all.map((i, idx) => (i.k === 'path' ? idx : -1)));
@@ -174,7 +174,7 @@ describe('buildDiagramScene — etiqueta de relación (doc 98)', () => {
     expect(at).toBeLessThan(firstBlock);
   });
 
-  it('bloques a 140px (auto-arrange): la etiqueta PARTE LÍNEA y deja libres la línea y los marcadores', () => {
+  it('bloques a 140px (auto-arrange): la etiqueta parte línea y deja libres la línea y los marcadores', () => {
     // t1 ocupa x=100..340 ⇒ t2 en x=480 deja un hueco de 140 (en escena: 300..440).
     const scene = buildDiagramScene(withPhrases({}, (inp) => { inp.diagram.subjectArea.layout.t2 = { x: 480, y: 220 }; }));
     const { lines, bg } = labelOf(scene);
@@ -196,7 +196,7 @@ describe('buildDiagramScene — etiqueta de relación (doc 98)', () => {
     expect(lines.map((l) => l.s).join(' ')).toBe('Detalle Motivo Party Negativo tiene Tipo Origen / es el origen del Detalle Motivo');
   });
 
-  it('relación RECURSIVA: la etiqueta va encima del propio bloque, no debajo de él', () => {
+  it('relación recursiva: la etiqueta va encima del propio bloque, no debajo de él', () => {
     const scene = buildDiagramScene(withPhrases({
       childTableId: 't1', identifying: false, pairs: [{ parentColumnId: 'c1', childColumnId: 'c3' }],
     }));
@@ -204,7 +204,7 @@ describe('buildDiagramScene — etiqueta de relación (doc 98)', () => {
     expect(lines.map((l) => l.s)).toEqual([SHORT]);
     const block = items(scene).find((i): i is RectItem => i.k === 'rect' && i.fill === '#1A2B4A')!;   // header de t1
     expect(lines[0].x).toBe(block.x + block.w / 2);                      // centrada sobre el bloque
-    expect(bg!.y + bg!.h).toBeLessThanOrEqual(block.y);                  // todo el fondo queda ARRIBA
+    expect(bg!.y + bg!.h).toBeLessThanOrEqual(block.y);                  // el fondo entero queda arriba
     expect(bg!.y).toBeGreaterThanOrEqual(0);
   });
 
@@ -247,7 +247,7 @@ describe('buildDiagramScene — etiqueta de relación (doc 98)', () => {
       subcategory: true, subtypeSymbolId: 'sym1', identifying: true, parentCardinality: 'one', childCardinality: 'one', ...over,
     }, (inp) => { inp.viewMode = 'logical'; });
 
-    it('la etiqueta va sobre la RAMA símbolo → subtipo, en su punto medio', () => {
+    it('la etiqueta va sobre la rama símbolo → subtipo, en su punto medio', () => {
       const scene = buildDiagramScene(sub());
       const { lines, bg } = labelOf(scene);
       expect(lines.map((l) => l.s).join(' ')).toBe(SHORT);
@@ -268,7 +268,7 @@ describe('buildDiagramScene — etiqueta de relación (doc 98)', () => {
       expect(at).toBeLessThan(firstBlock);
     });
 
-    it('en el modelo FÍSICO la subcategoría no se dibuja: tampoco su etiqueta', () => {
+    it('en el modelo físico la subcategoría no se dibuja: tampoco su etiqueta', () => {
       const scene = buildDiagramScene({ ...sub(), viewMode: 'physical' });
       expect(labelOf(scene).lines).toEqual([]);
     });
@@ -301,7 +301,7 @@ describe('buildDiagramScene — vistas, subcategorías y shapes', () => {
     expect(items(s).some((i) => i.k === 'path' && i.stroke === '#94A3B8')).toBe(true);
   });
 
-  it('vista SOLO en físico: el modo lógico no la dibuja (doc 63)', () => {
+  it('vista solo en físico: el modo lógico no la dibuja', () => {
     const inp = base();
     inp.diagram.views = [{
       id: 'v1', name: 'V_ORDERS', schema: 'dw_VU', sourceTableIds: ['t1'],
@@ -315,7 +315,7 @@ describe('buildDiagramScene — vistas, subcategorías y shapes', () => {
     expect(texts(sPhys).some((t) => t.s === 'VISTA')).toBe(true);
   });
 
-  it('subcategoría: rombo + doble trazo SOLO en modo lógico', () => {
+  it('subcategoría: rombo + doble trazo solo en modo lógico', () => {
     const inp = base();
     inp.viewMode = 'logical';
     inp.diagram.relationships = [
@@ -355,8 +355,8 @@ describe('buildDiagramScene — vistas, subcategorías y shapes', () => {
   });
 });
 
-// ── Doc 99: trazos manuales de wires ───────────────────────────────────────
-describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
+// ── Trazos manuales de wires ───────────────────────────────────────────────
+describe('buildDiagramScene — trazos manuales de wires', () => {
   type PathItem = Extract<SceneItem, { k: 'path' }>;
   type LineItem = Extract<SceneItem, { k: 'line' }>;
   type TextItem = Extract<SceneItem, { k: 'text' }>;
@@ -375,7 +375,7 @@ describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
   // Fixture base: t1 (100,200) 240×116 · t2 (600,220) · origen de la escena = (40,140).
   // Wire r1: sale de t1 por y=244 (escena 104) y entra a t2 por y=294 (escena 154).
 
-  it('sin trazos la escena es EXACTAMENTE la de siempre', () => {
+  it('sin trazos la escena es idéntica a la del camino automático', () => {
     expect(buildDiagramScene(routed({}))).toEqual(buildDiagramScene(base()));
     const noKey = base();
     expect('routes' in noKey.diagram.subjectArea).toBe(false);
@@ -389,7 +389,7 @@ describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
     expect(wire.dash).toBeUndefined();                                  // sigue siendo identifying
   });
 
-  it('el camino automático del mismo wire es otro (el trazo SÍ cambia el dibujo)', () => {
+  it('el camino automático del mismo wire es otro (el trazo sí cambia el dibujo)', () => {
     const auto = wiresOf(buildDiagramScene(base()))[0].d;
     const manual = wiresOf(buildDiagramScene(routed({ r1: [{ x: 450, y: 250 }] })))[0].d;
     expect(manual).not.toBe(auto);
@@ -418,7 +418,7 @@ describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
     const [wire] = wiresOf(scene);
     const n = numbers(wire.d);
     const end = { x: n[n.length - 2], y: n[n.length - 1] };
-    expect(end).toEqual({ x: 560 + 240, y: 154 });                       // borde DERECHO de t2
+    expect(end).toEqual({ x: 560 + 240, y: 154 });                       // borde derecho de t2
     // y la pata de gallo del hijo se dibuja hacia afuera de ese borde
     const foot = items(scene).filter((i): i is LineItem => i.k === 'line' && i.stroke === INK && i.y1 !== i.y2 || (i.k === 'line' && i.stroke === INK));
     expect(foot.some((l) => Math.min(l.x1, l.x2) >= 800 && Math.max(l.x1, l.x2) <= 822)).toBe(true);
@@ -452,11 +452,11 @@ describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
     expect(buildDiagramScene(routed('no soy un mapa' as never))).toEqual(auto);
   });
 
-  it('con bloques en posiciones con fracción el camino es el del CANVAS, trasladado', () => {
+  it('con bloques en posiciones con fracción el camino es el del canvas, trasladado', () => {
     // t1 en (100.3, 200.7): el origen de la escena queda con fracción. El wire
     // se rutea en coordenadas del canvas (anclajes y puntos enteros) y recién
     // después se traslada; ruteado en las de la escena, el punto alineado con
-    // la fila del padre quedaba a 0.3 px de ella y el tramo salía inclinado.
+    // la fila del padre quedaría a 0.3 px de ella y el tramo saldría inclinado.
     const via = [{ x: 450, y: 245 }];
     const inp = routed({ r1: via }, (i) => { i.diagram.subjectArea.layout.t1 = { x: 100.3, y: 200.7 }; });
     const scene = buildDiagramScene(inp);
@@ -480,8 +480,8 @@ describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
     const scene = buildDiagramScene(inp);
     const n = numbers(wiresOf(scene)[0].d);
     // El trazo baja por x=72 (28 px a la izquierda de t2): el origen de la
-    // escena es (12,140). Sale por la DERECHA de t1 (340 → 328) y entra por la
-    // IZQUIERDA de t2 (100 → 88).
+    // escena es (12,140). Sale por la derecha de t1 (340 → 328) y entra por la
+    // izquierda de t2 (100 → 88).
     expect({ x: n[0], y: n[1] }).toEqual({ x: 328, y: 104 });
     expect(n[n.length - 2]).toBe(88);
     expect(Math.min(...n.filter((_, i) => i % 2 === 0))).toBe(60);       // el tramo de más a la izquierda, a 60 del borde
@@ -510,7 +510,7 @@ describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
     const doubles = (s: ReturnType<typeof buildDiagramScene>) =>
       items(s).filter((i): i is PathItem => i.k === 'path' && i.stroke === CANVAS_BG).map((p) => p.d);
 
-    it('el TRONCO usa el trazo `subsym-{símbolo}` y la RAMA el de su relación', () => {
+    it('el tronco usa el trazo `subsym-{símbolo}` y la rama el de su relación', () => {
       const [autoTrunk, autoBranch] = doubles(buildDiagramScene(subcat({})));
       const [trunk, branch] = doubles(buildDiagramScene(subcat({ 'subsym-sym1': [{ x: 380, y: 300 }] })));
       expect(trunk).not.toBe(autoTrunk);
@@ -520,21 +520,21 @@ describe('buildDiagramScene — trazos manuales de wires (doc 99)', () => {
       expect(branch2).not.toBe(autoBranch);
     });
 
-    it('el trazo doble (color + carve) sigue el MISMO camino', () => {
+    it('el trazo doble (color + carve) sigue el mismo camino', () => {
       const scene = buildDiagramScene(subcat({ r1: [{ x: 520, y: 300 }] }));
       const branch = doubles(scene)[1];
       expect(items(scene).filter((i) => i.k === 'path' && i.d === branch)).toHaveLength(2);
     });
 
-    it('en el modelo FÍSICO no se dibuja, con o sin trazo', () => {
+    it('en el modelo físico no se dibuja, con o sin trazo', () => {
       const phys = buildDiagramScene({ ...subcat({ r1: [{ x: 520, y: 300 }], 'subsym-sym1': [{ x: 380, y: 300 }] }), viewMode: 'physical' });
       expect(doubles(phys)).toEqual([]);
     });
   });
 });
 
-// ── Doc 109: colores de las cajas y texto de los dibujos con formato ───────
-describe('buildDiagramScene — colores y textos (doc 109)', () => {
+// ── Colores de las cajas y texto de los dibujos con formato ────────────────
+describe('buildDiagramScene — colores y textos', () => {
   const TH = [{ id: 'th1', name: 'Entidad Principal', color: '#FFFF80' }];
   const fills = (s: ReturnType<typeof buildDiagramScene>) => items(s).flatMap((i) => (i.k === 'rect' && i.fill ? [i.fill] : []));
 
@@ -548,7 +548,7 @@ describe('buildDiagramScene — colores y textos (doc 109)', () => {
     expect(fills(s)).not.toContain(boxTints('#00B050').body);     // el canvas le quita el color a t2
   });
 
-  it('sin `colors` usa los del canvas; un theme que ya no existe = sin color', () => {
+  it('sin `colors` usa los del canvas; un theme inexistente = sin color', () => {
     const inp = base();
     inp.diagram.subjectArea.colors = { t1: '#00B050' };
     inp.diagram.tables[1].color = 'theme:borrado';

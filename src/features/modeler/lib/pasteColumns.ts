@@ -1,12 +1,12 @@
 /**
- * Lógica PURA del copy/paste de columnas entre bloques (doc 48). Sin IO — la
+ * Lógica pura del copy/paste de columnas entre bloques. Sin IO: la
  * orquestación (bulk + vistas espejo + reload) vive en PasteColumnsPopup.
  *
- * El paste es la variante "sobre tabla EXISTENTE" de createTableFromSources
- * (docs 43/45): cada columna pegada hereda su metadata INDIVIDUAL completa de
- * las dos facetas (definición y comment físico, PK/nullable/partition, UDPs,
- * dominio, tipos lógico y físico) con id NUEVO; lo que NO viaja: relaciones
- * (tampoco la marca FK, doc 118) ni vistas.
+ * El paste es la variante "sobre tabla existente" de createTableFromSources:
+ * cada columna pegada hereda su metadata individual completa de las dos
+ * facetas (definición y comment físico, PK/nullable/partition, UDPs, dominio,
+ * tipos lógico y físico) con id nuevo; lo que no viaja: relaciones (tampoco
+ * la marca FK) ni vistas.
  */
 import {
   bulk,
@@ -20,18 +20,18 @@ import { preKey } from './undoInvert';
 export interface PasteRow {
   /** Snapshot fuente (por valor, tomado al copiar). */
   col: CanonicalColumn;
-  /** Físico duplicado CI en el destino → se EXCLUYE del lote (regla owner:
-   *  bloqueo automático; espejo del guard 409 del backend). */
+  /** Físico duplicado CI en el destino → se excluye del lote (bloqueo
+   *  automático; espejo del guard 409 del backend). */
   blocked: boolean;
   /** Lógico duplicado CI — el backend no lo considera clave de unicidad:
-   *  warning en el popup, se pega igual (decisión owner ii). */
+   *  warning en el popup, se pega igual. */
   logicalDup: boolean;
 }
 
 const norm = (s: string) => s.trim().toLowerCase();
 
 /** Estado por fila del popup: qué se pega y qué queda bloqueado, contra el
- *  estado EFECTIVO del destino (diagram draft-aware del cliente). */
+ *  estado efectivo del destino (diagram draft-aware del cliente). */
 export function pastePlan(clipboard: CanonicalColumn[], targetCols: CanonicalColumn[]): PasteRow[] {
   const phys = new Set(targetCols.map((c) => norm(c.physicalName)));
   const logi = new Set(targetCols.map((c) => norm(c.logicalName)));
@@ -43,13 +43,13 @@ export function pastePlan(clipboard: CanonicalColumn[], targetCols: CanonicalCol
 }
 
 /**
- * Cambios del lote (UN recordChangesBulk) para pegar `cols` en el destino.
- * `cols` debe venir YA filtrado (sin blocked) y en el orden del clipboard
+ * Cambios del lote (un recordChangesBulk) para pegar `cols` en el destino.
+ * `cols` debe venir ya filtrado (sin blocked) y en el orden del clipboard
  * (orden físico de la fuente). Reglas de createTableFromSources adaptadas:
- *  - ordinal: al FINAL del físico del destino (max+1, no length — hay huecos);
- *  - doc 94 D2: si se pegan PK, entran tras la última PK del destino (en el
- *    orden del clipboard) y las no-PK del destino se corren en el MISMO lote
- *    (upsert del doc completo con el ordinal nuevo) — la tabla queda PK primero;
+ *  - ordinal: al final del físico del destino (max+1, no length — hay huecos);
+ *  - si se pegan PK, entran tras la última PK del destino (en el orden del
+ *    clipboard) y las no-PK del destino se corren en el mismo lote (upsert del
+ *    documento completo con el ordinal nuevo): la tabla queda PK primero;
  *  - payload limpio: flags solo cuando se apartan del default.
  * Undo: `invertBulk(changes, pastePreImages(targetCols))` — borra las pegadas y
  * devuelve las corridas a su ordinal.
@@ -58,13 +58,13 @@ export function pasteColumnsToBulk(input: {
   targetTableId: string;
   cols: CanonicalColumn[];
   targetCols: CanonicalColumn[];
-  /** Tabla FUENTE del clipboard — procedencia para el historial de auditoría
-   *  (doc 51: "Copied from column …"). */
+  /** Tabla fuente del clipboard — procedencia para el historial de auditoría
+   *  ("Copied from column …"). */
   sourceTable?: string;
-  /** Físico de ORIGEN de cada columna por id (la pegada puede salir con el case
-   *  del destino, doc 118); sin él, el de `cols`. */
+  /** Físico de origen de cada columna por id (la pegada puede salir con el case
+   *  del destino); sin él, el de `cols`. */
   sourceColumns?: ReadonlyMap<string, string>;
-  /** Doc 118: pegado desde OTRO proyecto — su nombre. */
+  /** Pegado desde otro proyecto: su nombre. */
   sourceProject?: string;
   /** Inyectable para tests; default crypto.randomUUID. */
   newId?: () => string;
@@ -96,7 +96,7 @@ export function pasteColumnsToBulk(input: {
   return [...creates, ...shifts];
 }
 
-/** Pre-imágenes del destino para el Undo del paste (doc 50 + doc 94): las
+/** Pre-imágenes del destino para el Undo del paste: las
  *  columnas existentes corridas vuelven a su ordinal; las pegadas se borran. */
 export function pastePreImages(targetCols: CanonicalColumn[]): Map<string, Record<string, unknown>> {
   return new Map(targetCols.map((c) => [

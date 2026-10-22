@@ -1,5 +1,5 @@
-// Doc 118 — el pegado de tabla graba EXACTAMENTE lo que mostró el popup
-// (`pasteTable(prepared)`): el esquema que no existe nace en el MISMO lote, el
+// El pegado de tabla graba exactamente lo que mostró el popup
+// (`pasteTable(prepared)`): el esquema que no existe nace en el mismo lote, el
 // nombre se conserva si está libre y, si otro lo tomó en el medio, pasa a copy n.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -41,8 +41,8 @@ beforeEach(async () => {
 });
 afterEach(async () => { await sleep(5); });
 
-describe('pasteTable(prepared) (doc 118)', () => {
-  it('graba la tabla y las columnas del popup, con el esquema nuevo PRIMERO en el mismo lote', async () => {
+describe('pasteTable(prepared)', () => {
+  it('graba la tabla y las columnas del popup, con el esquema nuevo primero en el mismo lote', async () => {
     const prepared = {
       table: { ...T1, schema: 'stg_nuevo', udpValues: { u: 'v' } } as never,
       cols: [{ ...C1, physicalName: 'COD_X', udpValues: { k: '1' } } as never],
@@ -55,14 +55,14 @@ describe('pasteTable(prepared) (doc 118)', () => {
     expect(lot[2]).toMatchObject({ collection: 'canonical_columns', payload: { physicalName: 'COD_X', udpValues: { k: '1' } } });
   });
 
-  it('la procedencia (doc 51) nombra la tabla y las columnas de la FUENTE, no las de la copia', async () => {
+  it('la procedencia nombra la tabla y las columnas de la fuente, no las de la copia', async () => {
     await st().pasteTable({ table: { ...T1, physicalName: 'M_CLIENTE_copy_1' } as never, cols: [{ ...C1, physicalName: 'COD_X' } as never] });
     const [lot] = written();
     expect(lot[0].origin).toEqual({ kind: 'paste-table', sourceTable: 'M_CLIENTE' });
     expect(lot[1].origin).toEqual({ kind: 'paste-table', sourceTable: 'M_CLIENTE', sourceColumn: 'COD' });
   });
 
-  it('el nombre se conserva si está libre en el proyecto (la fuente ya no está)', async () => {
+  it('el nombre se conserva si está libre en el proyecto (la fuente fue borrada)', async () => {
     useModelerStore.setState({ diagram: { ...structuredClone(DIA), tables: [] } as never });
     await expect(st().pasteTable({ table: T1 as never, cols: [C1 as never] })).resolves.toBe('M_CLIENTE');
     expect(written()[0][0]).toMatchObject({ collection: 'canonical_tables', payload: { physicalName: 'M_CLIENTE' } });
@@ -75,7 +75,7 @@ describe('pasteTable(prepared) (doc 118)', () => {
     await expect(st().pasteTable({ table: T1 as never, cols: [C1 as never] })).resolves.toBe('M_CLIENTE_copy_2');
   });
 
-  it('un 409 por OTRO nombre (p. ej. el esquema) no se reintenta: sube tal cual', async () => {
+  it('un 409 por otro nombre (p. ej. el esquema) no se reintenta: sube tal cual', async () => {
     vi.mocked(gov.recordChangesBulk).mockRejectedValueOnce(new Error('Schema stg_nuevo already exists'));
     await expect(st().pasteTable({ table: T1 as never, cols: [], createSchema: { name: 'stg_nuevo' } }))
       .rejects.toThrow('Schema stg_nuevo already exists');
@@ -92,7 +92,7 @@ describe('pasteTable(prepared) (doc 118)', () => {
     expect(schemas.deleteSchema).toHaveBeenCalledWith(schemaId);
   });
 
-  it('si otra tabla usa el esquema (una legada que estaba sin catalogar), el Undo lo deja', async () => {
+  it('si otra tabla usa el esquema (una existente que no estaba catalogada), el Undo lo deja', async () => {
     vi.mocked(schemas.schemaImpact).mockResolvedValueOnce({ name: 'stg_nuevo', tables: 1, views: 0, canvases: 1 });
     await st().pasteTable({ table: { ...T1, schema: 'stg_nuevo' } as never, cols: [], createSchema: { name: 'stg_nuevo' } });
     useModelerStore.setState({ deleteTable: vi.fn(async () => undefined) });
@@ -101,7 +101,7 @@ describe('pasteTable(prepared) (doc 118)', () => {
     expect(schemas.deleteSchema).not.toHaveBeenCalled();
   });
 
-  it('sin esquema nuevo, el Undo sólo borra la tabla', async () => {
+  it('sin esquema nuevo, el Undo solo borra la tabla', async () => {
     await st().pasteTable({ table: T1 as never, cols: [] });
     useModelerStore.setState({ deleteTable: vi.fn(async () => undefined) });
     await useUndoStore.getState().undoLast();

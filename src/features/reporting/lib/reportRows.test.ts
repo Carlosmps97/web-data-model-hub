@@ -1,4 +1,4 @@
-// Doc 70 §4.2: filas puras del reporte tabular (pantalla + Excel).
+// Filas puras del reporte tabular (pantalla + Excel).
 import { describe, expect, it } from 'vitest';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import type { RelationshipRow } from '@/services/reporting.service';
@@ -9,7 +9,7 @@ import {
 
 const T: ReportTableRow = {
   id: 't1', physicalName: 'M_CLIENTE', logicalName: 'Cliente', schema: 'core',
-  subjectAreas: ['Banking', 'Risk'], columnCount: 2, relationshipCount: 1, projects: ['DDV'],
+  subjectAreas: ['Banking', 'Risk'], columnCount: 2, relationshipCount: 1, projects: ['Ventas'],
   udpValues: { 'Tipo de Tabla': 'Maestro' }, description: 'Maestro de clientes',
   physicalNameOverridden: true, logicalOnly: false, physicalOnly: false,
 };
@@ -29,9 +29,9 @@ describe('reportRows', () => {
       'UDP · Tipo de Tabla': 'Maestro', 'UDP · Otro': '', 'Table ID': 't1',
     });
     expect(Object.keys(row).at(-1)).toBe('Table ID');
-    // Doc 102: Space (carpeta raíz, sub-proyecto) junto a los subject areas.
+    // Space (carpeta raíz, sub-proyecto) junto a los subject areas.
     expect(row.Space).toBe('');
-    expect(tableSheetRow({ ...T, spaces: ['CPYBCA', 'Otros'] }, [])['Space']).toBe('CPYBCA, Otros');
+    expect(tableSheetRow({ ...T, spaces: ['COMERCIAL', 'Otros'] }, [])['Space']).toBe('COMERCIAL, Otros');
     expect(Object.keys(row).slice(0, 5)).toEqual(['Table', 'Logical name', 'Schema', 'Space', 'Subject areas']);
   });
 
@@ -43,14 +43,14 @@ describe('reportRows', () => {
       PK: 'Y', FK: '', Nullable: 'N', 'Type overridden': 'Y', 'Logical type overridden': '',
       'UDP · Particion': 'No Definido', Definition: 'Identificador', 'Column ID': 'c1', 'Table ID': 't1',
     });
-    // Doc 85: comment físico al lado de la definición (vacío si no hay)
+    // Comment físico al lado de la definición (vacío si no hay)
     expect(columnSheetRow({ ...C, physicalDescription: 'Comentario fisico' }, T, [])['Physical comment']).toBe('Comentario fisico');
     expect(row['Physical comment']).toBe('');
     // sin tabla resuelta cae al id; opcionales ausentes → vacío
     const bare = columnSheetRow({ ...C, id: undefined }, undefined, []);
     expect(bare.Table).toBe('t1');
-    expect(Object.keys(bare)).not.toContain('Logical ordinal');   // doc 74: un solo orden
-    expect(Object.keys(bare)).not.toContain('PK position');   // doc 94: sin orden de llave aparte
+    expect(Object.keys(bare)).not.toContain('Logical ordinal');   // un solo orden
+    expect(Object.keys(bare)).not.toContain('PK position');   // sin orden de llave aparte
     expect(bare['Column ID']).toBe('');
   });
 
@@ -80,14 +80,14 @@ describe('reportRows', () => {
     const names: Record<string, string> = { t1: 'B_TABLE', t2: 'A_TABLE' };
     expect(sortColumnRows(rows, (id) => names[id] ?? id).map((r) => `${r.tableId}:${r.ordinal}`))
       .toEqual(['t2:0', 't1:0', 't1:1']);
-    // Doc 94: dentro de la tabla, el orden único — PK primero aunque su ordinal sea mayor
+    // Dentro de la tabla, el orden único: PK primero aunque su ordinal sea mayor
     const legacy = [{ ...C, id: 'x', isPrimaryKey: false, ordinal: 0 }, { ...C, id: 'k', isPrimaryKey: true, ordinal: 5 }];
     expect(sortColumnRows(legacy, () => 'T').map((r) => r.id)).toEqual(['k', 'x']);
   });
 });
 
 
-describe('viewSheetRow (final review #3 — doc 96 D6)', () => {
+describe('viewSheetRow', () => {
   it('sin columna «Mode»: la User-Defined SQL va como texto informativo', () => {
     const row = viewSheetRow({
       id: 'v1', name: 'VW', schema: 'gold_vu', sourceTableIds: ['t1'], sourceTables: ['gold.HD'], showOnCanvas: true,
@@ -98,7 +98,7 @@ describe('viewSheetRow (final review #3 — doc 96 D6)', () => {
   });
 });
 
-describe('relationshipSheetRow (doc 98 — hoja Relationships)', () => {
+describe('relationshipSheetRow (hoja Relationships)', () => {
   const R: RelationshipRow = {
     id: 'r1', pairIndex: 1, pairCount: 2,
     parent: 'M_CLIENTE.CODCLI', parentSchema: 'core', child: 'M_CUENTA.CODCLI', childSchema: 'stg',
@@ -109,7 +109,7 @@ describe('relationshipSheetRow (doc 98 — hoja Relationships)', () => {
     parentToChildPhrase: 'Cliente tiene', childToParentPhrase: 'pertenece a un Cliente',
   };
 
-  it('las columnas de siempre, con las dos frases junto a los datos de la relación', () => {
+  it('las columnas de la relación, con las dos frases junto a sus datos', () => {
     expect(relationshipSheetRow(R)).toEqual({
       'Parent schema': 'core', 'Parent table': 'M_CLIENTE', 'Parent column': 'CODCLI',
       'Child schema': 'stg', 'Child table': 'M_CUENTA', 'Child column': 'CODCLI',
@@ -136,7 +136,7 @@ describe('relationshipSheetRow (doc 98 — hoja Relationships)', () => {
     });
   });
 
-  it('respuesta de un backend viejo (sin tabla/columna separadas): cae al extremo combinado', () => {
+  it('respuesta sin tabla/columna separadas: cae al extremo combinado', () => {
     const row = relationshipSheetRow({
       ...R, parentTable: undefined, parentColumn: undefined, childTable: undefined, childColumn: undefined,
     });

@@ -1,9 +1,8 @@
 /**
- * Rule editor + validation bench (pantallas 16c y 16c·2) — split 50/50:
- * izquierda DEFINE (Form ↔ YAML), derecha VALIDA (los 5 checks en vivo, error
- * estilo compilador con caret + "Did you mean", Test contra una tabla REAL del
- * catálogo y el impacto estimado). El panel derecho es un banco de validación
- * de la regla — NO un preview del export (doc 30 §2).
+ * Rule editor + validation bench, en split 50/50: la izquierda define (Form ↔
+ * YAML) y la derecha valida (los 5 checks en vivo, error estilo compilador con
+ * caret + "Did you mean", Test contra una tabla real del catálogo y el impacto
+ * estimado). El panel derecho valida la regla; no es un preview del export.
  */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { useFloating } from '@/components/ui/useFloating';
@@ -31,7 +30,7 @@ const LEVEL_OF = { columna: 'column', tabla: 'table', modelo: 'canvas' } as cons
 export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDefs, artifacts, canEdit, onBack, onSaved }: {
   projectId: string;
   rule: DdlRule | null;                       // null = nueva
-  draft?: Partial<DdlRule>;                   // pre-carga de plantilla (16d)
+  draft?: Partial<DdlRule>;                   // pre-carga de plantilla
   rules: DdlRule[];
   config: DdlRulesetConfig;
   udpDefs: UdpDefinition[];
@@ -66,9 +65,9 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
   const patch = (p: Partial<DdlRuleEditInput>) => setDraft((d) => ({ ...d, ...p }));
 
   // ── Validación en vivo (debounce) — los 5 checks del back ──
-  // Doc 105: la limpieza apaga la corrida entera, no sólo el debounce — la
-  // respuesta TARDÍA de un borrador (o proyecto) anterior pisaba la vigente.
-  // Lo mismo en el impacto/Test y en el buscador de tablas.
+  // La limpieza apaga la corrida entera, no solo el debounce: así la respuesta
+  // tardía de un borrador (o proyecto) anterior no pisa la vigente. Lo mismo en
+  // el impacto/Test y en el buscador de tablas.
   useEffect(() => {
     let alive = true;
     setChecking(true);
@@ -82,8 +81,8 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
   }, [projectId, draft]);
 
   const valid = report?.state === 'valid';
-  // Doc 105: ¿el guardado cambia algo? En YAML cuenta el YAML (si no parsea, se
-  // deja guardar para que Save muestre el error); sin cambios no se registra una
+  // ¿El guardado cambia algo? En YAML cuenta el YAML (si no parsea, se deja
+  // guardar para que Save muestre el error); sin cambios no se registra una
   // versión vacía.
   const pending = useMemo(() => {
     if (mode !== 'yaml') return draft;
@@ -107,7 +106,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
     return () => { alive = false; clearTimeout(t); };
   }, [projectId, valid, draft, testTable]);
 
-  // Buscador de tablas reales del catálogo (spec 15.4).
+  // Buscador de tablas reales del catálogo.
   useEffect(() => {
     if (!tablePick) return;
     let alive = true;
@@ -118,7 +117,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
     return () => { alive = false; clearTimeout(t); };
   }, [projectId, tableQ, tablePick]);
 
-  // ── Autocomplete de UDP (16c·2): agrupa por clase, filtra al target ──
+  // ── Autocomplete de UDP: agrupa por clase, filtra al target ──
   const acItems = useMemo(() => {
     if (!ac) return [];
     const level = LEVEL_OF[ac.base];
@@ -139,7 +138,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
     const value = draft.condition;
     const m = /(columna|tabla|modelo)\.udp(?:\[\s*["']?(?:[^"'\]]*)?)?$/.exec(value);
     if (!m) { setAc(null); return; }
-    // SIEMPRE la forma canónica con corchetes (spec §6.2).
+    // Siempre la forma canónica con corchetes.
     const next = value.slice(0, m.index) + `${m[1]}.udp["${name}"]`;
     patch({ condition: next });
     setAc(null);
@@ -149,7 +148,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
   const applySuggestion = (err: NonNullable<DdlValidateResult['errors']>[number]) => {
     if (!err.token || !err.suggestion) return;
     if (err.suggestion.startsWith('LIKE ')) {
-      // '= 'DAC'' → `LIKE 'DAC-%'` (la trampa del catálogo, spec §9)
+      // '= 'DAC'' → `LIKE 'DAC-%'` (la trampa del catálogo)
       patch({ condition: draft.condition.replace(`= '${err.token}'`, err.suggestion) });
     } else {
       patch({ condition: draft.condition.replace(err.token, err.suggestion) });
@@ -195,7 +194,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      {/* breadcrumb bar */}
+      {/* barra de breadcrumb */}
       <div style={{ height: 52, flex: 'none', display: 'flex', alignItems: 'center', gap: 11, padding: '0 24px', borderBottom: '1px solid #EAEDF2', background: '#fff' }}>
         <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', fontSize: 12.5, fontWeight: 600, color: '#8A93A5', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
           <ChevronLeft size={13} /> Rule catalog
@@ -220,7 +219,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        {/* ── IZQUIERDA · definition ── */}
+        {/* ── Izquierda · definición ── */}
         <div style={{ flex: 1, minWidth: 0, borderRight: '1px solid #EAEDF2', background: '#fff', display: 'flex', flexDirection: 'column' }}>
           <div style={{ height: 46, flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', borderBottom: '1px solid #F0F2F6' }}>
             <span style={cap}>Definition</span>
@@ -371,7 +370,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
           </div>
         </div>
 
-        {/* ── DERECHA · validation bench ── */}
+        {/* ── Derecha · validación ── */}
         <div style={{ flex: 1, minWidth: 0, background: '#FBFCFD', display: 'flex', flexDirection: 'column' }}>
           <div style={{ height: 46, flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', borderBottom: '1px solid #F0F2F6' }}>
             <span style={cap}>Validation</span>
@@ -449,7 +448,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
               ))}
             </div>
 
-            {/* ── Test contra una tabla real (spec 15.4) ── */}
+            {/* ── Test contra una tabla real ── */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <span style={cap}>Test</span>
               <div style={{ flex: 1 }} />
@@ -527,7 +526,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
         </div>
       </div>
 
-      {/* footer */}
+      {/* pie */}
       <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', borderTop: '1px solid #EAEDF2', background: '#fff' }}>
         {valid
           ? <span style={{ fontSize: 12, color: '#8A93A5', display: 'inline-flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16A37B' }} />{dirty ? 'Validated · draft not saved' : `Validated · ${NO_CHANGES_HINT.toLowerCase()}`}</span>
@@ -545,10 +544,10 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
 
 // ── sub-editores de action ─────────────────────────────────────────────────
 
-/** Acciones de una regla (doc 30 §6.6 · doc 76 · doc 90): por COLUMNA — expression,
- *  exclude (quita la proyección), tags y data types (renombra el tipo base al
- *  exportar, CHAR → VARCHAR); por TABLA — tags, TBLPROPERTIES, statements
- *  (sentencias libres before/after) y column layout. */
+/** Acciones de una regla: por columna — expression, exclude (quita la
+ *  proyección), tags y data types (renombra el tipo base al exportar, CHAR →
+ *  VARCHAR); por tabla — tags, TBLPROPERTIES, statements (sentencias libres
+ *  before/after) y column layout. */
 type RuleActionKind = 'expression' | 'exclude' | 'tags' | 'types' | 'tblproperties' | 'statements' | 'layout';
 
 const COLUMN_ACTIONS: [RuleActionKind, string][] = [['expression', 'Expression'], ['exclude', 'Exclude column'], ['tags', 'Tags'], ['types', 'Data types']];
@@ -558,16 +557,16 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
   action: Record<string, unknown>;
   actionKind: RuleActionKind | 'emit';
   canEdit: boolean;
-  /** Doc 73: «Column layout» y «Statements» sólo existen para reglas de TABLA. */
+  /** «Column layout» y «Statements» solo existen para reglas de tabla. */
   target: 'column' | 'table';
   udpDefs: UdpDefinition[];
   onChange: (a: Record<string, unknown>) => void;
 }) {
   const [kind, setKind] = useState<RuleActionKind>(actionKind === 'emit' ? 'expression' : actionKind);
   const layout = (action.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string } | undefined) ?? {};
-  // Doc 93 D10: `partitionUdp` (alias legado `partitionOrderUdp`, que se
+  // `partitionUdp` (también se acepta el alias `partitionOrderUdp`, que se
   // descarta al editar). Sin `partitionColumns` el motor deja el orden físico
-  // (`keep`): el editor lo muestra igual (revisión doc 107).
+  // (`keep`) y el editor lo muestra igual.
   const partitionUdp = layout.partitionUdp ?? layout.partitionOrderUdp ?? '';
   const statements = (action.statements as { before?: string[]; after?: string[] } | undefined) ?? {};
   const pairs = (k: 'tags' | 'tblproperties' | 'types') =>
@@ -653,7 +652,7 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
         <>
           <input value={(action.expression as string) ?? ''} disabled={!canEdit} spellCheck={false}
             onChange={(e) => onChange({ ...action, expression: e.target.value })}
-            placeholder="bcp_encrypt_function.decrypt_column_view({col}, '{lookup:dac_map}')"
+            placeholder="security.decrypt_column_view({col}, '{lookup:dac_map}')"
             style={{ ...inp, fontFamily: 'var(--mono, monospace)' }} />
           <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, margin: '8px 0 16px' }}>
             <span style={{ fontSize: 11, color: '#9AA3B2', fontWeight: 600, marginRight: 2 }}>Insert</span>
@@ -825,10 +824,10 @@ function EmitAction({ action, canEdit, onChange }: {
   );
 }
 
-/** Doc 113 §5: desplegable anclado a un control con la regla única de
- *  flotantes — debajo, ARRIBA si no entra (y se queda de ese lado mientras
- *  entre), siguiendo al control con el scroll. Se ubica en la ventana, debajo
- *  de la barra superior de la app (`contentBounds`); si el control sale de la
+/** Desplegable anclado a un control con la regla única de flotantes: debajo,
+ *  arriba si no entra (y se queda de ese lado mientras entre), siguiendo al
+ *  control con el scroll. Se ubica en la ventana, debajo de la barra superior
+ *  de la app (`contentBounds`); si el control sale de la
  *  vista de sus paneles, se oculta (`placeAnchored`). `matchWidth`: el ancho
  *  del control; `size` re-ubica cuando cambia la lista. El `style` usa
  *  `overflowX`/`overflowY`, no `overflow`: el alto máximo agrega `overflowY` y

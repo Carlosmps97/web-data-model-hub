@@ -18,8 +18,8 @@ const diagram = {
   tables: [{ id: 't1' }, { id: 't2' }], columns: [], relationships: [], views: [],
 } as never;
 
-// Doc 84 E: en modo visor mover/auto-arreglar vive SOLO en la sesión.
-describe('useModelerStore — layout efímero del visor (doc 84 E)', () => {
+// En modo visor mover/auto-arreglar vive solo en la sesión.
+describe('useModelerStore — layout efímero del visor', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useModelerStore.setState({
@@ -41,9 +41,9 @@ describe('useModelerStore — layout efímero del visor (doc 84 E)', () => {
     expect(useModelerStore.getState().dirty).toBe(false);
   });
 
-  it('autoOrganize en modo visor aplica a los nodos vivos y recuerda, pero NO persiste', async () => {
+  it('autoOrganize en modo visor aplica a los nodos vivos y recuerda, pero no persiste', async () => {
     useSessionStore.setState({ openMode: 'readonly' });
-    useModelerStore.setState({ diagram });   // Doc 105 (R7-A): cambiar de sesión limpia el canvas — se carga DENTRO de ella.
+    useModelerStore.setState({ diagram });   // cambiar de sesión limpia el canvas: se carga dentro de ella
     await useModelerStore.getState().autoOrganize();
     const st = useModelerStore.getState();
     expect(st.viewerLayout.sa1).toEqual({ t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } });
@@ -55,11 +55,11 @@ describe('useModelerStore — layout efímero del visor (doc 84 E)', () => {
 
   it('autoOrganize en edición sigue persistiendo el layout', async () => {
     useSessionStore.setState({ openMode: 'editing' });
-    useModelerStore.setState({ diagram });   // Doc 105 (R7-A): cambiar de sesión limpia el canvas — se carga DENTRO de ella.
+    useModelerStore.setState({ diagram });   // cambiar de sesión limpia el canvas: se carga dentro de ella
     useModelerStore.setState({ reload: vi.fn(async () => undefined) } as never);
     await useModelerStore.getState().autoOrganize();
-    // Doc 99: las posiciones se graban con `arrangeSubjectArea`, que en la
-    // MISMA escritura reinicia los trazos manuales de los wires.
+    // Las posiciones se graban con `arrangeSubjectArea`, que en la misma
+    // escritura reinicia los trazos manuales de los wires.
     expect(struct.arrangeSubjectArea).toHaveBeenCalledWith('sa1', { t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } });
     expect(useModelerStore.getState().viewerLayout).toEqual({});
   });

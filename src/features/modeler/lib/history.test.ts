@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ACTION_LABEL, fieldValue, formatWhen, originText, refLabel, userLabel } from './history';
 
-describe('history — presentación del historial de auditoría (doc 51)', () => {
+describe('history — presentación del historial de auditoría', () => {
   it('userLabel: nombre > email > id, y System para la entrada sintética', () => {
     expect(userLabel({ user: { id: 'u1', name: 'Ana P', email: 'a@x' }, synthetic: false })).toBe('Ana P');
     expect(userLabel({ user: { id: 'u1', email: 'a@x' }, synthetic: false })).toBe('a@x');
@@ -19,11 +19,11 @@ describe('history — presentación del historial de auditoría (doc 51)', () =>
     expect(originText({ origin: { kind: 'ctas', sourceTable: 'M_SRC', sourceColumn: 'COD' } }))
       .toBe('Created from source M_SRC.COD (CTAS)');
     expect(originText({ origin: { kind: 'ctas' } })).toBe('Created from sources (CTAS)');
-    // Doc 118: pegado desde OTRO proyecto.
-    expect(originText({ origin: { kind: 'paste-table', sourceTable: 'M_CLIENTE', sourceProject: 'UDV Piloto' } }))
-      .toBe('Copied from table M_CLIENTE (project UDV Piloto)');
-    expect(originText({ origin: { kind: 'paste-columns', sourceTable: 'M_CLIENTE', sourceColumn: 'ID_CLI', sourceProject: 'UDV Piloto' } }))
-      .toBe('Copied from column M_CLIENTE.ID_CLI (project UDV Piloto)');
+    // Pegado desde otro proyecto.
+    expect(originText({ origin: { kind: 'paste-table', sourceTable: 'M_CLIENTE', sourceProject: 'Piloto' } }))
+      .toBe('Copied from table M_CLIENTE (project Piloto)');
+    expect(originText({ origin: { kind: 'paste-columns', sourceTable: 'M_CLIENTE', sourceColumn: 'ID_CLI', sourceProject: 'Piloto' } }))
+      .toBe('Copied from column M_CLIENTE.ID_CLI (project Piloto)');
     expect(originText({ origin: null })).toBeNull();
   });
 
@@ -32,7 +32,7 @@ describe('history — presentación del historial de auditoría (doc 51)', () =>
     expect(fieldValue('')).toBe('—');
     expect(fieldValue(true)).toBe('Yes');
     expect(fieldValue(false)).toBe('No');
-    expect(fieldValue(0)).toBe('0');           // 0 es un valor real (pkPosition/ordinal)
+    expect(fieldValue(0)).toBe('0');           // 0 es un valor real (p. ej., un ordinal)
     expect(fieldValue('BIGINT')).toBe('BIGINT');
     expect(fieldValue({ a: 1 })).toBe('{"a":1}');
   });

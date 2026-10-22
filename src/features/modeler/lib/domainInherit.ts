@@ -1,10 +1,10 @@
 /**
- * domainInherit (doc 85 §3.6) — UDP por DEFECTO de un parent domain que la
- * columna puede heredar al asignarlo. Erwin materializa en cada `<Domain>` los
- * valores de UDP de atributo (ambas facetas); la plataforma los guarda en
+ * domainInherit: UDP por defecto de un parent domain que la columna puede
+ * heredar al asignarlo. Erwin materializa en cada `<Domain>` los valores de
+ * UDP de atributo (ambas facetas); la plataforma los guarda en
  * `domain.udpValues` (mismas claves = ids de defs `column`). El popup «Inherit
- * from domain» ofrece los NO vacíos agrupados Logical · Physical y el usuario
- * elige cuáles copiar (D3/D4). Puro (testeable sin DOM).
+ * from domain» ofrece los no vacíos agrupados Logical · Physical y el usuario
+ * elige cuáles copiar. Puro (testeable sin DOM).
  */
 import type { UdpDefinition } from '@/features/standards/standards.service';
 import { udpView, type Facet } from '@/lib/facets';

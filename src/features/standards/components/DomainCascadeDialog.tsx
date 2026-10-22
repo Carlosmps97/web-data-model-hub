@@ -1,8 +1,8 @@
 /**
- * DomainCascadeDialog — «Apply changes · <dominio>» (docs F2 #2 · 95 D7): la lista
- * EXACTA de columnas que re-tipa el apply (misma regla que la cascada), una fila
- * por columna, paginada en el servidor y con buscador. «Show skipped columns»
- * suma las que no cambian (override o tipo ya distinto) con su motivo.
+ * DomainCascadeDialog — «Apply changes · <dominio>»: la lista exacta de columnas
+ * que re-tipa el apply (misma regla que la cascada), una fila por columna,
+ * paginada en el servidor y con buscador. «Show skipped columns» suma las que
+ * no cambian (override o tipo ya distinto) con su motivo.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Boxes, UploadCloud } from 'lucide-react';
@@ -33,7 +33,7 @@ export default function DomainCascadeDialog({ projectId, domainId, domainName, t
       physicalTo: targets.physicalTo, logicalTo: targets.logicalTo, q: q.trim() || undefined,
       status: showSkipped ? undefined : 'change', offset, limit: PAGE,
     });
-    if (id !== reqId.current) return;             // respuesta vieja: el usuario siguió escribiendo
+    if (id !== reqId.current) return;             // respuesta desfasada: el usuario siguió escribiendo
     setImpact(res);
     setRows((prev) => mergePage(prev, res.rows, offset));
   }, [projectId, domainId, targets.physicalTo, targets.logicalTo, q, showSkipped]);
@@ -53,7 +53,7 @@ export default function DomainCascadeDialog({ projectId, domainId, domainName, t
   }, [hasChange, load]);
 
   // Una página a la vez: `loading` (estado) recién cambia en el próximo render y
-  // un segundo scroll antes de él pediría el mismo offset (final review #9).
+  // un segundo scroll antes de él pediría el mismo offset.
   const loadMore = () => {
     if (paging.current || loading || !impact || rows.length >= impact.matched) return;
     paging.current = true;

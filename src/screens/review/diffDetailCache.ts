@@ -1,16 +1,16 @@
 import type { DiffEntityDetail } from '@/types/versioning';
 
 /**
- * Caché del popup «Change details» (doc 80 §8). Estados por entidad:
+ * Caché del popup «Change details». Estados por entidad:
  *  · 'loading' — pedido en vuelo
  *  · 'missing' — el backend respondió, pero esa entidad no venía (no pertenece
- *                al changeset): NO es un error, es «no hay detalle»
+ *                al changeset): no es un error, es «no hay detalle»
  *  · 'error'   — el pedido falló; se puede reintentar
  *  · el objeto — el detalle resuelto
  *
- * El fallo NO puede borrar la entrada: al quedar `undefined` el render volvía a
- * «Loading diff…» y el popup se veía colgado para siempre (así se leyó el 500
- * de `/diff/details` del 2026-09-09 — un spinner eterno en vez de un error).
+ * El fallo no puede borrar la entrada: con `undefined` el render vuelve a
+ * «Loading diff…» y el popup parece colgado para siempre (un spinner eterno en
+ * vez de un error).
  * Puro: la lógica del caché se testea sin React.
  */
 export type CacheEntry = DiffEntityDetail | 'loading' | 'missing' | 'error';
@@ -19,7 +19,7 @@ export interface DetailRef { collection: string; entityId: string }
 
 export const keyOf = (collection: string, entityId: string) => `${collection}::${entityId}`;
 
-/** Marca el lote como en vuelo sin pisar lo ya resuelto. Un 'error' previo SÍ
+/** Marca el lote como en vuelo sin pisar lo ya resuelto. Un 'error' previo sí
  *  se pisa: reintentar debe volver a mostrar el spinner. */
 export function markLoading(prev: CacheMap, chunk: DetailRef[]): CacheMap {
   const next = { ...prev };
@@ -42,7 +42,7 @@ export function applyLoaded(prev: CacheMap, chunk: DetailRef[], got: DiffEntityD
   return next;
 }
 
-/** Fallo: 'error' (nunca borrar). Lo ya resuelto de antes se conserva. */
+/** Fallo: 'error' (nunca borrar). Lo resuelto previamente se conserva. */
 export function applyFailed(prev: CacheMap, chunk: DetailRef[]): CacheMap {
   const next = { ...prev };
   for (const it of chunk) {

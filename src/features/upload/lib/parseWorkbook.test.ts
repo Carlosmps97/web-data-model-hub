@@ -1,7 +1,7 @@
-// Lectura cruda del .xlsx (doc 78 §3.2): todas las hojas como grillas con el
-// nº de fila Excel, sin filas vacías ni celdas finales vacías; celdas como
-// texto (saltos de línea incluidos). El significado lo pone el backend según
-// el perfil — acá NO hay semántica.
+// Lectura cruda del .xlsx: todas las hojas como grillas con el nº de fila
+// Excel, sin filas vacías ni celdas finales vacías; celdas como texto (saltos
+// de línea incluidos). El significado lo pone el backend según el perfil: aquí
+// no hay semántica.
 import { describe, expect, it } from 'vitest';
 import * as XLSX from 'xlsx';
 import { findSheet, headerKey, headersAt, readSheet, readWorkbook, sheetKey, sheetRowCount } from './parseWorkbook';
@@ -15,7 +15,7 @@ function workbook(sheets: Record<string, Aoa>): ArrayBuffer {
 }
 
 describe('readWorkbook', () => {
-  it('emits every sheet as a raw grid with Excel row numbers and no empty rows', () => {
+  it('emite cada hoja como una grilla cruda con los números de fila de Excel y sin filas vacías', () => {
     const out = readWorkbook(workbook({
       Cargar_Tablas: [[], [], [], ['', '(help)'], ['', 'SUBJECT', 'TABLA_LOGICO'], [], ['', 'S1', 'Cliente', '']],
       Otra: [['x']],
@@ -25,15 +25,15 @@ describe('readWorkbook', () => {
     const t = out.sheets[0];
     expect(t.rows.map((r) => r.row)).toEqual([4, 5, 7]);
     expect(t.rows[1].cells).toEqual(['', 'SUBJECT', 'TABLA_LOGICO']);
-    expect(t.rows[2].cells).toEqual(['', 'S1', 'Cliente']);        // trailing empty cells trimmed
+    expect(t.rows[2].cells).toEqual(['', 'S1', 'Cliente']);        // sin las celdas vacías del final
   });
 
-  it('keeps numbers as text and preserves line breaks inside cells', () => {
+  it('conserva los números como texto y los saltos de línea dentro de las celdas', () => {
     const out = readWorkbook(workbook({ T: [['TABLA_LOGICO', 'DEF_TABLA'], [2024, 'línea 1\nlínea 2 con ñ']] }), 'x.xlsx');
     expect(out.sheets[0].rows[1].cells).toEqual(['2024', 'línea 1\nlínea 2 con ñ']);
   });
 
-  it('editor helpers: sheet by name (no case/accents), headers of a row, data row count', () => {
+  it('helpers del editor: hoja por nombre (sin caso ni tildes), cabeceras de una fila, conteo de filas de datos', () => {
     const out = readWorkbook(workbook({ 'Cargar Tablás': [['', 'A', 'B'], ['', '1', '2'], ['', '3', '']] }), 'p.xlsx');
     const s = findSheet(out.sheets, 'cargar tablas')!;
     expect(s.name).toBe('Cargar Tablás');
@@ -48,8 +48,8 @@ describe('readWorkbook', () => {
   });
 });
 
-describe('texto que la base no puede guardar (doc 105, ronda 3)', () => {
-  it('quita el NUL (SheetJS decodifica `_x0000_` a U+0000) y reemplaza un surrogate suelto', () => {
+describe('texto que la base no puede guardar', () => {
+  it('quita el NUL (SheetJS decodifica `_x0000_` a U+0000) y sustituye un surrogate suelto', () => {
     const ws = XLSX.utils.aoa_to_sheet([['TABLA_LOGICO', 'DESC'], ['Clie\u0000nte', 'X\uD800Y'], ['ok', '😀']]);
     const sheet = readSheet('Tablas', ws);
     expect(sheet.rows[1].cells).toEqual(['Cliente', 'X�Y']);
@@ -57,7 +57,7 @@ describe('texto que la base no puede guardar (doc 105, ronda 3)', () => {
   });
 });
 
-describe('nombres de hoja y de archivo que la base no puede guardar (doc 105, ronda 5)', () => {
+describe('nombres de hoja y de archivo que la base no puede guardar', () => {
   it('SheetJS decodifica `_x0000_` también en el nombre de la hoja: se limpia igual que las celdas', () => {
     const ws = XLSX.utils.aoa_to_sheet([['x']]);
     expect(readSheet('Hoja\u00001', ws).name).toBe('Hoja1');
@@ -74,11 +74,10 @@ describe('nombres de hoja y de archivo que la base no puede guardar (doc 105, ro
   });
 });
 
-// Doc 105 (ronda 5): una celda de FECHA llegaba con el formato local de la celda
-// («1/2/24», «02-ene-24»): un UDP de fecha la guardaba así (el panel, que usa
-// YYYY-MM-DD, la mostraba vacía) y el backend ahora la rechaza. Toda celda
-// numérica con formato de fecha viaja como YYYY-MM-DD (con hora, si la tiene).
-describe('celdas de fecha de Excel (doc 105, ronda 5)', () => {
+// Toda celda numérica con formato de fecha viaja como YYYY-MM-DD (con hora, si
+// la tiene), no con el formato local de la celda («1/2/24», «02-ene-24»): el
+// panel de un UDP de fecha usa YYYY-MM-DD y el backend rechaza otro formato.
+describe('celdas de fecha de Excel', () => {
   function dated(cells: Record<string, XLSX.CellObject>): ArrayBuffer {
     const ws = XLSX.utils.aoa_to_sheet([['FECHA']]);
     Object.assign(ws, cells);
@@ -100,12 +99,12 @@ describe('celdas de fecha de Excel (doc 105, ronda 5)', () => {
   });
 });
 
-// Doc 105 (ronda 6, R16): (1) con hora pero un formato que sólo muestra la
-// fecha (típico de =NOW()), Excel muestra la fecha: viaja sólo la fecha (un UDP
-// de fecha la acepta); (2) un libro con sistema de fechas 1904 corría las
-// fechas 4 años (la serie se leía como del sistema 1900).
-describe('celdas de fecha: lo que muestra Excel (doc 105, ronda 6)', () => {
-  it('la hora sólo viaja si el formato la muestra', () => {
+// (1) Con hora pero un formato que solo muestra la fecha (típico de =NOW()),
+// Excel muestra la fecha: viaja solo la fecha (un UDP de fecha la acepta);
+// (2) en un libro con sistema de fechas 1904 la serie se lee con ese sistema
+// (leída como del sistema 1900, las fechas se correrían 4 años).
+describe('celdas de fecha: lo que muestra Excel', () => {
+  it('la hora solo viaja si el formato la muestra', () => {
     const ws = XLSX.utils.aoa_to_sheet([['FECHA']]);
     Object.assign(ws, {
       A2: { t: 'n', v: 45293.5729166667, z: 'dd/mm/yyyy' },
@@ -133,11 +132,11 @@ describe('celdas de fecha: lo que muestra Excel (doc 105, ronda 6)', () => {
   });
 });
 
-// Doc 105 (ronda 6, R17b): sólo es FECHA un formato con parte de fecha (año o
-// día). Una celda de sólo hora o una duración viajaba como una fecha de 1900
-// inventada («1900-01-00 08:30»): queda lo que muestra Excel.
-describe('horas y duraciones no son fechas (doc 105, ronda 6)', () => {
-  it('sólo hora, duración y «general» viajan como los muestra Excel', () => {
+// Solo es fecha un formato con parte de fecha (año o día). Una celda de solo
+// hora o una duración viaja como la muestra Excel, no como una fecha de 1900
+// inventada («1900-01-00 08:30»).
+describe('horas y duraciones no son fechas', () => {
+  it('solo hora, duración y «general» viajan como los muestra Excel', () => {
     const ws = XLSX.utils.aoa_to_sheet([['X']]);
     Object.assign(ws, {
       A2: { t: 'n', v: 0.3541666666666667, z: 'h:mm' },
@@ -154,9 +153,9 @@ describe('horas y duraciones no son fechas (doc 105, ronda 6)', () => {
   });
 });
 
-// Doc 105 (ronda 7, R18b): los formatos de FECHA de sólo mes («mmmm», «mmm»,
-// «[$-409]mmmm;@») son fechas (Excel los ofrece en la categoría Fecha).
-describe('formatos de fecha de sólo mes (doc 105, ronda 7)', () => {
+// Los formatos de fecha de solo mes («mmmm», «mmm», «[$-409]mmmm;@») son
+// fechas (Excel los ofrece en la categoría Fecha).
+describe('formatos de fecha de solo mes', () => {
   it('viajan como fecha; los de hora siguen siendo texto', () => {
     const ws = XLSX.utils.aoa_to_sheet([['X']]);
     Object.assign(ws, {

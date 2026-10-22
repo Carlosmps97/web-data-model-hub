@@ -1,12 +1,12 @@
-// Doc 88 §2: la firma estructural del diagrama decide cuándo invalidar el
+// La firma estructural del diagrama decide cuándo invalidar el
 // catálogo del Explorer.
 import { describe, it, expect } from 'vitest';
 import { diagramSignature } from './diagramSignature';
 
 const base = () => ({
-  tables: [{ id: 't1', physicalName: 'CLIENTE', logicalName: 'Cliente', schema: 'ddv' }],
+  tables: [{ id: 't1', physicalName: 'CLIENTE', logicalName: 'Cliente', schema: 'stg' }],
   columns: [{ tableId: 't1' }, { tableId: 't1' }],
-  views: [{ id: 'v1', name: 'CLIENTE', schema: 'ddv_vu' }],
+  views: [{ id: 'v1', name: 'CLIENTE', schema: 'stg_vu' }],
 });
 
 describe('diagramSignature', () => {
@@ -23,6 +23,6 @@ describe('diagramSignature', () => {
     expect(diagramSignature({ ...base(), tables: [{ ...base().tables[0], physicalName: 'CLIENTE2' }] })).not.toBe(a);
     expect(diagramSignature({ ...base(), columns: [{ tableId: 't1' }] })).not.toBe(a);
     expect(diagramSignature({ ...base(), views: [] })).not.toBe(a);
-    expect(diagramSignature({ ...base(), views: [{ id: 'v1', name: 'CLIENTE', schema: 'ddv_vu', customSql: 'select 1' }] })).not.toBe(a);
+    expect(diagramSignature({ ...base(), views: [{ id: 'v1', name: 'CLIENTE', schema: 'stg_vu', customSql: 'select 1' }] })).not.toBe(a);
   });
 });

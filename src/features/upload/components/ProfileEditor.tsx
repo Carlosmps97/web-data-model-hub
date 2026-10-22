@@ -14,7 +14,7 @@ type Tab = SheetRole | 'policies';
 const ACCEPT = '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /**
- * Formulario de un perfil (doc 78 §8): cabecera (nombre, descripción,
+ * Formulario de un perfil: cabecera (nombre, descripción,
  * default), una pestaña por hoja (nombre de hoja, fila de cabecera,
  * requerida, tabla de mapeos con «Read headers from a workbook…» y «Add
  * header») y la pestaña de políticas. Sin estado propio del perfil: el
@@ -162,7 +162,7 @@ export default function ProfileEditor({ projectId, draft, catalog, udpDefs, prob
       <div className="up-pf-head">
         <label className="up-pf-field up-pf-field--grow">
           <span>Profile name</span>
-          <input className="up-pf-input" value={draft.name} placeholder="e.g. Plantilla BCP" onChange={(e) => onChange({ ...draft, name: e.target.value })} />
+          <input className="up-pf-input" value={draft.name} placeholder="e.g. Plantilla estándar" onChange={(e) => onChange({ ...draft, name: e.target.value })} />
         </label>
         <label className="up-pf-field up-pf-field--grow">
           <span>Description</span>

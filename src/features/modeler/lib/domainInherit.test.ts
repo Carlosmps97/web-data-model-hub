@@ -9,7 +9,7 @@ const DEFS = [
   { id: 'u-t', name: 'Tipo de Carga', level: 'table', dataType: 'list', allowedValues: [] },
 ] as UdpDefinition[];
 
-describe('domainInherit (doc 85 §3.6)', () => {
+describe('domainInherit', () => {
   it('agrupa por faceta, ordena por nombre e ignora vacíos, defs de tabla e ids huérfanos', () => {
     const offer = domainUdpOffer({ udpValues: { 'u-cc': 'No', 'u-ac': 'No', 'u-cd': '  ', 'u-t': 'Full', gone: 'x' } }, DEFS);
     expect(offer.logical.map((i) => [i.def.id, i.value, i.facet])).toEqual([['u-ac', 'No', 'logical']]);

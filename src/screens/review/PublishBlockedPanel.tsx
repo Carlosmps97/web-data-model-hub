@@ -1,20 +1,13 @@
 /**
- * PublishBlockedPanel (doc 84 A1) — un approve que el backend rechazó (409/422
- * con `detail` estructurado) se explica ENTERO y se queda en la página: qué
- * chocó (lista completa agrupada por tipo, con su contexto y con qué existe en
- * producción), qué NO pasó (nada se publicó, el request sigue en revisión) y
- * qué hacer ahora, con la acción a mano para el owner. Reemplaza al toast
- * largo, mezclado y truncado. El bloqueo en sí no cambió.
+ * PublishBlockedPanel: un approve que el backend rechazó (409/422 con `detail`
+ * estructurado) se explica entero y se queda en la página: qué chocó (lista
+ * completa agrupada por tipo, con su contexto y con qué existe en producción),
+ * qué no pasó (nada se publicó, el request sigue en revisión) y qué hacer, con
+ * la acción a mano para el dueño. Evita un toast largo, mezclado y truncado.
  */
 import { ShieldAlert, Undo2, X } from 'lucide-react';
 import type { PublishBlockedDetail } from '@/types/versioning';
-import { blockedTitle, groupBlockedItems, itemContext, itemWhere } from './publishBlocked';
-
-function fmtWhen(iso: string): string {
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso;
-  return new Date(t).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-}
+import { blockedTitle, fmtWhen, groupBlockedItems, itemContext, itemLabel, itemWhere } from './publishBlocked';
 
 export default function PublishBlockedPanel({ detail, ownerName, isOwner, onWithdraw, onDismiss, userName }: {
   detail: PublishBlockedDetail;
@@ -54,7 +47,7 @@ export default function PublishBlockedPanel({ detail, ownerName, isOwner, onWith
               return (
                 <li key={`${it.entityId ?? it.name ?? i}-${i}`} className="dmh-rvb-item">
                   <div className="dmh-rvb-item-name">
-                    <span className="mono">{it.name ?? it.message}</span>
+                    <span className="mono">{itemLabel(it)}</span>
                     {ctx && <span className="dmh-rvb-ctx">{ctx}</span>}
                   </div>
                   {it.name && <div className="dmh-rvb-where">{itemWhere(it, fmtWhen, userName)}</div>}
@@ -75,6 +68,11 @@ export default function PublishBlockedPanel({ detail, ownerName, isOwner, onWith
             <li>
               Remove or rename the listed items in the draft. If a table already exists in production,
               add your columns to that table instead of creating it again.
+            </li>
+          ) : detail.code === 'deleted_in_production' ? (
+            <li>
+              Open the draft and click Publish: the dialog lists these objects and discards their changes
+              in one click.
             </li>
           ) : (
             <li>{detail.next || 'Fix the listed items in the draft.'}</li>

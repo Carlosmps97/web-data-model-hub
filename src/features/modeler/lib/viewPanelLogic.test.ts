@@ -1,4 +1,4 @@
-// Doc 61: helpers puros del panel de Properties de vista.
+// Helpers puros del panel de Properties de vista.
 import { describe, expect, it } from 'vitest';
 import { moveSource, reseedDraft } from './viewPanelLogic';
 import type { ViewSource } from '@/services/views.service';
@@ -22,7 +22,7 @@ describe('moveSource', () => {
   });
 });
 
-describe('reseedDraft (minor #10: la SQL cambió por fuera, p. ej. en el View Editor)', () => {
+describe('reseedDraft (la SQL cambió por fuera, p. ej. en el View Editor)', () => {
   it('sin cambios locales sin guardar, el borrador toma el texto nuevo', () => {
     expect(reseedDraft('SELECT 1', 'SELECT 1', 'SELECT 2')).toBe('SELECT 2');
     expect(reseedDraft('', null, 'SELECT 2')).toBe('SELECT 2');

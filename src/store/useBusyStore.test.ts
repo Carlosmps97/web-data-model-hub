@@ -18,8 +18,8 @@ describe('useBusyStore · runBlocking', () => {
   it('guarda el detalle opcional y el instante de inicio', async () => {
     await runBlocking('Copying…', async () => {
       const a = useBusyStore.getState().active;
-      expect(a?.detail).toBe('Copying standards from «Modelo DDV»');
+      expect(a?.detail).toBe('Copying standards from «Modelo Ventas»');
       expect(typeof a?.startedAt).toBe('number');
-    }, 'Copying standards from «Modelo DDV»');
+    }, 'Copying standards from «Modelo Ventas»');
   });
 });

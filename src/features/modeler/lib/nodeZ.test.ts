@@ -1,8 +1,7 @@
-// Doc 113: orden de pintado de los bloques del canvas — el seleccionado al
-// frente (10, como siempre); lo nuevo de esta sesión por delante de lo que ya
-// había, cada tanda (carga Excel, tabla nueva, importada, CTAS, pegada) encima
-// de las anteriores (1 + su rango); el resto, 0. Los dibujos siguen detrás (−1,
-// aparte).
+// Orden de pintado de los bloques del canvas: el seleccionado al frente (10);
+// lo nuevo de esta sesión por delante de lo que ya había, cada tanda (carga
+// Excel, tabla nueva, importada, CTAS, pegada) encima de las anteriores (1 + su
+// rango); el resto, 0. Los dibujos van detrás (−1, aparte).
 import { describe, expect, it } from 'vitest';
 import { FRESH_GENERATIONS, freshRanks, nodeZ } from './nodeZ';
 

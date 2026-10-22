@@ -5,20 +5,20 @@ export type ButtonVariant = 'primary' | 'success' | 'secondary' | 'ghost' | 'dan
 export type ButtonSize = 'md' | 'sm';
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  /** Visual variant. primary = blue, success = green, secondary = white + border. */
+  /** Variante visual. primary = azul, success = verde, secondary = blanco + borde. */
   variant?: ButtonVariant;
-  /** md = 36px tall (design default), sm = compact. */
+  /** md = 36px de alto (por defecto del diseño), sm = compacto. */
   size?: ButtonSize;
-  /** Leading lucide icon. */
+  /** Ícono lucide al inicio. */
   icon?: LucideIcon;
-  /** Trailing lucide icon. */
+  /** Ícono lucide al final. */
   iconRight?: LucideIcon;
 }
 
 /**
- * Button — design-system button (DMH-Erwin).
- * primary (blue #2E5BFF) · success (green #16A37B) · secondary (white, border #DDE2EC).
- * Default height 36px, radius 9. Uses tokens; light-only.
+ * Button: botón del sistema de diseño.
+ * primary (azul #2E5BFF) · success (verde #16A37B) · secondary (blanco, borde #DDE2EC).
+ * Alto por defecto 36px, radio 9. Usa tokens; solo tema claro.
  */
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
   { variant = 'primary', size = 'md', icon: Icon, iconRight: IconRight, className, children, type = 'button', ...rest },

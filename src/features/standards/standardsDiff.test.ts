@@ -1,8 +1,7 @@
-// Doc 105: ¿el guardado de una pantalla de Data Standards cambia algo? Cinco
-// pantallas habilitaban su botón SIN cambios y un guardado sin diff registraba
-// una versión vacía (el backend ahora responde 422 «There are no changes to
-// apply.»). Se compara lo que se ENVIARÍA contra lo vigente, normalizado igual
-// que el envío.
+// ¿El guardado de una pantalla de Data Standards cambia algo? Cinco pantallas
+// habilitan su botón solo con un cambio real (un guardado sin diff registraría
+// una versión vacía; el backend responde 422 «There are no changes to apply.»).
+// Se compara lo que se enviaría contra lo vigente, normalizado igual que el envío.
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/services/http';
 import { mergeOutputSettings } from '@/features/ddl';
@@ -31,14 +30,14 @@ describe('dominio', () => {
   it('alta: siempre es un cambio', () => {
     expect(domainChanged({ ...stored, id: '' }, null)).toBe(true);
   });
-  it('sin tocar, o tocado sólo como lo normaliza el envío: no es un cambio', () => {
+  it('sin tocar, o tocado solo como lo normaliza el envío: no es un cambio', () => {
     expect(domainChanged({ ...stored }, stored)).toBe(false);
     expect(domainChanged({ ...stored, name: ' Codigo Clave ', defaultDataType: ' INTEGER ' }, stored)).toBe(false);
     expect(domainChanged({ ...stored, namingTerm: '', physicalName: '  ', physicalDescription: '' }, stored)).toBe(false);   // ausente ≡ vacío
     expect(domainChanged({ ...stored, logicalDataType: '' }, stored)).toBe(false);   // un tipo nunca se cascadea a vacío
     expect(domainChanged({ ...stored, udpValues: { u2: 'X', u1: 'DAC' } }, stored)).toBe(false);   // orden de claves
     expect(domainChanged({ ...stored, udpValues: null }, { ...stored, udpValues: {} })).toBe(false);
-    // un UDP guardado vacío (dato viejo) ≡ sin valor: UdpAssign borra la clave al vaciar
+    // un UDP guardado vacío ≡ sin valor: UdpAssign borra la clave al vaciar
     expect(domainChanged({ ...stored }, { ...stored, udpValues: { u1: 'DAC', u2: 'X', u3: '' } })).toBe(false);
   });
   it('un cambio real en cualquier campo, o vaciar un texto guardado, sí lo es', () => {
@@ -83,7 +82,7 @@ describe('UDP', () => {
     expect(udpChanged({ ...f, defaultValue: 'DAC' }, seg, stored)).toBe(true);
     expect(udpChanged({ ...f, description: 'Nivel de sensibilidad' }, seg, stored)).toBe(true);
   });
-  it('vaciar un default o una descripción guardados viaja como "" (antes no viajaba y no se podía limpiar)', () => {
+  it('vaciar un default o una descripción guardados viaja como "" (así se pueden limpiar)', () => {
     const cleared = { ...udpFormOf({ ...stored, description: 'algo' }), defaultValue: '', description: '' };
     expect(udpChanged(cleared, seg, { ...stored, description: 'algo' })).toBe(true);
     expect(udpEditInput(cleared, seg, { ...stored, description: 'algo' })).toMatchObject({ defaultValue: '', description: '' });
@@ -123,9 +122,9 @@ describe('regla de DDL', () => {
     expect(ruleChanged({ ...d, enabled: false }, stored)).toBe(true);
     expect(ruleChanged({ ...d, name: 'tag_dac_v2' }, stored)).toBe(true);
   });
-  it('guardada invalid/stale y sin tocar: re-guardarla SÍ es un cambio (el backend graba la validación recalculada)', () => {
-    // Caso real: reglas del seed/one-shot grabadas antes de que el kit trajera
-    // sus UDPs. Hoy validan, pero el export las salta: sin esto no había salida.
+  it('guardada invalid/stale y sin tocar: re-guardarla sí es un cambio (el backend graba la validación recalculada)', () => {
+    // Caso: reglas del seed/one-shot grabadas sin que el proyecto tuviera sus
+    // UDPs. Hoy validan, pero el export las salta: re-guardarlas es la salida.
     expect(ruleChanged(draftOf(stored), { ...stored, validationState: 'invalid' })).toBe(true);
     expect(ruleChanged(draftOf(stored), { ...stored, validationState: 'stale' })).toBe(true);
   });
@@ -152,9 +151,9 @@ describe('lookups y funciones', () => {
     delete noDefault.default;
     expect(ddlConfigChanged({ ...clone().lookups, nivel: noDefault }, clone().functions, config)).toBe(false);
   });
-  it('con default, «nada» (null) NO es «sin mapear»: el valor deja de emitir el default (backend `_resolve_lookup`)', () => {
+  it('con default, «nada» (null) no es «sin mapear»: el valor deja de emitir el default (backend `_resolve_lookup`)', () => {
     const l = () => clone().lookups;
-    // antes se veía «No changes to apply» y no se podía guardar
+    // es un cambio: el botón no queda en «No changes to apply»
     expect(ddlConfigChanged({ ...l(), pais: { ...l().pais, values: { X: null } } }, clone().functions, config)).toBe(true);
     // y al revés: lo guardado mapeado a «nada» que vuelve a heredar el default
     const pinned: DdlRulesetConfig = { ...config, lookups: { ...l(), pais: { ...l().pais, values: { X: null } } } };
@@ -174,7 +173,7 @@ describe('lookups y funciones', () => {
   });
 });
 
-describe('lookupRow: qué dice cada fila del editor de lookups (espejo de `_resolve_lookup`, doc 105)', () => {
+describe('lookupRow: qué dice cada fila del editor de lookups (espejo de `_resolve_lookup`)', () => {
   const lk = (values: Record<string, string | null>, dflt: string | null = 'PE') =>
     ({ fromUdpId: 'u1', fromLevel: 'table' as const, values, default: dflt });
   it('con default: sin mapear emite el default (y se puede pasar a «nada»); «nada» no emite (y se puede des-mapear)', () => {
@@ -206,7 +205,7 @@ describe('Output settings', () => {
     expect(outputChanged({ ...v, fileNames: { ...v.fileNames, nameCase: 'lower' } }, stored)).toBe(true);
     expect(outputChanged({ ...v, oracle: { ...v.oracle, includeComments: true } }, stored)).toBe(true);
   });
-  it('doc 106: un proyecto con el mapeo de tipos o el tamaño máximo guardados no aparece «con cambios» al abrirlo', () => {
+  it('un proyecto con el mapeo de tipos o el tamaño máximo guardados no aparece «con cambios» al abrirlo', () => {
     const viejo = { ...stored, oracle: { typeMap: [{ from: 'DATETIME', to: 'DATE' }], maxStringSize: 'extended' } };
     expect(outputChanged(mergeOutputSettings(viejo), viejo)).toBe(false);
   });

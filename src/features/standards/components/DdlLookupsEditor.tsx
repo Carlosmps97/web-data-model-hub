@@ -1,12 +1,11 @@
 /**
- * Lookups & Functions del ruleset (doc 30 §7, componentes que el diseño no
- * traía). El lookup es el BUSCARV de Excel: tabla de DOS columnas con la
- * izquierda PREcargada con los valores permitidos del UDP de origen — el
- * modelador solo llena la derecha (spec §6.7). Cada fila tiene TRES estados
+ * Lookups & Functions del ruleset. El lookup es el BUSCARV de Excel: tabla de
+ * dos columnas con la izquierda precargada con los valores permitidos del UDP
+ * de origen; el modelador solo llena la derecha. Cada fila tiene tres estados
  * (espejo de `_resolve_lookup`): un valor; «nada» (null: no se emite); y sin
- * mapear (emite el default). Con default, los dos últimos NO son lo mismo
- * (doc 105): el placeholder dice qué pasa y la fila ofrece pasar de uno al
- * otro («Emit nothing» / «Unmap»). Vaciar la celda la deja sin mapear. Ver `lookupRow`.
+ * mapear (emite el default). Con default, los dos últimos no son lo mismo: el
+ * placeholder dice qué pasa y la fila ofrece pasar de uno al otro («Emit
+ * nothing» / «Unmap»). Vaciar la celda la deja sin mapear. Ver `lookupRow`.
  */
 import { useMemo, useState, type CSSProperties } from 'react';
 import { Ban, Plus, RotateCcw, Table2, Trash2, X } from 'lucide-react';
@@ -33,9 +32,9 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
 }) {
   const [tab, setTab] = useState<'lookups' | 'functions'>('lookups');
   const [lookups, setLookups] = useState<Record<string, DdlLookup>>(() => structuredClone(config.lookups));
-  // Doc 105 (R11/R14): claves de cada lookup en el config inicial — las stale
-  // siguen visibles hasta guardar; al BORRAR el lookup se descartan (uno nuevo
-  // con el mismo nombre no hereda sus filas).
+  // Claves de cada lookup en el config inicial: las stale siguen visibles hasta
+  // guardar; al borrar el lookup se descartan (uno nuevo con el mismo nombre no
+  // hereda sus filas).
   const [initialKeys, setInitialKeys] = useState<Record<string, string[]>>(
     () => Object.fromEntries(Object.entries(config.lookups).map(([name, l]) => [name, Object.keys(l.values ?? {})])));
   const [functions, setFunctions] = useState(() => structuredClone(config.functions));
@@ -48,14 +47,14 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
   const defById = useMemo(() => new Map(defs.map((d) => [d.id, d])), [defs]);
   const listDefs = useMemo(() => defs.filter((d) => d.dataType === 'list'), [defs]);
   const lk = selected ? lookups[selected] : undefined;
-  // Doc 105: sin un cambio real no se guarda (antes registraba una versión vacía).
+  // Sin un cambio real no se guarda (evita registrar una versión vacía).
   const dirty = useMemo(() => ddlConfigChanged(lookups, functions, config), [lookups, functions, config]);
   const srcDef = lk?.fromUdpId ? defById.get(lk.fromUdpId) : undefined;
 
   // Filas = valores permitidos del UDP (izquierda precargada) + claves ya
-  // mapeadas que quedaron fuera de la lista (stale, se muestran igual). Doc 105
-  // (R11): las stale del config INICIAL siguen visibles hasta guardar — vaciar
-  // su celda las des-mapea y la fila desaparecía con el foco adentro.
+  // mapeadas que están fuera de la lista (stale, se muestran igual). Las stale
+  // del config inicial siguen visibles hasta guardar: vaciar su celda las
+  // des-mapea sin que la fila desaparezca con el foco adentro.
   const rows = useMemo(() => {
     if (!lk) return [];
     const allowed = srcDef?.allowedValues ?? [];
@@ -160,8 +159,8 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
                         <div>{srcDef?.name ?? 'UDP value'}</div><div>Emitted value</div><div />
                       </div>
                       {rows.map((val) => {
-                        // Doc 105: con default, «nada» y «sin mapear» emiten distinto —
-                        // el placeholder lo dice y la fila pasa de uno al otro.
+                        // Con default, «nada» y «sin mapear» emiten distinto: el
+                        // placeholder lo dice y la fila pasa de uno al otro.
                         const row = lookupRow(lk, val);
                         const unmap = lk.default != null
                           ? `Unmap ${val} — emit the default (${lk.default === '' ? "''" : lk.default})` : `Unmap ${val}`;
@@ -171,8 +170,8 @@ export default function DdlLookupsEditor({ projectId, config, canEdit, onClose, 
                             <div style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12, color: (srcDef?.allowedValues ?? []).includes(val) ? '#1A2B4A' : '#B98600' }}>{val}</div>
                             <input value={lk.values[val] ?? ''} disabled={!canEdit} placeholder={row.placeholder} aria-label={`Emitted value for ${val}`}
                               onChange={(e) => {
-                                // Doc 105 (R6): vaciar la celda la vuelve a «sin mapear» (emite el
-                                // default); «nothing» (null) se elige sólo con «Emit nothing».
+                                // Vaciar la celda la vuelve a «sin mapear» (emite el default);
+                                // «nothing» (null) se elige solo con «Emit nothing».
                                 const next = { ...lk.values, [val]: e.target.value };
                                 if (!e.target.value) delete next[val];
                                 patchLk({ values: next });

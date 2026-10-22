@@ -1,15 +1,15 @@
 /**
- * ExportRulesPanel — el selector de DDL Export Rules del popup Export DDL
- * (doc 30 §12), como pestaña propia de la columna de opciones.
+ * ExportRulesPanel: el selector de DDL Export Rules del popup Export DDL, como
+ * pestaña propia de la columna de opciones.
  *
- * Las reglas NO son opciones de formato: la mitad son GENERADORES que agregan
+ * Las reglas no son opciones de formato: la mitad son generadores que agregan
  * objetos al `.zip` (la `_rej`, las vistas `_v`, las DAC). Por eso van en dos
  * grupos con encabezado — «Generators» (crean objetos) vs «Transformations»
  * (modifican el SQL) — y cada fila dice qué emite y qué hace, en vez de mostrar
  * solo el slug. Dentro de cada grupo se respeta el orden de ejecución del motor
  * (priority DESC, name ASC) que ya viene del backend.
  *
- * Un generador que come del artefacto de OTRO generador no seleccionado queda
+ * Un generador que come del artefacto de otro generador no seleccionado queda
  * marcado pero no emite nada: la fila lo avisa (`missingSource`).
  */
 import { useMemo } from 'react';

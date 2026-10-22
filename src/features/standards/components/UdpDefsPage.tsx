@@ -7,18 +7,18 @@ import { UDP_CLASS_SEGMENTS, udpView, type Facet, type UdpClassSegment } from '@
 import { applyErrorNotice, NO_CHANGES_HINT, udpChanged, udpEditInput, udpFormOf, type UdpForm } from '../standardsDiff';
 
 /**
- * Data Standards → UDP (doc 71 §2). Las propiedades se organizan por OBJETO de
- * Erwin y, dentro de los dos objetos con dos caras, por FACETA:
+ * Data Standards → UDP. Las propiedades se organizan por objeto de Erwin y,
+ * dentro de los dos objetos con dos caras, por faceta:
  *
  *   Entity / Table        → Logical (Entity) · Physical (Table)
  *   Attribute / Column    → Logical (Attribute) · Physical (Column)
- *   View                  → siempre física (las vistas viven en el modelo físico, doc 63)
+ *   View                  → siempre física (las vistas viven en el modelo físico)
  *   Model                 → siempre física (UDP del canvas)
  *
  * Navegador de objetos a la izquierda (con conteos por faceta), switch de faceta
  * en la cabecera, lista + formulario a la derecha. Los homónimos lógico/físico
- * son definiciones DISTINTAS (doc 69); `UDP_CLASS_SEGMENTS` sigue siendo la
- * única fuente de (level, view, label).
+ * son definiciones distintas; `UDP_CLASS_SEGMENTS` es la única fuente de
+ * (level, view, label).
  */
 
 const TYPES: UdpDataType[] = ['string', 'number', 'boolean', 'date', 'list'];
@@ -89,8 +89,8 @@ export default function UdpDefsPage({ projectId, snapshot, canEdit, onApplied }:
   }, [selId, defs]);
 
   const set = (p: Partial<UdpForm>) => setForm((f) => ({ ...f, ...p }));
-  // Doc 105: la definición guardada que se edita (null = alta) y si el guardado
-  // cambia algo — sin cambios no se registra una versión vacía.
+  // La definición guardada que se edita (null = alta) y si el guardado cambia
+  // algo: sin cambios no se registra una versión vacía.
   const stored = selId && selId !== NEW ? defs.find((x) => x.id === selId) ?? null : null;
   const dirty = selId === NEW || udpChanged(form, segment, stored);
 
@@ -231,10 +231,10 @@ export default function UdpDefsPage({ projectId, snapshot, canEdit, onApplied }:
                   </div>
                   <div style={{ flex: 1 }}><label style={lbl}>Default</label>
                     {form.dataType === 'list'
-                      // Doc 105 (ronda 5): un default que salió de la lista se sigue viendo (antes, «—»).
+                      // Un default que está fuera de la lista se sigue viendo (no como «—»).
                       ? <select style={inp} value={form.defaultValue} onChange={(e) => set({ defaultValue: e.target.value })}><option value="">—</option>{udpChoices({ dataType: 'list', allowedValues: form.allowedValues.map((v) => v.trim()).filter(Boolean) }, form.defaultValue).map((v) => <option key={v} value={v}>{v}</option>)}</select>
                       : form.dataType === 'boolean'
-                        // Doc 105 (ronda 5): el booleano se elige (se tipeaba como texto libre).
+                        // El booleano se elige en un select, no se tipea como texto libre.
                         ? <select style={inp} value={form.defaultValue} onChange={(e) => set({ defaultValue: e.target.value })}><option value="">—</option>{udpChoices({ dataType: 'boolean', allowedValues: [] }, form.defaultValue).map((v) => <option key={v} value={v}>{v}</option>)}</select>
                         : <input style={inp} value={form.defaultValue} onChange={(e) => set({ defaultValue: e.target.value })} placeholder="optional" />}
                   </div>

@@ -12,21 +12,21 @@ import { pendingChanges, stage, type PendingColors } from '../lib/canvasColors';
 import { discardSystemPicker, flushSystemPicker } from '../lib/systemColorPicker';
 
 /**
- * "Model properties" — la ficha del canvas (F5 + doc 112). TODO se graba con
- * Save, en la versión en edición (changeset), y Cancel/X/Escape lo descartan:
+ * "Model properties" — la ficha del canvas. Los cambios se graban con Save, en
+ * la versión en edición (changeset), y Cancel/X/Escape los descartan:
  *  - UDPs: los UDP level='canvas' del Modelo de Datos (subject area). Se graba
- *    SÓLO lo que cambió desde que se abrió la ficha, sobre los valores vigentes
- *    (una ficha reabierta mientras otro Save viajaba no lo pisa); al guardar
- *    refleja el mapa en el diagrama en memoria (sin refetch).
+ *    solo la diferencia contra lo que había al abrir la ficha, sobre los
+ *    valores vigentes (una ficha reabierta mientras otro Save viajaba no lo
+ *    pisa); al guardar refleja el mapa en el diagrama en memoria (sin refetch).
  *  - Colors on this canvas: qué cajas pinta distinto este canvas y pintar las
  *    elegidas. Quedan pendientes y el canvas las muestra como vista previa
- *    (`colorPreview`); al Save van en UN request con UN Undo.
- * En el visor se abre de sólo lectura.
+ *    (`colorPreview`); al Save van en un solo request con un solo Undo.
+ * En el visor se abre en solo lectura.
  */
 export default function ModelPropertiesModal({ subjectArea, canEdit, boxes, onClose, pushToast }: {
   subjectArea: SubjectArea;
   canEdit: boolean;
-  /** Doc 112: cajas a pintar en este canvas (desde Properties). */
+  /** Cajas a pintar en este canvas (desde Properties). */
   boxes?: string[];
   onClose: () => void;
   pushToast: (m: string, k?: 'err') => void;
@@ -45,7 +45,7 @@ export default function ModelPropertiesModal({ subjectArea, canEdit, boxes, onCl
     pendingRef.current = stage(pendingRef.current, ids, ref);
     setPending(pendingRef.current);
   };
-  // «More colors…» aplica mientras siga abierta ESTA ficha.
+  // «More colors…» aplica mientras siga abierta esta ficha.
   const [sheetOpen] = useState(() => {
     const sheet = useModelerStore.getState().modelProps;
     return () => useModelerStore.getState().modelProps === sheet;
@@ -61,7 +61,7 @@ export default function ModelPropertiesModal({ subjectArea, canEdit, boxes, onCl
     const colors = pendingChanges(useModelerStore.getState().canvasColors, pendingRef.current);
     if (!Object.keys(udp).length && !Object.keys(colors).length) { onClose(); return; }
     setBusy(true);
-    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió (`reportWriteError`).
+    // El fallo espera la revalidación y calla si la sesión es otra (`reportWriteError`).
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
     try {
@@ -101,7 +101,7 @@ export default function ModelPropertiesModal({ subjectArea, canEdit, boxes, onCl
       onClose={onClose}
       footer={(
         <>
-          {/* Doc 112: «Cancel» descarta todo lo no guardado (UDPs y colores);
+          {/* «Cancel» descarta lo no guardado (UDPs y colores);
               en el visor no hay nada que descartar: «Close». */}
           <button className="rd-btn rd-btn-secondary rd-btn-sm" disabled={busy} onClick={onClose}>{canEdit ? 'Cancel' : 'Close'}</button>
           {canEdit && (

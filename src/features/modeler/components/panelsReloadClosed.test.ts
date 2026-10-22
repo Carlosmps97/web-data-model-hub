@@ -1,15 +1,14 @@
-// Doc 105 (ronda 7, R18a-1) — los paneles de propiedades arman el documento
-// COMPLETO desde el diagrama y escriben directo al servicio. Con la marca «sin
-// refrescar» de la ronda 6, tras un reload fallido el panel seguía en pantalla
-// y la edición siguiente re-grababa el documento VIEJO (el UDP recién grabado
-// volvía atrás, en silencio). Ahora el reload fallido CIERRA el canvas: sin
-// diagrama no hay panel desde el cual editar lo viejo, y se avisa una vez.
+// Los paneles de propiedades arman el documento completo desde el diagrama y
+// escriben directo al servicio. Tras un reload fallido el canvas se cierra y se
+// avisa una vez: sin diagrama no hay panel desde el cual volver a grabar un
+// documento desactualizado (la edición siguiente revertiría en silencio el UDP
+// recién grabado).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetFake, walk } from '../../reporting/components/fakeReact.testutil';
 
 vi.mock('react', async (orig) => (await import('../../reporting/components/fakeReact.testutil')).fakeReact(await orig<object>()));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
-// Los hooks de zustand leen el estado REAL de los stores (sin React de verdad).
+// Los hooks de zustand leen el estado real de los stores (sin React de verdad).
 vi.mock('@/store/useModelerStore', async (orig) => {
   const actual = await orig<typeof import('@/store/useModelerStore')>();
   const real = actual.useModelerStore;
@@ -25,8 +24,8 @@ let server: Record<string, Doc> = {};
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    // Doc 109: los paneles leen el documento vigente por id antes de grabar —
-    // como el backend: de SU colección, y sin `ids` la colección entera.
+    // Los paneles leen el documento vigente por id antes de grabar; como en el
+    // backend: de su colección, y sin `ids` la colección entera.
     ...actual, recordChangesBulk: vi.fn(async () => ({})),
     effective: vi.fn(async (_cs: string, coll: string, opts?: { ids?: string[] }) =>
       Object.values(server)
@@ -89,15 +88,15 @@ beforeEach(async () => {
 });
 afterEach(async () => { await new Promise((r) => setTimeout(r, 5)); });
 
-describe('tras un reload fallido no queda panel que edite lo viejo (doc 105, ronda 7, R18a-1)', () => {
-  it('PropertiesPanel: el UDP queda grabado; el canvas se cierra con un aviso y el panel ya no se pinta', async () => {
+describe('tras un reload fallido no queda panel que edite el documento desactualizado', () => {
+  it('PropertiesPanel: el UDP queda grabado; el canvas se cierra con un aviso y el panel deja de pintarse', async () => {
     useModelerStore.setState({ selectedTableId: 't1' });
     vi.mocked(mod.loadDiagram).mockRejectedValueOnce(flaky());
     (udpOf(renderTable('udps'))!.props.onChange as (v: Record<string, string>) => void)({ U1: 'B' });
     await ticks();
     expect((server.t1.udpValues as Record<string, string>).U1).toBe('B');
     expect(vi.mocked(toast.error).mock.calls.map((c) => c[0])).toEqual([CLOSED]);
-    expect(renderTable('definition')).toBeNull();          // nada desde donde re-grabar la tabla vieja
+    expect(renderTable('definition')).toBeNull();          // nada desde donde volver a grabar la tabla desactualizada
     expect((server.t1.udpValues as Record<string, string>).U1).toBe('B');
   });
 

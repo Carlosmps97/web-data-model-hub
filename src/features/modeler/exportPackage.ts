@@ -1,8 +1,8 @@
-// Doc 66: orquestación del export HTML de subproyecto. Resuelve el scope
+// Orquestación del export HTML de subproyecto. Resuelve el scope
 // (packageLayout), baja cada diagrama con loadDiagram (headless y
-// changeset-aware — patrón doc 55), construye las páginas (builders puros de
+// changeset-aware), construye las páginas (builders puros de
 // lib/exportPackagePages) y empaqueta con fflate. Los módulos pesados
-// (escena/SVG/fuentes/fflate) cargan lazy, patrón del Toolbar (doc 59).
+// (escena/SVG/fuentes/fflate) cargan lazy, con el mismo patrón del Toolbar.
 import { listFolders, listSubjectAreas, loadDiagram } from './services/modeler.service';
 import type { Diagram } from './services/modeler.service';
 import type { ReportCanvasInput } from './lib/reportPdf';
@@ -23,7 +23,7 @@ export interface CancelFlag { cancelled: boolean }
 
 const FETCH_CONCURRENCY = 3;
 
-/** Descarga por Blob (mismo patrón del Toolbar, doc 59 — sin data URLs). */
+/** Descarga por Blob (mismo patrón del Toolbar, sin data URLs). */
 function domDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -56,7 +56,7 @@ async function fetchLookups(projectId: string): Promise<ExportLookups> {
   ]);
   return {
     domainsById: Object.fromEntries(domains.map((d) => [d.id, d.name])),
-    udpDefsById: Object.fromEntries(defs.map((d) => [d.id, { name: d.name, level: d.level, view: d.view }])),   // doc 69: faceta
+    udpDefsById: Object.fromEntries(defs.map((d) => [d.id, { name: d.name, level: d.level, view: d.view }])),   // view = faceta
   };
 }
 
@@ -80,10 +80,10 @@ function canvasHtml(
   breadcrumb: string[], indexHref: string | null,
 ): string {
   const drawings = diagram.subjectArea.drawings ?? [];
-  // Doc 109: los colores del canvas salen de su diagrama; los themes, del proyecto.
+  // Los colores del canvas salen de su diagrama; los themes, del proyecto.
   const svgLogical = b.buildDiagramSvg(b.buildDiagramScene({ diagram, drawings, viewMode: 'logical', themes }), { fontCss: b.fontCss });
   const svgPhysical = b.buildDiagramSvg(b.buildDiagramScene({ diagram, drawings, viewMode: 'physical', themes }), { fontCss: b.fontCss });
-  // Doc 96 D6: el SQL de cada vista es el DDL que escribe el Export (de sus columnas).
+  // El SQL de cada vista es el DDL que escribe el Export (de sus columnas).
   const viewDdl = Object.fromEntries(diagram.views.map((v) => [v.id, generatedViewDdl(v, diagram.tables)]));
   return buildCanvasPage({
     title: diagram.subjectArea.name, breadcrumb, indexHref,
@@ -137,7 +137,7 @@ export async function exportNodeHtml(opts: {
       const diagram = await loadDiagram(entry.sa.id);
       if (cancelled()) return;
       const indexHref = `${'../'.repeat(entry.dir.length)}index.html`;
-      // El crumb del caso project YA arranca en el proyecto; en folder se
+      // El crumb del caso project ya arranca en el proyecto; en folder se
       // antepone para que el breadcrumb siempre lea Proyecto / …carpetas….
       const breadcrumb = opts.kind === 'project' ? entry.crumb : [opts.projectName, ...entry.crumb];
       const html = canvasHtml(builders, diagram, lookups, themes, breadcrumb, indexHref);
@@ -172,10 +172,9 @@ export async function exportNodeHtml(opts: {
   return outcome;
 }
 
-// ── Doc 67: export PDF = REPORTE completo estilo Erwin ────────────────────
-// Portada · TOC · Subject Areas · por canvas (diagramas L+P vectoriales +
-// Table(s) + Column(s)) · Index alfabético · bookmarks jerárquicos.
-// Reemplaza al multipágina de solo-diagramas del doc 66 r3.
+// ── Export PDF = reporte completo estilo Erwin ────────────────────────────
+// Portada · TOC · Subject Areas · por canvas (Table(s) + Column(s)) · Index
+// alfabético · bookmarks jerárquicos.
 export async function exportNodePdf(opts: {
   kind: 'project' | 'folder' | 'canvas';
   nodeId: string;
@@ -191,7 +190,7 @@ export async function exportNodePdf(opts: {
     import('./lib/scenePdf'), import('./lib/reportPdf'), import('fflate'), fetchLookups(opts.projectId),
   ]);
 
-  // r2: el reporte ya no lleva diagramas — no se construyen escenas.
+  // El reporte no lleva diagramas: no se construyen escenas.
   const canvasInput = (diagram: Diagram, location: string): ReportCanvasInput =>
     ({ name: diagram.subjectArea.name, location, diagram });
   const downloadReport = (rootName: string, canvases: ReportCanvasInput[]) => {
@@ -226,7 +225,7 @@ export async function exportNodePdf(opts: {
     try {
       const diagram = await loadDiagram(entry.sa.id);
       if (cancelled()) return;
-      // Location = ruta de carpetas RELATIVA al nodo exportado.
+      // Location = ruta de carpetas relativa al nodo exportado.
       byIndex[i] = canvasInput(diagram, entry.crumb.slice(1).join(' / '));
       outcome.exported += 1;
     } catch {

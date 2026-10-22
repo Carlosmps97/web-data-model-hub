@@ -1,10 +1,10 @@
 /**
- * sheetTemplates — plantillas de hoja Excel del Reporting (doc 95 D11): un
- * formato FIJO guardado como dato (nombre de hoja + columnas encabezado → dato
- * + filtros de filas). Funciones PURAS: catálogo de datos, filas de la hoja (con
- * las MISMAS filas del export tabular, `reportRows`) y su filtrado, validación
- * del editor y nombre del archivo. El backend solo valida la FORMA de `source`:
- * sumar un dato nuevo es solo acá.
+ * sheetTemplates — plantillas de hoja Excel del Reporting: un formato fijo
+ * guardado como dato (nombre de hoja + columnas encabezado → dato + filtros de
+ * filas). Funciones puras: catálogo de datos, filas de la hoja (con las mismas
+ * filas del export tabular, `reportRows`) y su filtrado, validación del editor y
+ * nombre del archivo. El backend solo valida la forma de `source`: un dato nuevo
+ * se agrega solo aquí.
  */
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import { sortColumnRows, type SheetRow } from './reportRows';
@@ -12,23 +12,23 @@ import { sortColumnRows, type SheetRow } from './reportRows';
 export interface SheetTemplateColumn { header: string; source: string }
 /** Operadores de un filtro (espejo de `FilterOp` del backend). */
 export type FilterOp = 'is' | 'isNot' | 'isOneOf' | 'contains' | 'notContains' | 'startsWith' | 'isEmpty' | 'isNotEmpty';
-/** Filtro de filas: sale la fila que cumple TODOS. `isOneOf` lleva `values`;
+/** Filtro de filas: sale la fila que cumple todos. `isOneOf` lleva `values`;
  *  los «empty», nada; el resto, `value`. */
 export interface SheetTemplateFilter { source: string; op: FilterOp; value?: string | null; values?: string[] | null }
 export interface SheetTemplateBody {
   name: string; sheetName: string; description?: string | null; columns: SheetTemplateColumn[];
-  /** Plantillas guardadas antes de los filtros llegan sin la clave. */
+  /** Una plantilla sin filtros puede llegar sin la clave. */
   filters?: SheetTemplateFilter[];
-  /** Spec D11 (dueño + compartida): la compartida la ven todos en el proyecto. */
+  /** La plantilla compartida la ven todos en el proyecto; la otra, solo su dueño. */
   shared: boolean;
-  /** Doc 102: nombre del archivo con marcadores {yyyy} {MM} {dd} {HH} {mm} {ss}
-   *  (hora LOCAL de quien exporta); vacío ⇒ `<plantilla>-<AAAA-MM-DD>.xlsx`. */
+  /** Nombre del archivo con marcadores {yyyy} {MM} {dd} {HH} {mm} {ss} (hora
+   *  local de quien exporta); vacío ⇒ `<plantilla>-<AAAA-MM-DD>.xlsx`. */
   fileName?: string | null;
 }
 export interface SheetTemplate extends SheetTemplateBody { id: string; projectId: string; origin: string; owner?: string | null }
 
 /** ¿Puede editarla/borrarla? El dueño; un admin (`admin.manage`), además, las
- *  compartidas (así la QA_MODELO sembrada sigue editable). Espejo de `can_edit`. */
+ *  compartidas (así la QA_MODELO sembrada es editable). Espejo de `can_edit`. */
 export function canEditTemplate(t: Pick<SheetTemplate, 'owner' | 'shared'>, username: string | undefined,
                                 isAdmin: boolean): boolean {
   return (!!username && t.owner === username) || (isAdmin && t.shared === true);
@@ -40,7 +40,7 @@ export const BUILTIN_ORIGIN = 'builtin:qa-modelo';
 type Getter = (c: ReportColumnRow, t: ReportTableRow | undefined, position: number) => string | number;
 export interface SheetSource {
   key: string; label: string; group: 'Table fields' | 'Column fields'; get: Getter;
-  /** Datos con VARIOS valores (la tabla está en varios canvases): el filtro mira cada uno. */
+  /** Datos con varios valores (la tabla está en varios canvases): el filtro mira cada uno. */
   items?: (t: ReportTableRow | undefined) => string[];
 }
 
@@ -50,7 +50,7 @@ const list = (xs: string[] | undefined) => (xs ?? []).join(', ');
 
 /** Datos del modelo disponibles para una columna de la hoja (los UDP van aparte). */
 export const SHEET_SOURCES: SheetSource[] = [
-  // Doc 102: la jerarquía del modelador (plantilla Excel: SPACE › SUBJECT › DIAGRAMA).
+  // Jerarquía del modelador (plantilla Excel: SPACE › SUBJECT › DIAGRAMA).
   { key: 'table.space', label: 'Space (sub-project)', group: 'Table fields', get: (_c, t) => list(t?.spaces), items: (t) => t?.spaces ?? [] },
   { key: 'table.subject', label: 'Subject (folder)', group: 'Table fields', get: (_c, t) => list(t?.subjectAreas), items: (t) => t?.subjectAreas ?? [] },
   { key: 'table.diagram', label: 'Diagram (canvas)', group: 'Table fields', get: (_c, t) => list(t?.diagrams), items: (t) => t?.diagrams ?? [] },
@@ -131,14 +131,14 @@ export const FILTERS_MAX = 20;
 const FILTER_VALUE_MAX = 200;
 const FILTER_VALUES_MAX = 50;
 
-/** Operadores que se ofrecen para un dato: una bandera (X / vacío) sólo «marcada / no marcada». */
+/** Operadores que se ofrecen para un dato: una bandera (X / vacío) solo «marcada / no marcada». */
 export const filterOps = (source: string): { value: FilterOp; label: string }[] =>
   (FLAG_SOURCES.has(source) ? FLAG_OPS : ALL_OPS);
 
 /** ¿El operador lleva valor? */
 export const filterNeedsValue = (op: FilterOp): boolean => op !== 'isEmpty' && op !== 'isNotEmpty';
 
-/** «a, b ,, c» → ['a', 'b', 'c'] (valores de «is one of»). La coma DENTRO de
+/** «a, b ,, c» → ['a', 'b', 'c'] (valores de «is one of»). La coma dentro de
  *  () o <> es parte del valor: «DECIMAL(10,2), MAP<STRING, INT>» → 2 valores.
  *  Si un ( o < queda sin cerrar, se corta en todas las comas. */
 export function splitValues(text: string): string[] {
@@ -154,7 +154,7 @@ export function splitValues(text: string): string[] {
   return (depth === 0 ? out : text.split(',')).map((v) => v.trim()).filter(Boolean);
 }
 
-/** Filtro en el editor: el valor es TEXTO (para «is one of», separado por comas). */
+/** Filtro en el editor: el valor es texto (para «is one of», separado por comas). */
 export interface FilterDraft { source: string; op: FilterOp; text: string }
 
 export function toFilterDraft(f: SheetTemplateFilter): FilterDraft {
@@ -179,8 +179,8 @@ function filterItems(source: string, c: ReportColumnRow, t: ReportTableRow | und
 
 type RowTest = (c: ReportColumnRow, t: ReportTableRow | undefined, position: number) => boolean;
 
-/** Los filtros preparados UNA vez (valores normalizados) para probar muchas
- *  filas: la fila pasa si cumple TODOS, sin distinguir mayúsculas ni bordes. */
+/** Los filtros preparados una vez (valores normalizados) para probar muchas
+ *  filas: la fila pasa si cumple todos, sin distinguir mayúsculas ni bordes. */
 export function compileFilters(filters: SheetTemplateFilter[] | undefined): RowTest {
   const tests: RowTest[] = (filters ?? []).map((f) => {
     const value = norm(f.value);
@@ -204,7 +204,7 @@ export function compileFilters(filters: SheetTemplateFilter[] | undefined): RowT
 }
 
 /** Filas de la hoja: una por columna que cumple los filtros, ordenadas por tabla
- *  y orden único (PK primero), con la posición 1-based REAL dentro de cada
+ *  y orden único (PK primero), con la posición 1-based real dentro de cada
  *  tabla (filtrar no renumera). */
 export function templateRows(tpl: Pick<SheetTemplateBody, 'columns' | 'filters'>, tables: ReportTableRow[],
                              columns: ReportColumnRow[]): SheetRow[] {
@@ -221,8 +221,9 @@ export function templateRows(tpl: Pick<SheetTemplateBody, 'columns' | 'filters'>
   });
 }
 
-// Excel: nombre de hoja de 1 a 31 caracteres, sin : \ / ? * [ ] (espejo del backend).
-const BAD_SHEET = /[:\\/?*[\]]/;
+// Excel: nombre de hoja de 1 a 31 caracteres, sin : \ / ? * [ ], sin apóstrofo
+// al inicio ni al final y distinto de «History» (nombre reservado). Espejo del backend.
+const BAD_SHEET = /[:\\/?*[\]]|^'|'$|^history$/i;
 
 /** Problemas del borrador del editor (las mismas reglas que valida el backend). */
 export function templateProblems(t: Pick<SheetTemplateBody, 'name' | 'sheetName' | 'columns' | 'fileName' | 'filters'>): string[] {
@@ -230,7 +231,7 @@ export function templateProblems(t: Pick<SheetTemplateBody, 'name' | 'sheetName'
   if (!t.name.trim()) out.push('Give the template a name.');
   const sheet = t.sheetName.trim();
   if (!sheet || sheet.length > 31 || BAD_SHEET.test(sheet)) {
-    out.push('The sheet name must be 1–31 characters, without : \\ / ? * [ ].');
+    out.push("The sheet name must be 1–31 characters, without : \\ / ? * [ ], not start or end with an apostrophe, and not be History.");
   }
   if (t.columns.length === 0) out.push('Add at least one column.');
   const seen = new Set<string>();
@@ -267,7 +268,7 @@ export function moveItem<T>(list: T[], index: number, dir: -1 | 1): T[] {
   return next;
 }
 
-/** Doc 102: marcadores del nombre del archivo (hora LOCAL de quien exporta). */
+/** Marcadores del nombre del archivo (hora local de quien exporta). */
 export const FILE_NAME_TOKENS = ['yyyy', 'MM', 'dd', 'HH', 'mm', 'ss'] as const;
 const FILE_NAME_MAX = 120;
 // eslint-disable-next-line no-control-regex
@@ -285,7 +286,7 @@ export function cleanFileName(raw: string | null | undefined): string | null {
 export function fileNameProblem(raw: string | null | undefined): string | null {
   const text = cleanFileName(raw);
   if (!text) return null;
-  // Doc 105 (B7): en code points, como `len()` del backend (un emoji = 1, no 2).
+  // En code points, como `len()` del backend (un emoji = 1, no 2).
   if ([...text].length > FILE_NAME_MAX) return `The file name can have at most ${FILE_NAME_MAX} characters.`;
   if (BAD_FILE.test(text)) return 'The file name can\'t contain \\ / : * ? " < > |.';
   const known: readonly string[] = FILE_NAME_TOKENS;
@@ -297,8 +298,8 @@ export function fileNameProblem(raw: string | null | undefined): string | null {
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0');
 
-/** Archivo del export (doc 102): el nombre de la plantilla con sus marcadores a
- *  la hora LOCAL — la QA_MODELO sale `QA_REPORTE_2026-09-28 153045.xlsx`; sin
+/** Archivo del export: el nombre de la plantilla con sus marcadores a la hora
+ *  local (la QA_MODELO sale `QA_REPORTE_<AAAA-MM-DD> <HHmmss>.xlsx`); sin
  *  nombre propio (o con uno inválido), `<plantilla>-<AAAA-MM-DD>.xlsx`. */
 export function templateFileName(tpl: Pick<SheetTemplateBody, 'name' | 'fileName'>, date: Date): string {
   const parts: Record<string, string> = {

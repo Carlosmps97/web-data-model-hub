@@ -1,6 +1,6 @@
 /**
- * Lectura CRUDA del `.xlsx` (doc 78 §3.2) con SheetJS — la MISMA librería que
- * ya exporta el reporting. Todas las hojas viajan como grillas
+ * Lectura cruda del `.xlsx` con SheetJS, la misma librería con la que exporta
+ * el reporting. Todas las hojas viajan como grillas
  * `{name, rows: [{row, cells}]}` sin semántica: el backend aplica el perfil
  * de carga (hojas, fila de cabecera, mapeo). Los helpers `findSheet`,
  * `headersAt` y `sheetRowCount` sirven a la tarjeta del popup y al editor de
@@ -20,10 +20,10 @@ export const headerKey = (h: unknown): string =>
 /** Clave de nombre de hoja: sin caso, sin tildes, espacios colapsados (`norm_name`). */
 export const sheetKey = (name: string) => stripAccents(name).trim().toLowerCase().replace(/\s+/g, ' ');
 
-// Doc 105: texto que la base no puede guardar (Postgres rechaza el NUL y un
-// surrogate UTF-16 suelto; el backend responde 400 a TODA la carga). SheetJS
-// decodifica el escape de Excel `_x0000_` a U+0000: se quita (es invisible);
-// un surrogate sin pareja pasa a U+FFFD, como `String.prototype.toWellFormed`.
+// Texto que la base no puede guardar (Postgres rechaza el NUL y un surrogate
+// UTF-16 suelto; el backend responde 400 a toda la carga). SheetJS decodifica
+// el escape de Excel `_x0000_` a U+0000: se quita (es invisible); un surrogate
+// sin pareja pasa a U+FFFD, como `String.prototype.toWellFormed`.
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
 const storable = (s: string): string => s.split('\u0000').join('').replace(LONE_SURROGATE, '\uFFFD');
 
@@ -32,31 +32,30 @@ const cellText = (v: unknown): string => (v == null ? '' : storable(typeof v ===
 /** El formato sin los textos entre comillas ni los escapes. */
 const bareFormat = (fmt: string) => fmt.replace(/"[^"]*"/g, '').replace(/\\./g, '');
 
-/** ¿El formato MUESTRA la hora? (sin los corchetes de color/idioma — `[h]` de
+/** ¿El formato muestra la hora? (sin los corchetes de color/idioma — `[h]` de
  *  horas transcurridas sí cuenta). */
 function showsTime(fmt: string): boolean {
   return /[hs]|am\/pm|a\/p/i.test(bareFormat(fmt).replace(/\[(?![hms]+\])[^\]]*\]/gi, ''));
 }
 
-/** Doc 105 (rondas 6–7): ¿es una FECHA? Un formato de fecha para SheetJS con
- *  parte de fecha — año o día, o el mes de un formato que no muestra la hora
- *  («mmmm», de la categoría Fecha de Excel; en «mm:ss» la «m» son minutos),
- *  fuera de corchetes. Una celda de sólo hora, una duración (`[h]:mm`) o
- *  «general» en minúsculas (SheetJS la toma por fecha) viajaban como una fecha
- *  de 1900 inventada («1900-01-00 08:30»). */
+/** ¿Es una fecha? Un formato de fecha para SheetJS con parte de fecha (año o
+ *  día, o el mes de un formato que no muestra la hora: «mmmm», de la categoría
+ *  Fecha de Excel; en «mm:ss» la «m» son minutos), fuera de corchetes. Una
+ *  celda de solo hora, una duración (`[h]:mm`) o «general» en minúsculas
+ *  (SheetJS la toma por fecha) no es fecha: tratada como tal viajaría como una
+ *  fecha de 1900 inventada («1900-01-00 08:30»). */
 function isDateFormat(fmt: string): boolean {
   if (!XLSX.SSF.is_date(fmt)) return false;
   const bare = bareFormat(fmt).replace(/\[[^\]]*\]/g, '');
   return /[yd]/i.test(bare) || (/m/i.test(bare) && !showsTime(fmt));
 }
 
-/** Doc 105 (ronda 5): celda numérica con formato de FECHA → `YYYY-MM-DD` (más
- *  `HH:MM[:SS]` si el formato muestra la hora — ronda 6: con `=NOW()` y un
- *  formato de fecha, Excel muestra sólo la fecha). El texto formateado dependía
- *  del formato local de la celda («1/2/24», «02-ene-24»): un UDP de fecha lo
- *  guardaba así (el panel, que usa YYYY-MM-DD, lo mostraba vacío) y el backend
- *  ahora lo rechaza. Desde el número de serie (con el sistema de fechas del
- *  libro, 1900 o 1904): sin husos horarios de por medio. */
+/** Celda numérica con formato de fecha → `YYYY-MM-DD` (más `HH:MM[:SS]` si el
+ *  formato muestra la hora; con `=NOW()` y un formato de fecha, Excel muestra
+ *  solo la fecha). El texto formateado depende del formato local de la celda
+ *  («1/2/24», «02-ene-24»), que el panel de un UDP de fecha (YYYY-MM-DD) no
+ *  muestra y el backend rechaza. Se calcula desde el número de serie (con el
+ *  sistema de fechas del libro, 1900 o 1904): sin husos horarios de por medio. */
 function isoDate(cell: XLSX.CellObject | undefined, date1904: boolean): string | null {
   if (!cell || cell.t !== 'n' || typeof cell.v !== 'number' || typeof cell.z !== 'string' || !isDateFormat(cell.z)) return null;
   const d = XLSX.SSF.parse_date_code(cell.v, { date1904 });
@@ -68,9 +67,10 @@ function isoDate(cell: XLSX.CellObject | undefined, date1904: boolean): string |
 }
 
 export function readSheet(name: string, ws: XLSX.WorkSheet, { date1904 = false }: { date1904?: boolean } = {}): RawSheet {
-  // `!ref` es el rango USADO (la plantilla real empieza en B4): se fuerza el
-  // origen a A1 para que el índice de fila sea la fila Excel absoluta y las
-  // celdas conserven su columna (la fila de cabecera del perfil es absoluta).
+  // `!ref` es el rango usado (la plantilla real empieza en la columna B, fila
+  // 4): se fuerza el origen a la columna A, fila 1, para que el índice de fila
+  // sea la fila Excel absoluta y las celdas conserven su columna (la fila de
+  // cabecera del perfil es absoluta).
   const end = ws['!ref'] ? XLSX.utils.decode_range(ws['!ref']).e : { r: 0, c: 0 };
   const grid = XLSX.utils.sheet_to_json<unknown[]>(ws, {
     header: 1, raw: false, defval: '', blankrows: true, range: { s: { r: 0, c: 0 }, e: end },
@@ -81,7 +81,7 @@ export function readSheet(name: string, ws: XLSX.WorkSheet, { date1904 = false }
     while (cells.length && !cells[cells.length - 1].trim()) cells.pop();
     if (cells.some((c) => c.trim())) rows.push({ row: i + 1, cells });
   });
-  // Doc 105 (ronda 5): SheetJS decodifica `_x0000_` también en el nombre de la hoja.
+  // SheetJS decodifica `_x0000_` también en el nombre de la hoja.
   return { name: storable(name), rows };
 }
 

@@ -1,11 +1,11 @@
-// Doc 105 (H1, cierre) — el Undo es de la sesión donde nació. En TODO el repo:
+// El Undo es de la sesión donde nació. En todo el repo:
 //  · cada `pushUndo(…)` apila con el pin de su acción (tercer argumento): una
 //    acción que termina después de abrir otra versión no deja su inversa en la
-//    pila de la nueva;
-//  · las inversas de varias escrituras que arman los componentes cortan antes
-//    de cada escritura si la sesión cambió: las de pegar columnas, crear una
-//    relación y crear una subcategoría usan `undoColumnsBatch`; ningún
-//    componente que apila inversas arma deps de vistas SIN pin.
+//    pila de la recién abierta;
+//  · las inversas de varias escrituras que arman los componentes se detienen
+//    antes de cada escritura si la sesión es otra: las de pegar columnas, crear
+//    una relación y crear una subcategoría usan `undoColumnsBatch`; ningún
+//    componente que apila inversas arma deps de vistas sin pin.
 // El comportamiento se prueba en `lib/pinnedWrites.test.ts` y en los tests del
 // store; acá se revisa el fuente (sin DOM: vitest corre en node).
 import { readdirSync, readFileSync } from 'node:fs';
@@ -56,7 +56,7 @@ describe('el extractor de llamadas', () => {
   });
 });
 
-describe('cada pushUndo apila con el pin de su acción (doc 105, H1)', () => {
+describe('cada pushUndo apila con el pin de su acción', () => {
   const sites = files.flatMap((f) => pushUndoCalls(stripComments(readFileSync(f, 'utf-8')))
     .map((call) => ({ where: relative(SRC, f), call })));
   it('hay sitios que revisar (store y componentes)', () => {
@@ -68,7 +68,7 @@ describe('cada pushUndo apila con el pin de su acción (doc 105, H1)', () => {
   });
 });
 
-describe('inversas de varias escrituras en los componentes (doc 105, H1)', () => {
+describe('inversas de varias escrituras en los componentes', () => {
   const comp = (name: string) => stripComments(readFileSync(join(__dirname, name), 'utf-8'));
   it.each(['PasteColumnsPopup.tsx', 'RelationshipCreatePopup.tsx', 'SubcategoryCreatePopup.tsx'])(
     '%s: su inversa es `undoColumnsBatch` (corta con el pin del Undo)', (name) => {

@@ -1,11 +1,11 @@
 /**
- * Lo último GRABADO de cada canvas en esta sesión del navegador (doc 99).
+ * Lo último grabado de cada canvas en esta sesión del navegador.
  *
- * Un diagrama tarda en llegar. Si se pidió ANTES de que terminara un guardado
- * del canvas puede traer la posición o el trazo de antes de ese guardado: al
- * pintarlo, lo recién grabado «se deshacía solo» en pantalla hasta la
+ * Un diagrama tarda en llegar. Si se pidió antes de que terminara un guardado
+ * del canvas puede traer la posición o el trazo previos a ese guardado: al
+ * pintarlo, lo recién grabado «se desharía solo» en pantalla hasta la
  * siguiente recarga. Con este registro, quien recibe el diagrama sabe si hay
- * algo más nuevo que él y lo repone.
+ * algo más reciente que él y lo repone.
  *
  * El reloj es lógico (cuenta escrituras): no mide tiempo. Se anota por working
  * copy: lo grabado en una no se le repone a otra ni a producción.
@@ -14,7 +14,7 @@ import { cleanRoutes, type WireRoutes } from './wireRoute';
 import { cleanColors } from '@/lib/colors';
 
 type Layout = Record<string, { x: number; y: number }>;
-/** Doc 109: también los colores del canvas (excepciones por caja). */
+/** También los colores del canvas (excepciones por caja). */
 export interface WrittenCanvas { layout: Layout; routes: WireRoutes; colors: Record<string, string> }
 
 let clock = 0;
@@ -27,9 +27,8 @@ const copyLayout = (layout: Layout | null | undefined): Layout => {
   return out;
 };
 
-/** Doc 100 (P6): posiciones en píxeles ENTEROS al grabar. React Flow mueve los
- *  bloques con decimales cuando el zoom no es 100 % (72.3315) y se grababan
- *  tal cual. Sin -0. */
+/** Posiciones en píxeles enteros al grabar: React Flow mueve los bloques con
+ *  decimales cuando el zoom no es 100 % (72.3315). Sin -0. */
 export const wholePoint = <P extends { x: number; y: number }>(p: P): P => ({ ...p, x: whole(p.x), y: whole(p.y) });
 const whole = (v: number): number => { const r = Math.round(v); return r === 0 ? 0 : r; };
 
@@ -56,7 +55,7 @@ export function noteCanvasWrite(
                                colors: cleanColors(doc.colors) });
 }
 
-/** Posiciones, trazos y colores grabados DESPUÉS de la marca `asOf`; null si el
+/** Posiciones, trazos y colores grabados después de la marca `asOf`; null si el
  *  diagrama pedido en esa marca ya los trae. */
 export function writtenSince(cs: string | null, saId: string, asOf: number): WrittenCanvas | null {
   if (!cs) return null;

@@ -1,13 +1,13 @@
-// Doc 67: motor de layout del REPORTE PDF estilo Erwin. Páginas A4 en PUNTOS
-// (595×842) emitidas como escenas de la IR del doc 59 (scale=1 en scenePdf).
-// Puro: sin red ni DOM — testeable en node. La referencia analizada es
-// PDF_DDV_REMVAR.pdf (ver plan-implementacion/67-EXPORT-PDF-REPORTE-ERWIN.md).
+// Motor de layout del reporte PDF estilo Erwin. Páginas A4 en puntos (595×842)
+// emitidas como escenas de la IR de exportScene (scale=1 en scenePdf). Puro:
+// sin red ni DOM, testeable en node. El formato toma como referencia un
+// reporte PDF generado por Erwin.
 
 /** Página A4 en puntos y márgenes del reporte (aprox. de la referencia). */
 export const A4 = { w: 595, h: 842, ml: 56, mr: 56, mt: 78, mb: 60 };
 
-/** Anchos por CLASE de carácter (Helvetica aprox): la media plana de 0.55
- *  subestima textos EN MAYÚSCULAS (nombres físicos) y desbordaba celdas. */
+/** Anchos por clase de carácter (Helvetica aprox.): la media plana de 0.55
+ *  subestima textos en mayúsculas (nombres físicos) y desbordaría celdas. */
 const NARROW = /[ijltf.,:;'"|!()[\]]/;
 export function estWidth(s: string, size: number, bold?: boolean): number {
   let u = 0;
@@ -46,7 +46,7 @@ export function wrapText(s: string, maxW: number, size: number, bold?: boolean):
   return out;
 }
 
-// ═══ Reporte completo (doc 67) ═══════════════════════════════════════════
+// ═══ Reporte completo ════════════════════════════════════════════════════
 import type { SceneItem } from './exportScene';
 import type { Diagram } from '../services/modeler.service';
 import type { CanonicalColumn } from '@/services/governance.service';
@@ -56,14 +56,14 @@ import { orderColumns } from './columnOrder';
 export interface ReportCanvasInput { name: string; location: string; diagram: Diagram }
 export interface ModelReportInput { rootName: string; canvases: ReportCanvasInput[]; domainsById: Record<string, string> }
 
-// Colores (aproximación visual de la referencia Erwin — ver doc 67 supuestos).
+// Colores (aproximación visual del reporte de referencia de Erwin).
 const C = { band: '#F2A0F0', bandBorder: '#8A8A8A', head: '#AEE9EF', border: '#9A9A9A', text: '#000000', dim: '#555555' };
 const CONTENT_W = A4.w - A4.ml - A4.mr;      // 483pt
 const LH = 9.5, PAD = 5, ROW_SIZE = 7;       // métrica de filas
 const FULL_H = A4.h - A4.mt - A4.mb;         // alto útil de una página
 
 /** Flujo de páginas: intercala páginas "builder" (A4 en pt, scale 1) con
- *  páginas de diagrama (escena doc 59 pass-through con scale de ajuste). */
+ *  páginas de diagrama (escena de exportScene pass-through con scale de ajuste). */
 interface Flow { pages: ReportPage[]; items: SceneItem[] | null; y: number }
 const newFlow = (): Flow => ({ pages: [], items: null, y: 0 });
 function openPage(f: Flow): void {
@@ -105,7 +105,7 @@ function gridHeader(f: Flow, cols: string[], widths: number[]): void {
 
 /** Fila de grid: celdas envueltas, alto = celda más alta; si no cabe entera
  *  y sí cabría en página nueva, salta; si es más alta que una página, se
- *  PARTE por líneas (continúa con los mismos bordes). Devuelve la página de
+ *  parte por líneas (continúa con los mismos bordes). Devuelve la página de
  *  su primera línea. */
 function gridRow(f: Flow, cells: string[], widths: number[]): number {
   const wrapped = cells.map((c, i) => wrapText(c ?? '', widths[i] - 6, ROW_SIZE));
@@ -137,7 +137,7 @@ function gridRow(f: Flow, cells: string[], widths: number[]): number {
   return firstPage;
 }
 
-/** Página(s) del TOC. `numberFor` devuelve el número YA desplazado (o '' en
+/** Página(s) del TOC. `numberFor` devuelve el número ya desplazado (o '' en
  *  la pasada de conteo — el número no altera el layout: columna reservada). */
 interface TocEntry { title: string; level: number; cIdx: number }
 function buildTocPages(entries: TocEntry[], numberFor: (cIdx: number) => string, targetFor?: (cIdx: number) => number): Flow {
@@ -155,7 +155,7 @@ function buildTocPages(entries: TocEntry[], numberFor: (cIdx: number) => string,
       if (k === 0) {
         const num = numberFor(e.cIdx);
         if (num) text(f, A4.w - A4.mr, f.y + 8, num, 8, { anchor: 'end' });
-        // Hipervínculo (r2): toda la línea de la entrada salta a su página.
+        // Hipervínculo: toda la línea de la entrada salta a su página.
         if (targetFor) f.pages[f.pages.length - 1].links!.push({ x: A4.ml + indent, y: f.y, w: CONTENT_W - indent, h: 10.5, pageIndex: targetFor(e.cIdx) });
       }
       f.y += 10.5;
@@ -169,7 +169,7 @@ function buildTocPages(entries: TocEntry[], numberFor: (cIdx: number) => string,
 export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]; bookmarks: PdfBookmark[] } {
   const { rootName, canvases, domainsById } = input;
 
-  // ── Pasada de CONTENIDO (cIdx 0-based, luego se desplaza) ──
+  // ── Pasada de contenido (cIdx 0-based, luego se desplaza) ──
   const f = newFlow();
   const tocEntries: TocEntry[] = [];
   const indexMap = new Map<string, Set<number>>();       // physName → cIdx set
@@ -182,7 +182,7 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
   for (const cv of canvases) gridRow(f, [cv.name, cv.location], [190, 293]);
 
   for (const cv of canvases) {
-    // r2 (pedido owner): SIN páginas de diagrama — el canvas apunta a su Table(s).
+    // Sin páginas de diagrama: el canvas apunta a su Table(s).
     const tables = [...cv.diagram.tables].sort((a, b) => a.physicalName.localeCompare(b.physicalName));
     const tBand = band(f, `Table(s) of Subject Area "${cv.name}"`);
     tocEntries.push({ title: cv.name, level: 0, cIdx: tBand });
@@ -202,7 +202,7 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
       tocEntries.push({ title: `Column(s) of Table "${t.physicalName}"`, level: 2, cIdx: cBand });
       mark.tables.push({ name: t.physicalName, page: cBand });
       gridHeader(f, ['Physical Name', 'Logical Name', 'Comments', 'Is PK', 'Physical Data Type', 'Domain'], W);
-      const cols = orderColumns(colsByTable.get(t.id) ?? []);   // doc 94: orden único, PK primero
+      const cols = orderColumns(colsByTable.get(t.id) ?? []);   // orden único, PK primero
       for (const c of cols) {
         const pg = gridRow(f, [
           c.physicalName, c.logicalName, c.description ?? '',
@@ -237,8 +237,8 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
       text(g, A4.ml, g.y + 10, letter, 11, { bold: true });
       g.y += 16;
     }
-    // r2: cada número de página es un LINK individual (números en azul, como
-    // la referencia Erwin — sus números cyan son hipervínculos).
+    // Cada número de página es un link individual (números en azul, como en el
+    // reporte de Erwin, donde los números cyan son hipervínculos).
     ensure(g, LH + 1);
     text(g, A4.ml, g.y + 8, name, ROW_SIZE);
     let x = A4.ml + estWidth(name, ROW_SIZE) + 8;
@@ -267,7 +267,7 @@ export function buildModelReport(input: ModelReportInput): { pages: ReportPage[]
 
   const pages: ReportPage[] = [...cover.pages, ...tocFlow.pages, ...contentPages, ...indexPages];
 
-  // ── Header/footer en TODAS las páginas (diagramas: coords ÷ escala) ──
+  // ── Header/footer en todas las páginas (diagramas: coords ÷ escala) ──
   const total = pages.length;
   pages.forEach((p, i) => {
     p.scene.items.push(

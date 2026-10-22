@@ -15,7 +15,7 @@ import ProfileEditor from './ProfileEditor';
 type View = { t: 'list' } | { t: 'edit'; id: string | null; draft: UploadProfileBody };
 
 /**
- * Administrador de perfiles de carga (doc 78 §8): lista (editar, duplicar,
+ * Administrador de perfiles de carga: lista (editar, duplicar,
  * marcar default, borrar, crear el built-in) y editor. Los problemas del
  * servidor (422) y los locales se muestran junto a su fila; guardar pasa
  * por `localProblems` primero (sin viaje) y por el 422 después.

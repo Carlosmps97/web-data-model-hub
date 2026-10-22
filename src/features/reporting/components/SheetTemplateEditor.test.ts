@@ -1,16 +1,16 @@
-// Editor de plantillas (doc 95 D11) sin DOM: se llama al componente como función
-// con hooks de mentira (cada setter anota lo que recibe) y se disparan los
-// handlers REALES del árbol de elementos que devuelve.
+// Editor de plantillas sin DOM: se llama al componente como función con hooks
+// de mentira (cada setter anota lo que recibe) y se disparan los handlers
+// reales del árbol de elementos que devuelve.
 //
-// Doc 105 (P3): los campos hacían `setDraft({ ...draft, X })` con el `draft` del
-// ÚLTIMO render. Tras «New template» / «Duplicate» / elegir otra plantilla, el
-// reinicio del borrador llegaba por un efecto (una actualización posterior): una
-// tecla en esa ventana (CPU lenta) se encolaba DESPUÉS del reinicio como VALOR
-// completo — revivía la plantilla anterior con su id y «Save changes» la pisaba.
-// En la cola de React un valor reemplaza al estado y una función se aplica al
-// último estado encolado: eso es lo que modela `settle`.
-// Doc 105 (B6): «Next export:» se calculaba en el render del editor — los
-// segundos quedaban congelados hasta la siguiente tecla.
+// Los campos actualizan con una función sobre el último borrador encolado, no
+// con `setDraft({ ...draft, X })` sobre el `draft` del último render: tras «New
+// template» / «Duplicate» / elegir otra plantilla, una tecla que se encolara
+// después del reinicio como valor completo revivería la plantilla anterior con
+// su id y «Save changes» la pisaría. En la cola de React un valor sustituye al
+// estado y una función se aplica al último estado encolado: eso es lo que
+// modela `settle`.
+// «Next export:» tiene reloj propio: calculado en el render del editor, los
+// segundos quedarían congelados hasta la siguiente tecla.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SheetTemplate } from '../lib/sheetTemplates';
 import { byText, fake, nextStates, resetFake, runEffects, textOf, unmount, walk } from './fakeReact.testutil';
@@ -58,14 +58,14 @@ function render(shown: Draft, templates: SheetTemplate[] = [ALFA, BETA]) {
   if (!draftState) throw new Error('draft state not found');
   return { tree, draftCalls: draftState.calls };
 }
-/** Estado final de la cola: `pending` (el reinicio que aún no se renderizó) y luego `update`. */
+/** Estado final de la cola: `pending` (el reinicio que no se renderizó aún) y luego `update`. */
 const settle = (pending: Draft, update: unknown): Draft =>
   (typeof update === 'function' ? (update as (d: Draft) => Draft)(pending) : update as Draft);
 
 beforeEach(() => { vi.clearAllMocks(); });
 afterEach(() => { resetFake(); vi.useRealTimers(); });
 
-describe('P3 · el borrador no revive la plantilla anterior', () => {
+describe('el borrador no revive la plantilla anterior', () => {
   it.each([
     ['Template name', { target: { value: 'x' } }, { name: 'x' }],
     ['Sheet name', { target: { value: 'x' } }, { sheetName: 'x' }],
@@ -81,19 +81,19 @@ describe('P3 · el borrador no revive la plantilla anterior', () => {
     expect(final.id).toBeUndefined();   // sin el id de Alfa, «Create template» — no «Save changes» sobre Alfa
   });
 
-  it('«New template» reinicia el borrador en el MISMO evento (sin ventana con Alfa en pantalla)', () => {
+  it('«New template» reinicia el borrador en el mismo evento (sin ventana con Alfa en pantalla)', () => {
     const { tree, draftCalls } = render(draftOf(ALFA));
     (byText(tree, null, 'New template').props.onClick as () => void)();
     expect(draftCalls.map((u) => settle(draftOf(BETA), u))).toEqual([BLANK]);
   });
 
-  it('«Duplicate» abre la copia en el MISMO evento', () => {
+  it('«Duplicate» abre la copia en el mismo evento', () => {
     const { tree, draftCalls } = render(draftOf(ALFA));
     (byText(tree, null, 'Duplicate').props.onClick as () => void)();
     expect(draftCalls.map((u) => settle(BLANK, u))).toEqual([{ ...draftOf(ALFA), id: undefined, name: 'Alfa (copy)', shared: false }]);
   });
 
-  it('elegir otra plantilla de la lista la carga en el MISMO evento; la misma no pisa lo tecleado', () => {
+  it('elegir otra plantilla de la lista la carga en el mismo evento; la misma no pisa lo tecleado', () => {
     const { tree, draftCalls } = render(draftOf(ALFA));
     (byText(tree, 'button', 'Beta').props.onClick as () => void)();
     expect(draftCalls.map((u) => settle(BLANK, u))).toEqual([draftOf(BETA)]);
@@ -104,7 +104,7 @@ describe('P3 · el borrador no revive la plantilla anterior', () => {
   });
 });
 
-describe('B6 · «Next export:» con reloj propio', () => {
+describe('«Next export:» con reloj propio', () => {
   it('el editor delega el nombre en <NextExportName> con el borrador en pantalla', () => {
     const shown = draftOf(ALFA);
     const { tree } = render(shown);
@@ -123,13 +123,13 @@ describe('B6 · «Next export:» con reloj propio', () => {
     expect((fake.states[0].calls as Date[]).map((d) => d.getSeconds())).toEqual([46, 47]);
 
     const next = nextStates();
-    resetFake((_init, i) => next[i], { keepRefs: true });   // re-render del MISMO montaje con la hora nueva
+    resetFake((_init, i) => next[i], { keepRefs: true });   // re-render del mismo montaje con la hora nueva
     expect(textOf(NextExportName({ draft }))).toBe('QA_153047.xlsx');
 
     unmount();
     vi.advanceTimersByTime(5000);
-    // Revisión R6: el intervalo soltado no anota nada — ni en el render vigente
-    // ni como setter de otro montaje (antes una re-montada tragaba esos ticks).
+    // El intervalo soltado no anota nada: ni en el render vigente ni como
+    // setter de otro montaje.
     expect(fake.states[0].calls).toEqual([]);
     expect(fake.stale).toEqual([]);
   });
@@ -143,7 +143,7 @@ describe('filtros de la plantilla', () => {
     return el;
   };
 
-  it('«Add filter» suma un filtro vacío sobre el ÚLTIMO borrador', () => {
+  it('«Add filter» suma un filtro vacío sobre el último borrador', () => {
     const { tree, draftCalls } = render(draftOf(ALFA));
     const button = [...walk(tree)].find((e) => textOf(e) === 'Add filter' && typeof e.props.onClick === 'function');
     (button?.props.onClick as () => void)();
@@ -187,13 +187,13 @@ describe('filtros de la plantilla', () => {
     const shown = { ...draftOf(ALFA), filters: [
       { source: 'column.dataType', op: 'isOneOf', text: 'STRING, VARCHAR,' },
       { source: 'column.isPrimaryKey', op: 'isNotEmpty', text: '' },
-      { source: 'table.schema', op: 'startsWith', text: ' ddv_ ' }] };
+      { source: 'table.schema', op: 'startsWith', text: ' stg_ ' }] };
     const { tree } = render(shown);
     await (byText(tree, null, 'Save changes').props.onClick as () => Promise<void>)();
     expect(vi.mocked(updateSheetTemplate).mock.calls[0][2].filters).toEqual([
       { source: 'column.dataType', op: 'isOneOf', values: ['STRING', 'VARCHAR'] },
       { source: 'column.isPrimaryKey', op: 'isNotEmpty' },
-      { source: 'table.schema', op: 'startsWith', value: 'ddv_' }]);
+      { source: 'table.schema', op: 'startsWith', value: 'stg_' }]);
   });
 
   it('una plantilla guardada con filtros los abre como texto', () => {

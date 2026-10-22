@@ -1,27 +1,25 @@
-// Buscador del Model (doc 70 §11 · doc 72 r2) — reemplaza el input «Find a
-// table…» del toolbar (doc 64 §5). UN popup busca en TODA la versión (no sólo
-// el canvas abierto) por tabla, columna y DEFINICIÓN de columna. Cada hit
-// muestra los canvases donde está y DOS acciones (siempre visibles):
+// Buscador del Model. Un solo popup busca en toda la versión (no solo el
+// canvas abierto) por tabla, columna y definición de columna. Cada hit muestra
+// los canvases donde está y dos acciones (siempre visibles):
 //   · Locate on canvas — redirige al canvas (si hace falta) y centra sobre la
 //     tabla; para columnas, además selecciona la fila y abre su Properties.
-//     El click en la fila / Enter hacen esto.
+//     El clic en la fila / Enter hacen esto.
 //   · Inspect metadata — abre el Object Inspector (solo lectura, sin canvas).
 //
-// Navegación y paginación (doc 72 r2): los filtros SOLOS listan su alcance
-// (sin término); en el alcance «All» cada grupo muestra su primera página y
+// Navegación y paginación: los filtros por sí solos listan su alcance (sin
+// término); en el alcance «All» cada grupo muestra su primera página y
 // «Show all…» pasa al alcance del grupo, donde la lista carga por bloques de
 // 50 al llegar al final del scroll (o con «Load more»).
 //
-// Abierto desde un canvas (doc 72 r3), arranca ACOTADO a ese canvas: los
-// filtros Project › Sub-project › Domain › Model se pre-llenan con su ruta y la
-// lista muestra sus tablas de una; «Search everywhere» amplía a toda la versión.
+// Abierto desde un canvas, arranca acotado a ese canvas: los filtros
+// Project › Sub-project › Domain › Model se pre-llenan con su ruta y la lista
+// muestra sus tablas de una vez; «Search everywhere» amplía a toda la versión.
 //
-// Selectores y filtros (owner): alcance All · Tables / entities · Columns /
-// attributes · Definitions, y filtros en cascada con la MISMA jerarquía del
-// Model Explorer — Project (p.ej. «Modelo DDV») › Sub-project (carpeta raíz,
-// «CPYBCA») › Domain (sub-carpeta, «Despriorizado») › Model (canvas,
-// «Finanzas»). Cada nivel queda BLOQUEADO (plomo + candado) hasta elegir el
-// anterior; el backend alcanza el subárbol completo de la carpeta elegida.
+// Selectores y filtros: alcance All · Tables / entities · Columns /
+// attributes · Definitions, y filtros en cascada con la misma jerarquía del
+// Model Explorer: Project › Sub-project (carpeta raíz) › Domain (sub-carpeta)
+// › Model (canvas). Cada nivel queda bloqueado (plomo + candado) hasta elegir
+// el anterior; el backend alcanza el subárbol completo de la carpeta elegida.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type UIEvent } from 'react';
 import { facetNouns } from '@/lib/facets';
 import { Columns3, Crosshair, Eye, FileText, Lock, MapPin, Search, Table2 } from 'lucide-react';
@@ -38,7 +36,7 @@ import SearchSelect from './SearchSelect';
 import { useSessionStore } from '@/store/useSessionStore';
 
 const MIN_CHARS = 2;
-/** Alcance «All»: primera página de CADA grupo (vista general). */
+/** Alcance «All»: primera página de cada grupo (vista general). */
 const OVERVIEW_LIMIT = 25;
 /** Alcance de un grupo: bloques al hacer scroll. */
 const PAGE = 50;
@@ -92,8 +90,8 @@ export default function SearchModelPopup({ onClose, pushToast }: {
 }) {
   const activeSaId = useModelerStore((s) => s.activeSaId);
   const viewMode = useModelerStore((s) => s.viewMode);
-  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
-  // Canvas abierto al abrir el popup (doc 72 r3): semilla de los filtros.
+  const n = facetNouns(viewMode);   // Entity/Attribute o Table/Column
+  // Canvas abierto al abrir el popup: semilla de los filtros.
   const activeCanvas = useModelerStore((s) => (s.activeSaId ? (s.diagram?.subjectArea ?? null) : null));
   const openCanvasAndFocus = useModelerStore((s) => s.openCanvasAndFocus);
   const openInspector = useModelerStore((s) => s.openInspector);
@@ -106,7 +104,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
   const listRef = useRef<HTMLDivElement>(null);
   const moreRef = useRef(false);   // request de página en vuelo (evita duplicados por scroll)
 
-  // ── Filtros en cascada DENTRO del proyecto de la sesión (doc 75 D8):
+  // ── Filtros en cascada dentro del proyecto de la sesión:
   //    sub-proyecto → dominio → modelo.
   const projectId = useSessionStore((s) => s.activeProjectId) ?? '';
   const projectName = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name ?? null);
@@ -138,7 +136,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
   const pickSubproject = (v: string) => { setSubprojectId(v); setDomainId(''); setCanvasId(''); };
   const pickDomain = (v: string) => { setDomainId(v); setCanvasId(''); };
 
-  // Sub-proyectos = carpetas RAÍZ del proyecto; dominios = sub-carpetas del sub-proyecto elegido.
+  // Sub-proyectos = carpetas raíz del proyecto; dominios = sub-carpetas del sub-proyecto elegido.
   const subprojectOpts = useMemo<Opt[]>(
     () => folders.filter((f) => !f.parentFolderId).sort(byName).map((f) => ({ value: f.id, label: f.name })),
     [folders],
@@ -158,8 +156,8 @@ export default function SearchModelPopup({ onClose, pushToast }: {
   const term = q.trim();
   const folderFilter = domainId || subprojectId || '';
   const anyFilter = !!(subprojectId || domainId || canvasId);
-  // Doc 72 r2: con término (≥2), con un filtro o con un alcance concreto se LISTA
-  // (navegación); sólo «All» sin nada muestra la ayuda.
+  // Con término (≥2), con un filtro o con un alcance concreto se lista
+  // (navegación); solo «All» sin nada muestra la ayuda.
   const ready = term.length >= MIN_CHARS || anyFilter || scope !== 'all';
   const pageSize = scope === 'all' ? OVERVIEW_LIMIT : PAGE;
 
@@ -177,7 +175,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
     return () => { alive = false; clearTimeout(h); };
   }, [term, ready, scope, pageSize, folderFilter, canvasId]);
 
-  // Página siguiente del grupo (alcance de UN grupo): al llegar al final del scroll o con «Load more».
+  // Página siguiente del grupo (alcance de un solo grupo): al llegar al final del scroll o con «Load more».
   const group: Group | null = scope === 'all' ? null : scope;
   const nextOffset = group && res ? res.next[group] : null;
   const loadMore = () => {
@@ -208,7 +206,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
   };
   const locate = (canvases: ModelSearchCanvas[], tableId: string, colId: string | undefined, label: string) =>
     go(pickTargetCanvas(canvases, activeSaId), tableId, colId, label);
-  /** Inspect (doc 72): Object Inspector de la tabla (columna preseleccionada), sin canvas. */
+  /** Inspect: Object Inspector de la tabla (columna preseleccionada), sin canvas. */
   const inspect = (tableId: string, colId?: string) => {
     onClose();
     openInspector({ kind: 'table', id: tableId, colId: colId ?? null });
@@ -224,8 +222,8 @@ export default function SearchModelPopup({ onClose, pushToast }: {
   }, [res]);
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || !first) return;
-    // Doc 105 (R11): cierra el popup en ESTE keydown — sin preventDefault, el
-    // keypress del mismo Enter «clicaba» al botón que lo abrió (se reabría, o Undo).
+    // Cierra el popup en este keydown; sin preventDefault, el keypress del
+    // mismo Enter «clicaría» al botón que lo abrió (lo reabriría, o haría Undo).
     e.preventDefault();
     locate(first.canvases, first.tableId, first.colId, first.label);
   };
@@ -330,7 +328,7 @@ export default function SearchModelPopup({ onClose, pushToast }: {
       onClose={onClose}
       footer={<button className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Close</button>}
     >
-      {/* Alcance: qué se busca (owner: tablas/entidades, columnas/atributos, definiciones). */}
+      {/* Alcance: qué se busca (tablas/entidades, columnas/atributos, definiciones). */}
       <div className="rd-seg wk-srch-scope" role="tablist" aria-label="Search scope">
         {SCOPES.map((s) => (
           <button key={s.id} type="button" role="tab" aria-selected={scope === s.id} className={scope === s.id ? 'active' : ''} onClick={() => setScope(s.id)}>

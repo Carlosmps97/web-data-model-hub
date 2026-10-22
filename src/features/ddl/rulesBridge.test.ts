@@ -16,11 +16,11 @@ const rule = (id: string, over: Partial<ExportRule> = {}): ExportRule => ({
   appliesTo: ['ddl.tabla_fisica'], action: { layout: { partitionColumns: 'last' } }, ...over,
 });
 
-describe('layoutFromRules (doc 73 / doc 76 / doc 93)', () => {
+describe('layoutFromRules', () => {
   it('regla de layout seleccionada sobre la física ⇒ partitionsLast', () => {
     expect(layoutFromRules([rule('l1')], ['l1'])).toEqual({ partitionsLast: true, partitionUdp: null });
   });
-  it('partitionUdp (o su alias legado partitionOrderUdp) ⇒ UDP que define las particiones', () => {
+  it('partitionUdp (o su alias partitionOrderUdp) ⇒ UDP que define las particiones', () => {
     expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'last', partitionUdp: 'Particion' } } })], ['l1']))
       .toEqual({ partitionsLast: true, partitionUdp: 'Particion' });
     expect(layoutFromRules([rule('l1', { action: { layout: { partitionOrderUdp: ' Particion ' } } })], ['l1']))
@@ -36,14 +36,14 @@ describe('layoutFromRules (doc 73 / doc 76 / doc 93)', () => {
   });
 });
 
-describe('partitionCorrelative / withUdpPartitions (doc 93 D10)', () => {
+describe('partitionCorrelative / withUdpPartitions', () => {
   it('PART_01 → 1; valores fuera de la convención → null', () => {
     expect(partitionCorrelative('PART_01')).toBe(1);
     expect(partitionCorrelative('part-12')).toBe(12);
     expect(partitionCorrelative('No Definido')).toBeNull();
     expect(partitionCorrelative(undefined)).toBeNull();
   });
-  it('el UDP DEFINE las particiones: PART_nn ⇒ partición ordenada; el flag de la plataforma se ignora', () => {
+  it('el UDP define las particiones: PART_nn ⇒ partición ordenada; el flag de la plataforma se ignora', () => {
     const defs = [
       { id: 'u-log', name: 'Particion', level: 'column', view: 'logical' },     // homónimo lógico: no cuenta
       { id: 'u-part', name: 'Particion', level: 'column', view: 'physical' },
@@ -56,7 +56,7 @@ describe('partitionCorrelative / withUdpPartitions (doc 93 D10)', () => {
     const out = withUdpPartitions(cols, defs, 'Particion');
     expect(out.map((c) => [c.id, c.isPartition, c.partitionOrder])).toEqual([['a', true, 2], ['b', true, 1], ['c', false, null]]);
     expect(withUdpPartitions(cols, defs, null)).toBe(cols);
-    expect(withUdpPartitions(cols, [], 'Particion')).toBe(cols);    // UDP inexistente ⇒ flag (Review Focus #3)
+    expect(withUdpPartitions(cols, [], 'Particion')).toBe(cols);    // UDP inexistente ⇒ flag
   });
 });
 
@@ -69,7 +69,7 @@ describe('isAddendum', () => {
 });
 
 // Generadores tal como los siembra el kit (templates.py): el `emit` lleva el
-// artefacto, el tipo y el nombre CON PLACEHOLDERS del motor.
+// artefacto, el tipo y el nombre con placeholders del motor.
 const gen = (id: string, emit: Record<string, unknown>, over: Partial<ExportRule> = {}): ExportRule => ({
   id, name: id, kind: 'generator', priority: 200, enabled: true, validationState: 'valid',
   appliesTo: [], action: { emit }, ...over,
@@ -95,14 +95,14 @@ describe('emitTarget — qué objeto crea cada generador', () => {
   });
 });
 
-describe('missingSource — cascada de generadores (spec §7.3)', () => {
+describe('missingSource — cascada de generadores', () => {
   const rej = gen('tabla_rechazos', { artifact: 'ddl.tabla_rej', type: 'table', name: '{tabla.nombre}_rej' },
     { sourceArtifact: 'ddl.tabla_fisica' });
   const vistaRej = gen('vista_rechazos', { artifact: 'ddl.vista_rej', type: 'view', name: '{tabla.nombre}_rej' },
     { sourceArtifact: 'ddl.tabla_rej' });
   const all = [rej, vistaRej];
 
-  it('el generador que come de otro NO seleccionado no emite nada: avisa de quién depende', () => {
+  it('el generador que come de otro no seleccionado no emite nada: avisa de quién depende', () => {
     expect(missingSource(vistaRej, all, new Set(['vista_rechazos']))).toBe('tabla_rechazos');
   });
   it('con su fuente seleccionada, o si la fuente es un artefacto raíz, no falta nada', () => {
@@ -112,7 +112,7 @@ describe('missingSource — cascada de generadores (spec §7.3)', () => {
   });
 });
 
-describe('renderWithRules — payload y ensamblado (doc 93)', () => {
+describe('renderWithRules — payload y ensamblado', () => {
   it('manda las opciones de estilo y el ddlType; el .sql pega los ALTER a su objeto', async () => {
     vi.mocked(apiPost).mockResolvedValue({
       statements: [

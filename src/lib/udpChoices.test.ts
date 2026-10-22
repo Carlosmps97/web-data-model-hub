@@ -1,4 +1,4 @@
-// Opciones de un UDP que se elige (doc 105, ronda 5).
+// Opciones de un UDP que se elige.
 import { describe, expect, it } from 'vitest';
 import { udpChoices } from './udpChoices';
 

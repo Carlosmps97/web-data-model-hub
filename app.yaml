@@ -1,27 +1,27 @@
 # App spec de Databricks Apps — frontend (SPA Vite/React · server.mjs).
 #
-# NO BORRAR este archivo: Databricks lo lee en CADA arranque de la app (deploy,
-# stop/start desde la UI o reinicio del runtime) y es la única fuente del
-# `command` y las `env`. El bloque `config:` de databricks.yml no lo reemplaza:
-# el CLI lo ignora en silencio (bug databricks/cli #4901).
+# Este archivo no se borra: Databricks lo lee en cada arranque de la app
+# (despliegue, stop/start desde la UI o reinicio del runtime) y es la única
+# fuente del `command` y las `env`. El bloque `config:` de databricks.yml no lo
+# sustituye: el CLI lo ignora en silencio (issue databricks/cli #4901).
 #
-# Los `value` van vacíos a propósito: el workflow de deploy los llena con la
-# GitHub Variable HOMÓNIMA del environment elegido antes de subir el código
-# (si falta alguna, el deploy se corta). Los `valueFrom` referencian recursos
+# Los `value` van vacíos a propósito: el workflow de despliegue los llena con la
+# GitHub Variable homónima del environment elegido antes de subir el código
+# (si falta alguna, el despliegue se corta). Los `valueFrom` referencian recursos
 # `secret` de databricks.yml y los resuelve la propia app al arrancar.
 #
 # Antes de este `command`, Databricks instala las dependencias (`npm install`)
 # y corre el script `build` de package.json (tsc + vite build → dist/) en cada
-# deploy o arranque. `npm run start` solo levanta `node server.mjs`, que sirve
-# dist/ y proxya /api al backend servidor-a-servidor con el token M2M del
+# despliegue o arranque. `npm run start` solo levanta `node server.mjs`, que sirve
+# dist/ y reenvía /api al backend servidor-a-servidor con el token M2M del
 # service principal del front: el navegador habla con un solo origen (sin CORS
 # y sin doble SSO).
-# No definir NODE_ENV=production (el build necesita devDependencies) ni
+# No se define NODE_ENV=production (el build necesita devDependencies) ni
 # VITE_API_URL (reactivaría el cruce directo navegador→backend).
 command: ["npm", "run", "start"]
 
 env:
-  # URL de la app backend a la que server.mjs proxya /api — ej.
+  # URL de la app backend a la que server.mjs reenvía /api — ej.
   # https://bknd-data-model-hub-<workspace-id>.<n>.azure.databricksapps.com
   - name: BACKEND_API_URL
     value: ""

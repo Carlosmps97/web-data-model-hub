@@ -5,14 +5,13 @@ import { TYPE_OPTIONS, argSpecFor, composeParamType, editTypeArg, isTypeArg, par
 const COMPLEX = ['ARRAY', 'MAP', 'STRUCT'];
 
 /**
- * Selector de tipo de dato (doc 41): catálogo cerrado con buscador
- * "contiene" en vez de texto libre (pedido de los modeladores: tipear el
- * tipo a mano era fuente de errores). Los tipos parametrizados —
- * DECIMAL(p,s), VARCHAR(n), … — se completan con argumentos puntuales, y
- * STRUCT/ARRAY/MAP viven EN la lista (elegirlos emite `X<>` y el caller abre
- * su ComplexTypeBuilder, como siempre). Un valor fuera de catálogo (legacy)
- * se muestra tal cual como opción extra — patrón SchemaSelect: no rompe la
- * edición de columnas viejas.
+ * Selector de tipo de dato: catálogo cerrado con buscador "contiene" en vez
+ * de texto libre (escribir el tipo a mano es fuente de errores). Los tipos
+ * parametrizados (DECIMAL(p,s), VARCHAR(n), …) se completan con argumentos
+ * puntuales, y STRUCT/ARRAY/MAP viven en la lista (elegirlos emite `X<>` y el
+ * caller abre su ComplexTypeBuilder). Un valor fuera de catálogo se muestra
+ * tal cual como opción extra (patrón SchemaSelect): no rompe la edición de
+ * columnas con tipos que no están en el catálogo.
  */
 export default function TypePicker({ value, onChange, disabled, placeholder, emptyLabel }: {
   value: string;
@@ -26,12 +25,12 @@ export default function TypePicker({ value, onChange, disabled, placeholder, emp
   const parsed = parseParamType(trimmed);
   const isComplexValue = trimmed.includes('<');
   const spec = parsed ? argSpecFor(parsed.base) : null;
-  // Borrador LOCAL de los argumentos, ATADO a su base: al valor solo viaja el
-  // PREFIJO válido (un scale sin precision emite 'DECIMAL' a secas), pero el
-  // input conserva lo tipeado. Se resincroniza cuando el valor cambia por FUERA
-  // (otra base, heredar el default del dominio, reload) — detectado porque la
-  // base cambió o porque el valor entrante ya no es lo que este borrador compone.
-  // Doc 106 (revisión 2): con la base en el borrador, un argumento de un tipo
+  // Borrador local de los argumentos, atado a su base: al valor solo viaja el
+  // prefijo válido (un scale sin precision emite 'DECIMAL' a secas), pero el
+  // input conserva lo escrito. Se resincroniza cuando el valor cambia por fuera
+  // (otra base, heredar el default del dominio, reload), lo que se detecta
+  // porque la base es otra o porque el valor entrante difiere de lo que este
+  // borrador compone. Con la base en el borrador, un argumento de un tipo
   // anterior nunca reaparece en las cajas de otro.
   const [draft, setDraft] = useState<{ base: string; args: string[] }>(
     { base: parsed?.base ?? '', args: parsed?.args ?? [] });
@@ -47,8 +46,8 @@ export default function TypePicker({ value, onChange, disabled, placeholder, emp
     label: t,
     detail: COMPLEX.includes(t) ? '<…>' : (argSpecFor(t) ? `(${argSpecFor(t)!.join(', ')})` : undefined),
   }));
-  // Valor legacy fuera de catálogo (y no complejo): opción extra al tope para
-  // poder verlo/re-elegirlo — nunca se pierde al abrir la lista.
+  // Valor fuera de catálogo (y no complejo): opción extra al tope para poder
+  // verlo/re-elegirlo; nunca se pierde al abrir la lista.
   if (trimmed && !parsed && !isComplexValue) {
     options.unshift({ value: trimmed, label: trimmed, detail: '(current)' });
   }
@@ -57,8 +56,8 @@ export default function TypePicker({ value, onChange, disabled, placeholder, emp
     if (!v) { onChange(''); return; }
     if (COMPLEX.includes(v)) { onChange(`${v}<>`); return; }   // abre el builder del caller
     const s = argSpecFor(v);
-    // Re-elegir la MISMA base conserva los argumentos ya puestos; otra base
-    // arranca con las cajas vacías (doc 106: nada oculto de la anterior).
+    // Re-elegir la misma base conserva los argumentos ya puestos; otra base
+    // arranca con las cajas vacías (nada oculto de la anterior).
     const keep = parsed?.base === v ? parsed.args : [];
     setDraft({ base: v, args: keep });
     onChange(s ? composeParamType(v, keep) : v);
@@ -67,8 +66,8 @@ export default function TypePicker({ value, onChange, disabled, placeholder, emp
     if (!parsed || !spec) return;
     const next = editTypeArg(spec, argsDraft, i, raw);
     setDraft({ base: parsed.base, args: next });
-    // Doc 106: mientras una caja tenga algo que no es un argumento (`18,2`, `--`),
-    // el tipo queda como estaba — nada se aplica a medias ni se pierde.
+    // Mientras una caja tenga algo que no es un argumento (`18,2`, `--`), el
+    // tipo queda como estaba: nada se aplica a medias ni se pierde.
     if (next.some((a) => a.trim() !== '' && !isTypeArg(a))) return;
     onChange(composeParamType(parsed.base, next));
   };
@@ -87,7 +86,7 @@ export default function TypePicker({ value, onChange, disabled, placeholder, emp
       {spec && !isComplexValue && (
         <div className="wk-ss-args">
           {spec.map((label, i) => {
-            // Texto, no número (doc 106): `MAX`, `30 CHAR`, `*`, `-2`. Lo que no
+            // Texto, no número: `MAX`, `30 CHAR`, `*`, `-2`. Lo que no
             // es un argumento (`18,2`, `--`) se ve marcado y no viaja al tipo.
             const bad = (argsDraft[i] ?? '').trim() !== '' && !isTypeArg(argsDraft[i]);
             // width inline: dentro del panel, `.wk-pp-typewrap .rd-input`

@@ -3,13 +3,13 @@ import React from 'react';
 export type BadgeTone = 'blue' | 'green' | 'amber' | 'red' | 'purple' | 'neutral';
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
-  /** Color tone (soft tint bg + colored text). */
+  /** Tono de color (fondo con tinte suave + texto de color). */
   tone?: BadgeTone;
 }
 
 /**
- * Badge — small squared-radius label (counts, kinds like PK/FK/partition).
- * Smaller + less round than Pill.
+ * Badge: etiqueta pequeña de esquinas poco redondeadas (conteos, tipos como
+ * PK/FK/partición). Más pequeña y menos redonda que Pill.
  */
 export default function Badge({ tone = 'neutral', className, children, ...rest }: BadgeProps) {
   const cls = ['dmh-badge', `dmh-badge--${tone}`, className].filter(Boolean).join(' ');

@@ -1,9 +1,7 @@
-// Lógica pura del selector de tipos (doc 41): búsqueda "contiene" sin
-// distinción de mayúsculas (pedido 2026-08-30 — reemplaza al "empieza por"
-// original), catálogo alfabético en MAYÚSCULAS (convención del DDV) y tipos
-// parametrizados — DECIMAL(p,s), VARCHAR(n), … — editados por argumentos
-// puntuales en vez de texto libre (pedido de los modeladores: el texto libre
-// era fuente de errores).
+// Lógica pura del selector de tipos: búsqueda "contiene" sin distinción de
+// mayúsculas, catálogo alfabético en mayúsculas (convención de los modelos) y
+// tipos parametrizados — DECIMAL(p,s), VARCHAR(n), … — editados por argumentos
+// puntuales en vez de texto libre (el texto libre es fuente de errores).
 import { describe, it, expect } from 'vitest';
 import { TYPE_OPTIONS, argSpecFor, canonicalDefaultType, composeParamType, isTypeArg, parseParamType, containsCI } from './typePick';
 
@@ -16,7 +14,7 @@ describe('containsCI (búsqueda contiene, case-insensitive)', () => {
     expect(containsCI('Fecha Contable', 'conta')).toBe(true);
   });
 
-  it('NO matchea lo que no aparece en el texto', () => {
+  it('no matchea lo que no aparece en el texto', () => {
     expect(containsCI('TIMESTAMPTZ', 'fecha')).toBe(false);
     expect(containsCI('Monto Deuda', 'usd')).toBe(false);
   });
@@ -29,12 +27,12 @@ describe('containsCI (búsqueda contiene, case-insensitive)', () => {
 });
 
 describe('TYPE_OPTIONS (catálogo del combobox)', () => {
-  it('está en MAYÚSCULAS y orden alfabético', () => {
+  it('está en mayúsculas y orden alfabético', () => {
     expect(TYPE_OPTIONS.every((t) => t === t.toUpperCase())).toBe(true);
     expect([...TYPE_OPTIONS].sort()).toEqual(TYPE_OPTIONS);
   });
 
-  it('incluye los complejos (ya no van como botones aparte)', () => {
+  it('incluye los complejos (no van como botones aparte)', () => {
     for (const t of ['STRUCT', 'ARRAY', 'MAP']) expect(TYPE_OPTIONS).toContain(t);
   });
 
@@ -103,7 +101,7 @@ describe('composeParamType', () => {
   });
 });
 
-describe('doc 62 — VARIANT + tipos Oracle de la data real', () => {
+describe('VARIANT + tipos Oracle de la data real', () => {
   it('el catálogo incluye VARIANT (JSON libre), NUMBER y VARCHAR2', () => {
     for (const t of ['VARIANT', 'NUMBER', 'VARCHAR2']) expect(TYPE_OPTIONS).toContain(t);
   });
@@ -125,7 +123,7 @@ describe('doc 62 — VARIANT + tipos Oracle de la data real', () => {
   });
 });
 
-describe('doc 106 — catálogo de Databricks SQL / Hive, Oracle y SQL Server', () => {
+describe('catálogo de Databricks SQL / Hive, Oracle y SQL Server', () => {
   it('el combobox ofrece los tipos de los cuatro motores, sin repetidos', () => {
     const nuevos = [
       'INT', 'TIMESTAMP_NTZ', 'DOUBLE PRECISION', 'GEOGRAPHY', 'GEOMETRY',
@@ -139,7 +137,7 @@ describe('doc 106 — catálogo de Databricks SQL / Hive, Oracle y SQL Server', 
     expect(new Set(TYPE_OPTIONS).size).toBe(TYPE_OPTIONS.length);
   });
 
-  it('argumentos de los tipos nuevos (todos opcionales)', () => {
+  it('argumentos de los tipos de Oracle, SQL Server y Databricks (todos opcionales)', () => {
     for (const t of ['NVARCHAR2', 'NCHAR', 'RAW', 'UROWID', 'BINARY']) expect(argSpecFor(t)).toEqual(['length']);
     for (const t of ['FLOAT', 'TIMESTAMP', 'TIME', 'DATETIME2', 'DATETIMEOFFSET']) expect(argSpecFor(t)).toEqual(['precision']);
     expect(argSpecFor('VECTOR')).toEqual(['dimensions', 'format']);
@@ -147,7 +145,7 @@ describe('doc 106 — catálogo de Databricks SQL / Hive, Oracle y SQL Server', 
     expect(argSpecFor('TIMESTAMP WITH TIME ZONE')).toBeNull();   // varias palabras: sin argumentos
   });
 
-  it('parsea los tipos de varias palabras como UNA base del catálogo', () => {
+  it('parsea los tipos de varias palabras como una base del catálogo', () => {
     expect(parseParamType('timestamp  with time zone')).toEqual({ base: 'TIMESTAMP WITH TIME ZONE', args: [] });
     expect(parseParamType('Long Raw')).toEqual({ base: 'LONG RAW', args: [] });
     expect(parseParamType('TIMESTAMP WITH')).toBeNull();
@@ -165,7 +163,7 @@ describe('doc 106 — catálogo de Databricks SQL / Hive, Oracle y SQL Server', 
     for (const bad of ['', '-', '--', '18,2', '10.5', '30 CHAR BYTE', '1)', '30 *', "'x'", '1;2', '18 2', '1 0', 'ſ', 'ß']) expect(isTypeArg(bad)).toBe(false);
   });
 
-  it('composeParamType: solo viaja el prefijo de argumentos válidos (revisión)', () => {
+  it('composeParamType: solo viaja el prefijo de argumentos válidos', () => {
     expect(composeParamType('DECIMAL', ['--'])).toBe('DECIMAL');
     expect(composeParamType('DECIMAL', ['18,2'])).toBe('DECIMAL');
     expect(composeParamType('NUMBER', ['10', '-'])).toBe('NUMBER(10)');
@@ -180,7 +178,7 @@ describe('doc 106 — catálogo de Databricks SQL / Hive, Oracle y SQL Server', 
     expect(canonicalDefaultType('int(11)')).toBe('int(11)');                 // como el back: verbatim
   });
 
-  it('INT y DOUBLE PRECISION quedan tal cual; VARCHAR(MAX) se homologa a MAYÚSCULA', () => {
+  it('INT y DOUBLE PRECISION quedan tal cual; VARCHAR(MAX) se homologa a mayúscula', () => {
     expect(canonicalDefaultType('int')).toBe('INT');
     expect(canonicalDefaultType('double precision')).toBe('DOUBLE PRECISION');
     expect(canonicalDefaultType('varchar(max)')).toBe('VARCHAR(MAX)');

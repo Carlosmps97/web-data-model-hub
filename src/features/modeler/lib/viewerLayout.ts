@@ -1,16 +1,16 @@
 /**
- * Doc 84 E — layout EFÍMERO del visor. En modo solo-lectura (producción, una
- * versión publicada, un request ajeno) el modelador puede mover bloques y
- * auto-arreglar para leer mejor el diagrama, pero esos movimientos viven SOLO
+ * Layout efímero del visor. En modo solo-lectura (producción, una versión
+ * publicada, un request ajeno) el modelador puede mover bloques y
+ * auto-arreglar para leer mejor el diagrama, pero esos movimientos viven solo
  * en su sesión (store en memoria, por canvas): nunca se persisten. Persistir
- * un layout sigue siendo cosa de una edición (draft) que se publica.
+ * un layout es cosa de una edición (draft) que se publica.
  */
 export interface NodePos { x: number; y: number }
 export type Layout = Record<string, NodePos>;
 
 /** Dónde pinta el canvas la tabla nº `i` del diagrama si no tiene posición
- *  guardada (tablas que entraron sin layout). La colocación de lo nuevo de la
- *  carga (doc 113) la cuenta igual. */
+ *  guardada (tablas que entraron sin layout). La colocación de lo que agrega
+ *  una carga la cuenta igual. */
 export function gridSlot(i: number): NodePos {
   return { x: 60 + (i % 4) * 260, y: 60 + Math.floor(i / 4) * 220 };
 }
@@ -25,10 +25,10 @@ export function effectiveLayout(persisted: Layout | null | undefined, viewer: La
 /** Nodos cuya posición vive en `layout` (los dibujos van en `drawings`). */
 const LAYOUT_NODE_TYPES = new Set(['table', 'view', 'subcat']);
 
-/** Doc 105 (A4-o1): lo que dejó un arrastre. `onNodeDragStop` trae TODOS los
- *  nodos movidos (varios con selección múltiple): las posiciones de tablas,
- *  vistas y símbolos van al `layout` (tal cual: quien graba las redondea) y
- *  las de los dibujos, enteras, a `drawings`. */
+/** Lo que dejó un arrastre. `onNodeDragStop` trae todos los nodos movidos
+ *  (varios con selección múltiple): las posiciones de tablas, vistas y
+ *  símbolos van al `layout` (tal cual: quien graba las redondea) y las de los
+ *  dibujos, enteras, a `drawings`. */
 export function draggedPositions(
   nodes: readonly { id: string; type?: string; position: NodePos }[],
 ): { layout: Layout; shapes: (NodePos & { id: string })[] } {
@@ -41,10 +41,10 @@ export function draggedPositions(
   return { layout, shapes };
 }
 
-/** Doc 99 — layout EN PANTALLA: el cargado con las posiciones vivas de los
- *  nodos encima (enteras, como las guarda el canvas). Lo usa el export en
- *  edición: el diagrama del store conserva el layout de su última carga, y un
- *  trazo manual de wire está referido a donde los bloques están AHORA. */
+/** Layout en pantalla: el cargado con las posiciones vivas de los nodos encima
+ *  (enteras, como las guarda el canvas). Lo usa el export en edición: el
+ *  diagrama del store conserva el layout de su última carga, y un trazo manual
+ *  de wire está referido a donde los bloques están en este momento. */
 export function liveLayout(
   persisted: Layout | null | undefined,
   nodes: readonly { id: string; type?: string; position: NodePos }[],

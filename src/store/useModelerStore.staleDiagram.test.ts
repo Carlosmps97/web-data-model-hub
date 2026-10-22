@@ -1,11 +1,10 @@
-// Doc 105 (ronda 4, R10-D) — `applyCanvasDrop` hacía su `set` optimista (la
-// llave nueva en el diagrama local) DESPUÉS de escribir, sin mirar el pin: si
-// mientras escribía se abría otra versión y el refresco ya había reabierto el
-// canvas con ella, reinstalaba en pantalla el diagrama de la anterior (sellado
-// con su sesión). Desde ahí las ediciones no hacían nada SIN AVISAR y Save
-// resolvía como éxito («Saved»). Ahora el set tardío se corta, y — como
-// defensa — con un diagrama de otra sesión en pantalla las ediciones avisan
-// y Save falla con el motivo.
+// `applyCanvasDrop` hace su `set` optimista (la llave nueva en el diagrama
+// local) después de escribir; si mientras escribe se abre otra versión y el
+// refresco ya reabrió el canvas con ella, ese set tardío se corta: de lo
+// contrario reinstalaría en pantalla el diagrama de la anterior (sellado con su
+// sesión), las ediciones no harían nada sin avisar y Save resolvería como éxito
+// («Saved»). Como defensa, con un diagrama de otra sesión en pantalla las
+// ediciones avisan y Save falla con el motivo.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -84,21 +83,21 @@ async function dropThenSwitch(plan: object) {
   await drop.catch(() => {});
 }
 
-describe('el set optimista tardío de applyCanvasDrop no reinstala otra sesión (doc 105, ronda 4)', () => {
+describe('el set optimista tardío de applyCanvasDrop no reinstala otra sesión', () => {
   it('llave + orden: en pantalla queda la versión B', async () => {
     await dropThenSwitch({ key: [{ id: 'c2', isPrimaryKey: true }], order: ['c2', 'c1'] });
     expect(st().diagram?.tables[0].physicalName).toBe('VERSION_B');
   });
 
-  it('sólo llave: tampoco (ni recarga en la sesión nueva)', async () => {
+  it('solo llave: tampoco (ni recarga en la sesión nueva)', async () => {
     const loads = vi.mocked(mod.loadDiagram).mock.calls.length;
     await dropThenSwitch({ key: [{ id: 'c2', isPrimaryKey: true }] });
     expect(st().diagram?.tables[0].physicalName).toBe('VERSION_B');
-    expect(vi.mocked(mod.loadDiagram).mock.calls.length).toBe(loads + 1);   // sólo la reapertura del refresco
+    expect(vi.mocked(mod.loadDiagram).mock.calls.length).toBe(loads + 1);   // solo la reapertura del refresco
   });
 });
 
-describe('defensa: con un diagrama de OTRA sesión en pantalla se avisa, no se calla (doc 105, ronda 4)', () => {
+describe('defensa: con un diagrama de otra sesión en pantalla se avisa, no se calla', () => {
   /** El diagrama de cs1 reinstalado por error estando en cs2. */
   function staleOnScreen() {
     const stale = st().diagram;
@@ -140,7 +139,7 @@ describe('defensa: con un diagrama de OTRA sesión en pantalla se avisa, no se c
     expect(writes()).toBe(0);
   });
 
-  it('sin diagrama en pantalla (recién limpiado), nada que editar: se calla como siempre', async () => {
+  it('sin diagrama en pantalla (recién limpiado), nada que editar: se calla', async () => {
     openCs2();
     await expect(st().updateColumn('c1', { description: 'x' })).resolves.toBeUndefined();
     await expect(st().saveAll()).resolves.toBeUndefined();

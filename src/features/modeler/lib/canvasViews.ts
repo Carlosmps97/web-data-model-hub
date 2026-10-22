@@ -1,11 +1,11 @@
-// Membresía de vistas en el canvas (doc 70 §2) — helpers PUROS, sin React ni
-// red, para el store y el tab Views del panel de tabla.
+// Membresía de vistas en el canvas: helpers puros, sin React ni red, para el
+// store y la pestaña Views del panel de tabla.
 //
-// Desde el doc 70 una vista se dibuja en un canvas sólo si es MIEMBRO
-// (`SubjectArea.viewIds`), igual que las tablas con `tableIds`; el backend
-// devuelve `diagram.subjectArea.viewIds` ya materializado (un canvas legacy
-// recibe la lista de lo que hoy se ve), así que todas las mutaciones parten de
-// una lista explícita.
+// Una vista se dibuja en un canvas solo si es miembro (`SubjectArea.viewIds`),
+// igual que las tablas con `tableIds`; el backend devuelve
+// `diagram.subjectArea.viewIds` ya materializado (un canvas que no tiene la
+// lista guardada recibe la de lo que se ve), así que todas las mutaciones
+// parten de una lista explícita.
 import type { View } from '@/services/views.service';
 import { viewSourceIds } from './viewGraph';
 
@@ -14,8 +14,8 @@ export function viewsOfTable<T extends View>(views: T[], tableId: string): T[] {
   return views.filter((v) => viewSourceIds(v).includes(tableId));
 }
 
-/** Parte una lista de vistas de la tabla en las que están en ESTE canvas
- *  (`onCanvas` = ids de `diagram.views`) y las que viven sólo en otros
+/** Parte una lista de vistas de la tabla en las que están en este canvas
+ *  (`onCanvas` = ids de `diagram.views`) y las que viven solo en otros
  *  canvases (o en ninguno). Conserva el orden de `all`. */
 export function splitByCanvas<T extends { id: string }>(
   all: T[], onCanvas: Set<string>,
@@ -26,8 +26,8 @@ export function splitByCanvas<T extends { id: string }>(
   return { here, elsewhere };
 }
 
-/** Vistas del canvas que quedarían SIN ninguna fuente presente si el canvas
- *  conserva sólo `remainingTableIds` — se podan de la membresía al quitar una
+/** Vistas del canvas que quedarían sin ninguna fuente presente si el canvas
+ *  conserva solo `remainingTableIds`; se podan de la membresía al quitar una
  *  tabla (una vista sin fuente en el canvas no se dibuja ni tiene sentido). */
 export function orphanViewIds(views: View[], remainingTableIds: string[]): string[] {
   const remaining = new Set(remainingTableIds);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { draggedPositions, effectiveLayout, liveLayout } from './viewerLayout';
 
-describe('effectiveLayout (doc 84 E)', () => {
+describe('effectiveLayout', () => {
   it('sin overrides devuelve el layout publicado tal cual', () => {
     const persisted = { t1: { x: 1, y: 2 } };
     expect(effectiveLayout(persisted, undefined)).toBe(persisted);
@@ -17,11 +17,11 @@ describe('effectiveLayout (doc 84 E)', () => {
   });
 });
 
-// Doc 99: el export en EDICIÓN dibuja lo que está en pantalla. El diagrama del
-// store guarda el layout de la última carga: mover una tabla graba su posición
-// en el draft pero no refresca ese layout, y un trazo manual recién hecho sí
-// está vivo — sin las posiciones vivas el export uniría el trazo nuevo con la
-// tabla en su sitio viejo.
+// El export en edición dibuja lo que está en pantalla. El diagrama del store
+// guarda el layout de la última carga: mover una tabla graba su posición en el
+// draft pero no refresca ese layout, y un trazo manual recién hecho sí está
+// vivo — sin las posiciones vivas el export uniría el trazo recién hecho con
+// la tabla en su posición anterior.
 describe('liveLayout', () => {
   const nodes = [
     { id: 't1', type: 'table', position: { x: 10.4, y: 20.6 } },
@@ -49,8 +49,8 @@ describe('liveLayout', () => {
   });
 });
 
-// Doc 105 (A4-o1): `onNodeDragStop` trae TODOS los nodos movidos (varios con
-// selección múltiple); antes se guardaba sólo el que se tomó con el mouse.
+// `onNodeDragStop` trae todos los nodos movidos (varios con selección
+// múltiple), no solo el que se tomó con el mouse.
 describe('draggedPositions', () => {
   it('reparte los nodos movidos: tablas, vistas y símbolos al layout; los dibujos aparte, enteros', () => {
     const out = draggedPositions([

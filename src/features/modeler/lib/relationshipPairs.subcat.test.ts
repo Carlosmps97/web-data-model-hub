@@ -7,9 +7,9 @@ const col = (id: string, tableId: string, name: string, over: Partial<CanonicalC
   dataType: 'STRING', ordinal: 0, ...over,
 } as CanonicalColumn);
 
-/** Doc 53: el lote de una SUBCATEGORÍA lleva la relación con `subcategory` y
+/** El lote de una subcategoría lleva la relación con `subcategory` y
  *  su símbolo, y migra la llave como identifying (PK del hijo). */
-describe('mappingToBulk — variante subcategoría (doc 53)', () => {
+describe('mappingToBulk — variante subcategoría', () => {
   const parentPk = col('pk1', 'party', 'CODPARTY', { isPrimaryKey: true });
 
   it('marca la relación con subcategory + subtypeSymbolId', () => {
@@ -28,13 +28,13 @@ describe('mappingToBulk — variante subcategoría (doc 53)', () => {
     expect(relationship.childCardinality).toBe('one');
     // la columna heredada entra como PK+FK del subtipo (semántica ES-UN)
     expect(createdCols[0]).toMatchObject({ isPrimaryKey: true, isForeignKey: true, isNullable: false });
-    // el lote termina con el upsert de la relación (payload doc completo)
+    // el lote termina con el upsert de la relación (payload de documento completo)
     const last = changes[changes.length - 1];
     expect(last.collection).toBe('relationships');
     expect(last.payload).toMatchObject({ subcategory: true, subtypeSymbolId: 'sym-9' });
   });
 
-  it('sin `subcategory` el lote queda EXACTAMENTE como antes (sin campos nuevos)', () => {
+  it('sin `subcategory` la relación del lote no lleva campos de subcategoría', () => {
     const { relationship } = mappingToBulk({
       relId: 'rel-2', parentTableId: 'party', childTableId: 'party_rol',
       identifying: false, parentCardinality: 'one', childCardinality: 'zero-many',

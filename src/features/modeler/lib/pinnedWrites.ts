@@ -1,9 +1,9 @@
 /**
- * Doc 105 (H1) — escrituras atadas al pin de una sesión (`pinSession`), para
- * las acciones y las inversas del Undo que escriben VARIAS veces. Los servicios
- * toman la versión AL LLAMARLOS: si entre dos escrituras la sesión cambió (se
- * abrió otra versión, o la revalidación la degradó), lo que falta NO se escribe
- * — ni en la nueva ni en ninguna — y el corte no se traga como un error más.
+ * Escrituras atadas al pin de una sesión (`pinSession`), para las acciones y
+ * las inversas del Undo que escriben varias veces. Los servicios toman la
+ * versión al llamarlos: si entre dos escrituras la sesión cambia (se abre otra
+ * versión, o la revalidación la degrada), lo que falta no se escribe (ni en la
+ * nueva ni en ninguna) y el corte no se traga como un error más.
  */
 import * as gov from '@/services/governance.service';
 import type { BulkChange } from '@/services/governance.service';
@@ -16,14 +16,14 @@ export const pinned = <A extends unknown[], R>(pin: SessionPin, fn: (...a: A) =>
   (...a: A): R => { pin.check(); return fn(...a); };
 
 /** Deps de los sync de vistas (`viewSync`) con el pin en `updateView`: leen
- *  igual y cortan antes de escribir si la sesión cambió. */
+ *  igual y cortan antes de escribir si la sesión cambia. */
 export const pinnedViewDeps = (pin: SessionPin) => ({
   listViews: viewsSvc.listViews,
   updateView: pinned(pin, viewsSvc.updateView),
 });
 
 /** Un paso best-effort (sync de vistas): cualquier error se traga — la vista
- *  se corrige a mano —, salvo que la sesión cambió: eso corta la acción. */
+ *  se corrige a mano —, salvo que la sesión haya cambiado: eso corta la acción. */
 export async function bestEffort(run: () => Promise<unknown>): Promise<void> {
   try { await run(); } catch (e) { if (e instanceof SessionChangedError) throw e; }
 }
@@ -51,11 +51,11 @@ export function undoColumnsBatch(o: {
   };
 }
 
-/** Escrituras DIFERIDAS de lo que el usuario editó (debounce por clave y
- *  `flush` al cerrar el panel). Cada una va con el pin tomado al EDITAR: si al
- *  dispararse la sesión ya es otra — al cambiar de versión el panel se cierra
- *  y hace flush —, se descarta. Nunca se escribe en la versión que se abrió
- *  después (si la cambió la revalidación, ella ya avisó). */
+/** Escrituras diferidas de lo que el usuario editó (debounce por clave y
+ *  `flush` al cerrar el panel). Cada una va con el pin tomado al editar: si al
+ *  dispararse la sesión es otra (al cambiar de versión el panel se cierra y
+ *  hace flush), se descarta. Nunca se escribe en la versión que se abrió
+ *  después (si la cambia la revalidación, ella ya avisa). */
 export function pinnedDebouncer<T>(write: (value: T) => unknown, ms: number) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const pending = new Map<string, { value: T; pin: SessionPin }>();
@@ -65,18 +65,18 @@ export function pinnedDebouncer<T>(write: (value: T) => unknown, ms: number) {
     if (p && p.pin.holds()) void write(p.value);
   };
   return {
-    /** Agenda (o re-agenda) la escritura de `key` con la sesión de AHORA. */
+    /** Agenda (o re-agenda) la escritura de `key` con la sesión vigente. */
     schedule(key: string, value: T) {
       clearTimeout(timers.get(key));
       pending.set(key, { value, pin: pinSession() });
       timers.set(key, setTimeout(() => fire(key), ms));
     },
-    /** Descarta lo pendiente de `key` (quedó obsoleto: otro guardado lo trae). */
+    /** Descarta lo pendiente de `key` (otro guardado trae el valor vigente). */
     cancel(key: string) {
       clearTimeout(timers.get(key));
       timers.delete(key); pending.delete(key);
     },
-    /** Escribe ya lo pendiente (cerrar el panel) — sólo lo de la sesión vigente. */
+    /** Escribe ya lo pendiente (cerrar el panel) — solo lo de la sesión vigente. */
     flush() {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();

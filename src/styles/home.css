@@ -1,41 +1,40 @@
 /* ============================================================
-   Home / Hub (p0) + Open model (pg) — DMH-Erwin v20260625-2.
-   Translates the prototype's inline styles into token-driven classes.
-   Light-only navy. Source: design_handoff …/Data Model Hub.dc.html (#p0, #pg).
+   Home / Hub + Open model.
+   Clases basadas en tokens. Solo tema claro, azul marino.
    ============================================================ */
 
-/* ───────────────────────────── Page shell ────────────────────────── */
+/* ─────────────────────────── Contenedor de página ────────────────── */
 .dmh-home { flex: 1; overflow-y: auto; background: var(--page-bg); padding: 26px 30px 40px; }
 .dmh-home-inner { max-width: 1380px; margin: 0 auto; }
 
-/* ── Header row: WORKSPACE eyebrow + h1 + actions ─────────────────── */
+/* ── Fila de cabecera: eyebrow WORKSPACE + h1 + acciones ──────────── */
 .dmh-home-head { display: flex; align-items: flex-end; gap: 12px; margin-bottom: 18px; }
 .dmh-home-head-titles { flex: 1; min-width: 0; }
 .dmh-home-eyebrow { font-size: 12px; font-weight: 600; color: var(--text-muted-2); text-transform: uppercase; letter-spacing: .06em; }
 .dmh-home-h1 { margin: 4px 0 0; font-size: 26px; font-weight: 700; color: var(--navy); letter-spacing: -.015em; line-height: 1.1; }
-/* Right-aligned note: version actions now live inside Model (canvas). */
+/* Nota alineada a la derecha: las acciones de versión viven dentro de Model (canvas). */
 .dmh-home-note { font-size: 12.5px; color: var(--text-muted-2); line-height: 1.5; text-align: right; flex: none; }
 .dmh-home-note-link { color: var(--blue); font-weight: 600; text-decoration: none; }
 .dmh-home-note-link:hover { text-decoration: underline; }
 
-/* ── Projects filter strip ────────────────────────────────────────── */
+/* ── Franja de filtro de proyectos ────────────────────────────────── */
 .dmh-home-projects { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; }
 .dmh-home-projects-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted-3); margin-right: 2px; }
-/* Project chips reuse the design-system .dmh-chip, just height-locked to 30px. */
+/* Los chips de proyecto reusan el .dmh-chip del sistema de diseño, con altura fija de 30px. */
 .dmh-home-projects .dmh-chip { height: 30px; cursor: pointer; transition: border-color .14s, background .14s, color .14s; }
 .dmh-home-projects .dmh-chip:not(.is-active):hover { border-color: var(--blue-border); color: var(--blue); }
 
-/* ── Stat cards (5) ───────────────────────────────────────────────── */
+/* ── Tarjetas de estadísticas (5) ─────────────────────────────────── */
 .dmh-home-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 24px; }
 .dmh-stat { background: var(--fill-3); border: 1px solid var(--border-2); border-radius: 12px; padding: 16px 17px; }
 .dmh-stat-label { font-size: 12px; color: var(--text-muted-2); font-weight: 500; }
 .dmh-stat-value { font-size: 26px; font-weight: 700; color: var(--navy); margin-top: 5px; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .dmh-stat-value.is-loading { width: 46px; height: 30px; margin-top: 5px; border-radius: 7px; background: var(--fill-1); animation: dmh-skeleton 1.1s ease-in-out infinite; }
 
-/* ── Two-column body: requests (left) + versions read-only (right) ── */
+/* ── Cuerpo en dos columnas: solicitudes (izq.) + versiones (der.) ── */
 .dmh-home-cols { display: flex; gap: 20px; align-items: stretch; }
 
-/* Requests panel (left, wide) */
+/* Panel de solicitudes (izquierda, ancho) */
 .dmh-reqpanel { flex: 1; min-width: 0; display: flex; flex-direction: column; border: 1px solid var(--border-2); border-radius: 13px; overflow: hidden; background: var(--surface); }
 .dmh-reqpanel-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border-2); }
 .dmh-reqpanel-ico { width: 30px; height: 30px; flex: none; border-radius: 8px; background: var(--amber-tint); color: var(--amber-deep); display: flex; align-items: center; justify-content: center; }
@@ -55,7 +54,7 @@
 .dmh-reqitem-m { display: block; font-size: 11.5px; color: var(--text-muted-2); margin-top: 3px; }
 .dmh-reqitem-cta { flex: none; display: inline-flex; align-items: center; height: 32px; padding: 0 14px; border: 1px solid var(--blue-border); background: var(--blue-tint); color: var(--blue); border-radius: 8px; font-size: 12.5px; font-weight: 600; }
 
-/* status pills (inline, design-exact tones) */
+/* pills de estado (en línea, tonos exactos del diseño) */
 .dmh-vpill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; border-radius: var(--r-full); padding: 3px 10px; white-space: nowrap; }
 .dmh-vpill--production { color: var(--green-deep); background: var(--green-tint); }
 .dmh-vpill--review     { color: var(--amber-deep); background: var(--amber-tint); border: 1px solid #F4DFAE; }
@@ -67,7 +66,7 @@
 
 .dmh-reqpanel-empty { font-size: 12.5px; color: var(--text-muted); padding: 28px 14px; text-align: center; }
 
-/* ── Versions read-only card (right) ──────────────────────────────── */
+/* ── Tarjeta de versiones en solo lectura (derecha) ───────────────── */
 .dmh-vside { width: 380px; flex: none; display: flex; flex-direction: column; border: 1px solid var(--border-2); border-radius: 13px; overflow: hidden; background: var(--surface); }
 .dmh-vside-head { display: flex; align-items: center; gap: 10px; padding: 14px 18px; border-bottom: 1px solid var(--border-2); }
 .dmh-vside-ico { width: 30px; height: 30px; flex: none; border-radius: 8px; background: var(--blue-tint); color: var(--blue); display: flex; align-items: center; justify-content: center; }
@@ -82,7 +81,7 @@
 .dmh-vside-label.tone-blue  { color: var(--blue); }
 .dmh-vside-label.tone-muted { color: var(--text-muted-2); }
 .dmh-vside-meta { flex: 1; min-width: 0; font-size: 11.5px; color: var(--text-body); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Rollback de la versión en producción (crea un draft inverso — doc 16 §5d) */
+/* Rollback de la versión en producción (crea un draft inverso) */
 .dmh-vside-rollback { flex: none; display: inline-flex; align-items: center; gap: 4px;
   padding: 3px 8px; border: 1px solid var(--border-1, #E2E6EE); border-radius: 7px;
   background: #fff; font-size: 10.5px; font-weight: 600; color: var(--text-body);
@@ -94,7 +93,7 @@
 @keyframes dmh-skeleton { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 
 /* ============================================================
-   Open model modal (pg) — radio-card options inside the Dialog body.
+   Modal Open model: opciones radio-card dentro del cuerpo del Dialog.
    ============================================================ */
 .dmh-openmodel { display: flex; flex-direction: column; gap: 12px; }
 .dmh-openmodel-opt {
@@ -113,7 +112,7 @@
 .dmh-openmodel-ico--amber  { background: var(--amber-tint);  color: var(--amber-deep); }
 .dmh-openmodel-main { flex: 1; min-width: 0; }
 .dmh-openmodel-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
-/* El nombre y la descripción van en líneas propias (son <span>: en línea quedaban pegados). */
+/* El nombre y la descripción van en líneas propias (son <span>: en línea quedarían pegados). */
 .dmh-openmodel-name { display: block; font-size: 15px; font-weight: 700; color: var(--navy); }
 .dmh-openmodel-tag { font-size: 11px; font-weight: 600; color: var(--green-deep); background: var(--green-tint); border-radius: var(--r-full); padding: 2px 9px; }
 .dmh-openmodel-desc { display: block; font-size: 12.5px; color: #6B7689; margin-top: 4px; line-height: 1.45; }
@@ -121,7 +120,7 @@
 .dmh-openmodel-opt.is-selected .dmh-openmodel-radio { border-color: var(--blue); }
 .dmh-openmodel-radio .dot { width: 11px; height: 11px; border-radius: 50%; background: var(--blue); }
 
-/* drafts dropdown inside option 3 */
+/* desplegable de drafts dentro de la opción 3 */
 .dmh-openmodel-drafts { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
 .dmh-openmodel-draft {
   display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px;
@@ -137,12 +136,12 @@
 .dmh-openmodel-draft-check svg { width: 14px; height: 14px; }
 .dmh-openmodel-nodrafts { margin-top: 9px; font-size: 12px; color: var(--text-muted); font-style: italic; }
 
-/* ── Version tools (doc 65): cabecera, chips y popup Compare/Details ──────── */
+/* ── Herramientas de versión: cabecera, chips y popup Compare/Details ────── */
 .dmh-vside-actions { margin-left: auto; }
 .dmh-vside-tools { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 700; color: var(--blue); background: var(--blue-tint); border: 1px solid var(--blue-border); border-radius: 7px; padding: 4px 9px; cursor: pointer; white-space: nowrap; }
 .dmh-vside-tools:hover { filter: brightness(.97); }
 .dmh-vside-restored { flex: none; font-family: var(--mono); font-size: 10px; font-weight: 700; color: #7C5CC4; background: #F4EFFC; border: 1px solid #E4DAF6; border-radius: 6px; padding: 1px 5px; }
-/* Doc 104: versión que cambió de manos (⇄ = iniciada por otro usuario). */
+/* Versión transferida a otro dueño (⇄ = iniciada por otro usuario). */
 .dmh-vside-transferred { flex: none; font-size: 10.5px; font-weight: 700; color: #1F6A8A; background: #EAF5FA; border: 1px solid #CDE6F0; border-radius: 6px; padding: 0 5px; line-height: 16px; }
 .dmh-vside-info { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--border-2); background: var(--surface); color: var(--text-muted-2); cursor: pointer; }
 .dmh-vside-info:hover { color: var(--blue); border-color: var(--blue-border); }
@@ -178,7 +177,7 @@
 .dmh-vt-dtitle { font-size: 13.5px; font-weight: 700; color: var(--navy); }
 .dmh-vt-restored { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #5B4494; background: #F4EFFC; border: 1px solid #E4DAF6; border-radius: 9px; padding: 8px 11px; margin-bottom: 10px; }
 .dmh-vt-restored svg { flex: none; }
-/* Doc 104: administrar un draft (transferir / eliminar) en Version details. */
+/* Administrar un draft (transferir / eliminar) en Version details. */
 .dmh-vt-manage { display: inline-flex; gap: 6px; }
 .dmh-vt-error { margin-top: 12px; font-size: 12px; color: var(--red); background: var(--red-tint); border: 1px solid var(--red-border); border-radius: 9px; padding: 8px 11px; }
 .dmh-vt-transfer { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; padding: 5px 0; font-size: 12.5px; color: var(--text-body); }
@@ -199,7 +198,7 @@
 .dmh-vt-cwhen { font-size: 11px; color: var(--text-muted-2); }
 .dmh-vt-ctext { margin-top: 2px; color: var(--text-body); white-space: pre-wrap; }
 
-/* ── Project picker (doc 75 D8): paso 1 del Open model ─────────────────── */
+/* ── Selector de proyecto: paso 1 del Open model ───────────────────────── */
 .dmh-projpick { display: flex; flex-direction: column; gap: 10px; }
 .dmh-projpick-filter { display: flex; align-items: center; gap: 8px; padding: 0 10px; height: 34px;
   border: 1px solid var(--border-3); border-radius: var(--r-md); background: var(--surface); color: var(--text-muted); }
@@ -211,7 +210,7 @@
 .dmh-openmodel-step b { color: var(--navy); font-weight: 600; }
 .dmh-openmodel-new { margin-top: 4px; align-self: flex-start; }
 
-/* ── New project (doc 75 D15) ───────────────────────────────────────────── */
+/* ── New project ────────────────────────────────────────────────────────── */
 .dmh-newproj { display: flex; flex-direction: column; gap: 12px; }
 .dmh-newproj-field { display: flex; flex-direction: column; gap: 5px; }
 .dmh-newproj-label { font-size: 12px; font-weight: 600; color: var(--navy); }
@@ -228,7 +227,7 @@
 .dmh-newproj-warn { display: flex; align-items: flex-start; gap: 7px; padding: 8px 10px; border-radius: var(--r-md);
   background: var(--amber-tint); color: var(--amber-deep); font-size: 12px; line-height: 1.4; }
 
-/* ── Doc 75: versiones agrupadas por proyecto + botón New project ───────── */
+/* ── Versiones agrupadas por proyecto + botón New project ───────────────── */
 .dmh-vgroup-head { display: flex; align-items: center; gap: 8px; padding: 9px 18px; background: var(--fill-2); border-bottom: 1px solid #F2F4F8;
   cursor: pointer; user-select: none; font-size: 12px; color: var(--text-body); }
 .dmh-vgroup-head:hover { background: var(--fill-3, #EEF1F6); }

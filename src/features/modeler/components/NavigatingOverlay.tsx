@@ -5,9 +5,9 @@ import { useModelerStore } from '@/store/useModelerStore';
 const MAX_MS = 12_000;
 
 /**
- * Overlay bloqueante de navegación (doc 72 r2): «Locate on canvas» cierra el
- * popup y abre OTRO canvas — sin feedback, el usuario creía que no pasó nada y
- * repetía el click. `navigating` lo enciende `openCanvasAndFocus` y lo apaga
+ * Overlay bloqueante de navegación: «Locate on canvas» cierra el popup y abre
+ * otro canvas; sin feedback, parecería que no pasó nada y el usuario repetiría
+ * el click. `navigating` lo enciende `openCanvasAndFocus` y lo apaga
  * `setPendingFocus(null)` (el canvas centró o desistió) o el fallo de carga.
  */
 export default function NavigatingOverlay() {

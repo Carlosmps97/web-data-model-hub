@@ -1,5 +1,5 @@
 /**
- * Estado de una SOLICITUD de publicación (doc 88 §6) — helpers PUROS de Review.
+ * Estado de una solicitud de publicación: funciones puras de Review.
  * Una versión puede haber pasado por varios ciclos (enviar → retirar / rechazar
  * → corregir → re-enviar → aprobar); el badge y el filtro de la bandeja se
  * calculan por el estado de la versión + su último ciclo.
@@ -15,13 +15,13 @@ export interface RequestLike {
 
 export interface BadgeSpec { cls: string; text: string }
 
-/** Resultado EFECTIVO de la solicitud: por estado de la versión y, en draft, por
+/** Resultado efectivo de la solicitud: por estado de la versión y, en draft, por
  *  su último ciclo (rechazada o retirada). Sin historial ni envío ⇒ `pending`
  *  no aplica: se devuelve null (la versión nunca fue una solicitud). */
 export function outcomeOf(v: RequestLike): RequestOutcome | null {
   if (v.status === 'submitted') return 'pending';
   if (v.status === 'approved') return 'approved';
-  if (v.status === 'rejected') return 'rejected';                 // legacy pre-doc 88
+  if (v.status === 'rejected') return 'rejected';                 // cabecera sin historial de ciclos
   return v.lastRequest?.outcome ?? null;
 }
 
@@ -32,7 +32,7 @@ export const OUTCOME_BADGE: Record<RequestOutcome, BadgeSpec> = {
   withdrawn: { cls: 'dmh-rv-spill--draft', text: 'Withdrawn' },
 };
 
-/** Badge de la fila/cabecera: el resultado + dónde quedó la versión. */
+/** Badge de la fila/cabecera: el resultado + en qué estado está la versión. */
 export function requestBadge(v: RequestLike): BadgeSpec {
   const o = outcomeOf(v);
   if (o === 'pending') return OUTCOME_BADGE.pending;
@@ -43,14 +43,15 @@ export function requestBadge(v: RequestLike): BadgeSpec {
 }
 
 /** ¿La versión figura en la bandeja de solicitudes? Toda versión que fue
- *  enviada alguna vez (historial) o está en revisión / decidida (legacy). */
+ *  enviada alguna vez (historial) o que, sin historial, está en revisión,
+ *  rechazada o aprobada sin aplicar. */
 export function isRequest(v: { status: VersionStatus; requests?: RequestCycle[] | null; appliedAt?: string | null }): boolean {
   if ((v.requests?.length ?? 0) > 0) return true;
   return v.status === 'submitted' || v.status === 'rejected' || (v.status === 'approved' && !v.appliedAt);
 }
 
-/** Ciclos a mostrar (más reciente primero). Un doc legacy sin historial pero
- *  con una solicitud (enviada/decidida) gana un ciclo sintetizado desde su
+/** Ciclos a mostrar (más reciente primero). Una versión sin historial pero
+ *  con una solicitud (enviada/decidida) recibe un ciclo sintetizado desde su
  *  cabecera para que la decisión y su nota no se pierdan. */
 export function historyOf(d: ChangesetDetail): RequestCycle[] {
   const list = d.requests ?? [];
@@ -89,12 +90,12 @@ export function activityAt(v: { lastRequest?: RequestCycle | null; submittedAt?:
   return Date.parse(iso) || 0;
 }
 
-/** Doc 105 (U2): motivo cuando el request no es del actor ni lo revisa. */
+/** Motivo cuando el request no es del actor ni lo revisa. */
 export const REVIEW_CANVAS_DENIED =
   'Only its owner, its assigned reviewers and administrators can open this request in the canvas.';
 
-/** Botón «Open/View in canvas» de Review: el dueño de un DRAFT edita; un
- *  request en revisión se abre en solo lectura — sólo si el actor puede verlo
+/** Botón «Open/View in canvas» de Review: el dueño de un draft edita; un
+ *  request en revisión se abre en solo lectura, solo si el actor puede verlo
  *  (`canOpenVersion`, espejo del backend: dueño, revisor asignado,
  *  `versions.view_all` o `admin.manage`); cerrado, no se abre desde acá. */
 export function canvasAction(

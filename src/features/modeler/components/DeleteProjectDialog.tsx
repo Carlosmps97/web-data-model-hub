@@ -14,17 +14,16 @@ import { deletionSummary, nameMatches } from '../lib/projectDeletion';
 import { afterRevalidation, touchesVersion } from '../lib/sessionGuard';
 
 /**
- * DeleteProjectDialog (doc 75 D5) — el borrado se GRABA en la working copy y
- * sólo ocurre al aprobarla; el revisor lo ve como cambio crítico. Confirmación
+ * DeleteProjectDialog — el borrado se graba en la working copy y solo ocurre al
+ * aprobarla; quien revisa la versión lo ve como cambio crítico. Confirmación
  * tipeada con el nombre exacto del proyecto.
  */
 export default function DeleteProjectDialog({ open, project, onClose, onDeleted }: {
   open: boolean; project: Project; onClose: () => void; onDeleted: () => void;
 }) {
   const [counts, setCounts] = useState<ScopeCounts | null>(null);
-  // Doc 105 (O5): el conteo sólo INFORMA. Antes, si fallaba, el texto quedaba
-  // en «Counting…» y el botón deshabilitado para siempre; ahora lo dice, ofrece
-  // Retry y la confirmación tipeada basta para borrar.
+  // El conteo solo informa: si falla, se dice, se ofrece Retry y la
+  // confirmación tipeada basta para borrar (el botón no queda deshabilitado).
   const [countError, setCountError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [typed, setTyped] = useState('');
@@ -37,7 +36,7 @@ export default function DeleteProjectDialog({ open, project, onClose, onDeleted 
     let live = true;
     void getProjectCounts(project.id)
       .then((c) => { if (live) setCounts(c); })
-      // Doc 105 (ronda 5): sin el «— try again…» del transporte: el aviso ya ofrece Retry.
+      // Sin el «— try again…» del transporte: el aviso ya ofrece Retry.
       .catch((e) => { if (live) setCountError(errorReason(e, 'unknown error')); });
     return () => { live = false; };
   }, [open, project.id, attempt]);
@@ -50,11 +49,10 @@ export default function DeleteProjectDialog({ open, project, onClose, onDeleted 
     try {
       await runBlocking('Recording project deletion…', () => deleteProject(project.id));
     } catch (e) {
-      // Doc 105 (F1): antes el rechazo quedaba sin manejar y sin aviso. El
-      // diálogo sigue abierto con el motivo. Un 403/404/409 de la versión
-      // (escritura: criterio de los guardados del canvas) espera la
-      // revalidación: si cambió la sesión (transferida, eliminada, enviada),
-      // ella avisó y el diálogo ya no tiene sentido.
+      // El rechazo se maneja con aviso: el diálogo sigue abierto con el motivo.
+      // Un 403/404/409 de la versión (escritura: criterio de los guardados del
+      // canvas) espera la revalidación: si la sesión es otra (transferida,
+      // eliminada, enviada), ella avisó y el diálogo pierde sentido.
       if (touchesVersion(e, asked.activeChangesetId)) await afterRevalidation();
       if (canvasSessionKey(useSessionStore.getState()) !== askedKey) { onClose(); return; }
       const reason = apiErrorMessage(e, '').replace(/[.\s]+$/, '');
@@ -70,7 +68,7 @@ export default function DeleteProjectDialog({ open, project, onClose, onDeleted 
         <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" onClick={onClose}>Cancel</button>
         <button type="button" className="rd-btn rd-btn-danger rd-btn-sm" disabled={!ok} onClick={() => void confirm()}>Delete project</button>
       </>}>
-      {/* Región viva (doc 105): el conteo, su error y el reintento se anuncian. */}
+      {/* Región viva: el conteo, su error y el reintento se anuncian. */}
       <p className="dmh-delproj-text" role="status">
         {counts ? deletionSummary(project.name, counts)
           : countError ? <>Couldn't count the project contents: {countError}. Everything in the project will still be deleted.{' '}

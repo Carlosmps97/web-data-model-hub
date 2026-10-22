@@ -1,4 +1,4 @@
-// Doc 88 §6: estado/badge/historial de una solicitud (puros).
+// Estado/badge/historial de una solicitud (funciones puras).
 import { describe, it, expect } from 'vitest';
 import type { ChangesetDetail, RequestCycle } from '@/types/versioning';
 import { activityAt, canvasAction, historyOf, isRequest, outcomeOf, REVIEW_CANVAS_DENIED, requestBadge } from './requestState';
@@ -13,7 +13,7 @@ describe('outcomeOf / requestBadge', () => {
     expect(requestBadge({ status: 'approved', appliedAt: null }).text).toBe('Approved · publishing');
     expect(requestBadge({ status: 'draft', lastRequest: cycle(1, 'rejected') }).text).toBe('Rejected · back in draft');
     expect(requestBadge({ status: 'draft', lastRequest: cycle(1, 'withdrawn') }).text).toBe('Withdrawn · draft');
-    expect(requestBadge({ status: 'rejected' }).text).toBe('Rejected');            // legacy pre-doc 88
+    expect(requestBadge({ status: 'rejected' }).text).toBe('Rejected');            // cabecera en rejected, sin historial de ciclos
     expect(outcomeOf({ status: 'draft' })).toBeNull();
   });
 });
@@ -34,7 +34,7 @@ describe('historyOf', () => {
     const d = { ...base, status: 'draft' as const, requests: [cycle(1, 'withdrawn'), cycle(2, 'rejected', { note: 'falta PK' })] };
     expect(historyOf(d).map((c) => c.cycle)).toEqual([2, 1]);
   });
-  it('sintetiza el ciclo de un doc legacy rechazado y no inventa nada en un draft', () => {
+  it('sintetiza el ciclo de una versión rechazada sin historial y no inventa nada en un draft', () => {
     const legacy = { ...base, status: 'rejected' as const, reviewedBy: 'beto', reviewNote: 'no', submittedAt: 's' };
     const [c] = historyOf(legacy);
     expect([c.outcome, c.note, c.decidedBy, c.submittedBy]).toEqual(['rejected', 'no', 'beto', 'ana']);
@@ -51,9 +51,9 @@ describe('activityAt', () => {
   });
 });
 
-/** Doc 105 (U2): «View in canvas» sólo para quien PUEDE abrir el request —
- *  antes cualquiera lo abría y la sesión se degradaba con un aviso. */
-describe('canvasAction (doc 105)', () => {
+/** «View in canvas» solo para quien puede abrir el request; de lo contrario la
+ *  sesión se degradaría con un aviso. */
+describe('canvasAction', () => {
   const none = () => false;
   const admin = (p: string) => p === 'admin.manage';
   const req = { status: 'submitted' as const, owner: 'ana', reviewers: ['beto'] };

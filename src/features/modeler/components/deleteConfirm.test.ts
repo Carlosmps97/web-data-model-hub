@@ -1,7 +1,7 @@
-// Doc 105 (O2, verificador de navegador): el pre-conteo de «Delete table» en
-// Properties tragaba los errores — con la lectura de vistas caída, el diálogo
-// decía «0 views» y el borrado se llevaba igual las vistas que no mostró. Lo
-// que no se pudo contar se dice (null), no se muestra como cero.
+// El pre-conteo de «Delete table» en Properties no traga los errores: con la
+// lectura de vistas caída, mostrar «0 views» haría que el borrado se llevara
+// igual las vistas que no mostró. Lo que no se pudo contar se dice (null), no
+// se muestra como cero.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { textOf } from '../../reporting/components/fakeReact.testutil';
 
@@ -24,7 +24,7 @@ beforeEach(() => {
   vi.mocked(viewsSvc.listViews).mockResolvedValue([{ id: 'v1' }] as never);
 });
 
-describe('conteo del impacto de borrar una tabla (doc 105, O2)', () => {
+describe('conteo del impacto de borrar una tabla', () => {
   it('todo leído: los números', async () => {
     expect(await readTableDeleteCounts('t1')).toEqual({ canvases: 2, related: 1, views: 1 });
   });
@@ -54,9 +54,9 @@ describe('conteo del impacto de borrar una tabla (doc 105, O2)', () => {
   });
 });
 
-// Doc 105 (ronda 3, cosmético): en el modelo lógico el texto decía «Column …
-// this table» y «Its columns …»: mismos sustantivos por modelo que el título.
-describe('los diálogos de borrado usan los sustantivos del modelo (doc 105, ronda 3)', () => {
+// En el modelo lógico el texto del diálogo usa los mismos sustantivos por
+// modelo que el título (no «Column … this table» ni «Its columns …»).
+describe('los diálogos de borrado usan los sustantivos del modelo', () => {
   const noImpact = { relationships: [], total: 0 };
   const oneRel = { relationships: [{ relId: 'r1', otherTableName: 'T2', otherColumnName: 'C', canvases: [] }], total: 1 };
 
@@ -75,7 +75,7 @@ describe('los diálogos de borrado usan los sustantivos del modelo (doc 105, ron
     expect(message()).toMatch(/^Attribute “COD” participates in 1 relationship/);
   });
 
-  it('en físico, como siempre', async () => {
+  it('en físico, con tabla y columna', async () => {
     await confirmDeleteColumn({ name: 'COD', nouns: facetNouns('physical'), impact: noImpact as never, action: async () => {} });
     expect(message()).toBe('Column “COD” will be removed from this table.');
   });

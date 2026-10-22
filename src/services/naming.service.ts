@@ -1,16 +1,17 @@
 /**
- * Naming-standards (UDP) service — PER PROJECT (doc 75), not changeset-scoped.
+ * Servicio de estándares de nombres (UDP): por proyecto, sin alcance de
+ * changeset.
  *
- * Unlike `governance.service` (which routes model writes through the active
- * changeset overlay), glossary terms + naming config are project-wide
- * configuration, always under `/api/projects/{pid}/…`. Doc 105: this layer
- * only READS and computes (validate, impact, physicalize, lock/unlock) —
- * every standards CHANGE goes through the versioned `standards/apply`
- * (Data Standards › Save & apply, with history and rollback); the backend
- * answers 409 to the old direct writes (glossary/domains/naming CRUD,
- * propagate, rephysicalize).
+ * A diferencia de `governance.service` (que enruta las escrituras del modelo por
+ * el overlay del changeset activo), los términos del glosario y la configuración
+ * de naming son configuración de todo el proyecto, siempre bajo
+ * `/api/projects/{pid}/…`. Esta capa solo lee y calcula (validate, impact,
+ * physicalize, lock/unlock): todo cambio de estándares pasa por el
+ * `standards/apply` versionado (Data Standards › Save & apply, con historial y
+ * rollback); el backend responde 409 a las escrituras directas (CRUD de
+ * glossary/domains/naming, propagate, rephysicalize).
  *
- * Backend contract (envelope `{ success, data }`):
+ * Contrato del backend (envelope `{ success, data }`):
  *   - GET    …/settings/naming                → {column:NamingRule, table:NamingRule}
  *   - POST   …/glossary/physicalize           {logical, scope} → {physical}
  *   - POST   …/glossary/impact                {scope, termsUpsert, termsDelete, namingConfig?} → GlossaryImpact {renamed, outOfSync}
@@ -31,7 +32,7 @@ export interface DictTerm {
   term: string;
   abbrev: string;
   scope: UdpScope;
-  // F2 #1 (round-trip TS ↔ Pydantic): lock por ADMIN. También en SnapshotTerm.
+  // Round-trip TS ↔ Pydantic: lock por admin. También en SnapshotTerm.
   locked?: boolean;
   lockedBy?: string | null;
   lockedAt?: string | null;
@@ -40,7 +41,7 @@ export interface DictTerm {
 export interface NamingRule {
   separator: Separator;
   case: Casing;
-  /** Tope de largo del FÍSICO en caracteres (0 = sin tope); lo aplica el backend al crear o renombrar. */
+  /** Tope de largo del físico en caracteres (0 = sin tope); lo aplica el backend al crear o renombrar. */
   maxLength?: number;
 }
 
@@ -49,7 +50,7 @@ export interface NamingConfig {
   table: NamingRule;
 }
 
-// ── Validación de término nuevo + lock por ADMIN (F2 #1) ──
+// ── Validación de término nuevo + lock por admin ──
 export interface GlossaryCorpusHit {
   entity: 'table' | 'column';
   tableName: string;
@@ -61,7 +62,7 @@ export interface GlossaryValidation {
   ok: boolean;
   conflicts: {
     glossaryDuplicate: { id: string; term: string; abbrev: string } | null;
-    corpus: GlossaryCorpusHit[]; // doc 95 D1: la lista COMPLETA (antes muestra de 50)
+    corpus: GlossaryCorpusHit[]; // lista completa del corpus
     total: number;               // corpus total + 1 si hay duplicado
   };
 }
@@ -71,7 +72,7 @@ export interface GlossaryValidation {
 export const validateTerm = (projectId: string, term: string, scope: UdpScope) =>
   apiPost<GlossaryValidation>(`${DICT(projectId)}/validate`, { term, scope });
 
-// ── Dry-run del re-derivado (docs 94 D7 · 95 D3): qué renombra el borrador y qué ya estaba desfasado ──
+// ── Dry-run del re-derivado: qué renombra el borrador y qué ya estaba desfasado ──
 export interface GlossaryImpactRow {
   entity: 'column' | 'table';
   /** Tabla de la columna, o la tabla misma si `entity` = 'table'. */
@@ -100,20 +101,20 @@ export interface GlossaryImpactBody {
 export const glossaryImpact = (projectId: string, body: GlossaryImpactBody) =>
   apiPost<GlossaryImpact>(`${DICT(projectId)}/impact`, body);
 
-/** Bloquea/desbloquea una entrada (solo admin.manage; D4: intocable para todos). */
+/** Bloquea/desbloquea una entrada (solo admin.manage; bloqueada, es intocable para todos). */
 export const lockTerm = (projectId: string, id: string) =>
   apiPost<DictTerm>(`${DICT(projectId)}/${encodeURIComponent(id)}/lock`, {});
 export const unlockTerm = (projectId: string, id: string) =>
   apiPost<DictTerm>(`${DICT(projectId)}/${encodeURIComponent(id)}/unlock`, {});
 
-// ── Naming config (separator / case per scope) ──
+// ── Configuración de naming (separador / case por scope) ──
 export const getNamingConfig = (projectId: string) => apiGet<NamingConfig>(NAMING(projectId));
 
-// ── Physicalize / retroactive re-physicalize ──
+// ── Physicalize / re-physicalize retroactivo ──
 export const physicalize = (projectId: string, logical: string, scope: UdpScope) =>
   apiPost<{ physical: string }>(`${DICT(projectId)}/physicalize`, { logical, scope });
 
-// ── Parent Domains (per project; reads only — changes go through standards/apply, doc 105) ──
+// ── Parent Domains (por proyecto; solo lectura: los cambios van por standards/apply) ──
 const DOMAINS = (pid: string) => `${PROJECT(pid)}/domains`;
 
 export interface ParentDomainFull {
@@ -124,7 +125,7 @@ export interface ParentDomainFull {
   description?: string;
 }
 
-// ── Doc 95 D7: impacto EXACTO por columna (la misma regla que aplica la cascada) ──
+// ── Impacto exacto por columna (la misma regla que aplica la cascada) ──
 export type DomainColumnStatus = 'change' | 'override' | 'differs';
 
 export interface DomainColumnImpactRow {
@@ -144,19 +145,19 @@ export interface DomainColumnImpactRow {
 }
 
 export interface DomainColumnImpact {
-  /** Tipos ACTUALES del dominio. */
+  /** Tipos actuales del dominio. */
   domain: { physical: string | null; logical: string | null };
   /** Tipos nuevos (homologados) de las facetas que cambian. */
   targets: { physical?: string | null; logical?: string | null };
   /** Globales (no dependen de q/status). `tables` = todas; `changeTables` = las que cambian; `models` = modelos de las que cambian (sin tipos nuevos, de todas). */
   totals: { columns: number; tables: number; change: number; changeTables: number; override: number; differs: number; models: number };
-  /** Filas que matchean q/status (para paginar). */
+  /** Filas que coinciden con q/status (para paginar). */
   matched: number;
   rows: DomainColumnImpactRow[];
 }
 
 export const listDomainsGlobal = (projectId: string) => apiGet<ParentDomainFull[]>(DOMAINS(projectId));
-/** Doc 95 D7: vista previa por columna de re-tipar el dominio (`physicalTo`/`logicalTo`);
+/** Vista previa por columna de re-tipar el dominio (`physicalTo`/`logicalTo`);
  *  sin tipos nuevos mide quién lo sigue hoy. `limit: 0` = solo totales. */
 export const getDomainColumnImpact = (
   projectId: string,

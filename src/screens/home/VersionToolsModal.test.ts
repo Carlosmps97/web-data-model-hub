@@ -1,10 +1,9 @@
-// Version tools (Home) sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105:
-//  · F5 — con `refreshMe` los permisos cambian sin recargar, pero el popup leía
-//    `useAuthStore((s) => s.has)`: la MISMA función siempre, así que zustand no
-//    lo re-renderizaba y los botones seguían con los permisos viejos.
-//  · A5-o5 — el motivo de un botón deshabilitado (Transfer / Delete / Open in
-//    canvas) estaba sólo en `title`; ahora también en su nombre accesible.
+// Version tools (Home) sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+//  · Con `refreshMe` los permisos cambian sin recargar: leer
+//    `useAuthStore((s) => s.has)` no basta (es siempre la misma función, zustand
+//    no re-renderizaría y los botones se quedarían con los permisos anteriores).
+//  · El motivo de un botón deshabilitado (Transfer / Delete / Open in canvas) va
+//    en `title` y también en su nombre accesible.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChangesetDetail, VersionRow } from '@/types/versioning';
 import { byText, nextStates, resetFake, runEffects, walk, textOf } from '../../features/reporting/components/fakeReact.testutil';
@@ -21,10 +20,10 @@ vi.mock('@/services/versioning.service', async (orig) => ({
 vi.mock('@/store/useSessionStore', () => ({
   useSessionStore: (pick: (s: unknown) => unknown) => pick({ openModel: vi.fn() }),
 }));
-/** Store de auth de mentira con la MISMA forma que el real: `has` se crea una
+/** Store de auth simulado con la misma forma que el real: `has` se crea una
  *  vez y lee el estado vigente; `setState` mezcla (como `set` de zustand).
  *  Anota los selectores del último render: zustand re-renderiza un componente
- *  sólo si alguno devuelve otra cosa (Object.is). */
+ *  solo si alguno devuelve otra cosa (Object.is). */
 const auth = vi.hoisted(() => {
   type State = { user: { username: string; permissions: Record<string, boolean> } | null; has: (p: string) => boolean };
   const selectors = new Set<(s: State) => unknown>();
@@ -66,7 +65,7 @@ function render(keepRefs: boolean) {
 async function openDetails(detail: ChangesetDetail = DETAIL) {
   vi.mocked(getChangeset).mockResolvedValue(detail);
   props = {
-    versions: [{ ...ROW, status: detail.status }], users: [], projects: [{ id: 'p1', name: 'MODELO DDV' } as never],
+    versions: [{ ...ROW, status: detail.status }], users: [], projects: [{ id: 'p1', name: 'MODELO VENTAS' } as never],
     initialTab: 'details', initialVersionId: 'v1', initialProjectId: 'p1', onClose: vi.fn(), onChanged: vi.fn(),
   };
   render(false);
@@ -86,14 +85,14 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
-describe('Version tools: permisos al día sin recargar (doc 105, F5)', () => {
+describe('Version tools: permisos al día sin recargar', () => {
   it('refreshMe le da admin a carla: el popup se re-renderiza y ofrece Transfer/Delete', async () => {
     let tree = await openDetails();
     expect(labels(tree)).not.toContain('Transfer');                 // draft ajeno, sin permisos
     const before = auth.api.getState();
     asUser('carla', { 'admin.manage': true });                      // lo que hace refreshMe: set({ user })
     const after = auth.api.getState();
-    // zustand re-renderiza sólo si algún selector devuelve otra cosa: con `s.has`, nunca.
+    // zustand re-renderiza solo si algún selector devuelve otra cosa: con `s.has`, nunca.
     expect([...auth.selectors].some((pick) => !Object.is(pick(before), pick(after)))).toBe(true);
     tree = render(true);
     expect(labels(tree)).toEqual(expect.arrayContaining(['Transfer', 'Delete']));
@@ -101,7 +100,7 @@ describe('Version tools: permisos al día sin recargar (doc 105, F5)', () => {
   });
 });
 
-describe('Version tools: el motivo de un botón deshabilitado es accesible (doc 105, A5-o5)', () => {
+describe('Version tools: el motivo de un botón deshabilitado es accesible', () => {
   it('Transfer y Delete bloqueados (versión en revisión) llevan el motivo en su nombre accesible', async () => {
     asUser('carla', { 'admin.manage': true });
     const submitted = { ...DETAIL, status: 'submitted' as const, reviewers: ['beto'] };
@@ -114,7 +113,7 @@ describe('Version tools: el motivo de un botón deshabilitado es accesible (doc 
     expect(del.props['aria-label']).toBe(`Delete: ${versionActionBlock(submitted, 'delete')}`);
   });
 
-  it('Open in canvas deshabilitado también; habilitados, el nombre es sólo su texto', async () => {
+  it('Open in canvas deshabilitado también; habilitados, el nombre es solo su texto', async () => {
     let tree = await openDetails();                                  // carla sin permisos: no puede abrir el draft de ana
     const open = byText(tree, 'button', 'Open in canvas');
     expect(open.props.disabled).toBe(true);

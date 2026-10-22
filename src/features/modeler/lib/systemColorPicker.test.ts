@@ -1,7 +1,7 @@
-// «More colors…» (doc 112): el selector del navegador se ancla al input oculto.
-// El input se agregaba y se pulsaba en el mismo instante, sin que el navegador
-// le hubiera calculado posición: Chrome lo abría en la esquina superior
-// izquierda de la pantalla. Ahora va encima del botón que se pulsó, con su
+// «More colors…»: el selector del navegador se ancla al input oculto. Si el
+// input se agrega y se pulsa en el mismo instante, sin que el navegador le haya
+// calculado posición, Chrome abre el selector en la esquina superior izquierda
+// de la pantalla. Por eso el input va encima del botón que se pulsó, con su
 // tamaño, y se fuerza el cálculo de su posición antes de abrirlo.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -38,7 +38,7 @@ describe('selector de color del sistema', () => {
     discardSystemPicker(undefined);
   });
 
-  it('discardSystemPicker suelta sólo el selector que se abrió con ese `alive`', () => {
+  it('discardSystemPicker suelta solo el selector que se abrió con ese `alive`', () => {
     useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
     useModelerStore.setState({ activeSaId: 'sa1' });
     const { calls } = fakeDom();

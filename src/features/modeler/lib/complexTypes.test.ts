@@ -8,7 +8,7 @@ import {
   parseComplexType,
 } from './complexTypes';
 
-describe('collapseComplexType (F4 #6 — colapso visual en el canvas)', () => {
+describe('collapseComplexType (colapso visual en el canvas)', () => {
   it('deja los tipos simples tal cual', () => {
     expect(collapseComplexType('string')).toBe('string');
     expect(collapseComplexType('DECIMAL(38,18)')).toBe('DECIMAL(38,18)');
@@ -36,11 +36,11 @@ describe('isComplexType', () => {
   });
 });
 
-describe('ViewNode — tipo largo colapsado + flag de tooltip (A3, F4 #6)', () => {
+describe('ViewNode — tipo largo colapsado + flag de tooltip', () => {
   // El seam que reusa ViewNode (igual que TableNode): un tipo complejo largo
-  // (STRUCT origen o castType) se acorta para la fila Y se marca para el
-  // `title` con el tipo completo — el nodo nunca muestra el string crudo.
-  it('un STRUCT largo se colapsa Y queda flaggeado para el tooltip', () => {
+  // (STRUCT origen o castType) se acorta para la fila y se marca para el
+  // `title` con el tipo completo; el nodo nunca muestra el string crudo.
+  it('un STRUCT largo se colapsa y queda marcado para el tooltip', () => {
     const t = 'STRUCT<nombre:STRING,edad:INT,direccion:STRUCT<calle:STRING,ciudad:STRING>>';
     expect(collapseComplexType(t)).toBe('STRUCT<…>');
     expect(collapseComplexType(t).length).toBeLessThan(t.length);
@@ -100,7 +100,7 @@ describe('parseComplexType / composeComplexType (ComplexTypeBuilder)', () => {
   });
 });
 
-describe('hasComplexContent (doc 96 D8)', () => {
+describe('hasComplexContent', () => {
   it('complejo con estructura vs genérico vacío', () => {
     expect(hasComplexContent('ARRAY<STRUCT<a:VARCHAR(30)>>')).toBe(true);
     expect(hasComplexContent('ARRAY<>')).toBe(false);

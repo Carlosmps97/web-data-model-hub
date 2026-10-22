@@ -1,9 +1,9 @@
 /**
- * Doc 94 D2 — lote que aplica cambios a columnas de UNA tabla y la deja con las
- * PK primero: la que entra a la llave queda al final del bloque de PK; la que
- * sale, primera entre las no-PK; las que se corren por eso viajan en el MISMO
- * lote. Cada columna viaja UNA sola vez (doc completo + campos + ordinal nuevo:
- * dos ops al mismo _id en un lote no se acumulan). Devuelve también las
+ * Lote que aplica cambios a columnas de una tabla y la deja con las PK
+ * primero: la que entra a la llave queda al final del bloque de PK; la que
+ * sale, primera entre las no-PK; las que se corren por eso viajan en el mismo
+ * lote. Cada columna viaja una sola vez (documento completo + campos + ordinal
+ * nuevo: dos ops al mismo _id en un lote no se acumulan). Devuelve también las
  * pre-imágenes para el Undo. Puro.
  */
 import { bulk, type BulkChange, type CanonicalColumn } from '@/services/governance.service';

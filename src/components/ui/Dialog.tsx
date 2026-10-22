@@ -11,39 +11,39 @@ export interface DialogProps {
   open: boolean;
   title: string;
   subtitle?: string;
-  /** Leading lucide icon shown in the header chip. */
+  /** Ícono lucide al inicio, en el chip del encabezado. */
   icon?: LucideIcon;
   onClose: () => void;
   children: React.ReactNode;
-  /** Right-aligned footer actions. Wrap left-aligned content in <div className="dmh-dialog-foot-left">. */
+  /** Acciones del pie, alineadas a la derecha. El contenido alineado a la izquierda va en <div className="dmh-dialog-foot-left">. */
   footer?: React.ReactNode;
-  /** Dialog width in px. Default 560. */
+  /** Ancho del diálogo en px. Por defecto 560. */
   width?: number;
   /**
-   * Backdrop coverage:
-   *  - 'screen' (default): dims the whole viewport.
-   *  - 'canvas': dims ONLY the canvas region (below the chrome), leaving
-   *    the TopNav (and the canvas toolbar) sharp — the design's popup pattern.
+   * Cobertura del fondo:
+   *  - 'screen' (por defecto): oscurece todo el viewport.
+   *  - 'canvas': oscurece solo la región del canvas (debajo del chrome) y deja
+   *    nítidos el TopNav (y la barra del canvas): el patrón de popup del diseño.
    */
   backdrop?: DialogBackdrop;
   /**
-   * For backdrop='canvas': px from the top of the viewport where the scrim
-   * starts (the height of the sharp chrome above the canvas). Defaults to 52
-   * (TopNav only). Pass 116 when a 64px canvas toolbar is also present.
+   * Con backdrop='canvas': px desde el borde superior del viewport donde empieza
+   * el scrim (el alto del chrome nítido sobre el canvas). Por defecto 52 (solo el
+   * TopNav); 116 cuando además hay una barra de canvas de 64px.
    */
   canvasTop?: number;
 }
 
 /**
- * Dialog — design-system modal (DMH-Erwin). Supports the **canvas-only scrim**
- * pattern: with `backdrop="canvas"` the scrim (`rgba(16,27,48,.42)`) covers
- * ONLY the canvas region below the chrome, so the TopNav and toolbar stay crisp
- * and the table cards remain visible through it. No `backdrop-filter` blur
- * (2026-09-29): re-blurring the canvas on every frame made the whole browser
- * slow on machines without GPU acceleration.
+ * Dialog: modal del sistema de diseño. Admite el patrón de **scrim solo sobre el
+ * canvas**: con `backdrop="canvas"` el scrim (`rgba(16,27,48,.42)`) cubre solo la
+ * región del canvas debajo del chrome, así el TopNav y la barra de herramientas
+ * quedan nítidos y las tarjetas de las tablas siguen visibles a través de él. Sin
+ * blur de `backdrop-filter`: volver a difuminar el canvas en cada cuadro vuelve
+ * lento todo el navegador en equipos sin aceleración por GPU.
  *
- * ESC, backdrop click and the close button all dismiss. Rendered via a portal
- * to document.body so it overlays regardless of where it's mounted.
+ * Esc y el botón de cierre lo cierran (el clic en el fondo no). Se renderiza con
+ * un portal en document.body para quedar encima sin importar dónde se monte.
  */
 export default function Dialog({
   open,
@@ -57,18 +57,18 @@ export default function Dialog({
   backdrop = 'screen',
   canvasTop = 52,
 }: DialogProps) {
-  // ESC: lo consume SÓLO el diálogo del tope (doc 80 §1). Con el popup de
-  // Esquemas abierto encima del editor de vistas, un ESC cerraba los dos.
-  // El token es estable por instancia y el efecto depende sólo de `open`: si
-  // dependiera de `onClose` (los callers pasan arrows inline), cada render del
-  // diálogo de ABAJO lo re-registraría en el tope y le robaría el ESC.
+  // Esc lo consume solo el diálogo del tope: con el popup de Esquemas abierto
+  // encima del editor de vistas, un Esc cierra solo el de arriba. El token es
+  // estable por instancia y el efecto depende solo de `open`: si dependiera de
+  // `onClose` (quienes lo usan pasan arrows inline), cada render del diálogo de
+  // abajo lo volvería a registrar en el tope y le robaría el Esc.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const tokenRef = useRef<symbol | null>(null);
   if (tokenRef.current === null) tokenRef.current = Symbol('dmh-dialog');
   const boxRef = useRef<HTMLDivElement | null>(null);
-  // Quién tenía el foco al ABRIRSE: se lee en el render en que `open` pasa a
-  // true, antes del commit — un `autoFocus` de adentro todavía no lo tomó.
+  // Quién tenía el foco al abrirse: se lee en el render en que `open` pasa a
+  // true, antes de la fase de commit, cuando ningún `autoFocus` de adentro tomó el foco.
   const openerRef = useRef<Element | null>(null);
   const shownRef = useRef(false);
   if (open !== shownRef.current) {
@@ -80,13 +80,13 @@ export default function Dialog({
     if (!open) return;
     const token = tokenRef.current as symbol;
     pushDialog(token);
-    // Doc 105 (F6): el foco entra a la caja (abierto con el mouse quedaba en la
-    // página de atrás y Tab la recorría); al cerrar vuelve a quien lo abrió.
+    // El foco entra a la caja (abierto con el mouse, quedaría en la página de
+    // atrás y Tab la recorrería); al cerrar vuelve a quien lo abrió.
     const restoreFocus = focusInto(boxRef.current, openerRef.current);
     const onKey = (e: KeyboardEvent) => {
       if (!isTopDialog(token)) return;
       if (e.key === 'Escape') onCloseRef.current();
-      else recoverTab(e, boxRef.current);           // doc 105 (R6): Tab con el foco perdido
+      else recoverTab(e, boxRef.current);           // Tab con el foco perdido
     };
     window.addEventListener('keydown', onKey);
     return () => {
@@ -95,8 +95,8 @@ export default function Dialog({
       restoreFocus();
     };
   }, [open]);
-  // Doc 105 (R6): tras cada render, si el diálogo del tope perdió el foco —un
-  // botón suyo pasó a busy o desapareció—, vuelve a la caja (ver `keepFocusIn`).
+  // Tras cada render, si el diálogo del tope perdió el foco (un botón suyo entró
+  // en busy o desapareció), el foco vuelve a la caja (ver `keepFocusIn`).
   useEffect(() => {
     if (open && isTopDialog(tokenRef.current as symbol)) keepFocusIn(boxRef.current);
   });
@@ -104,9 +104,9 @@ export default function Dialog({
   if (!open) return null;
 
   const isCanvas = backdrop === 'canvas';
-  // Doc 92 D7: el borde superior del canvas se MIDE del DOM cuando existe —
-  // con la barra de herramientas colapsada (o envuelta en 2 filas, doc 64 §5)
-  // el 136 fijo de los callers ya no coincide; `canvasTop` queda de fallback.
+  // El borde superior del canvas se mide del DOM cuando existe: con la barra de
+  // herramientas colapsada (o envuelta en 2 filas) un valor fijo no coincidiría;
+  // `canvasTop` queda como respaldo.
   const measuredTop = isCanvas && typeof document !== 'undefined'
     ? document.querySelector<HTMLElement>('.wk-canvas')?.getBoundingClientRect().top
     : undefined;
@@ -114,13 +114,14 @@ export default function Dialog({
   const overlayStyle: React.CSSProperties = isCanvas
     ? { top: scrimTop, left: 0, right: 0, bottom: 0 }
     : { inset: 0 };
-  // Doc 112: debajo de la barra el alto disponible es menor que el 86vh del CSS
-  // (descontando el padding del fondo): sin esto, un contenido alto dejaba el
-  // pie (Cancel/Save) fuera de la pantalla en vez de hacer scroll en el cuerpo.
+  // Debajo de la barra el alto disponible es menor que el 86vh del CSS
+  // (descontando el padding del fondo): sin este límite, un contenido alto
+  // dejaría el pie (Cancel/Save) fuera de la pantalla en vez de hacer scroll en
+  // el cuerpo.
   const boxHeight: React.CSSProperties = isCanvas ? { maxHeight: `min(86vh, calc(100vh - ${scrimTop + 60}px))` } : {};
 
   return createPortal(
-    // El backdrop NO cierra al click (pedido owner 07-17): sólo X / acciones / ESC.
+    // El fondo no cierra al hacer clic: solo X, acciones o Esc.
     <div
       className={`dmh-dialog-backdrop${isCanvas ? ' dmh-dialog-backdrop--canvas' : ''}`}
       style={overlayStyle}
@@ -134,7 +135,7 @@ export default function Dialog({
         aria-label={title}
         ref={boxRef}
         tabIndex={-1}
-        onKeyDown={(e) => trapTab(e, boxRef.current)}   // doc 105: Tab no sale del diálogo
+        onKeyDown={(e) => trapTab(e, boxRef.current)}   // Tab no sale del diálogo
       >
         <div className="dmh-dialog-head">
           {Icon && (

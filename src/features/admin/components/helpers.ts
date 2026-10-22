@@ -1,12 +1,12 @@
 /**
- * helpers — tokens de diseño + utilidades puras del módulo Admin (pantalla 14).
- * Como el feature usa estilos inline (no .css), compartimos un objeto de tokens
+ * helpers: tokens de diseño + utilidades puras del módulo Admin.
+ * Como la feature usa estilos inline (no .css), se comparte un objeto de tokens
  * `C` y algunos estilos base reutilizables entre AdminScreen y los modales.
  */
 import type { CSSProperties } from 'react';
 import type { AdminUser, Role } from '../admin.service';
 
-/** Paleta del diseño navy light-only (tokens de referencia de la pantalla 14). */
+/** Paleta del diseño navy, solo tema claro (tokens de referencia del módulo Admin). */
 export const C = {
   navy: '#1A2B4A',
   text: '#3A4658',
@@ -63,12 +63,50 @@ export function initialsOf(u: Pick<AdminUser, 'name' | 'initials' | 'id'>): stri
 
 export interface Chip { label: string; color: string; bg: string; }
 
-/** Nivel de acceso derivado de los permisos del ROL (no del usuario). */
+/** Nivel de acceso derivado de los permisos del rol (no del usuario). */
 export function accessLevelOf(perms: Record<string, boolean> | undefined): Chip {
   const p = perms ?? {};
   if (p['admin.manage']) return { label: 'Full control', color: C.redDeep, bg: C.redBg };
-  if (p['model.edit'] || p['standards.edit'] || p['publish']) return { label: 'Edit', color: C.amber, bg: C.amberBg };
+  if (p['model.edit'] || p['standards.edit'] || p['review.decide']) return { label: 'Edit', color: C.amber, bg: C.amberBg };
   return { label: 'Read-only', color: C.green, bg: C.greenBg };
+}
+
+/** Usuarios activos (no deshabilitados) cuyo rol administra la plataforma. */
+export function activeAdminIds(users: AdminUser[], roles: Role[]): string[] {
+  const admin = new Set(roles.filter((r) => r.permissions['admin.manage']).map((r) => r.id));
+  return users.filter((u) => u.status !== 'disabled' && admin.has(u.role)).map((u) => u.id);
+}
+
+/** ¿Es el único administrador activo? Cambiarle el rol, deshabilitarlo o
+ *  quitarle el acceso dejaría la plataforma sin administrador. */
+export function isOnlyAdmin(userId: string, users: AdminUser[], roles: Role[]): boolean {
+  const ids = activeAdminIds(users, roles);
+  return ids.length === 1 && ids[0] === userId;
+}
+
+/** ¿La matriz en edición deja la plataforma sin ningún administrador activo? */
+export function matrixLeavesNoAdmin(draftRoles: Role[], users: AdminUser[]): boolean {
+  return activeAdminIds(users, draftRoles).length === 0;
+}
+
+/** Orden de guardado de la matriz (estable): primero los roles que quedan con
+ *  `admin.manage`, después el resto y al final el rol de quien guarda. El
+ *  backend evalúa cada guardado contra la matriz ya guardada y relee los
+ *  permisos de quien guarda en cada request: quitarle el permiso a un rol
+ *  antes de dárselo a otro se rechaza, y si quien guarda pierde `admin.manage`
+ *  ya no puede guardar nada más. */
+export function matrixSaveOrder(roles: Role[], actorRoleId?: string | null): Role[] {
+  const rank = (r: Role) => (r.id === actorRoleId ? 2 : r.permissions['admin.manage'] ? 0 : 1);
+  return [...roles].sort((a, b) => rank(a) - rank(b));
+}
+
+/** Proyectos asignados: lista vacía = todos. Los ids de proyectos borrados
+ *  no cuentan. */
+export function projectScopeLabel(projectIds: string[] | undefined, liveIds: Set<string>): string {
+  const ids = projectIds ?? [];
+  if (ids.length === 0) return 'All projects';
+  const n = ids.filter((id) => liveIds.has(id)).length;
+  return n === 1 ? '1 project' : `${n} projects`;
 }
 
 export function statusMeta(status: string): Chip {

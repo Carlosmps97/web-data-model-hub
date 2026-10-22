@@ -2,7 +2,7 @@
 // catálogo que los combos: cuando `loadSchemas` trae un catálogo distinto del
 // que tenía el store (un alta desde un combo, un pegado que crea su esquema,
 // una carga Excel) lo vuelve a consultar dentro de la misma versión; si el
-// catálogo no cambió, la foto cacheada sigue sirviendo. Una versión DISTINTA
+// catálogo es el mismo, la foto cacheada sigue sirviendo. Una versión distinta
 // por caso: el cache es module-level.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 

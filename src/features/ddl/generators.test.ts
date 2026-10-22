@@ -5,9 +5,10 @@ import {
   DEFAULT_DATABRICKS_OPTS as DEF, type DatabricksDdlInput, type DatabricksDdlOptions, type DdlTable, type DdlView, ddlZipName,
 } from './generators';
 
-// Doc 93: los DEFAULTS son la macro BCP (sin comillas, tipos en minúscula,
-// CREATE OR REPLACE). Las pruebas de forma históricas corren con el perfil
-// «clásico», que reproduce EXACTO el estilo anterior.
+// Los valores por defecto siguen la macro de referencia (sin comillas, tipos en
+// minúscula, CREATE OR REPLACE). Las pruebas de forma corren con el perfil
+// «clásico»: identificadores tal cual, comillas siempre, tipos en mayúscula e
+// IF NOT EXISTS.
 const CLASSIC: DatabricksDdlOptions = {
   ...DEF, identifierCase: 'as-is', external: false,
   quoteIdentifiers: 'always', typeCase: 'upper', createTable: 'if-not-exists',
@@ -24,8 +25,8 @@ const BASE = {
 };
 const withView = (v: DdlView): DatabricksDdlInput => ({ ...BASE, views: [v] });
 
-describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro BCP (doc 76 D9)', () => {
-  it('defaults de la macro: lower, sin comillas, tipos en minúscula, OR REPLACE, abfss + carpeta MAYÚSCULA', () => {
+describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro de referencia', () => {
+  it('valores por defecto de la macro: lower, sin comillas, tipos en minúscula, OR REPLACE, abfss + carpeta en mayúsculas', () => {
     expect(DEF.identifierCase).toBe('lower');
     expect(DEF.quoteIdentifiers).toBe('when-needed');
     expect(DEF.typeCase).toBe('lower');
@@ -42,7 +43,7 @@ describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro BCP (doc 76 D9)', () =>
     expect(ddl).not.toContain('NOT NULL');
   });
 
-  it('Comments OFF por default: el CREATE sale sin COMMENT hasta que se pidan', () => {
+  it('Comments apagado por defecto: el CREATE sale sin COMMENT hasta que se pidan', () => {
     expect(DEF.includeComments).toBe(false);
     const commented = {
       ...BASE,
@@ -53,7 +54,7 @@ describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro BCP (doc 76 D9)', () =>
     expect(databricksDdl(commented, { ...DEF, includeComments: true })).toContain("COMMENT 'Id del Cliente'");
   });
 
-  it('doc 85: el COMMENT de columna prefiere la descripción física y cae a la lógica', () => {
+  it('el COMMENT de columna prefiere la descripción física y cae a la lógica', () => {
     const input = { ...BASE, columns: [
       { id: 'c1', tableId: 't1', physicalName: 'ID', dataType: 'bigint', ordinal: 0, description: 'Id logico', physicalDescription: 'Id fisico' },
       { id: 'c2', tableId: 't1', physicalName: 'NOMBRE', dataType: 'string', ordinal: 1, description: 'Nombre', physicalDescription: '  ' },
@@ -74,7 +75,7 @@ describe('DEFAULT_DATABRICKS_OPTS — perfil de la macro BCP (doc 76 D9)', () =>
   });
 });
 
-describe('viewDDL — la User-Defined SQL es informativa (doc 96 D6)', () => {
+describe('viewDDL — la User-Defined SQL es informativa', () => {
   const tables = new Map<string, DdlTable>([
     ['t1', { id: 't1', physicalName: 'CLIENTE', schema: 'core' } as DdlTable],
     ['t2', { id: 't2', physicalName: 'CUENTA', schema: 'core' } as DdlTable],
@@ -82,7 +83,7 @@ describe('viewDDL — la User-Defined SQL es informativa (doc 96 D6)', () => {
   const regular: DdlView = { id: 'v', tableId: 't1', sourceTableIds: ['t1', 't2'], name: 'v_cc', schema: 'core',
     sources: [{ tableId: 't1', column: 'ID' }, { tableId: 't2', column: 'SALDO' }] };
 
-  it('con customSql el DDL es el MISMO que sin ella: sale de las columnas y la query no aparece', () => {
+  it('con customSql el DDL es el mismo que sin ella: sale de las columnas y la query no aparece', () => {
     const withSql = { ...regular, customSql: 'CREATE VIEW core.otra AS SELECT 1 FROM x JOIN y ON 1=1 WHERE secreto = 1' };
     expect(viewDDL(withSql, DEF, tables)).toBe(viewDDL(regular, DEF, tables));
     expect(viewDDL(withSql, DEF, tables)).not.toContain('secreto');
@@ -95,12 +96,12 @@ describe('viewDDL — la User-Defined SQL es informativa (doc 96 D6)', () => {
   });
 });
 
-describe('databricksDdl — vistas (editor 07b-2)', () => {
-  it('NO emite vistas cuando includeViews=false', () => {
+describe('databricksDdl — vistas', () => {
+  it('no emite vistas cuando includeViews=false', () => {
     expect(databricksDdl(withView({ id: 'v', tableId: 't1', name: 'v_c', schema: 'core' }), { ...DEF, includeViews: false })).not.toContain('VIEW');
   });
 
-  it('SELECT * (fallback) solo cuando la vista NO tiene proyección (legacy); sin WHERE (doc 91 D2)', () => {
+  it('SELECT * (fallback) solo cuando la vista no tiene proyección; sin WHERE', () => {
     const ddl = databricksDdl(withView({ id: 'v', tableId: 't1', name: 'v_cliente', schema: 'core' }), { ...DEF, includeViews: true });
     expect(ddl).toContain('CREATE OR REPLACE VIEW core.v_cliente');
     expect(ddl).toContain('SELECT *');
@@ -108,19 +109,19 @@ describe('databricksDdl — vistas (editor 07b-2)', () => {
     expect(ddl).not.toContain('WHERE');
   });
 
-  it('con TODAS las columnas como sources => las LISTA explícitas `col AS col` (doc 76 D10)', () => {
+  it('con todas las columnas como sources => las lista explícitas `col AS col`', () => {
     const ddl = databricksDdl(withView({ id: 'v', tableId: 't1', name: 'v_all', schema: 'core', sources: [{ column: 'ID' }, { column: 'NOMBRE' }] }), { ...DEF, includeViews: true });
     expect(ddl).not.toContain('SELECT *');
     expect(ddl).toMatch(/SELECT\n\s+id AS id,\n\s+nombre AS nombre\nFROM/);
   });
 
-  it('columnas EXPLÍCITAS (una por línea) cuando es un subconjunto', () => {
+  it('columnas explícitas (una por línea) cuando es un subconjunto', () => {
     const ddl = databricksDdl(withView({ id: 'v', tableId: 't1', name: 'v_sub', schema: 'core', sources: [{ column: 'ID' }] }), { ...DEF, includeViews: true });
     expect(ddl).toMatch(/SELECT\n\s+id AS id\nFROM/);
     expect(ddl).not.toContain('SELECT *');
   });
 
-  it('columnas EXPLÍCITAS con rename y expresión (la expresión y su alias VERBATIM)', () => {
+  it('columnas explícitas con rename y expresión (la expresión y su alias, verbatim)', () => {
     const ddl = databricksDdl(withView({
       id: 'v', tableId: 't1', name: 'v_x', schema: 'core',
       sources: [{ column: 'ID', outputAlias: 'Cuenta_Id' }, { column: 'NOMBRE', expression: 'UPPER(NOMBRE)', outputAlias: 'Nombre_Up' }],
@@ -146,7 +147,7 @@ describe('databricksDdl — vistas (editor 07b-2)', () => {
   });
 });
 
-describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () => {
+describe('viewDDL / databricksDdl — vistas multi-fuente', () => {
   const TWO: DatabricksDdlInput = {
     tables: [
       { id: 't1', physicalName: 'CLIENTE', schema: 'core' },
@@ -169,7 +170,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     ],
   };
 
-  it('doc 91 D5: FROM lista las fuentes separadas por coma con alias posicionales, SIN JOIN ni ON (aunque haya relación)', () => {
+  it('FROM lista las fuentes separadas por coma con alias posicionales, sin JOIN ni ON (aunque haya relación)', () => {
     const ddl = databricksDdl({ ...TWO, views: [V] }, { ...DEF, includeViews: true });
     expect(ddl).toContain('FROM core.cliente t1,\n  core.cuenta t2;');
     expect(ddl).not.toMatch(/\bJOIN\b/);
@@ -196,7 +197,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     expect(ddl).not.toMatch(/\bJOIN\b/);
   });
 
-  it('UNA fuente: sin alias ni cualificación (regresión legacy); CAST sin alias conserva el nombre', () => {
+  it('una fuente: sin alias ni cualificación; CAST sin alias conserva el nombre', () => {
     const one: DdlView = {
       id: 'v1', tableId: 't1', name: 'v_c', schema: 'core', sourceTableIds: ['t1'],
       sources: [{ column: 'ID', tableId: 't1', castType: 'STRING' }],
@@ -206,18 +207,18 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     expect(ddl).not.toContain('t1.id');
   });
 
-  it('la vista entra al export si ALGUNA fuente está en el set exportado', () => {
+  it('la vista entra al export si alguna fuente está en el set exportado', () => {
     const ddl = databricksDdl({ ...TWO, views: [V], tableIds: ['t2'] }, { ...DEF, includeViews: true });
     expect(ddl).toContain('v_cliente_cuenta');
   });
 
-  it('fuente FUERA del contexto (tabla desconocida): id visible', () => {
+  it('fuente fuera del contexto (tabla desconocida): id visible', () => {
     const v: DdlView = { ...V, sourceTableIds: ['t1', 'tx'], sources: [{ column: 'ID', tableId: 't1' }] };
     const ddl = databricksDdl({ ...TWO, views: [v] }, { ...DEF, includeViews: true });
     expect(ddl).toContain('FROM core.cliente t1,\n  tx t2;');
   });
 
-  it('expression se emite VERBATIM también con 2+ fuentes (sin cualificar)', () => {
+  it('expression se emite verbatim también con 2+ fuentes (sin cualificar)', () => {
     const v: DdlView = {
       ...V,
       sources: [
@@ -229,7 +230,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
     expect(ddl).toContain('ROUND(t2.SALDO, 2) AS saldo_r');
   });
 
-  it('descarta una fuente con expression en blanco (A4: no emite `t1.undefined`)', () => {
+  it('descarta una fuente con expression en blanco (no emite `t1.undefined`)', () => {
     const v: DdlView = {
       ...V,
       sources: [
@@ -243,7 +244,7 @@ describe('viewDDL / databricksDdl — vistas multi-fuente (F3, spec §3-5)', () 
   });
 });
 
-describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', () => {
+describe('databricksDdl — identifierCase (switch triple de casing)', () => {
   const CASED: DatabricksDdlInput = {
     tables: [
       { id: 't1', physicalName: 'Cliente', schema: 'Core', description: 'Maestro de Clientes' },
@@ -266,7 +267,7 @@ describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', ()
     expect(ddl).toContain('CONSTRAINT `pk_Cliente` PRIMARY KEY (`Id`)');
   });
 
-  it("'upper': schema/tabla/columna y nombres de constraint en MAYÚSCULAS", () => {
+  it("'upper': schema/tabla/columna y nombres de constraint en mayúsculas", () => {
     const ddl = databricksDdl(CASED, { ...CLASSIC, includeKeys: true, identifierCase: 'upper' });
     expect(ddl).toContain('CREATE TABLE IF NOT EXISTS `CORE`.`CLIENTE`');
     expect(ddl).toContain('`ID` BIGINT');
@@ -284,13 +285,13 @@ describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', ()
     expect(ddl).not.toContain('`Cliente`');
   });
 
-  it("'upper' NO toca literales de string ni COMMENTs", () => {
+  it("'upper' no toca literales de string ni COMMENTs", () => {
     const ddl = databricksDdl(CASED, { ...CLASSIC, identifierCase: 'upper', includeComments: true });
     expect(ddl).toContain("COMMENT 'Maestro de Clientes'");
     expect(ddl).toContain("COMMENT 'Id del Cliente'");
   });
 
-  it("'lower' NO toca tipos de datos ni el path base de LOCATION; la carpeta sigue locationFolderCase", () => {
+  it("'lower' no toca tipos de datos ni el path base de LOCATION; la carpeta sigue locationFolderCase", () => {
     const input: DatabricksDdlInput = {
       ...CASED,
       columns: [{ id: 'c1', tableId: 't1', physicalName: 'Monto', dataType: 'decimal(10,2)', ordinal: 0 }],
@@ -300,13 +301,13 @@ describe('databricksDdl — identifierCase (switch triple de casing, F4 #7)', ()
     // dbxType decide el casing del tipo, no el switch:
     expect(databricksDdl(input, opts)).toContain('`monto` DECIMAL(10,2)');
     // LOCATION es un literal (path físico): la base queda intacta y la carpeta
-    // sigue SU propio casing (doc 76 D9: default MAYÚSCULA; as-is = crudo).
+    // sigue su propio casing (por defecto, mayúsculas; as-is = crudo).
     expect(databricksDdl(input, opts)).toContain("LOCATION 's3://Bucket/Warehouse/CLIENTE'");
     expect(databricksDdl(input, { ...opts, locationFolderCase: 'as-is' })).toContain("LOCATION 's3://Bucket/Warehouse/Cliente'");
   });
 });
 
-describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #7)', () => {
+describe('databricksDdl — identifierCase sobre vistas multi-fuente', () => {
   const MULTI: DatabricksDdlInput = {
     tables: [
       { id: 't1', physicalName: 'Cliente', schema: 'Core' },
@@ -346,7 +347,7 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
     expect(vp).not.toMatch(/\bT2\b/);
   });
 
-  it('expresiones de vista se emiten VERBATIM (sin casing)', () => {
+  it('expresiones de vista se emiten verbatim (sin casing)', () => {
     const v: DdlView = {
       id: 'v', tableId: 't1', name: 'v_x', schema: 'Core', sourceTableIds: ['t1'],
       sources: [
@@ -358,7 +359,7 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
     expect(vp).toContain('UPPER(Nombre)');
   });
 
-  it('castType NO se casea (es un tipo de dato, no un identificador)', () => {
+  it('castType no se casea (es un tipo de dato, no un identificador)', () => {
     const v: DdlView = {
       id: 'v', tableId: 't1', name: 'v_cast', schema: 'Core', sourceTableIds: ['t1'],
       sources: [{ column: 'Id', tableId: 't1', castType: 'DECIMAL(10,2)', outputAlias: 'id_dec' }],
@@ -367,9 +368,9 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
     expect(vp).toContain('CAST(id AS DECIMAL(10,2)) AS id_dec');
   });
 
-  // ── Criterio obligatorio #2 (controller): 2 fuentes bajo 'upper' — un solo
-  //    caso que congela TODAS las reglas verbatim junto al casing del FROM/JOIN.
-  it("2 fuentes bajo 'upper': FROM caseado; alias/expression/castType VERBATIM", () => {
+  // ── 2 fuentes bajo 'upper': un solo caso que congela todas las reglas
+  //    verbatim junto al casing del FROM/JOIN.
+  it("2 fuentes bajo 'upper': FROM caseado; alias/expression/castType verbatim", () => {
     const v: DdlView = {
       id: 'v', tableId: 't1', name: 'v_multi', schema: 'Core',
       sourceTableIds: ['t1', 't2'],
@@ -380,24 +381,24 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
       ],
     };
     const vp = viewPart(databricksDdl({ ...MULTI, views: [v] }, { ...CLASSIC, includeViews: true, identifierCase: 'upper' }));
-    // FROM: nombres del modelo caseados, fuentes separadas por coma (doc 91 D5).
+    // FROM: nombres del modelo caseados, fuentes separadas por coma.
     expect(vp).toContain('FROM `CORE`.`CLIENTE` t1,\n  `CORE`.`CUENTA` t2;');
     // Alias generados: minúscula intacta (no `T1`/`T2`).
     expect(vp).not.toMatch(/\bT1\b/);
     expect(vp).not.toMatch(/\bT2\b/);
-    // expression: VERBATIM, alias incluido.
+    // expression: verbatim, alias incluido.
     expect(vp).toContain('ROUND(t2.saldo, 2) AS saldo_r');
-    // castType: VERBATIM (tipo de dato, no identificador); columna y alias caseados.
+    // castType: verbatim (tipo de dato, no identificador); columna y alias caseados.
     expect(vp).toContain('CAST(t2.SALDO AS DECIMAL(10,2)) AS SALDO_DEC');
   });
 
-  // ── Criterio obligatorio #1 (controller): el path directo `viewDDL(...)` (el que
-  //    usa ViewEditor, nunca databricksDdl) no debe heredar el `activeCase` del
-  //    ÚLTIMO export. viewDDL fija activeCase desde SUS opciones al entrar.
-  it("path directo viewDDL tras un export 'upper' NO hereda el casing (deriva activeCase de SUS opciones)", () => {
-    // Ensucia el activeCase global con un export en MAYÚSCULAS.
+  // ── El path directo `viewDDL(...)` (el que usa ViewEditor, nunca databricksDdl)
+  //    no debe heredar el `activeCase` del último export. viewDDL fija activeCase
+  //    desde sus opciones al entrar.
+  it("path directo viewDDL tras un export 'upper' no hereda el casing (deriva activeCase de sus opciones)", () => {
+    // Ensucia el activeCase global con un export en mayúsculas.
     databricksDdl(MULTI, { ...CLASSIC, includeViews: true, identifierCase: 'upper' });
-    // Ahora el ViewEditor llama viewDDL directo con el perfil clásico ('as-is').
+    // Luego el ViewEditor llama viewDDL directo con el perfil clásico ('as-is').
     const tableById = new Map<string, DdlTable>(MULTI.tables.map((t) => [t.id, t]));
     const out = viewDDL(MULTI.views![0], CLASSIC, tableById);
     // Identificadores del modelo: tal cual (no caseados por el export previo).
@@ -409,7 +410,7 @@ describe('databricksDdl — identifierCase sobre vistas multi-fuente (F3b + F4 #
   });
 });
 
-describe('databricksDdl — tipos complejos verbatim (F4 #6)', () => {
+describe('databricksDdl — tipos complejos verbatim', () => {
   const complex = (dataType: string): DatabricksDdlInput => ({
     tables: [{ id: 't1', physicalName: 'evento', schema: 'core' }],
     columns: [{ id: 'c1', tableId: 't1', physicalName: 'payload', dataType, ordinal: 0 }],
@@ -417,7 +418,7 @@ describe('databricksDdl — tipos complejos verbatim (F4 #6)', () => {
     modelName: 'm',
   });
 
-  it('un STRUCT anidado se emite VERBATIM (bug actual: toUpperCase rompe la sintaxis interna)', () => {
+  it('un STRUCT anidado se emite verbatim (toUpperCase rompería la sintaxis interna)', () => {
     const t = 'STRUCT<nombre:STRING, montos:ARRAY<DECIMAL(10,2)>, extra:MAP<STRING,STRING>>';
     expect(databricksDdl(complex(t), DEF)).toContain(`payload ${t}`);
   });
@@ -427,26 +428,26 @@ describe('databricksDdl — tipos complejos verbatim (F4 #6)', () => {
     expect(databricksDdl(complex(t), DEF)).toContain(`payload ${t}`);
   });
 
-  it('el switch identifierCase NO toca tipos complejos', () => {
+  it('el switch identifierCase no toca tipos complejos', () => {
     const t = 'STRUCT<Nombre:STRING>';
     expect(databricksDdl(complex(t), { ...DEF, identifierCase: 'upper' })).toContain(t);
     expect(databricksDdl(complex(t), { ...DEF, identifierCase: 'lower' })).toContain(t);
   });
 
-  it('doc 92 D6: un tipo complejo multilínea (como lo trae Erwin) sale en UNA línea, verbatim en casing', () => {
+  it('un tipo complejo multilínea (como lo trae Erwin) sale en una línea, verbatim en casing', () => {
     const erwin = 'Array \n<\n\tstruct <\n\tcodcampania: varchar(30),\n\tfecsolicitud: date\n\t>\n>';
     const ddl = databricksDdl(complex(erwin), DEF);
     expect(ddl).toContain('payload Array < struct < codcampania: varchar(30), fecsolicitud: date > >');
     expect(ddl.split('\n').filter((l) => l.includes('codcampania'))).toHaveLength(1);
   });
 
-  it('los tipos simples siguen mapeando igual que antes', () => {
+  it('los tipos simples usan el mapa normal (varchar → string; decimal(10,2) tal cual)', () => {
     expect(databricksDdl(complex('varchar'), DEF)).toContain('payload string');
     expect(databricksDdl(complex('decimal(10,2)'), DEF)).toContain('payload decimal(10,2)');
   });
 });
 
-describe('doc 94 — orden único: PK primero y PRIMARY KEY por ordinal (sin orden de llave aparte)', () => {
+describe('orden único: PK primero y PRIMARY KEY por ordinal (sin orden de llave aparte)', () => {
   it('cuerpo del CREATE con las PK primero aunque el ordinal guardado esté desordenado; PRIMARY KEY en ese orden', () => {
     const input: DatabricksDdlInput = {
       tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
@@ -478,7 +479,7 @@ describe('doc 94 — orden único: PK primero y PRIMARY KEY por ordinal (sin ord
   });
 });
 
-describe('particiones: PARTITIONED BY con su tipo, partitionsLast y partitionOrder (doc 73 / doc 76 D3 / doc 107)', () => {
+describe('particiones: PARTITIONED BY con su tipo, partitionsLast y partitionOrder', () => {
   const input: DatabricksDdlInput = {
     tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
     columns: [
@@ -494,7 +495,7 @@ describe('particiones: PARTITIONED BY con su tipo, partitionsLast y partitionOrd
     const body = ddl.slice(ddl.indexOf('(\n') + 2, ddl.indexOf('\n)'));
     return body.split(',\n').map((l) => l.trim().split(' ')[0]).filter((n) => n.startsWith('`'));
   };
-  it('doc 107: con PARTITIONED BY las particiones salen de la lista y van ahí con su definición — con o sin la regla', () => {
+  it('con PARTITIONED BY las particiones salen de la lista y van ahí con su definición, con o sin la regla', () => {
     for (const o of [{ ...CLASSIC, includeKeys: true }, { ...CLASSIC, includeKeys: true, partitionsLast: true }]) {
       const ddl = databricksDdl(input, o);
       expect(bodyNames(ddl)).toEqual(['`COD`', '`MTO`']);
@@ -527,7 +528,7 @@ describe('particiones: PARTITIONED BY con su tipo, partitionsLast y partitionOrd
   });
 });
 
-describe('doc 107 — particiones solo en el PARTITIONED BY (formato fijo, con o sin reglas)', () => {
+describe('particiones solo en el PARTITIONED BY (formato fijo, con o sin reglas)', () => {
   const input: DatabricksDdlInput = {
     tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
     columns: [
@@ -540,7 +541,7 @@ describe('doc 107 — particiones solo en el PARTITIONED BY (formato fijo, con o
     modelName: 'm',
   };
   const opts: DatabricksDdlOptions = { ...DEF, external: false };
-  it('las particiones NO van en la lista: se declaran con su tipo en el PARTITIONED BY, en orden PART_nn', () => {
+  it('las particiones no van en la lista: se declaran con su tipo en el PARTITIONED BY, en orden PART_nn', () => {
     expect(tableStatements(input, opts)[0].sql).toBe(
       'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  mto decimal(18,2)\n)\nUSING DELTA\nPARTITIONED BY (fecdia date, codmes int);\n');
   });
@@ -564,10 +565,10 @@ describe('doc 107 — particiones solo en el PARTITIONED BY (formato fijo, con o
 });
 
 describe('ddlZipName', () => {
-  it('one table → that table name .zip', () => {
+  it('una tabla → .zip con el nombre de esa tabla', () => {
     expect(ddlZipName([{ id: '1', physicalName: 'CLIENTE' }], 'M')).toBe('CLIENTE.zip');
   });
-  it('many tables → model name .zip', () => {
+  it('varias tablas → .zip con el nombre del modelo', () => {
     expect(ddlZipName(
       [{ id: '1', physicalName: 'A' }, { id: '2', physicalName: 'B' }],
       'My Model',
@@ -575,7 +576,7 @@ describe('ddlZipName', () => {
   });
 });
 
-// Doc 93 Anexo A — tabla del owner. Las particiones llegan como las deja
+// Tabla de referencia. Las particiones llegan como las deja
 // `withUdpPartitions` (PART_01 = codmes, PART_02 = nbrgrupo…).
 const SPEC_ROWS: [string, string, number | null][] = [
   ['CODCLAVEPARTYCLI', 'VARCHAR(128)', null], ['TIPROLCLI', 'CHAR(20)', null],
@@ -593,15 +594,15 @@ const SPEC_ROWS: [string, string, number | null][] = [
   ['FECDIA', 'DATE', null],
 ];
 const SPEC_INPUT: DatabricksDdlInput = {
-  tables: [{ id: 't1', physicalName: 'H_SALDOCIERREPROCESOBANCAMINORISTA', schema: 'bcp_udv_int' }],
+  tables: [{ id: 't1', physicalName: 'H_SALDOCIERREPROCESOVENTAS', schema: 'core_int' }],
   columns: SPEC_ROWS.map(([n, t, part], i) => ({
     id: `c${i}`, tableId: 't1', physicalName: n, dataType: t, ordinal: i,
     isPrimaryKey: i < 6, isNullable: i >= 6, isPartition: part !== null, partitionOrder: part,
   })),
-  relationships: [], modelName: 'UDV INT',
+  relationships: [], modelName: 'CORE INT',
 };
 const SPEC_LIST = [
-  'CREATE OR REPLACE TABLE bcp_udv_int.h_saldocierreprocesobancaminorista (',
+  'CREATE OR REPLACE TABLE core_int.h_saldocierreprocesoventas (',
   '  codclavepartycli varchar(128),', '  tiprolcli char(20),', '  codclavecta varchar(128),',
   '  codproducto varchar(30),', '  codclaveunicocli varchar(128),', '  codinternocomputacional varchar(30),',
   '  codctaapp string,', '  codcta20 string,', '  codctacomercial string,', '  codctainterna string,',
@@ -611,14 +612,14 @@ const SPEC_LIST = [
   '  mtosaldofinmesvigsol decimal(21,4),', '  mtosaldofinmesvigdol decimal(21,4),', '  fecrutina date,',
   '  fecactualizacionregistro timestamp,', '  tipfrecuenciaregistro char(1),',
 ];
-const SPEC_LOCATION = "LOCATION 'abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>/H_SALDOCIERREPROCESOBANCAMINORISTA';";
-// Doc 107: particiones solo en el PARTITIONED BY, con su tipo (formato fijo).
+const SPEC_LOCATION = "LOCATION 'abfss://<container_name>@<storage_account_name>.dfs.core.windows.net/<path>/H_SALDOCIERREPROCESOVENTAS';";
+// Particiones solo en el PARTITIONED BY, con su tipo (formato fijo).
 const SPEC_BASE_SQL = [
   ...SPEC_LIST, '  fecdia date', ')', 'USING DELTA',
   'PARTITIONED BY (codmes int, nbrgrupoprocesobcaminorista varchar(120))', SPEC_LOCATION,
 ].join('\n');
 
-describe('doc 93 — estilo de salida (comillas, tipos, CREATE, NOT NULL)', () => {
+describe('estilo de salida (comillas, tipos, CREATE, NOT NULL)', () => {
   it('needsQuote: solo nombres con espacios/caracteres especiales o palabras reservadas', () => {
     expect(needsQuote('codmes')).toBe(false);
     expect(needsQuote('_x1')).toBe(false);
@@ -629,17 +630,17 @@ describe('doc 93 — estilo de salida (comillas, tipos, CREATE, NOT NULL)', () =
 
   it('nombres que necesitan comillas las conservan (tabla, columnas, FROM y proyecciones)', () => {
     const input: DatabricksDdlInput = {
-      tables: [{ id: 't1', physicalName: 'HD BASE', schema: 'bcp' }],
+      tables: [{ id: 't1', physicalName: 'HD BASE', schema: 'stg' }],
       columns: [{ id: 'c1', tableId: 't1', physicalName: 'select', dataType: 'string', ordinal: 0 }],
       relationships: [], modelName: 'm',
-      views: [{ id: 'v', tableId: 't1', name: 'v x', schema: 'bcp_vu', sources: [{ column: 'select' }] }],
+      views: [{ id: 'v', tableId: 't1', name: 'v x', schema: 'stg_vu', sources: [{ column: 'select' }] }],
     };
     const ddl = databricksDdl(input, { ...DEF, external: false });
-    expect(ddl).toContain('CREATE OR REPLACE TABLE bcp.`hd base` (\n  `select` string\n)');
-    expect(ddl).toContain('CREATE OR REPLACE VIEW bcp_vu.`v x` AS\nSELECT\n  `select` AS `select`\nFROM bcp.`hd base`;');
+    expect(ddl).toContain('CREATE OR REPLACE TABLE stg.`hd base` (\n  `select` string\n)');
+    expect(ddl).toContain('CREATE OR REPLACE VIEW stg_vu.`v x` AS\nSELECT\n  `select` AS `select`\nFROM stg.`hd base`;');
   });
 
-  it("'always' + 'upper' + 'if-not-exists' = estilo anterior", () => {
+  it("'always' + 'upper' + 'if-not-exists' = comillas siempre, tipos en mayúscula e IF NOT EXISTS", () => {
     const ddl = databricksDdl(BASE, { ...DEF, quoteIdentifiers: 'always', typeCase: 'upper', createTable: 'if-not-exists' });
     expect(ddl).toContain('CREATE EXTERNAL TABLE IF NOT EXISTS `core`.`cliente` (\n  `id` BIGINT,\n  `nombre` STRING\n)');
   });
@@ -658,13 +659,13 @@ describe('doc 93 — estilo de salida (comillas, tipos, CREATE, NOT NULL)', () =
     expect(ddlType('')).toBe('string');
   });
 
-  it('createTableSql: OR REPLACE por default; IF NOT EXISTS (con/sin EXTERNAL) por setting', () => {
+  it('createTableSql: OR REPLACE por defecto; IF NOT EXISTS (con/sin EXTERNAL) por setting', () => {
     expect(createTableSql({ createTable: 'or-replace', external: true })).toBe('CREATE OR REPLACE TABLE');
     expect(createTableSql({ createTable: 'if-not-exists', external: true })).toBe('CREATE EXTERNAL TABLE IF NOT EXISTS');
     expect(createTableSql({ createTable: 'if-not-exists', external: false })).toBe('CREATE TABLE IF NOT EXISTS');
   });
 
-  it('golden del spec-rule (doc 93 Anexo A · doc 107): el CREATE físico que recibe el motor — igual con o sin la regla', () => {
+  it('golden de la tabla de referencia: el CREATE físico que recibe el motor, igual con o sin la regla', () => {
     expect(tableStatements(SPEC_INPUT, { ...DEF, partitionsLast: true })[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
     expect(tableStatements(SPEC_INPUT, DEF)[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
   });

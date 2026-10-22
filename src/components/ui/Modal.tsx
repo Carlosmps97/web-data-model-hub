@@ -11,44 +11,45 @@ interface ModalProps {
   icon?: IconName;
   onClose: () => void;
   children: React.ReactNode;
-  /** Right-aligned footer actions. The caller wraps any "left" content in `.left`. */
+  /** Acciones del pie, alineadas a la derecha. Quien lo usa envuelve el contenido «de la izquierda» en `.left`. */
   footer?: React.ReactNode;
   size?: 'md' | 'lg';
 }
 
 /**
- * Shared modal shell — dimmed scrim (no blur, see Dialog) + header (icon · title · subtitle · close)
- * + scrollable body + right-aligned footer. Mirrors `.dmh-modal` from the
- * Aurora prototype (`app.css`). ESC closes — only the topmost dialog (doc 105:
- * with «Inherit from domain» open over «New column», one ESC closed both and the
- * new column was lost; same stack as `Dialog`, doc 80 §1). Focus enters the box
- * on open (unless an `autoFocus` control already has it), Tab stays inside, and
- * on close focus returns to the opener (doc 105, F6 — `focusInto`/`trapTab`).
+ * Shell de modal compartido: scrim oscurecido (sin blur, ver Dialog) + encabezado
+ * (ícono · título · subtítulo · cerrar) + cuerpo con scroll + pie alineado a la
+ * derecha, con la clase `.dmh-modal` del sistema de diseño Aurora. Esc cierra solo
+ * el diálogo del tope (misma pila que `Dialog`): con «Inherit from domain» abierto
+ * sobre «New column», un Esc cierra solo el de arriba y la columna en edición no se
+ * pierde. El foco entra a la caja al abrirse (salvo que un control con `autoFocus`
+ * ya lo tenga), Tab no sale de ella y, al cerrarse, el foco vuelve a quien lo abrió
+ * (`focusInto`/`trapTab`).
  */
 export default function Modal({ title, subtitle, icon, onClose, children, footer, size = 'md' }: ModalProps) {
-  // Token estable por instancia y efecto sólo al montar (patrón de `Dialog`):
-  // re-registrar en cada render (los callers pasan arrows inline) pondría en
-  // el tope al Modal de ABAJO y le robaría el ESC.
+  // Token estable por instancia y efecto solo al montar (patrón de `Dialog`):
+  // volver a registrar en cada render (quienes lo usan pasan arrows inline)
+  // pondría en el tope al Modal de abajo y le robaría el Esc.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const tokenRef = useRef<symbol | null>(null);
   if (tokenRef.current === null) tokenRef.current = Symbol('dmh-modal');
   const boxRef = useRef<HTMLDivElement | null>(null);
-  // Quién tenía el foco al abrirse: se lee en el PRIMER render, antes del
-  // commit — un `autoFocus` de adentro todavía no lo tomó (init perezoso).
+  // Quién tenía el foco al abrirse: se lee en el primer render, antes de la fase
+  // de commit, cuando ningún `autoFocus` de adentro tomó el foco (init perezoso).
   const openerRef = useRef<Element | null | undefined>(undefined);
   if (openerRef.current === undefined) openerRef.current = activeElementNow();
 
   useEffect(() => {
     const token = tokenRef.current as symbol;
     pushDialog(token);
-    // Doc 105 (F6): el foco entra al popup (abierto con el mouse quedaba en la
-    // página de atrás); al cerrar vuelve a quien lo abrió. Ver `focusInto`.
+    // El foco entra al popup (abierto con el mouse, quedaría en la página de
+    // atrás); al cerrar vuelve a quien lo abrió. Ver `focusInto`.
     const restoreFocus = focusInto(boxRef.current, openerRef.current);
     const onKey = (e: KeyboardEvent) => {
       if (!isTopDialog(token)) return;
       if (e.key === 'Escape') onCloseRef.current();
-      else recoverTab(e, boxRef.current);           // doc 105 (R6): Tab con el foco perdido
+      else recoverTab(e, boxRef.current);           // Tab con el foco perdido
     };
     window.addEventListener('keydown', onKey);
     return () => {
@@ -57,13 +58,13 @@ export default function Modal({ title, subtitle, icon, onClose, children, footer
       restoreFocus();
     };
   }, []);
-  // Doc 105 (R6): tras cada render, si el popup del tope perdió el foco —un
-  // botón suyo pasó a busy o desapareció—, vuelve a la caja (ver `keepFocusIn`).
+  // Tras cada render, si el popup del tope perdió el foco (un botón suyo entró en
+  // busy o desapareció), el foco vuelve a la caja (ver `keepFocusIn`).
   useEffect(() => { if (isTopDialog(tokenRef.current as symbol)) keepFocusIn(boxRef.current); });
 
   return (
-    // El scrim NO cierra al click (pedido owner 07-17: un click afuera perdía
-    // lo tipeado). Cerrar = X / acción del footer / ESC.
+    // El scrim no cierra al hacer clic (un clic afuera perdería lo tipeado). Se
+    // cierra con X, una acción del footer o Esc.
     <div className="dmh-backdrop" role="presentation">
       <div
         className={`dmh-modal${size === 'lg' ? ' lg' : ''}`}
@@ -73,7 +74,7 @@ export default function Modal({ title, subtitle, icon, onClose, children, footer
         aria-label={title}
         ref={boxRef}
         tabIndex={-1}
-        onKeyDown={(e) => trapTab(e, boxRef.current)}   // doc 105: Tab no sale del popup
+        onKeyDown={(e) => trapTab(e, boxRef.current)}   // Tab no sale del popup
       >
         <div className="m-head">
           {icon && <span className="ico"><Icon name={icon} size={16} /></span>}

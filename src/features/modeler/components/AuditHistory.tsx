@@ -5,9 +5,9 @@ import type { HistoryItem } from '@/services/governance.service';
 import { ACTION_LABEL, fieldValue, formatWhen, originText, refLabel, userLabel } from '../lib/history';
 
 /**
- * Sección "History" de la pestaña Metadata (doc 51) — auditoría PUBLICADA de
- * una tabla o columna: quién / qué acción / qué versión / cuándo, con el
- * detalle de campos BAJO DEMANDA (fila expandible) para no recargar el panel.
+ * Sección "History" de la pestaña Metadata: auditoría publicada de una tabla o
+ * columna (quién / qué acción / qué versión / cuándo), con el detalle de
+ * campos bajo demanda (fila expandible) para no recargar el panel.
  * Se monta solo con Metadata activa ⇒ el fetch es bajo demanda; cambiar de
  * entidad re-consulta. Read-only puro: no toca changeset ni versionamiento.
  */
@@ -64,7 +64,7 @@ export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'colu
                       ↩{it.restoredFrom.versionLabel ?? '—'}
                     </span>
                   )}
-                  {/* Doc 104: la versión cambió de manos antes de publicarse. */}
+                  {/* Quien inició la versión no es quien la publicó. */}
                   {it.startedBy && it.startedBy.id !== it.user?.id && (
                     <span className="wk-pp-histver" title={`Started by ${refLabel(it.startedBy)}`}>⇄</span>
                   )}

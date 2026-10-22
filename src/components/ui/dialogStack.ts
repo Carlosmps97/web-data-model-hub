@@ -1,13 +1,13 @@
 /**
- * Pila de diálogos abiertos (doc 80 §1). `Dialog` escucha ESC en `window`, así
- * que con DOS diálogos abiertos —el popup de Esquemas montado ENCIMA del editor
- * de vistas— un solo ESC cerraba los dos: se perdía la vista a medio componer
- * por cancelar el popup de arriba. Con la pila, ESC lo consume únicamente el
+ * Pila de diálogos abiertos. `Dialog` escucha Esc en `window`, así que con dos
+ * diálogos abiertos (el popup de Esquemas montado encima del editor de vistas)
+ * un solo Esc cerraría los dos y se perdería la vista a medio componer al
+ * cancelar el popup de arriba. Con la pila, Esc lo consume únicamente el
  * diálogo del tope.
  *
  * El token es estable por diálogo (un `Symbol` por instancia, guardado en un
- * ref): registrar en cada render lo re-pondría en el tope y el de ABAJO se
- * comería el ESC. Puro, sin React — testeable.
+ * ref): registrar en cada render lo volvería a poner en el tope y el de abajo se
+ * quedaría con el Esc. Puro, sin React: testeable.
  */
 const stack: symbol[] = [];
 
@@ -20,12 +20,12 @@ export function removeDialog(token: symbol): void {
   if (i >= 0) stack.splice(i, 1);
 }
 
-/** ¿Es el diálogo del tope? Un token no registrado NUNCA es el tope. */
+/** ¿Es el diálogo del tope? Un token no registrado nunca es el tope. */
 export function isTopDialog(token: symbol): boolean {
   return stack.length > 0 && stack[stack.length - 1] === token;
 }
 
-/** Sólo para tests: vacía la pila. */
+/** Solo para tests: vacía la pila. */
 export function resetDialogStack(): void {
   stack.length = 0;
 }

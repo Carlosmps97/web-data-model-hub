@@ -1,11 +1,11 @@
 /**
- * Doc 105 (ronda 4) — aviso de los canvases donde la carga no pudo ubicar lo
- * nuevo, cuando el popup ya no los muestra: se cerró (cambiar Logical/Physical
- * cierra los modales; salir por el TopNav) o se abrió otra versión a mitad
- * (`version`: la carga quedó aplicada en la suya). Con 3 o menos y sus nombres
- * conocidos, los nombra; si no, dice cuántos. Doc 113 §1.3: lo nuevo quedó en
- * la posición provisional del backend (debajo de lo existente) — ya no se
- * sugiere Autoarrange, que reordenaría todo el canvas.
+ * Aviso de los canvases donde la carga no pudo ubicar lo nuevo, cuando el popup
+ * no puede mostrarlos: se cerró (cambiar Logical/Physical cierra los modales;
+ * salir por el TopNav) o se abrió otra versión a mitad (`version`: la carga se
+ * aplicó en la suya). Con 3 o menos y sus nombres conocidos, los nombra; si no,
+ * dice cuántos. Lo nuevo está en la posición provisional del backend (debajo
+ * de lo existente); el aviso no sugiere Autoarrange, que reordenaría el canvas
+ * entero.
  */
 export function notPlacedNotice(
   ids: string[], nameOf: (id: string) => string | undefined, other?: { version: string | null | undefined },

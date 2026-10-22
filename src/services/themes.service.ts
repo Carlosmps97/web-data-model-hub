@@ -1,7 +1,7 @@
 /**
- * Doc 109 — themes de color del proyecto (lectura). Los edita Data Standards
- * (apply versionado: `themesUpsert`/`themesDelete`); el canvas sólo los lee
- * para pintar las cajas que los usan.
+ * Themes de color del proyecto (lectura). Los edita Data Standards (apply
+ * versionado: `themesUpsert`/`themesDelete`); el canvas solo los lee para
+ * pintar las cajas que los usan.
  */
 import { apiGet } from '@/services/http';
 import { API_BASE } from '@/services/apiBase';

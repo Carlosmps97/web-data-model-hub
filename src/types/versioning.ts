@@ -1,27 +1,27 @@
 /**
- * Versioning + dashboard types (Home p0 / Open model pg / Review p5).
+ * Tipos de versionamiento y del dashboard (Home / Open model / Review).
  *
- * Espejan los shapers del backend R1:
+ * Espejan los shapers del backend:
  *   - `version_row(cs)` → {@link VersionRow}  (changesets/service.py)
  *   - `summary(projectId?)` → {@link DashboardSummary}  (summary/service.py)
  *   - `list_users()` → {@link SimUserDto}  (identity/users.py)
  *
- * Sólo se tipa lo que el frontend consume; campos extra del backend se ignoran
+ * Solo se tipa lo que el frontend consume; campos extra del backend se ignoran
  * (el envelope ya viene desempaquetado por `apiFetch`).
  */
 
 /** Estado de un changeset/versión. Coincide 1:1 con el backend. */
 export type VersionStatus = 'draft' | 'submitted' | 'approved' | 'rejected';
 
-/** Referencia a la versión restaurada (doc 65) — la estampa el rollback. */
+/** Referencia a la versión restaurada; la estampa el rollback. */
 export interface RestoredFrom {
   csId: string;
   versionLabel?: string | null;
   appliedAt?: string | null;
 }
 
-/** Doc 104: un traspaso de ownership de un draft (`transfers[]` del changeset,
- *  espejo del dict del backend — invariante round-trip). `from` de la PRIMERA
+/** Un traspaso de ownership de un draft (`transfers[]` del changeset, espejo
+ *  del dict del backend; invariante round-trip). `from` de la primera
  *  transferencia = quien inició la versión; `owner` es siempre el dueño actual. */
 export interface OwnershipTransfer {
   from: string;
@@ -32,7 +32,7 @@ export interface OwnershipTransfer {
   note?: string | null;
 }
 
-/** Conteos de activos de un proyecto (`GET /api/projects/{pid}/counts`, doc 75 D5). */
+/** Conteos de activos de un proyecto (`GET /api/projects/{pid}/counts`). */
 export interface ScopeCounts {
   tables: number;
   columns: number;
@@ -45,14 +45,14 @@ export interface ScopeCounts {
 
 /**
  * Fila de versión (tabla de Review + lista del Home + requests). Proyección de
- * un changeset SIN el `changes` crudo. `versionLabel`/`title`/`owner` pueden
- * venir `null` para drafts recién creados. Doc 75: toda versión es de UN
+ * un changeset sin el `changes` crudo. `versionLabel`/`title`/`owner` pueden
+ * venir `null` para drafts recién creados. Toda versión es de un solo
  * proyecto; `deletesProject` marca la que borra su proyecto (pill crítica).
  */
 export interface VersionRow {
   id: string;
-  /** Doc 88 §6: historial de solicitudes (un registro por ciclo de envío) y el
-   *  último ciclo — Review lista y etiqueta por él. */
+  /** Historial de solicitudes (un registro por ciclo de envío) y el último
+   *  ciclo; Review lista y etiqueta por él. */
   requests?: RequestCycle[];
   lastRequest?: RequestCycle | null;
   reviewedBy?: string | null;
@@ -68,12 +68,12 @@ export interface VersionRow {
   createdAt?: string | null;
   updatedAt?: string | null;
   submittedAt?: string | null;
-  /** Timestamp del apply COMPLETO a producción. `approved` sin appliedAt =
+  /** Timestamp del apply completo a producción. `approved` sin appliedAt =
    *  publish interrumpido (el backend lo excluye de la fila de producción). */
   appliedAt?: string | null;
-  /** Doc 65: presente cuando esta versión nació de una restauración. */
+  /** Presente cuando esta versión nació de una restauración. */
   restoredFrom?: RestoredFrom | null;
-  /** Doc 104: traspasos de ownership (vacío si nunca cambió de manos). */
+  /** Traspasos de ownership (vacío si la versión no tuvo traspasos). */
   transfers?: OwnershipTransfer[];
 }
 
@@ -91,12 +91,12 @@ export interface SimUserDto {
   id: string;
   name: string;
   initials: string;
-  /** Doc 105: usuario deshabilitado — sólo viene en `listUserNames()` (para
-   *  resolver nombres); nunca se ofrece como revisor ni destino. */
+  /** Usuario deshabilitado: solo viene en `listUserNames()` (para resolver
+   *  nombres); nunca se ofrece como revisor ni destino. */
   disabled?: boolean;
 }
 
-/** Body de `POST /api/changesets/snapshot`: la working copy es DEL proyecto (doc 75 D2). */
+/** Body de `POST /api/changesets/snapshot`: la working copy es del proyecto. */
 export interface SnapshotBody {
   projectId: string;
   title?: string;
@@ -105,7 +105,7 @@ export interface SnapshotBody {
 }
 
 /**
- * Body de `POST /api/changesets/{id}/submit` (publish request, Screen 04b).
+ * Body de `POST /api/changesets/{id}/submit` (publish request).
  * `reviewers` son ids de usuario (1+). `title`/`description` describen el cambio.
  */
 export interface SubmitBody {
@@ -114,10 +114,10 @@ export interface SubmitBody {
   reviewers?: string[];
 }
 
-// ─── Review detail (Review p5) ───────────────────────────────────────────────
+// ─── Detalle de la revisión (Review) ─────────────────────────────────────────
 
-/** Doc 88 §6: resultado de un ciclo de envío. `rejected` y `withdrawn` dejan la
- *  versión en draft (el owner sigue editando); `approved` la publica. */
+/** Resultado de un ciclo de envío. `rejected` y `withdrawn` dejan la versión en
+ *  draft (el dueño sigue editando); `approved` la publica. */
 export type RequestOutcome = 'pending' | 'approved' | 'rejected' | 'withdrawn';
 
 /** Un ciclo de solicitud de publicación (`requests[]` del changeset). Espejo
@@ -133,7 +133,7 @@ export interface RequestCycle {
   outcome: RequestOutcome;
   decidedAt?: string | null;
   decidedBy?: string | null;
-  /** Motivo del rechazo (obligatorio al rechazar, doc 88 §5). */
+  /** Motivo del rechazo (obligatorio al rechazar). */
   note?: string | null;
   decisions?: Record<string, Approval>;
 }
@@ -153,9 +153,9 @@ export interface ChangesetComment {
 }
 
 /**
- * Changeset completo de `GET /api/changesets/{id}`. Sólo se tipa lo que el panel
- * de Review consume; campos extra (p.ej. el `diff` resumen compat o `changes`)
- * se ignoran. `approvals` es un mapa `userId → Approval`.
+ * Changeset completo de `GET /api/changesets/{id}`. Solo se tipa lo que el panel
+ * de Review consume; campos extra (p.ej. `changes`) se ignoran. `approvals` es
+ * un mapa `userId → Approval`.
  */
 export interface ChangesetDetail {
   id: string;
@@ -164,46 +164,46 @@ export interface ChangesetDetail {
   owner: string | null;
   status: VersionStatus;
   versionLabel?: string | null;
-  /** Doc 75: proyecto de la versión. */
+  /** Proyecto de la versión. */
   projectId: string;
   reviewers: string[];
   approvals: Record<string, Approval>;
   comments: ChangesetComment[];
-  /** Doc 88 §6: historial de solicitudes de esta versión. */
+  /** Historial de solicitudes de esta versión. */
   requests?: RequestCycle[];
   submittedAt?: string | null;
   createdAt?: string | null;
   updatedAt?: string | null;
-  /** Decisor final + publicación (el backend siempre los sirve; doc 65 los tipa
-   *  para la pestaña Details del popup de herramientas de versiones). */
+  /** Decisor final + publicación (el backend siempre los sirve; se tipan para
+   *  la pestaña Details del popup de herramientas de versiones). */
   reviewedBy?: string | null;
-  /** Doc 88 §5: motivo del último rechazo (también en `requests[]`). */
+  /** Motivo del último rechazo (también en `requests[]`). */
   reviewNote?: string | null;
   reviewedAt?: string | null;
   appliedAt?: string | null;
-  /** Doc 65: presente cuando esta versión nació de una restauración. */
+  /** Presente cuando esta versión nació de una restauración. */
   restoredFrom?: RestoredFrom | null;
-  /** Doc 104: traspasos de ownership (vacío si nunca cambió de manos). */
+  /** Traspasos de ownership (vacío si la versión no tuvo traspasos). */
   transfers?: OwnershipTransfer[];
-  /** Resumen compat M-series: ids que el draft agrega / modifica / borra
-   *  frente a producción, por colección. */
+  /** Resumen por colección: ids que el draft agrega / modifica / borra frente
+   *  a producción. */
   diff?: Record<string, VersionDiffSummary>;
-  /** Doc 104: TODOS los cambios del draft (también lo creado y borrado dentro
-   *  de él) — lo que se borra al eliminarlo. */
+  /** Todos los cambios del draft (también lo creado y borrado dentro de él):
+   *  lo que se borra al eliminarlo. */
   changeCount?: number;
-  /** Doc 104 (ronda 2): un approve falló cuando ya escribía en producción;
+  /** Un approve falló cuando ya escribía en producción;
    *  mientras exista, el backend no deja eliminar el draft (409). */
   partialApplyAt?: string | null;
-  /** Doc 105: una carga Excel escribiendo en el draft (lock visible para los dos
+  /** Una carga Excel escribiendo en el draft (lock visible para los dos
    *  procesos del backend; `heartbeat` en epoch). Transferir, eliminar y enviar a
    *  revisión responden 409 mientras esté vivo. Espejo de `ChangesetDoc.uploadLock`. */
   uploadLock?: { jobId: string; owner: string; at: number; heartbeat: number } | null;
-  /** Doc 105: draft de restauración a medias (el proceso murió armándolo): no se
+  /** Draft de restauración a medias (el proceso murió armándolo): no se
    *  puede enviar (409); se elimina y se restaura de nuevo. Espejo de `ChangesetDoc`. */
   restoreIncomplete?: boolean | null;
 }
 
-/** Ids por verbo de una colección en el resumen compat de `GET /api/changesets/{id}`. */
+/** Ids por verbo de una colección en el resumen por colección de `GET /api/changesets/{id}`. */
 export interface VersionDiffSummary {
   added: string[];
   modified: string[];
@@ -215,12 +215,16 @@ export interface DiffEntity {
   id: string;
   name: string;
   collection?: string | null;
-  /** true: la entidad cambió en PRODUCCIÓN después de que esta versión la editó
-   *  (al publicar, este delta la pisaría). */
+  /** true: la entidad tiene cambios en producción posteriores a la edición de
+   *  esta versión (al publicar, este delta la pisaría). */
   conflict?: boolean;
-  /** Doc 100 (P3): producción la BORRÓ después de abrirse esta versión — al
-   *  publicar vuelve a la vida. Siempre acompañado de `conflict`. */
+  /** Producción la borró después de abrirse esta versión; al publicar vuelve a
+   *  la vida. Siempre acompañado de `conflict`. */
   restores?: boolean;
+  /** Objeto del modelo que otra versión borró y publicó después de abrirse
+   *  esta: no se publica ni se revive (el envío y la aprobación se bloquean
+   *  hasta que el dueño descarte el cambio). Siempre acompañado de `conflict`. */
+  deletedInProduction?: boolean;
 }
 
 /** Buckets de cambios de una colección dentro del diff. */
@@ -235,34 +239,34 @@ export interface DiffImpact {
   tablesTouched: number;
   columnsTouched: number;
   affectedOtherTables: { id: string; name: string }[];
-  /** Doc 75 D5: presente cuando la versión BORRA su proyecto — el revisor ve un
-   *  aviso crítico con los conteos de lo que desaparece. */
+  /** Presente cuando la versión borra su proyecto: el revisor ve un aviso
+   *  crítico con los conteos de lo que desaparece. */
   deletesProject?: { id: string; name: string; counts: ScopeCounts } | null;
 }
 
 /** Nodo de la jerarquía del diff (Proyecto→Folder→Canvas→Esquema→Tabla→Columna).
- *  `change` sólo en hojas que cambiaron (una tabla contenedora puede no tenerlo). */
+ *  `change` solo en hojas que cambiaron (una tabla contenedora puede no tenerlo). */
 export interface DiffTreeNode {
   type: 'project' | 'folder' | 'canvas' | 'schema' | 'table' | 'view' | 'column';
   id: string;
   name: string;
   change?: 'added' | 'edited' | 'deleted' | null;
   children?: DiffTreeNode[];
-  /** Doc 84 B2: id de la entidad versionada cuando el nodo de ESTRUCTURA cambió
+  /** Id de la entidad versionada cuando el nodo de estructura tiene cambios
    *  (carpeta/canvas/proyecto = su id; esquema = el uuid, el nodo lleva el nombre). */
   entityId?: string;
-  /** Doc 84 B4: tipo de dato de una columna (se escanea sin abrir cada fila). */
+  /** Tipo de dato de una columna (se escanea sin abrir cada fila). */
   dataType?: string | null;
 }
 
-/** Cambio de una entidad de ESTRUCTURA (proyecto/folder/canvas/esquema). */
+/** Cambio de una entidad de estructura (proyecto/folder/canvas/esquema). */
 export interface DiffStructureEntry {
   type: string;
   id: string;
   name: string;
   kind: string;
   change: 'added' | 'edited' | 'deleted';
-  /** Doc 84 B2: ya está representada (con su pill) en el árbol. */
+  /** Ya está representada (con su pill) en el árbol. */
   inTree?: boolean;
 }
 
@@ -276,7 +280,7 @@ export interface ChangesetDiff {
   orphans?: DiffTreeNode[];
   /** Cambios de estructura (proyectos/folders/canvases/esquemas). */
   structure?: DiffStructureEntry[];
-  /** Doc 84 A3: último cambio grabado en el request (el autor es el owner). */
+  /** Último cambio grabado en el request (el autor es el dueño). */
   lastChangeAt?: string | null;
 }
 
@@ -286,9 +290,9 @@ export interface ReviewBody {
   note?: string;
 }
 
-// ─── Change details (doc 31 — popup de la revisión) ──────────────────────────
+// ─── Change details (popup de la revisión) ───────────────────────────────────
 
-/** Una fila de campo del diff antes→después de una entidad.
+/** Una fila de campo del diff (before → after) de una entidad.
  *  `kind: 'delta'` = resumen de un cambio de conjunto (p.ej. "+2 added · −1
  *  removed") que se pinta como un solo valor ámbar, sin columna before. */
 export interface DiffFieldRow {
@@ -299,20 +303,20 @@ export interface DiffFieldRow {
   kind?: 'delta' | null;
 }
 
-/** Diff de UNA entidad de `POST /api/changesets/{id}/diff/details`.
- *  `fields` trae SOLO los campos con cambio real (vacío = solo metadata
- *  interna); las referencias vienen resueltas a NOMBRE por el backend. */
+/** Diff de una entidad de `POST /api/changesets/{id}/diff/details`.
+ *  `fields` trae solo los campos con cambio real (vacío = solo metadata
+ *  interna); las referencias vienen resueltas a nombre por el backend. */
 export interface DiffEntityDetail {
   collection: string;
   entityId: string;
   action: 'created' | 'modified' | 'deleted';
   name: string | null;
   fields: DiffFieldRow[];
-  /** Doc 84 B3: cuándo se grabó el cambio en el request (null en el compare). */
+  /** Cuándo se grabó el cambio en el request (null en el compare). */
   at?: string | null;
 }
 
-// ─── Version compare (doc 65 — popup "Version tools" del Home) ───────────────
+// ─── Version compare (popup "Version tools" del Home) ────────────────────────
 
 /** Extremo del compare: cabecera mínima de una versión publicada. */
 export interface CompareVersionRef {
@@ -322,7 +326,7 @@ export interface CompareVersionRef {
   appliedAt?: string | null;
 }
 
-/** Doc 84 C2: la ÚLTIMA versión del rango comparado que tocó una entidad. */
+/** La última versión del rango comparado que tocó una entidad. */
 export interface CompareLastVersion {
   id: string | null;
   versionLabel?: string | null;
@@ -330,7 +334,7 @@ export interface CompareLastVersion {
   appliedAt?: string | null;
 }
 
-/** Una entidad con cambio NETO entre las dos versiones comparadas. */
+/** Una entidad con cambio neto entre las dos versiones comparadas. */
 export interface CompareEntity {
   id: string;
   name: string | null;
@@ -345,9 +349,9 @@ export interface CompareBucket {
   deleted: CompareEntity[];
 }
 
-/** Respuesta de `GET /api/versions/compare` (doc 65). El backend normaliza
+/** Respuesta de `GET /api/versions/compare`. El backend normaliza
  *  `from`/`to` al orden cronológico; `unreconstructed` lista entidades sin
- *  imagen previa (publicadas antes de la captura) EXCLUIDAS del diff. */
+ *  imagen previa (publicadas antes de la captura) excluidas del diff. */
 export interface VersionCompare {
   from: CompareVersionRef;
   to: CompareVersionRef;
@@ -355,15 +359,15 @@ export interface VersionCompare {
   collections: Record<string, CompareBucket>;
   counts: { added: number; edited: number; deleted: number; total: number };
   unreconstructed: { collection: string; id: string; name: string | null }[];
-  /** Doc 84 C1: la misma jerarquía del popup de revisión. */
+  /** La misma jerarquía del popup de revisión. */
   tree?: DiffTreeNode[];
   orphans?: DiffTreeNode[];
   structure?: DiffStructureEntry[];
 }
 
-// ─── Publish blocked (doc 84 D1/A1) ──────────────────────────────────────────
+// ─── Publish blocked ─────────────────────────────────────────────────────────
 
-/** Un choque reportado por el publish. `kind`: table | column | schema | change. */
+/** Un choque reportado por el publish. `kind`: table | view | column | relationship | schema | change. */
 export interface PublishBlockedItem {
   collection?: string;
   kind: string;
@@ -372,8 +376,13 @@ export interface PublishBlockedItem {
   schema?: string | null;
   tableId?: string | null;
   tableName?: string | null;
-  /** `production`: ya existe publicado · `request`: se repite dentro del request. */
-  where?: 'production' | 'request';
+  /** `production`: ya existe publicado · `request`: se repite dentro del request ·
+   *  `deleted`: otra versión lo borró y publicó (o borró su tabla o su esquema). */
+  where?: 'production' | 'request' | 'deleted';
+  /** Con `deleted`: lo que se borró cuando no es el objeto mismo (su tabla o su esquema). */
+  deletedParent?: { kind: 'table' | 'schema'; id?: string | null; name: string } | null;
+  /** Con `deleted`: el borrado es posterior a la apertura de esta versión. */
+  afterOpened?: boolean;
   message: string;
   existing?: {
     id?: string | null;
@@ -386,8 +395,8 @@ export interface PublishBlockedItem {
   } | null;
 }
 
-/** `detail` estructurado de un 409/422 del approve: el bloqueo no cambió, ahora
- *  se explica entero (lista completa + qué hacer). */
+/** `detail` estructurado de un 409/422 del approve: explica el bloqueo entero
+ *  (lista completa + qué hacer). */
 export interface PublishBlockedDetail {
   code: string;
   message: string;

@@ -7,13 +7,13 @@ import FloatingPanel from './FloatingPanel';
 import { shownColor, type ColorSource } from '../lib/canvasColors';
 
 /**
- * Doc 109 — campo «Color» de Properties (tabla o vista). Doc 112: muestra las
- * DOS capas, para que una caja pintada por el canvas no parezca «sin color»:
+ * Campo «Color» de Properties (tabla o vista). Muestra las dos capas, para que
+ * una caja pintada por el canvas no parezca «sin color»:
  *
  *   On this canvas   ● lo que se ve en la caja y de dónde sale (pintada en este
  *                    canvas, el color de la tabla o ninguno) — «Change» abre la
  *                    ficha del canvas (Model properties) con esta caja
- *   <Noun> color     el color PROPIO del objeto, el de todos sus canvases (se
+ *   <Noun> color     el color propio del objeto, el de todos sus canvases (se
  *                    elige acá)
  */
 export default function ColorField({ id, own, canEdit, noun, onPick }: {

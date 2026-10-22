@@ -14,34 +14,36 @@ import type { Folder, Project, SubjectArea } from '../services/modeler.service';
 import { exportNodeHtml, exportNodePdf } from '../exportPackage';
 import type { CancelFlag, ExportOutcome, ExportProgress } from '../exportPackage';
 import DeleteProjectDialog from './DeleteProjectDialog';
+import { useAuthStore } from '@/store/useAuthStore';
+import { NO_EXPORT_HINT } from '@/lib/permissionHints';
 
 /* ──────────────────────────────────────────────────────────────────────────
    Model Explorer — árbol jerárquico Project → Folders (anidadas) → Canvas.
-   Doc 75 D8: se muestra SÓLO el proyecto de la sesión (crear proyectos va por
-   el Open model; renombrar/borrar el proyecto van por la working copy — D5:
-   «Delete project…» graba UN cambio y el revisor lo aprueba como crítico).
+   Se muestra solo el proyecto de la sesión (crear proyectos va por el Open
+   model; renombrar/borrar el proyecto van por la working copy: «Delete
+   project…» graba un cambio y quien revisa la versión lo aprueba como crítico).
    Cada nodo muestra al hover un botón "3 puntos" que abre un menú contextual:
      · project: New folder · New canvas · Export HTML · Rename · Delete project…
      · folder:  New folder · New canvas · Export HTML · Rename · Delete
      · canvas:  Export HTML · Rename · Delete
-   En readonly (o con el borrado del proyecto pendiente) el menú muestra SOLO
-   Export HTML/PDF (exportar no muta — doc 66 r2).
+   En readonly (o con el borrado del proyecto pendiente) el menú muestra solo
+   Export HTML/PDF (exportar no muta).
    Crear/renombrar = input inline. Borrar = ConfirmDialog. Carpetas con chevron.
 
-   Navegación tipo file-tree: expandir/colapsar proyectos y carpetas es SÓLO
+   Navegación tipo file-tree: expandir/colapsar proyectos y carpetas es solo
    navegación (varios proyectos abiertos a la vez, árboles lazy-load al cache
-   `trees` del store) y NO toca el canvas abierto — el canvas sólo cambia al
-   clicar OTRO canvas (con spinner mientras carga el diagrama).
+   `trees` del store) y no toca el canvas abierto: el canvas solo cambia al
+   clicar otro canvas (con spinner mientras carga el diagrama).
    ────────────────────────────────────────────────────────────────────────── */
 
 const INDENT = 14;            // px por nivel de profundidad
 const PAD_BASE = 6;           // padding-left base del primer nivel
 
 type NodeKind = 'project' | 'folder' | 'canvas';
-/** Filas del árbol: los nodos del explorer + la rama «Models» (doc 71). */
+/** Filas del árbol: los nodos del explorer + la rama «Models». */
 type RowKind = NodeKind | 'branch';
-/** `at`: el borde derecho de la fila / botón que lo abrió (doc 113 §5: el menú
- *  se ubica con la regla única de flotantes, no con un tope fijo). */
+/** `at`: el borde derecho de la fila / botón que lo abrió (el menú se ubica
+ *  con la regla única de flotantes, no con un tope fijo). */
 interface MenuState { kind: NodeKind; id: string; projectId: string; at: RectLike; }
 // `create` = input transitorio para crear (folder/canvas) dentro de un padre.
 interface CreateState { type: 'folder' | 'canvas'; projectId: string; parentFolderId: string | null; }
@@ -49,9 +51,9 @@ interface DeleteState { kind: NodeKind; id: string; name: string; projectId: str
 
 export default function ModelExplorer({ pushToast, filter = '', renderCatalog }: {
   pushToast: (m: string, k?: 'err') => void;
-  /** Doc 71: filtro «contiene» de la cabecera del Explorer (carpetas/canvases). */
+  /** Filtro «contiene» de la cabecera del Explorer (carpetas/canvases). */
   filter?: string;
-  /** Doc 71: ramas extra por proyecto (Tables · Views · Schemas), debajo de Models. */
+  /** Ramas extra por proyecto (Tables · Views · Schemas), debajo de Models. */
   renderCatalog?: (project: Project) => ReactNode;
 }) {
   const q = filter.trim().toLowerCase();
@@ -70,19 +72,21 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   const createCanvas = useModelerStore((s) => s.createCanvas);
   const renameCanvas = useModelerStore((s) => s.renameCanvas);
   const deleteCanvas = useModelerStore((s) => s.deleteCanvas);
-  // En modo visor el explorer es SOLO navegación: su CRUD (projects/folders/
+  // En modo visor el explorer es solo navegación: su CRUD (projects/folders/
   // canvases) son escrituras REST directas no versionadas que no pasan por el
-  // choke-point del changeset — se ocultan las affordances de MUTACIÓN. El
-  // menú de 3 puntos sí se abre: queda únicamente «Export HTML» (doc 66 r2).
+  // choke-point del changeset; se ocultan las affordances de mutación. El
+  // menú de 3 puntos sí se abre: queda únicamente «Export HTML».
   const readonlyMode = useSessionStore((s) => s.openMode === 'readonly');
-  // Doc 75 D5: con el borrado del proyecto pendiente en el draft, el explorer
+  // Con el borrado del proyecto pendiente en el draft, el explorer
   // no ofrece mutaciones (mismo gate que el visor).
   const readonly = readonlyMode || deletionPending;
-  // Doc 75 D8: el explorer es del proyecto de la sesión, nunca de todos.
+  // Exportar HTML/PDF exige el permiso `export`.
+  const canExport = useAuthStore((s) => s.has('export'));
+  // El explorer es del proyecto de la sesión, nunca de todos.
   const projects = useMemo(() => allProjects.filter((p) => p.id === activeProjectId), [allProjects, activeProjectId]);
   const [projectToDelete, setProjectToDelete] = useState<Project | null>(null);
 
-  const [expandedF, setExpandedF] = useState<Set<string>>(new Set()); // ids de folders EXPANDIDAS (default: TODAS colapsadas — pedido owner)
+  const [expandedF, setExpandedF] = useState<Set<string>>(new Set()); // ids de folders expandidas (default: todas colapsadas)
   const [expandedP, setExpandedP] = useState<Set<string>>(new Set()); // ids de proyectos expandidos (default: cerrados)
   const [collapsedModels, setCollapsedModels] = useState<Set<string>>(new Set()); // rama Models colapsada (default: abierta)
   const toggleModels = (pid: string) => setCollapsedModels((s) => { const n = new Set(s); if (n.has(pid)) n.delete(pid); else n.add(pid); return n; });
@@ -92,7 +96,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   const [creating, setCreating] = useState<CreateState | null>(null);
   const [toDelete, setToDelete] = useState<DeleteState | null>(null);
 
-  // Doc 66 — Export HTML: modal de progreso + flag de cancelación compartido
+  // Export HTML: modal de progreso + flag de cancelación compartido
   // con la orquestación (mutable: la UI lo pone en true, el pool lo lee).
   const [exporting, setExporting] = useState<{ title: string; format: 'html' | 'pdf' } | null>(null);
   const [exportProg, setExportProg] = useState<ExportProgress | null>(null);
@@ -128,14 +132,14 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   const toggle = (id: string) => setExpandedF((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const expand = (id: string) => setExpandedF((s) => (s.has(id) ? s : new Set(s).add(id)));
 
-  // Expande un proyecto y lazy-carga su árbol al cache si aún no está.
+  // Expande un proyecto y lazy-carga su árbol al cache si no está cargado.
   const ensureProjectOpen = useCallback((pid: string) => {
     setExpandedP((s) => (s.has(pid) ? s : new Set(s).add(pid)));
     if (!useModelerStore.getState().trees[pid]) {
       setLoadingTrees((s) => new Set(s).add(pid));
-      // Doc 104: si es la versión abierta la que ya no está (transferida o
-      // eliminada), el aviso correcto lo da la revalidación de la sesión. La
-      // versión se toma al pedir (la sesión puede cerrarse antes del error).
+      // Si la versión abierta desapareció (transferida o eliminada), el aviso
+      // correcto lo da la revalidación de la sesión. La versión se toma al
+      // pedir (la sesión puede cerrarse antes de que llegue el error).
       const askedCs = useSessionStore.getState().activeChangesetId;
       loadProjectTree(pid)
         .catch(async (e: unknown) => {
@@ -156,10 +160,10 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   // El proyecto del canvas abierto queda expandido (aditivo: no colapsa otros).
   useEffect(() => { if (activeProjectId) ensureProjectOpen(activeProjectId); }, [activeProjectId, ensureProjectOpen]);
 
-  // Revela el canvas ABIERTO (owner 2026-08-23): expande su cadena de carpetas
-  // — con la capa de origen (doc 54 §9) puede estar 2 niveles adentro — y lo
-  // trae a la vista. Solo reacciona al cambio de canvas/árbol: colapsar a mano
-  // después sigue libre (expandedF no es dependencia).
+  // Revela el canvas abierto: expande su cadena de carpetas (con la capa de
+  // origen puede estar 2 niveles adentro) y lo trae a la vista. Solo reacciona
+  // al cambio de canvas/árbol: colapsar a mano después sigue libre (expandedF
+  // no es dependencia).
   const revealedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeSaId || !activeProjectId) return;
@@ -202,8 +206,8 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   }, [menu]);
 
   const openMenu = (kind: NodeKind, id: string, projectId: string, e: React.MouseEvent) => {
-    // Doc 66 r2: el menú TAMBIÉN abre en readonly (ContextMenu decide qué
-    // mostrar ahí: solo «Export HTML»). El guard viejo dejaba el click muerto.
+    // El menú también abre en readonly (ContextMenu decide qué mostrar ahí:
+    // solo «Export HTML»).
     e.preventDefault(); e.stopPropagation();
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     setMenu({ kind, id, projectId, at: { left: r.right, right: r.right, top: r.top, bottom: r.bottom } });
@@ -220,7 +224,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   const askDelete = (kind: NodeKind, id: string, name: string, projectId: string) => {
     setMenu(null);
     if (kind === 'project') {
-      // Doc 75 D5: borrado por draft con confirmación tipeada y conteos.
+      // Borrado por draft con confirmación tipeada y conteos.
       const project = projects.find((p) => p.id === id);
       if (project) setProjectToDelete(project);
       return;
@@ -232,7 +236,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     setEditing(null);
     const name = value.trim();
     if (!name) return;
-    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió (`reportWriteError`).
+    // El fallo espera la revalidación y calla si la sesión es otra (`reportWriteError`).
     const onError = reportWriteError((e) => pushToast(failureText("Couldn't rename", e), 'err'));
     try {
       if (kind === 'project') await renameProject(id, name);
@@ -285,10 +289,10 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
         icon={opening ? <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden /> : <LayoutGrid size={14} />}
         label={sa.name}
         onClick={() => {
-          // Abrir sólo si no es el canvas ya abierto y no hay otra apertura en vuelo.
+          // Abrir solo si no es el canvas ya abierto y no hay otra apertura en vuelo.
           if (sa.id === activeSaId || openingSaId) return;
-          // Doc 105 (ronda 6): espera la revalidación — con la versión recién
-          // transferida o eliminada avisa ella (antes salían dos avisos) — y dice por qué.
+          // Espera la revalidación (con la versión recién transferida o eliminada
+          // avisa ella, sin un segundo aviso) y dice por qué.
           selectSubjectArea(sa.id, projectId).catch(reportWriteError((e) => pushToast(failureText("Couldn't open the canvas", e), 'err')));
         }}
         onMenu={(e) => openMenu('canvas', sa.id, projectId, e)} />
@@ -326,7 +330,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   };
 
   const renderProject = (p: Project) => {
-    // Expandir/colapsar es SÓLO navegación: nunca cambia el canvas abierto.
+    // Expandir/colapsar es solo navegación: nunca cambia el canvas abierto.
     const open = expandedP.has(p.id);
     const cached = trees[p.id];
     const tree = open && cached ? buildProjectTree(p, cached.folders, cached.subjectAreas) : null;
@@ -350,7 +354,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
         )}
         {open && tree && (
           <>
-            {/* Doc 71: la jerarquía de canvases (sub-proyectos › dominios › modelos)
+            {/* La jerarquía de canvases (sub-proyectos › dominios › modelos)
                 vive en la rama «Models»; Tables · Views · Schemas las aporta
                 renderCatalog al mismo nivel. */}
             <Row depth={1} kind="branch" active={false}
@@ -385,7 +389,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
         <div className="wk-exp-empty" style={{ padding: 8 }}>Open a project to browse its models.</div>}
 
       {menu && (
-        <ContextMenu menu={menu} readonly={readonly}
+        <ContextMenu menu={menu} readonly={readonly} canExport={canExport}
           onNewFolder={() => startCreate('folder', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
           onNewCanvas={() => startCreate('canvas', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
           onExport={() => { void startExport(menu.kind, menu.id, menu.projectId, 'html'); }}
@@ -434,7 +438,7 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
 }
 
 // Busca el nombre del nodo del menú para el diálogo de borrado (en el cache
-// del árbol de SU proyecto — las listas planas alcanzan, sin recorrer nodos).
+// del árbol de su proyecto: las listas planas alcanzan, sin recorrer nodos).
 function nameOf(
   menu: Pick<MenuState, 'kind' | 'id' | 'projectId'>,
   trees: Record<string, { folders: Folder[]; subjectAreas: SubjectArea[] }>,
@@ -453,7 +457,7 @@ function Row({
 }: {
   depth: number; active?: boolean; strong?: boolean; kind: RowKind;
   chevron?: React.ReactNode; icon: React.ReactNode; label: string;
-  /** Doc 71: contador a la derecha (ramas del proyecto). */
+  /** Contador a la derecha (ramas del proyecto). */
   count?: number;
   onClick: () => void; onMenu?: (e: React.MouseEvent) => void; dataId?: string;
 }) {
@@ -474,7 +478,7 @@ function Row({
   );
 }
 
-/** ¿La carpeta (o alguna descendiente / canvas) matchea el filtro? (doc 71) */
+/** ¿La carpeta (o alguna descendiente / canvas) matchea el filtro? */
 function folderHasMatch(node: FolderNode, q: string): boolean {
   if (node.folder.name.toLowerCase().includes(q)) return true;
   if (node.canvases.some((c) => c.name.toLowerCase().includes(q))) return true;
@@ -520,19 +524,20 @@ function InlineInput({
 
 // ── Menú contextual (popover anclado a la fila) ──────────────────────────
 function ContextMenu({
-  menu, readonly, onNewFolder, onNewCanvas, onExport, onExportPdf, onRename, onDelete,
+  menu, readonly, canExport, onNewFolder, onNewCanvas, onExport, onExportPdf, onRename, onDelete,
 }: {
   menu: MenuState; readonly: boolean;
+  canExport: boolean;
   onNewFolder: () => void; onNewCanvas: () => void; onExport: () => void; onExportPdf: () => void;
   onRename: () => void; onDelete: () => void;
 }) {
-  // Readonly (doc 66 r2): exportar NO muta — el menú aparece igual, pero solo
+  // Readonly: exportar no muta; el menú aparece igual, pero solo
   // con «Export HTML»; crear/renombrar/borrar siguen ocultos en modo visor.
   const showMutations = !readonly;
   const showCreate = showMutations && (menu.kind === 'project' || menu.kind === 'folder');
-  // Doc 113 §5: debajo de la fila (desde su borde derecho); ARRIBA si abajo no
-  // entra — en las últimas filas del Explorer se cortaba —, corrido para no
-  // salirse por la derecha y con scroll si no entra en ningún lado.
+  // Debajo de la fila (desde su borde derecho); arriba si abajo no entra (en
+  // las últimas filas del Explorer se cortaría), corrido para no salirse por la
+  // derecha y con scroll si no entra en ningún lado.
   const ref = useRef<HTMLDivElement>(null);
   const place = useFloating(ref, (box, bounds) => placeNextTo(menu.at, box, bounds, { side: 'bottom', align: 'start', gap: 2 }), [menu]);
   return (
@@ -546,10 +551,12 @@ function ContextMenu({
       {showCreate && <button className="rd-menu-item" onClick={onNewFolder}><FolderPlus size={15} /> New folder</button>}
       {showCreate && <button className="rd-menu-item" onClick={onNewCanvas}><Plus size={15} /> New canvas</button>}
       {showCreate && <div className="rd-menu-sep" />}
-      {/* Doc 66: export HTML del nodo (proyecto/folder → ZIP; canvas → .html). */}
-      <button className="rd-menu-item" onClick={onExport}><FileDown size={15} /> Export HTML</button>
-      {/* Doc 66 r3: UN PDF multipágina del nodo (2 páginas por canvas: L+P). */}
-      <button className="rd-menu-item" onClick={onExportPdf}><FileText size={15} /> Export PDF</button>
+      {/* Export HTML del nodo (proyecto/folder → ZIP; canvas → .html). */}
+      <button className="rd-menu-item" onClick={onExport} disabled={!canExport}
+        title={canExport ? undefined : NO_EXPORT_HINT}><FileDown size={15} /> Export HTML</button>
+      {/* Un PDF multipágina del nodo (2 páginas por canvas: L+P). */}
+      <button className="rd-menu-item" onClick={onExportPdf} disabled={!canExport}
+        title={canExport ? undefined : NO_EXPORT_HINT}><FileText size={15} /> Export PDF</button>
       {showMutations && <div className="rd-menu-sep" />}
       {showMutations && <button className="rd-menu-item" onClick={onRename}><Pencil size={15} /> Rename</button>}
       {showMutations && (
@@ -561,7 +568,7 @@ function ContextMenu({
   );
 }
 
-// ── Modal de progreso del export HTML (doc 66) ───────────────────────────
+// ── Modal de progreso del export HTML ────────────────────────────────────
 // Patrón visual de ConfirmDialog (backdrop --top + dmh-modal). Mientras corre:
 // barra determinada + Cancel; si terminó con fallos: resumen + Close.
 function ExportModal({

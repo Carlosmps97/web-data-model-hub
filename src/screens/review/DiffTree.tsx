@@ -1,12 +1,11 @@
 /**
- * DiffTree (doc 64 §7 — v2; nace en doc 31) — jerarquía navegable de los
- * cambios de un request para el popup "Change details". Rediseño: icono por
- * tipo de entidad, verbo como pill discreta, filas tintadas suaves, filtros
- * por VERBO + BÚSQUEDA por nombre (una fila es visible si matchea ella o algún
- * descendiente; buscar auto-expande las tablas) y contadores por sección. La
- * selección lleva además el `path` de ancestros (breadcrumb del panel) y el
- * `iconType` crudo. Con backend sin jerarquía cae al listado plano (mismo
- * contrato de siempre).
+ * DiffTree: jerarquía navegable de los cambios de un request para el popup
+ * "Change details": icono por tipo de entidad, verbo como pill discreta, filas
+ * tintadas suaves, filtros por verbo + búsqueda por nombre (una fila es visible
+ * si coincide ella o algún descendiente; buscar auto-expande las tablas) y
+ * contadores por sección. La selección lleva además el `path` de ancestros
+ * (breadcrumb del panel) y el `iconType` crudo. Si el backend no envía la
+ * jerarquía, cae al listado plano (mismo contrato).
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import {
@@ -15,9 +14,11 @@ import {
 } from 'lucide-react';
 import type { DiffStructureEntry, DiffTreeNode } from '@/types/versioning';
 
-/** Doc 84 C1: lo que el árbol necesita de un diff — lo cumplen tanto el diff de
+/** Lo que el árbol necesita de un diff: lo cumplen tanto el diff de
  *  un request (`ChangesetDiff`) como el compare de versiones (`VersionCompare`). */
-export interface DiffEntityLike { id: string; name?: string | null; conflict?: boolean; restores?: boolean }
+export interface DiffEntityLike {
+  id: string; name?: string | null; conflict?: boolean; restores?: boolean; deletedInProduction?: boolean;
+}
 export interface DiffBucketLike { added: DiffEntityLike[]; edited: DiffEntityLike[]; deleted: DiffEntityLike[] }
 export interface DiffLike {
   collections: Record<string, DiffBucketLike>;
@@ -62,11 +63,11 @@ export const TYPE_ICON: Record<string, ReactNode> = {
 };
 const NODE_COLLECTION: Record<string, string> = {
   table: 'canonical_tables', column: 'canonical_columns', view: 'views',
-  // Doc 84 B2: los nodos de ESTRUCTURA que cambiaron en el request se marcan y
+  // Los nodos de estructura que cambiaron en el request se marcan y
   // se seleccionan en el árbol (su entidad versionada viaja en `entityId`).
   folder: 'folders', canvas: 'subject_areas', schema: 'schemas', project: 'projects',
 };
-/** `structure[].type` YA es el nombre de colección (projects/folders/…). */
+/** `structure[].type` ya es el nombre de colección (projects/folders/…). */
 const PILL: Record<string, string> = { added: 'added', edited: 'modified', deleted: 'deleted' };
 const COLL_LBL: Record<string, string> = {
   canonical_tables: 'Table', canonical_columns: 'Column', views: 'View',
@@ -102,9 +103,9 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
   relationshipNames: Record<string, string | undefined>;
   selectedKey: string | null;
   onSelect: (sel: TreeSelection) => void;
-  /** Doc 64 §7: búsqueda por nombre (contiene, CI). */
+  /** Búsqueda por nombre (contiene, case-insensitive). */
   search: string;
-  /** Doc 64 §7: verbos visibles (chips del modal). */
+  /** Verbos visibles (chips del modal). */
   verbs: Set<DiffVerb>;
 }) {
   const q = search.trim().toLowerCase();
@@ -120,7 +121,7 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
 
   const tree = diff.tree ?? [];
   const orphans = diff.orphans ?? [];
-  // Doc 84 B2: lo que ya está en el árbol (con su pill) no se repite abajo.
+  // Lo que ya está en el árbol (con su pill) no se repite abajo.
   const structure = (diff.structure ?? [])
     .filter((s) => !s.inTree && verbs.has(s.change) && (!q || s.name.toLowerCase().includes(q)));
   const relRows = useMemo<RelRow[]>(() => {
@@ -225,7 +226,7 @@ export default function DiffTree({ diff, relationshipNames, selectedKey, onSelec
           right: isTable && visKids.length > 0 ? (
             <span className="dmh-rvd-count">{visKids.length} col{visKids.length === 1 ? '' : 's'}</span>
           ) : node.type === 'column' && node.dataType ? (
-            // Doc 84 B4: el tipo se lee en la fila, sin abrir cada columna.
+            // El tipo se lee en la fila, sin abrir cada columna.
             <span className="dmh-rvd-dtype" title="Data type">{node.dataType}</span>
           ) : undefined,
         })}

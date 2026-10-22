@@ -4,7 +4,7 @@ import { NEW_THEME_COLOR, themeChanged, themeEditInput, themeFormError, themeFor
 
 const T: Theme = { id: 'th1', name: 'Entidad Principal', color: '#FFFF80', order: 0 };
 
-describe('themeForm (doc 109)', () => {
+describe('themeForm', () => {
   it('alta: nombre vacío y el color por defecto de Erwin', () => {
     expect(themeFormOf(null)).toEqual({ name: '', color: NEW_THEME_COLOR });
     expect(themeFormOf(T)).toEqual({ name: 'Entidad Principal', color: '#FFFF80' });

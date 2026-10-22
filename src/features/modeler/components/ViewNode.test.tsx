@@ -1,5 +1,5 @@
-// Nodo VISTA del canvas (doc 105, ronda 5): la UI va en inglés — una vista sin
-// columnas decía «Sin columnas» (el nodo de tabla ya decía «No columns»).
+// Nodo de vista del canvas: la UI va en inglés; una vista sin columnas muestra
+// «No columns», igual que el nodo de tabla.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ReactFlowProvider, type NodeProps } from '@xyflow/react';
 import { describe, expect, it } from 'vitest';

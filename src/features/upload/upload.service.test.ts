@@ -1,5 +1,5 @@
-// Servicio de la carga masiva (doc 55 §7-8): rutas bajo el changeset y
-// polling del job hasta un estado terminal, cancelable y sin tragarse errores.
+// Servicio de la carga masiva: rutas bajo el changeset y polling del job hasta
+// un estado terminal, cancelable y sin tragarse errores.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@/services/http', () => {
@@ -8,7 +8,7 @@ vi.mock('@/services/http', () => {
     apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn(),
     setDevUser: vi.fn(), setAuthToken: vi.fn(), setOnUnauthorized: vi.fn(),
     ApiError, apiErrorMessage: vi.fn(), isConflictError: vi.fn(),
-    // el real (doc 105, ronda 5): red, timeout o 5xx
+    // como el real: red, timeout o 5xx
     isTransientError: (e: unknown) => e instanceof ApiError && (e.status === 0 || e.status >= 500),
   };
 });
@@ -35,14 +35,14 @@ const job = (status: UploadJob['status']): UploadJob => ({
 beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
-describe('upload.service routes', () => {
-  it('reads the target projects under the uploads path (doc 87)', async () => {
+describe('rutas de upload.service', () => {
+  it('lee los proyectos destino bajo la ruta de uploads', async () => {
     vi.mocked(apiGet).mockResolvedValue({ mode: 'choose', candidates: [] });
     await getUploadTargets('c 1');
     expect(apiGet).toHaveBeenCalledWith('/api/changesets/c%201/uploads/targets');
   });
 
-  it('hang off the changeset uploads path', async () => {
+  it('cuelgan de la ruta de uploads del changeset', async () => {
     vi.mocked(apiPost).mockResolvedValue(job('validating'));
     const raw = { fileName: 'f.xlsx', profileId: 'pf', sheets: [{ name: 'Cargar_Tablas', rows: [{ row: 5, cells: ['', 'TABLA_LOGICO'] }] }] };
     await startUpload('c 1', raw);
@@ -55,12 +55,12 @@ describe('upload.service routes', () => {
     vi.mocked(apiDelete).mockResolvedValue({ deleted: true });
     await discardUpload('c1', 'j1');
     expect(apiDelete).toHaveBeenCalledWith('/api/changesets/c1/uploads/j1');
-    // Doc 105 (ronda 8): sólo si sigue validado (409 si la carga ya empezó o terminó).
+    // Solo si sigue validado (409 si la carga ya empezó o terminó).
     await discardUpload('c1', 'j1', { onlyIfValidated: true });
     expect(apiDelete).toHaveBeenLastCalledWith('/api/changesets/c1/uploads/j1?status=validated');
   });
 
-  it('profiles: project-scoped URLs and verbs', async () => {
+  it('perfiles: URLs y verbos por proyecto', async () => {
     vi.mocked(apiGet).mockResolvedValue([]); vi.mocked(apiPost).mockResolvedValue({}); vi.mocked(apiPut).mockResolvedValue({}); vi.mocked(apiDelete).mockResolvedValue({});
     await listProfiles('p 1'); await createProfile('p1', BODY); await updateProfile('p1', 'a', BODY); await deleteProfile('p1', 'a');
     await setDefaultProfile('p1', 'a'); await validateProfile('p1', BODY); await suggestMappings('p1', 'tables', ['X']);
@@ -76,7 +76,7 @@ describe('upload.service routes', () => {
     expect(apiGet).toHaveBeenCalledWith('/api/projects/p1/upload-profiles/catalog');
   });
 
-  it('profileProblemsOf reads the 422 detail and ignores other errors', () => {
+  it('profileProblemsOf lee el detalle del 422 e ignora los demás errores', () => {
     const problems = [{ path: 'name', code: 'name-empty', message: 'm' }];
     expect(profileProblemsOf(new ApiError('bad', 422, { message: 'x', problems }))).toEqual(problems);
     expect(profileProblemsOf(new ApiError('conflict', 409, 'taken'))).toEqual([]);
@@ -84,7 +84,7 @@ describe('upload.service routes', () => {
     expect(profileProblemsOf(new Error('boom'))).toEqual([]);
   });
 
-  it('isTerminal covers validated / applied / failed only', () => {
+  it('isTerminal cubre solo validated / applied / failed', () => {
     expect(['validated', 'applied', 'failed'].every((s) => isTerminal(s as UploadJob['status']))).toBe(true);
     expect(isTerminal('validating')).toBe(false);
     expect(isTerminal('applying')).toBe(false);
@@ -92,7 +92,7 @@ describe('upload.service routes', () => {
 });
 
 describe('pollUploadJob', () => {
-  it('resolves on the first terminal state and reports every tick', async () => {
+  it('resuelve en el primer estado terminal e informa cada tick', async () => {
     vi.mocked(apiGet)
       .mockResolvedValueOnce(job('validating'))
       .mockResolvedValueOnce(job('validating'))
@@ -106,7 +106,7 @@ describe('pollUploadJob', () => {
     expect(apiGet).toHaveBeenCalledTimes(3);
   });
 
-  it('stops when the signal is aborted', async () => {
+  it('se detiene cuando se aborta la señal', async () => {
     vi.mocked(apiGet).mockResolvedValue(job('applying'));
     const ac = new AbortController();
     const p = pollUploadJob('c1', 'j1', { intervalMs: 500, signal: ac.signal });
@@ -118,19 +118,19 @@ describe('pollUploadJob', () => {
     expect(vi.mocked(apiGet).mock.calls.length).toBeLessThanOrEqual(2);
   });
 
-  it('propagates API errors (e.g. the job expired → 404)', async () => {
+  it('propaga los errores de la API (p. ej. el job expiró → 404)', async () => {
     vi.mocked(apiGet).mockRejectedValue(new Error('Upload not found'));
     await expect(pollUploadJob('c1', 'j1', { intervalMs: 100 })).rejects.toThrow('Upload not found');
   });
 });
 
-// Doc 105 (ronda 5, R15-H2): un GET caído mientras se aplica (red, timeout,
-// 5xx) NO es el resultado de la carga — el servidor la sigue aplicando. Antes
-// el polling lo propagaba y el popup la daba por fallida: sin arrange, sin
-// refresco del Explorer y sin vaciar el Undo (una inversa vieja pisaba lo
-// cargado). Ahora reintenta hasta un estado terminal; un 404 (el job ya no
-// está) sí es falla real; tras varios transitorios seguidos se rinde.
-describe('pollUploadJob reintenta los fallos transitorios (doc 105, ronda 5)', () => {
+// Un GET caído mientras se aplica (red, timeout, 5xx) no es el resultado de la
+// carga: el servidor la sigue aplicando. Si el polling lo propagara, el popup
+// la daría por fallida (sin arrange, sin refresco del Explorer y sin vaciar el
+// Undo, con lo que una inversa previa pisaría lo cargado). Por eso reintenta
+// hasta un estado terminal; un 404 (el job no existe) sí es falla real; tras
+// varios transitorios seguidos se rinde.
+describe('pollUploadJob reintenta los fallos transitorios', () => {
   beforeEach(() => { vi.mocked(apiGet).mockReset(); });
 
   it('red o timeout (status 0) y 5xx: sigue hasta el estado terminal', async () => {
@@ -145,13 +145,13 @@ describe('pollUploadJob reintenta los fallos transitorios (doc 105, ronda 5)', (
     expect(apiGet).toHaveBeenCalledTimes(4);
   });
 
-  it('un 404 (el job ya no está) es falla real: no reintenta', async () => {
+  it('un 404 (el job no existe) es falla real: no reintenta', async () => {
     vi.mocked(apiGet).mockRejectedValueOnce(new ApiError('Upload not found', 404));
     await expect(pollUploadJob('c1', 'j1', { intervalMs: 100 })).rejects.toThrow('Upload not found');
     expect(apiGet).toHaveBeenCalledTimes(1);
   });
 
-  it('se rinde tras varios transitorios SEGUIDOS (propaga el último)', async () => {
+  it('se rinde tras varios transitorios seguidos (propaga el último)', async () => {
     vi.mocked(apiGet).mockRejectedValue(new ApiError('timeout', 0));
     const out = pollUploadJob('c1', 'j1', { intervalMs: 100, maxTransient: 3 }).catch((e: Error) => e.message);
     await vi.advanceTimersByTimeAsync(10_000);

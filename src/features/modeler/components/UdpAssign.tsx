@@ -8,27 +8,27 @@ import { pinSession, type SessionPin } from '../lib/sessionGuard';
 import { udpChoices } from '@/lib/udpChoices';
 import { canonicalNumberText } from '@/lib/udpNumber';
 
-/** Asigna VALORES a las etiquetas UDP (definidas en Data Standards) de una
+/** Asigna valores a las etiquetas UDP (definidas en Data Standards) de una
  *  tabla, columna o canvas. Muestra cada key con su input (select si es
  *  'list', input tipado si no) y llama `onChange(next)` con el mapa completo
- *  {defId: value}. Sólo lista las definiciones del `level` Y la faceta `view`
- *  actual (doc 69: Entity/Attribute lógicos vs Table/Column físicos — los
- *  paneles pasan el modo del canvas; View y Model son siempre físicos).
+ *  {defId: value}. Solo lista las definiciones del `level` y la faceta `view`
+ *  actual (Entity/Attribute lógicos vs Table/Column físicos: los paneles pasan
+ *  el modo del canvas; View y Model son siempre físicos).
  *
- *  Guardado (doc 40): los selects commitean al elegir; los inputs de
- *  texto/número/fecha bufferean LOCAL y commitean al salir del campo (blur o
- *  Enter) y al desmontar (cerrar Properties / colapsar la fila guarda lo
- *  pendiente). Antes cada tecla disparaba onChange → un upsert + reload por
- *  carácter, y el input (atado al prop del server) perdía teclas al tipear
- *  rápido. `pending` (udpDraft.ts) evita que un commit armado sobre el prop
- *  stale pise lo recién guardado en otro campo mientras el reload viaja. */
+ *  Guardado: los selects commitean al elegir; los inputs de texto/número/fecha
+ *  bufferean en local y commitean al salir del campo (blur o Enter) y al
+ *  desmontar (cerrar Properties / colapsar la fila guarda lo pendiente). Así
+ *  no hay un onChange por tecla (un upsert + reload por carácter) y el input,
+ *  atado al prop del server, no pierde teclas al escribir rápido. `pending`
+ *  (udpDraft.ts) evita que un commit armado sobre el prop stale pise lo recién
+ *  guardado en otro campo mientras el reload viaja. */
 export default function UdpAssign({ level, view = 'physical', values, onChange, disabled, defs: defsProp }: {
   level: UdpLevel;
-  /** Doc 69: faceta cuyas defs se listan (los paneles pasan el modo del canvas). */
+  /** Faceta cuyas defs se listan (los paneles pasan el modo del canvas). */
   view?: Facet;
-  /** Doc 85: defs YA cargadas por el caller (p.ej. el snapshot de Data
-   *  Standards). Con esto no se consulta la sesión ni se hace fetch — Data
-   *  Standards es explícito por proyecto y puede no tener proyecto de sesión. */
+  /** Defs ya cargadas por el caller (p. ej. el snapshot de Data Standards).
+   *  Con esto no se consulta la sesión ni se hace fetch: Data Standards es
+   *  explícito por proyecto y puede no tener proyecto de sesión. */
   defs?: UdpDefinition[];
   values: UdpValues;
   onChange: (next: UdpValues) => void;
@@ -37,14 +37,14 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
   const [defs, setDefs] = useState<UdpDefinition[]>([]);
   // Borrador por campo (solo mientras se tipea); undefined = sin edición viva.
   const [draft, setDraft] = useState<Record<string, string | undefined>>({});
-  // Commits que el server todavía no refleja (el reload del padre demora).
+  // Commits pendientes de reflejarse en el server (el reload del padre demora).
   const pending = useRef<UdpValues>({});
   // Refs para el flush de desmontaje (cleanup de efecto ve el primer render).
   const latest = useRef({ values, onChange, draft, defs });
   latest.current = { values, onChange, draft, defs };
-  // Doc 105 (ronda 4, 6d): la sesión de la ÚLTIMA edición. Si el panel se
-  // cierra porque cambió (otra versión abierta, o la revalidación la bajó a solo
-  // lectura), lo tipeado se descarta: no se escribe en la nueva ni se avisa
+  // La sesión de la última edición. Si el panel se cierra porque la sesión es
+  // otra (otra versión abierta, o la revalidación la bajó a solo lectura), lo
+  // escrito se descarta: no se escribe en la sesión vigente ni se avisa
   // «read-only» encima del aviso de la revalidación.
   const editPin = useRef<SessionPin | null>(null);
   const sameSession = () => !editPin.current || editPin.current.holds();
@@ -52,7 +52,7 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
   useEffect(() => {
     let alive = true;
     if (defsProp) { setDefs(facetUdpDefs(defsProp, level, view)); return () => { alive = false; }; }
-    // Un efecto JAMÁS lanza (React desmontaría todo el árbol): sin proyecto
+    // Un efecto nunca lanza (React desmontaría todo el árbol): sin proyecto
     // activo en la sesión no hay defs que listar.
     let pid: string;
     try { pid = sessionProjectId(); } catch { setDefs([]); return () => { alive = false; }; }
@@ -63,13 +63,13 @@ export default function UdpAssign({ level, view = 'physical', values, onChange, 
   // Llegó un prop nuevo (reload): podar lo pendiente que ya está reflejado.
   useEffect(() => { pending.current = prunePending(values, pending.current); }, [values]);
 
-  // Doc 105 (ronda 6): un número se guarda en su forma canónica («10.50» →
-  // «10.5»): el Reporting busca `= 10.5` por el literal y su forma canónica.
+  // Un número se guarda en su forma canónica («10.50» → «10.5»): el
+  // Reporting busca `= 10.5` por el literal y su forma canónica.
   const typed = (list: UdpDefinition[], id: string, v: string) =>
     (list.find((d) => d.id === id)?.dataType === 'number' ? canonicalNumberText(v) : v);
 
   // Flush al desmontar: lo tipeado sin blur (cerrar el panel / colapsar la
-  // fila / cerrar el modal) se commitea en UN onChange con todos los borradores.
+  // fila / cerrar el modal) se commitea en un solo onChange con todos los borradores.
   useEffect(() => () => {
     const { values: vals, onChange: emit, draft: d, defs: list } = latest.current;
     if (!sameSession()) return;

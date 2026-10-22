@@ -5,7 +5,7 @@ vi.mock('@/features/standards/standards.service', () => ({ getSnapshot: vi.fn() 
 import { getSnapshot } from '@/features/standards/standards.service';
 import { loadSourceStandards } from './pasteSource.service';
 
-describe('loadSourceStandards (doc 118)', () => {
+describe('loadSourceStandards', () => {
   it('UDP, dominios y themes del proyecto de origen, de su snapshot', async () => {
     vi.mocked(getSnapshot).mockResolvedValueOnce({
       udp: [{ id: 'u' }], domains: [{ id: 'd' }], themes: [{ id: 't' }], dict: [], namingConfig: {},
@@ -14,7 +14,7 @@ describe('loadSourceStandards (doc 118)', () => {
     expect(getSnapshot).toHaveBeenCalledWith('pA');
   });
 
-  it('un snapshot viejo sin themes, sin themes', async () => {
+  it('un snapshot sin themes devuelve themes vacío', async () => {
     vi.mocked(getSnapshot).mockResolvedValueOnce({ udp: [], domains: [], dict: [], namingConfig: {} } as never);
     await expect(loadSourceStandards('pA')).resolves.toEqual({ udpDefs: [], domains: [], themes: [] });
   });

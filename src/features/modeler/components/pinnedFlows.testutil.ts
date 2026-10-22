@@ -1,48 +1,47 @@
 /**
- * Doc 105 (H1, barrido) — análisis ESTÁTICO de los flujos de escritura de un
- * componente: dentro de una función async, toda escritura que sigue a un
- * `await` ya cumplido tiene que ir precedida de un `.check()` (o un
- * `.holds()` que la descarte) del pin, sin otro `await` en el medio, o pasar
- * por `pinned(…)` / `pinnedViewDeps(…)`. Los
- * servicios toman la versión AL LLAMARLOS: sin eso, si la sesión cambió
- * mientras se esperaba, la escritura cae en la versión que se abrió después.
+ * Análisis estático de los flujos de escritura de un componente: dentro de una
+ * función async, toda escritura que sigue a un `await` ya cumplido tiene que ir
+ * precedida de un `.check()` (o un `.holds()` que la descarte) del pin, sin
+ * otro `await` en el medio, o pasar por `pinned(…)` / `pinnedViewDeps(…)`. Los
+ * servicios toman la versión al llamarlos: sin eso, si la sesión cambia
+ * mientras se espera, la escritura cae en la versión que se abrió después.
  * Lo usa el test de fuente de los componentes (sin DOM); no corre en la app.
  *
- * «Sigue a un await» se mira por el flujo, no sólo por el texto:
+ * «Sigue a un await» se mira por el flujo, no solo por el texto:
  *  · un `await` en otra rama exclusiva (if/else, `c ? a : b`, otro `case`) no
  *    precede a la escritura;
  *  · tampoco uno dentro de una rama que termina con `return`/`throw` (early
  *    return) si la escritura va después de ese `if`;
- *  · en un bucle cuyo cuerpo espera algo, la vuelta siguiente llega DESPUÉS de
+ *  · en un bucle cuyo cuerpo espera algo, la vuelta siguiente llega después de
  *    ese `await`: cuenta como uno al principio del cuerpo (en `for await`,
  *    siempre).
  *
- * Doc 105 (ronda 3, revisión R7) — lo que el análisis no veía:
- *  · el flujo sigue por los callbacks que corren EN EL ACTO (`forEach`/`map`/…,
+ * Además:
+ *  · el flujo sigue por los callbacks que corren en el acto (`forEach`/`map`/…,
  *    `runBlocking`, `run`, la IIFE): su escritura es del flujo de afuera; un
- *    `await` de adentro sólo precede a lo que sigue adentro;
+ *    `await` de adentro solo precede a lo que sigue adentro;
  *  · el callback de `.then/.catch/.finally` (y el de `persistReorder`) corre
- *    DESPUÉS de una promesa: cuenta un await al empezar;
+ *    después de una promesa: cuenta un await al empezar;
  *  · los diferidos (timers, efectos, handlers, `action:` de un objeto, las
- *    inversas del Undo) se analizan aparte, como siempre;
+ *    inversas del Undo) se analizan aparte;
  *  · acciones del store por alias (`st = useModelerStore.getState()`, `get()`)
- *    o desestructuradas; `csvc`; callbacks de props y helpers que escriben —
+ *    o desestructuradas; `csvc`; callbacks de props y helpers que escriben,
  *    también los locales: llamar a una función del archivo que escribe es
- *    escribir, aunque ella verifique SU pin (lo toma al llamarla), salvo que
+ *    escribir, aunque ella verifique su pin (lo toma al llamarla), salvo que
  *    reciba el pin del llamador o verifique uno de afuera;
- *  · sólo cuenta el `.check()`/`.holds()` de un PIN (`pin`, `…Pin`, `undo`) y
- *    el `.holds()` sólo si protege la escritura (`if (!pin.holds()) return;`
- *    antes, o la escritura dentro de `if (pin.holds())` / `pin.holds() && …`);
+ *  · solo cuenta el `.check()`/`.holds()` de un pin (`pin`, `…Pin`, `undo`) y
+ *    el `.holds()` solo si protege la escritura (`if (!pin.holds()) return;`
+ *    delante, o la escritura dentro de `if (pin.holds())` / `pin.holds() && …`);
  *    un check en una rama, un bucle o un callback no cubre lo que sigue afuera.
  *
- * Doc 105 (ronda 4, R10-A) — el confirm de un borrado con PRE-LECTURA:
- *  · un `action:` (callback diferido de un confirm) creado DESPUÉS de un await
+ * El confirm de un borrado con prelectura:
+ *  · un `action:` (callback diferido de un confirm) creado después de un await
  *    necesita un check del pin de afuera antes de crearlo (el confirm no abre
- *    en otra sesión) y sus escrituras, uno de un pin de AFUERA (al clic, la
+ *    en otra sesión) y sus escrituras, uno de un pin de afuera (al clic, la
  *    acción del store tomaría el pin de ese momento);
  *  · `reportWriteError(…)` toma la sesión al crearse: creado tras un await sin
- *    el pin de afuera, avisaría errores de la sesión nueva (p. ej. «read-only»
- *    encima del aviso de la revalidación).
+ *    el pin de afuera, avisaría errores de la sesión recién abierta (p. ej.
+ *    «read-only» encima del aviso de la revalidación).
  */
 import ts from 'typescript';
 
@@ -60,12 +59,12 @@ const SERVICE_WRITES = new Set([
   'struct.renameFolder', 'struct.moveFolder', 'struct.deleteFolder', 'struct.createSubjectArea',
   'struct.updateSubjectArea', 'struct.deleteSubjectArea', 'struct.renameProject', 'struct.deleteProject',
   'struct.reviveProject', 'struct.setCanvasColors',
-  // El ledger de la versión, directo (ronda 3).
+  // El ledger de la versión, directo.
   'csvc.recordChange', 'csvc.recordChangesBulk',
 ]);
 /** Sync de vistas: escriben por `deps.updateView`. */
 const VIEW_SYNCS = /^sync(New|Removed|Renamed)\w*$/;
-/** Acciones del store que escriben con la sesión de AHORA (cada una toma SU
+/** Acciones del store que escriben con la sesión del momento (cada una toma su
  *  pin al empezar: llamarla después de un `await` también necesita el check
  *  del flujo). Los dibujos agendan su guardado con la sesión del momento. */
 export const STORE_WRITE_ACTIONS = new Set([
@@ -76,8 +75,8 @@ export const STORE_WRITE_ACTIONS = new Set([
   'renameFolder', 'deleteFolder', 'createCanvas', 'renameCanvas', 'deleteCanvas', 'moveCanvas', 'renameProject',
   'deleteProject', 'undoProjectDeletion', 'saveAll',
   'addDrawing', 'updateDrawing', 'deleteDrawing', 'persistDrawings',
-  'setBoxColors', 'setObjectColor',   // doc 109
-  'applyCanvasColors',                // doc 112
+  'setBoxColors', 'setObjectColor',
+  'applyCanvasColors',
 ]);
 /** Callbacks que escriben (del padre): el cuerpo de columna (`onPatch`), el
  *  editor de vistas (`onSaved`: el llamador suma la vista al canvas), el alta
@@ -88,14 +87,14 @@ const WRITE_CALLBACKS = new Set([
   'onPatch', 'onPatchRef.current', 'onSaved', 'deleteViewVersioned',
   'onAdd', 'onCreate', 'onSave', 'onApply', 'onCommit', 'onDrop',
 ]);
-/** Helpers de otros módulos que escriben con la sesión de AHORA; con un pin
- *  entre sus argumentos, escriben con ése. */
+/** Helpers de otros módulos que escriben con la sesión del momento; con un pin
+ *  entre sus argumentos, escriben con ese. */
 const WRITE_HELPERS = new Set(['placeUploadedObjects', 'writeWireRoute']);
 
-/** Llamadas cuyo callback corre EN EL ACTO (parte del flujo que las llama). */
+/** Llamadas cuyo callback corre en el acto (parte del flujo que las llama). */
 const INLINE_METHODS = /^(forEach|map|flatMap|filter|some|every|reduce|reduceRight|find|findIndex|findLast|findLastIndex|sort|toSorted)$/;
 const INLINE_RUNNERS = new Set(['runBlocking', 'run', 'Array.from']);
-/** Llamadas cuyo callback corre DESPUÉS de una promesa. */
+/** Llamadas cuyo callback corre después de una promesa. */
 const CONT_METHODS = /^(then|catch|finally)$/;
 const CONT_RUNNERS = new Set(['persistReorder']);
 /** Receptor de un pin: `pin`, `undo` (la inversa del Undo), `…Pin`, `….current`. */
@@ -112,7 +111,7 @@ interface Guard { node: ts.Node; kind: 'check' | 'holds'; receiver: string }
 interface Write { node: ts.Node; name: string; pinned: boolean }
 interface Flow {
   fn: Fn; awaits: Await[]; guards: Guard[]; writes: Write[]; ownPins: Set<string>;
-  /** Ronda 4: lo que toma la sesión al crearse (`reportWriteError`, un `action:` diferido). */
+  /** Lo que toma la sesión al crearse (`reportWriteError`, un `action:` diferido). */
   bound: { node: ts.Node; name: string }[];
   actions: Fn[];
 }
@@ -192,7 +191,7 @@ function analyze(fileName: string, code: string) {
   // ── Escrituras ──
   let localWriters = new Set<string>();
   const writeNameOf = (t: string): string | null => {
-    if (t === 'bestEffort') return t;   // corre su callback YA: sin deps con pin, cuenta
+    if (t === 'bestEffort') return t;   // corre su callback de inmediato: sin deps con pin, cuenta
     if (SERVICE_WRITES.has(t) || WRITE_CALLBACKS.has(t) || WRITE_HELPERS.has(t)) return t;
     if (VIEW_SYNCS.test(t.split('.').pop() ?? '')) return t;
     if (bound.has(t) || localWriters.has(t)) return t;
@@ -213,7 +212,7 @@ function analyze(fileName: string, code: string) {
     const e = call.expression;
     if (ts.isPropertyAccessExpression(e) && !e.questionDotToken && (e.name.text === 'check' || e.name.text === 'holds')
         && PIN_RECEIVER.test(text(e.expression))) return { node: call, kind: e.name.text, receiver: text(e.expression) };
-    // doc 104: «¿la sesión sigue editando `cs`?» (tomada antes) — como un holds.
+    // «¿La sesión sigue editando `cs`?» (tomada previamente): cuenta como un holds.
     if (text(e) === 'stillEditing') return { node: call, kind: 'holds', receiver: call.arguments[0] ? text(call.arguments[0]) : '' };
     // `pinned(pin, fn)(…)` verifica al llamar
     if (ts.isCallExpression(e) && text(e.expression) === 'pinned') return { node: call, kind: 'check', receiver: e.arguments[0] ? text(e.arguments[0]) : '' };
@@ -227,7 +226,7 @@ function analyze(fileName: string, code: string) {
       if (isFn(n)) {
         const k = fnKind(n);
         if (k === 'root') {   // otra función: se analiza aparte
-          // …salvo que sea el `action:` de un confirm: se crea ACÁ (ronda 4).
+          // …salvo que sea el `action:` de un confirm: se crea acá.
           if (ts.isPropertyAssignment(n.parent) && text(n.parent.name) === 'action') flow.actions.push(n);
           return;
         }
@@ -236,7 +235,7 @@ function analyze(fileName: string, code: string) {
         return;
       }
       if (ts.isAwaitExpression(n)) flow.awaits.push({ end: n.getEnd(), node: n, scope });
-      // Pines tomados en el flujo (`pinSession()`, `explorerRequest()`): los de AHORA.
+      // Pines tomados en el flujo (`pinSession()`, `explorerRequest()`): los del momento.
       if (ts.isVariableDeclaration(n) && n.initializer && ts.isCallExpression(n.initializer)
           && /^(pinSession|explorerRequest)$/.test(text(n.initializer.expression))) {
         if (ts.isIdentifier(n.name)) flow.ownPins.add(n.name.text);
@@ -248,7 +247,7 @@ function analyze(fileName: string, code: string) {
         if (text(n.expression) === 'reportWriteError') flow.bound.push({ node: n, name: 'reportWriteError' });
         const w = writeOf(n);
         if (w) flow.writes.push(w);
-        // Una escritura pasada POR REFERENCIA a un callback en el acto / de continuación.
+        // Una escritura pasada por referencia a un callback en el acto / de continuación.
         const k = callKind(n);
         if (k) for (const a of n.arguments) {
           if (isFn(a)) continue;
@@ -283,7 +282,7 @@ function analyze(fileName: string, code: string) {
     const last = ts.isBlock(s) ? s.statements[s.statements.length - 1] : s;
     return !!last && (ts.isReturnStatement(last) || ts.isThrowStatement(last));
   };
-  /** ¿`a` está en una rama de un `if` — o en un `catch` (ronda 4) — que
+  /** ¿`a` está en una rama de un `if` (o en un `catch`) que
    *  termina con return/throw y `b` va después de ese if / try? (Un await del
    *  bloque `try` no: una excepción posterior sigue de largo por el catch.) */
   const earlyReturn = (a: ts.Node, b: ts.Node): boolean => {
@@ -334,7 +333,7 @@ function analyze(fileName: string, code: string) {
     }
     return false;
   };
-  /** ¿El `holds()` protege a `w`? — `if (!pin.holds()) return;` antes, o `w` dentro de `if (pin.holds())` / `pin.holds() && w` / `pin.holds() ? w : …`. */
+  /** ¿El `holds()` protege a `w`? — `if (!pin.holds()) return;` delante, o `w` dentro de `if (pin.holds())` / `pin.holds() && w` / `pin.holds() ? w : …`. */
   const holdsGuards = (h: ts.Node, w: ts.Node): boolean => {
     let node: ts.Node = h;
     let negated = false;
@@ -375,9 +374,9 @@ function analyze(fileName: string, code: string) {
   };
   collectRoots(sf);
 
-  /** ¿La función escribe con la sesión de AHORA? — alguna escritura suya no la
-   *  protege un pin de AFUERA (parámetro o clausura): o no la protege nada, o
-   *  sólo el pin que ella misma toma al empezar. */
+  /** ¿La función escribe con la sesión del momento? Sí, si alguna escritura suya
+   *  no la protege un pin de afuera (parámetro o clausura): o no la protege nada,
+   *  o solo el pin que ella misma toma al empezar. */
   const uncoveredWrite = (flow: Flow): Write | undefined => flow.writes.find((w) => {
     if (w.pinned) return false;
     const last = lastAwaitBefore(flow, w.node);
@@ -398,12 +397,12 @@ function analyze(fileName: string, code: string) {
   const flowOf = new Map(flows.map((f) => [f.fn, f]));
   const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
   for (const flow of flows) {
-    // Ronda 4: lo que toma la sesión al crearse, creado tras un await, necesita el pin de afuera.
+    // Lo que toma la sesión al crearse, creado tras un await, necesita el pin de afuera.
     for (const b of [...flow.bound, ...flow.actions.map((a) => ({ node: a as ts.Node, name: 'action' }))]) {
       const last = lastAwaitBefore(flow, b.node);
       if (last >= 0 && !flow.guards.some((g) => covers(g, b.node, last))) violations.push({ fn: fnName(flow.fn), line: lineOf(b.node), write: b.name });
     }
-    // …y la acción diferida, sus escrituras con un pin de AFUERA (no el del clic).
+    // …y la acción diferida, sus escrituras con un pin de afuera (no el del clic).
     for (const a of flow.actions) {
       const af = flowOf.get(a);
       const w = af && lastAwaitBefore(flow, a) >= 0 ? uncoveredWrite(af) : undefined;
@@ -426,7 +425,7 @@ export function unpinnedWrites(fileName: string, code: string): Violation[] {
 }
 
 /** Acciones del store (`useModelerStore = create(…)((set, get) => ({ … }))`)
- *  que escriben con la sesión de AHORA — para verificar `STORE_WRITE_ACTIONS`. */
+ *  que escriben con la sesión del momento, para verificar `STORE_WRITE_ACTIONS`. */
 export function storeWriters(fileName: string, code: string): string[] {
   const { sf, flows, isWriter } = analyze(fileName, code);
   let actions: ts.ObjectLiteralExpression | null = null;

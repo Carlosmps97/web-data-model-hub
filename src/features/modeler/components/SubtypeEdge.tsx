@@ -9,7 +9,7 @@ import RelationshipEdgeLabel from './RelationshipEdgeLabel';
 import WireRouteHandles from './WireRouteHandles';
 import { useWireRoute } from './useWireRoute';
 
-// Colores LITERALES (tokens.css resueltos): el SVG del Export image no
+// Colores literales (tokens.css resueltos): el SVG del Export image no
 // resuelve CSS vars fuera del documento (mismo criterio que DerivationEdge).
 const INK = '#3A4658';       // --ink-2
 const PRIMARY = '#2E5BFF';   // --primary
@@ -17,19 +17,19 @@ const DANGER = '#C0392B';    // --red
 const CANVAS = '#FBFCFD';    // --canvas-bg — carve central del trazo doble
 
 /**
- * Arista de SUBCATEGORÍA (doc 53): TRAZO DOBLE sólido sin crow's-foot — el
- * rasgo distintivo frente a identifying (sólida simple), non-identifying
- * (punteada) y derivación de vistas (oblicua ploma). El doble se dibuja con
- * un trazo ancho del color de la arista más un carve central del color del
- * canvas. Dos variantes con el mismo tipo: tronco supertipo→símbolo
- * (`data.trunk`) y símbolo→subtipo (id = rel.id). El lado de salida/entrada
- * se recalcula por posición de los nodos; la Y de anclaje en tablas usa la
- * del handle real y en el símbolo su centro. Drift (llave fuera de sync) →
- * rojo; pending = fantasma punteado simple. Doc 98: la RAMA de cada subtipo
- * lleva la frase de su relación (misma etiqueta y mismas reglas que el wire
- * crow's-foot); el tronco no es una relación y no lleva. Doc 99: tronco y
- * ramas aceptan trazo manual (el del tronco va con el id del edge,
- * `subsym-{símbolo}`; el de una rama, con el id de su relación).
+ * Arista de subcategoría: trazo doble sólido sin crow's-foot, el rasgo
+ * distintivo frente a identifying (sólida simple), non-identifying (punteada)
+ * y derivación de vistas (oblicua ploma). El doble se dibuja con un trazo
+ * ancho del color de la arista más un carve central del color del canvas. Dos
+ * variantes con el mismo tipo: tronco supertipo→símbolo (`data.trunk`) y
+ * símbolo→subtipo (id = rel.id). El lado de salida/entrada se recalcula por
+ * posición de los nodos; la Y de anclaje en tablas usa la del handle real y en
+ * el símbolo su centro. Drift (llave fuera de sync) → rojo; pending = fantasma
+ * punteado simple. La rama de cada subtipo lleva la frase de su relación
+ * (misma etiqueta y mismas reglas que el wire crow's-foot); el tronco no es
+ * una relación y no lleva. Tronco y ramas aceptan trazo manual (el del tronco
+ * va con el id del edge, `subsym-{símbolo}`; el de una rama, con el id de su
+ * relación).
  */
 function SubtypeEdge(props: EdgeProps) {
   const { id, source, target, sourceY, targetY, data } = props;
@@ -59,14 +59,14 @@ function SubtypeEdge(props: EdgeProps) {
   const sPos = sourceFacesRight ? Position.Right : Position.Left;
   const tPos = sourceFacesRight ? Position.Left : Position.Right;
 
-  // Los extremos que son SÍMBOLO anclan a su centro vertical; las tablas
+  // Los extremos que son símbolo anclan a su centro vertical; las tablas
   // conservan la Y de su handle (cabecera del supertipo / columna del subtipo).
   const sh = sourceNode.measured?.height ?? SYMBOL_SIZE;
   const th = targetNode.measured?.height ?? SYMBOL_SIZE;
   const sy = sourceNode.type === 'subcat' ? sAbs.y + sh / 2 : sourceY;
   const ty = targetNode.type === 'subcat' ? tAbs.y + th / 2 : targetY;
 
-  // Doc 99: con trazo manual el camino pasa por sus puntos; el tramo fijo es
+  // Con trazo manual el camino pasa por sus puntos; el tramo fijo es
   // corto en el extremo que es símbolo (no lleva marcador).
   const manual = via && routedGeometry({
     sBox: { x: sAbs.x, w: sw }, sy, sStub: sourceNode.type === 'subcat' ? STUB_SYMBOL : STUB_BLOCK,
@@ -97,7 +97,7 @@ function SubtypeEdge(props: EdgeProps) {
     />
   );
 
-  // Doc 111: el atenuado del resto lo hace la clase del canvas (CrowFootEdge).
+  // El atenuado del resto lo hace la clase del canvas (CrowFootEdge).
   const cls = active ? 'wk-edge wk-edge--hot' : 'wk-edge';
   const color = d.pending ? PRIMARY : d.drifted ? DANGER : active ? PRIMARY : INK;
   const opacity = d.pending ? 0.5 : undefined;

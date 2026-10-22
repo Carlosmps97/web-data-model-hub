@@ -10,7 +10,7 @@ const names = (id: string) => ({ carla: 'Carla Ruiz' }[id] ?? id);
 const base = { changesetId: 'cs1', versionLabel: 'v14', me: 'ana', canViewAll: false, userName: names };
 const draft = { status: 'draft' as const, owner: 'ana', reviewers: [] as string[], appliedAt: null };
 
-describe('sessionFate (doc 104)', () => {
+describe('sessionFate', () => {
   it('draft propio en edición: la sesión sigue', () => {
     expect(sessionFate({ ...base, mode: 'editing', cs: draft })).toEqual({ kind: 'keep' });
   });
@@ -22,36 +22,36 @@ describe('sessionFate (doc 104)', () => {
     expect(sessionFate({ ...base, mode: 'readonly', cs: null }).kind).toBe('close');
   });
 
-  it('transferida a otro y ya no la puede ver: producción en solo lectura', () => {
+  it('transferida a otro y sin acceso a ella: producción en solo lectura', () => {
     const f = sessionFate({ ...base, mode: 'editing', cs: { ...draft, owner: 'carla' } });
     expect(f).toEqual({ kind: 'readonly', changesetId: null, message: expect.stringMatching(/transferred to Carla Ruiz/) });
   });
 
-  it('transferida pero todavía visible (administrador o revisor): la misma versión en solo lectura', () => {
+  it('transferida pero aún visible (administrador o quien revisa): la misma versión en solo lectura', () => {
     const admin = sessionFate({ ...base, canViewAll: true, mode: 'editing', cs: { ...draft, owner: 'carla' } });
     expect(admin).toEqual({ kind: 'readonly', changesetId: 'cs1', message: expect.stringMatching(/transferred to Carla Ruiz/) });
     const reviewer = sessionFate({ ...base, mode: 'editing', cs: { ...draft, owner: 'carla', reviewers: ['ana'] } });
     expect(reviewer.kind === 'readonly' && reviewer.changesetId).toBe('cs1');
   });
 
-  it('propia pero ya no en draft (enviada o decidida en otra pestaña): la misma versión en solo lectura', () => {
+  it('propia pero fuera de draft (enviada o decidida en otra pestaña): la misma versión en solo lectura', () => {
     const f = sessionFate({ ...base, mode: 'editing', cs: { ...draft, status: 'submitted' } });
     expect(f).toEqual({ kind: 'readonly', changesetId: 'cs1', message: expect.stringMatching(/no longer in draft/) });
   });
 
-  it('visor de una versión ajena que dejó de ser visible: producción, SIN afirmar una transferencia', () => {
+  it('visor de una versión ajena que dejó de ser visible: producción, sin afirmar una transferencia', () => {
     const f = sessionFate({ ...base, mode: 'readonly', cs: { ...draft, owner: 'carla' } });
     expect(f.kind === 'readonly' && f.changesetId).toBeNull();
-    expect(f.kind === 'readonly' && f.message).not.toMatch(/transferred|no longer/);   // p.ej. lo re-enviaron a otro revisor, o nunca pudo verla
+    expect(f.kind === 'readonly' && f.message).not.toMatch(/transferred|no longer/);   // p. ej. se reasignó la revisión a otra persona, o nunca pudo verla
     expect(f.kind === 'readonly' && f.message).toMatch(/isn't available to you/);
-    // visible (publicada, propia, revisor, admin): sigue igual
+    // visible (publicada, propia, de quien revisa, admin): sigue igual
     expect(sessionFate({ ...base, mode: 'readonly', cs: { ...draft, status: 'submitted' } })).toEqual({ kind: 'keep' });
     expect(sessionFate({ ...base, mode: 'readonly', cs: { ...draft, owner: 'carla', status: 'approved', appliedAt: '2026-09-01' } }))
       .toEqual({ kind: 'keep' });
   });
 });
 
-describe('sessionFate — dueño ausente (doc 104)', () => {
+describe('sessionFate — dueño ausente', () => {
   it('una sesión de edición sobre un draft sin dueño no dice «no longer in draft (draft)»', () => {
     const f = sessionFate({ ...base, mode: 'editing', cs: { ...draft, owner: null } });
     expect(f.kind).toBe('readonly');
@@ -59,20 +59,20 @@ describe('sessionFate — dueño ausente (doc 104)', () => {
   });
 });
 
-describe('isVersionError (doc 104)', () => {
+describe('isVersionError', () => {
   const id = '5f2c1d7e-aaaa-bbbb-cccc-0123456789ab';
   it('403/404 de la versión abierta sí; otra URL, otro código o sin versión no', () => {
     expect(isVersionError(new ApiError('gone', 404, null, `/api/changesets/${id}/effective/projects`), id)).toBe(true);
     expect(isVersionError(new ApiError('no', 403, null, `/api/subject-areas/sa1/diagram?changesetId=${id}`), id)).toBe(true);
     expect(isVersionError(new ApiError('Project not found.', 404, null, '/api/projects/p1/folders'), id)).toBe(false);
-    // «This project was deleted.» (409) sigue siendo el borrado del PROYECTO
+    // «This project was deleted.» (409) es el borrado del proyecto
     expect(isVersionError(new ApiError('This project was deleted.', 409, null, `/api/changesets/${id}/effective/x`), id)).toBe(false);
     expect(isVersionError(new Error('x'), id)).toBe(false);
     expect(isVersionError(new ApiError('gone', 404, null, `/api/changesets/${id}`), null)).toBe(false);
   });
 });
 
-describe('touchesChangeset (doc 104)', () => {
+describe('touchesChangeset', () => {
   it('reconoce la versión en la ruta o en el query string, nunca otra ni un snapshot', () => {
     const id = '5f2c1d7e-aaaa-bbbb-cccc-0123456789ab';
     expect(touchesChangeset(`/api/changesets/${id}/changes`, id)).toBe(true);
@@ -85,12 +85,12 @@ describe('touchesChangeset (doc 104)', () => {
   });
 });
 
-describe('isVersionHeaderUrl (doc 104, ronda 2)', () => {
-  // La revalidación lee la CABECERA de la versión; si esa lectura falla (p. ej.
+describe('isVersionHeaderUrl', () => {
+  // La revalidación lee la cabecera de la versión; si esa lectura falla (p. ej.
   // un 403 del proxy de Databricks), el observador no debe volver a dispararla:
   // sería un bucle de peticiones sin fin.
   const id = '5f2c1d7e-aaaa-bbbb-cccc-0123456789ab';
-  it('sólo la cabecera exacta de la versión', () => {
+  it('solo la cabecera exacta de la versión', () => {
     expect(isVersionHeaderUrl(`/api/changesets/${id}`, id)).toBe(true);
     expect(isVersionHeaderUrl(`https://h/api/changesets/${id}?x=1`, id)).toBe(true);
     expect(isVersionHeaderUrl(`/api/changesets/${id}/changes`, id)).toBe(false);
@@ -99,9 +99,9 @@ describe('isVersionHeaderUrl (doc 104, ronda 2)', () => {
   });
 });
 
-describe('touchesVersion (doc 104, ronda 3)', () => {
+describe('touchesVersion', () => {
   const id = '5f2c1d7e-aaaa-bbbb-cccc-0123456789ab';
-  it('403/404/409 de la versión: pueden deberse a que la versión cambió por fuera', () => {
+  it('403/404/409 de la versión: pueden deberse a un cambio de la versión por fuera', () => {
     expect(touchesVersion(new ApiError('x', 409, null, `/api/changesets/${id}/changes`), id)).toBe(true);
     expect(touchesVersion(new ApiError('x', 403, null, `/api/changesets/${id}/changes`), id)).toBe(true);
     expect(touchesVersion(new ApiError('x', 500, null, `/api/changesets/${id}/changes`), id)).toBe(false);
@@ -109,10 +109,10 @@ describe('touchesVersion (doc 104, ronda 3)', () => {
   });
 });
 
-describe('afterRevalidation (doc 104, ronda 3)', () => {
-  // Quien recibe un error de SU versión espera a la revalidación en curso antes
-  // de avisar: si la sesión cambió, la revalidación ya dio el aviso correcto;
-  // si no (p. ej. le quitaron el rol), el error real se muestra.
+describe('afterRevalidation', () => {
+  // Quien recibe un error de su versión espera a la revalidación en curso
+  // antes de avisar: si la sesión es otra, la revalidación ya dio el aviso
+  // correcto; si no (p. ej. le quitaron el rol), el error real se muestra.
   it('espera a la revalidación registrada y resuelve aunque falle', async () => {
     let done = false;
     let release!: () => void;
@@ -132,11 +132,11 @@ describe('afterRevalidation (doc 104, ronda 3)', () => {
   });
 });
 
-// Doc 105 (F2): una CARGA que falla (el Explorer al abrir una versión, la
-// recarga del canvas) se avisa sólo si la sesión sigue siendo la pedida: un
-// error de la versión espera la revalidación (si la cambió, ella avisó); un
-// error viejo de una sesión que el usuario ya dejó no se muestra en la nueva.
-describe('stillAskedSession (doc 105, F2)', () => {
+// Una carga que falla (el Explorer al abrir una versión, la recarga del
+// canvas) se avisa solo si la sesión sigue siendo la pedida: un error de la
+// versión espera la revalidación (si la cambia, ella avisa); un error tardío
+// de una sesión que el usuario ya dejó no se muestra en la nueva.
+describe('stillAskedSession', () => {
   const v403 = new ApiError('Invalid JSON response (HTTP 403)', 403, null, '/api/changesets/cs1/effective/projects');
   const KEY = 'editing|p|cs1';
 
@@ -148,29 +148,29 @@ describe('stillAskedSession (doc 105, F2)', () => {
     await afterRevalidation();
   });
 
-  it('403 de la versión y la revalidación la cambió: se calla (ya avisó ella)', async () => {
+  it('403 de la versión y la revalidación cambia la sesión: se calla (ya avisó ella)', async () => {
     let key = KEY;
     trackRevalidation(new Promise<void>((r) => setTimeout(() => { key = 'readonly|p|'; r(); }, 20)));
     expect(await stillAskedSession(v403, 'cs1', KEY, () => key)).toBe(false);
   });
 
-  it('403 de la versión y la sesión sigue igual (proxy sólo en lecturas): se avisa, DESPUÉS de la revalidación', async () => {
+  it('403 de la versión y la sesión sigue igual (proxy solo en lecturas): se avisa, después de la revalidación', async () => {
     let done = false;
     trackRevalidation(new Promise<void>((r) => setTimeout(() => { done = true; r(); }, 20)));
     expect(await stillAskedSession(v403, 'cs1', KEY, () => KEY)).toBe(true);
     expect(done).toBe(true);
   });
 
-  it('error viejo de una sesión que el usuario ya dejó (abrió otra): se calla', async () => {
+  it('error tardío de una sesión que el usuario ya dejó (abrió otra): se calla', async () => {
     expect(await stillAskedSession(new ApiError('timeout', 0, null, '/api/x'), 'cs1', KEY, () => 'editing|p|cs2')).toBe(false);
   });
 });
 
-// Doc 105 (H1): una acción de VARIAS escrituras (la inversa de un Undo, borrar
-// una tabla) es de la sesión donde empezó. Los servicios toman la versión al
-// llamarlos: si en el medio se abrió otra versión (u otro modo), lo que faltaba
-// se escribiría en ELLA. El pin corta antes de cada escritura.
-describe('pinSession (doc 105, H1)', () => {
+// Una acción de varias escrituras (la inversa de un Undo, borrar una tabla) es
+// de la sesión donde empezó. Los servicios toman la versión al llamarlos: si en
+// el medio se abre otra versión (u otro modo), lo que falta se escribiría en
+// ella. El pin corta antes de cada escritura.
+describe('pinSession', () => {
   const open = (mode: 'editing' | 'readonly', changesetId?: string, projectId = 'p') =>
     useSessionStore.getState().openModel({ projectId, mode, changesetId });
 
@@ -186,7 +186,7 @@ describe('pinSession (doc 105, H1)', () => {
     ['otro modo (la revalidación la degradó)', () => open('readonly', 'cs1')],
     ['otro proyecto', () => open('editing', 'cs1', 'q')],
     ['sesión cerrada', () => useSessionStore.getState().closeModel()],
-  ])('corta con SessionChangedError si cambió: %s', (_label, change) => {
+  ])('corta con SessionChangedError si la sesión cambia: %s', (_label, change) => {
     open('editing', 'cs1');
     const pin = pinSession();
     change();
@@ -194,7 +194,7 @@ describe('pinSession (doc 105, H1)', () => {
     expect(() => pin.check()).toThrow(SessionChangedError);
   });
 
-  it('también si la sesión cambió y VOLVIÓ a la misma (editar → solo lectura → editar)', () => {
+  it('también si la sesión cambia y vuelve a la misma (editar → solo lectura → editar)', () => {
     open('editing', 'cs1');
     const pin = pinSession();
     open('readonly', 'cs1');
@@ -211,12 +211,12 @@ describe('pinSession (doc 105, H1)', () => {
   });
 });
 
-// Doc 105 (H7): el aviso del fallo de una ESCRITURA pedida desde un componente
-// (agregar una vista al canvas, borrar una tabla, guardar…) sigue el patrón de
-// DeleteProjectDialog: la sesión se toma AL PEDIR; un 403/404/409 de su versión
-// espera la revalidación y, si la sesión cambió (transferida, eliminada,
-// enviada — la revalidación ya avisó — o el usuario abrió otra), calla.
-describe('reportWriteError (doc 105, H7)', () => {
+// El aviso del fallo de una escritura pedida desde un componente (agregar una
+// vista al canvas, borrar una tabla, guardar…) sigue el patrón de
+// DeleteProjectDialog: la sesión se toma al pedir; un 403/404/409 de su versión
+// espera la revalidación y, si la sesión es otra (transferida, eliminada,
+// enviada —la revalidación ya avisó— o el usuario abrió otra), calla.
+describe('reportWriteError', () => {
   const v403 = new ApiError('Only the owner can edit this version.', 403, null, '/api/changesets/cs1/changes');
   const open = (mode: 'editing' | 'readonly', changesetId?: string) =>
     useSessionStore.getState().openModel({ projectId: 'p', mode, changesetId });
@@ -230,7 +230,7 @@ describe('reportWriteError (doc 105, H7)', () => {
     expect(report).not.toHaveBeenCalled();
   });
 
-  it('la sesión sigue igual (rol perdido): avisa el error, DESPUÉS de la revalidación', async () => {
+  it('la sesión sigue igual (rol perdido): avisa el error, después de la revalidación', async () => {
     open('editing', 'cs1');
     let revalidated = false;
     const report = vi.fn(() => { expect(revalidated).toBe(true); });
@@ -252,7 +252,7 @@ describe('reportWriteError (doc 105, H7)', () => {
     await afterRevalidation();
   });
 
-  it('la sesión se toma al PEDIR: si antes del error el usuario abrió otra versión, calla', async () => {
+  it('la sesión se toma al pedir: si el usuario abrió otra versión antes de que llegue el error, calla', async () => {
     open('editing', 'cs1');
     const report = vi.fn();
     const onError = reportWriteError(report);

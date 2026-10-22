@@ -1,6 +1,6 @@
-// DdlOutputForm en Oracle (doc 106): el export sale con los tipos tal cual, así
-// que el formulario ofrece solo el casing de los tipos — sin «Max string size»
-// ni «Type mapping».
+// DdlOutputForm en Oracle: el export sale con los tipos tal cual, así que el
+// formulario ofrece solo el casing de los tipos, sin «Max string size» ni
+// «Type mapping».
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import DdlOutputForm from './DdlOutputForm';
@@ -17,7 +17,7 @@ describe('formulario de Oracle', () => {
     expect(sections(html)).toEqual(['Include', 'Identifier casing', 'Quote identifiers', 'Data types', 'Schema', 'File names']);
   });
 
-  it('doc 108: NOT NULL es un interruptor aparte; el esquema es «No schema» por default y el elegido solo con «Custom»', () => {
+  it('NOT NULL es un interruptor aparte; el esquema es «No schema» por defecto y el elegido solo con «Custom»', () => {
     const html = renderToStaticMarkup(
       <DdlOutputForm value={mergeOutputSettings(null)} onChange={() => {}} dialect="oracle" />,
     );

@@ -1,5 +1,5 @@
 /**
- * affectedRows — lógica pura de las listas de afectados (doc 95 D4): los popups
+ * affectedRows: lógica pura de las listas de afectados. Los popups
  * de conflictos y de renombres del glosario y el de la cascada de un parent
  * domain comparten tabla (`AffectedTable.tsx`). Separada para testearla sin JSX.
  */
@@ -46,10 +46,10 @@ export function filterRows<T>(rows: T[], query: string, fields: (row: T) => (str
   return rows.filter((r) => fields(r).some((v) => fold(v).includes(q)));
 }
 
-/** Une una página del servidor a lo ya cargado: `offset` 0 reemplaza; otra página
- *  solo se agrega si empieza justo donde termina lo cargado. Una respuesta repetida
- *  (dos scrolls antes del re-render) o fuera de orden se descarta: la lista no
- *  duplica filas ni se da por completa antes de tiempo. */
+/** Une una página del servidor a lo ya cargado: `offset` 0 sustituye todo; otra
+ *  página solo se agrega si empieza justo donde termina lo cargado. Una respuesta
+ *  repetida (dos scrolls previos al re-render) o fuera de orden se descarta: la
+ *  lista no duplica filas ni se da por completa antes de tiempo. */
 export function mergePage<T>(loaded: T[], page: T[], offset: number): T[] {
   if (offset === 0) return page;
   return offset === loaded.length ? [...loaded, ...page] : loaded;
@@ -63,8 +63,8 @@ export function countLabel(shown: number, total: number): string {
   return `${n(total)} row${total === 1 ? '' : 's'}`;
 }
 
-/** Doc 96 D7: mueve el borde entre la columna `index` y la siguiente `dx` px —
- *  una crece y la vecina se achica en lo mismo (el total no cambia: el popup no
+/** Mueve el borde entre la columna `index` y la siguiente `dx` px: una crece y
+ *  la vecina se achica en lo mismo (el total no cambia: el popup no
  *  se ensancha ni desborda), sin bajar de `min` y sin empujar al revés. */
 export function resizeColumns(widths: number[], index: number, dx: number, min: number): number[] {
   if (index < 0 || index >= widths.length - 1) return widths;

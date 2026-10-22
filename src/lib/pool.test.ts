@@ -1,6 +1,6 @@
-// Doc 105 (B8): lecturas por lote con tope de concurrencia — el timeout de 30 s
-// de cada pedido corre desde que SALE, así que 50 POST a la vez se vencían en
-// cola. `mapPool` despacha de a `limit`, conserva el orden y corta al primer error.
+// Lecturas por lote con tope de concurrencia: el timeout de 30 s de cada pedido
+// corre desde que sale, así que 50 POST a la vez se vencerían en cola. `mapPool`
+// despacha de a `limit`, conserva el orden y corta al primer error.
 import { describe, expect, it } from 'vitest';
 import { mapPool } from './pool';
 
@@ -29,13 +29,13 @@ describe('mapPool', () => {
     expect(out).toEqual(Array.from({ length: 20 }, (_, i) => i));
   });
 
-  it('al primer error deja de despachar y rechaza con ESE error (el segundo no queda sin manejar)', async () => {
+  it('al primer error deja de despachar y rechaza con ese error (el segundo no queda sin manejar)', async () => {
     const started: number[] = [];
     const run = mapPool([0, 1, 2, 3, 4, 5, 6, 7, 8, 9], 2, async (n) => {
       started.push(n);
       if (n === 1) { await sleep(1); throw new Error('first'); }
       await sleep(5);
-      if (n === 0) throw new Error('second');   // termina DESPUÉS del primer error
+      if (n === 0) throw new Error('second');   // termina después del primer error
       return n;
     });
     await expect(run).rejects.toThrow('first');

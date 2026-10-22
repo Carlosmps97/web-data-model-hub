@@ -1,7 +1,7 @@
 // El arnés de hooks de mentira (fakeReact.testutil) también se prueba: con
-// setters ESTABLES (como en React), un setter de un montaje ANTERIOR — p. ej. un
-// intervalo que no se soltó al desmontar — escribía en el render vigente y un
-// test de «desmontar» pasaba por la razón equivocada (revisión R6, doc 105).
+// setters estables (como en React), un setter de un montaje anterior — p. ej.
+// un intervalo que no se soltó al desmontar — escribiría en el render vigente
+// y un test de «desmontar» pasaría por la razón equivocada.
 import { describe, expect, it } from 'vitest';
 import { fake, fakeReact, resetFake } from './fakeReact.testutil';
 
@@ -19,7 +19,7 @@ describe('fakeReact: setters por montaje', () => {
     expect(fake.stale).toEqual([{ index: 0, next: 5 }]);
   });
 
-  it('en un re-render del MISMO montaje (keepRefs) el setter es el mismo y anota en el render vigente', () => {
+  it('en un re-render del mismo montaje (keepRefs) el setter es el mismo y anota en el render vigente', () => {
     resetFake();
     const [, set] = R.useState(0) as [number, Setter];
     resetFake(null, { keepRefs: true });

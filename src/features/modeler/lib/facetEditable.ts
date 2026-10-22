@@ -1,5 +1,5 @@
 /**
- * facetEditable (doc 85 §3.7) — qué campos EDITA cada faceta en los Properties
+ * facetEditable — qué campos edita cada faceta en los Properties
  * del canvas. Espejo, restringido a lo que los paneles muestran, de los
  * contratos TABLE/COLUMN_FACET_FIELDS del backend: los campos de la otra
  * faceta se ven en solo-lectura con el hint «Switch the canvas to … to edit»;

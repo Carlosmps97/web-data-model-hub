@@ -1,7 +1,7 @@
-// Data Standards → Parent Domains sin DOM (hooks de mentira: ver
-// reporting/components/fakeReact.testutil). Doc 105: «Apply changes» se
-// habilitaba SIN cambios — también al revertir a una versión igual a la
-// vigente — y el apply registraba una versión vacía.
+// Data Standards → Parent Domains sin DOM (hooks simulados: ver
+// reporting/components/fakeReact.testutil). «Apply changes» solo se habilita con
+// un cambio real (tampoco al revertir a una versión igual a la vigente): así el
+// apply no registra una versión vacía.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import type { DomainHistoryEntry, SnapshotDomain, StandardsSnapshot } from '../standards.service';
@@ -52,7 +52,7 @@ const applyBtn = (tree: unknown) => byText(tree, 'button', 'Apply changes');
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe('Parent Domains: «Apply changes» sólo con un cambio real (doc 105)', () => {
+describe('Parent Domains: «Apply changes» solo con un cambio real', () => {
   it('en edición y sin cambios queda deshabilitado, con «No changes to apply»', async () => {
     let tree = await mount();
     click(byText(tree, 'button', 'Edit domain'));

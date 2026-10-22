@@ -41,9 +41,9 @@ describe('createNameSync', () => {
     await flush();
     expect(h.state().physical).toBe('AB');
 
-    h.calls[0].d.resolve({ physical: 'A' });         // la vieja llega tarde
+    h.calls[0].d.resolve({ physical: 'A' });         // la anterior llega tarde
     await flush();
-    expect(h.state().physical).toBe('AB');           // NO pisa con la stale
+    expect(h.state().physical).toBe('AB');           // no pisa con la respuesta stale
   });
 
   it('vaciar el lógico limpia el físico, commitea ambos y anula fetchs en vuelo', async () => {
@@ -57,7 +57,7 @@ describe('createNameSync', () => {
 
     h.calls[0].d.resolve({ physical: 'B' });         // resuelve tras el borrado
     await flush();
-    expect(h.state().physical).toBe('');             // no re-aparece el viejo
+    expect(h.state().physical).toBe('');             // no reaparece el valor anterior
   });
 
   it('override manual del físico apaga el auto y sobrevive respuestas tardías', async () => {
@@ -81,11 +81,11 @@ describe('createNameSync', () => {
     expect(h.calls[1].logical).toBe('abc');
   });
 
-  it('emite UN solo commit con AMBOS campos tras resolver el physicalize', async () => {
+  it('emite un solo commit con ambos campos tras resolver el physicalize', async () => {
     const h = harness();
     h.sync.setLogical('a');
     await vi.advanceTimersByTimeAsync(400);
-    expect(h.onCommit).not.toHaveBeenCalled();       // sin commit intermedio con físico viejo
+    expect(h.onCommit).not.toHaveBeenCalled();       // sin commit intermedio con el físico desactualizado
     h.calls[0].d.resolve({ physical: 'A' });
     await flush();
     await vi.advanceTimersByTimeAsync(400);
@@ -112,19 +112,19 @@ describe('createNameSync', () => {
     const h = harness();
     h.sync.setLogical('a');
     await vi.advanceTimersByTimeAsync(400);          // physicalize('a') en vuelo
-    h.sync.reset('col2', 'COL2');                    // cambió la identidad de la fila
+    h.sync.reset('col2', 'COL2');                    // cambia la identidad de la fila
     h.calls[0].d.resolve({ physical: 'A' });
     await flush();
     await vi.advanceTimersByTimeAsync(1000);
-    expect(h.onCommit).not.toHaveBeenCalled();       // nada del ciclo viejo persiste
+    expect(h.onCommit).not.toHaveBeenCalled();       // nada del ciclo anterior persiste
   });
 });
 
-describe('override persistido (doc 68)', () => {
+describe('override persistido', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('reset con overridden=true: renombrar el lógico NO re-deriva el físico', async () => {
+  it('reset con overridden=true: renombrar el lógico no re-deriva el físico', async () => {
     const h = harness();
     h.sync.reset('base eeff', 'HD_BASEEEFF', true);
     h.sync.setLogical('base eeff dos');
@@ -152,7 +152,7 @@ describe('override persistido (doc 68)', () => {
   });
 });
 
-describe('normalizePhysical — regla de case del scope (doc 83)', () => {
+describe('normalizePhysical — regla de case del scope', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
@@ -167,7 +167,7 @@ describe('normalizePhysical — regla de case del scope (doc 83)', () => {
     return { sync, onState, onCommit, state: () => onState.mock.calls.at(-1)?.[0] as { logical: string; physical: string } };
   };
 
-  it('tipear el físico en minúscula lo MUESTRA y lo commitea normalizado', async () => {
+  it('tipear el físico en minúscula lo muestra y lo commitea normalizado', async () => {
     const h = upperHarness();
     h.sync.reset('monto', 'MTO', false);
     h.sync.setPhysical('monto_deuda');
@@ -188,7 +188,7 @@ describe('normalizePhysical — regla de case del scope (doc 83)', () => {
     });
   });
 
-  it('reset NO normaliza lo persistido: un legacy en minúscula se muestra tal cual hasta editarlo', async () => {
+  it('reset no normaliza lo persistido: un físico guardado en minúscula se muestra tal cual hasta editarlo', async () => {
     const h = upperHarness();
     h.sync.reset('monto', 'mto_legacy', true);
     h.sync.setLogical('monto dos');                      // con override: commit sin re-derivar
@@ -198,7 +198,7 @@ describe('normalizePhysical — regla de case del scope (doc 83)', () => {
     });
   });
 
-  it('sin normalizePhysical el físico pasa tal cual (compat)', async () => {
+  it('sin normalizePhysical el físico pasa tal cual (identidad)', async () => {
     const h = harness();
     h.sync.setPhysical('abc');
     expect(h.state().physical).toBe('abc');
@@ -209,18 +209,18 @@ describe('normalizePhysical — regla de case del scope (doc 83)', () => {
   });
 });
 
-// ── tableNamePlan (doc 68): decisión de guardado del panel de TABLA ────────
+// ── tableNamePlan: decisión de guardado del panel de tabla ─────────────────
 import { tableNamePlan } from './nameSync';
 
 describe('tableNamePlan', () => {
   const prev = { logicalName: 'base eeff', physicalName: 'HD_BASEEEFF', physicalNameOverridden: true };
 
-  it('con override persistido, renombrar el lógico NO re-deriva y conserva el custom', () => {
+  it('con override persistido, renombrar el lógico no re-deriva y conserva el custom', () => {
     const plan = tableNamePlan({ logical: 'base eeff dos', physical: 'HD_BASEEEFF', prev, sessionOverride: null });
     expect(plan).toEqual({ physical: 'HD_BASEEEFF', overridden: true, derive: false });
   });
 
-  it('sin override, renombrar el lógico con físico intacto SÍ re-deriva (comportamiento previo)', () => {
+  it('sin override, renombrar el lógico con físico intacto sí re-deriva', () => {
     const plan = tableNamePlan({
       logical: 'maestro dos', physical: 'MAESTRO',
       prev: { logicalName: 'maestro', physicalName: 'MAESTRO' }, sessionOverride: null,

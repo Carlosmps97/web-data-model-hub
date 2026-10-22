@@ -1,23 +1,23 @@
 /**
- * ComplexTypeBuilder (doc 64 §2) — declarador HÍBRIDO de tipos complejos.
+ * ComplexTypeBuilder — declarador híbrido de tipos complejos.
  *
  * Aparece bajo el input de tipo cuando el texto es un STRUCT/ARRAY/MAP. Cada
  * "hueco" de tipo (elemento del ARRAY, key/value del MAP, tipo de cada
  * subcampo del STRUCT) es un TypeSlot: dropdown del catálogo (TypePicker, con
  * argumentos puntuales para DECIMAL/VARCHAR/…) en modo visual, sub-builder
- * ANIDADO cuando el valor es a su vez complejo, y toggle a CÓDIGO (texto
+ * anidado cuando el valor es a su vez complejo, y toggle a código (texto
  * libre) por slot para pegar directo `STRUCT<a:INT,b:ARRAY<STRING>>`. A nivel
  * raíz hay un segmented Builder | Code y un preview permanente del string
  * canónico. Sincronización bidireccional: el builder recompone el texto y el
- * texto re-deriva el builder (round-trip parse/compose ya testeado).
+ * texto re-deriva el builder (round-trip parse/compose cubierto por pruebas).
  *
- * El spec vive en ESTADO LOCAL POR NIVEL y solo se re-deriva del `value`
- * cuando el texto cambió por FUERA — nunca por el eco del propio compose
+ * El spec vive en estado local por nivel y solo se re-deriva del `value`
+ * cuando el texto cambia por fuera, nunca por el eco del propio compose
  * (useSpecState). Sin eso, tipear `varchar(` en una hoja compone un string
  * transitoriamente inválido, el re-parse del nivel superior falla y el árbol
  * de cajitas se auto-destruye a mitad de tipeo.
  *
- * El tipo SIGUE siendo texto (las "subcolumnas" de un STRUCT no son columnas
+ * El tipo es texto (las "subcolumnas" de un STRUCT no son columnas
  * reales; el DDL lo emite verbatim).
  */
 import { useEffect, useRef, useState } from 'react';
@@ -42,8 +42,8 @@ interface Props {
  *  cajitas y el texto siempre está disponible). */
 const MAX_DEPTH = 3;
 
-/** Spec local por NIVEL con anti-eco: solo se re-deriva del `value` cuando
- *  cambió por FUERA (input crudo, reload, edición en otro nivel). */
+/** Spec local por nivel con anti-eco: solo se re-deriva del `value` cuando
+ *  cambia por fuera (input crudo, reload, edición en otro nivel). */
 function useSpecState(value: string, onChange: (next: string) => void) {
   const [spec, setSpec] = useState<ComplexSpec | null>(() => parseComplexType(value));
   const lastComposed = useRef(value);
@@ -61,7 +61,7 @@ function useSpecState(value: string, onChange: (next: string) => void) {
   return { spec, push };
 }
 
-/** Slot de TIPO (hoja): TypePicker en visual + toggle `</>` a código; un valor
+/** Slot de tipo (hoja): TypePicker en visual + toggle `</>` a código; un valor
  *  complejo abre el sub-builder anidado debajo (recursión). */
 function TypeSlot({ value, onChange, disabled, placeholder, depth }: {
   value: string;
@@ -73,7 +73,7 @@ function TypeSlot({ value, onChange, disabled, placeholder, depth }: {
   const [codeWanted, setCodeWanted] = useState(false);
   const complexish = isComplexTypeStart(value);
   const parsed = complexish ? parseComplexType(value) : null;
-  // Complejo que NO parsea, o demasiado profundo: el picker no puede
+  // Complejo que no parsea, o demasiado profundo: el picker no puede
   // representarlo — código forzado (el texto nunca se pierde).
   const forcedCode = complexish && (!parsed || depth >= MAX_DEPTH);
   const inCode = codeWanted || forcedCode;
@@ -127,7 +127,7 @@ function NestedComplex({ value, onChange, disabled, depth }: {
   return <SpecEditor spec={spec} onSpec={push} disabled={disabled} depth={depth} />;
 }
 
-/** Cuerpo del builder para UN spec (array / map / struct). */
+/** Cuerpo del builder para un spec (array / map / struct). */
 function SpecEditor({ spec, onSpec, disabled, depth }: {
   spec: ComplexSpec;
   onSpec: (s: ComplexSpec) => void;
@@ -207,7 +207,7 @@ function SpecEditor({ spec, onSpec, disabled, depth }: {
 
 export default function ComplexTypeBuilder({ value, onChange, disabled }: Props) {
   const { spec, push } = useSpecState(value, onChange);
-  // Doc 96 D9: abre en Code — el día a día es pegar la estructura; el Builder es ayuda.
+  // Abre en Code: el día a día es pegar la estructura; el Builder es ayuda.
   const [mode, setMode] = useState<'builder' | 'code'>('code');
   const header = spec?.kind === 'array' ? 'ARRAY · element type'
     : spec?.kind === 'map' ? 'MAP · key and value'

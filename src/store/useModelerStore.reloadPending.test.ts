@@ -1,16 +1,15 @@
-// Doc 105 (ronda 5, R15) — la recarga que cierra casi toda edición del canvas.
-//  · H3: pedida mientras se ABRE OTRO canvas se descartaba («esa apertura trae
-//    el diagrama al día»). Si esa apertura fallaba, quedaba en pantalla el
-//    diagrama de ANTES de la edición y la siguiente edición de la misma columna
-//    (upsert del documento completo) pisaba la anterior; si abría, un cambio
-//    estructural no llegaba al Explorer (`explorerTick`).
-//  · Observación: una recarga pendiente no quedaba colgada si el refresco del
-//    Explorer ya no reabría nada.
-//  · H6: si la recarga fallaba (red, timeout, 5xx), cerraba el canvas EN
-//    SILENCIO. Ahora lo cierra y lo DICE (ronda 7, R18a-1: lo que quedaba en
-//    pantalla era de antes de la escritura; conservarlo dejaba editar datos
-//    viejos). Un 404, con su propio aviso. Un error de la versión espera la
-//    revalidación (si cambió la sesión, ella avisó).
+// La recarga que cierra casi toda edición del canvas.
+//  · Pedida mientras se abre otro canvas, no se descarta («esa apertura trae el
+//    diagrama al día»): si esa apertura falla, quedaría en pantalla el diagrama
+//    previo a la edición y la siguiente edición de la misma columna (upsert del
+//    documento completo) pisaría la anterior; si abre, un cambio estructural debe
+//    llegar al Explorer (`explorerTick`).
+//  · Una recarga pendiente no queda colgada si el refresco del Explorer no
+//    reabre nada.
+//  · Si la recarga falla (red, timeout, 5xx), cierra el canvas y lo dice: lo que
+//    queda en pantalla es anterior a la escritura y conservarlo dejaría editar
+//    datos desactualizados. Un 404, con su propio aviso. Un error de la versión
+//    espera la revalidación (si la sesión cambia, la revalidación ya avisó).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -82,7 +81,7 @@ async function editWhileOpeningB(fields: object, onServer: () => void) {
   return { openB, opening };
 }
 
-describe('recarga pedida mientras se abre OTRO canvas (doc 105, ronda 5, R15-H3)', () => {
+describe('recarga pedida mientras se abre otro canvas', () => {
   it('si esa apertura falla, al terminar se recarga el canvas editado (la edición siguiente no pisa la anterior)', async () => {
     const { openB, opening } = await editWhileOpeningB({ description: 'new' }, () => { server.description = 'new'; });
     openB.reject(new Error('Network error'));
@@ -114,9 +113,9 @@ describe('recarga pedida mientras se abre OTRO canvas (doc 105, ronda 5, R15-H3)
     expect(st().explorerTick).toBe(tick0);
   });
 
-  it('un refresco que ya no reabre nada descarta lo pendiente (no queda colgado)', async () => {
+  it('un refresco que no reabre nada descarta lo pendiente (no queda colgado)', async () => {
     const { openB } = await editWhileOpeningB({ description: 'new' }, () => { server.description = 'new'; });
-    vi.mocked(struct.listSubjectAreas).mockResolvedValue([] as never);   // los canvases ya no están
+    vi.mocked(struct.listSubjectAreas).mockResolvedValue([] as never);   // los canvases desaparecieron
     await st().refreshExplorer();
     openB.resolve(diaB());
     await tick(); await tick();
@@ -128,7 +127,7 @@ describe('recarga pedida mientras se abre OTRO canvas (doc 105, ronda 5, R15-H3)
   });
 });
 
-describe('una recarga que falla no cierra el canvas en silencio (doc 105, ronda 5, R15-H6 → ronda 7, R18a-1)', () => {
+describe('una recarga que falla no cierra el canvas en silencio', () => {
   const url = '/api/subject-areas/sa1/diagram?changesetId=cs1';
 
   it('red o timeout: se cierra y se dice por qué', async () => {
@@ -145,14 +144,14 @@ describe('una recarga que falla no cierra el canvas en silencio (doc 105, ronda 
     expect(shown()).toEqual(["Couldn't reload the canvas: Internal server error. Open it again from the explorer."]);
   });
 
-  it('404 (el canvas ya no está en esta versión): se cierra y se dice', async () => {
+  it('404 (el canvas no existe en esta versión): se cierra y se dice', async () => {
     vi.mocked(mod.loadDiagram).mockRejectedValueOnce(new ApiError('Subject area not found', 404, null, url));
     await st().reload();
     expect({ activeSaId: st().activeSaId, diagram: st().diagram }).toEqual({ activeSaId: null, diagram: null });
     expect(shown()).toEqual(['This canvas is no longer in this version, so it was closed. Open another one from the explorer.']);
   });
 
-  it('un error de la versión que la revalidación cambió: calla (ya avisó ella)', async () => {
+  it('un error de la versión que la revalidación cambia: calla (el aviso lo da la revalidación)', async () => {
     vi.mocked(mod.loadDiagram).mockImplementationOnce(async () => {
       trackRevalidation(new Promise<void>((res) => setTimeout(() => {
         useSessionStore.getState().openModel({ projectId: 'p1', mode: 'readonly' }); res();

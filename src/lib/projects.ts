@@ -1,7 +1,7 @@
 import type { Project } from '@/types/model';
 import type { VersionRow } from '@/types/versioning';
 
-/** Producción actual y drafts propios de un proyecto (doc 75 D8). */
+/** Producción actual y drafts propios de un proyecto. */
 export interface ProjectMeta {
   /** Etiqueta de la producción vigente (approved + applied más reciente) o null. */
   production: string | null;

@@ -1,9 +1,9 @@
-// Doc 105 (ronda 3, R7-D/E) — `reload()` (la recarga que cierra casi toda
-// acción del canvas) subía `_loadSeq` aunque hubiera una APERTURA de canvas en
-// vuelo: la invalidaba y dejaba `openingSaId` pegado (spinner fijo; el Explorer
-// ignora los clics mientras tanto). Pasaba con un clic en otro canvas justo
-// después de un guardado, y con la cola `await reload()` de un flujo de la
-// sesión anterior mientras el refresco de la nueva reabría el canvas.
+// `reload()` (la recarga que cierra casi toda acción del canvas) no pisa una
+// apertura de canvas en vuelo: si subiera `_loadSeq`, la invalidaría y dejaría
+// `openingSaId` pegado (spinner fijo; el Explorer ignora los clics mientras
+// tanto). Los casos: un clic en otro canvas justo después de un guardado, y la
+// cola `await reload()` de un flujo de la sesión anterior mientras el refresco
+// de la nueva reabre el canvas.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -43,7 +43,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await sleep(5); });
 
-describe('reload() no pisa una apertura de canvas en vuelo (doc 105, R7-D/E)', () => {
+describe('reload() no pisa una apertura de canvas en vuelo', () => {
   it('clic en otro canvas + recarga del actual (fin de un guardado): se abre el nuevo y el spinner se apaga', async () => {
     const lateX = deferred<unknown>();
     vi.mocked(mod.loadDiagram).mockImplementation(async (id: string) => (id === 'X' ? lateX.promise : dia(id)) as never);
@@ -71,7 +71,7 @@ describe('reload() no pisa una apertura de canvas en vuelo (doc 105, R7-D/E)', (
     }).toEqual({ table: 'T_B', drawings: ['d-B'], selectedTableId: null, openingSaId: null });
   });
 
-  it('crear una tabla: si la sesión cambió mientras recargaba, no la selecciona en la nueva', async () => {
+  it('crear una tabla: si la sesión cambia mientras recarga, no la selecciona en la nueva', async () => {
     const lateReload = deferred<unknown>();
     vi.mocked(mod.loadDiagram).mockImplementationOnce(() => lateReload.promise as never);
     const create = st().createTable({ logicalName: 'nueva', physicalName: 'M_NUEVA' });
@@ -83,18 +83,18 @@ describe('reload() no pisa una apertura de canvas en vuelo (doc 105, R7-D/E)', (
   });
 });
 
-// Doc 105 (ronda 4, R10-B) — SIN cambio de sesión: el Refresh del Explorer
-// reabre el MISMO canvas y, mientras su diagrama viaja, termina una edición y
-// pide `reload()`. Antes se saltaba (había una apertura en vuelo) y quedaba la
-// foto que la reapertura pidió ANTES del guardado; si el cambio era estructural,
-// el Explorer tampoco se enteraba. Ahora se recarga al terminar la apertura.
-describe('reload() durante la reapertura del MISMO canvas se hace al terminar (doc 105, ronda 4)', () => {
+// Sin cambio de sesión: el Refresh del Explorer reabre el mismo canvas y,
+// mientras su diagrama viaja, termina una edición y pide `reload()`. La recarga
+// se hace al terminar la apertura; si se omitiera (por haber una apertura en
+// vuelo), quedaría la foto que la reapertura pidió antes del guardado y, si el
+// cambio fuera estructural, el Explorer no se enteraría.
+describe('reload() durante la reapertura del mismo canvas se hace al terminar', () => {
   const structural = (id: string, tag: string, extra: boolean) => ({
     ...dia(id, tag),
     tables: [{ id: 't1', physicalName: `T_${tag}` }, ...(extra ? [{ id: 't2', physicalName: 'T_NUEVA' }] : [])],
   });
 
-  it('la foto vieja de la reapertura no queda: al final está lo guardado', async () => {
+  it('la foto desactualizada de la reapertura no queda: al final está lo guardado', async () => {
     const reopen = deferred<unknown>();
     vi.mocked(mod.loadDiagram).mockImplementationOnce(() => reopen.promise as never);
     const r = st().refreshExplorer();
@@ -102,13 +102,13 @@ describe('reload() durante la reapertura del MISMO canvas se hace al terminar (d
     expect(st().openingSaId).toBe('sa1');
     vi.mocked(mod.loadDiagram).mockImplementation(async (id: string) => dia(id, 'NUEVO') as never);
     await st().reload();                               // la edición terminó (el servidor ya tiene lo nuevo)
-    reopen.resolve(dia('sa1', 'VIEJO'));               // foto de ANTES del guardado
+    reopen.resolve(dia('sa1', 'VIEJO'));               // foto previa al guardado
     await r;
     expect(st().diagram?.tables[0]?.physicalName).toBe('T_NUEVO');
     expect(st().openingSaId).toBeNull();
   });
 
-  it('cambio estructural: el Explorer se entera una vez (la reapertura trajo la foto vieja)', async () => {
+  it('cambio estructural: el Explorer se entera una vez (la reapertura trajo la foto desactualizada)', async () => {
     const reopen = deferred<unknown>();
     vi.mocked(mod.loadDiagram).mockImplementationOnce(() => reopen.promise as never);
     const tick0 = st().explorerTick;

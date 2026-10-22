@@ -1,6 +1,6 @@
 /**
  * domainImpact — lógica pura del popup de cascada y del panel de un Parent
- * Domain (docs F2 #2 · 95 D7). Separada de DomainsPage para testearla sin JSX.
+ * Domain. Separada de DomainsPage para testearla sin JSX.
  */
 import type { DomainColumnImpact, DomainColumnImpactRow, DomainColumnStatus } from '@/services/naming.service';
 
@@ -9,7 +9,7 @@ const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? 
 
 export interface TypeTargets { physicalTo?: string; logicalTo?: string }
 
-/** Tipos que el borrador CAMBIA — física y/o lógica (antes solo se miraba la física). */
+/** Tipos que el borrador cambia: física y/o lógica. */
 export function typeTargets(
   before: { defaultDataType: string; logicalDataType?: string | null } | null,
   form: { defaultDataType: string; logicalDataType?: string | null },
@@ -47,7 +47,7 @@ export const STATUS_LABEL: Record<DomainColumnStatus, string> = {
   change: 'Will change', override: 'Skipped · override', differs: 'Skipped · type differs',
 };
 
-/** Líneas «antes → después» por faceta que cambia (tipos ya homologados por el backend). */
+/** Líneas «actual → nuevo» por faceta que cambia (tipos ya homologados por el backend). */
 export function typeChanges(i: Pick<DomainColumnImpact, 'domain' | 'targets'>): string[] {
   const out: string[] = [];
   if (i.targets.physical) out.push(`Physical: ${i.domain.physical ?? '—'} → ${i.targets.physical}`);

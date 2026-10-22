@@ -1,11 +1,10 @@
 /**
  * Cliente HTTP genérico del frontend.
  *
- * Encapsula el envelope `{ success, data?, error? }` que devuelven
- * todas las rutas de `@/app/api/*` (ver `@/server/http/response.ts`).
- * Los helpers de feature — `projects.service`, `models.service`,
- * `agent.service` — deberían construirse sobre esta capa para evitar
- * duplicar manejo de errores y parsing de JSON.
+ * Encapsula el envelope `{ success, data?, error? }` que devuelven las
+ * rutas `/api/*` del backend. Los servicios de feature (`projects.service`,
+ * `versioning.service`, …) se construyen sobre esta capa para no duplicar
+ * el manejo de errores ni el parsing de JSON.
  *
  * Diseño:
  *   - `apiFetch<T>()` devuelve el `data` desempaquetado cuando
@@ -19,19 +18,22 @@
 import type { ApiResponse } from '@/types/api';
 
 // Usuario dev activo (fallback del seam local; el backend prefiere el token).
-// El header `X-Dev-User` viaja SOLO en desarrollo (`vite dev`): en producción
-// la identidad es el token y el backend (REQUIRE_AUTH) ignora este header —
-// mandarlo solo servía para que el preflight CORS lo rechazara (400
+// El header `X-Dev-User` viaja solo en desarrollo (`vite dev`): en producción
+// la identidad es el token y el backend (REQUIRE_AUTH) ignora este header;
+// enviarlo solo provocaría que el preflight CORS lo rechace (400
 // "Disallowed CORS headers" → "Failed to fetch" en el login de Apps).
 let _devUser = '';
 export function setDevUser(u: string): void { _devUser = u; }
 
-// Token de sesión (auth propia). Se envía como `X-Session-Token` en TODA
-// llamada — NO como `Authorization: Bearer`: en Databricks Apps ese header le
-// pertenece al proxy SSO de la plataforma (lo consume para su propia auth y
-// el backend nunca lo recibe — visto 2026-07-20: 401 con el Bearer en vuelo).
-// El backend acepta ambos headers (Authorization sigue para curl/dev).
-// Lo setea el store de auth al login/restore y lo limpia al logout.
+// Token de sesión en memoria (auth propia). Normalmente vacío: el servidor del
+// front (server.mjs, también en desarrollo) guarda el token en una cookie
+// HttpOnly que el JavaScript no ve y lo pasa al backend. Solo cuando el backend
+// lo entrega en el cuerpo (front apuntado a otro origen con VITE_API_URL, o la
+// cookie apagada con SESSION_COOKIE=false) el store de auth lo deja acá; no
+// sobrevive a una recarga.
+// Se envía como `X-Session-Token`, no como `Authorization: Bearer`: en
+// Databricks Apps ese header le pertenece al proxy SSO de la plataforma (lo
+// consume para su propia auth y el backend nunca lo recibe).
 let _token = '';
 export function setAuthToken(t: string): void { _token = t; }
 
@@ -40,17 +42,17 @@ export function setAuthToken(t: string): void { _token = t; }
 let _onUnauthorized: (() => void) | null = null;
 export function setOnUnauthorized(cb: (() => void) | null): void { _onUnauthorized = cb; }
 
-// Doc 104: observador de respuestas de error (salvo el 401, que ya tiene su
-// handler). El canvas lo usa para revalidar su versión cuando un 403/404/409
-// de ESA versión avisa que otra sesión la transfirió o la eliminó. Sólo
-// observa: nunca cambia el error que recibe el llamador.
+// Observador de respuestas de error (salvo el 401, que ya tiene su handler).
+// El canvas lo usa para revalidar su versión cuando un 403/404/409 de esa
+// versión avisa que otra sesión la transfirió o la eliminó. Solo observa:
+// nunca cambia el error que recibe el llamador.
 let _onApiError: ((status: number, url: string) => void) | null = null;
 export function setOnApiError(cb: ((status: number, url: string) => void) | null): void { _onApiError = cb; }
 
-// Doc 105 (F5): un 403 puede ser un permiso que ya no se tiene (rol cambiado en
-// Admin): el store de auth re-lee /me (con su propio tope). Las rutas de
-// /api/auth/ no lo disparan: el 403 de la propia lectura de /me no la repite.
-// Sólo observa, como `_onApiError`.
+// Un 403 puede ser un permiso que el usuario perdió (rol cambiado en Admin): el
+// store de auth re-lee /me (con su propio tope). Las rutas de /api/auth/ no lo
+// disparan: el 403 de la propia lectura de /me no la repite.
+// Solo observa, como `_onApiError`.
 let _onForbidden: (() => void) | null = null;
 export function setOnForbidden(cb: (() => void) | null): void { _onForbidden = cb; }
 
@@ -61,7 +63,7 @@ export class ApiError extends Error {
   /** `detail` crudo de un HTTPException de FastAPI (string u objeto — p.ej. el
    *  422 de perfiles de carga trae `{message, problems}`); null si no aplica. */
   readonly detail: unknown;
-  /** URL pedida (doc 104): el canvas distingue si el error es de SU versión
+  /** URL pedida: el canvas distingue si el error es de su versión
    *  (transferida/eliminada) o de otra cosa. null si no aplica. */
   readonly url: string | null;
   constructor(message: string, status: number, detail: unknown = null, url: string | null = null) {
@@ -78,11 +80,11 @@ type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 interface RequestOptions {
   method?: HttpMethod;
   body?: unknown;
-  /** Additional headers. Content-Type is set automatically when body is set. */
+  /** Headers adicionales. Content-Type se fija automáticamente cuando hay body. */
   headers?: Record<string, string>;
-  /** AbortSignal from caller (e.g. useEffect cleanup). */
+  /** AbortSignal del llamador (p. ej. cleanup de un useEffect). */
   signal?: AbortSignal;
-  /** Timeout de ESTA llamada (default `DEFAULT_TIMEOUT_MS`); las acciones
+  /** Timeout de esta llamada (default `DEFAULT_TIMEOUT_MS`); las acciones
    *  largas (publicar, copiar estándares, rollback) usan `LONG_TIMEOUT_MS`. */
   timeoutMs?: number;
 }
@@ -96,9 +98,9 @@ interface RequestOptions {
 /** Timeout por defecto de toda llamada API: sin él, un backend colgado deja
  *  la UI en spinners eternos (fetch no tiene timeout propio). */
 const DEFAULT_TIMEOUT_MS = 30_000;
-/** Timeout de las acciones largas del servidor (doc 75 D18): publicar una
- *  working copy, crear un proyecto copiando estándares, rollback, apply de
- *  estándares — con el overlay bloqueante encendido en la sesión. */
+/** Timeout de las acciones largas del servidor: publicar una working copy,
+ *  crear un proyecto copiando estándares, rollback, apply de estándares, con
+ *  el overlay bloqueante encendido en la sesión. */
 export const LONG_TIMEOUT_MS = 120_000;
 /** Sin respuesta del servidor (red caída, DNS, o en Apps la sesión con el
  *  backend vencida — recargar hace el warm-up SSO, ver `warmup.ts`). */
@@ -112,16 +114,19 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
   const timeout = AbortSignal.timeout(timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
 
-  // The Next.js frontend (`:3000`) and the FastAPI backend (`:8000`) live on
-  // different origins. Without `credentials: 'include'` the browser neither
-  // sends nor accepts the `modeler-auth` session cookie on cross-origin
-  // requests, which would silently break every authenticated call.
+  // El front y el backend pueden vivir en orígenes distintos (p. ej. con
+  // `VITE_API_URL`). Sin `credentials: 'include'` el navegador no envía ni
+  // acepta cookies en requests cross-origin (como la de sesión del proxy de la
+  // plataforma), y toda llamada autenticada fallaría en silencio.
   const init: RequestInit = {
     method,
     signal: combined,
     credentials: 'include',
     headers: {
       ...(_token ? { 'X-Session-Token': _token } : {}),
+      // Mismo origen: la cookie de sesión viaja sola y server.mjs exige este
+      // header en las escrituras (otro origen no puede agregarlo: CSRF).
+      ...(url.startsWith('/api/') ? { 'X-Requested-With': 'XMLHttpRequest' } : {}),
       ...(import.meta.env.DEV && _devUser ? { 'X-Dev-User': _devUser } : {}),
       ...headers,
     },
@@ -140,7 +145,7 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
     }
     // Cancelada por su llamador (cleanup de un efecto): nadie la muestra.
     if (signal?.aborted) return new ApiError(err instanceof Error ? err.message : 'Aborted', 0, null, url);
-    // Doc 105: el «Failed to fetch» del navegador llegaba tal cual a los avisos.
+    // El «Failed to fetch» del navegador se sustituye por un texto legible en los avisos.
     return new ApiError(NETWORK_ERROR_TEXT, 0, null, url);
   };
 
@@ -166,16 +171,16 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
   try {
     json = (await response.json()) as ApiResponse<T>;
   } catch (err) {
-    // Doc 105 (ronda 3): un corte MIENTRAS llega el cuerpo (timeout, cancelación,
-    // red) no es «JSON inválido»; sólo un SyntaxError lo es.
+    // Un corte mientras llega el cuerpo (timeout, cancelación, red) no es «JSON
+    // inválido»; solo un SyntaxError lo es.
     if (!(err instanceof SyntaxError)) throw transportError(err);
     throw new ApiError(`Invalid JSON response (HTTP ${response.status})`, response.status, null, url);
   }
 
   if (!json || typeof json.success !== 'boolean') {
     // FastAPI HTTPException responde `{detail}` (sin envelope): propaga el
-    // mensaje real (p.ej. 409 "versión ya no está en borrador") en vez de un
-    // genérico ilegible.
+    // mensaje real (p. ej. el 409 de una versión que dejó de estar en draft) en
+    // vez de un genérico ilegible.
     const detail = (json as { detail?: unknown } | null)?.detail;
     if (!response.ok && typeof detail === 'string' && detail) {
       throw new ApiError(detail, response.status, detail, url);
@@ -196,7 +201,7 @@ export async function apiFetch<T>(url: string, opts: RequestOptions = {}): Promi
   return json.data as T;
 }
 
-// ─── Convenience shortcuts ────────────────────────────────────────
+// ─── Atajos ───────────────────────────────────────────────────────
 
 export function apiGet<T>(url: string, opts: Omit<RequestOptions, 'method' | 'body'> = {}): Promise<T> {
   return apiFetch<T>(url, { ...opts, method: 'GET' });
@@ -214,7 +219,7 @@ export function apiDelete<T>(url: string, opts: Omit<RequestOptions, 'method' | 
   return apiFetch<T>(url, { ...opts, method: 'DELETE' });
 }
 
-// ─── Error helpers ────────────────────────────────────────────────
+// ─── Auxiliares de errores ────────────────────────────────────────
 
 /** Mensaje legible de un error de API: el `detail` del backend si vino
  *  (ApiError lo conserva como `message`), o `fallback`. */
@@ -222,21 +227,21 @@ export function apiErrorMessage(e: unknown, fallback: string): string {
   return e instanceof Error && e.message ? e.message : fallback;
 }
 
-/** Doc 105 (ronda 3): el motivo de un error para ir DENTRO de un aviso que ya
- *  dice cómo reintentar — sin punto final ni el consejo «— try again…» del
- *  texto de transporte (salía «…within 30s — try again in a moment. Use
- *  Refresh to try again.»). */
+/** Motivo de un error para ir dentro de un aviso que ya dice cómo reintentar:
+ *  sin punto final ni el consejo «— try again…» del texto de transporte (que
+ *  duplicaría la indicación: «…within 30s — try again in a moment. Use Refresh
+ *  to try again.»). */
 export function errorReason(e: unknown, fallback: string): string {
   return apiErrorMessage(e, fallback).replace(/\s*[—-]\s*try again.*$/i, '').replace(/[.\s]+$/, '') || fallback;
 }
 
-/** Doc 105 (ronda 5, R15-H2): un fallo TRANSITORIO — red o timeout (status 0)
- *  o un 5xx —: reintentar puede andar, y no dice que lo pedido no ocurrió. */
+/** Fallo transitorio (red o timeout con status 0, o un 5xx): reintentar puede
+ *  funcionar, y el error no dice que lo pedido no ocurrió. */
 export function isTransientError(e: unknown): boolean {
   return e instanceof ApiError && (e.status === 0 || e.status >= 500);
 }
 
-/** ¿Es un 409 de negocio del backend (p.ej. nombre duplicado — spec 10 §9)? */
+/** ¿Es un 409 de negocio del backend (p. ej. nombre duplicado)? */
 export function isConflictError(e: unknown): boolean {
   return e instanceof ApiError && e.status === 409;
 }

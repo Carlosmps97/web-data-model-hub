@@ -1,6 +1,6 @@
-// Forma canónica de un número de UDP (doc 105, ronda 6). Los UDP se guardan como
-// TEXTO y el Reporting busca `= 10.5` por el literal y su forma canónica: un
-// «10.50» tipeado en el panel no aparecía. La misma forma que el backend
+// Forma canónica de un número de UDP. Los UDP se guardan como texto y el
+// Reporting busca `= 10.5` por el literal y su forma canónica: sin ella, un
+// «10.50» tipeado en el panel no aparecería. La misma forma que el backend
 // (`app/core/udp_values.canonical_number`) donde las dos coinciden; si no, tal cual.
 import { describe, expect, it } from 'vitest';
 import { canonicalNumberText } from './udpNumber';

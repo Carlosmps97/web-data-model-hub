@@ -1,4 +1,4 @@
-// Estado puro del editor de perfiles (doc 78 §8).
+// Estado puro del editor de perfiles.
 import { describe, expect, it } from 'vitest';
 import {
   emptyProfile, localProblems, mergeSuggestions, problemsByPath, problemsOfMapping, removeRule, ruleOf, toBody, upsertRule,
@@ -6,7 +6,7 @@ import {
 import type { ProfileMapping, UploadProfile } from '../upload.service';
 
 describe('profileDraft', () => {
-  it('mergeSuggestions adds new headers without touching mapped ones (by headerKey)', () => {
+  it('mergeSuggestions agrega las cabeceras nuevas sin tocar las ya mapeadas (por headerKey)', () => {
     const sheet = { name: 'T', required: true, headerRow: 5, mappings: [{ header: 'TABLA_LOGICO', target: { kind: 'field' as const, field: 'logicalName' }, rules: [] }] };
     const out = mergeSuggestions(sheet, [
       { header: 'Tabla Lógico', target: { kind: 'ignore' }, matched: null },
@@ -20,7 +20,7 @@ describe('profileDraft', () => {
     expect(sheet.mappings).toHaveLength(1);       // puro
   });
 
-  it('upsertRule replaces by type, removeRule drops it, ruleOf finds it', () => {
+  it('upsertRule sustituye por tipo, removeRule la quita y ruleOf la encuentra', () => {
     const m: ProfileMapping = { header: 'X', target: { kind: 'ignore' }, rules: [{ type: 'required', severity: 'error' }] };
     const m2 = upsertRule(m, { type: 'required', severity: 'warning' });
     expect(m2.rules).toEqual([{ type: 'required', severity: 'warning' }]);
@@ -29,7 +29,7 @@ describe('profileDraft', () => {
     expect(removeRule(m3, 'required').rules).toEqual([{ type: 'maxLength', value: 80, severity: 'error' }]);
   });
 
-  it('localProblems catches the structural issues before hitting the server', () => {
+  it('localProblems detecta los problemas estructurales sin consultar al servidor', () => {
     const p = emptyProfile();
     p.sheets.tables.name = 'Hoja'; p.sheets.columns.name = ' hoja ';
     p.sheets.tables.mappings = [
@@ -45,14 +45,14 @@ describe('profileDraft', () => {
     expect(problemsOfMapping(problems, 'columns', 0)).toEqual([]);
   });
 
-  it('a well-formed profile has no local problems', () => {
+  it('un perfil bien formado no tiene problemas locales', () => {
     const p = emptyProfile();
     p.name = 'P'; p.sheets.tables.name = 'Cargar_Tablas'; p.sheets.columns.name = 'Cargar_Campos'; p.sheets.tables.headerRow = null;
     p.sheets.tables.mappings = [{ header: 'TABLA_LOGICO', target: { kind: 'field', field: 'logicalName' }, rules: [] }];
     expect(localProblems(p)).toEqual([]);
   });
 
-  it('toBody deep-copies a stored profile and fills missing blocks', () => {
+  it('toBody copia en profundidad un perfil guardado y completa los bloques faltantes', () => {
     const doc = {
       id: 'a', projectId: 'p', origin: 'user', name: 'N', description: null, isDefault: true,
       sheets: { tables: { name: 'T', required: true, headerRow: 5, mappings: [{ header: 'H', target: { kind: 'udp', udpIds: ['u'] }, rules: [{ type: 'allowedValues', value: ['x'], severity: 'error' }] }] } },

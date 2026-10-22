@@ -12,7 +12,7 @@ const ROW: DomainColumnImpactRow = {
   attribute: 'codigo cliente', physicalType: 'INTEGER', logicalType: 'NUMBER', physical: 'change', logical: null, status: 'change',
 };
 
-describe('typeTargets (doc 95 D7)', () => {
+describe('typeTargets', () => {
   it('detecta cambio físico y/o lógico; vacío o igual no cuenta', () => {
     const before = { defaultDataType: 'INTEGER', logicalDataType: 'NUMBER' };
     expect(typeTargets(before, { defaultDataType: 'UUID', logicalDataType: 'NUMBER' })).toEqual({ physicalTo: 'UUID' });
@@ -27,7 +27,7 @@ describe('textos del popup y del panel', () => {
     expect(impactBanner(IMPACT)).toBe(
       '177 columns in 118 tables across 37 data models will be re-typed · 2 skipped (override) · 1 skipped (type already differs)');
   });
-  it('panel en inglés, con los modelos como el panel de antes (final review #6)', () => {
+  it('panel en inglés, con el conteo de modelos de datos', () => {
     expect(usageLines(IMPACT)).toEqual({
       headline: 'Used by 180 columns in 120 tables across 37 data models.', follow: '177 follow the domain',
       override: '2 overridden (skipped)', differs: '1 with another type (skipped)',

@@ -1,5 +1,5 @@
 /**
- * domainHistory — lógica pura del historial de un parent domain (doc 95 D8).
+ * domainHistory — lógica pura del historial de un parent domain.
  */
 import type { DomainHistoryEntry, SnapshotDomain } from './standards.service';
 
@@ -8,11 +8,11 @@ const LABEL: Record<string, string> = {
   description: 'Description', inheritsName: 'Standard attribute', physicalName: 'Physical name',
   physicalDescription: 'Physical description', udpValues: 'UDP defaults',
 };
-// Campos cortos: se muestran «antes → después»; el resto, solo «changed».
+// Campos cortos: se muestra el valor previo y el nuevo («x → y»); el resto, solo «changed».
 const SHOW_VALUES = new Set(['name', 'defaultDataType', 'logicalDataType', 'namingTerm', 'physicalName']);
 const txt = (v: unknown): string => (v === null || v === undefined || v === '' ? '—' : String(v));
 
-/** Qué cambió en cada entrada (más reciente primero) respecto de la anterior. */
+/** Qué modificó cada entrada (más reciente primero) respecto de la anterior. */
 export function historyLines(entries: DomainHistoryEntry[]): string[][] {
   return entries.map((e, i) => {
     const older = entries[i + 1];

@@ -1,6 +1,6 @@
-// ConfirmDialog sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105 (F6): ocupado (busy) deshabilita sus dos botones — el foco caía a
-// <body> y Tab iba a la página de atrás mientras la acción seguía en curso.
+// ConfirmDialog sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+// Ocupado (busy) deshabilita sus dos botones; el foco queda en la caja para que no
+// caiga a <body> y Tab no vaya a la página de atrás mientras la acción sigue en curso.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { byText, resetFake, runEffects, textOf, walk, type El } from '../../features/reporting/components/fakeReact.testutil';
 
@@ -28,8 +28,8 @@ function render(props: Partial<Parameters<typeof ConfirmDialog>[0]> = {}) {
 }
 const setRef = (el: El, current: unknown) => { (el.props.ref as { current: unknown }).current = current; };
 
-describe('ConfirmDialog ocupado: el foco no sale del diálogo (doc 105, F6)', () => {
-  it('al confirmar, la caja (tabIndex -1, sin outline) toma el foco ANTES de pasar a busy', () => {
+describe('ConfirmDialog ocupado: el foco no sale del diálogo', () => {
+  it('al confirmar, la caja (tabIndex -1, sin outline) toma el foco antes de pasar a busy', () => {
     const calls: string[] = [];
     const { tree, box } = render({ onConfirm: vi.fn(() => { calls.push('onConfirm → busy'); }) });
     expect(box.props.tabIndex).toBe(-1);
@@ -54,9 +54,9 @@ describe('ConfirmDialog ocupado: el foco no sale del diálogo (doc 105, F6)', ()
   });
 });
 
-// Doc 105 (F6): al cerrarse, el confirm no devolvía el foco: sobre un Dialog o
-// un Modal lo dejaba en <body> y Tab escapaba a la página de atrás.
-describe('ConfirmDialog: al cerrarse, el foco vuelve a quien lo abrió (doc 105, F6)', () => {
+// Al cerrarse, el confirm devuelve el foco a quien lo abrió: sobre un Dialog o un
+// Modal, si quedara en <body>, Tab escaparía a la página de atrás.
+describe('ConfirmDialog: al cerrarse, el foco vuelve a quien lo abrió', () => {
   const opener = () => ({ isConnected: true, disabled: false, focus: vi.fn(), matches: () => false, closest: () => null });
 
   it('montado abierto (confirmDialog / DialogHost): entra a la caja y, al cerrarse, vuelve a quien lo abrió', () => {
@@ -97,9 +97,9 @@ describe('ConfirmDialog: al cerrarse, el foco vuelve a quien lo abrió (doc 105,
   });
 });
 
-// Doc 105 (R6): el confirm no estaba en la pila de diálogos — un Tab con el foco
-// perdido no lo retomaba nadie (el Dialog de abajo se creía el tope).
-describe('ConfirmDialog en la pila de diálogos (doc 105, R6)', () => {
+// El confirm entra en la pila de diálogos: es el tope mientras está abierto, así
+// que un Tab con el foco perdido lo retoma su caja (y no el Dialog de abajo).
+describe('ConfirmDialog en la pila de diálogos', () => {
   it('abierto es el tope (el Dialog de abajo deja de serlo) y Tab con el foco en <body> vuelve a su caja', () => {
     resetDialogStack();
     const below = Symbol('Dialog de abajo');
@@ -127,10 +127,10 @@ describe('ConfirmDialog en la pila de diálogos (doc 105, R6)', () => {
   });
 });
 
-// Doc 105 (R11): el mensaje no era la descripción accesible del confirm (el lector
-// sólo decía el título) y el id del título era fijo — dos confirms a la vez (el
-// inline de un Dialog y el del DialogHost) compartían «confirm-dialog-title».
-describe('ConfirmDialog: nombre y descripción accesibles (doc 105, R11)', () => {
+// El mensaje es la descripción accesible del confirm (el lector de pantalla no se
+// queda en el título) y los ids son propios de cada instancia: dos confirms a la vez
+// (el inline de un Dialog y el del DialogHost) no comparten «confirm-dialog-title».
+describe('ConfirmDialog: nombre y descripción accesibles', () => {
   it('la caja se nombra con su título y se describe con su mensaje, con ids propios', () => {
     const { tree, box } = render({ message: 'The column CODIGO will be deleted.' });
     const h3 = [...walk(tree)].find((e: El) => e.type === 'h3')!;

@@ -15,7 +15,7 @@ import { DialogHost } from '@/components/ui/dialogs';
 import BusyOverlay from '@/components/BusyOverlay';
 
 /**
- * Global shell: the persistent <TopNav/> over the routed page (<Outlet/>).
+ * Shell global: el <TopNav/> persistente sobre la página enrutada (<Outlet/>).
  */
 function ShellLayout() {
   return (
@@ -29,13 +29,13 @@ function ShellLayout() {
 }
 
 export default function App() {
-  // Restaura la sesión (token en localStorage → /api/auth/me) UNA vez al boot;
-  // el guard `RequireAuth` muestra un splash mientras `status === 'loading'`.
+  // Restaura la sesión (cookie de sesión → /api/auth/refresh) una vez al arrancar;
+  // la guarda `RequireAuth` muestra un splash mientras `status === 'loading'`.
   const restore = useAuthStore((s) => s.restore);
   useEffect(() => { void restore(); }, [restore]);
-  // Doc 105 (F5): rol y permisos al día sin recargar — al volver a la pestaña
-  // se re-lee /me (refreshMe tiene su propio tope: una en vuelo, como mucho una
-  // cada 10 s). El otro disparador es un 403 (lo registra el store de auth).
+  // Rol y permisos al día sin recargar: al volver a la pestaña se vuelve a leer
+  // /me (refreshMe tiene su propio tope: una en vuelo, como mucho una cada 10 s).
+  // El otro disparador es un 403 (lo registra el store de auth).
   useEffect(() => {
     const refresh = () => { void useAuthStore.getState().refreshMe(); };
     const onVisible = () => { if (document.visibilityState === 'visible') refresh(); };
@@ -68,9 +68,9 @@ export default function App() {
       </Routes>
       {/* Host global de confirm/prompt estilizados. */}
       <DialogHost />
-      {/* Overlay bloqueante de acciones largas de ESTA sesión (doc 75 D18). */}
+      {/* Overlay bloqueante de acciones largas de esta sesión. */}
       <BusyOverlay />
-      {/* Toaster GLOBAL. closeButton = la "x" para cerrarlo sin esperar. */}
+      {/* Toaster global. closeButton = la "x" para cerrarlo sin esperar. */}
       <Toaster richColors closeButton position="bottom-center" toastOptions={{ style: { fontFamily: 'var(--ui)' } }} />
     </BrowserRouter>
   );

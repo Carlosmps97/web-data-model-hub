@@ -4,9 +4,9 @@ vi.mock('@/services/governance.service', () => ({}));
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 import { useModelerStore } from './useModelerStore';
 
-// Doc 61: el Properties de VISTA es un sidebar propio (selectedViewId) con
-// exclusión mutua total contra tabla/columna/edge — contrato de selección.
-describe('useModelerStore — Properties de vista (doc 61)', () => {
+// El Properties de vista es un sidebar propio (selectedViewId) con exclusión
+// mutua total contra tabla/columna/edge — contrato de selección.
+describe('useModelerStore — Properties de vista', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useModelerStore.setState({

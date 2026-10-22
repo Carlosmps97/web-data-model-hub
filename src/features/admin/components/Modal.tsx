@@ -1,7 +1,7 @@
 /**
- * Modal — shell reutilizable (backdrop + card centrada + header/footer) para los
- * modales del módulo Admin. El backdrop NO cierra al click (pedido owner 07-17):
- * cierre sólo por la X o las acciones del footer.
+ * Modal: shell reutilizable (backdrop + card centrada + header/footer) para los
+ * modales del módulo Admin. El backdrop no cierra al hacer clic: se cierra solo
+ * con la X o las acciones del footer.
  */
 import type { ReactNode } from 'react';
 import { C, iconBtnStyle, labelStyle } from './helpers';

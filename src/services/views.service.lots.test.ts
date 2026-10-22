@@ -1,5 +1,5 @@
-// Doc 102 (431): «Import existing tables» con vistas pedía TODAS las tablas en
-// UNA URL — con cientos de ids pasaba el tope de cabeceras del server del front.
+// «Import existing tables» con vistas pide las vistas de muchas tablas: en una
+// sola URL, cientos de ids superarían el tope de cabeceras del servidor del front (431).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ activeChangesetId: null as string | null }));
@@ -14,7 +14,7 @@ const ids = (n: number) => Array.from({ length: n }, (_, i) => `t${i}`);
 
 beforeEach(() => { vi.clearAllMocks(); state.activeChangesetId = null; });
 
-describe('listViewsForTables (doc 102)', () => {
+describe('listViewsForTables', () => {
   it('producción: tandas de 100 ids por GET y sin vistas repetidas', async () => {
     vi.mocked(apiGet).mockImplementation(async () => [{ id: 'v1', name: 'V1', sourceTableIds: ['t0'] }] as never);
     const out = await listViewsForTables(ids(250));
@@ -31,11 +31,11 @@ describe('listViewsForTables (doc 102)', () => {
   });
 });
 
-/** Doc 105 (P2): con draft pedía UN estado efectivo POR TABLA (250 tablas = 250
- *  GET, cada uno relee la cabecera y el ledger de vistas). Ahora: tandas de
- *  100 tablas por GET (`tableIds`), y un filtro de respaldo por fuentes — un
- *  backend viejo ignora `tableIds` y devolvería TODAS las vistas del proyecto. */
-describe('listViewsForTables con draft (doc 105)', () => {
+/** Con draft, las vistas se piden en tandas de 100 tablas por GET (`tableIds`)
+ *  en lugar de un estado efectivo por tabla (cada GET relee la cabecera y el
+ *  ledger de vistas), con un filtro de respaldo por fuentes: un backend que
+ *  ignorara `tableIds` devolvería todas las vistas del proyecto. */
+describe('listViewsForTables con draft', () => {
   beforeEach(() => { state.activeChangesetId = 'cs1'; });
 
   it('tandas de 100 tablas por lectura del estado efectivo', async () => {
@@ -47,7 +47,7 @@ describe('listViewsForTables con draft (doc 105)', () => {
     expect(calls.flatMap(([, , opts]) => (opts as { tableIds: string[] }).tableIds)).toEqual(ids(250));
   });
 
-  it('descarta vistas cuyas fuentes no están entre las tablas pedidas (backend viejo)', async () => {
+  it('descarta vistas cuyas fuentes no están entre las tablas pedidas (backend que ignora tableIds)', async () => {
     vi.mocked(csvc.effective).mockResolvedValue([
       { id: 'v1', name: 'V1', sourceTableIds: ['t1'] },
       { id: 'v9', name: 'V9', sourceTableIds: ['t-otra'] },

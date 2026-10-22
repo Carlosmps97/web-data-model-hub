@@ -1,10 +1,8 @@
-// Doc 105 (ronda 4, R10-C) — auto-arrange en modo VISOR: las posiciones que
-// ELK calcula sobre el diagrama del visor se aplicaban a los nodos VIVOS al
-// terminar, sin mirar si seguían siendo los de ese canvas y esa sesión. Si
-// mientras calculaba se abría el draft del mismo canvas, los bloques del draft
-// quedaban movidos (y un Save los grababa); si en la misma sesión se abría otro
-// canvas, se movían sus tablas homónimas. Ahora la rama del visor sólo aplica
-// si sigue la sesión y el canvas donde empezó.
+// Auto-arrange en modo visor: las posiciones que ELK calcula sobre el diagrama
+// del visor se aplican a los nodos vivos al terminar solo si siguen la sesión y
+// el canvas donde empezó. Si mientras calcula se abre el draft del mismo canvas,
+// sus bloques no deben moverse (un Save los grabaría); si en la misma sesión se
+// abre otro canvas, sus tablas homónimas tampoco.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -53,7 +51,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await new Promise((r) => setTimeout(r, 5)); });
 
-describe('el arrange del visor aplica sólo en su sesión y su canvas (doc 105, ronda 4)', () => {
+describe('el arrange del visor aplica solo en su sesión y su canvas', () => {
   it('se abre el draft del mismo canvas mientras ELK calcula: sus bloques no se mueven y Save no graba el arrange', async () => {
     const arrange = st().autoOrganize();
     await tick();
@@ -79,7 +77,7 @@ describe('el arrange del visor aplica sólo en su sesión y su canvas (doc 105, 
     expect(st().viewerLayout.sa2).toBeUndefined();
   });
 
-  it('sin cambios, mueve los bloques y lo recuerda por canvas (como siempre)', async () => {
+  it('sin cambios, mueve los bloques y lo recuerda por canvas', async () => {
     const arrange = st().autoOrganize();
     elk.resolve({ t1: { x: 999, y: 999 } });
     await arrange;

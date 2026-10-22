@@ -1,9 +1,9 @@
 /**
- * Estándares del proyecto de ORIGEN de un pegado entre proyectos (doc 118): sus
- * UDP, dominios y themes en una lectura (`standards/snapshot`). null si ese
- * proyecto ya no existe o no se puede ver (404/403): la revisión lo avisa y pega
- * lo que no los necesita. Otra falla (red, timeout, 5xx) sube: el popup la
- * muestra con Retry en vez de pegar sin ellos.
+ * Estándares del proyecto de origen de un pegado entre proyectos: sus UDP,
+ * dominios y themes en una lectura (`standards/snapshot`). null si ese proyecto
+ * no existe o no se puede ver (404/403): la revisión lo avisa y pega lo que no
+ * los necesita. Otra falla (red, timeout, 5xx) sube: el popup la muestra con
+ * Retry en vez de pegar sin ellos.
  */
 import { getSnapshot } from '@/features/standards/standards.service';
 import { ApiError } from '@/services/http';

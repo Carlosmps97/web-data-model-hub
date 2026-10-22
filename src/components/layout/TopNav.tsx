@@ -12,14 +12,14 @@ import UserMenu from './UserMenu';
 interface NavItem {
   label: string;
   to: string;
-  /** Returns true when the link is the active route. */
+  /** Devuelve true cuando el enlace corresponde a la ruta activa. */
   match: (pathname: string) => boolean;
-  /** Permiso requerido para VER el ítem (undefined = visible siempre). */
+  /** Permiso requerido para ver el ítem (undefined = visible siempre). */
   perm?: Permission;
 }
 
-// Data Standards visible a quien puede ver el modelo (los estándares se ven
-// read-only; editar exige `standards.edit`). Admin solo con `admin.manage`.
+// Data Standards visible a quien puede ver el modelo (los estándares se ven en
+// solo lectura; editar exige `standards.edit`). Admin solo con `admin.manage`.
 const NAV: NavItem[] = [
   { label: 'Home', to: '/', match: (p) => p === '/' },
   { label: 'Reporting', to: '/reporting', match: (p) => p.startsWith('/reporting') },
@@ -29,18 +29,19 @@ const NAV: NavItem[] = [
 ];
 
 /**
- * TopNav — global top navigation (52px, white, bottom border #EAEDF2).
- * Pattern "A" of the design:
- *   left  : navy logo square (database glyph) + "Data Model Hub" wordmark
- *   center: Home · Reporting · Model (canvas)  — active = blue tint / blue text
- *   right : 200px search field + UserMenu avatar (switch simulated user)
+ * TopNav: navegación superior global (52px, fondo blanco, borde inferior #EAEDF2).
+ * Patrón "A" del diseño:
+ *   izquierda: cuadro navy con el logo (glifo de base de datos) + wordmark "Data Model Hub"
+ *   centro   : Home · Reporting · Model (canvas) · Data Standards · Admin (según permisos)
+ *              — activo = tinte azul / texto azul
+ *   derecha  : campo de búsqueda de 200px + avatar del UserMenu (identidad y Sign out)
  *
- * Persistent chrome — rendered on every screen above the routed <Outlet/>.
+ * Chrome persistente: se renderiza en todas las pantallas sobre el <Outlet/> enrutado.
  *
- * Guard de cambios sin guardar: si se navega FUERA de /model con una versión en
+ * Guarda de cambios sin guardar: si se navega fuera de /model con una versión en
  * edición y `dirty`, se intercepta la navegación y se ofrece Guardar y salir /
  * Salir sin guardar / Cancelar. (El cierre de pestaña lo cubre el beforeunload
- * de WorkspaceScreen con el aviso nativo del browser.)
+ * de WorkspaceScreen con el aviso nativo del navegador.)
  */
 export default function TopNav() {
   const pathname = useLocation().pathname;
@@ -48,7 +49,7 @@ export default function TopNav() {
   const [query, setQuery] = useState('');
   // Permisos del usuario en sesión (reactivo: filtra los ítems del nav por rol).
   const perms = useAuthStore((s) => s.user?.permissions);
-  // Destino de navegación interceptado por el guard (null = sin popup).
+  // Destino de navegación interceptado por la guarda (null = sin popup).
   const [leaveTo, setLeaveTo] = useState<string | null>(null);
   const [savingLeave, setSavingLeave] = useState(false);
 
@@ -72,9 +73,9 @@ export default function TopNav() {
   const saveAndLeave = async () => {
     const to = leaveTo;
     setSavingLeave(true);
-    // Doc 105 (H7): si mientras guardaba la versión cambió (transferida,
-    // eliminada, enviada), la revalidación ya avisó: acá se calla. Ronda 7
-    // (R18a-5): con el motivo — sin él, no se sabe qué pasó ni qué hacer.
+    // Si la versión cambia mientras se guarda (transferida, eliminada, enviada),
+    // la revalidación ya avisa y aquí no se muestra nada más. El aviso
+    // incluye el motivo: sin él, no se sabe qué pasó ni qué hacer.
     const onError = reportWriteError((e) => toast.error(failureText("Couldn't save — you're still on the canvas", e)));
     try {
       await useModelerStore.getState().saveAll();
@@ -86,9 +87,10 @@ export default function TopNav() {
       setSavingLeave(false);
     }
   };
-  // Doc 112: el aviso se lleva el foco y Escape lo cierra a ÉL (quedarse). No
-  // está en la pila de diálogos: Escape cerraba el popup del canvas de atrás
-  // (Model properties, un editor a medio armar) y el aviso seguía arriba.
+  // El aviso se lleva el foco y Escape lo cierra a él (quedarse). No está en la
+  // pila de diálogos, así que escucha Escape en fase de captura: si no, Escape
+  // cerraría el popup del canvas de atrás (Model properties, un editor a medio
+  // armar) y el aviso seguiría arriba.
   const stayBtn = useRef<HTMLButtonElement>(null);
   const stayNow = useRef(stay);
   stayNow.current = stay;
@@ -145,11 +147,11 @@ export default function TopNav() {
         </div>
       </header>
 
-      {/* ── Popup de cambios sin guardar (guard de salida del modeler) ──
-          El scrim NO cierra al click (pedido owner 07-17): sólo botones. Doc
-          112: en la capa de confirmaciones (`--top`) y FUERA del <header> (su
-          z-index 40 lo encerraba): los popups del canvas dejan esta barra
-          clicable y el aviso quedaba DETRÁS de ellos. */}
+      {/* ── Popup de cambios sin guardar (guarda de salida del modeler) ──
+          El scrim no cierra al hacer clic: solo los botones. Va en la capa de
+          confirmaciones (`--top`) y fuera del <header> (su z-index 40 lo
+          encerraría): los popups del canvas dejan esta barra clicable y el aviso
+          debe quedar por encima de ellos. */}
       {leaveTo !== null && (
         <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
           <div className="dmh-modal" style={{ width: 470 }} role="dialog" aria-modal="true" aria-labelledby="unsaved-title">

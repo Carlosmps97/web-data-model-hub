@@ -1,4 +1,4 @@
-// Doc 119 — Structure · Schemas sin DOM (hooks de mentira: ver
+// Structure · Schemas sin DOM (hooks simulados: ver
 // features/reporting/components/fakeReact.testutil): el badge muestra el kind
 // guardado («tables + views» para `both`), «Both» se ofrece al crear y el cambio
 // de kind de una fila queda pendiente y se guarda en la versión.
@@ -9,8 +9,8 @@ vi.mock('react', async (orig) => (await import('../../reporting/components/fakeR
 const { STATE, svc } = vi.hoisted(() => ({
   STATE: {
     schemas: [
-      { id: 's1', name: 'bcp_ddv_cum_analytics_vu', description: null, kind: 'tables' },
-      { id: 's2', name: 'bcp_ddv_core', description: 'core', kind: 'both' },
+      { id: 's1', name: 'core_ventas_vu', description: null, kind: 'tables' },
+      { id: 's2', name: 'core_base', description: 'core', kind: 'both' },
     ],
     loadSchemas: vi.fn(async () => undefined),
     reload: vi.fn(async () => undefined),
@@ -41,7 +41,7 @@ vi.mock('../lib/sessionGuard', () => ({
 }));
 import SchemaManagerModal from './SchemaManagerModal';
 
-const SET_KIND = { kind: 'setKind', key: 'kind:s1', id: 's1', name: 'bcp_ddv_cum_analytics_vu', from: 'tables', to: 'views' };
+const SET_KIND = { kind: 'setKind', key: 'kind:s1', id: 's1', name: 'core_ventas_vu', from: 'tables', to: 'views' };
 /** `staged` es el 1.er useState y `kindEdit` el 7.º. */
 const mount = (staged: unknown[] = [], kindEdit: string | null = null) => {
   resetFake((init, i) => (i === 0 ? staged : i === 6 ? kindEdit : init));
@@ -55,11 +55,11 @@ const byTitle = (tree: unknown, title: string): El => {
 
 beforeEach(() => { Object.values(svc).forEach((f) => f.mockClear()); STATE.markDirty.mockClear(); });
 
-describe('SchemaManagerModal (doc 119)', () => {
+describe('SchemaManagerModal', () => {
   it('el badge muestra el kind guardado: «tables + views» para both', () => {
     const text = textOf(mount());
-    expect(text).toContain('bcp_ddv_cum_analytics_vutables');
-    expect(text).toContain('bcp_ddv_coretables + views');
+    expect(text).toContain('core_ventas_vutables');
+    expect(text).toContain('core_basetables + views');
   });
 
   it('crear ofrece Tables, Views y Both', () => {
@@ -82,7 +82,7 @@ describe('SchemaManagerModal (doc 119)', () => {
 
   it('el botón de la fila abre el selector (y no hay selector sin abrirlo)', () => {
     const closed = mount();
-    expect([...walk(closed)].filter((e) => e.type === 'button' && textOf(e) === 'Both')).toHaveLength(1);   // sólo el de crear
+    expect([...walk(closed)].filter((e) => e.type === 'button' && textOf(e) === 'Both')).toHaveLength(1);   // solo el de crear
     (byTitle(closed, 'Change what it holds: tables, views or both').props.onClick as () => void)();
     expect(nextStates()[6]).toBe('s1');
   });

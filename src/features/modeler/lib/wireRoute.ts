@@ -1,14 +1,14 @@
 /**
- * Trazos MANUALES de wires (doc 99): puntos de quiebre que el modelador pone a
- * mano sobre una relación o una subcategoría, guardados POR CANVAS en
- * `SubjectArea.routes`. Lógica PURA — la consumen CrowFootEdge, SubtypeEdge,
+ * Trazos manuales de wires: puntos de quiebre que el modelador pone a mano
+ * sobre una relación o una subcategoría, guardados por canvas en
+ * `SubjectArea.routes`. Lógica pura — la consumen CrowFootEdge, SubtypeEdge,
  * los tiradores del wire, el store y el export.
  *
- * Un wire SIN trazo no pasa por acá: se dibuja con el camino automático de
- * siempre (`getSmoothStepPath`). Con trazo, el camino es siempre ORTOGONAL:
- * sale y entra horizontal, pasa por todos los puntos en orden y entre dos
- * puntos desalineados dobla una sola vez, eligiendo el camino con menos
- * quiebres y sin volver sobre sí mismo. Todo en píxeles ENTEROS del canvas:
+ * Un wire sin trazo no pasa por acá: se dibuja con el camino automático
+ * (`getSmoothStepPath`). Con trazo, el camino es siempre ortogonal: sale y
+ * entra horizontal, pasa por todos los puntos en orden y entre dos puntos
+ * desalineados dobla una sola vez, eligiendo el camino con menos quiebres y
+ * sin volver sobre sí mismo. Las coordenadas son píxeles enteros del canvas:
  * los puntos se guardan redondeados y los anclajes se redondean igual, así
  * «alineado» es una igualdad y no una tolerancia.
  */
@@ -25,13 +25,13 @@ export const MAX_ROUTE_POINTS = 32;
 export const MAX_ROUTE_COORD = 1_000_000;
 export const MAX_ROUTE_ID_LEN = 200;
 /** Tramo fijo con que el wire sale/entra de un bloque: marcador crow's-foot
- *  (22) + margen. Mismo valor que deja libre la etiqueta (doc 98). */
+ *  (22) + margen. Mismo valor que deja libre la etiqueta. */
 export const STUB_BLOCK = 28;
 /** Tramo fijo en el símbolo de subcategoría (no lleva marcador). */
 export const STUB_SYMBOL = 10;
 /** Radio de las esquinas — el mismo del camino automático. */
 export const CORNER_RADIUS = 10;
-/** Imán del arrastre, en px de PANTALLA (se divide entre el zoom). */
+/** Imán del arrastre, en px de pantalla (se divide entre el zoom). */
 export const SNAP_PX = 6;
 /** Largo mínimo de un tramo (px de canvas) para ofrecer «crear punto». */
 export const MIN_HANDLE_SEGMENT = 36;
@@ -49,7 +49,7 @@ export const trunkRouteId = (symbolId: string): string => `subsym-${symbolId}`;
 const validCoord = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= MAX_ROUTE_COORD;
 
-/** Trazo válido (solo `x`/`y` de cada punto) o null. Un trazo con CUALQUIER
+/** Trazo válido (solo `x`/`y` de cada punto) o null. Un trazo con cualquier
  *  punto inválido se descarta entero: el wire vuelve al camino automático. */
 export function cleanRoute(raw: unknown): RoutePoint[] | null {
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_ROUTE_POINTS) return null;
@@ -87,7 +87,7 @@ export function cleanRoutes(raw: unknown): WireRoutes {
   return out;
 }
 
-/** Trazo guardado de un wire, o nada. Por llave PROPIA: `routes[id]` a secas
+/** Trazo guardado de un wire, o nada. Por llave propia: `routes[id]` a secas
  *  devolvería lo heredado de Object (`constructor`, `toString`…) si un wire
  *  llegara a llamarse así. */
 export function routeOf(routes: WireRoutes, id: string): RoutePoint[] | undefined {
@@ -96,7 +96,7 @@ export function routeOf(routes: WireRoutes, id: string): RoutePoint[] | undefine
 
 // ── Qué wires existen ──────────────────────────────────────────────────────
 
-/** Ids de TODOS los wires ruteables del diagrama, sin importar la faceta que
+/** Ids de todos los wires ruteables del diagrama, sin importar la faceta que
  *  se esté viendo (las subcategorías solo se dibujan en lógico, pero su trazo
  *  se conserva al editar en físico). */
 export function routableWireIds(rels: Relationship[]): string[] {
@@ -109,7 +109,7 @@ export function routableWireIds(rels: Relationship[]): string[] {
 }
 
 /** Wires que tocan una tabla: sus relaciones (como padre o hija) y el tronco de
- *  los grupos de subcategoría donde es SUPERTIPO. Si es subtipo solo sale su
+ *  los grupos de subcategoría donde es supertipo. Si es subtipo solo sale su
  *  rama — el tronco sigue dibujado para los demás subtipos. */
 export function wireIdsOfTable(rels: Relationship[], tableId: string): string[] {
   const ids = new Set<string>();
@@ -121,7 +121,7 @@ export function wireIdsOfTable(rels: Relationship[], tableId: string): string[] 
   return [...ids];
 }
 
-/** Solo los trazos de wires que existen (poda huérfanos). Devuelve el MISMO
+/** Solo los trazos de wires que existen (poda huérfanos). Devuelve el mismo
  *  objeto cuando no hay nada que podar. */
 export function pruneRoutes(routes: WireRoutes, validIds: Iterable<string>): WireRoutes {
   const valid = validIds instanceof Set ? validIds as Set<string> : new Set(validIds);
@@ -144,15 +144,15 @@ type EndBox = { x: number; w: number };
 /** El píxel entero de un punto: así se guardan los puntos del trazo. */
 const rounded = (p: RoutePoint): RoutePoint => ({ x: Math.round(p.x), y: Math.round(p.y) });
 
-/** Extremo sobre el borde `dir` de la caja, en píxeles ENTEROS (el mismo
+/** Extremo sobre el borde `dir` de la caja, en píxeles enteros (el mismo
  *  redondeo de los puntos del trazo): un punto que el imán alineó con la fila
- *  queda EXACTAMENTE en ella. Medio píxel de diferencia bastaba para que el
- *  camino entero cambiara de forma. */
+ *  queda exactamente en ella. Medio píxel de diferencia basta para que el
+ *  camino entero cambie de forma. */
 const endAt = (box: EndBox, y: number, dir: 1 | -1, stub: number): WireEnd => ({
   ...rounded({ x: dir === 1 ? box.x + box.w : box.x, y }), dir, stub,
 });
 
-/** Extremos de un wire CON trazo: el lado de salida lo decide el primer punto
+/** Extremos de un wire con trazo: el lado de salida lo decide el primer punto
  *  y el de entrada el último (a qué lado del centro del nodo quedan), no la
  *  posición del otro bloque. En el centro exacto gana la derecha.
  *  `routedGeometry` parte de estos lados y solo los cambia si por ellos el
@@ -223,10 +223,10 @@ const turn = (from: Dir, to: Dir): number =>
 const samePoint = (a: RoutePoint, b: RoutePoint) => Math.abs(a.x - b.x) < EPS && Math.abs(a.y - b.y) < EPS;
 
 /** ¿`a` es mejor camino que `b`? Menos quiebres; a igual costo, el que eligió
- *  el candidato preferido en el tramo MÁS TEMPRANO en que difieren. Así, entre
- *  caminos EQUIVALENTES, agregar o mover un punto cerca del hijo no cambia los
+ *  el candidato preferido en el tramo más temprano en que difieren. Así, entre
+ *  caminos equivalentes, agregar o mover un punto cerca del hijo no cambia los
  *  tramos que salen del padre. No es una garantía: si el cambio deja al
- *  arranque de siempre con más quiebres o volviendo sobre sí (pasa justo
+ *  arranque preferido con más quiebres o volviendo sobre sí (pasa justo
  *  cuando un punto queda alineado con su vecino), gana el camino más limpio. */
 function better(costA: number, picksA: number[], costB: number, picksB: number[]): boolean {
   if (costA !== costB) return costA < costB;
@@ -236,7 +236,7 @@ function better(costA: number, picksA: number[], costB: number, picksB: number[]
   return false;
 }
 
-/** ¿`b` está sobre el tramo recto a→c, ENTRE los dos? (punto de paso) */
+/** ¿`b` está sobre el tramo recto a→c, entre los dos? (punto de paso) */
 function passThrough(a: RoutePoint, b: RoutePoint, c: RoutePoint): boolean {
   const between = (v: number, m: number, n: number) => v >= Math.min(m, n) - EPS && v <= Math.max(m, n) + EPS;
   if (Math.abs(a.x - b.x) < EPS && Math.abs(b.x - c.x) < EPS) return between(b.y, a.y, c.y);
@@ -253,7 +253,7 @@ function passThrough(a: RoutePoint, b: RoutePoint, c: RoutePoint): boolean {
  * codo horizontal-vertical y, en el tramo que entra al hijo, el
  * vertical-horizontal.
  *
- * Los puntos que caen SOBRE el tramo fijo de un extremo (los primeros sobre el
+ * Los puntos que caen sobre el tramo fijo de un extremo (los primeros sobre el
  * del padre, los últimos sobre el del hijo) ya están en el camino: se rutean
  * como el fin de ese tramo, en vez de salir hasta él y volver.
  */
@@ -394,7 +394,7 @@ export function handleSegments(
   return out;
 }
 
-/** Punto a mitad del LARGO del camino. */
+/** Punto a mitad del largo del camino. */
 export function pathMidpoint(pts: RoutePoint[]): RoutePoint {
   if (!pts.length) return { x: 0, y: 0 };
   let total = 0;
@@ -443,7 +443,7 @@ export function roundedPath(pts: RoutePoint[], radius: number = CORNER_RADIUS): 
 
 // ── Edición ────────────────────────────────────────────────────────────────
 
-/** Punto nuevo en la posición `index`. Con el tope alcanzado devuelve la MISMA lista. */
+/** Punto nuevo en la posición `index`. Con el tope alcanzado devuelve la misma lista. */
 export function insertPoint(via: RoutePoint[], index: number, p: RoutePoint): RoutePoint[] {
   if (via.length >= MAX_ROUTE_POINTS) return via;
   const at = Math.max(0, Math.min(via.length, index));
@@ -484,7 +484,7 @@ export function snapPoint(p: RoutePoint, neighbors: RoutePoint[], tol: number): 
   return { x, y };
 }
 
-/** Aviso del auto-arrange en edición (doc 99): mueve todos los bloques, así
+/** Aviso del auto-arrange en edición: mueve todos los bloques, así
  *  que los trazos manuales del canvas se reinician. null = nada que avisar. */
 export function arrangeResetWarning(count: number): string | null {
   if (!(count > 0)) return null;

@@ -1,9 +1,9 @@
 /**
- * Diálogos de borrado COMPARTIDOS (doc 89 §3.5) por los Properties del canvas y
- * el Object Inspector: un solo texto de impacto para tabla/entidad, columna/
- * atributo y vista. El trabajo corre DENTRO del diálogo (`action`): queda con
- * spinner y bloqueado hasta terminar (el owner reportó reclicks por el delay);
- * si `action` lanza, la promesa rechaza y el caller muestra el motivo.
+ * Diálogos de borrado compartidos por los Properties del canvas y el Object
+ * Inspector: un solo texto de impacto para tabla/entidad, columna/atributo y
+ * vista. El trabajo corre dentro del diálogo (`action`): queda con spinner y
+ * bloqueado hasta terminar (evita reclics durante la espera); si `action`
+ * lanza, la promesa rechaza y el caller muestra el motivo.
  */
 import type { ReactNode } from 'react';
 import { confirmDialog } from '@/components/ui/dialogs';
@@ -13,12 +13,12 @@ import * as viewsSvc from '@/services/views.service';
 import type { FacetNouns } from '@/lib/facets';
 
 /** Conteos del impacto de borrar una tabla (Properties los consulta; el
- *  inspector los saca del dossier — `tableDeleteImpact`). Doc 105 (O2): null =
- *  no se pudo contar (el diálogo lo dice; antes se mostraba «0»). */
+ *  inspector los saca del dossier, `tableDeleteImpact`). null = no se pudo
+ *  contar (el diálogo lo dice en vez de mostrar «0»). */
 export interface TableDeleteCounts { canvases: number | null; related: number | null; views: number | null }
 
-/** Doc 105 (O2): el pre-conteo de Properties. Una lectura que falla queda en
- *  null — no en 0: el borrado se llevaría igual lo que el diálogo no mostró. */
+/** Pre-conteo de Properties. Una lectura que falla queda en null, no en 0:
+ *  el borrado se llevaría igual lo que el diálogo no mostró. */
 export async function readTableDeleteCounts(tableId: string): Promise<TableDeleteCounts> {
   const [usage, rels, views] = await Promise.all([
     gov.tableUsage(tableId).then((u) => u.usage).catch(() => null),
@@ -61,9 +61,9 @@ export function confirmDeleteTable(o: {
   });
 }
 
-/** Borrado de columna con impacto GLOBAL (spec 10 §8): relaciones donde la
- *  columna es extremo, en cualquier canvas — cada una pierde el par (o se
- *  borra si era el último). */
+/** Borrado de columna con impacto global: relaciones donde la columna es
+ *  extremo, en cualquier canvas; cada una pierde el par (o se borra si era el
+ *  último). */
 export function confirmDeleteColumn(o: {
   name: string; nouns: FacetNouns; impact: RelationshipImpact; action: () => Promise<unknown>;
 }): Promise<boolean> {
@@ -97,7 +97,7 @@ export function confirmDeleteColumn(o: {
   });
 }
 
-/** Borrado de vista del MODELO (todos los canvases). */
+/** Borrado de vista del modelo (todos los canvases). */
 export function confirmDeleteView(o: { name: string; action: () => Promise<unknown> }): Promise<boolean> {
   return confirmDialog({
     title: 'Delete view',

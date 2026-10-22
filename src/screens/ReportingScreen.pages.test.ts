@@ -1,12 +1,11 @@
-// Scroll infinito de la grilla del Reporting (doc 92 D3), sin DOM: la pantalla se
-// llama como función con los hooks de mentira de `fakeReact.testutil` — montar,
-// correr efectos, re-renderizar con el estado encolado, como React.
+// Scroll infinito de la grilla del Reporting, sin DOM: la pantalla se llama como
+// función con los hooks simulados de `fakeReact.testutil` (montar, correr efectos,
+// re-renderizar con el estado encolado, como React).
 //
-// Doc 105: si fallaba la página siguiente se hacía `setHasMore(false)`: la barra
-// decía «N tables» como si estuviera completo, «Select all» cubría sólo lo
-// cargado y no había reintento. Ahora el fallo no marca el fin, se dice al pie
-// de la grilla y Retry pide LA MISMA página — sin pisar la carga completa ni
-// avisar sobre una pantalla desmontada.
+// Si falla la página siguiente, el fallo no marca el fin de la lista: la barra no
+// la presenta como completa, el error se indica al pie de la grilla y Retry pide
+// la misma página, sin pisar la carga completa ni avisar sobre una pantalla
+// desmontada.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import type { ReportTableRow } from '@/services/reporting.service';
@@ -66,8 +65,8 @@ beforeEach(() => {
     (f.limit ? rows(f.offset ?? 0, Math.min(f.limit, TOTAL - (f.offset ?? 0))) : rows(0, TOTAL)));
 });
 
-describe('scroll infinito: la página siguiente que falla (doc 105)', () => {
-  it('no marca el fin: sigue parcial, lo dice al pie y Retry pide la MISMA página (el scroll no reintenta solo)', async () => {
+describe('scroll infinito: la página siguiente que falla', () => {
+  it('no marca el fin: sigue parcial, lo dice al pie y Retry pide la misma página (el scroll no reintenta solo)', async () => {
     let tree = await mount();
     expect(bar(tree)).toContain('50 of 120 tables');
 
@@ -77,8 +76,8 @@ describe('scroll infinito: la página siguiente que falla (doc 105)', () => {
     expect(vi.mocked(listReportTables)).toHaveBeenLastCalledWith('p1', { limit: 50, offset: 50 });
     expect(toast.error).toHaveBeenCalledTimes(1);
     tree = rerender();
-    expect(bar(tree)).toContain('50 of 120 tables');       // antes: «50 tables», como si estuviera completo
-    expect(bar(tree)).toContain("couldn't load more (Retry below)");   // el scroll ya no carga: sólo Retry
+    expect(bar(tree)).toContain('50 of 120 tables');       // no «50 tables», como si estuviera completo
+    expect(bar(tree)).toContain("couldn't load more (Retry below)");   // el scroll no carga: solo Retry
     expect(bar(tree)).not.toContain('scroll to load more');
     const footer = footerError(tree);
     expect(footer).toBeDefined();
@@ -97,7 +96,7 @@ describe('scroll infinito: la página siguiente que falla (doc 105)', () => {
     expect(footerError(tree)).toBeUndefined();
   });
 
-  it('una página que falla DESPUÉS de empezar la carga completa no avisa ni toca la grilla', async () => {
+  it('una página que falla después de empezar la carga completa no avisa ni toca la grilla', async () => {
     let tree = await mount();
     let failPage: (e: unknown) => void = () => {};
     vi.mocked(listReportTables).mockImplementationOnce(() => new Promise((_, reject) => { failPage = reject; }));

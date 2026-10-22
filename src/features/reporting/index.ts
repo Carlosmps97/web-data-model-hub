@@ -1,5 +1,5 @@
-// Public API of the `reporting` feature (doc 102). Import from `@/features/reporting`;
-// never reach into its subdirectories.
+// API pública de la feature `reporting`. Se importa desde `@/features/reporting`,
+// nunca desde sus subdirectorios.
 export { default as SheetTemplateCard } from './components/SheetTemplateCard';
 export {
   COLUMN_BATCH, columnSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows, tableSheetRow,

@@ -1,12 +1,12 @@
 /**
- * DiffExplorer (doc 84) — el explorador de cambios que hasta ahora vivía dentro
- * del popup «Change details» (doc 64 §7): barra de filtros (búsqueda + chips
- * por verbo), árbol jerárquico a la izquierda y diff de campos before → after
- * a la derecha, con las columnas cambiadas de una tabla expandibles inline.
- * Extraído para que el Compare de versiones (doc 65) muestre EXACTAMENTE lo
- * mismo: la fuente del detalle se inyecta (`loadDetails`, cache por entidad,
- * lote de hasta 200) y la atribución del cambio también (`attribution`: quién
- * y cuándo en la revisión; versión y autor en el compare). READ-ONLY.
+ * DiffExplorer: explorador de cambios del popup «Change details»: barra de
+ * filtros (búsqueda + chips por verbo), árbol jerárquico a la izquierda y diff
+ * de campos before → after a la derecha, con las columnas cambiadas de una tabla
+ * expandibles inline. Lo comparten la revisión y el Compare de versiones, que
+ * muestran exactamente lo mismo: la fuente del detalle se inyecta
+ * (`loadDetails`, cache por entidad, lote de hasta 200) y la atribución del
+ * cambio también (`attribution`: quién y cuándo en la revisión; versión y autor
+ * en el compare). De solo lectura.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronRight, MoveRight, Search, TriangleAlert } from 'lucide-react';
@@ -57,7 +57,7 @@ const ACTION_PILL: Record<DiffEntityDetail['action'], { cls: string; text: strin
   deleted: { cls: 'is-deleted', text: 'deleted' },
 };
 
-/** Renderer de filas de campo — compartido por la revisión y el compare (doc 65). */
+/** Renderer de filas de campo, compartido por la revisión y el compare. */
 export function FieldRows({ detail }: { detail: DiffEntityDetail }) {
   if (detail.fields.length === 0) {
     return (
@@ -106,7 +106,7 @@ export function FieldRows({ detail }: { detail: DiffEntityDetail }) {
   );
 }
 
-/** Resumen de UNA línea de un detalle (cabecera del accordion de columna). */
+/** Resumen de una línea de un detalle (cabecera del accordion de columna). */
 function summaryLine(d: DiffEntityDetail): string {
   if (d.action !== 'modified') {
     return d.fields.length ? `${d.fields.length} field${d.fields.length === 1 ? '' : 's'}` : '';
@@ -120,7 +120,7 @@ export interface DiffExplorerProps {
   diff: DiffLike;
   /** Detalle de campos de entidades puntuales (revisión: /diff/details; compare: /versions/compare/details). */
   loadDetails: (items: DetailRef[]) => Promise<{ items: DiffEntityDetail[] }>;
-  /** Doc 84 B3/C2: quién/cuándo (revisión) o versión/autor (compare) del ítem seleccionado. */
+  /** Quién/cuándo (revisión) o versión/autor (compare) del ítem seleccionado. */
   attribution?: (sel: TreeSelection, detail: DiffEntityDetail | null) => ReactNode;
   /** Estado vacío del panel derecho. */
   hint?: { title: string; body: string };
@@ -134,7 +134,7 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
   // se lee por ref para que `ensure` sea estable (el prefetch no se repite).
   const loadRef = useRef(loadDetails);
   loadRef.current = loadDetails;
-  // Doc 64 §7: filtros del árbol (búsqueda por nombre + chips por verbo).
+  // Filtros del árbol (búsqueda por nombre + chips por verbo).
   const [search, setSearch] = useState('');
   const [verbs, setVerbs] = useState<Set<DiffVerb>>(() => new Set<DiffVerb>(['added', 'edited', 'deleted']));
   // Accordions de columnas bajo la tabla seleccionada.
@@ -163,14 +163,15 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
     return { added, edited, deleted };
   }, [diff]);
 
-  // conflicto por entidad — ya viene en el /diff, no se recomputa. Doc 100
-  // (P3): `restore` = producción la borró y aprobar la vuelve a la vida.
+  // Conflicto por entidad: viene en el /diff, no se recomputa. `restore` =
+  // producción la borró y aprobar la vuelve a la vida; `deleted` = otra
+  // versión borró el objeto: no se publica hasta descartar el cambio.
   const conflictBy = useMemo(() => {
-    const m: Record<string, 'overwrite' | 'restore'> = {};
+    const m: Record<string, 'overwrite' | 'restore' | 'deleted'> = {};
     Object.entries(diff.collections).forEach(([collection, bucket]) => {
       (['added', 'edited', 'deleted'] as const).forEach((v) => {
         bucket[v].forEach((e) => {
-          if (e.conflict) m[keyOf(collection, e.id)] = e.restores ? 'restore' : 'overwrite';
+          if (e.conflict) m[keyOf(collection, e.id)] = e.deletedInProduction ? 'deleted' : e.restores ? 'restore' : 'overwrite';
         });
       });
     });
@@ -188,8 +189,8 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
       loadRef.current(chunk)
         .then(({ items: got }) => setCache((prev) => applyLoaded(prev, chunk, got)))
         .catch((err: unknown) => {
-          // Doc 80 §8: el fallo se MARCA (antes se borraba la entrada y el
-          // panel volvía a "Loading diff…" para siempre).
+          // El fallo se marca en la cache (`applyFailed`): borrar la entrada
+          // dejaría el panel en "Loading diff…" para siempre.
           chunk.forEach((it) => inFlight.current.delete(keyOf(it.collection, it.entityId)));
           setCache((prev) => applyFailed(prev, chunk));
           toast.error(err instanceof Error ? err.message : 'Could not load the change detail.');
@@ -200,7 +201,7 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
   /** Reintento puntual desde el estado de error. */
   const retry = useCallback((items: DetailRef[]) => ensure(items, true), [ensure]);
 
-  // Prefetch de RELACIONES al abrir: sus filas del árbol no tienen nombre
+  // Prefetch de relaciones al abrir: sus filas del árbol no tienen nombre
   // legible sin el detalle ("PADRE → HIJO" lo resuelve el backend).
   useEffect(() => {
     const b = diff.collections.relationships;
@@ -256,7 +257,7 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
 
   return (
     <>
-      {/* Doc 64 §7: filtros — búsqueda + verbos (leyenda incluida). */}
+      {/* Filtros: búsqueda + verbos (leyenda incluida). */}
       <div className="dmh-rvd-filters">
         <div className="dmh-rvd-search">
           <Search size={13} aria-hidden />
@@ -320,9 +321,11 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
               {selectedConflict && (
                 <div className="dmh-rv-note" role="alert" style={{ marginTop: 10 }}>
                   <TriangleAlert size={15} strokeWidth={1.7} aria-hidden />
-                  <span>{selectedConflict === 'restore'
-                    ? 'Deleted in production after this version was opened — approving restores it.'
-                    : 'Modified in production after this version edited it — approving overwrites that.'}</span>
+                  <span>{selectedConflict === 'deleted'
+                    ? "Deleted in production by another version after this version was opened — it can't be published: the owner discards this change."
+                    : selectedConflict === 'restore'
+                      ? 'Deleted in production after this version was opened — approving restores it.'
+                      : 'Modified in production after this version edited it — approving overwrites that.'}</span>
                 </div>
               )}
               <div className="dmh-rvd-dbody">
@@ -346,7 +349,7 @@ export default function DiffExplorer({ diff, loadDetails, attribution, hint }: D
                   <FieldRows detail={selectedEntry} />
                 )}
 
-                {/* Doc 64 §7: columnas cambiadas de la tabla, inline. */}
+                {/* Columnas cambiadas de la tabla, inline. */}
                 {(selection.childColumnIds?.length ?? 0) > 0 && (
                   <div className="dmh-rvd-cols">
                     <div className="dmh-rvd-cols-title">

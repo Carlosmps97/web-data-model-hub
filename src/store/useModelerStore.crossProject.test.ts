@@ -1,6 +1,6 @@
-// Doc 118 (fase 2) — el clipboard recuerda de qué proyecto viene y sobrevive al
-// cambio de versión y de proyecto (se pega en otro tras su revisión); la
-// selección, el menú y los popups no. El logout lo limpia (doc 50 §4).
+// El clipboard recuerda de qué proyecto viene y sobrevive al cambio de versión
+// y de proyecto (se pega en otro tras su revisión); la selección, el menú y los
+// popups no. El logout lo limpia.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -41,7 +41,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await sleep(5); });
 
-describe('clipboard entre proyectos (doc 118)', () => {
+describe('clipboard entre proyectos', () => {
   it('copiar una tabla o columnas anota el proyecto de origen', () => {
     st().copyTable('t1');
     expect(st().tblClipboard?.source).toEqual({ projectId: 'pA', projectName: 'Modelo A' });
@@ -108,7 +108,7 @@ describe('clipboard entre proyectos (doc 118)', () => {
     expect(st().colClipboard).toBeNull();
   });
 
-  it('sin revisión no se pega lo copiado en OTRO proyecto (llevaría sus ids)', async () => {
+  it('sin revisión no se pega lo copiado en otro proyecto (llevaría sus ids)', async () => {
     st().copyTable('t1');
     useSessionStore.setState({ activeChangesetId: 'csB', activeProjectId: 'pB' });
     useModelerStore.setState({ activeProjectId: 'pB' });
@@ -144,7 +144,7 @@ describe('clipboard entre proyectos (doc 118)', () => {
     expect(lot.find((c) => c.collection === 'canonical_columns')?.payload).toMatchObject({ parentDomainId: 'dom-de-B' });
   });
 
-  it('pegar desde OTRO proyecto anota el proyecto de origen en la procedencia', async () => {
+  it('pegar desde otro proyecto anota el proyecto de origen en la procedencia', async () => {
     st().copyTable('t1');
     useSessionStore.setState({ activeChangesetId: 'csB', activeProjectId: 'pB' });
     useModelerStore.setState({ activeProjectId: 'pB' });

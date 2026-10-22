@@ -1,10 +1,10 @@
-// Revisión 2 doc 114 (R2-1): borrar una tabla que está en VARIOS canvases. Sólo
-// el abierto fijaba lo que sigue sin posición: en los otros, las siguientes se
-// corrían una casilla y, si después se abría ese canvas y se creaba, importaba,
-// pegaba o hacía CTAS (las fijaba ahí), deshacer las dos acciones dejaba la tabla
-// borrada tapando a otra. Ahora cada canvas de la tabla fija lo suyo (su
-// diagrama, una lectura) y el Undo la repone donde se veía. Store REAL +
-// structure.service REAL sobre un draft en memoria (arnés de la revisión).
+// Borrar una tabla que está en varios canvases: cada canvas de la tabla fija lo
+// que sigue sin posición (su diagrama, una lectura) y el Undo la repone donde se
+// veía. Si solo lo fijara el canvas abierto, en los otros las siguientes se
+// correrían una casilla y, si después se abriera ese canvas y se creara,
+// importara, pegara o hiciera CTAS (que las fija ahí), deshacer las dos acciones
+// dejaría la tabla borrada tapando a otra. Store real + structure.service real
+// sobre un draft en memoria.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -69,7 +69,7 @@ function paintedOf(saId: string): Record<string, P> {
   return Object.fromEntries(dia.tables.map((t, i) => [t.id, layout[t.id] ?? gridSlot(i)]));
 }
 
-/** Tablas que se tapan EXACTAMENTE (misma esquina). */
+/** Tablas que se tapan exactamente (misma esquina). */
 function overlaps(saId: string): string[][] {
   const pos = paintedOf(saId);
   const ids = Object.keys(pos);
@@ -174,9 +174,9 @@ async function midAction(mid: Mid): Promise<void> {
 
 beforeEach(() => { vi.clearAllMocks(); wire(); });
 
-describe('borrar una tabla que está en un canvas NO abierto (revisión 2 doc 114, R2-1)', () => {
+describe('borrar una tabla que está en un canvas no abierto', () => {
   for (const mid of ['create', 'createFirst', 'import', 'importFirst', 'paste', 'ctas', 'removeOther'] as const) {
-    it(`borrar (otro canvas abierto) → abrir ese canvas → ${mid} → Undo → Undo: vuelve EXACTAMENTE al principio`, async () => {
+    it(`borrar (otro canvas abierto) → abrir ese canvas → ${mid} → Undo → Undo: vuelve exactamente al principio`, async () => {
       await openWorld([canvas('saX', ['tA', 'tT', 'tB', 'tC']), canvas('saY', ['tT', 'tQ'])], 'saY');
       expect(paintedOf('saX')).toEqual(START_X);
       await st().deleteTable('tT');
@@ -192,7 +192,7 @@ describe('borrar una tabla que está en un canvas NO abierto (revisión 2 doc 11
     });
   }
 
-  it('desde el Object Inspector (la tabla sólo está en un canvas que no está abierto): igual', async () => {
+  it('desde el Object Inspector (la tabla solo está en un canvas que no está abierto): igual', async () => {
     await openWorld([canvas('saX', ['tA', 'tT', 'tB', 'tC']), canvas('saY', ['tQ'])], 'saY');
     await st().deleteTable('tT', { pre: MODEL.find((t) => t.id === 'tT') as unknown as CanonicalTable });
     await pause(2);
@@ -206,7 +206,7 @@ describe('borrar una tabla que está en un canvas NO abierto (revisión 2 doc 11
     expect(overlaps('saX')).toEqual([]);
   });
 
-  it('si el diagrama de ese canvas no se puede leer, el borrado sigue (ese canvas queda como antes)', async () => {
+  it('si el diagrama de ese canvas no se puede leer, el borrado sigue (ese canvas queda sin cambios)', async () => {
     await openWorld([canvas('saX', ['tA', 'tT', 'tB', 'tC']), canvas('saY', ['tT', 'tQ'])], 'saY');
     vi.mocked(mod.loadDiagram).mockImplementation(async (saId: string) => {
       await pause();
@@ -221,7 +221,7 @@ describe('borrar una tabla que está en un canvas NO abierto (revisión 2 doc 11
     expect(paintedOf('saX')).toEqual({ tA: gridSlot(0), tB: gridSlot(1), tC: gridSlot(2) });
   });
 
-  it('con la tabla sólo en el canvas abierto no se lee ningún otro diagrama', async () => {
+  it('con la tabla solo en el canvas abierto no se lee ningún otro diagrama', async () => {
     await openWorld([canvas('saX', ['tA', 'tB']), canvas('saY', ['tT', 'tQ'])], 'saY');
     vi.mocked(mod.loadDiagram).mockClear();
     await st().deleteTable('tT');

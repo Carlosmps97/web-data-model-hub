@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { pkInKeyOrder } from './keyOrder';
 
-// Doc 94 D1: ya no hay orden de llave aparte — la llave sigue el `ordinal`.
+// No hay orden de llave aparte: la llave sigue el `ordinal`.
 describe('pkInKeyOrder', () => {
   it('solo las PK, por ordinal', () => {
     const cols = [
@@ -12,7 +12,7 @@ describe('pkInKeyOrder', () => {
     expect(pkInKeyOrder(cols).map((c) => c.id)).toEqual(['producto', 'codmes']);
   });
 
-  it('un pkPosition que quedó en datos viejos NO manda', () => {
+  it('un pkPosition presente en los datos no manda', () => {
     const cols = [
       { id: 'b', ordinal: 3, isPrimaryKey: true, pkPosition: 0 },
       { id: 'a', ordinal: 1, isPrimaryKey: true, pkPosition: 1 },

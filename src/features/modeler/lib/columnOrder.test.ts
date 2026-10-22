@@ -1,4 +1,4 @@
-// Doc 74: orden único de columnas — helpers compartidos por canvas, panel e inspector.
+// Orden único de columnas: helpers compartidos por canvas, panel e inspector.
 import { describe, expect, it, vi } from 'vitest';
 import { isPkFirst, moveId, orderColumns, persistReorder, pkFirstOrdinals, placeAtKeyBoundary, reorderPlan, sortByOrdinal } from './columnOrder';
 import { pkInKeyOrder } from './keyOrder';
@@ -16,7 +16,7 @@ describe('columnOrder', () => {
     expect(input.map((c) => c.id)).toEqual(['x', 'y', 'z', 'w']);
   });
 
-  it('reorderPlan: sólo las columnas cuya posición cambia', () => {
+  it('reorderPlan: solo las columnas cuya posición cambia', () => {
     expect(reorderPlan(cols, ['a', 'b', 'c'])).toEqual([]);
     expect(reorderPlan(cols, ['b', 'a', 'c']).map((s) => [s.c.id, s.idx])).toEqual([['b', 0], ['a', 1]]);
     expect(reorderPlan(cols, ['zzz', 'a']).map((s) => [s.c.id, s.idx])).toEqual([['a', 1]]);
@@ -41,11 +41,11 @@ describe('columnOrder', () => {
   });
 });
 
-// Doc 81 → doc 94: el ÚNICO orden = PK primero y, dentro de cada bloque, el
-// `ordinal` (sin orden de llave aparte). Es lo que dibuja el canvas; lo
-// comparten properties, inspector, panel de columna, vistas y DDL.
-describe('orderColumns (doc 94 — PK primero, ordenadas por ordinal)', () => {
-  // Caso del bug doc 81: la carga Excel dejó el ordinal en orden de hoja.
+// El único orden = PK primero y, dentro de cada bloque, el `ordinal` (sin
+// orden de llave aparte). Es lo que dibuja el canvas; lo comparten properties,
+// inspector, panel de columna, vistas y DDL.
+describe('orderColumns (PK primero, ordenadas por ordinal)', () => {
+  // Caso de una carga Excel que deja el ordinal en orden de hoja.
   const excel = [
     { id: 'party', ordinal: 0, isPrimaryKey: true },
     { id: 'rol', ordinal: 1, isPrimaryKey: true },
@@ -57,12 +57,12 @@ describe('orderColumns (doc 94 — PK primero, ordenadas por ordinal)', () => {
     expect(orderColumns(excel).map((c) => c.id)).toEqual(['party', 'rol', 'evaluada', 'xd']);
   });
 
-  it('coincide EXACTAMENTE con el orden que arma el canvas (pks + resto)', () => {
+  it('coincide exactamente con el orden que arma el canvas (pks + resto)', () => {
     const canvas = [...pkInKeyOrder(excel), ...sortByOrdinal(excel.filter((c) => !c.isPrimaryKey))];
     expect(orderColumns(excel).map((c) => c.id)).toEqual(canvas.map((c) => c.id));
   });
 
-  it('entre PK manda el ordinal: no hay orden de llave aparte (un pkPosition viejo se ignora)', () => {
+  it('entre PK manda el ordinal: no hay orden de llave aparte (un pkPosition en los datos se ignora)', () => {
     const cols = [
       { id: 'p2', ordinal: 5, isPrimaryKey: true, pkPosition: 1 },
       { id: 'p1', ordinal: 9, isPrimaryKey: true, pkPosition: 0 },
@@ -78,7 +78,7 @@ describe('orderColumns (doc 94 — PK primero, ordenadas por ordinal)', () => {
   });
 });
 
-describe('isPkFirst (doc 94 D3 — una PK nunca debajo de una no-PK)', () => {
+describe('isPkFirst (una PK nunca debajo de una no-PK)', () => {
   const cols = [
     { id: 'k1', ordinal: 0, isPrimaryKey: true }, { id: 'k2', ordinal: 1, isPrimaryKey: true },
     { id: 'a', ordinal: 2 }, { id: 'b', ordinal: 3 },
@@ -95,18 +95,18 @@ describe('isPkFirst (doc 94 D3 — una PK nunca debajo de una no-PK)', () => {
   });
 });
 
-describe('placeAtKeyBoundary (doc 94 D2 — marcar/desmarcar PK re-ubica la columna)', () => {
+describe('placeAtKeyBoundary (marcar/desmarcar PK re-ubica la columna)', () => {
   const cols = [
     { id: 'k1', ordinal: 0, isPrimaryKey: true }, { id: 'k2', ordinal: 1, isPrimaryKey: true },
     { id: 'a', ordinal: 2 }, { id: 'b', ordinal: 3 }, { id: 'c', ordinal: 4 },
   ];
-  it('una columna que pasa a PK queda al FINAL del bloque de PK', () => {
+  it('una columna que pasa a PK queda al final del bloque de PK', () => {
     expect(placeAtKeyBoundary(cols, 'c')).toEqual(['k1', 'k2', 'c', 'a', 'b']);
   });
-  it('una PK que deja de serlo queda PRIMERA entre las no-PK', () => {
+  it('una PK que deja de serlo queda primera entre las no-PK', () => {
     expect(placeAtKeyBoundary(cols, 'k1')).toEqual(['k2', 'k1', 'a', 'b', 'c']);
   });
-  it('bug del owner: columna nueva (ordinal al final) marcada PK sube al bloque; datos viejos se normalizan', () => {
+  it('columna nueva (ordinal al final) marcada PK sube al bloque; los datos que no están PK primero se normalizan', () => {
     const legacy = [
       { id: 'a', ordinal: 0 }, { id: 'k', ordinal: 1, isPrimaryKey: true },
       { id: 'n', ordinal: 2 }, { id: 'nueva', ordinal: 3 },
@@ -118,7 +118,7 @@ describe('placeAtKeyBoundary (doc 94 D2 — marcar/desmarcar PK re-ubica la colu
   });
 });
 
-describe('pkFirstOrdinals (doc 94 D2 — escrituras que cambian la llave dejan la tabla PK primero)', () => {
+describe('pkFirstOrdinals (escrituras que cambian la llave dejan la tabla PK primero)', () => {
   const cols = [
     { id: 'k1', ordinal: 0, isPrimaryKey: true }, { id: 'k2', ordinal: 1, isPrimaryKey: true },
     { id: 'a', ordinal: 2 }, { id: 'b', ordinal: 3 }, { id: 'c', ordinal: 4 },

@@ -1,9 +1,8 @@
-// Doc 113 §1.3 — lo que trajo la carga Excel (y, desde la revisión, lo último
-// creado: tabla nueva, importada, CTAS o pegada) queda ENCIMA de lo que ya había
-// en el canvas: `freshNodes` guarda por canvas las TANDAS de lo nuevo, de la más
-// vieja a la más nueva (ronda 2: antes lo siguiente reemplazaba a lo anterior y
-// lo de la carga quedaba empatado con lo existente). Es de la sesión: abrir otra
-// versión (o cerrar sesión) la limpia.
+// Lo que trajo la carga Excel (y lo último creado: tabla nueva, importada, CTAS o
+// pegada) queda encima de lo que ya había en el canvas: `freshNodes` guarda por
+// canvas las tandas de lo nuevo, de la más antigua a la más reciente (una tanda no
+// sustituye a la anterior; si lo hiciera, lo de la carga quedaría empatado con lo
+// existente). Es de la sesión: abrir otra versión (o cerrar sesión) la limpia.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
@@ -19,14 +18,14 @@ beforeEach(() => {
   useModelerStore.setState({ freshNodes: {} });
 });
 
-describe('freshNodes (doc 113 §1.3)', () => {
-  it('markFresh anota lo nuevo por canvas; cada llamada es una TANDA encima de las anteriores', () => {
+describe('freshNodes', () => {
+  it('markFresh anota lo nuevo por canvas; cada llamada es una tanda encima de las anteriores', () => {
     st().markFresh({ sa1: ['t1', 'v1'], sa2: ['t2'] });
     st().markFresh({ sa1: ['t3', 't3'] });
     expect(st().freshNodes).toEqual({ sa1: [['t1', 'v1'], ['t3']], sa2: [['t2']] });
   });
 
-  it('un bloque que vuelve a marcarse sube a la tanda nueva (sale de la vieja)', () => {
+  it('un bloque que vuelve a marcarse sube a la tanda más reciente (sale de la anterior)', () => {
     st().markFresh({ sa1: ['a', 'b'] });
     st().markFresh({ sa1: ['b'] });
     expect(st().freshNodes.sa1).toEqual([['a'], ['b']]);
@@ -34,7 +33,7 @@ describe('freshNodes (doc 113 §1.3)', () => {
     expect(st().freshNodes.sa1).toEqual([['b'], ['a']]);
   });
 
-  it(`con más de ${FRESH_GENERATIONS} tandas se funden las más viejas: lo de la sesión sigue encima de lo existente (ronda 3)`, () => {
+  it(`con más de ${FRESH_GENERATIONS} tandas se funden las más antiguas: lo de la sesión sigue encima de lo existente`, () => {
     for (let i = 0; i < FRESH_GENERATIONS + 2; i++) st().markFresh({ sa1: [`g${i}`] });
     expect(st().freshNodes.sa1).toHaveLength(FRESH_GENERATIONS);
     expect(st().freshNodes.sa1![0]).toEqual(['g0', 'g1', 'g2']);
@@ -44,7 +43,7 @@ describe('freshNodes (doc 113 §1.3)', () => {
     expect(nodeZ(`g${FRESH_GENERATIONS + 1}`, null, r)).toBeLessThan(10);
   });
 
-  it('con el orden de pintado del canvas: lo de la carga sigue SOBRE lo que ya había aunque después se cree otra tabla (ronda 2)', () => {
+  it('con el orden de pintado del canvas: lo de la carga sigue sobre lo que ya había aunque después se cree otra tabla', () => {
     const z = (id: string, sel: string | null = null) => nodeZ(id, sel, freshRanks(st().freshNodes.sa1));
     st().markFresh({ sa1: ['g1'] });             // carga Excel
     st().markFresh({ sa1: ['g2'] });             // otra carga

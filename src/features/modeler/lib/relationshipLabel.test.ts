@@ -3,7 +3,7 @@ import {
   cleanPhrase, labelMaxWidth, labelPlacement, phraseChange, phraseEdits, relationshipLabel, roleAppliedText, wrapLabel,
 } from './relationshipLabel';
 
-describe('relationshipLabel (doc 98 — etiqueta del wire, formato Erwin)', () => {
+describe('relationshipLabel (etiqueta del wire, formato Erwin)', () => {
   it('con las dos frases: «padre→hijo / hijo→padre» en una línea', () => {
     expect(relationshipLabel({
       parentToChildPhrase: 'Cliente tiene', childToParentPhrase: 'pertenece a un Cliente',
@@ -94,7 +94,7 @@ describe('labelPlacement (dónde va la etiqueta y cuánto puede medir)', () => {
       .toEqual({ x: 370, y: 129, maxWidth: 84, anchor: 'center' });
   });
 
-  it('hijo a la IZQUIERDA del padre: el hueco se mide hacia ese lado', () => {
+  it('hijo a la izquierda del padre: el hueco se mide hacia ese lado', () => {
     // sx = borde izquierdo del padre (600) · tx = borde derecho del hijo (460)
     expect(labelPlacement({ recursive: false, facesRight: false, sx: 600, tx: 460, midX: 530, midY: 80, box }))
       .toEqual({ x: 530, y: 80, maxWidth: 84, anchor: 'center' });
@@ -105,7 +105,7 @@ describe('labelPlacement (dónde va la etiqueta y cuánto puede medir)', () => {
       .toEqual({ x: 220, y: 330, maxWidth: 260, anchor: 'center' });
   });
 
-  it('recursiva: el wire corre bajo el propio bloque, la etiqueta va ENCIMA y centrada', () => {
+  it('recursiva: el wire corre bajo el propio bloque, la etiqueta va encima y centrada', () => {
     expect(labelPlacement({ recursive: true, facesRight: true, sx: 340, tx: 100, midX: 220, midY: 250, box }))
       .toEqual({ x: 220, y: 192, maxWidth: 240, anchor: 'bottom' });
   });
@@ -138,7 +138,7 @@ describe('phraseChange (guardar al salir de la caja)', () => {
   });
 });
 
-describe('phraseEdits (Apply del popup: un solo guardado con lo que cambió)', () => {
+describe('phraseEdits (Apply del popup: un solo guardado con lo que cambia)', () => {
   const rel = { parentToChildPhrase: 'Cliente tiene', childToParentPhrase: null };
 
   it('sin borradores, o tipeando lo mismo: no hay nada que grabar', () => {
@@ -146,12 +146,12 @@ describe('phraseEdits (Apply del popup: un solo guardado con lo que cambió)', (
     expect(phraseEdits(rel, { parentToChildPhrase: ' Cliente tiene ', childToParentPhrase: '  ' })).toBeNull();
   });
 
-  it('solo viaja la frase que cambió, limpia', () => {
+  it('solo viaja la frase que cambia, limpia', () => {
     expect(phraseEdits(rel, { parentToChildPhrase: 'Cliente tiene', childToParentPhrase: ' es de un Cliente ' }))
       .toEqual({ childToParentPhrase: 'es de un Cliente' });
   });
 
-  it('las dos frases en el MISMO guardado', () => {
+  it('las dos frases en el mismo guardado', () => {
     expect(phraseEdits(rel, { parentToChildPhrase: 'Cliente posee', childToParentPhrase: 'es de un Cliente' }))
       .toEqual({ parentToChildPhrase: 'Cliente posee', childToParentPhrase: 'es de un Cliente' });
   });
@@ -161,17 +161,17 @@ describe('phraseEdits (Apply del popup: un solo guardado con lo que cambió)', (
   });
 });
 
-// Revisión doc 114 (H4): el aviso del role name en el modelo lógico decía
-// «"X" renamed to "X"» cuando sólo cambiaba el físico (lo escondía).
-describe('roleAppliedText (revisión doc 114)', () => {
+// El aviso del role name en el modelo lógico nombra los físicos cuando solo
+// cambia el físico, en lugar de mostrar «"X" renamed to "X"».
+describe('roleAppliedText', () => {
   const cur = { logicalName: 'Codigo Cliente', physicalName: 'COD_CLI_X' };
-  it('lógico: el nombre lógico de antes y el role name', () => {
+  it('lógico: el nombre lógico previo y el role name', () => {
     expect(roleAppliedText(cur, 'Codigo Comprador', 'COD_COMPRADOR', 'logical')).toBe('Role name applied: "Codigo Cliente" renamed to "Codigo Comprador"');
   });
   it('físico: los físicos', () => {
     expect(roleAppliedText(cur, 'Codigo Comprador', 'COD_COMPRADOR', 'physical')).toBe('Role name applied: "COD_CLI_X" renamed to "COD_COMPRADOR"');
   });
-  it('mismo lógico (sólo cambia el físico): también en lógico nombra los físicos', () => {
+  it('mismo lógico (solo cambia el físico): también en lógico nombra los físicos', () => {
     expect(roleAppliedText(cur, 'Codigo Cliente', 'CODCLIENTE', 'logical')).toBe('Role name applied: "COD_CLI_X" renamed to "CODCLIENTE"');
   });
 });

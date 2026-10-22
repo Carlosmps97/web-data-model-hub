@@ -1,5 +1,5 @@
-// Doc 113 §4: lo nuevo nace en el centro de lo que el usuario VE del canvas —
-// descontando el panel de Properties que se abre al seleccionar la tabla nueva
+// Lo nuevo nace en el centro de lo que el usuario ve del canvas, descontando
+// el panel de Properties que se abre al seleccionar la tabla nueva
 // (achica el canvas por la derecha).
 import { describe, expect, it } from 'vitest';
 import { avoidStacking, blockSpot, cascade, centeredAt, focusViewport, insideRect, propsPanelWidth, usableArea, visibleCenter } from './canvasFocus';
@@ -15,7 +15,7 @@ describe('visibleCenter', () => {
     expect(visibleCenter(pane, 472)).toEqual({ x: 264 + (1176 - 472) / 2, y: 486 });
   });
 
-  it('revisión doc 113: si el panel se CERRARÁ (la carga Excel recarga el canvas sin selección), el centro de lo que quedará visible', () => {
+  it('si el panel se cerrará (la carga Excel recarga el canvas sin selección), el centro de lo que quedará visible', () => {
     // pane con el panel abierto (704 px): al cerrarse se ensancha 472 px.
     expect(visibleCenter({ left: 264, top: 136, width: 704, height: 700 }, -472)).toEqual({ x: 264 + (704 + 472) / 2, y: 486 });
   });
@@ -65,7 +65,7 @@ describe('insideRect', () => {
   });
 });
 
-describe('avoidStacking — altas seguidas en el mismo centro (revisión doc 113)', () => {
+describe('avoidStacking — altas seguidas en el mismo centro', () => {
   const size = { w: 240, h: 60 };
   it('sin otro bloque que arranque a esa altura y se cruce, se queda en su lugar', () => {
     expect(avoidStacking({ x: 880, y: 1970 }, size, [{ x: 0, y: 0, w: 240 }, { x: 880, y: 1500, w: 240 }])).toEqual({ x: 880, y: 1970 });
@@ -80,20 +80,20 @@ describe('avoidStacking — altas seguidas en el mismo centro (revisión doc 113
   });
 });
 
-// Ronda 2 de la revisión: lo RECIENTE (lo creado en esta sesión, también lo que
-// todavía no se pinta) no queda tapado hasta su nombre — una CTAS más alta,
-// centrada más arriba, tapaba ENTERA a la tabla en blanco de antes. Y la
-// cascada no saca la cabecera del bloque nuevo de lo que se ve.
-describe('avoidStacking — lo reciente asoma (ronda 2)', () => {
+// Lo reciente (lo creado en esta sesión, también lo pendiente de pintar) no
+// queda tapado hasta su nombre: una CTAS más alta, centrada más arriba, no tapa
+// entera a la tabla en blanco recién creada. Y la cascada no saca la
+// cabecera del bloque nuevo de lo que se ve.
+describe('avoidStacking — lo reciente asoma', () => {
   const view = { left: 400, top: 1700, right: 1600, bottom: 2300 };
   it('si taparía la esquina con el nombre (36 × 32) de un bloque reciente, baja en diagonal hasta que asome', () => {
     // A (240×60) en (880, 1970); una CTAS de 240×312 centrada → (880, 1844).
     expect(avoidStacking({ x: 880, y: 1844 }, { w: 240, h: 312 }, [], [{ x: 880, y: 1970, w: 240 }], view)).toEqual({ x: 916, y: 1880 });
   });
-  it('un bloque existente (no reciente) a otra altura puede quedar detrás, como pidió el owner', () => {
+  it('un bloque existente (no reciente) a otra altura puede quedar detrás, a propósito', () => {
     expect(avoidStacking({ x: 880, y: 1844 }, { w: 240, h: 312 }, [{ x: 880, y: 1970, w: 240 }], [], view)).toEqual({ x: 880, y: 1844 });
   });
-  it('ronda 3: si la cascada sacaría su cabecera de lo visible, nace en el lugar libre más cercano a la vista', () => {
+  it('si la cascada sacaría su cabecera de lo visible, nace en el lugar libre más cercano a la vista', () => {
     const recent = Array.from({ length: 12 }, (_, i) => ({ x: 880 + 36 * i, y: 1970 + 36 * i, w: 240 }));
     const size = { w: 240, h: 60 };
     const p = avoidStacking({ x: 880, y: 1970 }, size, recent, recent, view)!;
@@ -107,7 +107,7 @@ describe('avoidStacking — lo reciente asoma (ronda 2)', () => {
     // el más cercano al punto de partida: 36 px arriba y a la derecha de la primera
     expect(p).toEqual({ x: 916, y: 1934 });
   });
-  it('ronda 3: null sólo si no queda ningún lugar libre a la vista', () => {
+  it('null solo si no queda ningún lugar libre a la vista', () => {
     const recent: { x: number; y: number; w: number }[] = [];
     for (let i = -12; i <= 12; i++) for (let j = -12; j <= 12; j++) recent.push({ x: 880 + 36 * i, y: 1970 + 36 * j, w: 240 });
     expect(avoidStacking({ x: 880, y: 1970 }, { w: 240, h: 60 }, [], recent, view)).toBeNull();
@@ -118,10 +118,10 @@ describe('avoidStacking — lo reciente asoma (ronda 2)', () => {
   });
 });
 
-// Ronda 4 de la revisión: un bloque MÁS ANCHO que lo visible (zoom alto, nombres
-// largos en una laptop) nunca tiene la cabecera entera a la vista — la cascada
-// devolvía null y las altas caían exactamente encima de la primera.
-describe('bloques más anchos que lo visible y vista saturada (ronda 4)', () => {
+// Un bloque más ancho que lo visible (zoom alto, nombres largos en una laptop)
+// nunca tiene la cabecera entera a la vista: exigirla haría que la cascada
+// devolviera null y las altas cayeran exactamente encima de la primera.
+describe('bloques más anchos que lo visible y vista saturada', () => {
   const narrow = { left: 843, top: 1864, right: 1158, bottom: 2136 };        // 315 × 272 (zoom 2)
   const wide = { w: 432, h: 60 };
   const grip = (r: { x: number; y: number }, p: { x: number; y: number }, w = 432, h = 60) =>
@@ -132,14 +132,14 @@ describe('bloques más anchos que lo visible y vista saturada (ronda 4)', () => 
     expect(blockSpot({ center: { x: 1000, y: 2000 }, rect: narrow }, { w: 240, h: 60 })).toEqual({ x: 880, y: 1970 });
   });
 
-  it('su cascada exige a la vista sólo la esquina con el nombre: la segunda no cae encima de la primera', () => {
+  it('su cascada exige a la vista solo la esquina con el nombre: la segunda no cae encima de la primera', () => {
     const first = { x: 867, y: 1970 };
     const p = avoidStacking(first, wide, [{ ...first, w: 432 }], [{ ...first, w: 432 }], narrow)!;
     expect(p).toEqual({ x: 903, y: 2006 });
   });
 
   it('si la cabecera entera no entra en ningún lugar libre, basta la esquina con el nombre', () => {
-    // Bloque de 280 en una vista de 300: con la cabecera entera sólo cabe en x = left;
+    // Bloque de 280 en una vista de 300: con la cabecera entera solo cabe en x = left;
     // esa columna está tomada a toda altura por bloques recientes.
     const view = { left: 0, top: 0, right: 300, bottom: 400 };
     const recent = Array.from({ length: 13 }, (_, k) => ({ x: 0, y: k * 36 - 36, w: 280 }));
@@ -158,12 +158,12 @@ describe('bloques más anchos que lo visible y vista saturada (ronda 4)', () => 
   });
 });
 
-// Doc 114 (piloto): al seleccionar una tabla (se abre el panel de Properties),
-// el canvas se acerca y centra la tabla con sus vistas en el área que queda
-// libre — el canvas ya descuenta el panel. Hasta 100 % (sin alejar si el usuario
+// Al seleccionar una tabla (se abre el panel de Properties), el canvas se
+// acerca y centra la tabla con sus vistas en el área que queda libre (el
+// canvas ya descuenta el panel). Hasta 100 % (sin alejar si el usuario
 // ya estaba más cerca y entra); si el grupo no entra legible (60 %), la tabla
 // sola; y una tabla más alta que el área, desde su cabecera.
-describe('focusViewport — acercar y centrar la tabla con sus vistas (doc 114)', () => {
+describe('focusViewport — acercar y centrar la tabla con sus vistas', () => {
   type B = { x: number; y: number; w: number; h: number };
   const T: B = { x: 1000, y: 2000, w: 240, h: 312 };
   const V: B = { x: 1280, y: 2000, w: 240, h: 312 };
@@ -183,7 +183,7 @@ describe('focusViewport — acercar y centrar la tabla con sus vistas (doc 114)'
     expect((s.t + s.b) / 2).toBeCloseTo(365, 5);
   });
 
-  it('si el usuario ya estaba más cerca y el grupo entra, no aleja: sólo centra', () => {
+  it('si el usuario ya estaba más cerca y el grupo entra, no aleja: solo centra', () => {
     const vp = focusViewport(T, [V], { width: 1184, height: 910 }, 1.5);
     expect(vp.zoom).toBe(1.5);
     const s = screen(union([T, V]), vp);
@@ -233,10 +233,10 @@ describe('focusViewport — acercar y centrar la tabla con sus vistas (doc 114)'
   });
 });
 
-// Prueba en navegador (doc 114): en una laptop el minimapa (abajo a la derecha,
-// 200×150) tapaba parte de la vista encuadrada — el encuadre usa lo que queda
-// por ENCIMA del minimapa (nunca menos de la mitad del canvas).
-describe('usableArea — lo que se ve del canvas sin el minimapa (doc 114)', () => {
+// En una laptop el minimapa (abajo a la derecha, 200×150) taparía parte de la
+// vista encuadrada: el encuadre usa lo que queda por encima del minimapa (nunca
+// menos de la mitad del canvas).
+describe('usableArea — lo que se ve del canvas sin el minimapa', () => {
   const pane = { left: 264, top: 120, width: 414, height: 446, right: 678, bottom: 566 };
   it('sin minimapa: todo el canvas', () => {
     expect(usableArea(pane, null)).toEqual({ width: 414, height: 446 });
@@ -249,12 +249,12 @@ describe('usableArea — lo que se ve del canvas sin el minimapa (doc 114)', () 
   });
 });
 
-// Revisión independiente doc 114 (punto 3): matemática en los bordes y propiedad
-// sobre 20 000 casos al azar — la CABECERA de la tabla seleccionada queda siempre
-// dentro del área (antes, una tabla más alta que el área con una vista ENCIMA
-// quedaba fuera); y una vista lejana no descarta a la cercana (se suman de la más
-// cercana a la más lejana mientras el grupo entre legible).
-describe('focusViewport — bordes y propiedad (revisión doc 114)', () => {
+// Matemática en los bordes y propiedad sobre 20 000 casos al azar: la cabecera
+// de la tabla seleccionada queda siempre dentro del área (también con una tabla
+// más alta que el área y una vista encima); y una vista lejana no descarta a la
+// cercana (se suman de la más cercana a la más lejana mientras el grupo entre
+// legible).
+describe('focusViewport — bordes y propiedad', () => {
   type B = { x: number; y: number; w: number; h: number };
   const screen = (b: B, vp: { x: number; y: number; zoom: number }) =>
     ({ l: b.x * vp.zoom + vp.x, r: (b.x + b.w) * vp.zoom + vp.x, t: b.y * vp.zoom + vp.y, b: (b.y + b.h) * vp.zoom + vp.y });
@@ -273,7 +273,7 @@ describe('focusViewport — bordes y propiedad (revisión doc 114)', () => {
     expect(focusViewport(T, [], { width: 700, height: 500 }, 0).zoom).toBe(1);
   });
 
-  it('tabla más alta que el área con su vista ENCIMA: la cabecera de la tabla queda arriba, a la vista', () => {
+  it('tabla más alta que el área con su vista encima: la cabecera de la tabla queda arriba, a la vista', () => {
     const t5: B = { x: 2400, y: 0, w: 233, h: 1380 };
     const above: B = { x: 2400, y: -1000, w: 240, h: 100 };
     const area = { width: 704, height: 573 };
@@ -299,8 +299,8 @@ describe('focusViewport — bordes y propiedad (revisión doc 114)', () => {
     expect(screen(vdup, vp).l).toBeGreaterThan(area.width);   // la lejana queda fuera
   });
 
-  // Revisión 2 doc 114 (hallazgo 6): con una tabla alta, una vista que igual no se
-  // vería (encima de la cabecera, o muy abajo) bajaba el zoom y corría la tabla.
+  // Con una tabla alta, una vista que igual no se vería (encima de la cabecera, o
+  // muy abajo) no cuenta: si contara, bajaría el zoom y correría la tabla.
   it('tabla alta con una vista encima (o muy abajo) y corrida: no cuenta — 100 % y la tabla centrada', () => {
     const t5: B = { x: 2400, y: 0, w: 233, h: 1380 };
     const area = { width: 704, height: 573 };

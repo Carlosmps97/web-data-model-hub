@@ -1,4 +1,4 @@
-// Doc 113 §5 — regla única de las ventanas flotantes (tooltips, menús, popovers):
+// Regla única de las ventanas flotantes (tooltips, menús, popovers):
 // flip (lado opuesto si no entra), shift (se corre para quedar dentro, con
 // margen) y size (alto máximo con scroll si no entra en ningún lado).
 import { describe, expect, it, vi } from 'vitest';
@@ -13,7 +13,7 @@ describe('placeNextTo — junto a un ancla (tooltip, menú de un botón)', () =>
     expect(p).toEqual({ left: 100, top: 126, side: 'bottom', maxHeight: null });
   });
 
-  it('flip: sin lugar abajo y con lugar arriba, abre ARRIBA del ancla (menú del Explorer en la última fila)', () => {
+  it('flip: sin lugar abajo y con lugar arriba, abre arriba del ancla (menú del Explorer en la última fila)', () => {
     const p = placeNextTo(rect(100, 760, 40, 20), { width: 200, height: 160 }, VP, { gap: 2 });
     expect(p.side).toBe('top');
     expect(p.top).toBe(760 - 2 - 160);
@@ -83,12 +83,12 @@ describe('placeAtPoint — menú contextual en el cursor', () => {
       .toEqual({ left: 300, top: 200, side: 'bottom', maxHeight: null });
   });
 
-  it('cerca del borde derecho, abre a la IZQUIERDA del cursor', () => {
+  it('cerca del borde derecho, abre a la izquierda del cursor', () => {
     const p = placeAtPoint({ x: 950, y: 200 }, { width: 200, height: 150 }, VP);
     expect(p.left).toBe(750);
   });
 
-  it('cerca del borde inferior, abre HACIA ARRIBA del cursor', () => {
+  it('cerca del borde inferior, abre hacia arriba del cursor', () => {
     const p = placeAtPoint({ x: 300, y: 780 }, { width: 200, height: 150 }, VP);
     expect(p.top).toBe(630);
     expect(p.side).toBe('top');
@@ -117,7 +117,7 @@ describe('placeAtPoint — menú contextual en el cursor', () => {
   });
 });
 
-describe('placeAtPoint — margen (revisión doc 113)', () => {
+describe('placeAtPoint — margen', () => {
   it('con el cursor dentro del margen, el menú igual queda a 8 px del borde', () => {
     expect(placeAtPoint({ x: 3, y: 3 }, { width: 200, height: 150 }, VP)).toMatchObject({ left: 8, top: 8 });
   });
@@ -151,10 +151,10 @@ describe('viewportBounds', () => {
   });
 });
 
-// Ronda 2 de la revisión: el desplegable de un control dentro de paneles con
-// scroll (editor de reglas DDL, filtros de Reporting) se UBICA en la ventana —
-// limitado al medio panel quedaba de 60 px en ventanas bajas — y el recorte de
-// sus paneles sólo decide si se oculta (el control salió de la vista).
+// El desplegable de un control dentro de paneles con scroll (editor de reglas
+// DDL, filtros de Reporting) se ubica en la ventana (limitado al medio panel
+// quedaría de 60 px en ventanas bajas) y el recorte de sus paneles solo decide
+// si se oculta (el control salió de la vista).
 describe('placeAnchored — desplegable de un control dentro de paneles con scroll', () => {
   const viewport = { left: 0, top: 0, right: 1440, bottom: 600 };
   const panel = { left: 300, top: 330, right: 860, bottom: 600 };      // medio panel bajo
@@ -169,9 +169,9 @@ describe('placeAnchored — desplegable de un control dentro de paneles con scro
   });
 });
 
-// Ronda 3 de la revisión: la barra superior de la app (`.dmh-topnav`, z-index 40)
-// queda por encima de los desplegables del contenido (z-index 30): abiertos hacia
-// arriba en ventanas bajas se escondían debajo de ella.
+// La barra superior de la app (`.dmh-topnav`, z-index 40) queda por encima de
+// los desplegables del contenido (z-index 30): abiertos hacia arriba en ventanas
+// bajas se esconderían debajo de ella.
 describe('contentBounds — la ventana sin la barra superior de la app', () => {
   const viewport = { left: 0, top: 0, right: 1440, bottom: 650 };
   const withBar = (bottom: number | null) => vi.stubGlobal('document', {
@@ -187,16 +187,16 @@ describe('contentBounds — la ventana sin la barra superior de la app', () => {
     withBar(-10);
     try { expect(contentBounds(viewport)).toEqual(viewport); } finally { vi.unstubAllGlobals(); }
   });
-  it('con ese área, un desplegable que abre hacia arriba no pasa por debajo de la barra', () => {
+  it('con esa área, un desplegable que abre hacia arriba no pasa por debajo de la barra', () => {
     const input = { left: 24, top: 394, right: 696, bottom: 434 };
     const at = placeAnchored(input, { left: 0, top: 202, right: 720, bottom: 572 }, { width: 672, height: 347 }, { ...viewport, top: 52 }, { side: 'bottom', gap: 6 })!;
     expect(at.top).toBeGreaterThanOrEqual(52);
   });
 });
 
-// Revisión 2 doc 114 (barra, O2): el tooltip a la derecha de una herramienta de un
-// menú de lista, en una ventana angosta, no entraba ni a la derecha ni a la
-// izquierda — se corría encima de su propio botón y tapaba su nombre.
+// El tooltip a la derecha de una herramienta de un menú de lista, en una
+// ventana angosta, puede no entrar ni a la derecha ni a la izquierda: corrido
+// encima de su propio botón taparía su nombre, así que va abajo.
 describe('placeBeside — al costado, y si no entra en ninguno, abajo', () => {
   const bounds = { left: 0, top: 0, right: 760, bottom: 600 };
   const box = { width: 300, height: 30 };

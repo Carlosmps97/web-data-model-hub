@@ -1,12 +1,12 @@
 /**
  * standards.service — módulo Data Standards (versionado independiente de UDP +
- * Parent Domains), POR PROYECTO (doc 75): cada proyecto tiene su glosario,
- * dominios, UDPs, naming, reglas DDL y su propio historial. Backend
+ * Parent Domains), por proyecto: cada proyecto tiene su glosario, dominios,
+ * UDPs, naming, reglas DDL y su propio historial. Backend
  * `/api/projects/{pid}/standards/*` (envelope `{success,data}`).
  *
- * Las MUTACIONES puntuales de preview (physicalize, impacto de dominio) siguen
- * usando `@/services/naming.service`; este servicio agrega el snapshot + el
- * versionado (apply/rollback/history), que es lo nuevo del módulo.
+ * Las operaciones puntuales de preview (physicalize, impacto de dominio) usan
+ * `@/services/naming.service`; este servicio aporta el snapshot y el
+ * versionado (apply/rollback/history).
  */
 import { apiGet, apiPost, LONG_TIMEOUT_MS } from '@/services/http';
 import { runBlocking } from '@/store/useBusyStore';
@@ -19,7 +19,7 @@ const STD = (pid: string) => `${PROJECT(pid)}/standards`;
 
 import type { StandardsBlock } from '@/types/api';
 export type { StandardsBlock };
-/** Bloques copiables, con su etiqueta de UI (asistente «New project», doc 75 D15). */
+/** Bloques copiables, con su etiqueta de UI (asistente «New project»). */
 export const STANDARDS_BLOCKS: { key: StandardsBlock; label: string }[] = [
   { key: 'glossary', label: 'Glossary' },
   { key: 'domains', label: 'Parent domains' },
@@ -34,36 +34,36 @@ export interface StandardsSummary { glossary: number; domains: number; udp: numb
 export interface SnapshotTerm { id: string; term: string; abbrev: string; scope: UdpScope; locked?: boolean; lockedBy?: string | null; lockedAt?: string | null; }
 export interface SnapshotDomain {
   id: string; name: string;
-  /** Doc 69: `defaultDataType` = tipo FÍSICO por defecto; `logicalDataType` = faceta lógica. */
+  /** `defaultDataType` = tipo físico por defecto; `logicalDataType` = faceta lógica. */
   defaultDataType: string; logicalDataType?: string | null;
   namingTerm?: string | null; description?: string | null;
-  /** Doc 79/80: dominio «atributo estándar» (FecRutina, CodMes, TipIngresoLKDE…).
-   *  SOLO estos imponen su nombre lógico y su definición a la columna al
-   *  asignarse; el resto aporta únicamente el tipo de dato. El backend ya lo
-   *  proyectaba — sin el campo acá se perdía en cada round-trip de la UI. */
+  /** Dominio «atributo estándar» (FecRutina, CodMes, TipIngresoLKDE…). Solo
+   *  estos imponen su nombre lógico y su definición a la columna al asignarse;
+   *  el resto aporta únicamente el tipo de dato. El backend lo proyecta y el
+   *  campo se declara aquí para que no se pierda en el round-trip de la UI. */
   inheritsName?: boolean | null;
-  /** Doc 85: faceta física (null = derivado / igual a la lógica) + UDP por defecto de atributo/columna. */
+  /** Faceta física (null = derivado / igual a la lógica) + UDP por defecto de atributo/columna. */
   physicalName?: string | null; physicalDescription?: string | null; udpValues?: Record<string, string> | null;
 }
 export interface NamingRuleSnap { separator: Separator | string | null; case: Casing | string | null; maxLength?: number | null; }
-/** Definición de un UDP (User Defined Property): la KEY + su tipo + default +
+/** Definición de un UDP (User Defined Property): la clave + su tipo + default +
  *  valores permitidos (enum si dataType='list') + niveles donde aplica. */
 export type UdpDataType = 'string' | 'number' | 'boolean' | 'date' | 'list';
 export type UdpLevel = 'table' | 'column' | 'canvas' | 'view';
-/** Faceta Erwin (doc 69): 'logical' = Entity/Attribute · 'physical' = Table/Column/View/Model. */
+/** Faceta Erwin: 'logical' = Entity/Attribute · 'physical' = Table/Column/View/Model. */
 export type UdpView = 'logical' | 'physical';
 export interface UdpDefinition {
   id: string;
   name: string;
   level: UdpLevel;              // Class: 'table' | 'column' | 'canvas' (Modelo de Datos) | 'view'
-  view?: UdpView;               // faceta (doc 69): ausente = physical (defs previas)
+  view?: UdpView;               // faceta: ausente = physical
   dataType: UdpDataType;
   defaultValue?: string | null;
   allowedValues: string[];
   description?: string | null;
 }
 
-// ── DDL Export Rules (doc 30) — viven en el MISMO snapshot/versionado ──
+// ── DDL Export Rules: viven en el mismo snapshot/versionado ──
 export type DdlRuleKind = 'rule' | 'generator';
 export type DdlRuleTarget = 'column' | 'table';
 export type DdlValidationState = 'valid' | 'invalid' | 'stale';
@@ -87,7 +87,7 @@ export interface DdlRule {
   sourceArtifact?: string | null;         // solo kind='generator'
   condition: string;
   udpRefs: { udpId: string; level: UdpLevel }[];
-  action: Record<string, unknown>;        // expression|exclude|tags|types|tblproperties|statements|layout|emit (spec §6.6 · doc 76 · doc 90)
+  action: Record<string, unknown>;        // expression|exclude|tags|types|tblproperties|statements|layout|emit
   appliesTo: string[];
   priority: number;
   enabled: boolean;
@@ -103,7 +103,7 @@ export interface DdlLookup {
 export interface DdlRulesetConfig {
   lookups: Record<string, DdlLookup>;
   functions: { name: string; params: string[]; body: string }[];
-  /** Doc 93 D1: Output settings del Export DDL (ver features/ddl/outputSettings). */
+  /** Output settings del Export DDL (ver features/ddl/outputSettings). */
   output?: Record<string, unknown>;
 }
 
@@ -114,7 +114,7 @@ export interface StandardsSnapshot {
   udp: UdpDefinition[];
   ddlRules?: DdlRule[];
   ddlConfig?: DdlRulesetConfig;
-  /** Doc 109: themes de color del proyecto (snapshots viejos no lo traen). */
+  /** Themes de color del proyecto (opcional: un snapshot puede no traerlos). */
   themes?: Theme[];
 }
 
@@ -134,7 +134,7 @@ export interface StandardsVersion {
   revertsSeq?: number | null;
 }
 
-// ── Batch de cambios que se aplica como UNA versión (15d/15e) ──
+// ── Lote de cambios que se aplica como una versión ──
 export interface TermEditInput { id?: string; term: string; abbrev: string; scope: UdpScope; }
 export interface DomainEditInput { id?: string; name: string; defaultDataType: string; logicalDataType?: string; namingTerm?: string; description?: string; inheritsName?: boolean; physicalName?: string; physicalDescription?: string; udpValues?: Record<string, string>; }
 export interface NamingEditInput { separator: string; case: string; maxLength: number; }
@@ -142,13 +142,13 @@ export interface UdpEditInput {
   id?: string;
   name: string;
   level: UdpLevel;
-  view?: UdpView;               // faceta (doc 69); el backend asume physical si falta
+  view?: UdpView;               // faceta; el backend asume physical si falta
   dataType: UdpDataType;
   defaultValue?: string;
   allowedValues?: string[];
   description?: string;
 }
-/** Regla de DDL Export en el batch: `udpRefs`/estado los deriva el server. */
+/** Regla de DDL Export en el lote: `udpRefs`/estado los deriva el server. */
 export interface DdlRuleEditInput {
   id?: string;
   name: string;
@@ -163,7 +163,7 @@ export interface DdlRuleEditInput {
   priority: number;
   enabled: boolean;
 }
-/** Doc 109: alta/edición de un theme de color (sin `id` = alta). */
+/** Alta/edición de un theme de color (sin `id` = alta). */
 export interface ThemeEditInput { id?: string; name: string; color: string; order?: number }
 export interface ApplyStandardsBody {
   kind?: 'glossary' | 'udp' | 'domain' | 'naming' | 'ddl' | 'themes' | 'batch';
@@ -186,8 +186,8 @@ export interface ApplyStandardsBody {
 export const getSnapshot = (projectId: string) => apiGet<StandardsSnapshot>(`${STD(projectId)}/snapshot`);
 export const getVersions = (projectId: string) => apiGet<StandardsVersion[]>(`${STD(projectId)}/versions`);
 export const getStandardsSummary = (projectId: string) => apiGet<StandardsSummary>(`${STD(projectId)}/summary`);
-/** Aplica un batch como UNA versión del proyecto: re-deriva nombres/tipos en
- *  sus tablas — acción larga (doc 75 D18). */
+/** Aplica un lote como una versión del proyecto: re-deriva nombres/tipos en
+ *  sus tablas (acción larga). */
 export const applyStandards = (projectId: string, body: ApplyStandardsBody) =>
   runBlocking('Applying standards…', () =>
     apiPost<StandardsVersion>(`${STD(projectId)}/apply`, body, { timeoutMs: LONG_TIMEOUT_MS }));
@@ -195,7 +195,7 @@ export const rollbackStandards = (projectId: string, targetSeq: number) =>
   runBlocking('Rolling back standards…', () =>
     apiPost<StandardsVersion>(`${STD(projectId)}/rollback`, { targetSeq }, { timeoutMs: LONG_TIMEOUT_MS }));
 
-/** Doc 95 D8: una versión de Data Standards donde cambió UN dominio. */
+/** Una versión de Data Standards que modificó un dominio. */
 export interface DomainHistoryEntry {
   seq: number;
   label: string;
@@ -211,7 +211,7 @@ export interface DomainHistoryEntry {
 export const getDomainHistory = (projectId: string, domainId: string) =>
   apiGet<DomainHistoryEntry[]>(`${STD(projectId)}/domains/${encodeURIComponent(domainId)}/history`);
 
-/** Doc 95 D9: vista previa del rollback de Data Standards. */
+/** Vista previa del rollback de Data Standards. */
 export interface RollbackPreviewDomain {
   id: string;
   name: string;
@@ -229,7 +229,7 @@ export interface RollbackPreview {
 export const getRollbackPreview = (projectId: string, targetSeq: number) =>
   apiGet<RollbackPreview>(`${STD(projectId)}/rollback-preview?targetSeq=${targetSeq}`);
 
-/** Definiciones UDP activas DEL PROYECTO (módulo Data Standards y panel de
+/** Definiciones UDP activas del proyecto (módulo Data Standards y panel de
  *  Properties). GET abierto; las mutaciones van por applyStandards con
  *  kind='udp' (versionado). */
 export const getUdpDefs = (projectId: string) => apiGet<UdpDefinition[]>(`${PROJECT(projectId)}/udp`);

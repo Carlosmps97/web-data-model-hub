@@ -1,9 +1,9 @@
-// Doc 59: escena → PDF VECTORIAL sin dependencias (política de deps pineadas:
+// Escena → PDF vectorial sin dependencias (política de dependencias fijadas:
 // no se agrega jsPDF). Fuentes core Type1 (Helvetica/Courier + variantes) con
-// WinAnsiEncoding — cubre Latin-1 (es-PE completo); lo no mapeable degrada a
-// '?'. La página escala px→pt a 0.75 y se CAPA al techo del estándar ISO
+// WinAnsiEncoding: cubre Latin-1 (español completo); lo no mapeable degrada a
+// '?'. La página escala px→pt a 0.75 y se capa al techo del estándar ISO
 // 32000 (14400pt = 200in por lado; Acrobat trunca más allá). Streams sin
-// comprimir: el peso sigue siendo ~100× menor que la captura DOM anterior.
+// comprimir: el peso es ~100× menor que el de una captura del DOM.
 // Limitación aceptada: el hatch de vistas va como fondo plano (el borde
 // punteado + badge VISTA mantienen la identidad visual).
 import type { Scene, SceneItem } from './exportScene';
@@ -19,7 +19,7 @@ const WIN: Record<number, number> = {
   0x0153: 0x9C, 0x017E: 0x9E, 0x0178: 0x9F,
 };
 
-/** String de BYTES (cada char ≤ 0xFF) en WinAnsi; irrepresentable → '?'. */
+/** String de bytes (cada char ≤ 0xFF) en WinAnsi; irrepresentable → '?'. */
 export function winAnsiEncode(s: string): string {
   let out = '';
   for (const ch of s) {
@@ -33,7 +33,7 @@ export function winAnsiEncode(s: string): string {
 const escText = (bytes: string) => bytes.replace(/[\\()]/g, (c) => `\\${c}`);
 const n2 = (v: number) => String(Math.round(v * 1000) / 1000);
 
-/** '#RRGGBB' o '#RRGGBBAA' → 'r g b' 0..1 (el alpha se PRE-mezcla sobre bg). */
+/** '#RRGGBB' o '#RRGGBBAA' → 'r g b' 0..1 (el alpha se pre-mezcla sobre bg). */
 function rgb(hex: string, bg: string): string {
   const h = hex.replace('#', '');
   let r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
@@ -47,7 +47,7 @@ function rgb(hex: string, bg: string): string {
   return `${n2(r / 255)} ${n2(g / 255)} ${n2(b / 255)}`;
 }
 
-// ── Parser mínimo del path SVG que EMITE este export (M/L/Q/C/Z absolutos:
+// ── Parser mínimo del path SVG que emite este export (M/L/Q/C/Z absolutos:
 //    getSmoothStepPath usa M/L/Q y getBezierPath usa M/C) ──────────────────
 type Cmd = [string, number[]];
 function parsePath(d: string): Cmd[] {
@@ -63,7 +63,7 @@ function parsePath(d: string): Cmd[] {
 
 const FONTS = ['Helvetica', 'Helvetica-Bold', 'Courier', 'Courier-Bold', 'Helvetica-Oblique', 'Helvetica-BoldOblique'];
 const fontOf = (i: Extract<SceneItem, { k: 'text' }>): { f: string; wf: number } => {
-  // Doc 109: las familias de un dibujo se aproximan con las core del PDF
+  // Las familias de un dibujo se aproximan con las core del PDF
   // (monoespaciadas → Courier; el resto → Helvetica).
   if (i.mono || /courier|mono|consolas/i.test(i.font ?? '')) return i.bold ? { f: 'F4', wf: 0.6 } : { f: 'F3', wf: 0.6 };
   if (i.bold && i.italic) return { f: 'F6', wf: 0.58 };
@@ -72,9 +72,9 @@ const fontOf = (i: Extract<SceneItem, { k: 'text' }>): { f: string; wf: number }
   return { f: 'F1', wf: 0.55 };
 };
 
-/** Contenido de UNA página: content stream + tamaño en puntos (px→pt 0.75,
- *  capado al techo ISO de 14400pt). Extraído de buildDiagramPdf para que el
- *  multipágina (doc 66 r3) reuse el MISMO dibujo. */
+/** Contenido de una página: content stream + tamaño en puntos (px→pt 0.75,
+ *  capado al techo ISO de 14400pt). Lo comparten buildDiagramPdf y el
+ *  multipágina, que así reusa el mismo dibujo. */
 function sceneContent(scene: Scene, scale?: number): { stream: string; W: number; H: number } {
   const S = scale ?? Math.min(0.75, 14400 / scene.w, 14400 / scene.h);
   const W = scene.w * S, H = scene.h * S;
@@ -95,7 +95,7 @@ function sceneContent(scene: Scene, scale?: number): { stream: string; W: number
   };
   const paint = (fill?: string, stroke?: string) => (fill && stroke ? 'B' : fill ? 'f' : 'S');
 
-  /** Rect redondeado (4 esquinas, o solo las de ARRIBA para headers). */
+  /** Rect redondeado (4 esquinas, o solo las de arriba para headers). */
   const roundedRect = (x: number, y: number, w: number, h: number, r: number, topOnly: boolean): string => {
     const k = K * r;
     const p: string[] = [];
@@ -173,7 +173,7 @@ function sceneContent(scene: Scene, scale?: number): { stream: string; W: number
       case 'text': {
         const { f, wf } = fontOf(i);
         const len = [...i.s].length;
-        // Doc 98: `i.wf` = ancho medio propio del texto (frases en oración).
+        // `i.wf` = ancho medio propio del texto (frases en oración).
         const width = ((i.wf ?? wf) * i.size * len + (i.ls ?? 0) * Math.max(0, len - 1)) * S;
         const dx = i.anchor === 'end' ? width : i.anchor === 'middle' ? width / 2 : 0;
         const bytes = escText(winAnsiEncode(i.s));
@@ -181,7 +181,7 @@ function sceneContent(scene: Scene, scale?: number): { stream: string; W: number
         if (i.ls) s += ` ${n2(i.ls * S)} Tc`;
         s += `\n${n2(i.x * S - dx)} ${Y(i.y)} Td\n(${bytes}) Tj\nET Q`;
         if (i.underline) {
-          // Doc 109: subrayado = una línea bajo el texto, del ancho estimado.
+          // Subrayado = una línea bajo el texto, del ancho estimado.
           const uy = Y(i.y + i.size * 0.12);
           s += `\nq ${rgb(i.color, scene.bg)} RG ${n2(Math.max(0.5, i.size * 0.06) * S)} w ${n2(i.x * S - dx)} ${uy} m ${n2(i.x * S - dx + width)} ${uy} l S Q`;
         }
@@ -193,7 +193,7 @@ function sceneContent(scene: Scene, scale?: number): { stream: string; W: number
   return { stream: ops.join('\n'), W, H };
 }
 
-/** Serializa objetos 1..N + xref con offsets EXACTOS + trailer → bytes. */
+/** Serializa objetos 1..N + xref con offsets exactos + trailer → bytes. */
 function assemble(objs: string[]): Uint8Array<ArrayBuffer> {
   let out = `%PDF-1.4\n%${String.fromCharCode(0xE2, 0xE3, 0xCF, 0xD3)}\n`;
   const offsets: number[] = [];
@@ -213,7 +213,7 @@ function assemble(objs: string[]): Uint8Array<ArrayBuffer> {
 
 export function buildDiagramPdf(scene: Scene): Uint8Array<ArrayBuffer> {
   const { stream, W, H } = sceneContent(scene);
-  // ── Ensamblado: objetos 1..10 (layout HISTÓRICO del doc 59, intacto) ────
+  // ── Ensamblado: objetos 1..10 (numeración fija del PDF de una página) ───
   const objs: string[] = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -224,7 +224,7 @@ export function buildDiagramPdf(scene: Scene): Uint8Array<ArrayBuffer> {
   return assemble(objs);
 }
 
-// ── Doc 66 r3: PDF MULTIPÁGINA (una página por escena) con bookmarks ──────
+// ── PDF multipágina (una página por escena) con bookmarks ─────────────────
 // Numeración: 1 catálogo · 2 pages · 3..2+N páginas · 3+N..2+2N streams ·
 // 3+2N outlines root · 4+2N..3+3N items · 4+3N..9+3N fuentes (compartidas).
 export interface PdfPageInput { scene: Scene; title: string }
@@ -274,8 +274,8 @@ export function buildMultiDiagramPdf(
   return assemble(objs);
 }
 
-// ── Doc 67: PDF de REPORTE — páginas con escala propia + outline jerárquico ─
-/** Zona clicable en coordenadas de la ESCENA (se transforma con su escala). */
+// ── PDF de reporte: páginas con escala propia + outline jerárquico ──────────
+/** Zona clicable en coordenadas de la escena (se transforma con su escala). */
 export interface PdfLink { x: number; y: number; w: number; h: number; pageIndex: number }
 export interface ReportPage { scene: Scene; scale?: number; links?: PdfLink[] }
 export interface PdfBookmark { title: string; pageIndex: number; children?: PdfBookmark[] }
@@ -299,7 +299,7 @@ export function buildReportPdf(
   if (!pages.length) throw new Error('buildReportPdf: no pages');
   const N = pages.length;
 
-  // Aplana el árbol de bookmarks en PREORDEN con parent/hermanos/counts.
+  // Aplana el árbol de bookmarks en preorden con parent/hermanos/counts.
   interface Flat { title: string; pageIndex: number; parent: number; prev: number; next: number; first: number; last: number; count: number }
   const flat: Flat[] = [];
   const walk = (nodes: PdfBookmark[], parent: number): number[] => {
@@ -321,8 +321,8 @@ export function buildReportPdf(
   const roots = walk(bookmarks, -1);
   const M = flat.length;
 
-  // Anotaciones /Link por página (r2 doc 67): rects en unidades de la escena
-  // transformados con SU escala; A = total de links del documento.
+  // Anotaciones /Link por página: rects en unidades de la escena
+  // transformados con su escala; A = total de links del documento.
   const pageLinks = pages.map((p) => p.links ?? []);
   const A = pageLinks.reduce((acc, l) => acc + l.length, 0);
 

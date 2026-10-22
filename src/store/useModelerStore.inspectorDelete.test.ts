@@ -1,7 +1,7 @@
-// Doc 89 §3.1: borrar desde el Object Inspector SIN canvas reusa las cascadas
-// del store. Las dos firmas ganan un `opts` opcional con la pre-imagen del
-// dossier (estado efectivo) — sin `diagram` el Undo y la cascada de columna
-// deben funcionar igual que desde el canvas.
+// Borrar desde el Object Inspector sin canvas reusa las cascadas del store. Las
+// dos firmas aceptan un `opts` opcional con la pre-imagen del dossier (estado
+// efectivo): sin `diagram`, el Undo y la cascada de columna deben funcionar igual
+// que desde el canvas.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const order: string[] = [];
@@ -59,7 +59,7 @@ describe('deleteTable(id, { pre }) sin diagrama (inspector)', () => {
     await useModelerStore.getState().deleteTable('t1', { pre: tPre });
 
     expect(order).toEqual(['bulk', 'table:t1']);
-    // Doc 89 §3.6: sin canvas activo nadie sube el tick por firma → lo sube el borrado.
+    // Sin canvas activo nadie sube el tick por firma → lo sube el borrado.
     expect(useModelerStore.getState().explorerTick).toBe(1);
     const stack = useUndoStore.getState().stack;
     expect(stack.map((e) => e.label)).toEqual(['Delete table M_CLIENTE']);
@@ -72,7 +72,7 @@ describe('deleteTable(id, { pre }) sin diagrama (inspector)', () => {
     expect(useModelerStore.getState().explorerTick).toBe(2);
   });
 
-  it('sin pre-imagen ni diagrama: borra igual y no apila Undo (comportamiento actual)', async () => {
+  it('sin pre-imagen ni diagrama: borra igual y no apila Undo', async () => {
     vi.mocked(gov.listRelationships).mockResolvedValue([]);
     vi.mocked(gov.listColumns).mockResolvedValue([]);
 
@@ -94,7 +94,7 @@ describe('deleteColumn(id, relIds, { col }) sin diagrama (inspector)', () => {
         : []));
     vi.mocked(gov.listColumns).mockImplementation(async (tid: string) => (
       tid === 'tB' ? [{ id: 'cB', tableId: 'tB', isForeignKey: true, physicalName: 'COD', logicalName: 'codigo', dataType: 'INT', typeOverridden: false, ordinal: 0 } as never] : []));
-    // Tras borrar la relación, la hija ya no participa en ninguna → FK huérfana.
+    // Tras borrar la relación, la hija no queda en ninguna → FK huérfana.
     vi.mocked(gov.listRelationships).mockImplementationOnce(async () => [{ id: 'r1', parentTableId: 't1', childTableId: 'tB', identifying: false, parentCardinality: 'one', childCardinality: 'many', pairs: [{ parentColumnId: 'cA', childColumnId: 'cB' }] } as never])
       .mockImplementation(async () => []);
 
@@ -110,7 +110,7 @@ describe('deleteColumn(id, relIds, { col }) sin diagrama (inspector)', () => {
     expect(useModelerStore.getState().explorerTick).toBe(2);
   });
 
-  it('sin `col` ni diagrama: borra la columna «pelada» (comportamiento actual, sin Undo)', async () => {
+  it('sin `col` ni diagrama: borra la columna «pelada» (sin Undo)', async () => {
     await useModelerStore.getState().deleteColumn('cZ');
     expect(order).toEqual(['col:cZ']);
     expect(gov.listRelationships).not.toHaveBeenCalled();
@@ -118,13 +118,13 @@ describe('deleteColumn(id, relIds, { col }) sin diagrama (inspector)', () => {
   });
 });
 
-describe('loadNaming sin canvas abierto (doc 89 §3.1)', () => {
+describe('loadNaming sin canvas abierto', () => {
   it('con activeProjectId null cachea igual la config (el inspector la necesita para la regla de case)', async () => {
     await useModelerStore.getState().loadNaming('p1');
     expect(useModelerStore.getState().naming).toEqual({ table: { case: 'upper' }, column: { case: 'lower' } });
   });
 
-  it('con OTRO proyecto activo descarta la respuesta (cambio rápido de canvas)', async () => {
+  it('con otro proyecto activo descarta la respuesta (cambio rápido de canvas)', async () => {
     useModelerStore.setState({ activeProjectId: 'p2' });
     await useModelerStore.getState().loadNaming('p1');
     expect(useModelerStore.getState().naming).toBeNull();

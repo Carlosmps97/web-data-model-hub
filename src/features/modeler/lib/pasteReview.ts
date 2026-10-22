@@ -1,11 +1,11 @@
 /**
- * Revisión del PEGADO (doc 118): qué viaja de la tabla o las columnas copiadas
- * al destino, faceta por faceta, y qué no se puede copiar. PURA — los popups
- * piden los estándares y los nombres; el store graba el `payload` que se mostró.
+ * Revisión del pegado: qué viaja de la tabla o las columnas copiadas al
+ * destino, faceta por faceta, y qué no se puede copiar. Pura: los popups piden
+ * los estándares y los nombres; el store graba el `payload` que se mostró.
  *
- * Mismo proyecto: los UDP, dominios y themes se reconocen por id y viajan TAL
- * CUAL (un valor fuera de la lista también: la copia no limpia datos); sólo se
- * quita lo que ya no existe (definición UDP, dominio o theme borrados).
+ * Mismo proyecto: los UDP, dominios y themes se reconocen por id y viajan tal
+ * cual (un valor fuera de la lista también: la copia no limpia datos); solo se
+ * quita lo que fue borrado (definición UDP, dominio o theme).
  * Entre proyectos (cada proyecto tiene sus estándares): los nombres se comparan
  * como la carga Excel (`norm_name`: sin tildes, sin mayúsculas, espacios
  * colapsados); el UDP se busca en el destino por nombre + nivel + faceta y su
@@ -36,13 +36,13 @@ export interface PasteDomain {
 export interface PasteStandards { udpDefs: UdpDefinition[]; domains: PasteDomain[]; themes: Theme[] }
 export interface PasteTarget extends PasteStandards { schemas: DbSchema[]; naming: NamingConfig | null }
 /** Los checks del popup: UDPs de cada faceta y parent domains (un solo check:
- *  el dominio es UNO para las dos facetas). */
+ *  el dominio es uno solo para las dos facetas). */
 export interface PasteOptions { logicalUdps: boolean; physicalUdps: boolean; domains: boolean }
 export const ALL_COPY: PasteOptions = { logicalUdps: true, physicalUdps: true, domains: true };
 
 /** 'copy' viaja · 'off' lo apagó su check · 'missing' no puede viajar (ver `reason`). */
 export type PasteItemStatus = 'copy' | 'off' | 'missing';
-/** Por qué no viaja: 'gone' ya no existe · 'absent' no existe en el destino ·
+/** Por qué no viaja: 'gone' fue borrado · 'absent' no existe en el destino ·
  *  'ambiguous' el destino tiene más de uno con ese nombre · 'value' el valor no
  *  vale para el UDP del destino · 'conflict' otro UDP del origen cae en el mismo
  *  del destino con otro valor · 'unavailable' no se leyeron los estándares del origen. */
@@ -59,7 +59,7 @@ export interface PasteDomainItem {
 export interface PasteColumnItem {
   sourceId: string;
   logicalName: string;
-  /** Físico FINAL (con el case del destino). */
+  /** Físico final (con el case del destino). */
   physicalName: string;
   caseChanged: boolean;
   logicalType: string;
@@ -144,7 +144,7 @@ function udpItems(values: Record<string, string> | undefined, level: 'table' | '
   const resolved = Object.entries(values ?? {})
     .filter(([, v]) => v !== null && v !== undefined && String(v) !== '')
     .map(([defId, v]) => udpItem(defId, String(v), level, ctx));
-  // Entre proyectos, dos UDP del origen pueden caer en el MISMO del destino: con
+  // Entre proyectos, dos UDP del origen pueden caer en el mismo del destino: con
   // el mismo valor viaja uno; con valores distintos, ninguno (no hay cómo elegir).
   const byDef = groupBy(resolved.filter((u) => u.status === 'copy'), (u) => u.defId);
   const kept: PasteUdpItem[] = [];
@@ -178,7 +178,7 @@ function domainItem(c: CanonicalColumn, ctx: Ctx): PasteDomainItem | null {
     return { id: src.id, name: src.name, physicalName: src.physicalName || src.name, status: 'missing', reason: found.length ? 'ambiguous' : 'absent' };
   }
   const d = found[0];
-  // El aviso compara los DOMINIOS: la columna conserva su tipo y su override se
+  // El aviso compara los dominios: la columna conserva su tipo y su override se
   // recalcula contra el del destino (`overrides`).
   const physical = canonicalDefaultType(d.defaultDataType);
   const logical = canonicalDefaultType(d.logicalDataType ?? undefined);
@@ -191,7 +191,7 @@ function domainItem(c: CanonicalColumn, ctx: Ctx): PasteDomainItem | null {
 
 /** Overrides de tipo de una columna que viaja con `domain` (null = sin dominio:
  *  sin override). En el mismo proyecto, los suyos; entre proyectos, contra el
- *  dominio del DESTINO: override = tipo distinto del default homologado del
+ *  dominio del destino: override = tipo distinto del default homologado del
  *  dominio en esa faceta, como al editar el tipo de una columna con dominio en la
  *  UI (`typeFacetPatch`). */
 function overrides(c: CanonicalColumn, domain: PasteDomain | null, same: boolean): Pick<CanonicalColumn, 'typeOverridden' | 'logicalTypeOverridden'> {
@@ -204,7 +204,7 @@ function overrides(c: CanonicalColumn, domain: PasteDomain | null, same: boolean
 }
 
 export function reviewPaste(input: {
-  /** Tabla a pegar con sus nombres FINALES (`pasteNames`); sin ella, se pegan columnas. */
+  /** Tabla a pegar con sus nombres finales (`pasteNames`); sin ella, se pegan columnas. */
   table?: CanonicalTable;
   cols: CanonicalColumn[];
   /** Estándares del proyecto de origen y del destino (en el mismo proyecto, los mismos). */
@@ -216,7 +216,7 @@ export function reviewPaste(input: {
   nouns?: FacetNouns;
   /** Pegar columnas: ids de las que se omiten (su físico ya existe en el destino). */
   skip?: ReadonlySet<string>;
-  /** Entre proyectos: no se pudieron leer los estándares del origen (p. ej. ese proyecto ya no existe). */
+  /** Entre proyectos: no se pudieron leer los estándares del origen (p. ej. ese proyecto fue borrado). */
   sourceUnavailable?: boolean;
   /** Nombre del proyecto de origen, para los avisos. */
   sourceName?: string;
@@ -266,7 +266,7 @@ export function reviewPaste(input: {
     let schema: PasteSchemaItem | null = null;
     if (wanted) {
       const hit = target.schemas.find((s) => s.name.trim().toLowerCase() === wanted.toLowerCase());
-      // Un nombre que el catálogo no admite (texto legado) no se crea: queda como texto, como en la fuente.
+      // Un nombre que el catálogo no admite (texto libre) no se crea: queda como texto, como en la fuente.
       const creatable = SCHEMA_NAME_RE.test(wanted);
       schema = hit ? { name: hit.name, create: false, viewsKind: hit.kind === 'views' } : { name: wanted, create: creatable, viewsKind: false };
       if (schema.viewsKind) warnings.push(`Schema «${schema.name}» exists in this project as a views schema — the ${n.one} goes into it.`);
@@ -319,7 +319,7 @@ export function reviewPaste(input: {
       ? "1 UDP value belongs to a UDP that no longer exists or doesn't apply here — it won't be copied."
       : `${gone} UDP values belong to UDPs that no longer exist or don't apply here — they won't be copied.`);
   }
-  // Entre proyectos sólo se avisa lo que su check iba a llevar.
+  // Entre proyectos solo se avisa lo que su check iba a llevar.
   const wanted = (u: PasteUdpItem) => (u.facet === 'logical' ? options.logicalUdps : options.physicalUdps);
   const absent = unique(why('absent').filter(wanted).map((u) => udpLabel(u.name, u.facet)));
   if (absent.length) warnings.push(`UDPs that don't exist in this project won't be copied: ${listed(absent)}.`);
@@ -360,7 +360,7 @@ export function reviewPaste(input: {
     && pasted.findIndex((o) => o.physicalName.toLowerCase() === c.physicalName.toLowerCase()) === i).map((c) => c.physicalName);
   if (dups.length) blockers.push(`Columns end up with the same physical name: ${dups.slice(0, 5).join(', ')}.`);
 
-  // Lo que se REUTILIZA: UDPs (definiciones) y dominios distintos que existen en el destino.
+  // Lo que se reutiliza: UDPs (definiciones) y dominios distintos que existen en el destino.
   const facetCount = (facet: Facet) => new Set(allUdps.filter((u) => u.facet === facet && u.status !== 'missing').map((u) => u.defId)).size;
   return {
     table: tableOut,

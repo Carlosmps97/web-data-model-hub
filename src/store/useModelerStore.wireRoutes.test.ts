@@ -1,5 +1,5 @@
-// Doc 99 — trazos manuales de wires en el store: se siembran del diagrama, se
-// guardan UNA vez por gesto (optimista, con Undo), sobreviven a un reload que
+// Trazos manuales de wires en el store: se siembran del diagrama, se
+// guardan una vez por gesto (optimista, con Undo), sobreviven a un reload que
 // llega antes que su guardado, y los flujos que cambian el canvas (auto-
 // arrange, sacar o borrar una tabla) los reinician o podan. Servicios mockeados.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -42,11 +42,11 @@ import { useModelerStore, manualRouteCount } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
 
-// El `reload` REAL del store. El describe «auto-arrange» lo reemplaza por un
-// mock con `setState` — y el reemplazo quedaba en el store para los tests que
-// corrían DESPUÉS: con orden aleatorio, «un reload que llega antes que el
-// guardado» nunca recargaba (se veía el trazo local en vez del del backend).
-// Se repone en cada test (doc 105, ronda 6).
+// El `reload` real del store. El describe «auto-arrange» lo reemplaza por un
+// mock con `setState`, y el reemplazo seguiría en el store para los tests que
+// corren después: con orden aleatorio, «un reload que llega antes que el
+// guardado» nunca recargaría (se vería el trazo local en vez del del backend).
+// Por eso se repone en cada test.
 const realReload = useModelerStore.getState().reload;
 
 const R1 = [{ x: 200, y: 40 }, { x: 200, y: 160 }];
@@ -84,8 +84,8 @@ function deferred<T = unknown>() {
 
 beforeEach(async () => {
   vi.clearAllMocks();
-  // `clearAllMocks` no vacía las colas de `…Once`: una que un test no consumió
-  // se filtraba al siguiente (y cuál es depende del orden). Se vacían y se
+  // `clearAllMocks` no vacía las colas de `…Once`: una que un test no consume
+  // se filtra al siguiente (y cuál es depende del orden). Se vacían y se
   // reponen las implementaciones por defecto de las fábricas de arriba.
   vi.mocked(mod.loadDiagram).mockReset();
   vi.mocked(struct.setWireRoute).mockReset().mockImplementation(async () => ({}) as never);
@@ -123,7 +123,7 @@ describe('siembra desde el diagrama', () => {
     expect(routes()).toEqual({});
   });
 
-  it('un cambio local del diagrama que no toca el canvas NO re-siembra', () => {
+  it('un cambio local del diagrama que no toca el canvas no re-siembra', () => {
     useModelerStore.setState({ canvasRoutes: { r1: R2 } });
     const dia = useModelerStore.getState().diagram!;
     useModelerStore.setState({ diagram: { ...dia, columns: [] } });   // mismo subjectArea
@@ -168,7 +168,7 @@ describe('setWireRoute', () => {
 
   it('en visor o sin working copy no hace nada', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: 'cs1' });
-    useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });   // Doc 105 (R7-A): cambiar de sesión limpia el canvas — se carga DENTRO de ella.
+    useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });   // cambiar de sesión limpia el canvas: se carga dentro de ella
     await useModelerStore.getState().setWireRoute('r2', R2);
     useSessionStore.setState({ openMode: 'editing', activeChangesetId: null });
     useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });
@@ -187,11 +187,11 @@ describe('setWireRoute', () => {
     vi.mocked(struct.setWireRoute).mockRejectedValueOnce(new Error('sin red'));
     await useModelerStore.getState().setWireRoute('r1', R2);
     expect(routes()).toEqual({ r1: R1 });
-    expect(toast.error).toHaveBeenCalledWith("Couldn't save the wire route: sin red.");   // doc 105 (O1)
+    expect(toast.error).toHaveBeenCalledWith("Couldn't save the wire route: sin red.");
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
-  it('con la versión recién transferida, calla: espera la revalidación, que ya avisó (doc 105)', async () => {
+  it('con la versión recién transferida, calla: espera la revalidación, que ya avisó', async () => {
     vi.mocked(struct.setWireRoute).mockImplementationOnce(async () => {
       trackRevalidation(new Promise<void>((r) => setTimeout(() => {
         useSessionStore.getState().openModel({ projectId: 'p', mode: 'readonly', changesetId: 'cs1' }); r();
@@ -203,7 +203,7 @@ describe('setWireRoute', () => {
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
-  it('un fallo viejo no pisa un trazo más nuevo del mismo wire', async () => {
+  it('un fallo anterior no pisa un trazo más reciente del mismo wire', async () => {
     const first = deferred();
     vi.mocked(struct.setWireRoute).mockImplementationOnce(() => first.promise as never);
     const a = useModelerStore.getState().setWireRoute('r1', R2);
@@ -230,7 +230,7 @@ describe('setWireRoute', () => {
     expect(vi.mocked(struct.setWireRoute).mock.calls.at(-1)!.slice(0, 3)).toEqual(['sa1', 'r2', null]);
   });
 
-  it('Undo con OTRO canvas abierto graba en el canvas original y no toca la pantalla', async () => {
+  it('Undo con otro canvas abierto graba en el canvas original y no toca la pantalla', async () => {
     await useModelerStore.getState().setWireRoute('r1', R2);
     useModelerStore.setState({
       activeSaId: 'sa2',
@@ -242,7 +242,7 @@ describe('setWireRoute', () => {
   });
 });
 
-describe('un wire con nombre de propiedad heredada (revisión 2026-09-28)', () => {
+describe('un wire con nombre de propiedad heredada', () => {
   // `routes['constructor']` a secas devuelve la función heredada de Object.
   const odd = () => diagramWith({ r1: R1 }, { relationships: [rel('r1', 't1', 't2'), rel('constructor', 't1', 't3')] });
 
@@ -261,14 +261,14 @@ describe('un wire con nombre de propiedad heredada (revisión 2026-09-28)', () =
     useModelerStore.setState({ diagram: odd() });
     vi.mocked(mod.loadDiagram).mockResolvedValue(odd());
     await useModelerStore.getState().removeTableFromArea('t3');
-    // nada que podar: sin lista de trazos (revisión doc 114: y t1/t2, sin posición, quedan fijas donde se ven)
+    // nada que podar: sin lista de trazos (t1/t2, sin posición, quedan fijas donde se ven)
     const [saId, rm] = vi.mocked(struct.removeFromCanvas).mock.calls[0];
     expect(saId).toBe('sa1');
     expect(rm).toEqual({ tableIds: ['t3'], viewIds: [], pins: { t1: gridSlot(0), t2: gridSlot(1) } });
   });
 });
 
-describe('con la red fallando o lenta (revisión 2026-09-28)', () => {
+describe('con la red fallando o lenta', () => {
   const R4 = [{ x: 7, y: 7 }, { x: 8, y: 8 }];
   /** Canvas B: mismas relaciones (los ids de relación son globales), otros trazos. */
   const diagramB = (routes: unknown) => diagramWith(routes, {
@@ -292,7 +292,7 @@ describe('con la red fallando o lenta (revisión 2026-09-28)', () => {
     expect(routes(), 'quedó un guardado colgado').toEqual({});
   };
 
-  it('dos gestos sobre el mismo wire y los DOS guardados fallan: vuelve a lo último grabado', async () => {
+  it('dos gestos sobre el mismo wire y los dos guardados fallan: vuelve a lo último grabado', async () => {
     const [first, second] = holdWrites(2);
     const a = useModelerStore.getState().setWireRoute('r1', R2);
     const b = useModelerStore.getState().setWireRoute('r1', R3);
@@ -334,7 +334,7 @@ describe('con la red fallando o lenta (revisión 2026-09-28)', () => {
     expect(routes()).toEqual({ r1: R2 });
   });
 
-  it('un Undo lanzado con OTRO canvas abierto y que falla ya de vuelta en el original no pinta el trazo del otro', async () => {
+  it('un Undo lanzado con otro canvas abierto y que falla ya de vuelta en el original no pinta el trazo del otro', async () => {
     await useModelerStore.getState().setWireRoute('r1', R2);               // A: R1 → R2, grabado
     open('sa2', diagramB({ r1: R3 }));                                     // B tiene su propio r1
     const [undoWrite] = holdWrites(1);
@@ -355,7 +355,7 @@ describe('con la red fallando o lenta (revisión 2026-09-28)', () => {
     expectNothingPending('sa1');
   });
 
-  it('con un guardado en vuelo llega un diagrama donde ese wire YA NO existe: no se pinta un trazo huérfano', async () => {
+  it('con un guardado en vuelo llega un diagrama donde ese wire no existe: no se pinta un trazo huérfano', async () => {
     const [write] = holdWrites(1);
     const saving = useModelerStore.getState().setWireRoute('r2', R2);
     useModelerStore.setState({ diagram: diagramWith({ r1: R1 }, { relationships: [rel('r1', 't1', 't2')] }) });
@@ -376,7 +376,7 @@ describe('con la red fallando o lenta (revisión 2026-09-28)', () => {
     expect(routes()).toEqual({ r1: R1, r2: R2 });
   });
 
-  it('si el guardado en vuelo falla después de llegar el diagrama, vuelve a lo que ESE diagrama trajo', async () => {
+  it('si el guardado en vuelo falla después de llegar el diagrama, vuelve a lo que ese diagrama trajo', async () => {
     const [write] = holdWrites(1);
     const saving = useModelerStore.getState().setWireRoute('r1', R2);
     useModelerStore.setState({ diagram: diagramWith({ r1: R3 }) });        // otro valor grabado mientras tanto
@@ -400,12 +400,12 @@ describe('con la red fallando o lenta (revisión 2026-09-28)', () => {
   });
 
   it.each([['undefined', undefined], ['an empty object', {}], ['a number', 5], ['a single point', { x: 1, y: 2 }], ['text', 'x']])(
-    'una entrada que no es una lista de puntos (%s) NO quita el trazo guardado', async (_label, points) => {
+    'una entrada que no es una lista de puntos (%s) no quita el trazo guardado', async (_label, points) => {
       await useModelerStore.getState().setWireRoute('r1', points as never);
       expect({ writes: writes(), screen: routes() }).toEqual({ writes: [], screen: { r1: R1 } });
     });
 
-  it('con el diagrama de OTRO canvas en el store no graba nada', async () => {
+  it('con el diagrama de otro canvas en el store no graba nada', async () => {
     useModelerStore.setState({ activeSaId: 'sa2' });        // el diagrama sigue siendo el de sa1
     await useModelerStore.getState().setWireRoute('r2', R2);
     expect(writes()).toEqual([]);
@@ -426,10 +426,10 @@ describe('cambiar de canvas', () => {
 });
 
 describe('el diagrama del store queda al día (sin re-armar el canvas)', () => {
-  // El diagrama guarda el canvas de su ÚLTIMA carga. Hay código que copia ese
+  // El diagrama guarda el canvas de su última carga. Hay código que copia ese
   // canvas para cambiarle un campo (guardar Model properties) y el canvas se
   // re-arma con el layout del diagrama al cambiar de Logical a Physical: si el
-  // diagrama no tuviera el trazo y la posición nuevos, volverían los viejos.
+  // diagrama no tuviera el trazo y la posición recientes, volverían los anteriores.
   const copyCanvas = () => {
     const dia = useModelerStore.getState().diagram!;
     useModelerStore.setState({ diagram: { ...dia, subjectArea: { ...dia.subjectArea, udpValues: { u1: 'x' } } } });
@@ -447,7 +447,7 @@ describe('el diagrama del store queda al día (sin re-armar el canvas)', () => {
     expect(routes()).toEqual({});
   });
 
-  it('guardar un trazo NO cambia la identidad del diagrama (el canvas no se re-arma)', async () => {
+  it('guardar un trazo no cambia la identidad del diagrama (el canvas no se re-arma)', async () => {
     const before = useModelerStore.getState().diagram;
     await useModelerStore.getState().setWireRoute('r2', R2);
     expect(useModelerStore.getState().diagram).toBe(before);
@@ -470,7 +470,7 @@ describe('el diagrama del store queda al día (sin re-armar el canvas)', () => {
     expect(useModelerStore.getState().diagram!.subjectArea.layout.t2).toEqual({ x: 900, y: 300 });
   });
 
-  it('mover un bloque no toca el diagrama de OTRO canvas', async () => {
+  it('mover un bloque no toca el diagrama de otro canvas', async () => {
     useModelerStore.setState({ activeSaId: 'sa-otro' });
     await useModelerStore.getState().saveLayout('t2', { x: 900, y: 300 });
     expect(useModelerStore.getState().diagram!.subjectArea.layout).toEqual({});
@@ -494,7 +494,7 @@ describe('un reload que llega antes que el guardado', () => {
     expect(routes()).toEqual({ r1: R1, r2: R3 });
   });
 
-  it('también conserva un trazo recién QUITADO', async () => {
+  it('también conserva un trazo recién quitado', async () => {
     const write = deferred();
     vi.mocked(struct.setWireRoute).mockImplementationOnce(() => write.promise as never);
     const saved = useModelerStore.getState().setWireRoute('r1', null);
@@ -529,7 +529,7 @@ describe('auto-arrange', () => {
     expect(useModelerStore.getState().dirty).toBe(true);
   });
 
-  it('Undo devuelve las posiciones Y los trazos de antes', async () => {
+  it('Undo devuelve las posiciones y los trazos previos', async () => {
     await useModelerStore.getState().autoOrganize();
     expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['Auto-arrange']);
     await useUndoStore.getState().undoLast();
@@ -545,22 +545,22 @@ describe('auto-arrange', () => {
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
-  it('la pre-imagen del Undo se toma ANTES de calcular: si mientras tanto cambian los nodos (otro canvas), vuelve a la de este', async () => {
+  it('la pre-imagen del Undo se toma antes de calcular: si mientras tanto cambian los nodos (otro canvas), vuelve a la de este', async () => {
     const { arrangeDiagram } = await import('@/features/modeler/lib/arrangeGraph');
     vi.mocked(arrangeDiagram).mockImplementationOnce(async () => {
-      // mientras ELK calcula, el usuario abre OTRO canvas: los nodos vivos ya son de él
+      // mientras ELK calcula, el usuario abre otro canvas: los nodos vivos ya son de él
       useModelerStore.setState({ flow: { getNodes: () => [{ id: 'z9', type: 'table', position: { x: 99, y: 99 } }], setNodes: vi.fn() } as never });
       return { t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } };
     });
     await useModelerStore.getState().autoOrganize();
     await useUndoStore.getState().undoLast();
     expect(struct.arrangeSubjectArea).toHaveBeenLastCalledWith(
-      'sa1', { t1: { x: 1, y: 2 }, sym1: { x: 5, y: 6 } }, { r1: R1 });   // antes: { z9: {99,99} }
+      'sa1', { t1: { x: 1, y: 2 }, sym1: { x: 5, y: 6 } }, { r1: R1 });   // no { z9: {99,99} }
   });
 
-  it('en visor es efímero: oculta los trazos de ESE canvas y no graba nada', async () => {
+  it('en visor es efímero: oculta los trazos de ese canvas y no graba nada', async () => {
     useSessionStore.setState({ openMode: 'readonly' });
-    useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });   // Doc 105 (R7-A): cambiar de sesión limpia el canvas — se carga DENTRO de ella.
+    useModelerStore.setState({ diagram: diagramWith({ r1: R1 }) });   // cambiar de sesión limpia el canvas: se carga dentro de ella
     await useModelerStore.getState().autoOrganize();
     const st = useModelerStore.getState();
     expect(st.viewerRoutesOff).toEqual({ sa1: true });
@@ -586,7 +586,7 @@ describe('sacar una tabla del canvas', () => {
     expect([...rm.dropRouteIds!].sort()).toEqual(['r1', 's1', 'subsym-sym1']);
   });
 
-  it('el Undo repone esos trazos (en la misma escritura que devuelve la tabla, doc 100)', async () => {
+  it('el Undo repone esos trazos (en la misma escritura que devuelve la tabla)', async () => {
     await useModelerStore.getState().removeTableFromArea('t2');
     await useUndoStore.getState().undoLast();
     const [saId, add] = vi.mocked(struct.addToCanvas).mock.calls[0];
@@ -612,14 +612,14 @@ describe('borrar una tabla', () => {
     vi.mocked(gov.tableUsage).mockResolvedValue({ usage: [{ canvasId: 'sa1' }, { canvasId: 'sa9' }], total: 2 } as never);
   });
 
-  it('poda los trazos de sus wires en TODOS los canvases que la tenían', async () => {
+  it('poda los trazos de sus wires en todos los canvases que la tenían', async () => {
     await useModelerStore.getState().deleteTable('t2');
     const calls = vi.mocked(struct.removeFromCanvas).mock.calls;
     expect(calls.map((c) => [c[0], c[1].tableIds])).toEqual([['sa1', ['t2']], ['sa9', ['t2']]]);
     for (const c of calls) expect([...c[1].dropRouteIds!].sort()).toEqual(['r1', 's1', 'subsym-sym1']);
   });
 
-  it('el Undo repone los trazos sólo en el canvas activo', async () => {
+  it('el Undo repone los trazos solo en el canvas activo', async () => {
     await useModelerStore.getState().deleteTable('t2');
     await useUndoStore.getState().undoLast();
     const calls = vi.mocked(struct.addToCanvas).mock.calls;
@@ -631,7 +631,7 @@ describe('borrar una tabla', () => {
   it('una tabla sin relaciones se borra sin lista de trazos', async () => {
     vi.mocked(gov.listRelationships).mockResolvedValue([]);
     await useModelerStore.getState().deleteTable('t2');
-    // Revisión doc 114: en el canvas abierto las que quedan sin posición se fijan; en otro canvas no hay diagrama.
+    // En el canvas abierto las que quedan sin posición se fijan; en otro canvas no hay diagrama.
     expect(vi.mocked(struct.removeFromCanvas).mock.calls).toEqual([
       ['sa1', { tableIds: ['t2'], pins: { t1: gridSlot(0), t3: gridSlot(2) } }], ['sa9', { tableIds: ['t2'] }],
     ]);

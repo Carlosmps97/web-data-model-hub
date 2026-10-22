@@ -1,4 +1,4 @@
-// Object Inspector (doc 72 §3) — helpers PUROS de presentación: nombres y
+// Object Inspector — helpers puros de presentación: nombres y
 // tipos por faceta, posiciones, rótulos de relaciones y rutas de uso.
 import type { CanonicalColumn, TableLinkRow, TableUsageRow } from '@/services/governance.service';
 import type { Facet } from '@/lib/facets';
@@ -13,28 +13,28 @@ export const CARD_LBL: Record<string, string> = {
 export const otherFacet = (f: Facet): Facet => (f === 'logical' ? 'physical' : 'logical');
 
 /** Nombre del objeto en la faceta (entidad/atributo = lógico; tabla/columna =
- *  físico), con fallback al otro nombre si falta — revisión doc 114: la misma
- *  función de `@/lib/facets` (estaba duplicada). */
+ *  físico), con fallback al otro nombre si falta: la misma función de
+ *  `@/lib/facets`. */
 export { facetName } from '@/lib/facets';
 
-/** Tipo en la faceta: lógico con fallback al físico (doc 69 §4.9). */
+/** Tipo en la faceta: lógico con fallback al físico. */
 export const facetType = (c: Pick<CanonicalColumn, 'dataType' | 'logicalDataType'>, facet: Facet): string =>
   (facet === 'logical' ? (c.logicalDataType || c.dataType || '') : (c.dataType || ''));
 
-/** Posición 1-based de la columna en el orden de DISPLAY canónico de la
- *  tabla («#3 of 12») — bloque PK primero, igual que la lista del inspector
- *  (doc 81); 0 si no está. */
+/** Posición 1-based de la columna en el orden de display canónico de la
+ *  tabla («#3 of 12») — bloque PK primero, igual que la lista del inspector;
+ *  0 si no está. */
 export function positionIn(cols: CanonicalColumn[], colId: string): { pos: number; of: number } {
   const list = orderColumns(cols);
   return { pos: list.findIndex((c) => c.id === colId) + 1, of: list.length };
 }
 
-/** Existencia en una sola faceta (Is_Logical_Only / Is_Physical_Only). */
+/** Existencia en una sola faceta (`Is_Logical_Only` / `Is_Physical_Only`). */
 export const facetOnly = (c: { logicalOnly?: boolean; physicalOnly?: boolean }): 'logical' | 'physical' | null =>
   (c.logicalOnly ? 'logical' : c.physicalOnly ? 'physical' : null);
 
 /** Rótulo de llaves: «PK · #2 of 3 in the key» / «FK» / «—». La posición en
- *  la llave es la de la PK en el orden único (doc 94: por `ordinal`). */
+ *  la llave es la de la PK en el orden único (por `ordinal`). */
 export function keyLabel(c: CanonicalColumn, cols: CanonicalColumn[]): string {
   const parts: string[] = [];
   if (c.isPrimaryKey) {
@@ -51,11 +51,11 @@ export const cardinalityLabel = (l: Pick<TableLinkRow, 'parentCardinality' | 'ch
   `${CARD_LBL[l.parentCardinality] ?? l.parentCardinality} : ${CARD_LBL[l.childCardinality] ?? l.childCardinality}`
   + `${l.identifying ? ' · identifying' : ''}${l.pairs.length > 1 ? ` · ${l.pairs.length} pairs` : ''}`;
 
-/** Rol de la OTRA tabla respecto de `tableId` en la relación. */
+/** Rol de la otra tabla respecto de `tableId` en la relación. */
 export const linkRole = (l: Pick<TableLinkRow, 'parentTableId'>, tableId: string): 'parent' | 'child' =>
   (l.parentTableId === tableId ? 'child' : 'parent');
 
-/** Columnas PROPIAS de `tableId` en la unión (todas las de los pares). */
+/** Columnas propias de `tableId` en la unión (todas las de los pares). */
 export const ownColumns = (l: TableLinkRow, tableId: string): string[] =>
   l.pairs.map((p) => (l.parentTableId === tableId ? p.parentColumnName : p.childColumnName));
 
@@ -71,9 +71,9 @@ export function primaryCanvas(usage: TableUsageRow[], activeSaId: string | null)
   return usage.length === 1 ? usage[0] : null;
 }
 
-/** Doc 89 §3.2: conteos del diálogo «Delete table…» del inspector, calculados
- *  del dossier ya cargado (Properties los re-consulta; acá ya están): canvases
- *  donde aparece, tablas relacionadas ÚNICAS (la propia no cuenta) y vistas. */
+/** Conteos del diálogo «Delete table…» del inspector, calculados del dossier
+ *  ya cargado (Properties los re-consulta; acá ya están): canvases donde
+ *  aparece, tablas relacionadas únicas (la propia no cuenta) y vistas. */
 export function tableDeleteImpact(tableId: string, d: {
   usage: Pick<TableUsageRow, 'canvasId'>[];
   links: Pick<TableLinkRow, 'parentTableId' | 'childTableId'>[];

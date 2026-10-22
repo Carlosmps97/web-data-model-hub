@@ -3,9 +3,9 @@ import { Tags } from 'lucide-react';
 import type { UdpDefinition, UdpLevel } from '@/features/standards/standards.service';
 import { FACET_CLASS_LABEL, facetUdpDefs, type Facet } from '@/lib/facets';
 
-/** Valores UDP de SOLO LECTURA (Object Inspector, doc 72): nombre de la
- *  definición → valor, o el default en cursiva si no hay valor. Lista las defs
- *  del `level` y la faceta (doc 69), igual que `UdpAssign` pero sin inputs. */
+/** Valores UDP de solo lectura (Object Inspector): nombre de la definición →
+ *  valor, o el default en cursiva si no hay valor. Lista las defs del `level` y
+ *  la faceta, igual que `UdpAssign` pero sin inputs. */
 export default function UdpReadonly({ defs, level, facet, values }: {
   defs: UdpDefinition[]; level: UdpLevel; facet: Facet; values: Record<string, string>;
 }) {

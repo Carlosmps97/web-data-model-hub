@@ -1,4 +1,4 @@
-// Doc 102: columnas por tandas de 300 tablas y vistas por tandas de 2 000, con
+// Columnas por tandas de 300 tablas y vistas por tandas de 2 000, con
 // los ids en el cuerpo; una vista con fuentes en dos tandas sale una sola vez.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -37,8 +37,8 @@ describe('reportFetch', () => {
     expect(rows.map((v) => v.id)).toEqual(['v3', 'v1', 'v2']);
   });
 
-  // Doc 105 (B8): con 15 000 tablas salían 50 POST a la vez y el timeout de
-  // 30 s de cada uno corría desde el despacho — los últimos se vencían en cola.
+  // Con 15 000 tablas, 50 POST a la vez harían que el timeout de 30 s de cada
+  // uno, que corre desde el despacho, venciera a los últimos en cola.
   it('columnas: 15 000 tablas → 50 lotes, nunca más de 4 en vuelo y en el orden de los ids', async () => {
     let inflight = 0;
     let peak = 0;
@@ -82,11 +82,11 @@ describe('reportFetch', () => {
   });
 });
 
-// Doc 105 (A3-o1): la hoja Relationships pedía las primeras 5 000 relaciones de
-// TODO el proyecto y las filtraba acá — en proyectos grandes faltaban. Ahora van
-// por lotes de 300 tablas (POST, contrato del backend) y se deduplican por
-// relación. Se prueba contra `fetch` (servicio + http reales).
-describe('relaciones por lotes (doc 105 A3-o1)', () => {
+// La hoja Relationships pide las relaciones por lotes de 300 tablas (POST,
+// contrato del backend) y las deduplica por relación; pedir las primeras 5 000
+// del proyecto y filtrarlas acá dejaría fuera relaciones en proyectos grandes.
+// Se prueba contra `fetch` (servicio + http reales).
+describe('relaciones por lotes', () => {
   type Body = { projectId: string; tableIds: string[]; changesetId?: string | null };
   const rel = (id: string, parentTableId: string, childTableId: string, pairIndex = 0, pairCount = 1): RelationshipRow => ({
     id, pairIndex, pairCount, parentTableId, childTableId, parent: `${parentTableId}.C`, child: `${childTableId}.C`,
@@ -118,7 +118,7 @@ describe('relaciones por lotes (doc 105 A3-o1)', () => {
     expect(calls).toHaveLength(0);
   });
 
-  it('una relación con extremos en dos lotes sale UNA vez, con todas sus filas de par, en el orden de los lotes', async () => {
+  it('una relación con extremos en dos lotes sale una vez, con todas sus filas de par, en el orden de los lotes', async () => {
     // r1 (t5 → t400) es compuesta (2 pares) y la devuelven ambos lotes; el lote 2 responde primero.
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
       const first = bodyOf(init).tableIds[0] === 't0';

@@ -7,9 +7,9 @@ vi.mock('@/services/governance.service', () => ({
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 import { useModelerStore } from './useModelerStore';
 
-// Doc 49: el Properties de columna es un sidebar propio (selectedColumnId);
-// estas pruebas fijan el contrato de apertura/cierre respecto a la selección.
-describe('useModelerStore — Properties de columna (doc 49)', () => {
+// El Properties de columna es un sidebar propio (selectedColumnId); estas
+// pruebas fijan el contrato de apertura/cierre respecto a la selección.
+describe('useModelerStore — Properties de columna', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Sin canvas activo el reload() interno es no-op (no pega al backend).
@@ -25,7 +25,7 @@ describe('useModelerStore — Properties de columna (doc 49)', () => {
     expect(s.selectedTableId).toBe('t1');
     expect(s.selectedColumnId).toBe('c1');
     expect(s.selectedEdgeId).toBeNull();
-    // Ya no navega el panel de tabla: el deep-link queda para el botón Back.
+    // No navega el panel de tabla: el deep-link queda para el botón Back.
     expect(s.panelFocusColId).toBeNull();
   });
 
@@ -52,7 +52,7 @@ describe('useModelerStore — Properties de columna (doc 49)', () => {
     expect(useModelerStore.getState().selectedColumnId).toBeNull();
   });
 
-  it('deleteColumn no toca el panel si la borrada es OTRA columna', async () => {
+  it('deleteColumn no toca el panel si la borrada es otra columna', async () => {
     useModelerStore.setState({ selectedColumnId: 'c2' });
     await useModelerStore.getState().deleteColumn('c1');
     expect(useModelerStore.getState().selectedColumnId).toBe('c2');

@@ -90,7 +90,7 @@ describe('cleanRoute / cleanRoutes — espejo de clean_routes del backend', () =
   });
 
   it('la llave `__proto__` se ignora: asignarla cambiaría el prototipo del mapa', () => {
-    // JSON.parse SÍ la crea como propiedad propia; `out[id] = …` no.
+    // JSON.parse sí la crea como propiedad propia; `out[id] = …` no.
     const raw = JSON.parse('{"__proto__": [{"x": 1, "y": 2}], "constructor": [{"x": 3, "y": 4}], "r": [{"x": 5, "y": 6}]}');
     const out = cleanRoutes(raw);
     expect(Object.keys(out).sort()).toEqual(['constructor', 'r']);
@@ -113,7 +113,7 @@ describe('ids de los wires ruteables', () => {
     expect(routableWireIds(rels).sort()).toEqual(['r1', 's1', 's2', 's3', 'subsym-sym1', 'subsym-sym2'].sort());
   });
 
-  it('wires de una tabla: sus relaciones y el tronco de los grupos donde es SUPERTIPO', () => {
+  it('wires de una tabla: sus relaciones y el tronco de los grupos donde es supertipo', () => {
     expect(wireIdsOfTable(rels, 'A').sort()).toEqual(['r1', 's1', 's2', 'subsym-sym1'].sort());
     // B es hija en r1 y supertipo de sym2
     expect(wireIdsOfTable(rels, 'B').sort()).toEqual(['r1', 's3', 'subsym-sym2'].sort());
@@ -132,7 +132,7 @@ describe('ids de los wires ruteables', () => {
     expect(routes).toHaveProperty('huerfano');                       // no muta
   });
 
-  it('pruneRoutes devuelve el MISMO objeto si no hay nada que podar', () => {
+  it('pruneRoutes devuelve el mismo objeto si no hay nada que podar', () => {
     const routes = { r1: [{ x: 1, y: 2 }] };
     expect(pruneRoutes(routes, ['r1', 'otro'])).toBe(routes);
   });
@@ -148,7 +148,7 @@ describe('wireEnds — el lado lo decide el primer y el último punto', () => {
     expect(ends([{ x: -80, y: 0 }]).s).toEqual({ x: 0, y: 50, dir: -1, stub: 28 });
   });
 
-  it('el hijo entra por el lado que mira al ÚLTIMO punto', () => {
+  it('el hijo entra por el lado que mira al último punto', () => {
     expect(ends([{ x: 250, y: 0 }]).t).toEqual({ x: 400, y: 200, dir: -1, stub: 10 });
     expect(ends([{ x: 250, y: 0 }, { x: 700, y: 0 }]).t).toEqual({ x: 500, y: 200, dir: 1, stub: 10 });
   });
@@ -170,12 +170,12 @@ describe('routeWire — camino ortogonal por los puntos', () => {
     expect(a).toEqual(b);
   });
 
-  it('un punto por encima de los dos bloques: el wire PASA por él, sin volver sobre sí', () => {
+  it('un punto por encima de los dos bloques: el wire pasa por él, sin volver sobre sí', () => {
     const via = [{ x: 250, y: -40 }];
     const r = routeWire(S, T, via);
-    // Hay dos caminos con los mismos quiebres; gana el que conserva el ARRANQUE
-    // (horizontal desde el padre y vertical en la X del punto, como cuando el
-    // punto estaba entre los bloques): al subir el punto, el tramo no salta.
+    // Hay dos caminos con los mismos quiebres; gana el que conserva el arranque
+    // (horizontal al salir del padre y vertical en la X del punto, como cuando
+    // el punto está entre los bloques): al subir el punto, el tramo no salta.
     expect(r.corners).toEqual([
       { x: 100, y: 50 }, { x: 250, y: 50 }, { x: 250, y: -40 },
       { x: 372, y: -40 }, { x: 372, y: 200 }, { x: 400, y: 200 },
@@ -193,11 +193,10 @@ describe('routeWire — camino ortogonal por los puntos', () => {
     ]);
   });
 
-  it('agregar un punto cerca del hijo NO cambia el arranque del camino', () => {
-    // Caso real de la verificación en navegador: con (1001,158) el wire salía
-    // horizontal y subía por x=1001. Al agregar un segundo punto más abajo y a
-    // la derecha hay dos caminos de igual costo; el que dobla pegado al padre
-    // (x=808) movía un tramo que el usuario no tocó.
+  it('agregar un punto cerca del hijo no cambia el arranque del camino', () => {
+    // Con (1001,158) el wire sale horizontal y sube por x=1001. Al agregar un
+    // segundo punto más abajo y a la derecha hay dos caminos de igual costo; el
+    // que dobla pegado al padre (x=808) movería un tramo que el usuario no tocó.
     const s: WireEnd = { x: 780, y: 232, dir: 1, stub: STUB_BLOCK };
     const t: WireEnd = { x: 1120, y: 84, dir: -1, stub: STUB_BLOCK };
     const one = routeWire(s, t, [{ x: 1001, y: 158 }]).corners;
@@ -218,7 +217,7 @@ describe('routeWire — camino ortogonal por los puntos', () => {
     for (const p of via) expect(onPath(r.corners, p)).toBe(true);
   });
 
-  it('PUNTOS FIJOS: al mover el padre solo cambia el primer tramo', () => {
+  it('puntos fijos: al mover el padre solo cambia el primer tramo', () => {
     const via = [{ x: 200, y: 0 }, { x: 300, y: 0 }];
     const before = routeWire(S, T, via).corners;
     const moved = routeWire({ ...S, x: 60, y: 140 }, T, via).corners;
@@ -242,7 +241,7 @@ describe('routeWire — camino ortogonal por los puntos', () => {
     expect(onPath(r.corners, { x: 110, y: -60 })).toBe(true);
   });
 
-  it('sale y entra SIEMPRE horizontal, en el sentido de cada lado', () => {
+  it('sale y entra siempre horizontal, en el sentido de cada lado', () => {
     const cases: [WireEnd, WireEnd, RoutePoint[]][] = [
       [S, T, [{ x: 250, y: 120 }]],
       [S, T, [{ x: 250, y: -400 }, { x: 900, y: 900 }]],
@@ -267,7 +266,7 @@ describe('routeWire — camino ortogonal por los puntos', () => {
     expect(r.path).not.toMatch(/NaN|Infinity|undefined/);
   });
 
-  it('es ortogonal y pasa por TODOS los puntos con cualquier entrada (barrido)', () => {
+  it('es ortogonal y pasa por todos los puntos con cualquier entrada (barrido)', () => {
     // Generador determinista (LCG): mismas entradas en cada corrida.
     let seed = 20260927;
     const rnd = (min: number, max: number) => {
@@ -304,7 +303,7 @@ describe('handleSegments — dónde se puede crear un punto', () => {
   it('cada tramo sabe en qué posición de la lista entra su punto nuevo', () => {
     const via = [{ x: 250, y: 120 }];
     const segs = routeWire(S, T, via).segments;
-    // tramo fijo · horizontal del padre · vertical hasta el punto | vertical desde el punto · horizontal al hijo · tramo fijo
+    // tramo fijo · horizontal del padre · vertical hasta el punto | vertical que sale del punto · horizontal al hijo · tramo fijo
     expect(segs.map((s) => s.insertAt)).toEqual([0, 0, 0, 1, 1, 1]);
     expect(segs[2]).toEqual({ a: { x: 250, y: 50 }, b: { x: 250, y: 120 }, insertAt: 0 });
     expect(segs[3]).toEqual({ a: { x: 250, y: 120 }, b: { x: 250, y: 200 }, insertAt: 1 });
@@ -324,7 +323,7 @@ describe('handleSegments — dónde se puede crear un punto', () => {
 });
 
 describe('pathMidpoint', () => {
-  it('es el punto a mitad del LARGO del camino, no el promedio de las esquinas', () => {
+  it('es el punto a mitad del largo del camino, no el promedio de las esquinas', () => {
     // 100 horizontal + 300 vertical ⇒ mitad a 200: cae sobre el tramo vertical
     expect(pathMidpoint([{ x: 0, y: 0 }, { x: 100, y: 0 }, { x: 100, y: 300 }])).toEqual({ x: 100, y: 100 });
   });
@@ -453,8 +452,6 @@ describe('arrangeResetWarning — aviso del auto-arrange', () => {
   });
 });
 
-// ── Hallazgos de la revisión independiente (2026-09-28) ─────────────────────
-
 describe('anclajes en píxeles enteros', () => {
   it('wireEnds redondea el borde del bloque y la fila, igual que los puntos del trazo', () => {
     const { s, t } = wireEnds({
@@ -468,8 +465,8 @@ describe('anclajes en píxeles enteros', () => {
 
   it('una fila en .5 rutea igual que la fila entera a la que el imán llevó el punto', () => {
     // El imán deja el punto en 50.5 y `movePoint` lo redondea a 51: a medio
-    // píxel exacto de la fila. Sin anclajes enteros ese medio píxel cambiaba
-    // el camino entero (entraba al bloque del padre y volvía 80 px sobre sí).
+    // píxel exacto de la fila. Sin anclajes enteros ese medio píxel cambiaría
+    // el camino entero (entraría al bloque del padre y volvería 80 px sobre sí).
     const via = [{ x: 128, y: 51 }, { x: 60, y: -80 }, { x: 300, y: 0 }, { x: 300, y: -150 }];
     const box = { sBox: { x: 0, w: 100 }, sStub: STUB_BLOCK, tBox: { x: 400, w: 100 }, ty: 200, tStub: STUB_BLOCK, via };
     const half = routedGeometry({ ...box, sy: 50.5 });
@@ -525,13 +522,13 @@ describe('puntos sobre el tramo fijo', () => {
     expect(onPath(r.corners, p)).toBe(true);
   });
 
-  it('un punto nuevo después de uno que está sobre el tramo fijo entra en SU posición', () => {
+  it('un punto nuevo después de uno que está sobre el tramo fijo entra en su posición', () => {
     const segs = routeWire(S, T, [{ x: 110, y: 50 }, { x: 250, y: 120 }]).segments;
-    // tramo fijo (antes del punto 0) · hasta el punto 1 (entre el 0 y el 1) · del punto 1 al hijo
+    // tramo fijo (previo al punto 0) · hasta el punto 1 (entre el 0 y el 1) · del punto 1 al hijo
     expect(segs.map((g) => g.insertAt)).toEqual([0, 1, 1, 2, 2, 2]);
   });
 
-  it('un punto DENTRO del bloque (detrás del anclaje) sí obliga a volver: se cuenta', () => {
+  it('un punto dentro del bloque (detrás del anclaje) sí obliga a volver: se cuenta', () => {
     expect(routeWire(S, T, [{ x: 40, y: 50 }]).backtracks).toBeGreaterThan(0);
   });
 });
@@ -557,7 +554,7 @@ describe('handleSegments — sin tiradores sobre los tramos fijos', () => {
 
   it('con zoom alto (largo mínimo menor que el tramo fijo) tampoco se ofrecen', () => {
     const segs = routeWire(S, T, [{ x: 250, y: 120 }]).segments;
-    // zoom 1.3 ⇒ 36 / 1.3 = 27.7 < 28: antes aparecía un tirador en cada tramo fijo
+    // zoom 1.3 ⇒ 36 / 1.3 = 27.7 < 28: los tramos fijos se excluyen por su marca, no por el largo
     expect(handleSegments(segs, 36 / 1.3)).toEqual([
       { x: 189, y: 50, insertAt: 0 },
       { x: 250, y: 85, insertAt: 0 },
@@ -576,7 +573,7 @@ describe('handleSegments — sin tiradores sobre los tramos fijos', () => {
 describe('routedGeometry — el lado cambia si por el suyo el wire vuelve sobre sí', () => {
   const stacked = { sBox: { x: 100, w: 240 }, sy: 50, sStub: STUB_BLOCK, tBox: { x: 100, w: 240 }, tStub: STUB_BLOCK };
 
-  it('bloques APILADOS con un punto entre los dos: forma de S, sin muñón suelto', () => {
+  it('bloques apilados con un punto entre los dos: forma de S, sin muñón suelto', () => {
     const g = routedGeometry({ ...stacked, ty: 400, via: [{ x: 220, y: 225 }] });
     expect(g.corners).toEqual([
       { x: 340, y: 50 }, { x: 368, y: 50 }, { x: 368, y: 225 },
@@ -598,7 +595,7 @@ describe('routedGeometry — el lado cambia si por el suyo el wire vuelve sobre 
     expect(g.backtracks).toBe(0);
   });
 
-  it('relación RECURSIVA con un punto bajo el bloque: lo rodea', () => {
+  it('relación recursiva con un punto bajo el bloque: lo rodea', () => {
     const g = routedGeometry({ ...stacked, ty: 90, via: [{ x: 220, y: 300 }] });
     expect(g.corners).toEqual([
       { x: 340, y: 50 }, { x: 368, y: 50 }, { x: 368, y: 300 },
@@ -643,7 +640,7 @@ describe('routedGeometry — el lado cambia si por el suyo el wire vuelve sobre 
     expect(g.backtracks).toBe(0);
   });
 
-  it('si TODA combinación vuelve sobre sí (punto dentro del bloque) se quedan los lados del punto', () => {
+  it('si toda combinación vuelve sobre sí (punto dentro del bloque) se quedan los lados del punto', () => {
     const input = {
       sBox: { x: 0, w: 240 }, sy: 50, sStub: STUB_BLOCK,
       tBox: { x: 400, w: 240 }, ty: 200, tStub: STUB_BLOCK,
@@ -655,7 +652,7 @@ describe('routedGeometry — el lado cambia si por el suyo el wire vuelve sobre 
     expect(g.backtracks).toBeGreaterThan(0);
   });
 
-  it('con UN punto fuera de los bloques y de sus filas nunca hay retroceso (barrido)', () => {
+  it('con un solo punto fuera de los bloques y de sus filas nunca hay retroceso (barrido)', () => {
     const layouts = [
       { sBox: { x: 0, w: 240 }, sy: 50, tBox: { x: 400, w: 240 }, ty: 200 },      // lado a lado
       { sBox: { x: 100, w: 240 }, sy: 50, tBox: { x: 100, w: 240 }, ty: 400 },    // apilados

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { exportGate } from './exportGate';
 
-// Final review #7/#15: el modal no exporta (ni se edita la pestaña Output) hasta
-// tener lo que decide el DDL — las Output settings del proyecto y las defs UDP
-// (particiones): sin ellas la física y la _rej podían salir con particiones distintas.
+// El modal no exporta (ni se edita la pestaña Output) hasta tener lo que decide el
+// DDL: las Output settings del proyecto y las defs UDP (particiones). Sin ellas, la
+// física y la _rej podrían salir con particiones distintas.
 describe('exportGate', () => {
   const base = { settingsReady: true, udpDefsReady: true, udpDefsFailed: false, rulesReady: true, rulesFailed: false, rulesSelected: 3 };
   it('todo cargado ⇒ listo', () => {
@@ -13,7 +13,7 @@ describe('exportGate', () => {
     expect(exportGate({ ...base, settingsReady: false }).ready).toBe(false);
     expect(exportGate({ ...base, udpDefsReady: false })).toEqual({ ready: false, note: 'Loading the project settings…' });
   });
-  it('lista de reglas: mientras carga ⇒ bloqueado; si falló ⇒ bloqueado con aviso (nunca con una selección vieja)', () => {
+  it('lista de reglas: mientras carga ⇒ bloqueado; si falló ⇒ bloqueado con aviso (nunca con una selección anterior)', () => {
     expect(exportGate({ ...base, rulesReady: false })).toEqual({ ready: false, note: 'Loading the project settings…' });
     const failed = exportGate({ ...base, rulesFailed: true, rulesSelected: 0 });
     expect(failed.ready).toBe(false);

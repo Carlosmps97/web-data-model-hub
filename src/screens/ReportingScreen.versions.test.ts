@@ -1,12 +1,12 @@
-// Combo Version del Reporting (wrapper), sin DOM: hooks de mentira de
-// `fakeReact.testutil` — montar, correr efectos, re-renderizar como React.
+// Combo Version del Reporting (wrapper), sin DOM: hooks simulados de
+// `fakeReact.testutil` (montar, correr efectos, re-renderizar como React).
 //
-// Doc 105 (R2-B5): el re-listado al volver el foco aplicaba CUALQUIER respuesta:
-// una lista vieja que llegaba tarde pisaba a la nueva → aviso falso «That version
-// is no longer open», vuelta a Production y el draft recién elegido desaparecía
-// del combo (lo mismo con la lista inicial). Ahora sólo cuenta la MÁS RECIENTE.
-// Doc 105 (A5-o4 por foco): si la versión elegida desaparece al re-listar, el
-// aviso dice POR QUÉ (se eliminó, se transfirió o se publicó/cerró) según su cabecera.
+// Al volver el foco se re-lista y solo cuenta la respuesta más reciente: una lista
+// desactualizada que llegara tarde pisaría a la última → aviso falso «That version
+// is no longer open», vuelta a Production y el draft recién elegido fuera del
+// combo (lo mismo con la lista inicial). Si la versión elegida desaparece al
+// re-listar, el aviso dice por qué (se eliminó, se transfirió o se publicó/cerró)
+// según su cabecera.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import type { ChangesetDetail, VersionRow } from '@/types/versioning';
@@ -14,7 +14,7 @@ import { nextStates, resetFake, runEffects, walk } from '../features/reporting/c
 
 vi.mock('react', async (orig) => (await import('../features/reporting/components/fakeReact.testutil')).fakeReact(await orig<object>()));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), info: vi.fn(), dismiss: vi.fn() } }));
-vi.mock('@/services/projects.service', () => ({ listProjects: vi.fn(async () => [{ id: 'p1', name: 'MODELO DDV' }]) }));
+vi.mock('@/services/projects.service', () => ({ listProjects: vi.fn(async () => [{ id: 'p1', name: 'MODELO VENTAS' }]) }));
 vi.mock('@/services/versioning.service', () => ({ listVersions: vi.fn(), getChangeset: vi.fn() }));
 vi.mock('@/store/useAuthStore', () => ({
   useAuthStore: (pick: (s: unknown) => unknown) => pick({ user: { username: 'ana' }, has: () => false }),
@@ -73,8 +73,8 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
-describe('combo Version: sólo cuenta el listado más reciente (doc 105 R2-B5)', () => {
-  it('un re-listado viejo que llega tarde no avisa, no vuelve a Production ni saca el draft recién elegido', async () => {
+describe('combo Version: solo cuenta el listado más reciente', () => {
+  it('un re-listado previo que llega tarde no avisa, no vuelve a Production ni saca el draft recién elegido', async () => {
     let tree = await mount();
     lists[0].resolve([PROD]);
     await tick();
@@ -88,7 +88,7 @@ describe('combo Version: sólo cuenta el listado más reciente (doc 105 R2-B5)',
     tree = rerender();
     expect(screen(tree).props.changesetId).toBe('cs-new');
 
-    lists[1].resolve([PROD]);                          // llega la lista vieja
+    lists[1].resolve([PROD]);                          // llega la lista desactualizada
     await tick();
     tree = rerender();
     expect(toast.warning).not.toHaveBeenCalled();
@@ -97,7 +97,7 @@ describe('combo Version: sólo cuenta el listado más reciente (doc 105 R2-B5)',
     expect(getChangeset).not.toHaveBeenCalled();
   });
 
-  it('la lista INICIAL que llega después de un re-listado no lo pisa', async () => {
+  it('la lista inicial que llega después de un re-listado no lo pisa', async () => {
     let tree = await mount();                          // lista inicial en vuelo
     focus();
     lists[1].resolve([PROD, DRAFT]);
@@ -110,7 +110,7 @@ describe('combo Version: sólo cuenta el listado más reciente (doc 105 R2-B5)',
   });
 });
 
-describe('la versión elegida desaparece al re-listar: el aviso dice por qué (doc 105 A5-o4)', () => {
+describe('la versión elegida desaparece al re-listar: el aviso dice por qué', () => {
   async function vanish(read: () => Promise<ChangesetDetail>) {
     let tree = await mount();
     lists[0].resolve([PROD, DRAFT]);
@@ -143,10 +143,10 @@ describe('la versión elegida desaparece al re-listar: el aviso dice por qué (d
   });
 });
 
-// Doc 105 (revisión): un 403 de INFRAESTRUCTURA (HTML del proxy, sin `detail`)
-// en una lectura de la versión se anunciaba «no longer available to you» y la
-// pantalla saltaba a Production.
-describe('un error que no es del backend no cambia de versión (doc 105)', () => {
+// Un 403 de infraestructura (HTML del proxy, sin `detail`) en una lectura de la
+// versión no se anuncia como «no longer available to you» ni hace saltar la
+// pantalla a Production.
+describe('un error que no es del backend no cambia de versión', () => {
   it('403 del proxy: re-lista y, si la versión sigue abierta, se queda en ella sin aviso', async () => {
     let tree = await mount();
     lists[0].resolve([PROD, DRAFT]);
@@ -165,16 +165,15 @@ describe('un error que no es del backend no cambia de versión (doc 105)', () =>
   });
 });
 
-// Doc 105 (revisión R6, B4): con la lista inicial en vuelo, vuelve el foco y el
-// RE-LISTADO falla: la inicial (buena) se descartaba por secuencia y el error se
-// callaba → combo sin versiones y ningún aviso. Si falla el más reciente, vale
-// la última lista buena que haya llegado desde el cambio de proyecto; sin
-// ninguna, se avisa.
-describe('si falla el listado más reciente (doc 105 R6)', () => {
+// Con la lista inicial en vuelo, vuelve el foco y el re-listado falla: la inicial
+// (buena) no se descarta por secuencia ni el error se calla (el combo quedaría sin
+// versiones y sin aviso). Si falla el más reciente, vale la última lista buena
+// que haya llegado desde el cambio de proyecto; sin ninguna, se avisa.
+describe('si falla el listado más reciente', () => {
   it('la inicial buena que llegó antes del fallo se aplica, sin avisos', async () => {
     let tree = await mount();                          // lista inicial en vuelo
     focus();                                           // re-listado
-    lists[0].resolve([PROD, DRAFT]);                   // la inicial llega (ya no es la más reciente)
+    lists[0].resolve([PROD, DRAFT]);                   // la inicial llega (no es la más reciente)
     await tick();
     lists[1].reject(new ApiError("Couldn't reach the server — check your connection or reload the page.", 0));
     await tick();
@@ -184,7 +183,7 @@ describe('si falla el listado más reciente (doc 105 R6)', () => {
     expect(toast.warning).not.toHaveBeenCalled();
   });
 
-  it('si la buena llega DESPUÉS del fallo, también se aplica (y se retira el aviso)', async () => {
+  it('si la buena llega después del fallo, también se aplica (y se retira el aviso)', async () => {
     let tree = await mount();
     focus();
     lists[1].reject(new ApiError('Bad gateway', 502, 'Bad gateway'));
@@ -199,7 +198,7 @@ describe('si falla el listado más reciente (doc 105 R6)', () => {
     expect(toast.dismiss).toHaveBeenCalledWith('dmh-rep-versions');
   });
 
-  it('si ninguna llegó bien, UN aviso', async () => {
+  it('si ninguna llegó bien, un solo aviso', async () => {
     await mount();
     focus();
     lists[1].reject(new ApiError('Bad gateway', 502, 'Bad gateway'));
@@ -211,11 +210,11 @@ describe('si falla el listado más reciente (doc 105 R6)', () => {
   });
 });
 
-// Doc 105 (regresión de navegador, s4_b4): con /api/versions caído, cada
-// re-listado fallido re-emitía el aviso B4 con el mismo id — sonner lo
-// reemplaza y reinicia su vencimiento: se cerraba solo aunque el mouse estuviera
-// encima. El aviso sale UNA vez por proyecto o por lista buena.
-describe('aviso B4 ya mostrado (doc 105)', () => {
+// Con /api/versions caído, re-emitir el aviso con el mismo id en cada re-listado
+// fallido haría que sonner lo sustituya y reinicie su vencimiento: se cerraría
+// solo aunque el mouse estuviera encima. El aviso sale una vez por proyecto o por
+// lista buena.
+describe('aviso de versiones no cargadas ya mostrado', () => {
   const B4 = "Couldn't load your versions of this project — only Production is available.";
   const fail = (i: number) => lists[i].reject(new ApiError('Bad gateway', 502, 'Bad gateway'));
 

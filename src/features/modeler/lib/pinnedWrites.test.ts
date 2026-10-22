@@ -1,9 +1,9 @@
-// Doc 105 (H1, cierre): las inversas del Undo que arman los COMPONENTES (pegar
-// columnas, crear una relación o una subcategoría, editar una columna o su
-// orden desde el Object Inspector) escriben varias veces: el lote inverso y
-// después, best-effort, las vistas. Los servicios toman la versión al llamarlos:
-// si entre medio se abrió otra versión (o la revalidación la degradó), lo que
-// falta NO se escribe — ni se traga el corte como un error cualquiera.
+// Las inversas del Undo que arman los componentes (pegar columnas, crear una
+// relación o una subcategoría, editar una columna o su orden en el Object
+// Inspector) escriben varias veces: el lote inverso y después, best-effort, las
+// vistas. Los servicios toman la versión al llamarlos: si entre medio se abrió
+// otra versión (o la revalidación la degradó), lo que falta no se escribe, ni se
+// traga el corte como un error cualquiera.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/governance.service', () => ({ recordChangesBulk: vi.fn() }));
@@ -18,7 +18,7 @@ import { bestEffort, pinned, pinnedDebouncer, pinnedViewDeps, undoColumnsBatch }
 const open = (changesetId: string) => useSessionStore.getState().openModel({ projectId: 'p', mode: 'editing', changesetId });
 const csNow = () => useSessionStore.getState().activeChangesetId;
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-/** Vista espejo de T1 con las columnas NUEVA y RENOMBRADA. */
+/** Vista espejo de T1 con la columna `NUEVA` y la renombrada (`NOMBRE_NUEVO`). */
 const VIEW = { id: 'v1', name: 'V', tableId: 't1', sources: [{ tableId: 't1', column: 'NUEVA' }, { tableId: 't1', column: 'NOMBRE_NUEVO' }] };
 let writes: string[] = [];
 
@@ -38,7 +38,7 @@ const undo = (after = vi.fn(async () => {})) => ({
   after,
 });
 
-describe('undoColumnsBatch (doc 105, H1)', () => {
+describe('undoColumnsBatch', () => {
   it('sin cambio de sesión: el lote, las vistas (creadas fuera, renames de vuelta) y la recarga', async () => {
     const { run, after } = undo();
     await run(pinSession());
@@ -46,7 +46,7 @@ describe('undoColumnsBatch (doc 105, H1)', () => {
     expect(after).toHaveBeenCalledTimes(1);
   });
 
-  it('si mientras graba el lote se abre otra versión, las vistas NO se escriben en ella y corta', async () => {
+  it('si mientras graba el lote se abre otra versión, las vistas no se escriben en ella y corta', async () => {
     const { run, after } = undo();
     const going = run(pinSession());
     await sleep(3);
@@ -65,8 +65,8 @@ describe('undoColumnsBatch (doc 105, H1)', () => {
   });
 });
 
-describe('piezas (doc 105, H1)', () => {
-  it('pinned: escribe mientras sigue la sesión; si cambió, corta ANTES de escribir', async () => {
+describe('piezas', () => {
+  it('pinned: escribe mientras sigue la sesión; si cambia, corta antes de escribir', async () => {
     const write = vi.fn(async (x: string) => x);
     const pin = pinSession();
     expect(await pinned(pin, write)('a')).toBe('a');
@@ -75,7 +75,7 @@ describe('piezas (doc 105, H1)', () => {
     expect(write).toHaveBeenCalledTimes(1);
   });
 
-  it('pinnedViewDeps: lee igual, pero `updateView` corta si la sesión cambió', async () => {
+  it('pinnedViewDeps: lee igual, pero `updateView` corta si la sesión cambia', async () => {
     const deps = pinnedViewDeps(pinSession());
     open('cs2');
     await expect(deps.listViews('t1')).resolves.toHaveLength(1);
@@ -89,12 +89,12 @@ describe('piezas (doc 105, H1)', () => {
   });
 });
 
-// Doc 105 (H1, barrido): el panel de columna guarda con DEBOUNCE lo tipeado
-// (definición, tipos) y, al cerrarse, escribe lo pendiente. Al cambiar de
-// versión el panel se cierra (la sesión limpia `selectedColumnId`) y ese flush
-// escribía lo tipeado en la versión NUEVA. Cada escritura diferida va con el
-// pin tomado al EDITAR: si al dispararse la sesión es otra, se descarta.
-describe('pinnedDebouncer (doc 105, H1)', () => {
+// El panel de columna guarda con debounce lo tipeado (definición, tipos) y, al
+// cerrarse, escribe lo pendiente. Al cambiar de versión el panel se cierra (la
+// sesión limpia `selectedColumnId`) y ese flush escribiría lo tipeado en la
+// versión recién abierta. Por eso cada escritura diferida va con el pin tomado
+// al editar: si al dispararse la sesión es otra, se descarta.
+describe('pinnedDebouncer', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
@@ -108,7 +108,7 @@ describe('pinnedDebouncer (doc 105, H1)', () => {
     expect(write.mock.calls).toEqual([['ab'], ['STRING']]);
   });
 
-  it('si la sesión cambió antes de dispararse, NO escribe (ni en la nueva ni en ninguna)', () => {
+  it('si la sesión cambia antes de dispararse, no escribe (ni en la nueva ni en ninguna)', () => {
     const write = vi.fn();
     const d = pinnedDebouncer(write, 400);
     d.schedule('description', 'tipeado en cs1');
@@ -117,7 +117,7 @@ describe('pinnedDebouncer (doc 105, H1)', () => {
     expect(write).not.toHaveBeenCalled();
   });
 
-  it('cancel descarta lo pendiente de una clave (el dominio re-aplica el tipo: el tipeo viejo no vuela)', () => {
+  it('cancel descarta lo pendiente de una clave (el dominio re-aplica el tipo: el tipeo anterior no vuela)', () => {
     const write = vi.fn();
     const d = pinnedDebouncer(write, 400);
     d.schedule('types', 'viejo');
@@ -128,7 +128,7 @@ describe('pinnedDebouncer (doc 105, H1)', () => {
     expect(write.mock.calls).toEqual([['sigue']]);
   });
 
-  it('flush (cerrar el panel) escribe ya lo pendiente de la sesión vigente, y sólo eso', () => {
+  it('flush (cerrar el panel) escribe ya lo pendiente de la sesión vigente, y solo eso', () => {
     const write = vi.fn();
     const d = pinnedDebouncer(write, 400);
     d.schedule('description', 'de cs1');

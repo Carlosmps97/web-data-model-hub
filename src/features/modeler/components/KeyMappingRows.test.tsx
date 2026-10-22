@@ -1,6 +1,6 @@
-// Doc 114 (piloto): el mapeo de llave del popup de relación (alta y Sync) y de
-// subcategoría mostraba SIEMPRE los nombres físicos; en el modelo lógico van
-// los nombres lógicos (atributos), como en el canvas.
+// El mapeo de llave del popup de relación (alta y Sync) y de subcategoría usa
+// los nombres del modelo del canvas: en el lógico van los nombres lógicos
+// (atributos), como en el canvas; en el físico, los físicos.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { CanonicalColumn } from '@/services/governance.service';
@@ -18,7 +18,7 @@ const rows: KeyRowState[] = [
 const html = (mode: 'logical' | 'physical') =>
   renderToStaticMarkup(<KeyMappingRows parentPks={parentPks} childCols={childCols} rows={rows} onChange={() => {}} mode={mode} />);
 
-describe('KeyMappingRows: nombres según el modelo del canvas (doc 114)', () => {
+describe('KeyMappingRows: nombres según el modelo del canvas', () => {
   it('lógico: atributos del padre y del hijo (también el par fijo del Sync)', () => {
     const out = html('logical');
     for (const n of ['Codigo Cliente', 'Codigo Cuenta', 'Codigo Cliente Hijo', 'Codigo Cuenta Hijo']) expect(out).toContain(n);
@@ -31,10 +31,10 @@ describe('KeyMappingRows: nombres según el modelo del canvas (doc 114)', () => 
   });
 });
 
-// Revisión doc 114: dos atributos del hijo con el MISMO nombre lógico se veían
-// idénticos (H1); los textos decían «column» en el lógico; el nombre elegido,
-// recortado, no se podía leer entero (H2).
-describe('KeyMappingRows: repetidos, sustantivos y tooltip (revisión doc 114)', () => {
+// Dos atributos del hijo con el mismo nombre lógico deben distinguirse; los
+// textos usan el sustantivo de la faceta (atributo en el lógico); el nombre
+// elegido, recortado, se lee entero en el tooltip.
+describe('KeyMappingRows: repetidos, sustantivos y tooltip', () => {
   const dupChild = [col('c1', 'Codigo Cliente', 'COD_CLIENTE_ANT', 'tc'), col('c2', 'Codigo Cliente', 'COD_CLI', 'tc')];
   const dupRows: KeyRowState[] = [
     { parentColumnId: 'p1', target: { kind: 'existing', columnId: 'c1' }, roleName: '', inherit: true },

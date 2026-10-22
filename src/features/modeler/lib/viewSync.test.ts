@@ -18,10 +18,10 @@ const mirror: View = {
 };
 
 describe('isMirrorOfTable', () => {
-  it('espejo = contiene TODAS las columnas de la tabla (case-insensitive)', () => {
+  it('espejo = contiene todas las columnas de la tabla (case-insensitive)', () => {
     expect(isMirrorOfTable(mirror, 't1', [col('cod', 0), col('FEC', 1)])).toBe(true);
   });
-  it('curada (le falta una columna a propósito) NO es espejo', () => {
+  it('curada (le falta una columna a propósito) no es espejo', () => {
     expect(isMirrorOfTable(mirror, 't1', [col('COD', 0), col('FEC', 1), col('OTRA', 2)])).toBe(false);
   });
 });
@@ -56,12 +56,12 @@ describe('alignSourcesToPhysical', () => {
 });
 
 describe('removeColumnSource / renameColumnSource', () => {
-  it('el delete saca la columna de CUALQUIER vista (espejo o curada)', () => {
+  it('el delete saca la columna de cualquier vista (espejo o curada)', () => {
     const next = removeColumnSource(mirror, 't1', 'fec');
     expect(next?.map((s) => s.column)).toEqual(['COD']);
     expect(removeColumnSource(mirror, 't1', 'NO_EXISTE')).toBeNull();
   });
-  it('el rename re-apunta y el alias sigue al nombre SOLO si era el default', () => {
+  it('el rename re-apunta y el alias sigue al nombre solo si era el default', () => {
     const v: View = { ...mirror, sources: [
       { tableId: 't1', column: 'FEC', outputAlias: 'FEC' },          // alias default
       { tableId: 't1', column: 'COD', outputAlias: 'CODIGO_NEGOCIO' }, // alias custom
@@ -74,8 +74,8 @@ describe('removeColumnSource / renameColumnSource', () => {
   });
 });
 
-describe('alignSourcesToPhysical — vista CURADA (subset)', () => {
-  it('reordena SOLO las columnas seleccionadas; NUNCA agrega las que faltan', () => {
+describe('alignSourcesToPhysical — vista curada (subset)', () => {
+  it('reordena solo las columnas seleccionadas; nunca agrega las que faltan', () => {
     const curated: View = { ...mirror, sources: [
       { tableId: 't1', column: 'FEC' }, { tableId: 't1', column: 'COD' },
     ] };
@@ -87,7 +87,7 @@ describe('alignSourcesToPhysical — vista CURADA (subset)', () => {
 });
 
 describe('syncNewColumnToMirrorViews', () => {
-  it('extiende SOLO las vistas espejo; las curadas quedan intactas', async () => {
+  it('extiende solo las vistas espejo; las curadas quedan intactas', async () => {
     const curated: View = { ...mirror, id: 'v-cur', sources: [{ tableId: 't1', column: 'COD' }] };
     const updateView = vi.fn().mockResolvedValue({});
     const n = await syncNewColumnToMirrorViews(
@@ -102,17 +102,17 @@ describe('syncNewColumnToMirrorViews', () => {
   });
 });
 
-// ── Doc 94 D4: el bug del owner — «Match the table's physical order» dejaba la
-// PK nueva abajo porque ordenaba por `ordinal` crudo (la PK recién marcada
-// conserva el ordinal del final). El orden de la vista es el ÚNICO: PK primero.
-describe('doc 94 — vistas en el orden único (PK primero)', () => {
+// ── «Match the table's physical order» no ordena por `ordinal` crudo: una PK
+// recién marcada conserva el ordinal del final y quedaría abajo. El orden de la
+// vista es el orden único de la tabla: PK primero.
+describe('vistas en el orden único (PK primero)', () => {
   const pk = (physicalName: string, ordinal: number): CanonicalColumn => ({ ...col(physicalName, ordinal), isPrimaryKey: true });
 
   it('alignSourcesToPhysical: una PK con ordinal alto queda con las PK, arriba', () => {
     const v: View = { ...mirror, sources: [
       { tableId: 't1', column: 'COD' }, { tableId: 't1', column: 'FEC' }, { tableId: 't1', column: 'NUEVA_PK' },
     ] };
-    // la lista llega en ordinal crudo (como la armaba alignView): igual sale PK primero
+    // la lista llega en ordinal crudo: igual sale PK primero
     const cols = [pk('COD', 0), col('FEC', 1), pk('NUEVA_PK', 2)];
     expect(alignSourcesToPhysical(v, new Map([['t1', cols]])).map((s) => s.column)).toEqual(['COD', 'NUEVA_PK', 'FEC']);
   });
@@ -138,8 +138,8 @@ describe('doc 94 — vistas en el orden único (PK primero)', () => {
   });
 });
 
-describe('syncNewColumnsToMirrorViews — varias columnas nuevas (doc 94 D4)', () => {
-  it('varias PK nuevas entran tras las PK EN SU ORDEN; las no-PK al final', async () => {
+describe('syncNewColumnsToMirrorViews — varias columnas nuevas', () => {
+  it('varias PK nuevas entran tras las PK en su orden; las no-PK al final', async () => {
     let current: View = { ...mirror, sources: [...(mirror.sources ?? [])] };
     const deps = {
       listViews: vi.fn(async () => [current]),
@@ -154,10 +154,10 @@ describe('syncNewColumnsToMirrorViews — varias columnas nuevas (doc 94 D4)', (
   });
 });
 
-// Doc 105 (ronda 3): cada columna es best-effort, pero el CORTE por cambio de
-// sesión (deps con pin: `pinnedViewDeps`) no es un error de esa vista — se
-// propaga y corta el resto (antes se tragaba y el lazo seguía).
-describe('syncNewColumnsToMirrorViews — corte por cambio de sesión (doc 105)', () => {
+// Cada columna es best-effort, pero el corte por cambio de sesión (deps con
+// pin: `pinnedViewDeps`) no es un error de esa vista: se propaga y corta el
+// resto.
+describe('syncNewColumnsToMirrorViews — corte por cambio de sesión', () => {
   it('propaga SessionChangedError y no sigue con las demás columnas', async () => {
     const updateView = vi.fn(async () => { throw new SessionChangedError(); });
     const deps = { listViews: vi.fn(async () => [mirror]), updateView };

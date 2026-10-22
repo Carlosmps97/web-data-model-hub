@@ -1,8 +1,8 @@
 /**
- * schemaCreate — alta de un esquema DESDE un combo (doc 96 D2-D4). Puro: la
- * validación compartida con el gestor de Esquemas, cuándo se ofrece y el ORDEN
- * que evita acciones que no convergen (crear en la versión → recargar el
- * catálogo → recién seleccionar).
+ * schemaCreate — alta de un esquema desde un combo. Puro: la validación
+ * compartida con el gestor de Esquemas, cuándo se ofrece y el orden que evita
+ * acciones que no convergen (crear en la versión → recargar el catálogo →
+ * recién seleccionar).
  */
 import { SCHEMA_NAME_RE, type SchemaKind } from './schemaStaging';
 
@@ -12,7 +12,7 @@ export function schemaNameError(name: string, taken: Set<string>): string | null
   const n = name.trim();
   if (!n) return 'The schema name is required.';
   if (!SCHEMA_NAME_RE.test(n)) {
-    return 'Invalid name: letters, numbers and underscore, starting with a letter (e.g. bcp_ddv_clientes).';
+    return 'Invalid name: letters, numbers and underscore, starting with a letter (e.g. stg_clientes).';
   }
   if (taken.has(n.toLowerCase())) return `Schema ${n} already exists`;
   return null;

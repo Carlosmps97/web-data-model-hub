@@ -10,8 +10,8 @@ const C = (id: string, tableId: string, physicalName: string, over: Partial<Cano
 
 describe('distinctTableSchemas', () => {
   it('dedup-ea, descarta vacíos y ordena', () => {
-    const pool = [T('a', 'X', 'x', 'DDV'), T('b', 'Y', 'y', 'core'), T('c', 'Z', 'z', 'DDV'), T('d', 'W', 'w')];
-    expect(distinctTableSchemas(pool)).toEqual(['core', 'DDV']);
+    const pool = [T('a', 'X', 'x', 'STG'), T('b', 'Y', 'y', 'core'), T('c', 'Z', 'z', 'STG'), T('d', 'W', 'w')];
+    expect(distinctTableSchemas(pool)).toEqual(['core', 'STG']);
   });
 });
 
@@ -54,17 +54,17 @@ describe('filterColumns · buscador de candidatas', () => {
   });
 });
 
-describe('tableSchemasFromCatalog · fast-path del kind (doc 44)', () => {
+describe('tableSchemasFromCatalog · fast-path del kind', () => {
   const S = (name: string, kind?: 'tables' | 'views' | 'both' | null) => ({ id: `s-${name}`, name, kind });
 
   it('con todo el catálogo clasificado devuelve solo los esquemas de tablas', () => {
-    const cat = [S('bcp_ddv_alm', 'tables'), S('bcp_ddv_alm_vu', 'views'), S('No_Definido', 'tables')];
-    expect(tableSchemasFromCatalog(cat)).toEqual(['bcp_ddv_alm', 'No_Definido']);
+    const cat = [S('core_alm', 'tables'), S('core_alm_vu', 'views'), S('No_Definido', 'tables')];
+    expect(tableSchemasFromCatalog(cat)).toEqual(['core_alm', 'No_Definido']);
   });
 
-  it('un esquema con tablas y vistas (both) cuenta como clasificado y como de tablas (doc 119)', () => {
-    const cat = [S('bcp_ddv_cum', 'tables'), S('bcp_ddv_cum_vu', 'both'), S('bcp_ddv_cum_vu2', 'views')];
-    expect(tableSchemasFromCatalog(cat)).toEqual(['bcp_ddv_cum', 'bcp_ddv_cum_vu']);
+  it('un esquema con tablas y vistas (both) cuenta como clasificado y como de tablas', () => {
+    const cat = [S('core_cum', 'tables'), S('core_cum_vu', 'both'), S('core_cum_vu2', 'views')];
+    expect(tableSchemasFromCatalog(cat)).toEqual(['core_cum', 'core_cum_vu']);
   });
 
   it('con algún esquema sin clasificar devuelve null (fallback al pool)', () => {
@@ -72,7 +72,7 @@ describe('tableSchemasFromCatalog · fast-path del kind (doc 44)', () => {
     expect(tableSchemasFromCatalog([S('a', 'tables'), S('b')])).toBeNull();
   });
 
-  it('con catálogo vacío devuelve null (las tablas pueden usar esquemas legacy)', () => {
+  it('con catálogo vacío devuelve null (las tablas pueden usar esquemas fuera del catálogo)', () => {
     expect(tableSchemasFromCatalog([])).toBeNull();
   });
 });

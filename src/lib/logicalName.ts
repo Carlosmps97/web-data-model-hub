@@ -1,15 +1,14 @@
-// Doc 92 D8 — nombres LÓGICOS (Entidad / Atributo) sin caracteres especiales.
+// Nombres lógicos (Entidad / Atributo) sin caracteres especiales.
 // Permitidos: letras Unicode (tildes, ñ), dígitos, espacio y guion bajo. Se
-// aplica AL TIPEAR en cada input de nombre lógico; el backend espeja la misma
+// aplica al tipear en cada input de nombre lógico; el backend espeja la misma
 // regla en el choke point de changesets (`core/naming/logical.py`), así ningún
 // escritor (Excel, API) la salta. Los físicos tienen sus propias reglas.
-// Doc 114: un espacio de otro tipo (el «no separable» que pegan Word/Outlook,
-// tabulador) es un espacio — antes se quitaba y pegaba las palabras —; los
-// invisibles (control, formato y los «default ignorable»: ancho cero, BOM, guion
-// suave, selectores de variación, rellenos hangul) se quitan sin contar como
-// especiales; una marca combinante sólo queda pegada a su letra o dígito y el
-// resultado se compone en NFC al final (revisión: componer antes de quitar los
-// invisibles dejaba la tilde suelta).
+// Un espacio de otro tipo (el «no separable» que pegan Word/Outlook, tabulador)
+// es un espacio (quitarlo pegaría las palabras); los invisibles (control,
+// formato y los «default ignorable»: ancho cero, BOM, guion suave, selectores de
+// variación, rellenos hangul) se quitan sin contar como especiales; una marca
+// combinante solo queda pegada a su letra o dígito y el resultado se compone en
+// NFC al final (componer antes de quitar los invisibles dejaría la tilde suelta).
 
 /** Espacios que no son el espacio común: el mismo conjunto del backend
  *  (`_OTHER_SPACES`) — `\s` no sirve, JS y Python difieren. */
@@ -18,7 +17,7 @@ const LETTER_OR_DIGIT = /[\p{L}\p{N}]/u;
 const MARK = /[\p{Mn}\p{Mc}]/u;
 const INVISIBLE = /[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}]/u;
 
-/** Lo que queda y los caracteres VISIBLES quitados (en orden, sin repetir). */
+/** Lo que queda y los caracteres visibles quitados (en orden, sin repetir). */
 function split(value: string): { kept: string; removed: string[] } {
   let kept = '';
   const removed = new Set<string>();
@@ -34,12 +33,12 @@ function split(value: string): { kept: string; removed: string[] } {
 }
 
 /** Quita los caracteres no permitidos; conserva espacios simples tal cual se
- *  tipean (el trim lo hace cada commit, como hasta hoy). */
+ *  tipean (el trim lo hace cada commit). */
 export function sanitizeLogicalName(value: string): string {
   return split(value).kept;
 }
 
-/** true si el texto trae algún carácter VISIBLE que la regla quitaría. */
+/** true si el texto trae algún carácter visible que la regla quitaría. */
 export function hasSpecialChars(value: string): boolean {
   return split(value).removed.length > 0;
 }

@@ -5,8 +5,8 @@ import {
 
 const paths = (objs: DdlObject[], f = DEFAULT_FILE_NAMES) => objectsToEntries(objs, f).map((e) => e.path).sort();
 
-describe('plainToObjects + objectsToEntries (doc 93 D11)', () => {
-  it('one table, no views → TABLE-NOMBRE.sql in the table folder', () => {
+describe('plainToObjects + objectsToEntries', () => {
+  it('una tabla sin vistas → TABLE-NOMBRE.sql en la carpeta de la tabla', () => {
     const objs = plainToObjects({
       tables: [{ id: 't1', physicalName: 'CLIENTE', schema: 'ventas', sql: 'CREATE TABLE cliente;' }],
       views: [],
@@ -14,7 +14,7 @@ describe('plainToObjects + objectsToEntries (doc 93 D11)', () => {
     expect(paths(objs)).toEqual(['CLIENTE/TABLE-CLIENTE.sql']);
   });
 
-  it('modeled views are VIEW_NEG and the name goes UPPERCASE', () => {
+  it('las vistas modeladas son VIEW_NEG y el nombre va en mayúsculas', () => {
     const objs = plainToObjects({
       tables: [{ id: 't1', physicalName: 'CLIENTE', schema: 'ventas', sql: 'CREATE TABLE cliente;' }],
       views: [
@@ -25,7 +25,7 @@ describe('plainToObjects + objectsToEntries (doc 93 D11)', () => {
     expect(paths(objs)).toEqual(['CLIENTE/TABLE-CLIENTE.sql', 'CLIENTE/VIEW_NEG-VW_A.sql', 'CLIENTE/VIEW_NEG-VW_B.sql']);
   });
 
-  it('multi-source view lands in the first EXPORTED source folder', () => {
+  it('una vista multi-fuente va a la carpeta de la primera fuente exportada', () => {
     const objs = plainToObjects({
       tables: [{ id: 'a', physicalName: 'A', schema: 's', sql: 'CREATE TABLE a;' }],
       views: [{ name: 'VW', schema: 's', sourceTableIds: ['b', 'a'], sql: 'CREATE VIEW vw;' }],
@@ -33,7 +33,7 @@ describe('plainToObjects + objectsToEntries (doc 93 D11)', () => {
     expect(paths(objs)).toEqual(['A/TABLE-A.sql', 'A/VIEW_NEG-VW.sql']);
   });
 
-  it('view with no exported source → _views/ root folder', () => {
+  it('vista sin fuente exportada → carpeta raíz _views/', () => {
     const objs = plainToObjects({
       tables: [{ id: 'a', physicalName: 'A', schema: 's', sql: 'CREATE TABLE a;' }],
       views: [{ name: 'ORPHAN', schema: 's', sourceTableIds: [], sql: 'CREATE VIEW orphan;' }],
@@ -41,7 +41,7 @@ describe('plainToObjects + objectsToEntries (doc 93 D11)', () => {
     expect(paths(objs)).toContain('_views/VIEW_NEG-ORPHAN.sql');
   });
 
-  it('same physical name in different schemas → both folders disambiguated', () => {
+  it('mismo nombre físico en esquemas distintos → ambas carpetas desambiguadas', () => {
     const objs = plainToObjects({
       tables: [
         { id: '1', physicalName: 'CLIENTE', schema: 'ventas', sql: 'a;' },
@@ -52,12 +52,12 @@ describe('plainToObjects + objectsToEntries (doc 93 D11)', () => {
     expect(paths(objs)).toEqual(['CLIENTE (riesgos)/TABLE-CLIENTE.sql', 'CLIENTE (ventas)/TABLE-CLIENTE.sql']);
   });
 
-  it('sanitizes illegal chars; no brackets anywhere', () => {
+  it('sanea caracteres ilegales; sin corchetes en ningún lado', () => {
     const objs = plainToObjects({ tables: [{ id: '1', physicalName: 'A/B:C', schema: 's', sql: 'x;' }], views: [] });
     expect(paths(objs)).toEqual(['A_B_C/TABLE-A_B_C.sql']);
   });
 
-  it('two views with the same name in one folder → both carry their schema (never _2)', () => {
+  it('dos vistas con el mismo nombre en una carpeta → ambas llevan su esquema (nunca _2)', () => {
     const objs = plainToObjects({
       tables: [{ id: 't1', physicalName: 'T', schema: 's', sql: 't;' }],
       views: [
@@ -69,8 +69,8 @@ describe('plainToObjects + objectsToEntries (doc 93 D11)', () => {
   });
 });
 
-describe('statementsToObjects (rules path)', () => {
-  it('folds tags into the object file compactly; generated tables are TABLE, generated views VIEW_TEC', () => {
+describe('statementsToObjects (camino con reglas)', () => {
+  it('pliega los tags en el archivo del objeto sin líneas en blanco; tablas generadas TABLE, vistas generadas VIEW_TEC', () => {
     const objs = statementsToObjects({
       statements: [
         { artifact: 'ddl.tabla_fisica', schema: 'v', name: 'CLIENTE', sql: 'CREATE TABLE cliente;' },
@@ -88,27 +88,27 @@ describe('statementsToObjects (rules path)', () => {
     expect(Object.keys(byPath).sort()).toEqual([
       'CLIENTE/TABLE-CLIENTE.sql', 'CLIENTE/TABLE-CLIENTE_REJ.sql', 'CLIENTE/VIEW_NEG-VW.sql', 'CLIENTE/VIEW_TEC-CLIENTE.sql',
     ]);
-    // CREATE y sus ALTER seguidos, sin líneas en blanco (doc 93 D12)
+    // CREATE y sus ALTER seguidos, sin líneas en blanco
     expect(byPath['CLIENTE/TABLE-CLIENTE.sql']).toBe('CREATE TABLE cliente;\nALTER TABLE cliente SET TAGS (x=1);\nOPTIMIZE cliente;\n');
     expect(byPath['CLIENTE/VIEW_NEG-VW.sql']).toBe('CREATE OR REPLACE VIEW vw AS SELECT 1;\nALTER TABLE vw SET TAGS (d=4);\n');
   });
 
-  it('the spec-rule case: _v and _vu views with the same name never collide (Review Focus #4)', () => {
+  it('caso con reglas: las vistas _v y _vu del mismo nombre nunca chocan', () => {
     const objs = statementsToObjects({
       statements: [
-        { artifact: 'ddl.tabla_fisica', schema: 'bcp', name: 'H_X', sql: 'CREATE TABLE h_x;' },
-        { artifact: 'ddl.vista_tecnica', schema: 'bcp_v', name: 'H_X', sql: 'CREATE OR REPLACE VIEW bcp_v.h_x AS SELECT 1;' },
-        { artifact: 'ddl.vista_tecnica_dac', schema: 'bcp_v', name: 'H_Xdac', sql: 'CREATE OR REPLACE VIEW bcp_v.h_xdac AS SELECT 1;' },
-        { artifact: 'ddl.vista_negocio', schema: 'bcp_vu', name: 'H_XDAC', sql: 'CREATE OR REPLACE VIEW bcp_vu.h_xdac AS SELECT 1;' },
-        { artifact: 'ddl.vista_negocio', schema: 'bcp_vu', name: 'H_X', sql: 'CREATE OR REPLACE VIEW bcp_vu.h_x AS SELECT 1;' },
+        { artifact: 'ddl.tabla_fisica', schema: 'stg', name: 'H_X', sql: 'CREATE TABLE h_x;' },
+        { artifact: 'ddl.vista_tecnica', schema: 'stg_v', name: 'H_X', sql: 'CREATE OR REPLACE VIEW stg_v.h_x AS SELECT 1;' },
+        { artifact: 'ddl.vista_tecnica_dac', schema: 'stg_v', name: 'H_Xdac', sql: 'CREATE OR REPLACE VIEW stg_v.h_xdac AS SELECT 1;' },
+        { artifact: 'ddl.vista_negocio', schema: 'stg_vu', name: 'H_XDAC', sql: 'CREATE OR REPLACE VIEW stg_vu.h_xdac AS SELECT 1;' },
+        { artifact: 'ddl.vista_negocio', schema: 'stg_vu', name: 'H_X', sql: 'CREATE OR REPLACE VIEW stg_vu.h_x AS SELECT 1;' },
       ],
-      viewSources: new Map([[viewKey('bcp_vu', 'H_XDAC'), ['t1']], [viewKey('bcp_vu', 'H_X'), ['t1']]]),
-      tablesById: new Map([['t1', { physicalName: 'H_X', schema: 'bcp' }]]),
+      viewSources: new Map([[viewKey('stg_vu', 'H_XDAC'), ['t1']], [viewKey('stg_vu', 'H_X'), ['t1']]]),
+      tablesById: new Map([['t1', { physicalName: 'H_X', schema: 'stg' }]]),
     });
     expect(paths(objs)).toEqual([
       'H_X/TABLE-H_X.sql', 'H_X/VIEW_NEG-H_X.sql', 'H_X/VIEW_NEG-H_XDAC.sql', 'H_X/VIEW_TEC-H_X.sql', 'H_X/VIEW_TEC-H_XDAC.sql',
     ]);
-    // same prefix + same name but different case / schema → schema-qualified, case-insensitively
+    // mismo prefijo y nombre con distinto casing o esquema → calificado con esquema, sin distinguir mayúsculas
     const clash: DdlObject[] = [
       { tableName: 'T', kind: 'view', origin: 'generated', schema: 'a', name: 'Tdac', sql: '1;' },
       { tableName: 'T', kind: 'view', origin: 'generated', schema: 'b', name: 'TDAC', sql: '2;' },
@@ -116,7 +116,7 @@ describe('statementsToObjects (rules path)', () => {
     expect(paths(clash)).toEqual(['T/VIEW_TEC-A.TDAC.sql', 'T/VIEW_TEC-B.TDAC.sql']);
   });
 
-  it('fileNames: custom prefixes, separator, case and schema "always"', () => {
+  it('fileNames: prefijos, separador y casing personalizados, y esquema "always"', () => {
     const objs: DdlObject[] = [
       { tableName: 'T', tableSchema: 's', kind: 'table', origin: 'model', schema: 's', name: 't', sql: 'x;' },
       { tableName: 'T', tableSchema: 's', kind: 'view', origin: 'generated', schema: 's_v', name: 't', sql: 'y;' },

@@ -1,9 +1,10 @@
 /**
- * Design-system UI primitives (DMH-Erwin v20260625-2). Import from
- * `@/components/ui`. Light-only, navy; styled via styles/components.css.
+ * Primitivas de UI del sistema de diseño. Se importan desde `@/components/ui`.
+ * Solo tema claro, navy; estilos en styles/components.css.
  *
- * Existing primitives (Modal, ConfirmDialog, Tooltip, Icon, TagEditor) keep
- * their own default exports and are re-exported here for convenience.
+ * Algunas primitivas (Modal, ConfirmDialog, Tooltip, Icon, TagEditor) conservan
+ * su propio export por defecto; Tooltip, Modal y ConfirmDialog también se
+ * reexportan aquí por comodidad.
  */
 
 export { default as Button } from './Button';
@@ -21,11 +22,11 @@ export type { AvatarProps, AvatarTone } from './Avatar';
 export { default as SegmentedControl } from './SegmentedControl';
 export type { SegmentedControlProps, SegmentOption } from './SegmentedControl';
 
-// Reused existing primitives.
+// Primitivas con export por defecto propio.
 export { default as Tooltip } from './Tooltip';
 export { default as Modal } from './Modal';
 export { default as ConfirmDialog } from './ConfirmDialog';
 
-// Doc 95 D4: lista de afectados compartida (virtualizada, con buscador).
+// Lista de afectados compartida (virtualizada, con buscador).
 export { default as AffectedTable } from './AffectedTable';
 export type { AffectedColumn, AffectedTableProps } from './AffectedTable';

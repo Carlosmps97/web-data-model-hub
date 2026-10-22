@@ -1,11 +1,10 @@
-// Doc 105 (ronda 6, R17a-1 → ronda 7, R18a-1) — tras un `reload()` que falla
-// por la red, un timeout o un 5xx, lo que había en pantalla es de ANTES de la
-// escritura que acaba de terminar: editar desde ahí pisaba lo grabado (el store
-// y también los paneles y popups, que arman el documento COMPLETO con el
-// diagrama). La marca «sin refrescar» de la ronda 6 no alcanzaba a los paneles:
-// ahora el canvas se CIERRA — como antes de R15, pero con el aviso «Couldn't
-// reload the canvas: … Open it again from the explorer.» — y sin diagrama en
-// pantalla no hay camino que edite datos viejos. Una caída = un aviso.
+// Tras un `reload()` que falla por la red, un timeout o un 5xx, lo que hay en
+// pantalla es anterior a la escritura que acaba de terminar: editar desde ahí
+// pisaría lo grabado (el store y también los paneles y popups, que arman el
+// documento completo con el diagrama). Por eso el canvas se cierra con el aviso
+// «Couldn't reload the canvas: … Open it again from the explorer.» y, sin
+// diagrama en pantalla, no hay camino que edite datos desactualizados. Una caída
+// = un aviso.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -86,8 +85,8 @@ beforeEach(async () => {
 });
 afterEach(async () => { await new Promise((r) => setTimeout(r, 5)); });
 
-describe('un reload fallido cierra el canvas con aviso (doc 105, ronda 7, R18a-1)', () => {
-  it('lo grabado queda; el canvas se cierra y lo dice; la edición siguiente no sale del diagrama viejo', async () => {
+describe('un reload fallido cierra el canvas con aviso', () => {
+  it('lo grabado queda; el canvas se cierra y lo dice; la edición siguiente no sale del diagrama desactualizado', async () => {
     vi.mocked(mod.loadDiagram).mockRejectedValueOnce(flaky());
     await st().updateColumn('c1', { description: 'new' });
     expect(server.c1.description).toBe('new');
@@ -130,7 +129,7 @@ describe('un reload fallido cierra el canvas con aviso (doc 105, ronda 7, R18a-1
     expect(server.c1).toMatchObject({ description: 'new', isNullable: false });
   });
 
-  it('falla la apertura de OTRO canvas y también la recarga pendiente: se cierra con UN aviso (el de la apertura)', async () => {
+  it('falla la apertura de otro canvas y también la recarga pendiente: se cierra con un aviso (el de la apertura)', async () => {
     const openB = deferred<unknown>();
     let writeGate!: () => void;
     const { recordChange } = await import('@/services/changeset.service');
@@ -148,7 +147,7 @@ describe('un reload fallido cierra el canvas con aviso (doc 105, ronda 7, R18a-1
     expect(shown()).toEqual([]);                                  // …y el store no suma otro
     expect({ activeSaId: st().activeSaId, diagram: st().diagram }).toEqual({ activeSaId: null, diagram: null });
     expect(server.c1.description).toBe('new');
-    // Lo callado fue SÓLO esa recarga: la siguiente que falla avisa.
+    // Lo callado fue solo esa recarga: la siguiente que falla avisa.
     vi.mocked(mod.loadDiagram).mockImplementation(async () => diaA() as never);
     await st().selectSubjectArea('sa1');
     vi.mocked(mod.loadDiagram).mockRejectedValueOnce(flaky());
@@ -156,7 +155,7 @@ describe('un reload fallido cierra el canvas con aviso (doc 105, ronda 7, R18a-1
     expect(shown()).toEqual([CLOSED]);
   });
 
-  it('si la recarga pendiente anda, el canvas editado queda al día (y sólo avisa la apertura)', async () => {
+  it('si la recarga pendiente anda, el canvas editado queda al día (y solo avisa la apertura)', async () => {
     const openB = deferred<unknown>();
     let writeGate!: () => void;
     const { recordChange } = await import('@/services/changeset.service');
@@ -176,8 +175,8 @@ describe('un reload fallido cierra el canvas con aviso (doc 105, ronda 7, R18a-1
   });
 });
 
-describe('el Inspector sin canvas sigue borrando con su pre-imagen (doc 105, ronda 6)', () => {
-  it('la hija FK se re-graba con su documento del SERVIDOR', async () => {
+describe('el Inspector sin canvas sigue borrando con su pre-imagen', () => {
+  it('la hija FK se re-graba con su documento del servidor', async () => {
     server.cB = { id: 'cB', tableId: 't1', logicalName: 'fk', physicalName: 'FK', dataType: 'INT', typeOverridden: false, ordinal: 2, isForeignKey: true, description: 'old' };
     rels = [{ id: 'r1', parentTableId: 't1', childTableId: 't1', identifying: false, parentCardinality: 'one', childCardinality: 'many', pairs: [{ parentColumnId: 'c1', childColumnId: 'cB' }] }];
     await st().reload();
@@ -188,12 +187,11 @@ describe('el Inspector sin canvas sigue borrando con su pre-imagen (doc 105, ron
   });
 });
 
-// Doc 105 (ronda 7): un dibujo editado dentro de los 500 ms del debounce se
-// perdía si el canvas se cerraba (el disparo con debounce ya no escribe con
-// otro canvas —o ninguno— abierto). Al cerrarlo se guarda en el acto, como al
-// cambiar de canvas.
-describe('cerrar el canvas no pierde un dibujo del debounce (doc 105, ronda 7)', () => {
-  it('el reload que falla guarda antes los dibujos pendientes del canvas', async () => {
+// Un dibujo editado dentro de los 500 ms del debounce se perdería si el canvas
+// se cierra (el disparo con debounce no escribe con otro canvas —o ninguno—
+// abierto): al cerrarlo se guarda en el acto, como al cambiar de canvas.
+describe('cerrar el canvas no pierde un dibujo del debounce', () => {
+  it('el reload que falla guarda primero los dibujos pendientes del canvas', async () => {
     const shape = { id: 'd1', type: 'rect', x: 1, y: 2, w: 3, h: 4 };
     useModelerStore.setState({ drawings: [shape] as never });
     st().persistDrawings();                                          // agenda el guardado (500 ms)
@@ -203,7 +201,7 @@ describe('cerrar el canvas no pierde un dibujo del debounce (doc 105, ronda 7)',
     expect(struct.setSubjectAreaDrawings).toHaveBeenCalledWith('sa1', [shape]);
   });
 
-  it('con el 404 (el canvas ya no está) no hay nada que guardar', async () => {
+  it('con el 404 (el canvas no existe) no hay nada que guardar', async () => {
     useModelerStore.setState({ drawings: [{ id: 'd1' }] as never });
     st().persistDrawings();
     vi.mocked(mod.loadDiagram).mockRejectedValueOnce(new ApiError('Not found', 404, null, '/api/subject-areas/sa1/diagram'));

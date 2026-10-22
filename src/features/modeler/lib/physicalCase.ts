@@ -1,16 +1,16 @@
 /**
- * Regla de CASE del físico TIPEADO (doc 83) — espejo de
+ * Regla de case del físico tipeado — espejo de
  * `app/core/naming/engine.apply_case` (el backend es autoritativo: la aplica
  * en el choke point de changesets a todo upsert de columna).
  *
- * `naming_config[column].case` sólo se aplicaba al DERIVAR el físico desde el
- * lógico (physicalize): tipear el físico directo (popup New column en modo
- * Physical, panel Properties) dejaba pasar minúsculas. El front aplica la
- * misma regla para que la UI muestre lo que se va a persistir.
+ * `naming_config[column].case` rige tanto al derivar el físico del lógico
+ * (physicalize) como al tipear el físico directo (popup New column en modo
+ * Physical, panel Properties). El front aplica la misma regla para que la UI
+ * muestre lo que se va a persistir.
  *
  *  - 'upper' / 'lower': sobre el string completo.
  *  - 'camel': re-segmenta por `_` / `-` / espacios con el mismo armado del
- *    motor; SIN separadores deja lo tipeado tal cual (no hay cómo re-segmentar
+ *    motor; sin separadores deja lo tipeado tal cual (no hay cómo re-segmentar
  *    «mtoDeu» sin perderlo).
  *  - regla ausente/desconocida ⇒ 'upper' (default sembrado por el backend).
  * Idempotente; no abrevia ni toca el lógico.

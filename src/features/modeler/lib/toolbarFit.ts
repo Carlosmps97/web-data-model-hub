@@ -1,23 +1,22 @@
 /**
- * Doc 114 (piloto) — la barra de herramientas del canvas en anchos menores
- * (laptops, navegador al 125 %). Antes: entre ~1480 y ~1720 px se escondían
- * Save y Publish tras un scroll horizontal invisible; más angosta, saltaba a 2–4
- * filas desparejas. Ahora queda SIEMPRE en una fila y se compacta por pasos, en
- * un orden fijo — como la cinta de Office: primero lo que menos se usa — hasta
- * que entra; al ensancharse vuelve atrás. Nada se quita: lo compactado de un
- * grupo queda en un menú con su nombre, en el mismo lugar.
+ * La barra de herramientas del canvas en anchos menores (laptops, navegador al
+ * 125 %): queda siempre en una fila, sin scroll horizontal que esconda Save y
+ * Publish ni filas desparejas, y se compacta por pasos, en un orden fijo (como
+ * la cinta de Office: primero lo que menos se usa), hasta que entra; al
+ * ensancharse vuelve atrás. Nada se quita: lo compactado de un grupo queda en
+ * un menú con su nombre, en el mismo lugar.
  * Puro: el hook (`useToolbarFit`) mide y aplica.
  */
 
 /** Pasos en orden; el nivel N aplica los N primeros:
- *  · open: «Open model» sólo con su ícono;
+ *  · open: «Open model» solo con su ícono;
  *  · drawing: las 8 formas, en el menú «Drawing»;
  *  · pill: la píldora de la versión sin el proyecto (está en el Explorer);
  *  · compact: sin los rótulos de grupo, botones de 34 px — la barra baja de alto;
  *  · ends: las cardinalidades Parent/Child, en un menú que muestra las elegidas;
  *  · actions: Auto-arrange y los dos Export, en «More actions» (Undo queda);
  *  · structure: CTAS, Create view, Schemas y la carga Excel, en un menú (New queda);
- *  · primary: Save y Publish sólo con su ícono;
+ *  · primary: Save y Publish solo con su ícono;
  *  · rel: el resto de Relationships (dibujar, subcategoría, etiquetas), en su menú. */
 export const TOOLBAR_STEPS = ['open', 'drawing', 'pill', 'compact', 'ends', 'actions', 'structure', 'primary', 'rel'] as const;
 export type ToolbarStep = (typeof TOOLBAR_STEPS)[number];

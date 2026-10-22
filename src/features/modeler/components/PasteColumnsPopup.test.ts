@@ -1,4 +1,4 @@
-// Doc 118 — «Paste columns» sin DOM (hooks de mentira: ver
+// «Paste columns» sin DOM (hooks simulados: ver
 // features/reporting/components/fakeReact.testutil): lo copiado en otro
 // proyecto nombra su origen, se revisa con los estándares de los dos y deja la
 // procedencia con el proyecto; lo del mismo proyecto no lee otros estándares.
@@ -73,22 +73,22 @@ beforeEach(() => {
   loadSourceStandards.mockResolvedValue(SRC_STD);
 });
 
-describe('PasteColumnsPopup — copiado en otro proyecto (doc 118, fase 2)', () => {
+describe('PasteColumnsPopup — copiado en otro proyecto', () => {
   it('el subtítulo nombra el proyecto de origen y la revisión lee sus estándares', async () => {
-    STATE.colClipboard = clipFrom('p2', 'UDV Piloto');
+    STATE.colClipboard = clipFrom('p2', 'Piloto');
     resetFake();
-    expect(mount()!.props.subtitle).toBe('M_CLIENTE from «UDV Piloto» → T_DESTINO');
+    expect(mount()!.props.subtitle).toBe('M_CLIENTE from «Piloto» → T_DESTINO');
     runEffects();
     await vi.waitFor(() => expect(nextStates()[3]).toEqual({ same: false, standards: SRC_STD }));
     expect(loadSourceStandards).toHaveBeenCalledWith('p2');
   });
 
   it('confirmar graba los UDP con los ids del destino y la procedencia con el proyecto', async () => {
-    STATE.colClipboard = clipFrom('p2', 'UDV Piloto');
+    STATE.colClipboard = clipFrom('p2', 'Piloto');
     (byText(ready({ same: false, standards: SRC_STD }), 'button', 'Paste 1 column').props.onClick as () => void)();
     await vi.waitFor(() => expect(recordChangesBulk).toHaveBeenCalledTimes(1));
     expect(created().payload.udpValues).toEqual({ 'dst-o': 'Juan' });
-    expect(created().origin).toEqual({ kind: 'paste-columns', sourceTable: 'M_CLIENTE', sourceColumn: 'COD', sourceProject: 'UDV Piloto' });
+    expect(created().origin).toEqual({ kind: 'paste-columns', sourceTable: 'M_CLIENTE', sourceColumn: 'COD', sourceProject: 'Piloto' });
   });
 
   it('sin el nombre del proyecto de origen, la procedencia lleva su id (como el pegado de tablas)', async () => {
@@ -99,17 +99,17 @@ describe('PasteColumnsPopup — copiado en otro proyecto (doc 118, fase 2)', () 
   });
 
   it('sin los estándares del origen lo avisa y deja pegar lo demás', () => {
-    STATE.colClipboard = clipFrom('p2', 'UDV Piloto');
+    STATE.colClipboard = clipFrom('p2', 'Piloto');
     const tree = ready({ same: false, standards: null });
     // Los avisos los pinta PasteDetails (no se invoca): se leen de la revisión que recibe.
     const details = [...walk(tree)].find((e) => 'review' in e.props)!;
     expect((details.props.review as { warnings: string[] }).warnings)
-      .toEqual(expect.arrayContaining([expect.stringContaining("The standards of «UDV Piloto» can't be read")]));
+      .toEqual(expect.arrayContaining([expect.stringContaining("The standards of «Piloto» can't be read")]));
     expect(byText(tree, 'button', 'Paste 1 column').props.disabled).toBe(false);
   });
 
   it('otra falla al leer los estándares del origen: el error con Retry', async () => {
-    STATE.colClipboard = clipFrom('p2', 'UDV Piloto');
+    STATE.colClipboard = clipFrom('p2', 'Piloto');
     loadSourceStandards.mockRejectedValueOnce(new Error('Network error'));
     resetFake();
     mount();
@@ -131,7 +131,7 @@ describe('PasteColumnsPopup — copiado en otro proyecto (doc 118, fase 2)', () 
   });
 
   it('la respuesta que llega después de cerrar el popup no escribe', async () => {
-    STATE.colClipboard = clipFrom('p2', 'UDV Piloto');
+    STATE.colClipboard = clipFrom('p2', 'Piloto');
     let release!: (v: unknown) => void;
     loadSourceStandards.mockReturnValueOnce(new Promise((r) => { release = r; }));
     resetFake();

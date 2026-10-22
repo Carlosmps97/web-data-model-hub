@@ -1,4 +1,4 @@
-// Armado puro de nodos 'view' + edges 'derivation' (F3, contrato compartido:
+// Armado puro de nodos 'view' + edges 'derivation' (contrato compartido:
 // id `deriv__{viewId}__{tableId}`, handles __hdr_src/__hdr_tgt, posición en
 // layout[viewId] o default junto a la primera fuente: x+280, misma y).
 import { describe, expect, it } from 'vitest';
@@ -25,7 +25,7 @@ const pos = new Map([['t1', { x: 100, y: 50 }], ['t2', { x: 500, y: 50 }]]);
 const noop = () => {};
 
 describe('viewSourceIds', () => {
-  it('canónico con fallback al tableId legacy', () => {
+  it('canónico con fallback al tableId (fuente principal)', () => {
     expect(viewSourceIds(view)).toEqual(['t1', 't2']);
     expect(viewSourceIds({ id: 'v', name: 'v', tableId: 't9' })).toEqual(['t9']);
     expect(viewSourceIds({ id: 'v', name: 'v' })).toEqual([]);
@@ -33,7 +33,7 @@ describe('viewSourceIds', () => {
 });
 
 describe('viewNodeRows', () => {
-  it('vista User-Defined SQL (doc 91 D7): las filas salen de sources igual que en Regular', () => {
+  it('vista User-Defined SQL: las filas salen de sources igual que en Regular', () => {
     const rows = viewNodeRows({
       ...view,
       customSql: 'CREATE VIEW s.v_cc AS SELEC ID FRM t',
@@ -65,7 +65,7 @@ describe('buildViewGraph', () => {
     expect(nodes[0].position).toEqual({ x: 380, y: 50 });
   });
 
-  it('un edge derivation por fuente PRESENTE — contrato de ids y handles', () => {
+  it('un edge derivation por fuente presente — contrato de ids y handles', () => {
     const { edges } = buildViewGraph([view], tables, columns, {}, pos, noop);
     expect(edges).toEqual([
       { id: 'deriv__v1__t1', source: 't1', target: 'v1', sourceHandle: '__hdr_src', targetHandle: '__hdr_tgt', type: 'derivation' },
@@ -73,7 +73,7 @@ describe('buildViewGraph', () => {
     ]);
   });
 
-  it('fuente ausente del canvas ⇒ sin su edge; vista sin NINGUNA fuente presente ⇒ sin nodo', () => {
+  it('fuente ausente del canvas ⇒ sin su edge; vista sin ninguna fuente presente ⇒ sin nodo', () => {
     const onlyT1 = new Map([['t1', { x: 0, y: 0 }]]);
     expect(buildViewGraph([view], tables, columns, {}, onlyT1, noop).edges).toHaveLength(1);
     expect(buildViewGraph([view], tables, columns, {}, new Map(), noop).nodes).toHaveLength(0);

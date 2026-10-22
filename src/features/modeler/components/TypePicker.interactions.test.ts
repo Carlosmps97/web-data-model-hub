@@ -1,8 +1,8 @@
-// TypePicker sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 106 · revisión independiente: las cajas de argumentos aceptan texto, pero
-// al valor solo viaja un argumento válido — nada que rompa el tipo ni el DDL
-// (`--` es un comentario SQL), nada que se «arregle» en silencio (`18,2` no es
-// `182`) y nada oculto de un tipo anterior (`VARCHAR(10,2)`).
+// TypePicker sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+// Las cajas de argumentos aceptan texto, pero al valor solo viaja un argumento
+// válido: nada que rompa el tipo ni el DDL (`--` es un comentario SQL), nada que
+// se «arregle» en silencio (`18,2` no es `182`) y nada oculto de un tipo anterior
+// (`VARCHAR(10,2)`).
 import { describe, expect, it, vi } from 'vitest';
 import { nextStates, resetFake, runEffects, walk, type El } from '../../reporting/components/fakeReact.testutil';
 
@@ -36,7 +36,7 @@ function mount(value: string) {
       (ss.props.onPick as (v: string) => void)(base);
       rerender();
     },
-    /** El valor cambia por FUERA (p. ej. heredar el default de un dominio). */
+    /** El valor cambia por fuera (p. ej. heredar el default de un dominio). */
     outside(next: string) {
       props = { ...props, value: next };
       rerender();
@@ -44,7 +44,7 @@ function mount(value: string) {
   };
 }
 
-describe('cajas de argumentos (doc 106 · revisión)', () => {
+describe('cajas de argumentos', () => {
   it('«--» no viaja al tipo (en el DDL comentaría el resto de la línea): el tipo queda como estaba y la caja marcada', () => {
     const p = mount('DECIMAL(10,2)');
     p.type(0, '--');
@@ -73,7 +73,7 @@ describe('cajas de argumentos (doc 106 · revisión)', () => {
     expect(p.emitted.at(-1)).toBe('VARCHAR(10)');
   });
 
-  it('ronda 2: un valor viejo de las cajas no reaparece si la base cambia por fuera', () => {
+  it('un valor anterior de las cajas no reaparece si la base cambia por fuera', () => {
     const p = mount('DECIMAL(10,2)');
     p.type(0, '');                                            // queda solo la escala «2»
     p.pick('STRING');
@@ -96,7 +96,7 @@ describe('cajas de argumentos (doc 106 · revisión)', () => {
     expect(p.emitted.at(-1)).toBe('TIMESTAMP(6)');
   });
 
-  it('lo válido sigue viajando: MAX, 30 CHAR, *', () => {
+  it('lo válido viaja: MAX, 30 CHAR, *', () => {
     const p = mount('VARCHAR2');
     p.type(0, '30 ');
     expect(p.emitted.at(-1)).toBe('VARCHAR2(30)');

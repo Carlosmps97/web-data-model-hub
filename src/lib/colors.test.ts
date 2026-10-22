@@ -4,9 +4,9 @@ import {
 } from './colors';
 
 // Contrato con app/core/colors.py (misma gramática; mismos casos que
-// tests/integration/test_colors_themes_doc109.py y test_apply_plan.py).
-describe('ColorRef (doc 109)', () => {
-  it('normaliza hex, acepta themes y sólo admite «none» donde corresponde', () => {
+// tests/integration/test_colors_themes.py y test_apply_plan.py).
+describe('ColorRef', () => {
+  it('normaliza hex, acepta themes y solo admite «none» donde corresponde', () => {
     expect(normalColor('#92d050')).toBe('#92D050');
     expect(normalColor(' #FFFF80 ')).toBe('#FFFF80');
     expect(normalColor('theme:t-pri')).toBe('theme:t-pri');

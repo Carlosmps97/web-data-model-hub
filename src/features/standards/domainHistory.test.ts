@@ -10,7 +10,7 @@ const entry = (seq: number, state: ReturnType<typeof st> | null, changed: string
   seq, label: `v${seq}`, title: `t${seq}`, author: 'ana', createdAt: '2026-09-25T10:00:00Z', kind: 'domain', state, changed,
 });
 
-describe('historyLines (doc 95 D8)', () => {
+describe('historyLines', () => {
   it('«antes → después» en campos cortos; «changed» en los largos', () => {
     const entries = [entry(3, st({ defaultDataType: 'UUID', description: 'otra' }), ['defaultDataType', 'description']), entry(1, st())];
     expect(historyLines(entries)).toEqual([['Physical type: INTEGER → UUID', 'Description changed'], ['Created']]);
@@ -25,7 +25,7 @@ describe('revertForm', () => {
     const current: SnapshotDomain = { id: 'd1', ...st({ defaultDataType: 'UUID' }) };
     expect(revertForm(current, entry(1, st()))).toMatchObject({ id: 'd1', defaultDataType: 'INTEGER', logicalDataType: 'NUMBER' });
   });
-  it('sin tipo lógico en la versión conserva el actual: el formulario muestra lo que de verdad queda (final review #10)', () => {
+  it('sin tipo lógico en la versión conserva el actual: el formulario muestra lo que de verdad queda', () => {
     const current: SnapshotDomain = { id: 'd1', ...st({ logicalDataType: 'NUMBER' }) };
     expect(revertForm(current, entry(1, st({ logicalDataType: null })))).toMatchObject({ logicalDataType: 'NUMBER' });
   });

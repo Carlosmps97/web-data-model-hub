@@ -8,9 +8,9 @@ import { applyErrorNotice, NO_CHANGES_HINT } from '../standardsDiff';
 import { MAX_THEME_NAME, themeChanged, themeEditInput, themeFormError, themeFormOf, type ThemeForm } from '../themeForm';
 
 /**
- * Data Standards → Color themes (doc 109). Un theme es un color con nombre que
- * las tablas y vistas usan por referencia, como los themes de Erwin: cambiar su
- * color repinta todas las cajas que lo usan, en todos los canvases. Acá sólo se
+ * Data Standards → Color themes. Un theme es un color con nombre que las tablas
+ * y vistas usan por referencia, como los themes de Erwin: cambiar su color
+ * repinta todas las cajas que lo usan, en todos los canvases. Aquí solo se
  * definen; las cajas se pintan en el canvas (clic derecho o Properties → Color).
  * Mismo patrón que UDP: lista + formulario, cada guardado es una versión.
  */
@@ -30,7 +30,7 @@ export default function ThemesPage({ projectId, snapshot, canEdit, onApplied }: 
   useEffect(() => {
     if (selId === NEW) setForm(themeFormOf(null));
     else if (stored) setForm(themeFormOf(stored));
-    else if (selId) setSelId(null);          // ya no existe (rollback)
+    else if (selId) setSelId(null);          // borrado por un rollback
   }, [selId, stored]);
 
   const set = (p: Partial<ThemeForm>) => setForm((f) => ({ ...f, ...p }));

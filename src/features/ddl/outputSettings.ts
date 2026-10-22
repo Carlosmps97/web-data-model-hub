@@ -1,16 +1,16 @@
 /**
- * Output settings del Export DDL (doc 93 D1): CÓMO se escribe todo DDL y cómo
- * se nombran los archivos del zip. Son dato del PROYECTO (Data Standards →
- * DDL export rules → Output, versionadas); el modal Export DDL arranca desde
- * ellas y permite ajustarlas para un export puntual. Espejo de
+ * Output settings del Export DDL: cómo se escribe el DDL y cómo se nombran los
+ * archivos del zip. Son dato del proyecto (Data Standards → DDL export rules →
+ * Output, versionadas); el modal Export DDL arranca desde ellas y permite
+ * ajustarlas para un export puntual. Espejo de
  * `app/features/ddl_rules/output.py` del backend.
  *
- * Doc 101: `dialect` = con qué dialecto abre el modal (Databricks por default)
- * y `oracle` = la configuración PROPIA de Oracle. Las claves planas de siempre
- * son las de Databricks; `fileNames` es de los dos dialectos.
+ * `dialect` = con qué dialecto abre el modal (Databricks por default) y
+ * `oracle` = la configuración propia de Oracle. Las claves planas son las de
+ * Databricks; `fileNames` es de los dos dialectos.
  *
- * Doc 106: Oracle ya no tiene mapeo de tipos (`typeMap`) ni tamaño máximo de
- * strings (`maxStringSize`); si una versión anterior los guardó, se ignoran.
+ * Oracle no tiene mapeo de tipos (`typeMap`) ni tamaño máximo de strings
+ * (`maxStringSize`); si la configuración guardada los trae, se ignoran.
  */
 import { DEFAULT_DATABRICKS_OPTS, type DatabricksDdlOptions, type DdlDialect } from './generators';
 import { DEFAULT_FILE_NAMES, type DdlFileNames } from './ddlExportBundle';
@@ -18,9 +18,9 @@ import { DEFAULT_ORACLE_OPTS, type OracleDdlOptions } from './oracle';
 
 export type DdlOutputSettings = Omit<DatabricksDdlOptions, 'partitionsLast'> & {
   fileNames: DdlFileNames;
-  /** Doc 101: dialecto con el que abre el modal Export DDL. */
+  /** Dialecto con el que abre el modal Export DDL. */
   dialect: DdlDialect;
-  /** Doc 101: configuración propia de Oracle. */
+  /** Configuración propia de Oracle. */
   oracle: OracleDdlOptions;
 };
 
@@ -49,7 +49,7 @@ const ORACLE_ENUMS: Record<string, readonly string[]> = {
   identifierCase: ['as-is', 'lower', 'upper'],
   quoteIdentifiers: ['when-needed', 'always'],
   typeCase: ['lower', 'upper'],
-  schemaMode: ['none', 'model', 'custom'],                  // doc 108
+  schemaMode: ['none', 'model', 'custom'],
 };
 const ORACLE_BOOLS = ['includeViews', 'includeKeys', 'includeNotNull', 'includeComments'];
 const ORACLE_TEXTS = ['defaultSchema'];
@@ -68,8 +68,8 @@ function mergeOracle(target: Record<string, unknown>, raw: unknown): void {
 }
 
 /** Defaults + lo guardado en el proyecto. Defensivo: una clave desconocida o
- *  un valor inválido se ignoran (rige el default) — nunca rompe el modal. Un
- *  proyecto guardado antes del doc 101 abre en Databricks con Oracle por default. Puro. */
+ *  un valor inválido se ignoran (rige el default); nunca rompe el modal. Un
+ *  proyecto sin `dialect` ni `oracle` guardados abre en Databricks con Oracle por default. Puro. */
 export function mergeOutputSettings(raw?: Record<string, unknown> | null): DdlOutputSettings {
   const out = structuredClone(DEFAULT_OUTPUT_SETTINGS) as unknown as Record<string, unknown>;
   const files = out.fileNames as Record<string, unknown>;

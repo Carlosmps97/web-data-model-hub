@@ -14,7 +14,7 @@ import type { Project } from '@/types/model';
 type Origin = 'empty' | 'copy';
 
 /**
- * NewProjectModal (doc 75 D15) — crea un proyecto vacío o copiando bloques de
+ * NewProjectModal: crea un proyecto vacío o copiando bloques de
  * Data Standards de otro proyecto (foto, sin vínculo). La creación es la única
  * operación directa sobre un proyecto; renombrar/borrar van por draft.
  */
@@ -54,7 +54,7 @@ export default function NewProjectModal({ open, onClose, onCreated }: {
   const countOf = (b: StandardsBlock): string => {
     if (!summary) return '';
     if (b === 'naming') return summary.naming ? 'table + column rules' : '—';
-    const n = (b === 'ddl' ? summary.rules : summary[b]) ?? 0;   // doc 109: `themes` puede faltar (backend viejo)
+    const n = (b === 'ddl' ? summary.rules : summary[b]) ?? 0;   // `themes` puede faltar en la respuesta
     return `${n.toLocaleString('en-US')} item${n === 1 ? '' : 's'}`;
   };
 
@@ -96,7 +96,7 @@ export default function NewProjectModal({ open, onClose, onCreated }: {
         <label className="dmh-newproj-field">
           <span className="dmh-newproj-label">Name</span>
           <input className="rd-input" value={name} onChange={(e) => { setName(e.target.value); setNameError(null); }}
-            placeholder="e.g. Modelo DDV" autoFocus aria-invalid={!!nameError} />
+            placeholder="e.g. Modelo Ventas" autoFocus aria-invalid={!!nameError} />
           {nameError && <span className="dmh-newproj-error">{nameError}</span>}
         </label>
         <label className="dmh-newproj-field">

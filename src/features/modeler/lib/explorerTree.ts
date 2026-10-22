@@ -1,6 +1,6 @@
-// Explorer unificado (doc 71 §1) — helpers PUROS del árbol por proyecto:
-// alcance de tablas/vistas, agrupación por esquema, resolución de canvases
-// para "ir al objeto" y el filtro liviano de la cabecera.
+// Explorer unificado — helpers puros del árbol por proyecto: alcance de
+// tablas/vistas, agrupación por esquema, resolución de canvases para "ir al
+// objeto" y el filtro liviano de la cabecera.
 
 export interface CanvasLike { id: string; name: string; tableIds: string[]; viewIds?: string[] | null; folderId?: string | null }
 
@@ -18,7 +18,7 @@ export function canvasesWithTable(canvases: CanvasLike[], tableId: string): Canv
   return canvases.filter((sa) => (sa.tableIds ?? []).includes(tableId));
 }
 
-/** Canvases donde la vista es miembro (`viewIds`, doc 70); si ningún canvas
+/** Canvases donde la vista es miembro (`viewIds`); si ningún canvas
  *  materializó su lista, cae a los canvases de sus tablas fuente. */
 export function canvasesWithView(canvases: CanvasLike[], viewId: string, sourceTableIds: string[]): CanvasLike[] {
   const explicit = canvases.filter((sa) => (sa.viewIds ?? []).includes(viewId));
@@ -27,12 +27,12 @@ export function canvasesWithView(canvases: CanvasLike[], viewId: string, sourceT
 }
 
 /**
- * Índice inverso canvas→objeto (perf del Explorer, doc 72): en «Modelo DDV» hay
- * ~2.1k tablas × cientos de canvases, y el render llamaba `canvasesWithTable`/
- * `canvasesWithView` (un barrido de TODOS los canvases) por cada fila y en cada
- * re-render — O(filas×canvases). Este índice se construye UNA vez por lista de
- * canvases y deja cada lookup en O(1); `order` preserva el orden de los canvases
- * para que el fallback por fuente sea idéntico a `canvasesWithView`.
+ * Índice inverso canvas→objeto para el rendimiento del Explorer: en un modelo
+ * grande (miles de tablas × cientos de canvases), llamar a `canvasesWithTable`/
+ * `canvasesWithView` (un barrido de todos los canvases) por cada fila y en cada
+ * re-render cuesta O(filas×canvases). Este índice se construye una vez por lista
+ * de canvases y deja cada lookup en O(1); `order` preserva el orden de los
+ * canvases para que el fallback por fuente sea idéntico a `canvasesWithView`.
  */
 export interface CanvasIndex {
   byTable: Map<string, CanvasLike[]>;
@@ -52,12 +52,12 @@ export function buildCanvasIndex(canvases: CanvasLike[]): CanvasIndex {
   return { byTable, byView, order };
 }
 
-/** Igual que `canvasesWithTable`, desde el índice (O(1)). */
+/** Igual que `canvasesWithTable`, a partir del índice (O(1)). */
 export function indexCanvasesWithTable(idx: CanvasIndex, tableId: string): CanvasLike[] {
   return idx.byTable.get(tableId) ?? [];
 }
 
-/** Igual que `canvasesWithView`, desde el índice: miembros explícitos (`viewIds`)
+/** Igual que `canvasesWithView`, a partir del índice: miembros explícitos (`viewIds`)
  *  o, si ninguno, la unión (sin duplicados, en orden de canvas) de los canvases
  *  de sus tablas fuente. */
 export function indexCanvasesWithView(idx: CanvasIndex, viewId: string, sourceTableIds: string[]): CanvasLike[] {
@@ -70,7 +70,7 @@ export function indexCanvasesWithView(idx: CanvasIndex, viewId: string, sourceTa
   return out;
 }
 
-/** Destino del click: el canvas ABIERTO si contiene el objeto; único canvas →
+/** Destino del clic: el canvas abierto si contiene el objeto; único canvas →
  *  ese; varios → null (el llamador ofrece elegir); ninguno → undefined. */
 export function pickCanvas<T extends { id: string }>(candidates: T[], activeSaId: string | null): T | null | undefined {
   if (candidates.length === 0) return undefined;

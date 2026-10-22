@@ -17,25 +17,25 @@ import {
 } from '../lib/schemaStaging';
 
 /**
- * Gestión de esquemas (doc 18 v2, botón "Esquemas" de Structure) con STAGING:
- * crear / renombrar / cambiar qué contiene / eliminar quedan como cambios
- * PENDIENTES en el modal y se registran TODOS JUNTOS en la versión activa con
- * "Save" — igual que los canvases: forman parte de TU versión y los demás los
- * ven recién al publicar (no hay una capa de versionado aparte). Antes de
- * guardar, cada pendiente sobre un esquema existente muestra su IMPACTO
- * efectivo (tablas · vistas · canvases). El rename propaga server-side a todas
- * las tablas/vistas del esquema dentro del draft; el delete se rechaza (409
- * legible) si tiene tablas o vistas.
+ * Gestión de esquemas (botón "Schemas" de Structure) con staging: crear /
+ * renombrar / cambiar qué contiene / eliminar quedan como cambios pendientes en
+ * el modal y se registran todos juntos en la versión activa con "Save", igual
+ * que los canvases: forman parte de la versión del usuario y los demás los ven
+ * al publicarse (no hay una capa de versionado aparte). Antes de guardar, cada
+ * pendiente sobre un esquema existente muestra su impacto efectivo (tablas ·
+ * vistas · canvases). El rename propaga server-side a todas las tablas/vistas
+ * del esquema dentro del draft; el delete se rechaza (409 legible) si tiene
+ * tablas o vistas.
  *
- * Doc 119: un esquema contiene tablas, vistas o ambas (`both`, badge «tables +
- * views»); se elige al crearlo y se puede cambiar desde la fila. Es lo que
- * filtran los combos de esquema de tablas y de vistas.
+ * Un esquema contiene tablas, vistas o ambas (`both`, badge «tables + views»);
+ * se elige al crearlo y se puede cambiar desde la fila. Es lo que filtran los
+ * combos de esquema de tablas y de vistas.
  *
- * Doc 80 §2: el campo "New schema" hace DOBLE trabajo — mientras escribes
- * filtra la lista de abajo por «contiene» (con ~390 esquemas, buscar el que
- * quieres renombrar era scrollear a ciegas) y, si nada coincide, ese texto es
- * el nombre del esquema nuevo. El alta de UN esquema desde un combo (antes el
- * atajo `_VU` del doc 80 §1) va por `SchemaCreateDialog` (doc 96).
+ * El campo "New schema" cumple doble función: mientras se escribe filtra la
+ * lista de abajo por «contiene» (con cientos de esquemas, ubicar el que se
+ * quiere renombrar sin filtro obligaría a recorrer la lista a ciegas) y, si
+ * nada coincide, ese texto es el nombre del esquema a crear. El alta de un
+ * esquema desde un combo va por `SchemaCreateDialog`.
  */
 export default function SchemaManagerModal({ onClose, pushToast }: {
   onClose: () => void;
@@ -49,20 +49,20 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
 
   const [staged, setStaged] = useState<StagedOp[]>([]);
   const [newName, setNewName] = useState('');
-  // Qué contendrá el esquema nuevo (doc 44) — Erwin no trae este dato, nace acá.
+  // Qué contendrá el esquema a crear: Erwin no trae este dato, nace aquí.
   const [newKind, setNewKind] = useState<SchemaKind>('tables');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Edición inline de nombre: fila existente ({id}) o create pendiente ({key}).
   const [editing, setEditing] = useState<{ id?: string; key?: string; name: string } | null>(null);
-  // Fila con el selector de qué contiene abierto (doc 119).
+  // Fila con el selector de qué contiene abierto.
   const [kindEdit, setKindEdit] = useState<string | null>(null);
-  // Impacto por esquema existente (se muestra en el pendiente, ANTES del Save).
+  // Impacto por esquema existente (se muestra en el pendiente, antes de guardar).
   const [impacts, setImpacts] = useState<Record<string, SchemaImpact | 'loading'>>({});
 
   const vLabel = versionLabel ?? 'current';
 
-  // Doc 96: la MISMA validación que el alta desde un combo (schemaNameError).
+  // La misma validación que el alta desde un combo (schemaNameError).
   const nameError = (name: string, exclude?: string): string | null => {
     const names = takenNames(schemas, staged);
     if (exclude) names.delete(exclude.toLowerCase());
@@ -121,10 +121,10 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     if (ops.length === 0) return;
     setBusy(true); setError(null);
     const done = new Set<string>();
-    // Doc 105 (H1): varias escrituras seguidas — todas en la sesión donde
-    // empezó: si en el medio se abrió otra versión (o la revalidación la
-    // degradó), lo que falta NO se aplica y el diálogo se cierra (ya no es de
-    // la versión en pantalla). Un fallo espera antes la revalidación (H7).
+    // Varias escrituras seguidas, todas en la sesión donde empezó: si en el
+    // medio se abrió otra versión (o la revalidación la degradó), lo que falta
+    // no se aplica y el diálogo se cierra (deja de corresponder a la versión en
+    // pantalla). Un fallo espera primero la revalidación.
     const pin = pinSession();
     const onError = reportWriteError((e) => {
       // Los ya aplicados salen del staging; el que falló (y los que siguen) quedan.
@@ -133,7 +133,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     });
     try {
       markDirty();
-      // Doc 75 D18: renombrar propaga a todas las tablas/vistas del esquema — bloqueante.
+      // Renombrar propaga a todas las tablas/vistas del esquema: operación bloqueante.
       await runBlocking('Applying schema changes…', async () => {
         for (const op of ops) {
           pin.check();
@@ -194,7 +194,7 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
     <button className="rd-btn rd-btn-icon rd-btn-ghost rd-btn-sm" title={title} disabled={busy} onClick={onClick}>{node}</button>
   );
 
-  // Badge de lo que contiene el esquema (doc 44 / doc 119); sin kind no se muestra.
+  // Badge de lo que contiene el esquema; sin kind no se muestra.
   const kindLabel = (k: SchemaKind) => (k === 'both' ? 'tables + views' : k);
   const kindBadge = (k?: SchemaKind | null) => (k ? (
     <span className="rd-small rd-mono" style={{ flexShrink: 0, padding: '1px 7px', border: '1px solid var(--border-soft, #EAEDF2)', borderRadius: 999, color: 'var(--text-muted, #8A93A5)', background: 'var(--fill-4, #F7F9FC)' }}>
@@ -203,8 +203,8 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
   ) : null);
   const KINDS: readonly SchemaKind[] = ['tables', 'views', 'both'];
   const segLabel = (k: SchemaKind) => (k === 'tables' ? 'Tables' : k === 'views' ? 'Views' : 'Both');
-  // Selector inline de qué contiene un esquema existente (doc 119): preselecciona
-  // su kind actual, elegir stagea y cierra; Escape sólo cierra el selector.
+  // Selector inline de qué contiene un esquema existente: preselecciona su
+  // kind actual, elegir stagea y cierra; Escape solo cierra el selector.
   const kindRow = (s: DbSchema) => {
     const current = s.kind ?? null;
     return (
@@ -234,8 +234,9 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
   );
 
   const creates = staged.filter((o): o is Extract<StagedOp, { kind: 'create' }> => o.kind === 'create');
-  // Doc 80 §2: lo que escribes en "New schema" filtra la lista (contiene, CI).
-  // Los pendientes siguen visibles: trabajo sin guardar no se esconde.
+  // Lo que se escribe en "New schema" filtra la lista («contiene», sin
+  // distinguir mayúsculas). Los pendientes siguen visibles: el trabajo sin
+  // guardar no se esconde.
   const filter = newName.trim();
   // La fila con un editor abierto (nombre o kind) tampoco se esconde: si se
   // desmontara, al reaparecer su editor volvería a tomar el foco mientras se tipea.
@@ -268,11 +269,11 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
       <div style={{ marginBottom: 14 }}>
         <label style={lbl}>New schema · type to filter the list</label>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input className="rd-input rd-mono" autoFocus placeholder="search or new name, e.g. bcp_ddv_clientes" value={newName}
+          <input className="rd-input rd-mono" autoFocus placeholder="search or new name, e.g. stg_clientes" value={newName}
             onChange={(e) => { setNewName(e.target.value); setError(null); }}
             onKeyDown={(e) => { if (e.key === 'Enter') addCreate(); }}
             style={{ flex: 1 }} />
-          {/* Qué contendrá (doc 44): separa tablas de vistas al acotar por esquema. */}
+          {/* Qué contendrá: separa tablas de vistas al acotar por esquema. */}
           <div className="rd-seg" style={{ flexShrink: 0 }}>
             <button type="button" className={newKind === 'tables' ? 'active' : ''} onClick={() => setNewKind('tables')}>Tables</button>
             <button type="button" className={newKind === 'views' ? 'active' : ''} onClick={() => setNewKind('views')}>Views</button>

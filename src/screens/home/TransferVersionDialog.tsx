@@ -1,19 +1,19 @@
 /**
- * TransferVersionDialog (doc 104) — pasa un DRAFT a otro usuario desde
+ * TransferVersionDialog: pasa un draft a otro usuario desde
  * Home › Version tools › Version details. Lo abre su dueño o un
  * administrador (también para asignárselo a sí mismo).
  *
- * Sólo ofrece usuarios cuyo rol edita modelos (`model.edit`), sin el dueño
+ * Solo ofrece usuarios cuyo rol edita modelos (`model.edit`), sin el dueño
  * actual: quien la reciba debe poder editarla y enviarla. La nota es opcional
  * y queda en la historia de la versión. El backend re-valida todo (403/409/400
  * con mensaje legible, que se muestra acá sin cerrar el diálogo).
  *
- * Pinta por ENCIMA del popup de herramientas (`dmh-backdrop--top`) y consume
+ * Pinta por encima del popup de herramientas (`dmh-backdrop--top`) y consume
  * su propio ESC en captura para no cerrar también el popup de abajo. El foco
  * entra al diálogo al abrirse (y al selector cuando la lista termina de
  * cargar) y Tab no sale de él; el popup de abajo queda `inert` mientras tanto.
  * Viaja el dueño que mostraba la pantalla (`expectedOwner`): si otra sesión lo
- * cambió en el medio, el backend responde 409 y no se mueve el draft ajeno.
+ * cambia en el medio, el backend responde 409 y no se mueve el draft ajeno.
  */
 import { useEffect, useRef, useState } from 'react';
 import { trapTab } from '@/components/ui/focusTrap';
@@ -31,10 +31,10 @@ export default function TransferVersionDialog({
   userName: (id?: string | null) => string;
   onClose: () => void;
   onTransferred: (updated: ChangesetDetail) => void;
-  /** La versión cambió por fuera (403/404/409): el padre recarga lista y
+  /** La versión se modificó por fuera (403/404/409): el padre recarga lista y
    *  detalle; este diálogo sigue abierto con el motivo. */
   onStale: (status: number) => void;
-  /** Adónde va el foco al cerrar si quien abrió el diálogo ya no está en
+  /** Adónde va el foco al cerrar si quien abrió el diálogo dejó de estar en
    *  pantalla (el padre recargó el detalle y re-creó el botón). */
   returnFocus?: () => HTMLElement | null | undefined;
 }) {
@@ -43,7 +43,7 @@ export default function TransferVersionDialog({
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Sube cuando un 400 dice que la lista quedó vieja (el destino perdió el rol).
+  // Sube cuando un 400 indica que la lista está desactualizada (el destino perdió el rol).
   const [usersTick, setUsersTick] = useState(0);
   const selectRef = useRef<HTMLSelectElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -54,7 +54,7 @@ export default function TransferVersionDialog({
 
   useEffect(() => {
     let alive = true;
-    listUsers('model.edit')
+    listUsers('model.edit', version.projectId)
       .then((rows) => {
         if (!alive) return;
         const targets = transferTargets(rows, version.owner);
@@ -63,10 +63,10 @@ export default function TransferVersionDialog({
       })
       .catch((e: unknown) => { if (alive) { setUsers([]); setError(apiErrorMessage(e, "Couldn't load the users.")); } });
     return () => { alive = false; };
-  }, [version.owner, usersTick]);
+  }, [version.owner, version.projectId, usersTick]);
 
   // Foco: al abrir, el diálogo (el selector está deshabilitado mientras carga
-  // la lista); cuando la lista llega, el selector — sólo si el usuario no
+  // la lista); cuando la lista llega, el selector, solo si el usuario no
   // movió el foco (p. ej. ya está escribiendo la nota). Al cerrar, vuelve a
   // quien abrió el diálogo si sigue en pantalla; si no, a lo que indique el
   // padre (`returnFocus` lee el DOM al cerrar: la primera versión alcanza).
@@ -111,7 +111,7 @@ export default function TransferVersionDialog({
     } catch (e) {
       setError(apiErrorMessage(e, "Couldn't transfer the version."));
       if (e instanceof ApiError) {
-        if (e.status === 400) setUsersTick((t) => t + 1);      // la lista de destinos quedó vieja
+        if (e.status === 400) setUsersTick((t) => t + 1);      // la lista de destinos está desactualizada
         if (e.status === 403 || e.status === 404 || e.status === 409) onStale(e.status);
       }
       setBusy(false);

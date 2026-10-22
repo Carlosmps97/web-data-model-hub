@@ -28,9 +28,9 @@ export function existingCopies(physicalName: string, taken: string[]): string[] 
 }
 
 /**
- * «Paste table» (doc 118): antes de pegar muestra el nombre final (con el aviso
- * si ya existe y se crea como copy n), qué viaja de cada faceta y qué no se
- * puede copiar; los checks deciden UDPs y parent domains. Lo copiado en OTRO
+ * «Paste table»: antes de pegar muestra el nombre final (con el aviso si ya
+ * existe y se crea como copy n), qué viaja de cada faceta y qué no se puede
+ * copiar; los checks deciden UDPs y parent domains. Lo copiado en otro
  * proyecto se revisa contra los estándares de los dos (los del origen, de su
  * snapshot). Confirmar graba exactamente lo que se mostró (`pasteTable(prepared)`).
  */
@@ -101,8 +101,8 @@ export default function PasteTablePopup({ onClose, pushToast }: {
       onClose();
     } catch (e) {
       await onError(e);
-      // Lo que falló (otro tomó el nombre o el esquema, un tope de largo) se
-      // revisa de nuevo con los datos de ahora.
+      // Lo que falló (otro usuario tomó el nombre o el esquema, un tope de
+      // largo) se revisa de nuevo con los datos vigentes.
       setAttempt((a) => a + 1);
     } finally { setSaving(false); }
   };

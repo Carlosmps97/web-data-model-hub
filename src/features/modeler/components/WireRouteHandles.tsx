@@ -14,7 +14,7 @@ import {
  *  umbral con que el canvas separa el temblor del trackpad de un arrastre. */
 const DRAG_THRESHOLD = 4;
 /** Pausa después de la última flecha para grabar: varias flechas seguidas son
- *  UN movimiento (una escritura, una entrada de Undo). */
+ *  un solo movimiento (una escritura, una entrada de Undo). */
 const NUDGE_SAVE_MS = 600;
 const ARROWS: Record<string, [number, number]> = {
   ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1],
@@ -28,12 +28,12 @@ interface Drag {
   last: RoutePoint[] | null;
   /** El gesto ya terminó (soltó, canceló o se desmontó); puede faltar el pointerup. */
   over: boolean;
-  /** Termina el gesto SIN guardar y suelta los listeners. */
+  /** Termina el gesto sin guardar y suelta los listeners. */
   stop: () => void;
 }
 
-/** El `click` que el navegador despacha al soltar un arrastre cae donde quedó
- *  el cursor — sobre el fondo, si el imán o un Esc dejaron el punto lejos — y
+/** El `click` que el navegador despacha al soltar un arrastre cae donde esté
+ *  el cursor (sobre el fondo, si el imán o un Esc dejaron el punto lejos) y
  *  deseleccionaría el wire. Se descarta ese clic, y solo ese. */
 function swallowNextClick(): void {
   const swallow = (ev: MouseEvent) => { ev.stopPropagation(); ev.preventDefault(); };
@@ -42,9 +42,9 @@ function swallowNextClick(): void {
 }
 
 /**
- * Tiradores del trazo manual de un wire (doc 99). Solo se montan sobre el wire
- * SELECCIONADO, en sesión de edición y con zoom de detalle. Van en la capa HTML
- * de etiquetas de React Flow y quedan ENCIMA de los bloques (un punto soltado
+ * Tiradores del trazo manual de un wire. Solo se montan sobre el wire
+ * seleccionado, en sesión de edición y con zoom de detalle. Van en la capa HTML
+ * de etiquetas de React Flow y quedan encima de los bloques (un punto soltado
  * sobre un bloque se puede volver a agarrar), con `nodrag nopan nokey`: sus
  * gestos no mueven el canvas, no hacen zoom ni abren un rectángulo de selección.
  *
@@ -56,12 +56,12 @@ function swallowNextClick(): void {
  *  · botón ↺      — vuelve al camino automático.
  *
  * Mientras se arrastra el trazo vive en el estado local del wire (`onDraft`);
- * se guarda UNA vez, al soltar (`onCommit`). El arrastre escucha en `window`:
+ * se guarda una vez, al soltar (`onCommit`). El arrastre escucha en `window`:
  * el tirador que lo inició puede desmontarse cuando el trazo cambia de forma.
  *
- * Los tiradores aparecen BAJO el cursor de quien acaba de seleccionar el wire:
+ * Los tiradores aparecen bajo el cursor de quien acaba de seleccionar el wire:
  * el segundo clic de un doble clic sobre el wire puede caer en uno. Por eso un
- * punto solo se quita con un doble clic cuyos DOS clics fueron sobre él, y ↺
+ * punto solo se quita con un doble clic cuyos dos clics fueron sobre él, y ↺
  * solo responde a un clic simple; lo demás sigue hasta el wire y abre su popup.
  */
 export default function WireRouteHandles({ via, segments, center, ends, onDraft, onCommit }: {
@@ -80,16 +80,16 @@ export default function WireRouteHandles({ via, segments, center, ends, onDraft,
   const zoom = useStore((s) => s.transform[2]);
   const [dragging, setDragging] = useState<number | null>(null);
   const drag = useRef<Drag | null>(null);
-  /** Movimiento con flechas todavía sin grabar, y el reloj que lo graba. */
+  /** Movimiento con flechas pendiente de grabar, y el reloj que lo graba. */
   const nudged = useRef<RoutePoint[] | null>(null);
   const nudgeTimer = useRef<number | null>(null);
-  /** Punto que recibió el PRIMER clic de un posible doble clic. */
+  /** Punto que recibió el primer clic de un posible doble clic. */
   const firstClickOn = useRef<number | null>(null);
   // Lo último que recibió el componente, para los listeners de `window`.
   const live = useRef({ ends, zoom, onDraft, onCommit });
   useEffect(() => { live.current = { ends, zoom, onDraft, onCommit }; });
-  // Al desmontar con un gesto a medias (el zoom cruzó a LOD compacto, cambió
-  // el canvas) se suelta SIN guardar y el borrador se descarta: el wire no
+  // Al desmontar con un gesto a medias (el zoom cruza a LOD compacto, cambia
+  // el canvas) se suelta sin guardar y el borrador se descarta: el wire no
   // puede quedar mostrando un trazo que nunca se grabó.
   useEffect(() => () => {
     if (nudgeTimer.current != null) window.clearTimeout(nudgeTimer.current);
@@ -126,7 +126,7 @@ export default function WireRouteHandles({ via, segments, center, ends, onDraft,
     };
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId) return;
-      // El botón ya no está apretado y nadie avisó (menú contextual, otra
+      // El botón dejó de estar apretado sin aviso (menú contextual, otra
       // ventana): el arrastre termina acá, sin guardar.
       if ((ev.buttons & 1) === 0) { release(); end(false); return; }
       if (d.over) return;
@@ -202,8 +202,8 @@ export default function WireRouteHandles({ via, segments, center, ends, onDraft,
     e.stopPropagation();
     if (!nudged.current) return;
     if (nudgeTimer.current != null) window.clearTimeout(nudgeTimer.current);
-    // Doc 105 (ronda 3): se graba con la sesión de cuándo se movió — si al
-    // dispararse ya es otra, el borrador se descarta (no va a otra versión).
+    // Se graba con la sesión del momento en que se movió: si al dispararse ya
+    // es otra, el borrador se descarta (no va a otra versión).
     const pin = pinSession();
     nudgeTimer.current = window.setTimeout(() => {
       nudgeTimer.current = null;
@@ -249,14 +249,14 @@ export default function WireRouteHandles({ via, segments, center, ends, onDraft,
           tabIndex={-1}
           onPointerDown={(e) => startDrag(e, a.insertAt, insertPoint(via, a.insertAt, a))}
           onClick={swallow}
-          // El doble clic NO se detiene: burbujea hasta el wire y abre su popup
+          // El doble clic no se detiene: burbujea hasta el wire y abre su popup
           // (este tirador suele quedar bajo el cursor de quien hace doble clic
           // sobre la etiqueta o sobre el centro del wire).
         />
       ))}
       {via.map((p, i) => (
         <button
-          // Los puntos no tienen id: su identidad ES la posición en el trazo.
+          // Los puntos no tienen id: su identidad es la posición en el trazo.
           key={`pt-${i}`}
           type="button"
           className={`wk-wire-pt nodrag nopan nokey${dragging === i ? ' on' : ''}`}

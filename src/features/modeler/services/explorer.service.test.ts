@@ -1,4 +1,4 @@
-// Doc 72 §1: inventario del proyecto en UNA request + columnas perezosas.
+// Inventario del proyecto en una sola request + columnas perezosas.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/services/http', () => ({
@@ -31,7 +31,7 @@ const RAW: RawInventory = {
     { id: 't1', physicalName: 'M_CLIENTE', logicalName: 'Cliente', schema: 'core', columnCount: 12 },
     { id: 't2', physicalName: 'M_CUENTA', logicalName: 'Cuenta', schema: null, columnCount: 0 },
   ],
-  // Filas SLIM: conteo, nunca columnas (perf 2026-09-08).
+  // Filas slim: conteo, nunca columnas.
   views: [
     { id: 'v1', name: 'V_CLI', schema: 'core_vu', sourceTableIds: ['t1', 't9'], columnCount: 2, custom: false },
     { id: 'v2', name: 'V_CUSTOM', sourceTableIds: ['t2'], columnCount: 1, custom: true },
@@ -40,14 +40,14 @@ const RAW: RawInventory = {
   total: { tables: 2, views: 2 },
 };
 
-describe('mapView / mapInventory (doc 72)', () => {
-  it('resuelve nombres de fuentes desde el inventario; el badge es el CONTEO', () => {
+describe('mapView / mapInventory', () => {
+  it('resuelve nombres de fuentes desde el inventario; el badge es el conteo', () => {
     const inv = mapInventory(RAW);
     expect(inv.canvases).toBe(3);
     expect(inv.tables[1].schema).toBeNull();
     const v1 = inv.views[0];
     expect(v1.sourceTables).toEqual(['M_CLIENTE', 't9']);            // t9 no está en el inventario → id
-    expect(v1.columnCount).toBe(2);                                  // las columnas NO viajan en el inventario
+    expect(v1.columnCount).toBe(2);                                  // las columnas no viajan en el inventario
     expect(v1.custom).toBe(false);
     expect('columns' in v1).toBe(false);
   });
@@ -100,17 +100,17 @@ describe('projectInventory / explorerColumns conmutan por la versión activa', (
       { id: 'c1', physicalName: 'A', logicalName: 'a', dataType: 'INT', ordinal: 1 } as never,
     ]);
     const cols = await explorerColumns('t1');
-    expect(listReportColumns).toHaveBeenCalledWith('p1', 't1');     // doc 75: columnas del proyecto
+    expect(listReportColumns).toHaveBeenCalledWith('p1', 't1');     // columnas del proyecto
     expect(cols[0]).toMatchObject({ id: 'c1', physicalName: 'A', ordinal: 1 });
     expect(csvc.effective).not.toHaveBeenCalled();
 
-    // Columnas de una VISTA: endpoint propio, acotado al proyecto de la sesión.
+    // Columnas de una vista: endpoint propio, acotado al proyecto de la sesión.
     vi.mocked(apiGet).mockResolvedValueOnce([{ outputAlias: 'a', column: 'A', tableId: 't1' }]);
     await explorerViewColumns('v 1');
     expect(vi.mocked(apiGet).mock.calls[1][0]).toMatch(/\/api\/projects\/p1\/catalog\/views\/v%201\/columns$/);
   });
 
-  it('producción: las columnas salen en el orden único — PK primero (final review #6)', async () => {
+  it('producción: las columnas salen en el orden único — PK primero', async () => {
     useSessionStore.setState({ activeChangesetId: null });
     vi.mocked(listReportColumns).mockResolvedValueOnce([
       { id: 'x', physicalName: 'X', logicalName: 'x', dataType: 'INT', ordinal: 0, isPrimaryKey: false } as never,

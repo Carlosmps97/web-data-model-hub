@@ -1,5 +1,5 @@
-// Lógica PURA del ViewEditor multi-fuente (F3, spec §3-5) — separada del JSX
-// para testearla con vitest sin DOM.
+// Lógica pura del ViewEditor multi-fuente, separada del JSX para probarla con
+// vitest sin DOM.
 import type { ViewInput, ViewSource } from '@/services/views.service';
 
 /** Config editable por columna de la grilla del editor. */
@@ -13,9 +13,9 @@ export function splitColKey(key: string): { tableId: string; column: string } {
   return { tableId: key.slice(0, i), column: key.slice(i + 2) };
 }
 
-/** Sources persistidos = columnas incluidas EN ORDEN (explícitas, sin SELECT *).
+/** Sources persistidos = columnas incluidas en orden (explícitas, sin SELECT *).
  *  Alias solo si difiere de la columna; expression/castType solo si no vacíos.
- *  `valid` filtra claves fantasma (columnas que ya no existen en sus fuentes). */
+ *  `valid` filtra claves fantasma (columnas que no existen en sus fuentes). */
 export function serializeSources(order: string[], cfg: Record<string, ColCfg>, valid: Set<string>): ViewSource[] {
   return order
     .filter((k) => valid.has(k) && cfg[k]?.included)
@@ -29,20 +29,20 @@ export function serializeSources(order: string[], cfg: Record<string, ColCfg>, v
         outputAlias: out && out !== column ? out : undefined,
         expression: cc.expression.trim() || undefined,
         castType: cc.castType.trim() || undefined,
-        // Definición propia SOLO si el usuario escribió una (vacío ⇒ hereda la
-        // de la columna física; no duplicamos passthroughs).
+        // Definición propia solo si el usuario escribió una (vacío ⇒ hereda la
+        // de la columna física; no se duplican passthroughs).
         description: cc.description.trim() || undefined,
       };
     });
 }
 
-/** Doc 96 D6: cuerpo del guardado del editor de vistas. La estructura del
- *  builder es la verdad (el DDL sale de ahí); la User-Defined SQL viaja como
- *  texto INFORMATIVO ('' ⇒ se quita). Los UDP se conservan tal cual. */
+/** Cuerpo del guardado del editor de vistas. La estructura del builder es la
+ *  verdad (el DDL sale de ahí); la User-Defined SQL viaja como texto
+ *  informativo ('' ⇒ se quita). Los UDP se conservan tal cual. */
 export function viewSaveBody(a: {
   name: string; schema: string; sourceIds: string[]; sources: ViewSource[]; showOnCanvas: boolean;
   sql: string; description: string; sqlText: string; udpValues?: Record<string, string>;
-  /** Doc 109: el color de la vista (el editor no lo cambia: se conserva). */
+  /** Color de la vista (el editor no lo cambia: se conserva). */
   color?: string | null;
 }): ViewInput {
   return {
@@ -55,9 +55,9 @@ export function viewSaveBody(a: {
 
 /** Nombres de salida repetidos (sin distinguir mayúsculas) entre las columnas
  *  de la vista: con alias duplicados el DDL es inválido (p. ej. `CODMES` de dos
- *  fuentes sin renombrar) — minor #12 del doc 96. Nombre = alias o columna; las
- *  expresiones sin alias no cuentan (su alias va dentro del texto). Devuelve la
- *  grafía de la primera aparición. Pura. */
+ *  fuentes sin renombrar). Nombre = alias o columna; las expresiones sin alias
+ *  no cuentan (su alias va dentro del texto). Devuelve la grafía de la primera
+ *  aparición. Pura. */
 export function duplicateOutputNames(sources: ViewSource[]): string[] {
   const seen = new Map<string, string>();
   const dup = new Set<string>();

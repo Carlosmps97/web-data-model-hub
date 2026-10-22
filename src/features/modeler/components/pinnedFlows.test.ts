@@ -1,10 +1,10 @@
-// Doc 105 (H1, barrido) — ningún flujo con escrituras termina escribiendo en
-// OTRA versión: dentro de una función async, toda escritura que sigue a un
-// `await` va precedida de un `.check()` del pin tomado al empezar (o pasa por
-// `pinned(…)` / `pinnedViewDeps(…)`). Los servicios toman la versión AL
-// LLAMARLOS: sin eso, si mientras se esperaba se abrió otra versión (o la
-// revalidación la degradó), la escritura caía en ella. Revisión estática
-// (TypeScript) de TODOS los componentes y del store — sin DOM.
+// Ningún flujo con escrituras termina escribiendo en otra versión: dentro de una
+// función async, toda escritura que sigue a un `await` va precedida de un
+// `.check()` del pin tomado al empezar (o pasa por `pinned(…)` /
+// `pinnedViewDeps(…)`). Los servicios toman la versión al llamarlos: sin eso, si
+// mientras se esperaba se abrió otra versión (o la revalidación la degradó), la
+// escritura caería en ella. Revisión estática (TypeScript) de todos los
+// componentes y del store, sin DOM.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -12,16 +12,16 @@ import { STORE_WRITE_ACTIONS, storeWriters, unpinnedWrites } from './pinnedFlows
 
 const check = (code: string) => unpinnedWrites('x.tsx', code).map((v) => `${v.fn}:${v.write}`);
 
-describe('el análisis (doc 105, H1)', () => {
+describe('el análisis', () => {
   it('una escritura después de un await, sin check: falla; con el check en el medio: pasa', () => {
     expect(check('const f = async () => { await read(); await gov.updateColumn(c); };')).toEqual(['f:gov.updateColumn']);
     expect(check('const f = async () => { await read(); pin.check(); await gov.updateColumn(c); };')).toEqual([]);
     expect(check('const f = async () => { await read(); if (!pin.holds()) return; await gov.updateColumn(c); };')).toEqual([]);
-    // un check ANTES del await no alcanza
+    // un check previo al await no alcanza
     expect(check('const f = async () => { pin.check(); await read(); await gov.updateColumn(c); };')).toEqual(['f:gov.updateColumn']);
   });
 
-  it('la primera escritura (sin await antes) no necesita check; la segunda sí', () => {
+  it('la primera escritura (sin await previo) no necesita check; la segunda sí', () => {
     expect(check('const f = async () => { await gov.createColumn(c); await viewsSvc.updateView(v); };'))
       .toEqual(['f:viewsSvc.updateView']);
   });
@@ -56,12 +56,11 @@ describe('el análisis (doc 105, H1)', () => {
   });
 });
 
-// Doc 105 (ronda 3, R7 punto 9) — falsos negativos del análisis que encontró
-// la revisión: callbacks que corren DESPUÉS de una promesa, callbacks que
-// corren EN EL ACTO (su escritura es del flujo de afuera), accesos al store por
-// alias, `csvc`, callbacks de props y helpers que escriben, y checks que no son
-// del pin o que no protegen la escritura.
-describe('falsos negativos del análisis (doc 105, ronda 3)', () => {
+// Falsos negativos que el análisis cubre: callbacks que corren después de una
+// promesa, callbacks que corren en el acto (su escritura es del flujo de
+// afuera), accesos al store por alias, `csvc`, callbacks de props y helpers que
+// escriben, y checks que no son del pin o que no protegen la escritura.
+describe('falsos negativos del análisis', () => {
   it('`.then/.catch/.finally`: el callback corre después de la promesa — la escritura necesita su check adentro', () => {
     expect(check('const f = () => { read().then(() => gov.updateColumn(c)); };')).toEqual(['f:gov.updateColumn']);
     expect(check('const f = () => { save().catch(() => gov.deleteTable(id)); };')).toEqual(['f:gov.deleteTable']);
@@ -69,7 +68,7 @@ describe('falsos negativos del análisis (doc 105, ronda 3)', () => {
     expect(check('const f = () => { read().then(() => { pin.check(); return gov.updateColumn(c); }); };')).toEqual([]);
     // por referencia
     expect(check('const f = () => { read().then(saveAll); };\nconst saveAll = useModelerStore((s) => s.saveAll);')).toEqual(['f:saveAll']);
-    // control: lo que va DESPUÉS del `.then(…)` (sin await) corre antes que su callback
+    // control: lo que va después del `.then(…)` (sin await) corre antes que su callback
     expect(check('const f = () => { read().then(() => null); gov.updateColumn(c); };')).toEqual([]);
   });
 
@@ -121,7 +120,7 @@ describe('falsos negativos del análisis (doc 105, ronda 3)', () => {
     expect(check('const f = async () => { await read(); await placeUploadedObjects(ids, members, focus); };')).toEqual(['f:placeUploadedObjects']);
     expect(check('const f = async () => { await read(); await placeUploadedObjects(ids, members, focus, undefined, { pin, signal }); };')).toEqual([]);
     expect(check('const f = async () => { await read(); await writeWireRoute(sa, w, null); };')).toEqual(['f:writeWireRoute']);
-    // un helper local que escribe: llamarlo tras un await es escribir (aunque él verifique SU pin, tomado al llamarlo)
+    // un helper local que escribe: llamarlo tras un await es escribir (aunque él verifique su pin, tomado al llamarlo)
     expect(check('const save = async () => { await gov.updateColumn(c); };\nconst f = async () => { await read(); await save(); };')).toEqual(['f:save']);
     expect(check('const save = async () => { const pin = pinSession(); await read(); pin.check(); await gov.updateColumn(c); };\nconst f = async () => { await read(); await save(); };'))
       .toEqual(['f:save']);
@@ -135,7 +134,7 @@ describe('falsos negativos del análisis (doc 105, ronda 3)', () => {
       .toEqual(['f:b']);
   });
 
-  it('cuenta sólo el check/holds DEL PIN, y el holds sólo si protege la escritura', () => {
+  it('cuenta solo el check/holds del pin, y el holds solo si protege la escritura', () => {
     expect(check('const f = async () => { await read(); validator.check(); await gov.updateColumn(c); };')).toEqual(['f:gov.updateColumn']);
     expect(check('const f = async () => { await read(); const ok = pin.holds(); await gov.updateColumn(c); };')).toEqual(['f:gov.updateColumn']);
     expect(check('const f = async () => { await read(); if (pin.holds()) console.log(1); await gov.updateColumn(c); };')).toEqual(['f:gov.updateColumn']);
@@ -153,19 +152,20 @@ describe('falsos negativos del análisis (doc 105, ronda 3)', () => {
     expect(check('const f = async () => { await read(); if (stillEditing(cs)) void struct.setSubjectAreaDrawings(sa, d); };')).toEqual([]);
   });
 
-  it('un `catch` que espera y termina (return/throw) no precede a lo de después del try (ronda 4)', () => {
+  it('un `catch` que espera y termina (return/throw) no precede a lo de después del try', () => {
     expect(check('const f = async () => { let d; try { d = read(); } catch (e) { await report(e); return; } await gov.updateColumn(c); };')).toEqual([]);
     expect(check('const f = async () => { let d; try { d = read(); } catch (e) { await report(e); throw e; } await gov.updateColumn(c); };')).toEqual([]);
     // sin terminar, sí
     expect(check('const f = async () => { let d; try { d = read(); } catch (e) { await report(e); } await gov.updateColumn(c); };')).toEqual(['f:gov.updateColumn']);
-    // un await del try que termina NO: una excepción después del await sigue de largo por el catch
+    // un await del try que termina no: una excepción después del await sigue de largo por el catch
     expect(check('const f = async () => { try { await read(); return; } catch { log(); } await gov.updateColumn(c); };')).toEqual(['f:gov.updateColumn']);
   });
 
-  // Ronda 4 (R10-A): el confirm de un borrado con PRE-LECTURA (conteos,
-  // impacto) se abría en la sesión que hubiera al terminar la lectura, y su
-  // `action` corría la acción del store con el pin de ESE momento.
-  it('un `action:` creado tras un await: el confirm sólo en la sesión de afuera, y la acción con su pin', () => {
+  // El confirm de un borrado con prelectura (conteos, impacto) se abre solo si
+  // sigue la sesión de afuera, y su `action` corre la acción del store con ese
+  // pin; si no, abriría en la sesión que hubiera al terminar la lectura, con el
+  // pin de ese momento.
+  it('un `action:` creado tras un await: el confirm solo en la sesión de afuera, y la acción con su pin', () => {
     const bound = '\nconst deleteTable = useModelerStore((s) => s.deleteTable);';
     const make = (guard: string, inner: string) =>
       `const f = async () => { const pin = pinSession(); const n = await count(); ${guard} await confirmDeleteTable({ impact: n, action: async () => { ${inner} await deleteTable(id); } }); };${bound}`;
@@ -176,14 +176,14 @@ describe('falsos negativos del análisis (doc 105, ronda 3)', () => {
     // con `pinned` adentro
     expect(check('const f = async () => { const pin = pinSession(); const i = await impact(); if (!pin.holds()) return; await confirmDeleteColumn({ impact: i, action: () => pinned(pin, deleteColumn)(id) }); };\nconst deleteColumn = useModelerStore((s) => s.deleteColumn);'))
       .toEqual([]);
-    // un pin tomado DENTRO de la acción no sirve (es el de la sesión del clic)
+    // un pin tomado dentro de la acción no sirve (es el de la sesión del clic)
     expect(check(`const f = async () => { const pin = pinSession(); const n = await count(); if (!pin.holds()) return; await confirmDeleteTable({ impact: n, action: async () => { const p2 = pinSession(); p2.check(); await deleteTable(id); } }); };${bound}`))
       .toEqual(['f:action:deleteTable']);
-    // sin await antes (el confirm abre en el acto), como siempre
+    // sin await previo (el confirm abre en el acto): no hace falta pin
     expect(check(`const f = async () => { await confirmDeleteTable({ impact: n, action: async () => { await deleteTable(id); } }); };${bound}`)).toEqual([]);
   });
 
-  it('`reportWriteError(…)` creado tras un await toma la sesión de ESE momento: necesita el pin de afuera', () => {
+  it('`reportWriteError(…)` creado tras un await toma la sesión de ese momento: necesita el pin de afuera', () => {
     expect(check('const f = async () => { const ok = await confirmDialog(x); const onError = reportWriteError(r); };')).toEqual(['f:reportWriteError']);
     expect(check('const f = async () => { const pin = pinSession(); const ok = await confirmDialog(x); if (!ok || !pin.holds()) return; const onError = reportWriteError(r); };')).toEqual([]);
     expect(check('const f = async () => { const onError = reportWriteError(r); const ok = await confirmDialog(x); };')).toEqual([]);
@@ -194,10 +194,10 @@ describe('falsos negativos del análisis (doc 105, ronda 3)', () => {
   });
 });
 
-// Doc 105 (ronda 3): la lista de acciones del store que escriben está al día —
-// toda acción cuyo flujo escribe con la sesión de AHORA figura (si no, llamarla
-// tras un await pasaba sin check).
-describe('STORE_WRITE_ACTIONS está completa (doc 105, ronda 3)', () => {
+// La lista de acciones del store que escriben está al día: toda acción cuyo
+// flujo escribe con la sesión del momento figura en ella (si no, llamarla tras
+// un await pasaría sin check).
+describe('STORE_WRITE_ACTIONS está completa', () => {
   it('toda acción del store que escribe está en la lista', () => {
     const f = join(resolve(__dirname, '../../..'), 'store/useModelerStore.ts');
     const writers = storeWriters(f, readFileSync(f, 'utf-8'));
@@ -206,9 +206,9 @@ describe('STORE_WRITE_ACTIONS está completa (doc 105, ronda 3)', () => {
   });
 });
 
-describe('todos los flujos de escritura verifican el pin (doc 105, H1)', () => {
+describe('todos los flujos de escritura verifican el pin', () => {
   const SRC = resolve(__dirname, '../../..');
-  // Doc 105 (ronda 3): toda la carpeta de la carga (el arrange de la carga vive fuera de components/).
+  // Toda la carpeta de la carga (el arrange de la carga vive fuera de components/).
   const dirs = ['features/modeler/components', 'features/upload', 'features/ddl/components', 'components'];
   const files = [
     ...dirs.flatMap((d) => readdirSync(join(SRC, d), { recursive: true, encoding: 'utf-8' })
@@ -216,7 +216,7 @@ describe('todos los flujos de escritura verifican el pin (doc 105, H1)', () => {
       .map((f) => join(SRC, d, f))),
     join(SRC, 'store/useModelerStore.ts'),
   ];
-  it('hay archivos que revisar (incluida la colocación de lo nuevo de la carga, doc 113)', () => {
+  it('hay archivos que revisar (incluida la colocación de lo nuevo de la carga)', () => {
     expect(files.length).toBeGreaterThan(40);
     expect(files).toContain(join(SRC, 'features/upload/placeUploaded.ts'));
   });
@@ -227,12 +227,12 @@ describe('todos los flujos de escritura verifican el pin (doc 105, H1)', () => {
   });
 });
 
-// Escrituras DIFERIDAS (el análisis de arriba no ve timers): el cuerpo del panel
+// Escrituras diferidas (el análisis de arriba no ve timers): el cuerpo del panel
 // de columna guarda con debounce lo tipeado y, al cerrarse, escribe lo
-// pendiente — al cambiar de versión el panel se cierra y ese flush escribía en
-// la NUEVA. Van con el pin tomado al editar (`pinnedDebouncer`); el commit de
-// los nombres (tras physicalize) mira el pin de la última edición.
-describe('escrituras diferidas del panel de columna (doc 105, H1)', () => {
+// pendiente; al cambiar de versión el panel se cierra y ese flush escribiría en
+// la versión recién abierta. Van con el pin tomado al editar (`pinnedDebouncer`);
+// el commit de los nombres (tras physicalize) mira el pin de la última edición.
+describe('escrituras diferidas del panel de columna', () => {
   const code = readFileSync(join(__dirname, 'ColumnPropertiesPanel.tsx'), 'utf-8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
   it('debounce y flush por `pinnedDebouncer` (ningún timer escribe a mano)', () => {
@@ -240,15 +240,15 @@ describe('escrituras diferidas del panel de columna (doc 105, H1)', () => {
     expect(code).not.toMatch(/setTimeout\([^;]*onPatch/);
     expect(code).not.toMatch(/Object\.values\(pendingDeb\.current\)/);
   });
-  it('el commit de nombres escribe sólo si sigue la sesión de la última edición', () => {
+  it('el commit de nombres escribe solo si sigue la sesión de la última edición', () => {
     expect(code).toMatch(/onCommit: \(fields\) => \{ if \(namePin\.current\.holds\(\)\)/);
   });
 });
 
-// Doc 105 (ronda 3): el trazo de un wire movido con las flechas se graba tras
-// una pausa (temporizador): con el pin de cuándo se movió — si al dispararse la
+// El trazo de un wire movido con las flechas se graba tras una pausa
+// (temporizador), con el pin del momento en que se movió: si al dispararse la
 // sesión ya es otra, se descarta el borrador en vez de grabarlo.
-describe('temporizador del nudge de wires (doc 105, ronda 3)', () => {
+describe('temporizador del nudge de wires', () => {
   it('el guardado diferido mira el pin tomado al soltar las flechas', () => {
     const src = readFileSync(join(__dirname, 'WireRouteHandles.tsx'), 'utf-8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');

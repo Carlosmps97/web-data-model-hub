@@ -1,11 +1,11 @@
 /**
  * standardsDiff — ¿el guardado de una pantalla de Data Standards cambia algo?
- * (doc 105). Se compara lo que se ENVIARÍA contra lo vigente, normalizado igual
- * que el envío (recortes; un opcional ausente ≡ vacío). Sin cambio real el botón
- * de guardar queda deshabilitado con «No changes to apply», como el glosario
- * con su diff: antes un guardado sin cambios registraba una versión vacía. El
- * backend ahora responde 422 «There are no changes to apply.» a un lote sin
- * cambios efectivos — si igual llega, es un aviso neutro, no un error. Puro.
+ * Se compara lo que se enviaría contra lo vigente, normalizado igual que el
+ * envío (recortes; un opcional ausente ≡ vacío). Sin cambio real el botón de
+ * guardar queda deshabilitado con «No changes to apply», como el glosario con
+ * su diff, para no registrar una versión vacía. El backend responde 422 «There
+ * are no changes to apply.» a un lote sin cambios efectivos; si igual llega, es
+ * un aviso neutro, no un error. Puro.
  */
 import { ApiError } from '@/services/http';
 import { mergeOutputSettings, type DdlOutputSettings } from '@/features/ddl';
@@ -72,14 +72,13 @@ export const udpFormOf = (d: UdpDefinition): UdpForm => ({
   allowedValues: [...d.allowedValues], description: d.description ?? '',
 });
 
-/** Texto opcional: con valor viaja; vaciado viaja '' SÓLO si lo guardado tenía
- *  valor (el backend guarda sólo lo presente: ausente = queda como estaba). */
+/** Texto opcional: con valor viaja; vaciado viaja '' solo si lo guardado tenía
+ *  valor (el backend guarda solo lo presente: ausente = queda como estaba). */
 const clearable = (value: string, stored: string | null | undefined): string | undefined =>
   (value ? value : stored ? '' : undefined);
 
 /** Cuerpo del upsert de una definición UDP (lo que envía «Save & apply»).
- *  Doc 105: vaciar el default o la descripción guardados viaja como '' —
- *  antes no viajaba y no había forma de limpiarlos. */
+ *  Vaciar el default o la descripción guardados viaja como '': así se limpian. */
 export function udpEditInput(form: UdpForm, seg: { level: UdpLevel; view: UdpView }, stored: UdpDefinition | null): UdpEditInput {
   return {
     id: stored ? form.id : undefined, name: form.name.trim(), level: seg.level, view: seg.view, dataType: form.dataType,
@@ -109,19 +108,19 @@ const ruleShape = (r: DdlRuleEditInput) => ({
 });
 
 /** Regla: ¿el guardado cambia algo? `stored` null = alta (siempre). El backend
- *  graba la validación RECALCULADA (`same_rule`) y el editor sólo guarda una
- *  regla válida: si lo guardado quedó `invalid`/`stale` (p. ej. sembrada antes
- *  de que el kit trajera sus UDPs), re-guardarla sin tocar nada SÍ es un cambio
- *  — sin él la regla quedaba fuera del export sin salida. */
+ *  graba la validación recalculada (`same_rule`) y el editor solo guarda una
+ *  regla válida: si lo guardado está `invalid`/`stale` (p. ej. sembrada sin que
+ *  el proyecto tuviera sus UDPs), re-guardarla sin tocar nada sí es un cambio;
+ *  sin él la regla seguiría fuera del export sin salida. */
 export function ruleChanged(draft: DdlRuleEditInput, stored: DdlRule | null): boolean {
   if (!stored || stored.validationState !== 'valid') return true;
   return !sameValue(ruleShape(draft), ruleShape(toEditInput(stored)));
 }
 
-/** Lo que EMITE un lookup (backend `_resolve_lookup`): un valor mapeado gana
+/** Lo que emite un lookup (backend `_resolve_lookup`): un valor mapeado gana
  *  —null = no emitir; '' = emitir vacío— y, sin mapear, rige el default. Por eso
- *  «nada» (null) ≡ sin mapear SÓLO si el default también es nada: con default,
- *  mapear a null deja de emitirlo (doc 105). `undefined` no viaja (JSON). */
+ *  «nada» (null) ≡ sin mapear solo si el default también es nada: con default,
+ *  mapear a null deja de emitirlo. `undefined` no viaja (JSON). */
 const lookupShape = (l: DdlLookup) => {
   const dflt = l.default ?? null;
   const values = Object.fromEntries(Object.entries(l.values ?? {})
@@ -134,8 +133,8 @@ const NOT_EMITTED = '— nothing (not emitted)';
 /** Una fila del editor de lookups (misma regla que `lookupShape`): qué emite
  *  con el input vacío —sin mapear: el default o nada; «nada» (null): no se
  *  emite; '': se emite vacío— y qué acción la lleva al otro estado. 'nothing'
- *  sólo sin mapear y con default; 'unmap' con un valor, o con null si hay
- *  default: sin default, «nada» y «sin mapear» son lo mismo (doc 105). */
+ *  solo sin mapear y con default; 'unmap' con un valor, o con null si hay
+ *  default: sin default, «nada» y «sin mapear» son lo mismo. */
 export function lookupRow(l: DdlLookup, key: string): { placeholder: string; action: 'unmap' | 'nothing' | null } {
   const dflt = l.default ?? null;
   const v = Object.prototype.hasOwnProperty.call(l.values ?? {}, key) ? l.values[key] : undefined;
@@ -149,7 +148,7 @@ export function lookupRow(l: DdlLookup, key: string): { placeholder: string; act
 }
 
 /** Lookups & Functions: ¿el guardado cambia algo? «Nada» (null) ≡ sin mapear
- *  sólo cuando el lookup no tiene default. */
+ *  solo cuando el lookup no tiene default. */
 export function ddlConfigChanged(lookups: Record<string, DdlLookup>, functions: DdlRulesetConfig['functions'],
                                  config: DdlRulesetConfig): boolean {
   const shape = (ls: Record<string, DdlLookup>) => Object.fromEntries(Object.entries(ls).map(([k, l]) => [k, lookupShape(l)]));

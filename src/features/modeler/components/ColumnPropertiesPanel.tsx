@@ -41,19 +41,17 @@ const TABS: { id: ColTab; label: string }[] = [
 ];
 
 /**
- * Panel lateral de propiedades de UNA COLUMNA (doc 49) — contexto propio,
- * separado del Properties de la tabla. Ocupa la misma área `props` del grid:
- * mientras `selectedColumnId` esté seteado, este panel reemplaza al de tabla.
- * Misma estética (header + tabs subrayadas + cuerpo scrolleable) y mismo
- * contrato read-only: sin changeset editable abre como reader.
+ * Panel lateral de propiedades de una columna: contexto propio, separado del
+ * Properties de la tabla. Ocupa la misma área `props` del grid: mientras
+ * `selectedColumnId` esté seteado, este panel ocupa el lugar del de tabla. Misma
+ * estética (header + tabs subrayadas + cuerpo scrolleable) y mismo contrato
+ * read-only: sin changeset editable abre como reader.
  *
- * La edición reutiliza EXACTAMENTE la mecánica de la card expandida que
- * reemplaza (ColumnRow, hoy retirada): nameSync anti-carreras para los
- * nombres (doc 18 §6), debounce 400ms con flush al desmontar para
- * definición/tipo (doc 40), regla dominio→tipo del doc 46 y flags (doc 94:
- * marcar/desmarcar PK re-ubica la columna en el orden único — lo hace el
- * store). Las acciones ESTRUCTURALES (reorden, alta) siguen en el Properties
- * de la tabla.
+ * La edición usa nameSync anti-carreras para los nombres, debounce de 400ms
+ * con flush al desmontar para definición/tipo, la regla dominio→tipo de
+ * `applyDomainPick` y flags (marcar/desmarcar PK re-ubica la columna en el
+ * orden único; lo hace el store). Las acciones estructurales (reorden, alta)
+ * siguen en el Properties de la tabla.
  */
 export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   pushToast: (m: string, k?: 'err') => void;
@@ -69,7 +67,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   const reload = useModelerStore((s) => s.reload);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
-  // Doc 69: faceta activa (switch Logical/Physical del canvas) → UDPs y rótulos.
+  // Faceta activa (switch Logical/Physical del canvas) → UDPs y rótulos.
   const viewMode = useModelerStore((s) => s.viewMode);
   const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
   useEffect(() => {
@@ -80,9 +78,9 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
 
   const col = diagram?.columns.find((c) => c.id === selectedColumnId) ?? null;
   const table = diagram?.tables.find((t) => t.id === col?.tableId) ?? null;
-  // Hermanas en el ÚNICO orden (doc 81/94: PK primero y cada bloque por
-  // ordinal, como el canvas): la Metadata y el «Position #N» las usan — así el
-  // N coincide con lo que se ve en el canvas.
+  // Hermanas en el orden único (PK primero y cada bloque por ordinal, como el
+  // canvas): la Metadata y el «Position #N» las usan; así el N coincide con lo
+  // que se ve en el canvas.
   const cols = useMemo(
     () => orderColumns((diagram?.columns ?? []).filter((c) => c.tableId === col?.tableId)),
     [diagram, col?.tableId],
@@ -92,8 +90,8 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   const [domains, setDomains] = useState<ParentDomain[]>([]);
   useEffect(() => { gov.listDomains().then(setDomains).catch(() => {}); }, []);
 
-  // La columna dejó de existir en el diagrama (borrada en otra vista o el
-  // contexto cambió por debajo): cerrar y dejar a la vista el panel de tabla.
+  // Si la columna desaparece del diagrama (borrada en otra vista o por un cambio
+  // de contexto), el panel se cierra y queda a la vista el de la tabla.
   useEffect(() => {
     if (diagram && selectedColumnId && !diagram.columns.some((c) => c.id === selectedColumnId)) {
       setSelectedColumn(null);
@@ -112,7 +110,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
     document.body.style.userSelect = 'none';
     const move = (ev: PointerEvent) => onResize(window.innerWidth - ev.clientX);
     const up = () => {
-      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      try { el.releasePointerCapture(e.pointerId); } catch { /* se ignora */ }
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       document.body.style.userSelect = '';
@@ -124,11 +122,10 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
 
   if (!col || !table) return null;
 
-  // Upsert changeset-aware (mismo patchCol que tenía el panel de tabla): un
-  // cambio de PK lo re-ubica el store (doc 94 D2) y un rename FÍSICO re-apunta
-  // las vistas que referencian el nombre viejo.
-  // Doc 105: de la sesión donde empezó (H1: el re-apunte de vistas, tras el
-  // upsert, corta si cambió) y su fallo espera la revalidación (H7).
+  // Upsert changeset-aware: un cambio de PK lo re-ubica el store y un rename
+  // físico re-apunta las vistas que referencian el nombre anterior.
+  // Va con la sesión donde empezó (el re-apunte de vistas, tras el upsert, se
+  // corta si la sesión es otra) y su fallo espera la revalidación.
   const patchCol = async (id: string, fields: Partial<CanonicalColumn>) => {
     const before = cols.find((c) => c.id === id);
     const pin = pinSession();
@@ -146,29 +143,28 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
     } catch (e) { await onError(e); }
   };
 
-  // Borrado con impacto GLOBAL (spec 10 §8) — mismo flujo que tenía la card
-  // expandida: relaciones donde la columna es extremo, en cualquier canvas.
+  // Borrado con impacto global: relaciones donde la columna es extremo, en
+  // cualquier canvas.
   const removeCol = async () => {
     const name = col.physicalName;
     const noun = facetNouns(viewMode).member;
-    // Doc 105 (ronda 4, R10-A): el borrado es de la sesión donde se pidió — si
-    // mientras se lee el impacto se abre otra versión, el confirm no se abre en
-    // ella, y la acción verifica el pin al clic.
+    // El borrado es de la sesión donde se pidió: si mientras se lee el impacto
+    // se abre otra versión, el confirm no se abre en ella, y la acción verifica
+    // el pin al clic.
     const pin = pinSession();
-    // Ronda 4 (6a): con el motivo, como Properties y el Inspector (el «…nothing
-    // was deleted. Try again.» de una lectura caída, un 409).
+    // Con el motivo, como Properties y el Inspector (el «…nothing was deleted.
+    // Try again.» de una lectura caída, un 409).
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't delete the ${noun}`, 'err'));
-    // Doc 105 (ronda 3): sin el impacto (relaciones donde es extremo) no se
-    // ofrece el borrado — con `relIds` vacío quedaban relaciones con pares
-    // hacia una columna borrada.
+    // Sin el impacto (relaciones donde es extremo) no se ofrece el borrado: con
+    // `relIds` vacío quedarían relaciones con pares hacia una columna borrada.
     const onImpactError = reportWriteError(() => pushToast(`Couldn't check the relationships of this ${noun}: nothing was deleted. Try again.`, 'err'));
     try {
       let impact: gov.RelationshipImpact;
       try { impact = await gov.columnImpact(col.id); } catch (e) { await onImpactError(e); return; }
       if (!pin.holds()) return;
       const relIds = impact.relationships.map((r) => r.relId);
-      // Diálogo compartido con el Object Inspector (doc 89 §3.5). Cascade: el
-      // changeset registra el delete de la columna Y de cada relación
+      // Diálogo compartido con el Object Inspector. Cascade: el
+      // changeset registra el delete de la columna y de cada relación
       // afectada; el store cierra este panel al terminar.
       const ok = await confirmDeleteColumn({
         name, nouns: facetNouns(viewMode), impact,
@@ -182,7 +178,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   // la vista (deep-link panelFocusColId — el panel de tabla lo consume).
   const backToTable = () => { setPanelFocusCol(col.id); setSelectedColumn(null); };
 
-  const udpCount = countFacetUdpValues(col.udpValues, udpDefs, 'column', viewMode);   // doc 69: faceta activa
+  const udpCount = countFacetUdpValues(col.udpValues, udpDefs, 'column', viewMode);   // UDPs de la faceta activa
   const counts: Partial<Record<ColTab, number>> = { udps: udpCount };
 
   return (
@@ -191,7 +187,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
         <div className={`wk-props-resizer${resizing ? ' dragging' : ''}`}
           onPointerDown={startResize} title="Drag to resize" />
       )}
-      {/* ── Header: back + glyph + nombre + "table X · column" + close ── */}
+      {/* ── Cabecera: volver + glifo + nombre + "table X · column" + cerrar ── */}
       <div className="wk-props-top">
         <div className="wk-props-head">
           <button className="wk-props-close wk-props-back" title="Back to table properties" onClick={backToTable}>
@@ -199,7 +195,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
           </button>
           <div className="wk-props-glyph" aria-hidden><Icon name="columns" size={17} /></div>
           <div className="wk-props-id">
-            {/* Doc 69: en Lógico es el ATRIBUTO de la entidad; en Físico, la COLUMNA de la tabla. */}
+            {/* En Logical es el atributo de la entidad; en Physical, la columna de la tabla. */}
             <div className="wk-props-title">{viewMode === 'logical' ? (col.logicalName || col.physicalName) : (col.physicalName || col.logicalName)}</div>
             <div className="wk-props-sub">
               {facetNoun('table', viewMode)} <span className="rd-mono">{viewMode === 'logical' ? (table.logicalName || table.physicalName) : (table.physicalName || table.logicalName)}</span> · {facetNoun('column', viewMode)}
@@ -222,7 +218,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
       <div className="wk-props-body">
         {/* key=col.id: cambiar de columna remonta el editor — estado local,
             nameSync y debounces arrancan limpios (y el flush del desmontaje
-            persiste lo pendiente de la columna anterior, doc 40). */}
+            persiste lo pendiente de la columna anterior). */}
         <ColumnPropsBody
           key={col.id}
           col={col}
@@ -242,14 +238,13 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
 }
 
 /**
- * Cuerpo del panel (montado por columna vía `key`): estado de edición portado
- * 1:1 de la card expandida de ColumnRow. Todas las pestañas comparten esta
- * instancia — cambiar de pestaña NO pierde un tipeo en vuelo.
+ * Cuerpo del panel (montado por columna vía `key`). Todas las pestañas
+ * comparten esta instancia: cambiar de pestaña no pierde un tipeo en vuelo.
  *
- * Doc 89 §3.3: exportado — el Object Inspector lo monta tal cual (no lee el
- * diagrama: sólo `naming` del store) para editar la columna SIN canvas con la
- * misma mecánica. `switchHint` reemplaza el texto «Switch the canvas…» cuando
- * el switch de faceta es el del propio popup.
+ * Exportado: el Object Inspector lo monta tal cual (no lee el diagrama: solo
+ * `naming` del store) para editar la columna sin canvas con la misma mecánica.
+ * `switchHint` sustituye el texto «Switch the canvas…» cuando el switch de
+ * faceta es el del propio popup.
  */
 export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view, canEdit, onPatch, onDelete, switchHint }: {
   col: CanonicalColumn;
@@ -257,9 +252,9 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   cols: CanonicalColumn[];
   tab: ColTab;
   domains: ParentDomain[];
-  /** Doc 85: defs UDP del proyecto — oferta de UDP por defecto del dominio al asignarlo. */
+  /** Defs UDP del proyecto: oferta de UDP por defecto del dominio al asignarlo. */
   udpDefs: UdpDefinition[];
-  /** Doc 69: faceta activa del canvas (UDPs de Attribute vs Column). */
+  /** Faceta activa del canvas (UDPs de Attribute vs Column). */
   view: Facet;
   canEdit: boolean;
   onPatch: (id: string, fields: Partial<CanonicalColumn>) => Promise<void>;
@@ -270,38 +265,38 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   const hint = switchHint ?? FACET_SWITCH_HINT;
   const [logical, setLogical] = useState(col.logicalName);
   const [physical, setPhysical] = useState(col.physicalName);
-  // Doc 96 D8: un complejo es el mismo en las dos facetas — datos cargados antes
-  // de la regla (lógico `ARRAY<>` de Erwin) se muestran ya alineados.
+  // Un complejo es el mismo en las dos facetas: datos cargados con facetas
+  // distintas (lógico `ARRAY<>` de Erwin) se muestran ya alineados.
   const [dataType, setDataType] = useState(() => mirrorComplex(col.logicalDataType ?? '', col.dataType ?? ''));
   const [description, setDescription] = useState(col.description ?? '');
   const [domainId, setDomainId] = useState(col.parentDomainId ?? '');
-  // Doc 85: faceta física de la definición y faceta lógica del tipo.
+  // Faceta física de la definición y faceta lógica del tipo.
   const [physicalDescription, setPhysicalDescription] = useState(col.physicalDescription ?? '');
   const [logicalDataType, setLogicalDataType] = useState(() => mirrorComplex(col.dataType ?? '', col.logicalDataType ?? ''));
-  // Popup «Inherit from domain X» (doc 85 §3.6): guarda el patch armado por
-  // onDomain hasta que el modelador elija los UDP (Skip = aplicar sin UDP).
-  // Doc 105 (H1): `pin` = la sesión en que se eligió el dominio (el popup puede
-  // quedar abierto mientras la versión cambia).
+  // Popup «Inherit from domain X»: guarda el patch armado por onDomain hasta
+  // que el modelador elija los UDP (Skip = aplicar sin UDP). `pin` = la sesión
+  // en que se eligió el dominio (el popup puede quedar abierto mientras la
+  // versión cambia).
   const [inherit, setInherit] = useState<{ domain: ParentDomain; offer: DomainUdpOffer; also: string[]; fields: Partial<CanonicalColumn>; defaults: DomainDefaultsPatch; pin: SessionPin } | null>(null);
   const nouns = facetNouns(view);
-  // Doc 85 §3.7: campo de la OTRA faceta ⇒ solo-lectura (input disabled + hint).
+  // Campo de la otra faceta ⇒ solo lectura (input disabled + hint).
   const ro = (field: ColumnField) => !facetEditable('column', field, view);
   // Spinner del tipo mientras el cambio de dominio viaja al changeset.
   const [typeBusy, setTypeBusy] = useState(false);
   // Flags (PK/FK/Nullable/Partition) en vuelo: bloquea la fila + spinner.
   const [flagsBusy, setFlagsBusy] = useState(false);
-  // Nombres lógico/físico: los maneja nameSync (anti-carreras, doc 18 §6) —
-  // token de secuencia contra respuestas stale de physicalize, override manual
-  // del físico, y UN solo upsert con AMBOS campos.
+  // Nombres lógico/físico: los maneja nameSync (anti-carreras): token de
+  // secuencia contra respuestas stale de physicalize, override manual del
+  // físico, y un solo upsert con ambos campos.
   const onPatchRef = useRef(onPatch);
   onPatchRef.current = onPatch;
-  // Doc 83: la regla de case del scope column se aplica al físico TIPEADO —
+  // La regla de case del scope column se aplica al físico tipeado:
   // el input muestra lo que se va a persistir (el backend normaliza igual).
   const columnCase = useModelerStore((s) => s.naming?.column.case);
   const columnCaseRef = useRef(columnCase);
   columnCaseRef.current = columnCase;
-  // Doc 105 (H1): el pin de la ÚLTIMA edición de nombres — el commit de
-  // nameSync (tras physicalize y su debounce) escribe sólo si sigue esa sesión.
+  // Pin de la última edición de nombres: el commit de nameSync (tras
+  // physicalize y su debounce) escribe solo si sigue esa sesión.
   const namePin = useRef<SessionPin>(pinSession());
   const sync = useRef<NameSync | null>(null);
   if (!sync.current) {
@@ -312,31 +307,31 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
       // col.id es estable por instancia (el cuerpo se monta con key=col.id).
       onCommit: (fields) => { if (namePin.current.holds()) void onPatchRef.current(col.id, fields); },
     });
-    // Doc 68: re-siembra el override persistido — sin esto, tras recargar,
-    // renombrar el lógico re-derivaba y pisaba el físico custom en el draft.
+    // Re-siembra el override persistido: sin esto, tras recargar, renombrar el
+    // lógico re-derivaría y pisaría el físico custom en el draft.
     sync.current.reset(col.logicalName, col.physicalName, col.physicalNameOverridden ?? false);
   }
 
-  // Debounce de lo tipeado (definiciones, tipos). Doc 105 (H1): cada guardado
-  // va con el pin de cuándo se tipeó — al cambiar de versión el panel se cierra
-  // y hace flush: lo de la sesión anterior se descarta, no cae en la nueva.
+  // Debounce de lo tipeado (definiciones, tipos). Cada guardado va con el pin
+  // de cuándo se tipeó: al cambiar de versión el panel se cierra y hace flush;
+  // lo de la sesión anterior se descarta, no cae en la nueva.
   const deferred = useRef<ReturnType<typeof pinnedDebouncer<Partial<CanonicalColumn>>> | null>(null);
   if (!deferred.current) {
     deferred.current = pinnedDebouncer((fields: Partial<CanonicalColumn>) => onPatchRef.current(col.id, fields), 400);
   }
   const debounced = (key: string, fields: Partial<CanonicalColumn>) => deferred.current?.schedule(key, fields);
   useEffect(() => () => {
-    // Flush (doc 40): cerrar el panel o cambiar de columna DENTRO de la
+    // Flush: cerrar el panel o cambiar de columna dentro de la
     // ventana del debounce no pierde lo tipeado (description/dataType).
     deferred.current?.flush();
     sync.current?.dispose();
   }, []);
 
-  const onLogical = (v: string) => { namePin.current = pinSession(); sync.current?.setLogical(sanitizeLogicalName(v)); };   // doc 92 D8
+  const onLogical = (v: string) => { namePin.current = pinSession(); sync.current?.setLogical(sanitizeLogicalName(v)); };
   const onPhysical = (v: string) => { namePin.current = pinSession(); sync.current?.setPhysical(v); };
   const onDescription = (v: string) => { setDescription(v); debounced('description', { description: v.trim() || undefined }); };
   const onPhysicalDescription = (v: string) => { setPhysicalDescription(v); debounced('physicalDescription', { physicalDescription: v.trim() || undefined }); };
-  // Doc 96 D8: los DOS tipos viajan juntos en un solo parche ('types'): un
+  // Los dos tipos viajan juntos en un solo parche ('types'): un
   // complejo es el mismo en las dos facetas y dos upserts separados podrían
   // pisarse. El flag de override se recalcula solo en la faceta que cambia
   // respecto de lo guardado (`typeFacetPatch`).
@@ -355,16 +350,16 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
     debounced('types', typeFields(v, logi));
   };
   const onDomain = async (id: string) => {
-    const pin = pinSession();   // doc 105 (H1): la sesión de ESTA elección
-    // El select refleja el cambio AL INSTANTE (estado local); el reload del
+    const pin = pinSession();   // la sesión de esta elección
+    // El select refleja el cambio al instante (estado local); el reload del
     // overlay confirma después. El spinner vive en el input de tipo.
     setDomainId(id);
     const dom = domains.find((d) => d.id === id);
     const prev = domains.find((d) => d.id === (col.parentDomainId ?? ''));
-    // Regla dominio→tipo (doc 46, applyDomainPick): elegir OTRO dominio
-    // RE-APLICA su default aunque hubiera override manual; re-elegir el MISMO
-    // dominio respeta el override; quitar el dominio conserva el tipo. El
-    // default viaja HOMOLOGADO (doc 64 r2).
+    // Regla dominio→tipo (applyDomainPick): elegir otro dominio re-aplica su
+    // default aunque hubiera override manual; re-elegir el mismo dominio
+    // respeta el override; quitar el dominio conserva el tipo. El default
+    // viaja homologado.
     const next = applyDomainPick({
       currentDomainId: col.parentDomainId ?? '',
       typeOverridden: !!col.typeOverridden,
@@ -372,14 +367,14 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
       nextDomainId: id,
       nextDefault: dom?.defaultDataType != null ? canonicalDefaultType(dom.defaultDataType) : undefined,
     });
-    // Un tipeo de tipo aún en debounce quedó obsoleto: si volara después,
-    // pisaría el default re-aplicado con el tipo viejo (lost-update). Doc 96:
-    // los dos tipos viajan juntos ('types'); el lógico en pantalla se re-envía abajo.
+    // Un tipeo de tipo aún en debounce pierde vigencia: si volara después, pisaría
+    // el default re-aplicado con el tipo anterior (lost-update). Los dos tipos
+    // viajan juntos ('types'); el lógico en pantalla se re-envía abajo.
     deferred.current?.cancel('types');
     setDataType(next.dataType);
     const fields: Partial<CanonicalColumn> = { parentDomainId: id || undefined, ...next };
     const changed = !!id && id !== (col.parentDomainId ?? '');
-    // Doc 69 §4.9 / doc 85: faceta LÓGICA del tipo — al cambiar de dominio
+    // Faceta lógica del tipo: al cambiar de dominio
     // hereda su tipo lógico (override lógico off); el mismo dominio se respeta.
     if (changed) {
       const lt = dom?.logicalDataType ? canonicalDefaultType(dom.logicalDataType) : '';
@@ -389,14 +384,14 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
     } else {
       // Mismo dominio (o sin dominio): el lógico en pantalla —quizá un tipeo que
       // estaba en el parche 'types' descartado arriba— viaja igual; su flag solo
-      // se recalcula si el valor cambió (minor #5).
+      // se recalcula si el valor difiere del guardado.
       const lp = typeFacetPatch(next.dataType, logicalDataType, col, dom);
       fields.logicalDataType = lp.logicalDataType;
       fields.logicalTypeOverridden = lp.logicalTypeOverridden;
     }
-    // Doc 79/85: SOLO los dominios "atributo estándar" (`inheritsName`) RE-APLICAN
-    // nombres (lógico y físico) y descripciones (lógica y física) al cambiar de
-    // dominio; el MISMO dominio respeta lo manual; los genéricos no tocan nada.
+    // Solo los dominios "atributo estándar" (`inheritsName`) re-aplican nombres
+    // (lógico y físico) y descripciones (lógica y física) al cambiar de
+    // dominio; el mismo dominio respeta lo manual; los genéricos no tocan nada.
     const defaults = applyDomainDefaults({
       prevDomain: prev, nextDomain: dom,
       current: { logicalName: logical, description, physicalName: physical, physicalDescription },
@@ -411,7 +406,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
       setPhysicalDescription(defaults.physicalDescription ?? '');
       fields.physicalDescription = defaults.physicalDescription ?? undefined;   // undefined = limpiar en el upsert
     }
-    // Doc 85 §3.6: UDP por defecto del dominio nuevo → el modelador elige (popup).
+    // UDP por defecto del dominio recién elegido → el modelador elige (popup).
     const offer: DomainUdpOffer = changed ? domainUdpOffer(dom, udpDefs) : { logical: [], physical: [], total: 0 };
     if (offer.total > 0 && dom) {
       const also = [`type ${next.dataType || '—'}${fields.logicalDataType ? ` / ${fields.logicalDataType}` : ''}`];
@@ -422,8 +417,8 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
     await commitDomain(fields, defaults, pin);
   };
 
-  /** Aplica el patch de dominio (un solo upsert: evita lost-update). Doc 85 D2:
-   *  el físico heredado es el override del dominio o el DERIVADO del lógico
+  /** Aplica el patch de dominio (un solo upsert: evita lost-update). El
+   *  físico heredado es el override del dominio o el derivado del lógico
    *  nuevo por glosario; `physicalNameOverridden` = heredado ≠ derivado (así el
    *  rephysicalize del Glosario respeta un físico custom y re-deriva uno derivable). */
   const commitDomain = async (fields: Partial<CanonicalColumn>, defaults: DomainDefaultsPatch, pin: SessionPin) => {
@@ -444,8 +439,8 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
         setPhysical(phys);
         Object.assign(fields, { logicalName: defaults.logicalName, physicalName: phys, physicalNameOverridden: overridden });
       }
-      // Doc 105 (H1): si mientras se derivaba el físico (o con el popup abierto)
-      // se abrió otra versión, la elección ya no es de ésta: no se escribe.
+      // Si mientras se derivaba el físico (o con el popup abierto) se abrió otra
+      // versión, la elección no corresponde a esta: no se escribe.
       if (!pin.holds()) return;
       await onPatch(col.id, fields);
     } finally { setTypeBusy(false); }
@@ -465,7 +460,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   };
   const toggle = (field: 'isPrimaryKey' | 'isForeignKey' | 'isNullable' | 'isPartition', cur?: boolean) => () => {
     setFlagsBusy(true);
-    // Doc 94 D2: entrar/salir de la llave la re-ubica en la frontera del bloque
+    // Entrar/salir de la llave la re-ubica en la frontera del bloque
     // de PK (lo hace el store, en un solo lote con Undo).
     const patch = { [field]: !cur };
     onPatch(col.id, patch).finally(() => setFlagsBusy(false));
@@ -489,7 +484,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
           <div className="wk-props-field"><label>Physical name</label>
             <div style={{ display: 'flex', gap: 4 }}>
               <input className="rd-input rd-mono" disabled={!canEdit || ro('physicalName')} title={ro('physicalName') ? hint[view] : undefined} placeholder="Physical name" value={physical} onChange={(e) => onPhysical(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
-              {/* Doc 88 §3: mismo «rayo» que en Properties de tabla — re-deriva del lógico (glosario) y apaga el override. */}
+              {/* Mismo «rayo» que en Properties de tabla: re-deriva del lógico (glosario) y apaga el override. */}
               {canEdit && !ro('physicalName') && (
                 <button className="rd-btn rd-btn-ghost rd-btn-sm" title="Derive from logical (glossary)" disabled={!logical.trim()} onClick={() => { namePin.current = pinSession(); sync.current?.derive(); }}>
                   <Icon name="bolt" size={12} />
@@ -500,7 +495,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
           <div className="wk-props-field"><label>Functional definition</label>
             <textarea className="wk-pp-textarea" disabled={!canEdit || ro('description')} title={ro('description') ? hint[view] : undefined} placeholder="What this attribute represents…" value={description} onChange={(e) => onDescription(e.target.value)} />
           </div>
-          {/* Doc 85: comment FÍSICO (Erwin Comment) — el DDL lo emite como COMMENT; vacío = igual a la definición. */}
+          {/* Comment físico (Comment de Erwin): el DDL lo emite como COMMENT; vacío = igual a la definición. */}
           <div className="wk-props-field"><label>Comment (physical)</label>
             <textarea className="wk-pp-textarea" disabled={!canEdit || ro('physicalDescription')} title={ro('physicalDescription') ? hint[view] : undefined}
               placeholder={description.trim() ? `Same as the functional definition: ${description.trim()}` : 'Physical comment (defaults to the functional definition)'}
@@ -525,7 +520,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
         </>
       )}
 
-      {/* ── Data Type: Parent Domain + tipo (misma dupla del alta, doc 41) ── */}
+      {/* ── Data Type: Parent Domain + tipo (misma dupla del alta) ── */}
       {tab === 'datatype' && (
         <>
           <div className="wk-props-field"><label>Parent Domain</label>
@@ -538,7 +533,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
               onPick={onDomain}
             />
           </div>
-          {/* Doc 85 §3.7: el tipo de la faceta activa se edita; el de la otra se ve en solo-lectura. */}
+          {/* El tipo de la faceta activa se edita; el de la otra se ve en solo-lectura. */}
           <div className="wk-props-field"><label>Logical data type</label>
             <span className="wk-pp-typewrap">
               <TypePicker value={ro('logicalDataType') ? (logicalDataType || dataType) : logicalDataType} onChange={onLogicalDataType}
@@ -593,7 +588,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
             <dt>Physical comment</dt><dd>{col.physicalDescription || '—'}</dd>
             <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{col.id}</dd>
           </dl>
-          {/* Historial de auditoría (doc 51): acciones PUBLICADAS sobre la
+          {/* Historial de auditoría: acciones publicadas sobre la
               columna — quién / qué / cuándo / qué versión, detalle bajo demanda. */}
           <AuditHistory kind="column" entityId={col.id} />
         </>

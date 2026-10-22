@@ -1,12 +1,12 @@
 /**
- * canvasSession — clave de CONTEXTO de la sesión de canvas (doc 75 D8).
+ * canvasSession: clave de contexto de la sesión de canvas.
  *
- * El workspace re-sincroniza TODO (`refreshExplorer`: proyecto activo del
+ * El workspace re-sincroniza todo (`refreshExplorer`: proyecto activo del
  * modeler, árbol, esquemas, canvas) cuando cambia el contexto con el que se
- * abrió el modelo: proyecto, modo o changeset. Antes el efecto sólo miraba
- * modo + changeset, así que abrir OTRO proyecto en el mismo modo (readonly →
- * readonly, el caso «View production») dejaba explorer/toolbar/canvas pegados
- * al proyecto anterior hasta recargar la página (owner 2026-09-08).
+ * abrió el modelo: proyecto, modo o changeset. El proyecto forma parte de la
+ * clave: abrir otro proyecto en el mismo modo (readonly → readonly, el caso
+ * «View production») también re-sincroniza; sin él, explorer, toolbar y canvas
+ * quedarían en el proyecto anterior hasta recargar la página.
  *
  * Puro: la clave es un string estable para la misma sesión y distinto ante
  * cualquier cambio; `null` sin sesión de canvas.

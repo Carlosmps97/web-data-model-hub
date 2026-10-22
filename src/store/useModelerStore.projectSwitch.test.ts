@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Cambio de proyecto con un canvas abierto (owner 2026-09-08): al pasar la
- * sesión de A a B, `refreshExplorer()` debe dejar el workspace EN B — proyecto
- * activo, árbol, esquemas — y soltar el canvas de A (que no existe en B). El
- * disparo lo hace `WorkspaceScreen` por la clave de sesión
- * (`canvasSessionKey`, que incluye el proyecto).
+ * Cambio de proyecto con un canvas abierto: al pasar la sesión de A a B,
+ * `refreshExplorer()` debe dejar el workspace en B (proyecto activo, árbol,
+ * esquemas) y soltar el canvas de A (que no existe en B). El disparo lo hace
+ * `WorkspaceScreen` por la clave de sesión (`canvasSessionKey`, que incluye el
+ * proyecto).
  */
 vi.mock('@/features/modeler/services/structure.service', () => ({
   listProjects: vi.fn(),
@@ -24,7 +24,7 @@ import * as struct from '@/features/modeler/services/structure.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from './useModelerStore';
 
-const PROJECTS = [{ id: 'A', name: 'Modelo DDV' }, { id: 'B', name: 'UDV INT FISICO' }];
+const PROJECTS = [{ id: 'A', name: 'Modelo Ventas' }, { id: 'B', name: 'VENTAS FISICO' }];
 const SA_A = { id: 'sa-a', projectId: 'A', name: 'Canvas A', folderId: null, tableIds: [], layout: {} };
 const SA_B = { id: 'sa-b', projectId: 'B', name: 'Canvas B', folderId: null, tableIds: [], layout: {} };
 
@@ -57,7 +57,7 @@ describe('useModelerStore.refreshExplorer — cambio de proyecto en la misma ses
     expect(s.selectedTableId).toBeNull();
   });
 
-  it('reabrir el MISMO proyecto conserva el canvas y lo recarga', async () => {
+  it('reabrir el mismo proyecto conserva el canvas y lo recarga', async () => {
     const mod = await import('@/features/modeler/services/modeler.service');
     vi.mocked(mod.loadDiagram).mockResolvedValue({
       subjectArea: SA_A, tables: [], columns: [], relationships: [], views: [],

@@ -1,7 +1,7 @@
 // DeleteProjectDialog sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105 (verificación en navegador, O5): si el conteo del proyecto fallaba, el
-// texto quedaba en «Counting project contents…» y «Delete project» deshabilitado
-// para siempre (sin reintento ni salida).
+// Si el conteo del proyecto falla, el texto no debe quedar en «Counting project
+// contents…» ni «Delete project» deshabilitado para siempre (sin reintento ni
+// salida).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import { byText, nextStates, resetFake, runEffects, textOf, walk } from '../../reporting/components/fakeReact.testutil';
@@ -13,7 +13,7 @@ vi.mock('@/store/useModelerStore', () => ({ useModelerStore: (sel: (s: unknown) 
 import { getProjectCounts } from '@/services/projects.service';
 import DeleteProjectDialog from './DeleteProjectDialog';
 
-const PROJECT = { id: 'p1', name: 'Modelo DDV' } as never;
+const PROJECT = { id: 'p1', name: 'Modelo Ventas' } as never;
 const COUNTS = { tables: 2, columns: 9, views: 1, relationships: 1, schemas: 1, folders: 1, canvases: 1 };
 const tick = () => new Promise((r) => setTimeout(r, 0));
 let props: Parameters<typeof DeleteProjectDialog>[0];
@@ -39,14 +39,14 @@ const typeName = (tree: unknown, v: string) => (input(tree).props.onChange as (e
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe('DeleteProjectDialog: el conteo informa, no traba (doc 105)', () => {
+describe('DeleteProjectDialog: el conteo informa, no traba', () => {
   it('con el conteo caído lo dice, ofrece Retry y el nombre tipeado igual habilita el borrado', async () => {
     vi.mocked(getProjectCounts).mockRejectedValueOnce(new ApiError('Service unavailable', 503));
     let tree = await open();
     expect(textOf(tree)).toContain("Couldn't count the project contents: Service unavailable.");
     expect(textOf(tree)).not.toContain('Counting project contents…');
     expect(deleteBtn(tree).props.disabled).toBe(true);
-    typeName(tree, 'Modelo DDV');
+    typeName(tree, 'Modelo Ventas');
     tree = rerender();
     expect(deleteBtn(tree).props.disabled).toBe(false);
     // el texto del conteo es una región viva (el resultado y el error se anuncian)
@@ -65,7 +65,7 @@ describe('DeleteProjectDialog: el conteo informa, no traba (doc 105)', () => {
     expect(textOf(tree)).toContain('2 tables');
   });
 
-  it('el motivo va sin el consejo «— try again…» del transporte (el aviso ya ofrece Retry) (doc 105, ronda 5)', async () => {
+  it('el motivo va sin el consejo «— try again…» del transporte (el aviso ya ofrece Retry)', async () => {
     vi.mocked(getProjectCounts).mockRejectedValueOnce(new ApiError("The server didn't respond within 30s — try again in a moment.", 0));
     const tree = await open();
     expect(textOf(tree)).toContain("Couldn't count the project contents: The server didn't respond within 30s. Everything");
@@ -77,7 +77,7 @@ describe('DeleteProjectDialog: el conteo informa, no traba (doc 105)', () => {
     let tree = await open();
     expect(textOf(tree)).toContain('2 tables, 9 columns');
     expect(deleteBtn(tree).props.disabled).toBe(true);
-    typeName(tree, 'Modelo DDV');
+    typeName(tree, 'Modelo Ventas');
     tree = rerender();
     expect(deleteBtn(tree).props.disabled).toBe(false);
   });

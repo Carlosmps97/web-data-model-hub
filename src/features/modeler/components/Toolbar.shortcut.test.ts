@@ -1,5 +1,5 @@
-// ⌘K / Ctrl+K (doc 105, ronda 6, R17b): con «Saving working copy…» (o el
-// overlay de Locate) en pantalla abría el buscador DEBAJO y se llevaba el foco.
+// ⌘K / Ctrl+K: con «Saving working copy…» (o el overlay de Locate) en pantalla no
+// abre el buscador (quedaría debajo y se llevaría el foco).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const modal = { open: false };

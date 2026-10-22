@@ -1,9 +1,9 @@
-// Revisión 2 doc 114 (punto 3): el 2.º clic de un doble clic sobre una tabla —
-// rápido o lento — caía donde la tabla ya no estaba (el canvas se mueve para
-// encuadrarla): deseleccionaba, elegía otra tabla, abría el popup de un wire,
-// hacía el zoom del fondo o cortaba el encuadre a medio camino. El escudo lo ataja
-// en la captura: sólo el 2.º clic (el navegador lo marca con `detail` ≥ 2) en el
-// mismo lugar que un clic que encuadró, poco después.
+// El 2.º clic de un doble clic sobre una tabla, rápido o lento, caería fuera de
+// la tabla (el canvas se mueve para encuadrarla): deseleccionaría,
+// elegiría otra tabla, abriría el popup de un wire, haría el zoom del fondo o
+// cortaría el encuadre a medio camino. El escudo lo ataja en la captura: solo el
+// 2.º clic (el navegador lo marca con `detail` ≥ 2) en el mismo lugar que un
+// clic que encuadró, poco después.
 import { describe, expect, it, vi } from 'vitest';
 import { createDblClickShield } from './dblClickShield';
 
@@ -19,12 +19,12 @@ function shield() {
 }
 const swallowed = (e: Ev) => vi.mocked(e.stopPropagation).mock.calls.length > 0;
 
-describe('escudo del doble clic (revisión 2 doc 114)', () => {
+describe('escudo del doble clic', () => {
   it('el 2.º clic de un doble clic sobre una tabla que se encuadró no llega a nadie', () => {
     const { s, tick } = shield();
     s.handle(ev('click', 1));   // 1.er clic (captura)…
     s.arm();                    // …que selecciona y encuadra la tabla
-    tick(380);                  // doble clic LENTO: el canvas ya se mueve
+    tick(380);                  // doble clic lento: el canvas ya se mueve
     for (const type of ['mousedown', 'mouseup', 'click', 'dblclick']) {
       const e = ev(type, 2, 103, 98);
       s.handle(e);
@@ -42,7 +42,7 @@ describe('escudo del doble clic (revisión 2 doc 114)', () => {
     const right = ev('mousedown', 2, 100, 100, 2);
     s.handle(right);
     expect(swallowed(right)).toBe(false);
-    tick(900);   // ya no es un doble clic (pasó el tiempo del sistema): otro clic, que vale
+    tick(900);   // deja de ser un doble clic (pasó el tiempo del sistema): otro clic, que vale
     const late = ev('mousedown', 1);
     s.handle(late);
     expect(swallowed(late)).toBe(false);
@@ -57,7 +57,7 @@ describe('escudo del doble clic (revisión 2 doc 114)', () => {
     expect(swallowed(second)).toBe(false);
   });
 
-  it('un encuadre de ANTES (otro clic) no ataja el doble clic de ahora', () => {
+  it('un encuadre previo (de otro clic) no ataja el doble clic actual', () => {
     const { s, tick } = shield();
     s.handle(ev('click', 1, 400, 400));
     s.arm();
@@ -69,7 +69,7 @@ describe('escudo del doble clic (revisión 2 doc 114)', () => {
     expect(swallowed(second)).toBe(false);
   });
 
-  it('un doble clic en OTRO lugar (más de unos píxeles) o pasado el tiempo no se ataja', () => {
+  it('un doble clic en otro lugar (más de unos píxeles) o pasado el tiempo no se ataja', () => {
     const { s, tick } = shield();
     s.handle(ev('click', 1, 100, 100));
     s.arm();

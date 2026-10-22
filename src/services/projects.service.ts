@@ -9,13 +9,13 @@ export function listProjects(): Promise<Project[]> {
   return apiGet<Project[]>(`${API_BASE}/api/projects`);
 }
 
-/** Crea el proyecto (doc 75 D15): vacío o copiando bloques de Data Standards
+/** Crea el proyecto: vacío o copiando bloques de Data Standards
  *  de otro (`copyFrom`). Acción larga: timeout extendido + overlay del caller. */
 export function createProject(data: CreateProjectRequest): Promise<Project> {
   return apiPost<Project>(`${API_BASE}/api/projects`, data, { timeoutMs: LONG_TIMEOUT_MS });
 }
 
-/** Conteos de activos del proyecto (diálogo «Delete project…», doc 75 D5). */
+/** Conteos de activos del proyecto (diálogo «Delete project…»). */
 export function getProjectCounts(projectId: string): Promise<ScopeCounts> {
   return apiGet<ScopeCounts>(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/counts`);
 }

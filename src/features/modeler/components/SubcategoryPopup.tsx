@@ -11,14 +11,14 @@ import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import RelationshipPhraseFields, { type PhraseKey } from './RelationshipPhraseFields';
 
 /**
- * Popup de GESTIÓN de un grupo de subcategoría (doc 53) — doble click en el
- * símbolo o en cualquiera de sus aristas. Muestra supertipo + subtipos (con
- * estado de drift de llave), permite quitar un subtipo o borrar el grupo
- * completo. Los borrados van por el MISMO camino que el resto (store →
- * changeset + Undo por relación); quitar la última arista elimina el símbolo
- * solo (es derivado — regla Erwin). Reparar drift v1 = quitar y re-agregar.
- * Doc 98: cada subtipo es UNA relación con sus propias frases (la etiqueta de
- * su rama) — se editan por fila, con su Apply.
+ * Popup de gestión de un grupo de subcategoría: doble clic en el símbolo o en
+ * cualquiera de sus aristas. Muestra supertipo + subtipos (con estado de drift
+ * de llave), permite quitar un subtipo o borrar el grupo completo. Los borrados
+ * van por el mismo camino que el resto (store → changeset + Undo por relación);
+ * quitar la última arista elimina el símbolo solo (es derivado, regla de
+ * Erwin). Limitación: un drift se repara quitando el subtipo y volviéndolo a
+ * agregar. Cada subtipo es una relación con sus propias frases (la etiqueta de
+ * su rama); se editan por fila, con su Apply.
  */
 export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
   symbolId: string; onClose: () => void; pushToast: (m: string, k?: 'err') => void;
@@ -30,14 +30,14 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const [busy, setBusy] = useState(false);
-  // Doc 98: borradores de frases por relación (ausente = sin tocar).
+  // Borradores de frases por relación (ausente = sin tocar).
   const [phraseDrafts, setPhraseDrafts] = useState<Record<string, Partial<Record<PhraseKey, string>>>>({});
 
   const rels = useMemo(
     () => (diagram?.relationships ?? []).filter((r) => r.subcategory && r.subtypeSymbolId === symbolId),
     [diagram, symbolId],
   );
-  // El grupo murió (se quitó la última arista o cambió el diagrama): cerrar.
+  // El grupo dejó de existir (se quitó la última arista o el diagrama se actualizó sin él): cerrar.
   useEffect(() => { if (!rels.length) onClose(); }, [rels.length, onClose]);
 
   const tables = diagram?.tables ?? [];
@@ -53,8 +53,8 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
     return viewMode === 'logical' ? (t.logicalName || t.physicalName) : t.physicalName;
   };
 
-  // Doc 105 (H7): el fallo de una escritura espera la revalidación y calla si
-  // la sesión cambió (`reportWriteError`: ya avisó ella).
+  // El fallo de una escritura espera la revalidación y calla si la sesión
+  // cambia (`reportWriteError`: el aviso lo da la revalidación).
   const removeOne = async (relId: string, childName: string) => {
     setBusy(true);
     const onError = reportWriteError(() => pushToast("Couldn't remove the subtype", 'err'));
@@ -70,7 +70,7 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
     finally { setBusy(false); }
   };
 
-  // Frases de UNA rama (doc 98): un guardado con lo que cambió, por el store
+  // Frases de una rama: un guardado con lo modificado, por el store
   // (changeset + Undo). Si falla, el borrador queda en las cajas.
   const applyPhrases = async (relId: string) => {
     const r = rels.find((x) => x.id === relId);
@@ -96,8 +96,8 @@ export default function SubcategoryPopup({ symbolId, onClose, pushToast }: {
         message: `The ${rels.length} subtype relationship(s) of this symbol will be removed. The tables and their columns stay in the model.`,
         confirmLabel: 'Delete subcategory', cancelLabel: 'Cancel', variant: 'danger',
         // Secuencial por el mismo camino changeset-aware (cada quitada deja su
-        // propia entrada de Undo, doc 50). Doc 105 (H1): todas en la sesión en
-        // que se confirmó — si cambia en el medio, las que faltan no se borran.
+        // propia entrada de Undo), todas en la sesión en que se confirmó: si
+        // cambia en el medio, las que faltan no se borran.
         action: async () => {
           const pin = pinSession();
           for (const r of ids) { pin.check(); await deleteRelationship(r.id); }

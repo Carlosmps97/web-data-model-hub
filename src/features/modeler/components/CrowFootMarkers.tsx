@@ -4,10 +4,9 @@ import type { ReactNode } from 'react';
 // url(#cf-<card>) en markerStart/markerEnd del edge. orient="auto-start-reverse"
 // los rota según la dirección de la línea.
 //
-// GEOMETRÍA (doc 19): la "pata de muchos" ABRE hacia la tabla — el vértice
-// queda del lado de la línea (x=12) y las puntas TOCAN el borde del nodo
-// (x=20). La versión anterior estaba invertida (vértice pegado a la tabla),
-// por eso los símbolos se leían como flechas.
+// Geometría: la "pata de muchos" abre hacia la tabla; el vértice queda del
+// lado de la línea (x=12) y las puntas tocan el borde del nodo (x=20). Con el
+// vértice pegado a la tabla, los símbolos se leerían como flechas.
 const STROKE = 'var(--ink-2)';
 
 // viewBox 0..20 x 0..20; la línea llega desde x=0; el nodo está hacia x=20.

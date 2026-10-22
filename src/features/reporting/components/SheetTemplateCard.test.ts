@@ -1,9 +1,9 @@
 // «Export with a template» sin DOM (hooks de mentira: ver fakeReact.testutil).
-// Doc 105 (B3): el Reporting no sabía que la card exportaba — los combos Project
-// / Version seguían habilitados y el export bajaba el archivo de la versión
-// anterior. Doc 105 (R2-B3): con la versión cerrada salían dos toasts (el error
-// y el aviso «showing Production»), uno sobre la pantalla ya desmontada.
-// Doc 105 (A5-o4): una versión transferida mostraba el texto del canvas.
+// La card avisa al Reporting mientras exporta: los combos Project / Version se
+// deshabilitan y el export no baja el archivo de otra versión. Con la versión
+// cerrada sale un solo toast (compartido con el aviso «showing Production»),
+// nunca sobre una pantalla ya desmontada. Si la versión se transfirió, el
+// mensaje lo dice.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
@@ -49,7 +49,7 @@ const clickExport = async (tree: unknown) => {
 beforeEach(() => { vi.clearAllMocks(); resetFake(); });
 
 describe('SheetTemplateCard', () => {
-  it('B3: avisa al Reporting mientras exporta, y «libre» al terminar o desmontarse', () => {
+  it('avisa al Reporting mientras exporta, y «libre» al terminar o desmontarse', () => {
     const onBusyChange = vi.fn();
     render({ onBusyChange }, true);
     const unmount = runEffects();
@@ -81,7 +81,7 @@ describe('SheetTemplateCard', () => {
     expect(vi.mocked(toast.error).mock.calls[0][1]?.id).toBeUndefined();
   });
 
-  it('R2-B3: si la pantalla se desmontó mientras exportaba, el error no sale sobre la pantalla nueva', async () => {
+  it('si la pantalla se desmontó mientras exportaba, el error no sale sobre la pantalla nueva', async () => {
     let fail: (e: unknown) => void = () => {};
     const tree = render({
       versionToastId: 'dmh-rep-version',
@@ -116,7 +116,7 @@ describe('SheetTemplateCard', () => {
       expect(textOf(render())).not.toContain('only matching rows');
     });
 
-    it('baja sólo las filas que cumplen y el aviso dice cuántas', async () => {
+    it('baja solo las filas que cumplen y el aviso dice cuántas', async () => {
       const tree = render({ fetchColumns: async () => [column('ID', true), column('NOMBRE', false)] }, false, PK_ONLY);
       runEffects();
       await clickExport(tree);

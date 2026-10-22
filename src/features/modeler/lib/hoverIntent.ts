@@ -1,18 +1,18 @@
 import { useModelerStore } from '@/store/useModelerStore';
 
 /**
- * Doc 111 — resaltado de relaciones al pasar el mouse, sin trabar el canvas.
+ * Resaltado de relaciones al pasar el mouse, sin trabar el canvas.
  *
- * Antes, cada bloque (y cada wire) que el mouse cruzaba prendía y apagaba el
- * resaltado: TODOS los wires del canvas se re-renderizaban y animaban su
- * opacidad dos veces por bloque. Ir de un objeto a otro cruzando el canvas
- * dejaba el hilo principal ocupado y la selección respondía tarde (medido:
- * ~1 s con CPU ×4 en un canvas de 131 tablas). Ahora:
- * - sólo resalta si el mouse SE QUEDA `HOVER_INTENT_MS` sobre el bloque o el
+ * Si cada bloque (y cada wire) que el mouse cruza prendiera y apagara el
+ * resaltado, todos los wires del canvas se re-renderizarían y animarían su
+ * opacidad dos veces por bloque: ir de un objeto a otro cruzando el canvas
+ * dejaría el hilo principal ocupado y la selección respondería tarde (del
+ * orden de 1 s con CPU ×4 en un canvas de ~130 tablas). Por eso:
+ * - solo resalta si el mouse se queda `HOVER_INTENT_MS` sobre el bloque o el
  *   wire (pasar de largo no hace nada); salir apaga en el acto;
- * - un dibujo no resalta nada (no tiene relaciones; antes atenuaba todo);
+ * - un dibujo no resalta nada (no tiene relaciones);
  * - el atenuado del resto lo hace una clase del canvas (`bindHoverDim`): cada
- *   wire sólo dice si es de los resaltados, ninguno lee «¿hay hover?».
+ *   wire solo dice si es de los resaltados, ninguno lee «¿hay hover?».
  */
 export const HOVER_INTENT_MS = 90;
 

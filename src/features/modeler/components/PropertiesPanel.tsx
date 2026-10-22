@@ -28,8 +28,8 @@ import type { TableViewRow, View } from '@/services/views.service';
 import { splitByCanvas } from '../lib/canvasViews';
 import { confirmDeleteTable, confirmDeleteView, readTableDeleteCounts } from './deleteConfirm';
 
-// Doc 51: los UDPs dejan Metadata y pasan a pestaña propia (paridad con el
-// panel de columna del doc 49); Metadata conserva el resto y suma History.
+// Los UDPs tienen pestaña propia (paridad con el panel de columna); Metadata
+// reúne el resto y suma History.
 type Tab = 'definition' | 'columns' | 'views' | 'links' | 'udps' | 'metadata';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'definition', label: 'Definition' },
@@ -40,34 +40,34 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'metadata', label: 'Metadata' },
 ];
 
-// Etiqueta compacta por extremo (diseño pp3: "1 : N · identifying").
+// Etiqueta compacta por extremo (p. ej. "1 : N · identifying").
 const CARD_LBL: Record<gov.Cardinality, string> = {
   one: '1', 'one-only': '1', 'zero-one': '0..1', many: 'N', 'one-many': '1..N', 'zero-many': '0..N',
 };
 
 /**
- * Panel lateral de propiedades (diseño p8 + pp1–pp4): header con glyph navy +
- * "schema X · table", 5 pestañas SUBRAYADAS (underline, no pill) con contador
- * en Columns/Views, y cuerpo scrolleable. En read-only (sin changeset activo)
- * el panel abre igual pero como reader: inputs deshabilitados y sin acciones.
+ * Panel lateral de propiedades: header con glyph navy + "schema X · table",
+ * pestañas subrayadas (underline, no pill) con contador en Columns/Views, y
+ * cuerpo scrolleable. En read-only (sin changeset activo) el panel abre igual
+ * pero como reader: inputs deshabilitados y sin acciones.
  */
 export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m: string, k?: 'err') => void; onResize?: (width: number) => void }) {
   // Selectores individuales (no el store entero): el panel vive junto al canvas
-  // y suscribirse a TODO el store lo re-renderizaba en cada hover/drag/dirty.
+  // y suscribirse a todo el store lo re-renderizaría en cada hover/drag/dirty.
   const diagram = useModelerStore((s) => s.diagram);
   const selectedTableId = useModelerStore((s) => s.selectedTableId);
   const setSelectedTable = useModelerStore((s) => s.setSelectedTable);
   const reload = useModelerStore((s) => s.reload);
-  const setObjectColor = useModelerStore((s) => s.setObjectColor);   // doc 109
+  const setObjectColor = useModelerStore((s) => s.setObjectColor);
   const reorderColumns = useModelerStore((s) => s.reorderColumns);
-  // Doc 49: el click en una fila abre el Properties de ESA columna (sidebar
-  // propio) — la edición inline (fila expandida) se retiró de este panel.
+  // El clic en una fila abre el Properties de esa columna (sidebar propio);
+  // este panel no edita columnas en línea.
   const setSelectedColumn = useModelerStore((s) => s.setSelectedColumn);
   const setColumnTarget = useModelerStore((s) => s.setColumnTarget);
   const deleteRelationship = useModelerStore((s) => s.deleteRelationship);
   const removeTableFromArea = useModelerStore((s) => s.removeTableFromArea);
   const deleteTable = useModelerStore((s) => s.deleteTable);
-  // Doc 70: membresía de vistas en ESTE canvas (tab Views).
+  // Membresía de vistas en este canvas (tab Views).
   const addViewsToCanvas = useModelerStore((s) => s.addViewsToCanvas);
   const removeViewFromCanvas = useModelerStore((s) => s.removeViewFromCanvas);
   const deleteView = useModelerStore((s) => s.deleteView);
@@ -75,10 +75,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // el panel abre como reader igual que sin changeset.
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
-  // Doc 69: la faceta activa la da el switch Logical/Physical del canvas —
-  // los UDPs (y los rótulos entity/table) siguen ese modo.
+  // La faceta activa la da el switch Logical/Physical del canvas: los UDPs (y
+  // los rótulos entity/table) siguen ese modo.
   const viewMode = useModelerStore((s) => s.viewMode);
-  const nouns = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
+  const nouns = facetNouns(viewMode);   // Entity/Attribute o Table/Column
   const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
   useEffect(() => {
     let alive = true;
@@ -86,10 +86,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     return () => { alive = false; };
   }, []);
   const table = diagram?.tables.find((t) => t.id === selectedTableId) ?? null;
-  // Doc 81: la lista sigue el ÚNICO orden de display (bloque PK primero + resto
-  // por `ordinal`), el MISMO que dibuja el canvas — antes era puro `ordinal` y
-  // con la carga Excel (PK no primero) divergía del canvas. El drag&drop
-  // reordena las no-PK (el bloque PK se reordena en «Key order», más abajo).
+  // La lista sigue el único orden de display (bloque PK primero + resto por
+  // `ordinal`), el mismo que dibuja el canvas. El drag&drop reordena dentro de
+  // cada bloque (ver handleDrop).
   const cols = useMemo(
     () => orderColumns((diagram?.columns ?? []).filter((c) => c.tableId === selectedTableId)),
     [diagram, selectedTableId],
@@ -100,26 +99,26 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   );
 
   const [tab, setTab] = useState<Tab>('definition');
-  // Doc 85 §3.7: la pestaña Views solo existe en el modelo físico (doc 63/70);
-  // Columns se rotula Attributes en lógico (facetNouns).
+  // La pestaña Views solo existe en el modelo físico; Columns se rotula
+  // Attributes en lógico (facetNouns).
   const tabs = TABS.filter((t) => t.id !== 'views' || viewMode === 'physical')
     .map((t) => (t.id === 'columns' ? { ...t, label: nouns.Members } : t));
   useEffect(() => { if (tab === 'views' && viewMode !== 'physical') setTab('definition'); }, [tab, viewMode]);
 
   // ── Definition: form local de la tabla ──
   const [form, setForm] = useState({ logicalName: '', physicalName: '', schema: '', description: '' });
-  // Doc 68: intención sobre el FÍSICO en esta sesión de edición — true (lo
-  // tipeó), false (lo vació / botón derive), null (no lo tocó → manda el
-  // flag persistido de la tabla). Ver tableNamePlan.
+  // Intención sobre el físico en esta sesión de edición: true (lo escribió),
+  // false (lo vació / botón derive), null (no lo tocó → manda el flag
+  // persistido de la tabla). Ver tableNamePlan.
   const [physTouched, setPhysTouched] = useState<boolean | null>(null);
   const [savingDef, setSavingDef] = useState(false);
   useEffect(() => {
     if (table) setForm({ logicalName: table.logicalName, physicalName: table.physicalName, schema: table.schema ?? '', description: table.description ?? '' });
     setPhysTouched(null);
-    setColQuery('');   // el buscador de columnas no arrastra el filtro a OTRA tabla
-    // Re-sembrar SOLO al cambiar de tabla (doc 40): con deps por identidad,
-    // cualquier reload del diagrama (guardar un UDP, blur de la definición)
-    // pisaba lo que el usuario tenía a medio tipear en este form.
+    setColQuery('');   // el buscador de columnas no arrastra el filtro a otra tabla
+    // Se re-siembra solo al cambiar de tabla: con deps por identidad, cualquier
+    // reload del diagrama (guardar un UDP, blur de la definición) pisaría lo que
+    // el usuario tiene a medio escribir en este form.
   }, [table?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── DnD reorder (HTML5 nativo) ──
@@ -130,14 +129,14 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // Reorden persistiéndose en background (la lista ya se movió de forma optimista).
   const [reordering, setReordering] = useState(false);
   // Quitar del canvas / borrar la tabla: mientras corre, spinner en el botón y
-  // ambos deshabilitados (el borrado tarda; evita reclicks — pedido owner).
+  // ambos deshabilitados (el borrado tarda; evita clics repetidos).
   const [delBusy, setDelBusy] = useState<'remove' | 'delete' | null>(null);
   // Drag del handle para ensanchar el panel (solo-vista; nombres largos).
   const [resizing, setResizing] = useState(false);
 
-  // ── Views (pp2 → doc 70) — vistas GLOBALES de la tabla con sus canvases;
-  // se cargan al seleccionar la tabla (contador del tab) y se refrescan con el
-  // diagrama (agregar/quitar una vista acá la mueve entre secciones). ──
+  // ── Views: vistas globales de la tabla con sus canvases; se cargan al
+  // seleccionar la tabla (contador del tab) y se refrescan con el diagrama
+  // (agregar/quitar una vista aquí la mueve entre secciones). ──
   const [views, setViews] = useState<TableViewRow[]>([]);
   const [viewEditor, setViewEditor] = useState<{ view?: View; readOnly?: boolean } | null>(null);
   const reloadViews = () => { if (selectedTableId) viewsSvc.tableViews(selectedTableId).then((r) => setViews(r.views)).catch(() => {}); };
@@ -150,8 +149,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     return () => { alive = false; };
   }, [selectedTableId, diagram]);
 
-  // Buscador de columnas (doc 42): contiene CI sobre lógico/físico. Con
-  // filtro activo el drag&drop se desactiva (ver comentario en el render).
+  // Buscador de columnas: «contiene» sin distinguir mayúsculas sobre
+  // lógico/físico. Con filtro activo el drag&drop se desactiva (ver comentario
+  // en el render).
   const [colQuery, setColQuery] = useState('');
   const colFiltering = colQuery.trim() !== '';
   const visibleCols = useMemo(
@@ -159,11 +159,11 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     [cols, colQuery, colFiltering],
   );
   const [aligningId, setAligningId] = useState<string | null>(null);
-  // Deep-link al listado (doc 48, ajustado en doc 49): pestaña Columns con la
-  // fila A LA VISTA (scroll, ya sin expandir — la edición vive en el panel de
-  // columna). Hoy lo produce el botón Back del ColumnPropertiesPanel. Se
-  // limpia el buscador (podría ocultarla) y el foco se CONSUME (una sola
-  // navegación; después el usuario recupera el control).
+  // Deep-link al listado: pestaña Columns con la fila a la vista (scroll, sin
+  // expandir; la edición vive en el panel de columna). Lo produce el botón Back
+  // del ColumnPropertiesPanel. Se limpia el buscador (podría ocultarla) y el
+  // foco se consume (una sola navegación; después el usuario recupera el
+  // control).
   const panelFocusColId = useModelerStore((s) => s.panelFocusColId);
   useEffect(() => {
     if (!panelFocusColId) return;
@@ -176,15 +176,15 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     }));
     useModelerStore.getState().setPanelFocusCol(null);
   }, [panelFocusColId]);
-  // ── Metadata (V3): dónde se usa la tabla (proyecto › carpeta › canvas) ──
+  // ── Metadata: dónde se usa la tabla (proyecto › carpeta › canvas) ──
   const [usage, setUsage] = useState<gov.TableUsageRow[] | null>(null);
   useEffect(() => {
     setUsage(null);
     if (selectedTableId) gov.tableUsage(selectedTableId).then((u) => setUsage(u.usage)).catch(() => setUsage([]));
   }, [selectedTableId]);
-  // ── Links: relaciones GLOBALES de la tabla (es canónica — las de otros
+  // ── Links: relaciones globales de la tabla (es canónica: las de otros
   // canvases no están en el diagrama actual; llegan con nombres resueltos).
-  // Se refresca también al cambiar el diagrama: dibujar/borrar un wire acá
+  // Se refresca también al cambiar el diagrama: dibujar/borrar un wire aquí
   // mueve relaciones entre las secciones "this canvas"/"other canvases". ──
   const [allLinks, setAllLinks] = useState<gov.TableLinkRow[] | null>(null);
   useEffect(() => { setAllLinks(null); }, [selectedTableId]);
@@ -204,35 +204,35 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const colName = (id: string) => diagram?.columns.find((c) => c.id === id)?.physicalName ?? id;
   const counts: Partial<Record<Tab, number>> = {
     columns: cols.length, views: views.length,
-    udps: countFacetUdpValues(table.udpValues, udpDefs, 'table', viewMode),   // doc 69: solo la faceta activa
+    udps: countFacetUdpValues(table.udpValues, udpDefs, 'table', viewMode),   // solo la faceta activa
   };
-  // parents = relaciones donde esta tabla es HIJA (la otra es su padre).
+  // parents = relaciones donde esta tabla es hija (la otra es su padre).
   const parents = links.filter((r) => r.childTableId === table.id).length;
   const children = links.length - parents;
 
-  // Pre-imagen POR VALOR de la tabla para el Undo (doc 50) — común a los tres
-  // caminos de guardado de abajo (Save, blur de la definición, UDP).
+  // Pre-imagen por valor de la tabla para el Undo, común a los tres caminos de
+  // guardado de abajo (Save, blur de la definición, UDP).
   const tablePre = (t: gov.CanonicalTable = table) => ({ ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) });
-  // Doc 109 (revisión): los guardados de la tabla van EN FILA con el color
-  // (`inObjectOrder`) y cada uno parte del documento VIGENTE de la working copy
-  // — antes cada uno mandaba la tabla de su render y el segundo revertía al
-  // primero (definición al salir del campo + color enseguida). Si ya no existe
-  // (se borró), avisa en vez de recrearla.
+  // Los guardados de la tabla van en fila con el color (`inObjectOrder`) y cada
+  // uno parte del documento vigente de la working copy: si cada uno mandara la
+  // tabla de su render, el segundo revertiría al primero (definición al salir
+  // del campo + color enseguida). Si la tabla fue borrada, avisa en vez de
+  // recrearla.
   const latestTable = async (): Promise<gov.CanonicalTable> => {
     const cur = await gov.currentTable(table.id);
     if (!cur) throw new Error(`This ${nouns.one} is no longer in the working copy.`);
     return cur;
   };
 
-  // Doc 105 (H7): el fallo de cada escritura de este panel espera la
-  // revalidación y calla si la sesión cambió (`reportWriteError`: ya avisó
-  // ella). Se crea al PEDIR la escritura: toma esa sesión. H1: su inversa se
-  // apila sólo en la sesión donde empezó (`pinSession`).
+  // El fallo de cada escritura de este panel espera la revalidación y calla si
+  // la sesión cambia (`reportWriteError`: el aviso lo da la revalidación). Se
+  // crea al pedir la escritura, así que toma esa sesión. Su inversa se apila
+  // solo en la sesión donde empezó (`pinSession`).
   const saveDef = async () => {
     setSavingDef(true);
     const pin = pinSession();
-    // Propaga el motivo real (p.ej. 409: la versión ya no está en borrador) en
-    // vez de un "Couldn't save" genérico que esconde POR QUÉ no se guardó.
+    // Propaga el motivo real (p. ej. 409: la versión dejó de estar en borrador)
+    // en vez de un "Couldn't save" genérico que esconde por qué no se guardó.
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
     const tid = table.id;
     try { await inObjectOrder(tid, async () => {
@@ -241,26 +241,26 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       pin.check();
       const pre = tablePre(table);
       const logical = form.logicalName.trim();
-      // Doc 68: la decisión (re-derivar vs conservar el custom + flag de
-      // override) vive en tableNamePlan — un físico con override NO se
-      // re-deriva al renombrar el lógico; vaciarlo re-enciende el auto.
+      // La decisión (re-derivar vs conservar el custom + flag de override) vive
+      // en tableNamePlan: un físico con override no se re-deriva al renombrar
+      // el lógico; vaciarlo re-enciende el auto.
       const plan = tableNamePlan({ logical, physical: form.physicalName.trim(), prev: table, sessionOverride: physTouched });
       let physical = plan.physical;
       if (plan.derive) {
         try { physical = (await gov.physicalize(logical, 'table')).physical; } catch { /* mantener el actual */ }
       }
-      // `updateTable` sólo cubre name/schema; un único upsert changeset-aware (merge
+      // `updateTable` solo cubre name/schema; un único upsert changeset-aware (merge
       // sobre la tabla actual) cubre además `description`, y luego reload.
       pin.check();   // el físico pudo derivarse con un await
       await gov.createTable({ ...table, logicalName: logical, physicalName: physical, physicalNameOverridden: plan.overridden, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
-      // Doc 109: la inversa restaura sólo lo que este Save cambió (sobre lo vigente).
+      // La inversa restaura solo lo que este Save modificó (sobre lo vigente).
       pushUndo(`Edit table ${pre.physicalName}`, undoFields('table', tid, {
         logicalName: pre.logicalName, physicalName: pre.physicalName, physicalNameOverridden: pre.physicalNameOverridden,
         schema: pre.schema, description: pre.description,
       }, pin, reload), pin);
-      // El form ya no se re-siembra en cada reload (solo al cambiar de tabla):
-      // reflejar acá el físico derivado para que el input no quede stale — si
-      // sigue abierta ESTA tabla (el guardado pudo esperar su turno en la fila).
+      // El form no se re-siembra en cada reload (solo al cambiar de tabla): se
+      // refleja aquí el físico derivado para que el input no quede stale, si
+      // sigue abierta esta tabla (el guardado pudo esperar su turno en la fila).
       if (useModelerStore.getState().selectedTableId === tid) {
         setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
         setPhysTouched(null);
@@ -274,20 +274,20 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     try {
       const p = (await gov.physicalize(form.logicalName.trim(), 'table')).physical;
       setForm((f) => ({ ...f, physicalName: p }));
-      setPhysTouched(false);  // doc 68: derivar = renunciar al override
+      setPhysTouched(false);  // derivar = renunciar al override
     } catch { pushToast("Couldn't derive the physical name", 'err'); }
   };
-  // Definición funcional: auto-guardado al salir del campo (doc 40), mismo
-  // paradigma que la definición de columna — antes cerrar el panel sin Save la
-  // perdía. Los NOMBRES y el schema siguen detrás del botón Save: un rename es
-  // transaccional (re-deriva el físico, re-apunta vistas, valida unicidad) y
-  // no debe dispararse a medio tipear. `...table` usa los nombres del server:
-  // un nombre a medio editar en el form NO viaja con este blur.
+  // Definición funcional: auto-guardado al salir del campo, mismo paradigma que
+  // la definición de columna (cerrar el panel sin Save no la pierde). Los
+  // nombres y el schema siguen detrás del botón Save: un rename es
+  // transaccional (re-deriva el físico, re-apunta vistas, valida unicidad) y no
+  // debe dispararse a medio escribir. `...table` usa los nombres del server: un
+  // nombre a medio editar en el form no viaja con este blur.
   const saveDescriptionOnBlur = async () => {
     if (!canEdit || !table) return;
     const next = form.description.trim() || undefined;
-    // Doc 109: «sin cambio» se decide contra el documento VIGENTE, en la fila (el
-    // diagrama en pantalla puede no tener todavía el guardado anterior).
+    // «Sin cambio» se decide contra el documento vigente, en la fila (el
+    // diagrama en pantalla puede no reflejar aún el guardado anterior).
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
     try {
@@ -319,19 +319,18 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     } catch (e) { await onError(e); }
   };
 
-  // ── V2 (doc 19 §12b): "Match physical order" — reordena los sources de la
-  // vista según el orden ÚNICO de cada tabla fuente (doc 94 D4: PK primero —
-  // antes ordenaba por ordinal crudo y una PK recién marcada quedaba abajo).
-  // Idea del equipo (Erwin no lo tiene). Las columnas no resolubles
+  // ── "Match physical order": reordena los sources de la vista según el orden
+  // único de cada tabla fuente (PK primero, así una PK recién marcada sube a su
+  // bloque). Función propia (Erwin no la ofrece). Las columnas no resolubles
   // (expresiones) conservan su orden relativo al final de su grupo.
   const alignView = async (v: View) => {
-    // Doc 105 (ronda 4): el pin y el aviso del error se toman AL PEDIRLO, antes
-    // del confirm — si mientras estaba abierto la revalidación bajó la versión
-    // a solo lectura, no se escribe ni se avisa encima de ella.
-    const pin = pinSession();   // doc 105 (H1): lee las columnas y después escribe
+    // El pin y el aviso del error se toman al pedirlo, antes de abrir el confirm: si
+    // mientras estaba abierto la revalidación bajó la versión a solo lectura,
+    // no se escribe ni se avisa encima de ella.
+    const pin = pinSession();   // lee las columnas y después escribe
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't reorder the view", 'err'));
-    // Confirmación previa (pedido owner): reordenar reescribe la definición de
-    // la vista → popup Aceptar/Cancelar antes de ejecutar.
+    // Confirmación previa: reordenar reescribe la definición de la vista →
+    // popup Aceptar/Cancelar antes de ejecutar.
     const ok = await confirmDialog({
       title: 'Reorder view columns',
       message: <>The columns of view <strong>“{v.name}”</strong> will be reordered to match the physical order of its source table(s). This rewrites the view definition.</>,
@@ -355,7 +354,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     } catch (e) { await onError(e); }
     finally { setAligningId(null); }
   };
-  // DnD: al pasar por encima decide si el drop va antes/después según la mitad del row.
+  // DnD: al pasar por encima decide si el drop va arriba o abajo según la mitad de la fila.
   const handleDragOver = (id: string, e: React.DragEvent) => {
     e.preventDefault();
     if (id === dragId) { setOverId(null); return; }
@@ -366,14 +365,14 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const handleDrop = async (targetId: string) => {
     const src = dragId; const wasAfter = after;
     setDragId(null); setOverId(null);
-    // Con filtro activo NO se reordena (doc 42): el splice de abajo trabaja
-    // sobre la lista COMPLETA y un drop calculado sobre el subconjunto visible
-    // insertaría en una posición equivocada. El grip ya viene deshabilitado;
-    // este guard es el cinturón por si un drag nació antes de filtrar.
+    // Con filtro activo no se reordena: el splice de abajo trabaja sobre la
+    // lista completa y un drop calculado sobre el subconjunto visible
+    // insertaría en una posición equivocada. El grip viene deshabilitado; este
+    // guard cubre el caso de un drag iniciado antes de filtrar.
     if (!src || src === targetId || reordering || colFiltering) return;
-    // Doc 94 D3: UN solo orden — las PK se arrastran como cualquier columna,
-    // pero dentro de su bloque: una PK nunca queda debajo de una no-PK (ni una
-    // no-PK arriba de una PK). Un drop que cruza la frontera se rechaza.
+    // Un solo orden: las PK se arrastran como cualquier columna, pero dentro de
+    // su bloque; una PK nunca queda debajo de una no-PK (ni una no-PK arriba de
+    // una PK). Un drop que cruza la frontera se rechaza.
     const ids = cols.map((c) => c.id).filter((x) => x !== src);
     let idx = ids.indexOf(targetId);
     if (idx < 0) return;
@@ -411,24 +410,25 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   const askDeleteTable = async () => {
     if (delBusy) return;
     setDelBusy('delete');
-    // Doc 105 (ronda 4, R10-A): el borrado es de la sesión donde se pidió. El
-    // pre-conteo no tiene fondo: si mientras cuenta se abre otra versión, el
-    // confirm no se abre en ella, y la acción verifica el pin al clic (la del
-    // store tomaría el de ese momento).
+    // El borrado pertenece a la sesión donde se pidió. El pre-conteo no tiene
+    // fondo: si mientras cuenta se abre otra versión, el confirm no se abre en
+    // ella, y la acción verifica el pin al clic (la del store tomaría el de ese
+    // momento).
     const pin = pinSession();
-    // Doc 105 (H5): con la versión recién transferida el borrado termina con el
-    // error original de la versión — la revalidación ya avisó: acá se calla.
+    // Con la versión recién transferida el borrado termina con el error
+    // original de la versión; la revalidación se encarga del aviso, así que
+    // aquí se calla.
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't delete the ${nouns.one}`, 'err'));
     try {
       // Impacto: canvases donde aparece, tablas relacionadas (relaciones que se
       // van) y vistas que también se eliminan. Durante este pre-conteo el botón
-      // ya muestra el spinner (el diálogo todavía no abre). Doc 105 (O2): lo que
-      // no se pudo contar, el diálogo lo dice (antes mostraba «0»).
+      // muestra el spinner (el diálogo se abre después). Lo que no se pudo
+      // contar, el diálogo lo indica (en vez de mostrar «0»).
       const impact = await readTableDeleteCounts(table.id);
       if (!pin.holds()) return;
-      // Diálogo compartido con el Object Inspector (doc 89 §3.5). El borrado
-      // (cascada versionada) corre DENTRO del diálogo: queda con spinner y
-      // bloqueado hasta terminar (el owner reportó reclicks por el delay).
+      // Diálogo compartido con el Object Inspector. El borrado (cascada
+      // versionada) corre dentro del diálogo: queda con spinner y bloqueado
+      // hasta terminar (evita clics repetidos durante la espera).
       const ok = await confirmDeleteTable({
         name: table.physicalName || table.logicalName, nouns,
         impact,
@@ -440,7 +440,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   };
 
   // ── Resize del panel (drag del borde izquierdo). El ancho lo fija/clampa/
-  // persiste WorkspaceScreen; acá sólo emitimos el ancho = viewport − X. ──
+  // persiste WorkspaceScreen; aquí solo se emite el ancho = viewport − X. ──
   const startResize = (e: ReactPointerEvent) => {
     if (!onResize) return;
     e.preventDefault();
@@ -450,7 +450,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
     document.body.style.userSelect = 'none';
     const move = (ev: PointerEvent) => onResize(window.innerWidth - ev.clientX);
     const up = () => {
-      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      try { el.releasePointerCapture(e.pointerId); } catch { /* se ignora */ }
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       document.body.style.userSelect = '';
@@ -467,12 +467,12 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         <div className={`wk-props-resizer${resizing ? ' dragging' : ''}`}
           onPointerDown={startResize} title="Drag to resize" />
       )}
-      {/* ── Header fijo: glyph + nombre + schema · table + close (diseño p8) ── */}
+      {/* ── Header fijo: glyph + nombre + schema · table + close ── */}
       <div className="wk-props-top">
         <div className="wk-props-head">
           <div className="wk-props-glyph" aria-hidden><Table2 size={17} strokeWidth={1.6} /></div>
           <div className="wk-props-id">
-            {/* Doc 69: en Lógico el objeto es la ENTIDAD (nombre lógico); en Físico, la TABLA. */}
+            {/* En Lógico el objeto es la entidad (nombre lógico); en Físico, la tabla. */}
             <div className="wk-props-title">{viewMode === 'logical' ? (table.logicalName || table.physicalName) : (table.physicalName || table.logicalName)}</div>
             <div className="wk-props-sub">
               schema <span className="rd-mono">{table.schema || '—'}</span> · {facetNoun('table', viewMode)}
@@ -493,10 +493,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       </div>
 
       <div className="wk-props-body">
-        {/* ── Definition (pp1) ── */}
+        {/* ── Definition ── */}
         {tab === 'definition' && (
           <>
-            {/* Doc 85 §3.7: cada faceta edita SUS campos; los de la otra quedan en solo-lectura con el hint. */}
+            {/* Cada faceta edita sus campos; los de la otra quedan en solo lectura con el hint. */}
             <p className="wk-pp-cap" style={{ marginTop: 0 }}>
               <b>{viewMode === 'logical' ? 'Logical facet' : 'Physical facet'}</b> — fields of the other facet are read-only here. {FACET_SWITCH_HINT[viewMode]}
             </p>
@@ -510,7 +510,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
               </div>
             </div>
             <div className="wk-props-field"><label>Schema</label>
-              {/* Dropdown de esquemas (doc 18): se crean desde Structure · Esquemas. */}
+              {/* Combo de esquemas de tablas: se crean desde Structure · Schemas o con «+ Create schema…» del propio combo. */}
               <SchemaSelect kind="tables" value={form.schema} onChange={(v) => setForm({ ...form, schema: v })} disabled={!canEdit || !facetEditable('table', 'schema', viewMode)} />
             </div>
             <div className="wk-props-field"><label>Functional definition</label>
@@ -521,8 +521,8 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 {savingDef && <span className="rd-spin" aria-hidden />}{savingDef ? 'Saving…' : 'Save'}
               </button>
             )}
-            {/* Doc 109: color PROPIO de la tabla (todos sus canvases). Se aplica al
-                elegirlo — va aparte del formulario de arriba, que se guarda con Save. */}
+            {/* Color propio de la tabla (todos sus canvases). Se aplica al
+                elegirlo; va aparte del formulario de arriba, que se guarda con Save. */}
             <div className="wk-pp-section">
               <ColorField id={table.id} own={table.color} canEdit={canEdit} noun={nouns.one}
                 onPick={(ref) => {
@@ -555,9 +555,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
             </div>
             <p className="wk-pp-cap">{canEdit ? `Drag the handle to reorder · click ${nouns.aMember} to edit.` : `Click ${nouns.aMember} to view its details.`}</p>
             {cols.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>No {nouns.members} yet.{canEdit ? ` Use “Add ${nouns.member}”.` : ''}</div>}
-            {/* Buscador de columnas (doc 42): contiene CI sobre lógico o
-                físico. Con filtro activo el drag&drop SE DESACTIVA — el drop
-                se resuelve contra la lista completa y reordenar viendo un
+            {/* Buscador de columnas: «contiene», sin distinguir mayúsculas, sobre
+                lógico o físico. Con filtro activo el drag&drop se desactiva: el
+                drop se resuelve contra la lista completa y reordenar viendo un
                 subconjunto corrompería el orden. */}
             {canEdit && cols.length > 1 && (
               <p className="wk-pp-cap" style={{ marginTop: 0 }}>Drag a row to reorder the {nouns.members}.</p>
@@ -608,21 +608,21 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
           </>
         )}
 
-        {/* ── Views (pp2) ── */}
+        {/* ── Views ── */}
         {tab === 'views' && (() => {
-          // Doc 70 §2.4 (paridad con Links): la tabla es canónica y sus vistas
-          // viven en canvases concretos. «This canvas» = miembros dibujados acá
-          // (editables); «Other canvases» = las demás (sólo lectura + «Add to
-          // this canvas»). El contador del tab sigue siendo el total.
+          // Paridad con Links: la tabla es canónica y sus vistas viven en
+          // canvases concretos. «This canvas» = miembros dibujados aquí
+          // (editables); «Other canvases» = las demás (solo lectura + «Add to
+          // this canvas»). El contador del tab muestra el total.
           const onCanvas = new Set((diagram?.views ?? []).map((v) => v.id));
           const { here, elsewhere } = splitByCanvas(views, onCanvas);
-          // Doc 70 §10 (owner): las vistas están ligadas a la TABLA FÍSICA —
-          // en el modelo lógico se listan como referencia, sin acciones.
+          // Las vistas están ligadas a la tabla física: en el modelo lógico se
+          // listan como referencia, sin acciones.
           const physicalMode = viewMode === 'physical';
           const canAct = canEdit && physicalMode;
           const srcInfo = (v: View) => {
-            // F3: fuentes canónicas (fallback tableId legacy). Compartida = 2+
-            // fuentes ⇒ tinte violeta + badge con las OTRAS fuentes.
+            // Fuentes canónicas (`sourceTableIds`; si faltan, `tableId`).
+            // Compartida = 2+ fuentes ⇒ tinte violeta + badge con las otras fuentes.
             const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
             return {
               shared: srcIds.length > 1,
@@ -639,7 +639,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                   <Eye size={13} style={{ color: 'var(--purple)', flex: 'none' }} />
                   <span className="rd-mono">{v.schema ? `${v.schema}.` : ''}{v.name}</span>
                   <span style={{ marginLeft: 'auto', display: 'flex', gap: 2, flex: 'none' }}>
-                    {/* Ojo (F5): abre la vista SOLO-LECTURA — sirve en canvas
+                    {/* Ícono Eye: abre la vista en solo lectura; sirve en canvas
                         productivo sin crear versión. Siempre visible. */}
                     <button className={iconBtn} title="View definition (read-only)" onClick={() => setViewEditor({ view: v, readOnly: true })}><Eye size={12} /></button>
                     {canAct && !other && (
@@ -653,8 +653,8 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                             .catch(reportWriteError((e) => pushToast(failureText("Couldn't remove the view from this canvas", e), 'err')))}>
                           <Unlink size={12} />
                         </button>
-                        {/* Doc 105 (A4-o4): la misma acción del store que el Object
-                            Inspector — con Undo que la repone en su sitio. */}
+                        {/* La misma acción del store que el Object Inspector, con
+                            Undo que la repone en su sitio. */}
                         <button className={iconBtn} title="Delete from the model" onClick={async () => {
                           const onError = reportWriteError((e) => pushToast(apiErrorMessage(e, "Couldn't delete"), 'err'));
                           try {
@@ -718,16 +718,16 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
           );
         })()}
 
-        {/* ── Links (pp3: cards PARENT/CHILD) — this canvas + other canvases ── */}
+        {/* ── Links (cards PARENT/CHILD): this canvas + other canvases ── */}
         {tab === 'links' && (
           <>
             <div className="wk-props-sec" style={{ marginTop: 0 }}>This canvas · {links.length} link{links.length === 1 ? '' : 's'}</div>
             {links.length === 0 && <div className="rd-small" style={{ color: 'var(--muted)' }}>This table has no relationships on this canvas.</div>}
             {links.map((r) => {
               const isParentHere = r.parentTableId === table.id;
-              // Rol de la OTRA tabla respecto de la actual.
+              // Rol de la otra tabla respecto de la actual.
               const role = isParentHere ? 'child' : 'parent';
-              // Columnas PROPIAS de la unión (todas las de los pares — PK compuesta).
+              // Columnas propias de la unión (todas las de los pares: PK compuesta).
               const ownCols = r.pairs.map((p) => (isParentHere ? p.parentColumnId : p.childColumnId));
               return (
                 <div className="wk-pp-link" key={r.id}>
@@ -761,7 +761,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 </div>
               );
             })}
-            {/* Relaciones visibles sólo en OTROS canvases (la tabla es la misma
+            {/* Relaciones visibles solo en otros canvases (la tabla es la misma
                 en todos): cards plomo, solo lectura, con el/los canvas(es). */}
             {(() => {
               const others = (allLinks ?? []).filter((l) => !links.some((r) => r.id === l.id));
@@ -805,19 +805,19 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
           </>
         )}
 
-        {/* ── UDPs (doc 51: pestaña propia — antes vivían dentro de Metadata) ── */}
+        {/* ── UDPs (pestaña propia) ── */}
         {tab === 'udps' && (
           <>
             <p className="wk-pp-cap" style={{ marginTop: 0 }}>
               <b>{FACET_CAPTION.table[viewMode]}</b> — governance tags of this facet. {FACET_SWITCH_HINT[viewMode]}
             </p>
-            {/* key por tabla+faceta (doc 69): cambiar de selección o de modo
+            {/* key por tabla+faceta: cambiar de selección o de modo
                 remonta el asignador (borradores/pendientes internos). */}
             <UdpAssign key={`${table.id}:${viewMode}`} level="table" view={viewMode} values={table.udpValues ?? {}} disabled={!canEdit} onChange={saveTableUdp} />
           </>
         )}
 
-        {/* ── Metadata (pp4, solo lectura) ── */}
+        {/* ── Metadata (solo lectura) ── */}
         {tab === 'metadata' && (
           <>
             <dl className="wk-pp-meta">
@@ -829,8 +829,8 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
               <dt>Definition</dt><dd>{table.description || '—'}</dd>
               <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{table.id}</dd>
             </dl>
-            {/* V3 (doc 19 §12b): dónde se usa la tabla — proyecto › carpeta ›
-                canvas (efectivo: con changeset activo incluye lo pendiente). */}
+            {/* Dónde se usa la tabla: proyecto › carpeta › canvas (efectivo:
+                con changeset activo incluye lo pendiente). */}
             <div style={{ marginTop: 8, paddingTop: 14, borderTop: '1px solid #EAEDF2' }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#1A2B4A', marginBottom: 8 }}>
                 Used in{usage !== null ? ` · ${usage.length} canvas${usage.length === 1 ? '' : 'es'}` : ''}
@@ -849,8 +849,8 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 </div>
               ))}
             </div>
-            {/* Historial de auditoría (doc 51): acciones PUBLICADAS sobre la
-                tabla — quién / qué / cuándo / qué versión, detalle bajo demanda. */}
+            {/* Historial de auditoría: acciones publicadas sobre la tabla
+                (quién / qué / cuándo / qué versión), detalle bajo demanda. */}
             <AuditHistory kind="table" entityId={table.id} />
           </>
         )}
@@ -863,10 +863,10 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
           readOnly={viewEditor.readOnly}
           onClose={() => setViewEditor(null)}
           onSaved={(v, created) => {
-            // Doc 70: una vista NUEVA con «Show on this canvas» entra a la
-            // membresía de este canvas; editar no cambia membresía. Doc 105
-            // (F1): si no entra, se dice por qué — y qué falló (O1); con la
-            // versión recién transferida, calla (H7: ya avisó la revalidación).
+            // Una vista recién creada con «Show on this canvas» entra a la
+            // membresía de este canvas; editar no cambia membresía. Si no entra,
+            // se dice por qué y qué falló; con la versión recién transferida,
+            // calla (el aviso lo da la revalidación).
             if (created && v.showOnCanvas !== false) {
               void addViewsToCanvas([v.id])
                 .catch(reportWriteError((e) => pushToast(failureText("Couldn't add the view to this canvas", e), 'err')));

@@ -1,7 +1,7 @@
 /**
- * searchSelectNav — navegación por teclado del menú de SearchSelect (doc 41 +
- * doc 96 D1), pura. `count` = opciones visibles; la fila de acción, si existe,
- * ocupa el índice `count`. Sin acción, el comportamiento de siempre.
+ * searchSelectNav — navegación por teclado del menú de SearchSelect, pura.
+ * `count` = opciones visibles; la fila de acción, si existe, ocupa el índice
+ * `count`. Sin acción, solo se navega entre las opciones.
  */
 
 /** ↓ (`dir` 1) / ↑ (`dir` -1): nunca baja de 0 ni pasa del último ítem. */

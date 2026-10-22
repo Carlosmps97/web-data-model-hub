@@ -1,5 +1,5 @@
-// Doc 102: el Reporting lee producción o una versión propia (`changesetId`) y
-// los LOTES de ids van en el CUERPO (POST): en la URL, 300 ids daban 431.
+// El Reporting lee producción o una versión propia (`changesetId`) y los lotes
+// de ids van en el cuerpo (POST): en la URL, 300 ids darían 431.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
@@ -15,7 +15,7 @@ beforeEach(() => {
 });
 const url = () => new URL(String(vi.mocked(apiGet).mock.calls[0][0]), 'http://x');
 
-describe('reporting.service (doc 102)', () => {
+describe('reporting.service', () => {
   it('GET con changesetId solo si hay versión propia', async () => {
     await listReportTables('p1', { limit: 50 }, 'cs1');
     expect(url().pathname).toBe('/api/reporting/tables');
@@ -29,7 +29,7 @@ describe('reporting.service (doc 102)', () => {
     expect(await countReportTables('p1', 'cs1')).toBe(4);
     expect(url().searchParams.get('changesetId')).toBe('cs1');
   });
-  it('columnas de UNA tabla siguen por GET (Explorer), sin tableIds', async () => {
+  it('columnas de una tabla van por GET (Explorer), sin tableIds', async () => {
     await listReportColumns('p1', 't1');
     expect(Object.fromEntries(url().searchParams)).toEqual({ tableId: 't1', projectId: 'p1' });
   });
@@ -39,7 +39,7 @@ describe('reporting.service (doc 102)', () => {
     await queryReportViews('p1', ['t1']);
     expect(apiPost).toHaveBeenLastCalledWith('/api/reporting/views/query', { projectId: 'p1', tableIds: ['t1'] });
   });
-  it('relaciones del lote por POST (hoja Relationships), con la versión sólo si hay', async () => {
+  it('relaciones del lote por POST (hoja Relationships), con la versión solo si hay', async () => {
     await queryRelationshipsReport('p1', ['t1'], 'cs1');
     expect(apiPost).toHaveBeenCalledWith('/api/reporting/insights/relationships/query',
       { projectId: 'p1', tableIds: ['t1'], changesetId: 'cs1' });

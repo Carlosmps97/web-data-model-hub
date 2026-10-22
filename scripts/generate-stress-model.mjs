@@ -1,46 +1,40 @@
 #!/usr/bin/env node
 /**
- * Synthetic stress-model generator.
+ * Generador de un modelo sintético para pruebas de estrés.
  *
- * Produces a JSON document shaped like a `DataModel` (see
- * `src/types/model.ts`) with N tables, average M columns each, and a
- * realistic web of FK relationships. The output can be:
+ * Produce un documento JSON con forma de modelo de datos (tablas, columnas y
+ * relaciones) con N tablas, un promedio de M columnas por tabla y una red
+ * realista de relaciones FK, como insumo para medir el rendimiento con
+ * modelos grandes.
  *
- *   1. Pasted into the DBML / SQL importer to seed a real backend
- *      model for end-to-end perf testing.
- *   2. Loaded directly into the canvas via the `loadModel` store
- *      action (see `useModelStore.ts`) for in-memory benchmarking
- *      that bypasses the backend round-trip.
- *
- * Usage:
+ * Uso:
  *
  *   node scripts/generate-stress-model.mjs --tables=1000 --cols=10
  *
- * Options (all optional):
+ * Opciones (todas opcionales):
  *
- *   --tables    Number of tables (default 100). Common targets:
+ *   --tables    Cantidad de tablas (por defecto 100). Valores habituales:
  *               100, 1000, 3000, 10000.
- *   --cols      Average columns per table (default 8). Each table
- *               gets `cols ± 2` columns randomly.
- *   --fk-rate   Fraction of tables that get an outgoing FK (default
- *               0.6). Higher = denser graph; ELK takes longer.
- *   --out       Output path (default ./stress-model.json).
- *   --engine    Database engine for the model header (default sqlserver).
- *   --seed      RNG seed so runs are reproducible (default 42).
+ *   --cols      Promedio de columnas por tabla (por defecto 8). Cada tabla
+ *               recibe `cols ± 2` columnas al azar.
+ *   --fk-rate   Fracción de tablas con una FK saliente (por defecto 0.6).
+ *               Más alta = grafo más denso; ELK tarda más.
+ *   --out       Ruta de salida (por defecto ./stress-model.json).
+ *   --engine    Motor de base de datos del encabezado del modelo (por defecto sqlserver).
+ *   --seed      Semilla del RNG para que las corridas sean reproducibles (por defecto 42).
  *
- * Determinism:
+ * Determinismo:
  *
- *   The generator uses a tiny LCG seeded by `--seed`, NOT
- *   `Math.random`. Same seed + same flags produce byte-identical
- *   output across runs and machines, which makes A/B perf
- *   comparisons reliable.
+ *   El generador usa un LCG pequeño sembrado con `--seed`, no
+ *   `Math.random`. La misma semilla con los mismos flags produce una salida
+ *   idéntica byte a byte entre corridas y máquinas, lo que vuelve confiables
+ *   las comparaciones A/B de rendimiento.
  *
- * Why this lives in `scripts/` (not `src/`):
+ * Por qué vive en `scripts/` (y no en `src/`):
  *
- *   It is a developer tool, never imported by the app. Keeping it
- *   out of `src/` keeps the production bundle clean and lets us
- *   ship it as a `.mjs` (Node-direct) without TypeScript build
- *   pipeline overhead.
+ *   Es una herramienta de desarrollo que la app nunca importa. Fuera de
+ *   `src/` no entra al bundle de producción y corre como `.mjs` (Node
+ *   directo), sin pasar por el build de TypeScript.
  */
 
 import { writeFileSync } from 'node:fs';
@@ -48,7 +42,7 @@ import { resolve } from 'node:path';
 import { argv, exit } from 'node:process';
 import { randomUUID } from 'node:crypto';
 
-// ── Args ────────────────────────────────────────────────────────────
+// ── Argumentos ──────────────────────────────────────────────────────
 const args = parseArgs(argv.slice(2));
 const N = args.tables ?? 100;
 const COLS_AVG = args.cols ?? 8;
@@ -62,18 +56,18 @@ if (!Number.isFinite(N) || N <= 0) {
   exit(2);
 }
 
-// ── Deterministic RNG (LCG) ─────────────────────────────────────────
+// ── RNG determinista (LCG) ──────────────────────────────────────────
 let _rng = SEED >>> 0;
 const rand = () => {
-  // Numerical Recipes "minstd" — small, deterministic, plenty
-  // uniform for synthetic data.
+  // LCG de Numerical Recipes (1664525, 1013904223): pequeño, determinista y
+  // suficientemente uniforme para datos sintéticos.
   _rng = (Math.imul(_rng, 1664525) + 1013904223) >>> 0;
   return _rng / 0x1_0000_0000;
 };
 const randInt = (min, max) => Math.floor(rand() * (max - min + 1)) + min;
 const pick = (arr) => arr[Math.floor(rand() * arr.length)];
 
-// ── Vocabulary for plausible-looking schemas ────────────────────────
+// ── Vocabulario para esquemas verosímiles ───────────────────────────
 const SCHEMA_NAMES = ['dbo', 'sales', 'inventory', 'hr', 'finance', 'marketing'];
 const NOUNS = [
   'customer', 'order', 'invoice', 'product', 'category', 'supplier',
@@ -95,8 +89,8 @@ const TYPES_DATE = ['DATETIME', 'DATE', 'TIMESTAMP'];
 const TYPES_BOOL = ['BIT', 'BOOLEAN'];
 
 function nameForTable(i) {
-  // Stable, mostly-unique table names. We append an index for
-  // uniqueness when N is very large.
+  // Nombres de tabla estables; el índice al final garantiza la unicidad
+  // cuando N es muy grande.
   const base = pick(NOUNS);
   const suffix = pick(SUFFIXES);
   return `${base}${suffix}_${i}`;
@@ -128,30 +122,31 @@ function buildTable(i) {
     schema: pick(SCHEMA_NAMES),
     name: nameForTable(i),
     columns,
-    // Position omitted → cold-start placement kicks in (Issue #1).
+    // Sin posición: las tablas no traen coordenadas y el layout queda a cargo
+    // de quien consuma el modelo.
   };
 }
 
-// ── Generate ────────────────────────────────────────────────────────
+// ── Generación ──────────────────────────────────────────────────────
 const tables = [];
 for (let i = 0; i < N; i++) tables.push(buildTable(i));
 
 const relationships = [];
 for (let i = 0; i < N; i++) {
   if (rand() > FK_RATE) continue;
-  // Each FK links to a previously-generated table so the graph is a
-  // DAG (no cycles) — ELK handles cycles fine, but DAG layouts read
-  // better and match real-world ER diagrams more closely.
+  // Cada FK apunta a una tabla ya generada, así el grafo es un DAG
+  // (sin ciclos): ELK maneja ciclos sin problema, pero el layout de un DAG
+  // se lee mejor y se parece más a los diagramas ER reales.
   if (i === 0) continue;
   const targetIdx = randInt(0, i - 1);
   const src = tables[i];
   const tgt = tables[targetIdx];
-  // Pick a non-PK column on the source as the FK side.
+  // Una columna no PK del origen hace de lado FK.
   const nonPkCols = src.columns.filter((c) => !c.isPrimaryKey);
   if (nonPkCols.length === 0) continue;
   const srcCol = pick(nonPkCols);
   const tgtCol = tgt.columns[0]; // PK
-  // Mark the source column as FK so the canvas renders it correctly.
+  // La columna de origen se marca como FK para que el canvas la dibuje como tal.
   srcCol.isForeignKey = true;
   srcCol.foreignKeyRef = { table: tgt.name, column: tgtCol.name };
   relationships.push({
@@ -183,7 +178,7 @@ console.log(
     `(${(JSON.stringify(dataModel).length / 1024).toFixed(1)} KB JSON).`,
 );
 
-// ── Args parser ─────────────────────────────────────────────────────
+// ── Parser de argumentos ────────────────────────────────────────────
 function parseArgs(argv) {
   const out = {};
   for (const a of argv) {

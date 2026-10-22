@@ -3,8 +3,8 @@ import { EllipsisVertical, KeyRound, Link as LinkIcon } from 'lucide-react';
 import type { DbxColumn, DbxViewCol } from '../services/explorer.service';
 
 /**
- * Filas compartidas del Explorer unificado (docs 71/72) — columnas de tabla y
- * salidas de vista de las ramas del proyecto (`ProjectCatalog`).
+ * Filas compartidas del Explorer: columnas de tabla y salidas de vista de las
+ * ramas del proyecto (`ProjectCatalog`).
  */
 
 /** Indentación por nivel (mismos valores que ModelExplorer). */
@@ -28,7 +28,7 @@ const colIcon = (c: DbxColumn): ReactNode =>
  *  (ir al canvas y abrir su Properties). */
 export function ColumnLine({ col, depth, onClick, onMenu }: {
   col: DbxColumn; depth: number; onClick?: (e: ReactMouseEvent<HTMLElement>) => void;
-  /** Doc 72: menú ⋮ (Inspect metadata · Locate on canvas). */
+  /** Menú ⋮ (Inspect metadata · Locate on canvas). */
   onMenu?: (e: ReactMouseEvent<HTMLElement>) => void;
 }) {
   const title = col.logicalName

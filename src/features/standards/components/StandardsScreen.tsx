@@ -36,7 +36,7 @@ export default function StandardsScreen() {
   const canEdit = useAuthStore((s) => s.has('standards.edit'));
   const me = useAuthStore((s) => s.user);
   const [tab, setTab] = useState<Tab>('overview');
-  // Doc 75: los Data Standards son POR PROYECTO — el selector decide de cuál.
+  // Los Data Standards son por proyecto: el selector decide de cuál.
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [snapshot, setSnapshot] = useState<StandardsSnapshot | null>(null);
@@ -45,7 +45,7 @@ export default function StandardsScreen() {
   const [history, setHistory] = useState(false);
   const [rollbackTarget, setRollbackTarget] = useState<StandardsVersion | null>(null);
   const [busy, setBusy] = useState(false);
-  // Doc 95 D9: qué re-tipa y qué re-deriva el rollback elegido, antes de confirmarlo.
+  // Qué re-tipa y qué re-deriva el rollback elegido, antes de confirmarlo.
   const [preview, setPreview] = useState<RollbackPreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   useEffect(() => {
@@ -70,8 +70,8 @@ export default function StandardsScreen() {
     if (!projectId) return;
     const [snap, vers] = await Promise.all([getSnapshot(projectId), getVersions(projectId)]);
     setSnapshot(snap); setVersions(vers);
-    // Doc 109: un canvas abierto de este proyecto repinta con los themes vigentes
-    // (un apply o un rollback pudo cambiarlos).
+    // Un canvas abierto de este proyecto repinta con los themes vigentes (un
+    // apply o un rollback pudo cambiarlos).
     const modeler = useModelerStore.getState();
     if (modeler.activeProjectId === projectId) void modeler.loadThemes(projectId);
   }, [projectId]);
@@ -99,7 +99,7 @@ export default function StandardsScreen() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, background: '#fff' }}>
-      {/* sub-tabs */}
+      {/* sub-pestañas */}
       <div style={{ height: 52, flex: 'none', display: 'flex', alignItems: 'center', gap: 2, padding: '0 24px', borderBottom: '1px solid #EAEDF2' }}>
         {subTab('overview', 'Overview')}
         {subTab('glossary', 'Glossary')}
@@ -108,7 +108,7 @@ export default function StandardsScreen() {
         {subTab('ddl', 'DDL Export rules')}
         {subTab('themes', 'Color themes')}
         <span style={{ flex: 1 }} />
-        {/* Doc 75: proyecto cuyos estándares se ven/editan. */}
+        {/* Proyecto cuyos estándares se ven/editan. */}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, marginRight: 10 }}>
           <Database size={14} color="#8A93A5" aria-hidden />
           <span style={{ fontSize: 12, fontWeight: 600, color: '#56607A' }}>Project</span>
@@ -147,7 +147,7 @@ export default function StandardsScreen() {
         )}
       </div>
 
-      {/* footer: última versión + historial */}
+      {/* pie: última versión + historial */}
       {!loading && current && (
         <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '12px 24px', borderTop: '1px solid #EAEDF2', background: '#fff' }}>
           <span style={{ fontSize: 12, color: '#8A93A5' }}>Latest version <strong style={{ color: '#56607A' }}>{current.label}</strong> · {current.author}</span>
@@ -156,7 +156,7 @@ export default function StandardsScreen() {
         </div>
       )}
 
-      {/* 15f · historial */}
+      {/* historial */}
       {history && (
         <div style={backdrop}>
           <div style={{ width: 740, maxHeight: 800, background: '#fff', borderRadius: 16, boxShadow: '0 24px 70px rgba(16,27,48,0.4)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={(e) => e.stopPropagation()}>
@@ -195,7 +195,7 @@ export default function StandardsScreen() {
         </div>
       )}
 
-      {/* 15g · rollback confirm — doc 95 D9: con la vista previa de lo que re-tipa */}
+      {/* confirmación del rollback, con la vista previa de lo que re-tipa */}
       {rollbackTarget && (
         <Dialog open title={`Roll back to ${rollbackTarget.label}?`} icon={TriangleAlert} width={760}
           onClose={() => setRollbackTarget(null)}

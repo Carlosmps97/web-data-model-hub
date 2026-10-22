@@ -1,7 +1,7 @@
-// Cascadas EN LOTE (doc 39): deleteTable y createTableFromSources graban sus
-// cambios con UNA llamada recordChangesBulk en vez de N requests secuenciales
-// (a 4k columnas el loop viejo eran minutos). La semántica se conserva:
-// lecturas pre-borrado, FK huérfano, canvases y la tabla AL FINAL.
+// Cascadas en lote: deleteTable y createTableFromSources graban sus cambios con
+// una sola llamada recordChangesBulk en vez de N requests secuenciales (con 4k
+// columnas, un request por cambio tardaría minutos). Orden de la cascada:
+// lecturas pre-borrado, FK huérfano, canvases y la tabla al final.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const order: string[] = [];
@@ -26,13 +26,13 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
 vi.mock('@/services/views.service', () => ({
   listViews: vi.fn(),
   deleteView: vi.fn(),
-  // Doc 105 (H2): canvases de sus vistas (una multi-fuente puede estar en uno sin la tabla).
+  // Canvases de sus vistas (una multi-fuente puede estar en uno sin la tabla).
   tableViews: vi.fn(async () => ({ views: [], total: 0 })),
 }));
 vi.mock('@/features/modeler/services/structure.service', () => ({
   removeFromCanvas: vi.fn(async (saId: string) => { order.push(`canvas:${saId}`); return { tableIds: [], viewIds: [], layout: {} }; }),
   addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
-  // Doc 105 (F4): dónde estaban sus vistas, leído ANTES del lote.
+  // Dónde estaban sus vistas; se lee antes de escribir el lote.
   listedViews: vi.fn(async (saId: string) => { order.push(`listed:${saId}`); return { viewIds: [], layout: {} }; }),
 }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({
@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 describe('useModelerStore.deleteTable — cascada en lote', () => {
-  it('graba vistas+relaciones+columnas en UN bulk y la tabla AL FINAL (tras los canvases)', async () => {
+  it('graba vistas+relaciones+columnas en un bulk y la tabla al final (tras los canvases)', async () => {
     vi.mocked(viewsSvc.listViews).mockResolvedValue([{ id: 'v1' } as never]);
     vi.mocked(gov.listRelationships).mockImplementation(async (tid?: string) => (
       tid === 't1'
@@ -67,7 +67,7 @@ describe('useModelerStore.deleteTable — cascada en lote', () => {
 
     await useModelerStore.getState().deleteTable('t1');
 
-    // UN solo lote con la cascada completa, en orden vistas → relaciones → columnas.
+    // Un solo lote con la cascada completa, en orden vistas → relaciones → columnas.
     expect(gov.recordChangesBulk).toHaveBeenCalledTimes(1);
     expect(vi.mocked(gov.recordChangesBulk).mock.calls[0][0]).toEqual([
       { collection: 'views', entityId: 'v1', op: 'delete' },
@@ -79,17 +79,17 @@ describe('useModelerStore.deleteTable — cascada en lote', () => {
     expect(viewsSvc.deleteView).not.toHaveBeenCalled();
     expect(gov.deleteRelationship).not.toHaveBeenCalled();
     expect(gov.deleteColumn).not.toHaveBeenCalled();
-    // FK huérfano de la tabla SOBREVIVIENTE (cc ya no participa en ninguna
-    // relación) se desmarca igual que en el flujo viejo.
+    // El FK huérfano de la tabla sobreviviente (cc no queda en ninguna
+    // relación) se desmarca.
     expect(gov.updateColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'cc', isForeignKey: false }));
-    // Orden observable: lecturas (doc 105: también dónde estaban sus vistas) →
-    // lote → FK → canvases → tabla al final.
+    // Orden observable: lecturas (también dónde estaban sus vistas) → lote → FK
+    // → canvases → tabla al final.
     expect(order).toEqual(['listed:sa1', 'listed:sa2', 'bulk', 'fk:cc', 'canvas:sa1', 'canvas:sa2', 'table:t1']);
     expect(useModelerStore.getState().selectedTableId).toBeNull();
     expect(useModelerStore.getState().dirty).toBe(true);
   });
 
-  it('tabla sin cascada: bulk vacío NO viaja, la tabla igual se borra', async () => {
+  it('tabla sin cascada: bulk vacío no viaja, la tabla igual se borra', async () => {
     vi.mocked(viewsSvc.listViews).mockResolvedValue([]);
     vi.mocked(gov.listRelationships).mockResolvedValue([]);
     vi.mocked(gov.listColumns).mockResolvedValue([]);
@@ -104,7 +104,7 @@ describe('useModelerStore.deleteTable — cascada en lote', () => {
 });
 
 describe('useModelerStore.createTableFromSources — tabla+columnas en lote', () => {
-  it('graba la tabla y TODAS las columnas con un solo recordChangesBulk', async () => {
+  it('graba la tabla y todas las columnas con un solo recordChangesBulk', async () => {
     useModelerStore.setState({ activeSaId: 'sa1' });
 
     await useModelerStore.getState().createTableFromSources({
@@ -128,15 +128,15 @@ describe('useModelerStore.createTableFromSources — tabla+columnas en lote', ()
     expect(cols.map((c) => c.collection)).toEqual(['canonical_columns', 'canonical_columns']);
     expect(cols.map((c) => (c.payload as { ordinal: number }).ordinal)).toEqual([0, 1]);
     expect(cols.every((c) => (c.payload as { tableId: string }).tableId === tabla.entityId)).toBe(true);
-    // La membresía al canvas sigue igual (fuera del lote, colección de estructura).
-    // Doc 100: «agrega esta tabla»; la lista completa la arma el servicio en su cola.
+    // La membresía al canvas va fuera del lote (colección de estructura): «agrega
+    // esta tabla»; la lista completa la arma el servicio en su cola.
     expect(struct.addToCanvas).toHaveBeenCalledWith('sa1', { tableIds: [tabla.entityId] });
     expect(useModelerStore.getState().selectedTableId).toBe(tabla.entityId);
   });
 });
 
-describe('useModelerStore.createTableFromSources — herencia de metadata individual (doc 45)', () => {
-  it('copia definición, flags, UDPs, dominio y tipo; ids nuevos y ordinal PK primero (doc 94)', async () => {
+describe('useModelerStore.createTableFromSources — herencia de metadata individual', () => {
+  it('copia definición, flags, UDPs, dominio y tipo; ids nuevos y ordinal PK primero', async () => {
     useModelerStore.setState({ activeSaId: 'sa1' });
 
     await useModelerStore.getState().createTableFromSources({
@@ -162,10 +162,10 @@ describe('useModelerStore.createTableFromSources — herencia de metadata indivi
       description: 'Código del cliente', udpValues: { 'udp-1': 'CLIENTE' },
       ordinal: 0,
     });
-    // ids NUEVOS y tableId de la tabla nueva — no arrastra los del origen
+    // ids nuevos y tableId de la tabla nueva; no arrastra los del origen
     expect(c1.payload?.id).not.toBe('cSrc');
     expect(c1.payload?.tableId).toBe(tabla.entityId);
-    // columna sin extras: payload limpio (las claves opcionales NO viajan)
+    // columna sin extras: payload limpio (las claves opcionales no viajan)
     expect(c2.payload).toMatchObject({ physicalName: 'TXT', ordinal: 2 });
     for (const k of ['description', 'isForeignKey', 'isPartition', 'udpValues', 'pkPosition']) {
       expect(c2.payload).not.toHaveProperty(k);

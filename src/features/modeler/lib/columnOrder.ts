@@ -1,8 +1,8 @@
-// Orden de columnas (doc 74/81/94): UN solo orden por tabla — `ordinal` — con
-// las PK SIEMPRE primero (doc 94 D1: no existe un orden de llave aparte; entre
-// PK manda el `ordinal`, como entre las demás). Mismo orden en el modelo lógico
-// y en el físico, en el canvas, el panel de propiedades, el Object Inspector,
-// el panel de columna, las vistas, el DDL y el store. Helpers PUROS.
+// Orden de columnas: un solo orden por tabla, `ordinal`, con las PK siempre
+// primero (no existe un orden de llave aparte; entre PK manda el `ordinal`,
+// como entre las demás). Mismo orden en el modelo lógico y en el físico, en el
+// canvas, el panel de propiedades, el Object Inspector, el panel de columna,
+// las vistas, el DDL y el store. Helpers puros.
 
 export interface ReorderStep<T> { c: T; idx: number }
 
@@ -13,18 +13,18 @@ export function sortByOrdinal<T extends { ordinal: number }>(cols: T[]): T[] {
   return [...cols].sort((a, b) => a.ordinal - b.ordinal);
 }
 
-/** Orden ÚNICO de una tabla (doc 94 D1): PRIMERO las PK y después el resto,
- *  cada bloque por `ordinal`. Es exactamente lo que dibuja el canvas. Una tabla
- *  vieja con `ordinal` desordenado (PK con ordinal mayor que una no-PK) se ve
- *  igual PK primero. `cols` debe venir acotado a UNA tabla. Sort estable; no
- *  muta la entrada. */
+/** Orden único de una tabla: primero las PK y después el resto, cada bloque
+ *  por `ordinal`. Es exactamente lo que dibuja el canvas. Una tabla con
+ *  `ordinal` desordenado (PK con ordinal mayor que una no-PK) se ve igual PK
+ *  primero. `cols` debe venir acotado a una tabla. Sort estable; no muta la
+ *  entrada. */
 export function orderColumns<T extends Orderable>(cols: T[]): T[] {
   const pks = sortByOrdinal(cols.filter((c) => !!c.isPrimaryKey));
   const rest = sortByOrdinal(cols.filter((c) => !c.isPrimaryKey));
   return [...pks, ...rest];
 }
 
-/** ¿`orderedIds` respeta «PK primero» (doc 94 D3)? Falso si alguna PK queda
+/** ¿`orderedIds` respeta «PK primero»? Falso si alguna PK queda
  *  debajo de una no-PK. Ids desconocidos se ignoran. */
 export function isPkFirst<T extends Orderable & { id: string }>(cols: T[], orderedIds: string[]): boolean {
   const pk = new Map(cols.map((c) => [c.id, !!c.isPrimaryKey]));
@@ -37,11 +37,11 @@ export function isPkFirst<T extends Orderable & { id: string }>(cols: T[], order
   return true;
 }
 
-/** Orden nuevo (ids) cuando `colId` entra a la llave o sale de ella (doc 94
- *  D2) — con el flag `isPrimaryKey` de `cols` YA sin contar a `colId`: queda
- *  justo en la frontera, al FINAL del bloque de PK si entra y PRIMERA entre las
- *  no-PK si sale (es el mismo lugar). El resto conserva su orden único (así
- *  también se normaliza un `ordinal` viejo). Id desconocido ⇒ el orden único. */
+/** Orden resultante (ids) cuando `colId` entra a la llave o sale de ella, con
+ *  el flag `isPrimaryKey` de `cols` ya sin contar a `colId`: queda justo en la
+ *  frontera, al final del bloque de PK si entra y primera entre las no-PK si
+ *  sale (es el mismo lugar). El resto conserva su orden único (así también se
+ *  normaliza un `ordinal` desordenado). Id desconocido ⇒ el orden único. */
 export function placeAtKeyBoundary<T extends Orderable & { id: string }>(cols: T[], colId: string): string[] {
   if (!cols.some((c) => c.id === colId)) return orderColumns(cols).map((c) => c.id);
   const others = cols.filter((c) => c.id !== colId);
@@ -50,12 +50,12 @@ export function placeAtKeyBoundary<T extends Orderable & { id: string }>(cols: T
   return [...pks, colId, ...rest];
 }
 
-/** Doc 94 D2 — ordinales que dejan UNA tabla PK primero tras un cambio de
- *  llave y/o altas: las que entran (`toKey`, en ese orden, existentes o nuevas)
- *  van al final del bloque de PK; las que salen (`fromKey`), primeras entre las
+/** Ordinales que dejan una tabla PK primero tras un cambio de llave y/o
+ *  altas: las que entran (`toKey`, en ese orden, existentes o nuevas) van al
+ *  final del bloque de PK; las que salen (`fromKey`), primeras entre las
  *  no-PK; las nuevas que no entran a la llave (`add` fuera de `toKey`), al
- *  final. Devuelve SOLO las columnas cuyo ordinal cambia (las nuevas siempre).
- *  Sin cambios, normaliza un `ordinal` viejo desordenado. Puro. */
+ *  final. Devuelve solo las columnas cuyo ordinal cambia (las nuevas siempre).
+ *  Sin cambios, normaliza un `ordinal` desordenado. Puro. */
 export function pkFirstOrdinals<T extends Orderable & { id: string }>(
   cols: T[], opts: { toKey?: string[]; fromKey?: string[]; add?: { id: string }[] },
 ): Map<string, number> {

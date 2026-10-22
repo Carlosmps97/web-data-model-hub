@@ -1,14 +1,14 @@
 // Combos Project / Version y estados de la grilla del Reporting (markup estático, sin DOM).
-// Doc 105 (B9): el combo Version no tenía nombre accesible (un lector de
-// pantalla leía «edit text, Production · v12»). Doc 105 (B3): durante un
-// export quedaban habilitados — cambiar de versión no cortaba el export, que
-// terminaba y bajaba el archivo de la versión anterior.
+// El combo Version tiene nombre accesible (sin él, un lector de pantalla lee
+// «edit text, Production · v12»). Durante un export los combos se deshabilitan:
+// cambiar de versión no corta el export, que terminaría bajando el archivo de la
+// versión anterior.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { VersionRow } from '@/types/versioning';
 import { MoreTablesError, ProjectPick, TablesLoadError, VersionPick } from './ReportingScreen';
 
-const projects = [{ id: 'p1', name: 'MODELO DDV' }, { id: 'p2', name: 'RDV' }];
+const projects = [{ id: 'p1', name: 'MODELO VENTAS' }, { id: 'p2', name: 'PARAMETROS' }];
 const draft: VersionRow = {
   id: 'cs1', versionLabel: 'v14', title: 'Carga Excel', owner: 'ana', status: 'draft', projectId: 'p1',
   deletesProject: false, reviewers: [],
@@ -20,7 +20,7 @@ describe('combos del Reporting', () => {
   it('Project y Version tienen nombre accesible en su input', () => {
     const project = renderToStaticMarkup(<ProjectPick projects={projects} projectId="p1" onPick={() => {}} />);
     expect(inputOf(project)).toContain('aria-label="Project"');
-    expect(inputOf(project)).toContain('value="MODELO DDV"');
+    expect(inputOf(project)).toContain('value="MODELO VENTAS"');
     const version = renderToStaticMarkup(<VersionPick production={null} own={[draft]} versionId="cs1" onPick={() => {}} />);
     expect(inputOf(version)).toContain('aria-label="Version"');
     expect(inputOf(version)).toContain('value="v14 · Carga Excel — draft"');
@@ -35,9 +35,9 @@ describe('combos del Reporting', () => {
     }
   });
 
-  // Doc 105 (revisión, a11y): el motivo estaba sólo en `title` (del contenedor):
-  // un lector de pantalla no lo leía. Ahora el input lo describe
-  // (`aria-describedby`) sin cambiar su nombre accesible, «Project» / «Version».
+  // Un lector de pantalla no lee el `title` del contenedor: el input describe el
+  // motivo con `aria-describedby`, sin cambiar su nombre accesible («Project» /
+  // «Version»).
   it('el motivo es la descripción accesible del input; el nombre sigue siendo «Project» / «Version»', () => {
     const cases: [string, string][] = [
       ['Project', renderToStaticMarkup(<ProjectPick projects={projects} projectId="p1" onPick={() => {}} busy />)],
@@ -65,8 +65,8 @@ describe('combos del Reporting', () => {
   });
 });
 
-// Doc 105 (R2-B4): si la carga de tablas fallaba, la grilla decía «No tables to
-// report yet» (como un proyecto vacío). El reintento lo cablea la pantalla.
+// Si la carga de tablas falla, la grilla lo indica (no «No tables to report yet»,
+// como en un proyecto vacío). El reintento lo cablea la pantalla.
 describe('grilla del Reporting', () => {
   it('una carga fallida dice que falló y ofrece Retry', () => {
     const html = renderToStaticMarkup(<TablesLoadError onRetry={() => {}} />);

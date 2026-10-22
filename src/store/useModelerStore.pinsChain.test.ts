@@ -1,11 +1,11 @@
-// Revisión doc 114 (fijar lo existente sin posición): store REAL + structure.service
-// REAL sobre un draft en memoria (arnés tomado de la revisión independiente).
+// Fijar lo existente sin posición: store real + structure.service real sobre un
+// draft en memoria.
 //  · Undo en cadena: sacar o borrar A (sin posición) → crear / importar / pegar →
-//    Undo → Undo. Antes, sacar A corría a B y C una casilla, el alta los fijaba
-//    ahí y al reponer A quedaba encima de B. Ahora sacar también los fija donde
-//    se ven: la cadena vuelve EXACTAMENTE al principio.
-//  · Un alta sin posición (canvas no medible) no fija nada: si no, la nueva caía
-//    en su casilla por número de orden, encima de una tabla fijada.
+//    Undo → Undo. Sacar A también fija a B y C donde se ven (si no, se correrían
+//    una casilla, el alta los fijaría ahí y al reponer A quedaría encima de B):
+//    la cadena vuelve exactamente al principio.
+//  · Un alta sin posición (canvas no medible) no fija nada: si fijara, la nueva
+//    caería en su casilla por número de orden, encima de una tabla fijada.
 //  · Importar varias: lo que ya entró por otro camino no cuenta como «entra».
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -72,7 +72,7 @@ function painted(dia: Diagram | null): Record<string, P> {
   return { ...Object.fromEntries(tablePos), ...Object.fromEntries(vs.nodes.map((n) => [n.id, n.position])) };
 }
 
-/** Tablas que se tapan EXACTAMENTE (misma esquina). */
+/** Tablas que se tapan exactamente (misma esquina). */
 function sameCorner(dia: Diagram | null): string[][] {
   const pos = painted(dia);
   const ids = (dia?.tables ?? []).map((t) => t.id);
@@ -170,7 +170,7 @@ async function removeThenAddThenUndoTwice(how: 'remove' | 'delete', add: 'create
 
 beforeEach(() => { vi.clearAllMocks(); wire(); });
 
-describe('Undo en cadena con tablas sin posición (revisión doc 114)', () => {
+describe('Undo en cadena con tablas sin posición', () => {
   for (const how of ['remove', 'delete'] as const) {
     for (const add of ['create', 'import', 'paste'] as const) {
       it(`${how} A → ${add} → Undo → Undo: todo vuelve a su lugar, sin tapar`, async () => {
@@ -190,9 +190,9 @@ describe('Undo en cadena con tablas sin posición (revisión doc 114)', () => {
   });
 });
 
-describe('alta sin posición (canvas no medible): no fija nada (revisión doc 114)', () => {
+describe('alta sin posición (canvas no medible): no fija nada', () => {
   for (const add of ['create', 'import'] as const) {
-    it(`${add}: la nueva entra por su casilla y las demás se acomodan sin taparse, como antes`, async () => {
+    it(`${add}: la nueva entra por su casilla y las demás se acomodan sin taparse`, async () => {
       vi.mocked(canvasView).mockReturnValue(null);
       await openCanvas(canvasOf(['tB', 'tC']), [...ABC, T('t0', 'A0_PRIMERA')]);
       if (add === 'create') await st().createTable({ logicalName: 'a0', physicalName: 'A0_NUEVA' });
@@ -204,7 +204,7 @@ describe('alta sin posición (canvas no medible): no fija nada (revisión doc 11
   }
 });
 
-describe('importar varias: lo que ya entró por otro camino no cuenta como «entra» (revisión doc 114)', () => {
+describe('importar varias: lo que ya entró por otro camino no cuenta como «entra»', () => {
   it('con las vistas en lectura, tA entra por otro camino: B y C quedan fijas donde se ven', async () => {
     await openCanvas(canvasOf(['tB', 'tC']), [...ABC, T('tZ', 'Z_ULTIMA')]);
     vi.mocked(viewsSvc.listViewsForTables).mockImplementation(async () => {

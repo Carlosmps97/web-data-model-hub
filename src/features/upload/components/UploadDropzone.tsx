@@ -3,13 +3,13 @@ import { Download, FileSpreadsheet, UploadCloud } from 'lucide-react';
 import { Button } from '@/components/ui';
 
 /** Ruta pública de la plantilla (public/templates; la sirve Vite en dev y
- *  server.mjs en Databricks Apps). Doc 78: `Plantilla.xlsx` verbatim. */
+ *  server.mjs en Databricks Apps). `Plantilla.xlsx` se publica tal cual. */
 export const TEMPLATE_URL = `${import.meta.env.BASE_URL}templates/Plantilla.xlsx`;
 const TEMPLATE_NAME = 'Plantilla.xlsx';
 const ACCEPT = '.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 export interface DropzoneFile { name: string; size: number; }
-/** Hoja del perfil vista desde el archivo cargado (solo informativo; la verdad la dice el reporte). */
+/** Hoja del perfil según el archivo cargado (solo informativo; lo que vale es el reporte). */
 export interface DropzoneSheet { name: string; found: boolean; rows: number; }
 
 function fmtSize(bytes: number): string {
@@ -22,7 +22,7 @@ function fmtSize(bytes: number): string {
  * Selector del workbook: zona de arrastre + botón de archivo (teclado: Enter /
  * Space). Con archivo cargado muestra la tarjeta (nombre, tamaño, hojas del
  * perfil halladas o no) y permite reemplazarlo; la plantilla siempre está a
- * un click.
+ * un clic.
  */
 export default function UploadDropzone({ file, sheets, disabled, onFile }: {
   file: DropzoneFile | null;

@@ -1,4 +1,4 @@
-// LOD del canvas (doc 33): histéresis del umbral y tamaños de la caja
+// LOD del canvas: histéresis del umbral y tamaños de la caja
 // compacta (deben calzar con las métricas del nodo detallado — misma fórmula
 // que scripts/arrange_all.py del backend).
 import { describe, expect, it } from 'vitest';
@@ -7,14 +7,14 @@ import type { View } from '@/services/views.service';
 import { LOD_ENTER, LOD_EXIT, nextLod, tableLodSize, viewLodSize } from './lodSize';
 
 const table = (over: Partial<CanonicalTable> = {}): CanonicalTable =>
-  ({ id: 't1', schema: 'bcp_x', physicalName: 'MD_TABLA', logicalName: 'Tabla', ...over }) as CanonicalTable;
+  ({ id: 't1', schema: 'stg_x', physicalName: 'MD_TABLA', logicalName: 'Tabla', ...over }) as CanonicalTable;
 
 const col = (over: Partial<CanonicalColumn> = {}): CanonicalColumn =>
   ({ id: 'c1', tableId: 't1', physicalName: 'CODCLI', logicalName: 'Codigo Cliente',
      dataType: 'VARCHAR(20)', isPrimaryKey: false, ...over }) as CanonicalColumn;
 
 describe('nextLod (histéresis)', () => {
-  it('entra compacto SOLO bajo ENTER y sale SOLO sobre EXIT (banda muerta)', () => {
+  it('entra compacto solo bajo ENTER y sale solo sobre EXIT (banda muerta)', () => {
     expect(nextLod(false, LOD_ENTER - 0.01)).toBe(true);   // cruza hacia abajo
     expect(nextLod(false, LOD_ENTER + 0.01)).toBe(false);  // sin cruce
     expect(nextLod(true, LOD_EXIT + 0.01)).toBe(false);    // cruza hacia arriba
@@ -56,7 +56,7 @@ describe('tableLodSize', () => {
 describe('viewLodSize', () => {
   it('alto por filas de source y ancho por header/fila más larga', () => {
     const view = {
-      id: 'v1', schema: 'bcp_x_vu', name: 'MD_TABLA', tableId: 't1',
+      id: 'v1', schema: 'stg_x_vu', name: 'MD_TABLA', tableId: 't1',
       sourceTableIds: ['t1'],
       sources: [
         { tableId: 't1', column: 'CODCLI', outputAlias: 'CODCLI' },

@@ -1,5 +1,5 @@
-// Doc 109 — formulario de un theme de color (Data Standards → Color themes).
-// Lógica pura: qué falta, si cambió algo y qué se manda al apply. Las mismas
+// Formulario de un theme de color (Data Standards → Color themes).
+// Lógica pura: qué falta, si hay cambios y qué se manda al apply. Las mismas
 // reglas que valida el backend (`app/features/themes/models.py`).
 import type { Theme } from '@/lib/colors';
 import type { ThemeEditInput } from './standards.service';

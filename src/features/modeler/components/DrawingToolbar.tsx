@@ -12,10 +12,10 @@ import ColorPicker from './ColorPicker';
 import FloatingPanel from './FloatingPanel';
 
 /**
- * Doc 109 — barra de formato de un dibujo SELECCIONADO (aparece sólo así,
- * encima del dibujo y a tamaño de pantalla): relleno · borde | fuente ·
- * tamaño · B · I · U · color del texto · alineación | borrar. Una línea sólo
- * tiene su color y borrar. Cada control abre su panel; elegir aplica al toque.
+ * Barra de formato de un dibujo seleccionado (aparece solo así, encima del
+ * dibujo y a tamaño de pantalla): relleno · borde | fuente · tamaño · B · I ·
+ * U · color del texto · alineación | borrar. Una línea solo tiene su color y
+ * borrar. Cada control abre su panel; elegir aplica al toque.
  */
 type Panel = 'fill' | 'stroke' | 'font' | 'size' | 'text' | 'align';
 
@@ -34,10 +34,10 @@ export default function DrawingToolbar({ drawing, onChange, onDelete }: {
   const { align, valign } = drawingAlign(drawing);
   const stroke = drawingStroke(drawing);
   const fill = drawingFill(drawing);
-  // El patch se arma sobre el dibujo VIGENTE (el selector del sistema aplica
-  // tarde: con la foto del clic revertía un cambio hecho entretanto), y un
-  // texto viejo pasa al modelo nuevo en su primera edición (sin cambiar cómo
-  // se ve).
+  // El patch se arma sobre el dibujo vigente (el selector del sistema aplica
+  // tarde: con la foto del clic revertiría un cambio hecho entretanto), y un
+  // texto en formato simple pasa al formato con `font` en su primera edición
+  // (`legacyUpgrade`, sin cambiar cómo se ve).
   const current = () => useModelerStore.getState().drawings.find((x) => x.id === drawing.id) ?? drawing;
   // Lo elegido como se compara con lo que se ve («No color» = null).
   const asColor = (ref: string | null) => (!ref || ref === 'none' ? null : ref);

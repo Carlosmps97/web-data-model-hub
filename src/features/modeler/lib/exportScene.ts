@@ -1,17 +1,17 @@
-// Doc 59: motor de export SIN captura de DOM.
+// Motor de export sin captura de DOM.
 //
-// html-to-image clonaba ~450k elementos con getComputedStyle por elemento y
-// serializaba cientos de MB (minutos de bloqueo + RangeError en canvases
-// gigantes). Este módulo dibuja el diagrama DESDE EL MODELO — tablas,
-// columnas, relaciones, vistas, subcategorías y shapes — con las MISMAS
-// métricas del canvas (header 32 / fila 28 / clamp 240..880, espejo de
-// lodSize.ts y scripts/arrange_all.py) y los mismos ruteos (getSmoothStepPath
+// Capturar el DOM del canvas obliga a clonar cientos de miles de elementos con
+// getComputedStyle y a serializar cientos de MB: minutos de bloqueo y
+// RangeError en canvases gigantes. Este módulo dibuja el diagrama a partir del
+// modelo (tablas, columnas, relaciones, vistas, subcategorías y shapes) con
+// las mismas métricas del canvas (header 32 / fila 28 / clamp 240..880, espejo
+// de lodSize.ts y scripts/arrange_all.py) y los mismos ruteos (getSmoothStepPath
 // / getBezierPath de React Flow son funciones puras). El resultado es una
-// ESCENA intermedia (rects/paths/textos con coordenadas absolutas) que
+// escena intermedia (rects/paths/textos con coordenadas absolutas) que
 // serializan sceneSvg.ts y scenePdf.ts: solo el diagrama, cero metadata.
 //
-// Colores = tokens.css RESUELTOS a literal (el export vive fuera del
-// documento). Los rgba/opacity se PRE-MEZCLAN sobre su fondo real: la escena
+// Colores = tokens.css resueltos a literal (el export vive fuera del
+// documento). Los rgba/opacity se pre-mezclan sobre su fondo real: la escena
 // no maneja transparencia (simplifica el PDF).
 import { Position, getBezierPath, getSmoothStepPath } from '@xyflow/react';
 import type { CanonicalColumn, Cardinality } from '@/services/governance.service';
@@ -44,7 +44,7 @@ export type SceneItem =
       /** Ancho medio por carácter (× size) para anclar `middle`/`end` en el PDF,
        *  que no mide texto. Default: el de la fuente (scenePdf). */
       wf?: number;
-      /** Doc 109: familia elegida para el texto de un dibujo (null = la de la app)
+      /** Familia elegida para el texto de un dibujo (null = la de la app)
        *  y subrayado. */
       font?: string | null; underline?: boolean };
 
@@ -54,14 +54,14 @@ export interface SceneInput {
   diagram: Diagram | null;
   drawings: Drawing[];
   viewMode: 'logical' | 'physical';
-  /** Doc 98: dibujar las etiquetas de relación (frases). Default true; el
+  /** Dibuja las etiquetas de relación (frases). Default true; el
    *  toolbar pasa false cuando el usuario las tiene ocultas en el canvas. */
   relLabels?: boolean;
-  /** Doc 99: trazos manuales de wires a dibujar. Ausente = los del canvas
-   *  (`diagram.subjectArea.routes`); el toolbar pasa los VIVOS del store (en
-   *  edición pueden tener un guardado todavía en vuelo). */
+  /** Trazos manuales de wires a dibujar. Ausente = los del canvas
+   *  (`diagram.subjectArea.routes`); el toolbar pasa los vivos del store (en
+   *  edición pueden tener un guardado aún en vuelo). */
   routes?: WireRoutes;
-  /** Doc 109: colores de las cajas en el canvas (ausente = los del canvas,
+  /** Colores de las cajas en el canvas (ausente = los del canvas,
    *  `diagram.subjectArea.colors`) y los themes del proyecto para resolverlos. */
   colors?: Record<string, string>;
   themes?: Theme[];
@@ -101,9 +101,9 @@ const KEY_W = 14, GAP = 7;
 const CHAR_UI = 7.4;        // Geist 12px, nombres UPPER_SNAKE
 const CHAR_MONO = 6;        // Geist Mono 10px (tipos)
 const CHAR_HEAD = 7.2;      // header 12px bold mono-ish
-// Etiqueta de relación (doc 98): texto de 11px en oración (no UPPER_SNAKE).
+// Etiqueta de relación: texto de 11px en oración (no UPPER_SNAKE).
 // Ancho medio por carácter = 0.5·size — Geist y Helvetica rondan 0.45 en
-// español; el margen evita que el texto se salga de su fondo. El MISMO factor
+// español; el margen evita que el texto se salga de su fondo. El mismo factor
 // viaja en el item (`wf`) para que el PDF centre con él.
 const LABEL_SIZE = 11;
 const LABEL_WF = 0.5;
@@ -114,7 +114,7 @@ const clampW = (chars: number) => Math.min(880, Math.max(240, Math.round(chars *
 const trunc = (s: string, maxChars: number): string =>
   s.length <= maxChars ? s : `${s.slice(0, Math.max(1, maxChars - 1))}…`;
 
-/** Doc 109: texto de un dibujo en líneas de a lo más `budget` caracteres —
+/** Texto de un dibujo en líneas de a lo más `budget` caracteres —
  *  respeta los saltos y corta por palabra (una palabra larga, por carácter).
  *  Conserva los espacios al principio (Erwin los usa para centrar). Pura. */
 export function wrapText(text: string, budget: number): string[] {
@@ -135,7 +135,7 @@ export function wrapText(text: string, budget: number): string[] {
 
 interface Box { x: number; y: number; w: number; h: number }
 
-/** Doc 109: el bloque de texto de un dibujo (en las coordenadas del dibujo),
+/** Bloque de texto de un dibujo (en las coordenadas del dibujo),
  *  como lo pinta el canvas (`.wk-shape-text`): margen 2×4 px, interlineado 1.3,
  *  corte por palabra al ancho de la caja y el texto que no entra se sigue
  *  viendo. `box` = lo que ocupa (puede salirse de la caja: entra en los
@@ -178,7 +178,7 @@ function rowCenterY(b: TableBox, colId: string | null | undefined): number {
 }
 
 /** Marcador crow-foot en un extremo del wire. `away` = dirección X del wire
- *  ALEJÁNDOSE del nodo (+1 derecha). Geometría espejo de CrowFootMarkers
+ *  alejándose del nodo (+1 derecha). Geometría espejo de CrowFootMarkers
  *  (viewBox 0..20, lado del nodo en x=20): u(x) = borde + away·(20−x). */
 function crowfoot(items: SceneItem[], edgeX: number, y: number, away: 1 | -1, card: Cardinality, color: string) {
   const u = (x: number) => edgeX + away * (20 - x);
@@ -201,7 +201,7 @@ const EMPTY_SCENE: Scene = { w: 640, h: 400, bg: C.bg, items: [] };
 export function buildDiagramScene(input: SceneInput): Scene {
   const { diagram, drawings, viewMode } = input;
   if (!diagram && !drawings.length) return EMPTY_SCENE;
-  // Doc 109: color de cada caja (excepción del canvas → color de la tabla).
+  // Color de cada caja (excepción del canvas → color de la tabla).
   const canvasColors = input.colors ?? diagram?.subjectArea.colors ?? {};
   const themeIdx = themeIndex(input.themes ?? []);
   const tintOf = (id: string, own: string | null | undefined) => {
@@ -211,7 +211,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
   const name = nameOf(viewMode);
   const items: SceneItem[] = [];
 
-  // ── Fase 1: cajas de TODOS los nodos (coordenadas del canvas) ───────────
+  // ── Fase 1: cajas de todos los nodos (coordenadas del canvas) ───────────
   const layout = diagram?.subjectArea.layout ?? {};
   const colsByTable = new Map<string, CanonicalColumn[]>();
   (diagram?.columns ?? []).forEach((c) => {
@@ -219,8 +219,8 @@ export function buildDiagramScene(input: SceneInput): Scene {
   });
 
   const tableBoxes = new Map<string, TableBox>();
-  // Mismas filas que el canvas (doc 74/94): el orden único — PK primero y cada
-  // bloque por `ordinal` — en ambas facetas.
+  // Mismas filas que el canvas: el orden único (PK primero y cada bloque por
+  // `ordinal`) en ambas facetas.
   (diagram?.tables ?? []).forEach((t, i) => {
     const cols = colsByTable.get(t.id) ?? [];
     const ordered = orderColumns(cols);
@@ -246,7 +246,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
 
   interface ViewBox extends Box { v: View; rows: ReturnType<typeof viewNodeRows>; present: string[] }
   const viewBoxes: ViewBox[] = [];
-  // Doc 63: vistas SOLO en modelo físico — paridad export ↔ canvas.
+  // Vistas solo en modelo físico: paridad export ↔ canvas.
   for (const v of (viewMode === 'physical' ? diagram?.views ?? [] : [])) {
     const present = viewSourceIds(v).filter((id) => tableBoxes.has(id));
     if (!present.length) continue;
@@ -283,8 +283,8 @@ export function buildDiagramScene(input: SceneInput): Scene {
     const s = pkIdsByTable.get(c.tableId); if (s) s.add(c.id); else pkIdsByTable.set(c.tableId, new Set([c.id]));
   });
   const stdRels = (diagram?.relationships ?? []).filter((r) => !isSubcategory(r) && tableBoxes.has(r.parentTableId) && tableBoxes.has(r.childTableId));
-  // Reparto de salidas por padre: depende del orden RELATIVO de los hijos, así
-  // que vale igual antes y después de la traslación.
+  // Reparto de salidas por padre: depende del orden relativo de los hijos, así
+  // que la traslación no lo altera.
   const slots = fanSlots(stdRels.map((r) => {
     const tp = tableBoxes.get(r.childTableId)!;
     return { id: r.id, parentId: r.parentTableId, targetY: tp.y, targetX: tp.x };
@@ -303,16 +303,16 @@ export function buildDiagramScene(input: SceneInput): Scene {
     };
   };
 
-  // ── Doc 99: trazos manuales ─────────────────────────────────────────────
-  // El camino se calcula UNA vez, en coordenadas del CANVAS (la primera
-  // pasada, antes de la traslación de la fase 2), y después solo se traslada:
-  // es el mismo dibujo del canvas. Rutear de nuevo en las de la escena — con
-  // un origen que puede tener fracción — movía anclajes y puntos por separado.
+  // ── Trazos manuales ─────────────────────────────────────────────────────
+  // El camino se calcula una vez, en coordenadas del canvas (la primera
+  // pasada, antes de la traslación), y después solo se traslada: es el mismo
+  // dibujo del canvas. Rutear de nuevo en las coordenadas de la escena (con un
+  // origen que puede tener fracción) movería anclajes y puntos por separado.
   const routes = cleanRoutes(input.routes ?? diagram?.subjectArea.routes);
   const origin = { x: 0, y: 0 };
   const viaOf = (wireId: string): RoutePoint[] | null => routeOf(routes, wireId) ?? null;
   const routedCache = new Map<string, RoutedGeometry>();
-  /** Wire CON trazo entre dos cajas: mismo shape que `sidesOf` + camino. El
+  /** Wire con trazo entre dos cajas: mismo shape que `sidesOf` + camino. El
    *  lado de cada extremo lo decide el trazo (misma geometría que el canvas). */
   const routedWire = (
     wireId: string, sBox: Box, sy: number, sStub: number, tBox: Box, ty: number, tStub: number, via: RoutePoint[],
@@ -342,10 +342,10 @@ export function buildDiagramScene(input: SceneInput): Scene {
 
   interface RelLabel { lines: string[]; cx: number; rect: Box }
   type Rel = (typeof stdRels)[number];
-  /** Etiqueta de una relación (doc 98) para un tramo ya ruteado: misma regla
+  /** Etiqueta de una relación para un tramo ya ruteado: misma regla
    *  que el canvas (`labelPlacement`) y parte línea al ancho disponible.
-   *  `manual` (doc 99): con trazo la etiqueta sigue al camino, también en una
-   *  recursiva (su wire ya no corre necesariamente bajo el bloque). */
+   *  `manual`: con trazo la etiqueta sigue al camino, también en una
+   *  recursiva (su wire no corre necesariamente bajo el bloque). */
   const labelFor = (
     r: Rel, side: { facesRight: boolean; sx: number; tx: number }, midX: number, midY: number, from: Box, manual = false,
   ): RelLabel | null => {
@@ -361,7 +361,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
     return { lines, cx: at.x, rect: { x: at.x - w / 2, y: at.anchor === 'bottom' ? at.y - h : at.y - h / 2, w, h } };
   };
 
-  /** Wire de una relación con las coordenadas ACTUALES de sus cajas: se llama
+  /** Wire de una relación con las coordenadas actuales de sus cajas: se llama
    *  antes de la traslación (la etiqueta entra a los bounds) y después (dibujo). */
   const wire = (r: Rel) => {
     const p = tableBoxes.get(r.parentTableId)!;
@@ -379,9 +379,9 @@ export function buildDiagramScene(input: SceneInput): Scene {
     return { ...side, sy, ty, d, corners: null, label: labelFor(r, side, midX, midY, p) };
   };
 
-  /** Rama símbolo → subtipo de una subcategoría (doc 53), con su etiqueta
-   *  (doc 98: la frase es de la relación de ESA rama). null si el subtipo no
-   *  está en el canvas. */
+  /** Rama símbolo → subtipo de una subcategoría, con su etiqueta (la frase
+   *  es la de la relación de esa rama). null si el subtipo no está en el
+   *  canvas. */
   const branch = (sym: Box, r: Rel) => {
     const c = tableBoxes.get(r.childTableId);
     if (!c) return null;
@@ -396,7 +396,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
   };
 
   /** Tronco supertipo → símbolo de una subcategoría (no es una relación: sin
-   *  etiqueta). Doc 99: su trazo manual va con la llave `subsym-{símbolo}`. */
+   *  etiqueta). Su trazo manual va con la llave `subsym-{símbolo}`. */
   const trunk = (p: TableBox, sym: Box, symbolId: string) => {
     const sy = p.y + HEADER_H / 2;
     const ty = sym.y + sym.h / 2;
@@ -411,7 +411,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
   };
 
   // ── Fase 2: bounds + traslación (padding 60) ────────────────────────────
-  // Doc 99: los wires con trazo manual aportan sus esquinas a los bounds (un
+  // Los wires con trazo manual aportan sus esquinas a los bounds (un
   // punto puede quedar fuera de la caja que envuelve a los bloques).
   const labelBoxes = [
     ...stdRels.map((r) => {
@@ -432,7 +432,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
       });
     }),
   ].flatMap((l) => (l ? [l.rect] : []));
-  // Doc 109: el texto de un dibujo que desborda su caja también entra en los límites.
+  // El texto de un dibujo que desborda su caja también entra en los límites.
   const textBoxes = drawings.flatMap((d) => { const t = drawingTextLayout(d); return t ? [t.box] : []; });
   const boxes: Box[] = [...tableBoxes.values(), ...viewBoxes, ...symbolBoxes.values(), ...drawings, ...textBoxes,
     ...labelBoxes, ...routedBoxes];
@@ -445,8 +445,8 @@ export function buildDiagramScene(input: SceneInput): Scene {
   origin.x = minX; origin.y = minY;      // desde acá los trazos salen trasladados a la escena
   const dwx = (d: Drawing): Box => ({ x: d.x - minX, y: d.y - minY, w: d.w, h: d.h });
 
-  // ── Fase 3: SHAPES (capa de fondo, zIndex -1 en el canvas) ──────────────
-  // Doc 109: relleno, borde y texto con su formato (misma regla que el canvas,
+  // ── Fase 3: shapes (capa de fondo, zIndex -1 en el canvas) ──────────────
+  // Relleno, borde y texto con su formato (misma regla que el canvas,
   // `drawingStyle.ts`); la letra va en puntos → px (× 4/3).
   for (const d of drawings) {
     const b = dwx(d);
@@ -488,9 +488,9 @@ export function buildDiagramScene(input: SceneInput): Scene {
     }));
   }
 
-  // ── Fase 4: EDGES (React Flow los pinta bajo los nodos) ─────────────────
-  // Doc 98: las etiquetas se juntan acá y se dibujan al CIERRE de la fase —
-  // encima de todos los wires (ninguno las tacha) y debajo de los bloques.
+  // ── Fase 4: edges (React Flow los pinta bajo los nodos) ─────────────────
+  // Las etiquetas se juntan acá y se dibujan al cierre de la fase: encima de
+  // todos los wires (ninguno las tacha) y debajo de los bloques.
   const relLabels: RelLabel[] = [];
 
   for (const r of stdRels) {
@@ -516,7 +516,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
     }
   }
 
-  // Subcategorías (doc 53, solo lógico): tronco y ramas con TRAZO DOBLE
+  // Subcategorías (solo lógico): tronco y ramas con trazo doble
   // (ancho color + carve central color canvas).
   const dbl = (d: string, color: string) => {
     items.push({ k: 'path', d, stroke: color, sw: 4.4 });
@@ -536,7 +536,7 @@ export function buildDiagramScene(input: SceneInput): Scene {
     }
   }
 
-  // Etiquetas de relación (doc 98): fondo color canvas (tapa el tramo de wire
+  // Etiquetas de relación: fondo color canvas (tapa el tramo de wire
   // bajo el texto) + una línea de texto centrada por renglón.
   for (const l of relLabels) {
     items.push({ k: 'rect', ...l.rect, rx: 4, fill: C.bg });
@@ -546,10 +546,10 @@ export function buildDiagramScene(input: SceneInput): Scene {
     }));
   }
 
-  // ── Fase 5: NODOS tabla ─────────────────────────────────────────────────
+  // ── Fase 5: nodos tabla ─────────────────────────────────────────────────
   for (const b of tableBoxes.values()) {
     const { t, x, y, w, h } = b;
-    const tinted = tintOf(t.id, t.color);   // doc 109
+    const tinted = tintOf(t.id, t.color);
     items.push({ k: 'rect', x, y, w, h, rx: 11, fill: tinted?.body ?? C.surface });
     items.push({ k: 'rect', x, y, w, h: HEADER_H, rx: 11, rtop: true, fill: C.navy });
     if (b.pkRows > 0) {
@@ -596,15 +596,15 @@ export function buildDiagramScene(input: SceneInput): Scene {
     items.push({ k: 'rect', x, y, w, h, rx: 11, stroke: C.border, sw: 1 });
   }
 
-  // ── Fase 6: NODOS vista ─────────────────────────────────────────────────
+  // ── Fase 6: nodos vista ─────────────────────────────────────────────────
   for (const vb of viewBoxes) {
     const { v, x, y, w, h } = vb;
-    const vTint = tintOf(v.id, v.color);   // doc 109
+    const vTint = tintOf(v.id, v.color);
     items.push({ k: 'rect', x, y, w, h, rx: 12, fill: C.surface });
     items.push({ k: 'rect', x, y: y + HEADER_H, w, h: h - HEADER_H, fill: vTint?.body ?? C.vBody });
     items.push({ k: 'hatch', x, y: y + HEADER_H, w, h: h - HEADER_H });
     items.push({ k: 'rect', x, y, w, h: HEADER_H, rx: 12, rtop: true, fill: C.vHead });
-    // Ojo (glyph) + título + badge VISTA.
+    // Glyph Eye (contorno + pupila) + título + badge VISTA.
     const ex = x + PADX + 6, ey = y + HEADER_H / 2;
     items.push({ k: 'ellipse', cx: ex, cy: ey, rx: 6, ry: 4, stroke: C.headGlyph, sw: 1.4 });
     items.push({ k: 'ellipse', cx: ex, cy: ey, rx: 1.6, ry: 1.6, fill: C.headGlyph });

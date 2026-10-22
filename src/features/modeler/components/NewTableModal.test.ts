@@ -1,7 +1,7 @@
-// «New table» sin DOM (hooks de mentira: ver features/reporting/components/fakeReact.testutil).
-// Doc 105 (R14): Enter no respetaba el alta en vuelo (`busy` sigue en false dentro
-// del mismo render): un doble Enter creaba 2 tablas y uno sostenido, varias.
-// Y (R11) el Enter que crea y cierra no llamaba a preventDefault.
+// «New table» sin DOM (hooks simulados: ver features/reporting/components/fakeReact.testutil).
+// Enter respeta el alta en vuelo (`busy` sigue en false dentro del mismo render, así que
+// un doble Enter o uno sostenido podrían crear varias tablas) y el Enter que crea y
+// cierra llama a preventDefault.
 import { describe, expect, it, vi } from 'vitest';
 import { resetFake, walk, type El } from '../../reporting/components/fakeReact.testutil';
 
@@ -29,13 +29,13 @@ function render(onCreate: (...a: unknown[]) => Promise<unknown>, onClose = vi.fn
   };
 }
 
-describe('New table: Enter crea UNA tabla y no llega a quien abrió el popup (doc 105, R11/R14)', () => {
+describe('New table: Enter crea una sola tabla y no llega a quien abrió el popup', () => {
   it('Enter: preventDefault (el keypress no «clica» al botón de atrás)', () => {
     const enter = render(vi.fn(async () => undefined));
     expect(enter().preventDefault).toHaveBeenCalled();
   });
 
-  it('dos Enter seguidos (o uno sostenido) crean UNA tabla', async () => {
+  it('dos Enter seguidos (o uno sostenido) crean una sola tabla', async () => {
     let release!: () => void;
     const onCreate = vi.fn(() => new Promise<void>((r) => { release = r; }));
     const onClose = vi.fn();

@@ -6,11 +6,11 @@ import { applyDomainDefaults, suggestedName } from './domainDefaults';
 const FEC = { id: 'd-fec', name: 'FecRutina', description: 'Fecha de la rutina.', inheritsName: true };
 const COD = { id: 'd-cod', name: 'Codigo', namingTerm: 'CodigoGenerico', description: 'Codigo de referencia.', inheritsName: true };
 const CODMES = { id: 'd-codmes', name: 'CodMes', description: 'Codigo del mes.', inheritsName: true };
-// Dominios GENÉRICOS de tipo (Codigo, Fecha, Number…): NO tienen la marca ⇒
+// Dominios genéricos de tipo (Codigo, Fecha, Number…): no tienen la marca ⇒
 // jamás pisan el nombre ni la definición propios de la columna.
 const GEN = { id: 'd-gen', name: 'Codigo', description: 'Se asigna a atributos que contienen codificacion.' };
 
-describe('applyDomainDefaults · dominio → nombre + definición SOLO si es atributo estándar (doc 79)', () => {
+describe('applyDomainDefaults · dominio → nombre + definición solo si es atributo estándar', () => {
   it('dominio estándar, primer dominio: rellena nombre y definición', () => {
     expect(applyDomainDefaults({ prevDomain: undefined, nextDomain: FEC, current: { logicalName: '', description: '' } }))
       .toEqual({ logicalName: 'FecRutina', description: 'Fecha de la rutina.' });
@@ -20,26 +20,26 @@ describe('applyDomainDefaults · dominio → nombre + definición SOLO si es atr
     expect(applyDomainDefaults({ prevDomain: undefined, nextDomain: COD, current: { logicalName: '', description: '' } }))
       .toEqual({ logicalName: 'CodigoGenerico', description: 'Codigo de referencia.' });
   });
-  it('cambiar entre dominios ESTÁNDAR RE-APLICA aunque la columna tuviera lo suyo (CodMes → FecRutina)', () => {
+  it('cambiar entre dominios estándar re-aplica aunque la columna tuviera lo suyo (CodMes → FecRutina)', () => {
     expect(applyDomainDefaults({ prevDomain: CODMES, nextDomain: FEC, current: { logicalName: 'Codigo Mes Proceso', description: 'Mes del proceso.' } }))
       .toEqual({ logicalName: 'FecRutina', description: 'Fecha de la rutina.' });
   });
 
-  // — El fix del bug reportado —
-  it('dominio GENÉRICO (sin la marca): NO toca el nombre ni la definición propios', () => {
+  // — Dominios genéricos —
+  it('dominio genérico (sin la marca): no toca el nombre ni la definición propios', () => {
     expect(applyDomainDefaults({ prevDomain: undefined, nextDomain: GEN, current: { logicalName: 'Codigo Moneda', description: 'Codigo de la Moneda' } }))
       .toEqual({});
   });
-  it('dominio GENÉRICO sobre una columna vacía tampoco autocompleta con el nombre del dominio', () => {
+  it('dominio genérico sobre una columna vacía tampoco autocompleta con el nombre del dominio', () => {
     expect(applyDomainDefaults({ prevDomain: undefined, nextDomain: GEN, current: { logicalName: '', description: '' } }))
       .toEqual({});
   });
-  it('cambiar de un dominio estándar a uno GENÉRICO conserva nombre y definición propios', () => {
+  it('cambiar de un dominio estándar a uno genérico conserva nombre y definición propios', () => {
     expect(applyDomainDefaults({ prevDomain: FEC, nextDomain: GEN, current: { logicalName: 'Fecha Desembolso', description: 'Fecha de desembolso.' } }))
       .toEqual({});
   });
 
-  it('re-elegir el MISMO dominio respeta lo manual', () => {
+  it('re-elegir el mismo dominio respeta lo manual', () => {
     expect(applyDomainDefaults({ prevDomain: FEC, nextDomain: FEC, current: { logicalName: 'mi fecha', description: 'mi texto' } }))
       .toEqual({});
     // mismo dominio identificado por nombre cuando no hay ids
@@ -59,23 +59,23 @@ describe('applyDomainDefaults · dominio → nombre + definición SOLO si es atr
       .toEqual({});
   });
 
-  // — Doc 85: las dos facetas —
+  // — Las dos facetas —
   const FEC85 = { id: 'd-fec', name: 'FecRutina', description: 'Fecha de la rutina.', inheritsName: true, physicalName: 'FecRutina', physicalDescription: 'Fecha rutina (fisico).' };
-  it('doc 85: dominio estándar con físico propio y descripción física los hereda', () => {
+  it('dominio estándar con físico propio y descripción física los hereda', () => {
     expect(applyDomainDefaults({ prevDomain: undefined, nextDomain: FEC85, current: { logicalName: '', description: '' } }))
       .toEqual({ logicalName: 'FecRutina', physicalName: 'FecRutina', description: 'Fecha de la rutina.', physicalDescription: 'Fecha rutina (fisico).' });
   });
-  it('doc 85: sin físico propio NO emite physicalName (el caller deriva) y sin descripción física LIMPIA la anterior', () => {
+  it('sin físico propio no emite physicalName (el caller deriva) y sin descripción física limpia la anterior', () => {
     expect(applyDomainDefaults({ prevDomain: FEC85, nextDomain: CODMES, current: { logicalName: 'FecRutina', description: 'x', physicalName: 'FecRutina', physicalDescription: 'Fecha rutina (fisico).' } }))
       .toEqual({ logicalName: 'CodMes', description: 'Codigo del mes.', physicalDescription: null });
   });
-  it('doc 85: no repite el físico si ya coincide ni limpia lo que ya está vacío', () => {
+  it('no repite el físico si ya coincide ni limpia lo que ya está vacío', () => {
     expect(applyDomainDefaults({ prevDomain: CODMES, nextDomain: FEC85, current: { logicalName: 'FecRutina', description: 'Fecha de la rutina.', physicalName: 'FecRutina', physicalDescription: 'Fecha rutina (fisico).' } }))
       .toEqual({});
     expect(applyDomainDefaults({ prevDomain: FEC85, nextDomain: CODMES, current: { logicalName: 'CodMes', description: 'Codigo del mes.' } }))
       .toEqual({});
   });
-  it('doc 85: dominio GENÉRICO con físico y descripción física no toca nada (la marca gobierna nombres y descripciones)', () => {
+  it('dominio genérico con físico y descripción física no toca nada (la marca gobierna nombres y descripciones)', () => {
     expect(applyDomainDefaults({ prevDomain: undefined, nextDomain: { ...GEN, physicalName: 'COD', physicalDescription: 'x' }, current: { logicalName: 'Codigo Moneda', description: 'Codigo de la Moneda' } }))
       .toEqual({});
   });

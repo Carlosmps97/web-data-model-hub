@@ -1,6 +1,7 @@
-// Editor de reglas de DDL Export sin DOM (hooks de mentira: ver
-// reporting/components/fakeReact.testutil). Doc 105: «Save rule» se habilitaba
-// SIN cambios (bastaba con que la regla fuera válida) y registraba una versión vacía.
+// Editor de reglas de DDL Export sin DOM (hooks simulados: ver
+// reporting/components/fakeReact.testutil). «Save rule» solo se habilita con un
+// cambio real (no basta con que la regla sea válida): así no se registra una
+// versión vacía.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import type { DdlRule } from '../standards.service';
@@ -54,7 +55,7 @@ const saveBtn = (tree: unknown) => [...walk(tree)].find((e) => e.type === 'butto
 beforeEach(() => { vi.clearAllMocks(); vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
-describe('Regla de DDL: «Save rule» sólo con un cambio real (doc 105)', () => {
+describe('Regla de DDL: «Save rule» solo con un cambio real', () => {
   it('válida pero sin cambios queda deshabilitado, con «No changes to apply»', async () => {
     const tree = await open();
     expect(saveBtn(tree).props.disabled).toBe(true);
@@ -74,7 +75,7 @@ describe('Regla de DDL: «Save rule» sólo con un cambio real (doc 105)', () =>
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it('guardada invalid/stale que HOY valida (sin tocar nada): se puede re-guardar y vuelve al export', async () => {
+  it('guardada invalid/stale que hoy valida (sin tocar nada): se puede re-guardar y vuelve al export', async () => {
     for (const validationState of ['invalid', 'stale'] as const) {
       vi.mocked(saveDdlRule).mockClear();
       const tree = await open({ ...RULE, validationState });
@@ -87,11 +88,11 @@ describe('Regla de DDL: «Save rule» sólo con un cambio real (doc 105)', () =>
   });
 });
 
-// Doc 105 (eslint exhaustive-deps): los tres efectos con red del editor (validación en
-// vivo, impacto/Test y buscador de tablas) sólo cancelaban el debounce: una respuesta
-// TARDÍA de un borrador (o búsqueda) anterior pisaba la vigente. Y no dependían del
-// proyecto: con el editor abierto seguían contra el anterior.
-describe('Regla de DDL: respuestas tardías y cambio de proyecto (doc 105)', () => {
+// Los tres efectos con red del editor (validación en vivo, impacto/Test y buscador de
+// tablas) descartan la respuesta tardía de un borrador (o búsqueda) anterior para que no
+// pise la vigente, y dependen del proyecto (eslint exhaustive-deps): con el editor
+// abierto, un cambio de proyecto los vuelve a correr contra el proyecto vigente.
+describe('Regla de DDL: respuestas tardías y cambio de proyecto', () => {
   const VALID: DdlValidateResult = { state: 'valid', errors: [], checks: [], warnings: [], udpRefs: [], condition: '' };
   const INVALID: DdlValidateResult = {
     state: 'invalid', checks: [], warnings: [], udpRefs: [], condition: '',
@@ -215,7 +216,7 @@ function byLabel(tree: unknown, label: string) {
   return hit;
 }
 
-describe('Regla de layout (doc 107): las particiones van siempre en el PARTITIONED BY', () => {
+describe('Regla de layout: las particiones van siempre en el PARTITIONED BY', () => {
   const LAYOUT: DdlRule = {
     ...RULE, id: 'l1', name: 'particiones_al_final', target: 'table', condition: '', udpRefs: [],
     action: { layout: { partitionColumns: 'last', partitionUdp: 'Particion' } }, appliesTo: ['ddl.tabla_fisica'],
@@ -239,7 +240,7 @@ describe('Regla de layout (doc 107): las particiones van siempre en el PARTITION
     expect(text).toContain('PARTITIONED BY (codmes int, …)');
   });
 
-  it('revisión: una regla sin «partitionColumns» se muestra y se guarda como el motor la aplica (orden físico)', async () => {
+  it('una regla sin «partitionColumns» se muestra y se guarda como el motor la aplica (orden físico)', async () => {
     const onChange = vi.fn();
     const legacy: DdlRule = { ...LAYOUT, action: { layout: { partitionOrderUdp: 'Particion' } } };
     const panel = actionPanel(await open(legacy), onChange);

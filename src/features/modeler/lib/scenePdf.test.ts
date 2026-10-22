@@ -76,7 +76,7 @@ import { buildMultiDiagramPdf } from './scenePdf';
 
 describe('buildMultiDiagramPdf', () => {
   const pages = [
-    { scene: scene([{ k: 'rect' as const, x: 0, y: 0, w: 10, h: 10, fill: '#ffffff' }]), title: 'CPYBCAPYM / Datamart PYME — Logical' },
+    { scene: scene([{ k: 'rect' as const, x: 0, y: 0, w: 10, h: 10, fill: '#ffffff' }]), title: 'COMERCIALNORTE / Datamart Comercial — Logical' },
     { scene: scene([{ k: 'line' as const, x1: 0, y1: 0, x2: 5, y2: 5, stroke: '#000000', sw: 1 }], 320, 200), title: 'Suelto — Physical' },
   ];
 
@@ -94,7 +94,7 @@ describe('buildMultiDiagramPdf', () => {
     expect(s).toContain('/Outlines');
     expect(s).toContain('/PageMode /UseOutlines');
     expect(s).toContain('/Count 2 >>');
-    expect(s).toContain('(CPYBCAPYM / Datamart PYME');   // el em-dash va como byte 0x97
+    expect(s).toContain('(COMERCIALNORTE / Datamart Comercial');   // el em-dash va como byte 0x97
     expect(s).toContain('(Suelto');
     expect(s).toContain('/Fit]');
   });
@@ -142,7 +142,7 @@ describe('buildReportPdf', () => {
     expect(s).toContain('/MediaBox [0 0 480 300]');
   });
 
-  it('outline JERÁRQUICO: títulos, /Count de descendientes y /Dest a la página', () => {
+  it('outline jerárquico: títulos, /Count de descendientes y /Dest a la página', () => {
     const s = dec(buildReportPdf(pages, bookmarks));
     expect(s).toContain('(Root doc)');
     expect(s).toContain('(Canvas A)');
@@ -187,7 +187,7 @@ describe('buildReportPdf · links', () => {
 });
 
 
-describe('buildDiagramPdf — factor de ancho por texto (doc 98)', () => {
+describe('buildDiagramPdf — factor de ancho por texto', () => {
   const tdX = (pdf: string, text: string) => {
     const m = new RegExp(`([\\d.]+) [\\d.]+ Td\\n\\(${text}\\) Tj`).exec(pdf);
     return m ? Number(m[1]) : NaN;
@@ -199,13 +199,13 @@ describe('buildDiagramPdf — factor de ancho por texto (doc 98)', () => {
   it('sin factor propio usa el de la fuente (0.55): 13 caracteres × 11 × 0.55 / 2 a la izquierda', () => {
     expect(tdX(label(), 'Persona tiene')).toBeCloseTo((200 - (13 * 11 * 0.55) / 2) * 0.75, 1);
   });
-  it('con factor propio (0.5) el texto queda centrado con ESE ancho', () => {
+  it('con factor propio (0.5) el texto queda centrado con ese ancho', () => {
     expect(tdX(label(0.5), 'Persona tiene')).toBeCloseTo((200 - (13 * 11 * 0.5) / 2) * 0.75, 1);
   });
 });
 
 
-describe('buildDiagramPdf — texto de dibujos (doc 109)', () => {
+describe('buildDiagramPdf — texto de dibujos', () => {
   it('subrayado = una línea bajo el texto, del color del texto', () => {
     const pdf = dec(buildDiagramPdf(scene([{ k: 'text', x: 10, y: 50, s: 'Hola', size: 16, color: '#C00000', underline: true }])));
     // bajo la línea base (262.5) y del ancho estimado: 4 × 16 px × 0.55 × 0.75

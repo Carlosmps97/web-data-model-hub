@@ -3,18 +3,19 @@ import React from 'react';
 export type AvatarTone = 'blue' | 'purple' | 'green' | 'navy';
 
 export interface AvatarProps extends React.HTMLAttributes<HTMLSpanElement> {
-  /** Initials to render (e.g. "MR"). Truncated to 2 chars. */
+  /** Iniciales a mostrar (p. ej. "MR"). Se recortan a 2 caracteres. */
   initials: string;
-  /** Diameter in px. Design default = 30. */
+  /** Diámetro en px. Valor por defecto del diseño = 30. */
   size?: number;
-  /** Background tone. Default blue (#2E5BFF). */
+  /** Tono de fondo. Por defecto, azul (#2E5BFF). */
   tone?: AvatarTone;
 }
 
 /**
- * Avatar — circular initials chip. Design default: 30px, blue (#2E5BFF),
- * white initials. Used in the TopNav (current sim user) and on request/version
- * rows. Render as a <button> from the caller when it needs to open a menu.
+ * Avatar: chip circular con iniciales. Por defecto del diseño: 30px, azul
+ * (#2E5BFF), iniciales blancas. Se usa en filas de solicitudes, versiones,
+ * revisores y comentarios. Quien lo usa lo envuelve en un <button> cuando
+ * necesita abrir un menú.
  */
 export default function Avatar({ initials, size = 30, tone = 'blue', className, style, ...rest }: AvatarProps) {
   const text = (initials || '?').slice(0, 2).toUpperCase();

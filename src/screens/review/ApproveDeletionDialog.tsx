@@ -4,7 +4,7 @@ import { Dialog } from '@/components/ui';
 import { criticalDeletionText, nameMatches } from '@/features/modeler/lib/projectDeletion';
 import type { DiffImpact } from '@/types/versioning';
 
-/** Confirmación tipeada del aprobador antes de publicar un borrado de proyecto (doc 75 D5). */
+/** Confirmación tipeada del aprobador antes de publicar un borrado de proyecto. */
 export default function ApproveDeletionDialog({ open, deletes, onCancel, onConfirm }: {
   open: boolean;
   deletes: NonNullable<DiffImpact['deletesProject']>;

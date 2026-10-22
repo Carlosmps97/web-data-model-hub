@@ -1,9 +1,9 @@
 /**
- * createInputs (doc 86 §2.3) — payloads de ALTA según el modelo activo. El
- * selector global lógico/físico gobierna los popups: en Logical lo tipeado es
- * el nombre lógico (el físico lo deriva el store por glosario) y el tipo es el
- * LÓGICO; en Physical lo tipeado es el físico (regla de case del scope, doc 83)
- * y el tipo es el físico. Puro (testeable sin DOM).
+ * createInputs: payloads de alta según el modelo activo. El selector global
+ * lógico/físico gobierna los popups: en Logical lo tipeado es el nombre lógico
+ * (el físico lo deriva el store por glosario) y el tipo es el lógico; en
+ * Physical lo tipeado es el físico (regla de case del scope) y el tipo es el
+ * físico. Puro (testeable sin DOM).
  */
 import type { Facet } from '@/lib/facets';
 import type { AddColumnInput } from '@/store/useModelerStore';
@@ -15,9 +15,9 @@ export interface ColumnCreateForm {
   udpValues: Record<string, string>;
 }
 
-/** D4: en Logical el tipo tipeado es `logicalDataType`; el físico sale del
+/** En Logical el tipo tipeado es `logicalDataType`; el físico sale del
  *  dominio (dataType ausente ⇒ el store usa el default físico) o, sin dominio,
- *  es el mismo tipo. En Physical, como siempre: el tipo tipeado es `dataType`. */
+ *  es el mismo tipo. En Physical el tipo tipeado es `dataType`. */
 export function columnCreateInput(
   facet: Facet, f: ColumnCreateForm, domain: { defaultDataType: string; logicalDataType?: string | null } | undefined,
 ): AddColumnInput {
@@ -42,7 +42,7 @@ export interface TableCreateInput {
   logicalName: string; physicalName?: string; schema?: string; mode: Facet; description?: string; udpValues?: Record<string, string>;
 }
 
-/** D3: New entity (Logical) = nombre lógico, sin schema (se asigna en Physical);
+/** New entity (Logical) = nombre lógico, sin schema (se asigna en Physical);
  *  New table (Physical) = físico tipeado con la regla de case del scope table,
  *  lógico = lo tipeado (editable luego en Logical), schema. */
 export function tableCreateInput(facet: Facet, f: TableCreateForm, tableCase: string | undefined): TableCreateInput {

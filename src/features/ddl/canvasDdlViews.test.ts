@@ -1,5 +1,5 @@
-// Doc 102: el Export DDL lleva SOLO las vistas miembro del canvas
-// (`diagram.views`), no todas las vistas de sus tablas.
+// El Export DDL lleva solo las vistas miembro del canvas (`diagram.views`), no
+// todas las vistas de sus tablas.
 import { describe, expect, it } from 'vitest';
 import type { View } from '@/services/views.service';
 import { canvasDdlViews } from './canvasDdlViews';

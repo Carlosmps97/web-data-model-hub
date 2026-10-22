@@ -1,6 +1,6 @@
 /**
  * admin.service — módulo Admin (usuarios + roles + matriz). Backend
- * `/api/admin/*`, todo gated por `admin.manage` (el módulo solo lo ve el admin).
+ * `/api/admin/*`, todo protegido por `admin.manage` (el módulo solo lo ve el admin).
  */
 import { apiGet, apiPost, apiPut, apiDelete } from '@/services/http';
 import type { Permission } from '@/features/auth/auth.service';
@@ -9,10 +9,10 @@ import { API_BASE } from '@/services/apiBase';
 const ADMIN = `${API_BASE}/api/admin`;
 
 export interface AdminUser {
-  id: string;               // username (correo lowercase en entradas SSO — doc 38)
+  id: string;               // username (correo en minúsculas en entradas SSO)
   email: string;
   name: string;
-  role: string;             // role key
+  role: string;             // clave del rol
   projectIds: string[];
   status: 'active' | 'invited' | 'disabled' | string;
   initials?: string | null;
@@ -22,13 +22,13 @@ export interface AdminUser {
 }
 
 export interface Role {
-  id: string;               // role key
+  id: string;               // clave del rol
   name: string;
   description?: string | null;
   permissions: Record<string, boolean>;
 }
 
-/** Alta en la whitelist (doc 38): correo + rol. `password` queda solo para
+/** Alta en la whitelist: correo + rol. `password` queda solo para
  *  cuentas locales (el backend la exige si el username no es un correo). */
 export interface CreateUserInput {
   username: string; role: string; email?: string; name?: string; password?: string;
@@ -38,7 +38,7 @@ export interface UpdateUserInput {
   email?: string; name?: string; role?: string; projectIds?: string[]; status?: string; password?: string;
 }
 
-// ── Users ──
+// ── Usuarios ──
 export const listUsers = () => apiGet<AdminUser[]>(`${ADMIN}/users`);
 export const createUser = (body: CreateUserInput) => apiPost<AdminUser>(`${ADMIN}/users`, body);
 export const updateUser = (username: string, body: UpdateUserInput) =>
@@ -54,12 +54,11 @@ export const deleteRole = (key: string) => apiDelete<{ id: string }>(`${ADMIN}/r
 // ── Catálogo de permisos (columnas/filas de la matriz) + auditoría ──
 export const getPermissions = () => apiGet<Permission[]>(`${ADMIN}/permissions`);
 
-/** Etiquetas legibles de cada permiso (filas de la matriz, pantalla 14 + R10). */
+/** Etiquetas legibles de cada permiso (filas de la matriz). */
 export const PERMISSION_LABELS: Record<string, string> = {
   'model.view': 'View model / canvas',
   'model.edit': 'Create / edit tables',
-  'review.decide': 'Approve / reject requests',
-  'publish': 'Publish to production',
+  'review.decide': 'Approve / reject requests (approving publishes to production)',
   'rollback': 'Roll back to a published version',
   'versions.view_all': "Open other users' drafts and requests in the canvas",
   'export': 'Export DDL / metadata',

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 /**
- * useBusyStore — bloqueo POR SESIÓN de acciones largas (doc 75 D18): sólo la
+ * useBusyStore — bloqueo por sesión de acciones largas: solo la
  * pestaña que disparó la acción ve el overlay; el backend no toma locks
  * globales, así que otras sesiones siguen trabajando.
  */
@@ -17,7 +17,7 @@ export const useBusyStore = create<BusyState>((set) => ({
   stop: () => set({ active: null }),
 }));
 
-/** Corre `fn` con el overlay bloqueante encendido; lo apaga SIEMPRE (también
+/** Corre `fn` con el overlay bloqueante encendido; lo apaga siempre (también
  *  si falla). Anidable: dentro de otra acción bloqueante no toca el overlay
  *  (el título de la acción externa se conserva hasta que ella termina). */
 export async function runBlocking<T>(title: string, fn: () => Promise<T>, detail?: string): Promise<T> {

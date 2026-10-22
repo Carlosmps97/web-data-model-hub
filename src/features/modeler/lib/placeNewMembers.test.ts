@@ -1,8 +1,8 @@
-// Doc 113 §1.3 — tras la carga Excel NO se reacomoda el canvas: sólo lo que
-// ENTRÓ (tablas y sus vistas) se ordena como grupo, sin pisarse entre sí, en el
-// centro de lo que el usuario ve (o del contenido, si el canvas no está
-// abierto). Lo existente no se mueve. Vista nueva de una tabla que ya estaba:
-// pegada a su derecha.
+// Tras la carga Excel no se reacomoda el canvas: solo lo que entró (tablas y
+// sus vistas) se ordena como grupo, sin pisarse entre sí, en el centro de lo
+// que el usuario ve (o del contenido, si el canvas no está abierto). Lo
+// existente no se mueve. Vista nueva de una tabla que ya estaba: pegada a su
+// derecha.
 import { describe, expect, it } from 'vitest';
 import { pinsForEntering, pinsForLeaving, placeNewMembers, seenAt, type LayoutFn } from './placeNewMembers';
 import { tableLodSize, viewLodSize } from './lodSize';
@@ -12,10 +12,10 @@ import type { Diagram } from '../services/modeler.service';
 
 type Box = { x: number; y: number; w: number; h: number };
 
-const table = (id: string, name = id.toUpperCase()) => ({ id, projectId: 'p', physicalName: name, logicalName: name.toLowerCase(), schema: 'ddv' });
+const table = (id: string, name = id.toUpperCase()) => ({ id, projectId: 'p', physicalName: name, logicalName: name.toLowerCase(), schema: 'stg' });
 const col = (tableId: string, name: string) => ({ id: `${tableId}.${name}`, tableId, physicalName: name, logicalName: name.toLowerCase(), dataType: 'STRING', typeOverridden: false, ordinal: 0 });
 const view = (id: string, tableId: string, cols: string[]) => ({
-  id, name: id.toUpperCase(), schema: 'ddv_vu', tableId, sourceTableIds: [tableId],
+  id, name: id.toUpperCase(), schema: 'stg_vu', tableId, sourceTableIds: [tableId],
   sources: cols.map((c) => ({ tableId, column: c, outputAlias: c })),
 });
 
@@ -48,8 +48,8 @@ const bbox = (bs: Box[]) => {
   return { cx: (l + r) / 2, cy: (t + btm) / 2, l, t };
 };
 
-describe('placeNewMembers (doc 113 §1.3)', () => {
-  it('sólo devuelve posición para lo que ENTRÓ: lo existente no se mueve', async () => {
+describe('placeNewMembers', () => {
+  it('solo devuelve posición para lo que entró: lo existente no se mueve', async () => {
     const dia = diagram({ tables: [table('old1'), table('old2'), table('n1')], views: [view('vn1', 'n1', ['COD'])],
       layout: { old1: { x: 0, y: 0 }, old2: { x: 600, y: 0 }, n1: { x: 40, y: 9000 }, vn1: { x: 520, y: 9000 } } });
     const pos = await placeNewMembers(dia, ['n1', 'vn1'], { x: 1000, y: 2000 });
@@ -80,7 +80,7 @@ describe('placeNewMembers (doc 113 §1.3)', () => {
     for (const t of tables) expect(bs[`v${t.id}`].x).toBeGreaterThanOrEqual(bs[t.id].x + bs[t.id].w);
   });
 
-  it('vista nueva de una tabla que YA estaba: pegada a la derecha de su tabla, a su altura', async () => {
+  it('vista nueva de una tabla que ya estaba: pegada a la derecha de su tabla, a su altura', async () => {
     const dia = diagram({ tables: [table('old')], views: [view('vold', 'old', ['COD'])], layout: { old: { x: 100, y: 300 } } });
     const pos = await placeNewMembers(dia, ['vold'], { x: 5000, y: 5000 });
     const w = tableLodSize(dia.tables[0], dia.columns, 'physical').w;
@@ -132,11 +132,11 @@ describe('placeNewMembers (doc 113 §1.3)', () => {
   });
 });
 
-// Revisión doc 113 (BAJO-2): tablas que ya estaban SIN posición guardada (entraron
-// antes del doc 113 sin layout) se pintan donde las pone el canvas — la grilla por
-// número de orden; la colocación las cuenta ahí (centro del contenido, y la vista
-// nueva de una de ellas a su derecha).
-describe('placeNewMembers con lo existente SIN posición guardada', () => {
+// Tablas que ya estaban sin posición guardada (entraron sin layout) se pintan
+// donde las pone el canvas: la grilla por número de orden; la colocación las
+// cuenta ahí (centro del contenido, y la vista nueva de una de ellas a su
+// derecha).
+describe('placeNewMembers con lo existente sin posición guardada', () => {
   it('canvas no abierto: el centro del contenido cuenta la grilla por número de orden del canvas', async () => {
     // a (índice 0) y b (índice 1) sin layout → (60,60) y (320,60), como ModelerCanvas.
     const dia = diagram({ tables: [table('a'), table('b'), table('n1')] });
@@ -151,39 +151,39 @@ describe('placeNewMembers con lo existente SIN posición guardada', () => {
     const dia = diagram({ tables: [table('old')], views: [view('vold', 'old', ['COD'])] });
     const pos = await placeNewMembers(dia, ['vold'], { x: 5000, y: 5000 });
     const w = tableLodSize(dia.tables[0], dia.columns, 'physical').w;
-    expect(pos).toEqual({ vold: { x: 60 + w + 140, y: 60 } });          // sólo entró una vista: nada que fijar
+    expect(pos).toEqual({ vold: { x: 60 + w + 140, y: 60 } });          // solo entró una vista: nada que fijar
   });
 });
 
-// Ronda 2 de la revisión: lo existente SIN posición guardada que el canvas
-// CORRERÍA de lugar al entrar lo nuevo queda FIJADO donde estaba — una tabla se
-// pinta por su número de orden (el backend ordena por nombre, también en el
-// draft) y una tabla que entra y ordena antes la corre; se fijan todas, así
-// tampoco las corre un alta posterior. Una vista se re-ancla a una tabla que
-// entra si es su primera fuente. Lo que no se correría, no se toca.
+// Lo existente sin posición guardada que el canvas correría de lugar al entrar
+// lo nuevo queda fijado donde estaba: una tabla se pinta por su número de orden
+// (el backend ordena por nombre, también en el draft) y una tabla que entra y
+// la precede en el orden la corre; se fijan todas, así tampoco las corre un
+// alta posterior. Una vista se re-ancla a una tabla que entra si es su primera
+// fuente. Lo que no se correría, no se toca.
 describe('placeNewMembers fija lo existente que el canvas correría de lugar', () => {
-  it('tabla sin posición cuyo número de orden cambia: queda en su casilla de antes', async () => {
-    // Antes: a (casilla 0) y z (1). Entra b, que ordena entre las dos: z pasaría a la 2.
+  it('tabla sin posición cuyo número de orden cambia: queda en su casilla previa', async () => {
+    // Previo a la carga: a (casilla 0) y z (1). Entra b, que ordena entre las dos: z pasaría a la 2.
     const dia = diagram({ tables: [table('a'), table('b'), table('z')], layout: { a: { x: 0, y: 0 } } });
     const pos = await placeNewMembers(dia, ['b'], { x: 5000, y: 5000 });
     expect(pos.z).toEqual(gridSlot(1));
     expect(pos.a).toBeUndefined();
   });
 
-  it('tabla sin posición que hoy no cambia de casilla: también se fija (una alta posterior que ordene antes la correría)', async () => {
+  it('tabla sin posición que no cambia de casilla: también se fija (una alta posterior que la preceda en el orden la correría)', async () => {
     const dia = diagram({ tables: [table('a'), table('b'), table('n', 'Z_NUEVA')] });
     const pos = await placeNewMembers(dia, ['n'], { x: 5000, y: 5000 });
     expect(pos.a).toEqual(gridSlot(0));
     expect(pos.b).toEqual(gridSlot(1));
   });
 
-  it('si sólo entran vistas, las tablas no cambian de casilla: no se fija nada', async () => {
+  it('si solo entran vistas, las tablas no cambian de casilla: no se fija nada', async () => {
     const dia = diagram({ tables: [table('a'), table('b')], views: [view('vb', 'b', ['COD'])] });
     const pos = await placeNewMembers(dia, ['vb'], { x: 5000, y: 5000 });
     expect(Object.keys(pos)).toEqual(['vb']);
   });
 
-  it('vista sin posición con fuentes [nueva, vieja]: queda junto a su tabla de antes', async () => {
+  it('vista sin posición con fuentes [nueva, existente]: queda junto a la tabla existente', async () => {
     const vx = { ...view('vx', 'n1', ['COD']), sourceTableIds: ['n1', 'old'] };
     const dia = diagram({ tables: [table('n1'), table('old')], views: [vx], layout: { old: { x: 0, y: 0 } } });
     const pos = await placeNewMembers(dia, ['n1'], { x: 5000, y: 5000 });
@@ -203,7 +203,7 @@ describe('placeNewMembers fija lo existente que el canvas correría de lugar', (
     expect(pos.vz).toBeUndefined();
   });
 
-  it('fuzz: con lo fijado, cada bloque existente se ve EXACTAMENTE donde se veía antes de la carga', async () => {
+  it('fuzz: con lo fijado, cada bloque existente se ve exactamente donde se veía antes de la carga', async () => {
     type P = { x: number; y: number };
     type V = ReturnType<typeof view>;
     const row: LayoutFn = async (nodes) => {
@@ -234,7 +234,7 @@ describe('placeNewMembers fija lo existente que el canvas correría de lugar', (
         const src = [tables[Math.floor(rnd() * n)].id, tables[Math.floor(rnd() * n)].id].slice(0, rnd() < 0.4 ? 2 : 1);
         views.push({ ...view(`v${j}`, src[0], ['COD']), sourceTableIds: [...new Set(src)] });
       }
-      // Una vista se veía antes si alguna fuente ya estaba; si no, ENTRA con la carga.
+      // Una vista se veía antes de la carga si alguna fuente ya estaba; si no, entra con ella.
       const before = views.filter((v) => v.sourceTableIds.some((id) => !fresh.has(id)));
       for (const v of before) if (rnd() < 0.4) layout[v.id] = { x: Math.floor(rnd() * 3000), y: Math.floor(rnd() * 3000) };
       const entering = [...fresh, ...views.filter((v) => !before.includes(v)).map((v) => v.id)];
@@ -249,12 +249,12 @@ describe('placeNewMembers fija lo existente que el canvas correría de lugar', (
   });
 });
 
-// Doc 114 (piloto): lo mismo al crear, importar, CTAS o pegar una tabla — el
-// canvas que se mira es el de ANTES del alta (la tabla que entra todavía no
-// está en el diagrama). Una tabla que entra y ordena antes corría de casilla a
-// las que no tienen posición guardada; ahora quedan donde se ven.
-describe('pinsForEntering (doc 114: crear, importar, CTAS y pegar)', () => {
-  it('alta de una tabla NUEVA: las existentes sin posición quedan en su casilla de hoy', () => {
+// Lo mismo al crear, importar, CTAS o pegar una tabla: el canvas que se mira es
+// el previo al alta (el diagrama no incluye la tabla que entra). Una tabla
+// que entra y las precede en el orden correría de casilla a las que no tienen
+// posición guardada; con los pins quedan donde se ven.
+describe('pinsForEntering (crear, importar, CTAS y pegar)', () => {
+  it('alta de una tabla nueva: las existentes sin posición quedan en su casilla actual', () => {
     const dia = diagram({ tables: [table('a'), table('z')], layout: { a: { x: 0, y: 0 } } });
     expect(pinsForEntering(dia, ['nueva']).pins).toEqual({ z: gridSlot(1) });
   });
@@ -266,13 +266,13 @@ describe('pinsForEntering (doc 114: crear, importar, CTAS y pegar)', () => {
     expect(pinsForEntering(placed, ['n']).pins).toEqual({});
   });
 
-  it('importar una tabla que es la PRIMERA fuente de una vista que ya se ve (por otra fuente): la vista queda donde se ve', () => {
+  it('importar una tabla que es la primera fuente de una vista que ya se ve (por otra fuente): la vista queda donde se ve', () => {
     const vx = { ...view('vx', 'imp', ['COD']), sourceTableIds: ['imp', 'old'] };
     const dia = diagram({ tables: [table('old')], views: [vx], layout: { old: { x: 100, y: 50 } } });
     expect(pinsForEntering(dia, ['imp']).pins).toEqual({ vx: defaultViewPosition({ x: 100, y: 50 }) });
   });
 
-  it('fuzz: sobre el canvas de ANTES, cada bloque existente se ve EXACTAMENTE donde se veía', () => {
+  it('fuzz: sobre el canvas previo al alta, cada bloque existente se ve exactamente donde se veía', () => {
     type P = { x: number; y: number };
     type V = ReturnType<typeof view>;
     const painted = (dia: Diagram, layout: Record<string, P>): Record<string, P> => {
@@ -307,7 +307,7 @@ describe('pinsForEntering (doc 114: crear, importar, CTAS y pegar)', () => {
       const was = painted(before, layout);
       const now = painted(after, { ...layout, ...enteringLayout, ...pins });
       for (const id of Object.keys(was)) expect(now[id], `caso ${k}, ${id}`).toEqual(was[id]);
-      // Sólo se fija lo que no tiene posición guardada.
+      // Solo se fija lo que no tiene posición guardada.
       for (const id of Object.keys(pins)) expect(layout[id], `caso ${k}, ${id} ya tenía posición`).toBeUndefined();
       checked += Object.keys(was).length;
     }
@@ -315,12 +315,12 @@ describe('pinsForEntering (doc 114: crear, importar, CTAS y pegar)', () => {
   });
 });
 
-// Revisión doc 114 (H1): sacar o borrar una tabla corría una casilla hacia atrás a
-// las que no tienen posición — y si después se creaba otra (que las fijaba ahí),
-// deshacer las dos acciones dejaba una tabla tapando a otra. Al sacar también se
-// fijan donde se ven (el canvas de ANTES de sacarla).
-describe('pinsForLeaving (revisión doc 114: sacar o borrar)', () => {
-  it('sacar la primera: las siguientes sin posición quedan en su casilla de hoy', () => {
+// Sacar o borrar una tabla correría una casilla hacia atrás a las que no tienen
+// posición, y si después se creara otra (que las fija ahí), deshacer las dos
+// acciones dejaría una tabla tapando a otra. Al sacar también se fijan donde se
+// ven (el canvas previo a sacarla).
+describe('pinsForLeaving (sacar o borrar)', () => {
+  it('sacar la primera: las siguientes sin posición quedan en su casilla actual', () => {
     const dia = diagram({ tables: [table('a'), table('b'), table('c')] });
     expect(pinsForLeaving(dia, ['a'])).toEqual({ b: gridSlot(1), c: gridSlot(2) });
   });
@@ -334,7 +334,7 @@ describe('pinsForLeaving (revisión doc 114: sacar o borrar)', () => {
     const dia = diagram({ tables: [table('a'), table('b')], views: [vx], layout: { a: { x: 100, y: 50 }, b: { x: 900, y: 50 } } });
     expect(pinsForLeaving(dia, ['a'])).toEqual({ vx: defaultViewPosition({ x: 100, y: 50 }) });
   });
-  it('fuzz: tras sacar, cada bloque que queda se ve EXACTAMENTE donde se veía', () => {
+  it('fuzz: tras sacar, cada bloque que queda se ve exactamente donde se veía', () => {
     type P = { x: number; y: number };
     type V = ReturnType<typeof view>;
     const painted = (dia: Diagram, layout: Record<string, P>): Record<string, P> => {
@@ -374,9 +374,9 @@ describe('pinsForLeaving (revisión doc 114: sacar o borrar)', () => {
   });
 });
 
-// Revisión 2 doc 114 (R2-1): borrar una tabla de un canvas que NO está abierto —
-// el Undo la repone donde se veía en ese canvas (su posición o su casilla).
-describe('seenAt (revisión 2 doc 114)', () => {
+// Borrar una tabla de un canvas que no está abierto: el Undo la repone donde se
+// veía en ese canvas (su posición o su casilla).
+describe('seenAt', () => {
   it('su posición guardada o, sin ella, su casilla por número de orden; null si no está', () => {
     const dia = diagram({ tables: [table('a'), table('b'), table('c')], layout: { c: { x: 700, y: 80 } } });
     expect(seenAt(dia, 'b')).toEqual(gridSlot(1));

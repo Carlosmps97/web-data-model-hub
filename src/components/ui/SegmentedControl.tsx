@@ -12,14 +12,14 @@ export interface SegmentedControlProps<T extends string = string> {
   value: T;
   onChange: (value: T) => void;
   className?: string;
-  /** Accessible group label. */
+  /** Etiqueta accesible del grupo. */
   'aria-label'?: string;
 }
 
 /**
- * SegmentedControl — pill-group toggle (e.g. UDP Per column / Per table,
- * separator / case selectors). Active segment = white fill + blue text on a
- * subtle tray. Controlled.
+ * SegmentedControl: selector en grupo de píldoras (p. ej. UDP Per column / Per
+ * table, selectores de separador o de case). Segmento activo = relleno blanco +
+ * texto azul sobre una bandeja sutil. Controlado.
  */
 export default function SegmentedControl<T extends string = string>({
   options,

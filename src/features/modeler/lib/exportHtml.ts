@@ -1,20 +1,20 @@
-// Doc 58: export interactivo a HTML.
+// Export interactivo a HTML.
 //
-// El .svg exportado se queda NITIDO a cualquier escala, pero abierto suelto en
-// el navegador el zoom de pagina topa en ~500% — en modelos grandes eso no
-// alcanza para leer una columna. Este modulo construye un HTML AUTOCONTENIDO
+// El .svg exportado se mantiene nítido a cualquier escala, pero abierto suelto
+// en el navegador el zoom de página topa en ~500%: en modelos grandes eso no
+// alcanza para leer una columna. Este módulo construye un HTML autocontenido
 // (cero recursos externos, funciona offline) que embebe el mismo SVG vectorial
 // y le pone un visor pan/zoom propio: rueda = zoom al cursor hasta 64x,
-// arrastre = pan, doble click = acercar. El zoom es transform translate+scale
+// arrastre = pan, doble clic = acercar. El zoom es transform translate+scale
 // sobre SVG inline (mismo mecanismo que React Flow): render vectorial en cada
 // frame, sin perder nitidez.
 //
-// El SVG NO se inyecta crudo en el body: el markup del generador (doc 59) es
-// XML con tags auto-cerrados (`<rect/>`) que el parser HTML re-interpreta
-// como tags ABIERTOS y rompe el anidado. Se embebe como literal JS y se
-// parsea en runtime con DOMParser (XML real), que si los respeta.
+// El SVG no se inyecta crudo en el body: el markup del generador SVG es XML
+// con tags auto-cerrados (`<rect/>`) que el parser HTML reinterpreta como tags
+// abiertos, lo que rompe el anidado. Se embebe como literal JS y se parsea en
+// runtime con DOMParser (XML real), que sí los respeta.
 
-/** Escapa texto para interpolarlo en HTML (titulo del documento). */
+/** Escapa texto para interpolarlo en HTML (título del documento). */
 export function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => (
     c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : c === '"' ? '&quot;' : '&#39;'
@@ -22,8 +22,8 @@ export function escapeHtml(s: string): string {
 }
 
 /**
- * String como literal JS seguro DENTRO de un `<script>` inline: JSON.stringify
- * + neutralizar `</script` y `<!--`, las DOS secuencias que el parser HTML
+ * String como literal JS seguro dentro de un `<script>` inline: JSON.stringify
+ * + neutralizar `</script` y `<!--`, las dos secuencias que el parser HTML
  * honra dentro de script data. `<\/` y `<\!--` valen lo mismo en runtime.
  */
 export function jsStringLiteral(s: string): string {

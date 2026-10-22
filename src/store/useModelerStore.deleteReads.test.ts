@@ -1,11 +1,10 @@
-// Doc 105 (ronda 3) — borrar una COLUMNA (o la cascada de FK de borrar una
-// TABLA): todas las lecturas van ANTES de la primera escritura, como en
-// `deleteTable` (A3/A5). Antes `deleteColumn` leía las relaciones de la hija
-// DESPUÉS de borrar las relaciones elegidas: si esa lectura fallaba, quedaban
-// relaciones borradas con la columna viva y sin Undo; y `deleteTable` leía las
-// de la hija con `.catch(() => [])`: una caída apagaba el `isForeignKey` de una
-// hija que sigue siendo FK de otra relación. Ahora si una lectura falla no se
-// escribe nada (`NothingDoneError`, reintentable).
+// Borrar una columna (o la cascada de FK de borrar una tabla): todas las
+// lecturas van antes de la primera escritura, como en `deleteTable`. Si las
+// relaciones de la hija se leyeran después de borrar las relaciones elegidas y
+// esa lectura fallara, quedarían relaciones borradas con la columna viva y sin
+// Undo; y si una lectura caída contara como lista vacía, se apagaría el
+// `isForeignKey` de una hija que sigue siendo FK de otra relación. Si una
+// lectura falla no se escribe nada (`NothingDoneError`, reintentable).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const log: string[] = [];
@@ -55,10 +54,10 @@ const rel = (id: string, parentTableId: string, childTableId: string, pairs: [st
   pairs: pairs.map(([parentColumnId, childColumnId]) => ({ parentColumnId, childColumnId })),
 });
 const R1 = rel('r1', 't1', 'tB', [['cA', 'cB']]);          // la que se borra con la columna
-const R2 = rel('r2', 'tC', 'tB', [['cX', 'cB']]);          // OTRA relación donde cB también es hija
+const R2 = rel('r2', 'tC', 'tB', [['cX', 'cB']]);          // otra relación donde cB también es hija
 const writes = () => log.filter((l) => l.startsWith('w-'));
 const firstWrite = () => log.findIndex((l) => l.startsWith('w-'));
-/** Última lectura de la CASCADA (relaciones y columnas; el saneo de vistas posterior al borrado lee aparte). */
+/** Última lectura de la cascada (relaciones y columnas; el saneo de vistas posterior al borrado lee aparte). */
 const lastRead = () => log.map((l) => /^read-(rels|cols|usage)/.test(l)).lastIndexOf(true);
 const COLUMN_UNREADABLE = "Couldn't check what depends on this column: nothing was deleted. Try again.";
 
@@ -72,11 +71,11 @@ beforeEach(() => {
   useModelerStore.setState({ activeSaId: null, diagram: null, dirty: false, viewMode: 'physical', selectedColumnId: null });
 });
 
-describe('borrar una columna: primero todas las lecturas (doc 105, ronda 3)', () => {
+describe('borrar una columna: primero todas las lecturas', () => {
   it('ninguna escritura antes de la última lectura; la FK huérfana de la hija se apaga', async () => {
     await useModelerStore.getState().deleteColumn('cA', ['r1'], { col: COL as never });
     expect(firstWrite()).toBeGreaterThan(lastRead());
-    expect(log.indexOf('read-views')).toBeLessThan(firstWrite());   // pre-imagen de las vistas, también antes
+    expect(log.indexOf('read-views')).toBeLessThan(firstWrite());   // la pre-imagen de las vistas también va primero
     expect(writes()).toEqual(['w-rel-del:r1', 'w-col:cB', 'w-del-col:cA']);
   });
 
@@ -96,7 +95,7 @@ describe('borrar una columna: primero todas las lecturas (doc 105, ronda 3)', ()
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
-  it('una hija que sigue siendo FK de OTRA relación conserva su flag', async () => {
+  it('una hija que sigue siendo FK de otra relación conserva su flag', async () => {
     rels.tB = [R1, R2];
     await useModelerStore.getState().deleteColumn('cA', ['r1'], { col: COL as never });
     expect(writes()).toEqual(['w-rel-del:r1', 'w-del-col:cA']);
@@ -110,7 +109,7 @@ describe('borrar una columna: primero todas las lecturas (doc 105, ronda 3)', ()
   });
 });
 
-describe('borrar una tabla: la FK de las hijas se decide ANTES de escribir (doc 105, ronda 3)', () => {
+describe('borrar una tabla: la FK de las hijas se decide antes de escribir', () => {
   const TPRE = { id: 't1', physicalName: 'M_T1', logicalName: 't1' };
 
   it('si no se pudieron leer las relaciones de una hija, no se borra nada', async () => {
@@ -122,14 +121,14 @@ describe('borrar una tabla: la FK de las hijas se decide ANTES de escribir (doc 
     expect(writes()).toEqual([]);
   });
 
-  it('una hija que sigue siendo FK de OTRA relación conserva su flag', async () => {
+  it('una hija que sigue siendo FK de otra relación conserva su flag', async () => {
     rels.tB = [R1, R2];
     await useModelerStore.getState().deleteTable('t1', { pre: TPRE as never });
     expect(writes()).not.toContain('w-col:cB');
     expect(firstWrite()).toBeGreaterThan(lastRead());
   });
 
-  it('sin otra relación, la FK huérfana se apaga (como antes)', async () => {
+  it('sin otra relación, la FK huérfana se apaga', async () => {
     await useModelerStore.getState().deleteTable('t1', { pre: TPRE as never });
     expect(writes()).toEqual(['w-bulk', 'w-col:cB', 'w-table:t1']);
   });

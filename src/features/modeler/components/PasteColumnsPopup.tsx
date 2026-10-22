@@ -18,14 +18,14 @@ import { loadSourceStandards } from '../services/pasteSource.service';
 import PasteDetails from './PasteDetails';
 
 /**
- * Confirmación del PASTE de columnas (doc 48): staging local — nada persiste
- * hasta Confirm. Doc 118: muestra qué viaja de cada faceta (checks de UDPs y
- * parent domains, detalle por columna) y qué no se puede copiar; lo copiado en
- * OTRO proyecto se revisa contra los estándares de los dos. Las filas con
- * nombre FÍSICO duplicado en el destino (con el case del proyecto) quedan
- * omitidas automáticamente (regla owner, espejo del guard 409 del backend); el
- * duplicado solo-lógico es warning y se pega igual. Confirm = UN PUT
- * /changes/bulk + vistas espejo best-effort (mismo patrón que RelationshipCreatePopup).
+ * Confirmación del paste de columnas: staging local, nada persiste hasta
+ * Confirm. Muestra qué viaja de cada faceta (checks de UDPs y parent domains,
+ * detalle por columna) y qué no se puede copiar; lo copiado en otro proyecto se
+ * revisa contra los estándares de los dos. Las filas con nombre físico
+ * duplicado en el destino (con el case del proyecto) se omiten automáticamente
+ * (espejo del guard 409 del backend); el duplicado solo lógico es warning y se
+ * pega igual. Confirm = un solo PUT /changes/bulk + vistas espejo best-effort
+ * (mismo patrón que RelationshipCreatePopup).
  */
 export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
   targetId: string; onClose: () => void; pushToast: (m: string, k?: 'err') => void;
@@ -34,8 +34,8 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
   const clipboard = useModelerStore((s) => s.colClipboard);
   const viewMode = useModelerStore((s) => s.viewMode);
   const sessionPid = useSessionStore((s) => s.activeProjectId);
-  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
-  // Doc 105 (ronda 6, R17a-11): el nombre según la faceta (en Lógico mostraba el físico).
+  const n = facetNouns(viewMode);   // Entity/Attribute o Table/Column
+  // El nombre según la faceta activa.
   const shown = (t: { logicalName?: string; physicalName: string }) => (viewMode === 'logical' ? t.logicalName || t.physicalName : t.physicalName);
   const [facet, setFacet] = useState<Facet>(viewMode);
   const [options, setOptions] = useState<PasteOptions>(ALL_COPY);
@@ -72,7 +72,7 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
     return () => { alive = false; };
   }, [attempt, srcPid]);
 
-  // Duplicados contra el destino con el físico FINAL (case del proyecto).
+  // Duplicados contra el destino con el físico definitivo (case del proyecto).
   const plan = useMemo(() => {
     const columnCase = target?.naming?.column?.case;
     const cased = (clipboard?.cols ?? []).map((c) => ({ ...c, physicalName: applyNamingCase(c.physicalName, columnCase) }));
@@ -115,38 +115,38 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
   const confirm = async () => {
     if (!review || saving) return;
     setSaving(true);
-    // Doc 105 (H1): la acción es de la sesión donde empezó (sus escrituras y su
-    // inversa cortan si cambió); un fallo espera la revalidación (H7).
+    // La acción pertenece a la sesión donde empezó (sus escrituras y su inversa
+    // cortan si la sesión cambia); un fallo espera la revalidación.
     const pin = pinSession();
-    // 409 por carrera multiusuario u otro error: el lote es atómico (nada
-    // quedó a medias) — mensaje visible y el popup NO se cierra.
+    // 409 por carrera multiusuario u otro error: el lote es atómico (nada queda
+    // a medias); mensaje visible y el popup no se cierra.
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't paste the ${n.members}`, 'err'));
     try {
       const cols = review.payload.cols;
       const changes = pasteColumnsToBulk({
         targetTableId: targetId, cols, targetCols,
-        // Procedencia (doc 51): la tabla fuente viaja en el clipboard, y el
-        // físico de origen de cada columna (la pegada sale con el case del destino).
+        // Procedencia: la tabla fuente viaja en el clipboard, y el físico de
+        // origen de cada columna (la pegada sale con el case del destino).
         sourceTable: clipboard.source.physicalName || clipboard.source.logicalName || undefined,
         sourceColumns: new Map(clipboard.cols.map((c) => [c.id, c.physicalName])),
         sourceProject: source && !source.same ? clipboard.source.projectName || clipboard.source.projectId || undefined : undefined,
       });
       await gov.recordChangesBulk(changes);
-      // Undo (doc 50): las columnas pegadas se borran y las del destino que el
-      // lote corrió (doc 94: PK pegadas ⇒ PK primero) vuelven a su ordinal
-      // (+ retirar las pegadas de las vistas espejo, best-effort).
+      // Undo: las columnas pegadas se borran y las del destino que el lote
+      // corrió (PK pegadas ⇒ PK primero) vuelven a su ordinal (+ retirar las
+      // pegadas de las vistas espejo, best-effort).
       const inverse = invertBulk(changes, pastePreImages(targetCols));
       pushUndo(`Paste ${cols.length} ${cols.length === 1 ? n.member : n.members}`, undoColumnsBatch({
         inverse, tableId: targetId, created: cols.map((c) => c.physicalName),
         after: () => useModelerStore.getState().reload(),
       }), pin);
-      // V1 (decisión owner i): las columnas pegadas entran también a las
-      // vistas ESPEJO del destino — misma baseline para todas las columnas
-      // del lote (patrón RelationshipCreatePopup), best-effort.
-      // Doc 94 D4: las PK pegadas entran tras las PK del destino, en su orden.
+      // Las columnas pegadas entran también a las vistas espejo del destino:
+      // misma baseline para todas las columnas del lote (patrón
+      // RelationshipCreatePopup), best-effort. Las PK pegadas entran tras las
+      // PK del destino, en su orden.
       await syncNewColumnsToMirrorViews(pinnedViewDeps(pin), targetId, cols, targetCols);
-      // Lo que sigue es de la sesión donde se pegó (patrón del CTAS, doc 105
-      // ronda 4): en otra, ni marca cambios ni recarga ni avisa.
+      // Lo que sigue pertenece a la sesión donde se pegó (patrón del CTAS): en
+      // otra, ni marca cambios ni recarga ni avisa.
       if (pin.holds()) {
         useModelerStore.getState().markDirty();
         await useModelerStore.getState().reload();

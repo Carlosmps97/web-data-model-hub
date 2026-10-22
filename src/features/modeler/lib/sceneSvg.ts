@@ -1,4 +1,4 @@
-// Doc 59: escena → SVG standalone. Texto como <text> (vectorial, nítido a
+// Escena → SVG standalone. Texto como <text> (vectorial, nítido a
 // cualquier zoom), hatch de vistas como <pattern>, fuentes embebibles vía
 // opts.fontCss (@font-face con data URLs — el archivo funciona offline).
 import type { Scene, SceneItem } from './exportScene';
@@ -11,7 +11,7 @@ const esc = (s: string) => s.replace(/[&<>]/g, (c) => (c === '&' ? '&amp;' : c =
 const escAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 const n = (v: number) => String(Math.round(v * 100) / 100);
 
-/** Atributos con omisión de undefined. Los valores YA vienen saneados. */
+/** Atributos con omisión de undefined. Los valores ya vienen saneados. */
 function at(o: Record<string, string | number | undefined>): string {
   let out = '';
   for (const [k, v] of Object.entries(o)) if (v !== undefined && v !== '') out += ` ${k}="${v}"`;
@@ -22,7 +22,7 @@ const strokeAt = (i: { stroke?: string; sw?: number; dash?: string }) => ({
   stroke: i.stroke, 'stroke-width': i.stroke ? n(i.sw ?? 1) : undefined, 'stroke-dasharray': i.dash,
 });
 
-/** Header con SOLO las esquinas superiores redondeadas (cuadráticas: paridad
+/** Header con solo las esquinas superiores redondeadas (cuadráticas: paridad
  *  con la conversión Q→C del PDF). */
 function roundedTop(x: number, y: number, w: number, h: number, r: number): string {
   return `M${n(x)},${n(y + h)} L${n(x)},${n(y + r)} Q${n(x)},${n(y)} ${n(x + r)},${n(y)} L${n(x + w - r)},${n(y)} Q${n(x + w)},${n(y)} ${n(x + w)},${n(y + r)} L${n(x + w)},${n(y + h)} Z`;
@@ -46,7 +46,7 @@ function item(i: SceneItem, defs: { hatch: boolean }): string {
       return `<path d="${i.d}"${at({ fill: i.fill ?? 'none', ...strokeAt(i) })}/>`;
     case 'text':
       return `<text x="${n(i.x)}" y="${n(i.y)}"${at({
-        // Doc 109: la familia elegida en un dibujo, con la de la app de respaldo.
+        // La familia elegida en un dibujo, con la de la app de respaldo.
         'font-family': i.mono ? MONO : i.font ? `${escAttr(JSON.stringify(i.font))}, ${UI}` : UI,
         'font-size': n(i.size),
         'font-weight': i.bold ? 700 : undefined,

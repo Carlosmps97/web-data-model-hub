@@ -1,30 +1,28 @@
 /**
- * ExportDdlModal (Screen 10 — Export DDL, `#pd`).
+ * ExportDdlModal: pantalla Export DDL.
  *
- * Opened from the canvas toolbar's **Export DDL** action. Renders over the
- * design-system Dialog with the **canvas** backdrop (only the modeling surface
- * below the 64px toolbar is dimmed; the toolbar stays sharp).
+ * Se abre desde la acción **Export DDL** de la barra del canvas. Se renderiza con
+ * el Dialog del sistema de diseño y el fondo **canvas** (solo se oscurece la
+ * superficie de modelado debajo de la barra; la barra queda nítida).
  *
- * Generates **Databricks** or **Oracle** DDL live from the active diagram
- * (canonical tables/columns/relationships), con la selección de tablas y el
- * dialecto arriba — el modal abre con el dialecto por default del proyecto
- * (Output settings, doc 101; Databricks salvo que el proyecto diga otra cosa) —
- * y la columna de opciones partida en DOS PESTAÑAS:
- *  - **Output** — cómo se escribe el DDL y cómo se nombran los archivos: el
- *    formulario compartido `DdlOutputForm` (doc 93 D1). Arranca desde las
- *    Output settings del proyecto (Data Standards) y se puede ajustar para
- *    este export.
- *  - **Export rules** (`ExportRulesPanel`) — el ruleset del proyecto: qué
- *    reglas corren al exportar. Van aparte porque no son formato — la mitad
- *    son GENERADORES que agregan objetos al `.zip`. Son de Databricks (SET
- *    TAGS, TBLPROPERTIES, tablas _rej…): con Oracle no corren y la pestaña no
- *    aparece (doc 101).
+ * Genera DDL de **Databricks** u **Oracle** en vivo desde el diagrama activo
+ * (tablas/columnas/relaciones canónicas), con la selección de tablas y el
+ * dialecto arriba (el modal abre con el dialecto por defecto del proyecto,
+ * definido en Output settings; Databricks salvo que el proyecto diga otra cosa)
+ * y la columna de opciones partida en dos pestañas:
+ *  - **Output**: cómo se escribe el DDL y cómo se nombran los archivos, con el
+ *    formulario compartido `DdlOutputForm`. Arranca desde las Output settings
+ *    del proyecto (Data Standards) y se puede ajustar para este export.
+ *  - **Export rules** (`ExportRulesPanel`): el ruleset del proyecto, es decir,
+ *    qué reglas corren al exportar. Van aparte porque no son formato: la mitad
+ *    son generadores que agregan objetos al `.zip`. Son de Databricks (SET TAGS,
+ *    TBLPROPERTIES, tablas _rej…): con Oracle no corren y la pestaña no aparece.
  *
- * Footer: **Download** (a `.zip` with one `.sql` per object — `TABLE-X.sql` /
- * `VIEW_NEG-Y.sql` / `VIEW_TEC-Z.sql`, doc 93 D11 — each table and its views
- * under a folder named after the table) and **Copy to clipboard** (single
- * concatenated SQL). UI-only — no persistence.
- * Doc 102: solo las vistas del canvas (`diagram.views`), no todas las de sus tablas.
+ * Pie: **Download** (un `.zip` con un `.sql` por objeto, `TABLE-X.sql` /
+ * `VIEW_NEG-Y.sql` / `VIEW_TEC-Z.sql`, cada tabla y sus vistas en una carpeta con
+ * el nombre de la tabla) y **Copy to clipboard** (un solo SQL concatenado). Solo
+ * UI, sin persistencia. Exporta solo las vistas del canvas (`diagram.views`), no
+ * todas las de sus tablas.
  */
 'use client';
 
@@ -57,6 +55,8 @@ import ExportRulesPanel from './ExportRulesPanel';
 import DdlOutputForm from './DdlOutputForm';
 import { exportGate } from '../exportGate';
 import { pickedTableIds } from '../tableSelection';
+import { useAuthStore } from '@/store/useAuthStore';
+import { NO_EXPORT_HINT } from '@/lib/permissionHints';
 
 export interface ExportDdlModalProps {
   open: boolean;
@@ -66,15 +66,15 @@ export interface ExportDdlModalProps {
 }
 
 export default function ExportDdlModal({ open, diagram, modelName, onClose }: ExportDdlModalProps) {
-  // Doc 101: arranca con el dialecto por default del proyecto (Output settings);
-  // cambiarlo acá vale solo para este export.
+  // Arranca con el dialecto por defecto del proyecto (Output settings);
+  // cambiarlo aquí vale solo para este export.
   const [dialect, setDialect] = useState<DdlDialect>('databricks');
   const isDbx = dialect === 'databricks';
   // Pestaña de la columna de opciones: formato del DDL vs ruleset del proyecto.
   const [tab, setTab] = useState<'output' | 'rules'>('output');
   const pickDialect = (d: DdlDialect) => { setDialect(d); setTab('output'); };
-  // Doc 93 D1: las Output settings del proyecto son el punto de partida; lo
-  // que se cambie acá vale solo para este export.
+  // Las Output settings del proyecto son el punto de partida; lo que se
+  // cambie aquí vale solo para este export.
   const [settings, setSettings] = useState<DdlOutputSettings>(DEFAULT_OUTPUT_SETTINGS);
   const [settingsReady, setSettingsReady] = useState(false);
   // Las últimas settings leídas del proyecto: al reabrir se ven de entrada (no
@@ -82,7 +82,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const lastLoaded = useRef<{ projectId: string; settings: DdlOutputSettings } | null>(null);
   const { opts, fileNames } = useMemo(() => splitOutputSettings(settings), [settings]);
 
-  // All tables of the diagram, sorted for a stable checklist.
+  // Todas las tablas del diagrama, ordenadas para que la lista de selección sea estable.
   const allTables = useMemo<DdlTable[]>(
     () => (diagram?.tables ?? [])
       .map((t) => ({ id: t.id, physicalName: t.physicalName, logicalName: t.logicalName, schema: t.schema, description: t.description }))
@@ -90,22 +90,21 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     [diagram],
   );
 
-  // Doc 102: vistas del export = las MIEMBRO de este canvas (`diagram.views`, la
-  // misma lista que el canvas dibuja), no todas las vistas de sus tablas. F3:
+  // Vistas del export = las miembro de este canvas (`diagram.views`, la misma
+  // lista que el canvas dibuja), no todas las vistas de sus tablas. Los
   // sourceTableIds viajan al generador (multi-fuente, `FROM t1, t2`).
   const views = useMemo(() => canvasDdlViews(diagram), [diagram]);
 
-  // DDL Export rules (doc 30 F10): habilitadas+válidas del catálogo, TODAS
-  // marcadas por default. Sin selección el export sale byte-idéntico al de
-  // siempre (cero regresión).
+  // DDL Export rules: las habilitadas y válidas del catálogo, todas marcadas por
+  // defecto. Sin selección, el export sale idéntico byte a byte al DDL base.
   const [exportRules, setExportRules] = useState<ExportRule[]>([]);
   const [selRules, setSelRules] = useState<Set<string> | null>(null);
-  // Doc 101 (bug previo): la lista de reglas se pide en cada apertura; hasta que
-  // llega no hay selección vieja que valga (ni se exporta).
+  // La lista de reglas se pide en cada apertura; hasta que llega no vale
+  // ninguna selección anterior (ni se exporta).
   const [rulesState, setRulesState] = useState<'loading' | 'ready' | 'failed'>('loading');
   const [rendering, setRendering] = useState(false);
-  // Doc 93 D10: defs UDP del proyecto — resuelven por nombre el UDP de columna
-  // que DEFINE las particiones (regla de layout `partitionUdp`). null = cargando.
+  // Defs UDP del proyecto: resuelven por nombre el UDP de columna que define
+  // las particiones (regla de layout `partitionUdp`). null = cargando.
   const [udpDefs, setUdpDefs] = useState<UdpDefLite[] | null>(null);
   const [udpFailed, setUdpFailed] = useState(false);
   useEffect(() => {
@@ -138,7 +137,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     () => selRules ?? new Set(exportRules.map((r) => r.id)),
     [selRules, exportRules],
   );
-  // Las reglas son de Databricks: con Oracle no corre ninguna (doc 101).
+  // Las reglas son de Databricks: con Oracle no corre ninguna.
   const activeRuleIds = useMemo(() => (isDbx ? selRuleIds : new Set<string>()), [isDbx, selRuleIds]);
   const toggleRule = (id: string) => {
     const base = new Set(selRuleIds);
@@ -146,13 +145,13 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     setSelRules(base);
   };
 
-  // Preview CON reglas aplicadas: bajo demanda ("Apply rules"), nunca en vivo
-  // — es una llamada al motor del backend y debe coincidir EXACTO con el
-  // download. Cualquier cambio de opciones/selección lo invalida.
+  // Preview con reglas aplicadas: bajo demanda ("Apply rules"), nunca en vivo,
+  // porque es una llamada al motor del backend y debe coincidir exactamente con
+  // el download. Cualquier cambio de opciones/selección lo invalida.
   const [rulesPreview, setRulesPreview] = useState<{ sql: string; applied: number; version: string } | null>(null);
 
-  // Tablas a exportar — doc 108: por default NINGUNA (antes, todas); cada vez que
-  // se abre el modal se vuelve a empezar sin elección. Una tabla que dejó el canvas sale de la elección.
+  // Tablas a exportar: por defecto ninguna; cada vez que se abre el modal se
+  // empieza sin elección. Una tabla que dejó el canvas sale de la elección.
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [tableFilter, setTableFilter] = useState('');
   const selectedIds = useMemo(() => pickedTableIds(selected, allTables.map((t) => t.id)), [selected, allTables]);
@@ -173,12 +172,12 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     () => (ddlInput ? (isDbx ? databricksDdl(ddlInput, opts) : oracleDdl(ddlInput, oracleOpts)) : ''),
     [ddlInput, opts, isDbx, oracleOpts],
   );
-  // Doc 73: el layout de columnas (regla «Partition columns last») lo dictan las
-  // reglas SELECCIONADAS — sólo el export con reglas lo aplica; sin reglas el
-  // DDL base sigue byte-idéntico.
+  // El layout de columnas (regla «Partition columns last») lo dictan las reglas
+  // seleccionadas: solo el export con reglas lo aplica; sin reglas, el DDL base
+  // no cambia.
   const layout = useMemo(() => layoutFromRules(exportRules, selRuleIds), [exportRules, selRuleIds]);
   const effOpts = useMemo(() => ({ ...opts, partitionsLast: layout.partitionsLast }), [opts, layout]);
-  // Doc 93 D10: con la regla de layout, las particiones salen del UDP que ella
+  // Con la regla de layout, las particiones salen del UDP que ella
   // nombra (PART_nn = partición y su orden) → el CREATE físico y el motor
   // coinciden; sin esa regla (o sin el UDP) rige el flag de la plataforma.
   const rulesInput = useMemo(() => (ddlInput
@@ -227,7 +226,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const selectAll = () => setSelected(new Set(allTables.map((t) => t.id)));
   const selectNone = () => setSelected(new Set<string>());
 
-  // Column count per table (for the "N cols" hint) + name filter over the list.
+  // Cantidad de columnas por tabla (para la pista "N cols") + filtro por nombre sobre la lista.
   const colCountByTable = useMemo(() => {
     const m = new Map<string, number>();
     (diagram?.columns ?? []).forEach((c) => m.set(c.tableId, (m.get(c.tableId) ?? 0) + 1));
@@ -236,7 +235,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const filteredTables = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
     if (!q) return allTables;
-    // También por ESQUEMA y "esquema.tabla": dos tablas pueden llamarse igual
+    // También por esquema y "esquema.tabla": dos tablas pueden llamarse igual
     // en esquemas distintos y el filtro debe poder distinguirlas.
     return allTables.filter(
       (t) => t.physicalName.toLowerCase().includes(q)
@@ -291,7 +290,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
 
       const entries = objectsToEntries(objects, fileNames);
       // Oracle: las FK en su propio archivo, para correrlo después de todas las
-      // tablas (en el archivo de la tabla hija podían correr antes que el padre).
+      // tablas (en el archivo de la tabla hija podrían correr antes que el padre).
       const fks = isDbx ? null : oracleForeignKeysFile(ddlInput, oracleOpts);
       if (fks) entries.push({ path: 'FOREIGN_KEYS.sql', content: fks });
       const zipName = ddlZipName(exportTables, modelName);
@@ -315,8 +314,8 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   // Proyecto sin reglas, u Oracle (las reglas son de Databricks) ⇒ sin pestañas.
   const rulesTab = isDbx && exportRules.length > 0;
   const showRules = tab === 'rules' && rulesTab;
-  // Final review #7/#15: sin las Output settings y las defs UDP cargadas no se
-  // exporta (la física y la _rej podían diferir en particiones).
+  // Sin las Output settings y las defs UDP cargadas no se exporta (la física y
+  // la _rej podrían diferir en particiones).
   // Oracle no usa las defs UDP ni las reglas (son de Databricks): no las espera.
   const gate = exportGate({
     settingsReady,
@@ -327,6 +326,9 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
     rulesSelected: activeRuleIds.size,
   });
   const canExport = exportTables.length > 0 && gate.ready;
+  // Descargar o copiar el DDL exige el permiso `export`.
+  const allowed = useAuthStore((st) => st.has('export'));
+  const deniedTip = allowed ? undefined : NO_EXPORT_HINT;
 
   const footer = (
     <>
@@ -336,8 +338,8 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
         {gate.note && ` · ${gate.note}`}
       </span>
       <Button variant="secondary" onClick={onClose}>Close</Button>
-      <Button variant="secondary" icon={Copy} onClick={copy} disabled={!canExport || rendering}>Copy</Button>
-      <Button variant="primary" icon={Download} onClick={download} disabled={!canExport || rendering}>
+      <Button variant="secondary" icon={Copy} onClick={copy} disabled={!allowed || !canExport || rendering} title={deniedTip}>Copy</Button>
+      <Button variant="primary" icon={Download} onClick={download} disabled={!allowed || !canExport || rendering} title={deniedTip}>
         {rendering ? 'Applying rules…' : 'Download .zip'}
       </Button>
     </>
@@ -356,7 +358,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
       canvasTop={136}
     >
       <div className="exd">
-        {/* Tables to export — from current canvas */}
+        {/* Tablas a exportar, del canvas actual */}
         <div className="exd-tablesx">
           <div className="exd-tablesx-head">
             <span className="exd-tablesx-title">Tables to export</span>
@@ -408,12 +410,12 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
           </div>
         </div>
 
-        {/* Dialect (cards) */}
+        {/* Dialecto (tarjetas) */}
         <div className="exd-field">
           <span className="exd-lbl">Target dialect</span>
           <div className="exd-dialects">
-            {/* Hasta que llegan las Output settings no se elige: el default del
-                proyecto pisaría la elección (doc 101). */}
+            {/* Hasta que llegan las Output settings no se elige: el valor por
+                defecto del proyecto pisaría la elección. */}
             <button
               type="button"
               className={`exd-dialect${!isDbx ? ' is-on' : ''}`}
@@ -444,11 +446,11 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
         </div>
 
         <div className="exd-cols">
-          {/* ── Options column ── */}
+          {/* ── Columna de opciones ── */}
           <div className="exd-opts">
-            {/* Las reglas NO son opciones de formato — la mitad GENERA objetos
-                nuevos (la _rej, las vistas _v/DAC): van en su propia pestaña, con
-                toda la altura de la columna. Proyecto sin reglas ⇒ sin pestañas. */}
+            {/* Las reglas no son opciones de formato: la mitad genera objetos
+                adicionales (la _rej, las vistas _v/DAC) y van en su propia pestaña,
+                con toda la altura de la columna. Proyecto sin reglas ⇒ sin pestañas. */}
             {!isDbx && exportRules.length > 0 && (
               <span className="exd-dialect-note">The export rules apply to Databricks only — Oracle exports the model as is.</span>
             )}
@@ -491,7 +493,7 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
             )}
           </div>
 
-          {/* ── Preview column (dark) ── */}
+          {/* ── Columna de preview (oscura) ── */}
           <div className="exd-previewcol">
             <div className="exd-previewhead">
               <span className="exd-lbl">

@@ -1,19 +1,19 @@
-// API request/response types
+// Tipos de request/response de la API
 
-// Generic API response wrapper
+// Envoltorio genérico de respuesta de la API
 export interface ApiResponse<T> {
   success: boolean;
   data?: T;
   error?: string;
 }
 
-// ─── Project endpoints ───────────────────────────────────────────────────────
+// ─── Endpoints de proyectos ──────────────────────────────────────────────────
 
-/** Bloques de Data Standards que un proyecto nuevo puede copiar de otro (doc 75 D15).
+/** Bloques de Data Standards que un proyecto nuevo puede copiar de otro.
  *  Espeja `COPY_BLOCKS` del backend. */
 export type StandardsBlock = 'glossary' | 'domains' | 'udp' | 'naming' | 'ddl' | 'themes';
 
-/** `POST /api/projects` (doc 75 D15): la creación es la ÚNICA operación directa
+/** `POST /api/projects`: la creación es la única operación directa
  *  sobre un proyecto (renombrar/borrar van por draft). `copyFrom` copia bloques
  *  de Data Standards de otro proyecto; sin él, el proyecto nace vacío. */
 export interface CreateProjectRequest {

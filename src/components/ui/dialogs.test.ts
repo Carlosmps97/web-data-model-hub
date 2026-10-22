@@ -1,7 +1,7 @@
-// Host global de diálogos sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105 (F6): el prompt con `action` pasaba a busy deshabilitando el input y
-// los dos botones — el foco caía a <body> y Tab salía a la página de atrás (el
-// mismo defecto que ConfirmDialog). Y al cerrarse no devolvía el foco.
+// Host global de diálogos sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+// El prompt con `action` pasa a busy y deshabilita el input y los dos botones: el foco
+// queda en la caja para que no caiga a <body> y Tab no salga a la página de atrás
+// (igual que en ConfirmDialog). Al cerrarse, el foco vuelve a quien lo abrió.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { byText, fake, resetFake, runEffects, walk, type El } from '../../features/reporting/components/fakeReact.testutil';
 
@@ -44,8 +44,8 @@ function renderPrompt() {
 }
 const setRef = (el: El, current: unknown) => { (el.props.ref as { current: unknown }).current = current; };
 
-describe('promptDialog: el foco no sale del diálogo (doc 105, F6)', () => {
-  it('con action, al aceptar la caja (tabIndex -1, sin outline) toma el foco ANTES de pasar a busy', () => {
+describe('promptDialog: el foco no sale del diálogo', () => {
+  it('con action, al aceptar la caja (tabIndex -1, sin outline) toma el foco antes de pasar a busy', () => {
     void promptDialog({ title: 'New changeset', label: 'Title', action: () => new Promise(() => undefined) });
     const { tree, box } = renderPrompt();
     expect(box.props.tabIndex).toBe(-1);
@@ -53,7 +53,7 @@ describe('promptDialog: el foco no sale del diálogo (doc 105, F6)', () => {
     let busyAtFocus: unknown[] | null = null;                 // `busy` es el 2.º useState del prompt
     setRef(box, { focus: vi.fn(() => { busyAtFocus = [...fake.states[1].calls]; }) });
     (byText(tree, 'button', 'OK').props.onClick as () => void)();
-    expect(busyAtFocus).toEqual([]);                          // todavía no estaba ocupado…
+    expect(busyAtFocus).toEqual([]);                          // al tomar el foco, sin ocupar…
     expect(fake.states[1].calls).toEqual([true]);             // …y después sí
   });
 
@@ -77,7 +77,7 @@ describe('promptDialog: el foco no sale del diálogo (doc 105, F6)', () => {
   });
 });
 
-describe('promptDialog: pila de diálogos y nombres accesibles (doc 105, R6)', () => {
+describe('promptDialog: pila de diálogos y nombres accesibles', () => {
   it('abierto es el tope y Tab con el foco en <body> vuelve a su caja', () => {
     resetDialogStack();
     const below = Symbol('Modal de abajo');
@@ -122,10 +122,10 @@ describe('promptDialog: pila de diálogos y nombres accesibles (doc 105, R6)', (
   });
 });
 
-// Doc 105 (R11): el Enter que acepta el prompt (sin `action`) lo cierra en su
-// keydown; sin preventDefault, el keypress de ese Enter «clicaba» al botón que lo
-// abrió y aparecía un segundo prompt.
-describe('promptDialog: el Enter que acepta no llega a quien lo abrió (doc 105, R11)', () => {
+// El Enter que acepta el prompt (sin `action`) lo cierra en su keydown; sin
+// preventDefault, el keypress de ese Enter «clicaría» al botón que lo abrió y
+// aparecería un segundo prompt.
+describe('promptDialog: el Enter que acepta no llega a quien lo abrió', () => {
   it('Enter en el input: preventDefault (no hay keypress que active al botón de atrás) y resuelve', async () => {
     const done = promptDialog({ title: 'New changeset', label: 'Title', initial: 'Sprint 12' });
     const { tree } = renderPrompt();

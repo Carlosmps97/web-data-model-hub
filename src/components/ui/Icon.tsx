@@ -1,5 +1,5 @@
-// Single-stroke icon set — ported from newStyleWeb/Redesign/parts/icons.jsx.
-// One source of truth for all glyphs (1.5–2px stroke). No emoji.
+// Set de íconos de trazo simple: fuente única de todos los glifos (trazo de
+// 1.5–2px). Sin emojis.
 import React from 'react';
 
 const PATHS = {
@@ -63,7 +63,7 @@ export type IconName = keyof typeof PATHS;
 export interface IconProps {
   name: IconName;
   size?: number;
-  /** stroke width */
+  /** grosor del trazo */
   sw?: number;
   fill?: string;
   className?: string;

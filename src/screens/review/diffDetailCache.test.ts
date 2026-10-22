@@ -6,7 +6,7 @@ const ref = (c: string, e: string) => ({ collection: c, entityId: e });
 const det = (c: string, e: string): DiffEntityDetail =>
   ({ collection: c, entityId: e, action: 'created', name: e, fields: [] });
 
-describe('diffDetailCache (doc 80 §8 — un fallo no puede verse como «Loading…»)', () => {
+describe('diffDetailCache (un fallo no puede verse como «Loading…»)', () => {
   it('markLoading no pisa lo ya resuelto', () => {
     const prev: CacheMap = { [keyOf('canonical_tables', 't1')]: det('canonical_tables', 't1') };
     const next = markLoading(prev, [ref('canonical_tables', 't1'), ref('canonical_columns', 'c1')]);

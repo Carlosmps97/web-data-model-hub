@@ -24,12 +24,12 @@ import TypePicker from './TypePicker';
 import UdpAssign from './UdpAssign';
 
 /** Opciones del combobox de Parent Domain: alfabético, con el tipo por defecto
- *  como detalle a la derecha (doc 41) — HOMOLOGADO a la grafía canónica
- *  (doc 64 r2: un dominio legacy con `Array` se muestra como `ARRAY<>`). */
+ *  como detalle a la derecha, homologado a la grafía canónica (un dominio con
+ *  `Array` se muestra como `ARRAY<>`). */
 export const domainOptions = (domains: ParentDomain[], facet: Facet = 'physical') =>
   [...domains]
     .sort((a, b) => a.name.localeCompare(b.name))
-    // Doc 86 §2.4: el detalle es el tipo de la FACETA activa (lógico en Logical).
+    // El detalle es el tipo de la faceta activa (lógico en Logical).
     .map((d) => ({ value: d.id, label: d.name, detail: facetDomainDefault(d, facet) }));
 
 /** Default de tipo del dominio en la faceta: lógico (con fallback al físico) o físico. Homologado. */
@@ -45,21 +45,21 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   const [preview, setPreview] = useState('');
   const [parentDomainId, setParentDomainId] = useState('');
   const [dataType, setDataType] = useState('');
-  // Doc 64 §1: override local vivo — misma regla del panel (doc 46). El campo
-  // de tipo SIEMPRE muestra el vigente (default del dominio u override manual).
+  // Override local vivo, con la misma regla del panel. El campo de tipo
+  // siempre muestra el vigente (default del dominio u override manual).
   const [typeOverridden, setTypeOverridden] = useState(false);
   const [domains, setDomains] = useState<ParentDomain[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Metadata del alta (doc 40): definición funcional, flags y UDPs en el MISMO
-  // popup — antes había que crear la columna y luego ir a Properties · Columns.
+  // Metadata del alta: definición funcional, flags y UDPs en el mismo popup,
+  // sin tener que crear la columna y luego ir a Properties · Columns.
   const [description, setDescription] = useState('');
   const [isPrimaryKey, setIsPrimaryKey] = useState(false);
   const [isForeignKey, setIsForeignKey] = useState(false);
   const [isNullable, setIsNullable] = useState(true);
   const [isPartition, setIsPartition] = useState(false);
   const [udpValues, setUdpValues] = useState<Record<string, string>>({});
-  // Doc 85: descripción física heredada del dominio estándar (viaja en el alta; se edita luego en Properties).
+  // Descripción física heredada del dominio estándar (viaja en el alta; se edita luego en Properties).
   const [physicalDescription, setPhysicalDescription] = useState('');
   const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
   useEffect(() => {
@@ -69,29 +69,29 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
   }, []);
   const [inherit, setInherit] = useState<{ domain: ParentDomain; offer: DomainUdpOffer; also: string[] } | null>(null);
   // Ref espejo de los UDP: el blur del input (commit de UdpAssign) dispara en
-  // el MISMO gesto que el click en "Add" — el submit lee el ref (sincrónico)
+  // el mismo gesto que el click en "Add" — el submit lee el ref (sincrónico)
   // para no perder ese último valor contra el batching del estado.
   const udpRef = useRef<Record<string, string>>({});
   // Token de secuencia: al escribir rápido, la respuesta de physicalize de un
-  // texto MÁS CORTO podía llegar DESPUÉS y pisar el preview (carrera fuera de
-  // orden → "colcomplicado2" mostraba "COLCOMPLIC"). Debounce + guarda: solo
-  // la respuesta del ÚLTIMO input actualiza el preview.
+  // texto más corto puede llegar después y pisar el preview (carrera fuera de
+  // orden: "colcomplicado2" mostraría "COLCOMPLIC"). Debounce + guarda: solo
+  // la respuesta del último input actualiza el preview.
   const previewSeq = useRef(0);
-  // Doc 69: los UDPs del alta siguen la faceta activa del canvas.
+  // Los UDPs del alta siguen la faceta activa del canvas.
   const viewMode = useModelerStore((s) => s.viewMode);
-  // Doc 86: el popup NO tiene selector propio — sigue el selector global. En
-  // Logical lo tipeado es el nombre lógico y el tipo es el LÓGICO; en Physical
-  // lo tipeado es el físico (regla de case, doc 83) y el tipo es el físico.
+  // El popup no tiene selector propio: sigue el selector global. En Logical lo
+  // tipeado es el nombre lógico y el tipo es el lógico; en Physical lo tipeado
+  // es el físico (con la regla de case) y el tipo es el físico.
   const mode = viewMode;
-  // Doc 83: regla de case del scope column (naming config del proyecto).
+  // Regla de case del scope column (naming config del proyecto).
   const columnCase = useModelerStore((s) => s.naming?.column.case);
 
   useEffect(() => { gov.listDomains().then(setDomains).catch(() => {}); }, []);
   useEffect(() => {
     if (!name.trim()) { setPreview(''); return; }
     if (mode === 'physical') {
-      // Doc 83: el físico tipeado se persiste con la regla de case del scope
-      // (store + backend); el preview avisa SOLO cuando cambia lo tipeado.
+      // El físico tipeado se persiste con la regla de case del scope
+      // (store + backend); el preview avisa solo cuando cambia lo tipeado.
       ++previewSeq.current;                       // anula un physicalize lógico en vuelo
       const cased = applyNamingCase(name.trim(), columnCase);
       setPreview(cased !== name.trim() ? cased : '');
@@ -106,14 +106,14 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     return () => clearTimeout(t);
   }, [mode, name, columnCase]);
 
-  // Doc 64 §1: dupla dominio+tipo como Properties · Data Type — elegir el
-  // dominio muestra su default AL INSTANTE (argumentos puntuales y builder de
-  // complejos editables de frente); editar el tipo deslinda (applyDomainPick,
-  // regla doc 46: OTRO dominio re-aplica su default aunque hubiera override).
+  // Dupla dominio+tipo como Properties · Data Type: elegir el dominio muestra
+  // su default al instante (argumentos puntuales y builder de complejos
+  // editables de frente); editar el tipo deslinda (applyDomainPick: otro
+  // dominio re-aplica su default aunque hubiera override).
   const activeDomain = domains.find((d) => d.id === parentDomainId);
-  // Doc 64 r2: el default se consume HOMOLOGADO (canonicalDefaultType) — un
-  // dominio legacy con `Array` hereda `ARRAY<>` (y abre el builder), no el
-  // texto crudo de la BD sin homologar.
+  // El default se consume homologado (canonicalDefaultType): un dominio con
+  // `Array` hereda `ARRAY<>` (y abre el builder), no el texto crudo de la BD
+  // sin homologar.
   const domainDefault = facetDomainDefault(activeDomain, mode);
   const onDomainPick = (id: string) => {
     const dom = domains.find((d) => d.id === id);
@@ -125,9 +125,9 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       nextDomainId: id,
       nextDefault: dom ? facetDomainDefault(dom, mode) : undefined,
     });
-    // Doc 79: solo un dominio "atributo estándar" (Erwin `Attribute_Definition`
+    // Solo un dominio "atributo estándar" (Erwin `Attribute_Definition`
     // ⇒ `inheritsName`) re-aplica nombre lógico y definición; los genéricos de
-    // tipo NO tocan nada. Re-elegir el MISMO respeta lo tipeado. En modo
+    // tipo no tocan nada. Re-elegir el mismo respeta lo tipeado. En modo
     // «Physical» el input es un físico: el nombre no aplica.
     const defaults = applyDomainDefaults({
       prevDomain: prev, nextDomain: dom,
@@ -135,13 +135,13 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     });
     if (mode === 'logical' && defaults.logicalName !== undefined) setName(defaults.logicalName);
     if (defaults.description !== undefined) setDescription(defaults.description);
-    // Doc 85: la descripción física va con la misma marca (`defaults.physicalName` se
-    // ignora en el alta: el store deriva/casea el físico — D8).
+    // La descripción física va con la misma marca (`defaults.physicalName` se
+    // ignora en el alta: el store deriva/casea el físico).
     if (defaults.physicalDescription !== undefined) setPhysicalDescription(defaults.physicalDescription ?? '');
     setParentDomainId(id);
     setDataType(next.dataType);
     setTypeOverridden(next.typeOverridden);
-    // Doc 85 §3.6: UDP por defecto del dominio nuevo → el modelador elige (popup);
+    // UDP por defecto del dominio recién elegido → el modelador elige (popup);
     // lo elegido entra al buffer local y viaja en el mismo alta.
     const offer = dom && id !== parentDomainId ? domainUdpOffer(dom, udpDefs) : null;
     if (dom && offer && offer.total > 0) {
@@ -157,8 +157,8 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     setTypeOverridden(activeDomain ? next.trim() !== domainDefault : next.trim() !== '');
   };
 
-  // Doc 105 (R14): un alta a la vez — `busy` sigue en false dentro del mismo
-  // render: un doble Enter (o uno sostenido) creaba varias columnas duplicadas.
+  // Un alta a la vez: `busy` sigue en false dentro del mismo render, y sin esta
+  // guarda un doble Enter (o uno sostenido) crearía columnas duplicadas.
   const inFlight = useRef(false);
   const submit = async () => {
     if (!name.trim() || inFlight.current) return;
@@ -166,15 +166,15 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
     setBusy(true);
     setError(null);
     try {
-      // Doc 86 §2.3: payload por faceta (createInputs, puro y testeado).
+      // Payload por faceta (createInputs, puro y testeado).
       await onAdd(tableId, columnCreateInput(mode, {
         name, parentDomainId, typeText: dataType, description, physicalDescription,
         isPrimaryKey, isForeignKey, isNullable, isPartition, udpValues: udpRef.current,
       }, activeDomain));
       onClose();
     } catch (e) {
-      // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
-      // detail real del backend — el modal NO se cierra.
+      // 409 de duplicado u otro error: mensaje inline con el detail real del
+      // backend; el modal no se cierra.
       setError(apiErrorMessage(e, "Couldn't add the column"));
     } finally { inFlight.current = false; setBusy(false); }
   };
@@ -189,7 +189,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
       <input className="rd-input" autoFocus placeholder={mode === 'logical' ? 'Attribute name (e.g. monto deuda dólares)' : 'Column name (e.g. MTO_DEU_USD)'} value={name} onChange={(e) => setName(mode === 'logical' ? sanitizeLogicalName(e.target.value) : e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }} style={{ width: '100%' }} />
       {preview && <div className="rd-small" style={{ marginTop: 8 }}>Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{preview}</span></div>}
       <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-        {/* Combobox con buscador (doc 41): contiene, lista acotada con
+        {/* Combobox con buscador: contiene, lista acotada con
             scroll, nombre + tipo default a la derecha. */}
         <SearchSelect
           options={domainOptions(domains, mode)}
@@ -199,9 +199,9 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
           onPick={onDomainPick}
         />
         <div>
-          {/* Doc 64 §1: el tipo SIEMPRE visible (default del dominio u
-              override) — catálogo cerrado con argumentos puntuales;
-              STRUCT/ARRAY/MAP están EN la lista (doc 41). */}
+          {/* El tipo siempre visible (default del dominio u override):
+              catálogo cerrado con argumentos puntuales; STRUCT/ARRAY/MAP
+              están en la lista. */}
           <TypePicker
             value={dataType}
             onChange={onTypeChange}
@@ -216,7 +216,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
             </div>
           )}
           {/* Builder visual: STRUCT/ARRAY/MAP se declaran campo a campo
-              (recompone el texto; híbrido doc 64 §2). */}
+              (recompone el texto del tipo). */}
           {isComplexTypeStart(dataType) && (
             <ComplexTypeBuilder value={dataType} onChange={onTypeChange} />
           )}
@@ -231,7 +231,7 @@ export default function ColumnEditor({ tableId, onClose, onAdd }: {
           <label className={`wk-pp-flag nl${isNullable ? ' on' : ''}`}><input type="checkbox" checked={isNullable} onChange={() => setIsNullable(!isNullable)} /> Nullable</label>
           <label className={`wk-pp-flag pt${isPartition ? ' on' : ''}`}><input type="checkbox" checked={isPartition} onChange={() => setIsPartition(!isPartition)} /><Icon name="grid" size={11} /> Partition</label>
         </div>
-        {/* UDP a nivel columna: BUFFER local (como el modal de Model properties)
+        {/* UDP a nivel columna: buffer local (como el modal de Model properties)
             — nada viaja hasta el Add; el alta va en un solo payload. */}
         <div style={{ paddingTop: 10, borderTop: '1px solid #EEF1F6' }}>
           <div style={{ fontSize: 10.5, fontWeight: 700, color: '#8A93A5', textTransform: 'uppercase', letterSpacing: 0.3, marginBottom: 8 }}>{FACET_CAPTION.column[viewMode]}</div>
@@ -264,17 +264,15 @@ function Grip() {
 interface ColumnRowProps {
   col: CanonicalColumn;
   canEdit: boolean;
-  /** Doc 85: faceta activa — la celda de tipo muestra el tipo de ESA faceta (default physical). */
+  /** Faceta activa: la celda de tipo muestra el tipo de esa faceta (default physical). */
   facet?: Facet;
-  /** Doc 42: con el buscador de columnas activo el reorder se apaga — el drop
-   *  se resuelve contra la lista COMPLETA y una lista filtrada lo corrompería.
-   *  Doc 81: también se apaga en las filas PK (el bloque de llave queda fijo
-   *  arriba; su orden se cambia en la sección «Key order»). */
+  /** Con el buscador de columnas activo el reorder se apaga: el drop se
+   *  resuelve contra la lista completa y una lista filtrada lo corrompería. */
   dragDisabled?: boolean;
-  /** Doc 81: motivo del drag apagado (tooltip del grip). Sin él se asume filtro. */
+  /** Motivo del drag apagado (tooltip del grip). Sin él se asume filtro. */
   dragDisabledReason?: string;
-  /** Doc 49: el click abre el Properties de ESTA columna (sidebar propio) —
-   *  la edición inline (fila expandida) se retiró de este listado. */
+  /** El click abre el Properties de esta columna (sidebar propio); este
+   *  listado no tiene edición inline. */
   onOpen: (id: string) => void;
   // DnD vertical (HTML5 nativo).
   isDragging: boolean;
@@ -286,11 +284,10 @@ interface ColumnRowProps {
 }
 
 /**
- * Fila de columna en el PropertiesPanel · Columns (diseño p8): fila compacta
+ * Fila de columna en el PropertiesPanel · Columns: fila compacta
  * grip · icono PK/FK/PART · lógico · físico · tipo · badges. El click abre el
- * Properties de la columna (doc 49) — la card expandida "Editing column" se
- * retiró: la edición vive en ColumnPropertiesPanel. Drag por el grip para
- * reordenar (acción estructural, se queda en el panel de tabla).
+ * Properties de la columna; la edición vive en ColumnPropertiesPanel. Drag por
+ * el grip para reordenar (acción estructural, se queda en el panel de tabla).
  */
 export function ColumnRow({ col, canEdit, facet, dragDisabled, dragDisabledReason, onOpen, isDragging, dropHint, onDragStart, onDragOver, onDrop, onDragEnd }: ColumnRowProps) {
   const canDrag = canEdit && !dragDisabled;

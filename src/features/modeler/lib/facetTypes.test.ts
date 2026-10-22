@@ -13,7 +13,7 @@ describe('isCompleteSimpleType', () => {
   });
 });
 
-describe('tipos complejos por faceta (doc 96 D8)', () => {
+describe('tipos complejos por faceta', () => {
   const full = 'ARRAY<STRUCT<a:VARCHAR(30)>>';
   it('mirrorComplex: el complejo con estructura manda (espejo del kit)', () => {
     expect(mirrorComplex(full, 'ARRAY<>')).toBe(full);
@@ -33,9 +33,9 @@ describe('tipos complejos por faceta (doc 96 D8)', () => {
   });
 });
 
-describe('syncedOtherFacet — secuencias de tecleo en Code (final review #1)', () => {
+describe('syncedOtherFacet — secuencias de tecleo en Code', () => {
   const full = 'ARRAY<STRING>';
-  // Aplica las ediciones de UNA faceta tecla a tecla, como el panel.
+  // Aplica las ediciones de una faceta tecla a tecla, como el panel.
   const edit = (start: { phys: string; logi: string }, values: string[], facet: 'phys' | 'logi') => {
     let { phys, logi } = start;
     for (const v of values) {
@@ -57,7 +57,7 @@ describe('syncedOtherFacet — secuencias de tecleo en Code (final review #1)', 
   });
 });
 
-describe('typeFacetPatch (minor #5: el flag se recalcula solo en la faceta que cambia)', () => {
+describe('typeFacetPatch (el flag se recalcula solo en la faceta que cambia)', () => {
   const dom = { defaultDataType: 'INTEGER', logicalDataType: 'NUMBER' };
   const stored = { dataType: 'INT', logicalDataType: 'NUMBER', typeOverridden: false, logicalTypeOverridden: false };
   it('editar solo el lógico conserva typeOverridden aunque el físico crudo difiera del dominio', () => {

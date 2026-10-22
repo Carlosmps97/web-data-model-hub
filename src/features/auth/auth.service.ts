@@ -1,14 +1,18 @@
 /**
- * auth.service — sesión por token; dos formas de iniciarla (doc 38).
+ * auth.service: sesión por token; dos formas de iniciarla y su renovación.
  *
  * Backend (envelope `{success,data}`):
- *   POST /api/auth/sso/login                     → { token, user }  (identidad
+ *   POST /api/auth/sso/login                     → { user, expiresIn }  (identidad
  *        heredada del SSO de Databricks Apps; 403 si el correo no está
  *        asignado a un rol en Admin)
- *   POST /api/auth/login  {username, password} → { token, user }  (cuenta
+ *   POST /api/auth/login  {username, password} → { user, expiresIn }  (cuenta
  *        local con contraseña — carril del administrador)
+ *   POST /api/auth/refresh                       → { user, expiresIn }  (token
+ *        nuevo con la vida completa; 401 si la sesión ya no vale)
  *   POST /api/auth/logout                        → { ok }
  *   GET  /api/auth/me                            → SessionUser | Principal básico
+ * El backend también devuelve `token`; el servidor del front lo saca del cuerpo
+ * y lo guarda en una cookie HttpOnly (ver `services/http.ts`).
  */
 import { apiGet, apiPost } from '@/services/http';
 
@@ -16,7 +20,7 @@ import { API_BASE } from '@/services/apiBase';
 
 /** Permisos de la matriz (1:1 con el backend `PERMISSIONS`). */
 export type Permission =
-  | 'model.view' | 'model.edit' | 'review.decide' | 'publish'
+  | 'model.view' | 'model.edit' | 'review.decide'
   | 'rollback' | 'versions.view_all' | 'export' | 'standards.edit' | 'admin.manage';
 
 /** Usuario en sesión enriquecido (rol + permisos efectivos) que devuelve /me. */
@@ -34,16 +38,23 @@ export interface SessionUser {
 }
 
 export interface LoginResult {
-  token: string;
   user: SessionUser;
+  /** Segundos de vida del token. */
+  expiresIn: number;
+  /** Solo cuando el token no viaja en la cookie (ver `services/http.ts`). */
+  token?: string;
 }
 
 export const login = (username: string, password: string) =>
   apiPost<LoginResult>(`${API_BASE}/api/auth/login`, { username, password });
 
-/** Login con la identidad heredada de Databricks (doc 38). Sin body: la
- *  identidad viaja en headers que el server del front releva al backend. */
+/** Login con la identidad heredada de Databricks. Sin body: la identidad
+ *  viaja en headers que el servidor del front releva al backend. */
 export const ssoLogin = () => apiPost<LoginResult>(`${API_BASE}/api/auth/sso/login`);
+
+/** Renueva la sesión: token nuevo con la vida completa y el usuario al día. */
+export const refreshSession = (signal?: AbortSignal) =>
+  apiPost<LoginResult>(`${API_BASE}/api/auth/refresh`, undefined, { signal });
 
 export const logout = () => apiPost<{ ok: boolean }>(`${API_BASE}/api/auth/logout`);
 

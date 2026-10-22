@@ -1,16 +1,15 @@
-// Doc 105 — borrar tablas y vistas (y su Undo) contra un backend EN MEMORIA que
-// se porta como el real: el lote (`PUT /changes/bulk`), el borrado de una vista
-// y el de una tabla cascadean la membresía en el MISMO request (doc 88 §4:
-// quitan el id — y su posición — de todo canvas que lo lista explícitamente;
-// un canvas sin lista explícita, legacy, no se toca) y un canvas se graba podado
-// de los miembros que el draft borró. `structure.service` es el real (con su
-// cola por canvas).
-//  · F4 (doc 100 P8): el Undo de borrar una tabla devuelve sus vistas a los
-//    canvases con lista explícita, con su posición, y la tabla a su posición en
-//    TODOS los canvases — UNA escritura por canvas.
-//  · A3/A5 (front): si falla una lectura de la cascada no se borra nada.
-//  · A4-o4: borrar una vista (panel o inspector) tiene el mismo Undo, con posición.
-//  · A5-o1: «Import existing tables» con vistas que no se pudieron leer avisa.
+// Borrar tablas y vistas (y su Undo) contra un backend en memoria que se porta
+// como el real: el lote (`PUT /changes/bulk`), el borrado de una vista y el de una
+// tabla cascadean la membresía en el mismo request (quitan el id, y su posición,
+// de todo canvas que lo lista explícitamente; un canvas sin lista explícita no se
+// toca) y un canvas se graba podado de los miembros que el draft borró.
+// `structure.service` es el real (con su cola por canvas).
+//  · El Undo de borrar una tabla devuelve sus vistas a los canvases con lista
+//    explícita, con su posición, y la tabla a su posición en todos los canvases,
+//    con una escritura por canvas.
+//  · Si falla una lectura de la cascada no se borra nada.
+//  · Borrar una vista (panel o inspector) tiene el mismo Undo, con posición.
+//  · «Import existing tables» con vistas que no se pudieron leer avisa.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -62,7 +61,7 @@ const deleted = (coll: string, id: string) => ops.get(`${coll}:${id}`) === 'dele
 const unhandled: unknown[] = [];
 const onUnhandled = (e: unknown) => { unhandled.push(e); };
 
-/** Cascada de membresía del backend (doc 88 §4) al borrar una tabla o vista. */
+/** Cascada de membresía del backend al borrar una tabla o vista. */
 function cascade(coll: string, id: string): void {
   if (!cascadeOnDelete) return;
   const field = coll === 'views' ? 'viewIds' : 'tableIds';
@@ -73,9 +72,10 @@ function cascade(coll: string, id: string): void {
     if (sa.layout) delete sa.layout[id];
   }
 }
-/** Poda del backend al grabar un canvas (prune_deleted_members): sólo los ids
- *  LISTADOS en `tableIds`/`viewIds` con un borrado pendiente salen de las listas
- *  y del layout (un canvas legacy conserva la posición de sus vistas). */
+/** Poda del backend al grabar un canvas (prune_deleted_members): solo los ids
+ *  listados en `tableIds`/`viewIds` con un borrado pendiente salen de las listas
+ *  y del layout (un canvas sin lista explícita de vistas conserva la posición de
+ *  sus vistas). */
 function prune(sa: SubjectArea): SubjectArea {
   const listed = [...(sa.tableIds ?? []), ...(Array.isArray(sa.viewIds) ? sa.viewIds : [])];
   const gone = new Set(listed.filter((id) => deleted('canonical_tables', id) || deleted('views', id)));
@@ -85,7 +85,7 @@ function prune(sa: SubjectArea): SubjectArea {
   if (sa.layout) out.layout = Object.fromEntries(Object.entries(sa.layout).filter(([k]) => !gone.has(k)));
   return out;
 }
-/** Vistas que el canvas MUESTRA: su lista explícita o, legacy, las de sus fuentes. */
+/** Vistas que el canvas muestra: su lista explícita o, si no la tiene, las de sus fuentes. */
 const shown = (sa: SubjectArea): string[] =>
   (Array.isArray(sa.viewIds) ? sa.viewIds : VIEWS.filter((v) => v.sourceTableIds.some((t) => sa.tableIds.includes(t))).map((v) => v.id))
     .filter((v) => !deleted('views', v));
@@ -102,14 +102,14 @@ beforeEach(async () => {
   cascadeOnDelete = true;
   ops = new Map();
   draft = {
-    // Canvas ACTIVO, con lista explícita de vistas (doc 70).
+    // Canvas activo, con lista explícita de vistas.
     sa1: { id: 'sa1', projectId: 'p', name: 'Uno', folderId: null, tableIds: ['t1', 't2'], viewIds: ['v1', 'v2'],
       layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 0, y: 300 }, v2: { x: 400, y: 300 } },
       drawings: [], udpValues: {}, routes: {} } as SubjectArea,
-    // Otro canvas con lista explícita que también muestra v1.
+    // Otro canvas con lista explícita que también muestra `v1`.
     sa2: { id: 'sa2', projectId: 'p', name: 'Dos', folderId: null, tableIds: ['t1'], viewIds: ['v1'],
       layout: { t1: { x: 5, y: 5 }, v1: { x: 5, y: 205 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
-    // Canvas legacy (sin lista explícita): muestra v1 por su fuente.
+    // Canvas sin lista explícita de vistas: muestra `v1` por su fuente.
     sa3: { id: 'sa3', projectId: 'p', name: 'Tres', folderId: null, tableIds: ['t1'],
       layout: { t1: { x: 9, y: 9 }, v1: { x: 9, y: 209 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
   };
@@ -196,7 +196,7 @@ afterEach(async () => {
   expect(unhandled, 'unhandledRejection durante la prueba').toEqual([]);
 });
 
-describe('borrar una tabla y deshacer (doc 105, F4 / doc 100 P8)', () => {
+describe('borrar una tabla y deshacer', () => {
   it('el borrado saca la tabla y sus vistas de cada canvas (la vista: cascada del backend)', async () => {
     await st().deleteTable('t1');
     expect(draft.sa1.tableIds).toEqual(['t2']);
@@ -206,21 +206,21 @@ describe('borrar una tabla y deshacer (doc 105, F4 / doc 100 P8)', () => {
     expect(draft.sa3.viewIds).toBeUndefined();
   });
 
-  it('deshacer devuelve la tabla Y su vista a cada canvas con lista explícita, con sus posiciones', async () => {
+  it('deshacer devuelve la tabla y su vista a cada canvas con lista explícita, con sus posiciones', async () => {
     await st().deleteTable('t1');
     log = [];
     await useUndoStore.getState().undoLast();
     expect(ops.get('views:v1')).toBe('upsert');                          // la vista revivió en el modelo
     expect(new Set(draft.sa1.tableIds)).toEqual(new Set(['t1', 't2']));
-    expect(new Set(draft.sa1.viewIds)).toEqual(new Set(['v1', 'v2']));  // antes: ['v2']
+    expect(new Set(draft.sa1.viewIds)).toEqual(new Set(['v1', 'v2']));
     expect(draft.sa1.layout.v1).toEqual({ x: 0, y: 300 });
     expect(draft.sa1.layout.t1).toEqual({ x: 0, y: 0 });
-    expect(draft.sa2.viewIds).toEqual(['v1']);                          // antes: []
-    expect(draft.sa2.layout).toEqual({ t1: { x: 5, y: 5 }, v1: { x: 5, y: 205 } });   // la tabla, en SU posición
-    expect(puts().sort()).toEqual(['put:sa1', 'put:sa2', 'put:sa3']);   // UNA escritura por canvas
+    expect(draft.sa2.viewIds).toEqual(['v1']);
+    expect(draft.sa2.layout).toEqual({ t1: { x: 5, y: 5 }, v1: { x: 5, y: 205 } });   // la tabla, en su posición
+    expect(puts().sort()).toEqual(['put:sa1', 'put:sa2', 'put:sa3']);   // una escritura por canvas
   });
 
-  it('un canvas SIN lista explícita (legacy) sigue sin lista tras deshacer; la tabla vuelve a su sitio', async () => {
+  it('un canvas sin lista explícita sigue sin lista tras deshacer; la tabla vuelve a su sitio', async () => {
     await st().deleteTable('t1');
     await useUndoStore.getState().undoLast();
     expect(draft.sa3.viewIds).toBeUndefined();
@@ -240,13 +240,13 @@ describe('borrar una tabla y deshacer (doc 105, F4 / doc 100 P8)', () => {
   });
 });
 
-describe('borrar una tabla cuando falla una lectura de la cascada (doc 105, A3/A5)', () => {
+describe('borrar una tabla cuando falla una lectura de la cascada', () => {
   it.each([
     ['las vistas', () => vi.mocked(viewsSvc.listViews).mockRejectedValueOnce(new Error('sin red'))],
     ['las relaciones', () => vi.mocked(gov.listRelationships).mockRejectedValueOnce(new Error('sin red'))],
     ['las columnas', () => vi.mocked(gov.listColumns).mockRejectedValueOnce(new Error('sin red'))],
     ['los canvases', () => vi.mocked(gov.tableUsage).mockRejectedValueOnce(new Error('sin red'))],
-  ])('si no se pudo leer %s, NO se borra nada y se dice por qué', async (_label, fail) => {
+  ])('si no se pudo leer %s, no se borra nada y se dice por qué', async (_label, fail) => {
     fail();
     const before = structuredClone(draft);
     await expect(st().deleteTable('t1')).rejects.toThrow(DEPENDENTS);
@@ -257,7 +257,7 @@ describe('borrar una tabla cuando falla una lectura de la cascada (doc 105, A3/A
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
-  it('en solo lectura el motivo es ése (no «no se pudo leer») y tampoco se borra nada', async () => {
+  it('en solo lectura el motivo es ese (no «no se pudo leer») y tampoco se borra nada', async () => {
     useSessionStore.setState({ openMode: 'readonly' });
     await expect(st().deleteTable('t1')).rejects.toThrow(/edit mode|read-only/);
     await expect(st().deleteView(V1 as never, { canvasIds: ['sa1'] })).rejects.toThrow(/edit mode|read-only/);
@@ -275,7 +275,7 @@ describe('borrar una tabla cuando falla una lectura de la cascada (doc 105, A3/A
   });
 });
 
-describe('borrar una VISTA y deshacer (doc 105, A4-o4)', () => {
+describe('borrar una vista y deshacer', () => {
   it('con los canvases del llamador (inspector): el Undo la devuelve a cada lista explícita, en su sitio', async () => {
     await st().deleteView(V1 as never, { canvasIds: ['sa1', 'sa2', 'sa3'] });
     expect(deleted('views', 'v1')).toBe(true);
@@ -288,7 +288,7 @@ describe('borrar una VISTA y deshacer (doc 105, A4-o4)', () => {
     expect(draft.sa1.layout.v1).toEqual({ x: 0, y: 300 });
     expect(draft.sa2.viewIds).toEqual(['v1']);
     expect(draft.sa2.layout.v1).toEqual({ x: 5, y: 205 });
-    expect(draft.sa3.viewIds).toBeUndefined();                          // legacy: no se toca
+    expect(draft.sa3.viewIds).toBeUndefined();                          // sin lista explícita: no se toca
     expect(puts().sort()).toEqual(['put:sa1', 'put:sa2']);
   });
 
@@ -304,7 +304,7 @@ describe('borrar una VISTA y deshacer (doc 105, A4-o4)', () => {
     expect(draft.sa2.layout.v1).toEqual({ x: 5, y: 205 });
   });
 
-  it('si no se pudo leer dónde está, NO se borra nada', async () => {
+  it('si no se pudo leer dónde está, no se borra nada', async () => {
     vi.mocked(viewsSvc.tableViews).mockRejectedValueOnce(new Error('sin red'));
     await expect(st().deleteView(V1 as never)).rejects.toThrow(/nothing was deleted/);
     expect(viewsSvc.deleteView).not.toHaveBeenCalled();
@@ -312,7 +312,7 @@ describe('borrar una VISTA y deshacer (doc 105, A4-o4)', () => {
   });
 });
 
-describe('«Import existing tables» con vistas que no se pudieron leer (doc 105, A5-o1)', () => {
+describe('«Import existing tables» con vistas que no se pudieron leer', () => {
   it('importa las tablas igual y avisa que faltan sus vistas', async () => {
     vi.mocked(viewsSvc.listViewsForTables).mockRejectedValueOnce(new Error('sin red'));
     await st().addExistingTables(['t3'], { withViews: true });

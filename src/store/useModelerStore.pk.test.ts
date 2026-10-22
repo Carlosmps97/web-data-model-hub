@@ -1,5 +1,5 @@
-// Doc 94 — orden único con PK primero en el store: marcar/desmarcar PK
-// re-numera la tabla en UN lote (con un solo Undo) y ningún reorden deja una
+// Orden único con PK primero en el store: marcar/desmarcar PK
+// re-numera la tabla en un lote (con un solo Undo) y ningún reorden deja una
 // PK debajo de una no-PK.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -29,8 +29,8 @@ beforeEach(() => {
   useUndoStore.setState({ stack: [], busy: false });
 });
 
-describe('updateColumn — cambio de llave (doc 94 D2)', () => {
-  it('marcar PK: sube al final del bloque PK y corre las no-PK en UN lote', async () => {
+describe('updateColumn — cambio de llave', () => {
+  it('marcar PK: sube al final del bloque PK y corre las no-PK en un lote', async () => {
     setCols([col('k', 0, true), col('a', 1), col('b', 2), col('c', 3)]);
     await useModelerStore.getState().updateColumn('c', { isPrimaryKey: true });
     expect(gov.updateColumn).not.toHaveBeenCalled();
@@ -40,7 +40,7 @@ describe('updateColumn — cambio de llave (doc 94 D2)', () => {
     expect(useUndoStore.getState().stack.map((u) => u.label)).toEqual(['Edit column C']);
   });
 
-  it('Undo devuelve la llave y los ordinales previos en UN lote', async () => {
+  it('Undo devuelve la llave y los ordinales previos en un lote', async () => {
     setCols([col('k', 0, true), col('a', 1), col('c', 2)]);
     await useModelerStore.getState().updateColumn('c', { isPrimaryKey: true });
     await useUndoStore.getState().undoLast();
@@ -55,7 +55,7 @@ describe('updateColumn — cambio de llave (doc 94 D2)', () => {
     expect([sent.k2.ordinal, sent.k1.ordinal, sent.k1.isPrimaryKey]).toEqual([0, 1, false]);
   });
 
-  it('sin cambio de llave: el upsert de siempre (una columna)', async () => {
+  it('sin cambio de llave: un upsert simple (una columna)', async () => {
     setCols([col('k', 0, true), col('a', 1)]);
     await useModelerStore.getState().updateColumn('a', { description: 'x' });
     expect(gov.recordChangesBulk).not.toHaveBeenCalled();
@@ -63,7 +63,7 @@ describe('updateColumn — cambio de llave (doc 94 D2)', () => {
   });
 });
 
-describe('reorderColumns — validación PK primero (doc 94 D3)', () => {
+describe('reorderColumns — validación PK primero', () => {
   it('rechaza dejar una PK debajo de una no-PK: no escribe nada y avisa', async () => {
     setCols([col('k', 0, true), col('a', 1), col('b', 2)]);
     await useModelerStore.getState().reorderColumns('t1', ['a', 'k', 'b']);
@@ -79,7 +79,7 @@ describe('reorderColumns — validación PK primero (doc 94 D3)', () => {
   });
 });
 
-describe('applyCanvasDrop — la llave nueva vale para el reorden (doc 94)', () => {
+describe('applyCanvasDrop — la llave nueva vale para el reorden', () => {
   it('soltar en la zona de llave: marca la PK y reordena PK primero', async () => {
     setCols([col('k', 0, true), col('a', 1), col('b', 2)]);
     await useModelerStore.getState().applyCanvasDrop('t1', { order: ['k', 'b', 'a'], key: [{ id: 'b', isPrimaryKey: true }] });
@@ -91,15 +91,15 @@ describe('applyCanvasDrop — la llave nueva vale para el reorden (doc 94)', () 
   });
 });
 
-describe('Undo del reorden (final review #1)', () => {
+describe('Undo del reorden', () => {
   const lastWrite = () => {
     const out = new Map<string, { ordinal: number; isPrimaryKey?: boolean }>();
     for (const [c] of vi.mocked(gov.updateColumn).mock.calls) out.set(c.id, { ordinal: c.ordinal, isPrimaryKey: c.isPrimaryKey });
     return out;
   };
 
-  it('Undo de un reorden que normalizó un ordinal viejo: restaura por valor, sin chocar con la guarda', async () => {
-    setCols([col('a', 0), col('k', 1, true), col('b', 2)]);           // dato viejo: PK con ordinal 1
+  it('Undo de un reorden que normalizó un ordinal fuera del orden PK primero: restaura por valor, sin chocar con la guarda', async () => {
+    setCols([col('a', 0), col('k', 1, true), col('b', 2)]);           // dato sin normalizar: PK con ordinal 1
     await useModelerStore.getState().reorderColumns('t1', ['k', 'a', 'b']);
     vi.mocked(gov.updateColumn).mockClear();
     await useUndoStore.getState().undoLast();

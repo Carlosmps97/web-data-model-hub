@@ -1,15 +1,15 @@
 /**
- * rulesBridge — puente del Export DDL con las DDL Export Rules (doc 30 §8).
+ * rulesBridge — puente del Export DDL con las DDL Export Rules.
  *
- * El motor de reglas vive en el backend y es PURO: acá se arma el payload con
- * el estado EFECTIVO que el canvas está exportando (drafts incluidos) — cada
- * tabla con sus columnas (udpValues) y su CREATE base, cada vista con su SQL —
+ * El motor de reglas vive en el backend y es puro: acá se arma el payload con
+ * el estado efectivo que el canvas está exportando (drafts incluidos): cada
+ * tabla con sus columnas (udpValues) y su CREATE base, cada vista con su SQL;
  * y el `.sql` final se ensambla con la respuesta + el sello de la versión de
- * reglas usada (la evidencia de por qué el DDL de marzo salió distinto al de
- * junio).
+ * reglas usada (la evidencia de por qué dos exports del mismo modelo salieron
+ * distintos).
  *
- * Sin reglas seleccionadas el export NO pasa por acá: sale byte-idéntico al de
- * siempre.
+ * Sin reglas seleccionadas el export no pasa por acá: sale byte-idéntico al del
+ * generador local.
  */
 import { apiGet, apiPost } from '@/services/http';
 import { API_BASE } from '@/services/apiBase';
@@ -30,7 +30,7 @@ export interface ExportRule {
   /** Qué hace la regla, en una línea (la escribe el autor en Data Standards). */
   description?: string | null;
   kind: 'rule' | 'generator';
-  /** Artefacto de ENTRADA — solo generadores; encadena la cascada (spec §7.3). */
+  /** Artefacto de entrada (solo generadores); encadena la cascada. */
   sourceArtifact?: string | null;
   priority: number;
   enabled: boolean;
@@ -39,7 +39,7 @@ export interface ExportRule {
   action: Record<string, unknown>;
 }
 
-/** Artefactos que existen SIEMPRE: nadie los genera, son la entrada del motor. */
+/** Artefactos que existen siempre: nadie los genera, son la entrada del motor. */
 const ROOT_ARTIFACTS = new Set(['ddl.tabla_fisica', 'ddl.vista_negocio']);
 
 /** El `emit` de un generador, tal como lo guarda el kit. */
@@ -54,7 +54,7 @@ const PLACEHOLDERS: [RegExp, string][] = [
 ];
 const readable = (tpl: string) => PLACEHOLDERS.reduce((acc, [re, to]) => acc.replace(re, to), tpl);
 
-/** Objeto que CREA un generador, legible: `{tabla.esquema}_v` + `{tabla.nombre}`
+/** Objeto que crea un generador, legible: `{tabla.esquema}_v` + `{tabla.nombre}`
  *  ⇒ `<schema>_v.<table>`. Null si la regla no genera nada. */
 export function emitTarget(rule: ExportRule): { type: 'table' | 'view'; label: string } | null {
   const emit = emitOf(rule);
@@ -67,7 +67,7 @@ export function emitTarget(rule: ExportRule): { type: 'table' | 'view'; label: s
   };
 }
 
-/** Generador cuyo artefacto de ENTRADA lo produce otro generador que NO está
+/** Generador cuyo artefacto de entrada lo produce otro generador que no está
  *  seleccionado: la regla queda marcada pero no emite nada. Devuelve el nombre
  *  del generador que falta (null si no hay tal dependencia). */
 export function missingSource(
@@ -92,29 +92,29 @@ export interface RenderedExport {
   skipped: number;
 }
 
-/** Reglas del PROYECTO (doc 75: cada proyecto tiene su ruleset). */
+/** Reglas del proyecto (cada proyecto tiene su ruleset). */
 export const fetchExportRules = (projectId: string) => apiGet<ExportRule[]>(DDL_RULES(projectId));
 
 /** Defs UDP del proyecto (para `withUdpPartitions`). */
 export const fetchUdpDefs = (projectId: string) => apiGet<UdpDefLite[]>(`${PROJECT(projectId)}/udp`);
 
-/** Config del ruleset del proyecto: el modal toma de acá las Output settings (doc 93 D1). */
+/** Config del ruleset del proyecto: el modal toma de acá las Output settings. */
 export const fetchDdlConfig = (projectId: string) =>
   apiGet<{ output?: Record<string, unknown> | null }>(`${DDL_RULES(projectId)}/config`);
 
 export interface ExportLayout {
   partitionsLast: boolean;
-  /** Doc 93 D10: UDP de columna cuyos valores PART_nn DEFINEN las particiones
+  /** UDP de columna cuyos valores PART_nn definen las particiones
    *  (qué columnas y en qué orden). null = el flag de la plataforma. */
   partitionUdp: string | null;
 }
 
-/** Doc 73/76/93: layout de columnas dictado por el ruleset — reglas de TABLA
- *  seleccionadas sobre `ddl.tabla_fisica` con `action.layout`:
- *  `partitionColumns = 'last'` ⇒ particiones al final del CREATE (doc 107:
- *  solo sin PARTITIONED BY — con él van siempre ahí, con su tipo);
- *  `partitionUdp` (alias legado `partitionOrderUdp`) ⇒ particiones desde ese
- *  UDP. Espejo de `layout_from_rules` del motor. */
+/** Layout de columnas dictado por el ruleset: reglas de tabla seleccionadas
+ *  sobre `ddl.tabla_fisica` con `action.layout`:
+ *  `partitionColumns = 'last'` ⇒ particiones al final del CREATE (solo sin
+ *  PARTITIONED BY; con él van siempre ahí, con su tipo);
+ *  `partitionUdp` (también se acepta el alias `partitionOrderUdp`) ⇒
+ *  particiones tomadas de ese UDP. Espejo de `layout_from_rules` del motor. */
 export function layoutFromRules(rules: ExportRule[], selected: Iterable<string>): ExportLayout {
   const sel = new Set(selected);
   const out: ExportLayout = { partitionsLast: false, partitionUdp: null };
@@ -142,7 +142,7 @@ export function partitionCorrelative(value: string | null | undefined): number |
   return m ? Number(m[1]) : null;
 }
 
-/** Doc 93 D10 — particiones DESDE el UDP (espejo de `physical_columns` del
+/** Particiones definidas por el UDP (espejo de `physical_columns` del
  *  motor): una columna es de partición si y solo si su valor es PART_nn,
  *  ordenada por nn; el flag `isPartition` de la plataforma se ignora. Sin UDP
  *  (o si el UDP no existe en el proyecto) las columnas vuelven intactas y rige
@@ -160,7 +160,7 @@ export function withUdpPartitions<C extends { udpValues?: Record<string, string>
 }
 
 /** Reglas seleccionables en el modal: habilitadas y no-inválidas (las stale
- *  corren igual — solo avisan). Default del modal: TODAS marcadas. */
+ *  corren igual, solo avisan). Default del modal: todas marcadas. */
 export const selectableRules = (rules: ExportRule[]): ExportRule[] =>
   rules.filter((r) => r.enabled && r.validationState !== 'invalid');
 
@@ -186,21 +186,21 @@ export async function renderWithRules(args: {
     ruleIds,
     model: { name: diagram.subjectArea?.name, udpValues: diagram.subjectArea?.udpValues ?? {} },
     // Opciones del modal: los artefactos generados (p.ej. la tabla _rej) salen
-    // ESPEJO del CREATE físico — mismo casing, USING, particiones y LOCATION
+    // como espejo del CREATE físico: mismo casing, USING, particiones y LOCATION
     // (carpeta = nombre final con su sufijo y el casing de carpeta).
     options: {
       identifierCase: opts.identifierCase,
-      quoteIdentifiers: opts.quoteIdentifiers,          // doc 93 D2
-      typeCase: opts.typeCase,                          // doc 93 D3
-      createTable: opts.createTable,                    // doc 93 D5
-      viewTagsAs: opts.viewTagsAs,                      // doc 93 D6
-      includeKeys: opts.includeKeys,                    // doc 93 D5: NOT NULL de las tablas generadas
+      quoteIdentifiers: opts.quoteIdentifiers,
+      typeCase: opts.typeCase,
+      createTable: opts.createTable,
+      viewTagsAs: opts.viewTagsAs,
+      includeKeys: opts.includeKeys,                    // NOT NULL de las tablas generadas
       tableFormat: opts.tableFormat,
       external: opts.external,
       location: opts.location,
       locationFolderCase: opts.locationFolderCase ?? 'upper',
       includePartitions: opts.includePartitions,
-      partitionsLast: !!opts.partitionsLast,            // doc 73: informativo (el motor lo deriva de las reglas)
+      partitionsLast: !!opts.partitionsLast,            // informativo (el motor lo deriva de las reglas)
     },
     tables: tables.map(({ table, sql }) => ({
       table: {
@@ -208,13 +208,13 @@ export async function renderWithRules(args: {
         description: table.description,
         udpValues: (diagram.tables.find((t) => t.id === table.id))?.udpValues ?? {},
       },
-      // Orden ÚNICO explícito (doc 73 O2 · doc 94: PK primero y cada bloque por
-      // ordinal): el motor no depende del orden de llegada.
+      // Orden único explícito (PK primero y cada bloque por ordinal): el motor
+      // no depende del orden de llegada.
       columns: pkFirstColumns(colsByTable.get(table.id) ?? []).map((c) => {
         const canon = udpOfColumn.get(c.id);
         return {
           physicalName: c.physicalName, dataType: c.dataType, ordinal: c.ordinal,
-          ddlType: ddlType(c.dataType, opts.typeCase ?? 'lower'),   // doc 93 D4: la _rej sale con el tipo de la física
+          ddlType: ddlType(c.dataType, opts.typeCase ?? 'lower'),   // la _rej sale con el tipo de la física
           isNullable: c.isNullable, isPrimaryKey: c.isPrimaryKey,
           // sin esto la _rej no hereda el PARTITIONED BY de la física
           isPartition: c.isPartition,
@@ -231,10 +231,10 @@ export async function renderWithRules(args: {
       sourceTableIds: view.sourceTableIds?.length
         ? view.sourceTableIds
         : (view.tableId ? [view.tableId] : []),
-      // Vista de NEGOCIO = su `showOnCanvas` (el switch «Show on this canvas»
+      // Vista de negocio = su `showOnCanvas` (el switch «Show on this canvas»
       // guardado en la vista): solo esas se decoran con ddl.vista_negocio; el
-      // resto pasa intacto (pedido owner 07-20). No es la membresía del canvas:
-      // ésa ya decidió qué vistas llegan acá (`canvasDdlViews`, doc 102/105 C2).
+      // resto pasa intacto. No es la membresía del canvas: esa ya decidió qué
+      // vistas llegan acá (`canvasDdlViews`).
       businessView: view.showOnCanvas !== false,
     })),
   };
@@ -243,12 +243,12 @@ export async function renderWithRules(args: {
   return { sql: assemble(rendered, modelName, tables.length), rendered };
 }
 
-/** Anexos de un objeto (doc 76): `<artefacto>.tags` y `<artefacto>.extra`. */
+/** Anexos de un objeto: `<artefacto>.tags` y `<artefacto>.extra`. */
 export const isAddendum = (artifact: string): boolean => /\.(tags|extra)$/.test(artifact);
 
 /** Ensambla el archivo: header con el sello de reglas + statements en el orden
- *  del motor (por tabla: física → tags → generados; luego vistas). Doc 93 D12:
- *  los ALTER/anexos van PEGADOS a su objeto; una línea en blanco solo entre
+ *  del motor (por tabla: física → tags → generados; luego vistas). Los
+ *  ALTER/anexos van pegados a su objeto; una línea en blanco solo entre
  *  objetos. */
 function assemble(rendered: RenderedExport, modelName: string, tableCount: number): string {
   const header = `-- ${modelName || 'model'} · Databricks · ${tableCount} table(s)\n`

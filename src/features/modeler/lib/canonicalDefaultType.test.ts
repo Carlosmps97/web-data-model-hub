@@ -1,10 +1,10 @@
-// Doc 64 r2 — espejo front de `canonicalize_default_type` (back, doc 62):
-// homologa el `defaultDataType` de un parent domain a la grafía canónica al
-// CONSUMIRLO (la BD puede traer dominios legacy sin homologar).
+// Espejo front de `canonicalize_default_type` (backend): homologa el
+// `defaultDataType` de un parent domain a la grafía canónica al consumirlo (la
+// BD puede traer dominios sin homologar).
 import { describe, expect, it } from 'vitest';
 import { canonicalDefaultType } from './typePick';
 
-describe('canonicalDefaultType (doc 64 r2 — espejo del back doc 62)', () => {
+describe('canonicalDefaultType (espejo del backend)', () => {
   it('ARRAY/MAP/STRUCT "pelados" (o con <> vacío) → X<> — abre el builder', () => {
     expect(canonicalDefaultType('Array')).toBe('ARRAY<>');
     expect(canonicalDefaultType('map <>')).toBe('MAP<>');
@@ -29,12 +29,12 @@ describe('canonicalDefaultType (doc 64 r2 — espejo del back doc 62)', () => {
     expect(canonicalDefaultType('struct<a: integer, b: varchar(5)>')).toBe('STRUCT<a:INTEGER,b:VARCHAR(5)>');
   });
 
-  it('complejo con interior NO reconocible → verbatim entero (el front no aplica sinónimos adentro; el back sí desde el doc 92 D6)', () => {
+  it('complejo con interior no reconocible → verbatim entero (el front no aplica sinónimos adentro; el backend sí)', () => {
     expect(canonicalDefaultType('ARRAY<bool>')).toBe('ARRAY<bool>');
     expect(canonicalDefaultType('STRUCT<a:INT')).toBe('STRUCT<a:INT');   // desbalanceado
   });
 
-  it('lo canónico pasa intacto; lo desconocido queda VERBATIM; vacío → vacío', () => {
+  it('lo canónico pasa intacto; lo desconocido queda verbatim; vacío → vacío', () => {
     expect(canonicalDefaultType('ARRAY<>')).toBe('ARRAY<>');
     expect(canonicalDefaultType('DECIMAL(18,6)')).toBe('DECIMAL(18,6)');
     expect(canonicalDefaultType('FOO_BAR')).toBe('FOO_BAR');

@@ -1,4 +1,4 @@
-// Doc 102 (D1): el combo Version del Reporting — producción + MIS versiones sin
+// El combo Version del Reporting: producción + las versiones propias sin
 // publicar del proyecto (borrador o en revisión).
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiGet, ApiError } from '@/services/http';
@@ -29,31 +29,31 @@ describe('reportVersions', () => {
     expect(productionLabel(null)).toBe('Production');
   });
   it('nombre del Excel por niveles: la versión propia va en el nombre', () => {
-    const d = new Date(2026, 8, 28, 12, 0, 0);   // hora LOCAL: el nombre usa la fecha local
-    expect(levelsFileName('MODELO DDV', null, d)).toBe('data-model-hub-report-MODELO_DDV-2026-09-28.xlsx');
-    expect(levelsFileName('MODELO DDV', 'v14', d)).toBe('data-model-hub-report-MODELO_DDV-v14-2026-09-28.xlsx');
+    const d = new Date(2026, 8, 28, 12, 0, 0);   // hora local: el nombre usa la fecha local
+    expect(levelsFileName('MODELO VENTAS', null, d)).toBe('data-model-hub-report-MODELO_VENTAS-2026-09-28.xlsx');
+    expect(levelsFileName('MODELO VENTAS', 'v14', d)).toBe('data-model-hub-report-MODELO_VENTAS-v14-2026-09-28.xlsx');
   });
-  it('la fecha del nombre es la LOCAL de quien exporta (como la plantilla), no la UTC', () => {
+  it('la fecha del nombre es la local de quien exporta (como la plantilla), no la UTC', () => {
     // Lima 23:59 ya es el día siguiente en UTC; 00:00 de un huso al este de UTC, el anterior.
-    expect(levelsFileName('MODELO DDV', null, new Date(2026, 8, 28, 23, 59, 59)))
-      .toBe('data-model-hub-report-MODELO_DDV-2026-09-28.xlsx');
-    expect(levelsFileName('MODELO DDV', 'v14', new Date(2026, 8, 28, 0, 0, 1)))
-      .toBe('data-model-hub-report-MODELO_DDV-v14-2026-09-28.xlsx');
+    expect(levelsFileName('MODELO VENTAS', null, new Date(2026, 8, 28, 23, 59, 59)))
+      .toBe('data-model-hub-report-MODELO_VENTAS-2026-09-28.xlsx');
+    expect(levelsFileName('MODELO VENTAS', 'v14', new Date(2026, 8, 28, 0, 0, 1)))
+      .toBe('data-model-hub-report-MODELO_VENTAS-v14-2026-09-28.xlsx');
   });
 });
 
-// Doc 105 (A5-o4): una versión transferida (403) o eliminada (404) mostraba el
-// texto del CANVAS («Only published versions and your own drafts can be opened
-// in the canvas…»). En modo versión se dice qué pasó; en producción, el error tal cual.
-describe('errores de lectura del modo versión (doc 105)', () => {
+// Una versión transferida (403) o eliminada (404) no muestra el texto del canvas
+// («Only published versions and your own drafts can be opened in the canvas…»):
+// en modo versión se dice qué pasó; en producción, el error tal cual.
+describe('errores de lectura del modo versión', () => {
   const FORBIDDEN = 'Only published versions and your own drafts can be opened in the canvas. Administrators can open any version.';
-  // Como los arma http.ts con la respuesta del backend: FastAPI SIEMPRE manda `detail`.
+  // Como los arma http.ts con la respuesta del backend: FastAPI siempre manda `detail`.
   const backend = (message: string, status: number) => new ApiError(message, status, message);
   const e403 = backend(FORBIDDEN, 403);
   const e404 = backend('Version not found.', 404);
   const e409 = backend('That version is no longer open — it was published or closed. Pick another version.', 409);
 
-  it('403 = ya no es tuya; 404 = se eliminó; lo demás no es «se fue»', () => {
+  it('403 = se transfirió; 404 = se eliminó; lo demás no es «se fue»', () => {
     expect(versionGoneText(e403)).toBe('This version is no longer available to you — showing Production.');
     expect(versionGoneText(e404)).toBe('This version was deleted — showing Production.');
     expect(versionGoneText(e409)).toBeNull();
@@ -73,29 +73,29 @@ describe('errores de lectura del modo versión (doc 105)', () => {
   });
 });
 
-// Doc 105 (A5-o4 por foco): al re-listar, la versión elegida ya no está entre MIS
-// versiones abiertas. Antes siempre decía «no longer open», inexacto si se
-// TRANSFIRIÓ o se ELIMINÓ: se decide con su cabecera (o el error al leerla).
-describe('por qué desapareció la versión elegida (doc 105)', () => {
+// Al re-listar, la versión elegida no aparece entre las versiones abiertas
+// propias. «No longer open» sería inexacto si se transfirió o se eliminó: el
+// texto se decide con su cabecera (o el error al leerla).
+describe('por qué desapareció la versión elegida', () => {
   const closed = 'That version is no longer open — showing Production.';
-  it('eliminada (404), ya no tuya (403 o con otro dueño), o publicada/cerrada', () => {
+  it('eliminada (404), transferida (403 o con otro dueño), o publicada/cerrada', () => {
     expect(vanishedVersionText({ error: new ApiError('Version not found.', 404, 'Version not found.') }, 'ana')).toBe('This version was deleted — showing Production.');
     expect(vanishedVersionText({ error: new ApiError('Forbidden', 403, 'Forbidden') }, 'ana')).toBe('This version is no longer available to you — showing Production.');
     expect(vanishedVersionText({ header: { owner: 'beto', status: 'draft' } }, 'ana')).toBe('This version is no longer available to you — showing Production.');
     expect(vanishedVersionText({ header: { owner: 'ana', status: 'approved' } }, 'ana')).toBe(closed);
     expect(vanishedVersionText({ header: { owner: 'ana', status: 'rejected' } }, 'ana')).toBe(closed);
   });
-  it('si la cabecera no se pudo leer, el texto de siempre', () => {
+  it('si la cabecera no se pudo leer, el texto genérico', () => {
     expect(vanishedVersionText({ error: new ApiError('Bad gateway', 502) }, 'ana')).toBe(closed);
     expect(vanishedVersionText({ error: new Error('offline') }, 'ana')).toBe(closed);
   });
 });
 
-// Doc 105 (revisión, A5-o4): un 403/404 de INFRAESTRUCTURA — el HTML del proxy
-// de Databricks, o el 404 genérico de una ruta que el backend no tiene (front
-// desplegado antes que el back) — se anunciaba como «ya no está disponible
-// para ti» / «se eliminó» y la pantalla cambiaba de versión. Sólo se atribuye
-// a la versión un error del backend: trae `detail` (FastAPI siempre lo manda).
+// Un 403/404 de infraestructura — el HTML del proxy de Databricks, o el 404
+// genérico de una ruta que el backend no tiene (front desplegado antes que el
+// back) — no se anuncia como «no longer available to you» / «was deleted» ni
+// cambia la versión en pantalla. Solo se atribuye a la versión un error del
+// backend: trae `detail` (FastAPI siempre lo manda).
 describe('un 403/404 que no es del backend no es de la versión', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
   const closed = 'That version is no longer open — showing Production.';

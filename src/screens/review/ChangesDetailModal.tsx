@@ -1,10 +1,9 @@
 /**
- * ChangesDetailModal (doc 64 §7 — v2; nace en doc 31) — popup "Change details"
- * de la revisión. Doc 84: el cuerpo (filtros + árbol + diff de campos) vive en
- * `DiffExplorer`, compartido con el Compare de versiones; acá quedan el overlay,
- * la cabecera y la fuente de datos (`POST /diff/details`, bajo demanda) más la
- * atribución «quién y cuándo» de cada cambio (B3). READ-ONLY: no toca nada del
- * flujo de aprobación.
+ * ChangesDetailModal: popup "Change details" de la revisión. El cuerpo
+ * (filtros + árbol + diff de campos) vive en `DiffExplorer`, compartido con el
+ * Compare de versiones; acá quedan el overlay, la cabecera y la fuente de datos
+ * (`POST /diff/details`, bajo demanda) más la atribución «quién y cuándo» de
+ * cada cambio. De solo lectura: no toca nada del flujo de aprobación.
  */
 import { useCallback, useEffect } from 'react';
 import { FileDiff, X } from 'lucide-react';
@@ -20,7 +19,7 @@ export default function ChangesDetailModal({ csId, title, versionLabel, diff, ow
   title: string | null;
   versionLabel: string | null;
   diff: ChangesetDiff;
-  /** Doc 84 B3: autor de TODOS los cambios del request (un changeset = un owner). */
+  /** Autor de todos los cambios del request (un changeset = un dueño). */
   ownerName?: string | null;
   onClose: () => void;
 }) {

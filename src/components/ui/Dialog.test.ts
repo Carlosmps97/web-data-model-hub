@@ -1,7 +1,8 @@
-// Dialog del design system sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105 (F6): abierto con el mouse, el foco quedaba en la página de atrás —
-// Tab la recorría y la trampa del diálogo nunca actuaba (SheetTemplateEditor,
-// ExportDdlModal, PublishModal, OpenModelModal, UploadModal, ModelPropertiesModal…).
+// Dialog del sistema de diseño sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+// Al abrirse, el foco entra a la caja aunque se abra con el mouse: si quedara en la
+// página de atrás, Tab la recorrería y la trampa del diálogo nunca actuaría
+// (SheetTemplateEditor, ExportDdlModal, PublishModal, OpenModelModal, UploadModal,
+// ModelPropertiesModal…).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetFake, runEffects, walk, type El } from '../../features/reporting/components/fakeReact.testutil';
 
@@ -22,14 +23,14 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
-/** Renderiza el Dialog; `rerender` = el MISMO montado (mismas refs y efectos). */
+/** Renderiza el Dialog; `rerender` = el mismo montado (mismas refs y efectos). */
 function render(open: boolean, rerender = false) {
   resetFake(null, { keepRefs: rerender });
   return Dialog({ open, title: 'Sheet templates', onClose: vi.fn(), children: null as never });
 }
 const boxOf = (tree: unknown) => [...walk(tree)].find((e: El) => e.props.role === 'dialog')!;
 
-describe('Dialog: el foco entra al abrirse (doc 105, F6)', () => {
+describe('Dialog: el foco entra al abrirse', () => {
   it('abierto con el mouse: la caja (tabIndex -1, sin outline) toma el foco; al cerrarse vuelve a quien lo abrió', () => {
     const opener = { isConnected: true, disabled: false, focus: vi.fn(), matches: () => false, closest: () => null };
     const doc: { activeElement: unknown; body: object } = { activeElement: opener, body: {} };
@@ -58,14 +59,14 @@ describe('Dialog: el foco entra al abrirse (doc 105, F6)', () => {
   });
 });
 
-describe('Dialog: con un control autoFocus adentro, el foco igual vuelve a quien lo abrió (doc 105)', () => {
+describe('Dialog: con un control autoFocus adentro, el foco igual vuelve a quien lo abrió', () => {
   it('quien abrió se captura en el render en que `open` pasa a true (antes del commit y del autoFocus)', () => {
     const doc: { activeElement: unknown; body: object } = { activeElement: null, body: {} };
     vi.stubGlobal('document', doc);
     render(false);                            // montado cerrado: `open` cambia después
     const opener = { isConnected: true, disabled: false, focus: vi.fn(), matches: () => false, closest: () => null };
     doc.activeElement = opener;
-    const el = boxOf(render(true, true));     // se abre: el render todavía ve el foco en quien lo abrió
+    const el = boxOf(render(true, true));     // se abre: en el render, el foco sigue en quien lo abrió
     const input = { matches: () => false };
     const box = { focus: vi.fn(), contains: (n: unknown) => n === input, matches: () => false };
     (el.props.ref as { current: unknown }).current = box;
@@ -79,9 +80,9 @@ describe('Dialog: con un control autoFocus adentro, el foco igual vuelve a quien
   });
 });
 
-// Doc 105 (R6): con el diálogo abierto el foco se perdía a <body> —el botón que
-// lo tenía desapareció o pasó a busy (deshabilitado)— y Tab salía a la página.
-describe('Dialog: el foco no se pierde con el diálogo abierto (doc 105, R6)', () => {
+// Con el diálogo abierto, si el botón que tenía el foco desaparece o pasa a busy
+// (deshabilitado), el foco caería a <body> y Tab saldría a la página: la caja lo retoma.
+describe('Dialog: el foco no se pierde con el diálogo abierto', () => {
   function openWithFocusInside() {
     const doc: { activeElement: unknown; body: object } = { activeElement: null, body: {} };
     vi.stubGlobal('document', doc);
@@ -95,7 +96,7 @@ describe('Dialog: el foco no se pierde con el diálogo abierto (doc 105, R6)', (
     return { doc, box, save };
   }
 
-  it('(a) Tab con el foco en <body> lo retoma la caja — sólo si es el diálogo del tope', () => {
+  it('Tab con el foco en <body> lo retoma la caja, solo si es el diálogo del tope', () => {
     const { doc, box } = openWithFocusInside();
     doc.activeElement = doc.body;                  // el botón que tenía el foco desapareció
     const tab = { key: 'Tab', shiftKey: false, preventDefault: vi.fn() };
@@ -108,7 +109,7 @@ describe('Dialog: el foco no se pierde con el diálogo abierto (doc 105, R6)', (
     expect(tab2.preventDefault).not.toHaveBeenCalled();
   });
 
-  it('(c) tras un render con el foco en un botón suyo que pasó a busy, el foco vuelve a la caja', () => {
+  it('tras un render con el foco en un botón suyo que pasó a busy, el foco vuelve a la caja', () => {
     const { doc, box, save } = openWithFocusInside();
     doc.activeElement = save;                      // «Save» se deshabilitó con el foco adentro
     render(true, true);
@@ -117,8 +118,8 @@ describe('Dialog: el foco no se pierde con el diálogo abierto (doc 105, R6)', (
   });
 });
 
-describe('Dialog con fondo de canvas: entra entero debajo de la barra (doc 112)', () => {
-  it('su alto máximo descuenta dónde empieza el fondo (si no, el pie quedaba fuera de la pantalla)', () => {
+describe('Dialog con fondo de canvas: entra entero debajo de la barra', () => {
+  it('su alto máximo descuenta dónde empieza el fondo (si no, el pie quedaría fuera de la pantalla)', () => {
     vi.stubGlobal('document', { activeElement: null, body: {}, querySelector: () => null });
     resetFake(null);
     const tree = Dialog({ open: true, title: 'Model properties', onClose: vi.fn(), children: null as never,
@@ -126,7 +127,7 @@ describe('Dialog con fondo de canvas: entra entero debajo de la barra (doc 112)'
     expect((boxOf(tree).props.style as { maxHeight?: string }).maxHeight).toBe('min(86vh, calc(100vh - 196px))');
   });
 
-  it('con fondo de pantalla completa, el alto de siempre (CSS)', () => {
+  it('con fondo de pantalla completa, el alto lo fija el CSS', () => {
     vi.stubGlobal('document', { activeElement: null, body: {} });
     expect((boxOf(render(true)).props.style as { maxHeight?: string }).maxHeight).toBeUndefined();
   });

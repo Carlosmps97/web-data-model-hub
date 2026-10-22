@@ -13,24 +13,25 @@ import { useModelerStore } from '@/store/useModelerStore';
 export interface ViewNodeData {
   view: View;
   /** Tablas fuente resueltas (las presentes en el diagrama). Las conserva
-   *  ModelerCanvas para trazar el wire de derivación; el nodo ya no las lista. */
+   *  ModelerCanvas para trazar el wire de derivación; el nodo no las lista. */
   sourceTables: CanonicalTable[];
   /** dataType de la columna origen por `${tableId}::${column}`. */
   colTypes: Record<string, string>;
   /** Abre el ViewEditor (lo inyecta ModelerCanvas). */
   onEdit: (viewId: string) => void;
-  /** LOD (doc 33): render compacto bajo el umbral de zoom. */
+  /** LOD: render compacto bajo el umbral de zoom. */
   lod?: boolean;
   [key: string]: unknown;
 }
 
 /**
- * Nodo VISTA del canvas (F3, spec §3-5): card "medio plomo" — header gris
- * pizarra con ojo + badge VISTA, borde punteado envolvente y cuerpo con hatch
- * diagonal tenue a 45°. La derivación se comunica SOLO por el wire punteado
- * tabla→vista (el nodo ya no lleva etiqueta "Origen/Deriva de"). Click = SOLO
- * selección (usa el `selected` nativo de React Flow — nunca abre el
- * PropertiesPanel); el lápiz del header abre el ViewEditor si canEdit.
+ * Nodo de vista del canvas: card "medio plomo", con header gris pizarra con el
+ * ícono Eye + badge VISTA, borde punteado envolvente y cuerpo con hatch
+ * diagonal tenue a 45°. La derivación se comunica solo por el wire punteado
+ * tabla→vista (el nodo no lleva etiqueta de origen). El nodo no maneja el
+ * clic: la selección usa el `selected` nativo de React Flow y ModelerCanvas
+ * abre el panel de propiedades de la vista; el lápiz del header abre el
+ * ViewEditor si canEdit.
  */
 function ViewNode({ data, selected }: NodeProps) {
   const { view, colTypes, onEdit, lod } = data as ViewNodeData;
@@ -39,12 +40,12 @@ function ViewNode({ data, selected }: NodeProps) {
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
 
   const rows = viewNodeRows(view, colTypes);
-  // Doc 109: color de la caja en ESTE canvas (misma regla que las tablas).
+  // Color de la caja en este canvas (misma regla que las tablas).
   const hex = useModelerStore((s) => boxHex(view.id, view.color, s.canvasColors, s.themeIdx, s.colorPreview));
   const tint = tintStyle(hex);
 
-  // LOD (doc 33): misma caja "medio plomo" (borde punteado + hatch del body =
-  // la identidad visual de VISTA a lo lejos) con el MISMO tamaño, sin filas.
+  // LOD: misma caja "medio plomo" (borde punteado + hatch del body = la
+  // identidad visual de vista a lo lejos) con el mismo tamaño, sin filas.
   // Conserva el ancla del wire de derivación (__hdr_tgt). Sin lápiz de edición.
   if (lod) {
     const { w, h } = viewLodSize(view, colTypes);

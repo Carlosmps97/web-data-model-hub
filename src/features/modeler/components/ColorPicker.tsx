@@ -4,17 +4,17 @@ import { NO_COLOR, STANDARD_COLORS, normalColor, themeRef, type Theme } from '@/
 import { openSystemPicker } from '../lib/systemColorPicker';
 
 /**
- * Doc 109 — selector de color (UN componente para los lugares que pintan: la
- * ficha del canvas, el campo Color de Properties y la barra de formato de
- * dibujos). «More colors…» abre el del sistema (`lib/systemColorPicker`).
+ * Selector de color (un solo componente para los lugares que pintan: la ficha
+ * del canvas, el campo Color de Properties y la barra de formato de dibujos).
+ * «More colors…» abre el del sistema (`lib/systemColorPicker`).
  *
- *   THEMES          los colores con nombre del proyecto (Data Standards)
- *   OTHER COLORS    10 colores estándar + «More colors…» (selector del sistema)
+ *   Themes          los colores con nombre del proyecto (Data Standards)
+ *   Other colors    10 colores estándar + «More colors…» (selector del sistema)
  *   ───
  *   No color        sin color
- *   Use the table's color   sólo en el canvas: quita la excepción
+ *   Use the table's color   solo en el canvas: quita la excepción
  *
- * `value` es la referencia elegida hoy (ColorRef o null). Elegir llama a
+ * `value` es la referencia vigente (ColorRef o null). Elegir llama a
  * `onPick` con la referencia nueva; quien lo monta cierra el panel.
  */
 export interface ColorPickerProps {
@@ -28,7 +28,7 @@ export interface ColorPickerProps {
   /** Canvas: «Use the table's color» (quita la excepción). `hex` = el color
    *  que la caja toma al elegirlo (null = sin color). */
   inherit?: { label: string; hex: string | null; current: boolean } | null;
-  /** Doc 112: mientras devuelva true, «More colors…» aplica lo elegido (el
+  /** Mientras devuelva true, «More colors…» aplica lo elegido (el
    *  selector del sistema puede seguir abierto después de cerrarse este panel,
    *  y se sigue ajustando). Sin la prop, aplica mientras sigan la sesión y el
    *  canvas donde se abrió. */

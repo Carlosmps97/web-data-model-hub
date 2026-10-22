@@ -24,8 +24,8 @@ const STAR_POINTS = (() => {
   return pts.join(' ');
 })();
 
-/** La forma en sí (relleno y borde). Doc 109: con relleno y borde propios;
- *  sin ellos, como siempre (borde azul y su tinte suave). */
+/** La forma en sí (relleno y borde): con relleno y borde propios o, sin ellos,
+ *  con el estilo por defecto (borde azul y su tinte suave). */
 function ShapeBody({ type, stroke, fill, w, h }: { type: DrawingType; stroke: string | null; fill: string | null; w: number; h: number }) {
   const bg = fill ?? 'transparent';
   const border = stroke ? `2px solid ${stroke}` : 'none';
@@ -39,7 +39,7 @@ function ShapeBody({ type, stroke, fill, w, h }: { type: DrawingType; stroke: st
     return <div className="wk-shape-box" style={{ borderRadius: 8, border, background: bg }} />;
   }
   if (type === 'line') {
-    // Corre por el lado LARGO de su caja (horizontal o vertical).
+    // Corre por el lado largo de su caja (horizontal o vertical).
     const vertical = h > w;
     return (
       <svg className="wk-shape-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -64,7 +64,7 @@ function ShapeBody({ type, stroke, fill, w, h }: { type: DrawingType; stroke: st
 }
 
 /**
- * Dibujo del canvas (capa DRAWING, detrás de las tablas). Doc 109: todas las
+ * Dibujo del canvas (capa DRAWING, detrás de las tablas). Todas las
  * formas menos la línea llevan texto (doble clic para escribir); seleccionado
  * y en edición muestra tiradores para redimensionar y la barra de formato.
  * Posición y tamaño se guardan con el canvas (`updateDrawing`).
@@ -135,8 +135,8 @@ export default function ShapeNode({ id, data, selected, width, height }: NodePro
             onChange={(e) => setDraft(e.target.value)}
             onBlur={commitText}
             onKeyDown={(e) => {
-              // Sólo flechas y Supr: son del texto, no del canvas (el resto sigue
-              // su camino — deshacer, Esc de un popup; lección del doc 99).
+              // Solo flechas y Supr: son del texto, no del canvas (el resto sigue
+              // su camino: deshacer, Esc de un popup).
               if (e.key.startsWith('Arrow') || e.key === 'Delete' || e.key === 'Backspace') e.stopPropagation();
               if (e.key === 'Escape') { setDraft(drawing.text ?? ''); setEditing(false); }
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) commitText();
@@ -151,10 +151,10 @@ export default function ShapeNode({ id, data, selected, width, height }: NodePro
   );
 }
 
-/** Doc 113 §5: la barra de formato arriba del dibujo; ABAJO si arriba se
- *  cortaría contra el borde superior del canvas y abajo entra. Se monta sólo con
- *  el dibujo seleccionado y del store de React Flow toma sólo el LADO: re-render
- *  cuando cambia, no en cada cuadro de pan/zoom. */
+/** La barra de formato va arriba del dibujo; abajo si arriba se cortaría contra
+ *  el borde superior del canvas y abajo entra. Se monta solo con el dibujo
+ *  seleccionado y del store de React Flow toma solo el lado: re-render cuando
+ *  cambia, no en cada cuadro de pan/zoom. */
 function ShapeToolbar({ id, children }: { id: string; children: ReactNode }) {
   const side = useStore((s) => {
     const n = s.nodeLookup.get(id);

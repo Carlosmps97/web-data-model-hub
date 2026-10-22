@@ -10,22 +10,22 @@ const FIELDS: { key: PhraseKey; label: string; placeholder: string }[] = [
 ];
 
 /**
- * Frases de relación (doc 98, Erwin: Relationship Editor · General): las dos
- * cajas que comparten el popup de CREACIÓN (staging: viajan en el lote del
- * Confirm) y el de EDICIÓN, que pasa `onApply` y gana el botón Apply — mismo
- * patrón que el Role name. Guardar al salir de la caja se descartó: bloqueaba
- * el popup mientras se tipeaba la segunda frase y se tragaba el clic
- * siguiente. Componente controlado y sin IO.
+ * Frases de relación (en Erwin: Relationship Editor · General): las dos cajas
+ * que comparten el popup de creación (staging: viajan en el lote del Confirm) y
+ * el de edición, que pasa `onApply` y gana el botón Apply, mismo patrón que el
+ * Role name. No se guarda al salir de la caja: eso bloquearía el popup mientras
+ * se escribe la segunda frase y se tragaría el clic siguiente. Componente
+ * controlado y sin IO.
  */
 export default function RelationshipPhraseFields({ values, onChange, locked, onApply, canApply = false, bare = false }: {
   values: PhraseValues;
   onChange: (key: PhraseKey, value: string) => void;
   locked: boolean;
-  /** Popup de edición: graba las dos frases en UN guardado (botón o Enter). */
+  /** Popup de edición: graba las dos frases en un solo guardado (botón o Enter). */
   onApply?: () => void;
   /** Hay cambios sin grabar. */
   canApply?: boolean;
-  /** Sin título ni margen de bloque: va DENTRO de otra fila (un subtipo del
+  /** Sin título ni margen de bloque: va dentro de otra fila (un subtipo del
    *  popup de subcategoría, que pone un único título para todas). */
   bare?: boolean;
 }) {

@@ -28,19 +28,19 @@ export const CARDS: { v: Cardinality; lbl: string }[] = [
 ];
 
 /**
- * Popup de EDICIÓN de relación (docs 19 + 47): tipo Identifying/Non-identifying
- * (con propagación de flags PK), cardinalidades, mapa READ-ONLY de pares
- * (N=N por construcción — el alta manual de pares murió con doc 47) con Role
- * name por par (rename in place, o SPLIT si la columna está unificada), y el
- * banner de DRIFT con "Sync with parent key" cuando la llave del padre cambió.
- * Doc 98: frases de relación (la etiqueta del wire), con su botón Apply.
+ * Popup de edición de relación: tipo Identifying/Non-identifying (con
+ * propagación de flags PK), cardinalidades, mapa de solo lectura de pares (N=N
+ * por construcción; no hay alta manual de pares) con Role name por par (rename
+ * in place, o split si la columna está unificada), el banner de drift con
+ * "Sync with parent key" cuando la llave del padre no coincide con la migrada, y las frases de
+ * relación (la etiqueta del wire), con su botón Apply.
  */
 export default function RelationshipPopup({ relId, onClose, pushToast }: { relId: string; onClose: () => void; pushToast: (m: string, k?: 'err') => void }) {
   const diagram = useModelerStore((s) => s.diagram);
   const updateRelationship = useModelerStore((s) => s.updateRelationship);
   const deleteRelationship = useModelerStore((s) => s.deleteRelationship);
   const reload = useModelerStore((s) => s.reload);
-  // Doc 114: nombres del modelo del canvas (entidades/atributos en el lógico).
+  // Nombres del modelo del canvas (entidades/atributos en el lógico).
   const viewMode = useModelerStore((s) => s.viewMode);
   const nouns = facetNouns(viewMode);
   // En modo visor puede haber changeset activo (viendo un request): reader-only.
@@ -48,9 +48,9 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const [saving, setSaving] = useState(false);
   const [roleDrafts, setRoleDrafts] = useState<Record<number, string>>({});
-  // Doc 98: borradores de las frases (ausente = sin tocar → se ve la vigente).
+  // Borradores de las frases (ausente = sin tocar → se ve la vigente).
   const [phraseDrafts, setPhraseDrafts] = useState<Partial<Record<PhraseKey, string>>>({});
-  // Modo SYNC (doc 47): re-mapeo de la llave tras un drift del padre.
+  // Modo sync: re-mapeo de la llave tras un drift del padre.
   const [syncing, setSyncing] = useState(false);
   const [syncRows, setSyncRows] = useState<KeyRowState[]>([]);
 
@@ -65,14 +65,14 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
 
   const drift = relationshipDrift(rel, parentPksNow.map((c) => c.id));
   const locked = !canEdit || saving;
-  // Revisión doc 114: por tabla — los lógicos repetidos se distinguen por su físico.
+  // Por tabla: los lógicos repetidos se distinguen por su físico.
   const shownCol = new Map([
     ...distinctNames(cols.filter((c) => c.tableId === rel.parentTableId), viewMode),
     ...distinctNames(childOpts, viewMode),
   ]);
   const colName = (id: string) => shownCol.get(id) ?? (colById.has(id) ? facetName(colById.get(id), viewMode) : id);
-  // Doc 105 (H7): el fallo de una escritura espera la revalidación y calla si
-  // la sesión cambió (`reportWriteError`: ya avisó ella).
+  // El fallo de una escritura espera la revalidación y calla si la sesión
+  // cambia (`reportWriteError`: el aviso lo da la revalidación).
   const run = async (fn: () => Promise<void>, err: string) => {
     setSaving(true);
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : err, 'err'));
@@ -84,9 +84,9 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   const setType = (identifying: boolean) => {
     if (identifying === rel.identifying) return;
     void run(async () => {
-      // Doc 105 (H1): la acción es de la sesión donde empezó.
+      // La acción pertenece a la sesión donde empezó.
       const pin = pinSession();
-      // Pre-imágenes para el Undo (doc 50): la relación + las columnas HIJAS
+      // Pre-imágenes para el Undo: la relación + las columnas hijas
       // de sus pares (la propagación de abajo solo toca esas: promoción a PK
       // o demote conservador).
       const relPre = { ...rel, pairs: rel.pairs.map((p) => ({ ...p })) };
@@ -95,17 +95,17 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         .filter((c): c is CanonicalColumn => !!c)
         .map((c) => ({ ...c }));
       await gov.updateRelationship({ ...rel, identifying });
-      // Doc 94 D2: los hijos que entran/salen de la llave quedan en la frontera
-      // del bloque de PK y las columnas que se corren viajan en el MISMO lote.
+      // Los hijos que entran/salen de la llave quedan en la frontera del bloque
+      // de PK y las columnas que se corren viajan en el mismo lote.
       const patches: Record<string, Partial<CanonicalColumn>> = {};
       if (identifying) {
-        // Erwin: la FK entra a la PK del hijo — se promueven TODOS los pares.
+        // Como en Erwin, la FK entra a la PK del hijo: se promueven todos los pares.
         for (const p of rel.pairs) {
           const c = colById.get(p.childColumnId);
           if (c && (!c.isPrimaryKey || c.isNullable !== false)) patches[c.id] = { isForeignKey: true, isPrimaryKey: true, isNullable: false };
         }
       } else {
-        // Demote conservador: no pisa PKs sostenidas por OTRA rel identifying.
+        // Demote conservador: no pisa PKs sostenidas por otra rel identifying.
         const near = await gov.listRelationships(rel.childTableId);
         for (const cid of demotablePkChildren(rel, near.filter((r) => r.id !== rel.id))) {
           if (colById.get(cid)?.isPrimaryKey) patches[cid] = { isPrimaryKey: false };
@@ -135,7 +135,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         ? { ...rel, parentCardinality: v } : { ...rel, childCardinality: v });
     }, "Couldn't update");
 
-  // ── Frases de relación (doc 98): Apply graba las DOS en un guardado ──
+  // ── Frases de relación: Apply graba las dos en un solo guardado ──
   const pendingPhrases = phraseEdits(rel, phraseDrafts);
   const applyPhrases = () => {
     if (!pendingPhrases) return;               // sin cambio real: cero requests
@@ -147,16 +147,16 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
     }, "Couldn't update");
   };
 
-  // ── Role name (Erwin): rename in place, o SPLIT si está unificada ──
+  // ── Role name (como en Erwin): rename in place, o split si está unificada ──
   const applyRole = (i: number) => {
     const name = (roleDrafts[i] ?? '').trim();
     if (!name) { pushToast('Type the role name', 'err'); return; }
     void run(async () => {
-      // Doc 105 (H1): lee y después escribe varias veces — todo en la sesión
-      // donde empezó: cada escritura verifica el pin.
+      // Lee y después escribe varias veces, todo en la sesión donde empezó:
+      // cada escritura verifica el pin.
       const pin = pinSession();
-      // Plan con el slice GLOBAL de la tabla hija (la unificación puede venir
-      // de una relación de OTRO canvas).
+      // Plan con el slice global de la tabla hija (la unificación puede venir
+      // de una relación de otro canvas).
       const near = await gov.listRelationships(rel.childTableId);
       const inNear = near.find((r) => r.id === rel.id);
       const plan = roleNamePlan(inNear ?? rel, i, near.length ? near : [rel]);
@@ -175,10 +175,10 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         });
         pushToast(roleAppliedText(cur, name, physical, viewMode));
       } else {
-        // SPLIT: la columna está compartida (unificada) — se crea una nueva
-        // con el role name y ESTE par se repunta; la vieja queda para el resto.
-        // Doc 94 D2: en una identificante la nueva es PK y entra tras la última
-        // PK del hijo (las no-PK se corren en el MISMO lote).
+        // Split: la columna está compartida (unificada); se crea otra con el
+        // role name y este par se repunta; la original queda para el resto. En
+        // una identificante la columna creada es PK y entra tras la última PK
+        // del hijo (las no-PK se corren en el mismo lote).
         const newId = crypto.randomUUID();
         const layout = rel.identifying ? pkFirstOrdinals(childOpts, { toKey: [newId], add: [{ id: newId }] }) : null;
         const created: CanonicalColumn = {
@@ -191,7 +191,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         pin.check();
         if (shifts.length) await gov.recordChangesBulk([gov.bulk.createColumn(created), ...shifts]);
         else await gov.createColumn(created);
-        // V1: la columna del split entra también a las vistas ESPEJO del hijo.
+        // La columna del split entra también a las vistas espejo del hijo.
         await bestEffort(() => syncNewColumnToMirrorViews(pinnedViewDeps(pin), rel.childTableId, physical, childOpts, rel.identifying));
         pin.check();
         await gov.updateRelationship({
@@ -205,7 +205,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
     }, "Couldn't apply the role name");
   };
 
-  // ── Sync con la llave del padre (doc 47) ──
+  // ── Sync con la llave del padre ──
   const startSync = () => {
     const pkIdSet = new Set(parentPksNow.map((c) => c.id));
     const kept = rel.pairs.filter((p) => pkIdSet.has(p.parentColumnId));
@@ -221,7 +221,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   };
 
   const applySync = () => void run(async () => {
-    const pin = pinSession();   // doc 105 (H1): lee y después escribe varias veces
+    const pin = pinSession();   // lee y después escribe varias veces
     const pkIdSet = new Set(parentPksNow.map((c) => c.id));
     const pkById = new Map(parentPksNow.map((c) => [c.id, c]));
     const keptRole = new Map(rel.pairs.map((p) => [p.parentColumnId, p.roleName ?? undefined]));
@@ -251,19 +251,19 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
                target: { kind: 'create' as const, id: crypto.randomUUID(), logicalName: logical, physicalName: physical },
                ...(r.roleName.trim() ? { roleName: r.roleName.trim() } : {}) };
     }));
-    // Doc 98: el Sync re-emite la relación campo por campo — syncMappingInput
-    // lleva todo lo que vive a nivel de relación (frases incluidas).
+    // El Sync re-emite la relación campo por campo: syncMappingInput lleva
+    // todo lo que vive a nivel de relación (frases incluidas).
     const { changes, createdCols } = mappingToBulk(syncMappingInput(rel, resolutions, childOpts));
-    // Pares retirados (su PK ya no existe en el padre): limpieza conservadora
-    // del flag FK — misma regla que el delete de relación.
+    // Pares que se quitan (su PK dejó de existir en el padre): limpieza
+    // conservadora del flag FK, misma regla que el delete de relación.
     const near = await gov.listRelationships(rel.childTableId);
     for (const p of rel.pairs.filter((pp) => !pkIdSet.has(pp.parentColumnId))) {
       const c = colById.get(p.childColumnId);
       if (!c?.isForeignKey) continue;
       const still = near.some((r2) => r2.id !== rel.id && r2.pairs.some((q) => q.childColumnId === c.id));
       if (still) continue;
-      // Una columna viaja UNA sola vez por lote (doc 85): si el orden único ya
-      // la corrió (doc 94), el flag se suma a ese mismo cambio.
+      // Una columna viaja una sola vez por lote: si el orden único ya la
+      // corrió, el flag se suma a ese mismo cambio.
       const prev = changes.find((ch) => ch.collection === 'canonical_columns' && ch.entityId === c.id);
       if (prev) prev.payload = { ...prev.payload, isForeignKey: false };
       else changes.push(gov.bulk.createColumn({ ...c, isForeignKey: false }));
@@ -308,9 +308,9 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         <span className="rd-mono">{childTable ? facetName(childTable, viewMode) : rel.childTableId}</span>
       </div>
 
-      {/* Drift (doc 47): la llave migrada no calza con la PK actual del padre.
-          Rojo (owner 2026-08-23) — es una incongruencia a corregir. Sin PK en
-          el padre no hay contra qué sincronizar: el Sync se oculta. */}
+      {/* Drift: la llave migrada no calza con la PK actual del padre.
+          En rojo: es una incongruencia a corregir. Sin PK en el padre no hay
+          contra qué sincronizar: el Sync se oculta. */}
       {drift && canEdit && !syncing && (
         <div className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
           background: 'var(--red-tint)', border: '1px solid var(--red-border)', borderRadius: 8, padding: '8px 12px' }}>
@@ -365,7 +365,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       />
 
       {syncing ? (
-        /* ── Modo SYNC: re-mapeo N=N contra la llave vigente del padre ── */
+        /* ── Modo sync: re-mapeo N=N contra la llave vigente del padre ── */
         <div className="wk-props-field">
           <label>Sync with parent key · parent key has {parentPksNow.length} {parentPksNow.length === 1 ? nouns.member : nouns.members} · "Inherit" copies the parent's definition, UDPs and metadata</label>
           <KeyMappingRows parentPks={parentPksNow} childCols={childOpts} rows={syncRows} onChange={setSyncRows} locked={locked} mode={viewMode} />
@@ -383,7 +383,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
           </div>
         </div>
       ) : (
-        /* ── Mapa READ-ONLY de pares (N=N) + role name por par ── */
+        /* ── Mapa de solo lectura de pares (N=N) + role name por par ── */
         <div className="wk-props-field"><label>Key migration · {rel.pairs.length} pair{rel.pairs.length === 1 ? '' : 's'}</label>
           <div className="wk-relpairs">
             {rel.pairs.map((p, i) => (

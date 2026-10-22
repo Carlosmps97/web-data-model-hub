@@ -2,16 +2,16 @@ import { useModelerStore } from '@/store/useModelerStore';
 import { pinSession } from './sessionGuard';
 
 /**
- * «More colors…» (doc 109): el selector del sistema sobre un <input type="color">
- * PROPIO, fuera de React. Abrirlo le quita el foco a la ventana y el panel que
+ * «More colors…»: el selector del sistema sobre un <input type="color">
+ * propio, fuera de React. Abrirlo le quita el foco a la ventana y el panel que
  * lo ofreció puede cerrarse: el input sigue vivo y aplica lo elegido igual (en
  * Mac el selector del sistema queda abierto y se sigue ajustando). Según el
  * navegador avisa con `input` en cada arrastre y con `change` al cerrarse: se
  * aplica al `change` o tras una pausa sin cambios. Uno a la vez: abrir otro
- * descarta el anterior. Sólo aplica en la sesión y el canvas donde se abrió (el
+ * descarta el anterior. Solo aplica en la sesión y el canvas donde se abrió (el
  * selector del sistema puede seguir abierto mientras el usuario cambia de
- * versión o de canvas) y, doc 112, mientras `alive` lo permita: una ficha del
- * canvas ya cerrada no pinta su caja con lo elegido después.
+ * versión o de canvas) y mientras `alive` lo permita: una ficha del canvas ya
+ * cerrada no pinta su caja con lo elegido después.
  */
 interface SystemPicker {
   el: HTMLInputElement;
@@ -76,13 +76,13 @@ export function openSystemPicker(initial: string, at: DOMRect | null, apply: (he
     finish();
   };
   systemPicker = { el, alive, discard: finish, flushNow };
-  // Doc 112: recién agregado, el input todavía no tiene posición calculada y
-  // Chrome abría su selector en la esquina superior izquierda de la pantalla.
+  // Recién agregado, el input no tiene posición calculada y Chrome abriría su
+  // selector en la esquina superior izquierda de la pantalla.
   el.getBoundingClientRect();
   el.click();
 }
 
-/** Doc 112: quien lo abrió con `alive` se cierra (la ficha del canvas): lo que
+/** Quien lo abrió con `alive` se cierra (la ficha del canvas): lo que
  *  ya se había elegido y esperaba la pausa de 700 ms se aplica, y el selector se
  *  suelta — elegir y cerrar enseguida no pierde el último color. Otro selector
  *  (abierto con otro `alive`, o sin él) no se toca. */
@@ -90,7 +90,7 @@ export function flushSystemPicker(alive: () => boolean): void {
   if (systemPicker && systemPicker.alive === alive) systemPicker.flushNow();
 }
 
-/** Doc 112: quien lo abrió con `alive` se cerró SIN guardar (Cancel de la
+/** Quien lo abrió con `alive` se cerró sin guardar (Cancel de la
  *  ficha): lo elegido no se aplica y el selector se suelta. Otro no se toca. */
 export function discardSystemPicker(alive: (() => boolean) | undefined): void {
   if (systemPicker && systemPicker.alive === alive) systemPicker.discard();

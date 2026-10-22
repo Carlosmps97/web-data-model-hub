@@ -1,5 +1,5 @@
 /**
- * sheetTemplates.service — plantillas de hoja Excel del proyecto (doc 95 D11).
+ * sheetTemplates.service — plantillas de hoja Excel del proyecto.
  * Backend `/api/projects/{pid}/sheet-templates` (envelope `{success,data}`).
  */
 import { apiDelete, apiGet, apiPost, apiPut } from '@/services/http';

@@ -1,5 +1,5 @@
-// Doc 112 — «Colors on this canvas» (ficha del canvas) y la línea del color en
-// Properties: qué cajas pinta distinto ESTE canvas, de dónde sale el color que
+// «Colors on this canvas» (ficha del canvas) y la línea del color en
+// Properties: qué cajas pinta distinto este canvas, de dónde sale el color que
 // se ve en una caja, y a qué cajas se aplica «Paint on this canvas».
 import { describe, expect, it } from 'vitest';
 import { canvasBoxes, paintedHere, paintTargets, pendingChanges, shownColor, stage, withPending } from './canvasColors';
@@ -23,7 +23,7 @@ describe('canvasBoxes', () => {
     ]);
   });
 
-  it('lógico: entidades por su lógico (o su físico si no tiene) y sin vistas (doc 63)', () => {
+  it('lógico: entidades por su lógico (o su físico si no tiene) y sin vistas', () => {
     expect(canvasBoxes(diagram, 'logical').map((b) => b.name)).toEqual(['Cuenta', 'M_CLIENTE', 'agencia']);
   });
 
@@ -33,7 +33,7 @@ describe('canvasBoxes', () => {
 });
 
 describe('paintedHere', () => {
-  it('sólo las cajas del canvas con excepción, ordenadas por nombre sin importar mayúsculas', () => {
+  it('solo las cajas del canvas con excepción, ordenadas por nombre sin importar mayúsculas', () => {
     const boxes = canvasBoxes(diagram, 'physical');
     const rows = paintedHere(boxes, { t1: 'none', t3: '#FFC000', v1: 'theme:sec', gone: '#000000' });
     expect(rows.map((r) => [r.id, r.ref])).toEqual([['t3', '#FFC000'], ['t1', 'none'], ['v1', 'theme:sec']]);
@@ -73,7 +73,7 @@ describe('paintTargets — a qué cajas se aplica «Paint on this canvas»', () 
   });
 });
 
-describe('cambios pendientes de la ficha (doc 112: Save graba, Cancel descarta)', () => {
+describe('cambios pendientes de la ficha (Save graba, Cancel descarta)', () => {
   const canvas = { t1: 'theme:pri', t2: 'none' };
 
   it('withPending: los colores del canvas con lo pendiente encima (null = vuelve al de su tabla)', () => {
@@ -81,7 +81,7 @@ describe('cambios pendientes de la ficha (doc 112: Save graba, Cancel descarta)'
     expect(withPending(canvas, {})).toEqual(canvas);
   });
 
-  it('pendingChanges: sólo lo que de verdad cambia respecto de lo grabado', () => {
+  it('pendingChanges: solo lo que de verdad cambia respecto de lo grabado', () => {
     expect(pendingChanges(canvas, { t1: 'theme:pri', t2: null, t3: null, t4: '#00B050' })).toEqual({ t2: null, t4: '#00B050' });
     expect(pendingChanges(canvas, {})).toEqual({});
   });

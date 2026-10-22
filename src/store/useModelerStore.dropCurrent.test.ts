@@ -1,14 +1,13 @@
-// Doc 105 (ronda 5, R15-H1) — soltar una fila en el bloque (TableNode →
-// `applyCanvasDrop`): graba la llave y después reordena. El set optimista de la
-// llave reinstalaba el diagrama CAPTURADO al empezar, y el reorden re-grababa
-// el documento COMPLETO de cada columna movida tomado de ese diagrama:
-//  · mismo canvas: si mientras se grababa la llave terminaba otra edición (el
-//    debounce de la descripción del panel) y su reload traía lo nuevo, el set
-//    volvía a lo viejo y el reorden pisaba la edición en el servidor;
-//  · otro canvas (misma sesión): pintaba A con `activeSaId` = B, y un arrastre
-//    en esa ventana grababa bloques de A en el layout de B.
-// Ahora la llave se aplica sobre el diagrama VIGENTE y sólo si sigue siendo el
-// mismo canvas, y cada escritura lleva el documento vigente de la columna.
+// Soltar una fila en el bloque (TableNode → `applyCanvasDrop`) graba la llave y
+// después reordena. La llave se aplica sobre el diagrama vigente y solo si sigue
+// siendo el mismo canvas, y cada escritura lleva el documento vigente de la
+// columna. Si el set optimista reinstalara el diagrama capturado al empezar y el
+// reorden re-grabara el documento completo de cada columna tomado de ese diagrama:
+//  · mismo canvas: si mientras se graba la llave termina otra edición (el
+//    debounce de la descripción del panel) y su reload trae lo último, el set
+//    volvería al estado previo y el reorden pisaría la edición en el servidor;
+//  · otro canvas (misma sesión): pintaría A con `activeSaId` = B, y un arrastre
+//    en esa ventana grabaría bloques de A en el layout de B.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -76,7 +75,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await new Promise((r) => setTimeout(r, 5)); });
 
-describe('el drop trabaja sobre lo VIGENTE (doc 105, ronda 5, R15-H1)', () => {
+describe('el drop trabaja sobre lo vigente', () => {
   it('mismo canvas: otra edición termina mientras se graba la llave — el reorden no la pisa', async () => {
     const d = drop({ key: [{ id: 'c3', isPrimaryKey: true }], order: ['c3', 'c1', 'c2'] }, 'c3');
     await tick();
@@ -124,7 +123,7 @@ describe('el drop trabaja sobre lo VIGENTE (doc 105, ronda 5, R15-H1)', () => {
   });
 });
 
-describe('el reorden trabaja sobre lo VIGENTE en cada escritura (doc 105, ronda 5, R15-H1)', () => {
+describe('el reorden trabaja sobre lo vigente en cada escritura', () => {
   const eight = () => Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, col(`k${i}`, i)]));
 
   it('una edición que termina entre tandas (de a 5) no la pisa la tanda siguiente', async () => {
@@ -141,17 +140,17 @@ describe('el reorden trabaja sobre lo VIGENTE en cada escritura (doc 105, ronda 
     expect(server.k0).toMatchObject({ description: 'nueva', ordinal: 7 });
   });
 
-  it('el Undo del reorden sólo devuelve el orden (no pisa una edición posterior)', async () => {
+  it('el Undo del reorden solo devuelve el orden (no pisa una edición posterior)', async () => {
     await st().reorderColumns('t1', ['c2', 'c1', 'c3']);
     await st().updateColumn('c1', { description: 'nueva' });
     const { useUndoStore } = await import('./useUndoStore');
-    // la entrada del reorden quedó debajo de la de la edición: se deshace primero ésa
+    // la entrada del reorden está debajo de la de la edición: se deshace primero esa
     useUndoStore.setState((u) => ({ stack: u.stack.filter((e) => e.label === 'Reorder columns') }));
     await useUndoStore.getState().undoLast();
     expect(server.c1).toMatchObject({ description: 'nueva', ordinal: 0 });
   });
 
-  it('con la tabla fuera del canvas, leer sus columnas no reinstala un diagrama viejo', async () => {
+  it('con la tabla fuera del canvas, leer sus columnas no reinstala un diagrama desactualizado', async () => {
     await st().selectSubjectArea('sa2');
     const read = deferred<unknown>();
     const gov = await import('@/services/governance.service');
@@ -170,11 +169,11 @@ describe('el reorden trabaja sobre lo VIGENTE en cada escritura (doc 105, ronda 
   });
 });
 
-// Doc 105 (ronda 6, R17a-2): «el documento vigente» no puede revivir una
-// columna BORRADA — si el canvas en pantalla tiene la tabla y ya no la columna,
-// no se escribe; si la tabla no está en pantalla, se relee del servidor (antes
-// se re-grababa la capturada: el upsert la revivía en el draft).
-describe('el reorden no revive una columna borrada entre tandas (doc 105, ronda 6)', () => {
+// «El documento vigente» no puede revivir una columna borrada: si el canvas en
+// pantalla tiene la tabla pero no la columna, no se escribe; si la tabla no está
+// en pantalla, se relee del servidor (re-grabar la capturada la reviviría en el
+// draft por el upsert).
+describe('el reorden no revive una columna borrada entre tandas', () => {
   /** Ninguna escritura sin documento (un `{ ...null }` iría con id undefined). */
   const noOrphanWrites = () => expect(vi.mocked(csvc.recordChange).mock.calls.filter(([, , id]) => typeof id !== 'string')).toEqual([]);
   const eight = () => Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`k${i}`, col(`k${i}`, i)]));
@@ -236,11 +235,11 @@ describe('el reorden no revive una columna borrada entre tandas (doc 105, ronda 
   });
 });
 
-// Doc 105 (ronda 6, R17a-10): con la tabla fuera del canvas el reorden espera
-// `listColumns` — si mientras leía se abrió otra versión, no marca «cambios sin
-// guardar» en la nueva (WorkspaceScreen ya limpió `dirty` al cambiar).
-describe('el reorden con lectura no ensucia la sesión nueva (doc 105, ronda 6)', () => {
-  it('si la sesión cambió mientras leía, se corta sin marcar dirty', async () => {
+// Con la tabla fuera del canvas el reorden espera `listColumns`: si mientras lee
+// se abre otra versión, no marca «cambios sin guardar» en la nueva (WorkspaceScreen
+// limpia `dirty` al cambiar).
+describe('el reorden con lectura no ensucia la sesión nueva', () => {
+  it('si la sesión cambia mientras lee, se corta sin marcar dirty', async () => {
     await st().selectSubjectArea('sa2');
     const read = deferred<unknown>();
     const gov = await import('@/services/governance.service');
@@ -257,12 +256,12 @@ describe('el reorden con lectura no ensucia la sesión nueva (doc 105, ronda 6)'
   });
 });
 
-// Doc 105 (ronda 7, R18a-2): con la tabla fuera de pantalla, cada columna
-// releía la tabla COMPLETA (`listColumns`): el Undo de un reorden de N columnas
-// hecho en otro canvas eran N lecturas de N documentos, con el Undo ocupado todo
-// ese tiempo. Ahora: UNA lectura por tabla y tanda (la tanda siguiente relee:
-// lo borrado entre tandas se sigue viendo — el caso de arriba).
-describe('fuera de pantalla: una lectura por tabla y tanda (doc 105, ronda 7, R18a-2)', () => {
+// Con la tabla fuera de pantalla se hace una lectura (`listColumns`) por tabla y
+// tanda, no una por columna: el Undo de un reorden de N columnas hecho en otro
+// canvas serían N lecturas de N documentos, con el Undo ocupado todo ese tiempo.
+// La tanda siguiente relee, así que lo borrado entre tandas se sigue viendo (el
+// caso de arriba).
+describe('fuera de pantalla: una lectura por tabla y tanda', () => {
   const N = 40;
   const many = () => Object.fromEntries(Array.from({ length: N }, (_, i) => [`k${i}`, col(`k${i}`, i)]));
   const lastFirst = [`k${N - 1}`, ...Array.from({ length: N - 1 }, (_, i) => `k${i}`)];   // se mueven las N

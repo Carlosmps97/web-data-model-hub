@@ -1,25 +1,34 @@
 /**
- * AdminScreen — pantalla 14 "Permisos: administrar niveles de acceso".
+ * AdminScreen: pantalla "Permisos: administrar niveles de acceso".
  *
- * Doc 38: la tabla de usuarios es la WHITELIST de acceso — correos asignados a
- * una matriz de rol (el login es el SSO de Databricks; sin asignación no se
- * entra). "Add email" da acceso; quitar la entrada lo revoca. Las cuentas
- * locales con contraseña (`admin`) conviven en la misma lista.
+ * La tabla de usuarios es la whitelist de acceso: correos asignados a una
+ * matriz de rol (el login es el SSO de Databricks; sin asignación no se entra).
+ * "Add email" da acceso; quitar la entrada lo revoca. Las cuentas locales con
+ * contraseña (`admin`) conviven en la misma lista. Cada entrada accede a todos
+ * los proyectos o solo a los que tiene asignados (columna Projects).
+ *
+ * Siempre queda al menos un administrador activo: al único no se le quita el
+ * acceso, ni se le cambia el rol o el estado, ni la matriz puede dejar sin
+ * `admin.manage` a todos los administradores (el backend aplica la misma regla).
  *
  * Layout: sidebar de roles (izq) + main con header, tabla de accesos y matriz
- * de permisos por rol. Se renderiza DEBAJO del TopNav global (chrome de
- * ShellLayout) y ya viene gated a `admin.manage`. Estilos inline (navy).
+ * de permisos por rol. Se renderiza debajo del TopNav global (chrome de
+ * ShellLayout) y la ruta ya exige `admin.manage`. Estilos inline (navy).
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { CSSProperties } from 'react';
 import { toast } from 'sonner';
 import { ApiError } from '@/services/http';
 import type { Permission } from '@/features/auth/auth.service';
+import { listProjects } from '@/services/projects.service';
+import { useAuthStore } from '@/store/useAuthStore';
+import type { Project } from '@/types/model';
 import type { AdminUser, Role } from '../admin.service';
 import { listUsers, listRoles, getPermissions, deleteUser, deleteRole, upsertRole } from '../admin.service';
 import {
-  C, accessLevelOf, avatarColor, chipStyle, initialsOf, primaryBtn, inputStyle,
-  iconBtnStyle, roleNameOf, statusMeta,
+  C, accessLevelOf, avatarColor, chipStyle, initialsOf, isOnlyAdmin, matrixLeavesNoAdmin, matrixSaveOrder, primaryBtn,
+  inputStyle, iconBtnStyle, projectScopeLabel, roleNameOf, statusMeta,
 } from './helpers';
 import { CloseIcon, PencilIcon, PlusIcon, SearchIcon, ShieldIcon, TrashIcon } from './icons';
 import UserModal from './UserModal';
@@ -31,7 +40,8 @@ interface ConfirmState { title: string; message: string; confirmLabel?: string; 
 interface UserModalState { open: boolean; mode: 'create' | 'edit'; initial: AdminUser | null; }
 interface RoleModalState { open: boolean; mode: 'create' | 'edit'; initial: Role | null; }
 
-const TABLE_COLS = 'minmax(260px, 2.4fr) 150px 150px 118px 96px';
+const TABLE_COLS = 'minmax(260px, 2.4fr) 150px 150px 120px 118px 96px';
+const ONLY_ADMIN = 'This is the only administrator: give the administrator role to someone else first.';
 
 const eyebrowStyle: CSSProperties = { fontSize: 11.5, fontWeight: 700, letterSpacing: 1, textTransform: 'uppercase', color: '#8A93A5' };
 const h1Style: CSSProperties = { margin: '6px 0 0', fontSize: 24, fontWeight: 800, letterSpacing: '-0.01em', color: C.navy };
@@ -39,9 +49,11 @@ const thStyle: CSSProperties = { padding: '11px 14px', fontSize: 11, fontWeight:
 const tdStyle: CSSProperties = { padding: '11px 14px', display: 'flex', alignItems: 'center', minWidth: 0 };
 
 export default function AdminScreen() {
+  const navigate = useNavigate();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
   const [permissions, setPermissions] = useState<Permission[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,10 +70,11 @@ export default function AdminScreen() {
 
   // ── carga ──
   const fetchAll = useCallback(async () => {
-    const [u, r, p] = await Promise.all([listUsers(), listRoles(), getPermissions()]);
+    const [u, r, p, pr] = await Promise.all([listUsers(), listRoles(), getPermissions(), listProjects()]);
     setUsers(u);
     setRoles(r);
     setPermissions(p);
+    setProjects(pr);
   }, []);
 
   const initialLoad = useCallback(async () => {
@@ -95,6 +108,8 @@ export default function AdminScreen() {
     return m;
   }, [roles]);
 
+  const liveProjectIds = useMemo(() => new Set(projects.map((p) => p.id)), [projects]);
+
   const roleCounts = useMemo(() => {
     const m: Record<string, number> = {};
     for (const u of users) m[u.role] = (m[u.role] ?? 0) + 1;
@@ -110,19 +125,24 @@ export default function AdminScreen() {
     });
   }, [users, search, selectedRoleId]);
 
-  // ── Matriz de permisos: edición con BORRADOR ──
-  // Nada se aplica al instante: entrás en modo edición, tocás las celdas del
-  // borrador local y recién al Guardar se persisten los roles cambiados.
+  // ── Matriz de permisos: edición con borrador ──
+  // Nada se aplica al instante: se entra en modo edición, se tocan las celdas del
+  // borrador local y recién al guardar se persisten los roles cambiados.
   const startEditMatrix = () => {
     setDraftRoles(roles.map((r) => ({ ...r, permissions: { ...r.permissions } })));
     setEditingMatrix(true);
   };
   const cancelEditMatrix = () => { setDraftRoles(null); setEditingMatrix(false); };
   const handleDraftToggle = useCallback((role: Role, perm: string) => {
-    setDraftRoles((prev) => (prev ?? []).map((r) => (
+    const next = (draftRoles ?? []).map((r) => (
       r.id === role.id ? { ...r, permissions: { ...r.permissions, [perm]: !r.permissions[perm] } } : r
-    )));
-  }, []);
+    ));
+    if (perm === 'admin.manage' && matrixLeavesNoAdmin(next, users)) {
+      toast.error('At least one active user must keep the administrator permission (admin.manage).');
+      return;
+    }
+    setDraftRoles(next);
+  }, [draftRoles, users]);
   // Roles cuyo set de permisos difiere del original (los únicos que se guardan).
   const changedRoles = useMemo(() => {
     if (!draftRoles) return [] as Role[];
@@ -137,18 +157,34 @@ export default function AdminScreen() {
   const saveMatrix = async () => {
     if (!draftRoles) return;
     setSavingMatrix(true);
+    const actorRole = useAuthStore.getState().user?.role ?? null;
+    const actorLosesAdmin = changedRoles.some((r) => r.id === actorRole && !r.permissions['admin.manage']);
     try {
-      for (const r of changedRoles) {
+      for (const r of matrixSaveOrder(changedRoles, actorRole)) {
         await upsertRole(r.id, { name: r.name, description: r.description ?? undefined, permissions: r.permissions });
       }
-      setRoles(await listRoles());
+      if (actorLosesAdmin) {
+        // Quien guardó ya no administra la plataforma: la matriz muestra lo
+        // guardado, la sesión se actualiza (sin el tope de lecturas) y la ruta
+        // /admin deja de estar disponible.
+        setRoles(draftRoles);
+        setEditingMatrix(false);
+        setDraftRoles(null);
+        toast.success('Permissions updated · your role no longer manages users and permissions');
+        await useAuthStore.getState().refreshMe({ force: true });
+        navigate('/');
+        return;
+      }
       setEditingMatrix(false);
       setDraftRoles(null);
+      setRoles(await listRoles());
       toast.success(changedRoles.length
         ? `Permissions updated (${changedRoles.length} role${changedRoles.length === 1 ? '' : 's'})`
         : 'No changes to save');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't save the permissions");
+      // Lo que sí se guardó queda a la vista: el borrador sigue y solo marca lo pendiente.
+      try { setRoles(await listRoles()); } catch { await useAuthStore.getState().refreshMe(); }
     } finally {
       setSavingMatrix(false);
     }
@@ -176,7 +212,7 @@ export default function AdminScreen() {
   // ── render ──
   return (
     <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', background: C.white, color: C.text }}>
-      {/* SIDEBAR — roles */}
+      {/* Sidebar — roles */}
       <aside style={{ width: 270, flexShrink: 0, background: C.panel, borderRight: `1px solid ${C.border}`, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div style={{ padding: '20px 18px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <ShieldIcon size={14} color={C.muted} />
@@ -244,7 +280,7 @@ export default function AdminScreen() {
         </div>
       </aside>
 
-      {/* MAIN */}
+      {/* Main */}
       <main style={{ flex: 1, minWidth: 0, overflowY: 'auto' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', padding: '26px 30px 64px' }}>
           {/* Header */}
@@ -300,11 +336,12 @@ export default function AdminScreen() {
               {/* Tabla de usuarios */}
               <div style={{ marginTop: 20, border: `1px solid ${C.border}`, borderRadius: 13, overflow: 'hidden' }}>
                 <div style={{ overflowX: 'auto' }}>
-                  <div style={{ minWidth: 860 }}>
+                  <div style={{ minWidth: 980 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: TABLE_COLS, background: C.panel, borderBottom: `1px solid ${C.border}` }}>
                       <div style={thStyle}>User</div>
                       <div style={thStyle}>Role</div>
                       <div style={thStyle}>Access level</div>
+                      <div style={thStyle}>Projects</div>
                       <div style={thStyle}>Status</div>
                       <div style={{ ...thStyle, textAlign: 'right' }} />
                     </div>
@@ -312,10 +349,13 @@ export default function AdminScreen() {
                     {filteredUsers.map((u, idx) => {
                       const level = accessLevelOf(rolesById[u.role]?.permissions);
                       const status = statusMeta(u.status);
-                      // Entradas de whitelist recién creadas aún no tienen nombre
-                      // (lo resuelve el backend en el primer login SSO).
+                      // Las entradas de whitelist recién creadas no tienen nombre
+                      // hasta el primer login SSO (lo resuelve el backend).
                       const primary = u.name || u.email || u.id;
                       const secondary = u.name ? (u.email || u.id) : 'Pending first sign-in';
+                      const onlyAdmin = isOnlyAdmin(u.id, users, roles);
+                      const scope = rolesById[u.role]?.permissions['admin.manage']
+                        ? 'All projects' : projectScopeLabel(u.projectIds, liveProjectIds);
                       return (
                         <div key={u.id} style={{ display: 'grid', gridTemplateColumns: TABLE_COLS, borderBottom: idx === filteredUsers.length - 1 ? 'none' : `1px solid ${C.border}` }}>
                           <div style={{ ...tdStyle, gap: 11 }}>
@@ -336,13 +376,19 @@ export default function AdminScreen() {
                             <span style={chipStyle(level)}>{level.label}</span>
                           </div>
                           <div style={tdStyle}>
+                            <span style={{ fontSize: 12.5, color: C.text2 }}>{scope}</span>
+                          </div>
+                          <div style={tdStyle}>
                             <span style={chipStyle(status)}>{status.label}</span>
                           </div>
                           <div style={{ ...tdStyle, justifyContent: 'flex-end', gap: 6 }}>
                             <button type="button" onClick={() => setUserModal({ open: true, mode: 'edit', initial: u })} aria-label={`Edit ${primary}`} style={{ ...iconBtnStyle, width: 30, height: 30 }}>
                               <PencilIcon size={14} />
                             </button>
-                            <button type="button" onClick={() => askDeleteUser(u)} aria-label={`Remove access for ${primary}`} style={{ ...iconBtnStyle, width: 30, height: 30, color: C.red }}>
+                            <button type="button" onClick={() => askDeleteUser(u)} disabled={onlyAdmin}
+                              title={onlyAdmin ? ONLY_ADMIN : undefined}
+                              aria-label={`Remove access for ${primary}`}
+                              style={{ ...iconBtnStyle, width: 30, height: 30, color: C.red, ...(onlyAdmin ? { opacity: 0.35, cursor: 'not-allowed' } : {}) }}>
                               <TrashIcon size={14} />
                             </button>
                           </div>
@@ -402,12 +448,14 @@ export default function AdminScreen() {
         </div>
       </main>
 
-      {/* MODALES */}
+      {/* Modales */}
       {userModal.open && (
         <UserModal
           mode={userModal.mode}
           initial={userModal.initial}
           roles={roles}
+          projects={projects}
+          onlyAdmin={Boolean(userModal.initial && isOnlyAdmin(userModal.initial.id, users, roles))}
           onClose={() => setUserModal({ open: false, mode: 'create', initial: null })}
           onSaved={softRefresh}
         />

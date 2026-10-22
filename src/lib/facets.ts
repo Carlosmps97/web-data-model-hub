@@ -1,12 +1,12 @@
 /**
- * Contrato de FACETAS lógico/físico (doc 69 §4.9) — espejo de `app/core/facets.py`.
+ * Contrato de facetas lógico/físico, espejo de `app/core/facets.py`.
  *
- * Erwin modela UN objeto con DOS vistas: Entity/Attribute (lógica) y
+ * Erwin modela un objeto con dos vistas: Entity/Attribute (lógica) y
  * Table/Column (física). En la plataforma es el mismo documento; cada
  * propiedad pertenece a una faceta o es compartida, y las definiciones UDP
  * declaran la suya (`view`). View y Model solo tienen faceta física.
- * Este módulo es la ÚNICA fuente de etiquetas y filtros por faceta para
- * paneles, Data Standards y exports — una faceta nueva se agrega acá.
+ * Este módulo es la única fuente de etiquetas y filtros por faceta para
+ * paneles, Data Standards y exports; una faceta nueva se agrega aquí.
  */
 import type { UdpLevel, UdpView } from '@/features/standards/standards.service';
 
@@ -14,7 +14,7 @@ export type Facet = UdpView;
 
 export const PHYSICAL_ONLY_UDP_LEVELS: ReadonlySet<UdpLevel> = new Set<UdpLevel>(['view', 'canvas']);
 
-/** Faceta EFECTIVA de una def: view/canvas ⇒ physical; ausente/desconocida ⇒ physical (defs pre-doc 69). */
+/** Faceta efectiva de una def: view/canvas ⇒ physical; ausente/desconocida ⇒ physical. */
 export function normalizeUdpView(level: UdpLevel, view?: string | null): Facet {
   if (PHYSICAL_ONLY_UDP_LEVELS.has(level)) return 'physical';
   return view === 'logical' ? 'logical' : 'physical';
@@ -30,7 +30,7 @@ export function facetUdpDefs<T extends { level: UdpLevel; view?: string | null }
   return defs.filter((d) => d.level === level && udpView(d) === facet);
 }
 
-/** Cuántos valores NO vacíos de `values` pertenecen a defs de (level, facet). */
+/** Cuántos valores no vacíos de `values` pertenecen a defs de (level, facet). */
 export function countFacetUdpValues(
   values: Record<string, string> | undefined,
   defs: { id: string; level: UdpLevel; view?: string | null }[],
@@ -46,17 +46,17 @@ export function countFacetUdpValues(
 export const facetNoun = (level: 'table' | 'column', facet: Facet): 'entity' | 'table' | 'attribute' | 'column' =>
   level === 'table' ? (facet === 'logical' ? 'entity' : 'table') : (facet === 'logical' ? 'attribute' : 'column');
 
-/** Doc 114: el nombre de una tabla o columna en el modelo activo — lógico
+/** El nombre de una tabla o columna en el modelo activo — lógico
  *  (entidad/atributo) o físico (tabla/columna) —, con el otro de respaldo si
  *  falta. Lo usan los popups de relación y subcategoría, como el canvas. */
 export const facetName = (o: { logicalName?: string | null; physicalName?: string | null } | null | undefined, facet: Facet): string =>
   (facet === 'logical' ? (o?.logicalName || o?.physicalName) : (o?.physicalName || o?.logicalName)) ?? '';
 
-/** Revisión doc 114 (H1): los nombres del modelo activo de un conjunto (las
- *  columnas de UNA tabla), por id — el lógico se puede repetir (el físico es el
- *  único): los repetidos, sin mirar mayúsculas, bordes, espacios internos ni la
- *  forma Unicode (ronda 2: la lista los dibuja iguales), llevan el nombre del
- *  otro modelo entre paréntesis; el resto, tal cual. */
+/** Los nombres del modelo activo de un conjunto (las columnas de una tabla),
+ *  por id. El lógico se puede repetir (el físico es el único): los repetidos,
+ *  sin mirar mayúsculas, bordes, espacios internos ni la forma Unicode (la
+ *  lista los dibuja iguales), llevan el nombre del otro modelo entre
+ *  paréntesis; el resto, tal cual. */
 export function distinctNames<T extends { id: string; logicalName?: string | null; physicalName?: string | null }>(
   items: readonly T[], facet: Facet,
 ): Map<string, string> {
@@ -68,7 +68,7 @@ export function distinctNames<T extends { id: string; logicalName?: string | nul
     ? `${facetName(o, facet).trim()} (${facetName(o, other).trim()})` : facetName(o, facet)]));
 }
 
-/** Sustantivos del objeto por faceta (doc 85 §3.8): ÚNICA fuente de los
+/** Sustantivos del objeto por faceta: única fuente de los
  *  rótulos «Entity/Attribute» (modelo lógico) y «Table/Column» (físico) que
  *  usa el workspace Model — pestañas, botones, diálogos, toasts, Explorer, ⌘K.
  *  Views no cambia de nombre (solo existen en físico). */
@@ -84,9 +84,9 @@ export const FACET_NOUNS: Record<Facet, FacetNouns> = {
 };
 export const facetNouns = (facet: Facet): FacetNouns => FACET_NOUNS[facet];
 
-/** Doc 86 §2.2: herramientas de Structure por modelo. Views, CTAS y Schemas
- *  son conceptos FÍSICOS; New entity/table vive en ambos. Doc 113 §1.2: la
- *  carga Excel también es física (crea tablas con esquema y sus vistas `_vu`). */
+/** Herramientas de Structure por modelo. Views, CTAS y Schemas son conceptos
+ *  físicos; New entity/table vive en ambos. La carga Excel también es física
+ *  (crea tablas con esquema y sus vistas `_vu`). */
 export type StructureTool = 'new-table' | 'ctas' | 'view' | 'schema' | 'upload';
 const PHYSICAL_ONLY_TOOLS: ReadonlySet<StructureTool> = new Set<StructureTool>(['ctas', 'view', 'schema', 'upload']);
 export const toolAvailableIn = (tool: StructureTool, facet: Facet): boolean =>
@@ -98,7 +98,7 @@ export const PHYSICAL_ONLY_TOOL_TIP: Record<StructureTool, string> = {
   view: 'Views belong to the physical model — switch to Physical',
   schema: 'Schemas belong to the physical model — switch to Physical',
 };
-/** Rótulo del modelo activo (barra de estado del canvas, doc 86 D1). */
+/** Rótulo del modelo activo (barra de estado del canvas). */
 export const MODEL_MODE_CAPTION: Record<Facet, string> = {
   logical: 'Logical model · entities & attributes',
   physical: 'Physical model · tables, columns & views',

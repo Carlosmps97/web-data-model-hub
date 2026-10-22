@@ -1,8 +1,8 @@
 /**
- * useUiStore — preferencias de CHROME del Model (doc 92 D7): la barra de
+ * useUiStore — preferencias de chrome del Model: la barra de
  * herramientas del canvas (Model · Structure · Relationships · Drawing ·
  * Actions · Save · Publish) y el sidebar Explorer colapsados para ganar
- * espacio de canvas. La navegación de módulos (TopNav) NO se colapsa: queda
+ * espacio de canvas. La navegación de módulos (TopNav) no se colapsa: queda
  * siempre fija. Se recuerdan por browser (localStorage); no son estado del
  * modelo.
  */
@@ -24,8 +24,8 @@ interface UiState {
   toolbarCollapsed: boolean;
   /** Explorer del Model colapsado a un riel con el botón para mostrarlo. */
   explorerCollapsed: boolean;
-  /** Doc 98: etiquetas de relación (frases) ocultas en el canvas y en el
-   *  export. Se guarda el «oculto» para que el default sea VERLAS. */
+  /** Etiquetas de relación (frases) ocultas en el canvas y en el export. Se
+   *  guarda el «oculto» para que el default sea verlas. */
   relLabelsHidden: boolean;
   setToolbarCollapsed: (v: boolean) => void;
   setExplorerCollapsed: (v: boolean) => void;

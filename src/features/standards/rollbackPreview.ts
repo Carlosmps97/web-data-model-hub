@@ -1,6 +1,6 @@
 /**
  * rollbackPreview — lógica pura de la vista previa del rollback de Data
- * Standards (doc 95 D9): qué dominios cambian de tipo y cuántas columnas se
+ * Standards: qué dominios cambian de tipo y cuántas columnas se
  * re-tipan, antes de confirmar.
  */
 import type { RollbackPreview } from './standards.service';

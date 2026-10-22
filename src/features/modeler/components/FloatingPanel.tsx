@@ -4,13 +4,13 @@ import { placeAtPoint, placeNextTo } from '@/lib/floating';
 import { useFloating } from '@/components/ui/useFloating';
 
 /**
- * Doc 109 — panel flotante (selector de color, opciones de texto) anclado a un
- * botón o a un punto de la pantalla. Va por portal con `position: fixed` (el
- * toolbar y los paneles recortan lo absoluto — doc 52) y se acomoda para no
- * salirse de la ventana con la regla única de flotantes (doc 113 §5: flip,
- * corrimiento y alto máximo). Se cierra con un clic afuera, Esc o la rueda fuera
- * del panel. NO al perder la ventana el foco: el selector de color del sistema
- * (More colors…) abre su propia ventana y el panel tiene que seguir ahí.
+ * Panel flotante (selector de color, opciones de texto) anclado a un botón o a
+ * un punto de la pantalla. Va por portal con `position: fixed` (el toolbar y
+ * los paneles recortan lo absoluto) y se acomoda para no salirse de la ventana
+ * con la regla única de flotantes (flip, corrimiento y alto máximo). Se cierra
+ * con un clic afuera, Esc o la rueda fuera del panel. No se cierra al perder la
+ * ventana el foco: el selector de color del sistema (More colors…) abre su
+ * propia ventana y el panel tiene que seguir ahí.
  */
 export interface FloatingPanelProps {
   /** Dónde abrir: el rectángulo del botón (abre debajo, o arriba si no entra)
@@ -21,9 +21,9 @@ export interface FloatingPanelProps {
   /** Abrir a la izquierda del ancla si no entra a la derecha (flyout de menú). */
   side?: 'below' | 'right';
   /** El botón que lo abrió: su clic lo cierra él mismo (sin esto, el clic
-   *  afuera lo cerraba y el mismo clic lo volvía a abrir). */
+   *  afuera lo cerraría y el mismo clic lo volvería a abrir). */
   owner?: Element | null;
-  /** Doc 112: dentro de un diálogo, se dibuja AHÍ (sin portal) para que su
+  /** Dentro de un diálogo se dibuja ahí (sin portal) para que su
    *  trampa de Tab lo incluya; igual queda fijo encima (no agranda el diálogo). */
   inPlace?: boolean;
 }

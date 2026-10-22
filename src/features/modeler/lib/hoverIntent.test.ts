@@ -1,8 +1,7 @@
-// Doc 111 — el resaltado de relaciones al pasar el mouse repintaba TODOS los
-// wires del canvas en cada bloque que el mouse cruzaba (y también sobre los
-// dibujos, que no tienen relaciones): ir de un objeto a otro trababa la
-// selección (medido: ~1 s de hilo principal con CPU ×4 en un canvas de 131
-// tablas). Ahora sólo resalta si el mouse SE QUEDA sobre el bloque o el wire.
+// Resaltado de relaciones al pasar el mouse: solo resalta si el mouse se
+// detiene sobre el bloque o el wire, de modo que cruzar el canvas no repinta
+// todos los wires en cada bloque que el mouse atraviesa; los dibujos no
+// resaltan nada (no tienen relaciones).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useModelerStore } from '@/store/useModelerStore';
 import { bindHoverDim, createHoverIntent, HOVER_INTENT_MS, hoverTargetOf } from './hoverIntent';

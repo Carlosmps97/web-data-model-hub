@@ -1,13 +1,13 @@
 import type { ScopeCounts } from '@/types/versioning';
 
 /**
- * Textos del borrado de proyecto por draft (doc 75 D5): el diálogo del
- * modelador, el panel «Deletion pending» y el aviso crítico del revisor
- * (D20). Puros: reciben los conteos de `GET /api/projects/{pid}/counts`.
+ * Textos del borrado de proyecto por draft: el diálogo del modelador, el panel
+ * «Deletion pending» y el aviso crítico para quien revisa. Puros: reciben los
+ * conteos de `GET /api/projects/{pid}/counts`.
  */
 const num = new Intl.NumberFormat('en-US');
 
-/** «1 folder» / «12 folders» (doc 105: decía «1 folders»). */
+/** «1 folder» / «12 folders» (singular con 1). */
 const n = (count: number, one: string, many: string) => `${num.format(count)} ${count === 1 ? one : many}`;
 
 function countsList(c: ScopeCounts): string {
@@ -16,8 +16,8 @@ function countsList(c: ScopeCounts): string {
     + `${n(c.folders, 'folder', 'folders')} and ${n(c.canvases, 'canvas', 'canvases')}`;
 }
 
-// Doc 105: los conteos son de PRODUCCIÓN; al aprobar, el apply graba primero lo
-// que la working copy agregó y la cascada lo borra junto con el resto.
+// Los conteos son de producción; al aprobar, el apply graba primero lo que la
+// working copy agregó y la cascada lo borra junto con el resto.
 export function deletionSummary(name: string, c: ScopeCounts): string {
   return `This working copy will delete project «${name}» and everything in it: ${countsList(c)} in production `
     + '(plus anything this working copy adds), and its Data Standards.';

@@ -1,9 +1,8 @@
-// SearchSelect sin DOM (hooks de mentira: ver features/reporting/components/fakeReact.testutil).
-// Doc 105 (R6): elegir (Enter / clic) o ESC con el menú abierto hacían `blur()`
-// del input — DENTRO de un Dialog/Modal el foco quedaba en <body> y Tab salía a
-// la página de atrás. Y «+ Create schema…» hacía `blur()` ANTES de abrir su
-// diálogo: el diálogo nuevo recordaba <body> como quien lo abrió y, al
-// cerrarse, el foco se perdía.
+// SearchSelect sin DOM (hooks simulados: ver features/reporting/components/fakeReact.testutil).
+// Dentro de un Dialog/Modal, elegir (Enter / clic) o ESC con el menú abierto no hacen
+// `blur()` del input: el foco quedaría en <body> y Tab saldría a la página de atrás.
+// «+ Create schema…» tampoco hace `blur()` antes de abrir su diálogo: el diálogo
+// recordaría <body> como quien lo abrió y, al cerrarse, el foco se perdería.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextStates, resetFake, runEffects, walk, type El } from '../../reporting/components/fakeReact.testutil';
 
@@ -14,7 +13,7 @@ import { focusInto } from '@/components/ui/focusTrap';
 
 type Props = Parameters<typeof SearchSelect>[0];
 let props: Props;
-/** Input de mentira: `closest('[aria-modal="true"]')` dice si está dentro de un diálogo. */
+/** Input simulado: `closest('[aria-modal="true"]')` dice si está dentro de un diálogo. */
 let fakeInput: { blur: ReturnType<typeof vi.fn>; closest: (sel: string) => unknown; getBoundingClientRect: () => object };
 
 function render(rerender = false) {
@@ -32,7 +31,7 @@ const key = (tree: unknown, k: string) =>
 const focus = (tree: unknown, relatedTarget: unknown) =>
   (inputOf(tree).props.onFocus as (e: unknown) => void)({ relatedTarget, currentTarget: fakeInput });
 /** Un diálogo que se abre con el foco en el combo y, al cerrarse, se lo devuelve
- *  con el mecanismo REAL (`focusInto`): el `focus()` del input dispara su onFocus. */
+ *  con el mecanismo real (`focusInto`): el `focus()` del input dispara su onFocus. */
 function nestedDialogCloses(tree: unknown) {
   const doc: { activeElement: unknown; body: object; querySelectorAll: () => unknown[] } = { activeElement: null, body: {}, querySelectorAll: () => [] };
   vi.stubGlobal('document', doc);
@@ -43,9 +42,9 @@ function nestedDialogCloses(tree: unknown) {
   });
   const box = { focus: vi.fn(() => { doc.activeElement = box; }), contains: (n: unknown) => n === box, matches: () => false };
   doc.activeElement = combo;
-  const restore = focusInto(box as never);          // se abre: recuerda al combo
+  const restore = focusInto(box as never);          // se abre: registra al combo como origen
   doc.activeElement = doc.body;                     // ESC: se desmonta con el foco adentro
-  restore();                                        // le devuelve el foco al combo
+  restore();                                        // el foco vuelve al combo
   expect(combo.focus).toHaveBeenCalledTimes(1);
 }
 /** Abre el menú como lo hace el usuario al entrar con Tab (foco desde otro control). */
@@ -75,8 +74,8 @@ const inside = (dialog: boolean) => {
   };
 };
 
-describe('SearchSelect dentro de un diálogo: elegir o ESC no sacan el foco del input (doc 105, R6)', () => {
-  it('Enter elige y cierra el menú SIN blur (el foco queda en el input, adentro del diálogo)', () => {
+describe('SearchSelect dentro de un diálogo: elegir o ESC no sacan el foco del input', () => {
+  it('Enter elige y cierra el menú sin blur (el foco queda en el input, adentro del diálogo)', () => {
     inside(true);
     let tree = openMenu();
     key(tree, 'Enter');
@@ -86,7 +85,7 @@ describe('SearchSelect dentro de un diálogo: elegir o ESC no sacan el foco del 
     expect(inputOf(tree).props['aria-expanded']).toBe(false);
   });
 
-  it('ESC con el menú abierto lo cierra SIN blur; ↓ con el menú cerrado lo vuelve a abrir', () => {
+  it('ESC con el menú abierto lo cierra sin blur; ↓ con el menú cerrado lo vuelve a abrir', () => {
     inside(true);
     let tree = openMenu();
     key(tree, 'Escape');
@@ -98,7 +97,7 @@ describe('SearchSelect dentro de un diálogo: elegir o ESC no sacan el foco del 
     expect(inputOf(tree).props['aria-expanded']).toBe(true);
   });
 
-  it('fuera de un diálogo nada cambia: elegir y ESC siguen soltando el foco', () => {
+  it('fuera de un diálogo, elegir y ESC sueltan el foco', () => {
     inside(false);
     let tree = openMenu();
     key(tree, 'Enter');
@@ -109,8 +108,8 @@ describe('SearchSelect dentro de un diálogo: elegir o ESC no sacan el foco del 
   });
 });
 
-describe('SearchSelect: el foco que devuelve un diálogo al cerrarse no reabre el menú (doc 105)', () => {
-  it('elegir abre un diálogo anidado («Inherit from domain»); al cerrarlo, el combo recibe el foco SIN menú', () => {
+describe('SearchSelect: el foco que devuelve un diálogo al cerrarse no reabre el menú', () => {
+  it('elegir abre un diálogo anidado («Inherit from domain»); al cerrarlo, el combo recibe el foco sin menú', () => {
     inside(true);
     let tree = openMenu();
     key(tree, 'Enter');                             // elige: el padre abre «Inherit from domain»
@@ -124,8 +123,8 @@ describe('SearchSelect: el foco que devuelve un diálogo al cerrarse no reabre e
   });
 });
 
-describe('SearchSelect: la acción del pie («+ Create schema…») (doc 105, R6)', () => {
-  it('corre SIN blur previo (el diálogo que abre sabe quién lo abrió) y el foco que vuelve no reabre el menú', () => {
+describe('SearchSelect: la acción del pie («+ Create schema…»)', () => {
+  it('corre sin blur previo (el diálogo que abre sabe quién lo abrió) y el foco que vuelve no reabre el menú', () => {
     inside(true);
     const onRun = vi.fn();
     props = { ...props, action: { label: (q) => `+ Create schema "${q}"`, onRun } };
@@ -157,10 +156,10 @@ describe('SearchSelect: la acción del pie («+ Create schema…») (doc 105, R6
   });
 });
 
-// Doc 105 (R11): con el foco en el input y el menú cerrado (tras elegir en un
-// diálogo, o tras la acción del pie), lo tipeado se perdía — el input mostraba
-// el valor elegido y sólo ↓/↑ reabrían el menú.
-describe('SearchSelect con el foco y el menú cerrado: tipear abre el menú y busca (doc 105, R11)', () => {
+// Con el foco en el input y el menú cerrado (tras elegir en un diálogo, o tras la
+// acción del pie), lo que se escribe abre el menú y cae en la búsqueda; sin esto, el
+// input mostraría el valor elegido y solo ↓/↑ reabrirían el menú.
+describe('SearchSelect con el foco y el menú cerrado: tipear abre el menú y busca', () => {
   const press = (tree: unknown, e: Record<string, unknown>) => {
     const ev = { preventDefault: vi.fn(), stopPropagation: vi.fn(), ...e };
     (inputOf(tree).props.onKeyDown as (x: unknown) => void)(ev);
@@ -169,13 +168,13 @@ describe('SearchSelect con el foco y el menú cerrado: tipear abre el menú y bu
   function pickedInDialog() {
     inside(true);
     let tree = openMenu();
-    key(tree, 'Enter');                             // elige UDV: menú cerrado, foco en el input
+    key(tree, 'Enter');                             // elige la opción resaltada: menú cerrado, foco en el input
     tree = render(true);
     expect(inputOf(tree).props['aria-expanded']).toBe(false);
     return tree;
   }
 
-  it('una letra abre el menú SIN preventDefault: el navegador la escribe en la búsqueda', () => {
+  it('una letra abre el menú sin preventDefault: el navegador la escribe en la búsqueda', () => {
     let tree = pickedInDialog();
     const ev = press(tree, { key: 'S' });
     expect(ev.preventDefault).not.toHaveBeenCalled();
@@ -216,10 +215,10 @@ describe('SearchSelect con el foco y el menú cerrado: tipear abre el menú y bu
   });
 });
 
-// Doc 105 (R14): con el menú cerrado, lo que NO entra por un keydown imprimible
-// —pegar, IME/teclas muertas, dictado, AltGr— se perdía (el input mostraba el
-// valor elegido y el menú no se abría).
-describe('SearchSelect con el menú cerrado: pegar, IME, dictado y AltGr también abren (doc 105, R14)', () => {
+// Con el menú cerrado, lo que no entra por un keydown imprimible (pegar, IME/teclas
+// muertas, dictado, AltGr) también abre el menú; sin esto se perdería (el input
+// mostraría el valor elegido y el menú no se abriría).
+describe('SearchSelect con el menú cerrado: pegar, IME, dictado y AltGr también abren', () => {
   function pickedInDialog() {
     inside(true);
     let tree = openMenu();

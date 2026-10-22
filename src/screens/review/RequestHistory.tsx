@@ -3,10 +3,10 @@ import type { RequestCycle } from '@/types/versioning';
 import { OUTCOME_BADGE, decidedVerb, fmtDate } from './requestState';
 
 /**
- * Doc 88 §6: historial de solicitudes de una versión — un bloque por ciclo de
- * envío (más reciente primero): quién la envió y a quién, el resultado, quién
- * decidió y, en un rechazo, el MOTIVO (obligatorio, doc 88 §5). Sobrevive a
- * que la versión vuelva a draft, se re-envíe o se publique.
+ * Historial de solicitudes de una versión: un bloque por ciclo de envío (más
+ * reciente primero) con quién la envió y a quién, el resultado, quién decidió
+ * y, en un rechazo, el motivo (obligatorio). Sobrevive a que la versión vuelva
+ * a draft, se re-envíe o se publique.
  */
 export default function RequestHistory({ rows, userName, userInitials, avatarTone }: {
   rows: RequestCycle[];

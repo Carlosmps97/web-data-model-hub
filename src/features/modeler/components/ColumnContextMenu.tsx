@@ -12,8 +12,8 @@ export const PASTE_KEY_LABEL = IS_MAC ? '⌘V' : 'Ctrl+V';
 export const UNDO_KEY_LABEL = IS_MAC ? '⌘Z' : 'Ctrl+Z';
 export const SEARCH_KEY_LABEL = IS_MAC ? '⌘K' : 'Ctrl+K';
 
-// Doc 105 (ronda 5, R15-H9): con los sustantivos de la faceta abierta (en
-// Lógico decía «columns copied … on the target table» y «Table X copied»).
+// Mensajes con los sustantivos de la faceta abierta (en Logical, entidad y
+// atributos; en Physical, tabla y columnas).
 export const copiedMessage = (n: number, nouns: FacetNouns) =>
   `${n} ${n === 1 ? nouns.member : nouns.members} copied — paste with ${PASTE_KEY_LABEL} on the target ${nouns.one}`;
 
@@ -21,7 +21,7 @@ export const copiedTableMessage = (name: string, nouns: FacetNouns) =>
   `${nouns.One} ${name} copied — paste with ${PASTE_KEY_LABEL}`;
 
 /**
- * Menú contextual del canvas (docs 48 + 50): espejo DESCUBRIBLE de Ctrl/Cmd+C/V.
+ * Menú contextual del canvas: espejo descubrible de Ctrl/Cmd+C/V.
  * Fila → Copy de columnas (+ Paste de columnas si hay clipboard y edición);
  * bloque → Copy table (+ Paste de columnas / Paste table según clipboard).
  * Vive fuera del viewport de React Flow (position: fixed sin ancestro con
@@ -30,11 +30,11 @@ export const copiedTableMessage = (name: string, nouns: FacetNouns) =>
 export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const menu = useModelerStore((s) => s.colMenu);
   const viewMode = useModelerStore((s) => s.viewMode);
-  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
+  const n = facetNouns(viewMode);   // sustantivos Entity/Attribute o Table/Column
   const closeColMenu = useModelerStore((s) => s.closeColMenu);
   const selCount = useModelerStore((s) => s.colSel?.ids.length ?? 0);
   const clipCount = useModelerStore((s) => s.colClipboard?.cols.length ?? 0);
-  // El nombre según la faceta (ronda 5, R15-H9: en Lógico mostraba el físico).
+  // El nombre según la faceta: en Logical, el lógico (o el físico si no tiene).
   const tblClipName = useModelerStore((s) => {
     const t = s.tblClipboard?.table;
     return t ? (s.viewMode === 'logical' ? t.logicalName || t.physicalName : t.physicalName) : null;
@@ -45,7 +45,7 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
 
   // Cierre por interacción global: click/pan fuera (mousedown), zoom/scroll
   // (wheel), Esc o blur de la ventana. Capture: gana aunque el target frene el
-  // bubbling; los mousedown DENTRO del menú no cierran (el click debe llegar).
+  // bubbling; los mousedown dentro del menú no cierran (el click debe llegar).
   useEffect(() => {
     if (!menu) return;
     const onDown = (e: Event) => {
@@ -71,11 +71,11 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   const isBlock = menu.colId == null;
   const showCopyCols = !isView && !isBlock && selCount > 0;   // copiar es lectura: vale también en readonly
   const showPasteCols = !isView && clipCount > 0 && canEdit;
-  // Doc 50: el menú del BLOQUE siempre ofrece copiar la tabla; pegarla exige
-  // clipboard de tabla + edición (crea una tabla NUEVA, no necesita destino).
+  // El menú del bloque siempre ofrece copiar la tabla; pegarla exige
+  // clipboard de tabla + edición (crea una tabla nueva, no necesita destino).
   const showCopyTable = !isView && isBlock;
   const showPasteTable = !isView && isBlock && tblClipName != null && canEdit;
-  // Doc 112: el color de la caja EN ESTE canvas ya no está acá — es del canvas
+  // El color de la caja en este canvas no se ofrece acá: es del canvas
   // (Model properties → Colors on this canvas), no de la tabla.
   if (!showCopyCols && !showPasteCols && !showCopyTable && !showPasteTable) return null;
 
@@ -97,7 +97,7 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
     if (name) pushToast(copiedTableMessage(name, n));
     st.closeColMenu();
   };
-  // Doc 118: pegar la tabla abre el popup que muestra qué viaja (como Ctrl+V).
+  // Pegar la tabla abre el popup que muestra qué viaja (como Ctrl+V).
   const doPasteTable = () => {
     const st = useModelerStore.getState();
     st.closeColMenu();
@@ -130,9 +130,9 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   );
 }
 
-/** Doc 113 §5: el menú en el cursor con la regla única de flotantes — a la
- *  izquierda o arriba del cursor si no entra (antes: un tope fijo estimado de
- *  ~200×120 que cortaba los nombres largos y el último ítem). */
+/** El menú en el cursor con la regla única de flotantes: a la izquierda o
+ *  arriba del cursor si no entra, según su tamaño medido (un tope fijo
+ *  estimado cortaría los nombres largos y el último ítem). */
 function MenuBox({ boxRef, x, y, children }: { boxRef: RefObject<HTMLDivElement | null>; x: number; y: number; children: ReactNode }) {
   const place = useFloating(boxRef, (box, bounds) => placeAtPoint({ x, y }, box, bounds), [x, y]);
   return <div ref={boxRef} className="wk-ctxmenu" style={place} role="menu">{children}</div>;

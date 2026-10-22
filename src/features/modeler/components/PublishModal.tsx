@@ -1,38 +1,46 @@
 /**
- * PublishModal (Screen 04b — "Publish request, request approval", ppub).
+ * PublishModal: envía la working copy a aprobación.
  *
- * Opened from the canvas toolbar's green **Publish** button. Renders over the
- * design-system Dialog with the **canvas** backdrop, so only the modeling
- * surface below the 64px toolbar is dimmed while the toolbar stays
- * sharp (the design's popup pattern). The user fills a Title + Description,
- * picks one or more **reviewers** (toggle chips with avatar + name), and sends
- * the working copy (`activeChangesetId`) for approval via
- * `submit(id, {title, description, reviewers})` → status `submitted`.
+ * Se abre desde el botón verde **Publish** del toolbar del canvas. Se dibuja
+ * sobre el Dialog del sistema de diseño con el backdrop **canvas**, de modo que
+ * solo se oscurece la superficie de modelado bajo el toolbar de 64px y el
+ * toolbar queda nítido (patrón de popup del diseño). El usuario completa Title +
+ * Description, elige uno o más **revisores** (chips conmutables con avatar +
+ * nombre) y envía la working copy (`activeChangesetId`) a aprobación vía
+ * `submit(id, {title, description, reviewers})` → estado `submitted`.
  *
- * Guards:
- *  - No `activeChangesetId` (e.g. opened read-only): show a hint and disable
- *    sending — you must open an editable version first.
- *  - At least one reviewer is required to send.
- *
- * NOTE: this is wiring + UI only; the changeset/session reconciliation is R4-0.
+ * Guardas:
+ *  - Sin `activeChangesetId` (p. ej. abierto en solo lectura): muestra un aviso
+ *    y deshabilita el envío; primero hay que abrir una versión editable.
+ *  - Se requiere al menos un revisor para enviar.
+ *  - Si la versión cambia objetos que otra versión borró y publicó, el envío se
+ *    bloquea (409 `deleted_in_production`): el popup lista esos objetos con su
+ *    nombre y su id y ofrece descartar esos cambios; después se envía de nuevo.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { AlertTriangle, ArrowUpToLine, Check, Info } from 'lucide-react';
+import { AlertTriangle, ArrowUpToLine, Check, Info, ShieldAlert, Trash2 } from 'lucide-react';
 
 import { Avatar, Button, Dialog } from '@/components/ui';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
+import { useUndoStore } from '@/store/useUndoStore';
 import { runBlocking } from '@/store/useBusyStore';
-import { getPublished, listUsers, submit } from '@/services/versioning.service';
-import type { SimUserDto } from '@/types/versioning';
+import { apiErrorMessage, errorReason } from '@/services/http';
+import { canvasSessionKey } from '../lib/canvasSession';
+import { stillAskedSession } from '../lib/sessionGuard';
+import {
+  discardDeleted, getPublished, listUserNames, listUsers, publishBlockedDetail, submit,
+} from '@/services/versioning.service';
+import { blockedTitle, fmtWhen, groupBlockedItems, itemContext, itemLabel, itemWhere } from '@/screens/review/publishBlocked';
+import type { PublishBlockedDetail, SimUserDto } from '@/types/versioning';
 
 export interface PublishModalProps {
   open: boolean;
   onClose: () => void;
 }
 
-/** Deterministic avatar tone so each reviewer keeps the same color. */
+/** Tono de avatar determinista: cada revisor conserva el mismo color. */
 const TONES = ['blue', 'purple', 'green', 'navy'] as const;
 const toneFor = (id: string) => {
   let h = 0;
@@ -44,7 +52,7 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
   const changesetId = useSessionStore((s) => s.activeChangesetId);
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
   const projectId = useSessionStore((s) => s.activeProjectId);
-  // Doc 75 D5/D20: la working copy borra su proyecto — se avisa ANTES de enviar.
+  // La working copy borra su proyecto: se avisa antes de enviar.
   const deletesProject = useModelerStore((s) => s.projectDeletionPending);
   const projectName = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name ?? null);
 
@@ -54,21 +62,31 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
   const [description, setDescription] = useState('');
   const [reviewers, setReviewers] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  // Objetos que otra versión borró y que esta cambia: bloquean el envío.
+  const [blocked, setBlocked] = useState<PublishBlockedDetail | null>(null);
+  const [discarding, setDiscarding] = useState(false);
+  const [names, setNames] = useState<Record<string, string>>({});
+  // Foco: con el bloqueo va a «Discard»; al descartar, de vuelta a «Send».
+  const discardRef = useRef<HTMLButtonElement>(null);
+  const sendRef = useRef<HTMLButtonElement>(null);
+  const focusSend = useRef(false);
 
-  // Reset the form each time the modal opens, then load the reviewer list.
+  // Reinicia el formulario cada vez que se abre el modal y luego carga la lista de revisores.
   useEffect(() => {
     if (!open) return;
     setTitle('');
     setDescription('');
     setReviewers([]);
     setSubmitting(false);
+    setBlocked(null);
+    setDiscarding(false);
 
     let cancelled = false;
     setUsersLoading(true);
-    // Solo usuarios que PUEDEN decidir (rol con `review.decide`): asignar a
-    // alguien sin ese permiso dejaba el request trabado (unanimidad imposible)
-    // y ese revisor recibía un 403 al intentar aprobar.
-    listUsers('review.decide')
+    // Solo usuarios que pueden decidir (rol con `review.decide`): asignar a
+    // alguien sin ese permiso dejaría el request trabado (unanimidad imposible)
+    // y ese revisor recibiría un 403 al intentar aprobar.
+    listUsers('review.decide', projectId)
       .then((rows) => {
         if (!cancelled) setUsers(rows);
       })
@@ -82,13 +100,34 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, projectId]);
+
+  // Nombres de quienes publicaron los borrados (best-effort: sin la lista, el id).
+  useEffect(() => {
+    if (!blocked) return;
+    let cancelled = false;
+    listUserNames()
+      .then((rows) => { if (!cancelled) setNames(Object.fromEntries(rows.map((u) => [u.id, u.name]))); })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [blocked]);
+  const userName = (id: string) => names[id] ?? id;
+
+  useEffect(() => {
+    if (blocked && !discarding) discardRef.current?.focus();   // también tras un descarte que falló
+  }, [blocked, discarding]);
+  useEffect(() => {
+    if (!discarding && !blocked && focusSend.current) {
+      focusSend.current = false;
+      sendRef.current?.focus();
+    }
+  }, [discarding, blocked]);
 
   const toggleReviewer = (id: string) =>
     setReviewers((prev) => (prev.includes(id) ? prev.filter((r) => r !== id) : [...prev, id]));
 
   const hasChangeset = Boolean(changesetId);
-  const canSend = hasChangeset && reviewers.length > 0 && !submitting;
+  const canSend = hasChangeset && reviewers.length > 0 && !submitting && !blocked && !discarding;
 
   const handleSend = async () => {
     if (!changesetId || !canSend || !projectId) return;
@@ -99,18 +138,57 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
         description: description.trim() || undefined,
         reviewers,
       }));
-      // Publicado = checkpoint: ya no hay cambios "sin guardar" en la sesión.
+      // Enviado = checkpoint: la sesión no conserva cambios "sin guardar".
       useModelerStore.getState().clearDirty();
       // La working copy salió de `draft` (submitted): el backend rechaza nuevas
-      // ediciones (409). Transiciona la sesión a SOLO LECTURA (producción del
+      // ediciones (409). Transiciona la sesión a solo lectura (producción del
       // proyecto) para no dejar al usuario "editando" una versión bloqueada.
       const pub = await getPublished(projectId).catch(() => null);
       useSessionStore.getState().openModel({ projectId, mode: 'readonly', versionLabel: pub?.versionLabel ?? null });
       toast.success('Request sent — the canvas is now read-only (production)');
       onClose();
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : "Couldn't send the request.");
+      const detail = publishBlockedDetail(err);
+      // Lo que otra versión borró: la lista completa queda en el popup, con la
+      // acción para descartarlo (un toast la truncaría).
+      if (detail?.code === 'deleted_in_production') setBlocked(detail);
+      else toast.error(err instanceof Error ? err.message : "Couldn't send the request.");
       setSubmitting(false);
+    }
+  };
+
+  const handleDiscard = async () => {
+    if (!changesetId || discarding) return;
+    // Una inversa del Undo en vuelo podría volver a escribir sobre lo descartado.
+    if (useUndoStore.getState().busy) { toast.error('Undo is still running — discard when it finishes.'); return; }
+    setDiscarding(true);
+    const asked = useSessionStore.getState();
+    const askedKey = canvasSessionKey(asked);
+    try {
+      const res = await runBlocking('Discarding changes…', () => discardDeleted(changesetId));
+      setBlocked(null);
+      focusSend.current = true;
+      if (useSessionStore.getState().activeChangesetId === changesetId) {
+        // Los cambios quitados no están en la pila de Undo: una inversa previa
+        // podría volver a ponerlos (misma política que una carga Excel). El
+        // canvas y el Explorer pasan a mostrar la versión sin esos cambios; un
+        // fallo del refresco se avisa con el criterio de sessionGuard.
+        useUndoStore.getState().clear();
+        await useModelerStore.getState().refreshExplorer().catch(async (e: unknown) => {
+          const current = () => canvasSessionKey(useSessionStore.getState());
+          if (!(await stillAskedSession(e, asked.activeChangesetId, askedKey, current))) return;
+          toast.error(`Couldn't reload the explorer: ${errorReason(e, 'unknown error')}. Use Refresh to try again.`,
+            { id: `dmh-explorer-load:${askedKey}` });
+        });
+      }
+      const n = res.discarded.length;
+      toast.success(n
+        ? `${n} ${n === 1 ? 'change' : 'changes'} discarded — you can send the version now`
+        : 'Nothing left to discard — you can send the version now');
+    } catch (err: unknown) {
+      toast.error(apiErrorMessage(err, "Couldn't discard the changes."));
+    } finally {
+      setDiscarding(false);
     }
   };
 
@@ -119,7 +197,7 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
       <Button variant="secondary" onClick={onClose}>
         Cancel
       </Button>
-      <Button variant="success" icon={ArrowUpToLine} onClick={handleSend} disabled={!canSend}>
+      <Button ref={sendRef} variant="success" icon={ArrowUpToLine} onClick={handleSend} disabled={!canSend}>
         Send for Approval
       </Button>
     </>
@@ -142,6 +220,46 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
           <div className="ppub-hint">
             Open an editable version (Open model) to publish.
           </div>
+        )}
+        {blocked && (
+          <section className="dmh-rvb" role="alert" aria-label="Changes on deleted objects">
+            <div className="dmh-rvb-head">
+              <ShieldAlert size={18} strokeWidth={1.7} aria-hidden />
+              <div style={{ minWidth: 0 }}>
+                <div className="dmh-rvb-title">{blockedTitle(blocked)}</div>
+                <div className="dmh-rvb-sub">
+                  Nothing was sent. Discard your changes on these objects, then send the version again.
+                </div>
+              </div>
+            </div>
+            {groupBlockedItems(blocked.items).map((g) => (
+              <div key={g.kind} className="dmh-rvb-group">
+                <div className="dmh-rvb-glabel">
+                  {g.label}
+                  <span className="dmh-rvb-gcount">{g.items.length}</span>
+                </div>
+                <ul className="dmh-rvb-list">
+                  {g.items.map((it, i) => {
+                    const ctx = itemContext(it);
+                    return (
+                      <li key={`${it.entityId ?? it.name ?? i}-${i}`} className="dmh-rvb-item">
+                        <div className="dmh-rvb-item-name">
+                          <span className="mono">{itemLabel(it)}</span>
+                          {ctx && <span className="dmh-rvb-ctx">{ctx}</span>}
+                        </div>
+                        <div className="dmh-rvb-where">{itemWhere(it, fmtWhen, userName)}</div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+            <div className="dmh-rvb-next">
+              <Button ref={discardRef} variant="danger" icon={Trash2} onClick={handleDiscard} disabled={discarding}>
+                Discard changes on deleted objects
+              </Button>
+            </div>
+          </section>
         )}
         {deletesProject && (
           <div className="dmh-rv-critical" role="alert">

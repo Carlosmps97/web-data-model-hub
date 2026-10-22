@@ -1,9 +1,9 @@
-// Doc 105 (H1) — una inversa de Undo, o una acción de varias escrituras, es de
-// la SESIÓN donde empezó. Los servicios toman la versión al llamarlos: si en el
-// medio se abre otra versión, lo que falta se escribía en ELLA (el revisor lo
-// vio con Ctrl+Z de «Delete table»: `recordChange('cs2', 'subject_areas',
-// 'sa3')`). Backend EN MEMORIA como el de `deleteUndo.test.ts`; cada escritura
-// anota la versión a la que va (la que el servicio real tomaría al llamarlo).
+// Una inversa de Undo, o una acción de varias escrituras, es de la sesión donde
+// empezó. Los servicios toman la versión al llamarlos: si en el medio se abre
+// otra versión, lo que falta no debe escribirse en ella (p. ej. con Ctrl+Z de
+// «Delete table»: `recordChange('cs2', 'subject_areas', 'sa3')`). Backend en
+// memoria como el de `deleteUndo.test.ts`; cada escritura anota la versión a
+// la que va (la que el servicio real tomaría al llamarlo).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -58,7 +58,7 @@ const openCs2 = () => useSessionStore.getState().openModel({ projectId: 'p', mod
 const unhandled: unknown[] = [];
 const onUnhandled = (e: unknown) => { unhandled.push(e); };
 
-/** Cascada de membresía del backend (doc 88 §4) al borrar una tabla o vista. */
+/** Cascada de membresía del backend al borrar una tabla o vista. */
 function cascade(coll: string, id: string): void {
   const field = coll === 'views' ? 'viewIds' : 'tableIds';
   for (const sa of Object.values(draft)) {
@@ -105,7 +105,7 @@ beforeEach(async () => {
     else if (coll !== 'subject_areas') ops.set(`${coll}:${id}`, op);
     return {} as never;
   });
-  // Los mocks de governance / views anotan la versión de la sesión AL LLAMARLOS:
+  // Los mocks de governance / views anotan la versión de la sesión al llamarlos:
   // es la que tomaría el servicio real (`writableCs()` / `editingCs()`).
   vi.mocked(gov.recordChangesBulk).mockImplementation(async (changes) => {
     writes.push(`${csNow()}:bulk`);
@@ -182,7 +182,7 @@ afterEach(async () => {
   expect(unhandled, 'unhandledRejection durante la prueba').toEqual([]);
 });
 
-/** Ctrl+Z y, a los `ms`, el usuario abre OTRA versión en edición. */
+/** Ctrl+Z y, a los `ms`, el usuario abre otra versión en edición. */
 async function undoThenOpenCs2(ms: number): Promise<string | null> {
   const undo = useUndoStore.getState().undoLast();
   await sleep(ms);
@@ -190,13 +190,13 @@ async function undoThenOpenCs2(ms: number): Promise<string | null> {
   return undo;
 }
 
-describe('una inversa EN VUELO cuando se abre otra versión (doc 105, H1)', () => {
+describe('una inversa en vuelo cuando se abre otra versión', () => {
   it('«Delete table»: los canvases que faltan no se escriben en la versión nueva, y no se avisa nada', async () => {
     await st().deleteTable('t1');                      // editando cs1
     writes = [];
     latency = 15;
     const label = await undoThenOpenCs2(25);           // va por el primer canvas…
-    expect(toCs2()).toEqual([]);                       // antes: ['cs2:subject_areas:sa3']
+    expect(toCs2()).toEqual([]);                       // nada va a cs2
     expect(writes[0]).toBe('cs1:bulk');                // lo pedido en su sesión sí se escribió
     expect(label).toBeNull();                          // ni «Undid…»…
     expect(toast.error).not.toHaveBeenCalled();        // …ni un error engañoso
@@ -229,7 +229,7 @@ describe('una inversa EN VUELO cuando se abre otra versión (doc 105, H1)', () =
     const d = st().diagram!;
     useModelerStore.setState({ diagram: { ...d, columns: cols } });
     await st().reorderColumns('t1', cols.map((c) => c.id).reverse());   // 8 cambian: tandas de 5 + 3
-    // Doc 105 (ronda 6): la recarga de este harness trae la tabla SIN columnas —
+    // La recarga de este harness trae la tabla sin columnas;
     // con su tabla en pantalla, eso sería «se borraron» y la inversa no las re-graba.
     useModelerStore.setState({ diagram: { ...st().diagram!, columns: cols } });
     writes = [];
@@ -239,7 +239,7 @@ describe('una inversa EN VUELO cuando se abre otra versión (doc 105, H1)', () =
     expect(writes.filter((w) => w.startsWith('cs1:column:'))).toHaveLength(5);
   });
 
-  it('«Create table» (su inversa borra la tabla): si la versión cambia mientras lee, no borra NADA', async () => {
+  it('«Create table» (su inversa borra la tabla): si la versión cambia mientras lee, no borra nada', async () => {
     await st().createTable({ logicalName: 'nueva', physicalName: 'M_NUEVA' });
     writes = [];
     latency = 15;
@@ -250,7 +250,7 @@ describe('una inversa EN VUELO cuando se abre otra versión (doc 105, H1)', () =
   });
 });
 
-describe('una acción de varias escrituras cuando se abre otra versión (doc 105, H1)', () => {
+describe('una acción de varias escrituras cuando se abre otra versión', () => {
   it('borrar una tabla: si la versión cambia mientras lee su cascada, no borra nada y lo dice', async () => {
     latency = 15;
     const del = st().deleteTable('t1');
@@ -270,7 +270,7 @@ describe('una acción de varias escrituras cuando se abre otra versión (doc 105
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
-  it('una acción que TERMINA de escribir y se abre otra versión antes de apilar: su inversa no queda en la pila nueva', async () => {
+  it('una acción que termina de escribir y se abre otra versión antes de apilar: su inversa no queda en la pila nueva', async () => {
     latency = 15;
     const load = vi.mocked(mod.loadDiagram).getMockImplementation()!;
     vi.mocked(mod.loadDiagram).mockImplementation(async (saId) => { await sleep(30); return load(saId); });

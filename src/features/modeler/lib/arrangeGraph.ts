@@ -1,9 +1,9 @@
-// Armado del grafo del Autoarrange (doc 55 §3.5) — compartido por el botón
-// del toolbar (nodos MEDIDOS por React Flow) y por el arrange «headless» de
-// la carga masiva (canvases que no están abiertos: tamaños estimados con las
-// MISMAS métricas de `lodSize.ts` / `scripts/arrange_all.py`). `buildArrangeGraph`
-// es puro; `arrangeDiagram` llama a ELK y re-deriva los símbolos de
-// subcategoría (doc 53), exactamente como lo hacía `autoOrganize`.
+// Armado del grafo del Autoarrange, compartido por el botón del toolbar (nodos
+// medidos por React Flow) y por el arrange «headless» de la carga masiva
+// (canvases que no están abiertos: tamaños estimados con las mismas métricas de
+// `lodSize.ts` / `scripts/arrange_all.py`). `buildArrangeGraph` es puro;
+// `arrangeDiagram` llama a ELK y re-deriva los símbolos de subcategoría (lo usa
+// también `autoOrganize`).
 import type { Diagram } from '@/features/modeler/services/modeler.service';
 import type { CanonicalColumn } from '@/services/governance.service';
 import { tableLodSize, viewLodSize } from './lodSize';
@@ -31,10 +31,10 @@ export function buildArrangeGraph(dia: Diagram, sizeOf: SizeOf, viewMode: 'logic
     const s = tableLodSize(t, colsByTable.get(t.id) ?? [], viewMode);
     return { id: t.id, width: s.w, height: s.h };
   });
-  // F3: las vistas visibles se auto-organizan como nodos normales; sus
+  // Las vistas visibles se auto-organizan como nodos normales; sus
   // derivaciones entran como edges para que ELK las ubique junto a sus fuentes.
-  // Doc 63: vistas SOLO en modelo físico — en lógico no están en el canvas,
-  // así que el arrange no las mueve ni les reserva sitio.
+  // Las vistas existen solo en el modelo físico: en lógico no están en el
+  // canvas, así que el arrange no las mueve ni les reserva sitio.
   const views = viewMode === 'physical'
     ? (dia.views ?? []).filter((v) => viewSourceIds(v).some((id) => tableIds.has(id)))
     : [];
@@ -54,7 +54,7 @@ export function buildArrangeGraph(dia: Diagram, sizeOf: SizeOf, viewMode: 'logic
 
 /** Layout ELK del diagrama + símbolos de subcategoría re-derivados. Devuelve
  *  posiciones por id (tablas, vistas y símbolos) listas para
- *  `setSubjectAreaLayout` (que MERGEA, M3a). */
+ *  `setSubjectAreaLayout` (que hace merge). */
 export async function arrangeDiagram(
   dia: Diagram, sizeOf: SizeOf, viewMode: 'logical' | 'physical',
 ): Promise<Record<string, { x: number; y: number }>> {
@@ -62,9 +62,9 @@ export async function arrangeDiagram(
   const g = buildArrangeGraph(dia, sizeOf, viewMode);
   const nodes = g.nodes.map((n) => ({ id: n.id, position: { x: 0, y: 0 }, data: {}, width: n.width, height: n.height })) as never;
   const pos = await elkLayout(nodes, g.edges as never);
-  // Doc 53: los símbolos de subcategoría NO van a ELK — tras el arrange se
-  // re-derivan al punto medio de sus nuevas posiciones (el merge M3a dejaría
-  // pegada la posición vieja del símbolo, huérfana del layout nuevo).
+  // Los símbolos de subcategoría no van a ELK: tras el arrange se re-derivan al
+  // punto medio de las posiciones calculadas (el merge dejaría pegada la
+  // posición previa del símbolo, huérfana del layout recién calculado).
   const sizeById = new Map(g.nodes.map((n) => [n.id, n]));
   for (const grp of subtypeGroups(dia.relationships)) {
     const p = pos[grp.parentTableId];

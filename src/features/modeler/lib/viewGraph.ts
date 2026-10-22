@@ -1,7 +1,7 @@
-// Armado PURO de los nodos 'view' y edges 'derivation' del canvas (F3,
-// spec §3-5) — separado de ModelerCanvas para testearlo sin React.
+// Armado puro de los nodos 'view' y edges 'derivation' del canvas, separado de
+// ModelerCanvas para probarlo sin React.
 //
-// Contrato compartido F3:
+// Contrato compartido:
 //   - node type 'view'; posición en SubjectArea.layout[viewId] = {x,y}
 //   - edge type 'derivation'; id = `deriv__{viewId}__{tableId}`,
 //     source=tableId (handle '__hdr_src'), target=viewId (handle '__hdr_tgt')
@@ -18,19 +18,19 @@ export function defaultViewPosition(anchor: { x: number; y: number }): { x: numb
   return { x: anchor.x + VIEW_OFFSET_X, y: anchor.y };
 }
 
-/** Fuentes canónicas de una vista, con fallback al `tableId` legacy. */
+/** Fuentes canónicas de una vista, con fallback a `tableId` (fuente principal). */
 export function viewSourceIds(v: View): string[] {
   return v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
 }
 
 export interface ViewNodeRow { name: string; type: string; fx: boolean; }
 
-/** Filas del nodo VISTA: `outputAlias||column` + `castType||tipo origen`, con
- *  marca `fx` si hay expresión o cast (pedido 5). `colTypes` viene indexado
- *  por `${tableId}::${physicalName}` (lo arma buildViewGraph). */
+/** Filas del nodo de vista: `outputAlias||column` + `castType||tipo origen`,
+ *  con marca `fx` si hay expresión o cast. `colTypes` viene indexado por
+ *  `${tableId}::${physicalName}` (lo arma buildViewGraph). */
 export function viewNodeRows(view: View, colTypes: Record<string, string>): ViewNodeRow[] {
-  // Doc 91 D7: en AMBOS modos las filas salen de `sources` — en User-Defined
-  // SQL el popup/panel persisten ahí todas las columnas de las fuentes.
+  // En ambos modos las filas salen de `sources`: en User-Defined SQL el
+  // popup/panel persisten ahí todas las columnas de las fuentes.
   const first = viewSourceIds(view)[0] ?? '';
   return (view.sources ?? [])
     .filter((s) => s.column || s.expression)
@@ -45,7 +45,7 @@ export function viewNodeRows(view: View, colTypes: Record<string, string>): View
 }
 
 /** Nodos 'view' + edges 'derivation' a partir de `diagram.views`.
- *  - posición: `layout[viewId]`, o default junto a la primera fuente PRESENTE
+ *  - posición: `layout[viewId]`, o default junto a la primera fuente presente
  *    (x + 280, misma y);
  *  - un edge por fuente presente en el canvas (las ausentes no dibujan wire);
  *  - vistas sin ninguna fuente presente se saltan (defensivo: el backend ya

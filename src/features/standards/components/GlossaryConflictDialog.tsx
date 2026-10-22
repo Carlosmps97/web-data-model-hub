@@ -1,7 +1,7 @@
 /**
- * GlossaryConflictDialog — el término no se puede agregar (doc 95 D1): por qué
- * (duplicado y/o uso en nombres lógicos) y TODOS los nombres involucrados en una
- * tabla — tabla · columna · nombre lógico con la frase marcada.
+ * GlossaryConflictDialog — el término no se puede agregar: por qué (duplicado
+ * y/o uso en nombres lógicos) y la lista completa de nombres involucrados en una
+ * tabla: tabla · columna · nombre lógico con la frase marcada.
  */
 import { useMemo, useState } from 'react';
 import { ShieldAlert } from 'lucide-react';

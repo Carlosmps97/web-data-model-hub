@@ -1,17 +1,17 @@
-// Armado PURO de los nodos 'subcat' (símbolo de subcategoría) y edges 'subcat'
-// del canvas (doc 53) — separado de ModelerCanvas para testearlo sin React.
+// Armado puro de los nodos 'subcat' (símbolo de subcategoría) y edges 'subcat'
+// del canvas, separado de ModelerCanvas para testearlo sin React.
 //
 // Contrato:
-//   - la subcategoría es una VARIANTE de `relationships` (`subcategory=true` +
-//     `subtypeSymbolId`); el símbolo (círculo) es un nodo DERIVADO: existe
+//   - la subcategoría es una variante de `relationships` (`subcategory=true` +
+//     `subtypeSymbolId`); el símbolo (rombo) es un nodo derivado: existe
 //     mientras el grupo tenga ≥1 arista y su posición vive en
 //     SubjectArea.layout[symbolId] (default: punto medio padre↔hijos);
 //   - node type 'subcat'; id = subtypeSymbolId;
-//   - edge type 'subcat': UNA arista tronco `subsym-{symbolId}` supertipo →
-//     símbolo (handles __hdr_src → __sym_tgt) + UNA arista por subtipo
+//   - edge type 'subcat': una arista tronco `subsym-{symbolId}` supertipo →
+//     símbolo (handles __hdr_src → __sym_tgt) + una arista por subtipo
 //     símbolo → hijo (id = rel.id, handles __sym_src → `{col}__tgt`);
-//   - doc 98: las frases son de cada RELACIÓN, así que la etiqueta va en la
-//     rama de su subtipo (el tronco no es una relación: no lleva).
+//   - las frases son de cada relación, así que la etiqueta va en la rama de su
+//     subtipo (el tronco no es una relación: no lleva).
 import type { Edge, Node } from '@xyflow/react';
 import type { Relationship } from '@/services/governance.service';
 import { relationshipLabel } from './relationshipLabel';
@@ -25,7 +25,7 @@ export interface SubtypeGroup {
   rels: Relationship[];
 }
 
-/** Predicado de la variante (doc 53): subcategoría CON símbolo. */
+/** Predicado de la variante: subcategoría con símbolo. */
 export function isSubcategory(r: Relationship): boolean {
   return !!r.subcategory && !!r.subtypeSymbolId;
 }
@@ -45,7 +45,7 @@ export function subtypeGroups(rels: Relationship[]): SubtypeGroup[] {
   return [...by.values()].sort((a, b) => a.symbolId.localeCompare(b.symbolId));
 }
 
-/** Símbolo donde `childTableId` YA es subtipo (regla Erwin: una entidad no es
+/** Símbolo donde `childTableId` ya es subtipo (regla Erwin: una entidad no es
  *  subtipo en dos grupos), o null. */
 export function childSubtypeMembership(rels: Relationship[], childTableId: string): string | null {
   for (const r of rels) {
@@ -77,7 +77,7 @@ export function symbolDefaultPos(parent: NodeBox, children: { x: number; y: numb
 }
 
 /** Nodos 'subcat' + edges 'subcat' a partir de las relaciones de subcategoría.
- *  - un grupo dibuja solo si su SUPERTIPO está en el canvas;
+ *  - un grupo dibuja solo si su supertipo está en el canvas;
  *  - aristas de hijo solo para hijos presentes (el backend ya filtra las
  *    relaciones a "ambas puntas en el canvas", esto es defensivo);
  *  - `driftOf` marca en ámbar las aristas fuera de sync con la llave. */

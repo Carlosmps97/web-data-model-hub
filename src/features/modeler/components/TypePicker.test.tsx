@@ -1,5 +1,5 @@
-// TypePicker (doc 106): las cajas de argumentos aceptan texto — `VARCHAR(MAX)`
-// (RDV), `VARCHAR2(30 CHAR)`, `NUMBER(*,2)` —, no solo números.
+// TypePicker: las cajas de argumentos aceptan texto (`VARCHAR(MAX)`,
+// `VARCHAR2(30 CHAR)`, `NUMBER(*,2)`), no solo números.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import TypePicker from './TypePicker';

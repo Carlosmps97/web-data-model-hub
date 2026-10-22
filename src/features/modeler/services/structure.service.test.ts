@@ -1,7 +1,7 @@
-// Escrituras del canvas en sesión de edición (doc 99): cada guardado es
-// «leer el canvas efectivo + grabar el documento COMPLETO». Dos cosas que
-// estas pruebas fijan: los trazos manuales de wires viajan con el documento
-// en TODAS las escrituras, y dos escrituras del mismo canvas van en fila.
+// Escrituras del canvas en sesión de edición: cada guardado es «leer el
+// canvas efectivo + grabar el documento completo». Dos cosas que estas
+// pruebas fijan: los trazos manuales de wires viajan con el documento en
+// todas las escrituras, y dos escrituras del mismo canvas van en fila.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/changeset.service', () => ({ effective: vi.fn(), recordChange: vi.fn() }));
@@ -48,7 +48,7 @@ beforeEach(() => {
   });
 });
 
-describe('setWireRoute — entradas (revisión 2026-09-28)', () => {
+describe('setWireRoute — entradas', () => {
   it.each([['undefined', undefined], ['an empty object', {}], ['zero', 0], ['true', true], ['text', 'x'], ['a single point', { x: 1, y: 2 }]])(
     'algo que no es una lista ni null (%s) se rechaza sin tocar el canvas', async (_label, points) => {
       draft.sa1 = canvas({ routes: { r1: R1 } });
@@ -113,7 +113,7 @@ describe('setWireRoute', () => {
     expect(recorded()[0].routes).toEqual({ r2: R2, r1: R1 });
   });
 
-  it('un canvas anterior al doc 99 (sin la llave) recibe su primer trazo', async () => {
+  it('un canvas sin la llave de trazos recibe su primer trazo', async () => {
     const legacy = canvas();
     delete legacy.routes;
     draft.sa1 = legacy;
@@ -121,7 +121,7 @@ describe('setWireRoute', () => {
     expect(recorded()[0].routes).toEqual({ r1: R1 });
   });
 
-  it('rechaza un trazo inválido ANTES de tocar el backend', async () => {
+  it('rechaza un trazo inválido antes de tocar el backend', async () => {
     await expect(struct.setWireRoute('sa1', 'r1', [{ x: Number.NaN, y: 1 }])).rejects.toThrow(/route/i);
     expect(csvc.effective).not.toHaveBeenCalled();
     expect(csvc.recordChange).not.toHaveBeenCalled();
@@ -147,8 +147,8 @@ describe('setWireRoute', () => {
   });
 });
 
-describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)', () => {
-  it('addToCanvas suma sólo lo que falta, con posiciones y trazos, en UNA escritura, y devuelve lo que entró', async () => {
+describe('miembros del canvas: la lista se arma dentro de la cola', () => {
+  it('addToCanvas suma solo lo que falta, con posiciones y trazos, en una escritura, y devuelve lo que entró', async () => {
     draft.sa1 = canvas({ viewIds: ['v1'], routes: { r9: R2 } });
     const added = await struct.addToCanvas('sa1', {
       tableIds: ['t2', 't3', 't3'], viewIds: ['v1', 'v2'], layout: { t3: { x: 5, y: 6 } }, routes: { r1: R1, r2: R2 },
@@ -162,7 +162,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     }));
   });
 
-  it('revisión doc 113: la posición sólo vale para lo que ENTRA — una tabla o vista que ya estaba no se mueve', async () => {
+  it('la posición solo vale para lo que entra — una tabla o vista que ya estaba no se mueve', async () => {
     draft.sa1 = canvas({ viewIds: ['v1'], layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 9, y: 9 } } });
     await struct.addToCanvas('sa1', {
       tableIds: ['t2', 't3'], viewIds: ['v1'],
@@ -175,7 +175,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(csvc.recordChange).not.toHaveBeenCalled();
   });
 
-  it('doc 114: `pins` fija SÓLO a miembros que ya estaban y no tienen posición guardada, cuando entra una tabla', async () => {
+  it('`pins` fija solo a miembros que ya estaban y no tienen posición guardada, cuando entra una tabla', async () => {
     draft.sa1 = canvas({ tableIds: ['t1', 't2', 't9'], viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, v2: { x: 3, y: 3 } } });
     await struct.addToCanvas('sa1', {
       tableIds: ['t3'], layout: { t3: { x: 5, y: 6 } },
@@ -184,7 +184,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(draft.sa1.layout).toEqual({ t1: { x: 0, y: 0 }, v2: { x: 3, y: 3 }, t3: { x: 5, y: 6 }, t2: { x: 60, y: 60 }, v1: { x: 1, y: 1 } });
   });
 
-  it('doc 114: sin una tabla que entre, `pins` no fija nada (el orden del canvas no cambia)', async () => {
+  it('sin una tabla que entre, `pins` no fija nada (el orden del canvas no cambia)', async () => {
     draft.sa1 = canvas({ viewIds: [], layout: {} });
     vi.mocked(csvc.recordChange).mockClear();
     await struct.addToCanvas('sa1', { tableIds: ['t1'], pins: { t2: { x: 1, y: 1 } } });
@@ -194,9 +194,9 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(draft.sa1.layout).toEqual({});
   });
 
-  it('ronda 2: los trazos sólo acompañan a una tabla que ENTRA — con la tabla ya presente (en otro lugar) no vuelven', async () => {
+  it('los trazos solo acompañan a una tabla que entra — con la tabla ya presente (en otro lugar) no vuelven', async () => {
     // Undo de «sacar t2» mientras otra alta la repuso en otro lugar: sus trazos
-    // viejos ya no calzan con donde está.
+    // previos no calzan con donde está.
     draft.sa1 = canvas({ layout: { t1: { x: 0, y: 0 }, t2: { x: 880, y: 1970 } }, routes: {} });
     vi.mocked(csvc.recordChange).mockClear();
     await struct.addToCanvas('sa1', { tableIds: ['t2'], layout: { t2: { x: 400, y: 0 } }, routes: { r1: R1 } });
@@ -205,7 +205,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(draft.sa1.routes).toEqual({});
   });
 
-  it('dos altas casi a la vez no se pisan (antes cada una grababa la lista que leyó afuera)', async () => {
+  it('dos altas casi a la vez no se pisan (cada una arma la lista dentro de la cola)', async () => {
     await Promise.all([struct.addToCanvas('sa1', { tableIds: ['t3'] }), struct.addToCanvas('sa1', { tableIds: ['t4'] })]);
     expect(draft.sa1.tableIds).toEqual(['t1', 't2', 't3', 't4']);
   });
@@ -223,7 +223,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(calls).toEqual(['get:sa1', 'get:sa1']);
   });
 
-  it('canvas sin lista explícita de vistas (doc 70): parte de la que se MUESTRA; sin ella, no toca las vistas', async () => {
+  it('canvas sin lista explícita de vistas: parte de la que se muestra; sin ella, no toca las vistas', async () => {
     draft.sa1 = canvas({ viewIds: undefined });
     expect(await struct.addToCanvas('sa1', { viewIds: ['v2'] }, ['v1'])).toEqual({ tableIds: [], viewIds: ['v2'] });
     expect(draft.sa1.viewIds).toEqual(['v1', 'v2']);
@@ -238,7 +238,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(draft.sa2.layout).toEqual({ t1: { x: 0, y: 0 } });
   });
 
-  it('una tabla que entra a un canvas sin lista NO arrastra sus vistas: la lista que se muestra queda fija', async () => {
+  it('una tabla que entra a un canvas sin lista no arrastra sus vistas: la lista que se muestra queda fija', async () => {
     draft.sa1 = canvas({ viewIds: undefined });
     await struct.addToCanvas('sa1', { tableIds: ['t3'] }, ['v1']);
     expect(draft.sa1.viewIds).toEqual(['v1']);
@@ -247,7 +247,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(draft.sa2.viewIds).toBeUndefined();
   });
 
-  it('Undo de borrar una vista (doc 89): vuelve a una lista explícita, aunque esté vacía; no a una que ya la tiene ni a un canvas sin lista', async () => {
+  it('Undo de borrar una vista: vuelve a una lista explícita, aunque esté vacía; no a una que ya la tiene ni a un canvas sin lista', async () => {
     draft.sa1 = canvas({ viewIds: ['v1'] });
     expect(await struct.addToCanvas('sa1', { viewIds: ['v1'] })).toEqual({ tableIds: [], viewIds: [] });
     expect(calls).toEqual(['get:sa1']);
@@ -271,7 +271,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(out.routes).toEqual({ r2: R2 });
   });
 
-  it('revisión doc 114: removeFromCanvas con `pins` fija SÓLO a lo que queda sin posición, cuando sale una tabla', async () => {
+  it('removeFromCanvas con `pins` fija solo a lo que queda sin posición, cuando sale una tabla', async () => {
     draft.sa1 = canvas({ tableIds: ['t1', 't2', 't3'], viewIds: ['v1'], layout: { t2: { x: 4, y: 4 } } });
     await struct.removeFromCanvas('sa1', {
       tableIds: ['t1'], pins: { t1: { x: 1, y: 1 }, t2: { x: 2, y: 2 }, t3: { x: 320, y: 60 }, v1: { x: 7, y: 7 }, t9: { x: 9, y: 9 } },
@@ -280,7 +280,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
     expect(draft.sa1.layout).toEqual({ t2: { x: 4, y: 4 }, t3: { x: 320, y: 60 }, v1: { x: 7, y: 7 } });
   });
 
-  it('revisión doc 114: sin una tabla que salga, `pins` no fija nada', async () => {
+  it('sin una tabla que salga, `pins` no fija nada', async () => {
     draft.sa1 = canvas({ tableIds: ['t1'], viewIds: ['v1', 'v2'], layout: {} });
     await struct.removeFromCanvas('sa1', { viewIds: ['v2'], pins: { t1: { x: 1, y: 1 } } });
     expect(draft.sa1.viewIds).toEqual(['v1']);
@@ -314,7 +314,7 @@ describe('miembros del canvas: la lista se arma DENTRO de la cola (doc 100, P5)'
   });
 });
 
-describe('posiciones enteras (doc 100, P6)', () => {
+describe('posiciones enteras', () => {
   it('toda escritura del canvas graba las posiciones redondeadas, también las que ya traía', async () => {
     draft.sa1 = canvas({ layout: { t1: { x: 0.4, y: 10.5 }, t2: { x: 400, y: 0 } } });
     await struct.setSubjectAreaLayout('sa1', { t2: { x: 72.3315, y: -3.7 } });
@@ -328,11 +328,11 @@ describe('posiciones enteras (doc 100, P6)', () => {
     expect(Object.is(recorded()[0].layout.t1.x, 0) && Object.is(recorded()[0].layout.t1.y, 0)).toBe(true);
   });
 
-  // Doc 104 (revisión): sin sesión de edición NO hay escritura directa a
-  // producción. El visor nunca persiste posiciones (doc 84 E); sólo llegaba
-  // acá un guardado pendiente de una sesión que se degradó a solo lectura
-  // (versión transferida, eliminada o enviada) — y publicaba sin revisión.
-  it('sin working copy NO escribe en producción (exige edición)', async () => {
+  // Sin sesión de edición no hay escritura directa a producción. El visor
+  // nunca persiste posiciones; solo llegaría acá un guardado pendiente de una
+  // sesión que se degradó a solo lectura (versión transferida, eliminada o
+  // enviada), que publicaría sin revisión.
+  it('sin working copy no escribe en producción (exige edición)', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: null });
     await expect(struct.setSubjectAreaLayout('sa1', { t1: { x: 1.6, y: 2.2 } }))
       .rejects.toThrow('requires a working copy in edit mode');
@@ -341,7 +341,7 @@ describe('posiciones enteras (doc 100, P6)', () => {
   });
 });
 
-describe('mensajes en inglés (doc 100, P4)', () => {
+describe('mensajes en inglés', () => {
   it('un canvas o una carpeta que ya no están en la working copy', async () => {
     await expect(struct.updateSubjectArea('nope', { projectId: 'p1', name: 'x' })).rejects.toThrow('This canvas is no longer in the working copy.');
     await expect(struct.setSubjectAreaLayout('nope', { t1: { x: 1, y: 1 } })).rejects.toThrow('This canvas is no longer in the working copy.');
@@ -349,9 +349,9 @@ describe('mensajes en inglés (doc 100, P4)', () => {
   });
 });
 
-describe('acciones del Explorer sin sesión de edición (doc 104, ronda 2)', () => {
-  // Un confirm/inline del Explorer que quedó abierto cuando la sesión se
-  // degradó (versión transferida, eliminada o enviada) escribía DIRECTO a
+describe('acciones del Explorer sin sesión de edición', () => {
+  // Un confirm/inline del Explorer abierto cuando la sesión se degrada
+  // (versión transferida, eliminada o enviada) no escribe directo a
   // producción: carpetas y canvases van siempre por la working copy.
   it('carpetas y canvases rechazan y no tocan producción', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: null });
@@ -370,7 +370,7 @@ describe('acciones del Explorer sin sesión de edición (doc 104, ronda 2)', () 
 });
 
 describe('arrangeSubjectArea', () => {
-  it('graba las posiciones nuevas y reinicia los trazos en UNA sola escritura', async () => {
+  it('graba las posiciones nuevas y reinicia los trazos en una sola escritura', async () => {
     draft.sa1 = canvas({ routes: { r1: R1, r2: R2 }, layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, sym: { x: 9, y: 9 } } });
     await struct.arrangeSubjectArea('sa1', { t1: { x: 50, y: 60 }, t2: { x: 700, y: 80 } });
     expect(csvc.recordChange).toHaveBeenCalledTimes(1);
@@ -378,7 +378,7 @@ describe('arrangeSubjectArea', () => {
     expect(recorded()[0].routes).toEqual({});
   });
 
-  it('puede reponer posiciones Y trazos (Undo del auto-arrange)', async () => {
+  it('puede reponer posiciones y trazos (Undo del auto-arrange)', async () => {
     draft.sa1 = canvas({ routes: {}, layout: { t1: { x: 50, y: 60 } } });
     await struct.arrangeSubjectArea('sa1', { t1: { x: 0, y: 0 } }, { r1: R1 });
     expect(recorded()[0].layout).toEqual({ t1: { x: 0, y: 0 } });
@@ -417,9 +417,9 @@ describe('las demás escrituras del canvas conservan los trazos', () => {
 });
 
 describe('cola por canvas — dos guardados del mismo canvas van en fila', () => {
-  it('mover una tabla y trazar un wire casi a la vez NO se pisan', async () => {
-    // Sin la cola: los dos leen el canvas viejo y el segundo PUT borra el
-    // cambio del primero (el trazo desaparecía al recargar).
+  it('mover una tabla y trazar un wire casi a la vez no se pisan', async () => {
+    // Sin la cola, los dos leerían el mismo canvas y el segundo PUT borraría
+    // el cambio del primero (el trazo desaparecería al recargar).
     await Promise.all([
       struct.setWireRoute('sa1', 'r1', R1),
       struct.setSubjectAreaLayout('sa1', { t2: { x: 900, y: 300 } }),
@@ -448,7 +448,7 @@ describe('cola por canvas — dos guardados del mismo canvas van en fila', () =>
     expect(draft.sa2.routes).toEqual({ r1: R2 });
   });
 
-  it('un guardado que falla avisa a quien lo pidió y NO frena al siguiente', async () => {
+  it('un guardado que falla avisa a quien lo pidió y no frena al siguiente', async () => {
     vi.mocked(csvc.recordChange).mockImplementationOnce(async () => { throw new Error('boom'); });
     const first = struct.setWireRoute('sa1', 'r1', R1);
     const second = struct.setSubjectAreaLayout('sa1', { t2: { x: 900, y: 300 } });
@@ -468,10 +468,10 @@ describe('cola por canvas — dos guardados del mismo canvas van en fila', () =>
   });
 });
 
-// Doc 105 (F4 / doc 100 P8): el Undo de borrar una tabla o una vista repone lo
-// que REALMENTE salió de cada canvas, con su posición.
-describe('lo que sale de un canvas, con su posición (doc 105, F4)', () => {
-  it('removeFromCanvas devuelve lo que REALMENTE salió: tablas, vistas y sus posiciones', async () => {
+// El Undo de borrar una tabla o una vista repone lo que realmente salió de
+// cada canvas, con su posición.
+describe('lo que sale de un canvas, con su posición', () => {
+  it('removeFromCanvas devuelve lo que realmente salió: tablas, vistas y sus posiciones', async () => {
     draft.sa1 = canvas({ viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } } });
     const out = await struct.removeFromCanvas('sa1', { tableIds: ['t2', 't9'], viewIds: ['v1', 'v9'] });
     expect(out).toEqual({ tableIds: ['t2'], viewIds: ['v1'], layout: { t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } }, colors: {} });
@@ -485,10 +485,10 @@ describe('lo que sale de un canvas, con su posición (doc 105, F4)', () => {
     expect(await struct.removeFromCanvas('nope', { tableIds: ['t1'] })).toEqual(none);
   });
 
-  it('listedViews: cuáles de esas vistas lista EXPLÍCITAMENTE el canvas y dónde están, leído en su cola', async () => {
+  it('listedViews: cuáles de esas vistas lista explícitamente el canvas y dónde están, leído en su cola', async () => {
     draft.sa1 = canvas({ viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, v1: { x: 7, y: 8 } } });
     expect(await struct.listedViews('sa1', ['v1', 'v2', 'v9'])).toEqual({ viewIds: ['v1', 'v2'], layout: { v1: { x: 7, y: 8 } }, colors: {} });
-    // En la cola: se lee DESPUÉS de una escritura pendiente del mismo canvas.
+    // En la cola: se lee después de una escritura pendiente del mismo canvas.
     const [, seen] = await Promise.all([
       struct.removeFromCanvas('sa1', { viewIds: ['v2'] }),
       struct.listedViews('sa1', ['v1', 'v2']),
@@ -496,7 +496,7 @@ describe('lo que sale de un canvas, con su posición (doc 105, F4)', () => {
     expect(seen).toEqual({ viewIds: ['v1'], layout: { v1: { x: 7, y: 8 } }, colors: {} });
   });
 
-  it('listedViews: un canvas sin lista explícita (legacy) o que ya no está no lista ninguna', async () => {
+  it('listedViews: un canvas sin lista explícita o que ya no está no lista ninguna', async () => {
     draft.sa2 = canvas({ id: 'sa2', viewIds: undefined, layout: { v1: { x: 9, y: 9 } } });
     expect(await struct.listedViews('sa2', ['v1'])).toEqual({ viewIds: [], layout: {}, colors: {} });
     expect(await struct.listedViews('nope', ['v1'])).toEqual({ viewIds: [], layout: {}, colors: {} });
@@ -505,7 +505,7 @@ describe('lo que sale de un canvas, con su posición (doc 105, F4)', () => {
   });
 });
 
-describe('setCanvasColors (doc 109)', () => {
+describe('setCanvasColors', () => {
   it('mezcla el lote sobre los colores efectivos del canvas y graba el documento completo', async () => {
     draft.sa1 = canvas({ viewIds: ['v1'], colors: { t1: '#16A37B', t2: 'none' } });
     await struct.setCanvasColors('sa1', { t1: 'theme:th1', t2: null, v1: '#ff0000' });
@@ -519,7 +519,7 @@ describe('setCanvasColors (doc 109)', () => {
     expect(recorded()[0].colors).toEqual({ t2: '#16A37B', v1: 'none' });
   });
 
-  it('rechaza un color inválido ANTES de tocar el backend', async () => {
+  it('rechaza un color inválido antes de tocar el backend', async () => {
     await expect(struct.setCanvasColors('sa1', { t1: 'rojo' })).rejects.toThrow(/Invalid color/);
     expect(csvc.effective).not.toHaveBeenCalled();
   });
@@ -543,7 +543,7 @@ describe('setCanvasColors (doc 109)', () => {
   });
 });
 
-describe('el color de una caja en el canvas sale y entra con ella (doc 112)', () => {
+describe('el color de una caja en el canvas sale y entra con ella', () => {
   it('removeFromCanvas quita el color de lo que sale y lo devuelve; el de las demás cajas queda', async () => {
     draft.sa1 = canvas({ viewIds: ['v1'], colors: { t1: '#111111', t2: 'none', v1: 'theme:a' } });
     const out = await struct.removeFromCanvas('sa1', { tableIds: ['t2'], viewIds: ['v1'] });
@@ -551,7 +551,7 @@ describe('el color de una caja en el canvas sale y entra con ella (doc 112)', ()
     expect(draft.sa1.colors).toEqual({ t1: '#111111' });
   });
 
-  it('una caja que ENTRA llega con el color de su tabla: un color guardado de antes no revive', async () => {
+  it('una caja que entra llega con el color de su tabla: un color guardado previamente no revive', async () => {
     draft.sa1 = canvas({ tableIds: ['t1'], viewIds: [], colors: { t1: '#111111', t2: '#FF0000', v1: 'none' } });
     await struct.addToCanvas('sa1', { tableIds: ['t2'], viewIds: ['v1'] });
     expect(draft.sa1.colors).toEqual({ t1: '#111111' });
@@ -580,7 +580,7 @@ describe('el color de una caja en el canvas sale y entra con ella (doc 112)', ()
     expect(draft.sa1.colors).toEqual({ t1: '#111111', v1: 'none' });   // quitar uno que sobraba sí vale
   });
 
-  it('canvas sin lista explícita de vistas (legacy, doc 70): una vista que se muestra por sus fuentes se pinta', async () => {
+  it('canvas sin lista explícita de vistas: una vista que se muestra por sus fuentes se pinta', async () => {
     draft.sa1 = canvas({ tableIds: ['t1'], viewIds: undefined, colors: {} });
     await struct.setCanvasColors('sa1', { v1: '#123456' });
     expect(draft.sa1.colors).toEqual({ v1: '#123456' });
@@ -592,8 +592,8 @@ describe('el color de una caja en el canvas sale y entra con ella (doc 112)', ()
   });
 });
 
-describe('UDPs del canvas por cambios (doc 112)', () => {
-  it('mezcla SÓLO lo cambiado sobre los valores vigentes: un guardado que aterrizó antes no se pisa', async () => {
+describe('UDPs del canvas por cambios', () => {
+  it('mezcla solo lo cambiado sobre los valores vigentes: un guardado que aterrizó antes no se pisa', async () => {
     draft.sa1 = canvas({ udpValues: { u1: 'NEW', u2: 'x' } });    // otro guardado ya dejó u1 = NEW
     await struct.patchSubjectAreaUdp('sa1', { u3: 'y', u2: '' });
     expect(draft.sa1.udpValues).toEqual({ u1: 'NEW', u3: 'y' });

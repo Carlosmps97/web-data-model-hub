@@ -19,10 +19,10 @@ import { placeNextTo, type RectLike } from '@/lib/floating';
 // Profundidades: ramas del proyecto a depth 1 (hermanas de «Models»); esquema 2 · objeto 3 · columna 4.
 type Branch = 'tables' | 'views' | 'schemas';
 
-/** `at` (doc 113 §5): dónde se ancla — los dos menús se ubican con la regla
- *  única de flotantes (antes, con topes fijos estimados que cortaban). */
+/** `at`: dónde se ancla; los dos menús se ubican con la regla única de
+ *  flotantes. */
 interface Picker { at: RectLike; label: string; candidates: CanvasLike[]; targetId: string; colId?: string }
-/** Menú ⋮ de una fila (doc 72): qué inspeccionar y cómo localizar. */
+/** Menú ⋮ de una fila: qué inspeccionar y cómo localizar. */
 interface RowMenu { at: RectLike; label: string; inspect: InspectTarget; candidates: CanvasLike[]; targetId: string; colId?: string }
 type RowMenuSpec = Omit<RowMenu, 'at'>;
 
@@ -42,14 +42,15 @@ function FloatingMenu({ at, cap, children }: { at: RectLike; cap?: number; child
 }
 
 /**
- * Ramas Tables · Views · Schemas de UN proyecto (doc 71 §1): el catálogo acotado
- * a las tablas de sus canvases. Doc 72 §1: el inventario (tablas con conteo de
- * columnas + vistas) llega en UNA request server-side, se carga al abrir
- * cualquiera de las ramas (o al filtrar) y se cachea hasta que cambie la
- * versión activa o la membresía de los canvases. Tablas y vistas traen sólo el
- * CONTEO de columnas: las columnas de una y otra se cargan al expandirlas. Click en tabla/columna/vista = ir al objeto (canvas
- * abierto → centrar; único canvas → abrirlo y centrar; varios → elegir); el
- * menú ⋮ ofrece además «Inspect metadata» (Object Inspector, sin canvas).
+ * Ramas Tables · Views · Schemas de un proyecto: el catálogo acotado a las
+ * tablas de sus canvases. El inventario (tablas con conteo de columnas + vistas)
+ * llega en una sola request server-side, se carga al abrir cualquiera de las
+ * ramas (o al filtrar) y se cachea hasta que cambie la versión activa o la
+ * membresía de los canvases. Tablas y vistas traen solo el conteo de columnas:
+ * las columnas de una y otra se cargan al expandirlas. Clic en
+ * tabla/columna/vista = ir al objeto (canvas abierto → centrar; único canvas →
+ * abrirlo y centrar; varios → elegir); el menú ⋮ ofrece además «Inspect
+ * metadata» (Object Inspector, sin canvas).
  */
 export default function ProjectCatalog({ project, filter, pushToast }: {
   project: Project;
@@ -59,18 +60,18 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   const tree = useModelerStore((s) => s.trees[project.id]);
   const activeSaId = useModelerStore((s) => s.activeSaId);
   const viewMode = useModelerStore((s) => s.viewMode);
-  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
+  const n = facetNouns(viewMode);   // Entity/Attribute o Table/Column
   const openCanvasAndFocus = useModelerStore((s) => s.openCanvasAndFocus);
   const openInspector = useModelerStore((s) => s.openInspector);
   const focusTable = useModelerStore((s) => s.focusTable);
   const focusColumn = useModelerStore((s) => s.focusColumn);
   const activeCs = useSessionStore((s) => s.activeChangesetId);
-  const explorerTick = useModelerStore((s) => s.explorerTick);   // doc 88 §2
+  const explorerTick = useModelerStore((s) => s.explorerTick);
 
   const canvases: CanvasLike[] = useMemo(() => tree?.subjectAreas ?? [], [tree]);
   const tableIds = useMemo(() => projectTableIds(canvases), [canvases]);
-  // Perf (doc 72): índice inverso canvas→objeto UNA vez, en lugar de barrer los
-  // cientos de canvases por cada fila y en cada re-render (O(filas×canvases)).
+  // Rendimiento: índice inverso canvas→objeto calculado una vez, en lugar de barrer
+  // los cientos de canvases por cada fila y en cada re-render (O(filas×canvases)).
   const canvasIndex = useMemo(() => buildCanvasIndex(canvases), [canvases]);
   const activeCanvasTables = useMemo(
     () => new Set(canvases.find((c) => c.id === activeSaId)?.tableIds ?? []),
@@ -85,8 +86,8 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   const loadingRef = useRef(false);
   const [cols, setCols] = useState<Record<string, DbxColumn[]>>({});
   const [colBusy, setColBusy] = useState<Set<string>>(new Set());
-  // Columnas de VISTA: como las de tabla, se piden al expandir (el inventario
-  // sólo trae el conteo — ver `explorer.service`).
+  // Columnas de vista: como las de tabla, se piden al expandir (el inventario
+  // solo trae el conteo; ver `explorer.service`).
   const [viewCols, setViewCols] = useState<Record<string, DbxViewCol[]>>({});
   const [viewColBusy, setViewColBusy] = useState<Set<string>>(new Set());
   const [expSchemas, setExpSchemas] = useState<Set<string>>(new Set());
@@ -102,15 +103,15 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
     [inv],
   );
 
-  // Cambió la versión activa, la membresía de los canvases o la estructura del
-  // canvas activo (doc 88 §2: `explorerTick`) → inventario obsoleto. Se vuelve a
-  // pedir sólo si hay una rama abierta (carga perezosa).
+  // Cambio de versión activa, de membresía de los canvases o de estructura del
+  // canvas activo (`explorerTick`) → inventario desactualizado. Se vuelve a pedir solo
+  // si hay una rama abierta (carga perezosa).
   useEffect(() => {
     setInv(null); setCols({}); setViewCols({});
     setExpSchemas(new Set()); setExpTables(new Set()); setExpViews(new Set());
   }, [activeCs, idsKey, explorerTick]);
 
-  // UNA request por proyecto (doc 72 §1) al abrir cualquier rama o al filtrar.
+  // Una sola request por proyecto al abrir cualquier rama o al filtrar.
   const wanted = open.size > 0 || filtering;
   useEffect(() => {
     if (inv !== null || !wanted || !tree || loadingRef.current) return undefined;
@@ -175,7 +176,7 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
   const goView = (e: ReactMouseEvent, v: DbxView) =>
     resolve(e, v.name, indexCanvasesWithView(canvasIndex, v.id, v.sourceTableIds), v.id);
 
-  // ── Menú ⋮ (doc 72): Inspect metadata / Locate on canvas ──
+  // ── Menú ⋮: Inspect metadata / Locate on canvas ──
   const openMenu = (e: ReactMouseEvent, spec: RowMenuSpec) => {
     e.stopPropagation();
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -288,7 +289,7 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
     </div>
   );
 
-  // `children` es un thunk: sólo construimos las filas del esquema cuando está
+  // `children` es un thunk: las filas del esquema solo se construyen cuando está
   // abierto (evita crear miles de elementos por un esquema colapsado).
   const schemaNode = (kind: 'tables' | 'views', schema: string, count: number, children: () => ReactNode) => {
     const key = `${kind}:${schema}`;
@@ -314,7 +315,7 @@ export default function ProjectCatalog({ project, filter, pushToast }: {
           : tableGroups.length === 0 ? empty(filtering ? `No ${n.many} match the filter.` : `No ${n.many}.`)
             : tableGroups.map((g) => schemaNode('tables', g.schema, g.items.length, () => g.items.map((t) => tableRow(t, 3))))
       ))}
-      {/* Doc 86 D5: las vistas son del modelo físico — la rama no se lista en Logical. */}
+      {/* Las vistas son del modelo físico: la rama no se lista en Logical. */}
       {viewMode === 'physical' && branchRow('views', <Eye size={14} style={{ color: 'var(--purple)' }} />, 'Views', views?.length)}
       {viewMode === 'physical' && body('views', () => (
         viewGroups.length === 0 ? empty(filtering ? 'No views match the filter.' : 'No views on this project.')

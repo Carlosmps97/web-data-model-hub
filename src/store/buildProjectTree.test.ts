@@ -1,5 +1,5 @@
-// Doc 92 D1: el árbol del Explorer ordena carpetas (= subject areas) y canvases
-// alfabéticamente, case-insensitive; `order` (Erwin) sólo desempata.
+// El árbol del Explorer ordena carpetas (= subject areas) y canvases
+// alfabéticamente, case-insensitive; `order` (Erwin) solo desempata.
 import { describe, expect, it } from 'vitest';
 import { buildProjectTree } from './useModelerStore';
 import type { Project } from '@/types/model';
@@ -11,7 +11,7 @@ const F = (id: string, parent: string | null, name: string, order = 0) =>
 const SA = (id: string, folderId: string | null, name: string) =>
   ({ id, projectId: 'p1', folderId, name, tableIds: [] }) as unknown as SubjectArea;
 
-describe('buildProjectTree (doc 92 D1)', () => {
+describe('buildProjectTree', () => {
   it('carpetas A–Z aunque `order` diga otra cosa; canvases A–Z case-insensitive', () => {
     const folders = [F('f1', null, 'zeta', 0), F('f2', null, 'Alfa', 9), F('f3', null, 'beta', 1), F('f4', 'f2', 'Sub b', 0), F('f5', 'f2', 'sub a', 1)];
     const canvases = [SA('c1', null, 'beta'), SA('c2', null, 'Alfa'), SA('c3', 'f2', 'zz'), SA('c4', 'f2', 'AA')];

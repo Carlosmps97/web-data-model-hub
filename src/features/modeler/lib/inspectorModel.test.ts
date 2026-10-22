@@ -1,4 +1,4 @@
-// Doc 72 §3: helpers puros del Object Inspector.
+// Helpers puros del Object Inspector.
 import { describe, expect, it } from 'vitest';
 import type { CanonicalColumn, TableLinkRow } from '@/services/governance.service';
 import {
@@ -19,21 +19,21 @@ describe('inspectorModel', () => {
     expect(facetType({ dataType: 'VARCHAR(30)', logicalDataType: 'X' }, 'physical')).toBe('VARCHAR(30)');
   });
 
-  it('positionIn sigue el orden de display canónico: bloque PK primero (doc 81)', () => {
+  it('positionIn sigue el orden de display canónico: bloque PK primero', () => {
     const cols = [col('a', 3), col('b', 1), col('c', 2)];
     expect(positionIn(cols, 'a')).toEqual({ pos: 3, of: 3 });
     expect(positionIn(cols, 'c')).toEqual({ pos: 2, of: 3 });
     expect(positionIn(cols, 'zzz')).toEqual({ pos: 0, of: 3 });
-    // Tabla legacy (Excel pre-doc-81, ordinal no PK-first): el badge acompaña
-    // a la lista — la PK se muestra 1.ª aunque su ordinal sea el último.
+    // Tabla cuyo ordinal no pone la PK primero: el badge acompaña a la
+    // lista — la PK se muestra 1.ª aunque su ordinal sea el último.
     const legacy = [col('x', 0), col('y', 1), col('pk', 2, { isPrimaryKey: true })];
     expect(positionIn(legacy, 'pk')).toEqual({ pos: 1, of: 3 });
     expect(positionIn(legacy, 'x')).toEqual({ pos: 2, of: 3 });
   });
 
   it('keyLabel / facetOnly', () => {
-    // Doc 94: la posición en la llave sale del orden único (ordinal), no de un pkPosition viejo.
-    const stale = (pkPosition: number) => ({ pkPosition }) as Partial<CanonicalColumn>;   // campo retirado, dato viejo
+    // La posición en la llave sale del orden único (ordinal); un pkPosition en los datos no cuenta.
+    const stale = (pkPosition: number) => ({ pkPosition }) as Partial<CanonicalColumn>;   // campo fuera del modelo: se ignora
     const cols = [col('a', 1, { isPrimaryKey: true, ...stale(1) }), col('b', 2, { isPrimaryKey: true, ...stale(0), isForeignKey: true }), col('c', 3)];
     expect(keyLabel(cols[0], cols)).toBe('PK · #1 of 2 in the key');
     expect(keyLabel(cols[1], cols)).toBe('PK · #2 of 2 in the key · FK');
@@ -62,9 +62,9 @@ describe('inspectorModel', () => {
   });
 
   it('usagePath / primaryCanvas', () => {
-    const a = { canvasId: 'a', canvas: 'Finanzas', project: 'DDV', folder: 'CPYBCA' };
+    const a = { canvasId: 'a', canvas: 'Finanzas', project: 'Ventas', folder: 'COMERCIAL' };
     const b = { canvasId: 'b', canvas: 'Pricing', project: null, folder: null };
-    expect(usagePath(a)).toBe('DDV › CPYBCA › Finanzas');
+    expect(usagePath(a)).toBe('Ventas › COMERCIAL › Finanzas');
     expect(usagePath(b)).toBe('— › root › Pricing');
     expect(primaryCanvas([a, b], 'b')?.canvasId).toBe('b');
     expect(primaryCanvas([a, b], 'zzz')).toBeNull();
@@ -73,15 +73,15 @@ describe('inspectorModel', () => {
   });
 });
 
-// Doc 89 §3.2: conteos del diálogo «Delete table…» del inspector, calculados
-// del dossier ya cargado (sin re-consultar como hace Properties).
-describe('tableDeleteImpact (doc 89)', () => {
+// Conteos del diálogo «Delete table…» del inspector, calculados del dossier
+// ya cargado (sin re-consultar como hace Properties).
+describe('tableDeleteImpact', () => {
   const link = (id: string, parent: string, child: string): TableLinkRow => ({
     id, parentTableId: parent, parentTableName: parent, childTableId: child, childTableName: child,
     parentCardinality: 'one', childCardinality: 'many', identifying: false, pairs: [], canvases: [],
   });
 
-  it('cuenta canvases, tablas relacionadas ÚNICAS (sin la propia) y vistas', () => {
+  it('cuenta canvases, tablas relacionadas únicas (sin la propia) y vistas', () => {
     const impact = tableDeleteImpact('t1', {
       usage: [{ canvasId: 'sa1' }, { canvasId: 'sa2' }],
       links: [link('r1', 't1', 'tB'), link('r2', 'tC', 't1'), link('r3', 't1', 'tB'), link('r4', 't1', 't1')],

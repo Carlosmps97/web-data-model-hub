@@ -1,10 +1,10 @@
-// Doc 105 (H5) — borrar una tabla o una vista con la versión RECIÉN
-// TRANSFERIDA: la lectura de la cascada falla con 403 de ESA versión y la
-// revalidación la degrada a solo lectura (y avisa). El borrado decía además
-// «…nothing was deleted. Try again.» — falso: ya no se puede. Criterio del doc
-// 104: un 403/404/409 de la versión espera la revalidación; si cambió la
-// sesión, el error original sigue (los llamadores del doc 104 lo callan); si
-// no (rol perdido, proxy), el aviso de siempre. Harness de `deleteUndo.test.ts`.
+// Borrar una tabla o una vista con la versión recién transferida: la lectura de
+// la cascada falla con 403 de esa versión y la revalidación la degrada a solo
+// lectura (y avisa). El borrado no agrega «…nothing was deleted. Try again.»,
+// que sería falso: en esa sesión no se puede reintentar. Criterio: un
+// 403/404/409 de la versión espera la revalidación; si la sesión cambia, el error
+// original sigue (los llamadores lo callan); si no (rol perdido, proxy), se
+// muestra el aviso habitual. Harness de `deleteUndo.test.ts`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -56,7 +56,7 @@ const deleted = (coll: string, id: string) => ops.get(`${coll}:${id}`) === 'dele
 const unhandled: unknown[] = [];
 const onUnhandled = (e: unknown) => { unhandled.push(e); };
 
-/** Cascada de membresía del backend (doc 88 §4) al borrar una tabla o vista. */
+/** Cascada de membresía del backend al borrar una tabla o vista. */
 function cascade(coll: string, id: string): void {
   if (!cascadeOnDelete) return;
   const field = coll === 'views' ? 'viewIds' : 'tableIds';
@@ -67,9 +67,10 @@ function cascade(coll: string, id: string): void {
     if (sa.layout) delete sa.layout[id];
   }
 }
-/** Poda del backend al grabar un canvas (prune_deleted_members): sólo los ids
- *  LISTADOS en `tableIds`/`viewIds` con un borrado pendiente salen de las listas
- *  y del layout (un canvas legacy conserva la posición de sus vistas). */
+/** Poda del backend al grabar un canvas (prune_deleted_members): solo los ids
+ *  listados en `tableIds`/`viewIds` con un borrado pendiente salen de las listas
+ *  y del layout (un canvas sin lista explícita de vistas conserva la posición de
+ *  sus vistas). */
 function prune(sa: SubjectArea): SubjectArea {
   const listed = [...(sa.tableIds ?? []), ...(Array.isArray(sa.viewIds) ? sa.viewIds : [])];
   const gone = new Set(listed.filter((id) => deleted('canonical_tables', id) || deleted('views', id)));
@@ -79,7 +80,7 @@ function prune(sa: SubjectArea): SubjectArea {
   if (sa.layout) out.layout = Object.fromEntries(Object.entries(sa.layout).filter(([k]) => !gone.has(k)));
   return out;
 }
-/** Vistas que el canvas MUESTRA: su lista explícita o, legacy, las de sus fuentes. */
+/** Vistas que el canvas muestra: su lista explícita o, si no la tiene, las de sus fuentes. */
 const shown = (sa: SubjectArea): string[] =>
   (Array.isArray(sa.viewIds) ? sa.viewIds : VIEWS.filter((v) => v.sourceTableIds.some((t) => sa.tableIds.includes(t))).map((v) => v.id))
     .filter((v) => !deleted('views', v));
@@ -96,14 +97,14 @@ beforeEach(async () => {
   cascadeOnDelete = true;
   ops = new Map();
   draft = {
-    // Canvas ACTIVO, con lista explícita de vistas (doc 70).
+    // Canvas activo, con lista explícita de vistas.
     sa1: { id: 'sa1', projectId: 'p', name: 'Uno', folderId: null, tableIds: ['t1', 't2'], viewIds: ['v1', 'v2'],
       layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 0, y: 300 }, v2: { x: 400, y: 300 } },
       drawings: [], udpValues: {}, routes: {} } as SubjectArea,
-    // Otro canvas con lista explícita que también muestra v1.
+    // Otro canvas con lista explícita que también muestra `v1`.
     sa2: { id: 'sa2', projectId: 'p', name: 'Dos', folderId: null, tableIds: ['t1'], viewIds: ['v1'],
       layout: { t1: { x: 5, y: 5 }, v1: { x: 5, y: 205 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
-    // Canvas legacy (sin lista explícita): muestra v1 por su fuente.
+    // Canvas sin lista explícita de vistas: muestra `v1` por su fuente.
     sa3: { id: 'sa3', projectId: 'p', name: 'Tres', folderId: null, tableIds: ['t1'],
       layout: { t1: { x: 9, y: 9 }, v1: { x: 9, y: 209 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
   };
@@ -192,7 +193,7 @@ afterEach(async () => {
 
 
 /** La lectura de la cascada falla con 403 de la versión; `transfer` = la
- *  revalidación (registrada ANTES de que el error llegue, como el observador
+ *  revalidación (registrada antes de que el error llegue, como el observador
  *  HTTP) la degrada a solo lectura. */
 function refuseRead(transfer: boolean): void {
   vi.mocked(gov.listRelationships).mockImplementationOnce(async () => {
@@ -205,7 +206,7 @@ function refuseRead(transfer: boolean): void {
   });
 }
 
-describe('borrar con la versión recién transferida (doc 105, H5)', () => {
+describe('borrar con la versión recién transferida', () => {
   it('tabla: no dice «Try again» — sigue el error original, para que el llamador lo calle', async () => {
     refuseRead(true);
     const err = await st().deleteTable('t1').then(() => null, (e: unknown) => e as Error);
@@ -214,12 +215,12 @@ describe('borrar con la versión recién transferida (doc 105, H5)', () => {
     expect(gov.recordChangesBulk).not.toHaveBeenCalled();
   });
 
-  it('tabla: si la sesión sigue igual (rol perdido, proxy), el aviso de siempre — DESPUÉS de la revalidación', async () => {
+  it('tabla: si la sesión sigue igual (rol perdido, proxy), el aviso de siempre, después de la revalidación', async () => {
     refuseRead(false);
     await expect(st().deleteTable('t1')).rejects.toThrow(DEPENDENTS);
   });
 
-  it('tabla: si mientras leía se abrió OTRA versión en edición, sigue el error original (no el «Try again» de otra sesión)', async () => {
+  it('tabla: si mientras leía se abrió otra versión en edición, sigue el error original (no el «Try again» de otra sesión)', async () => {
     vi.mocked(gov.listRelationships).mockImplementationOnce(async () => {
       await sleep(5);
       useSessionStore.getState().openModel({ projectId: 'p', mode: 'editing', changesetId: 'cs2' });

@@ -1,21 +1,23 @@
 /**
- * ReviewScreen (p5) — "Requests · review & approval", CROSS-PROJECT.
+ * ReviewScreen: "Requests · review & approval", transversal a todos los proyectos.
  *
- * Layout (per design #p5) — a two-section panel:
- *   · header: "Requests · review & approval" + close
- *   · SECTION 1 (left): From / Reviewer filters, "{N} requests", request cards
- *     (status badge, "Assigned to you", snap · vN, requester → reviewer, project)
- *   · SECTION 2 (right): open request detail — title + status, meta line
- *     (From {owner} · snapshot of vN · date · Reviewer {names}), actions
- *     (Open in canvas / Comment / Reject / Approve), an assigned-reviewer note,
- *     impact chips + legend, the requester note, "Changes · N" diff, and the
- *     reviewer comments thread + input.
+ * Distribución en dos secciones:
+ *   · cabecera: "Requests · review & approval" + cerrar
+ *   · sección 1 (izquierda): filtros From / Reviewer, "{N} requests", tarjetas de
+ *     request (badge de estado, "Assigned to you", snap · vN, solicitante → revisor,
+ *     proyecto)
+ *   · sección 2 (derecha): detalle del request abierto: título + estado, línea de
+ *     metadatos (`From {owner} · snapshot of vN · date · Reviewer {names}`),
+ *     acciones (Open in canvas / Comment / Reject / Approve), nota del revisor
+ *     asignado, chips de impacto + leyenda, nota del solicitante, diff
+ *     "Changes · N" y el hilo de comentarios de revisión con su input.
  *
- * Data: versioning.service (listVersions / getPublished / listUserNames /
- * getChangeset / getDiff / review / addComment) + projects.service. The actor
- * comes from useSessionStore (injects X-Dev-User). Approve/Reject are disabled
- * when the actor is NOT the assigned reviewer; on 403 we toast. Lists + detail
- * reload when the actor changes — key for validating the approval flow.
+ * Datos: versioning.service (listVersions / getPublished / listUserNames /
+ * getChangeset / getDiff / review / addComment) + projects.service. El actor sale
+ * de useSessionStore (en desarrollo inyecta X-Dev-User). Approve/Reject se
+ * deshabilitan cuando el actor no es el revisor asignado; ante un 403 se muestra
+ * un toast. Las listas y el detalle se recargan cuando cambia el actor, clave
+ * para validar el flujo de aprobación.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -40,6 +42,7 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { runBlocking } from '@/store/useBusyStore';
 import {
+  canOpenVersion,
   publishBlockedDetail,
   addComment,
   getChangeset,
@@ -72,17 +75,17 @@ import type {
   VersionRow,
 } from '@/types/versioning';
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── auxiliares ───────────────────────────────────────────────────────────────
 
 const AVATAR_TONES = ['blue', 'purple', 'green', 'navy'] as const;
-/** Stable avatar tone from an id so a given user always gets the same color. */
+/** Tono de avatar estable a partir del id: un mismo usuario recibe siempre el mismo color. */
 function avatarTone(id: string): (typeof AVATAR_TONES)[number] {
   let h = 0;
   for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return AVATAR_TONES[h % AVATAR_TONES.length];
 }
 
-/** Compact, locale-aware date for card meta / comments. */
+/** Fecha compacta, según el locale, para los metadatos de tarjetas y comentarios. */
 function fmtDate(iso?: string | null): string {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -90,7 +93,7 @@ function fmtDate(iso?: string | null): string {
   return d.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-/** Doc 88 §6: chips de resultado de la bandeja (All por defecto). */
+/** Chips de resultado de la bandeja (All por defecto). */
 const OUTCOME_CHIPS: { key: 'all' | RequestOutcome; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'pending', label: 'Pending' },
@@ -99,7 +102,7 @@ const OUTCOME_CHIPS: { key: 'all' | RequestOutcome; label: string }[] = [
   { key: 'withdrawn', label: 'Withdrawn' },
 ];
 
-// ── component ────────────────────────────────────────────────────────────────
+// ── componente ───────────────────────────────────────────────────────────────
 
 export default function ReviewScreen() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -112,34 +115,34 @@ export default function ReviewScreen() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
 
-  // Filters: From (requester/owner) + Reviewer (defaults to "Me", the actor)
-  // + Project (doc 75 D20: bandeja global, proyecto siempre diferenciado).
+  // Filtros: From (solicitante/dueño) + Reviewer (por defecto "Me", el actor)
+  // + Project (bandeja global, con el proyecto siempre diferenciado).
   const [ownerFilter, setOwnerFilter] = useState('');
   const [reviewerFilter, setReviewerFilter] = useState(user.id);
   const [projectFilter, setProjectFilter] = useState('');
-  // Doc 88 §6: la bandeja muestra TODAS las solicitudes (cualquier resultado)
-  // por defecto; el chip acota por resultado del último ciclo.
+  // La bandeja muestra todas las solicitudes (cualquier resultado) por defecto;
+  // el chip acota por resultado del último ciclo.
   const [outcomeFilter, setOutcomeFilter] = useState<'all' | RequestOutcome>('all');
-  // Doc 88 §5: rechazar pasa por un diálogo con el motivo obligatorio.
+  // Rechazar pasa por un diálogo con el motivo obligatorio.
   const [rejectOpen, setRejectOpen] = useState(false);
-  // Doc 75 D5: aprobar un request que borra su proyecto exige confirmación tipeada.
+  // Aprobar un request que borra su proyecto exige confirmación tipeada.
   const [approveDeletionOpen, setApproveDeletionOpen] = useState(false);
 
-  // Selection + detail.
+  // Selección + detalle.
   const selectedId = searchParams.get('id');
   const [detail, setDetail] = useState<ChangesetDetail | null>(null);
   const [diff, setDiff] = useState<ChangesetDiff | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [acting, setActing] = useState(false);
-  // Popup "Change details" (doc 31) — se cierra solo al cambiar de request.
+  // Popup "Change details": se cierra solo al cambiar de request.
   const [detailsOpen, setDetailsOpen] = useState(false);
-  // Doc 84 A1: publish bloqueado (409/422 estructurado del approve) — panel
-  // persistente con la lista completa; se limpia al cambiar de request.
+  // Publish bloqueado (409/422 estructurado del approve): panel persistente con
+  // la lista completa; se limpia al cambiar de request.
   const [blocked, setBlocked] = useState<PublishBlockedDetail | null>(null);
   useEffect(() => { setBlocked(null); }, [selectedId]);
-  // Tras withdraw/reopen la versión volvió a draft y SALE de la lista: en vez de
-  // auto-seleccionar en silencio otro request (que confunde: "Open in canvas"
-  // abriría el request de OTRO), mostramos un empty-state con la vuelta al canvas.
+  // Tras withdraw/reopen la versión vuelve a draft y sale de la lista: en vez de
+  // auto-seleccionar en silencio otro request (confuso: "Open in canvas" abriría
+  // el request de otra persona), se muestra un empty-state con la vuelta al canvas.
   const [draftHint, setDraftHint] = useState<{ id: string; projectId: string; label: string | null } | null>(null);
 
   const [commentText, setCommentText] = useState('');
@@ -164,12 +167,12 @@ export default function ReviewScreen() {
     [projects],
   );
 
-  // When the actor changes, follow them with the "Reviewer: Me" default.
+  // Cuando cambia el actor, el filtro "Reviewer: Me" por defecto pasa a ser él.
   useEffect(() => {
     setReviewerFilter((prev) => (prev === '' ? '' : user.id));
   }, [user.id]);
 
-  // ── load the cross-project lists (reload when the actor changes) ────────────
+  // ── listas de todos los proyectos (se recargan al cambiar el actor) ─────────
   useEffect(() => {
     let cancelled = false;
     setListsLoading(true);
@@ -193,7 +196,7 @@ export default function ReviewScreen() {
     };
   }, [user.id]);
 
-  // ── load the selected changeset detail + diff ───────────────────────────────
+  // ── detalle y diff del changeset seleccionado ───────────────────────────────
   const loadDetail = useCallback((id: string) => {
     let cancelled = false;
     setDetailLoading(true);
@@ -217,22 +220,30 @@ export default function ReviewScreen() {
     };
   }, []);
 
-  // Reload detail when the selection OR the actor changes (latter re-evaluates
-  // reviewer permissions / approvals).
+  // El contenido de una versión no publicada (cambios, diff, comentarios) solo
+  // lo ven su dueño, sus revisores asignados y quien tenga `versions.view_all`
+  // o `admin.manage` (espejo del backend): para el resto el panel muestra la
+  // fila de la lista y no pide el detalle. Se suscribe a los permisos (cambian
+  // con `refreshMe`): `s.has` es siempre la misma función.
+  const perms = useAuthStore((s) => s.user?.permissions);
+  const selectedRow = useMemo(() => versions.find((v) => v.id === selectedId) ?? null, [versions, selectedId]);
+  const hidden = Boolean(selectedRow) && !canOpenVersion(selectedRow!, user.id, (perm) => Boolean(perms?.[perm]));
+
+  // Recarga el detalle cuando cambia la selección o el actor (este último
+  // reevalúa los permisos de revisor y las aprobaciones).
   useEffect(() => {
     setDetailsOpen(false);
-    if (!selectedId) {
-      setDetail(null);
-      setDiff(null);
-      return;
-    }
-    setCommentText('');
-    // Clear the previous request immediately so the detail panel shows its
-    // skeleton while the new one loads (no stale content during the fetch).
+    // Limpia de inmediato el request anterior para que el panel de detalle
+    // muestre su skeleton mientras carga el siguiente (sin contenido desactualizado).
     setDetail(null);
     setDiff(null);
+    if (!selectedId || hidden) return;
+    // La visibilidad se decide con la fila de la lista: el detalle se pide
+    // cuando la lista ya cargó.
+    if (listsLoading) return;
+    setCommentText('');
     return loadDetail(selectedId);
-  }, [selectedId, user.id, loadDetail]);
+  }, [selectedId, user.id, loadDetail, hidden, listsLoading]);
 
   const select = useCallback(
     (id: string) => {
@@ -244,9 +255,10 @@ export default function ReviewScreen() {
     [searchParams, setSearchParams],
   );
 
-  // ── the request list (doc 88 §6): every version that was EVER sent for
-  //    review (its history survives withdraw / reject / publish), filtered by
-  //    requester, reviewer, project and outcome; pending first, then by activity ──
+  // ── lista de requests: toda versión que alguna vez se envió a revisión (su
+  //    historial sobrevive a withdraw / reject / publish), filtrada por
+  //    solicitante, revisor, proyecto y resultado; pendientes primero, luego por
+  //    actividad ──
   const allRequests = useMemo(() => {
     return versions
       .filter(isRequest)
@@ -269,35 +281,34 @@ export default function ReviewScreen() {
       });
   }, [allRequests, outcomeFilter]);
 
-  // Auto-select the first request when nothing is selected (the design always
-  // shows an open request on the right) — EXCEPT right after a withdraw/reopen,
-  // where jumping to another request reads as "my request mutated into this one".
+  // Auto-selecciona el primer request cuando no hay selección (el panel derecho
+  // siempre muestra un request abierto), salvo justo después de un withdraw/reopen,
+  // donde saltar a otro request se leería como «mi request se convirtió en este».
   useEffect(() => {
     if (!selectedId && !draftHint && requestRows.length > 0) select(requestRows[0].id);
   }, [selectedId, draftHint, requestRows, select]);
 
-  // ── derived detail bits ─────────────────────────────────────────────────────
+  // ── datos derivados del detalle ─────────────────────────────────────────────
   const isReviewer = Boolean(detail && user.id && detail.reviewers.includes(user.id));
   const alreadyVoted = Boolean(detail && user.id && detail.approvals[user.id]);
-  // Doc 88 §6: sólo un ciclo EN REVISIÓN admite acciones y comentarios; una
-  // solicitud cerrada (aprobada, rechazada → draft, retirada) se lee nomás.
+  // Solo un ciclo en revisión admite acciones y comentarios; una solicitud
+  // cerrada (aprobada, rechazada → draft, retirada) es de solo lectura.
   const isOpenRequest = Boolean(detail && detail.status === 'submitted');
   const canAct = Boolean(detail && detail.status === 'submitted' && isReviewer && !alreadyVoted);
-  // El OWNER puede retirar su request mientras siga en revisión (para seguir
+  // El dueño puede retirar su request mientras siga en revisión (para seguir
   // editando la versión y re-enviarla después).
   const canWithdraw = Boolean(detail && detail.status === 'submitted' && user.id && detail.owner === user.id);
-  // El OWNER puede reabrir un request RECHAZADO (rejected → draft): el reject
-  // nunca elimina la versión, sólo rechaza la solicitud.
+  // El dueño puede reabrir un request rechazado (rejected → draft): el reject
+  // nunca elimina la versión, solo rechaza la solicitud.
   const canReopen = Boolean(detail && detail.status === 'rejected' && user.id && detail.owner === user.id);
-  // Sólo el dueño de un DRAFT edita en el canvas; cualquier otro caso se abre
-  // como visor (solo lectura) — la edición vuelve recién con Withdraw/Reopen —
-  // y sólo si el actor puede verlo (doc 105 U2: espejo del backend). Se
-  // suscribe a los PERMISOS (cambian con `refreshMe`, F5): `s.has` es siempre
-  // la misma función y la pantalla no se enteraba de los nuevos.
-  const perms = useAuthStore((s) => s.user?.permissions);
+  // Solo el dueño de un draft edita en el canvas; cualquier otro caso se abre
+  // como visor (solo lectura) y la edición vuelve recién con Withdraw/Reopen;
+  // además, solo si el actor puede verlo (espejo del backend). Se suscribe a los
+  // permisos (cambian con `refreshMe`): `s.has` es siempre la misma función y la
+  // pantalla no se enteraría de los cambios.
   const canvas = detail ? canvasAction(detail, user.id, (perm) => Boolean(perms?.[perm])) : null;
 
-  // Doc 105: un revisor deshabilitado (dejó la empresa) nunca vota — se marca.
+  // Un revisor deshabilitado (dejó la empresa) nunca vota: se marca.
   const disabledReviewers = useMemo(
     () => (detail
       ? detail.reviewers.filter((id) => users.find((u) => u.id === id)?.disabled && !detail.approvals?.[id])
@@ -308,7 +319,7 @@ export default function ReviewScreen() {
     ? detail.reviewers.map((id) => `${userName(id)}${disabledReviewers.includes(id) ? ' (disabled)' : ''}`).join(', ') || '—'
     : '—';
 
-  /** The assigned-reviewer note shown when the actor cannot act. */
+  /** Nota del revisor asignado que se muestra cuando el actor no puede actuar. */
   const noteText = useMemo(() => {
     if (!detail || canAct) return '';
     if (detail.status !== 'submitted') {
@@ -318,7 +329,7 @@ export default function ReviewScreen() {
       if (o === 'approved') return detail.appliedAt ? 'This request was approved and published.' : 'This request was approved and is being published.';
       return `This request is ${detail.status}.`;
     }
-    // Doc 105: la unanimidad no llegará nunca — el dueño retira y reasigna.
+    // La unanimidad nunca llegará: el dueño retira y reasigna.
     if (disabledReviewers.length && detail.owner === user.id)
       return `${disabledReviewers.map(userName).join(', ')} can no longer review (disabled): withdraw the request and send it again with active reviewers.`;
     if (!isReviewer)
@@ -327,7 +338,7 @@ export default function ReviewScreen() {
     return '';
   }, [detail, canAct, isReviewer, alreadyVoted, reviewerNames, disabledReviewers, userName, user.id]);
 
-  // Diff totals for the impact legend + "Changes · N" (+ conflictos vs producción).
+  // Totales del diff para la leyenda de impacto + "Changes · N" (+ conflictos vs producción).
   const diffTotals = useMemo(() => {
     let added = 0;
     let edited = 0;
@@ -338,11 +349,11 @@ export default function ReviewScreen() {
         edited += b.edited.length;
         deleted += b.deleted.length;
       });
-    const conflicts = diff ? conflictCounts(diff) : { overwrites: 0, restores: 0, total: 0 };
+    const conflicts = diff ? conflictCounts(diff) : { overwrites: 0, restores: 0, blocked: 0, total: 0 };
     return { added, edited, deleted, conflicts, total: added + edited + deleted };
   }, [diff]);
 
-  // ── actions ─────────────────────────────────────────────────────────────────
+  // ── acciones ────────────────────────────────────────────────────────────────
   const deletesProject = diff?.impact.deletesProject ?? null;
   const doReview = async (decision: 'approve' | 'reject', note?: string) => {
     if (!detail || acting) return;
@@ -358,8 +369,8 @@ export default function ReviewScreen() {
       void listVersions().then(setVersions).catch(() => undefined);
       void getDiff(detail.id).then(setDiff).catch(() => undefined);
     } catch (err) {
-      // Doc 84 A1: un publish bloqueado llega estructurado → panel persistente
-      // con la lista completa; el toast sólo avisa (el bloqueo en sí no cambió).
+      // Un publish bloqueado llega estructurado → panel persistente con la lista
+      // completa; el toast solo avisa (el detalle del bloqueo queda en el panel).
       const blockedDetail = publishBlockedDetail(err);
       if (blockedDetail) {
         setBlocked(blockedDetail);
@@ -374,11 +385,11 @@ export default function ReviewScreen() {
 
   const openInCanvas = () => {
     if (!detail) return;
-    // Modo edición SÓLO para el dueño de un draft. Un request en revisión (o ya
-    // decidido) se abre en SOLO LECTURA sobre su propio overlay: se ve el
-    // contenido enviado, pero no se puede mutar ni re-publicar — antes este
-    // camino ligaba el canvas en `editing` a un changeset no-draft y producía
-    // 409 persistentes o re-submits que pisaban el envío.
+    // Modo edición solo para el dueño de un draft. Un request en revisión (o ya
+    // decidido) se abre en solo lectura sobre su propio overlay: se ve el
+    // contenido enviado, pero no se puede mutar ni re-publicar. Ligar el canvas
+    // en `editing` a un changeset que no es draft produciría 409 persistentes o
+    // re-envíos que pisarían el envío.
     if (!canvas?.enabled) return;
     openModel({
       projectId: detail.projectId,
@@ -389,7 +400,7 @@ export default function ReviewScreen() {
     navigate('/model');
   };
 
-  /** Post-withdraw/reopen: la versión volvió a draft — limpia selección y
+  /** Tras withdraw/reopen la versión vuelve a draft: limpia selección y
    *  listas, y deja el empty-state con la vuelta directa al canvas. */
   const backToDraft = (id: string, projectId: string, label: string | null) => {
     setDraftHint({ id, projectId, label });
@@ -402,7 +413,7 @@ export default function ReviewScreen() {
     void listVersions().then(setVersions).catch(() => undefined);
   };
 
-  /** Owner retira su request en revisión: vuelve a draft (reaparece en Open
+  /** El dueño retira su request en revisión: vuelve a draft (reaparece en Open
    *  model → "Continue a working version") y sale de la lista de requests. */
   const doWithdraw = async () => {
     if (!detail || acting) return;
@@ -425,8 +436,8 @@ export default function ReviewScreen() {
       backToDraft(id, projectId, versionLabel ?? null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not withdraw the request.');
-      // El fallo típico es una carrera (409: un revisor decidió antes): refresca
-      // el detalle y las listas para no dejar botones sobre un estado que ya no existe.
+      // El fallo típico es una carrera (409: un revisor decidió primero): refresca
+      // el detalle y las listas para no dejar botones sobre un estado inexistente.
       void loadDetail(id);
       void listVersions().then(setVersions).catch(() => undefined);
     } finally {
@@ -434,7 +445,7 @@ export default function ReviewScreen() {
     }
   };
 
-  /** Owner reabre su request rechazado: rejected → draft para corregir y
+  /** El dueño reabre su request rechazado: rejected → draft para corregir y
    *  re-enviar (el reject nunca elimina la versión). */
   const doReopen = async () => {
     if (!detail || acting) return;
@@ -485,7 +496,7 @@ export default function ReviewScreen() {
   return (
     <div className="dmh-review">
       <div className="dmh-rv-panel">
-        {/* header */}
+        {/* cabecera */}
         <div className="dmh-rv-phead">
           <div className="dmh-rv-phead-ico">
             <Inbox size={19} strokeWidth={1.5} aria-hidden />
@@ -507,7 +518,7 @@ export default function ReviewScreen() {
         </div>
 
         <div className="dmh-rv-cols">
-          {/* ── SECTION 1 · request list + filters ────────────────────── */}
+          {/* ── sección 1 · lista de requests + filtros ───────────────── */}
           <div className="dmh-rv-list">
             <div className="dmh-rv-list-filters">
               <label className="dmh-rv-flt">
@@ -561,7 +572,7 @@ export default function ReviewScreen() {
               </label>
             </div>
 
-            {/* Doc 88 §6: resultado del último ciclo — All por defecto */}
+            {/* Resultado del último ciclo; All por defecto */}
             <div className="dmh-rv-chips" role="tablist" aria-label="Filter by outcome">
               {OUTCOME_CHIPS.map((c) => (
                 <button
@@ -635,7 +646,7 @@ export default function ReviewScreen() {
             </div>
           </div>
 
-          {/* ── SECTION 2 · open request detail ───────────────────────── */}
+          {/* ── sección 2 · detalle del request abierto ───────────────── */}
           <div className="dmh-rv-detail">
             {!selectedId ? (
               <div className="dmh-rv-detail-empty">
@@ -647,7 +658,18 @@ export default function ReviewScreen() {
                   Pick one on the left to see its impact, diff and comments.
                 </div>
               </div>
-            ) : detailLoading && !detail ? (
+            ) : hidden && selectedRow ? (
+              <div className="dmh-rv-detail-empty" role="note">
+                <div className="dmh-rv-detail-empty-ico">
+                  <Inbox size={22} strokeWidth={1.5} aria-hidden />
+                </div>
+                <div className="dmh-rv-detail-empty-t">{selectedRow.title || selectedRow.versionLabel || 'Request'}</div>
+                <div className="dmh-rv-detail-empty-m">
+                  Requested by {userName(selectedRow.owner)}. Only its owner, its assigned reviewers and
+                  administrators can see its changes and comments.
+                </div>
+              </div>
+            ) : (detailLoading || listsLoading) && !detail ? (
               <div className="dmh-rv-detail-loading">
                 <div className="dmh-rv-skel" style={{ height: 24, width: '50%' }} />
                 <div className="dmh-rv-skel" style={{ height: 18, width: '70%' }} />
@@ -683,7 +705,7 @@ export default function ReviewScreen() {
               )
             ) : (
               <>
-                {/* detail header */}
+                {/* cabecera del detalle */}
                 <div className="dmh-rv-dhead">
                   <div className="dmh-rv-dhead-row">
                     <div className="dmh-rv-dhead-main">
@@ -702,7 +724,7 @@ export default function ReviewScreen() {
                         />
                         <span>
                           From <strong>{userName(detail.owner)}</strong>
-                          {/* Doc 104: la versión cambió de manos antes de enviarse. */}
+                          {/* La versión fue transferida antes de enviarse. */}
                           {startedBy(detail) && startedBy(detail) !== detail.owner && (
                             <span title="Ownership was transferred: the current owner sent the request and will appear as its author">
                               {' '}(started by {userName(startedBy(detail))})
@@ -732,8 +754,8 @@ export default function ReviewScreen() {
                       </div>
                     </div>
                     <div className="dmh-rv-dactions">
-                      {/* Doc 88 §6: una solicitud cerrada no se abre desde acá (evita
-                          conflictos con la versión que sigue su vida); el owner de un
+                      {/* Una solicitud cerrada no se abre desde acá (evita
+                          conflictos con la versión que sigue su vida); el dueño de un
                           draft rechazado sí sigue editando la suya. */}
                       <Tooltip label={canvas?.hint ?? ''}>
                         <button
@@ -855,7 +877,7 @@ export default function ReviewScreen() {
                   )}
                 </div>
 
-                {/* detail body */}
+                {/* cuerpo del detalle */}
                 <div className="dmh-rv-dbody">
                   {blocked && (
                     <PublishBlockedPanel
@@ -886,7 +908,7 @@ export default function ReviewScreen() {
                     </div>
                   )}
 
-                  {/* Doc 88 §6: historial de ciclos (motivo del rechazo incluido) */}
+                  {/* Historial de ciclos (motivo del rechazo incluido) */}
                   <RequestHistory rows={historyOf(detail)} userName={userName} userInitials={userInitials} avatarTone={avatarTone} />
 
                   {diffTotals.conflicts.total > 0 && (
@@ -899,7 +921,7 @@ export default function ReviewScreen() {
                             in production after this version edited {diffTotals.conflicts.overwrites === 1 ? 'it' : 'them'} — approving will overwrite those production changes.
                           </>
                         )}
-                        {/* Doc 100 (P3): lo que otra versión borró vuelve al aprobar. */}
+                        {/* Lo que otra versión borró vuelve al aprobar. */}
                         {diffTotals.conflicts.restores > 0 && (
                           <>
                             {diffTotals.conflicts.overwrites > 0 ? ' ' : ''}
@@ -907,14 +929,22 @@ export default function ReviewScreen() {
                             in production after this version was opened — approving will restore {diffTotals.conflicts.restores === 1 ? 'it' : 'them'}.
                           </>
                         )}
+                        {/* Objetos que otra versión borró: no se publican ni se reviven. */}
+                        {diffTotals.conflicts.blocked > 0 && (
+                          <>
+                            {diffTotals.conflicts.overwrites + diffTotals.conflicts.restores > 0 ? ' ' : ''}
+                            <strong>{diffTotals.conflicts.blocked}</strong> {diffTotals.conflicts.blocked === 1 ? 'object in this request was' : 'objects in this request were'} deleted
+                            in production by another version after this version was opened — publishing is blocked until the owner discards {diffTotals.conflicts.blocked === 1 ? 'that change' : 'those changes'}.
+                          </>
+                        )}
                       </span>
                     </div>
                   )}
 
-                  {/* Doc 75 D5/D20: el request borra su proyecto — aviso crítico. */}
+                  {/* El request borra su proyecto: aviso crítico. */}
                   {deletesProject && <CriticalDeletionBlock deletes={deletesProject} />}
 
-                  {/* Resumen (doc 31) — el detalle fino vive en el popup */}
+                  {/* Resumen; el detalle fino vive en el popup */}
                   <ChangesSummary diff={diff} onOpenDetails={() => setDetailsOpen(true)} />
 
                   {detailsOpen && diff && (
@@ -928,7 +958,7 @@ export default function ReviewScreen() {
                     />
                   )}
 
-                  {/* reviewer comments */}
+                  {/* comentarios de revisión */}
                   <div className="dmh-rv-comments">
                     <div className="dmh-rv-comments-title">Reviewer comments</div>
                     {detail.comments.map((c, i) => (
@@ -999,6 +1029,3 @@ export default function ReviewScreen() {
     </div>
   );
 }
-
-// El viejo DiffBody inline (árbol + fallback plano) se movió al popup
-// "Change details" (doc 31): screens/review/DiffTree.tsx + ChangesDetailModal.

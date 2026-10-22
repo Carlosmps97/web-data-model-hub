@@ -1,9 +1,9 @@
-// Doc 114 (piloto): en anchos menores la barra se compacta por pasos en UNA fila
-// (sin scroll horizontal ni filas desparejas). Lo que se compacta de un grupo
-// queda en un menú con su nombre, en su lugar: ninguna opción se quita. Acá, con
-// el nivel fijado (el hook mide en el navegador), qué queda a la vista y qué
-// menús aparecen; abrir cada menú y encontrar todas las opciones lo prueba el
-// guion de navegador del doc 114.
+// En anchos menores la barra se compacta por pasos en una sola fila (sin scroll
+// horizontal ni filas desparejas). Lo que se compacta de un grupo queda en un menú
+// con su nombre, en su lugar: ninguna opción se quita. Aquí, con el nivel fijado
+// (el hook mide en el navegador), se prueba qué queda a la vista y qué menús
+// aparecen; abrir cada menú y encontrar todas las opciones requiere un navegador
+// real.
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -39,8 +39,8 @@ function render(level: number) {
   return { html, buttons, names: buttons.map((b) => b.name), menus: buttons.filter((b) => /wk-grpmenu/.test(b.attrs)), toolbarClass };
 }
 
-describe('Toolbar adaptable (doc 114)', () => {
-  it('nivel 0 (pantalla ancha): todo a la vista, como siempre, sin menús de compactación', () => {
+describe('Toolbar adaptable', () => {
+  it('nivel 0 (pantalla ancha): todo a la vista, sin menús de compactación', () => {
     const r = render(0);
     expect(r.menus.filter((m) => /wk-grpmenu/.test(m.attrs))).toEqual([]);
     for (const n of ['New table', 'CTAS — create from existing', 'Create view', 'Schemas — create & manage', 'Autoarrange', 'Export DDL', 'Add a rectangle', 'Add a text'])
@@ -70,7 +70,7 @@ describe('Toolbar adaptable (doc 114)', () => {
     ]);
     for (const m of r.menus.filter((x) => /wk-grpmenu/.test(x.attrs))) {
       expect(m.attrs).toContain('aria-expanded="false"');
-      expect(m.attrs).not.toContain('aria-haspopup');   // patrón disclosure (revisión doc 114)
+      expect(m.attrs).not.toContain('aria-haspopup');   // patrón disclosure
     }
     // Lo compactado no está suelto en la barra (está en su menú).
     for (const n of ['CTAS — create from existing', 'Autoarrange', 'Export DDL', 'Add a rectangle']) expect(r.names).not.toContain(n);
@@ -94,9 +94,9 @@ describe('Toolbar adaptable (doc 114)', () => {
     expect(r.buttons.find((b) => /class="wk-publish/.test(b.attrs))?.attrs).toContain('aria-label="Publish"');
   });
 
-  // Revisión 2 doc 114: un comentario `//` escrito entre etiquetas JSX es TEXTO —
-  // se dibujó al pie de la página (y achicó el canvas). Lo de adentro de la barra
-  // es UI en inglés: ni comentarios ni notas de los documentos.
+  // Un comentario `//` escrito entre etiquetas JSX es texto: se dibujaría al pie
+  // de la página (y achicaría el canvas). Lo de adentro de la barra es UI en
+  // inglés: ni comentarios ni notas internas.
   it('no hay texto suelto de comentarios en lo que dibuja la barra', () => {
     for (let lv = 0; lv <= TOOLBAR_STEPS.length; lv++) {
       const text = render(lv).html.replace(/<[^>]+>/g, ' ');

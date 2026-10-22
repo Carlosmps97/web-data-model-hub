@@ -14,38 +14,38 @@ function CrowFootEdge(props: EdgeProps) {
   const { id, source, target, sourceY, targetY, data } = props;
   const sourceNode = useInternalNode(source);
   const targetNode = useInternalNode(target);
-  // Selector DERIVADO (booleano por edge, no los ids crudos): un hover sólo
-  // re-renderiza los wires que se resaltan. Doc 111: el atenuado del RESTO lo
-  // hace una clase del canvas (`.wk-canvas--hover`, lib/hoverIntent) — con un
-  // «¿hay hover?» por wire, entrar o salir de cualquier bloque re-renderizaba
-  // y animaba TODOS los wires.
+  // Selector derivado (booleano por edge, no los ids crudos): un hover solo
+  // re-renderiza los wires que se resaltan. El atenuado del resto lo hace una
+  // clase del canvas (`.wk-canvas--hover`, lib/hoverIntent): con un «¿hay
+  // hover?» por wire, entrar o salir de cualquier bloque re-renderizaría y
+  // animaría todos los wires.
   const active = useModelerStore(
     (s) => s.hoverEdgeId === id || s.selectedEdgeId === id
       || (!!s.hoverNodeId && (source === s.hoverNodeId || target === s.hoverNodeId)),
   );
-  // Doc 98: la etiqueta se oculta con el botón del toolbar y en zoom lejano
+  // La etiqueta se oculta con el botón del toolbar y en zoom lejano
   // (LOD compacto: a esa escala el texto es ilegible y solo ensucia).
   const labelsHidden = useUiStore((s) => s.relLabelsHidden);
-  // Doc 99: trazo manual del wire (null = camino automático de siempre).
+  // Trazo manual del wire (null = camino automático).
   const { via, editable, lod, setDraft, commit } = useWireRoute(id, !!(data as { pending?: boolean } | undefined)?.pending);
 
   if (!sourceNode || !targetNode) return null;
   // `pending` = edge fantasma (drop hecho, popup de confirmación abierto).
-  // v2 (doc 19): source del edge = PADRE (lado PK), target = HIJO (lado FK).
-  // Doc 47: fanSlot/fanCount/parentPkRows reparten la salida en la zona de
-  // llave del padre; `drifted` = pares fuera de sync con la llave (ámbar).
+  // Source del edge = padre (lado PK), target = hijo (lado FK).
+  // fanSlot/fanCount/parentPkRows reparten la salida en la zona de llave del
+  // padre; `drifted` = pares fuera de sync con la llave (en rojo).
   const d = (data ?? {}) as {
     parentCardinality: Cardinality; childCardinality: Cardinality;
     identifying: boolean; pending?: boolean; pairCount?: number;
     fanSlot?: number; fanCount?: number; parentPkRows?: number; drifted?: boolean;
-    // Doc 98: frases de relación ya compuestas («padre→hijo / hijo→padre»);
+    // Frases de relación ya compuestas («padre→hijo / hijo→padre»);
     // `labelTitle` = texto completo, para el tooltip cuando el dibujo se cortó.
     label?: string | null; labelTitle?: string | null;
   };
 
   // Lado que mira a la otra tabla (dbdiagram): si el centro del origen está a la
-  // izquierda del centro del destino, el origen sale por la DERECHA y el destino
-  // entra por la IZQUIERDA; si no, al revés. Se voltea solo al mover los nodos.
+  // izquierda del centro del destino, el origen sale por la derecha y el destino
+  // entra por la izquierda; si no, al revés. Se voltea solo al mover los nodos.
   const sAbs = sourceNode.internals.positionAbsolute;
   const tAbs = targetNode.internals.positionAbsolute;
   const sw = sourceNode.measured?.width ?? 230;
@@ -57,7 +57,7 @@ function CrowFootEdge(props: EdgeProps) {
   const sPos = sourceFacesRight ? Position.Right : Position.Left;
   const tPos = sourceFacesRight ? Position.Left : Position.Right;
 
-  // Doc 47: la salida se reparte en la zona de llave del padre (fan-out). El
+  // La salida se reparte en la zona de llave del padre (fan-out). El
   // fantasma (sin fanCount) conserva la Y de su handle.
   const sh = sourceNode.measured?.height ?? HEADER_H + ROW_H;
   const sy = d.fanCount
@@ -65,7 +65,7 @@ function CrowFootEdge(props: EdgeProps) {
     : sourceY;
 
   // Ruteo ortogonal (H/V) con esquinas redondeadas — lo provee React Flow
-  // (`getSmoothStepPath`), sin matemática manual de caminos. Doc 99: con trazo
+  // (`getSmoothStepPath`), sin matemática manual de caminos. Con trazo
   // manual el camino pasa por sus puntos (`routedGeometry`) y el lado de cada
   // extremo lo decide el trazo, no la posición del otro bloque.
   const manual = via && routedGeometry({
@@ -82,8 +82,7 @@ function CrowFootEdge(props: EdgeProps) {
 
   // Resaltado (dbdiagram): activa la relación bajo el mouse o las conectadas a la
   // tabla bajo el mouse; el resto se atenúa por CSS (`.wk-edge--hot`). Drift
-  // (doc 47) → ROJO: incongruencia de llave que el modelador debe corregir
-  // (owner 2026-08-23).
+  // → rojo: incongruencia de llave que el modelador debe corregir.
   const stroke = d.pending ? 'var(--primary)'
     : d.drifted ? 'var(--red)'
     : active ? 'var(--primary)' : 'var(--ink-2)';
@@ -92,7 +91,7 @@ function CrowFootEdge(props: EdgeProps) {
   // Misma regla que el export: centrada en el punto medio del wire y con el
   // ancho que deja el hueco entre los bloques (si no cabe, parte línea); en
   // una recursiva el wire corre bajo el bloque, así que va encima de él.
-  // Doc 99: con trazo la etiqueta sigue al camino, también en una recursiva.
+  // Con trazo, la etiqueta sigue al camino, también en una recursiva.
   const at = labelPlacement({
     recursive: !manual && source === target,
     facesRight: manual ? manual.s.dir === 1 : sourceFacesRight,
@@ -111,7 +110,7 @@ function CrowFootEdge(props: EdgeProps) {
         style={{
           stroke,
           strokeWidth: active ? 2.4 : 1.5,
-          // Convención Erwin (doc 19): identifying = línea SÓLIDA (la FK entra a
+          // Convención Erwin: identifying = línea sólida (la FK entra a
           // la PK del hijo); non-identifying = punteada. Pending: dash más aireado.
           strokeDasharray: d.pending ? '6 5' : d.identifying ? undefined : '7 4',
           opacity: d.pending ? 0.5 : undefined,

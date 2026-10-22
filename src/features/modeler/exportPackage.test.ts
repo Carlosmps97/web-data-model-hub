@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { strFromU8, unzipSync } from 'fflate';
 
-// La orquestación se testea con los SERVICIOS mockeados (patrón
-// upload/placeUploaded.test.ts) y los builders REALES (integración de verdad).
+// La orquestación se prueba con los servicios mockeados (mismo patrón que
+// upload/placeUploaded.test.ts) y los builders reales (integración de verdad).
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(),
   listFolders: vi.fn(),
@@ -44,35 +44,35 @@ beforeEach(() => {
 
 describe('exportNodeHtml', () => {
   it('folder → ZIP con rutas espejo, index y páginas; progreso completo', async () => {
-    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'CPYBCA'), F('f2', 'f1', 'CPYBCAPYM')]);
-    const sas = [SA('s1', 'f2', 'Datamart PYME'), SA('s2', 'f1', 'Suelto')];
+    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'COMERCIAL'), F('f2', 'f1', 'COMERCIALNORTE')]);
+    const sas = [SA('s1', 'f2', 'Datamart Comercial'), SA('s2', 'f1', 'Suelto')];
     vi.mocked(listSubjectAreas).mockResolvedValue(sas);
     vi.mocked(loadDiagram).mockImplementation(async (id: string) => dia(sas.find((s) => s.id === id)!));
 
     const download = vi.fn();
     const progress: number[] = [];
     const out = await exportNodeHtml({
-      kind: 'folder', nodeId: 'f1', projectId: 'p1', projectName: 'Modelo DDV',
+      kind: 'folder', nodeId: 'f1', projectId: 'p1', projectName: 'Modelo Ventas',
       onProgress: (p) => progress.push(p.done), download,
     });
 
     expect(out).toMatchObject({ exported: 2, total: 2, failed: [], cancelled: false });
     expect(download).toHaveBeenCalledTimes(1);
     const [blob, filename] = download.mock.calls[0];
-    expect(filename).toBe('CPYBCA.zip');
+    expect(filename).toBe('COMERCIAL.zip');
     const entries = await zipEntries(blob);
     expect(Object.keys(entries).sort()).toEqual([
-      'CPYBCA/CPYBCAPYM/Datamart PYME.html',
-      'CPYBCA/Suelto.html',
-      'CPYBCA/index.html',
+      'COMERCIAL/COMERCIALNORTE/Datamart Comercial.html',
+      'COMERCIAL/Suelto.html',
+      'COMERCIAL/index.html',
     ]);
-    expect(entries['CPYBCA/index.html']).toContain('Datamart PYME');
-    expect(entries['CPYBCA/CPYBCAPYM/Datamart PYME.html']).toContain('PH_S1');
+    expect(entries['COMERCIAL/index.html']).toContain('Datamart Comercial');
+    expect(entries['COMERCIAL/COMERCIALNORTE/Datamart Comercial.html']).toContain('PH_S1');
     expect(progress[progress.length - 1]).toBe(2);
   });
 
   it('canvas que falla → failed[] con su nombre y el ZIP sale con el resto', async () => {
-    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'CPYBCA')]);
+    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'COMERCIAL')]);
     const sas = [SA('s1', 'f1', 'Bueno'), SA('s2', 'f1', 'Malo')];
     vi.mocked(listSubjectAreas).mockResolvedValue(sas);
     vi.mocked(loadDiagram).mockImplementation(async (id: string) => {
@@ -84,8 +84,8 @@ describe('exportNodeHtml', () => {
     expect(out.failed).toEqual(['Malo']);
     expect(out.exported).toBe(1);
     const entries = await zipEntries(download.mock.calls[0][0]);
-    expect(Object.keys(entries)).toContain('CPYBCA/Bueno.html');
-    expect(Object.keys(entries)).not.toContain('CPYBCA/Malo.html');
+    expect(Object.keys(entries)).toContain('COMERCIAL/Bueno.html');
+    expect(Object.keys(entries)).not.toContain('COMERCIAL/Malo.html');
   });
 
   it('cancel antes de empezar → no descarga nada', async () => {
@@ -119,32 +119,32 @@ const pdfText = async (blob: Blob): Promise<string> => {
 };
 
 describe('exportNodePdf', () => {
-  it('folder → UN reporte estilo Erwin: A4, TOC, bookmarks jerárquicos, index', async () => {
-    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'CPYBCA'), F('f2', 'f1', 'CPYBCAPYM')]);
-    const sas = [SA('s1', 'f2', 'Datamart PYME'), SA('s2', 'f1', 'Suelto')];
+  it('folder → un reporte estilo Erwin: A4, TOC, bookmarks jerárquicos, index', async () => {
+    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'COMERCIAL'), F('f2', 'f1', 'COMERCIALNORTE')]);
+    const sas = [SA('s1', 'f2', 'Datamart Comercial'), SA('s2', 'f1', 'Suelto')];
     vi.mocked(listSubjectAreas).mockResolvedValue(sas);
     vi.mocked(loadDiagram).mockImplementation(async (id: string) => dia(sas.find((s) => s.id === id)!));
 
     const download = vi.fn();
-    const out = await exportNodePdf({ kind: 'folder', nodeId: 'f1', projectId: 'p1', projectName: 'Modelo DDV', download });
+    const out = await exportNodePdf({ kind: 'folder', nodeId: 'f1', projectId: 'p1', projectName: 'Modelo Ventas', download });
 
     expect(out).toMatchObject({ exported: 2, total: 2, failed: [], cancelled: false });
     const [blob, filename] = download.mock.calls[0];
-    expect(filename).toBe('CPYBCA.pdf');
+    expect(filename).toBe('COMERCIAL.pdf');
     expect(blob.type).toBe('application/pdf');
     const s = await pdfText(blob);
     expect(s.startsWith('%PDF-1.4')).toBe(true);
-    // Streams comprimidos ⇒ se verifica ESTRUCTURA: outline + páginas A4.
+    // Streams comprimidos ⇒ se verifica la estructura: outline + páginas A4.
     expect(s).toContain('/Filter /FlateDecode');
     expect(s).toContain('/MediaBox [0 0 595 842]');
     expect(s).toContain('/Annots');                         // hipervínculos del TOC/Index
-    expect(s).toContain('(CPYBCA)');                        // bookmark raíz
+    expect(s).toContain('(COMERCIAL)');                        // bookmark raíz
     expect(s).toContain('(Table Of Contents)');
-    expect(s).toContain('(Datamart PYME)');                 // bookmark del canvas
+    expect(s).toContain('(Datamart Comercial)');                 // bookmark del canvas
     expect(s).toContain('(PH_S1)');                         // bookmark de la tabla
     expect(s).toContain('(Index)');
     const count = Number(/\/Kids \[[^\]]*\] \/Count (\d+)/.exec(s)![1]);
-    expect(count).toBeGreaterThanOrEqual(4);                // portada+toc+contenido+index (r2: sin diagramas)
+    expect(count).toBeGreaterThanOrEqual(4);                // portada+toc+contenido+index (sin diagramas)
   });
 
   it('canvas suelto → reporte del canvas en PDF directo', async () => {
@@ -162,7 +162,7 @@ describe('exportNodePdf', () => {
   });
 
   it('canvas que falla → fuera del reporte y en failed[]', async () => {
-    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'CPYBCA')]);
+    vi.mocked(listFolders).mockResolvedValue([F('f1', null, 'COMERCIAL')]);
     const sas = [SA('s1', 'f1', 'Bueno'), SA('s2', 'f1', 'Malo')];
     vi.mocked(listSubjectAreas).mockResolvedValue(sas);
     vi.mocked(loadDiagram).mockImplementation(async (id: string) => {

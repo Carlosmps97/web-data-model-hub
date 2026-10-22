@@ -1,10 +1,10 @@
-// Lógica pura del ViewEditor multi-fuente (F3): claves de grilla, serialización
-// de sources y (doc 96 D6) el cuerpo del guardado — la estructura manda y la
-// User-Defined SQL viaja como texto informativo.
+// Lógica pura del ViewEditor multi-fuente: claves de grilla, serialización de
+// sources y el cuerpo del guardado — la estructura manda y la User-Defined SQL
+// viaja como texto informativo.
 import { describe, expect, it } from 'vitest';
 import { colKey, duplicateOutputNames, splitColKey, serializeSources, viewSaveBody, type ColCfg } from './viewEditorLogic';
 
-describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
+describe('viewEditorLogic — grilla multi-fuente', () => {
   const cfg: Record<string, ColCfg> = {
     't1::ID': { included: true, output: 'ID', expression: '', castType: '', description: 'Business key' },
     't1::NOMBRE': { included: true, output: 'nombre_up', expression: 'UPPER(t1.NOMBRE)', castType: '', description: '' },
@@ -18,7 +18,7 @@ describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
     expect(splitColKey(colKey('t1', 'ID'))).toEqual({ tableId: 't1', column: 'ID' });
   });
 
-  it('serializa solo columnas incluidas Y válidas, en orden, con tableId', () => {
+  it('serializa solo columnas incluidas y válidas, en orden, con tableId', () => {
     const out = serializeSources(order, cfg, valid);
     expect(out.map((s) => s.column)).toEqual(['ID', 'NOMBRE', 'SALDO']);
     expect(out[0]).toEqual({ column: 'ID', tableId: 't1', outputAlias: undefined, expression: undefined, castType: undefined, description: 'Business key' });
@@ -32,14 +32,14 @@ describe('viewEditorLogic — grilla multi-fuente (F3)', () => {
     expect(out[2].outputAlias).toBe('saldo_txt');
   });
 
-  it('description (F5): se serializa con texto, se omite si vacía/whitespace', () => {
+  it('description: se serializa con texto, se omite si vacía/whitespace', () => {
     const out = serializeSources(order, cfg, valid);
     expect(out[0].description).toBe('Business key');   // t1::ID
     expect(out[2].description).toBeUndefined();          // t2::SALDO = '  ' → trim → undefined
   });
 });
 
-describe('viewSaveBody (doc 96 D6)', () => {
+describe('viewSaveBody', () => {
   const base = { name: ' V ', schema: '', sourceIds: ['t1', 't2'], sources: [{ column: 'ID', tableId: 't1' }],
     showOnCanvas: true, sql: 'CREATE VIEW …', description: '  ', sqlText: '', udpValues: { u: 'x' } };
   it('las columnas vienen del builder aunque haya query personalizada', () => {
@@ -53,7 +53,7 @@ describe('viewSaveBody (doc 96 D6)', () => {
   });
 });
 
-describe('duplicateOutputNames (minor #12: el DDL sería inválido con alias repetidos)', () => {
+describe('duplicateOutputNames (el DDL sería inválido con alias repetidos)', () => {
   it('la misma columna de dos fuentes sin alias se repite', () => {
     expect(duplicateOutputNames([{ column: 'CODMES', tableId: 't1' }, { column: 'CODMES', tableId: 't2' }])).toEqual(['CODMES']);
   });

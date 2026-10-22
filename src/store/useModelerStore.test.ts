@@ -10,14 +10,14 @@ import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from './useModelerStore';
 
-describe('useModelerStore.deleteColumn (cascade spec 10 §8)', () => {
+describe('useModelerStore.deleteColumn', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Sin canvas activo el reload() interno es no-op (no pega al backend).
     useModelerStore.setState({ activeSaId: null, dirty: false });
   });
 
-  it('borra las relaciones afectadas ANTES que la columna', async () => {
+  it('borra las relaciones afectadas antes que la columna', async () => {
     const order: string[] = [];
     vi.mocked(gov.deleteRelationship).mockImplementation(async (id: string) => { order.push(`rel:${id}`); return {} as never; });
     vi.mocked(gov.deleteColumn).mockImplementation(async (id: string) => { order.push(`col:${id}`); return {} as never; });
@@ -26,7 +26,7 @@ describe('useModelerStore.deleteColumn (cascade spec 10 §8)', () => {
     expect(useModelerStore.getState().dirty).toBe(true);
   });
 
-  it('sin relaciones conserva el contrato anterior (sólo la columna)', async () => {
+  it('sin relaciones borra solo la columna', async () => {
     await useModelerStore.getState().deleteColumn('c1');
     expect(gov.deleteRelationship).not.toHaveBeenCalled();
     expect(gov.deleteColumn).toHaveBeenCalledWith('c1');
@@ -34,7 +34,7 @@ describe('useModelerStore.deleteColumn (cascade spec 10 §8)', () => {
 });
 
 
-describe('useModelerStore.deleteProject (doc 75 D5)', () => {
+describe('useModelerStore.deleteProject', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useSessionStore.setState({ openMode: 'editing', activeProjectId: 'p1', activeChangesetId: 'cs1' });
@@ -42,7 +42,7 @@ describe('useModelerStore.deleteProject (doc 75 D5)', () => {
     useModelerStore.setState({ activeProjectId: 'p1', activeSaId: null, dirty: false, projectDeletionPending: false });
   });
 
-  it('graba UN solo cambio y deja el draft en deletion pending', async () => {
+  it('graba un solo cambio y deja el draft en deletion pending', async () => {
     const rec = vi.spyOn(csvc, 'recordChange').mockResolvedValue(undefined as never);
     await useModelerStore.getState().deleteProject('p1');
     expect(rec).toHaveBeenCalledTimes(1);

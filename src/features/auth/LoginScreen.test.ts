@@ -1,6 +1,6 @@
-// LoginScreen sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105 (verificación en navegador, O4): cuando la sesión terminaba sola
-// (usuario deshabilitado, sesión vencida) se caía en el login sin decir por qué.
+// LoginScreen sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+// Cuando la sesión termina sola (usuario deshabilitado, sesión vencida), el login
+// dice por qué.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetFake, runEffects, textOf, walk } from '../reporting/components/fakeReact.testutil';
 
@@ -26,7 +26,7 @@ function render() {
 
 beforeEach(() => { auth.notice = null; auth.status = 'anon'; route.state = undefined; });
 
-describe('LoginScreen: por qué terminó la sesión (doc 105)', () => {
+describe('LoginScreen: por qué terminó la sesión', () => {
   it('muestra el aviso de la sesión que terminó sola, como estado (no como error)', () => {
     auth.notice = 'Your session ended. Please sign in again.';
     const tree = render();
@@ -45,10 +45,10 @@ describe('LoginScreen: por qué terminó la sesión (doc 105)', () => {
   });
 });
 
-// Doc 105 (ronda 5): con la red o el servidor caídos al abrir la app, el token
-// se conserva y el login dice «reload the page» — pero al recargar EN /login la
-// sesión se restauraba (status authed) y la pantalla seguía en «Sign in».
-describe('LoginScreen con la sesión ya restaurada (doc 105, ronda 5)', () => {
+// Con la red o el servidor caídos al abrir la app, el token se conserva y el login
+// dice «reload the page»; al recargar en /login con la sesión ya restaurada (status
+// authed), la pantalla sigue al destino en vez de quedarse en «Sign in».
+describe('LoginScreen con la sesión ya restaurada', () => {
   it('sesión válida → va al destino que motivó el login (o a Home), sin el formulario', () => {
     auth.status = 'authed';
     route.state = { from: '/model' };

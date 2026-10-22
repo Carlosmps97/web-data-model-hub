@@ -1,10 +1,9 @@
-// UdpAssign sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105 (ronda 4, 6d) — lo tipeado sin blur se guarda al desmontar (cerrar
-// Properties). Si el panel se desmonta porque la sesión cambió — se abrió otra
-// versión, o la revalidación la bajó a solo lectura —, ese flush escribía con la
-// sesión NUEVA: en solo lectura fallaba y avisaba «read-only» encima del aviso
-// de la revalidación. Ahora lo pendiente es de la sesión de la ÚLTIMA edición:
-// si ya no es la vigente, se descarta.
+// UdpAssign sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+// Lo escrito sin blur se guarda al desmontar (cerrar Properties). Lo pendiente
+// pertenece a la sesión de la última edición: si el panel se desmonta porque la
+// sesión es otra (se abrió otra versión, o la revalidación la bajó a solo
+// lectura), se descarta; escribir con la sesión vigente fallaría en solo lectura
+// y avisaría «read-only» encima del aviso de la revalidación.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextStates, resetFake, runEffects, unmount, walk } from '../../reporting/components/fakeReact.testutil';
 
@@ -40,14 +39,14 @@ beforeEach(() => {
   useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1', activeProjectId: 'p1' });
 });
 
-describe('UdpAssign: lo pendiente es de la sesión de la última edición (doc 105, ronda 4)', () => {
-  it('al desmontar en la MISMA sesión, guarda lo tipeado (como siempre)', () => {
+describe('UdpAssign: lo pendiente es de la sesión de la última edición', () => {
+  it('al desmontar en la misma sesión, guarda lo tipeado', () => {
     mountAndType('Finanzas');
     unmount();
     expect(props.onChange).toHaveBeenCalledWith({ u1: 'Finanzas' });
   });
 
-  it('la revalidación bajó la versión a solo lectura: el panel se cierra y NO escribe', () => {
+  it('la revalidación bajó la versión a solo lectura: el panel se cierra y no escribe', () => {
     mountAndType('Finanzas');
     useSessionStore.setState({ openMode: 'readonly' });
     unmount();
@@ -69,9 +68,10 @@ describe('UdpAssign: lo pendiente es de la sesión de la última edición (doc 1
   });
 });
 
-// Doc 105 (ronda 5): un UDP booleano se tipeaba como texto libre («Sí», «yes»,
-// «1»…): el Reporting lo normaliza al filtrar pero GROUP BY agrupaba por grafía.
-describe('UDP booleano: se elige true/false, no se tipea (doc 105, ronda 5)', () => {
+// Un UDP booleano se elige (true/false) en vez de escribirse como texto libre
+// («Sí», «yes», «1»…): el Reporting lo normaliza al filtrar, pero GROUP BY
+// agruparía por grafía.
+describe('UDP booleano: se elige true/false, no se tipea', () => {
   const BOOL = [{ id: 'u2', name: 'Sensible', level: 'table', view: 'physical', dataType: 'boolean', allowedValues: [] }] as never[];
   function mountBool(values: Record<string, string>) {
     props = { level: 'table', view: 'physical', values, onChange: vi.fn(), defs: BOOL };
@@ -92,7 +92,7 @@ describe('UDP booleano: se elige true/false, no se tipea (doc 105, ronda 5)', ()
     expect(props.onChange).toHaveBeenCalledWith({ u2: 'false' });
   });
 
-  it('un valor legado («Sí») se sigue viendo, no se pierde en silencio', () => {
+  it('un valor guardado fuera de true/false («Sí») se ve y no se pierde en silencio', () => {
     const tree = mountBool({ u2: 'Sí' });
     const sel = [...walk(tree)].find((e) => e.type === 'select')!;
     expect(sel.props.value).toBe('Sí');
@@ -100,9 +100,9 @@ describe('UDP booleano: se elige true/false, no se tipea (doc 105, ronda 5)', ()
   });
 });
 
-// Doc 105 (ronda 6): un número se guarda en su forma canónica («10.50» → «10.5»):
-// el Reporting busca `= 10.5` por el literal y su forma canónica.
-describe('UDP numérico: se guarda en su forma canónica (doc 105, ronda 6)', () => {
+// Un número se guarda en su forma canónica («10.50» → «10.5»): el Reporting
+// busca `= 10.5` por el literal y su forma canónica.
+describe('UDP numérico: se guarda en su forma canónica', () => {
   it('al salir del campo', () => {
     const NUM = [{ id: 'u4', name: 'Peso', level: 'table', view: 'physical', dataType: 'number', allowedValues: [] }] as never[];
     props = { level: 'table', view: 'physical', values: {}, onChange: vi.fn(), defs: NUM };

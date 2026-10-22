@@ -1,11 +1,11 @@
 /**
- * Doc 113 §5 — regla ÚNICA para ubicar ventanas flotantes (tooltips, menús,
- * popovers): las prácticas de Floating UI / Popper, sin librería.
+ * Regla única para ubicar ventanas flotantes (tooltips, menús, popovers): las
+ * prácticas de Floating UI / Popper, sin librería.
  *  · flip  — si no entra del lado pedido, se abre del lado opuesto;
  *  · shift — se corre sobre el otro eje para quedar dentro, con margen (`pad`);
  *  · size  — si no entra en ningún lado, toma el lado con más espacio y limita
  *            el alto (`maxHeight`: scroll interno).
- * Puras: reciben el tamaño MEDIDO del cuadro y el área donde debe quedar
+ * Puras: reciben el tamaño medido del cuadro y el área donde debe quedar
  * (la ventana: `viewportBounds`). El hook `useFloating` mide y aplica.
  */
 
@@ -17,7 +17,7 @@ export type Align = 'start' | 'center' | 'end';
 export interface Placement {
   left: number;
   top: number;
-  /** Lado donde quedó (tras el flip). */
+  /** Lado final (tras el flip). */
   side: Side;
   /** Alto máximo cuando no entra entero (null = entra). */
   maxHeight: number | null;
@@ -59,7 +59,7 @@ export function placeNextTo(anchor: RectLike, box: Size, bounds: RectLike, opts:
     if (need <= room(opposite)) chosen = opposite;
     else {
       chosen = room(opposite) > room(side) ? opposite : side;
-      capped = vertical;          // sólo el alto se limita (el ancho se corre)
+      capped = vertical;          // solo el alto se limita (el ancho se corre)
     }
   }
   if (vertical) {
@@ -85,9 +85,9 @@ export function placeNextTo(anchor: RectLike, box: Size, bounds: RectLike, opts:
   return { left: Math.round(left), top: Math.round(top), side: chosen, maxHeight: null };
 }
 
-/** Revisión 2 doc 114: al costado (`right` / `left`, el otro si no entra) y, si
- *  no entra en ninguno, abajo — corrido sobre su propio ancla, un tooltip tapaba
- *  el nombre del botón. */
+/** Al costado (`right` / `left`, el otro si no entra) y, si no entra en
+ *  ninguno, abajo: corrido sobre su propio ancla, un tooltip taparía el nombre
+ *  del botón. */
 export function placeBeside(anchor: RectLike, box: Size, bounds: RectLike, opts: PlaceOptions = {}): Placement {
   const p = placeNextTo(anchor, box, bounds, opts);
   const beside = p.side === 'right' || p.side === 'left';
@@ -127,25 +127,25 @@ export function intersectRects(rects: RectLike[]): RectLike {
   }));
 }
 
-/** ¿El rectángulo `a` quedó por completo fuera de `clip`? (un control que el
+/** ¿El rectángulo `a` está por completo fuera de `clip`? (un control que el
  *  scroll de su panel sacó de la vista). */
 export function outside(a: RectLike, clip: RectLike): boolean {
   return a.bottom <= clip.top || a.top >= clip.bottom || a.right <= clip.left || a.left >= clip.right;
 }
 
-/** Ronda 2 (revisión doc 113): el desplegable de un control que vive dentro de
- *  paneles con scroll — se UBICA en la ventana (`viewport`), como cualquier
- *  desplegable: si abajo no entra, arriba, sobre lo que haya; y se oculta (null)
- *  sólo cuando el control salió de la vista de sus paneles (`clip`, ver
- *  `clipRect`). Limitado al panel recortado quedaba de 60 px en ventanas bajas. */
+/** El desplegable de un control que vive dentro de paneles con scroll: se
+ *  ubica en la ventana (`viewport`), como cualquier desplegable (si abajo no
+ *  entra, arriba, sobre lo que haya), y se oculta (null) solo cuando el control
+ *  salió de la vista de sus paneles (`clip`, ver `clipRect`). Limitado al panel
+ *  recortado quedaría de 60 px en ventanas bajas. */
 export function placeAnchored(anchor: RectLike, clip: RectLike, box: Size, viewport: RectLike, opts: PlaceOptions = {}): Placement | null {
   return outside(anchor, clip) ? null : placeNextTo(anchor, box, viewport, opts);
 }
 
-/** Ronda 3 (revisión doc 113): el área de los desplegables del CONTENIDO — la
- *  ventana sin la barra superior de la app (`.dmh-topnav`, z-index 40), que
- *  queda por encima de ellos: abiertos hacia arriba en ventanas bajas se
- *  escondían debajo. Con la barra fuera de la vista (o sin ella), la ventana. */
+/** El área de los desplegables del contenido: la ventana sin la barra superior
+ *  de la app (`.dmh-topnav`, z-index 40), que queda por encima de ellos (abiertos
+ *  hacia arriba en ventanas bajas se esconderían debajo). Con la barra fuera de
+ *  la vista (o sin ella), la ventana. */
 export function contentBounds(viewport: RectLike): RectLike {
   if (typeof document === 'undefined') return viewport;
   const bar = document.querySelector('.dmh-topnav')?.getBoundingClientRect();
@@ -153,10 +153,10 @@ export function contentBounds(viewport: RectLike): RectLike {
   return { ...viewport, top: Math.min(bar.bottom, viewport.bottom) };
 }
 
-/** Revisión doc 113: la parte de la ventana donde se VE un control que está
- *  dentro de contenedores con scroll — la ventana recortada por cada ancestro
- *  que recorta su contenido (overflow distinto de visible). Si el control salió
- *  de ahí, su desplegable se oculta (`placeAnchored`). */
+/** La parte de la ventana donde se ve un control que está dentro de
+ *  contenedores con scroll: la ventana recortada por cada ancestro que recorta
+ *  su contenido (overflow distinto de visible). Si el control sale de ahí, su
+ *  desplegable se oculta (`placeAnchored`). */
 export function clipRect(el: Element): RectLike {
   const rects: RectLike[] = [viewportBounds()];
   for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {

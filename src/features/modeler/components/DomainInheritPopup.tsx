@@ -5,9 +5,9 @@ import type { ParentDomain } from '@/services/governance.service';
 import type { DomainUdpOffer, DomainUdpOfferItem } from '../lib/domainInherit';
 
 /**
- * Doc 85 §3.6 — «Inherit from domain X». Aparece SOLO al elegir un dominio
- * DISTINTO del actual que tenga UDP por defecto: el modelador elige cuáles
- * copiar a la columna (ambas facetas, todo marcado por defecto — D4). `also`
+ * «Inherit from domain X». Aparece solo al elegir un dominio distinto del
+ * actual que tenga UDP por defecto: el modelador elige cuáles copiar a la
+ * columna (ambas facetas, todos marcados por defecto). `also`
  * resume lo que se aplica de todos modos (tipo; nombres + definiciones si el
  * dominio es «atributo estándar»). Skip = ningún UDP (el resto se aplica igual).
  */

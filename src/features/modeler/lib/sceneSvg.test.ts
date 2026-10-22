@@ -21,7 +21,7 @@ describe('buildDiagramSvg', () => {
     expect(out).toContain('fill="none"');
   });
 
-  it('rect rtop = path con SOLO las esquinas de arriba redondeadas', () => {
+  it('rect rtop = path con solo las esquinas de arriba redondeadas', () => {
     const out = buildDiagramSvg(scene([{ k: 'rect', x: 0, y: 0, w: 100, h: 32, rx: 11, rtop: true, fill: '#1A2B4A' }]));
     expect(out).toContain('<path d="M0,32');
     expect(out).toContain('fill="#1A2B4A"');
@@ -68,13 +68,13 @@ describe('buildDiagramSvg', () => {
   });
 });
 
-describe('buildDiagramSvg — texto de dibujos (doc 109)', () => {
+describe('buildDiagramSvg — texto de dibujos', () => {
   it('familia elegida (con la de la app de respaldo) y subrayado', () => {
     const out = buildDiagramSvg(scene([{ k: 'text', x: 1, y: 2, s: 'Hola', size: 16, color: '#000000', font: 'Arial', underline: true }]));
     expect(out).toContain('font-family="&quot;Arial&quot;, ');
     expect(out).toContain('text-decoration="underline"');
   });
-  it('sin familia ni subrayado, como siempre; la sangría de Erwin se conserva', () => {
+  it('sin familia ni subrayado, sale con la letra de la app; la sangría de Erwin se conserva', () => {
     const out = buildDiagramSvg(scene([{ k: 'text', x: 1, y: 2, s: '   Título', size: 16, color: '#000000' }]));
     expect(out).not.toContain('text-decoration');
     expect(out).not.toContain('&quot;');

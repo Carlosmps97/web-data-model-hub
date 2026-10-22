@@ -1,15 +1,15 @@
-// Doc 96 D2-D4: alta de un esquema DESDE un combo — validación compartida con
-// el gestor, cuándo se ofrece y el orden crear → recargar → seleccionar.
+// Alta de un esquema desde un combo: validación compartida con el gestor,
+// cuándo se ofrece y el orden crear → recargar → seleccionar.
 import { describe, expect, it, vi } from 'vitest';
 import { canCreateSchema, createActionLabel, createSchemaAndPick, schemaNameError } from './schemaCreate';
 
 describe('schemaNameError (compartida con el gestor)', () => {
-  const taken = new Set(['bcp_ddv_clientes']);
+  const taken = new Set(['stg_clientes']);
   it('requerido, patrón y duplicado sin mayúsculas', () => {
     expect(schemaNameError('  ', taken)).toBe('The schema name is required.');
     expect(schemaNameError('1abc', taken)).toMatch(/^Invalid name/);
-    expect(schemaNameError('BCP_DDV_CLIENTES', taken)).toBe('Schema BCP_DDV_CLIENTES already exists');
-    expect(schemaNameError('bcp_ddv_nuevo', taken)).toBeNull();
+    expect(schemaNameError('STG_CLIENTES', taken)).toBe('Schema STG_CLIENTES already exists');
+    expect(schemaNameError('stg_nuevo', taken)).toBeNull();
   });
 });
 
@@ -30,18 +30,18 @@ describe('createSchemaAndPick — crear, recargar y recién seleccionar', () => 
   it('selecciona después de crear y de recargar el catálogo', async () => {
     const order: string[] = [];
     await createSchemaAndPick({
-      name: ' bcp_x ', kind: 'tables',
+      name: ' stg_x ', kind: 'tables',
       create: async (n, k) => { order.push(`create:${n}:${k}`); },
       refresh: async () => { order.push('refresh'); },
       pick: (n) => { order.push(`pick:${n}`); },
     });
-    expect(order).toEqual(['create:bcp_x:tables', 'refresh', 'pick:bcp_x']);
+    expect(order).toEqual(['create:stg_x:tables', 'refresh', 'pick:stg_x']);
   });
   it('si la creación falla, no selecciona nada y propaga el error', async () => {
     const pick = vi.fn();
     await expect(createSchemaAndPick({
-      name: 'bcp_x', kind: 'views',
-      create: async () => { throw new Error('Schema bcp_x already exists'); },
+      name: 'stg_x', kind: 'views',
+      create: async () => { throw new Error('Schema stg_x already exists'); },
       refresh: async () => {}, pick,
     })).rejects.toThrow('already exists');
     expect(pick).not.toHaveBeenCalled();
@@ -50,7 +50,7 @@ describe('createSchemaAndPick — crear, recargar y recién seleccionar', () => 
     const refresh = vi.fn(async () => {});
     const pick = vi.fn();
     await expect(createSchemaAndPick({
-      name: 'bcp_x', kind: 'tables',
+      name: 'stg_x', kind: 'tables',
       create: async () => { throw new Error('Network error'); }, refresh, pick,
     })).rejects.toThrow('Network error');
     expect(refresh).toHaveBeenCalledTimes(1);
@@ -59,16 +59,16 @@ describe('createSchemaAndPick — crear, recargar y recién seleccionar', () => 
   it('si solo falla la recarga, igual selecciona (el esquema ya está en la versión)', async () => {
     const pick = vi.fn();
     await createSchemaAndPick({
-      name: 'bcp_x', kind: 'tables', create: async () => {},
+      name: 'stg_x', kind: 'tables', create: async () => {},
       refresh: async () => { throw new Error('net'); }, pick,
     });
-    expect(pick).toHaveBeenCalledWith('bcp_x');
+    expect(pick).toHaveBeenCalledWith('stg_x');
   });
 });
 
 describe('createActionLabel', () => {
   it('con y sin texto tipeado', () => {
     expect(createActionLabel('')).toBe('+ New schema…');
-    expect(createActionLabel(' bcp_x ')).toBe('+ Create schema "bcp_x"…');
+    expect(createActionLabel(' stg_x ')).toBe('+ Create schema "stg_x"…');
   });
 });

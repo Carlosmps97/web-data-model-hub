@@ -7,10 +7,10 @@ import {
 const core = { id: 's1', name: 'core' };
 const temp = { id: 's2', name: 'temp_x' };
 const SCHEMAS = [core, temp];
-// Doc 119: un esquema guardado como de tablas que se pasa a vistas o a ambos.
+// Un esquema guardado como de tablas que se pasa a vistas o a ambos.
 const mixto = { id: 's3', name: 'core_vu', kind: 'tables' as const };
 
-describe('setKind del esquema (doc 119)', () => {
+describe('setKind del esquema', () => {
   it('stageSetKind guarda el kind nuevo y reemplaza uno previo del mismo esquema', () => {
     let ops = stageSetKind([], mixto, 'views');
     ops = stageSetKind(ops, mixto, 'both');
@@ -98,7 +98,7 @@ describe('schemaStaging', () => {
     expect(orderedForSave(ops).map((o) => o.kind)).toEqual(['create', 'rename', 'delete']);
   });
 
-  it('takenNames: delete libera el nombre; rename libera el viejo y toma el nuevo', () => {
+  it('takenNames: delete libera el nombre; rename libera el anterior y toma el nuevo', () => {
     let ops: StagedOp[] = stageDelete([], temp);
     ops = stageRename(ops, core, 'core_v2');
     const names = takenNames(SCHEMAS, ops);
@@ -114,7 +114,7 @@ describe('schemaStaging', () => {
   });
 });
 
-describe('schemaKind del create (doc 44)', () => {
+describe('schemaKind del create', () => {
   it('stageCreate guarda el kind elegido y editCreate lo preserva', () => {
     let ops = stageCreate([], 'core_vu', 'views');
     expect(ops[0]).toMatchObject({ kind: 'create', name: 'core_vu', schemaKind: 'views' });

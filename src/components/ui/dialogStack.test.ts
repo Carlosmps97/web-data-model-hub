@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { isTopDialog, pushDialog, removeDialog, resetDialogStack } from './dialogStack';
 
-describe('dialogStack (doc 80 §1 — ESC lo consume sólo el diálogo de arriba)', () => {
+describe('dialogStack (ESC lo consume solo el diálogo de arriba)', () => {
   beforeEach(resetDialogStack);
 
   it('el último en abrirse es el tope', () => {
@@ -11,7 +11,7 @@ describe('dialogStack (doc 80 §1 — ESC lo consume sólo el diálogo de arriba
     expect(isTopDialog(viewEditor)).toBe(true);
     pushDialog(schemas);
     expect(isTopDialog(schemas)).toBe(true);
-    expect(isTopDialog(viewEditor)).toBe(false);   // el de abajo NO se cierra con ESC
+    expect(isTopDialog(viewEditor)).toBe(false);   // el de abajo no se cierra con ESC
   });
 
   it('al cerrar el de arriba, el de abajo recupera el ESC', () => {
@@ -21,7 +21,7 @@ describe('dialogStack (doc 80 §1 — ESC lo consume sólo el diálogo de arriba
     expect(isTopDialog(a)).toBe(true);
   });
 
-  it('re-registrar un token YA abierto no lo sube al tope (renders repetidos)', () => {
+  it('volver a registrar un token ya abierto no lo sube al tope (renders repetidos)', () => {
     const a = Symbol('a'); const b = Symbol('b');
     pushDialog(a); pushDialog(b);
     pushDialog(a);                    // el de abajo re-renderiza

@@ -1,9 +1,9 @@
 import { useBusyStore } from '@/store/useBusyStore';
 
 /**
- * Overlay bloqueante global (doc 75 D18): mismo lenguaje que NavigatingOverlay
- * (scrim + tarjeta con spinner); sin botón de cierre — termina cuando termina
- * la acción de ESTA sesión (`runBlocking`).
+ * Overlay bloqueante global: mismo lenguaje visual que NavigatingOverlay
+ * (scrim + tarjeta con spinner); sin botón de cierre: termina cuando termina
+ * la acción de esta sesión (`runBlocking`).
  */
 export default function BusyOverlay() {
   const active = useBusyStore((s) => s.active);

@@ -1,21 +1,20 @@
 /**
- * Doc 113 §1.3 — tras aplicar la carga masiva, en cada canvas que ganó tablas
- * o vistas se ubica SÓLO lo que entró (`newMembers` del resultado del job):
- * agrupado, sin pisarse, en el centro de lo que el usuario ve (el canvas
- * abierto: `focus`) o del contenido de ese canvas (`placeNewMembers`). Se graba
- * con `setSubjectAreaLayout`, que mezcla las posiciones: lo existente no se
- * mueve y los trazos manuales de wires se conservan. Reemplaza al arrange
- * completo de la carga (doc 55 §3.5), que movía todos los bloques.
+ * Tras aplicar la carga masiva, en cada canvas que ganó tablas o vistas se
+ * ubica solo lo que entró (`newMembers` del resultado del job): agrupado, sin
+ * pisarse, en el centro de lo que el usuario ve (el canvas abierto: `focus`) o
+ * del contenido de ese canvas (`placeNewMembers`). Se graba con
+ * `setSubjectAreaLayout`, que mezcla las posiciones: lo existente no se mueve y
+ * los trazos manuales de wires se conservan (no se reacomodan todos los bloques).
  * Un canvas que falla no frena a los demás: se devuelve en `failed` para que el
  * popup lo avise (lo nuevo queda en la posición provisional del backend).
- * Doc 105 (R7-B, rondas 4-5): corre con el pin de la CARGA — si en el medio se
- * abrió otra versión, corta antes de cargar o escribir en ella y devuelve en
- * `skipped` los canvases que no llegó a ubicar.
+ * Corre con el pin de la carga: si en el medio se abrió otra versión, corta
+ * antes de cargar o escribir en ella y devuelve en `skipped` los canvases que
+ * no llegó a ubicar.
  */
 import * as mod from '@/features/modeler/services/modeler.service';
 import * as struct from '@/features/modeler/services/structure.service';
 import { placeNewMembers } from '@/features/modeler/lib/placeNewMembers';
-// eslint-disable-next-line no-restricted-imports -- a propósito: por el barrel de modeler sería un ciclo (Toolbar → UploadModal → modeler); ver doc/architecture.md
+// eslint-disable-next-line no-restricted-imports -- a propósito: por el barrel de modeler sería un ciclo (Toolbar → UploadModal → modeler); ver docs/02-arquitectura.md
 import { SessionChangedError, pinSession, type SessionPin } from '@/features/modeler/lib/sessionGuard';
 
 /** `placed`: canvases resueltos (también los que no tenían nada que mover). */
@@ -30,7 +29,7 @@ export async function placeUploadedObjects(
 ): Promise<PlaceOutcome> {
   const pin = guard.pin ?? pinSession();
   const out: PlaceOutcome = { placed: 0, failed: [], skipped: [] };
-  // Sólo los canvases donde entró algo (sin `newMembers` — backend anterior —, ninguno).
+  // Solo los canvases donde entró algo (sin `newMembers`, ninguno).
   const ids = canvasIds.filter((id) => (newMembers?.[id]?.length ?? 0) > 0);
   for (let i = 0; i < ids.length; i++) {
     if (!pin.holds()) { out.skipped = ids.slice(i); break; }
@@ -45,7 +44,7 @@ export async function placeUploadedObjects(
       }
       out.placed += 1;
     } catch (e) {
-      // La sesión cambió: no es un canvas que falló — éste y los que faltan quedan sin ubicar.
+      // Cambio de sesión: no es un canvas que falló; este y los que faltan quedan sin ubicar.
       if (e instanceof SessionChangedError) { out.skipped = ids.slice(i); break; }
       out.failed.push(id);
     }

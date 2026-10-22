@@ -1,6 +1,6 @@
-/* Shared design-system primitives (rd-) + modal + tag editor + toasts + inspector panel. Part of the Aurora system — see doc/architecture.md. */
+/* Primitivas compartidas del sistema de diseño (rd-) + modal + editor de tags + toasts + panel inspector. Parte del sistema Aurora; ver docs/02-arquitectura.md. */
 
-/* ============================================================ Typography */
+/* ============================================================ Tipografía */
 .rd-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--subtle); }
 .rd-h1 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; color: var(--ink); line-height: 1.15; }
 .rd-h2 { font-size: 19px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); }
@@ -9,7 +9,7 @@
 .rd-small { font-size: 12px; color: var(--muted); line-height: 1.55; }
 .rd-mono { font-family: var(--mono); }
 
-/* ============================================================ Buttons */
+/* ============================================================ Botones */
 .rd-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 8px 14px; font-size: 13px; font-weight: 600; line-height: 1; border-radius: var(--r-sm); border: 1px solid transparent; cursor: pointer; transition: all .15s cubic-bezier(.4,0,.2,1); white-space: nowrap; color: var(--ink-2); background: transparent; }
 .rd-btn svg { width: 15px; height: 15px; }
 .rd-btn:disabled { opacity: .5; cursor: not-allowed; }
@@ -23,12 +23,12 @@
 .rd-btn-danger:hover { background: #f7dcdc; }
 .rd-btn-sm { padding: 6px 10px; font-size: 12px; }
 .rd-btn-lg { padding: 11px 18px; font-size: 14px; }
-/* Doc 107: compacto, para acciones dentro de un encabezado o de un buscador («All», «None»). */
+/* Compacto, para acciones dentro de un encabezado o de un buscador («All», «None»). */
 .rd-btn-xs { padding: 4px 9px; font-size: 11.5px; gap: 5px; }
 .rd-btn-icon { padding: 8px; width: 34px; height: 34px; }
 .rd-btn-icon.rd-btn-sm { padding: 6px; width: 30px; height: 30px; }
 
-/* ============================================================ Badges & chips */
+/* ============================================================ Badges y chips */
 .rd-badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px; font-size: 11px; font-weight: 700; border-radius: var(--r-full); line-height: 1.3; letter-spacing: .01em; white-space: nowrap; }
 .rd-badge svg { width: 12px; height: 12px; }
 .rd-badge-primary { background: var(--primary-soft); color: var(--primary-700); }
@@ -104,7 +104,7 @@ select.rd-input { padding-top: 0; padding-bottom: 0; height: 38px; }
 
 /* ============================================================ Modal */
 .dmh-backdrop { position: fixed; inset: 0; background: rgba(20,22,40,.4); display: flex; align-items: center; justify-content: center; z-index: 200; animation: dmh-fade .15s ease; padding: 30px; }
-/* Confirmaciones/prompts (DialogHost, ConfirmDialog): SIEMPRE por encima de
+/* Confirmaciones/prompts (DialogHost, ConfirmDialog): siempre por encima de
    cualquier modal, incluido el Dialog del design-system (z-index 300). */
 .dmh-backdrop--top { z-index: 400; }
 @keyframes dmh-fade { from { opacity: 0; } to { opacity: 1; } }
@@ -122,7 +122,7 @@ select.rd-input { padding-top: 0; padding-bottom: 0; height: 38px; }
 .code-area { width: 100%; min-height: 280px; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; color: var(--ink); background: #0e1018; border: 1px solid var(--border-strong); border-radius: var(--r-sm); padding: 14px 16px; resize: vertical; outline: none; white-space: pre; tab-size: 2; }
 .code-area.light { background: var(--surface-2); color: var(--ink); }
 .code-area.ddl { color: #c7d2fe; }
-/* Key/value tag editor (domain / table / column) */
+/* Editor de tags clave/valor (dominio / tabla / columna) */
 .tag-editor { display: flex; flex-direction: column; gap: 8px; }
 .tag-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-chip { display: inline-flex; align-items: center; gap: 0; height: 24px; padding: 0 4px 0 0; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-full); font-size: 11.5px; overflow: hidden; }
@@ -134,7 +134,7 @@ select.rd-input { padding-top: 0; padding-bottom: 0; height: 38px; }
 .tag-add .rd-input { padding: 7px 10px; font-size: 12.5px; }
 .tag-add .tag-eq { color: var(--subtle); font-weight: 700; }
 .tag-editor.compact .tag-add .rd-input { padding: 6px 9px; font-size: 12px; }
-/* ============================================================ Toasts / select / empty */
+/* ============================================================ Toasts / select / vacío */
 .dmh-toasts { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 8px; z-index: 400; align-items: center; }
 .dmh-toast { display: flex; align-items: center; gap: 9px; padding: 10px 15px; background: var(--ink); color: #fff; border-radius: var(--r); font-size: 13px; font-weight: 600; box-shadow: var(--shadow-lg); animation: dmh-pop .2s ease; }
 .dmh-toast .ic { color: var(--flow); display: flex; }

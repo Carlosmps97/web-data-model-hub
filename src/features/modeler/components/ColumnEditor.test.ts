@@ -1,7 +1,7 @@
 // «New column» sin DOM (hooks de mentira: ver features/reporting/components/fakeReact.testutil).
-// Doc 105 (R11): Enter en el nombre crea la columna y cierra el popup; sin
-// preventDefault, si el cierre cae antes del keypress de ese Enter, el keypress
-// «clicaba» al botón que lo abrió (se reabría el popup).
+// Enter en el nombre crea la columna y cierra el popup; sin preventDefault, si
+// el cierre ocurre antes de que llegue el keypress de ese Enter, el keypress
+// «clicaría» al botón que lo abrió (se reabriría el popup).
 import { describe, expect, it, vi } from 'vitest';
 import { resetFake, walk, type El } from '../../reporting/components/fakeReact.testutil';
 
@@ -15,7 +15,7 @@ vi.mock('@/features/standards/standards.service', () => ({ getUdpDefs: vi.fn(asy
 vi.mock('@/services/governance.service', () => ({ listDomains: vi.fn(async () => []) }));
 import ColumnEditor from './ColumnEditor';
 
-describe('New column: el Enter que crea y cierra no llega a quien lo abrió (doc 105, R11)', () => {
+describe('New column: el Enter que crea y cierra no llega a quien lo abrió', () => {
   it('Enter en el nombre: preventDefault y crea la columna', async () => {
     resetFake((init, i) => (i === 0 ? 'MTO_DEU' : init));     // `name` = 1.er useState
     const onAdd = vi.fn(async () => undefined);
@@ -30,10 +30,10 @@ describe('New column: el Enter que crea y cierra no llega a quien lo abrió (doc
   });
 });
 
-// Doc 105 (R14): Enter no respetaba el alta en vuelo (`busy` sigue en false dentro
-// del mismo render) — un doble Enter creaba 2 columnas y uno sostenido, 5; el
-// backend chequea la unicidad sin bloqueo: duplicados que bloquean el publish.
-describe('New column: un alta a la vez (doc 105, R14)', () => {
+// Enter debe respetar el alta en vuelo (`busy` sigue en false dentro del mismo
+// render): sin la guarda, un doble Enter crearía 2 columnas y uno sostenido, 5;
+// el backend chequea la unicidad sin bloqueo, y los duplicados bloquean el publish.
+describe('New column: un alta a la vez', () => {
   const render = (onAdd: (...a: unknown[]) => Promise<unknown>, onClose = vi.fn()) => {
     resetFake((init, i) => (i === 0 ? 'MTO_DEU' : init));
     const tree = ColumnEditor({ tableId: 't1', onClose, onAdd: onAdd as never });
@@ -41,7 +41,7 @@ describe('New column: un alta a la vez (doc 105, R14)', () => {
     return () => (input.props.onKeyDown as (e: unknown) => void)({ key: 'Enter', preventDefault: vi.fn() });
   };
 
-  it('dos Enter seguidos (o uno sostenido) crean UNA columna', async () => {
+  it('dos Enter seguidos (o uno sostenido) crean una sola columna', async () => {
     let release!: () => void;
     const onAdd = vi.fn(() => new Promise<void>((r) => { release = r; }));
     const onClose = vi.fn();

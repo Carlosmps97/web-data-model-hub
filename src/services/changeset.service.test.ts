@@ -1,6 +1,6 @@
-// recordChangesBulk (doc 39): un LOTE de cambios viaja en tandas de 1000 por
-// PUT /changes/bulk — la cascada cambio-por-cambio eran ~4k requests
-// secuenciales en tablas DDV grandes (minutos de espera).
+// recordChangesBulk: un lote de cambios viaja en tandas de 1000 por
+// PUT /changes/bulk; enviar la cascada cambio por cambio serían miles de
+// requests secuenciales en tablas grandes (minutos de espera).
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/services/http', () => ({
@@ -17,7 +17,7 @@ const del = (i: number): BulkChange => ({ collection: 'canonical_columns', entit
 beforeEach(() => vi.clearAllMocks());
 
 describe('recordChangesBulk', () => {
-  it('trocea en tandas de 1000 SECUENCIALES contra /changes/bulk', async () => {
+  it('trocea en tandas de 1000 secuenciales contra /changes/bulk', async () => {
     const items = Array.from({ length: 2500 }, (_, i) => del(i));
     const res = await recordChangesBulk('cs1', items);
     expect(vi.mocked(apiPut).mock.calls.map(([url]) => url))

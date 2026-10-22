@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { countLabel, filterRows, invisibleChars, mergePage, resizeColumns, showInvisible } from './affectedRows';
 
-describe('mergePage (final review #9: paginado del servidor)', () => {
+describe('mergePage (paginado del servidor)', () => {
   it('la primera página reemplaza; la siguiente se agrega donde termina lo cargado', () => {
     expect(mergePage(['x'], ['a', 'b'], 0)).toEqual(['a', 'b']);
     expect(mergePage(['a', 'b'], ['c', 'd'], 2)).toEqual(['a', 'b', 'c', 'd']);
@@ -15,7 +15,7 @@ describe('mergePage (final review #9: paginado del servidor)', () => {
   });
 });
 
-describe('caracteres invisibles (doc 95 D3/D4)', () => {
+describe('caracteres invisibles', () => {
   it('marca el U+00A0 del final para que se vea', () => {
     expect(showInvisible('HM_JERARQUIAFUNCIONALCRE\u00a0')).toBe('HM_JERARQUIAFUNCIONALCRE⍽');
     expect(showInvisible('SIN_RAROS')).toBe('SIN_RAROS');
@@ -44,7 +44,7 @@ describe('countLabel', () => {
   });
 });
 
-describe('resizeColumns (doc 96 D7)', () => {
+describe('resizeColumns', () => {
   it('una crece y la vecina se achica en lo mismo; el total no cambia', () => {
     expect(resizeColumns([100, 100, 100], 0, 20, 72)).toEqual([120, 80, 100]);
   });

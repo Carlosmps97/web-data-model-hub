@@ -1,5 +1,5 @@
-// Minor #8a (doc 96): navegación por teclado del menú de SearchSelect. Sin
-// `action` el comportamiento de los combos existentes no cambia.
+// Navegación por teclado del menú de SearchSelect. Sin `action`, el menú solo
+// navega entre sus opciones.
 import { describe, expect, it } from 'vitest';
 import { enterTarget, moveHighlight } from './searchSelectNav';
 

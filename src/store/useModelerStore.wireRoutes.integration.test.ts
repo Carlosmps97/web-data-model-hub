@@ -1,9 +1,8 @@
-// Doc 99 — trazos manuales de wires, INTEGRADO: el store real con el
+// Trazos manuales de wires, integrado: el store real con el
 // `structure.service` real (con su cola de escrituras) contra un backend en
-// memoria con LATENCIA. Lo único simulado es la red. Invariante central:
-// cuando todo queda quieto, lo que se VE es lo que quedó GRABADO — también si
-// la red falla o un diagrama llega tarde. (Escenarios de la revisión
-// independiente del 2026-09-28.)
+// memoria con latencia. Lo único simulado es la red. Invariante central:
+// cuando todo queda quieto, lo que se ve es lo que está grabado, también si
+// la red falla o un diagrama llega tarde.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), message: vi.fn() } }));
@@ -106,7 +105,7 @@ beforeEach(async () => {
     return {} as never;
   });
   vi.mocked(mod.loadDiagram).mockImplementation(async (saId: string) => {
-    const snap = draft[saId] ? structuredClone(draft[saId]) : null;          // foto AL LLEGAR el request
+    const snap = draft[saId] ? structuredClone(draft[saId]) : null;          // foto al llegar el request
     await sleep(diagramLatency);
     if (!snap) throw new Error('404');
     const has = (t: string) => snap.tableIds.includes(t);
@@ -138,12 +137,12 @@ beforeEach(async () => {
   process.on('unhandledRejection', onUnhandled);
 });
 afterEach(async () => {
-  await sleep(120);                                    // que termine todo lo que quedó en vuelo
+  await sleep(120);                                    // que termine todo lo que sigue en vuelo
   process.off('unhandledRejection', onUnhandled);
   expect(unhandled, 'unhandledRejection durante la prueba').toEqual([]);
 });
 
-/** Pantalla == backend, ahora y después de recargar. */
+/** Pantalla == backend, en el momento y después de recargar. */
 async function expectScreenIsBackend(saId = 'sa1') {
   expect(routes(), 'pantalla vs grabado').toEqual(draft[saId].routes);
   expect(st().diagram!.subjectArea.routes, 'diagrama del store vs grabado').toEqual(draft[saId].routes);
@@ -151,7 +150,7 @@ async function expectScreenIsBackend(saId = 'sa1') {
   expect(routes(), 'pantalla vs grabado, tras recargar').toEqual(draft[saId].routes);
 }
 
-describe('I1 — gestos rápidos sobre el mismo wire con la cola REAL', () => {
+describe('gestos rápidos sobre el mismo wire con la cola real', () => {
   it('los dos graban: queda el último, en pantalla y en el backend', async () => {
     await Promise.all([st().setWireRoute('r1', R2), st().setWireRoute('r1', R3)]);
     expect(log).toEqual(['get:sa1', 'put:sa1', 'get:sa1', 'put:sa1']);
@@ -159,7 +158,7 @@ describe('I1 — gestos rápidos sobre el mismo wire con la cola REAL', () => {
     await expectScreenIsBackend();
   });
 
-  it('LOS DOS FALLAN (red caída): el backend sigue con R1 y la pantalla debe mostrar R1', async () => {
+  it('los dos fallan (red caída): el backend sigue con R1 y la pantalla debe mostrar R1', async () => {
     failPut = [1, 2];
     await Promise.all([st().setWireRoute('r1', R2), st().setWireRoute('r1', R3)]);
     expect(toast.error).toHaveBeenCalledTimes(2);
@@ -195,7 +194,7 @@ describe('I1 — gestos rápidos sobre el mismo wire con la cola REAL', () => {
   });
 });
 
-describe('I2 — trazar, mover, quitar y deshacer ×3 (backend en memoria)', () => {
+describe('trazar, mover, quitar y deshacer ×3 (backend en memoria)', () => {
   it('cada paso deja pantalla == backend y al final todo vuelve al inicio', async () => {
     const before = structuredClone(draft.sa1);
     await st().setWireRoute('r2', R2);
@@ -215,7 +214,7 @@ describe('I2 — trazar, mover, quitar y deshacer ×3 (backend en memoria)', () 
     await expectScreenIsBackend();
   });
 
-  it('quitar el ÚLTIMO trazo y deshacer: la llave routes nunca falta en lo grabado', async () => {
+  it('quitar el último trazo y deshacer: la llave routes nunca falta en lo grabado', async () => {
     await st().setWireRoute('r1', null);
     expect(draft.sa1).toHaveProperty('routes', {});
     await useUndoStore.getState().undoLast();
@@ -224,19 +223,19 @@ describe('I2 — trazar, mover, quitar y deshacer ×3 (backend en memoria)', () 
   });
 });
 
-describe('I3 — un diagrama que llega tarde (latencia)', () => {
-  it('reload lento pedido ANTES del gesto; el guardado termina primero: el trazo grabado no desaparece', async () => {
+describe('un diagrama que llega tarde (latencia)', () => {
+  it('reload lento pedido antes del gesto; el guardado termina primero: el trazo grabado no desaparece', async () => {
     diagramLatency = 80;
     const reloading = st().reload();
     await sleep(5);
     await st().setWireRoute('r2', R2);                  // ~10 ms: termina antes que el diagrama
     expect(draft.sa1.routes).toEqual({ r1: R1, r2: R2 });
     expect(routes()).toEqual({ r1: R1, r2: R2 });
-    await reloading;                                     // llega la foto vieja
+    await reloading;                                     // llega la foto previa al guardado
     expect(routes(), 'pantalla vs grabado').toEqual(draft.sa1.routes);
   });
 
-  it('reload lento pedido DURANTE el guardado (el guardado sigue en vuelo al llegar): conserva el trazo', async () => {
+  it('reload lento pedido durante el guardado (el guardado sigue en vuelo al llegar): conserva el trazo', async () => {
     putLatency = 60; diagramLatency = 10;
     const saving = st().setWireRoute('r2', R2);
     await st().reload();
@@ -255,7 +254,7 @@ describe('I3 — un diagrama que llega tarde (latencia)', () => {
   });
 });
 
-describe('I4 — sacar una tabla del canvas + Undo', () => {
+describe('sacar una tabla del canvas + Undo', () => {
   beforeEach(async () => {
     draft.sa1 = canvas({ routes: { r1: R1, r2: R2, s1: R3, 'subsym-sym1': R4 } });
     await st().reload();
@@ -278,7 +277,7 @@ describe('I4 — sacar una tabla del canvas + Undo', () => {
     await expectScreenIsBackend();
   });
 
-  it('sacar con un trazo de esa tabla EN VUELO y después deshacer las dos cosas', async () => {
+  it('sacar con un trazo de esa tabla en vuelo y después deshacer las dos cosas', async () => {
     putLatency = 20;
     const saving = st().setWireRoute('r1', R4);
     const removing = st().removeTableFromArea('t2');
@@ -294,7 +293,7 @@ describe('I4 — sacar una tabla del canvas + Undo', () => {
   });
 });
 
-describe('I5 — borrar una tabla + Undo', () => {
+describe('borrar una tabla + Undo', () => {
   beforeEach(async () => {
     draft.sa1 = canvas({ routes: { r1: R1, r2: R2, s1: R3, 'subsym-sym1': R4 } });
     draft.sa9 = canvas({ id: 'sa9', name: 'Nueve', routes: { r1: R4, r2: R4 } });
@@ -316,12 +315,12 @@ describe('I5 — borrar una tabla + Undo', () => {
     expect(draft.sa1.routes).toEqual({ r1: R1, r2: R2, s1: R3, 'subsym-sym1': R4 });
     expect(draft.sa1.layout.t2).toEqual({ x: 400, y: 0 });
     await expectScreenIsBackend();
-    // documentado: en los demás canvases los trazos NO vuelven
+    // documentado: en los demás canvases los trazos no vuelven
     expect(draft.sa9.routes).toEqual({ r2: R4 });
   });
 });
 
-describe('I6 — cambiar de canvas con guardado en vuelo (selectSubjectArea real)', () => {
+describe('cambiar de canvas con guardado en vuelo (selectSubjectArea real)', () => {
   it('A en vuelo → B → gesto en B sobre el mismo wire → volver a A', async () => {
     putLatency = 40;
     const savingA = st().setWireRoute('r1', R2);
@@ -349,7 +348,7 @@ describe('I6 — cambiar de canvas con guardado en vuelo (selectSubjectArea real
   });
 });
 
-describe('I7 — auto-arrange', () => {
+describe('auto-arrange', () => {
   it('con un trazo en vuelo: al terminar, backend sin trazos y pantalla igual; Undo repone todo', async () => {
     putLatency = 20;
     const saving = st().setWireRoute('r2', R2);
@@ -373,7 +372,7 @@ describe('I7 — auto-arrange', () => {
     await expectScreenIsBackend();
   });
 
-  it('un gesto hecho MIENTRAS se guarda el arrange: queda grabado y a la vista', async () => {
+  it('un gesto hecho mientras se guarda el arrange: queda grabado y a la vista', async () => {
     putLatency = 30;
     const arranging = st().autoOrganize();
     await sleep(10);

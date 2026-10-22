@@ -1,13 +1,13 @@
 /**
- * schemas.service — entidad `schemas` (esquema físico de BD, doc 18),
- * changeset-aware (patrón structure.service):
- *  - ESCRITURAS en sesión de edición → changeset (`recordChange`, doc COMPLETO);
- *    rename/delete van SIEMPRE por los endpoints del changeset (la propagación
+ * schemas.service — entidad `schemas` (esquema físico de BD), changeset-aware
+ * (patrón structure.service):
+ *  - Escrituras en sesión de edición → changeset (`recordChange`, doc completo);
+ *    rename/delete van siempre por los endpoints del changeset (la propagación
  *    a tablas/vistas y el guard de uso se computan server-side).
- *  - LECTURAS con changeset activo → estado efectivo (los esquemas creados en
+ *  - Lecturas con changeset activo → estado efectivo (los esquemas creados en
  *    el draft aparecen al instante en los dropdowns).
- *  - Sin changeset → endpoints directos del PROYECTO de la sesión (doc 75:
- *    los esquemas están aislados por proyecto).
+ *  - Sin changeset → endpoints directos del proyecto de la sesión (los
+ *    esquemas están aislados por proyecto).
  */
 import { apiGet, apiPost } from '@/services/http';
 import * as csvc from '@/services/changeset.service';
@@ -19,10 +19,10 @@ const CS = `${API_BASE}/api/changesets`;
 
 import type { SchemaKind } from '../lib/schemaStaging';
 
-/** Qué contiene el esquema (doc 44 / doc 119): sólo tablas, sólo vistas o
- *  ambas (`both`). Es lo que filtran los combos de esquema. Erwin no trae este
- *  dato: nace en la plataforma (la migración lo deriva de los miembros, la UI
- *  lo pide al crear y Structure · Schemas lo deja cambiar). Opcional: esquemas
+/** Qué contiene el esquema: solo tablas, solo vistas o ambas (`both`). Es lo
+ *  que filtran los combos de esquema. Erwin no trae este dato: nace en la
+ *  plataforma (la carga de modelos Erwin lo deriva de los miembros, la UI lo
+ *  pide al crear y Structure · Schemas lo deja cambiar). Opcional: esquemas
  *  nunca clasificados vienen sin él. */
 export type { SchemaKind } from '../lib/schemaStaging';
 
@@ -45,32 +45,32 @@ export const listSchemas = async (): Promise<DbSchema[]> => {
   return rows.sort(byName);
 };
 
-/** SIEMPRE dentro de una versión en edición: si la sesión se degradó (versión
+/** Siempre dentro de una versión en edición: si la sesión se degradó (versión
  *  transferida, eliminada o enviada) rechaza con un mensaje legible. */
 export const createSchema = async (name: string, description?: string, kind?: SchemaKind): Promise<DbSchema> => {
   const cs = writeCs();
   if (!cs) throw new Error('Creating a schema requires a version in edit mode.');
-  // Camino changeset: el payload es el DOC COMPLETO — kind debe ir acá o se
+  // Camino changeset: el payload es el doc completo — kind debe ir acá o se
   // publicaría sin él (invariante round-trip).
   const s: DbSchema = { id: crypto.randomUUID(), name, description: description || null, kind: kind ?? null };
   await csvc.recordChange(cs, 'schemas', s.id, 'upsert', { ...s });
   return s;
 };
 
-/** Doc 119: cambiar qué contiene un esquema EXISTENTE (lo declarado). Como el
- *  rename, lo arma el servidor desde el doc efectivo de la versión: el cliente
- *  nunca manda el doc de un esquema existente (un catálogo desactualizado
- *  pisaría un rename pendiente). */
+/** Cambia qué contiene un esquema existente (lo declarado). Como el rename, lo
+ *  arma el servidor a partir del doc efectivo de la versión: el cliente nunca
+ *  manda el doc de un esquema existente (un catálogo desactualizado pisaría un
+ *  rename pendiente). */
 export const setSchemaKind = async (id: string, kind: SchemaKind): Promise<void> => {
   const cs = writeCs();
   if (!cs) throw new Error('Changing what a schema holds requires a version in edit mode.');
   await apiPost(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/kind`, { kind });
 };
 
-/** Doc 96 (final review): alta de UN esquema desde un combo — SOLO dentro de
- *  una versión en edición (cambio `schemas` en el changeset activo, como
- *  Structure · Schemas). Sin versión en edición rechaza: jamás escribe directo
- *  a producción (p. ej. si la sesión salió de edición con el popup abierto). */
+/** Alta de un esquema desde un combo, solo dentro de una versión en edición
+ *  (cambio `schemas` en el changeset activo, como Structure · Schemas). Sin
+ *  versión en edición rechaza: jamás escribe directo a producción (p. ej. si
+ *  la sesión salió de edición con el popup abierto). */
 export const createSchemaInVersion = async (name: string, kind: SchemaKind): Promise<DbSchema> => {
   if (!writeCs()) throw new Error('Creating a schema here requires a version in edit mode.');
   return createSchema(name, undefined, kind);
@@ -78,8 +78,8 @@ export const createSchemaInVersion = async (name: string, kind: SchemaKind): Pro
 
 export interface SchemaImpact { name: string; tables: number; views: number; canvases: number }
 
-/** Impacto EFECTIVO de tocar el esquema (tablas/vistas que lo usan y en
- *  cuántos canvases aparecen) — para mostrarlo ANTES de guardar. */
+/** Impacto efectivo de tocar el esquema (tablas/vistas que lo usan y en
+ *  cuántos canvases aparecen) — para mostrarlo antes de guardar. */
 export const schemaImpact = (id: string): Promise<SchemaImpact> => {
   const cs = readCs();
   if (!cs) return Promise.reject(new Error('An active version is required.'));
@@ -87,7 +87,7 @@ export const schemaImpact = (id: string): Promise<SchemaImpact> => {
 };
 
 /** Rename versionado: propaga a todas las tablas/vistas efectivas del esquema
- *  DENTRO del draft (server-side). Devuelve cuántas se tocaron. */
+ *  dentro del draft (server-side). Devuelve cuántas se tocaron. */
 export const renameSchema = (id: string, newName: string): Promise<{ tables: number; views: number }> => {
   const cs = writeCs();
   if (!cs) return Promise.reject(new Error('Renaming a schema requires a version in edit mode.'));

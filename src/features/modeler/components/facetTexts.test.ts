@@ -1,8 +1,7 @@
-// Doc 105 (ronda 4, 6b) — avisos con el sustantivo del modelo abierto (doc 85:
-// Entity/Attribute en lógico, Table/Column en físico): pegar desde el menú de
-// la columna decía «Table pasted as» aunque Ctrl+V (el canvas) ya decía
-// «Entity/Table pasted as», y «Add existing» decía «Couldn't add the table…»
-// también en lógico. Sin DOM: se revisa el fuente.
+// Avisos con el sustantivo del modelo abierto (Entity/Attribute en lógico,
+// Table/Column en físico): pegar desde el menú de la columna avisa igual que
+// Ctrl+V en el canvas («Entity/Table pasted as»), y «Add existing» dice
+// «Couldn't add the entity…» en lógico. Sin DOM: se revisa el fuente.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -12,8 +11,8 @@ import { PASTE_KEY_LABEL as K, copiedMessage, copiedTableMessage } from './Colum
 const code = (name: string) => readFileSync(join(__dirname, name), 'utf-8')
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
-describe('avisos con el sustantivo del modelo (doc 105, ronda 4)', () => {
-  it('ColumnContextMenu › Paste table: como Ctrl+V, abre el popup que avisa con la faceta (doc 118)', () => {
+describe('avisos con el sustantivo del modelo', () => {
+  it('ColumnContextMenu › Paste table: como Ctrl+V, abre el popup que avisa con la faceta', () => {
     expect(code('ColumnContextMenu.tsx')).toMatch(/st\.setTablePasteOpen\(true\)/);
     expect(code('ModelerCanvas.tsx')).toMatch(/st\.setTablePasteOpen\(true\)/);
     const src = code('PasteTablePopup.tsx');
@@ -29,10 +28,10 @@ describe('avisos con el sustantivo del modelo (doc 105, ronda 4)', () => {
   });
 });
 
-// Doc 105 (ronda 5, R15-H9): copiar y pegar tablas en Lógico mezclaba facetas —
-// «Copy attribute» junto a «Copy table», «Paste N columns», «Paste table (X as
-// copy)», «Table X copied», «…columns copied», «Couldn't paste the table».
-describe('copiar y pegar con los sustantivos de la faceta (doc 105, ronda 5)', () => {
+// Copiar y pegar tablas en lógico no mezcla facetas: menú, avisos y errores usan
+// el sustantivo de la faceta (nada de «Copy attribute» junto a «Copy table», ni
+// «Paste N columns», «Table X copied» o «Couldn't paste the table» en lógico).
+describe('copiar y pegar con los sustantivos de la faceta', () => {
   it('los avisos de copiar', () => {
     const L = facetNouns('logical'), P = facetNouns('physical');
     expect(copiedMessage(1, L)).toBe(`1 attribute copied — paste with ${K} on the target entity`);
@@ -60,10 +59,10 @@ describe('copiar y pegar con los sustantivos de la faceta (doc 105, ronda 5)', (
   });
 });
 
-// Doc 105 (ronda 6, R17a-11): pegar COLUMNAS en Lógico mostraba nombres físicos
-// («3 attributes pasted into T_CLIENTE», el subtítulo FÍSICO → FÍSICO) y el Undo
-// decía «Paste N columns».
-describe('pegar atributos/columnas con la faceta (doc 105, ronda 6)', () => {
+// Pegar columnas en lógico muestra nombres lógicos (no «3 attributes pasted into
+// T_CLIENTE» ni el subtítulo físico → físico) y el Undo usa el sustantivo de la
+// faceta (no «Paste N columns»).
+describe('pegar atributos/columnas con la faceta', () => {
   const src = code('PasteColumnsPopup.tsx');
 
   it('los nombres de origen y destino, según la faceta', () => {

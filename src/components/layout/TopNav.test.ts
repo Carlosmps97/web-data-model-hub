@@ -1,8 +1,8 @@
-// Doc 105 (ronda 7, R18a-5) — «Save and leave» del aviso de cambios sin
-// guardar: si el guardado fallaba, el aviso decía sólo «Couldn't save — you're
-// still on the canvas», sin el motivo, y el usuario quedaba entre «Cancel» y
-// «Leave without saving» sin saber qué pasó. Ahora lo lleva (`failureText`).
-// Sin DOM: hooks de mentira (ver reporting/components/fakeReact.testutil).
+// «Save and leave» del aviso de cambios sin guardar: si el guardado falla, el
+// aviso «Couldn't save — you're still on the canvas» incluye el motivo
+// (`failureText`), para que el usuario sepa qué pasó antes de elegir entre
+// «Cancel» y «Leave without saving».
+// Sin DOM: hooks simulados (ver reporting/components/fakeReact.testutil).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nextStates, resetFake, runEffects, textOf, walk } from '../../features/reporting/components/fakeReact.testutil';
 
@@ -41,7 +41,7 @@ function saveAndLeave() {
 
 beforeEach(() => { vi.clearAllMocks(); saveAll.mockReset(); });
 
-describe('«Save and leave» (doc 105, ronda 7, R18a-5)', () => {
+describe('«Save and leave»', () => {
   it('si el guardado falla, el aviso dice por qué — y no sale', async () => {
     saveAll.mockRejectedValueOnce(new ApiError('Internal server error', 500, null, '/api/subject-areas/sa1/layout?changesetId=cs1'));
     saveAndLeave()();
@@ -50,7 +50,7 @@ describe('«Save and leave» (doc 105, ronda 7, R18a-5)', () => {
     expect(vi.mocked(toast.error).mock.calls.map((c) => c[0])).toEqual(["Couldn't save — you're still on the canvas: Internal server error."]);
   });
 
-  it('sin motivo legible, el aviso de siempre', async () => {
+  it('sin motivo legible, muestra el aviso base', async () => {
     saveAll.mockRejectedValueOnce(new Error(''));
     saveAndLeave()();
     await ticks();
@@ -66,17 +66,17 @@ describe('«Save and leave» (doc 105, ronda 7, R18a-5)', () => {
   });
 });
 
-describe('aviso de cambios sin guardar por encima de los popups del canvas (doc 112)', () => {
-  it('va en la capa de confirmaciones: los popups del canvas dejan la barra clicable y lo tapaban', () => {
+describe('aviso de cambios sin guardar por encima de los popups del canvas', () => {
+  it('va en la capa de confirmaciones, por encima de los popups del canvas que dejan la barra clicable', () => {
     // Con un popup del canvas abierto (Model properties, New table…) el TopNav
-    // sigue clicable (doc 105, R7-A): el aviso quedaba DETRÁS del popup (z 200
-    // contra 300) y la pantalla parecía trabada.
+    // sigue clicable: el aviso va en la capa `--top`, por encima del popup; si
+    // quedara detrás, la pantalla parecería trabada.
     resetFake((init, i) => (i === 1 ? '/' : init));
     const isScrim = (el: { props: { className?: unknown } }) => /\bdmh-backdrop\b/.test(String(el.props.className ?? ''));
     const tree = TopNav();
     const scrim = [...walk(tree)].find(isScrim);
     expect(String(scrim?.props.className)).toMatch(/\bdmh-backdrop--top\b/);
-    // Y FUERA del <header>: la barra tiene su propio z-index (40) y encerraba
+    // Y fuera del <header>: la barra tiene su propio z-index (40), que encerraría
     // al aviso por debajo de los popups aunque tuviera la capa alta.
     const header = [...walk(tree)].find((el) => el.type === 'header');
     expect(header).toBeTruthy();
@@ -84,8 +84,8 @@ describe('aviso de cambios sin guardar por encima de los popups del canvas (doc 
   });
 });
 
-describe('aviso de cambios sin guardar: foco y Escape (doc 112)', () => {
-  it('se lleva el foco y Escape lo cierra a ÉL (quedarse), sin llegar al popup del canvas de atrás', () => {
+describe('aviso de cambios sin guardar: foco y Escape', () => {
+  it('se lleva el foco y Escape lo cierra a él (quedarse), sin llegar al popup del canvas de atrás', () => {
     const listeners: { type: string; fn: (e: unknown) => void; capture: unknown }[] = [];
     vi.stubGlobal('window', {
       addEventListener: (type: string, fn: (e: unknown) => void, capture: unknown) => { listeners.push({ type, fn, capture }); },

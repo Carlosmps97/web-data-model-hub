@@ -1,11 +1,11 @@
-# Deploy del frontend a Databricks Apps.
+# Despliegue del frontend a Databricks Apps.
 #
 # Mapeo rama → GitHub Environment (Variables y Secrets salen del environment,
-# con fallback a los del repositorio):
+# con los del repositorio como respaldo):
 #   · deploy-dev → dev   · develop → qa   · main → prod
-# SOLO esas tres ramas despliegan: el push únicamente dispara en ellas y el
-# disparo manual desde cualquier otra rama se omite (guard del job).
-# Toda la mecánica vive en reusable-databricks-deploy.yml; acá solo se declara
+# Solo esas tres ramas despliegan: el push únicamente dispara en ellas y el
+# disparo manual desde cualquier otra rama se omite (guarda del job).
+# Toda la mecánica vive en reusable-databricks-deploy.yml; aquí solo se declara
 # la topología de la solución: esta app consume la app backend vía el proxy
 # /api de server.mjs, así que su service principal necesita CAN_USE sobre ella.
 

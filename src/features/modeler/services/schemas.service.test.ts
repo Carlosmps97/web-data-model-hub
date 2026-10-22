@@ -1,5 +1,5 @@
-// Final review (doc 96): el alta de un esquema desde un combo SOLO entra a una
-// versión en edición — sin ella rechaza y no escribe directo a producción.
+// El alta de un esquema desde un combo solo entra a una versión en edición:
+// sin ella rechaza y no escribe directo a producción.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/services/http', () => ({
@@ -17,7 +17,7 @@ import { createSchema, createSchemaInVersion, deleteSchema, setSchemaKind } from
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe('setSchemaKind (doc 119)', () => {
+describe('setSchemaKind', () => {
   it('lo registra server-side con el kind declarado nuevo (la versión arma el doc efectivo; el cliente no manda el doc)', async () => {
     useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
     await setSchemaKind('s1', 'views');
@@ -36,23 +36,23 @@ describe('setSchemaKind (doc 119)', () => {
 describe('createSchemaInVersion', () => {
   it('sin una versión en edición rechaza y no escribe nada', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: 'cs1' });
-    await expect(createSchemaInVersion('bcp_x', 'tables')).rejects.toThrow('version in edit mode');
+    await expect(createSchemaInVersion('stg_x', 'tables')).rejects.toThrow('version in edit mode');
     expect(csvc.recordChange).not.toHaveBeenCalled();
     expect(apiPost).not.toHaveBeenCalled();
   });
   it('en edición registra el cambio en el changeset activo, con su kind', async () => {
     useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
-    const s = await createSchemaInVersion('bcp_x', 'views');
-    expect(s).toMatchObject({ name: 'bcp_x', kind: 'views' });
-    expect(csvc.recordChange).toHaveBeenCalledWith('cs1', 'schemas', s.id, 'upsert', expect.objectContaining({ name: 'bcp_x', kind: 'views' }));
+    const s = await createSchemaInVersion('stg_x', 'views');
+    expect(s).toMatchObject({ name: 'stg_x', kind: 'views' });
+    expect(csvc.recordChange).toHaveBeenCalledWith('cs1', 'schemas', s.id, 'upsert', expect.objectContaining({ name: 'stg_x', kind: 'views' }));
     expect(apiPost).not.toHaveBeenCalled();
   });
 });
 
-describe('gestor de esquemas sin sesión de edición (doc 104, ronda 2)', () => {
+describe('gestor de esquemas sin sesión de edición', () => {
   it('crear y eliminar rechazan y no escriben directo a producción', async () => {
     useSessionStore.setState({ openMode: 'readonly', activeChangesetId: null });
-    await expect(createSchema('bcp_x', undefined, 'tables')).rejects.toThrow('version in edit mode');
+    await expect(createSchema('stg_x', undefined, 'tables')).rejects.toThrow('version in edit mode');
     await expect(deleteSchema('s1')).rejects.toThrow('version in edit mode');
     expect(apiPost).not.toHaveBeenCalled();
     expect(apiDelete).not.toHaveBeenCalled();

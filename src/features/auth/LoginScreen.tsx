@@ -7,8 +7,8 @@ import { useAuthStore } from '@/store/useAuthStore';
 import { Splash } from './guards';
 
 /**
- * LoginScreen (doc 38) — dos caminos hacia la misma sesión por token:
- *  1. "Continue with Databricks": un click; hereda la identidad del SSO de la
+ * LoginScreen: dos caminos hacia la misma sesión por token:
+ *  1. "Continue with Databricks": un clic; hereda la identidad del SSO de la
  *     plataforma (el correo debe estar asignado a un rol en Admin — whitelist).
  *  2. "Administrator": cuenta local `admin` con contraseña.
  * Al autenticar, redirige al destino que motivó el login (o a Home).
@@ -18,7 +18,7 @@ export default function LoginScreen() {
   const location = useLocation() as { state?: { from?: string } };
   const doLogin = useAuthStore((s) => s.login);
   const doLoginSso = useAuthStore((s) => s.loginSso);
-  // Doc 105 (O4): por qué terminó la sesión anterior sin que el usuario saliera.
+  // Por qué terminó la sesión anterior sin que el usuario saliera.
   const notice = useAuthStore((s) => s.notice);
   const status = useAuthStore((s) => s.status);
   const [adminMode, setAdminMode] = useState(false);
@@ -26,17 +26,17 @@ export default function LoginScreen() {
   const [busy, setBusy] = useState<null | 'sso' | 'admin'>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Databricks Apps: si el navegador aún no tiene sesión SSO con el DOMINIO
+  // Databricks Apps: si el navegador no tiene sesión SSO con el dominio
   // del backend, ningún fetch pasa el proxy. El probe lo detecta y hace una
-  // navegación de ida y vuelta por /api/auth/warmup (doc 36). Con un solo
+  // navegación de ida y vuelta por /api/auth/warmup. Con un solo
   // origen (server.mjs) es no-op; se conserva para setups locales cross-origin.
   useEffect(() => { void ensureBackendSession(); }, []);
 
   const goHome = () => navigate(location.state?.from ?? '/', { replace: true });
 
-  // Doc 105 (ronda 5): con la red o el servidor caídos el token se conserva y el
-  // aviso pide recargar — al recargar AQUÍ la sesión se restaura: se sigue al
-  // destino en vez de pedir entrar otra vez; mientras se verifica, el splash.
+  // Con la red o el servidor caídos el token se conserva y el aviso pide
+  // recargar; al recargar aquí la sesión se restaura y se sigue al destino en vez
+  // de pedir entrar otra vez. Mientras se verifica, se muestra el splash.
   if (status === 'authed') return <Navigate to={location.state?.from ?? '/'} replace />;
   if (status === 'loading') return <Splash />;
 

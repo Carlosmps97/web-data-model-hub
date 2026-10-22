@@ -1,4 +1,4 @@
-// Doc 118 — el detalle del pegado sin DOM (hooks de mentira: ver
+// El detalle del pegado sin DOM (hooks simulados: ver
 // features/reporting/components/fakeReact.testutil): 10 columnas por página con
 // «cargar más», buscador «contiene», selector Lógico | Físico y checks por grupo.
 import { describe, expect, it, vi } from 'vitest';
@@ -37,7 +37,7 @@ describe('visibleColumns', () => {
   });
 });
 
-describe('PasteDetails (doc 118)', () => {
+describe('PasteDetails', () => {
   it('muestra 10 columnas y «cargar más» suma 10', () => {
     const { tree } = render();
     expect(items(tree)).toHaveLength(10);
@@ -47,7 +47,7 @@ describe('PasteDetails (doc 118)', () => {
     expect(fake.states[1].calls).toEqual([20]);
   });
 
-  it('la última página carga sólo lo que falta', () => {
+  it('la última página carga solo lo que falta', () => {
     expect(textOf(byText(render({ shown: 20 }).tree, 'button', 'Load'))).toBe('Load 5 more · 20 of 25');
     expect(() => byText(render({ shown: 30 }).tree, 'button', 'Load')).toThrow();
   });

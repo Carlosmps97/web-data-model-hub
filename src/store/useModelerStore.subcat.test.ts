@@ -4,9 +4,9 @@ vi.mock('@/services/governance.service', () => ({}));
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 import { useModelerStore } from './useModelerStore';
 
-/** Doc 53: armado de la herramienta Subcategory — exclusión mutua con la de
- *  relación y desarme automático al pasar al modelo físico. */
-describe('useModelerStore — subcatArmed (doc 53)', () => {
+/** Armado de la herramienta Subcategory: exclusión mutua con la de relación y
+ *  desarme automático al pasar al modelo físico. */
+describe('useModelerStore — subcatArmed', () => {
   beforeEach(() => {
     useModelerStore.setState({
       relPreset: null, subcatArmed: false, viewMode: 'logical', activeSaId: null,
@@ -29,7 +29,7 @@ describe('useModelerStore — subcatArmed (doc 53)', () => {
     expect(s.subcatArmed).toBe(false);
   });
 
-  it('desarmar relación (null) NO toca la subcategoría', () => {
+  it('desarmar relación (null) no toca la subcategoría', () => {
     useModelerStore.getState().setSubcatArmed(true);
     useModelerStore.getState().setRelPreset(null);
     expect(useModelerStore.getState().subcatArmed).toBe(true);
@@ -51,9 +51,9 @@ describe('useModelerStore — subcatArmed (doc 53)', () => {
   });
 });
 
-/** Doc 63: vistas exclusivas del modelo físico — entrar a lógico cierra el
- *  panel de vista (su bloque ya no está en el canvas). */
-describe('useModelerStore — setViewMode y vistas (doc 63)', () => {
+/** Vistas exclusivas del modelo físico: entrar a lógico cierra el panel de
+ *  vista (su bloque deja de estar en el canvas). */
+describe('useModelerStore — setViewMode y vistas', () => {
   it('pasar a lógico limpia selectedViewId; volver a físico no re-selecciona', () => {
     useModelerStore.setState({ viewMode: 'physical', selectedViewId: 'v1', subcatArmed: false, relPreset: null });
     useModelerStore.getState().setViewMode('logical');

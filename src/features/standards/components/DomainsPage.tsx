@@ -32,12 +32,12 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirm, setConfirm] = useState<null | 'apply' | 'delete'>(null);
-  // Doc 95 D7: el panel usa la MISMA regla que la cascada (quién sigue hoy al dominio).
+  // El panel usa la misma regla que la cascada (quién sigue hoy al dominio).
   const [usage, setUsage] = useState<DomainColumnImpact | null>(null);
-  // Doc 95 D8: versión desde la que se está revirtiendo (null = edición normal).
+  // Versión desde la que se está revirtiendo (null = edición normal).
   const [revertFrom, setRevertFrom] = useState<string | null>(null);
-  // Tras crear un dominio, el id lo genera el backend; guardamos el nombre para
-  // seleccionarlo cuando la recarga lo traiga (si no, selId quedaba en '__new__').
+  // Tras crear un dominio, el id lo genera el backend; se guarda el nombre para
+  // seleccionarlo cuando la recarga lo traiga (si no, selId seguiría en '__new__').
   const [pendingName, setPendingName] = useState<string | null>(null);
 
   const selected = useMemo(() => domains.find((d) => d.id === selId) ?? null, [domains, selId]);
@@ -48,9 +48,9 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
     if (d) { setSelId(d.id); setPendingName(null); }
   }, [domains, pendingName]);
   const [form, setForm] = useState<SnapshotDomain>(EMPTY);
-  // Doc 85 §3.5: la página muestra UNA faceta a la vez, como Data Standards → UDP.
+  // La página muestra una faceta a la vez, como Data Standards → UDP.
   const [facet, setFacet] = useState<Facet>('logical');
-  // Físico DERIVADO del lógico por la regla del scope column (placeholder / valor cuando no hay override).
+  // Físico derivado del lógico por la regla del scope column (placeholder / valor cuando no hay override).
   const [derivedPhys, setDerivedPhys] = useState('');
   useEffect(() => {
     const logical = form.name.trim();
@@ -86,17 +86,17 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
   const startCreate = () => { setSelId('__new__'); setForm(EMPTY); setFacet('logical'); setRevertFrom(null); setMode('create'); };
   const startEdit = () => { if (selected) { setForm({ ...selected }); setRevertFrom(null); setMode('edit'); } };
   const cancel = () => { setMode('view'); setConfirm(null); setRevertFrom(null); if (selected) setForm({ ...selected }); };
-  // Doc 95 D8: revertir = cargar en el editor los valores de esa versión; se
-  // aplican con el mismo popup de cascada (misma regla, versión nueva auditada).
+  // Revertir = cargar en el editor los valores de esa versión; se aplican con
+  // el mismo popup de cascada (misma regla, una versión más, auditada).
   const startRevert = (entry: DomainHistoryEntry) => {
     if (!selected) return;
     setForm(revertForm(selected, entry)); setRevertFrom(entry.label); setFacet('physical'); setMode('edit');
   };
 
-  // Doc 95 D7: tipos que el borrador CAMBIA (física y/o lógica).
+  // Tipos que el borrador cambia (física y/o lógica).
   const targets = useMemo(() => (mode === 'edit' ? typeTargets(selected, form) : {}), [mode, selected, form]);
-  // Doc 105: sin un cambio real no se aplica — tampoco al revertir a una versión
-  // igual a la vigente (antes registraba una versión vacía).
+  // Sin un cambio real no se aplica, tampoco al revertir a una versión igual a
+  // la vigente (evita registrar una versión vacía).
   const dirty = mode === 'create' || domainChanged(form, selected);
   const canApply = !!form.name.trim() && !!form.defaultDataType.trim() && dirty;
 
@@ -106,7 +106,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
       const creating = mode === 'create';
       const v = await applyStandards(projectId, {
         kind: 'domain',
-        // Doc 95 D8: el revert queda como una versión nueva con título propio.
+        // El revert se registra como una versión más, con título propio.
         title: revertFrom ? `Revert ${form.name.trim()} to ${revertFrom}` : undefined,
         domainsUpsert: [domainEditInput(form, creating ? null : selected)],
       });
@@ -130,7 +130,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
 
   return (
     <div style={{ display: 'flex', minHeight: 0, flex: 1 }}>
-      {/* list */}
+      {/* lista */}
       <div style={{ width: 308, flex: 'none', borderRight: '1px solid #EAEDF2', background: '#FAFBFC', padding: '18px 16px', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <span style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#9AA3B2' }}>Domains · {domains.length}</span>
@@ -146,16 +146,16 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8, flexWrap: 'wrap' }}>
               <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#1A2B4A', background: '#F2F4F8', borderRadius: 6, padding: '2px 7px' }} title="Physical default type">{d.defaultDataType}</span>
               {d.logicalDataType && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#5B3FA0', background: '#F4EEFF', borderRadius: 6, padding: '2px 7px' }} title="Logical data type">{d.logicalDataType}</span>}
-              {/* Doc 85: físico con override (vacío = derivado del lógico). */}
+              {/* Físico con override (vacío = derivado del lógico). */}
               {d.physicalName && d.physicalName !== d.name && <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#9A6B00', background: '#FFF6E5', borderRadius: 6, padding: '2px 7px', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }} title={`Physical name override: ${d.physicalName}`}>{d.physicalName}</span>}
-              {/* Doc 80 §4: se ve de un vistazo cuáles imponen nombre+definición. */}
+              {/* Se ve de un vistazo cuáles imponen nombre+definición. */}
               {d.inheritsName && <span style={{ fontSize: 10.5, fontWeight: 700, color: '#0E8C6A', background: '#E8F7F1', border: '1px solid #C6EADC', borderRadius: 6, padding: '2px 7px' }} title="Standard attribute: its name and definition are inherited by the column">name + definition</span>}
             </div>
           </div>
         ))}
       </div>
 
-      {/* detail */}
+      {/* detalle */}
       <div style={{ flex: 1, minWidth: 0, overflowY: 'auto', padding: '26px 30px', background: '#FBFCFD' }}>
         {!selected && mode !== 'create' ? <div style={{ fontSize: 13, color: '#9AA3B2' }}>Pick a domain.</div> : (
           <div style={{ maxWidth: 720 }}>
@@ -171,7 +171,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
             )}
             {!editable && form.description && <p style={{ margin: '0 0 18px', fontSize: 13, color: '#6B7689', lineHeight: 1.5 }}>{form.description}</p>}
 
-            {/* Doc 85 §3.5: switch de faceta (mismo rd-seg de Data Standards → UDP). */}
+            {/* Switch de faceta (mismo rd-seg de Data Standards → UDP). */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
               <div className="rd-seg" role="tablist" aria-label="Facet">
                 <button type="button" role="tab" aria-selected={facet === 'logical'} className={facet === 'logical' ? 'active' : ''} onClick={() => setFacet('logical')}>Logical · Attribute</button>
@@ -214,7 +214,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
             {facet === 'physical' && (
               <>
                 <label style={lbl}>Physical name</label>
-                {/* Doc 85 D1: vacío = DERIVADO del lógico por la regla del scope column; texto = override. */}
+                {/* Vacío = derivado del lógico por la regla del scope column; texto = override. */}
                 {editable ? (
                   <div style={{ display: 'flex', gap: 6, marginBottom: 18 }}>
                     <input className="rd-input" style={{ ...field, marginBottom: 0, fontFamily: 'var(--mono, monospace)' }} value={form.physicalName ?? ''}
@@ -254,7 +254,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
               </>
             )}
 
-            {/* ── Both models ── */}
+            {/* ── Sección «Both models» ── */}
             <div style={{ ...lbl, marginTop: 6 }}>Both models</div>
             <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start', padding: '13px 15px', background: form.inheritsName ? '#F2FBF7' : '#fff', border: `1px solid ${form.inheritsName ? '#C6EADC' : '#E2E6EE'}`, borderRadius: 10, marginBottom: 18 }}>
               <input type="checkbox" id="dom-inherits-name" style={{ marginTop: 2, width: 15, height: 15, cursor: editable ? 'pointer' : 'default' }}
@@ -269,7 +269,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
               </label>
             </div>
 
-            {/* Doc 95 D7: quién sigue hoy al dominio — en inglés y con la regla de la cascada */}
+            {/* Quién sigue hoy al dominio, en inglés y con la regla de la cascada */}
             {u && mode !== 'create' && (
               <div style={usageBox}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: '#1A2B4A' }}>{u.headline}</div>
@@ -281,12 +281,12 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
               </div>
             )}
 
-            {/* Doc 95 D8: historial de este dominio, con Revert */}
+            {/* Historial de este dominio, con Revert */}
             {mode === 'view' && selected && (
               <DomainHistory projectId={projectId} domainId={selected.id} canEdit={canEdit} onRevert={startRevert} />
             )}
 
-            {/* actions */}
+            {/* acciones */}
             {canEdit && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12, paddingTop: 18, borderTop: '1px solid #EAEDF2' }}>
                 {editable && !dirty && <span style={{ fontSize: 12.5, color: '#8A93A5' }}>{NO_CHANGES_HINT}</span>}
@@ -306,7 +306,7 @@ export default function DomainsPage({ projectId, snapshot, canEdit, onApplied }:
         )}
       </div>
 
-      {/* Doc 95 D7: popup de cascada con la lista exacta por columna */}
+      {/* Popup de cascada con la lista exacta por columna */}
       {confirm === 'apply' && mode === 'edit' && selected && (
         <DomainCascadeDialog projectId={projectId} domainId={selected.id} domainName={form.name} targets={targets}
           busy={busy} title={revertFrom ? `Revert ${form.name} to ${revertFrom}` : undefined}

@@ -7,7 +7,7 @@ const P: RollbackPreview = {
   domains: [{ id: 'd1', name: 'Codigo Clave', physical: { from: 'UUID', to: 'INTEGER' }, logical: null, columns: 30000 }],
 };
 
-describe('vista previa del rollback (doc 95 D9)', () => {
+describe('vista previa del rollback', () => {
   it('filas por dominio con el cambio de tipo y las columnas', () => {
     expect(rollbackDomainRows(P)).toEqual([
       { id: 'd1', name: 'Codigo Clave', physical: 'UUID → INTEGER', logical: '—', columns: '30,000' }]);

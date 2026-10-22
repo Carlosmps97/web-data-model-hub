@@ -1,5 +1,5 @@
-// Doc 88 §3: `derive()` — el «rayo» del panel de atributo re-deriva el físico
-// desde el lógico y apaga el override; una edición posterior gana.
+// `derive()`: el «rayo» del panel de atributo re-deriva el físico a partir del
+// lógico y apaga el override; una edición posterior gana.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createNameSync } from './nameSync';
 
@@ -25,7 +25,7 @@ function harness() {
 
 const flush = async () => { await Promise.resolve(); await Promise.resolve(); };
 
-describe('createNameSync.derive (doc 88 §3)', () => {
+describe('createNameSync.derive', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 

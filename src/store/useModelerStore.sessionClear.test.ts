@@ -1,12 +1,11 @@
-// Doc 105 (ronda 3, R7-A) — al abrir OTRA versión (o cambiar de modo o de
-// proyecto), el canvas de la anterior seguía vivo y editable hasta que el
-// refresco lo reabría (varias idas y vueltas): `updateTable`/`updateColumn`
-// hacían upsert del documento COMPLETO de A en B, Save grababa el layout y los
-// dibujos de A en B. Ahora, en TODO cambio de la sesión de canvas, el store
-// limpia de forma síncrona el diagrama, los dibujos, la selección y los popups
-// (conserva `activeSaId`: el refresco reabre ese canvas si existe en la nueva),
-// descarta las cargas en vuelo de la anterior y — como defensa — no escribe con
-// un diagrama cargado en otra sesión.
+// En todo cambio de la sesión de canvas (abrir otra versión, cambiar de modo o
+// de proyecto) el store limpia de forma síncrona el diagrama, los dibujos, la
+// selección y los popups (conserva `activeSaId`: el refresco reabre ese canvas
+// si existe en la nueva), descarta las cargas en vuelo de la anterior y, como
+// defensa, no escribe con un diagrama cargado en otra sesión. Si el canvas de la
+// anterior siguiera vivo y editable hasta que el refresco lo reabre (varias idas
+// y vueltas), `updateTable`/`updateColumn` harían upsert del documento completo
+// de A en B, y Save grabaría el layout y los dibujos de A en B.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -68,7 +67,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await sleep(5); });
 
-describe('cambiar de sesión limpia el canvas de la anterior al instante (doc 105, R7-A)', () => {
+describe('cambiar de sesión limpia el canvas de la anterior al instante', () => {
   it('diagrama, dibujos, selección y popups se van en el acto; activeSaId queda para reabrir', () => {
     openCs2();
     const s = st();
@@ -90,7 +89,7 @@ describe('cambiar de sesión limpia el canvas de la anterior al instante (doc 10
     await st().updateTable('t1', { description: 'nota' });   // blur de la definición en PropertiesPanel
     await st().updateColumn('c1', { description: 'x' });     // un campo de columna
     await st().saveAll();                                    // Save: layout y dibujos
-    expect(writes()).toEqual([]);                            // antes: el doc de cs1 escrito en cs2
+    expect(writes()).toEqual([]);                            // ningún doc de cs1 escrito en cs2
     late.resolve([P1]);
     await r;
     expect(st().diagram?.tables[0]?.physicalName).toBe('CLIENTE_B');   // el refresco reabrió con B
@@ -108,7 +107,7 @@ describe('cambiar de sesión limpia el canvas de la anterior al instante (doc 10
     expect(st().openingSaId).toBeNull();
   });
 
-  it('defensa: con un diagrama cargado en OTRA sesión (reinstalado por error) no se escribe — y se avisa (ronda 4)', async () => {
+  it('defensa: con un diagrama cargado en otra sesión (reinstalado por error) no se escribe y se avisa', async () => {
     const stale = st().diagram;                              // cargado en cs1
     openCs2();
     useModelerStore.setState({ diagram: stale });            // p. ej. un set optimista tardío

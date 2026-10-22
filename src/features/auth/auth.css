@@ -1,5 +1,5 @@
-/* Login (pantalla 13) + splash de restauración de sesión + menú de usuario real.
-   Navy light-only, tokens del diseño (2026-07-04). */
+/* Login + splash de restauración de sesión + menú de usuario real.
+   Navy, solo tema claro, tokens del diseño. */
 
 .dmh-splash {
   position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
@@ -34,7 +34,7 @@
   font-size: 12.5px; color: #C0392B; background: #FBEDEC; border: 1px solid #F1D4D0;
   border-radius: 8px; padding: 9px 12px; margin-bottom: 14px;
 }
-/* Doc 105: por qué terminó la sesión anterior (informativo, no error). */
+/* Por qué terminó la sesión anterior (informativo, no error). */
 .dmh-login-notice {
   font-size: 12.5px; color: #1A2B4A; background: #EEF3FF; border: 1px solid #D5E0FF;
   border-radius: 8px; padding: 9px 12px; margin-bottom: 14px; line-height: 1.45;
@@ -47,7 +47,7 @@
 .dmh-login-btn:hover:not(:disabled) { background: #1E48E0; }
 .dmh-login-btn:disabled { opacity: 0.55; cursor: default; }
 
-/* Doc 38: variante secundaria (modo administrador) + piezas del layout de
+/* Variante secundaria (modo administrador) + piezas del layout de
    dos caminos (hint bajo el botón SSO, divisor "or", volver). */
 .dmh-login-btn--ghost { background: #fff; color: #1A2B4A; border: 1px solid #E2E6EE; }
 .dmh-login-btn--ghost:hover:not(:disabled) { background: #F4F6FA; }

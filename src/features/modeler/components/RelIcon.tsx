@@ -1,5 +1,5 @@
 // Símbolos crow's-foot (notación estándar) para los extremos de una relación.
-// Misma geometría que CrowFootMarkers (doc 19): la pata ABRE hacia la tabla
+// Misma geometría que CrowFootMarkers: la pata abre hacia la tabla
 // (vértice del lado de la línea); min (interior: círculo=0, barra=1) + max
 // (contra la tabla: barra=1, pata=muchos):
 //   one        → Exactly one          ──┤
@@ -59,8 +59,8 @@ export function RelLineIcon({ dashed = false, size = 17 }: { dashed?: boolean; s
   );
 }
 
-/** Ícono de la herramienta SUBCATEGORÍA (doc 53): línea del supertipo, ROMBO
- *  con barra discriminadora (rediseño 2026-08-23) y patas a los subtipos. */
+/** Ícono de la herramienta subcategoría: línea del supertipo, rombo con barra
+ *  discriminadora y patas a los subtipos. */
 export function SubcatIcon({ size = 17 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 18 18" fill="none" stroke="currentColor"
@@ -74,7 +74,7 @@ export function SubcatIcon({ size = 17 }: { size?: number }) {
   );
 }
 
-/** Ícono del botón Show/Hide relationship labels (doc 98): el wire con su
+/** Ícono del botón Show/Hide relationship labels: el wire con su
  *  etiqueta en el punto medio. */
 export function RelLabelIcon({ size = 17 }: { size?: number }) {
   return (

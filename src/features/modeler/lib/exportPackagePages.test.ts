@@ -43,43 +43,43 @@ const SA = (id: string, folderId: string | null, name: string): SubjectArea =>
   ({ id, projectId: 'p1', name, folderId, tableIds: [], layout: {} });
 
 describe('packageLayout', () => {
-  const folders = [F('f1', null, 'CPYBCA'), F('f2', 'f1', 'CPYBCAPYM'), F('f3', 'f1', 'CPYBCANEG', 1), F('fx', null, 'Otros')];
+  const folders = [F('f1', null, 'COMERCIAL'), F('f2', 'f1', 'COMERCIALNORTE'), F('f3', 'f1', 'COMERCIALSUR', 1), F('fx', null, 'Otros')];
   const sas = [
-    SA('s1', 'f2', 'Datamart PYME'), SA('s2', 'f2', 'Alerta Mora'),
+    SA('s1', 'f2', 'Datamart Comercial'), SA('s2', 'f2', 'Alerta Mora'),
     SA('s3', 'f1', 'Suelto'), SA('s4', null, 'Raiz'), SA('s5', 'fx', 'FueraDeScope'),
   ];
 
   it('folder: subtree con subcarpetas; lo de otros folders y la raíz quedan fuera', () => {
-    const out = packageLayout('folder', 'f1', 'Modelo DDV', folders, sas);
-    expect(out.rootName).toBe('CPYBCA');
+    const out = packageLayout('folder', 'f1', 'Modelo Ventas', folders, sas);
+    expect(out.rootName).toBe('COMERCIAL');
     expect(out.canvases.map((c) => [...c.dir, c.file].join('/'))).toEqual([
       'Suelto.html',
-      'CPYBCAPYM/Alerta Mora.html',
-      'CPYBCAPYM/Datamart PYME.html',
+      'COMERCIALNORTE/Alerta Mora.html',
+      'COMERCIALNORTE/Datamart Comercial.html',
     ]);
     expect(out.canvases.some((c) => c.sa.id === 's5' || c.sa.id === 's4')).toBe(false);
   });
 
-  it('doc 92 D1: carpetas y canvases A–Z sin importar `order` ni mayúsculas', () => {
+  it('carpetas y canvases A–Z sin importar `order` ni mayúsculas', () => {
     const f = [F('a', null, 'zeta', 0), F('b', null, 'Alfa', 5), F('c', null, 'beta', 1)];
     const c = [SA('s1', 'a', 'x'), SA('s2', null, 'Beta canvas'), SA('s3', null, 'alfa canvas')];
     const out = packageLayout('project', 'p1', 'P', f, c);
     expect(out.canvases.map((x) => [...x.dir, x.file].join('/'))).toEqual(['alfa canvas.html', 'Beta canvas.html', 'zeta/x.html']);
   });
 
-  it('folder: crumb arranca en el folder exportado con nombres ORIGINALES', () => {
-    const out = packageLayout('folder', 'f1', 'Modelo DDV', folders, sas);
+  it('folder: crumb arranca en el folder exportado con nombres originales', () => {
+    const out = packageLayout('folder', 'f1', 'Modelo Ventas', folders, sas);
     const dm = out.canvases.find((c) => c.sa.id === 's1');
-    expect(dm?.crumb).toEqual(['CPYBCA', 'CPYBCAPYM']);
-    expect(dm?.dir).toEqual(['CPYBCAPYM']);
+    expect(dm?.crumb).toEqual(['COMERCIAL', 'COMERCIALNORTE']);
+    expect(dm?.dir).toEqual(['COMERCIALNORTE']);
   });
 
   it('project: incluye canvases de raíz (folderId null) y todo el árbol', () => {
-    const out = packageLayout('project', 'p1', 'Modelo DDV', folders, sas);
-    expect(out.rootName).toBe('Modelo DDV');
+    const out = packageLayout('project', 'p1', 'Modelo Ventas', folders, sas);
+    expect(out.rootName).toBe('Modelo Ventas');
     const paths = out.canvases.map((c) => [...c.dir, c.file].join('/'));
     expect(paths).toContain('Raiz.html');
-    expect(paths).toContain('CPYBCA/CPYBCAPYM/Datamart PYME.html');
+    expect(paths).toContain('COMERCIAL/COMERCIALNORTE/Datamart Comercial.html');
     expect(paths).toContain('Otros/FueraDeScope.html');
   });
 
@@ -101,7 +101,7 @@ import type { Diagram } from '../services/modeler.service';
 function fixtureDiagram(): Diagram {
   return {
     subjectArea: {
-      id: 'sa1', projectId: 'p1', name: 'Datamart PYME', folderId: 'f2',
+      id: 'sa1', projectId: 'p1', name: 'Datamart Comercial', folderId: 'f2',
       tableIds: ['t1', 't2'], layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 } },
       udpValues: { uCanvas: 'Mensual' },
     },
@@ -132,16 +132,16 @@ describe('buildCanvasPage', () => {
   const svgL = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text>Parametro</text></svg>';
   const svgP = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><text>MD_PARAMETRO</text></svg>';
   const out = buildCanvasPage({
-    title: 'Datamart PYME', breadcrumb: ['Modelo DDV', 'CPYBCA'], indexHref: '../index.html',
+    title: 'Datamart Comercial', breadcrumb: ['Modelo Ventas', 'COMERCIAL'], indexHref: '../index.html',
     svgLogical: svgL, svgPhysical: svgP, diagram: fixtureDiagram(), lookups: LOOKUPS,
   });
 
   it('documento completo con título escapado y link al index', () => {
     expect(out.toLowerCase().startsWith('<!doctype html>')).toBe(true);
-    expect(out).toContain('<title>Datamart PYME</title>');
+    expect(out).toContain('<title>Datamart Comercial</title>');
     expect(out).toContain('href="../index.html"');
   });
-  it('embebe AMBOS SVGs como literales JS neutralizados', () => {
+  it('embebe ambos SVGs como literales JS neutralizados', () => {
     expect(out).toContain(jsStringLiteral(svgL));
     expect(out).toContain(jsStringLiteral(svgP));
   });
@@ -160,7 +160,7 @@ describe('buildCanvasPage', () => {
     expect(out).toContain('Capa');
     expect(out).toContain('Sensible');
   });
-  it('la descripción con HTML sale ESCAPADA (anti-XSS)', () => {
+  it('la descripción con HTML sale escapada (anti-XSS)', () => {
     expect(out).toContain('Maestra &lt;b&gt;mensual&lt;/b&gt;');
     expect(out).not.toContain('Maestra <b>mensual</b>');
   });
@@ -168,26 +168,26 @@ describe('buildCanvasPage', () => {
     expect(out).toContain('one → zero-many');
     expect(out).toContain('CODMES → CODMES');
   });
-  it('doc 98: la tabla Relationships lleva las frases (completas y escapadas)', () => {
+  it('la tabla Relationships lleva las frases (completas y escapadas)', () => {
     const d = fixtureDiagram();
     const largo = `Parametro <clasifica> ${'x'.repeat(90)}`;
     Object.assign(d.relationships[0], { parentToChildPhrase: largo, childToParentPhrase: 'es de un Parametro' });
     const page = buildCanvasPage({
-      title: 'Datamart PYME', breadcrumb: ['Modelo DDV'], indexHref: null,
+      title: 'Datamart Comercial', breadcrumb: ['Modelo Ventas'], indexHref: null,
       svgLogical: svgL, svgPhysical: svgP, diagram: d, lookups: LOOKUPS,
     });
     expect(page).toContain('<th>Verb phrases</th>');
-    // Reporte = frase COMPLETA (sin el corte del canvas) y sin HTML crudo.
+    // Reporte = frase completa (sin el corte del canvas) y sin HTML crudo.
     expect(page).toContain(`Parametro &lt;clasifica&gt; ${'x'.repeat(90)} / es de un Parametro`);
     expect(page).not.toContain('<clasifica>');
   });
-  it('doc 98: relación sin frases deja la celda vacía', () => {
+  it('relación sin frases deja la celda vacía', () => {
     expect(out).toContain('<th>Verb phrases</th>');
     expect(out).toContain('<td class="phrase"></td>');
   });
-  it('final review #3 (doc 96 D6): la vista muestra su DDL generado y la User-Defined SQL como informativa aparte', () => {
+  it('la vista muestra su DDL generado y la User-Defined SQL como informativa aparte', () => {
     const page = buildCanvasPage({
-      title: 'Datamart PYME', breadcrumb: ['Modelo DDV', 'CPYBCA'], indexHref: '../index.html',
+      title: 'Datamart Comercial', breadcrumb: ['Modelo Ventas', 'COMERCIAL'], indexHref: '../index.html',
       svgLogical: svgL, svgPhysical: svgP, diagram: fixtureDiagram(), lookups: LOOKUPS,
       viewDdl: { v1: 'CREATE OR REPLACE VIEW gold_vu.VW_VENTA AS SELECT t1.CODMES AS CODMES FROM gold.HD_VENTA t1;' },
     });
@@ -212,25 +212,25 @@ import { buildIndexPage } from './exportPackagePages';
 
 describe('buildIndexPage', () => {
   const out = buildIndexPage({
-    rootName: 'CPYBCA', generatedAt: '2026-09-01 15:00 UTC',
+    rootName: 'COMERCIAL', generatedAt: '2026-09-01 15:00 UTC',
     entries: [
       { name: 'Suelto', dir: [], file: 'Suelto.html', tables: [{ logical: 'Parametro', physical: 'MD_PARAMETRO' }] },
-      { name: 'Datamart PYME', dir: ['CPYBCAPYM'], file: 'Datamart PYME.html', tables: [{ logical: 'Venta', physical: 'HD_VENTA' }, { logical: 'Mora', physical: 'HD_MORA' }] },
+      { name: 'Datamart Comercial', dir: ['COMERCIALNORTE'], file: 'Datamart Comercial.html', tables: [{ logical: 'Venta', physical: 'HD_VENTA' }, { logical: 'Mora', physical: 'HD_MORA' }] },
     ],
   });
 
   it('header con nombre, fecha y conteos', () => {
-    expect(out).toContain('CPYBCA');
+    expect(out).toContain('COMERCIAL');
     expect(out).toContain('2026-09-01 15:00 UTC');
     expect(out).toContain('2 canvases · 3 tables');
   });
   it('links relativos con segmentos URL-encoded', () => {
     expect(out).toContain('href="Suelto.html"');
-    expect(out).toContain('href="CPYBCAPYM/Datamart%20PYME.html"');
+    expect(out).toContain('href="COMERCIALNORTE/Datamart%20Comercial.html"');
   });
   it('árbol con la carpeta como <details> abierto', () => {
     expect(out).toContain('<details open>');
-    expect(out).toContain('CPYBCAPYM');
+    expect(out).toContain('COMERCIALNORTE');
   });
   it('embebe el JSON del filtro (canvases + tablas) como literal JS', () => {
     expect(out).toContain('MD_PARAMETRO');
@@ -241,7 +241,7 @@ describe('buildIndexPage', () => {
 
 import { udpChipsHtml } from './exportPackagePages';
 
-describe('udpChipsHtml (doc 69 · facetas)', () => {
+describe('udpChipsHtml (facetas)', () => {
   const lk = {
     domainsById: {},
     udpDefsById: {

@@ -1,14 +1,14 @@
 /**
- * Revisión 2 doc 114 (punto 3) — escudo del doble clic sobre una tabla.
+ * Escudo del doble clic sobre una tabla.
  * Un clic en una tabla (o en una de sus filas) la selecciona y el canvas se
- * mueve enseguida para encuadrarla; el 2.º clic de un doble clic — rápido o
- * lento — caía entonces sobre otra cosa (el fondo, otra tabla, un wire, un
- * dibujo) y hacía lo suyo (deseleccionar, elegir otra tabla, abrir el popup de
- * la relación, el zoom del fondo) o cortaba el encuadre a medio camino. Se lo
+ * mueve enseguida para encuadrarla; el 2.º clic de un doble clic, rápido o
+ * lento, caería entonces sobre otra cosa (el fondo, otra tabla, un wire, un
+ * dibujo) y haría lo suyo (deseleccionar, elegir otra tabla, abrir el popup de
+ * la relación, el zoom del fondo) o cortaría el encuadre a medio camino. Se lo
  * ataja en la captura del canvas, antes que React Flow y React: el navegador
  * dice cuál es (`detail` ≥ 2: mismo lugar, dentro del tiempo del sistema) y acá
  * se exige, además, que el 1.er clic haya encuadrado (`arm`), a unos píxeles de
- * él y poco después. Sólo el botón principal; los demás gestos pasan.
+ * él y poco después. Solo el botón principal; los demás gestos pasan.
  */
 
 /** Píxeles de pantalla desde el 1.er clic (el umbral del sistema es menor). */

@@ -1,9 +1,9 @@
 /**
- * ddlRules.service — DDL Export Rules (doc 30, 5ta pestaña de Data Standards).
+ * ddlRules.service — DDL Export Rules (quinta pestaña de Data Standards).
  *
  * Lectura + validación/test/impact van a `/api/projects/{pid}/ddl-rules/*`
- * (stateless, por proyecto — doc 75).
- * Las MUTACIONES son versionadas: pasan por `applyStandards` (rulesUpsert /
+ * (stateless, por proyecto).
+ * Las mutaciones son versionadas: pasan por `applyStandards` (rulesUpsert /
  * rulesDelete / ddlConfigPatch) — cada guardado es una versión del historial,
  * con rollback incluido, igual que UDP/Glossary/Parent Domains.
  */
@@ -21,7 +21,7 @@ import {
 
 const DDL = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}/ddl-rules`;
 
-/** Artefacto del catálogo. `kind` (doc 71 H4): table | view — el editor lo
+/** Artefacto del catálogo. `kind`: table | view — el editor lo
  *  muestra para elegir destinos compatibles con la acción. */
 export interface DdlArtifact { id: string; label: string; root: boolean; generatedBy?: string; kind?: 'table' | 'view'; }
 export interface DdlTestFragment { column?: string; label?: string; sql: string; why?: string | null; }
@@ -32,7 +32,9 @@ export interface DdlTemplatesPayload {
   templates: DdlTemplate[];
   seedRules: DdlRuleEditInput[];
   seedLookups: Record<string, DdlLookup>;
-  /** Doc 93 D1: Output settings por defecto (las convenciones de la macro BCP). */
+  /** Funciones que llaman las semillas (p. ej. `decrypt_dac`). */
+  seedFunctions?: DdlRulesetConfig['functions'];
+  /** Output settings por defecto (las convenciones de la macro de referencia). */
   seedOutput?: Record<string, unknown>;
 }
 /** El /validate devuelve además la condición canonizada y los udpRefs. */
@@ -79,31 +81,48 @@ export const saveDdlConfig = (
 ): Promise<StandardsVersion> =>
   applyStandards(projectId, { kind: 'ddl', title: 'DDL lookups & functions · edited', ddlConfigPatch: patch });
 
-/** Doc 93 D1: guarda las Output settings del proyecto (una versión del historial). */
+/** Guarda las Output settings del proyecto (una versión del historial). */
 export const saveDdlOutput = (projectId: string, output: DdlOutputSettings): Promise<StandardsVersion> =>
   applyStandards(projectId, {
     kind: 'ddl', title: 'DDL output settings · edited',
     ddlConfigPatch: { output: output as unknown as Record<string, unknown> },
   });
 
-/** CTA del catálogo vacío: aplica el ruleset base (doc 93: 12 reglas + 5
- *  generadores + lookups + Output settings) como UNA versión del proyecto. En
- *  una BD nueva esto mismo lo corre `scripts/seed_ddl_export_rules.py
- *  --all-projects` — acá queda para quien lo borró todo. Doc 101: el ruleset
- *  base es de Databricks — el dialecto por default del proyecto y su
- *  configuración de Oracle (`currentOutput`) se conservan: un proyecto Oracle
- *  (catálogo vacío a propósito) no cambia de dialecto por sumar las reglas. */
+/** Funciones del proyecto + las semillas que faltan (por nombre): una función
+ *  que el proyecto ya define (p. ej. `decrypt_dac` con la función SQL de la
+ *  instalación) se conserva tal cual. Pura. */
+export function withSeedFunctions(
+  current: DdlRulesetConfig['functions'], seeds: DdlRulesetConfig['functions'],
+): DdlRulesetConfig['functions'] {
+  const have = new Set(current.map((f) => f.name));
+  return [...current, ...seeds.filter((f) => !have.has(f.name))];
+}
+
+/** CTA del catálogo vacío: aplica el ruleset base (12 reglas + 5 generadores +
+ *  lookups + funciones + Output settings) como una versión del proyecto. En una
+ *  BD nueva esto mismo lo corre `scripts/seed_ddl_export_rules.py
+ *  --all-projects`; aquí sirve para un proyecto que borró todas sus reglas. El
+ *  ruleset base es de Databricks: el dialecto por default del proyecto y su
+ *  configuración de Oracle (`currentOutput`) se conservan, así un proyecto
+ *  Oracle (catálogo vacío a propósito) no cambia de dialecto por sumar las
+ *  reglas; las funciones del proyecto (`currentFunctions`) también. */
 export const seedStarterRules = async (
   projectId: string, currentOutput?: Record<string, unknown> | null,
+  currentFunctions: DdlRulesetConfig['functions'] = [],
 ): Promise<StandardsVersion> => {
   const t = await getDdlTemplates(projectId);
   const keep = Object.fromEntries(
     (['dialect', 'oracle'] as const).filter((k) => currentOutput?.[k] != null).map((k) => [k, currentOutput![k]]),
   );
+  const functions = withSeedFunctions(currentFunctions, t.seedFunctions ?? []);
   return applyStandards(projectId, {
     kind: 'ddl', title: `Base — DDL export rules · ${t.seedRules.length} rules + lookups + output`,
     rulesUpsert: t.seedRules,
-    ddlConfigPatch: { lookups: t.seedLookups, ...(t.seedOutput ? { output: { ...t.seedOutput, ...keep } } : {}) },
+    ddlConfigPatch: {
+      lookups: t.seedLookups,
+      ...(functions.length !== currentFunctions.length ? { functions } : {}),
+      ...(t.seedOutput ? { output: { ...t.seedOutput, ...keep } } : {}),
+    },
   });
 };
 
@@ -127,8 +146,8 @@ export function ruleActionSummary(r: DdlRule): string {
     return `Statements: ${(st.before?.[0] ?? st.after?.[0] ?? '').slice(0, 48)}${n > 1 ? ` (+${n - 1})` : ''}`;
   }
   if (a.layout) {
-    // Doc 107: con PARTITIONED BY las particiones van siempre ahí; la regla dice
-    // de dónde salen (UDP o flag) y dónde van cuando el export no lo escribe.
+    // Con PARTITIONED BY las particiones van siempre ahí; la regla dice de dónde
+    // salen (UDP o flag) y dónde van cuando el export no lo escribe.
     const lay = a.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string };
     const udp = (lay.partitionUdp ?? lay.partitionOrderUdp ?? '').trim();
     const from = udp ? `partitions from UDP "${udp}"` : 'partitions from the partition flag';
@@ -144,7 +163,7 @@ export function ruleActionSummary(r: DdlRule): string {
   return '—';
 }
 
-// ── Form ↔ YAML (claves en inglés, 1:1 con el formulario — spec §6.1) ──────
+// ── Form ↔ YAML (claves en inglés, 1:1 con el formulario) ──────────────────
 
 const YAML_KEYS = ['name', 'description', 'kind', 'target', 'sourceArtifact',
                    'condition', 'action', 'appliesTo', 'priority', 'enabled'] as const;

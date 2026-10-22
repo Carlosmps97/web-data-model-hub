@@ -1,9 +1,9 @@
-// LOD del canvas (doc 33): tamaño de la CAJA compacta de un nodo, replicando
+// LOD del canvas: tamaño de la caja compacta de un nodo, replicando
 // las métricas reales de `.wk-node`/`.wk-vnode` (las mismas que usa
 // scripts/arrange_all.py del backend para el auto-arrange):
 //   ancho  = clamp(chars·8 + 72, 240, 880)   (max-content de la fila más larga)
 //   alto   = 32 (header) + filas·28
-// El nodo compacto DEBE medir lo mismo que el detallado: de lejos, la masa de
+// El nodo compacto debe medir lo mismo que el detallado: de lejos, la masa de
 // cada tabla y la franja PK son información visual — solo se dejan de pintar
 // las filas, que bajo el umbral miden menos de 1px.
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
@@ -12,10 +12,10 @@ import { collapseComplexType } from './complexTypes';
 import { viewNodeRows } from './viewGraph';
 
 /** Histéresis del umbral: entra compacto bajo ENTER, vuelve a detalle sobre
- *  EXIT (banda muerta para no parpadear en el borde). Valores CALIBRADOS por
- *  el owner (2026-07-25) probando sobre el canvas Analytics (392 nodos): con
- *  umbrales más altos el compacto aparecía sintiéndose aún "cerca" del
- *  modelo; a 0.10 una fila de 12px mide 1.2px — nada legible se pierde. */
+ *  EXIT (banda muerta para no parpadear en el borde). Valores calibrados sobre
+ *  un canvas grande (~400 nodos): con umbrales más altos el compacto aparece
+ *  cuando el modelo aún se percibe "cerca"; a 0.10 una fila de 12px mide
+ *  1.2px, así que no se pierde nada legible. */
 export const LOD_ENTER = 0.1;
 export const LOD_EXIT = 0.2;
 

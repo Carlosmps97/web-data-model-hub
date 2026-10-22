@@ -1,14 +1,14 @@
 'use client';
 
 /**
- * ConfirmDialog — styled replacement for `window.confirm`.
+ * ConfirmDialog: reemplazo estilizado de `window.confirm`.
  *
- * Keyboard-accessible (ESC cancels, confirm auto-focuses) with an optional
- * "don't ask again this session" affordance persisted in `sessionStorage`.
+ * Accesible por teclado (Esc cancela, el botón de confirmar toma el foco) con una
+ * opción "no volver a preguntar en esta sesión" persistida en `sessionStorage`.
  *
- * Public helpers:
- *   - `shouldSkipConfirm(key)` — read the flag before opening the dialog.
- *   - `clearSkipConfirm(key)`  — clear a flag.
+ * Helpers públicos:
+ *   - `shouldSkipConfirm(key)` — lee la marca antes de abrir el diálogo.
+ *   - `clearSkipConfirm(key)`  — borra una marca.
  */
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
@@ -25,7 +25,7 @@ export function shouldSkipConfirm(key: string | undefined): boolean {
 
 export function clearSkipConfirm(key: string | undefined): void {
   if (!key || typeof window === 'undefined') return;
-  try { window.sessionStorage.removeItem(SKIP_PREFIX + key); } catch { /* ignore */ }
+  try { window.sessionStorage.removeItem(SKIP_PREFIX + key); } catch { /* se ignora */ }
 }
 
 interface ConfirmDialogProps {
@@ -38,8 +38,8 @@ interface ConfirmDialogProps {
   dontAskKey?: string;
   /** Acción en curso: deshabilita botones/ESC/backdrop y muestra spinner en confirmar. */
   busy?: boolean;
-  /** Botón con el foco al abrir (default «confirm»). «cancel» para lo que no
-   *  se deshace (doc 104: eliminar una versión) — un Enter doble no confirma. */
+  /** Botón con el foco al abrir (por defecto «confirm»). «cancel» para lo que no
+   *  se deshace (p. ej., eliminar una versión): un Enter doble no confirma. */
   initialFocus?: 'confirm' | 'cancel';
   onConfirm: () => void;
   onCancel: () => void;
@@ -64,16 +64,16 @@ export default function ConfirmDialog({
     setPrevOpen(open);
     if (open) setSkipNext(false);
   }
-  // Doc 105 (R11): ids propios (dos confirms a la vez —el inline de un Dialog y
-  // el del DialogHost— compartían «confirm-dialog-title»); el mensaje es la
-  // descripción accesible (el lector sólo decía el título).
+  // Ids propios: dos confirms a la vez (el inline de un Dialog y el del
+  // DialogHost) no comparten ids. El mensaje es la descripción accesible, así el
+  // lector de pantalla no se queda en el título.
   const titleId = useId();
   const messageId = useId();
   const confirmBtnRef = useRef<HTMLButtonElement | null>(null);
   const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
-  // Quién tenía el foco al ABRIRSE: se lee en el render en que `open` pasa a
-  // true, antes del commit (sirve montado abierto o abierto después).
+  // Quién tenía el foco al abrirse: se lee en el render en que `open` pasa a
+  // true, antes de la fase de commit (sirve montado abierto o abierto después).
   const openerRef = useRef<Element | null>(null);
   const shownRef = useRef(false);
   if (open !== shownRef.current) {
@@ -84,11 +84,11 @@ export default function ConfirmDialog({
   const tokenRef = useRef<symbol | null>(null);
   if (tokenRef.current === null) tokenRef.current = Symbol('dmh-confirm');
 
-  // Doc 105 (F6): el foco entra a la caja al abrirse (a los 30 ms lo toma su
-  // botón) y, al cerrarse, vuelve a quien lo abrió — sobre un Dialog o un Modal
-  // quedaba en <body> y Tab escapaba a la página de atrás. Ver `focusInto`.
-  // R6: entra a la pila de diálogos (es el tope mientras está abierto) y un Tab
-  // con el foco perdido lo retoma su caja (`recoverTab`).
+  // El foco entra a la caja al abrirse (a los 30 ms lo toma su botón) y, al
+  // cerrarse, vuelve a quien lo abrió: sobre un Dialog o un Modal, si quedara en
+  // <body>, Tab escaparía a la página de atrás. Ver `focusInto`. Además entra a
+  // la pila de diálogos (es el tope mientras está abierto) y un Tab con el foco
+  // perdido lo retoma su caja (`recoverTab`).
   useEffect(() => {
     if (!open) return undefined;
     const token = tokenRef.current as symbol;
@@ -106,8 +106,8 @@ export default function ConfirmDialog({
   useEffect(() => {
     if (!open) return;
     const t = window.setTimeout(() => (initialFocus === 'cancel' ? cancelBtnRef : confirmBtnRef).current?.focus(), 30);
-    // Capture + stopPropagation: si el confirm se abre SOBRE un Modal (que
-    // también escucha ESC en window), el ESC cierra sólo este diálogo.
+    // Capture + stopPropagation: si el confirm se abre sobre un Modal (que
+    // también escucha Esc en window), Esc cierra solo este diálogo.
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); if (!busy) onCancel(); } };
     window.addEventListener('keydown', onKey, true);
     return () => { window.clearTimeout(t); window.removeEventListener('keydown', onKey, true); };
@@ -115,11 +115,11 @@ export default function ConfirmDialog({
 
   const handleConfirm = useCallback(() => {
     if (dontAskKey && skipNext) {
-      try { window.sessionStorage.setItem(SKIP_PREFIX + dontAskKey, '1'); } catch { /* ignore */ }
+      try { window.sessionStorage.setItem(SKIP_PREFIX + dontAskKey, '1'); } catch { /* se ignora */ }
     }
-    // Doc 105 (F6): confirmar suele pasar a busy, que deshabilita los dos
-    // botones; el enfocado soltaba el foco a <body> y Tab salía a la página de
-    // atrás. El foco queda en la caja (como en TransferVersionDialog).
+    // Confirmar suele pasar a busy, que deshabilita los dos botones: el botón
+    // enfocado soltaría el foco a <body> y Tab saldría a la página de atrás. Por
+    // eso el foco queda en la caja (como en TransferVersionDialog).
     boxRef.current?.focus();
     onConfirm();
   }, [dontAskKey, skipNext, onConfirm]);
@@ -129,9 +129,9 @@ export default function ConfirmDialog({
   const danger = variant === 'danger';
 
   return (
-    // --top: una confirmación SIEMPRE pinta por encima de cualquier modal,
-    // incluido el Dialog del design-system (z-index 300 > .dmh-backdrop 200).
-    // El scrim NO cierra al click (pedido owner 07-17): sólo botones / ESC.
+    // --top: una confirmación siempre pinta por encima de cualquier modal,
+    // incluido el Dialog del sistema de diseño (z-index 300 > .dmh-backdrop 200).
+    // El scrim no cierra al hacer clic: solo los botones o Esc.
     <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
       <div
         className="dmh-modal"
@@ -142,7 +142,7 @@ export default function ConfirmDialog({
         aria-describedby={messageId}
         ref={boxRef}
         tabIndex={-1}
-        onKeyDown={(e) => trapTab(e, boxRef.current)}   // doc 105: Tab no sale del diálogo
+        onKeyDown={(e) => trapTab(e, boxRef.current)}   // Tab no sale del diálogo
       >
         <div className="m-body" style={{ display: 'flex', gap: 14 }}>
           <span

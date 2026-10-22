@@ -1,5 +1,5 @@
-// Doc 109 — colores de las cajas en el store: se siembran del canvas, se pintan
-// al instante y se graban UNA vez por gesto (con Undo), un guardado fallido
+// Colores de las cajas en el store: se siembran del canvas, se pintan
+// al instante y se graban una vez por gesto (con Undo), un guardado fallido
 // vuelve a lo anterior, y el color propio de una tabla o vista es un cambio del
 // modelo (changeset) con su Undo. Servicios mockeados.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -78,7 +78,7 @@ describe('siembra desde el canvas', () => {
 });
 
 describe('setBoxColors', () => {
-  it('pinta de inmediato, graba UNA vez el lote y marca el canvas sucio', async () => {
+  it('pinta de inmediato, graba una vez el lote y marca el canvas sucio', async () => {
     const saved = st().setBoxColors(['t1', 'v1', 't1'], 'theme:th2');
     expect(colors()).toEqual({ t1: 'theme:th2', t2: '#16A37B', v1: 'theme:th2' });   // optimista
     await saved;
@@ -132,16 +132,16 @@ describe('setBoxColors', () => {
     expect(colors().t1).toBe('#222222');
   });
 
-  it('un diagrama que llega con el guardado en vuelo (pedido antes) no borra el color pedido', async () => {
+  it('un diagrama pedido antes de guardar que llega con el guardado en vuelo no borra el color pedido', async () => {
     let done!: () => void;
     vi.mocked(struct.setCanvasColors).mockImplementationOnce(() => new Promise((r) => { done = () => r({} as never); }));
     const saved = st().setBoxColors(['t1'], '#FF0000');
-    useModelerStore.setState({ diagram: diagramWith({ t2: '#16A37B' }) });   // la foto de antes del guardado
+    useModelerStore.setState({ diagram: diagramWith({ t2: '#16A37B' }) });   // la foto previa al guardado
     expect(colors()).toEqual({ t1: '#FF0000', t2: '#16A37B' });
     done();
     await saved;
     expect(colors()).toEqual({ t1: '#FF0000', t2: '#16A37B' });
-    // y volver al color de la tabla se graba (antes se salteaba: «sin cambio»)
+    // y volver al color de la tabla también se graba (no cuenta como «sin cambio»)
     await st().setBoxColors(['t1'], null);
     expect(vi.mocked(struct.setCanvasColors).mock.calls[1]).toEqual(['sa1', { t1: null }]);
   });
@@ -201,7 +201,7 @@ describe('setObjectColor', () => {
     expect(viewsSvc.updateView).toHaveBeenCalledWith('v1', expect.objectContaining({ color: null }));
   });
 
-  it('en fila con otra escritura de la tabla: parte del documento VIGENTE (no lo revierte)', async () => {
+  it('en fila con otra escritura de la tabla: parte del documento vigente (no lo revierte)', async () => {
     let release!: () => void;
     const first = inObjectOrder('t1', () => new Promise<void>((r) => { release = r; }).then(() => {
       working.t1 = { ...working.t1, description: 'nueva' };     // la escritura anterior (la definición)
@@ -214,13 +214,13 @@ describe('setObjectColor', () => {
     expect(gov.createTable).toHaveBeenCalledWith(expect.objectContaining({ id: 't1', description: 'nueva', color: '#FF0000' }));
   });
 
-  it('aunque el diagrama en pantalla esté viejo (su recarga falló), parte de la working copy', async () => {
+  it('aunque el diagrama en pantalla esté desactualizado (su recarga falló), parte de la working copy', async () => {
     working.t1 = { ...working.t1, udpValues: { u1: 'A' } };      // el diagrama no lo tiene
     await st().setObjectColor('t1', '#ff0000');
     expect(gov.createTable).toHaveBeenCalledWith(expect.objectContaining({ udpValues: { u1: 'A' }, color: '#FF0000' }));
   });
 
-  it('una tabla que ya no está en la working copy avisa y no se recrea', async () => {
+  it('una tabla que no está en la working copy avisa y no se recrea', async () => {
     delete working.t1;
     await expect(st().setObjectColor('t1', '#ff0000')).rejects.toThrow(/no longer in the working copy/);
     expect(gov.createTable).not.toHaveBeenCalled();
@@ -228,14 +228,14 @@ describe('setObjectColor', () => {
 
   it('sin cambio o con un color inválido, nada', async () => {
     await st().setObjectColor('t1', 'theme:th1');
-    await st().setObjectColor('t2', 'none');           // 'none' sólo vale como excepción de un canvas
+    await st().setObjectColor('t2', 'none');           // 'none' solo vale como excepción de un canvas
     expect(gov.createTable).not.toHaveBeenCalled();
     expect(viewsSvc.updateView).not.toHaveBeenCalled();
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 });
 
-describe('ficha del canvas — Model properties (doc 112)', () => {
+describe('ficha del canvas — Model properties', () => {
   it('se abre sobre el canvas abierto; desde Properties, con la caja de ese panel', () => {
     st().openModelProps();
     expect(st().modelProps).toEqual({ saId: 'sa1' });
@@ -251,7 +251,7 @@ describe('ficha del canvas — Model properties (doc 112)', () => {
     expect(st().modelProps).toBeNull();
   });
 
-  it('se cierra al cambiar de canvas o de sesión (lo que muestra es de UN canvas)', () => {
+  it('se cierra al cambiar de canvas o de sesión (lo que muestra es de un solo canvas)', () => {
     st().openModelProps();
     useModelerStore.setState({ activeSaId: 'sa2' });
     expect(st().modelProps).toBeNull();
@@ -262,7 +262,7 @@ describe('ficha del canvas — Model properties (doc 112)', () => {
   });
 });
 
-describe('ficha del canvas — un cierre tardío no cierra otra (doc 112, revisión)', () => {
+describe('ficha del canvas — un cierre tardío no cierra otra', () => {
   it('el Save lento de la ficha anterior no cierra la que se abrió después', () => {
     st().openModelProps();
     const first = st().modelProps!;
@@ -275,8 +275,8 @@ describe('ficha del canvas — un cierre tardío no cierra otra (doc 112, revisi
   });
 });
 
-describe('applyCanvasColors — la ficha del canvas graba sus colores al Save (doc 112)', () => {
-  it('graba UNA vez sólo lo que cambia, con UN Undo que repone todo, y devuelve true', async () => {
+describe('applyCanvasColors — la ficha del canvas graba sus colores al Save', () => {
+  it('graba una vez solo lo que cambia, con un Undo que repone todo, y devuelve true', async () => {
     const ok = await st().applyCanvasColors({ t1: 'theme:th2', t2: null, v1: 'none', t9: '#000000' }, 'Change colors on this canvas');
     expect(ok).toBe(true);
     expect(struct.setCanvasColors).toHaveBeenCalledTimes(1);
@@ -309,7 +309,7 @@ describe('applyCanvasColors — la ficha del canvas graba sus colores al Save (d
   });
 });
 
-describe('vista previa de la ficha (doc 112)', () => {
+describe('vista previa de la ficha', () => {
   it('setColorPreview la pone; vacía o null la quita', () => {
     st().setColorPreview({ t1: '#FF0000' });
     expect(st().colorPreview).toEqual({ t1: '#FF0000' });

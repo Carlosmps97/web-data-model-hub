@@ -22,19 +22,18 @@ const cellInput: React.CSSProperties = { width: '100%', height: 32, padding: '0 
 const updn = (dis: boolean): React.CSSProperties => ({ height: 13, border: 'none', background: 'transparent', cursor: dis ? 'default' : 'pointer', color: dis ? '#D6DCE6' : '#8A93A5', padding: 0, lineHeight: 0 });
 
 /**
- * ViewEditor multi-fuente (F3, spec §3-5; doc 91). Una vista nace de 1..N
- * tablas del canvas: combobox de fuentes con filtro «contiene» (doc 91 D4) y
- * lista vertical de las elegidas (nombres largos envuelven, nunca se cortan),
- * grilla de columnas AGRUPADA por tabla origen (incluir, alias de salida,
- * expresión SQL, castType con combobox de tipos + libre), switch "Show on this
- * canvas" al crear (doc 70: membresía del canvas actual — y la membresía decide
- * qué vistas exporta el Export DDL de ese canvas, doc 102; el valor queda en la
- * vista como `showOnCanvas`, que con Export rules marca la vista de NEGOCIO,
- * doc 105 C2). Con 2+ fuentes el DDL las lista `FROM t1, t2` sin JOIN (doc 91 D5,
- * como Erwin); un join o un WHERE se escriben en el modo «User-Defined SQL»
- * (doc 91 D6): la sentencia completa, guardada VERBATIM y sin validación —
- * en ese modo el canvas lista todas las columnas de las fuentes (D7).
- * El preview usa el MISMO generador que el Export DDL (`viewDDL`).
+ * Editor de vistas multi-fuente. Una vista nace de 1..N tablas del canvas:
+ * combobox de fuentes con filtro «contiene» y lista vertical de las elegidas
+ * (los nombres largos envuelven, nunca se cortan), grilla de columnas agrupada
+ * por tabla origen (incluir, alias de salida, expresión SQL, castType con
+ * combobox de tipos o texto libre) y switch "Show on this canvas" al crear
+ * (membresía del canvas actual; la membresía decide qué vistas exporta el
+ * Export DDL de ese canvas, y el valor queda en la vista como `showOnCanvas`,
+ * que con Export rules marca la vista de negocio). Con 2+ fuentes el DDL las
+ * lista `FROM t1, t2` sin JOIN, como Erwin; un join o un WHERE se documentan en
+ * la pestaña «User-Defined SQL», texto informativo que se guarda con la vista
+ * sin validar: el DDL sale siempre de las columnas.
+ * El preview usa el mismo generador que el Export DDL (`viewDDL`).
  */
 export default function ViewEditor({
   lockedTableId, view, onClose, onSaved, pushToast, readOnly,
@@ -44,13 +43,13 @@ export default function ViewEditor({
   /** Vista existente ⇒ modo edición; ausente ⇒ creación. */
   view?: View;
   onClose: () => void;
-  /** Doc 70: entrega el doc guardado y si fue una CREACIÓN — el llamador
+  /** Entrega el doc guardado y si fue una creación; el llamador
    *  decide la membresía del canvas (`addViewsToCanvas`) según el switch
    *  «Show on this canvas» (viaja como `saved.showOnCanvas`). */
   onSaved: (saved: View, created: boolean) => void;
   pushToast: (m: string, k?: 'err') => void;
-  /** Modo VISOR (F5): abre la vista solo-lectura desde un canvas productivo
-   *  (sin changeset) — muestra definiciones sin necesidad de crear versión. */
+  /** Modo visor: abre la vista en solo lectura desde un canvas productivo
+   *  (sin changeset); muestra definiciones sin necesidad de crear versión. */
   readOnly?: boolean;
 }) {
   const editing = !!view;
@@ -63,13 +62,13 @@ export default function ViewEditor({
   const colsByTable = useMemo(() => {
     const m = new Map<string, typeof allColumns>();
     for (const c of allColumns) { const a = m.get(c.tableId) ?? []; a.push(c); m.set(c.tableId, a); }
-    // Doc 94: el orden único de cada fuente — PK primero y cada bloque por ordinal.
+    // Orden único de cada fuente: PK primero y cada bloque por ordinal.
     for (const [k, a] of m) m.set(k, orderColumns(a));
     return m;
   }, [allColumns]);
 
-  // Fuentes iniciales: canónicas de la vista (fallback tableId legacy) o la
-  // tabla pre-amarrada. Constante de montaje para los inicializadores.
+  // Fuentes iniciales: las canónicas de la vista (si no las trae, su `tableId`)
+  // o la tabla pre-amarrada. Constante de montaje para los inicializadores.
   const initialSourceIds = view?.sourceTableIds?.length
     ? view.sourceTableIds
     : view?.tableId ? [view.tableId]
@@ -77,19 +76,19 @@ export default function ViewEditor({
   const firstTable = tableById.get(initialSourceIds[0] ?? '');
 
   const [sourceIds, setSourceIds] = useState<string[]>(initialSourceIds);
-  // Defaults de creación (doc 52 §4): nombre = el FÍSICO de la tabla origen
-  // tal cual (M_CLIENTE → M_CLIENTE; antes `v_<físico>`). El esquema arranca
-  // VACÍO y lo resuelve el efecto de abajo (doc 80 §1).
+  // Valores por defecto al crear: nombre = el físico de la tabla origen tal cual
+  // (M_CLIENTE → M_CLIENTE). El esquema arranca vacío y lo resuelve el efecto de
+  // abajo.
   const [name, setName] = useState(view?.name ?? (firstTable ? firstTable.physicalName : ''));
   const [schema, setSchema] = useState(view?.schema ?? '');
-  // Convención `_VU` (doc 52 §4, corregida por el doc 80 §1), solo al CREAR:
-  // cuando el catálogo llega, si existe `<esquemaTabla>_VU` (CI, kind vistas)
-  // se auto-selecciona UNA sola vez — y solo si el usuario no tocó el campo.
-  // Si NO existe, el campo queda VACÍO y se ofrece crearlo: el fallback viejo
-  // era el esquema de la TABLA, o sea una vista naciendo en un esquema de
-  // tablas que ni siquiera figura en su propio combo (`kind="views"`).
+  // Convención `_VU`, solo al crear: cuando el catálogo llega, si existe
+  // `<esquemaTabla>_VU` (sin distinguir mayúsculas, kind vistas) se autoselecciona
+  // una sola vez, y solo si el usuario no tocó el campo. Si no existe, el campo
+  // queda vacío y se ofrece crearlo: el esquema de la tabla no sirve de respaldo,
+  // porque la vista nacería en un esquema de tablas que ni siquiera figura en su
+  // propio combo (`kind="views"`).
   const storeSchemas = useModelerStore((s) => s.schemas);
-  // Esquema de la fuente ACTUAL (no la de montaje): "New view" desde el toolbar
+  // Esquema de la fuente actual (no la de montaje): "New view" desde el toolbar
   // arranca sin fuentes y la primera se elige adentro.
   const firstSourceSchema = tableById.get(sourceIds[0] ?? '')?.schema;
   const schemaAutoRef = useRef<string | null>(view ? null : '');
@@ -100,43 +99,42 @@ export default function ViewEditor({
     schemaAutoRef.current = null;
     setSchema((cur) => (cur === '' ? hit : cur));
   }, [storeSchemas, ro, firstSourceSchema]);
-  // El `<ESQUEMA>_VU` que FALTA, derivado (no estado): con estado, cualquier
-  // recarga del catálogo con la fuente aún sin resolver lo dejaba en blanco y
-  // el aviso desaparecía sin que nada hubiera cambiado.
+  // El `<ESQUEMA>_VU` que falta, derivado (no estado): con estado, cualquier
+  // recarga del catálogo con la fuente aún sin resolver lo dejaría en blanco y
+  // el aviso desaparecería sin que nada hubiera cambiado.
   const suggestVU = useMemo(
     () => (view || ro ? null : viewSchemaOnCreate(firstSourceSchema, storeSchemas).suggest),
     [view, ro, firstSourceSchema, storeSchemas],
   );
 
-  // Alta del `_VU` DESDE acá (doc 80 §1 → doc 96 D5): el mismo popup del combo,
-  // por el camino normal (changeset activo), nunca escritura directa; al crear
-  // queda seleccionado.
+  // Alta del `_VU` desde acá: el mismo popup del combo, por el camino normal
+  // (changeset activo), nunca escritura directa; al crear queda seleccionado.
   const [schemaModal, setSchemaModal] = useState(false);
-  // "Show on this canvas" arranca ON al CREAR (doc 50 §5 — pedido del equipo);
-  // al editar una existente se respeta lo persistido (un `?? true` pelado
-  // habría "encendido" vistas legacy sin el campo).
+  // "Show on this canvas" arranca encendido al crear; al editar una existente se
+  // respeta lo persistido (un `?? true` directo encendería las vistas guardadas
+  // sin el campo).
   const [showOnCanvas, setShowOnCanvas] = useState(view ? (view.showOnCanvas ?? false) : true);
-  // F5: definición funcional de la vista (nivel vista). Editable en el panel izq.
+  // Definición funcional de la vista (nivel vista). Editable en el panel izquierdo.
   const [description, setDescription] = useState(view?.description ?? '');
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // ── Doc 96 D6 (decisión del owner): la User-Defined SQL es texto INFORMATIVO
-  // de la vista — se guarda con ella, sin validar, pero el DDL sale SIEMPRE de
-  // las columnas. `sqlMode` es solo la pestaña visible de la sección 2
-  // (Columns | User-Defined SQL): no es un modo de la vista. ──
+  // ── La User-Defined SQL es texto informativo de la vista: se guarda con ella,
+  // sin validar, pero el DDL sale siempre de las columnas. `sqlMode` es solo la
+  // pestaña visible de la sección 2 (Columns | User-Defined SQL): no es un modo
+  // de la vista. ──
   const [sqlMode, setSqlMode] = useState(false);
   const [sqlDraft, setSqlDraft] = useState(() => (view?.customSql ?? '').trim());
 
-  // ── Doc 64 §3: ancho de "Source column" redimensionable (drag del header;
-  // persiste por browser — nombres largos se leen sin agrandar todo). ──
+  // ── Ancho de "Source column" redimensionable (arrastre del header; persiste
+  // por navegador: los nombres largos se leen sin agrandar todo). ──
   const [srcW, setSrcWRaw] = useState<number>(() => {
     try { const v = Number(localStorage.getItem('dmh:veSrcW')); return v >= 140 && v <= 480 ? v : 200; } catch { return 200; }
   });
   const setSrcW = (w: number) => {
     const clamped = Math.round(Math.max(140, Math.min(480, w)));
     setSrcWRaw(clamped);
-    try { localStorage.setItem('dmh:veSrcW', String(clamped)); } catch { /* ignore */ }
+    try { localStorage.setItem('dmh:veSrcW', String(clamped)); } catch { /* se ignora */ }
   };
   const startSrcResize = (e: ReactPointerEvent) => {
     e.preventDefault();
@@ -146,7 +144,7 @@ export default function ViewEditor({
     const start = srcW;
     const move = (ev: PointerEvent) => setSrcW(start + (ev.clientX - startX));
     const up = () => {
-      try { el.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      try { el.releasePointerCapture(e.pointerId); } catch { /* se ignora */ }
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
     };
@@ -161,7 +159,7 @@ export default function ViewEditor({
     const hasProjection = srcItems.length > 0;
     const order: string[] = [];
     const cfg: Record<string, ColCfg> = {};
-    // 1) columnas proyectadas EN SU ORDEN (ítems legacy sin tableId ⇒ 1ª fuente)
+    // 1) columnas proyectadas en su orden (ítems sin tableId ⇒ 1.ª fuente)
     for (const s of srcItems) {
       const k = colKey(s.tableId ?? initialSourceIds[0] ?? '', s.column!);
       if (cfg[k]) continue;
@@ -169,7 +167,7 @@ export default function ViewEditor({
       cfg[k] = { included: true, output: s.outputAlias ?? s.column!, expression: s.expression ?? '', castType: s.castType ?? '', description: s.description ?? '' };
     }
     // 2) resto de columnas de cada fuente: excluidas si ya hay proyección;
-    //    TODAS incluidas en una vista nueva (comportamiento 07b-2).
+    //    todas incluidas al crear la vista.
     for (const tid of initialSourceIds) {
       for (const c of colsByTable.get(tid) ?? []) {
         const k = colKey(tid, c.physicalName);
@@ -181,7 +179,7 @@ export default function ViewEditor({
     return { order, cfg };
   });
 
-  // Metadata por clave de las fuentes ACTUALES (nombre + tipo de la columna).
+  // Metadata por clave de las fuentes actuales (nombre + tipo de la columna).
   const colMeta = useMemo(() => {
     const m = new Map<string, { name: string; dataType: string; description: string }>();
     for (const tid of sourceIds) {
@@ -190,8 +188,8 @@ export default function ViewEditor({
     return m;
   }, [sourceIds, colsByTable]);
   // Claves persistibles: las verificadas contra el canvas + las de fuentes
-  // FUERA de este canvas (vista compartida abierta desde otro canvas): esas
-  // columnas no se pueden verificar acá y se PRESERVAN para no perderlas.
+  // fuera de este canvas (vista compartida abierta desde otro canvas): esas
+  // columnas no se pueden verificar acá y se preservan para no perderlas.
   const validKeys = useMemo(() => {
     const s = new Set(colMeta.keys());
     for (const k of order) if (!canvasTables.has(splitColKey(k).tableId)) s.add(k);
@@ -204,7 +202,7 @@ export default function ViewEditor({
     for (const k of g.order) if (validKeys.has(k)) next[k] = { ...next[k], included };
     return { ...g, cfg: next };
   });
-  // Reordena DENTRO del grupo de su tabla (la grilla se renderiza agrupada).
+  // Reordena dentro del grupo de su tabla (la grilla se renderiza agrupada).
   const move = (k: string, dir: -1 | 1) => setGrid((g) => {
     const tid = splitColKey(k).tableId;
     const idxs: number[] = [];
@@ -219,13 +217,11 @@ export default function ViewEditor({
 
   const addSource = (tid: string) => {
     if (!tid || sourceIds.includes(tid)) return;
-    // Doc 64 r2: New view desde el toolbar arranca SIN fuentes ⇒ sin nombre
-    // (el botón quedaba deshabilitado y se leía como culpa del JOIN). Al
-    // agregar la PRIMERA fuente, nombre y esquema se precargan como en el
-    // flujo pre-amarrado (físico tal cual + `_VU` si existe, doc 52 §4).
-    // Doc 80 §1: el ESQUEMA ya no se toca acá — lo resuelve el efecto de
-    // arriba sobre la fuente actual (con `_VU` lo selecciona; sin `_VU` queda
-    // vacío y se ofrece crearlo). Antes caía al esquema de la TABLA.
+    // "New view" desde el toolbar arranca sin fuentes y por eso sin nombre: al
+    // agregar la primera fuente, el nombre se precarga como en el flujo
+    // pre-amarrado (físico tal cual). El esquema no se toca acá: lo resuelve el
+    // efecto de arriba sobre la fuente actual (con `_VU` lo selecciona; sin
+    // `_VU` queda vacío y se ofrece crearlo).
     if (sourceIds.length === 0) {
       const t = tableById.get(tid);
       if (t && !name.trim()) setName(t.physicalName);
@@ -238,8 +234,8 @@ export default function ViewEditor({
         const k = colKey(tid, c.physicalName);
         if (cfg[k]) continue;
         order.push(k);
-        // Fuente agregada a una proyección existente ⇒ columnas EXCLUIDAS por
-        // default (el usuario elige); en una vista nueva se incluye todo.
+        // Fuente agregada a una proyección existente ⇒ columnas excluidas por
+        // defecto (el usuario elige); al crear la vista se incluye todo.
         cfg[k] = { included: !editing, output: c.physicalName, expression: '', castType: '', description: '' };
       }
       return { order, cfg };
@@ -254,8 +250,8 @@ export default function ViewEditor({
     }));
   };
 
-  // Doc 91 D4: combobox de fuentes — TODAS las tablas del canvas aún no
-  // elegidas (`schema.físico` + lógico a la derecha); el filtro «contiene» del
+  // Combobox de fuentes: todas las tablas del canvas que no están elegidas
+  // (`schema.físico` + lógico a la derecha); el filtro «contiene» del
   // SearchSelect mira ambos (`matchDetail`).
   const sourceOptions = useMemo(() => tables
     .filter((t) => !sourceIds.includes(t.id))
@@ -266,20 +262,20 @@ export default function ViewEditor({
     () => order.filter((k) => validKeys.has(k) && cfg[k]?.included).length,
     [order, cfg, validKeys],
   );
-  // Minor #12 (doc 96): nombres de salida repetidos harían inválido el DDL.
+  // Nombres de salida repetidos harían inválido el DDL.
   const dupNames = useMemo(() => duplicateOutputNames(serializeSources(order, cfg, validKeys)), [order, cfg, validKeys]);
-  // Doc 96 D6: la vista SIEMPRE necesita columnas (el DDL sale de ellas); la
+  // La vista siempre necesita columnas (el DDL sale de ellas); la
   // User-Defined SQL es opcional e informativa.
   const canSave = !!name.trim() && sourceIds.length > 0 && !busy && includedCount > 0 && dupNames.length === 0;
-  // Doc 64 r2: motivo VISIBLE del bloqueo.
+  // Motivo visible del bloqueo.
   const disabledReason = busy ? undefined
     : !name.trim() ? 'Give the view a name (section 1)'
       : sourceIds.length === 0 ? 'Add at least one source table'
         : includedCount === 0 ? 'Select at least one column'
           : dupNames.length ? `Output name ${dupNames[0]} is repeated — rename one (the DDL would be invalid)` : undefined;
 
-  // Preview con el MISMO generador del Export DDL — una sola fuente de verdad:
-  // sale de las columnas (doc 96 D6), nunca de la User-Defined SQL.
+  // Preview con el mismo generador del Export DDL, una sola fuente de verdad:
+  // sale de las columnas, nunca de la User-Defined SQL.
   const preview = useMemo(() => {
     if (includedCount === 0) return '-- Select at least one column for the view.';
     const dv: DdlView = {
@@ -297,15 +293,15 @@ export default function ViewEditor({
   const save = async () => {
     if (!canSave || ro) return;
     setBusy(true);
-    // Doc 105: la vista se graba en la sesión donde se pidió (H1) y un fallo
-    // espera la revalidación (H7). Propaga el motivo real (p.ej. el 409 del
-    // backend F3a: vista sin fuentes).
+    // La vista se graba en la sesión donde se pidió y un fallo espera la
+    // revalidación. Propaga el motivo real (p. ej. el 409 del backend: vista sin
+    // fuentes).
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the view", 'err'));
     try {
-      // Doc 96 D6: las columnas del builder son la verdad (el DDL sale de ahí);
-      // la User-Defined SQL viaja como texto informativo. El payload del
-      // changeset es el DOC COMPLETO: los UDP de la vista se conservan.
+      // Las columnas del builder son la verdad (el DDL sale de ahí); la
+      // User-Defined SQL viaja como texto informativo. El payload del changeset
+      // es el doc completo: los UDP de la vista se conservan.
       const body = viewSaveBody({
         name, schema, sourceIds, sources: serializeSources(order, cfg, validKeys), showOnCanvas,
         sql: preview, description, sqlText: sqlDraft, udpValues: view?.udpValues, color: view?.color,
@@ -313,8 +309,8 @@ export default function ViewEditor({
       const saved = editing && view
         ? await viewsSvc.updateView(view.id, body)
         : await viewsSvc.createView(body);
-      // Doc 105 (H1): lo que sigue (el llamador la suma al canvas) es otra
-      // escritura — si mientras se guardaba se abrió otra versión, ya no va.
+      // Lo que sigue (el llamador la suma al canvas) es otra escritura: si
+      // mientras se guardaba se abrió otra versión, no se ejecuta.
       if (!pin.holds()) { onClose(); return; }
       pushToast(editing ? 'View updated' : 'View created');
       onSaved(saved, !editing);
@@ -366,7 +362,7 @@ export default function ViewEditor({
         {COLUMN_DATA_TYPES.map((t) => <option key={t} value={t} />)}
       </datalist>
       <fieldset disabled={ro} style={{ border: 0, padding: 0, margin: '-4px -4px 0', minWidth: 0, display: 'flex', gap: 0, height: 560, minHeight: 0 }}>
-        {/* ── LEFT · identity + fuentes ── */}
+        {/* ── Izquierda · identidad + fuentes ── */}
         <div style={{ width: 400, flex: 'none', borderRight: '1px solid #EAEDF2', background: '#FAFBFC', display: 'flex', flexDirection: 'column', minHeight: 0, borderRadius: '10px 0 0 10px' }}>
           <div style={{ padding: '14px 18px', borderBottom: '1px solid #EAEDF2', display: 'flex', alignItems: 'center', gap: 9 }}>
             <span style={{ width: 22, height: 22, borderRadius: 6, background: '#F3EEFF', color: PURPLE, fontSize: 12, fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>1</span>
@@ -379,10 +375,10 @@ export default function ViewEditor({
             </div>
             <div>
               <label style={lbl}>Schema</label>
-              {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
-                  de VISTAS; «+ Create schema…» los crea desde el mismo combo (doc 96). */}
+              {/* Combobox de esquemas con buscador, solo esquemas de
+                  vistas; «+ Create schema…» los crea desde el mismo combo. */}
               <SchemaSelect kind="views" value={schema} onChange={setSchema} className="" inputStyle={idField} />
-              {/* Doc 80 §1: sin `<ESQUEMA>_VU` el campo queda vacío y se ofrece
+              {/* Sin `<ESQUEMA>_VU` el campo queda vacío y se ofrece
                   crearlo por el camino versionado (popup de Esquemas). */}
               {!ro && !schema && suggestVU && (
                 <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'flex-start' }}>
@@ -396,14 +392,14 @@ export default function ViewEditor({
                 </div>
               )}
             </div>
-            {/* F5: definición funcional de la VISTA (nivel vista, no de columna). */}
+            {/* Definición funcional de la vista (nivel vista, no de columna). */}
             <div>
               <label style={lbl}>Functional definition</label>
               <textarea value={description} onChange={(e) => setDescription(e.target.value)}
                 placeholder="What this view represents (business definition)…"
                 style={{ width: '100%', minHeight: 66, padding: '10px 13px', background: '#fff', border: '1px solid #DDE2EC', borderRadius: 10, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.55, color: NAVY, resize: 'vertical', outline: 'none', boxSizing: 'border-box' }} />
             </div>
-            {/* ── Fuentes (doc 91 D4): lista vertical de las elegidas + combobox
+            {/* ── Fuentes: lista vertical de las elegidas + combobox
                 con filtro «contiene» sobre todas las tablas del canvas. ── */}
             <div>
               <label style={lbl}>Source tables</label>
@@ -440,7 +436,7 @@ export default function ViewEditor({
                 disabled={ro || sourceOptions.length === 0} onPick={addSource} />
               <div style={{ marginTop: 6, fontSize: 11, color: MUTED }}>Type to filter by schema, table or logical name (contains).</div>
             </div>
-            {/* ── Doc 70: al CREAR, la vista se suma a la membresía de ESTE
+            {/* ── Al crear, la vista se suma a la membresía de este
                 canvas (el llamador la agrega con addViewsToCanvas). Al editar
                 no se muestra: la membresía se maneja desde Properties → Views
                 («Add to this canvas» / «Remove from canvas»). ── */}
@@ -454,12 +450,10 @@ export default function ViewEditor({
                 <span style={{ fontSize: 10.5, color: MUTED }}>adds the new view to the current canvas — and to its DDL export</span>
               </div>
             )}
-            {/* Doc 91 D1/D2: sin «Labels / tags» (los UDP de vista los reemplazan)
-                ni caja Filter (un WHERE se escribe en el User-Defined SQL). */}
           </div>
         </div>
 
-        {/* ── RIGHT · columnas por fuente + preview ── */}
+        {/* ── Derecha · columnas por fuente + preview ── */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
           <div style={{ padding: '14px 20px 12px', borderBottom: '1px solid #EEF1F5' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -467,7 +461,7 @@ export default function ViewEditor({
               <h2 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: NAVY }}>
                 {sqlMode ? 'User-Defined SQL — informational' : <>Columns — include, rename, express &amp; cast</>}
               </h2>
-              {/* Doc 96 D6: dos pestañas de la MISMA vista — las columnas (de ahí sale
+              {/* Dos pestañas de la misma vista: las columnas (de ahí sale
                   el DDL) y la User-Defined SQL informativa. */}
               <div className="rd-seg" style={{ marginLeft: 'auto' }}>
                 <button type="button" className={!sqlMode ? 'active' : ''} onClick={() => setSqlMode(false)}>Columns</button>
@@ -492,13 +486,13 @@ export default function ViewEditor({
           </div>
 
           <div style={{ flex: 1, overflowY: 'auto', padding: '14px 20px', minHeight: 0 }}>
-            {/* Doc 64 §4b: dos cuerpos — builder de columnas o User-Defined SQL. */}
+            {/* Dos cuerpos: builder de columnas o User-Defined SQL. */}
             {!sqlMode && (<>
-            {/* grilla de columnas AGRUPADA por tabla fuente */}
+            {/* grilla de columnas agrupada por tabla fuente */}
             <div style={{ border: '1px solid #EAEDF2', borderRadius: 12, overflow: 'hidden' }}>
               <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 10, padding: '9px 13px', background: '#F7F9FC', borderBottom: '1px solid #EAEDF2', fontSize: 10, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: MUTED }}>
                 <span /><span />
-                {/* Doc 64 §3: columna redimensionable (drag del borde derecho). */}
+                {/* Columna redimensionable (arrastre del borde derecho). */}
                 <span style={{ position: 'relative', paddingRight: 12 }}>Source column
                   <span title="Drag to resize this column" onPointerDown={startSrcResize}
                     style={{ position: 'absolute', right: 2, top: -9, bottom: -9, width: 9, cursor: 'col-resize', borderRight: '2px solid #D9DFEA' }} />
@@ -530,7 +524,7 @@ export default function ViewEditor({
                             <button type="button" onClick={() => move(k, -1)} disabled={searching} title="Subir" style={updn(searching)}><ChevronUp size={13} /></button>
                             <button type="button" onClick={() => move(k, 1)} disabled={searching} title="Bajar" style={updn(searching)}><ChevronDown size={13} /></button>
                           </span>
-                          {/* Doc 64 §3: title = nombre completo · tipo (lectura
+                          {/* title = nombre completo · tipo (lectura
                               inmediata de nombres largos sin redimensionar). */}
                           <span title={`${meta.name}${meta.dataType ? ` · ${meta.dataType}` : ''}`}
                             style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 600, color: cc.included ? NAVY : '#A9B1BE', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -544,8 +538,8 @@ export default function ViewEditor({
                           <input style={{ ...cellInput, opacity: cc.included ? 1 : 0.5, borderColor: cc.castType.trim() ? '#E1D4FB' : '#DDE2EC', color: cc.castType.trim() ? PURPLE_DK : NAVY }}
                             value={cc.castType} disabled={!cc.included} list="view-cast-types"
                             onChange={(e) => patch(k, { castType: e.target.value })} placeholder="cast a tipo…" />
-                          {/* F5: definición propia de la columna-de-vista. Placeholder =
-                              la definición HEREDADA de la columna física (vacío ⇒ hereda). */}
+                          {/* Definición propia de la columna de vista. Placeholder =
+                              la definición heredada de la columna física (vacío ⇒ hereda). */}
                           <input style={{ ...cellInput, opacity: cc.included ? 1 : 0.5, borderColor: cc.description.trim() ? '#E1D4FB' : '#DDE2EC' }}
                             value={cc.description} disabled={!cc.included}
                             onChange={(e) => patch(k, { description: e.target.value })}
@@ -559,8 +553,8 @@ export default function ViewEditor({
               })}
             </div>
             {searching && <div style={{ marginTop: 7, fontSize: 11, color: MUTED }}>Clear the search to reorder columns.</div>}
-            {/* Doc 91 D5: con 2+ fuentes el DDL las lista `FROM t1, t2` (como
-                Erwin), sin JOIN — la caja JOIN del doc 64 §4a se retiró. */}
+            {/* Con 2+ fuentes el DDL las lista `FROM t1, t2` (como
+                Erwin), sin JOIN. */}
             {sourceIds.length >= 2 && (
               <div style={{ marginTop: 10, fontSize: 11.5, color: '#56607A', background: '#F7F9FC', border: '1px solid #EAEDF2', borderRadius: 8, padding: '7px 10px' }}>
                 {sourceIds.length} sources — the DDL lists them as <span className="rd-mono">FROM t1, t2…</span> with no JOIN (Erwin default). A join or a WHERE can be noted in the <strong>User-Defined SQL</strong> (informational).
@@ -568,7 +562,7 @@ export default function ViewEditor({
             )}
             </>)}
 
-            {/* ── User-Defined SQL (doc 96 D6): texto informativo, sin validar, no se exporta ── */}
+            {/* ── User-Defined SQL: texto informativo, sin validar, no se exporta ── */}
             {sqlMode && (
               <div style={{ border: '1px solid #E1D4FB', borderRadius: 12, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', background: '#F8F5FF', borderBottom: '1px solid #EEE7FB', fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: PURPLE }}>
@@ -601,8 +595,8 @@ export default function ViewEditor({
           </div>
         </div>
       </fieldset>
-      {/* Doc 80 §1 → doc 96 D5: el popup de alta montado ENCIMA de este diálogo
-          (mismo que usa el combo); ESC lo consume sólo este popup. */}
+      {/* Popup de alta montado encima de este diálogo (el mismo
+          que usa el combo); ESC lo consume solo este popup. */}
       {schemaModal && (
         <SchemaCreateDialog kind="views" initialName={suggestVU ?? ''}
           onCreated={(n) => setSchema(n)} onClose={() => setSchemaModal(false)} />

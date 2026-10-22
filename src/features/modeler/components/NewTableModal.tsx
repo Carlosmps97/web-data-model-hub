@@ -19,9 +19,10 @@ import { tableSchemasCached } from '../services/schemaPartition';
 type Mode = 'blank' | 'import';
 
 /**
- * New table (Pantalla 05 / 05b). Un solo modal con dos modos:
- *  - **Blank**: Logical Name + Physical Name (auto-derivado del UDP per-table,
- *    editable) + Schema (free-text, NO dropdown). Sin "Add a primary key".
+ * New table. Un solo modal con dos modos:
+ *  - **Blank**: nombre según la faceta activa (lógico con el físico derivado como
+ *    vista previa, o físico con su esquema), definición funcional y UDPs. Sin
+ *    "Add a primary key".
  *  - **Import existing**: busca el pool universal con filtro por schema y agrega
  *    tablas al canvas (universal → propaga a todos los módulos que la referencian).
  * Usa el `Dialog` con backdrop "canvas" (oscurece solo el lienzo).
@@ -38,30 +39,28 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [schema, setSchema] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Doc 64 §6: metadata del alta — definición funcional + UDPs en el MISMO
-  // popup (antes había que crear y luego ir a Properties). Ref espejo de los
-  // UDP: el blur del input (commit de UdpAssign) dispara en el MISMO gesto que
-  // el click en "Create table" — el submit lee el ref (sincrónico) para no
-  // perder ese último valor contra el batching del estado (patrón doc 40).
+  // Metadata del alta: definición funcional + UDPs en el mismo popup. Ref espejo
+  // de los UDP: el blur del input (commit de UdpAssign) dispara en el mismo gesto
+  // que el clic en "Create table"; el submit lee el ref (sincrónico) para no
+  // perder ese último valor frente al batching del estado.
   const [description, setDescription] = useState('');
-  // Doc 69: los UDPs del alta siguen la faceta activa del canvas (Entity/Table).
+  // Los UDPs del alta siguen la faceta activa del canvas (Entity/Table).
   const viewMode = useModelerStore((s) => s.viewMode);
-  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
-  // Doc 86 D3: New entity (Logical) tipea el LÓGICO y muestra el físico
-  // derivado; New table (Physical) tipea el FÍSICO (regla de case del scope
-  // table) + Schema. `logical` guarda lo tipeado en ambos casos.
+  const n = facetNouns(viewMode);   // Entity/Attribute o Table/Column
+  // New entity (Logical) recibe el nombre lógico y muestra el físico derivado;
+  // New table (Physical) recibe el físico (regla de case del scope table) y el
+  // esquema. `logical` guarda lo escrito en ambos casos.
   const tableCase = useModelerStore((s) => s.naming?.table.case);
   const casedPhysical = viewMode === 'physical' ? applyNamingCase(logical.trim(), tableCase) : '';
   const [udpValues, setUdpValues] = useState<Record<string, string>>({});
   const udpRef = useRef<Record<string, string>>({});
   const setUdp = (next: Record<string, string>) => { udpRef.current = next; setUdpValues(next); };
 
-  // Auto-physicalize (scope 'table') con debounce, salvo override manual.
-  // `alive` descarta la respuesta si el efecto ya se limpió (el usuario siguió
-  // tipeando o tomó el override): sin esto una respuesta VIEJA que llegara
-  // tarde pisaba el físico vigente con el derivado de un lógico anterior.
+  // Auto-physicalize (scope 'table') con debounce. `alive` descarta la respuesta
+  // si el efecto ya se limpió (el usuario siguió escribiendo): así una respuesta
+  // tardía no pisa el físico vigente con el derivado de un lógico anterior.
   useEffect(() => {
-    if (viewMode === 'physical') return;   // doc 86: el preview derivado es del modo Logical
+    if (viewMode === 'physical') return;   // la vista previa derivada es del modo Logical
     const t = logical.trim();
     if (!t) { setPhysical(''); return; }
     let alive = true;
@@ -71,8 +70,8 @@ export default function NewTableModal({ onClose, onCreate }: {
     return () => { alive = false; clearTimeout(h); };
   }, [logical, viewMode]);
 
-  // Doc 105 (R14): un alta a la vez — `busy` sigue en false dentro del mismo
-  // render: un doble Enter (o uno sostenido) creaba varias tablas.
+  // Un alta a la vez: `busy` sigue en false dentro del mismo render, así que sin
+  // este ref un doble Enter (o uno sostenido) crearía varias tablas.
   const inFlight = useRef(false);
   const submitBlank = async () => {
     const ln = logical.trim();
@@ -81,13 +80,13 @@ export default function NewTableModal({ onClose, onCreate }: {
     setBusy(true);
     setError(null);
     try {
-      // Doc 86 §2.3: payload por faceta (createInputs, puro y testeado). En
-      // Logical el físico lo deriva el store por glosario (scope table).
+      // Payload por faceta (createInputs, puro y testeado). En Logical el
+      // físico lo deriva el store por glosario (scope table).
       await onCreate(tableCreateInput(viewMode, { name: ln, schema, description, udpValues: udpRef.current }, tableCase));
       onClose();
     } catch (e) {
-      // 409 de duplicado (spec 10 §9) u otro error: mensaje INLINE con el
-      // detail real del backend — el modal NO se cierra.
+      // 409 de duplicado u otro error: mensaje en línea con el detail real del
+      // backend; el modal no se cierra.
       setError(apiErrorMessage(e, "Couldn't create the table"));
     } finally { inFlight.current = false; setBusy(false); }
   };
@@ -102,16 +101,17 @@ export default function NewTableModal({ onClose, onCreate }: {
   const [schemaFilter, setSchemaFilter] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
   const [added, setAdded] = useState<Set<string>>(new Set());
-  // Doc 70: la tabla entra SOLA; sus vistas se suman a este canvas a pedido.
+  // La tabla entra sola; sus vistas se suman a este canvas a pedido.
   const [withViews, setWithViews] = useState(false);
 
-  // Búsqueda SERVER-SIDE con debounce: a 15k tablas el modal no baja el
-  // catálogo completo — el backend matchea por nombre + esquema y devuelve la
+  // Búsqueda server-side con debounce: con miles de tablas el modal no baja el
+  // catálogo completo; el backend busca por nombre + esquema y devuelve la
   // página. `alive` descarta respuestas fuera de orden (el usuario siguió
-  // tipeando). 300ms: cada búsqueda es un scan por regex server-side (costo
-  // proporcional a la colección) — no disparar por tecla. `schemaFilter` está en
-  // las deps: cambiar el esquema RE-CONSULTA (antes filtraba client-side sobre la
-  // página de 50 y las tablas del esquema fuera de esa página no aparecían).
+  // escribiendo). 300 ms: cada búsqueda es un scan por regex server-side (costo
+  // proporcional a la colección), por eso no se dispara por tecla. `schemaFilter`
+  // está en las deps: cambiar el esquema vuelve a consultar, porque un filtro en
+  // el cliente sobre la página de 50 dejaría fuera las tablas del esquema que no
+  // entraron en esa página.
   const PAGE = 50;
   useEffect(() => {
     if (mode !== 'import') return;
@@ -124,14 +124,14 @@ export default function NewTableModal({ onClose, onCreate }: {
     return () => { alive = false; clearTimeout(h); };
   }, [mode, q, schemaFilter]);
 
-  // Filtro por esquema (doc 43): opciones = esquemas que contienen TABLAS
-  // (cacheados por sesión y versión en schemaPartition, compartidos con el
-  // CTAS) — así el combobox no mezcla los esquemas solo-de-vistas (`_vu`).
-  // Mientras cargan se muestra solo "All schemas"; el catálogo completo queda
-  // como fallback únicamente si la bajada FALLA. El acotado por esquema lo
-  // hace el BACKEND (server-side, junto a `q`); el filtro client-side de acá
-  // es sólo defensa — descarta cualquier resultado de un esquema previo que
-  // quedara en pantalla mientras resuelve la nueva consulta.
+  // Filtro por esquema: opciones = esquemas que contienen tablas (cacheados por
+  // sesión y versión en schemaPartition, compartidos con el CTAS); así el
+  // combobox no mezcla los esquemas solo de vistas (`_vu`). Mientras cargan se
+  // muestra solo "All schemas"; el catálogo completo queda como fallback
+  // únicamente si la descarga falla. El acotado por esquema lo hace el backend
+  // (junto a `q`); el filtro en el cliente es solo defensa: descarta cualquier
+  // resultado de un esquema previo que quedara en pantalla mientras se resuelve
+  // la nueva consulta.
   const schemaPool = useModelerStore((s) => s.schemas);
   const [tableSchemas, setTableSchemas] = useState<string[] | null>(null);
   const [schemasErr, setSchemasErr] = useState(false);
@@ -155,9 +155,9 @@ export default function NewTableModal({ onClose, onCreate }: {
 
   const addOne = async (id: string) => {
     setAdding(id);
-    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió (`reportWriteError`). Antes no tenía catch: rechazo sin manejar.
-    const onError = reportWriteError((e) => toast.error(failureText(`Couldn't add the ${n.one} to this canvas`, e)));   // ronda 4 (6b): entity/table
-    // Doc 113 §4: con la tabla, para estimar su bloque al ubicarlo en el centro de lo que se ve.
+    // El fallo espera la revalidación y calla si la sesión cambia (`reportWriteError`).
+    const onError = reportWriteError((e) => toast.error(failureText(`Couldn't add the ${n.one} to this canvas`, e)));   // entity/table según la faceta
+    // Se pasa la tabla para estimar su bloque al ubicarla en el centro de lo que se ve.
     try { await addExistingTables([id], { withViews, tables: tables.filter((t) => t.id === id) }); setAdded((s) => new Set(s).add(id)); }
     catch (e) { await onError(e); }
     finally { setAdding(null); }
@@ -198,7 +198,7 @@ export default function NewTableModal({ onClose, onCreate }: {
               <input className="rd-input" autoFocus placeholder="e.g. cuenta cliente" value={logical}
                 onChange={(e) => setLogical(sanitizeLogicalName(e.target.value))} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void submitBlank(); } }}
                 style={{ width: '100%' }} />
-              {/* Doc 86 D3: el físico se deriva por glosario (scope table); se edita luego en Physical. */}
+              {/* El físico se deriva por glosario (scope table); se edita luego en Physical. */}
               <span className="rd-small" style={{ color: 'var(--text-muted, #8A93A5)', marginTop: 4, display: 'block' }}>
                 Physical: <span className="rd-mono" style={{ color: 'var(--flow-700)' }}>{physical || '—'}</span> — derived from the glossary; schema and physical name are set in the Physical model.
               </span>
@@ -218,14 +218,13 @@ export default function NewTableModal({ onClose, onCreate }: {
               </div>
               <div style={field}>
                 <label style={lbl}>Schema</label>
-                {/* Combobox de esquemas con buscador (docs 18/52) — solo esquemas
-                    de TABLAS; «+ Create schema…» los crea desde el combo (doc 96). */}
+                {/* Combobox de esquemas con buscador, solo esquemas de tablas;
+                    «+ Create schema…» los crea desde el combo. */}
                 <SchemaSelect kind="tables" value={schema} onChange={setSchema} style={{ width: '100%' }} />
               </div>
             </>
           )}
-          {/* Doc 64 §6: definición funcional + UDPs en el alta (como el popup
-              de New column, doc 40). */}
+          {/* Definición funcional + UDPs en el alta (como el popup de New column). */}
           <div style={field}>
             <label style={lbl}>Functional definition</label>
             <textarea className="wk-pp-textarea" placeholder={`What this ${n.one} represents (business definition)…`}
@@ -250,12 +249,12 @@ export default function NewTableModal({ onClose, onCreate }: {
                 style={{ flex: 1, border: 0, background: 'transparent', outline: 'none', padding: '10px 0', fontSize: 13 }} />
             </div>
             <div style={{ width: 168, flexShrink: 0 }}>
-              {/* Combobox buscable (doc 41), mismo estilo que el del CTAS. */}
+              {/* Combobox buscable, mismo estilo que el del CTAS. */}
               <SearchSelect mono options={schemaOpts} valueLabel={schemaFilter} placeholder="All schemas" emptyLabel="All schemas" onPick={setSchemaFilter} />
             </div>
           </div>
-          {/* Doc 70: una tabla vive en muchos canvases y cada canvas modela sus
-              vistas — importar NO arrastra vistas salvo pedido explícito. */}
+          {/* Una tabla vive en muchos canvases y cada canvas modela sus
+              vistas: importar no arrastra vistas salvo pedido explícito. */}
           <label className="rd-small" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10, color: 'var(--text-muted, #56607A)', cursor: 'pointer' }}>
             <input type="checkbox" checked={withViews} onChange={(e) => setWithViews(e.target.checked)} />
             Also add the table's views to this canvas
@@ -266,7 +265,7 @@ export default function NewTableModal({ onClose, onCreate }: {
               return (
                 <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--border-soft, #EAEDF2)', borderRadius: 10 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Doc 86: el nombre de la faceta activa primero. */}
+                    {/* El nombre de la faceta activa primero. */}
                     <div className={viewMode === 'physical' ? 'rd-mono' : ''} style={{ fontWeight: 600, fontSize: 13 }}>{viewMode === 'physical' ? t.physicalName : (t.logicalName || t.physicalName)}</div>
                     <div className={`rd-small${viewMode === 'logical' ? ' rd-mono' : ''}`} style={{ color: 'var(--text-muted, #8A93A5)' }}>{viewMode === 'physical' ? t.logicalName : t.physicalName} · used in {usageOf(t.id)} modules</div>
                   </div>

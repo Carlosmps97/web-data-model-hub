@@ -1,6 +1,6 @@
 /**
  * RoleModal — alta/edición de rol (nombre + descripción). Los permisos se editan
- * en la matriz de la pantalla, no acá: en alta arranca con permisos vacíos y en
+ * en la matriz de la pantalla, no aquí: en alta arranca con permisos vacíos y en
  * edición se preservan. La clave (key) al crear es el slug del nombre.
  */
 import { useState } from 'react';

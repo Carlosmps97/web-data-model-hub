@@ -6,7 +6,7 @@ vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), LONG_TIME
 
 import { apiGet, apiPost } from '@/services/http';
 import {
-  ruleActionSummary, ruleToYaml, saveDdlOutput, saveDdlRule, seedStarterRules, toEditInput, toggleDdlRule, yamlToRule,
+  ruleActionSummary, ruleToYaml, saveDdlOutput, saveDdlRule, seedStarterRules, toEditInput, toggleDdlRule, withSeedFunctions, yamlToRule,
 } from './ddlRules.service';
 import type { DdlRule } from './standards.service';
 
@@ -21,8 +21,8 @@ const RULE: DdlRule = {
 
 beforeEach(() => vi.clearAllMocks());
 
-describe('YAML round-trip', () => {
-  it('form → yaml → form conserva los campos (claves inglesas, spec §6.1)', () => {
+describe('YAML ida y vuelta', () => {
+  it('form → yaml → form conserva los campos (claves en inglés)', () => {
     const edit = toEditInput(RULE);
     const yaml = ruleToYaml(edit);
     expect(yaml).toContain('name: enmascarar_dac');
@@ -54,7 +54,7 @@ describe('mutaciones versionadas (standards/apply)', () => {
     expect((body as { rulesUpsert: unknown[] }).rulesUpsert).toHaveLength(1);
   });
 
-  it('toggleDdlRule manda la regla entera con enabled flipped', async () => {
+  it('toggleDdlRule manda la regla entera con enabled invertido', async () => {
     vi.mocked(apiPost).mockResolvedValue({ seq: 10 });
     await toggleDdlRule('p1', RULE, false);
     const body = vi.mocked(apiPost).mock.calls[0][1] as {
@@ -64,7 +64,7 @@ describe('mutaciones versionadas (standards/apply)', () => {
     expect(body.title).toContain('disabled');
   });
 
-  it('seedStarterRules aplica las semillas + lookups + Output settings como UNA versión', async () => {
+  it('seedStarterRules aplica las semillas + lookups + Output settings como una versión', async () => {
     vi.mocked(apiGet).mockResolvedValue({
       templates: [], seedRules: [{ name: 'a' }, { name: 'b' }],
       seedLookups: { vacuum_map: { values: {} } },
@@ -80,7 +80,7 @@ describe('mutaciones versionadas (standards/apply)', () => {
     expect((body as { ddlConfigPatch: { output?: unknown } }).ddlConfigPatch.output).toEqual({ typeCase: 'lower' });
   });
 
-  it('doc 101: restaurar el ruleset base conserva el dialecto por default y la config Oracle del proyecto', async () => {
+  it('restaurar el ruleset base conserva el dialecto por default y la config Oracle del proyecto', async () => {
     vi.mocked(apiGet).mockResolvedValue({
       templates: [], seedRules: [{ name: 'a' }], seedLookups: {},
       seedOutput: { typeCase: 'lower', dialect: 'databricks', oracle: { typeCase: 'upper' } },
@@ -92,7 +92,21 @@ describe('mutaciones versionadas (standards/apply)', () => {
     expect(out).toEqual({ typeCase: 'lower', dialect: 'oracle', oracle: { includeComments: true } });
   });
 
-  it('saveDdlOutput guarda las Output settings como UNA versión (ddlConfigPatch.output)', async () => {
+  it('restaurar agrega las funciones semilla que faltan y conserva la del proyecto', async () => {
+    const seedFn = { name: 'decrypt_dac', params: ['col'], body: "security.decrypt_column_view({col}, '{lookup:dac_map}')" };
+    vi.mocked(apiGet).mockResolvedValue({ templates: [], seedRules: [{ name: 'a' }], seedLookups: {}, seedFunctions: [seedFn] });
+    vi.mocked(apiPost).mockResolvedValue({ seq: 14 });
+    await seedStarterRules('p1', null, []);
+    let patch = (vi.mocked(apiPost).mock.calls[0][1] as { ddlConfigPatch: { functions?: unknown[] } }).ddlConfigPatch;
+    expect(patch.functions).toEqual([seedFn]);                       // el proyecto no la tenía
+    const propia = { name: 'decrypt_dac', params: ['col'], body: 'org.descifrar({col})' };
+    await seedStarterRules('p1', null, [propia]);
+    patch = (vi.mocked(apiPost).mock.calls[1][1] as { ddlConfigPatch: { functions?: unknown[] } }).ddlConfigPatch;
+    expect(patch.functions).toBeUndefined();                         // la del proyecto no se toca
+    expect(withSeedFunctions([propia], [seedFn])).toEqual([propia]);
+  });
+
+  it('saveDdlOutput guarda las Output settings como una versión (ddlConfigPatch.output)', async () => {
     vi.mocked(apiPost).mockResolvedValue({ seq: 12 });
     await saveDdlOutput('p1', { viewTagsAs: 'view' } as unknown as Parameters<typeof saveDdlOutput>[1]);
     const [url, body] = vi.mocked(apiPost).mock.calls[0];
@@ -103,7 +117,7 @@ describe('mutaciones versionadas (standards/apply)', () => {
 
 describe('ruleActionSummary — resumen de la acción en el catálogo', () => {
   const layout = (lay: Record<string, unknown>): DdlRule => ({ ...RULE, target: 'table', action: { layout: lay } });
-  it('doc 107: el layout dice de dónde salen las particiones y qué pasa sin PARTITIONED BY', () => {
+  it('el layout dice de dónde salen las particiones y qué pasa sin PARTITIONED BY', () => {
     expect(ruleActionSummary(layout({ partitionColumns: 'last', partitionUdp: 'Particion' })))
       .toBe('Column layout: partitions from UDP "Particion" · last when there is no PARTITIONED BY');
     expect(ruleActionSummary(layout({ partitionColumns: 'keep' })))

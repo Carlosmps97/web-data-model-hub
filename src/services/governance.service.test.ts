@@ -21,7 +21,7 @@ describe('searchTables · filtro por esquema (New table · Import existing)', ()
   beforeEach(() => {
     vi.clearAllMocks();
     useSessionStore.setState({ activeChangesetId: null });
-    useSessionStore.setState({ activeProjectId: 'p1' });   // doc 75: catálogo DEL proyecto
+    useSessionStore.setState({ activeProjectId: 'p1' });   // catálogo del proyecto
   });
 
   it('sin changeset activo manda schema como query param al catálogo del proyecto', async () => {
@@ -44,20 +44,20 @@ describe('searchTables · filtro por esquema (New table · Import existing)', ()
       '/api/changesets/cs1/effective/canonical_tables?q=clie&limit=50&schema=CORE');
   });
 
-  it('sin schema no agrega el param (contrato original)', async () => {
+  it('sin schema no agrega el param', async () => {
     vi.mocked(apiGet).mockResolvedValue([]);
     await searchTables('clie', 50);
     expect(apiGet).toHaveBeenCalledWith('/api/projects/p1/catalog/tables?q=clie&limit=50');
   });
 });
 
-describe('columnImpact (spec 10 §8)', () => {
+describe('columnImpact', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useSessionStore.setState({ activeChangesetId: null });
   });
 
-  it('sin changeset activo consulta sólo por columnId', async () => {
+  it('sin changeset activo consulta solo por columnId', async () => {
     vi.mocked(apiGet).mockResolvedValue({ relationships: [], total: 0 });
     await columnImpact('c1');
     expect(apiGet).toHaveBeenCalledWith('/api/relationships/impact?columnId=c1');

@@ -1,9 +1,9 @@
-// Doc 105 (A4-o2, A4-o3) — `refreshExplorer`:
-//  · sólo el refresco MÁS RECIENTE escribe: la respuesta tardía de un refresco
+// `refreshExplorer`:
+//  · solo el refresco más reciente escribe: la respuesta tardía de un refresco
 //    anterior (otra sesión: se abrió otra versión o proyecto mientras cargaba)
 //    no pisa proyectos, proyecto activo ni árbol;
-//  · lo que antes fallaba en silencio (esquemas, recarga del canvas) se avisa,
-//    con el criterio de sesión (sessionGuard): calla si la sesión ya no es la
+//  · los fallos de esquemas y de la recarga del canvas se avisan, con el
+//    criterio de sesión (sessionGuard): calla si la sesión dejó de ser la
 //    pedida.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,17 +56,17 @@ beforeEach(() => {
 });
 afterEach(async () => { await sleep(10); });
 
-describe('refreshExplorer — sólo el refresco más reciente escribe (doc 105, A4-o2)', () => {
+describe('refreshExplorer — solo el refresco más reciente escribe', () => {
   it('la lista de proyectos tardía de la sesión anterior no pisa la de la sesión nueva', async () => {
     const late = deferred<unknown>();
     vi.mocked(struct.listProjects).mockImplementationOnce(() => late.promise as never);   // sesión 1 (cs1)
     const first = useModelerStore.getState().refreshExplorer();
-    // El usuario abre OTRO proyecto (otra versión) antes de que llegue la respuesta.
+    // El usuario abre otro proyecto (otra versión) antes de que llegue la respuesta.
     useSessionStore.getState().openModel({ projectId: 'p2', mode: 'editing', changesetId: 'cs2' });
     vi.mocked(struct.listProjects).mockResolvedValueOnce([P2] as never);                  // sesión 2 (cs2)
     await useModelerStore.getState().refreshExplorer();
     expect(useModelerStore.getState().activeProjectId).toBe('p2');
-    late.resolve([P1, P2]);                                                              // llega la vieja
+    late.resolve([P1, P2]);                                                              // llega la respuesta anterior
     await first;
     const s = useModelerStore.getState();
     expect(s.projects.map((p) => p.id)).toEqual(['p2']);
@@ -103,15 +103,15 @@ describe('refreshExplorer — sólo el refresco más reciente escribe (doc 105, 
   });
 });
 
-describe('refreshExplorer — fallos que antes callaba (doc 105, A4-o3)', () => {
-  it('la recarga del canvas falla con la sesión igual: se cierra el canvas Y se dice por qué', async () => {
+describe('refreshExplorer — fallos que se avisan', () => {
+  it('la recarga del canvas falla con la sesión igual: se cierra el canvas y se dice por qué', async () => {
     vi.mocked(mod.loadDiagram).mockRejectedValueOnce(new ApiError('Server error', 500, null, '/api/subject-areas/sa1/diagram'));
     await useModelerStore.getState().refreshExplorer();
     expect(useModelerStore.getState().activeSaId).toBeNull();
     expect(toast.error).toHaveBeenCalledWith(expect.stringMatching(/Couldn't reload the canvas.*Server error/), expect.anything());
   });
 
-  it('la recarga del canvas falla por la versión y la revalidación cambió la sesión: calla', async () => {
+  it('la recarga del canvas falla por la versión y la revalidación cambia la sesión: calla', async () => {
     vi.mocked(mod.loadDiagram).mockImplementationOnce(async () => {
       trackRevalidation(new Promise<void>((res) => setTimeout(() => {
         useSessionStore.getState().openModel({ projectId: 'p1', mode: 'readonly' }); res();

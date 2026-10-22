@@ -8,7 +8,7 @@ const form: SnapshotDomain = {
 };
 const stored: SnapshotDomain = { ...form, name: 'Codigo Clave', description: 'agregada después', namingTerm: 'Codigo' };
 
-describe('domainEditInput (final review #10: el revert aplica lo que muestra el formulario)', () => {
+describe('domainEditInput (el revert aplica lo que muestra el formulario)', () => {
   it('un texto que el formulario vació viaja como "" y lo limpia (el backend ignora los ausentes)', () => {
     expect(domainEditInput({ ...form, description: null, namingTerm: '' }, stored)).toMatchObject({
       id: 'd1', name: 'Codigo Clave', defaultDataType: 'INTEGER', description: '', namingTerm: '',

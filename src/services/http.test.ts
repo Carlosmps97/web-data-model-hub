@@ -14,9 +14,9 @@ describe('apiErrorMessage', () => {
   });
 });
 
-// Doc 105 (ronda 3, cosmético): el motivo va DENTRO de un aviso que ya dice
-// cómo reintentar; el consejo del texto de transporte sobraba («…within 30s —
-// try again in a moment. Use Refresh to try again.»).
+// El motivo va dentro de un aviso que ya dice cómo reintentar; el consejo del
+// texto de transporte sobra («…within 30s — try again in a moment. Use Refresh
+// to try again.»).
 describe('errorReason', () => {
   const TIMEOUT = new ApiError("The server didn't respond within 30s — try again in a moment.", 0, null, '/api/x');
 
@@ -25,7 +25,7 @@ describe('errorReason', () => {
     expect(errorReason(new Error('Busy - Try again later.'), 'x')).toBe('Busy');
   });
 
-  it('el resto del motivo, igual (sólo sin punto final); vacío → fallback', () => {
+  it('el resto del motivo, igual (solo sin punto final); vacío → fallback', () => {
     expect(errorReason(new ApiError('Ya existe la tabla core.CLIENTE.', 409), 'x')).toBe('Ya existe la tabla core.CLIENTE');
     expect(errorReason(new Error(NETWORK_ERROR_TEXT), 'x')).toBe(NETWORK_ERROR_TEXT.replace(/\.$/, ''));
     expect(errorReason(new Error(''), 'unknown error')).toBe('unknown error');
@@ -33,8 +33,8 @@ describe('errorReason', () => {
   });
 });
 
-// Doc 105 (ronda 5, R15-H2): transitorio = reintentar puede andar y no dice que
-// lo pedido no ocurrió (red, timeout, 5xx); un 4xx es la respuesta.
+// Transitorio = reintentar puede funcionar y no dice que lo pedido no ocurrió
+// (red, timeout, 5xx); un 4xx es la respuesta.
 describe('isTransientError', () => {
   it('red o timeout (status 0) y 5xx sí; 4xx y lo que no es de la API, no', () => {
     expect(isTransientError(new ApiError('timeout', 0))).toBe(true);
@@ -47,14 +47,14 @@ describe('isTransientError', () => {
 });
 
 describe('isConflictError', () => {
-  it('true sólo para ApiError con status 409', () => {
+  it('true solo para ApiError con status 409', () => {
     expect(isConflictError(new ApiError('dup', 409))).toBe(true);
     expect(isConflictError(new ApiError('forbidden', 403))).toBe(false);
     expect(isConflictError(new Error('x'))).toBe(false);
   });
 });
 
-describe('setOnApiError (doc 104)', () => {
+describe('setOnApiError', () => {
   const respond = (status: number, body: unknown) =>
     vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
 
@@ -93,10 +93,10 @@ describe('setOnApiError (doc 104)', () => {
   });
 });
 
-// Doc 105 (F5): un 403 puede ser un permiso que ya no se tiene (rol cambiado en
-// Admin): el store de auth re-lee /me. La lectura de /me (y todo /api/auth/)
-// no lo dispara: su propio 403 no puede redisparar su lectura.
-describe('setOnForbidden (doc 105, F5)', () => {
+// Un 403 puede ser un permiso que el usuario perdió (rol cambiado en Admin): el
+// store de auth re-lee /me. La lectura de /me (y todo /api/auth/) no lo
+// dispara: su propio 403 no puede redisparar su lectura.
+describe('setOnForbidden', () => {
   const respond = (status: number, body: unknown) =>
     vi.fn(async () => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
 
@@ -113,7 +113,7 @@ describe('setOnForbidden (doc 105, F5)', () => {
     expect(calls).toBe(1);
   });
 
-  it('un 403 de /api/auth/ (p. ej. la propia lectura de /me) NO avisa', async () => {
+  it('un 403 de /api/auth/ (p. ej. la propia lectura de /me) no avisa', async () => {
     let calls = 0;
     setOnForbidden(() => { calls += 1; });
     vi.stubGlobal('fetch', respond(403, { detail: 'nope' }));
@@ -133,7 +133,7 @@ describe('setOnForbidden (doc 105, F5)', () => {
   });
 });
 
-describe('red caída (doc 105)', () => {
+describe('red caída', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it('sin respuesta del servidor, el aviso es legible (no el «Failed to fetch» del navegador)', async () => {
@@ -155,7 +155,7 @@ describe('red caída (doc 105)', () => {
   });
 });
 
-describe('la respuesta se corta a medio leer (doc 105, ronda 3)', () => {
+describe('la respuesta se corta a medio leer', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
   const cut = (err: unknown, ms = 0) => ({
     ok: true, status: 200,

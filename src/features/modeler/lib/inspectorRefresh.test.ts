@@ -1,6 +1,6 @@
-// Doc 89 §3.6: qué refrescar tras una escritura del inspector — regla
-// COMPLEMENTARIA a la del doc 88 §2 (reload() sube explorerTick sólo cuando
-// cambia la firma del canvas ACTIVO), nunca ambas cosas.
+// Qué refrescar tras una escritura del inspector: regla complementaria a la
+// de reload() (que sube explorerTick solo cuando cambia la firma del canvas
+// activo), nunca ambas cosas.
 import { describe, expect, it } from 'vitest';
 import { inspectorRefreshPlan } from './inspectorRefresh';
 

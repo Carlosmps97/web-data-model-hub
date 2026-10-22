@@ -1,8 +1,8 @@
 /* ============================================================
-   Design-system primitives (DMH-Erwin v20260625-2).
-   Classes: dmh-btn, dmh-pill, dmh-chip, dmh-badge, dmh-avatar,
-   dmh-seg, dmh-dialog. Light-only, navy. Uses tokens.css.
-   These are NEW (the legacy rd-/dmh-modal classes in ui.css stay).
+   Primitivas del sistema de diseño.
+   Clases: dmh-btn, dmh-pill, dmh-chip, dmh-badge, dmh-avatar,
+   dmh-seg, dmh-dialog. Solo tema claro, azul marino. Usa tokens.css.
+   Conviven con las clases rd-/dmh-modal de ui.css.
    ============================================================ */
 
 /* ─────────────────────────────── Button ──────────────────────────── */
@@ -102,10 +102,10 @@
   background: var(--blur-overlay);
   animation: dmh-dialog-fade .15s ease;
 }
-/* canvas variant: dims ONLY the region it covers (set via inline
-   top/left/right/bottom), so the TopNav + toolbar above it stay sharp.
-   2026-09-29: sin `backdrop-filter` — re-difuminar el canvas en cada cuadro
-   saturaba el navegador sin aceleración por GPU (popups lentos en Model). */
+/* variante canvas: oscurece solo la región que cubre (fijada con
+   top/left/right/bottom en línea), así el TopNav y la barra de herramientas
+   de arriba quedan nítidos. Sin `backdrop-filter`: re-difuminar el canvas en
+   cada cuadro satura el navegador sin aceleración por GPU (popups lentos). */
 
 .dmh-dialog {
   background: var(--surface); border: 1px solid var(--border-3);
@@ -128,7 +128,7 @@
 @keyframes dmh-dialog-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes dmh-dialog-pop { from { opacity: 0; transform: translateY(8px) scale(.99); } to { opacity: 1; transform: none; } }
 
-/* ── Busy overlay (doc 75 D18): bloqueo por sesión de acciones largas ──── */
+/* ── Busy overlay: bloqueo por sesión de acciones largas ──────────────── */
 .dmh-busy-overlay { position: fixed; inset: 0; z-index: 1300; display: flex; align-items: center;
   justify-content: center; background: rgba(16, 27, 48, .35); backdrop-filter: blur(1px); }
 .dmh-busy-card { display: flex; align-items: center; gap: 12px; padding: 16px 20px; background: #fff;

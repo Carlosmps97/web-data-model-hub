@@ -1,4 +1,4 @@
-/** summarizeDiff (doc 31) — agrega el /diff a la card "Changes summary". */
+/** summarizeDiff: agrega el /diff a la card "Changes summary". */
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/http', () => ({
@@ -23,7 +23,7 @@ const DIFF: ChangesetDiff = {
   impact: { tablesTouched: 3, columnsTouched: 4, affectedOtherTables: [] },
   tree: [
     {
-      type: 'project', id: 'p1', name: 'Modelo DDV',
+      type: 'project', id: 'p1', name: 'Modelo Ventas',
       children: [
         {
           type: 'folder', id: 'f1', name: 'Despriorizado',
@@ -38,7 +38,7 @@ const DIFF: ChangesetDiff = {
   ],
 };
 
-describe('summarizeDiff (doc 31)', () => {
+describe('summarizeDiff', () => {
   it('cuenta por colección en orden fijo y omite filas en cero', () => {
     const s = summarizeDiff(DIFF);
     expect(s.rows.map((r) => r.label)).toEqual([
@@ -58,11 +58,11 @@ describe('summarizeDiff (doc 31)', () => {
 
   it('proyectos y modelos con nombre real; el folder raíz no prefija', () => {
     const s = summarizeDiff(DIFF);
-    expect(s.projects).toEqual(['Modelo DDV']);
+    expect(s.projects).toEqual(['Modelo Ventas']);
     expect(s.models).toEqual(['Despriorizado › Pricing', 'Riesgos']);
   });
 
-  it('diff sin árbol (backend viejo) no rompe: solo conteos', () => {
+  it('diff sin árbol no rompe: solo conteos', () => {
     const s = summarizeDiff({ ...DIFF, tree: undefined });
     expect(s.projects).toEqual([]);
     expect(s.models).toEqual([]);

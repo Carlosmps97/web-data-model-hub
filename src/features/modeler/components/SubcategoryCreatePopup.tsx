@@ -26,20 +26,19 @@ export interface SubcatDraft {
 const NEW_SYMBOL = '__new__';
 
 /**
- * Popup de CONFIRMACIÓN de subcategoría (doc 53): mismo staging local que el
- * de relación (doc 47) — nada persiste hasta Confirm, que arma UN
- * PUT /changes/bulk (columnas migradas + relación con `subcategory=true` y el
- * símbolo del grupo). ES-UN: identifying + 1:1 fijos (sin selects de
- * cardinalidad). Guard Erwin: una tabla es subtipo en UN solo grupo — el
- * chequeo corre draft-aware contra el pool global, no solo este canvas.
- * Doc 98: las frases de relación (opcionales) de ESTA rama nacen en el mismo
- * lote.
+ * Popup de confirmación de subcategoría: mismo staging local que el de
+ * relación; nada persiste hasta Confirm, que arma un solo PUT /changes/bulk
+ * (columnas migradas + relación con `subcategory=true` y el símbolo del grupo).
+ * ES-UN: identifying + 1:1 fijos (sin selects de cardinalidad). Regla de Erwin:
+ * una tabla es subtipo en un solo grupo; el chequeo corre draft-aware contra el
+ * pool global, no solo este canvas. Las frases de relación (opcionales) de esta
+ * rama nacen en el mismo lote.
  */
 export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
   draft: SubcatDraft; onClose: (created: boolean) => void; pushToast: (m: string, k?: 'err') => void;
 }) {
   const diagram = useModelerStore((s) => s.diagram);
-  // Doc 114: nombres del modelo del canvas (la subcategoría es del lógico).
+  // Nombres del modelo del canvas (la subcategoría es del lógico).
   const viewMode = useModelerStore((s) => s.viewMode);
   const [saving, setSaving] = useState(false);
   // null = chequeo global en vuelo; '' = libre; string = mensaje de bloqueo.
@@ -55,7 +54,7 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
   const pkById = useMemo(() => new Map(parentPks.map((c) => [c.id, c])), [parentPks]);
   const colById = useMemo(() => new Map(childCols.map((c) => [c.id, c])), [childCols]);
 
-  // Grupos EXISTENTES del supertipo en este canvas: la nueva arista puede
+  // Grupos existentes del supertipo en este canvas: la arista que se crea puede
   // sumarse a uno o estrenar símbolo (flujo Erwin). Con un único grupo, ese es
   // el default (intención más común); el drag desde el círculo lo trae fijado.
   const groups = useMemo(
@@ -72,11 +71,11 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
   const [rows, setRows] = useState<KeyRowState[]>(() =>
     buildKeyMapping(parentPks, childCols, draft.dropColumnId).map((r) => ({ ...r, roleName: '', inherit: true })));
 
-  // Regla Erwin (doc 53): una entidad NO es subtipo en dos grupos. El slice es
-  // GLOBAL y draft-aware (effective) — cubre grupos visibles solo en otros
-  // canvases. Best-effort: si el chequeo falla, no bloquea (el flujo sigue).
-  // Textos del bloqueo con el nombre del modelo del canvas (doc 114); como
-  // strings, el chequeo no se repite en cada recarga del diagrama.
+  // Regla de Erwin: una entidad no es subtipo en dos grupos. El slice es global
+  // y draft-aware (effective): cubre grupos visibles solo en otros canvases.
+  // Best-effort: si el chequeo falla, no bloquea (el flujo sigue). Textos del
+  // bloqueo con el nombre del modelo del canvas; como strings, el chequeo no
+  // se repite en cada recarga del diagrama.
   const childShown = childTable ? facetName(childTable, viewMode) : draft.childTableId;
   const childNoun = facetNouns(viewMode).a;
   useEffect(() => {
@@ -91,14 +90,14 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
           : '');
       })
       .catch(() => { if (alive) setBlocked(''); });
-    // StrictMode (doc 43): el cuerpo repone el guard; el cleanup solo lo apaga.
+    // StrictMode: el cuerpo repone el guard; el cleanup solo lo apaga.
     return () => { alive = false; };
   }, [draft.childTableId, childShown, childNoun]);
 
   const confirm = async () => {
     setSaving(true);
-    // Doc 105 (H1): la acción es de la sesión donde empezó (sus escrituras y su
-    // inversa cortan si cambió); un fallo espera la revalidación (H7).
+    // La acción pertenece a la sesión donde empezó (sus escrituras y su inversa
+    // cortan si la sesión cambia); un fallo espera la revalidación.
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't create the subcategory", 'err'));
     try {
@@ -125,7 +124,7 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
         };
       }));
       const symbolId = groupChoice === NEW_SYMBOL ? crypto.randomUUID() : groupChoice;
-      // ES-UN (doc 53): la PK del supertipo ES la PK del subtipo → identifying
+      // ES-UN: la PK del supertipo es la PK del subtipo → identifying
       // con cardinalidades one/one; el backend re-normaliza igual.
       const { changes, createdCols } = mappingToBulk({
         relId: crypto.randomUUID(),
@@ -133,13 +132,13 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
         identifying: true, parentCardinality: 'one', childCardinality: 'one',
         rows: resolutions, childCols,
         subcategory: { symbolId },
-        ...phrases,   // doc 98: mappingToBulk las limpia (en blanco no viajan)
+        ...phrases,   // mappingToBulk las limpia (en blanco no viajan)
       });
       pin.check();
       await gov.recordChangesBulk(changes);
-      // Undo (doc 50): misma inversa genérica del popup de relación (doc 47) —
-      // cae la relación (y el símbolo, que es derivado), se borran las columnas
-      // creadas y las existentes vuelven a su pre-imagen.
+      // Undo: misma inversa genérica del popup de relación; cae la relación (y
+      // el símbolo, que es derivado), se borran las columnas creadas y las
+      // existentes vuelven a su pre-imagen.
       const pre = new Map(childCols.map((c) => [
         preKey('canonical_columns', c.id),
         { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) } as Record<string, unknown>,
@@ -157,9 +156,9 @@ export default function SubcategoryCreatePopup({ draft, onClose, pushToast }: {
         inverse, tableId: undoChildId, created: undoCreated, renamesBack,
         after: () => useModelerStore.getState().reload(),
       }), pin);
-      // V1: las columnas migradas entran también a las vistas ESPEJO del hijo.
-      // Doc 94 D4: la subcategoría es identificante — las nuevas son PK y
-      // entran tras las PK del subtipo.
+      // Las columnas migradas entran también a las vistas espejo del hijo. La
+      // subcategoría es identificante: las columnas creadas son PK y entran
+      // tras las PK del subtipo.
       await syncNewColumnsToMirrorViews(pinnedViewDeps(pin), draft.childTableId, createdCols, childCols);
       for (const r of resolutions) {
         if (r.target.kind !== 'existing' || !r.target.rename) continue;

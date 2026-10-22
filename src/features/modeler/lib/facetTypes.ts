@@ -1,15 +1,14 @@
 /**
- * facetTypes — reglas del TIPO entre las dos facetas de una columna (doc 96 D8):
- * un tipo complejo es el MISMO en lógico y físico (su estructura es propia de
- * cada columna); los simples son independientes (doc 69). Espejo de
- * `mirror_complex` / `synced_other_facet` del backend. Puro. Vive aparte de
- * `complexTypes` porque necesita la gramática de `typePick` (que ya importa
- * `complexTypes`).
+ * facetTypes — reglas del tipo entre las dos facetas de una columna: un tipo
+ * complejo es el mismo en lógico y físico (su estructura es propia de cada
+ * columna); los simples son independientes. Espejo de `mirror_complex` /
+ * `synced_other_facet` del backend. Puro. Vive aparte de `complexTypes` porque
+ * necesita la gramática de `typePick` (que ya importa `complexTypes`).
  */
 import { hasComplexContent, isComplexTypeStart } from './complexTypes';
 import { canonicalDefaultType, parseParamType } from './typePick';
 
-/** ¿Un tipo SIMPLE completo del catálogo (`STRING`, `VARCHAR(20)`, alias como
+/** ¿Un tipo simple completo del catálogo (`STRING`, `VARCHAR(20)`, alias como
  *  `INT`)? Los estados intermedios del tecleo (`S`, `ARRAY`, `VARCHAR(`) no. */
 export function isCompleteSimpleType(t: string): boolean {
   return parseParamType(canonicalDefaultType(t)) !== null;
@@ -22,7 +21,7 @@ export function mirrorComplex(source: string, target: string): string {
 }
 
 /** Al poner `next` en una faceta, qué toma la otra: `next` si es complejo, o si
- *  las dos eran el MISMO tipo y ese tipo no era un simple completo (un complejo
+ *  las dos eran el mismo tipo y ese tipo no era un simple completo (un complejo
  *  o un estado intermedio del tecleo en Code: siguen enlazadas hasta salir
  *  juntas); si no, queda como estaba. */
 export function syncedOtherFacet(next: string, prevThis: string, prevOther: string): string {
@@ -38,11 +37,11 @@ export interface StoredFacetTypes {
   typeOverridden?: boolean | null; logicalTypeOverridden?: boolean | null;
 }
 
-/** Parche de tipos de una columna: las dos facetas viajan JUNTAS (un solo
- *  upsert), pero el flag de override se recalcula SOLO en la faceta cuyo valor
- *  cambia respecto de lo guardado — editar el lógico no toca `typeOverridden`
- *  (minor #5 del doc 96). Override = distinto del default HOMOLOGADO del
- *  dominio en esa faceta (doc 46 / doc 64 r2); sin dominio, no hay override. */
+/** Parche de tipos de una columna: las dos facetas viajan juntas (un solo
+ *  upsert), pero el flag de override se recalcula solo en la faceta cuyo valor
+ *  cambia respecto de lo guardado: editar el lógico no toca `typeOverridden`.
+ *  Override = distinto del default homologado del dominio en esa faceta; sin
+ *  dominio, no hay override. */
 export function typeFacetPatch(
   phys: string, logi: string, stored: StoredFacetTypes,
   domain: { defaultDataType: string; logicalDataType?: string | null } | null | undefined,

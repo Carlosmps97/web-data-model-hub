@@ -1,35 +1,35 @@
 /**
- * ddlExportBundle — arma la lista de archivos del `.zip` del Export DDL (doc 37 · doc 93).
+ * ddlExportBundle: arma la lista de archivos del `.zip` del Export DDL.
  *
- * PURO: no toca el DOM ni la red. Recibe el DDL ya partido por objeto (de
+ * Puro: no toca el DOM ni la red. Recibe el DDL ya partido por objeto (de
  * cualquiera de los dos caminos: `tableStatements`/`viewStatements` sin reglas,
  * o `rendered.statements` con reglas) y lo mapea a rutas `carpeta/archivo`:
  *   {Tabla}/TABLE-{TABLA}.sql · {Tabla}/VIEW_NEG-{VISTA}.sql · {Tabla}/VIEW_TEC-{VISTA}.sql
- * Doc 93 D11: el prefijo depende de la CATEGORÍA (tabla · vista modelada · vista
- * generada por reglas) y el nombre va en MAYÚSCULA — todo configurable en las
- * Output settings (`fileNames`). Si dos archivos de una carpeta chocan (sin
- * distinguir mayúsculas: Mac/Windows no las distinguen al descomprimir), esos
- * llevan su esquema. D12: CREATE y sus ALTER seguidos, sin líneas en blanco.
+ * El prefijo depende de la categoría (tabla · vista modelada · vista generada por
+ * reglas) y el nombre va en mayúscula; todo es configurable en las Output
+ * settings (`fileNames`). Si dos archivos de una carpeta chocan (sin distinguir
+ * mayúsculas: Mac/Windows no las distinguen al descomprimir), esos llevan su
+ * esquema. El CREATE y sus ALTER van seguidos, sin líneas en blanco.
  */
 import type { ZipEntry } from '@/lib/zip';
 
 export interface DdlObject {
-  /** Nombre físico de la TABLA a cuya carpeta pertenece el objeto ('' → _views). */
+  /** Nombre físico de la tabla a cuya carpeta pertenece el objeto ('' → _views). */
   tableName: string;
   /** Esquema de esa tabla — desambigua la carpeta ante nombres físicos iguales. */
   tableSchema?: string;
   kind: 'table' | 'view';
-  /** Doc 93 D11: `model` = viene del modelo (física, vistas modeladas en
-   *  Erwin/canvas); `generated` = lo creó un generador del ruleset. */
+  /** `model` = viene del modelo (física, vistas modeladas en Erwin/canvas);
+   *  `generated` = lo creó un generador del ruleset. */
   origin: 'model' | 'generated';
-  /** Esquema del OBJETO — entra al nombre del archivo ante un choque. */
+  /** Esquema del objeto: entra al nombre del archivo ante un choque. */
   schema?: string;
   /** Nombre del objeto — va al nombre del archivo. */
   name: string;
   sql: string;
 }
 
-/** Doc 93 D11 — cómo se nombran los archivos del zip (Output settings). */
+/** Cómo se nombran los archivos del zip (Output settings). */
 export interface DdlFileNames {
   /** Prefijo de las tablas (física y generadas). */
   table: string;
@@ -50,14 +50,14 @@ export const DEFAULT_FILE_NAMES: DdlFileNames = {
   separator: '-', nameCase: 'upper', schema: 'when-needed',
 };
 
-// Artefactos del motor de reglas (doc 30) que el pipeline emite (backend).
+// Artefactos del motor de reglas que el pipeline emite (backend).
 const PHYSICAL = 'ddl.tabla_fisica';
 const VIEW_BUSINESS = 'ddl.vista_negocio';
 const VIEW_PASSIVE = 'ddl.vista';
-/** Artefactos que vienen del MODELO; cualquier otro lo generó una regla. */
+/** Artefactos que vienen del modelo; cualquier otro lo generó una regla. */
 const MODELED = new Set([PHYSICAL, VIEW_BUSINESS, VIEW_PASSIVE]);
-// Doc 76: anexos de CUALQUIER objeto (`<artefacto>.tags` = ALTER … SET TAGS,
-// `<artefacto>.extra` = sentencias libres `after`) — se pliegan al archivo del objeto.
+// Anexos de cualquier objeto (`<artefacto>.tags` = ALTER … SET TAGS,
+// `<artefacto>.extra` = sentencias libres `after`): se pliegan al archivo del objeto.
 const ADDENDUM_RX = /^(.*)\.(tags|extra)$/;
 
 const ROOT_VIEWS = '_views';
@@ -67,7 +67,7 @@ export function viewKey(schema: string | null | undefined, name: string): string
   return JSON.stringify([schema ?? '', name]);
 }
 
-/** Reemplaza ilegales en Windows y control chars. */
+/** Sustituye los caracteres ilegales en Windows y los de control. */
 function sanitizeName(s: string): string {
   // eslint-disable-next-line no-control-regex
   const out = (s ?? '').replace(/[\\/:*?"<>|]/g, '_').replace(/[\x00-\x1f]/g, '_').trim();
@@ -82,7 +82,7 @@ function isViewSql(sql: string): boolean {
   return /^\s*CREATE\s+(OR\s+REPLACE\s+)?(TEMP(ORARY)?\s+)?VIEW\b/i.test(sql);
 }
 
-/** Camino SIN reglas: todo viene del modelo; cada vista a su tabla fuente. */
+/** Camino sin reglas: todo viene del modelo; cada vista a su tabla fuente. */
 export function plainToObjects(args: {
   tables: { id: string; physicalName: string; schema?: string; sql: string }[];
   views: { name: string; schema?: string; sourceTableIds: string[]; sql: string }[];
@@ -103,7 +103,7 @@ export function plainToObjects(args: {
   return objects;
 }
 
-/** Camino CON reglas: agrupa los statements del motor por tabla. */
+/** Camino con reglas: agrupa los statements del motor por tabla. */
 export function statementsToObjects(args: {
   statements: { artifact: string; schema?: string | null; name?: string | null; sql: string }[];
   viewSources: Map<string, string[]>;
@@ -127,8 +127,8 @@ export function statementsToObjects(args: {
   for (const s of statements) {
     const addendum = ADDENDUM_RX.exec(s.artifact);
     if (addendum) {
-      // `.tags` / `.extra`: al archivo de su objeto (ya emitido justo antes),
-      // pegados — sin línea en blanco (doc 93 D12).
+      // `.tags` / `.extra`: al archivo de su objeto (emitido justo antes de ellos),
+      // pegados, sin línea en blanco.
       const base = addendum[1];
       const existing = byKey.get(keyOf(base, s));
       let target: DdlObject;
@@ -174,7 +174,7 @@ export function statementsToObjects(args: {
 }
 
 /** Asigna nombres de carpeta únicos; si un nombre físico se repite entre
- *  esquemas, TODAS esas carpetas se desambiguan con `(esquema)`. */
+ *  esquemas, todas esas carpetas se desambiguan con `(esquema)`. */
 function allocFolders(objects: DdlObject[]): Map<string, string> {
   const order: string[] = [];
   const meta = new Map<string, { tableName: string; schema?: string }>();
@@ -228,7 +228,7 @@ function stemOf(o: DdlObject, f: DdlFileNames, withSchema: boolean): string {
 export function objectsToEntries(objects: DdlObject[], fileNames: DdlFileNames = DEFAULT_FILE_NAMES): ZipEntry[] {
   const f: DdlFileNames = { ...DEFAULT_FILE_NAMES, ...fileNames };
   const folder = allocFolders(objects);
-  // Choques por carpeta SIN distinguir mayúsculas (Mac/Windows al descomprimir).
+  // Choques por carpeta sin distinguir mayúsculas (Mac/Windows al descomprimir).
   const key = (dir: string, file: string) => `${dir}/${file}`.toLowerCase();
   const simple = objects.map((o) => stemOf(o, f, f.schema === 'always'));
   const counts = new Map<string, number>();

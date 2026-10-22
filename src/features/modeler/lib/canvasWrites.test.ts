@@ -52,7 +52,7 @@ describe('canvasWrites — lo último grabado de cada canvas', () => {
     expect(writtenSince('cs1', 'sa1', asked)).toEqual({ layout: {}, routes: {}, colors: {} });
   });
 
-  it('doc 109: los colores del canvas pasan limpios (lo inválido se cae)', () => {
+  it('los colores del canvas pasan limpios (lo inválido se cae)', () => {
     const asked = canvasClock();
     noteCanvasWrite('cs1', 'sa1', doc({ colors: { t1: '#16a37b', t2: 'none', t3: 'rojo', t4: 7 } }));
     expect(writtenSince('cs1', 'sa1', asked)?.colors).toEqual({ t1: '#16A37B', t2: 'none' });

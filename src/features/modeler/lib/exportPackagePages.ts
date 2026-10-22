@@ -1,6 +1,6 @@
-// Doc 66: builders PUROS del export de subproyecto — sanitización de nombres,
-// layout del ZIP, página por canvas e index. Sin imports de servicios ni del
-// store (testeables en node); la red/ZIP viven en ../exportPackage.ts.
+// Builders puros del export de subproyecto: sanitización de nombres, layout
+// del ZIP, página por canvas e index. Sin imports de servicios ni del store
+// (testeables en node); la red/ZIP viven en ../exportPackage.ts.
 
 /** Caracteres prohibidos en nombres de archivo (Windows es el más estricto)
  *  + caracteres de control (rango intencional: nombres van a rutas de ZIP). */
@@ -8,14 +8,14 @@
 const RESERVED = /[\\/:*?"<>|\u0000-\u001F\u007F]/g;
 
 /** Nombre seguro para archivo/carpeta del ZIP. Conserva acentos/espacios
- *  interiores; recorta puntos y espacios FINALES (inválidos en Windows). */
+ *  interiores; recorta puntos y espacios finales (inválidos en Windows). */
 export function sanitizeFileName(raw: string): string {
   const s = raw.replace(RESERVED, '_').replace(/[. ]+$/g, '').trim();
   return s || 'untitled';
 }
 
 /** Resuelve colisiones case-insensitive dentro de una carpeta: `base`,
- *  `base_2`, `base_3`… MUTA `taken` registrando el nombre elegido. */
+ *  `base_2`, `base_3`… Muta `taken` registrando el nombre elegido. */
 export function uniqueName(base: string, taken: Set<string>): string {
   if (!taken.has(base.toLowerCase())) { taken.add(base.toLowerCase()); return base; }
   for (let i = 2; ; i++) {
@@ -27,15 +27,15 @@ export function uniqueName(base: string, taken: Set<string>): string {
 import type { Folder, SubjectArea } from '../services/modeler.service';
 
 /** Una entrada del paquete: el canvas + su carpeta (segmentos saneados, ruta
- *  real del ZIP), su breadcrumb (nombres originales desde el nodo exportado)
+ *  real del ZIP), su breadcrumb (nombres originales a partir del nodo exportado)
  *  y su nombre de archivo único con extensión. */
 export interface LayoutCanvas { sa: SubjectArea; dir: string[]; crumb: string[]; file: string }
 export interface PackageLayout { rootName: string; canvases: LayoutCanvas[] }
 
-/** Resuelve el SCOPE del export a rutas del ZIP. Espejo del orden del
- *  explorer (`buildProjectTree`, doc 92 D1): carpetas y canvases A–Z
- *  (case-insensitive; `order` sólo desempata). Carpetas sin canvases (directa o transitivamente) no generan
- *  entradas — un ZIP no tiene directorios vacíos. */
+/** Resuelve el alcance del export (proyecto o carpeta) a rutas del ZIP. Espejo
+ *  del orden del explorer (`buildProjectTree`): carpetas y canvases A–Z
+ *  (case-insensitive; `order` solo desempata). Carpetas sin canvases (directa
+ *  o transitivamente) no generan entradas: un ZIP no tiene directorios vacíos. */
 export function packageLayout(
   kind: 'project' | 'folder', nodeId: string, projectName: string,
   folders: Folder[], subjectAreas: SubjectArea[],
@@ -86,7 +86,7 @@ import { relationshipLabel } from './relationshipLabel';
 export type UdpLevel = 'table' | 'column' | 'canvas' | 'view';
 export interface ExportLookups {
   domainsById: Record<string, string>;
-  /** `view` (doc 69): faceta de la def; ausente = physical. */
+  /** `view`: faceta de la def; ausente = physical. */
   udpDefsById: Record<string, { name: string; level: UdpLevel; view?: Facet }>;
 }
 export interface CanvasPageInput {
@@ -98,7 +98,7 @@ export interface CanvasPageInput {
   diagram: Diagram;
   lookups: ExportLookups;
   fontCss?: string;
-  /** Doc 96 D6: DDL generado de cada vista (id → texto), el que escribe el Export
+  /** DDL generado de cada vista (id → texto), el mismo que escribe el Export
    *  DDL. Sin él se muestra el SQL guardado. */
   viewDdl?: Record<string, string>;
 }
@@ -106,7 +106,7 @@ export interface CanvasPageInput {
 const esc = escapeHtml;
 
 /** Chips `Nombre: valor` de las UDP asignadas cuyo def exista y sea del nivel
- *  pedido (defs desconocidas se omiten). Doc 69: ambas facetas — físicas
+ *  pedido (defs desconocidas se omiten). Incluye ambas facetas: físicas
  *  primero con el nombre plano; las lógicas (Entity/Attribute) marcadas. */
 export function udpChipsHtml(values: Record<string, string> | undefined, level: UdpLevel, lk: ExportLookups): string {
   if (!values) return '';
@@ -122,7 +122,7 @@ export function udpChipsHtml(values: Record<string, string> | undefined, level: 
     .join('');
 }
 
-/** Filas de columnas en el orden único (doc 94: PK primero, por `ordinal`);
+/** Filas de columnas en el orden único (PK primero, por `ordinal`);
  *  «PK #k» = posición de la PK en ese orden. */
 function columnsRows(cols: CanonicalColumn[], lk: ExportLookups): string {
   let k = 0;
@@ -146,7 +146,7 @@ function columnsRows(cols: CanonicalColumn[], lk: ExportLookups): string {
 }
 
 /** Cuerpo estático de la pestaña Tables: secciones por tabla (ancla
- *  `t-<physicalName>`), relaciones del canvas y vistas. Todo escapado. */
+ *  `t-<physicalName>`), relaciones del canvas y vistas, con el texto escapado. */
 function tablesSectionHtml(diagram: Diagram, lk: ExportLookups, viewDdl?: Record<string, string>): string {
   const { tables, columns, relationships, views } = diagram;
   const tablesById = new Map<string, CanonicalTable>(tables.map((t) => [t.id, t]));
@@ -178,7 +178,7 @@ ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
     const flags = [r.identifying ? 'identifying' : '', r.subcategory ? 'subcategory' : ''].filter(Boolean)
       .map((f) => `<span class="chip">${f}</span>`).join('');
     const name = (t?: CanonicalTable) => t ? `<code>${esc(t.physicalName)}</code> <span class="dim">(${esc(t.logicalName)})</span>` : '—';
-    // Doc 98: frases de la relación — COMPLETAS (el corte con «…» es del canvas).
+    // Frases de la relación completas (el corte con «…» es propio del canvas).
     const phrase = esc(relationshipLabel(r, Infinity) ?? '');
     return `<tr><td>${name(p)}</td><td>${name(ch)}</td><td>${esc(r.parentCardinality)} → ${esc(r.childCardinality)}</td><td>${flags}</td><td>${pairs}</td><td class="phrase">${phrase}</td></tr>`;
   }).join('\n');
@@ -194,8 +194,8 @@ ${t.description ? `<p class="desc">${esc(t.description)}</p>` : ''}
   const viewCards = views.map((v) => {
     const srcs = (v.sourceTableIds ?? (v.tableId ? [v.tableId] : []))
       .map((id) => tablesById.get(id)?.physicalName ?? id).map((n) => `<code>${esc(n)}</code>`).join(', ');
-    // Doc 96 D6: el SQL de la vista es el DDL generado de sus columnas; la
-    // User-Defined SQL va aparte, marcada como informativa (no se exporta).
+    // El SQL de la vista es el DDL generado de sus columnas; la User-Defined SQL
+    // va aparte, marcada como informativa (no se exporta).
     const ddl = viewDdl?.[v.id] ?? v.sql ?? '(generated from sources)';
     const custom = v.customSql?.trim();
     const info = custom ? `\n<p class="dim">User-Defined SQL — informational, not exported</p>\n<pre>${esc(custom)}</pre>` : '';
@@ -213,9 +213,9 @@ ${relSection}
 ${viewSection}`;
 }
 
-/** Página HTML autocontenida de UN canvas: visor pan/zoom del doc 58 con dos
- *  SVGs (Logical/Physical) + pestaña Tables estática. Offline: cero recursos
- *  externos (fuentes van embebidas vía fontCss). */
+/** Página HTML autocontenida de un canvas: el visor pan/zoom del export HTML
+ *  con dos SVGs (Logical/Physical) + pestaña Tables estática. Offline: cero
+ *  recursos externos (las fuentes van embebidas vía fontCss). */
 export function buildCanvasPage(input: CanvasPageInput): string {
   const title = esc(input.title);
   const crumb = input.breadcrumb.map((b) => esc(b)).join(' / ');
@@ -438,7 +438,7 @@ function treeHtml(entries: IndexCanvasEntry[]): string {
   return `<ul class="tree">${render(root)}</ul>`;
 }
 
-/** index.html de la raíz del ZIP: árbol espejo + filtro «contiene» (doc 57)
+/** index.html de la raíz del ZIP: árbol espejo + filtro «contiene»
  *  sobre canvases y tablas (link directo al ancla `#t-…`). Autocontenido. */
 export function buildIndexPage(input: { rootName: string; generatedAt: string; entries: IndexCanvasEntry[] }): string {
   const totalTables = input.entries.reduce((acc, e) => acc + e.tables.length, 0);

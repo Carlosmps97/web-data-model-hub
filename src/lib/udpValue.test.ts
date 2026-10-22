@@ -19,7 +19,7 @@ describe('udpValueFor — la regla de la carga Excel (bulk_upload/standards.udp_
     for (const bad of ['abc', 'nan', 'inf', '1_000', '']) expect(udpValueFor(def('number'), bad)).toBeNull();
   });
 
-  it('fecha: ISO real; de una fecha-hora, sólo la fecha', () => {
+  it('fecha: ISO real; de una fecha-hora, solo la fecha', () => {
     expect(udpValueFor(def('date'), '2024-02-29')).toBe('2024-02-29');
     expect(udpValueFor(def('date'), '2024-03-01T10:30')).toBe('2024-03-01');
     expect(udpValueFor(def('date'), '2024-03-01 10:30:59')).toBe('2024-03-01');
@@ -28,7 +28,7 @@ describe('udpValueFor — la regla de la carga Excel (bulk_upload/standards.udp_
     expect(udpValueFor(def('date'), '0000-01-01')).toBeNull();            // el año 0 no existe
   });
 
-  it('un valor o una opción que no son texto (dato legado) se tratan como texto', () => {
+  it('un valor o una opción que no son texto (dato guardado con otro tipo) se tratan como texto', () => {
     expect(udpValueFor(def('number'), 12 as unknown as string)).toBe('12');
     expect(udpValueFor(def('list', [1 as unknown as string, 'B']), '1')).toBe('1');
     expect(udpValueFor(def('string'), 5 as unknown as string)).toBe('5');

@@ -1,9 +1,9 @@
-// Doc 105 (H2, F4 incompleto) — una vista MULTI-FUENTE (t1 + t2) se borra con
-// cualquiera de sus tablas (`listViews(t1)` la trae) y la cascada del backend
-// (doc 88 §4) la saca de TODO canvas que la lista — también de uno que tiene
-// t2 pero NO t1. El Undo de borrar t1 sólo miraba los canvases de la TABLA: en
-// ése la vista no volvía (ni su posición). Backend en memoria del harness de
-// `deleteUndo.test.ts`, con la vista v3 y el canvas sa4 (sólo t2, lista v3).
+// Una vista multi-fuente (t1 + t2) se borra con cualquiera de sus tablas
+// (`listViews(t1)` la trae) y la cascada del backend la saca de todo canvas que
+// la lista, también de uno que tiene t2 pero no t1. El Undo de borrar t1 mira
+// también los canvases de sus vistas, no solo los de la tabla: si no, en ese
+// canvas la vista no volvería (ni su posición). Backend en memoria del harness de
+// `deleteUndo.test.ts`, con la vista v3 y el canvas sa4 (solo t2, lista v3).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -55,7 +55,7 @@ const deleted = (coll: string, id: string) => ops.get(`${coll}:${id}`) === 'dele
 const unhandled: unknown[] = [];
 const onUnhandled = (e: unknown) => { unhandled.push(e); };
 
-/** Cascada de membresía del backend (doc 88 §4) al borrar una tabla o vista. */
+/** Cascada de membresía del backend al borrar una tabla o vista. */
 function cascade(coll: string, id: string): void {
   if (!cascadeOnDelete) return;
   const field = coll === 'views' ? 'viewIds' : 'tableIds';
@@ -66,9 +66,10 @@ function cascade(coll: string, id: string): void {
     if (sa.layout) delete sa.layout[id];
   }
 }
-/** Poda del backend al grabar un canvas (prune_deleted_members): sólo los ids
- *  LISTADOS en `tableIds`/`viewIds` con un borrado pendiente salen de las listas
- *  y del layout (un canvas legacy conserva la posición de sus vistas). */
+/** Poda del backend al grabar un canvas (prune_deleted_members): solo los ids
+ *  listados en `tableIds`/`viewIds` con un borrado pendiente salen de las listas
+ *  y del layout (un canvas sin lista explícita de vistas conserva la posición de
+ *  sus vistas). */
 function prune(sa: SubjectArea): SubjectArea {
   const listed = [...(sa.tableIds ?? []), ...(Array.isArray(sa.viewIds) ? sa.viewIds : [])];
   const gone = new Set(listed.filter((id) => deleted('canonical_tables', id) || deleted('views', id)));
@@ -78,7 +79,7 @@ function prune(sa: SubjectArea): SubjectArea {
   if (sa.layout) out.layout = Object.fromEntries(Object.entries(sa.layout).filter(([k]) => !gone.has(k)));
   return out;
 }
-/** Vistas que el canvas MUESTRA: su lista explícita o, legacy, las de sus fuentes. */
+/** Vistas que el canvas muestra: su lista explícita o, si no la tiene, las de sus fuentes. */
 const shown = (sa: SubjectArea): string[] =>
   (Array.isArray(sa.viewIds) ? sa.viewIds : VIEWS.filter((v) => v.sourceTableIds.some((t) => sa.tableIds.includes(t))).map((v) => v.id))
     .filter((v) => !deleted('views', v));
@@ -95,17 +96,17 @@ beforeEach(async () => {
   cascadeOnDelete = true;
   ops = new Map();
   draft = {
-    // Canvas ACTIVO, con lista explícita de vistas (doc 70).
+    // Canvas activo, con lista explícita de vistas.
     sa1: { id: 'sa1', projectId: 'p', name: 'Uno', folderId: null, tableIds: ['t1', 't2'], viewIds: ['v1', 'v2'],
       layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 0, y: 300 }, v2: { x: 400, y: 300 } },
       drawings: [], udpValues: {}, routes: {} } as SubjectArea,
-    // Otro canvas con lista explícita que también muestra v1.
+    // Otro canvas con lista explícita que también muestra `v1`.
     sa2: { id: 'sa2', projectId: 'p', name: 'Dos', folderId: null, tableIds: ['t1'], viewIds: ['v1'],
       layout: { t1: { x: 5, y: 5 }, v1: { x: 5, y: 205 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
-    // R3: canvas con lista explícita que tiene SÓLO t2 y muestra la vista multi-fuente v3 (t1+t2).
+    // Canvas con lista explícita que tiene solo t2 y muestra la vista multi-fuente v3 (t1+t2).
     sa4: { id: 'sa4', projectId: 'p', name: 'Cuatro', folderId: null, tableIds: ['t2'], viewIds: ['v3'],
       layout: { t2: { x: 70, y: 70 }, v3: { x: 70, y: 270 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
-    // Canvas legacy (sin lista explícita): muestra v1 por su fuente.
+    // Canvas sin lista explícita de vistas: muestra `v1` por su fuente.
     sa3: { id: 'sa3', projectId: 'p', name: 'Tres', folderId: null, tableIds: ['t1'],
       layout: { t1: { x: 9, y: 9 }, v1: { x: 9, y: 209 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
   };
@@ -193,20 +194,20 @@ afterEach(async () => {
 });
 
 
-describe('borrar una tabla con una vista multi-fuente (doc 105, H2)', () => {
-  it('deshacer devuelve la vista, en su posición, al canvas que la listaba SIN la tabla borrada', async () => {
+describe('borrar una tabla con una vista multi-fuente', () => {
+  it('deshacer devuelve la vista, en su posición, al canvas que la listaba sin la tabla borrada', async () => {
     await st().deleteTable('t1');
     expect(deleted('views', 'v3')).toBe(true);           // listViews(t1) incluye v3: se borra con t1
     expect(draft.sa4.viewIds).toEqual([]);                // la cascada del backend la sacó de sa4
     await useUndoStore.getState().undoLast();
     expect(ops.get('views:v3')).toBe('upsert');           // la vista revivió en el modelo
     expect({ viewIds: draft.sa4.viewIds, pos: draft.sa4.layout.v3 ?? null })
-      .toEqual({ viewIds: ['v3'], pos: { x: 70, y: 270 } });   // antes: { viewIds: [], pos: null }
-    expect(draft.sa4.tableIds).toEqual(['t2']);          // la tabla borrada NO entra a ese canvas
+      .toEqual({ viewIds: ['v3'], pos: { x: 70, y: 270 } });
+    expect(draft.sa4.tableIds).toEqual(['t2']);          // la tabla borrada no entra a ese canvas
     expect(draft.sa4.layout.t1).toBeUndefined();
   });
 
-  it('una escritura por canvas en el Undo, también en el que sólo tenía la vista', async () => {
+  it('una escritura por canvas en el Undo, también en el que solo tenía la vista', async () => {
     await st().deleteTable('t1');
     log = [];
     await useUndoStore.getState().undoLast();
@@ -223,15 +224,15 @@ describe('borrar una tabla con una vista multi-fuente (doc 105, H2)', () => {
       .toEqual({ viewIds: ['v3'], pos: { x: 70, y: 270 } });
   });
 
-  it('con ese canvas abierto, el Explorer se refresca UNA vez (lo hace la recarga: cambió su firma)', async () => {
+  it('con ese canvas abierto, el Explorer se refresca una vez (lo hace la recarga: cambia su firma)', async () => {
     await st().selectSubjectArea('sa4');
     const tick = st().explorerTick;
     await st().deleteTable('t1');
     expect(st().diagram?.views.map((v) => v.id)).toEqual([]);   // la vista salió de pantalla
-    expect(st().explorerTick - tick).toBe(1);                   // antes: 2 (recarga + «no estaba acá»)
+    expect(st().explorerTick - tick).toBe(1);
   });
 
-  it('si no se pueden leer los canvases de sus vistas, no se borra nada (A3/A5)', async () => {
+  it('si no se pueden leer los canvases de sus vistas, no se borra nada', async () => {
     vi.mocked(viewsSvc.tableViews).mockRejectedValueOnce(new Error('sin red'));
     const before = structuredClone(draft);
     await expect(st().deleteTable('t1')).rejects.toThrow(DEPENDENTS);

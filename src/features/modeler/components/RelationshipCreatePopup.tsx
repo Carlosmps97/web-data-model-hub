@@ -24,16 +24,16 @@ export interface RelDraft {
 }
 
 /**
- * Popup de CONFIRMACIÓN de relación (doc 47): staging local — nada persiste
- * hasta Confirm. N filas fijas = PKs del padre (orden de llave); Confirm arma
- * UN PUT /changes/bulk (columnas + relación). Cancel = cero requests.
- * Doc 98: las frases de relación (opcionales) nacen en ese mismo lote.
+ * Popup de confirmación de relación: staging local, nada persiste hasta
+ * Confirm. N filas fijas = PKs del padre (orden de llave); Confirm arma un solo
+ * PUT /changes/bulk (columnas + relación). Cancel = cero requests. Las frases
+ * de relación (opcionales) nacen en ese mismo lote.
  */
 export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
   draft: RelDraft; onClose: (created: boolean) => void; pushToast: (m: string, k?: 'err') => void;
 }) {
   const diagram = useModelerStore((s) => s.diagram);
-  // Doc 114: nombres del modelo del canvas (entidades/atributos en el lógico).
+  // Nombres del modelo del canvas (entidades/atributos en el lógico).
   const viewMode = useModelerStore((s) => s.viewMode);
   const [saving, setSaving] = useState(false);
   const [cards, setCards] = useState({ parent: draft.parentCardinality, child: draft.childCardinality });
@@ -52,8 +52,8 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
 
   const confirm = async () => {
     setSaving(true);
-    // Doc 105 (H1): la acción es de la sesión donde empezó (sus escrituras y su
-    // inversa cortan si cambió); un fallo espera la revalidación (H7).
+    // La acción pertenece a la sesión donde empezó (sus escrituras y su inversa
+    // cortan si la sesión cambia); un fallo espera la revalidación.
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't create the relationship", 'err'));
     try {
@@ -86,12 +86,12 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
         parentTableId: draft.parentTableId, childTableId: draft.childTableId,
         identifying: draft.identifying, parentCardinality: cards.parent, childCardinality: cards.child,
         rows: resolutions, childCols,
-        ...phrases,   // doc 98: mappingToBulk las limpia (en blanco no viajan)
+        ...phrases,   // mappingToBulk las limpia (en blanco no viajan)
       });
       pin.check();
       await gov.recordChangesBulk(changes);
-      // Undo (doc 50): inversa genérica del lote — cae la relación, se borran
-      // las columnas CREADAS y las existentes modificadas vuelven a su
+      // Undo: inversa genérica del lote; cae la relación, se borran
+      // las columnas creadas y las existentes modificadas vuelven a su
       // pre-imagen (snapshot por valor de las columnas del hijo); las vistas
       // espejo se corrigen best-effort (retiro de creadas + renames de vuelta).
       const pre = new Map(childCols.map((c) => [
@@ -111,9 +111,9 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
         inverse, tableId: undoChildId, created: undoCreated, renamesBack,
         after: () => useModelerStore.getState().reload(),
       }), pin);
-      // V1: las columnas migradas entran también a las vistas ESPEJO del hijo;
-      // los renames por role name re-apuntan los sources de las vistas.
-      // Doc 94 D4: en una identificante las nuevas son PK y entran tras las PK.
+      // Las columnas migradas entran también a las vistas espejo del hijo; los
+      // renames por role name re-apuntan los sources de las vistas. En una
+      // identificante las columnas creadas son PK y entran tras las PK.
       await syncNewColumnsToMirrorViews(pinnedViewDeps(pin), draft.childTableId, createdCols, childCols);
       for (const r of resolutions) {
         if (r.target.kind !== 'existing' || !r.target.rename) continue;

@@ -1,7 +1,7 @@
 /**
- * DDL Export rules — 5ta pestaña de Data Standards (doc 30, pantallas 16/16b/
- * 16c/16d). Navegación interna: overview → catalog → editor. Las reglas
- * transforman el TEXTO del Export DDL según UDPs; nunca tocan el modelo.
+ * DDL Export rules — quinta pestaña de Data Standards. Navegación interna:
+ * overview → catalog → editor. Las reglas transforman el texto del Export DDL
+ * según UDPs; nunca tocan el modelo.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Braces, ChevronRight, FileCode2, PackagePlus, TriangleAlert } from 'lucide-react';
@@ -32,7 +32,7 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
   const rules = useMemo(() => snapshot.ddlRules ?? [], [snapshot.ddlRules]);
   const config = useMemo(() => snapshot.ddlConfig ?? { lookups: {}, functions: [], output: {} }, [snapshot.ddlConfig]);
   const [view, setView] = useState<View>({ t: 'overview' });
-  // Doc 93 D1: editor de las Output settings del proyecto.
+  // Editor de las Output settings del proyecto.
   const [outputOpen, setOutputOpen] = useState(false);
   const [artifacts, setArtifacts] = useState<DdlArtifact[]>([]);
 
@@ -75,7 +75,7 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
     );
   }
 
-  // ── Overview (pantalla 16) ──
+  // ── Overview ──
   return (
     <div style={{ padding: '26px 34px', background: '#FBFCFD', flex: 1 }}>
       <div style={{ maxWidth: 980 }}>
@@ -90,7 +90,7 @@ export default function DdlRulesTab({ projectId, snapshot, versions, canEdit, me
           </div>
         </div>
 
-        {/* Banner AZUL — "solo el texto exportado", no ámbar (doc 30 §7) */}
+        {/* Banner azul ("solo el texto exportado"), no ámbar */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, background: '#EFF4FF', border: '1px solid #D4E0FF', borderRadius: 12, padding: '13px 16px', marginBottom: 16 }}>
           <Braces size={18} color="#2E5BFF" style={{ flex: 'none', marginTop: 1 }} />
           <div style={{ fontSize: 12.5, color: '#45597C', lineHeight: 1.55 }}>

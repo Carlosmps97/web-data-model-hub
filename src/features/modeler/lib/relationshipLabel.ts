@@ -1,25 +1,25 @@
 /**
- * Frases de relación (doc 98, Erwin: Parent-to-Child / Child-To-Parent
- * Phrase): la etiqueta que el canvas y el export dibujan sobre el wire.
- * Lógica PURA — la consumen CrowFootEdge, exportScene, los popups de relación
- * y los paneles de Links.
+ * Frases de relación (en Erwin: Parent-to-Child / Child-To-Parent Phrase): la
+ * etiqueta que el canvas y el export dibujan sobre el wire. Lógica pura: la
+ * consumen CrowFootEdge, exportScene, los popups de relación y los paneles de
+ * Links.
  */
 import type { Relationship } from '@/services/governance.service';
 import { facetName, type Facet } from '@/lib/facets';
 
-/** Tope de ESCRITURA de cada frase (caja de texto de los popups). */
+/** Tope de escritura de cada frase (caja de texto de los popups). */
 export const PHRASE_MAX = 120;
-/** Tope de DIBUJO por frase en el canvas/export: lo que excede se corta con
+/** Tope de dibujo por frase en el canvas/export: lo que excede se corta con
  *  «…» (el texto completo vive en el popup). El real más largo de los XML
  *  tiene 77 caracteres. */
 export const PHRASE_DRAW_MAX = 80;
 
-/** Ancho de la etiqueta (px de canvas). Cuando el texto no cabe, PARTE LÍNEA:
+/** Ancho de la etiqueta (px de canvas). Cuando el texto no cabe, parte línea:
  *  una etiqueta más ancha que el hueco entre dos bloques taparía la línea y
  *  sus marcadores, y quedaría cortada bajo los propios bloques. */
 export const LABEL_MAX_W = 260;
 export const LABEL_MIN_W = 72;
-/** Aire que se deja libre en CADA extremo: marcador crow's-foot (22) + margen. */
+/** Aire que se deja libre en cada extremo: marcador crow's-foot (22) + margen. */
 const MARKER_CLEARANCE = 28;
 /** Separación entre el bloque y la etiqueta de una relación recursiva. */
 const RECURSIVE_LIFT = 8;
@@ -34,7 +34,7 @@ export function cleanPhrase(raw: string | null | undefined): string | null {
   return (raw ?? '').trim() || null;
 }
 
-/** Corta a `max` CARACTERES (no unidades UTF-16: un emoji no se parte). Un
+/** Corta a `max` caracteres (no unidades UTF-16: un emoji no se parte). Un
  *  tope sin sentido (NaN, < 2) no corta. */
 function clip(s: string, max: number): string {
   if (!(max >= 2)) return s;
@@ -52,7 +52,7 @@ export function relationshipLabel(rel: RelationshipPhrases, max: number = PHRASE
   return parts.length ? parts.join(' / ') : null;
 }
 
-/** Ancho máximo de la etiqueta según el HUECO horizontal entre los dos bloques
+/** Ancho máximo de la etiqueta según el hueco horizontal entre los dos bloques
  *  (deja libres los marcadores de ambos extremos). Sin hueco — bloques
  *  apilados — usa el ancho por defecto. */
 export function labelMaxWidth(gap: number): number {
@@ -69,10 +69,10 @@ export interface LabelPlacement {
 }
 
 /**
- * Dónde va la etiqueta y cuánto puede medir — la MISMA regla para el canvas y
+ * Dónde va la etiqueta y cuánto puede medir — la misma regla para el canvas y
  * el export. Normal: centrada en el punto medio del wire, con el ancho que deja
  * el hueco entre los bloques. Recursiva (padre = hijo): el wire corre por
- * debajo del propio bloque, así que la etiqueta va ENCIMA del bloque, centrada.
+ * debajo del propio bloque, así que la etiqueta va encima del bloque, centrada.
  * `sx`/`tx` = bordes por donde el wire sale del padre y entra al hijo.
  */
 export function labelPlacement(a: {
@@ -117,15 +117,15 @@ export function wrapLabel(text: string, maxChars: number): string[] {
   return lines.length ? lines : [''];
 }
 
-/** null = el borrador no cambia la frase vigente; si cambia, la frase LIMPIA
+/** null = el borrador no cambia la frase vigente; si cambia, la frase limpia
  *  a grabar (null la borra). */
 export function phraseChange(current: string | null | undefined, draft: string): { value: string | null } | null {
   const value = cleanPhrase(draft);
   return value === cleanPhrase(current) ? null : { value };
 }
 
-/** Apply del popup de edición: las frases que REALMENTE cambian respecto de
- *  la relación, limpias, para grabarlas en UN solo guardado. null = nada que
+/** Apply del popup de edición: las frases que realmente cambian respecto de
+ *  la relación, limpias, para grabarlas en un solo guardado. null = nada que
  *  grabar (cero requests). */
 export function phraseEdits(
   rel: RelationshipPhrases, drafts: Partial<Record<PhraseKey, string>>,
@@ -140,10 +140,10 @@ export function phraseEdits(
   return Object.keys(out).length ? out : null;
 }
 
-/** Revisión doc 114 (H4): el aviso del role name aplicado sobre una columna del
- *  hijo, con los nombres del modelo del canvas — salvo que el lógico no cambie
- *  (sólo cambia el físico derivado): entonces nombra los físicos, también en el
- *  lógico (decía «"X" renamed to "X"»). */
+/** El aviso del role name aplicado sobre una columna del hijo, con los nombres
+ *  del modelo del canvas, salvo que el lógico no cambie (solo cambia el físico
+ *  derivado): entonces nombra los físicos, también en el lógico (así no muestra
+ *  «"X" renamed to "X"»). */
 export function roleAppliedText(
   cur: { logicalName?: string | null; physicalName?: string | null }, name: string, physical: string, facet: Facet,
 ): string {

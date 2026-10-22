@@ -1,19 +1,19 @@
 /**
- * Warm-up de sesión para Databricks Apps (doc 36).
+ * Warm-up de sesión para Databricks Apps.
  *
- * Cada Databricks App vive detrás de su PROPIO muro SSO por subdominio (la
- * cookie no se comparte entre apps). Un usuario que solo visitó el FRONT no
- * tiene sesión con el dominio del BACKEND, y un fetch() no puede completar
+ * Cada Databricks App vive detrás de su propio muro SSO por subdominio (la
+ * cookie no se comparte entre apps). Un usuario que solo visitó el front no
+ * tiene sesión con el dominio del backend, y un fetch() no puede completar
  * ese SSO (redirect cross-origin a Microsoft = imposible dentro de XHR): el
  * proxy responde su 401 sin CORS y el navegador lo reporta como
  * "Failed to fetch".
  *
- * Este probe detecta ese estado y hace UNA navegación top-level al endpoint
- * `GET /api/auth/warmup?next=<url>` del backend: el SSO ocurre solo, la
- * cookie queda puesta y el backend rebota de vuelta. Guard en sessionStorage
- * para no loopear si el backend está realmente caído.
+ * Este probe detecta ese estado y hace una navegación top-level al endpoint
+ * `GET /api/auth/warmup/{next_b64}` del backend (destino en base64url): el SSO ocurre solo, la
+ * cookie queda puesta y el backend rebota de vuelta. Un guard en sessionStorage
+ * evita un bucle de redirecciones si el backend está realmente caído.
  *
- * En dev (API_BASE = localhost) el probe responde bien y NUNCA se redirige.
+ * En dev (API_BASE = localhost) el probe responde bien y nunca se redirige.
  */
 import { API_BASE } from './apiBase';
 
@@ -30,13 +30,13 @@ export async function ensureBackendSession(
     sessionStorage.removeItem(GUARD_KEY); // rearma el guard para futuras expiraciones
   } catch {
     // fetch rechazado = ni siquiera hubo respuesta legible (proxy SSO sin
-    // sesión, o backend caído). Redirigir UNA vez; si volvemos igual, no
-    // insistir: que el login muestre su error normal.
+    // sesión, o backend caído). Se redirige una sola vez; si al volver sigue
+    // igual, no se insiste y el login muestra su error normal.
     if (sessionStorage.getItem(GUARD_KEY)) return;
     sessionStorage.setItem(GUARD_KEY, '1');
-    // `next` va EN EL PATH (base64url sin padding), no como query string: el
+    // `next` va en el path (base64url sin padding), no como query string: el
     // replay post-SSO del proxy de Databricks se atora con query strings y
-    // dejaba al usuario varado en un `{}` (visto 2026-07-30 en corporativo).
+    // deja al usuario varado en un `{}`.
     const token = btoa(window.location.href)
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     navigate(`${base}/api/auth/warmup/${token}`);

@@ -8,16 +8,16 @@ import { normalizeTags, tagId } from '@/lib/tags';
 interface TagEditorProps {
   value?: Tag[];
   onChange: (tags: Tag[]) => void;
-  /** Tighter spacing for in-row contexts (e.g. the column detail panel). */
+  /** Espaciado más ajustado para contextos en fila (p. ej. el panel de detalle de la columna). */
   compact?: boolean;
   keyPlaceholder?: string;
   valuePlaceholder?: string;
 }
 
 /**
- * Reusable key/value tag editor — chips + a "key = value" add row. Built on
- * `@/lib/tags`. Used at three levels (domain, table, column) per the
- * governance spec; tags are secondary metadata so callers render this last.
+ * Editor reutilizable de tags clave/valor: chips + una fila "key = value" para
+ * agregar. Se apoya en `@/lib/tags`. Se usa en tres niveles (dominio, tabla,
+ * columna); los tags son metadatos secundarios, por eso quien lo usa lo pone al final.
  */
 export default function TagEditor({
   value,

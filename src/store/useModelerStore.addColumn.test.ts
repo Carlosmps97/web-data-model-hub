@@ -1,7 +1,6 @@
-// Alta de columna con metadata completa (doc 40): el popup "New column" ahora
-// captura definición funcional, flags (PK/FK/Nullable/Partition) y UDPs — el
-// store los pasa al payload del changeset en el MISMO alta (antes había que ir
-// a Properties · Columns después de crear).
+// Alta de columna con metadata completa: el popup "New column" captura
+// definición funcional, flags (PK/FK/Nullable/Partition) y UDPs, y el store los
+// pasa al payload del changeset en la misma alta.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/services/governance.service', async (importOriginal) => {
@@ -30,7 +29,7 @@ beforeEach(() => {
   useModelerStore.setState({ activeSaId: null, dirty: false, diagram: diagramWith([]), naming: null });
 });
 
-describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
+describe('useModelerStore.addColumn — metadata en el alta', () => {
   it('pasa description, flags y udpValues al payload del changeset', async () => {
     await useModelerStore.getState().addColumn('t1', {
       logicalName: 'COL_A', mode: 'physical',
@@ -48,7 +47,7 @@ describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
     });
   });
 
-  it('flags apagados y campos vacíos NO viajan (payload limpio, como en edición)', async () => {
+  it('flags apagados y campos vacíos no viajan (payload limpio, como en edición)', async () => {
     await useModelerStore.getState().addColumn('t1', {
       logicalName: 'COL_B', mode: 'physical',
       description: '   ', isPrimaryKey: false, isForeignKey: false, isNullable: true,
@@ -63,7 +62,7 @@ describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
     expect(payload.udpValues).toBeUndefined();
   });
 
-  it('doc 94: PK nueva entra tras la última PK y corre las no-PK en el MISMO lote', async () => {
+  it('una PK nueva entra tras la última PK y corre las no-PK en el mismo lote', async () => {
     useModelerStore.setState({ diagram: diagramWith([
       { id: 'c1', tableId: 't1', physicalName: 'C1', isPrimaryKey: true, ordinal: 0 },
       { id: 'c2', tableId: 't1', physicalName: 'C2', ordinal: 1 },
@@ -81,7 +80,7 @@ describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
       .toEqual([['c2', 2], ['c3', 3]]);
   });
 
-  it('doc 94: PK nueva sin no-PK que correr: alta simple, tras las PK', async () => {
+  it('PK nueva sin no-PK que correr: alta simple, tras las PK', async () => {
     useModelerStore.setState({ diagram: diagramWith([
       { id: 'c1', tableId: 't1', isPrimaryKey: true, ordinal: 0 },
     ]) });
@@ -94,7 +93,7 @@ describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
     expect('pkPosition' in payload).toBe(false);
   });
 
-  it('el alta sin metadata conserva el contrato anterior (regresión)', async () => {
+  it('el alta sin metadata manda solo los campos básicos', async () => {
     await useModelerStore.getState().addColumn('t1', { logicalName: 'palabras', mode: 'logical' });
     expect(gov.physicalize).toHaveBeenCalledWith('palabras');
     const payload = vi.mocked(gov.createColumn).mock.calls[0][0];
@@ -103,13 +102,13 @@ describe('useModelerStore.addColumn — metadata en el alta (doc 40)', () => {
   });
 });
 
-describe('useModelerStore.addColumn — typeOverridden vs default del dominio (doc 64 §1)', () => {
-  // El popup ahora muestra el default del dominio EN el campo de tipo y lo
-  // manda tal cual: "vino dataType" ya no equivale a override — el override
-  // real es tipo ≠ default del dominio elegido (regla doc 46).
+describe('useModelerStore.addColumn — typeOverridden vs default del dominio', () => {
+  // El popup muestra el default del dominio en el campo de tipo y lo manda tal
+  // cual: que llegue dataType no equivale a override; el override es
+  // tipo ≠ default del dominio elegido.
   const DOM = [{ id: 'd1', name: 'monto6D', defaultDataType: 'DECIMAL(18,6)' }];
 
-  it('tipo IGUAL al default del dominio ⇒ typeOverridden false', async () => {
+  it('tipo igual al default del dominio ⇒ typeOverridden false', async () => {
     vi.mocked(gov.listDomains).mockResolvedValueOnce(DOM as never);
     await useModelerStore.getState().addColumn('t1', {
       logicalName: 'COL', mode: 'physical', parentDomainId: 'd1', dataType: 'DECIMAL(18,6)',
@@ -119,7 +118,7 @@ describe('useModelerStore.addColumn — typeOverridden vs default del dominio (d
     });
   });
 
-  it('tipo DISTINTO al default ⇒ typeOverridden true', async () => {
+  it('tipo distinto al default ⇒ typeOverridden true', async () => {
     vi.mocked(gov.listDomains).mockResolvedValueOnce(DOM as never);
     await useModelerStore.getState().addColumn('t1', {
       logicalName: 'COL', mode: 'physical', parentDomainId: 'd1', dataType: 'DECIMAL(18,2)',
@@ -129,7 +128,7 @@ describe('useModelerStore.addColumn — typeOverridden vs default del dominio (d
     });
   });
 
-  it('dominio SIN tipo mandado ⇒ hereda el default con typeOverridden false (regresión)', async () => {
+  it('dominio sin tipo mandado ⇒ hereda el default con typeOverridden false', async () => {
     vi.mocked(gov.listDomains).mockResolvedValueOnce(DOM as never);
     await useModelerStore.getState().addColumn('t1', {
       logicalName: 'COL', mode: 'physical', parentDomainId: 'd1',
@@ -139,7 +138,7 @@ describe('useModelerStore.addColumn — typeOverridden vs default del dominio (d
     });
   });
 
-  it('sin dominio, un tipo tipeado sigue marcando override (semántica previa)', async () => {
+  it('sin dominio, un tipo tipeado marca override', async () => {
     await useModelerStore.getState().addColumn('t1', {
       logicalName: 'COL', mode: 'physical', dataType: 'STRING',
     });
@@ -149,9 +148,9 @@ describe('useModelerStore.addColumn — typeOverridden vs default del dominio (d
   });
 });
 
-describe('useModelerStore.addColumn — default LEGACY del dominio homologado (doc 64 r2)', () => {
+describe('useModelerStore.addColumn — default crudo del dominio, homologado', () => {
   // La BD puede traer dominios sin homologar (`Array`, `BIG INTEGER`): el
-  // store consume el default vía canonicalDefaultType (espejo del back doc 62).
+  // store consume el default vía canonicalDefaultType (espejo del backend).
   const LEGACY = [{ id: 'd2', name: 'ColArray', defaultDataType: 'Array' }];
 
   it('dominio `Array` (crudo en BD) hereda `ARRAY<>` sin override', async () => {
@@ -175,13 +174,13 @@ describe('useModelerStore.addColumn — default LEGACY del dominio homologado (d
   });
 });
 
-// Doc 83: la regla de case del scope (`naming_config.column.case`) se cumple
-// también cuando el físico se TIPEA directo (modo Physical del popup), no sólo
-// al derivarlo desde el lógico.
+// La regla de case del scope (`naming_config.column.case`) se cumple también
+// cuando el físico se tipea directo (modo Physical del popup), no solo al
+// derivarlo desde el lógico.
 const NAMING = (c: 'upper' | 'lower' | 'camel') =>
   ({ column: { separator: '_', case: c }, table: { separator: '_', case: 'upper' } }) as const;
 
-describe('useModelerStore.addColumn — case del físico en modo Physical (doc 83)', () => {
+describe('useModelerStore.addColumn — case del físico en modo Physical', () => {
   it('lo tipeado en minúscula se persiste con la regla del scope; el lógico queda tal cual', async () => {
     useModelerStore.setState({ naming: NAMING('upper') });
     await useModelerStore.getState().addColumn('t1', { logicalName: 'monto_deuda', mode: 'physical' });
@@ -202,7 +201,7 @@ describe('useModelerStore.addColumn — case del físico en modo Physical (doc 8
     expect(vi.mocked(gov.createColumn).mock.calls[0][0]).toMatchObject({ physicalName: 'MONTO' });
   });
 
-  it('modo Logical sigue derivando por physicalize y NO re-normaliza la respuesta', async () => {
+  it('modo Logical deriva por physicalize y no re-normaliza la respuesta', async () => {
     useModelerStore.setState({ naming: NAMING('lower') });
     await useModelerStore.getState().addColumn('t1', { logicalName: 'monto', mode: 'logical' });
     expect(gov.physicalize).toHaveBeenCalledWith('monto');
@@ -210,7 +209,7 @@ describe('useModelerStore.addColumn — case del físico en modo Physical (doc 8
   });
 });
 
-describe('addColumn — tipos complejos (doc 96 D8)', () => {
+describe('addColumn — tipos complejos', () => {
   const colArray = { id: 'd4', name: 'ColArray', defaultDataType: 'ARRAY<>', logicalDataType: 'ARRAY<>' };
   it('en Logical, un complejo tipeado con un dominio genérico también es el físico', async () => {
     vi.mocked(gov.listDomains).mockResolvedValueOnce([colArray] as never);
@@ -232,7 +231,7 @@ describe('addColumn — tipos complejos (doc 96 D8)', () => {
   });
 });
 
-describe('addColumn — un complejo TIPEADO es el mismo en las dos facetas (minor #6)', () => {
+describe('addColumn — un complejo tipeado es el mismo en las dos facetas', () => {
   it('gana al default complejo completo del dominio', async () => {
     vi.mocked(gov.listDomains).mockResolvedValueOnce([
       { id: 'd5', name: 'ColStruct', defaultDataType: 'ARRAY<STRING>', logicalDataType: 'ARRAY<STRING>' },

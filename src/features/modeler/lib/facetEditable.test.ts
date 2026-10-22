@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { facetEditable } from './facetEditable';
 
-describe('facetEditable (doc 85 §3.7)', () => {
+describe('facetEditable', () => {
   it('tabla: nombres por faceta, schema físico, definición compartida', () => {
     expect(facetEditable('table', 'logicalName', 'logical')).toBe(true);
     expect(facetEditable('table', 'logicalName', 'physical')).toBe(false);

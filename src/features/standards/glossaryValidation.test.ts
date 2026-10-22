@@ -17,7 +17,7 @@ describe('termsToValidate', () => {
     expect(termsToValidate([])).toEqual([]);
   });
 
-  it('incluye filas existentes cuyo texto cambió vs el original', () => {
+  it('incluye filas existentes con el texto modificado respecto del original', () => {
     const drafts = [
       { term: 'codigo nuevo', _orig: 'codigo viejo' },
       { term: '  Codigo  ', _orig: 'codigo' },
@@ -30,7 +30,7 @@ describe('termsToValidate', () => {
   });
 });
 
-// Doc 95 D1 — el popup de conflictos dice QUÉ se bloquea y lista todo.
+// El popup de conflictos dice qué se bloquea y da la lista completa.
 describe('popup de conflictos', () => {
   const base: GlossaryValidation = {
     ok: false,
@@ -50,7 +50,7 @@ describe('popup de conflictos', () => {
     expect(conflictRows(base)[0]).toEqual({ table: 'HM_A', column: 'NUMXBCONSOLIDADO', logical: 'Numero XB Consolidado' });
   });
 
-  it('dice que son COLUMNAS, cuántas, en cuántas tablas y que no se permite', () => {
+  it('dice que son columnas, cuántas, en cuántas tablas y que no se permite', () => {
     expect(conflictMessage(base, 'column')).toEqual([
       "It already appears in the logical name of 3 columns in 2 tables. Adding it would change their physical names, so it's not allowed.",
       'Column terms only look at column names — tables are never renamed.',
@@ -77,7 +77,7 @@ describe('popup de conflictos', () => {
   });
 });
 
-// Doc 95 D3 — renombres del borrador vs nombres ya desfasados.
+// Renombres del borrador vs nombres ya desfasados.
 describe('popup de apply', () => {
   const col = (table: string, from: string, to: string, tableId = table): GlossaryImpactRow =>
     ({ entity: 'column', tableId, table, from, to });
@@ -112,7 +112,7 @@ describe('popup de apply', () => {
   });
 });
 
-describe('filas incompletas (doc 102)', () => {
+describe('filas incompletas', () => {
   const before = new Map([['e1', { term: 'codigo', abbrev: 'COD' }], ['e2', { term: 'viejo', abbrev: '' }]]);
   it('termGap', () => {
     expect(termGap({ term: 'a', abbrev: 'A' })).toBeNull();
@@ -126,7 +126,7 @@ describe('filas incompletas (doc 102)', () => {
       { id: 'n2', term: '', abbrev: '', _new: true },                 // nueva vacía
       { id: 'n3', term: 'ok', abbrev: 'OK', _new: true },
       { id: 'e1', term: 'codigo', abbrev: ' ' },                      // editada: borró la abreviatura
-      { id: 'e2', term: 'viejo', abbrev: '' },                        // incompleta de antes, sin tocar
+      { id: 'e2', term: 'viejo', abbrev: '' },                        // guardada incompleta, sin tocar
       { id: 'e3', term: 'x', abbrev: '', _deleted: true },
     ];
     expect(incompleteRows(drafts, before).map((d) => d.id)).toEqual(['n1', 'n2', 'e1']);
@@ -140,10 +140,10 @@ describe('filas incompletas (doc 102)', () => {
   });
 });
 
-// Doc 105 (P1-bis): la edición se compara RECORTADA — «SUC␠» sobre «SUC» contaba
-// como cambio, viajaba idéntico y registraba una versión sin cambios reales
-// (y re-derivaba los físicos de todo el proyecto).
-describe('ediciones recortadas (doc 105 P1-bis)', () => {
+// La edición se compara recortada: «SUC␠» sobre «SUC» no cuenta como cambio
+// (viajaría idéntico, registraría una versión sin cambios reales y re-derivaría
+// los físicos del proyecto entero).
+describe('ediciones recortadas', () => {
   const before = new Map([['1', { term: 'SUC', abbrev: 'SC' }], ['2', { term: 'monto', abbrev: 'MTO' }]]);
 
   it('un blanco alrededor no es una edición; un cambio de texto o de mayúsculas sí', () => {
@@ -152,11 +152,11 @@ describe('ediciones recortadas (doc 105 P1-bis)', () => {
     expect(termEdited({ term: 'SUCURSAL', abbrev: 'SC' }, before.get('1')!)).toBe(true);
     expect(termEdited({ term: 'SUC', abbrev: 'SUC' }, before.get('1')!)).toBe(true);
     expect(termEdited({ term: 'suc', abbrev: 'SC' }, before.get('1')!)).toBe(true);
-    // un original con blancos (dato viejo) sin tocar tampoco cuenta
+    // un original con blancos (guardado así) sin tocar tampoco cuenta
     expect(termEdited({ term: 'SUC ', abbrev: 'SC' }, { term: 'SUC ', abbrev: 'SC' })).toBe(false);
   });
 
-  it('viajan sólo las filas nuevas o editadas de verdad, recortadas', () => {
+  it('viajan solo las filas nuevas o editadas de verdad, recortadas', () => {
     const drafts = [
       { id: '1', term: 'SUC ', abbrev: 'SC', scope: 'column' as const },                    // blanco: no viaja
       { id: '2', term: ' monto', abbrev: 'MNT ', scope: 'column' as const },                // editada: viaja recortada
@@ -171,15 +171,15 @@ describe('ediciones recortadas (doc 105 P1-bis)', () => {
     ]);
   });
 
-  it('una fila incompleta de antes, tocada sólo con blancos, no bloquea el guardado', () => {
+  it('una fila guardada incompleta, tocada solo con blancos, no bloquea el guardado', () => {
     const b = new Map([['1', { term: 'SUC', abbrev: '' }]]);
     expect(incompleteRows([{ id: '1', term: 'SUC ', abbrev: ' ' }], b)).toEqual([]);
     expect(incompleteRows([{ id: '1', term: 'SUCURSAL', abbrev: '' }], b)).toHaveLength(1);
   });
 });
 
-describe('maxLengthLabel (doc 105, ronda 4)', () => {
-  it('0 es límite DESACTIVADO (así lo aplica el motor): «No limit», no «0 chars»', () => {
+describe('maxLengthLabel', () => {
+  it('0 es límite desactivado (así lo aplica el motor): «No limit», no «0 chars»', () => {
     expect(maxLengthLabel(0)).toBe('No limit');
     expect(maxLengthLabel(150)).toBe('150 chars');
     expect(maxLengthLabel(1)).toBe('1 char');

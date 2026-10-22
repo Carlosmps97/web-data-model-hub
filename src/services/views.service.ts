@@ -1,13 +1,13 @@
-// Views service (R4c → doc 20: VERSIONADAS). CRUD de las vistas asociadas a
-// una tabla. El backend devuelve el envelope `{ success, data }`, que
+// Servicio de vistas (versionadas). CRUD de las vistas asociadas a una tabla.
+// El backend devuelve el envelope `{ success, data }`, que
 // `apiGet/apiPost/...` ya desempaquetan.
 //
-// Desde el doc 20 las vistas siguen el MISMO patrón changeset-aware que
+// Las vistas siguen el mismo patrón changeset-aware que
 // governance/estructura/esquemas: con changeset activo, las lecturas van al
-// estado EFECTIVO (publicado + overlay del draft) y las escrituras se
-// registran en el changeset con el DOC COMPLETO (el overlay REEMPLAZA).
-// Producción se toca SOLO en el apply del approve; el ROLLBACK las revierte.
-// Sin changeset, las LECTURAS van al REST directo; las ESCRITURAS exigen una
+// estado efectivo (publicado + overlay del draft) y las escrituras se
+// registran en el changeset con el doc completo (el overlay sustituye al doc).
+// Producción se toca solo en el apply del approve; el rollback las revierte.
+// Sin changeset, las lecturas van al REST directo; las escrituras exigen una
 // versión en edición.
 
 import { apiGet } from './http';
@@ -19,59 +19,58 @@ const active = () => useSessionStore.getState().activeChangesetId;
 import { API_BASE } from '@/services/apiBase';
 const VIEWS = `${API_BASE}/api/views`;
 
-/** Una proyección de columna dentro de una vista (editor 07b-2 / F3 multi-fuente):
- *  la columna origen, de qué tabla fuente viene, nombre de salida, expresión SQL
- *  y/o CAST opcionales. `table` queda por compatibilidad con vistas legacy. */
+/** Una proyección de columna dentro de una vista (editor multi-fuente): la
+ *  columna origen, de qué tabla fuente viene, nombre de salida, expresión SQL
+ *  y/o CAST opcionales. `table` identifica la fuente por nombre en vistas que
+ *  no traen `tableId`. */
 export interface ViewSource {
   /** Columna origen. */
   column?: string;
-  /** (Legacy) tabla origen por nombre. */
+  /** Tabla origen por nombre (vistas sin `tableId`). */
   table?: string;
-  /** F3: id de la tabla fuente de la que viene la columna. */
+  /** Id de la tabla fuente de la que viene la columna. */
   tableId?: string;
   /** Nombre de salida (alias) de la columna en la vista. */
   outputAlias?: string;
   /** Expresión SQL libre (mask/hash/cast/concat…). */
   expression?: string;
-  /** F3: override de tipo ⇒ el DDL emite `CAST(col AS castType) AS alias`. */
+  /** Override de tipo ⇒ el DDL emite `CAST(col AS castType) AS alias`. */
   castType?: string;
-  /** F5: definición funcional PROPIA de esta columna en la vista (semántica
+  /** Definición funcional propia de esta columna en la vista (semántica
    *  re-contextualizada respecto de la física). Vacío ⇒ hereda la definición
    *  de la columna física origen. Erwin la trae a nivel de columna-de-vista. */
   description?: string;
 }
 
-/** Vista persistida (forma completa del backend R4c + F3).
- *  Invariante round-trip: cada campo persistido vive acá Y en el `ViewDoc`
- *  Pydantic del backend (F3a) — si falta en uno, desaparece al recargar. */
+/** Vista persistida (forma completa del backend).
+ *  Invariante round-trip: cada campo persistido vive acá y en el `ViewDoc`
+ *  Pydantic del backend; si falta en uno, desaparece al recargar. */
 export interface View {
   id: string;
-  /** Legacy: primera fuente (= sourceTableIds[0], compat). */
+  /** Primera fuente (= sourceTableIds[0]), por compatibilidad. */
   tableId?: string;
-  /** F3: fuentes canónicas de la vista, en orden (definen los alias t1, t2…). */
+  /** Fuentes canónicas de la vista, en orden (definen los alias t1, t2…). */
   sourceTableIds?: string[];
-  /** F3 (D3): flag GLOBAL — la vista aparece en todo canvas con ≥1 fuente.
-   *  No decide qué vistas se exportan (eso es la membresía del canvas, doc
-   *  102); para las reglas DDL marca la vista de NEGOCIO (doc 105, C2). */
+  /** Flag global: la vista aparece en todo canvas con ≥1 fuente. No decide
+   *  qué vistas se exportan (eso es la membresía del canvas); para las reglas
+   *  DDL marca la vista de negocio. */
   showOnCanvas?: boolean;
   name: string;
   schema?: string;
-  /** Doc 91 D1/D2/D5: `tags`, `filter` y `joinOverride` se RETIRARON (los UDP
-   *  de vista reemplazan a las etiquetas; con 2+ fuentes el DDL lista
-   *  `FROM t1, t2` como Erwin; un JOIN/WHERE se anota en la User-Defined SQL). */
-  /** Proyección columna a columna — de acá sale el DDL (doc 96 D6). */
+  /** Proyección columna a columna: de acá sale el DDL. Con 2+ fuentes el DDL
+   *  lista `FROM t1, t2` como Erwin; un JOIN/WHERE se anota en la User-Defined SQL. */
   sources?: ViewSource[];
   outputAlias?: string;
   expression?: string;
   sql?: string;
   description?: string;
-  /** Doc 61 → 91 → doc 96 D6: «User-Defined SQL», texto INFORMATIVO — se
-   *  guarda tal cual, sin validar, y NO se exporta: el DDL se genera siempre de
-   *  `sources`. Distinto de `sql` (preview congelado). */
+  /** «User-Defined SQL»: texto informativo; se guarda tal cual, sin validar, y
+   *  no se exporta: el DDL se genera siempre de `sources`. Distinto de `sql`
+   *  (preview congelado). */
   customSql?: string;
-  /** Doc 61: valores UDP de la vista ({defId: value}) — keys de level='view'. */
+  /** Valores UDP de la vista ({defId: value}): keys de level='view'. */
   udpValues?: Record<string, string>;
-  /** Doc 109: color de la vista en todos sus canvases (como las tablas). */
+  /** Color de la vista en todos sus canvases (como las tablas). */
   color?: string | null;
 }
 
@@ -89,12 +88,12 @@ export interface ViewInput {
   description?: string;
   customSql?: string;
   udpValues?: Record<string, string>;
-  /** Doc 109: el payload es el doc COMPLETO — quien edita una vista conserva su color. */
+  /** El payload es el doc completo: quien edita una vista conserva su color. */
   color?: string | null;
 }
 
 /** Normaliza el doc para el changeset (espejo de la normalización del apply):
- *  tableId ↔ sourceTableIds coherentes — el payload es el DOC COMPLETO. */
+ *  tableId ↔ sourceTableIds coherentes; el payload es el doc completo. */
 function normalizeInput(body: ViewInput): ViewInput {
   const src = body.sourceTableIds?.length
     ? body.sourceTableIds
@@ -102,8 +101,8 @@ function normalizeInput(body: ViewInput): ViewInput {
   return { ...body, sourceTableIds: src, tableId: src[0] ?? body.tableId };
 }
 
-/** Doc 109: el documento VIGENTE de una vista en la working copy (null = no
- *  existe o no hay sesión de edición) — base de un guardado (ver `currentTable`). */
+/** Documento vigente de una vista en la working copy (null = no existe o no
+ *  hay sesión de edición): base de un guardado (ver `currentTable`). */
 export async function currentView(id: string): Promise<View | null> {
   const a = active();
   if (!a) return null;
@@ -111,23 +110,23 @@ export async function currentView(id: string): Promise<View | null> {
   return v ?? null;
 }
 
-/** Vistas de una tabla concreta (con changeset: estado EFECTIVO). */
+/** Vistas de una tabla concreta (con changeset: estado efectivo). */
 export function listViews(tableId: string): Promise<View[]> {
   const a = active();
   if (a) return csvc.effective<View>(a, 'views', { tableId });
   return apiGet<View[]>(`${VIEWS}?tableId=${encodeURIComponent(tableId)}`);
 }
 
-/** Doc 102 (431): ids por GET — 100 uuid ≈ 4 KB de URL, lejos del tope de
+/** Ids por GET: 100 uuid ≈ 4 KB de URL, lejos del tope de
  *  16 KB (línea de pedido + cabeceras) del servidor Node del front. */
 export const VIEW_IDS_PER_GET = 100;
 
-/** Vistas de VARIAS tablas (p.ej. «Import existing tables» con sus vistas), en
- *  tandas de `VIEW_IDS_PER_GET` tablas por request — sin draft contra
- *  producción; con changeset activo contra su estado efectivo (doc 105: antes
- *  era UN pedido por tabla). Todo o nada: si una tanda falla, falla la lectura.
- *  Dedup por id y filtro de respaldo por fuentes (un backend viejo ignora
- *  `tableIds` en el estado efectivo y devolvería todas las vistas). */
+/** Vistas de varias tablas (p. ej. «Import existing tables» con sus vistas), en
+ *  tandas de `VIEW_IDS_PER_GET` tablas por request: sin draft, contra
+ *  producción; con changeset activo, contra su estado efectivo. Todo o nada: si
+ *  una tanda falla, falla la lectura. Dedup por id y filtro de respaldo por
+ *  fuentes (si el backend ignorara `tableIds` en el estado efectivo, devolvería
+ *  todas las vistas del proyecto). */
 export async function listViewsForTables(tableIds: string[]): Promise<View[]> {
   if (!tableIds.length) return [];
   const a = active();
@@ -145,11 +144,11 @@ export async function listViewsForTables(tableIds: string[]): Promise<View[]> {
   return [...byId.values()];
 }
 
-/** Una vista de la tabla con los canvases donde es MIEMBRO (doc 70 §2.4). */
+/** Una vista de la tabla con los canvases donde es miembro. */
 export interface TableViewRow extends View { canvases: { id: string; name: string }[]; }
 
-/** Vistas GLOBALES de una tabla (la tabla es canónica: incluye las que viven
- *  sólo en otros canvases) con sus canvases — tab Views del panel («This
+/** Vistas globales de una tabla (la tabla es canónica: incluye las que viven
+ *  solo en otros canvases) con sus canvases: tab Views del panel («This
  *  canvas» / «Other canvases»), espejo de `gov.tableLinks`. Con changeset
  *  activo el backend aplica el overlay del draft. */
 export function tableViews(tableId: string): Promise<{ views: TableViewRow[]; total: number }> {
@@ -159,7 +158,7 @@ export function tableViews(tableId: string): Promise<{ views: TableViewRow[]; to
   return apiGet<{ views: TableViewRow[]; total: number }>(`${VIEWS}/for-table?${params.toString()}`);
 }
 
-/** Crear / editar / borrar una vista va SIEMPRE por la versión en edición
+/** Crear / editar / borrar una vista va siempre por la versión en edición
  *  (como tablas y columnas en governance): si la sesión se degradó, rechaza. */
 function editingCs(): string {
   const s = useSessionStore.getState();
@@ -180,9 +179,6 @@ export async function updateView(id: string, body: ViewInput): Promise<View> {
   const doc = { ...normalizeInput(body), id } as View;
   return csvc.recordChange(a, 'views', id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
 }
-
-// Doc 91 D6: el sandbox `POST /api/views/sql/parse` (Validate) se RETIRÓ — el
-// User-Defined SQL se guarda verbatim, sin validar.
 
 export async function deleteView(id: string): Promise<{ deleted: boolean }> {
   const a = editingCs();

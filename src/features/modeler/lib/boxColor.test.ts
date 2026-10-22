@@ -1,5 +1,5 @@
-// Doc 112 — vista previa de la ficha del canvas: mientras está abierta, sus
-// colores PENDIENTES (sin grabar) se ven en las cajas; Save los graba, Cancel
+// Vista previa de la ficha del canvas: mientras está abierta, sus colores
+// pendientes (sin grabar) se ven en las cajas; Save los graba, Cancel
 // los descarta. `boxHex` los aplica encima de los colores grabados del canvas.
 import { describe, expect, it } from 'vitest';
 import { boxHex } from './boxColor';
@@ -24,7 +24,7 @@ describe('boxHex con la vista previa de la ficha', () => {
     expect(boxHex('t1', null, canvas, themes, { t1: null })).toBeNull();
   });
 
-  it('una caja que no está en la vista previa se ve como siempre', () => {
+  it('una caja que no está en la vista previa se ve con sus colores grabados', () => {
     expect(boxHex('t1', '#92D050', canvas, themes, { t3: '#FF0000' })).toBe('#FFFF80');
   });
 });

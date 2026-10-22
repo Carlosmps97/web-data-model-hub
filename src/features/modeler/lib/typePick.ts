@@ -1,20 +1,19 @@
-// Lógica pura del selector de tipos y dominios (doc 41). El combobox de
-// "Type override" dejó de ser texto libre (fuente de errores según los
-// modeladores): catálogo cerrado en MAYÚSCULAS (convención del DDV, y los
-// defaults de dominio se comparan por string exacto), búsqueda "contiene"
-// case-insensitive, y tipos parametrizados editados por argumentos puntuales.
+// Lógica pura del selector de tipos y dominios. El combobox de "Type override"
+// no es texto libre (evita errores de tipeo): catálogo cerrado en mayúsculas
+// (convención de los modelos, y los defaults de dominio se comparan por string
+// exacto), búsqueda "contiene" case-insensitive, y tipos parametrizados
+// editados por argumentos puntuales.
 import { COLUMN_DATA_TYPES } from '@/types/model';
 import { parseComplexType } from './complexTypes';
 
-/** ¿`text` contiene `query`? (case-insensitive; query vacía matchea todo).
- *  "Contiene" desde 2026-08-30 (pedido del owner) — reemplaza al "empieza
- *  por" original del doc 41 en TODAS las listas buscables del módulo Model. */
+/** ¿`text` contiene `query`? (case-insensitive; una query vacía siempre matchea).
+ *  Es el criterio de búsqueda de todas las listas buscables del módulo Model. */
 export function containsCI(text: string, query: string): boolean {
   return text.toLowerCase().includes(query.trim().toLowerCase());
 }
 
-/** Catálogo del combobox: canónico en MAYÚSCULAS, orden alfabético. Incluye
- *  STRUCT/ARRAY/MAP (elegirlos abre el builder — ya no van como botones). */
+/** Catálogo del combobox: canónico en mayúsculas, orden alfabético. Incluye
+ *  STRUCT/ARRAY/MAP (elegirlos abre el builder). */
 export const TYPE_OPTIONS: string[] = [...COLUMN_DATA_TYPES]
   .map((t) => t.toUpperCase())
   .sort();
@@ -24,13 +23,13 @@ export const TYPE_OPTIONS: string[] = [...COLUMN_DATA_TYPES]
 const ARG_SPECS: Record<string, string[]> = {
   DECIMAL: ['precision', 'scale'],
   NUMERIC: ['precision', 'scale'],
-  NUMBER: ['precision', 'scale'],   // doc 62: dominios Oracle (NUMBER(22,3))
+  NUMBER: ['precision', 'scale'],   // dominios Oracle (NUMBER(22,3))
   VARCHAR: ['length'],
   CHAR: ['length'],
   NVARCHAR: ['length'],
   VARBINARY: ['length'],
-  VARCHAR2: ['length'],             // doc 62: dominios Oracle (VARCHAR2(10))
-  // doc 106: Oracle / SQL Server / Databricks
+  VARCHAR2: ['length'],             // dominios Oracle (VARCHAR2(10))
+  // Oracle / SQL Server / Databricks
   NVARCHAR2: ['length'],
   NCHAR: ['length'],
   RAW: ['length'],
@@ -52,11 +51,11 @@ export function argSpecFor(base: string): string[] | null {
 }
 
 /** `DECIMAL(18,2)` → {base: 'DECIMAL', args: ['18','2']} (base normalizada a
- *  MAYÚSCULAS, tolerante a espacios/minúsculas). Solo bases del catálogo; los
+ *  mayúsculas, tolerante a espacios/minúsculas). Solo bases del catálogo; los
  *  complejos (`<`) y los tipos fuera de catálogo devuelven null — el caller
  *  los muestra tal cual como opción extra (patrón SchemaSelect: un valor
- *  legacy no rompe la edición). La base puede tener varias palabras
- *  (`TIMESTAMP WITH TIME ZONE`, doc 106). */
+ *  fuera de catálogo no rompe la edición). La base puede tener varias palabras
+ *  (`TIMESTAMP WITH TIME ZONE`). */
 export function parseParamType(value: string): { base: string; args: string[] } | null {
   const t = (value ?? '').trim();
   if (!t || t.includes('<')) return null;
@@ -66,16 +65,16 @@ export function parseParamType(value: string): { base: string; args: string[] } 
   const base = m[1].split(/\s+/).join(' ').toUpperCase();
   if (!TYPE_OPTIONS.includes(base)) return null;
   if (m[2] === undefined) return { base, args: [] };
-  // Doc 106: la MISMA gramática que el back (`_simple`): entre paréntesis, de 1
-  // a N argumentos válidos (N = los del tipo). `INT(11)`, `DECIMAL()` o
-  // `DECIMAL(10.5)` no son del catálogo: se muestran tal cual (valor legado).
+  // La misma gramática que el back (`_simple`): entre paréntesis, de 1 a N
+  // argumentos válidos (N = los del tipo). `INT(11)`, `DECIMAL()` o
+  // `DECIMAL(10.5)` no son del catálogo: se muestran tal cual.
   const args = m[2].split(',').map((a) => a.trim());
   if (args.length > (ARG_SPECS[base]?.length ?? 0) || !args.every(isTypeArg)) return null;
   return { base, args };
 }
 
-// Doc 106: un argumento es un número o una palabra (`MAX`, `*`, `-2`, `FLOAT32`)
-// con una unidad opcional que es una PALABRA (`30 CHAR`; `18 2` no) — espejo de
+// Un argumento es un número o una palabra (`MAX`, `*`, `-2`, `FLOAT32`) con una
+// unidad opcional que es una palabra (`30 CHAR`; `18 2` no) — espejo de
 // `_ARG_RE` del back. Nada que rompa el texto del tipo ni el DDL (`--` es un
 // comentario SQL). Solo ASCII. No valida por motor.
 const TYPE_ARG = /^-?[A-Za-z0-9_*]+(?: [A-Za-z][A-Za-z0-9_]*)?$/;
@@ -86,10 +85,10 @@ export function isTypeArg(a: string): boolean {
   return TYPE_ARG.test(normArg(a));
 }
 
-/** Arma el tipo desde base + argumentos: toma el PREFIJO de argumentos válidos
+/** Arma el tipo desde base + argumentos: toma el prefijo de argumentos válidos
  *  (un scale sin precision no tiene sentido; uno vacío o inválido corta), a lo
  *  sumo los que el tipo admite, y omite el paréntesis si no queda nada. Cada
- *  argumento sale en MAYÚSCULA y con un solo espacio (`30 char` → `30 CHAR`,
+ *  argumento sale en mayúscula y con un solo espacio (`30 char` → `30 CHAR`,
  *  `max` → `MAX`), como el back. */
 export function composeParamType(base: string, args: string[]): string {
   const max = ARG_SPECS[base.toUpperCase()]?.length ?? 0;
@@ -107,26 +106,25 @@ export function editTypeArg(spec: string[], draft: string[], i: number, raw: str
   return spec.map((_, j) => (j === i ? raw : (draft[j] ?? '')));
 }
 
-// ── Homologación del default de un PARENT DOMAIN (doc 64 r2) ──────────────
-// Espejo FRONT de `canonicalize_default_type` (app/core/datatypes.py, doc 62):
-// la BD todavía puede traer dominios con la grafía CRUDA del XML de Erwin
-// (`Array`, `BIG INTEGER`, `decimal (22,4)`) mientras el script de
-// homologación no corra con --apply — el front homologa AL CONSUMIR el
-// default (elegir el dominio, comparar override, mostrarlo en el combobox)
-// para que `Array` herede `ARRAY<>` y abra el builder, igual que elegir
-// ARRAY en la lista.
+// ── Homologación del default de un parent domain ──────────────────────────
+// Espejo en el front de `canonicalize_default_type` (app/core/datatypes.py):
+// la BD puede traer dominios con la grafía cruda del XML de Erwin (`Array`,
+// `BIG INTEGER`, `decimal (22,4)`) si el script de homologación no corrió con
+// --apply; el front homologa al consumir el default (elegir el dominio,
+// comparar override, mostrarlo en el combobox) para que `Array` herede
+// `ARRAY<>` y abra el builder, igual que elegir ARRAY en la lista.
 
 /** Sinónimos de dialecto → base del catálogo (solo para homologar defaults;
- *  espejo de `_BASE_ALIASES` del back). Doc 106: `INT` y `DOUBLE PRECISION`
- *  son del catálogo (quedan tal cual). */
+ *  espejo de `_BASE_ALIASES` del back). `INT` y `DOUBLE PRECISION` son del
+ *  catálogo (quedan tal cual). */
 const BASE_ALIASES: Record<string, string> = {
   BIGINTEGER: 'BIGINT', BOOL: 'BOOLEAN',
 };
 const normKey = (s: string) => s.replace(/\s+/g, '').toUpperCase();
 
-/** Canónico del INTERIOR de un complejo (espejo de `_canonical` del back:
+/** Canónico del interior de un complejo (espejo de `_canonical` del back:
  *  sin aliases ni expansión de pelados — si algo no se reconoce, el complejo
- *  ENTERO queda verbatim). */
+ *  entero queda verbatim). */
 function canonicalInner(t: string): string | null {
   const s = t.trim();
   if (!s) return null;
@@ -155,13 +153,13 @@ function canonicalInner(t: string): string | null {
   return p ? composeParamType(p.base, p.args) : null;
 }
 
-/** Default de dominio → grafía canónica de la plataforma. Reglas EN ORDEN
+/** Default de dominio → grafía canónica de la plataforma. Reglas en orden
  *  (mismas del back): 1) `ARRAY`/`MAP`/`STRUCT` "pelados" (o `<>` vacío) →
  *  `X<>` — lo mismo que emite el combobox al elegirlos; 2) complejo con
  *  contenido → recompone canónico (o verbatim si algo no parsea); 3) simple
- *  del catálogo → base MAYÚSCULA + argumentos compactos (`decimal (22,4)` →
+ *  del catálogo → base en mayúscula + argumentos compactos (`decimal (22,4)` →
  *  `DECIMAL(22,4)`); 4) sinónimos (`BIG INTEGER` → `BIGINT`) y reintento;
- *  5) sin reconocer → VERBATIM recortado (jamás se inventa un tipo). */
+ *  5) sin reconocer → verbatim recortado (jamás se inventa un tipo). */
 export function canonicalDefaultType(raw: string | null | undefined): string {
   const t = (raw ?? '').trim();
   if (!t) return '';

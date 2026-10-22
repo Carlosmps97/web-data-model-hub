@@ -1,10 +1,11 @@
 /* ============================================================
-   Global shell — TopNav (52px) + app page region (DMH-Erwin).
-   Pattern "A": white bar, bottom border #EAEDF2, logo + wordmark,
-   center nav links, right search + avatar/UserMenu. Light-only.
+   Shell global: TopNav (52px) + región de página de la app.
+   Patrón «A»: barra blanca, borde inferior #EAEDF2, logo + wordmark,
+   links de navegación al centro, búsqueda + avatar/UserMenu a la
+   derecha. Solo tema claro.
    ============================================================ */
 
-/* App root: column with the fixed TopNav on top and the routed page below. */
+/* Raíz de la app: columna con el TopNav fijo arriba y la página enrutada debajo. */
 .dmh-app { display: flex; flex-direction: column; height: 100vh; background: var(--page-bg); overflow: hidden; }
 .dmh-app-main { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
@@ -15,7 +16,7 @@
   position: relative; z-index: 40;
 }
 
-/* Brand (logo + wordmark) */
+/* Marca (logo + wordmark) */
 .dmh-brand { display: flex; align-items: center; gap: 10px; border: none; background: transparent; cursor: pointer; padding: 0; }
 .dmh-brand-logo {
   width: 28px; height: 28px; border-radius: 8px; background: var(--navy); color: #fff;
@@ -23,7 +24,7 @@
 }
 .dmh-brand-word { font-size: 14px; font-weight: 700; letter-spacing: -.01em; color: var(--navy); white-space: nowrap; }
 
-/* Center nav links */
+/* Links de navegación al centro */
 .dmh-nav { display: flex; align-items: center; gap: 4px; }
 .dmh-nav-link {
   display: inline-flex; align-items: center; gap: 7px;
@@ -37,10 +38,10 @@
 
 .dmh-nav-spacer { flex: 1; }
 
-/* Right cluster */
+/* Grupo de la derecha */
 .dmh-topnav-right { display: flex; align-items: center; gap: 12px; }
 
-/* Search field (200px, #F4F6F9 bg) */
+/* Campo de búsqueda (200px, fondo #F4F6F9) */
 .dmh-topnav-search { position: relative; width: 200px; }
 .dmh-topnav-search svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-muted-2); pointer-events: none; }
 .dmh-topnav-search input {
@@ -77,15 +78,15 @@
 .dmh-usermenu-item.is-active .dmh-usermenu-check { color: var(--blue); display: inline-flex; }
 .dmh-usermenu-check { color: transparent; display: inline-flex; flex-shrink: 0; }
 
-/* ───────────── Legacy screens nested under the TopNav ─────────────── */
-/* The modeler's .wk grid (and the governance shell) hard-code height:100vh,
-   which would overflow by the 52px TopNav. When nested under the global shell
-   we constrain them to the available region (R3 re-styles the canvas shell). */
+/* ───────────── Pantallas anidadas bajo el TopNav ─────────────────── */
+/* La grilla .wk del modeler (y el shell de governance) fijan height:100vh,
+   que desbordaría por los 52px del TopNav. Anidadas bajo el shell global,
+   se limitan a la región disponible. */
 .dmh-app-main > .dmh-model-route { flex: 1; min-height: 0; display: flex; }
 .dmh-app-main > .dmh-model-route > .wk { height: 100%; flex: 1; min-width: 0; }
 .dmh-app-main > .dmh { height: 100%; }
 
-/* ─────────────────────────────── Page stub ───────────────────────── */
+/* ─────────────────────────── Página simple (stub) ────────────────── */
 .dmh-stub { flex: 1; overflow-y: auto; padding: 40px 36px; }
 .dmh-stub-inner { max-width: 760px; }
 .dmh-stub h1 { font-size: 26px; font-weight: 700; letter-spacing: -.015em; color: var(--navy); line-height: 1.15; }

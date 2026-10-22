@@ -1,14 +1,14 @@
 /**
- * Lógica PURA del copy/paste de TABLAS completas (doc 50). Sin IO — la
- * orquestación (nombres tomados en el proyecto, bulk, canvas, layout,
- * reintentos) vive en `useModelerStore.pasteTable`.
+ * Lógica pura del copy/paste de tablas completas. Sin IO: la orquestación
+ * (nombres tomados en el proyecto, bulk, canvas, layout, reintentos) vive en
+ * `useModelerStore.pasteTable`.
  *
- * El paste es la variante "tabla NUEVA desde un snapshot" de
- * createTableFromSources (docs 43/45): la tabla hereda esquema, definición,
- * UDPs y su color (doc 109, como Erwin); cada columna hereda su metadata INDIVIDUAL completa con id NUEVO y el
- * ORDEN DE LA LLAVE re-numerado. Viajan las DOS facetas (doc 118): tipo lógico
+ * El paste es la variante "tabla nueva desde un snapshot" de
+ * createTableFromSources: la tabla hereda esquema, definición, UDPs y su color
+ * (como Erwin); cada columna hereda su metadata individual completa con id
+ * nuevo y el orden de la llave re-numerado. Viajan las dos facetas: tipo lógico
  * y su override, comment físico, override del físico y marcas de faceta. Lo que
- * NO viaja: relaciones (pedido explícito) ni el flag `isForeignKey` (sin
+ * no viaja: relaciones (decisión de diseño) ni el flag `isForeignKey` (sin
  * relación sería una marca huérfana) ni vistas.
  */
 import {
@@ -22,9 +22,9 @@ import { orderColumns } from './columnOrder';
 const PHYS_SUFFIX = /_copy_\d+$/i;
 const LOGI_SUFFIX = / copy \d+$/i;
 
-/** Base del nombre de la copia: despoja UN sufijo previo (`X_copy_2` copiada
- *  → base `X`, no `X_copy_2_copy_1`) — el correlativo cuenta copias de la
- *  MISMA tabla. */
+/** Base del nombre de la copia: despoja un sufijo previo (`X_copy_2` copiada
+ *  → base `X`, no `X_copy_2_copy_1`); el correlativo cuenta copias de la
+ *  misma tabla. */
 export function copyNameBase(name: string, kind: 'physical' | 'logical'): string {
   const trimmed = name.trim();
   const base = trimmed.replace(kind === 'physical' ? PHYS_SUFFIX : LOGI_SUFFIX, '');
@@ -32,11 +32,11 @@ export function copyNameBase(name: string, kind: 'physical' | 'logical'): string
 }
 
 /**
- * Nombres de la copia: el menor `n ≥ 1` cuyo FÍSICO `${base}_copy_${n}` esté
- * libre (CI) contra `takenPhysical`; el lógico usa el MISMO `n` (los lógicos
- * no tienen unicidad — doc 50 §2 — pero mantener el correlativo alineado los
- * hace legibles). La llama `pasteNames` con los físicos tomados del proyecto
- * (la unicidad del físico es por proyecto, doc 75).
+ * Nombres de la copia: el menor `n ≥ 1` cuyo físico `${base}_copy_${n}` esté
+ * libre (CI) contra `takenPhysical`; el lógico usa el mismo `n` (los lógicos
+ * no tienen unicidad, pero mantener el correlativo alineado los hace
+ * legibles). La llama `pasteNames` con los físicos tomados del proyecto
+ * (la unicidad del físico es por proyecto).
  */
 export function nextCopyNames(
   basePhysical: string,
@@ -55,7 +55,7 @@ export function nextCopyNames(
 }
 
 /**
- * Nombres de la tabla pegada (doc 118): si el físico está LIBRE en el destino
+ * Nombres de la tabla pegada: si el físico está libre en el destino
  * (CI) se conserva tal cual —lógico incluido, aunque ya traiga un `_copy_n`—;
  * si está tomado, el primer `_copy_n` libre sobre su base (`copyNameBase`).
  * `takenPhysical`: los físicos que ya existen en el destino.
@@ -79,7 +79,7 @@ export function pasteNames(
 
 /** Metadata propia de una columna que viaja al pegarla (tabla o columnas),
  *  sin nombres, tipo físico, dominio, llave ni orden: payload limpio — cada
- *  clave sólo cuando se aparta del default (patrón doc 40). */
+ *  clave solo cuando se aparta del default. */
 export function columnCopyFields(c: CanonicalColumn): Partial<CanonicalColumn> {
   const description = (c.description ?? '').trim();
   const physicalDescription = (c.physicalDescription ?? '').trim();
@@ -98,14 +98,13 @@ export function columnCopyFields(c: CanonicalColumn): Partial<CanonicalColumn> {
 }
 
 /**
- * Cambios del lote (UN recordChangesBulk) de la tabla pegada. Reglas de
+ * Cambios del lote (un solo recordChangesBulk) de la tabla pegada. Reglas de
  * createTableFromSources adaptadas al snapshot:
- *  - ids SIEMPRE nuevos (tabla `input.id`, columnas `newId()`);
- *  - ordinal secuencial 0.. en el ORDEN ÚNICO del snapshot (doc 94: PK
- *    primero, cada bloque por ordinal — un dato viejo desordenado se copia
- *    normalizado);
- *  - `isForeignKey` NO viaja (doc 50: las relaciones no se copian);
- *  - payload limpio: claves opcionales solo cuando aportan (patrón doc 40).
+ *  - ids siempre nuevos (tabla `input.id`, columnas `newId()`);
+ *  - ordinal secuencial 0.. en el orden único del snapshot (PK primero, cada
+ *    bloque por ordinal; un dato desordenado se copia normalizado);
+ *  - `isForeignKey` no viaja (las relaciones no se copian);
+ *  - payload limpio: claves opcionales solo cuando aportan.
  */
 export function copyTableToBulk(input: {
   table: CanonicalTable;
@@ -113,16 +112,16 @@ export function copyTableToBulk(input: {
   id: string;
   physicalName: string;
   logicalName: string;
-  /** Procedencia (doc 51): la tabla y los físicos de las columnas de ORIGEN por
-   *  id — `table`/`cols` pueden traer ya los nombres finales de la copia — y,
-   *  desde otro proyecto, su nombre (doc 118). Sin ella, los de `table`/`cols`. */
+  /** Procedencia: la tabla y los físicos de las columnas de origen por id
+   *  (`table`/`cols` pueden traer ya los nombres finales de la copia) y, desde
+   *  otro proyecto, su nombre. Sin ella, los de `table`/`cols`. */
   source?: { table: string; columns: ReadonlyMap<string, string>; project?: string };
   /** Inyectable para tests; default crypto.randomUUID. */
   newId?: () => string;
 }): BulkChange[] {
   const newId = input.newId ?? (() => crypto.randomUUID());
   const t = input.table;
-  // Procedencia (doc 51): el historial de auditoría muestra de qué tabla/
+  // Procedencia: el historial de auditoría muestra de qué tabla/
   // columna nació cada entidad pegada ("Copied from …").
   const srcTable = input.source?.table ?? (t.physicalName || t.logicalName);
   const fromProject = input.source?.project ? { sourceProject: input.source.project } : {};

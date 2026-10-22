@@ -4,7 +4,7 @@ import { facetNouns, type Facet } from '@/lib/facets';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
 import type { PasteColumnItem, PasteOptions, PasteReview, PasteUdpItem } from '../lib/pasteReview';
 
-/** Columnas por página en la lista del popup (owner: 10 y «cargar más»). */
+/** Columnas por página en la lista del popup (10 y «cargar más»). */
 export const PASTE_PAGE = 10;
 
 /** Filas a la vista: búsqueda «contiene» sobre el nombre lógico o físico (sin
@@ -18,7 +18,7 @@ export function visibleColumns(cols: PasteColumnItem[], q: string, shown: number
 }
 
 /**
- * Lo que va a viajar en un pegado (doc 118), compartido por «Paste table» y
+ * Lo que va a viajar en un pegado, compartido por «Paste table» y
  * «Paste columns»: checks por grupo (UDPs lógicos, UDPs físicos, parent
  * domains), selector Lógico | Físico con la metadata de esa faceta, la tabla
  * agrupada y las columnas una por una (10 por página, «cargar más» y buscador),
@@ -93,7 +93,7 @@ export default function PasteDetails({ review, options, onOptions, facet, onFace
             const isOpen = openId === c.sourceId;
             const name = facet === 'logical' ? c.logicalName : c.physicalName;
             const type = facet === 'logical' ? c.logicalType : c.physicalType;
-            // La fila muestra lo que VIAJA: sin su check —o si la columna se omite—, ni el dominio ni los UDP.
+            // La fila muestra lo que viaja: sin su check (o si la columna se omite), ni el dominio ni los UDP.
             const domain = !c.skipped && c.domain?.status === 'copy' ? (facet === 'logical' ? c.domain.name : c.domain.physicalName) : '';
             const udps = facetUdps(c.udps);
             const copied = c.skipped ? 0 : udps.filter((u) => u.status === 'copy').length;

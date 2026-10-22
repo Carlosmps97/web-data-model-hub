@@ -1,6 +1,6 @@
-// Presentación del historial de auditoría (doc 51) — helpers PUROS que
-// consume AuditHistory (testeables sin DOM). El dato viene del backend tal
-// cual el ledger lo derivó; acá solo se vuelve legible (UI en inglés).
+// Presentación del historial de auditoría — helpers puros que consume
+// AuditHistory (testeables sin DOM). El dato viene del backend tal cual el
+// ledger lo deriva; acá solo se vuelve legible (UI en inglés).
 import type { HistoryItem, HistoryUser } from '@/services/changeset.service';
 
 export const ACTION_LABEL: Record<HistoryItem['action'], string> = {
@@ -9,8 +9,8 @@ export const ACTION_LABEL: Record<HistoryItem['action'], string> = {
   deleted: 'Deleted',
 };
 
-/** Autor de la fila: nombre > email > id; la entrada sintética de la
- *  migración no tiene usuario real — "System (initial load)". */
+/** Autor de la fila: nombre > email > id; la entrada sintética de la carga
+ *  inicial (migración desde Erwin) no tiene usuario real — "System (initial load)". */
 export function userLabel(item: Pick<HistoryItem, 'user' | 'synthetic'>): string {
   if (item.synthetic) return 'System (initial load)';
   const u = item.user;
@@ -30,7 +30,7 @@ export function originText(item: Pick<HistoryItem, 'origin'>): string | null {
   const src = o.sourceTable && o.sourceColumn
     ? `${o.sourceTable}.${o.sourceColumn}`
     : o.sourceTable || o.sourceColumn || null;
-  // Doc 118: desde OTRO proyecto, también su nombre.
+  // Si viene de otro proyecto, también su nombre.
   const from = o.sourceProject ? ` (project ${o.sourceProject})` : '';
   if (o.kind === 'paste-table') return `Copied from table ${src ?? '…'}${from}`;
   if (o.kind === 'paste-columns') return `Copied from column ${src ?? '…'}${from}`;

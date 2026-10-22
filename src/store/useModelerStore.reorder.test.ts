@@ -1,6 +1,6 @@
-// Doc 74: el drag&drop de Properties → Columns, el grip del canvas y las
-// flechas del inspector reordenan el ÚNICO orden de la tabla (`ordinal`, el
-// mismo en lógico y físico): se persiste sólo lo que cambió, con Undo.
+// El drag&drop de Properties → Columns, el grip del canvas y las flechas del
+// inspector reordenan el único orden de la tabla (`ordinal`, el mismo en lógico
+// y físico): se persiste solo lo que cambia, con Undo.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('@/services/governance.service', () => ({
@@ -29,8 +29,8 @@ beforeEach(() => {
 
 const calls = () => vi.mocked(gov.updateColumn).mock.calls.map(([c]) => ({ id: c.id, ordinal: c.ordinal }));
 
-describe('useModelerStore.reorderColumns (doc 74)', () => {
-  it('escribe ordinal sólo en las columnas que se movieron y deja Undo', async () => {
+describe('useModelerStore.reorderColumns', () => {
+  it('escribe ordinal solo en las columnas que se movieron y deja Undo', async () => {
     await useModelerStore.getState().reorderColumns('t1', ['b', 'a', 'c']);
     expect(calls()).toEqual([{ id: 'b', ordinal: 0 }, { id: 'a', ordinal: 1 }]);
     const byId = new Map(useModelerStore.getState().diagram!.columns.map((c) => [c.id, c]));

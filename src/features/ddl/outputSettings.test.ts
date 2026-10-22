@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_OUTPUT_SETTINGS, mergeOutputSettings, splitOutputSettings } from './outputSettings';
 import { DEFAULT_ORACLE_OPTS } from './oracle';
 
-describe('mergeOutputSettings (doc 93 D1)', () => {
+describe('mergeOutputSettings', () => {
   it('sin nada guardado ⇒ los defaults de la macro', () => {
     expect(mergeOutputSettings(undefined)).toEqual(DEFAULT_OUTPUT_SETTINGS);
     expect(mergeOutputSettings(null).fileNames).toEqual({
@@ -16,7 +16,7 @@ describe('mergeOutputSettings (doc 93 D1)', () => {
     expect(s.location).toBe('s3://x');
     expect(s.fileNames).toMatchObject({ modeledView: 'NEG', table: 'TABLE' });
   });
-  it('valores inválidos o desconocidos se ignoran sin romper (Review Focus #5)', () => {
+  it('valores inválidos o desconocidos se ignoran sin romper', () => {
     const s = mergeOutputSettings({ typeCase: 'raro', external: 'yes', zzz: 1, fileNames: { nameCase: 'x' }, tblProperties: [{ key: 'a', value: 1 }, 'x'] });
     expect(s.typeCase).toBe('lower');
     expect(s.external).toBe(true);
@@ -40,8 +40,8 @@ describe('mergeOutputSettings (doc 93 D1)', () => {
   });
 });
 
-describe('mergeOutputSettings — dialecto y configuración Oracle (doc 101)', () => {
-  it('sin nada guardado (o un proyecto de antes del doc 101): Databricks por default y Oracle con sus defaults', () => {
+describe('mergeOutputSettings — dialecto y configuración Oracle', () => {
+  it('sin nada guardado (o sin dialecto ni config Oracle): Databricks por default y Oracle con sus defaults', () => {
     const s = mergeOutputSettings({ typeCase: 'upper', includeKeys: true });
     expect(s.dialect).toBe('databricks');
     expect(s.oracle).toEqual(DEFAULT_ORACLE_OPTS);
@@ -53,12 +53,12 @@ describe('mergeOutputSettings — dialecto y configuración Oracle (doc 101)', (
   it('toma el dialecto y la config Oracle guardados, clave a clave', () => {
     const s = mergeOutputSettings({
       dialect: 'oracle',
-      oracle: { includeComments: true, identifierCase: 'as-is', defaultSchema: 'bcp' },
+      oracle: { includeComments: true, identifierCase: 'as-is', defaultSchema: 'stg' },
     });
     expect(s.dialect).toBe('oracle');
-    expect(s.oracle).toEqual({ ...DEFAULT_ORACLE_OPTS, includeComments: true, identifierCase: 'as-is', defaultSchema: 'bcp' });
+    expect(s.oracle).toEqual({ ...DEFAULT_ORACLE_OPTS, includeComments: true, identifierCase: 'as-is', defaultSchema: 'stg' });
   });
-  it('doc 106: el mapeo de tipos y el tamaño máximo que guardó una versión anterior se ignoran', () => {
+  it('el mapeo de tipos y el tamaño máximo guardados en la config Oracle se ignoran', () => {
     const s = mergeOutputSettings({
       dialect: 'oracle',
       oracle: { typeCase: 'lower', typeMap: [{ from: 'DATETIME', to: 'DATE' }], maxStringSize: 'extended' },
@@ -78,9 +78,9 @@ describe('mergeOutputSettings — dialecto y configuración Oracle (doc 101)', (
     expect(mergeOutputSettings({ oracle: 'x' }).oracle).toEqual(DEFAULT_ORACLE_OPTS);
   });
 
-  it('doc 108: NOT NULL aparte y el esquema (sin / del modelo / elegido) se guardan; lo inválido cae a su default', () => {
-    const ok = mergeOutputSettings({ oracle: { includeNotNull: true, schemaMode: 'custom', defaultSchema: 'bcp' } });
-    expect(ok.oracle).toEqual({ ...DEFAULT_ORACLE_OPTS, includeNotNull: true, schemaMode: 'custom', defaultSchema: 'bcp' });
+  it('NOT NULL aparte y el esquema (sin / del modelo / elegido) se guardan; lo inválido cae a su default', () => {
+    const ok = mergeOutputSettings({ oracle: { includeNotNull: true, schemaMode: 'custom', defaultSchema: 'stg' } });
+    expect(ok.oracle).toEqual({ ...DEFAULT_ORACLE_OPTS, includeNotNull: true, schemaMode: 'custom', defaultSchema: 'stg' });
     const bad = mergeOutputSettings({ oracle: { includeNotNull: 'si', schemaMode: 'raro' } });
     expect(bad.oracle.includeNotNull).toBe(false);
     expect(bad.oracle.schemaMode).toBe('none');

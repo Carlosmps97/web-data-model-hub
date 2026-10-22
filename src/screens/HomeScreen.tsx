@@ -1,21 +1,23 @@
 /**
- * HomeScreen (p0) — the Data Model Hub workspace landing.
+ * HomeScreen: pantalla de inicio de Data Model Hub.
  *
- * Per the DMH-Erwin v20260625-2 design (#p0) the Home is purely informational:
- *   · title row: "Workspace overview" eyebrow + "Welcome back, {name}" + a note
- *     pointing to Model (canvas) for choosing / creating a version
- *   · PROJECTS strip (chips refilter the 5 counters; "+N more")
- *   · 5 summary cards (Tables / Views / Relationships / Subject Areas / Projects)
- *   · two columns: Requests assigned to you (left) + Versions read-only (right)
+ * El Home es puramente informativo:
+ *   · fila de título: antetítulo "Workspace overview" + "Welcome back, {name}" + una
+ *     nota que remite a Model (canvas) para elegir o crear una versión
+ *   · franja PROJECTS (los chips refiltran los 5 contadores; "+N more")
+ *   · 5 tarjetas de resumen (Tables / Views / Relationships / Subject Areas / Projects)
+ *   · dos columnas: requests asignados al usuario (izquierda) + versiones de solo
+ *     lectura (derecha)
  *
- * Version creation / snapshot now lives INSIDE Model (the Open-model entry moved
- * to the canvas toolbar). Doc 104: the Versions panel doesn't edit, but its
- * "Version tools" popup lets the owner (or an administrator) transfer or delete
- * a draft; the row shows ⇄ when a version changed hands.
+ * La creación de versiones y la consulta de snapshots están dentro de Model (barra
+ * del canvas). El panel de versiones no edita, pero su popup "Version tools" permite
+ * al dueño de un draft (o a un administrador) transferirlo o eliminarlo; la fila
+ * muestra ⇄ cuando una versión fue transferida.
  *
- * Data: dashboard.service.getSummary + versioning.service (versions, published,
- * requests, users) + projects.service.listProjects. The actor comes from
- * useSessionStore (injects X-Dev-User). Loading → skeleton; errors → sonner.
+ * Datos: dashboard.service.getSummary + versioning.service (versions, published,
+ * requests, users) + projects.service.listProjects. El actor sale de
+ * useSessionStore (en desarrollo inyecta X-Dev-User). Carga → skeleton; errores →
+ * toast de sonner.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -26,6 +28,7 @@ import { Avatar, Button } from '@/components/ui';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import NewProjectModal from '@/components/NewProjectModal';
 import { useAuthStore } from '@/store/useAuthStore';
+import { newProjectBlock } from '@/lib/permissionHints';
 import { useSessionStore } from '@/store/useSessionStore';
 import { runBlocking } from '@/store/useBusyStore';
 import { getSummary } from '@/services/dashboard.service';
@@ -47,7 +50,7 @@ import type {
   VersionStatus,
 } from '@/types/versioning';
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── auxiliares ───────────────────────────────────────────────────────────────
 
 interface PillSpec {
   cls: string;
@@ -55,7 +58,7 @@ interface PillSpec {
   hollow?: boolean;
 }
 
-/** Maps a real backend status onto the design's inline status pill. */
+/** Traduce el estado del backend a la píldora de estado de la fila. */
 function statusPill(status: VersionStatus, isProduction: boolean): PillSpec {
   if (isProduction) return { cls: 'dmh-vpill--production', text: 'Production' };
   switch (status) {
@@ -72,7 +75,7 @@ function statusPill(status: VersionStatus, isProduction: boolean): PillSpec {
   }
 }
 
-/** Label tone for the version mono code, matching the status. */
+/** Tono de la etiqueta monoespaciada de la versión, según su estado. */
 function labelTone(status: VersionStatus, isProduction: boolean): string {
   if (isProduction) return 'tone-green';
   if (status === 'submitted') return 'tone-blue';
@@ -88,21 +91,21 @@ const STAT_DEFS: { key: keyof DashboardSummary; label: string }[] = [
 ];
 
 const AVATAR_TONES = ['blue', 'purple', 'green', 'navy'] as const;
-/** Stable avatar tone from an id so a given user always gets the same color. */
+/** Tono de avatar estable a partir del id: un mismo usuario recibe siempre el mismo color. */
 function avatarTone(id: string): (typeof AVATAR_TONES)[number] {
   let h = 0;
   for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return AVATAR_TONES[h % AVATAR_TONES.length];
 }
 
-/** Epoch ms of the most recent timestamp on a row (for sorting). */
+/** Epoch en ms de la marca de tiempo más reciente de la fila (para ordenar). */
 function rowTs(v: VersionRow): number {
   const iso = v.submittedAt ?? v.updatedAt ?? v.createdAt ?? null;
   const t = iso ? Date.parse(iso) : NaN;
   return Number.isNaN(t) ? 0 : t;
 }
 
-/** Compact relative time ("2h ago", "yesterday", "3d ago", or a date). */
+/** Tiempo relativo compacto ("2h ago", "yesterday", "3d ago" o una fecha). */
 function relTime(iso?: string | null): string {
   if (!iso) return '';
   const then = Date.parse(iso);
@@ -123,7 +126,7 @@ function relTime(iso?: string | null): string {
 
 const MAX_PROJECT_CHIPS = 6;
 
-// ── component ────────────────────────────────────────────────────────────────
+// ── componente ───────────────────────────────────────────────────────────────
 
 export default function HomeScreen() {
   const navigate = useNavigate();
@@ -138,21 +141,22 @@ export default function HomeScreen() {
 
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [requests, setRequests] = useState<VersionRow[]>([]);
-  // Doc 75 D15: alta de proyecto desde el Home (vacío o copiando estándares).
+  // Alta de proyecto desde el Home (vacío o copiando estándares).
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   // Grupos de versiones por proyecto colapsados por el usuario.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [users, setUsers] = useState<SimUserDto[]>([]);
   const [listsLoading, setListsLoading] = useState(true);
 
-  // Doc 65: popup "Version tools" (Compare + Details). `versionId` preselecciona
-  // la versión en la pestaña Details (botón ⓘ de la fila).
+  // Popup "Version tools" (Compare + Details). `versionId` preselecciona la
+  // versión en la pestaña Details (botón ⓘ de la fila).
   const [toolsOpen, setToolsOpen] =
     useState<{ tab: 'compare' | 'details'; versionId?: string | null; projectId?: string | null } | null>(null);
 
-  // Rollback: restaura el modelo a CUALQUIER versión publicada pasada (crea un
+  // Rollback: restaura el modelo a cualquier versión publicada pasada (crea un
   // draft que deshace las versiones posteriores). Permiso propio `rollback`.
   const canRollback = useAuthStore((s) => s.has('rollback'));
+  const newProjectBlocked = useAuthStore((s) => newProjectBlock(s.user));
   const [rollbackTarget, setRollbackTarget] = useState<VersionRow | null>(null);
   const [rollingBack, setRollingBack] = useState(false);
   const doRollback = async () => {
@@ -193,7 +197,8 @@ export default function HomeScreen() {
     [projects],
   );
 
-  // Project list + non-summary lists load once (actor-scoped via the http header).
+  // Proyectos y listas ajenas al resumen: se cargan una vez (acotadas al actor por
+  // el header de http).
   useEffect(() => {
     let cancelled = false;
     setListsLoading(true);
@@ -201,7 +206,7 @@ export default function HomeScreen() {
       listProjects(),
       listVersions(),
       listRequests({ reviewer: user.id }),
-      // Sólo nombres (cosmético): si falla, se ven los ids — no deja el Home en blanco.
+      // Solo nombres (cosmético): si falla, se ven los ids y el Home no queda en blanco.
       listUserNames().catch(() => []),
     ])
       .then(([proj, vers, reqs, us]) => {
@@ -221,16 +226,16 @@ export default function HomeScreen() {
     return () => {
       cancelled = true;
     };
-    // Re-run when the simulated actor changes so the inbox reflects them.
+    // Se vuelve a ejecutar cuando cambia el actor, para que la bandeja lo refleje.
   }, [user.id]);
 
-  // Stable key for the multi-project filter (sorted ids) → drives the summary.
+  // Clave estable del filtro multiproyecto (ids ordenados) → dispara el resumen.
   const projectFilterKey = useMemo(
     () => [...selectedProjectIds].sort().join(','),
     [selectedProjectIds],
   );
 
-  // Summary reloads whenever the project filter (union) changes.
+  // El resumen se recarga cada vez que cambia el filtro de proyectos (unión).
   useEffect(() => {
     let cancelled = false;
     setSummaryLoading(true);
@@ -250,8 +255,8 @@ export default function HomeScreen() {
     };
   }, [projectFilterKey]);
 
-  /** Doc 75: versiones agrupadas POR PROYECTO (A–Z); en cada grupo la
-   *  producción del proyecto va primero y el resto por recencia. */
+  /** Versiones agrupadas por proyecto (A–Z); en cada grupo la producción
+   *  del proyecto va primero y el resto por recencia. */
   const versionGroups = useMemo(() => {
     const meta = projectMeta(versions, user.id);
     const byProject = new Map<string, VersionRow[]>();
@@ -288,7 +293,7 @@ export default function HomeScreen() {
   return (
     <div className="dmh-home">
       <div className="dmh-home-inner">
-        {/* ── title row ──────────────────────────────────────────── */}
+        {/* ── fila de título ─────────────────────────────────────── */}
         <div className="dmh-home-head">
           <div className="dmh-home-head-titles">
             <div className="dmh-home-eyebrow">Workspace overview</div>
@@ -303,13 +308,14 @@ export default function HomeScreen() {
             <br />
             or create a version.
           </div>
-          <button type="button" className="dmh-home-newproj" onClick={() => setNewProjectOpen(true)} title="Create an independent project">
+          <button type="button" className="dmh-home-newproj" onClick={() => setNewProjectOpen(true)}
+            disabled={Boolean(newProjectBlocked)} title={newProjectBlocked ?? 'Create an independent project'}>
             <FolderPlus size={14} strokeWidth={1.7} aria-hidden />
             New project
           </button>
         </div>
 
-        {/* ── projects filter strip ──────────────────────────────── */}
+        {/* ── franja de filtro por proyecto ──────────────────────── */}
         <div className="dmh-home-projects">
           <span className="dmh-home-projects-label">Projects</span>
           {shownProjects.map((p) => {
@@ -370,7 +376,7 @@ export default function HomeScreen() {
           )}
         </div>
 
-        {/* ── 5 summary cards ────────────────────────────────────── */}
+        {/* ── 5 tarjetas de resumen ──────────────────────────────── */}
         <div className="dmh-home-stats">
           {STAT_DEFS.map((stat) => (
             <div key={stat.key} className="dmh-stat">
@@ -384,9 +390,9 @@ export default function HomeScreen() {
           ))}
         </div>
 
-        {/* ── two columns: requests (left) · versions read-only (right) ── */}
+        {/* ── dos columnas: requests (izquierda) · versiones (derecha) ── */}
         <div className="dmh-home-cols">
-          {/* requests assigned to the logged-in user */}
+          {/* requests asignados al usuario de la sesión */}
           <div className="dmh-reqpanel">
             <div className="dmh-reqpanel-head">
               <div className="dmh-reqpanel-ico">
@@ -457,7 +463,7 @@ export default function HomeScreen() {
             </div>
           </div>
 
-          {/* versions (read-only, all projects) */}
+          {/* versiones (solo lectura, todos los proyectos) */}
           <div className="dmh-vside">
             <div className="dmh-vside-head">
               <div className="dmh-vside-ico">
@@ -468,7 +474,7 @@ export default function HomeScreen() {
                 <div className="dmh-vside-sub">{versionCount} total · {versionGroups.length} project{versionGroups.length === 1 ? '' : 's'}</div>
               </div>
               <div className="dmh-vside-actions">
-                {/* Doc 65: herramientas READ-ONLY sobre versiones (comparar / detalle). */}
+                {/* Herramientas de versiones: comparar, ver el detalle y transferir o eliminar drafts. */}
                 <button
                   type="button"
                   className="dmh-vside-tools"
@@ -511,8 +517,8 @@ export default function HomeScreen() {
                       <span className={`dmh-vside-label ${labelTone(row.status, isProduction)}`}>
                         {row.versionLabel ?? '—'}
                       </span>
-                      {/* Doc 65: la versión nació de una restauración — queda
-                          ligada a la versión restaurada sin parsear títulos. */}
+                      {/* La versión nace de una restauración: queda ligada a
+                          la versión restaurada sin parsear títulos. */}
                       {row.restoredFrom && (
                         <span
                           className="dmh-vside-restored"
@@ -524,7 +530,7 @@ export default function HomeScreen() {
                       <span className="dmh-vside-meta">
                         {userName(row.owner)}
                       </span>
-                      {/* Doc 104: la versión cambió de manos — quién la inició. */}
+                      {/* La versión fue transferida: se muestra quién la inició. */}
                       {startedBy(row) && (
                         <span
                           className="dmh-vside-transferred"
@@ -542,7 +548,7 @@ export default function HomeScreen() {
                       >
                         <Info size={12} strokeWidth={1.8} aria-hidden />
                       </button>
-                      {/* Rollback a CUALQUIER versión publicada pasada: restaura
+                      {/* Rollback a cualquier versión publicada pasada: restaura
                           el modelo a ese estado (deshace las posteriores). La
                           producción actual no se ofrece (ya es ese estado).
                           Crea un draft que pasa por el flujo normal de revisión. */}

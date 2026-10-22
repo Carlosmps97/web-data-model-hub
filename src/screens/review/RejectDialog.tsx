@@ -3,9 +3,9 @@ import { X } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 
 /**
- * Doc 88 §5: rechazar una solicitud EXIGE el motivo (el backend lo valida
- * también: 422 sin nota). El motivo queda en el historial de la solicitud y la
- * versión vuelve a draft para su owner (doc 88 §6).
+ * Rechazar una solicitud exige el motivo (el backend también lo valida: 422 sin
+ * nota). El motivo queda en el historial de la solicitud y la versión vuelve a
+ * draft para su dueño.
  */
 export default function RejectDialog({ open, title, busy, onCancel, onConfirm }: {
   open: boolean;

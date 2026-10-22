@@ -1,7 +1,7 @@
 import { Trash2 } from 'lucide-react';
 import type { Project } from '@/types/model';
 
-/** Reemplaza el canvas mientras la working copy borra su proyecto (doc 75 D5). */
+/** Ocupa el lugar del canvas mientras la working copy borra su proyecto. */
 export default function DeletionPendingPanel({ project, onUndo, onSend }: {
   project: Project; onUndo: () => void; onSend: () => void;
 }) {

@@ -1,10 +1,10 @@
 /**
- * SchemaCreateDialog — alta de UN esquema desde un combo de esquema (doc 96 D3).
- * Mismo camino que Structure · Schemas: el esquema entra a TU versión (cambio
- * `schemas` en el changeset activo) y publica al aprobar. Recién cuando quedó
- * registrado y el catálogo se recargó se selecciona en el combo de origen
- * (`createSchemaAndPick`). No recarga el canvas: el formulario de origen
- * conserva sus demás campos.
+ * SchemaCreateDialog: alta de un esquema desde un combo de esquema. Mismo
+ * camino que Structure · Schemas: el esquema entra a la versión del usuario
+ * (cambio `schemas` en el changeset activo) y se publica al aprobar. Solo
+ * cuando queda registrado y el catálogo se recarga se selecciona en el combo
+ * de origen (`createSchemaAndPick`). No recarga el canvas: el formulario de
+ * origen conserva sus demás campos.
  */
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -67,7 +67,7 @@ export default function SchemaCreateDialog({ kind, initialName, onCreated, onClo
       <label style={lbl}>
         Schema name <span style={kindChip}>for {kind}</span>
       </label>
-      <input className="rd-input rd-mono" autoFocus value={name} placeholder="e.g. bcp_ddv_clientes"
+      <input className="rd-input rd-mono" autoFocus value={name} placeholder="e.g. stg_clientes"
         onChange={(e) => { setName(e.target.value); setError(null); }}
         onKeyDown={(e) => {
           // Enter crea acá y no llega al formulario de origen (New table, New view…).

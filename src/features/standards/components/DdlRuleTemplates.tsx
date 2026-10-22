@@ -1,7 +1,7 @@
 /**
- * New rule — template picker (pantalla 16d). Nunca un editor vacío: 4
- * plantillas reales + "Blank rule". Al continuar, el editor se pre-carga con
- * la plantilla elegida (todo editable después).
+ * New rule — selector de plantillas. Nunca un editor vacío: 4 plantillas
+ * reales + "Blank rule". Al continuar, el editor se pre-carga con la plantilla
+ * elegida (editable por completo después).
  */
 import { useEffect, useState } from 'react';
 import { Columns3, Eye, EyeOff, FileCode2, KeyRound, Plus, Table2, Tag, X } from 'lucide-react';
@@ -10,8 +10,8 @@ import { toast } from 'sonner';
 import { getDdlTemplates, type DdlTemplate } from '../ddlRules.service';
 import type { DdlRule } from '../standards.service';
 
-// Doc 76: plantillas del ruleset base (macro BCP). Cualquier id nuevo del
-// backend cae en el icono genérico.
+// Plantillas del ruleset base (convenciones de la macro de referencia).
+// Cualquier otro id del backend cae en el icono genérico.
 const ICONS: Record<string, React.ReactNode> = {
   'decrypt-dac': <KeyRound size={17} color="#2E5BFF" />,
   'exclude-dac': <EyeOff size={17} color="#2E5BFF" />,

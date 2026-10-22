@@ -1,8 +1,7 @@
-// Doc 113 §4 — la tabla nueva nace en el centro de lo que el usuario VE del
-// canvas (antes entraba sin posición y el canvas la ubicaba por número de orden:
-// en un modelo de cientos de tablas, miles de píxeles más abajo). También al
-// importar una existente, en CTAS y al pegar si el original no está a la vista;
-// los dibujos usan el mismo centro.
+// La tabla nueva nace en el centro de lo que el usuario ve del canvas (sin
+// posición, el canvas la ubicaría por número de orden: en un modelo de cientos de
+// tablas, miles de píxeles más abajo). También al importar una existente, en CTAS
+// y al pegar si el original no está a la vista; los dibujos usan el mismo centro.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -55,8 +54,8 @@ beforeEach(async () => {
 });
 afterEach(async () => { await sleep(5); });
 
-describe('New table: nace en el centro de lo que se ve (doc 113 §4)', () => {
-  it('se graba CON posición: el bloque (240×60 sin columnas) centrado, y queda seleccionado', async () => {
+describe('New table: nace en el centro de lo que se ve', () => {
+  it('se graba con posición: el bloque (240×60 sin columnas) centrado, y queda seleccionado', async () => {
     await st().createTable({ logicalName: 'cliente nuevo', physicalName: 'CLIENTE' });
     const add = lastAdd();
     const id = add.tableIds![0];
@@ -66,7 +65,7 @@ describe('New table: nace en el centro de lo que se ve (doc 113 §4)', () => {
     expect(st().selectedTableId).toBe(id);
   });
 
-  it('sin el canvas montado (no hay qué medir), entra sin posición como antes', async () => {
+  it('sin el canvas montado (no hay qué medir), entra sin posición', async () => {
     vi.mocked(canvasView).mockReturnValue(null);
     await st().createTable({ logicalName: 'x', physicalName: 'X' });
     expect(lastAdd().layout).toBeUndefined();
@@ -105,14 +104,14 @@ describe('Pegar una tabla', () => {
     screenToFlowPosition: (p: { x: number; y: number }) => p,
   }) as never;
 
-  it('con el original a la vista, la copia va a su lado (+36 px, como siempre)', async () => {
+  it('con el original a la vista, la copia va a su lado (+36 px)', async () => {
     useModelerStore.setState({ flow: flow({ x: 500, y: 1800 }), tblClipboard: { table: T1 as never, cols: [C1 as never] } });
     await st().pasteTable();
     const add = lastAdd();
     expect(Object.values(add.layout!)).toEqual([{ x: 536, y: 1836 }]);
   });
 
-  it('con el original FUERA de la vista, la copia nace en el centro de lo que se ve', async () => {
+  it('con el original fuera de la vista, la copia nace en el centro de lo que se ve', async () => {
     useModelerStore.setState({ flow: flow({ x: 9000, y: 40000 }), tblClipboard: { table: T1 as never, cols: [C1 as never] } });
     await st().pasteTable();
     const add = lastAdd();
@@ -131,16 +130,15 @@ describe('Dibujos: nacen en el centro de lo que se ve (mismo cálculo)', () => {
   });
 });
 
-// Ronda 3 de la revisión: lo reciente que todavía no se pinta cuenta por su
-// posición guardada — pero sólo si se dibuja en esta faceta (las vistas, sólo
-// en Physical).
+// Lo reciente que no se ha pintado cuenta por su posición guardada, pero solo si
+// se dibuja en esta faceta (las vistas, solo en Physical).
 describe('lo reciente que no se dibuja no desvía a la tabla nueva', () => {
   const withFreshView = (mode: 'logical' | 'physical') => {
     const base = structuredClone(DIA);
     const dia = {
       ...base,
       subjectArea: { ...base.subjectArea, layout: { ...base.subjectArea.layout, v9: { x: 880, y: 1970 } } },
-      views: [{ id: 'v9', name: 'V9', schema: 'ddv_vu', tableId: 't1', sourceTableIds: ['t1'], sources: [] }],
+      views: [{ id: 'v9', name: 'V9', schema: 'stg_vu', tableId: 't1', sourceTableIds: ['t1'], sources: [] }],
     };
     useModelerStore.setState({ diagram: dia as never, viewMode: mode });
     st().markFresh({ sa1: ['v9'] });
@@ -159,18 +157,18 @@ describe('lo reciente que no se dibuja no desvía a la tabla nueva', () => {
   });
 });
 
-// Doc 114 (piloto): crear, importar, CTAS o pegar una tabla ya no corre de
-// casilla a las tablas existentes SIN posición guardada (el canvas las pinta
-// por su número de orden, por nombre: una tabla que entra y ordena antes las
-// corría). Se fijan donde se ven, en la MISMA escritura del alta.
-describe('el alta fija a las existentes sin posición (doc 114)', () => {
+// Crear, importar, CTAS o pegar una tabla no corre de casilla a las tablas
+// existentes sin posición guardada (el canvas las pinta por su número de orden,
+// por nombre: una tabla que entra y queda primero en el orden las correría). Se
+// fijan donde se ven, en la misma escritura del alta.
+describe('el alta fija a las existentes sin posición', () => {
   const T2 = { id: 't2', logicalName: 'zeta', physicalName: 'Z_SIN_POSICION' };
   const withLayoutless = () => {
     const base = structuredClone(DIA);
     useModelerStore.setState({ diagram: { ...base, subjectArea: { ...base.subjectArea, tableIds: ['t1', 't2'] }, tables: [T1, T2] } as never });
   };
   const pins = () => (vi.mocked(struct.addToCanvas).mock.calls.at(-1)![1] as { pins?: Record<string, { x: number; y: number }> }).pins;
-  const SLOT_1 = { x: 60 + 260, y: 60 };   // gridSlot(1): la casilla de hoy de t2
+  const SLOT_1 = { x: 60 + 260, y: 60 };   // gridSlot(1): la casilla actual de t2
 
   it('New table', async () => {
     withLayoutless();

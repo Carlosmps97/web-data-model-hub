@@ -1,81 +1,79 @@
 /* ============================================================
-   Data Model Hub — design tokens (DMH-Erwin v20260625-2).
-   Single LIGHT theme · navy. NO dark mode.
-   Source of truth: design_handoff_data_model_hub/README.md (§Design Tokens).
-   Fonts: Geist (UI) + Geist Mono (data/SQL) — set in globals.css.
+   Data Model Hub — tokens de diseño.
+   Un solo tema claro · azul marino. Sin modo oscuro.
+   Fuentes: Geist (UI) + Geist Mono (datos/SQL), definidas en globals.css.
 
-   Naming policy: the variable names used by the existing codebase
-   (--primary, --ink, --bg, --border, --muted, --success, …) are KEPT
-   STABLE and remapped to the new palette so every legacy class keeps
-   working. New design tokens are ADDED below (raw hex aliases + the
-   card/popup shadows + the canvas/scrim tokens).
-   Tokens live on :root so every class works without a wrapper.
+   Nombres: hay dos capas. La paleta del diseño (alias de hex crudos,
+   sombras de tarjetas y popups, tokens de canvas y scrim) y los nombres
+   semánticos que usan las clases (--primary, --ink, --bg, --border,
+   --muted, --success, …), que apuntan a esa paleta.
+   Los tokens viven en :root para que toda clase funcione sin contenedor.
    ============================================================ */
 
 :root {
-  /* ── Design palette (raw, exact hex from the handoff) ────────────── */
+  /* ── Paleta del diseño (hex crudos, exactos) ─────────────────────── */
 
-  /* Blue (primary actions, active states, FK) */
-  --blue:            #2E5BFF;   /* Primary blue */
-  --blue-tint:       #EAF0FF;   /* active nav/tab, selected fills */
-  --blue-border:     #D4E0FF;   /* pills / soft borders */
+  /* Azul (acciones primarias, estados activos, FK) */
+  --blue:            #2E5BFF;   /* azul primario */
+  --blue-tint:       #EAF0FF;   /* nav/tab activos, rellenos seleccionados */
+  --blue-border:     #D4E0FF;   /* pills / bordes suaves */
   --blue-border-2:   #D9E3FB;
-  --blue-soft:       #F2F6FF;   /* very soft blue wash */
-  --blue-soft-2:     #E3EBFF;   /* franja PK del nodo — un paso más oscura (doc 47) */
+  --blue-soft:       #F2F6FF;   /* lavado azul muy suave */
+  --blue-soft-2:     #E3EBFF;   /* franja PK del nodo, un paso más oscura */
 
-  /* Green (publish / success) */
-  --green:           #16A37B;   /* Publish button, completed steps */
-  --green-deep:      #0E8C6A;   /* added text, partition icon */
-  --green-tint:      #E4F6EF;   /* success pills */
-  --green-tint-2:    #EFFAF4;   /* added rows */
-  --green-tint-3:    #F4F9F6;   /* current production row */
+  /* Verde (publish / éxito) */
+  --green:           #16A37B;   /* botón Publish, pasos completados */
+  --green-deep:      #0E8C6A;   /* texto agregado, ícono de partición */
+  --green-tint:      #E4F6EF;   /* pills de éxito */
+  --green-tint-2:    #EFFAF4;   /* filas agregadas */
+  --green-tint-3:    #F4F9F6;   /* fila de producción vigente */
 
-  /* Amber (PK icon, warnings, in-review, overrides) */
-  --amber:           #E0A024;   /* PK icon */
-  --amber-deep:      #9A6B00;   /* warning text */
-  --amber-tint:      #FFF6E6;   /* in-review pills */
+  /* Ámbar (ícono PK, advertencias, en revisión, overrides) */
+  --amber:           #E0A024;   /* ícono PK */
+  --amber-deep:      #9A6B00;   /* texto de advertencia */
+  --amber-tint:      #FFF6E6;   /* pills de en revisión */
   --amber-tint-2:    #FFF1D6;   /* overrides */
 
-  /* Red (reject) */
+  /* Rojo (rechazo) */
   --red:             #C0392B;
   --red-border:      #F0C9C4;
   --red-tint:        #FBEAEA;
 
-  /* Purple (parent-domain glyph, modifier badge, some avatars) */
+  /* Morado (glifo de dominio padre, badge de modificador, algunos avatares) */
   --purple:          #8B5CF6;
   --purple-tint:     #F2EEFE;
 
-  /* Ink / text */
-  --navy:            #1A2B4A;   /* headings, dark cards, table headers */
-  --text-body:       #3A4658;   /* default text */
-  --text-muted:      #56607A;   /* secondary */
-  --text-muted-2:    #8A93A5;   /* labels / mono types */
-  --text-muted-3:    #9AA3B2;   /* fainter labels */
-  --text-placeholder:#A9B1BE;   /* input placeholders */
+  /* Tinta / texto */
+  --navy:            #1A2B4A;   /* títulos, tarjetas oscuras, cabeceras de tabla */
+  --text-body:       #3A4658;   /* texto por defecto */
+  --text-muted:      #56607A;   /* secundario */
+  --text-muted-2:    #8A93A5;   /* etiquetas / tipos en mono */
+  --text-muted-3:    #9AA3B2;   /* etiquetas más tenues */
+  --text-placeholder:#A9B1BE;   /* placeholders de inputs */
 
-  /* Borders */
-  --border-1:        #E2E6EE;   /* cards */
-  --border-2:        #EAEDF2;   /* dividers / top-nav border */
-  --border-3:        #DDE2EC;   /* inputs / secondary button */
+  /* Bordes */
+  --border-1:        #E2E6EE;   /* tarjetas */
+  --border-2:        #EAEDF2;   /* divisores / borde del top-nav */
+  --border-3:        #DDE2EC;   /* inputs / botón secundario */
   --border-4:        #E6EAF0;
 
-  /* Subtle fills */
+  /* Rellenos sutiles */
   --fill-1:          #F4F6F9;
-  --fill-2:          #F7F9FC;   /* table header */
+  --fill-2:          #F7F9FC;   /* cabecera de tabla */
   --fill-3:          #FAFBFC;
   --fill-4:          #F0F2F6;
 
-  /* Page + canvas */
-  --page-bg:         #EDEFF3;   /* app background */
-  --canvas-bg:       #FBFCFD;   /* modeling surface */
-  --canvas-dot:      #D6DBE6;   /* dotted grid */
+  /* Página + canvas */
+  --page-bg:         #EDEFF3;   /* fondo de la app */
+  --canvas-bg:       #FBFCFD;   /* superficie de modelado */
+  --canvas-dot:      #D6DBE6;   /* grilla de puntos */
 
-  /* Popup backdrop — dims ONLY the canvas region (no blur: see components.css) */
+  /* Fondo de popups: oscurece solo la región del canvas (sin blur: ver components.css) */
   --blur-overlay:    rgba(16,27,48,0.42);
 
-  /* ── Legacy-compatible aliases (KEEP these names) ───────────────── */
+  /* ── Alias semánticos (nombres que usan las clases) ─────────────── */
 
-  /* surfaces / neutrals */
+  /* superficies / neutros */
   --bg:            var(--page-bg);
   --canvas:        var(--canvas-bg);
   --surface:       #ffffff;
@@ -90,50 +88,50 @@
   --placeholder:   var(--text-placeholder);
   --inverse:       #ffffff;
 
-  /* semantics */
+  /* semánticos */
   --success:      var(--green-deep);  --success-soft: var(--green-tint);
   --warning:      var(--amber-deep);  --warning-soft: var(--amber-tint);
   --error:        var(--red);         --error-soft:   var(--red-tint);
 
-  /* Primary = design blue (was navy). Navy lives on --navy / --ink. */
+  /* Primary = azul del diseño. El azul marino vive en --navy / --ink. */
   --primary:       var(--blue);
-  --primary-700:   #1F46E0;          /* darker blue for :hover */
+  --primary-700:   #1F46E0;          /* azul más oscuro para :hover */
   --primary-soft:  var(--blue-tint);
   --primary-muted: rgba(46,91,255,.10);
   --on-primary:    #ffffff;
 
-  /* flow accents (relationship wires) — keep teal-ish but align to blue */
+  /* acentos de flujo (wires de relaciones): tono verde azulado, con acento azul */
   --flow:          var(--green);
   --flow-700:      var(--green-deep);
   --flow-soft:     var(--green-tint);
   --accent2:       var(--blue);
 
-  /* ER key chips (PK amber / FK blue / partition green) */
+  /* chips de llaves ER (PK ámbar / FK azul / partición verde) */
   --k-pk: var(--amber);      --k-pk-soft: var(--amber-tint);
   --k-fk: var(--blue);       --k-fk-soft: var(--blue-tint);
   --k-sk: var(--purple);     --k-sk-soft: var(--purple-tint);
   --k-pt: var(--green-deep); --k-pt-soft: var(--green-tint);
 
-  /* ── Radii ──────────────────────────────────────────────────────── */
-  --r-sm:  9px;    /* inputs / buttons / icon buttons */
-  --r:     11px;   /* cards (small) */
-  --r-lg:  13px;   /* cards */
-  --r-xl:  14px;   /* large cards */
+  /* ── Radios ─────────────────────────────────────────────────────── */
+  --r-sm:  9px;    /* inputs / botones / botones de ícono */
+  --r:     11px;   /* tarjetas (chicas) */
+  --r-lg:  13px;   /* tarjetas */
+  --r-xl:  14px;   /* tarjetas grandes */
   --r-full:999px;  /* pills */
-  --r-chip:7px;    /* small chips (5–8) */
+  --r-chip:7px;    /* chips chicos (5–8) */
 
-  /* ── Elevation ──────────────────────────────────────────────────── */
+  /* ── Elevación ──────────────────────────────────────────────────── */
   --shadow-xs: 0 1px 2px rgba(16,27,48,.05);
   --shadow-sm: 0 1px 3px rgba(16,27,48,.06);
   --shadow-md: 0 6px 18px -4px rgba(16,27,48,.12), 0 2px 6px -2px rgba(16,27,48,.08);
   --shadow-lg: 0 16px 40px -8px rgba(16,27,48,.20);
-  /* Named design shadows */
+  /* Sombras con nombre del diseño */
   --shadow-card:  0 1px 3px rgba(16,27,48,.04), 0 18px 50px rgba(16,27,48,.07);
   --shadow-table: 0 2px 6px rgba(16,27,48,.06), 0 10px 28px rgba(16,27,48,.07);
   --shadow-popup: 0 30px 90px rgba(16,27,48,.34);
 
-  /* ── Typography ─────────────────────────────────────────────────── */
-  /* --font-geist / --font-geist-mono are set in globals.css */
+  /* ── Tipografía ─────────────────────────────────────────────────── */
+  /* --font-geist / --font-geist-mono se definen en globals.css */
   --ui:   var(--font-geist), 'Geist Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --mono: var(--font-geist-mono), 'Geist Mono Variable', ui-monospace, 'JetBrains Mono', monospace;
 }

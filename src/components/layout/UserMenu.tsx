@@ -5,8 +5,8 @@ import Avatar from '@/components/ui/Avatar';
 import { useAuthStore } from '@/store/useAuthStore';
 
 /**
- * UserMenu — avatar en el TopNav que abre un dropdown con la identidad REAL de
- * la sesión (auth propia) + Sign out. Cierra al click afuera / ESC.
+ * UserMenu: avatar en el TopNav que abre un dropdown con la identidad real de
+ * la sesión (auth propia) + Sign out. Se cierra al hacer clic afuera o con Esc.
  */
 export default function UserMenu() {
   const navigate = useNavigate();

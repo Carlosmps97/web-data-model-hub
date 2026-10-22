@@ -1,30 +1,30 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Oracle DDL generator (doc 101 — Export DDL · dialecto Oracle).
+// Generador de DDL Oracle (Export DDL · dialecto Oracle).
 //
-// PURO y con el MISMO input que el generador de Databricks (`generators.ts`).
+// Puro y con el mismo input que el generador de Databricks (`generators.ts`).
 // Lo que cambia es la sintaxis:
 //  - `CREATE TABLE` simple (Oracle no tiene OR REPLACE para tablas) con la PK
-//    adentro, como la escribe Erwin (doc 108): `PRIMARY KEY (…) DISABLE
-//    NOVALIDATE`, sin nombre. Las FK son `ALTER TABLE … ADD CONSTRAINT …
+//    adentro, como la escribe Erwin: `PRIMARY KEY (…) DISABLE NOVALIDATE`,
+//    sin nombre. Las FK son `ALTER TABLE … ADD CONSTRAINT …
 //    DISABLE NOVALIDATE` (Oracle no admite una FK habilitada sobre una PK
-//    deshabilitada) y van TODAS después de todas las tablas (en el script
+//    deshabilitada) y van todas después de todas las tablas (en el script
 //    único) o en su propio archivo del `.zip` (`oracleForeignKeysFile`): así
 //    nunca corren antes que su tabla padre, ni con ciclos. Nombres de FK únicos
 //    y de a lo sumo 128 bytes.
 //  - `NOT NULL` aparte de las llaves y apagado por default; sin esquema por
-//    default (`CREATE TABLE DE_X`) — o el del modelo, o uno elegido (doc 108).
+//    default (`CREATE TABLE DE_X`), o el del modelo, o uno elegido.
 //  - Comentarios con `COMMENT ON TABLE / COLUMN` (Oracle no los acepta dentro
 //    del CREATE): recortados a 4 000 bytes y sin nada que corte la sentencia en
 //    SQL*Plus / SQL Developer (líneas en blanco, líneas que terminan en «;»,
 //    líneas de solo «/» o «.», líneas de más de 2 000 caracteres). Si algo trae
 //    «&», el script arranca con `SET DEFINE OFF`.
-//  - Identificadores con comillas DOBLES solo si el nombre las necesita (o
+//  - Identificadores con comillas dobles solo si el nombre las necesita (o
 //    siempre, si así se configura).
 //  - Sin particiones, LOCATION, TBLPROPERTIES, tags, USING ni Unity Catalog:
 //    no existen en Oracle. Las Export rules tampoco corren (son de Databricks).
-//  - Tipos: TAL CUAL el modelo, solo con el casing elegido (doc 106: sin mapeo
-//    de tipos ni ajustes — un tipo que Oracle no acepta es del modelo, no del
-//    export). Defaults espejo de `app/features/ddl_rules/output.py` (backend).
+//  - Tipos: tal cual el modelo, solo con el casing elegido (sin mapeo de tipos
+//    ni ajustes: un tipo que Oracle no acepta es del modelo, no del export).
+//    Defaults espejo de `app/features/ddl_rules/output.py` (backend).
 // ─────────────────────────────────────────────────────────────────────────────
 import { foldComplexType } from '@/lib/typeText';
 import {
@@ -33,32 +33,31 @@ import {
   type IdentifierCase, type QuoteMode, type TypeCase,
 } from './generators';
 
-/** Doc 108: esquema de los nombres — ninguno (`CREATE TABLE DE_X`, como Erwin), el
+/** Esquema de los nombres: ninguno (`CREATE TABLE DE_X`, como Erwin), el
  *  de cada objeto en el modelo, o uno elegido para todos (`defaultSchema`). */
 export type OracleSchemaMode = 'none' | 'model' | 'custom';
 
-/** Configuración PROPIA de Oracle (doc 101 §4.1) — independiente de la de Databricks. */
+/** Configuración propia de Oracle, independiente de la de Databricks. */
 export interface OracleDdlOptions {
   /** `CREATE OR REPLACE VIEW` por cada vista del canvas exportado. */
   includeViews: boolean;
   /** PRIMARY KEY (`… DISABLE NOVALIDATE`) y FOREIGN KEY. */
   includeKeys: boolean;
-  /** Doc 108: `NOT NULL` en las columnas obligatorias (y en las de la PK), aparte de las llaves. */
+  /** `NOT NULL` en las columnas obligatorias (y en las de la PK), aparte de las llaves. */
   includeNotNull: boolean;
   /** `COMMENT ON TABLE / COLUMN` desde las definiciones. */
   includeComments: boolean;
   identifierCase: IdentifierCase;
   quoteIdentifiers: QuoteMode;
   typeCase: TypeCase;
-  /** Doc 108: de dónde sale el esquema de los nombres. */
+  /** De dónde sale el esquema de los nombres. */
   schemaMode: OracleSchemaMode;
   /** El esquema elegido para todos los objetos (solo con `schemaMode = custom`; vacío = sin esquema). */
   defaultSchema: string;
 }
 
-/** Defaults de Oracle = lo pedido por el owner para el proyecto RDV (comentarios
- *  OFF, PK/FK ON, tipos en MAYÚSCULA) + identificadores en MAYÚSCULA; doc 108:
- *  como Erwin — sin NOT NULL y sin esquema. */
+/** Defaults de Oracle: comentarios apagados, PK/FK encendidas, tipos e
+ *  identificadores en mayúsculas y, como Erwin, sin NOT NULL y sin esquema. */
 export const DEFAULT_ORACLE_OPTS: OracleDdlOptions = {
   includeViews: true,
   includeKeys: true,
@@ -89,7 +88,7 @@ VALIDATE VALUES VARCHAR VARCHAR2 VIEW WHENEVER WHERE WITH
 // dígitos, `_`, `$` o `#`.
 const ORACLE_SAFE_IDENT = /^[A-Za-z][A-Za-z0-9_$#]*$/;
 
-/** true si el nombre NO compila sin comillas dobles en Oracle. */
+/** Devuelve true si el nombre no compila sin comillas dobles en Oracle. */
 export const oracleNeedsQuote = (s: string): boolean =>
   !ORACLE_SAFE_IDENT.test(s) || ORACLE_RESERVED_WORDS.has(s.toUpperCase());
 
@@ -100,7 +99,7 @@ const caseWith = (s: string, mode: IdentifierCase): string =>
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 
 /** Identificador del modelo con el casing y las comillas de la configuración.
- *  Oracle no admite comillas dobles DENTRO de un identificador: se quitan. */
+ *  Oracle no admite comillas dobles dentro de un identificador: se quitan. */
 function identOf(o: Pick<OracleDdlOptions, 'identifierCase' | 'quoteIdentifiers'>): (s: string) => string {
   return (s: string) => {
     const c = caseWith(s, o.identifierCase);
@@ -113,8 +112,8 @@ const bytesOf = (s: string): number => utf8.encode(s).length;
 
 // ── Tipos ────────────────────────────────────────────────────────────────────
 
-/** Tipo de una columna tal como sale en el CREATE de Oracle (doc 106): el del
- *  modelo TAL CUAL, con el casing `typeCase`. Sin tipo = STRING (como en
+/** Tipo de una columna tal como sale en el CREATE de Oracle: el del modelo
+ *  tal cual, con el casing `typeCase`. Sin tipo = STRING (como en
  *  Databricks). Un complejo sale verbatim en una línea (los nombres de sus
  *  campos son del modelo). */
 export function oracleType(raw: string, o: Pick<OracleDdlOptions, 'typeCase'>): string {
@@ -136,7 +135,7 @@ const MAX_COMMENT_LINE = 2000;
 // empieza con «#» (SQLPREFIX) corre como comando aparte.
 const ENDS_STATEMENT = (l: string) => l.endsWith(';');
 const LONE_BREAK = (l: string) => /^\s*[/.]\s*$/.test(l);
-// Peligrosa si queda al INICIO de una línea física (la primera del literal va
+// Peligrosa si queda al inicio de una línea física (la primera del literal va
 // en la misma línea que `COMMENT ON … IS '`: esa no cuenta).
 const BREAKS_STATEMENT = (l: string) => LONE_BREAK(l) || /^\s*#/.test(l);
 
@@ -152,7 +151,7 @@ function fitIndex(s: string): number {
 }
 const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
 
-/** Parte una línea larga en un espacio antes del tope, sin dejar una pieza en
+/** Parte una línea larga en un espacio dentro del tope, sin dejar una pieza en
  *  blanco ni una línea que termine en «;» o que arranque la siguiente de forma
  *  peligrosa; sin espacio posible, en un corte duro con el mismo cuidado (y sin
  *  partir un carácter de dos unidades, como un emoji). */
@@ -235,7 +234,7 @@ interface Ctx {
   tableById: Map<string, DdlTable>;
   colName: Map<string, string>;
   byTable: Map<string, DdlColumn[]>;
-  /** tabla → NOMBRE EN MAYÚSCULA → nombre físico real (las vistas lo usan). */
+  /** tabla → nombre en mayúsculas → nombre físico real (las vistas lo usan). */
   realColumn: Map<string, Map<string, string>>;
   rels: DdlRelationship[];                             // FK con padre e hijo dentro del export
   fkName: Map<string, string>;
@@ -245,7 +244,7 @@ function qualifiedName(schema: string, name: string, ident: (s: string) => strin
   return schema ? `${ident(schema)}.${ident(name)}` : ident(name);
 }
 
-/** Doc 108: esquema de un objeto según `schemaMode` — ninguno, el del modelo
+/** Esquema de un objeto según `schemaMode`: ninguno, el del modelo
  *  (`own`) o el elegido para todos. */
 function schemaFor(own: string | undefined, o: OracleDdlOptions): string {
   if (o.schemaMode === 'model') return (own ?? '').trim();
@@ -253,7 +252,7 @@ function schemaFor(own: string | undefined, o: OracleDdlOptions): string {
   return '';
 }
 
-/** Nombre de una tabla con el esquema que corresponde (doc 108). */
+/** Nombre de una tabla con el esquema que corresponde. */
 function qualify(t: DdlTable, ctx: Ctx): string {
   return qualifiedName(schemaFor(t.schema, ctx.o), t.physicalName, ctx.ident);
 }
@@ -285,7 +284,7 @@ function contextOf(input: DatabricksDdlInput, o: OracleDdlOptions): Ctx {
     fkName: new Map(),
   };
   // Nombres de FK: únicos en el export (sin distinguir mayúsculas) y
-  // deterministas, en el orden de las tablas. La PK va sin nombre (doc 108).
+  // deterministas, en el orden de las tablas. La PK va sin nombre.
   const used = new Set<string>();
   const take = (raw: string): string => {
     let name = capName(raw);
@@ -309,14 +308,14 @@ function contextOf(input: DatabricksDdlInput, o: OracleDdlOptions): Ctx {
 function tableDDL(t: DdlTable, ctx: Ctx): string {
   const { o, ident } = ctx;
   const full = qualify(t, ctx);
-  // Doc 94: el orden único — PK primero y cada bloque por ordinal.
+  // Orden único: PK primero y cada bloque por ordinal.
   const ordered = pkFirstColumns(ctx.byTable.get(t.id) ?? []);
   const inner = ordered.map((c) => {
     let l = `  ${ident(c.physicalName)} ${oracleType(c.dataType, o)}`;
     if (o.includeNotNull && (c.isNullable === false || c.isPrimaryKey)) l += ' NOT NULL';
     return l;
   });
-  // Doc 108: como Erwin — sin nombre de constraint y DISABLE NOVALIDATE.
+  // Como Erwin: sin nombre de constraint y DISABLE NOVALIDATE.
   const pks = ordered.filter((c) => c.isPrimaryKey).map((c) => ident(c.physicalName));
   if (o.includeKeys && pks.length) inner.push(`  PRIMARY KEY (${pks.join(', ')}) DISABLE NOVALIDATE`);
   let out = `CREATE TABLE ${full} (\n${inner.join(',\n')}\n);\n`;
@@ -325,7 +324,7 @@ function tableDDL(t: DdlTable, ctx: Ctx): string {
     const td = oracleComment(t.description ?? '');
     if (td) out += `COMMENT ON TABLE ${full} IS ${lit(td)};\n`;
     for (const c of ordered) {
-      // Doc 85 D10: el comment FÍSICO manda; si no hay, la definición.
+      // El comment físico manda; si no hay, la definición.
       const cm = oracleComment((c.physicalDescription ?? '').trim() || (c.description ?? ''));
       if (cm) out += `COMMENT ON COLUMN ${full}.${ident(c.physicalName)} IS ${lit(cm)};\n`;
     }
@@ -334,7 +333,7 @@ function tableDDL(t: DdlTable, ctx: Ctx): string {
 }
 
 /** Los `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` del export: la tiene el
- *  HIJO; una relación con varios pares = UNA constraint compuesta. */
+ *  hijo; una relación con varios pares = una sola constraint compuesta. */
 function foreignKeys(ctx: Ctx): string[] {
   const { o, ident } = ctx;
   if (!o.includeKeys) return [];
@@ -357,11 +356,11 @@ function foreignKeys(ctx: Ctx): string[] {
 }
 
 /** `CREATE OR REPLACE VIEW` Oracle — misma estructura que la de Databricks
- *  (`viewDDL`): expresión VERBATIM > `CAST(col AS tipo) AS alias` > `col AS
+ *  (`viewDDL`): expresión verbatim > `CAST(col AS tipo) AS alias` > `col AS
  *  alias`; con 2+ fuentes, alias posicionales t1, t2… y `FROM a t1, b t2`. Las
- *  columnas llevan el nombre REAL de la columna de su tabla y el MISMO casing y
+ *  columnas llevan el nombre real de la columna de su tabla y el mismo casing y
  *  comillas que las columnas de la tabla (en Oracle, un nombre entre comillas
- *  distingue mayúsculas); el tipo del CAST sale tal cual (doc 106), con el
+ *  distingue mayúsculas); el tipo del CAST sale tal cual, con el
  *  casing de los tipos. */
 function viewDDL(v: DdlView, ctx: Ctx): string {
   const { o, ident } = ctx;
@@ -415,7 +414,7 @@ function exportViews(input: DatabricksDdlInput, ctx: Ctx): DdlView[] {
   });
 }
 
-/** Un statement por TABLA del set exportado: su CREATE y sus COMMENT ON (las FK
+/** Un statement por tabla del set exportado: su CREATE y sus COMMENT ON (las FK
  *  van en `oracleForeignKeysFile`). Alimenta el `.zip` (un archivo por objeto). */
 export function oracleTableStatements(
   input: DatabricksDdlInput, o: OracleDdlOptions,

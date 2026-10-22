@@ -1,17 +1,18 @@
 # Workflow reutilizable: despliegue de una Databricks App vía Asset Bundle.
-# Es agnóstico a la app — el mismo archivo sirve para cualquier repositorio que
-# cumpla el contrato de abajo. Lo específico de cada solución vive en el caller.
+# Es agnóstico a la app: el mismo archivo sirve para cualquier repositorio que
+# cumpla el contrato de abajo. Lo específico de cada solución vive en el workflow
+# que lo invoca.
 #
-# Contrato (nada de valores por defecto en el código):
-#   · databricks.yml declara UNA app, sus variables (sin `default:`), permisos
-#     y bindings de secretos.
+# Contrato (sin valores por defecto en el código):
+#   · databricks.yml declara una sola app, sus variables (sin `default:`),
+#     permisos y bindings de secretos.
 #   · app.yaml declara el runtime (command + env). Cada env con clave `value`
-#     se llena en el deploy con la GitHub Variable HOMÓNIMA.
+#     se llena en el despliegue con la GitHub Variable homónima.
 #   · Cada variable del bundle se llena con la GitHub Variable homónima en
-#     MAYÚSCULAS (ej. secret_scope ← SECRET_SCOPE) y se pasa como BUNDLE_VAR_*.
+#     mayúsculas (ej. databricks_scope_name ← DATABRICKS_SCOPE_NAME) y se pasa como BUNDLE_VAR_*.
 #   · Variables y Secrets se leen del GitHub Environment recibido como input
-#     (con fallback a los del repositorio). Si falta alguno, el run se corta
-#     ANTES de tocar la app y se listan los nombres faltantes.
+#     (con los del repositorio como respaldo). Si falta alguno, el run se corta
+#     antes de tocar la app y se listan los nombres faltantes.
 #
 # Requisitos del repositorio que llama:
 #   · Secret   DATABRICKS_TOKEN — token del workspace destino (lo usa solo el CLI).
@@ -52,11 +53,11 @@ permissions:
 jobs:
   deploy:
     name: Despliegue (${{ inputs.environment }})
-    # Imagen fija del runner: `ubuntu-latest` cambia de versión sola (pasa a
-    # Ubuntu 26 desde el 2026-10-19) y con ella las versiones de yq/jq.
+    # Imagen fija del runner: `ubuntu-latest` cambia de versión sin aviso y con
+    # ella las versiones de yq/jq.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # Un deploy a la vez por repositorio y environment; los demás quedan en cola.
+    # Un despliegue a la vez por repositorio y environment; los demás quedan en cola.
     concurrency:
       group: databricks-deploy-${{ github.repository }}-${{ inputs.environment }}
       cancel-in-progress: false
@@ -70,11 +71,11 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Versión FIJA del CLI (el tag de la acción instala esa misma versión).
-      # Instalar siempre la última cambió el deploy sin aviso: la 1.14.0 migró
-      # el bundle al motor "direct", que actualiza la app con el «App update»
-      # de Databricks. Para subir de versión: cambiar el tag a propósito y
-      # probar primero en dev.
+      # Versión fija del CLI (el tag de la acción instala esa misma versión).
+      # Una versión nueva del CLI puede cambiar el despliegue sin aviso (p. ej.,
+      # desde la 1.14.0 el bundle se aplica con el motor "direct", que actualiza
+      # la app con el «App update» de Databricks). Para subir de versión se
+      # cambia el tag a propósito y se prueba primero en dev.
       - name: Instalar Databricks CLI
         uses: databricks/setup-cli@v1.18.0
 
@@ -95,7 +96,7 @@ jobs:
           fi
 
       # Toda variable declarada en databricks.yml debe existir como GitHub
-      # Variable homónima en MAYÚSCULAS; se exporta como BUNDLE_VAR_<variable>.
+      # Variable homónima en mayúsculas; se exporta como BUNDLE_VAR_<variable>.
       - name: Resolver variables del bundle desde GitHub Variables
         env:
           GH_VARS: ${{ toJSON(vars) }}
@@ -136,10 +137,10 @@ jobs:
           echo "── env efectivo de app.yaml ──"
           yq '.env' app.yaml
 
-      # Identidad del build (doc 82): el commit y la hora del deploy viajan
-      # como env de la app (NO son GitHub Variables: se derivan del run). El
-      # backend los expone en GET /api/health → `build.sha`, y así se sabe qué
-      # código corre en Apps antes de reportar un bug "que ya está arreglado".
+      # Identidad del build: el commit y la hora del despliegue viajan como env
+      # de la app (no son GitHub Variables: se derivan del run). El backend los
+      # expone en GET /api/health → `build.sha`, lo que permite confirmar qué
+      # commit corre en Apps antes de diagnosticar un error.
       - name: Estampar BUILD_SHA / BUILD_TIME en app.yaml
         run: |
           if [ ! -f app.yaml ]; then exit 0; fi
@@ -170,7 +171,7 @@ jobs:
           echo "App del bundle: $NAME (resource key: $KEY)"
 
       # Workspaces con cupo de apps: si la app ya fue creada a mano (mismo
-      # nombre), se importa al estado del bundle para que el deploy la actualice
+      # nombre), se importa al estado del bundle para que el despliegue la actualice
       # en su sitio en lugar de fallar con 409 ALREADY_EXISTS. Si el bind
       # responde 403, a la identidad del token le falta CAN_MANAGE sobre la app.
       - name: Adoptar app pre-existente (evita 409 ALREADY_EXISTS)
@@ -184,9 +185,9 @@ jobs:
             echo "La app '$APP_NAME' no existe todavía: el deploy la creará."
           fi
 
-      # Qué va a cambiar el deploy, campo por campo, ANTES de aplicarlo. Si la
+      # Qué va a cambiar el despliegue, campo por campo, antes de aplicarlo. Si la
       # app aparece con cambios que no son su código (descripción, recursos,
-      # tamaño de cómputo), el deploy dispara un «App update» de Databricks: la
+      # tamaño de cómputo), el despliegue dispara un «App update» de Databricks: la
       # operación que puede fallar con "failed to update app's compute size".
       # El listado dice qué campo la provoca.
       - name: Plan del bundle (qué va a cambiar)
@@ -205,14 +206,14 @@ jobs:
           fi
 
       # Sube el código (source_code_path) y crea/actualiza la app, sus permisos
-      # y bindings. Si falla resolviendo un recurso `secret`, verificar que el
-      # scope y la key existan en el workspace destino.
+      # y bindings. Si falla al resolver un recurso `secret`, el scope o la key
+      # no existen en el workspace destino.
       - name: Desplegar bundle
         run: databricks bundle deploy --target "$BUNDLE_TARGET"
 
       # El bloque `permissions:` del bundle deja la ACL exactamente como la
-      # declara databricks.yml; los permisos app-a-app se re-aplican acá en cada
-      # deploy. PATCH agrega sin pisar el resto de la ACL; ambos pasos son
+      # declara databricks.yml; los permisos app-a-app se re-aplican aquí en cada
+      # despliegue. PATCH agrega sin pisar el resto de la ACL; ambos pasos son
       # idempotentes y no dependen del orden en que se desplieguen las apps.
       - name: Autorizar a la app consumidora sobre esta app (CAN_USE)
         if: inputs.consumer_app != ''

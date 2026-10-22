@@ -1,6 +1,6 @@
-// Matcher del buscador de columnas de Properties · Columns (doc 42). Mismo
-// paradigma que los combobox del doc 41: "contiene", case-insensitive,
-// contra el nombre LÓGICO o el FÍSICO. Puro.
+// Matcher del buscador de columnas de Properties · Columns. Mismo paradigma
+// que los combobox de dominio y tipos: "contiene", case-insensitive, contra el
+// nombre lógico o el físico. Puro.
 import { containsCI } from './typePick';
 
 export function matchesColumn(

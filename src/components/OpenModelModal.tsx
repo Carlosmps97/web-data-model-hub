@@ -1,17 +1,17 @@
 /**
- * OpenModelModal (pg · doc 75 D8) — "Open model" in two steps:
+ * OpenModelModal: «Open model» en dos pasos.
  *
- *   Step 1 · Project  → ProjectPicker (A–Z, production + own drafts per project)
- *   Step 2 · Mode     → three radio cards for THAT project:
- *     1. View production (read-only)  → openModel({projectId, mode:'readonly', versionLabel})
- *     2. Snapshot from production      → snapshot({projectId}) → openModel({projectId, mode:'editing',
- *                                        changesetId, versionLabel}) → navigate('/model')
- *     3. Continue a working version    → pick one of the actor's drafts of the project →
- *                                        openModel({projectId, mode:'editing', changesetId}) → /model
+ *   Paso 1 · Proyecto → ProjectPicker (A–Z, producción + drafts propios por proyecto)
+ *   Paso 2 · Modo     → tres tarjetas de opción para ese proyecto:
+ *     1. Ver producción (solo lectura)     → openModel({projectId, mode:'readonly', versionLabel})
+ *     2. Snapshot desde producción         → snapshot({projectId}) → openModel({projectId, mode:'editing',
+ *                                            changesetId, versionLabel}) → navigate('/model')
+ *     3. Continuar una versión de trabajo  → se elige uno de los drafts del actor en el proyecto →
+ *                                            openModel({projectId, mode:'editing', changesetId}) → /model
  *
- * Launched from Home / the Toolbar (NOT over the canvas), so it uses the
- * design-system Dialog with the default `screen` backdrop. Cancel / Esc close
- * without navigating. The snapshot runs under the session-blocking overlay.
+ * Se abre desde Home o la Toolbar (no sobre el canvas), por eso usa el Dialog del
+ * sistema de diseño con el fondo `screen` por defecto. Cancel / Esc cierran sin
+ * navegar. El snapshot corre bajo el overlay que bloquea la sesión.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -34,15 +34,17 @@ type Step = 'project' | 'mode';
 export interface OpenModelModalProps {
   open: boolean;
   onClose: () => void;
-  /** Project preselected in step 1 (last opened / current session). */
+  /** Proyecto preseleccionado en el paso 1 (el último abierto o el de la sesión actual). */
   defaultProjectId?: string | null;
-  /** Users (id→name) to label the drafts list. */
+  /** Usuarios (id→nombre) para rotular la lista de drafts. */
   users: SimUserDto[];
-  /** «New project…» link of step 1 (Home / Workspace open the NewProjectModal). */
+  /** Enlace «New project…» del paso 1 (Home / Workspace abren el NewProjectModal). */
   onNewProject?: () => void;
+  /** Motivo por el que el usuario no puede crear proyectos (deshabilita el enlace). */
+  newProjectBlocked?: string | null;
 }
 
-export default function OpenModelModal({ open, onClose, defaultProjectId, users, onNewProject }: OpenModelModalProps) {
+export default function OpenModelModal({ open, onClose, defaultProjectId, users, onNewProject, newProjectBlocked = null }: OpenModelModalProps) {
   const navigate = useNavigate();
   const actor = useSessionStore((s) => s.user);
   const openModel = useSessionStore((s) => s.openModel);
@@ -56,7 +58,7 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
   const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Reset each time the modal opens, then load projects + versions (one request each).
+  // Se reinicia cada vez que el modal se abre y luego carga proyectos + versiones (un request cada uno).
   useEffect(() => {
     if (!open) return;
     setStep('project');
@@ -103,7 +105,7 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
     setStep('mode');
   };
 
-  // "Continue" is only actionable when the selected mode has a valid target.
+  // «Continue» solo se habilita cuando el modo elegido tiene un destino válido.
   const canContinue = useMemo(() => {
     if (submitting || !projectId) return false;
     if (mode === 'readonly') return hasProduction;
@@ -180,7 +182,8 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
             <ProjectPicker projects={projects} meta={meta} selectedId={projectId} onSelect={setProjectId} />
           )}
           {onNewProject && (
-            <Button variant="secondary" size="sm" icon={FolderPlus} className="dmh-openmodel-new" onClick={onNewProject}>
+            <Button variant="secondary" size="sm" icon={FolderPlus} className="dmh-openmodel-new" onClick={onNewProject}
+              disabled={Boolean(newProjectBlocked)} title={newProjectBlocked ?? undefined}>
               New project…
             </Button>
           )}
@@ -188,7 +191,7 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
       ) : (
         <div className="dmh-openmodel">
           <div className="dmh-openmodel-step">Step <b>2</b> of 2 · Mode · <b>{project?.name}</b></div>
-          {/* option 1 — read-only production */}
+          {/* opción 1 — producción en solo lectura */}
           <button
             type="button"
             className={`dmh-openmodel-opt${mode === 'readonly' ? ' is-selected' : ''}`}
@@ -212,7 +215,7 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
             <span className="dmh-openmodel-radio">{mode === 'readonly' && <span className="dot" />}</span>
           </button>
 
-          {/* option 2 — snapshot from production */}
+          {/* opción 2 — snapshot desde producción */}
           <button
             type="button"
             className={`dmh-openmodel-opt${mode === 'snapshot' ? ' is-selected' : ''}`}
@@ -233,7 +236,7 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
             <span className="dmh-openmodel-radio">{mode === 'snapshot' && <span className="dot" />}</span>
           </button>
 
-          {/* option 3 — continue a working version (drafts of THIS project) */}
+          {/* opción 3 — continuar una versión de trabajo (drafts de este proyecto) */}
           <button
             type="button"
             className={`dmh-openmodel-opt${mode === 'continue' ? ' is-selected' : ''}`}
@@ -272,7 +275,7 @@ export default function OpenModelModal({ open, onClose, defaultProjectId, users,
                           <span className="dmh-openmodel-draft-meta">
                             {d.title ? `${d.title} · ` : ''}
                             {userName(d.owner)}
-                            {/* Doc 104: draft recibido por una transferencia. */}
+                            {/* Draft recibido por una transferencia. */}
                             {d.transfers?.length ? ` · received from ${userName(d.transfers[d.transfers.length - 1].from)}` : ''}
                           </span>
                           {selected ? (

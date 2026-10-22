@@ -38,7 +38,7 @@ function previewPhysical(logical: string, terms: SnapshotTerm[], sep: string, ca
 }
 
 // _orig: término original al entrar en edición — permite detectar renombres
-// de texto para validarlos antes de aplicar (F2 #1, ver termsToValidate).
+// de texto para validarlos antes de aplicar (ver termsToValidate).
 type Draft = SnapshotTerm & { _new?: boolean; _deleted?: boolean; _orig?: string };
 
 export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }: {
@@ -53,32 +53,32 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
   const [confirm, setConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  // F2 #1: candado admin + dialog de conflictos de validación.
+  // Candado admin + diálogo de conflictos de validación.
   const isAdmin = useAuthStore((s) => s.has('admin.manage'));
   const [conflicts, setConflicts] = useState<{ term: string; validation: GlossaryValidation } | null>(null);
-  // Doc 95 D5: resultado de Validate por fila (id → término que pasó sin conflictos).
+  // Resultado de Validate por fila (id → término que pasó sin conflictos).
   const [validated, setValidated] = useState<Record<string, string>>({});
   const [checking, setChecking] = useState<string | null>(null); // id de la fila validándose
-  // Doc 94 D7: impacto REAL del apply (dry-run); el aviso solo sale si > 0.
+  // Impacto real del apply (dry-run); el aviso solo sale si > 0.
   const [impact, setImpact] = useState<GlossaryImpact | null>(null);
-  // Doc 102: filas donde el usuario pidió Validar (se marcan en rojo aunque estén vacías).
+  // Filas donde el usuario pidió Validar (se marcan en rojo aunque estén vacías).
   const [flagged, setFlagged] = useState<Set<string>>(new Set());
 
-  // Config del scope. La REGLA CORPORATIVA está bloqueada en join + UPPER
-  // (así se derivan los físicos reales del catálogo: CODCLAVESUJETOCLI); los
-  // combos se muestran pero las demás opciones quedan deshabilitadas.
+  // Config del scope. La regla de nombres está bloqueada en join + UPPER (así
+  // se derivan los físicos reales del catálogo: CODCLAVESUJETOCLI); los combos
+  // se muestran pero las demás opciones quedan deshabilitadas.
   const cfg0 = snapshot.namingConfig[scope];
   const [sep, setSep] = useState<string>(String(cfg0.separator ?? ''));
   const [casing, setCasing] = useState<string>(String(cfg0.case ?? 'upper'));
-  // Límite de caracteres del nombre FÍSICO (default 150; se versiona en Data Standards).
+  // Límite de caracteres del nombre físico (default 150; se versiona en Data Standards).
   const [maxLen, setMaxLen] = useState<number>(Number(cfg0.maxLength ?? 150));
 
-  // Borrador EDITABLE de términos (vacío hasta entrar en modo edición; la vista
+  // Borrador editable de términos (vacío hasta entrar en modo edición; la vista
   // read-only usa `snapshot.dict` directamente vía `live`).
   const [terms, setTerms] = useState<Draft[]>([]);
 
   // Re-sincroniza los chips read-only de separador/case al cambiar de scope
-  // (cuando NO se está editando): sin esto mostraban las reglas del scope viejo.
+  // (cuando no se está editando): sin esto mostrarían las reglas del scope anterior.
   useEffect(() => {
     if (editing) return;
     setSep(String(snapshot.namingConfig[scope].separator ?? ''));
@@ -113,7 +113,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     for (const t of terms) {
       if (t._deleted) { if (!t._new) removed.push(`${t.term} → ${t.abbrev}`); continue; }
       if (t._new) added.push(`${t.term} → ${t.abbrev}`);
-      // Doc 105 (P1-bis): recortado — un blanco alrededor no es una edición.
+      // Comparado recortado: un blanco alrededor no es una edición.
       else { const b = before.get(t.id); if (b && termEdited(t, b)) edited.push(`${t.term} → ${t.abbrev}`); }
     }
     const cfgChanged = sep !== String(cfg0.separator ?? '') || casing !== String(cfg0.case ?? 'upper') || maxLen !== Number(cfg0.maxLength ?? 150);
@@ -121,7 +121,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     return { added, edited, removed, cfgChanged, count: added.length + edited.length + removed.length };
   }, [terms, sep, casing, maxLen, snapshot.dict, scope, cfg0]);
 
-  // Doc 102: término Y abreviatura obligatorios en toda fila nueva o editada.
+  // Término y abreviatura obligatorios en toda fila nueva o editada.
   const before = useMemo(() => new Map(snapshot.dict.filter((t) => t.scope === scope).map((t) => [t.id, t])), [snapshot.dict, scope]);
   const incomplete = useMemo(() => (editing ? incompleteRows(terms, before) : []), [editing, terms, before]);
   const incompleteIds = useMemo(() => new Set(incomplete.map((t) => t.id)), [incomplete]);
@@ -130,9 +130,9 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     incompleteIds.has(t.id) && t[field].trim() === ''
     && (flagged.has(t.id) || t.term.trim() !== '' || t.abbrev.trim() !== '');
 
-  // Validación on-demand de una fila NUEVA (botón junto al alta). El backend
-  // igual re-valida al guardar: esto es cortesía de UX. Doc 95 D5: el resultado
-  // queda visible en la fila (chip), no en un toast que se pierde.
+  // Validación on-demand de una fila nueva (botón junto al alta). El backend
+  // igual re-valida al guardar: esto es cortesía de UX. El resultado queda
+  // visible en la fila (chip), no en un toast que se pierde.
   const validateDraft = async (t: Draft) => {
     const term = t.term.trim();
     const gap = termGap(t);
@@ -161,9 +161,9 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     }
   };
 
-  // Batch del borrador: solo términos NUEVOS o realmente EDITADOS (antes se
-  // reenviaban TODOS como upsert → inflaba el diff/impacto y re-derivaba de más).
-  // Doc 105 (P1-bis): «realmente» = comparado recortado (`termsToUpsert`).
+  // Lote del borrador: solo términos nuevos o realmente editados (reenviar todos
+  // como upsert inflaría el diff/impacto y re-derivaría de más). «Realmente» =
+  // comparado recortado (`termsToUpsert`).
   const buildBody = (): ApplyStandardsBody => {
     const body: ApplyStandardsBody = { kind: 'glossary' };
     const before = new Map(snapshot.dict.filter((t) => t.scope === scope).map((t) => [t.id, t]));
@@ -182,15 +182,15 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
     setEditing(false); setConfirm(false); setImpact(null); setValidated({}); setFlagged(new Set()); onApplied();
   };
 
-  /** «Save & apply» (doc 94 D7): valida los términos nuevos/renombrados, mide el
-   *  impacto REAL (dry-run del mismo re-derivado que corre el apply) y SOLO si
-   *  algún nombre físico cambia pide confirmación, con los números. */
+  /** «Save & apply»: valida los términos nuevos/renombrados, mide el impacto
+   *  real (dry-run del mismo re-derivado que corre el apply) y solo si algún
+   *  nombre físico cambia pide confirmación, con los números. */
   const saveAndApply = async () => {
     setBusy(true);
     try {
-      if (incomplete.length) { toast.error(incompleteMessage(incomplete.length)); return; }   // doc 102
-      // F2 #1: cada término NUEVO o renombrado se chequea contra el glosario y
-      // el corpus; el primero con conflictos corta (el backend re-valida igual).
+      if (incomplete.length) { toast.error(incompleteMessage(incomplete.length)); return; }
+      // Cada término nuevo o renombrado se chequea contra el glosario y el
+      // corpus; el primero con conflictos corta (el backend re-valida igual).
       for (const term of termsToValidate(terms)) {
         const v = await validateTerm(projectId, term, scope);
         if (!v.ok) { setConflicts({ term, validation: v }); return; }
@@ -230,7 +230,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
 
   return (
     <div style={{ padding: '24px 34px', maxWidth: 1000 }}>
-      {/* heading */}
+      {/* encabezado */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 16 }}>
         <div style={{ width: 40, height: 40, borderRadius: 11, background: '#EAF0FF', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#2E5BFF' }}><BookOpenText size={20} /></div>
         <div style={{ flex: 1 }}>
@@ -263,7 +263,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
       {/* config + preview */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 20 }}>
         <div style={{ ...card, flex: 1 }}>
-          {/* Regla corporativa BLOQUEADA en join + UPPER (column y table): los
+          {/* Regla de nombres bloqueada en join + UPPER (column y table): los
               combos se ven, pero las otras opciones están deshabilitadas. */}
           <div style={{ fontSize: 12, fontWeight: 600, color: '#56607A', marginBottom: 8 }}>Separator between terms</div>
           {editing ? (
@@ -277,8 +277,8 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
               <option value="upper">UPPER</option><option value="lower" disabled>lower</option><option value="camel" disabled>camelCase</option>
             </select>
           ) : <div style={chip}>{casing.toUpperCase()}</div>}
-          {/* F: límite de caracteres del físico (tabla/columna). Al crear, si
-              el físico lo excede, el backend rechaza con error. Versionado. */}
+          {/* Límite de caracteres del físico (tabla/columna). Al crear, si el
+              físico lo excede, el backend rechaza con error. Versionado. */}
           <div style={{ fontSize: 12, fontWeight: 600, color: '#56607A', margin: '15px 0 8px' }}>Max physical length (chars)</div>
           {editing ? (
             <input type="number" min={1} max={1000} value={maxLen}
@@ -294,7 +294,7 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
         </div>
       </div>
 
-      {/* terms table */}
+      {/* tabla de términos */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 11 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: '#1A2B4A' }}>Terms &amp; abbreviations</div>
         <span style={{ fontSize: 11.5, color: '#9AA3B2' }}>{live.length} terms</span>
@@ -350,10 +350,10 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
         {shown.length === 0 && <div style={{ padding: 16, fontSize: 12.5, color: '#9AA3B2' }}>No matching terms.</div>}
       </div>
 
-      {/* footer edit actions */}
+      {/* acciones de edición del pie */}
       {editing && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 18, paddingTop: 16, borderTop: '1px solid #EAEDF2' }}>
-          {/* Doc 102: con filas incompletas el pie dice por qué no se puede guardar. */}
+          {/* Con filas incompletas el pie dice por qué no se puede guardar. */}
           <span style={{ fontSize: 12.5, color: incomplete.length ? '#C0392B' : diff.count ? '#9A6B00' : '#8A93A5' }}>
             {incomplete.length ? incompleteMessage(incomplete.length)
               : diff.count ? `${diff.count} unsaved change${diff.count > 1 ? 's' : ''}` : 'No changes yet'}
@@ -365,13 +365,13 @@ export default function GlossaryPage({ projectId, snapshot, canEdit, onApplied }
         </div>
       )}
 
-      {/* Doc 95 D3/D4: qué renombra el borrador y qué ya estaba desfasado, completo */}
+      {/* Qué renombra el borrador y qué ya estaba desfasado, completo */}
       {confirm && impact && (
         <GlossaryApplyDialog scope={scope} impact={impact} diff={diff} busy={busy}
           onCancel={() => { setConfirm(false); setImpact(null); }} onApply={apply} />
       )}
 
-      {/* Doc 95 D1: el término no se puede agregar — por qué y todas las columnas */}
+      {/* El término no se puede agregar: por qué y todas las columnas */}
       {conflicts && (
         <GlossaryConflictDialog term={conflicts.term} scope={scope} validation={conflicts.validation}
           onClose={() => setConflicts(null)} />
@@ -390,7 +390,7 @@ function del(set: React.Dispatch<React.SetStateAction<Draft[]>>, id: string) {
 
 const chip: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', height: 36, padding: '0 14px', border: '1px solid #E2E6EE', background: '#F7F9FC', color: '#1A2B4A', borderRadius: 8, fontSize: 12.5, fontWeight: 600, fontFamily: 'var(--mono, monospace)' };
 const inp: React.CSSProperties = { height: 32, fontSize: 13, marginRight: 8 };
-const invalidInp: React.CSSProperties = { borderColor: '#E0A39B', background: '#FFF6F5' };   // doc 102: campo obligatorio vacío
+const invalidInp: React.CSSProperties = { borderColor: '#E0A39B', background: '#FFF6F5' };   // campo obligatorio vacío
 const okChip: React.CSSProperties = { alignSelf: 'flex-start', fontSize: 11, fontWeight: 600, color: '#0E8C6A', background: '#E8F7F1', border: '1px solid #C6EADC', borderRadius: 6, padding: '1px 7px' };
 const btnGhost: React.CSSProperties = { height: 40, padding: '0 18px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
 const btnPrimary: React.CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: '#2E5BFF', color: '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };

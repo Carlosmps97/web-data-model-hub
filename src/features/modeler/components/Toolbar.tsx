@@ -41,6 +41,8 @@ import { arrangeResetWarning } from '../lib/wireRoute';
 import { TOOLBAR_STEPS, stepOn, type ToolbarStep } from '../lib/toolbarFit';
 import { blocksRepeat, nextIn, tabExit } from '../lib/toolbarKeys';
 import { useToolbarFit } from './useToolbarFit';
+import { useAuthStore } from '@/store/useAuthStore';
+import { NO_EXPORT_HINT } from '@/lib/permissionHints';
 
 // Las 4 cardinalidades crow's-foot del preset por extremo (el popup de la
 // relación ofrece las 6, incluyendo 'many' pelado y 'one-only').
@@ -51,7 +53,7 @@ const CARDS: { k: Cardinality; tip: string }[] = [
   { k: 'zero-many', tip: 'Zero or many' },
 ];
 
-// Formas del grupo DRAWING (R6d). `id` = DrawingType; cada botón crea una forma.
+// Formas del grupo DRAWING. `id` = DrawingType; cada botón crea una forma.
 const SHAPES: { id: DrawingType; tip: string; icon: ReactNode }[] = [
   { id: 'rect', tip: 'Rectangle', icon: <RectangleHorizontal size={17} /> },
   { id: 'square', tip: 'Square', icon: <Square size={17} /> },
@@ -72,8 +74,8 @@ const MODEL_PROPS_TIP = 'Model properties — UDPs and colors of this canvas';
 
 
 /** ⌘K / Ctrl+K: abre el buscador del Model con una sesión de canvas abierta.
- *  Doc 105 (ronda 6): no con un modal o una espera en pantalla (`modalOpen`) —
- *  abría el buscador DEBAJO de «Saving working copy…» y se llevaba el foco. */
+ *  No con un modal o una espera en pantalla (`modalOpen`): el buscador quedaría
+ *  debajo de «Saving working copy…» y se llevaría el foco. */
 export function onSearchShortcut(e: KeyboardEvent, open: () => void): void {
   if (!((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k')) return;
   e.preventDefault();
@@ -82,21 +84,21 @@ export function onSearchShortcut(e: KeyboardEvent, open: () => void): void {
 }
 
 export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: string, k?: 'err') => void; onOpenModel?: () => void }) {
-  // Doc 92 D7: barra de herramientas colapsable (la navegación de módulos no).
+  // Barra de herramientas colapsable (la navegación de módulos no).
   const toolbarCollapsed = useUiStore((st) => st.toolbarCollapsed);
   const toggleToolbar = useUiStore((st) => st.toggleToolbar);
-  // Doc 98: mostrar/ocultar las etiquetas de relación (por navegador).
+  // Mostrar/ocultar las etiquetas de relación (por navegador).
   const relLabelsHidden = useUiStore((st) => st.relLabelsHidden);
   const toggleRelLabels = useUiStore((st) => st.toggleRelLabels);
   const activeSaId = useModelerStore((s) => s.activeSaId);
   const diagram = useModelerStore((s) => s.diagram);
   const relPreset = useModelerStore((s) => s.relPreset);
   const setRelPreset = useModelerStore((s) => s.setRelPreset);
-  // Doc 53: la herramienta Subcategory SOLO vive en modelo lógico — en físico
-  // el botón se deshabilita y el store la desarma al cambiar de modo.
+  // La herramienta Subcategory solo vive en modelo lógico: en físico el botón
+  // se deshabilita y el store la desarma al cambiar de modo.
   const viewMode = useModelerStore((s) => s.viewMode);
   const setViewMode = useModelerStore((s) => s.setViewMode);
-  const n = facetNouns(viewMode);   // doc 85: Entity/Attribute vs Table/Column
+  const n = facetNouns(viewMode);   // Entity/Attribute o Table/Column
   const subcatArmed = useModelerStore((s) => s.subcatArmed);
   const setSubcatArmed = useModelerStore((s) => s.setSubcatArmed);
   const autoOrganize = useModelerStore((s) => s.autoOrganize);
@@ -104,24 +106,24 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const addDrawing = useModelerStore((s) => s.addDrawing);
   const saveAll = useModelerStore((s) => s.saveAll);
   const reload = useModelerStore((s) => s.reload);
-  // Doc 70: una vista nueva se suma a la membresía de ESTE canvas.
+  // Una vista recién creada se suma a la membresía de este canvas.
   const addViewsToCanvas = useModelerStore((s) => s.addViewsToCanvas);
 
   const openMode = useSessionStore((s) => s.openMode);
   const versionLabel = useSessionStore((s) => s.activeVersionLabel);
-  // Doc 75 D8: el chip nombra el proyecto de la sesión.
+  // El chip nombra el proyecto de la sesión.
   const projectName = useModelerStore((s) => s.projects.find((p) => p.id === s.activeProjectId)?.name ?? null);
   const readonly = openMode === 'readonly';
-  // Doc 70: visor de un snapshot (`asof:<versionId>`) — el modelo tal como se
+  // Visor de un snapshot (`asof:<versionId>`): el modelo tal como se
   // publicó en esa versión, reconstruido del ledger.
   const snapshot = isAsOfChangesetId(useSessionStore((s) => s.activeChangesetId));
-  // Doc 55: la carga masiva escribe en el draft activo — no exige canvas
+  // La carga masiva escribe en el draft activo: no exige canvas
   // abierto (crea proyectos/canvases), sí sesión de edición con changeset.
   const activeCsId = useSessionStore((s) => s.activeChangesetId);
   const canUpload = openMode === 'editing' && !!activeCsId;
 
-  // Undo (doc 50): el tooltip muestra QUÉ se va a deshacer; el botón se apaga
-  // sin pila, con una inversa en vuelo o en solo-lectura.
+  // Undo: el tooltip muestra qué se va a deshacer; el botón se apaga sin pila,
+  // con una inversa en vuelo o en solo lectura.
   const undoCount = useUndoStore((s) => s.stack.length);
   const undoLabel = useUndoStore((s) => (s.stack.length ? s.stack[s.stack.length - 1].label : null));
   const undoBusy = useUndoStore((s) => s.busy);
@@ -132,34 +134,36 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   };
 
   const [modal, setModal] = useState<'table' | 'ctas' | 'view' | 'schema' | 'upload' | null>(null);
-  // Doc 71: el buscador se comparte con la cabecera del Explorer (estado en el store).
+  // El buscador se comparte con la cabecera del Explorer (estado en el store).
   const searchOpen = useModelerStore((s) => s.searchOpen);
   const setSearchOpen = useModelerStore((s) => s.setSearchOpen);
   const [publishOpen, setPublishOpen] = useState(false);
   const [ddlOpen, setDdlOpen] = useState(false);
-  // Doc 112: la ficha del canvas (Model properties) — también la abre el color
+  // La ficha del canvas (Model properties): también la abre el color
   // en Properties; el estado vive en el store.
   const modelProps = useModelerStore((s) => s.modelProps);
   const openModelProps = useModelerStore((s) => s.openModelProps);
   const closeModelProps = useModelerStore((s) => s.closeModelProps);
   // Al salir del Model (Toolbar desmontado) la ficha no queda abierta en el
-  // store: volver la montaba un instante (foco y una lectura de UDPs).
+  // store: si quedara, volver la montaría un instante (foco y una lectura de UDPs).
   useEffect(() => () => closeModelProps(), [closeModelProps]);
-  // Doc 59: menú del botón ÚNICO de export (SVG / HTML / PDF). Portal fixed:
-  // el toolbar scrollea horizontal y un menú absoluto se recortaría (doc 52).
+  // Menú del botón único de export (SVG / HTML / PDF). Portal fixed: el
+  // toolbar scrollea horizontal y un menú absoluto se recortaría.
   const [exportOpen, setExportOpen] = useState(false);
+  // Exportar (DDL, imagen, HTML, PDF) exige el permiso `export`.
+  const canExport = useAuthStore((s) => s.has('export'));
   const [exportPos, setExportPos] = useState<RectLike | null>(null);
   const exportBtnRef = useRef<HTMLSpanElement | null>(null);
   // Selección de cardinalidad por extremo (crow's-foot), en términos
-  // PARENT (lado PK) / CHILD (lado FK) — doc 19. Default Erwin: one → zero-many.
+  // PARENT (lado PK) / CHILD (lado FK). Default Erwin: one → zero-many.
   const [relSel, setRelSel] = useState<{ parent: Cardinality; child: Cardinality }>({ parent: 'one', child: 'zero-many' });
   // Acciones largas del toolbar en vuelo (feedback de "en proceso").
   const [saving, setSaving] = useState(false);
   const [arranging, setArranging] = useState(false);
-  // Doc 99: trazos manuales de wires del canvas — el auto-arrange en edición
-  // los reinicia, así que confirma antes diciendo cuántos son.
+  // Trazos manuales de wires del canvas: el auto-arrange en edición los
+  // reinicia, así que primero confirma indicando cuántos son.
   const routeCount = useModelerStore(manualRouteCount);
-  // La pregunta es sobre UN canvas: si mientras está abierta cambia el canvas
+  // La pregunta es sobre un solo canvas: si mientras está abierta cambia el canvas
   // (buscador, Explorer), deja de valer.
   const [arrangeAsk, setArrangeAsk] = useState<string | null>(null);
   const setRelEnd = (end: 'parent' | 'child', c: Cardinality) => {
@@ -168,15 +172,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     if (relPreset) setRelPreset({ ...next, identifying: relPreset.identifying });
   };
   // Dos herramientas de dibujo estilo Erwin: Identifying (sólida) y
-  // Non-identifying (punteada). Armar una desarma la otra; re-click desarma.
+  // Non-identifying (punteada). Armar una desarma la otra; un segundo clic desarma.
   const armRel = (identifying: boolean) =>
     setRelPreset(relPreset?.identifying === identifying ? null : { ...relSel, identifying });
 
   const hasCanvas = activeSaId != null && diagram != null;
-  // Edición habilitada: hay canvas y NO es modo solo-lectura.
+  // Edición habilitada: hay canvas y no es modo solo lectura.
   const canEdit = hasCanvas && !readonly;
 
-  // Doc 114: la barra se compacta por pasos hasta entrar en UNA fila (sin scroll
+  // La barra se compacta por pasos hasta entrar en una sola fila (sin scroll
   // horizontal ni filas desparejas); pasado el último, envuelve antes que
   // esconder botones. Lo compactado de un grupo queda en un menú en su lugar.
   const tbRef = useRef<HTMLDivElement | null>(null);
@@ -187,20 +191,20 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const tbClass = toolbarCollapsed ? ' wk-toolbar--collapsed'
     : TOOLBAR_STEPS.filter((st) => stepOn(level, st)).map((st) => ` tb-${st}`).join('') + (level > TOOLBAR_STEPS.length ? ' tb-wrap' : '');
   const cardTip = (c: Cardinality) => CARDS.find((x) => x.k === c)?.tip ?? c;
-  // Revisión doc 114: un menú de grupo a la vez; si la barra cambia de nivel,
-  // los botones se movieron y el menú abierto se cierra.
+  // Un menú de grupo a la vez; si la barra cambia de nivel, los botones se
+  // mueven y el menú abierto se cierra.
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const menus = useMemo(() => ({ open: openMenu, setOpen: setOpenMenu, level }), [openMenu, level]);
 
-  // ⌘K / Ctrl+K abre el buscador del Model (doc 70 §11).
+  // ⌘K / Ctrl+K abre el buscador del Model.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => onSearchShortcut(e, () => useModelerStore.getState().setSearchOpen(true));
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Doc 105 (H7): los fallos de una escritura esperan la revalidación y callan
-  // si la sesión cambió (`reportWriteError`: ella ya avisó).
+  // Los fallos de una escritura esperan la revalidación y callan si la sesión
+  // cambia (`reportWriteError`: el aviso lo da la revalidación).
   const onSave = async () => {
     setSaving(true);
     // Propaga el motivo real (p.ej. un 4xx del backend), no un genérico.
@@ -222,11 +226,11 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     void runArrange();
   };
 
-  // Doc 59: export SIN captura de DOM. html-to-image clonaba ~450k elementos
-  // con getComputedStyle (minutos + RangeError en Analytics) y el data URL
-  // gigante producía descargas VACÍAS (límite ~2MB de Chrome). Ahora la
-  // escena se dibuja desde el MODELO (solo diagrama: columnas, relaciones,
-  // pintados) y todo baja por Blob; los módulos pesados cargan lazy.
+  // Export sin captura de DOM: la escena se dibuja desde el modelo (solo
+  // diagrama: columnas, relaciones, pintados) y todo baja por Blob; los módulos
+  // pesados cargan lazy. Clonar el DOM de un canvas grande (cientos de miles de
+  // elementos con getComputedStyle) tardaría minutos y un data URL gigante
+  // superaría el límite de ~2MB de Chrome, con descargas vacías.
   const download = (blob: Blob, filename: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -245,23 +249,23 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       const [{ buildDiagramScene }, { buildDiagramSvg }] = await Promise.all([
         import('../lib/exportScene'), import('../lib/sceneSvg'),
       ]);
-      // Doc 99: los trazos manuales están referidos a donde los bloques están
-      // AHORA. En edición el export toma las posiciones vivas (el diagrama del
-      // store guarda las de su última carga: sin esto un trazo recién hecho
-      // saldría unido a la tabla en su sitio viejo) y los trazos vivos. En
-      // visor exporta lo publicado, como siempre: posiciones Y trazos
-      // publicados, sin los movimientos efímeros de la sesión.
+      // Los trazos manuales están referidos a la posición actual de los
+      // bloques. En edición el export toma las posiciones vivas (el diagrama
+      // del store guarda las de su última carga: sin esto un trazo recién hecho
+      // saldría unido a la tabla en su posición anterior) y los trazos vivos.
+      // En visor exporta lo publicado: posiciones y trazos publicados, sin los
+      // movimientos efímeros de la sesión.
       const viewer = useSessionStore.getState().openMode === 'readonly';
       const sa = st.diagram.subjectArea;
       const diagram = viewer || !st.flow
         ? st.diagram
         : { ...st.diagram, subjectArea: { ...sa, layout: liveLayout(sa.layout, st.flow.getNodes()) } };
-      // Doc 98: el export respeta el botón Show/Hide relationship labels.
+      // El export respeta el botón Show/Hide relationship labels.
       const scene = buildDiagramScene({
         diagram, drawings: st.drawings, viewMode: st.viewMode,
         relLabels: !useUiStore.getState().relLabelsHidden,
         routes: st.canvasRoutes,
-        colors: st.canvasColors, themes: st.themes,   // doc 109: los vivos, como los trazos
+        colors: st.canvasColors, themes: st.themes,   // los vivos, como los trazos
       });
       if (kind === 'pdf') {
         const { buildDiagramPdf } = await import('../lib/scenePdf');
@@ -284,37 +288,37 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
     }
   };
 
-  // Doc 86: cambiar de modelo con un popup de creación abierto lo cierra — un
-  // popup es de UNA faceta (entidad o tabla, atributo o columna).
+  // Cambiar de modelo con un popup de creación abierto lo cierra: un popup es
+  // de una sola faceta (entidad o tabla, atributo o columna).
   useEffect(() => { setModal(null); }, [viewMode]);
-  // Doc 105 (ronda 3, R7-A): los diálogos con fondo de canvas dejan el Toolbar
-  // y el TopNav clicables — al cambiar la sesión (otra versión, modo o
-  // proyecto) se cierran todos: lo armado en una no se graba en la otra.
+  // Los diálogos con fondo de canvas dejan el Toolbar y el TopNav clicables:
+  // al cambiar la sesión (otra versión, modo o proyecto) se cierran todos, para
+  // que lo armado en una no se grabe en la otra.
   const sessionKey = useSessionStore((s) => canvasSessionKey(s));
   useEffect(() => {
     setModal(null); setPublishOpen(false); setDdlOpen(false); closeModelProps(); setExportOpen(false); setArrangeAsk(null);
   }, [sessionKey, closeModelProps]);
 
-  // Doc 105 (ronda 5): nombre accesible de un botón de ÍCONO — el tooltip sólo
-  // se ve con el mouse (el lector de pantalla anunciaba «button» sin más). En
-  // el visor dice además por qué está deshabilitado.
+  // Nombre accesible de un botón de ícono: el tooltip solo se ve con el mouse
+  // (sin nombre, el lector de pantalla anunciaría «button» sin más). En el visor
+  // dice además por qué está deshabilitado.
   const named = (label: string, lockTip = true) => (lockTip && readonly ? `${label} — ${VIEWER_TIP}` : label);
 
   // Botón-icono de sección. `disabled` ya contempla viewer-lock en cada call.
-  // Doc 114: `text` = su nombre corto dentro del menú de un grupo compactado.
-  const ic = (label: string, node: ReactNode, onClick: () => void, opts?: { on?: boolean; disabled?: boolean; lockTip?: boolean; text?: string }) => (
-    <ToolBtn tip={opts?.lockTip && readonly ? VIEWER_TIP : label} name={named(label, !!opts?.lockTip)} text={opts?.text}
+  // `text` = su nombre corto dentro del menú de un grupo compactado.
+  const ic = (label: string, node: ReactNode, onClick: () => void, opts?: { on?: boolean; disabled?: boolean; lockTip?: boolean; text?: string; tip?: string }) => (
+    <ToolBtn tip={opts?.tip ?? (opts?.lockTip && readonly ? VIEWER_TIP : label)} name={named(label, !!opts?.lockTip)} text={opts?.text}
       on={opts?.on} disabled={opts?.disabled} onClick={onClick}>{node}</ToolBtn>
   );
 
   return (
     <ToolMenus.Provider value={menus}>
-    {/* Revisión 2 doc 114: Enter o Espacio sostenidos no encadenan herramientas
-        (cada repetición activaba lo que tuviera el foco, hasta confirmar un Auto-arrange). */}
+    {/* Enter o Espacio sostenidos no encadenan herramientas (cada repetición
+        activaría lo que tuviera el foco, hasta confirmar un Auto-arrange). */}
     <div ref={tbRef} className={`wk-toolbar${tbClass}`}
       onKeyDownCapture={(e) => { if (blocksRepeat({ repeat: e.repeat, key: e.key, target: e.target as HTMLElement }, tbRef.current)) e.preventDefault(); }}>
-      {/* Doc 92 D7: barra colapsada a una franja — sólo el botón para mostrarla
-          y el contexto de la versión; los popups (abajo) siguen montados. */}
+      {/* Barra colapsada a una franja: solo el botón para mostrarla y el
+          contexto de la versión; los popups (abajo) siguen montados. */}
       {toolbarCollapsed && (
         <div className="wk-tb-strip">
           <button type="button" className="wk-tb-expand" onClick={toggleToolbar}
@@ -329,10 +333,9 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         </div>
       )}
       {!toolbarCollapsed && (<>
-      {/* MODEL (doc 86): el «botón padre» lógico/físico estilo Erwin — gobierna
-          explorer, tools, popups, UDPs, dominios y labels del canvas. Doc 112: y
-          la ficha del canvas abierto (Model properties: UDPs + colores), que
-          antes estaba en ACTIONS y el color de las cajas, en el clic derecho. */}
+      {/* MODEL: el «botón padre» lógico/físico estilo Erwin; gobierna explorer,
+          tools, popups, UDPs, dominios y labels del canvas. Incluye también la
+          ficha del canvas abierto (Model properties: UDPs + colores). */}
       <div className="wk-grp">
         <div className="wk-modelcol">
           <div className="wk-seg" role="group" aria-label="Model view">
@@ -357,7 +360,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       </div>
       <span className="wk-div" />
 
-      {/* STRUCTURE — Views, CTAS, Schemas y la carga Excel son físicos (doc 86 D2, doc 113). */}
+      {/* STRUCTURE — Views, CTAS, Schemas y la carga Excel son físicos. */}
       <div className="wk-grp">
         <div className="wk-grp-row">
           {ic(`New ${n.one}`, <Table2 size={17} />, () => setModal('table'), { disabled: !canEdit, lockTip: true })}
@@ -365,7 +368,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             {ic(toolAvailableIn('ctas', viewMode) ? 'CTAS — create from existing' : PHYSICAL_ONLY_TOOL_TIP.ctas, <Combine size={17} />, () => setModal('ctas'), { disabled: !canEdit || !toolAvailableIn('ctas', viewMode), lockTip: true, text: 'CTAS' })}
             {ic(toolAvailableIn('view', viewMode) ? 'Create view' : PHYSICAL_ONLY_TOOL_TIP.view, <Eye size={17} />, () => setModal('view'), { disabled: !canEdit || !toolAvailableIn('view', viewMode), lockTip: true, text: 'Create view' })}
             {ic(toolAvailableIn('schema', viewMode) ? 'Schemas — create & manage' : PHYSICAL_ONLY_TOOL_TIP.schema, <FolderCog size={17} />, () => setModal('schema'), { disabled: !canEdit || !toolAvailableIn('schema', viewMode), lockTip: true, text: 'Schemas' })}
-            {/* Doc 113 §1.2: la carga Excel también es física (crea tablas con esquema y sus vistas). */}
+            {/* La carga Excel también es física (crea tablas con esquema y sus vistas). */}
             {ic(toolAvailableIn('upload', viewMode) ? 'Upload from Excel — create or update tables, columns and structure in bulk' : PHYSICAL_ONLY_TOOL_TIP.upload, <FileSpreadsheet size={17} />, () => setModal('upload'), { disabled: !canUpload || !toolAvailableIn('upload', viewMode), lockTip: true, text: 'Upload from Excel' })}
           </Collapsible>
         </div>
@@ -373,10 +376,10 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       </div>
       <span className="wk-div" />
 
-      {/* SEARCH & INSPECT (docs 70 §11 · 72): UN popup busca (o navega por
-          filtros) tablas, columnas y definiciones en TODA la versión; cada hit
-          ofrece «Locate on canvas» (redirige/centra) e «Inspect metadata»
-          (Object Inspector, sin canvas). Reemplaza el input «Find a table…». */}
+      {/* SEARCH & INSPECT: un solo popup busca (o navega por filtros) tablas,
+          columnas y definiciones en toda la versión; cada hit ofrece «Locate on
+          canvas» (redirige/centra) e «Inspect metadata» (Object Inspector, sin
+          canvas). */}
       <div className="wk-grp">
         <div className="wk-grp-row">
           {ic(`Search the model — locate a table, column or definition on its canvas, or inspect its metadata (${SEARCH_KEY_LABEL})`, <Search size={17} />, () => setSearchOpen(true), { disabled: !openMode })}
@@ -386,9 +389,9 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       <span className="wk-div" />
 
       {/* RELATIONSHIPS — cardinalidad por extremo (crow's-foot, Parent/Child)
-          + dos herramientas de dibujo estilo Erwin (doc 19) */}
+          + dos herramientas de dibujo estilo Erwin */}
       <div className="wk-grp">
-        {/* Doc 114: compactado, primero las cardinalidades (su botón muestra las
+        {/* Al compactar, primero las cardinalidades (su botón muestra las
             elegidas) y al final todo el grupo, cada parte en su menú. */}
         <Collapsible when={on('rel')} menu={{ name: 'Relationships — cardinality, draw, subcategory and labels', icon: <RelLineIcon />, active: !!relPreset || subcatArmed, disabled: !openMode }}>
         <div className="wk-relwrap">
@@ -448,7 +451,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
               </button>
             </Tooltip>
           </div>
-          {/* Subcategoría aparte: es supertipo/subtipo (doc 53), no un tercer
+          {/* Subcategoría aparte: es supertipo/subtipo, no un tercer
               estilo de línea identifying/non-identifying */}
           <span className="wk-relsep" />
           <div className="wk-reldraw2 wk-subcatcol">
@@ -467,8 +470,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
                 <SubcatIcon />
               </button>
             </Tooltip>
-            {/* Doc 98: etiquetas de relación (frases) — preferencia de
-                VISUALIZACIÓN, así que también vale en modo visor. */}
+            {/* Etiquetas de relación (frases): preferencia de visualización,
+                así que también vale en modo visor. */}
             <Tooltip label={relLabelsHidden
               ? 'Show relationship labels (verb phrases)'
               : 'Hide relationship labels (verb phrases)'}>
@@ -490,7 +493,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       </div>
       <span className="wk-div" />
 
-      {/* DRAWING (R6d): 2 filas × 4; cada botón crea una forma en el centro */}
+      {/* DRAWING: 2 filas × 4; cada botón crea una forma en el centro */}
       <div className="wk-grp">
         <Collapsible when={on('drawing')} menu={{ name: 'Drawing — add a shape', icon: <Shapes size={17} />, disabled: !openMode }}>
         <div className="wk-drawgrid">
@@ -507,9 +510,9 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       </div>
       <span className="wk-div" />
 
-      {/* STANDARDS (UDP / Parent Domains) se movió a su propio módulo
-          "Data Standards" (2026-07-04): reglas globales, versionadas aparte,
-          fuera del canvas/changeset. Ver plan-implementacion/03. */}
+      {/* Los estándares (UDP / Parent Domains) viven en el módulo "Data
+          Standards": reglas globales, versionadas aparte, fuera del
+          canvas/changeset. */}
 
       {/* ACTIONS */}
       <div className="wk-grp">
@@ -524,16 +527,17 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
             name: 'More actions — auto-arrange and exports', list: true, active: exportOpen, disabled: !openMode,
             icon: arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <MoreHorizontal size={17} />,
           }}>
-          {/* Doc 84 E: también en modo visor (sólo en esta sesión, no se guarda). */}
+          {/* También en modo visor (solo en esta sesión, no se guarda). */}
           {ic(readonly ? 'Auto-arrange — view only, not saved' : 'Autoarrange', arranging ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Network size={17} />, () => void onArrange(), { disabled: !hasCanvas || arranging, text: 'Auto-arrange' })}
-          {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true), { disabled: !hasCanvas, text: 'Export DDL' })}
-          {/* En el menú de lista, a todo el ancho como las demás (revisión 2). */}
+          {ic('Export DDL', <FileCode2 size={17} />, () => setDdlOpen(true),
+            { disabled: !hasCanvas || !canExport, text: 'Export DDL', tip: canExport ? undefined : NO_EXPORT_HINT })}
+          {/* En el menú de lista, a todo el ancho como las demás. */}
           <span ref={exportBtnRef} style={{ display: 'flex', flexDirection: 'column' }}>
             {ic('Export diagram — SVG · interactive HTML · PDF', <ImageDown size={17} />, () => {
               const r = exportBtnRef.current?.getBoundingClientRect();
               setExportPos(r ? { left: r.left, top: r.top, right: r.right, bottom: r.bottom } : null);
               setExportOpen((v) => !v);
-            }, { disabled: !hasCanvas, on: exportOpen, text: 'Export diagram' })}
+            }, { disabled: !hasCanvas || !canExport, on: exportOpen, text: 'Export diagram', tip: canExport ? undefined : NO_EXPORT_HINT })}
           </span>
           </Collapsible>
         </div>
@@ -542,7 +546,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
 
       {/* ── Cluster derecho ── */}
       <div className="wk-right">
-        {/* Responsive (2026-09-11): en filas envueltas el contexto va a la
+        {/* Responsive: en filas envueltas el contexto va a la
             izquierda y las acciones a la derecha (space-between); la parte
             «proyecto» de la pill se oculta en pantallas angostas. */}
         <div className="wk-right-ctx">
@@ -565,7 +569,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         <Tooltip label={readonly ? VIEWER_TIP : 'Publish version'}>
           <button className="wk-publish" aria-label="Publish" disabled={!canEdit} onClick={() => setPublishOpen(true)}><ArrowUpToLine size={15} /><span className="wk-btn-txt">Publish</span></button>
         </Tooltip>
-        {/* Doc 92 D7: colapsa la barra de herramientas (más espacio de canvas). */}
+        {/* Colapsa la barra de herramientas (más espacio de canvas). */}
         <Tooltip label="Hide the tools bar — more room for the canvas">
           <button type="button" className="wk-tb-collapse" onClick={toggleToolbar} aria-label="Hide the tools bar" aria-expanded={true}>
             <ChevronUp size={15} />
@@ -595,8 +599,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {modal === 'view' && (
         <ViewEditor onClose={() => setModal(null)} pushToast={pushToast}
           onSaved={(v, created) => {
-            // Doc 105 (F1): si la vista nueva no entra al canvas, se dice por qué
-            // — y qué falló (O1); con la versión recién transferida, calla (H7).
+            // Si la vista recién creada no entra al canvas, se dice por qué y qué
+            // falló; con la versión recién transferida, calla.
             if (created && v.showOnCanvas !== false) {
               void addViewsToCanvas([v.id])
                 .catch(reportWriteError((e) => pushToast(failureText("Couldn't add the view to this canvas", e), 'err')));
@@ -606,7 +610,7 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       {modal === 'schema' && <SchemaManagerModal onClose={() => setModal(null)} pushToast={pushToast} />}
       {modal === 'upload' && <UploadModal onClose={() => setModal(null)} pushToast={pushToast} />}
 
-      {/* Doc 70 §11: buscador del Model (tablas · columnas · definiciones). */}
+      {/* Buscador del Model (tablas · columnas · definiciones). */}
       {searchOpen && <SearchModelPopup onClose={() => setSearchOpen(false)} pushToast={pushToast} />}
 
       <PublishModal open={publishOpen} onClose={() => setPublishOpen(false)} />
@@ -639,17 +643,17 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   );
 }
 
-/** Doc 113 §5: menú de un botón del toolbar (Export diagram) — debajo del
+/** Menú de un botón del toolbar (Export diagram): debajo del
  *  botón, arriba si no entra y siempre dentro de la ventana. */
 function MenuNextTo({ at, onClose, children }: { at: RectLike; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const place = useFloating(ref, (box, bounds) => placeNextTo(at, box, bounds, { side: 'bottom', align: 'start', gap: 6 }), [at]);
-  useEscape(onClose);   // revisión doc 114: Esc lo cierra (antes sólo un clic afuera)
+  useEscape(onClose);   // Esc lo cierra (también un clic afuera)
   return <div ref={ref} className="wk-ctxmenu" style={place}>{children}</div>;
 }
 
-/** Doc 114: dentro del menú de un grupo compactado, cada herramienta muestra
- *  también su nombre (en la barra, sólo el ícono con su tooltip). */
+/** Dentro del menú de un grupo compactado, cada herramienta muestra también
+ *  su nombre (en la barra, solo el ícono con su tooltip). */
 const InToolMenu = createContext(false);
 
 function ToolBtn({ tip, name, text, on, disabled, onClick, children }: {
@@ -681,23 +685,23 @@ interface MenuSpec {
   disabled?: boolean;
 }
 
-/** Doc 114: una parte de la barra que se compacta — `when` en false, tal cual;
+/** Una parte de la barra que se compacta: `when` en false, tal cual;
  *  en true, un botón en su lugar que la abre en un menú flotante. */
 function Collapsible({ when, menu, children }: { when: boolean; menu: MenuSpec; children: ReactNode }) {
   return when ? <GroupMenu {...menu}>{children}</GroupMenu> : <>{children}</>;
 }
 
-/** Revisión doc 114: los menús de grupo de la barra — cuál está abierto (uno a
+/** Los menús de grupo de la barra: cuál está abierto (uno a
  *  la vez) y el nivel de compactación (al cambiar, el menú abierto se cierra:
  *  su botón se movió). */
 const ToolMenus = createContext<{ open: string | null; setOpen: Dispatch<SetStateAction<string | null>>; level: number }>(
   { open: null, setOpen: () => {}, level: 0 });
 
 /** Esc (en el documento, en captura) mientras el menú está abierto: lo cierra
- *  aunque el foco no esté adentro — Tab afuera, un clic en un rótulo. Revisión 2:
- *  salvo con el foco en un diálogo (el buscador, Open model, New table…): ese Esc
- *  es suyo — antes cerraba el menú de atrás y el diálogo seguía abierto. Con una
- *  ficha abierta (Model properties) y el menú encima, el foco está en el menú. */
+ *  aunque el foco no esté adentro (Tab afuera, un clic en un rótulo), salvo con
+ *  el foco en un diálogo (el buscador, Open model, New table…): ese Esc es suyo;
+ *  si cerrara el menú de atrás, el diálogo seguiría abierto. Con una ficha
+ *  abierta (Model properties) y el menú encima, el foco está en el menú. */
 function useEscape(onEscape: () => void): void {
   const cb = useRef(onEscape);
   cb.current = onEscape;
@@ -722,7 +726,7 @@ function GroupMenu({ name, icon, list, keepOpen, active, disabled, children }: M
     menus.setOpen((cur) => (cur === id ? null : cur));
     if (focusBack) btn.current?.focus();
   }, [menus, id]);
-  // Uno a la vez (con teclado se podían abrir dos); y al cambiar el nivel, cerrado.
+  // Uno a la vez (con teclado podrían abrirse dos); y al cambiar el nivel, cerrado.
   useEffect(() => { if (at && menus.open !== id) setAt(null); }, [at, menus.open, id]);
   const level = useRef(menus.level);
   useEffect(() => {
@@ -733,7 +737,7 @@ function GroupMenu({ name, icon, list, keepOpen, active, disabled, children }: M
   return (
     <>
       <Tooltip label={name}>
-        {/* Patrón «disclosure» (revisión: `aria-haspopup` anunciaba un menú y el
+        {/* Patrón «disclosure» (sin `aria-haspopup`: anunciaría un menú y el
             panel es un grupo de botones). */}
         <button ref={btn} type="button" className={`wk-tic wk-grpmenu${at || active ? ' on' : ''}`} aria-label={name}
           aria-expanded={!!at} aria-controls={at ? id : undefined} disabled={disabled}
@@ -756,12 +760,12 @@ function GroupMenu({ name, icon, list, keepOpen, active, disabled, children }: M
 }
 
 /** El menú del grupo: debajo del botón (arriba si no entra, dentro de la
- *  ventana — doc 113 §5). Al abrirse, el foco va a la primera herramienta (o al
- *  propio menú si no hay ninguna habilitada); Esc lo cierra y vuelve al botón;
- *  si el foco se va afuera, se cierra; usar una herramienta lo cierra y devuelve
- *  el foco al botón — el modal que abra vuelve ahí al cerrarse (salvo `keepOpen`
- *  o lo marcado `data-keep-open`, como las cardinalidades). Revisión 2: Tab en
- *  sus bordes vuelve a la barra (el menú es un portal al final de la página). */
+ *  ventana). Al abrirse, el foco va a la primera herramienta (o al propio menú
+ *  si no hay ninguna habilitada); Esc lo cierra y vuelve al botón; si el foco se
+ *  va afuera, se cierra; usar una herramienta lo cierra y devuelve el foco al
+ *  botón, y el modal que abra vuelve ahí al cerrarse (salvo `keepOpen` o lo
+ *  marcado `data-keep-open`, como las cardinalidades). Tab en sus bordes vuelve
+ *  a la barra (el menú es un portal al final de la página). */
 function ToolPopover({ id, at, name, list, keepOpen, onClose, button, children }: {
   id: string; at: RectLike; name: string; list?: boolean; keepOpen?: boolean; onClose: (focusBack?: boolean) => void;
   button: { current: HTMLButtonElement | null }; children: ReactNode;

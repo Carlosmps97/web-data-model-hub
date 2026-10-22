@@ -1,25 +1,25 @@
 /* ============================================================
-   Reporting (pr / Screen 11) — DMH-Erwin v20260625-2.
-   Tabular metadata grid + search/multi-filter bar + Excel export panel.
-   Token-driven, light-only navy. Source: design_handoff …/README.md (#pr).
+   Reporting.
+   Grilla tabular de metadatos + barra de búsqueda/multifiltro + panel de
+   export a Excel. Basado en tokens, solo tema claro, azul marino.
    ============================================================ */
 
-/* ───────────────────────────── Page shell ────────────────────────── */
+/* ─────────────────────────── Contenedor de página ────────────────── */
 .dmh-rep { flex: 1; overflow-y: auto; background: var(--page-bg); padding: 26px 30px 40px; }
 .dmh-rep-inner { max-width: 1500px; margin: 0 auto; }
 
-/* ── Header ────────────────────────────────────────────────────────── */
+/* ── Cabecera ──────────────────────────────────────────────────────── */
 .dmh-rep-head { margin-bottom: 18px; }
 .dmh-rep-eyebrow { font-size: 12px; font-weight: 600; color: var(--text-muted-2); text-transform: uppercase; letter-spacing: .06em; }
 .dmh-rep-h1 { margin: 4px 0 0; font-size: 26px; font-weight: 700; color: var(--navy); letter-spacing: -.015em; line-height: 1.1; }
 .dmh-rep-sub { margin: 6px 0 0; font-size: 13.5px; color: var(--text-muted); max-width: 720px; }
 
-/* ── Body: grid column (left) + export rail (right) ────────────────── */
+/* ── Cuerpo: columna de la grilla (izq.) + riel de export (der.) ───── */
 .dmh-rep-cols { display: flex; gap: 20px; align-items: flex-start; }
 .dmh-rep-main { flex: 1; min-width: 0; }
 .dmh-rep-rail { width: 312px; flex: none; position: sticky; top: 14px; display: flex; flex-direction: column; gap: 16px; }
 
-/* ── Filter / search bar ───────────────────────────────────────────── */
+/* ── Barra de filtros / búsqueda ───────────────────────────────────── */
 .dmh-rep-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 .dmh-rep-search { position: relative; flex: 1; min-width: 220px; }
 .dmh-rep-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--text-muted-3); pointer-events: none; }
@@ -31,7 +31,7 @@
 .dmh-rep-search input::placeholder { color: var(--text-placeholder); }
 .dmh-rep-search input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--primary-muted); }
 
-/* ── Multi-select combobox filter ──────────────────────────────────── */
+/* ── Filtro combobox de selección múltiple ─────────────────────────── */
 .dmh-rep-filter { position: relative; }
 .dmh-rep-filter-btn {
   display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 11px;
@@ -56,14 +56,14 @@
   border: 1px solid var(--border-2); border-radius: var(--r); box-shadow: var(--shadow-popup);
 }
 .dmh-rep-menu-empty { padding: 10px 10px; font-size: 12.5px; color: var(--text-muted-3); }
-/* Doc 92 D2: buscador «contiene» del popover. */
+/* Buscador «contiene» del popover. */
 .dmh-rep-menu-search { position: sticky; top: -6px; z-index: 1; display: flex; align-items: center; gap: 7px; margin: -6px -6px 4px;
   padding: 8px 10px; background: var(--surface); border-bottom: 1px solid var(--border-2); }
 .dmh-rep-menu-search svg { width: 13px; height: 13px; color: var(--text-muted-3); flex: none; }
 .dmh-rep-menu-search input { flex: 1; min-width: 0; border: none; background: transparent; outline: none; font-family: var(--ui);
   font-size: 13px; color: var(--text-body); }
 .dmh-rep-menu-search input::placeholder { color: var(--text-placeholder); }
-/* Doc 92 D3: centinela del scroll infinito. */
+/* Centinela del scroll infinito. */
 .dmh-rep-sentinel td { padding: 10px 14px; font-size: 12px; color: var(--text-muted-3); text-align: center; }
 .dmh-rep-opt {
   display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 9px; border: none;
@@ -79,10 +79,10 @@
 .dmh-rep-opt-box svg { width: 11px; height: 11px; }
 .dmh-rep-opt-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* Doc 107: los botones de la barra de filtros miden lo mismo que sus controles. */
+/* Los botones de la barra de filtros miden lo mismo que sus controles. */
 .dmh-rep-bar .dmh-btn { height: 38px; }
 
-/* ── Metadata table ────────────────────────────────────────────────── */
+/* ── Tabla de metadatos ────────────────────────────────────────────── */
 .dmh-rep-tablewrap {
   border: 1px solid var(--border-2); border-radius: 13px; overflow: hidden; background: var(--surface);
   box-shadow: var(--shadow-sm);
@@ -100,14 +100,14 @@
 .dmh-rep-table tbody tr:nth-child(even) { background: var(--fill-3); }
 .dmh-rep-table tbody tr:hover { background: var(--blue-soft); }
 .dmh-rep-table td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--navy); font-weight: 600; }
-/* Doc 70 §4.2 — grilla ancha (Columns / Tables + Columns): scroll horizontal
-   dentro de .dmh-rep-tablescroll, celdas sin quiebre y con elipsis. */
+/* Grilla ancha (Columns / Tables + Columns): scroll horizontal dentro de
+   .dmh-rep-tablescroll, celdas sin quiebre y con elipsis. */
 .dmh-rep-table--wide { width: max-content; min-width: 100%; }
 .dmh-rep-table--wide thead th, .dmh-rep-table--wide tbody td { white-space: nowrap; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
 .dmh-rep-table--wide tbody td { padding: 8px 12px; font-size: 12.5px; }
 .dmh-rep-gridnote { padding: 8px 14px; font-size: 12px; color: var(--text-muted-2); border-bottom: 1px solid #F2F4F8; }
 
-/* row-selection checkbox column + "N selected" counter (export by selection) */
+/* columna de checkbox para elegir filas + contador "N selected" (export por selección) */
 .dmh-rep-selcount { margin-left: 4px; font-size: 12.5px; color: var(--text-muted-2); white-space: nowrap; }
 .dmh-rep-selcount strong { color: var(--blue); font-weight: 600; }
 .dmh-rep-selcount-hint { font-style: normal; color: var(--text-muted-3); }
@@ -124,7 +124,7 @@
 .dmh-rep-table tbody tr.is-selected,
 .dmh-rep-table tbody tr.is-selected:nth-child(even) { background: var(--blue-soft); }
 
-/* right-rail summary cards (tables by subject area + most related) */
+/* tarjetas de resumen del riel derecho (tablas por subject area + más relacionadas) */
 .dmh-rep-sumcard { padding: 16px; }
 .dmh-rep-sumcard-title { font-size: 11px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted-3); margin-bottom: 12px; }
 .dmh-rep-sumcard-empty { font-size: 12.5px; color: var(--text-muted); }
@@ -156,7 +156,7 @@
 .dmh-rep-chip--proj { background: var(--blue-tint); color: var(--blue); }
 .dmh-rep-chip-none { font-size: 12px; color: var(--text-muted-3); }
 
-/* ── States (loading / empty) ──────────────────────────────────────── */
+/* ── Estados (cargando / vacío) ────────────────────────────────────── */
 .dmh-rep-state { padding: 54px 20px; text-align: center; color: var(--text-muted); }
 .dmh-rep-state-ico { display: inline-flex; color: var(--text-muted-3); margin-bottom: 10px; }
 .dmh-rep-state-t { font-size: 14px; font-weight: 600; color: var(--navy); }
@@ -166,7 +166,7 @@
   linear-gradient(90deg, var(--fill-3) 0%, var(--fill-1) 50%, var(--fill-3) 100%);
   background-size: 200% 100%; animation: dmh-skeleton 1.1s ease-in-out infinite; }
 
-/* ── Export rail card ──────────────────────────────────────────────── */
+/* ── Tarjeta del riel de export ────────────────────────────────────── */
 .dmh-rep-card { border: 1px solid var(--border-2); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow-sm); overflow: hidden; }
 .dmh-rep-card-head { display: flex; align-items: center; gap: 9px; padding: 14px 16px 10px; }
 .dmh-rep-card-ico { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: var(--green-tint); color: var(--green-deep); }
@@ -192,13 +192,13 @@
 .dmh-rep-card-foot { padding: 12px 16px 16px; }
 .dmh-rep-export-btn { width: 100%; justify-content: center; height: 40px; }
 .dmh-rep-export-note { margin-top: 8px; font-size: 11.5px; color: var(--text-muted-3); text-align: center; }
-/* Doc 96 D10: card de plantillas con la misma distribución que la de Excel. */
+/* Card de plantillas con la misma distribución que la de Excel. */
 .dmh-rep-card-body { padding: 0 16px 4px; }
 .dmh-rep-card-empty { font-size: 12.5px; color: var(--text-muted); }
 .dmh-rep-card-links { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-2); display: flex; }
 .dmh-rep-card-links .dmh-btn { flex: 1; }
 
-/* ── Indicators card ───────────────────────────────────────────────── */
+/* ── Tarjeta de indicadores ────────────────────────────────────────── */
 .dmh-rep-kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border-2); border: 1px solid var(--border-2); border-radius: 13px; overflow: hidden; }
 .dmh-rep-kpi { background: var(--surface); padding: 14px 15px; }
 .dmh-rep-kpi-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted-3); }
@@ -210,8 +210,8 @@
   .dmh-rep-rail { width: 100%; position: static; }
 }
 
-/* ── Doc 75 D13: selector de proyecto del reporte ───────────────────────── */
+/* ── Selector de proyecto del reporte ───────────────────────────────────── */
 .dmh-rep-project { display: inline-block; width: 220px; flex: none; }
-/* Doc 102: combo Version (producción o una versión propia) y aviso de working copy. */
+/* Combo Version (producción o una versión propia) y aviso de working copy. */
 .dmh-rep-version { display: inline-block; width: 250px; flex: none; }
 .dmh-rep-wc { margin: 8px 0 0; padding: 7px 11px; font-size: 12px; color: #7A6220; background: #FFF9EE; border: 1px solid #F1E2BD; border-radius: 8px; }

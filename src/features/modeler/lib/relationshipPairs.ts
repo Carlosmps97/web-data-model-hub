@@ -1,7 +1,7 @@
 /**
- * Lógica PURA de los pares de una relación v2 (doc 19): validación de pares,
- * plan de role name (rename vs split estilo Erwin) y demote seguro de PK al
- * pasar a non-identifying. Sin IO — la orquestación vive en RelationshipPopup.
+ * Lógica pura de los pares de una relación: plan de role name (rename vs split
+ * estilo Erwin), demote seguro de PK al pasar a non-identifying, mapeo de la
+ * llave del padre y drift. Sin IO: la orquestación vive en RelationshipPopup.
  */
 import {
   bulk,
@@ -19,11 +19,11 @@ export type RoleNamePlan =
   | { kind: 'split'; fromColumnId: string };
 
 /**
- * Efecto de aplicar un role name al par `pairIndex` de `rel` (Erwin §1.2):
- * - la columna hija la usa SOLO este par (en `allRels`, que debe incluir a
- *   `rel`) → se RENOMBRA in place;
+ * Efecto de aplicar un role name al par `pairIndex` de `rel` (como en Erwin):
+ * - la columna hija la usa solo este par (en `allRels`, que debe incluir a
+ *   `rel`) → se renombra in place;
  * - está compartida/"unificada" (otro par de esta u otra relación la tiene
- *   como hija) → SPLIT: columna nueva y el par se repunta a ella.
+ *   como hija) → split: columna nueva y el par se repunta a ella.
  */
 export function roleNamePlan(rel: Relationship, pairIndex: number,
                              allRels: Relationship[]): RoleNamePlan {
@@ -41,12 +41,9 @@ export function roleNamePlan(rel: Relationship, pairIndex: number,
     : { kind: 'rename', columnId: childId };
 }
 
-// pairError / parentCandidates / childCandidates murieron con doc 47: el alta
-// manual de pares se retiró — el mapeo N=N nace completo en buildKeyMapping.
-
 /**
- * Columnas hijas de `rel` que se pueden DEMOTEAR de PK al pasar la relación a
- * non-identifying: las que NO son hijas de OTRA relación identifying (guard
+ * Columnas hijas de `rel` que se pueden demotear de PK al pasar la relación a
+ * non-identifying: las que no son hijas de otra relación identifying (guard
  * conservador — un PK puesto por otra relación identifying no se pisa).
  */
 export function demotablePkChildren(rel: Relationship, otherRels: Relationship[]): string[] {
@@ -56,7 +53,7 @@ export function demotablePkChildren(rel: Relationship, otherRels: Relationship[]
       (r) => r.id !== rel.id && r.identifying && r.pairs.some((p) => p.childColumnId === cid)));
 }
 
-// ── Mapeo N=N (doc 47): la relación migra la llave COMPLETA del padre ───────
+// ── Mapeo N=N: la relación migra la llave completa del padre ────────────────
 
 export type MappingTarget =
   | { kind: 'existing'; columnId: string }
@@ -68,10 +65,10 @@ export interface MappingRow {
 }
 
 /**
- * Filas del popup de creación: UNA por PK del padre (en el orden recibido —
- * pasar `pkInKeyOrder`). Default por fila: columna del hijo HOMÓNIMA (físico o
- * lógico, case-insensitive) aún no reclamada; sin match → `create`.
- * `dropColumnId` (donde SOLTÓ el wire): si no quedó reclamada por un match,
+ * Filas del popup de creación: una por PK del padre (en el orden recibido —
+ * pasar `pkInKeyOrder`). Default por fila: columna del hijo homónima (físico o
+ * lógico, case-insensitive) sin reclamar; sin match → `create`.
+ * `dropColumnId` (donde se soltó el wire): si no la reclama un match,
  * se preselecciona en la primera fila `create`. Auto-mapeo excluido
  * (recursivas: una PK no migra a sí misma). Pura.
  */
@@ -102,14 +99,14 @@ export interface MappingResolution {
   parentCol: CanonicalColumn;
   target:
     | { kind: 'existing'; col: CanonicalColumn; preexisting?: boolean;
-        /** Role name sobre columna EXISTENTE = rename in place (nombres ya
+        /** Role name sobre columna existente = rename in place (nombres ya
          *  fisicalizados — la función es pura). */
         rename?: { logicalName: string; physicalName: string } }
     | { kind: 'create'; id: string; logicalName: string; physicalName: string };
   /** Role name del par (en create nombra la columna nueva; en existentes viaja
    *  con `target.rename`; en preexisting conserva el vigente del par). */
   roleName?: string;
-  /** Herencia POR FILA (feedback prueba viva 2026-08-15): definición/UDPs del
+  /** Herencia por fila: definición/UDPs del
    *  padre (y en existentes también tipo/dominio). */
   inherit: boolean;
 }
@@ -123,30 +120,30 @@ export interface MappingBulkInput {
   childCardinality: Cardinality;
   /** En orden de llave del padre. */
   rows: MappingResolution[];
-  /** Columnas ACTUALES del hijo (orden único, doc 94). */
+  /** Columnas actuales del hijo (orden único). */
   childCols: CanonicalColumn[];
-  /** Doc 53: presencia = la relación es una SUBCATEGORÍA del símbolo dado
+  /** Presencia = la relación es una subcategoría del símbolo dado
    *  (el caller pasa identifying=true y cardinalidades one/one). */
   subcategory?: { symbolId: string };
-  /** Doc 98: frases de relación. Crear las toma del popup; Sync pasa las
-   *  VIGENTES — el lote re-emite la relación campo por campo. */
+  /** Frases de relación. Crear las toma del popup; Sync pasa las
+   *  vigentes: el lote re-emite la relación campo por campo. */
   parentToChildPhrase?: string | null;
   childToParentPhrase?: string | null;
 }
 
 /**
  * Lote de confirmación del popup (create y sync): columnas nuevas + updates de
- * existentes + upsert de la relación — payloads DOC COMPLETO, la relación al
- * FINAL. Tipo/dominio SIEMPRE espejan al padre en columnas nuevas (contrato de
- * una FK); `inherit` va POR FILA y gobierna definición/UDPs (en existentes
- * también tipo/dominio). Role name en existentes = `target.rename` (rename in
- * place, mismo semántico que el Apply del popup de edición). `preexisting`
- * (sync): el par ya existía — la columna no se re-emite. Doc 94 D2: en una
- * identificante, las columnas que ENTRAN a la llave (creadas o promovidas, en
+ * existentes + upsert de la relación; payloads de documento completo, la
+ * relación al final. Tipo/dominio siempre espejan al padre en columnas nuevas
+ * (contrato de una FK); `inherit` va por fila y gobierna definición/UDPs (en
+ * existentes también tipo/dominio). Role name en existentes = `target.rename`
+ * (rename in place, misma semántica que el Apply del popup de edición).
+ * `preexisting` (sync): el par ya existía y la columna no se re-emite. En una
+ * identificante, las columnas que entran a la llave (creadas o promovidas, en
  * el orden de las filas) quedan tras la última PK del hijo y las no-PK se
- * corren en el MISMO lote (cada columna viaja una sola vez); en una
- * no-identificante las creadas van al final. Pura — `physicalize` corre ANTES
- * (los nombres llegan resueltos).
+ * corren en el mismo lote (cada columna viaja una sola vez); en una
+ * no-identificante las creadas van al final. Pura: los nombres llegan
+ * resueltos (`physicalize` corre en el llamador).
  */
 export function mappingToBulk(input: MappingBulkInput): {
   changes: BulkChange[]; createdCols: CanonicalColumn[]; relationship: Relationship;
@@ -205,8 +202,8 @@ export function mappingToBulk(input: MappingBulkInput): {
       if (ord.has(c.id) && !touched.has(c.id)) changes.push(bulk.createColumn({ ...c, ordinal: ord.get(c.id)! }));
     }
   }
-  // Doc 98: las frases viajan LIMPIAS y solo si existen (sin frase, la
-  // relación sale como siempre — el backend lee la llave ausente como null).
+  // Las frases viajan limpias y solo si existen (sin frase, la relación sale
+  // sin esa llave: el backend lee la llave ausente como null).
   const p2c = cleanPhrase(input.parentToChildPhrase);
   const c2p = cleanPhrase(input.childToParentPhrase);
   const relationship: Relationship = {
@@ -222,11 +219,11 @@ export function mappingToBulk(input: MappingBulkInput): {
 }
 
 /**
- * Entrada de `mappingToBulk` para RE-EMITIR una relación que ya existe («Sync
- * with parent key»): todo lo que vive a nivel de RELACIÓN sale de `rel` — id,
- * extremos, tipo, cardinalidades, frases (doc 98) y símbolo de subcategoría —
- * y solo los pares se rearman desde `rows`. Un campo nuevo de `Relationship`
- * se agrega ACÁ: es el único punto que la reconstruye campo por campo. Pura.
+ * Entrada de `mappingToBulk` para re-emitir una relación que ya existe («Sync
+ * with parent key»): lo que vive a nivel de relación sale de `rel` (id,
+ * extremos, tipo, cardinalidades, frases y símbolo de subcategoría) y solo los
+ * pares se rearman a partir de `rows`. Un campo nuevo de `Relationship` se
+ * agrega acá: es el único punto que la reconstruye campo por campo. Pura.
  */
 export function syncMappingInput(rel: Relationship, rows: MappingResolution[],
                                  childCols: CanonicalColumn[]): MappingBulkInput {
@@ -240,10 +237,10 @@ export function syncMappingInput(rel: Relationship, rows: MappingResolution[],
   };
 }
 
-/** Drift de una relación vs la llave EFECTIVA del padre: `missing` = PKs sin
- *  par; `extra` = pares cuya columna padre ya no es PK. null = en sync. Pura.
- *  Padre SIN PK ⇒ todos los pares son `extra` ⇒ drift: delata la llave
- *  faltante al validar con los modeladores (owner 2026-08-23). */
+/** Drift de una relación vs la llave efectiva del padre: `missing` = PKs sin
+ *  par; `extra` = pares cuya columna padre no es PK. null = en sync. Pura.
+ *  Padre sin PK ⇒ todos los pares son `extra` ⇒ drift: delata la llave
+ *  faltante. */
 export function relationshipDrift(rel: Relationship, parentPkIds: string[]):
     { missing: string[]; extra: string[] } | null {
   const inPairs = new Set(rel.pairs.map((p) => p.parentColumnId));

@@ -1,24 +1,24 @@
-// UploadModal sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105 (ronda 5, R15) — la carga ya pedida:
-//  · H5: la marca «applying» (ronda 4) quedaba puesta si el POST del apply
-//    fallaba: cerrar el popup ya no descartaba el job validado;
-//  · H2: la pila de Undo se vacía y queda CERRADA desde que empieza el apply
-//    (una inversa vieja, o de lo editado con el popup cerrado, pisaría lo
-//    cargado); si el polling se rinde ante fallos transitorios, la carga NO se
-//    da por fallida: «no se pudo confirmar el resultado» y se refresca;
-//  · H4: con la sesión cambiada, una carga que FALLA se avisa nombrando la
-//    versión — salvo que el motivo sea esa versión misma (ya avisó la revalidación).
-// Ronda 6 (R17a): «otra versión abierta» se mira por la VERSIÓN (csId, en
-// edición), no por la época de la sesión; tras un logout (401, u otro usuario)
-// no se avisa nada; 401/403 del polling = «no se pudo confirmar»; un POST sin
-// respuesta lo decide el polling; se refresca también tras un apply fallido (y
-// se avisa si el refresco falla); con el Undo en vuelo la carga no empieza.
-// Ronda 7 (R18a): con otra versión abierta, la carga que termina BIEN también
-// se avisa (nombrando la versión); un POST sin respuesta se relee un par de
-// veces antes de darlo por no llegado; el arrange sigue la VERSIÓN (A → B → A).
-// Doc 113 §1.3: ya no hay arrange completo — se ubica SÓLO lo que entró a cada
-// canvas (`newMembers`), en el centro de lo que se ve si es el canvas abierto,
-// y se marca para pintarlo encima (`markFresh`).
+// UploadModal sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+// La carga ya pedida:
+//  · si el POST del apply falla con una respuesta de error, el job sigue
+//    validado: cerrar el popup lo descarta;
+//  · la pila de Undo se vacía y queda cerrada desde que empieza el apply (una
+//    inversa previa, o de lo editado con el popup cerrado, pisaría lo cargado);
+//    si el polling se rinde ante fallos transitorios, la carga no se da por
+//    fallida: «no se pudo confirmar el resultado» y se refresca;
+//  · con la sesión cambiada, una carga que falla se avisa nombrando la versión,
+//    salvo que el motivo sea esa versión misma (ya avisó la revalidación).
+// «Otra versión abierta» se mira por la versión (csId, en edición), no por la
+// época de la sesión; tras un logout (401, u otro usuario) no se avisa nada;
+// 401/403 del polling = «no se pudo confirmar»; un POST sin respuesta lo decide
+// el polling; se refresca también tras un apply fallido (y se avisa si el
+// refresco falla); con el Undo en vuelo la carga no empieza.
+// Con otra versión abierta, la carga que termina bien también se avisa
+// (nombrando la versión); un POST sin respuesta se relee un par de veces antes de
+// darlo por no llegado; el arrange sigue la versión (A → B → A).
+// No hay arrange completo: se ubica solo lo que entró a cada canvas
+// (`newMembers`), en el centro de lo que se ve si es el canvas abierto, y se
+// marca para pintarlo encima (`markFresh`).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import { fake, nextStates, resetFake, runEffects, textOf, unmount, walk } from '../../reporting/components/fakeReact.testutil';
@@ -113,8 +113,8 @@ beforeEach(() => {
 });
 afterEach(() => { vi.useRealTimers(); });   // las relecturas del POST sin respuesta se prueban con reloj falso
 
-describe('H5: si el POST del apply falla, el job sigue validado (doc 105, ronda 5)', () => {
-  it('cerrar el popup lo descarta (como antes de la ronda 4)', async () => {
+describe('si el POST del apply falla, el job sigue validado', () => {
+  it('cerrar el popup lo descarta', async () => {
     let tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(new ApiError('Another upload is being applied to this version; wait for it to finish.', 409, null, '/api/changesets/cs1/uploads/j1/apply'));
     upload(tree);
@@ -127,8 +127,8 @@ describe('H5: si el POST del apply falla, el job sigue validado (doc 105, ronda 
   });
 });
 
-describe('H2: la carga ya pedida y el Undo (doc 105, ronda 5)', () => {
-  it('la pila se vacía y queda CERRADA desde antes del POST hasta que la carga termina', async () => {
+describe('la carga ya pedida y el Undo', () => {
+  it('la pila se vacía y queda cerrada antes de enviar el POST y hasta que la carga termina', async () => {
     const tree = mountValidated();
     const order: string[] = [];
     clearUndo.mockImplementation((h?: object) => { order.push(h ? 'hold' : 'clear'); });
@@ -166,8 +166,8 @@ describe('H2: la carga ya pedida y el Undo (doc 105, ronda 5)', () => {
   });
 });
 
-describe('H4: la carga falla con la sesión cambiada (doc 105, ronda 5)', () => {
-  /** Upload; el polling queda en vuelo; el TopNav desmonta el popup y se abre OTRA versión (cs2). */
+describe('la carga falla con la sesión cambiada', () => {
+  /** Upload; el polling queda en vuelo; el TopNav desmonta el popup y se abre otra versión (cs2). */
   async function switchDuringApply() {
     const tree = mountValidated();
     vi.mocked(applyUpload).mockResolvedValueOnce({ ...JOB, status: 'applying' } as never);
@@ -196,11 +196,11 @@ describe('H4: la carga falla con la sesión cambiada (doc 105, ronda 5)', () => 
     expect(errToasts()).toEqual(['The upload to the version where it started failed: Nothing was written.']);
   });
 
-  it('ronda 6 (R17a-9): con OTRA versión abierta, un error de la versión de la carga SE AVISA — la revalidación no la mira', async () => {
+  it('con otra versión abierta, un error de la versión de la carga se avisa: la revalidación no la mira', async () => {
     const p = await switchDuringApply();
     p.fail(new ApiError('You no longer have access to this version.', 403, null, '/api/changesets/cs1/uploads/j1'));
     await ticks();
-    // (un 403 del POLLING no dice cómo terminó: ronda 6, R17a-3)
+    // (un 403 del polling no dice cómo terminó)
     expect(errToasts()).toEqual(["Couldn't confirm the result of the upload to “v3”: You no longer have access to this version. It may still be applied — check that version before continuing."]);
   });
 
@@ -220,7 +220,7 @@ describe('H4: la carga falla con la sesión cambiada (doc 105, ronda 5)', () => 
   });
 });
 
-describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa', () => {
+describe('el resultado de la carga, dónde y a quién se avisa', () => {
   const applying = () => vi.mocked(applyUpload).mockResolvedValueOnce({ ...JOB, status: 'applying' } as never);
   /** El polling en vuelo, para decidir su final en el test. */
   function pollInFlight() {
@@ -229,7 +229,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     return { finish: (j: unknown) => finish(j), fail: (e: unknown) => fail(e) };
   }
 
-  it('3 · un 401 del polling (sesión vencida o logout — el popup se desmonta): nada que avisar', async () => {
+  it('un 401 del polling (sesión vencida o logout; el popup se desmonta): nada que avisar', async () => {
     const tree = mountValidated();
     applying(); const p = pollInFlight();
     upload(tree); await tick();
@@ -239,7 +239,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(errToasts()).toEqual([]);
   });
 
-  it('3 · si ya entró OTRO usuario, nada de esta carga se avisa', async () => {
+  it('si ya entró otro usuario, nada de esta carga se avisa', async () => {
     const tree = mountValidated();
     applying(); const p = pollInFlight();
     upload(tree); await tick();
@@ -250,7 +250,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(errToasts()).toEqual([]);
   });
 
-  it('ronda 8 · con OTRO usuario en el tab y la misma versión abierta, la falla a mitad no refresca su Explorer', async () => {
+  it('con otro usuario en el tab y la misma versión abierta, la falla a mitad no refresca su Explorer', async () => {
     const tree = mountValidated();
     applying(); const p = pollInFlight();
     upload(tree); await tick();
@@ -262,7 +262,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(refreshExplorer).not.toHaveBeenCalled();
   });
 
-  it('ronda 8 · …ni «unconfirmed» (el polling se rindió)', async () => {
+  it('…ni «unconfirmed» (el polling se rindió)', async () => {
     const tree = mountValidated();
     applying(); const p = pollInFlight();
     upload(tree); await tick();
@@ -274,7 +274,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(refreshExplorer).not.toHaveBeenCalled();
   });
 
-  it('3 · un 403 del polling (sin permiso): no se sabe cómo terminó — «unconfirmed», no «failed»', async () => {
+  it('un 403 del polling (sin permiso): no se sabe cómo terminó; «unconfirmed», no «failed»', async () => {
     const tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockRejectedValueOnce(new ApiError("You don't have permission for this action (model.edit).", 403, null, '/api/changesets/cs1/uploads/j1'));
@@ -284,7 +284,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(error()).toMatch(/^Couldn't confirm the result of the upload: You don't have permission/);
   });
 
-  it('9 · en la MISMA sesión, un error de la versión que la revalidación resolvió cambiándola: calla (avisó ella)', async () => {
+  it('en la misma sesión, un error de la versión que la revalidación resolvió cambiándola: calla (avisó ella)', async () => {
     const tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockRejectedValueOnce(new ApiError('This version was deleted.', 404, null, '/api/changesets/cs1/uploads/j1'));
@@ -295,19 +295,19 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(phase()).not.toBe('failed');
   });
 
-  it('9 · de vuelta en la MISMA versión (A → B → A), un error de la versión se avisa (ya la revalidó al reabrirla)', async () => {
+  it('de vuelta en la misma versión (A → B → A), un error de la versión se avisa (ya la revalidó al reabrirla)', async () => {
     const tree = mountValidated();
     applying(); const p = pollInFlight();
     upload(tree); await tick();
     unmount();
     pinState.holds = false;                       // otra época de sesión…
-    session.activeChangesetId = 'cs1';           // …en la MISMA versión
+    session.activeChangesetId = 'cs1';           // …en la misma versión
     p.fail(new ApiError("You don't have permission for this action (model.edit).", 403, null, '/api/changesets/cs1/uploads/j1'));
     await ticks();
     expect(errToasts()).toHaveLength(1);
   });
 
-  it('8 · el POST sin respuesta: el polling dice si llegó — aplicada, sigue normal', async () => {
+  it('el POST sin respuesta: el polling dice si llegó; aplicada, sigue normal', async () => {
     const tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(TIMEOUT());
     vi.mocked(pollUploadJob).mockResolvedValueOnce(APPLIED as never);
@@ -317,7 +317,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(pollUploadJob).toHaveBeenCalled();
   });
 
-  it('8 · el POST sin respuesta y el job sigue «validated» (también al releerlo): se DESCARTA esperando la respuesta — nada se aplicó, y lo dice', async () => {
+  it('el POST sin respuesta y el job sigue «validated» (también al releerlo): se descarta esperando la respuesta; nada se aplicó, y lo dice', async () => {
     vi.useFakeTimers();
     let tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(TIMEOUT());
@@ -325,12 +325,12 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     upload(tree);
     await vi.advanceTimersByTimeAsync(0);
     expect(pollUploadJob).toHaveBeenCalledTimes(1);
-    expect(phase()).toBe('applying');                  // todavía no concluye: pudo llegar tarde
+    expect(phase()).toBe('applying');                  // sin concluir: pudo llegar tarde
     expect(discardUpload).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(pollUploadJob).toHaveBeenCalledTimes(3);    // la primera lectura y dos relecturas espaciadas
-    // Ronda 8: «no llegó» se vuelve CIERTO — un POST aún más tardío ya no encuentra el job;
-    // y sólo si sigue validado (si en ese instante la carga ya empezó o terminó, 409: se sigue).
+    // «No llegó» se vuelve cierto: un POST que llegue después no encuentra el job;
+    // y solo si sigue validado (si en ese instante la carga ya empezó o terminó, 409: se sigue).
     expect(discardUpload).toHaveBeenCalledTimes(1);
     expect(discardUpload).toHaveBeenCalledWith('cs1', 'j1', { onlyIfValidated: true });
     tree = rerender();
@@ -338,10 +338,10 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(error()).toBe("Nothing was applied — the upload didn't start (The server didn't respond within 30s). Validate the workbook and upload it again.");
     (button(tree, 'Close').props.onClick as () => void)();
     unmount();
-    expect(discardUpload).toHaveBeenCalledTimes(1);    // ya no hay nada que descartar
+    expect(discardUpload).toHaveBeenCalledTimes(1);    // no queda nada que descartar
   });
 
-  it('ronda 8 · …y el DELETE da 409 (el servidor ya lo está aplicando): el POST sí llegó — se sigue el polling y la carga termina', async () => {
+  it('…y el DELETE da 409 (el servidor ya lo está aplicando): el POST sí llegó; se sigue el polling y la carga termina', async () => {
     vi.useFakeTimers();
     const tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(TIMEOUT());
@@ -356,7 +356,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(errToasts()).toEqual([]);
   });
 
-  it('ronda 8 · …y el DELETE da 404 (el job ya no existe): tampoco se aplicará — «failed», nada se aplicó', async () => {
+  it('…y el DELETE da 404 (el job no existe): tampoco se aplicará; «failed», nada se aplicó', async () => {
     vi.useFakeTimers();
     const tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(TIMEOUT());
@@ -368,7 +368,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(error()).toMatch(/^Nothing was applied/);
   });
 
-  it('ronda 8 · …y el DELETE no responde: no se sabe si llegó — «unconfirmed»', async () => {
+  it('…y el DELETE no responde: no se sabe si llegó; «unconfirmed»', async () => {
     vi.useFakeTimers();
     const tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(TIMEOUT());
@@ -379,7 +379,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(phase()).toBe('unconfirmed');
   });
 
-  it('ronda 7 (obs.) · el POST sin respuesta llegó TARDE: una relectura lo ve — sigue normal', async () => {
+  it('el POST sin respuesta llegó tarde: una relectura lo ve y sigue normal', async () => {
     vi.useFakeTimers();
     const tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(TIMEOUT());
@@ -391,7 +391,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(errToasts()).toEqual([]);
   });
 
-  it('ronda 7 (obs.) · con el POST respondido, «validated» no se relee (sólo el que no tuvo respuesta pudo llegar tarde)', async () => {
+  it('con el POST respondido, «validated» no se relee (solo el que no tuvo respuesta pudo llegar tarde)', async () => {
     const tree = mountValidated();
     vi.mocked(applyUpload).mockResolvedValueOnce({ ...JOB, status: 'applying' } as never);
     vi.mocked(pollUploadJob).mockResolvedValueOnce({ ...JOB } as never);
@@ -399,11 +399,11 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     await ticks();
     expect(pollUploadJob).toHaveBeenCalledTimes(1);
     expect(phase()).toBe('failed');
-    // Ronda 8: el servidor lo devolvió a «validated» — no «Upload failed.» a secas.
+    // El servidor lo devolvió a «validated»: no «Upload failed.» a secas.
     expect(error()).toBe("Nothing was applied — the upload didn't start. Validate the workbook and upload it again.");
   });
 
-  it('ronda 7 (obs.) · con respuesta de error del POST no se relee (sigue validado de verdad)', async () => {
+  it('con respuesta de error del POST no se relee (sigue validado de verdad)', async () => {
     const tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(new ApiError('Another upload is being applied to this version; wait for it to finish.', 409, null, '/api/changesets/cs1/uploads/j1/apply'));
     upload(tree);
@@ -412,7 +412,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(phase()).toBe('failed');
   });
 
-  it('ronda 8 · el POST sin respuesta y la 1.ª lectura «validated»: desmontar el popup en la pausa NO descarta el job (el POST pudo llegar tarde)', async () => {
+  it('el POST sin respuesta y la 1.ª lectura «validated»: desmontar el popup en la pausa no descarta el job (el POST pudo llegar tarde)', async () => {
     vi.useFakeTimers();
     const tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(TIMEOUT());
@@ -431,7 +431,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(pollUploadJob).toHaveBeenCalledTimes(2);   // el POST llegó tarde: la relectura la ve aplicada
   });
 
-  it('ronda 8 · el apply terminó «failed»: cerrar el popup descarta ese job (como antes)', async () => {
+  it('el apply terminó «failed»: cerrar el popup descarta ese job', async () => {
     let tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockResolvedValueOnce({ ...JOB, status: 'failed', error: 'Nothing was written.' } as never);
@@ -444,7 +444,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(discardUpload).toHaveBeenCalledWith('cs1', 'j1');
   });
 
-  it('ronda 8 · el popup sigue ocupado mientras se refresca el Explorer (el canvas aún muestra lo anterior) y avisa al terminar', async () => {
+  it('el popup sigue ocupado mientras se refresca el Explorer (el canvas muestra el diagrama previo a la carga) y avisa al terminar', async () => {
     const tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockResolvedValueOnce(APPLIED as never);
@@ -464,7 +464,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(okToasts()).toEqual([expect.stringMatching(/^Uploaded /)]);
   });
 
-  it('ronda 8 · un logout DURANTE el refresco del Explorer: el aviso de la carga no pasa a la sesión siguiente', async () => {
+  it('un logout durante el refresco del Explorer: el aviso de la carga no pasa a la sesión siguiente', async () => {
     const tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockResolvedValueOnce(APPLIED as never);
@@ -475,13 +475,13 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     upload(tree);
     await ticks();
     expect(refreshExplorer).toHaveBeenCalled();
-    auth.user = { username: 'bob' };                  // logout y login DURANTE el refresco
+    auth.user = { username: 'bob' };                  // logout y login durante el refresco
     refreshed();
     await ticks();
     expect(shownTo).toEqual([]);
   });
 
-  it('ronda 8 · otra versión abierta DURANTE el refresco: el aviso de la carga la nombra', async () => {
+  it('otra versión abierta durante el refresco: el aviso de la carga la nombra', async () => {
     const tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockResolvedValueOnce(APPLIED as never);
@@ -495,7 +495,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(okToasts()).toEqual([expect.stringMatching(/^Uploaded .* to “v3”$/)]);
   });
 
-  it('ronda 8 · POST sin respuesta, popup cerrado en la pausa y las relecturas siguen «validated»: al concluir que no llegó, se descarta el job', async () => {
+  it('POST sin respuesta, popup cerrado en la pausa y las relecturas siguen «validated»: al concluir que no llegó, se descarta el job', async () => {
     vi.useFakeTimers();
     const tree = mountValidated();
     vi.mocked(applyUpload).mockRejectedValueOnce(TIMEOUT());
@@ -511,11 +511,11 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     await vi.advanceTimersByTimeAsync(10_000);
     expect(pollUploadJob).toHaveBeenCalledTimes(3);
     expect(discardUpload).toHaveBeenCalledWith('cs1', 'j1', { onlyIfValidated: true });   // no llegó: nada lo aplica después del aviso de falla
-    // Con el popup cerrado, el aviso dice que fue LA CARGA (no sólo «el servidor no respondió»).
+    // Con el popup cerrado, el aviso dice que fue la carga (no solo «el servidor no respondió»).
     expect(errToasts()).toEqual([expect.stringMatching(/^The upload to “v3” failed: Nothing was applied — the upload didn't start \(/)]);
   });
 
-  it('4 · «unconfirmed» con la red caída: si el refresco del Explorer falla, se avisa', async () => {
+  it('«unconfirmed» con la red caída: si el refresco del Explorer falla, se avisa', async () => {
     const tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockRejectedValueOnce(TIMEOUT());
@@ -526,7 +526,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(errToasts()).toEqual(["Couldn't reload the explorer: The server didn't respond within 30s. Use Refresh to try again."]);
   });
 
-  it('4 · también al terminar bien', async () => {
+  it('también al terminar bien', async () => {
     const tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockResolvedValueOnce(APPLIED as never);
@@ -537,7 +537,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(errToasts()).toEqual(["Couldn't reload the explorer: The server didn't respond within 30s. Use Refresh to try again."]);
   });
 
-  it('7 · el apply falló a mitad (tandas grabadas): «failed» y se refresca', async () => {
+  it('el apply falló a mitad (tandas grabadas): «failed» y se refresca', async () => {
     const tree = mountValidated();
     applying();
     vi.mocked(pollUploadJob).mockResolvedValueOnce({ ...JOB, status: 'failed', error: 'The upload stopped. 3 of 5 batches had already been saved.' } as never);
@@ -547,7 +547,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(refreshExplorer).toHaveBeenCalled();
   });
 
-  it('5 · con una inversa del Undo en vuelo, la carga no empieza', async () => {
+  it('con una inversa del Undo en vuelo, la carga no empieza', async () => {
     const tree = mountValidated();
     undoState.busy = true;
     upload(tree);
@@ -557,7 +557,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
     expect(errToasts()).toEqual(['Undo is still running — upload when it finishes.']);
   });
 
-  it('6 · otra versión y de vuelta a la MISMA (A → B → A): al terminar, se refresca y se vacía su Undo', async () => {
+  it('otra versión y de vuelta a la misma (A → B → A): al terminar, se refresca y se vacía su Undo', async () => {
     const tree = mountValidated();
     applying(); const p = pollInFlight();
     upload(tree); await tick();
@@ -572,7 +572,7 @@ describe('ronda 6 (R17a): el resultado de la carga, dónde y a quién se avisa',
   });
 });
 
-describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el arrange por versión', () => {
+describe('la carga que termina con otra versión abierta, y el arrange por versión', () => {
   const applying = () => vi.mocked(applyUpload).mockResolvedValueOnce({ ...JOB, status: 'applying' } as never);
   /** Upload; el polling queda en vuelo (se decide en el test). */
   async function inFlight() {
@@ -586,11 +586,11 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
   }
   const COUNTS = { columns: { create: 12, update: 0, unchanged: 0 } };
 
-  it('R18a-4 · termina BIEN con otra versión abierta: se avisa que terminó, nombrando la versión', async () => {
+  it('termina bien con otra versión abierta: se avisa que terminó, nombrando la versión', async () => {
     const finish = await inFlight();
     unmount();                                         // el TopNav desmonta el popup…
     pinState.holds = false;
-    session.activeChangesetId = 'cs2';                // …y se abre OTRA versión
+    session.activeChangesetId = 'cs2';                // …y se abre otra versión
     finish({ ...APPLIED, result: { affectedCanvasIds: [], counts: COUNTS } });
     await ticks();
     expect(okToasts()).toEqual(['Uploaded 12 columns to “v3”']);
@@ -599,7 +599,7 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
     expect(clearUndo).not.toHaveBeenCalledWith();      // ni su pila de Undo
   });
 
-  it('ronda 8 · la versión de la carga abierta en SOLO LECTURA: al terminar se refresca su Explorer (sin tocar su Undo) y el aviso la nombra', async () => {
+  it('la versión de la carga abierta en solo lectura: al terminar se refresca su Explorer (sin tocar su Undo) y el aviso la nombra', async () => {
     const finish = await inFlight();
     unmount();
     session.openMode = 'readonly';                    // la misma versión, abierta como visor
@@ -610,7 +610,7 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
     expect(okToasts()).toEqual(['Uploaded 12 columns to “v3”']);
   });
 
-  it('R18a-4 · con canvases sin arreglar: UN aviso (aplicada + lo que quedó sin arreglar)', async () => {
+  it('con canvases sin ubicar: un solo aviso (aplicada + lo que no se pudo ubicar)', async () => {
     vi.mocked(placeUploadedObjects).mockResolvedValueOnce({ placed: 0, failed: ['sa9'], skipped: [] });
     const finish = await inFlight();
     unmount();
@@ -623,7 +623,7 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
     expect(errToasts()[0]).toMatch(/^The upload to “v3” was applied, but the new objects couldn't be placed on 1 canvas/);
   });
 
-  it('R18a-4 · tras un logout (otro usuario): nada', async () => {
+  it('tras un logout (otro usuario): nada', async () => {
     const finish = await inFlight();
     unmount();
     pinState.holds = false;
@@ -634,7 +634,7 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
     expect(vi.mocked(props.pushToast)).not.toHaveBeenCalled();
   });
 
-  it('ronda 8 · termina BIEN en la MISMA versión pero con OTRO usuario (logout y login en el tab): nada', async () => {
+  it('termina bien en la misma versión pero con otro usuario (logout y login en el tab): nada', async () => {
     const finish = await inFlight();
     unmount();
     session.activeChangesetId = 'cs1';                // la misma versión, en edición…
@@ -646,13 +646,13 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
     expect(clearUndo).not.toHaveBeenCalledWith();         // ni su pila de Undo
   });
 
-  it('A → B → A: el arrange sigue la VERSIÓN — de vuelta en la misma no se salta canvases; con otra abierta, corta', async () => {
+  it('A → B → A: el arrange sigue la versión; de vuelta en la misma no se salta canvases; con otra abierta, corta', async () => {
     let guard: { pin?: { holds: () => boolean; check: () => void } } = {};
     vi.mocked(placeUploadedObjects).mockImplementationOnce(async (_ids, _m, _f, _p, g) => { guard = g ?? {}; return { placed: 1, failed: [], skipped: [] }; });
     const finish = await inFlight();
     unmount();
     pinState.holds = false;                            // otra época de la sesión…
-    session.activeChangesetId = 'cs1';                // …en la MISMA versión (A → B → A)
+    session.activeChangesetId = 'cs1';                // …en la misma versión (A → B → A)
     finish({ ...APPLIED, result: { affectedCanvasIds: ['sa1'], counts: COUNTS } });
     await ticks();
     expect(guard.pin?.holds()).toBe(true);
@@ -667,10 +667,10 @@ describe('ronda 7 (R18a): la carga que termina con OTRA versión abierta, y el a
   });
 });
 
-// Doc 113 §1.3 — tras la carga NO se reacomoda el canvas: se ubica sólo lo que
-// entró a cada canvas (`newMembers` del backend), centrado en lo que el usuario
-// ve si es el canvas abierto, y queda marcado para pintarse encima.
-describe('doc 113: sólo lo nuevo, al centro de lo que se ve y encima', () => {
+// Tras la carga no se reacomoda el canvas: se ubica solo lo que entró a cada
+// canvas (`newMembers` del backend), centrado en lo que el usuario ve si es el
+// canvas abierto, y queda marcado para pintarse encima.
+describe('solo lo nuevo, al centro de lo que se ve y encima', () => {
   const MEMBERS = { sa1: ['t1', 'v1'], sa2: ['t2'] };
   const DONE = { ...APPLIED, result: { affectedCanvasIds: ['sa1', 'sa2'], newMembers: MEMBERS, counts: {} } };
   const VIEW = { center: { x: 5, y: 6 }, rect: { left: 0, top: 0, right: 10, bottom: 12 } };
@@ -683,7 +683,7 @@ describe('doc 113: sólo lo nuevo, al centro de lo que se ve y encima', () => {
     await ticks(6);
   }
 
-  it('pasa `newMembers` y el centro de lo que se ve del canvas ABIERTO (si la carga lo tocó)', async () => {
+  it('pasa `newMembers` y el centro de lo que se ve del canvas abierto (si la carga lo tocó)', async () => {
     Object.assign(mstate, { activeSaId: 'sa1', diagram: { subjectArea: { id: 'sa1' } } });
     vi.mocked(canvasView).mockReturnValueOnce(VIEW);
     await uploadDone();
@@ -692,8 +692,8 @@ describe('doc 113: sólo lo nuevo, al centro de lo que se ve y encima', () => {
     expect(call[1]).toEqual(MEMBERS);
     expect(call[2]).toEqual({ saId: 'sa1', point: { x: 5, y: 6 } });
     expect(call[4]).toEqual({ pin: expect.objectContaining({ holds: expect.any(Function), check: expect.any(Function) }) });
-    // Revisión: el refresco reabre el canvas SIN selección (el panel de Properties
-    // se cierra): el centro se mide como quedará, con el panel cerrado.
+    // El refresco reabre el canvas sin selección (el panel de Properties se
+    // cierra): el centro se mide como quedará, con el panel cerrado.
     expect(vi.mocked(canvasView).mock.calls[0][1]).toEqual({ panel: 'closes' });
   });
 
@@ -706,7 +706,7 @@ describe('doc 113: sólo lo nuevo, al centro de lo que se ve y encima', () => {
     vi.mocked(canvasView).mockReturnValue(null);
   });
 
-  it('marca lo ubicado para pintarlo encima (menos los canvases que fallaron), ANTES de refrescar', async () => {
+  it('marca lo ubicado para pintarlo encima (menos los canvases que fallaron), antes de refrescar', async () => {
     vi.mocked(placeUploadedObjects).mockResolvedValueOnce({ placed: 1, failed: ['sa2'], skipped: [] });
     const order: string[] = [];
     markFresh.mockImplementationOnce(() => { order.push('fresh'); });
@@ -716,7 +716,7 @@ describe('doc 113: sólo lo nuevo, al centro de lo que se ve y encima', () => {
     expect(order).toEqual(['fresh', 'refresh']);
   });
 
-  it('el resumen final dice que lo existente no se movió; los que fallaron, que lo nuevo quedó debajo', async () => {
+  it('el resumen final dice que lo existente no se movió; en los que fallaron, que lo nuevo está debajo', async () => {
     vi.mocked(placeUploadedObjects).mockResolvedValueOnce({ placed: 1, failed: ['sa2'], skipped: [] });
     await uploadDone();
     const shown = [...walk(rerender())].map(textOf).join('\n');
@@ -725,7 +725,7 @@ describe('doc 113: sólo lo nuevo, al centro de lo que se ve y encima', () => {
     expect(shown).not.toMatch(/auto-arranged|Autoarrange/);
   });
 
-  it('con otra versión abierta al terminar, no se marca nada en la sesión de ahora', async () => {
+  it('con otra versión abierta al terminar, no se marca nada en la sesión vigente', async () => {
     const tree = mountValidated();
     vi.mocked(applyUpload).mockResolvedValueOnce({ ...JOB, status: 'applying' } as never);
     let finish!: (j: unknown) => void;

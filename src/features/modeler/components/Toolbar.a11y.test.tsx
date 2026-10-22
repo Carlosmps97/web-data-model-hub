@@ -1,10 +1,10 @@
-// Toolbar del canvas (doc 105, ronda 5): los botones de ÍCONO no tenían nombre
-// accesible — sólo un tooltip visual al pasar el mouse (un lector de pantalla
-// anunciaba «button» sin más; el teclado no sabía qué hacía cada uno).
+// Toolbar del canvas: cada botón de ícono tiene nombre accesible, además del
+// tooltip visual al pasar el mouse (sin él, un lector de pantalla anunciaría
+// «button» sin más y con el teclado no se sabría qué hace cada uno).
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 
-// En un render del lado del servidor zustand lee el estado INICIAL del store:
+// En un render del lado del servidor zustand lee el estado inicial del store:
 // la sesión sale de este objeto (el resto del store, real).
 const session: Record<string, unknown> = {};
 vi.mock('@/store/useSessionStore', async (orig) => {
@@ -42,9 +42,9 @@ describe('Toolbar: cada botón tiene nombre accesible', () => {
   });
 });
 
-// Doc 105 (ronda 6, R17b): «Add a ellipse»; el atajo del buscador decía «⌘K» fijo
-// (en Windows es Ctrl+K); Logical/Physical no decían cuál está activa.
-describe('Toolbar: nombres y estado (doc 105, ronda 6)', () => {
+// Artículo correcto («Add an ellipse»), atajo del buscador según el sistema («⌘K» en
+// Mac, Ctrl+K en Windows) y Logical/Physical anuncian cuál está activa.
+describe('Toolbar: nombres y estado', () => {
   it('artículo correcto, atajo del sistema y la vista activa anunciada', async () => {
     Object.assign(session, { openMode: 'editing', activeChangesetId: 'cs1', activeProjectId: 'p1' });
     const html = renderToStaticMarkup(<Toolbar pushToast={() => {}} onOpenModel={() => {}} />);

@@ -1,5 +1,5 @@
-// Colapso visual de tipos complejos para el canvas (F4 #6, spec §6).
-// Puro y sin dependencias — el nodo muestra `STRUCT<…>` con tooltip del tipo
+// Colapso visual de tipos complejos para el canvas.
+// Puro y sin dependencias: el nodo muestra `STRUCT<…>` con tooltip del tipo
 // completo; el DDL (generators.ts) emite el tipo real verbatim.
 
 /** `STRUCT<a:INT,b:STRING>` → `STRUCT<…>`; tipos simples quedan tal cual. */
@@ -16,7 +16,7 @@ export function isComplexType(dataType: string): boolean {
 }
 
 // ── Builder estructurado de tipos complejos (ColumnEditor) ────────────────
-// Parse/compose PUROS del texto del tipo. Las "subcolumnas" de un STRUCT no
+// Parse/compose puros del texto del tipo. Las "subcolumnas" de un STRUCT no
 // son columnas reales: el tipo sigue siendo un string (el DDL lo emite
 // verbatim); esto solo permite editarlo campo a campo en vez de tipear la
 // estructura lineal a mano. Round-trip estable: parse(compose(s)) == s.
@@ -26,7 +26,7 @@ export type ComplexSpec =
   | { kind: 'array'; element: string }
   | { kind: 'map'; key: string; value: string };
 
-/** Corta `inner` por `sep` de PROFUNDIDAD 0 (respeta <> y () anidados). */
+/** Corta `inner` por `sep` de profundidad 0 (respeta <> y () anidados). */
 function splitTop(inner: string, sep: string): string[] {
   const out: string[] = [];
   let depth = 0;
@@ -80,7 +80,7 @@ export function parseComplexType(text: string): ComplexSpec | null {
   return { kind: 'struct', fields };
 }
 
-/** true si el texto ARRANCA como complejo (candidato al builder visual). */
+/** true si el texto arranca como complejo (candidato al builder visual). */
 export function isComplexTypeStart(t: string): boolean {
   return /^\s*(STRUCT|ARRAY|MAP)\s*</i.test(t ?? '');
 }
@@ -92,8 +92,8 @@ export function composeComplexType(spec: ComplexSpec): string {
   return `STRUCT<${spec.fields.map((f) => `${f.name.trim()}:${f.type.trim()}`).join(',')}>`;
 }
 
-// ── Doc 96 D8: un tipo complejo es el MISMO en las dos facetas ─────────────
-// (su estructura es propia de cada columna). Espejo de `mirror_complex` del kit.
+// ── Un tipo complejo es el mismo en las dos facetas ───────────────────────
+// (su estructura es propia de cada columna). Espejo de `mirror_complex` del backend.
 
 /** ¿STRUCT/ARRAY/MAP con estructura adentro? `ARRAY<>` no (genérico vacío). */
 export function hasComplexContent(t: string | null | undefined): boolean {

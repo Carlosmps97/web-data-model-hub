@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { LAST_PROJECT_KEY, sessionProjectId, useSessionStore } from './useSessionStore';
 
-describe('useSessionStore · proyecto activo (doc 75)', () => {
+describe('useSessionStore · proyecto activo', () => {
   beforeEach(() => useSessionStore.setState({ openMode: null, activeChangesetId: null, activeVersionLabel: null, activeProjectId: null }));
 
   it('sessionProjectId lanza sin proyecto y devuelve el activo', () => {

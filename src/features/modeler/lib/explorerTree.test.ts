@@ -1,4 +1,4 @@
-// Doc 71 §1: helpers puros del Explorer unificado.
+// Helpers puros del Explorer.
 import { describe, expect, it } from 'vitest';
 import {
   buildCanvasIndex, canvasesWithTable, canvasesWithView, groupBySchema, indexCanvasesWithTable,
@@ -24,7 +24,7 @@ describe('explorerTree', () => {
     expect(canvasesWithView(CANV, 'v9', ['t9'])).toEqual([]);
   });
 
-  it('buildCanvasIndex: los lookups O(1) dan EXACTAMENTE lo mismo que el barrido', () => {
+  it('buildCanvasIndex: los lookups O(1) dan exactamente lo mismo que el barrido', () => {
     const idx = buildCanvasIndex(CANV);
     const ids = (cs: { id: string }[]) => cs.map((c) => c.id);
     // Paridad tabla: todos los ids conocidos + uno inexistente.

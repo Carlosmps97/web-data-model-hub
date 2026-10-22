@@ -1,9 +1,9 @@
 /**
- * Rule catalog (pantalla 16b) — tabla DENSA tipo hoja de cálculo, no cards:
- * los modeladores vienen de Excel. La columna Status combina el toggle de
+ * Rule catalog: tabla densa tipo hoja de cálculo, no cards (los modeladores
+ * trabajan habitualmente con Excel). La columna Status combina el toggle de
  * enabled + el punto de validación. Fila → editor. "New rule" abre el picker
- * de plantillas (16d). Incluye el CTA de las 7 semillas cuando está vacío
- * (doc 30 D4), el editor de lookups/functions y la cascada de generadores.
+ * de plantillas. Incluye el CTA del ruleset base cuando está vacío, el editor
+ * de lookups/functions y la cascada de generadores.
  */
 import { useMemo, useState } from 'react';
 import { ChevronLeft, Info, Plus, Search, Sparkles, Table2 } from 'lucide-react';
@@ -58,7 +58,7 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
     });
   }, [rules, q, type, artifact, attention]);
 
-  // Cadenas de dependencia de generadores (spec §7.3, visible): raíz → … → hoja.
+  // Cadenas de dependencia de generadores (visibles): raíz → … → hoja.
   const chains = useMemo(() => {
     const gens = rules.filter((r) => r.kind === 'generator' && r.enabled);
     const emitOf = (g: DdlRule) => ((g.action?.emit as Record<string, unknown> | undefined)?.artifact as string) ?? '';
@@ -86,7 +86,7 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
 
   const doSeed = async () => {
     setSeeding(true);
-    try { await seedStarterRules(projectId, config.output); await onApplied(); toast.success('Starter rules added'); }
+    try { await seedStarterRules(projectId, config.output, config.functions); await onApplied(); toast.success('Starter rules added'); }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't add the starter rules"); }
     finally { setSeeding(false); }
   };
@@ -154,7 +154,7 @@ export default function DdlRuleCatalog({ projectId, rules, config, artifacts, ca
           <Sparkles size={22} color="#8B5CF6" />
           <div style={{ fontSize: 14, fontWeight: 700, color: '#1A2B4A', marginTop: 8 }}>No export rules yet</div>
           <div style={{ fontSize: 12.5, color: '#8A93A5', margin: '6px auto 14px', maxWidth: 460, lineHeight: 1.5 }}>
-            Restore the base rule set — the DDL set of the BCP macro: commented DROP, vacuum
+            Restore the base rule set — the DDL set of the reference macro: commented DROP, vacuum
             TBLPROPERTIES, updateFrequency / isDAC / DAC tags, rejected table, NoDAC and DAC technical
             and rejected views, and DAC decryption on business views — and the output settings
             (quoting, casing, file names). You can edit or disable any of them later.

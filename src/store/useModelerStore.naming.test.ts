@@ -9,10 +9,10 @@ import { useModelerStore } from './useModelerStore';
 const CFG_UPPER = { column: { separator: '_', case: 'upper' }, table: { separator: '_', case: 'upper' } } as const;
 const CFG_LOWER = { column: { separator: '_', case: 'lower' }, table: { separator: '_', case: 'upper' } } as const;
 
-// Doc 83: el canvas cachea el naming config del proyecto (case por scope) para
+// El canvas cachea el naming config del proyecto (case por scope) para
 // que el popup New column y el panel Properties muestren el físico con la
 // regla al instante; el backend la aplica igual al escribir (autoritativo).
-describe('useModelerStore.loadNaming — naming config del proyecto (doc 83)', () => {
+describe('useModelerStore.loadNaming — naming config del proyecto', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useModelerStore.setState({ activeProjectId: 'p1', naming: null });
@@ -25,7 +25,7 @@ describe('useModelerStore.loadNaming — naming config del proyecto (doc 83)', (
     expect(useModelerStore.getState().naming).toEqual(CFG_LOWER);
   });
 
-  it('una respuesta de OTRO proyecto (cambio rápido de canvas) no pisa la config del activo', async () => {
+  it('una respuesta de otro proyecto (cambio rápido de canvas) no pisa la config del activo', async () => {
     vi.mocked(naming.getNamingConfig).mockResolvedValue(CFG_LOWER);
     await useModelerStore.getState().loadNaming('p2');
     expect(useModelerStore.getState().naming).toBeNull();

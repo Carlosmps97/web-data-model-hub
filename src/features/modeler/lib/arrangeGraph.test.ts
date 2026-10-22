@@ -1,4 +1,4 @@
-// Armado PURO del grafo del Autoarrange (doc 55 §3.5): tablas + vistas
+// Armado puro del grafo del Autoarrange: tablas + vistas
 // visibles como nodos (tamaño medido si existe, si no la estimación LOD),
 // relaciones + derivaciones como edges. Lo comparten el botón Autoarrange
 // (nodos medidos) y el arrange headless de la carga masiva (sin DOM).
@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { buildArrangeGraph } from './arrangeGraph';
 import type { Diagram } from '@/features/modeler/services/modeler.service';
 
-const table = (id: string) => ({ id, physicalName: id.toUpperCase(), logicalName: id, schema: 'ddv' });
+const table = (id: string) => ({ id, physicalName: id.toUpperCase(), logicalName: id, schema: 'stg' });
 const column = (tableId: string, i: number) => ({
   id: `${tableId}.c${i}`, tableId, physicalName: `C${i}`, logicalName: `c ${i}`, dataType: 'STRING',
   typeOverridden: false, ordinal: i,
@@ -30,7 +30,7 @@ function diagram(): Diagram {
 }
 
 describe('buildArrangeGraph', () => {
-  it('sizes tables with the LOD estimate when nothing is measured', () => {
+  it('dimensiona las tablas con la estimación LOD cuando no hay nada medido', () => {
     const g = buildArrangeGraph(diagram(), () => undefined, 'physical');
     const a = g.nodes.find((n) => n.id === 'a')!;
     const b = g.nodes.find((n) => n.id === 'b')!;
@@ -39,13 +39,13 @@ describe('buildArrangeGraph', () => {
     expect(a.width).toBeGreaterThanOrEqual(240);
   });
 
-  it('prefers measured sizes when provided', () => {
+  it('prefiere los tamaños medidos cuando existen', () => {
     const g = buildArrangeGraph(diagram(), (id) => (id === 'a' ? { width: 500, height: 700 } : undefined), 'physical');
     expect(g.nodes.find((n) => n.id === 'a')).toEqual({ id: 'a', width: 500, height: 700 });
     expect(g.nodes.find((n) => n.id === 'b')!.height).toBe(60);
   });
 
-  it('adds visible views as nodes with derivation edges and skips views without a source in the canvas', () => {
+  it('agrega las vistas visibles como nodos con edges de derivación y omite las que no tienen fuente en el canvas', () => {
     const g = buildArrangeGraph(diagram(), () => undefined, 'physical');
     expect(g.nodes.map((n) => n.id)).toEqual(['a', 'b', 'v1']);
     expect(g.edges).toEqual([
@@ -55,7 +55,7 @@ describe('buildArrangeGraph', () => {
     expect(g.viewIds).toEqual(['v1']);
   });
 
-  it('leaves views OUT of the graph in logical mode (doc 63)', () => {
+  it('deja las vistas fuera del grafo en modo lógico', () => {
     const g = buildArrangeGraph(diagram(), () => undefined, 'logical');
     expect(g.nodes.map((n) => n.id)).toEqual(['a', 'b']);
     expect(g.edges).toEqual([{ id: 'r1', source: 'a', target: 'b' }]);

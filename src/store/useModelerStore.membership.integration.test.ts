@@ -1,8 +1,8 @@
-// Doc 100 (P5/P6) — miembros del canvas, INTEGRADO: el store real con el
+// Miembros del canvas, prueba integrada: el store real con el
 // `structure.service` real (con su cola de escrituras) contra un backend en
-// memoria con LATENCIA. Invariante: la lista completa de tablas y vistas se
-// arma DENTRO de la cola, sobre el canvas grabado de ese momento — armada
-// afuera (con el diagrama en memoria o una lectura previa) se perdía cualquier
+// memoria con latencia. Invariante: la lista completa de tablas y vistas se
+// arma dentro de la cola, sobre el canvas grabado de ese momento; armada
+// afuera (con el diagrama en memoria o una lectura previa) se perdería cualquier
 // otra escritura de miembros que cayera en medio.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -65,8 +65,8 @@ const puts = () => log.filter((l) => l.startsWith('put:'));
 const unhandled: unknown[] = [];
 const onUnhandled = (e: unknown) => { unhandled.push(e); };
 
-/** Vistas que el canvas MUESTRA: su lista explícita o, si no tiene (canvas nuevo
- *  o legacy, doc 70), las que tienen una fuente en el canvas. Lo hace el backend. */
+/** Vistas que el canvas muestra: su lista explícita o, si no la tiene, las que
+ *  tienen una fuente en el canvas. Lo hace el backend. */
 const shown = (sa: SubjectArea): string[] =>
   Array.isArray(sa.viewIds) ? sa.viewIds : VIEWS.filter((v) => v.sourceTableIds.some((t) => sa.tableIds.includes(t))).map((v) => v.id);
 
@@ -133,7 +133,7 @@ afterEach(async () => {
   expect(unhandled, 'unhandledRejection durante la prueba').toEqual([]);
 });
 
-describe('P5 — dos escrituras de miembros que se cruzan no se pisan', () => {
+describe('dos escrituras de miembros que se cruzan no se pisan', () => {
   it('deshacer «sacar una tabla» mientras entra otra: quedan las dos', async () => {
     await st().removeTableFromArea('t2');
     expect(draft.sa1.tableIds).toEqual(['t1']);
@@ -162,10 +162,10 @@ describe('P5 — dos escrituras de miembros que se cruzan no se pisan', () => {
   });
 });
 
-describe('P5 — el Undo de sacar una tabla es UNA escritura y repone todo', () => {
+describe('el Undo de sacar una tabla es una escritura y repone todo', () => {
   it('tabla, vistas huérfanas, posiciones y trazos vuelven juntos', async () => {
     const before = structuredClone(draft.sa1);
-    await st().removeTableFromArea('t1');                  // v1 (sólo t1) queda huérfana; r1 pierde su trazo
+    await st().removeTableFromArea('t1');                  // `v1` (solo `t1`) queda huérfana; `r1` pierde su trazo
     expect(draft.sa1.tableIds).toEqual(['t2']);
     expect(draft.sa1.viewIds).toEqual(['v2']);
     expect(draft.sa1.routes).toEqual({});
@@ -178,10 +178,10 @@ describe('P5 — el Undo de sacar una tabla es UNA escritura y repone todo', () 
     expect(draft.sa1.routes).toEqual(before.routes);
   });
 
-  it('en el modelo lógico la vista huérfana vuelve a SU posición (ahí las vistas no son nodos, doc 63)', async () => {
+  it('en el modelo lógico la vista huérfana vuelve a su posición (ahí las vistas no son nodos)', async () => {
     const f = flowOf() as unknown as { getNode: (id: string) => unknown };
     useModelerStore.setState({ flow: { ...f, getNode: (id: string) => (id.startsWith('v') ? undefined : f.getNode(id)) } as never });
-    await st().removeTableFromArea('t1');                  // v1 (sólo t1) sale huérfana
+    await st().removeTableFromArea('t1');                  // `v1` (solo `t1`) sale huérfana
     await useUndoStore.getState().undoLast();
     expect(draft.sa1.viewIds).toContain('v1');
     expect(draft.sa1.layout.v1).toEqual({ x: 0, y: 300 });
@@ -203,11 +203,11 @@ describe('P5 — el Undo de sacar una tabla es UNA escritura y repone todo', () 
   });
 });
 
-describe('P5 — canvas sin lista explícita de vistas (doc 70)', () => {
-  it('importar una tabla NO arrastra sus vistas; pedirlas conserva las que ya se mostraban', async () => {
+describe('canvas sin lista explícita de vistas', () => {
+  it('importar una tabla no arrastra sus vistas; pedirlas conserva las que ya se mostraban', async () => {
     const legacy = canvas();
     delete (legacy as Partial<SubjectArea>).viewIds;
-    draft.sa1 = legacy;                                    // muestra v1 y v2 por sus fuentes
+    draft.sa1 = legacy;                                    // muestra `v1` y `v2` por sus fuentes
     await st().reload();
     await st().addExistingTables(['t3']);
     expect(draft.sa1.viewIds).toEqual(['v1', 'v2']);       // v3 (fuente t3) no entra sola
@@ -217,15 +217,15 @@ describe('P5 — canvas sin lista explícita de vistas (doc 70)', () => {
   });
 });
 
-describe('P5 — el Undo usa las vistas de SU canvas, no las del canvas abierto (revisión 2026-09-28)', () => {
+describe('el Undo usa las vistas de su canvas, no las del canvas abierto', () => {
   const legacy = (over: Partial<SubjectArea> = {}) => {
     const sa = canvas(over);
-    delete (sa as Partial<SubjectArea>).viewIds;          // canvas sin lista explícita (doc 70)
+    delete (sa as Partial<SubjectArea>).viewIds;          // canvas sin lista explícita
     return sa;
   };
 
-  it('sacar una tabla sin vistas y deshacer desde OTRO canvas no le pone al primero las vistas del segundo', async () => {
-    draft.sa1 = legacy({ tableIds: ['t1', 't2', 't4'] });                   // muestra v1 y v2 por sus fuentes
+  it('sacar una tabla sin vistas y deshacer desde otro canvas no le pone al primero las vistas del segundo', async () => {
+    draft.sa1 = legacy({ tableIds: ['t1', 't2', 't4'] });                   // muestra `v1` y `v2` por sus fuentes
     draft.sa2 = canvas({ id: 'sa2', name: 'Otro', tableIds: ['t3'], viewIds: ['v3'], layout: { t3: { x: 5, y: 5 } }, routes: {} });
     await st().reload();
     await st().removeTableFromArea('t4');                                  // sin vistas huérfanas: sigue sin lista
@@ -233,7 +233,7 @@ describe('P5 — el Undo usa las vistas de SU canvas, no las del canvas abierto 
     await st().selectSubjectArea('sa2');
     await useUndoStore.getState().undoLast();
     expect(draft.sa1.tableIds).toEqual(['t1', 't2', 't4']);
-    expect(draft.sa1.viewIds).toBeUndefined();                             // antes: ['v3'] (la del canvas abierto)
+    expect(draft.sa1.viewIds).toBeUndefined();                             // no toma la lista del canvas abierto (['v3'])
   });
 
   it.each([
@@ -243,7 +243,7 @@ describe('P5 — el Undo usa las vistas de SU canvas, no las del canvas abierto 
       vi.mocked(viewsSvc.listViewsForTables).mockImplementation(async () => [VIEWS[2]] as never);
       await st().addExistingTables(['t3'], { withViews: true });
     }, ['v1', 'v2']],
-  ])('%s y deshacer desde otro canvas deja la lista de SU canvas', async (_label, act, after) => {
+  ])('%s y deshacer desde otro canvas deja la lista de su canvas', async (_label, act, after) => {
     draft.sa2 = canvas({ id: 'sa2', name: 'Otro', tableIds: ['t3'], viewIds: ['v3'], layout: { t3: { x: 5, y: 5 } }, routes: {} });
     await act();
     await st().selectSubjectArea('sa2');
@@ -253,7 +253,7 @@ describe('P5 — el Undo usa las vistas de SU canvas, no las del canvas abierto 
   });
 });
 
-describe('P6 — posiciones enteras', () => {
+describe('posiciones enteras', () => {
   it('mover un bloque con zoom: se graba en píxeles enteros y el diagrama queda igual', async () => {
     await st().saveLayout('t1', { x: 72.3315, y: 40.5 });
     expect(draft.sa1.layout.t1).toEqual({ x: 72, y: 41 });

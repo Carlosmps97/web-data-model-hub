@@ -1,7 +1,7 @@
-// Data Standards → UDP sin DOM (hooks de mentira: ver
-// reporting/components/fakeReact.testutil). Doc 105: «Save & apply» se
-// habilitaba SIN cambios y registraba una versión vacía; además vaciar el
-// default o la descripción no viajaba (el backend guarda sólo lo presente).
+// Data Standards → UDP sin DOM (hooks simulados: ver
+// reporting/components/fakeReact.testutil). «Save & apply» solo se habilita con
+// un cambio real (sin cambios no se registra una versión vacía), y vaciar el
+// default o la descripción viaja como "" (el backend guarda solo lo presente).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import type { StandardsSnapshot, UdpDefinition } from '../standards.service';
@@ -41,7 +41,7 @@ function openDef() {
   return rerender();
 }
 const saveBtn = (tree: unknown) => byText(tree, 'button', 'Save & apply');
-/** El campo del bloque cuyo <label> DIRECTO dice `label`. */
+/** El campo del bloque cuyo <label> directo dice `label`. */
 const inputOf = (tree: unknown, label: string) => {
   const kids = (e: { props: Record<string, unknown> }) => [e.props.children].flat() as { type?: unknown; props?: Record<string, unknown> }[];
   const box = [...walk(tree)].find((e) => e.type === 'div' && kids(e).some((c) => c?.type === 'label' && c.props?.children === label))!;
@@ -51,7 +51,7 @@ const type = (el: { props: Record<string, unknown> }, value: string) => (el.prop
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe('UDP: «Save & apply» sólo con un cambio real (doc 105)', () => {
+describe('UDP: «Save & apply» solo con un cambio real', () => {
   it('sin cambios queda deshabilitado, con «No changes to apply»', () => {
     const tree = openDef();
     expect(saveBtn(tree).props.disabled).toBe(true);
@@ -78,8 +78,8 @@ describe('UDP: «Save & apply» sólo con un cambio real (doc 105)', () => {
   });
 });
 
-// Doc 105 (ronda 5): el default de un UDP booleano se tipeaba como texto libre.
-describe('UDP booleano: el default se elige true/false (doc 105, ronda 5)', () => {
+// El default de un UDP booleano se elige en un select, no se tipea como texto libre.
+describe('UDP booleano: el default se elige true/false', () => {
   it('el Default de un Boolean es un select con true y false', () => {
     const BOOL: UdpDefinition = { ...DEF, id: 'u2', name: 'Sensible', dataType: 'boolean', defaultValue: '', allowedValues: [] };
     props = { projectId: 'p1', snapshot: { ...snapshot, udp: [BOOL] } as StandardsSnapshot, canEdit: true, onApplied: vi.fn(async () => {}) };
@@ -97,10 +97,10 @@ describe('UDP booleano: el default se elige true/false (doc 105, ronda 5)', () =
   });
 });
 
-// Doc 105 (ronda 5): el default de una lista que ya no está entre los valores
-// permitidos se veía «—» (el select no tenía esa opción) pero se conservaba.
-describe('UDP de lista: un default fuera de la lista se sigue viendo (doc 105, ronda 5)', () => {
-  it('el select del Default muestra el valor guardado aunque ya no esté permitido', () => {
+// El default de una lista que está fuera de los valores permitidos se conserva y
+// el select lo muestra con su propia opción, en lugar de «—».
+describe('UDP de lista: un default fuera de la lista se sigue viendo', () => {
+  it('el select del Default muestra el valor guardado aunque no esté entre los permitidos', () => {
     const LIST: UdpDefinition = { ...DEF, id: 'u3', name: 'Nivel', defaultValue: 'Retirado', allowedValues: ['DAC', 'No DAC'] };
     props = { projectId: 'p1', snapshot: { ...snapshot, udp: [LIST] } as StandardsSnapshot, canEdit: true, onApplied: vi.fn(async () => {}) };
     resetFake();

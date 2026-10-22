@@ -1,11 +1,11 @@
 /* ============================================================
-   Requests · review & approval (p5) — DMH-Erwin v20260625-2.
-   Two-section panel: filtered request list (left) + open request
-   detail with impact, diff and reviewer comments (right). Token-
-   driven, light-only navy. Source: …/Data Model Hub.dc.html (#p5).
+   Requests · revisión y aprobación.
+   Panel en dos secciones: lista filtrada de solicitudes (izquierda) +
+   detalle de la solicitud abierta con impacto, diff y comentarios de
+   los revisores (derecha). Basado en tokens, solo tema claro, azul marino.
    ============================================================ */
 
-/* ───────────────────────────── Panel shell ───────────────────────── */
+/* ─────────────────────────── Contenedor del panel ────────────────── */
 .dmh-review { flex: 1; min-height: 0; display: flex; background: var(--page-bg); padding: 20px 26px; }
 .dmh-rv-panel {
   flex: 1; min-height: 0; display: flex; flex-direction: column;
@@ -13,7 +13,7 @@
   box-shadow: 0 1px 3px rgba(16,27,48,.04), 0 18px 50px rgba(16,27,48,.07);
 }
 
-/* ── Header ────────────────────────────────────────────────────────── */
+/* ── Cabecera ──────────────────────────────────────────────────────── */
 .dmh-rv-phead { display: flex; align-items: center; gap: 12px; padding: 15px 20px; border-bottom: 1px solid var(--border-2); flex: none; }
 .dmh-rv-phead-ico { width: 36px; height: 36px; flex: none; border-radius: 9px; background: var(--amber-tint); color: var(--amber-deep); display: flex; align-items: center; justify-content: center; }
 .dmh-rv-phead-text { flex: 1; min-width: 0; }
@@ -22,10 +22,10 @@
 .dmh-rv-phead-close { width: 32px; height: 32px; flex: none; border: none; background: var(--fill-2); border-radius: 8px; color: var(--text-muted); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background .14s, color .14s; }
 .dmh-rv-phead-close:hover { background: var(--fill-1); color: var(--navy); }
 
-/* ── Two sections ──────────────────────────────────────────────────── */
+/* ── Dos secciones ─────────────────────────────────────────────────── */
 .dmh-rv-cols { flex: 1; min-height: 0; display: flex; }
 
-/* ════════ SECTION 1 · request list ════════ */
+/* ════════ Sección 1 · lista de solicitudes ════════ */
 .dmh-rv-list { width: 392px; flex: none; min-height: 0; display: flex; flex-direction: column; border-right: 1px solid var(--border-2); background: var(--fill-3); }
 .dmh-rv-list-filters { display: flex; gap: 7px; padding: 13px 15px; border-bottom: 1px solid var(--border-2); flex: none; }
 .dmh-rv-flt {
@@ -66,14 +66,14 @@
 .dmh-rv-card-arrow { color: #C0C7D2; flex: none; }
 .dmh-rv-pchip { font-size: 10px; font-weight: 600; color: var(--text-body); background: var(--fill-2); border-radius: var(--r-full); padding: 1px 8px; white-space: nowrap; }
 
-/* status pills (cards + detail) */
+/* pills de estado (tarjetas + detalle) */
 .dmh-rv-spill { font-size: 10.5px; font-weight: 600; border-radius: var(--r-full); padding: 2px 8px; white-space: nowrap; }
 .dmh-rv-spill--review { color: var(--amber-deep); background: var(--amber-tint); border: 1px solid #F4DFAE; }
 .dmh-rv-spill--approved { color: var(--green-deep); background: var(--green-tint); border: 1px solid #CDEBDC; }
 .dmh-rv-spill--rejected { color: var(--red); background: var(--red-tint); border: 1px solid var(--red-border); }
 .dmh-rv-spill--draft { color: var(--text-muted); background: var(--fill-4); }
 
-/* ════════ SECTION 2 · request detail ════════ */
+/* ════════ Sección 2 · detalle de la solicitud ════════ */
 .dmh-rv-detail { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
 .dmh-rv-detail-empty { margin: auto; padding: 60px 30px; text-align: center; }
@@ -83,9 +83,9 @@
 .dmh-rv-detail-loading { padding: 24px; display: flex; flex-direction: column; gap: 14px; }
 .dmh-rv-skel { background: var(--fill-1); border-radius: 8px; animation: dmh-skeleton 1.1s ease-in-out infinite; }
 
-/* ── Detail header ─────────────────────────────────────────────────── */
+/* ── Cabecera del detalle ──────────────────────────────────────────── */
 .dmh-rv-dhead { padding: 18px 24px; border-bottom: 1px solid var(--border-2); flex: none; }
-/* Doc 105: en anchos chicos (≈1024 px) las acciones bajan a su propia fila en vez de
+/* En anchos chicos (≈1024 px) las acciones bajan a su propia fila en vez de
    aplastar título y metadatos (o recortar Approve); desde ≈1440 px no cambia nada. */
 .dmh-rv-dhead-row { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
 .dmh-rv-dhead-main { flex: 1 1 330px; min-width: 0; }
@@ -114,23 +114,23 @@
 .dmh-rv-act--approve { border: none; padding: 0 16px; background: var(--green); color: #fff; }
 .dmh-rv-act--approve:not(:disabled):hover { background: var(--green-deep); }
 .dmh-rv-act--approve:disabled { background: #DCE6E1; color: #fff; }
-/* Withdraw (sólo owner de un request en revisión): vuelve la versión a draft */
+/* Withdraw (solo el dueño de un request en revisión): vuelve la versión a draft */
 .dmh-rv-act--withdraw { border: 1px solid var(--amber-tint-2); background: var(--amber-tint); color: var(--amber-deep); }
 .dmh-rv-act--withdraw:not(:disabled):hover { background: #FFEFCB; }
 .dmh-rv-act--withdraw:disabled { opacity: .55; }
 
-/* assigned-reviewer note (también usado por el aviso de conflictos del diff) */
+/* nota del revisor asignado (también la usa el aviso de conflictos del diff) */
 .dmh-rv-note { display: flex; align-items: center; gap: 9px; margin-top: 14px; background: #FFFBF2; border: 1px solid #F4E4BE; border-radius: 10px; padding: 9px 13px; }
 .dmh-rv-note svg { flex: none; color: var(--amber-deep); }
 .dmh-rv-note span { font-size: 12px; color: #7A5B16; line-height: 1.4; }
 
-/* Badge por fila del diff: la entidad cambió en producción después de esta versión */
+/* Badge por fila del diff: la entidad tiene cambios en producción posteriores a esta versión */
 .dmh-rv-diffrow-conflict { display: inline-flex; align-items: center; gap: 4px; flex: none;
   font-size: 10px; font-weight: 700; color: var(--amber-deep); background: var(--amber-tint);
   border: 1px solid var(--amber-tint-2); border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
 .dmh-rv-diffrow-conflict svg { flex: none; }
 
-/* impact chips + legend */
+/* chips de impacto + leyenda */
 .dmh-rv-impact { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 13px; }
 .dmh-rv-impact-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--text-body); background: var(--fill-3); border: 1px solid var(--border-3); border-radius: 8px; padding: 5px 11px; }
 .dmh-rv-impact-chip svg { color: var(--text-muted-2); }
@@ -142,10 +142,10 @@
 .dmh-rv-impact-legend .lg--mod { color: var(--amber-deep); } .lg--mod .sq { background: var(--amber); }
 .dmh-rv-impact-legend .lg--del { color: var(--red); } .lg--del .sq { background: #DC4234; }
 
-/* ── Detail body (scrolls) ─────────────────────────────────────────── */
+/* ── Cuerpo del detalle (con scroll) ───────────────────────────────── */
 .dmh-rv-dbody { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 24px 22px; }
 
-/* requester note card */
+/* tarjeta con la nota del solicitante */
 .dmh-rv-note-card { background: var(--fill-3); border: 1px solid var(--border-2); border-radius: 11px; padding: 13px 15px; margin-bottom: 14px; }
 .dmh-rv-note-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .dmh-rv-note-card-name { font-size: 12.5px; font-weight: 600; color: var(--navy); }
@@ -156,7 +156,7 @@
 
 .dmh-rv-changes-label { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted-3); margin: 2px 0 10px; }
 
-/* ── Diff cards ────────────────────────────────────────────────────── */
+/* ── Tarjetas del diff ─────────────────────────────────────────────── */
 .dmh-rv-diff { display: flex; flex-direction: column; gap: 11px; }
 .dmh-rv-diff-empty { padding: 22px; text-align: center; font-size: 13px; color: var(--text-muted); border: 1px dashed var(--border-3); border-radius: 11px; }
 .dmh-rv-diffrow { border-radius: 11px; overflow: hidden; background: var(--surface); border: 1px solid var(--border-3); }
@@ -181,7 +181,7 @@
 .dmh-rv-diffrow-spacer { flex: 1; }
 .dmh-rv-diffrow-coll { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted-2); }
 
-/* ── Reviewer comments ─────────────────────────────────────────────── */
+/* ── Comentarios de los revisores ──────────────────────────────────── */
 .dmh-rv-comments { border-top: 1px solid var(--border-2); margin-top: 8px; padding-top: 16px; }
 .dmh-rv-comments-title { font-size: 10.5px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted-3); margin-bottom: 12px; }
 .dmh-rv-comment { display: flex; gap: 10px; margin-bottom: 12px; }
@@ -208,7 +208,7 @@
 .dmh-rv-comment-send:not(:disabled):hover { background: var(--primary-700); }
 .dmh-rv-comment-send:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ══ Doc 64 §7 (v2 del doc 31) · Changes summary + popup "Change details" ══ */
+/* ══ Changes summary + popup "Change details" ══ */
 
 /* ── summary card (cuerpo del request) ── */
 .dmh-rvs-card { background: var(--surface); border: 1px solid var(--border-2); border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
@@ -240,7 +240,7 @@
 .dmh-rvs-cnt.is-edited { color: var(--amber-deep); background: var(--amber-tint); }
 .dmh-rvs-cnt.is-deleted { color: var(--red); background: var(--red-tint); }
 
-/* ── modal overlay ── */
+/* ── overlay del modal ── */
 .dmh-rvd-overlay { position: fixed; inset: 0; z-index: 90; background: rgba(15, 23, 42, .45); display: flex; align-items: center; justify-content: center; padding: 26px; }
 .dmh-rvd-modal { width: min(1240px, 96vw); height: min(820px, 92vh); background: var(--surface); border-radius: 14px; box-shadow: 0 24px 64px rgba(15, 23, 42, .28); display: flex; flex-direction: column; overflow: hidden; }
 .dmh-rvd-head { display: flex; align-items: center; gap: 11px; padding: 13px 18px; border-bottom: 1px solid var(--border-2); flex: none; }
@@ -266,7 +266,7 @@
 .dmh-rvd-vchip.on.v-deleted .sq { background: #DC4234; }
 .dmh-rvd-filters-note { margin-left: auto; font-size: 11px; color: var(--text-muted-2); }
 
-/* ── modal body: árbol (izq) + detalle (der) ── */
+/* ── cuerpo del modal: árbol (izq) + detalle (der) ── */
 .dmh-rvd-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 40%) 1fr; }
 .dmh-rvd-left { min-height: 0; overflow-y: auto; border-right: 1px solid var(--border-2); padding: 8px 8px 14px; }
 .dmh-rvd-tree { display: flex; flex-direction: column; gap: 1px; }
@@ -274,7 +274,7 @@
 .dmh-rvd-seccount { font-size: 10px; font-weight: 700; color: var(--text-muted-2); background: var(--fill-2); border-radius: 999px; padding: 0 7px; line-height: 15px; }
 .dmh-rvd-noresults { padding: 26px 14px; text-align: center; font-size: 12.5px; color: var(--text-muted-2); }
 
-/* fila del árbol v2 — icono por tipo + tinte suave + pill de verbo */
+/* fila del árbol: icono por tipo + tinte suave + pill de verbo */
 .dmh-rvd-row { position: relative; display: flex; align-items: center; gap: 7px; min-height: 29px; padding-right: 8px; border-radius: 7px; border-left: 3px solid transparent; }
 .dmh-rvd-row.is-selectable { cursor: pointer; }
 .dmh-rvd-row.is-selectable:hover { background: var(--fill-2); }
@@ -319,7 +319,7 @@
 .dmh-rvd-nofields { font-size: 12.5px; color: var(--text-muted-2); padding: 14px; text-align: center; border: 1px dashed var(--border-3); border-radius: 10px; }
 .dmh-rvd-childnote { font-size: 11.5px; color: var(--text-muted-2); margin-top: 12px; padding: 8px 11px; background: var(--fill-3); border-radius: 8px; }
 
-/* filas de campo v2: label + CHIPS before → after */
+/* filas de campo: label + chips before → after */
 .dmh-rvd-fields { display: flex; flex-direction: column; }
 .dmh-rvd-fieldrow { display: flex; align-items: baseline; gap: 9px; padding: 8px 2px; border-bottom: 1px solid var(--border-soft); }
 .dmh-rvd-fieldrow:last-child { border-bottom: none; }
@@ -368,7 +368,7 @@
 .dmh-rvd-colsum { font-size: 11px; color: var(--text-muted-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
 .dmh-rvd-colbody { padding: 4px 11px 9px; border-top: 1px dashed var(--border-2); }
 
-/* ── Doc 75 D20: proyecto diferenciado en la bandeja + borrado crítico ──── */
+/* ── Proyecto diferenciado en la bandeja + borrado crítico ──────────────── */
 .dmh-rv-pchip { display: inline-flex; align-items: center; gap: 4px; }
 .dmh-rv-critical { display: flex; gap: 10px; padding: 12px 14px; margin: 0 0 12px; border: 1px solid #F3C7C7; background: #FDECEC;
   border-radius: 10px; color: #7A1F1F; font-size: 13px; line-height: 1.5; }
@@ -377,7 +377,7 @@
 .dmh-rv-spill--critical { background: #FDECEC; color: #C0392B; border: 1px solid #F3C7C7; }
 .dmh-delproj-label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; color: var(--navy); margin-top: 4px; }
 
-/* ── Doc 84 A1 · Publish blocked (panel persistente en la revisión) ─────────── */
+/* ── Publish blocked (panel persistente en la revisión) ─────────────────────── */
 .dmh-rvb { margin-bottom: 14px; border: 1px solid var(--red-border); border-left: 4px solid var(--red); border-radius: 11px; background: #FFF7F6; padding: 14px 16px; }
 .dmh-rvb-head { display: flex; align-items: flex-start; gap: 10px; }
 .dmh-rvb-head > svg { flex: none; color: var(--red); margin-top: 1px; }
@@ -399,21 +399,21 @@
 .dmh-rvb-next ol { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--text-body); line-height: 1.5; }
 .dmh-rvb-next .dmh-rv-act { margin-top: 10px; }
 
-/* Doc 84 A2/A3 · resumen: último cambio + fila de conflictos */
+/* Resumen: último cambio + fila de conflictos */
 .dmh-rvs-last { font-size: 11px; color: var(--text-muted-2); margin-left: 8px; }
 .dmh-rvs-row.is-conflict { background: #FFFBF2; }
 .dmh-rvs-row.is-conflict .dmh-rvs-rowlbl { display: inline-flex; align-items: center; gap: 6px; color: var(--amber-deep); }
 
-/* Doc 84 B3/C2 · atribución del cambio bajo la cabecera del detalle */
+/* Atribución del cambio bajo la cabecera del detalle */
 .dmh-rvd-attr { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-muted); margin-top: 8px; padding: 0 2px; }
 
-/* Doc 84 B4 · tipo de dato en las filas de columna del árbol */
+/* Tipo de dato en las filas de columna del árbol */
 .dmh-rvd-dtype { margin-left: auto; flex: none; font-family: var(--mono); font-size: 10.5px; color: var(--text-muted-2); }
 
-/* Doc 84 C1 · el explorer embebido en el popup de Version tools */
+/* El explorer embebido en el popup de Version tools */
 .dmh-vt-explorer { height: min(560px, 62vh); display: flex; flex-direction: column; border: 1px solid var(--border-2); border-radius: 11px; overflow: hidden; background: var(--surface); }
 
-/* ── Doc 88 §5-6: chips de resultado, historial de solicitudes y diálogo de rechazo ── */
+/* ── Chips de resultado, historial de solicitudes y diálogo de rechazo ── */
 .dmh-rv-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
 .dmh-rv-chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 999px; border: 1px solid var(--border-1); background: var(--surface); color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .dmh-rv-chip:hover { color: var(--navy); }

@@ -1,4 +1,4 @@
-// Proyecto destino de la carga (doc 87 §3.5, D1): helpers puros del popup.
+// Proyecto destino de la carga: helpers puros del popup.
 import { describe, it, expect } from 'vitest';
 import type { UploadTargets } from '../upload.service';
 import { needsTarget, pickTarget, targetHint } from './uploadTarget';
@@ -6,7 +6,7 @@ import { needsTarget, pickTarget, targetHint } from './uploadTarget';
 const c = (id: string, name: string): UploadTargets['candidates'][number] => ({ id, name, folders: 1, canvases: 0 });
 const NONE: UploadTargets = { mode: 'none', candidates: [] };
 const AUTO: UploadTargets = { mode: 'auto', candidates: [c('f1', 'Modelo Fisico')] };
-const CHOOSE: UploadTargets = { mode: 'choose', candidates: [c('c', 'CPYBCA'), c('o', 'Otros')] };
+const CHOOSE: UploadTargets = { mode: 'choose', candidates: [c('c', 'COMERCIAL'), c('o', 'Otros')] };
 
 describe('needsTarget', () => {
   it('solo exige destino con 2+ proyectos internos', () => {

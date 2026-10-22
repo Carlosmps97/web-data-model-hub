@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { canvasSessionKey } from './canvasSession';
 
 /**
- * Bug (owner 2026-09-08): con un proyecto abierto en solo lectura, abrir OTRO
- * proyecto también en solo lectura no re-sincronizaba el workspace (explorer,
- * toolbar y canvas seguían en el proyecto anterior hasta recargar la página):
- * el efecto de `WorkspaceScreen` sólo miraba `openMode` + `activeChangesetId`.
- * La clave de contexto incluye el PROYECTO: cualquier cambio de proyecto, modo
- * o changeset produce una clave distinta ⇒ `refreshExplorer()`.
+ * La clave de contexto incluye el proyecto: con un proyecto abierto en solo
+ * lectura, abrir otro proyecto también en solo lectura re-sincroniza el
+ * workspace (explorer, toolbar y canvas), aunque `openMode` y
+ * `activeChangesetId` no cambien. Cualquier cambio de proyecto, modo o
+ * changeset produce una clave distinta ⇒ `refreshExplorer()`.
  */
 describe('canvasSessionKey', () => {
   it('sin sesión de canvas (openMode null) ⇒ null', () => {

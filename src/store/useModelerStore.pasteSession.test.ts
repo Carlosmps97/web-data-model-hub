@@ -1,7 +1,6 @@
-// Doc 105 (ronda 4, 6c) — pegar una tabla termina recargando el canvas; si
-// mientras recargaba se abrió otra versión, `pasteTable` igual devolvía el
-// nombre de la copia y el llamador (menú de la columna, Ctrl+V) avisaba
-// «… pasted as …» sobre la versión NUEVA. Ahora devuelve null: no se avisa.
+// Pegar una tabla termina recargando el canvas; si mientras recarga se abre otra
+// versión, `pasteTable` devuelve null para que el llamador (menú de la columna,
+// Ctrl+V) no avise «… pasted as …» sobre la versión que se abrió.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -35,7 +34,7 @@ beforeEach(async () => {
 });
 afterEach(async () => { await sleep(5); });
 
-describe('pegar una tabla no avisa en otra versión (doc 105, ronda 4)', () => {
+describe('pegar una tabla no avisa en otra versión', () => {
   it('si mientras recargaba se abrió otra versión, no devuelve el nombre', async () => {
     const late = deferred<unknown>();
     vi.mocked(mod.loadDiagram).mockImplementationOnce(() => late.promise as never);
@@ -46,22 +45,22 @@ describe('pegar una tabla no avisa en otra versión (doc 105, ronda 4)', () => {
     await expect(paste).resolves.toBeNull();
   });
 
-  it('sin cambio de sesión, devuelve el nombre de la copia (como siempre)', async () => {
+  it('sin cambio de sesión, devuelve el nombre de la copia', async () => {
     await expect(st().pasteTable()).resolves.toMatch(/^M_CLIENTE/);
   });
 });
 
-// Doc 105 (ronda 5, R15-H9): el nombre que se muestra al copiar y pegar una
-// tabla es el de la faceta abierta — en Lógico decía «Entity pasted as» con el
-// nombre FÍSICO de la copia.
-describe('copiar y pegar dan el nombre según la faceta (doc 105, ronda 5)', () => {
+// El nombre que se muestra al copiar y pegar una tabla es el de la faceta
+// abierta (en Lógico, «Entity pasted as» lleva el nombre lógico de la copia, no
+// el físico).
+describe('copiar y pegar dan el nombre según la faceta', () => {
   it('en Lógico: el lógico del original y el de la copia', async () => {
     useModelerStore.setState({ viewMode: 'logical' });
     expect(st().copyTable('t1')).toBe('cliente');
     await expect(st().pasteTable()).resolves.toMatch(/^cliente/);
   });
 
-  // Doc 105 (ronda 6, R17a-11): la etiqueta del Undo también sigue la faceta.
+  // La etiqueta del Undo también sigue la faceta.
   it('en Lógico, el Undo dice «Paste entity <lógico>»', async () => {
     const { useUndoStore } = await import('./useUndoStore');
     useUndoStore.setState({ stack: [], busy: false });
@@ -71,7 +70,7 @@ describe('copiar y pegar dan el nombre según la faceta (doc 105, ronda 5)', () 
     expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual([`Paste entity ${name}`]);
   });
 
-  it('en Físico: los físicos (como siempre)', async () => {
+  it('en Físico: los físicos', async () => {
     useModelerStore.setState({ viewMode: 'physical' });
     expect(st().copyTable('t1')).toBe('M_CLIENTE');
     await expect(st().pasteTable()).resolves.toMatch(/^M_CLIENTE_copy/);

@@ -1,8 +1,8 @@
 /**
  * PermissionMatrix — grilla permiso (fila) × rol (columna).
- * Flujo SEGURO: por defecto es SOLO-LECTURA. Solo en modo edición (`editing`)
- * las celdas son toggles; los cambios van a un BORRADOR en el padre y se
- * persisten todos juntos al Guardar (nada se aplica de inmediato). Las celdas
+ * Flujo seguro: por defecto es de solo lectura. Solo en modo edición (`editing`)
+ * las celdas son toggles; los cambios van a un borrador en el padre y se
+ * persisten todos juntos al guardar (nada se aplica de inmediato). Las celdas
  * modificadas respecto al original se resaltan.
  */
 import type { Permission } from '@/features/auth/auth.service';
@@ -81,7 +81,7 @@ export default function PermissionMatrix({ roles, permissions, editing, saving, 
                         <Dot on={on} />
                       </button>
                     ) : (
-                      // Solo-lectura: no es interactivo.
+                      // Solo lectura: no es interactivo.
                       <Dot on={on} dim />
                     )}
                   </div>

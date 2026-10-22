@@ -1,7 +1,7 @@
-// Modal legacy sin DOM (hooks de mentira: ver reporting/components/fakeReact.testutil).
-// Doc 105: el Modal (New column, Relationship, Subcategory, Paste columns,
-// Inherit from domain, usuarios y roles) no participaba de la pila de diálogos
-// ni de la trampa de Tab que ya tenían Dialog/ConfirmDialog.
+// Modal sin DOM (hooks simulados: ver reporting/components/fakeReact.testutil).
+// El Modal (New column, Relationship, Subcategory, Paste columns, Inherit from
+// domain, usuarios y roles) participa de la pila de diálogos y de la trampa de Tab,
+// igual que Dialog/ConfirmDialog.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fake, resetFake, runEffects, walk, type El } from '../../features/reporting/components/fakeReact.testutil';
 
@@ -31,8 +31,8 @@ function mount(onClose: () => void, children: unknown = null) {
   return { tree, unmount: () => cleanups.forEach((c) => c()) };
 }
 
-describe('Modal: ESC cierra sólo el del tope (doc 105)', () => {
-  it('con «Inherit from domain» abierto sobre «New column», ESC cierra sólo el de arriba', () => {
+describe('Modal: ESC cierra solo el del tope', () => {
+  it('con «Inherit from domain» abierto sobre «New column», ESC cierra solo el de arriba', () => {
     const closeEditor = vi.fn();
     const closeInherit = vi.fn();
     mount(closeEditor);                 // New column
@@ -45,7 +45,7 @@ describe('Modal: ESC cierra sólo el del tope (doc 105)', () => {
     expect(closeEditor).toHaveBeenCalledTimes(1);
   });
 
-  it('re-renderizar el de ABAJO (los callers pasan arrows nuevas) no le da el tope', () => {
+  it('volver a renderizar el de abajo (quienes lo usan pasan arrows nuevas) no le da el tope', () => {
     const closeEditor = vi.fn();
     const closeInherit = vi.fn();
     mount(closeEditor);
@@ -66,7 +66,7 @@ describe('Modal: ESC cierra sólo el del tope (doc 105)', () => {
     expect(closeEditor2).not.toHaveBeenCalled();
   });
 
-  it('un Modal solo cierra con ESC; otras teclas no; desmontado ya no escucha', () => {
+  it('un Modal solo cierra con ESC; otras teclas no; desmontado deja de escuchar', () => {
     const onClose = vi.fn();
     const m = mount(onClose);
     press('Enter');
@@ -79,7 +79,7 @@ describe('Modal: ESC cierra sólo el del tope (doc 105)', () => {
   });
 });
 
-describe('Modal: Tab no sale del popup (doc 105, F6)', () => {
+describe('Modal: Tab no sale del popup', () => {
   it('Tab en el último control vuelve al primero; Shift+Tab en el primero va al último', () => {
     const { tree } = mount(vi.fn());
     const box = [...walk(tree)].find((el: El) => el.props.role === 'dialog')!;
@@ -107,7 +107,7 @@ describe('Modal: Tab no sale del popup (doc 105, F6)', () => {
   });
 });
 
-describe('Modal: el foco entra al popup al abrirse (doc 105, F6)', () => {
+describe('Modal: el foco entra al popup al abrirse', () => {
   it('abierto con el mouse, la caja (tabIndex -1, sin outline) toma el foco; al cerrarse vuelve a quien lo abrió', () => {
     const opener = { isConnected: true, disabled: false, focus: vi.fn(), matches: () => false, closest: () => null };
     const doc: { activeElement: unknown; body: object } = { activeElement: opener, body: {} };
@@ -139,8 +139,8 @@ describe('Modal: el foco entra al popup al abrirse (doc 105, F6)', () => {
   });
 });
 
-describe('Modal: con un control autoFocus adentro, el foco igual vuelve a quien lo abrió (doc 105)', () => {
-  it('quien abrió se captura en el PRIMER render (antes del commit y del autoFocus)', () => {
+describe('Modal: con un control autoFocus adentro, el foco igual vuelve a quien lo abrió', () => {
+  it('quien abrió se captura en el primer render (antes del commit y del autoFocus)', () => {
     const opener = { isConnected: true, disabled: false, focus: vi.fn(), matches: () => false, closest: () => null };
     const doc: { activeElement: unknown; body: object } = { activeElement: opener, body: {} };
     vi.stubGlobal('document', doc);
@@ -177,9 +177,9 @@ describe('Modal: con un control autoFocus adentro, el foco igual vuelve a quien 
   });
 });
 
-// Doc 105 (R6): con el popup abierto el foco se perdía a <body> (SubcategoryPopup:
-// «Remove» + confirmar se lleva la fila con el botón) y Tab salía a la página.
-describe('Modal: el foco no se pierde con el popup abierto (doc 105, R6)', () => {
+// Con el popup abierto, si el foco cae a <body> (p. ej., en SubcategoryPopup «Remove»
+// + confirmar se lleva la fila con el botón), Tab saldría a la página: la caja lo retoma.
+describe('Modal: el foco no se pierde con el popup abierto', () => {
   function openWithFocusInside() {
     const doc: { activeElement: unknown; body: object } = { activeElement: null, body: {} };
     vi.stubGlobal('document', doc);
@@ -195,7 +195,7 @@ describe('Modal: el foco no se pierde con el popup abierto (doc 105, R6)', () =>
     return { doc, box, save };
   }
 
-  it('(a) Tab con el foco en <body> lo retoma la caja — sólo si es el popup del tope', () => {
+  it('Tab con el foco en <body> lo retoma la caja, solo si es el popup del tope', () => {
     const { doc, box } = openWithFocusInside();
     doc.activeElement = doc.body;
     const tab = { key: 'Tab', shiftKey: false, preventDefault: vi.fn() };
@@ -208,7 +208,7 @@ describe('Modal: el foco no se pierde con el popup abierto (doc 105, R6)', () =>
     expect(tab2.preventDefault).not.toHaveBeenCalled();
   });
 
-  it('(c) tras un render con el foco en un botón suyo que pasó a busy, el foco vuelve a la caja', () => {
+  it('tras un render con el foco en un botón suyo que pasó a busy, el foco vuelve a la caja', () => {
     const { doc, box, save } = openWithFocusInside();
     doc.activeElement = save;
     resetFake(null, { keepRefs: true });

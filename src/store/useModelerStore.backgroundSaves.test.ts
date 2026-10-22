@@ -1,9 +1,8 @@
-// Doc 105 (F1, A4-o1) — guardados del canvas que corren en SEGUNDO PLANO: el
-// canvas los dispara con `void` (soltar un bloque, cambiar de canvas con
-// dibujos pendientes). Si fallan, avisan con el criterio de los dibujos (doc
-// 104): un error de la versión espera la revalidación y calla si la sesión ya
-// no edita esa versión (ella avisó); si no, el motivo real. Nunca un rechazo
-// sin manejar.
+// Guardados del canvas que corren en segundo plano: el canvas los dispara con
+// `void` (soltar un bloque, cambiar de canvas con dibujos pendientes). Si fallan,
+// avisan con el criterio de los dibujos: un error de la versión espera la
+// revalidación y calla si la sesión dejó de editar esa versión (la revalidación
+// ya avisó); si no, muestra el motivo real. Nunca queda un rechazo sin manejar.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
@@ -28,8 +27,7 @@ const onUnhandled = (e: unknown) => { unhandled.push(e); };
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const refused = (message: string) => new ApiError(message, 403, message, '/api/changesets/cs1/changes');
 
-// Doc 105 (ronda 5, R15-H1): los bloques que se mueven son del canvas (sólo
-// ésos entran a su layout).
+// Los bloques que se mueven son del canvas (solo esos entran a su layout).
 const diagram = (saId: string) => ({
   subjectArea: { id: saId, projectId: 'p1', name: saId, tableIds: ['t1', 't2'], viewIds: ['v1'], layout: {}, routes: {} },
   tables: [], columns: [], relationships: [], views: [],
@@ -48,13 +46,13 @@ afterEach(async () => {
   process.off('unhandledRejection', onUnhandled);
 });
 
-describe('saveLayout que falla (doc 105, F1)', () => {
+describe('saveLayout que falla', () => {
   it('como lo llama el canvas (`void saveLayout(...)`): sin rechazo sin manejar y con el motivo', async () => {
     vi.mocked(struct.setSubjectAreaLayout).mockRejectedValueOnce(new Error('sin red'));
     void useModelerStore.getState().saveLayout('t1', { x: 10.4, y: 20.6 });
     await sleep(30);
     expect(unhandled, 'unhandledRejection').toEqual([]);
-    // Doc 105 (O1): qué falló + el motivo (el motivo solo no dice qué falló).
+    // Qué falló + el motivo (el motivo solo no dice qué falló).
     expect(toast.error).toHaveBeenCalledWith("Couldn't save the position: sin red.");
   });
 
@@ -64,7 +62,7 @@ describe('saveLayout que falla (doc 105, F1)', () => {
     expect(toast.error).toHaveBeenCalledWith("Couldn't save the position");
   });
 
-  it('403 de la versión y la revalidación cambió la sesión: calla (ya avisó ella)', async () => {
+  it('403 de la versión y la revalidación cambia la sesión: calla (el aviso lo da la revalidación)', async () => {
     vi.mocked(struct.setSubjectAreaLayout).mockImplementationOnce(async () => {
       trackRevalidation(new Promise<void>((res) => setTimeout(() => {
         useSessionStore.getState().openModel({ projectId: 'p1', mode: 'readonly', changesetId: 'cs1' }); res();
@@ -75,7 +73,7 @@ describe('saveLayout que falla (doc 105, F1)', () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it('403 de la versión y la sesión sigue igual (rol perdido): avisa el motivo real, DESPUÉS de la revalidación', async () => {
+  it('403 de la versión y la sesión sigue igual (rol perdido): avisa el motivo real, después de la revalidación', async () => {
     let revalidated = false;
     vi.mocked(struct.setSubjectAreaLayout).mockImplementationOnce(async () => {
       trackRevalidation(new Promise<void>((res) => setTimeout(() => { revalidated = true; res(); }, 20)));
@@ -87,8 +85,8 @@ describe('saveLayout que falla (doc 105, F1)', () => {
   });
 });
 
-describe('flush de dibujos al cambiar de canvas (doc 105, F1)', () => {
-  it('si falla, avisa como el guardado con debounce (antes lo tragaba)', async () => {
+describe('flush de dibujos al cambiar de canvas', () => {
+  it('si falla, avisa como el guardado con debounce', async () => {
     vi.mocked(struct.setSubjectAreaDrawings).mockRejectedValueOnce(new Error('sin red'));
     useModelerStore.getState().addDrawing('rect');                // agenda el guardado (debounce)
     await useModelerStore.getState().selectSubjectArea('sa2');    // flush inmediato del canvas anterior
@@ -98,7 +96,7 @@ describe('flush de dibujos al cambiar de canvas (doc 105, F1)', () => {
     expect(toast.error).toHaveBeenCalledWith("Couldn't save the drawings: sin red.");
   });
 
-  it('403 de la versión que cambió la sesión: calla', async () => {
+  it('403 de la versión que cambia la sesión: calla', async () => {
     vi.mocked(struct.setSubjectAreaDrawings).mockImplementationOnce(async () => {
       trackRevalidation(new Promise<void>((res) => setTimeout(() => {
         useSessionStore.getState().openModel({ projectId: 'p1', mode: 'readonly', changesetId: 'cs1' }); res();
@@ -112,7 +110,7 @@ describe('flush de dibujos al cambiar de canvas (doc 105, F1)', () => {
   });
 });
 
-describe('updateDrawing sin cambio real (doc 109)', () => {
+describe('updateDrawing sin cambio real', () => {
   it('no graba ni marca el canvas sucio; un cambio real, sí', async () => {
     // El guardado de dibujos es un temporizador de módulo (debounce de 500 ms):
     // el que otro test dejó agendado caería dentro de la ventana que se mide acá.
@@ -130,8 +128,8 @@ describe('updateDrawing sin cambio real (doc 109)', () => {
   });
 });
 
-describe('mover VARIOS bloques a la vez (doc 105, A4-o1)', () => {
-  it('UNA escritura del layout con todos los movidos, en píxeles enteros, y el diagrama al día en sitio', async () => {
+describe('mover varios bloques a la vez', () => {
+  it('una escritura del layout con todos los movidos, en píxeles enteros, y el diagrama al día en sitio', async () => {
     const before = useModelerStore.getState().diagram;
     await useModelerStore.getState().saveNodePositions({ t1: { x: 10.4, y: 20.6 }, v1: { x: 300, y: 40 } });
     expect(struct.setSubjectAreaLayout).toHaveBeenCalledTimes(1);
@@ -147,7 +145,7 @@ describe('mover VARIOS bloques a la vez (doc 105, A4-o1)', () => {
     expect(useModelerStore.getState().dirty).toBe(false);
   });
 
-  it('si falla, avisa una vez (criterio de F1)', async () => {
+  it('si falla, avisa una vez (mismo criterio que saveLayout)', async () => {
     vi.mocked(struct.setSubjectAreaLayout).mockRejectedValueOnce(new Error('sin red'));
     void useModelerStore.getState().saveNodePositions({ t1: { x: 1, y: 1 }, t2: { x: 2, y: 2 } });
     await sleep(30);
@@ -157,17 +155,17 @@ describe('mover VARIOS bloques a la vez (doc 105, A4-o1)', () => {
   });
 });
 
-// Doc 105 (O1, verificador de navegador): «Internal server error. Check the
-// logs…» junto a «View created» no decía QUÉ falló. El aviso lleva el contexto
-// y el motivo — sin duplicar el contexto si el motivo ya lo trae.
-describe('failureText (doc 105, O1)', () => {
+// Un «Internal server error. Check the logs…» junto a «View created» no dice qué
+// falló: el aviso lleva el contexto y el motivo, sin duplicar el contexto si el
+// motivo ya lo trae.
+describe('failureText', () => {
   it('contexto + motivo, con un solo punto final', () => {
     expect(failureText("Couldn't add the view to this canvas", new Error('Internal server error. Check the logs using the X-Request-ID.')))
       .toBe("Couldn't add the view to this canvas: Internal server error. Check the logs using the X-Request-ID.");
     expect(failureText("Couldn't save the position", new Error('sin red'))).toBe("Couldn't save the position: sin red.");
   });
 
-  it('sin motivo legible: sólo el contexto', () => {
+  it('sin motivo legible: solo el contexto', () => {
     expect(failureText("Couldn't save the position", new Error(''))).toBe("Couldn't save the position");
     expect(failureText("Couldn't save the position", 'raro')).toBe("Couldn't save the position");
   });
@@ -178,8 +176,8 @@ describe('failureText (doc 105, O1)', () => {
   });
 });
 
-describe('dibujo nuevo (doc 111)', () => {
-  it('queda marcado para nacer SELECCIONADO (si no, se pintaba detrás de una tabla y parecía no haberse creado)', () => {
+describe('dibujo nuevo', () => {
+  it('queda marcado para nacer seleccionado (si no, se pintaría detrás de una tabla y parecería no haberse creado)', () => {
     useModelerStore.getState().addDrawing('rect');
     const st = useModelerStore.getState();
     const created = st.drawings[st.drawings.length - 1];

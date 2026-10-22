@@ -1,19 +1,19 @@
 /**
- * dialogs — reemplazo promise-based de `window.confirm` / `window.prompt` con
+ * dialogs: reemplazo promise-based de `window.confirm` / `window.prompt` con
  * popups propios de la web (mismo shell `.dmh-backdrop`/`.dmh-modal` que Modal).
  *
  * Uso (drop-in en cualquier handler):
  *   if (!(await confirmDialog({ title: 'Delete column', message: '…', variant: 'danger' }))) return;
  *   const name = await promptDialog({ title: 'New changeset', label: 'Title' });  // null = cancelado
  *
- * Con `action` el diálogo NO se cierra al confirmar: queda bloqueado con spinner
+ * Con `action` el diálogo no se cierra al confirmar: queda bloqueado con spinner
  * hasta que la promesa termina (feedback de "en proceso") y recién ahí cierra.
  *   await confirmDialog({ …, action: () => deleteRelationship(id) });  // true al terminar
- *   // si `action` lanza, la promesa del diálogo RECHAZA → catch del caller (toast).
+ *   // si `action` lanza, la promesa del diálogo se rechaza → catch de quien lo llama (toast).
  *
- * `<DialogHost/>` se monta UNA vez al final de `App.tsx` (después del router)
- * para pintar por encima de cualquier modal abierto (mismo z-index, DOM
- * posterior). Los pedidos se encolan: se muestra de a uno.
+ * `<DialogHost/>` se monta una sola vez al final de `App.tsx` (después del router)
+ * para pintar por encima de cualquier modal abierto (capa `--top`). Los pedidos
+ * se encolan: se muestra de a uno.
  */
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { create } from 'zustand';
@@ -27,7 +27,7 @@ export interface ConfirmOpts {
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'danger' | 'primary';
-  /** Botón con el foco al abrir (default «confirm»; «cancel» para lo irreversible). */
+  /** Botón con el foco al abrir (por defecto «confirm»; «cancel» para lo irreversible). */
   initialFocus?: 'confirm' | 'cancel';
   /** Trabajo a ejecutar al confirmar; el diálogo muestra busy hasta que resuelve. */
   action?: () => Promise<unknown>;
@@ -35,7 +35,7 @@ export interface ConfirmOpts {
 
 export interface PromptOpts {
   title: string;
-  /** Label sobre el input (opcional). */
+  /** Etiqueta sobre el input (opcional). */
   label?: string;
   placeholder?: string;
   initial?: string;
@@ -104,12 +104,12 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
-  // Quién tenía el foco al abrirse: primer render, antes del commit (init perezoso).
+  // Quién tenía el foco al abrirse: primer render, antes de la fase de commit (init perezoso).
   const openerRef = useRef<Element | null | undefined>(undefined);
   if (openerRef.current === undefined) openerRef.current = activeElementNow();
   const tokenRef = useRef<symbol | null>(null);
   if (tokenRef.current === null) tokenRef.current = Symbol('dmh-prompt');
-  // Doc 105 (R6): la caja se nombra con su título; el <label> nombra al input.
+  // La caja se nombra con su título; el <label> nombra al input.
   const titleId = useId();
   const inputId = useId();
 
@@ -117,8 +117,8 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
   const submit = () => {
     if (busy) return;
     if (!opts.action) { p.resolve(value); shift(); return; }
-    // Doc 105 (F6): busy deshabilita el input y los botones — el foco caía a
-    // <body> y Tab salía a la página de atrás; queda en la caja (como ConfirmDialog).
+    // Busy deshabilita el input y los botones: el foco caería a <body> y Tab
+    // saldría a la página de atrás, así que queda en la caja (como en ConfirmDialog).
     boxRef.current?.focus();
     setBusy(true);
     opts.action(value)
@@ -128,16 +128,16 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
 
   useEffect(() => {
     const t = window.setTimeout(() => inputRef.current?.focus(), 30);
-    // Capture + stopPropagation: el ESC cierra SOLO este diálogo, no el modal
+    // Capture + stopPropagation: Esc cierra solo este diálogo, no el modal
     // que pueda estar debajo (Modal escucha keydown en bubble).
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); cancel(); } };
     window.addEventListener('keydown', onKey, true);
     return () => { window.clearTimeout(t); window.removeEventListener('keydown', onKey, true); };
   }); // sin deps: cancel/submit capturan estado fresco; listener barato
 
-  // Doc 105 (F6): el foco entra a la caja al abrirse (a los 30 ms lo toma el
-  // input) y, al cerrarse, vuelve a quien abrió el prompt. Ver `focusInto`.
-  // R6: entra a la pila de diálogos y un Tab con el foco perdido lo retoma su caja.
+  // El foco entra a la caja al abrirse (a los 30 ms lo toma el input) y, al
+  // cerrarse, vuelve a quien abrió el prompt. Ver `focusInto`. Además entra a la
+  // pila de diálogos y un Tab con el foco perdido lo retoma su caja.
   useEffect(() => {
     const token = tokenRef.current as symbol;
     pushDialog(token);
@@ -153,7 +153,7 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
 
   return (
     // --top: por encima de cualquier modal abierto (incl. Dialog, z-index 300).
-    // El scrim NO cierra al click (pedido owner 07-17): sólo botones / ESC.
+    // El scrim no cierra al hacer clic: solo los botones o Esc.
     <div className="dmh-backdrop dmh-backdrop--top" role="presentation">
       <div className="dmh-modal" style={{ width: 440, outline: 'none' }} role="dialog" aria-modal="true" ref={boxRef}
         aria-labelledby={titleId} tabIndex={-1} onKeyDown={(e) => trapTab(e, boxRef.current)}>
@@ -169,8 +169,8 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
             placeholder={opts.placeholder}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            // Doc 105 (R11): sin preventDefault, el keypress de este Enter «clicaba»
-            // al botón que abrió el prompt (aparecía otro).
+            // Sin preventDefault, el keypress de este Enter «clicaría» al botón
+            // que abrió el prompt (y aparecería otro).
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); submit(); } }}
           />
         </div>
@@ -185,7 +185,7 @@ function PromptHostView({ p, shift }: { p: Extract<Pending, { kind: 'prompt' }>;
   );
 }
 
-/** Host global de diálogos — montar una sola vez en App. */
+/** Host global de diálogos; se monta una sola vez en App. */
 export function DialogHost() {
   const current = useDialogQueue((s) => s.queue[0]);
   const shift = useDialogQueue((s) => s.shift);

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { applyNamingCase } from './physicalCase';
 
-// Doc 83: espejo de `app/core/naming/engine.apply_case` — la regla de case del
-// scope se aplica al físico TIPEADO (popup en modo Physical, panel Properties),
-// no sólo al derivado desde el lógico.
+// Espejo de `app/core/naming/engine.apply_case`: la regla de case del scope se
+// aplica al físico tipeado (popup en modo Physical, panel Properties), no solo
+// al derivado del lógico.
 describe('applyNamingCase', () => {
-  it('upper: lo tipeado en minúscula sale en MAYÚSCULA (regla del scope column)', () => {
+  it('upper: lo tipeado en minúscula sale en mayúscula (regla del scope column)', () => {
     expect(applyNamingCase('monto_deuda', 'upper')).toBe('MONTO_DEUDA');
   });
 

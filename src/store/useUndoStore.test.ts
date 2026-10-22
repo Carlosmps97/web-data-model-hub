@@ -11,7 +11,7 @@ const open = (mode: 'editing' | 'readonly', changesetId: string) =>
 
 beforeEach(() => { useUndoStore.setState({ stack: [], busy: false }); });
 
-describe('useUndoStore (doc 50)', () => {
+describe('useUndoStore', () => {
   it('undoLast es LIFO: corre la inversa y devuelve su label', async () => {
     const ran: string[] = [];
     pushUndo('a', async () => { ran.push('a'); });
@@ -21,7 +21,7 @@ describe('useUndoStore (doc 50)', () => {
     expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['a']);
   });
 
-  it('una inversa corriendo SUPRIME la instrumentación (no apila su propia inversa)', async () => {
+  it('una inversa corriendo suprime la instrumentación (no apila su propia inversa)', async () => {
     pushUndo('add', async () => {
       // La inversa reusa una acción del store instrumentada: su pushUndo
       // interno no debe entrar a la pila.
@@ -31,14 +31,14 @@ describe('useUndoStore (doc 50)', () => {
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
-  it('si la inversa FALLA, la entrada ya salió de la pila y el error se propaga', async () => {
+  it('si la inversa falla, la entrada ya salió de la pila y el error se propaga', async () => {
     pushUndo('boom', async () => { throw new Error('409'); });
     await expect(useUndoStore.getState().undoLast()).rejects.toThrow('409');
     expect(useUndoStore.getState().stack).toEqual([]);
     expect(useUndoStore.getState().busy).toBe(false);
   });
 
-  it('la pila se acota a 50 (se descarta lo más viejo)', () => {
+  it('la pila se acota a 50 (se descarta lo más antiguo)', () => {
     for (let i = 0; i < 55; i += 1) pushUndo(`e${i}`, async () => {});
     const stack = useUndoStore.getState().stack;
     expect(stack).toHaveLength(50);
@@ -57,12 +57,11 @@ describe('useUndoStore (doc 50)', () => {
   });
 });
 
-// Doc 105 (H1): la inversa es de la sesión en que se pidió el Undo. Los
-// servicios toman la versión al llamarlos: si mientras corre se abre otra
-// versión (u otro modo), lo que falta NO se escribe — ni en la nueva ni en
-// ninguna — y no se avisa nada engañoso («Undid…» o el error de una sesión que
-// ya no está en pantalla).
-describe('Undo atado a la sesión (doc 105, H1)', () => {
+// La inversa es de la sesión en que se pidió el Undo. Los servicios toman la
+// versión al llamarlos: si mientras corre se abre otra versión (u otro modo),
+// lo que falta no se escribe — ni en la nueva ni en ninguna — y no se avisa
+// nada engañoso («Undid…» o el error de una sesión que ya no está en pantalla).
+describe('Undo atado a la sesión', () => {
   beforeEach(() => { open('editing', 'cs1'); });
 
   it('la inversa recibe el pin de su sesión: si se abre otra versión, corta y undoLast calla (null)', async () => {
@@ -95,7 +94,7 @@ describe('Undo atado a la sesión (doc 105, H1)', () => {
     await expect(useUndoStore.getState().undoLast()).resolves.toBeNull();
   });
 
-  it('con la sesión igual el error se propaga, DESPUÉS de la revalidación', async () => {
+  it('con la sesión igual el error se propaga, después de la revalidación', async () => {
     let revalidated = false;
     pushUndo('Edit column', async () => {
       trackRevalidation(new Promise<void>((r) => setTimeout(() => { revalidated = true; r(); }, 10)));
@@ -105,9 +104,10 @@ describe('Undo atado a la sesión (doc 105, H1)', () => {
     expect(revalidated).toBe(true);
   });
 
-  // Sin overlay: un flash con fondo difuminado en cada Ctrl+Z (doc 103: el blur
-  // cuesta compositor) y `busy` ya impide dos Undo a la vez. La protección de
-  // H1 es el pin: la inversa corta antes de cada escritura si la sesión cambió.
+  // Sin overlay: sería un flash con fondo difuminado en cada Ctrl+Z (el blur
+  // cuesta compositor) y `busy` ya impide dos Undo a la vez. La protección
+  // frente al cambio de sesión es el pin: la inversa corta antes de cada
+  // escritura si la sesión cambió.
   it('no enciende el overlay bloqueante (sin flash en cada Ctrl+Z)', async () => {
     let during: unknown = 'sin medir';
     pushUndo('Delete table T', async () => { during = useBusyStore.getState().active; });
@@ -116,7 +116,7 @@ describe('Undo atado a la sesión (doc 105, H1)', () => {
     expect(useBusyStore.getState().active).toBeNull();
   });
 
-  it('una acción que termina DESPUÉS de cambiar la sesión no deja su inversa en la pila de la nueva', () => {
+  it('una acción que termina después de cambiar la sesión no deja su inversa en la pila de la nueva', () => {
     const pin = pinSession();          // la acción empieza editando cs1…
     open('editing', 'cs2');            // …y termina con cs2 abierta
     pushUndo('Create table T', async () => {}, pin);
@@ -126,11 +126,11 @@ describe('Undo atado a la sesión (doc 105, H1)', () => {
   });
 });
 
-// Doc 105 (H3): una inversa que falla SIN haber escrito nada (p. ej. la lectura
-// previa de la cascada de «Create table» → borrar la tabla) no se pierde: la
-// entrada vuelve a la pila y el aviso pide pulsar Undo otra vez. Antes salía de
-// la pila y el «Try again» con Ctrl+Z deshacía OTRA acción.
-describe('una inversa que falla sin escribir (doc 105, H3)', () => {
+// Una inversa que falla sin haber escrito nada (p. ej. la lectura previa de la
+// cascada de «Create table» → borrar la tabla) no se pierde: la entrada vuelve
+// a la pila y el aviso pide pulsar Undo otra vez. Si saliera de la pila, otro
+// Ctrl+Z deshacería otra acción.
+describe('una inversa que falla sin escribir', () => {
   const READ = "Couldn't check what depends on this table";
   const unread = () => new NothingDoneError(READ, `${READ}: nothing was deleted. Try again.`);
 
@@ -144,7 +144,7 @@ describe('una inversa que falla sin escribir (doc 105, H3)', () => {
     expect(useUndoStore.getState().busy).toBe(false);
   });
 
-  it('reintentar deshace ESA acción', async () => {
+  it('reintentar deshace esa acción', async () => {
     let fail = true;
     const ran = vi.fn(async () => { if (fail) throw unread(); });
     pushUndo('Rename column X', async () => {});
@@ -170,12 +170,11 @@ describe('una inversa que falla sin escribir (doc 105, H3)', () => {
   });
 });
 
-// Doc 105 (ronda 3, R7-F): una inversa que falla por TRANSPORTE (timeout, red:
-// status 0) no dice si escribió. Las inversas reponen pre-imágenes (upserts,
-// borrados y membresía: idempotentes), así que re-correrla converge: la entrada
-// vuelve a la pila — antes se descartaba y «probar de nuevo» (Ctrl+Z) deshacía
-// OTRA acción.
-describe('una inversa que falla por transporte (doc 105, R7-F)', () => {
+// Una inversa que falla por transporte (timeout, red: status 0) no dice si
+// escribió. Las inversas reponen pre-imágenes (upserts, borrados y membresía:
+// idempotentes), así que re-correrla converge: la entrada vuelve a la pila. Si
+// se descartara, «probar de nuevo» (Ctrl+Z) desharía otra acción.
+describe('una inversa que falla por transporte', () => {
   const timeout = () => new ApiError("The server didn't respond within 30s — try again in a moment.", 0, null, '/api/changesets/cs1/changes/bulk');
 
   it('vuelve a la pila; el aviso dice qué no se deshizo y que se pulse Undo otra vez', async () => {
@@ -187,7 +186,7 @@ describe('una inversa que falla por transporte (doc 105, R7-F)', () => {
       .rejects.toThrow("Couldn't undo Delete table T: The server didn't respond within 30s. Press Undo to try again.");
     expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['Rename column A', 'Delete table T']);
     await useUndoStore.getState().undoLast().catch(() => {});
-    expect(ran).toEqual(['T', 'T']);                   // reintenta ESA, no «Rename column A»
+    expect(ran).toEqual(['T', 'T']);                   // reintenta esa, no «Rename column A»
   });
 
   it('un error del servidor con respuesta (409, 500) sigue descartándola', async () => {
@@ -198,11 +197,11 @@ describe('una inversa que falla por transporte (doc 105, R7-F)', () => {
   });
 });
 
-// Doc 105 (ronda 3): mientras corre una inversa, `push` ignora lo que apila la
-// PROPIA inversa (una acción del store reusada). Pero si en el medio cambió la
-// sesión, lo que se apila ya es de la nueva: no se descarta.
-describe('apilar mientras corre una inversa (doc 105, ronda 3)', () => {
-  it('lo apilado por la inversa se ignora; lo de una sesión NUEVA, no', async () => {
+// Mientras corre una inversa, `push` ignora lo que apila la propia inversa (una
+// acción del store reusada). Pero si en el medio cambió la sesión, lo que se
+// apila ya es de la nueva: no se descarta.
+describe('apilar mientras corre una inversa', () => {
+  it('lo apilado por la inversa se ignora; lo de una sesión nueva, no', async () => {
     open('editing', 'cs1');
     let release!: () => void;
     pushUndo('Delete table T', async () => {
@@ -220,11 +219,11 @@ describe('apilar mientras corre una inversa (doc 105, ronda 3)', () => {
   });
 });
 
-// Doc 105 (ronda 5, R15-H2): mientras se aplica una carga Excel la pila queda
-// vacía y CERRADA — la carga no está en ella, y una inversa vieja (o una de lo
-// editado con el popup ya cerrado) pisaría lo cargado. `clear({ until, pin })`:
-// no apila ni deshace hasta que `until` termine, mientras siga esa sesión.
-describe('clear con `until`: la pila queda cerrada mientras dura (doc 105, ronda 5)', () => {
+// Mientras se aplica una carga Excel la pila queda vacía y cerrada: la carga no
+// está en ella, y una inversa previa (o una de lo editado con el popup ya
+// cerrado) pisaría lo cargado. `clear({ until, pin })`: no apila ni deshace
+// hasta que `until` termine, mientras siga esa sesión.
+describe('clear con `until`: la pila queda cerrada mientras dura', () => {
   const labels = () => useUndoStore.getState().stack.map((e) => e.label);
   const open: (() => Promise<void>)[] = [];
   const hold = () => {
@@ -236,7 +235,7 @@ describe('clear con `until`: la pila queda cerrada mientras dura (doc 105, ronda
     return release;
   };
   beforeEach(() => { useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1', activeProjectId: 'p1' }); });
-  // Cada carga termina (el cierre sigue la VERSIÓN: uno sin terminar cerraría la pila del test siguiente).
+  // Cada carga termina (el cierre sigue la versión: uno sin terminar cerraría la pila del test siguiente).
   afterEach(async () => { for (const r of open.splice(0)) await r(); });
 
   it('vacía, no apila mientras dura y después vuelve a apilar', async () => {
@@ -260,17 +259,17 @@ describe('clear con `until`: la pila queda cerrada mientras dura (doc 105, ronda
     await expect(useUndoStore.getState().undoLast()).resolves.toBe('X');
   });
 
-  it('en OTRA sesión no rige (la carga era de la anterior)', () => {
+  it('en otra sesión no rige (la carga era de la anterior)', () => {
     hold();
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs2' });
     pushUndo('D', async () => {});
     expect(labels()).toEqual(['D']);
   });
 
-  // Doc 105 (ronda 6, R17a-6): el cierre sigue la VERSIÓN, no la época de la
-  // sesión — ir a otra y volver a la de la carga (que sigue aplicándose) no la
-  // abre: apilaría inversas de antes de lo cargado.
-  it('de vuelta a la MISMA versión mientras dura: sigue cerrada', () => {
+  // El cierre sigue la versión, no la época de la sesión: ir a otra y volver a
+  // la de la carga (que sigue aplicándose) no la abre, porque apilaría inversas
+  // previas a lo cargado.
+  it('de vuelta a la misma versión mientras dura: sigue cerrada', () => {
     hold();
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs2' });
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs1' });
@@ -278,10 +277,10 @@ describe('clear con `until`: la pila queda cerrada mientras dura (doc 105, ronda
     expect(labels()).toEqual([]);
   });
 
-  // Doc 105 (ronda 7, R18a-3): el cierre era UNA ranura — una segunda carga en
-  // OTRA versión lo reemplazaba y, de vuelta en la de la primera (que seguía
-  // aplicándose), la pila ya no estaba cerrada.
-  it('dos cargas en versiones distintas: cada versión sigue cerrada mientras dure la SUYA', async () => {
+  // El cierre se lleva por versión, no en una sola ranura: una segunda carga en
+  // otra versión no lo reemplaza y, de vuelta en la de la primera (que sigue
+  // aplicándose), la pila sigue cerrada.
+  it('dos cargas en versiones distintas: cada versión sigue cerrada mientras dure la suya', async () => {
     const first = hold();                                                                    // carga en cs1
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs2' });
     const second = hold();                                                                   // otra en cs2
@@ -296,7 +295,7 @@ describe('clear con `until`: la pila queda cerrada mientras dura (doc 105, ronda
     expect(labels()).toEqual(['I']);
   });
 
-  it('dos cargas en la MISMA versión: cerrada hasta que terminen las dos', async () => {
+  it('dos cargas en la misma versión: cerrada hasta que terminen las dos', async () => {
     const first = hold();
     const second = hold();
     await first();
@@ -307,16 +306,16 @@ describe('clear con `until`: la pila queda cerrada mientras dura (doc 105, ronda
     expect(labels()).toEqual(['K']);
   });
 
-  it('la misma versión en SOLO LECTURA no está cerrada (no se edita)', () => {
+  it('la misma versión en solo lectura no está cerrada (no se edita)', () => {
     hold();
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'readonly', changesetId: 'cs1' });
     pushUndo('F', async () => {});
     expect(labels()).toEqual(['F']);
   });
 
-  // Doc 105 (ronda 6, R17a-5): una inversa YA en vuelo al empezar la carga que
-  // falla sin escribir (o por transporte) no vuelve a la pila cerrada — antes se
-  // re-apilaba con `set` directo, saltándose el cierre.
+  // Una inversa ya en vuelo al empezar la carga que falla sin escribir (o por
+  // transporte) no vuelve a la pila cerrada: re-apilarla con `set` directo se
+  // saltaría el cierre.
   it.each([
     ['por transporte (status 0)', () => new ApiError("The server didn't respond within 30s — try again in a moment.", 0, null, '/api/x')],
     ['sin escribir nada (NothingDoneError)', () => new NothingDoneError("Couldn't read X", "Couldn't read X: nothing was deleted.")],

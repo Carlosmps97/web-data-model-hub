@@ -6,7 +6,7 @@ import {
   type SheetTemplateFilter,
 } from './sheetTemplates';
 
-describe('canEditTemplate (final review #1: dueño + compartida)', () => {
+describe('canEditTemplate (dueño + compartida)', () => {
   it.each([
     [{ owner: 'ana', shared: false }, 'ana', false, true],       // la dueña
     [{ owner: 'ana', shared: true }, 'luis', false, false],      // compartida ajena: solo la usa
@@ -19,8 +19,8 @@ describe('canEditTemplate (final review #1: dueño + compartida)', () => {
 });
 
 const T: ReportTableRow = {
-  id: 't1', physicalName: 'HM_PAGOCLIENTEDEUDOR', logicalName: 'hm pago', schema: 'bcp_ddv_sdp',
-  subjectAreas: [], columnCount: 3, relationshipCount: 0, projects: ['DDV'], description: '',
+  id: 't1', physicalName: 'HM_PAGOCLIENTEDEUDOR', logicalName: 'hm pago', schema: 'stg_pagos',
+  subjectAreas: [], columnCount: 3, relationshipCount: 0, projects: ['Ventas'], description: '',
   udpValues: { 'Clasificacion del Dato': 'No DAC', 'Dominio Principal': 'Soluciones de Pago' },
 };
 const col = (over: Partial<ReportColumnRow>): ReportColumnRow => ({
@@ -44,13 +44,13 @@ const QA = {
   ],
 };
 
-describe('templateRows (doc 95 D11)', () => {
+describe('templateRows', () => {
   it('una fila por columna: PK primero, posición 1-based, X en PK, UDP de tabla y de columna', () => {
     const rows = templateRows(QA, [T], COLS);
     expect(rows.map((r) => [r.ORDEN_FISICO, r.CAMPO_FISICO, r.PK])).toEqual([
       [1, 'CODCLAVEPARTYCLI', 'X'], [2, 'CODMES', 'X'], [3, 'TIPRANGOPOBLACION', '']]);
     expect(rows[1]).toMatchObject({
-      DATABASE: 'bcp_ddv_sdp', TABLA_FISICA: 'HM_PAGOCLIENTEDEUDOR', PARTICION: 'PART_02', PARENT_DOMAIN: 'CodMes',
+      DATABASE: 'stg_pagos', TABLA_FISICA: 'HM_PAGOCLIENTEDEUDOR', PARTICION: 'PART_02', PARENT_DOMAIN: 'CodMes',
       UDP_CLASIFICACION_DEL_DATO: 'No DAC', UDP_DOMINIO_PRINCIPAL: 'Soluciones de Pago',
     });
     expect(Object.keys(rows[0])).toEqual(QA.columns.map((c) => c.header));
@@ -87,9 +87,15 @@ describe('editor de plantillas', () => {
   it('valida como el backend', () => {
     expect(templateProblems({ name: ' ', sheetName: 'A/B', columns: [
       { header: 'X', source: 'table.schema' }, { header: 'x', source: 'table.schema' }] })).toEqual([
-      'Give the template a name.', 'The sheet name must be 1–31 characters, without : \\ / ? * [ ].',
+      'Give the template a name.',
+      "The sheet name must be 1–31 characters, without : \\ / ? * [ ], not start or end with an apostrophe, and not be History.",
       "The header 'x' is repeated."]);
     expect(templateProblems({ name: 'QA', sheetName: 'QA_MODELO', columns: [{ header: 'A', source: 'table.schema' }] })).toEqual([]);
+    // Lo que Excel (y el escritor xlsx) no admite como nombre de hoja.
+    for (const sheetName of ['History', 'history', "'Datos", "Datos'"]) {
+      expect(templateProblems({ name: 'QA', sheetName, columns: [{ header: 'A', source: 'table.schema' }] })).toHaveLength(1);
+    }
+    expect(templateProblems({ name: 'QA', sheetName: "Datos d'Hoja", columns: [{ header: 'A', source: 'table.schema' }] })).toEqual([]);
   });
   it('mover columnas y nombre de archivo', () => {
     expect(moveItem(['a', 'b', 'c'], 2, -1)).toEqual(['a', 'c', 'b']);
@@ -98,9 +104,9 @@ describe('editor de plantillas', () => {
   });
 });
 
-describe('nombre del archivo (doc 102)', () => {
+describe('nombre del archivo', () => {
   const QA = 'QA_REPORTE_{yyyy}-{MM}-{dd} {HH}{mm}{ss}';
-  it('resuelve los marcadores con la hora LOCAL (también a las 23:59)', () => {
+  it('resuelve los marcadores con la hora local (también a las 23:59)', () => {
     expect(templateFileName({ name: 'QA_MODELO', fileName: QA }, new Date(2026, 8, 28, 15, 30, 45)))
       .toBe('QA_REPORTE_2026-09-28 153045.xlsx');
     expect(templateFileName({ name: 'QA_MODELO', fileName: QA }, new Date(2026, 8, 28, 23, 59, 59)))
@@ -124,8 +130,8 @@ describe('nombre del archivo (doc 102)', () => {
     expect(templateProblems({ name: 'QA', sheetName: 'QA', fileName: 'A:B', columns: [{ header: 'A', source: 'table.schema' }] }))
       .toEqual(['The file name can\'t contain \\ / : * ? " < > |.']);
   });
-  // Doc 105 (B7): el backend cuenta el largo con `len()` de Python (code
-  // points); el front contaba unidades UTF-16 y un emoji valía 2.
+  // El backend cuenta el largo con `len()` de Python (code points); contar
+  // unidades UTF-16 haría que un emoji valga 2.
   it('el largo se cuenta en caracteres (code points), como el backend', () => {
     expect(fileNameProblem('😀'.repeat(61))).toBeNull();                 // 61 caracteres, 122 unidades UTF-16
     expect(fileNameProblem(`${'😀'.repeat(60)}${'x'.repeat(60)}`)).toBeNull();   // justo 120
@@ -134,14 +140,14 @@ describe('nombre del archivo (doc 102)', () => {
   });
 });
 
-describe('campos Subject / Diagram / Space (doc 102)', () => {
+describe('campos Subject / Diagram / Space', () => {
   it('salen en el grupo de tabla y se llenan desde la fila (separados por coma)', () => {
     const groups = sourceOptions([]);
     expect(groups[0].options.slice(0, 3).map((o) => o.value)).toEqual(['table.space', 'table.subject', 'table.diagram']);
-    const t: ReportTableRow = { ...T, spaces: ['CPYBCA'], subjectAreas: ['Despriorizado', 'Riesgos'], diagrams: ['D1'] };
+    const t: ReportTableRow = { ...T, spaces: ['COMERCIAL'], subjectAreas: ['Despriorizado', 'Riesgos'], diagrams: ['D1'] };
     const rows = templateRows({ columns: [{ header: 'SPACE', source: 'table.space' }, { header: 'SUBJECT', source: 'table.subject' },
       { header: 'DIAGRAMA', source: 'table.diagram' }] }, [t], [COLS[0]]);
-    expect(rows[0]).toEqual({ SPACE: 'CPYBCA', SUBJECT: 'Despriorizado, Riesgos', DIAGRAMA: 'D1' });
+    expect(rows[0]).toEqual({ SPACE: 'COMERCIAL', SUBJECT: 'Despriorizado, Riesgos', DIAGRAMA: 'D1' });
     expect(templateRows({ columns: [{ header: 'S', source: 'table.space' }] }, [T], [COLS[0]])[0]).toEqual({ S: '' });
   });
 });
@@ -155,7 +161,7 @@ describe('filtros de la plantilla', () => {
     expect(rowsWith()).toEqual([['CODCLAVEPARTYCLI', 1], ['CODMES', 2], ['TIPRANGOPOBLACION', 3]]);
     expect(templateRows({ columns: COLUMNS }, [T], COLS)).toHaveLength(3);
   });
-  it('sale la fila que cumple TODOS; la posición es la real en la tabla (no se renumera)', () => {
+  it('sale la fila que cumple todos; la posición es la real en la tabla (no se renumera)', () => {
     expect(rowsWith({ source: 'column.isPrimaryKey', op: 'isEmpty' })).toEqual([['TIPRANGOPOBLACION', 3]]);
     expect(rowsWith({ source: 'column.isPrimaryKey', op: 'isNotEmpty' },
       { source: 'column.parentDomain', op: 'startsWith', value: 'cod' })).toEqual([['CODCLAVEPARTYCLI', 1], ['CODMES', 2]]);
@@ -173,7 +179,7 @@ describe('filtros de la plantilla', () => {
     expect(rowsWith({ source: 'table.udp:Dominio Principal', op: 'contains', value: 'pago' })).toHaveLength(3);
     expect(rowsWith({ source: 'column.position', op: 'is', value: '2' })).toEqual([['CODMES', 2]]);
   });
-  it('un dato con varios valores (canvases, carpetas) cumple si ALGUNO cumple', () => {
+  it('un dato con varios valores (canvases, carpetas) cumple si alguno cumple', () => {
     const t: ReportTableRow = { ...T, diagrams: ['Canvas Uno', 'Canvas Dos'] };
     const rows = (f: SheetTemplateFilter) => templateRows({ columns: COLUMNS, filters: [f] }, [t], COLS).length;
     expect(rows({ source: 'table.diagram', op: 'is', value: 'canvas dos' })).toBe(3);
@@ -190,21 +196,21 @@ describe('filtros de la plantilla', () => {
     expect(compileFilters(undefined)(COLS[0], T, 1)).toBe(true);
     expect(compileFilters([])(COLS[0], T, 1)).toBe(true);
   });
-  it('los filtros se preparan UNA vez para todas las filas', () => {
+  it('los filtros se preparan una vez para todas las filas', () => {
     let reads = 0;
     const filter = { source: 'column.physicalName', op: 'isOneOf' as const, get values() { reads += 1; return ['codmes']; } };
     const many = Array.from({ length: 50 }, (_, i) => ({ ...COLS[1], id: `c${i}`, physicalName: i ? `X${i}` : 'CODMES' }));
     expect(templateRows({ columns: COLUMNS, filters: [filter] }, [T], many)).toHaveLength(1);
     expect(reads).toBe(1);
   });
-  it('operadores por dato: las banderas sólo «is marked» / «is not marked»', () => {
+  it('operadores por dato: las banderas solo «is marked» / «is not marked»', () => {
     expect(filterOps('column.isPrimaryKey')).toEqual([{ value: 'isNotEmpty', label: 'is marked' }, { value: 'isEmpty', label: 'is not marked' }]);
     expect(filterOps('column.dataType').map((o) => o.label)).toEqual(
       ['is', 'is not', 'is one of', 'contains', 'does not contain', 'starts with', 'is empty', 'is not empty']);
   });
   it('«is one of» se escribe separado por comas', () => {
     expect(splitValues(' STRING, varchar ,, ')).toEqual(['STRING', 'varchar']);
-    // Revisión: la coma DENTRO de paréntesis es parte del valor (tipos como DECIMAL(10,2)).
+    // La coma dentro de paréntesis es parte del valor (tipos como DECIMAL(10,2)).
     expect(splitValues('DECIMAL(10,2), DECIMAL(18, 2) ,STRING')).toEqual(['DECIMAL(10,2)', 'DECIMAL(18, 2)', 'STRING']);
     // …y dentro de <> (tipos complejos de Databricks).
     expect(splitValues('MAP<STRING, INT>, STRUCT<id: INT, name: STRING>, ARRAY<DECIMAL(10,2)>'))
@@ -239,7 +245,7 @@ describe('filtros de la plantilla', () => {
     expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'is', value: '😀'.repeat(200) }] })).toEqual([]);
     expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'isOneOf', values: ['😀'.repeat(201)] }] }))
       .toEqual(['A filter value can have at most 200 characters.']);
-    // Revisión: el backend pide hasta 50 valores en «is one of» (sin esto, el 422 se veía ilegible).
+    // El backend admite hasta 50 valores en «is one of» (validarlo acá evita un 422 ilegible).
     expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'isOneOf', values: Array.from({ length: 50 }, (_, i) => `T${i}`) }] }))
       .toEqual([]);
     expect(templateProblems({ ...base, filters: [{ source: 'column.dataType', op: 'isOneOf', values: Array.from({ length: 51 }, (_, i) => `T${i}`) }] }))

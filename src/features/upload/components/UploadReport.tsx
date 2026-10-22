@@ -125,7 +125,7 @@ export function TablesLedger({ rows }: { rows: UploadTableRow[] }) {
   );
 }
 
-/** Perfil usado y hojas halladas (doc 78): la cabecera del reporte. */
+/** Perfil usado y hojas halladas: la cabecera del reporte. */
 export function ReportHead({ report }: { report: UploadReport }) {
   if (!report.profile && !report.sheets?.length) return null;
   return (

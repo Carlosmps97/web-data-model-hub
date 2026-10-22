@@ -13,16 +13,16 @@ const rel = (over: Partial<Relationship> = {}): Relationship => ({
 });
 
 describe('roleNamePlan (rename vs split — unificación Erwin)', () => {
-  it('columna hija usada SOLO por este par → rename in place', () => {
+  it('columna hija usada solo por este par → rename in place', () => {
     expect(roleNamePlan(rel(), 0, [rel()])).toEqual({ kind: 'rename', columnId: 'c1' });
   });
 
-  it('columna hija compartida con OTRA relación → split', () => {
+  it('columna hija compartida con otra relación → split', () => {
     const other = rel({ id: 'r2', pairs: [{ parentColumnId: 'p9', childColumnId: 'c1' }] });
     expect(roleNamePlan(rel(), 0, [rel(), other])).toEqual({ kind: 'split', fromColumnId: 'c1' });
   });
 
-  it('columna hija repetida en OTRO par de la misma relación → split', () => {
+  it('columna hija repetida en otro par de la misma relación → split', () => {
     const r = rel({ pairs: [
       { parentColumnId: 'p1', childColumnId: 'c1' },
       { parentColumnId: 'p2', childColumnId: 'c1' },
@@ -32,7 +32,7 @@ describe('roleNamePlan (rename vs split — unificación Erwin)', () => {
 });
 
 describe('demotablePkChildren (identifying → non-identifying)', () => {
-  it('demotea la hija salvo que OTRA relación identifying la tenga como hija', () => {
+  it('demotea la hija salvo que otra relación identifying la tenga como hija', () => {
     const r = rel({ identifying: true });
     expect(demotablePkChildren(r, [])).toEqual(['c1']);
     const otherIdent = rel({ id: 'r2', identifying: true, pairs: [{ parentColumnId: 'x', childColumnId: 'c1' }] });
@@ -42,13 +42,13 @@ describe('demotablePkChildren (identifying → non-identifying)', () => {
   });
 });
 
-// ── buildKeyMapping / relationshipDrift (doc 47) ─────────────────────────────
+// ── buildKeyMapping / relationshipDrift ──────────────────────────────────────
 
 const col = (id: string, tableId: string, physicalName: string, extra: Partial<CanonicalColumn> = {}): CanonicalColumn =>
   ({ id, tableId, physicalName, logicalName: physicalName.toLowerCase(), dataType: 'BIGINT',
      typeOverridden: false, ordinal: 0, ...extra });
 
-describe('buildKeyMapping (doc 47)', () => {
+describe('buildKeyMapping', () => {
   const pks = [col('p1', 'P', 'CUSTOMER_ID'), col('p2', 'P', 'REGION_CD')];
 
   it('matchea homónimas del hijo case-insensitive y el resto lo crea', () => {
@@ -60,7 +60,7 @@ describe('buildKeyMapping (doc 47)', () => {
   });
 
   it('una columna hija no se reclama dos veces (unicidad de destinos)', () => {
-    // ambas PKs comparten nombre lógico con h1 → sólo la primera la reclama
+    // ambas PKs comparten nombre lógico con h1 → solo la primera la reclama
     const childCols = [col('h1', 'H', 'X', { logicalName: 'customer_id' })];
     const rows = buildKeyMapping(
       [col('p1', 'P', 'A', { logicalName: 'customer_id' }), col('p2', 'P', 'B', { logicalName: 'customer_id' })],
@@ -82,7 +82,7 @@ describe('buildKeyMapping (doc 47)', () => {
     expect(rows[1].target).toEqual({ kind: 'create' });
   });
 
-  it('el drop que YA matchea por nombre no se duplica en otra fila', () => {
+  it('el drop que ya matchea por nombre no se duplica en otra fila', () => {
     const childCols = [col('h1', 'H', 'REGION_CD')];
     const rows = buildKeyMapping(pks, childCols, 'h1');
     expect(rows[0].target).toEqual({ kind: 'create' });                       // p1 sin match
@@ -90,7 +90,7 @@ describe('buildKeyMapping (doc 47)', () => {
   });
 });
 
-describe('mappingToBulk (doc 47)', () => {
+describe('mappingToBulk', () => {
   const parent1 = col('p1', 'P', 'CUSTOMER_ID', {
     parentDomainId: 'domA', description: 'Id del cliente', udpValues: { u1: 'oro' } });
   const parent2 = col('p2', 'P', 'REGION_CD');
@@ -105,7 +105,7 @@ describe('mappingToBulk (doc 47)', () => {
     { parentCol: parent2, target: { kind: 'existing', col: existing }, inherit: true },
   ];
 
-  it('identifying + inherit: crea con metadata del padre; doc 94: la PK nueva entra tras la última PK y la no-PK se corre en el MISMO lote', () => {
+  it('identifying + inherit: crea con metadata del padre; la PK nueva entra tras la última PK y la no-PK se corre en el mismo lote', () => {
     const { changes, createdCols, relationship } = mappingToBulk({ ...base, identifying: true, rows, childCols: childColsBulk });
     expect(createdCols).toHaveLength(1);
     const nueva = createdCols[0];
@@ -118,7 +118,7 @@ describe('mappingToBulk (doc 47)', () => {
     // la existente: gana FK, conserva su ordinal (ya era PK), hereda metadata del padre
     const upd = changes.find((c) => c.entityId === 'h1')!.payload as unknown as CanonicalColumn;
     expect(upd).toMatchObject({ isForeignKey: true, isPrimaryKey: true, ordinal: 0, dataType: 'BIGINT' });
-    // la no-PK se corre (orden único: REGION_CD · CUSTOMER_ID · AMOUNT) — una sola vez, doc completo
+    // la no-PK se corre (orden único: REGION_CD · CUSTOMER_ID · AMOUNT) — una sola vez, documento completo
     const shifted = changes.filter((c) => c.entityId === 'h2');
     expect(shifted).toHaveLength(1);
     expect(shifted[0].payload).toMatchObject({ physicalName: 'AMOUNT', ordinal: 2 });
@@ -130,7 +130,7 @@ describe('mappingToBulk (doc 47)', () => {
     ]);
   });
 
-  it('non-identifying + inherit=No: la nueva queda FK nullable en blanco; la PK existente del hijo CONSERVA su PK', () => {
+  it('non-identifying + inherit=No: la nueva queda FK nullable en blanco; la PK existente del hijo conserva su PK', () => {
     const rowsNo = rows.map((r) => ({ ...r, inherit: false }));
     const { changes, createdCols } = mappingToBulk({ ...base, identifying: false, rows: rowsNo, childCols: childColsBulk });
     expect(createdCols[0]).toMatchObject({ isForeignKey: true, isPrimaryKey: false, isNullable: true, ordinal: 2 });
@@ -154,7 +154,7 @@ describe('mappingToBulk (doc 47)', () => {
     ]);
   });
 
-  it('doc 94: identifying que PROMUEVE una no-PK existente: sube al bloque de PK (un solo cambio por columna)', () => {
+  it('identifying que promueve una no-PK existente: sube al bloque de PK (un solo cambio por columna)', () => {
     const child = [col('k', 'H', 'K', { isPrimaryKey: true }), col('a', 'H', 'A', { ordinal: 1 }), col('b', 'H', 'B', { ordinal: 2 })];
     const { changes } = mappingToBulk({
       ...base, identifying: true, childCols: child,
@@ -166,7 +166,7 @@ describe('mappingToBulk (doc 47)', () => {
     expect(changes.filter((c) => c.entityId === 'b')).toHaveLength(1);
   });
 
-  it('inherit POR FILA: una fila en blanco y otra heredando en el MISMO lote', () => {
+  it('inherit por fila: una fila en blanco y otra heredando en el mismo lote', () => {
     const mixed: MappingResolution[] = [
       { parentCol: parent2, target: { kind: 'create', id: 'n4', logicalName: 'region_cd', physicalName: 'REGION_CD' }, inherit: false },
       { parentCol: parent1, target: { kind: 'existing', col: existing }, inherit: true },
@@ -174,12 +174,12 @@ describe('mappingToBulk (doc 47)', () => {
     const { changes, createdCols } = mappingToBulk({ ...base, identifying: false, rows: mixed, childCols: childColsBulk });
     expect(createdCols[0].description).toBeUndefined();                     // fila 1: sin herencia
     const upd = changes.find((c) => c.entityId === 'h1')!.payload as unknown as CanonicalColumn;
-    expect(upd).toMatchObject({                                             // fila 2: hereda TODO del padre
+    expect(upd).toMatchObject({                                             // fila 2: hereda del padre todos los campos
       parentDomainId: 'domA', description: 'Id del cliente', udpValues: { u1: 'oro' },
     });
   });
 
-  it('existente con role name: el update RENOMBRA la columna y el par lleva roleName', () => {
+  it('existente con role name: el update renombra la columna y el par lleva roleName', () => {
     const rowsRen: MappingResolution[] = [{
       parentCol: parent1, roleName: 'region venta', inherit: false,
       target: { kind: 'existing', col: existing, rename: { logicalName: 'region venta', physicalName: 'REGION_VENTA' } },
@@ -191,7 +191,7 @@ describe('mappingToBulk (doc 47)', () => {
   });
 });
 
-describe('mappingToBulk · frases de relación (doc 98)', () => {
+describe('mappingToBulk · frases de relación', () => {
   const parent = col('p1', 'P', 'CUSTOMER_ID', { isPrimaryKey: true });
   const child = col('h1', 'H', 'CUSTOMER_ID');
   const input = {
@@ -220,14 +220,14 @@ describe('mappingToBulk · frases de relación (doc 98)', () => {
     expect('childToParentPhrase' in relationship).toBe(false);
   });
 
-  it('sin frases: la relación sale como siempre, sin llaves nuevas', () => {
+  it('sin frases: la relación sale sin las llaves de frase', () => {
     const { relationship } = mappingToBulk(input);
     expect('parentToChildPhrase' in relationship).toBe(false);
     expect('childToParentPhrase' in relationship).toBe(false);
   });
 });
 
-describe('syncMappingInput (doc 98 — «Sync with parent key» re-emite la relación)', () => {
+describe('syncMappingInput («Sync with parent key» re-emite la relación)', () => {
   const parent = col('p1', 'P', 'CUSTOMER_ID', { isPrimaryKey: true });
   const child = col('h1', 'H', 'CUSTOMER_ID');
   const rows: MappingResolution[] = [
@@ -240,7 +240,7 @@ describe('syncMappingInput (doc 98 — «Sync with parent key» re-emite la rela
     parentToChildPhrase: 'Cliente tiene', childToParentPhrase: 'pertenece a un Cliente',
   };
 
-  it('todo lo que vive a nivel de RELACIÓN sale intacto; solo cambian los pares', () => {
+  it('todo lo que vive a nivel de relación sale intacto; solo cambian los pares', () => {
     const { relationship } = mappingToBulk(syncMappingInput(existing, rows, [child]));
     expect(relationship).toEqual({
       id: 'r7', parentTableId: 'P', childTableId: 'H',
@@ -260,7 +260,7 @@ describe('syncMappingInput (doc 98 — «Sync with parent key» re-emite la rela
   });
 });
 
-describe('relationshipDrift (doc 47)', () => {
+describe('relationshipDrift', () => {
   const relDrift: Relationship = {
     id: 'r1', parentTableId: 'P', childTableId: 'H',
     pairs: [{ parentColumnId: 'p1', childColumnId: 'h1' }],
@@ -272,7 +272,7 @@ describe('relationshipDrift (doc 47)', () => {
   it('missing: PK del padre sin par', () => {
     expect(relationshipDrift(relDrift, ['p1', 'p2'])).toEqual({ missing: ['p2'], extra: [] });
   });
-  it('extra: par cuya columna padre ya no es PK', () => {
+  it('extra: par cuya columna padre no es PK', () => {
     expect(relationshipDrift(relDrift, ['pX'])).toEqual({ missing: ['pX'], extra: ['p1'] });
   });
 });

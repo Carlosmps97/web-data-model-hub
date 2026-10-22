@@ -1,26 +1,26 @@
 /**
- * VersionToolsModal (doc 65) — popup "Version tools" del Home (caja Versions):
+ * VersionToolsModal: popup "Version tools" del Home (caja Versions):
  *
- *   · Compare versions — diferencias NETAS entre DOS versiones publicadas
+ *   · Compare versions: diferencias netas entre dos versiones publicadas
  *     (`GET /api/versions/compare`): conteos por verbo, buckets por tipo de
- *     entidad y, por fila, el diff de campos antes→después BAJO DEMANDA
- *     (`POST /api/versions/compare/details`, shape doc 31 — se reusa el
- *     renderer del popup de revisión). Aviso ámbar si el rango incluye
- *     entidades irreconstruibles (publicadas antes de las before-images).
- *   · Version details — cabecera completa de UNA versión: owner, revisores y
+ *     entidad y, por fila, el diff de campos antes→después bajo demanda
+ *     (`POST /api/versions/compare/details`, con la misma forma que el detalle
+ *     del popup de revisión, cuyo renderer se reusa). Aviso ámbar si el rango
+ *     incluye entidades irreconstruibles (publicadas sin before-images).
+ *   · Version details: cabecera completa de una versión: dueño, revisores y
  *     sus decisiones (fecha + nota), fechas clave, procedencia de restauración
- *     y comentarios, vía `GET /api/changesets/{id}`. Doc 70: botón «Open in
- *     canvas» — una versión PUBLICADA abre el Model en modo visor con el
- *     changeset virtual `asof:<versionId>` (snapshot exacto reconstruido del
- *     ledger: producción + inverso de las versiones posteriores); la producción
- *     actual abre el visor normal; un draft/request abre su overlay en visor.
+ *     y comentarios, vía `GET /api/changesets/{id}`. Botón «Open in canvas»:
+ *     una versión publicada abre el Model en modo visor con el changeset
+ *     virtual `asof:<versionId>` (snapshot exacto reconstruido del ledger:
+ *     producción + inverso de las versiones posteriores); la producción actual
+ *     abre el visor normal; un draft/request abre su overlay en visor.
  *
- * Doc 104: Details también ADMINISTRA un draft — «Transfer» (pasa el
- * ownership a otro usuario que edita modelos; la versión recuerda quién la
- * inició) y «Delete» (lo elimina con sus cambios; producción no cambia). Los
- * ve su dueño o un administrador; sólo sobre drafts (en revisión: retirar
- * primero; publicadas: nunca). El resto del popup sigue siendo de lectura
- * (el Restore vive en la fila de la caja Versions).
+ * Details también administra un draft: «Transfer» (pasa la propiedad a otro
+ * usuario que edita modelos; la versión registra quién la inició) y «Delete»
+ * (lo elimina con sus cambios; producción no cambia). Los ve su dueño o un
+ * administrador; solo sobre drafts (en revisión: retirar primero; publicadas:
+ * nunca). El resto del popup es de solo lectura (el Restore vive en la fila de
+ * la caja Versions).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -91,20 +91,20 @@ export default function VersionToolsModal({
   projects: Project[];
   initialTab?: Tab;
   initialVersionId?: string | null;
-  /** Doc 75: proyecto preseleccionado (el de la fila que abrió el popup). */
+  /** Proyecto preseleccionado (el de la fila que abrió el popup). */
   initialProjectId?: string | null;
   onClose: () => void;
-  /** Doc 104: una versión se transfirió o eliminó — el Home recarga la lista. */
+  /** Una versión se transfirió o eliminó: el Home recarga la lista. */
   onChanged?: () => void;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
-  // Doc 75: las versiones son por proyecto — el selector acota Compare y Details.
+  // Las versiones son por proyecto: el selector acota Compare y Details.
   const sortedProjects = useMemo(() => sortProjects(projects), [projects]);
   const [projectId, setProjectId] = useState<string>(() =>
     initialProjectId
     ?? versions.find((v) => v.id === initialVersionId)?.projectId
     ?? sortedProjects[0]?.id ?? '');
-  // Doc 104: versiones que ESTE popup vio eliminarse (acá o por un 404): salen
+  // Versiones que este popup vio eliminarse (acá o por un 404): salen
   // de la lista al instante, sin esperar la recarga del Home.
   const [goneIds, setGoneIds] = useState<ReadonlySet<string>>(() => new Set());
   const markGone = (id: string) => setGoneIds((s) => (s.has(id) ? s : new Set(s).add(id)));
@@ -114,10 +114,10 @@ export default function VersionToolsModal({
   const published = useMemo(() => projectMeta(projectVersions, null)[projectId]?.productionRow ?? null, [projectVersions, projectId]);
   const navigate = useNavigate();
   const openModel = useSessionStore((s) => s.openModel);
-  // Doc 70 §12: quién puede abrir qué versión en el canvas (espejo del backend).
+  // Quién puede abrir qué versión en el canvas (espejo del backend).
   const me = useAuthStore((s) => s.user?.username ?? null);
-  // Doc 105 (F5): se suscribe a los PERMISOS (cambian con `refreshMe`): `s.has`
-  // es siempre la misma función y el popup no se enteraba de los nuevos.
+  // Se suscribe a los permisos (cambian con `refreshMe`): `s.has` es siempre la
+  // misma función y el popup no se enteraría de los cambios.
   const perms = useAuthStore((s) => s.user?.permissions);
   const has = (perm: string) => Boolean(perms?.[perm]);
 
@@ -136,7 +136,7 @@ export default function VersionToolsModal({
     return users.find((u) => u.id === id)?.initials ?? id.slice(0, 2).toUpperCase();
   };
 
-  // ── Compare: solo versiones PUBLICADAS, en orden cronológico ──────────────
+  // ── Compare: solo versiones publicadas, en orden cronológico ──────────────
   const publishedRows = useMemo(
     () => projectVersions
       .filter((v) => v.status === 'approved' && !!v.appliedAt)
@@ -174,13 +174,13 @@ export default function VersionToolsModal({
     }
   };
 
-  // Doc 84 C1: el detalle de campos sale del rango comparado, bajo demanda
+  // El detalle de campos sale del rango comparado, bajo demanda
   // (mismo explorer que el popup de revisión).
   const loadCompareDetails = useCallback(
     (items: DetailRef[]) => (cmp ? compareVersionDetails(cmp.from.id, cmp.to.id, items) : Promise.resolve({ items: [] })),
     [cmp],
   );
-  // Doc 84 C2: atribución por entidad — la ÚLTIMA versión del rango que la
+  // Atribución por entidad: la última versión del rango que la
   // tocó (etiqueta, autor y fecha de publicación), del ledger compuesto.
   const compareAttribution = useCallback((sel: TreeSelection) => {
     const bucket = cmp?.collections[sel.collection];
@@ -207,7 +207,7 @@ export default function VersionToolsModal({
   const [selId, setSelId] = useState<string>(
     initialVersionId ?? published?.id ?? detailRows[0]?.id ?? '',
   );
-  // Cambiar de proyecto re-apunta los selectores a las versiones de ESE proyecto.
+  // Cambiar de proyecto re-apunta los selectores a las versiones de ese proyecto.
   const pickProject = (pid: string) => {
     setProjectId(pid);
     const rows = versions.filter((v) => v.projectId === pid && !goneIds.has(v.id));
@@ -221,14 +221,14 @@ export default function VersionToolsModal({
   };
   const [detail, setDetail] = useState<ChangesetDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  // Doc 104: re-leer la versión tras transferirla (o si cambió por fuera).
+  // Re-leer la versión tras transferirla (o si se modificó por fuera).
   const [detailTick, setDetailTick] = useState(0);
-  // La versión que se está transfiriendo: el diálogo queda ligado a ELLA (no
+  // La versión que se está transfiriendo: el diálogo queda ligado a ella (no
   // al detalle, que se recarga), así un error no lo cierra ni lo re-apunta.
   const [transferFor, setTransferFor] = useState<ChangesetDetail | null>(null);
-  // Doc 105 (F6): con el confirm de Delete encima, el popup queda inerte (como
-  // con el de transferencia) y, al cerrarse, re-renderiza: el efecto de abajo
-  // le devuelve el foco (antes Cancel lo dejaba en <body>).
+  // Con el confirm de Delete encima, el popup queda inerte (como con el de
+  // transferencia) y, al cerrarse, re-renderiza: el efecto de abajo le devuelve
+  // el foco (si no, Cancel lo dejaría en <body>).
   const [confirming, setConfirming] = useState(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
 
@@ -243,7 +243,7 @@ export default function VersionToolsModal({
     box.focus();
   });
 
-  // Doc 104: si la versión elegida desaparece de la lista (se eliminó) o no
+  // Si la versión elegida desaparece de la lista (se eliminó) o no
   // hay ninguna elegida, el selector va a la producción o a la más reciente.
   useEffect(() => {
     if (detailRows.some((v) => v.id === selId)) return;
@@ -272,15 +272,15 @@ export default function VersionToolsModal({
   const isProduction = published?.id === selId;
   const isPublished = detail?.status === 'approved' && !!detail?.appliedAt;
   const canOpen = !!detail && canOpenVersion(detail, me, has);
-  // Doc 104: administrar (transferir / eliminar) — dueño que edita o admin;
-  // una publicada es historia: ni se ofrece.
+  // Administrar (transferir / eliminar): dueño que edita o admin; una versión
+  // publicada es historia y no se ofrece.
   const canManage = !!detail && detail.status !== 'approved' && canManageVersion(detail, me, has);
   const transferBlock = detail ? versionActionBlock(detail, 'transfer') : null;
   const deleteBlock = detail ? versionActionBlock(detail, 'delete') : null;
   const starter = detail ? showStartedBy(detail) : null;
 
-  /** La versión cambió por fuera (otra sesión la envió, transfirió o
-   *  eliminó): recarga la lista del Home y — si sigue existiendo — el detalle
+  /** La versión se modificó por fuera (otra sesión la envió, transfirió o
+   *  eliminó): recarga la lista del Home y, si sigue existiendo, el detalle
    *  (una eliminada sale sola del selector: releerla daría otro 404). */
   const refreshAll = (status?: number) => {
     onChanged?.();
@@ -335,7 +335,7 @@ export default function VersionToolsModal({
     }
   };
 
-  /** Doc 70: abre la versión en el canvas, SIEMPRE en modo visor. Publicada
+  /** Abre la versión en el canvas, siempre en modo visor. Publicada
    *  pasada → snapshot `asof:` (el backend compone el inverso de las versiones
    *  posteriores); producción → visor normal; draft/request → su overlay. */
   const openInCanvas = () => {
@@ -369,7 +369,7 @@ export default function VersionToolsModal({
 
   return (
     <div className="dmh-rvd-overlay" role="presentation">
-      {/* Doc 104: con el diálogo de transferencia abierto, el popup queda
+      {/* Con el diálogo de transferencia abierto, el popup queda
           inerte (ni foco ni clics): no se puede cambiar la versión por detrás. */}
       <div className="dmh-vt-modal" role="dialog" aria-modal="true" aria-label="Version tools"
         ref={boxRef} tabIndex={-1} inert={transferFor || confirming ? true : undefined}
@@ -409,7 +409,7 @@ export default function VersionToolsModal({
             Version details
           </button>
           <span style={{ flex: 1 }} />
-          {/* Doc 75: versiones por proyecto. */}
+          {/* Versiones por proyecto. */}
           <div className="dmh-vt-picker dmh-vt-project">
             <label htmlFor="dmh-vt-project">Project</label>
             <select id="dmh-vt-project" value={projectId} onChange={(e) => pickProject(e.target.value)}>
@@ -560,7 +560,7 @@ export default function VersionToolsModal({
                     <span style={{ flex: 1 }} />
                     {canManage && (
                       <span className="dmh-vt-manage">
-                        {/* Doc 105 (A5-o5): deshabilitado, el motivo va también en
+                        {/* Deshabilitado, el motivo va también en
                             el nombre accesible (patrón de «View in canvas» en Review). */}
                         <button
                           type="button"
@@ -626,7 +626,7 @@ export default function VersionToolsModal({
                       />
                       {userName(detail.owner)}
                     </span>
-                    {/* Doc 104: la versión cambió de manos — quién la inició. */}
+                    {/* La versión fue transferida: se muestra quién la inició. */}
                     {starter && (
                       <>
                         <span className="dmh-vt-glabel">Started by</span>
@@ -723,8 +723,8 @@ export default function VersionToolsModal({
           // Un 404 = otra sesión la eliminó: sale de la lista al instante,
           // como al eliminarla acá (la recarga del Home puede demorar).
           onStale={(status) => { if (status === 404) markGone(transferFor.id); refreshAll(status); }}
-          // Si el botón que lo abrió ya no está (el detalle se recargó), el
-          // foco vuelve al Transfer nuevo o, si no hay, a este popup.
+          // Si el botón que lo abrió dejó de existir (el detalle se recargó), el
+          // foco vuelve al Transfer recreado o, si no hay, a este popup.
           returnFocus={() => boxRef.current?.querySelector<HTMLElement>('[data-vt-action="transfer"]:not(:disabled)')
             ?? boxRef.current}
           onTransferred={(updated) => {

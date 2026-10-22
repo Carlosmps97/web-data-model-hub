@@ -1,23 +1,23 @@
-// Filas del reporte tabular (doc 70 §4.2) — funciones PURAS compartidas por la
-// grilla en pantalla y las hojas del Excel: la metadata COMPLETA de tablas y
-// columnas, por separado (`tableSheetRow` / `columnSheetRow`) o unida en una
-// fila por columna con la metadata de su tabla (`joinedSheetRow`). Los UDPs
-// salen como columnas dinámicas «UDP · <def>» (unión de claves, orden estable).
+// Filas del reporte tabular — funciones puras compartidas por la grilla en
+// pantalla y las hojas del Excel: la metadata completa de tablas y columnas,
+// por separado (`tableSheetRow` / `columnSheetRow`) o unida en una fila por
+// columna con la metadata de su tabla (`joinedSheetRow`). Los UDPs salen como
+// columnas dinámicas «UDP · <def>» (unión de claves, orden estable).
 import type { RelationshipRow } from '@/services/reporting.service';
 import type { ReportColumnRow, ReportTableRow, ReportViewRow } from '@/services/reporting.service';
 
 export type SheetRow = Record<string, string | number>;
 
-/** Tope de tablas por pedido de COLUMNAS (doc 102: los ids van en el CUERPO;
- *  el lote acota el tamaño de cada respuesta y permite pedirlos en paralelo);
- *  lotes más grandes se parten con `chunk`. */
+/** Tope de tablas por pedido de columnas (los ids van en el cuerpo; el lote
+ *  acota el tamaño de cada respuesta y permite pedirlos en paralelo); lotes
+ *  más grandes se parten con `chunk`. */
 export const COLUMN_BATCH = 300;
 
-/** Doc 102: tope de ids por pedido de VISTAS (van en el cuerpo; el backend
- *  acepta hasta 5 000). */
+/** Tope de ids por pedido de vistas (van en el cuerpo; el backend acepta hasta
+ *  5 000). */
 export const VIEW_BATCH = 2000;
 
-/** Doc 105 (A3-o1): tope de ids por pedido de RELACIONES (el backend acepta 1..300). */
+/** Tope de ids por pedido de relaciones (el backend acepta 1..300). */
 export const RELATIONSHIP_BATCH = 300;
 
 const yn = (b: boolean | null | undefined): string => (b ? 'Y' : '');
@@ -32,13 +32,13 @@ export function udpKeysOf(maps: Array<Record<string, string> | undefined>): stri
 const udpCells = (values: Record<string, string> | undefined, keys: string[]): SheetRow =>
   Object.fromEntries(keys.map((k) => [`UDP · ${k}`, values?.[k] ?? '']));
 
-/** Fila de la hoja Tables: toda la metadata de la tabla (docs 68/69 incl.). */
+/** Fila de la hoja Tables: toda la metadata de la tabla (incluidos overrides y facetas lógico/físico). */
 export function tableSheetRow(t: ReportTableRow, udpKeys: string[]): SheetRow {
   return {
     Table: t.physicalName,
     'Logical name': t.logicalName,
     Schema: t.schema,
-    Space: (t.spaces ?? []).join(', '),   // doc 102: carpeta raíz (sub-proyecto)
+    Space: (t.spaces ?? []).join(', '),   // carpeta raíz (sub-proyecto)
     'Subject areas': t.subjectAreas.join(', '),
     Diagrams: (t.diagrams ?? []).join(', '),
     '#Columns': t.columnCount,
@@ -53,7 +53,7 @@ export function tableSheetRow(t: ReportTableRow, udpKeys: string[]): SheetRow {
   };
 }
 
-/** Fila de la hoja Columns: toda la metadata de la columna (docs 19/68/69). */
+/** Fila de la hoja Columns: toda la metadata de la columna (incluidos overrides y facetas lógico/físico). */
 export function columnSheetRow(c: ReportColumnRow, table: ReportTableRow | undefined, udpKeys: string[]): SheetRow {
   return {
     Table: table?.physicalName ?? c.tableId,
@@ -75,13 +75,13 @@ export function columnSheetRow(c: ReportColumnRow, table: ReportTableRow | undef
     'Physical only': yn(c.physicalOnly),
     ...udpCells(c.udpValues, udpKeys),
     Definition: str(c.description),
-    'Physical comment': str(c.physicalDescription),   // doc 85
+    'Physical comment': str(c.physicalDescription),
     'Column ID': str(c.id),
     'Table ID': c.tableId,
   };
 }
 
-/** Fila UNIDA (Tables + Columns): la metadata de la tabla («Table · …») seguida
+/** Fila unida (Tables + Columns): la metadata de la tabla («Table · …») seguida
  *  de la de la columna («Column · …»), una fila por columna. */
 export function joinedSheetRow(
   c: ReportColumnRow, table: ReportTableRow | undefined,
@@ -124,16 +124,16 @@ export function chunk<T>(xs: T[], n: number): T[][] {
 }
 
 /** Orden de presentación de las columnas: tabla (físico) y, dentro de ella,
- *  el orden único (doc 94: PK primero y cada bloque por ordinal). */
+ *  el orden único (PK primero y cada bloque por ordinal). */
 export function sortColumnRows(rows: ReportColumnRow[], tableName: (id: string) => string): ReportColumnRow[] {
   return [...rows].sort((a, b) =>
     tableName(a.tableId).localeCompare(tableName(b.tableId)) || a.tableId.localeCompare(b.tableId)
     || Number(!!b.isPrimaryKey) - Number(!!a.isPrimaryKey) || a.ordinal - b.ordinal);
 }
 
-/** Fila de la hoja «Views» del export tabular. Doc 96 D6: sin «Mode» — la
- *  User-Defined SQL es texto informativo y va en su propia columna; el DDL de
- *  la vista sale de sus columnas. */
+/** Fila de la hoja «Views» del export tabular, sin «Mode»: la User-Defined SQL
+ *  es texto informativo y va en su propia columna; el DDL de la vista sale de
+ *  sus columnas. */
 export function viewSheetRow(v: ReportViewRow): SheetRow {
   return {
     View: v.name,
@@ -141,16 +141,16 @@ export function viewSheetRow(v: ReportViewRow): SheetRow {
     'Source tables': v.sourceTables.join(', '),
     '#Columns': v.columns.length,
     'On canvas': v.showOnCanvas ? 'Y' : '',
-    Canvases: (v.canvases ?? []).join(', '),   // doc 70: membresía por canvas
+    Canvases: (v.canvases ?? []).join(', '),   // membresía por canvas
     Description: v.description ?? '',
     SQL: v.sql ?? '',
     'User-Defined SQL': v.customSql ?? '',
   };
 }
 
-/** Fila de la hoja «Relationships»: detalle POR PAR de columnas (v2, doc 19 —
- *  una FK compuesta emite una fila por par, con «Pair i/n»). Doc 98: las
- *  frases de la relación van junto a sus otros datos de relación. */
+/** Fila de la hoja «Relationships»: detalle por par de columnas (una FK
+ *  compuesta emite una fila por par, con «Pair i/n»). Las frases de la
+ *  relación van junto a sus otros datos de relación. */
 export function relationshipSheetRow(r: RelationshipRow): SheetRow {
   return {
     'Parent schema': str(r.parentSchema),

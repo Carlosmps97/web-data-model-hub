@@ -1,10 +1,10 @@
 /**
- * AffectedTable — lista de afectados compartida (doc 95 D4): cabecera fija,
+ * AffectedTable: lista de afectados compartida, con cabecera fija,
  * buscador, filas virtualizadas (decenas de miles sin congelar el navegador) y
  * pie con el conteo. Presentacional: el padre decide si filtra en memoria
  * (`filterRows`) o pagina en el servidor (`total` + `onEndReached`).
  *
- * Doc 96 D7: los bordes del encabezado se arrastran — una columna crece y la
+ * Los bordes del encabezado se arrastran: una columna crece y la
  * vecina se achica en lo mismo (el ancho total no cambia, sin scroll
  * horizontal); doble clic en el borde vuelve a los anchos declarados.
  */
@@ -28,7 +28,7 @@ export interface AffectedTableProps<T> {
   rows: T[];
   columns: AffectedColumn<T>[];
   rowKey: (row: T, index: number) => string;
-  /** Total real cuando `rows` es una página o un filtro (default: `rows.length`). */
+  /** Total real cuando `rows` es una página o un filtro (por defecto, `rows.length`). */
   total?: number;
   query?: string;
   onQuery?: (q: string) => void;
@@ -63,7 +63,7 @@ export default function AffectedTable<T>({
     e.stopPropagation();
     const el = e.currentTarget;
     el.setPointerCapture(e.pointerId);
-    // Solo las columnas actuales (si el popup cambió sus columnas, sobran refs viejas).
+    // Solo las columnas actuales (si el popup cambia sus columnas, quedan refs sobrantes).
     const start = columns.map((_, j) => headRefs.current[j]?.getBoundingClientRect().width ?? 0);
     const x0 = e.clientX;
     const move = (ev: PointerEvent) => setWidths(resizeColumns(start, i, ev.clientX - x0, MIN_COL));

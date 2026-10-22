@@ -4,7 +4,7 @@ import type { Project } from '@/types/model';
 import { sortProjects, type ProjectMeta } from '@/lib/projects';
 
 /**
- * ProjectPicker (doc 75 D8) — lista de proyectos A–Z con su producción vigente
+ * ProjectPicker: lista de proyectos A–Z con su producción vigente
  * y los drafts propios; una sola selección. Reusa el lenguaje de las tarjetas
  * del Open model (`dmh-openmodel-opt`).
  */

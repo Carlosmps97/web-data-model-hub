@@ -1,9 +1,9 @@
 /**
- * Fan-out de wires (doc 47 §6): los K edges crowfoot que salen del MISMO
- * bloque padre se reparten en la "zona de llave" (cabecera + franja PK) para
- * que las patas de gallo no se encimen. El canvas asigna slot/count al armar
- * los edges (orden por posición del hijo → menos cruces, estable);
- * CrowFootEdge calcula la Y EN VIVO con las métricas del nodo. Puro.
+ * Fan-out de wires: los K edges crowfoot que salen del mismo bloque padre se
+ * reparten en la "zona de llave" (cabecera + franja PK) para que las patas de
+ * gallo no se encimen. El canvas asigna slot/count al armar los edges (orden
+ * por posición del hijo → menos cruces, estable); CrowFootEdge calcula la Y en
+ * vivo con las métricas del nodo. Puro.
  */
 export const HEADER_H = 32;   // alto de cabecera del nodo (espejo de lodSize.ts)
 export const ROW_H = 28;      // alto de fila de columna (espejo de lodSize.ts)

@@ -9,10 +9,10 @@ import RulesEditor from './RulesEditor';
 const LEVEL_OF_ROLE: Record<SheetRole, UdpDefinition['level']> = { tables: 'table', columns: 'column' };
 
 /**
- * Una fila de la tabla de mapeos (doc 78 §8): cabecera del Excel · destino
- * (campo, uno o varios UDP de cualquier faceta, o ignorar) · valor por
- * defecto · reglas · quitar. Los problemas del servidor/locales de ESTA
- * fila se listan debajo, en rojo.
+ * Una fila de la tabla de mapeos: cabecera del Excel · destino (campo, uno o
+ * varios UDP de cualquier faceta, o ignorar) · valor por defecto · reglas ·
+ * quitar. Los problemas del servidor/locales de esta fila se listan debajo,
+ * en rojo.
  */
 export default function MappingRow({ role, mapping, catalog, udpDefs, problems, onChange, onRemove }: {
   role: SheetRole;

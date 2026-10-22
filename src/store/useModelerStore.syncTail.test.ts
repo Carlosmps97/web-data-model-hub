@@ -1,7 +1,7 @@
-// Doc 105 (ronda 3) — alta y baja de columna: después de escribir la columna
-// sincronizan las vistas espejo (best-effort) y recargan. Si la sesión cambió
-// durante esa sincronización, lo que sigue (el aviso «Column also … view(s)»,
-// la recarga y el tick del Explorer) ya no es de la sesión en pantalla: se corta.
+// Alta y baja de columna: después de escribir la columna sincronizan las vistas
+// espejo (best-effort) y recargan. Si la sesión cambia durante esa
+// sincronización, lo que sigue (el aviso «Column also … view(s)», la recarga y
+// el tick del Explorer) no corresponde a la sesión en pantalla: se corta.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -24,7 +24,7 @@ import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 
 const COD = { id: 'c1', tableId: 't1', physicalName: 'COD', logicalName: 'cod', dataType: 'STRING', typeOverridden: false, ordinal: 0 };
-// Vista espejo de t1: refleja TODAS sus columnas.
+// Vista espejo de t1: refleja todas sus columnas.
 const MIRROR = { id: 'v1', name: 'VU_T1', tableId: 't1', sourceTableIds: ['t1'], sources: [{ tableId: 't1', column: 'COD', outputAlias: 'COD' }] };
 const DIA = {
   subjectArea: { id: 'sa1', projectId: 'p1', name: 'C', tableIds: ['t1'], layout: {} },
@@ -44,8 +44,8 @@ beforeEach(() => {
   vi.mocked(mod.loadDiagram).mockResolvedValue(structuredClone(DIA) as never);
 });
 
-describe('la cola de alta/baja de columna es de su sesión (doc 105, ronda 3)', () => {
-  it('alta: si la sesión cambió mientras sincronizaba vistas, no avisa ni recarga', async () => {
+describe('la cola de alta/baja de columna es de su sesión', () => {
+  it('alta: si la sesión cambia mientras sincroniza vistas, no avisa ni recarga', async () => {
     switchDuringSync();
     await useModelerStore.getState().addColumn('t1', { logicalName: 'NUEVA', mode: 'physical' });
     expect(viewsSvc.updateView).toHaveBeenCalledTimes(1);
@@ -61,7 +61,7 @@ describe('la cola de alta/baja de columna es de su sesión (doc 105, ronda 3)', 
     expect(mod.loadDiagram).not.toHaveBeenCalled();
   });
 
-  it('sin cambio de sesión, avisa y recarga como siempre', async () => {
+  it('sin cambio de sesión, avisa y recarga', async () => {
     vi.mocked(viewsSvc.updateView).mockResolvedValue({} as never);
     await useModelerStore.getState().addColumn('t1', { logicalName: 'NUEVA', mode: 'physical' });
     expect(toast.success).toHaveBeenCalledWith('Column also added to 1 mirror view(s)');

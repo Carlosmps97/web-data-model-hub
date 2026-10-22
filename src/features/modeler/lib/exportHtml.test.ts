@@ -16,7 +16,7 @@ describe('jsStringLiteral', () => {
     const lit = jsStringLiteral(src);
     expect(new Function(`return ${lit}`)()).toBe(src);
   });
-  it('nunca deja `</script` ni `<!--` crudos (romperian el parser HTML)', () => {
+  it('nunca deja `</script` ni `<!--` crudos (romperían el parser HTML)', () => {
     const lit = jsStringLiteral('a</script>b<!--c');
     expect(lit.includes('</script')).toBe(false);
     expect(lit.includes('<!--')).toBe(false);
@@ -27,7 +27,7 @@ describe('buildInteractiveHtml', () => {
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="80"><rect/></svg>';
   const out = buildInteractiveHtml({ title: 'My <Canvas> & "co"', svgMarkup: svg });
 
-  it('es un documento HTML completo con el titulo escapado', () => {
+  it('es un documento HTML completo con el título escapado', () => {
     expect(out.toLowerCase().startsWith('<!doctype html>')).toBe(true);
     expect(out).toContain('<title>My &lt;Canvas&gt; &amp; &quot;co&quot;</title>');
     expect(out).not.toContain('<title>My <Canvas>');
@@ -45,7 +45,7 @@ describe('buildInteractiveHtml', () => {
   });
 
   it('no referencia recursos externos (funciona offline)', () => {
-    // El unico http permitido es el xmlns DENTRO del payload SVG del usuario.
+    // El único http permitido es el xmlns dentro del payload SVG del usuario.
     const template = buildInteractiveHtml({ title: 't', svgMarkup: '<svg/>' });
     expect(/https?:\/\//.test(template.replace(jsStringLiteral('<svg/>'), ''))).toBe(false);
   });

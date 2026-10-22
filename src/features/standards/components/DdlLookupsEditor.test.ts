@@ -1,6 +1,6 @@
-// Lookups & Functions sin DOM (hooks de mentira: ver
-// reporting/components/fakeReact.testutil). Doc 105: «Save changes» se
-// habilitaba SIN cambios y registraba una versión vacía.
+// Lookups & Functions sin DOM (hooks simulados: ver
+// reporting/components/fakeReact.testutil). «Save changes» solo se habilita con
+// un cambio real; sin cambios no se registra una versión vacía.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import type { DdlRulesetConfig } from '../standards.service';
@@ -55,7 +55,7 @@ const type = (el: { props: Record<string, unknown> }, value: string) => (el.prop
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe('Lookups & Functions: «Save changes» sólo con un cambio real (doc 105)', () => {
+describe('Lookups & Functions: «Save changes» solo con un cambio real', () => {
   it('sin cambios (o «nada» escrito sobre un valor sin mapear) queda deshabilitado, con «No changes to apply»', async () => {
     let tree = await open();
     expect(saveBtn(tree).props.disabled).toBe(true);
@@ -78,10 +78,10 @@ describe('Lookups & Functions: «Save changes» sólo con un cambio real (doc 10
   });
 });
 
-// Doc 105: con un default, «nada» (null = no emitir) y «sin mapear» (emite el
-// default) se veían iguales —input vacío con «— nothing»— y sólo se llegaba a
-// «nada» tipeando y borrando; a «sin mapear» no se volvía nunca.
-describe('Lookups: con default, «nada» y «sin mapear» se distinguen y se eligen a propósito (doc 105)', () => {
+// Con un default, «nada» (null = no emitir) y «sin mapear» (emite el default)
+// se ven distintos (el placeholder lo dice) y cada uno se elige a propósito:
+// «Emit nothing» lleva a «nada»; «Unmap» o vaciar la celda, a «sin mapear».
+describe('Lookups: con default, «nada» y «sin mapear» se distinguen y se eligen a propósito', () => {
   const PAIS: DdlRulesetConfig = {
     lookups: { pais: { fromUdpId: 'u1', fromLevel: 'column', values: { DAC: null }, default: 'PE' } },
     functions: [],
@@ -110,7 +110,7 @@ describe('Lookups: con default, «nada» y «sin mapear» se distinguen y se eli
     expect(saveBtn(tree).props.disabled).toBe(false);
   });
 
-  it('tipear y borrar una celda la vuelve a «sin mapear» (emite el default), no a «nothing» (doc 105, R6)', async () => {
+  it('tipear y borrar una celda la vuelve a «sin mapear» (emite el default), no a «nothing»', async () => {
     let tree = await open(PAIS);
     type(cell(tree, 'No DAC'), 'X');
     tree = rerender();
@@ -120,7 +120,7 @@ describe('Lookups: con default, «nada» y «sin mapear» se distinguen y se eli
     expect(saveBtn(tree).props.disabled).toBe(true);            // lo guardado: sin cambio
   });
 
-  it('sin default no se ofrece «Emit nothing» (ya no emite nada); un valor mapeado sí se puede des-mapear', async () => {
+  it('sin default no se ofrece «Emit nothing» (sin mapear tampoco se emite nada); un valor mapeado sí se puede des-mapear', async () => {
     const tree = await open();                                    // nivel: default null, DAC → 'sha2'
     const labels = [...walk(tree)].filter((e) => e.type === 'button').map((e) => String(e.props['aria-label'] ?? ''));
     expect(labels.some((l) => l.startsWith('Emit nothing'))).toBe(false);
@@ -128,10 +128,10 @@ describe('Lookups: con default, «nada» y «sin mapear» se distinguen y se eli
   });
 });
 
-// Doc 105 (R11): vaciar la celda de un valor «stale» (ya no está en la lista del
-// UDP) le borraba la clave y la fila desaparecía mientras se editaba — el foco
-// caía a <body>. Las claves stale del config inicial siguen visibles hasta guardar.
-describe('Lookups: un valor stale vaciado sigue en la tabla hasta guardar (doc 105, R11)', () => {
+// Vaciar la celda de un valor «stale» (fuera de la lista del UDP) le borra la
+// clave, pero la fila no desaparece mientras se edita (el foco no cae a <body>):
+// las claves stale del config inicial siguen visibles hasta guardar.
+describe('Lookups: un valor stale vaciado sigue en la tabla hasta guardar', () => {
   it('vaciar su celda la des-mapea pero la fila (y el foco en su input) sigue ahí', async () => {
     const STALE: DdlRulesetConfig = {
       lookups: { pais: { fromUdpId: 'u1', fromLevel: 'column', values: { Legacy: 'X' }, default: 'PE' } }, functions: [],
@@ -145,10 +145,10 @@ describe('Lookups: un valor stale vaciado sigue en la tabla hasta guardar (doc 1
   });
 });
 
-// Doc 105 (R14): las claves stale del config inicial se buscaban sólo por el
-// NOMBRE del lookup — uno nuevo creado con el nombre de uno borrado heredaba sus filas.
-describe('Lookups: un lookup nuevo con el nombre de uno borrado no hereda sus filas stale (doc 105, R14)', () => {
-  it('borrar «nivel» y crear otro «nivel»: sólo los valores del UDP', async () => {
+// Las claves stale del config inicial se descartan al borrar el lookup: uno
+// nuevo creado con el nombre de uno borrado no hereda sus filas.
+describe('Lookups: un lookup nuevo con el nombre de uno borrado no hereda sus filas stale', () => {
+  it('borrar «nivel» y crear otro «nivel»: solo los valores del UDP', async () => {
     const GHOST: DdlRulesetConfig = {
       lookups: { nivel: { fromUdpId: 'u1', fromLevel: 'column', values: { LEGACY_1: 'x', LEGACY_2: 'y' }, default: null } }, functions: [],
     };

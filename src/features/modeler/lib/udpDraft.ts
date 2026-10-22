@@ -1,12 +1,13 @@
 /**
- * Lógica pura del guardado de UDPs por blur (doc 40).
+ * Lógica pura del guardado de UDPs por blur.
  *
- * Los inputs de texto/número/fecha de UdpAssign commitean al SALIR del campo
- * (blur) en vez de por tecla — antes cada carácter disparaba un upsert + reload
- * del diagrama y el input, atado al prop del server, perdía teclas al tipear
- * rápido. Como el reload demora, un commit posterior armado sobre el prop
- * STALE pisaría lo recién guardado en otro campo: `pending` es el overlay de
- * commits que el server todavía no refleja. En `pending`, cadena vacía = delete.
+ * Los inputs de texto/número/fecha de UdpAssign commitean al salir del campo
+ * (blur) y no por tecla: un commit por carácter dispararía un upsert + reload
+ * del diagrama por cada tecla, y el input, atado al prop del server, perdería
+ * teclas al tipear rápido. Como el reload demora, un commit posterior armado
+ * sobre el prop desactualizado pisaría lo recién guardado en otro campo:
+ * `pending` es el overlay de commits que el server no refleja aún. En
+ * `pending`, cadena vacía = delete.
  */
 
 export type UdpValues = Record<string, string>;
@@ -20,7 +21,7 @@ export function applyPending(values: UdpValues, pending: UdpValues): UdpValues {
   return eff;
 }
 
-/** Mapa siguiente tras commitear UN campo ('' elimina la key → rige el default). */
+/** Mapa siguiente tras commitear un campo ('' elimina la key → rige el default). */
 export function commitValue(base: UdpValues, id: string, v: string): UdpValues {
   const next = { ...base };
   if (v === '') delete next[id]; else next[id] = v;
@@ -36,9 +37,9 @@ export function prunePending(values: UdpValues, pending: UdpValues): UdpValues {
   return next;
 }
 
-/** Doc 112: lo que la ficha cambió respecto de cómo se abrió ('' = quitar). Se
- *  graba SÓLO eso, sobre los valores vigentes del canvas: si mientras tanto
- *  aterrizó otro guardado, la ficha abierta con los viejos no lo pisa. */
+/** Lo que la ficha modificó respecto de cómo se abrió ('' = quitar). Se graba
+ *  solo eso, sobre los valores vigentes del canvas: si mientras tanto aterrizó
+ *  otro guardado, la ficha abierta con los valores previos no lo pisa. */
 export function udpChanges(initial: UdpValues, values: UdpValues): UdpValues {
   const out: UdpValues = {};
   for (const k of new Set([...Object.keys(initial), ...Object.keys(values)])) {

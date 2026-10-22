@@ -2,7 +2,7 @@ import type { ProfileCatalog, ProfileMapping, ProfileRule, RuleSeverity, RuleTyp
 import { removeRule, ruleOf, upsertRule } from '../lib/profileDraft';
 
 /**
- * Reglas de UNA columna del perfil (doc 78 §3.5): una fila por tipo del
+ * Reglas de una columna del perfil: una fila por tipo del
  * catálogo — activar/desactivar, valor según `valueKind` y severidad.
  * `mustExist` solo se ofrece cuando el destino es un campo que lo admite.
  */

@@ -1,13 +1,13 @@
 /* ============================================================
-   Upload from Excel (doc 55) — popup de carga masiva.
-   Prefijo `up-`. Tokens de tokens.css; light-only como todo el DMH.
+   Upload from Excel — popup de carga masiva.
+   Prefijo `up-`. Tokens de tokens.css; light-only, como el resto del DMH.
    Firma visual: el "cell locator" — `Tablas · row 14 · UDP_Universal`
    en mono, como una referencia de celda de la hoja de cálculo.
    ============================================================ */
 
 .up { display: grid; gap: 14px; }
 
-/* ── Riel de pasos (codifica la secuencia REAL: Upload se habilita
+/* ── Riel de pasos (codifica la secuencia real: Upload se habilita
       recién cuando Validate pasa) ─────────────────────────────── */
 .up-steps { display: flex; align-items: center; gap: 0; padding: 2px 2px 0; }
 .up-step { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text-muted-3); white-space: nowrap; }
@@ -125,19 +125,19 @@
 .up-done-line { font-size: 12.5px; color: var(--text-body); margin-top: 3px; }
 .up-done-line + .up-done-line { margin-top: 2px; }
 
-/* ── Footer ─────────────────────────────────────────────────── */
+/* ── Pie ────────────────────────────────────────────────────── */
 .up-status { font-size: 12px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
 .up-status.is-error { color: var(--red); }
 .up-status.is-ok { color: var(--green-deep); }
 .up-status.is-warn { color: var(--amber-deep); }
 
-/* ── Perfil de carga (doc 78): fila del selector ─────────────── */
+/* ── Perfil de carga: fila del selector ──────────────────────── */
 .up-profile-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .up-profile-label { font-size: 12px; font-weight: 700; color: var(--navy); white-space: nowrap; }
 .up-profile-row .up-profile-select { min-width: 240px; }
 .up-profile-empty { font-size: 12px; color: var(--text-muted); }
 .up-profile-desc { font-size: 12px; color: var(--text-muted); margin-top: -6px; }
-/* Doc 87: destino de la carga (proyecto interno) — misma fila que el perfil */
+/* Destino de la carga (proyecto interno): misma fila que el perfil */
 .up-target-hint { font-size: 12px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 6px; }
 .up-loc.is-missing { color: var(--red); background: var(--red-tint); border-color: var(--red-border); }
 .up-report-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); }

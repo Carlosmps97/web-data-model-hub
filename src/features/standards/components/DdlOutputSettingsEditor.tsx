@@ -1,12 +1,12 @@
 /**
- * Output settings (doc 93 D1) — CÓMO se escribe todo DDL exportado del
- * proyecto y cómo se nombran sus archivos. Mismo formulario que la pestaña
- * Output del modal Export DDL, que arranca desde estos valores. Guardar
- * registra una versión de Data Standards (rollback disponible).
+ * Output settings: cómo se escribe todo DDL exportado del proyecto y cómo se
+ * nombran sus archivos. Mismo formulario que la pestaña Output del modal Export
+ * DDL, que arranca desde estos valores. Guardar registra una versión de Data
+ * Standards (rollback disponible).
  *
- * Doc 101: el proyecto elige su dialecto por default (con el que abre el modal)
- * y tiene una configuración por dialecto — Databricks y Oracle se editan en
- * pestañas; los nombres de archivo son de los dos.
+ * El proyecto elige su dialecto por default (con el que abre el modal) y tiene
+ * una configuración por dialecto: Databricks y Oracle se editan en pestañas;
+ * los nombres de archivo son de los dos.
  */
 import { useMemo, useState } from 'react';
 import { FileCode2, X } from 'lucide-react';
@@ -30,7 +30,7 @@ export default function DdlOutputSettingsEditor({ projectId, config, canEdit, on
   // Qué configuración se está editando (arranca en la del dialecto por default).
   const [shown, setShown] = useState<DdlDialect>(() => value.dialect);
   const [saving, setSaving] = useState(false);
-  // Doc 105: sin un cambio real no se guarda (antes registraba una versión vacía).
+  // Sin un cambio real no se guarda (evita registrar una versión vacía).
   const dirty = useMemo(() => outputChanged(value, config.output), [value, config.output]);
 
   const doSave = async () => {

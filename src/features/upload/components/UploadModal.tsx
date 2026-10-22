@@ -16,7 +16,7 @@ import {
 } from '../upload.service';
 import { placeUploadedObjects } from '../placeUploaded';
 import { canvasView } from '@/features/modeler/lib/canvasFocus';
-// eslint-disable-next-line no-restricted-imports -- a propósito: por el barrel de modeler sería un ciclo (Toolbar → UploadModal → modeler); ver doc/architecture.md
+// eslint-disable-next-line no-restricted-imports -- a propósito: por el barrel de modeler sería un ciclo (Toolbar → UploadModal → modeler); ver docs/02-arquitectura.md
 import { SessionChangedError, afterRevalidation, pinSession, touchesVersion, type SessionPin } from '@/features/modeler/lib/sessionGuard';
 import { needsTarget, pickTarget, targetHint } from '../lib/uploadTarget';
 import { notPlacedNotice } from '../lib/arrangeNotice';
@@ -26,29 +26,29 @@ import ProfileManagerModal from './ProfileManagerModal';
 import '../upload.css';
 
 /**
- * Popup «Upload from Excel» (doc 55 §8 · doc 78 §8). Máquina de estados:
+ * Popup «Upload from Excel». Máquina de estados:
  *   idle → parsed → validating → validated → applying → arranging → done
  *                                  ↘ failed (reporte fresco + motivo)
- * El workbook se lee CRUDO (todas las hojas) y viaja con el perfil de carga
+ * El workbook se lee crudo (todas las hojas) y viaja con el perfil de carga
  * elegido; el backend aplica el perfil. Validate hace polling del job; Upload
- * solo se habilita con 0 errores; al aplicar, el backend RE-valida, y al
- * terminar el front ubica lo nuevo y refresca el explorer. Doc 113 §1.3: ya no
- * arregla (ELK) los canvases completos — en la fase `arranging` ubica SÓLO lo
- * que entró a cada canvas, en el centro de lo que se ve si es el canvas abierto,
- * y lo marca para pintarlo encima (lo existente no se mueve).
- * Doc 105: la pila de Undo se vacía al EMPEZAR el apply y queda cerrada (por
- * versión) hasta que termine; si el polling se rinde ante fallos transitorios
- * la fase es `unconfirmed` (la carga pudo quedar aplicada). Cerrar el popup
- * descarta el job si aún no se aplicó; mientras aplica/arregla su botón no lo
- * cierra, y si otra cosa lo desmonta la carga sigue y avisa con un toast.
+ * solo se habilita con 0 errores; al aplicar, el backend vuelve a validar, y al
+ * terminar el front ubica lo nuevo y refresca el explorer. No reacomoda (ELK)
+ * los canvases completos: en la fase `arranging` ubica solo lo que entró a cada
+ * canvas, en el centro de lo que se ve si es el canvas abierto, y lo marca para
+ * pintarlo encima (lo existente no se mueve).
+ * La pila de Undo se vacía al empezar el apply y queda cerrada (por versión)
+ * hasta que termine; si el polling se rinde ante fallos transitorios la fase es
+ * `unconfirmed` (la carga pudo quedar aplicada). Cerrar el popup descarta el
+ * job no aplicado; mientras aplica o ubica, su botón no lo cierra, y si
+ * otra cosa lo desmonta la carga sigue y avisa con un toast.
  *
- * Doc 87 §3.5: si el proyecto tiene una capa de «proyectos internos» (2+
- * carpetas raíz con subcarpetas — DDV: CPYBCA / Otros) la fila Target project
- * exige elegir una antes de validar; con una sola (UDV) se muestra dónde caerá
- * la carga; sin capa la fila no aparece. La regla la decide el backend.
+ * Si el proyecto tiene una capa de «proyectos internos» (2+ carpetas raíz con
+ * subcarpetas) la fila Target project exige elegir una antes de validar; con
+ * una sola se muestra dónde caerá la carga; sin capa la fila no aparece. La
+ * regla la decide el backend.
  */
-// Doc 105 (ronda 5, R15-H2): `unconfirmed` — el polling del apply se rindió ante
-// fallos transitorios: la carga pudo terminar (no es `failed`).
+// `unconfirmed`: el polling del apply se rindió ante fallos transitorios; la
+// carga pudo terminar (no es `failed`).
 type Phase = 'idle' | 'parsed' | 'validating' | 'validated' | 'applying' | 'arranging' | 'done' | 'failed' | 'unconfirmed';
 
 const STEPS = ['Choose file', 'Validate', 'Upload'] as const;
@@ -89,9 +89,8 @@ function summaryLine(c: UploadSummary | undefined): string {
   return parts.length ? parts.join(', ') : 'no changes';
 }
 
-/** Doc 105 (ronda 7, obs.): un POST del apply SIN respuesta pudo llegar tarde —
- *  si el job sigue «validated», se relee tras estas pausas antes de darlo por
- *  no llegado. */
+/** Un POST del apply sin respuesta pudo llegar tarde: si el job sigue
+ *  «validated», se relee tras estas pausas antes de darlo por no llegado. */
 const LATE_POST_REREADS_MS = [2000, 4000];
 const wait = (ms: number) => new Promise<void>((r) => { setTimeout(r, ms); });
 
@@ -126,8 +125,8 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
   const [creatingDefault, setCreatingDefault] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const jobRef = useRef<UploadJob | null>(null);
-  // Doc 105 (ronda 4): ¿el popup sigue abierto? — lo que ya no muestra (canvases
-  // sin arreglar, un fallo de la carga) se avisa con un toast.
+  // ¿El popup sigue abierto? Si no, lo que no puede mostrar (canvases sin
+  // ubicar, un fallo de la carga) se avisa con un toast.
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
@@ -148,7 +147,7 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
     return () => { alive = false; };
   }, [projectId]);
 
-  // Doc 87: capa de proyectos internos de la versión (estructura EFECTIVA del draft).
+  // Capa de proyectos internos de la versión (estructura efectiva del draft).
   useEffect(() => {
     if (!csId || !projectId) return;
     let alive = true;
@@ -231,44 +230,44 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
   const upload = async () => {
     const j = jobRef.current;
     if (!csId || !j || j.status !== 'validated' || (j.report?.errorCount ?? 0) > 0 || working) return;
-    // Doc 105 (ronda 6, R17a-5): con una inversa del Undo en vuelo no se empieza —
-    // la carga cierra la pila al empezar, y esa inversa (si fallara) ya no vuelve.
+    // Con una inversa del Undo en vuelo no se empieza: la carga cierra la pila al
+    // empezar, y esa inversa (si fallara) no podría volver a la pila.
     if (useUndoStore.getState().busy) { pushToast('Undo is still running — upload when it finishes.', 'err'); return; }
-    // Doc 105 (ronda 3, R7-B): la carga es de la versión donde se pidió — el
-    // arrange corre con su pin y lo que sigue no toca otra versión. Ronda 4:
-    // cerrar el popup (Logical/Physical cierra los modales; el TopNav lo
-    // desmonta) ya NO corta la carga pedida. Lo que el popup ya no muestra
-    // (canvases sin arreglar, un fallo) se avisa con un toast.
+    // La carga es de la versión donde se pidió: el arrange corre con su pin y lo
+    // que sigue no toca otra versión. Cerrar el popup (Logical/Physical cierra
+    // los modales; el TopNav lo desmonta) no corta la carga pedida. Lo que el
+    // popup cerrado no puede mostrar (canvases sin ubicar, un fallo) se avisa
+    // con un toast.
     const pin = pinSession();
     const who = useAuthStore.getState().user?.username ?? null;
     setError(null); setPhase('applying');
-    // Doc 105 (ronda 5, R15-H2): desde que empieza el apply, la pila de Undo
-    // queda vacía y CERRADA hasta que la carga termine (en su versión): la
-    // carga no está en ella, y una inversa vieja — o de lo editado con el popup
-    // ya cerrado (botón del toolbar, Ctrl+Z) — pisaría lo cargado.
+    // Desde que empieza el apply, la pila de Undo queda vacía y cerrada hasta
+    // que la carga termine (en su versión): la carga no está en ella, y una
+    // inversa previa (o de lo editado con el popup ya cerrado: botón del
+    // toolbar, Ctrl+Z) pisaría lo cargado.
     let finished!: () => void;
     useUndoStore.getState().clear({ until: new Promise<void>((r) => { finished = r; }) });
-    // Al desmontar se descarta el job NO aplicado: éste ya se está aplicando.
+    // Al desmontar se descarta el job no aplicado; este ya se está aplicando.
     jobRef.current = { ...j, status: 'applying' };
-    // Ronda 6 (R17a-6): ¿sigue abierta (en edición) la versión de la carga? — la
-    // VERSIÓN, no la época de la sesión: ir a otra y volver a ésta es ésta.
+    // ¿Sigue abierta (en edición) la versión de la carga? Cuenta la versión, no
+    // la época de la sesión: ir a otra y volver a esta sigue siendo esta.
     const ours = () => { const s = useSessionStore.getState(); return s.activeChangesetId === csId && s.openMode !== 'readonly'; };
-    // Ronda 8: para LEER (refrescar el Explorer) basta con que se vea la versión, en cualquier modo.
+    // Para leer (refrescar el Explorer) basta con que se vea la versión, en cualquier modo.
     const shown = () => useSessionStore.getState().activeChangesetId === csId;
-    // Ronda 6 (R17a-3): tras un logout (o con otro usuario) nada de esta carga se avisa.
+    // Tras un logout (o con otro usuario) nada de esta carga se avisa.
     const sameUser = () => (useAuthStore.getState().user?.username ?? null) === who;
-    // Ronda 7 (obs. A → B → A): el arrange sigue la VERSIÓN de la carga, como
-    // `ours()` — no la época de la sesión: ir a otra y volver a ésta no deja
-    // canvases sin arreglar. Con otra abierta (u otro usuario) corta antes de escribir.
+    // El arrange sigue la versión de la carga, como `ours()`, no la época de la
+    // sesión: ir a otra y volver a esta (A → B → A) no deja canvases sin ubicar.
+    // Con otra abierta (u otro usuario) corta antes de escribir.
     const inVersion: SessionPin = {
       holds: () => ours() && sameUser(),
       check: () => { if (!ours() || !sameUser()) throw new SessionChangedError(); },
     };
     const to = versionLabel ? `to “${versionLabel}”` : 'to the version where it started';
-    /** El Explorer, refrescado si la versión abierta es la de la carga (ronda 6,
-     *  R17a-4/7: si falla, lo dice — el refresco vacía el árbol al empezar), en
-     *  edición o como visor (ronda 8), y sigue el mismo usuario (tras un logout,
-     *  nada de esta carga toca la pantalla). */
+    /** El Explorer, refrescado si la versión abierta es la de la carga (en
+     *  edición o como visor) y sigue el mismo usuario (tras un logout, nada de
+     *  esta carga toca la pantalla). Si el refresco falla, lo dice: el refresco
+     *  vacía el árbol al empezar. */
     const refresh = async () => {
       if (!shown() || !sameUser()) return;
       try { await useModelerStore.getState().refreshExplorer(); } catch (e) {
@@ -277,26 +276,26 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
       }
     };
     /** El resultado de la carga, donde corresponde. `mine`: con la versión de la
-     *  carga abierta; `other`: con OTRA abierta (ronda 5, R15-H4), nombrándola. */
+     *  carga abierta; `other`: con otra abierta, nombrándola. */
     const report = async (to: 'failed' | 'unconfirmed', mine: string, other: string, e?: unknown) => {
-      // Ronda 6 (R17a-3): un 401 (sesión vencida, logout) o ya otro usuario: nada.
+      // Un 401 (sesión vencida, logout) u otro usuario: nada.
       if (!sameUser() || (e instanceof ApiError && e.status === 401)) return;
-      // Un error de la versión abierta en la MISMA sesión: pudo cambiar de manos —
+      // Un error de la versión abierta en la misma sesión: pudo cambiar de manos —
       // lo avisa la revalidación (si la cambia); si no, es real (p. ej. rol perdido).
       if (e !== undefined && ours() && pin.holds() && touchesVersion(e, csId)) {
         await afterRevalidation();
         if (!pin.holds()) return;
       }
-      // Con el popup ya cerrado, el toast dice que fue LA CARGA y en qué versión
-      // (ronda 8: `mine` es la línea de estado del popup — «Couldn't reach the server…» solo, no).
+      // Con el popup ya cerrado, el toast dice que fue la carga y en qué versión
+      // (`mine` es la línea de estado del popup: «Couldn't reach the server…» solo no basta).
       if (ours()) { setPhase(to); setError(mine); if (!mounted.current) pushToast(other, 'err'); return; }
-      // Ronda 6 (R17a-9): con OTRA versión abierta la revalidación no mira ésta: se avisa siempre.
+      // Con otra versión abierta la revalidación no mira esta: se avisa siempre.
       pushToast(other, 'err');
     };
     const fail = (msg: string, e?: unknown) =>
       report('failed', msg, `The upload ${to} failed: ${msg.replace(/[.\s]+$/, '')}.`, e);
-    // Ronda 5 (R15-H2): el polling se rindió — el servidor pudo terminarla: no
-    // es «failed». Ronda 6 (R17a-3): también un 401/403 del polling.
+    // El polling se rindió (o respondió 401/403): el servidor pudo terminar la
+    // carga, así que no es «failed».
     const unconfirmed = async (e: unknown) => {
       const reason = errorReason(e, 'no response');
       await report('unconfirmed',
@@ -307,34 +306,35 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
     try {
       let postError: unknown = null;
       try { track(await applyUpload(csId, j.id)); } catch (e) {
-        // Ronda 5 (R15-H5): una respuesta de error — sigue validado: cerrar lo descarta.
+        // Una respuesta de error: sigue validado y cerrar lo descarta.
         if (!isTransientError(e)) { jobRef.current = j; throw e; }
-        // Ronda 6 (R17a-8): SIN respuesta (red, timeout, 5xx) el servidor pudo
-        // reclamarlo: lo dice el polling — «validated» es que no llegó.
+        // Sin respuesta (red, timeout, 5xx) el servidor pudo reclamarlo: lo dice
+        // el polling («validated» es que no llegó).
         postError = e;
       }
-      // Ronda 8: el polling sólo pinta el progreso — `jobRef` (lo que desmontar el
-      // popup descarta) lo decide el final: una foto «validated» de un POST que
-      // aún no llegó lo dejaría descartable y lo cortaría si llega tarde.
+      // El polling solo pinta el progreso; `jobRef` (lo que desmontar el popup
+      // descarta) lo decide el estado final: una foto «validated» de un POST
+      // pendiente lo dejaría descartable y lo cortaría si llega tarde.
       const progress = (job: UploadJob) => setJob(job);
       let final: UploadJob;
       let discarded = false;
       try {
         final = await pollUploadJob(csId, j.id, { onTick: progress });
-        // Ronda 7 (obs.): sin respuesta, el POST pudo llegar TARDE — «validated»
-        // en la primera lectura no alcanza para darlo por no llegado.
+        // Sin respuesta, el POST pudo llegar tarde: «validated» en la primera
+        // lectura no alcanza para darlo por no llegado.
         for (const pause of postError ? LATE_POST_REREADS_MS : []) {
           if (final.status !== 'validated') break;
           await wait(pause);
           final = await pollUploadJob(csId, j.id, { onTick: progress });
         }
-        // Ronda 8: «no llegó» se vuelve CIERTO descartando el job (y esperando la
-        // respuesta): un POST aún más tardío ya no lo encuentra. Sólo si sigue
-        // validado: un 409 es que la carga ya empezó (o terminó) — el POST sí
-        // llegó: se sigue su polling. Sin respuesta (o 401/403): «unconfirmed».
+        // «No llegó» se vuelve cierto descartando el job (y esperando la
+        // respuesta): un POST que llegue después no lo encuentra. Solo si sigue
+        // validado: un 409 indica que la carga empezó (o terminó), es decir, que
+        // el POST sí llegó, y se sigue su polling. Sin respuesta (o 401/403):
+        // «unconfirmed».
         if (postError && final.status === 'validated') {
           discarded = await discardUpload(csId, j.id, { onlyIfValidated: true }).then(() => true, (e: unknown) => {
-            if (e instanceof ApiError && e.status === 404) return true;     // ya no existe: tampoco se aplicará
+            if (e instanceof ApiError && e.status === 404) return true;     // el job no existe: tampoco se aplicará
             if (e instanceof ApiError && e.status === 409) return false;
             throw e;
           });
@@ -349,27 +349,27 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
         const reason = discarded ? ` (${errorReason(postError, 'no response')})` : '';
         const notStarted = new Error(`Nothing was applied — the upload didn't start${reason}. Validate the workbook and upload it again.`);
         if (discarded) { jobRef.current = null; throw notStarted; }
-        // El servidor lo devolvió a «validated»: sigue validado — cerrar lo descarta
-        // (con el popup ya cerrado, acá: su limpieza corrió antes).
+        // El servidor lo devolvió a «validated»: sigue validado y cerrar lo
+        // descarta (con el popup ya cerrado, se descarta aquí: su limpieza ya corrió).
         jobRef.current = j;
         if (!mounted.current) void discardUpload(csId, j.id).catch(() => {});
         throw notStarted;
       }
       jobRef.current = final;
       if (final.status !== 'applied') {
-        // Ronda 6 (R17a-7): pudo fallar A MITAD (tandas grabadas): se refresca.
+        // Pudo fallar a mitad (con tandas ya grabadas): se refresca.
         await fail(final.error ?? 'Upload failed.');
         await refresh();
         return;
       }
       const ids = final.result?.affectedCanvasIds ?? [];
-      // Doc 113 §1.3: qué entró a cada canvas (un backend anterior no lo manda:
-      // entonces nada se mueve y lo nuevo queda en su posición provisional).
+      // Qué entró a cada canvas (si el backend no lo manda, nada se mueve y lo
+      // nuevo queda en su posición provisional).
       const members = final.result?.newMembers;
       const toPlace = ids.filter((id) => (members?.[id]?.length ?? 0) > 0);
-      // El canvas ABIERTO (de esta carga) ubica lo nuevo en el centro de lo que se
-      // ve — medido como quedará: el refresco lo reabre SIN selección y el panel
-      // de Properties, si estaba abierto, se cierra (revisión doc 113).
+      // El canvas abierto (de esta carga) ubica lo nuevo en el centro de lo que se
+      // ve, medido como quedará: el refresco lo reabre sin selección y el panel
+      // de Properties, si estaba abierto, se cierra.
       const m = useModelerStore.getState();
       const openId = ours() && sameUser() && m.activeSaId && m.diagram?.subjectArea.id === m.activeSaId && ids.includes(m.activeSaId)
         ? m.activeSaId : null;
@@ -379,38 +379,38 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
         (done, total) => setArrange({ done, total }), { pin: inVersion });
       const missing = [...failed, ...skipped];
       const counts = final.result?.counts;
-      /** El aviso de la carga aplicada, según la sesión de AHORA (ronda 8: también
-       *  después del refresco — entretanto pudo haber un logout u otra versión). */
+      /** El aviso de la carga aplicada, según la sesión del momento del aviso
+       *  (también después del refresco: entretanto pudo haber un logout u otra versión). */
       const announce = () => {
         // Tras un logout (u otro usuario en el tab) nada de esta carga se avisa.
         if (!sameUser()) return;
         if (!ours()) {
-          // Otra versión abierta: la carga quedó aplicada en la suya — se avisa
-          // nombrándola (ronda 7, R18a-4: antes, sólo si algo quedó sin arreglar),
-          // en UN aviso con lo que quedó sin arreglar; sin refrescar ni tocar la abierta.
+          // Otra versión abierta: la carga se aplicó en la suya y se avisa
+          // nombrándola, en un solo aviso con lo que no se pudo ubicar; sin
+          // refrescar ni tocar la abierta.
           if (missing.length) pushToast(notPlacedNotice(missing, canvasName, { version: versionLabel }), 'err');
           else pushToast(`Uploaded ${summaryLine(counts)} ${to}`);
           return;
         }
         pushToast(`Uploaded ${summaryLine(counts)}`);
-        // Con el popup ya cerrado, los que no se arreglaron no se ven en él.
+        // Con el popup ya cerrado, los que no se ubicaron no se ven en él.
         if (!mounted.current && missing.length) pushToast(notPlacedNotice(missing, canvasName), 'err');
       };
       // Otra versión abierta, u otro usuario en el tab (aun con la misma versión):
-      // sólo el aviso que corresponda — sin vaciar la pila de Undo de ESA sesión (la
-      // de la versión de la carga quedó cerrada mientras aplicaba). Ronda 8: con la
-      // versión de la carga abierta como VISOR, su Explorer sí se refresca.
+      // solo el aviso que corresponda, sin vaciar la pila de Undo de esa sesión (la
+      // de la versión de la carga estuvo cerrada mientras aplicaba). Con la versión
+      // de la carga abierta como visor, su Explorer sí se refresca.
       if (!ours() || !sameUser()) { await refresh(); announce(); return; }
       setArrangeFailed(missing);
-      // Doc 113 §1.3: lo ubicado se pinta ENCIMA de lo que ya había (antes del
-      // refresco: el canvas abierto lo toma al recargarse).
+      // Lo ubicado se pinta encima de lo que ya había (se marca antes de
+      // refrescar: el canvas abierto lo toma al recargarse).
       useModelerStore.getState().markFresh(Object.fromEntries(
         toPlace.filter((id) => !missing.includes(id)).map((id) => [id, members![id]])));
-      // Los cambios del lote no están en la pila de Undo: una inversa vieja
+      // Los cambios del lote no están en la pila de Undo: una inversa previa
       // podría pisarlos. Misma política que cambiar de changeset.
       useUndoStore.getState().clear();
-      // Ronda 8: el popup sigue ocupado hasta que el Explorer y el canvas abierto
-      // muestran lo cargado — editar el diagrama anterior lo revertiría.
+      // El popup sigue ocupado hasta que el Explorer y el canvas abierto muestran
+      // lo cargado: editar el diagrama previo a la carga lo revertiría.
       await refresh();
       jobRef.current = null;
       setPhase('done');
@@ -480,7 +480,7 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
         : { text: 'No issues — ready to upload.', tone: 'ok' };
   } else if (phase === 'applying') status = { text: `${job?.progress.phase ?? 'Uploading'}…` };
   else if (phase === 'arranging') {
-    // Ronda 8: ubicados todos (o nada que ubicar), falta el refresco del Explorer.
+    // Ubicados todos (o nada que ubicar), falta el refresco del Explorer.
     status = { text: arrange && arrange.done < arrange.total ? `Placing the new objects ${arrange.done}/${arrange.total}…` : 'Updating the explorer…' };
   }
   else if (phase === 'done') status = { text: 'Upload complete.', tone: 'ok' };

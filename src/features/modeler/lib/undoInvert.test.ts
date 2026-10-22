@@ -26,7 +26,7 @@ describe('invertBulk', () => {
     expect(inv).toEqual([up('relationships', 'r1', { id: 'r1', pairs: [] })]);
   });
 
-  it('invierte el ORDEN (lo último aplicado se deshace primero)', () => {
+  it('invierte el orden (lo último aplicado se deshace primero)', () => {
     const inv = invertBulk([
       up('canonical_columns', 'c9', { id: 'c9' }),
       up('relationships', 'r9', { id: 'r9' }),

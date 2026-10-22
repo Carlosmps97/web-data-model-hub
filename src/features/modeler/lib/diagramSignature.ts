@@ -1,11 +1,11 @@
 /**
- * Firma ESTRUCTURAL de un diagrama (doc 88 §2): cambia cuando cambia lo que el
- * Explorer dibuja — identidad, nombres y esquema de tablas y vistas, y el nº de
- * columnas por tabla — y NO con descripciones, UDPs, flags de columna ni layout.
- * El store la compara en cada `reload()` del canvas activo y, si difiere, sube
- * `explorerTick`: el catálogo del Explorer (inventario cacheado, doc 72) se
- * invalida y se vuelve a pedir SOLO si hay una rama abierta. Tiempo real sin
- * polling ni websockets. Puro.
+ * Firma estructural de un diagrama: cambia cuando cambia lo que el Explorer
+ * dibuja (identidad, nombres y esquema de tablas y vistas, y el nº de columnas
+ * por tabla) y no con descripciones, UDPs, flags de columna ni layout. El store
+ * la compara en cada `reload()` del canvas activo y, si difiere, sube
+ * `explorerTick`: el catálogo del Explorer (inventario cacheado) se invalida y
+ * se vuelve a pedir solo si hay una rama abierta. Tiempo real sin polling ni
+ * websockets. Puro.
  */
 export interface SignatureDiagram {
   tables: { id: string; physicalName: string; logicalName?: string | null; schema?: string | null }[];

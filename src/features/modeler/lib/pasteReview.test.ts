@@ -13,7 +13,7 @@ const UDPS = [
 const DOMAIN: ParentDomain = { id: 'd1', name: 'Fecha', defaultDataType: 'DATE', logicalDataType: 'DATE', physicalName: 'FEC' };
 const SCHEMAS: DbSchema[] = [
   { id: 's1', name: 'Core', kind: 'tables' }, { id: 's2', name: 'VU', kind: 'views' },
-  { id: 's3', name: 'Mixto', kind: 'both' },   // doc 119: contiene tablas y vistas
+  { id: 's3', name: 'Mixto', kind: 'both' },   // contiene tablas y vistas
 ];
 const TARGET: PasteTarget = {
   udpDefs: UDPS, domains: [DOMAIN], themes: [{ id: 'th1', name: 'Azul', color: '#0070C0' }], schemas: SCHEMAS,
@@ -38,15 +38,15 @@ const review = (over: Partial<Parameters<typeof reviewPaste>[0]> = {}) => review
   table: TABLE, cols: COLS, source: TARGET, target: TARGET, sameProject: true, options: ALL_COPY, ...over,
 });
 
-describe('reviewPaste — mismo proyecto (doc 118)', () => {
-  it('los UDP que existen viajan TAL CUAL (también un valor fuera de la lista); los de una definición borrada no', () => {
+describe('reviewPaste — mismo proyecto', () => {
+  it('los UDP que existen viajan tal cual (también un valor fuera de la lista); los de una definición borrada no', () => {
     const r = review();
     expect(r.payload.table?.udpValues).toEqual({ 'ut-p': 'Si', 'ut-l': 'No' });
     expect(r.payload.cols[0].udpValues).toEqual({ 'uc-p': 'Si', 'uc-l': 'Fuera de la lista' });
     expect(r.warnings).toContain("2 UDP values belong to UDPs that no longer exist or don't apply here — they won't be copied.");
   });
 
-  it('un valor legado que no es texto viaja como texto (el backend sólo acepta texto), también 0 y false', () => {
+  it('un valor que no es texto viaja como texto (el backend solo acepta texto), también 0 y false', () => {
     const r = review({ cols: [col({ id: 'c9', physicalName: 'X', udpValues: { 'uc-p': 7 as unknown as string } })] });
     expect(r.payload.cols[0].udpValues).toEqual({ 'uc-p': '7' });
     const zero = review({ cols: [col({ id: 'c9', physicalName: 'X', udpValues: { 'uc-p': 0 as unknown as string, 'uc-l': false as unknown as string } })] });
@@ -55,7 +55,7 @@ describe('reviewPaste — mismo proyecto (doc 118)', () => {
     expect(empty.payload.cols[0].udpValues).toBeUndefined();
   });
 
-  it('cada faceta tiene su check: sin UDPs lógicos viajan sólo los físicos (y al revés)', () => {
+  it('cada faceta tiene su check: sin UDPs lógicos viajan solo los físicos (y al revés)', () => {
     const noLogical = review({ options: { ...ALL_COPY, logicalUdps: false } });
     expect(noLogical.payload.table?.udpValues).toEqual({ 'ut-p': 'Si' });
     expect(noLogical.payload.cols[0].udpValues).toEqual({ 'uc-p': 'Si' });
@@ -104,7 +104,7 @@ describe('reviewPaste — mismo proyecto (doc 118)', () => {
     expect(vistas.table?.schema).toEqual({ name: 'VU', create: false, viewsKind: true });
     expect(vistas.warnings).toContain('Schema «VU» exists in this project as a views schema — the table goes into it.');
     expect(review({ table: { ...TABLE, schema: '  ' } }).table?.schema).toBeNull();
-    // Doc 119: un esquema que contiene tablas y vistas recibe la tabla sin aviso.
+    // Un esquema que contiene tablas y vistas recibe la tabla sin aviso.
     const mixto = review({ table: { ...TABLE, schema: 'MIXTO' } });
     expect(mixto.table?.schema).toEqual({ name: 'Mixto', create: false, viewsKind: false });
     expect(mixto.warnings.some((w) => w.includes('views schema'))).toBe(false);
@@ -144,7 +144,7 @@ describe('reviewPaste — mismo proyecto (doc 118)', () => {
     expect(r.blockers).toEqual(['Columns end up with the same physical name: COD.']);
   });
 
-  it('los checks cuentan los UDPs y dominios DISTINTOS que se reutilizan', () => {
+  it('los checks cuentan los UDPs y dominios distintos que se reutilizan', () => {
     expect(review().counts).toEqual({ logicalUdps: 2, physicalUdps: 2, domains: 1 });
     const twice = review({ cols: [COLS[0], { ...COLS[0], id: 'c9', physicalName: 'OTRA' }] });
     expect(twice.counts).toEqual({ logicalUdps: 2, physicalUdps: 2, domains: 1 });   // mismo UDP y dominio en 2 columnas
@@ -167,7 +167,7 @@ describe('reviewPaste — mismo proyecto (doc 118)', () => {
   });
 });
 
-describe('reviewPaste — entre proyectos (doc 118, fase 2)', () => {
+describe('reviewPaste — entre proyectos', () => {
   const list = (id: string, name: string, level: 'table' | 'column', view: 'logical' | 'physical', allowedValues: string[]): UdpDefinition =>
     ({ id, name, level, view, dataType: 'list', allowedValues });
   const text = (id: string, name: string): UdpDefinition => ({ id, name, level: 'column', view: 'physical', dataType: 'string', allowedValues: [] });
@@ -194,7 +194,7 @@ describe('reviewPaste — entre proyectos (doc 118, fase 2)', () => {
     naming: { column: { separator: '_', case: 'lower', maxLength: 30 }, table: { separator: '_', case: 'upper', maxLength: 40 } },
   };
   const T: CanonicalTable = {
-    id: 't1', physicalName: 'T_CLIENTE', logicalName: 'Cliente', schema: 'ddv', color: 'theme:th-azul',
+    id: 't1', physicalName: 'T_CLIENTE', logicalName: 'Cliente', schema: 'stg', color: 'theme:th-azul',
     udpValues: { 'ut-p': 'full', 'ut-l': 'Si' },
   };
   const C = [
@@ -262,7 +262,7 @@ describe('reviewPaste — entre proyectos (doc 118, fase 2)', () => {
 
   it('esquema y nombres con las reglas del destino', () => {
     const r = cross();
-    expect(r.payload.createSchema).toEqual({ name: 'ddv' });
+    expect(r.payload.createSchema).toEqual({ name: 'stg' });
     expect(r.payload.cols.map((c) => c.physicalName)).toEqual(['cod_cliente', 'fec_alta']);
   });
 
@@ -270,7 +270,7 @@ describe('reviewPaste — entre proyectos (doc 118, fase 2)', () => {
     expect(cross().counts).toEqual({ logicalUdps: 1, physicalUdps: 1, domains: 1 });
   });
 
-  it('si no se pueden leer los estándares del origen, sólo viaja lo que no los necesita', () => {
+  it('si no se pueden leer los estándares del origen, solo viaja lo que no los necesita', () => {
     const r = cross({ sourceUnavailable: true, sourceName: 'Modelo A', table: { ...T, color: '#123456' } });
     expect(r.payload.table?.udpValues).toBeUndefined();
     expect(r.payload.table?.color).toBe('#123456');
@@ -348,7 +348,7 @@ describe('reviewPaste — entre proyectos (doc 118, fase 2)', () => {
     expect(r.payload.table?.color).toBe('theme:B-az');
   });
 
-  it('un valor de UDP que no es texto (dato legado) se valida como texto, sin romper', () => {
+  it('un valor de UDP que no es texto se valida como texto, sin romper', () => {
     const dest = { ...DEST, udpDefs: DEST.udpDefs.filter((d) => d.id !== 'B-o2') };
     const r = cross({ target: dest, cols: [col({ id: 'c9', physicalName: 'X', udpValues: { 'uc-o': 7 as unknown as string } })] });
     expect(r.payload.cols[0].udpValues).toEqual({ 'B-o1': '7' });

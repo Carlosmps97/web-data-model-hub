@@ -1,4 +1,4 @@
-// Doc 118 — «Paste table» sin DOM (hooks de mentira: ver
+// «Paste table» sin DOM (hooks simulados: ver
 // features/reporting/components/fakeReact.testutil): avisa el duplicado con las
 // copias que ya existen, graba lo que mostró y un nombre sobre el tope bloquea;
 // lo copiado en otro proyecto se revisa con los estándares de los dos.
@@ -51,7 +51,7 @@ function render(data: unknown = DATA()) {
   return PasteTablePopup({ onClose: vi.fn(), pushToast: vi.fn() });
 }
 
-const FROM_B = { ...CLIP, source: { projectId: 'p2', projectName: 'UDV Piloto' } };
+const FROM_B = { ...CLIP, source: { projectId: 'p2', projectName: 'Piloto' } };
 // «Tipo de Carga» con otro id y otra grafía en cada proyecto.
 const tipoCarga = (id: string, allowedValues: string[]) =>
   ({ id, name: 'Tipo de Carga', level: 'table', view: 'physical', dataType: 'list', allowedValues });
@@ -71,7 +71,7 @@ describe('existingCopies', () => {
   });
 });
 
-describe('PasteTablePopup (doc 118)', () => {
+describe('PasteTablePopup', () => {
   it('avisa que ya existe y con qué nombre se crea', () => {
     const head = [...walk(render())].find((e) => e.props.className === 'wk-paste-head')!;
     expect(textOf(head)).toContain('Already in this project: M_CLIENTE, M_CLIENTE_copy_1 —');
@@ -94,12 +94,12 @@ describe('PasteTablePopup (doc 118)', () => {
   });
 });
 
-describe('PasteTablePopup — copiado en otro proyecto (doc 118, fase 2)', () => {
+describe('PasteTablePopup — copiado en otro proyecto', () => {
   it('el subtítulo nombra el proyecto de origen y la revisión lee sus estándares', async () => {
     STATE.tblClipboard = FROM_B;
     resetFake();
     const tree = PasteTablePopup({ onClose: vi.fn(), pushToast: vi.fn() });
-    expect(tree!.props.subtitle).toBe('M_CLIENTE from «UDV Piloto» → this canvas');
+    expect(tree!.props.subtitle).toBe('M_CLIENTE from «Piloto» → this canvas');
     runEffects();
     await vi.waitFor(() => expect(nextStates()[2]).toEqual(expect.objectContaining({ same: false, source: SRC_STD })));
     expect(loadSourceStandards).toHaveBeenCalledWith('p2');
@@ -165,7 +165,7 @@ describe('PasteTablePopup — copiado en otro proyecto (doc 118, fase 2)', () =>
     // Los avisos los pinta PasteDetails (no se invoca): se leen de la revisión que recibe.
     const details = [...walk(tree)].find((e) => 'review' in e.props)!;
     expect((details.props.review as { warnings: string[] }).warnings)
-      .toEqual(expect.arrayContaining([expect.stringContaining("The standards of «UDV Piloto» can't be read")]));
+      .toEqual(expect.arrayContaining([expect.stringContaining("The standards of «Piloto» can't be read")]));
     expect(byText(tree, 'button', 'Paste table').props.disabled).toBe(false);
   });
 });

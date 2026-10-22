@@ -38,18 +38,18 @@ import RelationshipPhraseLine from './RelationshipPhraseLine';
 import UdpReadonly from './UdpReadonly';
 
 /**
- * Object Inspector (doc 72 §3 · r2 · doc 89) — popup con la metadata completa
- * de una tabla/entidad (con sus columnas/atributos) o de una vista, SIN
- * necesidad de canvas: el estado efectivo de la versión abierta llega en UNA
- * request (`/api/catalog/inspect/…`). Tiene su propio switch Logical/Physical
- * (arranca en la faceta del canvas activo, o física sin canvas) y NO cambia el
- * modo del canvas. Lo que en el sidebar dependía del canvas («this canvas»,
- * posición) se reemplaza por «Where used» + «Open in canvas».
+ * Object Inspector: popup con la metadata completa de una tabla/entidad (con sus
+ * columnas/atributos) o de una vista, sin necesidad de canvas: el estado efectivo
+ * de la versión abierta llega en una sola request (`/api/catalog/inspect/…`).
+ * Tiene su propio switch Logical/Physical (arranca en la faceta del canvas
+ * activo, o física sin canvas) y no cambia el modo del canvas. Lo que en el
+ * sidebar depende del canvas («this canvas», posición) se presenta aquí como
+ * «Where used» + «Open in canvas».
  *
- * Doc 89: en sesión de edición sobre un draft propio EDITA como los Properties
- * del canvas (nombres por faceta con rayo del glosario, esquema, definición,
+ * En sesión de edición sobre un draft propio edita como los Properties del canvas
+ * (nombres por faceta con rayo del glosario, esquema, definición,
  * tipos/dominios/llaves/UDPs de la columna vía `ColumnPropsBody`, definición y
- * UDPs de la vista) y BORRA tablas, columnas y vistas por el mismo camino
+ * UDPs de la vista) y borra tablas, columnas y vistas por el mismo camino
  * versionado que el sidebar (`gov.*` / `viewsSvc.*` = cambios del changeset →
  * diff, revisión, historial, Undo). Borrar tabla/columna reusa las cascadas del
  * store con la pre-imagen del dossier (sin canvas no hay diagrama).
@@ -86,8 +86,8 @@ function useCanEdit(): boolean {
   return openMode === 'editing' && !!activeCs && !isAsOfChangesetId(activeCs);
 }
 
-/** Doc 89 §3.3: dominios + defs UDP del proyecto — los insumos de
- *  `ColumnPropsBody` (los mismos que carga el sidebar de columna). */
+/** Dominios + defs UDP del proyecto: los insumos de `ColumnPropsBody`
+ *  (los mismos que carga el sidebar de columna). */
 function useEditorInputs(enabled: boolean): { domains: ParentDomain[]; udpDefs: UdpDefinition[] } {
   const [domains, setDomains] = useState<ParentDomain[]>([]);
   const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
@@ -101,8 +101,8 @@ function useEditorInputs(enabled: boolean): { domains: ParentDomain[]; udpDefs: 
   return { domains, udpDefs };
 }
 
-/** Doc 89 §3.1: la regla de case del físico tipeado (doc 83) necesita `naming`,
- *  que sólo se carga al abrir un canvas — sin canvas el inspector lo pide. */
+/** La regla de case del físico escrito necesita `naming`, que solo se carga al
+ *  abrir un canvas; sin canvas el inspector lo pide. */
 function useNamingLoaded(): void {
   const naming = useModelerStore((s) => s.naming);
   const loadNaming = useModelerStore((s) => s.loadNaming);
@@ -119,8 +119,8 @@ const CANVAS_ONLY_HINT = 'Relationships and canvas placement are edited on the c
 const errMsg = (e: unknown, fallback: string) => (e instanceof Error && e.message ? e.message : fallback);
 const muted = (text: ReactNode) => <div className="rd-small" style={{ color: 'var(--muted)' }}>{text}</div>;
 
-/** Pre-imagen POR VALOR de una vista para el Undo (doc 50) — el payload es el
- *  doc completo; `canvases` (fila del inspector de tabla) no es parte del doc. */
+/** Pre-imagen por valor de una vista para el Undo: el payload es el doc
+ *  completo; `canvases` (fila del inspector de tabla) no es parte del doc. */
 function viewPre(v: View): View {
   const copy: View & { canvases?: unknown } = {
     ...v,
@@ -132,10 +132,9 @@ function viewPre(v: View): View {
   return copy;
 }
 
-/** Doc 89 §3.4: borra la vista en el changeset (el backend poda sus membresías,
- *  doc 88 §4) con su Undo. Doc 105 (A4-o4): es la MISMA acción del store que
- *  usan los paneles del canvas — el Undo repone el doc y la vuelve a listar, en
- *  su posición, en cada canvas que la listaba. */
+/** Borra la vista en el changeset (el backend poda sus membresías) con su Undo.
+ *  Es la misma acción del store que usan los paneles del canvas: el Undo repone
+ *  el doc y la vuelve a listar, en su posición, en cada canvas que la listaba. */
 const deleteViewVersioned = (pre: View, canvasIds: string[]): Promise<void> =>
   useModelerStore.getState().deleteView(pre, { canvasIds });
 
@@ -223,15 +222,15 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   const canEdit = useCanEdit();
   useNamingLoaded();
   const { domains, udpDefs } = useEditorInputs(canEdit);
-  // D5: arranca en la faceta del canvas activo (o física sin canvas); no toca el canvas.
+  // Arranca en la faceta del canvas activo (o física sin canvas); no toca el canvas.
   const [facet, setFacet] = useState<Facet>(activeSaId ? canvasFacet : 'physical');
   const [data, setData] = useState<InspectTableResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TTab>(target.colId ? 'columns' : 'definition');
   const [selCol, setSelCol] = useState<string | null>(target.colId ?? null);
   const [colQ, setColQ] = useState('');
-  // Doc 89 §3.2: form de Definition como el Properties (doc 68: `physTouched` =
-  // intención sobre el físico en ESTA edición; null = manda el flag persistido).
+  // Form de Definition como el Properties (`physTouched` = intención sobre el
+  // físico en esta edición; null = manda el flag persistido).
   const [form, setForm] = useState({ logicalName: '', physicalName: '', schema: '', description: '' });
   const [physTouched, setPhysTouched] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
@@ -245,7 +244,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       .then((d) => {
         if (!alive) return;
         setData(d);
-        // Se siembra SOLO al cargar (doc 40): un refresco tras guardar no pisa lo que se está tipeando.
+        // Se siembra solo al cargar: un refresco tras guardar no pisa lo que se está escribiendo.
         setForm({ logicalName: d.table.logicalName, physicalName: d.table.physicalName, schema: d.table.schema ?? '', description: d.table.description ?? '' });
         setPhysTouched(null);
       })
@@ -254,23 +253,22 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   }, [target.id]);
 
   const table = data?.table;
-  // Doc 81: mismo orden que el canvas y el properties — bloque PK primero +
-  // resto por ordinal (antes era puro ordinal y con la carga Excel divergía).
+  // Mismo orden que el canvas y el Properties: bloque PK primero + resto por ordinal.
   const cols = useMemo(() => (data ? orderColumns(data.columns) : []), [data]);
   const visible = useMemo(() => cols.filter((c) => matchesColumn(c, colQ)), [cols, colQ]);
   const col = selCol ? (data?.columns.find((c) => c.id === selCol) ?? null) : null;
   const domainName = (id?: string | null) => (id ? (std ? (std.domains.find((d) => d.id === id)?.name ?? id) : '…') : '—');
   const noun = facetNoun('table', facet);
   const nouns = facetNouns(facet);
-  // Doc 85 §3.7: Views solo en físico; Columns se rotula Attributes en lógico.
+  // Views solo en físico; Columns se rotula Attributes en lógico.
   const tTabs = T_TABS.filter((t) => t.id !== 'views' || facet === 'physical')
     .map((t) => (t.id === 'columns' ? { ...t, label: nouns.Members } : t));
   useEffect(() => { if (tab === 'views' && facet !== 'physical') setTab('definition'); }, [tab, facet]);
-  // Doc 85 §3.7: campo de la OTRA faceta ⇒ solo-lectura (input disabled + hint del popup).
+  // Campo de la otra faceta ⇒ solo lectura (input disabled + hint del popup).
   const ro = (field: TableField) => !facetEditable('table', field, facet);
 
-  // ── Refresco (doc 89 §3.6): el dossier siempre; el canvas si lo contiene, si
-  // no, el Explorer sólo ante cambios estructurales — nunca ambos. ──
+  // ── Refresco: el dossier siempre; el canvas si lo contiene, si no, el
+  // Explorer solo ante cambios estructurales, nunca ambos. ──
   const refresh = async () => { setData(await inspectTable(target.id)); };
   const afterEdit = async (structural: boolean) => {
     markDirty();
@@ -282,18 +280,18 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   const tablePre = (t: CanonicalTable): CanonicalTable => ({ ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) });
 
   // ── Definition: nombres por faceta + rayo + esquema + definición (espejo de Properties) ──
-  // Doc 105: cada escritura del inspector es de la sesión donde empezó (H1:
-  // `pinSession`, su inversa se apila sólo ahí y corta si cambió) y su fallo
-  // espera la revalidación y calla si la sesión cambió (H5/H7: `reportWriteError`).
+  // Cada escritura del inspector pertenece a la sesión donde empezó (`pinSession`:
+  // su inversa se apila solo ahí y corta si la sesión cambia) y su fallo espera la
+  // revalidación y calla si la sesión cambia (`reportWriteError`).
   const saveTableDef = async () => {
     if (!data) return;
     const pin = pinSession();
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save")));
     const pre = tablePre(data.table);
     const logical = form.logicalName.trim();
-    // Doc 68: la decisión (re-derivar vs conservar el custom + flag de override)
-    // vive en tableNamePlan — un físico con override NO se re-deriva al renombrar
-    // el lógico; vaciarlo re-enciende el auto.
+    // La decisión (re-derivar vs conservar el custom + flag de override) vive en
+    // tableNamePlan: un físico con override no se re-deriva al renombrar el
+    // lógico; vaciarlo re-enciende el auto.
     const plan = tableNamePlan({ logical, physical: form.physicalName.trim(), prev: data.table, sessionOverride: physTouched });
     let physical = plan.physical;
     if (plan.derive) {
@@ -317,10 +315,10 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     } catch (e) { await onError(e); }
     finally { setSaving(false); }
   };
-  // Definición funcional: auto-guardado al salir del campo (doc 40). Los
-  // nombres y el esquema siguen detrás de Save (un rename es transaccional):
-  // `...data.table` usa los nombres del server — un nombre a medio editar en el
-  // form NO viaja con este blur.
+  // Definición funcional: auto-guardado al salir del campo. Los nombres y el
+  // esquema siguen detrás de Save (un rename es transaccional): `...data.table`
+  // usa los nombres del server, así que un nombre a medio editar en el form no
+  // viaja con este blur.
   const saveDescriptionOnBlur = async () => {
     if (!canEdit || !data) return;
     const next = form.description.trim() || undefined;
@@ -334,12 +332,12 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       await afterEdit(false);
     } catch (e) { await onError(e); }
   };
-  /** Rayo (doc 88 §3): re-deriva el físico desde el lógico por el glosario y apaga el override. */
+  /** Rayo: re-deriva el físico desde el lógico por el glosario y apaga el override. */
   const derivePhysical = async () => {
     try {
       const p = (await gov.physicalize(form.logicalName.trim(), 'table')).physical;
       setForm((f) => ({ ...f, physicalName: p }));
-      setPhysTouched(false);  // doc 68: derivar = renunciar al override
+      setPhysTouched(false);  // derivar = renunciar al override
     } catch { toast.error("Couldn't derive the physical name"); }
   };
   const saveTableUdp = async (next: Record<string, string>) => {
@@ -353,10 +351,10 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       await afterEdit(false);
     } catch (e) { await onError(e); }
   };
-  /** Doc 89 §3.2: borrado con el diálogo de impacto de Properties (conteos del
-   *  dossier) y la cascada versionada del store — la pre-imagen del Undo viene
-   *  del dossier porque sin canvas no hay diagrama. El store recarga el canvas
-   *  y sincroniza el Explorer; el popup se cierra (la tabla ya no existe). */
+  /** Borrado con el diálogo de impacto de Properties (conteos del dossier) y la
+   *  cascada versionada del store; la pre-imagen del Undo viene del dossier
+   *  porque sin canvas no hay diagrama. El store recarga el canvas y sincroniza
+   *  el Explorer; el popup se cierra, pues la tabla deja de existir. */
   const askDeleteTable = async () => {
     if (!data || deleting) return;
     setDeleting(true);
@@ -372,14 +370,14 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     finally { setDeleting(false); }
   };
 
-  // ── Columna: mismo upsert changeset-aware que el sidebar (doc 89 §3.3) ──
+  // ── Columna: mismo upsert changeset-aware que el sidebar ──
   const patchColumn = async (id: string, fields: Partial<CanonicalColumn>) => {
     const c = data?.columns.find((x) => x.id === id);
     if (!c) return;
     const pin = pinSession();
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save the column")));
-    // Doc 94 D2: entrar o salir de la llave la re-ubica en la frontera del
-    // bloque de PK — ella y las que se corren viajan en UN lote, con UN Undo.
+    // Entrar o salir de la llave la reubica en la frontera del bloque de PK:
+    // ella y las que se corren viajan en un solo lote, con un solo Undo.
     if (fields.isPrimaryKey !== undefined && !!fields.isPrimaryKey !== !!c.isPrimaryKey) {
       try {
         const { changes, pres } = keyLayoutBulk(data!.columns, { [id]: fields });
@@ -399,15 +397,15 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       await gov.updateColumn({ ...c, ...fields });   // upsert por id = update (merge)
       pushUndo(`Edit column ${pre.physicalName}`, async (undo) => {
         await gov.updateColumn(pre);
-        // Si el cambio renombró el FÍSICO, las vistas quedaron re-apuntadas al
-        // nombre nuevo: deshacer las devuelve al viejo (best-effort; doc 105:
-        // sólo mientras siga la sesión del Undo).
+        // Si el cambio renombró el físico, las vistas apuntan al nombre nuevo:
+        // deshacer las devuelve al anterior (best-effort; solo mientras siga la
+        // sesión del Undo).
         if (renamed) await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(undo), c.tableId, fields.physicalName as string, pre.physicalName));
         await afterEdit(structural);
       }, pin);
       if (renamed) {
-        // Un rename FÍSICO re-apunta las vistas que referencian el nombre viejo
-        // (mismo sync del sidebar); la vista se corrige a mano si hiciera falta.
+        // Un rename físico re-apunta las vistas que referencian el nombre anterior
+        // (mismo sync del sidebar); la vista se ajusta a mano si hiciera falta.
         await bestEffort(async () => {
           const n = await syncRenamedColumnInViews(pinnedViewDeps(pin), c.tableId, c.physicalName, fields.physicalName as string);
           if (n) toast.success(`Rename also applied to ${n} view(s)`);
@@ -416,18 +414,16 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       await afterEdit(structural);
     } catch (e) { await onError(e); }
   };
-  /** Doc 89 §3.3: impacto GLOBAL (spec 10 §8) + cascada versionada del store —
-   *  la columna viaja desde el dossier (sin canvas no está en el diagrama). */
+  /** Impacto global + cascada versionada del store; la columna viaja desde el
+   *  dossier (sin canvas no está en el diagrama). */
   const askDeleteColumn = async (c: CanonicalColumn) => {
-    // Doc 105 (ronda 4, R10-A): el borrado es de la sesión donde se pidió — el
-    // pin y los avisos se toman ANTES de leer el impacto (creado después, el
-    // aviso avisaba «read-only» encima de la revalidación); si mientras lee se
-    // abre otra versión, el confirm no se abre en ella, y la acción verifica
-    // el pin al clic.
+    // El borrado pertenece a la sesión donde se pidió: el pin y los avisos se
+    // toman antes de leer el impacto (creados después, el aviso mostraría
+    // «read-only» encima de la revalidación); si mientras lee se abre otra
+    // versión, el confirm no se abre en ella, y la acción verifica el pin al clic.
     const pin = pinSession();
-    // Doc 105 (ronda 3): sin el impacto (relaciones donde es extremo) no se
-    // ofrece el borrado — con `relIds` vacío quedaban relaciones con pares
-    // hacia una columna borrada.
+    // Sin el impacto (relaciones donde es extremo) no se ofrece el borrado: con
+    // `relIds` vacío quedarían relaciones con pares hacia una columna borrada.
     const onImpactError = reportWriteError(() => toast.error(`Couldn't check the relationships of this ${nouns.member}: nothing was deleted. Try again.`));
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
     let impact: gov.RelationshipImpact;
@@ -446,20 +442,20 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       }
     } catch (e) { await onError(e); }
   };
-  /** Doc 74: mueve la columna en el único orden de la tabla (`ordinal`). */
+  /** Mueve la columna en el único orden de la tabla (`ordinal`). */
   const move = async (colId: string, delta: number) => {
     if (!data || reordering) return;
     const ids = cols.map((c) => c.id);
     const from = ids.indexOf(colId), to = from + delta;
-    // Doc 94 D3: se reordena dentro de cada bloque (las PK entre ellas, como
-    // cualquier columna); nadie cruza la frontera del bloque de PK.
+    // Se reordena dentro de cada bloque (las PK entre ellas, como cualquier
+    // columna); ninguna cruza la frontera del bloque de PK.
     if (!cols[from] || !cols[to] || !!cols[from].isPrimaryKey !== !!cols[to].isPrimaryKey) return;
     const nextIds = moveId(ids, colId, delta);
     if (nextIds === ids) return;
     const plan = reorderPlan(data.columns, nextIds);
     if (!plan.length) return;
     setReordering(true);
-    const pin = pinSession();   // doc 105 (H1): tandas de escrituras
+    const pin = pinSession();   // tandas de escrituras de una misma sesión
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't reorder")));
     // Optimista: el inspector reordena ya; la persistencia corre detrás.
     setData((d) => d && ({ ...d, columns: d.columns.map((c) => { const s = plan.find((p) => p.c.id === c.id); return s ? { ...c, ordinal: s.idx } : c; }) }));
@@ -471,7 +467,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     } catch (e) { await onError(e); await refresh().catch(() => {}); }
     finally { setReordering(false); }
   };
-  /** Doc 89 §3.2: basurero de la pestaña Views (paridad con Properties › Views). */
+  /** Basurero de la pestaña Views (paridad con Properties › Views). */
   const askDeleteView = async (v: TableViewRow) => {
     const pre = viewPre(v);
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
@@ -538,7 +534,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
             <div className="wk-insp-body">
               {tab === 'definition' && canEdit && (
                 <>
-                  {/* Doc 89 §3.2 · doc 85 §3.7: cada faceta edita SUS campos; los de la otra quedan en solo-lectura con el hint. */}
+                  {/* Cada faceta edita sus campos; los de la otra quedan en solo lectura con el hint. */}
                   <p className="wk-pp-cap" style={{ marginTop: 0 }}>
                     <b>{facet === 'logical' ? 'Logical facet' : 'Physical facet'}</b> — fields of the other facet are read-only here. {INSPECTOR_SWITCH_HINT[facet]}
                   </p>
@@ -737,7 +733,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   );
 }
 
-// ── Columna / atributo (doc 89 §3.3): el Properties de columna completo ──────
+// ── Columna / atributo: el Properties de columna completo ─────────────────────
 
 const COL_TABS: { id: ColTab; label: string }[] = [
   { id: 'definition', label: 'Definition' },
@@ -777,9 +773,9 @@ function ColumnDetail({ col, cols, table, facet, std, canEdit, domains, udpDefs,
               </button>
             ))}
           </div>
-          {/* key=col.id: cambiar de columna remonta el editor — estado local,
+          {/* key=col.id: cambiar de columna remonta el editor; estado local,
               nameSync y debounces arrancan limpios (y el flush del desmontaje
-              persiste lo pendiente de la columna anterior, doc 40). */}
+              persiste lo pendiente de la columna anterior). */}
           <div style={{ paddingTop: 12 }}>
             <ColumnPropsBody key={col.id} col={col} table={table} cols={cols} tab={tab} domains={domains} udpDefs={udpDefs}
               view={facet} canEdit onPatch={onPatch} onDelete={onDelete} switchHint={INSPECTOR_SWITCH_HINT} />
@@ -853,11 +849,11 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     return () => { alive = false; };
   }, [target.id]);
   const view = data?.view;
-  // Doc 96 D6: la User-Defined SQL es solo informativa (el DDL sale de las columnas).
+  // La User-Defined SQL es solo informativa (el DDL sale de las columnas).
   const hasSql = !!(view?.customSql && view.customSql.trim());
   const srcName = (id?: string | null) => (id ? (data?.sources.find((s) => s.id === id)?.physicalName ?? id) : '—');
 
-  // ── Escritura versionada (doc 89 §3.4): el mismo saveView del panel de vista ──
+  // ── Escritura versionada: el mismo saveView del panel de vista ──
   const refresh = async () => { setData(await inspectView(target.id)); };
   const afterEdit = async (structural: boolean) => {
     markDirty();
@@ -868,9 +864,9 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
   };
   const saveView = async (patch: Partial<ViewInput>, label: string, structural: boolean) => {
     if (!data) return;
-    const pin = pinSession();   // doc 105 (H1): su inversa se apila sólo en su sesión
+    const pin = pinSession();   // su inversa se apila solo en su sesión
     const pre = viewPre(data.view);
-    await viewsSvc.updateView(pre.id, { ...data.view, ...patch } as ViewInput);   // doc completo (el overlay reemplaza)
+    await viewsSvc.updateView(pre.id, { ...data.view, ...patch } as ViewInput);   // doc completo (el overlay lo sustituye entero)
     pushUndo(label, async () => { await viewsSvc.updateView(pre.id, pre as ViewInput); await afterEdit(structural); }, pin);
     await afterEdit(structural);
   };
@@ -902,15 +898,15 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save UDP")));
     try { await saveView({ udpValues: next }, `Edit view ${data.view.name}`, false); } catch (e) { await onError(e); }
   };
-  /** Doc 89 §3.4: borra la vista (cualquiera sea su origen: botón View del
-   *  toolbar o Properties › Views — misma colección) y cierra el popup. */
+  /** Borra la vista (cualquiera sea su origen: botón View del toolbar o
+   *  Properties › Views, misma colección) y cierra el popup. */
   const askDelete = async () => {
     if (!data || deleting) return;
     setDeleting(true);
     const pre = viewPre(data.view);
     const canvasIds = data.usage.map((u) => u.canvasId);
-    // Doc 105 (H5): con la versión recién transferida el borrado termina con el
-    // error original — la revalidación ya avisó: acá se calla.
+    // Con la versión recién transferida el borrado termina con el error
+    // original; la revalidación se encarga del aviso, así que aquí se calla.
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
     try {
       const ok = await confirmDeleteView({ name: pre.name, action: () => deleteViewVersioned(pre, canvasIds) });
@@ -934,7 +930,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     const c = primaryCanvas(data.usage, activeSaId);
     if (c) goCanvas(c); else setTab('usage');
   };
-  // Doc 91 D7: en ambos modos las columnas son `sources`.
+  // En ambos modos las columnas son `sources`.
   const nCols = view ? (view.sources ?? []).length : 0;
   const counts: Partial<Record<VTab, number>> = data ? { columns: nCols, usage: data.usage.length } : {};
 

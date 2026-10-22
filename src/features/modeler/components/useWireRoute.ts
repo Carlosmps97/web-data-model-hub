@@ -4,11 +4,11 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { routeOf, type RoutePoint } from '../lib/wireRoute';
 
 /**
- * Trazo manual de UN wire del canvas (doc 99) — lo comparten el wire
- * crow's-foot y los de subcategoría (tronco y ramas).
+ * Trazo manual de un wire del canvas; lo comparten el wire crow's-foot y los
+ * de subcategoría (tronco y ramas).
  *
- *  · `via`      — puntos a dibujar, o null para el camino automático de
- *                 siempre. Sale del store por selector (cambiar el trazo de un
+ *  · `via`      — puntos a dibujar, o null para el camino automático. Sale
+ *                 del store por selector (cambiar el trazo de un
  *                 wire no re-pinta los demás) y, mientras se arrastra un
  *                 tirador, del borrador local.
  *  · `editable` — mostrar los tiradores: wire seleccionado, sesión de edición
@@ -17,7 +17,7 @@ import { routeOf, type RoutePoint } from '../lib/wireRoute';
  *  · `commit`   — guarda el trazo (una escritura) y suelta el borrador.
  *
  * En modo visor, un auto-arrange de la sesión oculta los trazos publicados de
- * ese canvas (`viewerRoutesOff`): con los bloques en otro sitio ya no calzan.
+ * ese canvas (`viewerRoutesOff`): con los bloques en otro sitio no calzan.
  */
 export function useWireRoute(id: string, pending: boolean) {
   const stored = useModelerStore((s) => routeOf(s.canvasRoutes, id));
@@ -35,7 +35,7 @@ export function useWireRoute(id: string, pending: boolean) {
 
   const editable = selected && editing && !lod && !pending;
   // El borrador solo cuenta mientras los tiradores están a la vista: fuera de
-  // edición el wire dibuja SIEMPRE lo guardado.
+  // edición el wire dibuja siempre lo guardado.
   const current = pending ? null : (editable ? draft : null) ?? (viewer && hidden ? null : stored ?? null);
   return { via: current?.length ? current : null, editable, lod, setDraft, commit };
 }

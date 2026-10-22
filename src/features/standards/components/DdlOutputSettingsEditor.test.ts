@@ -1,6 +1,6 @@
-// Output settings sin DOM (hooks de mentira: ver
-// reporting/components/fakeReact.testutil). Doc 105: «Save changes» se
-// habilitaba SIN cambios y registraba una versión vacía.
+// Output settings sin DOM (hooks simulados: ver
+// reporting/components/fakeReact.testutil). «Save changes» solo se habilita con
+// un cambio real; sin cambios no se registra una versión vacía.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import { DdlOutputForm, type DdlOutputSettings } from '@/features/ddl';
@@ -35,7 +35,7 @@ const form = (tree: unknown) => [...walk(tree)].find((e) => e.type === DdlOutput
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe('Output settings: «Save changes» sólo con un cambio real (doc 105)', () => {
+describe('Output settings: «Save changes» solo con un cambio real', () => {
   it('sin cambios queda deshabilitado, con «No changes to apply» (también sin nada guardado: rigen los defaults)', () => {
     for (const tree of [open(), open(undefined)]) {
       expect(saveBtn(tree).props.disabled).toBe(true);

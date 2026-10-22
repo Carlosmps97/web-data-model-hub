@@ -12,7 +12,7 @@ const rel = (id: string, parent: string, child: string, symbol?: string | null):
   ...(symbol !== undefined ? { subcategory: true, subtypeSymbolId: symbol } : {}),
 });
 
-describe('subtypeGraph (doc 53)', () => {
+describe('subtypeGraph', () => {
   const rels: Relationship[] = [
     rel('r1', 'party', 'individuo', 'sym1'),
     rel('r2', 'party', 'organizacion', 'sym1'),
@@ -20,7 +20,7 @@ describe('subtypeGraph (doc 53)', () => {
     rel('std', 'party', 'party-rol'),          // relación normal — no entra
   ];
 
-  it('isSubcategory exige flag Y símbolo', () => {
+  it('isSubcategory exige flag y símbolo', () => {
     expect(isSubcategory(rels[0])).toBe(true);
     expect(isSubcategory(rels[3])).toBe(false);
     expect(isSubcategory(rel('x', 'a', 'b', null))).toBe(false);
@@ -34,7 +34,7 @@ describe('subtypeGraph (doc 53)', () => {
     expect(groups[1].rels.map((r) => r.id)).toEqual(['r3']);
   });
 
-  it('membership: un subtipo pertenece a UN grupo', () => {
+  it('membership: un subtipo pertenece a un grupo', () => {
     expect(childSubtypeMembership(rels, 'individuo')).toBe('sym1');
     expect(childSubtypeMembership(rels, 'party-rol')).toBe(null);  // std no cuenta
     expect(childSubtypeMembership(rels, 'party')).toBe(null);
@@ -59,7 +59,7 @@ describe('subtypeGraph (doc 53)', () => {
     const tablePos = new Map([
       ['party', { x: 0, y: 0 }], ['individuo', { x: 0, y: 300 }],
       ['organizacion', { x: 300, y: 300 }],
-      ['cuenta', { x: 900, y: 0 }],           // sym2 SIN su hijo en canvas
+      ['cuenta', { x: 900, y: 0 }],           // sym2 sin su hijo en canvas
     ]);
     const { nodes, edges } = buildSubtypeGraph(
       rels, layout, tablePos, () => ({ w: 230, h: 120 }), (r) => r.id === 'r2');
@@ -88,7 +88,7 @@ describe('subtypeGraph (doc 53)', () => {
     expect(edges.find((e) => e.id === 'subsym-sym2')).toBeDefined();
   });
 
-  it('grupo cuyo supertipo NO está en el canvas no se dibuja', () => {
+  it('grupo cuyo supertipo no está en el canvas no se dibuja', () => {
     const tablePos = new Map([['individuo', { x: 0, y: 0 }]]);
     const { nodes, edges } = buildSubtypeGraph(
       rels, {}, tablePos, () => ({ w: 230, h: 120 }), () => false);
@@ -97,11 +97,11 @@ describe('subtypeGraph (doc 53)', () => {
   });
 });
 
-describe('subtypeGraph · frases de relación (doc 98)', () => {
+describe('subtypeGraph · frases de relación', () => {
   const tablePos = new Map([['party', { x: 0, y: 0 }], ['individuo', { x: 0, y: 300 }], ['organizacion', { x: 300, y: 300 }]]);
   const build = (rels: Relationship[]) => buildSubtypeGraph(rels, {}, tablePos, () => ({ w: 230, h: 100 }), () => false);
 
-  it('cada RAMA lleva la frase de SU relación; el tronco no lleva ninguna', () => {
+  it('cada rama lleva la frase de su relación; el tronco no lleva ninguna', () => {
     const { edges } = build([
       { ...rel('r1', 'party', 'individuo', 'sym1'), parentToChildPhrase: 'Party es un Individuo' },
       { ...rel('r2', 'party', 'organizacion', 'sym1'),

@@ -1,25 +1,24 @@
 /**
- * Doc 113 §1.3 — dónde van las tablas y vistas que ENTRARON a un canvas con la
- * carga Excel. Antes la carga corría el Autoarrange COMPLETO (movía todos los
- * bloques y reiniciaba los trazos manuales de wires); ahora lo existente no se
- * toca:
- *  · lo nuevo (tablas + las vistas de esas tablas) se ordena como GRUPO con el
- *    mismo motor del Autoarrange (ELK), sólo con esos bloques: no se pisan entre
+ * Dónde van las tablas y vistas que entran a un canvas con la carga Excel. La
+ * carga no corre el Autoarrange completo (movería todos los bloques y
+ * reiniciaría los trazos manuales de wires): lo existente no se toca.
+ *  · lo nuevo (tablas + las vistas de esas tablas) se ordena como grupo con el
+ *    mismo motor del Autoarrange (ELK), solo con esos bloques: no se pisan entre
  *    sí y cada vista queda a la derecha de su tabla;
  *  · el grupo se centra en `focus` (el centro de lo que el usuario ve, si es el
  *    canvas abierto) o en el centro del contenido existente; en un canvas sin
  *    nada, arriba a la izquierda. Si ahí había bloques, lo nuevo queda encima
  *    (el canvas lo pinta por delante: `freshNodes`), sin moverlos;
- *  · una vista nueva de una tabla que YA estaba va pegada a la derecha de su
+ *  · una vista nueva de una tabla que ya estaba va pegada a la derecha de su
  *    tabla y baja si chocaría con otro bloque nuevo.
  * Tamaños: la estimación LOD en físico (la carga es del modelo físico), la misma
  * del Autoarrange sin nodos medidos. Devuelve, en píxeles enteros, la posición
- * de lo que entró y (ronda 2 de la revisión) la de lo existente SIN posición
- * guardada que el canvas correría de lugar, fijado donde estaba: las tablas
- * sin posición se pintan por su número de orden (el backend ordena por nombre,
- * también en el draft) y una tabla que entra y ordena antes las corre — se
- * fijan todas, así tampoco las corre un alta posterior —; una vista sin
- * posición se re-anclaría a una tabla que entra si es su primera fuente.
+ * de lo que entró y la de lo existente sin posición guardada que el canvas
+ * correría de lugar, fijado donde estaba: las tablas sin posición se pintan por
+ * su número de orden (el backend ordena por nombre, también en el draft) y una
+ * tabla que entra y las precede en el orden las corre; se fijan todas, así
+ * tampoco las corre un alta posterior. Una vista sin posición se re-anclaría a
+ * una tabla que entra si es su primera fuente.
  */
 import type { Diagram } from '../services/modeler.service';
 import type { CanonicalColumn } from '@/services/governance.service';
@@ -55,16 +54,16 @@ function centerOf(bs: Box[]): Point | null {
   return { x: (l + r) / 2, y: (t + btm) / 2 };
 }
 
-/** Dónde está HOY cada bloque existente (`now`) y cuáles fijar (`pins`) para
- *  que lo que entra — tablas `tables` y vistas `views` — no los corra: su
- *  posición guardada o, si no tiene (entró sin layout, antes del doc 113), donde
- *  lo pinta el canvas — la grilla por número de orden entre lo que ya estaba
- *  para las tablas, y a la derecha de su primera fuente que ya estaba para las
- *  vistas. Si entra una tabla se fijan TODAS las tablas sin posición (una que
- *  ordena antes las corre de casilla; así tampoco las corre un alta posterior)
- *  y las vistas sin posición cuya primera fuente presente pasaría a ser una
- *  tabla que entra. `dia` puede ser el canvas de ANTES (doc 114: crear,
- *  importar, CTAS, pegar — lo que entra todavía no está) o el de DESPUÉS (la
+/** Dónde está en este momento cada bloque existente (`now`) y cuáles fijar
+ *  (`pins`) para que lo que entra — tablas `tables` y vistas `views` — no los
+ *  corra: su posición guardada o, si no tiene (entró sin layout), donde lo
+ *  pinta el canvas — la grilla por número de orden entre lo que ya estaba para
+ *  las tablas, y a la derecha de su primera fuente que ya estaba para las
+ *  vistas. Si entra una tabla se fijan todas las tablas sin posición (una que
+ *  las precede en el orden las corre de casilla; así tampoco las corre un alta
+ *  posterior) y las vistas sin posición cuya primera fuente presente pasaría a
+ *  ser una tabla que entra. `dia` puede ser el canvas previo a la entrada
+ *  (crear, importar, CTAS, pegar: el diagrama no incluye lo que entra) o el posterior (la
  *  carga Excel: lo que entró ya está y se salta). Puro. */
 export function pinsForEntering(
   dia: Diagram, tables: readonly string[], views: readonly string[] = [],
@@ -94,11 +93,11 @@ export function pinsForEntering(
   return { now, pins };
 }
 
-/** Revisión doc 114: lo mismo al SACAR o BORRAR tablas (`leaving`) del canvas
- *  abierto — las que siguen sin posición se correrían una casilla hacia atrás
- *  (y un Undo posterior dejaba una tabla tapando a otra): se fijan donde se ven,
+/** Lo mismo al sacar o borrar tablas (`leaving`) del canvas abierto: las que
+ *  siguen sin posición se correrían una casilla hacia atrás (y un Undo
+ *  posterior dejaría una tabla tapando a otra), así que se fijan donde se ven,
  *  igual que las vistas sin posición cuya primera fuente presente sale y les
- *  queda otra. `dia` = el canvas de ANTES de sacarlas. Puro. */
+ *  queda otra. `dia` = el canvas previo a sacarlas. Puro. */
 export function pinsForLeaving(dia: Diagram, leaving: readonly string[]): Record<string, Point> {
   const out = new Set(leaving);
   if (!dia.tables.some((t) => out.has(t.id))) return {};
@@ -118,9 +117,9 @@ export function pinsForLeaving(dia: Diagram, leaving: readonly string[]): Record
   return pins;
 }
 
-/** Revisión 2 doc 114 (R2-1): dónde se ve la tabla `id` en el canvas `dia` — su
- *  posición guardada o su casilla por número de orden; null si no está. El Undo
- *  de borrar una tabla la repone ahí en cada canvas que no estaba abierto. Puro. */
+/** Dónde se ve la tabla `id` en el canvas `dia`: su posición guardada o su
+ *  casilla por número de orden; null si no está. El Undo de borrar una tabla la
+ *  repone ahí en cada canvas que no estaba abierto. Puro. */
 export function seenAt(dia: Diagram, id: string): Point | null {
   const i = dia.tables.findIndex((t) => t.id === id);
   return i < 0 ? null : dia.subjectArea.layout?.[id] ?? gridSlot(i);

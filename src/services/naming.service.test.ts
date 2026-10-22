@@ -1,4 +1,4 @@
-/** naming.service · dry-run del glosario (doc 94 D7). */
+/** naming.service · dry-run del glosario. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn() }));

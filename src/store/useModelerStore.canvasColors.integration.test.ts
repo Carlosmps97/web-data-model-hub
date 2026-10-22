@@ -1,8 +1,8 @@
-// Doc 112 — el color de una caja EN un canvas vive mientras la caja está en ese
-// canvas, INTEGRADO: el store real con el `structure.service` real (su cola de
+// El color de una caja en un canvas vive mientras la caja está en ese canvas.
+// Prueba integrada: el store real con el `structure.service` real (su cola de
 // escrituras) contra un draft en memoria. Sacar o borrar una tabla o vista le
-// quita su color de ese canvas (antes quedaba guardado y revivía si la caja
-// volvía); el Undo lo repone con la caja; una caja que vuelve a entrar llega con
+// quita su color de ese canvas (no queda guardado para revivir si la caja
+// vuelve); el Undo lo repone con la caja; una caja que vuelve a entrar llega con
 // el color de su tabla; los colores de los demás canvases no se tocan.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -107,8 +107,8 @@ beforeEach(async () => {
   vi.mocked(viewsSvc.listViewsForTables).mockImplementation(async () => [] as never);
   vi.mocked(viewsSvc.updateView).mockImplementation(async () => ({}) as never);
   vi.mocked(viewsSvc.tableViews).mockImplementation(async () => ({ views: [] }) as never);
-  // La cascada del backend (doc 88 §4 + doc 112): borrar una vista la saca de
-  // todo canvas que la lista, con su posición y su color.
+  // La cascada del backend: borrar una vista la saca de todo canvas que la
+  // lista, con su posición y su color.
   vi.mocked(viewsSvc.deleteView).mockImplementation(async (id: string) => {
     for (const sa of Object.values(draft)) {
       if (!sa.viewIds?.includes(id)) continue;
@@ -136,8 +136,8 @@ afterEach(async () => {
 });
 
 describe('sacar una caja del canvas', () => {
-  it('su color en ESTE canvas sale con ella (y el de su vista huérfana); el de otro canvas queda; deshacer lo repone', async () => {
-    await st().removeTableFromArea('t1');                      // v1 (sólo t1) sale huérfana
+  it('su color en este canvas sale con ella (y el de su vista huérfana); el de otro canvas queda; deshacer lo repone', async () => {
+    await st().removeTableFromArea('t1');                      // `v1` (solo `t1`) sale huérfana
     expect(draft.sa1.colors).toEqual({ t2: 'none', v2: '#FFC000' });
     expect(st().canvasColors).toEqual({ t2: 'none', v2: '#FFC000' });
     expect(draft.sa2.colors).toEqual({ t1: '#222222' });
@@ -146,7 +146,7 @@ describe('sacar una caja del canvas', () => {
     expect(st().canvasColors).toEqual(canvas().colors);
   });
 
-  it('si después se vuelve a importar, llega con el color de su tabla (no revive el de antes)', async () => {
+  it('si después se vuelve a importar, llega con el color de su tabla (no revive el color anterior)', async () => {
     await st().removeTableFromArea('t1');
     await st().addExistingTables(['t1']);
     expect(draft.sa1.tableIds).toContain('t1');

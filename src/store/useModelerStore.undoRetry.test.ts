@@ -1,8 +1,8 @@
-// Doc 105 (H3) — la inversa de «Create table» / «Paste table» es borrar la
-// tabla, y ese borrado puede fallar SIN escribir nada (no pudo leer su cascada,
-// A3/A5). `undoLast` ya había sacado la entrada: el «Try again» del aviso, con
-// Ctrl+Z, deshacía OTRA acción y la tabla seguía viva. Ahora la entrada vuelve
-// a la pila y el aviso pide pulsar Undo otra vez. Harness de `deleteUndo.test.ts`.
+// La inversa de «Create table» / «Paste table» es borrar la tabla, y ese
+// borrado puede fallar sin escribir nada (no pudo leer su cascada). `undoLast`
+// ya sacó la entrada de la pila: si no volviera, otro Ctrl+Z deshacería otra
+// acción y la tabla seguiría viva. Por eso la entrada vuelve a la pila y el
+// aviso pide pulsar Undo otra vez. Harness de `deleteUndo.test.ts`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
@@ -52,7 +52,7 @@ const deleted = (coll: string, id: string) => ops.get(`${coll}:${id}`) === 'dele
 const unhandled: unknown[] = [];
 const onUnhandled = (e: unknown) => { unhandled.push(e); };
 
-/** Cascada de membresía del backend (doc 88 §4) al borrar una tabla o vista. */
+/** Cascada de membresía del backend al borrar una tabla o vista. */
 function cascade(coll: string, id: string): void {
   if (!cascadeOnDelete) return;
   const field = coll === 'views' ? 'viewIds' : 'tableIds';
@@ -63,9 +63,9 @@ function cascade(coll: string, id: string): void {
     if (sa.layout) delete sa.layout[id];
   }
 }
-/** Poda del backend al grabar un canvas (prune_deleted_members): sólo los ids
- *  LISTADOS en `tableIds`/`viewIds` con un borrado pendiente salen de las listas
- *  y del layout (un canvas legacy conserva la posición de sus vistas). */
+/** Poda del backend al grabar un canvas (prune_deleted_members): solo los ids
+ *  listados en `tableIds`/`viewIds` con un borrado pendiente salen de las listas
+ *  y del layout (un canvas sin lista explícita de vistas conserva su posición). */
 function prune(sa: SubjectArea): SubjectArea {
   const listed = [...(sa.tableIds ?? []), ...(Array.isArray(sa.viewIds) ? sa.viewIds : [])];
   const gone = new Set(listed.filter((id) => deleted('canonical_tables', id) || deleted('views', id)));
@@ -75,7 +75,7 @@ function prune(sa: SubjectArea): SubjectArea {
   if (sa.layout) out.layout = Object.fromEntries(Object.entries(sa.layout).filter(([k]) => !gone.has(k)));
   return out;
 }
-/** Vistas que el canvas MUESTRA: su lista explícita o, legacy, las de sus fuentes. */
+/** Vistas que el canvas muestra: su lista explícita o, sin ella, las de sus fuentes. */
 const shown = (sa: SubjectArea): string[] =>
   (Array.isArray(sa.viewIds) ? sa.viewIds : VIEWS.filter((v) => v.sourceTableIds.some((t) => sa.tableIds.includes(t))).map((v) => v.id))
     .filter((v) => !deleted('views', v));
@@ -92,14 +92,14 @@ beforeEach(async () => {
   cascadeOnDelete = true;
   ops = new Map();
   draft = {
-    // Canvas ACTIVO, con lista explícita de vistas (doc 70).
+    // Canvas activo, con lista explícita de vistas.
     sa1: { id: 'sa1', projectId: 'p', name: 'Uno', folderId: null, tableIds: ['t1', 't2'], viewIds: ['v1', 'v2'],
       layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 0, y: 300 }, v2: { x: 400, y: 300 } },
       drawings: [], udpValues: {}, routes: {} } as SubjectArea,
     // Otro canvas con lista explícita que también muestra v1.
     sa2: { id: 'sa2', projectId: 'p', name: 'Dos', folderId: null, tableIds: ['t1'], viewIds: ['v1'],
       layout: { t1: { x: 5, y: 5 }, v1: { x: 5, y: 205 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
-    // Canvas legacy (sin lista explícita): muestra v1 por su fuente.
+    // Canvas sin lista explícita de vistas: muestra v1 por su fuente.
     sa3: { id: 'sa3', projectId: 'p', name: 'Tres', folderId: null, tableIds: ['t1'],
       layout: { t1: { x: 9, y: 9 }, v1: { x: 9, y: 209 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
   };
@@ -187,10 +187,10 @@ afterEach(async () => {
 });
 
 
-describe('una inversa que borra una tabla y no pudo leer su cascada (doc 105, H3)', () => {
+describe('una inversa que borra una tabla y no pudo leer su cascada', () => {
   const stack = () => useUndoStore.getState().stack.map((e) => e.label);
 
-  it('la entrada vuelve a la pila: Undo otra vez reintenta ESA acción, no la anterior', async () => {
+  it('la entrada vuelve a la pila: Undo otra vez reintenta esa acción, no la anterior', async () => {
     const other = vi.fn(async () => {});
     useUndoStore.setState({ stack: [
       { label: 'Rename column X', run: other },                         // acción anterior del usuario
@@ -204,7 +204,7 @@ describe('una inversa que borra una tabla y no pudo leer su cascada (doc 105, H3
     // El usuario hace lo que dice el aviso: pulsa Undo otra vez.
     const label = await useUndoStore.getState().undoLast();
     expect({ undid: label, otherRan: other.mock.calls.length, t3Deleted: deleted('canonical_tables', 't3') })
-      .toEqual({ undid: 'Create table M_T3', otherRan: 0, t3Deleted: true });   // antes: 'Rename column X', 1, false
+      .toEqual({ undid: 'Create table M_T3', otherRan: 0, t3Deleted: true });
     expect(stack()).toEqual(['Rename column X']);
   });
 
@@ -214,10 +214,10 @@ describe('una inversa que borra una tabla y no pudo leer su cascada (doc 105, H3
   });
 });
 
-// Doc 105 (O3, verificador de navegador): en el modelo lógico el diálogo dice
-// «Delete entity» y el rechazo decía «this table». Mismos sustantivos por
-// modelo (`facetNouns(viewMode)`), también en el aviso del Undo.
-describe('el aviso usa los sustantivos del modelo abierto (doc 105, O3)', () => {
+// En el modelo lógico el diálogo dice «Delete entity»: el rechazo usa los
+// mismos sustantivos por modelo (`facetNouns(viewMode)`), también en el aviso
+// del Undo.
+describe('el aviso usa los sustantivos del modelo abierto', () => {
   it('lógico: «this entity» al borrar y al deshacer', async () => {
     st().setViewMode('logical');
     vi.mocked(gov.listColumns).mockRejectedValueOnce(new Error('sin red'));

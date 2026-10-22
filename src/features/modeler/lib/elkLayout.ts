@@ -4,19 +4,19 @@ import type { Node, Edge } from '@xyflow/react';
 const elk = new ELK();
 
 /**
- * Auto-arrange del canvas con ELK (Eclipse Layout Kernel) — algoritmo `layered`
- * (Sugiyama). NO usamos matemática de posicionamiento hecha a mano: ELK resuelve
+ * Auto-arrange del canvas con ELK (Eclipse Layout Kernel), algoritmo `layered`
+ * (Sugiyama). No se usa matemática de posicionamiento hecha a mano: ELK resuelve
  * asignación de capas, orden dentro de capa (minimización de cruces) y coordenadas.
  * El ruteo visual de los wires lo hace React Flow (`getSmoothStepPath`, ortogonal).
  *
  * Config afinada para diagramas ER (validada contra el canvas de estrés):
- *  · separateConnectedComponents + componentComponent → las tablas/clusters SUELTOS
+ *  · separateConnectedComponents + componentComponent → las tablas/clusters sueltos
  *    se empaquetan en bloques compactos en vez de una tira larga.
- *  · spacing.edge* → los wires tienen AIRE (no se pegan a los nodos ni entre sí).
+ *  · spacing.edge* → los wires tienen aire (no se pegan a los nodos ni entre sí).
  *  · BRANDES_KOEPF + favorStraightEdges → columnas balanceadas y wires más rectos.
  *  · crossingMinimization LAYER_SWEEP + thoroughness alto → menos cruces de wires.
- *  · usa el ancho/alto MEDIDO de cada nodo (ahora variable por el ancho dinámico),
- *    así el layout respeta el tamaño real de cada tabla.
+ *  · usa el ancho/alto medido de cada nodo (variable por el ancho dinámico), así
+ *    el layout respeta el tamaño real de cada tabla.
  */
 const opts: Record<string, string> = {
   'elk.algorithm': 'layered',
@@ -39,7 +39,7 @@ const opts: Record<string, string> = {
   'elk.layered.thoroughness': '10',
 };
 
-// Fallback SÓLO si un nodo aún no fue medido por React Flow (raro: el arrange se
+// Fallback solo para un nodo que React Flow no midió (raro: el arrange se
 // dispara con el canvas visible). Los reales llegan por `n.measured`.
 const NODE_W = 240;
 const NODE_H = 160;

@@ -1,13 +1,13 @@
 /**
- * Revisión 2 doc 114 — teclado en la barra del canvas y sus menús de grupo.
+ * Teclado en la barra del canvas y sus menús de grupo.
  * Puro (los componentes le pasan el evento y los elementos).
  */
 
-/** Enter o Espacio sostenidos repiten la tecla: cada repetición activaba lo que
- *  tuviera el foco — el grupo abría su menú, el foco iba a la 1.ª herramienta,
- *  usarla lo devolvía al grupo… hasta confirmar un Auto-arrange. En un botón de
- *  la barra (`root`) o de sus menús flotantes, la repetición no activa nada; en
- *  un modal (aunque lo abra la barra) o en un campo, sí. */
+/** Enter o Espacio sostenidos repiten la tecla: si cada repetición activara lo
+ *  que tiene el foco, el grupo abriría su menú, el foco iría a la 1.ª
+ *  herramienta, usarla lo devolvería al grupo… hasta confirmar un Auto-arrange.
+ *  En un botón de la barra (`root`) o de sus menús flotantes, la repetición no
+ *  activa nada; en un modal (aunque lo abra la barra) o en un campo, sí. */
 export function blocksRepeat(
   e: { repeat: boolean; key: string; target: { closest?: (sel: string) => unknown } | null },
   root: { contains: (n: never) => boolean } | null,
@@ -19,7 +19,7 @@ export function blocksRepeat(
 }
 
 /** Tab en los bordes del menú de un grupo (un portal al final de la página: el
- *  foco saltaba lejos). `back`: Shift+Tab en la 1.ª herramienta (o en el menú,
+ *  foco saltaría lejos). `back`: Shift+Tab en la 1.ª herramienta (o en el menú,
  *  sin herramientas) — vuelve al botón del grupo; `forward`: Tab en la última —
  *  sigue con lo que viene después del grupo en la barra; null: lo hace el navegador. */
 export function tabExit<T>(e: { key: string; shiftKey: boolean }, items: readonly T[], active: T | null, panel: T): 'back' | 'forward' | null {

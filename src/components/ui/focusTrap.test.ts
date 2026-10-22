@@ -5,9 +5,9 @@ import {
   activeElementNow, focusInto, isFocusReturn, keepFocusIn, modalOpen, noteKey, recoverTab, tabTarget, trapTab,
 } from './focusTrap';
 
-/** Doc 105 (F6): Tab no sale de un diálogo (Version tools, confirmaciones,
- *  Dialog del design system) — antes sólo el de transferencia lo atrapaba. */
-describe('tabTarget (doc 105)', () => {
+/** Tab no sale de un diálogo (Version tools, confirmaciones, Dialog del sistema
+ *  de diseño). */
+describe('tabTarget', () => {
   const [box, a, b, c] = ['box', 'a', 'b', 'c'];
   it('Tab en el último vuelve al primero; en el medio sigue el navegador', () => {
     expect(tabTarget([a, b, c], c, box, false)).toBe(a);
@@ -22,7 +22,7 @@ describe('tabTarget (doc 105)', () => {
   });
 });
 
-/** DOM de mentira: sólo lo que usan estas funciones. `modals` = las cajas
+/** DOM simulado: solo lo que usan estas funciones. `modals` = las cajas
  *  `[aria-modal="true"]` que siguen en pantalla (en orden de documento). */
 function dom() {
   const doc: { activeElement: unknown; body: object; modals: unknown[]; querySelectorAll: () => unknown[] } = {
@@ -36,7 +36,7 @@ function dom() {
       focus: vi.fn(() => { doc.activeElement = n; }),
       contains: (x: unknown) => x === n || inside.includes(x),
       matches: (sel: string) => sel === ':disabled' && n.disabled,
-      // `closest('[aria-modal="true"]')`: la caja del diálogo que lo contiene (aunque ya no esté en pantalla).
+      // `closest('[aria-modal="true"]')`: la caja del diálogo que lo contiene (aunque haya salido de la pantalla).
       closest: (sel: string) => (sel === '[aria-modal="true"]' ? dialog : null),
       getClientRects: () => (n.isConnected ? [1] : []),
     };
@@ -45,9 +45,9 @@ function dom() {
   return { doc, node };
 }
 
-/** Doc 105 (F6): un Dialog/Modal abierto con el mouse dejaba el foco en la
- *  página de atrás — Tab la recorría y la trampa nunca actuaba. */
-describe('focusInto (doc 105)', () => {
+/** Un Dialog/Modal abierto con el mouse toma el foco: si quedara en la página de
+ *  atrás, Tab la recorrería y la trampa nunca actuaría. */
+describe('focusInto', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it('abierto con el mouse (el foco afuera): la caja toma el foco; al cerrarse con él adentro, vuelve a quien lo abrió', () => {
@@ -122,7 +122,7 @@ describe('focusInto (doc 105)', () => {
     expect(() => restore2()).not.toThrow();
   });
 
-  it('quien abrió ya no sirve (se fue con su fila, o quedó deshabilitado): el foco va al diálogo que sigue abierto', () => {
+  it('quien abrió no sirve (se fue con su fila o está deshabilitado): el foco va al diálogo que sigue abierto', () => {
     const { doc, node } = dom();
     for (const opener of [node({ connected: false }), node({ disabled: true })]) {
       const below = node();                         // p. ej. el Modal «Subcategory» que sigue abierto
@@ -142,7 +142,7 @@ describe('focusInto (doc 105)', () => {
     const trigger = node();                         // «Chained…»
     const boxA = node();
     doc.activeElement = trigger;
-    focusInto(boxA as never);                       // confirm A: recuerda a `trigger`
+    focusInto(boxA as never);                       // confirm A: guarda a `trigger` como opener
     (boxA as { isConnected: boolean }).isConnected = false;   // A se cerró…
     const yesA = node({ connected: false, dialog: boxA });    // …y su botón se fue con él
     const boxB = node();
@@ -154,7 +154,7 @@ describe('focusInto (doc 105)', () => {
     expect(trigger.focus).toHaveBeenCalledTimes(1);
   });
 
-  it('isFocusReturn: verdadero sólo DURANTE la devolución del foco al cerrarse, y sólo para ese elemento', () => {
+  it('isFocusReturn: verdadero solo durante la devolución del foco al cerrarse, y solo para ese elemento', () => {
     const { doc, node } = dom();
     const opener = node();
     const other = node();
@@ -166,16 +166,16 @@ describe('focusInto (doc 105)', () => {
     doc.activeElement = doc.body;
     restore();
     expect(during).toEqual([true, false]);          // el onFocus del que lo recibe lo ve (el evento es síncrono)
-    expect(isFocusReturn(opener)).toBe(false);       // después, ya no
+    expect(isFocusReturn(opener)).toBe(false);       // después, no
   });
 
-  it('quien abrió quedó deshabilitado DENTRO de un diálogo que sigue abierto: el foco va a esa caja, no detrás de ella', () => {
+  it('quien abrió quedó deshabilitado dentro de un diálogo que sigue abierto: el foco va a esa caja, no detrás de ella', () => {
     const { doc, node } = dom();
-    const pageBtn = node();                         // botón de la página, DETRÁS del diálogo de afuera
+    const pageBtn = node();                         // botón de la página, detrás del diálogo de afuera
     const outer = node();                           // el diálogo de afuera: sigue abierto
     doc.activeElement = pageBtn;
-    focusInto(outer as never);                      // el de afuera recuerda al botón de la página
-    const del = node({ disabled: true, dialog: outer });      // su «Delete» quedó deshabilitado (busy)
+    focusInto(outer as never);                      // el de afuera guarda como opener al botón de la página
+    const del = node({ disabled: true, dialog: outer });      // su «Delete» está deshabilitado (busy)
     const inner = node();
     const restore = focusInto(inner as never, del as never);  // el confirm que abrió ese «Delete»
     doc.modals = [outer];
@@ -188,9 +188,9 @@ describe('focusInto (doc 105)', () => {
   });
 });
 
-/** Doc 105 (F6, R6): el foco se perdía a <body> con el diálogo abierto —un
- *  botón que quedó deshabilitado (busy) o que desapareció— y Tab salía a la página. */
-describe('recoverTab / keepFocusIn (doc 105)', () => {
+/** Con el diálogo abierto, el foco puede caer a <body> (un botón que entró en busy o
+ *  que desapareció): la caja lo retoma para que Tab no salga a la página. */
+describe('recoverTab / keepFocusIn', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it('recoverTab: Tab con el foco en <body> (o en un control deshabilitado de la caja) vuelve a la caja', () => {
@@ -238,9 +238,9 @@ describe('recoverTab / keepFocusIn (doc 105)', () => {
   });
 });
 
-/** Doc 105 (R6): la trampa leía `.disabled` — no veía lo deshabilitado por un
- *  `fieldset[disabled]` ni lo oculto con `visibility: hidden`. */
-describe('trapTab: sólo controles habilitados y visibles (doc 105)', () => {
+/** La trampa no se limita a `.disabled`: también excluye lo deshabilitado por un
+ *  `fieldset[disabled]` y lo oculto con `visibility: hidden`. */
+describe('trapTab: solo controles habilitados y visibles', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it('un control de un fieldset deshabilitado o con visibility:hidden no cuenta', () => {
@@ -258,10 +258,11 @@ describe('trapTab: sólo controles habilitados y visibles (doc 105)', () => {
   });
 });
 
-/** Doc 105 (R11): un Enter que cierra un diálogo en su keydown devolvía el foco
- *  a quien lo abrió ANTES del keypress de ese mismo Enter — el keypress «clicaba»
- *  al opener (un botón): se reabría el popup de búsqueda o se repetía Undo. */
-describe('focusInto con un Enter en curso (doc 105, R11)', () => {
+/** Un Enter que cierra un diálogo en su keydown no devuelve el foco a quien lo
+ *  abrió hasta el keyup: si lo devolviera antes de que llegue el keypress de ese
+ *  mismo Enter, el keypress «clicaría» al opener (un botón) y se reabriría el
+ *  popup de búsqueda o se repetiría Undo. */
+describe('focusInto con un Enter en curso', () => {
   afterEach(() => { noteKey({ type: 'keyup', key: 'Enter' }); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
   it('el foco vuelve recién en el keyup del Enter: el keypress de ese Enter no le llega a quien abrió', () => {
@@ -272,7 +273,7 @@ describe('focusInto con un Enter en curso (doc 105, R11)', () => {
     const restore = focusInto(box as never);
     noteKey({ type: 'keydown', key: 'Enter' });     // Enter en el buscador: Locate cierra el diálogo…
     doc.activeElement = doc.body;
-    restore();                                      // …y su limpieza corre DENTRO de ese keydown
+    restore();                                      // …y su limpieza corre dentro de ese keydown
     const keypressTarget = doc.activeElement;       // el keypress que sigue va a quien tiene el foco
     expect(keypressTarget).not.toBe(opener);
     expect(opener.focus).not.toHaveBeenCalled();
@@ -305,7 +306,7 @@ describe('focusInto con un Enter en curso (doc 105, R11)', () => {
     doc.activeElement = other;
     noteKey({ type: 'keyup', key: 'Enter' });
     expect(opener.focus).not.toHaveBeenCalled();
-    // quien abrió está DENTRO de un diálogo cuya caja quedó con el foco (keepFocusIn)
+    // quien abrió está dentro de un diálogo cuya caja tiene el foco (keepFocusIn)
     const inner = node();
     const outer = { ...node({ inside: [inner] }), matches: (sel: string) => sel === '[aria-modal="true"]' };
     doc.activeElement = inner;
@@ -318,7 +319,7 @@ describe('focusInto con un Enter en curso (doc 105, R11)', () => {
     expect(inner.focus).toHaveBeenCalledTimes(1);
   });
 
-  it('Enter sostenido (autorepeat) más de 1 s: el respaldo espera mientras sigan llegando keydown (doc 105, R14)', () => {
+  it('Enter sostenido (autorepeat) más de 1 s: el respaldo espera mientras sigan llegando keydown', () => {
     vi.useFakeTimers();
     const { doc, node } = dom();
     const opener = node();
@@ -332,7 +333,7 @@ describe('focusInto con un Enter en curso (doc 105, R11)', () => {
       noteKey({ type: 'keydown', key: 'Enter', repeat: true });
     }
     vi.advanceTimersByTime(100);
-    expect(opener.focus).not.toHaveBeenCalled();    // devuelto ahora, el autorepeat lo «clicaría»
+    expect(opener.focus).not.toHaveBeenCalled();    // devuelto en este punto, el autorepeat lo «clicaría»
     noteKey({ type: 'keyup', key: 'Enter' });
     expect(opener.focus).toHaveBeenCalledTimes(1);
   });
@@ -360,7 +361,7 @@ describe('focusInto con un Enter en curso (doc 105, R11)', () => {
     expect(opener.focus).toHaveBeenCalledTimes(1);
   });
 
-  it('un diálogo que se abre con una devolución pendiente recuerda a su destino, no a <body> (doc 105, R17b F2)', () => {
+  it('un diálogo que se abre con una devolución pendiente recuerda a su destino, no a <body>', () => {
     const { doc, node } = dom();
     const apply = node();                           // «Apply…» de la página
     doc.activeElement = apply;
@@ -374,10 +375,10 @@ describe('focusInto con un Enter en curso (doc 105, R11)', () => {
     expect(apply.focus).not.toHaveBeenCalled();
     doc.activeElement = doc.body;                   // ESC cierra el Modal
     restoreModal();
-    expect(apply.focus).toHaveBeenCalledTimes(1);   // vuelve a «Apply…» (antes quedaba en <body>)
+    expect(apply.focus).toHaveBeenCalledTimes(1);   // vuelve a «Apply…» (no queda en <body>)
   });
 
-  it('un Tab durante la espera (foco en <body>) hace ya la devolución y se queda en quien abrió (doc 105, R17b F4)', () => {
+  it('un Tab durante la espera (foco en <body>) hace ya la devolución y se queda en quien abrió', () => {
     const { doc, node } = dom();
     const notes = node();                           // «Notes…»
     doc.activeElement = notes;
@@ -388,7 +389,7 @@ describe('focusInto con un Enter en curso (doc 105, R11)', () => {
     expect(notes.focus).not.toHaveBeenCalled();
     const tab = { type: 'keydown', key: 'Tab', preventDefault: vi.fn() };
     noteKey(tab);
-    expect(notes.focus).toHaveBeenCalledTimes(1);   // antes: el Tab saltaba al inicio de la página
+    expect(notes.focus).toHaveBeenCalledTimes(1);   // el Tab no salta al inicio de la página
     expect(tab.preventDefault).toHaveBeenCalled();
     // con el foco en otro lado (no perdido), un Tab no toca nada
     const other = node();
@@ -425,13 +426,14 @@ describe('focusInto con un Enter en curso (doc 105, R11)', () => {
   });
 });
 
-/** Doc 105 (R11): el canvas protegía sus atajos (⌘Z, ESC) sólo con `.dmh-backdrop`
- *  — con un Dialog abierto (Search, CTAS, Publish…) ⌘Z deshacía por detrás. */
-describe('modalOpen (doc 105, R11)', () => {
+/** El canvas protege sus atajos (⌘Z, ESC) con `modalOpen()`, que ve cualquier
+ *  diálogo y no solo `.dmh-backdrop`: con un Dialog abierto (Search, CTAS,
+ *  Publish…), ⌘Z no deshace por detrás. */
+describe('modalOpen', () => {
   afterEach(() => { vi.unstubAllGlobals(); });
 
   it('ve cualquier diálogo aria-modal (Dialog, Modal, confirm, prompt) además de un .dmh-backdrop', () => {
-    // documento de mentira con un Dialog abierto: `.dmh-dialog-backdrop` > `[aria-modal="true"]`
+    // documento simulado con un Dialog abierto: `.dmh-dialog-backdrop` > `[aria-modal="true"]`
     const present = ['.dmh-dialog-backdrop', '[aria-modal="true"]'];
     vi.stubGlobal('document', { querySelector: (sel: string) => (sel.split(',').some((p) => present.includes(p.trim())) ? {} : null) });
     expect(modalOpen()).toBe(true);
@@ -439,7 +441,7 @@ describe('modalOpen (doc 105, R11)', () => {
     expect(modalOpen()).toBe(false);
   });
 
-  it('ve también las esperas bloqueantes: «Saving working copy…» (.dmh-busy-overlay) y el Locate (.wk-nav-overlay) (doc 105, R14)', () => {
+  it('ve también las esperas bloqueantes: «Saving working copy…» (.dmh-busy-overlay) y el Locate (.wk-nav-overlay)', () => {
     for (const present of ['.dmh-busy-overlay', '.wk-nav-overlay']) {
       vi.stubGlobal('document', { querySelector: (sel: string) => (sel.split(',').some((p) => p.trim() === present) ? {} : null) });
       expect(modalOpen()).toBe(true);

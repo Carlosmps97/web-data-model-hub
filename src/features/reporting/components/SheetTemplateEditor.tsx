@@ -1,10 +1,10 @@
 /**
- * SheetTemplateEditor — alta y edición de plantillas de hoja Excel (doc 95 D11):
- * nombre, nombre de hoja, columnas (encabezado → dato del modelo o UDP) y
- * filtros de filas (sale la fila que cumple todos). Son dato: se editan sin
- * redesplegar. Permisos (spec D11): cada uno edita las suyas y comparte las que
- * quiera; las compartidas ajenas se ven en solo lectura y se pueden duplicar; un
- * admin gobierna las compartidas.
+ * SheetTemplateEditor — alta y edición de plantillas de hoja Excel: nombre,
+ * nombre de hoja, columnas (encabezado → dato del modelo o UDP) y filtros de
+ * filas (sale la fila que cumple todos). Son dato: se editan sin redesplegar.
+ * Permisos: cada uno edita las suyas y comparte las que quiera; las compartidas
+ * ajenas se ven en solo lectura y se pueden duplicar; un admin gobierna las
+ * compartidas.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -28,8 +28,8 @@ const toDraft = (t: SheetTemplate): Draft => ({
   fileName: t.fileName ?? '', columns: t.columns.map((c) => ({ ...c })), filters: (t.filters ?? []).map(toFilterDraft),
 });
 
-/** Doc 105 (B6): «Next export:» con reloj propio de 1 s — calculado en el render
- *  del editor, los segundos quedaban congelados hasta la siguiente tecla. */
+/** «Next export:» con reloj propio de 1 s: calculado en el render del editor,
+ *  los segundos quedarían congelados hasta la siguiente tecla. */
 export function NextExportName({ draft }: { draft: Pick<SheetTemplateBody, 'name' | 'fileName'> }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -61,10 +61,9 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
     setConfirmDelete(false);
   }, [selId, templates]);
 
-  /** Doc 105 (P3): elegir (lista, «New template», «Duplicate») reinicia el
-   *  borrador EN EL MISMO EVENTO — si llegaba sólo por el efecto, quedaba una
-   *  ventana con la plantilla anterior en pantalla. La misma selección no pisa
-   *  lo tecleado. */
+  /** Elegir (lista, «New template», «Duplicate») reinicia el borrador en el
+   *  mismo evento: si llegara solo por el efecto, quedaría una ventana con la
+   *  plantilla anterior en pantalla. La misma selección no pisa lo tecleado. */
   const choose = (id: string | null, copy: Draft | null = null) => {
     if (id === selId && !copy) return;
     const t = templates.find((x) => x.id === id);
@@ -73,9 +72,9 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
     setDraft(t ? toDraft(t) : copy ?? EMPTY);
     setConfirmDelete(false);
   };
-  /** Doc 105 (P3): todo campo actualiza sobre el ÚLTIMO borrador encolado — con
-   *  `{ ...draft, X }` una tecla tras un reinicio aún no renderizado revivía la
-   *  plantilla anterior con su id (y «Save changes» la pisaba). */
+  /** Cada campo actualiza sobre el último borrador encolado: con
+   *  `{ ...draft, X }` una tecla tras un reinicio sin renderizar reviviría la
+   *  plantilla anterior con su id (y «Save changes» la pisaría). */
   const patchDraft = (patch: Partial<Draft>) => setDraft((d) => ({ ...d, ...patch }));
 
   const groups = useMemo(() => sourceOptions(defs), [defs]);
@@ -108,7 +107,7 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
       const body: SheetTemplateBody = {
         name: draft.name.trim(), sheetName: draft.sheetName.trim(), description: draft.description?.trim() || null,
         shared: foreign || draft.shared, columns: draft.columns.map((c) => ({ header: c.header.trim(), source: c.source })),
-        fileName: cleanFileName(draft.fileName),   // doc 102
+        fileName: cleanFileName(draft.fileName),
         filters: draft.filters.map(toFilterBody),
       };
       const saved = draft.id
@@ -194,7 +193,7 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
           <label style={fieldLabel}>Description
             <input className="rd-input" value={draft.description ?? ''} onChange={(e) => patchDraft({ description: e.target.value })} placeholder="What this format is for" />
           </label>
-          {/* Doc 102: nombre del archivo del export — dato de la plantilla, sin redesplegar. */}
+          {/* Nombre del archivo del export: dato de la plantilla, sin redesplegar. */}
           <label style={fieldLabel}>File name
             <input className="rd-input" value={draft.fileName ?? ''} aria-label="File name"
               onChange={(e) => patchDraft({ fileName: e.target.value })}

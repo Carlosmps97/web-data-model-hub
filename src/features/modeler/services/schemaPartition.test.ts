@@ -1,6 +1,6 @@
-// Cache de esquemas-con-tablas (doc 43): una sola bajada del pool por sesión
-// y versión, compartida entre CTAS y New table. Los tests usan una versión
-// DISTINTA por caso porque el cache es module-level (persiste entre tests).
+// Cache de esquemas-con-tablas: una sola bajada del pool por sesión y versión,
+// compartida entre CTAS y New table. Los tests usan una versión distinta por
+// caso porque el cache es module-level (persiste entre tests).
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const csState = vi.hoisted(() => ({ activeId: null as string | null }));
@@ -26,20 +26,20 @@ const T = (schema?: string) => ({ id: crypto.randomUUID(), physicalName: 'X', lo
 describe('tableSchemasCached · esquemas con tablas, cacheados por versión', () => {
   beforeEach(() => {
     listTables.mockReset();
-    // catálogo por defecto SIN kind → fuerza el camino del pool (pre-doc-44)
+    // catálogo por defecto sin kind → fuerza el camino del pool
     listSchemas.mockReset();
     listSchemas.mockResolvedValue([{ id: 'x', name: 'X' }]);
   });
 
   it('deriva los esquemas del pool y cachea: la segunda llamada no re-consulta', async () => {
     csState.activeId = 'v1';
-    listTables.mockResolvedValue([T('DDV'), T('core'), T('DDV'), T(undefined)]);
-    expect(await tableSchemasCached()).toEqual(['core', 'DDV']);
-    expect(await tableSchemasCached()).toEqual(['core', 'DDV']);
+    listTables.mockResolvedValue([T('STG'), T('core'), T('STG'), T(undefined)]);
+    expect(await tableSchemasCached()).toEqual(['core', 'STG']);
+    expect(await tableSchemasCached()).toEqual(['core', 'STG']);
     expect(listTables).toHaveBeenCalledTimes(1);
   });
 
-  it('dos llamadas EN VUELO comparten un solo fetch (montaje doble de StrictMode)', async () => {
+  it('dos llamadas en vuelo comparten un solo fetch (montaje doble de StrictMode)', async () => {
     csState.activeId = 'v2';
     let release!: (v: ReturnType<typeof T>[]) => void;
     listTables.mockReturnValue(new Promise((res) => { release = res; }) as never);
@@ -67,13 +67,13 @@ describe('tableSchemasCached · esquemas con tablas, cacheados por versión', ()
     expect(listTables).toHaveBeenCalledTimes(2);
   });
 
-  it('catálogo totalmente clasificado (doc 44): usa el kind y NO baja el pool', async () => {
+  it('catálogo totalmente clasificado: usa el kind y no baja el pool', async () => {
     csState.activeId = 'v5';
     listSchemas.mockResolvedValue([
-      { id: '1', name: 'bcp_ddv_alm', kind: 'tables' },
-      { id: '2', name: 'bcp_ddv_alm_vu', kind: 'views' },
+      { id: '1', name: 'core_alm', kind: 'tables' },
+      { id: '2', name: 'core_alm_vu', kind: 'views' },
     ]);
-    expect(await tableSchemasCached()).toEqual(['bcp_ddv_alm']);
+    expect(await tableSchemasCached()).toEqual(['core_alm']);
     expect(listTables).not.toHaveBeenCalled();
   });
 
@@ -92,7 +92,7 @@ describe('tableSchemasCached · esquemas con tablas, cacheados por versión', ()
     expect(await tableSchemasCached()).toEqual(['C']);
   });
 
-  it('invalidar (al guardar en Structure · Schemas, doc 119) re-consulta en la próxima llamada', async () => {
+  it('invalidar (al guardar en Structure · Schemas) re-consulta en la próxima llamada', async () => {
     csState.activeId = 'v9';
     listSchemas.mockResolvedValue([{ id: '1', name: 'mix', kind: 'views' }]);
     expect(await tableSchemasCached()).toEqual([]);
@@ -102,7 +102,7 @@ describe('tableSchemasCached · esquemas con tablas, cacheados por versión', ()
     expect(await tableSchemasCached()).toEqual(['mix']);
   });
 
-  it('una respuesta en vuelo que llega después de invalidar no deja la foto vieja en el cache', async () => {
+  it('una respuesta en vuelo que llega después de invalidar no deja la foto desactualizada en el cache', async () => {
     csState.activeId = 'v10';
     let release!: (v: { id: string; name: string; kind: 'tables' | 'views' | 'both' }[]) => void;
     listSchemas.mockReturnValueOnce(new Promise((res) => { release = res; }) as never);

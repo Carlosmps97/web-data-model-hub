@@ -12,10 +12,10 @@ beforeAll(() => {
 });
 
 const { useUiStore } = await import('./useUiStore');
-// Estado con el que NACE el store en un navegador sin preferencias guardadas.
+// Estado con el que nace el store en un navegador sin preferencias guardadas.
 const bornRelLabelsHidden = useUiStore.getState().relLabelsHidden;
 
-describe('useUiStore (doc 92 D7 — chrome colapsable)', () => {
+describe('useUiStore (chrome colapsable)', () => {
   beforeEach(() => {
     mem.clear();
     useUiStore.setState({ toolbarCollapsed: false, explorerCollapsed: false });
@@ -35,7 +35,7 @@ describe('useUiStore (doc 92 D7 — chrome colapsable)', () => {
   });
 });
 
-describe('useUiStore · etiquetas de relación (doc 98)', () => {
+describe('useUiStore · etiquetas de relación', () => {
   beforeEach(() => {
     mem.clear();
     useUiStore.setState({ relLabelsHidden: false });

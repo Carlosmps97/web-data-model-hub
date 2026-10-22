@@ -1,5 +1,5 @@
-// TagEditor (doc 105, ronda 5): la UI va en inglés — sus placeholders por
-// defecto decían «clave» / «valor».
+// TagEditor: la UI va en inglés, incluidos sus placeholders por defecto
+// («key» / «value»).
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import TagEditor from './TagEditor';

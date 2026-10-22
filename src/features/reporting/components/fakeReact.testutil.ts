@@ -1,18 +1,18 @@
 /**
- * Hooks de React de mentira para probar componentes SIN DOM ni renderer (vitest
- * corre en node). El componente se llama como FUNCIÓN: cada `useState` devuelve
- * su valor inicial (o el que decida `fake.override`) y un setter que sólo ANOTA
+ * Hooks de React de mentira para probar componentes sin DOM ni renderer (vitest
+ * corre en node). El componente se llama como función: cada `useState` devuelve
+ * su valor inicial (o el que decida `fake.override`) y un setter que solo anota
  * lo que recibe; `useEffect` guarda el efecto para correrlo a mano. Con eso se
- * disparan los handlers REALES del árbol de elementos que devuelve.
+ * disparan los handlers reales del árbol de elementos que devuelve.
  * Para un ciclo de vida (montar → datos → re-render): `nextStates()` da el estado
- * siguiente, `resetFake(…, { keepRefs: true })` re-renderiza el MISMO componente
- * (mismas refs) y `runEffects()` corre sólo los efectos cuyas deps cambiaron,
- * limpiando antes su run anterior; `unmount()` corre todas las limpiezas.
+ * siguiente, `resetFake(…, { keepRefs: true })` re-renderiza el mismo componente
+ * (mismas refs) y `runEffects()` corre solo los efectos cuyas deps cambiaron,
+ * limpiando primero su run anterior; `unmount()` corre todas las limpiezas.
  *
  * Uso (en cada archivo de test; el mock se iza):
  *   vi.mock('react', async (orig) => (await import('./fakeReact.testutil')).fakeReact(await orig<object>()));
  *
- * Sin imports de React: este módulo se carga DENTRO del mock de 'react'.
+ * Sin imports de React: este módulo se carga dentro del mock de 'react'.
  */
 type Effect = () => void | (() => void);
 type Deps = readonly unknown[] | undefined;
@@ -21,15 +21,15 @@ export const fake = {
   /** Valor que devuelve el `useState` número `index` en lugar de `init` (null = el inicial). */
   override: null as null | ((init: unknown, index: number) => unknown),
   states: [] as { value: unknown; calls: unknown[] }[],
-  /** Setter de cada `useState` (en orden): ESTABLE entre re-renders, como en React —
-   *  anota en el render vigente al momento de la llamada. */
+  /** Setter de cada `useState` (en orden): estable entre re-renders, como en React —
+   *  anota en el render que esté vigente cuando se llama. */
   setters: [] as ((next: unknown) => void)[],
-  /** Montaje vigente: cada `resetFake()` SIN `keepRefs` es un montaje nuevo. */
+  /** Montaje vigente: cada `resetFake()` sin `keepRefs` es un montaje nuevo. */
   mount: 0,
-  /** Llamadas de setters de un montaje ANTERIOR (p. ej. un intervalo que no se
+  /** Llamadas de setters de un montaje anterior (p. ej. un intervalo que no se
    *  soltó al desmontar): se anotan aparte, nunca en el render vigente. */
   stale: [] as { index: number; next: unknown }[],
-  /** Efectos de ESTE render, en orden; `due` = primer run o deps distintas al run anterior. */
+  /** Efectos de este render, en orden; `due` = primer run o deps distintas al run anterior. */
   effects: [] as { fn: Effect; deps: Deps; due: boolean }[],
   /** Refs por orden de llamada: como en React, sobreviven a un re-render (`keepRefs`). */
   refs: [] as { current: unknown }[],
@@ -44,7 +44,7 @@ export const fake = {
 };
 
 /** Deja el estado de los hooks listo para un render nuevo; con `keepRefs` es un
- *  RE-render del mismo componente montado (mismas refs y efectos ya corridos). */
+ *  re-render del mismo componente montado (mismas refs y efectos ya corridos). */
 export function resetFake(override: typeof fake.override = null, { keepRefs = false } = {}): void {
   fake.override = override;
   fake.states = [];
@@ -74,14 +74,14 @@ const memo = (make: () => unknown, deps: Deps) => {
 };
 
 /** Estado del próximo render: cada `useState` con sus setters aplicados en orden
- *  (un valor reemplaza; una función recibe el último valor), como la cola de React. */
+ *  (un valor sustituye al anterior; una función recibe el último valor), como la cola de React. */
 export function nextStates(): unknown[] {
   return fake.states.map(({ value, calls }) =>
     calls.reduce((v, c) => (typeof c === 'function' ? (c as (p: unknown) => unknown)(v) : c), value));
 }
 
-/** Corre los efectos de este render cuyas deps cambiaron (antes, la limpieza de
- *  su run anterior); devuelve las limpiezas nuevas (el «desmontar» de ESTOS). */
+/** Corre los efectos de este render cuyas deps cambiaron (primero, la limpieza de
+ *  su run anterior); devuelve las limpiezas nuevas (el «desmontar» de estos). */
 export function runEffects(): (() => void)[] {
   const out: (() => void)[] = [];
   fake.effects.forEach(({ fn, deps, due }, i) => {

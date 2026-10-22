@@ -12,23 +12,23 @@ import { buildCandidates, filterColumns } from '../lib/ctasPick';
 
 /** Página server-side de fuentes (mismo tamaño que el Import existing). */
 const PAGE = 50;
-/** Tope de filas de columnas RENDERIZADAS — el filtro y Select all operan
- *  sobre el total (una fuente DDV real trae miles de columnas; miles de
- *  checkboxes en el DOM repiten el problema del canvas pre-LOD). */
+/** Tope de filas de columnas renderizadas: el filtro y Select all operan
+ *  sobre el total (una fuente grande trae miles de columnas, y miles de
+ *  checkboxes en el DOM degradan el render como un canvas sin LOD). */
 const COL_CAP = 300;
 
 /**
- * CTAS — Create Table As Select (Pantalla 06, rediseño doc 43). Dos secciones:
- *  1) elegir tablas fuente de TODO el modelo (ya no sólo el canvas) con el
- *     patrón del Import existing: búsqueda SERVER-SIDE paginada (draft-aware)
+ * CTAS — Create Table As Select. Dos secciones:
+ *  1) elegir tablas fuente del modelo completo (no solo del canvas) con el
+ *     patrón del Import existing: búsqueda server-side paginada (draft-aware)
  *     + filtro por esquema, chips de seleccionadas (sobreviven al cambio de
  *     página), y columnas a heredar con buscador y tabla dueña visible;
- *  2) definir la nueva tabla — Schema con combobox buscable (doc 41) acotado a
- *     esquemas de TABLAS + preview SQL en vivo.
- * Este popup consulta SOLO `canonical_tables` (pedido del owner): la colección
- * `views` ni se toca — ni para las fuentes ni para los esquemas, que salen del
- * pool de tablas cacheado por sesión (`tableSchemasCached`).
- * Crea vía `createTableFromSources` (un solo lote al changeset, doc 39).
+ *  2) definir la tabla a crear: Schema con combobox buscable acotado a
+ *     esquemas de tablas + preview SQL en vivo.
+ * Este popup consulta solo `canonical_tables`: la colección `views` no se
+ * toca, ni para las fuentes ni para los esquemas, que salen del pool de
+ * tablas cacheado por sesión (`tableSchemasCached`).
+ * Crea vía `createTableFromSources` (un solo lote al changeset).
  */
 export default function CtasModal({ onClose, pushToast }: { onClose: () => void; pushToast: (m: string, k?: 'err') => void }) {
   const createTableFromSources = useModelerStore((s) => s.createTableFromSources);
@@ -41,7 +41,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
   const [tableSchemas, setTableSchemas] = useState<string[] | null>(null);
   const [schemasErr, setSchemasErr] = useState(false);
 
-  // `sources` conserva el ORDEN DE SELECCIÓN (Set = orden de inserción): fija
+  // `sources` conserva el orden de selección (Set = orden de inserción): fija
   // la precedencia del dedup de candidatas y el orden del FROM del preview.
   // `selById` cachea el doc de cada seleccionada: la fila puede salir de la
   // página al seguir buscando y chips/FROM/tabla-dueña deben sobrevivir.
@@ -59,17 +59,17 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
   const [physName, setPhysName] = useState('');
   const [busy, setBusy] = useState(false);
 
-  // Guard de desmonte para los callbacks de HANDLERS (listColumns). El cuerpo
-  // REPONE true: con StrictMode (montaje doble en dev) el cleanup del primer
-  // montaje dejaba el ref en false para siempre y el modal descartaba todas
+  // Guard de desmonte para los callbacks de handlers (listColumns). El cuerpo
+  // repone true: con StrictMode (montaje doble en dev) el cleanup del primer
+  // montaje dejaría el ref en false para siempre y el modal descartaría todas
   // las respuestas ("Loading tables…" eterno). Los efectos usan su propio
   // `let live` por corrida (patrón Import existing), inmune a ese doble ciclo.
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
 
-  // Búsqueda SERVER-SIDE con debounce (patrón Import existing): página inicial
-  // alfabética al abrir; tipear o cambiar el esquema RE-CONSULTA (draft-aware
-  // vía /effective con q/limit/schema). `live` descarta respuestas viejas.
+  // Búsqueda server-side con debounce (patrón Import existing): página inicial
+  // alfabética al abrir; tipear o cambiar el esquema re-consulta (draft-aware
+  // vía /effective con q/limit/schema). `live` descarta respuestas desfasadas.
   useEffect(() => {
     let live = true;
     const h = setTimeout(() => {
@@ -80,11 +80,11 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
     return () => { live = false; clearTimeout(h); };
   }, [tq, tSchema, pushToast]);
 
-  // Esquemas con tablas en SEGUNDO PLANO (cacheados por sesión y versión en
+  // Esquemas con tablas en segundo plano (cacheados por sesión y versión en
   // schemaPartition, compartidos con New table). Mientras cargan, los combobox
-  // muestran solo su opción vacía — NUNCA el catálogo completo, que mezclaría
+  // muestran solo su opción vacía, nunca el catálogo completo, que mezclaría
   // los esquemas solo-de-vistas (`_vu`); el catálogo queda como fallback
-  // únicamente si la bajada FALLA (mejor con ruido que en blanco).
+  // únicamente si la bajada falla (mejor con ruido que en blanco).
   useEffect(() => {
     let live = true;
     tableSchemasCached()
@@ -110,8 +110,8 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
 
   const candidates = useMemo(() => buildCandidates([...sources], colsByTable), [sources, colsByTable]);
   const visibleCands = useMemo(() => filterColumns(candidates, cq), [candidates, cq]);
-  // Lo que se CREA sale de lo marcado sobre el TOTAL de candidatas: el
-  // buscador sólo acota la vista, jamás lo que se hereda.
+  // Lo que se crea sale de lo marcado sobre el total de candidatas: el
+  // buscador solo acota la vista, jamás lo que se hereda.
   const pickedCols = useMemo(() => candidates.filter((c) => picks.has(c.id)), [candidates, picks]);
 
   const toggleSrc = (t: CanonicalTable) => {
@@ -134,7 +134,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
   };
   const togglePick = (id: string) => setPicks((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  // Select all / Clear: actúan sobre las candidatas VISIBLES — con el buscador
+  // Select all / Clear: actúan sobre las candidatas visibles; con el buscador
   // activo, sobre el subconjunto filtrado (p.ej. marcar todas las "FEC_…");
   // picks de fuentes deseleccionadas quedan inertes (pickedCols filtra).
   const pickAll = () => setPicks((p) => { const n = new Set(p); for (const c of visibleCands) n.add(c.id); return n; });
@@ -148,7 +148,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
     return () => clearTimeout(h);
   }, [name]);
 
-  // Un solo pool de opciones para AMBOS combobox (filtro de fuentes y esquema
+  // Un solo pool de opciones para ambos combobox (filtro de fuentes y esquema
   // de la tabla nueva): esquemas con tablas; catálogo completo solo si falló.
   const schemaOpts = useMemo(() => {
     const base = tableSchemas ?? (schemasErr ? schemasCatalog.map((s) => s.name) : []);
@@ -166,15 +166,15 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
     if (!name.trim()) { pushToast('Table name is required', 'err'); return; }
     if (pickedCols.length === 0) { pushToast('Pick at least one column', 'err'); return; }
     setBusy(true);
-    // Doc 105 (ronda 4, 6c): el aviso de éxito es de la sesión donde se pidió
+    // El aviso de éxito es de la sesión donde se pidió
     // (el store recarga el canvas al final: se pudo abrir otra versión).
     const pin = pinSession();
-    // Doc 105 (ronda 3): el fallo espera la revalidación y calla si la sesión cambió; dice por qué.
+    // El fallo espera la revalidación y calla si la sesión es otra; dice por qué.
     const onError = reportWriteError((e) => pushToast(failureText('Could not create the table', e), 'err'));
     try {
       await createTableFromSources({
         logicalName: name.trim(), schema: schema.trim() || undefined,
-        // `sourceTable` = tabla dueña en el ORIGEN (doc 51): procedencia para
+        // `sourceTable` = tabla dueña en el origen: procedencia para
         // el historial de auditoría; el store no la incluye en el payload.
         columns: pickedCols.map((c) => ({ ...c, sourceTable: selById.get(c.tableId)?.physicalName })),
       });
@@ -183,7 +183,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
     } catch (e) { await onError(e); } finally { setBusy(false); }
   };
 
-  // Esc en los buscadores: limpia la query SIN cerrar el Dialog (escucha
+  // Esc en los buscadores: limpia la query sin cerrar el Dialog (escucha
   // keydown en window); con la query ya vacía sí deja pasar el cierre.
   const escClears = (val: string, set: (v: string) => void) => (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Escape' && val) { e.stopPropagation(); set(''); }
@@ -218,7 +218,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
       )}
     >
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 22 }}>
-        {/* 1 · Choose source tables and columns */}
+        {/* Paso 1 · «Choose source tables and columns» */}
         <div>
           <div style={step}>1 · Choose source tables and columns</div>
           <div className="rd-small" style={{ marginBottom: 10, color: 'var(--text-muted, #8A93A5)' }}>
@@ -239,7 +239,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
             </div>
           </div>
           {/* Chips de seleccionadas: la selección sigue visible (y quitable)
-              aunque la búsqueda cambie de página y esas filas ya no estén. */}
+              aunque la búsqueda cambie de página y esas filas no estén en ella. */}
           {srcTables.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 8, maxHeight: 56, overflowY: 'auto' }}>
               {srcTables.map((t) => (
@@ -313,7 +313,7 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
                       <span className="rd-mono" style={{ flex: 1, minWidth: 0, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.physicalName}</span>
                       <span className="rd-mono" style={{ color: 'var(--text-muted-2, #8A93A5)', fontSize: 10, flexShrink: 0 }}>{c.dataType}</span>
                     </span>
-                    {/* a qué tabla pertenece la columna (pedido doc 43) */}
+                    {/* a qué tabla pertenece la columna */}
                     <span style={sub}>{owner ? (owner.schema ? `${owner.schema}.${owner.physicalName}` : owner.physicalName) : '—'}</span>
                   </span>
                 </label>
@@ -335,13 +335,13 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
           )}
         </div>
 
-        {/* 2 · Define the new table */}
+        {/* Paso 2 · «Define the new table» */}
         <div>
           <div style={step}>2 · Define the new table</div>
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <label style={lbl}>Schema</label>
-              {/* Doc 96 D5: el MISMO combo de esquemas de tablas que New Table
+              {/* El mismo combo de esquemas de tablas que New Table
                   (con «+ Create schema…» en una versión en edición). */}
               <SchemaSelect kind="tables" value={schema} onChange={setSchema} />
             </div>

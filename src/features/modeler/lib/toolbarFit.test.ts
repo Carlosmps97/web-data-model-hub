@@ -1,7 +1,7 @@
-// Doc 114 (piloto): la barra del canvas se adapta al ancho SIN scroll horizontal
-// ni filas desparejas — en una sola fila, compacta por pasos en un orden fijo
-// (como la cinta de Office: primero lo que menos se usa) y vuelve atrás al
-// ensancharse. Nada se quita: lo compactado queda en un menú de su grupo.
+// La barra del canvas se adapta al ancho sin scroll horizontal ni filas
+// desparejas: en una sola fila, compacta por pasos en un orden fijo (como la
+// cinta de Office: primero lo que menos se usa) y vuelve atrás al ensancharse.
+// Nada se quita: lo compactado queda en un menú de su grupo.
 import { describe, expect, it } from 'vitest';
 import { TOOLBAR_STEPS, fitLevel, stepOn } from './toolbarFit';
 
@@ -17,7 +17,7 @@ describe('fitLevel', () => {
     expect(fitLevel(3, { available: 1500, content: 1400 }, { 2: 1520 }, 9)).toBe(3);
   });
 
-  it('al ensancharse vuelve un paso sólo si el nivel anterior ENTRA (con un margen, sin rebotar)', () => {
+  it('al ensancharse vuelve un paso solo si el nivel anterior entra (con un margen, sin rebotar)', () => {
     expect(fitLevel(3, { available: 1525, content: 1400 }, { 2: 1520 }, 9)).toBe(3);   // 1525 < 1520 + 8
     expect(fitLevel(3, { available: 1528, content: 1400 }, { 2: 1520 }, 9)).toBe(2);
   });

@@ -1,13 +1,13 @@
-// Doc 109: cómo se ve un dibujo del canvas (forma o texto) — una sola regla
-// para el canvas y el export. Todo lo que el dibujo no trae toma el default de
-// su tipo; los dibujos anteriores al doc 109 se ven igual que antes.
+// Cómo se ve un dibujo del canvas (forma o texto): una sola regla para el
+// canvas y el export. Todo lo que el dibujo no trae toma el default de su tipo;
+// un texto en formato simple (sin `font`) conserva su aspecto propio.
 import type { CSSProperties } from 'react';
 import type { Drawing, DrawingFont, TextAlign, TextVAlign } from '../services/modeler.service';
 import { normalColor } from '@/lib/colors';
 
 export const DEFAULT_STROKE = '#2E5BFF';
 export const DEFAULT_TEXT_COLOR = '#1A2B4A';
-/** Tamaño de letra por defecto, en puntos (≈ 14.7 px, el texto de siempre). */
+/** Tamaño de letra por defecto, en puntos (≈ 14.7 px). */
 export const DEFAULT_FONT_PT = 11;
 /** Familia de la app (cuando el dibujo no elige una): la de `tokens.css`. */
 export const APP_FONT = 'var(--ui)';
@@ -21,7 +21,7 @@ export const FONT_FAMILIES = [
 /** Tamaños del selector (puntos, como Office/Erwin). */
 export const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72];
 
-/** Texto «viejo» (anterior al doc 109): sin `font`, su `color` era el del texto. */
+/** Texto en formato simple: sin `font`, su `color` es el de la letra. */
 export const isLegacyText = (d: Drawing): boolean => d.type === 'text' && !d.font;
 export const hasText = (d: Drawing): boolean => d.type !== 'line';
 
@@ -35,7 +35,7 @@ export function drawingStroke(d: Drawing): string | null {
 }
 
 /** Relleno: null = transparente. Sin `fill`, las formas llevan el tinte suave
- *  de su borde (como siempre) y el texto, nada. Pura. */
+ *  de su borde y el texto, nada. Pura. */
 export function drawingFill(d: Drawing): string | null {
   if (d.fill === 'none') return null;
   const f = normalColor(d.fill);
@@ -51,7 +51,7 @@ export interface ResolvedFont {
 /** Formato del texto con los defaults del tipo. Pura. */
 export function drawingFont(d: Drawing): ResolvedFont {
   if (isLegacyText(d)) {
-    // texto anterior al doc 109: 14 px seminegrita del color del dibujo
+    // texto en formato simple: 14 px seminegrita del color del dibujo
     return { family: null, size: 10.5, bold: true, italic: false, underline: false,
              color: normalColor(d.color) ?? DEFAULT_STROKE };
   }
@@ -92,16 +92,16 @@ export function textCss(d: Drawing): CSSProperties {
   };
 }
 
-/** Lo que pasa un texto viejo al modelo nuevo conservando cómo se veía
- *  (vacío si no es viejo). Toda edición desde la barra lo antepone: sin esto,
- *  el borde de un texto viejo cambiaba el color de su letra y la alineación no
- *  hacía nada. Pura. */
+/** Lo que pasa un texto en formato simple al formato con `font` conservando
+ *  cómo se ve (vacío si ya tiene `font`). Toda edición desde la barra lo
+ *  antepone: sin esto, el borde de un texto simple cambiaría el color de su
+ *  letra y la alineación no haría nada. Pura. */
 export function legacyUpgrade(d: Drawing): Partial<Drawing> {
   if (!isLegacyText(d)) return {};
   const f = drawingFont(d);
   return {
     font: { size: f.size, bold: true, color: f.color },
-    color: null,                    // en el modelo nuevo `color` es el borde
+    color: null,                    // con `font`, `color` es el borde
     align: 'left', valign: 'middle',
   };
 }

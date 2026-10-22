@@ -1,25 +1,24 @@
 # Databricks Asset Bundle — frontend (SPA Vite/React) como Databricks App.
 #
-# Declara lo que el bundle aplica en cada deploy: la app, sus permisos y el
-# binding del secreto compartido. La config de RUNTIME (command + env) vive en
-# app.yaml; el bloque `config:` de este archivo no se usa porque el CLI lo
-# ignora en silencio (bug databricks/cli #4901).
+# Declara lo que el bundle aplica en cada despliegue: la app, sus permisos y el
+# binding del secreto compartido. La configuración de runtime (command + env)
+# vive en app.yaml; el bloque `config:` de este archivo no se usa porque el CLI
+# lo ignora en silencio (issue databricks/cli #4901).
 #
-# Ninguna variable lleva `default:`: el workflow de deploy exporta cada una
-# como BUNDLE_VAR_<variable> desde la GitHub Variable homónima en MAYÚSCULAS.
-# Para un deploy manual, exportar esos BUNDLE_VAR_* y DATABRICKS_HOST antes de
+# Ninguna variable lleva `default:`: el workflow de despliegue exporta cada una
+# como BUNDLE_VAR_<variable> desde la GitHub Variable homónima en mayúsculas.
+# Un despliegue manual exporta esos BUNDLE_VAR_* y DATABRICKS_HOST antes de
 # `databricks bundle deploy --target <target>`.
 bundle:
   name: frnt-data-model-hub
   # Motor "direct": el CLI aplica el bundle llamando a la API de Databricks,
-  # sin Terraform. Es el motor por defecto del CLI (los deploys hechos con
-  # Terraform se migraron solos desde la 1.14.0); queda explícito para que
-  # ningún workspace vuelva al motor Terraform, ya deprecado.
+  # sin Terraform. Es el motor por defecto del CLI desde la 1.14.0; se declara
+  # explícito para que ningún workspace use el motor Terraform, en desuso en el CLI.
   engine: direct
 
 variables:
-  secret_scope:
-    # GitHub Variable SECRET_SCOPE — ej. kv-scope-datacraft (el mismo scope que usa el backend)
+  databricks_scope_name:
+    # GitHub Variable DATABRICKS_SCOPE_NAME — ej. kv-scope-dmh (el mismo scope que usa el backend)
     description: "Scope de secretos del workspace que guarda el secreto compartido del relay SSO."
   proxy_secret_key:
     # GitHub Variable PROXY_SECRET_KEY — ej. dmh-proxy-secret (la misma key que usa el backend)
@@ -38,7 +37,7 @@ resources:
         - name: proxy_secret
           description: "Secreto compartido front↔backend que autentica el relay de identidad SSO."
           secret:
-            scope: ${var.secret_scope}
+            scope: ${var.databricks_scope_name}
             key: ${var.proxy_secret_key}
             permission: READ
       permissions:
@@ -53,6 +52,6 @@ targets:
     default: true
     workspace:
       # Sin `host:` a propósito: el workspace destino sale de la variable de
-      # entorno DATABRICKS_HOST (un host acá ganaría sobre esa variable y
+      # entorno DATABRICKS_HOST (un host aquí ganaría sobre esa variable y
       # obligaría a editar el repositorio por cada ambiente).
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}

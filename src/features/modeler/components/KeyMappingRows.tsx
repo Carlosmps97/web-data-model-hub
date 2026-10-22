@@ -8,7 +8,7 @@ export interface KeyRowState {
   parentColumnId: string;
   target: MappingTarget;
   roleName: string;
-  /** Herencia de metadata del padre — POR FILA (default sí). */
+  /** Herencia de metadata del padre, por fila (default sí). */
   inherit: boolean;
   /** Sync: par ya vigente — mapeo fijo, sin selector ni role/inherit. */
   locked?: boolean;
@@ -17,14 +17,13 @@ export interface KeyRowState {
 const CREATE = '__create__';
 
 /**
- * Grid de mapeo N=N (doc 47): una fila por PK del padre — destino en el hijo
- * (columna existente o "Create") + role name e "Inherit" POR FILA (feedback
- * prueba viva 2026-08-15; en existentes el role name RENOMBRA la columna).
- * Sin agregar/quitar filas. Presentacional puro: el estado vive en el popup.
- * Doc 114: los nombres, los del modelo del canvas (`mode`) — atributos en el
- * lógico, columnas en el físico (antes, siempre los físicos); los lógicos
- * repetidos se distinguen por su físico (revisión: si no, la FK podía ir a la
- * columna equivocada sin notarse).
+ * Grid de mapeo N=N: una fila por PK del padre, con destino en el hijo
+ * (columna existente o "Create") + role name e "Inherit" por fila (en
+ * existentes, el role name renombra la columna). Sin agregar/quitar filas.
+ * Presentacional puro: el estado vive en el popup. Los nombres son los del
+ * modelo del canvas (`mode`): atributos en el lógico, columnas en el físico;
+ * los lógicos repetidos se distinguen por su físico (si no, la FK podría ir a
+ * la columna equivocada sin notarse).
  */
 export default function KeyMappingRows({ parentPks, childCols, rows, onChange, locked, mode }: {
   parentPks: CanonicalColumn[];
@@ -51,7 +50,7 @@ export default function KeyMappingRows({ parentPks, childCols, rows, onChange, l
         if (!pk) return null;
         const isCreate = row.target.kind === 'create';
         const current = row.target.kind === 'existing' ? colById.get(row.target.columnId) : undefined;
-        // Opciones: crear + columnas del hijo no reclamadas por OTRA fila; sin auto-mapeo.
+        // Opciones: crear + columnas del hijo no reclamadas por otra fila; sin auto-mapeo.
         const options = [
           { value: CREATE, label: `➕ Create "${row.roleName.trim() || pk.logicalName}"` },
           ...childCols

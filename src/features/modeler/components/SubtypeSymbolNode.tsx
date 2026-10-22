@@ -5,15 +5,15 @@ import { useSessionStore } from '@/store/useSessionStore';
 import { SYMBOL_SIZE } from '../lib/subtypeGraph';
 
 /**
- * Símbolo de SUBCATEGORÍA (doc 53): el nodo intermedio del grupo
- * supertipo→subtipos — ROMBO con barra discriminadora (rediseño 2026-08-23
- * sobre la notación Erwin). Es un nodo DERIVADO de las relaciones del grupo —
- * no se persiste como entidad; su posición vive en layout[symbolId]. Con la
- * herramienta Subcategory armada, el símbolo entero inicia el drag hacia un
- * subtipo nuevo (flujo Erwin "click en el símbolo"). Doble click → popup de
- * gestión del grupo (lo maneja ModelerCanvas).
+ * Símbolo de subcategoría: el nodo intermedio del grupo supertipo→subtipos,
+ * un rombo con barra discriminadora (variante de la notación Erwin). Es un
+ * nodo derivado de las relaciones del grupo: no se persiste como entidad; su
+ * posición vive en layout[symbolId]. Con la herramienta Subcategory armada, el
+ * símbolo entero inicia el drag hacia un subtipo a agregar (flujo Erwin "clic
+ * en el símbolo"). Doble clic → popup de gestión del grupo (lo maneja
+ * ModelerCanvas).
  *
- * Colores LITERALES (no CSS vars): el SVG del Export image no resuelve
+ * Colores literales (no CSS vars): el SVG del Export image no resuelve
  * variables en atributos (mismo criterio que DerivationEdge).
  */
 function SubtypeSymbolNode({ id }: NodeProps) {

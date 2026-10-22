@@ -27,9 +27,6 @@ const TABS: { id: VTab; label: string }[] = [
   { id: 'metadata', label: 'Metadata' },
 ];
 
-/** Nombre EXACTO (CI) del UDP gestionado que refleja el modo — "Tipo de
- *  Vista", del catálogo fijo del kit (doc 61 r2; la DATA va en español). */
-
 const mono: React.CSSProperties = {
   fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 11.5,
   background: '#F7F8FA', border: '1px solid #EAEDF2', borderRadius: 8,
@@ -37,17 +34,16 @@ const mono: React.CSSProperties = {
 };
 
 /**
- * Panel lateral de propiedades de una VISTA (doc 61, doc 91) — paridad con el
- * panel de tabla: click al bloque 'view' del canvas lo abre (selectedViewId).
+ * Panel lateral de propiedades de una vista, con paridad con el panel de tabla:
+ * un clic al bloque 'view' del canvas lo abre (selectedViewId).
  * Seis pestañas: Definition · Columns (reorden drag&drop + detalle por columna)
  * · Sources (fuentes + editor completo) · Query SQL (DDL generado + User-Defined
- * SQL informativa) · UDP · Metadata (+ historial doc 51).
+ * SQL informativa) · UDP · Metadata (+ historial de auditoría).
  *
- * Doc 96 D6 (decisión del owner): la User-Defined SQL (`customSql`) es texto
- * INFORMATIVO — el DDL sale SIEMPRE de las columnas; no hay un modo que bloquee
- * la edición de fuentes o columnas. Todas las escrituras van por
- * viewsSvc.updateView (changeset-aware, doc completo) con pre-imagen en el Undo
- * (doc 50).
+ * La User-Defined SQL (`customSql`) es texto informativo: el DDL sale siempre de
+ * las columnas; no hay un modo que bloquee la edición de fuentes o columnas.
+ * Todas las escrituras van por viewsSvc.updateView (changeset-aware, doc
+ * completo) con pre-imagen en el Undo.
  */
 export default function ViewPropertiesPanel({ pushToast, onResize }: {
   pushToast: (m: string, k?: 'err') => void;
@@ -57,22 +53,22 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const selectedViewId = useModelerStore((s) => s.selectedViewId);
   const setSelectedView = useModelerStore((s) => s.setSelectedView);
   const reload = useModelerStore((s) => s.reload);
-  // Doc 70: la visibilidad es por CANVAS (membresía), no un flag global.
+  // La visibilidad es por canvas (membresía), no un flag global.
   const removeViewFromCanvas = useModelerStore((s) => s.removeViewFromCanvas);
   const deleteView = useModelerStore((s) => s.deleteView);
-  const setObjectColor = useModelerStore((s) => s.setObjectColor);   // doc 109
+  const setObjectColor = useModelerStore((s) => s.setObjectColor);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
 
   const view = diagram?.views.find((v) => v.id === selectedViewId) ?? null;
-  const hasSql = !!(view?.customSql ?? '').trim();   // doc 96 D6: solo informativo
+  const hasSql = !!(view?.customSql ?? '').trim();   // solo informativo
 
   const [tab, setTab] = useState<VTab>('definition');
   const [form, setForm] = useState({ name: '', schema: '', description: '' });
   const [savingDef, setSavingDef] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
-  // User-Defined SQL (doc 96 D6): texto informativo, sin validación.
+  // User-Defined SQL: texto informativo, sin validación.
   const [sqlDraft, setSqlDraft] = useState('');
   const [sqlBusy, setSqlBusy] = useState(false);
   const [resizing, setResizing] = useState(false);
@@ -90,7 +86,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   }, [diagram, selectedViewId, setSelectedView]);
 
   // Re-sembrar el estado local al cambiar de vista (o tras reload con rename).
-  // `storedSql` = la SQL guardada que conoce el borrador (minor #10).
+  // `storedSql` = la SQL guardada que conoce el borrador.
   const storedSql = useRef('');
   useEffect(() => {
     if (!view) return;
@@ -100,8 +96,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     setFocusedIdx(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view?.id]);
-  // Minor #10: si la SQL guardada cambia por fuera (p. ej. en el View Editor),
-  // el borrador la toma — salvo que tenga cambios locales sin guardar.
+  // Si la SQL guardada cambia por fuera (p. ej. en el View Editor), el borrador
+  // la toma, salvo que tenga cambios locales sin guardar.
   useEffect(() => {
     const next = (view?.customSql ?? '').trim();
     if (next === storedSql.current) return;
@@ -110,8 +106,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     setSqlDraft((d) => reseedDraft(d, prev, next));
   }, [view?.customSql]);
 
-  // Doc 70: canvases donde la vista es miembro (Metadata) — vía el listado
-  // global de su primera fuente (mismo endpoint del tab Views de la tabla).
+  // Canvases donde la vista es miembro (Metadata), vía el listado global de su
+  // primera fuente (mismo endpoint de la pestaña Views de la tabla).
   const [canvasNames, setCanvasNames] = useState<string[] | null>(null);
   useEffect(() => {
     const first = view ? viewSourceIds(view)[0] : undefined;
@@ -130,9 +126,9 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const srcIds = view ? viewSourceIds(view) : [];
   const tableName = (id: string) => tables.find((t) => t.id === id)?.physicalName ?? id;
 
-  // DDL efectivo con el MISMO generador del Export (doc 96 D6: sale de las
-  // columnas; la User-Defined SQL es informativa) — el mismo armado que el
-  // Inspector y el export HTML.
+  // DDL efectivo con el mismo generador del Export (sale de las columnas; la
+  // User-Defined SQL es informativa): el mismo armado que el Inspector y el
+  // export HTML.
   const effectiveDdl = useMemo(() => (view ? generatedViewDdl(view, tables) : ''), [view, tables]);
 
   // ── Resize (mismo contrato que los otros paneles) ──
@@ -146,7 +142,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
 
   if (!view) return null;
 
-  // Pre-imagen POR VALOR para el Undo (doc 50) — el payload es el doc completo.
+  // Pre-imagen por valor para el Undo: el payload es el doc completo.
   const viewPre = (v: View): View => ({
     ...v,
     sources: v.sources?.map((s) => ({ ...s })),
@@ -155,33 +151,33 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   });
 
   /** Único camino de guardado del panel: updateView (changeset-aware) con el
-   *  doc completo + inversa en el Undo + reload. Doc 109 (revisión): en fila
-   *  con el color de la vista (`inObjectOrder`) y desde el documento VIGENTE de
-   *  la working copy (antes, el segundo guardado revertía al primero); si ya no
-   *  existe, avisa en vez de recrearla. */
+   *  doc completo + inversa en el Undo + reload. Va en fila con el color de la
+   *  vista (`inObjectOrder`) y parte del documento vigente de la working copy
+   *  (así un segundo guardado no revierte el primero); si la vista no está en
+   *  la working copy, avisa en vez de recrearla. */
   const saveView = async (patch: Partial<ViewInput>, label: string, toastMsg?: string) => {
-    const pin = pinSession();   // doc 105 (H1): su inversa se apila sólo en su sesión
+    const pin = pinSession();   // su inversa se apila solo en su sesión
     const id = view.id;
     const wrote = await inObjectOrder(id, async () => {
       pin.check();
       const cur = await viewsSvc.currentView(id);
       pin.check();
       if (!cur) throw new Error('This view is no longer in the working copy.');
-      // Sin cambio respecto de lo VIGENTE: nada que grabar.
+      // Sin cambio respecto de lo vigente: nada que grabar.
       const keys = Object.keys(patch) as (keyof ViewInput)[];
       const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
       if (keys.every((k) => same((cur as ViewInput)[k], patch[k]))) return false;
       const pre = viewPre(cur) as unknown as Record<string, unknown>;
       await viewsSvc.updateView(id, { ...cur, ...patch } as ViewInput);
-      // La inversa restaura sólo lo que este guardado cambió (sobre lo vigente).
+      // La inversa restaura solo los campos que este guardado modifica (sobre lo vigente).
       pushUndo(label, undoFields('view', id, Object.fromEntries(keys.map((k) => [k, pre[k]])), pin, reload), pin);
       await reload();
       return true;
     });
     if (wrote && toastMsg) pushToast(toastMsg);
   };
-  /** Doc 105 (H7): el `.catch` de un guardado, tomado AL PEDIRLO — con la
-   *  versión recién transferida calla (la revalidación ya avisó). */
+  /** El `.catch` de un guardado, tomado al pedirlo: con la versión recién
+   *  transferida calla (la revalidación ya avisó). */
   const saveErr = () => reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));
 
   const saveDef = async () => {
@@ -198,17 +194,17 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const saveDescriptionOnBlur = async () => {
     if (!canEdit) return;
     const next = form.description.trim() || undefined;
-    const onError = saveErr();      // doc 109: «sin cambio» lo decide `saveView` contra lo vigente
+    const onError = saveErr();      // «sin cambio» lo decide `saveView` contra lo vigente
     try { await saveView({ description: next }, `Edit view ${view.name}`); } catch (e) { await onError(e); }
   };
   const askDelete = async () => {
-    // Doc 105 (H5): con la versión recién transferida el borrado termina con el
-    // error original — la revalidación ya avisó: acá se calla.
+    // Con la versión recién transferida el borrado termina con el error
+    // original; la revalidación ya avisó, así que acá se calla.
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't delete", 'err'));
     try {
-      // Diálogo compartido con Properties › Views y el Object Inspector (doc 89
-      // §3.5). Doc 105 (A4-o4): y la misma acción del store — con Undo, que la
-      // repone en su sitio en cada canvas que la listaba.
+      // Diálogo compartido con Properties › Views y el Object Inspector, y la
+      // misma acción del store: con Undo, que la repone en su sitio en cada
+      // canvas que la listaba.
       const ok = await confirmDeleteView({
         name: view.name,
         action: async () => { await deleteView(view); setSelectedView(null); await reload(); },
@@ -217,8 +213,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     } catch (e) { await onError(e); }
   };
 
-  // ── Columns: filas visibles — SIEMPRE desde `sources` (doc 91 D7: en modo
-  // User-Defined SQL son todas las columnas de las fuentes) ──
+  // ── Columns: filas visibles, siempre desde `sources` ──
   const entries = (view.sources ?? [])
     .map((s, i) => ({ s, i }))
     .filter(({ s }) => (s.column ?? '').trim() || (s.expression ?? '').trim());
@@ -249,8 +244,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     try { await saveView({ sources: next }, `Edit view column`); } catch (e) { await onError(e); }
   };
 
-  // ── Query SQL (doc 96 D6): la User-Defined SQL se guarda como texto
-  // INFORMATIVO ('' ⇒ se quita); no toca las columnas ni el DDL. ──
+  // ── Query SQL: la User-Defined SQL se guarda como texto informativo
+  // ('' ⇒ se quita); no toca las columnas ni el DDL. ──
   const saveSql = async () => {
     setSqlBusy(true);
     const onError = saveErr();
@@ -311,8 +306,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
             <div className="wk-props-field"><label>Functional definition</label>
               <textarea className="wk-pp-textarea" disabled={!canEdit} placeholder="What this view represents…" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} onBlur={() => void saveDescriptionOnBlur()} />
             </div>
-            {/* Doc 70: quitarla de ESTE canvas no la borra del modelo ni de
-                otros canvases (antes: checkbox «Show on canvas», flag global). */}
+            {/* Quitarla de este canvas no la borra del modelo ni de
+                otros canvases. */}
             {canEdit && (
               <button type="button" className="rd-btn rd-btn-secondary rd-btn-sm" style={{ width: '100%', marginBottom: 8 }}
                 title="Remove this view from the current canvas (it stays in the model and in other canvases)"
@@ -326,7 +321,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
                 {savingDef && <span className="rd-spin" aria-hidden />}{savingDef ? 'Saving…' : 'Save'}
               </button>
             )}
-            {/* Doc 109: color PROPIO de la vista (todos sus canvases), como las tablas. */}
+            {/* Color propio de la vista (el de todos sus canvases), como en las tablas. */}
             <div className="wk-pp-section">
               <ColorField id={view.id} own={view.color} canEdit={canEdit} noun="view"
                 onPick={(ref) => {
@@ -385,7 +380,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
           </>
         )}
 
-        {/* ── Columns · detalle de UNA columna de la vista ── */}
+        {/* ── Columns · detalle de una columna de la vista ── */}
         {tab === 'columns' && focusedIdx !== null && (
           <>
             <button className="rd-btn rd-btn-ghost rd-btn-sm" style={{ marginBottom: 10 }} onClick={() => setFocusedIdx(null)}>
@@ -415,8 +410,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
                 </span>
               ))}
             </div>
-            {/* Doc 91 D2/D5 · doc 96 D6: con 2+ fuentes el DDL las lista `FROM t1, t2`
-                sin JOIN (Erwin); un join o un WHERE se anotan en la User-Defined SQL. */}
+            {/* Con 2+ fuentes el DDL las lista `FROM t1, t2` sin JOIN
+                (como Erwin); un join o un WHERE se anotan en la User-Defined SQL. */}
             {srcIds.length > 1 && (
               <p className="wk-pp-cap">The DDL lists the sources as <span className="rd-mono">FROM t1, t2…</span> with no JOIN (Erwin default). A join or a WHERE can be noted in the User-Defined SQL (Query SQL tab, informational).</p>
             )}
@@ -427,7 +422,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
           </>
         )}
 
-        {/* ── Query SQL (doc 96 D6): DDL generado de las columnas + User-Defined SQL informativa ── */}
+        {/* ── Query SQL: DDL generado de las columnas + User-Defined SQL informativa ── */}
         {tab === 'sql' && (
           <>
             <p className="wk-pp-cap" style={{ marginTop: 0 }}>
@@ -473,7 +468,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
               <dt>Definition</dt><dd>{view.description || '—'}</dd>
               <dt>ID</dt><dd className="rd-mono" style={{ fontSize: 10.5 }}>{view.id}</dd>
             </dl>
-            {/* Historial de auditoría (doc 51 extendido a vistas en doc 61). */}
+            {/* Historial de auditoría de la vista. */}
             <AuditHistory kind="view" entityId={view.id} />
           </>
         )}
@@ -489,8 +484,8 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   );
 }
 
-/** Detalle editable de UNA columna de vista (modo Regular): alias, expresión,
- *  cast y definición propia (placeholder = la HEREDADA de la física, doc 22). */
+/** Detalle editable de una columna de vista: alias, expresión, cast y
+ *  definición propia (placeholder = la heredada de la física). */
 function ColumnDetail({ src, idx, sourceTable, inheritedType, inheritedDef, canEdit, onSave }: {
   src: viewsSvc.ViewSource; idx: number; sourceTable: string;
   inheritedType: string; inheritedDef: string; canEdit: boolean;

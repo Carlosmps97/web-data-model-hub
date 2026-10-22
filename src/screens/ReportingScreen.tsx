@@ -1,32 +1,35 @@
 /**
- * ReportingScreen (pr — Screen 11) — tabular reporting of metadata.
+ * ReportingScreen: reporte tabular de la metadata.
  *
- * Layout (per design #pr + R6c spec):
- *   · header: REPORTING eyebrow + "Reporting" h1 + blurb
- *   · filter bar: table-name search + multi-select comboboxes
- *     (Schema · Project · Subject area) that filter the grid live, plus Clear
- *   · metadata table: Table · Schema · Subject area · #Columns · #Relations ·
- *     Projects · Functional definition — zebra rows, hover, sticky header
- *   · right rail: "Export to Excel" checklist of detail levels → xlsx workbook
- *     (one sheet per checked level), then small KPI indicators
+ * Distribución:
+ *   · cabecera: antetítulo REPORTING + h1 "Reporting" + texto breve
+ *   · barra de filtros: selector Project, búsqueda por nombre de tabla y
+ *     comboboxes de selección múltiple (Schema · Subject area) que filtran la
+ *     grilla en vivo, más Clear
+ *   · tabla de metadata: Table · Schema · Subject area · #Columns · #Relations ·
+ *     Projects · Functional definition; filas cebra, hover, encabezado fijo
+ *   · panel derecho: checklist "Export to Excel" de niveles de detalle → libro
+ *     xlsx (una hoja por nivel marcado) y, debajo, pequeños indicadores KPI
  *
- * Data: reporting.service (tables + columns + filters), always for ONE project
- * (doc 75 D13: the Project picker at the start of the bar is mandatory; the
- * session's project, then the last opened one, is preselected). Search + chips
- * filter the loaded rows client-side; the first filter applied loads the full set.
- * Doc 92 D3–D5: without filters the grid loads pages of 50 and fetches the next
- * one when the sentinel row scrolls into view; the bar shows the REAL total
- * (`/tables/count`) and «Select all» selects every table of the project (loaded
- * or not) — the export then downloads the full set. Doc 92 D2: the Schema and
- * Subject area popovers have a «contains» search box.
- * Doc 70: the filter combos list the WHOLE catalog (`/reporting/filters`), not
- * just the values of the 50 rows loaded up-front; a Show switch renders the
- * grid as Tables · Columns · Tables + Columns (same pure row builders as the
- * Excel export, `lib/reportRows`), and the export gains the joined sheet.
- * Doc 102: combo Version (producción o una versión propia sin publicar) — con
- * una versión propia la grilla, los filtros y los dos exports son de esa
- * versión; los lotes de ids van por POST (fin del 431).
- * Loading → skeleton/placeholders; errors → sonner toast.
+ * Datos: reporting.service (tablas + columnas + filtros), siempre de un solo
+ * proyecto (el selector Project al inicio de la barra es obligatorio; se
+ * preselecciona el proyecto de la sesión y, si no hay, el último abierto). La
+ * búsqueda y los chips filtran en el cliente las filas cargadas; el primer filtro
+ * aplicado carga el set completo. Sin filtros, la grilla carga páginas de 50 y
+ * pide la siguiente cuando la fila centinela entra en la vista; la barra muestra
+ * el total real (`/tables/count`) y «Select all» selecciona todas las tablas del
+ * proyecto (cargadas o no): el export baja entonces el set completo. Los popovers
+ * de Schema y Subject area tienen una búsqueda «contiene».
+ * Los combos de filtro listan el catálogo completo (`/reporting/filters`), no solo
+ * los valores de las 50 filas cargadas al inicio; el selector Show presenta la
+ * grilla como Tables · Columns · Tables + Columns (con las mismas funciones puras
+ * que arman las filas del Excel, `lib/reportRows`), y el export incluye la hoja
+ * unida.
+ * Combo Version (producción o una versión propia sin publicar): con una versión
+ * propia, la grilla, los filtros y los dos exports son de esa versión; los lotes
+ * de ids viajan en el cuerpo de un POST (en la URL superarían el tope de
+ * cabeceras del servidor y la respuesta sería 431).
+ * Carga → skeleton/placeholders; errores → toast de sonner.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { toast } from 'sonner';
@@ -56,6 +59,7 @@ import { getChangeset, listVersions } from '@/services/versioning.service';
 import { projectMeta, sortProjects } from '@/lib/projects';
 import { LAST_PROJECT_KEY, useSessionStore } from '@/store/useSessionStore';
 import { useAuthStore } from '@/store/useAuthStore';
+import { NO_EXPORT_HINT } from '@/lib/permissionHints';
 import type { Project } from '@/types/model';
 import type { VersionRow } from '@/types/versioning';
 import {
@@ -63,10 +67,10 @@ import {
   type ReportColumnRow, type ReportFilterOptions, type ReportTableRow,
 } from '@/services/reporting.service';
 
-// ── export levels ─────────────────────────────────────────────────────────────
+// ── niveles de export ─────────────────────────────────────────────────────────
 
 type LevelKey = 'tables' | 'columns' | 'joined' | 'relationships' | 'views' | 'definitions';
-/** Doc 70 §4.2: qué muestra la grilla en pantalla. */
+/** Qué muestra la grilla en pantalla. */
 type ShowMode = 'tables' | 'columns' | 'joined';
 
 interface LevelSpec {
@@ -95,28 +99,28 @@ function initialProjectId(projects: Project[]): string | null {
   return sortProjects(projects)[0]?.id ?? null;
 }
 
-/** Doc 105 (B3): por qué el proyecto y la versión no se pueden cambiar
- *  mientras corre un export (terminaría igual y bajaría el archivo de lo que
- *  ya no está en pantalla). */
+/** Por qué el proyecto y la versión no se pueden cambiar mientras corre un
+ *  export (terminaría igual y bajaría el archivo de lo que dejó de estar en
+ *  pantalla). */
 const EXPORT_BUSY_HINT = 'Wait for the export to finish';
 
-/** Doc 105 (B4): toast de «no se pudo listar tus versiones» (uno, aunque se repita). */
+/** Id del toast «no se pudieron listar las versiones» (uno solo, aunque se repita). */
 const VERSIONS_TOAST = 'dmh-rep-versions';
 
-/** Texto sólo para lectores de pantalla (visualmente oculto). */
+/** Texto solo para lectores de pantalla (visualmente oculto). */
 const SR_ONLY: React.CSSProperties = {
   position: 'absolute', width: 1, height: 1, padding: 0, margin: -1, overflow: 'hidden',
   clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap', border: 0,
 };
 
-/** Doc 105 (a11y): el motivo de un combo deshabilitado estaba sólo en `title`;
- *  ahora también es la DESCRIPCIÓN accesible del input (su nombre no cambia). */
+/** El motivo de un combo deshabilitado va en `title` y también como descripción
+ *  accesible del input (su nombre accesible no cambia). */
 function BusyHint({ id }: { id: string }) {
   return <span id={id} style={SR_ONLY}>{EXPORT_BUSY_HINT}</span>;
 }
 
-/** Selector de proyecto (doc 75 D13): obligatorio, comparte estilo con el Standards.
- *  `busy` (doc 105 B3): un export en curso lo deshabilita. */
+/** Selector de proyecto: obligatorio, comparte estilo con el de Standards.
+ *  `busy`: un export en curso lo deshabilita. */
 export function ProjectPick({ projects, projectId, onPick, busy = false }: {
   projects: Project[]; projectId: string | null; onPick: (id: string) => void; busy?: boolean;
 }) {
@@ -138,11 +142,11 @@ export function ProjectPick({ projects, projectId, onPick, busy = false }: {
   );
 }
 
-/** Doc 102 (D1): valor del combo Version para producción. */
+/** Valor del combo Version para producción. */
 const PRODUCTION = '__production__';
 
-/** Combo Version: producción o una de MIS versiones sin publicar del proyecto.
- *  `busy` (doc 105 B3): un export en curso lo deshabilita. */
+/** Combo Version: producción o una de las versiones propias sin publicar del
+ *  proyecto. `busy`: un export en curso lo deshabilita. */
 export function VersionPick({ production, own, versionId, onPick, busy = false }: {
   production: VersionRow | null; own: VersionRow[]; versionId: string | null; onPick: (id: string | null) => void;
   busy?: boolean;
@@ -163,15 +167,15 @@ export function VersionPick({ production, own, versionId, onPick, busy = false }
   );
 }
 
-// ── multi-select filter popover ───────────────────────────────────────────────
+// ── popover de filtro de selección múltiple ───────────────────────────────────
 
 const GRID_ROW_CAP = 5000;
-/** Doc 92 D3: tamaño de página del scroll infinito de la grilla de tablas. */
+/** Tamaño de página del scroll infinito de la grilla de tablas. */
 const TABLE_PAGE = 50;
 
-/** Doc 105 (R2-B4): la carga de tablas de la grilla falló — antes se veía «No
- *  tables to report yet», como un proyecto vacío. Retry relanza SÓLO la carga
- *  que falló (la paginada o la completa). */
+/** Falló la carga de tablas de la grilla: se indica el error (no «No tables to
+ *  report yet», como en un proyecto vacío). Retry relanza solo la carga que
+ *  falló (la paginada o la completa). */
 export function TablesLoadError({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="dmh-rep-state" role="alert">
@@ -183,8 +187,8 @@ export function TablesLoadError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/** Doc 105: la página siguiente del scroll infinito falló — antes la lista se
- *  daba por terminada («N tables», sin reintento). Retry pide LA MISMA página. */
+/** Falló la página siguiente del scroll infinito: la lista no se da por
+ *  terminada y Retry pide la misma página. */
 export function MoreTablesError({ onRetry }: { onRetry: () => void }) {
   return (
     <span role="alert" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
@@ -194,7 +198,7 @@ export function MoreTablesError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/** Doc 70 §4.2 — grilla genérica de filas ya aplanadas por las mismas funciones
+/** Grilla genérica de filas ya aplanadas por las mismas funciones
  *  puras del Excel (`lib/reportRows`): encabezados = unión de claves, scroll
  *  horizontal, tope de filas en pantalla (el export no lo tiene). */
 function MetaGrid({ rows, loading, notice, scopeLabel }: {
@@ -253,12 +257,12 @@ interface MultiFilterProps {
 /** Alto máximo de la lista del filtro (el mismo 320 px de `.dmh-rep-menu`). */
 const FILTER_MENU_CAP = 320;
 
-/** Doc 113 §5: el popover del filtro con la regla única de flotantes — debajo
- *  del botón; alineado dentro de la ventana o ARRIBA si no entra (y se queda de
- *  ese lado mientras entre: no salta al filtrar), y sigue al botón con el
- *  scroll. Si el botón sale de la vista de sus contenedores con scroll, el
- *  popover se oculta (antes lo recortaba su panel; `placeAnchored`). `size`
- *  re-ubica al filtrar la lista. */
+/** Popover del filtro con la regla única de flotantes: debajo del botón,
+ *  alineado dentro de la ventana o arriba si no entra (y se queda de ese lado
+ *  mientras entre: no salta al filtrar), y sigue al botón con el scroll. Si el
+ *  botón sale de la vista de sus contenedores con scroll, el popover se oculta
+ *  en lugar de quedar recortado por su panel (`placeAnchored`). `size` lo
+ *  reubica al filtrar la lista. */
 function FilterPopover({ anchor, size, children }: { anchor: RefObject<HTMLElement | null>; size: number; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const place = useFloating(ref, (box, viewport, prev) => {
@@ -273,7 +277,7 @@ function FilterPopover({ anchor, size, children }: { anchor: RefObject<HTMLEleme
 
 function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFilterProps) {
   const [open, setOpen] = useState(false);
-  // Doc 92 D2: filtro «contiene» (case-insensitive) sobre las opciones del popover.
+  // Filtro «contiene» (case-insensitive) sobre las opciones del popover.
   const [q, setQ] = useState('');
   const ref = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -354,10 +358,10 @@ function MultiFilter({ label, icon: Icon, options, selected, onToggle }: MultiFi
   );
 }
 
-// ── component ──────────────────────────────────────────────────────────────────
+// ── componente ─────────────────────────────────────────────────────────────────
 
 export default function ReportingScreenWrapper() {
-  // Doc 75 D13: todo reporte es de UN proyecto — el wrapper lo elige y lo comparte.
+  // Todo reporte es de un solo proyecto: el wrapper lo elige y lo comparte.
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState<string | null>(null);
   useEffect(() => {
@@ -365,42 +369,44 @@ export default function ReportingScreenWrapper() {
       .then((ps) => { setProjects(ps); setProjectId(initialProjectId(ps)); })
       .catch(() => toast.error("Couldn't load the projects"));
   }, []);
-  // Doc 102 (D1): versión del reporte — null = producción; si no, una versión
-  // PROPIA sin publicar (borrador o en revisión) del proyecto.
+  // Versión del reporte: null = producción; si no, una versión propia sin
+  // publicar (borrador o en revisión) del proyecto.
   const me = useAuthStore((s) => s.user?.username ?? null);
+  // Descargar la metadata (Excel) exige el permiso `export`.
+  const canExport = useAuthStore((s) => s.has('export'));
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [versionId, setVersionId] = useState<string | null>(null);
-  // Doc 105 (R2-B5): sólo se aplica el listado de versiones MÁS RECIENTE (el
-  // inicial o un re-listado): una respuesta vieja que llegaba tarde pisaba a la
-  // nueva — aviso falso «no longer open», vuelta a Production y el draft recién
-  // elegido fuera del combo. Mismo patrón que `_explorerSeq` del canvas.
-  // Doc 105 (R6): si el más reciente FALLA, vale la última lista buena que haya
-  // llegado desde el cambio de proyecto (aunque la trajera un pedido anterior);
-  // sin ninguna, se avisa (B4) — antes el fallo se callaba y el combo quedaba vacío.
-  // `warned`: el aviso B4 ya está en pantalla — re-emitirlo con el mismo id lo
-  // reemplaza y reinicia su vencimiento (se cerraba solo aun con el mouse encima);
-  // sale UNA vez por proyecto o por lista buena.
+  // Solo se aplica el listado de versiones más reciente (el inicial o un
+  // re-listado): una respuesta desactualizada que llegara tarde pisaría a la
+  // última, con aviso falso «no longer open», vuelta a Production y el draft
+  // recién elegido fuera del combo. Mismo patrón que `_explorerSeq` del canvas.
+  // Si el más reciente falla, vale la última lista buena que haya llegado desde
+  // el cambio de proyecto (aunque la trajera un pedido anterior); sin ninguna, se
+  // avisa en lugar de dejar el combo vacío sin explicación.
+  // `warned`: el aviso ya está en pantalla; re-emitirlo con el mismo id lo
+  // sustituye y reinicia su vencimiento (se cerraría solo aun con el mouse
+  // encima), así que sale una vez por proyecto o por lista buena.
   const versionsReq = useRef({ seq: 0, failed: 0, warned: false, good: null as { seq: number; list: VersionRow[] } | null });
   /** Llegó una lista buena: la aplica si es la más reciente ('latest') o si la
-   *  más reciente falló y ésta es la mejor que hay ('fallback'); si no, null. */
+   *  más reciente falló y esta es la mejor que hay ('fallback'); si no, null. */
   const takeVersions = useCallback((seq: number, vs: VersionRow[]): 'latest' | 'fallback' | null => {
     const r = versionsReq.current;
     if (!r.good || seq > r.good.seq) r.good = { seq, list: vs };
     const how = seq === r.seq ? 'latest' : r.failed === r.seq && r.good.seq === seq ? 'fallback' : null;
     if (how) {
       setVersions(vs);
-      if (r.warned) { toast.dismiss(VERSIONS_TOAST); r.warned = false; }   // B4: la lista volvió
+      if (r.warned) { toast.dismiss(VERSIONS_TOAST); r.warned = false; }   // la lista volvió: se retira el aviso
     }
     return how;
   }, []);
-  /** Falló un listado: si era el más reciente, vale la última lista buena; sin ninguna, el aviso B4. */
+  /** Falló un listado: si era el más reciente, vale la última lista buena; sin ninguna, el aviso. */
   const versionsFailed = useCallback((seq: number) => {
     const r = versionsReq.current;
     if (seq !== r.seq) return;
     r.failed = seq;
     if (r.good) setVersions(r.good.list);
     else if (!r.warned) {
-      // Doc 105 (B4): antes el combo quedaba en Production sin decir por qué.
+      // El aviso explica por qué el combo solo ofrece Production.
       r.warned = true;
       toast.error("Couldn't load your versions of this project — only Production is available.", { id: VERSIONS_TOAST });
     }
@@ -411,8 +417,8 @@ export default function ReportingScreenWrapper() {
     if (!projectId) return undefined;
     let cancelled = false;
     const r = versionsReq.current;
-    r.good = null;   // proyecto nuevo: todavía no llegó ninguna lista buena
-    if (r.warned) { toast.dismiss(VERSIONS_TOAST); r.warned = false; }   // el aviso era del proyecto anterior
+    r.good = null;   // cambio de proyecto: sin lista buena hasta que llegue una
+    if (r.warned) { toast.dismiss(VERSIONS_TOAST); r.warned = false; }   // el aviso es del proyecto anterior
     const seq = ++r.seq;
     listVersions(projectId)
       .then((vs) => { if (!cancelled) takeVersions(seq, vs); })
@@ -423,12 +429,12 @@ export default function ReportingScreenWrapper() {
     [versions, me, projectId]);
   const own = useMemo(() => (projectId ? ownOpenVersions(versions, projectId, me) : []), [versions, projectId, me]);
   const version = own.find((r) => r.id === versionId) ?? null;
-  // Doc 102: si una lectura de la versión falla (p. ej. se publicó o se cerró en
-  // otra pestaña), se vuelve a pedir la lista: si ya no está abierta, el combo
-  // deja de ofrecerla y la pantalla vuelve a producción, con aviso.
-  // Doc 105: el aviso comparte el id del toast del error (R2-B3: uno solo, no
-  // dos); un 403/404 (A5-o4: se transfirió o se eliminó) vuelve a producción
-  // sin esperar la lista — el backend ya lo dijo.
+  // Si una lectura de la versión falla (p. ej. se publicó o se cerró en otra
+  // pestaña), se vuelve a pedir la lista: si la versión dejó de estar abierta, el
+  // combo deja de ofrecerla y la pantalla vuelve a producción, con aviso.
+  // El aviso comparte el id del toast del error (uno solo, no dos); un 403/404
+  // (se transfirió o se eliminó) vuelve a producción sin esperar la lista,
+  // porque el backend ya lo confirmó.
   const liveProject = useRef<string | null>(null);
   const liveVersion = useRef<string | null>(null);
   useEffect(() => { liveProject.current = projectId; }, [projectId]);
@@ -445,13 +451,13 @@ export default function ReportingScreenWrapper() {
     const seq = ++versionsReq.current.seq;
     listVersions(pid)
       .then((vs) => {
-        // Sólo la MÁS RECIENTE trae noticias sobre la versión elegida.
+        // Solo la lista más reciente trae noticias sobre la versión elegida.
         if (liveProject.current !== pid || takeVersions(seq, vs) !== 'latest') return;
         const cur = liveVersion.current;
         if (cur && !(gone && cur === was) && !ownOpenVersions(vs, pid, me).some((r) => r.id === cur)) {
           setVersionId(null);
-          // Doc 105 (A5-o4): ¿se eliminó, se transfirió o se publicó/cerró? Lo dice
-          // su cabecera — un pedido, sólo cuando la versión elegida desaparece.
+          // ¿Se eliminó, se transfirió o se publicó/cerró? Lo dice su cabecera:
+          // un pedido, solo cuando la versión elegida desaparece.
           getChangeset(cur)
             .then((header) => ({ header }), (error: unknown) => ({ error }))
             .then((read) => { toast.warning(vanishedVersionText(read, me), { id: VERSION_TOAST }); });
@@ -459,15 +465,15 @@ export default function ReportingScreenWrapper() {
       })
       .catch(() => { if (liveProject.current === pid) versionsFailed(seq); });   // la versión sigue elegida
   }, [me, takeVersions, versionsFailed]);
-  // Doc 105 (R2-B5): la lista sólo se pedía al cambiar de proyecto — un draft
-  // creado (o publicado) en otra pestaña no aparecía (o seguía ofrecido).
+  // La lista se vuelve a pedir al recuperar el foco: así aparece un draft creado
+  // en otra pestaña y deja de ofrecerse uno publicado allí.
   useEffect(() => {
     const onFocus = () => recheckVersions();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [recheckVersions]);
-  // Doc 105 (B3): export en curso (por niveles o con plantilla) — Project y
-  // Version quedan deshabilitados hasta que termine.
+  // Export en curso (por niveles o con plantilla): Project y Version quedan
+  // deshabilitados hasta que termine.
   const [exportBusy, setExportBusy] = useState(false);
   const pick = <ProjectPick projects={projects} projectId={projectId} onPick={setProjectId} busy={exportBusy} />;
   if (!projectId) {
@@ -486,27 +492,29 @@ export default function ReportingScreenWrapper() {
     <VersionPick production={production} own={own} versionId={version?.id ?? null} onPick={setVersionId} busy={exportBusy} />
   );
   return (
-    <ReportingScreen key={`${projectId}:${version?.id ?? 'production'}`} projectId={projectId} projectName={projectName}
+    <ReportingScreen key={`${projectId}:${version?.id ?? 'production'}`} projectId={projectId} projectName={projectName} canExport={canExport}
       changesetId={version?.id ?? null} versionLabel={version?.versionLabel ?? null} onVersionError={recheckVersions}
       onExportBusy={setExportBusy} projectPicker={pick} versionPicker={versionPick} />
   );
 }
 
 export function ReportingScreen({
-  projectId, projectName, changesetId, versionLabel, onVersionError, onExportBusy, projectPicker, versionPicker,
+  projectId, projectName, changesetId, versionLabel, onVersionError, onExportBusy, projectPicker, versionPicker, canExport = false,
 }: {
   projectId: string; projectName: string;
-  /** Doc 102 (D1): versión PROPIA sin publicar del reporte; null = producción. */
+  /** Versión propia sin publicar del reporte; null = producción. */
   changesetId: string | null; versionLabel: string | null;
-  /** Doc 102: falló una lectura de la versión — el wrapper revisa si sigue abierta
-   *  (doc 105: con el error, para distinguir transferida/eliminada). */
+  /** Falló una lectura de la versión: el wrapper revisa si sigue abierta (recibe
+   *  el error para distinguir transferida/eliminada). */
   onVersionError: (err?: unknown) => void;
-  /** Doc 105 (B3): hay un export en curso (`false` también al desmontarse). */
+  /** Hay un export en curso (`false` también al desmontarse). */
   onExportBusy: (busy: boolean) => void;
   projectPicker: React.ReactNode; versionPicker: React.ReactNode;
+  /** El usuario tiene el permiso `export` (bajar la metadata a Excel). */
+  canExport?: boolean;
 }) {
-  // Doc 102: con una versión propia el reporte es ESA versión (producción + sus
-  // cambios): la grilla la carga completa y toda lectura lleva su id.
+  // Con una versión propia el reporte es esa versión (producción + sus cambios):
+  // la grilla la carga completa y toda lectura lleva su id.
   const draftMode = changesetId !== null;
   const [tables, setTables] = useState<ReportTableRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -517,69 +525,68 @@ export function ReportingScreen({
 
   const [levels, setLevels] = useState<Set<LevelKey>>(new Set<LevelKey>(['tables', 'columns']));
   const [exporting, setExporting] = useState(false);
-  // Doc 105 (B3): la card de plantillas avisa si exporta; con cualquiera de los
-  // dos exports en curso el wrapper deshabilita Project / Version.
+  // La card de plantillas avisa si exporta; con cualquiera de los dos exports en
+  // curso el wrapper deshabilita Project / Version.
   const [templateBusy, setTemplateBusy] = useState(false);
   const exportBusy = exporting || templateBusy;
   useEffect(() => {
     onExportBusy(exportBusy);
     return () => onExportBusy(false);
   }, [exportBusy, onExportBusy]);
-  // Doc 105 (R2-B3): un export que falla DESPUÉS de desmontar (el wrapper volvió
-  // a Production) no avisa sobre la pantalla nueva.
+  // Un export que falla después de desmontar (el wrapper volvió a Production) no
+  // avisa sobre la pantalla nueva.
   const alive = useRef(true);
   useEffect(() => {
     alive.current = true;
     return () => { alive.current = false; };
   }, []);
-  /** Doc 105 (R2-B3/A5-o4): aviso de una lectura fallida. En modo versión, UN
-   *  toast con el id del aviso «showing Production» del wrapper (un 403/404 dice
-   *  que la versión se transfirió o se eliminó) y el wrapper revisa la versión. */
+  /** Aviso de una lectura fallida. En modo versión, un solo toast con el id del
+   *  aviso «showing Production» del wrapper (un 403/404 dice que la versión se
+   *  transfirió o se eliminó) y el wrapper revisa la versión. */
   const readFailed = useCallback((err: unknown, fallback: string) => {
     if (!changesetId) { toast.error(readErrorText(err, fallback, false)); return; }
     toast.error(readErrorText(err, fallback, true), { id: VERSION_TOAST });
     onVersionError(err);
   }, [changesetId, onVersionError]);
 
-  // Doc 70 §4.1: universo COMPLETO de los filtros (no depende de las 50 filas
-  // de la carga inicial). Si falla, los combos caen a lo derivado de las filas.
+  // Universo completo de los filtros (no depende de las 50 filas de la carga
+  // inicial). Si falla, los combos caen a lo derivado de las filas.
   const [serverFilters, setServerFilters] = useState<ReportFilterOptions | null>(null);
   useEffect(() => {
     let cancelled = false;
     listReportFilters(projectId, changesetId).then((f) => { if (!cancelled) setServerFilters(f); }).catch(() => {});
     return () => { cancelled = true; };
   }, [projectId, changesetId]);
-  // Doc 70 §4.2: qué muestra la grilla — tablas, sus columnas o la fila unida.
+  // Qué muestra la grilla: tablas, sus columnas o la fila unida.
   const [show, setShow] = useState<ShowMode>('tables');
 
-  // Doc 92 D3: sin filtros la grilla se carga por PÁGINAS (orden físico) y pide
-  // la siguiente cuando el centinela entra al viewport; con un filtro se
-  // descarga el set completo (facetas/conteos exactos sobre todo).
+  // Sin filtros la grilla se carga por páginas (orden físico) y pide la siguiente
+  // cuando el centinela entra al viewport; con un filtro se descarga el set
+  // completo (facetas/conteos exactos sobre todo).
   const [fullLoad, setFullLoad] = useState(draftMode);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  // Doc 92 D4: total REAL de tablas del proyecto (null = aún no llegó).
+  // Total real de tablas del proyecto (null = sin conteo: pendiente o fallido).
   const [total, setTotal] = useState<number | null>(null);
-  // Doc 105 (R2-B4): qué carga de la grilla falló (null = ninguna) y un contador
-  // de reintentos POR carga — uno compartido relanzaría las dos, que competirían
-  // por la grilla.
+  // Qué carga de la grilla falló (null = ninguna) y un contador de reintentos por
+  // carga: uno compartido relanzaría las dos, que competirían por la grilla.
   const [loadError, setLoadError] = useState<'page' | 'full' | null>(null);
   const [pageTry, setPageTry] = useState(0);
   const [fullTry, setFullTry] = useState(0);
   const retryLoad = () => (loadError === 'full' ? setFullTry((n) => n + 1) : setPageTry((n) => n + 1));
-  // Doc 105: offset de la página del scroll infinito que falló (null = ninguna).
-  // Un fallo NO marca el fin: antes `setHasMore(false)` dejaba la barra en «N
-  // tables» como si estuviera completo, «Select all» cubría sólo lo cargado y no
-  // había reintento. Cada carga nueva (primera página o completa) sube la
-  // «época»: una página pedida antes ya no toca la grilla ni avisa.
+  // Offset de la página del scroll infinito que falló (null = ninguna). Un fallo
+  // no marca el fin (`hasMore` se mantiene): la barra no se presenta como
+  // completa, «Select all» abarca todo el proyecto y Retry pide esa página. Cada
+  // carga nueva (primera página o completa) sube la «época»: una página pedida
+  // en una época anterior no toca la grilla ni avisa.
   const [moreError, setMoreError] = useState<number | null>(null);
   const pagesEpoch = useRef(0);
   useEffect(() => {
-    // Doc 102: la versión propia la carga completa el efecto de abajo. Doc 105:
-    // al pasar a la carga completa, una página que llega tarde ya no la pisa.
+    // La versión propia la carga completa el efecto de abajo. Al pasar a la carga
+    // completa, una página que llega tarde no la pisa.
     if (draftMode || fullLoad) return undefined;
     let cancelled = false;
-    pagesEpoch.current += 1;   // doc 105: una página pedida antes ya no toca la grilla
+    pagesEpoch.current += 1;   // una página de una época anterior no toca la grilla
     setMoreError(null);
     setLoadingMore(false);
     setLoading(true);
@@ -611,7 +618,7 @@ export function ReportingScreen({
   useEffect(() => {
     if (!fullLoad) return undefined;
     let cancelled = false;
-    pagesEpoch.current += 1;   // doc 105: una página pedida antes ya no toca la grilla
+    pagesEpoch.current += 1;   // una página de una época anterior no toca la grilla
     setMoreError(null);
     setLoadingMore(false);
     setLoading(true);
@@ -635,14 +642,14 @@ export function ReportingScreen({
       cancelled = true;
     };
   }, [fullLoad, projectId, changesetId, readFailed, fullTry]);
-  /** Página siguiente del scroll infinito. Con una página fallida sólo `retry`
-   *  (el botón Retry) la vuelve a pedir — el mismo offset; el scroll no reintenta solo. */
+  /** Página siguiente del scroll infinito. Con una página fallida, solo `retry`
+   *  (el botón Retry) la vuelve a pedir, con el mismo offset; el scroll no reintenta solo. */
   const loadMore = useCallback((retry = false) => {
     if (fullLoad || !hasMore || loadingMore || loading) return;
     if (moreError !== null && !retry) return;
     const offset = moreError ?? tables.length;
     const epoch = pagesEpoch.current;
-    // Vigente: la pantalla sigue montada y no empezó otra carga (doc 105).
+    // Vigente: la pantalla sigue montada y no empezó otra carga.
     const current = () => alive.current && epoch === pagesEpoch.current;
     setMoreError(null);
     setLoadingMore(true);
@@ -666,9 +673,9 @@ export function ReportingScreen({
   loadMoreRef.current = loadMore;
   const scrollRef = useRef<HTMLDivElement>(null);
   const sentinelRef = useRef<HTMLTableRowElement>(null);
-  // Centinela al final de la tabla: al asomar (200 px antes) pide la página
+  // Centinela al final de la tabla: al asomar (con 200 px de margen) pide la página
   // siguiente. Se re-arma cuando cambia lo cargado o el modo de la grilla (y al
-  // volver del error al centinela: doc 105).
+  // volver del error al centinela).
   useEffect(() => {
     const el = sentinelRef.current;
     if (!el || fullLoad || !hasMore || typeof IntersectionObserver === 'undefined') return undefined;
@@ -679,11 +686,11 @@ export function ReportingScreen({
     obs.observe(el);
     return () => obs.disconnect();
   }, [fullLoad, hasMore, show, loading, tables.length, moreError]);
-  // Hay tablas del proyecto que la grilla aún no cargó (sin filtros).
+  // Quedan tablas del proyecto sin cargar en la grilla (sin filtros).
   const partial = !fullLoad && hasMore;
 
-  // Per-facet predicates. Building a facet's options excludes its OWN selection,
-  // so the filters narrow each other (cumulative / faceted).
+  // Predicados por faceta. Las opciones de una faceta excluyen su propia
+  // selección, así los filtros se acotan entre sí (acumulativos / por facetas).
   const passSearch = useCallback(
     (t: ReportTableRow) => {
       const q = search.trim().toLowerCase();
@@ -700,14 +707,14 @@ export function ReportingScreen({
     [areaSel],
   );
 
-  // Faceted option lists: each reflects rows passing the OTHER filters; selected
-  // values are always kept visible so they can be toggled off.
+  // Listas de opciones por faceta: cada una refleja las filas que pasan los otros
+  // filtros; los valores seleccionados siguen visibles para poder desmarcarlos.
   const schemaOptions = useMemo(() => {
     const s = new Set(
       tables.filter((t) => passSearch(t) && passArea(t)).map((t) => t.schema).filter(Boolean),
     );
     schemaSel.forEach((v) => s.add(v));
-    return unionSorted(serverFilters?.schemas ?? [], s);   // doc 70: universo completo
+    return unionSorted(serverFilters?.schemas ?? [], s);   // universo completo del catálogo
   }, [tables, passSearch, passArea, schemaSel, serverFilters]);
   const areaOptions = useMemo(() => {
     const s = new Set(
@@ -717,16 +724,16 @@ export function ReportingScreen({
     return unionSorted(serverFilters?.subjectAreas ?? [], s);
   }, [tables, passSearch, passSchema, areaSel, serverFilters]);
 
-  // Rows passing ALL filters.
+  // Filas que pasan todos los filtros.
   const filtered = useMemo(
     () => tables.filter((t) => passSearch(t) && passSchema(t) && passArea(t)),
     [tables, passSearch, passSchema, passArea],
   );
 
-  // ── row selection (drives the Excel export) ──────────────────────────────────
-  // Explicit set; starts EMPTY (nothing selected). Only ids among the visible
-  // (filtered) rows count toward the export. Doc 92 D5: `allSelected` = TODAS
-  // las tablas del proyecto (cargadas o no) — el export baja el set completo.
+  // ── selección de filas (alimenta el export a Excel) ──────────────────────────
+  // Conjunto explícito; arranca vacío (nada seleccionado). Solo cuentan para el
+  // export los ids de las filas visibles (filtradas). `allSelected` = todas las
+  // tablas del proyecto (cargadas o no): el export baja el set completo.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [allSelected, setAllSelected] = useState(false);
   const filteredIds = useMemo(() => filtered.map((t) => t.id), [filtered]);
@@ -741,17 +748,17 @@ export function ReportingScreen({
   const selectedCount = allSelected && partial && total != null ? total : selectedIds.size;
   const allRowsSelected = allSelected || (filtered.length > 0 && selectedIds.size === filtered.length);
 
-  // Filas a exportar: la selección, o TODAS las del proyecto (filtradas) con
-  // «Select all» y páginas pendientes (doc 92 D5). Las comparten el export por
-  // niveles y el de plantilla (doc 95 D11).
+  // Filas a exportar: la selección o, con «Select all» y páginas pendientes,
+  // todas las del proyecto (filtradas). Las comparten el export por niveles y el
+  // de plantilla.
   const resolveExportRows = useCallback(async (): Promise<ReportTableRow[]> => (
     allSelected && partial
       ? (await listReportTables(projectId, {}, changesetId)).filter((t) => passSearch(t) && passSchema(t) && passArea(t))
       : selectedRows
   ), [allSelected, partial, projectId, changesetId, passSearch, passSchema, passArea, selectedRows]);
   // Columnas de la card de plantillas: en modo versión, un error avisa al wrapper
-  // (con el error: doc 105) — la card muestra su toast con el id compartido. Si
-  // esta pantalla ya se desmontó, el error es de una versión que ya no está en
+  // (pasándole el error) y la card muestra su toast con el id compartido. Si esta
+  // pantalla se desmontó, el error es de una versión que dejó de estar en
   // pantalla: no toca la que se eligió después.
   const fetchColumns = useCallback((ids: string[]) => {
     const read = fetchColumnsFor(projectId, ids, changesetId);
@@ -762,7 +769,7 @@ export function ReportingScreen({
 
   const toggleRow = (id: string) => {
     if (allSelected) {
-      // Desmarcar una fila con todo seleccionado: modo explícito sobre lo cargado (S3).
+      // Desmarcar una fila con todo seleccionado: modo explícito sobre lo cargado.
       setAllSelected(false);
       setSelected(new Set(filteredIds.filter((x) => x !== id)));
       return;
@@ -785,7 +792,7 @@ export function ReportingScreen({
     });
   };
 
-  // Right-rail summaries derive from the (filtered) rows.
+  // Los resúmenes del panel derecho se derivan de las filas (filtradas).
   const bySubjectArea = useMemo(() => {
     const m = new Map<string, number>();
     filtered.forEach((t) => t.subjectAreas.forEach((a) => m.set(a, (m.get(a) ?? 0) + 1)));
@@ -800,10 +807,10 @@ export function ReportingScreen({
     [filtered],
   );
 
-  // ── Doc 70 §4.2: columnas de las tablas en foco (selección, o las filtradas)
-  // para los modos Columns / Tables + Columns. Tope de UX: COLUMN_BATCH (300)
-  // tablas en pantalla (un solo lote; los ids ya van en el cuerpo, doc 102) —
-  // por encima se pide acotar (filtro o selección); el export no tiene tope.
+  // ── Columnas de las tablas en foco (selección, o las filtradas) para los
+  // modos Columns / Tables + Columns. Tope de UX: COLUMN_BATCH (300) tablas en
+  // pantalla (un solo lote; los ids van en el cuerpo); por encima se pide acotar
+  // (filtro o selección). El export no tiene tope.
   const colScope = useMemo(() => (selectedRows.length > 0 ? selectedRows : filtered), [selectedRows, filtered]);
   const colScopeKey = useMemo(() => colScope.map((t) => t.id).join(','), [colScope]);
   const colScopeTooBig = colScope.length > COLUMN_BATCH;
@@ -834,13 +841,13 @@ export function ReportingScreen({
     return sorted.map((c) => joinedSheetRow(c, tableById.get(c.tableId), tblUdp, colUdp));
   }, [show, colRows, tableById, colScope]);
 
-  // La búsqueda cuenta como filtro recién con 2+ caracteres: el PRIMER
+  // La búsqueda cuenta como filtro recién con 2+ caracteres: el primer
   // keystroke no debe disparar la descarga del set completo (15k tablas).
   const anyFilter =
     search.trim().length >= 2 || schemaSel.size > 0 || areaSel.size > 0;
 
-  // The first time any filter is applied, load the full table set — con
-  // debounce para que tipear rápido no encole la carga a mitad de palabra.
+  // La primera vez que se aplica un filtro se carga el set completo de tablas,
+  // con debounce para que tipear rápido no encole la carga a mitad de palabra.
   useEffect(() => {
     if (!anyFilter || fullLoad) return;
     const t = setTimeout(() => setFullLoad(true), 300);
@@ -863,7 +870,7 @@ export function ReportingScreen({
 
   const toggleLevel = (key: LevelKey) => toggleSet<LevelKey>(setLevels, key);
 
-  // ── Excel export: one sheet per checked level ────────────────────────────────
+  // ── export a Excel: una hoja por nivel marcado ───────────────────────────────
   const handleExport = async () => {
     if (levels.size === 0) {
       toast.error('Pick at least one detail level to export.');
@@ -875,8 +882,8 @@ export function ReportingScreen({
     }
     setExporting(true);
     try {
-      // Doc 92 D5: Select all con páginas pendientes ⇒ TODAS las tablas del
-      // proyecto (se bajan completas para el Excel, sin tocar la grilla).
+      // Select all con páginas pendientes ⇒ todas las tablas del proyecto (se
+      // bajan completas para el Excel, sin tocar la grilla).
       const rows = await resolveExportRows();
       if (rows.length === 0) {
         toast.error('Select at least one row to export.');
@@ -885,16 +892,15 @@ export function ReportingScreen({
       const wb = XLSX.utils.book_new();
 
       // UDPs como columnas dinámicas (una por def presente en la selección).
-      // Doc 70: las MISMAS funciones puras de la grilla (lib/reportRows) arman
-      // las hojas — metadata completa de tablas y columnas, por separado o unida.
+      // Las mismas funciones puras de la grilla (lib/reportRows) arman las hojas:
+      // metadata completa de tablas y columnas, por separado o unida.
       const tableUdpKeys = udpKeysOf(rows.map((t) => t.udpValues));
       if (levels.has('tables')) {
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map((t) => tableSheetRow(t, tableUdpKeys))), 'Tables');
       }
 
       if (levels.has('columns') || levels.has('joined')) {
-        // Columnas de las tablas seleccionadas por tandas de 300 ids (antes,
-        // más de 300 tablas caía a la descarga completa capada a 20k).
+        // Columnas de las tablas seleccionadas, por tandas de 300 ids.
         const byId = new Map(rows.map((t) => [t.id, t] as const));
         const cols = sortColumnRows(await fetchColumnsFor(projectId, rows.map((t) => t.id), changesetId), (id) => byId.get(id)?.physicalName ?? id);
         const colUdpKeys = udpKeysOf(cols.map((c) => c.udpValues));
@@ -910,12 +916,11 @@ export function ReportingScreen({
       }
 
       if (levels.has('relationships')) {
-        // Detalle POR PAR de columnas (v2, doc 19): una FK compuesta emite una
-        // fila por par (mismo Rel id + Pair). Acotado a las tablas seleccionadas.
-        // Doc 105 (A3-o1): por lotes de ids (antes, las primeras 5 000 del
-        // PROYECTO filtradas acá: en proyectos grandes faltaban relaciones).
+        // Detalle por par de columnas: una FK compuesta emite una fila por par
+        // (mismo Rel id + Pair). Acotado a las tablas seleccionadas y pedido por
+        // lotes de ids, para no omitir relaciones en proyectos grandes.
         const rels = await fetchRelationshipsFor(projectId, rows.map((t) => t.id), changesetId);
-        const data = rels.map(relationshipSheetRow);   // doc 98: incluye las frases
+        const data = rels.map(relationshipSheetRow);   // incluye las frases de la relación
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Relationships');
       }
 
@@ -925,10 +930,10 @@ export function ReportingScreen({
         // (alias, origen, casteo, transformación). Mismo patrón acotado que Columns.
         const ids = rows.map((t) => t.id);
         const idSet = new Set(ids);
-        // Doc 102: ids en el CUERPO, en tandas (antes >300 tablas bajaban TODAS las vistas del proyecto).
+        // Ids en el cuerpo del request, en tandas.
         const views = (await fetchViewsFor(projectId, ids, changesetId))
           .filter((v) => v.sourceTableIds.some((tid) => idSet.has(tid)));
-        const viewsData = views.map(viewSheetRow);   // doc 96 D6: sin «Mode»
+        const viewsData = views.map(viewSheetRow);
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(viewsData), 'Views');
         const colsData = views.flatMap((v) =>
           v.columns.map((c) => ({
@@ -953,11 +958,11 @@ export function ReportingScreen({
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Definitions');
       }
 
-      // Doc 102: con una versión propia, su etiqueta va en el nombre del archivo.
+      // Con una versión propia, su etiqueta va en el nombre del archivo.
       XLSX.writeFile(wb, levelsFileName(projectName, draftMode ? (versionLabel ?? 'draft') : null, new Date()));
       toast.success('Report exported to Excel.');
     } catch (err: unknown) {
-      if (!alive.current) return;   // doc 105 (R2-B3): la pantalla ya cambió (p. ej. volvió a Production)
+      if (!alive.current) return;   // la pantalla es otra (p. ej. volvió a Production)
       readFailed(err, 'Could not build the Excel file.');
     } finally {
       setExporting(false);
@@ -967,7 +972,7 @@ export function ReportingScreen({
   return (
     <div className="dmh-rep">
       <div className="dmh-rep-inner">
-        {/* ── header ───────────────────────────────────────────────── */}
+        {/* ── cabecera ─────────────────────────────────────────────── */}
         <div className="dmh-rep-head">
           <div className="dmh-rep-eyebrow">Reporting</div>
           <h1 className="dmh-rep-h1">Reporting</h1>
@@ -978,13 +983,13 @@ export function ReportingScreen({
         </div>
 
         <div className="dmh-rep-cols">
-          {/* ── left: filters + table ──────────────────────────────── */}
+          {/* ── izquierda: filtros + tabla ─────────────────────────── */}
           <div className="dmh-rep-main">
             <div className="dmh-rep-bar">
-              {/* Doc 75 D13: proyecto del reporte (obligatorio). Doc 102: y su versión. */}
+              {/* Proyecto del reporte (obligatorio) y su versión. */}
               {projectPicker}
               {versionPicker}
-              {/* Doc 70 §4.2: qué muestra la grilla — tablas, sus columnas o la fila unida. */}
+              {/* Qué muestra la grilla: tablas, sus columnas o la fila unida. */}
               <div className="rd-seg" role="tablist" aria-label="Show">
                 <button type="button" role="tab" aria-selected={show === 'tables'} className={show === 'tables' ? 'active' : ''} onClick={() => setShow('tables')}>Tables</button>
                 <button type="button" role="tab" aria-selected={show === 'columns'} className={show === 'columns' ? 'active' : ''} onClick={() => setShow('columns')}>Columns</button>
@@ -1026,7 +1031,7 @@ export function ReportingScreen({
                   : <>{filtered.length.toLocaleString()} table{filtered.length === 1 ? '' : 's'}</>}
                 {partial && (
                   <em className="dmh-rep-selcount-hint">
-                    {/* Doc 105: tras un fallo el scroll ya no carga — sólo Retry, al pie. */}
+                    {/* Tras un fallo el scroll no carga: solo Retry, al pie. */}
                     {moreError !== null ? " · couldn't load more (Retry below)" : ' · scroll to load more'}
                   </em>
                 )}
@@ -1040,7 +1045,7 @@ export function ReportingScreen({
 
             <div className="dmh-rep-tablewrap">
               <div className="dmh-rep-tablescroll" ref={scrollRef}>
-                {/* Doc 105 (R2-B4): una carga fallida no se disfraza de proyecto vacío. */}
+                {/* Una carga fallida no se presenta como proyecto vacío. */}
                 {loadError && !loading ? (
                   <TablesLoadError onRetry={retryLoad} />
                 ) : show !== 'tables' ? (
@@ -1161,8 +1166,8 @@ export function ReportingScreen({
                         </tr>
                       ))
                     )}
-                    {/* Doc 92 D3: centinela del scroll infinito (sólo sin filtros y con páginas pendientes).
-                        Doc 105: si la página siguiente falló, el pie lo dice y ofrece Retry. */}
+                    {/* Centinela del scroll infinito (solo sin filtros y con páginas pendientes).
+                        Si la página siguiente falló, el pie lo indica y ofrece Retry. */}
                     {!loading && partial && (moreError !== null ? (
                       <tr className="dmh-rep-sentinel">
                         <td colSpan={8}><MoreTablesError onRetry={() => loadMore(true)} /></td>
@@ -1179,7 +1184,7 @@ export function ReportingScreen({
             </div>
           </div>
 
-          {/* ── right: export rail + KPIs ──────────────────────────── */}
+          {/* ── derecha: panel de export + KPIs ────────────────────── */}
           <div className="dmh-rep-rail">
             <div className="dmh-rep-card">
               <div className="dmh-rep-card-head">
@@ -1218,7 +1223,8 @@ export function ReportingScreen({
                   icon={Download}
                   className="dmh-rep-export-btn"
                   onClick={handleExport}
-                  disabled={exporting || levels.size === 0 || selectedCount === 0 || loading}
+                  disabled={!canExport || exporting || levels.size === 0 || selectedCount === 0 || loading}
+                  title={canExport ? undefined : NO_EXPORT_HINT}
                 >
                   {exporting ? 'Exporting…' : 'Download .xlsx'}
                 </Button>
@@ -1229,7 +1235,7 @@ export function ReportingScreen({
               </div>
             </div>
 
-            {/* Doc 95 D11: formatos fijos guardados (p. ej. QA_MODELO) */}
+            {/* Formatos fijos guardados (p. ej. QA_MODELO) */}
             <SheetTemplateCard projectId={projectId} selectedCount={selectedCount} disabled={loading}
               resolveTables={resolveExportRows} fetchColumns={fetchColumns} onBusyChange={setTemplateBusy}
               versionToastId={changesetId ? VERSION_TOAST : undefined} />

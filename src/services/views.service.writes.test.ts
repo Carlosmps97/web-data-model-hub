@@ -1,6 +1,6 @@
-// Doc 104 (ronda 2): crear / editar / borrar una vista va SIEMPRE por la
-// versión en edición. Un popup que quedó abierto cuando la sesión se degradó
-// (versión transferida, eliminada o enviada) escribía directo a producción.
+// Crear, editar o borrar una vista va siempre por la versión en edición. Un popup
+// que sigue abierto cuando la sesión se degrada (versión transferida, eliminada o
+// enviada) no debe escribir directo a producción.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/http', () => ({
@@ -19,11 +19,11 @@ import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
 import { createView, deleteView, updateView } from './views.service';
 
-const body = { name: 'V_X', schema: 'UDV_VU', sourceTableIds: ['t1'], sources: [] } as never;
+const body = { name: 'V_X', schema: 'STG_VU', sourceTableIds: ['t1'], sources: [] } as never;
 
 beforeEach(() => { vi.clearAllMocks(); });
 
-describe('escrituras de vistas (doc 104)', () => {
+describe('escrituras de vistas', () => {
   it('sin sesión de edición rechazan y no tocan producción', async () => {
     for (const s of [{ openMode: 'readonly', activeChangesetId: null }, { openMode: 'readonly', activeChangesetId: 'cs1' }] as const) {
       useSessionStore.setState(s);

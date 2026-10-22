@@ -1,8 +1,8 @@
-// Doc 114 (piloto): al seleccionar una tabla — clic en la tabla o en una columna
-// de OTRA tabla (se abre el panel de Properties), o «Locate» desde el Explorer o
-// el buscador — el canvas se acerca y centra la tabla con sus vistas en el área
-// que queda libre (el canvas ya descuenta el panel). Seguir trabajando dentro de
-// la misma tabla no vuelve a mover el canvas.
+// Al seleccionar una tabla (clic en la tabla o en una columna de otra tabla, que
+// abre el panel de Properties, o «Locate» desde el Explorer o el buscador) el
+// canvas se acerca y centra la tabla con sus vistas en el área que queda libre
+// (el canvas ya descuenta el panel). Seguir trabajando dentro de la misma tabla
+// no vuelve a mover el canvas.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/features/modeler/lib/canvasFocus', async (orig) => {
@@ -17,7 +17,7 @@ import { useSessionStore } from './useSessionStore';
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Tras un clic el encuadre arranca enseguida (cuando el panel ya achicó el canvas) y anima.
- *  Revisión 2: ya no espera la ventana del doble clic (lo ataja `dblClickShield`). */
+ *  No espera la ventana del doble clic (lo ataja `dblClickShield`). */
 const CLICK_WAIT = 120;
 const T = { id: 't1', type: 'table', position: { x: 1000, y: 2000 }, measured: { width: 240, height: 312 }, data: {} };
 const V = { id: 'v1', type: 'view', position: { x: 1280, y: 2000 }, measured: { width: 240, height: 312 }, data: { view: { id: 'v1', sourceTableIds: ['t1'] } } };
@@ -39,11 +39,11 @@ beforeEach(() => {
   useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
   useModelerStore.setState({ selectedTableId: null, selectedColumnId: null, selectedViewId: null, selectedEdgeId: null, flow: null,
     relPreset: null, subcatArmed: false, colMenu: null } as never);
-  useModelerStore.getState().selectTable(null);   // también olvida la tabla pendiente de encuadre (H3)
+  useModelerStore.getState().selectTable(null);   // también olvida la tabla pendiente de encuadre
 });
 
-describe('enfocar la tabla seleccionada con sus vistas (doc 114)', () => {
-  it('clic en la tabla: la centra con SU vista (no la de otra tabla), acercando hasta 100 %, con animación', async () => {
+describe('enfocar la tabla seleccionada con sus vistas', () => {
+  it('clic en la tabla: la centra con su vista (no la de otra tabla), acercando hasta 100 %, con animación', async () => {
     const f = flow();
     useModelerStore.setState({ flow: f as never });
     useModelerStore.getState().selectTable('t1');
@@ -54,13 +54,13 @@ describe('enfocar la tabla seleccionada con sus vistas (doc 114)', () => {
     expect(vp).toEqual(EXPECTED);
     expect(vp.zoom).toBe(1);
     expect(opts.duration).toBeGreaterThan(0);
-    // Revisión 2: trayecto directo — cortado a mitad de camino (deseleccionar, un
+    // Trayecto directo: cortado a mitad de camino (deseleccionar, un
     // menú, un arrastre, la rueda) nunca queda más lejos que al principio (la
     // interpolación «suave» de d3 se aleja en el medio de un trayecto largo).
     expect(opts).toMatchObject({ interpolate: 'linear' });
   });
 
-  it('otro clic en la MISMA tabla (o en una de sus columnas): no vuelve a mover el canvas', async () => {
+  it('otro clic en la misma tabla (o en una de sus columnas): no vuelve a mover el canvas', async () => {
     const f = flow();
     useModelerStore.setState({ flow: f as never, selectedTableId: 't1' });
     useModelerStore.getState().selectTable('t1');
@@ -70,7 +70,7 @@ describe('enfocar la tabla seleccionada con sus vistas (doc 114)', () => {
     expect(useModelerStore.getState().selectedColumnId).toBe('c1');
   });
 
-  it('clic en una columna de OTRA tabla: la selecciona, abre la columna y centra esa tabla', async () => {
+  it('clic en una columna de otra tabla: la selecciona, abre la columna y centra esa tabla', async () => {
     const f = flow();
     useModelerStore.setState({ flow: f as never, selectedTableId: 't2' });
     useModelerStore.getState().focusColumnInPanel('t1', 'c1');
@@ -88,7 +88,7 @@ describe('enfocar la tabla seleccionada con sus vistas (doc 114)', () => {
     expect(f.setCenter).not.toHaveBeenCalled();
   });
 
-  it('Locate de una VISTA: la centra como antes, sin seleccionar', async () => {
+  it('Locate de una vista: la centra sin seleccionarla', async () => {
     const f = flow();
     useModelerStore.setState({ flow: f as never });
     useModelerStore.getState().focusTable('v1');
@@ -108,10 +108,10 @@ describe('enfocar la tabla seleccionada con sus vistas (doc 114)', () => {
   });
 });
 
-// Prueba en navegador (doc 114): lejos, el canvas dibuja cajas compactas (LOD) de
-// otro tamaño que el detalle; al acercarse cambian y el grupo quedaba corrido unos
-// píxeles. Al terminar la animación se corrige con lo medido — salvo que el
-// usuario ya haya movido el canvas o seleccionado otra cosa.
+// Lejos, el canvas dibuja cajas compactas (LOD) de otro tamaño que el detalle; al
+// acercarse cambian y el grupo quedaría corrido unos píxeles. Al terminar la
+// animación se corrige con lo medido, salvo que el usuario ya haya movido el
+// canvas o seleccionado otra cosa.
 describe('enfoque: corrección al cambiar el tamaño de las cajas', () => {
   const sized = (w: number) => [
     { ...T, measured: { width: w, height: 312 } },
@@ -153,7 +153,7 @@ describe('enfoque: corrección al cambiar el tamaño de las cajas', () => {
 
   it('si el usuario movió el canvas (o eligió otra tabla) entretanto, no se corrige', async () => {
     let w = 240;
-    const f = flowWith(() => sized(w), () => ({ x: 5, y: 5, zoom: 0.8 }));   // ya no es el encuadre pedido
+    const f = flowWith(() => sized(w), () => ({ x: 5, y: 5, zoom: 0.8 }));   // difiere del encuadre pedido
     f.setViewport.mockImplementation(async () => { w = 220; return true; });
     useModelerStore.setState({ flow: f as never });
     useModelerStore.getState().selectTable('t1');
@@ -162,16 +162,16 @@ describe('enfoque: corrección al cambiar el tamaño de las cajas', () => {
   });
 });
 
-// Revisión independiente doc 114 (punto 3):
-//  H1 — en un doble clic el segundo clic caía donde la tabla ya no estaba. Ronda 2:
-//       lo ataja el escudo del canvas (`dblClickShield`, armado por el clic que
-//       encuadra) — también el doble clic LENTO — y el encuadre arranca enseguida.
-//  H3 — con la herramienta de relación o subcategoría armada, un clic en una
-//       cabecera selecciona SIN mover el canvas (rompía el trazo clic → clic).
-//  H4 — la corrección final no mueve el canvas si se cerró el panel o cambió la
-//       selección durante la animación.
-describe('encuadre tras un clic (revisión doc 114)', () => {
-  it('H1 (ronda 2): tras un clic arranca enseguida y arma el escudo del doble clic', async () => {
+// Encuadre tras un clic:
+//  · en un doble clic, el segundo clic caería donde la tabla estaba antes de
+//    moverse: lo ataja el escudo del canvas (`dblClickShield`, armado por el clic
+//    que encuadra), también en el doble clic lento, y el encuadre arranca enseguida;
+//  · con la herramienta de relación o subcategoría armada, un clic en una
+//    cabecera selecciona sin mover el canvas (moverlo rompería el trazo clic → clic);
+//  · la corrección final no mueve el canvas si se cierra el panel o cambia la
+//    selección durante la animación.
+describe('encuadre tras un clic', () => {
+  it('tras un clic arranca enseguida y arma el escudo del doble clic', async () => {
     const f = flow();
     useModelerStore.setState({ flow: f as never });
     const arm = vi.spyOn(dblClickShield, 'arm');
@@ -193,7 +193,7 @@ describe('encuadre tras un clic (revisión doc 114)', () => {
     arm.mockRestore();
   });
 
-  it('H3: con la herramienta de relación (o subcategoría) armada, selecciona sin mover el canvas', async () => {
+  it('con la herramienta de relación (o subcategoría) armada, selecciona sin mover el canvas', async () => {
     for (const armed of [{ relPreset: { parent: 'one', child: 'zero-many', identifying: true } }, { subcatArmed: true }]) {
       const f = flow();
       useModelerStore.setState({ flow: f as never, selectedTableId: null, relPreset: null, subcatArmed: false, ...armed } as never);
@@ -205,7 +205,7 @@ describe('encuadre tras un clic (revisión doc 114)', () => {
     useModelerStore.setState({ relPreset: null, subcatArmed: false } as never);
   });
 
-  it('H3 (ronda 2): desarmada la herramienta, otro clic en esa misma tabla ya la encuadra', async () => {
+  it('desarmada la herramienta, otro clic en esa misma tabla ya la encuadra', async () => {
     const f = flow();
     useModelerStore.setState({ flow: f as never, selectedTableId: null, subcatArmed: true } as never);
     useModelerStore.getState().selectTable('t1');
@@ -215,12 +215,12 @@ describe('encuadre tras un clic (revisión doc 114)', () => {
     useModelerStore.getState().selectTable('t1');
     await sleep(CLICK_WAIT);
     expect(f.setViewport).toHaveBeenCalledTimes(1);
-    useModelerStore.getState().selectTable('t1');   // y otro clic más ya no la mueve
+    useModelerStore.getState().selectTable('t1');   // y un clic más no la vuelve a mover
     await sleep(CLICK_WAIT);
     expect(f.setViewport).toHaveBeenCalledTimes(1);
   });
 
-  it('H4: si se cierra el panel (el área cambia) o cambia la selección durante la animación, no se corrige', async () => {
+  it('si se cierra el panel (el área cambia) o cambia la selección durante la animación, no se corrige', async () => {
     const { paneSize } = await import('@/features/modeler/lib/canvasFocus');
     for (const change of ['area', 'selection'] as const) {
       let w = 240;
@@ -246,8 +246,8 @@ describe('encuadre tras un clic (revisión doc 114)', () => {
   });
 });
 
-/** Un flow cuya animación NO termina sola: como d3, la promesa de `setViewport`
- *  con duración sólo se resuelve al final de la transición — si se interrumpe
+/** Un flow cuya animación no termina sola: como d3, la promesa de `setViewport`
+ *  con duración solo se resuelve al final de la transición; si se interrumpe
  *  (rueda, paneo, un clic en el fondo, otro setViewport), nunca. */
 const stuckFlow = (viewport?: () => { x: number; y: number; zoom: number }) => {
   const f = flow();
@@ -258,10 +258,9 @@ const stuckFlow = (viewport?: () => { x: number; y: number; zoom: number }) => {
 };
 const durations = (f: ReturnType<typeof flow>) => f.setViewport.mock.calls.map((c) => c[1]);
 
-// Revisión doc 114 (H4, en navegador): cerrar el panel (deseleccionar) justo
-// cuando el encuadre arranca dejaba que la animación siguiera hasta el final.
-// Ronda 2: el corte ya no depende de que la promesa de la animación se resuelva.
-describe('deseleccionar durante el encuadre lo detiene (revisión doc 114)', () => {
+// Cerrar el panel (deseleccionar) justo cuando el encuadre arranca detiene la
+// animación; el corte no depende de que la promesa de la animación se resuelva.
+describe('deseleccionar durante el encuadre lo detiene', () => {
   it('antes de arrancar: no se mueve; ya arrancado: se corta donde está, y no queda nada colgado', async () => {
     // 1) Deseleccionada antes de que arranque: no se mueve.
     let f = flow();
@@ -279,8 +278,8 @@ describe('deseleccionar durante el encuadre lo detiene (revisión doc 114)', () 
     useModelerStore.getState().setSelectedTable(null);
     await sleep(20);
     expect(durations(f)).toEqual([{ duration: 400, interpolate: 'linear' }, { duration: 0 }]);
-    // Ronda 2 (hallazgo 1): la suscripción del corte ya no está — volver a seleccionarla
-    // (sin encuadre) y deseleccionarla minutos después no corta nada.
+    // La suscripción del corte se libera al terminar: volver a seleccionarla (sin
+    // encuadre) y deseleccionarla minutos después no corta nada.
     useModelerStore.getState().setSelectedTable('t1');
     useModelerStore.getState().setSelectedTable(null);
     await sleep(900);
@@ -288,9 +287,8 @@ describe('deseleccionar durante el encuadre lo detiene (revisión doc 114)', () 
   });
 });
 
-// Revisión 2 doc 114 (punto 3).
-describe('el encuadre no queda colgado ni pisa lo que hace el usuario (revisión 2 doc 114)', () => {
-  it('hallazgo 1: si la animación se interrumpe (su promesa no se resuelve), el encuadre se suelta igual', async () => {
+describe('el encuadre no queda colgado ni pisa lo que hace el usuario', () => {
+  it('si la animación se interrumpe (su promesa no se resuelve), el encuadre se suelta igual', async () => {
     const f = stuckFlow();
     useModelerStore.setState({ flow: f as never, selectedTableId: null });
     useModelerStore.getState().selectTable('t1');
@@ -302,7 +300,7 @@ describe('el encuadre no queda colgado ni pisa lo que hace el usuario (revisión
     expect(f.setViewport).toHaveBeenCalledTimes(1);   // sin corte extemporáneo
   });
 
-  it('hallazgo 3: abrir un menú contextual durante la animación la corta (el menú queda junto a su tabla)', async () => {
+  it('abrir un menú contextual durante la animación la corta (el menú queda junto a su tabla)', async () => {
     const f = stuckFlow();
     useModelerStore.setState({ flow: f as never, selectedTableId: null, colMenu: null } as never);
     useModelerStore.getState().selectTable('t1');
@@ -313,7 +311,7 @@ describe('el encuadre no queda colgado ni pisa lo que hace el usuario (revisión
     useModelerStore.setState({ colMenu: null } as never);
   });
 
-  it('hallazgo 3: armar una herramienta durante la animación no la corta a medio camino, pero ya no corrige', async () => {
+  it('armar una herramienta durante la animación no la corta a medio camino, pero se omite la corrección final', async () => {
     for (const armed of [{ relPreset: { parent: 'one', child: 'zero-many', identifying: true } }, { subcatArmed: true }]) {
       let w = 240;
       let last = { x: 0, y: 0, zoom: 0.3 };
@@ -335,7 +333,7 @@ describe('el encuadre no queda colgado ni pisa lo que hace el usuario (revisión
     }
   });
 
-  it('hallazgo 3: con un bloque arrastrándose cuando le toca arrancar, no arranca', async () => {
+  it('con un bloque arrastrándose cuando le toca arrancar, no arranca', async () => {
     const f = flow();
     const dragging = NODES.map((n) => (n.id === 't2' ? { ...n, dragging: true } : n));
     Object.assign(f, { getNodes: () => dragging });
@@ -345,7 +343,7 @@ describe('el encuadre no queda colgado ni pisa lo que hace el usuario (revisión
     expect(f.setViewport).not.toHaveBeenCalled();
   });
 
-  it('hallazgo 3: arrastrar una tabla durante la animación la corta (stopFraming, desde onNodeDragStart)', async () => {
+  it('arrastrar una tabla durante la animación la corta (stopFraming, desde onNodeDragStart)', async () => {
     const f = stuckFlow();
     useModelerStore.setState({ flow: f as never, selectedTableId: null });
     useModelerStore.getState().selectTable('t1');
@@ -357,7 +355,7 @@ describe('el encuadre no queda colgado ni pisa lo que hace el usuario (revisión
     expect(f.setViewport).toHaveBeenCalledTimes(2);
   });
 
-  it('hallazgo 4: un clic en otra tabla mientras el canvas todavía se mueve (corrección, Locate) la encuadra igual', async () => {
+  it('un clic en otra tabla mientras el canvas sigue en movimiento (corrección, Locate) la encuadra igual', async () => {
     let t = 0;
     const f = stuckFlow(() => ({ x: (t += 3), y: 0, zoom: 0.3 }));   // el canvas sigue moviéndose
     useModelerStore.setState({ flow: f as never, selectedTableId: null });
@@ -370,7 +368,7 @@ describe('el encuadre no queda colgado ni pisa lo que hace el usuario (revisión
     expect(last[1]).toEqual({ duration: 400, interpolate: 'linear' });
   });
 
-  it('hallazgo 5: Locate de una columna en el visor encuadra UNA vez y sin el escudo del clic', async () => {
+  it('Locate de una columna en el visor encuadra una vez y sin el escudo del clic', async () => {
     useSessionStore.setState({ openMode: 'readonly' });
     const f = flow();
     useModelerStore.setState({

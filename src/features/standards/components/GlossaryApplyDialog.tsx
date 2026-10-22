@@ -1,8 +1,8 @@
 /**
- * GlossaryApplyDialog — confirmación del apply del glosario (docs 94 D7 · 95 D3/D4):
- * los nombres que renombra el borrador y, APARTE, los que ya estaban desfasados
- * de la regla vigente (p. ej. un U+00A0 venido del XML) y el apply repara de
- * paso. Listas completas, con buscador, y los invisibles se ven.
+ * GlossaryApplyDialog — confirmación del apply del glosario: los nombres que
+ * renombra el borrador y, aparte, los que ya estaban desfasados de la regla
+ * vigente (p. ej. un U+00A0 venido del XML) y el apply repara de paso. Listas
+ * completas, con buscador, y los invisibles se ven.
  */
 import { useMemo, useState } from 'react';
 import { UploadCloud } from 'lucide-react';

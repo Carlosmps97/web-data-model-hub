@@ -1,16 +1,16 @@
 /**
- * DdlOutputForm — CÓMO se escribe el DDL exportado y cómo se nombran sus
- * archivos (doc 93 D1). Un solo formulario para dos lugares: la pestaña Output
- * del modal Export DDL (ajuste de un export puntual) y el editor «Output
- * settings» de Data Standards (el estándar del proyecto, versionado).
- * Controlado y sin estado propio.
+ * DdlOutputForm: cómo se escribe el DDL exportado y cómo se nombran sus
+ * archivos. Un solo formulario para dos lugares: la pestaña Output del modal
+ * Export DDL (ajuste de un export puntual) y el editor «Output settings» de
+ * Data Standards (el estándar del proyecto, versionado). Controlado y sin
+ * estado propio.
  *
- * Doc 101: `dialect` elige QUÉ configuración se edita. Databricks = el
- * formulario de siempre (claves planas). Oracle = su configuración propia
- * (`value.oracle`): solo lo que existe en Oracle — sin particiones, índices
- * ZORDER, CREATE OR REPLACE, tags, USING, Unity Catalog, LOCATION ni
- * TBLPROPERTIES. Los nombres de archivo son de los dos. Doc 106: los tipos
- * salen tal cual (sin mapeo de tipos ni tamaño máximo de strings).
+ * `dialect` elige qué configuración se edita. Databricks = el formulario base
+ * (claves planas). Oracle = su configuración propia (`value.oracle`): solo lo
+ * que existe en Oracle, sin particiones, índices ZORDER, CREATE OR REPLACE,
+ * tags, USING, Unity Catalog, LOCATION ni TBLPROPERTIES. Los nombres de archivo
+ * son de los dos. En Oracle los tipos salen tal cual (sin mapeo de tipos ni
+ * tamaño máximo de strings).
  */
 import { Plus, Trash2 } from 'lucide-react';
 
@@ -22,7 +22,7 @@ import type { OracleDdlOptions } from '../oracle';
 
 const FORMATS: DdlTableFormat[] = ['delta', 'parquet', 'avro', 'orc', 'csv', 'json'];
 
-/** Display label for a format chip (ORC/CSV/JSON upper, rest capitalised). */
+/** Etiqueta visible del chip de formato (ORC/CSV/JSON en mayúsculas, el resto capitalizado). */
 const fmtLabel = (f: DdlTableFormat): string =>
   (f === 'orc' || f === 'csv' || f === 'json' ? f.toUpperCase() : f.charAt(0).toUpperCase() + f.slice(1));
 
@@ -108,7 +108,7 @@ function FileNamesFields({ value, onChange, disabled }: {
   );
 }
 
-/** Configuración propia de Oracle (doc 101 §4.1). */
+/** Configuración propia de Oracle. */
 function OracleFields({ value, onChange, disabled, viewsHint }: {
   value: DdlOutputSettings; onChange: (next: DdlOutputSettings) => void; disabled?: boolean; viewsHint?: string;
 }) {
@@ -138,7 +138,7 @@ function OracleFields({ value, onChange, disabled, viewsHint }: {
       <Seg label="Data types" disabled={disabled} value={o.typeCase} onPick={(v) => set('typeCase', v)}
         options={[['lower', 'lower', 'varchar(128), number(19,4), date'], ['upper', 'UPPER', 'VARCHAR(128), NUMBER(19,4), DATE']]} />
 
-      {/* Doc 108: sin esquema por default (`CREATE TABLE DE_X`, como Erwin). */}
+      {/* Sin esquema por defecto (`CREATE TABLE DE_X`, como Erwin). */}
       <span className="exd-section">Schema</span>
       <Seg label="Schema" disabled={disabled} value={o.schemaMode} onPick={(v) => set('schemaMode', v)}
         options={[['none', 'No schema', 'CREATE TABLE DE_X'], ['model', 'Model schema', 'Each object with its schema in the model'],
@@ -161,7 +161,7 @@ export default function DdlOutputForm({ value, onChange, disabled, viewsHint, di
   disabled?: boolean;
   /** Pista del switch Views (el modal cuenta las vistas del canvas). */
   viewsHint?: string;
-  /** Doc 101: qué configuración se edita (Databricks = la de siempre). */
+  /** Qué configuración se edita (por defecto, la de Databricks). */
   dialect?: DdlDialect;
 }) {
   if (dialect === 'oracle') {
@@ -201,7 +201,7 @@ export default function DdlOutputForm({ value, onChange, disabled, viewsHint, di
 
       <span className="exd-section">Tags on views</span>
       <Seg label="Tags on views" disabled={disabled} value={value.viewTagsAs} onPick={(v) => set('viewTagsAs', v)}
-        options={[['table', 'ALTER TABLE', 'ALTER TABLE <view> SET TAGS … (as the BCP macro)'],
+        options={[['table', 'ALTER TABLE', 'ALTER TABLE <view> SET TAGS … (as the reference macro)'],
                   ['view', 'ALTER VIEW', 'ALTER VIEW <view> SET TAGS …']]} />
 
       <span className="exd-section">Table format · USING</span>

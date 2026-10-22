@@ -1,4 +1,4 @@
-// Doc 113 §5: la barra de formato de un dibujo va arriba del dibujo; si arriba
+// La barra de formato de un dibujo va arriba del dibujo; si arriba
 // no entra (el dibujo está pegado al borde superior del canvas), va abajo.
 import { describe, expect, it } from 'vitest';
 import { DRAWING_TOOLBAR_ROOM, drawingToolbarSide, nodeTopOnScreen } from './toolbarSide';
@@ -15,7 +15,7 @@ describe('drawingToolbarSide (top, bottom del dibujo; alto del canvas)', () => {
     expect(drawingToolbarSide(-80, 40, 800)).toBe('bottom');
   });
 
-  it('revisión: si ABAJO tampoco entra (dibujo grande que se sale del canvas), se queda arriba', () => {
+  it('si abajo tampoco entra (dibujo grande que se sale del canvas), se queda arriba', () => {
     expect(drawingToolbarSide(20, 790, 800)).toBe('top');
     expect(drawingToolbarSide(-300, 1200, 800)).toBe('top');
   });

@@ -1,8 +1,8 @@
 /**
- * DomainHistory — historial de UN parent domain (doc 95 D8): las versiones de
- * Data Standards donde este dominio cambió, qué cambió en cada una y «Revert to
- * vN», que carga esos valores en el editor (se aplican con el mismo popup de
- * cascada: misma regla, versión nueva, auditada).
+ * DomainHistory — historial de un parent domain: las versiones de Data
+ * Standards que modificaron este dominio, qué se modificó en cada una y «Revert
+ * to vN», que carga esos valores en el editor (se aplican con el mismo popup de
+ * cascada: misma regla, una versión más, auditada).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { History, RotateCcw } from 'lucide-react';

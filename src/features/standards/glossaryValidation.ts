@@ -1,5 +1,5 @@
 /**
- * glossaryValidation — lógica pura de los popups del glosario (F2 #1, docs 94 y 95).
+ * glossaryValidation — lógica pura de los popups del glosario.
  * Separada de GlossaryPage para testearla con vitest sin montar JSX.
  */
 import type { GlossaryImpact, GlossaryImpactRow, GlossaryValidation, UdpScope } from '@/services/naming.service';
@@ -10,10 +10,10 @@ const norm = (s: string | undefined | null) => (s || '').trim().toLowerCase();
 const fmt = (n: number) => n.toLocaleString('en-US');
 const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? one : many}`;
 
-/** Términos que hay que validar antes de aplicar: filas NUEVAS o cuyo TEXTO
- *  cambió vs el original (`_orig`), vivas y con texto. El backend valida tanto
+/** Términos que hay que validar antes de aplicar: filas nuevas o cuyo texto
+ *  difiere del original (`_orig`), vivas y con texto. El backend valida tanto
  *  altas como renombres (con exclude_id); un cambio de solo case/espacios o de
- *  abreviatura no dispara validación (el término lógico no cambió). */
+ *  abreviatura no dispara validación (el término lógico es el mismo). */
 export function termsToValidate<
   T extends { term: string; _new?: boolean; _deleted?: boolean; _orig?: string },
 >(drafts: T[]): string[] {
@@ -26,7 +26,7 @@ export function termsToValidate<
     .map((d) => d.term.trim());
 }
 
-// ── Conflictos al agregar un término (doc 95 D1) ──
+// ── Conflictos al agregar un término ──
 
 export interface ConflictRow { table: string; column: string | null; logical: string }
 
@@ -75,7 +75,7 @@ export function highlightParts(text: string, term: string): { text: string; hit:
   return out.length ? out : [{ text, hit: false }];
 }
 
-// ── Renombres del apply (doc 95 D3/D4) ──
+// ── Renombres del apply ──
 
 /** ¿Hay algo que mostrar antes de aplicar? (renombres o reparaciones). */
 export const needsConfirm = (imp: GlossaryImpact): boolean => imp.renamed.length + imp.outOfSync.length > 0;
@@ -108,7 +108,7 @@ export function outOfSyncReason(row: GlossaryImpactRow): string {
 
 export const NO_RENAMES = "Your changes don't rename any existing name.";
 
-/** Nota del popup según el scope editado (final review #10). */
+/** Nota del popup según el scope editado. */
 export function impactNote(scope: UdpScope): string {
   const base = scope === 'table'
     ? 'Table terms only rename table names — never column names.'
@@ -116,7 +116,7 @@ export function impactNote(scope: UdpScope): string {
   return `${base} You can roll back this version from the history.`;
 }
 
-// ── Filas incompletas (doc 102) ──
+// ── Filas incompletas ──
 
 /** Qué le falta a una fila del glosario (null = completa). */
 export type TermGap = 'term' | 'abbrev' | 'both';
@@ -128,14 +128,14 @@ export function termGap(t: { term: string; abbrev: string }): TermGap | null {
   return noAbbrev ? 'abbrev' : null;
 }
 
-/** Doc 105 (P1-bis): ¿la fila existente cambió? Se compara RECORTADO — lo que
- *  viaja al backend: «SUC␠» sobre «SUC» no es una edición (antes contaba,
- *  viajaba idéntico y registraba una versión sin cambios reales). */
+/** ¿La fila existente se editó? Se compara recortado, como viaja al backend:
+ *  «SUC␠» sobre «SUC» no es una edición (viajaría idéntico y registraría una
+ *  versión sin cambios reales). */
 export function termEdited(t: { term: string; abbrev: string }, before: { term: string; abbrev: string }): boolean {
   return t.term.trim() !== before.term.trim() || t.abbrev.trim() !== before.abbrev.trim();
 }
 
-/** `termsUpsert` del apply: sólo filas vivas NUEVAS o EDITADAS de verdad
+/** `termsUpsert` del apply: solo filas vivas nuevas o editadas de verdad
  *  (`termEdited`), recortadas; una nueva viaja sin id. Las borradas van por
  *  `termsDelete`. */
 export function termsToUpsert<S extends string>(
@@ -149,14 +149,14 @@ export function termsToUpsert<S extends string>(
       const b = before.get(t.id);
       return !b || termEdited(t, b);
     })
-    // Doc 102: sin descarte silencioso — el guard de filas incompletas garantiza término y abreviatura.
+    // Sin descarte silencioso: el guard de filas incompletas garantiza término y abreviatura.
     .map((t) => ({ id: t._new ? undefined : t.id, term: t.term.trim(), abbrev: t.abbrev.trim(), scope }));
 }
 
-/** Filas NUEVAS o EDITADAS (vivas) con término o abreviatura vacíos: bloquean
- *  el Save & apply (antes se descartaban en silencio y salía «Saved»). Una fila
- *  existente sin tocar no cuenta aunque venga incompleta de antes (tocarla sólo
- *  con blancos tampoco: doc 105). */
+/** Filas nuevas o editadas (vivas) con término o abreviatura vacíos: bloquean
+ *  el Save & apply (no se descartan en silencio). Una fila existente sin tocar
+ *  no cuenta aunque ya esté guardada incompleta (tocarla solo con blancos
+ *  tampoco). */
 export function incompleteRows<T extends { id: string; term: string; abbrev: string; _new?: boolean; _deleted?: boolean }>(
   drafts: T[], before: Map<string, { term: string; abbrev: string }>,
 ): T[] {
@@ -179,8 +179,8 @@ export function gapToast(gap: TermGap): string {
   return 'Type the term and the abbreviation before validating';
 }
 
-/** Límite del físico tal como lo aplica el motor (doc 105, ronda 4): 0 =
- *  límite DESACTIVADO (la pantalla decía «0 chars»). */
+/** Límite del físico tal como lo aplica el motor: 0 = límite desactivado
+ *  («No limit», no «0 chars»). */
 export function maxLengthLabel(n: number): string {
   if (!n || n <= 0) return 'No limit';
   return `${n} ${n === 1 ? 'char' : 'chars'}`;

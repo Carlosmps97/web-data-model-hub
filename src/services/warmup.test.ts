@@ -13,7 +13,7 @@ function stubBrowser(href = 'https://front.example.com/login') {
   return store;
 }
 
-describe('ensureBackendSession (warm-up SSO de Databricks Apps, doc 36)', () => {
+describe('ensureBackendSession (warm-up SSO de Databricks Apps)', () => {
   beforeEach(() => stubBrowser());
   afterEach(() => vi.unstubAllGlobals());
 
@@ -28,7 +28,7 @@ describe('ensureBackendSession (warm-up SSO de Databricks Apps, doc 36)', () => 
 
   it('probe OK: no redirige y rearma el guard', async () => {
     const store = stubBrowser();
-    store.set('dmh-warmup-redirected', '1');           // quedó de una vez anterior
+    store.set('dmh-warmup-redirected', '1');           // marca de un intento anterior
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
     const navigate = vi.fn();
     await ensureBackendSession('https://bknd.example.com', navigate);
@@ -36,7 +36,7 @@ describe('ensureBackendSession (warm-up SSO de Databricks Apps, doc 36)', () => 
     expect(store.has('dmh-warmup-redirected')).toBe(false);   // guard rearmado
   });
 
-  it('probe bloqueado (proxy SSO): redirige UNA vez al warmup con next en el PATH (b64url)', async () => {
+  it('probe bloqueado (proxy SSO): redirige una vez al warmup con next en el path (b64url)', async () => {
     const store = stubBrowser('https://front.example.com/login?a=1');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
     const navigate = vi.fn();
@@ -45,12 +45,12 @@ describe('ensureBackendSession (warm-up SSO de Databricks Apps, doc 36)', () => 
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(navigate).toHaveBeenCalledWith(`https://bknd.example.com/api/auth/warmup/${token}`);
-    // sin query string: el replay post-SSO del proxy de Databricks la rompia
+    // sin query string: el replay post-SSO del proxy de Databricks la rompe
     expect((navigate.mock.calls[0][0] as string).includes('?')).toBe(false);
     expect(store.get('dmh-warmup-redirected')).toBe('1');
   });
 
-  it('segundo fallo con guard puesto: NO loopea', async () => {
+  it('segundo fallo con guard puesto: no vuelve a redirigir', async () => {
     const store = stubBrowser();
     store.set('dmh-warmup-redirected', '1');
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));

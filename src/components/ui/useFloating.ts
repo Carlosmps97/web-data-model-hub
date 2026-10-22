@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties, type DependencyL
 import { viewportBounds, type Placement, type RectLike, type Size } from '@/lib/floating';
 
 export interface FloatingOptions {
-  /** Re-ubicar también con el scroll de cualquier contenedor (el ancla se mueve con él). */
+  /** Reubicar también con el scroll de cualquier contenedor (el ancla se mueve con él). */
   follow?: boolean;
   /** Ancho a imponer al cuadro (p. ej. el del control al que se ancla un desplegable). */
   matchWidth?: () => number | null | undefined;
@@ -13,9 +13,9 @@ export interface FloatingOptions {
 export type Placed = Placement & { width: number | null; hidden?: boolean };
 
 /** Lo que se pinta tras medir: la ubicación con el ancho impuesto o, sin lugar,
- *  oculto CON el ancho impuesto y el lado de antes (para volver de ese lado).
- *  Ronda 2 de la revisión: sin el ancho, React lo borraba, el cuadro cambiaba
- *  de tamaño y el ResizeObserver lo volvía a escribir dentro de su propio aviso
+ *  oculto con el ancho impuesto y el lado anterior (para volver de ese lado).
+ *  Sin el ancho, React lo borraría, el cuadro cambiaría de tamaño y el
+ *  ResizeObserver lo volvería a escribir dentro de su propio aviso
  *  («ResizeObserver loop completed with undelivered notifications»). */
 export function nextPlaced(at: Placement | null, width: number | null, last: Placed | null): Placed {
   return at ? { ...at, width } : { left: 0, top: 0, side: last?.side ?? 'bottom', maxHeight: null, width, hidden: true };
@@ -28,10 +28,10 @@ export function samePlaced(a: Placed | null, b: Placed | null): boolean {
 }
 
 /** Estilo del cuadro. Hasta medirlo (y mientras su ancla no se ve) queda
- *  transparente y sin eventos — NO con `visibility: hidden`: un `autoFocus` o el
- *  `focus()` del montaje no entran a un elemento oculto (revisión doc 113: el
- *  buscador del filtro de Reporting perdía lo tipeado y el selector de color no
- *  recibía el foco). */
+ *  transparente y sin eventos, no con `visibility: hidden`: un `autoFocus` o el
+ *  `focus()` del montaje no entran a un elemento oculto (el buscador del filtro
+ *  de Reporting perdería lo tipeado y el selector de color no recibiría el
+ *  foco). */
 export function floatingStyle(placed: Placed | null): CSSProperties {
   if (!placed || placed.hidden) {
     return { position: 'fixed', left: 0, top: 0, opacity: 0, pointerEvents: 'none', ...(placed?.width != null ? { width: placed.width } : {}) };
@@ -44,9 +44,9 @@ export function floatingStyle(placed: Placed | null): CSSProperties {
 }
 
 /**
- * Doc 113 §5 — mide el cuadro flotante ANTES de pintarlo (layout effect) y lo
- * ubica con `compute` (`placeNextTo` / `placeAtPoint` de `lib/floating`; recibe
- * la ubicación anterior para conservar el lado mientras entre). Se re-ubica si
+ * Mide el cuadro flotante antes de pintarlo (layout effect) y lo ubica con
+ * `compute` (`placeNextTo` / `placeAtPoint` de `lib/floating`; recibe la
+ * ubicación anterior para conservar el lado mientras entre). Se reubica si
  * cambia el tamaño de la ventana o el del propio cuadro (ResizeObserver: ítems
  * que cargan después, una lista que se filtra) y, con `follow`, con el scroll de
  * cualquier contenedor. Devuelve el estilo `position: fixed` a aplicar.
@@ -68,9 +68,9 @@ export function useFloating(
     const measure = () => {
       const last = lastRef.current;
       const width = opts.matchWidth?.() ?? null;
-      // El ancho impuesto ANTES de medir el alto: con otro ancho las filas envuelven distinto.
+      // El ancho impuesto antes de medir el alto: con otro ancho las filas envuelven distinto.
       if (width != null) el.style.width = `${width}px`;
-      // Alto NATURAL: el contenido + bordes (sin el maxHeight de una medición anterior).
+      // Alto natural: el contenido + bordes (sin el maxHeight de una medición anterior).
       const height = el.scrollHeight + (el.offsetHeight - el.clientHeight);
       const at = compute({ width: width ?? el.offsetWidth, height }, viewportBounds(), last);
       const next = nextPlaced(at, width, last);
@@ -78,7 +78,7 @@ export function useFloating(
       lastRef.current = next;
       setPlaced(next);
     };
-    // El scroll DENTRO del cuadro (su propia lista) no mueve el ancla.
+    // El scroll dentro del cuadro (su propia lista) no mueve el ancla.
     const onScroll = (e: Event) => { if (!(e.target instanceof Node && el.contains(e.target))) measure(); };
     measure();
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => measure());

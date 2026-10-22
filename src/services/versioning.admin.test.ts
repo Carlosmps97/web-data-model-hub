@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deleteVersion, listUserNames, listUsers, transferVersion } from './versioning.service';
 
-/** Doc 104: transferir / eliminar viajan con el dueño que MOSTRABA la pantalla
- *  (`expectedOwner`): si otra sesión lo cambió en el medio, el backend responde
+/** Transferir / eliminar viajan con el dueño que mostraba la pantalla
+ *  (`expectedOwner`): si otra sesión lo cambia en el medio, el backend responde
  *  409 en vez de actuar sobre el draft de otra persona. */
-describe('administración de versiones (doc 104)', () => {
+describe('administración de versiones', () => {
   const calls: { url: string; method?: string; body?: unknown }[] = [];
   afterEach(() => { calls.length = 0; vi.unstubAllGlobals(); });
   const stub = (data: unknown) => vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
@@ -14,9 +14,9 @@ describe('administración de versiones (doc 104)', () => {
 
   it('deleteVersion manda el dueño esperado en el query string (codificado)', async () => {
     stub({ id: 'cs1', deleted: true, changes: 3 });
-    await deleteVersion('cs1', 'ana@bcp.com.pe');
+    await deleteVersion('cs1', 'ana@empresa.com');
     expect(calls[0].method).toBe('DELETE');
-    expect(calls[0].url).toMatch(/\/api\/changesets\/cs1\?expectedOwner=ana%40bcp\.com\.pe$/);
+    expect(calls[0].url).toMatch(/\/api\/changesets\/cs1\?expectedOwner=ana%40empresa\.com$/);
   });
 
   it('transferVersion manda destino, nota y dueño esperado en el cuerpo', async () => {
@@ -28,10 +28,10 @@ describe('administración de versiones (doc 104)', () => {
   });
 });
 
-/** Doc 105 (U1): los NOMBRES se resuelven con el directorio completo (quien
- *  dejó la empresa sigue siendo dueño o autor de su versión); ofrecer personas
- *  (revisores, destinos) sigue siendo sólo con activos. */
-describe('directorio de usuarios para nombres (doc 105)', () => {
+/** Los nombres se resuelven con el directorio completo (quien dejó la empresa
+ *  sigue siendo dueño o autor de su versión); ofrecer personas (revisores,
+ *  destinos) es solo con usuarios activos. */
+describe('directorio de usuarios para nombres', () => {
   const urls: string[] = [];
   afterEach(() => { urls.length = 0; vi.unstubAllGlobals(); });
   const stub = () => vi.stubGlobal('fetch', vi.fn(async (url: string) => {

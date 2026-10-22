@@ -1,5 +1,5 @@
 /**
- * Estado PURO del editor de perfiles (doc 78 §8): perfil vacío, conversión
+ * Estado puro del editor de perfiles: perfil vacío, conversión
  * doc → body, merge de sugerencias sin pisar lo mapeado, reglas por tipo y
  * la validación estructural local (espejo de lo que el backend rechaza con
  * 422 — el servidor sigue siendo la autoridad).
@@ -50,7 +50,7 @@ export const cloneMapping = (m: ProfileMapping): ProfileMapping => ({
   defaultValue: m.defaultValue ?? null,
 });
 
-/** Agrega las cabeceras sugeridas que aún no están (por `headerKey`); nunca pisa un mapeo existente. */
+/** Agrega las cabeceras sugeridas que faltan (por `headerKey`); nunca pisa un mapeo existente. */
 export function mergeSuggestions(sheet: ProfileSheet, suggestions: Suggestion[]): ProfileSheet {
   const have = new Set(sheet.mappings.map((m) => headerKey(m.header)));
   const added: ProfileMapping[] = [];

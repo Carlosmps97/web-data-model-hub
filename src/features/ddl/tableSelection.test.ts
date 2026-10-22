@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { pickedTableIds } from './tableSelection';
 
-describe('pickedTableIds — «Tables to export» (doc 108)', () => {
+describe('pickedTableIds — «Tables to export»', () => {
   it('sin una elección explícita no hay ninguna tabla elegida', () => {
     expect([...pickedTableIds(null, ['a', 'b'])]).toEqual([]);
   });

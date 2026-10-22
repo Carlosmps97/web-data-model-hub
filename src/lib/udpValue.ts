@@ -1,14 +1,14 @@
 /**
- * Valor de un UDP según la definición del DESTINO (doc 118: pegar entre
- * proyectos, donde el mismo UDP puede tener otro tipo u otra lista). Acepta lo
- * mismo que la carga Excel del backend (`bulk_upload/standards.udp_value` con
+ * Valor de un UDP según la definición del destino (al pegar entre proyectos,
+ * el mismo UDP puede tener otro tipo u otra lista). Acepta lo mismo que la
+ * carga Excel del backend (`bulk_upload/standards.udp_value` con
  * `app/core/udp_values.py`): lista contra `allowedValues` sin bordes, espacios
  * internos colapsados y sin mayúsculas (`norm_enum`), con la grafía del destino;
  * número finito, escrito como lo graba la UI (`canonicalNumberText`: igual que
- * el backend en las grafías comunes); fecha ISO real (de una fecha-hora, sólo la
+ * el backend en las grafías comunes); fecha ISO real (de una fecha-hora, solo la
  * fecha); booleano a «true»/«false»; texto tal cual. Un valor que no es texto
- * (dato legado) se lee como texto. Devuelve lo que se graba, o null si el valor
- * no vale para esa definición. Pura.
+ * (un dato guardado con otro tipo) se lee como texto. Devuelve lo que se graba,
+ * o null si el valor no vale para esa definición. Pura.
  */
 import { canonicalNumberText } from './udpNumber';
 

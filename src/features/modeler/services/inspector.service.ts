@@ -1,6 +1,6 @@
 /**
- * inspector.service (doc 72 §3) — datos del Object Inspector: el dossier de
- * solo lectura de una tabla/entidad o de una vista en UNA request, efectivo
+ * inspector.service — datos del Object Inspector: el dossier de solo lectura
+ * de una tabla/entidad o de una vista en una sola request, efectivo
  * con versión activa (draft o `asof:`) y publicado sin ella. No depende del
  * canvas: sirve para leer la metadata sin abrir ningún diagrama.
  */
@@ -16,7 +16,7 @@ export interface InspectTableResult {
   table: CanonicalTable;
   /** Columnas efectivas en orden físico (la faceta se ordena en el cliente). */
   columns: CanonicalColumn[];
-  /** Relaciones GLOBALES (parent/child, pares con nombres, canvases donde se ven). */
+  /** Relaciones globales (parent/child, pares con nombres, canvases donde se ven). */
   links: TableLinkRow[];
   /** Vistas sobre la tabla con los canvases donde son miembro. */
   views: TableViewRow[];

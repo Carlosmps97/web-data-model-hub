@@ -1,6 +1,6 @@
-/* App shell: rail + top bar + page + project cards (dmh-). Part of the Aurora system — see doc/architecture.md. */
+/* Shell de la app: rail + barra superior + página + tarjetas de proyecto (dmh-). Parte del sistema Aurora; ver docs/02-arquitectura.md. */
 
-/* ============================================================ App shell */
+/* ============================================================ Shell de la app */
 .dmh { height: 100vh; display: flex; overflow: hidden; background: var(--bg); }
 .dmh-rail { width: 64px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 6px; z-index: 20; }
 .dmh-rail-logo { width: 38px; height: 38px; border-radius: var(--r); background: var(--primary); color: #fff; display: flex; align-items: center; justify-content: center; margin-bottom: 10px; }

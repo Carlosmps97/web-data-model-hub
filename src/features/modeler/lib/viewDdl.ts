@@ -1,8 +1,8 @@
 /**
- * viewDdl — el DDL de una vista tal como lo escribe el Export DDL (doc 96 D6):
- * sale de sus columnas (`sources`; con 2+ fuentes `FROM t1, t2` sin JOIN),
- * nunca de la User-Defined SQL, que es texto informativo. Un solo armado para
- * Properties, el Inspector y el export HTML (final review #3).
+ * viewDdl — el DDL de una vista tal como lo escribe el Export DDL: sale de sus
+ * columnas (`sources`; con 2+ fuentes `FROM t1, t2` sin JOIN), nunca de la
+ * User-Defined SQL, que es texto informativo. Un solo armado para Properties,
+ * el Inspector y el export HTML.
  */
 import { DEFAULT_DATABRICKS_OPTS, viewDDL, type DdlView } from '@/features/ddl';
 

@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { applyDomainPick } from './domainType';
 
-describe('applyDomainPick · regla dominio→tipo al (re)elegir parent domain (doc 46)', () => {
-  it('elegir un dominio sin override previo hereda su default (regla original)', () => {
+describe('applyDomainPick · regla dominio→tipo al (re)elegir parent domain', () => {
+  it('elegir un dominio sin override previo hereda su default', () => {
     expect(applyDomainPick({
       currentDomainId: '', typeOverridden: false, currentType: 'STRING',
       nextDomainId: 'dom-A', nextDefault: 'BIGINT',
     })).toEqual({ dataType: 'BIGINT', typeOverridden: false });
   });
 
-  it('elegir OTRO dominio con override manual RE-APLICA el default del nuevo (bug reportado)', () => {
+  it('elegir OTRO dominio con override manual RE-APLICA el default del nuevo', () => {
     expect(applyDomainPick({
       currentDomainId: 'dom-A', typeOverridden: true, currentType: 'DECIMAL(18,2)',
       nextDomainId: 'dom-B', nextDefault: 'DATE',

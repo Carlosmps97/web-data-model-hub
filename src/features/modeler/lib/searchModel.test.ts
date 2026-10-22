@@ -1,4 +1,4 @@
-// Doc 70 §11: lógica pura del buscador del Model.
+// Lógica pura del buscador del Model.
 import { describe, expect, it } from 'vitest';
 import { columnPath, folderChain, pickTargetCanvas, snippet, splitHighlight } from './searchModel';
 

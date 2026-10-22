@@ -1,12 +1,12 @@
 /**
- * Servicio de la carga masiva desde Excel (doc 55 §7-8 · doc 78). Los jobs
- * viven en el backend bajo el changeset destino; el front manda el workbook
- * CRUDO (`readWorkbook`) + el perfil de carga elegido, hace polling del job
- * y, con el reporte limpio, dispara el apply. Un 404 en el polling = el job
- * expiró (reinicio del backend): el popup pide validar de nuevo.
+ * Servicio de la carga masiva desde Excel. Los jobs viven en el backend bajo el
+ * changeset destino; el front manda el workbook crudo (`readWorkbook`) + el
+ * perfil de carga elegido, hace polling del job y, con el reporte limpio,
+ * dispara el apply. Un 404 en el polling = el job expiró (reinicio del
+ * backend): el popup pide validar de nuevo.
  *
- * Perfiles de carga (doc 78 §7.1): CRUD por proyecto + catálogo del editor +
- * validación sin guardar + sugerencia de mapeo por nombre + built-in.
+ * Perfiles de carga: CRUD por proyecto + catálogo del editor + validación sin
+ * guardar + sugerencia de mapeo por nombre + built-in.
  */
 import { apiGet, apiPost, apiPut, apiDelete, ApiError, isTransientError } from '@/services/http';
 import { API_BASE } from '@/services/apiBase';
@@ -14,12 +14,12 @@ import { API_BASE } from '@/services/apiBase';
 // ── Workbook crudo ────────────────────────────────────────────────────────
 export interface RawSheetRow { row: number; cells: string[] }
 export interface RawSheet { name: string; rows: RawSheetRow[] }
-/** Doc 87 §3.5: `targetFolderId` = carpeta «proyecto interno» destino; solo
+/** `targetFolderId` = carpeta «proyecto interno» destino; solo
  *  viaja cuando el proyecto tiene 2+ (`mode: 'choose'`), el backend resuelve
  *  el resto. */
 export interface UploadWorkbookBody { fileName: string; profileId: string; sheets: RawSheet[]; targetFolderId?: string | null }
 
-// ── Proyecto destino (doc 87 §3.5) ────────────────────────────────────────
+// ── Proyecto destino ──────────────────────────────────────────────────────
 export type UploadTargetMode = 'none' | 'auto' | 'choose';
 export interface UploadTargetCandidate { id: string; name: string; folders: number; canvases: number }
 /** Capa de proyectos internos del proyecto de la versión: carpetas raíz con
@@ -50,7 +50,7 @@ export interface UploadProfileBody {
 export interface UploadProfile extends UploadProfileBody {
   id: string;
   projectId: string;
-  origin: string;                 // 'user' | 'builtin:plantilla-bcp'
+  origin: string;                 // 'user' | BUILTIN_ORIGIN (perfil predefinido)
   createdBy?: string | null;
   updatedBy?: string | null;
   createdAt?: string | null;
@@ -90,7 +90,7 @@ export interface UploadTableRow {
   action: 'create' | 'update' | 'unchanged' | 'error';
   canvas: string | null;
   columns: UploadCounts;
-  /** Doc 87: vistas `_vu` de la fila (create | unchanged). */
+  /** Vistas `_vu` de la fila (create | unchanged). */
   views?: UploadCounts;
   issues: number;
 }
@@ -105,8 +105,8 @@ export interface UploadReport {
   profile?: { id: string; name: string } | null;
   sheets?: UploadReportSheet[];
 }
-/** Doc 113 §1.3: `newMembers` = por canvas, las tablas y vistas que ENTRARON con
- *  la carga (lo único que el front ubica; un backend anterior no lo manda). */
+/** `newMembers` = por canvas, las tablas y vistas que entraron con la carga (lo
+ *  único que el front ubica; opcional: si falta, el front no mueve nada). */
 export interface UploadResult { affectedCanvasIds: string[]; counts: UploadSummary; newMembers?: Record<string, string[]>; }
 export interface UploadJob {
   id: string;
@@ -127,8 +127,8 @@ const jobUrl = (csId: string, jobId: string) => `${base(csId)}/${encodeURICompon
 export const startUpload = (csId: string, body: UploadWorkbookBody) => apiPost<UploadJob>(base(csId), body);
 export const getUploadJob = (csId: string, jobId: string) => apiGet<UploadJob>(jobUrl(csId, jobId));
 export const applyUpload = (csId: string, jobId: string) => apiPost<UploadJob>(`${jobUrl(csId, jobId)}/apply`);
-/** Doc 105 (ronda 8): `onlyIfValidated` — sólo si sigue validado; si la carga
- *  ya empezó o terminó, 409 (su resultado no se pierde). */
+/** `onlyIfValidated`: solo si sigue validado; si la carga ya empezó o terminó,
+ *  409 (su resultado no se pierde). */
 export const discardUpload = (csId: string, jobId: string, opts: { onlyIfValidated?: boolean } = {}) =>
   apiDelete<{ deleted: boolean }>(`${jobUrl(csId, jobId)}${opts.onlyIfValidated ? '?status=validated' : ''}`);
 export const getUploadTargets = (csId: string) => apiGet<UploadTargets>(`${base(csId)}/targets`);
@@ -172,16 +172,15 @@ const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, 
   signal?.addEventListener('abort', onAbort, { once: true });
 });
 
-/** Doc 105 (ronda 5, R15-H2): transitorios SEGUIDOS antes de rendirse (con
- *  espera creciente) — un GET caído o un 5xx no es el resultado del job. */
+/** Transitorios seguidos antes de rendirse (con espera creciente): un GET
+ *  caído o un 5xx no es el resultado del job. */
 const DEFAULT_MAX_TRANSIENT = 10;
 
 /** Consulta el job hasta un estado terminal (validated / applied / failed).
  *  `onTick` recibe cada foto (progreso para la barra); `signal` corta el
- *  polling (cerrar el popup). Doc 105 (ronda 5, R15-H2): un fallo transitorio
- *  se reintenta — antes la carga se daba por fallida aunque el servidor la
- *  terminara —; tras `maxTransient` seguidos se rinde y propaga el último. Los
- *  demás errores (un 404: el job ya no está) se propagan tal cual. */
+ *  polling (cerrar el popup). Un fallo transitorio se reintenta (el servidor
+ *  pudo terminar la carga); tras `maxTransient` seguidos se rinde y propaga el
+ *  último. Los demás errores (un 404: el job no existe) se propagan tal cual. */
 export async function pollUploadJob(
   csId: string,
   jobId: string,

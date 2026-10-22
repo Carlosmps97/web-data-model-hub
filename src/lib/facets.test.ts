@@ -7,7 +7,7 @@ const DEFS = [
   { id: 'v', name: 'Tipo de Vista', level: 'view' as const, view: 'logical' as const },
 ];
 
-describe('facets (doc 69)', () => {
+describe('facets', () => {
   it('normalizeUdpView: view/canvas siempre physical; ausente = physical', () => {
     expect(normalizeUdpView('view', 'logical')).toBe('physical');
     expect(normalizeUdpView('canvas', undefined)).toBe('physical');
@@ -34,24 +34,24 @@ describe('facets (doc 69)', () => {
     expect(UDP_CLASS_SEGMENTS.map((s) => s.label)).toEqual(['Entity (Logical)', 'Table (Physical)', 'Attribute (Logical)', 'Column (Physical)', 'View', 'Model']);
     expect(UDP_CLASS_SEGMENTS.filter((s) => s.level === 'view' || s.level === 'canvas').every((s) => s.view === 'physical')).toBe(true);
   });
-  it('toolAvailableIn (doc 86 → doc 113): Views, CTAS, Schemas y Upload from Excel solo en físico; New table en ambos', () => {
+  it('toolAvailableIn: Views, CTAS, Schemas y Upload from Excel solo en físico; New table en ambos', () => {
     expect(['view', 'ctas', 'schema', 'upload'].every((t) => !toolAvailableIn(t as 'view', 'logical') && toolAvailableIn(t as 'view', 'physical'))).toBe(true);
     expect(toolAvailableIn('new-table', 'logical') && toolAvailableIn('new-table', 'physical')).toBe(true);
     expect(PHYSICAL_ONLY_TOOL_TIP.view).toMatch(/physical model/);
-    // Doc 113 §1.2: la carga crea vistas (físicas) — en Logical, deshabilitada con el motivo.
+    // La carga crea vistas (físicas): en Logical, deshabilitada con el motivo.
     expect(PHYSICAL_ONLY_TOOL_TIP.upload).toBe('Upload from Excel belongs to the physical model — switch to Physical');
     expect(MODEL_MODE_CAPTION.logical).toMatch(/^Logical model/);
     expect(MODEL_MODE_CAPTION.physical).toMatch(/^Physical model/);
   });
-  it('facetNouns (doc 85): Entity/Attribute en lógico, Table/Column en físico', () => {
+  it('facetNouns: Entity/Attribute en lógico, Table/Column en físico', () => {
     expect(facetNouns('logical')).toEqual({ one: 'entity', many: 'entities', One: 'Entity', Many: 'Entities', a: 'an entity', member: 'attribute', members: 'attributes', Member: 'Attribute', Members: 'Attributes', aMember: 'an attribute' });
     expect(facetNouns('physical')).toEqual({ one: 'table', many: 'tables', One: 'Table', Many: 'Tables', a: 'a table', member: 'column', members: 'columns', Member: 'Column', Members: 'Columns', aMember: 'a column' });
   });
 });
 
-// Doc 114 (piloto): el popup de relación (alta, edición y Sync) mostraba SIEMPRE
-// los nombres físicos; en el modelo lógico van los lógicos (entidad/atributo).
-describe('facetName (doc 114)', () => {
+// El popup de relación (alta, edición y Sync) muestra los nombres del modelo
+// activo: en el lógico, los lógicos (entidad/atributo); en el físico, los físicos.
+describe('facetName', () => {
   it('el nombre del modelo activo, con el otro de respaldo si falta', () => {
     const c = { logicalName: 'Codigo Cliente', physicalName: 'COD_CLI' };
     expect(facetName(c, 'logical')).toBe('Codigo Cliente');
@@ -62,10 +62,10 @@ describe('facetName (doc 114)', () => {
   });
 });
 
-// Revisión doc 114 (H1): en el lógico dos atributos de una misma tabla pueden
-// llamarse igual (el físico es el único) — el selector del popup de relación los
-// mostraba idénticos y la FK podía ir a la columna equivocada sin notarse.
-describe('distinctNames (revisión doc 114)', () => {
+// En el lógico dos atributos de una misma tabla pueden llamarse igual (el físico
+// es el único): el selector del popup de relación los distingue para que la FK
+// no vaya a la columna equivocada sin notarse.
+describe('distinctNames', () => {
   const cols = [
     { id: 'a', logicalName: 'Codigo Cliente', physicalName: 'COD_CLI' },
     { id: 'b', logicalName: 'codigo cliente ', physicalName: 'COD_CLIENTE_ANT' },
@@ -82,9 +82,9 @@ describe('distinctNames (revisión doc 114)', () => {
   it('físico: los físicos son únicos por tabla — tal cual', () => {
     expect([...distinctNames(cols, 'physical').values()]).toEqual(['COD_CLI', 'COD_CLIENTE_ANT', 'NOMBRE', 'FECHA']);
   });
-  // Ronda 2: la lista del combo colapsa los espacios y dibuja igual una tilde
-  // compuesta que una combinante — también ésos son repetidos.
-  it('también los que sólo difieren en espacios internos o en la forma Unicode (NFC / NFD)', () => {
+  // La lista del combo colapsa los espacios y dibuja igual una tilde compuesta
+  // que una combinante: esos también son repetidos.
+  it('también los que solo difieren en espacios internos o en la forma Unicode (NFC / NFD)', () => {
     const nfd = 'Código'.normalize('NFD'), nfc = 'Código'.normalize('NFC');
     const m = distinctNames([
       { id: 'a', logicalName: 'Codigo  Cliente', physicalName: 'COD_CLI' },

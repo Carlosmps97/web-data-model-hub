@@ -1,14 +1,14 @@
 /**
- * Inversa genérica de un lote de cambios (doc 50 — Undo). Pura, sin IO.
+ * Inversa genérica de un lote de cambios (Undo). Pura, sin IO.
  *
- * Regla por ítem, recorrido en ORDEN INVERSO (lo último aplicado se deshace
+ * Regla por ítem, recorrido en orden inverso (lo último aplicado se deshace
  * primero — p.ej. la relación cae antes de restaurar/borrar sus columnas):
- *  - upsert de entidad PREEXISTENTE (hay pre-imagen) → re-upsert del pre-image;
- *  - upsert de entidad NUEVA (sin pre-imagen)        → delete;
+ *  - upsert de entidad preexistente (hay pre-imagen) → re-upsert del pre-image;
+ *  - upsert de entidad nueva (sin pre-imagen)        → delete;
  *  - delete (hay pre-imagen)                          → re-upsert del pre-image;
  *  - delete sin pre-imagen                            → no restaurable (se omite).
  *
- * Asume que un lote toca cada entidad UNA sola vez (cierto para todos los
+ * Asume que un lote toca cada entidad una sola vez (cierto para todos los
  * lotes de la plataforma: paste, relación, cascadas).
  */
 import type { BulkChange } from '@/services/governance.service';

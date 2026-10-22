@@ -1,5 +1,5 @@
-// Final review #3 (doc 96 D6): el DDL de una vista sale de sus columnas — el
-// mismo texto en Properties, el Inspector y el export HTML.
+// El DDL de una vista sale de sus columnas: el mismo texto en Properties, el
+// Inspector y el export HTML.
 import { describe, expect, it } from 'vitest';
 import { generatedViewDdl } from './viewDdl';
 
