@@ -121,7 +121,7 @@ web-data-model-hub/
 
 - Node.js 20 o superior y npm.
 - El backend (`backend-data-model-hub`) corriendo en `http://localhost:8000`, con su `.env` configurado y
-  los roles y la cuenta `admin` creados con `scripts/create_admin.py` de ese repositorio.
+  los roles y los usuarios creados con `scripts/seed_users.py` de ese repositorio.
 
 ## Puesta en marcha local
 
@@ -146,8 +146,8 @@ web-data-model-hub/
    Vite sirve la web en `http://localhost:3000` y reenvía `/api` a `http://localhost:8000` con el mismo
    proxy de `server.mjs`: la sesión viaja en la cookie HttpOnly `dmh_session`, como en producción.
    `VITE_API_URL` queda vacía (mismo origen). En local no hay muro SSO: **Continue with Databricks** entra
-   con el usuario de desarrollo que configura el backend (`LOCAL_DEV_USER`, que debe estar en la whitelist),
-   y la cuenta local `admin` entra con usuario y contraseña.
+   con el usuario de desarrollo que configura el backend: `LOCAL_DEV_USER` igual a uno de los correos de
+   `scripts/seed_users.py` (o uno dado de alta desde Admin).
 
 4. Para apuntar la web local a otro backend, se define la URL en `.env.local` y se reinicia Vite:
 

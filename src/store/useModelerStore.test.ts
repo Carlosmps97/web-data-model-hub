@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/services/governance.service', () => ({
-  deleteRelationship: vi.fn().mockResolvedValue({}),
-  deleteColumn: vi.fn().mockResolvedValue({}),
-}));
+vi.mock('@/services/governance.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/governance.service')>();
+  return { bulk: actual.bulk, recordChangesBulk: vi.fn().mockResolvedValue({}) };
+});
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 import * as gov from '@/services/governance.service';
 import * as csvc from '@/services/changeset.service';
@@ -17,19 +17,20 @@ describe('useModelerStore.deleteColumn', () => {
     useModelerStore.setState({ activeSaId: null, dirty: false });
   });
 
-  it('borra las relaciones afectadas antes que la columna', async () => {
-    const order: string[] = [];
-    vi.mocked(gov.deleteRelationship).mockImplementation(async (id: string) => { order.push(`rel:${id}`); return {} as never; });
-    vi.mocked(gov.deleteColumn).mockImplementation(async (id: string) => { order.push(`col:${id}`); return {} as never; });
+  it('borra las relaciones afectadas y la columna en un solo lote', async () => {
     await useModelerStore.getState().deleteColumn('c1', ['r1', 'r2']);
-    expect(order).toEqual(['rel:r1', 'rel:r2', 'col:c1']);
+    expect(gov.recordChangesBulk).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(gov.recordChangesBulk).mock.calls[0][0]).toEqual([
+      { collection: 'relationships', entityId: 'r1', op: 'delete' },
+      { collection: 'relationships', entityId: 'r2', op: 'delete' },
+      { collection: 'canonical_columns', entityId: 'c1', op: 'delete' },
+    ]);
     expect(useModelerStore.getState().dirty).toBe(true);
   });
 
   it('sin relaciones borra solo la columna', async () => {
     await useModelerStore.getState().deleteColumn('c1');
-    expect(gov.deleteRelationship).not.toHaveBeenCalled();
-    expect(gov.deleteColumn).toHaveBeenCalledWith('c1');
+    expect(vi.mocked(gov.recordChangesBulk).mock.calls).toEqual([[[{ collection: 'canonical_columns', entityId: 'c1', op: 'delete' }], 1]]);
   });
 });
 

@@ -52,8 +52,10 @@ export interface Drawing {
 export interface SubjectArea { id: string; projectId: string; name: string; folderId?: string | null; tableIds: string[]; viewIds?: string[] | null; layout: Record<string, { x: number; y: number }>; drawings?: Drawing[]; udpValues?: Record<string, string>; routes?: Record<string, { x: number; y: number }[]>; colors?: Record<string, string>; }
 // `views` = vistas miembro del canvas (`viewIds`; un canvas sin lista usa
 // showOnCanvas + ≥1 fuente) — las resuelve el backend en /diagram; el front
-// solo las dibuja (nodos 'view' + wires).
-export interface Diagram { subjectArea: SubjectArea; tables: CanonicalTable[]; columns: CanonicalColumn[]; relationships: Relationship[]; views: View[]; }
+// solo las dibuja (nodos 'view' + wires). `productionStamp` = huella de lo
+// publicado del proyecto al leerlo (cambia cuando otra versión o Data Standards
+// lo cambian); `draftSeq` = escrituras del draft hasta entonces (`writeSeq`).
+export interface Diagram { subjectArea: SubjectArea; tables: CanonicalTable[]; columns: CanonicalColumn[]; relationships: Relationship[]; views: View[]; productionStamp?: string | null; draftSeq?: number | null; }
 
 // ── Projects (directos) ──
 // El proyecto se crea directo (projects.service.createProject) y se
@@ -79,8 +81,13 @@ export const listRelationships = () => gov.listRelationships();
 // aplica el overlay del changeset server-side. Armarlo en el cliente (pool
 // completo de tablas + un fetch por tabla + todas las relaciones) tardaría
 // segundos con 100 tablas y movería el catálogo entero por apertura.
-export async function loadDiagram(saId: string): Promise<Diagram> {
+// Con `tableIds`, el recorte de esas tablas (`lib/diagramSlice`): un servidor
+// que no lo conoce responde el diagrama completo, que se usa como tal.
+export async function loadDiagram(saId: string, opts?: { tableIds?: string[] }): Promise<Diagram> {
+  const params = new URLSearchParams();
   const cs = useSessionStore.getState().activeChangesetId;
-  const qs = cs ? `?changesetId=${encodeURIComponent(cs)}` : '';
-  return apiGet<Diagram>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}/diagram${qs}`);
+  if (cs) params.set('changesetId', cs);
+  if (opts?.tableIds?.length) params.set('tableIds', opts.tableIds.join(','));
+  const qs = params.toString();
+  return apiGet<Diagram>(`${API_BASE}/api/subject-areas/${encodeURIComponent(saId)}/diagram${qs ? `?${qs}` : ''}`);
 }

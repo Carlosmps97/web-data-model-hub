@@ -1,12 +1,11 @@
 /**
  * UserModal: la whitelist de acceso.
  *
- * Alta ("Add email"): correo + rol, sin contraseña — la entrada habilita el
- * login con la cuenta de Databricks de ese correo. El nombre lo resuelve el
- * backend en el primer login (SCIM / derivado del correo).
+ * Alta ("Add email"): correo + rol — la entrada habilita el login con la
+ * cuenta de Databricks de ese correo. El nombre lo resuelve el backend en el
+ * primer login (SCIM / derivado del correo).
  *
- * Edición: rol/estado/nombre/proyectos. El campo de contraseña solo aparece en
- * cuentas locales (`hasPassword`, p.ej. `admin`) para rotar su clave.
+ * Edición: rol/estado/nombre/proyectos.
  *
  * Proyectos: «All projects» (lista vacía) o solo los marcados. Los
  * administradores ven todos los proyectos aunque tengan algunos marcados.
@@ -48,13 +47,11 @@ const radioRow: CSSProperties = { display: 'flex', alignItems: 'center', gap: 8,
 
 export default function UserModal({ mode, initial, roles, projects, onlyAdmin, onClose, onSaved }: Props) {
   const isEdit = mode === 'edit';
-  const isLocalAccount = isEdit && Boolean(initial?.hasPassword);
   const lockRole = isEdit && onlyAdmin;
   const [email, setEmail] = useState(initial?.id ?? '');
   const [name, setName] = useState(initial?.name ?? '');
   const [role, setRole] = useState(initial?.role ?? roles[0]?.id ?? '');
   const [status, setStatus] = useState(initial?.status ?? 'active');
-  const [password, setPassword] = useState('');
   const [allProjects, setAllProjects] = useState(!(initial?.projectIds?.length));
   const [selected, setSelected] = useState<Set<string>>(() => new Set(initial?.projectIds ?? []));
   // En la edición, los proyectos se guardan solo si se tocó la sección: cambiar
@@ -91,7 +88,6 @@ export default function UserModal({ mode, initial, roles, projects, onlyAdmin, o
       if (isEdit && initial) {
         const body: UpdateUserInput = { name: name.trim(), ...(sendProjects ? { projectIds } : {}) };
         if (!lockRole) { body.role = role; body.status = status; }
-        if (isLocalAccount && password) body.password = password;
         await updateUser(initial.id, body);
         toast.success('Access updated');
       } else {
@@ -126,12 +122,12 @@ export default function UserModal({ mode, initial, roles, projects, onlyAdmin, o
     >
       <div style={{ display: 'grid', gap: 13 }}>
         <Field
-          label={isLocalAccount ? 'Username (local account)' : 'Email'}
+          label="Email"
           hint={isEdit ? undefined : 'The Databricks account email, exactly as it signs in to the workspace.'}
         >
           <input
             style={{ ...inputStyle, ...(isEdit ? { background: C.panel, color: C.text3, cursor: 'not-allowed' } : {}) }}
-            type={isLocalAccount ? 'text' : 'email'}
+            type="email"
             value={email}
             readOnly={isEdit}
             onChange={(e) => setEmail(e.target.value)}
@@ -193,18 +189,6 @@ export default function UserModal({ mode, initial, roles, projects, onlyAdmin, o
               : 'The user only sees, edits and reviews the selected projects.'}
           </span>
         </div>
-        {isLocalAccount && (
-          <Field label="Reset password" hint="Leave blank to keep it unchanged.">
-            <input
-              style={inputStyle}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              autoComplete="new-password"
-            />
-          </Field>
-        )}
       </div>
     </ModalShell>
   );

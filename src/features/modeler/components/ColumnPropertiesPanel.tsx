@@ -26,6 +26,7 @@ import TypePicker from './TypePicker';
 import UdpAssign from './UdpAssign';
 import DomainInheritPopup from './DomainInheritPopup';
 import { confirmDeleteColumn } from './deleteConfirm';
+import { busyMessage, holdTable, readEmptiedViews } from './deleteFlows';
 import { facetEditable, type ColumnField } from '../lib/facetEditable';
 import { domainUdpOffer, mergeInheritedUdps, type DomainUdpOffer, type DomainUdpOfferItem } from '../lib/domainInherit';
 import { facetType } from '../lib/inspectorModel';
@@ -146,6 +147,10 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   // Borrado con impacto global: relaciones donde la columna es extremo, en
   // cualquier canvas.
   const removeCol = async () => {
+    // Un borrado por tabla a la vez: el menú del canvas puede estar borrando
+    // columnas de esta misma tabla.
+    const hold = holdTable(col.tableId);
+    if (!hold) { pushToast(busyMessage(facetNouns(viewMode))); return; }
     const name = col.physicalName;
     const noun = facetNouns(viewMode).member;
     // El borrado es de la sesión donde se pidió: si mientras se lee el impacto
@@ -159,19 +164,25 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
     // `relIds` vacío quedarían relaciones con pares hacia una columna borrada.
     const onImpactError = reportWriteError(() => pushToast(`Couldn't check the relationships of this ${noun}: nothing was deleted. Try again.`, 'err'));
     try {
+      // Las vistas que quedarían sin columnas se leen junto con el impacto.
+      const emptied = readEmptiedViews(col.tableId, [col.physicalName]);
       let impact: gov.RelationshipImpact;
       try { impact = await gov.columnImpact(col.id); } catch (e) { await onImpactError(e); return; }
+      const emptiedViews = await emptied;
       if (!pin.holds()) return;
       const relIds = impact.relationships.map((r) => r.relId);
       // Diálogo compartido con el Object Inspector. Cascade: el
       // changeset registra el delete de la columna y de cada relación
       // afectada; el store cierra este panel al terminar.
       const ok = await confirmDeleteColumn({
-        name, nouns: facetNouns(viewMode), impact,
-        action: () => { pin.check(); return deleteColumn(col.id, relIds); },
+        name, nouns: facetNouns(viewMode), impact, emptiedViews,
+        // La columna viaja al store: si al confirmar ya no está dibujada (el
+        // canvas se recargó o se cerró), la cascada se resuelve igual.
+        action: () => { pin.check(); return deleteColumn(col.id, relIds, { col }); },
       });
       if (ok) pushToast(impact.total > 0 ? `${facetNouns(viewMode).Member} and its relationships deleted` : `${facetNouns(viewMode).Member} deleted`);
     } catch (e) { await onError(e); }
+    finally { hold.release(); }
   };
 
   // Back: vuelve al Properties de la tabla directo en Columns, con esta fila a

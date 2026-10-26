@@ -17,6 +17,7 @@ import type { View, ViewInput, ViewSource } from '@/services/views.service';
 
 import { orderColumns } from './columnOrder';
 import { SessionChangedError } from './sessionGuard';
+import { duplicateOutputNames, outputNameOf } from './viewEditorLogic';
 
 const norm = (s?: string) => (s ?? '').trim().toLowerCase();
 
@@ -72,13 +73,100 @@ export function alignSourcesToPhysical(view: View, colsByTable: Map<string, Cano
   return keyed.map((k) => k.s);
 }
 
+const ofColumn = (view: View, s: ViewSource, tableId: string, physicalName: string) =>
+  (s.tableId ?? view.tableId) === tableId && norm(s.column) === norm(physicalName);
+
 /** Sources sin la columna (para un delete); null si la vista no la referencia.
  *  Aplica a toda vista (espejo o curada): una columna eliminada no puede
  *  quedar referenciada en ningún SELECT. */
 export function removeColumnSource(view: View, tableId: string, physicalName: string): ViewSource[] | null {
   const sources = view.sources ?? [];
-  const next = sources.filter((s) => !((s.tableId ?? view.tableId) === tableId && norm(s.column) === norm(physicalName)));
+  const next = sources.filter((s) => !ofColumn(view, s, tableId, physicalName));
   return next.length === sources.length ? null : next;
+}
+
+/** Fuente de una columna en una vista, con su posición: lo que quita
+ *  `removeColumnsSources` y repone `restoreColumnsSources`. */
+export interface PlacedSource { index: number; source: ViewSource }
+
+/** Una columna que salió de la vista en un borrado: sus fuentes, con su tabla
+ *  explícita (una fuente legacy sin `tableId` no se resuelve después contra
+ *  otra) y su posición en el documento de antes del borrado. */
+export interface RemovedColumn { physicalName: string; at: PlacedSource[] }
+
+/** Sources sin ninguna de esas columnas y, de cada una que la vista listaba, lo
+ *  que salió (en el orden dado); null si no lista ninguna. Una sola pasada por
+ *  las fuentes: el costo no crece con columnas × fuentes. Puro. */
+export function removeColumnsSources(view: View, tableId: string, physicalNames: string[]): { sources: ViewSource[]; removed: RemovedColumn[] } | null {
+  const wanted = new Map(physicalNames.map((name) => [norm(name), name]));
+  const at = new Map<string, PlacedSource[]>();
+  const sources: ViewSource[] = [];
+  (view.sources ?? []).forEach((source, index) => {
+    const name = (source.tableId ?? view.tableId) === tableId ? wanted.get(norm(source.column)) : undefined;
+    if (name === undefined) { sources.push(source); return; }
+    const placed = { index, source: { ...source, tableId } };
+    const list = at.get(name);
+    if (list) list.push(placed); else at.set(name, [placed]);
+  });
+  if (!at.size) return null;
+  const removed = [...wanted.values()].flatMap((physicalName) => {
+    const list = at.get(physicalName);
+    return list ? [{ physicalName, at: list }] : [];
+  });
+  return { sources, removed };
+}
+
+/** Sources de `view` (su documento vigente) con las columnas que quitó
+ *  `removeColumnsSources` de vuelta. Ninguna si la vista ya no lee de esa tabla
+ *  (se re-apuntó); no vuelve la que la vista ya lista ni la que repetiría un
+ *  nombre de salida (se decide en orden inverso al borrado, como si volvieran de
+ *  a una). Cada fuente vuelve a su índice de antes del borrado, descontadas las
+ *  que no vuelven y estaban antes que ella: entre las fuentes que quedaron, cae
+ *  donde estaba (una columna que la vista volvió a listar, al final, no la
+ *  corre); si ahora tiene menos fuentes, al final. null si no repone ninguna.
+ *  Lineal. Puro. */
+export function restoreColumnsSources(view: View, tableId: string, removed: RemovedColumn[]): ViewSource[] | null {
+  const reads = view.sourceTableIds?.length ? view.sourceTableIds : (view.tableId ? [view.tableId] : []);
+  if (!reads.includes(tableId)) return null;
+  const current = view.sources ?? [];
+  const listed = new Set(current.filter((s) => (s.tableId ?? view.tableId) === tableId).map((s) => norm(s.column)));
+  // Un nombre de salida que ya estaba repetido puede repetirse; cualquier otro, no.
+  const repeated = new Set(duplicateOutputNames(current).map((n) => n.toLowerCase()));
+  const taken = new Set(current.map((s) => outputNameOf(s).toLowerCase()).filter(Boolean));
+  const back = new Set<RemovedColumn>();
+  for (const r of [...removed].reverse()) {
+    if (listed.has(norm(r.physicalName))) continue;
+    const names = r.at.map((p) => outputNameOf(p.source).toLowerCase()).filter(Boolean);
+    if (names.some((n, i) => !repeated.has(n) && (taken.has(n) || names.indexOf(n) < i))) continue;
+    names.forEach((n) => taken.add(n));
+    back.add(r);
+  }
+  if (!back.size) return null;
+  const skipped = removed.filter((r) => !back.has(r)).flatMap((r) => r.at.map((p) => p.index)).sort((a, b) => a - b);
+  const placed = [...back].flatMap((r) => r.at).sort((a, b) => a.index - b.index);
+  const out: ViewSource[] = [];
+  let next = 0;   // la siguiente fuente vigente
+  let gaps = 0;   // fuentes que no vuelven, antes de la que se ubica
+  for (const { index, source } of placed) {
+    while (gaps < skipped.length && skipped[gaps] < index) gaps += 1;
+    while (out.length < index - gaps && next < current.length) out.push(current[next++]);
+    out.push(source);
+  }
+  return [...out, ...current.slice(next)];
+}
+
+/** ¿Proyecta algo? Alguna fuente con columna o expresión no vacía: sin ninguna,
+ *  el Export DDL (`viewDDL`) escribe la vista como `SELECT *`. Puro. */
+export function hasProjection(sources: ViewSource[] | undefined): boolean {
+  return (sources ?? []).some((s) => (s.column ?? '').trim() || (s.expression ?? '').trim());
+}
+
+/** Las vistas que quedan sin proyección al quitarles esas columnas. Puro. */
+export function viewsLeftEmpty(views: View[], tableId: string, physicalNames: string[]): View[] {
+  return views.filter((v) => {
+    const next = removeColumnsSources(v, tableId, physicalNames);
+    return !!next && !hasProjection(next.sources);
+  });
 }
 
 /** Sources con la columna renombrada (rename físico); null si no la referencia.

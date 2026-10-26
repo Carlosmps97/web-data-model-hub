@@ -286,9 +286,9 @@ lee `src/` de este repositorio.
   propia. El cliente de token es un `vi.fn` que entrega tokens sucesivos;
   las aserciones no dependen de cuál de ellos llega, para no depender del orden de las pruebas.
 - **Sesión en cookie.** Con otro backend falso que, como el real, decodifica y normaliza la ruta: el token
-  sale del cuerpo del login, del login SSO y de la renovación (también comprimida y por rutas con `%XX`)
+  sale del cuerpo del login SSO y de la renovación (también comprimida y por rutas con `%XX`)
   y queda en la cookie con sus atributos; una codificación inválida recibe 400; las demás respuestas de
-  `/api/auth/` y un login fallido o sin token pasan tal cual; la cookie viaja al backend como
+  `/api/auth/` y un login rechazado o sin token pasan tal cual; la cookie viaja al backend como
   `X-Session-Token` y las cookies del navegador no; una escritura con la cookie sin `X-Requested-With` no
   llega al backend; las respuestas de `/api` salen sin cabeceras CORS; el logout borra la cookie con éxito,
   con error, sin backend configurado, ante un error interno y con el backend caído; y con

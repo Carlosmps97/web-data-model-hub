@@ -78,16 +78,15 @@ Dos ideas atraviesan todo el documento:
 
 - `src/App.tsx` llama a `restore()` una vez al montar y registra los listeners de `focus` y
   `visibilitychange` que llaman a `refreshMe()`.
-- `src/features/auth/LoginScreen.tsx` ofrece **Continue with Databricks** (SSO de la plataforma) y el acceso
-  de **Administrator** con contraseña. Al montar ejecuta `ensureBackendSession()`.
-- `src/features/auth/auth.service.ts` expone `login`, `ssoLogin`, `refreshSession`, `logout` y `fetchMe`.
+- `src/features/auth/LoginScreen.tsx` ofrece **Continue with Databricks** (SSO de la plataforma). Al montar
+  ejecuta `ensureBackendSession()`.
+- `src/features/auth/auth.service.ts` expone `ssoLogin`, `refreshSession`, `logout` y `fetchMe`.
 - `src/features/auth/guards.tsx` contiene `RequireAuth` (muestra `Splash` mientras `status === 'loading'` y
   redirige a `/login` con `anon`) y `RequirePermission`.
 
 | Acción | Método y ruta | Resultado |
 |---|---|---|
 | Login SSO | `POST /api/auth/sso/login` | `{ user, expiresIn }`: el backend toma la identidad que inyecta la plataforma; `server.mjs` pasa el token a la cookie. |
-| Login local | `POST /api/auth/login` | `{ user, expiresIn }` con `{ username, password }`. |
 | Restaurar y renovar | `POST /api/auth/refresh` | `{ user, expiresIn }` con un token nuevo en la cookie; 401 si la sesión ya no vale. |
 | Refrescar permisos | `GET /api/auth/me` | `SessionUser` con `permissions`, o un principal básico sin permisos. |
 | Logout | `POST /api/auth/logout` | `{ ok }`; `server.mjs` borra la cookie. |
@@ -124,7 +123,7 @@ del proxy y del token de servicio está en [Seguridad](08-seguridad.md).
 
 ### Login, logout y 401
 
-Los dos logins comparten `enterSession()`: primero `resetAppState()` (el actor que entra no hereda canvas,
+El login SSO pasa por `enterSession()`: primero `resetAppState()` (el actor que entra no hereda canvas,
 árbol, portapapeles ni Undo del anterior), luego espeja el actor y arranca `sessionKeeper`. El token queda
 en la cookie HttpOnly; solo si la respuesta lo trae en el cuerpo (otro origen o `SESSION_COOKIE=false`) se
 entrega al cliente HTTP (`setAuthToken`), en memoria. El logout cancela la renovación en vuelo (si su
@@ -190,8 +189,8 @@ sequenceDiagram
   end
 
   Note over Login,API: Login
-  Login->>AS: loginSso() o login(usuario, clave)
-  AS->>API: POST /api/auth/sso/login o /api/auth/login
+  Login->>AS: loginSso()
+  AS->>API: POST /api/auth/sso/login
   API-->>AS: user y expiresIn (token en la cookie)
   AS->>AS: resetAppState(), mirror(user) y status authed
   AS->>SK: start(expiresIn)
@@ -478,10 +477,47 @@ Las acciones del store eligen entre un cambio o un lote según cuántas entidade
   revive. Rechaza dejar una PK debajo de una columna que no es de la llave.
 - Borrar una tabla o una columna hace todas sus lecturas (dependencias, vistas, canvases) antes de la
   primera escritura; si una lectura falla, no se borra nada (`NothingDoneError`).
+- `deleteColumns` (y `deleteColumn`, el caso de una) borra columnas de una tabla en un solo lote, y en un
+  solo request: las relaciones elegidas en el diálogo de impacto (sin los pares de esas columnas, o borradas
+  si no les queda ninguno), la marca FK que queda huérfana en la otra punta (salvo en una columna que también
+  se borra), las columnas y cada vista que las lista, una sola vez y sin ninguna de ellas (`viewWriteDoc`, el
+  mismo documento que grabaría `updateView`, a partir del estado efectivo y no de la copia del diagrama).
+  Lee las relaciones y las vistas de la tabla una vez y las FK de la otra punta una vez por tabla hija, en
+  paralelo: borrar N columnas cuesta lo mismo que borrar una. Se graba todo o nada: si una de esas vistas no
+  valida, las columnas siguen; un lote de más de 2000 cambios (el tope del backend por request) se rechaza
+  antes de escribir. Su Undo, también en un lote, repone columnas, FK y relaciones y vuelve a poner cada
+  columna en esas vistas, en su posición, sobre su documento vigente (`restoreColumnsSources`, en orden
+  inverso al del borrado): lo editado en la vista después del borrado no se pisa, y una vista que ya no lee
+  de esa tabla, que ya lista la columna o en la que repetiría un nombre de salida queda como está.
+- El impacto de borrar varias columnas sale de una lectura de los links de la tabla
+  (`lib/columnsImpact.ts`); las vistas que quedarían sin columnas se leen a la vez (`readEmptiedViews`,
+  `components/deleteFlows.tsx`).
 
 Toda acción llama a `markDirty()`, que alimenta el aviso de cambios sin guardar (y el `beforeunload` del
 navegador) y termina con `reload()`, que vuelve a pedir el diagrama y reconcilia con el overlay. Si el
 diagrama recargado cambió en estructura (`diagramSignature`), el Explorer se invalida (`bumpExplorer`).
+
+`reload()` pide solo lo que cambió (`lib/diagramSlice`). Cada escritura al draft (`recordChange` y
+`recordChangesBulk`, al terminar, también si falló) anota las tablas que toca: la de una columna (y la que
+tenía), los extremos de una relación, las fuentes de una vista, la tabla misma. Una baja de columna o de
+relación no trae payload: la ubica el diagrama en pantalla, y lo que no está en él no es de este canvas.
+Mientras se abre un canvas, su foto puede ser previa a lo escrito: si se abre otro, cualquier escritura deja
+pendiente el diagrama completo (salvo carpetas, proyectos y otros canvases, como el dibujo que guarda el
+anterior al cambiar), y al instalarse la apertura recarga si quedó algo pendiente; si se reabre el mismo
+(Refresh), también lo que el diagrama en pantalla no tiene (puede ser algo recién creado cuyo recorte se
+descartó). La recarga siguiente pide el
+recorte de las tablas pendientes (`GET /diagram?tableIds=`) y lo funde en el diagrama abierto (`mergeSlice`):
+lo del lote se reemplaza, lo que ya no viene se quita y lo demás conserva su objeto, así el canvas no vuelve a
+dibujar nada más. Lo pendiente se salda cuando una carga se instala (lo anotado hasta que se pidió); si se
+descarta o falla, sigue para la siguiente. Va el diagrama completo si no hay nada pendiente, si algo no se
+acota a tablas (baja de una tabla o de una vista, membresía del canvas, esquemas), si son más de 30 tablas, si
+hay un diagrama completo en vuelo o con `reload({ full: true })`. También si el recorte trae otra membresía
+del canvas, o si su contador del draft (`draftSeq`) muestra una escritura que esta pestaña no hizo: cada
+`/changes` devuelve el número de la suya (`writeSeq`), y una que falta es de otra pestaña u otro equipo, de
+una carga Excel o de un esquema; sin el número de la última carga completa, tampoco se sabe qué vio. Los
+números propios se olvidan al cambiar de sesión. Si trae otro sello de producción (`productionStamp`: otra versión o Data
+Standards cambiaron lo publicado), se funde y después se pide el completo, sin esperarlo. Un servidor sin
+recortes responde el diagrama completo, que se usa como tal.
 
 ### Diagrama sellado
 
@@ -601,6 +637,7 @@ upserts y deletes normales, sin mecánica adicional. No hay redo.
 | Disparo | Botón **Undo** de la Toolbar y Ctrl+Z en el canvas llaman a `undoLast()`; al terminar se muestra «Undid: <label>». |
 | Concurrencia | `busy` impide dos Undo a la vez; no hay overlay bloqueante. |
 | Pila cerrada | `clear({ until })` vacía la pila y la deja cerrada para la versión actual hasta que la promesa termine. Lo usa la carga desde Excel mientras aplica. |
+| Pre-imágenes | Las inversas reponen documentos completos. Borrar una vista toma su pre-imagen del documento de la vista (`tableViews` o `currentView` de `views.service`), no de la copia del canvas: el diagrama trae las vistas sin el CREATE VIEW original de Erwin (`sql`). |
 
 `undoLast()` saca la entrada de la pila antes de correrla, con un pin nuevo. Según el resultado:
 
@@ -701,8 +738,8 @@ produce un aviso y no varios apilados.
 
 ### Cierre del canvas cuando la recarga falla
 
-`reload()` vuelve a pedir el diagrama tras cada escritura. Si falla (red, tiempo agotado, 5xx), no se
-reintenta solo: lo que hay en pantalla es anterior a la escritura que acaba de terminar y editar desde ahí
+`reload()` vuelve a pedir el diagrama (o el recorte de lo editado) tras cada escritura. Si falla (red,
+tiempo agotado, 5xx), no se reintenta solo: lo que hay en pantalla es anterior a la escritura que acaba de terminar y editar desde ahí
 pisaría lo grabado. Entonces:
 
 1. Si el error es de la versión, espera la revalidación; si mientras tanto empezó otra carga o cambió el
@@ -937,7 +974,7 @@ Rules seleccionadas.
 
 1. **Export DDL** de la Toolbar abre `ExportDdlModal` (`src/features/ddl/components/ExportDdlModal.tsx`).
    Las vistas son las miembro del canvas (`canvasDdlViews(diagram)`). «Tables to export» arranca sin
-   ninguna tabla elegida.
+   ninguna tabla elegida. Con el modal cerrado no se calcula nada (DDL, vistas ni conteos de columnas).
 2. Al abrir pide, con el proyecto de la sesión (`sessionProjectId()`), el catálogo de reglas
    (`GET /api/projects/{pid}/ddl-rules`), las definiciones de UDP (`GET /api/projects/{pid}/udp`) y la
    configuración (`GET /api/projects/{pid}/ddl-rules/config`). `mergeOutputSettings()` completa las Output

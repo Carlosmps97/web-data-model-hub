@@ -230,8 +230,8 @@ export function buildUpstreamHeaders(incoming, token, clientIp, proxySecret = ''
 // ── Sesión en cookie HttpOnly ────────────────────────────────────────────
 //
 // El token de sesión que emite el backend no llega al JavaScript de la página.
-// Las respuestas 2xx de /api/auth/* se leen enteras: si traen el token (login,
-// login SSO y renovación), este servidor lo saca del cuerpo y lo entrega en una
+// Las respuestas 2xx de /api/auth/* se leen enteras: si traen el token (login
+// SSO y renovación), este servidor lo saca del cuerpo y lo entrega en una
 // cookie; en cada request a /api la cookie vuelve al backend como
 // `X-Session-Token`. La ruta se evalúa como la resuelve el backend (`apiRoute`):
 // una ruta con %XX no saca el token por otro camino.
@@ -311,8 +311,8 @@ function decodeJson(buf, encoding) {
   }
 }
 
-/** Respuesta 2xx de /api/auth/*: si trae el token (login, login SSO,
- *  renovación), pasa del cuerpo a la cookie. Un cuerpo sin token (otra forma,
+/** Respuesta 2xx de /api/auth/*: si trae el token (login SSO, renovación),
+ *  pasa del cuerpo a la cookie. Un cuerpo sin token (otra forma,
  *  no JSON) sale tal cual. */
 function deliverSession(req, res, upRes, headers) {
   const chunks = [];

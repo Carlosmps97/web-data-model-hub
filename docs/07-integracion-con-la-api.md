@@ -340,7 +340,7 @@ historial de Data Standards.
 Las tablas siguientes listan, por archivo, cada función que llama a la API. La columna «Permiso en el
 backend» refleja las dependencias de la ruta en FastAPI:
 
-- **Pública**: no exige sesión de la aplicación (salud, login, login SSO y warm-up); su acceso depende
+- **Pública**: no exige sesión de la aplicación (salud, login SSO y warm-up); su acceso depende
   del perímetro de la plataforma (el proxy de Databricks Apps y `server.mjs`).
 - **Sesión**: exige solo la sesión propia (`/me` y logout).
 - **Control común**: el control que el backend monta en todas las rutas de datos: sesión válida,
@@ -458,8 +458,7 @@ ruta se mantienen en `docs/07-api.md` y `docs/08-seguridad.md` del backend.
 
 | Función | Método | Endpoint | Permiso en el backend | Uso |
 |---|---|---|---|---|
-| `login` | POST | `/api/auth/login` | Pública | Login local con usuario y contraseña; devuelve `{user, expiresIn}` (el token queda en la cookie). |
-| `ssoLogin` | POST | `/api/auth/sso/login` | Pública | Login con la identidad SSO que relaya `server.mjs`; devuelve `{user, expiresIn}`. |
+| `ssoLogin` | POST | `/api/auth/sso/login` | Pública | Login con la identidad SSO que relaya `server.mjs`; devuelve `{user, expiresIn}` (el token queda en la cookie). |
 | `refreshSession` | POST | `/api/auth/refresh` | Sesión | Renueva la sesión: token nuevo en la cookie y `{user, expiresIn}`. Lo usan `restore()` al arrancar y `sessionKeeper` con actividad. |
 | `logout` | POST | `/api/auth/logout` | Sesión | Cierra la sesión en el backend; `server.mjs` borra la cookie. |
 | `fetchMe` | GET | `/api/auth/me` | Sesión | Usuario en sesión con su rol y permisos. |
@@ -470,7 +469,7 @@ ruta se mantienen en `docs/07-api.md` y `docs/08-seguridad.md` del backend.
 |---|---|---|---|---|
 | `listUsers` | GET | `/api/admin/users` | `admin.manage` | Lista los usuarios registrados. |
 | `createUser` | POST | `/api/admin/users` | `admin.manage` | Crea un usuario. |
-| `updateUser` | PUT | `/api/admin/users/{username}` | `admin.manage` | Actualiza un usuario (rol, proyectos, estado, contraseña). |
+| `updateUser` | PUT | `/api/admin/users/{username}` | `admin.manage` | Actualiza un usuario (rol, proyectos, estado). |
 | `deleteUser` | DELETE | `/api/admin/users/{username}` | `admin.manage` | Elimina un usuario. |
 | `listRoles` | GET | `/api/admin/roles` | `admin.manage` | Lista los roles. |
 | `upsertRole` | PUT | `/api/admin/roles/{key}` | `admin.manage` | Crea o actualiza un rol con su mapa de permisos. |
@@ -484,7 +483,7 @@ ruta se mantienen en `docs/07-api.md` y `docs/08-seguridad.md` del backend.
 | `listProjects` | GET | `/api/projects` | Control común | Lista los proyectos (árbol del Model). |
 | `listFolders` | GET | `/api/projects/{project_id}/folders` | Control común | Carpetas del proyecto. |
 | `listSubjectAreas` | GET | `/api/projects/{pid}/subject-areas` | Control común | Canvases del proyecto, opcionalmente de una carpeta (`folderId`). |
-| `loadDiagram` | GET | `/api/subject-areas/{sa_id}/diagram` | Control común | Diagrama completo de un canvas (tablas, columnas, relaciones y vistas); con `changesetId` aplica el overlay. |
+| `loadDiagram` | GET | `/api/subject-areas/{sa_id}/diagram` | Control común | Diagrama completo de un canvas (tablas, columnas, relaciones y vistas); con `changesetId` aplica el overlay; con `tableIds`, el recorte de esas tablas para la recarga tras editar. |
 
 ### `src/features/modeler/services/schemas.service.ts`
 

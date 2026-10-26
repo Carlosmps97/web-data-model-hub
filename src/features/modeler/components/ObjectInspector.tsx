@@ -32,6 +32,7 @@ import {
 import AuditHistory from './AuditHistory';
 import { ColumnPropsBody, type ColTab } from './ColumnPropertiesPanel';
 import { confirmDeleteColumn, confirmDeleteTable, confirmDeleteView } from './deleteConfirm';
+import { busyMessage, holdTable, readEmptiedViews } from './deleteFlows';
 import SchemaSelect from './SchemaSelect';
 import UdpAssign from './UdpAssign';
 import RelationshipPhraseLine from './RelationshipPhraseLine';
@@ -357,6 +358,10 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
    *  el Explorer; el popup se cierra, pues la tabla deja de existir. */
   const askDeleteTable = async () => {
     if (!data || deleting) return;
+    // Un borrado por tabla a la vez: el menú del canvas puede estar borrando
+    // esta tabla o sus columnas.
+    const hold = holdTable(target.id);
+    if (!hold) { toast.message(busyMessage(nouns)); return; }
     setDeleting(true);
     const t = data.table;
     const onError = reportWriteError((e) => toast.error(errMsg(e, `Couldn't delete the ${nouns.one}`)));
@@ -367,7 +372,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       });
       if (ok) { toast.success(`${nouns.One} deleted`); onClose(); }
     } catch (e) { await onError(e); }
-    finally { setDeleting(false); }
+    finally { setDeleting(false); hold.release(); }
   };
 
   // ── Columna: mismo upsert changeset-aware que el sidebar ──
@@ -417,30 +422,40 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   /** Impacto global + cascada versionada del store; la columna viaja desde el
    *  dossier (sin canvas no está en el diagrama). */
   const askDeleteColumn = async (c: CanonicalColumn) => {
-    // El borrado pertenece a la sesión donde se pidió: el pin y los avisos se
-    // toman antes de leer el impacto (creados después, el aviso mostraría
-    // «read-only» encima de la revalidación); si mientras lee se abre otra
-    // versión, el confirm no se abre en ella, y la acción verifica el pin al clic.
-    const pin = pinSession();
-    // Sin el impacto (relaciones donde es extremo) no se ofrece el borrado: con
-    // `relIds` vacío quedarían relaciones con pares hacia una columna borrada.
-    const onImpactError = reportWriteError(() => toast.error(`Couldn't check the relationships of this ${nouns.member}: nothing was deleted. Try again.`));
-    const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
-    let impact: gov.RelationshipImpact;
-    try { impact = await gov.columnImpact(c.id); } catch (e) { await onImpactError(e); return; }
-    if (!pin.holds()) return;
-    const relIds = impact.relationships.map((r) => r.relId);
+    // Un borrado por tabla a la vez: el menú del canvas puede estar borrando
+    // columnas de esta misma tabla.
+    const hold = holdTable(c.tableId);
+    if (!hold) { toast.message(busyMessage(nouns)); return; }
     try {
-      const ok = await confirmDeleteColumn({
-        name: c.physicalName, nouns, impact,
-        action: () => { pin.check(); return deleteColumn(c.id, relIds, { col: c }); },
-      });
-      if (ok) {
-        toast.success(impact.total > 0 ? `${nouns.Member} and its relationships deleted` : `${nouns.Member} deleted`);
-        setSelCol(null);
-        await refresh();   // el store ya recargó el canvas y sincronizó el Explorer
-      }
-    } catch (e) { await onError(e); }
+      // El borrado pertenece a la sesión donde se pidió: el pin y los avisos se
+      // toman antes de leer el impacto (creados después, el aviso mostraría
+      // «read-only» encima de la revalidación); si mientras lee se abre otra
+      // versión, el confirm no se abre en ella, y la acción verifica el pin al clic.
+      const pin = pinSession();
+      // Sin el impacto (relaciones donde es extremo) no se ofrece el borrado: con
+      // `relIds` vacío quedarían relaciones con pares hacia una columna borrada.
+      const onImpactError = reportWriteError(() => toast.error(`Couldn't check the relationships of this ${nouns.member}: nothing was deleted. Try again.`));
+      const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
+      // Las vistas que quedarían sin columnas se leen junto con el impacto.
+      const emptied = readEmptiedViews(c.tableId, [c.physicalName]);
+      let impact: gov.RelationshipImpact;
+      try { impact = await gov.columnImpact(c.id); } catch (e) { await onImpactError(e); return; }
+      const emptiedViews = await emptied;
+      if (!pin.holds()) return;
+      const relIds = impact.relationships.map((r) => r.relId);
+      try {
+        const ok = await confirmDeleteColumn({
+          name: c.physicalName, nouns, impact, emptiedViews,
+          action: () => { pin.check(); return deleteColumn(c.id, relIds, { col: c }); },
+        });
+        if (ok) {
+          toast.success(impact.total > 0 ? `${nouns.Member} and its relationships deleted` : `${nouns.Member} deleted`);
+          setSelCol(null);
+          hold.release();    // el borrado terminó: refrescar el popup no retiene la tabla
+          await refresh();   // el store ya recargó el canvas y sincronizó el Explorer
+        }
+      } catch (e) { await onError(e); }
+    } finally { hold.release(); }
   };
   /** Mueve la columna en el único orden de la tabla (`ordinal`). */
   const move = async (colId: string, delta: number) => {

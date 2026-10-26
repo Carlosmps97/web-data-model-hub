@@ -62,6 +62,8 @@ describe('avisos de escrituras del canvas: esperan la revalidación', () => {
     'ModelPropertiesModal.tsx', 'NewTableModal.tsx',
     // El pegado de tabla se graba desde su popup.
     'PasteTablePopup.tsx',
+    // Los flujos de borrado que comparten el menú del canvas y Properties.
+    'deleteFlows.tsx',
   ])('%s', (file) => {
     const rest = unguarded(source(file)).filter((l) => !NOT_A_WRITE.some((re) => re.test(l)));
     expect(rest).toEqual([]);
@@ -82,10 +84,11 @@ describe('WorkspaceScreen no carga los proyectos al montar', () => {
 });
 
 describe('el diálogo de borrar tabla cuenta sin tragar errores', () => {
-  it('PropertiesPanel usa readTableDeleteCounts (null = no se pudo contar), no `.catch(() => [])`', () => {
-    const code = stripComments(source('PropertiesPanel.tsx'));
-    expect(code).toMatch(/readTableDeleteCounts\(table\.id\)/);
-    expect(code).not.toMatch(/listViews\(table\.id\)\.catch\(\(\) => \[\]\)/);
+  it('el flujo compartido usa readTableDeleteCounts (null = no se pudo contar), no `.catch(() => [])`; Properties va por él', () => {
+    const flows = stripComments(source('deleteFlows.tsx'));
+    expect(flows).toMatch(/readTableDeleteCounts\(o\.table\.id\)/);
+    expect(flows).not.toMatch(/listViews\([^)]*\)\.catch\(\(\) => \[\]\)/);
+    expect(stripComments(source('PropertiesPanel.tsx'))).toMatch(/askDeleteTable\(\{ table, nouns, pushToast, deleteTable \}\)/);
   });
 });
 

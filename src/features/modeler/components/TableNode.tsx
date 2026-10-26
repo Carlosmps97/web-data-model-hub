@@ -8,8 +8,7 @@ import { reportWriteError } from '../lib/sessionGuard';
 import { useSessionStore } from '@/store/useSessionStore';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { collapseComplexType, isComplexType } from '../lib/complexTypes';
-import { pkInKeyOrder } from '../lib/keyOrder';
-import { sortByOrdinal } from '../lib/columnOrder';
+import { orderColumns } from '../lib/columnOrder';
 import { planCanvasDrop, type DropTarget } from '../lib/canvasDrop';
 import { tableLodSize } from '../lib/lodSize';
 import { boxHex, tintStyle } from '../lib/boxColor';
@@ -97,9 +96,9 @@ function TableNode({ data }: NodeProps) {
     viewMode === 'logical' ? o.logicalName : o.physicalName;
   // El orden único: bloque PK primero y cada bloque por `ordinal` (sin orden de
   // llave aparte; el mismo del PRIMARY KEY(...) del DDL), igual en ambas facetas.
-  const ordered = sortByOrdinal(columns);
-  const pks = pkInKeyOrder(ordered);
-  const rest = ordered.filter((c) => !c.isPrimaryKey);
+  const drawn = orderColumns(columns);   // el mismo orden con que `keepMeasured` ve las anclas
+  const pks = drawn.filter((c) => !!c.isPrimaryKey);
+  const rest = drawn.filter((c) => !c.isPrimaryKey);
   const canDrag = canEdit && !lod && !relArmed;
   const rowDrag = (c: CanonicalColumn) => (!canDrag ? {} : {
     onDragOver: (e: DragEvent<HTMLElement>) => {

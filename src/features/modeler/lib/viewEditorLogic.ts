@@ -53,6 +53,11 @@ export function viewSaveBody(a: {
   };
 }
 
+/** Nombre de salida de una fuente: su alias o su columna; una expresión sin
+ *  alias no tiene (su alias va dentro del texto). Pura. */
+export const outputNameOf = (s: ViewSource): string =>
+  (s.outputAlias ?? '').trim() || (s.expression ? '' : (s.column ?? '').trim());
+
 /** Nombres de salida repetidos (sin distinguir mayúsculas) entre las columnas
  *  de la vista: con alias duplicados el DDL es inválido (p. ej. `CODMES` de dos
  *  fuentes sin renombrar). Nombre = alias o columna; las expresiones sin alias
@@ -62,7 +67,7 @@ export function duplicateOutputNames(sources: ViewSource[]): string[] {
   const seen = new Map<string, string>();
   const dup = new Set<string>();
   for (const s of sources) {
-    const name = (s.outputAlias ?? '').trim() || (s.expression ? '' : (s.column ?? '').trim());
+    const name = outputNameOf(s);
     if (!name) continue;
     const k = name.toLowerCase();
     const first = seen.get(k);

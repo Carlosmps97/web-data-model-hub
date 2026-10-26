@@ -10,11 +10,13 @@ import type { DbSchema } from '@/features/modeler/services/schemas.service';
 import { invalidateTableSchemas } from '@/features/modeler/services/schemaPartition';
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
 import * as gov from '@/services/governance.service';
+import { onDraftWrite } from '@/services/changeset.service';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { getNamingConfig, type NamingConfig } from '@/services/naming.service';
-import { facetNouns } from '@/lib/facets';
+import { facetName, facetNouns } from '@/lib/facets';
 import { applyNamingCase } from '@/features/modeler/lib/physicalCase';
 import { diagramSignature } from '@/features/modeler/lib/diagramSignature';
+import { editedTables, isSlice, membershipChanged, mergeSlice, noEdits } from '@/features/modeler/lib/diagramSlice';
 import { copyNameBase, copyTableToBulk, pasteNames } from '@/features/modeler/lib/copyTable';
 import { keyLayoutBulk } from '@/features/modeler/lib/keyLayout';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
@@ -39,7 +41,8 @@ import {
 } from '@/features/modeler/lib/wireRoute';
 import type { RoutePoint, WireRoutes } from '@/features/modeler/lib/wireRoute';
 import {
-  removeColumnSource, syncNewColumnToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews,
+  removeColumnsSources, restoreColumnsSources, syncNewColumnToMirrorViews, syncRenamedColumnInViews,
+  type RemovedColumn,
 } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import type { View, ViewInput } from '@/services/views.service';
@@ -365,7 +368,10 @@ interface ModelerState {
   /** @internal recarga folders+canvases del proyecto y depura la selección.
    *  `isCurrent`: si al llegar la respuesta devuelve false, no escribe. */
   _refreshProject: (projectId: string, isCurrent?: () => boolean) => Promise<void>;
-  reload: () => Promise<void>;
+  /** Recarga el canvas abierto: solo las tablas que tocó lo escrito desde la
+   *  última carga (`lib/diagramSlice`) o, si no se puede acotar o con `full`,
+   *  el diagrama completo. */
+  reload: (opts?: { full?: boolean }) => Promise<void>;
   /** Cachea el naming config de `projectId` (descarta respuestas de
    *  un proyecto que dejó de ser el activo; un fallo no pisa lo cacheado). */
   loadNaming: (projectId: string | null) => Promise<void>;
@@ -425,12 +431,15 @@ interface ModelerState {
   /** Aplica el plan de un drop en el bloque del canvas — cambios
    *  de llave (entrar/salir/reordenar) + reorden de columnas. */
   applyCanvasDrop: (tableId: string, plan: CanvasDropPlan) => Promise<void>;
-  /** Borra la columna en el changeset; con `relIds`, borra primero cada
-   *  relación afectada (cascada del aviso de impacto: evita relaciones
-   *  huérfanas). */
-  /** `opts.col` = la columna (estado efectivo) cuando no está en el
-   *  diagrama — sin ella la cascada de relaciones/FK/vistas no se puede resolver. */
+  /** `deleteColumns` de una columna. `opts.col` = la columna (estado
+   *  efectivo) cuando no está en el diagrama — sin ella la cascada de
+   *  relaciones/FK/vistas no se puede resolver. */
   deleteColumn: (colId: string, relIds?: string[], opts?: { col?: CanonicalColumn }) => Promise<void>;
+  /** Borra columnas de UNA tabla en un solo lote: las relaciones del aviso de
+   *  impacto (`relIds`) recortadas o borradas, las FK que quedan huérfanas, las
+   *  columnas y cada vista que las lista; un solo Undo. `opts.cols` = las que
+   *  no están en el diagrama (estado efectivo). */
+  deleteColumns: (colIds: string[], relIds?: string[], opts?: { cols?: CanonicalColumn[] }) => Promise<void>;
   setViewMode: (m: 'logical' | 'physical') => void;
   createSubjectArea: (name: string) => Promise<void>;
 }
@@ -710,6 +719,53 @@ let _reloadAfterOpening: { saId: string; prev: Diagram | null } | null = null;
 // (una caída, un aviso). La consume la `reload()` al empezar (así no queda
 // armada si esta termina antes).
 let _quietReloadFailure = false;
+// Lo que esta pestaña escribió en el draft y todavía no está en el diagrama en
+// pantalla: las tablas que tocó (`lib/diagramSlice.editedTables`) y si hace
+// falta el completo, cada uno con el número de la anotación más reciente que lo
+// pidió. Una carga lo salda al instalarse — lo anotado hasta que se pidió —; si
+// se descarta o falla, sigue pendiente para la siguiente. Lo de una sesión
+// anterior lo salda la primera carga de la nueva (completa: no hay diagrama en
+// pantalla donde fundir un recorte).
+const _owed = { tables: new Map<string, number>(), full: 0 };
+let _notes = 0;
+// Escrituras del draft (`writeSeq` de su cabecera) desde la última carga
+// completa: `atLoad` la vio el servidor; `own` son las de esta pestaña. Una
+// escritura que no está entre ellas (otra pestaña u otro equipo, una carga
+// Excel, un esquema) pide el diagrama completo.
+const seqsFresh = () => ({ atLoad: null as number | null, own: new Set<number>() });
+let _seqs = seqsFresh();
+// La última carga pedida por `reload()`: sus tablas si es un recorte, null si es
+// el diagrama completo. Vale mientras nadie pida otra (`seq === _loadSeq`).
+let _lastLoad: { seq: number; tables: Set<string> | null } | null = null;
+// Hasta cuántas tablas una recarga va por recorte; más, el diagrama completo.
+const SLICE_MAX_TABLES = 30;
+
+/** Salda lo pendiente anotado hasta `upTo` que cubre una carga instalada: todo
+ *  si fue el diagrama completo, las tablas del lote si fue un recorte. */
+function settleOwed(upTo: number, lot: ReadonlySet<string> | null): void {
+  for (const [t, n] of _owed.tables) if (n <= upTo && (!lot || lot.has(t))) _owed.tables.delete(t);
+  if (!lot && _owed.full <= upTo) _owed.full = 0;
+}
+
+/** ¿Quedó algo anotado después de `upTo`? */
+const owedSince = (upTo: number): boolean => _owed.full > upTo || [..._owed.tables.values()].some((n) => n > upTo);
+
+/** Las escrituras del draft vistas por una carga completa instalada. */
+function sawDraft(seq: number | null | undefined): void {
+  const atLoad = seq ?? null;
+  _seqs = { atLoad, own: new Set(atLoad == null ? [] : [..._seqs.own].filter((n) => n > atLoad)) };
+}
+
+/** ¿Hay escrituras en el draft que esta pestaña no hizo desde la última carga
+ *  completa? Sin números en la respuesta (un backend que no los da) no se sabe:
+ *  no. Sin el número de la última carga completa (la trajo un backend sin
+ *  ellos), tampoco se sabe qué vio: sí. */
+function othersWrote(seq: number | null | undefined): boolean {
+  if (seq == null) return false;
+  if (_seqs.atLoad == null) return true;
+  for (let n = _seqs.atLoad + 1; n <= seq; n++) if (!_seqs.own.has(n)) return true;
+  return false;
+}
 // Lo mismo para los refrescos del Explorer — solo el más reciente escribe. La
 // respuesta tardía de uno anterior (otra sesión: se abrió otra versión, modo o
 // proyecto mientras cargaba) no pisa proyectos, proyecto activo, árbol,
@@ -737,10 +793,13 @@ const reasonOf = (e: unknown): string => errorReason(e, 'unknown error');
 /** Alguna lectura previa al borrado falló — no se borró nada. Es un
  *  `NothingDoneError`, así el Undo que lo pidió vuelve a la pila. Usa el
  *  sustantivo del modelo abierto (entity / table), como el diálogo. */
-const dependentsUnreadable = (noun: string) => {
-  const reason = `Couldn't check what depends on this ${noun}`;
+const dependentsUnreadable = (subject: string) => {
+  const reason = `Couldn't check what depends on ${subject}`;
   return new NothingDoneError(reason, `${reason}: nothing was deleted. Try again.`);
 };
+/** Techo de cambios por request de `PUT /changes/bulk` (backend `ChangesBulkBody`):
+ *  un lote que debe grabarse todo o nada no puede pasarlo. */
+const BULK_MAX_CHANGES = 2000;
 const VIEW_USAGE_UNREADABLE = "Couldn't check where this view is used: nothing was deleted. Try again.";
 
 /** El error con que termina un borrado cuya lectura previa falló (no se borró
@@ -1502,6 +1561,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     flushPendingDrawings(get().activeSaId, get().drawings);
     const seq = ++_loadSeq;
     _openingSeq = seq;
+    const upTo = _notes;   // lo anotado hasta aquí lo trae esta apertura
     const pin = pinSession();   // el sello de la sesión del diagrama
     set({ openingSaId: saId });
     let installed = false;
@@ -1532,6 +1592,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // seleccionado — la misma relación puede estar en el canvas destino y
       // aparecería seleccionada, con sus tiradores a la vista.
       installed = true;
+      settleOwed(upTo, null);
+      sawDraft(diagram.draftSeq);
       set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null, selectedEdgeId: null,
             colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
             drawings: diagram.subjectArea.drawings ?? [] });
@@ -1553,8 +1615,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         _reloadAfterOpening = null;
         if (pending?.saId === saId) {
           if (installed) await reloadAfterOpening(pending.prev);   // el mismo: su foto pudo ser previa al guardado
-        } else if (pending && installed) {
-          get().bumpExplorer();                                    // se abrió otro: el Explorer igual se entera
+        } else if (installed) {
+          if (pending) get().bumpExplorer();                       // se abrió otro: el Explorer igual se entera
+          // Lo escrito mientras se abría pudo quedar fuera de su foto.
+          if (owedSince(upTo)) await get().reload();
         } else if (pending) {
           // Falló: sigue el editado, con la foto previa. Si su recarga también
           // falla, cierra el canvas sin otro aviso — el de la apertura ya cuenta
@@ -1672,7 +1736,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       if (active === projectId || active == null) set({ naming });
     } catch { /* sin config el front asume upper (default del backend) */ }
   },
-  reload: async () => {
+  reload: async (opts) => {
     const quiet = _quietReloadFailure;
     _quietReloadFailure = false;
     const id = get().activeSaId; if (!id) return;
@@ -1685,13 +1749,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       _reloadAfterOpening ??= { saId: id, prev: get().diagram };
       return;
     }
+    // Recorte: solo las tablas pendientes (lo escrito que todavía no está en
+    // pantalla, también lo de un recorte en vuelo, que esta reemplaza), si todo
+    // se acota a tablas, el canvas en pantalla es este y no hay un diagrama
+    // completo en vuelo. Si no, el diagrama completo.
+    const fullInFlight = _lastLoad?.seq === _loadSeq && _lastLoad.tables === null;
+    const upTo = _notes;
+    const lot = new Set(_owed.tables.keys());
+    const sliced = !opts?.full && !_owed.full && !fullInFlight
+      && liveDiagram()?.subjectArea.id === id && lot.size > 0 && lot.size <= SLICE_MAX_TABLES;
     const seq = ++_loadSeq;
+    _lastLoad = { seq, tables: sliced ? lot : null };
     const pin = pinSession();   // el sello de la sesión del diagrama
     const askedCs = useSessionStore.getState().activeChangesetId;
     const asked = canvasClock();
     let loaded: Diagram;
     try {
-      loaded = await mod.loadDiagram(id);
+      loaded = await mod.loadDiagram(id, sliced ? { tableIds: [...lot] } : undefined);
     } catch (e) {
       // Un error de la versión espera la revalidación (si la sesión cambió,
       // ella avisó y el canvas ya se limpió). Cualquier otra falla también
@@ -1714,9 +1788,31 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     // Descarta respuestas desfasadas (cambio de canvas o carga más reciente en vuelo).
     if (seq !== _loadSeq || get().activeSaId !== id) return;
+    _lastLoad = null;
+    // Un recorte se funde en el diagrama en pantalla. Si el canvas cambió fuera
+    // de él (membresía) o alguien más escribió en el draft, va el completo; si
+    // otra versión cambió lo publicado (sello), el completo después, sin
+    // esperarlo. Un servidor sin recortes responde el completo.
+    let fresh = loaded;
+    let published = false;
+    if (isSlice(loaded)) {
+      const base = liveDiagram();
+      if (!base || base.subjectArea.id !== id || membershipChanged(base, loaded) || othersWrote(loaded.draftSeq)) {
+        _quietReloadFailure = quiet;
+        await get().reload({ full: true });
+        return;
+      }
+      fresh = mergeSlice(base, loaded);
+      published = loaded.productionStamp !== base.productionStamp;
+      settleOwed(upTo, new Set(loaded.slice.tableIds));
+      sawDraft(loaded.draftSeq);   // hasta aquí, todo lo escrito fue de esta pestaña
+    } else {
+      settleOwed(upTo, null);
+      sawDraft(loaded.draftSeq);
+    }
     // Si algo del canvas se grabó después de pedir este diagrama, se repone
     // (la foto puede ser previa a ese guardado).
-    const diagram = sealDiagram(withWrittenCanvas(loaded, asked), pin);
+    const diagram = sealDiagram(withWrittenCanvas(fresh, asked), pin);
     const prev = get().diagram;
     set({ diagram });
     // Un cambio estructural del mismo canvas (tabla/vista nueva,
@@ -1725,6 +1821,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (prev && prev.subjectArea.id === diagram.subjectArea.id && diagramSignature(prev) !== diagramSignature(diagram)) {
       get().bumpExplorer();
     }
+    if (published) void get().reload({ full: true });
   },
   saveLayout: (tableId, pos) => get().saveNodePositions({ [tableId]: pos }),
   saveNodePositions: async (positions) => {
@@ -1949,8 +2046,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (!pin.holds()) return;
     await get().reload();
     // Undo: la inversa es el delete del store — limpia también las
-    // vistas espejo y el panel de columna si quedó abierto sobre ella.
-    pushUndo(`Add column ${physical}`, () => get().deleteColumn(id), pin);
+    // vistas espejo y el panel de columna si quedó abierto sobre ella. Lleva
+    // la columna creada: el diagrama en pantalla puede no tenerla.
+    pushUndo(`Add column ${physical}`, () => get().deleteColumn(id, [], { col: payload }), pin);
   },
   updateRelationship: async (r) => {
     const dia = editableDiagram(); if (!dia) return;   // el canvas de esta sesión
@@ -2124,23 +2222,32 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const askedCs = useSessionStore.getState().activeChangesetId;
     const saId = get().activeSaId;
     const onActive = !!saId && !!liveDiagram()?.views.some((v) => v.id === view.id);
-    // Pre-imagen por valor: el documento completo, sin `canvases` (la fila
-    // del panel o del inspector no es parte del documento).
-    const pre = JSON.parse(JSON.stringify(view)) as View & { canvases?: unknown };
-    delete pre.canvases;
     // Dónde está antes de borrarla: el backend la saca de cada canvas que la
     // lista, con su posición, en el mismo request. Si no se puede leer, no se
     // borra (el Undo quedaría incompleto).
     let placed: Map<string, ListedViews>;
+    // Documento para el Undo: el del llamador (panel de la tabla, inspector) o,
+    // sin lista de canvases (panel de la vista, que parte del diagrama: ahí la
+    // vista no trae su `sql`), la fila de su tabla que se lee para ubicarla; si
+    // esa lista no la trae (diagrama desactualizado, vista re-apuntada), el
+    // documento vigente.
+    let doc: View = view;
     try {
       const src = view.sourceTableIds?.[0] ?? view.tableId;
-      const canvasIds = opts?.canvasIds ?? (src
-        ? ((await viewsSvc.tableViews(src)).views.find((v) => v.id === view.id)?.canvases ?? []).map((c) => c.id)
-        : []);
+      let canvasIds = opts?.canvasIds;
+      if (!canvasIds) {
+        const row = src ? (await viewsSvc.tableViews(src)).views.find((v) => v.id === view.id) : undefined;
+        doc = row ?? (await viewsSvc.currentView(view.id)) ?? view;
+        canvasIds = (row?.canvases ?? []).map((c) => c.id);
+      }
       placed = await listedViewsBy([...canvasIds, ...(onActive && saId ? [saId] : [])], [view.id]);
     } catch (e) {
       throw await readFailure(e, askedCs, pin, () => new Error(VIEW_USAGE_UNREADABLE));   // ídem deleteTable
     }
+    // Pre-imagen por valor: el documento completo, sin `canvases` (la fila
+    // del panel o del inspector no es parte del documento).
+    const pre = JSON.parse(JSON.stringify(doc)) as View & { canvases?: unknown };
+    delete pre.canvases;
     pin.check();
     get().markDirty();
     await viewsSvc.deleteView(view.id);
@@ -2344,7 +2451,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }
       }
     } catch (e) {
-      throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(noun));
+      throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(`this ${noun}`));
     }
     pin.check();
     get().markDirty();
@@ -2602,119 +2709,175 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     }
     if (plan.order) { pin.check(); await get().reorderColumns(tableId, plan.order); }
   },
-  deleteColumn: async (colId, relIds = [], opts) => {
+  deleteColumn: (colId, relIds = [], opts) => get().deleteColumns([colId], relIds, opts?.col ? { cols: [opts.col] } : undefined),
+  deleteColumns: async (colIds, relIds = [], opts) => {
     // De la sesión donde empezó — también como inversa de «Add column».
     const pin = pinSession();
     const askedCs = useSessionStore.getState().activeChangesetId;
-    const noun = facetNouns(get().viewMode).member;
-    // Primero las relaciones (elegidas en el diálogo de impacto), después la
-    // columna: el changeset nunca queda con pares colgando de una columna
-    // borrada. Si la relación tiene más pares, solo se quita el par de esta
-    // columna; si era el último, se borra completa.
-    const col = liveDiagram()?.columns.find((c) => c.id === colId) ?? opts?.col;
+    const nouns = facetNouns(get().viewMode);
+    const ids = [...new Set(colIds)];
+    if (!ids.length) return;
+    const gone = new Set(ids);
+    const rels = [...new Set(relIds)];
+    // Las relaciones elegidas en el diálogo de impacto, las FK que quedan
+    // huérfanas, las columnas y las vistas que las listan van en un solo lote:
+    // se graban juntas o nada (una vista que no valida deja las columnas como
+    // estaban). De una relación con más pares salen los pares de estas
+    // columnas; si no le queda ninguno, se borra completa.
+    // Por id en un mapa: en un canvas de decenas de miles de columnas, buscar
+    // cada una recorriendo el diagrama crece con columnas × diagrama.
+    const drawn = new Map((liveDiagram()?.columns ?? []).map((c) => [c.id, c]));
+    const known = new Map((opts?.cols ?? []).map((c) => [c.id, c]));
+    const cols = ids.flatMap((id) => {
+      const c = drawn.get(id) ?? known.get(id);
+      return c ? [c] : [];
+    });
+    const tableId = cols[0]?.tableId;
+    if (cols.some((c) => c.tableId !== tableId)) throw new Error(`${nouns.Members} from more than one ${nouns.one} can't be deleted together`);
     // Todas las lecturas antes de la primera escritura — si alguna falla no se
-    // escribe nada (leer las relaciones de la hija después de borrar las
-    // elegidas dejaría, ante una caída, relaciones borradas con la columna viva
-    // y sin Undo). La FK huérfana se decide con lo leído aquí, descontando lo
-    // que este borrado le hace a cada relación elegida.
+    // escribe nada (leer las relaciones de las hijas después de borrar las
+    // elegidas dejaría, ante una caída, relaciones borradas con las columnas
+    // vivas y sin Undo). La FK huérfana se decide con lo leído aquí,
+    // descontando lo que este borrado le hace a cada relación elegida.
     let pool: gov.Relationship[];
-    let viewsPre: View[];
+    // Vistas que referencian alguna de las columnas: el documento sin ellas
+    // (una columna borrada no queda en ningún SELECT) y, para el Undo, sus
+    // fuentes con su posición.
+    const viewsNext: View[] = [];
+    const viewsRemoved: { id: string; removed: RemovedColumn[] }[] = [];
     const fkClearedPre: CanonicalColumn[] = [];
     /** Pares con que queda cada relación elegida (vacío = se borra entera). */
     const after = new Map<string, gov.RelationshipPair[]>();
+    const touches = (p: gov.RelationshipPair) => gone.has(p.parentColumnId) || gone.has(p.childColumnId);
+    /** Las del impacto que todavía tocan estas columnas: una que otro borrado ya
+     *  recortó o re-apuntó (un impacto viejo) no se toca. Sin la tabla no hay
+     *  relaciones leídas: van todas. */
+    let fix = rels;
     try {
       let views: View[];
       [pool, views] = await Promise.all([
-        relIds.length && col ? gov.listRelationships(col.tableId) : Promise.resolve([] as gov.Relationship[]),
-        col ? viewsSvc.listViews(col.tableId) : Promise.resolve([] as View[]),
+        rels.length && tableId ? gov.listRelationships(tableId) : Promise.resolve([] as gov.Relationship[]),
+        tableId ? viewsSvc.listViews(tableId) : Promise.resolve([] as View[]),
       ]);
-      // Pre-imágenes para el Undo: vistas que referencian la columna.
-      viewsPre = col
-        ? views.filter((v) => removeColumnSource(v, col.tableId, col.physicalName) != null)
-          .map((v) => JSON.parse(JSON.stringify(v)) as View)
-        : [];
+      const names = cols.map((c) => c.physicalName);
+      for (const v of views) {
+        const out = tableId ? removeColumnsSources(v, tableId, names) : null;
+        if (!out) continue;
+        viewsNext.push(viewsSvc.viewWriteDoc(v.id, { ...v, sources: out.sources }));
+        viewsRemoved.push({ id: v.id, removed: out.removed });
+      }
       // Columnas hijas del otro extremo de los pares afectados: al caer el
       // par/relación pueden quedar con un isForeignKey huérfano (misma limpieza
-      // conservadora que deleteRelationship — isPrimaryKey nunca se toca).
-      const fkCandidates = new Map<string, string>();   // childColumnId → childTableId
-      for (const rid of relIds) {
+      // conservadora que deleteRelationship — isPrimaryKey nunca se toca). Una
+      // hija que también se borra no se toca.
+      if (tableId) fix = rels.filter((rid) => pool.find((r) => r.id === rid)?.pairs.some(touches));
+      const candidates = new Map<string, string[]>();   // childTableId → childColumnIds
+      for (const rid of fix) {
         const rel = pool.find((r) => r.id === rid);
-        const dropped = rel?.pairs.filter((p) => p.parentColumnId === colId || p.childColumnId === colId) ?? [];
-        const remaining = rel?.pairs.filter((p) => p.parentColumnId !== colId && p.childColumnId !== colId) ?? [];
-        dropped.forEach((p) => { if (p.childColumnId !== colId && rel) fkCandidates.set(p.childColumnId, rel.childTableId); });
+        const remaining = rel?.pairs.filter((p) => !touches(p)) ?? [];
+        for (const p of rel?.pairs.filter(touches) ?? []) {
+          if (!rel || gone.has(p.childColumnId)) continue;
+          const list = candidates.get(rel.childTableId) ?? [];
+          if (!list.includes(p.childColumnId)) candidates.set(rel.childTableId, [...list, p.childColumnId]);
+        }
         after.set(rid, rel && remaining.length > 0 && remaining.length < rel.pairs.length ? remaining : []);
       }
-      for (const [cid, ctid] of fkCandidates) {
-        // La hija puede no estar en el diagrama (inspector sin canvas u
-        // otra tabla fuera de este canvas) → se resuelve por API, como deleteTable.
-        const [c, near] = await Promise.all([
-          liveDiagram()?.columns.find((x) => x.id === cid) ?? gov.listColumns(ctid).then((cs) => cs.find((x) => x.id === cid)),
-          gov.listRelationships(ctid),
+      // Una lectura por tabla hija, todas a la vez. La hija puede no estar en
+      // el diagrama (inspector sin canvas u otra tabla fuera de este canvas) →
+      // se resuelve por API, como deleteTable; si es la misma tabla, sus
+      // relaciones ya están leídas.
+      const onCanvas = new Map((liveDiagram()?.columns ?? []).map((c) => [c.id, c]));
+      const cleared = await Promise.all([...candidates].map(async ([ctid, cids]) => {
+        const shown = cids.map((cid) => onCanvas.get(cid));
+        const [listed, near] = await Promise.all([
+          shown.every(Boolean) ? Promise.resolve([] as CanonicalColumn[]) : gov.listColumns(ctid),
+          ctid === tableId ? Promise.resolve(pool) : gov.listRelationships(ctid),
         ]);
-        if (!c?.isForeignKey) continue;
-        const still = near.some((r) => (after.get(r.id) ?? r.pairs).some((p) => p.childColumnId === cid));
-        if (!still) fkClearedPre.push({ ...c });
-      }
+        return cids.flatMap((cid, i) => {
+          const c = shown[i] ?? listed.find((x) => x.id === cid);
+          if (!c?.isForeignKey) return [];
+          const still = near.some((r) => (after.get(r.id) ?? r.pairs).some((p) => p.childColumnId === cid));
+          return still ? [] : [{ ...c }];
+        });
+      }));
+      fkClearedPre.push(...cleared.flat());
     } catch (e) {
-      throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(noun));
+      throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(ids.length === 1 ? `this ${nouns.member}` : `these ${nouns.members}`));
     }
     pin.check();
-    get().markDirty();
-    // Pre-imágenes para el Undo: columna y relaciones afectadas (por valor).
-    const colPre = col ? { ...col, ...(col.udpValues ? { udpValues: { ...col.udpValues } } : {}) } : null;
-    const relsPre = pool.filter((r) => relIds.includes(r.id))
+    // Pre-imágenes para el Undo: columnas y relaciones afectadas (por valor).
+    const colsPre = cols.map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
+    const relsPre = pool.filter((r) => fix.includes(r.id))
       .map((r) => ({ ...r, pairs: r.pairs.map((p) => ({ ...p })) }));
-    for (const rid of relIds) {
-      const rel = pool.find((r) => r.id === rid);
-      const remaining = after.get(rid) ?? [];
-      pin.check();
-      if (rel && remaining.length) {
-        await gov.updateRelationship({ ...rel, pairs: remaining });
-      } else {
-        await gov.deleteRelationship(rid);
-      }
+    // El guard N=N del backend resuelve la llave del padre con las columnas del
+    // mismo lote: una relación que pierde los pares de una PK borrada valida.
+    // Va en un solo request: partido en tandas dejaría de ser todo o nada.
+    const lot = [
+      ...fix.map((rid) => {
+        const rel = pool.find((r) => r.id === rid);
+        const remaining = after.get(rid) ?? [];
+        return rel && remaining.length
+          ? gov.bulk.upsertRelationship({ ...rel, pairs: remaining })
+          : gov.bulk.deleteRelationship(rid);
+      }),
+      ...fkClearedPre.map((c) => gov.bulk.updateColumn({ ...c, isForeignKey: false })),
+      ...ids.map((id) => gov.bulk.deleteColumn(id)),
+      ...viewsNext.map((v) => gov.bulk.upsertView(v)),
+    ];
+    if (lot.length > BULK_MAX_CHANGES) {
+      throw new Error(`This delete needs ${lot.length} changes and the limit is ${BULK_MAX_CHANGES} at a time: nothing was deleted. Delete fewer ${nouns.members} at a time.`);
     }
-    for (const c of fkClearedPre) {
-      pin.check();
-      await gov.updateColumn({ ...c, isForeignKey: false });
-    }
-    pin.check();
-    await gov.deleteColumn(colId);
-    // Undo: un solo lote restaura columna + FKs limpiadas + relaciones (la
-    // columna va primero — el guard N=N del backend resuelve la llave del
-    // padre con las columnas del mismo lote); las vistas capturadas vuelven a
-    // su documento previo (best-effort).
-    if (colPre) {
-      pushUndo(`Delete column ${colPre.physicalName}`, async (undo) => {
-        await gov.recordChangesBulk([
-          gov.bulk.createColumn(colPre),
+    get().markDirty();
+    await gov.recordChangesBulk(lot, lot.length);
+    // Undo: un solo lote repone columnas, FKs limpiadas y relaciones, y vuelve
+    // a poner cada columna en sus vistas sobre su documento vigente (lo editado
+    // después del borrado no se pisa; una que ya no las tiene como fuente de
+    // esta tabla, borrada o re-apuntada, queda como está).
+    if (colsPre.length) {
+      const undoTable = colsPre[0].tableId;
+      const what = colsPre.length === 1 ? colsPre[0].physicalName : `these ${colsPre.length} ${nouns.members}`;
+      const label = colsPre.length === 1
+        ? `Delete ${nouns.member} ${facetName(colsPre[0], get().viewMode)}` : `Delete ${colsPre.length} ${nouns.members}`;
+      pushUndo(label, async (undo) => {
+        const undoCs = useSessionStore.getState().activeChangesetId;
+        let current: View[] = [];
+        try {
+          if (viewsRemoved.length) current = await viewsSvc.listViews(undoTable);
+        } catch (e) {
+          const reason = `Couldn't read the views of ${what}`;
+          throw await readFailure(e, undoCs, undo, () => new NothingDoneError(reason, `${reason}: nothing was undone.`));
+        }
+        const byId = new Map(current.map((v) => [v.id, v]));
+        const views = viewsRemoved.flatMap(({ id, removed }) => {
+          const cur = byId.get(id);
+          const sources = cur && restoreColumnsSources(cur, undoTable, removed);
+          return cur && sources ? [gov.bulk.upsertView(viewsSvc.viewWriteDoc(id, { ...cur, sources }))] : [];
+        });
+        const inverse = [
+          ...colsPre.map((c) => gov.bulk.createColumn(c)),
           ...fkClearedPre.map((c) => gov.bulk.createColumn(c)),
           ...relsPre.map((r) => gov.bulk.upsertRelationship(r)),
-        ]);
-        for (const v of viewsPre) {
-          undo.check();
-          try { await viewsSvc.updateView(v.id, v); } catch { /* best-effort */ }
-        }
+          ...views,
+        ];
+        undo.check();
+        await gov.recordChangesBulk(inverse, inverse.length);
         await get().reload();
-        get().syncExplorer(!!get().diagram?.tables.some((t) => t.id === colPre.tableId));
+        get().syncExplorer(!!get().diagram?.tables.some((t) => t.id === undoTable));
       }, pin);
     }
-    // Si la columna borrada tenía su Properties abierto, se cierra —
-    // el sidebar vuelve al Properties de la tabla.
-    if (get().selectedColumnId === colId) set({ selectedColumnId: null, selectedViewId: null });
-    // La columna eliminada sale de los sources de toda vista que la
-    // referenciaba (espejo o curada) — best-effort, no bloquea el borrado.
-    if (col) {
-      try {
-        const n = await syncRemovedColumnFromViews(pinnedViewDeps(pin), col.tableId, col.physicalName);
-        if (n && pin.holds()) toast.success(`Column also removed from ${n} view(s)`);
-      } catch { /* la vista se corrige a mano o con "Ordenar como la tabla" */ }
-    }
-    // Si la sesión cambió mientras sincronizaba, lo que sigue no es de esta.
+    // Si estaba abierto el Properties de una columna borrada, se cierra — el
+    // sidebar vuelve al Properties de la tabla. La selección de filas era de
+    // columnas que ya no existen.
+    const open = get().selectedColumnId;
+    if (open && gone.has(open)) set({ selectedColumnId: null, selectedViewId: null });
+    if (get().colSel?.ids.some((i) => gone.has(i))) set({ colSel: null });
+    // Las vistas son del modelo físico: listan columnas, en cualquier faceta.
+    if (viewsNext.length && pin.holds()) toast.success(`${ids.length === 1 ? 'Column' : 'Columns'} also removed from ${viewsNext.length} view(s)`);
+    // Si la sesión cambió mientras se grababa, lo que sigue no es de esta.
     if (!pin.holds()) return;
     await get().reload();
     // Tabla fuera del canvas activo (o sin canvas) → tick a mano.
-    get().syncExplorer(!!col && !!get().diagram?.tables.some((t) => t.id === col.tableId));
+    get().syncExplorer(!!tableId && !!get().diagram?.tables.some((t) => t.id === tableId));
   },
   // La subcategoría es exclusiva del modelo lógico — pasar a físico desarma
   // la herramienta (el botón del toolbar también se deshabilita). Las vistas
@@ -3098,6 +3261,30 @@ useModelerStore.subscribe((s, prev) => {
 // proyecto tras su revisión —, y lo limpia el logout (`resetAppState`).
 // Suscripción a nivel de módulo (useSessionStore no importa este store, así que
 // no hay ciclo). La sesión es la única fuente del changeset activo.
+// Lo que esta pestaña escribe en el draft de la sesión abierta: la próxima
+// `reload()` recarga esas tablas (`lib/diagramSlice`) y su número no cuenta como
+// escritura de otro.
+onDraftWrite((cs, changes, writeSeq) => {
+  const s = useSessionStore.getState();
+  if (s.openMode !== 'editing' || s.activeChangesetId !== cs) return;
+  const edited = noEdits();
+  // Mientras se abre un canvas, su foto puede ser previa a lo escrito: si es
+  // otro, el de pantalla no dice dónde cae nada (va el completo); si es este,
+  // lo que el de pantalla no tiene tampoco se puede ubicar.
+  const shown = liveDiagram();
+  const opening = useModelerStore.getState().openingSaId;
+  if (opening && opening !== shown?.subjectArea.id) {
+    // Salvo lo que no es de ningún canvas o es de otro (al cambiar de canvas,
+    // el anterior guarda su dibujo).
+    edited.full = changes.some((ch) => !(ch.collection === 'projects' || ch.collection === 'folders'
+      || (ch.collection === 'subject_areas' && ch.entityId !== opening)));
+  } else editedTables(shown, changes, edited, !!opening);
+  const n = ++_notes;
+  for (const t of edited.tables) _owed.tables.set(t, n);
+  if (edited.full) _owed.full = n;
+  if (writeSeq != null) _seqs.own.add(writeSeq);
+});
+
 useSessionStore.subscribe((s, prev) => {
   // La pila de Undo es de la sesión — proyecto, modo y versión, como
   // `canvasSessionKey` —, no solo de la versión: editar → solo lectura →
@@ -3114,6 +3301,7 @@ useSessionStore.subscribe((s, prev) => {
     // cargas en vuelo de la anterior se descartan al llegar (`_loadSeq`).
     _loadSeq += 1;
     _reloadAfterOpening = null;   // una recarga en espera es de la sesión anterior
+    _seqs = seqsFresh();          // los números propios son de su versión
     useModelerStore.setState({
       diagram: null, drawings: [], openingSaId: null,
       selectedTableId: null, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null,

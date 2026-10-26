@@ -41,14 +41,15 @@ describe('copiar y pegar con los sustantivos de la faceta', () => {
     expect(copiedTableMessage('M_CLIENTE', P)).toBe(`Table M_CLIENTE copied — paste with ${K}`);
   });
 
-  it('el menú: Copy / Paste con la faceta, y el nombre del clipboard según ella', () => {
+  it('el menú: Copy / Paste con la faceta (los textos los arma lib/canvasMenu.ts), y el nombre del clipboard según ella', () => {
     const src = code('ColumnContextMenu.tsx');
     expect(src).not.toMatch(/>\s*Copy table\s*</);
     expect(src).not.toMatch(/Paste table \(/);
-    expect(src).toMatch(/`Copy \$\{n\.one\}`/);
-    expect(src).toMatch(/`Paste \$\{clipCount\} \$\{clipCount === 1 \? n\.member : n\.members\}`/);
-    expect(src).toMatch(/`Paste \$\{n\.one\} \$\{tblClipName\}…`/);
     expect(src).toMatch(/s\.viewMode === 'logical' \? t\.logicalName \|\| t\.physicalName : t\.physicalName/);
+    const menu = readFileSync(join(__dirname, '../lib/canvasMenu.ts'), 'utf-8');
+    expect(menu).toMatch(/`Copy \$\{n\.one\}`/);
+    expect(menu).toMatch(/`Paste \$\{clip\.count\} \$\{clip\.count === 1 \? n\.member : n\.members\}`/);
+    expect(menu).toMatch(/`Paste \$\{n\.one\} \$\{clip\.name\}…`/);
   });
 
   it('el canvas (Ctrl+C / Ctrl+V): los mismos avisos, con la faceta', () => {

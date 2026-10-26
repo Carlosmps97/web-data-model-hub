@@ -9,16 +9,13 @@ import { API_BASE } from '@/services/apiBase';
 const ADMIN = `${API_BASE}/api/admin`;
 
 export interface AdminUser {
-  id: string;               // username (correo en minúsculas en entradas SSO)
+  id: string;               // username: el correo, en minúsculas
   email: string;
   name: string;
   role: string;             // clave del rol
   projectIds: string[];
   status: 'active' | 'invited' | 'disabled' | string;
   initials?: string | null;
-  /** true solo en cuentas locales con contraseña (p.ej. `admin`): habilita el
-   *  reset de contraseña en el modal. Las entradas de whitelist no la tienen. */
-  hasPassword?: boolean;
 }
 
 export interface Role {
@@ -28,14 +25,13 @@ export interface Role {
   permissions: Record<string, boolean>;
 }
 
-/** Alta en la whitelist: correo + rol. `password` queda solo para
- *  cuentas locales (el backend la exige si el username no es un correo). */
+/** Alta en la whitelist: correo + rol. */
 export interface CreateUserInput {
-  username: string; role: string; email?: string; name?: string; password?: string;
+  username: string; role: string; email?: string; name?: string;
   projectIds?: string[]; status?: string;
 }
 export interface UpdateUserInput {
-  email?: string; name?: string; role?: string; projectIds?: string[]; status?: string; password?: string;
+  email?: string; name?: string; role?: string; projectIds?: string[]; status?: string;
 }
 
 // ── Usuarios ──

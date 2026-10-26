@@ -132,7 +132,7 @@ export function layoutFromRules(rules: ExportRule[], selected: Iterable<string>)
 }
 
 
-// Misma convención del kit y del motor: PART_01 → 1.
+// Misma convención del motor: PART_01 → 1.
 const PARTITION_RE = /^PART[_-]?(\d+)$/i;
 
 /** Valor UDP → correlativo de partición; valores fuera de la convención

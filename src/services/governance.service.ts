@@ -83,7 +83,9 @@ const rec = (collection: string, id: string, op: 'upsert' | 'delete', payload?: 
  *  versionadas no se nombran fuera de los services). */
 export type BulkChange = csvc.BulkChange;
 export type ChangeOrigin = csvc.ChangeOrigin;
-export const recordChangesBulk = (changes: BulkChange[]) => csvc.recordChangesBulk(writableCs(), changes);
+/** `chunkSize`: cambios por request (ver `csvc.recordChangesBulk`); el lote que
+ *  debe grabarse todo o nada pasa su largo y viaja en uno solo. */
+export const recordChangesBulk = (changes: BulkChange[], chunkSize?: number) => csvc.recordChangesBulk(writableCs(), changes, chunkSize);
 export const bulk = {
   deleteTable: (id: string): BulkChange => ({ collection: 'canonical_tables', entityId: id, op: 'delete' }),
   deleteColumn: (id: string): BulkChange => ({ collection: 'canonical_columns', entityId: id, op: 'delete' }),
@@ -97,6 +99,8 @@ export const bulk = {
     ({ collection: 'canonical_tables', entityId: t.id, op: 'upsert', payload: { ...t }, ...(origin ? { origin } : {}) }),
   createColumn: (c: CanonicalColumn, origin?: ChangeOrigin): BulkChange =>
     ({ collection: 'canonical_columns', entityId: c.id, op: 'upsert', payload: { ...c }, ...(origin ? { origin } : {}) }),
+  // Paridad con `updateColumn`: la columna completa con los campos cambiados.
+  updateColumn: (c: CanonicalColumn): BulkChange => ({ collection: 'canonical_columns', entityId: c.id, op: 'upsert', payload: { ...c } }),
   // La migración de llave graba columnas + relación en un solo lote.
   upsertRelationship: (r: Relationship): BulkChange => ({ collection: 'relationships', entityId: r.id, op: 'upsert', payload: { ...r } }),
   // Undo: restaurar vistas de una cascada deshecha; el payload es el doc

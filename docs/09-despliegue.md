@@ -86,7 +86,7 @@ Detalles del proxy (`server.mjs`):
   del navegador; conserva el `X-Forwarded-For` de la plataforma (o pone la IP del cliente) para que el rate
   limiting del backend vea la IP real. Las respuestas de `/api` salen sin las cabeceras `Access-Control-*`
   del backend.
-- **Sesión en cookie**: en las respuestas de login, login SSO y renovación saca el token del cuerpo y lo
+- **Sesión en cookie**: en las respuestas del login SSO y de la renovación saca el token del cuerpo y lo
   entrega en la cookie `__Host-dmh_session` (HttpOnly, `Secure`, `SameSite=Strict`, `Max-Age` igual a la
   vida del token); en cada request la pasa al backend como `X-Session-Token`; exige `X-Requested-With` en
   las escrituras que usan la cookie; y la borra en el logout, aunque el backend falle.
@@ -317,8 +317,7 @@ BACKEND_API_URL=https://<url-del-backend> PORT=8080 PROXY_SHARED_SECRET=<secreto
 - La identidad del usuario debe llegar a `server.mjs` en `X-Forwarded-Email` (y opcionalmente
   `X-Forwarded-Preferred-Username` y `X-Forwarded-User`), inyectadas por un proxy de identidad delante del
   front. Ese proxy debe descartar las cabeceras que envíe el cliente, porque `server.mjs` confía en ellas
-  tal como llegan. Sin proxy de identidad, el login SSO no está disponible y solo queda el login con usuario
-  y contraseña.
+  tal como llegan. Sin proxy de identidad no hay login: la aplicación solo admite el SSO.
 - `PROXY_SHARED_SECRET` debe coincidir con el del backend.
 - Si se ejecuta un build fuera del destino, se conservan las `devDependencies` para compilar
   (`NODE_ENV=production` no se define durante la instalación) y luego basta con `dist/`, `server.mjs` y

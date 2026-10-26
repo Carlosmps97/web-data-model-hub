@@ -13,7 +13,7 @@ import { confirmDialog } from '@/components/ui/dialogs';
 import * as gov from '@/services/governance.service';
 import * as viewsSvc from '@/services/views.service';
 import { facetNouns } from '@/lib/facets';
-import { confirmDeleteColumn, confirmDeleteTable, readTableDeleteCounts } from './deleteConfirm';
+import { confirmDeleteColumn, confirmDeleteColumns, confirmDeleteTable, readTableDeleteCounts } from './deleteConfirm';
 
 const message = () => textOf(vi.mocked(confirmDialog).mock.calls[0][0].message);
 
@@ -77,6 +77,71 @@ describe('los diálogos de borrado usan los sustantivos del modelo', () => {
 
   it('en físico, con tabla y columna', async () => {
     await confirmDeleteColumn({ name: 'COD', nouns: facetNouns('physical'), impact: noImpact as never, action: async () => {} });
+    expect(message()).toBe('Column “COD” will be removed from this table.');
+  });
+});
+
+// Borrar varias columnas (menú del canvas): un solo diálogo con todas, de qué
+// tabla son y las relaciones que pierden pares; con una sola, el de siempre.
+describe('diálogo de borrar varias columnas', () => {
+  const noImpact = { relationships: [], total: 0 };
+  const oneRel = { relationships: [{ relId: 'r1', otherTableName: 'H', otherColumnName: 'HA, HB', canvases: [{ id: 'sa1', name: 'Canvas 1' }] }], total: 1 };
+  const opts = () => vi.mocked(confirmDialog).mock.calls[0][0];
+
+  it('título, cuántas y de qué tabla, con todos los nombres', async () => {
+    await confirmDeleteColumns({ names: ['PA', 'PB', 'C1'], tableName: 'P', nouns: facetNouns('physical'), impact: noImpact as never, action: async () => {} });
+    expect(opts().title).toBe('Delete 3 columns');
+    expect(message()).toContain('3 columns of “P” will be deleted:');
+    expect(message()).toContain('PAPBC1');
+    expect(opts().confirmLabel).toBe('Delete');
+    expect(opts().variant).toBe('danger');
+  });
+
+  it('con relaciones: las nombra y el botón dice «Delete anyway»', async () => {
+    await confirmDeleteColumns({ names: ['PA', 'PB'], tableName: 'P', nouns: facetNouns('physical'), impact: oneRel as never, action: async () => {} });
+    expect(message()).toContain('They participate in 1 relationship — each will lose the pairs of these columns (or be deleted if none remain):');
+    expect(message()).toContain('H.HA, HB');
+    expect(message()).toContain('in Canvas 1');
+    expect(opts().confirmLabel).toBe('Delete anyway');
+  });
+
+  it('en el modelo lógico, con sus sustantivos', async () => {
+    await confirmDeleteColumns({ names: ['cod', 'fec'], tableName: 'Cliente', nouns: facetNouns('logical'), impact: noImpact as never, action: async () => {} });
+    expect(opts().title).toBe('Delete 2 attributes');
+    expect(message()).toContain('2 attributes of “Cliente” will be deleted:');
+  });
+
+  it('con una sola columna es el diálogo de siempre', async () => {
+    await confirmDeleteColumns({ names: ['COD'], tableName: 'P', nouns: facetNouns('physical'), impact: noImpact as never, action: async () => {} });
+    expect(opts().title).toBe('Delete column');
+    expect(message()).toBe('Column “COD” will be removed from this table.');
+  });
+});
+
+// Una vista que el borrado deja sin columnas: el Export DDL la escribiría como
+// `SELECT *`. El diálogo lo avisa (y si no pudo revisarlo, lo dice); el borrado
+// sigue.
+describe('aviso de vistas que quedan sin columnas', () => {
+  const noImpact = { relationships: [], total: 0 };
+  const physical = facetNouns('physical');
+
+  it('una columna, una vista', async () => {
+    await confirmDeleteColumn({ name: 'COD', nouns: physical, impact: noImpact as never, emptiedViews: ['VU_A'], action: async () => {} });
+    expect(message()).toContain('This view will be left without columns: VU_A. Edit or delete it afterwards.');
+  });
+
+  it('varias columnas, varias vistas', async () => {
+    await confirmDeleteColumns({ names: ['PA', 'PB'], tableName: 'P', nouns: physical, impact: noImpact as never, emptiedViews: ['VU_A', 'VU_B'], action: async () => {} });
+    expect(message()).toContain('These 2 views will be left without columns: VU_A, VU_B. Edit or delete them afterwards.');
+  });
+
+  it('si no se pudieron leer las vistas, lo dice', async () => {
+    await confirmDeleteColumns({ names: ['PA', 'PB'], tableName: 'P', nouns: physical, impact: noImpact as never, emptiedViews: null, action: async () => {} });
+    expect(message()).toContain("Couldn't check which views would be left without columns.");
+  });
+
+  it('sin vistas vacías no agrega nada', async () => {
+    await confirmDeleteColumn({ name: 'COD', nouns: physical, impact: noImpact as never, emptiedViews: [], action: async () => {} });
     expect(message()).toBe('Column “COD” will be removed from this table.');
   });
 });

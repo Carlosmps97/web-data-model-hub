@@ -1,16 +1,14 @@
 /**
- * auth.service: sesión por token; dos formas de iniciarla y su renovación.
+ * auth.service: sesión por token, iniciada con el SSO de Databricks, y su
+ * renovación.
  *
  * Backend (envelope `{success,data}`):
- *   POST /api/auth/sso/login                     → { user, expiresIn }  (identidad
- *        heredada del SSO de Databricks Apps; 403 si el correo no está
- *        asignado a un rol en Admin)
- *   POST /api/auth/login  {username, password} → { user, expiresIn }  (cuenta
- *        local con contraseña — carril del administrador)
- *   POST /api/auth/refresh                       → { user, expiresIn }  (token
- *        nuevo con la vida completa; 401 si la sesión ya no vale)
- *   POST /api/auth/logout                        → { ok }
- *   GET  /api/auth/me                            → SessionUser | Principal básico
+ *   POST /api/auth/sso/login  → { user, expiresIn }  (identidad heredada del SSO
+ *        de Databricks Apps; 403 si el correo no está asignado a un rol en Admin)
+ *   POST /api/auth/refresh    → { user, expiresIn }  (token nuevo con la vida
+ *        completa; 401 si la sesión ya no vale)
+ *   POST /api/auth/logout     → { ok }
+ *   GET  /api/auth/me         → SessionUser | Principal básico
  * El backend también devuelve `token`; el servidor del front lo saca del cuerpo
  * y lo guarda en una cookie HttpOnly (ver `services/http.ts`).
  */
@@ -44,9 +42,6 @@ export interface LoginResult {
   /** Solo cuando el token no viaja en la cookie (ver `services/http.ts`). */
   token?: string;
 }
-
-export const login = (username: string, password: string) =>
-  apiPost<LoginResult>(`${API_BASE}/api/auth/login`, { username, password });
 
 /** Login con la identidad heredada de Databricks. Sin body: la identidad
  *  viaja en headers que el servidor del front releva al backend. */

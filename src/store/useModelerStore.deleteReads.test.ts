@@ -56,6 +56,8 @@ const rel = (id: string, parentTableId: string, childTableId: string, pairs: [st
 const R1 = rel('r1', 't1', 'tB', [['cA', 'cB']]);          // la que se borra con la columna
 const R2 = rel('r2', 'tC', 'tB', [['cX', 'cB']]);          // otra relación donde cB también es hija
 const writes = () => log.filter((l) => l.startsWith('w-'));
+/** Lo que llevó el primer lote: `colección:op:id`. */
+const lot = () => vi.mocked(gov.recordChangesBulk).mock.calls[0][0].map((c) => `${c.collection}:${c.op}:${c.entityId}`);
 const firstWrite = () => log.findIndex((l) => l.startsWith('w-'));
 /** Última lectura de la cascada (relaciones y columnas; el saneo de vistas posterior al borrado lee aparte). */
 const lastRead = () => log.map((l) => /^read-(rels|cols|usage)/.test(l)).lastIndexOf(true);
@@ -76,7 +78,9 @@ describe('borrar una columna: primero todas las lecturas', () => {
     await useModelerStore.getState().deleteColumn('cA', ['r1'], { col: COL as never });
     expect(firstWrite()).toBeGreaterThan(lastRead());
     expect(log.indexOf('read-views')).toBeLessThan(firstWrite());   // la pre-imagen de las vistas también va primero
-    expect(writes()).toEqual(['w-rel-del:r1', 'w-col:cB', 'w-del-col:cA']);
+    expect(writes()).toEqual(['w-bulk']);                           // todo en un solo lote
+    expect(lot()).toEqual(['relationships:delete:r1', 'canonical_columns:upsert:cB', 'canonical_columns:delete:cA']);
+    expect(vi.mocked(gov.recordChangesBulk).mock.calls[0][0][1].payload).toEqual({ ...CHILD, isForeignKey: false });
   });
 
   it.each([
@@ -98,7 +102,7 @@ describe('borrar una columna: primero todas las lecturas', () => {
   it('una hija que sigue siendo FK de otra relación conserva su flag', async () => {
     rels.tB = [R1, R2];
     await useModelerStore.getState().deleteColumn('cA', ['r1'], { col: COL as never });
-    expect(writes()).toEqual(['w-rel-del:r1', 'w-del-col:cA']);
+    expect(lot()).toEqual(['relationships:delete:r1', 'canonical_columns:delete:cA']);
   });
 
   it('en el modelo lógico, «this attribute»', async () => {

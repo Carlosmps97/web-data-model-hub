@@ -100,9 +100,16 @@ describe('deleteColumn(id, relIds, { col }) sin diagrama (inspector)', () => {
 
     await useModelerStore.getState().deleteColumn('cA', ['r1'], { col: col as never });
 
-    expect(order).toEqual(['rel-del:r1', 'fk:cB', 'col:cA']);
-    expect(gov.updateColumn).toHaveBeenCalledWith(expect.objectContaining({ id: 'cB', isForeignKey: false }));
-    // Las vistas que la referenciaban se sanean (best-effort) con la tabla de la columna.
+    // Un solo lote: la relación (era su único par), la FK huérfana de la hija y la columna.
+    expect(order).toEqual(['bulk']);
+    expect(vi.mocked(gov.recordChangesBulk).mock.calls[0][0]).toEqual([
+      { collection: 'relationships', entityId: 'r1', op: 'delete' },
+      expect.objectContaining({ collection: 'canonical_columns', entityId: 'cB', op: 'upsert',
+        payload: expect.objectContaining({ isForeignKey: false }) }),
+      { collection: 'canonical_columns', entityId: 'cA', op: 'delete' },
+    ]);
+    // Las vistas de la tabla de la columna se leen una vez, antes de escribir.
+    expect(viewsSvc.listViews).toHaveBeenCalledTimes(1);
     expect(viewsSvc.listViews).toHaveBeenCalledWith('t1');
     expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['Delete column COD']);
     expect(useModelerStore.getState().explorerTick).toBe(1);
@@ -112,7 +119,7 @@ describe('deleteColumn(id, relIds, { col }) sin diagrama (inspector)', () => {
 
   it('sin `col` ni diagrama: borra la columna «pelada» (sin Undo)', async () => {
     await useModelerStore.getState().deleteColumn('cZ');
-    expect(order).toEqual(['col:cZ']);
+    expect(vi.mocked(gov.recordChangesBulk).mock.calls).toEqual([[[{ collection: 'canonical_columns', entityId: 'cZ', op: 'delete' }], 1]]);
     expect(gov.listRelationships).not.toHaveBeenCalled();
     expect(useUndoStore.getState().stack).toEqual([]);
   });

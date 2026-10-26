@@ -22,9 +22,13 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
     recordChangesBulk: vi.fn(), deleteTable: vi.fn(), updateColumn: vi.fn(),
   };
 });
-vi.mock('@/services/views.service', () => ({
-  listViews: vi.fn(), listViewsForTables: vi.fn(), tableViews: vi.fn(), deleteView: vi.fn(), updateView: vi.fn(),
-}));
+vi.mock('@/services/views.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/views.service')>();
+  return {
+    viewWriteDoc: actual.viewWriteDoc,
+    listViews: vi.fn(), listViewsForTables: vi.fn(), tableViews: vi.fn(), deleteView: vi.fn(), updateView: vi.fn(),
+  };
+});
 vi.mock('@/services/naming.service', () => ({ getNamingConfig: vi.fn(async () => ({})) }));
 
 import { toast } from 'sonner';
@@ -211,13 +215,14 @@ describe('una inversa en vuelo cuando se abre otra versión', () => {
     expect(writes[0]).toBe('cs1:view:v1');
   });
 
-  it('«Delete column»: las vistas que faltan reponer no se escriben en la versión nueva', async () => {
+  it('«Delete column»: la inversa repone columna y vistas en un solo lote; nada va a la versión nueva', async () => {
     const d = st().diagram!;
     useModelerStore.setState({ diagram: { ...d, columns: [{ id: 'c1', tableId: 't1', physicalName: 'C1', logicalName: 'c1', ordinal: 0, dataType: 'STRING', typeOverridden: false }] } });
     await st().deleteColumn('c1');
+    expect(ops.get('views:v1')).toBe('upsert');        // la vista, sin C1, en el lote del borrado
     writes = [];
     latency = 15;
-    await undoThenOpenCs2(8);                          // el lote va; las vistas, después
+    await undoThenOpenCs2(8);                          // el lote está en vuelo
     expect(toCs2()).toEqual([]);
     expect(writes).toEqual(['cs1:bulk']);
   });

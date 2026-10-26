@@ -82,18 +82,23 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   const lastLoaded = useRef<{ projectId: string; settings: DdlOutputSettings } | null>(null);
   const { opts, fileNames } = useMemo(() => splitOutputSettings(settings), [settings]);
 
+  // El modal vive montado en la barra y el diagrama cambia con cada edición del
+  // canvas: cerrado no lo recorre (en un canvas gigante, armar el DDL en cada
+  // recarga costaba decenas de ms).
+  const source = open ? diagram : null;
+
   // Todas las tablas del diagrama, ordenadas para que la lista de selección sea estable.
   const allTables = useMemo<DdlTable[]>(
-    () => (diagram?.tables ?? [])
+    () => (source?.tables ?? [])
       .map((t) => ({ id: t.id, physicalName: t.physicalName, logicalName: t.logicalName, schema: t.schema, description: t.description }))
       .sort((a, b) => a.physicalName.localeCompare(b.physicalName)),
-    [diagram],
+    [source],
   );
 
   // Vistas del export = las miembro de este canvas (`diagram.views`, la misma
   // lista que el canvas dibuja), no todas las vistas de sus tablas. Los
   // sourceTableIds viajan al generador (multi-fuente, `FROM t1, t2`).
-  const views = useMemo(() => canvasDdlViews(diagram), [diagram]);
+  const views = useMemo(() => canvasDdlViews(source), [source]);
 
   // DDL Export rules: las habilitadas y válidas del catálogo, todas marcadas por
   // defecto. Sin selección, el export sale idéntico byte a byte al DDL base.
@@ -158,14 +163,14 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
 
   const exportTables = allTables.filter((t) => selectedIds.has(t.id));
 
-  const ddlInput = useMemo(() => (diagram ? {
-    tables: diagram.tables,
-    columns: diagram.columns,
-    relationships: diagram.relationships,
+  const ddlInput = useMemo(() => (source ? {
+    tables: source.tables,
+    columns: source.columns,
+    relationships: source.relationships,
     views,
     tableIds: [...selectedIds],
     modelName,
-  } : null), [diagram, selectedIds, modelName, views]);
+  } : null), [source, selectedIds, modelName, views]);
 
   const oracleOpts = settings.oracle;
   const ddl = useMemo(
@@ -229,9 +234,9 @@ export default function ExportDdlModal({ open, diagram, modelName, onClose }: Ex
   // Cantidad de columnas por tabla (para la pista "N cols") + filtro por nombre sobre la lista.
   const colCountByTable = useMemo(() => {
     const m = new Map<string, number>();
-    (diagram?.columns ?? []).forEach((c) => m.set(c.tableId, (m.get(c.tableId) ?? 0) + 1));
+    (source?.columns ?? []).forEach((c) => m.set(c.tableId, (m.get(c.tableId) ?? 0) + 1));
     return m;
-  }, [diagram]);
+  }, [source]);
   const filteredTables = useMemo(() => {
     const q = tableFilter.trim().toLowerCase();
     if (!q) return allTables;

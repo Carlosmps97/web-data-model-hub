@@ -30,6 +30,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
 });
 vi.mock('@/services/views.service', () => ({
   listViews: vi.fn(), listViewsForTables: vi.fn(), tableViews: vi.fn(), deleteView: vi.fn(), updateView: vi.fn(),
+  currentView: vi.fn(),
 }));
 vi.mock('@/services/naming.service', () => ({ getNamingConfig: vi.fn(async () => ({})) }));
 
@@ -302,6 +303,39 @@ describe('borrar una vista y deshacer', () => {
     expect(draft.sa1.layout.v1).toEqual({ x: 0, y: 300 });
     expect(draft.sa2.viewIds).toEqual(['v1']);
     expect(draft.sa2.layout.v1).toEqual({ x: 5, y: 205 });
+  });
+
+  it('desde el panel de la vista (copia del diagrama, sin su SQL de Erwin): el Undo repone el documento completo', async () => {
+    const full = { ...structuredClone(V1), sql: 'CREATE VIEW V_T1 AS SELECT CODCLIENTE FROM M_T1', description: 'Vista de T1' };
+    vi.mocked(viewsSvc.tableViews).mockImplementationOnce(async () =>
+      ({ views: [{ ...structuredClone(full), canvases: [{ id: 'sa1', name: 'sa1' }] }], total: 1 }) as never);
+    await st().deleteView(structuredClone(V1) as never);           // el diagrama no trae `sql`
+    await useUndoStore.getState().undoLast();
+    const restored = vi.mocked(viewsSvc.updateView).mock.calls.at(-1);
+    expect(restored?.[0]).toBe('v1');
+    expect(restored?.[1]).toEqual(full);                           // sin `canvases` (no es parte del documento)
+  });
+
+  it('desde el panel, si el listado de su tabla no la trae: el Undo repone el documento vigente', async () => {
+    const full = { ...structuredClone(V1), sql: 'CREATE VIEW V_T1 AS SELECT CODCLIENTE FROM M_T1' };
+    vi.mocked(viewsSvc.tableViews).mockImplementationOnce(async () => ({ views: [], total: 0 }) as never);
+    vi.mocked(viewsSvc.currentView).mockResolvedValueOnce(structuredClone(full) as never);
+    await st().deleteView(structuredClone(V1) as never);
+    await useUndoStore.getState().undoLast();
+    expect(vi.mocked(viewsSvc.updateView).mock.calls.at(-1)).toEqual(['v1', full]);
+  });
+
+  it('con los canvases del llamador: no relee su tabla y la pre-imagen es la del llamador', async () => {
+    vi.mocked(viewsSvc.tableViews).mockClear();
+    vi.mocked(viewsSvc.currentView).mockClear();
+    const caller = { ...structuredClone(V1), sql: 'SQL DEL LLAMADOR', canvases: [{ id: 'sa1', name: 'sa1' }] };
+    await st().deleteView(caller as never, { canvasIds: ['sa1'] });
+    expect(viewsSvc.tableViews).not.toHaveBeenCalled();
+    expect(viewsSvc.currentView).not.toHaveBeenCalled();
+    await useUndoStore.getState().undoLast();
+    const doc: Record<string, unknown> = { ...caller };
+    delete doc.canvases;
+    expect(vi.mocked(viewsSvc.updateView).mock.calls.at(-1)).toEqual(['v1', doc]);
   });
 
   it('si no se pudo leer dónde está, no se borra nada', async () => {

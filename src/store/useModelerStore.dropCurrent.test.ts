@@ -19,7 +19,12 @@ let hold: { id: string; gate: ReturnType<typeof deferred<unknown>> } | null = nu
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(async () => []), recordChangesBulk: vi.fn(async () => ({})),
+    ...actual, effective: vi.fn(async () => []),
+    // El lote (borrar una columna) se aplica como sus cambios uno a uno.
+    recordChangesBulk: vi.fn(async (_cs: string, changes: { entityId: string; op: string; payload?: Doc }[]) => {
+      for (const c of changes) { if (c.op === 'delete') delete server[c.entityId]; else server[c.entityId] = { ...c.payload! }; }
+      return {};
+    }),
     recordChange: vi.fn((_cs: string, _coll: string, id: string, op: string, payload: Doc) => {
       const save = () => { if (op === 'delete') delete server[id]; else server[id] = { ...payload }; return {}; };
       if (hold && hold.id === id && payload?.isPrimaryKey) { const g = hold.gate; hold = null; return g.promise.then(save); }

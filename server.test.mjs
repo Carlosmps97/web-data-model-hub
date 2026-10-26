@@ -279,7 +279,7 @@ describe('servidor integrado (estáticos + proxy)', () => {
   it('un POST que recibe 401 no se reintenta (el body ya se consumió)', async () => {
     fail401 = 1;
     const before = seen.length;
-    const r = await fetch(`${base}/api/auth/login`, { method: 'POST', body: '{}' });
+    const r = await fetch(`${base}/api/auth/sso/login`, { method: 'POST', body: '{}' });
     expect(r.status).toBe(401);
     expect(seen.length).toBe(before + 1);
   });
@@ -328,11 +328,9 @@ describe('sesión en cookie HttpOnly', () => {
         }
         // Como un backend (o un proxy intermedio) que decodifica %XX y normaliza la ruta.
         const route = path.posix.normalize(decodeURIComponent(req.url.split('?')[0]));
-        if (route === '/api/auth/login') {
-          if (body.includes('bad')) send(401, JSON.stringify({ detail: 'Invalid credentials.' }));
-          else send(200, session('jwt-login', 3600));
-        } else if (route === '/api/auth/sso/login') {
-          send(200, session('jwt-sso', 60));
+        if (route === '/api/auth/sso/login') {
+          if (req.headers['x-test-denied']) send(403, JSON.stringify({ detail: 'This account has no access.' }));
+          else send(200, session('jwt-sso', 60));
         } else if (route === '/api/auth/refresh') {
           send(200, session('jwt-renewed', 3600));
         } else if (route === '/api/auth/logout') {
@@ -360,12 +358,10 @@ describe('sesión en cookie HttpOnly', () => {
   beforeEach(() => { logoutStatus = 200; gzipNext = false; plainNext = false; });
 
   it('login: el token sale del cuerpo y queda en una cookie HttpOnly (sin Secure por http)', async () => {
-    const r = await fetch(`${base}/api/auth/login`, {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"username":"admin","password":"x"}',
-    });
+    const r = await fetch(`${base}/api/auth/sso/login`, { method: 'POST' });
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ success: true, data: { user: { username: 'ana' }, expiresIn: 3600 } });
-    expect(r.headers.getSetCookie()).toEqual(['dmh_session=jwt-login; Path=/; Max-Age=3600; HttpOnly; SameSite=Strict']);
+    expect(await r.json()).toEqual({ success: true, data: { user: { username: 'ana' }, expiresIn: 60 } });
+    expect(r.headers.getSetCookie()).toEqual(['dmh_session=jwt-sso; Path=/; Max-Age=60; HttpOnly; SameSite=Strict']);
     expect(r.headers.get('cache-control')).toBe('no-store');
     expect(seen.at(-1).headers['accept-encoding']).toBe('identity');   // el cuerpo se lee: sin compresión
   });
@@ -411,11 +407,11 @@ describe('sesión en cookie HttpOnly', () => {
     expect(r.headers.getSetCookie()).toEqual([]);
   });
 
-  it('un login fallido o una respuesta sin token pasan tal cual, sin cookie', async () => {
-    const bad = await fetch(`${base}/api/auth/login`, { method: 'POST', body: '{"password":"bad"}' });
-    expect(bad.status).toBe(401);
+  it('un login rechazado o una respuesta sin token pasan tal cual, sin cookie', async () => {
+    const bad = await fetch(`${base}/api/auth/sso/login`, { method: 'POST', headers: { 'x-test-denied': '1' } });
+    expect(bad.status).toBe(403);
     expect(bad.headers.getSetCookie()).toEqual([]);
-    expect(await bad.json()).toEqual({ detail: 'Invalid credentials.' });
+    expect(await bad.json()).toEqual({ detail: 'This account has no access.' });
     plainNext = true;
     const plain = await fetch(`${base}/api/auth/refresh`, { method: 'POST', headers: { 'x-requested-with': 'XMLHttpRequest' } });
     expect(await plain.text()).toBe('ok');
@@ -512,8 +508,8 @@ describe('sesión en cookie HttpOnly', () => {
   });
 
   it('con sessionCookie: false el token queda en el cuerpo y la cookie no se usa', async () => {
-    const r = await fetch(`${legacyBase}/api/auth/login`, { method: 'POST', body: '{}' });
-    expect((await r.json()).data.token).toBe('jwt-login');
+    const r = await fetch(`${legacyBase}/api/auth/sso/login`, { method: 'POST', body: '{}' });
+    expect((await r.json()).data.token).toBe('jwt-sso');
     expect(r.headers.getSetCookie()).toEqual([]);
     const w = await fetch(`${legacyBase}/api/changesets`, { method: 'POST', headers: { cookie: 'dmh_session=jwt-ana' }, body: 'x' });
     expect(w.status).toBe(200);

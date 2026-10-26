@@ -26,7 +26,8 @@ import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
 import type { TableViewRow, View } from '@/services/views.service';
 import { splitByCanvas } from '../lib/canvasViews';
-import { confirmDeleteTable, confirmDeleteView, readTableDeleteCounts } from './deleteConfirm';
+import { confirmDeleteView } from './deleteConfirm';
+import { askDeleteTable, askRemoveFromCanvas } from './deleteFlows';
 
 // Los UDPs tienen pestaña propia (paridad con el panel de columna); Metadata
 // reúne el resto y suma History.
@@ -390,52 +391,18 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   };
 
   // ── Quitar del canvas / borrar la tabla (versionado + popup de impacto) ──
+  // Los flujos son los mismos del menú del canvas; acá, además, el spinner del
+  // botón mientras corren (el conteo del impacto va antes del diálogo).
   const removeFromCanvas = async () => {
     if (delBusy) return;
     setDelBusy('remove');
-    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't remove the ${nouns.one}`, 'err'));
-    try {
-      const ok = await confirmDialog({
-        title: 'Remove from canvas',
-        message: <>Remove <strong>“{table.physicalName || table.logicalName}”</strong> from this canvas? The table and its data stay in the model — you can add it back later.</>,
-        confirmLabel: 'Remove', cancelLabel: 'Cancel',
-        // El diálogo queda con spinner y bloqueado hasta que termina (no cierra
-        // ni deja re-clickear mientras se aplica).
-        action: async () => { await removeTableFromArea(table.id); },
-      });
-      if (ok) pushToast(`${nouns.One} removed from this canvas`);
-    } catch (e) { await onError(e); }
+    try { await askRemoveFromCanvas({ table, nouns, pushToast, remove: removeTableFromArea }); }
     finally { setDelBusy(null); }
   };
-  const askDeleteTable = async () => {
+  const onDeleteTable = async () => {
     if (delBusy) return;
     setDelBusy('delete');
-    // El borrado pertenece a la sesión donde se pidió. El pre-conteo no tiene
-    // fondo: si mientras cuenta se abre otra versión, el confirm no se abre en
-    // ella, y la acción verifica el pin al clic (la del store tomaría el de ese
-    // momento).
-    const pin = pinSession();
-    // Con la versión recién transferida el borrado termina con el error
-    // original de la versión; la revalidación se encarga del aviso, así que
-    // aquí se calla.
-    const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : `Couldn't delete the ${nouns.one}`, 'err'));
-    try {
-      // Impacto: canvases donde aparece, tablas relacionadas (relaciones que se
-      // van) y vistas que también se eliminan. Durante este pre-conteo el botón
-      // muestra el spinner (el diálogo se abre después). Lo que no se pudo
-      // contar, el diálogo lo indica (en vez de mostrar «0»).
-      const impact = await readTableDeleteCounts(table.id);
-      if (!pin.holds()) return;
-      // Diálogo compartido con el Object Inspector. El borrado (cascada
-      // versionada) corre dentro del diálogo: queda con spinner y bloqueado
-      // hasta terminar (evita clics repetidos durante la espera).
-      const ok = await confirmDeleteTable({
-        name: table.physicalName || table.logicalName, nouns,
-        impact,
-        action: async () => { pin.check(); await deleteTable(table.id); },
-      });
-      if (ok) pushToast(`${nouns.One} deleted`);
-    } catch (e) { await onError(e); }
+    try { await askDeleteTable({ table, nouns, pushToast, deleteTable }); }
     finally { setDelBusy(null); }
   };
 
@@ -535,7 +502,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
                 <button className="rd-btn rd-btn-secondary rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={delBusy !== null} onClick={removeFromCanvas}>
                   {delBusy === 'remove' ? <span className="rd-spin" aria-hidden /> : <Table2 size={12} />} Remove from this canvas
                 </button>
-                <button className="rd-btn rd-btn-danger rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={delBusy !== null} onClick={askDeleteTable}>
+                <button className="rd-btn rd-btn-danger rd-btn-sm" style={{ width: '100%', justifyContent: 'center' }} disabled={delBusy !== null} onClick={onDeleteTable}>
                   {delBusy === 'delete' ? <span className="rd-spin" aria-hidden /> : <Trash2 size={12} />} Delete {nouns.one}…
                 </button>
               </div>

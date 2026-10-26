@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('../features/auth/auth.service', () => ({
-  fetchMe: vi.fn(), login: vi.fn(), ssoLogin: vi.fn(), logout: vi.fn(), refreshSession: vi.fn(),
+  fetchMe: vi.fn(), ssoLogin: vi.fn(), logout: vi.fn(), refreshSession: vi.fn(),
 }));
 vi.mock('../features/modeler/services/modeler.service', () => ({}));
 
@@ -148,8 +148,8 @@ describe('por qué terminó la sesión', () => {
     await useAuthStore.getState().logout();
     expect(useAuthStore.getState().notice).toBeNull();
     useAuthStore.setState({ notice: SESSION_ENDED_TEXT });
-    vi.mocked(auth.login).mockResolvedValue({ user: user({ 'model.view': true }), expiresIn: 3600 } as never);
-    await useAuthStore.getState().login('admin', 'x');
+    vi.mocked(auth.ssoLogin).mockResolvedValue({ user: user({ 'model.view': true }), expiresIn: 3600 } as never);
+    await useAuthStore.getState().loginSso();
     expect(useAuthStore.getState().notice).toBeNull();
   });
 });

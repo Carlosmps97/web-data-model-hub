@@ -122,6 +122,32 @@ un píxel: el navegador paga estilo, layout y pintado de contenido que nadie pue
 La virtualización del viewport de React Flow (`onlyRenderVisibleElements`) no ayuda en ese caso: con el
 canvas encuadrado completo, todos los nodos son visibles.
 
+Tampoco ayuda si los nodos llegan sin tamaño medido: React Flow trata un nodo sin `measured` como nuevo, le
+borra las anclas medidas y lo dibuja aunque esté fuera de pantalla para medirlo (`forceInitialRender`). Por
+eso, al re-armar los nodos con cada carga del diagrama, `keepMeasured` (`features/modeler/lib`) conserva el
+`measured` de cada bloque cuyas anclas y caja no cambiaron: en una tabla, el orden de sus filas (llave
+primero, cada parte por `ordinal`) y su ancho estimado; en modo compacto, las columnas con wires y el tamaño
+de la caja; en una vista, el tamaño de la caja (su ancla está en la cabecera); un símbolo no tiene anclas que
+se muevan. Vuelven a medirse el bloque cuyas anclas o caja cambiaron (alta, baja, reorden, llave, un nombre
+más largo, una vista que perdió una fila), los extremos de un wire nuevo o re-apuntado (`wireChanges`) y todos
+al cambiar de faceta. Así los wires quedan en la fila correcta aunque la tabla no cambie de alto, y fuera de
+pantalla solo se dibuja lo que cambió. Sin esto, borrar una columna en un canvas de 200 tablas montaba y
+desmontaba ~900 mil elementos.
+
+Un bloque medido en modo compacto (al abrir un canvas gigante todo se ve de lejos) conserva esa caja hasta que
+se dibuja de cerca, cuando React Flow lo vuelve a medir. Si es extremo de un wire de relación o de
+subcategoría, que anclan en sus filas y en su caja, se vuelve a medir en la carga siguiente aunque esté fuera
+de pantalla (`measuredCompact`). Hasta que se dibuja, el recorte por viewport y el Auto-arrange usan su caja
+estimada, como cuando se ordena con el canvas alejado, y un wire de derivación sale de su borde derecho
+estimado (unos 60–100 px más a la derecha): re-medir las fuentes de todas las vistas sería re-medir casi todo
+el canvas.
+
+Lo otro que pesaba en un canvas gigante era bajar el diagrama completo tras cada edición (~3 MB comprimidos y
+más de 1 s en el servidor en Analytics). La recarga pide solo el recorte de las tablas que tocó lo escrito y
+lo funde en el diagrama abierto (`lib/diagramSlice`; detalle en [Flujo de datos](06-flujo-de-datos.md)): unas
+decenas de KB y milisegundos en el servidor, y lo que no cambió conserva su objeto, así `keepMeasured` no
+tiene nada que volver a medir fuera del lote.
+
 ### Zoom semántico (LOD)
 
 Por debajo de un umbral de zoom, cada tabla y cada vista se pintan como una caja compacta del mismo tamaño

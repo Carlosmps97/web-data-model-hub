@@ -124,7 +124,7 @@ vacía, el proxy responde `502 BACKEND_API_URL is not configured.`.
 - **Cabeceras.** `buildUpstreamHeaders` descarta las cabeceras hop-by-hop, `host`, la `authorization`
   entrante y las cookies del navegador: la autorización hacia el backend la pone siempre el servidor. El
   token de sesión de la aplicación sale de la cookie HttpOnly y viaja aparte, en `X-Session-Token`.
-- **Sesión en cookie.** En las respuestas de login, login SSO y renovación, el servidor saca el token del
+- **Sesión en cookie.** En las respuestas del login SSO y de la renovación, el servidor saca el token del
   cuerpo y lo entrega en la cookie `__Host-dmh_session` (HttpOnly, `SameSite=Strict`, `Secure`); exige
   `X-Requested-With` en las escrituras que usan la cookie y borra la cookie en el logout. El detalle está
   en [Seguridad](08-seguridad.md#sesión-en-cookie-httponly).
@@ -391,14 +391,13 @@ sin uso.
 | `status` | `'loading'` (restaurando al arrancar), `'anon'` (sin sesión) o `'authed'`. |
 | `user` | `SessionUser` de la sesión (login, renovación o `/api/auth/me`): usuario, rol, permisos efectivos y proyectos. |
 | `error`, `notice` | Error del último intento de login; `notice` explica por qué terminó una sesión sin que el usuario saliera (acceso deshabilitado, sesión vencida sin uso, sesión terminada u otra cuenta en otra pestaña) y el login lo muestra como estado. |
-| `login(username, password)` | `POST /api/auth/login`. |
 | `loginSso()` | `POST /api/auth/sso/login` con la identidad relevada por `server.mjs`. |
 | `logout()` | Cancela la renovación en vuelo, llama a `POST /api/auth/logout` (best-effort; `server.mjs` borra la cookie), borra la marca de pestañas y llama a `resetAppState()`. |
 | `restore()` | Al arrancar, renueva la sesión con `POST /api/auth/refresh`. Un `401` deja la sesión en `anon` con el aviso que corresponde (acceso quitado, vencida sin uso o terminada); ante falta de red o una falla del servidor o del proxy, la cookie se conserva y el login pide recargar. Si mientras tanto el usuario entra de nuevo, esa respuesta no decide nada. |
 | `refreshMe()` | Vuelve a leer `/me` al volver el foco a la pestaña y ante un `403` fuera de `/api/auth/`. Una lectura en vuelo y como mucho una cada 10 s (`ME_GAP_MS`). Actualiza el usuario solo si cambiaron rol o permisos; si `/me` no trae permisos (usuario deshabilitado), cierra la sesión. |
 | `has(perm)` | Consulta un permiso. Para que un componente reaccione a cambios de permisos, la llamada va dentro del selector (`useAuthStore((s) => s.has('x'))`) o el componente se suscribe a `s.user?.permissions`. |
 
-Ambos logins pasan por el mismo camino (`enterSession`): primero `resetAppState()`, luego se espeja el
+El login SSO pasa por `enterSession`: primero `resetAppState()`, luego se espeja el
 actor en `useSessionStore`, se marca `authed` y arranca `sessionKeeper`. Al crearse, el store registra el
 handler global de `401` (cierra la sesión y el guard lleva a `/login`) y el observador de `403`
 (`refreshMe`).
@@ -435,7 +434,7 @@ edición:
 | Copiar y pegar | `colSel`, `colClipboard`, `tblClipboard` (copias por valor que recuerdan el proyecto de origen). |
 | Nivel de detalle | `lod` y `lodLock` (congela el valor actual; los exports no lo necesitan porque dibujan su propia escena). |
 | Guardado | `dirty`, `saveAll()`, `saveNodePositions()`, `persistDrawings()`. |
-| Edición de modelo | `createTable`, `addColumn`, `updateColumn`, `reorderColumns`, `deleteColumn`, `deleteTable`, `deleteView`, `pasteTable`, entre otras. |
+| Edición de modelo | `createTable`, `addColumn`, `updateColumn`, `reorderColumns`, `deleteColumn`, `deleteColumns`, `deleteTable`, `deleteView`, `pasteTable`, entre otras. |
 
 Las acciones de edición escriben por los services conscientes del changeset y luego recargan el diagrama.
 Varias protecciones de concurrencia viven aquí: contadores de secuencia descartan respuestas de diagrama

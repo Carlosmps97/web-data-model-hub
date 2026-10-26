@@ -3,9 +3,8 @@
  *
  * La tabla de usuarios es la whitelist de acceso: correos asignados a una
  * matriz de rol (el login es el SSO de Databricks; sin asignación no se entra).
- * "Add email" da acceso; quitar la entrada lo revoca. Las cuentas locales con
- * contraseña (`admin`) conviven en la misma lista. Cada entrada accede a todos
- * los proyectos o solo a los que tiene asignados (columna Projects).
+ * "Add email" da acceso; quitar la entrada lo revoca. Cada entrada accede a
+ * todos los proyectos o solo a los que tiene asignados (columna Projects).
  *
  * Siempre queda al menos un administrador activo: al único no se le quita el
  * acceso, ni se le cambia el rol o el estado, ni la matriz puede dejar sin

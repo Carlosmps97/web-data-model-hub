@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('@/services/governance.service', () => ({
-  deleteColumn: vi.fn().mockResolvedValue({}),
-  deleteRelationship: vi.fn().mockResolvedValue({}),
-}));
+vi.mock('@/services/governance.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/governance.service')>();
+  return { bulk: actual.bulk, recordChangesBulk: vi.fn().mockResolvedValue({}) };
+});
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 import { useModelerStore } from './useModelerStore';
 

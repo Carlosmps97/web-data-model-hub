@@ -38,7 +38,7 @@ barra superior `TopNav` (`src/components/layout/TopNav.tsx`), que muestra **Home
 
 | Pantalla | Ruta | Componente | Propósito |
 |---|---|---|---|
-| Login | `/login` | `src/features/auth/LoginScreen.tsx` | Inicio de sesión: SSO de la plataforma o cuenta local con usuario y contraseña. |
+| Login | `/login` | `src/features/auth/LoginScreen.tsx` | Inicio de sesión con el SSO de la plataforma (**Continue with Databricks**). |
 | Home | `/` | `src/screens/HomeScreen.tsx` | Resumen informativo: contadores por proyecto (Tables, Views, Relationships, Subject Areas, Projects), solicitudes asignadas al usuario y versiones. Desde el panel de versiones se abren **Version tools** (comparar versiones, ver el detalle, transferir o eliminar un draft) y el rollback. |
 | Model | `/model` | `src/features/modeler/components/WorkspaceScreen.tsx` | El modelador: **Open model**, Model Explorer, canvas, paneles de propiedades, selector lógico/físico, **Upload from Excel**, **Export DDL**, **Export diagram** y **Publish**. |
 | Review | `/review` | `src/screens/ReviewScreen.tsx` | Bandeja de solicitudes de publicación de todos los proyectos: detalle, diff de cambios, comentarios, **Approve**, **Reject** y **Withdraw request**. Se abre desde las solicitudes del Home. |

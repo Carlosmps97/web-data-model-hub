@@ -61,11 +61,44 @@ export function confirmDeleteTable(o: {
   });
 }
 
+/** Las relaciones que pierden pares: la otra punta y los canvases donde se ven. */
+const relationshipList = (impact: RelationshipImpact) => (
+  <ul style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 180, overflow: 'auto' }}>
+    {impact.relationships.map((r) => (
+      <li key={r.relId} style={{ marginBottom: 4 }}>
+        <span className="rd-mono">{r.otherTableName}.{r.otherColumnName}</span>
+        {r.canvases.length > 0 && (
+          <span className="rd-small" style={{ color: 'var(--muted)' }}>
+            {' '}— in {r.canvases.map((c) => c.name).join(', ')}
+          </span>
+        )}
+      </li>
+    ))}
+  </ul>
+);
+
+/** Las vistas que el borrado deja sin columnas (el Export DDL las escribiría
+ *  como `SELECT *`): se avisan y el borrado sigue. null = no se pudo revisar;
+ *  sin dato o sin vistas, nada. */
+const emptiedViewsNote = (names: string[] | null | undefined) => {
+  if (names === undefined || names?.length === 0) return null;
+  const style = { margin: '10px 0 0' };
+  if (names === null) return <p style={style}>{"Couldn't check which views would be left without columns."}</p>;
+  const one = names.length === 1;
+  return (
+    <p style={style}>
+      {one ? 'This view will be left without columns: ' : `These ${names.length} views will be left without columns: `}
+      <span className="rd-mono">{names.join(', ')}</span>
+      {one ? '. Edit or delete it afterwards.' : '. Edit or delete them afterwards.'}
+    </p>
+  );
+};
+
 /** Borrado de columna con impacto global: relaciones donde la columna es
  *  extremo, en cualquier canvas; cada una pierde el par (o se borra si era el
- *  último). */
+ *  último). `emptiedViews`: las vistas que quedan sin columnas. */
 export function confirmDeleteColumn(o: {
-  name: string; nouns: FacetNouns; impact: RelationshipImpact; action: () => Promise<unknown>;
+  name: string; nouns: FacetNouns; impact: RelationshipImpact; emptiedViews?: string[] | null; action: () => Promise<unknown>;
 }): Promise<boolean> {
   const { impact } = o;
   return confirmDialog({
@@ -75,21 +108,45 @@ export function confirmDeleteColumn(o: {
         <p style={{ margin: 0 }}>
           {o.nouns.Member} <strong>“{o.name}”</strong> participates in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} — each will lose this pair (or be deleted if it was the last one):
         </p>
-        <ul style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 180, overflow: 'auto' }}>
-          {impact.relationships.map((r) => (
-            <li key={r.relId} style={{ marginBottom: 4 }}>
-              <span className="rd-mono">{r.otherTableName}.{r.otherColumnName}</span>
-              {r.canvases.length > 0 && (
-                <span className="rd-small" style={{ color: 'var(--muted)' }}>
-                  {' '}— in {r.canvases.map((c) => c.name).join(', ')}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+        {relationshipList(impact)}
+        {emptiedViewsNote(o.emptiedViews)}
       </>
     ) : (
-      <>{o.nouns.Member} <strong>“{o.name}”</strong> will be removed from this {o.nouns.one}.</>
+      <>{o.nouns.Member} <strong>“{o.name}”</strong> will be removed from this {o.nouns.one}.{emptiedViewsNote(o.emptiedViews)}</>
+    ),
+    confirmLabel: impact.total > 0 ? 'Delete anyway' : 'Delete',
+    cancelLabel: 'Cancel', variant: 'danger',
+    action: o.action,
+  });
+}
+
+/** Borrado de varias columnas de una tabla (menú del canvas): todas en un
+ *  diálogo, con las relaciones que pierden pares y las vistas que quedan sin
+ *  columnas. Con una sola, el diálogo de `confirmDeleteColumn`. */
+export function confirmDeleteColumns(o: {
+  names: string[]; tableName: string; nouns: FacetNouns; impact: RelationshipImpact;
+  emptiedViews?: string[] | null; action: () => Promise<unknown>;
+}): Promise<boolean> {
+  const { names, nouns, impact } = o;
+  if (names.length === 1) return confirmDeleteColumn({ name: names[0], nouns, impact, emptiedViews: o.emptiedViews, action: o.action });
+  return confirmDialog({
+    title: `Delete ${names.length} ${nouns.members}`,
+    message: (
+      <>
+        <p style={{ margin: 0 }}>{names.length} {nouns.members} of <strong>“{o.tableName}”</strong> will be deleted:</p>
+        <ul className="rd-mono" style={{ margin: '8px 0 0', paddingLeft: 18, maxHeight: 140, overflow: 'auto' }}>
+          {names.map((name, i) => <li key={i}>{name}</li>)}
+        </ul>
+        {impact.total > 0 && (
+          <>
+            <p style={{ margin: '10px 0 0' }}>
+              They participate in <strong>{impact.total}</strong> relationship{impact.total === 1 ? '' : 's'} — each will lose the pairs of these {nouns.members} (or be deleted if none remain):
+            </p>
+            {relationshipList(impact)}
+          </>
+        )}
+        {emptiedViewsNote(o.emptiedViews)}
+      </>
     ),
     confirmLabel: impact.total > 0 ? 'Delete anyway' : 'Delete',
     cancelLabel: 'Cancel', variant: 'danger',

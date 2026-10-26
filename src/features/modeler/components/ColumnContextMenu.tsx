@@ -1,13 +1,17 @@
-import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
-import { facetNouns, type FacetNouns } from '@/lib/facets';
+import { Fragment, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { facetName, facetNouns, type FacetNouns } from '@/lib/facets';
 import { placeAtPoint } from '@/lib/floating';
 import { useFloating } from '@/components/ui/useFloating';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
+import { canvasMenuItems, type CanvasClipboard, type CanvasMenuAction } from '../lib/canvasMenu';
+import { orderColumns } from '../lib/columnOrder';
+import { askDeleteColumns, askDeleteTable, askRemoveFromCanvas } from './deleteFlows';
 
 // Etiquetas de atajos agnósticas al SO (Windows/Linux = Ctrl, macOS = ⌘) —
 // el handler real ya acepta ambos (`metaKey || ctrlKey`).
 const IS_MAC = /Mac/i.test(typeof navigator === 'undefined' ? '' : navigator.platform);
+export const COPY_KEY_LABEL = IS_MAC ? '⌘C' : 'Ctrl+C';
 export const PASTE_KEY_LABEL = IS_MAC ? '⌘V' : 'Ctrl+V';
 export const UNDO_KEY_LABEL = IS_MAC ? '⌘Z' : 'Ctrl+Z';
 export const SEARCH_KEY_LABEL = IS_MAC ? '⌘K' : 'Ctrl+K';
@@ -20,12 +24,17 @@ export const copiedMessage = (n: number, nouns: FacetNouns) =>
 export const copiedTableMessage = (name: string, nouns: FacetNouns) =>
   `${nouns.One} ${name} copied — paste with ${PASTE_KEY_LABEL}`;
 
+type ColMenu = NonNullable<ReturnType<typeof useModelerStore.getState>['colMenu']>;
+
 /**
- * Menú contextual del canvas: espejo descubrible de Ctrl/Cmd+C/V.
- * Fila → Copy de columnas (+ Paste de columnas si hay clipboard y edición);
- * bloque → Copy table (+ Paste de columnas / Paste table según clipboard).
- * Vive fuera del viewport de React Flow (position: fixed sin ancestro con
- * transform), lo monta ModelerCanvas; TableNode/onNodeContextMenu lo abren vía store.
+ * Menú contextual del canvas (`lib/canvasMenu.ts` decide los ítems): en una
+ * fila, Copy · Paste · Delete sobre las columnas seleccionadas; en el bloque,
+ * Copy table · Paste · Remove from this canvas · Delete table…. Lo que no
+ * aplica se ve deshabilitado con su motivo. Copy/Paste son el espejo de
+ * Ctrl/Cmd+C/V; los borrados usan los flujos de `deleteFlows` (los mismos del
+ * panel Properties). Vive fuera del viewport de React Flow (position: fixed sin
+ * ancestro con transform), lo monta ModelerCanvas; TableNode/onNodeContextMenu
+ * lo abren vía store.
  */
 export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string, k?: 'err') => void }) {
   const menu = useModelerStore((s) => s.colMenu);
@@ -42,6 +51,9 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const ref = useRef<HTMLDivElement>(null);
+  // Un borrado lee su impacto antes del diálogo: mientras tanto el menú queda
+  // abierto, con el spinner en ese ítem y el resto deshabilitado.
+  const [pending, setPending] = useState<{ menu: ColMenu; action: CanvasMenuAction } | null>(null);
 
   // Cierre por interacción global: click/pan fuera (mousedown), zoom/scroll
   // (wheel), Esc o blur de la ventana. Capture: gana aunque el target frene el
@@ -66,66 +78,107 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
     };
   }, [menu, closeColMenu]);
 
-  if (!menu) return null;
-  const isView = menu.kind === 'view';
-  const isBlock = menu.colId == null;
-  const showCopyCols = !isView && !isBlock && selCount > 0;   // copiar es lectura: vale también en readonly
-  const showPasteCols = !isView && clipCount > 0 && canEdit;
-  // El menú del bloque siempre ofrece copiar la tabla; pegarla exige
-  // clipboard de tabla + edición (crea una tabla nueva, no necesita destino).
-  const showCopyTable = !isView && isBlock;
-  const showPasteTable = !isView && isBlock && tblClipName != null && canEdit;
-  // El color de la caja en este canvas no se ofrece acá: es del canvas
-  // (Model properties → Colors on this canvas), no de la tabla.
-  if (!showCopyCols && !showPasteCols && !showCopyTable && !showPasteTable) return null;
+  // Las vistas no tienen menú: su color en el canvas se gestiona en Model properties.
+  if (!menu || menu.kind === 'view') return null;
+  const clipboard: CanvasClipboard = tblClipName != null ? { kind: 'table', name: tblClipName }
+    : clipCount > 0 ? { kind: 'columns', count: clipCount } : { kind: 'none' };
+  const items = canvasMenuItems({
+    target: menu.colId == null ? 'table' : 'row', selCount, clipboard, canEdit, nouns: n,
+    keys: { copy: COPY_KEY_LABEL, paste: PASTE_KEY_LABEL },
+  });
+  const busy = pending?.menu === menu ? pending.action : null;
+  // El flujo sigue si el menú que lo pidió sigue abierto; se cierra justo antes
+  // del diálogo.
+  const hooks = {
+    stillWanted: () => useModelerStore.getState().colMenu === menu,
+    beforeDialog: () => useModelerStore.getState().closeColMenu(),
+  };
+  // Al terminar, el spinner se suelta solo si sigue siendo el de este menú: un
+  // borrado que termina tarde no le quita el suyo al de un menú abierto después.
+  const release = () => setPending((p) => (p?.menu === menu ? null : p));
 
-  const doCopy = () => {
+  const deleteSelected = async () => {
     const st = useModelerStore.getState();
-    const count = st.copySelectedColumns();
-    if (count > 0) pushToast(copiedMessage(count, n));
-    st.closeColMenu();
+    const sel = st.colSel;
+    const table = st.diagram?.tables.find((t) => t.id === menu.tableId);
+    if (!sel || sel.tableId !== menu.tableId || !table) return;
+    const wanted = new Set(sel.ids);
+    // En el orden único de la tabla (PK primero), como se ven en el bloque.
+    const cols = orderColumns((st.diagram?.columns ?? []).filter((c) => c.tableId === table.id && wanted.has(c.id)));
+    if (!cols.length) return;
+    setPending({ menu, action: 'delete-columns' });
+    try {
+      await askDeleteColumns({
+        tableId: table.id, tableName: facetName(table, st.viewMode), cols, viewMode: st.viewMode,
+        pushToast, deleteColumns: st.deleteColumns, ...hooks,
+      });
+    } finally { release(); }
   };
-  const doPaste = () => {
+  const deleteTable = async () => {
     const st = useModelerStore.getState();
-    st.setSelectedTable(menu.tableId);   // el destino queda visible (anillo .sel)
-    st.setPasteTarget(menu.tableId);
-    st.closeColMenu();
+    const table = st.diagram?.tables.find((t) => t.id === menu.tableId);
+    if (!table) return;
+    setPending({ menu, action: 'delete-table' });
+    try { await askDeleteTable({ table, nouns: n, pushToast, deleteTable: st.deleteTable, ...hooks }); }
+    finally { release(); }
   };
-  const doCopyTable = () => {
+
+  const run = (action: CanvasMenuAction) => {
     const st = useModelerStore.getState();
-    const name = st.copyTable(menu.tableId);
-    if (name) pushToast(copiedTableMessage(name, n));
-    st.closeColMenu();
-  };
-  // Pegar la tabla abre el popup que muestra qué viaja (como Ctrl+V).
-  const doPasteTable = () => {
-    const st = useModelerStore.getState();
-    st.closeColMenu();
-    st.setTablePasteOpen(true);
+    switch (action) {
+      case 'copy-columns': {
+        const count = st.copySelectedColumns();
+        if (count > 0) pushToast(copiedMessage(count, n));
+        st.closeColMenu();
+        return;
+      }
+      case 'copy-table': {
+        const name = st.copyTable(menu.tableId);
+        if (name) pushToast(copiedTableMessage(name, n));
+        st.closeColMenu();
+        return;
+      }
+      case 'paste':
+        // Lo mismo que Ctrl/Cmd+V: una tabla copiada abre el popup que muestra
+        // qué viaja (crea una tabla nueva, no necesita destino); columnas
+        // copiadas, su confirmación sobre ESTA tabla.
+        if (st.tblClipboard) {
+          st.closeColMenu();
+          st.setTablePasteOpen(true);
+          return;
+        }
+        st.setSelectedTable(menu.tableId);   // el destino queda visible (anillo .sel)
+        st.setPasteTarget(menu.tableId);
+        st.closeColMenu();
+        return;
+      case 'delete-columns':
+        void deleteSelected();
+        return;
+      case 'remove-table': {
+        const table = st.diagram?.tables.find((t) => t.id === menu.tableId);
+        st.closeColMenu();
+        if (table) void askRemoveFromCanvas({ table, nouns: n, pushToast, remove: st.removeTableFromArea });
+        return;
+      }
+      case 'delete-table':
+        void deleteTable();
+        return;
+    }
   };
 
   return (
     <MenuBox boxRef={ref} x={menu.x} y={menu.y}>
-      {showCopyCols && (
-        <button type="button" role="menuitem" onClick={doCopy}>
-          {selCount > 1 ? `Copy ${selCount} ${n.members}` : `Copy ${n.member}`}
-        </button>
-      )}
-      {showCopyTable && (
-        <button type="button" role="menuitem" onClick={doCopyTable}>
-          {`Copy ${n.one}`}
-        </button>
-      )}
-      {showPasteCols && (
-        <button type="button" role="menuitem" onClick={doPaste}>
-          {`Paste ${clipCount} ${clipCount === 1 ? n.member : n.members}`}
-        </button>
-      )}
-      {showPasteTable && (
-        <button type="button" role="menuitem" onClick={doPasteTable}>
-          {`Paste ${n.one} ${tblClipName}…`}
-        </button>
-      )}
+      {items.map((it) => (
+        <Fragment key={it.action}>
+          {it.separatorBefore && <div className="wk-ctxmenu-sep" role="separator" />}
+          <button type="button" role="menuitem" className={it.danger ? 'danger' : undefined}
+            disabled={!it.enabled || busy !== null} title={it.hint} onClick={() => run(it.action)}>
+            {busy === it.action && <span className="rd-spin" aria-hidden />}
+            {it.label}
+            {it.shortcut && <span className="wk-ctxmenu-key" aria-hidden>{it.shortcut}</span>}
+          </button>
+        </Fragment>
+      ))}
     </MenuBox>
   );
 }

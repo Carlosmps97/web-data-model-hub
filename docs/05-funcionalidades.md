@@ -233,9 +233,14 @@ Comportamientos:
   mueven en la sesión.
 - **Sin borrado por teclado**: Supr no borra bloques del canvas; los borrados van por acciones
   explícitas del panel o los menús.
-- **Menú contextual** (`ColumnContextMenu.tsx`, clic derecho sobre una fila o un bloque): es el
-  espejo visible de los atajos de copiar y pegar, con los textos en los sustantivos de la faceta
-  («Copy 3 attributes», «Paste entity …»).
+- **Menú contextual** (`ColumnContextMenu.tsx`, ítems en `lib/canvasMenu.ts`): clic derecho sobre
+  una fila ofrece **Copy**, **Paste** y **Delete…** para las columnas seleccionadas (una fila que no
+  estaba seleccionada pasa a ser la selección); sobre el bloque, **Copy table**, **Paste**,
+  **Remove from this canvas** y **Delete table…**, con los mismos flujos del panel Properties. Los
+  textos van en los sustantivos de la faceta («Copy 3 attributes», «Paste entity …») y lo que no
+  aplica se ve deshabilitado con su motivo: **Paste** sin nada copiado y, en el visor, todo salvo
+  **Copy**. Mientras un borrado lee su impacto, el menú queda abierto con un spinner; si se cierra
+  antes, no se abre el diálogo.
 
 Atajos del canvas (`ModelerCanvas.tsx` y `Toolbar.tsx`; ⌘ en macOS, Ctrl en Windows y Linux):
 
@@ -284,8 +289,14 @@ Las tablas nuevas aparecen en el centro de lo que el usuario está viendo del ca
 - El nombre físico de una columna se deriva del lógico con el glosario y el naming del proyecto; un
   físico escrito a mano queda marcado como override. Un nombre físico más largo que el tope del
   naming (`maxLength`) se rechaza.
-- Renombrar una columna actualiza las vistas que la usan; agregar o quitar una columna se propaga a
-  las vistas espejo de su tabla.
+- Renombrar una columna actualiza las vistas que la usan y agregar una se propaga a las vistas espejo
+  de su tabla. Borrar una columna la saca de toda vista que la lista, en la misma escritura que el
+  borrado (con las relaciones elegidas en el diálogo de impacto): si alguna de esas vistas no se puede
+  grabar, la columna no se borra. La confirmación avisa qué vistas quedan sin columnas (el Export DDL
+  las escribiría como `SELECT *`): el borrado sigue y la vista se corrige o se borra después.
+- Varias columnas seleccionadas de una tabla se borran juntas desde el menú de clic derecho: una sola
+  confirmación (las columnas, las relaciones que pierden pares y las vistas que quedan sin columnas),
+  un solo lote y un solo Undo, con el mismo costo que borrar una.
 
 ### Esquemas
 
@@ -878,15 +889,13 @@ Ruta `/admin`, componente `features/admin/components/AdminScreen.tsx`; servicio
 `features/admin/admin.service.ts`. Todo exige `admin.manage`.
 
 - **Usuarios** (la lista de acceso): la tabla de usuarios es la whitelist de la aplicación. **Add
-  email** (`UserModal.tsx`) da acceso asignando un correo a un rol, sin contraseña: el correo debe
+  email** (`UserModal.tsx`) da acceso asignando un correo a un rol: el correo debe
   ser el de la cuenta con la que la persona inicia sesión en la plataforma, y el nombre se completa en
   el primer ingreso («Pending first sign-in» hasta entonces). Un correo que ya tiene acceso no se
   vuelve a agregar; el backend responde 400 con este mensaje:
   `That user already has access. Edit it instead.`
-  La edición
-  (**Edit access**) cambia rol, estado (Active, Disabled), nombre y proyectos; en cuentas locales con
-  contraseña aparece **Reset password**. **Remove access** revoca el acceso (se puede volver a dar
-  agregando el correo). La tabla tiene búsqueda por correo o nombre.
+  La edición (**Edit access**) cambia rol, estado (Active, Disabled), nombre y proyectos. **Remove access**
+  revoca el acceso (se puede volver a dar agregando el correo). La tabla tiene búsqueda por correo o nombre.
 - **Proyectos asignados**: la columna **Projects** muestra **All projects** o la cantidad de proyectos
   asignados vigentes (`projectScopeLabel`); un usuario con rol administrador figura siempre con **All
   projects**. El modal de usuario ofrece **All projects** (lista vacía) u **Only these projects** con

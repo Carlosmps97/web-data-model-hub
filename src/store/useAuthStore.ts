@@ -26,7 +26,6 @@ interface AuthState {
   /** Por qué terminó la sesión sin que el usuario saliera (se muestra en el
    *  login); null tras un logout propio o un login. */
   notice: string | null;
-  login: (username: string, password: string) => Promise<void>;
   loginSso: () => Promise<void>;
   logout: () => Promise<void>;
   restore: () => Promise<void>;
@@ -115,7 +114,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
     });
   };
 
-  /** Pipeline común a ambos logins: el actor que entra arranca sin estado
+  /** Entrada a la sesión tras el login SSO: el actor que entra arranca sin estado
    *  heredado (defensa en profundidad: sesión vencida, tab reusada), queda
    *  espejado en useSessionStore y con su keeper. */
   const enterSession = (res: LoginResult): void => {
@@ -131,12 +130,6 @@ export const useAuthStore = create<AuthState>((set, get) => {
   user: null,
   error: null,
   notice: null,
-
-  login: async (username, password) => {
-    set({ error: null });
-    await stopSessionKeeper();
-    enterSession(await auth.login(username.trim(), password));
-  },
 
   loginSso: async () => {
     set({ error: null });

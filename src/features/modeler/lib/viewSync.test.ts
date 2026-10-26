@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CanonicalColumn } from '@/services/governance.service';
-import type { View } from '@/services/views.service';
-import { alignSourcesToPhysical, appendColumnSource, isMirrorOfTable, removeColumnSource, renameColumnSource, syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews } from './viewSync';
+import type { View, ViewSource } from '@/services/views.service';
+import { alignSourcesToPhysical, appendColumnSource, hasProjection, isMirrorOfTable, removeColumnSource, removeColumnsSources, renameColumnSource, restoreColumnsSources, syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, viewsLeftEmpty } from './viewSync';
 import { SessionChangedError } from './sessionGuard';
 
 const col = (physicalName: string, ordinal: number): CanonicalColumn => ({
@@ -71,6 +71,56 @@ describe('removeColumnSource / renameColumnSource', () => {
     const renamed2 = renameColumnSource(v, 't1', 'COD', 'COD2');
     expect(renamed2?.[1]).toMatchObject({ column: 'COD2', outputAlias: 'CODIGO_NEGOCIO' });
     expect(renameColumnSource(v, 't1', 'ZZZ', 'W')).toBeNull();
+  });
+});
+
+describe('quitar y reponer una columna (Undo de un borrado)', () => {
+  const v: View = { ...mirror, sources: [
+    { tableId: 't1', column: 'COD', outputAlias: 'COD' },
+    { tableId: 't1', column: 'FEC', outputAlias: 'FEC' },
+    { tableId: 't1', column: 'cod', outputAlias: 'COD_2' },
+  ] };
+  const removedCod = () => removeColumnsSources(v, 't1', ['COD'])!.removed;
+
+  it('las fuentes de la columna con su posición (case-insensitive, por tabla)', () => {
+    expect(removedCod()).toEqual([{ physicalName: 'COD', at: [{ index: 0, source: v.sources![0] }, { index: 2, source: v.sources![2] }] }]);
+    expect(removeColumnsSources(v, 't9', ['COD'])).toBeNull();
+  });
+
+  it('las repone en su lugar sobre el documento vigente, aunque cambió después', () => {
+    const now: View = { ...v, name: 'RENOMBRADA', sources: [v.sources![1], { tableId: 't1', column: 'NUEVA', outputAlias: 'NUEVA' }] };
+    expect(restoreColumnsSources(now, 't1', removedCod())).toEqual([v.sources![0], v.sources![1], v.sources![2],
+      { tableId: 't1', column: 'NUEVA', outputAlias: 'NUEVA' }]);
+    // Con menos fuentes que antes, al final.
+    expect(restoreColumnsSources({ ...v, sources: [] }, 't1', removedCod())).toEqual([v.sources![0], v.sources![2]]);
+  });
+
+  it('null si la vista ya lista la columna', () => {
+    expect(restoreColumnsSources(v, 't1', removedCod())).toBeNull();
+  });
+
+  it('null si la vista ya no lee de esa tabla o si repetiría un nombre de salida', () => {
+    expect(restoreColumnsSources({ ...v, tableId: 't2', sourceTableIds: ['t2'], sources: [] }, 't1', removedCod())).toBeNull();
+    expect(restoreColumnsSources({ ...v, sources: [{ tableId: 't1', column: 'FEC', outputAlias: 'COD' }] }, 't1', removedCod())).toBeNull();
+  });
+
+  it('un nombre de salida que ya estaba repetido en la vista puede repetirse; uno nuevo repetido dentro de la columna, no', () => {
+    const A = { tableId: 't1', column: 'A', outputAlias: 'X' }, B = { tableId: 't1', column: 'B', outputAlias: 'X' };
+    const COD = { tableId: 't1', column: 'COD', outputAlias: 'X' };
+    const base: View = { ...v, sources: [A, B, COD] };
+    const { removed } = removeColumnsSources(base, 't1', ['COD'])!;
+    expect(restoreColumnsSources({ ...base, sources: [A, B] }, 't1', removed)).toEqual([A, B, COD]);
+    const twice: View = { ...v, sources: [COD, { ...COD }] };
+    const out = removeColumnsSources(twice, 't1', ['COD'])!;
+    expect(restoreColumnsSources({ ...twice, sources: out.sources }, 't1', out.removed)).toBeNull();
+  });
+
+  it('una fuente legacy sin tabla vuelve con la suya (no se resuelve contra otra primera fuente)', () => {
+    const legacy: View = { id: 'v9', name: 'V', tableId: 't1', sourceTableIds: ['t1', 't2'], sources: [{ column: 'COD', outputAlias: 'COD' }] };
+    const { removed } = removeColumnsSources(legacy, 't1', ['COD'])!;
+    expect(removed).toEqual([{ physicalName: 'COD', at: [{ index: 0, source: { column: 'COD', outputAlias: 'COD', tableId: 't1' } }] }]);
+    const now: View = { ...legacy, tableId: 't2', sourceTableIds: ['t2', 't1'], sources: [] };
+    expect(restoreColumnsSources(now, 't1', removed)).toEqual([{ column: 'COD', outputAlias: 'COD', tableId: 't1' }]);
   });
 });
 
@@ -172,5 +222,106 @@ describe('syncNewColumnsToMirrorViews — corte por cambio de sesión', () => {
     await expect(syncNewColumnsToMirrorViews(deps, 't1', [{ physicalName: 'A' }], [col('COD', 0), col('FEC', 1)]))
       .resolves.toBe(0);
     expect(updateView).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('varias columnas de una vista (borrado de varias columnas)', () => {
+  const v: View = { id: 'v1', name: 'VU_P', tableId: 'tP', sourceTableIds: ['tP'], sources: [
+    { tableId: 'tP', column: 'PA', outputAlias: 'PA' },
+    { tableId: 'tP', column: 'PB', outputAlias: 'PB' },
+    { tableId: 'tP', column: 'C1', outputAlias: 'C1' },
+    { expression: '1', outputAlias: 'UNO' },
+  ] };
+  const [PA, PB, C1, UNO] = v.sources!;
+
+  it('las quita en un solo documento y anota cada una con su posición en el documento de antes del borrado', () => {
+    expect(removeColumnsSources(v, 'tP', ['PB', 'PA'])).toEqual({
+      sources: [C1, UNO],
+      removed: [{ physicalName: 'PB', at: [{ index: 1, source: PB }] }, { physicalName: 'PA', at: [{ index: 0, source: PA }] }],
+    });
+    expect(removeColumnsSources(v, 'tP', ['PA', 'PB'])?.removed).toEqual([
+      { physicalName: 'PA', at: [{ index: 0, source: PA }] }, { physicalName: 'PB', at: [{ index: 1, source: PB }] },
+    ]);
+  });
+
+  it('salta las que la vista no lista; null si no lista ninguna', () => {
+    expect(removeColumnsSources(v, 'tP', ['ZZ', 'C1'])?.removed.map((r) => r.physicalName)).toEqual(['C1']);
+    expect(removeColumnsSources(v, 'tP', ['ZZ'])).toBeNull();
+    expect(removeColumnsSources(v, 't9', ['PA'])).toBeNull();
+  });
+
+  it('el Undo las repone en su lugar sobre el documento vigente: lo editado después queda', () => {
+    const { removed } = removeColumnsSources(v, 'tP', ['PB', 'PA'])!;
+    const NEW = { tableId: 'tP', column: 'NUEVA', outputAlias: 'NUEVA' };
+    expect(restoreColumnsSources({ ...v, sources: [C1, UNO, NEW] }, 'tP', removed)).toEqual([PA, PB, C1, UNO, NEW]);
+  });
+
+  it('se salta la que la vista ya volvió a listar (al final, como la sincroniza la espejo); null si no repone ninguna', () => {
+    const { removed } = removeColumnsSources(v, 'tP', ['PA', 'PB'])!;
+    expect(restoreColumnsSources({ ...v, sources: [C1, UNO, PA] }, 'tP', removed)).toEqual([PB, C1, UNO, PA]);
+    expect(restoreColumnsSources({ ...v, tableId: 't2', sourceTableIds: ['t2'], sources: [] }, 'tP', removed)).toBeNull();
+  });
+
+  it('las demás vuelven a su lugar entre las que quedaron aunque la que volvió a listarse esté al final', () => {
+    const [A, B, C, D] = ['A', 'B', 'C', 'D'].map((c) => ({ tableId: 'tP', column: c, outputAlias: c }));
+    const four: View = { ...v, sources: [A, B, C, D] };
+    const { removed } = removeColumnsSources(four, 'tP', ['B', 'C'])!;
+    expect(restoreColumnsSources({ ...four, sources: [A, D, B] }, 'tP', removed)).toEqual([A, C, D, B]);
+  });
+
+  it('si una no vuelve (su nombre de salida ya está tomado), las otras vuelven en su orden relativo', () => {
+    const { removed } = removeColumnsSources(v, 'tP', ['PB', 'PA'])!;
+    const X = { expression: "'x'", outputAlias: 'PA' };
+    expect(restoreColumnsSources({ ...v, sources: [C1, X] }, 'tP', removed)).toEqual([PB, C1, X]);
+  });
+
+  it('quitar y reponer deja la vista como estaba, en cualquier orden y con fuentes nuevas al final (fuzz)', () => {
+    let seed = 127;
+    const rnd = (n: number) => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+    for (let run = 0; run < 300; run += 1) {
+      const names = Array.from({ length: 2 + rnd(12) }, (_, i) => `C${i}`);
+      const sources: ViewSource[] = names.flatMap((name, i): ViewSource[] => {
+        const kind = rnd(5);
+        if (kind === 0) return [{ expression: `${i}`, outputAlias: `E${i}` }];
+        if (kind === 1) return [{ tableId: 'tQ', column: name, outputAlias: `Q_${name}` }];
+        if (kind === 2) return [{ column: name, outputAlias: name }];   // legacy: sin tabla, de la primera fuente
+        return [{ tableId: 'tP', column: name, outputAlias: name }];
+      });
+      const view: View = { id: 'vf', name: 'VF', tableId: 'tP', sourceTableIds: ['tP', 'tQ'], sources };
+      const pick = names.filter(() => rnd(2) === 0).sort(() => rnd(3) - 1);
+      const out = removeColumnsSources(view, 'tP', pick);
+      // Lo que vuelve trae su tabla explícita.
+      const expected = sources.map((x) => (out && !('tableId' in x) && !('expression' in x) && pick.includes(x.column!) ? { ...x, tableId: 'tP' } : x));
+      if (!out) { expect(sources.filter((x) => 'column' in x && !('tableId' in x && x.tableId === 'tQ') && pick.includes(x.column!))).toEqual([]); continue; }
+      expect(restoreColumnsSources({ ...view, sources: out.sources }, 'tP', out.removed)).toEqual(expected);
+      const added = { tableId: 'tP', column: 'NUEVA', outputAlias: 'NUEVA' };
+      expect(restoreColumnsSources({ ...view, sources: [...out.sources, added] }, 'tP', out.removed)).toEqual([...expected, added]);
+    }
+  });
+
+  it('cuesta lineal: 4.500 fuentes y 1.990 columnas, quitar y reponer en menos de medio segundo', () => {
+    const big: View = { id: 'vb', name: 'VB', tableId: 'tP', sourceTableIds: ['tP'],
+      sources: Array.from({ length: 4500 }, (_, i) => ({ tableId: 'tP', column: `COL_${i}`, outputAlias: `COL_${i}` })) };
+    const pick = Array.from({ length: 1990 }, (_, i) => `COL_${i * 2}`);
+    const t0 = performance.now();
+    const out = removeColumnsSources(big, 'tP', pick)!;
+    const back = restoreColumnsSources({ ...big, sources: out.sources }, 'tP', out.removed);
+    expect(performance.now() - t0).toBeLessThan(500);
+    expect(back).toEqual(big.sources);
+  });
+
+  it('proyección = alguna columna o expresión no vacía (sin ninguna, el DDL cae a SELECT *)', () => {
+    expect(hasProjection(undefined)).toBe(false);
+    expect(hasProjection([])).toBe(false);
+    expect(hasProjection([{ column: '  ' }, { table: 'T' }])).toBe(false);
+    expect(hasProjection([{ expression: ' 1 ' }])).toBe(true);
+    expect(hasProjection([{ column: 'PA' }])).toBe(true);
+  });
+
+  it('vistas que quedan sin proyección: solo las que esas columnas vacían', () => {
+    const only: View = { ...v, id: 'v2', sources: [PA, PB] };
+    const withExpr: View = { ...v, id: 'v3', sources: [PA, UNO] };
+    const other: View = { ...v, id: 'v4', sources: [C1] };
+    expect(viewsLeftEmpty([only, withExpr, other], 'tP', ['PA', 'PB']).map((x) => x.id)).toEqual(['v2']);
   });
 });

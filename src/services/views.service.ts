@@ -174,9 +174,13 @@ export async function createView(body: ViewInput): Promise<View> {
   return csvc.recordChange(a, 'views', doc.id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
 }
 
+/** El documento que graba una edición de vista (el cuerpo normalizado con su
+ *  `id`): lo usa `updateView` y lo que va en un lote (`gov.bulk.upsertView`). */
+export const viewWriteDoc = (id: string, body: ViewInput): View => ({ ...normalizeInput(body), id } as View);
+
 export async function updateView(id: string, body: ViewInput): Promise<View> {
   const a = editingCs();
-  const doc = { ...normalizeInput(body), id } as View;
+  const doc = viewWriteDoc(id, body);
   return csvc.recordChange(a, 'views', id, 'upsert', doc as unknown as Record<string, unknown>).then(() => doc);
 }
 

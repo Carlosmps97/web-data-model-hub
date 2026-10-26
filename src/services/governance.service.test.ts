@@ -70,3 +70,15 @@ describe('columnImpact', () => {
     expect(apiGet).toHaveBeenCalledWith('/api/relationships/impact?columnId=c1&changesetId=cs1');
   });
 });
+
+describe('recordChangesBulk', () => {
+  it('pasa el tamaño de tanda al servicio de versiones (el lote que va entero, en un request)', async () => {
+    const csvc = await import('./changeset.service');
+    const spy = vi.spyOn(csvc, 'recordChangesBulk').mockResolvedValue(undefined);
+    useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
+    const { recordChangesBulk, bulk } = await import('./governance.service');
+    await recordChangesBulk([bulk.deleteColumn('c1')], 1);
+    expect(spy).toHaveBeenCalledWith('cs1', [bulk.deleteColumn('c1')], 1);
+    spy.mockRestore();
+  });
+});

@@ -68,7 +68,7 @@ const VIEW_SYNCS = /^sync(New|Removed|Renamed)\w*$/;
  *  pin al empezar: llamarla después de un `await` también necesita el check
  *  del flujo). Los dibujos agendan su guardado con la sesión del momento. */
 export const STORE_WRITE_ACTIONS = new Set([
-  'addColumn', 'updateColumn', 'deleteColumn', 'reorderColumns', 'applyCanvasDrop', 'updateRelationship',
+  'addColumn', 'updateColumn', 'deleteColumn', 'deleteColumns', 'reorderColumns', 'applyCanvasDrop', 'updateRelationship',
   'deleteRelationship', 'createTable', 'updateTable', 'deleteTable', 'addExistingTables', 'addViewsToCanvas',
   'removeViewFromCanvas', 'deleteView', 'removeTableFromArea', 'saveLayout', 'saveNodePositions', 'saveAllLayout',
   'autoOrganize', 'setWireRoute', 'pasteTable', 'createTableFromSources', 'createSubjectArea', 'createFolder',

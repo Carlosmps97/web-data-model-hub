@@ -11,10 +11,36 @@ export interface Changeset {
   id: string; title: string; owner: string; status: string;
   diff?: Record<string, ChangesetDiff>;
   submittedAt?: string; reviewedBy?: string; reviewedAt?: string; reviewNote?: string;
+  /** Escrituras grabadas en el draft: cada `/changes` devuelve el número de la suya. */
+  writeSeq?: number;
 }
 
-export const recordChange = (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) =>
-  apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
+/** Lo que se escribió en un draft, para quien necesite saberlo (el canvas
+ *  recarga solo las tablas tocadas). Se avisa al terminar cada escritura, también
+ *  si falló (no se sabe si llegó; recargar esas tablas es correcto igual): una
+ *  recarga que empieza antes nunca la da por vista. `writeSeq` es el número de
+ *  la escritura en el draft (sin él si falló). */
+type DraftWriteListener = (changesetId: string, changes: readonly BulkChange[], writeSeq?: number) => void;
+const draftWriteListeners = new Set<DraftWriteListener>();
+export function onDraftWrite(listener: DraftWriteListener): () => void {
+  draftWriteListeners.add(listener);
+  return () => { draftWriteListeners.delete(listener); };
+}
+const announce = (id: string, changes: readonly BulkChange[], writeSeq?: number) => {
+  for (const listener of draftWriteListeners) {
+    try { listener(id, changes, writeSeq); } catch { /* un observador roto no cambia la escritura */ }
+  }
+};
+
+export const recordChange = async (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) => {
+  let done: Changeset | undefined;
+  try {
+    done = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
+    return done;
+  } finally {
+    announce(id, [{ collection, entityId, op, payload }], done?.writeSeq);
+  }
+};
 /** Procedencia de un alta: la muestra el historial de auditoría
  *  ("Created from …"). Solo la adjuntan paste de tabla/columnas y CTAS. */
 export interface ChangeOrigin {
@@ -38,7 +64,14 @@ export interface BulkChange {
 export const recordChangesBulk = async (id: string, changes: BulkChange[], chunkSize = 1000): Promise<Changeset | undefined> => {
   let last: Changeset | undefined;
   for (let i = 0; i < changes.length; i += chunkSize) {
-    last = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes/bulk`, { changes: changes.slice(i, i + chunkSize) });
+    const chunk = changes.slice(i, i + chunkSize);
+    let done: Changeset | undefined;
+    try {
+      done = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes/bulk`, { changes: chunk });
+      last = done;
+    } finally {
+      announce(id, chunk, done?.writeSeq);
+    }
   }
   return last;
 };

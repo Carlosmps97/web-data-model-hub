@@ -36,6 +36,7 @@ import { draggedPositions, effectiveLayout, gridSlot } from '../lib/viewerLayout
 import { dblClickShield, SHIELD_EVENTS } from '../lib/dblClickShield';
 import { bindHoverDim, createHoverIntent, hoverTargetOf } from '../lib/hoverIntent';
 import { freshRanks, nodeZ } from '../lib/nodeZ';
+import { keepMeasured, measureOptions, type BuildMemo } from '../lib/keepMeasured';
 
 const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode, subcat: SubtypeSymbolNode };
 const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge, subcat: SubtypeEdge };
@@ -110,6 +111,8 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const nodeHover = useMemo(() => createHoverIntent(setHoverNode), [setHoverNode]);
   const edgeHover = useMemo(() => createHoverIntent(setHoverEdge), [setHoverEdge]);
   useEffect(() => () => { nodeHover.dispose(); edgeHover.dispose(); }, [nodeHover, edgeHover]);
+  // Faceta y wires del armado anterior (ver `keepMeasured`).
+  const lastBuild = useRef<BuildMemo>({ wires: new Map() });
 
   // Sincroniza el diagrama (store) → nodos/aristas de React Flow.
   useEffect(() => {
@@ -180,13 +183,11 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       (tid) => ({ w: 230, h: HEADER_H + Math.max(1, colsByTable.get(tid)?.length ?? 1) * ROW_H }),
       (r) => relationshipDrift(r, [...(pkIdsByTable.get(r.parentTableId) ?? new Set<string>())]) != null,
     );
-    // Preserva los nodos de shapes ya presentes (los repuebla el efecto de drawings).
-    setNodes((prev) => [...prev.filter((n) => n.type === 'shape'), ...tableNodes, ...viewNodes, ...sub.nodes]);
     const slots = fanSlots(stdRels.map((r) => {
       const tp = tablePos.get(r.childTableId) ?? { x: 0, y: 0 };
       return { id: r.id, parentId: r.parentTableId, targetY: tp.y, targetX: tp.x };
     }));
-    setEdges([
+    const nextEdges: Edge[] = [
       // El edge siempre va padre → hijo: sale de la cabecera del padre (fan-out
       // en la zona de llave) y entra por la columna del primer par (orden de
       // llave). Los pares viven en el popup.
@@ -210,7 +211,17 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       }),
       ...views.edges,
       ...sub.edges,
-    ]);
+    ];
+    // Preserva los nodos de shapes ya presentes (los repuebla el efecto de drawings).
+    // Cada bloque conserva su tamaño medido salvo que cambien sus anclas, su caja o
+    // la faceta, que sea extremo de un wire nuevo o re-apuntado, o que ancle un wire
+    // de relación con la medida del otro modo (compacto o detallado): sin eso React
+    // Flow volvería a dibujar todos para medirlos (`keepMeasured`).
+    const { keep, memo } = measureOptions(lastBuild.current, nextEdges, viewMode);
+    lastBuild.current = memo;
+    setNodes((prev) => [...prev.filter((n) => n.type === 'shape'),
+      ...keepMeasured(prev, [...tableNodes, ...viewNodes, ...sub.nodes], keep)]);
+    setEdges(nextEdges);
   }, [diagram, viewMode, readonly, setNodes, setEdges, onEditView]);
 
   // LOD: al cruzar el umbral de zoom se parchea solo data.lod de los nodos
@@ -557,10 +568,10 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           const st = useModelerStore.getState();
           st.clearColSel(); st.closeColMenu();
         }}
-        // Menú contextual del bloque: siempre ofrece "Copy table" (copiar es
-        // lectura, vale también en readonly) y, si hay clipboard + edición, las
-        // entradas de paste. El menú de fila (copy de columnas) lo abre TableNode
-        // con stopPropagation.
+        // Menú contextual del bloque: Copy table (copiar es lectura, vale también
+        // en readonly), Paste, Remove from this canvas y Delete table… (lo que no
+        // aplica, deshabilitado). El menú de fila (las columnas seleccionadas) lo
+        // abre TableNode con stopPropagation.
         onNodeContextMenu={(e, node) => {
           // Solo tablas: el color en este canvas, que sería lo único del menú de
           // una vista, se gestiona en Model properties.

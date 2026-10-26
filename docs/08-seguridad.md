@@ -98,7 +98,7 @@ bundle redefine la ACL en cada despliegue.
 ## Sesión en cookie HttpOnly
 
 El token de sesión que emite el backend no llega al JavaScript de la página. `server.mjs` lee enteras las
-respuestas 2xx de `/api/auth/*`: si traen el token (login, login SSO y renovación), lo saca del cuerpo y lo
+respuestas 2xx de `/api/auth/*`: si traen el token (login SSO y renovación), lo saca del cuerpo y lo
 entrega en una cookie; en cada request a `/api` la cookie vuelve al backend como `X-Session-Token`. La SPA
 recibe `{user, expiresIn}`. La ruta se evalúa como la resuelve el backend (`apiRoute`: `%XX`
 decodificados y ruta normalizada), de modo que una ruta como `/api/auth/%72efresh` no saca el token por
@@ -137,16 +137,12 @@ En desarrollo, `vite.config.ts` monta el mismo manejador (`createApiHandler`) pa
 
 ## Inicio de sesión
 
-`src/features/auth/LoginScreen.tsx` ofrece dos formas de iniciar sesión, que terminan en el mismo
+`src/features/auth/LoginScreen.tsx` inicia la sesión con el SSO de la plataforma; termina en el
 `enterSession` del store:
 
 | Botón | Servicio | Endpoint | Resultado |
 |---|---|---|---|
 | **Continue with Databricks** | `auth.ssoLogin()` | `POST /api/auth/sso/login` (sin cuerpo) | Sesión si el correo de la plataforma está en la whitelist con un rol activo. Un 403 muestra el mensaje del backend (pedir a un administrador que asigne el correo a un rol). |
-| **Sign in as administrator** | `auth.login('admin', password)` | `POST /api/auth/login` | Sesión de la cuenta local `admin`. La pantalla fija el usuario `admin`; la contraseña la valida el backend con rate limit y bloqueo por intentos. |
-
-La cuenta local `admin` la crea `scripts/create_admin.py` del backend con una contraseña inicial escrita
-en ese script; se cambia desde **Admin** después de cada corrida del script.
 
 `src/services/warmup.ts` (`ensureBackendSession`) solo actúa si `API_BASE` apunta a otro origen (desarrollo
 contra un backend remoto): si el `fetch` a `/api/health` no obtiene respuesta legible, navega una sola vez
@@ -289,7 +285,7 @@ La interfaz asume que el backend verifica, en toda ruta de datos y en este orden
 3. Permiso `model.view` para ver el modelo y su metadata.
 4. Alcance por proyecto (`projectIds`).
 
-Solo quedan fuera las rutas públicas (salud, login, login SSO, warm-up), las de la sesión propia
+Solo quedan fuera las rutas públicas (salud, login SSO, warm-up), las de la sesión propia
 (`/me`, logout) y las de administración, que exigen `admin.manage`. Por eso los controles de la UI se
 limitan a no ofrecer lo que respondería 403 y a explicar el motivo.
 
@@ -324,7 +320,7 @@ Los secretos del front viven solo en el proceso de `server.mjs`, nunca en el bun
 | Fallback SPA | Una ruta que no es archivo devuelve `index.html`. |
 | Errores del proxy | 502 con mensajes genéricos (`Backend unreachable.`, `Backend authorization unavailable.`, `BACKEND_API_URL is not configured.`); el detalle va solo al log del servidor. |
 | Timeout | 120 segundos por request reenviada. |
-| Respuestas del backend | Se reenvían en streaming con sus cabeceras (incluidas las de seguridad del backend), salvo `connection`, `keep-alive`, `transfer-encoding` y las `Access-Control-*`. Las de login, login SSO y renovación se leen enteras para pasar el token a la cookie. |
+| Respuestas del backend | Se reenvían en streaming con sus cabeceras (incluidas las de seguridad del backend), salvo `connection`, `keep-alive`, `transfer-encoding` y las `Access-Control-*`. Las del login SSO y la renovación se leen enteras para pasar el token a la cookie. |
 | Sesión y CSRF | Cookie HttpOnly, `SameSite=Strict`, `__Host-` por HTTPS, y `X-Requested-With` exigido en las escrituras con la cookie (ver [Sesión en cookie HttpOnly](#sesión-en-cookie-httponly)). |
 | Cabeceras de seguridad | Los estáticos y el fallback SPA llevan `SECURITY_HEADERS` (ver la tabla siguiente). Las respuestas de `/api/*` conservan las que pone el backend. |
 
@@ -415,7 +411,6 @@ la aplicación.
 - [ ] Las respuestas de los estáticos llevan `Content-Security-Policy` y, por HTTPS, `Strict-Transport-Security`.
 - [ ] Tras el login, el navegador tiene la cookie `__Host-dmh_session` (HttpOnly, Secure, SameSite=Strict),
       `localStorage` no guarda ningún token y recargar la página conserva la sesión.
-- [ ] La contraseña de la cuenta `admin` difiere de la de `scripts/create_admin.py` del backend.
 - [ ] `npm test`, `tsc --noEmit` y `eslint` pasan sobre el commit a desplegar.
 
 ## Documentos relacionados
