@@ -1332,6 +1332,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // están siempre disponibles aunque el nodo no exista en el DOM.
     raf(() => raf(() => {
       const n = rf.getNode(tableId); if (!n) return;
+      // Una vista se encuadra como una tabla: entera si entra legible y, si es más
+      // alta que el canvas, desde su cabecera (centrar su medio dejaba el nombre fuera).
+      const area = n.type === 'view' ? paneSize() : null;
+      if (area) {
+        void rf.setViewport(focusViewport(flowBox(n, get().viewMode), [], area, rf.getZoom()), { duration: 420 });
+        return;
+      }
       const w = n.measured?.width ?? n.width ?? 260;
       const h = n.measured?.height ?? n.height ?? 140;
       const zoom = Math.min(1.2, Math.max(0.8, rf.getZoom()));

@@ -933,11 +933,15 @@ El primer lote que falla corta la lectura con su error, y los resultados conserv
 ### Exports
 
 - Ambos botones **Download .xlsx** exigen el permiso `export` (deshabilitados con el motivo si falta).
-- **Export to Excel por niveles**: el workbook se arma en el navegador con SheetJS (`xlsx`). Se resuelven
-  las filas (la selección, o todas las que pasan los filtros con «Select all»), se leen por lotes solo los
-  niveles marcados y se agrega una hoja por nivel con las funciones puras de `lib/reportRows.ts`. El nombre
-  sale de `levelsFileName()` e incluye la versión en modo versión.
-- **Export with a template**: `SheetTemplateCard` usa las mismas filas y `fetchColumnsFor`;
+- **Export to Excel**: se resuelven las filas (la selección, o todas las que pasan los filtros con
+  «Select all»), se leen por lotes solo los datos de las hojas incluidas, se aplica la búsqueda
+  (`narrowSheetData`) y cada hoja da sus filas con las mismas funciones que la pestaña
+  (`workbookSheet`, `lib/reportSheets.ts`). `buildXlsx` (`lib/xlsxWriter.ts`) escribe el libro en flujo
+  con `fflate` —celdas de más de 32 767 caracteres en columnas de continuación, hojas de más de
+  1 048 575 filas en hojas de continuación— y `saveXlsx` lo descarga. El nombre sale de
+  `reportFileName()` e incluye la versión en modo versión.
+- **Export with a template**: `SheetTemplateCard` usa las mismas filas y `fetchColumnsFor` (columnas
+  acotadas por la búsqueda) y el mismo escritor;
   `templateRows()` (`lib/sheetTemplates.ts`) arma una fila por columna y aplica los filtros de la
   plantilla en el navegador (`compileFilters`). Las plantillas se leen y guardan en
   `/api/projects/{pid}/sheet-templates`; no hay endpoint de filtrado.
@@ -959,7 +963,7 @@ sequenceDiagram
   RF->>API: POST .../query por lotes, máximo 4 en vuelo
   API-->>RF: filas por lote
   RF-->>RS: filas en orden de lotes
-  RS->>RS: SheetJS arma el workbook y descarga
+  RS->>RS: buildXlsx escribe el libro en flujo y saveXlsx lo descarga
   alt 403 o 404 del backend en modo versión
     RS->>W: onVersionError
     W->>W: vuelve a Production con aviso

@@ -7,6 +7,7 @@
 // lectura).
 //   GET /api/reporting/tables?projectId=&schema=   → ReportTableRow[]
 //   GET /api/reporting/columns?projectId=&tableId= → ReportColumnRow[] (sin id = todas)
+//   GET /api/reporting/search?projectId=&q=&scope= → {tableIds} (columnas, definiciones o vistas)
 //   POST /api/reporting/columns/query · /views/query · /insights/relationships/query
 //        → lotes de ids en el cuerpo
 // `changesetId` = una versión propia sin publicar (sin él, producción).
@@ -127,6 +128,17 @@ export interface ReportTableFilters {
   offset?: number;
 }
 
+/** `GET /api/reporting/search` — ids de las tablas del proyecto (o de la versión
+ *  propia) con una columna cuyo nombre contiene `q` (`columns`), cuya definición o
+ *  la de alguna de sus columnas lo contiene (`definitions`) o que son fuente de una
+ *  vista cuyo nombre lo contiene (`views`). */
+export function searchReportTables(projectId: string, q: string, scope: 'columns' | 'definitions' | 'views',
+                                   changesetId?: string | null): Promise<string[]> {
+  const qs = new URLSearchParams({ q, scope });
+  return apiGet<{ tableIds: string[] }>(`${API_BASE}/api/reporting/search${withScope(projectId, qs, changesetId)}`)
+    .then((r) => r.tableIds);
+}
+
 /** Lista las filas de reporte por tabla del proyecto, opcionalmente acotadas por esquema. */
 export function listReportTables(projectId: string, filters: ReportTableFilters = {}, changesetId?: string | null): Promise<ReportTableRow[]> {
   const qs = new URLSearchParams();
@@ -169,7 +181,7 @@ export function queryReportViews(projectId: string, tableIds: string[], changese
   return apiPost<ReportViewRow[]>(`${API_BASE}/api/reporting/views/query`, lotBody(projectId, tableIds, changesetId));
 }
 
-/** Una fila de la hoja Relationships del export por niveles. */
+/** Una fila de la hoja Relationships del export por hojas. */
 export interface RelationshipRow {
   /** Una fila por par de columnas: una FK compuesta repite `id` con
    *  `pairIndex` incremental. parent = lado PK, child = lado FK. */

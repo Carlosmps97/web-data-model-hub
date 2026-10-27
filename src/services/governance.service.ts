@@ -155,7 +155,7 @@ export const searchTables = async (q: string, limit = 50, schema?: string) => {
   if (schema) params.set('schema', schema);
   return apiGet<CanonicalTable[]>(`${PROJECT()}/catalog/tables?${params.toString()}`);
 };
-// ── Buscador del Model: tablas · columnas · definiciones ──
+// ── Buscador del Model: tablas · columnas · definiciones · vistas ──
 export interface ModelSearchCanvas { id: string; name: string; projectId?: string | null }
 export interface ModelSearchTable {
   id: string; physicalName: string; logicalName: string; schema?: string | null; description?: string | null;
@@ -167,17 +167,30 @@ export interface ModelSearchColumn {
   physicalName: string; logicalName: string; dataType?: string | null; description?: string | null;
   canvases: ModelSearchCanvas[];
 }
-export type ModelSearchScope = 'all' | 'tables' | 'columns' | 'definitions';
+/** Vista del buscador: solo existe en el modelo físico. */
+export interface ModelSearchView {
+  id: string; name: string; schema?: string | null;
+  /** Tablas fuente como `esquema.TABLA`. */
+  sourceTables: string[];
+  columnCount: number;
+  /** Tiene User-Defined SQL. */
+  custom: boolean;
+  /** Canvases donde la vista es miembro (vacío = no se dibuja en ninguno). */
+  canvases: ModelSearchCanvas[];
+}
+export type ModelSearchScope = 'all' | 'tables' | 'columns' | 'definitions' | 'views';
 export interface ModelSearchResult {
   tables: ModelSearchTable[];
   columns: ModelSearchColumn[];
   /** Columnas cuya definición funcional contiene el término. */
   definitions: ModelSearchColumn[];
+  /** Vistas cuyo nombre contiene el término (con `scope=views` o `views` en «All»). */
+  views: ModelSearchView[];
   /** Tope por grupo aplicado por el backend (tamaño de página). */
   limit: number;
   /** Offset de esta página y el de la siguiente por grupo (null = agotado). */
   offset: number;
-  next: { tables: number | null; columns: number | null; definitions: number | null };
+  next: { tables: number | null; columns: number | null; definitions: number | null; views: number | null };
   scope: ModelSearchScope;
 }
 /** Selectores y filtros del buscador: alcance por grupo; la jerarquía del
@@ -190,15 +203,18 @@ export interface ModelSearchOptions {
   /** Página siguiente (viene de `ModelSearchResult.next`). */
   offset?: number;
   scope?: ModelSearchScope;
+  /** Con el alcance «All», incluir el grupo de vistas (solo en el modelo físico). */
+  views?: boolean;
   folderId?: string | null;
   canvasId?: string | null;
 }
-/** Un request, tres grupos, cada hit con sus canvases. Con changeset activo
+/** Un request, todos los grupos, cada hit con sus canvases. Con changeset activo
  *  (draft, request en visor o snapshot `asof:`) el backend aplica el overlay.
  *  `q` vacío navega el alcance de los filtros; `offset` pagina. */
 export const searchModel = async (q: string, opts: ModelSearchOptions = {}) => {
   const params = new URLSearchParams({ q, limit: String(opts.limit ?? 25), scope: opts.scope ?? 'all' });
   if (opts.offset) params.set('offset', String(opts.offset));
+  if (opts.views) params.set('views', 'true');
   if (opts.folderId) params.set('folderId', opts.folderId);
   if (opts.canvasId) params.set('canvasId', opts.canvasId);
   const a = active();

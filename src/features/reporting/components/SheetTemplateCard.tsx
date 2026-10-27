@@ -1,13 +1,12 @@
 /**
  * SheetTemplateCard — «Export with a template»: baja una hoja con el formato
  * fijo de una plantilla guardada del proyecto (p. ej. QA_MODELO), sobre la
- * misma selección y filtros que el export por niveles; los filtros de la
+ * misma selección y filtros que el export por hojas; los filtros de la
  * plantilla eligen, además, qué filas salen. Las plantillas son dato: se crean
  * y editan en «Manage templates…» sin redesplegar.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
 import { Download, FileSpreadsheet } from 'lucide-react';
 import { Button } from '@/components/ui';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -16,16 +15,20 @@ import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.servi
 import { listSheetTemplates } from '../sheetTemplates.service';
 import { templateFileName, templateRows, type SheetTemplate } from '../lib/sheetTemplates';
 import { readErrorText } from '../lib/reportVersions';
+import { buildXlsx, saveXlsx } from '../lib/xlsxWriter';
 import SheetTemplateEditor, { filtersLabel } from './SheetTemplateEditor';
 
 export default function SheetTemplateCard({
-  projectId, selectedCount, disabled, resolveTables, fetchColumns, onBusyChange, versionToastId,
+  projectId, selectedCount, disabled, resolveTables, fetchColumns, keepColumn, onBusyChange, versionToastId,
 }: {
   projectId: string;
   selectedCount: number;
   disabled: boolean;
   resolveTables: () => Promise<ReportTableRow[]>;
   fetchColumns: (tableIds: string[]) => Promise<ReportColumnRow[]>;
+  /** Columnas que deja la búsqueda del Reporting (sin búsqueda, todas): se
+   *  aplica después de numerar la posición de cada columna en su tabla. */
+  keepColumn?: (c: ReportColumnRow) => boolean;
   /** Avisa si hay un export en curso (y `false` al desmontarse): el Reporting
    *  deshabilita Project / Version mientras tanto. */
   onBusyChange?: (busy: boolean) => void;
@@ -69,17 +72,22 @@ export default function SheetTemplateCard({
       const tables = await resolveTables();
       if (tables.length === 0) { toast.error('Select at least one row to export.'); return; }
       const columns = await fetchColumns(tables.map((t) => t.id));
-      const rows = templateRows(selected, tables, columns);
+      const rows = templateRows(selected, tables, columns, keepColumn);
       const filtered = (selected.filters?.length ?? 0) > 0;
-      if (filtered && rows.length === 0 && columns.length > 0) {
-        toast.info('No rows match the template filters — nothing was exported.');
+      if ((filtered || keepColumn) && rows.length === 0 && columns.length > 0) {
+        // ¿Quién dejó 0 filas? Los filtros solos, o la búsqueda sobre lo que dejan.
+        const byFilters = !keepColumn || templateRows(selected, tables, columns).length === 0;
+        toast.info(byFilters
+          ? 'No rows match the template filters — nothing was exported.'
+          : 'No columns match the search — nothing was exported.');
         return;
       }
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(rows, { header: selected.columns.map((c) => c.header) });
-      XLSX.utils.book_append_sheet(wb, ws, selected.sheetName);
-      XLSX.writeFile(wb, templateFileName(selected, new Date()));   // nombre de la plantilla
-      toast.success(filtered
+      // Una hoja con las columnas fijas de la plantilla, escrita en flujo (sin límite de tamaño).
+      const blob = await buildXlsx([{
+        name: selected.sheetName, header: selected.columns.map((c) => c.header), count: rows.length, rowAt: (i) => rows[i],
+      }]);
+      saveXlsx(blob, templateFileName(selected, new Date()));   // nombre de la plantilla
+      toast.success(filtered || keepColumn
         ? `Exported ${rows.length} row${rows.length === 1 ? '' : 's'} with the ${selected.name} template.`
         : `Exported with the ${selected.name} template.`);
     } catch (err: unknown) {

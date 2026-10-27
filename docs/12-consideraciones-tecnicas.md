@@ -256,7 +256,10 @@ La grilla de `src/screens/ReportingScreen.tsx` no se virtualiza: acota lo que tr
   2 000 y relaciones en tandas de 300, con a lo sumo 4 lotes en vuelo (`LOTS_IN_FLIGHT`). Con todos los
   lotes a la vez, el timeout de cada pedido correría mientras espera en cola; el primer lote que falla
   corta la lectura.
-- Los exports a Excel se arman en el navegador solo con la selección.
+- Los exports a Excel se arman en el navegador solo con la selección y se escriben en flujo
+  (`src/features/reporting/lib/xlsxWriter.ts`): la memoria queda acotada al archivo comprimido, no al
+  libro entero, y los límites de Excel (32 767 caracteres por celda, 1 048 576 filas por hoja) se
+  cumplen con columnas y hojas de continuación.
 
 ### Listas virtualizadas
 

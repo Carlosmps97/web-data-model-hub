@@ -203,11 +203,12 @@ export function compileFilters(filters: SheetTemplateFilter[] | undefined): RowT
   return (c, t, position) => tests.every((test) => test(c, t, position));
 }
 
-/** Filas de la hoja: una por columna que cumple los filtros, ordenadas por tabla
- *  y orden único (PK primero), con la posición 1-based real dentro de cada
- *  tabla (filtrar no renumera). */
+/** Filas de la hoja: una por columna que cumple los filtros (y, si se da,
+ *  `keepColumn`: la búsqueda del Reporting), ordenadas por tabla y orden único
+ *  (PK primero), con la posición 1-based real dentro de cada tabla (filtrar no
+ *  renumera). */
 export function templateRows(tpl: Pick<SheetTemplateBody, 'columns' | 'filters'>, tables: ReportTableRow[],
-                             columns: ReportColumnRow[]): SheetRow[] {
+                             columns: ReportColumnRow[], keepColumn?: (c: ReportColumnRow) => boolean): SheetRow[] {
   const byId = new Map(tables.map((t) => [t.id, t] as const));
   const sorted = sortColumnRows(columns, (id) => byId.get(id)?.physicalName ?? id);
   const pos = new Map<string, number>();
@@ -216,7 +217,7 @@ export function templateRows(tpl: Pick<SheetTemplateBody, 'columns' | 'filters'>
     const p = (pos.get(c.tableId) ?? 0) + 1;
     pos.set(c.tableId, p);
     const t = byId.get(c.tableId);
-    if (!keep(c, t, p)) return [];
+    if (!keep(c, t, p) || (keepColumn && !keepColumn(c))) return [];
     return [Object.fromEntries(tpl.columns.map((col) => [col.header, cell(col.source, c, t, p)]))];
   });
 }

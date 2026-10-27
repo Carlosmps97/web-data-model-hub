@@ -12,15 +12,13 @@ import { byText, resetFake, runEffects, textOf } from './fakeReact.testutil';
 
 vi.mock('react', async (orig) => (await import('./fakeReact.testutil')).fakeReact(await orig<object>()));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
-vi.mock('xlsx', () => ({
-  utils: { book_new: vi.fn(() => ({})), json_to_sheet: vi.fn(() => ({})), book_append_sheet: vi.fn() }, writeFile: vi.fn(),
-}));
+vi.mock('../lib/xlsxWriter', () => ({ buildXlsx: vi.fn(async () => new Blob()), saveXlsx: vi.fn() }));
 vi.mock('@/store/useAuthStore', () => ({
   useAuthStore: (pick: (s: unknown) => unknown) => pick({ user: { username: 'ana' }, has: () => false }),
 }));
 vi.mock('../sheetTemplates.service', () => ({ listSheetTemplates: vi.fn(async () => []) }));
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
+import { buildXlsx, saveXlsx, type WorkbookSheet } from '../lib/xlsxWriter';
 import SheetTemplateCard from './SheetTemplateCard';
 
 const TPL: SheetTemplate = {
@@ -41,6 +39,11 @@ function render(over: Partial<Props> = {}, busy = false, tpl: SheetTemplate = TP
     resolveTables: async () => [TABLE], fetchColumns: async () => [], ...over,
   } as Props);
 }
+/** Filas de la hoja que recibió el escritor (la única del libro). */
+const writtenRows = () => {
+  const [[sheets]] = vi.mocked(buildXlsx).mock.calls as unknown as [[WorkbookSheet[]]];
+  return Array.from({ length: sheets[0].count }, (_, i) => sheets[0].rowAt(i));
+};
 const clickExport = async (tree: unknown) => {
   (byText(tree, null, 'Download .xlsx').props.onClick as () => Promise<void>)();
   await tick();
@@ -94,15 +97,25 @@ describe('SheetTemplateCard', () => {
     fail(new ApiError('That version is no longer open.', 409));
     await done;
     expect(toast.error).not.toHaveBeenCalled();
-    expect(XLSX.writeFile).not.toHaveBeenCalled();
+    expect(saveXlsx).not.toHaveBeenCalled();
   });
 
   it('un export que termina bien sigue bajando el archivo', async () => {
     const tree = render();
     runEffects();
     await clickExport(tree);
-    expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
+    expect(saveXlsx).toHaveBeenCalledTimes(1);
     expect(toast.success).toHaveBeenCalledWith('Exported with the QA template.');
+  });
+
+  it('escribe una hoja con el nombre y las columnas fijas de la plantilla, sin límite de tamaño', async () => {
+    const tree = render();
+    runEffects();
+    await clickExport(tree);
+    const [[sheets]] = vi.mocked(buildXlsx).mock.calls as unknown as [[WorkbookSheet[]]];
+    expect(sheets.map((x) => [x.name, x.header])).toEqual([['QA', ['TABLA']]]);
+    expect(writtenRows()).toEqual([]);                 // la tabla no tiene columnas
+    expect(vi.mocked(saveXlsx).mock.calls[0][1]).toMatch(/^QA-\d{4}-\d{2}-\d{2}\.xlsx$/);
   });
 
   describe('con filtros', () => {
@@ -120,8 +133,8 @@ describe('SheetTemplateCard', () => {
       const tree = render({ fetchColumns: async () => [column('ID', true), column('NOMBRE', false)] }, false, PK_ONLY);
       runEffects();
       await clickExport(tree);
-      expect(vi.mocked(XLSX.utils.json_to_sheet).mock.calls[0][0]).toEqual([{ CAMPO: 'ID' }]);
-      expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
+      expect(writtenRows()).toEqual([{ CAMPO: 'ID' }]);
+      expect(saveXlsx).toHaveBeenCalledTimes(1);
       expect(toast.success).toHaveBeenCalledWith('Exported 1 row with the QA template.');
     });
 
@@ -130,14 +143,47 @@ describe('SheetTemplateCard', () => {
       runEffects();
       await clickExport(tree);
       expect(toast.info).not.toHaveBeenCalled();
-      expect(XLSX.writeFile).toHaveBeenCalledTimes(1);
+      expect(saveXlsx).toHaveBeenCalledTimes(1);
+    });
+
+    it('la búsqueda del Reporting recorta sin renumerar la posición de la columna', async () => {
+      const POS: SheetTemplate = { ...TPL, columns: [{ header: 'CAMPO', source: 'column.physicalName' }, { header: 'ORDEN', source: 'column.position' }] };
+      const cols = [{ ...column('ID', true), ordinal: 1 }, { ...column('NOMBRE', false), ordinal: 2 }, { ...column('CODCLIENTE', false), ordinal: 3 }];
+      const tree = render({ fetchColumns: async () => cols, keepColumn: (c) => c.physicalName.includes('COD') }, false, POS);
+      runEffects();
+      await clickExport(tree);
+      expect(writtenRows()).toEqual([{ CAMPO: 'CODCLIENTE', ORDEN: 3 }]);
+      expect(toast.success).toHaveBeenCalledWith('Exported 1 row with the QA template.');
+    });
+
+    it('con filtros que sí dejan filas y una búsqueda que las vacía, el aviso culpa a la búsqueda', async () => {
+      const tree = render({ fetchColumns: async () => [column('ID', true)], keepColumn: () => false }, false, PK_ONLY);
+      runEffects();
+      await clickExport(tree);
+      expect(saveXlsx).not.toHaveBeenCalled();
+      expect(toast.info).toHaveBeenCalledWith('No columns match the search — nothing was exported.');
+    });
+
+    it('si los filtros solos ya no dejan filas, el aviso culpa a los filtros (haya o no búsqueda)', async () => {
+      const tree = render({ fetchColumns: async () => [column('NOMBRE', false)], keepColumn: () => true }, false, PK_ONLY);
+      runEffects();
+      await clickExport(tree);
+      expect(toast.info).toHaveBeenCalledWith('No rows match the template filters — nothing was exported.');
+    });
+
+    it('si la búsqueda no deja filas, avisa y no baja un libro vacío', async () => {
+      const tree = render({ fetchColumns: async () => [column('NOMBRE', false)], keepColumn: () => false });
+      runEffects();
+      await clickExport(tree);
+      expect(saveXlsx).not.toHaveBeenCalled();
+      expect(toast.info).toHaveBeenCalledWith('No columns match the search — nothing was exported.');
     });
 
     it('si ninguna fila cumple, avisa y no baja nada', async () => {
       const tree = render({ fetchColumns: async () => [column('NOMBRE', false)] }, false, PK_ONLY);
       runEffects();
       await clickExport(tree);
-      expect(XLSX.writeFile).not.toHaveBeenCalled();
+      expect(saveXlsx).not.toHaveBeenCalled();
       expect(toast.info).toHaveBeenCalledWith('No rows match the template filters — nothing was exported.');
     });
   });

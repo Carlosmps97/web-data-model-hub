@@ -168,6 +168,12 @@ describe('filtros de la plantilla', () => {
     expect(rowsWith({ source: 'column.isPrimaryKey', op: 'isNotEmpty' },
       { source: 'column.udp:Particion', op: 'isNotEmpty' })).toEqual([['CODMES', 2]]);
   });
+  it('la búsqueda del Reporting recorta como un filtro más: la posición sigue siendo la real', () => {
+    const keep = (c: ReportColumnRow) => c.physicalName.startsWith('TIP');
+    expect(templateRows({ columns: COLUMNS }, [T], COLS, keep).map((r) => [r.CAMPO, r.POS])).toEqual([['TIPRANGOPOBLACION', 3]]);
+    expect(templateRows({ columns: COLUMNS, filters: [{ source: 'column.isPrimaryKey', op: 'isNotEmpty' }] }, [T], COLS, keep))
+      .toEqual([]);
+  });
   it('cada operador, sin distinguir mayúsculas ni espacios al borde', () => {
     expect(rowsWith({ source: 'column.physicalName', op: 'is', value: ' codmes ' })).toEqual([['CODMES', 2]]);
     expect(rowsWith({ source: 'column.physicalName', op: 'isNot', value: 'CODMES' })).toHaveLength(2);

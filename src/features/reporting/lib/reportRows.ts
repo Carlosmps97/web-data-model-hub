@@ -148,6 +148,25 @@ export function viewSheetRow(v: ReportViewRow): SheetRow {
   };
 }
 
+/** Fila de la hoja «View columns»: la vista y el detalle de una de sus columnas
+ *  (alias de salida, tabla/columna de origen, casteo y transformación). */
+export function viewColumnSheetRow(v: Pick<ReportViewRow, 'name' | 'schema'>, c: ReportViewRow['columns'][number]): SheetRow {
+  return {
+    View: v.name,
+    Schema: v.schema ?? '',
+    'Output alias': str(c.outputAlias),
+    'Source table': str(c.sourceTable),
+    'Source column': str(c.sourceColumn),
+    'Cast type': str(c.castType),
+    'Expression / transform': str(c.expression),
+  };
+}
+
+/** Fila de la hoja «Definitions»: la definición funcional de la tabla. */
+export function definitionSheetRow(t: ReportTableRow): SheetRow {
+  return { Table: t.physicalName, 'Logical name': t.logicalName, 'Functional definition': t.description };
+}
+
 /** Fila de la hoja «Relationships»: detalle por par de columnas (una FK
  *  compuesta emite una fila por par, con «Pair i/n»). Las frases de la
  *  relación van junto a sus otros datos de relación. */

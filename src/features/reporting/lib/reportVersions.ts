@@ -1,7 +1,7 @@
 /**
  * Versión del Reporting: producción o una versión propia sin publicar
  * (borrador o en revisión) del proyecto. Funciones puras del combo Version y
- * del nombre del Excel por niveles.
+ * del nombre del Excel por hojas.
  */
 import { ApiError } from '@/services/http';
 import type { VersionRow } from '@/types/versioning';
@@ -27,9 +27,9 @@ export function productionLabel(prod: VersionRow | null): string {
   return prod?.versionLabel ? `Production · ${prod.versionLabel}` : 'Production';
 }
 
-/** Excel por niveles: `data-model-hub-report-<proyecto>[-<versión propia>]-<fecha>.xlsx`.
+/** Excel por hojas: `data-model-hub-report-<proyecto>[-<versión propia>]-<fecha>.xlsx`.
  *  Fecha local de quien exporta (la misma del nombre de la plantilla). */
-export function levelsFileName(projectName: string, versionLabel: string | null, date: Date): string {
+export function reportFileName(projectName: string, versionLabel: string | null, date: Date): string {
   const safe = (s: string) => s.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/^_+|_+$/g, '');
   const slug = safe(projectName) || 'project';
   const ver = versionLabel ? `-${safe(versionLabel) || 'draft'}` : '';

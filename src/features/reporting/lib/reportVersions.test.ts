@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiGet, ApiError } from '@/services/http';
 import type { VersionRow } from '@/types/versioning';
 import {
-  levelsFileName, ownOpenVersions, productionLabel, readErrorText, vanishedVersionText, versionGoneText, versionOptionLabel,
+  reportFileName, ownOpenVersions, productionLabel, readErrorText, vanishedVersionText, versionGoneText, versionOptionLabel,
 } from './reportVersions';
 
 const v = (over: Partial<VersionRow>): VersionRow => ({
@@ -28,16 +28,16 @@ describe('reportVersions', () => {
     expect(productionLabel(v({ versionLabel: 'v12', status: 'approved' }))).toBe('Production · v12');
     expect(productionLabel(null)).toBe('Production');
   });
-  it('nombre del Excel por niveles: la versión propia va en el nombre', () => {
+  it('nombre del Excel por hojas: la versión propia va en el nombre', () => {
     const d = new Date(2026, 8, 28, 12, 0, 0);   // hora local: el nombre usa la fecha local
-    expect(levelsFileName('MODELO VENTAS', null, d)).toBe('data-model-hub-report-MODELO_VENTAS-2026-09-28.xlsx');
-    expect(levelsFileName('MODELO VENTAS', 'v14', d)).toBe('data-model-hub-report-MODELO_VENTAS-v14-2026-09-28.xlsx');
+    expect(reportFileName('MODELO VENTAS', null, d)).toBe('data-model-hub-report-MODELO_VENTAS-2026-09-28.xlsx');
+    expect(reportFileName('MODELO VENTAS', 'v14', d)).toBe('data-model-hub-report-MODELO_VENTAS-v14-2026-09-28.xlsx');
   });
   it('la fecha del nombre es la local de quien exporta (como la plantilla), no la UTC', () => {
     // Lima 23:59 ya es el día siguiente en UTC; 00:00 de un huso al este de UTC, el anterior.
-    expect(levelsFileName('MODELO VENTAS', null, new Date(2026, 8, 28, 23, 59, 59)))
+    expect(reportFileName('MODELO VENTAS', null, new Date(2026, 8, 28, 23, 59, 59)))
       .toBe('data-model-hub-report-MODELO_VENTAS-2026-09-28.xlsx');
-    expect(levelsFileName('MODELO VENTAS', 'v14', new Date(2026, 8, 28, 0, 0, 1)))
+    expect(reportFileName('MODELO VENTAS', 'v14', new Date(2026, 8, 28, 0, 0, 1)))
       .toBe('data-model-hub-report-MODELO_VENTAS-v14-2026-09-28.xlsx');
   });
 });

@@ -68,7 +68,8 @@ export function itemWhere(
   const ex = it.existing ?? null;
   if (it.where === 'deleted') {
     const p = it.deletedParent;
-    let out = p ? `${p.kind === 'schema' ? 'Schema' : 'Table'} ${p.name} deleted in production` : 'Deleted in production';
+    const parent = p?.kind === 'schema' ? 'Schema' : p?.kind === 'column' ? 'Column' : 'Table';
+    let out = p ? `${parent} ${p.name} deleted in production` : 'Deleted in production';
     if (ex?.version) out += ` by ${ex.version}`;
     if (ex?.owner) out += ` (${userName(ex.owner)})`;
     if (ex?.publishedAt) out += ` on ${fmt(ex.publishedAt)}`;

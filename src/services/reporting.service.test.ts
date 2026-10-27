@@ -6,7 +6,7 @@ vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
 import { apiGet, apiPost } from '@/services/http';
 import {
   countReportTables, listReportColumns, listReportFilters, listReportTables, queryRelationshipsReport, queryReportColumns,
-  queryReportViews,
+  queryReportViews, searchReportTables,
 } from './reporting.service';
 
 beforeEach(() => {
@@ -22,6 +22,15 @@ describe('reporting.service', () => {
     expect(Object.fromEntries(url().searchParams)).toEqual({ limit: '50', projectId: 'p1', changesetId: 'cs1' });
     vi.mocked(apiGet).mockClear();
     await listReportFilters('p1', null);
+    expect(url().searchParams.has('changesetId')).toBe(false);
+  });
+  it('búsqueda por columnas, definiciones o vistas: GET con el texto y el alcance; la versión solo si hay', async () => {
+    vi.mocked(apiGet).mockResolvedValue({ tableIds: ['t1', 't2'] });
+    expect(await searchReportTables('p1', 'cod cli', 'columns', 'cs1')).toEqual(['t1', 't2']);
+    expect(url().pathname).toBe('/api/reporting/search');
+    expect(Object.fromEntries(url().searchParams)).toEqual({ q: 'cod cli', scope: 'columns', projectId: 'p1', changesetId: 'cs1' });
+    vi.mocked(apiGet).mockClear();
+    await searchReportTables('p1', 'vw', 'views', null);
     expect(url().searchParams.has('changesetId')).toBe(false);
   });
   it('conteo con versión', async () => {

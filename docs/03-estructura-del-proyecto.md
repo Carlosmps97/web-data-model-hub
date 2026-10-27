@@ -161,13 +161,16 @@ features/<nombre>/
 
 ```text
 features/reporting/
-├── index.ts                         # Exporta SheetTemplateCard y las funciones de filas, lecturas y versiones
+├── index.ts                         # Exporta SheetTemplateCard y las funciones de hojas, búsqueda, lecturas, Excel y versiones
 ├── components/
 │   ├── SheetTemplateCard.tsx        # Tarjeta de plantillas de hoja en Reporting (export con plantilla)
 │   ├── SheetTemplateEditor.tsx      # Editor de columnas y filtros de una plantilla
 │   └── fakeReact.testutil.ts        # Soporte de pruebas: render sin DOM
 ├── lib/
-│   ├── reportRows.ts                # Filas de hoja por nivel (tablas, columnas, relaciones, vistas)
+│   ├── reportRows.ts                # Filas de cada hoja (tablas, columnas, relaciones, vistas)
+│   ├── reportSheets.ts              # Hojas del Excel = pestañas de la pantalla
+│   ├── reportSearch.ts              # Búsqueda con alcance y recorte de columnas y vistas
+│   ├── xlsxWriter.ts                # Escritura del .xlsx en flujo (límites de Excel sin perder datos)
 │   ├── reportFetch.ts               # Lecturas en lotes con tope de concurrencia
 │   ├── reportVersions.ts            # Opciones y textos de versión del Reporting
 │   └── sheetTemplates.ts            # Columnas y filtros de filas de una plantilla
@@ -180,14 +183,19 @@ Su barrel publica solo lo que usa `src/screens/ReportingScreen.tsx`:
 // API pública de la feature `reporting`. Se importa desde `@/features/reporting`,
 // nunca desde sus subdirectorios.
 export { default as SheetTemplateCard } from './components/SheetTemplateCard';
-export {
-  COLUMN_BATCH, columnSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows, tableSheetRow,
-  udpKeysOf, unionSorted, viewSheetRow,
-} from './lib/reportRows';
+export { COLUMN_BATCH, sheetHeaders, unionSorted } from './lib/reportRows';
 export type { SheetRow } from './lib/reportRows';
+export { REPORT_SHEETS, sheetNeeds, workbookSheet } from './lib/reportSheets';
+export type { SheetData, SheetKey } from './lib/reportSheets';
+export {
+  columnFilter, narrowSheetData, scopeSheet, SEARCH_MAX_CHARS, SEARCH_MIN_CHARS, SEARCH_SCOPES, searchTerm, serverScope,
+  tableMatches,
+} from './lib/reportSearch';
+export type { SearchScope } from './lib/reportSearch';
+export { buildXlsx, saveXlsx } from './lib/xlsxWriter';
 export { fetchColumnsFor, fetchRelationshipsFor, fetchViewsFor } from './lib/reportFetch';
 export {
-  levelsFileName, ownOpenVersions, productionLabel, readErrorText, vanishedVersionText, VERSION_CLOSED_TEXT, VERSION_TOAST,
+  reportFileName, ownOpenVersions, productionLabel, readErrorText, vanishedVersionText, VERSION_CLOSED_TEXT, VERSION_TOAST,
   versionGoneText, versionOptionLabel,
 } from './lib/reportVersions';
 ```
@@ -195,7 +203,7 @@ export {
 Y la pantalla lo consume por el barrel:
 
 ```ts
-import { SheetTemplateCard, fetchColumnsFor, sheetHeaders } from '@/features/reporting';
+import { SheetTemplateCard, buildXlsx, fetchColumnsFor, workbookSheet } from '@/features/reporting';
 ```
 
 No todas las features usan las tres subcarpetas: `standards` tiene sus services y su lógica pura en la

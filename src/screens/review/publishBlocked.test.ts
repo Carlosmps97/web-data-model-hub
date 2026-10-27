@@ -83,7 +83,7 @@ describe('publishBlocked: vistas con nombre repetido', () => {
     expect(groupBlockedItems([{ ...deleted, kind: 'relationship' }])[0].label).toBe('Relationships');
   });
 
-  it('dice qué se borró cuando no es el objeto mismo: su tabla o su esquema', () => {
+  it('dice qué se borró cuando no es el objeto mismo: su tabla, su esquema o la columna de un par', () => {
     const col: PublishBlockedItem = {
       kind: 'column', entityId: 'c1', name: 'CODNUEVO', where: 'deleted', message: 'm', tableName: 'M_NUEVA',
       deletedParent: { kind: 'schema', id: 's1', name: 'STG' }, afterOpened: true,
@@ -93,6 +93,8 @@ describe('publishBlocked: vistas con nombre repetido', () => {
       .toBe('Schema STG deleted in production by v7 (Admin) on D(2026-10-21T10:00:00+00:00) after this version was opened');
     expect(itemWhere({ ...col, deletedParent: { kind: 'table', name: 'M_CUENTA' } }, fmt, userName))
       .toMatch(/^Table M_CUENTA deleted in production by v7/);
+    const rel: PublishBlockedItem = { ...col, kind: 'relationship', deletedParent: { kind: 'column', id: 'c9', name: 'CODCLIENTE' } };
+    expect(itemWhere(rel, fmt, userName)).toMatch(/^Column CODCLIENTE deleted in production by v7/);
     // Un esquema borrado antes de abrirse la versión: sin la coletilla.
     expect(itemWhere({ ...col, afterOpened: false, existing: null }, fmt, userName)).toBe('Schema STG deleted in production');
     expect(itemContext({ ...col, kind: 'table', schema: 'STG' })).toBe('schema STG');

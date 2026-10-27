@@ -460,18 +460,20 @@ y se borra el objeto, sin abrir un canvas.
 ### Find a table: búsqueda del modelo (`SearchModelPopup.tsx`)
 
 Se abre con el botón de búsqueda del grupo **Search & inspect** o con Ctrl/Cmd+K. Busca en toda la
-versión por tabla, columna y definición de columna (`lib/searchModel.ts`, coincidencia «contiene» sin
-distinguir mayúsculas).
+versión por tabla, columna, definición de columna y, en el modelo físico, vista (`lib/searchModel.ts`,
+coincidencia «contiene» sin distinguir mayúsculas).
 
-- Alcances **All**, **Tables / entities**, **Columns / attributes** y **Definitions**, y filtros en
-  cascada con la jerarquía del Model Explorer: Project › Sub-project › Domain › Model. Cada nivel queda
-  bloqueado hasta elegir el anterior.
+- Alcances **All**, **Tables / entities**, **Columns / attributes**, **Definitions** y, solo en físico
+  (las vistas no existen en el modelo lógico), **Views**; y filtros en cascada con la jerarquía del Model
+  Explorer: Project › Sub-project › Domain › Model. Cada nivel queda bloqueado hasta elegir el anterior.
+  Con un filtro, una vista entra si es miembro de un canvas del alcance.
+- Cada vista muestra `esquema.NOMBRE`, sus tablas fuente y su número de columnas.
 - Abierto desde un canvas, arranca acotado a él; **Search everywhere** amplía a toda la versión.
 - En el alcance All cada grupo muestra su primera página y **Show all…** pasa al alcance del grupo,
   que carga por bloques de 50 al llegar al final (o con **Load more**).
 - Cada resultado muestra los canvases donde está y dos acciones: **Locate on canvas** (cambia al
-  canvas si hace falta, centra la tabla y, para columnas, selecciona la fila y abre su panel; también
-  con clic o Enter) e **Inspect metadata** (abre el Object Inspector).
+  canvas si hace falta, centra la tabla o la vista y, para columnas, selecciona la fila y abre su panel;
+  también con clic o Enter) e **Inspect metadata** (abre el Object Inspector).
 
 ## Model: toolbar
 
@@ -791,32 +793,46 @@ corre un export, los combos Project y Version quedan deshabilitados («Wait for 
 
 ### Grilla y filtros
 
-- Columnas: Table · Schema · Subject area · #Columns · #Relations · Projects · Functional definition.
-- Búsqueda por nombre de tabla y filtros de selección múltiple (Schema · Subject area, con búsqueda
-  «contiene» en sus popovers) que se acotan entre sí; los combos listan el catálogo completo del
-  proyecto (`GET /api/reporting/filters`).
-- **Show** presenta la grilla como Tables, Columns o Tables + Columns, con las mismas funciones que
-  arman las hojas del Excel (`lib/reportRows.ts`).
+- Búsqueda con alcance, como el buscador del Model (`lib/reportSearch.ts`): **Tables / entities**
+  (nombre físico o lógico de la tabla, en el navegador), **Columns / attributes** (tablas con una columna
+  cuyo nombre lo contiene), **Definitions** (definición de la tabla o de alguna de sus columnas) y
+  **Views** (tablas fuente de una vista cuyo nombre lo contiene). Las tres últimas las resuelve
+  `GET /api/reporting/search`; con ellas, las hojas de columnas y de vistas muestran solo lo que
+  coincide, en pantalla y en el Excel. Elegir un alcance muestra su hoja (Columns, Views o Tables).
+- Filtros de selección múltiple (Schema · Subject area, con búsqueda «contiene» en sus popovers) que se
+  acotan entre sí; los combos listan el catálogo completo del proyecto (`GET /api/reporting/filters`).
+- Una pestaña por hoja del Excel (`lib/reportSheets.ts`): **Tables · Columns · Tables + Columns ·
+  Relationships · Views · View columns · Definitions**. El nombre muestra la hoja en la grilla, con las
+  mismas filas que el Excel; la casilla la incluye en el libro (por defecto, Tables y Columns). La
+  pestaña Tables es la grilla de selección: Table · Schema · Subject area · #Columns · #Relations ·
+  Projects · Functional definition, con casillas por fila. Las otras muestran las tablas elegidas (o las
+  filtradas): hasta 300 tablas y las primeras 5 000 filas, con los textos largos recortados.
 - Sin filtros, la grilla carga páginas de 50 tablas al hacer scroll y la barra muestra el total real
   (`/tables/count`); **Select all** selecciona todas las tablas del proyecto, cargadas o no. El primer
   filtro carga el conjunto completo para que el filtrado sea exacto.
 - Si falla la carga, se ve «Couldn't load the tables» con **Retry**; si falla una página siguiente,
   el pie dice «Couldn't load more tables.» con **Retry** de esa página.
 
-### Export to Excel por niveles
+### Export to Excel
 
-La card **Export to Excel** arma en el navegador un libro `xlsx` con una hoja por nivel marcado:
-Tables overview, Columns detail, Tables + Columns (joined), Relationships (una fila por par de
-columnas, con cardinalidad y frases), Views detail (hojas Views y View columns) y Definitions. Incluye
-solo las filas seleccionadas (o todas las que pasan los filtros, con Select all). Columnas, vistas y
-relaciones se leen por lotes de ids con `POST` (`lib/reportFetch.ts`), a lo sumo cuatro en vuelo. El
-archivo se llama `data-model-hub-report-<proyecto>[-<versión>]-<AAAA-MM-DD>.xlsx`. El botón
-**Download .xlsx** exige el permiso `export`; sin él se muestra deshabilitado con el motivo.
+La card **Export to Excel** lista las hojas incluidas en las pestañas y baja un libro `xlsx` con ellas,
+en el orden del libro, con las filas seleccionadas (o todas las que pasan los filtros, con Select all) y
+la búsqueda aplicada. Columnas, vistas y relaciones se leen por lotes de ids con `POST`
+(`lib/reportFetch.ts`), a lo sumo cuatro en vuelo. El archivo se llama
+`data-model-hub-report-<proyecto>[-<versión>]-<AAAA-MM-DD>.xlsx`. El botón **Download .xlsx** exige el
+permiso `export`; sin él se muestra deshabilitado con el motivo.
+
+El libro se escribe en flujo (`lib/xlsxWriter.ts`, con `fflate`): se comprime por bloques mientras se
+escribe, así que la memoria no crece con el tamaño del modelo y un proyecto entero se exporta con todas
+sus hojas. Los límites de Excel se cumplen sin perder datos: un texto de más de 32 767 caracteres (el
+SQL de una vista grande) sigue en las columnas siguientes, «SQL (2)», «SQL (3)»…, y una hoja de más de
+1 048 575 filas sigue en «<hoja> (2)».
 
 ### Plantillas de hoja
 
 La card **Export with a template** (`SheetTemplateCard.tsx`) baja una sola hoja con el formato fijo de
-una plantilla guardada del proyecto, sobre la misma selección y filtros. Las plantillas son dato del
+una plantilla guardada del proyecto, sobre la misma selección, filtros y búsqueda, con el mismo escritor
+en flujo. Las plantillas son dato del
 proyecto (`lib/sheetTemplates.ts`): nombre, hoja, columnas (encabezado → dato del modelo o UDP),
 filtros de filas y nombre de archivo. Cada usuario gestiona las suyas; un administrador, además, las
 compartidas. Su **Download .xlsx** sigue la misma regla del permiso `export`. El nombre de hoja sigue las

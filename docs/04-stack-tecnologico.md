@@ -48,9 +48,9 @@ Son las que terminan en el bundle del navegador (`dependencies` de `package.json
 | `lucide-react` | `1.21.0` | Íconos SVG de toda la UI. |
 | `@fontsource-variable/geist` | `5.2.9` | Tipografía Geist (UI), servida desde el propio build: se importa en `src/main.tsx` y se embebe en los exports del diagrama (`features/modeler/lib/exportFonts.ts`, con `?inline`). |
 | `@fontsource-variable/geist-mono` | `5.2.8` | Tipografía Geist Mono (datos y SQL), con el mismo uso que Geist. |
-| `xlsx` | `0.20.3` (`file:vendor/xlsx-0.20.3.tgz`) | SheetJS: export a Excel del Reporting (`screens/ReportingScreen.tsx`, `features/reporting/components/SheetTemplateCard.tsx`) y lectura del libro de la carga masiva (`features/upload/lib/parseWorkbook.ts`). |
+| `xlsx` | `0.20.3` (`file:vendor/xlsx-0.20.3.tgz`) | SheetJS: lectura del libro de la carga masiva (`features/upload/lib/parseWorkbook.ts`). |
 | `yaml` | `2.9.0` | Lectura y escritura YAML del editor de DDL Export Rules; único import en `features/standards/ddlRules.service.ts`. |
-| `fflate` | `0.8.3` | Empaquetado ZIP del export HTML del diagrama (`zipSync`) y compresión del reporte PDF (`zlibSync`); import dinámico en `features/modeler/exportPackage.ts`. |
+| `fflate` | `0.8.3` | Empaquetado ZIP del export HTML del diagrama (`zipSync`) y compresión del reporte PDF (`zlibSync`), con import dinámico en `features/modeler/exportPackage.ts`; y escritura en flujo de los Excel del Reporting (`Zip` + `ZipDeflate`, `features/reporting/lib/xlsxWriter.ts`). |
 
 Los identificadores del cliente se generan con `crypto.randomUUID()` del navegador, sin librería.
 

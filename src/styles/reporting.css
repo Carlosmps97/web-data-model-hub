@@ -30,6 +30,10 @@
 }
 .dmh-rep-search input::placeholder { color: var(--text-placeholder); }
 .dmh-rep-search input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px var(--primary-muted); }
+/* Alcance + texto de la búsqueda: van juntos al partirse la barra. */
+.dmh-rep-searchgroup { display: flex; align-items: center; gap: 8px; flex: 1 1 640px; min-width: 0; }
+.dmh-rep-searchgroup .rd-seg { flex: none; }
+.dmh-rep-search .dmh-rep-search-spin { position: absolute; right: 12px; top: 50%; margin-top: -6px; color: var(--blue); }
 
 /* ── Filtro combobox de selección múltiple ─────────────────────────── */
 .dmh-rep-filter { position: relative; }
@@ -81,6 +85,26 @@
 
 /* Los botones de la barra de filtros miden lo mismo que sus controles. */
 .dmh-rep-bar .dmh-btn { height: 38px; }
+
+/* ── Pestañas = hojas del Excel: el nombre muestra la hoja, la casilla la incluye ── */
+/* En anchos chicos las pestañas pasan a una segunda línea: nada queda oculto ni con barra de desplazamiento. */
+.dmh-rep-sheets { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--border-2); }
+.dmh-rep-sheet {
+  position: relative; display: inline-flex; align-items: center; flex: none; padding-left: 12px;
+  border-radius: 8px 8px 0 0; color: var(--text-muted);
+}
+.dmh-rep-sheet:hover { background: var(--fill-1); }
+.dmh-rep-sheet.is-active { color: var(--primary); }
+.dmh-rep-sheet.is-active::after { content: ''; position: absolute; left: 8px; right: 8px; bottom: 0; height: 2px; border-radius: 2px; background: var(--primary); }
+.dmh-rep-sheet-box {
+  display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: none; padding: 0;
+  border: 1.5px solid var(--border-3); border-radius: 4px; background: var(--surface); color: #fff; cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.dmh-rep-sheet-box svg { width: 11px; height: 11px; }
+.dmh-rep-sheet-box.is-on { background: var(--green); border-color: var(--green); }
+.dmh-rep-sheet-name { padding: 8px 12px 9px 7px; border: none; background: none; font-family: var(--ui); font-size: 13px; font-weight: 600; color: inherit; cursor: pointer; white-space: nowrap; }
+.dmh-rep-sheethint { padding: 8px 2px 10px; font-size: 12px; color: var(--text-muted-2); }
 
 /* ── Tabla de metadatos ────────────────────────────────────────────── */
 .dmh-rep-tablewrap {
@@ -154,6 +178,7 @@
 }
 .dmh-rep-chip--sa { background: var(--purple-tint); color: #6D44C9; }
 .dmh-rep-chip--proj { background: var(--blue-tint); color: var(--blue); }
+.dmh-rep-chip--sheet { background: var(--green-tint); color: var(--green-deep); }
 .dmh-rep-chip-none { font-size: 12px; color: var(--text-muted-3); }
 
 /* ── Estados (cargando / vacío) ────────────────────────────────────── */
@@ -172,22 +197,6 @@
 .dmh-rep-card-ico { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 8px; background: var(--green-tint); color: var(--green-deep); }
 .dmh-rep-card-title { font-size: 14px; font-weight: 700; color: var(--navy); }
 .dmh-rep-card-desc { padding: 0 16px 12px; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
-
-.dmh-rep-levels { padding: 0 12px 4px; display: flex; flex-direction: column; gap: 2px; }
-.dmh-rep-level {
-  display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 8px; border: none;
-  background: none; border-radius: 8px; cursor: pointer; text-align: left; transition: background .12s;
-}
-.dmh-rep-level:hover { background: var(--fill-1); }
-.dmh-rep-level-box {
-  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; flex: none;
-  margin-top: 1px; border: 1.5px solid var(--border-3); border-radius: 5px; color: #fff; transition: background .12s, border-color .12s;
-}
-.dmh-rep-level.is-on .dmh-rep-level-box { background: var(--green); border-color: var(--green); }
-.dmh-rep-level-box svg { width: 12px; height: 12px; }
-.dmh-rep-level-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.dmh-rep-level-name { font-size: 13px; font-weight: 600; color: var(--navy); }
-.dmh-rep-level-hint { font-size: 11.5px; color: var(--text-muted-2); line-height: 1.35; }
 
 .dmh-rep-card-foot { padding: 12px 16px 16px; }
 .dmh-rep-export-btn { width: 100%; justify-content: center; height: 40px; }

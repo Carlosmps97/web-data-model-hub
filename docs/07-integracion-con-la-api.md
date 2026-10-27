@@ -414,7 +414,7 @@ ruta se mantienen en `docs/07-api.md` y `docs/08-seguridad.md` del backend.
 | `listDomains` | GET | `/api/projects/{project_id}/domains` | Control común | Dominios (parent domains) del proyecto. |
 | `listTables` | GET | `/api/projects/{project_id}/catalog/tables` | Control común | Tablas del catálogo publicado (sin versión activa). |
 | `searchTables` | GET | `/api/projects/{project_id}/catalog/tables` | Control común | Búsqueda de tablas por nombre (`q`, `limit`, `schema`). |
-| `searchModel` | GET | `/api/projects/{project_id}/catalog/search` | Control común | Buscador del Model: tablas, columnas y definiciones. |
+| `searchModel` | GET | `/api/projects/{project_id}/catalog/search` | Control común | Buscador del Model: tablas, columnas, definiciones y, en físico, vistas. |
 | `listColumns` | GET | `/api/catalog/tables/{table_id}/columns` | Control común | Columnas publicadas de una tabla. |
 | `listRelationships` | GET | `/api/relationships` | Control común | Relaciones publicadas, opcionalmente de una tabla. |
 | `tableUsage` | GET | `/api/catalog/tables/{table_id}/usage` | Control común | Canvases donde aparece una tabla (con `changesetId`, incluye el overlay del draft). |
@@ -441,6 +441,7 @@ ruta se mantienen en `docs/07-api.md` y `docs/08-seguridad.md` del backend.
 | `listReportFilters` | GET | `/api/reporting/filters` | Control común | Opciones de filtro: esquemas y canvases del alcance. |
 | `listReportTables` | GET | `/api/reporting/tables` | Control común | Filas de tablas para la grilla de Reporting. |
 | `countReportTables` | GET | `/api/reporting/tables/count` | Control común | Total de tablas del alcance. |
+| `searchReportTables` | GET | `/api/reporting/search` | Control común | Tablas que coinciden por nombre de columna, definición o nombre de vista. |
 | `listReportColumns` | GET | `/api/reporting/columns` | Control común | Columnas de una tabla o de todo el proyecto. |
 | `queryReportColumns` | POST | `/api/reporting/columns/query` | Control común | Columnas de un lote de tablas. |
 | `queryReportViews` | POST | `/api/reporting/views/query` | Control común | Vistas derivadas de un lote de tablas. |

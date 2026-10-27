@@ -88,14 +88,15 @@ describe('enfocar la tabla seleccionada con sus vistas', () => {
     expect(f.setCenter).not.toHaveBeenCalled();
   });
 
-  it('Locate de una vista: la centra sin seleccionarla', async () => {
+  it('Locate de una vista: la encuadra como a una tabla, sin seleccionarla', async () => {
     const f = flow();
     useModelerStore.setState({ flow: f as never });
     useModelerStore.getState().focusTable('v1');
     await sleep(60);
     expect(useModelerStore.getState().selectedTableId).toBeNull();
-    expect(f.setCenter).toHaveBeenCalledTimes(1);
-    expect(f.setViewport).not.toHaveBeenCalled();
+    expect(f.setCenter).not.toHaveBeenCalled();
+    expect(f.setViewport).toHaveBeenCalledTimes(1);
+    expect(f.setViewport.mock.calls[0][0]).toEqual(focusViewport(box(V), [], { width: 704, height: 730 }, 0.3));
   });
 
   it('deseleccionar (null) no mueve el canvas', async () => {

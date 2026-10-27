@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import type { RelationshipRow } from '@/services/reporting.service';
 import {
-  chunk, columnSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows, tableSheetRow, udpKeysOf,
-  unionSorted, viewSheetRow,
+  chunk, columnSheetRow, definitionSheetRow, joinedSheetRow, relationshipSheetRow, sheetHeaders, sortColumnRows,
+  tableSheetRow, udpKeysOf, unionSorted, viewColumnSheetRow, viewSheetRow,
 } from './reportRows';
 
 const T: ReportTableRow = {
@@ -95,6 +95,27 @@ describe('viewSheetRow', () => {
     });
     expect(Object.keys(row)).not.toContain('Mode');
     expect(row).toMatchObject({ View: 'VW', Schema: 'gold_vu', '#Columns': 0, 'User-Defined SQL': 'SELECT 1', SQL: 'CREATE VIEW …' });
+  });
+});
+
+describe('viewColumnSheetRow / definitionSheetRow', () => {
+  const V = {
+    id: 'v1', name: 'VW', schema: 'gold_vu', sourceTableIds: ['t1'], sourceTables: ['gold.HD'], showOnCanvas: true,
+    columns: [],
+  };
+  it('View columns: la vista y el detalle de la columna (alias, origen, casteo, transformación)', () => {
+    expect(viewColumnSheetRow(V, { outputAlias: 'COD', sourceTable: 'gold.HD', sourceColumn: 'CODCLI', castType: 'INT',
+      expression: 'TRIM(CODCLI)' })).toEqual({
+      View: 'VW', Schema: 'gold_vu', 'Output alias': 'COD', 'Source table': 'gold.HD', 'Source column': 'CODCLI',
+      'Cast type': 'INT', 'Expression / transform': 'TRIM(CODCLI)',
+    });
+    expect(viewColumnSheetRow({ ...V, schema: null }, {})).toEqual({
+      View: 'VW', Schema: '', 'Output alias': '', 'Source table': '', 'Source column': '', 'Cast type': '',
+      'Expression / transform': '',
+    });
+  });
+  it('Definitions: tabla, nombre lógico y definición funcional', () => {
+    expect(definitionSheetRow(T)).toEqual({ Table: 'M_CLIENTE', 'Logical name': 'Cliente', 'Functional definition': 'Maestro de clientes' });
   });
 });
 

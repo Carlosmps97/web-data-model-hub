@@ -101,7 +101,7 @@ describe('scroll infinito: la página siguiente que falla', () => {
     let failPage: (e: unknown) => void = () => {};
     vi.mocked(listReportTables).mockImplementationOnce(() => new Promise((_, reject) => { failPage = reject; }));
     scrollToEnd();                                           // página 2 en vuelo
-    const search = [...walk(tree)].find((e) => e.type === 'input' && e.props['aria-label'] === 'Search tables by name')!;
+    const search = [...walk(tree)].find((e) => e.type === 'input' && e.props['aria-label'] === 'Search the report')!;
     (search.props.onChange as (e: unknown) => void)({ target: { value: 'T1' } });
     rerender();
     await tick(320);                                         // debounce: arranca la carga completa

@@ -3,13 +3,16 @@
  *
  * Distribución:
  *   · cabecera: antetítulo REPORTING + h1 "Reporting" + texto breve
- *   · barra de filtros: selector Project, búsqueda por nombre de tabla y
- *     comboboxes de selección múltiple (Schema · Subject area) que filtran la
+ *   · barra de filtros: selector Project, búsqueda con alcance (Tables /
+ *     entities · Columns / attributes · Definitions · Views, `lib/reportSearch`)
+ *     y comboboxes de selección múltiple (Schema · Subject area) que filtran la
  *     grilla en vivo, más Clear
- *   · tabla de metadata: Table · Schema · Subject area · #Columns · #Relations ·
+ *   · pestañas = hojas del Excel (`lib/reportSheets`): el nombre muestra la hoja
+ *     en la grilla y la casilla la incluye en el libro. La pestaña Tables es la
+ *     grilla de selección: Table · Schema · Subject area · #Columns · #Relations ·
  *     Projects · Functional definition; filas cebra, hover, encabezado fijo
- *   · panel derecho: checklist "Export to Excel" de niveles de detalle → libro
- *     xlsx (una hoja por nivel marcado) y, debajo, pequeños indicadores KPI
+ *   · panel derecho: "Export to Excel" (las hojas incluidas → un libro xlsx
+ *     escrito en flujo, `lib/xlsxWriter`), plantillas y pequeños indicadores KPI
  *
  * Datos: reporting.service (tablas + columnas + filtros), siempre de un solo
  * proyecto (el selector Project al inicio de la barra es obligatorio; se
@@ -21,10 +24,11 @@
  * proyecto (cargadas o no): el export baja entonces el set completo. Los popovers
  * de Schema y Subject area tienen una búsqueda «contiene».
  * Los combos de filtro listan el catálogo completo (`/reporting/filters`), no solo
- * los valores de las 50 filas cargadas al inicio; el selector Show presenta la
- * grilla como Tables · Columns · Tables + Columns (con las mismas funciones puras
- * que arman las filas del Excel, `lib/reportRows`), y el export incluye la hoja
- * unida.
+ * los valores de las 50 filas cargadas al inicio. Cada pestaña arma sus filas con
+ * las mismas funciones puras que el Excel (`lib/reportSheets`); con la búsqueda
+ * por columnas, definiciones o vistas, el servidor dice qué tablas entran
+ * (`/reporting/search`) y las hojas de columnas y vistas muestran solo lo que
+ * coincide, en pantalla y en el Excel.
  * Combo Version (producción o una versión propia sin publicar): con una versión
  * propia, la grilla, los filtros y los dos exports son de esa versión; los lotes
  * de ids viajan en el cuerpo de un POST (en la URL superarían el tope de
@@ -33,7 +37,6 @@
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { toast } from 'sonner';
-import * as XLSX from 'xlsx';
 import {
   Check,
   ChevronDown,
@@ -45,10 +48,11 @@ import {
 } from 'lucide-react';
 
 import {
-  COLUMN_BATCH, SheetTemplateCard, columnSheetRow, fetchColumnsFor, fetchRelationshipsFor, fetchViewsFor,
-  joinedSheetRow, levelsFileName, ownOpenVersions, productionLabel, readErrorText, relationshipSheetRow, sheetHeaders,
-  sortColumnRows, tableSheetRow, udpKeysOf, unionSorted, vanishedVersionText, VERSION_TOAST, versionGoneText,
-  versionOptionLabel, viewSheetRow, type SheetRow,
+  buildXlsx, COLUMN_BATCH, columnFilter, fetchColumnsFor, fetchRelationshipsFor, fetchViewsFor, reportFileName,
+  narrowSheetData, ownOpenVersions, productionLabel, readErrorText, REPORT_SHEETS, saveXlsx, scopeSheet, SEARCH_MAX_CHARS,
+  SEARCH_MIN_CHARS, SEARCH_SCOPES, searchTerm, serverScope, sheetHeaders, sheetNeeds, SheetTemplateCard, tableMatches, unionSorted, vanishedVersionText,
+  VERSION_TOAST, versionGoneText, versionOptionLabel, workbookSheet,
+  type SearchScope, type SheetData, type SheetKey, type SheetRow,
 } from '@/features/reporting';
 import SearchSelect from '@/features/modeler/components/SearchSelect';
 import { Button } from '@/components/ui';
@@ -63,31 +67,9 @@ import { NO_EXPORT_HINT } from '@/lib/permissionHints';
 import type { Project } from '@/types/model';
 import type { VersionRow } from '@/types/versioning';
 import {
-  countReportTables, listReportFilters, listReportTables,
-  type ReportColumnRow, type ReportFilterOptions, type ReportTableRow,
+  countReportTables, listReportFilters, listReportTables, searchReportTables,
+  type ReportFilterOptions, type ReportTableRow,
 } from '@/services/reporting.service';
-
-// ── niveles de export ─────────────────────────────────────────────────────────
-
-type LevelKey = 'tables' | 'columns' | 'joined' | 'relationships' | 'views' | 'definitions';
-/** Qué muestra la grilla en pantalla. */
-type ShowMode = 'tables' | 'columns' | 'joined';
-
-interface LevelSpec {
-  key: LevelKey;
-  name: string;
-  hint: string;
-  sheet: string;
-}
-
-const EXPORT_LEVELS: LevelSpec[] = [
-  { key: 'tables', name: 'Tables overview', hint: 'One row per table: schema, counts, subject areas, projects, definition, flags, UDPs.', sheet: 'Tables' },
-  { key: 'columns', name: 'Columns detail', hint: 'Every field: physical & logical type, PK/FK, nullable, partition, domain, ordinals, overrides, UDPs.', sheet: 'Columns' },
-  { key: 'joined', name: 'Tables + Columns (joined)', hint: 'One row per column carrying its table metadata — everything in a single sheet.', sheet: 'Tables + Columns' },
-  { key: 'relationships', name: 'Relationships', hint: 'One row per relationship: tables, columns, cardinality and verb phrases.', sheet: 'Relationships' },
-  { key: 'views', name: 'Views detail', hint: 'Views derived from the selected tables: sources, User-Defined SQL, per-column aliases, casts and expressions.', sheet: 'Views' },
-  { key: 'definitions', name: 'Definitions', hint: 'Functional definition text per table.', sheet: 'Definitions' },
-];
 
 /** Proyecto inicial del módulo: el de la sesión de canvas → el último abierto → el primero A–Z. */
 function initialProjectId(projects: Project[]): string | null {
@@ -172,6 +154,12 @@ export function VersionPick({ production, own, versionId, onPick, busy = false }
 const GRID_ROW_CAP = 5000;
 /** Tamaño de página del scroll infinito de la grilla de tablas. */
 const TABLE_PAGE = 50;
+/** Caracteres de una celda en pantalla (un SQL de vista puede tener un millón); el Excel lleva el texto completo. */
+const CELL_TEXT_CAP = 300;
+/** Caracteres del tooltip de una celda larga. */
+const CELL_TITLE_CAP = 2000;
+/** Espera tras la última tecla antes de buscar en el servidor. */
+const SEARCH_DEBOUNCE_MS = 300;
 
 /** Falló la carga de tablas de la grilla: se indica el error (no «No tables to
  *  report yet», como en un proyecto vacío). Retry relanza solo la carga que
@@ -198,14 +186,28 @@ export function MoreTablesError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
-/** Grilla genérica de filas ya aplanadas por las mismas funciones
- *  puras del Excel (`lib/reportRows`): encabezados = unión de claves, scroll
- *  horizontal, tope de filas en pantalla (el export no lo tiene). */
-function MetaGrid({ rows, loading, notice, scopeLabel }: {
-  rows: SheetRow[]; loading: boolean; notice: string | null; scopeLabel: string;
+const clip = (text: string, cap: number) => (text.length > cap ? `${text.slice(0, cap)}…` : text);
+
+/** Grilla genérica de una hoja: las primeras filas armadas por las mismas
+ *  funciones puras del Excel (`lib/reportSheets`); encabezados = unión de
+ *  claves, scroll horizontal, tope de filas y de texto por celda en pantalla (el
+ *  export no los tiene). `total` = filas de la hoja completa. */
+function MetaGrid({ rows, total, loading, notice, scopeLabel, onRetry, errorTitle = "Couldn't load this sheet" }: {
+  rows: SheetRow[]; total: number; loading: boolean; notice: string | null; scopeLabel: string;
+  /** La lectura falló: se ofrece reintentar. */
+  onRetry?: () => void;
+  errorTitle?: string;
 }) {
   const headers = useMemo(() => sheetHeaders(rows), [rows]);
-  const shown = rows.length > GRID_ROW_CAP ? rows.slice(0, GRID_ROW_CAP) : rows;
+  if (onRetry) {
+    return (
+      <div className="dmh-rep-state" role="alert">
+        <div className="dmh-rep-state-t">{errorTitle}</div>
+        <div className="dmh-rep-state-m">Check your connection and try again.</div>
+        <div style={{ marginTop: 12 }}><Button variant="secondary" onClick={onRetry}>Retry</Button></div>
+      </div>
+    );
+  }
   if (notice) {
     return (
       <div className="dmh-rep-state">
@@ -214,11 +216,11 @@ function MetaGrid({ rows, loading, notice, scopeLabel }: {
       </div>
     );
   }
-  if (loading) return <div className="dmh-rep-state"><div className="dmh-rep-state-t">Loading columns…</div></div>;
-  if (rows.length === 0) {
+  if (loading) return <div className="dmh-rep-state"><div className="dmh-rep-state-t">Loading…</div></div>;
+  if (total === 0) {
     return (
       <div className="dmh-rep-state">
-        <div className="dmh-rep-state-t">No columns in scope</div>
+        <div className="dmh-rep-state-t">No rows in scope</div>
         <div className="dmh-rep-state-m">{scopeLabel}</div>
       </div>
     );
@@ -226,17 +228,21 @@ function MetaGrid({ rows, loading, notice, scopeLabel }: {
   return (
     <>
       <div className="dmh-rep-gridnote">
-        {rows.length.toLocaleString()} row{rows.length === 1 ? '' : 's'} · {scopeLabel}
-        {rows.length > GRID_ROW_CAP && ` · showing the first ${GRID_ROW_CAP.toLocaleString()} — export to Excel for the full set`}
+        {total.toLocaleString()} row{total === 1 ? '' : 's'} · {scopeLabel}
+        {total > rows.length && ` · showing the first ${rows.length.toLocaleString()} — export to Excel for the full set`}
       </div>
       <table className="dmh-rep-table dmh-rep-table--wide">
         <thead><tr>{headers.map((h) => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>
-          {shown.map((r, i) => (
+          {rows.map((r, i) => (
             <tr key={i}>
               {headers.map((h) => {
                 const v = r[h];
-                return <td key={h} title={typeof v === 'string' && v.length > 60 ? v : undefined}>{v === '' || v == null ? <span className="dmh-rep-chip-none">—</span> : String(v)}</td>;
+                return (
+                  <td key={h} title={typeof v === 'string' && v.length > 60 ? clip(v, CELL_TITLE_CAP) : undefined}>
+                    {v === '' || v == null ? <span className="dmh-rep-chip-none">—</span> : clip(String(v), CELL_TEXT_CAP)}
+                  </td>
+                );
               })}
             </tr>
           ))}
@@ -472,7 +478,7 @@ export default function ReportingScreenWrapper() {
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
   }, [recheckVersions]);
-  // Export en curso (por niveles o con plantilla): Project y Version quedan
+  // Export en curso (por hojas o con plantilla): Project y Version quedan
   // deshabilitados hasta que termine.
   const [exportBusy, setExportBusy] = useState(false);
   const pick = <ProjectPick projects={projects} projectId={projectId} onPick={setProjectId} busy={exportBusy} />;
@@ -523,7 +529,8 @@ export function ReportingScreen({
   const [schemaSel, setSchemaSel] = useState<Set<string>>(new Set());
   const [areaSel, setAreaSel] = useState<Set<string>>(new Set());
 
-  const [levels, setLevels] = useState<Set<LevelKey>>(new Set<LevelKey>(['tables', 'columns']));
+  // Hojas que van al Excel: las casillas de las pestañas.
+  const [marked, setMarked] = useState<Set<SheetKey>>(new Set<SheetKey>(['tables', 'columns']));
   const [exporting, setExporting] = useState(false);
   // La card de plantillas avisa si exporta; con cualquiera de los dos exports en
   // curso el wrapper deshabilita Project / Version.
@@ -557,8 +564,10 @@ export function ReportingScreen({
     listReportFilters(projectId, changesetId).then((f) => { if (!cancelled) setServerFilters(f); }).catch(() => {});
     return () => { cancelled = true; };
   }, [projectId, changesetId]);
-  // Qué muestra la grilla: tablas, sus columnas o la fila unida.
-  const [show, setShow] = useState<ShowMode>('tables');
+  // Hoja en pantalla: la pestaña activa.
+  const [sheet, setSheet] = useState<SheetKey>('tables');
+  // Alcance de la búsqueda (Tables / entities · Columns / attributes · Definitions · Views).
+  const [scope, setScope] = useState<SearchScope>('tables');
 
   // Sin filtros la grilla se carga por páginas (orden físico) y pide la siguiente
   // cuando el centinela entra al viewport; con un filtro se descarga el set
@@ -685,18 +694,47 @@ export function ReportingScreen({
     );
     obs.observe(el);
     return () => obs.disconnect();
-  }, [fullLoad, hasMore, show, loading, tables.length, moreError]);
+  }, [fullLoad, hasMore, sheet, loading, tables.length, moreError]);
   // Quedan tablas del proyecto sin cargar en la grilla (sin filtros).
   const partial = !fullLoad && hasMore;
+
+  // Búsqueda: por nombre de tabla en el navegador; por columnas, definiciones o
+  // vistas, el servidor dice qué tablas entran (con debounce; solo vale la
+  // respuesta del término y alcance vigentes). Mientras tanto la grilla espera.
+  const term = searchTerm(search, scope);
+  const remote = serverScope(scope, term);
+  const matchKey = remote ? `${remote}:${term}` : '';
+  // `failed`: la búsqueda falló (la grilla lo dice y ofrece Retry, `searchTry`).
+  const [match, setMatch] = useState<{ key: string; ids: Set<string>; failed?: boolean } | null>(null);
+  const [searchTry, setSearchTry] = useState(0);
+  useEffect(() => {
+    if (!remote) return undefined;
+    let cancelled = false;
+    // Volver a una búsqueda que falló la reintenta: mientras tanto, «searching…».
+    setMatch((m) => (m?.key === matchKey && m.failed ? null : m));
+    const handle = setTimeout(() => {
+      searchReportTables(projectId, term, remote, changesetId)
+        .then((ids) => { if (!cancelled) setMatch({ key: matchKey, ids: new Set(ids) }); })
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          readFailed(err, "Couldn't run the search.");
+          setMatch({ key: matchKey, ids: new Set(), failed: true });
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => { cancelled = true; clearTimeout(handle); };
+  }, [remote, term, matchKey, projectId, changesetId, readFailed, searchTry]);
+  const matchIds = remote && match?.key === matchKey ? match.ids : null;
+  const searching = remote !== null && matchIds === null;
+  const searchFailed = remote !== null && match?.key === matchKey && !!match.failed;
+  const retrySearch = () => { setMatch(null); setSearchTry((n) => n + 1); };
+  /** Elegir un alcance muestra su hoja natural (Columns → Columns, Views → Views). */
+  const pickScope = (next: SearchScope) => { setScope(next); setSheet(scopeSheet(next)); };
 
   // Predicados por faceta. Las opciones de una faceta excluyen su propia
   // selección, así los filtros se acotan entre sí (acumulativos / por facetas).
   const passSearch = useCallback(
-    (t: ReportTableRow) => {
-      const q = search.trim().toLowerCase();
-      return !q || t.physicalName.toLowerCase().includes(q) || t.logicalName.toLowerCase().includes(q);
-    },
-    [search],
+    (t: ReportTableRow) => tableMatches(t, scope, term, matchIds),
+    [scope, term, matchIds],
   );
   const passSchema = useCallback(
     (t: ReportTableRow) => schemaSel.size === 0 || schemaSel.has(t.schema),
@@ -749,7 +787,7 @@ export function ReportingScreen({
   const allRowsSelected = allSelected || (filtered.length > 0 && selectedIds.size === filtered.length);
 
   // Filas a exportar: la selección o, con «Select all» y páginas pendientes,
-  // todas las del proyecto (filtradas). Las comparten el export por niveles y el
+  // todas las del proyecto (filtradas). Las comparten el export por hojas y el
   // de plantilla.
   const resolveExportRows = useCallback(async (): Promise<ReportTableRow[]> => (
     allSelected && partial
@@ -759,13 +797,15 @@ export function ReportingScreen({
   // Columnas de la card de plantillas: en modo versión, un error avisa al wrapper
   // (pasándole el error) y la card muestra su toast con el id compartido. Si esta
   // pantalla se desmontó, el error es de una versión que dejó de estar en
-  // pantalla: no toca la que se eligió después.
+  // pantalla: no toca la que se eligió después. Llegan todas: la card aplica la
+  // búsqueda (`keepColumn`) después de numerar la posición de cada columna.
   const fetchColumns = useCallback((ids: string[]) => {
     const read = fetchColumnsFor(projectId, ids, changesetId);
     return changesetId
       ? read.catch((err: unknown) => { if (alive.current) onVersionError(err); throw err; })
       : read;
   }, [projectId, changesetId, onVersionError]);
+  const keepColumn = useMemo(() => columnFilter(scope, term) ?? undefined, [scope, term]);
 
   const toggleRow = (id: string) => {
     if (allSelected) {
@@ -807,44 +847,65 @@ export function ReportingScreen({
     [filtered],
   );
 
-  // ── Columnas de las tablas en foco (selección, o las filtradas) para los
-  // modos Columns / Tables + Columns. Tope de UX: COLUMN_BATCH (300) tablas en
-  // pantalla (un solo lote; los ids van en el cuerpo); por encima se pide acotar
-  // (filtro o selección). El export no tiene tope.
-  const colScope = useMemo(() => (selectedRows.length > 0 ? selectedRows : filtered), [selectedRows, filtered]);
-  const colScopeKey = useMemo(() => colScope.map((t) => t.id).join(','), [colScope]);
-  const colScopeTooBig = colScope.length > COLUMN_BATCH;
-  const [colRows, setColRows] = useState<ReportColumnRow[] | null>(null);
-  const [colLoading, setColLoading] = useState(false);
+  // ── Hojas en pantalla: las de las tablas en foco (selección, o las filtradas).
+  // Las que necesitan detalle (columnas, relaciones o vistas) lo leen una vez por
+  // tablas en foco y lo guardan mientras no cambien. Tope de UX: COLUMN_BATCH (300)
+  // tablas (los ids van en el cuerpo); por encima se pide acotar (filtro o
+  // selección). El export no tiene tope.
+  const scopeTables = useMemo(() => (selectedRows.length > 0 ? selectedRows : filtered), [selectedRows, filtered]);
+  const scopeKey = useMemo(() => scopeTables.map((t) => t.id).join(','), [scopeTables]);
+  const scopeTooBig = scopeTables.length > COLUMN_BATCH;
+  const needs = sheetNeeds(sheet);
+  const [detail, setDetail] = useState<{ key: string; parts: Partial<SheetData> }>({ key: '', parts: {} });
+  // Lectura de detalle que falló (`${needs}:${scopeKey}`) y reintentos.
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailTry, setDetailTry] = useState(0);
+  // Lecturas en vuelo (`${needs}:${scopeKey}`): cambiar de pestaña no las corta ni
+  // las repite al volver; su respuesta vale mientras las tablas en foco sean las mismas.
+  const detailReads = useRef(new Set<string>());
+  const liveScope = useRef(scopeKey);
+  liveScope.current = scopeKey;
+  const parts = useMemo(() => (detail.key === scopeKey ? detail.parts : {}), [detail, scopeKey]);
+  const pending = needs !== null && parts[needs] === undefined;
+  const detailFailed = pending && detailError === `${needs}:${scopeKey}`;
   useEffect(() => {
-    if (show === 'tables' || colScopeTooBig || colScope.length === 0) { setColRows(null); return undefined; }
-    let cancelled = false;
-    setColLoading(true);
-    fetchColumnsFor(projectId, colScope.map((t) => t.id), changesetId)
-      .then((rows) => { if (!cancelled) setColRows(rows); })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        readFailed(err, 'Could not load the columns.');
-        setColRows([]);
+    if (!needs || !pending || scopeTooBig || scopeTables.length === 0) return;
+    const key = scopeKey;
+    const tag = `${needs}:${key}`;
+    if (detailReads.current.has(tag)) return;
+    detailReads.current.add(tag);
+    setDetailError((e) => (e === tag ? null : e));
+    const ids = scopeTables.map((t) => t.id);
+    const read: Promise<Partial<SheetData>> = needs === 'columns'
+      ? fetchColumnsFor(projectId, ids, changesetId).then((columns) => ({ columns }))
+      : needs === 'views'
+        ? fetchViewsFor(projectId, ids, changesetId).then((views) => ({ views }))
+        : fetchRelationshipsFor(projectId, ids, changesetId).then((relationships) => ({ relationships }));
+    const current = () => alive.current && liveScope.current === key;
+    read
+      .then((part) => {
+        if (current()) setDetail((d) => ({ key, parts: { ...(d.key === key ? d.parts : {}), ...part } }));
       })
-      .finally(() => { if (!cancelled) setColLoading(false); });
-    return () => { cancelled = true; };
+      .catch((err: unknown) => {
+        if (!current()) return;
+        readFailed(err, `Could not load the ${needs}.`);
+        setDetailError(tag);
+      })
+      .finally(() => { detailReads.current.delete(tag); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [show, colScopeKey, colScopeTooBig]);
-  const tableById = useMemo(() => new Map(tables.map((t) => [t.id, t] as const)), [tables]);
-  const gridRows = useMemo<SheetRow[]>(() => {
-    if (show === 'tables' || !colRows) return [];
-    const sorted = sortColumnRows(colRows, (id) => tableById.get(id)?.physicalName ?? id);
-    const colUdp = udpKeysOf(sorted.map((c) => c.udpValues));
-    if (show === 'columns') return sorted.map((c) => columnSheetRow(c, tableById.get(c.tableId), colUdp));
-    const tblUdp = udpKeysOf(colScope.map((t) => t.udpValues));
-    return sorted.map((c) => joinedSheetRow(c, tableById.get(c.tableId), tblUdp, colUdp));
-  }, [show, colRows, tableById, colScope]);
+  }, [needs, pending, scopeKey, scopeTooBig, detailTry]);
+  const sheetData = useMemo(() => narrowSheetData({ tables: scopeTables, ...parts }, scope, term),
+    [scopeTables, parts, scope, term]);
+  const preview = useMemo(() => (sheet === 'tables' ? null : workbookSheet(sheet, sheetData)), [sheet, sheetData]);
+  const gridRows = useMemo<SheetRow[]>(
+    () => (preview ? Array.from({ length: Math.min(GRID_ROW_CAP, preview.count) }, (_, i) => preview.rowAt(i)) : []),
+    [preview],
+  );
+  const activeSheet = REPORT_SHEETS.find((x) => x.key === sheet)!;
 
   // La búsqueda cuenta como filtro recién con 2+ caracteres: el primer
   // keystroke no debe disparar la descarga del set completo (15k tablas).
-  const anyFilter =
-    search.trim().length >= 2 || schemaSel.size > 0 || areaSel.size > 0;
+  const anyFilter = search.trim().length >= SEARCH_MIN_CHARS || schemaSel.size > 0 || areaSel.size > 0;
 
   // La primera vez que se aplica un filtro se carga el set completo de tablas,
   // con debounce para que tipear rápido no encole la carga a mitad de palabra.
@@ -868,12 +929,12 @@ export function ReportingScreen({
       return next;
     });
 
-  const toggleLevel = (key: LevelKey) => toggleSet<LevelKey>(setLevels, key);
+  const toggleMarked = (key: SheetKey) => toggleSet<SheetKey>(setMarked, key);
 
-  // ── export a Excel: una hoja por nivel marcado ───────────────────────────────
+  // ── export a Excel: una hoja por pestaña incluida, en el orden del libro ─────
   const handleExport = async () => {
-    if (levels.size === 0) {
-      toast.error('Pick at least one detail level to export.');
+    if (marked.size === 0) {
+      toast.error('Tick at least one sheet on the tabs to export.');
       return;
     }
     if (selectedRows.length === 0 && !(allSelected && partial)) {
@@ -889,77 +950,20 @@ export function ReportingScreen({
         toast.error('Select at least one row to export.');
         return;
       }
-      const wb = XLSX.utils.book_new();
-
-      // UDPs como columnas dinámicas (una por def presente en la selección).
-      // Las mismas funciones puras de la grilla (lib/reportRows) arman las hojas:
-      // metadata completa de tablas y columnas, por separado o unida.
-      const tableUdpKeys = udpKeysOf(rows.map((t) => t.udpValues));
-      if (levels.has('tables')) {
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows.map((t) => tableSheetRow(t, tableUdpKeys))), 'Tables');
-      }
-
-      if (levels.has('columns') || levels.has('joined')) {
-        // Columnas de las tablas seleccionadas, por tandas de 300 ids.
-        const byId = new Map(rows.map((t) => [t.id, t] as const));
-        const cols = sortColumnRows(await fetchColumnsFor(projectId, rows.map((t) => t.id), changesetId), (id) => byId.get(id)?.physicalName ?? id);
-        const colUdpKeys = udpKeysOf(cols.map((c) => c.udpValues));
-        if (levels.has('columns')) {
-          XLSX.utils.book_append_sheet(
-            wb, XLSX.utils.json_to_sheet(cols.map((c) => columnSheetRow(c, byId.get(c.tableId), colUdpKeys))), 'Columns');
-        }
-        if (levels.has('joined')) {
-          XLSX.utils.book_append_sheet(
-            wb, XLSX.utils.json_to_sheet(cols.map((c) => joinedSheetRow(c, byId.get(c.tableId), tableUdpKeys, colUdpKeys))),
-            'Tables + Columns');
-        }
-      }
-
-      if (levels.has('relationships')) {
-        // Detalle por par de columnas: una FK compuesta emite una fila por par
-        // (mismo Rel id + Pair). Acotado a las tablas seleccionadas y pedido por
-        // lotes de ids, para no omitir relaciones en proyectos grandes.
-        const rels = await fetchRelationshipsFor(projectId, rows.map((t) => t.id), changesetId);
-        const data = rels.map(relationshipSheetRow);   // incluye las frases de la relación
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Relationships');
-      }
-
-      if (levels.has('views')) {
-        // Vistas derivadas de las tablas seleccionadas: 2 hojas — la vista en
-        // sí (fuentes/SQL/User-Defined SQL) y su detalle columna a columna
-        // (alias, origen, casteo, transformación). Mismo patrón acotado que Columns.
-        const ids = rows.map((t) => t.id);
-        const idSet = new Set(ids);
-        // Ids en el cuerpo del request, en tandas.
-        const views = (await fetchViewsFor(projectId, ids, changesetId))
-          .filter((v) => v.sourceTableIds.some((tid) => idSet.has(tid)));
-        const viewsData = views.map(viewSheetRow);
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(viewsData), 'Views');
-        const colsData = views.flatMap((v) =>
-          v.columns.map((c) => ({
-            View: v.name,
-            Schema: v.schema ?? '',
-            'Output alias': c.outputAlias ?? '',
-            'Source table': c.sourceTable ?? '',
-            'Source column': c.sourceColumn ?? '',
-            'Cast type': c.castType ?? '',
-            'Expression / transform': c.expression ?? '',
-          })),
-        );
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(colsData), 'View columns');
-      }
-
-      if (levels.has('definitions')) {
-        const data = rows.map((t) => ({
-          Table: t.physicalName,
-          'Logical name': t.logicalName,
-          'Functional definition': t.description,
-        }));
-        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'Definitions');
-      }
-
+      const keys = REPORT_SHEETS.map((x) => x.key).filter((k) => marked.has(k));
+      const reads = new Set(keys.map(sheetNeeds));
+      // Detalle de las tablas del export por lotes de ids (sin el tope de la pantalla).
+      const ids = rows.map((t) => t.id);
+      const data: SheetData = { tables: rows };
+      if (reads.has('columns')) data.columns = await fetchColumnsFor(projectId, ids, changesetId);
+      if (reads.has('relationships')) data.relationships = await fetchRelationshipsFor(projectId, ids, changesetId);
+      if (reads.has('views')) data.views = await fetchViewsFor(projectId, ids, changesetId);
+      // Las mismas filas que las pestañas (`workbookSheet`), con la búsqueda aplicada,
+      // escritas en flujo: ningún límite de Excel corta el export.
+      const narrowed = narrowSheetData(data, scope, term);
+      const blob = await buildXlsx(keys.map((k) => workbookSheet(k, narrowed)));
       // Con una versión propia, su etiqueta va en el nombre del archivo.
-      XLSX.writeFile(wb, levelsFileName(projectName, draftMode ? (versionLabel ?? 'draft') : null, new Date()));
+      saveXlsx(blob, reportFileName(projectName, draftMode ? (versionLabel ?? 'draft') : null, new Date()));
       toast.success('Report exported to Excel.');
     } catch (err: unknown) {
       if (!alive.current) return;   // la pantalla es otra (p. ej. volvió a Production)
@@ -978,7 +982,7 @@ export function ReportingScreen({
           <h1 className="dmh-rep-h1">Reporting</h1>
           <p className="dmh-rep-sub">
             Tabular view of the metadata of one project — tables, columns, relationships and views.
-            Pick the project, filter the grid, then export the detail levels you need to Excel.
+            Search and filter, look at each sheet on its tab, and tick the tabs you want in the Excel workbook.
           </p>
         </div>
 
@@ -989,21 +993,26 @@ export function ReportingScreen({
               {/* Proyecto del reporte (obligatorio) y su versión. */}
               {projectPicker}
               {versionPicker}
-              {/* Qué muestra la grilla: tablas, sus columnas o la fila unida. */}
-              <div className="rd-seg" role="tablist" aria-label="Show">
-                <button type="button" role="tab" aria-selected={show === 'tables'} className={show === 'tables' ? 'active' : ''} onClick={() => setShow('tables')}>Tables</button>
-                <button type="button" role="tab" aria-selected={show === 'columns'} className={show === 'columns' ? 'active' : ''} onClick={() => setShow('columns')}>Columns</button>
-                <button type="button" role="tab" aria-selected={show === 'joined'} className={show === 'joined' ? 'active' : ''} onClick={() => setShow('joined')}>Tables + Columns</button>
-              </div>
-              <div className="dmh-rep-search">
-                <Search strokeWidth={1.7} aria-hidden />
-                <input
-                  type="text"
-                  placeholder="Search tables by name…"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  aria-label="Search tables by name"
-                />
+              {/* Búsqueda con alcance, como el buscador del Model. */}
+              <div className="dmh-rep-searchgroup">
+                <div className="rd-seg" role="tablist" aria-label="Search in">
+                  {SEARCH_SCOPES.map((x) => (
+                    <button key={x.id} type="button" role="tab" aria-selected={scope === x.id}
+                      className={scope === x.id ? 'active' : ''} onClick={() => pickScope(x.id)}>{x.label}</button>
+                  ))}
+                </div>
+                <div className="dmh-rep-search">
+                  <Search strokeWidth={1.7} aria-hidden />
+                  <input
+                    type="text"
+                    placeholder={SEARCH_SCOPES.find((x) => x.id === scope)!.placeholder}
+                    value={search}
+                    maxLength={SEARCH_MAX_CHARS}
+                    onChange={(e) => setSearch(e.target.value)}
+                    aria-label="Search the report"
+                  />
+                  {searching && <span className="rd-spin dmh-rep-search-spin" aria-hidden />}
+                </div>
               </div>
               <MultiFilter
                 label="Schema"
@@ -1026,7 +1035,7 @@ export function ReportingScreen({
               )}
               <span className="dmh-rep-selcount">
                 <strong>{selectedCount.toLocaleString()} selected</strong> ·{' '}
-                {partial
+                {searching ? <>searching…</> : partial
                   ? <>{tables.length.toLocaleString()} of {total == null ? '…' : total.toLocaleString()} tables</>
                   : <>{filtered.length.toLocaleString()} table{filtered.length === 1 ? '' : 's'}</>}
                 {partial && (
@@ -1043,19 +1052,44 @@ export function ReportingScreen({
               </div>
             )}
 
+            {/* Pestañas = hojas del Excel: el nombre muestra la hoja, la casilla la incluye en el libro. */}
+            <div className="dmh-rep-sheets" role="group" aria-label="Sheets">
+              {REPORT_SHEETS.map((x) => {
+                const on = marked.has(x.key);
+                const active = sheet === x.key;
+                return (
+                  <span key={x.key} className={`dmh-rep-sheet${active ? ' is-active' : ''}`}>
+                    <button type="button" role="checkbox" aria-checked={on} className={`dmh-rep-sheet-box${on ? ' is-on' : ''}`}
+                      aria-label={`Include ${x.label} in the Excel`}
+                      title={on ? `${x.label} goes in the Excel — click to leave it out` : `Click to include ${x.label} in the Excel`}
+                      onClick={() => toggleMarked(x.key)}>
+                      {on && <Check strokeWidth={3} aria-hidden />}
+                    </button>
+                    <button type="button" className="dmh-rep-sheet-name" aria-current={active ? 'true' : undefined}
+                      title={x.hint} onClick={() => setSheet(x.key)}>{x.label}</button>
+                  </span>
+                );
+              })}
+            </div>
+            <div className="dmh-rep-sheethint">{activeSheet.hint}</div>
+
             <div className="dmh-rep-tablewrap">
               <div className="dmh-rep-tablescroll" ref={scrollRef}>
                 {/* Una carga fallida no se presenta como proyecto vacío. */}
                 {loadError && !loading ? (
                   <TablesLoadError onRetry={retryLoad} />
-                ) : show !== 'tables' ? (
+                ) : sheet !== 'tables' ? (
                   <MetaGrid
                     rows={gridRows}
-                    loading={loading || colLoading}
-                    notice={colScopeTooBig
-                      ? `Narrow the tables to ${COLUMN_BATCH} or fewer (filter, or select rows in the Tables view) to browse their columns — ${colScope.length} in scope now.`
-                      : colScope.length === 0 ? 'No tables in scope.' : null}
-                    scopeLabel={`${selectedRows.length > 0 ? 'selected' : 'filtered'} table${colScope.length === 1 ? '' : 's'}: ${colScope.length}`}
+                    total={preview?.count ?? 0}
+                    loading={loading || searching || (pending && !detailFailed && !scopeTooBig && scopeTables.length > 0)}
+                    notice={loading || searching ? null : needs && scopeTooBig
+                      ? `Narrow the tables to ${COLUMN_BATCH} or fewer (filter, or select rows on the Tables tab) to browse this sheet — ${scopeTables.length} in scope now.`
+                      : scopeTables.length === 0 ? 'No tables in scope.' : null}
+                    scopeLabel={`${selectedRows.length > 0 ? 'selected' : 'filtered'} table${scopeTables.length === 1 ? '' : 's'}: ${scopeTables.length}`}
+                    onRetry={searchFailed ? retrySearch
+                      : detailFailed ? () => { setDetailError(null); setDetailTry((n) => n + 1); } : undefined}
+                    errorTitle={searchFailed ? "Couldn't run the search" : undefined}
                   />
                 ) : (
                 <table className="dmh-rep-table">
@@ -1082,7 +1116,7 @@ export function ReportingScreen({
                     </tr>
                   </thead>
                   <tbody>
-                    {loading ? (
+                    {loading || searching ? (
                       Array.from({ length: 6 }).map((_, i) => (
                         <tr key={i} className="dmh-rep-skel">
                           <td colSpan={8} className="dmh-rep-skel-row" />
@@ -1096,13 +1130,14 @@ export function ReportingScreen({
                               <TableProperties size={26} strokeWidth={1.3} aria-hidden />
                             </div>
                             <div className="dmh-rep-state-t">
-                              {anyFilter ? 'No tables match your filters' : 'No tables to report yet'}
+                              {searchFailed ? "Couldn't run the search" : anyFilter || term ? 'No tables match your filters' : 'No tables to report yet'}
                             </div>
                             <div className="dmh-rep-state-m">
-                              {anyFilter
-                                ? 'Try clearing the search or a filter.'
-                                : 'Once your model has tables, they will show up here.'}
+                              {searchFailed ? 'Check your connection and try again.'
+                                : anyFilter || term ? 'Try clearing the search or a filter.'
+                                  : 'Once your model has tables, they will show up here.'}
                             </div>
+                            {searchFailed && <div style={{ marginTop: 12 }}><Button variant="secondary" onClick={retrySearch}>Retry</Button></div>}
                           </div>
                         </td>
                       </tr>
@@ -1194,28 +1229,19 @@ export function ReportingScreen({
                 <span className="dmh-rep-card-title">Export to Excel</span>
               </div>
               <div className="dmh-rep-card-desc">
-                Choose the detail levels to include — each becomes a sheet in the workbook.
-                Exports respect the filters above.
+                Each tab above the grid is one sheet of the workbook — tick the tabs you want.
+                Exports respect the search and filters.
               </div>
-              <div className="dmh-rep-levels">
-                {EXPORT_LEVELS.map((lvl) => {
-                  const on = levels.has(lvl.key);
-                  return (
-                    <button
-                      key={lvl.key}
-                      type="button"
-                      className={`dmh-rep-level${on ? ' is-on' : ''}`}
-                      onClick={() => toggleLevel(lvl.key)}
-                      aria-pressed={on}
-                    >
-                      <span className="dmh-rep-level-box">{on && <Check strokeWidth={3} aria-hidden />}</span>
-                      <span className="dmh-rep-level-text">
-                        <span className="dmh-rep-level-name">{lvl.name}</span>
-                        <span className="dmh-rep-level-hint">{lvl.hint}</span>
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="dmh-rep-card-body">
+                {marked.size === 0 ? (
+                  <div className="dmh-rep-card-empty">No sheets ticked yet.</div>
+                ) : (
+                  <div className="dmh-rep-chips" role="group" aria-label="Sheets to download">
+                    {REPORT_SHEETS.filter((x) => marked.has(x.key)).map((x) => (
+                      <span key={x.key} className="dmh-rep-chip dmh-rep-chip--sheet">{x.label}</span>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="dmh-rep-card-foot">
                 <Button
@@ -1223,8 +1249,8 @@ export function ReportingScreen({
                   icon={Download}
                   className="dmh-rep-export-btn"
                   onClick={handleExport}
-                  disabled={!canExport || exporting || levels.size === 0 || selectedCount === 0 || loading}
-                  title={canExport ? undefined : NO_EXPORT_HINT}
+                  disabled={!canExport || exporting || templateBusy || marked.size === 0 || selectedCount === 0 || loading || searching}
+                  title={!canExport ? NO_EXPORT_HINT : marked.size === 0 ? 'Tick at least one sheet on the tabs' : undefined}
                 >
                   {exporting ? 'Exporting…' : 'Download .xlsx'}
                 </Button>
@@ -1236,13 +1262,13 @@ export function ReportingScreen({
             </div>
 
             {/* Formatos fijos guardados (p. ej. QA_MODELO) */}
-            <SheetTemplateCard projectId={projectId} selectedCount={selectedCount} disabled={loading}
-              resolveTables={resolveExportRows} fetchColumns={fetchColumns} onBusyChange={setTemplateBusy}
+            <SheetTemplateCard projectId={projectId} selectedCount={selectedCount} disabled={loading || searching || exporting}
+              resolveTables={resolveExportRows} fetchColumns={fetchColumns} keepColumn={keepColumn} onBusyChange={setTemplateBusy}
               versionToastId={changesetId ? VERSION_TOAST : undefined} />
 
             <div className="dmh-rep-card dmh-rep-sumcard">
               <div className="dmh-rep-sumcard-title">Tables by subject area</div>
-              {loading ? (
+              {loading || searching ? (
                 <div className="dmh-rep-sumcard-empty">Loading…</div>
               ) : bySubjectArea.length === 0 ? (
                 <div className="dmh-rep-sumcard-empty">No subject areas in view.</div>
@@ -1268,7 +1294,7 @@ export function ReportingScreen({
 
             <div className="dmh-rep-card dmh-rep-sumcard">
               <div className="dmh-rep-sumcard-title">Most related / in most projects</div>
-              {loading ? (
+              {loading || searching ? (
                 <div className="dmh-rep-sumcard-empty">Loading…</div>
               ) : mostRelated.length === 0 ? (
                 <div className="dmh-rep-sumcard-empty">No tables in view.</div>

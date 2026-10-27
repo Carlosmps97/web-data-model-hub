@@ -377,10 +377,11 @@ export interface PublishBlockedItem {
   tableId?: string | null;
   tableName?: string | null;
   /** `production`: ya existe publicado · `request`: se repite dentro del request ·
-   *  `deleted`: otra versión lo borró y publicó (o borró su tabla o su esquema). */
+   *  `deleted`: otra versión lo borró y publicó (o borró su tabla, su esquema o una columna de sus pares). */
   where?: 'production' | 'request' | 'deleted';
-  /** Con `deleted`: lo que se borró cuando no es el objeto mismo (su tabla o su esquema). */
-  deletedParent?: { kind: 'table' | 'schema'; id?: string | null; name: string } | null;
+  /** Con `deleted`: lo que se borró cuando no es el objeto mismo (su tabla, su esquema o una columna de
+   *  los pares de una relación). */
+  deletedParent?: { kind: 'table' | 'schema' | 'column'; id?: string | null; name: string } | null;
   /** Con `deleted`: el borrado es posterior a la apertura de esta versión. */
   afterOpened?: boolean;
   message: string;
