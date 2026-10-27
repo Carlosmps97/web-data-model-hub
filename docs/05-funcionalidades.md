@@ -77,10 +77,11 @@ Qué muestra:
 - Cinco tarjetas de resumen: Tables, Views, Relationships, Subject Areas y Projects
   (`dashboard.service.getSummary`).
 - Columna **Requests**: los requests asignados al usuario como revisor, con enlace a **Review**.
-- Caja **Versions**: las versiones agrupadas por proyecto (cada grupo, plegable, dice cuál es su
-  producción o «No production»). Cada fila muestra la etiqueta de versión, el dueño, el estado y
-  marcas adicionales: `↩` si nació de una restauración («Restored from …»), `⇄` si fue transferida
-  («Started by … · transferred N times») y **Deletes project** si la versión borra su proyecto.
+- Caja **Versions**: las versiones agrupadas por proyecto (cada grupo, plegable, muestra bajo el nombre
+  su producción o «No production»). El código de una versión es `v` + la fecha y hora de su creación en
+  Lima (`v20261026143005`). Cada fila tiene dos líneas: arriba el código, **Deletes project** si la
+  versión borra su proyecto y el estado; abajo el dueño, `⇄` si fue transferida («Started by … ·
+  transferred N times»), `↩` si nació de una restauración («Restored from …») y los botones.
 
 Acciones:
 
@@ -100,6 +101,9 @@ Acciones:
   el draft pasa por la revisión normal.
 - **Version tools** y el ícono de información de cada fila abren `screens/home/VersionToolsModal.tsx`
   con dos pestañas:
+  - Los combos de versión de ambas pestañas muestran `código (correo del dueño) — título`, más la fecha
+    de publicación (Compare) o el estado (Details). El título se omite si repite el código (un draft se
+    titula como su código).
   - **Compare**: elige dos versiones publicadas (**From (older)** y **To (newer)**, con **Swap
     versions**) y muestra las diferencias netas por verbo (added, modified, deleted) y por tipo de
     entidad (`GET /api/versions/compare`); al elegir una fila se pide el detalle de campos antes →
@@ -421,7 +425,7 @@ El área derecha muestra un panel a la vez, según la selección (`useModelerSto
 | Views | Vistas que usan la tabla y alta de una vista con la tabla como fuente fija (solo en físico). |
 | Links | Relaciones de la tabla con su cardinalidad compacta (por ejemplo, «1 : N · identifying»). |
 | UDPs | Valores de las propiedades definidas por el usuario de la faceta activa (`UdpAssign.tsx`; el valor se graba al salir del campo). |
-| Metadata | Datos de auditoría y la sección **History** (`AuditHistory.tsx`): quién, qué acción, en qué versión y cuándo, con el detalle de campos bajo demanda. |
+| Metadata | Datos de auditoría y la sección **History** (`AuditHistory.tsx`): cada evento en dos líneas (la acción con el código de la versión y, debajo, quién y cuándo), con el detalle de campos bajo demanda. |
 
 Borrar una tabla pide confirmación (`deleteConfirm.tsx`) y la quita de todos los canvases donde está;
 **Remove from this canvas** solo la saca del canvas abierto.
@@ -741,7 +745,7 @@ requests de los proyectos a los que el usuario accede.
   resto, el panel muestra la fila de la lista con un aviso que indica quién lo pidió y quiénes pueden
   ver sus cambios y comentarios, y no pide el detalle. La decisión se toma con la fila de la lista, por
   lo que el detalle se pide cuando la lista terminó de cargar.
-- Cabecera con título, estado y metadatos (`From <dueño> · snapshot of vN · fecha · Reviewer
+- Cabecera con título, estado y metadatos (`From <dueño> · snapshot of <código> · fecha · Reviewer
   <nombres>`), y las acciones **Open in canvas** (o **View in canvas**), **Comment**, **Reject** y
   **Approve**.
 - **Open in canvas** se habilita solo para quien puede abrir el request: dueño, revisor asignado,

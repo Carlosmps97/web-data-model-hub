@@ -327,7 +327,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
           </button>
           {openMode && (
             <span className="wk-tb-strip-ctx">
-              {projectName ? `«${projectName}» · ` : ''}{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}
+              {projectName && <><span className="wk-ctx-proj">{`«${projectName}»`}</span><span className="wk-ctx-sep"> · </span></>}
+              <span className="wk-ctx-ver">{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}</span>
             </span>
           )}
         </div>
@@ -558,7 +559,8 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         {openMode && (
           <span className={`wk-vpill${readonly ? ' viewer' : ''}`}
             title={snapshot ? 'Read-only snapshot of a published version, rebuilt from the change ledger' : pillText}>
-            {projectName && <span className="wk-vpill-proj">{`«${projectName}» · `}</span>}{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}
+            {projectName && <><span className="wk-vpill-proj wk-ctx-proj">{`«${projectName}»`}</span><span className="wk-vpill-proj wk-ctx-sep"> · </span></>}
+            <span className="wk-ctx-ver">{readonly ? (snapshot ? 'Snapshot' : 'Viewer') : 'Editing'} · {versionLabel ?? '—'}</span>
           </span>
         )}
         </div>

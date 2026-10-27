@@ -501,11 +501,14 @@ export default function HomeScreen() {
                       aria-expanded={!collapsedGroups.has(g.id)}>
                       {collapsedGroups.has(g.id) ? <ChevronRight size={13} aria-hidden /> : <ChevronDown size={13} aria-hidden />}
                       <Database size={13} strokeWidth={1.5} aria-hidden />
-                      <span className="dmh-vgroup-name">«{g.name}»</span>
-                      <span className="dmh-vgroup-meta">
-                        {g.production ? <>Production <b>{g.production}</b></> : 'No production'} · {g.rows.length} version{g.rows.length === 1 ? '' : 's'}
+                      {/* El nombre arriba y la producción debajo: con el código
+                          con fecha no entran en una línea. */}
+                      <span className="dmh-vgroup-text">
+                        <span className="dmh-vgroup-name">«{g.name}»</span>
+                        <span className="dmh-vgroup-meta">
+                          {g.production ? <>Production <b>{g.production}</b></> : 'No production'} · {g.rows.length} version{g.rows.length === 1 ? '' : 's'}
+                        </span>
                       </span>
-                      <span className="dmh-vgroup-spacer" />
                     </div>
                     {!collapsedGroups.has(g.id) && g.rows.map(({ row, isProduction }) => {
                   const pill = statusPill(row.status, isProduction);
@@ -514,59 +517,64 @@ export default function HomeScreen() {
                       key={row.id}
                       className={`dmh-vside-row${isProduction ? ' is-production' : ''}`}
                     >
-                      <span className={`dmh-vside-label ${labelTone(row.status, isProduction)}`}>
-                        {row.versionLabel ?? '—'}
-                      </span>
-                      {/* La versión nace de una restauración: queda ligada a
-                          la versión restaurada sin parsear títulos. */}
-                      {row.restoredFrom && (
-                        <span
-                          className="dmh-vside-restored"
-                          title={`Restored from ${row.restoredFrom.versionLabel ?? 'a previous version'}`}
-                        >
-                          ↩{row.restoredFrom.versionLabel ?? '—'}
+                      {/* Arriba el código con su estado; abajo el dueño, las marcas y las acciones. */}
+                      <div className="dmh-vside-line">
+                        <span className={`dmh-vside-label ${labelTone(row.status, isProduction)}`}>
+                          {row.versionLabel ?? '—'}
                         </span>
-                      )}
-                      <span className="dmh-vside-meta">
-                        {userName(row.owner)}
-                      </span>
-                      {/* La versión fue transferida: se muestra quién la inició. */}
-                      {startedBy(row) && (
-                        <span
-                          className="dmh-vside-transferred"
-                          title={`Started by ${userName(startedBy(row))} · transferred ${row.transfers!.length} time${row.transfers!.length === 1 ? '' : 's'}`}
-                        >
-                          ⇄
+                        <span className={`dmh-vpill ${pill.cls}`}>
+                          <span className={`dot${pill.hollow ? ' hollow' : ''}`} />
+                          {pill.text}
                         </span>
-                      )}
-                      {row.deletesProject && <span className="dmh-vpill dmh-vpill--critical">Deletes project</span>}
-                      <button
-                        type="button"
-                        className="dmh-vside-info"
-                        title="Version details — owner, approvals and dates; transfer or delete a draft"
-                        onClick={() => setToolsOpen({ tab: 'details', versionId: row.id, projectId: row.projectId })}
-                      >
-                        <Info size={12} strokeWidth={1.8} aria-hidden />
-                      </button>
-                      {/* Rollback a cualquier versión publicada pasada: restaura
-                          el modelo a ese estado (deshace las posteriores). La
-                          producción actual no se ofrece (ya es ese estado).
-                          Crea un draft que pasa por el flujo normal de revisión. */}
-                      {!isProduction && row.status === 'approved' && !!row.appliedAt && canRollback && (
+                      </div>
+                      <div className="dmh-vside-line">
+                        <span className="dmh-vside-meta" title={userName(row.owner)}>
+                          {userName(row.owner)}
+                        </span>
+                        {/* La versión fue transferida: se muestra quién la inició. */}
+                        {startedBy(row) && (
+                          <span
+                            className="dmh-vside-transferred"
+                            title={`Started by ${userName(startedBy(row))} · transferred ${row.transfers!.length} time${row.transfers!.length === 1 ? '' : 's'}`}
+                          >
+                            ⇄
+                          </span>
+                        )}
+                        {/* La versión nace de una restauración: queda ligada a
+                            la versión restaurada sin parsear títulos. */}
+                        {row.restoredFrom && (
+                          <span
+                            className="dmh-vside-restored"
+                            title={`Restored from ${row.restoredFrom.versionLabel ?? 'a previous version'}`}
+                          >
+                            ↩{row.restoredFrom.versionLabel ?? '—'}
+                          </span>
+                        )}
+                        {row.deletesProject && <span className="dmh-vpill dmh-vpill--critical">Deletes project</span>}
                         <button
                           type="button"
-                          className="dmh-vside-rollback"
-                          title="Restore the model to this version (creates a draft, goes through review)"
-                          onClick={() => setRollbackTarget(row)}
+                          className="dmh-vside-info"
+                          title="Version details — owner, approvals and dates; transfer or delete a draft"
+                          onClick={() => setToolsOpen({ tab: 'details', versionId: row.id, projectId: row.projectId })}
                         >
-                          <Undo2 size={11} strokeWidth={1.9} aria-hidden />
-                          Restore
+                          <Info size={12} strokeWidth={1.8} aria-hidden />
                         </button>
-                      )}
-                      <span className={`dmh-vpill ${pill.cls}`}>
-                        <span className={`dot${pill.hollow ? ' hollow' : ''}`} />
-                        {pill.text}
-                      </span>
+                        {/* Rollback a cualquier versión publicada pasada: restaura
+                            el modelo a ese estado (deshace las posteriores). La
+                            producción actual no se ofrece (ya es ese estado).
+                            Crea un draft que pasa por el flujo normal de revisión. */}
+                        {!isProduction && row.status === 'approved' && !!row.appliedAt && canRollback && (
+                          <button
+                            type="button"
+                            className="dmh-vside-rollback"
+                            title="Restore the model to this version (creates a draft, goes through review)"
+                            onClick={() => setRollbackTarget(row)}
+                          >
+                            <Undo2 size={11} strokeWidth={1.9} aria-hidden />
+                            Restore
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}

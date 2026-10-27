@@ -82,6 +82,15 @@ const STATUS_TEXT: Record<VersionRow['status'], string> = {
   rejected: 'Rejected',
 };
 
+/** «v20261026143005 (ana@bcp.com.pe) — Título»: el código con el correo de su
+ *  dueño (el id del usuario es su correo) y el título solo si dice algo más
+ *  que el código (por defecto un draft se titula como su código). */
+function versionOptionText(v: VersionRow): string {
+  const owner = v.owner ? ` (${v.owner})` : '';
+  const title = v.title?.trim() && v.title !== v.versionLabel ? ` — ${v.title}` : '';
+  return `${v.versionLabel ?? '—'}${owner}${title}`;
+}
+
 export default function VersionToolsModal({
   versions, users, projects, initialTab = 'compare', initialVersionId = null, initialProjectId = null, onClose,
   onChanged,
@@ -154,7 +163,7 @@ export default function VersionToolsModal({
 
   const optionLabel = (v: VersionRow): string => {
     const date = v.appliedAt ? new Date(v.appliedAt).toLocaleDateString() : '';
-    return `${v.versionLabel ?? '—'} — ${v.title ?? 'Untitled'}${date ? ` (${date})` : ''}`;
+    return `${versionOptionText(v)}${date ? ` · ${date}` : ''}`;
   };
 
   const runCompare = async () => {
@@ -427,9 +436,11 @@ export default function VersionToolsModal({
             ) : (
               <>
                 <div className="dmh-vt-pickers">
-                  <div className="dmh-vt-picker">
+                  {/* El código con el correo y el título: los dos combos se reparten el ancho. */}
+                  <div className="dmh-vt-picker" style={{ flex: '1 1 250px' }}>
                     <label htmlFor="dmh-vt-from">From (older)</label>
-                    <select id="dmh-vt-from" value={fromId} onChange={(e) => setFromId(e.target.value)}>
+                    <select id="dmh-vt-from" value={fromId} onChange={(e) => setFromId(e.target.value)}
+                      style={{ width: '100%', maxWidth: 'none', minWidth: 0 }}>
                       {publishedRows.map((v) => (
                         <option key={v.id} value={v.id}>{optionLabel(v)}</option>
                       ))}
@@ -443,9 +454,10 @@ export default function VersionToolsModal({
                   >
                     <ArrowLeftRight size={13} strokeWidth={1.7} aria-hidden />
                   </button>
-                  <div className="dmh-vt-picker">
+                  <div className="dmh-vt-picker" style={{ flex: '1 1 250px' }}>
                     <label htmlFor="dmh-vt-to">To (newer)</label>
-                    <select id="dmh-vt-to" value={toId} onChange={(e) => setToId(e.target.value)}>
+                    <select id="dmh-vt-to" value={toId} onChange={(e) => setToId(e.target.value)}
+                      style={{ width: '100%', maxWidth: 'none', minWidth: 0 }}>
                       {publishedRows.map((v) => (
                         <option key={v.id} value={v.id}>{optionLabel(v)}</option>
                       ))}
@@ -453,7 +465,7 @@ export default function VersionToolsModal({
                   </div>
                   <button
                     type="button"
-                    className="dmh-btn dmh-btn--primary"
+                    className="dmh-btn dmh-btn--primary dmh-vt-compare"
                     onClick={runCompare}
                     disabled={cmpLoading}
                   >
@@ -527,11 +539,11 @@ export default function VersionToolsModal({
                     id="dmh-vt-version"
                     value={selId}
                     onChange={(e) => setSelId(e.target.value)}
-                    style={{ width: '100%', maxWidth: 'none' }}
+                    style={{ width: '100%', maxWidth: 'none', minWidth: 0 }}
                   >
                     {detailRows.map((v) => (
                       <option key={v.id} value={v.id}>
-                        {`${v.versionLabel ?? '—'} — ${v.title ?? 'Untitled'} · ${published?.id === v.id ? 'Production' : STATUS_TEXT[v.status]}`}
+                        {`${versionOptionText(v)} · ${published?.id === v.id ? 'Production' : STATUS_TEXT[v.status]}`}
                       </option>
                     ))}
                   </select>

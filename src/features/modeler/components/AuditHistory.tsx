@@ -53,23 +53,30 @@ export default function AuditHistory({ kind, entityId }: { kind: 'table' | 'colu
               <div key={`${it.csId ?? 'x'}-${i}`} className={`wk-pp-histrow${open ? ' open' : ''}`}>
                 <button type="button" className="wk-pp-histhead" title={open ? 'Hide details' : 'Show details'}
                   onClick={() => setOpenIdx(open ? null : i)}>
-                  <span className={`wk-pp-histact ${it.action}`}>{ACTION_LABEL[it.action]}</span>
-                  <span className="wk-pp-histuser" title={it.user?.email ?? undefined}>{userLabel(it)}</span>
-                  {it.version && <span className="wk-pp-histver rd-mono">{it.version}</span>}
-                  {it.restoredFrom && (
-                    <span
-                      className="wk-pp-histver rd-mono"
-                      title={`This version restored the model to ${it.restoredFrom.versionLabel ?? 'a previous version'}`}
-                    >
-                      ↩{it.restoredFrom.versionLabel ?? '—'}
+                  {/* Arriba la acción con los códigos de versión; abajo quién y cuándo. */}
+                  <span className="wk-pp-histline">
+                    <span className="wk-pp-histtags">
+                      <span className={`wk-pp-histact ${it.action}`}>{ACTION_LABEL[it.action]}</span>
+                      {it.version && <span className="wk-pp-histver rd-mono">{it.version}</span>}
+                      {it.restoredFrom && (
+                        <span
+                          className="wk-pp-histver rd-mono"
+                          title={`This version restored the model to ${it.restoredFrom.versionLabel ?? 'a previous version'}`}
+                        >
+                          ↩{it.restoredFrom.versionLabel ?? '—'}
+                        </span>
+                      )}
+                      {/* Quien inició la versión no es quien la publicó. */}
+                      {it.startedBy && it.startedBy.id !== it.user?.id && (
+                        <span className="wk-pp-histver" title={`Started by ${refLabel(it.startedBy)}`}>⇄</span>
+                      )}
                     </span>
-                  )}
-                  {/* Quien inició la versión no es quien la publicó. */}
-                  {it.startedBy && it.startedBy.id !== it.user?.id && (
-                    <span className="wk-pp-histver" title={`Started by ${refLabel(it.startedBy)}`}>⇄</span>
-                  )}
-                  <span className="wk-pp-histwhen">{formatWhen(it.at)}</span>
-                  <ChevronDown size={12} className="wk-pp-histcaret" aria-hidden />
+                    <ChevronDown size={12} className="wk-pp-histcaret" aria-hidden />
+                  </span>
+                  <span className="wk-pp-histline">
+                    <span className="wk-pp-histuser" title={it.user?.email ?? undefined}>{userLabel(it)}</span>
+                    <span className="wk-pp-histwhen">{formatWhen(it.at)}</span>
+                  </span>
                 </button>
                 {open && (
                   <div className="wk-pp-histdetail">

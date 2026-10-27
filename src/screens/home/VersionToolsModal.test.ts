@@ -126,3 +126,84 @@ describe('Version tools: el motivo de un botón deshabilitado es accesible', () 
     }
   });
 });
+
+describe('Version tools: los combos muestran el código con el correo de su dueño', () => {
+  const V = (o: Partial<VersionRow>): VersionRow => ({ ...ROW, ...o });
+  const ROWS: VersionRow[] = [
+    V({ id: 'b', versionLabel: 'v20261020090000', title: 'v20261020090000', owner: 'system', status: 'approved',
+      appliedAt: '2026-10-20T14:00:00Z', createdAt: '2026-10-20T14:00:00Z' }),
+    V({ id: 'c', versionLabel: 'v20261021101500', title: 'Nuevas tablas', owner: 'ana@bcp.com.pe', status: 'approved',
+      appliedAt: '2026-10-22T15:00:00Z', createdAt: '2026-10-21T15:15:00Z' }),
+    V({ id: 'd', versionLabel: 'v20261026143005', title: 'v20261026143005', owner: 'beto@bcp.com.pe', status: 'draft',
+      createdAt: '2026-10-26T19:30:05Z' }),
+    V({ id: 'e', versionLabel: 'v20261025080000', title: null, owner: null, status: 'submitted',
+      createdAt: '2026-10-25T13:00:00Z' }),
+  ];
+  const options = (tree: unknown, id: string) => {
+    const select = [...walk(tree)].find((e) => e.type === 'select' && e.props.id === id);
+    return [...walk(select)].filter((e) => e.type === 'option').map((e) => textOf(e));
+  };
+  const open = (initialTab: 'compare' | 'details') => {
+    vi.mocked(getChangeset).mockResolvedValue({ ...DETAIL, id: 'c' });
+    props = {
+      versions: ROWS, users: [{ id: 'ana@bcp.com.pe', name: 'Ana Gómez', initials: 'AG' }],
+      projects: [{ id: 'p1', name: 'MODELO VENTAS' } as never], initialTab, initialVersionId: null,
+      initialProjectId: 'p1', onClose: vi.fn(), onChanged: vi.fn(),
+    };
+    return render(false);
+  };
+
+  it('Version details: código (correo) — título · estado; el título solo si no repite el código', () => {
+    expect(options(open('details'), 'dmh-vt-version')).toEqual([
+      'v20261026143005 (beto@bcp.com.pe) · Editing (draft)',
+      'v20261025080000 · In review',
+      'v20261021101500 (ana@bcp.com.pe) — Nuevas tablas · Production',
+      'v20261020090000 (system) · Published',
+    ]);
+  });
+
+  it('sin dueño, sin código o con título en blanco: ni paréntesis vacíos ni títulos en blanco', () => {
+    vi.mocked(getChangeset).mockResolvedValue(DETAIL);
+    props = {
+      versions: [
+        V({ id: 'g', versionLabel: 'v20261020100000', title: '   ', owner: 'ana@bcp.com.pe', status: 'rejected',
+          createdAt: '2026-10-20T15:00:00Z' }),
+        V({ id: 'h', versionLabel: 'v20261019100000', title: 'Ajustes', owner: '', status: 'draft',
+          createdAt: '2026-10-19T15:00:00Z' }),
+        V({ id: 'i', versionLabel: null, title: 'Sin código', owner: 'beto@bcp.com.pe', status: 'draft',
+          createdAt: '2026-10-18T15:00:00Z' }),
+      ],
+      users: [], projects: [{ id: 'p1', name: 'MODELO VENTAS' } as never], initialTab: 'details',
+      initialVersionId: null, initialProjectId: 'p1', onClose: vi.fn(), onChanged: vi.fn(),
+    };
+    expect(options(render(false), 'dmh-vt-version')).toEqual([
+      'v20261020100000 (ana@bcp.com.pe) · Rejected',
+      'v20261019100000 — Ajustes · Editing (draft)',
+      '— (beto@bcp.com.pe) — Sin código · Editing (draft)',
+    ]);
+  });
+
+  it('Compare: los combos se reparten el ancho, bajan de línea si no entran y no fuerzan scroll', () => {
+    const tree = open('compare');
+    const select = (id: string) => [...walk(tree)].find((e) => e.type === 'select' && e.props.id === id)!;
+    const picker = (id: string) => [...walk(tree)].find((e) => e.type === 'div' && e.props.className === 'dmh-vt-picker'
+      && [...walk(e.props.children)].some((k) => k.type === 'select' && k.props.id === id))!;
+    for (const id of ['dmh-vt-from', 'dmh-vt-to']) {
+      expect(picker(id).props.style).toEqual({ flex: '1 1 250px' });
+      expect(select(id).props.style).toEqual({ width: '100%', maxWidth: 'none', minWidth: 0 });
+    }
+    const compare = [...walk(tree)].find((e) => e.type === 'button' && textOf(e).trim() === 'Compare')!;
+    expect(String(compare.props.className)).toContain('dmh-vt-compare');      // mismo ancho al pasar a «Comparing…»
+  });
+
+  it('Compare (From/To): código (correo) — título · fecha de publicación', () => {
+    const tree = open('compare');
+    const day = (iso: string) => new Date(iso).toLocaleDateString();
+    const expected = [
+      `v20261020090000 (system) · ${day('2026-10-20T14:00:00Z')}`,
+      `v20261021101500 (ana@bcp.com.pe) — Nuevas tablas · ${day('2026-10-22T15:00:00Z')}`,
+    ];
+    expect(options(tree, 'dmh-vt-from')).toEqual(expected);
+    expect(options(tree, 'dmh-vt-to')).toEqual(expected);
+  });
+});
