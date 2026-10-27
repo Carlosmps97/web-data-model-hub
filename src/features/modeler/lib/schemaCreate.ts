@@ -4,6 +4,7 @@
  * acciones que no convergen (crear en la versión → recargar el catálogo →
  * recién seleccionar).
  */
+import { isSystemSchema } from './schemaPick';
 import { SCHEMA_NAME_RE, type SchemaKind } from './schemaStaging';
 
 /** Misma validación que el gestor de Esquemas (el backend la repite al
@@ -14,6 +15,7 @@ export function schemaNameError(name: string, taken: Set<string>): string | null
   if (!SCHEMA_NAME_RE.test(n)) {
     return 'Invalid name: letters, numbers and underscore, starting with a letter (e.g. stg_clientes).';
   }
+  if (isSystemSchema(n)) return `${n} is reserved for the system default schema.`;
   if (taken.has(n.toLowerCase())) return `Schema ${n} already exists`;
   return null;
 }

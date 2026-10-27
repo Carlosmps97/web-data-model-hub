@@ -13,7 +13,7 @@ import type { CanonicalColumn, CanonicalTable } from '@/services/governance.serv
 import * as viewsSvc from '@/services/views.service';
 import { columnsImpactFromLinks } from '../lib/columnsImpact';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
-import { viewsLeftEmpty } from '../lib/viewSync';
+import { namesLeavingTable, viewsLeftEmpty } from '../lib/viewSync';
 import { confirmDeleteColumns, confirmDeleteTable, readTableDeleteCounts } from './deleteConfirm';
 
 type PushToast = (m: string, k?: 'err') => void;
@@ -46,12 +46,17 @@ export function holdTable(tableId: string, stillWanted?: () => boolean): TableHo
   return hold;
 }
 
-/** Nombres de las vistas que esas columnas dejan sin columnas; null si no se
- *  pudieron leer (el diálogo lo dice). Nunca rechaza: corre junto con la
- *  lectura del impacto, sin sumar una ida y vuelta. */
-export function readEmptiedViews(tableId: string, physicalNames: string[]): Promise<string[] | null> {
-  return viewsSvc.listViews(tableId)
-    .then((views) => viewsLeftEmpty(views, tableId, physicalNames).map((v) => v.name))
+/** Nombres de las vistas que borrar esas columnas deja sin columnas (un nombre
+ *  que conserva otra columna de la tabla, homónima, no sale de las vistas);
+ *  null si no se pudieron leer (el diálogo lo dice). Nunca rechaza: corre junto
+ *  con la lectura del impacto, sin sumar una ida y vuelta. */
+export function readEmptiedViews(tableId: string, cols: { id: string; physicalName: string }[]): Promise<string[] | null> {
+  const gone = new Set(cols.map((c) => c.id));
+  return Promise.all([viewsSvc.listViews(tableId), gov.listColumns(tableId)])
+    .then(([views, all]) => {
+      const names = namesLeavingTable(cols.map((c) => c.physicalName), all.filter((c) => !gone.has(c.id)));
+      return viewsLeftEmpty(views, tableId, names).map((v) => v.name);
+    })
     .catch(() => null);
 }
 
@@ -80,7 +85,7 @@ async function deleteColumnsFlow(o: Parameters<typeof askDeleteColumns>[0], hold
   const onImpactError = reportWriteError(() => o.pushToast(unreadable, 'err'));
   const onError = reportWriteError((e) => o.pushToast(e instanceof Error && e.message ? e.message : `Couldn't delete ${these}`, 'err'));
   const ids = o.cols.map((c) => c.id);
-  const emptied = readEmptiedViews(o.tableId, o.cols.map((c) => c.physicalName));
+  const emptied = readEmptiedViews(o.tableId, o.cols);
   // Sin el impacto no se ofrece el borrado: sin `relIds` quedarían relaciones
   // con pares hacia columnas borradas.
   let impact: gov.RelationshipImpact;

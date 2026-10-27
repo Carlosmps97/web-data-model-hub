@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { DbSchema } from '../services/schemas.service';
-import { defaultViewSchema, schemasForKind, viewSchemaOnCreate } from './schemaPick';
+import {
+  defaultSchemaName, defaultViewSchema, emptySchemaLabel, isSystemSchema, pickedSchema, schemasForKind, viewSchemaOnCreate,
+} from './schemaPick';
 
 const sch = (name: string, kind?: 'tables' | 'views' | 'both' | null): DbSchema =>
   ({ id: name, name, kind: kind ?? null });
@@ -72,5 +74,42 @@ describe('viewSchemaOnCreate (sin _VU el campo queda vacío)', () => {
     expect(viewSchemaOnCreate('', CATALOG)).toEqual({ schema: '', suggest: null });
     expect(viewSchemaOnCreate(null, CATALOG)).toEqual({ schema: '', suggest: null });
     expect(viewSchemaOnCreate(undefined, CATALOG)).toEqual({ schema: '', suggest: null });
+  });
+});
+
+describe('emptySchemaLabel', () => {
+  it('en tablas y vistas la opción vacía es el esquema por defecto (el backend las graba ahí)', () => {
+    expect(emptySchemaLabel('tables')).toBe('Not_defined (default)');
+    expect(emptySchemaLabel('views')).toBe('Not_defined (default)');
+    expect(emptySchemaLabel('all')).toBe('(no schema)');
+  });
+  it('con la grafía que el esquema ya tiene en el catálogo', () => {
+    expect(emptySchemaLabel('tables', [{ id: 's', name: 'NOT_DEFINED', kind: 'both' } as never])).toBe('NOT_DEFINED (default)');
+  });
+});
+
+describe('esquema por defecto (del sistema)', () => {
+  it('se reconoce sin distinguir mayúsculas ni espacios', () => {
+    expect(isSystemSchema('Not_defined')).toBe(true);
+    expect(isSystemSchema(' NOT_DEFINED ')).toBe(true);
+    expect(isSystemSchema('not_defined_vu')).toBe(false);
+    expect(isSystemSchema(null)).toBe(false);
+  });
+  it('una vista de una tabla en el esquema por defecto queda en él: no se sugiere un Not_defined_VU', () => {
+    expect(viewSchemaOnCreate('Not_defined', CATALOG)).toEqual({ schema: '', suggest: null });
+  });
+});
+
+describe('defaultSchemaName / pickedSchema', () => {
+  it('el nombre con que el backend graba lo que va sin esquema: la grafía del catálogo', () => {
+    expect(defaultSchemaName()).toBe('Not_defined');
+    expect(defaultSchemaName([sch('NOT_DEFINED', 'both')])).toBe('NOT_DEFINED');
+  });
+  it('elegir la opción vacía sobre un objeto que ya está en el por defecto no lo cambia', () => {
+    expect(pickedSchema('tables', 'Not_defined', '')).toBe('Not_defined');
+    expect(pickedSchema('views', 'not_defined', '')).toBe('not_defined');
+    expect(pickedSchema('tables', 'STG', '')).toBe('');
+    expect(pickedSchema('all', 'Not_defined', '')).toBe('');
+    expect(pickedSchema('tables', 'Not_defined', 'STG')).toBe('STG');
   });
 });

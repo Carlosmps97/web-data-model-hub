@@ -10,7 +10,9 @@ import { textOf } from '../../reporting/components/fakeReact.testutil';
 vi.mock('@/components/ui/dialogs', () => ({
   confirmDialog: vi.fn(async (o: { action?: () => Promise<unknown> }) => { if (o.action) await o.action(); return true; }),
 }));
-vi.mock('@/services/governance.service', () => ({ tableLinks: vi.fn(), tableUsage: vi.fn(), listRelationships: vi.fn() }));
+vi.mock('@/services/governance.service', () => ({
+  tableLinks: vi.fn(), tableUsage: vi.fn(), listRelationships: vi.fn(), listColumns: vi.fn(),
+}));
 vi.mock('@/services/views.service', () => ({ listViews: vi.fn() }));
 
 import { confirmDialog } from '@/components/ui/dialogs';
@@ -45,6 +47,7 @@ beforeEach(() => {
   deleteColumns = vi.fn(async () => {});
   vi.mocked(gov.tableLinks).mockResolvedValue({ links: [LINK], total: 1 } as never);
   vi.mocked(viewsSvc.listViews).mockResolvedValue([] as never);
+  vi.mocked(gov.listColumns).mockResolvedValue([PA, PB] as never);
 });
 
 describe('borrar varias columnas desde el menú', () => {
@@ -273,9 +276,21 @@ describe('el candado por tabla y los pedidos cancelados', () => {
 describe('vistas que quedan sin columnas', () => {
   it('sus nombres; null si no se pudieron leer (nunca rechaza)', async () => {
     vi.mocked(viewsSvc.listViews).mockResolvedValueOnce([VIEW, { ...VIEW, id: 'v2', name: 'VU_OTRA', sources: [VIEW.sources[0], { expression: '1' }] }] as never);
-    expect(await readEmptiedViews('tP', ['PA', 'PB'])).toEqual(['VU_P']);
+    expect(await readEmptiedViews('tP', [PA, PB])).toEqual(['VU_P']);
     vi.mocked(viewsSvc.listViews).mockRejectedValueOnce(new Error('sin red'));
-    expect(await readEmptiedViews('tP', ['PA'])).toBeNull();
+    expect(await readEmptiedViews('tP', [PA])).toBeNull();
+    vi.mocked(gov.listColumns).mockRejectedValueOnce(new Error('sin red'));
+    expect(await readEmptiedViews('tP', [PA])).toBeNull();
+  });
+
+  it('una columna repetida (homónima) que queda en la tabla sostiene la vista', async () => {
+    // PA y PA2 se llaman igual: borrar PA deja a PA2, y la fuente «PA» de la
+    // vista sigue resolviendo a ella.
+    const PA2 = col('pa2', { physicalName: 'PA' });
+    vi.mocked(gov.listColumns).mockResolvedValue([PA, PA2, PB] as never);
+    vi.mocked(viewsSvc.listViews).mockResolvedValue([{ ...VIEW, sources: [VIEW.sources[0]] }] as never);
+    expect(await readEmptiedViews('tP', [PA])).toEqual([]);
+    expect(await readEmptiedViews('tP', [PA, PA2])).toEqual(['VU_P']);
   });
 });
 

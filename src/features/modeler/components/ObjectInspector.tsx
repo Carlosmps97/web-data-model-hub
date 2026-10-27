@@ -437,7 +437,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       const onImpactError = reportWriteError(() => toast.error(`Couldn't check the relationships of this ${nouns.member}: nothing was deleted. Try again.`));
       const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't delete")));
       // Las vistas que quedarían sin columnas se leen junto con el impacto.
-      const emptied = readEmptiedViews(c.tableId, [c.physicalName]);
+      const emptied = readEmptiedViews(c.tableId, [c]);
       let impact: gov.RelationshipImpact;
       try { impact = await gov.columnImpact(c.id); } catch (e) { await onImpactError(e); return; }
       const emptiedViews = await emptied;

@@ -16,9 +16,11 @@ export const pinned = <A extends unknown[], R>(pin: SessionPin, fn: (...a: A) =>
   (...a: A): R => { pin.check(); return fn(...a); };
 
 /** Deps de los sync de vistas (`viewSync`) con el pin en `updateView`: leen
- *  igual y cortan antes de escribir si la sesión cambia. */
+ *  igual (también las columnas vigentes de la tabla, para no tocar el nombre
+ *  que conserva una homónima) y cortan antes de escribir si la sesión cambia. */
 export const pinnedViewDeps = (pin: SessionPin) => ({
   listViews: viewsSvc.listViews,
+  listColumns: gov.listColumns,
   updateView: pinned(pin, viewsSvc.updateView),
 });
 

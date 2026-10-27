@@ -8,6 +8,37 @@ import type { DbSchema } from '../services/schemas.service';
 
 export type SchemaKindFilter = 'tables' | 'views' | 'all';
 
+/** Esquema por defecto, del sistema (`DEFAULT_SCHEMA` de
+ *  `app/features/schemas/models.py`): el backend deja en él la tabla o vista
+ *  que se graba sin esquema; todo proyecto lo tiene y nadie lo renombra, le
+ *  cambia el kind ni lo borra. */
+const DEFAULT_SCHEMA = 'Not_defined';
+
+/** ¿Es el esquema por defecto (sin distinguir mayúsculas ni espacios)? */
+export function isSystemSchema(name: string | null | undefined): boolean {
+  return (name ?? '').trim().toLowerCase() === DEFAULT_SCHEMA.toLowerCase();
+}
+
+/** Nombre con que el backend graba una tabla o vista sin esquema: el esquema
+ *  por defecto con la grafía que tenga en el catálogo (lo reusa sin distinguir
+ *  mayúsculas). */
+export function defaultSchemaName(catalog: DbSchema[] = []): string {
+  return catalog.find((s) => isSystemSchema(s.name))?.name ?? DEFAULT_SCHEMA;
+}
+
+/** Rótulo de la opción vacía del combo: en tablas y vistas, el esquema por
+ *  defecto. */
+export function emptySchemaLabel(kind: SchemaKindFilter, catalog: DbSchema[] = []): string {
+  return kind === 'all' ? '(no schema)' : `${defaultSchemaName(catalog)} (default)`;
+}
+
+/** Valor que deja elegir una opción del combo: en tablas y vistas, la opción
+ *  vacía sobre un objeto que ya está en el esquema por defecto no lo cambia
+ *  (son lo mismo: no hay nada que grabar). */
+export function pickedSchema(kind: SchemaKindFilter, current: string, picked: string): string {
+  return kind !== 'all' && picked === '' && isSystemSchema(current) ? current : picked;
+}
+
 /**
  * Esquemas válidos para un contexto. Con `kind` concreto entran los de ese
  * kind, los que contienen tablas y vistas (`both`) y los sin clasificar
@@ -48,7 +79,8 @@ export function viewSchemaOnCreate(
   schemas: DbSchema[],
 ): { schema: string; suggest: string | null } {
   const base = (tableSchema ?? '').trim();
-  if (!base) return { schema: '', suggest: null };
+  // Sin esquema propio (o en el por defecto) la vista también queda en el por defecto.
+  if (!base || isSystemSchema(base)) return { schema: '', suggest: null };
   const hit = defaultViewSchema(base, schemas);
   return hit ? { schema: hit, suggest: null } : { schema: '', suggest: `${base}_VU` };
 }

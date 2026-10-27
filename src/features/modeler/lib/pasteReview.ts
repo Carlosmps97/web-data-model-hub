@@ -26,6 +26,7 @@ import { FACET_NOUNS, udpView, type Facet, type FacetNouns } from '@/lib/facets'
 import { udpValueFor } from '@/lib/udpValue';
 import type { DbSchema } from '../services/schemas.service';
 import { applyNamingCase } from './physicalCase';
+import { isSystemSchema } from './schemaPick';
 import { SCHEMA_NAME_RE } from './schemaStaging';
 import { canonicalDefaultType } from './typePick';
 
@@ -267,10 +268,11 @@ export function reviewPaste(input: {
     if (wanted) {
       const hit = target.schemas.find((s) => s.name.trim().toLowerCase() === wanted.toLowerCase());
       // Un nombre que el catálogo no admite (texto libre) no se crea: queda como texto, como en la fuente.
-      const creatable = SCHEMA_NAME_RE.test(wanted);
+      // El esquema por defecto tampoco: es del sistema y, si falta, el backend lo crea al grabar la tabla.
+      const creatable = SCHEMA_NAME_RE.test(wanted) && !isSystemSchema(wanted);
       schema = hit ? { name: hit.name, create: false, viewsKind: hit.kind === 'views' } : { name: wanted, create: creatable, viewsKind: false };
       if (schema.viewsKind) warnings.push(`Schema «${schema.name}» exists in this project as a views schema — the ${n.one} goes into it.`);
-      if (!hit && !creatable) warnings.push(`«${wanted}» isn't a valid schema name — the ${n.one} keeps it, but it isn't created as a schema.`);
+      if (!hit && !creatable && !isSystemSchema(wanted)) warnings.push(`«${wanted}» isn't a valid schema name — the ${n.one} keeps it, but it isn't created as a schema.`);
       if (schema.create) createSchema = { name: schema.name };
     }
     tableOut = { schema, udps };

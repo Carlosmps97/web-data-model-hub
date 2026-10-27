@@ -274,7 +274,8 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
     for (const r of resolutions) {
       if (r.target.kind !== 'existing' || !r.target.rename) continue;
       const { col, rename } = r.target;
-      await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), rel.childTableId, col.physicalName, rename.physicalName));
+      await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), rel.childTableId, col.physicalName, rename.physicalName,
+        { createdIds: createdCols.map((c) => c.id) }));
     }
     setSyncing(false);
     useModelerStore.getState().markDirty();

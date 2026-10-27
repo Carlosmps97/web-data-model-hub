@@ -6,7 +6,7 @@
 // traga el corte como un error cualquiera.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/services/governance.service', () => ({ recordChangesBulk: vi.fn() }));
+vi.mock('@/services/governance.service', () => ({ recordChangesBulk: vi.fn(), listColumns: vi.fn() }));
 vi.mock('@/services/views.service', () => ({ listViews: vi.fn(), updateView: vi.fn() }));
 
 import * as gov from '@/services/governance.service';
@@ -28,6 +28,7 @@ beforeEach(() => {
   open('cs1');
   vi.mocked(gov.recordChangesBulk).mockImplementation(async () => { writes.push(`${csNow()}:bulk`); await sleep(10); return undefined; });
   vi.mocked(viewsSvc.listViews).mockImplementation(async () => [structuredClone(VIEW)] as never);
+  vi.mocked(gov.listColumns).mockResolvedValue([] as never);   // ninguna homónima en la tabla
   vi.mocked(viewsSvc.updateView).mockImplementation(async (id) => { writes.push(`${csNow()}:view:${id}`); return {} as never; });
 });
 

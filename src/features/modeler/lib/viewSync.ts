@@ -8,6 +8,9 @@
  *  - "Ordenar como la tabla física": reordena los sources de la vista según
  *    el orden único de cada tabla fuente (PK primero, cada bloque por
  *    `ordinal`).
+ *  - Una fuente apunta a la columna por nombre: si una tabla tiene columnas
+ *    repetidas (homónimas heredadas de Erwin) y se borra o renombra una, la
+ *    fuente sigue resolviendo a la otra y no se toca (`namesLeavingTable`).
  *
  * Los helpers de decisión son puros; `syncNewColumnToMirrorViews` orquesta
  * con dependencias inyectadas (patrón nameSync) para ser testeable sin red.
@@ -71,6 +74,14 @@ export function alignSourcesToPhysical(view: View, colsByTable: Map<string, Cano
   });
   keyed.sort((a, b) => (a.g - b.g) || (a.pos - b.pos) || (a.i - b.i));
   return keyed.map((k) => k.s);
+}
+
+/** De esos nombres, los que dejan de existir en la tabla: los que ninguna
+ *  columna que queda (`remaining`) conserva. Con una homónima que sigue en la
+ *  tabla, las fuentes de vista con ese nombre siguen resolviendo. Puro. */
+export function namesLeavingTable(names: string[], remaining: { physicalName: string }[]): string[] {
+  const held = new Set(remaining.map((c) => norm(c.physicalName)));
+  return names.filter((n) => !held.has(norm(n)));
 }
 
 const ofColumn = (view: View, s: ViewSource, tableId: string, physicalName: string) =>
@@ -189,7 +200,26 @@ export function renameColumnSource(view: View, tableId: string, oldPhysical: str
 type SyncDeps = {
   listViews: (tableId: string) => Promise<View[]>;
   updateView: (id: string, body: ViewInput) => Promise<unknown>;
+  /** Columnas vigentes de la tabla (después del borrado o del rename): con
+   *  ellas un nombre que otra columna conserva no se toca en las vistas. */
+  listColumns?: (tableId: string) => Promise<CanonicalColumn[]>;
 };
+
+/** `createdIds`: columnas creadas en el mismo lote que el rename o el borrado;
+ *  no son homónimas heredadas y no sostienen el nombre en las vistas. */
+type HeldOpts = { createdIds?: string[] };
+
+/** Las vistas de la tabla y, en paralelo (sin sumar una ida y vuelta), las
+ *  columnas que pueden sostener un nombre. Sin `listColumns`, o si su lectura
+ *  falla, null: las vistas se tocan como siempre. */
+async function readForSync(deps: SyncDeps, tableId: string, opts?: HeldOpts): Promise<[CanonicalColumn[] | null, View[]]> {
+  const [cols, views] = await Promise.all([
+    deps.listColumns ? deps.listColumns(tableId).catch(() => null) : Promise.resolve(null),
+    deps.listViews(tableId),
+  ]);
+  const created = new Set(opts?.createdIds ?? []);
+  return [cols && cols.filter((c) => !created.has(c.id)), views];
+}
 
 /** Propaga una columna recién creada a las vistas espejo de su tabla
  *  (`isPrimaryKey`: la nueva es PK ⇒ entra tras las PK). Devuelve cuántas
@@ -239,11 +269,13 @@ export async function syncNewColumnsToMirrorViews(
 }
 
 /** Columna eliminada: sale de los sources de toda vista que la referencie
- *  (espejo o curada). Devuelve cuántas vistas se tocaron. */
+ *  (espejo o curada), salvo que otra columna de la tabla conserve el nombre.
+ *  Devuelve cuántas vistas se tocaron. */
 export async function syncRemovedColumnFromViews(
-  deps: SyncDeps, tableId: string, physicalName: string,
+  deps: SyncDeps, tableId: string, physicalName: string, opts?: HeldOpts,
 ): Promise<number> {
-  const views = await deps.listViews(tableId);
+  const [cols, views] = await readForSync(deps, tableId, opts);
+  if (cols && !namesLeavingTable([physicalName], cols).length) return 0;
   let touched = 0;
   for (const v of views) {
     const next = removeColumnSource(v, tableId, physicalName);
@@ -255,12 +287,14 @@ export async function syncRemovedColumnFromViews(
 }
 
 /** Columna renombrada (físico): re-apunta los sources de toda vista que la
- *  referenciaba por el nombre anterior. Devuelve cuántas vistas se tocaron. */
+ *  referenciaba por el nombre anterior, salvo que otra columna de la tabla lo
+ *  conserve (esas fuentes son de ella). Devuelve cuántas vistas se tocaron. */
 export async function syncRenamedColumnInViews(
-  deps: SyncDeps, tableId: string, oldPhysical: string, newPhysical: string,
+  deps: SyncDeps, tableId: string, oldPhysical: string, newPhysical: string, opts?: HeldOpts,
 ): Promise<number> {
   if (norm(oldPhysical) === norm(newPhysical)) return 0;
-  const views = await deps.listViews(tableId);
+  const [cols, views] = await readForSync(deps, tableId, opts);
+  if (cols && !namesLeavingTable([oldPhysical], cols).length) return 0;
   let touched = 0;
   for (const v of views) {
     const next = renameColumnSource(v, tableId, oldPhysical, newPhysical);

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { isAsOfChangesetId } from '@/services/versioning.service';
-import { schemasForKind, type SchemaKindFilter } from '../lib/schemaPick';
+import { emptySchemaLabel, isSystemSchema, pickedSchema, schemasForKind, type SchemaKindFilter } from '../lib/schemaPick';
 import { canCreateSchema, createActionLabel } from '../lib/schemaCreate';
 import SchemaCreateDialog from './SchemaCreateDialog';
 import SearchSelect from './SearchSelect';
@@ -16,9 +16,12 @@ import SearchSelect from './SearchSelect';
  * Opciones = esquemas efectivos de la versión activa (los creados en el draft
  * aparecen al instante), particionados por `kind`: un contexto de tablas no
  * muestra esquemas de vistas ni viceversa; los sin clasificar entran en ambos.
- * '' = sin esquema. Un valor actual no catalogado (p. ej. una tabla cuyo
- * esquema no está en el catálogo) o de otro kind se muestra igual como opción
- * extra para no romper la edición.
+ * '' = sin esquema: el backend graba la tabla o la vista en el esquema por
+ * defecto (`Not_defined`, del sistema), así que en tablas y vistas la opción
+ * vacía se rotula con él y lo representa (el esquema no se lista aparte). Un
+ * valor actual no catalogado (p. ej. una tabla cuyo esquema no está en el
+ * catálogo) o de otro kind se muestra igual como opción extra para no romper la
+ * edición.
  *
  * Al elegir el esquema de una tabla o una vista en una versión en edición, el
  * menú ofrece «+ Create schema…»: abre `SchemaCreateDialog`, el esquema entra a
@@ -49,22 +52,27 @@ export default function SchemaSelect({ value, onChange, disabled, className, sty
     if (useModelerStore.getState().schemas.length === 0) void loadSchemas().catch(() => {});
   }, [loadSchemas]);
 
+  // En tablas y vistas el esquema por defecto es la opción vacía.
+  const byDefault = kind !== 'all';
   const options = useMemo(() => {
-    const pool = schemasForKind(schemas, kind);
+    const pool = schemasForKind(schemas, kind).filter((s) => !byDefault || !isSystemSchema(s.name));
     const opts = pool.map((s) => ({ value: s.name, label: s.name }));
-    if (value && !pool.some((s) => s.name === value)) opts.unshift({ value, label: value });
+    if (value && !(byDefault && isSystemSchema(value)) && !pool.some((s) => s.name === value)) {
+      opts.unshift({ value, label: value });
+    }
     return opts;
-  }, [schemas, kind, value]);
+  }, [schemas, kind, value, byDefault]);
+  const emptyLabel = emptySchemaLabel(kind, schemas);
 
   return (
     <div style={style}>
       <SearchSelect
         mono
         options={options}
-        valueLabel={value}
+        valueLabel={byDefault && (!value.trim() || isSystemSchema(value)) ? emptyLabel : value}
         placeholder="Search schema…"
-        emptyLabel="(no schema)"
-        onPick={onChange}
+        emptyLabel={emptyLabel}
+        onPick={(v) => onChange(pickedSchema(kind, value, v))}
         disabled={disabled}
         inputClassName={className ?? 'rd-input'}
         inputStyle={inputStyle}

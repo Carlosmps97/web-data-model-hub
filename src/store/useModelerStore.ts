@@ -41,7 +41,7 @@ import {
 } from '@/features/modeler/lib/wireRoute';
 import type { RoutePoint, WireRoutes } from '@/features/modeler/lib/wireRoute';
 import {
-  removeColumnsSources, restoreColumnsSources, syncNewColumnToMirrorViews, syncRenamedColumnInViews,
+  namesLeavingTable, removeColumnsSources, restoreColumnsSources, syncNewColumnToMirrorViews, syncRenamedColumnInViews,
   type RemovedColumn,
 } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
@@ -2762,11 +2762,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     let fix = rels;
     try {
       let views: View[];
-      [pool, views] = await Promise.all([
+      let tableCols: CanonicalColumn[];
+      // Las columnas vigentes de la tabla, del servidor (el diagrama puede ir
+      // atrasado), en paralelo con las demás lecturas.
+      [pool, views, tableCols] = await Promise.all([
         rels.length && tableId ? gov.listRelationships(tableId) : Promise.resolve([] as gov.Relationship[]),
         tableId ? viewsSvc.listViews(tableId) : Promise.resolve([] as View[]),
+        tableId ? gov.listColumns(tableId) : Promise.resolve([] as CanonicalColumn[]),
       ]);
-      const names = cols.map((c) => c.physicalName);
+      // Un nombre que conserva otra columna de la tabla (homónima) no sale de
+      // las vistas: sus fuentes siguen resolviendo a ella.
+      const names = namesLeavingTable(cols.map((c) => c.physicalName), tableCols.filter((c) => !gone.has(c.id)));
       for (const v of views) {
         const out = tableId ? removeColumnsSources(v, tableId, names) : null;
         if (!out) continue;

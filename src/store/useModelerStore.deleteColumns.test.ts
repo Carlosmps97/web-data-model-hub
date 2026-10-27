@@ -96,7 +96,8 @@ describe('borrar varias columnas: un solo lote', () => {
     await st().deleteColumns(['pa', 'pb', 'c1'], ['r1']);
     expect(relReads()).toEqual(['tP', 'tH']);
     expect(viewsSvc.listViews).toHaveBeenCalledTimes(1);
-    expect(gov.listColumns).not.toHaveBeenCalled();   // las hijas están en el diagrama
+    // Las columnas de la tabla, del servidor (en paralelo); las hijas, del diagrama.
+    expect(vi.mocked(gov.listColumns).mock.calls.map((c) => c[0])).toEqual(['tP']);
   });
 
   it('recursiva con las dos puntas elegidas: la columna borrada no recibe además el FK en false', async () => {
@@ -242,5 +243,34 @@ describe('deshacer el borrado de varias columnas', () => {
     await expect(useUndoStore.getState().undoLast()).rejects.toThrow("Couldn't read the views of these 3 columns: nothing was undone.");
     expect(gov.recordChangesBulk).toHaveBeenCalledTimes(1);
     expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['Delete 3 columns']);
+  });
+});
+
+// Columnas repetidas (homónimas heredadas de Erwin): la fuente de la vista
+// apunta a la columna por nombre. Borrar una copia deja a la otra: la vista no
+// pierde esa columna. Borrar las dos sí la saca.
+describe('borrar una columna homónima', () => {
+  const PA2 = col('pa2', 'tP', 3, { physicalName: 'PA' });
+  const withHomonym = async () => {
+    vi.mocked(mod.loadDiagram).mockImplementation(async () => structuredClone({ ...DIA, columns: [...DIA.columns, PA2] }) as never);
+    await st().reload();
+    vi.clearAllMocks();
+    vi.mocked(gov.listRelationships).mockImplementation(async (t) => structuredClone(RELS[t ?? ''] ?? []) as never);
+    vi.mocked(gov.recordChangesBulk).mockImplementation(async () => ({}) as never);
+    vi.mocked(viewsSvc.listViews).mockImplementation(async (t) => (t === 'tP' ? [structuredClone(V1)] : []) as never);
+    vi.mocked(gov.listColumns).mockImplementation(async (t) => (t === 'tP' ? [PA, PB, C1, PA2] : []) as never);
+  };
+
+  it('con la otra copia en la tabla, la vista conserva la fuente', async () => {
+    await withHomonym();
+    await st().deleteColumns(['pa2'], []);
+    expect(lot().map((c) => `${c.collection}:${c.op}:${c.entityId}`)).toEqual(['canonical_columns:delete:pa2']);
+  });
+
+  it('borrando las dos copias, la vista la pierde', async () => {
+    await withHomonym();
+    await st().deleteColumns(['pa', 'pa2'], ['r1']);
+    const view = lot().find((c) => c.collection === 'views');
+    expect((view?.payload as { sources: { column?: string }[] }).sources.map((x) => x.column)).toEqual(['PB', 'C1', undefined]);
   });
 });

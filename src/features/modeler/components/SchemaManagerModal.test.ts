@@ -11,6 +11,7 @@ const { STATE, svc } = vi.hoisted(() => ({
     schemas: [
       { id: 's1', name: 'core_ventas_vu', description: null, kind: 'tables' },
       { id: 's2', name: 'core_base', description: 'core', kind: 'both' },
+      { id: 's3', name: 'Not_defined', description: null, kind: 'both' },
     ],
     loadSchemas: vi.fn(async () => undefined),
     reload: vi.fn(async () => undefined),
@@ -60,6 +61,15 @@ describe('SchemaManagerModal', () => {
     const text = textOf(mount());
     expect(text).toContain('core_ventas_vutables');
     expect(text).toContain('core_basetables + views');
+  });
+
+  it('el esquema por defecto es del sistema: su fila no ofrece acciones', () => {
+    const tree = mount();
+    const row = [...walk(tree)].find((e) => (e as unknown as { key?: string | null }).key === 's3');
+    if (!row) throw new Error('no row s3');
+    expect(textOf(row)).toContain('system default');
+    expect([...walk(row)].some((e) => e.type === 'button')).toBe(false);
+    expect([...walk(tree)].filter((e) => e.type === 'button' && e.props.title === 'Delete (only if empty)')).toHaveLength(2);
   });
 
   it('crear ofrece Tables, Views y Both', () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CanonicalColumn } from '@/services/governance.service';
 import type { View, ViewSource } from '@/services/views.service';
-import { alignSourcesToPhysical, appendColumnSource, hasProjection, isMirrorOfTable, removeColumnSource, removeColumnsSources, renameColumnSource, restoreColumnsSources, syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, viewsLeftEmpty } from './viewSync';
+import { alignSourcesToPhysical, appendColumnSource, hasProjection, isMirrorOfTable, namesLeavingTable, removeColumnSource, removeColumnsSources, renameColumnSource, restoreColumnsSources, syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews, viewsLeftEmpty } from './viewSync';
 import { SessionChangedError } from './sessionGuard';
 
 const col = (physicalName: string, ordinal: number): CanonicalColumn => ({
@@ -323,5 +323,64 @@ describe('varias columnas de una vista (borrado de varias columnas)', () => {
     const withExpr: View = { ...v, id: 'v3', sources: [PA, UNO] };
     const other: View = { ...v, id: 'v4', sources: [C1] };
     expect(viewsLeftEmpty([only, withExpr, other], 'tP', ['PA', 'PB']).map((x) => x.id)).toEqual(['v2']);
+  });
+});
+
+// Columnas repetidas (homónimas heredadas de Erwin): las fuentes de una vista
+// apuntan a la columna por nombre. Si al borrar o renombrar una queda otra con
+// ese nombre en la tabla, la fuente sigue resolviendo a ella y no se toca.
+describe('columnas homónimas', () => {
+  const homonym = (id: string): CanonicalColumn => ({ ...col('COD', 0), id });
+
+  it('namesLeavingTable: solo salen los nombres que nadie conserva', () => {
+    expect(namesLeavingTable(['COD', 'FEC'], [homonym('cod-2')])).toEqual(['FEC']);
+    expect(namesLeavingTable(['cod'], [])).toEqual(['cod']);
+  });
+
+  it('borrar una de dos homónimas no saca la fuente; borrar la última sí', async () => {
+    const updateView = vi.fn<(id: string, body: { sources?: ViewSource[] }) => Promise<void>>(async () => {});
+    const deps = { listViews: vi.fn(async () => [mirror]), updateView,
+      listColumns: vi.fn(async () => [homonym('cod-2'), col('FEC', 1)]) };
+    expect(await syncRemovedColumnFromViews(deps, 't1', 'COD')).toBe(0);
+    expect(updateView).not.toHaveBeenCalled();
+    deps.listColumns.mockResolvedValueOnce([col('FEC', 1)]);
+    expect(await syncRemovedColumnFromViews(deps, 't1', 'COD')).toBe(1);
+    expect(updateView.mock.calls[0]?.[1].sources?.map((x) => x.column)).toEqual(['FEC']);
+  });
+
+  it('renombrar una de dos homónimas no re-apunta la fuente (es de la otra)', async () => {
+    const updateView = vi.fn(async () => {});
+    const deps = { listViews: vi.fn(async () => [mirror]), updateView,
+      listColumns: vi.fn(async () => [{ ...homonym('cod-1'), physicalName: 'COD_X' }, homonym('cod-2'), col('FEC', 1)]) };
+    expect(await syncRenamedColumnInViews(deps, 't1', 'COD', 'COD_X')).toBe(0);
+    expect(updateView).not.toHaveBeenCalled();
+  });
+
+  it('sin la lectura de columnas, o si falla, se comporta como siempre', async () => {
+    const updateView = vi.fn(async () => {});
+    expect(await syncRenamedColumnInViews({ listViews: vi.fn(async () => [mirror]), updateView }, 't1', 'COD', 'COD_X')).toBe(1);
+    const failing = { listViews: vi.fn(async () => [mirror]), updateView,
+      listColumns: vi.fn(async (): Promise<CanonicalColumn[]> => { throw new Error('sin red'); }) };
+    expect(await syncRenamedColumnInViews(failing, 't1', 'COD', 'COD_X')).toBe(1);
+  });
+
+  it('una columna creada en el mismo lote con el nombre anterior no lo sostiene', async () => {
+    // Migrar la llave: E (COD) pasa a COD_X por role name y el lote crea C, también COD.
+    const updateView = vi.fn(async () => {});
+    const deps = { listViews: vi.fn(async () => [mirror]), updateView,
+      listColumns: vi.fn(async () => [{ ...homonym('e'), physicalName: 'COD_X' }, homonym('c')]) };
+    expect(await syncRenamedColumnInViews(deps, 't1', 'COD', 'COD_X', { createdIds: ['c'] })).toBe(1);
+  });
+
+  it('las columnas y las vistas se leen a la vez (sin sumar una ida y vuelta)', async () => {
+    let views!: (v: View[]) => void;
+    const deps = { listViews: vi.fn(() => new Promise<View[]>((r) => { views = r; })), updateView: vi.fn(async () => {}),
+      listColumns: vi.fn(async () => [] as CanonicalColumn[]) };
+    const run = syncRemovedColumnFromViews(deps, 't1', 'COD');
+    await Promise.resolve();
+    expect(deps.listViews).toHaveBeenCalled();
+    expect(deps.listColumns).toHaveBeenCalled();
+    views([mirror]);
+    expect(await run).toBe(1);
   });
 });

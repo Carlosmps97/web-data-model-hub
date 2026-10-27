@@ -13,6 +13,14 @@ describe('schemaNameError (compartida con el gestor)', () => {
   });
 });
 
+describe('schemaNameError — esquema de sistema', () => {
+  it('su nombre está reservado, en cualquier grafía', () => {
+    expect(schemaNameError('not_defined', new Set())).toBe('not_defined is reserved for the system default schema.');
+    expect(schemaNameError('NOT_DEFINED', new Set(['not_defined']))).toBe('NOT_DEFINED is reserved for the system default schema.');
+    expect(schemaNameError('not_defined_vu', new Set())).toBeNull();
+  });
+});
+
 describe('canCreateSchema', () => {
   const ok = { kind: 'tables' as const, openMode: 'editing', changesetId: 'cs1', asOf: false };
   it('solo en edición, con versión viva, combo habilitado y kind tablas/vistas', () => {

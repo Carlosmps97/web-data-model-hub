@@ -110,6 +110,14 @@ describe('reviewPaste — mismo proyecto', () => {
     expect(mixto.warnings.some((w) => w.includes('views schema'))).toBe(false);
   });
 
+  it('el esquema por defecto nunca se crea: es del sistema (si falta, lo crea el backend al grabar la tabla)', () => {
+    const r = review({ table: { ...TABLE, schema: 'Not_defined' } });
+    expect(r.table?.schema).toEqual({ name: 'Not_defined', create: false, viewsKind: false });
+    expect(r.payload.createSchema).toBeUndefined();
+    expect(r.payload.table?.schema).toBe('Not_defined');
+    expect(r.warnings.some((w) => w.includes('Not_defined'))).toBe(false);
+  });
+
   it('un esquema que no es un nombre válido no se crea: la tabla lo conserva como texto, con aviso', () => {
     const r = review({ table: { ...TABLE, schema: 'stg-legado' } });
     expect(r.table?.schema).toEqual({ name: 'stg-legado', create: false, viewsKind: false });

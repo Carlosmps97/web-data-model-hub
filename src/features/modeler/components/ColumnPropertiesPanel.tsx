@@ -165,7 +165,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
     const onImpactError = reportWriteError(() => pushToast(`Couldn't check the relationships of this ${noun}: nothing was deleted. Try again.`, 'err'));
     try {
       // Las vistas que quedarían sin columnas se leen junto con el impacto.
-      const emptied = readEmptiedViews(col.tableId, [col.physicalName]);
+      const emptied = readEmptiedViews(col.tableId, [col]);
       let impact: gov.RelationshipImpact;
       try { impact = await gov.columnImpact(col.id); } catch (e) { await onImpactError(e); return; }
       const emptiedViews = await emptied;

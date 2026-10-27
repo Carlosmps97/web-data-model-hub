@@ -9,6 +9,7 @@ import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
 import { tableSchemasCached } from '../services/schemaPartition';
 import { buildCandidates, filterColumns } from '../lib/ctasPick';
+import { defaultSchemaName } from '../lib/schemaPick';
 
 /** Página server-side de fuentes (mismo tamaño que el Import existing). */
 const PAGE = 50;
@@ -156,11 +157,11 @@ export default function CtasModal({ onClose, pushToast }: { onClose: () => void;
   }, [tableSchemas, schemasErr, schemasCatalog]);
 
   const sql = useMemo(() => {
-    const tbl = `${schema.trim() || 'schema'}.${physName || 'new_table'}`;
+    const tbl = `${schema.trim() || defaultSchemaName(schemasCatalog)}.${physName || 'new_table'}`;
     const cols = pickedCols.length ? pickedCols.map((c) => `  ${c.physicalName}`).join(',\n') : '  *';
     const from = srcTables.map((t) => (t.schema ? `${t.schema}.${t.physicalName}` : t.physicalName)).join(', ') || '<source tables>';
     return `CREATE TABLE ${tbl} AS\nSELECT\n${cols}\nFROM ${from};`;
-  }, [schema, physName, pickedCols, srcTables]);
+  }, [schema, physName, pickedCols, srcTables, schemasCatalog]);
 
   const create = async () => {
     if (!name.trim()) { pushToast('Table name is required', 'err'); return; }

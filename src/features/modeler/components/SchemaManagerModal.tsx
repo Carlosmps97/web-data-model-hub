@@ -9,6 +9,7 @@ import { useSessionStore } from '@/store/useSessionStore';
 import * as schemasSvc from '../services/schemas.service';
 import type { DbSchema, SchemaImpact } from '../services/schemas.service';
 import { schemaNameError } from '../lib/schemaCreate';
+import { isSystemSchema } from '../lib/schemaPick';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import { invalidateTableSchemas } from '../services/schemaPartition';
 import {
@@ -30,6 +31,10 @@ import {
  * Un esquema contiene tablas, vistas o ambas (`both`, badge «tables + views»);
  * se elige al crearlo y se puede cambiar desde la fila. Es lo que filtran los
  * combos de esquema de tablas y de vistas.
+ *
+ * El esquema por defecto (`Not_defined`) es del sistema: su fila no ofrece
+ * acciones (el backend rechaza renombrarlo, cambiarlo o borrarlo) y su nombre
+ * no se puede usar para otro esquema.
  *
  * El campo "New schema" cumple doble función: mientras se escribe filtra la
  * lista de abajo por «contiene» (con cientos de esquemas, ubicar el que se
@@ -332,7 +337,10 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
                       </div>
                     )}
                   </div>
-                  {kindEdit === s.id ? kindRow(s) : pending
+                  {isSystemSchema(s.name) ? (
+                    <span className="rd-small" title="System default schema for tables and views saved without a schema. It can't be renamed, changed or deleted."
+                      style={{ flexShrink: 0, fontWeight: 700, color: 'var(--text-muted, #8A93A5)' }}>system default</span>
+                  ) : kindEdit === s.id ? kindRow(s) : pending
                     ? iconBtn('Undo this change', () => setStaged((ops) => unstage(ops, pending.key)), <Undo2 size={13} />)
                     : (
                       <>

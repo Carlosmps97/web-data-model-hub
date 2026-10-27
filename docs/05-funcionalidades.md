@@ -298,6 +298,9 @@ Las tablas nuevas aparecen en el centro de lo que el usuario está viendo del ca
   borrado (con las relaciones elegidas en el diálogo de impacto): si alguna de esas vistas no se puede
   grabar, la columna no se borra. La confirmación avisa qué vistas quedan sin columnas (el Export DDL
   las escribiría como `SELECT *`): el borrado sigue y la vista se corrige o se borra después.
+- Las vistas apuntan a la columna por nombre. Si la tabla tiene columnas repetidas (homónimas heredadas
+  de Erwin) y se borra o renombra una, las vistas no se tocan mientras otra columna conserve ese nombre:
+  siguen resolviendo a ella (`namesLeavingTable`, `lib/viewSync.ts`).
 - Varias columnas seleccionadas de una tabla se borran juntas desde el menú de clic derecho: una sola
   confirmación (las columnas, las relaciones que pierden pares y las vistas que quedan sin columnas),
   un solo lote y un solo Undo, con el mismo costo que borrar una.
@@ -317,6 +320,13 @@ impacto (tablas, vistas y canvases).
 - Renombrar propaga a todas las tablas y vistas del esquema dentro de la versión; eliminar un esquema
   con tablas o vistas se rechaza con un mensaje legible.
 - Desde un combo de esquema se puede crear uno al vuelo (`SchemaCreateDialog.tsx`).
+- `Not_defined` es el esquema por defecto, del sistema: todo proyecto lo tiene y una tabla o vista que se
+  graba sin esquema queda en él (lo hace el backend). En los combos de esquema de tablas y de vistas es
+  la opción vacía, rotulada «Not_defined (default)» (no se lista aparte); en Structure · Schemas su fila
+  dice «system default» y no ofrece acciones, y su nombre no se puede usar para otro esquema
+  (`isSystemSchema` en `lib/schemaPick.ts`). Una vista de una tabla en `Not_defined` también queda en él
+  (no se sugiere un `Not_defined_VU`), y la vista previa del SQL de New view y de CTAS muestra el esquema
+  por defecto cuando el campo va vacío (`defaultSchemaName`).
 
 ## Model: vistas
 

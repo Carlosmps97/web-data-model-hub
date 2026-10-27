@@ -10,7 +10,7 @@ import { colKey, duplicateOutputNames, splitColKey, serializeSources, viewSaveBo
 import SchemaSelect from './SchemaSelect';
 import SearchSelect from './SearchSelect';
 import SchemaCreateDialog from './SchemaCreateDialog';
-import { viewSchemaOnCreate } from '../lib/schemaPick';
+import { defaultSchemaName, viewSchemaOnCreate } from '../lib/schemaPick';
 import { orderColumns } from '../lib/columnOrder';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
 
@@ -275,20 +275,21 @@ export default function ViewEditor({
           : dupNames.length ? `Output name ${dupNames[0]} is repeated — rename one (the DDL would be invalid)` : undefined;
 
   // Preview con el mismo generador del Export DDL, una sola fuente de verdad:
-  // sale de las columnas, nunca de la User-Defined SQL.
+  // sale de las columnas, nunca de la User-Defined SQL. Sin esquema, la vista
+  // queda en el esquema por defecto (el backend la graba ahí).
   const preview = useMemo(() => {
     if (includedCount === 0) return '-- Select at least one column for the view.';
     const dv: DdlView = {
       id: view?.id ?? 'new',
       name: name.trim() || 'view',
-      schema: schema.trim() || undefined,
+      schema: schema.trim() || defaultSchemaName(storeSchemas),
       tableId: sourceIds[0],
       sourceTableIds: sourceIds,
       sources: serializeSources(order, cfg, validKeys),
     };
     return viewDDL(dv, { ...DEFAULT_DATABRICKS_OPTS, includeComments: false },
       new Map(tables.map((t) => [t.id, t]))).trim();
-  }, [includedCount, view, name, schema, sourceIds, order, cfg, validKeys, tables]);
+  }, [includedCount, view, name, schema, sourceIds, order, cfg, validKeys, tables, storeSchemas]);
 
   const save = async () => {
     if (!canSave || ro) return;
