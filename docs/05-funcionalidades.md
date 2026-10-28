@@ -21,7 +21,7 @@ el frontend. Los textos de botones y pantallas se citan tal como aparecen en la 
 - [Model: Object Inspector y búsqueda](#model-object-inspector-y-búsqueda)
 - [Model: toolbar](#model-toolbar)
 - [Model: copiar y pegar](#model-copiar-y-pegar)
-- [Model: Undo](#model-undo)
+- [Model: Undo y Redo](#model-undo-y-redo)
 - [Model: colores por canvas y themes](#model-colores-por-canvas-y-themes)
 - [Model: auto-arrange, posiciones fijas y LOD](#model-auto-arrange-posiciones-fijas-y-lod)
 - [Model: publicar y borrar el proyecto](#model-publicar-y-borrar-el-proyecto)
@@ -180,7 +180,7 @@ Comportamientos de la sesión:
   **Save and leave**, **Leave without saving** y **Cancel**; si el guardado falla, no sale y el aviso
   dice el motivo. Cerrar la pestaña con cambios dispara el aviso nativo del navegador
   (`beforeunload`).
-- Cambiar de proyecto, modo o versión cierra los popups abiertos y vacía la pila de Undo.
+- Cambiar de proyecto, modo o versión cierra los popups abiertos y vacía el historial de Undo y Redo.
 
 ## Model: Explorer
 
@@ -252,12 +252,13 @@ Atajos del canvas (`ModelerCanvas.tsx` y `Toolbar.tsx`; ⌘ en macOS, Ctrl en Wi
 |---|---|
 | Ctrl/Cmd+C | Copia las filas seleccionadas o, sin filas, la tabla seleccionada. |
 | Ctrl/Cmd+V | Pega: con tabla copiada, abre la revisión de pegado de tabla; con columnas, la de columnas sobre la tabla seleccionada. |
-| Ctrl/Cmd+Z | Deshace la última acción (no hay rehacer). |
+| Ctrl/Cmd+Z | Deshace la última acción. |
+| Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y | Rehace lo último deshecho. |
 | Ctrl/Cmd+K | Abre la búsqueda del modelo. |
 | Esc | Cierra el menú contextual o limpia la selección de filas. |
 
-Los atajos no actúan con un modal o un overlay de espera abierto. Copiar, pegar y deshacer tampoco
-actúan con el foco en un campo editable, y copiar no actúa con texto seleccionado en la página (ahí
+Los atajos no actúan con un modal o un overlay de espera abierto. Copiar, pegar, deshacer y rehacer
+tampoco actúan con el foco en un campo editable, y copiar no actúa con texto seleccionado en la página (ahí
 manda el copiado nativo del navegador).
 
 ## Model: tablas, columnas y esquemas
@@ -501,7 +502,7 @@ adapta al ancho disponible (`useToolbarFit.ts`, `lib/toolbarFit.ts`).
 | Search & inspect | Búsqueda del modelo (Ctrl/Cmd+K). |
 | Relationships | Identifying, non-identifying, cardinalidad de cada extremo, subcategoría (solo en lógico), mostrar u ocultar etiquetas. |
 | Drawing | Las ocho formas. |
-| Actions | **Undo**, **Auto-arrange**, **Export DDL**, **Export diagram** (SVG, HTML interactivo, PDF). |
+| Actions | **Undo**, **Redo**, **Auto-arrange**, **Export DDL**, **Export diagram** (SVG, HTML interactivo, PDF). |
 | Derecha | Indicador de proyecto y versión, **Open model**, **Save** («Save working copy») y **Publish**. |
 
 Las herramientas de edición se deshabilitan en visor. Las que pertenecen al modelo físico, con Logical
@@ -539,18 +540,32 @@ al cerrar la sesión. La copia es por valor.
   avisa: el pegado nunca crea UDP ni dominios. Si el proyecto de origen no existe o no se puede ver,
   se pega sin su metadata con un aviso; otros fallos de lectura se muestran con **Retry**.
 
-## Model: Undo
+## Model: Undo y Redo
 
-`store/useUndoStore.ts` mantiene una pila de inversas de las acciones del canvas (crear, borrar,
-renombrar, mover, pegar, pintar, trazos, entre otras), con su etiqueta. El botón **Undo** del toolbar
-dice qué se deshará («Undo — <acción> (Ctrl+Z)», con ⌘Z en macOS) y se apaga sin pila; Ctrl/Cmd+Z hace lo mismo y avisa
-«Undid: <acción>». No existe rehacer.
+`store/useUndoStore.ts` mantiene el historial de las acciones del canvas (crear, borrar, renombrar,
+mover, pegar, pintar, trazos, entre otras), con su etiqueta, hasta 50. El botón **Undo** del toolbar dice
+qué se deshará («Undo — <acción> (Ctrl+Z)», con ⌘Z en macOS) y **Redo**, a su lado, qué se rehará
+(«Redo — <acción> (Ctrl+Y)», con ⇧⌘Z en macOS); cada uno se apaga sin nada que hacer. En el canvas,
+Ctrl/Cmd+Z deshace y Ctrl/Cmd+Shift+Z o Ctrl/Cmd+Y rehacen, y avisan «Undid: <acción>» / «Redid:
+<acción>».
 
-- La pila se vacía en todo cambio de sesión (proyecto, modo o versión).
-- Cada acción de varias escrituras, y cada inversa, pertenece a la sesión donde empezó
+- Se rehace en orden inverso a lo deshecho, y solo si la versión no cambió desde el Undo: cualquier
+  escritura en la versión en el medio (otra acción, mover un bloque, dibujar, Save, el Schema manager,
+  otra pestaña sobre la misma versión) cancela lo pendiente de rehacer. Si el cambio llegó por fuera de
+  esta pestaña, Redo avisa «This version changed after the undo: there's nothing to redo.» y no escribe
+  nada.
+- Undo y Redo empiezan cuando termina lo que esta pestaña ya estaba grabando (por ejemplo, un bloque recién
+  soltado): eso cuenta como una escritura más, no como parte del paso.
+- Rehacer un borrado en cascada (tabla, columnas, vista, relación) lo recalcula con lo vigente. Si al
+  rehacer el borrado de columnas otra relación empezó a usarlas, no se borra nada y se avisa: borrarlas de
+  nuevo muestra el impacto.
+- El historial se vacía en todo cambio de sesión (proyecto, modo o versión).
+- Cada acción de varias escrituras, y cada paso de Undo o Redo, pertenece a la sesión donde empezó
   (`pinSession`, `lib/pinnedWrites.ts`): si la sesión cambia a mitad de camino, lo que falta no se
   escribe en ninguna versión.
-- Durante una carga Excel la pila queda vacía y cerrada hasta que la carga termina.
+- Durante una carga Excel el historial queda vacío y cerrado hasta que la carga termina. Ni la carga, ni
+  **Send for Approval**, ni descartar lo borrado por otra versión empiezan mientras corre un Undo o un
+  Redo.
 
 ## Model: colores por canvas y themes
 
@@ -613,7 +628,7 @@ en [Consideraciones técnicas](12-consideraciones-tecnicas.md).
 - Si la versión cambia objetos que otra versión borró y publicó después de abrirse esta, el envío se
   bloquea y el popup lista cada objeto como `NOMBRE (id)`, con su tabla y la versión, el autor y la fecha
   del borrado. **Discard changes on deleted objects** quita esos cambios de la versión (también los que no
-  se ven en el canvas, como las columnas de una tabla borrada), vacía la pila de Undo y recarga el
+  se ven en el canvas, como las columnas de una tabla borrada), vacía el historial de Undo y Redo y recarga el
   Explorer y el canvas; después se envía de nuevo.
 
 **Delete project…** (menú del proyecto en el Explorer, `DeleteProjectDialog.tsx`) registra el borrado
@@ -692,8 +707,8 @@ Comportamientos:
   uno o varios UDP con su faceta, o ignorar; valor por defecto) y reglas con severidad
   (`RulesEditor.tsx`). **Read headers from a workbook…** sugiere el mapeo por nombre. El estado del
   editor es puro (`lib/profileDraft.ts`) y valida en el cliente con las mismas reglas que el backend.
-- Desde que empieza el apply, la pila de Undo queda vacía y cerrada hasta el final; con una inversa
-  del Undo en curso, la carga no empieza («Undo is still running — upload when it finishes.»).
+- Desde que empieza el apply, el historial de Undo y Redo queda vacío y cerrado hasta el final; con un
+  Undo o un Redo en curso, la carga no empieza («Undo or redo is still running — upload when it finishes.»).
 - La carga pertenece a la versión donde se pidió: si mientras tanto se abre otra versión, la ubicación
   de bloques corta antes de escribir en ella y el resultado se avisa nombrando la versión de la carga.
 - Cerrar el popup descarta un job no aplicado; mientras aplica o ubica, el botón no lo cierra, y si

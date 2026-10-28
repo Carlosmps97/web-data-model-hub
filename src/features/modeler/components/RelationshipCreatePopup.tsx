@@ -11,7 +11,7 @@ import {
 import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { invertBulk, preKey } from '@/features/modeler/lib/undoInvert';
 import { syncNewColumnsToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
-import { bestEffort, pinnedViewDeps, undoColumnsBatch } from '../lib/pinnedWrites';
+import { bestEffort, columnsBatchStep, pinnedViewDeps } from '../lib/pinnedWrites';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
 import RelationshipPhraseFields, { type PhraseValues } from './RelationshipPhraseFields';
@@ -94,21 +94,23 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
       // las columnas creadas y las existentes modificadas vuelven a su
       // pre-imagen (snapshot por valor de las columnas del hijo); las vistas
       // espejo se corrigen best-effort (retiro de creadas + renames de vuelta).
+      // Redo: el mismo lote (mismos ids), y las vistas otra vez.
       const pre = new Map(childCols.map((c) => [
         preKey('canonical_columns', c.id),
         { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) } as Record<string, unknown>,
       ]));
       const inverse = invertBulk(changes, pre);
-      const renamesBack: { from: string; to: string }[] = [];
+      // Renames por role name, del nombre previo al nuevo.
+      const renames: { from: string; to: string }[] = [];
       for (const r of resolutions) {
         if (r.target.kind === 'existing' && r.target.rename) {
-          renamesBack.push({ from: r.target.rename.physicalName, to: r.target.col.physicalName });
+          renames.push({ from: r.target.col.physicalName, to: r.target.rename.physicalName });
         }
       }
-      const undoCreated = createdCols.map((c) => c.physicalName);
-      const undoChildId = draft.childTableId;
-      pushUndo('Create relationship', undoColumnsBatch({
-        inverse, tableId: undoChildId, created: undoCreated, renamesBack,
+      pushUndo('Create relationship', columnsBatchStep({
+        forward: changes, inverse, tableId: draft.childTableId,
+        created: createdCols.map((c) => ({ physicalName: c.physicalName, isPrimaryKey: c.isPrimaryKey })),
+        baseline: childCols.map((c) => ({ ...c })), renames, createdIds: createdCols.map((c) => c.id),
         after: () => useModelerStore.getState().reload(),
       }), pin);
       // Las columnas migradas entran también a las vistas espejo del hijo; los

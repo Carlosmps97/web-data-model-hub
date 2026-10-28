@@ -11,6 +11,7 @@ import { invalidateTableSchemas } from '@/features/modeler/services/schemaPartit
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
 import * as gov from '@/services/governance.service';
 import { onDraftWrite } from '@/services/changeset.service';
+import { trackDraftWork } from '@/services/draftWork';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { getNamingConfig, type NamingConfig } from '@/services/naming.service';
 import { facetName, facetNouns } from '@/lib/facets';
@@ -35,19 +36,19 @@ import { canvasClock, wholePoint, writtenSince } from '@/features/modeler/lib/ca
 import {
   afterRevalidation, isVersionError, pinSession, stillAskedSession, touchesVersion, type SessionPin,
 } from '@/features/modeler/lib/sessionGuard';
-import { bestEffort, pinnedViewDeps } from '@/features/modeler/lib/pinnedWrites';
+import { columnStep, lotStep, pinnedViewDeps } from '@/features/modeler/lib/pinnedWrites';
 import {
   cleanRoute, cleanRoutes, pruneRoutes, routableWireIds, routeOf, sameRoute, wireIdsOfTable,
 } from '@/features/modeler/lib/wireRoute';
 import type { RoutePoint, WireRoutes } from '@/features/modeler/lib/wireRoute';
 import {
-  namesLeavingTable, removeColumnsSources, restoreColumnsSources, syncNewColumnToMirrorViews, syncRenamedColumnInViews,
+  namesLeavingTable, removeColumnsSources, restoreColumnsSources, syncNewColumnToMirrorViews,
   type RemovedColumn,
 } from '@/features/modeler/lib/viewSync';
 import * as viewsSvc from '@/services/views.service';
 import type { View, ViewInput } from '@/services/views.service';
 import { useSessionStore } from '@/store/useSessionStore';
-import { NothingDoneError, pushUndo, useUndoStore } from '@/store/useUndoStore';
+import { NothingDoneError, freshStep, pushUndo, useUndoStore, type HistoryStep } from '@/store/useUndoStore';
 import { cleanColors, normalColor, themeIndex, type Theme } from '@/lib/colors';
 import { listThemes } from '@/services/themes.service';
 import { runBlocking } from '@/store/useBusyStore';
@@ -404,8 +405,10 @@ interface ModelerState {
    *  el mismo desde los paneles del canvas y el Object Inspector: repone el doc
    *  y la vuelve a listar, en su posición, en cada canvas que la listaba.
    *  `canvasIds`: dónde se usa, si el llamador ya lo sabe (si no, se consulta).
-   *  El refresco posterior al borrado queda en manos del llamador. */
-  deleteView: (view: View, opts?: { canvasIds?: string[] }) => Promise<void>;
+   *  El refresco posterior al borrado queda en manos del llamador. Con
+   *  `onUndo`, entrega su inversa en vez de apilarla (la pide otro paso del
+   *  historial: rehacer el borrado). */
+  deleteView: (view: View, opts?: { canvasIds?: string[]; onUndo?: (step: HistoryStep) => void }) => Promise<void>;
   // `sourceTable` (opcional por columna): nombre de la tabla dueña en el
   // origen — procedencia para el historial de auditoría; no viaja al payload.
   createTableFromSources: (input: { logicalName: string; schema?: string; columns: (CanonicalColumn & { sourceTable?: string })[] }) => Promise<void>;
@@ -419,8 +422,11 @@ interface ModelerState {
   /** Borra la tabla del modelo con cascada versionada: vistas, relaciones,
    *  columnas, membresía en todos los canvases, y la tabla. Todo en el changeset. */
   /** `opts.pre` = pre-imagen para el Undo cuando la tabla no está
-   *  en el diagrama (borrado desde el Object Inspector, sin canvas). */
-  deleteTable: (tableId: string, opts?: { pre?: CanonicalTable }) => Promise<void>;
+   *  en el diagrama (borrado desde el Object Inspector, sin canvas); sin ella
+   *  ni la tabla en el diagrama, se lee. Con `opts.onUndo`, entrega su inversa
+   *  en vez de apilarla (la pide otro paso del historial: deshacer «Create
+   *  table», rehacer «Delete table»). */
+  deleteTable: (tableId: string, opts?: { pre?: CanonicalTable; onUndo?: (step: HistoryStep) => void }) => Promise<void>;
   updateTable: (id: string, fields: { logicalName?: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
   /** Upsert de una columna en el changeset (merge sobre la columna actual del diagrama) + reload. */
   updateColumn: (colId: string, fields: Partial<CanonicalColumn>) => Promise<void>;
@@ -438,8 +444,11 @@ interface ModelerState {
   /** Borra columnas de UNA tabla en un solo lote: las relaciones del aviso de
    *  impacto (`relIds`) recortadas o borradas, las FK que quedan huérfanas, las
    *  columnas y cada vista que las lista; un solo Undo. `opts.cols` = las que
-   *  no están en el diagrama (estado efectivo). */
-  deleteColumns: (colIds: string[], relIds?: string[], opts?: { cols?: CanonicalColumn[] }) => Promise<void>;
+   *  no están en el diagrama (estado efectivo). Con `opts.onUndo`, entrega su
+   *  inversa en vez de apilarla (deshacer «Add column», rehacer el borrado).
+   *  Con `opts.exact` (rehacer el borrado), las relaciones a tocar son solo
+   *  `relIds`: si otra usa ahora alguna de las columnas, no borra nada. */
+  deleteColumns: (colIds: string[], relIds?: string[], opts?: { cols?: CanonicalColumn[]; onUndo?: (step: HistoryStep) => void; exact?: boolean }) => Promise<void>;
   setViewMode: (m: 'logical' | 'physical') => void;
   createSubjectArea: (name: string) => Promise<void>;
 }
@@ -579,6 +588,134 @@ function pinsOut(saId: string, leaving: string[], other?: Diagram): { pins?: Rec
   if (!dia) return {};
   const pins = pinsForLeaving(dia, leaving);
   return Object.keys(pins).length ? { pins } : {};
+}
+
+// ── Membresía del canvas como pasos del historial ─────────────────────────
+// Siempre sobre el canvas de la acción (`saId`), aunque al deshacer o rehacer
+// haya otro abierto. Cada paso arma su contrario con lo que el servicio dice que
+// entró o salió (posición, color y trazos incluidos). `shown`: la lista de
+// vistas del canvas al pedir la acción (ver `struct.addToCanvas`).
+
+/** Saca del canvas lo que entró y devuelve el paso que lo vuelve a poner. */
+function membersOut(saId: string, members: struct.CanvasMembers, shown?: string[] | null): HistoryStep {
+  return freshStep(async () => {
+    const out = await struct.removeFromCanvas(saId, members, shown);
+    await useModelerStore.getState().reload();
+    return membersIn(saId, out, shown);
+  });
+}
+
+/** Vuelve a poner lo que salió (solo lo que trae: sin tablas, posiciones ni
+ *  trazos, esas llaves no viajan) y devuelve el paso que lo saca otra vez. */
+function membersIn(saId: string, out: struct.CanvasMembersOut, shown?: string[] | null): HistoryStep {
+  return freshStep(async () => {
+    const added = await struct.addToCanvas(saId, {
+      ...(out.tableIds.length ? { tableIds: out.tableIds } : {}), viewIds: out.viewIds,
+      ...(Object.keys(out.layout).length ? { layout: out.layout } : {}),
+      ...(Object.keys(out.routes).length ? { routes: out.routes } : {}),
+      colors: out.colors,
+    }, shown);
+    await useModelerStore.getState().reload();
+    return membersOut(saId, { ...(added.tableIds.length ? { tableIds: added.tableIds } : {}), viewIds: added.viewIds }, shown);
+  });
+}
+
+/** Saca una tabla del canvas con sus vistas que quedan huérfanas (`viewIds`) y
+ *  los trazos de sus wires; lo que queda sin posición, donde se ve si ese
+ *  canvas está abierto (`pinsOut`). Devuelve el paso que la vuelve a poner. */
+function tableOut(saId: string, tableId: string, viewIds: string[], wireIds: string[], shown?: string[] | null): HistoryStep {
+  return freshStep(async () => {
+    const out = await struct.removeFromCanvas(saId, {
+      tableIds: [tableId], viewIds, ...(wireIds.length ? { dropRouteIds: wireIds } : {}), ...pinsOut(saId, [tableId]),
+    }, shown);
+    await useModelerStore.getState().reload();
+    return tableIn(saId, tableId, out, wireIds, shown);
+  });
+}
+
+/** Vuelve a poner la tabla con lo que salió con ella, en una sola escritura.
+ *  Las vistas solo cuentan si salieron con ella: sin ellas, un canvas sin lista
+ *  explícita sigue sin lista. */
+function tableIn(saId: string, tableId: string, out: struct.CanvasMembersOut, wireIds: string[], shown?: string[] | null): HistoryStep {
+  return async () => {
+    await struct.addToCanvas(saId, {
+      tableIds: [tableId], viewIds: out.viewIds, layout: out.layout, routes: out.routes, colors: out.colors,
+    }, out.viewIds.length ? shown : undefined);
+    await useModelerStore.getState().reload();
+    return tableOut(saId, tableId, out.viewIds, wireIds, shown);
+  };
+}
+
+// ── Borrados en cascada como pasos del historial ──────────────────────────
+// Frescos (`freshStep`): la acción del store vuelve a leer lo que depende del
+// objeto en ese momento y entrega su inversa (`onUndo`) en vez de apilarla.
+
+/** Borra la tabla con su cascada (deshacer «Create table», rehacer «Delete
+ *  table») y devuelve su inversa. */
+function tableDrop(id: string, pre?: CanonicalTable): HistoryStep {
+  return freshStep(async () => {
+    const got: { step: HistoryStep | null } = { step: null };
+    await useModelerStore.getState().deleteTable(id, { ...(pre ? { pre } : {}), onUndo: (step) => { got.step = step; } });
+    return got.step;
+  });
+}
+
+/** Borra columnas de una tabla con su cascada (deshacer «Add column», rehacer
+ *  el borrado: `exact`) y devuelve su inversa. */
+function columnsDrop(ids: string[], relIds: string[], cols: CanonicalColumn[], exact = false): HistoryStep {
+  return freshStep(async () => {
+    const got: { step: HistoryStep | null } = { step: null };
+    await useModelerStore.getState().deleteColumns(ids, relIds, { cols, exact, onUndo: (step) => { got.step = step; } });
+    return got.step;
+  });
+}
+
+/** Borra la vista de todos los canvases (rehacer el borrado) y devuelve su inversa. */
+function viewDrop(view: View): HistoryStep {
+  return freshStep(async () => {
+    const got: { step: HistoryStep | null } = { step: null };
+    await useModelerStore.getState().deleteView(view, { onUndo: (step) => { got.step = step; } });
+    return got.step;
+  });
+}
+
+const RELATIONSHIP_KEYS_UNREADABLE = "Couldn't check the keys of this relationship";
+
+/** Repone una relación borrada y el FK que su borrado apagó en las hijas (por
+ *  valor); devuelve el paso que la vuelve a borrar. */
+function relRestore(rel: gov.Relationship, fkCleared: CanonicalColumn[]): HistoryStep {
+  return async () => {
+    await gov.recordChangesBulk([...fkCleared.map((c) => gov.bulk.createColumn(c)), gov.bulk.upsertRelationship(rel)]);
+    await useModelerStore.getState().reload();
+    return relDrop(rel);
+  };
+}
+
+/** Borra la relación y apaga el FK de sus columnas hijas que no quedan como
+ *  hijas en otra relación (la regla de `deleteRelationship`), con lo vigente de
+ *  la tabla hija — no depende del canvas abierto —, en un lote; devuelve el paso
+ *  que la repone. */
+function relDrop(rel: gov.Relationship): HistoryStep {
+  return freshStep(async (pin) => {
+    const askedCs = useSessionStore.getState().activeChangesetId;
+    let near: gov.Relationship[], cols: CanonicalColumn[];
+    try {
+      [near, cols] = await Promise.all([gov.listRelationships(rel.childTableId), gov.listColumns(rel.childTableId)]);
+    } catch (e) {
+      throw await readFailure(e, askedCs, pin,
+        () => new NothingDoneError(RELATIONSHIP_KEYS_UNREADABLE, `${RELATIONSHIP_KEYS_UNREADABLE}: nothing was deleted. Try again.`));
+    }
+    const children = new Set(rel.pairs.map((p) => p.childColumnId));
+    const cleared = cols.filter((c) => children.has(c.id) && c.isForeignKey
+      && !near.some((r) => r.id !== rel.id && r.pairs.some((p) => p.childColumnId === c.id)));
+    pin.check();
+    await gov.recordChangesBulk([
+      gov.bulk.deleteRelationship(rel.id),
+      ...cleared.map((c) => gov.bulk.updateColumn({ ...c, isForeignKey: false })),
+    ]);
+    await useModelerStore.getState().reload();
+    return relRestore(rel, cleared);
+  });
 }
 
 /** El diagrama previo de cada canvas de `canvasIds` que no es el abierto — al
@@ -766,6 +903,12 @@ function othersWrote(seq: number | null | undefined): boolean {
   for (let n = _seqs.atLoad + 1; n <= seq; n++) if (!_seqs.own.has(n)) return true;
   return false;
 }
+
+/** Una carga completa que ve escrituras que esta pestaña no hizo: lo pendiente
+ *  de rehacer ya no calza (el Redo igual lo verifica antes de escribir). */
+function sawOthers(seq: number | null | undefined): void {
+  if (othersWrote(seq)) useUndoStore.getState().dropRedo();
+}
 // Lo mismo para los refrescos del Explorer — solo el más reciente escribe. La
 // respuesta tardía de uno anterior (otra sesión: se abrió otra versión, modo o
 // proyecto mientras cargaba) no pisa proyectos, proyecto activo, árbol,
@@ -800,7 +943,11 @@ const dependentsUnreadable = (subject: string) => {
 /** Techo de cambios por request de `PUT /changes/bulk` (backend `ChangesBulkBody`):
  *  un lote que debe grabarse todo o nada no puede pasarlo. */
 const BULK_MAX_CHANGES = 2000;
-const VIEW_USAGE_UNREADABLE = "Couldn't check where this view is used: nothing was deleted. Try again.";
+/** La lectura de dónde se usa una vista falló — no se borró nada (`NothingDoneError`). */
+const viewUsageUnreadable = () => {
+  const reason = "Couldn't check where this view is used";
+  return new NothingDoneError(reason, `${reason}: nothing was deleted. Try again.`);
+};
 
 /** El error con que termina un borrado cuya lectura previa falló (no se borró
  *  nada). Un 403/404/409 de la versión puede deberse a que cambió de manos: se
@@ -1020,18 +1167,38 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         const shown = get().viewMode === 'logical' ? logicalName || physicalName : physicalName;
         // El esquema que nació con el pegado se va con él si nadie más lo usa (una
         // tabla preexistente pudo estar en ese esquema sin catalogar: entonces queda).
-        // Best-effort: un esquema sin uso que quede es inofensivo.
-        pushUndo(`Paste ${facetNouns(get().viewMode).one} ${shown}`, async () => {
-          await get().deleteTable(id);
-          if (!schema) return;
-          pin.check();
-          const use = await schemasSvc.schemaImpact(schema.id).catch(() => null);
-          if (!use || use.tables + use.views > 0) return;
-          pin.check();
-          await schemasSvc.deleteSchema(schema.id).catch(() => undefined);
-          void get().loadSchemas().catch(() => undefined);
-          get().bumpExplorer();
-        }, pin);
+        // Best-effort: un esquema sin uso que quede es inofensivo. Se borra por su
+        // endpoint, que vuelve a revisar el uso en el servidor.
+        // Rehacer repone el esquema como estaba al borrarlo (mismo id, nombre
+        // vigente) y la copia como estaba.
+        const dropPaste: HistoryStep = freshStep(async (undo) => {
+          const got: { step: HistoryStep | null } = { step: null };
+          await get().deleteTable(id, { onUndo: (step) => { got.step = step; } });
+          let gone: DbSchema | null = null;
+          if (schema) {
+            undo.check();
+            const use = await schemasSvc.schemaImpact(schema.id).catch(() => null);
+            const doc = use && use.tables + use.views === 0
+              ? (await schemasSvc.listSchemas().catch(() => [] as DbSchema[])).find((s) => s.id === schema.id) ?? null
+              : null;
+            if (doc) {
+              undo.check();
+              gone = await schemasSvc.deleteSchema(doc.id).then(() => doc, () => null);
+              void get().loadSchemas().catch(() => undefined);
+              get().bumpExplorer();
+            }
+          }
+          const recreate = got.step;
+          if (!recreate) return null;
+          return async (redo) => {
+            if (gone) await gov.recordChangesBulk([gov.bulk.upsertSchema(gone)]);
+            redo.check();
+            await recreate(redo);
+            if (gone) void get().loadSchemas().catch(() => undefined);
+            return dropPaste;
+          };
+        });
+        pushUndo(`Paste ${facetNouns(get().viewMode).one} ${shown}`, dropPaste, pin);
         return shown;
       }
       throw lastErr instanceof Error ? lastErr : new Error("Couldn't paste the table");
@@ -1094,7 +1261,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't save the wire route");
       return;
     }
-    pushUndo('Reroute wire', () => writeWireRoute(saId, wireId, prev), pin);
+    const route = (to: RoutePoint[] | null, back: RoutePoint[] | null): HistoryStep => async () => {
+      await writeWireRoute(saId, wireId, to);
+      return route(back, to);
+    };
+    pushUndo('Reroute wire', route(prev, next.length ? next : null), pin);
   },
   themes: [],
   themeIdx: new Map(),
@@ -1138,8 +1309,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       await reportCanvasSaveError(e, session.activeChangesetId, "Couldn't change the color");
       return false;
     }
-    pushUndo(label ?? (ids.length === 1 ? 'Change color' : `Change color of ${ids.length} boxes`),
-      () => writeCanvasColors(saId, prev), pin);
+    const paint = (to: Record<string, string | null>, back: Record<string, string | null>): HistoryStep => async () => {
+      await writeCanvasColors(saId, to);
+      return paint(back, to);
+    };
+    pushUndo(label ?? (ids.length === 1 ? 'Change color' : `Change color of ${ids.length} boxes`), paint(prev, next), pin);
     return true;
   },
   setBoxColors: async (ids, ref) => {
@@ -1166,10 +1340,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const reload = () => get().reload();
       if (table) {
         await gov.createTable({ ...table, color: value });
-        pushUndo(`Change color of ${table.physicalName}`, undoFields('table', id, { color: table.color ?? null }, pin, reload), pin);
+        pushUndo(`Change color of ${table.physicalName}`, fieldsStep('table', id, { color: table.color ?? null }, { color: value }, reload), pin);
       } else if (view) {
         await viewsSvc.updateView(view.id, { ...view, color: value } as ViewInput);
-        pushUndo(`Change color of ${view.name}`, undoFields('view', id, { color: view.color ?? null }, pin, reload), pin);
+        pushUndo(`Change color of ${view.name}`, fieldsStep('view', id, { color: view.color ?? null }, { color: value }, reload), pin);
       }
       await get().reload();
     });
@@ -1600,6 +1774,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // aparecería seleccionada, con sus tiradores a la vista.
       installed = true;
       settleOwed(upTo, null);
+      sawOthers(diagram.draftSeq);
       sawDraft(diagram.draftSeq);
       set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null, selectedEdgeId: null,
             colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
@@ -1815,6 +1990,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       sawDraft(loaded.draftSeq);   // hasta aquí, todo lo escrito fue de esta pestaña
     } else {
       settleOwed(upTo, null);
+      sawOthers(loaded.draftSeq);
       sawDraft(loaded.draftSeq);
     }
     // Si algo del canvas se grabó después de pedir este diagrama, se repone
@@ -1925,12 +2101,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     pin.check();
     await struct.arrangeSubjectArea(saId, pos);
     showRoutes(saId, () => ({}));
-    pushUndo('Auto-arrange', async () => {
+    // Deshacer repone posiciones y trazos previos; rehacer, las calculadas con
+    // los trazos en cero (como al ordenar). Con otro canvas abierto, solo graba.
+    const arranged: HistoryStep = async () => {
+      await struct.arrangeSubjectArea(saId, pos);
+      if (get().activeSaId !== saId) return before;
+      showRoutes(saId, () => ({}));
+      await get().reload();
+      return before;
+    };
+    const before: HistoryStep = async () => {
       await struct.arrangeSubjectArea(saId, prevLayout, prevRoutes);
-      if (get().activeSaId !== saId) return;
+      if (get().activeSaId !== saId) return arranged;
       showRoutes(saId, () => prevRoutes);
       await get().reload();
-    }, pin);
+      return arranged;
+    };
+    pushUndo('Auto-arrange', before, pin);
     await get().reload();
   },
   createTable: async (input: { logicalName: string; physicalName?: string; schema?: string; mode?: 'logical' | 'physical'; description?: string; udpValues?: Record<string, string> }) => {
@@ -1971,7 +2158,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
     get().markFresh({ [saId]: [id] });
     // Undo: tabla recién creada — la cascada del delete es trivial.
-    pushUndo(`Create table ${physical}`, () => get().deleteTable(id), pin);
+    pushUndo(`Create table ${physical}`, tableDrop(id), pin);
   },
   addColumn: async (tableId: string, input: AddColumnInput) => {
     const dia = editableDiagram(); if (!dia) return;   // el canvas de esta sesión
@@ -2055,7 +2242,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Undo: la inversa es el delete del store — limpia también las
     // vistas espejo y el panel de columna si quedó abierto sobre ella. Lleva
     // la columna creada: el diagrama en pantalla puede no tenerla.
-    pushUndo(`Add column ${physical}`, () => get().deleteColumn(id, [], { col: payload }), pin);
+    pushUndo(`Add column ${physical}`, columnsDrop([id], [], [payload]), pin);
   },
   updateRelationship: async (r) => {
     const dia = editableDiagram(); if (!dia) return;   // el canvas de esta sesión
@@ -2064,7 +2251,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const pre0 = dia.relationships.find((x) => x.id === r.id);
     const pre = pre0 ? { ...pre0, pairs: pre0.pairs.map((p) => ({ ...p })) } : null;
     await gov.updateRelationship(r);
-    if (pre) pushUndo('Edit relationship', async () => { await gov.updateRelationship(pre); await get().reload(); }, pin);
+    const post = { ...r, pairs: r.pairs.map((p) => ({ ...p })) };
+    const put = (doc: gov.Relationship, back: gov.Relationship): HistoryStep => async () => {
+      await gov.updateRelationship(doc);
+      await get().reload();
+      return put(back, doc);
+    };
+    if (pre) pushUndo('Edit relationship', put(pre, post), pin);
     await get().reload();
   },
   deleteRelationship: async (id) => {
@@ -2096,15 +2289,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }
       }
     }
-    if (relPre) {
-      pushUndo('Delete relationship', async () => {
-        await gov.recordChangesBulk([
-          ...fkClearedPre.map((c) => gov.bulk.createColumn(c)),
-          gov.bulk.upsertRelationship(relPre),
-        ]);
-        await get().reload();
-      }, pin);
-    }
+    if (relPre) pushUndo('Delete relationship', relRestore(relPre, fkClearedPre), pin);
     await get().reload();
   },
   addExistingTables: async (tableIds: string[], opts) => {
@@ -2177,10 +2362,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       ].filter(Boolean).join(' + ');
       // La lista de vistas es la de este canvas al importar: el Undo puede
       // correr con otro canvas abierto (la pila sobrevive al cambio de canvas).
-      pushUndo(`Add ${what} to canvas`, async () => {
-        await struct.removeFromCanvas(saId, added, shown);
-        await get().reload();
-      }, pin);
+      pushUndo(`Add ${what} to canvas`, membersOut(saId, added, shown), pin);
     }
   },
   addViewsToCanvas: async (viewIds) => {
@@ -2195,10 +2377,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await get().reload();
     const n = added.viewIds.length;
     if (!n) return;
-    pushUndo(`Add ${n} view${n === 1 ? '' : 's'} to canvas`, async () => {
-      await struct.removeFromCanvas(saId, { viewIds: added.viewIds }, shown);
-      await get().reload();
-    }, pin);
+    pushUndo(`Add ${n} view${n === 1 ? '' : 's'} to canvas`, membersOut(saId, { viewIds: added.viewIds }, shown), pin);
   },
   removeViewFromCanvas: async (viewId) => {
     const saId = get().activeSaId; if (!saId) return;
@@ -2214,15 +2393,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const out = await struct.removeFromCanvas(saId, { viewIds: [viewId] }, shown);
     if (get().selectedViewId === viewId) set({ selectedViewId: null });
     await get().reload();
-    // Vuelve con su posición en una sola escritura (lista de vistas de este
-    // canvas, no la del que esté abierto al deshacer), y con su color en este
-    // canvas (salió con ella).
-    pushUndo(`Remove ${name} from canvas`, async () => {
-      await struct.addToCanvas(saId, {
-        viewIds: [viewId], ...(pos ? { layout: { [viewId]: pos } } : {}), colors: out.colors,
-      }, shown);
-      await get().reload();
-    }, pin);
+    // Vuelve con su posición — la de pantalla; sin nodo, la grabada — en una
+    // sola escritura (lista de vistas de este canvas, no la del que esté abierto
+    // al deshacer), y con su color en este canvas (salió con ella).
+    pushUndo(`Remove ${name} from canvas`, membersIn(saId, {
+      ...out, tableIds: [], viewIds: [viewId], layout: { ...out.layout, ...(pos ? { [viewId]: pos } : {}) }, routes: {},
+    }, shown), pin);
   },
   deleteView: async (view, opts) => {
     const pin = pinSession();
@@ -2249,7 +2425,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       }
       placed = await listedViewsBy([...canvasIds, ...(onActive && saId ? [saId] : [])], [view.id]);
     } catch (e) {
-      throw await readFailure(e, askedCs, pin, () => new Error(VIEW_USAGE_UNREADABLE));   // ídem deleteTable
+      throw await readFailure(e, askedCs, pin, viewUsageUnreadable);   // ídem deleteTable
     }
     // Pre-imagen por valor: el documento completo, sin `canvases` (la fila
     // del panel o del inspector no es parte del documento).
@@ -2259,7 +2435,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     get().markDirty();
     await viewsSvc.deleteView(view.id);
     if (get().selectedViewId === view.id) set({ selectedViewId: null });
-    pushUndo(`Delete view ${pre.name}`, async (undo) => {
+    // Su contrario la vuelve a borrar, fresca (relee dónde está).
+    const restore: HistoryStep = async (undo) => {
       await viewsSvc.updateView(pre.id, pre as ViewInput);
       // Cada canvas la vuelve a listar dentro de su cola, en una sola escritura
       // con su posición. Un canvas sin lista explícita no se toca: su regla por
@@ -2277,7 +2454,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       await get().reload();
       // Si no volvió al canvas activo, el Explorer se refresca a mano.
       get().syncExplorer(!!get().diagram?.views.some((v) => v.id === pre.id));
-    }, pin);
+      return viewDrop(pre);
+    };
+    if (opts?.onUndo) opts.onUndo(restore);
+    else pushUndo(`Delete view ${pre.name}`, restore, pin);
   },
   createTableFromSources: ({ logicalName, schema, columns }) => runBlocking('Creating table…', async () => {
     const saId = get().activeSaId; if (!saId) throw new Error('Pick a Subject Area');
@@ -2328,7 +2508,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (!pin.holds()) return;   // no selecciona en otra sesión
     set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible
     get().markFresh({ [saId]: [id] });   // encima aunque se deseleccione
-    pushUndo(`Create table ${physical}`, () => get().deleteTable(id), pin);
+    pushUndo(`Create table ${physical}`, tableDrop(id), pin);
   }),
   setColumnTarget: (id: string | null) => set({ columnTarget: id }),
   // Seleccionar tabla o edge cambia de contexto: cierra el panel de columna.
@@ -2379,15 +2559,14 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // las de este canvas al sacar la tabla (el Undo puede correr con otro
     // canvas abierto) y solo cuentan si salieron huérfanas: sin ellas, un canvas
     // sin lista explícita sigue sin lista. Su color en este canvas (y el de sus
-    // vistas huérfanas) vuelve con ella. Las posiciones, las de pantalla; si no
-    // hay nodo (en lógico las vistas no lo son), las del canvas grabado que
-    // devolvió el servicio.
-    pushUndo(`Remove ${name} from canvas`, async () => {
-      const layout = { ...out.layout, ...(pos ? { [tableId]: pos } : {}), ...orphanPos } as Record<string, { x: number; y: number }>;
-      await struct.addToCanvas(saId, { tableIds: [tableId], viewIds: orphans, layout, routes: droppedRoutes, colors: out.colors },
-        orphans.length ? shown : undefined);
-      await get().reload();
-    }, pin);
+    // vistas huérfanas) vuelve con ella, y sus trazos. Las posiciones, las de
+    // pantalla; si no hay nodo (en lógico las vistas no lo son), las del canvas
+    // grabado que devolvió el servicio. Rehacer y volver a deshacer usan lo que
+    // el servicio dice que salió (posición, color, vistas y trazos).
+    pushUndo(`Remove ${name} from canvas`, tableIn(saId, tableId, {
+      ...out, viewIds: orphans, routes: droppedRoutes,
+      layout: { ...out.layout, ...(pos ? { [tableId]: pos } : {}), ...orphanPos } as Record<string, { x: number; y: number }>,
+    }, wireIds, shown), pin);
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
   },
@@ -2410,11 +2589,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     let viewCanvasIds: string[];
     let viewsBack: Map<string, ListedViews>;
     let others: Map<string, Diagram>;
+    let tableDoc: CanonicalTable | null = null;
     const fkClearedPre: CanonicalColumn[] = [];
     try {
       // vistas que la usan (cualquier fuente: tableId o sourceTableIds)
       const viewsRead = viewsSvc.listViews(tableId);
-      [views, rels, cols, usage, viewCanvasIds] = await Promise.all([
+      // El documento de la tabla, para el Undo, si no está en el canvas abierto
+      // ni lo trae el llamador (p. ej. deshacer «Create table» con otro canvas
+      // abierto).
+      const docRead = opts?.pre || liveDiagram()?.tables.some((x) => x.id === tableId)
+        ? Promise.resolve(null) : gov.currentTable(tableId);
+      [views, rels, cols, usage, viewCanvasIds, tableDoc] = await Promise.all([
         viewsRead,
         // relaciones donde es extremo (globales)
         gov.listRelationships(tableId),
@@ -2424,6 +2609,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         // y los de sus vistas (una multi-fuente puede estar en un canvas sin
         // esta tabla).
         viewsRead.then((vs) => (vs.length ? canvasesOfViews(tableId, vs.map((v) => v.id)) : [])),
+        docRead,
       ]);
       // El lote de abajo saca cada vista borrada de todo canvas que la lista
       // (cascada del backend): antes se anota qué lista cada canvas y dónde,
@@ -2465,7 +2651,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Pre-imágenes para el Undo: las lecturas de arriba ya traen el estado
     // pre-borrado — se congelan por valor antes de tocar nada. Sin canvas
     // (inspector) la pre-imagen viene del dossier efectivo.
-    const t0 = liveDiagram()?.tables.find((x) => x.id === tableId) ?? opts?.pre;
+    const t0 = liveDiagram()?.tables.find((x) => x.id === tableId) ?? opts?.pre ?? tableDoc;
     const tPre = t0 ? { ...t0, ...(t0.udpValues ? { udpValues: { ...t0.udpValues } } : {}) } : null;
     const undoSaId = get().activeSaId;
     const undoNode = get().flow?.getNode(tableId);
@@ -2490,7 +2676,6 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // borran; sus trazos quedarían huérfanos en cada canvas) y sus vistas, si
     // el backend no las sacó ya; cada canvas dice qué salió.
     const wireIds = wireIdsOfTable(rels, tableId);
-    const droppedRoutes = routesOf(get().canvasRoutes, wireIds);   // del canvas activo, para el Undo
     const viewIdsOut = views.map((v) => v.id);
     const removed = new Map<string, struct.CanvasMembersOut>();
     // Los canvases de la tabla y, además, los que solo listaban alguna de sus
@@ -2512,9 +2697,10 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await gov.deleteTable(tableId);
     // Undo: un solo lote restaura tabla + columnas + FKs limpiadas +
     // relaciones + vistas (el guard N=N resuelve la llave con las columnas del
-    // mismo lote), y después las membresías de canvas.
+    // mismo lote), y después las membresías de canvas. Su contrario la vuelve
+    // a borrar, fresca.
     if (tPre) {
-      pushUndo(`Delete table ${tPre.physicalName}`, async (undo) => {
+      const restore: HistoryStep = async (undo) => {
         await gov.recordChangesBulk([
           gov.bulk.createTable(tPre),
           ...colsPre.map((c) => gov.bulk.createColumn(c)),
@@ -2523,9 +2709,9 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           ...viewsPre.map((v) => gov.bulk.upsertView(v)),
         ]);
         // Una escritura por canvas, dentro de su cola. La tabla vuelve a su
-        // posición en cada canvas (en el activo, a la de pantalla) y las vistas
-        // que ese canvas listaba, a la suya; un canvas sin lista explícita
-        // sigue sin lista. Los trazos solo vuelven al canvas activo. Mientras
+        // posición en cada canvas (en el activo, a la de pantalla), con los
+        // trazos que ese canvas quitó, y las vistas que ese canvas listaba, a
+        // la suya; un canvas sin lista explícita sigue sin lista. Mientras
         // siga la sesión del Undo — si se abrió otra versión, lo que falta no
         // va a ella. Un canvas que solo listaba sus vistas recupera esas, no la
         // tabla (nunca la tuvo).
@@ -2549,14 +2735,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
               ...(withTable ? { tableIds: [tableId] } : {}),
               ...(viewIds.length ? { viewIds } : {}),
               ...(Object.keys(layout).length ? { layout } : {}),
-              ...(active ? { routes: droppedRoutes } : {}),
+              ...(out && Object.keys(out.routes).length ? { routes: out.routes } : {}),
               colors,
             });
           } catch { /* el canvas pudo desaparecer */ }
         }
         await get().reload();
         get().syncExplorer(canvasIds.includes(get().activeSaId ?? ''));
-      }, pin);
+        return tableDrop(tableId, tPre);
+      };
+      if (opts?.onUndo) opts.onUndo(restore);
+      else pushUndo(`Delete table ${tPre.physicalName}`, restore, pin);
     }
     if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
     await get().reload();
@@ -2585,27 +2774,19 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const mine = dia.columns.filter((x) => x.tableId === c.tableId);
       const { changes, pres } = keyLayoutBulk(mine, { [colId]: fields });
       await gov.recordChangesBulk(changes);
-      pushUndo(`Edit column ${c.physicalName}`, async () => {
-        await gov.recordChangesBulk(pres.map((p) => gov.bulk.createColumn(p)));
-        await get().reload();
-      }, pin);
+      pushUndo(`Edit column ${c.physicalName}`, lotStep(pres.map((p) => gov.bulk.createColumn(p)), changes, () => get().reload()), pin);
       await get().reload();
       return;
     }
     // Pre-imagen por valor para el Undo.
     const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
-    await gov.updateColumn({ ...c, ...fields }); // upsert por id = update (merge)
-    pushUndo(`Edit column ${pre.physicalName}`, async (undo) => {
-      await gov.updateColumn(pre);
-      // Si el cambio renombró el físico, las vistas quedaron re-apuntadas al
-      // nombre recién puesto (sync del panel): deshacer las devuelve al
-      // original. Solo mientras siga la sesión del Undo.
-      if (typeof fields.physicalName === 'string' && fields.physicalName !== pre.physicalName) {
-        const renamedTo = fields.physicalName;
-        await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(undo), pre.tableId, renamedTo, pre.physicalName));
-      }
-      await get().reload();
-    }, pin);
+    const post = { ...c, ...fields };
+    await gov.updateColumn(post); // upsert por id = update (merge)
+    // Undo y Redo por valor. Si el cambio renombró el físico, las vistas
+    // quedaron re-apuntadas al nombre nuevo (sync del panel): deshacer las
+    // devuelve al original y rehacer, otra vez al nuevo.
+    pushUndo(`Edit column ${pre.physicalName}`,
+      columnStep(pre, { ...post, ...(post.udpValues ? { udpValues: { ...post.udpValues } } : {}) }, () => get().reload()), pin);
     await get().reload();
   },
   reorderColumns: async (tableId, orderedIds) => {
@@ -2658,17 +2839,19 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // previo pudo ser un dato cargado desordenado, o la llave pudo cambiar en
       // el medio (drop en el canvas: llave + reorden).
       const pres = sortByOrdinal(changed.map(({ c }) => ({ ...c })));
-      pushUndo('Reorder columns', async (undo) => {
-        // Solo el orden vuelve atrás: sobre el documento vigente.
-        const undoReads: ColumnReads = new Map();
-        await persistReorder(pres.map((c) => ({ c, idx: c.ordinal })), async (c, idx) => {
-          const cur = await currentColumn(c, undoReads);
+      // Solo el orden va y vuelve: sobre el documento vigente.
+      const order = (plan: { c: CanonicalColumn; idx: number }[], back: typeof plan): HistoryStep => async (stepPin) => {
+        const reads: ColumnReads = new Map();
+        await persistReorder(plan, async (c, idx) => {
+          const cur = await currentColumn(c, reads);
           if (!cur) return;
-          undo.check();
+          stepPin.check();
           await gov.updateColumn({ ...cur, ordinal: idx });
         });
         await get().reload();
-      }, pin);
+        return order(back, plan);
+      };
+      pushUndo('Reorder columns', order(pres.map((c) => ({ c, idx: c.ordinal })), changed.map(({ c, idx }) => ({ c, idx }))), pin);
     }
     await get().reload();
   },
@@ -2707,10 +2890,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const cur = get().diagram;
       if (cur) set({ diagram: { ...cur, columns: cur.columns.map((c) => (flags.has(c.id) ? { ...c, isPrimaryKey: flags.get(c.id) } : c)) } });
       if (pres.length) {
-        pushUndo('Edit key', async (undo) => {
-          for (const c of pres) { undo.check(); await gov.updateColumn(c); }
+        const keys = (write: CanonicalColumn[], back: CanonicalColumn[]): HistoryStep => async (stepPin) => {
+          for (const c of write) { stepPin.check(); await gov.updateColumn(c); }
           await get().reload();
-        }, pin);
+          return keys(back, write);
+        };
+        pushUndo('Edit key', keys(pres, pres.map((c) => ({ ...c, isPrimaryKey: flags.get(c.id) }))), pin);
       }
       if (!plan.order) await get().reload();
     }
@@ -2766,7 +2951,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // Las columnas vigentes de la tabla, del servidor (el diagrama puede ir
       // atrasado), en paralelo con las demás lecturas.
       [pool, views, tableCols] = await Promise.all([
-        rels.length && tableId ? gov.listRelationships(tableId) : Promise.resolve([] as gov.Relationship[]),
+        (rels.length || opts?.exact) && tableId ? gov.listRelationships(tableId) : Promise.resolve([] as gov.Relationship[]),
         tableId ? viewsSvc.listViews(tableId) : Promise.resolve([] as View[]),
         tableId ? gov.listColumns(tableId) : Promise.resolve([] as CanonicalColumn[]),
       ]);
@@ -2817,6 +3002,14 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     } catch (e) {
       throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(ids.length === 1 ? `this ${nouns.member}` : `these ${nouns.members}`));
     }
+    // Rehacer el borrado toca solo las relaciones de su impacto: una que ahora
+    // usa estas columnas quedaría colgando. Borrarlas de nuevo muestra el impacto.
+    if (opts?.exact && pool.some((r) => !rels.includes(r.id) && r.pairs.some(touches))) {
+      const one = cols.length === 1;
+      const what = one ? `${nouns.member} ${facetName(cols[0], get().viewMode)}` : `these ${cols.length} ${nouns.members}`;
+      throw new Error(`Couldn't redo: ${what} ${one ? 'is' : 'are'} now used by another relationship. `
+        + `Delete ${one ? 'it' : 'them'} again to choose what happens to that relationship.`);
+    }
     pin.check();
     // Pre-imágenes para el Undo: columnas y relaciones afectadas (por valor).
     const colsPre = cols.map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
@@ -2851,7 +3044,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       const what = colsPre.length === 1 ? colsPre[0].physicalName : `these ${colsPre.length} ${nouns.members}`;
       const label = colsPre.length === 1
         ? `Delete ${nouns.member} ${facetName(colsPre[0], get().viewMode)}` : `Delete ${colsPre.length} ${nouns.members}`;
-      pushUndo(label, async (undo) => {
+      const restore: HistoryStep = async (undo) => {
         const undoCs = useSessionStore.getState().activeChangesetId;
         let current: View[] = [];
         try {
@@ -2876,7 +3069,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         await gov.recordChangesBulk(inverse, inverse.length);
         await get().reload();
         get().syncExplorer(!!get().diagram?.tables.some((t) => t.id === undoTable));
-      }, pin);
+        // Volver a borrar: exacto si es rehacer este borrado (también cuando este ya
+        // era un paso exacto); el borrado que deshace «Add column» sigue sin serlo.
+        return columnsDrop(ids, fix, colsPre, !opts?.onUndo || !!opts.exact);
+      };
+      if (opts?.onUndo) opts.onUndo(restore);
+      else pushUndo(label, restore, pin);
     }
     // Si estaba abierto el Properties de una columna borrada, se cierra — el
     // sidebar vuelve al Properties de la tabla. La selección de filas era de
@@ -3124,14 +3322,15 @@ async function writeCanvasColors(saId: string, patch: Record<string, string | nu
  *  de la definición al salir del campo y el color elegido enseguida no se
  *  pisan, aunque una recarga falle o quede reemplazada. */
 const _objectWrites = new Map<string, Promise<unknown>>();
-/** Inversa de una escritura de una tabla o vista que restaura solo los campos
- *  que esa escritura cambió (`fields` = sus valores previos), sobre el
- *  documento vigente y en la fila del objeto. Con la foto completa, deshacer
- *  revertiría también lo que otra escritura (el color, la definición) grabó
- *  después. */
-export function undoFields(kind: 'table' | 'view', id: string, fields: Record<string, unknown>,
-  pin: SessionPin, reload: () => Promise<void>): () => Promise<void> {
-  return async () => {
+/** Paso del historial de una escritura de una tabla o vista: graba `fields`
+ *  sobre el documento vigente, en la fila del objeto, y devuelve el paso que
+ *  graba `other` — deshacer y rehacer son el mismo paso con los valores
+ *  cruzados (los previos y los nuevos de los campos que esa escritura cambió).
+ *  Con la foto completa, deshacer revertiría también lo que otra escritura (el
+ *  color, la definición) grabó después. */
+export function fieldsStep(kind: 'table' | 'view', id: string, fields: Record<string, unknown>,
+  other: Record<string, unknown>, reload: () => Promise<void>): HistoryStep {
+  return async (pin) => {
     await inObjectOrder(id, async () => {
       const cur = kind === 'table' ? await gov.currentTable(id) : await viewsSvc.currentView(id);
       pin.check();
@@ -3140,11 +3339,12 @@ export function undoFields(kind: 'table' | 'view', id: string, fields: Record<st
       else await viewsSvc.updateView(id, { ...(cur as View), ...fields } as ViewInput);
     });
     await reload();
+    return fieldsStep(kind, id, other, fields, reload);
   };
 }
 
 export function inObjectOrder<T>(id: string, fn: () => Promise<T>): Promise<T> {
-  const run = (_objectWrites.get(id) ?? Promise.resolve()).then(fn, fn);
+  const run = trackDraftWork((_objectWrites.get(id) ?? Promise.resolve()).then(fn, fn));
   const tail = run.then(() => undefined, () => undefined);
   _objectWrites.set(id, tail);
   void tail.then(() => { if (_objectWrites.get(id) === tail) _objectWrites.delete(id); });

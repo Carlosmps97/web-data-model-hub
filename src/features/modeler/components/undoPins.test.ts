@@ -2,10 +2,11 @@
 //  · cada `pushUndo(…)` apila con el pin de su acción (tercer argumento): una
 //    acción que termina después de abrir otra versión no deja su inversa en la
 //    pila de la recién abierta;
-//  · las inversas de varias escrituras que arman los componentes se detienen
-//    antes de cada escritura si la sesión es otra: las de pegar columnas, crear
-//    una relación y crear una subcategoría usan `undoColumnsBatch`; ningún
-//    componente que apila inversas arma deps de vistas sin pin.
+//  · los pasos de varias escrituras que arman los componentes (deshacer y
+//    rehacer) se detienen antes de cada escritura si la sesión es otra: los de
+//    pegar columnas, crear una relación y crear una subcategoría usan
+//    `columnsBatchStep`; ningún componente que apila pasos arma deps de vistas
+//    sin pin.
 // El comportamiento se prueba en `lib/pinnedWrites.test.ts` y en los tests del
 // store; acá se revisa el fuente (sin DOM: vitest corre en node).
 import { readdirSync, readFileSync } from 'node:fs';
@@ -71,15 +72,18 @@ describe('cada pushUndo apila con el pin de su acción', () => {
 describe('inversas de varias escrituras en los componentes', () => {
   const comp = (name: string) => stripComments(readFileSync(join(__dirname, name), 'utf-8'));
   it.each(['PasteColumnsPopup.tsx', 'RelationshipCreatePopup.tsx', 'SubcategoryCreatePopup.tsx'])(
-    '%s: su inversa es `undoColumnsBatch` (corta con el pin del Undo)', (name) => {
+    '%s: sus pasos son `columnsBatchStep` (cortan con el pin del paso)', (name) => {
       const undo = pushUndoCalls(comp(name));
       expect(undo).toHaveLength(1);
-      expect(undo[0]).toMatch(/undoColumnsBatch\(/);
+      expect(undo[0]).toMatch(/columnsBatchStep\(/);
     });
-  it('ObjectInspector: la inversa de reordenar (tandas de escrituras) corta con el pin del Undo', () => {
-    const reorder = pushUndoCalls(comp('ObjectInspector.tsx')).filter((c) => c.startsWith("pushUndo('Reorder columns'"));
+  it('ObjectInspector: los pasos de reordenar (tandas de escrituras) cortan con el pin del paso', () => {
+    const code = comp('ObjectInspector.tsx');
+    const reorder = pushUndoCalls(code).filter((c) => c.startsWith("pushUndo('Reorder columns'"));
     expect(reorder).toHaveLength(1);
-    expect(reorder[0]).toMatch(/async \(undo\) => \{[^}]*pinned\(undo, gov\.updateColumn\)/);
+    const step = reorder[0].match(/pushUndo\('Reorder columns', (\w+)\(/)?.[1];
+    expect(step).toBeTruthy();
+    expect(code).toMatch(new RegExp(`const ${step} = [^;]*?async \\((\\w+)\\) => \\{[^}]*pinned\\(\\1, gov\\.updateColumn\\)`));
   });
   it.each(['PasteColumnsPopup.tsx', 'RelationshipCreatePopup.tsx', 'SubcategoryCreatePopup.tsx', 'ObjectInspector.tsx'])(
     '%s: sin deps de vistas sin pin (`updateView: viewsSvc.updateView`)', (name) => {

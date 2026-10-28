@@ -15,7 +15,7 @@ lo gobiernan; los detalles de cada endpoint están en [Integración con la API](
 - [Abrir un proyecto: visor de producción o sesión de edición](#abrir-un-proyecto-visor-de-producción-o-sesión-de-edición)
 - [Apertura de un canvas](#apertura-de-un-canvas)
 - [Edición: cambios, cola por canvas y escrituras en segundo plano](#edición-cambios-cola-por-canvas-y-escrituras-en-segundo-plano)
-- [Undo y la working copy](#undo-y-la-working-copy)
+- [Undo, Redo y la working copy](#undo-redo-y-la-working-copy)
 - [Revalidación ante errores y cierre del canvas](#revalidación-ante-errores-y-cierre-del-canvas)
 - [Enviar a revisión, revisar, aprobar y publicar](#enviar-a-revisión-revisar-aprobar-y-publicar)
 - [Reporting](#reporting)
@@ -35,7 +35,7 @@ en el momento de cada llamada.
 | `sessionKeeper` | `src/features/auth/sessionKeeper.ts` | Renueva la sesión con actividad (como mucho una vez cada 5 minutos) y la cierra sin uso; coordina las pestañas con la marca `localStorage['dmh.session']` (usuario y vencimiento, sin el token). |
 | `useSessionStore` | `src/store/useSessionStore.ts` | Actor espejado y sesión de canvas: `activeProjectId`, `openMode` (`readonly` o `editing`), `activeChangesetId`, `activeVersionLabel`. Es la única fuente del changeset activo. |
 | `useModelerStore` | `src/store/useModelerStore.ts` | Workspace del modelador: árbol del Explorer, diagrama abierto, dibujos, selección, `dirty`, `viewMode`, LOD y todas las acciones de edición. |
-| `useUndoStore` | `src/store/useUndoStore.ts` | Pila de inversas de la sesión de canvas (sin redo). |
+| `useUndoStore` | `src/store/useUndoStore.ts` | Historial de la sesión de canvas: Undo y Redo. |
 | `useBusyStore` | `src/store/useBusyStore.ts` | `runBlocking(label, fn)`: overlay bloqueante durante acciones largas (snapshot, envío, decisión, carga). |
 | `resetAppState` | `src/store/resetAppState.ts` | Borra en un punto todo el estado ligado al usuario (login, logout, 401). |
 | Cliente HTTP | `src/services/http.ts` | `apiFetch` y atajos, envelope, timeouts, observadores de 401, 403 y errores. |
@@ -275,7 +275,7 @@ envía siempre el documento completo en cada upsert.
 Dos mecanismos reaccionan a un cambio de la clave de sesión:
 
 1. **Suscripción del store** (al final de `useModelerStore.ts`): si cambia el modo, el proyecto o el
-   changeset, vacía la pila de Undo, sube `_loadSeq` (descarta toda carga de diagrama en vuelo), anula una
+   changeset, vacía el historial de Undo y Redo, sube `_loadSeq` (descarta toda carga de diagrama en vuelo), anula una
    recarga en espera y limpia en el acto el diagrama, los dibujos, la selección, los menús, los popups de
    pegado, el Inspector y la ficha del canvas. Conserva `activeSaId` para que el refresco reabra el mismo
    canvas si existe en la sesión nueva, y conserva el portapapeles (copiar en una versión y pegar en otra
@@ -623,32 +623,44 @@ Los componentes que escriben por su cuenta usan `reportWriteError(report)` (`ses
   `PublishModal` la muestra y ofrece `discardDeleted`, y el panel «Publish blocked» de la revisión la
   muestra al revisor. El diff marca esas entidades con `deletedInProduction` (no se restauran).
 
-## Undo y la working copy
+## Undo, Redo y la working copy
 
-La pila de Undo (`src/store/useUndoStore.ts`) guarda inversas como closures que llaman a los mismos
-servicios con conocimiento del changeset. Deshacer es un cambio más del draft: el versionado y el diff ven
-upserts y deletes normales, sin mecánica adicional. No hay redo.
+El historial (`src/store/useUndoStore.ts`) guarda pasos (`HistoryStep`) que llaman a los mismos
+servicios con conocimiento del changeset y devuelven el paso contrario. Deshacer y rehacer son cambios más
+del draft: el versionado y el diff ven upserts y deletes normales, sin mecánica adicional.
 
 | Regla | Detalle |
 |---|---|
-| Tope | 50 entradas (`CAP`); al pasarlo se descarta la más antigua. |
-| Alcance | La pila es de la sesión de canvas: se vacía al cambiar de proyecto, modo o versión (incluido editar → solo lectura → editar la misma versión) y en `resetAppState`. |
-| Apilado | Cada acción instrumentada llama a `pushUndo(label, run, pin)` con el pin con que empezó: si la sesión cambió mientras la acción corría, la inversa no entra en la pila de la sesión nueva. Mientras corre una inversa, lo que ella apila se ignora (una inversa no apila su propia inversa). |
-| Disparo | Botón **Undo** de la Toolbar y Ctrl+Z en el canvas llaman a `undoLast()`; al terminar se muestra «Undid: <label>». |
-| Concurrencia | `busy` impide dos Undo a la vez; no hay overlay bloqueante. |
-| Pila cerrada | `clear({ until })` vacía la pila y la deja cerrada para la versión actual hasta que la promesa termine. Lo usa la carga desde Excel mientras aplica. |
-| Pre-imágenes | Las inversas reponen documentos completos. Borrar una vista toma su pre-imagen del documento de la vista (`tableViews` o `currentView` de `views.service`), no de la copia del canvas: el diagrama trae las vistas sin el CREATE VIEW original de Erwin (`sql`). |
+| Tope | 50 entradas por pila (`CAP`); al pasarlo se descarta la más antigua. |
+| Alcance | El historial es de la sesión de canvas: se vacía al cambiar de proyecto, modo o versión (incluido editar → solo lectura → editar la misma versión) y en `resetAppState`. |
+| Apilado | Cada acción instrumentada llama a `pushUndo(label, run, pin)` con el pin con que empezó: si la sesión cambió mientras la acción corría, el paso no entra en la pila de la sesión nueva. Una acción nueva vacía lo pendiente de rehacer. Mientras corre un paso, lo que se apila se ignora y lo pendiente de rehacer se vacía. |
+| Ida y vuelta | `undoLast()` corre el paso y deja su contrario en `redoStack`; `redoLast()` corre ese y deja el suyo en `stack`, con el mismo label. Los borrados en cascada (`deleteTable`, `deleteColumns`, `deleteView`) entregan su inversa con `onUndo`: rehacerlos los recalcula con lo vigente. |
+| Base del Redo | Las escrituras del Undo (números `writeSeq` consecutivos, avisados por `onDraftWrite`) fijan la base. Antes de escribir, `redoLast()` lee el contador (`writeSeqOf`, `GET /api/changesets/{cs_id}/seq`): si no es la base, vacía lo pendiente y avisa «This version changed after the undo: there's nothing to redo.». Un hueco en las escrituras del paso también deja sin Redo. |
+| Lo que ya se estaba grabando | `undoLast()` y `redoLast()` esperan antes de tomar la entrada lo que esta pestaña ya mandó a escribir (`draftWorkSettled()`: las escrituras de `changeset.service` y las filas por canvas `inOrder` y por objeto `inObjectOrder`): su aviso llega fuera del paso y cancela lo pendiente de rehacer, y si esa acción apila su inversa mientras tanto, es la que se deshace. Los guardados con debounce todavía sin disparar (dibujos 500 ms, campos 400 ms) no cuentan. |
+| Disparo | Botones **Undo** y **Redo** de la Toolbar; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z y Ctrl/Cmd+Y en el canvas. Al terminar se muestra «Undid: <label>» / «Redid: <label>». |
+| Concurrencia | `busy` impide dos pasos a la vez; no hay overlay bloqueante. Send for Approval, descartar lo borrado por otra versión y la carga Excel no empiezan mientras corre un paso (avisan que se intente al terminar). |
+| Pila cerrada | `clear({ until })` vacía las dos pilas y las deja cerradas para la versión actual hasta que la promesa termine. Lo usa la carga desde Excel mientras aplica. |
+| Pre-imágenes | Los pasos reponen documentos completos o, en los guardados de campos, solo esos campos sobre lo vigente. Borrar una vista toma su pre-imagen del documento de la vista (`tableViews` o `currentView` de `views.service`), no de la copia del canvas: el diagrama trae las vistas sin el CREATE VIEW original de Erwin (`sql`). |
 
-`undoLast()` saca la entrada de la pila antes de correrla, con un pin nuevo. Según el resultado:
+`undoLast()` y `redoLast()` sacan la entrada de su pila antes de correrla, con un pin nuevo. Según el
+resultado:
 
-- **Éxito**: devuelve el label si la sesión sigue igual.
-- **Error 403, 404 o 409 de la versión**: espera la revalidación; si la sesión cambió, calla.
-- **`NothingDoneError`** (falló una lectura previa y no se escribió nada): la entrada vuelve a la pila y el
-  aviso dice «…: nothing was undone. Press Undo to try again.».
-- **Falla de transporte (status 0)**: no se sabe si la inversa escribió, pero las inversas reponen
-  pre-imágenes (idempotentes), así que la entrada vuelve a la pila con «Couldn't undo <label>: <motivo>.
-  Press Undo to try again.».
-- **Cualquier otro error**: la entrada se descarta (no bloquea las anteriores) y el error se muestra.
+- **Éxito**: devuelven el label si la sesión sigue igual.
+- **Error 403, 404 o 409 de la versión**: esperan la revalidación; si la sesión cambió, callan.
+- **`NothingDoneError`** (falló una lectura previa y no se escribió nada, o no se pudo leer el contador
+  antes de rehacer): la entrada vuelve a su pila y el aviso pide pulsar Undo (o Redo) otra vez. Un Redo
+  no vuelve si la versión cambió mientras tanto: si cambió mientras leía el contador, avisa que no hay
+  qué rehacer; si cambió mientras corría el paso, avisa «<motivo>: nothing was redone.» sin invitar a
+  reintentar.
+- **Falla de transporte (status 0)**: los pasos reponen imágenes (idempotentes) o recalculan, así que la
+  entrada vuelve a su pila con «Couldn't undo/redo <label>: <motivo>. Press Undo/Redo to try again.». En
+  un Redo, lo que alcanzó a escribir con número (consecutivo desde la base) mueve la base y el reintento
+  pasa el candado; si alguna escritura quedó sin respuesta, si la versión cambió mientras corría o si el
+  paso es fresco y alcanzó a escribir, el aviso no ofrece reintentar y lo pendiente de rehacer se vacía.
+  Un Undo fresco (`freshStep`) que alcanzó a escribir vuelve a su pila, pero al reintentarse no deja qué
+  rehacer: su contrario partiría de un estado a medias.
+- **Cualquier otro error**: la entrada se descarta (no bloquea las anteriores), el error se muestra y lo que
+  dependía de ella para rehacer se vacía.
 
 ```mermaid
 sequenceDiagram
@@ -1040,8 +1052,8 @@ La carga masiva escribe en la working copy abierta. Los jobs viven en el backend
 3. **Validate**: `startUpload(cs, { fileName, profileId, sheets, targetFolderId })` →
    `POST /api/changesets/{cs}/uploads`, y `pollUploadJob()` hasta un estado terminal (cada 800 ms). El
    backend aplica el perfil de carga y devuelve el reporte. **Upload** solo se habilita con cero errores.
-4. **Apply**: antes de empezar, si hay una inversa del Undo en vuelo, no se empieza. La pila de Undo se
-   vacía y queda cerrada para esa versión hasta que la carga termine (`clear({ until })`). Luego
+4. **Apply**: antes de empezar, si hay un Undo o un Redo en vuelo, no se empieza. El historial de Undo y
+   Redo se vacía y queda cerrado para esa versión hasta que la carga termine (`clear({ until })`). Luego
    `POST /api/changesets/{cs}/uploads/{job}/apply` y polling hasta `applied` o `failed`.
 5. **Ubicación**: con `affectedCanvasIds` y `newMembers` del resultado, `placeUploadedObjects()` ubica solo
    lo que entró a cada canvas (en el centro de lo visible si es el canvas abierto) con

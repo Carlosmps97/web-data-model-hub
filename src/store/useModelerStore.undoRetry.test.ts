@@ -191,10 +191,10 @@ describe('una inversa que borra una tabla y no pudo leer su cascada', () => {
   const stack = () => useUndoStore.getState().stack.map((e) => e.label);
 
   it('la entrada vuelve a la pila: Undo otra vez reintenta esa acción, no la anterior', async () => {
-    const other = vi.fn(async () => {});
+    const other = vi.fn(async () => null);
     useUndoStore.setState({ stack: [
       { label: 'Rename column X', run: other },                         // acción anterior del usuario
-      { label: 'Create table M_T3', run: () => st().deleteTable('t3') }, // inversa de crear t3
+      { label: 'Create table M_T3', run: async () => { await st().deleteTable('t3'); return null; } }, // inversa de crear t3
     ], busy: false });
     vi.mocked(gov.listRelationships).mockRejectedValueOnce(new Error('sin red'));   // un blip de red
     await expect(useUndoStore.getState().undoLast())
@@ -223,7 +223,7 @@ describe('el aviso usa los sustantivos del modelo abierto', () => {
     vi.mocked(gov.listColumns).mockRejectedValueOnce(new Error('sin red'));
     await expect(st().deleteTable('t3'))
       .rejects.toThrow("Couldn't check what depends on this entity: nothing was deleted. Try again.");
-    useUndoStore.setState({ stack: [{ label: 'Create table M_T3', run: () => st().deleteTable('t3') }], busy: false });
+    useUndoStore.setState({ stack: [{ label: 'Create table M_T3', run: async () => { await st().deleteTable('t3'); return null; } }], busy: false });
     vi.mocked(gov.listColumns).mockRejectedValueOnce(new Error('sin red'));
     await expect(useUndoStore.getState().undoLast())
       .rejects.toThrow("Couldn't check what depends on this entity: nothing was undone. Press Undo to try again.");

@@ -33,7 +33,10 @@ vi.mock('@/store/useSessionStore', () => ({
 }));
 const clearUndo = vi.fn();
 const undoState = { busy: false };
-vi.mock('@/store/useUndoStore', () => ({ useUndoStore: { getState: () => ({ clear: clearUndo, busy: undoState.busy }) } }));
+vi.mock('@/store/useUndoStore', () => ({
+  useUndoStore: { getState: () => ({ clear: clearUndo, busy: undoState.busy }) },
+  historyRunning: (then: string) => (undoState.busy ? `Undo or redo is still running — ${then} when it finishes.` : null),
+}));
 const refreshExplorer = vi.fn(async () => {});
 const markFresh = vi.fn();
 const mstate = {
@@ -554,7 +557,7 @@ describe('el resultado de la carga, dónde y a quién se avisa', () => {
     await ticks();
     expect(applyUpload).not.toHaveBeenCalled();
     expect(clearUndo).not.toHaveBeenCalled();
-    expect(errToasts()).toEqual(['Undo is still running — upload when it finishes.']);
+    expect(errToasts()).toEqual(['Undo or redo is still running — upload when it finishes.']);
   });
 
   it('otra versión y de vuelta a la misma (A → B → A): al terminar, se refresca y se vacía su Undo', async () => {

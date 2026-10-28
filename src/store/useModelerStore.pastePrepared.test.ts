@@ -85,6 +85,7 @@ describe('pasteTable(prepared)', () => {
   it('el Undo borra la tabla y después el esquema que nació con ella', async () => {
     await st().pasteTable({ table: { ...T1, schema: 'stg_nuevo' } as never, cols: [], createSchema: { name: 'stg_nuevo' } });
     const schemaId = (written()[0][0].payload as { id: string }).id;
+    vi.mocked(schemas.listSchemas).mockResolvedValueOnce([{ id: schemaId, name: 'stg_nuevo', description: null, kind: 'tables' }]);
     const deleteTable = vi.fn(async () => undefined);
     useModelerStore.setState({ deleteTable });
     await useUndoStore.getState().undoLast();
@@ -119,10 +120,13 @@ describe('pasteTable(prepared)', () => {
   it('el catálogo de esquemas se refresca al pegar con esquema nuevo y al deshacerlo', async () => {
     await st().pasteTable({ table: { ...T1, schema: 'stg_nuevo' } as never, cols: [], createSchema: { name: 'stg_nuevo' } });
     await vi.waitFor(() => expect(schemas.listSchemas).toHaveBeenCalledTimes(1));
+    const schemaId = (written()[0][0].payload as { id: string }).id;
+    vi.mocked(schemas.listSchemas).mockResolvedValue([{ id: schemaId, name: 'stg_nuevo', description: null, kind: 'tables' }]);
     useModelerStore.setState({ deleteTable: vi.fn(async () => undefined) });
     const tick = st().explorerTick;
     await useUndoStore.getState().undoLast();
-    await vi.waitFor(() => expect(schemas.listSchemas).toHaveBeenCalledTimes(2));
+    // Una lectura para tomar el esquema vigente antes de borrarlo y otra del refresco.
+    await vi.waitFor(() => expect(schemas.listSchemas).toHaveBeenCalledTimes(3));
     expect(st().explorerTick).toBeGreaterThan(tick);
   });
 

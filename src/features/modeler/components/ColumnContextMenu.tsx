@@ -14,6 +14,7 @@ const IS_MAC = /Mac/i.test(typeof navigator === 'undefined' ? '' : navigator.pla
 export const COPY_KEY_LABEL = IS_MAC ? '⌘C' : 'Ctrl+C';
 export const PASTE_KEY_LABEL = IS_MAC ? '⌘V' : 'Ctrl+V';
 export const UNDO_KEY_LABEL = IS_MAC ? '⌘Z' : 'Ctrl+Z';
+export const REDO_KEY_LABEL = IS_MAC ? '⇧⌘Z' : 'Ctrl+Y';
 export const SEARCH_KEY_LABEL = IS_MAC ? '⌘K' : 'Ctrl+K';
 
 // Mensajes con los sustantivos de la faceta abierta (en Logical, entidad y

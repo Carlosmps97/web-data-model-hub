@@ -7,7 +7,7 @@ import { createPortal } from 'react-dom';
 import {
   Table2, Combine, Network, Search, Save, ArrowUpToLine, ChevronDown, ChevronUp,
   Square, Circle, Minus, Star, Diamond, Type, RectangleHorizontal,
-  FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Settings2, Undo2,
+  FileCode2, FileSpreadsheet, ImageDown, AppWindow, FileDown, FolderCog, FolderOpen, Eye, Settings2, Undo2, Redo2,
   MoreHorizontal, Shapes,
 } from 'lucide-react';
 import Tooltip from '@/components/ui/Tooltip';
@@ -18,7 +18,8 @@ import { EndIcon, RelLabelIcon, RelLineIcon, SubcatIcon } from './RelIcon';
 import type { Cardinality } from '@/services/governance.service';
 import { failureText, manualRouteCount, useModelerStore } from '@/store/useModelerStore';
 import { useUndoStore } from '@/store/useUndoStore';
-import { SEARCH_KEY_LABEL, UNDO_KEY_LABEL } from './ColumnContextMenu';
+import { REDO_KEY_LABEL, SEARCH_KEY_LABEL, UNDO_KEY_LABEL } from './ColumnContextMenu';
+import { runHistory } from '../lib/historyKeys';
 import { modalOpen } from '@/components/ui/focusTrap';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -122,16 +123,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const activeCsId = useSessionStore((s) => s.activeChangesetId);
   const canUpload = openMode === 'editing' && !!activeCsId;
 
-  // Undo: el tooltip muestra qué se va a deshacer; el botón se apaga sin pila,
-  // con una inversa en vuelo o en solo lectura.
+  // Undo y Redo: el tooltip muestra qué se va a deshacer o rehacer; cada botón
+  // se apaga sin nada que hacer, con un paso en vuelo (spinner en el que corre)
+  // o en solo lectura.
   const undoCount = useUndoStore((s) => s.stack.length);
   const undoLabel = useUndoStore((s) => (s.stack.length ? s.stack[s.stack.length - 1].label : null));
-  const undoBusy = useUndoStore((s) => s.busy);
-  const onUndo = () => {
-    void useUndoStore.getState().undoLast()
-      .then((label) => { if (label) pushToast(`Undid: ${label}`); })
-      .catch((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't undo", 'err'));
-  };
+  const redoCount = useUndoStore((s) => s.redoStack.length);
+  const redoLabel = useUndoStore((s) => (s.redoStack.length ? s.redoStack[s.redoStack.length - 1].label : null));
+  const historyBusy = useUndoStore((s) => s.busy);
+  const running = useUndoStore((s) => s.running);
 
   const [modal, setModal] = useState<'table' | 'ctas' | 'view' | 'schema' | 'upload' | null>(null);
   // El buscador se comparte con la cabecera del Explorer (estado en el store).
@@ -520,9 +520,15 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
         <div className="wk-grp-row">
           {ic(
             undoLabel ? `Undo — ${undoLabel} (${UNDO_KEY_LABEL})` : `Undo (${UNDO_KEY_LABEL}) — nothing to undo`,
-            undoBusy ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Undo2 size={17} />,
-            onUndo,
-            { disabled: !canEdit || undoBusy || undoCount === 0, lockTip: true },
+            running === 'undo' ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Undo2 size={17} />,
+            () => runHistory('undo', pushToast),
+            { disabled: !canEdit || historyBusy || undoCount === 0, lockTip: true },
+          )}
+          {ic(
+            redoLabel ? `Redo — ${redoLabel} (${REDO_KEY_LABEL})` : `Redo (${REDO_KEY_LABEL}) — nothing to redo`,
+            running === 'redo' ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Redo2 size={17} />,
+            () => runHistory('redo', pushToast),
+            { disabled: !canEdit || historyBusy || redoCount === 0, lockTip: true },
           )}
           <Collapsible when={on('actions')} menu={{
             name: 'More actions — auto-arrange and exports', list: true, active: exportOpen, disabled: !openMode,

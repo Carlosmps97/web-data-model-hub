@@ -242,7 +242,7 @@ describe('borrar con la versión recién transferida', () => {
   });
 
   it('como inversa de «Create table»: el Undo calla (avisó la revalidación) y no vuelve a la pila', async () => {
-    useUndoStore.setState({ stack: [{ label: 'Create table M_T1', run: () => st().deleteTable('t1') }], busy: false });
+    useUndoStore.setState({ stack: [{ label: 'Create table M_T1', run: async () => { await st().deleteTable('t1'); return null; } }], busy: false });
     refuseRead(true);
     await expect(useUndoStore.getState().undoLast()).resolves.toBeNull();
     expect(useUndoStore.getState().stack).toEqual([]);

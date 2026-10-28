@@ -39,7 +39,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => ({
 vi.mock('@/services/naming.service', () => ({ getNamingConfig: vi.fn(async () => null) }));
 vi.mock('../services/pasteSource.service', () => ({ loadSourceStandards }));
 vi.mock('../lib/viewSync', () => ({ syncNewColumnsToMirrorViews: vi.fn(async () => undefined) }));
-vi.mock('../lib/pinnedWrites', () => ({ pinnedViewDeps: vi.fn(), undoColumnsBatch: vi.fn() }));
+vi.mock('../lib/pinnedWrites', () => ({ pinnedViewDeps: vi.fn(), columnsBatchStep: vi.fn() }));
 vi.mock('../lib/sessionGuard', () => ({
   pinSession: () => ({ check: () => undefined, holds: () => HOLDS.v }),
   reportWriteError: (r: (e: unknown) => void) => async (e: unknown) => r(e),

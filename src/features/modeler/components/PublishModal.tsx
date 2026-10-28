@@ -24,7 +24,7 @@ import { AlertTriangle, ArrowUpToLine, Check, Info, ShieldAlert, Trash2 } from '
 import { Avatar, Button, Dialog } from '@/components/ui';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
-import { useUndoStore } from '@/store/useUndoStore';
+import { historyRunning, useUndoStore } from '@/store/useUndoStore';
 import { runBlocking } from '@/store/useBusyStore';
 import { apiErrorMessage, errorReason } from '@/services/http';
 import { canvasSessionKey } from '../lib/canvasSession';
@@ -131,6 +131,9 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
 
   const handleSend = async () => {
     if (!changesetId || !canSend || !projectId) return;
+    // Un Undo/Redo en vuelo seguiría escribiendo en la versión que se envía.
+    const running = historyRunning('send');
+    if (running) { toast.error(running); return; }
     setSubmitting(true);
     try {
       await runBlocking('Sending for approval…', () => submit(changesetId, {
@@ -159,8 +162,9 @@ export default function PublishModal({ open, onClose }: PublishModalProps) {
 
   const handleDiscard = async () => {
     if (!changesetId || discarding) return;
-    // Una inversa del Undo en vuelo podría volver a escribir sobre lo descartado.
-    if (useUndoStore.getState().busy) { toast.error('Undo is still running — discard when it finishes.'); return; }
+    // Un Undo/Redo en vuelo podría volver a escribir sobre lo descartado.
+    const running = historyRunning('discard');
+    if (running) { toast.error(running); return; }
     setDiscarding(true);
     const asked = useSessionStore.getState();
     const askedKey = canvasSessionKey(asked);

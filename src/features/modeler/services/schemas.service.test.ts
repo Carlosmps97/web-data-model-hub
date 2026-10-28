@@ -8,7 +8,7 @@ vi.mock('@/services/http', () => ({
   ApiError: class extends Error { status = 0; }, apiErrorMessage: vi.fn(), isConflictError: vi.fn(),
   LONG_TIMEOUT_MS: 120_000,
 }));
-vi.mock('@/services/changeset.service', () => ({ recordChange: vi.fn(async () => ({})), effective: vi.fn() }));
+vi.mock('@/services/changeset.service', () => ({ recordChange: vi.fn(async () => ({})), effective: vi.fn(), announceDraftWrite: vi.fn() }));
 
 import { apiDelete, apiPost } from '@/services/http';
 import * as csvc from '@/services/changeset.service';
@@ -30,6 +30,21 @@ describe('setSchemaKind', () => {
     await expect(setSchemaKind('s1', 'views')).rejects.toThrow('version in edit mode');
     expect(apiPost).not.toHaveBeenCalled();
     expect(csvc.recordChange).not.toHaveBeenCalled();
+  });
+});
+
+// Borrar un esquema va por su endpoint (revisa el uso en el servidor); la
+// escritura se avisa como las de `changeset.service`, con el número que devuelve.
+describe('deleteSchema', () => {
+  it('avisa su escritura con el número que devuelve el endpoint; sin número si falla', async () => {
+    useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
+    vi.mocked(apiPost).mockResolvedValueOnce({ deleted: true, writeSeq: 8 });
+    await deleteSchema('s1');
+    expect(apiPost).toHaveBeenCalledWith(expect.stringMatching(/\/api\/changesets\/cs1\/schemas\/s1\/delete$/));
+    expect(csvc.announceDraftWrite).toHaveBeenCalledWith('cs1', [{ collection: 'schemas', entityId: 's1', op: 'delete' }], 8);
+    vi.mocked(apiPost).mockRejectedValueOnce(new Error('in use'));
+    await expect(deleteSchema('s2')).rejects.toThrow('in use');
+    expect(csvc.announceDraftWrite).toHaveBeenLastCalledWith('cs1', [{ collection: 'schemas', entityId: 's2', op: 'delete' }], undefined);
   });
 });
 

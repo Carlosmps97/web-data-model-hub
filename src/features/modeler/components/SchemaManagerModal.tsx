@@ -6,6 +6,7 @@ import { confirmDialog } from '@/components/ui/dialogs';
 import { apiErrorMessage } from '@/services/http';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
+import { useUndoStore } from '@/store/useUndoStore';
 import * as schemasSvc from '../services/schemas.service';
 import type { DbSchema, SchemaImpact } from '../services/schemas.service';
 import { schemaNameError } from '../lib/schemaCreate';
@@ -160,6 +161,10 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
       if (!pin.holds()) onClose();
     } finally {
       setBusy(false);
+      // Renombrar o cambiar el tipo de un esquema graba en la versión por su
+      // propio endpoint, sin aviso de escritura (borrar sí se avisa): lo
+      // pendiente de rehacer ya no calza.
+      if (done.size) useUndoStore.getState().dropRedo();
       // Lo guardado (o parte, si algo falló) cambia el catálogo: el filtro de
       // esquemas de CTAS / Import existing vuelve a consultarlo.
       invalidateTableSchemas();

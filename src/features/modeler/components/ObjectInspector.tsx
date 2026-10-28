@@ -6,7 +6,7 @@ import Dialog from '@/components/ui/Dialog';
 import Icon from '@/components/ui/Icon';
 import { useModelerStore, type InspectTarget } from '@/store/useModelerStore';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
-import { pushUndo } from '@/store/useUndoStore';
+import { pushUndo, type HistoryStep } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable, ParentDomain, TableUsageRow } from '@/services/governance.service';
 import * as viewsSvc from '@/services/views.service';
@@ -22,7 +22,7 @@ import { facetEditable, type TableField } from '../lib/facetEditable';
 import { inspectorRefreshPlan } from '../lib/inspectorRefresh';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { tableNamePlan } from '../lib/nameSync';
-import { bestEffort, pinned, pinnedViewDeps } from '../lib/pinnedWrites';
+import { bestEffort, columnStep, lotStep, pinned, pinnedViewDeps } from '../lib/pinnedWrites';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import { syncRenamedColumnInViews } from '../lib/viewSync';
 import {
@@ -279,6 +279,12 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     else if (plan === 'bump') bumpExplorer();
   };
   const tablePre = (t: CanonicalTable): CanonicalTable => ({ ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) });
+  /** Deshacer y rehacer un guardado de la tabla: el documento por valor, de un lado y del otro. */
+  const tableStep = (write: CanonicalTable, back: CanonicalTable, structural: boolean): HistoryStep => async () => {
+    await gov.createTable(write);
+    await afterEdit(structural);
+    return tableStep(back, write, structural);
+  };
 
   // ── Definition: nombres por faceta + rayo + esquema + definición (espejo de Properties) ──
   // Cada escritura del inspector pertenece a la sesión donde empezó (`pinSession`:
@@ -308,7 +314,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     try {
       pin.check();   // el físico pudo derivarse con un await
       await gov.createTable(next);   // upsert por id = update (merge sobre el doc efectivo)
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(true); }, pin);
+      pushUndo(`Edit table ${pre.physicalName}`, tableStep(pre, next, true), pin);
       setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
       setPhysTouched(null);
       await afterEdit(structural);
@@ -328,8 +334,9 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     const pin = pinSession();
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save")));
     try {
-      await gov.createTable({ ...data.table, description: next });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(false); }, pin);
+      const doc = { ...data.table, description: next };
+      await gov.createTable(doc);
+      pushUndo(`Edit table ${pre.physicalName}`, tableStep(pre, doc, false), pin);
       await afterEdit(false);
     } catch (e) { await onError(e); }
   };
@@ -347,8 +354,9 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     const pin = pinSession();
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save UDP")));
     try {
-      await gov.createTable({ ...data.table, udpValues: next });
-      pushUndo(`Edit table ${pre.physicalName}`, async () => { await gov.createTable(pre); await afterEdit(false); }, pin);
+      const doc = { ...data.table, udpValues: next };
+      await gov.createTable(doc);
+      pushUndo(`Edit table ${pre.physicalName}`, tableStep(pre, doc, false), pin);
       await afterEdit(false);
     } catch (e) { await onError(e); }
   };
@@ -387,10 +395,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       try {
         const { changes, pres } = keyLayoutBulk(data!.columns, { [id]: fields });
         await gov.recordChangesBulk(changes);
-        pushUndo(`Edit column ${c.physicalName}`, async () => {
-          await gov.recordChangesBulk(pres.map((p) => gov.bulk.createColumn(p)));
-          await afterEdit(true);
-        }, pin);
+        pushUndo(`Edit column ${c.physicalName}`, lotStep(pres.map((p) => gov.bulk.createColumn(p)), changes, () => afterEdit(true)), pin);
         await afterEdit(true);
       } catch (e) { await onError(e); }
       return;
@@ -399,15 +404,14 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     const renamed = typeof fields.physicalName === 'string' && fields.physicalName !== c.physicalName;
     const structural = renamed || (typeof fields.logicalName === 'string' && fields.logicalName !== c.logicalName);
     try {
-      await gov.updateColumn({ ...c, ...fields });   // upsert por id = update (merge)
-      pushUndo(`Edit column ${pre.physicalName}`, async (undo) => {
-        await gov.updateColumn(pre);
-        // Si el cambio renombró el físico, las vistas apuntan al nombre nuevo:
-        // deshacer las devuelve al anterior (best-effort; solo mientras siga la
-        // sesión del Undo).
-        if (renamed) await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(undo), c.tableId, fields.physicalName as string, pre.physicalName));
-        await afterEdit(structural);
-      }, pin);
+      const post = { ...c, ...fields };
+      await gov.updateColumn(post);   // upsert por id = update (merge)
+      // Deshacer y rehacer por valor. Si el cambio renombró el físico, las
+      // vistas apuntan al nombre nuevo: deshacer las devuelve al anterior y
+      // rehacer, otra vez al nuevo (best-effort; solo mientras siga la sesión
+      // del paso).
+      pushUndo(`Edit column ${pre.physicalName}`,
+        columnStep(pre, { ...post, ...(post.udpValues ? { udpValues: { ...post.udpValues } } : {}) }, () => afterEdit(structural)), pin);
       if (renamed) {
         // Un rename físico re-apunta las vistas que referencian el nombre anterior
         // (mismo sync del sidebar); la vista se ajusta a mano si hiciera falta.
@@ -476,8 +480,13 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     setData((d) => d && ({ ...d, columns: d.columns.map((c) => { const s = plan.find((p) => p.c.id === c.id); return s ? { ...c, ordinal: s.idx } : c; }) }));
     try {
       await persistReorder(plan, (c, idx) => pinned(pin, gov.updateColumn)({ ...c, ordinal: idx }));
-      pushUndo('Reorder columns',
-        async (undo) => { await persistReorder(plan, (c) => pinned(undo, gov.updateColumn)(c)); await afterEdit(false); }, pin);
+      // Deshacer repone cada columna movida (por valor); rehacer, su ordinal nuevo.
+      const order = (forward: boolean): HistoryStep => async (stepPin) => {
+        await persistReorder(plan, (c, idx) => pinned(stepPin, gov.updateColumn)(forward ? { ...c, ordinal: idx } : c));
+        await afterEdit(false);
+        return order(!forward);
+      };
+      pushUndo('Reorder columns', order(false), pin);
       await afterEdit(false);
     } catch (e) { await onError(e); await refresh().catch(() => {}); }
     finally { setReordering(false); }
@@ -881,8 +890,15 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     if (!data) return;
     const pin = pinSession();   // su inversa se apila solo en su sesión
     const pre = viewPre(data.view);
-    await viewsSvc.updateView(pre.id, { ...data.view, ...patch } as ViewInput);   // doc completo (el overlay lo sustituye entero)
-    pushUndo(label, async () => { await viewsSvc.updateView(pre.id, pre as ViewInput); await afterEdit(structural); }, pin);
+    const next = { ...data.view, ...patch } as ViewInput;
+    await viewsSvc.updateView(pre.id, next);   // doc completo (el overlay lo sustituye entero)
+    // Deshacer y rehacer: el documento por valor, de un lado y del otro.
+    const viewStep = (write: ViewInput, back: ViewInput): HistoryStep => async () => {
+      await viewsSvc.updateView(pre.id, write);
+      await afterEdit(structural);
+      return viewStep(back, write);
+    };
+    pushUndo(label, viewStep(pre as ViewInput, next), pin);
     await afterEdit(structural);
   };
   const saveDef = async () => {

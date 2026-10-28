@@ -9,8 +9,9 @@ vi.mock('@/services/http', () => ({
   apiPost: vi.fn(),
   apiPut: vi.fn().mockResolvedValue({ id: 'cs1', title: 't', owner: 'ana', status: 'draft' }),
 }));
-import { apiPut } from '@/services/http';
-import { onDraftWrite, recordChange, recordChangesBulk, type BulkChange } from './changeset.service';
+import { apiGet, apiPut } from '@/services/http';
+import { onDraftWrite, recordChange, recordChangesBulk, writeSeqOf, type BulkChange } from './changeset.service';
+import { draftWorkSettled } from './draftWork';
 
 const del = (i: number): BulkChange => ({ collection: 'canonical_columns', entityId: `c${i}`, op: 'delete' });
 
@@ -80,3 +81,38 @@ describe('onDraftWrite', () => {
   });
 });
 
+// Undo y Redo esperan lo que esta pestaña ya mandó a escribir: su aviso tiene
+// que llegar antes de que empiece el paso.
+describe('trabajo en vuelo', () => {
+  it.each([
+    ['recordChange', () => recordChange('cs1', 'canonical_columns', 'c1', 'delete')],
+    ['recordChangesBulk', () => recordChangesBulk('cs1', [del(1)])],
+  ])('draftWorkSettled espera a %s y a su aviso', async (_name, write) => {
+    const order: string[] = [];
+    let answer!: () => void;
+    vi.mocked(apiPut).mockImplementationOnce(() => new Promise((r) => { answer = () => r({ writeSeq: 7 }); }));
+    const off = onDraftWrite((_cs, _changes, seq) => order.push(`aviso ${seq}`));
+    try {
+      const done = write();
+      const settled = draftWorkSettled().then(() => order.push('settled'));
+      await new Promise((r) => setTimeout(r, 5));
+      expect(order).toEqual([]);
+      answer();
+      await Promise.all([done, settled]);
+      expect(order).toEqual(['aviso 7', 'settled']);
+    } finally {
+      off();
+    }
+  });
+});
+
+// El Redo verifica antes de escribir que nadie escribió en la versión desde su
+// Undo: lee solo el contador, no la cabecera (que arma el resumen de todos los
+// cambios del draft).
+describe('writeSeqOf', () => {
+  it('lee el contador de escrituras de la versión', async () => {
+    vi.mocked(apiGet).mockResolvedValueOnce({ writeSeq: 7 });
+    await expect(writeSeqOf('cs 1')).resolves.toEqual({ writeSeq: 7 });
+    expect(vi.mocked(apiGet).mock.calls.map(([url]) => url)).toEqual(['/api/changesets/cs%201/seq']);
+  });
+});

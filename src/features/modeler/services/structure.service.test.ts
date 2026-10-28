@@ -271,6 +271,15 @@ describe('miembros del canvas: la lista se arma dentro de la cola', () => {
     expect(out.routes).toEqual({ r2: R2 });
   });
 
+  it('removeFromCanvas devuelve los trazos que quitó (el Undo los repone), y nada sin `dropRouteIds`', async () => {
+    draft.sa1 = canvas({ routes: { r1: R1, r2: R2 } });
+    const out = await struct.removeFromCanvas('sa1', { tableIds: ['t2'], dropRouteIds: ['r1', 'r9'] });
+    expect(out.routes).toEqual({ r1: R1 });
+    expect(draft.sa1.routes).toEqual({ r2: R2 });
+    expect((await struct.removeFromCanvas('sa1', { tableIds: ['t1'] })).routes).toEqual({});
+    expect((await struct.removeFromCanvas('sa9', { tableIds: ['t1'], dropRouteIds: ['r2'] })).routes).toEqual({});
+  });
+
   it('removeFromCanvas con `pins` fija solo a lo que queda sin posición, cuando sale una tabla', async () => {
     draft.sa1 = canvas({ tableIds: ['t1', 't2', 't3'], viewIds: ['v1'], layout: { t2: { x: 4, y: 4 } } });
     await struct.removeFromCanvas('sa1', {
@@ -474,11 +483,11 @@ describe('lo que sale de un canvas, con su posición', () => {
   it('removeFromCanvas devuelve lo que realmente salió: tablas, vistas y sus posiciones', async () => {
     draft.sa1 = canvas({ viewIds: ['v1', 'v2'], layout: { t1: { x: 0, y: 0 }, t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } } });
     const out = await struct.removeFromCanvas('sa1', { tableIds: ['t2', 't9'], viewIds: ['v1', 'v9'] });
-    expect(out).toEqual({ tableIds: ['t2'], viewIds: ['v1'], layout: { t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } }, colors: {} });
+    expect(out).toEqual({ tableIds: ['t2'], viewIds: ['v1'], layout: { t2: { x: 400, y: 0 }, v1: { x: 1, y: 1 } }, colors: {}, routes: {} });
   });
 
   it('nada que sacar, canvas sin lista explícita o canvas que ya no está: vacío', async () => {
-    const none = { tableIds: [], viewIds: [], layout: {}, colors: {} };
+    const none = { tableIds: [], viewIds: [], layout: {}, colors: {}, routes: {} };
     expect(await struct.removeFromCanvas('sa1', { tableIds: ['t9'] })).toEqual(none);
     draft.sa2 = canvas({ id: 'sa2', viewIds: undefined, layout: { t1: { x: 0, y: 0 }, v1: { x: 9, y: 9 } } });
     expect(await struct.removeFromCanvas('sa2', { viewIds: ['v1'] })).toEqual(none);

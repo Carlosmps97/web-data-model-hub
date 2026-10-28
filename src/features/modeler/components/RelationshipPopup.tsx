@@ -16,7 +16,7 @@ import { pkInKeyOrder } from '@/features/modeler/lib/keyOrder';
 import { pkFirstOrdinals } from '../lib/columnOrder';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, syncRenamedColumnInViews } from '@/features/modeler/lib/viewSync';
-import { bestEffort, pinnedViewDeps } from '../lib/pinnedWrites';
+import { bestEffort, pinnedViewDeps, relationshipTypeStep } from '../lib/pinnedWrites';
 import { phraseEdits, roleAppliedText } from '../lib/relationshipLabel';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import KeyMappingRows, { type KeyRowState } from './KeyMappingRows';
@@ -118,13 +118,12 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
       pushToast(identifying ? `Identifying: child ${nouns.members} promoted to PK`
         : n ? `Non-identifying: ${n} child ${nouns.member}(s) leave the PK` : 'Non-identifying');
       const undoCols = [...colPres, ...keyPres.filter((p) => !colPres.some((c) => c.id === p.id))];
-      pushUndo('Edit relationship', async () => {
-        await gov.recordChangesBulk([
-          ...undoCols.map((c) => gov.bulk.createColumn(c)),
-          gov.bulk.upsertRelationship(relPre),
-        ]);
-        await reload();
-      }, pin);
+      // Deshacer en un lote (la relación y las columnas como estaban); rehacer en
+      // un lote, o como esta acción si la relación es recursiva.
+      pushUndo('Edit relationship', relationshipTypeStep(
+        [...undoCols.map((c) => gov.bulk.createColumn(c)), gov.bulk.upsertRelationship(relPre)],
+        { ...relPre, identifying }, keyChanges, reload,
+      ), pin);
       await reload();
     }, "Couldn't update");
   };

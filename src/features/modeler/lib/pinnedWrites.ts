@@ -1,15 +1,16 @@
 /**
  * Escrituras atadas al pin de una sesión (`pinSession`), para las acciones y
- * las inversas del Undo que escriben varias veces. Los servicios toman la
- * versión al llamarlos: si entre dos escrituras la sesión cambia (se abre otra
- * versión, o la revalidación la degrada), lo que falta no se escribe (ni en la
- * nueva ni en ninguna) y el corte no se traga como un error más.
+ * los pasos del historial (Undo/Redo) que escriben varias veces. Los servicios
+ * toman la versión al llamarlos: si entre dos escrituras la sesión cambia (se
+ * abre otra versión, o la revalidación la degrada), lo que falta no se escribe
+ * (ni en la nueva ni en ninguna) y el corte no se traga como un error más.
  */
 import * as gov from '@/services/governance.service';
-import type { BulkChange } from '@/services/governance.service';
+import type { BulkChange, CanonicalColumn, Relationship } from '@/services/governance.service';
+import type { HistoryStep } from '@/store/useUndoStore';
 import * as viewsSvc from '@/services/views.service';
 import { SessionChangedError, pinSession, type SessionPin } from './sessionGuard';
-import { syncRemovedColumnFromViews, syncRenamedColumnInViews } from './viewSync';
+import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from './viewSync';
 
 /** `fn` que, antes de escribir, verifica que siga la sesión del pin. */
 export const pinned = <A extends unknown[], R>(pin: SessionPin, fn: (...a: A) => R) =>
@@ -30,27 +31,100 @@ export async function bestEffort(run: () => Promise<unknown>): Promise<void> {
   try { await run(); } catch (e) { if (e instanceof SessionChangedError) throw e; }
 }
 
-/** Inversa de un lote que creó columnas y/o renombró otras (pegar columnas,
- *  migrar la llave de una relación o de una subcategoría): el lote inverso y,
- *  best-effort, las vistas — sacar las columnas creadas y devolver los renames
- *  —; `after`, la recarga. Recibe el pin de la sesión del Undo (`run(pin)`). */
-export function undoColumnsBatch(o: {
-  inverse: BulkChange[]; tableId: string; created: string[]; renamesBack?: { from: string; to: string }[];
-  after: () => Promise<unknown>;
-}): (pin: SessionPin) => Promise<void> {
-  return async (pin) => {
-    await gov.recordChangesBulk(o.inverse);
-    for (const name of o.created) {
-      pin.check();
-      await bestEffort(() => syncRemovedColumnFromViews(pinnedViewDeps(pin), o.tableId, name));
+/** Paso de un lote por valor: graba `write`, recarga (`after`) y devuelve el
+ *  paso que graba `back` — deshacer y rehacer un lote son el mismo paso con los
+ *  lotes cruzados (entrar o salir de la llave, cambiar el tipo de relación). */
+export function lotStep(write: BulkChange[], back: BulkChange[], after: () => Promise<unknown>): HistoryStep {
+  return async () => {
+    await gov.recordChangesBulk(write);
+    await after();
+    return lotStep(back, write, after);
+  };
+}
+
+/** Paso del tipo de una relación (identifying ↔ non-identifying): deshacer
+ *  graba `back` en un lote (la relación y las columnas como estaban); rehacer
+ *  graba la relación (`rel`) y la llave (`keys`) en un lote, salvo en una
+ *  relación recursiva: ahí la llave del padre es la del hijo y el backend valida
+ *  el N=N contra ella, así que va como la acción — la relación y después la llave. */
+export function relationshipTypeStep(back: BulkChange[], rel: Relationship, keys: BulkChange[], after: () => Promise<unknown>): HistoryStep {
+  const undo: HistoryStep = async () => {
+    await gov.recordChangesBulk(back);
+    await after();
+    return redo;
+  };
+  const redo: HistoryStep = async (pin) => {
+    if (rel.parentTableId !== rel.childTableId) await gov.recordChangesBulk([gov.bulk.upsertRelationship(rel), ...keys]);
+    else {
+      await gov.updateRelationship(rel);
+      if (keys.length) {
+        pin.check();
+        await gov.recordChangesBulk(keys);
+      }
     }
-    for (const r of o.renamesBack ?? []) {
+    await after();
+    return undo;
+  };
+  return undo;
+}
+
+/** Paso de una columna por valor: graba `write` y, si su físico no es el de
+ *  `back`, re-apunta las vistas de ese nombre al nuevo (best-effort, con el pin
+ *  del paso); devuelve el paso que graba `back`. */
+export function columnStep(write: CanonicalColumn, back: CanonicalColumn, after: () => Promise<unknown>): HistoryStep {
+  return async (pin) => {
+    await gov.updateColumn(write);
+    if (write.physicalName !== back.physicalName) {
+      await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), write.tableId, back.physicalName, write.physicalName));
+    }
+    await after();
+    return columnStep(back, write, after);
+  };
+}
+
+/** Un lote que creó columnas y/o renombró otras (pegar columnas, migrar la
+ *  llave de una relación o de una subcategoría) como pasos del historial, con
+ *  los mismos ids de un lado y del otro.
+ *  · Deshacer: el lote inverso y, best-effort, las vistas — sacar las columnas
+ *    creadas y devolver los renames (`renames` va del nombre previo al nuevo).
+ *  · Rehacer: el lote original y, best-effort, las creadas a las vistas espejo
+ *    (con la tabla de antes del lote, `baseline`) y los renames al nombre nuevo
+ *    (`createdIds`: las columnas del lote, que no sostienen el nombre previo).
+ *  `after`, la recarga. Cada uno corta antes de escribir si la sesión del paso
+ *  es otra. */
+export function columnsBatchStep(o: {
+  forward: BulkChange[]; inverse: BulkChange[]; tableId: string;
+  created: { physicalName: string; isPrimaryKey?: boolean | null }[]; baseline: CanonicalColumn[];
+  renames?: { from: string; to: string }[]; createdIds?: string[];
+  after: () => Promise<unknown>;
+}): HistoryStep {
+  const undo: HistoryStep = async (pin) => {
+    await gov.recordChangesBulk(o.inverse);
+    for (const c of o.created) {
       pin.check();
-      await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), o.tableId, r.from, r.to));
+      await bestEffort(() => syncRemovedColumnFromViews(pinnedViewDeps(pin), o.tableId, c.physicalName));
+    }
+    for (const r of o.renames ?? []) {
+      pin.check();
+      await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), o.tableId, r.to, r.from));
     }
     pin.check();
     await o.after();
+    return redo;
   };
+  const redo: HistoryStep = async (pin) => {
+    await gov.recordChangesBulk(o.forward);
+    pin.check();
+    await bestEffort(() => syncNewColumnsToMirrorViews(pinnedViewDeps(pin), o.tableId, o.created, o.baseline));
+    for (const r of o.renames ?? []) {
+      pin.check();
+      await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), o.tableId, r.from, r.to, { createdIds: o.createdIds }));
+    }
+    pin.check();
+    await o.after();
+    return undo;
+  };
+  return undo;
 }
 
 /** Escrituras diferidas de lo que el usuario editó (debounce por clave y

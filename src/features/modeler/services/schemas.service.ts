@@ -11,6 +11,7 @@
  */
 import { apiGet, apiPost } from '@/services/http';
 import * as csvc from '@/services/changeset.service';
+import { trackDraftWork } from '@/services/draftWork';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 
 import { API_BASE } from '@/services/apiBase';
@@ -95,9 +96,18 @@ export const renameSchema = (id: string, newName: string): Promise<{ tables: num
 };
 
 /** Delete versionado: el backend rechaza (409) si el esquema tiene tablas o
- *  vistas en su estado efectivo. */
+ *  vistas en su estado efectivo. La escritura se avisa como las de
+ *  `changeset.service`, con el número que devuelve el endpoint (sin él si falló). */
 export const deleteSchema = async (id: string): Promise<void> => {
   const cs = writeCs();
   if (!cs) throw new Error('Deleting a schema requires a version in edit mode.');
-  await apiPost(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/delete`);
+  await trackDraftWork((async () => {
+    let seq: number | undefined;
+    try {
+      seq = (await apiPost<{ deleted: boolean; writeSeq?: number }>(
+        `${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/delete`)).writeSeq;
+    } finally {
+      csvc.announceDraftWrite(cs, [{ collection: 'schemas', entityId: id, op: 'delete' }], seq);
+    }
+  })());
 };

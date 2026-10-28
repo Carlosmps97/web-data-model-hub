@@ -144,7 +144,9 @@ describe('importar con el diagrama en memoria desactualizado no mueve un bloque 
   it('deshacer «sacar t2» mientras se importa t2: t2 queda donde la repuso el Undo', async () => {
     await st().removeTableFromArea('t2');
     expect(draft.sa1.tableIds).toEqual(['t1']);
-    await Promise.all([useUndoStore.getState().undoLast(), st().addExistingTables(['t2'], { tables: [TABLES[1] as never] })]);
+    const undo = useUndoStore.getState().undoLast();
+    await sleep(1);                                    // el Undo ya encoló su escritura; el diagrama sigue sin t2
+    await Promise.all([undo, st().addExistingTables(['t2'], { tables: [TABLES[1] as never] })]);
     expect(draft.sa1.tableIds).toEqual(['t1', 't2']);
     expect(draft.sa1.layout!.t2).toEqual({ x: 400, y: 0 });
   });

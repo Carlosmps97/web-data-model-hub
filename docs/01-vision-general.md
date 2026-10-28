@@ -165,7 +165,7 @@ Cada pantalla y feature se describe en detalle en [Funcionalidades](05-funcional
 |---|---|---|
 | Autenticación | `src/features/auth` | Login, restauración de sesión y guardas de ruta. |
 | Home | `src/screens/HomeScreen.tsx`, `src/screens/home` | Resumen, solicitudes asignadas, versiones, **Version tools** y rollback. |
-| Modelador | `src/features/modeler` | Canvas, Model Explorer, paneles de propiedades, relaciones, subcategorías, vistas, esquemas, copiar y pegar, Undo y **Publish**. |
+| Modelador | `src/features/modeler` | Canvas, Model Explorer, paneles de propiedades, relaciones, subcategorías, vistas, esquemas, copiar y pegar, Undo y Redo, y **Publish**. |
 | Carga Excel | `src/features/upload` | **Upload from Excel** con perfiles de carga y reporte del resultado. |
 | Export DDL | `src/features/ddl` | Generación del DDL con reglas y selección de tablas. |
 | Review | `src/screens/ReviewScreen.tsx`, `src/screens/review` | Bandeja de solicitudes, diff, comentarios y decisión. |

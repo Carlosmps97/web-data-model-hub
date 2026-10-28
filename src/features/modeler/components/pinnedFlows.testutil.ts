@@ -23,13 +23,13 @@
  *  · el callback de `.then/.catch/.finally` (y el de `persistReorder`) corre
  *    después de una promesa: cuenta un await al empezar;
  *  · los diferidos (timers, efectos, handlers, `action:` de un objeto, las
- *    inversas del Undo) se analizan aparte;
+ *    pasos del historial) se analizan aparte;
  *  · acciones del store por alias (`st = useModelerStore.getState()`, `get()`)
  *    o desestructuradas; `csvc`; callbacks de props y helpers que escriben,
  *    también los locales: llamar a una función del archivo que escribe es
  *    escribir, aunque ella verifique su pin (lo toma al llamarla), salvo que
  *    reciba el pin del llamador o verifique uno de afuera;
- *  · solo cuenta el `.check()`/`.holds()` de un pin (`pin`, `…Pin`, `undo`) y
+ *  · solo cuenta el `.check()`/`.holds()` de un pin (`pin`, `…Pin`, `undo`, `redo`) y
  *    el `.holds()` solo si protege la escritura (`if (!pin.holds()) return;`
  *    delante, o la escritura dentro de `if (pin.holds())` / `pin.holds() && …`);
  *    un check en una rama, un bucle o un callback no cubre lo que sigue afuera.
@@ -97,10 +97,10 @@ const INLINE_RUNNERS = new Set(['runBlocking', 'run', 'Array.from']);
 /** Llamadas cuyo callback corre después de una promesa. */
 const CONT_METHODS = /^(then|catch|finally)$/;
 const CONT_RUNNERS = new Set(['persistReorder']);
-/** Receptor de un pin: `pin`, `undo` (la inversa del Undo), `…Pin`, `….current`. */
-const PIN_RECEIVER = /^(?:[\w$]+\.)*(?:pin|undo|\w+Pin)(?:\.current)?$/;
+/** Receptor de un pin: `pin`, `undo`/`redo` (los pasos del historial), `…Pin`, `….current`. */
+const PIN_RECEIVER = /^(?:[\w$]+\.)*(?:pin|undo|redo|\w+Pin)(?:\.current)?$/;
 /** Un pin entre los argumentos de un helper (`save(pin)`, `{ pin, signal }`). */
-const PIN_ARG = /\b(?:pin|undo|\w+Pin)\b/;
+const PIN_ARG = /\b(?:pin|undo|redo|\w+Pin)\b/;
 
 export interface Violation { fn: string; line: number; write: string }
 

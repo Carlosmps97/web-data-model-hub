@@ -7,7 +7,7 @@ import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.s
 import { ApiError, apiErrorMessage, errorReason, isTransientError } from '@/services/http';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
-import { useUndoStore } from '@/store/useUndoStore';
+import { historyRunning, useUndoStore } from '@/store/useUndoStore';
 import { useAuthStore } from '@/store/useAuthStore';
 import { findSheet, readWorkbook, sheetRowCount, type RawWorkbook } from '../lib/parseWorkbook';
 import {
@@ -230,9 +230,10 @@ export default function UploadModal({ onClose, pushToast }: { onClose: () => voi
   const upload = async () => {
     const j = jobRef.current;
     if (!csId || !j || j.status !== 'validated' || (j.report?.errorCount ?? 0) > 0 || working) return;
-    // Con una inversa del Undo en vuelo no se empieza: la carga cierra la pila al
-    // empezar, y esa inversa (si fallara) no podría volver a la pila.
-    if (useUndoStore.getState().busy) { pushToast('Undo is still running — upload when it finishes.', 'err'); return; }
+    // Con un Undo/Redo en vuelo no se empieza: la carga cierra el historial al
+    // empezar, y ese paso (si fallara) no podría volver a su pila.
+    const running = historyRunning('upload');
+    if (running) { pushToast(running, 'err'); return; }
     // La carga es de la versión donde se pidió: el arrange corre con su pin y lo
     // que sigue no toca otra versión. Cerrar el popup (Logical/Physical cierra
     // los modales; el TopNav lo desmonta) no corta la carga pedida. Lo que el

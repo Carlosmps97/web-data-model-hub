@@ -20,7 +20,7 @@ import RelationshipCreatePopup, { type RelDraft } from './RelationshipCreatePopu
 import SubcategoryCreatePopup, { type SubcatDraft } from './SubcategoryCreatePopup';
 import SubcategoryPopup from './SubcategoryPopup';
 import ColumnContextMenu, { copiedMessage, copiedTableMessage } from './ColumnContextMenu';
-import { useUndoStore } from '@/store/useUndoStore';
+import { historyKey, historyShortcut } from '../lib/historyKeys';
 import { modalOpen } from '@/components/ui/focusTrap';
 import PasteColumnsPopup from './PasteColumnsPopup';
 import PasteTablePopup from './PasteTablePopup';
@@ -322,7 +322,8 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // Ctrl en Windows/Linux): Ctrl/Cmd+C copia la selección de filas (o el
   // bloque seleccionado si no hay filas), Ctrl/Cmd+V pega (clipboard de tabla →
   // tabla nueva; de columnas → confirmación sobre la tabla seleccionada),
-  // Ctrl/Cmd+Z deshace la última acción y Esc limpia menú/selección. Guardas:
+  // Ctrl/Cmd+Z deshace la última acción, Ctrl/Cmd+Shift+Z y Ctrl/Cmd+Y rehacen
+  // lo último deshecho (`historyShortcut`) y Esc limpia menú/selección. Guardas:
   // cualquier modal o espera en pantalla (`modalOpen`: un Dialog, Modal o
   // confirm `aria-modal`, un scrim .dmh-backdrop, o los overlays de espera
   // .dmh-busy-overlay / .wk-nav-overlay), foco en un campo editable (ahí mandan
@@ -339,19 +340,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       }
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
       const k = e.key.toLowerCase();
-      if (k !== 'c' && k !== 'v' && k !== 'z') return;
+      const cmd = historyShortcut(e);
+      if (k !== 'c' && k !== 'v' && !cmd) return;
       const t = e.target as HTMLElement | null;
       if (t?.closest('input, textarea, select, [contenteditable="true"]')) return;
-      if (k === 'z') {
-        // Deshace la última acción instrumentada. Shift+Z (redo) no existe; sin
-        // edición o sin pila, el atajo no hace nada.
-        if (e.shiftKey || readonly || !activeChangeset) return;
-        const undo = useUndoStore.getState();
-        if (undo.busy || !undo.stack.length) return;
-        e.preventDefault();
-        void undo.undoLast()
-          .then((label) => { if (label) pushToast(`Undid: ${label}`); })
-          .catch((err) => pushToast(err instanceof Error && err.message ? err.message : "Couldn't undo", 'err'));
+      if (cmd) {
+        // Deshace o rehace con el historial de la sesión (sin edición, el atajo
+        // no es del canvas).
+        historyKey(e, cmd, !readonly && !!activeChangeset, pushToast);
         return;
       }
       if (k === 'c') {

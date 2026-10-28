@@ -23,6 +23,7 @@
  */
 import * as mod from './modeler.service';
 import * as csvc from '@/services/changeset.service';
+import { trackDraftWork } from '@/services/draftWork';
 import { useSessionStore } from '@/store/useSessionStore';
 import { noteCanvasWrite, wholeLayout } from '../lib/canvasWrites';
 import { MAX_ROUTE_POINTS, cleanRoute, cleanRoutes, pruneRoutes, routeOf, validWireId } from '../lib/wireRoute';
@@ -46,7 +47,7 @@ const uid = () => crypto.randomUUID();
  *  request lleva timeout (`apiFetch`), así que la cola no puede quedar colgada. */
 const saQueue = new Map<string, Promise<unknown>>();
 function inOrder<T>(saId: string, job: () => Promise<T>): Promise<T> {
-  const run = (saQueue.get(saId) ?? Promise.resolve()).then(job);
+  const run = trackDraftWork((saQueue.get(saId) ?? Promise.resolve()).then(job));
   const tail = run.catch(() => undefined);
   saQueue.set(saId, tail);
   void tail.then(() => { if (saQueue.get(saId) === tail) saQueue.delete(saId); });
@@ -294,9 +295,11 @@ export const addToCanvas = async (
   });
 };
 
-/** Lo que salió de un canvas: miembros, sus posiciones y su color en ese
- *  canvas. */
-export type CanvasMembersOut = Required<CanvasMembers> & { layout: NonNullable<Layout>; colors: Record<string, string> };
+/** Lo que salió de un canvas: miembros, sus posiciones, su color en ese canvas
+ *  y los trazos de wires que se quitaron. */
+export type CanvasMembersOut = Required<CanvasMembers> & {
+  layout: NonNullable<Layout>; colors: Record<string, string>; routes: WireRoutes;
+};
 
 /** Las posiciones de `ids` en un layout (solo las que tiene). */
 const positionsOf = (layout: Layout | undefined, ids: Iterable<string>): NonNullable<Layout> => {
@@ -319,15 +322,15 @@ const colorsOf = (colors: unknown, ids: Iterable<string>): Record<string, string
  *  que sale: si vuelve en otra posición no calzarían). La tabla o vista sigue
  *  en el modelo y en los demás canvases. Un canvas que no está en la working
  *  copy no se toca (borrar una tabla recorre todos los canvases donde estaba).
- *  Devuelve lo que realmente salió, con sus posiciones y colores — el Undo lo
- *  repone tal cual. */
+ *  Devuelve lo que realmente salió, con sus posiciones, colores y trazos — el
+ *  Undo lo repone tal cual. */
 export const removeFromCanvas = async (
   saId: string, rm: CanvasMembers & { dropRouteIds?: string[]; pins?: Layout }, shownViews?: string[] | null,
 ): Promise<CanvasMembersOut> => {
   const cs = requireWriteCs('Editing a canvas');
   return inOrder(saId, async () => {
     const cur = await fetchEffectiveSa(cs, saId);
-    if (!cur) return { tableIds: [], viewIds: [], layout: {}, colors: {} };
+    if (!cur) return { tableIds: [], viewIds: [], layout: {}, colors: {}, routes: {} };
     const next: SubjectArea = { ...cur, id: saId };
     const gone = new Set<string>();
     const tables = cur.tableIds ?? [];
@@ -358,13 +361,17 @@ export const removeFromCanvas = async (
     if (Object.keys(colors).length) {
       next.colors = Object.fromEntries(Object.entries(cleanColors(cur.colors)).filter(([id]) => !gone.has(id)));
     }
+    const dropped: WireRoutes = {};
     if (rm.dropRouteIds?.length && cur.routes) {
       const routes = cleanRoutes(cur.routes);
-      for (const id of rm.dropRouteIds) if (routeOf(routes, id)) { delete routes[id]; changed = true; }
+      for (const id of rm.dropRouteIds) {
+        const route = routeOf(routes, id);
+        if (route) { dropped[id] = route; delete routes[id]; changed = true; }
+      }
       next.routes = routes;
     }
     if (changed) await saveCanvas(cs, saId, next);
-    return { tableIds: outTables, viewIds: outViews, layout: positionsOf(cur.layout, gone), colors };
+    return { tableIds: outTables, viewIds: outViews, layout: positionsOf(cur.layout, gone), colors, routes: dropped };
   });
 };
 

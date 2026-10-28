@@ -42,7 +42,7 @@ beforeEach(() => {
   vi.mocked(mod.loadDiagram).mockResolvedValue(JSON.parse(JSON.stringify(DIAGRAM)));
   vi.mocked(struct.addToCanvas).mockResolvedValue({ tableIds: [], viewIds: [] });
   // Lo que salió y su color en el canvas: el Undo lo repone.
-  vi.mocked(struct.removeFromCanvas).mockResolvedValue({ tableIds: [], viewIds: [], layout: {}, colors: { v1: '#92D050' } });
+  vi.mocked(struct.removeFromCanvas).mockResolvedValue({ tableIds: [], viewIds: [], layout: {}, colors: { v1: '#92D050' }, routes: {} });
   useModelerStore.setState({ activeSaId: 'sa1', flow: null, diagram: JSON.parse(JSON.stringify(DIAGRAM)), selectedViewId: null, dirty: false });
   useUndoStore.setState({ stack: [], busy: false });
 });

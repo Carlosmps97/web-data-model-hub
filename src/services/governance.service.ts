@@ -110,6 +110,9 @@ export const bulk = {
   // mismo lote (doc completo, como schemas.service.createSchema).
   createSchema: (s: { id: string; name: string; kind: SchemaKind }): BulkChange =>
     ({ collection: 'schemas', entityId: s.id, op: 'upsert', payload: { id: s.id, name: s.name, description: null, kind: s.kind } }),
+  // Rehacer ese pegado, deshecho, repone el esquema con el documento que tenía
+  // (doc completo).
+  upsertSchema: (s: { id: string }): BulkChange => ({ collection: 'schemas', entityId: s.id, op: 'upsert', payload: { ...s } }),
 };
 
 // ── helper público de lectura (siempre publicado): conversión lógico→físico ──

@@ -10,7 +10,7 @@ vi.mock('@/features/modeler/services/structure.service', () => ({
   setWireRoute: vi.fn(async () => ({})),
   arrangeSubjectArea: vi.fn(async () => ({})),
   addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
-  removeFromCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [], layout: {} })),
+  removeFromCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [], layout: {}, colors: {}, routes: {} })),
   setSubjectAreaLayout: vi.fn(async () => ({})),
 }));
 vi.mock('@/features/modeler/lib/arrangeGraph', () => ({
@@ -339,6 +339,7 @@ describe('con la red fallando o lenta', () => {
     open('sa2', diagramB({ r1: R3 }));                                     // B tiene su propio r1
     const [undoWrite] = holdWrites(1);
     const undone = useUndoStore.getState().undoLast().catch((e: Error) => e);
+    await flush();                                                         // el Undo ya escribe (con B abierto)
     open('sa1', diagramWith({ r1: R2 }));                                  // vuelve a A (grabado: R2)
     expect(routes()).toEqual({ r1: R1 });                                  // el Undo en vuelo manda
     undoWrite.reject(new Error('offline'));
@@ -619,13 +620,14 @@ describe('borrar una tabla', () => {
     for (const c of calls) expect([...c[1].dropRouteIds!].sort()).toEqual(['r1', 's1', 'subsym-sym1']);
   });
 
-  it('el Undo repone los trazos solo en el canvas activo', async () => {
+  it('el Undo repone en cada canvas los trazos que salieron de él (no los de la pantalla)', async () => {
+    vi.mocked(struct.removeFromCanvas)
+      .mockResolvedValueOnce({ tableIds: ['t2'], viewIds: [], layout: {}, colors: {}, routes: { r1: R1 } })
+      .mockResolvedValueOnce({ tableIds: ['t2'], viewIds: [], layout: {}, colors: {}, routes: { s1: R3 } });
     await useModelerStore.getState().deleteTable('t2');
     await useUndoStore.getState().undoLast();
     const calls = vi.mocked(struct.addToCanvas).mock.calls;
-    expect(calls.map((c) => [c[0], c[1].tableIds])).toEqual([['sa1', ['t2']], ['sa9', ['t2']]]);
-    expect(calls[0][1].routes).toEqual({ r1: R1 });
-    expect(calls[1][1]).not.toHaveProperty('routes');
+    expect(calls.map((c) => [c[0], c[1].tableIds, c[1].routes])).toEqual([['sa1', ['t2'], { r1: R1 }], ['sa9', ['t2'], { s1: R3 }]]);
   });
 
   it('una tabla sin relaciones se borra sin lista de trazos', async () => {

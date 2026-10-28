@@ -10,7 +10,7 @@ import { pushUndo } from '@/store/useUndoStore';
 import { pasteColumnsToBulk, pastePlan, pastePreImages } from '../lib/pasteColumns';
 import { ALL_COPY, reviewPaste, type PasteColumnItem, type PasteOptions, type PasteStandards, type PasteTarget } from '../lib/pasteReview';
 import { applyNamingCase } from '../lib/physicalCase';
-import { pinnedViewDeps, undoColumnsBatch } from '../lib/pinnedWrites';
+import { columnsBatchStep, pinnedViewDeps } from '../lib/pinnedWrites';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import { invertBulk } from '../lib/undoInvert';
 import { syncNewColumnsToMirrorViews } from '../lib/viewSync';
@@ -134,10 +134,13 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
       await gov.recordChangesBulk(changes);
       // Undo: las columnas pegadas se borran y las del destino que el lote
       // corrió (PK pegadas ⇒ PK primero) vuelven a su ordinal (+ retirar las
-      // pegadas de las vistas espejo, best-effort).
+      // pegadas de las vistas espejo, best-effort). Redo: el mismo lote y las
+      // pegadas otra vez a las vistas espejo, con la misma base.
       const inverse = invertBulk(changes, pastePreImages(targetCols));
-      pushUndo(`Paste ${cols.length} ${cols.length === 1 ? n.member : n.members}`, undoColumnsBatch({
-        inverse, tableId: targetId, created: cols.map((c) => c.physicalName),
+      pushUndo(`Paste ${cols.length} ${cols.length === 1 ? n.member : n.members}`, columnsBatchStep({
+        forward: changes, inverse, tableId: targetId,
+        created: cols.map((c) => ({ physicalName: c.physicalName, isPrimaryKey: c.isPrimaryKey })),
+        baseline: targetCols.map((c) => ({ ...c })),
         after: () => useModelerStore.getState().reload(),
       }), pin);
       // Las columnas pegadas entran también a las vistas espejo del destino:

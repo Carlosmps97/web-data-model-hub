@@ -149,6 +149,8 @@ describe('falsos negativos del análisis', () => {
     expect(check('const f = async () => { await read(); if (!rowPin.holds()) { log(); return; } await gov.updateColumn(c); };')).toEqual([]);
     expect(check('const f = async () => { await read(); if (namePin.current.holds()) void onPatchRef.current(id, v); };')).toEqual([]);
     expect(check('const f = async () => { await read(); undo.check(); await gov.updateColumn(c); };')).toEqual([]);
+    expect(check('const f = async () => { await read(); redo.check(); await gov.updateColumn(c); };')).toEqual([]);
+    expect(check('const f = async () => { await read(); await syncRenamedColumnInViews(pinnedViewDeps(redo), t, a, b); };')).toEqual([]);
     expect(check('const f = async () => { await read(); if (stillEditing(cs)) void struct.setSubjectAreaDrawings(sa, d); };')).toEqual([]);
   });
 
@@ -215,6 +217,8 @@ describe('todos los flujos de escritura verifican el pin', () => {
       .filter((f) => /\.tsx?$/.test(f) && !/\.test\.|testutil/.test(f))
       .map((f) => join(SRC, d, f))),
     join(SRC, 'store/useModelerStore.ts'),
+    // Los pasos del historial que escriben con el pin del Undo/Redo.
+    join(SRC, 'features/modeler/lib/pinnedWrites.ts'),
   ];
   it('hay archivos que revisar (incluida la colocación de lo nuevo de la carga)', () => {
     expect(files.length).toBeGreaterThan(40);

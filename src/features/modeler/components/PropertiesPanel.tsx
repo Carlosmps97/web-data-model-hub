@@ -3,7 +3,7 @@ import { sanitizeLogicalName } from '@/lib/logicalName';
 import { ArrowDownUp, Eye, Pencil, Plus, Table2, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
-import { failureText, inObjectOrder, undoFields, useModelerStore } from '@/store/useModelerStore';
+import { failureText, fieldsStep, inObjectOrder, useModelerStore } from '@/store/useModelerStore';
 import { pushUndo } from '@/store/useUndoStore';
 import AuditHistory from './AuditHistory';
 import UdpAssign from './UdpAssign';
@@ -253,12 +253,13 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       // `updateTable` solo cubre name/schema; un único upsert changeset-aware (merge
       // sobre la tabla actual) cubre además `description`, y luego reload.
       pin.check();   // el físico pudo derivarse con un await
-      await gov.createTable({ ...table, logicalName: logical, physicalName: physical, physicalNameOverridden: plan.overridden, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined });
-      // La inversa restaura solo lo que este Save modificó (sobre lo vigente).
-      pushUndo(`Edit table ${pre.physicalName}`, undoFields('table', tid, {
+      const saved = { logicalName: logical, physicalName: physical, physicalNameOverridden: plan.overridden, schema: form.schema.trim() || undefined, description: form.description.trim() || undefined };
+      await gov.createTable({ ...table, ...saved });
+      // Deshacer y rehacer escriben solo lo que este Save modificó (sobre lo vigente).
+      pushUndo(`Edit table ${pre.physicalName}`, fieldsStep('table', tid, {
         logicalName: pre.logicalName, physicalName: pre.physicalName, physicalNameOverridden: pre.physicalNameOverridden,
         schema: pre.schema, description: pre.description,
-      }, pin, reload), pin);
+      }, saved, reload), pin);
       // El form no se re-siembra en cada reload (solo al cambiar de tabla): se
       // refleja aquí el físico derivado para que el input no quede stale, si
       // sigue abierta esta tabla (el guardado pudo esperar su turno en la fila).
@@ -298,7 +299,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         pin.check();
         if ((cur.description ?? undefined) === next) return;
         await gov.createTable({ ...cur, description: next });
-        pushUndo(`Edit table ${cur.physicalName}`, undoFields('table', cur.id, { description: cur.description }, pin, reload), pin);
+        pushUndo(`Edit table ${cur.physicalName}`, fieldsStep('table', cur.id, { description: cur.description }, { description: next }, reload), pin);
         await reload();
       });
     } catch (e) { await onError(e); }
@@ -314,7 +315,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         pin.check();
         const pre = tablePre(cur);
         await gov.createTable({ ...cur, udpValues: next });
-        pushUndo(`Edit table ${pre.physicalName}`, undoFields('table', cur.id, { udpValues: pre.udpValues }, pin, reload), pin);
+        pushUndo(`Edit table ${pre.physicalName}`, fieldsStep('table', cur.id, { udpValues: pre.udpValues }, { udpValues: next }, reload), pin);
         await reload();
       });
     } catch (e) { await onError(e); }

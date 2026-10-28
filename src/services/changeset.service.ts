@@ -1,6 +1,7 @@
 import { apiGet, apiPut } from '@/services/http';
 
 import { API_BASE } from '@/services/apiBase';
+import { trackDraftWork } from '@/services/draftWork';
 const CS = `${API_BASE}/api/changesets`;
 
 export interface ChangesetDiff { added: string[]; modified: string[]; removed: string[]; }
@@ -26,21 +27,25 @@ export function onDraftWrite(listener: DraftWriteListener): () => void {
   draftWriteListeners.add(listener);
   return () => { draftWriteListeners.delete(listener); };
 }
-const announce = (id: string, changes: readonly BulkChange[], writeSeq?: number) => {
+/** Avisa una escritura en el draft a los observadores de `onDraftWrite`. La
+ *  usan las escrituras de este servicio y las de un endpoint propio que
+ *  devuelve su número (borrar un esquema). */
+export const announceDraftWrite = (id: string, changes: readonly BulkChange[], writeSeq?: number) => {
   for (const listener of draftWriteListeners) {
     try { listener(id, changes, writeSeq); } catch { /* un observador roto no cambia la escritura */ }
   }
 };
 
-export const recordChange = async (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) => {
-  let done: Changeset | undefined;
-  try {
-    done = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
-    return done;
-  } finally {
-    announce(id, [{ collection, entityId, op, payload }], done?.writeSeq);
-  }
-};
+export const recordChange = (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) =>
+  trackDraftWork((async () => {
+    let done: Changeset | undefined;
+    try {
+      done = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
+      return done;
+    } finally {
+      announceDraftWrite(id, [{ collection, entityId, op, payload }], done?.writeSeq);
+    }
+  })());
 /** Procedencia de un alta: la muestra el historial de auditoría
  *  ("Created from …"). Solo la adjuntan paste de tabla/columnas y CTAS. */
 export interface ChangeOrigin {
@@ -61,20 +66,25 @@ export interface BulkChange {
  *  de columnas. Tandas de 1000 (mismo criterio que la carga Erwin), secuenciales
  *  para no saturar el backend; el server valida el lote completo de cada tanda
  *  antes de escribir. Lote vacío = cero requests. */
-export const recordChangesBulk = async (id: string, changes: BulkChange[], chunkSize = 1000): Promise<Changeset | undefined> => {
-  let last: Changeset | undefined;
-  for (let i = 0; i < changes.length; i += chunkSize) {
-    const chunk = changes.slice(i, i + chunkSize);
-    let done: Changeset | undefined;
-    try {
-      done = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes/bulk`, { changes: chunk });
-      last = done;
-    } finally {
-      announce(id, chunk, done?.writeSeq);
+export const recordChangesBulk = (id: string, changes: BulkChange[], chunkSize = 1000): Promise<Changeset | undefined> =>
+  trackDraftWork((async () => {
+    let last: Changeset | undefined;
+    for (let i = 0; i < changes.length; i += chunkSize) {
+      const chunk = changes.slice(i, i + chunkSize);
+      let done: Changeset | undefined;
+      try {
+        done = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes/bulk`, { changes: chunk });
+        last = done;
+      } finally {
+        announceDraftWrite(id, chunk, done?.writeSeq);
+      }
     }
-  }
-  return last;
-};
+    return last;
+  })());
+/** Escrituras grabadas en la versión (`writeSeq`), sin el resto de su cabecera
+ *  (que arma el resumen de todos sus cambios): el Redo lo compara con el que
+ *  dejó su Undo antes de escribir. */
+export const writeSeqOf = (id: string) => apiGet<{ writeSeq: number }>(`${CS}/${encodeURIComponent(id)}/seq`);
 /** Estado efectivo de una colección. `opts.tableId`/`opts.ids` acotan la
  *  respuesta a un slice server-side — sin filtro, canonical_columns a escala
  *  (300k docs) mueve la colección completa por request. `opts.q`/`opts.limit`:

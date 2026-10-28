@@ -34,6 +34,8 @@ vi.mock('@/store/useSessionStore', () => ({ useSessionStore: (pick: (s: unknown)
 vi.mock('@/store/useBusyStore', () => ({ runBlocking: async (_label: string, fn: () => Promise<void>) => fn() }));
 vi.mock('@/components/ui/dialogs', () => ({ confirmDialog: vi.fn(async () => true) }));
 vi.mock('../services/schemas.service', () => svc);
+const { dropRedo } = vi.hoisted(() => ({ dropRedo: vi.fn() }));
+vi.mock('@/store/useUndoStore', () => ({ useUndoStore: { getState: () => ({ dropRedo }) } }));
 const { invalidateTableSchemas } = vi.hoisted(() => ({ invalidateTableSchemas: vi.fn() }));
 vi.mock('../services/schemaPartition', () => ({ invalidateTableSchemas }));
 vi.mock('../lib/sessionGuard', () => ({
@@ -54,7 +56,10 @@ const byTitle = (tree: unknown, title: string): El => {
   return hit;
 };
 
-beforeEach(() => { Object.values(svc).forEach((f) => f.mockClear()); STATE.markDirty.mockClear(); });
+beforeEach(() => {
+  Object.values(svc).forEach((f) => f.mockClear());
+  STATE.markDirty.mockClear(); dropRedo.mockClear(); invalidateTableSchemas.mockClear();
+});
 
 describe('SchemaManagerModal', () => {
   it('el badge muestra el kind guardado: «tables + views» para both', () => {
@@ -111,5 +116,21 @@ describe('SchemaManagerModal', () => {
     await vi.waitFor(() => expect(pushToast).toHaveBeenCalledWith('1 schema change(s) recorded in your version v3'));
     expect(svc.renameSchema).not.toHaveBeenCalled();
     expect(onCloseSpy).not.toHaveBeenCalled();
+  });
+
+  // Renombrar, cambiar el tipo o borrar un esquema graba en la versión por su
+  // propio endpoint (sin aviso de escritura): lo pendiente de rehacer ya no calza.
+  it('aplicar un cambio vacía lo pendiente de rehacer; si no se aplicó nada, no', async () => {
+    resetFake((init, i) => (i === 0 ? [SET_KIND] : init));
+    let tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
+    (byText(tree.props.footer, 'button', 'Save 1 change').props.onClick as () => void)();
+    await vi.waitFor(() => expect(dropRedo).toHaveBeenCalledTimes(1));
+    dropRedo.mockClear();
+    svc.setSchemaKind.mockRejectedValueOnce(new Error('409'));
+    resetFake((init, i) => (i === 0 ? [SET_KIND] : init));
+    tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
+    (byText(tree.props.footer, 'button', 'Save 1 change').props.onClick as () => void)();
+    await vi.waitFor(() => expect(invalidateTableSchemas).toHaveBeenCalled());
+    expect(dropRedo).not.toHaveBeenCalled();
   });
 });

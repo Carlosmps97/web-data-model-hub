@@ -302,7 +302,7 @@ describe('borrar una tabla + Undo', () => {
     vi.mocked(gov.tableUsage).mockImplementation(async () => ({ usage: [{ canvasId: 'sa1' }, { canvasId: 'sa9' }], total: 2 }) as never);
   });
 
-  it('poda en todos los canvases; el Undo repone la tabla en todos y los trazos en el activo', async () => {
+  it('poda en todos los canvases; el Undo repone la tabla y sus trazos en todos', async () => {
     await st().deleteTable('t2');
     expect(draft.sa1.routes).toEqual({ r2: R2 });
     expect(draft.sa9.routes).toEqual({ r2: R4 });
@@ -315,8 +315,8 @@ describe('borrar una tabla + Undo', () => {
     expect(draft.sa1.routes).toEqual({ r1: R1, r2: R2, s1: R3, 'subsym-sym1': R4 });
     expect(draft.sa1.layout.t2).toEqual({ x: 400, y: 0 });
     await expectScreenIsBackend();
-    // documentado: en los demás canvases los trazos no vuelven
-    expect(draft.sa9.routes).toEqual({ r2: R4 });
+    // también en los demás canvases: cada uno recupera los trazos que quitó
+    expect(draft.sa9.routes).toEqual({ r1: R4, r2: R4 });
   });
 });
 

@@ -357,7 +357,7 @@ flowchart TD
   Auth["useAuthStore<br/>status, user, permisos"]
   Session["useSessionStore<br/>actor, proyecto, modo, versión"]
   Modeler["useModelerStore<br/>explorer, canvas, selección"]
-  Undo["useUndoStore<br/>pila de inversas"]
+  Undo["useUndoStore<br/>historial Undo/Redo"]
   Ui["useUiStore<br/>preferencias del chrome"]
   Busy["useBusyStore<br/>overlay bloqueante"]
   Dialogs["dialogs.tsx<br/>cola de diálogos"]
@@ -439,26 +439,41 @@ edición:
 Las acciones de edición escriben por los services conscientes del changeset y luego recargan el diagrama.
 Varias protecciones de concurrencia viven aquí: contadores de secuencia descartan respuestas de diagrama
 o de refresco del Explorer que llegan fuera de orden, cada diagrama queda sellado con la sesión que lo
-cargó, y una suscripción de módulo a `useSessionStore` limpia canvas, selección, popups y la pila de Undo
-cuando cambia la sesión de canvas. Los selectores derivados (`buildProjectTree`, `selectActiveTree`)
+cargó, y una suscripción de módulo a `useSessionStore` limpia canvas, selección, popups y el historial de
+Undo y Redo cuando cambia la sesión de canvas. Los selectores derivados (`buildProjectTree`, `selectActiveTree`)
 arman el árbol anidado del Explorer a partir del estado plano. El funcionamiento detallado está en
 [Flujo de datos](06-flujo-de-datos.md).
 
 ### `useUndoStore`
 
-Pila de Undo de la sesión de edición (`src/store/useUndoStore.ts`), con un tope de 50 entradas y sin
-redo. Cada acción instrumentada apila su inversa como una función que vuelve a llamar a los mismos
-services: deshacer es un cambio más del draft, sin mecánica especial en el backend.
+Historial de la sesión de edición (`src/store/useUndoStore.ts`): Undo y Redo, con un tope de 50 entradas
+en cada pila (`stack` y `redoStack`). Cada acción instrumentada apila un paso (`HistoryStep`) que vuelve a
+llamar a los mismos services y devuelve el paso contrario, armado con lo que acaba de escribir: deshacer y
+rehacer son cambios más del draft, sin mecánica especial en el backend.
 
-- `push(entry)` apila una inversa con el pin de la sesión de su acción; si esa sesión no es la vigente, la
-  descarta.
-- `undoLast()` ejecuta la última inversa con un pin de la sesión actual y corta si la sesión cambia
-  mientras corre. `busy` impide dos Undo simultáneos. Si la inversa falla sin escribir nada
-  (`NothingDoneError`) o por transporte (red o tiempo agotado), vuelve a la pila para reintentarse.
-- `clear({ until })` vacía la pila y la deja cerrada hasta que termine una promesa, en la versión donde se
-  pidió. La usa la carga desde Excel: una inversa previa pisaría lo cargado.
+- `push(entry)` apila el paso de una acción nueva con el pin de la sesión de su acción (si esa sesión no
+  es la vigente, lo descarta) y vacía lo pendiente de rehacer.
+- `undoLast()` corre el último paso con un pin de la sesión actual y deja su contrario en `redoStack`;
+  `redoLast()` hace lo mismo al revés. Antes de tomar la entrada esperan lo que esta pestaña ya mandó a
+  escribir (`draftWorkSettled()` de `src/services/draftWork.ts`: escrituras en vuelo y las filas por canvas
+  y por objeto), así eso no cuenta como parte del paso. Los dos cortan si la sesión cambia mientras
+  corren; `busy` impide dos a la vez y `running` dice cuál corre. Si un paso falla sin escribir nada
+  (`NothingDoneError`) o por transporte (red o tiempo agotado), vuelve a su pila para reintentarse; un
+  Redo no vuelve si la versión cambió mientras corría, si una escritura quedó sin respuesta o si es un
+  paso fresco que alcanzó a escribir.
+- Pasos frescos (`freshStep`: borrados en cascada, entrar o salir del canvas): arman su contrario con lo
+  que leen o escriben al correr. Re-correr uno que falló a mitad parte de un estado a medias y su
+  contrario saldría incompleto: un Redo fresco no se reintenta y un Undo fresco reintentado no deja qué
+  rehacer.
+- Rehacer solo sobre la versión tal como la dejó el Undo: las escrituras del Undo (números consecutivos
+  de `writeSeq`, avisados por `onDraftWrite`) fijan la base, y `redoLast()` lee el contador de la versión
+  (`writeSeqOf`) antes de escribir; si no coincide, vacía lo pendiente y no rehace. Una escritura de esta
+  pestaña fuera del historial, el Schema manager o una recarga que ve escrituras ajenas también lo vacían
+  (`dropRedo`).
+- `clear({ until })` vacía las dos pilas y las deja cerradas hasta que termine una promesa, en la versión
+  donde se pidió. La usa la carga desde Excel: un paso previo pisaría lo cargado.
 
-La pila muere con la sesión de canvas (cambio de proyecto, modo o versión) y con `resetAppState()`.
+El historial muere con la sesión de canvas (cambio de proyecto, modo o versión) y con `resetAppState()`.
 
 ### `useUiStore`
 
@@ -488,7 +503,7 @@ llamó muestra el error.
 
 `src/store/resetAppState.ts` borra en un solo punto todo el estado de trabajo ligado al usuario: la
 sesión de canvas de `useSessionStore`, el workspace de `useModelerStore` (diagrama, árboles, selección,
-dibujos, clipboards), la pila de Undo, la cabecera `X-Dev-User` y las preferencias «no volver a
+dibujos, clipboards), el historial de Undo y Redo, la cabecera `X-Dev-User` y las preferencias «no volver a
 preguntar» de `ConfirmDialog` en `sessionStorage`. Se ejecuta en el logout, ante un `401` y antes de cada
 login. Como el logout es navegación SPA sin recarga y los stores son singletons de módulo, sin este reset
 el siguiente usuario de la pestaña heredaría el canvas y lo copiado por el anterior.

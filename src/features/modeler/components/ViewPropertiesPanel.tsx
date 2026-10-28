@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { ArrowLeft, Eye, GripVertical, Pencil, Trash2, Unlink } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
-import { failureText, inObjectOrder, undoFields, useModelerStore } from '@/store/useModelerStore';
+import { failureText, fieldsStep, inObjectOrder, useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { pushUndo } from '@/store/useUndoStore';
 import * as viewsSvc from '@/services/views.service';
@@ -170,7 +170,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
       const pre = viewPre(cur) as unknown as Record<string, unknown>;
       await viewsSvc.updateView(id, { ...cur, ...patch } as ViewInput);
       // La inversa restaura solo los campos que este guardado modifica (sobre lo vigente).
-      pushUndo(label, undoFields('view', id, Object.fromEntries(keys.map((k) => [k, pre[k]])), pin, reload), pin);
+      pushUndo(label, fieldsStep('view', id, Object.fromEntries(keys.map((k) => [k, pre[k]])), { ...patch }, reload), pin);
       await reload();
       return true;
     });

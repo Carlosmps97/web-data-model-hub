@@ -153,26 +153,26 @@ describe('pila de Undo en los cambios de sesión', () => {
   });
 
   it('editar → solo lectura → editar la misma versión vacía la pila', () => {
-    pushUndo('Delete table T', async () => {});
+    pushUndo('Delete table T', async () => null);
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'readonly', changesetId: 'cs1' });
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs1' });
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
   it('cambiar de modo sobre la misma versión ya la vacía (sin volver a editar)', () => {
-    pushUndo('x', async () => {});
+    pushUndo('x', async () => null);
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'readonly', changesetId: 'cs1' });
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
   it('cambiar de versión la vacía', () => {
-    pushUndo('x', async () => {});
+    pushUndo('x', async () => null);
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs2' });
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 
   it('reabrir la misma sesión (mismo proyecto, modo y versión) no la vacía', () => {
-    pushUndo('x', async () => {});
+    pushUndo('x', async () => null);
     useSessionStore.getState().openModel({ projectId: 'p1', mode: 'editing', changesetId: 'cs1' });
     expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['x']);
   });

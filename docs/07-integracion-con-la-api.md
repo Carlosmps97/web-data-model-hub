@@ -381,6 +381,7 @@ ruta se mantienen en `docs/07-api.md` y `docs/08-seguridad.md` del backend.
 | `recordChangesBulk` | PUT | `/api/changesets/{cs_id}/changes/bulk` | `model.edit` | Registra un lote de cambios; el cliente parte la lista en trozos de 1000. |
 | `effective` | GET | `/api/changesets/{cs_id}/effective/{collection}` | Control común | Estado efectivo de una colección en la versión (producción + overlay del draft); admite `tableId`, `tableIds`, `ids`, `q`, `limit`, `schema`. |
 | `entityHistory` | GET | `/api/changesets/history/{collection}/{entity_id}` | Control común | Historial de una tabla, columna o vista derivado de las versiones publicadas. |
+| `writeSeqOf` | GET | `/api/changesets/{cs_id}/seq` | Control común | Escrituras grabadas en la versión; el Redo lo compara con el que dejó su Undo. |
 
 ### `src/services/versioning.service.ts`
 
@@ -494,7 +495,7 @@ ruta se mantienen en `docs/07-api.md` y `docs/08-seguridad.md` del backend.
 | `setSchemaKind` | POST | `/api/changesets/{cs_id}/schemas/{schema_id}/kind` | `model.edit` | Cambia qué contiene un esquema (`tables`, `views`, `both`). |
 | `schemaImpact` | GET | `/api/changesets/{cs_id}/schemas/{schema_id}/impact` | Control común | Tablas, vistas y canvases que usan un esquema. |
 | `renameSchema` | POST | `/api/changesets/{cs_id}/schemas/{schema_id}/rename` | `model.edit` | Renombra un esquema y propaga el nombre a sus tablas y vistas. |
-| `deleteSchema` | POST | `/api/changesets/{cs_id}/schemas/{schema_id}/delete` | `model.edit` | Elimina un esquema en el draft. |
+| `deleteSchema` | POST | `/api/changesets/{cs_id}/schemas/{schema_id}/delete` | `model.edit` | Elimina un esquema en el draft (el servidor revisa que no se use) y avisa la escritura con el `writeSeq` que devuelve. |
 
 ### `src/features/modeler/services/inspector.service.ts`
 
