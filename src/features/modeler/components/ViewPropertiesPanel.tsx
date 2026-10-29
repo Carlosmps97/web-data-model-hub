@@ -13,6 +13,7 @@ import { generatedViewDdl } from '../lib/viewDdl';
 import { confirmDeleteView } from './deleteConfirm';
 import AuditHistory from './AuditHistory';
 import SchemaSelect from './SchemaSelect';
+import { useModelForm } from './useModelForm';
 import ColorField from './ColorField';
 import UdpAssign from './UdpAssign';
 import ViewEditor from './ViewEditor';
@@ -32,6 +33,9 @@ const mono: React.CSSProperties = {
   background: '#F7F8FA', border: '1px solid #EAEDF2', borderRadius: 8,
   padding: '10px 12px', whiteSpace: 'pre', overflowX: 'auto', color: '#1A2B4A',
 };
+
+/** El formulario de la definición sin vista (todavía no llegó al canvas). */
+const EMPTY_FORM = { name: '', schema: '', description: '' };
 
 /**
  * Panel lateral de propiedades de una vista, con paridad con el panel de tabla:
@@ -64,7 +68,10 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
   const hasSql = !!(view?.customSql ?? '').trim();   // solo informativo
 
   const [tab, setTab] = useState<VTab>('definition');
-  const [form, setForm] = useState({ name: '', schema: '', description: '' });
+  // Se siembra al cambiar de vista; si la vista cambia en la versión (Undo,
+  // Redo, el propio guardado), los campos sin cambios locales toman lo vigente
+  // y lo que se está escribiendo se conserva (useModelForm).
+  const [form, setForm] = useModelForm(view?.id, view ? { name: view.name, schema: view.schema ?? '', description: view.description ?? '' } : null, EMPTY_FORM);
   const [savingDef, setSavingDef] = useState(false);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -85,12 +92,11 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
     }
   }, [diagram, selectedViewId, setSelectedView]);
 
-  // Re-sembrar el estado local al cambiar de vista (o tras reload con rename).
-  // `storedSql` = la SQL guardada que conoce el borrador.
+  // Re-sembrar la SQL y el foco al cambiar de vista. `storedSql` = la SQL
+  // guardada que conoce el borrador.
   const storedSql = useRef('');
   useEffect(() => {
     if (!view) return;
-    setForm({ name: view.name, schema: view.schema ?? '', description: view.description ?? '' });
     storedSql.current = (view.customSql ?? '').trim();
     setSqlDraft(storedSql.current);
     setFocusedIdx(null);

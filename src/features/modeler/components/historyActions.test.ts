@@ -269,6 +269,6 @@ describe('acciones con Undo enteras en historyAction', () => {
 
   it('el panel de columna corre entero su guardado (re-apunta vistas después de updateColumn)', () => {
     const code = readFileSync(join(SRC, 'features/modeler/components/ColumnPropertiesPanel.tsx'), 'utf-8');
-    expect(code).toMatch(/const patchCol = \(id: string, fields: Partial<CanonicalColumn>\) => historyAction\(async \(\) => \{/);
+    expect(code).toMatch(/const patchCol = \(id: string, fields: Partial<CanonicalColumn>, opts\?: ColumnPatchOpts\) => historyAction\(async \(\) => \{/);
   });
 });

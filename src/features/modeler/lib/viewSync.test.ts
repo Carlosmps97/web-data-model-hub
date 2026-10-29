@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CanonicalColumn } from '@/services/governance.service';
 import type { View, ViewSource } from '@/services/views.service';
-import { alignSourcesToPhysical, appendColumnSource, hasProjection, isMirrorOfTable, namesLeavingTable, removeColumnSource, removeColumnsSources, renameColumnSource, restoreColumnsSources, syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews, viewsLeftEmpty } from './viewSync';
+import { alignSourcesToPhysical, appendColumnSource, hasProjection, isMirrorOfTable, namesLeavingTable, removeColumnSource, removeColumnsSources, renameColumnSource, renamedViews, restoreColumnsSources, syncNewColumnToMirrorViews, syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews, viewsLeftEmpty } from './viewSync';
 import { SessionChangedError } from './sessionGuard';
 
 const col = (physicalName: string, ordinal: number): CanonicalColumn => ({
@@ -382,5 +382,21 @@ describe('columnas homónimas', () => {
     expect(deps.listColumns).toHaveBeenCalled();
     views([mirror]);
     expect(await run).toBe(1);
+  });
+});
+
+// El plan del re-apunte al renombrar el físico de una columna, sin escribir (doc
+// 133 §14, P9): lo manda el guardado de la columna en su mismo lote.
+describe('renamedViews', () => {
+  const V = (id: string, cols: string[]) => ({ id, name: id, tableId: 't1', sources: cols.map((column) => ({ tableId: 't1', column })) }) as unknown as View;
+  it('re-apunta del nombre anterior al nuevo, solo en las vistas que lo usan', () => {
+    const out = renamedViews([V('v1', ['A', 'NOMBRE']), V('v2', ['A'])], [], 't1', 'NOMBRE', 'NOMBRE_X');
+    expect(out.map((v) => [v.id, (v.sources ?? []).map((x) => x.column)])).toEqual([['v1', ['A', 'NOMBRE_X']]]);
+  });
+  it('si otra columna de la tabla conserva el nombre (homónima), no toca ninguna', () => {
+    expect(renamedViews([V('v1', ['NOMBRE'])], [{ physicalName: 'NOMBRE' }], 't1', 'NOMBRE', 'NOMBRE_X')).toEqual([]);
+  });
+  it('el mismo nombre (sin distinguir mayúsculas): ninguna', () => {
+    expect(renamedViews([V('v1', ['NOMBRE'])], [], 't1', 'NOMBRE', 'nombre')).toEqual([]);
   });
 });

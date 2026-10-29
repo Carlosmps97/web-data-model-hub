@@ -341,6 +341,49 @@ describe('Redo de altas y cascadas', () => {
     expect(columns.has(id)).toBe(false);
   });
 
+  // P9 (doc 133 §14): renombrar el físico re-apunta las vistas en el mismo lote que
+  // la columna; dos renombres seguidos van en la fila de la columna y la vista
+  // termina en el último nombre (nunca en el intermedio). Deshacerlos, igual.
+  it('dos renombres seguidos del físico dejan la vista en el último nombre; deshacerlos la devuelve', async () => {
+    const lots0 = vi.mocked(gov.recordChangesBulk).mock.calls.length;
+    await Promise.all([st().updateColumn('a', { physicalName: 'NOMBRE_1' }), st().updateColumn('a', { physicalName: 'NOMBRE_2' })]);
+    expect(columns.get('a')?.physicalName).toBe('NOMBRE_2');
+    expect(views.get('v1')?.sources?.map((x) => x.column)).toEqual(['CODCLIENTE', 'NOMBRE_2']);
+    expect(vi.mocked(gov.recordChangesBulk).mock.calls.slice(lots0).map(([ch]) => ch.map((c) => c.collection)))
+      .toEqual([['canonical_columns', 'views'], ['canonical_columns', 'views']]);
+    await undo();
+    await undo();
+    expect(columns.get('a')?.physicalName).toBe('NOMBRE');
+    expect(views.get('v1')?.sources?.map((x) => x.column)).toEqual(['CODCLIENTE', 'NOMBRE']);
+  });
+
+  // El borrado que pide el usuario toca las relaciones del aviso que confirmó (doc
+  // 133 §13, P3): una que usa las columnas y no estaba en él (un Undo la repuso
+  // mientras se leía el aviso, otra versión la publicó) quedaría apuntando a una
+  // columna borrada.
+  it('borrar una columna que usa una relación que no estaba en el aviso: no borra nada y lo dice', async () => {
+    const before = snapshot();
+    await expect(st().deleteColumns(['k'], [])).rejects.toThrow(
+      'Column CODCLIENTE is now used by another relationship: nothing was deleted. Delete it again to choose what happens to that relationship.');
+    expect(snapshot()).toEqual(before);
+    expect(useUndoStore.getState().stack).toEqual([]);
+  });
+
+  it('… con varias columnas, lo mismo', async () => {
+    const before = snapshot();
+    await expect(st().deleteColumns(['k', 'a'], [])).rejects.toThrow(
+      'These 2 columns are now used by another relationship: nothing was deleted. Delete them again to choose what happens to that relationship.');
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('sin relaciones en el aviso igual lee las de la tabla (en paralelo con las demás lecturas) y, si ninguna la usa, borra', async () => {
+    await st().deleteColumns(['a'], []);
+    expect(gov.listRelationships).toHaveBeenCalledWith('t1');
+    expect(columns.has('a')).toBe(false);
+    expect(await undo()).toBe('Delete column NOMBRE');
+    expect(columns.has('a')).toBe(true);
+  });
+
   // Un borrado en cascada relee lo vigente: si se cae a mitad, re-correrlo parte
   // de un estado a medias y su contrario saldría incompleto.
   it('rehacer «Delete table» sin respuesta y sin grabar: nada a medias, el Redo vuelve y el reintento la borra entera', async () => {

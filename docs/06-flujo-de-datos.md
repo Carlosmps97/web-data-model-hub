@@ -470,7 +470,13 @@ Las acciones del store eligen entre un cambio o un lote según cuántas entidade
   viajan en el mismo lote.
 - `updateColumn`: marcar o desmarcar la PK reubica la columna en la frontera del bloque de llave
   (`keyLayoutBulk`) en un solo lote y un solo Undo; cualquier otro cambio es un upsert del documento
-  completo.
+  completo. El documento sale de la columna del canvas abierto; con otro canvas abierto (sin la columna) o
+  con lo que el panel manda al cerrarse (`fromServer`), de la columna vigente de la versión (`columnBase`):
+  si ya no está, no graba (un guardado nunca revive una columna borrada). Sin canvas abierto, solo graba con
+  `fromServer`. El paso de Undo lleva el pin de la edición (`opts.pin`). Un físico nuevo re-apunta las vistas
+  que usaban el nombre anterior en el MISMO lote que la columna (`writeColumn`: un request, todo o nada; si no
+  se pueden leer las vistas, no graba nada): dos renombres seguidos van en la fila de la columna y ninguna
+  vista queda en un nombre intermedio. Deshacer y rehacer, igual. Devuelve cuántas vistas re-apuntó.
 - Relaciones: el popup de mapeo graba columnas y relación en un solo lote.
 - `reorderColumns`: es optimista. Reordena en el store al soltar y persiste solo las columnas cuyo
   `ordinal` cambió, en tandas de 5 (`persistReorder`). Cada escritura lleva el documento vigente de la
@@ -502,7 +508,11 @@ Las acciones del store eligen entre un cambio o un lote según cuántas entidade
   se borra), las columnas y cada vista que las lista, una sola vez y sin ninguna de ellas (`viewWriteDoc`, el
   mismo documento que grabaría `updateView`, a partir del estado efectivo y no de la copia del diagrama).
   Lee las relaciones y las vistas de la tabla una vez y las FK de la otra punta una vez por tabla hija, en
-  paralelo: borrar N columnas cuesta lo mismo que borrar una. Se graba todo o nada: si una de esas vistas no
+  paralelo: borrar N columnas cuesta lo mismo que borrar una. El borrado que pide el usuario y rehacerlo tocan
+  solo las relaciones elegidas: si otra usa ahora esas columnas (otra versión la publicó, o un Undo la repuso
+  mientras se leía el aviso), no borra nada y avisa «Column X is now used by another relationship: nothing was
+  deleted. Delete it again to choose what happens to that relationship.» (al rehacer, «Couldn't redo: …»).
+  Deshacer «Add column» no la mira. Se graba todo o nada: si una de esas vistas no
   valida, las columnas siguen; un lote de más de 2000 cambios (el tope del backend por request) se rechaza
   antes de escribir. Su Undo, también en un lote, repone columnas, FK y relaciones y vuelve a poner cada
   columna en esas vistas, en su posición, sobre su documento vigente (`restoreColumnsSources`, en orden
@@ -657,7 +667,7 @@ del draft: el versionado y el diff ven upserts y deletes normales, sin mecánica
 | Apilado | Cada acción instrumentada llama a `pushUndo(label, run, pin)` con el pin con que empezó: si la sesión cambió mientras la acción corría, el paso no entra en la pila de la sesión nueva. Una acción nueva vacía lo pendiente de rehacer. Mientras corre un paso, lo que se apila se ignora y lo pendiente de rehacer se vacía. |
 | Ida y vuelta | `undoLast()` corre el paso y deja su contrario en `redoStack`; `redoLast()` corre ese y deja el suyo en `stack`, con el mismo label. Los borrados en cascada (`deleteTable`, `deleteColumns`, `deleteView`) entregan su inversa con `onUndo`: rehacerlos los recalcula con lo vigente. |
 | Base del Redo | Las escrituras del Undo (números `writeSeq` consecutivos, avisados por `onDraftWrite`) fijan la base. Antes de escribir, `redoLast()` lee el contador (`writeSeqOf`, `GET /api/changesets/{cs_id}/seq`): si no es la base, vacía lo pendiente y avisa «This version changed after the undo: there's nothing to redo.». Un hueco en las escrituras del paso también deja sin Redo. |
-| Lo que ya se estaba grabando | `undoLast()` y `redoLast()`, con la pantalla ya en espera, mandan lo agendado tras una espera (`flushPendingWrites()`: campos 400 ms y nombres de la columna, dibujos 500 ms, flechas sobre un punto de wire 600 ms, el selector de color 700 ms) y esperan antes de tomar la entrada todo el trabajo en vuelo (`draftWorkSettled()`: las escrituras de `changeset.service`, las filas por canvas `inOrder` y por objeto `inObjectOrder`, y las acciones con Undo enteras, `historyAction`). Lo que empezó antes de pulsar es lo que se deshace; lo que no tiene Undo propio cancela lo pendiente de rehacer. Los guardados de una misma columna van en fila y cada uno suma lo que grabaron los anteriores de la fila (`_columnWrites`): dos campos grabados a la vez no se pisan. |
+| Lo que ya se estaba grabando | `undoLast()` y `redoLast()`, con la pantalla ya en espera, mandan lo agendado tras una espera (`flushPendingWrites()`: campos 400 ms y nombres de la columna, dibujos 500 ms, flechas sobre un punto de wire 600 ms, el selector de color 700 ms) y esperan antes de tomar la entrada todo el trabajo en vuelo (`draftWorkSettled()`: las escrituras de `changeset.service`, las filas por canvas `inOrder` y por objeto `inObjectOrder`, y las acciones con Undo enteras, `historyAction`). Lo que empezó antes de pulsar es lo que se deshace; lo que no tiene Undo propio cancela lo pendiente de rehacer. Los guardados de una misma columna van en fila y cada uno suma lo que grabaron los anteriores de la fila (`_columnWrites`): dos campos grabados a la vez no se pisan. Cerrar el panel de columna (o cambiar de columna o de canvas) también manda ya lo agendado, con el pin de la edición. |
 | Disparo | Botones **Undo** y **Redo** de la Toolbar; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z y Ctrl/Cmd+Y en el canvas. Al terminar se muestra «Undid: <label>» / «Redid: <label>». |
 | Concurrencia | `busy` impide dos pasos a la vez. Mientras corre, `lib/historyWait.ts` se queda con el teclado y el puntero (captura en `window` con `stopImmediatePropagation`; pasan los atajos del navegador y lo que dispara el código), el menú contextual de columna se cierra y, con un botón apretado, Undo y Redo no corren; `HistoryOverlay` muestra el aviso a los 300 ms sin tomar el puntero. Send for Approval, descartar lo borrado por otra versión y la carga Excel no empiezan mientras corre un paso (avisan que se intente al terminar). |
 | Pila cerrada | `clear({ until })` vacía las dos pilas y las deja cerradas para la versión actual hasta que la promesa termine. Lo usa la carga desde Excel mientras aplica. |

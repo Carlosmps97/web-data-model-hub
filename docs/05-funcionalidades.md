@@ -441,17 +441,28 @@ El área derecha muestra un panel a la vez, según la selección (`useModelerSto
 Borrar una tabla pide confirmación (`deleteConfirm.tsx`) y la quita de todos los canvases donde está;
 **Remove from this canvas** solo la saca del canvas abierto.
 
+El formulario de Definition se siembra con la tabla (`useModelForm`) y, si la tabla cambia en la versión (un
+Undo o Redo, el propio guardado), cada campo sin cambios locales toma lo vigente; lo que se está escribiendo se
+conserva. Así, tras deshacer lo tipeado el formulario muestra lo vigente y salir del campo no lo vuelve a grabar.
+
 ### Properties de columna (`ColumnPropertiesPanel.tsx`)
 
 Ocupa el lugar del panel de tabla mientras hay una columna seleccionada. Pestañas **Definition**,
 **Data Type** (dominio, tipos lógico y físico, overrides de tipo), **UDPs** y **Metadata** (con
 History).
 
+Lo tipeado (nombres, definiciones, tipos) se graba tras una pausa de 400 ms y también al cambiar de columna,
+cerrar el panel o abrir otro canvas: lo pendiente sale sobre la columna vigente de la versión (si ya no está, no
+se graba) y su paso de Undo queda en el canvas donde se tipeó. **Delete column…** lee las relaciones que usan la
+columna; si mientras las lee corre un Undo o un Redo, las vuelve a leer al terminar el paso (o cancela el borrado
+si el paso se llevó la columna).
+
 ### Properties de vista (`ViewPropertiesPanel.tsx`)
 
 Se abre con un clic en el bloque de la vista. Pestañas **Definition**, **Columns** (reorden por
 arrastre y detalle por columna), **Sources** (fuentes y acceso al editor completo), **Query SQL** (DDL
-generado y la User-Defined SQL informativa), **UDP** y **Metadata** (con History).
+generado y la User-Defined SQL informativa), **UDP** y **Metadata** (con History). El formulario de
+Definition sigue la misma regla que el de la tabla.
 
 ### Model properties (`ModelPropertiesModal.tsx`)
 

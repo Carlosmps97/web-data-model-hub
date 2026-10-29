@@ -141,7 +141,7 @@ describe('defensa: con un diagrama de otra sesión en pantalla se avisa, no se c
 
   it('sin diagrama en pantalla (recién limpiado), nada que editar: se calla', async () => {
     openCs2();
-    await expect(st().updateColumn('c1', { description: 'x' })).resolves.toBeUndefined();
+    await expect(st().updateColumn('c1', { description: 'x' })).resolves.toBeNull();
     await expect(st().saveAll()).resolves.toBeUndefined();
     await st().saveNodePositions({ t1: { x: 5, y: 5 } });
     expect(toast.error).not.toHaveBeenCalled();

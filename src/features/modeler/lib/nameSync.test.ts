@@ -334,20 +334,53 @@ describe('createNameSync — lo agendado ante un Undo', () => {
     expect(hasPendingWrites()).toBe(false);
   });
 
-  it('al cerrar el panel con el físico en vuelo, sigue agendado: su commit sale 400 ms después de llegar, como antes', async () => {
+  it('al cerrar el panel con el físico en vuelo, su commit sale apenas llega; hasta entonces es trabajo en vuelo', async () => {
     const h = harness();
     h.sync.setLogical('cliente');
     await vi.advanceTimersByTimeAsync(400);          // ya pidió el físico
     h.sync.dispose();
-    expect(hasPendingWrites()).toBe(true);
+    const settled = settledFlag();
+    await flush();
+    expect(settled.done).toBe(false);
     h.calls[0].d.resolve({ physical: 'CLIENTE' });
-    await flush(); await flush();
-    // Con la columna recién borrada, su recarga llega antes: el guardado no la revive.
-    expect(h.onCommit).not.toHaveBeenCalled();
-    expect(hasPendingWrites()).toBe(true);
-    await vi.advanceTimersByTimeAsync(400);
+    await draftWorkSettled();
     expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
     expect(hasPendingWrites()).toBe(false);
+    vi.advanceTimersByTime(800);
+    expect(h.onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('al cerrar el panel antes de 400 ms de tipear el lógico, pide el físico ya y manda el commit apenas llega', async () => {
+    const h = harness();
+    h.sync.setLogical('cliente');
+    h.sync.dispose();
+    expect(h.calls.map((c) => c.logical)).toEqual(['cliente']);
+    h.calls[0].d.resolve({ physical: 'CLIENTE' });
+    await draftWorkSettled();
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
+    expect(hasPendingWrites()).toBe(false);
+    vi.advanceTimersByTime(800);
+    expect(h.physicalize).toHaveBeenCalledTimes(1);
+    expect(h.onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('al cerrar el panel con el commit agendado (el físico ya llegó o se tipeó), lo manda en el acto', async () => {
+    const h = harness();
+    h.sync.setLogical('cliente');
+    await vi.advanceTimersByTimeAsync(400);
+    h.calls[0].d.resolve({ physical: 'CLIENTE' });
+    await flush(); await flush();                    // llegó: commit agendado a 400 ms
+    expect(h.onCommit).not.toHaveBeenCalled();
+    h.sync.dispose();
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
+    expect(hasPendingWrites()).toBe(false);
+    const k = harness();
+    k.sync.setPhysical('X_CLI');
+    k.sync.dispose();
+    expect(k.onCommit).toHaveBeenCalledWith({ logicalName: '', physicalName: 'X_CLI', physicalNameOverridden: true });
+    vi.advanceTimersByTime(800);
+    expect(h.onCommit).toHaveBeenCalledTimes(1);
+    expect(k.onCommit).toHaveBeenCalledTimes(1);
   });
 
   it('… y un Undo en ese lapso lo manda ya y lo espera', async () => {
@@ -386,16 +419,37 @@ describe('createNameSync — lo agendado ante un Undo', () => {
     expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
   });
 
-  it('reset y dispose sueltan lo agendado sin mandarlo', () => {
+  it('reset suelta lo agendado sin mandarlo', () => {
     const h = harness();
     h.sync.setPhysical('CLI');
     h.sync.reset('otra', 'OTRA');
     expect(hasPendingWrites()).toBe(false);
-    h.sync.setLogical('cli');
-    h.sync.dispose();
-    expect(hasPendingWrites()).toBe(false);
     flushPendingWrites();
     expect(h.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('cerrar el panel sin nada tipeado no manda nada', () => {
+    const h = harness();
+    h.sync.reset('cliente', 'CLIENTE');
+    h.sync.dispose();
+    expect(h.physicalize).not.toHaveBeenCalled();
+    expect(h.onCommit).not.toHaveBeenCalled();
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('idle: sin nada agendado ni en vuelo', async () => {
+    const h = harness();
+    h.sync.reset('cliente', 'CLIENTE');
+    expect(h.sync.idle()).toBe(true);
+    h.sync.setLogical('cuenta');
+    expect(h.sync.idle()).toBe(false);               // el físico por pedir
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.sync.idle()).toBe(false);               // en vuelo
+    h.calls[0].d.resolve({ physical: 'CUENTA' });
+    await flush(); await flush();
+    expect(h.sync.idle()).toBe(false);               // el commit agendado
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.sync.idle()).toBe(true);
   });
 
   it('sin nada tipeado no cuenta como agendado', () => {

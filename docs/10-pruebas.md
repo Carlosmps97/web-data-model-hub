@@ -240,6 +240,18 @@ candado). Los arneses que ya simulaban aparte el lote del modelo y la escritura 
 envío único con `lotTo` (`canvasLot.testutil.ts`, que lo reparte con el mismo estado final), y los que
 mockean `structure.service` entero, con `canvasLotStub`; lo atómico lo prueban los archivos dedicados.
 
+Los paneles de propiedades se prueban con los hooks de mentira (`fakeReact.testutil.ts`): `useModelForm.test.ts` y
+`modelForm.test.ts` (el formulario de tabla y de vista se siembra en el mismo render y sigue a la versión sin pisar
+lo que se escribe), `columnPanelClose.test.ts` (lo pendiente del panel de columna sale al desmontarse, con
+`fromServer` y el pin de la edición; el cuerpo toma los nombres vigentes si no hay nada tipeado) y
+`columnPanelWrites.test.ts` (el contenedor del panel: re-apuntar vistas desde lo grabado y releer el impacto de
+«Delete column…» si corre un Undo o un Redo). `inspectorColumnWrites.test.ts` monta el inspector de tabla y fija que
+dos guardados de una misma columna pedidos con la misma ficha no se pisan (van en fila y leen la ficha vigente).
+`useModelerStore.columnBase.test.ts` fija la base de `updateColumn` (canvas abierto, otro canvas, sin canvas, columna
+borrada, llave fuera del canvas, pin de la edición). El renombre atómico (columna y vistas en un lote) lo fijan
+`pinnedWrites.test.ts` (`writeColumn`, `columnStep`), `viewSync.test.ts` (`renamedViews`) y, con dos renombres
+seguidos, `useModelerStore.redoCascades.test.ts`, `columnBase` e `inspectorColumnWrites.test.ts`.
+
 ## Permisos y Admin
 
 Las reglas de acceso que la interfaz replica del backend se prueban como lógica pura o con el servicio y

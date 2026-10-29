@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { sanitizeLogicalName } from '@/lib/logicalName';
 import { toast } from 'sonner';
 import { ArrowLeft, Crosshair, Eye, KeyRound, Link as LinkIcon, MapPin, Search, Table2, Trash2 } from 'lucide-react';
 import Dialog from '@/components/ui/Dialog';
 import Icon from '@/components/ui/Icon';
-import { useModelerStore, type InspectTarget } from '@/store/useModelerStore';
+import { inObjectOrder, useModelerStore, type InspectTarget } from '@/store/useModelerStore';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import { historyAction, pushUndo, type HistoryStep } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
@@ -22,15 +22,14 @@ import { facetEditable, type TableField } from '../lib/facetEditable';
 import { inspectorRefreshPlan } from '../lib/inspectorRefresh';
 import { keyLayoutBulk } from '../lib/keyLayout';
 import { tableNamePlan } from '../lib/nameSync';
-import { bestEffort, columnStep, lotStep, pinned, pinnedViewDeps } from '../lib/pinnedWrites';
+import { columnBase, columnStep, lotStep, pinned, writeColumn } from '../lib/pinnedWrites';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
-import { syncRenamedColumnInViews } from '../lib/viewSync';
 import {
   cardinalityLabel, facetName, facetOnly, facetType, linkRole, otherFacet, ownColumns,
   positionIn, primaryCanvas, tableDeleteImpact, usagePath,
 } from '../lib/inspectorModel';
 import AuditHistory from './AuditHistory';
-import { ColumnPropsBody, type ColTab } from './ColumnPropertiesPanel';
+import { ColumnPropsBody, type ColTab, type ColumnPatchOpts } from './ColumnPropertiesPanel';
 import { confirmDeleteColumn, confirmDeleteTable, confirmDeleteView } from './deleteConfirm';
 import { busyMessage, holdTable, readEmptiedViews } from './deleteFlows';
 import SchemaSelect from './SchemaSelect';
@@ -226,6 +225,10 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   // Arranca en la faceta del canvas activo (o física sin canvas); no toca el canvas.
   const [facet, setFacet] = useState<Facet>(activeSaId ? canvasFacet : 'physical');
   const [data, setData] = useState<InspectTableResult | null>(null);
+  // La ficha también en una ref: los guardados de una columna corren en fila y
+  // cada uno arma su documento con la vigente cuando le toca (la que dejó el
+  // refresco del anterior), no con la del render en que se pidió.
+  const dataRef = useRef<InspectTableResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<TTab>(target.colId ? 'columns' : 'definition');
   const [selCol, setSelCol] = useState<string | null>(target.colId ?? null);
@@ -244,6 +247,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     inspectTable(target.id)
       .then((d) => {
         if (!alive) return;
+        dataRef.current = d;
         setData(d);
         // Se siembra solo al cargar: un refresco tras guardar no pisa lo que se está escribiendo.
         setForm({ logicalName: d.table.logicalName, physicalName: d.table.physicalName, schema: d.table.schema ?? '', description: d.table.description ?? '' });
@@ -270,7 +274,11 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
 
   // ── Refresco: el dossier siempre; el canvas si lo contiene, si no, el
   // Explorer solo ante cambios estructurales, nunca ambos. ──
-  const refresh = async () => { setData(await inspectTable(target.id)); };
+  const refresh = async () => {
+    const d = await inspectTable(target.id);
+    dataRef.current = d;
+    setData(d);
+  };
   const afterEdit = async (structural: boolean) => {
     markDirty();
     await refresh();
@@ -384,44 +392,44 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   };
 
   // ── Columna: mismo upsert changeset-aware que el sidebar ──
-  const patchColumn = (id: string, fields: Partial<CanonicalColumn>) => historyAction(async () => {
-    const c = data?.columns.find((x) => x.id === id);
-    if (!c) return;
-    const pin = pinSession();
+  // En fila por columna, como `updateColumn` del store: lo que el cuerpo de la
+  // columna manda al desmontarse (nombres, definición, tipos) sale a la vez y
+  // cada guardado lee su base cuando le toca (la ficha vigente, `dataRef`). Lo
+  // que llega ya desmontado va sobre la vigente de la versión y con el pin de la
+  // edición (`ColumnPatchOpts`).
+  const patchColumn = (id: string, fields: Partial<CanonicalColumn>, opts?: ColumnPatchOpts) => historyAction(async () => {
+    const pin = opts?.pin ?? pinSession();
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save the column")));
-    // Entrar o salir de la llave la reubica en la frontera del bloque de PK:
-    // ella y las que se corren viajan en un solo lote, con un solo Undo.
-    if (fields.isPrimaryKey !== undefined && !!fields.isPrimaryKey !== !!c.isPrimaryKey) {
-      try {
-        const { changes, pres } = keyLayoutBulk(data!.columns, { [id]: fields });
-        await gov.recordChangesBulk(changes);
-        pushUndo(`Edit column ${c.physicalName}`, lotStep(pres.map((p) => gov.bulk.createColumn(p)), changes, () => afterEdit(true)), pin);
-        await afterEdit(true);
-      } catch (e) { await onError(e); }
-      return;
-    }
-    const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
-    const renamed = typeof fields.physicalName === 'string' && fields.physicalName !== c.physicalName;
-    const structural = renamed || (typeof fields.logicalName === 'string' && fields.logicalName !== c.logicalName);
-    try {
-      const post = { ...c, ...fields };
-      await gov.updateColumn(post);   // upsert por id = update (merge)
-      // Deshacer y rehacer por valor. Si el cambio renombró el físico, las
-      // vistas apuntan al nombre nuevo: deshacer las devuelve al anterior y
-      // rehacer, otra vez al nuevo (best-effort; solo mientras siga la sesión
-      // del paso).
-      pushUndo(`Edit column ${pre.physicalName}`,
-        columnStep(pre, { ...post, ...(post.udpValues ? { udpValues: { ...post.udpValues } } : {}) }, () => afterEdit(structural)), pin);
-      if (renamed) {
-        // Un rename físico re-apunta las vistas que referencian el nombre anterior
-        // (mismo sync del sidebar); la vista se ajusta a mano si hiciera falta.
-        await bestEffort(async () => {
-          const n = await syncRenamedColumnInViews(pinnedViewDeps(pin), c.tableId, c.physicalName, fields.physicalName as string);
-          if (n) toast.success(`Rename also applied to ${n} view(s)`);
-        });
+    await inObjectOrder(id, async () => {
+      if (!pin.holds()) return;
+      const c = await columnBase(id, dataRef.current?.columns.find((x) => x.id === id), opts?.fromServer)
+        .catch(async (e) => { await onError(e); return undefined; });
+      if (!c || !pin.holds()) return;
+      // Entrar o salir de la llave la reubica en la frontera del bloque de PK:
+      // ella y las que se corren viajan en un solo lote, con un solo Undo.
+      if (fields.isPrimaryKey !== undefined && !!fields.isPrimaryKey !== !!c.isPrimaryKey) {
+        try {
+          const { changes, pres } = keyLayoutBulk(dataRef.current!.columns, { [id]: fields });
+          await gov.recordChangesBulk(changes);
+          pushUndo(`Edit column ${c.physicalName}`, lotStep(pres.map((p) => gov.bulk.createColumn(p)), changes, () => afterEdit(true)), pin);
+          await afterEdit(true);
+        } catch (e) { await onError(e); }
+        return;
       }
-      await afterEdit(structural);
-    } catch (e) { await onError(e); }
+      const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
+      const renamed = typeof fields.physicalName === 'string' && fields.physicalName !== c.physicalName;
+      const structural = renamed || (typeof fields.logicalName === 'string' && fields.logicalName !== c.logicalName);
+      try {
+        const post = { ...c, ...fields };
+        // Un rename físico re-apunta en el mismo lote las vistas que usaban el
+        // nombre anterior (`writeColumn`, todo o nada); deshacer y rehacer, igual.
+        const views = await writeColumn(post, c.physicalName, pin);
+        pushUndo(`Edit column ${pre.physicalName}`,
+          columnStep(pre, { ...post, ...(post.udpValues ? { udpValues: { ...post.udpValues } } : {}) }, () => afterEdit(structural)), pin);
+        if (views) toast.success(`Rename also applied to ${views} view(s)`);
+        await afterEdit(structural);
+      } catch (e) { await onError(e); }
+    });
   });
   /** Impacto global + cascada versionada del store; la columna viaja desde el
    *  dossier (sin canvas no está en el diagrama). */
@@ -477,7 +485,9 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     const pin = pinSession();   // tandas de escrituras de una misma sesión
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't reorder")));
     // Optimista: el inspector reordena ya; la persistencia corre detrás.
-    setData((d) => d && ({ ...d, columns: d.columns.map((c) => { const s = plan.find((p) => p.c.id === c.id); return s ? { ...c, ordinal: s.idx } : c; }) }));
+    const moved = dataRef.current && { ...dataRef.current, columns: dataRef.current.columns.map((c) => { const s = plan.find((p) => p.c.id === c.id); return s ? { ...c, ordinal: s.idx } : c; }) };
+    dataRef.current = moved;
+    setData(moved);
     try {
       await persistReorder(plan, (c, idx) => pinned(pin, gov.updateColumn)({ ...c, ordinal: idx }));
       // Deshacer repone cada columna movida (por valor); rehacer, su ordinal nuevo.
@@ -769,7 +779,7 @@ const COL_TABS: { id: ColTab; label: string }[] = [
 function ColumnDetail({ col, cols, table, facet, std, canEdit, domains, udpDefs, domainName, onBack, onPatch, onDelete }: {
   col: CanonicalColumn; cols: CanonicalColumn[]; table: CanonicalTable; facet: Facet; std: Standards | null; canEdit: boolean;
   domains: ParentDomain[]; udpDefs: UdpDefinition[]; domainName: string; onBack: () => void;
-  onPatch: (id: string, fields: Partial<CanonicalColumn>) => Promise<void>;
+  onPatch: (id: string, fields: Partial<CanonicalColumn>, opts?: ColumnPatchOpts) => Promise<void>;
   onDelete: () => void;
 }) {
   const position = positionIn(cols, col.id);

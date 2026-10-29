@@ -286,21 +286,30 @@ export async function syncRemovedColumnFromViews(
   return touched;
 }
 
-/** Columna renombrada (físico): re-apunta los sources de toda vista que la
- *  referenciaba por el nombre anterior, salvo que otra columna de la tabla lo
- *  conserve (esas fuentes son de ella). Devuelve cuántas vistas se tocaron. */
+/** Columna renombrada (físico): las vistas que la referenciaban por el nombre
+ *  anterior, con sus sources re-apuntados al nuevo; ninguna si otra columna de la
+ *  tabla (`remaining`, sin la renombrada; null = no se sabe) conserva ese nombre
+ *  (esas fuentes son de ella). Pura: el lote de la columna las graba junto con
+ *  ella (`writeColumn`). */
+export function renamedViews(
+  views: View[], remaining: { physicalName: string }[] | null, tableId: string, oldPhysical: string, newPhysical: string,
+): View[] {
+  if (norm(oldPhysical) === norm(newPhysical)) return [];
+  if (remaining && !namesLeavingTable([oldPhysical], remaining).length) return [];
+  return views.flatMap((v) => {
+    const next = renameColumnSource(v, tableId, oldPhysical, newPhysical);
+    return next ? [{ ...v, sources: next }] : [];
+  });
+}
+
+/** Columna renombrada (físico), ya grabada: re-apunta cada vista de
+ *  `renamedViews`, una por una. Devuelve cuántas vistas se tocaron. */
 export async function syncRenamedColumnInViews(
   deps: SyncDeps, tableId: string, oldPhysical: string, newPhysical: string, opts?: HeldOpts,
 ): Promise<number> {
   if (norm(oldPhysical) === norm(newPhysical)) return 0;
   const [cols, views] = await readForSync(deps, tableId, opts);
-  if (cols && !namesLeavingTable([oldPhysical], cols).length) return 0;
-  let touched = 0;
-  for (const v of views) {
-    const next = renameColumnSource(v, tableId, oldPhysical, newPhysical);
-    if (!next) continue;
-    await deps.updateView(v.id, { ...v, sources: next });
-    touched += 1;
-  }
-  return touched;
+  const moved = renamedViews(views, cols, tableId, oldPhysical, newPhysical);
+  for (const v of moved) await deps.updateView(v.id, v);
+  return moved.length;
 }

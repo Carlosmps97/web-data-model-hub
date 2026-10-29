@@ -10,6 +10,7 @@ vi.mock('@/services/changeset.service', async (orig) =>
   (await import('@/store/draftLedger.testutil')).withDraftLedger(await orig()));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), message: vi.fn(), warning: vi.fn() } }));
 vi.mock('../features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
+vi.mock('@/services/views.service', async (orig) => ({ ...(await orig<object>()), listViews: vi.fn(async () => []) }));
 vi.mock('@/services/governance.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/governance.service')>();
   return { ...actual, updateColumn: vi.fn(), recordChangesBulk: vi.fn() };

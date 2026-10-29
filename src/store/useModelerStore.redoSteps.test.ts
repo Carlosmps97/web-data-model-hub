@@ -21,7 +21,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
     currentTable: vi.fn(), listColumns: vi.fn(),
   };
 });
-vi.mock('@/services/views.service', () => ({ listViews: vi.fn(), updateView: vi.fn(), currentView: vi.fn() }));
+vi.mock('@/services/views.service', () => ({ listViews: vi.fn(), updateView: vi.fn(), currentView: vi.fn(), viewWriteDoc: (id: string, body: object) => ({ ...body, id }) }));
 
 import * as struct from '../features/modeler/services/structure.service';
 import { arrangeDiagram } from '../features/modeler/lib/arrangeGraph';
@@ -158,17 +158,26 @@ describe('Redo de acciones simétricas', () => {
     expect(useModelerStore.getState().canvasRoutes).toEqual({});
   });
 
-  it('editar una columna con rename: rehacer la renombra otra vez y re-apunta las vistas', async () => {
+  it('editar una columna con rename: la vista se re-apunta en el mismo lote; deshacer y rehacer, igual', async () => {
     setDiagram([col('a', 0), col('k', 1)]);
     vi.mocked(gov.listColumns).mockImplementation(async () => [col('k', 1)]);   // ninguna homónima conserva el nombre
+    const lots: gov.BulkChange[][] = [];
+    vi.mocked(gov.recordChangesBulk).mockImplementation(async (changes) => {
+      lots.push(changes);
+      for (const ch of changes) if (ch.collection === 'views') views.set(ch.entityId, { ...(ch.payload as unknown as View), id: ch.entityId });
+      draftLedger.write(CS);
+      return {} as never;
+    });
+    const colOf = (lot: gov.BulkChange[]) => lot.find((ch) => ch.collection === 'canonical_columns')!.payload;
     await st()().updateColumn('a', { physicalName: 'A2', description: 'nueva' });
-    views.set('v1', { ...views.get('v1')!, sources: [{ column: 'A2', tableId: 't1' }] });   // el panel re-apuntó la vista
+    expect(views.get('v1')!.sources?.map((x) => x.column)).toEqual(['A2']);
     await undo();
-    expect(vi.mocked(gov.updateColumn).mock.calls.at(-1)![0]).toMatchObject({ id: 'a', physicalName: 'A' });
+    expect(colOf(lots.at(-1)!)).toMatchObject({ id: 'a', physicalName: 'A' });
     expect(views.get('v1')!.sources?.map((x) => x.column)).toEqual(['A']);
     await redo();
-    expect(vi.mocked(gov.updateColumn).mock.calls.at(-1)![0]).toMatchObject({ id: 'a', physicalName: 'A2', description: 'nueva', ordinal: 0 });
+    expect(colOf(lots.at(-1)!)).toMatchObject({ id: 'a', physicalName: 'A2', description: 'nueva', ordinal: 0 });
     expect(views.get('v1')!.sources?.map((x) => x.column)).toEqual(['A2']);
+    expect(lots.map((lot) => lot.map((ch) => ch.collection))).toEqual(Array(3).fill(['canonical_columns', 'views']));
     expect(await undo()).toBe('Edit column A');
   });
 

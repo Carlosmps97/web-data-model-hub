@@ -21,6 +21,7 @@ import { ColumnRow } from './ColumnEditor';
 import { tableNamePlan } from '../lib/nameSync';
 import { facetEditable } from '../lib/facetEditable';
 import SchemaSelect from './SchemaSelect';
+import { useModelForm } from './useModelForm';
 import ColorField from './ColorField';
 import ViewEditor from './ViewEditor';
 import * as viewsSvc from '@/services/views.service';
@@ -45,6 +46,9 @@ const TABS: { id: Tab; label: string }[] = [
 const CARD_LBL: Record<gov.Cardinality, string> = {
   one: '1', 'one-only': '1', 'zero-one': '0..1', many: 'N', 'one-many': '1..N', 'zero-many': '0..N',
 };
+
+/** El formulario de la definición sin tabla (todavía no llegó al canvas). */
+const EMPTY_FORM = { logicalName: '', physicalName: '', schema: '', description: '' };
 
 /**
  * Panel lateral de propiedades: header con glyph navy + "schema X · table",
@@ -107,20 +111,23 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   useEffect(() => { if (tab === 'views' && viewMode !== 'physical') setTab('definition'); }, [tab, viewMode]);
 
   // ── Definition: form local de la tabla ──
-  const [form, setForm] = useState({ logicalName: '', physicalName: '', schema: '', description: '' });
+  // Se siembra al cambiar de tabla; si la tabla cambia en la versión (Undo,
+  // Redo, el propio guardado), los campos sin cambios locales toman lo vigente
+  // y lo que se está escribiendo se conserva (useModelForm).
+  const [form, setForm] = useModelForm(table?.id, table
+    ? { logicalName: table.logicalName, physicalName: table.physicalName, schema: table.schema ?? '', description: table.description ?? '' }
+    : null, EMPTY_FORM);
   // Intención sobre el físico en esta sesión de edición: true (lo escribió),
   // false (lo vació / botón derive), null (no lo tocó → manda el flag
   // persistido de la tabla). Ver tableNamePlan.
   const [physTouched, setPhysTouched] = useState<boolean | null>(null);
   const [savingDef, setSavingDef] = useState(false);
+  // Con la tabla ELEGIDA (como el formulario): si la tabla sale del canvas y
+  // vuelve, lo escrito y la intención sobre el físico siguen juntos.
   useEffect(() => {
-    if (table) setForm({ logicalName: table.logicalName, physicalName: table.physicalName, schema: table.schema ?? '', description: table.description ?? '' });
     setPhysTouched(null);
     setColQuery('');   // el buscador de columnas no arrastra el filtro a otra tabla
-    // Se re-siembra solo al cambiar de tabla: con deps por identidad, cualquier
-    // reload del diagrama (guardar un UDP, blur de la definición) pisaría lo que
-    // el usuario tiene a medio escribir en este form.
-  }, [table?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedTableId]);
 
   // ── DnD reorder (HTML5 nativo) ──
   const [dragId, setDragId] = useState<string | null>(null);
@@ -260,9 +267,9 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         logicalName: pre.logicalName, physicalName: pre.physicalName, physicalNameOverridden: pre.physicalNameOverridden,
         schema: pre.schema, description: pre.description,
       }, saved, reload), pin);
-      // El form no se re-siembra en cada reload (solo al cambiar de tabla): se
-      // refleja aquí el físico derivado para que el input no quede stale, si
-      // sigue abierta esta tabla (el guardado pudo esperar su turno en la fila).
+      // Lo grabado puede no ser lo escrito (el físico derivado, o vaciado para
+      // re-derivarlo): se refleja aquí, si sigue abierta esta tabla (el
+      // guardado pudo esperar su turno en la fila).
       if (useModelerStore.getState().selectedTableId === tid) {
         setForm((f) => ({ ...f, logicalName: logical, physicalName: physical }));
         setPhysTouched(null);

@@ -4,7 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { useModelerStore } from '@/store/useModelerStore';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
-import { historyAction, useUndoStore } from '@/store/useUndoStore';
+import { historyAction, useUndoStore, whenHistoryIdle } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable, ParentDomain } from '@/services/governance.service';
 import { isComplexTypeStart } from '../lib/complexTypes';
@@ -16,8 +16,7 @@ import { orderColumns } from '../lib/columnOrder';
 import { pkInKeyOrder } from '../lib/keyOrder';
 import { createNameSync, type NameSync } from '../lib/nameSync';
 import { applyNamingCase } from '../lib/physicalCase';
-import { syncRenamedColumnInViews } from '../lib/viewSync';
-import { bestEffort, pinnedDebouncer, pinnedViewDeps } from '../lib/pinnedWrites';
+import { pinnedDebouncer } from '../lib/pinnedWrites';
 import { pinSession, reportWriteError, type SessionPin } from '../lib/sessionGuard';
 import AuditHistory from './AuditHistory';
 import { domainOptions } from './ColumnEditor';
@@ -66,7 +65,6 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   const setPanelFocusCol = useModelerStore((s) => s.setPanelFocusCol);
   const updateColumn = useModelerStore((s) => s.updateColumn);
   const deleteColumn = useModelerStore((s) => s.deleteColumn);
-  const reload = useModelerStore((s) => s.reload);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   // Faceta activa (switch Logical/Physical del canvas) → UDPs y rótulos.
@@ -128,23 +126,13 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   if (!col || !table) return null;
 
   // Upsert changeset-aware: un cambio de PK lo re-ubica el store y un rename
-  // físico re-apunta las vistas que referencian el nombre anterior.
-  // Va con la sesión donde empezó (el re-apunte de vistas, tras el upsert, se
-  // corta si la sesión es otra) y su fallo espera la revalidación.
-  const patchCol = (id: string, fields: Partial<CanonicalColumn>) => historyAction(async () => {
-    const before = cols.find((c) => c.id === id);
-    const pin = pinSession();
+  // físico re-apunta, en el mismo lote, las vistas que usaban el nombre anterior.
+  // Su fallo espera la revalidación.
+  const patchCol = (id: string, fields: Partial<CanonicalColumn>, opts?: ColumnPatchOpts) => historyAction(async () => {
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the column", 'err'));
     try {
-      await updateColumn(id, fields);
-      const renamedTo = fields.physicalName;
-      if (before && renamedTo && renamedTo !== before.physicalName) {
-        // La vista se corrige a mano si hiciera falta (best-effort).
-        await bestEffort(async () => {
-          const n = await syncRenamedColumnInViews(pinnedViewDeps(pin), before.tableId, before.physicalName, renamedTo);
-          if (n) { pushToast(`Rename also applied to ${n} view(s)`); void reload(); }
-        });
-      }
+      const done = await updateColumn(id, fields, opts);
+      if (done?.views) pushToast(`Rename also applied to ${done.views} view(s)`);
     } catch (e) { await onError(e); }
   });
 
@@ -155,7 +143,6 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
     // columnas de esta misma tabla.
     const hold = holdTable(col.tableId);
     if (!hold) { pushToast(busyMessage(facetNouns(viewMode))); return; }
-    const name = col.physicalName;
     const noun = facetNouns(viewMode).member;
     // El borrado es de la sesión donde se pidió: si mientras se lee el impacto
     // se abre otra versión, el confirm no se abre en ella, y la acción verifica
@@ -168,21 +155,39 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
     // `relIds` vacío quedarían relaciones con pares hacia una columna borrada.
     const onImpactError = reportWriteError(() => pushToast(`Couldn't check the relationships of this ${noun}: nothing was deleted. Try again.`, 'err'));
     try {
-      // Las vistas que quedarían sin columnas se leen junto con el impacto.
-      const emptied = readEmptiedViews(col.tableId, [col]);
       let impact: gov.RelationshipImpact;
-      try { impact = await gov.columnImpact(col.id); } catch (e) { await onImpactError(e); return; }
-      const emptiedViews = await emptied;
+      let emptiedViews: string[] | null;
+      let cur = col;   // la columna vigente: un paso pudo renombrarla
+      // Si mientras se lee corrió (o corre) un Undo o un Redo, el aviso puede no
+      // tener las relaciones vigentes: al terminar el paso se vuelve a leer (hasta
+      // tres veces; el store igual rechaza el borrado si otra relación usa la
+      // columna). Si el paso se la llevó (o ya no es la elegida), el borrado se
+      // cancela, como en el menú del canvas.
+      for (let round = 1; ; round += 1) {
+        const steps = useUndoStore.getState().steps;
+        // Las vistas que quedarían sin columnas se leen junto con el impacto.
+        const emptied = readEmptiedViews(cur.tableId, [cur]);
+        try { impact = await gov.columnImpact(cur.id); } catch (e) { await onImpactError(e); return; }
+        emptiedViews = await emptied;
+        const undo = useUndoStore.getState();
+        if (!undo.busy && undo.steps === steps) break;
+        await new Promise<void>((done) => { whenHistoryIdle(done); });
+        const st = useModelerStore.getState();
+        const now = st.selectedColumnId === col.id ? st.diagram?.columns.find((c) => c.id === col.id) : undefined;
+        if (!now) return;
+        cur = now;
+        if (round === 3) break;
+      }
       if (!pin.holds()) return;
       const relIds = impact.relationships.map((r) => r.relId);
       // Diálogo compartido con el Object Inspector. Cascade: el
       // changeset registra el delete de la columna y de cada relación
       // afectada; el store cierra este panel al terminar.
       const ok = await confirmDeleteColumn({
-        name, nouns: facetNouns(viewMode), impact, emptiedViews,
+        name: cur.physicalName, nouns: facetNouns(viewMode), impact, emptiedViews,
         // La columna viaja al store: si al confirmar ya no está dibujada (el
         // canvas se recargó o se cerró), la cascada se resuelve igual.
-        action: () => { pin.check(); return deleteColumn(col.id, relIds, { col }); },
+        action: () => { pin.check(); return deleteColumn(cur.id, relIds, { col: cur }); },
       });
       if (ok) pushToast(impact.total > 0 ? `${facetNouns(viewMode).Member} and its relationships deleted` : `${facetNouns(viewMode).Member} deleted`);
     } catch (e) { await onError(e); }
@@ -253,6 +258,11 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   );
 }
 
+/** Lo que el cuerpo del panel manda ya desmontado (cambió la columna o el
+ *  canvas, o se cerró): se graba sobre la columna vigente de la versión —si ya
+ *  no está, no se graba— y con el pin de cuando se editó (su sesión y su canvas). */
+export interface ColumnPatchOpts { fromServer: true; pin: SessionPin }
+
 /**
  * Cuerpo del panel (montado por columna vía `key`). Todas las pestañas
  * comparten esta instancia: cambiar de pestaña no pierde un tipeo en vuelo.
@@ -273,7 +283,8 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   /** Faceta activa del canvas (UDPs de Attribute vs Column). */
   view: Facet;
   canEdit: boolean;
-  onPatch: (id: string, fields: Partial<CanonicalColumn>) => Promise<void>;
+  /** `opts`: lo que sale con el cuerpo ya desmontado (`ColumnPatchOpts`). */
+  onPatch: (id: string, fields: Partial<CanonicalColumn>, opts?: ColumnPatchOpts) => Promise<void>;
   onDelete: () => void;
   /** Hint de la faceta de solo lectura (default: el del canvas). */
   switchHint?: Record<Facet, string>;
@@ -314,6 +325,16 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   // Pin de la última edición de nombres: el commit de nameSync (tras
   // physicalize y su debounce) escribe solo si sigue esa sesión.
   const namePin = useRef<SessionPin>(pinSession());
+  // Desmontado (ver el efecto de abajo), lo pendiente sale con `ColumnPatchOpts`.
+  const closed = useRef(false);
+  const late = (pin: SessionPin): ColumnPatchOpts | undefined => (closed.current ? { fromServer: true, pin } : undefined);
+  // Guardados de nombres de este cuerpo todavía en camino (escritura y recarga):
+  // mientras tanto, la recarga de uno anterior no es «la versión cambió».
+  const namesInFlight = useRef(0);
+  const sendNames = (fields: Partial<CanonicalColumn>, opts: ColumnPatchOpts | undefined) => {
+    namesInFlight.current += 1;
+    return onPatchRef.current(col.id, fields, opts).finally(() => { namesInFlight.current -= 1; });
+  };
   const sync = useRef<NameSync | null>(null);
   if (!sync.current) {
     sync.current = createNameSync({
@@ -321,7 +342,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
       normalizePhysical: (v) => applyNamingCase(v, columnCaseRef.current),
       onState: (s) => { setLogical(s.logical); setPhysical(s.physical); },
       // col.id es estable por instancia (el cuerpo se monta con key=col.id).
-      onCommit: (fields) => { if (namePin.current.holds()) void onPatchRef.current(col.id, fields); },
+      onCommit: (fields) => { if (namePin.current.holds()) void sendNames(fields, late(namePin.current)); },
     });
     // Re-siembra el override persistido: sin esto, tras recargar, renombrar el
     // lógico re-derivaría y pisaría el físico custom en el draft.
@@ -333,15 +354,30 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
   // lo de la sesión anterior se descarta, no cae en la nueva.
   const deferred = useRef<ReturnType<typeof pinnedDebouncer<Partial<CanonicalColumn>>> | null>(null);
   if (!deferred.current) {
-    deferred.current = pinnedDebouncer((fields: Partial<CanonicalColumn>) => onPatchRef.current(col.id, fields), 400);
+    deferred.current = pinnedDebouncer((fields: Partial<CanonicalColumn>, pin: SessionPin) => onPatchRef.current(col.id, fields, late(pin)), 400);
   }
   const debounced = (key: string, fields: Partial<CanonicalColumn>) => deferred.current?.schedule(key, fields);
-  useEffect(() => () => {
-    // Flush: cerrar el panel o cambiar de columna dentro de la
-    // ventana del debounce no pierde lo tipeado (description/dataType).
-    deferred.current?.flush();
-    sync.current?.dispose();
+  useEffect(() => {
+    closed.current = false;   // el desmontaje de prueba de StrictMode vuelve a montar
+    return () => {
+      // Cerrar el panel, cambiar de columna o de canvas dentro de la ventana del
+      // debounce no pierde lo tipeado (definiciones, tipos y nombres).
+      closed.current = true;
+      deferred.current?.flush();
+      sync.current?.dispose();
+    };
   }, []);
+
+  // Si los nombres cambian en la versión sin nada tipeado ni guardado propio en
+  // camino (llega lo que se grabó al cerrar el panel, si se vuelve enseguida a la
+  // columna), los campos toman lo vigente: un commit posterior no repone los
+  // nombres viejos.
+  useEffect(() => {
+    if (namesInFlight.current > 0 || !sync.current?.idle()) return;
+    sync.current.reset(col.logicalName, col.physicalName, col.physicalNameOverridden ?? false);
+    setLogical(col.logicalName);
+    setPhysical(col.physicalName);
+  }, [col.logicalName, col.physicalName, col.physicalNameOverridden]);
 
   const onLogical = (v: string) => { namePin.current = pinSession(); sync.current?.setLogical(sanitizeLogicalName(v)); };
   const onPhysical = (v: string) => { namePin.current = pinSession(); sync.current?.setPhysical(v); };
@@ -460,7 +496,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
       // Si mientras se derivaba el físico (o con el popup abierto) se abrió otra
       // versión, la elección no corresponde a esta: no se escribe.
       if (!pin.holds()) return;
-      await onPatch(col.id, fields);
+      await (fields.logicalName !== undefined ? sendNames(fields, late(pin)) : onPatch(col.id, fields, late(pin)));
     } finally { setTypeBusy(false); }
   });
   const confirmInherit = async (picked: DomainUdpOfferItem[]) => {

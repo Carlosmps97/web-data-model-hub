@@ -37,7 +37,7 @@ import { canvasClock, wholePoint, writtenSince } from '@/features/modeler/lib/ca
 import {
   afterRevalidation, isVersionError, pinSession, setCanvasSource, stillAskedSession, touchesVersion, type SessionPin,
 } from '@/features/modeler/lib/sessionGuard';
-import { columnStep, lotStep, pinnedViewDeps } from '@/features/modeler/lib/pinnedWrites';
+import { columnBase, columnStep, lotStep, pinnedViewDeps, writeColumn } from '@/features/modeler/lib/pinnedWrites';
 import {
   cleanRoute, cleanRoutes, pruneRoutes, routableWireIds, routeOf, sameRoute, wireIdsOfTable,
 } from '@/features/modeler/lib/wireRoute';
@@ -433,8 +433,15 @@ interface ModelerState {
    *  table», rehacer «Delete table»). */
   deleteTable: (tableId: string, opts?: { pre?: CanonicalTable; onUndo?: (step: HistoryStep) => void }) => Promise<void>;
   updateTable: (id: string, fields: { logicalName?: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
-  /** Upsert de una columna en el changeset (merge sobre la columna actual del diagrama) + reload. */
-  updateColumn: (colId: string, fields: Partial<CanonicalColumn>) => Promise<void>;
+  /** Upsert de una columna en el changeset (merge sobre la columna actual del
+   *  diagrama) + reload. Con otro canvas abierto (sin la columna), o con
+   *  `opts.fromServer` (lo que manda el panel al cerrarse), sobre su documento
+   *  vigente en la versión; si ya no está, no graba. Sin canvas abierto, solo con
+   *  `opts.fromServer`. `opts.pin`: la sesión y el canvas de cuando se editó
+   *  (sin él, los de ahora). Un físico nuevo re-apunta en el mismo lote las vistas
+   *  que usaban el anterior (`writeColumn`). Devuelve cuántas vistas re-apuntó
+   *  (null si no grabó). */
+  updateColumn: (colId: string, fields: Partial<CanonicalColumn>, opts?: { fromServer?: boolean; pin?: SessionPin }) => Promise<{ views: number } | null>;
   /** Reordena las columnas de una tabla al orden de ids recibido (el único
    *  orden, `ordinal`, el mismo en lógico y físico) y persiste solo las que
    *  se movieron. */
@@ -451,8 +458,9 @@ interface ModelerState {
    *  columnas y cada vista que las lista; un solo Undo. `opts.cols` = las que
    *  no están en el diagrama (estado efectivo). Con `opts.onUndo`, entrega su
    *  inversa en vez de apilarla (deshacer «Add column», rehacer el borrado).
-   *  Con `opts.exact` (rehacer el borrado), las relaciones a tocar son solo
-   *  `relIds`: si otra usa ahora alguna de las columnas, no borra nada. */
+   *  El borrado que pide el usuario (sin `opts.onUndo`) y rehacerlo
+   *  (`opts.exact`) tocan solo las relaciones de `relIds`: si otra usa ahora
+   *  alguna de las columnas, no borra nada. */
   deleteColumns: (colIds: string[], relIds?: string[], opts?: { cols?: CanonicalColumn[]; onUndo?: (step: HistoryStep) => void; exact?: boolean }) => Promise<void>;
   setViewMode: (m: 'logical' | 'physical') => void;
   createSubjectArea: (name: string) => Promise<void>;
@@ -2953,30 +2961,38 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     await gov.createTable({ ...t, ...fields }); // upsert por id = update
     await get().reload();
   },
-  updateColumn: (colId, fields) => {
-    // De la sesión donde se pidió. En fila con los demás guardados de la columna
-    // (escritura y recarga): cada uno arma su documento con la columna del
-    // diagrama más lo que cambiaron los anteriores de la fila (`_columnWrites`),
-    // así un nombre y una descripción grabados a la vez no se pisan aunque una
-    // recarga quede reemplazada por otra.
-    const pin = pinSession();
+  updateColumn: (colId, fields, opts) => {
+    // De la sesión donde se pidió (o se editó: `opts.pin`). En fila con los demás
+    // guardados de la columna (escritura y recarga): cada uno arma su documento
+    // con la columna del diagrama más lo que cambiaron los anteriores de la fila
+    // (`_columnWrites`), así un nombre y una descripción grabados a la vez no se
+    // pisan aunque una recarga quede reemplazada por otra.
+    const pin = opts?.pin ?? pinSession();
     const key = `${useSessionStore.getState().activeChangesetId ?? ''}:${colId}`;
     const open = _columnWrites.get(key) ?? { fields: {}, count: 0 };
     _columnWrites.set(key, open);
     open.count += 1;
     return historyAction(async () => {
       try {
-        await inObjectOrder(colId, async () => {
-          if (!pin.holds()) return;
+        return await inObjectOrder(colId, async () => {
+          if (!pin.holds()) return null;
           const dia = editableDiagram();   // el canvas de esta sesión
+          // Sin canvas abierto (p. ej. lo cerró un reload fallido), nada que
+          // editar, salvo lo que el panel manda al cerrarse.
+          if (!dia && !opts?.fromServer) return null;
           const shown = dia?.columns.find((x) => x.id === colId);
-          if (!dia || !shown) return;
-          const c = { ...shown, ...open.fields };
+          // Con otro canvas abierto (se editó en otro), o lo que el panel manda
+          // al cerrarse: la vigente de la versión (`columnBase`).
+          const base = await columnBase(colId, shown, opts?.fromServer);
+          if (!base || !pin.holds()) return null;
+          const c = { ...base, ...open.fields };
           get().markDirty();
           // Entrar o salir de la llave re-ubica la columna en la frontera del bloque
           // de PK — ella y las que se corren viajan en un solo lote, con un solo Undo.
           if (fields.isPrimaryKey !== undefined && !!fields.isPrimaryKey !== !!c.isPrimaryKey) {
-            const mine = dia.columns.filter((x) => x.tableId === c.tableId).map((x) => (x.id === colId ? c : x));
+            const siblings = dia && shown ? dia.columns.filter((x) => x.tableId === c.tableId) : await gov.listColumns(c.tableId);
+            if (!pin.holds()) return null;
+            const mine = siblings.map((x) => (x.id === colId ? c : x));
             const { changes, pres } = keyLayoutBulk(mine, { [colId]: fields });
             await gov.recordChangesBulk(changes);
             // Lo que cambió esta escritura: los campos y el lugar en el bloque de PK
@@ -2984,21 +3000,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
             const ordinal = changes.find((ch) => ch.entityId === colId)?.payload?.ordinal;
             Object.assign(open.fields, fields, typeof ordinal === 'number' ? { ordinal } : {});
             pushUndo(`Edit column ${c.physicalName}`, lotStep(pres.map((p) => gov.bulk.createColumn(p)), changes, () => get().reload()), pin);
-            await get().reload();
-            return;
+            if (shown) await get().reload();
+            return { views: 0 };
           }
           // Pre-imagen por valor para el Undo.
           const pre = { ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) };
           const post = { ...c, ...fields };
-          await gov.updateColumn(post); // upsert por id = update (merge)
+          // Un físico nuevo re-apunta en el mismo lote las vistas que usaban el
+          // anterior (todo o nada; en la fila, dos renombres quedan en orden).
+          const views = await writeColumn(post, c.physicalName, pin);
           Object.assign(open.fields, fields);
-          // Undo y Redo por valor. Si el cambio renombró el físico, las vistas
-          // quedaron re-apuntadas al nombre nuevo (sync del panel): deshacer las
-          // devuelve al original y rehacer, otra vez al nuevo.
+          // Undo y Redo por valor, también con sus vistas en un solo lote.
           pushUndo(`Edit column ${pre.physicalName}`,
             columnStep(pre, { ...post, ...(post.udpValues ? { udpValues: { ...post.udpValues } } : {}) }, () => get().reload()), pin);
-          // Dentro de la fila: quien pidió el guardado ve lo grabado al terminar.
-          await get().reload();
+          // Dentro de la fila: quien pidió el guardado ve lo grabado al terminar
+          // (el canvas abierto, si la muestra).
+          if (shown) await get().reload();
+          return { views };
         });
       } finally {
         open.count -= 1;
@@ -3162,13 +3180,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
      *  recortó o re-apuntó (un impacto viejo) no se toca. Sin la tabla no hay
      *  relaciones leídas: van todas. */
     let fix = rels;
+    // El borrado que pide el usuario (no un paso del historial) y rehacer el
+    // borrado tocan solo las relaciones que se eligieron: se leen las de la tabla
+    // para ver si otra usa estas columnas.
+    const checked = !!opts?.exact || !opts?.onUndo;
     try {
       let views: View[];
       let tableCols: CanonicalColumn[];
       // Las columnas vigentes de la tabla, del servidor (el diagrama puede ir
       // atrasado), en paralelo con las demás lecturas.
       [pool, views, tableCols] = await Promise.all([
-        (rels.length || opts?.exact) && tableId ? gov.listRelationships(tableId) : Promise.resolve([] as gov.Relationship[]),
+        (rels.length || checked) && tableId ? gov.listRelationships(tableId) : Promise.resolve([] as gov.Relationship[]),
         tableId ? viewsSvc.listViews(tableId) : Promise.resolve([] as View[]),
         tableId ? gov.listColumns(tableId) : Promise.resolve([] as CanonicalColumn[]),
       ]);
@@ -3219,13 +3241,17 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     } catch (e) {
       throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(ids.length === 1 ? `this ${nouns.member}` : `these ${nouns.members}`));
     }
-    // Rehacer el borrado toca solo las relaciones de su impacto: una que ahora
-    // usa estas columnas quedaría colgando. Borrarlas de nuevo muestra el impacto.
-    if (opts?.exact && pool.some((r) => !rels.includes(r.id) && r.pairs.some(touches))) {
+    // Una relación que ahora usa estas columnas y no se eligió (otra versión la
+    // publicó, o un Undo la repuso mientras se leía el aviso) quedaría apuntando
+    // a una columna borrada: no se borra nada. Borrarlas de nuevo muestra el
+    // impacto. Deshacer «Add column» no mira (como antes).
+    if (checked && pool.some((r) => !rels.includes(r.id) && r.pairs.some(touches))) {
       const one = cols.length === 1;
-      const what = one ? `${nouns.member} ${facetName(cols[0], get().viewMode)}` : `these ${cols.length} ${nouns.members}`;
-      throw new Error(`Couldn't redo: ${what} ${one ? 'is' : 'are'} now used by another relationship. `
-        + `Delete ${one ? 'it' : 'them'} again to choose what happens to that relationship.`);
+      const name = one ? facetName(cols[0], get().viewMode) : '';
+      const again = `Delete ${one ? 'it' : 'them'} again to choose what happens to that relationship.`;
+      throw new Error(opts?.exact
+        ? `Couldn't redo: ${one ? `${nouns.member} ${name} is` : `these ${cols.length} ${nouns.members} are`} now used by another relationship. ${again}`
+        : `${one ? `${nouns.Member} ${name} is` : `These ${cols.length} ${nouns.members} are`} now used by another relationship: nothing was deleted. ${again}`);
     }
     pin.check();
     // Pre-imágenes para el Undo: columnas y relaciones afectadas (por valor).

@@ -8,10 +8,11 @@
 import { pendingWrite } from '@/services/draftWork';
 import * as gov from '@/services/governance.service';
 import type { BulkChange, CanonicalColumn, Relationship } from '@/services/governance.service';
-import type { HistoryStep } from '@/store/useUndoStore';
+import { NothingDoneError, type HistoryStep } from '@/store/useUndoStore';
+import { useSessionStore } from '@/store/useSessionStore';
 import * as viewsSvc from '@/services/views.service';
-import { SessionChangedError, pinSession, type SessionPin } from './sessionGuard';
-import { syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from './viewSync';
+import { SessionChangedError, afterRevalidation, pinSession, touchesVersion, type SessionPin } from './sessionGuard';
+import { renamedViews, syncNewColumnsToMirrorViews, syncRemovedColumnFromViews, syncRenamedColumnInViews } from './viewSync';
 
 /** `fn` que, antes de escribir, verifica que siga la sesión del pin. */
 export const pinned = <A extends unknown[], R>(pin: SessionPin, fn: (...a: A) => R) =>
@@ -69,15 +70,57 @@ export function relationshipTypeStep(back: BulkChange[], rel: Relationship, keys
   return undo;
 }
 
-/** Paso de una columna por valor: graba `write` y, si su físico no es el de
- *  `back`, re-apunta las vistas de ese nombre al nuevo (best-effort, con el pin
- *  del paso); devuelve el paso que graba `back`. */
+/** La base de un guardado de columna: la que se ve (`shown`: en el diagrama o en
+ *  la ficha del Object Inspector) o, sin ella o con `fromServer` (lo que el panel
+ *  manda al cerrarse), la vigente de la versión. undefined si ya no está: no se
+ *  graba (un guardado no revive una columna borrada). */
+export async function columnBase(id: string, shown: CanonicalColumn | undefined, fromServer?: boolean): Promise<CanonicalColumn | undefined> {
+  return shown && !fromServer ? shown : (await gov.currentColumns([id]))[0];
+}
+
+/** Graba una columna. Si su físico cambia (de `fromPhysical` al de `write`), las
+ *  vistas que usaban el nombre anterior —el que la columna tiene hoy en la
+ *  versión: un guardado sin respuesta pudo grabarse— se re-apuntan en el MISMO
+ *  lote (`renamedViews`): un solo request, todo o nada, así dos renombres seguidos
+ *  (en la fila de la columna) nunca dejan una vista en el nombre intermedio. Si no
+ *  se pueden leer las vistas, no graba nada (`NothingDoneError`: se puede
+ *  reintentar); corta antes de escribir si la sesión del pin es otra. Devuelve
+ *  cuántas vistas re-apuntó. */
+export async function writeColumn(write: CanonicalColumn, fromPhysical: string, pin: SessionPin): Promise<number> {
+  const same = write.physicalName.trim().toLowerCase() === fromPhysical.trim().toLowerCase();
+  let moved: ReturnType<typeof renamedViews> = [];
+  if (!same) {
+    const cs = useSessionStore.getState().activeChangesetId;
+    try {
+      const [views, cols] = await Promise.all([viewsSvc.listViews(write.tableId), gov.listColumns(write.tableId).catch(() => null)]);
+      const from = cols?.find((c) => c.id === write.id)?.physicalName ?? fromPhysical;
+      moved = renamedViews(views, cols && cols.filter((c) => c.id !== write.id), write.tableId, from, write.physicalName);
+    } catch (e) {
+      // Como las demás lecturas previas: un error de la versión espera la
+      // revalidación y, si la sesión ya es otra, sale tal cual (quien lo pidió
+      // calla); si no, no se grabó nada y se puede reintentar.
+      if (touchesVersion(e, cs)) await afterRevalidation();
+      if (!pin.holds()) throw e;
+      const reason = `Couldn't read the views that use ${fromPhysical}`;
+      throw new NothingDoneError(reason, `${reason}: nothing was saved. Try again.`);
+    }
+  }
+  pin.check();
+  if (!moved.length) {
+    await gov.updateColumn(write);   // upsert por id = update (merge)
+    return 0;
+  }
+  const lot = [gov.bulk.updateColumn(write), ...moved.map((v) => gov.bulk.upsertView(viewsSvc.viewWriteDoc(v.id, v)))];
+  await gov.recordChangesBulk(lot, lot.length);   // un solo request: todo o nada
+  return moved.length;
+}
+
+/** Paso de una columna por valor: graba `write` con sus vistas re-apuntadas desde
+ *  el físico de `back` (`writeColumn`, un solo lote) y devuelve el paso que graba
+ *  `back`. */
 export function columnStep(write: CanonicalColumn, back: CanonicalColumn, after: () => Promise<unknown>): HistoryStep {
   return async (pin) => {
-    await gov.updateColumn(write);
-    if (write.physicalName !== back.physicalName) {
-      await bestEffort(() => syncRenamedColumnInViews(pinnedViewDeps(pin), write.tableId, back.physicalName, write.physicalName));
-    }
+    await writeColumn(write, back.physicalName, pin);
     await after();
     return columnStep(back, write, after);
   };
@@ -132,8 +175,9 @@ export function columnsBatchStep(o: {
  *  `flush` al cerrar el panel o al pulsar Undo o Redo). Cada una va con el pin
  *  tomado al editar: si al dispararse la sesión es otra (al cambiar de versión
  *  el panel se cierra y hace flush), se descarta. Nunca se escribe en la
- *  versión que se abrió después (si la cambia la revalidación, ella ya avisa). */
-export function pinnedDebouncer<T>(write: (value: T) => unknown, ms: number) {
+ *  versión que se abrió después (si la cambia la revalidación, ella ya avisa).
+ *  `write` recibe ese pin: su canvas es el de la edición. */
+export function pinnedDebouncer<T>(write: (value: T, pin: SessionPin) => unknown, ms: number) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const pending = new Map<string, { value: T; pin: SessionPin }>();
   // Lo pendiente cuenta para Undo y Redo, que lo escriben ya.
@@ -143,7 +187,7 @@ export function pinnedDebouncer<T>(write: (value: T) => unknown, ms: number) {
     const p = pending.get(key);
     pending.delete(key); timers.delete(key);
     settle();
-    if (p && p.pin.holds()) void write(p.value);
+    if (p && p.pin.holds()) void write(p.value, p.pin);
   };
   const api = {
     /** Agenda (o re-agenda) la escritura de `key` con la sesión vigente. */

@@ -30,13 +30,14 @@ describe('el panel de columna avisa el motivo del borrado fallido', () => {
   });
 });
 
-// El panel de columna pasa la columna al store, como el Inspector: si al
-// confirmar ya no está dibujada (el canvas se recargó o se cerró), la cascada
-// (relaciones recortadas, FK, vistas, Undo) se resuelve igual.
+// El panel de columna pasa la columna al store (la vigente, si un paso la
+// renombró mientras se leía el impacto), como el Inspector: si al confirmar ya no
+// está dibujada (el canvas se recargó o se cerró), la cascada (relaciones
+// recortadas, FK, vistas, Undo) se resuelve igual.
 describe('el panel de columna pasa la columna al store', () => {
   it('ColumnPropertiesPanel.removeCol', () => {
     const body = /const removeCol = async \(\) => \{([\s\S]*?)\n {2}\};/.exec(code('ColumnPropertiesPanel.tsx'))?.[1] ?? '';
-    expect(body).toMatch(/deleteColumn\(col\.id, relIds, \{ col \}\)/);
+    expect(body).toMatch(/deleteColumn\(cur\.id, relIds, \{ col: cur \}\)/);
   });
 });
 

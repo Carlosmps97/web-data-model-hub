@@ -19,9 +19,9 @@
  * al lógico recién editado.
  *
  * Lo tipeado sin grabar cuenta como escritura agendada: Undo y Redo lo graban ya
- * (doc 133 §5). El commit agendado sale en el acto; si falta el físico derivado,
- * se pide ya y el commit sale apenas llega, y mientras tanto es trabajo en
- * vuelo (el Undo lo espera).
+ * (doc 133 §5), y también cerrar el panel. El commit agendado sale en el acto; si
+ * falta el físico derivado, se pide ya y el commit sale apenas llega, y mientras
+ * tanto es trabajo en vuelo (el Undo lo espera).
  */
 import { pendingWrite, trackDraftWork } from '@/services/draftWork';
 
@@ -49,9 +49,11 @@ export interface NameSync {
   /** Re-deriva el físico a partir del lógico (glosario) y apaga el
    *  override: el «rayo» del panel de atributo, par del de tabla. */
   derive(): void;
-  /** Se cierra el panel: lo agendado por tiempo se descarta y el físico ya
-   *  pedido se graba como siempre, 400 ms después de llegar. */
+  /** Se cierra el panel: lo agendado sale ya; el físico que falta se pide ya
+   *  y su commit sale apenas llega. */
   dispose(): void;
+  /** Nada agendado ni en vuelo: lo que muestra es lo grabado (o lo sembrado). */
+  idle(): boolean;
 }
 
 export function createNameSync(opts: NameSyncOptions): NameSync {
@@ -157,13 +159,11 @@ export function createNameSync(opts: NameSyncOptions): NameSync {
       request(v, mySeq, (r) => { physical = r.physical; physEdited = false; }, false);
     },
     dispose() {
-      // Lo agendado por tiempo se descarta; el físico ya pedido sigue: su commit
-      // sale 400 ms después de llegar (con la columna recién borrada, su recarga
-      // llega antes y el guardado no la revive) y cuenta como agendado, así un
-      // Undo o un Redo lo mandan ya.
-      stopPhys(); clearTimeout(commitTimer); commitTimer = undefined;
-      settle();
+      // Como ante un Undo: cerrar el panel o cambiar de columna no pierde lo
+      // tipeado (quien lo graba decide si la columna sigue en la versión).
+      flush();
     },
+    idle: () => physTimer === undefined && commitTimer === undefined && !deriving,
   };
 }
 
