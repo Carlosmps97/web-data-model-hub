@@ -11,7 +11,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), message: v
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    ...actual, effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(),
     writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
   };
 });
@@ -52,6 +52,7 @@ import { freshRanks, nodeZ } from '@/features/modeler/lib/nodeZ';
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { lotTo } from './canvasLot.testutil';
 import type { SubjectArea } from '@/features/modeler/services/modeler.service';
 
 const VIEW = { center: { x: 1000, y: 2000 }, rect: { left: 400, top: 1700, right: 1600, bottom: 2300 } };
@@ -81,11 +82,11 @@ beforeEach(async () => {
   created = {};
   vi.mocked(canvasView).mockReturnValue(VIEW);
   vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const id = opts?.ids?.[0] as string;
-    const snap = draft[id] ? structuredClone(draft[id]) : null;
+    const snaps = (opts?.ids ?? []).filter((id) => draft[id]).map((id) => structuredClone(draft[id]));
     await sleep(5);
-    return (snap ? [snap] : []) as never;
+    return snaps as never;
   });
+  vi.mocked(csvc.recordChangesBulk).mockImplementation(lotTo(gov.recordChangesBulk, csvc.recordChange));
   vi.mocked(csvc.recordChange).mockImplementation(async (_cs, _coll, id, op, payload) => {
     const body = payload ? structuredClone(payload) : undefined;
     await sleep(5);

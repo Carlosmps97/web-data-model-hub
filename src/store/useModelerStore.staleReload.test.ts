@@ -37,6 +37,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
     ...actual,
     listRelationships: vi.fn(async (tid: string) => rels.filter((r) => r.parentTableId === tid || r.childTableId === tid).map((r) => structuredClone(r))),
     listColumns: vi.fn(async (tid: string) => Object.values(server).filter((c) => c.tableId === tid).map((c) => ({ ...c }))),
+    currentColumns: vi.fn(async (ids: string[]) => Object.values(server).filter((c) => ids.includes(c.id)).map((c) => ({ ...c }))),
     tableUsage: vi.fn(async () => ({ usage: [], total: 0 })),
     listDomains: vi.fn(async () => []),
   };

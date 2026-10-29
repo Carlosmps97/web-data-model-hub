@@ -14,7 +14,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/governance.service')>();
   return {
     ...actual,
-    listRelationships: vi.fn(), listColumns: vi.fn(), recordChangesBulk: vi.fn(),
+    listRelationships: vi.fn(), listColumns: vi.fn(), currentColumns: vi.fn(), recordChangesBulk: vi.fn(),
     updateColumn: vi.fn(), updateRelationship: vi.fn(), deleteRelationship: vi.fn(), deleteColumn: vi.fn(),
   };
 });
@@ -60,6 +60,7 @@ beforeEach(async () => {
   useUndoStore.setState({ stack: [], busy: false });
   vi.mocked(gov.listRelationships).mockImplementation(async () => [structuredClone(R1)] as never);
   vi.mocked(gov.listColumns).mockImplementation(async () => [] as never);
+  vi.mocked(gov.currentColumns).mockImplementation(async () => [] as never);
   vi.mocked(gov.recordChangesBulk).mockImplementation(async () => ({}) as never);
   vi.mocked(viewsSvc.listViews).mockImplementation(async () => [structuredClone(V1), structuredClone(V2)] as never);
   vi.mocked(mod.loadDiagram).mockImplementation(async () => structuredClone(DIA) as never);
@@ -100,7 +101,7 @@ describe('borrar una columna: un solo lote', () => {
     const many = Array.from({ length: 600 }, (_, i) => ({ ...R1, id: `r${i}`, pairs: [{ parentColumnId: 'pb', childColumnId: `h${i}` }] }));
     const children = many.map((_, i) => ({ ...HB, id: `h${i}` }));
     vi.mocked(gov.listRelationships).mockImplementation(async () => structuredClone(many) as never);
-    vi.mocked(gov.listColumns).mockImplementation(async () => structuredClone(children) as never);
+    vi.mocked(gov.currentColumns).mockImplementation(async (ids: string[]) => structuredClone(children.filter((c) => ids.includes(c.id))) as never);
     await useModelerStore.getState().deleteColumn('pb', many.map((r) => r.id));
     expect(gov.recordChangesBulk).toHaveBeenCalledTimes(1);
     const [changes, chunk] = vi.mocked(gov.recordChangesBulk).mock.calls[0];

@@ -454,10 +454,16 @@ rehacer son cambios más del draft, sin mecánica especial en el backend.
 - `push(entry)` apila el paso de una acción nueva con el pin de la sesión de su acción (si esa sesión no
   es la vigente, lo descarta) y vacía lo pendiente de rehacer.
 - `undoLast()` corre el último paso con un pin de la sesión actual y deja su contrario en `redoStack`;
-  `redoLast()` hace lo mismo al revés. Antes de tomar la entrada esperan lo que esta pestaña ya mandó a
-  escribir (`draftWorkSettled()` de `src/services/draftWork.ts`: escrituras en vuelo y las filas por canvas
-  y por objeto), así eso no cuenta como parte del paso. Los dos cortan si la sesión cambia mientras
-  corren; `busy` impide dos a la vez y `running` dice cuál corre. Si un paso falla sin escribir nada
+  `redoLast()` hace lo mismo al revés. Antes de tomar la entrada, con la pantalla ya en espera, mandan lo
+  agendado tras una espera de tecleo (`flushPendingWrites()`; cada fuente se registra con `pendingWrite`
+  de `src/services/draftWork.ts` mientras tiene algo agendado: campos y nombres de la columna, dibujos,
+  flechas sobre un punto de wire, el selector de color) y esperan todo el trabajo en vuelo
+  (`draftWorkSettled()`: escrituras, las filas por canvas y por objeto, y las acciones con Undo enteras:
+  `historyAction` las corre como trabajo en vuelo con su refresco y su entrada en la pila; todo
+  `pushUndo` va dentro de una, lo exige `historyActions.test.ts`). Así lo que empezó antes de pulsar es
+  lo que se deshace (doc 133 §5). Los dos cortan si la sesión cambia mientras corren; `busy` impide dos a
+  la vez, `running` dice cuál corre y `steps` cuenta los que corrieron (el panel de columna se vuelve a
+  sembrar con él). Si un paso falla sin escribir nada
   (`NothingDoneError`) o por transporte (red o tiempo agotado), vuelve a su pila para reintentarse; un
   Redo no vuelve si la versión cambió mientras corría, si una escritura quedó sin respuesta o si es un
   paso fresco que alcanzó a escribir.
@@ -476,8 +482,13 @@ rehacer son cambios más del draft, sin mecánica especial en el backend.
   mientras tanto terminó otra acción) y, si hay números posteriores a la marca que no son de esta
   pestaña, vacía Undo y Redo y lanza `StaleUndoError` (`runHistory` avisa y recarga el diagrama). El
   reintento de un paso que falló por red admite, esa sola vez, tantos números sin dueño como escrituras
-  sin respuesta tuvo ese paso; un `clear` mientras corría impide que vuelva a la pila. Al volver a la
-  pestaña, `syncOtherTabs` (useModelerStore) recarga el diagrama si otra pestaña escribió.
+  sin respuesta tuvo ese paso; un `clear` mientras corría impide que vuelva a la pila. Una acción cuyo
+  lote quedó sin respuesta pero se verificó grabado (doc 133 §4) apila su entrada con ese margen
+  (`UndoEntry.lost`): `verifiedLost(step, n)` marca el paso y la marca se consume al apilarlo (también lo
+  que un Redo devuelve a Undo), así no pasa a otra entrada. La ventana del candado empieza en lo visto o,
+  sin carga, en el primer número que conoció la sesión (`mark.first`); sin ninguno, una entrada con
+  escrituras sin respuesta no se deshace. Al volver a la pestaña, `syncOtherTabs` (useModelerStore)
+  recarga el diagrama si otra pestaña escribió.
 - Rehacer solo sobre la versión tal como la dejó el Undo: las escrituras del Undo (números consecutivos
   de `writeSeq`, avisados por `onDraftWrite`) fijan la base, y `redoLast()` lee el contador de la versión
   (`writeSeqOf`) antes de escribir; si no coincide, vacía lo pendiente y no rehace. Una escritura de esta
@@ -485,6 +496,12 @@ rehacer son cambios más del draft, sin mecánica especial en el backend.
   Renombrar, cambiar el tipo o borrar un esquema vacía todo el historial (`clear`).
 - `clear({ until })` vacía las dos pilas y las deja cerradas hasta que termine una promesa, en la versión
   donde se pidió. La usa la carga desde Excel: un paso previo pisaría lo cargado.
+- Mientras corre un paso no empieza nada: `lib/historyWait.ts` (registrado al montar `HistoryOverlay`, en
+  captura sobre `window`) se queda con el teclado y el puntero (pasan los atajos del navegador que no editan
+  y lo que dispara el código), el menú contextual de columna se cierra, y con un botón apretado (un
+  arrastre en curso) `runHistory` no corre el paso. `HistoryOverlay` muestra «Undoing…»/«Redoing…» a los
+  300 ms sin tomar el puntero. Lo que llega por fuera (el selector de color del sistema) espera el fin del
+  paso (`whenHistoryIdle`).
 
 El historial muere con la sesión de canvas (cambio de proyecto, modo o versión) y con `resetAppState()`.
 
@@ -548,7 +565,9 @@ usuario abre otra versión y escribir el resto en ella. Para impedirlo,
   la versión, espera la revalidación y calla si la sesión es otra; si no, reporta el motivo real.
 
 `features/modeler/lib/pinnedWrites.ts` agrupa ayudantes sobre los pins (escrituras verificadas, sync de
-vistas, debouncers que descartan lo editado en otra sesión). Pruebas que leen el código fuente
+vistas, debouncers que descartan lo editado en otra sesión). Las cascadas que viajan en un solo envío
+(`struct.canvasLot`, doc 133 §4) verifican el pin al armar el lote, en el mismo tick en que se manda: o va
+entero a la versión de la acción, o no va. Pruebas que leen el código fuente
 (`pinnedFlows.test.ts`, `undoPins.test.ts`, `workspaceWriteErrors.test.ts`) verifican que los flujos
 respeten estas reglas.
 

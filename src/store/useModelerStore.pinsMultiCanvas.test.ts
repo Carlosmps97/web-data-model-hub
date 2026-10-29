@@ -11,7 +11,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: v
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    ...actual, effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(),
     writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
   };
 });
@@ -47,6 +47,7 @@ import type { Diagram, SubjectArea } from '@/features/modeler/services/modeler.s
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { lotTo } from './canvasLot.testutil';
 
 type P = { x: number; y: number };
 interface MTable { id: string; projectId: string; physicalName: string; logicalName: string }
@@ -99,11 +100,11 @@ function flowMock() {
 function wire(): void {
   vi.mocked(canvasView).mockReturnValue(VIEW);
   vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const id = opts?.ids?.[0] as string;
-    const snap = world.draft[id] ? structuredClone(world.draft[id]) : null;
+    const snaps = (opts?.ids ?? []).filter((id) => world.draft[id]).map((id) => structuredClone(world.draft[id]));
     await pause();
-    return (snap ? [snap] : []) as never;
+    return snaps as never;
   });
+  vi.mocked(csvc.recordChangesBulk).mockImplementation(lotTo(gov.recordChangesBulk, csvc.recordChange));
   vi.mocked(csvc.recordChange).mockImplementation(async (_cs, _coll, id, op, payload) => {
     const body = payload ? structuredClone(payload) : undefined;
     await pause();
@@ -211,6 +212,17 @@ describe('borrar una tabla que está en un canvas no abierto', () => {
     expect(overlaps('saX')).toEqual([]);
   });
 
+  it('deshacer después de que otra versión publicó un renombre que cambia el orden: vuelve donde se veía, sin tapar', async () => {
+    await openWorld([canvas('saX', ['tA', 'tT', 'tB', 'tC']), canvas('saY', ['tT', 'tQ'])], 'saY');
+    await st().deleteTable('tT');
+    await pause(2);
+    // Otra versión publica un renombre: A_PRIMERA pasa a ordenarse después de B_BORRAR.
+    world.tables.set('tA', { ...world.tables.get('tA')!, physicalName: 'C_RENOMBRADA' });
+    await undo();
+    expect(paintedOf('saX').tT).toEqual(gridSlot(1));
+    expect(overlaps('saX')).toEqual([]);
+  });
+
   it('si el diagrama de ese canvas no se puede leer, el borrado sigue (ese canvas queda sin cambios)', async () => {
     await openWorld([canvas('saX', ['tA', 'tT', 'tB', 'tC']), canvas('saY', ['tT', 'tQ'])], 'saY');
     vi.mocked(mod.loadDiagram).mockImplementation(async (saId: string) => {
@@ -224,6 +236,53 @@ describe('borrar una tabla que está en un canvas no abierto', () => {
     expect(world.draft.saX.tableIds).toEqual(['tA', 'tB', 'tC']);
     expect(world.draft.saY.tableIds).toEqual(['tQ']);
     expect(paintedOf('saX')).toEqual({ tA: gridSlot(0), tB: gridSlot(1), tC: gridSlot(2) });
+  });
+
+  it('con todas las tablas posicionadas en el otro canvas no baja su diagrama (le basta su documento) y el Undo la repone en su sitio', async () => {
+    const placed = { ...canvas('saX', ['tA', 'tT', 'tB']), layout: { tA: { x: 0, y: 0 }, tT: { x: 300, y: 0 }, tB: { x: 600, y: 0 } } } as SubjectArea;
+    await openWorld([placed, canvas('saY', ['tT', 'tQ'])], 'saY');
+    vi.mocked(mod.loadDiagram).mockClear();
+    await st().deleteTable('tT');
+    await pause(2);
+    expect(vi.mocked(mod.loadDiagram).mock.calls.map(([id]) => id).filter((id) => id !== 'saY')).toEqual([]);
+    expect(world.draft.saX.tableIds).toEqual(['tA', 'tB']);
+    await undo();
+    expect(paintedOf('saX')).toEqual({ tA: { x: 0, y: 0 }, tT: { x: 300, y: 0 }, tB: { x: 600, y: 0 } });
+  });
+
+  it('con alguna tabla sin posición en el otro canvas sí lo baja (para fijar lo que se correría)', async () => {
+    const half = { ...canvas('saX', ['tA', 'tT', 'tB']), layout: { tA: { x: 0, y: 0 }, tT: { x: 300, y: 0 } } } as SubjectArea;
+    await openWorld([half, canvas('saY', ['tT', 'tQ'])], 'saY');
+    vi.mocked(mod.loadDiagram).mockClear();
+    await st().deleteTable('tT');
+    await pause(2);
+    expect(vi.mocked(mod.loadDiagram).mock.calls.map(([id]) => id)).toContain('saX');
+  });
+
+  it('si no se puede leer el documento del otro canvas, baja su diagrama como antes y fija lo que se correría', async () => {
+    await openWorld([canvas('saX', ['tA', 'tT', 'tB', 'tC']), canvas('saY', ['tT', 'tQ'])], 'saY');
+    const read = vi.mocked(csvc.effective).getMockImplementation()!;
+    let fail = true;
+    vi.mocked(csvc.effective).mockImplementation(async (cs, coll, opts) => {
+      if (fail && opts?.ids?.length === 1 && opts.ids[0] === 'saX') { fail = false; throw new Error('network'); }
+      return read(cs, coll, opts);
+    });
+    await st().deleteTable('tT');
+    await pause(2);
+    expect(paintedOf('saX')).toEqual({ tA: gridSlot(0), tB: gridSlot(2), tC: gridSlot(3) });
+  });
+
+  it('con un canvas todo posicionado y otro que no: baja solo el diagrama del que lo necesita, y fija ahí lo que se correría', async () => {
+    const placed = { ...canvas('saZ', ['tT', 'tQ']), layout: { tT: { x: 300, y: 0 }, tQ: { x: 600, y: 0 } } } as SubjectArea;
+    await openWorld([canvas('saX', ['tA', 'tT', 'tB', 'tC']), placed, canvas('saY', ['tT', 'tQ'])], 'saY');
+    vi.mocked(mod.loadDiagram).mockClear();
+    await st().deleteTable('tT');
+    await pause(2);
+    expect(vi.mocked(mod.loadDiagram).mock.calls.map(([id]) => id).filter((id) => id !== 'saY').sort()).toEqual(['saX']);
+    expect(paintedOf('saX')).toEqual({ tA: gridSlot(0), tB: gridSlot(2), tC: gridSlot(3) });
+    await undo();
+    expect(paintedOf('saX')).toEqual(START_X);
+    expect(paintedOf('saZ')).toEqual({ tT: { x: 300, y: 0 }, tQ: { x: 600, y: 0 } });
   });
 
   it('con la tabla solo en el canvas abierto no se lee ningún otro diagrama', async () => {

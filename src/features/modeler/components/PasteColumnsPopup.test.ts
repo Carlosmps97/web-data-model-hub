@@ -31,7 +31,7 @@ vi.mock('@/store/useSessionStore', () => ({
   sessionProjectId: () => 'p1',
   useSessionStore: (pick: (s: unknown) => unknown) => pick({ activeProjectId: 'p1' }),
 }));
-vi.mock('@/store/useUndoStore', () => ({ pushUndo: vi.fn() }));
+vi.mock('@/store/useUndoStore', () => ({ pushUndo: vi.fn(), historyAction: <T,>(action: () => Promise<T>) => action() }));
 vi.mock('@/features/standards/standards.service', () => ({ getUdpDefs: vi.fn(async () => []) }));
 vi.mock('@/services/governance.service', async (importOriginal) => ({
   ...(await importOriginal<object>()), listDomains: vi.fn(async () => []), recordChangesBulk,

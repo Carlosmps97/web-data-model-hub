@@ -5,6 +5,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const order: string[] = [];
+/** Los cambios de cada envío único (`canvasLot`). */
+const sentLots: { collection: string; entityId: string; op: string; payload?: unknown }[][] = [];
 
 vi.mock('@/services/governance.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/governance.service')>();
@@ -12,6 +14,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
     ...actual,
     listRelationships: vi.fn(),
     listColumns: vi.fn(),
+    currentColumns: vi.fn(async () => []),
     tableUsage: vi.fn(async () => ({ usage: [], total: 0 })),
     updateColumn: vi.fn(async (c: { id: string }) => { order.push(`fk:${c.id}`); return {}; }),
     updateRelationship: vi.fn(async (r: { id: string }) => { order.push(`rel-upd:${r.id}`); return {}; }),
@@ -26,10 +29,20 @@ vi.mock('@/services/views.service', () => ({
   updateView: vi.fn(async () => ({})),
   deleteView: vi.fn(),
 }));
-vi.mock('@/features/modeler/services/structure.service', () => ({
-  removeFromCanvas: vi.fn(async () => {}),
-  addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
-}));
+vi.mock('@/features/modeler/services/structure.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/modeler/services/structure.service')>();
+  return {
+    ...actual,
+    removeFromCanvas: vi.fn(async () => {}),
+    addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
+    canvasLot: vi.fn(async (ids: string[], build: (docs: Map<string, null>) => { changes: (typeof sentLots)[number]; result: unknown }) => {
+      const plan = build(new Map(ids.map((id) => [id, null])));
+      order.push('lot');
+      sentLots.push(plan.changes);
+      return plan.result;
+    }),
+  };
+});
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(async () => { throw new Error('sin canvas en el test'); }),
 }));
@@ -45,6 +58,7 @@ import { useModelerStore } from './useModelerStore';
 beforeEach(() => {
   vi.clearAllMocks();
   order.length = 0;
+  sentLots.length = 0;
   useUndoStore.setState({ stack: [], busy: false });
   useModelerStore.setState({ activeSaId: null, diagram: null, dirty: false, selectedTableId: null, selectedColumnId: null, naming: null, activeProjectId: null, explorerTick: 0 });
 });
@@ -58,14 +72,17 @@ describe('deleteTable(id, { pre }) sin diagrama (inspector)', () => {
 
     await useModelerStore.getState().deleteTable('t1', { pre: tPre });
 
-    expect(order).toEqual(['bulk', 'table:t1']);
+    expect(order).toEqual(['lot']);
+    expect(sentLots[0].map((c) => `${c.collection}:${c.op}:${c.entityId}`))
+      .toEqual(['canonical_columns:delete:c1', 'canonical_tables:delete:t1']);
     // Sin canvas activo nadie sube el tick por firma → lo sube el borrado.
     expect(useModelerStore.getState().explorerTick).toBe(1);
     const stack = useUndoStore.getState().stack;
     expect(stack.map((e) => e.label)).toEqual(['Delete table M_CLIENTE']);
     order.length = 0;
     await useUndoStore.getState().undoLast();
-    const items = vi.mocked(gov.recordChangesBulk).mock.calls.at(-1)![0];
+    expect(order).toEqual(['lot']);
+    const items = sentLots.at(-1)!;
     expect(items[0]).toMatchObject({ collection: 'canonical_tables', entityId: 't1', op: 'upsert', payload: tPre });
     expect(items[1]).toMatchObject({ collection: 'canonical_columns', entityId: 'c1', op: 'upsert' });
     // La inversa también refresca el Explorer (la tabla vuelve al inventario).
@@ -78,7 +95,7 @@ describe('deleteTable(id, { pre }) sin diagrama (inspector)', () => {
 
     await useModelerStore.getState().deleteTable('t1');
 
-    expect(gov.deleteTable).toHaveBeenCalledWith('t1');
+    expect(sentLots).toEqual([[{ collection: 'canonical_tables', entityId: 't1', op: 'delete' }]]);
     expect(useUndoStore.getState().stack).toEqual([]);
   });
 });
@@ -94,6 +111,9 @@ describe('deleteColumn(id, relIds, { col }) sin diagrama (inspector)', () => {
         : []));
     vi.mocked(gov.listColumns).mockImplementation(async (tid: string) => (
       tid === 'tB' ? [{ id: 'cB', tableId: 'tB', isForeignKey: true, physicalName: 'COD', logicalName: 'codigo', dataType: 'INT', typeOverridden: false, ordinal: 0 } as never] : []));
+    // La hija se lee por id (sin bajar su tabla entera).
+    vi.mocked(gov.currentColumns).mockImplementation(async (ids: string[]) => (
+      ids.includes('cB') ? [{ id: 'cB', tableId: 'tB', isForeignKey: true, physicalName: 'COD', logicalName: 'codigo', dataType: 'INT', typeOverridden: false, ordinal: 0 } as never] : []));
     // Tras borrar la relación, la hija no queda en ninguna → FK huérfana.
     vi.mocked(gov.listRelationships).mockImplementationOnce(async () => [{ id: 'r1', parentTableId: 't1', childTableId: 'tB', identifying: false, parentCardinality: 'one', childCardinality: 'many', pairs: [{ parentColumnId: 'cA', childColumnId: 'cB' }] } as never])
       .mockImplementation(async () => []);

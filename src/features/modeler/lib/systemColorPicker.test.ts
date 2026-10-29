@@ -4,6 +4,8 @@
 // de la pantalla. Por eso el input va encima del botón que se pulsó, con su
 // tamaño, y se fuerza el cálculo de su posición antes de abrirlo.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { flushPendingWrites, hasPendingWrites } from '@/services/draftWork';
+import { useUndoStore } from '@/store/useUndoStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { discardSystemPicker, openSystemPicker } from './systemColorPicker';
@@ -48,5 +50,59 @@ describe('selector de color del sistema', () => {
     expect(calls).not.toContain('remove');
     discardSystemPicker(alive);
     expect(calls).toContain('remove');
+  });
+});
+
+// Lo elegido espera una pausa de 700 ms (o el cierre del selector) antes de
+// aplicarse. Undo y Redo lo aplican ya, antes de esperar lo en vuelo (doc 133
+// §5); el selector del sistema queda fuera del bloqueo de la pantalla, así que
+// lo elegido durante un Undo o Redo se aplica recién al terminar el paso.
+describe('selector de color del sistema ante un Undo', () => {
+  afterEach(() => { vi.useRealTimers(); useUndoStore.setState({ busy: false, running: null }); });
+  const openWith = () => {
+    useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
+    useModelerStore.setState({ activeSaId: 'sa1' });
+    const dom = fakeDom();
+    const apply = vi.fn();
+    openSystemPicker('#92D050', null, apply);
+    const pick = (hex: string) => { dom.el.value = hex; dom.listeners.input(); };
+    return { ...dom, apply, pick };
+  };
+
+  it('lo que espera la pausa cuenta como agendado: flushPendingWrites lo aplica ya, una vez', () => {
+    vi.useFakeTimers();
+    const { apply, pick } = openWith();
+    pick('#112233');
+    expect(hasPendingWrites()).toBe(true);
+    flushPendingWrites();
+    expect(apply.mock.calls).toEqual([['#112233']]);
+    expect(hasPendingWrites()).toBe(false);
+    vi.advanceTimersByTime(700);
+    expect(apply).toHaveBeenCalledTimes(1);
+    discardSystemPicker(undefined);
+  });
+
+  it('elegido durante un Undo o Redo, se aplica recién cuando termina el paso', async () => {
+    vi.useFakeTimers();
+    const { apply, pick, listeners } = openWith();
+    useUndoStore.setState({ busy: true, running: 'undo' });
+    pick('#445566');
+    vi.advanceTimersByTime(700);
+    expect(apply).not.toHaveBeenCalled();
+    pick('#778899');
+    listeners.change();
+    expect(apply).not.toHaveBeenCalled();
+    useUndoStore.setState({ busy: false, running: null });
+    await Promise.resolve();
+    expect(apply.mock.calls).toEqual([['#778899']]);
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('al soltarse o descartarse deja de contar como agendado', () => {
+    vi.useFakeTimers();
+    const { pick } = openWith();
+    pick('#112233');
+    discardSystemPicker(undefined);
+    expect(hasPendingWrites()).toBe(false);
   });
 });

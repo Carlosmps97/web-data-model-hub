@@ -568,11 +568,23 @@ Ctrl/Cmd+Z deshace y Ctrl/Cmd+Shift+Z o Ctrl/Cmd+Y rehacen, y avisan «Undid: <a
   otra pestaña sobre la misma versión) cancela lo pendiente de rehacer. Si el cambio llegó por fuera de
   esta pestaña, Redo avisa «This version changed after the undo: there's nothing to redo.» y no escribe
   nada.
-- Undo y Redo empiezan cuando termina lo que esta pestaña ya estaba grabando (por ejemplo, un bloque recién
-  soltado): eso cuenta como una escritura más, no como parte del paso.
+- Lo que empezó antes de pulsar Ctrl+Z (o el botón) termina y es lo que se deshace: Undo y Redo esperan la
+  acción en curso completa (sus escrituras, su refresco y su entrada en el historial), y lo tipeado que
+  esperaba su pausa (campos y nombre de la columna, dibujos, flechas sobre un punto de wire, un color elegido
+  en el selector del sistema) se graba antes. Lo que se estaba grabando sin Undo propio (un bloque recién
+  soltado) cuenta como una escritura más, no como parte del paso.
+- Mientras se deshace o se rehace no empieza nada: la pantalla no responde a teclas ni clics (los atajos del
+  navegador sí); si tarda más de 300 ms aparece «Undoing…» o «Redoing…», y a los 10 s «Still waiting for the
+  server…». Con un botón del mouse apretado (arrastrando algo), Ctrl+Z y el botón no corren y avisan
+  «Finish dragging first, then undo.». Un menú contextual abierto se cierra al empezar. Al terminar, el
+  panel de la columna muestra lo que quedó en la versión.
 - Rehacer un borrado en cascada (tabla, columnas, vista, relación) lo recalcula con lo vigente. Si al
   rehacer el borrado de columnas otra relación empezó a usarlas, no se borra nada y se avisa: borrarlas de
   nuevo muestra el impacto.
+- Borrar una tabla o una relación, crear una tabla, CTAS y pegar una tabla (y su Undo y Redo) se graban
+  todo o nada, en un solo envío: si se corta la red no queda nada a medias. Si no llegó la respuesta, se
+  revisa qué quedó: si se grabó, la acción sigue con su Undo; si no, «No response from the server:
+  nothing was deleted. Try again.» (created / pasted) y se puede reintentar.
 - El historial se vacía en todo cambio de sesión (proyecto, modo o versión); cambiar de canvas no lo
   vacía. También al renombrar, cambiar el tipo o borrar un esquema en el Schema manager (lo guardado en el
   historial lleva el nombre del esquema en cada tabla) y al borrar un canvas que tenía acciones suyas.

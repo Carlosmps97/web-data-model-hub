@@ -18,7 +18,7 @@
  *
  * Además:
  *  · el flujo sigue por los callbacks que corren en el acto (`forEach`/`map`/…,
- *    `runBlocking`, `run`, la IIFE): su escritura es del flujo de afuera; un
+ *    `runBlocking`, `run`, `historyAction`, la IIFE): su escritura es del flujo de afuera; un
  *    `await` de adentro solo precede a lo que sigue adentro;
  *  · el callback de `.then/.catch/.finally` (y el de `persistReorder`) corre
  *    después de una promesa: cuenta un await al empezar;
@@ -93,7 +93,7 @@ const WRITE_HELPERS = new Set(['placeUploadedObjects', 'writeWireRoute']);
 
 /** Llamadas cuyo callback corre en el acto (parte del flujo que las llama). */
 const INLINE_METHODS = /^(forEach|map|flatMap|filter|some|every|reduce|reduceRight|find|findIndex|findLast|findLastIndex|sort|toSorted)$/;
-const INLINE_RUNNERS = new Set(['runBlocking', 'run', 'Array.from']);
+const INLINE_RUNNERS = new Set(['runBlocking', 'run', 'historyAction', 'Array.from']);
 /** Llamadas cuyo callback corre después de una promesa. */
 const CONT_METHODS = /^(then|catch|finally)$/;
 const CONT_RUNNERS = new Set(['persistReorder']);

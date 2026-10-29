@@ -6,10 +6,10 @@ vi.mock('@/services/changeset.service', async (orig) =>
 import { ApiError } from '@/services/http';
 import { writeSeqOf } from '@/services/changeset.service';
 import { forgetDraftSeqs, noteSeen } from '@/services/draftSeqs';
-import { trackDraftWork } from '@/services/draftWork';
+import { pendingWrite, trackDraftWork } from '@/services/draftWork';
 import { pinSession, setCanvasSource, trackRevalidation } from '@/features/modeler/lib/sessionGuard';
 import { draftLedger } from './draftLedger.testutil';
-import { NothingDoneError, OtherCanvasError, StaleUndoError, freshStep, pushUndo, useUndoStore, type HistoryStep } from './useUndoStore';
+import { NothingDoneError, OtherCanvasError, StaleUndoError, freshStep, historyAction, pushUndo, useUndoStore, verifiedLost, whenHistoryIdle, type HistoryStep } from './useUndoStore';
 import { useBusyStore } from './useBusyStore';
 import { useSessionStore } from './useSessionStore';
 
@@ -954,6 +954,149 @@ describe('candado del Undo', () => {
     expect(labels()).toEqual([]);
   });
 
+  it('una acción cuyo lote quedó sin respuesta y se verificó grabado: su Undo admite ese número sin dueño', async () => {
+    const log: string[] = [];
+    noteSeen(CS, draftLedger.seq);
+    const pin = pinSession();
+    draftLedger.lost(CS);                        // el lote se grabó, pero no llegó la respuesta
+    draftLedger.foreign();
+    pushUndo('A', verifiedLost(pair('A', log), 1), pin);
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    expect(log).toEqual(['undo A']);
+  });
+
+  it('el margen es exacto: un número sin dueño más (otra pestaña) sigue bloqueando', async () => {
+    noteSeen(CS, draftLedger.seq);
+    const pin = pinSession();
+    draftLedger.lost(CS);
+    draftLedger.foreign();
+    pushUndo('A', verifiedLost(pair('A', []), 1), pin);
+    draftLedger.foreign();
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+    expect(labels()).toEqual([]);
+  });
+
+  it('lo que un Redo con su lote verificado devuelve a Undo admite ese número', async () => {
+    const log: string[] = [];
+    const redo: HistoryStep = async () => {
+      draftLedger.lost(CS);                      // se grabó, sin respuesta; el paso lo verificó
+      draftLedger.foreign();
+      log.push('redo A');
+      return verifiedLost(pair('A', log), 1);
+    };
+    noteSeen(CS, draftLedger.seq);
+    const pin = pinSession();
+    draftLedger.write(CS);
+    pushUndo('A', async () => { draftLedger.write(CS); log.push('undo A'); return redo; }, pin);
+    await useUndoStore.getState().undoLast();
+    expect(await useUndoStore.getState().redoLast()).toBe('A');
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    expect(log).toEqual(['undo A', 'redo A', 'undo A']);
+  });
+
+  it('el margen se consume al apilar: el mismo paso, devuelto otra vez por un Redo, ya no lo admite', async () => {
+    noteSeen(CS, draftLedger.seq);
+    const log: string[] = [];
+    const undoStep: HistoryStep = async () => { draftLedger.write(CS); log.push('undo'); return redoStep; };
+    const redoStep: HistoryStep = async () => { draftLedger.write(CS); log.push('redo'); return undoStep; };
+    const pin = pinSession();
+    draftLedger.lost(CS);                        // el lote de la acción, sin respuesta y verificado
+    draftLedger.foreign();
+    pushUndo('A', verifiedLost(undoStep, 1), pin);
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    noteSeen(CS, draftLedger.seq);               // la recarga del paso
+    expect(await useUndoStore.getState().redoLast()).toBe('A');   // vuelve a Undo el mismo paso
+    draftLedger.foreign();                       // otra pestaña
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+    expect(log).toEqual(['undo', 'redo']);
+  });
+
+  it('un paso marcado que va a Redo no lleva el margen cuando vuelve a Undo', async () => {
+    noteSeen(CS, draftLedger.seq);
+    const same: HistoryStep = async () => { draftLedger.write(CS); return same; };   // su propio contrario
+    pushUndo('A', async () => { draftLedger.write(CS); return verifiedLost(same, 1); }, pinSession());
+    await useUndoStore.getState().undoLast();    // `same` queda para rehacer
+    noteSeen(CS, draftLedger.seq);
+    expect(await useUndoStore.getState().redoLast()).toBe('A');   // y vuelve a Undo
+    draftLedger.foreign();                       // otra pestaña
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+  });
+
+  it('el margen de un paso que no llega a apilarse no queda para después', async () => {
+    noteSeen(CS, draftLedger.seq);
+    const step: HistoryStep = async () => null;
+    pushUndo('A', verifiedLost(step, 1), { holds: () => false, check: () => undefined } as never);   // otra sesión: no apila
+    const pin = pinSession();
+    draftLedger.foreign();                       // otra pestaña, después de que empezó la acción nueva
+    pushUndo('B', step, pin);                    // el mismo paso, en una acción sin escrituras perdidas
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+  });
+
+  it('una acción que empezó sin nada visto ni conocido de la versión: su margen no vale (no se sabe dónde cayó lo suyo)', async () => {
+    const log: string[] = [];
+    const pin = pinSession();                    // nada cargado ni escrito con número en la sesión
+    draftLedger.lost(CS);                        // su lote: sin respuesta…
+    draftLedger.foreign();                       // …pero grabado
+    pushUndo('A', verifiedLost(pair('A', log), 1), pin);
+    draftLedger.foreign();                       // otra pestaña
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(UNCONFIRMED);
+    expect(log).toEqual([]);
+  });
+
+  it('… tampoco si después se abre un canvas (lo visto queda después de lo suyo)', async () => {
+    const pin = pinSession();
+    draftLedger.lost(CS);
+    draftLedger.foreign();
+    pushUndo('A', verifiedLost(pair('A', []), 1), pin);
+    noteSeen(CS, draftLedger.seq);               // se abre un canvas
+    draftLedger.foreign();                       // otra pestaña
+    await expect(useUndoStore.getState().undoLast()).rejects.toBeInstanceOf(StaleUndoError);
+  });
+
+  it('sin nada visto pero con una escritura propia con número antes: el margen vale desde ella', async () => {
+    const log: string[] = [];
+    draftLedger.write(CS);                       // lo primero que conoce la sesión
+    const pin = pinSession();
+    draftLedger.lost(CS);
+    draftLedger.foreign();
+    pushUndo('A', verifiedLost(pair('A', log), 1), pin);
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    expect(log).toEqual(['undo A']);
+  });
+
+  it('sin nada visto ni conocido, una entrada sin margen no se frena por guardados ajenos sin respuesta que no llegaron', async () => {
+    const log: string[] = [];
+    draftLedger.lost(CS);                        // un guardado anterior que venció y no llegó
+    act('A', log);                               // su escritura tiene número
+    draftLedger.lost(CS);                        // otro posterior, tampoco llegó
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    expect(log).toEqual(['undo A']);
+  });
+
+  it('una acción sin nada visto y sin escrituras sin respuesta se deshace como antes', async () => {
+    const log: string[] = [];
+    act('A', log);
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    act('B', log);
+    draftLedger.foreign();
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+  });
+
+  it('el margen de la acción no se suma al de un reintento: este parte del contador ya verificado', async () => {
+    let fail = true;
+    noteSeen(CS, draftLedger.seq);
+    const pin = pinSession();
+    draftLedger.lost(CS);
+    draftLedger.foreign();
+    pushUndo('A', verifiedLost(async () => {
+      if (fail) { draftLedger.foreign(); throw new ApiError('Network error', 0, null, '/api/x'); }   // no escribió nada suyo
+      return null;
+    }, 1), pin);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow('Press Undo to try again.');
+    fail = false;
+    await expect(useUndoStore.getState().undoLast()).rejects.toBeInstanceOf(StaleUndoError);
+  });
+
   it('el paso que un Redo devuelve a Undo vale desde ese Redo', async () => {
     const log: string[] = [];
     act('A', log);
@@ -1216,5 +1359,242 @@ describe('candado por canvas', () => {
     await action;
     expect(labels()).toEqual(['A', 'C']);
     expect(useUndoStore.getState().busy).toBe(false);
+  });
+});
+
+// Doc 133 §5 (fase 2): lo que empezó antes del Ctrl+Z termina y es lo que se
+// deshace. Una acción con Undo corre entera como trabajo en vuelo
+// (`historyAction`): Undo y Redo esperan también su refresco y su entrada en la
+// pila, no solo sus escrituras.
+describe('acción en curso al pulsar Undo o Redo', () => {
+  let canvas: string | null = 'sa-A';
+  beforeEach(() => {
+    open('editing', CS);
+    canvas = 'sa-A';
+    setCanvasSource(() => canvas);
+    vi.mocked(writeSeqOf).mockClear();
+  });
+  afterEach(() => setCanvasSource(() => null));
+
+  /** Una acción como las del store: escribe, refresca (sin escribir) y recién
+   *  después apila su Undo. `refresh` decide cuándo termina el refresco. */
+  const action = (label: string, log: string[], refresh: () => Promise<void> = () => sleep(10)) =>
+    historyAction(async () => {
+      const pin = pinSession();
+      draftLedger.write(CS);
+      await refresh();
+      pushUndo(label, pair(label, log), pin);
+    });
+
+  it('Ctrl+Z durante el refresco de una acción deshace esa acción, no la anterior', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    let refreshed!: () => void;
+    const b = action('B', log, () => new Promise<void>((r) => { refreshed = r; }));
+    const undo = useUndoStore.getState().undoLast();
+    await sleep(5);
+    expect(log).toEqual([]);                       // espera a B: todavía no deshizo nada
+    refreshed();
+    expect(await undo).toBe('B');
+    await b;
+    expect(log).toEqual(['undo B']);
+    expect([labels(), redoLabels()]).toEqual([['A'], ['B']]);
+  });
+
+  it('con la pila vacía, Ctrl+Z espera la primera acción en curso y la deshace', async () => {
+    const log: string[] = [];
+    const b = action('B', log);
+    expect(await useUndoStore.getState().undoLast()).toBe('B');
+    await b;
+    expect([labels(), log]).toEqual([[], ['undo B']]);
+  });
+
+  it('con lo de otro canvas arriba y una acción de este en curso, espera y deshace la de este', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    canvas = 'sa-B';
+    const b = action('B', log);
+    expect(await useUndoStore.getState().undoLast()).toBe('B');
+    await b;
+    expect([labels(), log]).toEqual([['A'], ['undo B']]);
+  });
+
+  it('Redo con una acción en curso la espera: la acción nueva deja sin nada que rehacer', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    await useUndoStore.getState().undoLast();
+    // Lee antes de escribir: al pulsar Redo todavía no escribió nada.
+    const b = historyAction(async () => {
+      const pin = pinSession();
+      await sleep(5);
+      draftLedger.write(CS);
+      await sleep(10);
+      pushUndo('B', pair('B', log), pin);
+    });
+    await expect(useUndoStore.getState().redoLast()).rejects.toThrow("This version changed after the undo: there's nothing to redo.");
+    await b;
+    expect([labels(), redoLabels(), log]).toEqual([['B'], [], ['undo A']]);
+  });
+
+  it('Redo con lo de otro canvas arriba y una acción de este en curso: la espera y avisa que no hay qué rehacer', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    await useUndoStore.getState().undoLast();
+    canvas = 'sa-B';
+    const b = historyAction(async () => {
+      const pin = pinSession();
+      await sleep(5);
+      draftLedger.write(CS);
+      pushUndo('B', pair('B', log), pin);
+    });
+    await expect(useUndoStore.getState().redoLast()).rejects.toThrow("This version changed after the undo: there's nothing to redo.");
+    await b;
+    expect([labels(), redoLabels()]).toEqual([['B'], []]);
+  });
+
+  it('con lo de otro canvas arriba y una acción en curso que no apila: avisa en cuál fue sin leer el contador', async () => {
+    pushUndo('A', pair('A', []), pinSession());
+    canvas = 'sa-B';
+    const b = historyAction(async () => { await sleep(5); draftLedger.write(CS); });
+    vi.mocked(writeSeqOf).mockClear();
+    await expect(useUndoStore.getState().undoLast()).rejects.toMatchObject({ cmd: 'undo', canvasId: 'sa-A' });
+    await b;
+    expect(writeSeqOf).not.toHaveBeenCalled();
+    expect(useUndoStore.getState().busy).toBe(false);
+  });
+
+  it('una acción en curso que falla sin apilar: Ctrl+Z termina sin hacer nada y no queda nada en curso', async () => {
+    const failed = historyAction(async () => { await sleep(5); throw new Error('boom'); });
+    failed.catch(() => undefined);
+    expect(await useUndoStore.getState().undoLast()).toBeNull();
+    await expect(failed).rejects.toThrow('boom');
+    // Sin nada en curso, lo de otro canvas arriba se avisa en el acto, sin leer el contador.
+    pushUndo('A', pair('A', []), pinSession());
+    canvas = 'sa-B';
+    vi.mocked(writeSeqOf).mockClear();
+    await expect(useUndoStore.getState().undoLast()).rejects.toBeInstanceOf(OtherCanvasError);
+    expect(writeSeqOf).not.toHaveBeenCalled();
+  });
+
+  it('una acción en curso que llama a otra acción con Undo no deja colgado el Ctrl+Z', async () => {
+    const log: string[] = [];
+    const outer = historyAction(async () => {
+      const pin = pinSession();
+      await sleep(5);
+      await historyAction(async () => { draftLedger.write(CS); });
+      await sleep(5);
+      pushUndo('B', pair('B', log), pin);
+    });
+    expect(await useUndoStore.getState().undoLast()).toBe('B');
+    await outer;
+  });
+
+  /** Algo agendado tras una espera de tecleo: al mandarlo corre la acción. */
+  const scheduled = (label: string, log: string[]) => {
+    const w = pendingWrite(() => { w.release(); void action(label, log); });
+    w.hold();
+  };
+
+  it('Ctrl+Z manda ya lo agendado (espera de tecleo) y deshace eso', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    scheduled('B', log);
+    expect(await useUndoStore.getState().undoLast()).toBe('B');
+    expect([labels(), log]).toEqual([['A'], ['undo B']]);
+  });
+
+  it('con la pila vacía y algo agendado, Ctrl+Z lo manda y lo deshace', async () => {
+    const log: string[] = [];
+    scheduled('B', log);
+    expect(await useUndoStore.getState().undoLast()).toBe('B');
+    expect([labels(), log]).toEqual([[], ['undo B']]);
+  });
+
+  it('con lo de otro canvas arriba y algo agendado en este, lo manda y lo deshace', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    canvas = 'sa-B';
+    scheduled('B', log);
+    expect(await useUndoStore.getState().undoLast()).toBe('B');
+    expect([labels(), log]).toEqual([['A'], ['undo B']]);
+  });
+
+  it('lo agendado se manda con la pantalla ya en espera', async () => {
+    let busy: boolean | null = null;
+    const w = pendingWrite(() => { busy = useUndoStore.getState().busy; w.release(); });
+    w.hold();
+    pushUndo('A', pair('A', []), pinSession());
+    await useUndoStore.getState().undoLast();
+    expect(busy).toBe(true);
+  });
+
+  it('Redo manda lo agendado antes: si escribe, no queda qué rehacer', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    await useUndoStore.getState().undoLast();
+    scheduled('B', log);
+    await expect(useUndoStore.getState().redoLast()).rejects.toThrow("This version changed after the undo: there's nothing to redo.");
+    expect([labels(), log]).toEqual([['B'], ['undo A']]);
+  });
+
+  it('un paso que reusa una acción con Undo corre sin esperarse a sí mismo', async () => {
+    pushUndo('A', async () => {
+      await historyAction(async () => { draftLedger.write(CS); pushUndo('reusada', async () => null); });
+      return null;
+    }, pinSession());
+    expect(await Promise.race([useUndoStore.getState().undoLast(), sleep(200).then(() => 'colgado')])).toBe('A');
+  });
+});
+
+// Lo que llega por fuera del bloqueo de la pantalla (el selector de color del
+// sistema) espera a que termine el paso, y corre fuera del aviso de fin: si
+// fallara, no cortaría a los demás que esperan ese aviso.
+describe('whenHistoryIdle', () => {
+  afterEach(() => { useUndoStore.setState({ busy: false, running: null }); });
+
+  it('sin paso en curso corre en el acto', () => {
+    const ran: string[] = [];
+    whenHistoryIdle(() => ran.push('ya'));
+    expect(ran).toEqual(['ya']);
+  });
+
+  it('con un paso en curso corre al terminar, después del aviso de fin', async () => {
+    useUndoStore.setState({ busy: true, running: 'undo' });
+    const order: string[] = [];
+    whenHistoryIdle(() => order.push('selector'));
+    expect(order).toEqual([]);
+    useUndoStore.setState({ busy: false, running: null });
+    order.push('fin del paso');
+    await Promise.resolve();
+    expect(order).toEqual(['fin del paso', 'selector']);
+  });
+});
+
+// Los paneles que copian el modelo para editarlo se vuelven a sembrar cuando
+// termina un Undo o un Redo que corrió (`steps`).
+describe('pasos terminados', () => {
+  beforeEach(() => { open('editing', CS); vi.mocked(writeSeqOf).mockClear(); });
+  const steps = () => useUndoStore.getState().steps;
+
+  it('suben con cada Undo o Redo que corrió, también si falla', async () => {
+    const s0 = steps();
+    pushUndo('A', pair('A', []), pinSession());
+    await useUndoStore.getState().undoLast();
+    expect(steps()).toBe(s0 + 1);
+    await useUndoStore.getState().redoLast();
+    expect(steps()).toBe(s0 + 2);
+    pushUndo('B', async () => { throw new Error('409'); }, pinSession());
+    await useUndoStore.getState().undoLast().catch(() => undefined);
+    expect(steps()).toBe(s0 + 3);
+  });
+
+  it('no suben con uno que no llegó a correr (nada que deshacer, el candado no dejó rehacer)', async () => {
+    const s0 = steps();
+    expect(await useUndoStore.getState().undoLast()).toBeNull();
+    pushUndo('A', pair('A', []), pinSession());
+    await useUndoStore.getState().undoLast();
+    draftLedger.foreign();
+    await useUndoStore.getState().redoLast().catch(() => undefined);
+    expect(steps()).toBe(s0 + 1);
   });
 });

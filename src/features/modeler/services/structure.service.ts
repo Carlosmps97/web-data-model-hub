@@ -31,6 +31,7 @@ import { cleanColors, normalColor } from '@/lib/colors';
 import { applyPending } from '../lib/udpDraft';
 import type { RoutePoint, WireRoutes } from '../lib/wireRoute';
 import type { Drawing, Folder, Project, SubjectArea } from './modeler.service';
+import type { BulkChange } from '@/services/changeset.service';
 
 /** Changeset para lecturas: cualquier modo con changeset activo (el visor
  *  readonly de un request también debe ver su estructura draft). */
@@ -70,7 +71,7 @@ type Layout = SubjectArea['layout'];
 
 /** Avisos de algo que dejó de existir en la working copy. En inglés: llegan a
  *  pantalla. */
-const CANVAS_GONE = 'This canvas is no longer in the working copy.';
+export const CANVAS_GONE = 'This canvas is no longer in the working copy.';
 const FOLDER_GONE = 'This folder is no longer in the working copy.';
 
 // ── Lecturas efectivas ─────────────────────────────────────────────────────
@@ -254,46 +255,56 @@ const viewBase = (cur: SubjectArea, shown?: string[] | null): string[] | null =>
  *  una tabla y solo a quien sigue sin posición en el canvas efectivo (nunca
  *  mueve un bloque posicionado), en la misma escritura. */
 export const addToCanvas = async (
-  saId: string, add: CanvasMembers & { layout?: Layout; routes?: WireRoutes; colors?: Record<string, string>; pins?: Layout },
-  shownViews?: string[] | null,
+  saId: string, add: CanvasAdd, shownViews?: string[] | null,
 ): Promise<Required<CanvasMembers>> => {
   const cs = requireWriteCs('Editing a canvas');
   return inOrder(saId, async () => {
     const cur = await fetchEffectiveSa(cs, saId);
     if (!cur) throw new Error(CANVAS_GONE);
-    const tables = cur.tableIds ?? [];
-    const tableIds = [...new Set(add.tableIds ?? [])].filter((id) => !tables.includes(id));
-    const views = viewBase(cur, shownViews);
-    const viewIds = views ? [...new Set(add.viewIds ?? [])].filter((id) => !views.includes(id)) : [];
-    const entering = [...tableIds, ...viewIds];
-    const placed = Object.fromEntries(Object.entries(add.layout ?? {}).filter(([id]) => entering.includes(id)));
-    const members = new Set([...tables, ...(views ?? [])]);
-    const pinned = tableIds.length
-      ? Object.entries(add.pins ?? {}).filter(([id]) => members.has(id) && !cur.layout?.[id])
-      : [];
-    const layout = Object.keys(placed).length || pinned.length ? { ...Object.fromEntries(pinned), ...placed } : null;
-    const routes = cleanRoutes(add.routes);
-    const withRoutes = tableIds.length > 0 && Object.keys(routes).length > 0;
-    if (!tableIds.length && !viewIds.length && !layout && !withRoutes) return { tableIds, viewIds };
-    const next: SubjectArea = { ...cur, id: saId };
-    if (tableIds.length) next.tableIds = [...tables, ...tableIds];
-    if (views && (viewIds.length || !Array.isArray(cur.viewIds))) next.viewIds = [...views, ...viewIds];
-    if (layout) next.layout = { ...(cur.layout ?? {}), ...layout };
-    if (withRoutes) next.routes = { ...cleanRoutes(cur.routes), ...routes };
-    if (entering.length) {
-      const colors = cleanColors(cur.colors);
-      const back = cleanColors(add.colors);
-      let touched = false;
-      for (const id of entering) {
-        if (back[id]) { colors[id] = back[id]; touched = true; }
-        else if (id in colors) { delete colors[id]; touched = true; }
-      }
-      if (touched) next.colors = colors;
-    }
-    await saveCanvas(cs, saId, next);
-    return { tableIds, viewIds };
+    const { next, entered } = planCanvasAdd(cur, add, shownViews);
+    if (next) await saveCanvas(cs, saId, next);
+    return entered;
   });
 };
+
+/** Lo que suma `addToCanvas` a un canvas. */
+export type CanvasAdd = CanvasMembers & { layout?: Layout; routes?: WireRoutes; colors?: Record<string, string>; pins?: Layout };
+
+/** Lo que `addToCanvas` haría sobre el documento `cur`, sin escribir: el
+ *  documento siguiente (null si no cambia nada) y lo que entra. */
+export function planCanvasAdd(cur: SubjectArea, add: CanvasAdd, shownViews?: string[] | null):
+  { next: SubjectArea | null; entered: Required<CanvasMembers> } {
+  const tables = cur.tableIds ?? [];
+  const tableIds = [...new Set(add.tableIds ?? [])].filter((id) => !tables.includes(id));
+  const views = viewBase(cur, shownViews);
+  const viewIds = views ? [...new Set(add.viewIds ?? [])].filter((id) => !views.includes(id)) : [];
+  const entering = [...tableIds, ...viewIds];
+  const placed = Object.fromEntries(Object.entries(add.layout ?? {}).filter(([id]) => entering.includes(id)));
+  const members = new Set([...tables, ...(views ?? [])]);
+  const pinned = tableIds.length
+    ? Object.entries(add.pins ?? {}).filter(([id]) => members.has(id) && !cur.layout?.[id])
+    : [];
+  const layout = Object.keys(placed).length || pinned.length ? { ...Object.fromEntries(pinned), ...placed } : null;
+  const routes = cleanRoutes(add.routes);
+  const withRoutes = tableIds.length > 0 && Object.keys(routes).length > 0;
+  if (!tableIds.length && !viewIds.length && !layout && !withRoutes) return { next: null, entered: { tableIds, viewIds } };
+  const next: SubjectArea = { ...cur };
+  if (tableIds.length) next.tableIds = [...tables, ...tableIds];
+  if (views && (viewIds.length || !Array.isArray(cur.viewIds))) next.viewIds = [...views, ...viewIds];
+  if (layout) next.layout = { ...(cur.layout ?? {}), ...layout };
+  if (withRoutes) next.routes = { ...cleanRoutes(cur.routes), ...routes };
+  if (entering.length) {
+    const colors = cleanColors(cur.colors);
+    const back = cleanColors(add.colors);
+    let touched = false;
+    for (const id of entering) {
+      if (back[id]) { colors[id] = back[id]; touched = true; }
+      else if (id in colors) { delete colors[id]; touched = true; }
+    }
+    if (touched) next.colors = colors;
+  }
+  return { next, entered: { tableIds, viewIds } };
+}
 
 /** Lo que salió de un canvas: miembros, sus posiciones, su color en ese canvas
  *  y los trazos de wires que se quitaron. */
@@ -325,55 +336,141 @@ const colorsOf = (colors: unknown, ids: Iterable<string>): Record<string, string
  *  Devuelve lo que realmente salió, con sus posiciones, colores y trazos — el
  *  Undo lo repone tal cual. */
 export const removeFromCanvas = async (
-  saId: string, rm: CanvasMembers & { dropRouteIds?: string[]; pins?: Layout }, shownViews?: string[] | null,
+  saId: string, rm: CanvasRemove, shownViews?: string[] | null,
 ): Promise<CanvasMembersOut> => {
   const cs = requireWriteCs('Editing a canvas');
   return inOrder(saId, async () => {
-    const cur = await fetchEffectiveSa(cs, saId);
-    if (!cur) return { tableIds: [], viewIds: [], layout: {}, colors: {}, routes: {} };
-    const next: SubjectArea = { ...cur, id: saId };
-    const gone = new Set<string>();
-    const tables = cur.tableIds ?? [];
-    const outTables = (rm.tableIds ?? []).filter((id) => tables.includes(id));
-    if (outTables.length) {
-      next.tableIds = tables.filter((id) => !outTables.includes(id));
-      outTables.forEach((id) => gone.add(id));
-    }
-    const views = rm.viewIds?.length ? viewBase(cur, shownViews) : null;
-    const outViews = views ? rm.viewIds!.filter((id) => views.includes(id)) : [];
-    if (outViews.length) {
-      next.viewIds = views!.filter((id) => !outViews.includes(id));
-      outViews.forEach((id) => gone.add(id));
-    }
-    let changed = gone.size > 0;
-    if (gone.size && cur.layout) {
-      next.layout = Object.fromEntries(Object.entries(cur.layout).filter(([id]) => !gone.has(id)));
-    }
-    // `pins`: dónde se ven en ese momento los que quedan sin posición
-    // (`pinsForLeaving`): solo si sale una tabla y solo a quien sigue sin
-    // posición en el canvas efectivo, en la misma escritura.
-    const stays = new Set([...(next.tableIds ?? tables), ...(viewBase(next, shownViews) ?? [])]);
-    const pinned = outTables.length
-      ? Object.entries(rm.pins ?? {}).filter(([id]) => stays.has(id) && !gone.has(id) && !cur.layout?.[id])
-      : [];
-    if (pinned.length) next.layout = { ...(next.layout ?? cur.layout ?? {}), ...Object.fromEntries(pinned) };
-    const colors = colorsOf(cur.colors, gone);
-    if (Object.keys(colors).length) {
-      next.colors = Object.fromEntries(Object.entries(cleanColors(cur.colors)).filter(([id]) => !gone.has(id)));
-    }
-    const dropped: WireRoutes = {};
-    if (rm.dropRouteIds?.length && cur.routes) {
-      const routes = cleanRoutes(cur.routes);
-      for (const id of rm.dropRouteIds) {
-        const route = routeOf(routes, id);
-        if (route) { dropped[id] = route; delete routes[id]; changed = true; }
-      }
-      next.routes = routes;
-    }
-    if (changed) await saveCanvas(cs, saId, next);
-    return { tableIds: outTables, viewIds: outViews, layout: positionsOf(cur.layout, gone), colors, routes: dropped };
+    const { next, out } = planCanvasRemove(await fetchEffectiveSa(cs, saId), rm, shownViews);
+    if (next) await saveCanvas(cs, saId, next);
+    return out;
   });
 };
+
+/** Lo que saca `removeFromCanvas` de un canvas. */
+export type CanvasRemove = CanvasMembers & { dropRouteIds?: string[]; pins?: Layout };
+
+/** Lo que `removeFromCanvas` haría sobre el documento `cur`, sin escribir: el
+ *  documento siguiente (null si no cambia nada o el canvas no está) y lo que
+ *  sale, con sus posiciones, colores y trazos. */
+export function planCanvasRemove(cur: SubjectArea | null, rm: CanvasRemove, shownViews?: string[] | null):
+  { next: SubjectArea | null; out: CanvasMembersOut } {
+  if (!cur) return { next: null, out: { tableIds: [], viewIds: [], layout: {}, colors: {}, routes: {} } };
+  const next: SubjectArea = { ...cur };
+  const gone = new Set<string>();
+  const tables = cur.tableIds ?? [];
+  const outTables = (rm.tableIds ?? []).filter((id) => tables.includes(id));
+  if (outTables.length) {
+    next.tableIds = tables.filter((id) => !outTables.includes(id));
+    outTables.forEach((id) => gone.add(id));
+  }
+  const views = rm.viewIds?.length ? viewBase(cur, shownViews) : null;
+  const outViews = views ? rm.viewIds!.filter((id) => views.includes(id)) : [];
+  if (outViews.length) {
+    next.viewIds = views!.filter((id) => !outViews.includes(id));
+    outViews.forEach((id) => gone.add(id));
+  }
+  let changed = gone.size > 0;
+  if (gone.size && cur.layout) {
+    next.layout = Object.fromEntries(Object.entries(cur.layout).filter(([id]) => !gone.has(id)));
+  }
+  // `pins`: dónde se ven en ese momento los que quedan sin posición
+  // (`pinsForLeaving`): solo si sale una tabla y solo a quien sigue sin
+  // posición en el canvas efectivo, en la misma escritura.
+  const stays = new Set([...(next.tableIds ?? tables), ...(viewBase(next, shownViews) ?? [])]);
+  const pinned = outTables.length
+    ? Object.entries(rm.pins ?? {}).filter(([id]) => stays.has(id) && !gone.has(id) && !cur.layout?.[id])
+    : [];
+  if (pinned.length) next.layout = { ...(next.layout ?? cur.layout ?? {}), ...Object.fromEntries(pinned) };
+  const colors = colorsOf(cur.colors, gone);
+  if (Object.keys(colors).length) {
+    next.colors = Object.fromEntries(Object.entries(cleanColors(cur.colors)).filter(([id]) => !gone.has(id)));
+  }
+  const dropped: WireRoutes = {};
+  if (rm.dropRouteIds?.length && cur.routes) {
+    const routes = cleanRoutes(cur.routes);
+    for (const id of rm.dropRouteIds) {
+      const route = routeOf(routes, id);
+      if (route) { dropped[id] = route; delete routes[id]; changed = true; }
+    }
+    next.routes = routes;
+  }
+  return {
+    next: changed ? next : null,
+    out: { tableIds: outTables, viewIds: outViews, layout: positionsOf(cur.layout, gone), colors, routes: dropped },
+  };
+}
+
+/** Máximo de cambios en un solo envío (techo del endpoint del lote). */
+export const LOT_MAX = 2000;
+/** Ids por lectura de canvases: 100 uuid ≈ 4 KB de URL, lejos del tope de 16 KB
+ *  (línea de pedido + cabeceras) del servidor Node del front. */
+const CANVAS_IDS_PER_GET = 100;
+
+/** El lote no entra en un solo envío: no se grabó nada. */
+export class LotTooLargeError extends Error {
+  readonly size: number;
+  constructor(size: number) {
+    super(`This change needs ${size} writes and the limit is ${LOT_MAX} at a time: nothing was saved.`);
+    this.name = 'LotTooLargeError';
+    this.size = size;
+  }
+}
+
+/** Los documentos efectivos de los canvases `ids` (los que están), en tandas de
+ *  `CANVAS_IDS_PER_GET` a la vez. */
+async function readCanvases(cs: string, ids: string[]): Promise<Map<string, SubjectArea>> {
+  const reads: Promise<SubjectArea[]>[] = [];
+  for (let i = 0; i < ids.length; i += CANVAS_IDS_PER_GET) {
+    reads.push(csvc.effective<SubjectArea>(cs, 'subject_areas', { ids: ids.slice(i, i + CANVAS_IDS_PER_GET) }));
+  }
+  const wanted = new Set(ids);
+  const out = new Map<string, SubjectArea>();
+  for (const rows of await Promise.all(reads)) for (const doc of rows) if (wanted.has(doc.id)) out.set(doc.id, doc);
+  return out;
+}
+
+/** Los documentos de los canvases `ids` en la versión abierta (los que están),
+ *  sin esperar sus colas: una foto para decidir qué más leer. */
+export const canvasDocs = async (ids: string[]): Promise<Map<string, SubjectArea>> => {
+  const cs = readCs();
+  return cs && ids.length ? readCanvases(cs, ids) : new Map();
+};
+
+/** Lo que arma `canvasLot`: los cambios del modelo, el documento nuevo de cada
+ *  canvas que cambia (los que no están no se tocan) y lo que devuelve. */
+export interface CanvasLotPlan<T> {
+  changes: BulkChange[];
+  canvases: Map<string, SubjectArea>;
+  result: T;
+}
+
+/** Cambios del modelo y de varios canvases en un solo envío: todo o nada (doc
+ *  133 §4). Toma la cola de cada canvas en orden de id (dos lotes nunca se esperan
+ *  en cruz), lee sus documentos efectivos (null: ya no está; en tandas de
+ *  `CANVAS_IDS_PER_GET`, a la vez) y `build` arma el lote sin escribir nada (no
+ *  puede pedir otra escritura de canvas: esperaría su propia cola). Anota lo
+ *  grabado de cada canvas. Con más cambios de los que admite un envío no graba
+ *  nada (`LotTooLargeError`). */
+export async function canvasLot<T>(saIds: string[], build: (docs: Map<string, SubjectArea | null>) => CanvasLotPlan<T>): Promise<T> {
+  const cs = requireWriteCs('Editing a canvas');
+  const ids = [...new Set(saIds)].sort();
+  const run = async (): Promise<T> => {
+    const docs = new Map<string, SubjectArea | null>(ids.map((id) => [id, null]));
+    for (const [id, doc] of await readCanvases(cs, ids)) docs.set(id, doc);
+    const plan = build(docs);
+    const canvases = [...plan.canvases].map(([id, doc]) => [id, { ...doc, id, ...(doc.layout ? { layout: wholeLayout(doc.layout) } : {}) }] as const);
+    const lot: BulkChange[] = [
+      ...plan.changes,
+      ...canvases.map(([id, doc]): BulkChange => ({ collection: 'subject_areas', entityId: id, op: 'upsert', payload: { ...doc } })),
+    ];
+    if (lot.length > LOT_MAX) throw new LotTooLargeError(lot.length);
+    if (lot.length) await csvc.recordChangesBulk(cs, lot, lot.length);
+    for (const [id, doc] of canvases) noteCanvasWrite(cs, id, doc);
+    return plan.result;
+  };
+  const take = (i: number): Promise<T> => (i === ids.length ? run() : inOrder(ids[i], () => take(i + 1)));
+  return take(0);
+}
 
 /** De `viewIds`, cuáles lista explícitamente el canvas, dónde están y su color
  *  en él — leído en su cola (después de sus escrituras pendientes), sin

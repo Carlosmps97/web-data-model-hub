@@ -6,6 +6,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
 });
 vi.mock('@/features/modeler/services/modeler.service', () => ({}));
 import { useModelerStore } from './useModelerStore';
+import { useUndoStore } from './useUndoStore';
 
 // El Properties de columna es un sidebar propio (selectedColumnId); estas
 // pruebas fijan el contrato de apertura/cierre respecto a la selección.
@@ -50,6 +51,16 @@ describe('useModelerStore — Properties de columna', () => {
     useModelerStore.setState({ selectedColumnId: 'c1' });
     await useModelerStore.getState().deleteColumn('c1');
     expect(useModelerStore.getState().selectedColumnId).toBeNull();
+  });
+
+  // Un borrado desde el menú que todavía lee su impacto no sigue con lo leído
+  // antes de un Undo o Redo: el menú se cierra y el borrado se corta (doc 133 §5).
+  it('un Undo o Redo que empieza cierra el menú contextual de columna', () => {
+    useModelerStore.getState().openColMenu({ x: 10, y: 10, tableId: 't1', colId: 'c1' } as never);
+    expect(useModelerStore.getState().colMenu).not.toBeNull();
+    useUndoStore.setState({ busy: true, running: 'undo' });
+    expect(useModelerStore.getState().colMenu).toBeNull();
+    useUndoStore.setState({ busy: false, running: null });
   });
 
   it('deleteColumn no toca el panel si la borrada es otra columna', async () => {

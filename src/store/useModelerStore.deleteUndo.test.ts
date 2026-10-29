@@ -6,7 +6,7 @@
 // `structure.service` es el real (con su cola por canvas).
 //  · El Undo de borrar una tabla devuelve sus vistas a los canvases con lista
 //    explícita, con su posición, y la tabla a su posición en todos los canvases,
-//    con una escritura por canvas.
+//    en un solo envío (doc 133 §4).
 //  · Si falla una lectura de la cascada no se borra nada.
 //  · Borrar una vista (panel o inspector) tiene el mismo Undo, con posición.
 //  · «Import existing tables» con vistas que no se pudieron leer avisa.
@@ -16,7 +16,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: v
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    ...actual, effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(),
     writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
   };
 });
@@ -45,6 +45,7 @@ import * as viewsSvc from '@/services/views.service';
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { lotTo } from './canvasLot.testutil';
 import type { SubjectArea } from '../features/modeler/services/modeler.service';
 
 type Pos = { x: number; y: number };
@@ -118,12 +119,13 @@ beforeEach(async () => {
       layout: { t1: { x: 9, y: 9 }, v1: { x: 9, y: 209 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
   };
   vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const id = opts?.ids?.[0] as string;
-    log.push(`get:${id}`);
-    const snap = draft[id] ? structuredClone(draft[id]) : null;
+    const ids = opts?.ids ?? [];
+    for (const id of ids) log.push(`get:${id}`);
+    const snaps = ids.filter((id) => draft[id]).map((id) => structuredClone(draft[id]));
     await sleep(2);
-    return (snap ? [snap] : []) as never;
+    return snaps as never;
   });
+  vi.mocked(csvc.recordChangesBulk).mockImplementation(lotTo(gov.recordChangesBulk, csvc.recordChange));
   vi.mocked(csvc.recordChange).mockImplementation(async (_cs, coll, id, op, payload) => {
     log.push(`put:${id}`);
     await sleep(2);
@@ -212,7 +214,7 @@ describe('borrar una tabla y deshacer', () => {
 
   it('deshacer devuelve la tabla y su vista a cada canvas con lista explícita, con sus posiciones', async () => {
     await st().deleteTable('t1');
-    log = [];
+    vi.mocked(csvc.recordChangesBulk).mockClear();
     await useUndoStore.getState().undoLast();
     expect(ops.get('views:v1')).toBe('upsert');                          // la vista revivió en el modelo
     expect(new Set(draft.sa1.tableIds)).toEqual(new Set(['t1', 't2']));
@@ -221,7 +223,10 @@ describe('borrar una tabla y deshacer', () => {
     expect(draft.sa1.layout.t1).toEqual({ x: 0, y: 0 });
     expect(draft.sa2.viewIds).toEqual(['v1']);
     expect(draft.sa2.layout).toEqual({ t1: { x: 5, y: 5 }, v1: { x: 5, y: 205 } });   // la tabla, en su posición
-    expect(puts().sort()).toEqual(['put:sa1', 'put:sa2', 'put:sa3']);   // una escritura por canvas
+    // Un solo envío, con los tres canvases.
+    expect(csvc.recordChangesBulk).toHaveBeenCalledTimes(1);
+    const sent = vi.mocked(csvc.recordChangesBulk).mock.calls[0][1];
+    expect(sent.filter((c) => c.collection === 'subject_areas').map((c) => c.entityId).sort()).toEqual(['sa1', 'sa2', 'sa3']);
   });
 
   it('un canvas sin lista explícita sigue sin lista tras deshacer; la tabla vuelve a su sitio', async () => {
@@ -271,7 +276,13 @@ describe('borrar una tabla cuando falla una lectura de la cascada', () => {
   });
 
   it('si no se pudo anotar dónde estaban sus vistas (para el Undo), tampoco', async () => {
-    vi.mocked(csvc.effective).mockRejectedValueOnce(new Error('sin red'));
+    const read = vi.mocked(csvc.effective).getMockImplementation()!;
+    let fail = true;
+    vi.mocked(csvc.effective).mockImplementation(async (cs, coll, opts) => {
+      // La lectura de un canvas para anotar dónde lista sus vistas.
+      if (fail && (opts?.ids?.length ?? 0) === 1) { fail = false; throw new Error('sin red'); }
+      return read(cs, coll, opts);
+    });
     await expect(st().deleteTable('t1')).rejects.toThrow(DEPENDENTS);
     expect(gov.recordChangesBulk).not.toHaveBeenCalled();
     expect(gov.deleteTable).not.toHaveBeenCalled();

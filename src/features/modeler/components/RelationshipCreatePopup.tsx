@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import Modal from '@/components/ui/Modal';
 import { useModelerStore } from '@/store/useModelerStore';
 import { facetName, facetNouns } from '@/lib/facets';
-import { pushUndo } from '@/store/useUndoStore';
+import { historyAction, pushUndo } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import type { Cardinality } from '@/services/governance.service';
 import {
@@ -50,7 +50,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
   const [rows, setRows] = useState<KeyRowState[]>(() =>
     buildKeyMapping(parentPks, childCols, draft.dropColumnId).map((r) => ({ ...r, roleName: '', inherit: true })));
 
-  const confirm = async () => {
+  const confirm = () => historyAction(async () => {
     setSaving(true);
     // La acción pertenece a la sesión donde empezó (sus escrituras y su inversa
     // cortan si la sesión cambia); un fallo espera la revalidación.
@@ -130,7 +130,7 @@ export default function RelationshipCreatePopup({ draft, onClose, pushToast }: {
     } catch (e) {
       await onError(e);
     } finally { setSaving(false); }
-  };
+  });
 
   return (
     <Modal title="Create relationship" icon="link" size="lg" onClose={() => { if (!saving) onClose(false); }}>

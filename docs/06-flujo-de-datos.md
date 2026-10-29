@@ -452,7 +452,7 @@ backend. No existe escritura directa a producción desde el front.
 | Llamada | Endpoint | Uso |
 |---|---|---|
 | `recordChange(cs, collection, entityId, op, payload)` | `PUT /api/changesets/{id}/changes` | Un cambio (`upsert` o `delete`) con el documento completo. |
-| `recordChangesBulk(cs, changes)` | `PUT /api/changesets/{id}/changes/bulk` | Lote en tandas secuenciales de 1000 cambios; el backend valida cada tanda completa antes de escribir. Lote vacío = cero peticiones. |
+| `recordChangesBulk(cs, changes, chunkSize?)` | `PUT /api/changesets/{id}/changes/bulk` | Lote en tandas secuenciales de 1000 cambios; el backend valida cada tanda completa antes de escribir. Con `chunkSize` igual al largo del lote, viaja entero en un request (lo que se graba todo o nada). Lote vacío = cero peticiones. |
 
 El `projectId` de cada payload lo estampa el backend con el del changeset, que además rechaza con 409
 cualquier referencia a una entidad de otro proyecto. Los permisos (`model.edit`) los exige el backend en
@@ -462,9 +462,10 @@ cada escritura; ver [Seguridad](08-seguridad.md).
 
 Las acciones del store eligen entre un cambio o un lote según cuántas entidades tocan:
 
-- `createTable`: deriva el nombre físico (`gov.physicalize` cuando hace falta), crea la tabla con
-  `gov.createTable` y la agrega al canvas con `struct.addToCanvas` (miembro y posición en la misma
-  escritura del canvas), recarga y apila su Undo.
+- `createTable`: deriva el nombre físico (`gov.physicalize` cuando hace falta) y graba la tabla y su caja
+  en el canvas (miembro, posición y pins) en un solo envío (`createInCanvas`); si el canvas ya no está en
+  la versión, no crea nada. Recarga y apila su Undo. CTAS (`createTableFromSources`) y pegar una tabla
+  (`pasteTable`, con el esquema que nace con la copia) van igual, con sus columnas en el mismo envío.
 - `addColumn`: una columna nueva de la llave entra después de la última PK; las columnas que se corren
   viajan en el mismo lote.
 - `updateColumn`: marcar o desmarcar la PK reubica la columna en la frontera del bloque de llave
@@ -476,7 +477,25 @@ Las acciones del store eligen entre un cambio o un lote según cuántas entidade
   columna (`currentColumn`): una edición que terminó entre tandas no se pisa y una columna borrada no
   revive. Rechaza dejar una PK debajo de una columna que no es de la llave.
 - Borrar una tabla o una columna hace todas sus lecturas (dependencias, vistas, canvases) antes de la
-  primera escritura; si una lectura falla, no se borra nada (`NothingDoneError`).
+  primera escritura; si una lectura falla, no se borra nada (`NothingDoneError`). Lee solo lo necesario:
+  de las tablas hijas, sus columnas hijas por id (`gov.currentColumns`, en tandas de 100 ids), no la tabla
+  entera; de los otros canvases donde está la tabla, su documento (`struct.canvasDocs`), y su diagrama
+  completo solo si alguna de sus tablas no tiene posición guardada (ahí se fija lo que se correría de
+  casilla y dónde se veía la tabla, para su Undo).
+- Las cascadas viajan en un solo envío, todo o nada (doc 133 §4), con `struct.canvasLot`: toma la cola
+  de cada canvas que toca (en orden de id, así dos lotes no se esperan en cruz), lee sus documentos (en
+  tandas de 100 ids) y graba los cambios del modelo y el documento nuevo de cada canvas en un solo
+  request. Lo que suma o saca de cada canvas lo calculan `planCanvasAdd` / `planCanvasRemove`, los mismos
+  de `addToCanvas` / `removeFromCanvas`. Borrar una tabla manda vistas, relaciones, columnas, el FK que
+  se apaga en las hijas, la tabla y cada canvas donde estaba (miembro, vistas, posición, color, trazos de
+  sus wires y pins); su Undo, un solo envío que repone todo. Borrar una relación lee primero las
+  relaciones de la hija y sus columnas hijas (por id) y manda la relación y el FK apagado juntos. Un lote
+  de más de 2000 cambios (el tope del endpoint) va por partes, como antes, con la tabla al final.
+- Respuesta perdida (`sendLot`): si el envío queda sin respuesta (o el servidor falla), se relee lo
+  escrito. Si se grabó, la acción sigue como hecha y su Undo admite ese número de escritura sin dueño
+  (`verifiedLost`), solo si el contador de la versión muestra uno; si no se grabó, «No response from the
+  server: nothing was deleted. Try again.» (o el motivo del servidor, si respondió) y se puede
+  reintentar; si no se pudo saber, el error original.
 - `deleteColumns` (y `deleteColumn`, el caso de una) borra columnas de una tabla en un solo lote, y en un
   solo request: las relaciones elegidas en el diálogo de impacto (sin los pares de esas columnas, o borradas
   si no les queda ninguno), la marca FK que queda huérfana en la otra punta (salvo en una columna que también
@@ -588,9 +607,9 @@ position: …», «Couldn't save the drawings: …»).
 
 ### Guardas de sesión en acciones de varias escrituras
 
-Una acción que escribe varias veces (crear una tabla y agregarla al canvas, borrar una tabla con su
-cascada, la inversa de un Undo) toma `pinSession()` al empezar y llama a `pin.check()` antes de cada
-escritura que sigue a un `await`. Si en el medio se abre otra versión, otro modo u otro proyecto, lo que
+Una acción que escribe varias veces (pegar columnas, la inversa de un Undo) toma `pinSession()` al
+empezar y llama a `pin.check()` antes de cada escritura que sigue a un `await`; las que viajan en un solo
+envío (`sendLot`) lo verifican al armarlo, justo antes de mandarlo. Si en el medio se abre otra versión, otro modo u otro proyecto, lo que
 falta no se escribe en ninguna parte y la acción termina con `SessionChangedError`, que nadie anuncia: la
 sesión en pantalla ya no es la suya.
 
@@ -638,9 +657,9 @@ del draft: el versionado y el diff ven upserts y deletes normales, sin mecánica
 | Apilado | Cada acción instrumentada llama a `pushUndo(label, run, pin)` con el pin con que empezó: si la sesión cambió mientras la acción corría, el paso no entra en la pila de la sesión nueva. Una acción nueva vacía lo pendiente de rehacer. Mientras corre un paso, lo que se apila se ignora y lo pendiente de rehacer se vacía. |
 | Ida y vuelta | `undoLast()` corre el paso y deja su contrario en `redoStack`; `redoLast()` corre ese y deja el suyo en `stack`, con el mismo label. Los borrados en cascada (`deleteTable`, `deleteColumns`, `deleteView`) entregan su inversa con `onUndo`: rehacerlos los recalcula con lo vigente. |
 | Base del Redo | Las escrituras del Undo (números `writeSeq` consecutivos, avisados por `onDraftWrite`) fijan la base. Antes de escribir, `redoLast()` lee el contador (`writeSeqOf`, `GET /api/changesets/{cs_id}/seq`): si no es la base, vacía lo pendiente y avisa «This version changed after the undo: there's nothing to redo.». Un hueco en las escrituras del paso también deja sin Redo. |
-| Lo que ya se estaba grabando | `undoLast()` y `redoLast()` esperan antes de tomar la entrada lo que esta pestaña ya mandó a escribir (`draftWorkSettled()`: las escrituras de `changeset.service` y las filas por canvas `inOrder` y por objeto `inObjectOrder`): su aviso llega fuera del paso y cancela lo pendiente de rehacer, y si esa acción apila su inversa mientras tanto, es la que se deshace. Los guardados con debounce todavía sin disparar (dibujos 500 ms, campos 400 ms) no cuentan. |
+| Lo que ya se estaba grabando | `undoLast()` y `redoLast()`, con la pantalla ya en espera, mandan lo agendado tras una espera (`flushPendingWrites()`: campos 400 ms y nombres de la columna, dibujos 500 ms, flechas sobre un punto de wire 600 ms, el selector de color 700 ms) y esperan antes de tomar la entrada todo el trabajo en vuelo (`draftWorkSettled()`: las escrituras de `changeset.service`, las filas por canvas `inOrder` y por objeto `inObjectOrder`, y las acciones con Undo enteras, `historyAction`). Lo que empezó antes de pulsar es lo que se deshace; lo que no tiene Undo propio cancela lo pendiente de rehacer. Los guardados de una misma columna van en fila y cada uno suma lo que grabaron los anteriores de la fila (`_columnWrites`): dos campos grabados a la vez no se pisan. |
 | Disparo | Botones **Undo** y **Redo** de la Toolbar; Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z y Ctrl/Cmd+Y en el canvas. Al terminar se muestra «Undid: <label>» / «Redid: <label>». |
-| Concurrencia | `busy` impide dos pasos a la vez; no hay overlay bloqueante. Send for Approval, descartar lo borrado por otra versión y la carga Excel no empiezan mientras corre un paso (avisan que se intente al terminar). |
+| Concurrencia | `busy` impide dos pasos a la vez. Mientras corre, `lib/historyWait.ts` se queda con el teclado y el puntero (captura en `window` con `stopImmediatePropagation`; pasan los atajos del navegador y lo que dispara el código), el menú contextual de columna se cierra y, con un botón apretado, Undo y Redo no corren; `HistoryOverlay` muestra el aviso a los 300 ms sin tomar el puntero. Send for Approval, descartar lo borrado por otra versión y la carga Excel no empiezan mientras corre un paso (avisan que se intente al terminar). |
 | Pila cerrada | `clear({ until })` vacía las dos pilas y las deja cerradas para la versión actual hasta que la promesa termine. Lo usa la carga desde Excel mientras aplica. |
 | Pre-imágenes | Los pasos reponen documentos completos o, en los guardados de campos, solo esos campos sobre lo vigente. Borrar una vista toma su pre-imagen del documento de la vista (`tableViews` o `currentView` de `views.service`), no de la copia del canvas: el diagrama trae las vistas sin el CREATE VIEW original de Erwin (`sql`). |
 
@@ -662,7 +681,8 @@ resultado:
   paso es fresco y alcanzó a escribir, el aviso no ofrece reintentar y lo pendiente de rehacer se vacía.
   Un Undo fresco (`freshStep`) que alcanzó a escribir vuelve a su pila, pero al reintentarse no deja qué
   rehacer: su contrario partiría de un estado a medias. El candado del Undo deja pasar el reintento si los
-  números sin dueño no son más que las escrituras sin respuesta de ese paso.
+  números sin dueño no son más que las escrituras sin respuesta de ese paso. Un borrado en cascada que
+  verificó su lote sin respuesta (`sendLot`) devuelve su contrario con ese margen (`verifiedLost`).
 - **Cualquier otro error**: la entrada se descarta (no bloquea las anteriores), el error se muestra y lo que
   dependía de ella para rehacer se vacía.
 

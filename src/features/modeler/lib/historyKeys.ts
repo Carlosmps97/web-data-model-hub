@@ -11,6 +11,7 @@ import { useBusyStore } from '@/store/useBusyStore';
 import { failureText, useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { OtherCanvasError, StaleUndoError, useUndoStore, type UndoEntry } from '@/store/useUndoStore';
+import { pointerHeld } from './historyWait';
 import { pinSession, reportWriteError } from './sessionGuard';
 
 export type HistoryCommand = 'undo' | 'redo';
@@ -27,9 +28,21 @@ export function historyShortcut(e: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrl
 type Notify = (message: string, kind?: 'err') => void;
 
 /** Deshace o rehace y avisa: «Undid: …» / «Redid: …», o el motivo si no pudo.
- *  Sin nada que hacer o con un paso en curso no hace nada. */
+ *  Sin nada que hacer o con un paso en curso no hace nada. Con un diálogo
+ *  abierto tampoco (varios dejan la barra a la vista: el botón no deshace por
+ *  detrás, como el atajo), ni con un botón apretado (un arrastre en curso
+ *  grabaría al soltar, en medio del paso: doc 133 §5); esos dos lo dicen en un
+ *  solo aviso (las repeticiones lo reemplazan). */
 export function runHistory(cmd: HistoryCommand, notify: Notify): void {
   const history = useUndoStore.getState();
+  if (history.busy) return;
+  if (modalOpen()) { toast.info(`Close the dialog first, then ${cmd}.`, { id: 'dmh-history-dialog' }); return; }
+  if (pointerHeld()) {
+    if ((cmd === 'undo' ? history.stack : history.redoStack).length) {
+      toast.info(`Finish dragging first, then ${cmd}.`, { id: 'dmh-history-drag' });
+    }
+    return;
+  }
   void (cmd === 'undo' ? history.undoLast() : history.redoLast())
     .then((label) => { if (label) notify(`${cmd === 'undo' ? 'Undid' : 'Redid'}: ${label}`); })
     .catch((e: unknown) => {

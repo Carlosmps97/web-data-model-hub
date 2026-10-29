@@ -20,7 +20,7 @@ describe('los avisos de éxito, solo en la sesión donde se pidió', () => {
   });
 
   it('PasteColumnsPopup › Paste: el aviso mira que la sesión siga', () => {
-    const body = /const confirm = async \(\) => \{([\s\S]*?)\n {2}\};/.exec(code('PasteColumnsPopup.tsx'))?.[1] ?? '';
+    const body = /const confirm = \(\) => historyAction\(async \(\) => \{([\s\S]*?)\n {2}\}\);/.exec(code('PasteColumnsPopup.tsx'))?.[1] ?? '';
     expect(body.indexOf('const pin = pinSession();')).toBeGreaterThan(-1);
     expect(body).toMatch(/if \(pin\.holds\(\)\) pushToast\(`\$\{cols\.length\}/);
   });

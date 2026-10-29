@@ -29,7 +29,7 @@ describe('draftSeqs', () => {
   // «Visto» = lo que trae una carga del diagrama: sus datos están en pantalla. Una
   // escritura propia o una lectura del contador no recargan nada.
   it('la marca guarda lo más alto que trajo una carga; las escrituras propias no lo suben', () => {
-    expect(markDraft(CS)).toEqual({ seen: null, unconfirmed: 0 });
+    expect(markDraft(CS)).toEqual({ seen: null, unconfirmed: 0, first: null });
     noteSeen(CS, 10);
     announceDraftWrite(CS, [], 12);
     noteSeen(CS, 9);    // una carga más vieja no baja lo visto
@@ -40,6 +40,12 @@ describe('draftSeqs', () => {
   it('sin nada visto, cuenta desde la primera escritura propia de la sesión', () => {
     announceDraftWrite(CS, [], 20);
     expect(foreignWrites(CS, null, 22)).toEqual([21, 22]);
+    expect(markDraft(CS)).toEqual({ seen: null, unconfirmed: 0, first: 20 });
+  });
+
+  it('una escritura sin respuesta no da un primer número (no se sabe cuál fue)', () => {
+    announceDraftWrite(CS, [], undefined, true);
+    expect(markDraft(CS)).toEqual({ seen: null, unconfirmed: 0, first: null });
   });
 
   it('sin base (nada visto al empezar la acción), cuenta desde lo primero visto en la sesión', () => {
@@ -79,7 +85,7 @@ describe('draftSeqs', () => {
     announceDraftWrite(CS, [], 3);
     announceDraftWrite(CS, [], undefined, true);
     forgetDraftSeqs();
-    expect(markDraft(CS)).toEqual({ seen: null, unconfirmed: 0 });
+    expect(markDraft(CS)).toEqual({ seen: null, unconfirmed: 0, first: null });
     expect(foreignWrites(CS, 2, 3)).toEqual([3]);
   });
 

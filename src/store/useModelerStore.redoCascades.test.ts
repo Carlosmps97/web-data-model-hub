@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/services/changeset.service', async (orig) => ({
   ...(await import('@/store/draftLedger.testutil')).withDraftLedger(await orig()),
-  effective: vi.fn(), recordChange: vi.fn(),
+  effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(),
 }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
 vi.mock('../features/modeler/services/modeler.service', () => ({
@@ -91,13 +91,21 @@ function apply(ch: gov.BulkChange) {
     default: throw new Error(`colección inesperada ${ch.collection}`);
   }
 }
-/** Un canvas cuya próxima lectura, después del próximo lote, se cae sin respuesta. */
-let dropAfterLot: { canvas: string; lot: boolean } | null = null;
 const write = async (changes: gov.BulkChange[]) => {
   await sleep(1); changes.forEach(apply); draftLedger.write(CS, changes);
-  if (dropAfterLot) dropAfterLot.lot = true;
   return {} as never;
 };
+/** Graba un canvas como el backend: sin lo que el draft ya no tiene. */
+function saveCanvas(id: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) {
+  if (op === 'delete') { delete draft[id]; return; }
+  const sa = clone(payload) as unknown as SubjectArea;
+  sa.tableIds = sa.tableIds.filter((t) => tables.has(t));
+  if (Array.isArray(sa.viewIds)) sa.viewIds = sa.viewIds.filter((v) => views.has(v));
+  draft[id] = sa;
+}
+/** Lo que le pasa al próximo envío único (`canvasLot`): sin respuesta, grabado o no. */
+let lotFault: null | 'lost' | 'lost-saved' = null;
+const NO_ANSWER = "The server didn't respond within 30s — try again in a moment.";
 const sources = (v: View) => [...new Set([...(v.sourceTableIds ?? []), ...(v.sources ?? []).map((s) => s.tableId)])].filter(Boolean) as string[];
 const listedIn = (vid: string) => Object.values(draft).filter((sa) => (sa.viewIds ?? []).includes(vid)).map((sa) => ({ id: sa.id, name: sa.name }));
 
@@ -162,27 +170,31 @@ beforeEach(async () => {
       layout: { t1: { x: 9, y: 9 }, t2: { x: 500, y: 9 }, v1: { x: 9, y: 209 } }, routes: { r1: R2 }, colors: {},
       drawings: [], udpValues: {} } as SubjectArea,
   };
-  dropAfterLot = null;
-  vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const id = opts?.ids?.[0] as string;
+  lotFault = null;
+  vi.mocked(csvc.effective).mockImplementation(async (_cs, coll, opts) => {
     await sleep(1);
-    if (dropAfterLot?.lot && dropAfterLot.canvas === id) {
-      dropAfterLot = null;
-      throw new ApiError("The server didn't respond within 30s — try again in a moment.", 0, null, '/api/x');
-    }
-    return (draft[id] ? [clone(draft[id])] : []) as never;
+    const ids = opts?.ids ?? [];
+    if (coll === 'canonical_columns') return ids.filter((id) => columns.has(id)).map((id) => clone(columns.get(id)!)) as never;
+    if (coll !== 'subject_areas') throw new Error(`lectura inesperada ${coll}`);
+    return ids.filter((id) => draft[id]).map((id) => clone(draft[id])) as never;
   });
   vi.mocked(csvc.recordChange).mockImplementation(async (cs, coll, id, op, payload) => {
     await sleep(1);
     if (coll !== 'subject_areas') throw new Error(`recordChange inesperado ${coll}`);
-    if (op === 'delete') delete draft[id];
-    else {
-      const sa = clone(payload) as unknown as SubjectArea;
-      sa.tableIds = sa.tableIds.filter((t) => tables.has(t));
-      if (Array.isArray(sa.viewIds)) sa.viewIds = sa.viewIds.filter((v) => views.has(v));
-      draft[id] = sa;
-    }
+    saveCanvas(id, op, payload);
     draftLedger.write(cs);
+    return {} as never;
+  });
+  // El envío único: el modelo y los canvases juntos, un solo número.
+  vi.mocked(csvc.recordChangesBulk).mockImplementation(async (cs, changes) => {
+    await sleep(1);
+    const fault = lotFault;
+    lotFault = null;
+    if (fault === 'lost') { draftLedger.lost(cs, changes); throw new ApiError(NO_ANSWER, 0, null, '/api/x'); }
+    for (const c of changes) if (c.collection !== 'subject_areas') apply(c);
+    for (const c of changes) if (c.collection === 'subject_areas') saveCanvas(c.entityId, c.op, c.payload);
+    if (fault === 'lost-saved') { draftLedger.foreign(); draftLedger.lost(cs, changes); throw new ApiError(NO_ANSWER, 0, null, '/api/x'); }
+    draftLedger.write(cs, changes);
     return {} as never;
   });
   vi.mocked(gov.recordChangesBulk).mockImplementation(write);
@@ -331,26 +343,45 @@ describe('Redo de altas y cascadas', () => {
 
   // Un borrado en cascada relee lo vigente: si se cae a mitad, re-correrlo parte
   // de un estado a medias y su contrario saldría incompleto.
-  it('rehacer «Delete table» que se cae a mitad: no se reintenta ni deja un Undo incompleto', async () => {
+  it('rehacer «Delete table» sin respuesta y sin grabar: nada a medias, el Redo vuelve y el reintento la borra entera', async () => {
     await st().deleteTable('t1');
+    const after = snapshot();
     await undo();
-    dropAfterLot = { canvas: 'sa2', lot: false };            // la lectura de «Dos» después del lote
-    const err = await redo().catch((e: Error) => e.message);
-    expect(err).toMatch(/^Couldn't redo Delete table M_CLIENTE: /);
-    expect(err).not.toMatch(/try again/);
-    expect(redoLabels()).toEqual([]);
-    expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual([]);
+    const before = snapshot();
+    lotFault = 'lost';
+    await expect(redo()).rejects.toThrow('No response from the server: nothing was redone. Press Redo to try again.');
+    expect(snapshot()).toEqual(before);
+    expect(redoLabels()).toEqual(['Delete table M_CLIENTE']);
+    expect(await redo()).toBe('Delete table M_CLIENTE');
+    expect(snapshot()).toEqual(after);
+    expect(await undo()).toBe('Delete table M_CLIENTE');
+    expect(snapshot()).toEqual(before);
   });
 
-  it('deshacer «Create table» que se cae a mitad: el reintento la borra y no deja un Redo incompleto', async () => {
+  it('rehacer «Delete table» sin respuesta pero grabado: rehecho entero y su Undo lo repone', async () => {
+    await st().deleteTable('t1');
+    const after = snapshot();
+    await undo();
+    const before = snapshot();
+    lotFault = 'lost-saved';
+    expect(await redo()).toBe('Delete table M_CLIENTE');
+    expect(snapshot()).toEqual(after);
+    expect(await undo()).toBe('Delete table M_CLIENTE');
+    expect(snapshot()).toEqual(before);
+  });
+
+  it('deshacer «Create table» sin respuesta y sin grabar: el reintento la borra y deja qué rehacer', async () => {
     await st().createTableFromSources({ logicalName: 'copia', columns: [
       { logicalName: 'cod', physicalName: 'CODCLIENTE', dataType: 'STRING', typeOverridden: false, isPrimaryKey: true, sourceTable: 'M_CLIENTE' },
     ] } as never);
-    dropAfterLot = { canvas: 'sa1', lot: false };            // la lectura de «Uno» después del lote
-    await expect(undo()).rejects.toThrow('Press Undo to try again.');
+    lotFault = 'lost';
+    await expect(undo()).rejects.toThrow('No response from the server: nothing was undone. Press Undo to try again.');
+    expect([...tables.values()].some((t) => t.physicalName === 'COPIA')).toBe(true);
     expect(await undo()).toBe('Create table COPIA');
     expect([...tables.values()].some((t) => t.physicalName === 'COPIA')).toBe(false);
-    expect(redoLabels()).toEqual([]);
+    expect(redoLabels()).toEqual(['Create table COPIA']);
+    expect(await redo()).toBe('Create table COPIA');
+    expect([...tables.values()].some((t) => t.physicalName === 'COPIA')).toBe(true);
   });
 
   it('rehacer «Delete view» con la lectura de dónde se usa caída: no borra nada y la entrada vuelve para reintentar', async () => {
@@ -365,7 +396,10 @@ describe('Redo de altas y cascadas', () => {
   });
 
   it('borrar una relación (apaga la FK de la hija): rehacer la recalcula, también con otro canvas abierto', async () => {
-    await roundTrip(() => st().deleteRelationship('r1'), 'Delete relationship', { otherCanvas: 'sa2' });
+    await roundTrip(async () => {
+      await st().deleteRelationship('r1');
+      expect(columns.get('c')?.isForeignKey).toBe(false);
+    }, 'Delete relationship', { otherCanvas: 'sa2' });
   });
 
   it('rehacer un borrado lo recalcula: una vista nueva sobre la tabla también se va, y el siguiente Undo la repone', async () => {

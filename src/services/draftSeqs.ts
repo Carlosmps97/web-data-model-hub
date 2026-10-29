@@ -31,17 +31,20 @@ const of = (cs: string): Seqs => {
 };
 
 /** Lo que una acción sabe de su versión al empezar (va en su pin): el contador
- *  más alto que trajo una carga y las escrituras propias sin respuesta hasta esa
- *  carga (el candado mira lo escrito desde ahí). */
+ *  más alto que trajo una carga, las escrituras propias sin respuesta hasta esa
+ *  carga (el candado mira lo escrito desde ahí) y, si no hubo carga, el primer
+ *  número que conoció la sesión (el candado mira desde él; sin ninguno, no se
+ *  sabe desde dónde). */
 export interface DraftMark {
   seen: number | null;
   unconfirmed: number;
+  first: number | null;
 }
 
 export function markDraft(cs: string | null | undefined): DraftMark | null {
   if (!cs) return null;
   const s = byVersion.get(cs);
-  return { seen: s?.seen ?? null, unconfirmed: s?.unconfirmedAtSeen ?? 0 };
+  return { seen: s?.seen ?? null, unconfirmed: s?.unconfirmedAtSeen ?? 0, first: s?.first ?? null };
 }
 
 /** El contador que trajo una carga del diagrama ya instalada. */

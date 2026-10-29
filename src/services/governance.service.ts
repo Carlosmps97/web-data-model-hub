@@ -138,6 +138,21 @@ export const currentTable = async (id: string): Promise<CanonicalTable | null> =
   const [t] = await csvc.effective<CanonicalTable>(a, 'canonical_tables', { ids: [id] });
   return t ?? null;
 };
+/** Ids por lectura de columnas: 100 uuid ≈ 4 KB de URL, lejos del tope de
+ *  16 KB (línea de pedido + cabeceras) del servidor Node del front. */
+const COLUMN_IDS_PER_GET = 100;
+/** Documentos vigentes de columnas en la working copy (las que existen), por
+ *  id —sin bajar su tabla entera—, en tandas de `COLUMN_IDS_PER_GET` a la vez;
+ *  sin sesión, ninguno. */
+export const currentColumns = async (ids: string[]): Promise<CanonicalColumn[]> => {
+  const a = active();
+  if (!a || !ids.length) return [];
+  const reads: Promise<CanonicalColumn[]>[] = [];
+  for (let i = 0; i < ids.length; i += COLUMN_IDS_PER_GET) {
+    reads.push(csvc.effective<CanonicalColumn>(a, 'canonical_columns', { ids: ids.slice(i, i + COLUMN_IDS_PER_GET) }));
+  }
+  return (await Promise.all(reads)).flat();
+};
 export const listTables = async () => {
   const a = active();
   return a ? csvc.effective<CanonicalTable>(a, 'canonical_tables') : apiGet<CanonicalTable[]>(`${PROJECT()}/catalog/tables`);

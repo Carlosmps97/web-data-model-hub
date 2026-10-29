@@ -16,10 +16,11 @@
  * llamarlos: si mientras corre se abre otra versión (o la revalidación la
  * degrada), lo que le falta se escribiría en esa otra. Por eso recibe el pin de
  * su sesión y corta antes de cada escritura que siga a un `await` si la sesión
- * ya es otra. Sin overlay bloqueante: sería un flash en cada Ctrl+Z y `busy` ya
- * impide dos pasos a la vez. Una acción que termina después de un cambio de
- * sesión no deja su inversa en la pila de la nueva (`pushUndo` con el pin de la
- * acción).
+ * ya es otra. Mientras corre un paso la pantalla no responde (`historyWait`):
+ * nada nuevo empieza en el medio; su capa es transparente y el aviso sale a los
+ * 300 ms (`HistoryOverlay`), sin parpadeo en cada Ctrl+Z. Una acción que termina
+ * después de un cambio de sesión no deja su inversa en la pila de la nueva
+ * (`pushUndo` con el pin de la acción).
  *
  * Rehacer solo sobre la versión tal como la dejó el Undo: las escrituras del
  * Undo (números consecutivos del contador `writeSeq` de la versión, avisados
@@ -29,7 +30,10 @@
  * rehace. Cualquier escritura de esta pestaña en la versión fuera de un
  * Undo/Redo vacía lo pendiente de rehacer en el acto. Undo y Redo esperan
  * antes lo que esta pestaña ya mandó a escribir (`draftWorkSettled`): su aviso
- * cae fuera del paso y la acción que lo mandó queda arriba del historial.
+ * cae fuera del paso y la acción que lo mandó queda arriba del historial. Cada
+ * acción con Undo corre entera como trabajo en vuelo (`historyAction`, doc 133
+ * §5): la espera incluye su refresco y su entrada en la pila, así lo que empezó
+ * antes de pulsar Ctrl+Z termina y es lo que se deshace.
  *
  * Deshacer también tiene candado (doc 133): cada acción recuerda lo visto de su
  * versión al empezar (su pin); antes de deshacerla se lee el contador y, si
@@ -41,7 +45,7 @@ import { create } from 'zustand';
 import { afterRevalidation, openCanvasId, pinSession, touchesVersion, type SessionPin } from '@/features/modeler/lib/sessionGuard';
 import { onDraftWrite, writeSeqOf } from '@/services/changeset.service';
 import { foreignWrites, markDraft, unconfirmedSince, type DraftMark } from '@/services/draftSeqs';
-import { draftWorkSettled } from '@/services/draftWork';
+import { draftWorkSettled, flushPendingWrites, hasPendingWrites, trackDraftWork } from '@/services/draftWork';
 import { ApiError, errorReason } from '@/services/http';
 import { useSessionStore } from '@/store/useSessionStore';
 
@@ -64,6 +68,9 @@ export interface UndoEntry {
   /** Lo visto de la versión al empezar la acción: lo escrito después que no
    *  sea de esta pestaña bloquea deshacerla. */
   mark?: DraftMark | null;
+  /** Escrituras de la acción que quedaron sin respuesta y se verificaron
+   *  grabadas (`verifiedLost`): el candado admite ese número sin dueño. */
+  lost?: number;
 }
 
 const CAP = 50;
@@ -90,6 +97,9 @@ let epoch = 0;
 /** Sube con cada `clear`: un Undo que falla después de que el historial se
  *  vació mientras corría no vuelve a la pila. */
 let generation = 0;
+/** Acciones con Undo en vuelo (`historyAction`): mientras haya alguna, lo de
+ *  arriba de la pila todavía puede cambiar. */
+let actionsInFlight = 0;
 /** Escrituras en la versión mientras corre un paso: sus números, si alguna
  *  llegó sin número y cuántas fallaron sin saberse si llegaron. */
 interface Run { seqs: number[]; unknown: boolean; lost: number }
@@ -108,6 +118,17 @@ function written(r: Run): 'none' | { first: number; last: number } | null {
 
 /** Los pasos marcados con `freshStep`. */
 const freshSteps = new WeakSet<HistoryStep>();
+/** Los pasos marcados con `verifiedLost`, hasta que se apilan: cuántas
+ *  escrituras sin respuesta de su acción se verificaron grabadas. */
+const verified = new WeakMap<HistoryStep, number>();
+/** El margen marcado en `step`: pasa a la entrada que se apila con él, una
+ *  sola vez (el mismo paso, devuelto otra vez por un Redo, ya no lo trae). */
+const takeLost = (step: HistoryStep | null): number | undefined => {
+  if (!step) return undefined;
+  const n = verified.get(step);
+  verified.delete(step);
+  return n || undefined;
+};
 /** Entradas de Undo de un paso fresco que falló después de poder escribir y
  *  volvieron a la pila: al reintentarse, su contrario no sirve para rehacer. */
 const partialUndos = new WeakSet<UndoEntry>();
@@ -162,13 +183,19 @@ const readCounter = (cs: string): Promise<{ ok: true; seq: number } | { ok: fals
 
 /** Candado del Undo: por qué no se deshace, si algo que no es de esta pestaña
  *  se escribió en la versión después de que empezó la acción (hasta el contador
- *  leído); null si no. El margen de un reintento vale una sola vez y solo para
- *  esa entrada: lo admitido no pasa a ser propio. */
+ *  leído); null si no. Se admiten las escrituras de la acción sin respuesta que
+ *  se verificaron grabadas (`verifiedLost`); un reintento parte del contador ya
+ *  leído (después de ellas) y admite solo las suyas, una sola vez: lo admitido
+ *  no pasa a ser propio. Una acción que empezó sin nada visto ni conocido de la
+ *  versión no sabe dónde cayó lo suyo sin respuesta: con un margen así no se
+ *  deshace. */
 function lockRefusal(cs: string, entry: UndoEntry, seq: number): 'elsewhere' | 'unconfirmed' | null {
   const again = retries.get(entry);
-  const allowed = again?.lost ?? 0;
-  const odd = foreignWrites(cs, again ? again.from : entry.mark?.seen ?? null, seq);
-  if (odd.length <= allowed) {
+  const from = again ? again.from : entry.mark?.seen ?? entry.mark?.first ?? null;
+  const unknown = from === null && (entry.lost ?? 0) > 0;
+  const allowed = again ? again.lost : entry.lost ?? 0;
+  const odd = foreignWrites(cs, from, seq);
+  if (!unknown && odd.length <= allowed) {
     retries.delete(entry);
     return null;
   }
@@ -198,6 +225,10 @@ interface UndoState {
   busy: boolean;
   /** Cuál corre (el botón que muestra la espera). */
   running: 'undo' | 'redo' | null;
+  /** Pasos de Undo o Redo que corrieron: los paneles que copian el modelo para
+   *  editarlo se vuelven a sembrar al cambiar (lo tipeado y grabado antes del
+   *  paso ya no es lo vigente). */
+  steps: number;
   /** Apila la inversa de una acción nueva y vacía lo pendiente de rehacer,
    *  salvo que `e.pin` indique que la sesión de la acción es distinta de la
    *  actual. Mientras corre un paso, no apila y vacía lo pendiente de rehacer. */
@@ -230,6 +261,7 @@ export const useUndoStore = create<UndoState>((set, get) => {
    *  reintento de un paso fresco que había escrito parte. Lo que ya había sigue
    *  solo si el Undo empezó justo donde lo dejó el anterior. */
   const keepRedo = (entry: UndoEntry, back: HistoryStep | null, r: Run, start: number) => {
+    takeLost(back);   // el margen es de una entrada de Undo, no de lo que se rehace
     const w = written(r);
     if (epoch !== start || held() || !back || partialUndos.has(entry) || w === null || w === 'none') { get().dropRedo(); return; }
     const keep = redoBase !== null && w.first === redoBase + 1 ? get().redoStack : [];
@@ -250,7 +282,9 @@ export const useUndoStore = create<UndoState>((set, get) => {
     redoStack: [],
     busy: false,
     running: null,
+    steps: 0,
     push: (e) => {
+      const lost = e.lost ?? takeLost(e.run);
       if (held()) return;
       if (get().busy && runningPin?.holds()) { get().dropRedo(); return; }
       if (e.pin && !e.pin.holds()) return;
@@ -265,6 +299,7 @@ export const useUndoStore = create<UndoState>((set, get) => {
         canvasId: e.pin && e.pin.canvasId !== undefined ? e.pin.canvasId : e.canvasId,
         mark: e.pin && e.pin.mark !== undefined ? e.pin.mark
           : e.mark !== undefined ? e.mark : markDraft(useSessionStore.getState().activeChangesetId),
+        ...(lost ? { lost } : {}),
       };
       set({ stack: [...get().stack, entry].slice(-CAP), redoStack: [] });
     },
@@ -291,17 +326,27 @@ export const useUndoStore = create<UndoState>((set, get) => {
       if (get().redoStack.length) set({ redoStack: [] });
     },
     undoLast: async () => {
-      if (get().busy || !get().stack.length || held()) return null;
+      if (get().busy || held()) return null;
+      // Con una acción en curso o algo agendado, lo de arriba se decide después
+      // de esperarlos.
+      const settling = actionsInFlight > 0 || hasPendingWrites();
+      if (!settling && !get().stack.length) return null;
       const top = get().stack[get().stack.length - 1];
-      if (elsewhere(top)) throw new OtherCanvasError('undo', top.canvasId);
+      if (!settling && elsewhere(top)) throw new OtherCanvasError('undo', top.canvasId);
       const pin = pinSession();
       const cs = useSessionStore.getState().activeChangesetId;
       set({ busy: true, running: 'undo' });
       const stop = () => set({ busy: false, running: null });
-      // Lo que esta pestaña ya mandó a escribir termina antes: su aviso cae fuera
-      // del paso y, si la acción que lo mandó apila su inversa, es la que se deshace.
+      // Lo agendado tras una espera de tecleo se manda ya y, con lo que esta
+      // pestaña ya mandó a escribir, termina antes: su aviso cae fuera del paso y,
+      // si la acción que lo mandó apila su inversa, es la que se deshace.
+      flushPendingWrites();
       await draftWorkSettled();
       if (!pin.holds() || held() || !get().stack.length) { stop(); return null; }
+      // Lo de arriba ahora (una acción pudo terminar mientras se esperaba): si es
+      // de otro canvas, se avisa sin leer nada.
+      const settled = get().stack[get().stack.length - 1];
+      if (elsewhere(settled)) { stop(); throw new OtherCanvasError('undo', settled.canvasId); }
       // El contador se lee recién ahora (lo ajeno que cayó mientras se esperaba
       // también cuenta), y otra vez si mientras se leía terminó otra acción.
       let seq: number | null = null;
@@ -359,19 +404,21 @@ export const useUndoStore = create<UndoState>((set, get) => {
         // Pudo dejar algo a medias: lo pendiente de rehacer ya no calza.
         get().dropRedo();
         throw e;
-      } finally { runningPin = null; run = null; set({ busy: false, running: null }); }
+      } finally { runningPin = null; run = null; set((s) => ({ busy: false, running: null, steps: s.steps + 1 })); }
     },
     redoLast: async () => {
       const cs = useSessionStore.getState().activeChangesetId;
       if (get().busy || !get().redoStack.length || held() || !cs) return null;
       const top = get().redoStack[get().redoStack.length - 1];
-      if (elsewhere(top)) throw new OtherCanvasError('redo', top.canvasId);
+      if (actionsInFlight === 0 && !hasPendingWrites() && elsewhere(top)) throw new OtherCanvasError('redo', top.canvasId);
       const pin = pinSession();
       const start = epoch;
       const gen = generation;
       set({ busy: true, running: 'redo' });
-      // Lo que esta pestaña ya mandó a escribir termina antes: si escribió en la
-      // versión, su aviso vacía lo pendiente y ya no hay qué rehacer.
+      // Lo agendado se manda ya y, con lo que esta pestaña ya mandó a escribir,
+      // termina antes: si escribió en la versión, su aviso vacía lo pendiente y ya
+      // no hay qué rehacer.
+      flushPendingWrites();
       await draftWorkSettled();
       const { redoStack } = get();
       if (!pin.holds() || held()) { set({ busy: false, running: null }); return null; }
@@ -385,6 +432,7 @@ export const useUndoStore = create<UndoState>((set, get) => {
       const r: Run = { seqs: [], unknown: false, lost: 0 };
       let writeSeq = 0;
       let checked = false;
+      let ran = false;
       set({ redoStack: redoStack.slice(0, -1) });
       try {
         // Candado: la versión sigue donde la dejó el último Undo/Redo.
@@ -396,9 +444,13 @@ export const useUndoStore = create<UndoState>((set, get) => {
         const mark = markDraft(cs);
         runningPin = pin;
         run = r;
+        ran = true;
         const back = await entry.run(pin);
+        const lost = takeLost(back);
         if (!pin.holds()) return null;
-        if (back && !held() && generation === gen) set((s) => ({ stack: [...s.stack, { label: entry.label, run: back, canvasId: entry.canvasId, mark }].slice(-CAP) }));
+        if (back && !held() && generation === gen) {
+          set((s) => ({ stack: [...s.stack, { label: entry.label, run: back, canvasId: entry.canvasId, mark, ...(lost ? { lost } : {}) }].slice(-CAP) }));
+        }
         // Lo que queda por rehacer sigue sobre lo que este paso escribió, si nada
         // ajeno escribió en el medio.
         const w = written(r);
@@ -433,7 +485,7 @@ export const useUndoStore = create<UndoState>((set, get) => {
         // Pudo dejar algo a medias: lo que quedaba por rehacer dependía de él.
         get().dropRedo();
         throw e;
-      } finally { runningPin = null; run = null; set({ busy: false, running: null }); }
+      } finally { runningPin = null; run = null; set((s) => ({ busy: false, running: null, steps: ran ? s.steps + 1 : s.steps })); }
     },
   };
 });
@@ -463,10 +515,41 @@ export function freshStep(step: HistoryStep): HistoryStep {
   return step;
 }
 
+/** Marca el paso que deshace una acción con `n` escrituras que quedaron sin
+ *  respuesta y se verificaron grabadas (releyendo lo que escribieron): esos
+ *  números son suyos y la entrada de Undo que se apile con el paso (`pushUndo`,
+ *  o lo que un Redo devuelve a Undo) los admite. Solo lo verificado: una
+ *  escritura sin verificar pudo no llegar, y el número sería de otra pestaña. */
+export function verifiedLost(step: HistoryStep, n: number): HistoryStep {
+  verified.set(step, n);
+  return step;
+}
+
 /** El aviso para quien no puede seguir mientras corre un Undo o un Redo (sus
  *  escrituras seguirían cayendo en la versión): null si no corre ninguno. */
 export const historyRunning = (then: string): string | null =>
   useUndoStore.getState().busy ? `Undo or redo is still running — ${then} when it finishes.` : null;
+
+/** Corre una acción que apila su Undo como trabajo en vuelo del draft: Undo y
+ *  Redo esperan a que termine del todo (escrituras, refresco y su entrada en la
+ *  pila) antes de tomar lo de arriba. No espera nada ella misma: un paso que la
+ *  reusa, o una acción en vuelo que llama a otra, siguen sin esperarse. */
+export function historyAction<T>(action: () => Promise<T>): Promise<T> {
+  const work = trackDraftWork(action());
+  actionsInFlight += 1;
+  const done = () => { actionsInFlight -= 1; };
+  work.then(done, done);
+  return work;
+}
+
+/** Corre `fn` cuando no corre ningún Undo/Redo: en el acto, o al terminar el
+ *  paso en curso (fuera del aviso de fin: si fallara, no cortaría a los demás
+ *  que lo esperan). Para lo que llega por fuera del bloqueo de la pantalla (el
+ *  selector de color del sistema). */
+export function whenHistoryIdle(fn: () => void): void {
+  if (!useUndoStore.getState().busy) { fn(); return; }
+  const off = useUndoStore.subscribe((s) => { if (!s.busy) { off(); queueMicrotask(fn); } });
+}
 
 /** Azúcar para los sitios de instrumentación (stores y popups). `pin`: la
  *  sesión en que empezó la acción; si es distinta de la actual, la inversa no

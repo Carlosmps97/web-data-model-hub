@@ -441,8 +441,8 @@ describe('modalOpen', () => {
     expect(modalOpen()).toBe(false);
   });
 
-  it('ve también las esperas bloqueantes: «Saving working copy…» (.dmh-busy-overlay) y el Locate (.wk-nav-overlay)', () => {
-    for (const present of ['.dmh-busy-overlay', '.wk-nav-overlay']) {
+  it('ve también las esperas bloqueantes: «Saving working copy…» (.dmh-busy-overlay), el Locate (.wk-nav-overlay) y un Undo/Redo (.dmh-history-wait)', () => {
+    for (const present of ['.dmh-busy-overlay', '.wk-nav-overlay', '.dmh-history-wait']) {
       vi.stubGlobal('document', { querySelector: (sel: string) => (sel.split(',').some((p) => p.trim() === present) ? {} : null) });
       expect(modalOpen()).toBe(true);
     }

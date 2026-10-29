@@ -6,7 +6,7 @@ import * as gov from '@/services/governance.service';
 import { getNamingConfig } from '@/services/naming.service';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
 import { useModelerStore } from '@/store/useModelerStore';
-import { pushUndo } from '@/store/useUndoStore';
+import { historyAction, pushUndo } from '@/store/useUndoStore';
 import { pasteColumnsToBulk, pastePlan, pastePreImages } from '../lib/pasteColumns';
 import { ALL_COPY, reviewPaste, type PasteColumnItem, type PasteOptions, type PasteStandards, type PasteTarget } from '../lib/pasteReview';
 import { applyNamingCase } from '../lib/physicalCase';
@@ -112,7 +112,7 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
     return <span className="wk-paste-tag ok">New</span>;
   };
 
-  const confirm = async () => {
+  const confirm = () => historyAction(async () => {
     if (!review || saving) return;
     setSaving(true);
     // La acción pertenece a la sesión donde empezó (sus escrituras y su inversa
@@ -159,7 +159,7 @@ export default function PasteColumnsPopup({ targetId, onClose, pushToast }: {
     } catch (e) {
       await onError(e);
     } finally { setSaving(false); }
-  };
+  });
 
   return (
     <Modal title={`Paste ${n.members}`} icon="columns" size="lg"

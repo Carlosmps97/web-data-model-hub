@@ -10,7 +10,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: v
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    ...actual, effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(),
     writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
   };
 });
@@ -100,10 +100,23 @@ beforeEach(async () => {
       layout: { t1: { x: 9, y: 9 }, v1: { x: 9, y: 209 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
   };
   vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const id = opts?.ids?.[0] as string;
-    const snap = draft[id] ? structuredClone(draft[id]) : null;
+    const snaps = (opts?.ids ?? []).filter((id) => draft[id]).map((id) => structuredClone(draft[id]));
     await sleep(latency);
-    return (snap ? [snap] : []) as never;
+    return snaps as never;
+  });
+  // El envío único (doc 133 §4): entero a la versión en que se armó (la del lote).
+  vi.mocked(csvc.recordChangesBulk).mockImplementation(async (cs, changes) => {
+    writes.push(`${cs}:lot`);
+    await sleep(latency);
+    for (const c of changes) {
+      if (c.collection === 'subject_areas') continue;
+      ops.set(`${c.collection}:${c.entityId}`, c.op);
+      if (c.op === 'delete' && (c.collection === 'views' || c.collection === 'canonical_tables')) cascade(c.collection, c.entityId);
+    }
+    for (const c of changes) {
+      if (c.collection === 'subject_areas') draft[c.entityId] = structuredClone(c.payload) as unknown as SubjectArea;
+    }
+    return {} as never;
   });
   vi.mocked(csvc.recordChange).mockImplementation(async (cs, coll, id, op, payload) => {
     writes.push(`${cs}:${coll}:${id}`);
@@ -198,13 +211,12 @@ async function undoThenOpenCs2(ms: number): Promise<string | null> {
 }
 
 describe('una inversa en vuelo cuando se abre otra versión', () => {
-  it('«Delete table»: los canvases que faltan no se escriben en la versión nueva, y no se avisa nada', async () => {
+  it('«Delete table»: si la versión cambia mientras arma su lote, no se escribe nada en ninguna, y no se avisa nada', async () => {
     await st().deleteTable('t1');                      // editando cs1
     writes = [];
     latency = 15;
-    const label = await undoThenOpenCs2(25);           // va por el primer canvas…
-    expect(toCs2()).toEqual([]);                       // nada va a cs2
-    expect(writes[0]).toBe('cs1:bulk');                // lo pedido en su sesión sí se escribió
+    const label = await undoThenOpenCs2(8);            // lee los canvases del lote…
+    expect(writes).toEqual([]);                        // …y el lote no sale: ni a cs1 ni a cs2
     expect(label).toBeNull();                          // ni «Undid…»…
     expect(toast.error).not.toHaveBeenCalled();        // …ni un error engañoso
   });

@@ -10,7 +10,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: v
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    ...actual, effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(),
     writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
   };
 });
@@ -37,6 +37,7 @@ import * as viewsSvc from '@/services/views.service';
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { lotTo } from './canvasLot.testutil';
 import type { SubjectArea } from '../features/modeler/services/modeler.service';
 
 type Pos = { x: number; y: number };
@@ -53,7 +54,6 @@ let cascadeOnDelete = true;
 let log: string[] = [];
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const st = () => useModelerStore.getState();
-const puts = () => log.filter((l) => l.startsWith('put:'));
 const deleted = (coll: string, id: string) => ops.get(`${coll}:${id}`) === 'delete';
 const unhandled: unknown[] = [];
 const onUnhandled = (e: unknown) => { unhandled.push(e); };
@@ -114,12 +114,13 @@ beforeEach(async () => {
       layout: { t1: { x: 9, y: 9 }, v1: { x: 9, y: 209 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
   };
   vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const id = opts?.ids?.[0] as string;
-    log.push(`get:${id}`);
-    const snap = draft[id] ? structuredClone(draft[id]) : null;
+    const ids = opts?.ids ?? [];
+    for (const id of ids) log.push(`get:${id}`);
+    const snaps = ids.filter((id) => draft[id]).map((id) => structuredClone(draft[id]));
     await sleep(2);
-    return (snap ? [snap] : []) as never;
+    return snaps as never;
   });
+  vi.mocked(csvc.recordChangesBulk).mockImplementation(lotTo(gov.recordChangesBulk, csvc.recordChange));
   vi.mocked(csvc.recordChange).mockImplementation(async (_cs, coll, id, op, payload) => {
     log.push(`put:${id}`);
     await sleep(2);
@@ -210,11 +211,13 @@ describe('borrar una tabla con una vista multi-fuente', () => {
     expect(draft.sa4.layout.t1).toBeUndefined();
   });
 
-  it('una escritura por canvas en el Undo, también en el que solo tenía la vista', async () => {
+  it('el Undo va en un solo envío, también con el canvas que solo tenía la vista', async () => {
     await st().deleteTable('t1');
-    log = [];
+    vi.mocked(csvc.recordChangesBulk).mockClear();
     await useUndoStore.getState().undoLast();
-    expect(puts().sort()).toEqual(['put:sa1', 'put:sa2', 'put:sa3', 'put:sa4']);
+    expect(csvc.recordChangesBulk).toHaveBeenCalledTimes(1);
+    const sent = vi.mocked(csvc.recordChangesBulk).mock.calls[0][1];
+    expect(sent.filter((c) => c.collection === 'subject_areas').map((c) => c.entityId).sort()).toEqual(['sa1', 'sa2', 'sa3', 'sa4']);
   });
 
   it('sin la cascada del backend, el borrado la saca igual de ese canvas y el Undo la repone', async () => {
@@ -239,6 +242,7 @@ describe('borrar una tabla con una vista multi-fuente', () => {
     vi.mocked(viewsSvc.tableViews).mockRejectedValueOnce(new Error('sin red'));
     const before = structuredClone(draft);
     await expect(st().deleteTable('t1')).rejects.toThrow(DEPENDENTS);
+    expect(csvc.recordChangesBulk).not.toHaveBeenCalled();
     expect(gov.recordChangesBulk).not.toHaveBeenCalled();
     expect(gov.deleteTable).not.toHaveBeenCalled();
     expect(draft).toEqual(before);

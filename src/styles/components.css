@@ -136,3 +136,8 @@
 .dmh-busy-card .rd-spin { color: var(--primary); width: 18px; height: 18px; }
 .dmh-busy-title { font-size: 13px; font-weight: 600; color: #1A2B4A; }
 .dmh-busy-detail { font-size: 12px; color: #8A93A5; margin-top: 2px; }
+/* ── Espera de un Undo/Redo: la bloquean los listeners; la capa nunca toma el puntero (no apaga el
+   hover del canvas en cada paso). El aviso sale a los 300 ms ── */
+.dmh-history-wait { position: fixed; inset: 0; z-index: 1250; display: flex; align-items: center;
+  justify-content: center; pointer-events: none; }
+.dmh-history-wait.is-shown { background: rgba(16, 27, 48, .18); animation: dmh-fade .15s ease; }

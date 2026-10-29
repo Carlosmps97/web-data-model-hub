@@ -82,3 +82,32 @@ describe('recordChangesBulk', () => {
     spy.mockRestore();
   });
 });
+
+describe('currentColumns', () => {
+  beforeEach(() => vi.mocked(apiGet).mockReset());
+
+  it('lee por id en tandas de 100 (la URL no pasa el tope del servidor) y junta lo que existe', async () => {
+    useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
+    vi.mocked(apiGet).mockImplementation(async (url: string) => {
+      const ids = decodeURIComponent(new URL(url, 'http://x').searchParams.get('ids') ?? '').split(',');
+      return ids.filter((id) => id !== 'h5').map((id) => ({ id })) as never;
+    });
+    const { currentColumns } = await import('./governance.service');
+    const ids = Array.from({ length: 250 }, (_, i) => `h${i}`);
+    const cols = await currentColumns(ids);
+    expect(vi.mocked(apiGet)).toHaveBeenCalledTimes(3);
+    for (const [url] of vi.mocked(apiGet).mock.calls) {
+      expect(decodeURIComponent(new URL(url as string, 'http://x').searchParams.get('ids') ?? '').split(',').length).toBeLessThanOrEqual(100);
+    }
+    expect(cols.map((c) => c.id)).toEqual(ids.filter((id) => id !== 'h5'));
+  });
+
+  it('sin ids o sin versión abierta no lee nada', async () => {
+    const { currentColumns } = await import('./governance.service');
+    useSessionStore.setState({ openMode: 'editing', activeChangesetId: null });
+    expect(await currentColumns(['h1'])).toEqual([]);
+    useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
+    expect(await currentColumns([])).toEqual([]);
+    expect(apiGet).not.toHaveBeenCalled();
+  });
+});

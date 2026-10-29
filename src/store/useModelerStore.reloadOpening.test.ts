@@ -7,18 +7,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
-vi.mock('../features/modeler/services/structure.service', () => ({
-  listProjects: vi.fn(async () => [{ id: 'p1', name: 'Uno' }]), listFolders: vi.fn(async () => []),
-  listSubjectAreas: vi.fn(async () => [{ id: 'sa1', projectId: 'p1', name: 'C', folderId: null, tableIds: ['t1'], layout: {} }]),
-  projectDeletionPending: vi.fn(async () => false),
-  addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
-}));
+vi.mock('../features/modeler/services/structure.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../features/modeler/services/structure.service')>();
+  const { canvasLotStub } = await import('./canvasLot.testutil');
+  const gov = await import('@/services/governance.service');
+  return {
+    ...actual,
+    listProjects: vi.fn(async () => [{ id: 'p1', name: 'Uno' }]), listFolders: vi.fn(async () => []),
+    listSubjectAreas: vi.fn(async () => [{ id: 'sa1', projectId: 'p1', name: 'C', folderId: null, tableIds: ['t1'], layout: {} }]),
+    projectDeletionPending: vi.fn(async () => false),
+    addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
+    // El envío único (doc 133 §4): sus cambios del modelo llegan al lote del modelo
+    // de esta prueba; lo que suma al canvas, a `planCanvasAdd`.
+    planCanvasAdd: vi.fn(actual.planCanvasAdd),
+    canvasLot: vi.fn(canvasLotStub((changes) => gov.recordChangesBulk(changes))),
+  };
+});
 vi.mock('../features/modeler/services/schemas.service', () => ({ listSchemas: vi.fn(async () => []) }));
 vi.mock('../features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
 vi.mock('@/services/naming.service', () => ({ getNamingConfig: vi.fn(async () => ({})) }));
 vi.mock('@/services/governance.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/governance.service')>();
-  return { ...actual, createTable: vi.fn(async () => ({})) };
+  return { ...actual, createTable: vi.fn(async () => ({})), recordChangesBulk: vi.fn(async () => ({})) };
 });
 
 import * as mod from '../features/modeler/services/modeler.service';

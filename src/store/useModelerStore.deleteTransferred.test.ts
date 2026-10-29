@@ -11,7 +11,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: v
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    ...actual, effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(async () => ({})),
     writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
   };
 });
@@ -112,11 +112,11 @@ beforeEach(async () => {
       layout: { t1: { x: 9, y: 9 }, v1: { x: 9, y: 209 } }, drawings: [], udpValues: {}, routes: {} } as SubjectArea,
   };
   vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const id = opts?.ids?.[0] as string;
-    log.push(`get:${id}`);
-    const snap = draft[id] ? structuredClone(draft[id]) : null;
+    const ids = opts?.ids ?? [];
+    for (const id of ids) log.push(`get:${id}`);
+    const snaps = ids.filter((id) => draft[id]).map((id) => structuredClone(draft[id]));
     await sleep(2);
-    return (snap ? [snap] : []) as never;
+    return snaps as never;
   });
   vi.mocked(csvc.recordChange).mockImplementation(async (_cs, coll, id, op, payload) => {
     log.push(`put:${id}`);
@@ -215,6 +215,7 @@ describe('borrar con la versión recién transferida', () => {
     const err = await st().deleteTable('t1').then(() => null, (e: unknown) => e as Error);
     expect(err?.message ?? '').not.toMatch(/Try again/);
     expect(err).toBeInstanceOf(ApiError);
+    expect(csvc.recordChangesBulk).not.toHaveBeenCalled();
     expect(gov.recordChangesBulk).not.toHaveBeenCalled();
   });
 

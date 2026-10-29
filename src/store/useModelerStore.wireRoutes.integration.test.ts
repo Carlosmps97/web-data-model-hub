@@ -9,7 +9,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), message: v
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    ...actual, effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(),
     writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
   };
 });
@@ -44,6 +44,7 @@ import * as gov from '@/services/governance.service';
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { lotTo } from './canvasLot.testutil';
 import type { SubjectArea } from '@/features/modeler/services/modeler.service';
 
 const R1 = [{ x: 200, y: 40 }, { x: 200, y: 160 }];
@@ -92,12 +93,13 @@ beforeEach(async () => {
   draft = { sa1: canvas(), sa2: canvas({ id: 'sa2', name: 'Otro', routes: { r1: R3 } }), sa9: canvas({ id: 'sa9', name: 'Nueve', routes: { r1: R4, r2: R4 } }) };
   putLatency = 5; getLatency = 5; diagramLatency = 5; failPut = []; nPut = 0; log = [];
   vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const id = opts?.ids?.[0] as string;
-    log.push(`get:${id}`);
-    const snap = draft[id] ? structuredClone(draft[id]) : null;
+    const ids = opts?.ids ?? [];
+    for (const id of ids) log.push(`get:${id}`);
+    const snaps = ids.filter((id) => draft[id]).map((id) => structuredClone(draft[id]));
     await sleep(getLatency);
-    return (snap ? [snap] : []) as never;
+    return snaps as never;
   });
+  vi.mocked(csvc.recordChangesBulk).mockImplementation(lotTo(gov.recordChangesBulk, csvc.recordChange));
   vi.mocked(csvc.recordChange).mockImplementation(async (_cs, _coll, id, op, payload) => {
     const n = ++nPut;
     log.push(`put:${id}`);

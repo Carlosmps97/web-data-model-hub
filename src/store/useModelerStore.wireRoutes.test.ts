@@ -10,13 +10,26 @@ vi.mock('@/services/changeset.service', async (importOriginal) => ({
 }));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), message: vi.fn() } }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
-vi.mock('@/features/modeler/services/structure.service', () => ({
-  setWireRoute: vi.fn(async () => ({})),
-  arrangeSubjectArea: vi.fn(async () => ({})),
-  addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
-  removeFromCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [], layout: {}, colors: {}, routes: {} })),
-  setSubjectAreaLayout: vi.fn(async () => ({})),
-}));
+/** Los canvases que lee y graba el envío único (`canvasLot`) de este test. */
+let lotDocs: Record<string, Record<string, unknown>> = {};
+vi.mock('@/features/modeler/services/structure.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/modeler/services/structure.service')>();
+  return {
+    ...actual,
+    setWireRoute: vi.fn(async () => ({})),
+    arrangeSubjectArea: vi.fn(async () => ({})),
+    addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
+    removeFromCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [], layout: {}, colors: {}, routes: {} })),
+    setSubjectAreaLayout: vi.fn(async () => ({})),
+    planCanvasRemove: vi.fn(actual.planCanvasRemove),
+    planCanvasAdd: vi.fn(actual.planCanvasAdd),
+    canvasLot: vi.fn(async (ids: string[], build: (docs: Map<string, unknown>) => { canvases: Map<string, Record<string, unknown>>; result: unknown }) => {
+      const plan = build(new Map(ids.map((id) => [id, lotDocs[id] ? structuredClone(lotDocs[id]) : null])));
+      for (const [id, doc] of plan.canvases) lotDocs[id] = doc;
+      return plan.result;
+    }),
+  };
+});
 vi.mock('@/features/modeler/lib/arrangeGraph', () => ({
   arrangeDiagram: vi.fn(async () => ({ t1: { x: 10, y: 20 }, t2: { x: 30, y: 40 } })),
 }));
@@ -618,35 +631,39 @@ describe('sacar una tabla del canvas', () => {
 });
 
 describe('borrar una tabla', () => {
+  const doc = (id: string, tableIds: string[], routes: Record<string, unknown>) =>
+    ({ id, projectId: 'p', name: id, tableIds, viewIds: [], layout: {}, routes });
   beforeEach(() => {
     useModelerStore.setState({ diagram: diagramWith({ r1: R1, r2: R2 }) });
     vi.mocked(mod.loadDiagram).mockResolvedValue(diagramWith({ r2: R2 }));
     vi.mocked(gov.listRelationships).mockResolvedValue([rel('r1', 't1', 't2'), rel('s1', 't2', 't3', 'sym1')] as never);
     vi.mocked(gov.tableUsage).mockResolvedValue({ usage: [{ canvasId: 'sa1' }, { canvasId: 'sa9' }], total: 2 } as never);
+    lotDocs = { sa1: doc('sa1', ['t1', 't2', 't3'], { r1: R1, r2: R2 }), sa9: doc('sa9', ['t2', 't3'], { s1: R3 }) };
   });
 
   it('poda los trazos de sus wires en todos los canvases que la tenían', async () => {
     await useModelerStore.getState().deleteTable('t2');
-    const calls = vi.mocked(struct.removeFromCanvas).mock.calls;
-    expect(calls.map((c) => [c[0], c[1].tableIds])).toEqual([['sa1', ['t2']], ['sa9', ['t2']]]);
+    const calls = vi.mocked(struct.planCanvasRemove).mock.calls;
+    expect(calls.map((c) => [c[0]?.id, c[1].tableIds])).toEqual([['sa1', ['t2']], ['sa9', ['t2']]]);
     for (const c of calls) expect([...c[1].dropRouteIds!].sort()).toEqual(['r1', 's1', 'subsym-sym1']);
+    expect([lotDocs.sa1.routes, lotDocs.sa9.routes]).toEqual([{ r2: R2 }, {}]);
+    expect(struct.removeFromCanvas).not.toHaveBeenCalled();
   });
 
   it('el Undo repone en cada canvas los trazos que salieron de él (no los de la pantalla)', async () => {
-    vi.mocked(struct.removeFromCanvas)
-      .mockResolvedValueOnce({ tableIds: ['t2'], viewIds: [], layout: {}, colors: {}, routes: { r1: R1 } })
-      .mockResolvedValueOnce({ tableIds: ['t2'], viewIds: [], layout: {}, colors: {}, routes: { s1: R3 } });
     await useModelerStore.getState().deleteTable('t2');
     await useUndoStore.getState().undoLast();
-    const calls = vi.mocked(struct.addToCanvas).mock.calls;
-    expect(calls.map((c) => [c[0], c[1].tableIds, c[1].routes])).toEqual([['sa1', ['t2'], { r1: R1 }], ['sa9', ['t2'], { s1: R3 }]]);
+    const calls = vi.mocked(struct.planCanvasAdd).mock.calls;
+    expect(calls.map((c) => [c[0].id, c[1].tableIds, c[1].routes])).toEqual([['sa1', ['t2'], { r1: R1 }], ['sa9', ['t2'], { s1: R3 }]]);
+    expect([lotDocs.sa1.routes, lotDocs.sa9.routes]).toEqual([{ r2: R2, r1: R1 }, { s1: R3 }]);
+    expect(struct.addToCanvas).not.toHaveBeenCalled();
   });
 
   it('una tabla sin relaciones se borra sin lista de trazos', async () => {
     vi.mocked(gov.listRelationships).mockResolvedValue([]);
     await useModelerStore.getState().deleteTable('t2');
     // En el canvas abierto las que quedan sin posición se fijan; en otro canvas no hay diagrama.
-    expect(vi.mocked(struct.removeFromCanvas).mock.calls).toEqual([
+    expect(vi.mocked(struct.planCanvasRemove).mock.calls.map((c) => [c[0]?.id, c[1]])).toEqual([
       ['sa1', { tableIds: ['t2'], pins: { t1: gridSlot(0), t3: gridSlot(2) } }], ['sa9', { tableIds: ['t2'] }],
     ]);
   });

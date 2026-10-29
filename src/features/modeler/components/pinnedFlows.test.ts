@@ -82,8 +82,10 @@ describe('falsos negativos del análisis', () => {
     expect(check('const f = async () => { xs.forEach(async (x) => { await read(x); }); await gov.updateColumn(c); };')).toEqual([]);
   });
 
-  it('`runBlocking`, `run` y la IIFE corren su callback en el acto; los diferidos, aparte', () => {
+  it('`runBlocking`, `run`, `historyAction` y la IIFE corren su callback en el acto; los diferidos, aparte', () => {
     expect(check("const f = async () => { await read(); await runBlocking('x', async () => { await gov.updateColumn(c); }); };"))
+      .toEqual(['f:gov.updateColumn']);
+    expect(check('const f = async () => { await read(); await historyAction(async () => { await gov.updateColumn(c); }); };'))
       .toEqual(['f:gov.updateColumn']);
     expect(check('const f = async () => { await read(); await run(async () => { await gov.updateColumn(c); }, "err"); };'))
       .toEqual(['f:gov.updateColumn']);
@@ -253,9 +255,12 @@ describe('escrituras diferidas del panel de columna', () => {
 // (temporizador), con el pin del momento en que se movió: si al dispararse la
 // sesión ya es otra, se descarta el borrador en vez de grabarlo.
 describe('temporizador del nudge de wires', () => {
-  it('el guardado diferido mira el pin tomado al soltar las flechas', () => {
+  // El pin tomado al soltar las flechas lo lleva `nudgeSaver` (lib/wireNudge.test.ts).
+  it('el guardado diferido va por nudgeSaver: soltar la flecha arranca su pausa', () => {
     const src = readFileSync(join(__dirname, 'WireRouteHandles.tsx'), 'utf-8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
-    expect(src).toMatch(/const pin = pinSession\(\);\s*nudgeTimer\.current = window\.setTimeout\(\(\) => \{[^}]*if \(!pin\.holds\(\)\)/);
+    expect(src).toMatch(/nudge\.current = nudgeSaver<RoutePoint\[\]>\(NUDGE_SAVE_MS,/);
+    expect(src).toMatch(/const onPointKeyUp = \(e: ReactKeyboardEvent\) => \{[^}]*nudge\.current\?\.pause\(\);\s*\};/);
+    expect(src).not.toMatch(/nudgeTimer/);
   });
 });

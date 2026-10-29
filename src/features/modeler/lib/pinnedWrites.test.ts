@@ -14,6 +14,7 @@ vi.mock('@/services/views.service', () => ({ listViews: vi.fn(), updateView: vi.
 
 import * as gov from '@/services/governance.service';
 import * as viewsSvc from '@/services/views.service';
+import { flushPendingWrites, hasPendingWrites } from '@/services/draftWork';
 import { useSessionStore } from '@/store/useSessionStore';
 import { SessionChangedError, pinSession } from './sessionGuard';
 import { bestEffort, columnsBatchStep, pinned, pinnedDebouncer, pinnedViewDeps, relationshipTypeStep } from './pinnedWrites';
@@ -186,6 +187,27 @@ describe('piezas', () => {
 describe('pinnedDebouncer', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
+
+  it('lo tipeado cuenta como agendado hasta escribirse o descartarse; Undo/Redo lo escriben ya', () => {
+    const write = vi.fn();
+    const d = pinnedDebouncer(write, 400);
+    d.schedule('description', 'a');
+    d.schedule('types', 'STRING');
+    expect(hasPendingWrites()).toBe(true);
+    flushPendingWrites();
+    expect(write.mock.calls).toEqual([['a'], ['STRING']]);
+    expect(hasPendingWrites()).toBe(false);
+    d.schedule('description', 'b');
+    d.cancel('description');
+    expect(hasPendingWrites()).toBe(false);
+    d.schedule('description', 'c');
+    vi.advanceTimersByTime(400);
+    expect(hasPendingWrites()).toBe(false);
+    d.schedule('description', 'd');
+    d.flush();
+    expect(hasPendingWrites()).toBe(false);
+    expect(write.mock.calls.map(([v]) => v)).toEqual(['a', 'STRING', 'c', 'd']);
+  });
 
   it('escribe lo último de cada clave pasado el debounce', () => {
     const write = vi.fn();

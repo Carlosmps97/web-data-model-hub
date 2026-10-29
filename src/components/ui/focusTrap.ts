@@ -93,9 +93,10 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 /** ¿Hay algo modal en pantalla? Un diálogo (`[aria-modal="true"]`: Dialog,
  *  Modal, confirmaciones, `promptDialog`, Version tools), un scrim `.dmh-backdrop`, o
  *  una espera bloqueante: `.dmh-busy-overlay` («Saving working copy…»,
- *  «Creating table…» — `runBlocking`) y `.wk-nav-overlay` (el Locate). Guarda
- *  de los atajos de la página que no deben actuar por detrás. */
-const MODAL_SELECTOR = '.dmh-backdrop, [aria-modal="true"], .dmh-busy-overlay, .wk-nav-overlay';
+ *  «Creating table…» — `runBlocking`), `.wk-nav-overlay` (el Locate) y
+ *  `.dmh-history-wait` (un Undo o un Redo en curso). Guarda de los atajos de la
+ *  página que no deben actuar por detrás. */
+const MODAL_SELECTOR = '.dmh-backdrop, [aria-modal="true"], .dmh-busy-overlay, .wk-nav-overlay, .dmh-history-wait';
 export function modalOpen(): boolean {
   return typeof document !== 'undefined' && !!document.querySelector(MODAL_SELECTOR);
 }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { EdgeLabelRenderer, useReactFlow, useStore } from '@xyflow/react';
-import { pinSession } from '../lib/sessionGuard';
+import { nudgeSaver, type NudgeSaver } from '../lib/wireNudge';
 import { RotateCcw } from 'lucide-react';
 import {
   MAX_ROUTE_POINTS, MIN_HANDLE_SEGMENT, SNAP_PX,
@@ -80,23 +80,25 @@ export default function WireRouteHandles({ via, segments, center, ends, onDraft,
   const zoom = useStore((s) => s.transform[2]);
   const [dragging, setDragging] = useState<number | null>(null);
   const drag = useRef<Drag | null>(null);
-  /** Movimiento con flechas pendiente de grabar, y el reloj que lo graba. */
-  const nudged = useRef<RoutePoint[] | null>(null);
-  const nudgeTimer = useRef<number | null>(null);
+  /** Movimiento con flechas pendiente de grabar (el borrador y su pausa). */
+  const nudge = useRef<NudgeSaver<RoutePoint[]> | null>(null);
   /** Punto que recibió el primer clic de un posible doble clic. */
   const firstClickOn = useRef<number | null>(null);
   // Lo último que recibió el componente, para los listeners de `window`.
   const live = useRef({ ends, zoom, onDraft, onCommit });
   useEffect(() => { live.current = { ends, zoom, onDraft, onCommit }; });
+  if (!nudge.current) {
+    nudge.current = nudgeSaver<RoutePoint[]>(NUDGE_SAVE_MS,
+      (moved) => live.current.onCommit(moved), () => live.current.onDraft(null));
+  }
   // Al desmontar con un gesto a medias (el zoom cruza a LOD compacto, cambia
   // el canvas) se suelta sin guardar y el borrador se descarta: el wire no
   // puede quedar mostrando un trazo que nunca se grabó.
   useEffect(() => () => {
-    if (nudgeTimer.current != null) window.clearTimeout(nudgeTimer.current);
-    const pending = !!drag.current || !!nudged.current;
+    const nudging = !!nudge.current?.drop();
+    const pending = !!drag.current || nudging;
     drag.current?.stop();
     drag.current = null;
-    nudged.current = null;
     if (pending) live.current.onDraft(null);
   }, []);
 
@@ -164,13 +166,7 @@ export default function WireRouteHandles({ via, segments, center, ends, onDraft,
   }, [screenToFlowPosition]);
 
   /** Graba el movimiento con flechas que esté pendiente. */
-  const commitNudge = () => {
-    if (nudgeTimer.current != null) { window.clearTimeout(nudgeTimer.current); nudgeTimer.current = null; }
-    const moved = nudged.current;
-    if (!moved) return;
-    nudged.current = null;
-    onCommit(moved);
-  };
+  const commitNudge = () => nudge.current?.commit();
 
   /** Solo se quedan con el evento las teclas que el punto usa; las demás —
    *  Esc, modificadores, deshacer, buscar — siguen hasta los atajos del canvas
@@ -185,31 +181,22 @@ export default function WireRouteHandles({ via, segments, center, ends, onDraft,
       // Al quitar un punto el foco queda en el mismo tirador, que pasa a ser
       // el punto siguiente: la tecla mantenida no los quita en cadena.
       if (e.repeat) return;
-      if (nudgeTimer.current != null) { window.clearTimeout(nudgeTimer.current); nudgeTimer.current = null; }
-      nudged.current = null;
+      nudge.current?.drop();
       onCommit(removePoint(via, index));
       return;
     }
-    if (nudgeTimer.current != null) { window.clearTimeout(nudgeTimer.current); nudgeTimer.current = null; }
     const by = e.shiftKey ? 10 : 1;
     const next = movePoint(via, index, { x: via[index].x + step[0] * by, y: via[index].y + step[1] * by });
-    nudged.current = next;
+    nudge.current?.move(next);
     onDraft(next);
   };
   /** Las flechas mueven en borrador; se graba tras una pausa o al perder el foco. */
   const onPointKeyUp = (e: ReactKeyboardEvent) => {
     if (!ARROWS[e.key]) return;
     e.stopPropagation();
-    if (!nudged.current) return;
-    if (nudgeTimer.current != null) window.clearTimeout(nudgeTimer.current);
     // Se graba con la sesión del momento en que se movió: si al dispararse ya
     // es otra, el borrador se descarta (no va a otra versión).
-    const pin = pinSession();
-    nudgeTimer.current = window.setTimeout(() => {
-      nudgeTimer.current = null;
-      if (!pin.holds()) { nudged.current = null; live.current.onDraft(null); return; }
-      commitNudge();
-    }, NUDGE_SAVE_MS);
+    nudge.current?.pause();
   };
 
   const place = (p: RoutePoint, extra = '') => ({

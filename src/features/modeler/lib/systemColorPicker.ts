@@ -1,4 +1,6 @@
+import { pendingWrite } from '@/services/draftWork';
 import { useModelerStore } from '@/store/useModelerStore';
+import { whenHistoryIdle } from '@/store/useUndoStore';
 import { pinSession } from './sessionGuard';
 
 /**
@@ -11,7 +13,10 @@ import { pinSession } from './sessionGuard';
  * descarta el anterior. Solo aplica en la sesión y el canvas donde se abrió (el
  * selector del sistema puede seguir abierto mientras el usuario cambia de
  * versión o de canvas) y mientras `alive` lo permita: una ficha del canvas ya
- * cerrada no pinta su caja con lo elegido después.
+ * cerrada no pinta su caja con lo elegido después. Lo que espera la pausa cuenta
+ * como escritura agendada: Undo y Redo lo aplican ya (doc 133 §5). El selector
+ * del sistema queda fuera del bloqueo de la pantalla durante un Undo o Redo: lo
+ * elegido mientras corre se aplica al terminar el paso.
  */
 interface SystemPicker {
   el: HTMLInputElement;
@@ -45,9 +50,11 @@ export function openSystemPicker(initial: string, at: DOMRect | null, apply: (he
   let pending: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
   let done = false;
+  const scheduled = pendingWrite(() => flush());
   const finish = () => {
     done = true;
     pending = null;
+    scheduled.release();
     if (timer) { clearTimeout(timer); timer = null; }
     el.remove();
     if (systemPicker?.el === el) systemPicker = null;
@@ -56,18 +63,21 @@ export function openSystemPicker(initial: string, at: DOMRect | null, apply: (he
     if (timer) { clearTimeout(timer); timer = null; }
     if (done) return;
     if (!valid()) { finish(); return; }
+    scheduled.release();
     if (pending) { const v = pending; pending = null; apply(v); }
   };
+  const settle = () => whenHistoryIdle(flush);
   const onInput = () => {
     if (done) return;
     pending = el.value.toUpperCase();
+    scheduled.hold();
     if (timer) clearTimeout(timer);
-    timer = setTimeout(flush, 700);
+    timer = setTimeout(settle, 700);
   };
   el.addEventListener('input', onInput);
   // Al cerrarse el selector se suelta el foco: los atajos (deshacer, borrar)
   // vuelven al canvas, que ignora las teclas que caen en un input.
-  el.addEventListener('change', () => { onInput(); flush(); el.blur(); });
+  el.addEventListener('change', () => { onInput(); settle(); el.blur(); });
   document.body.appendChild(el);
   const flushNow = () => {
     if (done) return;

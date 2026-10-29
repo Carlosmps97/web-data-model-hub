@@ -5,7 +5,7 @@ import { confirmDialog } from '@/components/ui/dialogs';
 import { useModelerStore } from '@/store/useModelerStore';
 import { distinctNames, facetName, facetNouns } from '@/lib/facets';
 import { useSessionStore } from '@/store/useSessionStore';
-import { pushUndo } from '@/store/useUndoStore';
+import { historyAction, pushUndo } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import type { Cardinality, CanonicalColumn } from '@/services/governance.service';
 import {
@@ -83,7 +83,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
   // ── Tipo (identifying ↔ non-identifying) con propagación de flags PK ──
   const setType = (identifying: boolean) => {
     if (identifying === rel.identifying) return;
-    void run(async () => {
+    void run(() => historyAction(async () => {
       // La acción pertenece a la sesión donde empezó.
       const pin = pinSession();
       // Pre-imágenes para el Undo: la relación + las columnas hijas
@@ -125,7 +125,7 @@ export default function RelationshipPopup({ relId, onClose, pushToast }: { relId
         { ...relPre, identifying }, keyChanges, reload,
       ), pin);
       await reload();
-    }, "Couldn't update");
+    }), "Couldn't update");
   };
 
   const setCard = (end: 'parent' | 'child', v: Cardinality) =>

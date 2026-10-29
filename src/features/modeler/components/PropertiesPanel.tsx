@@ -4,7 +4,7 @@ import { ArrowDownUp, Eye, Pencil, Plus, Table2, Trash2, Unlink } from 'lucide-r
 import Icon from '@/components/ui/Icon';
 import { confirmDialog } from '@/components/ui/dialogs';
 import { failureText, fieldsStep, inObjectOrder, useModelerStore } from '@/store/useModelerStore';
-import { pushUndo } from '@/store/useUndoStore';
+import { historyAction, pushUndo } from '@/store/useUndoStore';
 import AuditHistory from './AuditHistory';
 import UdpAssign from './UdpAssign';
 import RelationshipPhraseLine from './RelationshipPhraseLine';
@@ -229,7 +229,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // la sesión cambia (`reportWriteError`: el aviso lo da la revalidación). Se
   // crea al pedir la escritura, así que toma esa sesión. Su inversa se apila
   // solo en la sesión donde empezó (`pinSession`).
-  const saveDef = async () => {
+  const saveDef = () => historyAction(async () => {
     setSavingDef(true);
     const pin = pinSession();
     // Propaga el motivo real (p. ej. 409: la versión dejó de estar en borrador)
@@ -271,7 +271,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
       pushToast(`${nouns.One} updated`);
     }); } catch (e) { await onError(e); }
     finally { setSavingDef(false); }
-  };
+  });
   const derivePhysical = async () => {
     try {
       const p = (await gov.physicalize(form.logicalName.trim(), 'table')).physical;
@@ -285,7 +285,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
   // transaccional (re-deriva el físico, re-apunta vistas, valida unicidad) y no
   // debe dispararse a medio escribir. `...table` usa los nombres del server: un
   // nombre a medio editar en el form no viaja con este blur.
-  const saveDescriptionOnBlur = async () => {
+  const saveDescriptionOnBlur = () => historyAction(async () => {
     if (!canEdit || !table) return;
     const next = form.description.trim() || undefined;
     // «Sin cambio» se decide contra el documento vigente, en la fila (el
@@ -303,8 +303,8 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         await reload();
       });
     } catch (e) { await onError(e); }
-  };
-  const saveTableUdp = async (next: Record<string, string>) => {
+  });
+  const saveTableUdp = (next: Record<string, string>) => historyAction(async () => {
     if (!table) return;
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save UDP", 'err'));
@@ -319,7 +319,7 @@ export default function PropertiesPanel({ pushToast, onResize }: { pushToast: (m
         await reload();
       });
     } catch (e) { await onError(e); }
-  };
+  });
 
   // ── "Match physical order": reordena los sources de la vista según el orden
   // único de cada tabla fuente (PK primero, así una PK recién marcada sube a su

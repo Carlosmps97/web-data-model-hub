@@ -17,7 +17,14 @@
  * El commit del tramo auto se agenda recién al resolver (o fallar) el
  * physicalize: un commit intermedio persistiría el físico desactualizado junto
  * al lógico recién editado.
+ *
+ * Lo tipeado sin grabar cuenta como escritura agendada: Undo y Redo lo graban ya
+ * (doc 133 §5). El commit agendado sale en el acto; si falta el físico derivado,
+ * se pide ya y el commit sale apenas llega, y mientras tanto es trabajo en
+ * vuelo (el Undo lo espera).
  */
+import { pendingWrite, trackDraftWork } from '@/services/draftWork';
+
 export interface NameSyncState { logical: string; physical: string }
 
 export interface NameSyncOptions {
@@ -42,6 +49,8 @@ export interface NameSync {
   /** Re-deriva el físico a partir del lógico (glosario) y apaga el
    *  override: el «rayo» del panel de atributo, par del de tabla. */
   derive(): void;
+  /** Se cierra el panel: lo agendado por tiempo se descarta y el físico ya
+   *  pedido se graba como siempre, 400 ms después de llegar. */
   dispose(): void;
 }
 
@@ -54,41 +63,83 @@ export function createNameSync(opts: NameSyncOptions): NameSync {
   let seq = 0;
   let physTimer: ReturnType<typeof setTimeout> | undefined;
   let commitTimer: ReturnType<typeof setTimeout> | undefined;
+  /** El físico por pedir cuando se cumpla `physTimer`: el lógico y su turno. */
+  let ask: { v: string; mySeq: number } | null = null;
+  /** El physicalize en vuelo y si su commit sale apenas llegue (lo pidió un
+   *  Undo o Redo). */
+  let deriving: { done: Promise<void>; now: boolean } | null = null;
+  const scheduled = pendingWrite(() => flush());
 
   const emit = () => opts.onState({ logical, physical });
-  const scheduleCommit = () => {
-    clearTimeout(commitTimer);
-    commitTimer = setTimeout(
-      () => opts.onCommit({ logicalName: logical, physicalName: physical,
-                            physicalNameOverridden: physEdited }), ms,
-    );
+  const settle = () => {
+    if (physTimer === undefined && commitTimer === undefined && !deriving) scheduled.release();
+  };
+  const stopPhys = () => { clearTimeout(physTimer); physTimer = undefined; ask = null; };
+  const commit = () => {
+    clearTimeout(commitTimer); commitTimer = undefined;
+    settle();
+    opts.onCommit({ logicalName: logical, physicalName: physical, physicalNameOverridden: physEdited });
+  };
+  const scheduleCommit = (now = false) => {
+    clearTimeout(commitTimer); commitTimer = undefined;
+    if (now) { commit(); return; }
+    commitTimer = setTimeout(commit, ms);
+    scheduled.hold();
+  };
+  /** Pide el físico de `v` con el turno `mySeq`: si al llegar sigue siendo el
+   *  vigente, `apply` lo toma y se agenda el commit (también si falla, con
+   *  `commitOnFail`). */
+  const request = (v: string, mySeq: number, apply: (r: { physical: string }) => void, commitOnFail: boolean) => {
+    const entry: { done: Promise<void>; now: boolean } = { done: Promise.resolve(), now: false };
+    entry.done = opts.physicalize(v).then((r) => {
+      if (mySeq !== seq) return; // respuesta stale: hubo input más nuevo
+      apply(r); emit(); scheduleCommit(entry.now);
+    }).catch(() => { if (mySeq === seq && commitOnFail) scheduleCommit(entry.now); })
+      .finally(() => { if (deriving === entry) { deriving = null; settle(); } });
+    deriving = entry;
+    scheduled.hold();
+  };
+  const fromLogical = (v: string, mySeq: number) => request(v, mySeq, (r) => { physical = r.physical; },
+    // Sin naming disponible igual se persiste el lógico (degradado).
+    true);
+  /** Undo o Redo: lo agendado sale ya; el físico que falta se pide ya (salvo que
+   *  ya no sea el vigente: un físico tipeado después lo reemplazó) y su commit
+   *  sale apenas llega; hasta entonces es trabajo en vuelo del draft. */
+  const flush = () => {
+    if (physTimer !== undefined && ask) {
+      const { v, mySeq } = ask;
+      stopPhys();
+      if (mySeq === seq) fromLogical(v, mySeq);
+    }
+    if (commitTimer !== undefined) commit();
+    if (deriving) { deriving.now = true; void trackDraftWork(deriving.done); }
+    settle();
   };
 
   return {
     reset(l, p, overridden = false) {
       logical = l; physical = p; physEdited = overridden;
       seq++; // invalida cualquier physicalize en vuelo del ciclo anterior
-      clearTimeout(physTimer); clearTimeout(commitTimer);
+      stopPhys(); clearTimeout(commitTimer); commitTimer = undefined;
+      deriving = null;
+      settle();
     },
     setLogical(v) {
       logical = v; emit();
       const mySeq = ++seq;
-      clearTimeout(physTimer);
+      stopPhys();
       if (!v.trim()) {
         if (!physEdited) { physical = ''; emit(); }
         scheduleCommit();
         return;
       }
       if (physEdited) { scheduleCommit(); return; }
+      ask = { v: v.trim(), mySeq };
       physTimer = setTimeout(() => {
-        opts.physicalize(v.trim()).then((r) => {
-          if (mySeq !== seq) return; // respuesta stale: hubo input más nuevo
-          physical = r.physical; emit(); scheduleCommit();
-        }).catch(() => {
-          // Sin naming disponible igual se persiste el lógico (degradado).
-          if (mySeq === seq) scheduleCommit();
-        });
+        physTimer = undefined; ask = null;
+        fromLogical(v.trim(), mySeq);
       }, ms);
+      scheduled.hold();
     },
     setPhysical(v) {
       physical = normalize(v);      // la UI muestra lo que se persiste
@@ -101,13 +152,18 @@ export function createNameSync(opts: NameSyncOptions): NameSync {
       const v = logical.trim();
       if (!v) return;
       const mySeq = ++seq;          // invalida physicalize en vuelo; el de esta llamada manda
-      clearTimeout(physTimer);
-      opts.physicalize(v).then((r) => {
-        if (mySeq !== seq) return;  // el usuario tipeó algo después: se descarta
-        physical = r.physical; physEdited = false; emit(); scheduleCommit();
-      }).catch(() => { /* sin naming disponible el físico queda como está */ });
+      stopPhys();
+      // Sin naming disponible el físico queda como está.
+      request(v, mySeq, (r) => { physical = r.physical; physEdited = false; }, false);
     },
-    dispose() { clearTimeout(physTimer); clearTimeout(commitTimer); },
+    dispose() {
+      // Lo agendado por tiempo se descarta; el físico ya pedido sigue: su commit
+      // sale 400 ms después de llegar (con la columna recién borrada, su recarga
+      // llega antes y el guardado no la revive) y cuenta como agendado, así un
+      // Undo o un Redo lo mandan ya.
+      stopPhys(); clearTimeout(commitTimer); commitTimer = undefined;
+      settle();
+    },
   };
 }
 

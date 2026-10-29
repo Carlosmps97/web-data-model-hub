@@ -7,7 +7,7 @@ import ReportingScreen from '@/screens/ReportingScreen';
 import ReviewScreen from '@/screens/ReviewScreen';
 import LoginScreen from '@/features/auth/LoginScreen';
 import { RequireAuth, RequirePermission } from '@/features/auth/guards';
-import { WorkspaceScreen } from '@/features/modeler';
+import { HistoryOverlay, WorkspaceScreen } from '@/features/modeler';
 import { StandardsScreen } from '@/features/standards';
 import { AdminScreen } from '@/features/admin';
 import { useAuthStore } from '@/store/useAuthStore';
@@ -70,6 +70,8 @@ export default function App() {
       <DialogHost />
       {/* Overlay bloqueante de acciones largas de esta sesión. */}
       <BusyOverlay />
+      {/* Espera de un Undo o un Redo: la pantalla no responde mientras corre. */}
+      <HistoryOverlay />
       {/* Toaster global. closeButton = la "x" para cerrarlo sin esperar. */}
       <Toaster richColors closeButton position="bottom-center" toastOptions={{ style: { fontFamily: 'var(--ui)' } }} />
     </BrowserRouter>

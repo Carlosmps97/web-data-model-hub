@@ -4,6 +4,7 @@ import { ArrowLeft } from 'lucide-react';
 import Icon from '@/components/ui/Icon';
 import { useModelerStore } from '@/store/useModelerStore';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
+import { historyAction, useUndoStore } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable, ParentDomain } from '@/services/governance.service';
 import { isComplexTypeStart } from '../lib/complexTypes';
@@ -70,6 +71,9 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   // Faceta activa (switch Logical/Physical del canvas) → UDPs y rótulos.
   const viewMode = useModelerStore((s) => s.viewMode);
+  // Undo y Redo terminados: el editor se vuelve a sembrar de la versión (lo
+  // tipeado antes del paso se grabó y pudo deshacerse).
+  const steps = useUndoStore((s) => s.steps);
   const [udpDefs, setUdpDefs] = useState<UdpDefinition[]>([]);
   useEffect(() => {
     let alive = true;
@@ -127,7 +131,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
   // físico re-apunta las vistas que referencian el nombre anterior.
   // Va con la sesión donde empezó (el re-apunte de vistas, tras el upsert, se
   // corta si la sesión es otra) y su fallo espera la revalidación.
-  const patchCol = async (id: string, fields: Partial<CanonicalColumn>) => {
+  const patchCol = (id: string, fields: Partial<CanonicalColumn>) => historyAction(async () => {
     const before = cols.find((c) => c.id === id);
     const pin = pinSession();
     const onError = reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save the column", 'err'));
@@ -142,7 +146,7 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
         });
       }
     } catch (e) { await onError(e); }
-  };
+  });
 
   // Borrado con impacto global: relaciones donde la columna es extremo, en
   // cualquier canvas.
@@ -229,9 +233,10 @@ export default function ColumnPropertiesPanel({ pushToast, onResize }: {
       <div className="wk-props-body">
         {/* key=col.id: cambiar de columna remonta el editor — estado local,
             nameSync y debounces arrancan limpios (y el flush del desmontaje
-            persiste lo pendiente de la columna anterior). */}
+            persiste lo pendiente de la columna anterior). Igual al terminar un
+            Undo o Redo (`steps`). */}
         <ColumnPropsBody
-          key={col.id}
+          key={`${col.id}:${steps}`}
           col={col}
           table={table}
           cols={cols}
@@ -432,7 +437,9 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
    *  físico heredado es el override del dominio o el derivado del lógico
    *  nuevo por glosario; `physicalNameOverridden` = heredado ≠ derivado (así el
    *  rephysicalize del Glosario respeta un físico custom y re-deriva uno derivable). */
-  const commitDomain = async (fields: Partial<CanonicalColumn>, defaults: DomainDefaultsPatch, pin: SessionPin) => {
+  // Entera en vuelo (doc 133 §5): la derivación del físico es parte de la acción;
+  // un Ctrl+Z mientras se espera, la espera y deshace esta elección.
+  const commitDomain = (fields: Partial<CanonicalColumn>, defaults: DomainDefaultsPatch, pin: SessionPin) => historyAction(async () => {
     setTypeBusy(true);
     try {
       if (defaults.logicalName !== undefined) {
@@ -455,7 +462,7 @@ export function ColumnPropsBody({ col, table, cols, tab, domains, udpDefs, view,
       if (!pin.holds()) return;
       await onPatch(col.id, fields);
     } finally { setTypeBusy(false); }
-  };
+  });
   const confirmInherit = async (picked: DomainUdpOfferItem[]) => {
     if (!inherit) return;
     const fields = { ...inherit.fields };

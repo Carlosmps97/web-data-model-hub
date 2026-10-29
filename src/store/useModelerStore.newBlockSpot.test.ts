@@ -16,10 +16,20 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
   };
 });
 vi.mock('@/services/views.service', () => ({ listViews: vi.fn(async () => []), listViewsForTables: vi.fn(async () => []) }));
-vi.mock('@/features/modeler/services/structure.service', () => ({
-  addToCanvas: vi.fn(async (_sa: string, add: { tableIds?: string[] }) => ({ tableIds: add.tableIds ?? [], viewIds: [] })),
-  setSubjectAreaDrawings: vi.fn(async () => ({})),
-}));
+vi.mock('@/features/modeler/services/structure.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/features/modeler/services/structure.service')>();
+  const { canvasLotStub } = await import('./canvasLot.testutil');
+  const gov = await import('@/services/governance.service');
+  return {
+    ...actual,
+    addToCanvas: vi.fn(async (_sa: string, add: { tableIds?: string[] }) => ({ tableIds: add.tableIds ?? [], viewIds: [] })),
+    setSubjectAreaDrawings: vi.fn(async () => ({})),
+    // El envío único (doc 133 §4): sus cambios del modelo llegan al lote del modelo
+    // de esta prueba; lo que suma al canvas, a `planCanvasAdd`.
+    planCanvasAdd: vi.fn(actual.planCanvasAdd),
+    canvasLot: vi.fn(canvasLotStub((changes) => gov.recordChangesBulk(changes))),
+  };
+});
 vi.mock('@/features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
 vi.mock('@/services/naming.service', () => ({ getNamingConfig: vi.fn(async () => ({})) }));
 vi.mock('@/features/modeler/lib/canvasFocus', async (importOriginal) => {
@@ -42,7 +52,14 @@ const C1 = { id: 'c1', tableId: 't1', logicalName: 'cod', physicalName: 'COD', d
 const DIA = { subjectArea: { id: 'sa1', projectId: 'p1', name: 'C', tableIds: ['t1'], layout: { t1: { x: 500, y: 1800 } } }, tables: [T1], columns: [C1], relationships: [], views: [] };
 
 /** Última escritura de miembros del canvas: { tableIds, layout? }. */
-const lastAdd = () => vi.mocked(struct.addToCanvas).mock.calls.at(-1)![1] as { tableIds?: string[]; layout?: Record<string, { x: number; y: number }> };
+/** Lo último que un alta sumó al canvas: en el envío único (`planCanvasAdd`) o,
+ *  al importar, con `addToCanvas`. */
+const lastCanvasAdd = (): unknown => {
+  const lot = vi.mocked(struct.planCanvasAdd).mock;
+  const add = vi.mocked(struct.addToCanvas).mock;
+  return (lot.invocationCallOrder.at(-1) ?? 0) > (add.invocationCallOrder.at(-1) ?? 0) ? lot.calls.at(-1)![1] : add.calls.at(-1)![1];
+};
+const lastAdd = () => lastCanvasAdd() as { tableIds?: string[]; layout?: Record<string, { x: number; y: number }> };
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -167,7 +184,7 @@ describe('el alta fija a las existentes sin posición', () => {
     const base = structuredClone(DIA);
     useModelerStore.setState({ diagram: { ...base, subjectArea: { ...base.subjectArea, tableIds: ['t1', 't2'] }, tables: [T1, T2] } as never });
   };
-  const pins = () => (vi.mocked(struct.addToCanvas).mock.calls.at(-1)![1] as { pins?: Record<string, { x: number; y: number }> }).pins;
+  const pins = () => (lastCanvasAdd() as { pins?: Record<string, { x: number; y: number }> }).pins;
   const SLOT_1 = { x: 60 + 260, y: 60 };   // gridSlot(1): la casilla actual de t2
 
   it('New table', async () => {

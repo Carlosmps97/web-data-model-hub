@@ -15,7 +15,8 @@ import { useBusyStore } from '@/store/useBusyStore';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { StaleUndoError, useUndoStore } from '@/store/useUndoStore';
-import { historyKey, historyShortcut, historyTip } from './historyKeys';
+import { historyKey, historyShortcut, historyTip, runHistory } from './historyKeys';
+import { notePointer } from './historyWait';
 
 const key = (over: Partial<KeyboardEvent>) =>
   ({ key: 'z', metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, ...over }) as KeyboardEvent;
@@ -46,6 +47,7 @@ describe('historyKey', () => {
     useSessionStore.getState().openModel({ projectId: 'p', mode: 'editing', changesetId: 'cs1' });
     useUndoStore.getState().clear();
     useUndoStore.setState({ busy: false });
+    vi.mocked(toast.info).mockClear();
   });
   const event = () => ({ preventDefault: vi.fn() });
 
@@ -78,6 +80,51 @@ describe('historyKey', () => {
     const e = event();
     historyKey(e, 'redo', false, vi.fn());
     expect(e.preventDefault).not.toHaveBeenCalled();
+  });
+
+  // Un arrastre en curso graba al soltar: caería en medio del paso (doc 133 §5).
+  it('con un botón del mouse apretado se queda el atajo sin deshacer y lo dice en un solo aviso', async () => {
+    let ran = false;
+    useUndoStore.setState({ stack: [{ label: 'A', run: async () => { ran = true; return null; } }] });
+    notePointer({ type: 'pointerdown', buttons: 1, pointerId: 1 });
+    const e = event();
+    const notify = vi.fn();
+    historyKey(e, 'undo', true, notify);
+    historyKey(event(), 'undo', true, notify);           // repetido (tecla sostenida): el mismo aviso
+    notePointer({ type: 'pointerup', buttons: 0, pointerId: 1 });
+    expect(e.preventDefault).toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+    expect(vi.mocked(toast.info).mock.calls).toEqual([
+      ['Finish dragging first, then undo.', { id: 'dmh-history-drag' }],
+      ['Finish dragging first, then undo.', { id: 'dmh-history-drag' }],
+    ]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect([ran, useUndoStore.getState().stack.length]).toEqual([false, 1]);
+  });
+
+  // Varios diálogos dejan la barra a la vista (backdrop «canvas»): su botón Undo
+  // no deshace por detrás de uno abierto, como ya hace el atajo.
+  it('con un diálogo abierto, el botón de la barra no deshace y pide cerrarlo', async () => {
+    let ran = false;
+    useUndoStore.setState({ stack: [{ label: 'A', run: async () => { ran = true; return null; } }] });
+    modal.open = true;
+    runHistory('undo', vi.fn());
+    modal.open = false;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(vi.mocked(toast.info).mock.calls).toEqual([['Close the dialog first, then undo.', { id: 'dmh-history-dialog' }]]);
+    expect(ran).toBe(false);
+  });
+
+  it('el botón de la barra tampoco corre con otro puntero apretado (otro dedo arrastrando); sin nada que hacer, calla', async () => {
+    let ran = false;
+    useUndoStore.setState({ stack: [{ label: 'A', run: async () => { ran = true; return null; } }] });
+    notePointer({ type: 'pointerdown', buttons: 1, pointerId: 7 });
+    runHistory('redo', vi.fn());                         // nada que rehacer: sin aviso
+    runHistory('undo', vi.fn());
+    notePointer({ type: 'pointerup', buttons: 0, pointerId: 7 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(vi.mocked(toast.info).mock.calls).toEqual([['Finish dragging first, then undo.', { id: 'dmh-history-drag' }]]);
+    expect(ran).toBe(false);
   });
 });
 

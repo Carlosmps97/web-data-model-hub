@@ -18,6 +18,7 @@ import { toast } from 'sonner';
 import * as mod from '../features/modeler/services/modeler.service';
 import * as struct from '../features/modeler/services/structure.service';
 import { trackRevalidation } from '../features/modeler/lib/sessionGuard';
+import { flushPendingWrites, hasPendingWrites } from '@/services/draftWork';
 import { ApiError } from '@/services/http';
 import { failureText, useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
@@ -182,5 +183,51 @@ describe('dibujo nuevo', () => {
     const st = useModelerStore.getState();
     const created = st.drawings[st.drawings.length - 1];
     expect(st.justAddedDrawingId).toBe(created.id);
+  });
+});
+
+// Undo y Redo graban ya lo agendado antes de esperar lo en vuelo (doc 133 §5):
+// los dibujos no están en el historial, pero su guardado no puede caer en medio
+// del paso.
+describe('dibujos agendados ante un Undo', () => {
+  const box = { id: 'd1', type: 'rect' as const, x: 0, y: 0, w: 100, h: 40 };
+
+  it('cuentan como agendados; flushPendingWrites los graba ya, una sola vez', async () => {
+    await sleep(600);
+    vi.mocked(struct.setSubjectAreaDrawings).mockClear();
+    useModelerStore.setState({ drawings: [box] });
+    useModelerStore.getState().updateDrawing('d1', { x: 30 });
+    expect(hasPendingWrites()).toBe(true);
+    flushPendingWrites();
+    expect(struct.setSubjectAreaDrawings).toHaveBeenCalledWith('sa1', [{ ...box, x: 30 }]);
+    expect(hasPendingWrites()).toBe(false);
+    await sleep(600);
+    expect(struct.setSubjectAreaDrawings).toHaveBeenCalledTimes(1);
+  });
+
+  it('dejan de contar al grabarse por su espera, al cambiar de canvas o con Save', async () => {
+    await sleep(600);
+    useModelerStore.setState({ drawings: [box] });
+    useModelerStore.getState().updateDrawing('d1', { x: 31 });
+    await sleep(550);
+    expect(hasPendingWrites()).toBe(false);
+    useModelerStore.getState().updateDrawing('d1', { x: 32 });
+    await useModelerStore.getState().selectSubjectArea('sa2');
+    expect(hasPendingWrites()).toBe(false);
+    useModelerStore.setState({ activeSaId: 'sa1', diagram: diagram('sa1'), drawings: [box] });
+    useModelerStore.getState().updateDrawing('d1', { x: 33 });
+    await useModelerStore.getState().saveAll();
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('si el canvas cambió desde que se agendaron, no los graba (su cambio de canvas ya lo hizo)', async () => {
+    await sleep(600);
+    useModelerStore.setState({ drawings: [box] });
+    useModelerStore.getState().updateDrawing('d1', { x: 34 });
+    useModelerStore.setState({ activeSaId: 'sa9' });
+    vi.mocked(struct.setSubjectAreaDrawings).mockClear();
+    flushPendingWrites();
+    expect(struct.setSubjectAreaDrawings).not.toHaveBeenCalled();
+    expect(hasPendingWrites()).toBe(false);
   });
 });

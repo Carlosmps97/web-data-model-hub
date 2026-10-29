@@ -13,7 +13,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: v
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
-    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    ...actual, effective: vi.fn(), recordChange: vi.fn(), recordChangesBulk: vi.fn(),
     writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
   };
 });
@@ -49,6 +49,7 @@ import type { Diagram, SubjectArea } from '@/features/modeler/services/modeler.s
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { lotTo } from './canvasLot.testutil';
 
 type P = { x: number; y: number };
 interface MTable { id: string; projectId: string; physicalName: string; logicalName: string }
@@ -100,10 +101,11 @@ function flowMock() {
 function wire(): void {
   vi.mocked(canvasView).mockReturnValue(VIEW);
   vi.mocked(csvc.effective).mockImplementation(async (_cs, _coll, opts) => {
-    const snap = world.draft[opts?.ids?.[0] as string];
+    const snaps = (opts?.ids ?? []).filter((id) => world.draft[id]).map((id) => structuredClone(world.draft[id]));
     await pause();
-    return (snap ? [structuredClone(snap)] : []) as never;
+    return snaps as never;
   });
+  vi.mocked(csvc.recordChangesBulk).mockImplementation(lotTo(gov.recordChangesBulk, csvc.recordChange));
   vi.mocked(csvc.recordChange).mockImplementation(async (_cs, _coll, id, op, payload) => {
     await pause();
     if (op === 'delete') delete world.draft[id]; else world.draft[id] = structuredClone(payload) as unknown as SubjectArea;

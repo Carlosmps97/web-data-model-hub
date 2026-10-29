@@ -218,7 +218,7 @@ describe('pinSession', () => {
       const pin = pinSession();
       canvas = null;
       announceDraftWrite('cs1', [], 10);
-      expect([pin.canvasId, pin.mark]).toEqual(['sa1', { seen: 7, unconfirmed: 0 }]);   // lo sin confirmar, desde la carga
+      expect([pin.canvasId, pin.mark]).toEqual(['sa1', { seen: 7, unconfirmed: 0, first: 7 }]);   // lo sin confirmar, desde la carga
       expect(pinSession().canvasId).toBeNull();
     } finally {
       setCanvasSource(() => null);

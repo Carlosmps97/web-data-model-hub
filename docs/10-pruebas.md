@@ -218,6 +218,10 @@ it('CtasModal › Create: el pin se toma al pedirlo y el aviso mira que siga', (
 });
 ```
 
+`historyActions.test.ts` lee el fuente con el AST de TypeScript: todo `pushUndo` va dentro de una
+`historyAction`, ninguna espera el trabajo en vuelo ni abre un diálogo, y nada fuera de una espera algo
+antes de llamar a una acción con Undo (la lista de acciones sale del propio fuente).
+
 Otras guardas de este tipo en `src/features/modeler/components` (`pinnedFlows.test.ts`,
 `undoPins.test.ts`, `workspaceWriteErrors.test.ts`, `sessionModals.test.ts`, entre otras) usan el
 analizador de `pinnedFlows.testutil.ts`: dentro de una función async, toda escritura que sigue a un
@@ -227,6 +231,14 @@ espera podría caer en otra versión abierta mientras tanto.
 
 Como estas guardas dependen del texto del archivo, al renombrar una función o variable vigilada se
 actualiza también la expresión de la prueba.
+
+Las cascadas en un solo envío (doc 133 §4) se prueban con `structure.service` real contra un backend en
+memoria que graba el lote entero o nada y lleva el contador de escrituras (`draftLedger.testutil.ts`):
+`useModelerStore.deleteTableLot.test.ts`, `deleteRelationshipLot` y `createTableLot` cortan el envío
+antes del servidor, después de grabar y con el servidor fallando, y verifican el Undo que queda (y su
+candado). Los arneses que ya simulaban aparte el lote del modelo y la escritura de un canvas reciben el
+envío único con `lotTo` (`canvasLot.testutil.ts`, que lo reparte con el mismo estado final), y los que
+mockean `structure.service` entero, con `canvasLotStub`; lo atómico lo prueban los archivos dedicados.
 
 ## Permisos y Admin
 

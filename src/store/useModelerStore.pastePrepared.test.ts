@@ -12,7 +12,19 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/governance.service')>();
   return { ...actual, searchTables: vi.fn(async () => []), recordChangesBulk: vi.fn(async () => ({})) };
 });
-vi.mock('../features/modeler/services/structure.service', () => ({ addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })) }));
+vi.mock('../features/modeler/services/structure.service', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../features/modeler/services/structure.service')>();
+  const { canvasLotStub } = await import('./canvasLot.testutil');
+  const gov = await import('@/services/governance.service');
+  return {
+    ...actual,
+    addToCanvas: vi.fn(async () => ({ tableIds: [], viewIds: [] })),
+    // El envío único (doc 133 §4): sus cambios del modelo llegan al lote del modelo
+    // de esta prueba; lo que suma al canvas, a `planCanvasAdd`.
+    planCanvasAdd: vi.fn(actual.planCanvasAdd),
+    canvasLot: vi.fn(canvasLotStub((changes) => gov.recordChangesBulk(changes))),
+  };
+});
 vi.mock('../features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
 vi.mock('../features/modeler/services/schemas.service', () => ({
   deleteSchema: vi.fn(async () => undefined), listSchemas: vi.fn(async () => []),
@@ -21,6 +33,7 @@ vi.mock('../features/modeler/services/schemas.service', () => ({
 vi.mock('@/services/naming.service', () => ({ getNamingConfig: vi.fn(async () => ({})) }));
 
 import * as gov from '@/services/governance.service';
+import { ApiError } from '@/services/http';
 import * as mod from '../features/modeler/services/modeler.service';
 import * as schemas from '../features/modeler/services/schemas.service';
 import { useModelerStore } from './useModelerStore';
@@ -74,13 +87,13 @@ describe('pasteTable(prepared)', () => {
 
   it('si otro tomó el nombre en el medio (409), ese cuenta como tomado y se usa el siguiente', async () => {
     vi.mocked(gov.recordChangesBulk)
-      .mockRejectedValueOnce(new Error('Table M_CLIENTE_copy_1 already exists (schema core)'))
+      .mockRejectedValueOnce(new ApiError('Table M_CLIENTE_copy_1 already exists (schema core)', 409, null, '/api/x'))
       .mockResolvedValueOnce({} as never);
     await expect(st().pasteTable({ table: T1 as never, cols: [C1 as never] })).resolves.toBe('M_CLIENTE_copy_2');
   });
 
   it('un 409 por otro nombre (p. ej. el esquema) no se reintenta: sube tal cual', async () => {
-    vi.mocked(gov.recordChangesBulk).mockRejectedValueOnce(new Error('Schema stg_nuevo already exists'));
+    vi.mocked(gov.recordChangesBulk).mockRejectedValueOnce(new ApiError('Schema stg_nuevo already exists', 409, null, '/api/x'));
     await expect(st().pasteTable({ table: T1 as never, cols: [], createSchema: { name: 'stg_nuevo' } }))
       .rejects.toThrow('Schema stg_nuevo already exists');
     expect(gov.recordChangesBulk).toHaveBeenCalledTimes(1);
@@ -115,7 +128,7 @@ describe('pasteTable(prepared)', () => {
 
   it('un 409 que nombra el texto de la tabla pero no es «Table X already exists» no se reintenta', async () => {
     useModelerStore.setState({ diagram: { ...structuredClone(DIA), tables: [] } as never });
-    vi.mocked(gov.recordChangesBulk).mockRejectedValueOnce(new Error('Schema STG_NUEVO already exists'));
+    vi.mocked(gov.recordChangesBulk).mockRejectedValueOnce(new ApiError('Schema STG_NUEVO already exists', 409, null, '/api/x'));
     await expect(st().pasteTable({ table: { ...T1, physicalName: 'STG' } as never, cols: [], createSchema: { name: 'STG_NUEVO' } }))
       .rejects.toThrow('Schema STG_NUEVO already exists');
     expect(gov.recordChangesBulk).toHaveBeenCalledTimes(1);

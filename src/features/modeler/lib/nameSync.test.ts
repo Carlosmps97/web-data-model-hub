@@ -1,11 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createNameSync } from './nameSync';
+import { draftWorkSettled, flushPendingWrites, hasPendingWrites } from '@/services/draftWork';
+import { createNameSync, type NameSync } from './nameSync';
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
   const promise = new Promise<T>((r) => { resolve = r; });
   return { promise, resolve };
 }
+
+// Lo tipeado sin grabar cuenta para Undo/Redo (registro de módulo): cada test
+// descarta lo suyo al terminar (`reset`), así un physicalize sin responder de un
+// test no queda agendado ni en vuelo en el siguiente.
+const created: NameSync[] = [];
+afterEach(() => { created.splice(0).forEach((s) => s.reset('', '')); });
 
 /** Harness: physicalize controlable por llamada + espías de estado/commit. */
 function harness() {
@@ -18,6 +25,7 @@ function harness() {
   const onState = vi.fn();
   const onCommit = vi.fn();
   const sync = createNameSync({ physicalize, onState, onCommit, debounceMs: 400 });
+  created.push(sync);
   const state = () => onState.mock.calls.at(-1)?.[0] as { logical: string; physical: string };
   return { sync, physicalize, onState, onCommit, calls, state };
 }
@@ -244,5 +252,158 @@ describe('tableNamePlan', () => {
   it('sin lógico no hay derivación posible', () => {
     const plan = tableNamePlan({ logical: '', physical: 'X', prev: { logicalName: '', physicalName: 'X' }, sessionOverride: null });
     expect(plan.derive).toBe(false);
+  });
+});
+
+// Undo y Redo graban ya lo tipeado (doc 133 §5): el commit agendado sale en el
+// acto y, si falta el físico derivado, se pide ya y el commit sale apenas llega
+// (sin la segunda espera). Mientras falta, el Undo lo espera (trabajo en vuelo).
+describe('createNameSync — lo agendado ante un Undo', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** ¿Terminó la espera del trabajo en vuelo? */
+  const settledFlag = () => {
+    const f = { done: false };
+    void draftWorkSettled().then(() => { f.done = true; });
+    return f;
+  };
+
+  it('con el commit agendado, lo manda en el acto y deja de contar', () => {
+    const h = harness();
+    h.sync.setPhysical('CLI');
+    expect(hasPendingWrites()).toBe(true);
+    flushPendingWrites();
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: '', physicalName: 'CLI', physicalNameOverridden: true });
+    expect(hasPendingWrites()).toBe(false);
+    vi.advanceTimersByTime(400);
+    expect(h.onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin el físico pedido todavía, lo pide ya y manda el commit apenas llega; el Undo lo espera', async () => {
+    const h = harness();
+    h.sync.setLogical('cliente');
+    flushPendingWrites();
+    expect(h.calls.map((c) => c.logical)).toEqual(['cliente']);
+    const settled = settledFlag();
+    await flush();
+    expect(settled.done).toBe(false);
+    h.calls[0].d.resolve({ physical: 'CLIENTE' });
+    await draftWorkSettled();                        // termina recién con el commit mandado
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
+    expect(hasPendingWrites()).toBe(false);
+    vi.advanceTimersByTime(800);
+    expect(h.physicalize).toHaveBeenCalledTimes(1);
+    expect(h.onCommit).toHaveBeenCalledTimes(1);
+  });
+
+  it('con el físico en vuelo, manda el commit apenas llega', async () => {
+    const h = harness();
+    h.sync.setLogical('cliente');
+    await vi.advanceTimersByTimeAsync(400);          // ya pidió el físico
+    expect(hasPendingWrites()).toBe(true);
+    flushPendingWrites();
+    const settled = settledFlag();
+    await flush();
+    expect(settled.done).toBe(false);
+    h.calls[0].d.resolve({ physical: 'CLIENTE' });
+    await draftWorkSettled();
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('si el físico no se puede derivar, manda el lógico apenas falla', async () => {
+    const h = harness();
+    h.physicalize.mockImplementationOnce(() => Promise.reject(new Error('sin naming')));
+    h.sync.setLogical('cliente');
+    flushPendingWrites();
+    await flush(); await flush();
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: '', physicalNameOverridden: false });
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('sin el físico en vuelo, el rayo (derive) también se manda apenas llega', async () => {
+    const h = harness();
+    h.sync.reset('cliente', 'X_CLI', true);
+    h.sync.derive();
+    expect(hasPendingWrites()).toBe(true);
+    flushPendingWrites();
+    h.calls[0].d.resolve({ physical: 'CLIENTE' });
+    await flush(); await flush();
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('al cerrar el panel con el físico en vuelo, sigue agendado: su commit sale 400 ms después de llegar, como antes', async () => {
+    const h = harness();
+    h.sync.setLogical('cliente');
+    await vi.advanceTimersByTimeAsync(400);          // ya pidió el físico
+    h.sync.dispose();
+    expect(hasPendingWrites()).toBe(true);
+    h.calls[0].d.resolve({ physical: 'CLIENTE' });
+    await flush(); await flush();
+    // Con la columna recién borrada, su recarga llega antes: el guardado no la revive.
+    expect(h.onCommit).not.toHaveBeenCalled();
+    expect(hasPendingWrites()).toBe(true);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('… y un Undo en ese lapso lo manda ya y lo espera', async () => {
+    const h = harness();
+    h.sync.setLogical('cliente');
+    await vi.advanceTimersByTimeAsync(400);
+    h.sync.dispose();
+    flushPendingWrites();
+    const settled = settledFlag();
+    await flush();
+    expect(settled.done).toBe(false);
+    h.calls[0].d.resolve({ physical: 'CLIENTE' });
+    await draftWorkSettled();
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('con un físico tipeado después del lógico, no pide el físico viejo: manda el commit en el acto', () => {
+    const h = harness();
+    h.sync.setLogical('cliente');
+    h.sync.setPhysical('X_CLI');
+    flushPendingWrites();
+    expect(h.physicalize).not.toHaveBeenCalled();
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'X_CLI', physicalNameOverridden: true });
+    expect(hasPendingWrites()).toBe(false);
+  });
+
+  it('si pintar el físico falla al llegar, igual sale el commit', async () => {
+    const h = harness();
+    h.sync.setLogical('cliente');
+    await vi.advanceTimersByTimeAsync(400);
+    h.onState.mockImplementationOnce(() => { throw new Error('render'); });
+    h.calls[0].d.resolve({ physical: 'CLIENTE' });
+    await flush(); await flush();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(h.onCommit).toHaveBeenCalledWith({ logicalName: 'cliente', physicalName: 'CLIENTE', physicalNameOverridden: false });
+  });
+
+  it('reset y dispose sueltan lo agendado sin mandarlo', () => {
+    const h = harness();
+    h.sync.setPhysical('CLI');
+    h.sync.reset('otra', 'OTRA');
+    expect(hasPendingWrites()).toBe(false);
+    h.sync.setLogical('cli');
+    h.sync.dispose();
+    expect(hasPendingWrites()).toBe(false);
+    flushPendingWrites();
+    expect(h.onCommit).not.toHaveBeenCalled();
+  });
+
+  it('sin nada tipeado no cuenta como agendado', () => {
+    const h = harness();
+    h.sync.reset('cliente', 'CLIENTE');
+    expect(hasPendingWrites()).toBe(false);
+    flushPendingWrites();
+    expect(h.physicalize).not.toHaveBeenCalled();
+    expect(h.onCommit).not.toHaveBeenCalled();
   });
 });

@@ -13,7 +13,7 @@ vi.mock('@/services/governance.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/governance.service')>();
   return {
     ...actual,
-    listRelationships: vi.fn(), listColumns: vi.fn(), recordChangesBulk: vi.fn(),
+    listRelationships: vi.fn(), listColumns: vi.fn(), currentColumns: vi.fn(), recordChangesBulk: vi.fn(),
     updateColumn: vi.fn(), updateRelationship: vi.fn(), deleteRelationship: vi.fn(), deleteColumn: vi.fn(),
   };
 });
@@ -70,6 +70,7 @@ beforeEach(async () => {
   useUndoStore.setState({ stack: [], busy: false });
   vi.mocked(gov.listRelationships).mockImplementation(async (t) => structuredClone(RELS[t ?? ''] ?? []) as never);
   vi.mocked(gov.listColumns).mockImplementation(async () => [] as never);
+  vi.mocked(gov.currentColumns).mockImplementation(async () => [] as never);
   vi.mocked(gov.recordChangesBulk).mockImplementation(async () => ({}) as never);
   vi.mocked(viewsSvc.listViews).mockImplementation(async (t) => (t === 'tP' ? [structuredClone(V1)] : []) as never);
   vi.mocked(mod.loadDiagram).mockImplementation(async () => structuredClone(DIA) as never);

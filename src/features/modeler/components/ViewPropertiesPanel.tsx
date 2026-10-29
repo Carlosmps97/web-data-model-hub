@@ -3,7 +3,7 @@ import { ArrowLeft, Eye, GripVertical, Pencil, Trash2, Unlink } from 'lucide-rea
 import Icon from '@/components/ui/Icon';
 import { failureText, fieldsStep, inObjectOrder, useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
-import { pushUndo } from '@/store/useUndoStore';
+import { historyAction, pushUndo } from '@/store/useUndoStore';
 import * as viewsSvc from '@/services/views.service';
 import type { View, ViewInput } from '@/services/views.service';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
@@ -155,7 +155,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
    *  vista (`inObjectOrder`) y parte del documento vigente de la working copy
    *  (así un segundo guardado no revierte el primero); si la vista no está en
    *  la working copy, avisa en vez de recrearla. */
-  const saveView = async (patch: Partial<ViewInput>, label: string, toastMsg?: string) => {
+  const saveView = (patch: Partial<ViewInput>, label: string, toastMsg?: string) => historyAction(async () => {
     const pin = pinSession();   // su inversa se apila solo en su sesión
     const id = view.id;
     const wrote = await inObjectOrder(id, async () => {
@@ -175,7 +175,7 @@ export default function ViewPropertiesPanel({ pushToast, onResize }: {
       return true;
     });
     if (wrote && toastMsg) pushToast(toastMsg);
-  };
+  });
   /** El `.catch` de un guardado, tomado al pedirlo: con la versión recién
    *  transferida calla (la revalidación ya avisó). */
   const saveErr = () => reportWriteError((e) => pushToast(e instanceof Error && e.message ? e.message : "Couldn't save", 'err'));

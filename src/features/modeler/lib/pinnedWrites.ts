@@ -5,6 +5,7 @@
  * abre otra versión, o la revalidación la degrada), lo que falta no se escribe
  * (ni en la nueva ni en ninguna) y el corte no se traga como un error más.
  */
+import { pendingWrite } from '@/services/draftWork';
 import * as gov from '@/services/governance.service';
 import type { BulkChange, CanonicalColumn, Relationship } from '@/services/governance.service';
 import type { HistoryStep } from '@/store/useUndoStore';
@@ -128,35 +129,42 @@ export function columnsBatchStep(o: {
 }
 
 /** Escrituras diferidas de lo que el usuario editó (debounce por clave y
- *  `flush` al cerrar el panel). Cada una va con el pin tomado al editar: si al
- *  dispararse la sesión es otra (al cambiar de versión el panel se cierra y
- *  hace flush), se descarta. Nunca se escribe en la versión que se abrió
- *  después (si la cambia la revalidación, ella ya avisa). */
+ *  `flush` al cerrar el panel o al pulsar Undo o Redo). Cada una va con el pin
+ *  tomado al editar: si al dispararse la sesión es otra (al cambiar de versión
+ *  el panel se cierra y hace flush), se descarta. Nunca se escribe en la
+ *  versión que se abrió después (si la cambia la revalidación, ella ya avisa). */
 export function pinnedDebouncer<T>(write: (value: T) => unknown, ms: number) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const pending = new Map<string, { value: T; pin: SessionPin }>();
+  // Lo pendiente cuenta para Undo y Redo, que lo escriben ya.
+  const scheduled = pendingWrite(() => api.flush());
+  const settle = () => { if (!pending.size) scheduled.release(); };
   const fire = (key: string) => {
     const p = pending.get(key);
     pending.delete(key); timers.delete(key);
+    settle();
     if (p && p.pin.holds()) void write(p.value);
   };
-  return {
+  const api = {
     /** Agenda (o re-agenda) la escritura de `key` con la sesión vigente. */
     schedule(key: string, value: T) {
       clearTimeout(timers.get(key));
       pending.set(key, { value, pin: pinSession() });
       timers.set(key, setTimeout(() => fire(key), ms));
+      scheduled.hold();
     },
     /** Descarta lo pendiente de `key` (otro guardado trae el valor vigente). */
     cancel(key: string) {
       clearTimeout(timers.get(key));
       timers.delete(key); pending.delete(key);
+      settle();
     },
-    /** Escribe ya lo pendiente (cerrar el panel) — solo lo de la sesión vigente. */
+    /** Escribe ya lo pendiente (cerrar el panel, Undo, Redo) — solo lo de la sesión vigente. */
     flush() {
       for (const t of timers.values()) clearTimeout(t);
       timers.clear();
       for (const key of [...pending.keys()]) fire(key);
     },
   };
+  return api;
 }

@@ -6,7 +6,7 @@ import Dialog from '@/components/ui/Dialog';
 import Icon from '@/components/ui/Icon';
 import { useModelerStore, type InspectTarget } from '@/store/useModelerStore';
 import { sessionProjectId, useSessionStore } from '@/store/useSessionStore';
-import { pushUndo, type HistoryStep } from '@/store/useUndoStore';
+import { historyAction, pushUndo, type HistoryStep } from '@/store/useUndoStore';
 import * as gov from '@/services/governance.service';
 import type { CanonicalColumn, CanonicalTable, ParentDomain, TableUsageRow } from '@/services/governance.service';
 import * as viewsSvc from '@/services/views.service';
@@ -290,7 +290,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   // Cada escritura del inspector pertenece a la sesión donde empezó (`pinSession`:
   // su inversa se apila solo ahí y corta si la sesión cambia) y su fallo espera la
   // revalidación y calla si la sesión cambia (`reportWriteError`).
-  const saveTableDef = async () => {
+  const saveTableDef = () => historyAction(async () => {
     if (!data) return;
     const pin = pinSession();
     const onError = reportWriteError((e) => toast.error(errMsg(e, "Couldn't save")));
@@ -321,12 +321,12 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       toast.success(`${nouns.One} updated`);
     } catch (e) { await onError(e); }
     finally { setSaving(false); }
-  };
+  });
   // Definición funcional: auto-guardado al salir del campo. Los nombres y el
   // esquema siguen detrás de Save (un rename es transaccional): `...data.table`
   // usa los nombres del server, así que un nombre a medio editar en el form no
   // viaja con este blur.
-  const saveDescriptionOnBlur = async () => {
+  const saveDescriptionOnBlur = () => historyAction(async () => {
     if (!canEdit || !data) return;
     const next = form.description.trim() || undefined;
     if ((data.table.description ?? undefined) === next) return;
@@ -339,7 +339,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       pushUndo(`Edit table ${pre.physicalName}`, tableStep(pre, doc, false), pin);
       await afterEdit(false);
     } catch (e) { await onError(e); }
-  };
+  });
   /** Rayo: re-deriva el físico desde el lógico por el glosario y apaga el override. */
   const derivePhysical = async () => {
     try {
@@ -348,7 +348,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       setPhysTouched(false);  // derivar = renunciar al override
     } catch { toast.error("Couldn't derive the physical name"); }
   };
-  const saveTableUdp = async (next: Record<string, string>) => {
+  const saveTableUdp = (next: Record<string, string>) => historyAction(async () => {
     if (!data) return;
     const pre = tablePre(data.table);
     const pin = pinSession();
@@ -359,7 +359,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       pushUndo(`Edit table ${pre.physicalName}`, tableStep(pre, doc, false), pin);
       await afterEdit(false);
     } catch (e) { await onError(e); }
-  };
+  });
   /** Borrado con el diálogo de impacto de Properties (conteos del dossier) y la
    *  cascada versionada del store; la pre-imagen del Undo viene del dossier
    *  porque sin canvas no hay diagrama. El store recarga el canvas y sincroniza
@@ -384,7 +384,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
   };
 
   // ── Columna: mismo upsert changeset-aware que el sidebar ──
-  const patchColumn = async (id: string, fields: Partial<CanonicalColumn>) => {
+  const patchColumn = (id: string, fields: Partial<CanonicalColumn>) => historyAction(async () => {
     const c = data?.columns.find((x) => x.id === id);
     if (!c) return;
     const pin = pinSession();
@@ -422,7 +422,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       }
       await afterEdit(structural);
     } catch (e) { await onError(e); }
-  };
+  });
   /** Impacto global + cascada versionada del store; la columna viaja desde el
    *  dossier (sin canvas no está en el diagrama). */
   const askDeleteColumn = async (c: CanonicalColumn) => {
@@ -462,7 +462,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
     } finally { hold.release(); }
   };
   /** Mueve la columna en el único orden de la tabla (`ordinal`). */
-  const move = async (colId: string, delta: number) => {
+  const move = (colId: string, delta: number) => historyAction(async () => {
     if (!data || reordering) return;
     const ids = cols.map((c) => c.id);
     const from = ids.indexOf(colId), to = from + delta;
@@ -490,7 +490,7 @@ function TableInspector({ target, onClose }: { target: InspectTarget; onClose: (
       await afterEdit(false);
     } catch (e) { await onError(e); await refresh().catch(() => {}); }
     finally { setReordering(false); }
-  };
+  });
   /** Basurero de la pestaña Views (paridad con Properties › Views). */
   const askDeleteView = async (v: TableViewRow) => {
     const pre = viewPre(v);
@@ -886,7 +886,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     if (plan === 'reload') await reloadDiagram();
     else if (plan === 'bump') bumpExplorer();
   };
-  const saveView = async (patch: Partial<ViewInput>, label: string, structural: boolean) => {
+  const saveView = (patch: Partial<ViewInput>, label: string, structural: boolean) => historyAction(async () => {
     if (!data) return;
     const pin = pinSession();   // su inversa se apila solo en su sesión
     const pre = viewPre(data.view);
@@ -900,7 +900,7 @@ function ViewInspector({ target, onClose }: { target: InspectTarget; onClose: ()
     };
     pushUndo(label, viewStep(pre as ViewInput, next), pin);
     await afterEdit(structural);
-  };
+  });
   const saveDef = async () => {
     if (!data) return;
     const name = form.name.trim() || data.view.name;
