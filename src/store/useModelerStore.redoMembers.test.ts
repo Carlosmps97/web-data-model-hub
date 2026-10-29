@@ -22,6 +22,7 @@ import { draftLedger } from './draftLedger.testutil';
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { openOtherCanvasWhileStepRuns } from './historyCanvas.testutil';
 
 const CS = 'cs1';
 const R = [{ x: 200, y: 40 }, { x: 200, y: 160 }];
@@ -103,14 +104,27 @@ describe('Redo de la membresía del canvas', () => {
     expect(state(draft.sa1)).toEqual(before);
     expect(await redo()).toBe('Remove M_T1 from canvas');
     expect(state(draft.sa1)).toEqual(removed);
-    // Con otro canvas abierto: deshacer y rehacer siguen siendo del canvas de la acción.
+    // Con otro canvas abierto no se deshace (doc 133); si se abre otro mientras
+    // el paso corre, deshacer y rehacer siguen siendo del canvas de la acción.
     show('sa2');
-    await undo();
-    expect(state(draft.sa1)).toEqual(before);
-    await redo();
+    await expect(undo()).rejects.toMatchObject({ cmd: 'undo', canvasId: 'sa1' });
     expect(state(draft.sa1)).toEqual(removed);
-    await undo();
-    expect(state(draft.sa1)).toEqual(before);
+    show('sa1');
+    const other = openOtherCanvasWhileStepRuns(() => show('sa2'));
+    const opened = () => expect(useModelerStore.getState().activeSaId).toBe('sa2');   // el otro canvas de verdad se abrió
+    try {
+      await undo();
+      opened();
+      expect(state(draft.sa1)).toEqual(before);
+      show('sa1');
+      await redo();
+      opened();
+      expect(state(draft.sa1)).toEqual(removed);
+      show('sa1');
+      await undo();
+      opened();
+      expect(state(draft.sa1)).toEqual(before);
+    } finally { other.stop(); }
     expect(state(draft.sa2)).toEqual(state(canvas({ id: 'sa2', tableIds: ['t3'], layout: { t3: { x: 1, y: 1 } } })));
   });
 

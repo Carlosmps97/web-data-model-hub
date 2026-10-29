@@ -10,8 +10,9 @@ import type { DbSchema } from '@/features/modeler/services/schemas.service';
 import { invalidateTableSchemas } from '@/features/modeler/services/schemaPartition';
 import type { Diagram, Drawing, DrawingType, Folder, Project, SubjectArea } from '@/features/modeler/services/modeler.service';
 import * as gov from '@/services/governance.service';
-import { onDraftWrite } from '@/services/changeset.service';
-import { trackDraftWork } from '@/services/draftWork';
+import { onDraftWrite, writeSeqOf } from '@/services/changeset.service';
+import { forgetDraftSeqs, noteSeen } from '@/services/draftSeqs';
+import { draftWorkSettled, trackDraftWork } from '@/services/draftWork';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
 import { getNamingConfig, type NamingConfig } from '@/services/naming.service';
 import { facetName, facetNouns } from '@/lib/facets';
@@ -34,7 +35,7 @@ import { isPkFirst, orderColumns, persistReorder, pkFirstOrdinals, reorderPlan, 
 import type { CanvasDropPlan } from '@/features/modeler/lib/canvasDrop';
 import { canvasClock, wholePoint, writtenSince } from '@/features/modeler/lib/canvasWrites';
 import {
-  afterRevalidation, isVersionError, pinSession, stillAskedSession, touchesVersion, type SessionPin,
+  afterRevalidation, isVersionError, pinSession, setCanvasSource, stillAskedSession, touchesVersion, type SessionPin,
 } from '@/features/modeler/lib/sessionGuard';
 import { columnStep, lotStep, pinnedViewDeps } from '@/features/modeler/lib/pinnedWrites';
 import {
@@ -373,6 +374,10 @@ interface ModelerState {
    *  última carga (`lib/diagramSlice`) o, si no se puede acotar o con `full`,
    *  el diagrama completo. */
   reload: (opts?: { full?: boolean }) => Promise<void>;
+  /** Si otra pestaña (u otro equipo del dueño) escribió en la versión desde la
+   *  última carga, recarga el diagrama completo: lo suyo queda en pantalla y
+   *  «visto» para el candado del Undo. Se llama al volver a la pestaña. */
+  syncOtherTabs: () => Promise<void>;
   /** Cachea el naming config de `projectId` (descarta respuestas de
    *  un proyecto que dejó de ser el activo; un fallo no pisa lo cacheado). */
   loadNaming: (projectId: string | null) => Promise<void>;
@@ -856,6 +861,8 @@ let _reloadAfterOpening: { saId: string; prev: Diagram | null } | null = null;
 // (una caída, un aviso). La consume la `reload()` al empezar (así no queda
 // armada si esta termina antes).
 let _quietReloadFailure = false;
+// La mirada en curso al volver a la pestaña (foco y «visible» llegan juntos).
+let _syncing: Promise<void> | null = null;
 // Lo que esta pestaña escribió en el draft y todavía no está en el diagrama en
 // pantalla: las tablas que tocó (`lib/diagramSlice.editedTables`) y si hace
 // falta el completo, cada uno con el número de la anotación más reciente que lo
@@ -887,8 +894,11 @@ function settleOwed(upTo: number, lot: ReadonlySet<string> | null): void {
 /** ¿Quedó algo anotado después de `upTo`? */
 const owedSince = (upTo: number): boolean => _owed.full > upTo || [..._owed.tables.values()].some((n) => n > upTo);
 
-/** Las escrituras del draft vistas por una carga completa instalada. */
+/** Las escrituras del draft vistas por una carga completa instalada (también
+ *  para el candado del Undo: lo visto de la versión). */
 function sawDraft(seq: number | null | undefined): void {
+  const cs = useSessionStore.getState().activeChangesetId;
+  if (cs) noteSeen(cs, seq);
   const atLoad = seq ?? null;
   _seqs = { atLoad, own: new Set(atLoad == null ? [] : [..._seqs.own].filter((n) => n > atLoad)) };
 }
@@ -1854,7 +1864,13 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
   deleteCanvas: async (id, projectId) => {
     const { isCurrent } = explorerRequest();
+    // Lo hecho en ese canvas ya no se podrá deshacer ni rehacer allá, y tapa lo
+    // de abajo en la pila: el historial se vacía (se mira antes: la escritura
+    // misma ya vacía lo pendiente de rehacer).
+    const { stack, redoStack } = useUndoStore.getState();
+    const itsOwn = [...stack, ...redoStack].some((e) => e.canvasId === id);
     await struct.deleteSubjectArea(id);
+    if (itsOwn) useUndoStore.getState().clear();
     const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid, isCurrent);
   },
   moveCanvas: async (id, folderId) => {
@@ -2005,6 +2021,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       get().bumpExplorer();
     }
     if (published) void get().reload({ full: true });
+  },
+  syncOtherTabs: () => {
+    const s = useSessionStore.getState();
+    const cs = s.activeChangesetId;
+    if (s.openMode !== 'editing' || !cs || !get().activeSaId || !get().diagram) return Promise.resolve();
+    if (_syncing) return _syncing;
+    const pin = pinSession();
+    _syncing = (async () => {
+      try {
+        const { writeSeq } = await writeSeqOf(cs);
+        // Lo que esta pestaña tenía grabándose ya cuenta en el contador: se espera
+        // su respuesta (su número) antes de decidir si escribió otra pestaña.
+        await draftWorkSettled();
+        if (pin.holds() && othersWrote(writeSeq)) await get().reload({ full: true });
+      } catch { /* sin respuesta: lo verá la próxima recarga */ }
+    })().finally(() => { _syncing = null; });
+    return _syncing;
   },
   saveLayout: (tableId, pos) => get().saveNodePositions({ [tableId]: pos }),
   saveNodePositions: async (positions) => {
@@ -3107,6 +3140,22 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   },
 }));
 
+// El pin de cada acción recuerda el canvas abierto: Undo y Redo solo actúan
+// sobre lo hecho en el canvas que se ve (doc 133).
+setCanvasSource(() => useModelerStore.getState().activeSaId);
+
+/** Al volver a la pestaña (foco o visible) se mira si otra pestaña escribió en
+ *  la versión (`syncOtherTabs`). */
+export function watchReturns(
+  win: Pick<EventTarget, 'addEventListener'>,
+  doc: Pick<EventTarget, 'addEventListener'> & { visibilityState: DocumentVisibilityState },
+): void {
+  const look = () => { void useModelerStore.getState().syncOtherTabs(); };
+  win.addEventListener('focus', look);
+  doc.addEventListener('visibilitychange', () => { if (doc.visibilityState === 'visible') look(); });
+}
+if (typeof window !== 'undefined' && typeof document !== 'undefined') watchReturns(window, document);
+
 // ── Trazos manuales de wires ───────────────────────────────────────────────────────
 
 /** Cuántos wires del canvas abierto tienen trazo manual (aviso del auto-arrange). */
@@ -3515,6 +3564,7 @@ useSessionStore.subscribe((s, prev) => {
     _loadSeq += 1;
     _reloadAfterOpening = null;   // una recarga en espera es de la sesión anterior
     _seqs = seqsFresh();          // los números propios son de su versión
+    forgetDraftSeqs();            // y lo que el candado del Undo vio de ella
     useModelerStore.setState({
       diagram: null, drawings: [], openingSaId: null,
       selectedTableId: null, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null,

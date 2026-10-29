@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 // store: la sesión y el historial salen de estos objetos (el resto, real).
 const session: Record<string, unknown> = {};
 const history: Record<string, unknown> = {};
+const modeler: Record<string, unknown> = { activeSaId: 'sa1', diagram: { subjectArea: { id: 'sa1' } } };
 vi.mock('@/store/useSessionStore', async (orig) => {
   const actual = await orig<typeof import('@/store/useSessionStore')>();
   const real = actual.useSessionStore;
@@ -23,7 +24,7 @@ vi.mock('@/store/useUndoStore', async (orig) => {
 vi.mock('@/store/useModelerStore', async (orig) => {
   const actual = await orig<typeof import('@/store/useModelerStore')>();
   const real = actual.useModelerStore;
-  const hook = (sel: (s: unknown) => unknown) => sel({ ...real.getState(), activeSaId: 'sa1', diagram: { subjectArea: { id: 'sa1' } } });
+  const hook = (sel: (s: unknown) => unknown) => sel({ ...real.getState(), ...modeler });
   return { ...actual, useModelerStore: Object.assign(hook, real) };
 });
 vi.mock('./ColumnContextMenu', async (orig) => ({ ...(await orig<object>()), UNDO_KEY_LABEL: 'Mod+Z', REDO_KEY_LABEL: 'Mod+Shift+Z' }));
@@ -65,5 +66,31 @@ describe('Toolbar: botón Redo', () => {
     Object.assign(history, { stack: [], redoStack: [entry('Create table T')], busy: false });
     const redo = buttons().find((b) => b.name.startsWith('Redo'));
     expect(redo?.disabled).toBe(true);
+  });
+});
+
+// Undo y Redo solo actúan sobre lo hecho en el canvas abierto (doc 133): si lo
+// de arriba se hizo en otro, el tooltip dice en cuál y el botón sigue activo
+// (al pulsarlo avisa y ofrece abrirlo).
+describe('Toolbar: lo último se hizo en otro canvas', () => {
+  const at = (label: string, canvasId: string | null) => ({ label, run: async () => null, canvasId });
+  const CANVASES = [{ id: 'sa1', name: 'Uno' }, { id: 'sa2', name: 'Ventas' }];
+
+  it('el tooltip dice en qué canvas y el botón sigue activo', () => {
+    Object.assign(session, { openMode: 'editing', activeChangesetId: 'cs1', activeProjectId: 'p1' });
+    Object.assign(modeler, { subjectAreas: CANVASES });
+    Object.assign(history, { stack: [at('Edit column A', 'sa2')], redoStack: [at('Create table T', 'sa2')], busy: false });
+    const [undo, redo] = undoRedo();
+    expect(undo).toEqual({ name: 'Undo — Edit column A (on canvas Ventas)', disabled: false });
+    expect(redo).toEqual({ name: 'Redo — Create table T (on canvas Ventas)', disabled: false });
+  });
+
+  it('lo del canvas abierto, como siempre; lo hecho sin canvas, desde el Object Inspector', () => {
+    Object.assign(session, { openMode: 'editing', activeChangesetId: 'cs1', activeProjectId: 'p1' });
+    Object.assign(modeler, { subjectAreas: CANVASES });
+    Object.assign(history, { stack: [at('Edit column A', 'sa1')], redoStack: [at('Create table T', null)], busy: false });
+    const [undo, redo] = undoRedo();
+    expect(undo.name).toBe('Undo — Edit column A (Mod+Z)');
+    expect(redo.name).toBe('Redo — Create table T in the Object Inspector (Mod+Shift+Z)');
   });
 });

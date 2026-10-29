@@ -48,6 +48,7 @@ import { draftLedger } from './draftLedger.testutil';
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { openOtherCanvasWhileStepRuns } from './historyCanvas.testutil';
 
 type Col = gov.CanonicalColumn;
 type Rel = gov.Relationship;
@@ -220,8 +221,14 @@ beforeEach(async () => {
 afterEach(async () => { await sleep(10); });
 
 /** Acción → deshacer → rehacer → deshacer: el estado vuelve a cada punto. */
-async function roundTrip(act: () => Promise<unknown>, label: string, between?: () => Promise<void>) {
+/** Deshacer → rehacer → deshacer deja los datos iguales. `between` corre antes
+ *  del Redo. Con `otherCanvas`, ese canvas se abre apenas arranca el Redo y el
+ *  último Undo (desde el doc 133 no corren con otro canvas abierto, pero puede
+ *  abrirse uno mientras corren); el de la acción se reabre antes de cada uno. */
+async function roundTrip(act: () => Promise<unknown>, label: string, opts: { between?: () => Promise<unknown>; otherCanvas?: string } = {}) {
+  const { between, otherCanvas } = opts;
   const before = snapshot();
+  const home = st().activeSaId!;
   await act();
   const after = snapshot();
   expect(after).not.toEqual(before);
@@ -229,10 +236,19 @@ async function roundTrip(act: () => Promise<unknown>, label: string, between?: (
   expect(snapshot()).toEqual(before);
   expect(redoLabels()).toEqual([label]);
   await between?.();
-  expect(await redo()).toBe(label);
-  expect(snapshot()).toEqual(after);
-  expect(await undo()).toBe(label);
-  expect(snapshot()).toEqual(before);
+  const other = otherCanvas ? openOtherCanvasWhileStepRuns(() => open(otherCanvas)) : null;
+  try {
+    expect(await redo()).toBe(label);
+    expect(snapshot()).toEqual(after);
+    if (other) {
+      await other.opened();
+      expect(st().activeSaId).toBe(otherCanvas);   // el otro canvas de verdad se abrió
+      await open(home);
+    }
+    expect(await undo()).toBe(label);
+    expect(snapshot()).toEqual(before);
+    if (other) { await other.opened(); expect(st().activeSaId).toBe(otherCanvas); }
+  } finally { other?.stop(); }
 }
 
 describe('Redo de altas y cascadas', () => {
@@ -241,7 +257,7 @@ describe('Redo de altas y cascadas', () => {
   });
 
   it('crear una tabla y deshacer/rehacer con otro canvas abierto', async () => {
-    await roundTrip(() => st().createTable({ logicalName: 'NUEVA', mode: 'physical' }), 'Create table NUEVA', () => open('sa2'));
+    await roundTrip(() => st().createTable({ logicalName: 'NUEVA', mode: 'physical' }), 'Create table NUEVA', { otherCanvas: 'sa2' });
   });
 
   it('CTAS: rehacer re-crea la tabla con sus columnas', async () => {
@@ -259,7 +275,7 @@ describe('Redo de altas y cascadas', () => {
   });
 
   it('borrar una tabla y deshacer/rehacer con otro canvas abierto', async () => {
-    await roundTrip(() => st().deleteTable('t1'), 'Delete table M_CLIENTE', () => open('sa2'));
+    await roundTrip(() => st().deleteTable('t1'), 'Delete table M_CLIENTE', { otherCanvas: 'sa2' });
   });
 
   it('borrar una columna con su relación elegida (la FK de la hija se apaga): ida y vuelta', async () => {
@@ -349,7 +365,7 @@ describe('Redo de altas y cascadas', () => {
   });
 
   it('borrar una relación (apaga la FK de la hija): rehacer la recalcula, también con otro canvas abierto', async () => {
-    await roundTrip(() => st().deleteRelationship('r1'), 'Delete relationship', () => open('sa2'));
+    await roundTrip(() => st().deleteRelationship('r1'), 'Delete relationship', { otherCanvas: 'sa2' });
   });
 
   it('rehacer un borrado lo recalcula: una vista nueva sobre la tabla también se va, y el siguiente Undo la repone', async () => {
@@ -384,7 +400,7 @@ describe('Redo de altas y cascadas', () => {
     });
 
     it('deshacer borra la tabla y el esquema; rehacer vuelve los dos, también después de una recarga', async () => {
-      await roundTrip(paste, 'Paste table M_CLIENTE_copy_1', () => st().reload());
+      await roundTrip(paste, 'Paste table M_CLIENTE_copy_1', { between: () => st().reload() });
     });
 
     it('si mientras se deshace otra tabla empezó a usar el esquema, el servidor no lo borra', async () => {
@@ -397,13 +413,15 @@ describe('Redo de altas y cascadas', () => {
       expect(schemaRows.has(sid)).toBe(true);
     });
 
+    // Desde el doc 133 el Schema manager vacía el historial al renombrar; el paso
+    // igual no depende del nombre que tenía el esquema al pegar.
     it('renombrado antes de deshacer: rehacer lo repone con su nombre vigente', async () => {
       await paste();
-      // Structure · Schemas lo renombra (el servidor propaga el nombre a sus tablas) y recarga.
+      // El esquema cambia de nombre (el servidor propaga el nombre a sus tablas) y el canvas recarga.
       const [sid] = [...schemaRows.keys()];
       schemaRows.set(sid, { ...schemaRows.get(sid)!, name: 'STG_OTRO' });
       for (const t of tables.values()) if (t.schema === 'STG_NUEVO') tables.set(t.id, { ...t, schema: 'STG_OTRO' });
-      draftLedger.foreign();
+      draftLedger.write(CS, [{ collection: 'schemas', entityId: sid, op: 'upsert' }]);
       await st().reload();
       const renamed = snapshot();
       await undo();
@@ -423,24 +441,23 @@ describe('Redo de altas y cascadas', () => {
     expect(redoLabels()).toEqual([]);
   });
 
-  // Con su canvas cerrado, deshacer el alta lee la tabla del servidor (no está en
-  // pantalla) para dejar qué rehacer. Rehacer la devuelve donde se veía: sin
-  // posición guardada (el canvas la ubicaba por orden), vuelve con esa posición
-  // fijada — la regla del Undo de borrar una tabla en un canvas no abierto.
-  it('deshacer «Create table» con otro canvas abierto (la tabla no está en pantalla) también deja qué rehacer', async () => {
+  // Desde otro canvas no se deshace (doc 133): avisa sin tocar nada. En el suyo,
+  // deshacer el alta deja qué rehacer y rehacer la devuelve igual.
+  it('«Create table» no se deshace con otro canvas abierto (doc 133); en el suyo, deshacer deja qué rehacer', async () => {
     const before = snapshot();
     await st().createTable({ logicalName: 'NUEVA', mode: 'physical' });
     const after = snapshot();
     const id = Object.keys(after.tables).find((t) => !(t in before.tables))!;
     await open('sa2');
+    await expect(undo()).rejects.toMatchObject({ cmd: 'undo', canvasId: 'sa1' });
+    expect(snapshot()).toEqual(after);
+    await open('sa1');
     expect(await undo()).toBe('Create table NUEVA');
     expect(snapshot()).toEqual(before);
     expect(redoLabels()).toEqual(['Create table NUEVA']);
     expect(await redo()).toBe('Create table NUEVA');
-    const redone = snapshot();
-    expect(redone.canvases.sa1.layout[id]).toEqual(expect.objectContaining({ x: expect.any(Number), y: expect.any(Number) }));
-    delete redone.canvases.sa1.layout[id];
-    expect(redone).toEqual(after);
+    expect(snapshot().canvases.sa1.tableIds).toContain(id);
+    expect(snapshot()).toEqual(after);
   });
 });
 

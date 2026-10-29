@@ -5,10 +5,11 @@ vi.mock('@/services/changeset.service', async (orig) =>
 
 import { ApiError } from '@/services/http';
 import { writeSeqOf } from '@/services/changeset.service';
+import { forgetDraftSeqs, noteSeen } from '@/services/draftSeqs';
 import { trackDraftWork } from '@/services/draftWork';
-import { pinSession, trackRevalidation } from '@/features/modeler/lib/sessionGuard';
+import { pinSession, setCanvasSource, trackRevalidation } from '@/features/modeler/lib/sessionGuard';
 import { draftLedger } from './draftLedger.testutil';
-import { NothingDoneError, freshStep, pushUndo, useUndoStore, type HistoryStep } from './useUndoStore';
+import { NothingDoneError, OtherCanvasError, StaleUndoError, freshStep, pushUndo, useUndoStore, type HistoryStep } from './useUndoStore';
 import { useBusyStore } from './useBusyStore';
 import { useSessionStore } from './useSessionStore';
 
@@ -16,7 +17,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const open = (mode: 'editing' | 'readonly', changesetId: string) =>
   useSessionStore.getState().openModel({ projectId: 'p', mode, changesetId });
 
-beforeEach(() => { useUndoStore.getState().clear(); useUndoStore.setState({ busy: false }); });
+beforeEach(() => { useUndoStore.getState().clear(); useUndoStore.setState({ busy: false }); forgetDraftSeqs(); });
 
 describe('useUndoStore', () => {
   it('undoLast es LIFO: corre la inversa y devuelve su label', async () => {
@@ -484,12 +485,21 @@ describe('Redo', () => {
     expect(redoLabels()).toEqual([]);
   });
 
+  // Con el candado del Undo (doc 133), lo único que puede quedar entre dos Undo
+  // sin vaciar el historial es una escritura propia sin respuesta: la de un paso
+  // que falló por red y se reintenta.
   it('un Undo cuya primera escritura no sigue a la base descarta lo que había para rehacer', async () => {
-    pushUndo('A', pair('A', []));
+    let fail = true;
+    pushUndo('A', async () => {
+      if (fail) { draftLedger.lost(CS); draftLedger.foreign(); throw new ApiError('Network error', 0, null, '/api/x'); }
+      draftLedger.write(CS);
+      return pair('A', []);
+    });
     pushUndo('B', pair('B', []));
     await useUndoStore.getState().undoLast();          // B: base = su última escritura
-    draftLedger.foreign();
-    await useUndoStore.getState().undoLast();          // A empieza después de una ajena
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow('Press Undo to try again.');   // A se grabó sin respuesta
+    fail = false;
+    await useUndoStore.getState().undoLast();          // A otra vez: empieza después de esa escritura
     expect(redoLabels()).toEqual(['A']);
   });
 
@@ -793,5 +803,418 @@ describe('Redo', () => {
       expect(await useUndoStore.getState().undoLast()).toBe('A');
       expect(redoLabels()).toEqual(['A']);
     });
+  });
+});
+
+// ── Candado del Undo (doc 133) ──────────────────────────────────────────────
+// Solo el dueño escribe en su versión: un número del contador que no es de esta
+// pestaña es de otra pestaña o equipo suyo. Una acción recuerda lo visto de su
+// versión al empezar (su pin); si después alguien más escribió, deshacerla
+// podría pisar eso: no se deshace y el historial se vacía.
+describe('candado del Undo', () => {
+  const FOREIGN = "This version changed in another tab or window: the undo history was cleared so it doesn't overwrite those changes.";
+  const UNCONFIRMED = 'One of your saves got no response, so the undo history was cleared to avoid overwriting anything.';
+  beforeEach(() => { open('editing', CS); vi.mocked(writeSeqOf).mockClear(); });
+
+  /** Una acción con su pin: graba una vez y apila su inversa. */
+  const act = (label: string, log: string[]) => {
+    const pin = pinSession();
+    draftLedger.write(CS);
+    pushUndo(label, pair(label, log), pin);
+  };
+
+  it('deshace si todo lo escrito desde que empezó la acción es de esta pestaña', async () => {
+    const log: string[] = [];
+    act('A', log);
+    draftLedger.write(CS);                       // mover un bloque: escritura propia
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    expect(writeSeqOf).toHaveBeenCalledWith(CS);
+    expect(log).toEqual(['undo A']);
+  });
+
+  it('si otra pestaña escribió después: no corre el paso, vacía Undo y Redo y lo dice', async () => {
+    const log: string[] = [];
+    act('A', log);
+    act('B', log);
+    act('C', log);
+    await useUndoStore.getState().undoLast();    // C queda para rehacer
+    draftLedger.foreign();
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+    expect(log).toEqual(['undo C']);
+    expect([labels(), redoLabels()]).toEqual([[], []]);
+    expect(useUndoStore.getState().busy).toBe(false);
+  });
+
+  it('una escritura ajena que esta pestaña ya había visto al empezar la acción no la bloquea', async () => {
+    draftLedger.foreign();
+    noteSeen(CS, draftLedger.seq);               // la recarga del canvas la trajo
+    act('A', []);
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+  });
+
+  it('una ajena que no había visto al empezar sí la bloquea (no se sabe si fue antes o después)', async () => {
+    noteSeen(CS, draftLedger.seq);               // lo que trajo la última carga
+    draftLedger.foreign();
+    act('A', []);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+  });
+
+  it('sin nada visto al empezar, cuenta desde lo primero que vio la sesión (la ajena anterior no bloquea)', async () => {
+    draftLedger.foreign();
+    act('A', []);
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+  });
+
+  it('si no se puede leer el contador, no deshace nada y la acción queda para reintentar', async () => {
+    const log: string[] = [];
+    act('A', log);
+    vi.mocked(writeSeqOf).mockRejectedValueOnce(new ApiError('Bad gateway', 502, null, '/api/changesets/cs1/seq'));
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow("Couldn't check the version: nothing was undone. Press Undo to try again.");
+    expect([labels(), log, useUndoStore.getState().busy]).toEqual([['A'], [], false]);
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+  });
+
+  it('si la sesión cambia mientras lee el contador, no corre nada y calla', async () => {
+    const log: string[] = [];
+    act('A', log);
+    vi.mocked(writeSeqOf).mockImplementationOnce(async () => { open('editing', 'cs2'); return { writeSeq: draftLedger.seq }; });
+    expect(await useUndoStore.getState().undoLast()).toBeNull();
+    expect(log).toEqual([]);
+  });
+
+  it('lee el contador después de esperar lo que estaba en vuelo: una escritura ajena durante la espera también cuenta', async () => {
+    noteSeen(CS, draftLedger.seq);
+    act('A', []);
+    trackDraftWork((async () => { await sleep(10); draftLedger.foreign(); draftLedger.write(CS); })());
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+  });
+
+  it('si mientras lee el contador termina otra acción, lo vuelve a leer para ella', async () => {
+    noteSeen(CS, draftLedger.seq);
+    act('A', []);
+    vi.mocked(writeSeqOf).mockImplementationOnce(async () => {
+      const seq = draftLedger.seq;
+      act('B', []);                              // empieza y termina mientras se lee
+      draftLedger.foreign();                     // y otra pestaña escribe después
+      return { writeSeq: seq };
+    });
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+    expect(writeSeqOf).toHaveBeenCalledTimes(2);
+  });
+
+  it('lo que estaba en vuelo cuenta como propio', async () => {
+    act('A', []);
+    trackDraftWork((async () => { await sleep(10); draftLedger.write(CS); })());
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+  });
+
+  it('el reintento de un Undo que falló sin respuesta no se bloquea por sus propias escrituras sin número', async () => {
+    let fail = true;
+    const log: string[] = [];
+    const pin = pinSession();
+    draftLedger.write(CS);
+    pushUndo('A', async () => {
+      draftLedger.write(CS);
+      if (fail) {
+        draftLedger.lost(CS);                    // se grabó, pero no llegó la respuesta
+        draftLedger.foreign();
+        throw new ApiError('Network error', 0, null, '/api/x');
+      }
+      log.push('undo A');
+      return null;
+    }, pin);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow('Press Undo to try again.');
+    fail = false;
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    expect(log).toEqual(['undo A']);
+  });
+
+  it('pero si además escribió otra pestaña, el reintento no corre', async () => {
+    let fail = true;
+    const log: string[] = [];
+    const pin = pinSession();
+    draftLedger.write(CS);
+    pushUndo('A', async () => {
+      if (fail) { draftLedger.lost(CS); draftLedger.foreign(); throw new ApiError('Network error', 0, null, '/api/x'); }
+      log.push('undo A');
+      return null;
+    }, pin);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow('Press Undo to try again.');
+    fail = false;
+    draftLedger.foreign();
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+    expect([labels(), log]).toEqual([[], []]);
+  });
+
+  it('un guardado propio sin respuesta que sí se grabó: el siguiente Undo vacía el historial y lo dice', async () => {
+    act('A', []);
+    draftLedger.lost(CS);
+    draftLedger.foreign();
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(UNCONFIRMED);
+    expect(labels()).toEqual([]);
+  });
+
+  it('el paso que un Redo devuelve a Undo vale desde ese Redo', async () => {
+    const log: string[] = [];
+    act('A', log);
+    await useUndoStore.getState().undoLast();
+    await useUndoStore.getState().redoLast();
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    await useUndoStore.getState().redoLast();
+    draftLedger.foreign();
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+    expect(log).toEqual(['undo A', 'redo A', 'undo A', 'redo A']);
+  });
+
+  it('una escritura ajena durante la acción (antes de que apile) también la bloquea', async () => {
+    noteSeen(CS, draftLedger.seq);               // lo que trajo la carga del canvas
+    const pin = pinSession();
+    draftLedger.foreign();                       // otra pestaña escribe mientras la acción corre
+    draftLedger.write(CS);
+    pushUndo('A', pair('A', []), pin);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+  });
+
+  it('lo que un Redo devuelve a Undo vale desde ese Redo: una ajena anterior ya vista no lo bloquea', async () => {
+    noteSeen(CS, draftLedger.seq);
+    draftLedger.foreign();
+    noteSeen(CS, draftLedger.seq);               // la recarga la trajo antes de la acción
+    act('A', []);
+    await useUndoStore.getState().undoLast();
+    await useUndoStore.getState().redoLast();
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+  });
+
+  // «Visto» es lo que trajo una carga del diagrama (sus datos están en pantalla):
+  // leer el contador no recarga nada, así que no cuenta.
+  it('leer el contador no da por vistos los datos de otra pestaña; una carga del diagrama sí', async () => {
+    noteSeen(CS, draftLedger.seq);
+    act('A', []);
+    await useUndoStore.getState().undoLast();
+    draftLedger.foreign();
+    await expect(useUndoStore.getState().redoLast()).rejects.toThrow("This version changed after the undo: there's nothing to redo.");
+    act('B', []);                                // el diagrama sigue sin lo de la otra pestaña
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(FOREIGN);
+    noteSeen(CS, draftLedger.seq);               // la recarga del canvas lo trae
+    act('C', []);
+    expect(await useUndoStore.getState().undoLast()).toBe('C');
+  });
+
+  it('el rechazo es un StaleUndoError (quien lo muestra recarga el diagrama)', async () => {
+    noteSeen(CS, draftLedger.seq);
+    act('A', []);
+    draftLedger.foreign();
+    const err = await useUndoStore.getState().undoLast().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(StaleUndoError);
+  });
+
+  it('el margen de un reintento se usa una sola vez', async () => {
+    let attempt = 0;
+    const log: string[] = [];
+    noteSeen(CS, draftLedger.seq);
+    const pin = pinSession();
+    draftLedger.write(CS);
+    pushUndo('A', async () => {
+      attempt += 1;
+      if (attempt === 1) { draftLedger.lost(CS); throw new ApiError('Network error', 0, null, '/api/x'); }   // no llegó
+      if (attempt === 2) throw new NothingDoneError("Couldn't read A", "Couldn't read A: nothing was deleted.");
+      log.push('undo A');
+      return null;
+    }, pin);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow('Press Undo to try again.');
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow('Press Undo to try again.');
+    draftLedger.foreign();                       // otra pestaña
+    // Un número sin dueño y una escritura propia sin respuesta: no se sabe de
+    // quién es, y el margen ya se usó: no se deshace.
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(UNCONFIRMED);
+    expect(log).toEqual([]);
+  });
+
+  it('lo que un reintento admitió sin dueño no vale para lo de más abajo', async () => {
+    noteSeen(CS, draftLedger.seq);
+    act('A', []);
+    let fail = true;
+    const pin = pinSession();
+    draftLedger.write(CS);
+    pushUndo('B', async () => {
+      if (fail) { draftLedger.lost(CS); draftLedger.foreign(); throw new ApiError('Network error', 0, null, '/api/x'); }
+      draftLedger.write(CS);
+      return null;
+    }, pin);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow('Press Undo to try again.');
+    fail = false;
+    expect(await useUndoStore.getState().undoLast()).toBe('B');
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(UNCONFIRMED);
+  });
+
+  it('un Redo que termina después de un clear() durante su paso no vuelve a Undo', async () => {
+    act('A', []);
+    await useUndoStore.getState().undoLast();
+    useUndoStore.setState({ redoStack: [{ label: 'A', run: async () => { draftLedger.write(CS); useUndoStore.getState().clear(); return async () => null; } }] });
+    await useUndoStore.getState().redoLast();
+    expect([labels(), redoLabels()]).toEqual([[], []]);
+  });
+
+  it('si el historial se vació mientras corría (p. ej. el Schema manager), la entrada que falla no vuelve', async () => {
+    act('A', []);
+    pushUndo('B', async () => { await sleep(5); useUndoStore.getState().clear(); throw new ApiError('Network error', 0, null, '/api/x'); }, pinSession());
+    const err = await useUndoStore.getState().undoLast().catch((e: Error) => e.message);
+    expect(err).not.toMatch(/try again/);
+    expect(labels()).toEqual([]);
+    pushUndo('C', async () => { await sleep(5); useUndoStore.getState().clear(); throw new NothingDoneError("Couldn't read C", "Couldn't read C: nothing."); }, pinSession());
+    const err2 = await useUndoStore.getState().undoLast().catch((e: Error) => e.message);
+    expect(err2).not.toMatch(/try again/);
+    expect(labels()).toEqual([]);
+  });
+
+  it('un Undo rechazado no da por vistos los datos: lo que se haga sin recargar también queda protegido', async () => {
+    noteSeen(CS, draftLedger.seq);
+    act('A', []);
+    draftLedger.foreign();
+    await expect(useUndoStore.getState().undoLast()).rejects.toBeInstanceOf(StaleUndoError);
+    act('B', []);                                // antes de que la recarga traiga lo de la otra pestaña
+    await expect(useUndoStore.getState().undoLast()).rejects.toBeInstanceOf(StaleUndoError);
+  });
+
+  it('un guardado propio sin respuesta entre la carga y la acción da el aviso de guardado sin respuesta', async () => {
+    noteSeen(CS, draftLedger.seq);
+    draftLedger.lost(CS);                        // un guardado sin respuesta…
+    draftLedger.foreign();                       // …que sí se grabó
+    act('A', []);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow(UNCONFIRMED);
+  });
+
+  it('el margen de un reintento no sobrevive a una acción nueva', async () => {
+    noteSeen(CS, draftLedger.seq);
+    let fail = true;
+    const pin = pinSession();
+    draftLedger.write(CS);
+    pushUndo('B', async () => {
+      if (fail) { draftLedger.lost(CS); throw new ApiError('Network error', 0, null, '/api/x'); }   // no llegó
+      return null;
+    }, pin);
+    await expect(useUndoStore.getState().undoLast()).rejects.toThrow('Press Undo to try again.');
+    act('C', []);
+    await useUndoStore.getState().undoLast();    // C
+    fail = false;
+    draftLedger.foreign();                       // otra pestaña
+    await expect(useUndoStore.getState().undoLast()).rejects.toBeInstanceOf(StaleUndoError);
+  });
+
+  it('sin versión abierta no lee el contador', async () => {
+    useSessionStore.getState().closeModel();
+    pushUndo('A', async () => null);
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+    expect(writeSeqOf).not.toHaveBeenCalled();
+  });
+});
+
+// ── Candado por canvas (doc 133) ────────────────────────────────────────────
+// El historial es uno por versión, pero Undo y Redo solo actúan sobre lo hecho
+// en el canvas que está abierto: lo de otro canvas no se toca sin verlo.
+describe('candado por canvas', () => {
+  let canvas: string | null = 'sa-A';
+  beforeEach(() => {
+    open('editing', CS);
+    canvas = 'sa-A';
+    setCanvasSource(() => canvas);
+    vi.mocked(writeSeqOf).mockClear();
+  });
+  afterEach(() => setCanvasSource(() => null));
+
+  it('lo hecho en otro canvas no se deshace desde este: no corre nada y dice en cuál fue', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    canvas = 'sa-B';
+    const err = await useUndoStore.getState().undoLast().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OtherCanvasError);
+    expect(err).toMatchObject({ cmd: 'undo', canvasId: 'sa-A' });
+    expect([labels(), log, useUndoStore.getState().busy]).toEqual([['A'], [], false]);
+    expect(writeSeqOf).not.toHaveBeenCalled();
+    canvas = 'sa-A';
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+  });
+
+  it('lo hecho sin canvas abierto (Object Inspector) se deshace desde cualquier canvas', async () => {
+    canvas = null;
+    const pin = pinSession();
+    pushUndo('A', async () => null, pin);
+    canvas = 'sa-B';
+    expect(await useUndoStore.getState().undoLast()).toBe('A');
+  });
+
+  it('Redo: lo deshecho en otro canvas no se rehace desde este', async () => {
+    pushUndo('A', pair('A', []), pinSession());
+    await useUndoStore.getState().undoLast();
+    canvas = 'sa-B';
+    await expect(useUndoStore.getState().redoLast()).rejects.toMatchObject({ cmd: 'redo', canvasId: 'sa-A' });
+    expect(redoLabels()).toEqual(['A']);
+    canvas = 'sa-A';
+    expect(await useUndoStore.getState().redoLast()).toBe('A');
+  });
+
+  it('el contrario que dejan Undo y Redo sigue siendo del canvas de la acción', async () => {
+    pushUndo('A', pair('A', []), pinSession());
+    await useUndoStore.getState().undoLast();
+    await useUndoStore.getState().redoLast();
+    canvas = 'sa-B';
+    await expect(useUndoStore.getState().undoLast()).rejects.toBeInstanceOf(OtherCanvasError);
+  });
+
+  it('con lo de otro canvas arriba avisa en el acto, aunque haya algo grabándose', async () => {
+    pushUndo('A', pair('A', []), pinSession());
+    let land!: () => void;
+    const inFlight = trackDraftWork(new Promise<void>((r) => { land = r; }));
+    canvas = 'sa-B';
+    const quick = (p: Promise<unknown>) => Promise.race([p, sleep(30).then(() => 'esperó')]);
+    await expect(quick(useUndoStore.getState().undoLast())).rejects.toBeInstanceOf(OtherCanvasError);
+    expect(useUndoStore.getState().busy).toBe(false);
+    land(); await inFlight;
+    canvas = 'sa-A';
+    await useUndoStore.getState().undoLast();
+    let land2!: () => void;
+    const inFlight2 = trackDraftWork(new Promise<void>((r) => { land2 = r; }));
+    canvas = 'sa-B';
+    await expect(quick(useUndoStore.getState().redoLast())).rejects.toBeInstanceOf(OtherCanvasError);
+    expect(useUndoStore.getState().busy).toBe(false);
+    land2(); await inFlight2;
+  });
+
+  it('si se abre otro canvas mientras espera lo que estaba en vuelo, no deshace', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    trackDraftWork((async () => { await sleep(10); canvas = 'sa-B'; draftLedger.write(CS); })());
+    await expect(useUndoStore.getState().undoLast()).rejects.toMatchObject({ cmd: 'undo', canvasId: 'sa-A' });
+    expect([labels(), log]).toEqual([['A'], []]);
+  });
+
+  it('una acción de otro canvas que termina mientras lee el contador queda arriba y no se deshace', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    vi.mocked(writeSeqOf).mockImplementationOnce(async () => {
+      pushUndo('C', pair('C', log), { ...pinSession(), canvasId: 'sa-C' });
+      return { writeSeq: draftLedger.seq };
+    });
+    await expect(useUndoStore.getState().undoLast()).rejects.toMatchObject({ canvasId: 'sa-C' });
+    expect([labels(), log]).toEqual([['A', 'C'], []]);
+  });
+
+  it('Redo: si se abre otro canvas mientras espera lo que estaba en vuelo, no rehace', async () => {
+    const log: string[] = [];
+    pushUndo('A', pair('A', log), pinSession());
+    await useUndoStore.getState().undoLast();
+    trackDraftWork((async () => { await sleep(10); canvas = 'sa-B'; })());
+    await expect(useUndoStore.getState().redoLast()).rejects.toMatchObject({ cmd: 'redo', canvasId: 'sa-A' });
+    expect([redoLabels(), log]).toEqual([['A'], ['undo A']]);
+  });
+
+  it('si mientras espera lo que estaba en vuelo queda arriba una acción de otro canvas, tampoco la deshace', async () => {
+    pushUndo('A', pair('A', []), pinSession());
+    const action = trackDraftWork((async () => { await sleep(10); draftLedger.write(CS); })())
+      .then(() => pushUndo('C', pair('C', []), { ...pinSession(), canvasId: 'sa-C' }));
+    await expect(useUndoStore.getState().undoLast()).rejects.toMatchObject({ canvasId: 'sa-C' });
+    await action;
+    expect(labels()).toEqual(['A', 'C']);
+    expect(useUndoStore.getState().busy).toBe(false);
   });
 });

@@ -632,7 +632,9 @@ del draft: el versionado y el diff ven upserts y deletes normales, sin mecánica
 | Regla | Detalle |
 |---|---|
 | Tope | 50 entradas por pila (`CAP`); al pasarlo se descarta la más antigua. |
-| Alcance | El historial es de la sesión de canvas: se vacía al cambiar de proyecto, modo o versión (incluido editar → solo lectura → editar la misma versión) y en `resetAppState`. |
+| Alcance | El historial es de la sesión de canvas: se vacía al cambiar de proyecto, modo o versión (incluido editar → solo lectura → editar la misma versión) y en `resetAppState`. Cambiar de canvas no lo vacía. |
+| Canvas | Cada entrada guarda el canvas de su acción (`canvasId`, del pin). Undo y Redo solo corren la entrada del canvas abierto (o la hecha sin canvas, en el Object Inspector); si no, `OtherCanvasError`: el aviso dice en cuál fue y ofrece **Open canvas** (que no hace nada con un diálogo o una espera bloqueante en pantalla, ni desde otra sesión). Si ese canvas ya no existe —lo confirma el servidor cuando no está en la lista de aquí, o al fallar su apertura—, el historial se vacía; borrar un canvas con acciones suyas también lo vacía. |
+| Candado del Undo | Cada entrada guarda lo visto de la versión al empezar su acción (`mark`, `src/services/draftSeqs.ts`): el contador de la última carga del diagrama (una escritura propia o una lectura del contador no recargan datos, así que no cuentan). `undoLast()` lee el contador (`writeSeqOf`) después de esperar lo que estaba en vuelo, y otra vez si mientras leía terminó otra acción; si hay escrituras posteriores a la marca que no son de esta pestaña, vacía Undo y Redo y avisa «This version changed in another tab or window: …» (o «One of your saves got no response, …» si pudieron ser guardados propios sin respuesta), y el diagrama se recarga completo. Si la lectura falla, no deshace nada y pide pulsar Undo otra vez. Al volver a la pestaña (foco o visible), `syncOtherTabs` recarga el diagrama completo si otra pestaña escribió. |
 | Apilado | Cada acción instrumentada llama a `pushUndo(label, run, pin)` con el pin con que empezó: si la sesión cambió mientras la acción corría, el paso no entra en la pila de la sesión nueva. Una acción nueva vacía lo pendiente de rehacer. Mientras corre un paso, lo que se apila se ignora y lo pendiente de rehacer se vacía. |
 | Ida y vuelta | `undoLast()` corre el paso y deja su contrario en `redoStack`; `redoLast()` corre ese y deja el suyo en `stack`, con el mismo label. Los borrados en cascada (`deleteTable`, `deleteColumns`, `deleteView`) entregan su inversa con `onUndo`: rehacerlos los recalcula con lo vigente. |
 | Base del Redo | Las escrituras del Undo (números `writeSeq` consecutivos, avisados por `onDraftWrite`) fijan la base. Antes de escribir, `redoLast()` lee el contador (`writeSeqOf`, `GET /api/changesets/{cs_id}/seq`): si no es la base, vacía lo pendiente y avisa «This version changed after the undo: there's nothing to redo.». Un hueco en las escrituras del paso también deja sin Redo. |
@@ -648,7 +650,8 @@ resultado:
 - **Éxito**: devuelven el label si la sesión sigue igual.
 - **Error 403, 404 o 409 de la versión**: esperan la revalidación; si la sesión cambió, callan.
 - **`NothingDoneError`** (falló una lectura previa y no se escribió nada, o no se pudo leer el contador
-  antes de rehacer): la entrada vuelve a su pila y el aviso pide pulsar Undo (o Redo) otra vez. Un Redo
+  antes de rehacer): la entrada vuelve a su pila y el aviso pide pulsar Undo (o Redo) otra vez. Si no se
+  pudo leer el contador antes de deshacer, la entrada ni sale de la pila. Un Redo
   no vuelve si la versión cambió mientras tanto: si cambió mientras leía el contador, avisa que no hay
   qué rehacer; si cambió mientras corría el paso, avisa «<motivo>: nothing was redone.» sin invitar a
   reintentar.
@@ -658,7 +661,8 @@ resultado:
   pasa el candado; si alguna escritura quedó sin respuesta, si la versión cambió mientras corría o si el
   paso es fresco y alcanzó a escribir, el aviso no ofrece reintentar y lo pendiente de rehacer se vacía.
   Un Undo fresco (`freshStep`) que alcanzó a escribir vuelve a su pila, pero al reintentarse no deja qué
-  rehacer: su contrario partiría de un estado a medias.
+  rehacer: su contrario partiría de un estado a medias. El candado del Undo deja pasar el reintento si los
+  números sin dueño no son más que las escrituras sin respuesta de ese paso.
 - **Cualquier otro error**: la entrada se descarta (no bloquea las anteriores), el error se muestra y lo que
   dependía de ella para rehacer se vacía.
 

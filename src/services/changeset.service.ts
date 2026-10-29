@@ -20,8 +20,9 @@ export interface Changeset {
  *  recarga solo las tablas tocadas). Se avisa al terminar cada escritura, también
  *  si falló (no se sabe si llegó; recargar esas tablas es correcto igual): una
  *  recarga que empieza antes nunca la da por vista. `writeSeq` es el número de
- *  la escritura en el draft (sin él si falló). */
-type DraftWriteListener = (changesetId: string, changes: readonly BulkChange[], writeSeq?: number) => void;
+ *  la escritura en el draft (sin él si falló); `unconfirmed`, que falló sin
+ *  saberse si llegó (sin respuesta o con un error del servidor). */
+type DraftWriteListener = (changesetId: string, changes: readonly BulkChange[], writeSeq?: number, unconfirmed?: boolean) => void;
 const draftWriteListeners = new Set<DraftWriteListener>();
 export function onDraftWrite(listener: DraftWriteListener): () => void {
   draftWriteListeners.add(listener);
@@ -30,20 +31,32 @@ export function onDraftWrite(listener: DraftWriteListener): () => void {
 /** Avisa una escritura en el draft a los observadores de `onDraftWrite`. La
  *  usan las escrituras de este servicio y las de un endpoint propio que
  *  devuelve su número (borrar un esquema). */
-export const announceDraftWrite = (id: string, changes: readonly BulkChange[], writeSeq?: number) => {
+export const announceDraftWrite = (id: string, changes: readonly BulkChange[], writeSeq?: number, unconfirmed?: boolean) => {
   for (const listener of draftWriteListeners) {
-    try { listener(id, changes, writeSeq); } catch { /* un observador roto no cambia la escritura */ }
+    try { listener(id, changes, writeSeq, unconfirmed); } catch { /* un observador roto no cambia la escritura */ }
   }
+};
+
+/** ¿Una escritura fallida pudo grabarse igual? Sin respuesta (status 0) o con
+ *  un error del servidor o del proxy (≥ 500, también después de grabar): no se
+ *  sabe. Un rechazo (4xx) es antes de escribir. */
+export const unconfirmedWrite = (e: unknown): boolean => {
+  const status = (e as { status?: unknown } | null)?.status;
+  return typeof status !== 'number' || status === 0 || status >= 500;
 };
 
 export const recordChange = (id: string, collection: string, entityId: string, op: 'upsert' | 'delete', payload?: Record<string, unknown>) =>
   trackDraftWork((async () => {
     let done: Changeset | undefined;
+    let unconfirmed = false;
     try {
       done = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes`, { collection, entityId, op, payload });
       return done;
+    } catch (e) {
+      unconfirmed = unconfirmedWrite(e);
+      throw e;
     } finally {
-      announceDraftWrite(id, [{ collection, entityId, op, payload }], done?.writeSeq);
+      announceDraftWrite(id, [{ collection, entityId, op, payload }], done?.writeSeq, unconfirmed);
     }
   })());
 /** Procedencia de un alta: la muestra el historial de auditoría
@@ -72,18 +85,22 @@ export const recordChangesBulk = (id: string, changes: BulkChange[], chunkSize =
     for (let i = 0; i < changes.length; i += chunkSize) {
       const chunk = changes.slice(i, i + chunkSize);
       let done: Changeset | undefined;
+      let unconfirmed = false;
       try {
         done = await apiPut<Changeset>(`${CS}/${encodeURIComponent(id)}/changes/bulk`, { changes: chunk });
         last = done;
+      } catch (e) {
+        unconfirmed = unconfirmedWrite(e);
+        throw e;
       } finally {
-        announceDraftWrite(id, chunk, done?.writeSeq);
+        announceDraftWrite(id, chunk, done?.writeSeq, unconfirmed);
       }
     }
     return last;
   })());
 /** Escrituras grabadas en la versión (`writeSeq`), sin el resto de su cabecera
- *  (que arma el resumen de todos sus cambios): el Redo lo compara con el que
- *  dejó su Undo antes de escribir. */
+ *  (que arma el resumen de todos sus cambios): Undo y Redo lo leen antes de
+ *  escribir (candados del historial) y el canvas al volver a la pestaña. */
 export const writeSeqOf = (id: string) => apiGet<{ writeSeq: number }>(`${CS}/${encodeURIComponent(id)}/seq`);
 /** Estado efectivo de una colección. `opts.tableId`/`opts.ids` acotan la
  *  respuesta a un slice server-side — sin filtro, canonical_columns a escala

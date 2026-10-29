@@ -17,14 +17,21 @@ vi.mock('../features/modeler/services/structure.service', async (importOriginal)
 vi.mock('../features/modeler/services/schemas.service', () => ({ listSchemas: vi.fn(async () => []) }));
 vi.mock('../features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
 vi.mock('@/services/naming.service', () => ({ getNamingConfig: vi.fn(async () => ({})) }));
+vi.mock('@/services/changeset.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/changeset.service')>()),
+  writeSeqOf: vi.fn(async () => ({ writeSeq: 0 })),
+}));
 vi.mock('@/services/themes.service', () => ({ listThemes: vi.fn(async () => []) }));
 
 import { toast } from 'sonner';
 import * as csvc from '@/services/changeset.service';
 import * as http from '@/services/http';
 import * as mod from '../features/modeler/services/modeler.service';
-import { useModelerStore } from './useModelerStore';
+import { forgetDraftSeqs, markDraft } from '@/services/draftSeqs';
+import { pinSession } from '../features/modeler/lib/sessionGuard';
+import { useModelerStore, watchReturns } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
+import { useUndoStore } from './useUndoStore';
 
 const st = () => useModelerStore.getState();
 const load = () => vi.mocked(mod.loadDiagram);
@@ -503,5 +510,140 @@ describe('notas de completo, línea base del contador y aperturas', () => {
     load().mockResolvedValueOnce(other(7) as never);
     await st().reload();
     expect(load()).toHaveBeenLastCalledWith('sa2', undefined);
+  });
+});
+
+// El candado del Undo (doc 133) sabe del canvas abierto y de lo visto de la
+// versión por este store: cada carga deja visto su número, el pin de una acción
+// toma el canvas abierto, y cambiar de sesión lo olvida. Borrar un canvas vacía
+// el historial si algo de él quedaba por deshacer o rehacer.
+describe('lo que el historial sabe por el canvas', () => {
+  it('una carga completa deja visto el contador de la versión', async () => {
+    load().mockImplementation(async () => ({ ...full(), draftSeq: 9 }) as never);
+    await st().reload({ full: true });
+    expect(markDraft('cs1')?.seen).toBe(9);
+  });
+
+  it('el pin de una acción toma el canvas abierto', () => {
+    expect(pinSession().canvasId).toBe('sa1');
+    useModelerStore.setState({ activeSaId: null });
+    expect(pinSession().canvasId).toBeNull();
+  });
+
+  it('cambiar de sesión olvida lo visto', async () => {
+    load().mockImplementation(async () => ({ ...full(), draftSeq: 9 }) as never);
+    await st().reload({ full: true });
+    useSessionStore.setState({ activeChangesetId: 'cs2' });
+    expect(markDraft('cs1')?.seen).toBeNull();
+  });
+
+  it('borrar un canvas vacía el historial si había algo suyo; si no, lo deja', async () => {
+    const run = async () => null;
+    useUndoStore.setState({ stack: [{ label: 'A', run, canvasId: 'sa-otro' }], redoStack: [] });
+    await st().deleteCanvas('sa-vacio', 'p1');
+    expect(useUndoStore.getState().stack.map((e) => e.label)).toEqual(['A']);
+    useUndoStore.setState({ stack: [{ label: 'A', run, canvasId: 'sa-otro' }], redoStack: [{ label: 'B', run, canvasId: 'sa-borrado' }] });
+    await st().deleteCanvas('sa-borrado', 'p1');
+    expect([useUndoStore.getState().stack, useUndoStore.getState().redoStack]).toEqual([[], []]);
+  });
+});
+
+// Al volver a la pestaña se mira el contador de la versión: si otra pestaña
+// escribió, el diagrama se recarga completo — así lo de la otra pestaña queda en
+// pantalla y queda «visto» para el candado del Undo (doc 133).
+describe('al volver a la pestaña', () => {
+  // Lo visto de la versión no se arrastra de otra prueba (misma sesión).
+  beforeEach(() => forgetDraftSeqs());
+  const base5 = async () => {
+    load().mockImplementation(async () => ({ ...full(), draftSeq: 5 }) as never);
+    await st().reload({ full: true });
+    load().mockClear();
+  };
+
+  it('si otra pestaña escribió, recarga el diagrama completo y eso deja vistos sus números', async () => {
+    await base5();
+    vi.mocked(csvc.writeSeqOf).mockResolvedValueOnce({ writeSeq: 6 });   // la 6 la hizo otra pestaña
+    load().mockImplementation(async () => ({ ...full(), draftSeq: 6 }) as never);
+    await st().syncOtherTabs();
+    expect(load()).toHaveBeenCalledTimes(1);
+    expect(load()).toHaveBeenLastCalledWith('sa1', undefined);
+    expect(markDraft('cs1')?.seen).toBe(6);
+  });
+
+  it('si todo lo escrito es de esta pestaña, no recarga', async () => {
+    await base5();
+    vi.mocked(http.apiPut).mockResolvedValueOnce({ writeSeq: 6 } as never);
+    await editColumn();
+    vi.mocked(csvc.writeSeqOf).mockResolvedValueOnce({ writeSeq: 6 });
+    await st().syncOtherTabs();
+    expect(load()).not.toHaveBeenCalled();
+  });
+
+  it('sin canvas abierto o fuera de edición, no lee nada', async () => {
+    vi.mocked(csvc.writeSeqOf).mockClear();
+    useModelerStore.setState({ activeSaId: null, diagram: null });
+    await st().syncOtherTabs();
+    useModelerStore.setState({ activeSaId: 'sa1' });
+    useSessionStore.setState({ openMode: 'readonly' });
+    await st().syncOtherTabs();
+    expect(csvc.writeSeqOf).not.toHaveBeenCalled();
+  });
+
+  it('si mientras lee el contador se abre otra versión, no recarga nada', async () => {
+    await base5();
+    vi.mocked(csvc.writeSeqOf).mockImplementationOnce(async () => {
+      useSessionStore.setState({ activeChangesetId: 'cs2' });
+      return { writeSeq: 6 };
+    });
+    await st().syncOtherTabs();
+    expect(load()).not.toHaveBeenCalled();
+  });
+
+  it('una escritura propia todavía sin respuesta no se toma por ajena: no recarga', async () => {
+    await base5();
+    let answer!: (v: unknown) => void;
+    vi.mocked(http.apiPut).mockImplementationOnce(() => new Promise((r) => { answer = r; }));
+    const writing = editColumn();                                   // la 6: propia, sin respuesta todavía
+    vi.mocked(csvc.writeSeqOf).mockImplementationOnce(async () => {
+      setTimeout(() => answer({ writeSeq: 6 }), 5);                 // responde después de la lectura
+      return { writeSeq: 6 };
+    });
+    await st().syncOtherTabs();
+    await writing;
+    expect(load()).not.toHaveBeenCalled();
+  });
+
+  // «Visto» es solo lo que trajo una carga instalada: si la recarga queda diferida
+  // (se está abriendo un canvas) o falla, la lectura del contador no cuenta.
+  it('si la recarga queda diferida o falla, no da nada por visto', async () => {
+    await base5();
+    useModelerStore.setState({ openingSaId: 'sa1' });
+    vi.mocked(csvc.writeSeqOf).mockResolvedValueOnce({ writeSeq: 6 });
+    await st().syncOtherTabs();
+    expect(markDraft('cs1')?.seen).toBe(5);
+    useModelerStore.setState({ openingSaId: null });
+    vi.mocked(csvc.writeSeqOf).mockResolvedValueOnce({ writeSeq: 6 });
+    load().mockRejectedValueOnce(new Error('offline'));
+    await st().syncOtherTabs();
+    expect(markDraft('cs1')?.seen).toBe(5);
+  });
+
+  it('foco y pestaña visible en la misma vuelta: una sola lectura', async () => {
+    await base5();
+    const win = new EventTarget();
+    const doc = Object.assign(new EventTarget(), { visibilityState: 'hidden' as DocumentVisibilityState });
+    watchReturns(win, doc);
+    vi.mocked(csvc.writeSeqOf).mockClear();
+    let answer!: (v: { writeSeq: number }) => void;
+    vi.mocked(csvc.writeSeqOf).mockImplementationOnce(() => new Promise((r) => { answer = r; }));
+    win.dispatchEvent(new Event('focus'));
+    doc.visibilityState = 'visible';
+    doc.dispatchEvent(new Event('visibilitychange'));
+    expect(csvc.writeSeqOf).toHaveBeenCalledTimes(1);
+    answer({ writeSeq: 5 });
+    await tick();
+    doc.visibilityState = 'hidden';
+    doc.dispatchEvent(new Event('visibilitychange'));     // se ocultó: nada
+    expect(csvc.writeSeqOf).toHaveBeenCalledTimes(1);
   });
 });

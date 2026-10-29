@@ -5,6 +5,10 @@
 // Undo vuelve a poner la columna en esas vistas sobre su documento vigente.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/services/changeset.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/changeset.service')>()),
+  writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
+}));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
 vi.mock('@/services/governance.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/governance.service')>();

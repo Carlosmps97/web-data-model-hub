@@ -465,11 +465,24 @@ rehacer son cambios más del draft, sin mecánica especial en el backend.
   que leen o escriben al correr. Re-correr uno que falló a mitad parte de un estado a medias y su
   contrario saldría incompleto: un Redo fresco no se reintenta y un Undo fresco reintentado no deja qué
   rehacer.
+- Candado por canvas: cada entrada guarda el canvas de su acción (`canvasId`, tomado por su pin al
+  empezar; null sin canvas, p. ej. el Object Inspector). `undoLast()` y `redoLast()` no corren la entrada
+  de otro canvas: rechazan con `OtherCanvasError`, y `runHistory` (`lib/historyKeys.ts`) avisa en cuál
+  fue con el botón **Open canvas** (si ese canvas ya no existe, vacía el historial).
+- Candado del Undo: cada entrada guarda también lo visto de la versión al empezar su acción (`mark`, de
+  `src/services/draftSeqs.ts`: los números de las escrituras de esta pestaña, el contador que trajo la
+  última carga del diagrama —«visto»: sus datos están en pantalla— y las escrituras sin respuesta).
+  `undoLast()` lee el contador (`writeSeqOf`) después de esperar lo que estaba en vuelo (otra vez si
+  mientras tanto terminó otra acción) y, si hay números posteriores a la marca que no son de esta
+  pestaña, vacía Undo y Redo y lanza `StaleUndoError` (`runHistory` avisa y recarga el diagrama). El
+  reintento de un paso que falló por red admite, esa sola vez, tantos números sin dueño como escrituras
+  sin respuesta tuvo ese paso; un `clear` mientras corría impide que vuelva a la pila. Al volver a la
+  pestaña, `syncOtherTabs` (useModelerStore) recarga el diagrama si otra pestaña escribió.
 - Rehacer solo sobre la versión tal como la dejó el Undo: las escrituras del Undo (números consecutivos
   de `writeSeq`, avisados por `onDraftWrite`) fijan la base, y `redoLast()` lee el contador de la versión
   (`writeSeqOf`) antes de escribir; si no coincide, vacía lo pendiente y no rehace. Una escritura de esta
-  pestaña fuera del historial, el Schema manager o una recarga que ve escrituras ajenas también lo vacían
-  (`dropRedo`).
+  pestaña fuera del historial o una recarga que ve escrituras ajenas también lo vacían (`dropRedo`).
+  Renombrar, cambiar el tipo o borrar un esquema vacía todo el historial (`clear`).
 - `clear({ until })` vacía las dos pilas y las deja cerradas hasta que termine una promesa, en la versión
   donde se pidió. La usa la carga desde Excel: un paso previo pisaría lo cargado.
 

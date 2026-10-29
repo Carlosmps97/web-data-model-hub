@@ -4,6 +4,10 @@
 // modelo (changeset) con su Undo. Servicios mockeados.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/services/changeset.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/changeset.service')>()),
+  writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
+}));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), message: vi.fn() } }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
 vi.mock('@/features/modeler/services/structure.service', () => ({

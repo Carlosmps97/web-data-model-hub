@@ -6,7 +6,7 @@ import { confirmDialog } from '@/components/ui/dialogs';
 import { apiErrorMessage } from '@/services/http';
 import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
-import { useUndoStore } from '@/store/useUndoStore';
+import { historyRunning, useUndoStore } from '@/store/useUndoStore';
 import * as schemasSvc from '../services/schemas.service';
 import type { DbSchema, SchemaImpact } from '../services/schemas.service';
 import { schemaNameError } from '../lib/schemaCreate';
@@ -125,6 +125,10 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
   const save = async () => {
     const ops = orderedForSave(staged);
     if (ops.length === 0) return;
+    // Un Undo/Redo en vuelo seguiría escribiendo tablas con el nombre de esquema
+    // de antes (y el historial que se vacía al guardar podría volver a llenarse).
+    const running = historyRunning('save');
+    if (running) { setError(running); return; }
     setBusy(true); setError(null);
     const done = new Set<string>();
     // Varias escrituras seguidas, todas en la sesión donde empezó: si en el
@@ -137,6 +141,14 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
       setStaged((s) => s.filter((o) => !done.has(o.key)));
       setError(apiErrorMessage(e, "Couldn't save all the changes"));
     });
+    // Renombrar, cambiar el tipo o borrar un esquema cambia tablas y vistas que el
+    // historial guarda por valor (cada una lleva el nombre de su esquema):
+    // deshacer o rehacer algo anterior lo devolvería al esquema viejo. Se vacía
+    // (doc 133) apenas termina la escritura, antes de cualquier espera. Crear uno
+    // no toca nada de lo anterior.
+    const forgetHistory = () => {
+      if (ops.some((o) => o.kind !== 'create' && done.has(o.key))) useUndoStore.getState().clear();
+    };
     try {
       markDirty();
       // Renombrar propaga a todas las tablas/vistas del esquema: operación bloqueante.
@@ -151,20 +163,18 @@ export default function SchemaManagerModal({ onClose, pushToast }: {
           done.add(op.key);
         }
       });
+      forgetHistory();
       setStaged([]);
       setImpacts({});
       setKindEdit(null);
       setEditing(null);
       pushToast(`${ops.length} schema change(s) recorded in your version ${vLabel}`);
     } catch (e) {
+      forgetHistory();
       await onError(e);
       if (!pin.holds()) onClose();
     } finally {
       setBusy(false);
-      // Renombrar o cambiar el tipo de un esquema graba en la versión por su
-      // propio endpoint, sin aviso de escritura (borrar sí se avisa): lo
-      // pendiente de rehacer ya no calza.
-      if (done.size) useUndoStore.getState().dropRedo();
       // Lo guardado (o parte, si algo falló) cambia el catálogo: el filtro de
       // esquemas de CTAS / Import existing vuelve a consultarlo.
       invalidateTableSchemas();

@@ -34,13 +34,15 @@ vi.mock('@/store/useSessionStore', () => ({ useSessionStore: (pick: (s: unknown)
 vi.mock('@/store/useBusyStore', () => ({ runBlocking: async (_label: string, fn: () => Promise<void>) => fn() }));
 vi.mock('@/components/ui/dialogs', () => ({ confirmDialog: vi.fn(async () => true) }));
 vi.mock('../services/schemas.service', () => svc);
-const { dropRedo } = vi.hoisted(() => ({ dropRedo: vi.fn() }));
-vi.mock('@/store/useUndoStore', () => ({ useUndoStore: { getState: () => ({ dropRedo }) } }));
+const { clear, historyRunning } = vi.hoisted(() => ({ clear: vi.fn(), historyRunning: vi.fn((): string | null => null) }));
+vi.mock('@/store/useUndoStore', () => ({ useUndoStore: { getState: () => ({ clear }) }, historyRunning }));
 const { invalidateTableSchemas } = vi.hoisted(() => ({ invalidateTableSchemas: vi.fn() }));
 vi.mock('../services/schemaPartition', () => ({ invalidateTableSchemas }));
+const { errGate } = vi.hoisted(() => ({ errGate: { wait: null as Promise<void> | null } }));
 vi.mock('../lib/sessionGuard', () => ({
   pinSession: () => ({ check: () => undefined, holds: () => true }),
-  reportWriteError: (r: (e: unknown) => void) => async (e: unknown) => r(e),
+  // Un error de la versión espera la revalidación antes de mostrarse (`errGate`).
+  reportWriteError: (r: (e: unknown) => void) => async (e: unknown) => { if (errGate.wait) await errGate.wait; r(e); },
 }));
 import SchemaManagerModal from './SchemaManagerModal';
 
@@ -58,7 +60,7 @@ const byTitle = (tree: unknown, title: string): El => {
 
 beforeEach(() => {
   Object.values(svc).forEach((f) => f.mockClear());
-  STATE.markDirty.mockClear(); dropRedo.mockClear(); invalidateTableSchemas.mockClear();
+  STATE.markDirty.mockClear(); clear.mockClear(); invalidateTableSchemas.mockClear();
 });
 
 describe('SchemaManagerModal', () => {
@@ -118,19 +120,82 @@ describe('SchemaManagerModal', () => {
     expect(onCloseSpy).not.toHaveBeenCalled();
   });
 
-  // Renombrar, cambiar el tipo o borrar un esquema graba en la versión por su
-  // propio endpoint (sin aviso de escritura): lo pendiente de rehacer ya no calza.
-  it('aplicar un cambio vacía lo pendiente de rehacer; si no se aplicó nada, no', async () => {
-    resetFake((init, i) => (i === 0 ? [SET_KIND] : init));
+  // Renombrar, cambiar el tipo o borrar un esquema cambia tablas y vistas que el
+  // historial guarda por valor (cada una lleva el nombre de su esquema): deshacer
+  // o rehacer algo anterior devolvería el esquema viejo. El historial se vacía
+  // (doc 133). Crear uno nuevo no toca nada de lo anterior.
+  it.each([
+    ['cambiar el tipo', SET_KIND, 'setSchemaKind'],
+    ['renombrar', { kind: 'rename', key: 'ren:s1', id: 's1', from: 'core_ventas_vu', to: 'core_ventas_vu2' }, 'renameSchema'],
+    ['borrar', { kind: 'delete', key: 'del:s1', id: 's1', name: 'core_ventas_vu' }, 'deleteSchema'],
+  ] as const)('%s un esquema vacía el historial; si no se aplicó, no', async (_label, op, write) => {
+    resetFake((init, i) => (i === 0 ? [op] : init));
     let tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
     (byText(tree.props.footer, 'button', 'Save 1 change').props.onClick as () => void)();
-    await vi.waitFor(() => expect(dropRedo).toHaveBeenCalledTimes(1));
-    dropRedo.mockClear();
-    svc.setSchemaKind.mockRejectedValueOnce(new Error('409'));
-    resetFake((init, i) => (i === 0 ? [SET_KIND] : init));
+    await vi.waitFor(() => expect(clear).toHaveBeenCalledTimes(1));
+    clear.mockClear();
+    svc[write].mockRejectedValueOnce(new Error('409'));
+    resetFake((init, i) => (i === 0 ? [op] : init));
     tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
     (byText(tree.props.footer, 'button', 'Save 1 change').props.onClick as () => void)();
     await vi.waitFor(() => expect(invalidateTableSchemas).toHaveBeenCalled());
-    expect(dropRedo).not.toHaveBeenCalled();
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it('guardado parcial: crear y un renombre que falla no vacía; un renombre aplicado y algo después que falla, sí', async () => {
+    const create = { kind: 'create', key: 'new:stg_x', name: 'STG_X', schemaKind: 'tables' };
+    const rename = { kind: 'rename', key: 'ren:s1', id: 's1', from: 'core_ventas_vu', to: 'core_ventas_vu2' };
+    const del = { kind: 'delete', key: 'del:s2', id: 's2', name: 'core_base' };
+    svc.renameSchema.mockRejectedValueOnce(new Error('409'));
+    resetFake((init, i) => (i === 0 ? [create, rename] : init));
+    let tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
+    (byText(tree.props.footer, 'button', 'Save 2 changes').props.onClick as () => void)();
+    await vi.waitFor(() => expect(invalidateTableSchemas).toHaveBeenCalledTimes(1));
+    expect(svc.createSchema).toHaveBeenCalledTimes(1);
+    expect(clear).not.toHaveBeenCalled();
+    svc.deleteSchema.mockRejectedValueOnce(new Error('409'));
+    resetFake((init, i) => (i === 0 ? [rename, del] : init));
+    tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
+    (byText(tree.props.footer, 'button', 'Save 2 changes').props.onClick as () => void)();
+    await vi.waitFor(() => expect(invalidateTableSchemas).toHaveBeenCalledTimes(2));
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('si algo ya aplicado obliga a vaciar y después algo falla, vacía antes de esperar la revalidación', async () => {
+    const rename = { kind: 'rename', key: 'ren:s1', id: 's1', from: 'core_ventas_vu', to: 'core_ventas_vu2' };
+    const del = { kind: 'delete', key: 'del:s2', id: 's2', name: 'core_base' };
+    let release!: () => void;
+    errGate.wait = new Promise((r) => { release = r; });
+    try {
+      svc.deleteSchema.mockRejectedValueOnce(new Error('409'));
+      resetFake((init, i) => (i === 0 ? [rename, del] : init));
+      const tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
+      (byText(tree.props.footer, 'button', 'Save 2 changes').props.onClick as () => void)();
+      await vi.waitFor(() => expect(clear).toHaveBeenCalledTimes(1));
+    } finally {
+      release();
+      errGate.wait = null;
+    }
+    await vi.waitFor(() => expect(invalidateTableSchemas).toHaveBeenCalled());
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
+  it('con un Undo o Redo corriendo, no guarda nada y lo dice', async () => {
+    historyRunning.mockReturnValueOnce('Undo or redo is still running — save when it finishes.');
+    resetFake((init, i) => (i === 0 ? [SET_KIND] : init));
+    const tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
+    (byText(tree.props.footer, 'button', 'Save 1 change').props.onClick as () => void)();
+    await new Promise((r) => setTimeout(r, 5));
+    expect(svc.setSchemaKind).not.toHaveBeenCalled();
+    expect(nextStates()).toContain('Undo or redo is still running — save when it finishes.');
+  });
+
+  it('crear un esquema no vacía el historial', async () => {
+    resetFake((init, i) => (i === 0 ? [{ kind: 'create', key: 'new:stg_x', name: 'STG_X', schemaKind: 'tables' }] : init));
+    const tree = SchemaManagerModal({ onClose: vi.fn(), pushToast: vi.fn() });
+    (byText(tree.props.footer, 'button', 'Save 1 change').props.onClick as () => void)();
+    await vi.waitFor(() => expect(svc.createSchema).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(invalidateTableSchemas).toHaveBeenCalled());
+    expect(clear).not.toHaveBeenCalled();
   });
 });

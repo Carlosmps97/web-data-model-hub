@@ -63,6 +63,27 @@ describe('onDraftWrite', () => {
     }
   });
 
+  // Una escritura que falla sin respuesta (o con un error del servidor) pudo
+  // grabarse: el candado del Undo la cuenta como propia sin número conocido.
+  it('avisa si la escritura falló sin saberse si llegó (sin respuesta o error ≥ 500); un rechazo 4xx no', async () => {
+    const seen: [number, boolean | undefined][] = [];
+    const off = onDraftWrite((_cs, changes, _seq, unconfirmed) => seen.push([changes.length, unconfirmed]));
+    try {
+      const status = (s: number) => Object.assign(new Error(`status ${s}`), { status: s });
+      vi.mocked(apiPut).mockRejectedValueOnce(status(0)).mockRejectedValueOnce(status(502))
+        .mockRejectedValueOnce(status(409)).mockRejectedValueOnce(new Error('red'))
+        .mockResolvedValueOnce({ writeSeq: 3 } as never);
+      await expect(recordChange('cs1', 'canonical_columns', 'c1', 'delete')).rejects.toThrow('status 0');
+      await expect(recordChange('cs1', 'canonical_columns', 'c1', 'delete')).rejects.toThrow('status 502');
+      await expect(recordChangesBulk('cs1', [del(1), del(2)])).rejects.toThrow('status 409');
+      await expect(recordChangesBulk('cs1', [del(1)])).rejects.toThrow('red');
+      await recordChange('cs1', 'canonical_columns', 'c1', 'delete');
+      expect(seen).toEqual([[1, true], [1, true], [2, false], [1, true], [1, false]]);
+    } finally {
+      off();
+    }
+  });
+
   it('un observador roto no cambia la escritura, no corta el lote ni deja sin aviso a los demás', async () => {
     const off = onDraftWrite(() => { throw new Error('roto'); });
     const seen: number[] = [];

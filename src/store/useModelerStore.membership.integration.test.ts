@@ -9,7 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), message: vi.fn() } }));
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
-  return { ...actual, effective: vi.fn(), recordChange: vi.fn() };
+  return {
+    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
+  };
 });
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(), setSubjectAreaLayout: vi.fn(), setSubjectAreaDrawings: vi.fn(),
@@ -40,6 +43,7 @@ import * as viewsSvc from '@/services/views.service';
 import { useModelerStore } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { openOtherCanvasWhileStepRuns } from './historyCanvas.testutil';
 import type { SubjectArea } from '@/features/modeler/services/modeler.service';
 
 const R1 = [{ x: 200, y: 40 }, { x: 200, y: 160 }];
@@ -61,6 +65,21 @@ let draft: Record<string, SubjectArea> = {};
 let log: string[] = [];
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const st = () => useModelerStore.getState();
+
+/** Desde otro canvas no se deshace (doc 133): lo intenta, vuelve al de la
+ *  acción y deshace abriendo el otro apenas arranca el paso (puede pasar
+ *  mientras corre). El paso escribe en el canvas de la acción, no en el abierto. */
+async function undoWithOtherCanvasOpened(home: string, other: string): Promise<void> {
+  await st().selectSubjectArea(other);
+  await expect(useUndoStore.getState().undoLast()).rejects.toMatchObject({ cmd: 'undo', canvasId: home });
+  await st().selectSubjectArea(home);
+  const opening = openOtherCanvasWhileStepRuns(() => st().selectSubjectArea(other));
+  try {
+    await useUndoStore.getState().undoLast();
+    await opening.opened();
+  } finally { opening.stop(); }
+  expect(st().activeSaId).toBe(other);        // el otro canvas de verdad se abrió
+}
 const puts = () => log.filter((l) => l.startsWith('put:'));
 const unhandled: unknown[] = [];
 const onUnhandled = (e: unknown) => { unhandled.push(e); };
@@ -230,8 +249,7 @@ describe('el Undo usa las vistas de su canvas, no las del canvas abierto', () =>
     await st().reload();
     await st().removeTableFromArea('t4');                                  // sin vistas huérfanas: sigue sin lista
     expect(draft.sa1.viewIds).toBeUndefined();
-    await st().selectSubjectArea('sa2');
-    await useUndoStore.getState().undoLast();
+    await undoWithOtherCanvasOpened('sa1', 'sa2');
     expect(draft.sa1.tableIds).toEqual(['t1', 't2', 't4']);
     expect(draft.sa1.viewIds).toBeUndefined();                             // no toma la lista del canvas abierto (['v3'])
   });
@@ -246,8 +264,7 @@ describe('el Undo usa las vistas de su canvas, no las del canvas abierto', () =>
   ])('%s y deshacer desde otro canvas deja la lista de su canvas', async (_label, act, after) => {
     draft.sa2 = canvas({ id: 'sa2', name: 'Otro', tableIds: ['t3'], viewIds: ['v3'], layout: { t3: { x: 5, y: 5 } }, routes: {} });
     await act();
-    await st().selectSubjectArea('sa2');
-    await useUndoStore.getState().undoLast();
+    await undoWithOtherCanvasOpened('sa1', 'sa2');
     expect(new Set(draft.sa1.viewIds)).toEqual(new Set(after));
     expect(draft.sa2.viewIds).toEqual(['v3']);
   });

@@ -20,6 +20,7 @@ vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
   return {
     ...actual, effective: vi.fn(async () => []),
+    writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
     // El lote (borrar una columna) se aplica como sus cambios uno a uno.
     recordChangesBulk: vi.fn(async (_cs: string, changes: { entityId: string; op: string; payload?: Doc }[]) => {
       for (const c of changes) { if (c.op === 'delete') delete server[c.entityId]; else server[c.entityId] = { ...c.payload! }; }

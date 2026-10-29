@@ -19,7 +19,7 @@ import type { Cardinality } from '@/services/governance.service';
 import { failureText, manualRouteCount, useModelerStore } from '@/store/useModelerStore';
 import { useUndoStore } from '@/store/useUndoStore';
 import { REDO_KEY_LABEL, SEARCH_KEY_LABEL, UNDO_KEY_LABEL } from './ColumnContextMenu';
-import { runHistory } from '../lib/historyKeys';
+import { historyTip, runHistory } from '../lib/historyKeys';
 import { modalOpen } from '@/components/ui/focusTrap';
 import type { DrawingType } from '@/features/modeler/services/modeler.service';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -123,13 +123,13 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
   const activeCsId = useSessionStore((s) => s.activeChangesetId);
   const canUpload = openMode === 'editing' && !!activeCsId;
 
-  // Undo y Redo: el tooltip muestra qué se va a deshacer o rehacer; cada botón
-  // se apaga sin nada que hacer, con un paso en vuelo (spinner en el que corre)
-  // o en solo lectura.
-  const undoCount = useUndoStore((s) => s.stack.length);
-  const undoLabel = useUndoStore((s) => (s.stack.length ? s.stack[s.stack.length - 1].label : null));
-  const redoCount = useUndoStore((s) => s.redoStack.length);
-  const redoLabel = useUndoStore((s) => (s.redoStack.length ? s.redoStack[s.redoStack.length - 1].label : null));
+  // Undo y Redo: el tooltip muestra qué se va a deshacer o rehacer (y en qué
+  // canvas, si es otro: ahí no corre y el botón lo avisa); cada botón se apaga
+  // sin nada que hacer, con un paso en vuelo (spinner en el que corre) o en
+  // solo lectura.
+  const undoTop = useUndoStore((s) => s.stack[s.stack.length - 1] ?? null);
+  const redoTop = useUndoStore((s) => s.redoStack[s.redoStack.length - 1] ?? null);
+  const canvases = useModelerStore((s) => s.subjectAreas);
   const historyBusy = useUndoStore((s) => s.busy);
   const running = useUndoStore((s) => s.running);
 
@@ -519,16 +519,16 @@ export default function Toolbar({ pushToast, onOpenModel }: { pushToast: (m: str
       <div className="wk-grp">
         <div className="wk-grp-row">
           {ic(
-            undoLabel ? `Undo — ${undoLabel} (${UNDO_KEY_LABEL})` : `Undo (${UNDO_KEY_LABEL}) — nothing to undo`,
+            historyTip('undo', undoTop, UNDO_KEY_LABEL, activeSaId, canvases),
             running === 'undo' ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Undo2 size={17} />,
             () => runHistory('undo', pushToast),
-            { disabled: !canEdit || historyBusy || undoCount === 0, lockTip: true },
+            { disabled: !canEdit || historyBusy || !undoTop, lockTip: true },
           )}
           {ic(
-            redoLabel ? `Redo — ${redoLabel} (${REDO_KEY_LABEL})` : `Redo (${REDO_KEY_LABEL}) — nothing to redo`,
+            historyTip('redo', redoTop, REDO_KEY_LABEL, activeSaId, canvases),
             running === 'redo' ? <span className="rd-spin" style={{ color: 'var(--primary)' }} /> : <Redo2 size={17} />,
             () => runHistory('redo', pushToast),
-            { disabled: !canEdit || historyBusy || redoCount === 0, lockTip: true },
+            { disabled: !canEdit || historyBusy || !redoTop, lockTip: true },
           )}
           <Collapsible when={on('actions')} menu={{
             name: 'More actions — auto-arrange and exports', list: true, active: exportOpen, disabled: !openMode,

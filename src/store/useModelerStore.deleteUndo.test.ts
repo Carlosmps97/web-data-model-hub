@@ -15,7 +15,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
-  return { ...actual, effective: vi.fn(), recordChange: vi.fn() };
+  return {
+    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
+  };
 });
 vi.mock('../features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(), listFolders: vi.fn(async () => []), listSubjectAreas: vi.fn(async () => []), listProjects: vi.fn(async () => []),

@@ -30,10 +30,17 @@
  * Undo/Redo vacía lo pendiente de rehacer en el acto. Undo y Redo esperan
  * antes lo que esta pestaña ya mandó a escribir (`draftWorkSettled`): su aviso
  * cae fuera del paso y la acción que lo mandó queda arriba del historial.
+ *
+ * Deshacer también tiene candado (doc 133): cada acción recuerda lo visto de su
+ * versión al empezar (su pin); antes de deshacerla se lee el contador y, si
+ * alguien más escribió después (otra pestaña o equipo del dueño), no se deshace
+ * y el historial se vacía. Y Undo y Redo solo actúan sobre lo hecho en el
+ * canvas abierto: lo de otro canvas no se toca sin verlo.
  */
 import { create } from 'zustand';
-import { afterRevalidation, pinSession, touchesVersion, type SessionPin } from '@/features/modeler/lib/sessionGuard';
+import { afterRevalidation, openCanvasId, pinSession, touchesVersion, type SessionPin } from '@/features/modeler/lib/sessionGuard';
 import { onDraftWrite, writeSeqOf } from '@/services/changeset.service';
+import { foreignWrites, markDraft, unconfirmedSince, type DraftMark } from '@/services/draftSeqs';
 import { draftWorkSettled } from '@/services/draftWork';
 import { ApiError, errorReason } from '@/services/http';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -51,6 +58,12 @@ export interface UndoEntry {
   run: HistoryStep;
   /** Sesión de la acción que apiló la entrada. */
   pin?: SessionPin;
+  /** Canvas donde se hizo la acción (null: sin canvas, p. ej. el Object
+   *  Inspector): solo se deshace o rehace con ese canvas abierto. */
+  canvasId?: string | null;
+  /** Lo visto de la versión al empezar la acción: lo escrito después que no
+   *  sea de esta pestaña bloquea deshacerla. */
+  mark?: DraftMark | null;
 }
 
 const CAP = 50;
@@ -74,9 +87,12 @@ let redoBase: number | null = null;
 /** Sube con lo que invalida lo pendiente de rehacer (acción nueva, `clear`,
  *  `dropRedo`): un paso en vuelo que la ve cambiar no deja su contrario. */
 let epoch = 0;
-/** Escrituras en la versión mientras corre un paso: sus números y si alguna
- *  llegó sin número. */
-interface Run { seqs: number[]; unknown: boolean }
+/** Sube con cada `clear`: un Undo que falla después de que el historial se
+ *  vació mientras corría no vuelve a la pila. */
+let generation = 0;
+/** Escrituras en la versión mientras corre un paso: sus números, si alguna
+ *  llegó sin número y cuántas fallaron sin saberse si llegaron. */
+interface Run { seqs: number[]; unknown: boolean; lost: number }
 let run: Run | null = null;
 
 /** Cómo quedó la versión tras un paso: `none` si no escribió; la primera y la
@@ -96,9 +112,69 @@ const freshSteps = new WeakSet<HistoryStep>();
  *  volvieron a la pila: al reintentarse, su contrario no sirve para rehacer. */
 const partialUndos = new WeakSet<UndoEntry>();
 
+/** Entradas de Undo que fallaron por red y volvieron a la pila: el reintento
+ *  parte del contador ya verificado y admite, esa sola vez, tantos números sin
+ *  dueño como escrituras sin respuesta dejó ese paso. */
+let retries = new WeakMap<UndoEntry, { from: number; lost: number }>();
+
 /** La versión cambió después del Undo: no se rehace nada. */
 class StaleRedoError extends Error {
   constructor() { super("This version changed after the undo: there's nothing to redo."); }
+}
+
+/** El candado del Undo no dejó deshacer: algo que no es de esta pestaña se
+ *  escribió en la versión después de la acción (`elsewhere`), o pudo ser un
+ *  guardado propio que quedó sin respuesta (`unconfirmed`). El historial ya se
+ *  vació; quien lo muestra recarga el diagrama (lo nuevo no está en pantalla). */
+export class StaleUndoError extends Error {
+  readonly kind: 'elsewhere' | 'unconfirmed';
+  constructor(kind: 'elsewhere' | 'unconfirmed') {
+    super(kind === 'elsewhere'
+      ? "This version changed in another tab or window: the undo history was cleared so it doesn't overwrite those changes."
+      : 'One of your saves got no response, so the undo history was cleared to avoid overwriting anything.');
+    this.name = 'StaleUndoError';
+    this.kind = kind;
+  }
+}
+
+/** Lo último por deshacer (o rehacer) se hizo en otro canvas: no se toca desde
+ *  este. `runHistory` arma el aviso con su nombre y el botón para abrirlo. */
+export class OtherCanvasError extends Error {
+  readonly cmd: 'undo' | 'redo';
+  readonly canvasId: string;
+  constructor(cmd: 'undo' | 'redo', canvasId: string) {
+    super(cmd === 'undo' ? 'Your last change was on another canvas. Open it to undo it.'
+      : 'Your last undo was on another canvas. Open it to redo it.');
+    this.name = 'OtherCanvasError';
+    this.cmd = cmd;
+    this.canvasId = canvasId;
+  }
+}
+
+/** ¿La entrada es de un canvas que no es el abierto? Sin canvas (null) o sin
+ *  dato, de ninguno: vale desde cualquiera. */
+const elsewhere = (e: UndoEntry): e is UndoEntry & { canvasId: string } =>
+  typeof e.canvasId === 'string' && e.canvasId !== openCanvasId();
+
+/** El contador de la versión, sin rechazar (la lectura puede quedar sin usar). */
+const readCounter = (cs: string): Promise<{ ok: true; seq: number } | { ok: false; error: unknown }> =>
+  writeSeqOf(cs).then((r) => ({ ok: true as const, seq: r.writeSeq }), (error: unknown) => ({ ok: false as const, error }));
+
+/** Candado del Undo: por qué no se deshace, si algo que no es de esta pestaña
+ *  se escribió en la versión después de que empezó la acción (hasta el contador
+ *  leído); null si no. El margen de un reintento vale una sola vez y solo para
+ *  esa entrada: lo admitido no pasa a ser propio. */
+function lockRefusal(cs: string, entry: UndoEntry, seq: number): 'elsewhere' | 'unconfirmed' | null {
+  const again = retries.get(entry);
+  const allowed = again?.lost ?? 0;
+  const odd = foreignWrites(cs, again ? again.from : entry.mark?.seen ?? null, seq);
+  if (odd.length <= allowed) {
+    retries.delete(entry);
+    return null;
+  }
+  // Más números sin dueño que escrituras propias sin respuesta: al menos uno es
+  // de otra pestaña. Si no, pudieron ser todos suyos: no se sabe.
+  return odd.length > unconfirmedSince(cs, entry.mark) ? 'elsewhere' : 'unconfirmed';
 }
 
 /** La acción falló sin escribir nada (p. ej. una lectura previa): se puede
@@ -158,7 +234,7 @@ export const useUndoStore = create<UndoState>((set, get) => {
     if (epoch !== start || held() || !back || partialUndos.has(entry) || w === null || w === 'none') { get().dropRedo(); return; }
     const keep = redoBase !== null && w.first === redoBase + 1 ? get().redoStack : [];
     redoBase = w.last;
-    set({ redoStack: [...keep, { label: entry.label, run: back }].slice(-CAP) });
+    set({ redoStack: [...keep, { label: entry.label, run: back, canvasId: entry.canvasId }].slice(-CAP) });
   };
   /** Un paso que falló sin escribir (o por transporte) vuelve a su pila para
    *  reintentarlo, salvo con la pila cerrada (empezó una carga Excel mientras
@@ -180,7 +256,17 @@ export const useUndoStore = create<UndoState>((set, get) => {
       if (e.pin && !e.pin.holds()) return;
       epoch += 1;
       redoBase = null;
-      set({ stack: [...get().stack, e].slice(-CAP), redoStack: [] });
+      // Una acción nueva deja atrás los reintentos pendientes: su margen ya no vale.
+      retries = new WeakMap();
+      // El canvas y lo visto de la versión se tomaron al empezar la acción (su
+      // pin); sin ellos, lo visto al apilar.
+      const entry: UndoEntry = {
+        ...e,
+        canvasId: e.pin && e.pin.canvasId !== undefined ? e.pin.canvasId : e.canvasId,
+        mark: e.pin && e.pin.mark !== undefined ? e.pin.mark
+          : e.mark !== undefined ? e.mark : markDraft(useSessionStore.getState().activeChangesetId),
+      };
+      set({ stack: [...get().stack, entry].slice(-CAP), redoStack: [] });
     },
     clear: (h) => {
       const cs = useSessionStore.getState().activeChangesetId;
@@ -195,6 +281,7 @@ export const useUndoStore = create<UndoState>((set, get) => {
         });
       }
       epoch += 1;
+      generation += 1;
       redoBase = null;
       if (get().stack.length || get().redoStack.length) set({ stack: [], redoStack: [] });
     },
@@ -205,17 +292,40 @@ export const useUndoStore = create<UndoState>((set, get) => {
     },
     undoLast: async () => {
       if (get().busy || !get().stack.length || held()) return null;
+      const top = get().stack[get().stack.length - 1];
+      if (elsewhere(top)) throw new OtherCanvasError('undo', top.canvasId);
       const pin = pinSession();
       const cs = useSessionStore.getState().activeChangesetId;
       set({ busy: true, running: 'undo' });
+      const stop = () => set({ busy: false, running: null });
       // Lo que esta pestaña ya mandó a escribir termina antes: su aviso cae fuera
       // del paso y, si la acción que lo mandó apila su inversa, es la que se deshace.
       await draftWorkSettled();
+      if (!pin.holds() || held() || !get().stack.length) { stop(); return null; }
+      // El contador se lee recién ahora (lo ajeno que cayó mientras se esperaba
+      // también cuenta), y otra vez si mientras se leía terminó otra acción.
+      let seq: number | null = null;
+      for (let reads = 0; cs && reads < 2; reads += 1) {
+        const asked = get().stack[get().stack.length - 1];
+        const read = await readCounter(cs);
+        if (!read.ok && touchesVersion(read.error, cs)) await afterRevalidation();
+        if (!pin.holds() || held() || !get().stack.length) { stop(); return null; }
+        if (!read.ok) { stop(); throw new Error("Couldn't check the version: nothing was undone. Press Undo to try again."); }
+        seq = read.seq;
+        if (get().stack[get().stack.length - 1] === asked) break;
+      }
+      // La entrada que corre es la de arriba ahora (una acción pudo terminar
+      // mientras tanto), y con el canvas abierto ahora.
       const { stack } = get();
-      if (!pin.holds() || held() || !stack.length) { set({ busy: false, running: null }); return null; }
       const entry = stack[stack.length - 1];
+      if (elsewhere(entry)) { stop(); throw new OtherCanvasError('undo', entry.canvasId); }
+      // Candado: desde que empezó la acción nadie más escribió en la versión; si
+      // no, deshacerla podría pisar eso.
+      const refused = cs && seq !== null ? lockRefusal(cs, entry, seq) : null;
+      if (refused) { stop(); get().clear(); throw new StaleUndoError(refused); }
       const start = epoch;
-      const r: Run = { seqs: [], unknown: false };
+      const gen = generation;
+      const r: Run = { seqs: [], unknown: false, lost: 0 };
       runningPin = pin;
       run = r;
       set({ stack: stack.slice(0, -1) });
@@ -230,9 +340,12 @@ export const useUndoStore = create<UndoState>((set, get) => {
         // el usuario abrió otra): el error no corresponde a lo que está en pantalla.
         if (touchesVersion(e, cs)) await afterRevalidation();
         if (!pin.holds()) return null;
+        // Si el historial se vació mientras corría (Schema manager, borrar su
+        // canvas…), la entrada no vuelve.
+        const kept = generation === gen;
         // No escribió nada: la entrada vuelve arriba de la pila y pulsar Undo otra
         // vez reintenta esta acción (no deshace la anterior).
-        if (e instanceof NothingDoneError) throw retry('stack', entry, `${e.reason}: nothing was undone.`, 'Press Undo to try again.');
+        if (e instanceof NothingDoneError) throw retry('stack', entry, `${e.reason}: nothing was undone.`, 'Press Undo to try again.', kept);
         // Una falla de transporte (timeout, red: status 0) no dice si el paso
         // escribió. Los pasos reponen pre-imágenes (upserts, borrados,
         // membresía: idempotentes) y re-correrlo converge: la entrada vuelve a la
@@ -240,7 +353,8 @@ export const useUndoStore = create<UndoState>((set, get) => {
         // paso es fresco y pudo escribir, el reintento no deja qué rehacer.
         if (e instanceof ApiError && e.status === 0) {
           if (freshSteps.has(entry.run) && written(r) !== 'none') partialUndos.add(entry);
-          throw retry('stack', entry, `Couldn't undo ${entry.label}: ${errorReason(e, 'no response')}.`, 'Press Undo to try again.');
+          if (seq !== null) retries.set(entry, { from: seq, lost: r.lost });
+          throw retry('stack', entry, `Couldn't undo ${entry.label}: ${errorReason(e, 'no response')}.`, 'Press Undo to try again.', kept);
         }
         // Pudo dejar algo a medias: lo pendiente de rehacer ya no calza.
         get().dropRedo();
@@ -250,8 +364,11 @@ export const useUndoStore = create<UndoState>((set, get) => {
     redoLast: async () => {
       const cs = useSessionStore.getState().activeChangesetId;
       if (get().busy || !get().redoStack.length || held() || !cs) return null;
+      const top = get().redoStack[get().redoStack.length - 1];
+      if (elsewhere(top)) throw new OtherCanvasError('redo', top.canvasId);
       const pin = pinSession();
       const start = epoch;
+      const gen = generation;
       set({ busy: true, running: 'redo' });
       // Lo que esta pestaña ya mandó a escribir termina antes: si escribió en la
       // versión, su aviso vacía lo pendiente y ya no hay qué rehacer.
@@ -264,7 +381,8 @@ export const useUndoStore = create<UndoState>((set, get) => {
         throw new StaleRedoError();
       }
       const entry = redoStack[redoStack.length - 1];
-      const r: Run = { seqs: [], unknown: false };
+      if (elsewhere(entry)) { set({ busy: false, running: null }); throw new OtherCanvasError('redo', entry.canvasId); }
+      const r: Run = { seqs: [], unknown: false, lost: 0 };
       let writeSeq = 0;
       let checked = false;
       set({ redoStack: redoStack.slice(0, -1) });
@@ -274,11 +392,13 @@ export const useUndoStore = create<UndoState>((set, get) => {
         if (!pin.holds()) return null;
         if (epoch !== start || redoBase === null || writeSeq !== redoBase) throw new StaleRedoError();
         checked = true;
+        // Lo que vuelve a Undo vale desde aquí (la versión es la que dejó el Undo).
+        const mark = markDraft(cs);
         runningPin = pin;
         run = r;
         const back = await entry.run(pin);
         if (!pin.holds()) return null;
-        if (back && !held()) set((s) => ({ stack: [...s.stack, { label: entry.label, run: back }].slice(-CAP) }));
+        if (back && !held() && generation === gen) set((s) => ({ stack: [...s.stack, { label: entry.label, run: back, canvasId: entry.canvasId, mark }].slice(-CAP) }));
         // Lo que queda por rehacer sigue sobre lo que este paso escribió, si nada
         // ajeno escribió en el medio.
         const w = written(r);
@@ -321,12 +441,13 @@ export const useUndoStore = create<UndoState>((set, get) => {
 // Las escrituras de esta pestaña en la versión abierta: las de un paso en vuelo
 // son suyas (fijan la base del Redo); cualquier otra cambia la versión fuera
 // del historial y vacía lo pendiente de rehacer.
-onDraftWrite((cs, _changes, seq) => {
+onDraftWrite((cs, _changes, seq, unconfirmed) => {
   const s = useSessionStore.getState();
   if (s.openMode !== 'editing' || s.activeChangesetId !== cs) return;
   if (run) {
     if (seq == null) run.unknown = true;
     else run.seqs.push(seq);
+    if (unconfirmed) run.lost += 1;
     return;
   }
   useUndoStore.getState().dropRedo();

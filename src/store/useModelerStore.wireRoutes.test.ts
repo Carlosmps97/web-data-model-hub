@@ -4,6 +4,10 @@
 // arrange, sacar o borrar una tabla) los reinician o podan. Servicios mockeados.
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/services/changeset.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/services/changeset.service')>()),
+  writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
+}));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), message: vi.fn() } }));
 vi.mock('@/features/modeler/services/modeler.service', () => ({ loadDiagram: vi.fn() }));
 vi.mock('@/features/modeler/services/structure.service', () => ({
@@ -41,6 +45,7 @@ import { gridSlot } from '@/features/modeler/lib/viewerLayout';
 import { useModelerStore, manualRouteCount } from './useModelerStore';
 import { useSessionStore } from './useSessionStore';
 import { useUndoStore } from './useUndoStore';
+import { openOtherCanvasWhileStepRuns } from './historyCanvas.testutil';
 
 // El `reload` real del store. El describe «auto-arrange» lo reemplaza por un
 // mock con `setState`, y el reemplazo seguiría en el store para los tests que
@@ -230,13 +235,20 @@ describe('setWireRoute', () => {
     expect(vi.mocked(struct.setWireRoute).mock.calls.at(-1)!.slice(0, 3)).toEqual(['sa1', 'r2', null]);
   });
 
-  it('Undo con otro canvas abierto graba en el canvas original y no toca la pantalla', async () => {
+  // Desde otro canvas no se deshace (doc 133); si se abre otro mientras el paso
+  // corre, el paso graba en el canvas original y no toca la pantalla.
+  it('Undo con otro canvas abierto no corre; abierto mientras corre, graba en el original y no toca la pantalla', async () => {
     await useModelerStore.getState().setWireRoute('r1', R2);
-    useModelerStore.setState({
+    const openOther = () => useModelerStore.setState({
       activeSaId: 'sa2',
       diagram: diagramWith({ r1: R3 }, { subjectArea: { id: 'sa2', projectId: 'p', name: 'Otro', tableIds: [], layout: {}, routes: { r1: R3 } } }),
     });
-    await useUndoStore.getState().undoLast();
+    openOther();
+    await expect(useUndoStore.getState().undoLast()).rejects.toMatchObject({ cmd: 'undo', canvasId: 'sa1' });
+    expect(vi.mocked(struct.setWireRoute)).toHaveBeenCalledTimes(1);
+    useModelerStore.setState({ activeSaId: 'sa1', diagram: diagramWith({ r1: R2 }) });
+    const opening = openOtherCanvasWhileStepRuns(openOther);
+    try { await useUndoStore.getState().undoLast(); } finally { opening.stop(); }
     expect(vi.mocked(struct.setWireRoute).mock.calls.at(-1)!.slice(0, 3)).toEqual(['sa1', 'r1', R1]);
     expect(routes()).toEqual({ r1: R3 });
   });
@@ -334,13 +346,13 @@ describe('con la red fallando o lenta', () => {
     expect(routes()).toEqual({ r1: R2 });
   });
 
-  it('un Undo lanzado con otro canvas abierto y que falla ya de vuelta en el original no pinta el trazo del otro', async () => {
+  it('un Undo que pasa por otro canvas mientras escribe y falla ya de vuelta en el original no pinta el trazo del otro', async () => {
     await useModelerStore.getState().setWireRoute('r1', R2);               // A: R1 → R2, grabado
-    open('sa2', diagramB({ r1: R3 }));                                     // B tiene su propio r1
     const [undoWrite] = holdWrites(1);
     const undone = useUndoStore.getState().undoLast().catch((e: Error) => e);
-    await flush();                                                         // el Undo ya escribe (con B abierto)
-    open('sa1', diagramWith({ r1: R2 }));                                  // vuelve a A (grabado: R2)
+    await flush();                                                         // el Undo ya escribe (con A abierto)
+    open('sa2', diagramB({ r1: R3 }));                                     // se abre B (tiene su propio r1)
+    open('sa1', diagramWith({ r1: R2 }));                                  // y se vuelve a A (grabado: R2)
     expect(routes()).toEqual({ r1: R1 });                                  // el Undo en vuelo manda
     undoWrite.reject(new Error('offline'));
     await undone;

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import { useSessionStore } from '@/store/useSessionStore';
+import { announceDraftWrite } from '@/services/changeset.service';
+import { forgetDraftSeqs, noteSeen } from '@/services/draftSeqs';
 import {
   SessionChangedError, afterRevalidation, isVersionError, isVersionHeaderUrl, pinSession, reportWriteError, sessionFate,
-  stillAskedSession, touchesChangeset, touchesVersion, trackRevalidation,
+  setCanvasSource, stillAskedSession, touchesChangeset, touchesVersion, trackRevalidation,
 } from './sessionGuard';
 
 const names = (id: string) => ({ carla: 'Carla Ruiz' }[id] ?? id);
@@ -200,6 +202,32 @@ describe('pinSession', () => {
     open('readonly', 'cs1');
     open('editing', 'cs1');
     expect(pin.holds()).toBe(false);
+  });
+
+  // El candado del Undo: la acción recuerda en qué canvas se hizo y qué había
+  // visto de su versión al empezar (lo posterior que no sea suyo es ajeno).
+  it('recuerda el canvas abierto al empezar (null sin canvas) y lo visto de la versión', () => {
+    open('editing', 'cs1');
+    forgetDraftSeqs();
+    let canvas: string | null = 'sa1';
+    setCanvasSource(() => canvas);
+    try {
+      noteSeen('cs1', 7);                        // la carga del canvas
+      announceDraftWrite('cs1', [], 9);          // una escritura propia no recarga nada
+      announceDraftWrite('cs1', [], undefined, true);
+      const pin = pinSession();
+      canvas = null;
+      announceDraftWrite('cs1', [], 10);
+      expect([pin.canvasId, pin.mark]).toEqual(['sa1', { seen: 7, unconfirmed: 0 }]);   // lo sin confirmar, desde la carga
+      expect(pinSession().canvasId).toBeNull();
+    } finally {
+      setCanvasSource(() => null);
+    }
+  });
+
+  it('sin versión abierta no hay marca', () => {
+    useSessionStore.getState().closeModel();
+    expect(pinSession().mark).toBeNull();
   });
 
   it('lo que no es la sesión de canvas (etiqueta de versión, actor) no cuenta', () => {

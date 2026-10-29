@@ -8,12 +8,15 @@ vi.mock('@/services/http', () => ({
   ApiError: class extends Error { status = 0; }, apiErrorMessage: vi.fn(), isConflictError: vi.fn(),
   LONG_TIMEOUT_MS: 120_000,
 }));
-vi.mock('@/services/changeset.service', () => ({ recordChange: vi.fn(async () => ({})), effective: vi.fn(), announceDraftWrite: vi.fn() }));
+vi.mock('@/services/changeset.service', async (orig) => ({
+  recordChange: vi.fn(async () => ({})), effective: vi.fn(), announceDraftWrite: vi.fn(),
+  unconfirmedWrite: (await orig<typeof import('@/services/changeset.service')>()).unconfirmedWrite,
+}));
 
 import { apiDelete, apiPost } from '@/services/http';
 import * as csvc from '@/services/changeset.service';
 import { useSessionStore } from '@/store/useSessionStore';
-import { createSchema, createSchemaInVersion, deleteSchema, setSchemaKind } from './schemas.service';
+import { createSchema, createSchemaInVersion, deleteSchema, renameSchema, setSchemaKind } from './schemas.service';
 
 beforeEach(() => { vi.clearAllMocks(); });
 
@@ -35,16 +38,52 @@ describe('setSchemaKind', () => {
 
 // Borrar un esquema va por su endpoint (revisa el uso en el servidor); la
 // escritura se avisa como las de `changeset.service`, con el número que devuelve.
+const failure = (status: number, message: string) => Object.assign(new Error(message), { status });
+
 describe('deleteSchema', () => {
   it('avisa su escritura con el número que devuelve el endpoint; sin número si falla', async () => {
     useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
     vi.mocked(apiPost).mockResolvedValueOnce({ deleted: true, writeSeq: 8 });
     await deleteSchema('s1');
     expect(apiPost).toHaveBeenCalledWith(expect.stringMatching(/\/api\/changesets\/cs1\/schemas\/s1\/delete$/));
-    expect(csvc.announceDraftWrite).toHaveBeenCalledWith('cs1', [{ collection: 'schemas', entityId: 's1', op: 'delete' }], 8);
-    vi.mocked(apiPost).mockRejectedValueOnce(new Error('in use'));
+    expect(csvc.announceDraftWrite).toHaveBeenCalledWith('cs1', [{ collection: 'schemas', entityId: 's1', op: 'delete' }], 8, false);
+    vi.mocked(apiPost).mockRejectedValueOnce(failure(409, 'in use'));
     await expect(deleteSchema('s2')).rejects.toThrow('in use');
-    expect(csvc.announceDraftWrite).toHaveBeenLastCalledWith('cs1', [{ collection: 'schemas', entityId: 's2', op: 'delete' }], undefined);
+    expect(csvc.announceDraftWrite).toHaveBeenLastCalledWith('cs1', [{ collection: 'schemas', entityId: 's2', op: 'delete' }], undefined, false);
+  });
+
+  it('sin respuesta, avisa que no se sabe si llegó', async () => {
+    useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' });
+    vi.mocked(apiPost).mockRejectedValueOnce(failure(0, 'Network error'));
+    await expect(deleteSchema('s3')).rejects.toThrow('Network error');
+    expect(csvc.announceDraftWrite).toHaveBeenLastCalledWith('cs1', [{ collection: 'schemas', entityId: 's3', op: 'delete' }], undefined, true);
+  });
+});
+
+// Renombrar y cambiar el tipo también graban por su endpoint: se avisan como
+// las demás escrituras, con su número (el candado del Undo no las toma por
+// ajenas). Renombrar cambia además las tablas y vistas del esquema.
+describe('renameSchema y setSchemaKind avisan su escritura', () => {
+  beforeEach(() => { useSessionStore.setState({ openMode: 'editing', activeChangesetId: 'cs1' }); });
+
+  it('renombrar: con el número que devuelve el endpoint', async () => {
+    vi.mocked(apiPost).mockResolvedValueOnce({ tables: 2, views: 1, writeSeq: 11 });
+    await expect(renameSchema('s1', 'STG_NEW')).resolves.toEqual({ tables: 2, views: 1, writeSeq: 11 });
+    expect(csvc.announceDraftWrite).toHaveBeenCalledWith('cs1', [{ collection: 'schemas', entityId: 's1', op: 'upsert' }], 11, false);
+  });
+
+  it('cambiar el tipo: con el número que devuelve el endpoint', async () => {
+    vi.mocked(apiPost).mockResolvedValueOnce({ kind: 'views', writeSeq: 12 });
+    await setSchemaKind('s1', 'views');
+    expect(csvc.announceDraftWrite).toHaveBeenCalledWith('cs1', [{ collection: 'schemas', entityId: 's1', op: 'upsert' }], 12, false);
+  });
+
+  it('si fallan, avisan sin número (y si no hubo respuesta, que no se sabe si llegó)', async () => {
+    vi.mocked(apiPost).mockRejectedValueOnce(failure(0, 'Network error')).mockRejectedValueOnce(failure(409, 'duplicated'));
+    await expect(renameSchema('s1', 'STG_NEW')).rejects.toThrow('Network error');
+    expect(csvc.announceDraftWrite).toHaveBeenLastCalledWith('cs1', [{ collection: 'schemas', entityId: 's1', op: 'upsert' }], undefined, true);
+    await expect(setSchemaKind('s1', 'views')).rejects.toThrow('duplicated');
+    expect(csvc.announceDraftWrite).toHaveBeenLastCalledWith('cs1', [{ collection: 'schemas', entityId: 's1', op: 'upsert' }], undefined, false);
   });
 });
 

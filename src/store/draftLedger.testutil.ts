@@ -4,7 +4,7 @@
  * `withDraftLedger`: los avisos de escritura (`onDraftWrite`) pasan por acá y
  * `writeSeqOf` responde el contador.
  *  · `write`: una escritura de esta pestaña — sube el contador y se avisa con su número;
- *  · `lost`: una que falló sin respuesta — se avisa sin número;
+ *  · `lost`: una que falló sin respuesta — se avisa sin número y sin confirmar (pudo llegar);
  *  · `foreign`: una que esta pestaña no ve (otra pestaña, un endpoint sin aviso) — solo sube.
  *
  * Uso: `vi.mock('@/services/changeset.service', async (orig) =>
@@ -24,7 +24,7 @@ export const draftLedger = {
     return seq;
   },
   lost(cs: string, changes: Csvc.BulkChange[] = []): void {
-    for (const l of listeners) l(cs, changes, undefined);
+    for (const l of listeners) l(cs, changes, undefined, true);
   },
   foreign(): number {
     seq += 1;

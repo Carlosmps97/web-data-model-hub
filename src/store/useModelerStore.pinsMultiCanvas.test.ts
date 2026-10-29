@@ -10,7 +10,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn(), message: vi.fn() } }));
 vi.mock('@/services/changeset.service', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/changeset.service')>();
-  return { ...actual, effective: vi.fn(), recordChange: vi.fn() };
+  return {
+    ...actual, effective: vi.fn(), recordChange: vi.fn(),
+    writeSeqOf: async () => ({ writeSeq: 0 }),   // el candado del Undo lee el contador (doc 133): nada ajeno
+  };
 });
 vi.mock('@/features/modeler/services/modeler.service', () => ({
   loadDiagram: vi.fn(), setSubjectAreaLayout: vi.fn(), setSubjectAreaDrawings: vi.fn(),
@@ -186,6 +189,7 @@ describe('borrar una tabla que está en un canvas no abierto', () => {
       await switchTo('saX');
       await midAction(mid);
       await undo();
+      await switchTo('saY');                 // el borrado se hizo con Y abierto: se deshace en Y (doc 133)
       await undo();
       expect(paintedOf('saX')).toEqual(START_X);
       expect(overlaps('saX')).toEqual([]);
@@ -201,6 +205,7 @@ describe('borrar una tabla que está en un canvas no abierto', () => {
     await st().createTable({ logicalName: 'zeta', physicalName: 'Z_NUEVA' });
     await pause(2);
     await undo();
+    await switchTo('saY');                   // el Inspector se usó con Y abierto: se deshace en Y (doc 133)
     await undo();
     expect(paintedOf('saX')).toEqual(START_X);
     expect(overlaps('saX')).toEqual([]);

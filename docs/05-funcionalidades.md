@@ -549,6 +549,20 @@ qué se deshará («Undo — <acción> (Ctrl+Z)», con ⌘Z en macOS) y **Redo**
 Ctrl/Cmd+Z deshace y Ctrl/Cmd+Shift+Z o Ctrl/Cmd+Y rehacen, y avisan «Undid: <acción>» / «Redid:
 <acción>».
 
+- El historial es uno por versión, pero Undo y Redo solo actúan sobre lo hecho en el canvas abierto. Si
+  lo último se hizo en otro canvas, el tooltip lo dice («Undo — <acción> (on canvas <nombre>)») y pulsar
+  avisa «Your last change was on canvas <nombre>. Open it to undo it.», con el botón **Open canvas**, sin
+  deshacer nada. Lo hecho en el Object Inspector sin un canvas abierto se deshace desde cualquier canvas
+  («Undo — <acción> in the Object Inspector»). Si ese canvas ya no existe, el historial se vacía.
+- Antes de cada Undo se lee el contador de escrituras de la versión: si después de que empezó la acción
+  alguien más escribió en ella (otra pestaña o equipo del mismo dueño), no se deshace nada, el historial se
+  vacía, el diagrama se recarga y avisa «This version changed in another tab or window: the undo history was
+  cleared so it doesn't overwrite those changes.». Si pudo ser un guardado de esta pestaña que quedó sin
+  respuesta, el aviso es «One of your saves got no response, so the undo history was cleared to avoid
+  overwriting anything.». Si el contador no se puede leer, no deshace nada y pide pulsar Undo otra vez.
+- Al volver a la pestaña (foco o visible) se mira el contador: si otra pestaña escribió, el diagrama se
+  recarga completo. Así lo de la otra pestaña queda en pantalla y lo que se haga después se puede
+  deshacer.
 - Se rehace en orden inverso a lo deshecho, y solo si la versión no cambió desde el Undo: cualquier
   escritura en la versión en el medio (otra acción, mover un bloque, dibujar, Save, el Schema manager,
   otra pestaña sobre la misma versión) cancela lo pendiente de rehacer. Si el cambio llegó por fuera de
@@ -559,7 +573,9 @@ Ctrl/Cmd+Z deshace y Ctrl/Cmd+Shift+Z o Ctrl/Cmd+Y rehacen, y avisan «Undid: <a
 - Rehacer un borrado en cascada (tabla, columnas, vista, relación) lo recalcula con lo vigente. Si al
   rehacer el borrado de columnas otra relación empezó a usarlas, no se borra nada y se avisa: borrarlas de
   nuevo muestra el impacto.
-- El historial se vacía en todo cambio de sesión (proyecto, modo o versión).
+- El historial se vacía en todo cambio de sesión (proyecto, modo o versión); cambiar de canvas no lo
+  vacía. También al renombrar, cambiar el tipo o borrar un esquema en el Schema manager (lo guardado en el
+  historial lleva el nombre del esquema en cada tabla) y al borrar un canvas que tenía acciones suyas.
 - Cada acción de varias escrituras, y cada paso de Undo o Redo, pertenece a la sesión donde empezó
   (`pinSession`, `lib/pinnedWrites.ts`): si la sesión cambia a mitad de camino, lo que falta no se
   escribe en ninguna versión.

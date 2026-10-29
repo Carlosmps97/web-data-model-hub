@@ -65,7 +65,8 @@ export const createSchema = async (name: string, description?: string, kind?: Sc
 export const setSchemaKind = async (id: string, kind: SchemaKind): Promise<void> => {
   const cs = writeCs();
   if (!cs) throw new Error('Changing what a schema holds requires a version in edit mode.');
-  await apiPost(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/kind`, { kind });
+  await announced(cs, { collection: 'schemas', entityId: id, op: 'upsert' },
+    () => apiPost<{ kind: SchemaKind; writeSeq?: number }>(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/kind`, { kind }));
 };
 
 /** Alta de un esquema desde un combo, solo dentro de una versión en edición
@@ -89,25 +90,38 @@ export const schemaImpact = (id: string): Promise<SchemaImpact> => {
 
 /** Rename versionado: propaga a todas las tablas/vistas efectivas del esquema
  *  dentro del draft (server-side). Devuelve cuántas se tocaron. */
-export const renameSchema = (id: string, newName: string): Promise<{ tables: number; views: number }> => {
+export const renameSchema = (id: string, newName: string): Promise<{ tables: number; views: number; writeSeq?: number }> => {
   const cs = writeCs();
   if (!cs) return Promise.reject(new Error('Renaming a schema requires a version in edit mode.'));
-  return apiPost(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/rename`, { newName });
+  return announced(cs, { collection: 'schemas', entityId: id, op: 'upsert' },
+    () => apiPost<{ tables: number; views: number; writeSeq?: number }>(
+      `${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/rename`, { newName }));
 };
 
 /** Delete versionado: el backend rechaza (409) si el esquema tiene tablas o
- *  vistas en su estado efectivo. La escritura se avisa como las de
- *  `changeset.service`, con el número que devuelve el endpoint (sin él si falló). */
+ *  vistas en su estado efectivo. */
 export const deleteSchema = async (id: string): Promise<void> => {
   const cs = writeCs();
   if (!cs) throw new Error('Deleting a schema requires a version in edit mode.');
-  await trackDraftWork((async () => {
-    let seq: number | undefined;
+  await announced(cs, { collection: 'schemas', entityId: id, op: 'delete' },
+    () => apiPost<{ deleted: boolean; writeSeq?: number }>(`${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/delete`));
+};
+
+/** Una escritura del esquema por su propio endpoint, avisada como las de
+ *  `changeset.service`: con el número que devuelve (sin él si falló; si falló
+ *  sin saberse si llegó, lo dice) y esperada por Undo y Redo. */
+function announced<T extends { writeSeq?: number }>(cs: string, change: csvc.BulkChange, write: () => Promise<T>): Promise<T> {
+  return trackDraftWork((async () => {
+    let done: T | undefined;
+    let unconfirmed = false;
     try {
-      seq = (await apiPost<{ deleted: boolean; writeSeq?: number }>(
-        `${CS}/${encodeURIComponent(cs)}/schemas/${encodeURIComponent(id)}/delete`)).writeSeq;
+      done = await write();
+      return done;
+    } catch (e) {
+      unconfirmed = csvc.unconfirmedWrite(e);
+      throw e;
     } finally {
-      csvc.announceDraftWrite(cs, [{ collection: 'schemas', entityId: id, op: 'delete' }], seq);
+      csvc.announceDraftWrite(cs, [change], done?.writeSeq, unconfirmed);
     }
   })());
-};
+}

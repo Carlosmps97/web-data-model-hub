@@ -10,6 +10,7 @@ import { ApiError } from '@/services/http';
 import { canOpenVersion, isAsOfChangesetId } from '@/services/versioning.service';
 import { useSessionStore, type OpenMode } from '@/store/useSessionStore';
 import type { VersionStatus } from '@/types/versioning';
+import { markDraft, type DraftMark } from '@/services/draftSeqs';
 import { canvasSessionKey } from './canvasSession';
 
 export type SessionFate =
@@ -164,13 +165,31 @@ export interface SessionPin {
   holds: () => boolean;
   /** Corta con `SessionChangedError` si la sesión es otra: va antes de cada escritura. */
   check: () => void;
+  /** El canvas abierto al tomarlo (null sin canvas, p. ej. el Object Inspector): el Undo de la acción es de ese canvas. */
+  canvasId?: string | null;
+  /** Lo visto de la versión al tomarlo: lo posterior que no sea de esta pestaña bloquea el Undo de la acción. */
+  mark?: DraftMark | null;
 }
+
+// El canvas abierto lo conoce useModelerStore, que lo registra (este módulo no
+// importa el store).
+let canvasSource: () => string | null = () => null;
+export function setCanvasSource(source: () => string | null): void {
+  canvasSource = source;
+}
+/** El canvas abierto en este momento (null sin canvas). */
+export const openCanvasId = (): string | null => canvasSource();
 
 /** Ata lo que sigue a la sesión vigente (se toma al empezar la acción). */
 export function pinSession(): SessionPin {
   const at = sessionEpoch;
   const holds = () => sessionEpoch === at;
-  return { holds, check: () => { if (!holds()) throw new SessionChangedError(); } };
+  return {
+    holds,
+    check: () => { if (!holds()) throw new SessionChangedError(); },
+    canvasId: canvasSource(),
+    mark: markDraft(useSessionStore.getState().activeChangesetId),
+  };
 }
 
 /** El `.catch` de una escritura pedida en este momento (se crea al pedirla:
