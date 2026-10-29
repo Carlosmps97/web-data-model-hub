@@ -6,7 +6,7 @@ import { useModelerStore } from '@/store/useModelerStore';
 import { useSessionStore } from '@/store/useSessionStore';
 import { canvasMenuItems, type CanvasClipboard, type CanvasMenuAction } from '../lib/canvasMenu';
 import { orderColumns } from '../lib/columnOrder';
-import { askDeleteColumns, askDeleteTable, askRemoveFromCanvas } from './deleteFlows';
+import { askDeleteColumns, askDeleteTable, askDeleteTables, askRemoveFromCanvas, askRemoveTablesFromCanvas } from './deleteFlows';
 
 // Etiquetas de atajos agnósticas al SO (Windows/Linux = Ctrl, macOS = ⌘) —
 // el handler real ya acepta ambos (`metaKey || ctrlKey`).
@@ -25,12 +25,16 @@ export const copiedMessage = (n: number, nouns: FacetNouns) =>
 export const copiedTableMessage = (name: string, nouns: FacetNouns) =>
   `${nouns.One} ${name} copied — paste with ${PASTE_KEY_LABEL}`;
 
+export const copiedTablesMessage = (n: number, nouns: FacetNouns) =>
+  `${n} ${nouns.many} copied — paste with ${PASTE_KEY_LABEL}`;
+
 type ColMenu = NonNullable<ReturnType<typeof useModelerStore.getState>['colMenu']>;
 
 /**
  * Menú contextual del canvas (`lib/canvasMenu.ts` decide los ítems): en una
  * fila, Copy · Paste · Delete sobre las columnas seleccionadas; en el bloque,
- * Copy table · Paste · Remove from this canvas · Delete table…. Lo que no
+ * Copy table · Paste · Remove from this canvas · Delete table…; en una tabla de
+ * un grupo seleccionado, lo mismo para todas las del grupo. Lo que no
  * aplica se ve deshabilitado con su motivo. Copy/Paste son el espejo de
  * Ctrl/Cmd+C/V; los borrados usan los flujos de `deleteFlows` (los mismos del
  * panel Properties). Vive fuera del viewport de React Flow (position: fixed sin
@@ -49,6 +53,10 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
     const t = s.tblClipboard?.table;
     return t ? (s.viewMode === 'logical' ? t.logicalName || t.physicalName : t.physicalName) : null;
   });
+  // Un grupo copiado: cuántas y si fue en otro proyecto (ahí no se pega).
+  const groupClip = useModelerStore((s) => s.groupClipboard);
+  const sessionPid = useSessionStore((s) => s.activeProjectId);
+  const groupCount = useModelerStore((s) => s.groupIds.length);
   const readonly = useSessionStore((s) => s.openMode === 'readonly');
   const canEdit = useSessionStore((s) => s.activeChangesetId) != null && !readonly;
   const ref = useRef<HTMLDivElement>(null);
@@ -81,10 +89,12 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
 
   // Las vistas no tienen menú: su color en el canvas se gestiona en Model properties.
   if (!menu || menu.kind === 'view') return null;
-  const clipboard: CanvasClipboard = tblClipName != null ? { kind: 'table', name: tblClipName }
-    : clipCount > 0 ? { kind: 'columns', count: clipCount } : { kind: 'none' };
+  const clipboard: CanvasClipboard = groupClip
+    ? { kind: 'tables', count: groupClip.tables.length, foreign: !!groupClip.source.projectId && groupClip.source.projectId !== sessionPid }
+    : tblClipName != null ? { kind: 'table', name: tblClipName }
+      : clipCount > 0 ? { kind: 'columns', count: clipCount } : { kind: 'none' };
   const items = canvasMenuItems({
-    target: menu.colId == null ? 'table' : 'row', selCount, clipboard, canEdit, nouns: n,
+    target: menu.kind === 'group' ? 'group' : menu.colId == null ? 'table' : 'row', selCount, groupCount, clipboard, canEdit, nouns: n,
     keys: { copy: COPY_KEY_LABEL, paste: PASTE_KEY_LABEL },
   });
   const busy = pending?.menu === menu ? pending.action : null;
@@ -124,6 +134,21 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
     finally { release(); }
   };
 
+  /** Las tablas del grupo, en su orden (las que siguen en el canvas). */
+  const groupTables = () => {
+    const st = useModelerStore.getState();
+    const byId = new Map((st.diagram?.tables ?? []).map((t) => [t.id, t]));
+    return st.groupIds.map((id) => byId.get(id)).filter((t): t is NonNullable<typeof t> => !!t);
+  };
+  const deleteGroup = async () => {
+    const st = useModelerStore.getState();
+    const tables = groupTables();
+    if (!tables.length) return;
+    setPending({ menu, action: 'delete-tables' });
+    try { await askDeleteTables({ tables, nouns: n, pushToast, deleteTables: st.deleteTables, ...hooks }); }
+    finally { release(); }
+  };
+
   const run = (action: CanvasMenuAction) => {
     const st = useModelerStore.getState();
     switch (action) {
@@ -139,10 +164,21 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
         st.closeColMenu();
         return;
       }
+      case 'copy-tables': {
+        const count = st.copyTables(st.groupIds);
+        if (count > 0) pushToast(copiedTablesMessage(count, n));
+        st.closeColMenu();
+        return;
+      }
       case 'paste':
-        // Lo mismo que Ctrl/Cmd+V: una tabla copiada abre el popup que muestra
-        // qué viaja (crea una tabla nueva, no necesita destino); columnas
-        // copiadas, su confirmación sobre ESTA tabla.
+        // Lo mismo que Ctrl/Cmd+V: un grupo o una tabla copiados abren el popup
+        // que muestra qué viaja (crean tablas nuevas, no necesitan destino);
+        // columnas copiadas, su confirmación sobre ESTA tabla.
+        if (st.groupClipboard) {
+          st.closeColMenu();
+          st.setGroupPasteOpen(true);
+          return;
+        }
         if (st.tblClipboard) {
           st.closeColMenu();
           st.setTablePasteOpen(true);
@@ -163,6 +199,15 @@ export default function ColumnContextMenu({ pushToast }: { pushToast: (m: string
       }
       case 'delete-table':
         void deleteTable();
+        return;
+      case 'remove-tables': {
+        const tables = groupTables();
+        st.closeColMenu();
+        if (tables.length) void askRemoveTablesFromCanvas({ tables, nouns: n, pushToast, remove: st.removeTablesFromArea });
+        return;
+      }
+      case 'delete-tables':
+        void deleteGroup();
         return;
     }
   };

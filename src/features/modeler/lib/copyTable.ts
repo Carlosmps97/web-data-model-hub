@@ -77,6 +77,21 @@ export function pasteNames(
   return { physicalName: next.physicalName, logicalName: next.logicalName, renamed: true };
 }
 
+/** Nombres de un grupo pegado (doc 134 §3.7): `pasteNames` de cada tabla, en
+ *  orden, con los físicos ya elegidos sumados a lo tomado — dos tablas del grupo
+ *  nunca reciben el mismo nombre. */
+export function groupPasteNames(
+  tables: { physicalName: string; logicalName: string }[],
+  takenPhysical: Iterable<string>,
+): { physicalName: string; logicalName: string; renamed: boolean }[] {
+  const taken = [...takenPhysical];
+  return tables.map((t) => {
+    const names = pasteNames(t, taken);
+    taken.push(names.physicalName);
+    return names;
+  });
+}
+
 /** Metadata propia de una columna que viaja al pegarla (tabla o columnas),
  *  sin nombres, tipo físico, dominio, llave ni orden: payload limpio — cada
  *  clave solo cuando se aparta del default. */

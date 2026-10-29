@@ -1417,3 +1417,37 @@ select.exd-input { padding: 0 10px; }
 .wk-mp-pending { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--amber-tint);
   color: var(--amber-deep); font-size: 12px; line-height: 1.4; }
 .wk-pp-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #EEF1F5; }
+
+/* Explorer: mover canvases y carpetas (arrastrar y soltar, «Move to…»). */
+.wk-exp-row.drop-ok { background: var(--blue-tint); box-shadow: inset 0 0 0 1px var(--primary); }
+.wk-exp-row.flash { animation: wk-exp-flash 1.2s ease-out; }
+@keyframes wk-exp-flash { from { background: var(--blue-tint); } to { background: transparent; } }
+.wk-move-list { margin-top: 8px; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: var(--r-sm); padding: 4px; }
+.wk-move-row { display: flex; align-items: center; gap: 6px; width: 100%; height: 28px; padding-right: 8px; border: none;
+  background: transparent; border-radius: var(--r-sm); color: var(--ink-2); font: inherit; font-size: 13px; text-align: left; cursor: pointer; }
+.wk-move-row svg { flex-shrink: 0; color: var(--muted); }
+.wk-move-row:hover:not(:disabled) { background: var(--fill-4); }
+.wk-move-row.active { background: var(--blue-tint); color: var(--primary-700); font-weight: 600; }
+.wk-move-row:disabled { color: var(--text-muted-3); cursor: default; }
+
+/* «Paste N tables»: una fila por tabla con su nombre final y su detalle desplegable. */
+.wk-paste-group { margin-top: 10px; display: flex; flex-direction: column; gap: 2px; max-height: 360px; overflow: auto; }
+.wk-paste-group-row { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px; border: none; background: transparent;
+  border-radius: var(--r-sm); font: inherit; font-size: 13px; color: var(--ink-2); text-align: left; cursor: pointer; }
+.wk-paste-group-row:hover { background: var(--fill-4); }
+.wk-paste-group-row svg { flex-shrink: 0; color: var(--muted); }
+.wk-paste-group-row.blocked { color: #8A1F1F; }
+
+/* Selección por área (doc 134): cursor del modo, el cuadro, la pastilla del grupo y
+   el botón de los controles. El rectángulo propio de React Flow sobre una selección no
+   se usa: el grupo se ve por el anillo de cada tabla y sus tablas siguen respondiendo. */
+.box-mode .react-flow__pane { cursor: crosshair; }
+.wk-box-select { position: absolute; z-index: 6; border: 1px dashed var(--primary); background: rgba(52, 102, 255, .08);
+  border-radius: 2px; pointer-events: none; }
+.wk-group-pill { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 6; pointer-events: none;
+  padding: 5px 12px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-xs); border: 1px solid var(--border);
+  font-size: 12px; color: var(--ink-2); white-space: nowrap; }
+.react-flow__controls-button.wk-box-btn.on { background: var(--blue-tint); color: var(--primary); }
+/* El ícono de lucide es de trazo: sin el relleno que React Flow pone a los íconos de sus controles. */
+.react-flow__controls-button.wk-box-btn svg { fill: none; max-width: 14px; max-height: 14px; }
+.wk-canvas .react-flow__nodesselection { display: none; }

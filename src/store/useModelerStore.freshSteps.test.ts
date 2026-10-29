@@ -9,11 +9,11 @@ import { describe, expect, it } from 'vitest';
 const src = readFileSync(join(__dirname, 'useModelerStore.ts'), 'utf-8');
 
 describe('pasos frescos del store', () => {
-  it.each(['membersOut', 'membersIn', 'tableOut', 'tableDrop', 'columnsDrop', 'viewDrop', 'relDrop'])('%s va marcado', (name) => {
+  it.each(['membersOut', 'membersIn', 'tablesOut', 'tablesDrop', 'columnsDrop', 'viewDrop', 'relDrop'])('%s va marcado', (name) => {
     expect(src).toMatch(new RegExp(`function ${name}\\([^)]*\\): HistoryStep \\{\\s*return freshStep\\(`));
   });
 
-  it('deshacer «Paste table» va marcado', () => {
-    expect(src).toMatch(/const dropPaste: HistoryStep = freshStep\(/);
+  it('deshacer un pegado (una tabla o un grupo) va marcado', () => {
+    expect(src).toMatch(/function pasteUndo\([\s\S]*?\): HistoryStep \{\s*const store = \(\) => useModelerStore\.getState\(\);\s*const step: HistoryStep = freshStep\(/);
   });
 });

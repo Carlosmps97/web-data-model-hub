@@ -32,6 +32,24 @@ export async function readTableDeleteCounts(tableId: string): Promise<TableDelet
   };
 }
 
+/** Lo mismo para un grupo de tablas (doc 134 §3.9): canvases y vistas sin
+ *  repetir; relacionadas, solo las de afuera del grupo (las del grupo se borran
+ *  con él). Lo que no se pudo leer de alguna tabla queda en null. */
+export async function readTablesDeleteCounts(ids: string[]): Promise<TableDeleteCounts> {
+  const group = new Set(ids);
+  const all = <T,>(read: (id: string) => Promise<T>) => Promise.all(ids.map(read)).catch(() => null);
+  const [usage, rels, views] = await Promise.all([
+    all((id) => gov.tableUsage(id).then((u) => u.usage)),
+    all((id) => gov.listRelationships(id)),
+    all((id) => viewsSvc.listViews(id)),
+  ]);
+  return {
+    canvases: usage ? new Set(usage.flat().map((u) => u.canvasId)).size : null,
+    related: rels ? new Set(rels.flat().flatMap((r) => [r.parentTableId, r.childTableId]).filter((t) => !group.has(t))).size : null,
+    views: views ? new Set(views.flat().map((v) => v.id)).size : null,
+  };
+}
+
 /** Una línea del impacto: el número con su texto, o qué no se pudo contar. */
 const impactLine = (n: number | null, counted: (n: number) => ReactNode, uncounted: string) =>
   n == null ? <li>{uncounted}</li> : <li><strong>{n}</strong> {counted(n)}</li>;
@@ -56,6 +74,37 @@ export function confirmDeleteTable(o: {
           "Couldn't count its views (they are deleted too)")}
       </ul>
       <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--muted)' }}>Its {nouns.members} and relationships go too. This change is part of the current version.</div>
+    </>,
+    action: o.action,
+  });
+}
+
+/** Nombres de un grupo en el diálogo: los primeros 10 y cuántos más. */
+const NAMES_SHOWN = 10;
+
+export function confirmDeleteTables(o: {
+  names: string[]; nouns: FacetNouns; impact: TableDeleteCounts; action: () => Promise<unknown>;
+}): Promise<boolean> {
+  const { nouns, impact: { canvases, related, views: nViews } } = o;
+  const what = `${o.names.length} ${nouns.many}`;
+  const rest = o.names.length - NAMES_SHOWN;
+  return confirmDialog({
+    title: `Delete ${what}`,
+    variant: 'danger',
+    confirmLabel: `Delete ${what}`,
+    cancelLabel: 'Cancel',
+    message: <>
+      These {what} will be deleted from the model:{' '}
+      <strong>{o.names.slice(0, NAMES_SHOWN).join(', ')}</strong>{rest > 0 ? ` +${rest} more` : ''}. This affects:
+      <ul style={{ margin: '8px 0 0', paddingLeft: 18, lineHeight: 1.7 }}>
+        {impactLine(canvases, (n) => `canvas${n === 1 ? '' : 'es'} they appear on`,
+          "Couldn't count the canvases they appear on")}
+        {impactLine(related, (n) => `related ${n === 1 ? nouns.one : nouns.many} outside this group (their relationships are removed)`,
+          `Couldn't count the related ${nouns.many} (their relationships are removed)`)}
+        {impactLine(nViews, (n) => `view${n === 1 ? '' : 's'} (also deleted)`,
+          "Couldn't count their views (they are deleted too)")}
+      </ul>
+      <div style={{ marginTop: 8, fontSize: 11.5, color: 'var(--muted)' }}>Their {nouns.members} and relationships go too. This change is part of the current version.</div>
     </>,
     action: o.action,
   });

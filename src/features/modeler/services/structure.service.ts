@@ -26,6 +26,7 @@ import * as csvc from '@/services/changeset.service';
 import { trackDraftWork } from '@/services/draftWork';
 import { useSessionStore } from '@/store/useSessionStore';
 import { noteCanvasWrite, wholeLayout } from '../lib/canvasWrites';
+import { displayParents, folderSubtree } from '../lib/explorerMove';
 import { MAX_ROUTE_POINTS, cleanRoute, cleanRoutes, pruneRoutes, routeOf, validWireId } from '../lib/wireRoute';
 import { cleanColors, normalColor } from '@/lib/colors';
 import { applyPending } from '../lib/udpDraft';
@@ -178,10 +179,27 @@ export const renameFolder = async (id: string, name: string): Promise<Folder> =>
 export const moveFolder = async (id: string, parentFolderId: string | null): Promise<Folder> =>
   patchFolder(requireWriteCs('Moving a folder'), id, { parentFolderId });
 
-export const deleteFolder = async (id: string): Promise<{ deleted: boolean }> => {
-  const cs = requireWriteCs('Deleting a folder');
-  await csvc.recordChange(cs, 'folders', id, 'delete');
-  return { deleted: true };
+/** Borra la carpeta con todas sus subcarpetas y deja en la raíz del proyecto los
+ *  canvases de adentro (a cualquier profundidad), en un solo lote. Cada canvas se
+ *  decide con su documento leído en su cola (`canvasLot`): uno que otra escritura
+ *  ya sacó de la carpeta no se toca. Devuelve lo que borró y lo que movió. */
+export const deleteFolderTree = async (id: string, projectId: string): Promise<{ folders: string[]; canvases: string[] }> => {
+  requireWriteCs('Deleting a folder');
+  const [folders, canvases] = await Promise.all([listFolders(projectId), listSubjectAreas(projectId)]);
+  if (!folders.some((f) => f.id === id)) throw new Error(FOLDER_GONE);
+  // El subárbol que el Explorer muestra (en un ciclo, no la carpeta que la contiene).
+  const parentOf = displayParents(folders);
+  const tree = folderSubtree(folders.map((f) => ({ ...f, parentFolderId: parentOf.get(f.id) ?? null })), id);
+  const inside = canvases.filter((c) => c.folderId && tree.has(c.folderId)).map((c) => c.id);
+  return canvasLot(inside, (docs) => {
+    const moved = new Map<string, SubjectArea>();
+    for (const [saId, doc] of docs) if (doc?.folderId && tree.has(doc.folderId)) moved.set(saId, { ...doc, folderId: null });
+    return {
+      changes: [...tree].map((fid): BulkChange => ({ collection: 'folders', entityId: fid, op: 'delete' })),
+      canvases: moved,
+      result: { folders: [...tree], canvases: [...moved.keys()] },
+    };
+  });
 };
 
 // ── Canvas (subject_areas) ─────────────────────────────────────────────────
@@ -208,8 +226,10 @@ function patchSa(cs: string, saId: string, patch: Partial<SubjectArea>): Promise
   });
 }
 
+/** Cambia el nombre o la carpeta del canvas: solo lo que viene en `body` (lo
+ *  demás, del documento vigente; un campo que otra pestaña cambió no se pisa). */
 export const updateSubjectArea = async (
-  id: string, body: { projectId: string; name: string; folderId?: string | null },
+  id: string, body: { projectId: string; name?: string; folderId?: string | null },
 ): Promise<SubjectArea> => patchSa(requireWriteCs('Editing a canvas'), id, body);
 
 export const deleteSubjectArea = async (id: string): Promise<{ deleted: boolean }> => {

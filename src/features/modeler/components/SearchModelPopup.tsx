@@ -32,6 +32,7 @@ import type {
 import * as struct from '../services/structure.service';
 import type { Folder, SubjectArea } from '../services/modeler.service';
 import { useModelerStore } from '@/store/useModelerStore';
+import { folderSubtree } from '../lib/explorerMove';
 import { columnPath, folderChain, pickTargetCanvas, snippet, splitHighlight } from '../lib/searchModel';
 import SearchSelect from './SearchSelect';
 import { useSessionStore } from '@/store/useSessionStore';
@@ -56,18 +57,6 @@ const GROUP_LABEL: Record<Group, string> = { tables: 'tables', columns: 'columns
 type Opt = { value: string; label: string };
 const labelOf = (opts: Opt[], v: string) => opts.find((o) => o.value === v)?.label ?? '';
 const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name);
-
-/** Ids de `root` y todas sus sub-carpetas (BFS por parentFolderId) — el modelo
- *  puede colgar de cualquier nivel bajo el sub-proyecto/dominio elegido. */
-function folderSubtree(folders: Folder[], root: string): Set<string> {
-  const out = new Set<string>([root]);
-  const queue = [root];
-  while (queue.length) {
-    const cur = queue.shift()!;
-    for (const f of folders) if (f.parentFolderId === cur && !out.has(f.id)) { out.add(f.id); queue.push(f.id); }
-  }
-  return out;
-}
 
 /** Une una página más a un grupo sin repetir ids (el overlay del draft podría re-emitir). */
 function appendPage(prev: ModelSearchResult, more: ModelSearchResult, group: Group): ModelSearchResult {
@@ -151,7 +140,8 @@ export default function SearchModelPopup({ onClose, pushToast }: {
     () => (subprojectId ? folders.filter((f) => f.parentFolderId === subprojectId).sort(byName).map((f) => ({ value: f.id, label: f.name })) : []),
     [folders, subprojectId],
   );
-  // Modelos = canvases del subárbol del dominio (o del sub-proyecto si no hay dominio).
+  // Modelos = canvases del subárbol del dominio (o del sub-proyecto si no hay
+  // dominio): el modelo puede colgar de cualquier nivel bajo la carpeta elegida.
   const modelOpts = useMemo<Opt[]>(() => {
     const root = domainId || subprojectId;
     if (!root) return [];

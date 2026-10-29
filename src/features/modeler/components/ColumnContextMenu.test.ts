@@ -15,6 +15,8 @@ const { STATE, SESSION, flows } = vi.hoisted(() => ({
     askDeleteColumns: vi.fn<(o: unknown) => Promise<void>>(async () => {}),
     askDeleteTable: vi.fn<(o: unknown) => Promise<void>>(async () => {}),
     askRemoveFromCanvas: vi.fn<(o: unknown) => Promise<void>>(async () => {}),
+    askDeleteTables: vi.fn<(o: unknown) => Promise<void>>(async () => {}),
+    askRemoveTablesFromCanvas: vi.fn<(o: unknown) => Promise<void>>(async () => {}),
   },
 }));
 vi.mock('@/store/useModelerStore', () => {
@@ -51,7 +53,7 @@ beforeEach(() => {
   Object.assign(STATE, {
     colMenu: ROW_MENU, viewMode: 'physical',
     colSel: { tableId: 't1', ids: ['c2', 'c1'], anchor: 'c2' },
-    colClipboard: null, tblClipboard: null,
+    colClipboard: null, tblClipboard: null, groupClipboard: null, groupIds: [],
     diagram: { tables: [TABLE], columns: [col('c2', 5), col('c1', 9), col('pk', 7, { isPrimaryKey: true }), col('c3', 1)] },
     closeColMenu: vi.fn(() => { STATE.colMenu = null; }),
     copySelectedColumns: vi.fn(() => 2), copyTable: vi.fn(() => 'CLIENTE'),
@@ -163,5 +165,45 @@ describe('qué hace cada ítem', () => {
     expect(o.stillWanted()).toBe(true);
     STATE.colMenu = null;
     expect(o.stillWanted()).toBe(false);
+  });
+});
+
+// Menú de un grupo de tablas (doc 134 §3.5): Copy · Paste · Remove · Delete de las
+// tablas del grupo, en su orden, por los flujos de grupo.
+describe('menú de un grupo de tablas', () => {
+  const T2 = { id: 't2', physicalName: 'PEDIDO', logicalName: 'Pedido' };
+  const GROUP_MENU = { x: 10, y: 20, tableId: 't2', colId: null, kind: 'group' };
+  beforeEach(() => {
+    Object.assign(SESSION, { activeProjectId: 'p1' });
+    Object.assign(STATE, {
+      colMenu: GROUP_MENU, groupIds: ['t2', 't1'], groupClipboard: null,
+      diagram: { tables: [TABLE, T2], columns: [] },
+      copyTables: vi.fn(() => 2), setGroupPasteOpen: vi.fn(), removeTablesFromArea: vi.fn(), deleteTables: vi.fn(),
+    });
+  });
+  it('los cuatro ítems con cuántas tablas', () => {
+    expect(buttons(render()).map((b) => [textOf(b).replace(/(⌘|Ctrl\+)[CV]$/, ''), !b.props.disabled]))
+      .toEqual([['Copy 2 tables', true], ['Paste', false], ['Remove 2 tables from this canvas', true], ['Delete 2 tables…', true]]);
+  });
+  it('Copy copia el grupo y avisa', () => {
+    click(item(render(), 'Copy 2 tables'));
+    expect(STATE.copyTables).toHaveBeenCalledWith(['t2', 't1']);
+    expect(pushToast).toHaveBeenCalledWith(expect.stringMatching(/^2 tables copied — paste with/));
+    expect(STATE.closeColMenu).toHaveBeenCalled();
+  });
+  it('con un grupo copiado aquí, Paste abre su revisión; de otro proyecto queda en gris', () => {
+    STATE.groupClipboard = { tables: [{}, {}, {}], source: { projectId: 'p1', projectName: 'Uno' } };
+    click(item(render(), 'Paste 3 tables…'));
+    expect(STATE.setGroupPasteOpen).toHaveBeenCalledWith(true);
+    STATE.groupClipboard = { tables: [{}, {}, {}], source: { projectId: 'p2', projectName: 'Dos' } };
+    STATE.colMenu = GROUP_MENU;   // el clic anterior cerró el menú
+    expect(item(render(), 'Paste 3 tables…').props.disabled).toBe(true);
+  });
+  it('Remove y Delete van por los flujos de grupo con las tablas en el orden del grupo', () => {
+    click(item(render(), 'Remove 2 tables from this canvas'));
+    expect(flows.askRemoveTablesFromCanvas).toHaveBeenCalledWith(expect.objectContaining({ tables: [T2, TABLE], remove: STATE.removeTablesFromArea }));
+    STATE.colMenu = GROUP_MENU;   // el clic anterior cerró el menú
+    click(item(render(), 'Delete 2 tables…'));
+    expect(flows.askDeleteTables).toHaveBeenCalledWith(expect.objectContaining({ tables: [T2, TABLE], deleteTables: STATE.deleteTables }));
   });
 });

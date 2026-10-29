@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalColumn, CanonicalTable } from '@/services/governance.service';
-import { copyNameBase, copyTableToBulk, nextCopyNames, pasteNames } from './copyTable';
+import { copyNameBase, copyTableToBulk, nextCopyNames, pasteNames, groupPasteNames } from './copyTable';
 
 const TABLE: CanonicalTable = {
   id: 't1', physicalName: 'M_CLIENTE', logicalName: 'Cliente', schema: 'core',
@@ -138,5 +138,21 @@ describe('copyTableToBulk lleva las dos facetas', () => {
       physicalDescription: 'Comentario físico', physicalNameOverridden: true, physicalOnly: true,
     });
     expect('logicalOnly' in (c.payload as object)).toBe(false);
+  });
+});
+
+// Pegar un grupo (doc 134 §3.7): cada nombre elegido cuenta como tomado para las
+// siguientes, así dos tablas del grupo nunca reciben el mismo nombre.
+describe('groupPasteNames', () => {
+  it('X y X_copy_1 juntas, con las dos ya tomadas, dan X_copy_2 y X_copy_3', () => {
+    const out = groupPasteNames([{ physicalName: 'X', logicalName: 'x' }, { physicalName: 'X_copy_1', logicalName: 'x copy 1' }], ['X', 'X_copy_1']);
+    expect(out).toEqual([
+      { physicalName: 'X_copy_2', logicalName: 'x copy 2', renamed: true },
+      { physicalName: 'X_copy_3', logicalName: 'x copy 3', renamed: true },
+    ]);
+  });
+  it('una libre conserva su nombre y lo toma para las siguientes', () => {
+    const out = groupPasteNames([{ physicalName: 'NUEVA', logicalName: 'nueva' }, { physicalName: 'NUEVA', logicalName: 'nueva' }], []);
+    expect(out.map((n) => [n.physicalName, n.renamed])).toEqual([['NUEVA', false], ['NUEVA_copy_1', true]]);
   });
 });

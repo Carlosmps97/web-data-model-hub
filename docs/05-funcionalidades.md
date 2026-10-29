@@ -199,8 +199,20 @@ servicio `services/explorer.service.ts`. Es un árbol único en el sidebar, del 
   profunda del modelo (⌘K o Ctrl+K). **Switch…** reabre Open model para cambiar de proyecto o versión.
 - En **Models**, el menú de un proyecto, una carpeta o un canvas ofrece **Export HTML** y **Export
   PDF** (ver [Exports del diagrama](#exports-del-diagrama)). En edición suma **Rename** y **Delete**
-  (**Delete project…** en el proyecto) y, en proyectos y carpetas, **New folder** y **New canvas**. El
-  nombre se edita en línea: Enter confirma y Esc cancela.
+  (**Delete project…** en el proyecto), **Move to…** en carpetas y canvases y, en proyectos y carpetas,
+  **New folder** y **New canvas**. El nombre se edita en línea: Enter confirma y Esc cancela.
+- **Mover** (en edición): un canvas o una carpeta se arrastra y se suelta sobre otra carpeta, o sobre
+  **Models** para dejarlo en la raíz del proyecto; **Move to…** abre la lista de carpetas del proyecto
+  con buscador. Las reglas (`lib/explorerMove.ts`): solo dentro del proyecto abierto, una carpeta no va
+  dentro de sí misma ni de una subcarpeta suya, y no se mueve si en el destino ya hay una carpeta o un
+  canvas con el mismo nombre (sin distinguir mayúsculas, tildes ni espacios de más, como la carga Excel).
+  Un destino inválido no se resalta al arrastrar y en **Move to…** aparece deshabilitado con su motivo.
+  Una carpeta cerrada se abre si el arrastre se queda encima. El cambio se graba en la versión en
+  edición y en la revisión se lee como «Folder» (canvas) o «Parent folder» (carpeta), con nombres.
+- **Delete** de una carpeta borra, en un solo lote, la carpeta y todas sus subcarpetas, y deja en la raíz
+  del proyecto los canvases que estaban adentro.
+- **Nada queda escondido**: una carpeta o un canvas cuya carpeta ya no existe, o dos carpetas que dos
+  versiones dejaron una dentro de la otra, se muestran en la raíz del proyecto (`buildProjectTree`).
 - En **Tables** y **Views**, el menú `⋮` de una fila ofrece inspeccionar el objeto (abre el
   [Object Inspector](#model-object-inspector-y-búsqueda)) y localizarlo en un canvas.
 
@@ -229,6 +241,19 @@ Comportamientos:
   columna expandida. Ctrl/Cmd+clic alterna filas y Shift+clic selecciona un rango (de una sola tabla
   a la vez). El segundo clic de un doble clic se ataja (`lib/dblClickShield.ts`) para que no caiga
   sobre otro objeto mientras el canvas se mueve.
+- **Selección por área** (`lib/boxSelect.ts`, `useBoxSelect.ts`): el botón **Select area** de los
+  controles (junto a zoom, centrar y candado; deshabilitado con el candado puesto) enciende el modo en
+  que arrastrar sobre el fondo dibuja un cuadro; sin el modo, Shift + arrastrar sobre el fondo hace lo
+  mismo. Entran las tablas o entidades que quedan **completamente dentro**, con su caja medida o, si
+  todavía no se dibujaron, la estimada; nunca vistas, dibujos, el símbolo de subcategoría ni
+  relaciones. En el modo, el canvas se mueve con Espacio + arrastrar, el botón del medio, la rueda o
+  el minimapa. Ctrl/Cmd+clic en una tabla la suma o la saca del grupo sin abrir Properties; con dos o
+  más, Properties se cierra, cada tabla lleva el anillo de seleccionada y una pastilla dice cuántas
+  son. Un clic simple en una tabla deja solo esa (también seleccionarla con Locate, crearla o
+  pegarla); clic en el fondo o Esc limpian el grupo, que sobrevive a las recargas del diagrama.
+  Arrastrar una tabla del grupo mueve todas y solo ellas (una vista o un dibujo seleccionados antes
+  quedan fuera). Con el candado puesto no hay cuadro y el fondo se mueve como siempre. Las tablas no
+  toman foco de teclado: las flechas no las mueven.
 - **Resaltado al pasar el mouse**: se resaltan las relaciones del bloque o del wire solo si el mouse
   se queda un instante sobre él (`lib/hoverIntent.ts`); pasar de largo no hace nada. Un wire cuya
   llave difiere de la llave vigente del padre se pinta en rojo.
@@ -244,18 +269,23 @@ Comportamientos:
   textos van en los sustantivos de la faceta («Copy 3 attributes», «Paste entity …») y lo que no
   aplica se ve deshabilitado con su motivo: **Paste** sin nada copiado y, en el visor, todo salvo
   **Copy**. Mientras un borrado lee su impacto, el menú queda abierto con un spinner; si se cierra
-  antes, no se abre el diálogo.
+  antes, no se abre el diálogo. Sobre una tabla de un grupo seleccionado, el menú es del grupo:
+  **Copy N tables**, **Paste**, **Remove N tables from this canvas** y **Delete N tables…**; cada
+  acción es un solo lote con un solo Undo, y copiar y borrar llegan hasta 100 tablas por vez. Borrar
+  el grupo suma el impacto (canvases y vistas sin repetir, relacionadas solo las de afuera del grupo)
+  y aplica la cascada de una tabla al conjunto (`deleteTables`). Clic derecho sobre una tabla de
+  afuera del grupo lo limpia y abre el menú de esa tabla.
 
 Atajos del canvas (`ModelerCanvas.tsx` y `Toolbar.tsx`; ⌘ en macOS, Ctrl en Windows y Linux):
 
 | Atajo | Acción |
 |---|---|
-| Ctrl/Cmd+C | Copia las filas seleccionadas o, sin filas, la tabla seleccionada. |
-| Ctrl/Cmd+V | Pega: con tabla copiada, abre la revisión de pegado de tabla; con columnas, la de columnas sobre la tabla seleccionada. |
+| Ctrl/Cmd+C | Copia las filas seleccionadas; sin filas, el grupo de tablas seleccionado o la tabla seleccionada. |
+| Ctrl/Cmd+V | Pega: con un grupo copiado, abre la revisión de pegado del grupo; con tabla copiada, la de tabla; con columnas, la de columnas sobre la tabla seleccionada. |
 | Ctrl/Cmd+Z | Deshace la última acción. |
 | Ctrl/Cmd+Shift+Z, Ctrl/Cmd+Y | Rehace lo último deshecho. |
 | Ctrl/Cmd+K | Abre la búsqueda del modelo. |
-| Esc | Cierra el menú contextual o limpia la selección de filas. |
+| Esc | Cierra el menú contextual, limpia la selección de filas o el grupo de tablas. |
 
 Los atajos no actúan con un modal o un overlay de espera abierto. Copiar, pegar, deshacer y rehacer
 tampoco actúan con el foco en un campo editable, y copiar no actúa con texto seleccionado en la página (ahí
@@ -536,6 +566,13 @@ al cerrar la sesión. La copia es por valor.
   `PasteTablePopup.tsx`. El nombre se conserva si está libre en el proyecto; si no, se usa `_copy_n`
   (el primero libre). El esquema es el del proyecto con esa grafía o, si no existe, se crea en el mismo
   lote; el Undo lo borra con la tabla si nadie más lo usa.
+- **Grupo de tablas**: Ctrl/Cmd+V con un grupo copiado, o **Paste N tables…** del menú, abre
+  `PasteTablesPopup.tsx`: el nombre final de cada tabla (dos del grupo nunca reciben el mismo:
+  `groupPasteNames`), las casillas una sola vez para todas y el detalle de cada tabla al desplegarla;
+  el bloqueo de cualquiera deshabilita el pegado. Se pega en un solo lote, sin relaciones, con la misma
+  distribución entre las tablas (`lib/groupPlacement.ts`: al costado de los originales si se ven, si no
+  centrado en lo que se ve) y las copias quedan seleccionadas como grupo. Un grupo se pega solo en el
+  proyecto donde se copió; entre proyectos se pega de a una tabla.
 - **Revisión** (`PasteDetails.tsx`, `lib/pasteReview.ts`): ambos popups muestran casillas por grupo
   (**Logical UDPs**, **Physical UDPs**, **Parent domains**) con cuántos se reutilizan, el selector
   Logical | Physical con la metadata de cada faceta (columnas de a 10 con **Load more** y buscador),

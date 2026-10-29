@@ -24,7 +24,7 @@ export function visibleColumns(cols: PasteColumnItem[], q: string, shown: number
  * agrupada y las columnas una por una (10 por página, «cargar más» y buscador),
  * y lo que no se puede copiar.
  */
-export default function PasteDetails({ review, options, onOptions, facet, onFacet, rowTag }: {
+export default function PasteDetails({ review, options, onOptions, facet, onFacet, rowTag, checks = true }: {
   review: PasteReview;
   options: PasteOptions;
   onOptions: (next: PasteOptions) => void;
@@ -32,6 +32,8 @@ export default function PasteDetails({ review, options, onOptions, facet, onFace
   onFacet: (next: Facet) => void;
   /** Etiqueta por columna (pegar columnas: New / Logical name exists / skipped). */
   rowTag?: (c: PasteColumnItem) => ReactNode;
+  /** Los checks por grupo; pegar varias tablas los muestra una sola vez arriba (`PasteChecks`). */
+  checks?: boolean;
 }) {
   const [q, setQ] = useState('');
   const [shown, setShown] = useState(PASTE_PAGE);
@@ -43,18 +45,8 @@ export default function PasteDetails({ review, options, onOptions, facet, onFace
 
   return (
     <div className="wk-paste-details">
-      <div className="wk-paste-checks" role="group" aria-label="What to copy">
-        <span className="wk-paste-checks-cap">Copy</span>
-        <Check label={`Logical UDPs (${counts.logicalUdps})`} on={options.logicalUdps}
-          onChange={(v) => onOptions({ ...options, logicalUdps: v })} />
-        <Check label={`Physical UDPs (${counts.physicalUdps})`} on={options.physicalUdps}
-          onChange={(v) => onOptions({ ...options, physicalUdps: v })} />
-        <Check label={`Parent domains (${counts.domains})`} on={options.domains}
-          onChange={(v) => onOptions({ ...options, domains: v })} />
-      </div>
-      <p className="wk-pp-cap wk-paste-always">
-        Names, definitions, comments, data types and keys of both models are always copied. Relationships and views are not.
-      </p>
+      {/* Sin hooks: se llama como función y sus checks quedan en este mismo árbol. */}
+      {checks && PasteChecks({ counts, options, onOptions })}
 
       <div className="rd-seg wk-paste-facet" role="tablist" aria-label="Model">
         {(['logical', 'physical'] as const).map((f) => (
@@ -141,6 +133,29 @@ export default function PasteDetails({ review, options, onOptions, facet, onFace
         </div>
       )}
     </div>
+  );
+}
+
+/** Los checks por grupo (UDPs lógicos, UDPs físicos, parent domains) con cuánto
+ *  hay detrás de cada uno, y lo que viaja siempre. Sin hooks. */
+export function PasteChecks({ counts, options, onOptions }: {
+  counts: PasteReview['counts']; options: PasteOptions; onOptions: (next: PasteOptions) => void;
+}) {
+  return (
+    <>
+      <div className="wk-paste-checks" role="group" aria-label="What to copy">
+        <span className="wk-paste-checks-cap">Copy</span>
+        <Check label={`Logical UDPs (${counts.logicalUdps})`} on={options.logicalUdps}
+          onChange={(v) => onOptions({ ...options, logicalUdps: v })} />
+        <Check label={`Physical UDPs (${counts.physicalUdps})`} on={options.physicalUdps}
+          onChange={(v) => onOptions({ ...options, physicalUdps: v })} />
+        <Check label={`Parent domains (${counts.domains})`} on={options.domains}
+          onChange={(v) => onOptions({ ...options, domains: v })} />
+      </div>
+      <p className="wk-pp-cap wk-paste-always">
+        Names, definitions, comments, data types and keys of both models are always copied. Relationships and views are not.
+      </p>
+    </>
   );
 }
 

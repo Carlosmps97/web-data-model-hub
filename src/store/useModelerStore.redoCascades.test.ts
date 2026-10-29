@@ -290,6 +290,14 @@ describe('Redo de altas y cascadas', () => {
     await roundTrip(() => st().deleteTable('t1'), 'Delete table M_CLIENTE', { otherCanvas: 'sa2' });
   });
 
+  it('borrar un grupo de tablas (con su relación y su vista): un Undo y un Redo, ida y vuelta', async () => {
+    await roundTrip(() => st().deleteTables(['t1', 't2']), 'Delete 2 tables');
+  });
+
+  it('borrar un grupo y deshacer/rehacer con otro canvas abierto', async () => {
+    await roundTrip(() => st().deleteTables(['t1', 't2']), 'Delete 2 tables', { otherCanvas: 'sa2' });
+  });
+
   it('borrar una columna con su relación elegida (la FK de la hija se apaga): ida y vuelta', async () => {
     await roundTrip(() => st().deleteColumns(['k'], ['r1']), 'Delete column CODCLIENTE');
   });
@@ -478,6 +486,18 @@ describe('Redo de altas y cascadas', () => {
 
     it('deshacer borra la tabla y el esquema; rehacer vuelve los dos, también después de una recarga', async () => {
       await roundTrip(paste, 'Paste table M_CLIENTE_copy_1', { between: () => st().reload() });
+    });
+
+    it('un grupo con un esquema nuevo que piden las dos: deshacer borra las copias y el esquema; rehacer vuelve todo', async () => {
+      const [t1, t2] = [tables.get('t1')!, tables.get('t2')!];
+      useModelerStore.setState({ tblClipboard: null, groupClipboard: { source: { projectId: 'p', projectName: 'p' }, tables: [
+        { table: t1 as never, cols: [columns.get('k') as never], pos: null }, { table: t2 as never, cols: [columns.get('c') as never], pos: null },
+      ] } });
+      const pasteGroup = () => st().pasteTables([
+        { table: { ...t1, schema: 'STG_NUEVO' } as never, cols: [clone(columns.get('k')!) as never], createSchema: { name: 'STG_NUEVO' } },
+        { table: { ...t2, schema: 'STG_NUEVO' } as never, cols: [clone(columns.get('c')!) as never], createSchema: { name: 'STG_NUEVO' } },
+      ]);
+      await roundTrip(pasteGroup, 'Paste 2 tables', { between: () => st().reload() });
     });
 
     it('si mientras se deshace otra tabla empezó a usar el esquema, el servidor no lo borra', async () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   EllipsisVertical, ChevronRight, ChevronDown, Folder as FolderIcon,
-  FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid, FileDown, FileText,
+  FolderOpen, Database, Plus, Pencil, Trash2, FolderPlus, LayoutGrid, FileDown, FileText, FolderInput,
 } from 'lucide-react';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import { useFloating } from '@/components/ui/useFloating';
@@ -14,6 +14,8 @@ import type { Folder, Project, SubjectArea } from '../services/modeler.service';
 import { exportNodeHtml, exportNodePdf } from '../exportPackage';
 import type { CancelFlag, ExportOutcome, ExportProgress } from '../exportPackage';
 import DeleteProjectDialog from './DeleteProjectDialog';
+import MoveToDialog from './MoveToDialog';
+import { EXPLORER_DRAG_TYPE, moveVerdict, targetLabel, type MoveItem } from '../lib/explorerMove';
 import { useAuthStore } from '@/store/useAuthStore';
 import { NO_EXPORT_HINT } from '@/lib/permissionHints';
 
@@ -24,11 +26,13 @@ import { NO_EXPORT_HINT } from '@/lib/permissionHints';
    project…» graba un cambio y quien revisa la versión lo aprueba como crítico).
    Cada nodo muestra al hover un botón "3 puntos" que abre un menú contextual:
      · project: New folder · New canvas · Export HTML · Rename · Delete project…
-     · folder:  New folder · New canvas · Export HTML · Rename · Delete
-     · canvas:  Export HTML · Rename · Delete
+     · folder:  New folder · New canvas · Export HTML · Move to… · Rename · Delete
+     · canvas:  Export HTML · Move to… · Rename · Delete
    En readonly (o con el borrado del proyecto pendiente) el menú muestra solo
    Export HTML/PDF (exportar no muta).
    Crear/renombrar = input inline. Borrar = ConfirmDialog. Carpetas con chevron.
+   Canvases y carpetas se mueven arrastrándolos a otra carpeta (o a «Models», la
+   raíz del proyecto) o con «Move to…»; las reglas son las de `lib/explorerMove`.
 
    Navegación tipo file-tree: expandir/colapsar proyectos y carpetas es solo
    navegación (varios proyectos abiertos a la vez, árboles lazy-load al cache
@@ -72,6 +76,8 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   const createCanvas = useModelerStore((s) => s.createCanvas);
   const renameCanvas = useModelerStore((s) => s.renameCanvas);
   const deleteCanvas = useModelerStore((s) => s.deleteCanvas);
+  const moveFolder = useModelerStore((s) => s.moveFolder);
+  const moveCanvas = useModelerStore((s) => s.moveCanvas);
   // En modo visor el explorer es solo navegación: su CRUD (projects/folders/
   // canvases) son escrituras REST directas no versionadas que no pasan por el
   // choke-point del changeset; se ocultan las affordances de mutación. El
@@ -95,6 +101,15 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
   const [editing, setEditing] = useState<{ kind: NodeKind; id: string; projectId: string } | null>(null);
   const [creating, setCreating] = useState<CreateState | null>(null);
   const [toDelete, setToDelete] = useState<DeleteState | null>(null);
+  // «Move to…» abierto sobre un canvas o una carpeta.
+  const [moveTo, setMoveTo] = useState<{ item: MoveItem; name: string; projectId: string } | null>(null);
+  // Arrastre en curso (el `dataTransfer` no se puede leer durante `dragover`).
+  const dragRef = useRef<{ item: MoveItem; projectId: string } | null>(null);
+  // Destino resaltado (`proyecto:carpeta`, `proyecto:` = raíz) y la fila recién movida.
+  const [dropAt, setDropAt] = useState<string | null>(null);
+  const [flashId, setFlashId] = useState<string | null>(null);
+  // Carpeta cerrada bajo el cursor: se abre si el arrastre se queda encima.
+  const hoverRef = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
 
   // Export HTML: modal de progreso + flag de cancelación compartido
   // con la orquestación (mutable: la UI lo pone en true, el pool lo lee).
@@ -213,6 +228,77 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     setMenu({ kind, id, projectId, at: { left: r.right, right: r.right, top: r.top, bottom: r.bottom } });
   };
 
+  // ── Mover (arrastrar y soltar, «Move to…») ──────────────────────────────
+  const dropKey = (target: string | null, projectId: string) => `${projectId}:${target ?? ''}`;
+  const stopHover = () => { if (hoverRef.current) clearTimeout(hoverRef.current.timer); hoverRef.current = null; };
+  useEffect(() => () => stopHover(), []);
+  useEffect(() => {
+    if (!flashId) return;
+    const t = setTimeout(() => setFlashId(null), 1200);
+    return () => clearTimeout(t);
+  }, [flashId]);
+
+  const startDrag = (e: React.DragEvent, item: MoveItem, projectId: string) => {
+    dragRef.current = { item, projectId };
+    e.dataTransfer.setData(EXPLORER_DRAG_TYPE, item.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+  const endDrag = () => { dragRef.current = null; setDropAt(null); stopHover(); };
+  /** Solo un arrastre del Explorer, del mismo proyecto y a un destino válido. */
+  const canDrop = (e: React.DragEvent, target: string | null, projectId: string): boolean => {
+    const d = dragRef.current;
+    const tree = trees[projectId];
+    return !!d && !!tree && d.projectId === projectId && e.dataTransfer.types.includes(EXPLORER_DRAG_TYPE)
+      && moveVerdict(d.item, target, tree.folders, tree.subjectAreas).ok;
+  };
+  const dragOver = (e: React.DragEvent, target: string | null, projectId: string, closed = false) => {
+    if (!canDrop(e, target, projectId)) return;   // sin preventDefault: el navegador muestra «no se puede»
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    const key = dropKey(target, projectId);
+    if (dropAt !== key) setDropAt(key);
+    if (closed && target && hoverRef.current?.id !== target) {
+      stopHover();
+      hoverRef.current = { id: target, timer: setTimeout(() => { hoverRef.current = null; expand(target); }, 700) };
+    }
+  };
+  const dragLeave = (e: React.DragEvent, target: string | null, projectId: string) => {
+    if ((e.currentTarget as HTMLElement).contains(e.relatedTarget as Node | null)) return;
+    if (dropAt === dropKey(target, projectId)) setDropAt(null);
+    if (hoverRef.current?.id === target) stopHover();
+  };
+  const drop = (e: React.DragEvent, target: string | null, projectId: string) => {
+    const d = dragRef.current;
+    const ok = canDrop(e, target, projectId);
+    endDrag();
+    if (!d || !ok) return;
+    e.preventDefault();
+    void doMove(d.item, target, projectId);
+  };
+
+  /** Graba el movimiento, abre la carpeta destino y resalta lo movido. true si se movió. */
+  const doMove = async (item: MoveItem, target: string | null, projectId: string): Promise<boolean> => {
+    const tree = trees[projectId];
+    const name = (item.kind === 'folder' ? tree?.folders : tree?.subjectAreas)?.find((x) => x.id === item.id)?.name ?? '';
+    const where = targetLabel(target, tree?.folders ?? []);
+    const onError = reportWriteError((e) => pushToast(failureText("Couldn't move", e), 'err'));
+    try {
+      const moved = item.kind === 'folder' ? await moveFolder(item.id, target, projectId) : await moveCanvas(item.id, target, projectId);
+      if (!moved) return false;
+      // La cadena del destino queda abierta: lo movido se ve donde quedó.
+      const byId = new Map((useModelerStore.getState().trees[projectId]?.folders ?? []).map((f) => [f.id, f]));
+      const chain: string[] = [];
+      for (let fid = target; fid && byId.has(fid) && !chain.includes(fid); fid = byId.get(fid)!.parentFolderId ?? null) chain.push(fid);
+      if (chain.length) setExpandedF((cur) => { const n = new Set(cur); chain.forEach((id) => n.add(id)); return n; });
+      setFlashId(item.id);
+      requestAnimationFrame(() => {
+        document.querySelector(`.wk-exp-row[data-kind="${item.kind}"][data-id="${item.id}"]`)?.scrollIntoView({ block: 'nearest' });
+      });
+      pushToast(`Moved “${name}” to “${where}”`);
+      return true;
+    } catch (e) { await onError(e); return false; }
+  };
+
   // ── Acciones del menú ──────────────────────────────────────────────────
   const startRename = (kind: NodeKind, id: string, projectId: string) => { setMenu(null); setCreating(null); setEditing({ kind, id, projectId }); };
   const startCreate = (type: 'folder' | 'canvas', projectId: string, parentFolderId: string | null) => {
@@ -230,6 +316,12 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
       return;
     }
     setToDelete({ kind, id, name, projectId });
+  };
+
+  const startMoveTo = (kind: NodeKind, id: string, projectId: string) => {
+    setMenu(null);
+    if (kind === 'project') return;
+    setMoveTo({ item: { kind, id }, name: nameOf({ kind, id, projectId }, trees, projects), projectId });
   };
 
   const commitRename = useCallback(async (kind: NodeKind, id: string, projectId: string, value: string) => {
@@ -285,9 +377,10 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
     }
     const opening = openingSaId === sa.id;
     return (
-      <Row key={sa.id} depth={depth} active={sa.id === activeSaId} kind="canvas" dataId={sa.id}
+      <Row key={sa.id} depth={depth} active={sa.id === activeSaId} kind="canvas" dataId={sa.id} flash={flashId === sa.id}
         icon={opening ? <span className="rd-spin" style={{ color: 'var(--primary)' }} aria-hidden /> : <LayoutGrid size={14} />}
         label={sa.name}
+        drag={readonly ? undefined : { onDragStart: (e) => startDrag(e, { kind: 'canvas', id: sa.id }, projectId), onDragEnd: endDrag }}
         onClick={() => {
           // Abrir solo si no es el canvas ya abierto y no hay otra apertura en vuelo.
           if (sa.id === activeSaId || openingSaId) return;
@@ -310,9 +403,16 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
           <InlineInput depth={depth} defaultValue={folder.name} leading={<FolderIcon size={14} />}
             onCommit={(v) => commitRename('folder', folder.id, projectId, v)} onCancel={() => setEditing(null)} />
         ) : (
-          <Row depth={depth} kind="folder"
+          <Row depth={depth} kind="folder" dataId={folder.id} flash={flashId === folder.id}
+            dropOk={dropAt === dropKey(folder.id, projectId)}
             chevron={childCount > 0 ? (open ? <ChevronDown size={13} /> : <ChevronRight size={13} />) : <span style={{ width: 13 }} />}
             icon={open ? <FolderOpen size={14} /> : <FolderIcon size={14} />} label={folder.name}
+            drag={readonly ? undefined : { onDragStart: (e) => startDrag(e, { kind: 'folder', id: folder.id }, projectId), onDragEnd: endDrag }}
+            dropTarget={readonly ? undefined : {
+              onDragOver: (e) => dragOver(e, folder.id, projectId, !open),
+              onDragLeave: (e) => dragLeave(e, folder.id, projectId),
+              onDrop: (e) => drop(e, folder.id, projectId),
+            }}
             onClick={() => toggle(folder.id)} onMenu={(e) => openMenu('folder', folder.id, projectId, e)} />
         )}
         {open && (
@@ -357,9 +457,14 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
             {/* La jerarquía de canvases (sub-proyectos › dominios › modelos)
                 vive en la rama «Models»; Tables · Views · Schemas las aporta
                 renderCatalog al mismo nivel. */}
-            <Row depth={1} kind="branch" active={false}
+            <Row depth={1} kind="branch" active={false} dropOk={dropAt === dropKey(null, p.id)}
               chevron={(q || !collapsedModels.has(p.id)) ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
               icon={<LayoutGrid size={14} />} label="Models" count={countCanvases(tree)}
+              dropTarget={readonly ? undefined : {
+                onDragOver: (e) => dragOver(e, null, p.id),
+                onDragLeave: (e) => dragLeave(e, null, p.id),
+                onDrop: (e) => drop(e, null, p.id),
+              }}
               onClick={() => toggleModels(p.id)} />
             {(q || !collapsedModels.has(p.id)) && (
               <>
@@ -394,8 +499,16 @@ export default function ModelExplorer({ pushToast, filter = '', renderCatalog }:
           onNewCanvas={() => startCreate('canvas', menu.projectId, menu.kind === 'folder' ? menu.id : null)}
           onExport={() => { void startExport(menu.kind, menu.id, menu.projectId, 'html'); }}
           onExportPdf={() => { void startExport(menu.kind, menu.id, menu.projectId, 'pdf'); }}
+          onMoveTo={() => startMoveTo(menu.kind, menu.id, menu.projectId)}
           onRename={() => startRename(menu.kind, menu.id, menu.projectId)}
           onDelete={() => askDelete(menu.kind, menu.id, nameOf(menu, trees, projects), menu.projectId)} />
+      )}
+
+      {moveTo && trees[moveTo.projectId] && (
+        <MoveToDialog item={moveTo.item} name={moveTo.name}
+          folders={trees[moveTo.projectId].folders} canvases={trees[moveTo.projectId].subjectAreas}
+          onMove={async (target) => { if (await doMove(moveTo.item, target, moveTo.projectId)) setMoveTo(null); }}
+          onClose={() => setMoveTo(null)} />
       )}
 
       {exporting && (
@@ -453,21 +566,35 @@ function nameOf(
 
 // ── Fila de árbol genérica ───────────────────────────────────────────────
 function Row({
-  depth, active, strong, kind, chevron, icon, label, count, onClick, onMenu, dataId,
+  depth, active, strong, kind, chevron, icon, label, count, onClick, onMenu, dataId, drag, dropTarget, dropOk, flash,
 }: {
   depth: number; active?: boolean; strong?: boolean; kind: RowKind;
   chevron?: React.ReactNode; icon: React.ReactNode; label: string;
   /** Contador a la derecha (ramas del proyecto). */
   count?: number;
   onClick: () => void; onMenu?: (e: React.MouseEvent) => void; dataId?: string;
+  /** La fila se puede arrastrar (canvas o carpeta, en edición). */
+  drag?: { onDragStart: (e: React.DragEvent) => void; onDragEnd: () => void };
+  /** La fila recibe lo que se suelta (carpeta o «Models», en edición). */
+  dropTarget?: { onDragOver: (e: React.DragEvent) => void; onDragLeave: (e: React.DragEvent) => void; onDrop: (e: React.DragEvent) => void };
+  /** Destino válido bajo el arrastre. */
+  dropOk?: boolean;
+  /** Recién movida: se resalta un momento. */
+  flash?: boolean;
 }) {
   return (
     <div
-      className={`wk-exp-row${active ? ' active' : ''}${strong ? ' strong' : ''}`}
+      className={`wk-exp-row${active ? ' active' : ''}${strong ? ' strong' : ''}${dropOk ? ' drop-ok' : ''}${flash ? ' flash' : ''}`}
       style={{ paddingLeft: PAD_BASE + depth * INDENT }}
       onClick={onClick}
       data-kind={kind}
       data-id={dataId}
+      draggable={drag ? true : undefined}
+      onDragStart={drag?.onDragStart}
+      onDragEnd={drag?.onDragEnd}
+      onDragOver={dropTarget?.onDragOver}
+      onDragLeave={dropTarget?.onDragLeave}
+      onDrop={dropTarget?.onDrop}
     >
       {chevron ?? <span style={{ width: 13 }} />}
       <span className="wk-exp-ico">{icon}</span>
@@ -524,12 +651,12 @@ function InlineInput({
 
 // ── Menú contextual (popover anclado a la fila) ──────────────────────────
 function ContextMenu({
-  menu, readonly, canExport, onNewFolder, onNewCanvas, onExport, onExportPdf, onRename, onDelete,
+  menu, readonly, canExport, onNewFolder, onNewCanvas, onExport, onExportPdf, onMoveTo, onRename, onDelete,
 }: {
   menu: MenuState; readonly: boolean;
   canExport: boolean;
   onNewFolder: () => void; onNewCanvas: () => void; onExport: () => void; onExportPdf: () => void;
-  onRename: () => void; onDelete: () => void;
+  onMoveTo: () => void; onRename: () => void; onDelete: () => void;
 }) {
   // Readonly: exportar no muta; el menú aparece igual, pero solo
   // con «Export HTML»; crear/renombrar/borrar siguen ocultos en modo visor.
@@ -558,6 +685,7 @@ function ContextMenu({
       <button className="rd-menu-item" onClick={onExportPdf} disabled={!canExport}
         title={canExport ? undefined : NO_EXPORT_HINT}><FileText size={15} /> Export PDF</button>
       {showMutations && <div className="rd-menu-sep" />}
+      {showMutations && menu.kind !== 'project' && <button className="rd-menu-item" onClick={onMoveTo}><FolderInput size={15} /> Move to…</button>}
       {showMutations && <button className="rd-menu-item" onClick={onRename}><Pencil size={15} /> Rename</button>}
       {showMutations && (
         <button className="rd-menu-item danger" onClick={onDelete}>

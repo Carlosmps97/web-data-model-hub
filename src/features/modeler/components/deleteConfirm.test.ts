@@ -13,7 +13,7 @@ import { confirmDialog } from '@/components/ui/dialogs';
 import * as gov from '@/services/governance.service';
 import * as viewsSvc from '@/services/views.service';
 import { facetNouns } from '@/lib/facets';
-import { confirmDeleteColumn, confirmDeleteColumns, confirmDeleteTable, readTableDeleteCounts } from './deleteConfirm';
+import { confirmDeleteColumn, confirmDeleteColumns, confirmDeleteTable, confirmDeleteTables, readTableDeleteCounts, readTablesDeleteCounts } from './deleteConfirm';
 
 const message = () => textOf(vi.mocked(confirmDialog).mock.calls[0][0].message);
 
@@ -143,5 +143,43 @@ describe('aviso de vistas que quedan sin columnas', () => {
   it('sin vistas vacías no agrega nada', async () => {
     await confirmDeleteColumn({ name: 'COD', nouns: physical, impact: noImpact as never, emptiedViews: [], action: async () => {} });
     expect(message()).toBe('Column “COD” will be removed from this table.');
+  });
+});
+
+// Borrar un grupo de tablas (doc 134 §3.9): el impacto sumado, sin repetir, y las
+// relacionadas que cuentan son las de AFUERA del grupo.
+describe('impacto de borrar varias tablas', () => {
+  beforeEach(() => {
+    vi.mocked(gov.tableUsage).mockImplementation(async (id: string) =>
+      ({ usage: id === 't1' ? [{ canvasId: 'sa1' }, { canvasId: 'sa2' }] : [{ canvasId: 'sa2' }, { canvasId: 'sa3' }], total: 2 }) as never);
+    vi.mocked(gov.listRelationships).mockImplementation(async (id?: string) => (id === 't1'
+      ? [{ id: 'r1', parentTableId: 't1', childTableId: 't2', pairs: [] }, { id: 'r2', parentTableId: 't1', childTableId: 't9', pairs: [] }]
+      : [{ id: 'r1', parentTableId: 't1', childTableId: 't2', pairs: [] }, { id: 'r3', parentTableId: 't8', childTableId: 't2', pairs: [] }]) as never);
+    vi.mocked(viewsSvc.listViews).mockImplementation(async (id: string) => (id === 't1' ? [{ id: 'v1' }] : [{ id: 'v1' }, { id: 'v2' }]) as never);
+  });
+  it('canvases y vistas sin repetir; relacionadas solo las de afuera del grupo', async () => {
+    expect(await readTablesDeleteCounts(['t1', 't2'])).toEqual({ canvases: 3, related: 2, views: 2 });
+  });
+  it('lo que no se pudo leer de alguna tabla no se cuenta (null)', async () => {
+    vi.mocked(viewsSvc.listViews).mockRejectedValueOnce(new Error('down'));
+    expect(await readTablesDeleteCounts(['t1', 't2'])).toEqual({ canvases: 3, related: 2, views: null });
+  });
+});
+
+describe('diálogo de borrar varias tablas', () => {
+  const names = Array.from({ length: 12 }, (_, i) => `T${i + 1}`);
+  it('título y botón con cuántas; los primeros 10 nombres y «+2 more»', async () => {
+    await confirmDeleteTables({ names, nouns: facetNouns('physical'), impact: { canvases: 3, related: 2, views: 1 }, action: async () => {} });
+    const o = vi.mocked(confirmDialog).mock.calls[0][0];
+    expect(o.title).toBe('Delete 12 tables');
+    expect(o.confirmLabel).toBe('Delete 12 tables');
+    expect(message()).toContain('T10');
+    expect(message()).not.toContain('T11');
+    expect(message()).toContain('+2 more');
+    expect(message()).toContain('3 canvases they appear on');
+  });
+  it('en el modelo lógico, con sus sustantivos', async () => {
+    await confirmDeleteTables({ names: ['A', 'B'], nouns: facetNouns('logical'), impact: { canvases: 1, related: 0, views: 0 }, action: async () => {} });
+    expect(vi.mocked(confirmDialog).mock.calls[0][0].title).toBe('Delete 2 entities');
   });
 });

@@ -7,7 +7,7 @@ import { byText, fake, resetFake, textOf, walk, type El } from '../../reporting/
 vi.mock('react', async (orig) => (await import('../../reporting/components/fakeReact.testutil')).fakeReact(await orig<object>()));
 import type { CanonicalColumn } from '@/services/governance.service';
 import { ALL_COPY, reviewPaste, type PasteTarget } from '../lib/pasteReview';
-import PasteDetails, { PASTE_PAGE, visibleColumns } from './PasteDetails';
+import PasteDetails, { PASTE_PAGE, PasteChecks, visibleColumns } from './PasteDetails';
 
 const TARGET: PasteTarget = {
   udpDefs: [{ id: 'u', name: 'Particion', level: 'column', view: 'physical', dataType: 'list', allowedValues: [] }],
@@ -97,5 +97,24 @@ describe('PasteDetails', () => {
     expect([...walk(tree)].find((e) => String(e.props.label ?? '').startsWith('Physical UDPs'))!.props.label).toBe('Physical UDPs (1)');
     (logical.props.onChange as (v: boolean) => void)(false);
     expect(onOptions).toHaveBeenCalledWith({ ...ALL_COPY, logicalUdps: false });
+  });
+});
+
+// Pegar un grupo (doc 134 §3.7): los checks van una sola vez arriba
+// (`PasteChecks`) y el detalle de cada tabla, sin ellos.
+describe('checks del pegado', () => {
+  it('PasteDetails sin checks no los dibuja', () => {
+    resetFake();
+    const tree = PasteDetails({ review, options: ALL_COPY, onOptions: vi.fn(), facet: 'physical', onFacet: vi.fn(), checks: false });
+    expect([...walk(tree)].some((e) => e.props.className === 'wk-paste-checks')).toBe(false);
+  });
+  it('PasteChecks: los tres checks con sus conteos y cada uno cambia su opción', () => {
+    const onOptions = vi.fn();
+    const tree = PasteChecks({ counts: { logicalUdps: 2, physicalUdps: 5, domains: 1 }, options: ALL_COPY, onOptions });
+    const inputs = [...walk(tree)].filter((e) => e.type === 'Check' || (typeof e.type === 'function' && (e.type as { name?: string }).name === 'Check'));
+    expect(inputs.map((e) => e.props.label)).toEqual(['Logical UDPs (2)', 'Physical UDPs (5)', 'Parent domains (1)']);
+    (inputs[1].props.onChange as (v: boolean) => void)(false);
+    expect(onOptions).toHaveBeenCalledWith({ ...ALL_COPY, physicalUdps: false });
+    expect(textOf(tree)).toContain('Relationships and views are not.');
   });
 });

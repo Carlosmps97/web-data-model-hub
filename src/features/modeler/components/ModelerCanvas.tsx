@@ -19,11 +19,15 @@ import RelationshipPopup from './RelationshipPopup';
 import RelationshipCreatePopup, { type RelDraft } from './RelationshipCreatePopup';
 import SubcategoryCreatePopup, { type SubcatDraft } from './SubcategoryCreatePopup';
 import SubcategoryPopup from './SubcategoryPopup';
-import ColumnContextMenu, { copiedMessage, copiedTableMessage } from './ColumnContextMenu';
+import ColumnContextMenu, { copiedMessage, copiedTableMessage, copiedTablesMessage } from './ColumnContextMenu';
 import { historyKey, historyShortcut } from '../lib/historyKeys';
 import { modalOpen } from '@/components/ui/focusTrap';
 import PasteColumnsPopup from './PasteColumnsPopup';
 import PasteTablePopup from './PasteTablePopup';
+import PasteTablesPopup from './PasteTablesPopup';
+import SelectAreaButton from './SelectAreaButton';
+import GroupPill from './GroupPill';
+import { useBoxSelect } from './useBoxSelect';
 import ViewEditor from './ViewEditor';
 import { buildViewGraph } from '../lib/viewGraph';
 import { buildSubtypeGraph, childSubtypeMembership, isSubcategory, subtypeGroups } from '../lib/subtypeGraph';
@@ -37,6 +41,8 @@ import { dblClickShield, SHIELD_EVENTS } from '../lib/dblClickShield';
 import { bindHoverDim, createHoverIntent, hoverTargetOf } from '../lib/hoverIntent';
 import { freshRanks, nodeZ } from '../lib/nodeZ';
 import { keepMeasured, measureOptions, type BuildMemo } from '../lib/keepMeasured';
+import { applySelection, selectedTables, toggleGroup } from '../lib/boxSelect';
+import { GROUP_MAX, GROUP_PASTE_FOREIGN } from '../lib/canvasMenu';
 
 const nodeTypes = { table: TableNode, shape: ShapeNode, view: ViewNode, subcat: SubtypeSymbolNode };
 const edgeTypes = { crowfoot: CrowFootEdge, derivation: DerivationEdge, subcat: SubtypeEdge };
@@ -65,6 +71,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const pasteTarget = useModelerStore((s) => s.pasteTarget);
   const tablePasteOpen = useModelerStore((s) => s.tablePasteOpen);
   const setTablePasteOpen = useModelerStore((s) => s.setTablePasteOpen);
+  const groupPasteOpen = useModelerStore((s) => s.groupPasteOpen);
+  const setGroupPasteOpen = useModelerStore((s) => s.setGroupPasteOpen);
+  // Selección por área (doc 134): el modo «Select area» y el grupo de tablas, que
+  // se espeja en el `selected` de los nodos (`groupSeq` sube con cada cambio que
+  // no vino de React Flow).
+  const boxSelect = useModelerStore((s) => s.boxSelect);
+  const canvasLocked = useModelerStore((s) => s.canvasLocked);
+  const groupSeq = useModelerStore((s) => s.groupSeq);
   const setPasteTarget = useModelerStore((s) => s.setPasteTarget);
   const focusTable = useModelerStore((s) => s.focusTable);
   const pendingFocusTableId = useModelerStore((s) => s.pendingFocusTableId);
@@ -108,6 +122,20 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // que la selección de otro objeto respondiera tarde.
   const wrapRef = useRef<HTMLDivElement>(null);
   useEffect(() => (wrapRef.current ? bindHoverDim(wrapRef.current) : undefined), []);
+  // El cuadro de selección (modo encendido o Shift + arrastrar sobre el fondo).
+  const boxRect = useBoxSelect(wrapRef);
+  // Con Shift apretado el fondo no se arrastra: dibuja el cuadro.
+  const [shiftDown, setShiftDown] = useState(false);
+  // Con el candado puesto no hay cuadro: el botón principal vuelve a mover el fondo.
+  const boxGesture = !canvasLocked && (boxSelect || shiftDown);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Shift') setShiftDown(e.type === 'keydown'); };
+    const onBlur = () => setShiftDown(false);
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('keyup', onKey);
+    window.addEventListener('blur', onBlur);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); window.removeEventListener('blur', onBlur); };
+  }, []);
   const nodeHover = useMemo(() => createHoverIntent(setHoverNode), [setHoverNode]);
   const edgeHover = useMemo(() => createHoverIntent(setHoverEdge), [setHoverEdge]);
   useEffect(() => () => { nodeHover.dispose(); edgeHover.dispose(); }, [nodeHover, edgeHover]);
@@ -149,10 +177,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
     // la carga Excel va por delante de lo que ya estaba.
     const selNow = useModelerStore.getState().selectedTableId;
     const freshNow = freshRanks(useModelerStore.getState().freshNodes[diagram.subjectArea.id]);
+    // El grupo (o la tabla seleccionada) sigue seleccionado tras re-armar: es lo
+    // que React Flow arrastra junto.
+    const groupNow = new Set(useModelerStore.getState().groupIds);
     const tableNodes: Node[] = diagram.tables.map((t, i) => ({
       id: t.id,
       type: 'table',
       position: layout[t.id] ?? gridSlot(i),
+      selected: groupNow.size ? groupNow.has(t.id) : t.id === selNow,
       zIndex: nodeZ(t.id, selNow, freshNow),
       data: { table: t, columns: colsByTable.get(t.id) ?? [], lod: lodNow, refCols: refColsByTable.get(t.id) ?? [] },
     }));
@@ -238,6 +270,14 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         : { ...n, data: { ...n.data, lod } }));
   }, [lod, setNodes]);
 
+  // Lo que React Flow cambia por su cuenta (clic, arrastrar una tabla de afuera
+  // del grupo) vuelve al grupo de la app. Estable: React Flow vuelve a avisar su
+  // selección cada vez que cambia el callback, y con la de antes borraría el
+  // grupo que la app acaba de fijar y todavía no pasó a los nodos.
+  const onFlowSelection = useCallback(({ nodes: sel }: { nodes: Node[] }) => {
+    useModelerStore.getState().setGroup(selectedTables(sel), { fromFlow: true });
+  }, []);
+
   // Histéresis del umbral en onMove: entra compacto bajo LOD_ENTER, vuelve a
   // detalle sobre LOD_EXIT; setLod solo escribe al cruzar (cero renders en el
   // pan normal). Con `lodLock` activo el umbral no se evalúa.
@@ -250,15 +290,19 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   // El nodo seleccionado (incl. una tabla recién creada/importada) sube al
   // frente: React Flow pinta por orden de array ⇒ una tabla nueva podría quedar
   // detrás de un bloque existente. Lo de la carga Excel va por delante del
-  // resto. Update liviano (solo zIndex), sin re-armar.
+  // resto. Update liviano (zIndex y selección), sin re-armar. Lo seleccionado para
+  // React Flow (lo que arrastra junto) sale de la app en este único lugar: el
+  // grupo que fijó la app (cuadro, Ctrl/Cmd + clic, pegado, Esc) o, sin grupo, la
+  // tabla seleccionada (Ctrl/Cmd + clic en otra arma el grupo con las dos).
   useEffect(() => {
     const fresh = freshRanks(freshGens);
-    setNodes((prev) => prev.map((n) => {
+    const group = new Set(useModelerStore.getState().groupIds);
+    setNodes((prev) => applySelection(prev, group, selectedTableId).map((n) => {
       if (n.type === 'shape') return n;               // shapes siempre atrás (zIndex -1)
       const z = nodeZ(n.id, selectedTableId, fresh);
       return n.zIndex === z ? n : { ...n, zIndex: z };
     }));
-  }, [selectedTableId, freshGens, setNodes]);
+  }, [selectedTableId, freshGens, groupSeq, setNodes]);
 
   // Finder cross-canvas (Explorer, buscador ⌘K, Object Inspector): tras abrir
   // el canvas destino, centra sobre la tabla pendiente en cuanto su nodo monta.
@@ -336,6 +380,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       if (e.key === 'Escape') {
         if (st.colMenu) st.closeColMenu();
         else if (st.colSel) st.clearColSel();
+        else if (st.groupIds.length) st.setGroup([]);
         return;
       }
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
@@ -355,12 +400,27 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         if (sel && !sel.isCollapsed) return;
         const n = st.copySelectedColumns();
         if (n > 0) { pushToast(copiedMessage(n, facetNouns(st.viewMode))); return; }
+        // Con un grupo de tablas, el grupo (doc 134).
+        if (st.groupIds.length >= 2) {
+          const copied = st.copyTables(st.groupIds);
+          if (copied) pushToast(copiedTablesMessage(copied, facetNouns(st.viewMode)));
+          else pushToast(`Select up to ${GROUP_MAX} ${facetNouns(st.viewMode).many} at a time`, 'err');
+          return;
+        }
         // Sin filas seleccionadas, con un bloque seleccionado el copy toma la
         // tabla completa (columnas + metadata; sin relaciones).
         if (st.selectedTableId) {
           const name = st.copyTable(st.selectedTableId);
           if (name) pushToast(copiedTableMessage(name, facetNouns(st.viewMode)));
         }
+        return;
+      }
+      // Un grupo copiado en este proyecto abre su revisión (en otro, no se pega).
+      if (st.groupClipboard) {
+        if (readonly || !activeChangeset) { pushToast('Open the model in edit mode to paste', 'err'); return; }
+        const src = st.groupClipboard.source.projectId;
+        if (src && src !== useSessionStore.getState().activeProjectId) { pushToast(GROUP_PASTE_FOREIGN, 'err'); return; }
+        st.setGroupPasteOpen(true);
         return;
       }
       // El clipboard de tabla tiene prioridad (son excluyentes) y no necesita
@@ -508,7 +568,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
   const editView = editViewId ? (diagram?.views ?? []).find((v) => v.id === editViewId) : undefined;
 
   return (
-    <div ref={wrapRef} style={{ flex: 1, minHeight: 0 }}>
+    <div ref={wrapRef} style={{ flex: 1, minHeight: 0, position: 'relative' }} className={boxGesture ? 'box-mode' : undefined}>
       <CrowFootMarkers />
       <ReactFlow
         nodes={nodes}
@@ -527,12 +587,27 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           onMove(null, rf.getViewport());
           requestAnimationFrame(() => requestAnimationFrame(() => onMove(null, rf.getViewport())));
         }}
-        onNodeClick={(_e, node) => {
+        onNodeClick={(e, node) => {
           // Cualquier click fuera de una fila suelta la selección de columnas
           // (las filas hacen stopPropagation, así que acá solo llegan
           // cuerpo/cabecera del nodo); deseleccionar es trivial.
           const st = useModelerStore.getState();
           st.clearColSel(); st.closeColMenu();
+          // Ctrl/Cmd + clic en una tabla: la app la suma o la saca del grupo (sin
+          // grupo, parte de la tabla seleccionada), sin abrir Properties ni
+          // encuadrar; si queda una, es la selección de siempre. React Flow toma la
+          // selección de la app (la suya llega recién con el próximo render). En
+          // otro nodo, queda solo ese, como un clic simple.
+          if (e.metaKey || e.ctrlKey) {
+            if (node.type === 'table') {
+              const next = toggleGroup(st.groupIds, st.selectedTableId, node.id);
+              if (next.length >= 2) st.setGroup(next);
+              else { st.setGroup([]); setSelectedTable(next[0] ?? null); }
+              return;
+            }
+            st.setGroup([]);
+            setNodes((prev) => prev.map((n) => (!!n.selected === (n.id === node.id) ? n : { ...n, selected: n.id === node.id })));
+          } else if (st.groupIds.length) st.setGroup([]);
           // Nodo vista: abre su Properties (paridad con tablas); el lápiz del
           // header abre el ViewEditor.
           if (node.type === 'view') { st.setSelectedView(node.id); return; }
@@ -563,6 +638,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           setSelectedTable(null); setSelectedEdge(null);
           const st = useModelerStore.getState();
           st.clearColSel(); st.closeColMenu();
+          if (st.groupIds.length) st.setGroup([]);
         }}
         // Menú contextual del bloque: Copy table (copiar es lectura, vale también
         // en readonly), Paste, Remove from this canvas y Delete table… (lo que no
@@ -575,6 +651,13 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
           const st = useModelerStore.getState();
           if (st.relPreset) return;
           e.preventDefault();
+          // Sobre una tabla del grupo, el menú es del grupo; sobre otra, el grupo
+          // se suelta y el menú es de esa tabla.
+          if (st.groupIds.length >= 2 && st.groupIds.includes(node.id)) {
+            st.openColMenu({ x: e.clientX, y: e.clientY, tableId: node.id, colId: null, kind: 'group' });
+            return;
+          }
+          if (st.groupIds.length) st.setGroup([]);
           st.openColMenu({ x: e.clientX, y: e.clientY, tableId: node.id, colId: null, kind: 'table' });
         }}
         onEdgeMouseEnter={(_e, edge) => edgeHover.enter(edge.id)}
@@ -601,6 +684,16 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         // engañoso en edición y una violación del viewer-lock en readonly.
         // Los borrados reales van por la UI explícita (panel / popup de relación).
         deleteKeyCode={null}
+        // El cuadro de selección es de la app (`useBoxSelect`): React Flow da por
+        // «dentro» a lo que aún no dibujó y marca también las relaciones. Con el
+        // modo encendido o Shift, el botón principal no arrastra el fondo (lo
+        // mueven Espacio + arrastrar, el botón del medio, la rueda y el minimapa).
+        selectionKeyCode={null}
+        panOnDrag={boxGesture ? [1] : true}
+        onSelectionChange={onFlowSelection}
+        // Sin foco de teclado en los nodos: con foco, las flechas los moverían sin
+        // grabar (`moveSelectedNodes` de React Flow no pasa por onNodeDragStop).
+        nodesFocusable={false}
         // Con los defaults de React Flow, 1px de movimiento ya es drag
         // (nodeDragThreshold 1) y el click del gesto se suprime (clickDistance):
         // en trackpad el click a veces no seleccionaría la fila. A 4px, el click
@@ -642,9 +735,11 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
       >
         {/* Grilla de puntos: superficie #FBFCFD + puntos #D6DBE6, separación de 22px. */}
         <Background variant={BackgroundVariant.Dots} gap={22} size={1.1} color="#D6DBE6" bgColor="#FBFCFD" />
-        <Controls />
+        <Controls><SelectAreaButton /></Controls>
         <MiniMap pannable zoomable />
       </ReactFlow>
+      {boxRect && <div className="wk-box-select" style={{ left: boxRect.left, top: boxRect.top, width: boxRect.width, height: boxRect.height }} />}
+      <GroupPill />
       {editRelId && <RelationshipPopup relId={editRelId} onClose={() => setEditRelId(null)} pushToast={pushToast} />}
       {relDraft && (
         <RelationshipCreatePopup
@@ -677,6 +772,7 @@ export default function ModelerCanvas({ pushToast }: { pushToast: (m: string, k?
         <PasteColumnsPopup targetId={pasteTarget} onClose={() => setPasteTarget(null)} pushToast={pushToast} />
       )}
       {tablePasteOpen && <PasteTablePopup onClose={() => setTablePasteOpen(false)} pushToast={pushToast} />}
+      {groupPasteOpen && <PasteTablesPopup onClose={() => setGroupPasteOpen(false)} pushToast={pushToast} />}
     </div>
   );
 }

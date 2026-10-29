@@ -252,6 +252,29 @@ borrada, llave fuera del canvas, pin de la edición). El renombre atómico (colu
 `pinnedWrites.test.ts` (`writeColumn`, `columnStep`), `viewSync.test.ts` (`renamedViews`) y, con dos renombres
 seguidos, `useModelerStore.redoCascades.test.ts`, `columnBase` e `inspectorColumnWrites.test.ts`.
 
+Mover en el Explorer: `explorerMove.test.ts` fija las reglas (dentro de sí misma, ya en su lugar, homónimo
+en el destino, lo que ya no está) y el orden de **Move to…**; `buildProjectTree.test.ts`, que nada quede
+escondido (padre inexistente, ciclo entre dos carpetas); `structure.service.folderTree.test.ts`, el borrado de una
+carpeta en un solo lote (subcarpetas fuera, canvases a la raíz, un canvas que otra pestaña sacó no se toca) y la
+cola del canvas al moverlo mientras se graba una posición; `useModelerStore.explorerMove.test.ts`, que el store
+valide antes de grabar; y `MoveToDialog.test.ts`, el diálogo con los hooks de mentira.
+
+Selección por área y acciones en grupo: `boxSelect.test.ts` fija la geometría (entran solo las tablas
+completamente dentro, nunca las ocultas ni otros nodos), el gesto (4 px separan un clic de un cuadro) y lo que
+React Flow arrastra junto (con grupo, solo sus tablas; sin grupo, la tabla seleccionada; Ctrl/Cmd + clic lo calcula
+la app); `canvasSelection.static.test.ts` guarda lo del canvas que no se ve sin DOM (el cuadro de React Flow
+apagado, los nodos sin foco de teclado, el aviso de selección estable, la selección derivada en un solo efecto, el
+candado, el anillo y el cuadro en la burbuja del `mousedown`); `useModelerStore.groupSelection.test.ts`, el grupo
+(dos o más tablas, excluyente con las filas y con las herramientas, seleccionar una tabla lo suelta, el
+portapapeles por valor con tope de 100); `useModelerStore.removeTables.test.ts` y
+`useModelerStore.deleteTables.test.ts` (el FK solo en las hijas de afuera, por partes, respuestas perdidas, abrir
+otro canvas suelta el grupo y un fuzz de 300 modelos al azar contra borrar de a una), cada acción con una escritura
+y un Undo; `useModelerStore.pasteTables.test.ts`, los nombres (con reintento ante un 409), el esquema que piden
+varias nace una vez y las copias quedan seleccionadas; `useModelerStore.redoCascades.test.ts`, el Undo y el Redo de
+borrar y de pegar un grupo, también con otro canvas abierto; y `groupPlacement.test.ts` (la ubicación),
+`copyTable.test.ts` (`groupPasteNames`), `canvasMenu.test.ts`, `ColumnContextMenu.test.ts`, `deleteFlows.test.ts`,
+`deleteConfirm.test.ts` y `PasteTablesPopup.test.ts`, el menú, el diálogo y el popup.
+
 ## Permisos y Admin
 
 Las reglas de acceso que la interfaz replica del backend se prueban como lógica pura o con el servicio y

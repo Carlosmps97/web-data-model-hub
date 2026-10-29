@@ -14,7 +14,7 @@ import * as viewsSvc from '@/services/views.service';
 import { columnsImpactFromLinks } from '../lib/columnsImpact';
 import { pinSession, reportWriteError } from '../lib/sessionGuard';
 import { namesLeavingTable, viewsLeftEmpty } from '../lib/viewSync';
-import { confirmDeleteColumns, confirmDeleteTable, readTableDeleteCounts } from './deleteConfirm';
+import { confirmDeleteColumns, confirmDeleteTable, confirmDeleteTables, readTableDeleteCounts, readTablesDeleteCounts } from './deleteConfirm';
 
 type PushToast = (m: string, k?: 'err') => void;
 interface MenuHooks { stillWanted?: () => boolean; beforeDialog?: () => void }
@@ -31,8 +31,9 @@ export interface TableHold {
 }
 const held = new Map<string, TableHold & { stillWanted?: () => boolean }>();
 
-/** El aviso cuando otro borrado vigente tiene la tabla. */
-export const busyMessage = (nouns: FacetNouns) => `A delete on this ${nouns.one} is already in progress`;
+/** El aviso cuando otro borrado vigente tiene la tabla (en un grupo, alguna de sus tablas). */
+export const busyMessage = (nouns: FacetNouns, group = false) =>
+  (group ? `A delete on one of these ${nouns.many} is already in progress` : `A delete on this ${nouns.one} is already in progress`);
 
 /** Toma la tabla para un borrado; null si otro borrado vigente la tiene. */
 export function holdTable(tableId: string, stillWanted?: () => boolean): TableHold | null {
@@ -146,6 +147,61 @@ async function deleteTableFlow(o: Parameters<typeof askDeleteTable>[0], hold: Ta
       action: async () => { pin.check(); await o.deleteTable(o.table.id); },
     });
     if (ok) o.pushToast(`${o.nouns.One} deleted`);
+  } catch (e) { await onError(e); }
+}
+
+/** Borrar un grupo de tablas del modelo (doc 134 §3.9): cada una queda tomada
+ *  mientras dura; si otro borrado ya tiene alguna, no hay diálogo y las demás
+ *  quedan libres. Impacto sumado, un diálogo y un solo lote (`deleteTables`). */
+export function askDeleteTables(o: {
+  tables: CanonicalTable[]; nouns: FacetNouns; pushToast: PushToast; deleteTables: (ids: string[]) => Promise<void>;
+} & MenuHooks): Promise<void> {
+  const holds: TableHold[] = [];
+  for (const t of o.tables) {
+    const hold = holdTable(t.id, o.stillWanted);
+    if (!hold) {
+      holds.forEach((h) => h.release());
+      o.beforeDialog?.();
+      o.pushToast(busyMessage(o.nouns, o.tables.length > 1));
+      return Promise.resolve();
+    }
+    holds.push(hold);
+  }
+  return deleteTablesFlow(o, holds).finally(() => holds.forEach((h) => h.release()));
+}
+
+async function deleteTablesFlow(o: Parameters<typeof askDeleteTables>[0], holds: TableHold[]): Promise<void> {
+  const pin = pinSession();
+  const what = `${o.tables.length} ${o.nouns.many}`;
+  const onError = reportWriteError((e) => o.pushToast(e instanceof Error && e.message ? e.message : `Couldn't delete the ${what}`, 'err'));
+  try {
+    const impact = await readTablesDeleteCounts(o.tables.map((t) => t.id));
+    if (!pin.holds() || o.stillWanted?.() === false) return;
+    holds.forEach((h) => { h.dialog = true; });
+    o.beforeDialog?.();
+    const ids = o.tables.map((t) => t.id);
+    const ok = await confirmDeleteTables({
+      names: o.tables.map((t) => t.physicalName || t.logicalName), nouns: o.nouns, impact,
+      action: async () => { pin.check(); await o.deleteTables(ids); },
+    });
+    if (ok) o.pushToast(`${what} deleted`);
+  } catch (e) { await onError(e); }
+}
+
+/** Quitar un grupo de tablas del canvas abierto (siguen en el modelo). */
+export async function askRemoveTablesFromCanvas(o: {
+  tables: CanonicalTable[]; nouns: FacetNouns; pushToast: PushToast; remove: (ids: string[]) => Promise<void>;
+}): Promise<void> {
+  const what = `${o.tables.length} ${o.nouns.many}`;
+  const onError = reportWriteError((e) => o.pushToast(e instanceof Error && e.message ? e.message : `Couldn't remove the ${what}`, 'err'));
+  try {
+    const ok = await confirmDialog({
+      title: 'Remove from canvas',
+      message: <>Remove {what} from this canvas? They stay in the model — you can add them back later.</>,
+      confirmLabel: 'Remove', cancelLabel: 'Cancel',
+      action: async () => { await o.remove(o.tables.map((t) => t.id)); },
+    });
+    if (ok) o.pushToast(`${what} removed from this canvas`);
   } catch (e) { await onError(e); }
 }
 

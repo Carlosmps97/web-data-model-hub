@@ -23,6 +23,7 @@ import type { UdpDefinition } from '@/features/standards/standards.service';
 import type { NamingConfig } from '@/services/naming.service';
 import { normalColor, themeIdOf, themeRef, type Theme } from '@/lib/colors';
 import { FACET_NOUNS, udpView, type Facet, type FacetNouns } from '@/lib/facets';
+import { nameKey } from '@/lib/nameKey';
 import { udpValueFor } from '@/lib/udpValue';
 import type { DbSchema } from '../services/schemas.service';
 import { applyNamingCase } from './physicalCase';
@@ -103,9 +104,6 @@ interface Ctx {
 const chars = (s: string) => [...s].length;
 const SHORTEN = 'Shorten it in the source and copy it again, or raise the limit in Data Standards · Glossary.';
 const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
-/** Clave de un nombre, como `norm_name` de la carga Excel: sin bordes, sin tildes,
- *  espacios internos colapsados y sin mayúsculas. */
-const nameKey = (s: string) => String(s ?? '').normalize('NFKD').replace(/\p{M}/gu, '').trim().split(/\s+/).join(' ').toLowerCase();
 const udpKey = (d: UdpDefinition) => `${d.level}|${udpView(d)}|${nameKey(d.name)}`;
 const udpLabel = (name: string, facet: Facet) => (facet === 'logical' ? `${name} (Logical)` : name);
 const unique = (xs: string[]) => [...new Set(xs)];

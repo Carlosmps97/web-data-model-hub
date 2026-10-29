@@ -24,6 +24,7 @@ export function uniqueName(base: string, taken: Set<string>): string {
   }
 }
 
+import { byName, displayParents, folderOrder } from './explorerMove';
 import type { Folder, SubjectArea } from '../services/modeler.service';
 
 /** Una entrada del paquete: el canvas + su carpeta (segmentos saneados, ruta
@@ -34,25 +35,27 @@ export interface PackageLayout { rootName: string; canvases: LayoutCanvas[] }
 
 /** Resuelve el alcance del export (proyecto o carpeta) a rutas del ZIP. Espejo
  *  del orden del explorer (`buildProjectTree`): carpetas y canvases A–Z
- *  (case-insensitive; `order` solo desempata). Carpetas sin canvases (directa
- *  o transitivamente) no generan entradas: un ZIP no tiene directorios vacíos. */
+ *  (case-insensitive; `order` solo desempata), con los mismos padres a la vista
+ *  (`displayParents`): lo que cuelga de una carpeta que ya no existe, o de un
+ *  ciclo, sale desde la raíz. Carpetas sin canvases (directa o
+ *  transitivamente) no generan entradas: un ZIP no tiene directorios vacíos. */
 export function packageLayout(
   kind: 'project' | 'folder', nodeId: string, projectName: string,
   folders: Folder[], subjectAreas: SubjectArea[],
 ): PackageLayout {
+  const sortF = folderOrder;
+  const sortC = (a: SubjectArea, b: SubjectArea) => byName(a.name, b.name);
+  const parentOf = displayParents(folders);
   const byParent = new Map<string | null, Folder[]>();
   for (const f of folders) {
-    const k = f.parentFolderId ?? null;
+    const k = parentOf.get(f.id) ?? null;
     const arr = byParent.get(k); if (arr) arr.push(f); else byParent.set(k, [f]);
   }
   const byFolder = new Map<string | null, SubjectArea[]>();
   for (const sa of subjectAreas) {
-    const k = sa.folderId ?? null;
+    const k = sa.folderId && parentOf.has(sa.folderId) ? sa.folderId : null;
     const arr = byFolder.get(k); if (arr) arr.push(sa); else byFolder.set(k, [sa]);
   }
-  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || a.localeCompare(b);
-  const sortF = (a: Folder, b: Folder) => byName(a.name, b.name) || a.order - b.order;
-  const sortC = (a: SubjectArea, b: SubjectArea) => byName(a.name, b.name);
 
   const out: LayoutCanvas[] = [];
   const walk = (folderId: string | null, dir: string[], crumb: string[]) => {

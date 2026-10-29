@@ -25,7 +25,7 @@ export interface TableNodeData {
   [key: string]: unknown;
 }
 
-function TableNode({ data }: NodeProps) {
+function TableNode({ data, selected: flowSelected }: NodeProps) {
   const { table, columns, lod, refCols } = data as TableNodeData;
   // En modo visor puede haber changeset activo (viendo un request): sin handles
   // conectables ni affordances de edición.
@@ -43,7 +43,11 @@ function TableNode({ data }: NodeProps) {
   // Selector booleano (no el id crudo): con el id, cambiar la selección
   // re-renderizaría todos los nodos del canvas; con el booleano solo los 2
   // afectados (el que se selecciona y el que se deselecciona).
-  const selected = useModelerStore((s) => s.selectedTableId === table.id);
+  // En un grupo (2+ tablas, doc 134) el anillo sigue al `selected` de React Flow:
+  // es lo que React Flow arrastra junto.
+  const single = useModelerStore((s) => s.selectedTableId === table.id);
+  const groupActive = useModelerStore((s) => s.groupIds.length >= 2);
+  const selected = single || (groupActive && !!flowSelected);
   // Columnas a resaltar cuando el wire de una relación está bajo el mouse (o
   // seleccionado): todas las de los pares que tocan esta tabla. El selector
   // devuelve un string estable ('' para las tablas no afectadas) para que el

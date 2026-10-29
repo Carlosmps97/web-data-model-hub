@@ -260,3 +260,24 @@ describe('udpChipsHtml (facetas)', () => {
     expect(udpChipsHtml({ c: 'Si', p: '', zz: 'x' }, 'table', lk)).toBe('');
   });
 });
+
+// El export sigue al Explorer (doc 134 §4.5): una carpeta o un canvas cuyo padre
+// ya no existe, o dos carpetas en ciclo, se exportan desde la raíz — y exportar
+// una carpeta del ciclo no se cuelga.
+describe('packageLayout — nada queda afuera', () => {
+  const F = (id: string, name: string, parentFolderId: string | null) => ({ id, projectId: 'p', parentFolderId, name, order: 0 });
+  const C = (id: string, name: string, folderId: string | null) => ({ id, projectId: 'p', name, folderId, tableIds: [], layout: {} });
+
+  it('lo que cuelga de una carpeta inexistente sale en el export del proyecto', () => {
+    const out = packageLayout('project', 'p', 'Proyecto', [F('f1', 'Huerfana', 'gone')], [C('c1', 'Uno', 'f1'), C('c2', 'Dos', 'gone')]);
+    expect(out.canvases.map((c) => [c.sa.id, c.dir.join('/')])).toEqual([['c2', ''], ['c1', 'Huerfana']]);
+  });
+
+  it('dos carpetas en ciclo: cada canvas una vez, y exportar una de ellas no se cuelga', () => {
+    const folders = [F('a', 'Beta', 'b'), F('b', 'Alfa', 'a')];
+    const canvases = [C('c1', 'Uno', 'a'), C('c2', 'Dos', 'b')];
+    const project = packageLayout('project', 'p', 'Proyecto', folders, canvases);
+    expect(project.canvases.map((c) => [c.sa.id, c.dir.join('/')])).toEqual([['c2', 'Alfa'], ['c1', 'Alfa/Beta']]);
+    expect(packageLayout('folder', 'a', 'Proyecto', folders, canvases).canvases.map((c) => c.sa.id)).toEqual(['c1']);
+  });
+});

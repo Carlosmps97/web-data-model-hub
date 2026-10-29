@@ -19,8 +19,11 @@ import { facetName, facetNouns } from '@/lib/facets';
 import { applyNamingCase } from '@/features/modeler/lib/physicalCase';
 import { diagramSignature } from '@/features/modeler/lib/diagramSignature';
 import { editedTables, isSlice, membershipChanged, mergeSlice, noEdits } from '@/features/modeler/lib/diagramSlice';
-import { copyNameBase, copyTableToBulk, pasteNames } from '@/features/modeler/lib/copyTable';
+import { copyNameBase, copyTableToBulk, groupPasteNames, pasteNames } from '@/features/modeler/lib/copyTable';
+import { groupSpots } from '@/features/modeler/lib/groupPlacement';
 import { keyLayoutBulk } from '@/features/modeler/lib/keyLayout';
+import { byName, displayParents, folderOrder, moveVerdict, type MoveItem } from '@/features/modeler/lib/explorerMove';
+import { GROUP_MAX, GROUP_PASTE_FOREIGN } from '@/features/modeler/lib/canvasMenu';
 import { canonicalDefaultType } from '@/features/modeler/lib/typePick';
 import { mirrorComplex } from '@/features/modeler/lib/facetTypes';
 import { isComplexTypeStart } from '@/features/modeler/lib/complexTypes';
@@ -169,14 +172,48 @@ interface ModelerState {
    *  está libre en el proyecto; si no, `_copy_n`. Devuelve el nombre mostrado,
    *  o null si ya hay un paste en vuelo. */
   pasteTable: (prepared?: TablePastePrepared) => Promise<string | null>;
+  /** Pega el grupo copiado como tablas nuevas en el canvas activo, con lo que
+   *  mostró «Paste N tables» (`prepared`, en el orden del grupo): un solo lote,
+   *  nombres que no se repiten entre ellas, la misma distribución y un solo Undo
+   *  (doc 134 §3.7). Solo en el proyecto donde se copió. Devuelve los nombres que
+   *  se ven, o null si ya hay un pegado en vuelo o cambió la sesión. */
+  pasteTables: (prepared: TablePastePrepared[]) => Promise<string[] | null>;
   /** El popup de pegado de tabla está abierto (lo monta ModelerCanvas). */
   tablePasteOpen: boolean;
   setTablePasteOpen: (open: boolean) => void;
+  /** Grupo de tablas seleccionado en el canvas (doc 134): vacío o 2+ ids. Se
+   *  espeja en el `selected` de los nodos de tabla (lo que React Flow arrastra
+   *  junto); `groupSeq` sube con cada cambio que no vino de React Flow. */
+  groupIds: string[];
+  groupSeq: number;
+  /** Fija el grupo (sin repetidos; menos de 2 = sin grupo). Con grupo se cierran
+   *  Properties y la selección de filas. `fromFlow`: el cambio lo hizo React Flow
+   *  (no se le vuelve a escribir). */
+  setGroup: (ids: string[], opts?: { fromFlow?: boolean }) => void;
+  /** Lo que tomó el cuadro: 2+ → el grupo; una → la selección de siempre, sin
+   *  encuadrarla; ninguna → nada seleccionado. */
+  selectBox: (ids: string[]) => void;
+  /** «Select area» encendido: arrastrar el fondo dibuja el cuadro. Excluyente con
+   *  las herramientas de relación y de subcategoría. */
+  boxSelect: boolean;
+  setBoxSelect: (on: boolean) => void;
+  /** El candado de los controles del canvas está puesto: no se selecciona. */
+  canvasLocked: boolean;
+  setCanvasLocked: (on: boolean) => void;
+  /** Portapapeles de un grupo de tablas: por valor, en el orden del grupo y con
+   *  la posición de cada una (se pegan con la misma distribución). Excluyente
+   *  con el de tabla y el de columnas; mismo ciclo de vida. */
+  groupClipboard: ClipGroup | null;
+  /** Copia el grupo; devuelve cuántas tablas (0 si no hay o pasan de `GROUP_MAX`). */
+  copyTables: (ids: string[]) => number;
+  /** El popup de pegado del grupo está abierto (lo monta ModelerCanvas). */
+  groupPasteOpen: boolean;
+  setGroupPasteOpen: (open: boolean) => void;
   /** Menú contextual del canvas (fila: colId; bloque: colId null). */
-  /** `kind` = qué bloque abrió el menú (default tabla); una vista solo
-   *  ofrece el color. */
-  colMenu: { x: number; y: number; tableId: string; colId: string | null; kind?: 'table' | 'view' } | null;
-  openColMenu: (m: { x: number; y: number; tableId: string; colId: string | null; kind?: 'table' | 'view' }) => void;
+  /** `kind` = qué bloque abrió el menú (default tabla; `group`: una tabla del
+   *  grupo seleccionado); una vista solo ofrece el color. */
+  colMenu: { x: number; y: number; tableId: string; colId: string | null; kind?: 'table' | 'view' | 'group' } | null;
+  openColMenu: (m: { x: number; y: number; tableId: string; colId: string | null; kind?: 'table' | 'view' | 'group' }) => void;
   closeColMenu: () => void;
   /** Tabla destino del paste en confirmación (monta PasteColumnsPopup). */
   pasteTarget: string | null;
@@ -357,10 +394,14 @@ interface ModelerState {
   createFolder: (projectId: string, parentFolderId: string | null, name: string) => Promise<void>;
   renameFolder: (id: string, name: string, projectId?: string) => Promise<void>;
   deleteFolder: (id: string, projectId?: string) => Promise<void>;
+  /** Mueve una carpeta a otra (o a la raíz, `null`) del mismo proyecto; las
+   *  reglas de `explorerMove` deciden antes de grabar. true si se grabó (ya en
+   *  su lugar: false sin aviso). */
+  moveFolder: (id: string, parentFolderId: string | null, projectId?: string) => Promise<boolean>;
   createCanvas: (projectId: string, folderId: string | null, name: string) => Promise<void>;
   renameCanvas: (id: string, name: string, projectId?: string) => Promise<void>;
   deleteCanvas: (id: string, projectId?: string) => Promise<void>;
-  moveCanvas: (id: string, folderId: string | null) => Promise<void>;
+  moveCanvas: (id: string, folderId: string | null, projectId?: string) => Promise<boolean>;
   renameProject: (id: string, name: string) => Promise<void>;
   /** Graba el borrado del proyecto en la working copy (un solo cambio). */
   deleteProject: (id: string) => Promise<void>;
@@ -424,6 +465,9 @@ interface ModelerState {
   selectTable: (id: string | null) => void;
   setSelectedEdge: (id: string | null) => void;
   removeTableFromArea: (tableId: string) => Promise<void>;
+  /** Saca un grupo de tablas del canvas abierto en una sola escritura, con un
+   *  solo Undo (doc 134 §3.8); `removeTableFromArea` es el caso de una. */
+  removeTablesFromArea: (tableIds: string[]) => Promise<void>;
   /** Borra la tabla del modelo con cascada versionada: vistas, relaciones,
    *  columnas, membresía en todos los canvases, y la tabla. Todo en el changeset. */
   /** `opts.pre` = pre-imagen para el Undo cuando la tabla no está
@@ -432,6 +476,11 @@ interface ModelerState {
    *  en vez de apilarla (la pide otro paso del historial: deshacer «Create
    *  table», rehacer «Delete table»). */
   deleteTable: (tableId: string, opts?: { pre?: CanonicalTable; onUndo?: (step: HistoryStep) => void }) => Promise<void>;
+  /** Borra un grupo de tablas del modelo con la cascada de una tabla aplicada al
+   *  conjunto, en un solo lote y con un solo Undo (doc 134 §3.9); `deleteTable`
+   *  es el caso de una. `pres`: el documento de cada tabla para el Undo si no
+   *  está en pantalla. */
+  deleteTables: (tableIds: string[], opts?: { pres?: Map<string, CanonicalTable>; onUndo?: (step: HistoryStep) => void }) => Promise<void>;
   updateTable: (id: string, fields: { logicalName?: string; physicalName?: string; schema?: string; description?: string; udpValues?: Record<string, string> }) => Promise<void>;
   /** Upsert de una columna en el changeset (merge sobre la columna actual del
    *  diagrama) + reload. Con otro canvas abierto (sin la columna), o con
@@ -551,7 +600,7 @@ export function stopFraming(): void {
 
 /** La caja de un nodo del canvas (flujo) — su tamaño medido o, si
  *  todavía no se pintó (`onlyRenderVisibleElements`), el estimado LOD. */
-function flowBox(n: Node, facet: 'logical' | 'physical'): FlowBox {
+export function flowBox(n: Node, facet: 'logical' | 'physical'): FlowBox {
   const w = n.measured?.width ?? (typeof n.width === 'number' ? n.width : undefined);
   const h = n.measured?.height ?? (typeof n.height === 'number' ? n.height : undefined);
   if (w !== undefined && h !== undefined) return { x: n.position.x, y: n.position.y, w, h };
@@ -633,29 +682,29 @@ function membersIn(saId: string, out: struct.CanvasMembersOut, shown?: string[] 
   });
 }
 
-/** Saca una tabla del canvas con sus vistas que quedan huérfanas (`viewIds`) y
+/** Saca tablas del canvas con sus vistas que quedan huérfanas (`viewIds`) y
  *  los trazos de sus wires; lo que queda sin posición, donde se ve si ese
- *  canvas está abierto (`pinsOut`). Devuelve el paso que la vuelve a poner. */
-function tableOut(saId: string, tableId: string, viewIds: string[], wireIds: string[], shown?: string[] | null): HistoryStep {
+ *  canvas está abierto (`pinsOut`). Devuelve el paso que las vuelve a poner. */
+function tablesOut(saId: string, tableIds: string[], viewIds: string[], wireIds: string[], shown?: string[] | null): HistoryStep {
   return freshStep(async () => {
     const out = await struct.removeFromCanvas(saId, {
-      tableIds: [tableId], viewIds, ...(wireIds.length ? { dropRouteIds: wireIds } : {}), ...pinsOut(saId, [tableId]),
+      tableIds, viewIds, ...(wireIds.length ? { dropRouteIds: wireIds } : {}), ...pinsOut(saId, tableIds),
     }, shown);
     await useModelerStore.getState().reload();
-    return tableIn(saId, tableId, out, wireIds, shown);
+    return tablesIn(saId, tableIds, out, wireIds, shown);
   });
 }
 
-/** Vuelve a poner la tabla con lo que salió con ella, en una sola escritura.
- *  Las vistas solo cuentan si salieron con ella: sin ellas, un canvas sin lista
+/** Vuelve a poner las tablas con lo que salió con ellas, en una sola escritura.
+ *  Las vistas solo cuentan si salieron con ellas: sin ellas, un canvas sin lista
  *  explícita sigue sin lista. */
-function tableIn(saId: string, tableId: string, out: struct.CanvasMembersOut, wireIds: string[], shown?: string[] | null): HistoryStep {
+function tablesIn(saId: string, tableIds: string[], out: struct.CanvasMembersOut, wireIds: string[], shown?: string[] | null): HistoryStep {
   return async () => {
     await struct.addToCanvas(saId, {
-      tableIds: [tableId], viewIds: out.viewIds, layout: out.layout, routes: out.routes, colors: out.colors,
+      tableIds, viewIds: out.viewIds, layout: out.layout, routes: out.routes, colors: out.colors,
     }, out.viewIds.length ? shown : undefined);
     await useModelerStore.getState().reload();
-    return tableOut(saId, tableId, out.viewIds, wireIds, shown);
+    return tablesOut(saId, tableIds, out.viewIds, wireIds, shown);
   };
 }
 
@@ -663,15 +712,16 @@ function tableIn(saId: string, tableId: string, out: struct.CanvasMembersOut, wi
 // Frescos (`freshStep`): la acción del store vuelve a leer lo que depende del
 // objeto en ese momento y entrega su inversa (`onUndo`) en vez de apilarla.
 
-/** Borra la tabla con su cascada (deshacer «Create table», rehacer «Delete
- *  table») y devuelve su inversa. */
-function tableDrop(id: string, pre?: CanonicalTable): HistoryStep {
+/** Borra las tablas con su cascada (deshacer «Create table» o «Paste N tables»,
+ *  rehacer «Delete table») y devuelve su inversa. */
+function tablesDrop(ids: string[], pres?: Map<string, CanonicalTable>): HistoryStep {
   return freshStep(async () => {
     const got: { step: HistoryStep | null } = { step: null };
-    await useModelerStore.getState().deleteTable(id, { ...(pre ? { pre } : {}), onUndo: (step) => { got.step = step; } });
+    await useModelerStore.getState().deleteTables(ids, { ...(pres ? { pres } : {}), onUndo: (step) => { got.step = step; } });
     return got.step;
   });
 }
+const tableDrop = (id: string, pre?: CanonicalTable): HistoryStep => tablesDrop([id], pre ? new Map([[id, pre]]) : undefined);
 
 /** Borra columnas de una tabla con su cascada (deshacer «Add column», rehacer
  *  el borrado: `exact`) y devuelve su inversa. */
@@ -858,6 +908,8 @@ let _pasteTableBusy = false;
 export interface TablePastePrepared { table: CanonicalTable; cols: CanonicalColumn[]; createSchema?: { name: string } }
 /** El proyecto de donde se copió (pegar entre proyectos). */
 export interface ClipSource { projectId: string | null; projectName: string }
+/** Un grupo de tablas copiado (doc 134 §3.6). */
+export interface ClipGroup { tables: { table: CanonicalTable; cols: CanonicalColumn[]; pos: Point | null }[]; source: ClipSource }
 
 /** Último nombre conocido de cada proyecto: `refreshExplorer` vacía `projects`
  *  hasta que llega la lista (y, si falla, queda vacía) — lo copiado en ese rato
@@ -965,6 +1017,27 @@ function sawOthers(seq: number | null | undefined): void {
 let _explorerSeq = 0;
 /** Lo que el filtro de esquemas de CTAS lee de cada esquema del catálogo. */
 const schemasSignature = (rows: DbSchema[]): string => rows.map((s) => `${s.id}|${s.name}|${s.kind ?? ''}`).join('\n');
+/** Movimientos del Explorer en fila por proyecto: cada uno decide con el árbol
+ *  que dejó la relectura del anterior, así dos arrastres seguidos (A dentro de B
+ *  y enseguida B dentro de A) no arman un ciclo. */
+const _moveChains = new Map<string, Promise<unknown>>();
+function inMoveOrder<T>(pid: string, job: () => Promise<T>): Promise<T> {
+  const run = (_moveChains.get(pid) ?? Promise.resolve()).then(job);
+  const tail = run.catch(() => undefined);
+  _moveChains.set(pid, tail);
+  void tail.then(() => { if (_moveChains.get(pid) === tail) _moveChains.delete(pid); });
+  return run;
+}
+
+/** ¿Se puede mover `item` a `target` en el árbol del Explorer? Ya en su lugar:
+ *  false sin aviso; otro motivo: rechaza con él (llega al toast). */
+function moveAllowed(item: MoveItem, target: string | null, tree?: { folders: Folder[]; subjectAreas: SubjectArea[] }): boolean {
+  const verdict = moveVerdict(item, target, tree?.folders ?? [], tree?.subjectAreas ?? []);
+  if (verdict.ok) return true;
+  if (verdict.reason === 'same-place') return false;
+  throw new Error(verdict.message);
+}
+
 /** Lo que relee el árbol tras una mutación del Explorer escribe solo si sigue
  *  la sesión en que se pidió la mutación y no empezó un refresco más reciente
  *  (que trae el árbol vigente). Se toma al empezar la mutación. */
@@ -1101,6 +1174,43 @@ async function createInCanvas(
   }
 }
 
+/** El Undo de pegar tablas (una o un grupo): las borra con su cascada (`drop`:
+ *  `deleteTable` o `deleteTables`) y después cada esquema que nació con el
+ *  pegado si nadie más lo usa (una tabla preexistente pudo estar en ese esquema
+ *  sin catalogar: entonces queda). Best-effort: un esquema sin uso que quede es
+ *  inofensivo. Se borra por su endpoint, que vuelve a revisar el uso en el
+ *  servidor. Rehacer repone los esquemas como estaban al borrarlos (mismo id,
+ *  nombre vigente) y las copias como estaban. */
+function pasteUndo(drop: (onUndo: (step: HistoryStep) => void) => Promise<void>, created: { id: string }[]): HistoryStep {
+  const store = () => useModelerStore.getState();
+  const step: HistoryStep = freshStep(async (undo) => {
+    const got: { step: HistoryStep | null } = { step: null };
+    await drop((s) => { got.step = s; });
+    const gone: DbSchema[] = [];
+    for (const sc of created) {
+      undo.check();
+      const use = await schemasSvc.schemaImpact(sc.id).catch(() => null);
+      const doc = use && use.tables + use.views === 0
+        ? (await schemasSvc.listSchemas().catch(() => [] as DbSchema[])).find((x) => x.id === sc.id) ?? null
+        : null;
+      if (!doc) continue;
+      undo.check();
+      if (await schemasSvc.deleteSchema(doc.id).then(() => true, () => false)) gone.push(doc);
+    }
+    if (gone.length) { void store().loadSchemas().catch(() => undefined); store().bumpExplorer(); }
+    const recreate = got.step;
+    if (!recreate) return null;
+    return async (redo) => {
+      if (gone.length) await gov.recordChangesBulk(gone.map((g) => gov.bulk.upsertSchema(g)));
+      redo.check();
+      await recreate(redo);
+      if (gone.length) void store().loadSchemas().catch(() => undefined);
+      return step;
+    };
+  });
+  return step;
+}
+
 type ListedViews = Awaited<ReturnType<typeof struct.listedViews>>;
 /** Canvases donde es miembro alguna de `viewIds` (vistas de `tableId`). Una
  *  vista multi-fuente puede estar en un canvas que no tiene la tabla que se
@@ -1123,6 +1233,13 @@ async function listedViewsBy(canvasIds: string[], viewIds: string[]): Promise<Ma
   for (const [id, listed] of rows) if (listed.viewIds.length) out.set(id, listed);
   return out;
 }
+
+/** Seleccionar una tabla (clic, Locate, crearla, pegarla, importarla) suelta el
+ *  grupo: se selecciona una cosa a la vez (doc 134 §3.3). */
+const pickTable = (s: ModelerState, id: string | null): Partial<ModelerState> => ({
+  selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null,
+  ...(id && s.groupIds.length ? { groupIds: [], groupSeq: s.groupSeq + 1 } : {}),
+});
 
 export const useModelerStore = create<ModelerState>((set, get) => ({
   projects: [],
@@ -1155,15 +1272,21 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   naming: null,
   relPreset: null,
   // Armar una herramienta desarma la otra (un solo gesto de dibujo a la vez).
-  setRelPreset: (p) => set(p ? { relPreset: p, subcatArmed: false } : { relPreset: p }),
+  setRelPreset: (p) => set(p ? { relPreset: p, subcatArmed: false, boxSelect: false } : { relPreset: p }),
   subcatArmed: false,
-  setSubcatArmed: (on) => set(on ? { subcatArmed: true, relPreset: null } : { subcatArmed: false }),
+  setSubcatArmed: (on) => set(on ? { subcatArmed: true, relPreset: null, boxSelect: false } : { subcatArmed: false }),
+  boxSelect: false,
+  setBoxSelect: (on) => set(on ? { boxSelect: true, relPreset: null, subcatArmed: false } : { boxSelect: false }),
+  canvasLocked: false,
+  setCanvasLocked: (on) => { if (get().canvasLocked !== on) set({ canvasLocked: on }); },
   hoverEdgeId: null,
   hoverNodeId: null,
   setHoverEdge: (id) => set({ hoverEdgeId: id }),
   setHoverNode: (id) => set({ hoverNodeId: id }),
   colSel: null,
   toggleColSelect: (tableId, colId, mode) => {
+    // Filas y grupo de tablas son excluyentes.
+    if (get().groupIds.length) get().setGroup([]);
     const cur = get().colSel;
     // Cambiar de tabla fuente (o click simple) reinicia la selección: el
     // contrato es una sola tabla fuente por copia.
@@ -1205,7 +1328,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({
       colClipboard: { source: { logicalName: t?.logicalName ?? '', physicalName: t?.physicalName ?? '', ...clipSource() }, cols },
       colSel: null,
-      tblClipboard: null,
+      tblClipboard: null, groupClipboard: null,
     });
     return cols.length;
   },
@@ -1220,7 +1343,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       .map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
     set({
       tblClipboard: { table: { ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) }, cols, source: clipSource() },
-      colClipboard: null, colSel: null,   // excluyentes
+      colClipboard: null, colSel: null, groupClipboard: null,   // excluyentes
     });
     // El nombre que se muestra, según la faceta.
     return get().viewMode === 'logical' ? t.logicalName || t.physicalName : t.physicalName || t.logicalName;
@@ -1298,52 +1421,154 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         if (!pin.holds()) return null;
         // El esquema que nació con el pegado entra a los combos de esquema.
         if (schema) void get().loadSchemas().catch(() => undefined);
-        set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible
+        set((s) => pickTable(s, id));   // al frente + visible
         get().markFresh({ [saId]: [id] });   // y encima de lo demás aunque se deseleccione
         // El nombre de la copia que se muestra, según la faceta — también en la
         // etiqueta del Undo.
         const shown = get().viewMode === 'logical' ? logicalName || physicalName : physicalName;
-        // El esquema que nació con el pegado se va con él si nadie más lo usa (una
-        // tabla preexistente pudo estar en ese esquema sin catalogar: entonces queda).
-        // Best-effort: un esquema sin uso que quede es inofensivo. Se borra por su
-        // endpoint, que vuelve a revisar el uso en el servidor.
-        // Rehacer repone el esquema como estaba al borrarlo (mismo id, nombre
-        // vigente) y la copia como estaba.
-        const dropPaste: HistoryStep = freshStep(async (undo) => {
-          const got: { step: HistoryStep | null } = { step: null };
-          await get().deleteTable(id, { onUndo: (step) => { got.step = step; } });
-          let gone: DbSchema | null = null;
-          if (schema) {
-            undo.check();
-            const use = await schemasSvc.schemaImpact(schema.id).catch(() => null);
-            const doc = use && use.tables + use.views === 0
-              ? (await schemasSvc.listSchemas().catch(() => [] as DbSchema[])).find((s) => s.id === schema.id) ?? null
-              : null;
-            if (doc) {
-              undo.check();
-              gone = await schemasSvc.deleteSchema(doc.id).then(() => doc, () => null);
-              void get().loadSchemas().catch(() => undefined);
-              get().bumpExplorer();
-            }
-          }
-          const recreate = got.step;
-          if (!recreate) return null;
-          return async (redo) => {
-            if (gone) await gov.recordChangesBulk([gov.bulk.upsertSchema(gone)]);
-            redo.check();
-            await recreate(redo);
-            if (gone) void get().loadSchemas().catch(() => undefined);
-            return dropPaste;
-          };
-        });
+        // El Undo la borra y, si nadie más lo usa, el esquema que nació con ella.
+        const dropPaste = pasteUndo((onUndo) => get().deleteTable(id, { onUndo }), schema ? [schema] : []);
         pushUndo(`Paste ${facetNouns(get().viewMode).one} ${shown}`, lostWrites ? verifiedLost(dropPaste, lostWrites) : dropPaste, pin);
         return shown;
       }
       throw lastErr instanceof Error ? lastErr : new Error("Couldn't paste the table");
     } finally { _pasteTableBusy = false; }
   })),
+  pasteTables: (prepared) => {
+    const nouns = facetNouns(get().viewMode);
+    const what = `${prepared.length} ${nouns.many}`;
+    return historyAction(() => runBlocking(`Pasting ${what}…`, async () => {
+      if (_pasteTableBusy) return null;   // Ctrl+V repetido con el paste en vuelo
+      const clip = get().groupClipboard;
+      const saId = get().activeSaId;
+      if (!clip) throw new Error('Nothing to paste');
+      if (!saId) throw new Error('Pick a Subject Area');
+      if (prepared.length !== clip.tables.length) throw new Error('The copied tables changed: open the paste review again.');
+      // Los estándares de un grupo de otro proyecto no se traducen (doc 118 §11).
+      if (clip.source.projectId && clip.source.projectId !== useSessionStore.getState().activeProjectId) throw new Error(GROUP_PASTE_FOREIGN);
+      // La acción es de la sesión donde empezó (ver `pinSession`).
+      const pin = pinSession();
+      _pasteTableBusy = true;
+      try {
+        get().markDirty();
+        // Reintentos ante carrera multiusuario: un nombre que otro draft ganó (409)
+        // cuenta como tomado y se recalculan todos.
+        const lost: string[] = [];
+        let lastErr: unknown = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const taken = (await Promise.all(prepared.map((p) => tableNamesTaken(p.table.physicalName)))).flat();
+          const names = groupPasteNames(prepared.map((p) => p.table), [...taken, ...lost]);
+          const ids = prepared.map(() => crypto.randomUUID());
+          // Un esquema que piden varias tablas nace una sola vez.
+          const schemas = new Map<string, { id: string; name: string }>();
+          for (const p of prepared) {
+            const key = p.createSchema?.name.toLowerCase();
+            if (key && !schemas.has(key)) schemas.set(key, { id: crypto.randomUUID(), name: p.createSchema!.name });
+          }
+          const changes = [
+            ...[...schemas.values()].map((sc) => gov.bulk.createSchema({ ...sc, kind: 'tables' })),
+            ...prepared.flatMap((p, i) => copyTableToBulk({
+              table: p.table, cols: p.cols, id: ids[i], physicalName: names[i].physicalName, logicalName: names[i].logicalName,
+              // Procedencia: la tabla y las columnas copiadas, no los nombres finales.
+              source: { table: clip.tables[i].table.physicalName || clip.tables[i].table.logicalName,
+                columns: new Map(clip.tables[i].cols.map((c) => [c.id, c.physicalName])) },
+            })),
+          ];
+          // El grupo conserva su distribución: al costado de los originales si se
+          // ven en este canvas; si no, centrado en lo que se ve (`groupSpots`).
+          const rf = get().flow;
+          const view = canvasView(rf, { panel: get().selectedTableId ? 'closes' : undefined });
+          const sizes = prepared.map((p, i) => tableLodSize({ ...p.table, physicalName: names[i].physicalName, logicalName: names[i].logicalName }, p.cols, get().viewMode));
+          const nodes = clip.tables.map((t) => rf?.getNode(t.table.id) ?? null);
+          const pos = clip.tables.map((t, i) => {
+            const n = nodes[i];
+            return n ? { x: Math.round(n.position.x), y: Math.round(n.position.y) } : t.pos;
+          });
+          const placed = pos.filter((p): p is Point => !!p);
+          const corner = placed.length ? { x: Math.min(...placed.map((p) => p.x)) + 36, y: Math.min(...placed.map((p) => p.y)) + 36 } : null;
+          const beside = !!corner && nodes.every(Boolean) && (!view || insideRect(corner, view.rect));
+          const spots = groupSpots(ids.map((id, i) => ({ id, pos: pos[i], size: sizes[i] })),
+            { beside, view, others: nodeBoxes(rf), recent: recentBoxes(rf, saId) });
+          const release = holdSpots(saId, ids.map((id, i) => ({ ...spots[id], w: sizes[i].w })));
+          let lostWrites: number;
+          try {
+            try {
+              lostWrites = await createInCanvas(pin, saId, ids[0], changes, { tableIds: ids, layout: spots, ...pinsFor(saId, ids) }, 'pasted');
+            } catch (e) {
+              lastErr = e;
+              const hit = e instanceof Error ? names.find((n) => e.message.includes(`Table ${n.physicalName} already exists`)) : undefined;
+              if (hit) { lost.push(hit.physicalName); continue; }
+              throw e;
+            }
+            await get().reload();
+          } finally { release(); }
+          // No selecciona en otra sesión ni devuelve los nombres.
+          if (!pin.holds()) return null;
+          // Los esquemas que nacieron con el pegado entran a los combos.
+          if (schemas.size) void get().loadSchemas().catch(() => undefined);
+          get().markFresh({ [saId]: ids });   // encima de lo demás
+          get().setGroup(ids);                // seleccionadas: se pueden arrastrar juntas
+          const shown = names.map((n) => (get().viewMode === 'logical' ? n.logicalName || n.physicalName : n.physicalName));
+          // El Undo las borra juntas y, si nadie más los usa, los esquemas que
+          // nacieron con ellas.
+          const dropPaste = pasteUndo((onUndo) => get().deleteTables(ids, { onUndo }), [...schemas.values()]);
+          pushUndo(`Paste ${what}`, lostWrites ? verifiedLost(dropPaste, lostWrites) : dropPaste, pin);
+          return shown;
+        }
+        throw lastErr instanceof Error ? lastErr : new Error(`Couldn't paste the ${what}`);
+      } finally { _pasteTableBusy = false; }
+    }));
+  },
   tablePasteOpen: false,
   setTablePasteOpen: (open) => set({ tablePasteOpen: open }),
+  groupIds: [],
+  groupSeq: 0,
+  setGroup: (ids, opts) => {
+    const unique = [...new Set(ids)];
+    const group = unique.length >= 2 ? unique : [];
+    const cur = get().groupIds;
+    if (cur.length === group.length && cur.every((id, i) => id === group[i])) return;
+    set({
+      groupIds: group,
+      ...(opts?.fromFlow ? {} : { groupSeq: get().groupSeq + 1 }),
+      ...(group.length ? { selectedTableId: null, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null, colSel: null, colMenu: null } : {}),
+    });
+  },
+  selectBox: (ids) => {
+    if (ids.length >= 2) { get().setGroup(ids); return; }
+    get().setGroup([]);
+    get().setSelectedTable(ids[0] ?? null);
+  },
+  groupClipboard: null,
+  copyTables: (ids) => {
+    const d = get().diagram;
+    const wanted = [...new Set(ids)];
+    if (!d || !wanted.length || wanted.length > GROUP_MAX) return 0;
+    const byTable = new Map<string, CanonicalColumn[]>();
+    for (const c of d.columns) {
+      const list = byTable.get(c.tableId);
+      if (list) list.push(c); else byTable.set(c.tableId, [c]);
+    }
+    const shown = new Map(d.tables.map((t) => [t.id, t]));
+    const flow = get().flow;
+    // Por valor y en el orden del grupo (cada tabla con sus columnas en el orden
+    // único): editar o borrar después no altera lo copiado.
+    const tables = wanted.flatMap((id) => {
+      const t = shown.get(id);
+      if (!t) return [];
+      const node = flow?.getNode(id);
+      return [{
+        table: { ...t, ...(t.udpValues ? { udpValues: { ...t.udpValues } } : {}) },
+        cols: orderColumns(byTable.get(id) ?? []).map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) })),
+        pos: node ? { x: Math.round(node.position.x), y: Math.round(node.position.y) } : null,
+      }];
+    });
+    if (!tables.length) return 0;
+    set({ groupClipboard: { tables, source: clipSource() }, tblClipboard: null, colClipboard: null, colSel: null });
+    return tables.length;
+  },
+  groupPasteOpen: false,
+  setGroupPasteOpen: (open) => set({ groupPasteOpen: open }),
   colMenu: null,
   openColMenu: (m) => set({ colMenu: m }),
   closeColMenu: () => { if (get().colMenu) set({ colMenu: null }); },
@@ -1359,7 +1584,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Una columna de otra tabla también la selecciona — se enfoca (salvo que
     // quien llama ya la encuadró, como el Locate).
     const changed = tableId !== get().selectedTableId;
-    set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: colId, selectedViewId: null });
+    set((s) => ({ ...pickTable(s, tableId), selectedColumnId: colId }));
     if (changed && opts?.frame !== false) get().frameTable(tableId, { afterClick: true });
   },
   flow: null,
@@ -1636,7 +1861,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // Los nodos de vista nunca abren el panel y en solo lectura se centra sin
     // seleccionar (viewer-lock).
     if (node.type !== 'view' && useSessionStore.getState().openMode !== 'readonly') {
-      set({ selectedTableId: tableId, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
+      set((s) => pickTable(s, tableId));
     }
     // Una tabla se enfoca con sus vistas, como al seleccionarla con un clic.
     if (node.type === 'table') { get().frameTable(tableId); return; }
@@ -1758,7 +1983,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       activeProjectId: pid, folders, subjectAreas, activeFolderId: null, activeSaId: null,
       diagram: null, selectedTableId: null, drawings: [],
       // El clipboard sobrevive (se pega en otro proyecto); la selección y los popups no.
-      colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
+      colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, groupPasteOpen: false, groupIds: [], panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
       trees: { ...s.trees, [pid]: { folders, subjectAreas } },
     }));
   },
@@ -1828,7 +2053,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         // contexto): cerrar la sesión de canvas y volver al chooser.
         set({ activeProjectId: null, folders: [], subjectAreas: [], activeFolderId: null,
               activeSaId: null, diagram: null, selectedTableId: null, drawings: [],
-              colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
+              colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, groupPasteOpen: false, groupIds: [], panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
         if (pid) {
           toast.error('This project was deleted in a published version.');
           useSessionStore.getState().closeModel();
@@ -1862,7 +2087,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
           // canvas queda; si no, se cierra (su diagrama es de la sesión
           // anterior) y se dice por qué, en lugar de cerrarse en silencio.
           if (!(await stillAsked(e))) return false;
-          set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
+          set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, groupPasteOpen: false, groupIds: [], panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
           toast.error(`Couldn't reload the canvas: ${reasonOf(e)}. Open it again from the explorer.`,
             { id: `dmh-canvas-reload:${askedKey}` });
           return false;
@@ -1918,7 +2143,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       sawOthers(diagram.draftSeq);
       sawDraft(diagram.draftSeq);
       set({ ...crossProject, activeSaId: saId, diagram, selectedTableId: null, selectedEdgeId: null,
-            colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
+            colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, groupPasteOpen: false, groupIds: [], panelFocusColId: null, selectedColumnId: null, selectedViewId: null,
             drawings: diagram.subjectArea.drawings ?? [] });
       // Reglas de naming del proyecto del canvas (best-effort, no bloquea).
       void get().loadNaming(pid ?? get().activeProjectId);
@@ -1973,9 +2198,21 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid, isCurrent);
   },
   deleteFolder: async (id, projectId) => {
+    const pid = projectId ?? get().activeProjectId; if (!pid) return;
     const { isCurrent } = explorerRequest();
-    await struct.deleteFolder(id);
-    const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid, isCurrent);
+    // Con sus subcarpetas; sus canvases quedan en la raíz del proyecto.
+    await struct.deleteFolderTree(id, pid);
+    await get()._refreshProject(pid, isCurrent);
+  },
+  moveFolder: async (id, parentFolderId, projectId) => {
+    const pid = projectId ?? get().activeProjectId; if (!pid) return false;
+    return inMoveOrder(pid, async () => {
+      if (!moveAllowed({ kind: 'folder', id }, parentFolderId, get().trees[pid])) return false;
+      const { isCurrent } = explorerRequest();
+      await struct.moveFolder(id, parentFolderId);
+      await get()._refreshProject(pid, isCurrent);
+      return true;
+    });
   },
   createCanvas: async (projectId, folderId, name) => {
     const { isCurrent, pin } = explorerRequest();
@@ -1988,9 +2225,8 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
   renameCanvas: async (id, name, projectId) => {
     const pid = projectId ?? get().activeProjectId; if (!pid) return;
     const { isCurrent } = explorerRequest();
-    const pool = get().trees[pid]?.subjectAreas ?? get().subjectAreas;
-    const sa = pool.find((s) => s.id === id);
-    await struct.updateSubjectArea(id, { projectId: pid, name, folderId: sa?.folderId ?? null });
+    // Solo el nombre: la carpeta la deja el documento vigente.
+    await struct.updateSubjectArea(id, { projectId: pid, name });
     await get()._refreshProject(pid, isCurrent);
   },
   deleteCanvas: async (id, projectId) => {
@@ -2004,12 +2240,20 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (itsOwn) useUndoStore.getState().clear();
     const pid = projectId ?? get().activeProjectId; if (pid) await get()._refreshProject(pid, isCurrent);
   },
-  moveCanvas: async (id, folderId) => {
-    const pid = get().activeProjectId; if (!pid) return;
-    const sa = get().subjectAreas.find((s) => s.id === id); if (!sa) return;
-    const { isCurrent } = explorerRequest();
-    await struct.updateSubjectArea(id, { projectId: pid, name: sa.name, folderId });
-    await get()._refreshProject(pid, isCurrent);
+  moveCanvas: async (id, folderId, projectId) => {
+    const pid = projectId ?? get().activeProjectId; if (!pid) return false;
+    return inMoveOrder(pid, async () => {
+      if (!moveAllowed({ kind: 'canvas', id }, folderId, get().trees[pid])) return false;
+      const { isCurrent } = explorerRequest();
+      // Solo la carpeta: el nombre lo deja el documento vigente.
+      await struct.updateSubjectArea(id, { projectId: pid, folderId });
+      // El canvas abierto sabe dónde quedó (la búsqueda ⌘K arranca acotada a su
+      // carpeta), en sitio: cambiar la identidad del diagrama re-armaría el canvas.
+      const open = get().diagram;
+      if (open?.subjectArea.id === id) open.subjectArea.folderId = folderId;
+      await get()._refreshProject(pid, isCurrent);
+      return true;
+    });
   },
   renameProject: async (id, name) => {
     await struct.renameProject(id, name);
@@ -2051,7 +2295,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     set({
       ...treesPatch,
       folders, subjectAreas, activeFolderId,
-      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null }),
+      ...(saStillExists ? {} : { activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, groupPasteOpen: false, groupIds: [], panelFocusColId: null, selectedColumnId: null, selectedViewId: null }),
     });
   },
   loadNaming: async (projectId) => {
@@ -2107,7 +2351,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       // Un dibujo del debounce se guarda antes de cerrar (el canvas sigue
       // existiendo); con el 404 el canvas ya no está.
       if (!(e instanceof ApiError && e.status === 404)) flushPendingDrawings(id, get().drawings);
-      set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
+      set({ activeSaId: null, diagram: null, selectedTableId: null, drawings: [], colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, groupPasteOpen: false, groupIds: [], panelFocusColId: null, selectedColumnId: null, selectedViewId: null });
       if (e instanceof ApiError && e.status === 404) {
         toast.error('This canvas is no longer in this version, so it was closed. Open another one from the explorer.', { id: `dmh-canvas-reload:${sessionNow()}` });
       } else if (!quiet) {
@@ -2317,7 +2561,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // La tabla creada queda seleccionada → sube al frente (zIndex) y no cae
     // oculta detrás de un bloque que ya estaba en el canvas; y sigue encima de
     // lo demás aunque se deseleccione.
-    set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
+    set((s) => pickTable(s, id));
     get().markFresh({ [saId]: [id] });
     // Undo: tabla recién creada — la cascada del delete es trivial.
     const drop = tableDrop(id);
@@ -2494,7 +2738,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     } finally { release(); }
     if (!pin.holds()) return;   // lo que sigue es de la sesión de la acción
     // Selecciona la primera importada → al frente (zIndex) y visible.
-    set({ selectedTableId: tableIds[0], selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });
+    set((s) => pickTable(s, tableIds[0]));
     // Lo que entró queda encima de lo demás (lo que ya estaba, no).
     get().markFresh({ [saId]: [...added.tableIds, ...added.viewIds] });
     if (viewsUnread) {
@@ -2656,14 +2900,14 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       await get().reload();
     } finally { release(); }
     if (!pin.holds()) return;   // no selecciona en otra sesión
-    set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null });   // al frente + visible
+    set((s) => pickTable(s, id));   // al frente + visible
     get().markFresh({ [saId]: [id] });   // encima aunque se deseleccione
     const drop = tableDrop(id);
     pushUndo(`Create table ${physical}`, lost ? verifiedLost(drop, lost) : drop, pin);
   })),
   setColumnTarget: (id: string | null) => set({ columnTarget: id }),
   // Seleccionar tabla o edge cambia de contexto: cierra el panel de columna.
-  setSelectedTable: (id) => set({ selectedTableId: id, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null }),
+  setSelectedTable: (id) => set((s) => pickTable(s, id)),
   selectTable: (id) => {
     const changed = id !== get().selectedTableId;
     get().setSelectedTable(id);
@@ -2675,35 +2919,41 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     if (changed || _unframed === id) { _unframed = null; get().frameTable(id, { afterClick: true }); }
   },
   setSelectedEdge: (id) => set({ selectedEdgeId: id, selectedTableId: null, selectedColumnId: null, selectedViewId: null }),
-  removeTableFromArea: (tableId) => historyAction(async () => {
+  removeTableFromArea: (tableId) => get().removeTablesFromArea([tableId]),
+  removeTablesFromArea: (ids) => historyAction(async () => {
     get().markDirty();
     const saId = get().activeSaId; if (!saId) return;
     const d = editableDiagram(); if (!d) return;   // el canvas de esta sesión
+    const tableIds = [...new Set(ids)];
+    if (!tableIds.length) return;
+    const leaving = new Set(tableIds);
     const pin = pinSession();
-    // Para el Undo: nombre y posición antes de quitarla (el remove
-    // también borra su entrada del layout).
-    const name = d?.tables.find((t) => t.id === tableId)?.physicalName ?? 'table';
+    // Para el Undo: nombre y posiciones antes de quitarlas (el remove
+    // también borra sus entradas del layout).
+    const name = tableIds.length === 1
+      ? d.tables.find((t) => t.id === tableIds[0])?.physicalName ?? 'table'
+      : `${tableIds.length} ${facetNouns(get().viewMode).many}`;
     const flow = get().flow;
     const posOf = (id: string) => {
       const n = flow?.getNode(id);
       return n ? { x: Math.round(n.position.x), y: Math.round(n.position.y) } : null;
     };
-    const pos = posOf(tableId);
-    // Las vistas que quedan sin fuente en el canvas salen con la tabla
+    const pos = Object.fromEntries(tableIds.map((id) => [id, posOf(id)] as const).filter(([, p]) => p));
+    // Las vistas que quedan sin fuente en el canvas salen con las tablas
     // (siguen en el modelo). La membresía parte de la lista materializada.
-    const remaining = (d?.subjectArea.tableIds ?? []).filter((t) => t !== tableId);
-    const orphans = orphanViewIds(d?.views ?? [], remaining);
+    const remaining = (d.subjectArea.tableIds ?? []).filter((t) => !leaving.has(t));
+    const orphans = orphanViewIds(d.views ?? [], remaining);
     const orphanPos = Object.fromEntries(orphans.map((vid) => [vid, posOf(vid)] as const).filter(([, p]) => p));
-    // Los trazos manuales de los wires de la tabla salen con ella (si vuelve
+    // Los trazos manuales de los wires de las tablas salen con ellas (si vuelven
     // al canvas en otra posición dejarían de calzar); el Undo los repone.
-    const wireIds = wireIdsOfTable(d?.relationships ?? [], tableId);
+    const wireIds = [...new Set(tableIds.flatMap((id) => wireIdsOfTable(d.relationships ?? [], id)))];
     const droppedRoutes = routesOf(get().canvasRoutes, wireIds);
     // quita de tableIds + layout (+ vistas huérfanas) (+ trazos de sus wires).
     // Las listas las arma el servicio dentro de la cola del canvas.
-    const shown = d?.subjectArea.viewIds;
+    const shown = d.subjectArea.viewIds;
     const out = await struct.removeFromCanvas(saId, {
-      tableIds: [tableId], viewIds: orphans, ...(Object.keys(droppedRoutes).length ? { dropRouteIds: wireIds } : {}),
-      ...pinsOut(saId, [tableId]),
+      tableIds, viewIds: orphans, ...(Object.keys(droppedRoutes).length ? { dropRouteIds: wireIds } : {}),
+      ...pinsOut(saId, tableIds),
     }, shown);
     // La inversa es una sola escritura (tablas, vistas, posiciones y trazos
     // juntos, sin que cada parte lea el canvas por su cuenta). Las vistas son
@@ -2714,71 +2964,96 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     // pantalla; si no hay nodo (en lógico las vistas no lo son), las del canvas
     // grabado que devolvió el servicio. Rehacer y volver a deshacer usan lo que
     // el servicio dice que salió (posición, color, vistas y trazos).
-    pushUndo(`Remove ${name} from canvas`, tableIn(saId, tableId, {
+    pushUndo(`Remove ${name} from canvas`, tablesIn(saId, tableIds, {
       ...out, viewIds: orphans, routes: droppedRoutes,
-      layout: { ...out.layout, ...(pos ? { [tableId]: pos } : {}), ...orphanPos } as Record<string, { x: number; y: number }>,
+      layout: { ...out.layout, ...pos, ...orphanPos } as Record<string, { x: number; y: number }>,
     }, wireIds, shown), pin);
-    if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
+    if (leaving.has(get().selectedTableId ?? '')) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
+    if (get().groupIds.some((id) => leaving.has(id))) get().setGroup(get().groupIds.filter((id) => !leaving.has(id)));
     await get().reload();
   }),
-  deleteTable: (tableId, opts) => historyAction(() => runBlocking('Deleting table…', async () => {
+  deleteTable: (tableId, opts) => get().deleteTables([tableId], {
+    ...(opts?.pre ? { pres: new Map([[tableId, opts.pre]]) } : {}), ...(opts?.onUndo ? { onUndo: opts.onUndo } : {}),
+  }),
+  deleteTables: (ids, opts) => {
+    const tableIds = [...new Set(ids)];
+    const nouns = facetNouns(get().viewMode);
+    const one = tableIds.length === 1;
+    return historyAction(() => runBlocking(one ? 'Deleting table…' : `Deleting ${tableIds.length} ${nouns.many}…`, async () => {
     // Cascada completa en el changeset (versionada) en un solo lote, todo o nada
     // (doc 133 §4): vistas, relaciones, columnas, el FK que se apaga en las
-    // hijas, la tabla y cada canvas donde estaba. Las lecturas van primero
-    // (estado pre-borrado: ninguna afecta a las otras). Todas tienen que llegar:
-    // si una cayera a `[]`, la tabla se borraría igual y dejaría vistas y
-    // relaciones huérfanas en el draft. Si alguna falla, no se borra nada. Un
-    // lote que no entra en un envío va por partes, con la tabla al final: si
-    // algo se interrumpe, la tabla sigue viva y repetir el delete converge. Un
-    // solo reload al terminar. Todo es de la sesión donde empezó el borrado —
-    // también como inversa de «Create table» o «Paste table»; cada escritura lo
-    // verifica.
+    // hijas, las tablas y cada canvas donde estaban. Para un grupo (doc 134
+    // §3.9) es la misma cascada sobre el conjunto: cada vista y relación una
+    // sola vez, y el FK solo en las hijas de afuera del grupo. Las lecturas van
+    // primero (estado pre-borrado: ninguna afecta a las otras). Todas tienen que
+    // llegar: si una cayera a `[]`, las tablas se borrarían igual y dejarían
+    // vistas y relaciones huérfanas en el draft. Si alguna falla, no se borra
+    // nada. Un lote que no entra en un envío va por partes, con las tablas al
+    // final: si algo se interrumpe, siguen vivas y repetir el delete converge.
+    // Un solo reload al terminar. Todo es de la sesión donde empezó el borrado
+    // — también como inversa de «Create table» o «Paste table»; cada escritura
+    // lo verifica.
+    if (!tableIds.length) return;
+    const group = new Set(tableIds);
     const pin = pinSession();
     const askedCs = useSessionStore.getState().activeChangesetId;
-    const noun = facetNouns(get().viewMode).one;
-    let views: View[], rels: gov.Relationship[], cols: CanonicalColumn[], usage: gov.TableUsageRow[];
+    let views: View[], rels: gov.Relationship[], cols: CanonicalColumn[];
+    let usageOf: Map<string, Set<string>>;   // tabla → canvases que la contienen
     let viewCanvasIds: string[];
     let viewsBack: Map<string, ListedViews>;
     let others: Map<string, Diagram>;
-    let tableDoc: CanonicalTable | null = null;
+    const docs = new Map<string, CanonicalTable | null>();
     const fkClearedPre: CanonicalColumn[] = [];
     try {
-      // vistas que la usan (cualquier fuente: tableId o sourceTableIds)
-      const viewsRead = viewsSvc.listViews(tableId);
-      // El documento de la tabla, para el Undo, si no está en el canvas abierto
-      // ni lo trae el llamador (p. ej. deshacer «Create table» con otro canvas
-      // abierto).
-      const docRead = opts?.pre || liveDiagram()?.tables.some((x) => x.id === tableId)
-        ? Promise.resolve(null) : gov.currentTable(tableId);
-      [views, rels, cols, usage, viewCanvasIds, tableDoc] = await Promise.all([
-        viewsRead,
-        // relaciones donde es extremo (globales)
-        gov.listRelationships(tableId),
-        gov.listColumns(tableId),
-        // canvases que la contienen
-        gov.tableUsage(tableId).then((u) => u.usage),
-        // y los de sus vistas (una multi-fuente puede estar en un canvas sin
-        // esta tabla).
-        viewsRead.then((vs) => (vs.length ? canvasesOfViews(tableId, vs.map((v) => v.id)) : [])),
-        docRead,
-      ]);
+      const reads = await Promise.all(tableIds.map(async (tableId) => {
+        // vistas que la usan (cualquier fuente: tableId o sourceTableIds)
+        const viewsRead = viewsSvc.listViews(tableId);
+        // El documento de la tabla, para el Undo, si no está en el canvas
+        // abierto ni lo trae el llamador (p. ej. deshacer «Create table» con
+        // otro canvas abierto).
+        const docRead = opts?.pres?.get(tableId) || liveDiagram()?.tables.some((x) => x.id === tableId)
+          ? Promise.resolve(null) : gov.currentTable(tableId);
+        const [tViews, tRels, tCols, usage, tViewCanvases, doc] = await Promise.all([
+          viewsRead,
+          // relaciones donde es extremo (globales)
+          gov.listRelationships(tableId),
+          gov.listColumns(tableId),
+          // canvases que la contienen
+          gov.tableUsage(tableId).then((u) => u.usage),
+          // y los de sus vistas (una multi-fuente puede estar en un canvas sin
+          // esta tabla).
+          viewsRead.then((vs) => (vs.length ? canvasesOfViews(tableId, vs.map((v) => v.id)) : [])),
+          docRead,
+        ]);
+        return { tableId, tViews, tRels, tCols, usage, tViewCanvases, doc };
+      }));
+      // Lo del grupo, sin repetir: una relación entre dos tablas del grupo, o
+      // una vista de varias, aparece en la lectura de cada una.
+      const byId = <T extends { id: string }>(rows: T[]) => [...new Map(rows.map((r) => [r.id, r])).values()];
+      views = byId(reads.flatMap((r) => r.tViews));
+      rels = byId(reads.flatMap((r) => r.tRels));
+      cols = byId(reads.flatMap((r) => r.tCols));
+      usageOf = new Map(reads.map((r) => [r.tableId, new Set(r.usage.map((u) => u.canvasId))]));
+      viewCanvasIds = [...new Set(reads.flatMap((r) => r.tViewCanvases))];
+      for (const r of reads) docs.set(r.tableId, r.doc);
+      const tableCanvasIds = [...new Set([...usageOf.values()].flatMap((c) => [...c]))];
       // El lote de abajo saca cada vista borrada de todo canvas que la lista
       // (cascada del backend): antes se anota qué lista cada canvas y dónde,
-      // para que el Undo las reponga; y el diagrama de los otros canvases de la
-      // tabla.
+      // para que el Undo las reponga; y el diagrama de los otros canvases de las
+      // tablas.
       [viewsBack, others] = await Promise.all([
-        listedViewsBy([...usage.map((u) => u.canvasId), ...viewCanvasIds], views.map((v) => v.id)),
-        diagramsBefore(usage.map((u) => u.canvasId)),
+        listedViewsBy([...tableCanvasIds, ...viewCanvasIds], views.map((v) => v.id)),
+        diagramsBefore(tableCanvasIds),
       ]);
-      // FK huérfano en columnas hija de la otra tabla (misma regla conservadora
-      // que deleteRelationship: si ya no participan en ninguna relación). Se
-      // decide antes del lote, descontando las relaciones que este borrado se
-      // lleva; una lectura fallida aborta el borrado en lugar de apagar el FK
-      // de una hija que sigue en otra relación.
+      // FK huérfano en columnas hija de tablas de afuera del grupo (misma regla
+      // conservadora que deleteRelationship: si ya no participan en ninguna
+      // relación). Se decide antes del lote, descontando las relaciones que este
+      // borrado se lleva; una lectura fallida aborta el borrado en lugar de
+      // apagar el FK de una hija que sigue en otra relación.
       const gone = new Set(rels.map((r) => r.id));
       const children = new Map<string, Set<string>>();   // childTableId → childColumnIds
       for (const r of rels) {
-        if (r.parentTableId !== tableId || r.childTableId === tableId) continue;
+        if (!group.has(r.parentTableId) || group.has(r.childTableId)) continue;
         const set = children.get(r.childTableId) ?? new Set<string>();
         r.pairs.forEach((p) => set.add(p.childColumnId));
         children.set(r.childTableId, set);
@@ -2795,39 +3070,47 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }
       }
     } catch (e) {
-      throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(`this ${noun}`));
+      throw await readFailure(e, askedCs, pin, () => dependentsUnreadable(one ? `this ${nouns.one}` : `these ${nouns.many}`));
     }
     pin.check();
     get().markDirty();
     // Pre-imágenes para el Undo: las lecturas de arriba ya traen el estado
     // pre-borrado — se congelan por valor antes de tocar nada. Sin canvas
     // (inspector) la pre-imagen viene del dossier efectivo.
-    const t0 = liveDiagram()?.tables.find((x) => x.id === tableId) ?? opts?.pre ?? tableDoc;
-    const tPre = t0 ? { ...t0, ...(t0.udpValues ? { udpValues: { ...t0.udpValues } } : {}) } : null;
+    const pres = new Map<string, CanonicalTable>();
+    for (const tableId of tableIds) {
+      const t0 = liveDiagram()?.tables.find((x) => x.id === tableId) ?? opts?.pres?.get(tableId) ?? docs.get(tableId);
+      if (t0) pres.set(tableId, { ...t0, ...(t0.udpValues ? { udpValues: { ...t0.udpValues } } : {}) });
+    }
     const undoSaId = get().activeSaId;
-    const undoNode = get().flow?.getNode(tableId);
-    const undoPos = undoNode ? { x: Math.round(undoNode.position.x), y: Math.round(undoNode.position.y) } : null;
+    const undoPos = new Map<string, Point>();
+    for (const tableId of tableIds) {
+      const node = get().flow?.getNode(tableId);
+      if (node) undoPos.set(tableId, { x: Math.round(node.position.x), y: Math.round(node.position.y) });
+    }
     const colsPre = cols.map((c) => ({ ...c, ...(c.udpValues ? { udpValues: { ...c.udpValues } } : {}) }));
     const relsPre = rels.map((r) => ({ ...r, pairs: r.pairs.map((p) => ({ ...p })) }));
     const viewsPre = views.map((v) => JSON.parse(JSON.stringify(v)) as View);
-    // Dónde se veía en cada canvas que no estaba abierto.
-    const seenPre = new Map([...others].map(([id, dia]) => [id, seenAt(dia, tableId)] as const));
-    // De todos los canvases que la contienen sale con su posición y su color, y
-    // con ella los trazos manuales de sus wires (las relaciones se borran: sus
+    // Las tablas del grupo que tiene cada canvas.
+    const groupIn = (canvasId: string) => tableIds.filter((t) => usageOf.get(t)?.has(canvasId));
+    // Dónde se veía cada una en cada canvas que no estaba abierto.
+    const seenPre = new Map([...others].map(([id, dia]) => [id, new Map(groupIn(id).map((t) => [t, seenAt(dia, t)] as const))] as const));
+    // De todos los canvases que las contienen salen con su posición y su color,
+    // y con ellas los trazos manuales de sus wires (las relaciones se borran: sus
     // trazos quedarían huérfanos) y sus vistas; cada canvas dice qué salió. De
     // los que solo listaban alguna de sus vistas (multi-fuente) salen solo las
     // vistas.
-    const wireIds = wireIdsOfTable(rels, tableId);
     const viewIdsOut = views.map((v) => v.id);
-    const tableCanvases = new Set(usage.map((u) => u.canvasId));
+    const tableCanvases = new Set([...usageOf.values()].flatMap((c) => [...c]));
     const canvasIds = [...tableCanvases, ...[...viewsBack.keys()].filter((id) => !tableCanvases.has(id))];
     const leaving = (canvasId: string): struct.CanvasRemove => {
-      const withTable = tableCanvases.has(canvasId);
+      const here = groupIn(canvasId);
+      const wireIds = [...new Set(here.flatMap((t) => wireIdsOfTable(rels, t)))];
       return {
-        ...(withTable ? { tableIds: [tableId] } : {}),
+        ...(here.length ? { tableIds: here } : {}),
         ...(viewIdsOut.length ? { viewIds: viewIdsOut } : {}),
-        ...(withTable && wireIds.length ? { dropRouteIds: wireIds } : {}),
-        ...(withTable ? pinsOut(canvasId, [tableId], others.get(canvasId)) : {}),   // en todos sus canvases
+        ...(wireIds.length ? { dropRouteIds: wireIds } : {}),
+        ...(here.length ? pinsOut(canvasId, here, others.get(canvasId)) : {}),   // en todos sus canvases
       };
     };
     const dependents = [
@@ -2838,11 +3121,11 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
     let removed: Map<string, struct.CanvasMembersOut>;
     let lost = 0;
     try {
-      ({ result: removed, lost } = await sendLot(pin, canvasIds, (docs) => {
+      ({ result: removed, lost } = await sendLot(pin, canvasIds, (docsOf) => {
         const canvases = new Map<string, SubjectArea>();
         const out = new Map<string, struct.CanvasMembersOut>();
         for (const canvasId of canvasIds) {
-          const { next, out: gone } = struct.planCanvasRemove(docs.get(canvasId) ?? null, leaving(canvasId));
+          const { next, out: gone } = struct.planCanvasRemove(docsOf.get(canvasId) ?? null, leaving(canvasId));
           if (next) canvases.set(canvasId, next);
           out.set(canvasId, gone);
         }
@@ -2851,15 +3134,15 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
             ...dependents,
             // FK huérfano en columnas hija sobrevivientes (decidido arriba).
             ...fkClearedPre.map((c) => gov.bulk.updateColumn({ ...c, isForeignKey: false })),
-            gov.bulk.deleteTable(tableId),
+            ...tableIds.map((t) => gov.bulk.deleteTable(t)),
           ],
           canvases,
           result: out,
         };
-      }, async () => (await gov.currentTable(tableId)) === null, 'deleted'));
+      }, async () => (await Promise.all(tableIds.map((t) => gov.currentTable(t)))).every((t) => t === null), 'deleted'));
     } catch (e) {
       if (!(e instanceof struct.LotTooLargeError)) throw e;
-      // Por partes: el modelo en tandas, el FK de cada hija, cada canvas y la tabla.
+      // Por partes: el modelo en tandas, el FK de cada hija, cada canvas y las tablas.
       pin.check();
       await gov.recordChangesBulk(dependents);
       for (const c of fkClearedPre) {
@@ -2871,32 +3154,34 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         pin.check();
         removed.set(canvasId, await struct.removeFromCanvas(canvasId, leaving(canvasId)));
       }
-      pin.check();
-      await gov.deleteTable(tableId);
+      for (const t of tableIds) {
+        pin.check();
+        await gov.deleteTable(t);
+      }
     }
-    // Undo: un solo lote repone tabla + columnas + FKs limpiadas + relaciones +
+    // Undo: un solo lote repone tablas + columnas + FKs limpiadas + relaciones +
     // vistas (el guard N=N resuelve la llave con las columnas del mismo lote) y
-    // cada canvas. Su contrario la vuelve a borrar, fresca.
-    if (tPre) {
-      // Lo que vuelve a cada canvas: la tabla a su posición (en el activo, a la
+    // cada canvas. Su contrario las vuelve a borrar, fresco.
+    if (pres.size === tableIds.length) {
+      // Lo que vuelve a cada canvas: sus tablas a su posición (en el activo, a la
       // de pantalla), con los trazos que ese canvas quitó, y las vistas que ese
       // canvas listaba, a la suya; un canvas sin lista explícita sigue sin
-      // lista. Un canvas que solo listaba sus vistas recupera esas, no la tabla
-      // (nunca la tuvo). El color de cada caja en ese canvas vuelve con ella.
+      // lista. Un canvas que solo listaba sus vistas recupera esas, no las tablas
+      // (nunca las tuvo). El color de cada caja en ese canvas vuelve con ella.
       const back = (canvasId: string): struct.CanvasAdd => {
-        const withTable = tableCanvases.has(canvasId);
-        const active = withTable && canvasId === undoSaId;
+        const here = groupIn(canvasId);
+        const active = canvasId === undoSaId;
         const out = removed.get(canvasId);
         const listed = viewsBack.get(canvasId);
         const viewIds = [...new Set([...(listed?.viewIds ?? []), ...(out?.viewIds ?? [])])];
-        const seen = withTable && !active ? seenPre.get(canvasId) : null;
-        const layout = {
-          ...(out?.layout ?? {}), ...(listed?.layout ?? {}),
-          ...(active && undoPos ? { [tableId]: undoPos } : {}),
-          ...(seen ? { [tableId]: seen } : {}),
-        };
+        const placed: Record<string, Point> = {};
+        for (const t of here) {
+          const p = active ? undoPos.get(t) : seenPre.get(canvasId)?.get(t);
+          if (p) placed[t] = p;
+        }
+        const layout = { ...(out?.layout ?? {}), ...(listed?.layout ?? {}), ...placed };
         return {
-          ...(withTable ? { tableIds: [tableId] } : {}),
+          ...(here.length ? { tableIds: here } : {}),
           ...(viewIds.length ? { viewIds } : {}),
           ...(Object.keys(layout).length ? { layout } : {}),
           ...(out && Object.keys(out.routes).length ? { routes: out.routes } : {}),
@@ -2905,7 +3190,7 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
       };
       const restore: HistoryStep = async (undo) => {
         const model = [
-          gov.bulk.createTable(tPre),
+          ...tableIds.map((t) => gov.bulk.createTable(pres.get(t)!)),
           ...colsPre.map((c) => gov.bulk.createColumn(c)),
           ...fkClearedPre.map((c) => gov.bulk.createColumn(c)),
           ...relsPre.map((r) => gov.bulk.upsertRelationship(r)),
@@ -2916,12 +3201,12 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         const undoCs = useSessionStore.getState().activeChangesetId;
         const lot = { read: false };
         try {
-          await struct.canvasLot(canvasIds, (docs) => {
+          await struct.canvasLot(canvasIds, (docsOf) => {
             lot.read = true;
             undo.check();
             const canvases = new Map<string, SubjectArea>();
             for (const canvasId of canvasIds) {
-              const cur = docs.get(canvasId);
+              const cur = docsOf.get(canvasId);
               const next = cur ? struct.planCanvasAdd(cur, back(canvasId)).next : null;
               if (next) canvases.set(canvasId, next);
             }
@@ -2940,20 +3225,23 @@ export const useModelerStore = create<ModelerState>((set, get) => ({
         }
         await get().reload();
         get().syncExplorer(canvasIds.includes(get().activeSaId ?? ''));
-        return tableDrop(tableId, tPre);
+        return tablesDrop(tableIds, pres);
       };
       const step = lost ? verifiedLost(restore, lost) : restore;
+      const label = one ? `Delete table ${pres.get(tableIds[0])!.physicalName}` : `Delete ${tableIds.length} ${nouns.many}`;
       if (opts?.onUndo) opts.onUndo(step);
-      else pushUndo(`Delete table ${tPre.physicalName}`, step, pin);
+      else pushUndo(label, step, pin);
     }
-    if (get().selectedTableId === tableId) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
+    if (group.has(get().selectedTableId ?? '')) set({ selectedTableId: null, selectedColumnId: null, selectedViewId: null });
+    if (get().groupIds.some((t) => group.has(t))) get().setGroup(get().groupIds.filter((t) => !group.has(t)));
     await get().reload();
-    // Si la tabla no estaba en el canvas activo (o no hay canvas — borrado
+    // Si las tablas no estaban en el canvas activo (o no hay canvas — borrado
     // desde el Object Inspector), reload() no cambia ninguna firma → el
     // Explorer se refresca a mano. Complementa la regla de `reload()` (firma
     // del diagrama). Un canvas que listaba sus vistas también cambió de firma.
     get().syncExplorer(canvasIds.includes(get().activeSaId ?? ''));
-  })),
+    }));
+  },
   updateTable: async (id, fields) => {
     get().markDirty();
     const t = editableDiagram()?.tables.find((x) => x.id === id);
@@ -3790,7 +4078,7 @@ useSessionStore.subscribe((s, prev) => {
       diagram: null, drawings: [], openingSaId: null,
       selectedTableId: null, selectedEdgeId: null, selectedColumnId: null, selectedViewId: null,
       columnTarget: null, relPreset: null, subcatArmed: false, hoverEdgeId: null, hoverNodeId: null,
-      colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, panelFocusColId: null,
+      colSel: null, colMenu: null, pasteTarget: null, tablePasteOpen: false, groupPasteOpen: false, groupIds: [], panelFocusColId: null,
       inspect: null, searchOpen: false, navigating: null, pendingFocusTableId: null, pendingFocusColId: null,
       modelProps: null, colorPreview: null, freshNodes: {},
     });
@@ -3803,22 +4091,24 @@ useSessionStore.subscribe((s, prev) => {
  * canvases (por `folderId`; los de `folderId == null` cuelgan de la raíz).
  * Carpetas (= subject areas de Erwin) y canvases se ordenan alfabéticamente
  * (case-insensitive); `order` (el orden de Erwin que estampa el kit) queda solo
- * como desempate.
+ * como desempate. Nada queda escondido (`displayParents`): lo que cuelga de una
+ * carpeta que ya no existe, o de un ciclo que formaron dos versiones, se ve en
+ * la raíz.
  */
 export function buildProjectTree(project: Project, folders: Folder[], canvases: SubjectArea[]): ProjectTree {
+  const sortF = folderOrder;
+  const sortC = (a: SubjectArea, b: SubjectArea) => byName(a.name, b.name);
+  const parentOf = displayParents(folders);
   const byParent = new Map<string | null, Folder[]>();
   for (const f of folders) {
-    const key = f.parentFolderId ?? null;
+    const key = parentOf.get(f.id) ?? null;
     (byParent.get(key) ?? byParent.set(key, []).get(key)!).push(f);
   }
   const byFolder = new Map<string | null, SubjectArea[]>();
   for (const c of canvases) {
-    const key = c.folderId ?? null;
+    const key = c.folderId && parentOf.has(c.folderId) ? c.folderId : null;
     (byFolder.get(key) ?? byFolder.set(key, []).get(key)!).push(c);
   }
-  const byName = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }) || a.localeCompare(b);
-  const sortF = (a: Folder, b: Folder) => byName(a.name, b.name) || a.order - b.order;
-  const sortC = (a: SubjectArea, b: SubjectArea) => byName(a.name, b.name);
   const build = (parentId: string | null): FolderNode[] =>
     [...(byParent.get(parentId) ?? [])].sort(sortF).map((folder) => ({
       folder,

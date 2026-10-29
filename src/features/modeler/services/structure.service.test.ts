@@ -368,7 +368,7 @@ describe('acciones del Explorer sin sesión de edición', () => {
       struct.createFolder('p1', null, 'F'),
       struct.renameFolder('f1', 'F2'),
       struct.moveFolder('f1', null),
-      struct.deleteFolder('f1'),
+      struct.deleteFolderTree('f1', 'p1'),
       struct.createSubjectArea('p1', 'C', null),
       struct.updateSubjectArea('sa1', { projectId: 'p1', name: 'C2' }),
       struct.deleteSubjectArea('sa1'),

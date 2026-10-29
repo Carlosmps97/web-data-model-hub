@@ -56,7 +56,7 @@ const SERVICE_WRITES = new Set([
   // Estructura (canvas, carpetas, proyecto) — el store los llama como `struct.*`.
   'struct.addToCanvas', 'struct.removeFromCanvas', 'struct.setSubjectAreaLayout', 'struct.setSubjectAreaDrawings',
   'struct.arrangeSubjectArea', 'struct.setWireRoute', 'struct.setSubjectAreaUdp', 'struct.patchSubjectAreaUdp', 'struct.createFolder',
-  'struct.renameFolder', 'struct.moveFolder', 'struct.deleteFolder', 'struct.createSubjectArea',
+  'struct.renameFolder', 'struct.moveFolder', 'struct.deleteFolderTree', 'struct.createSubjectArea',
   'struct.updateSubjectArea', 'struct.deleteSubjectArea', 'struct.renameProject', 'struct.deleteProject',
   'struct.reviveProject', 'struct.setCanvasColors',
   // El ledger de la versión, directo.
@@ -70,9 +70,9 @@ const VIEW_SYNCS = /^sync(New|Removed|Renamed)\w*$/;
 export const STORE_WRITE_ACTIONS = new Set([
   'addColumn', 'updateColumn', 'deleteColumn', 'deleteColumns', 'reorderColumns', 'applyCanvasDrop', 'updateRelationship',
   'deleteRelationship', 'createTable', 'updateTable', 'deleteTable', 'addExistingTables', 'addViewsToCanvas',
-  'removeViewFromCanvas', 'deleteView', 'removeTableFromArea', 'saveLayout', 'saveNodePositions', 'saveAllLayout',
-  'autoOrganize', 'setWireRoute', 'pasteTable', 'createTableFromSources', 'createSubjectArea', 'createFolder',
-  'renameFolder', 'deleteFolder', 'createCanvas', 'renameCanvas', 'deleteCanvas', 'moveCanvas', 'renameProject',
+  'removeViewFromCanvas', 'deleteView', 'removeTableFromArea', 'removeTablesFromArea', 'deleteTables', 'saveLayout', 'saveNodePositions', 'saveAllLayout',
+  'autoOrganize', 'setWireRoute', 'pasteTable', 'pasteTables', 'createTableFromSources', 'createSubjectArea', 'createFolder',
+  'renameFolder', 'moveFolder', 'deleteFolder', 'createCanvas', 'renameCanvas', 'deleteCanvas', 'moveCanvas', 'renameProject',
   'deleteProject', 'undoProjectDeletion', 'saveAll',
   'addDrawing', 'updateDrawing', 'deleteDrawing', 'persistDrawings',
   'setBoxColors', 'setObjectColor',

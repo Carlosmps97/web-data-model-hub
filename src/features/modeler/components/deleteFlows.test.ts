@@ -20,7 +20,7 @@ import { facetNouns } from '@/lib/facets';
 import * as gov from '@/services/governance.service';
 import * as viewsSvc from '@/services/views.service';
 import { useSessionStore } from '@/store/useSessionStore';
-import { askDeleteColumns, askDeleteTable, askRemoveFromCanvas, readEmptiedViews } from './deleteFlows';
+import { askDeleteColumns, askDeleteTable, askDeleteTables, askRemoveFromCanvas, askRemoveTablesFromCanvas, readEmptiedViews } from './deleteFlows';
 
 const col = (id: string, extra: object = {}) =>
   ({ id, tableId: 'tP', physicalName: id.toUpperCase(), logicalName: `log_${id}`, dataType: 'INT', typeOverridden: false, ordinal: 0, ...extra });
@@ -321,5 +321,54 @@ describe('quitar y borrar la tabla (los del panel Properties)', () => {
     expect(dialog().title).toBe('Remove from canvas');
     expect(remove).toHaveBeenCalledWith('tP');
     expect(pushToast).toHaveBeenCalledWith('Table removed from this canvas');
+  });
+});
+
+// Borrar y quitar un grupo de tablas (doc 134 §3.8–§3.9): cada tabla queda tomada
+// mientras dura; si otro borrado ya tiene una, no hay diálogo y las demás quedan
+// libres.
+describe('borrar y quitar un grupo de tablas', () => {
+  const T1 = { id: 't1', physicalName: 'T1', logicalName: 't1' };
+  const T2 = { id: 't2', physicalName: 'T2', logicalName: 't2' };
+  beforeEach(() => {
+    vi.mocked(gov.tableUsage).mockResolvedValue({ usage: [{ canvasId: 'sa1' }], total: 1 } as never);
+    vi.mocked(gov.listRelationships).mockResolvedValue([] as never);
+    vi.mocked(viewsSvc.listViews).mockResolvedValue([] as never);
+  });
+  it('un diálogo para todas, borra con sus ids y avisa', async () => {
+    const deleteTables = vi.fn(async () => {});
+    await askDeleteTables({ tables: [T1, T2] as never, nouns: facetNouns('physical'), pushToast: pushToast as never, deleteTables });
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    expect(dialog().title).toBe('Delete 2 tables');
+    expect(deleteTables).toHaveBeenCalledWith(['t1', 't2']);
+    expect(pushToast).toHaveBeenCalledWith('2 tables deleted');
+  });
+  it('si otro borrado tiene una de las tablas: sin diálogo, aviso, y la otra queda libre', async () => {
+    let open!: () => void;
+    vi.mocked(confirmDialog).mockImplementationOnce((o: { action?: () => Promise<unknown> }) =>
+      new Promise((r) => { open = () => { void o.action?.(); r(true); }; }) as never);
+    const first = askDeleteTable({ table: T2 as never, nouns: facetNouns('physical'), pushToast: pushToast as never, deleteTable: vi.fn(async () => {}) });
+    await vi.waitFor(() => expect(confirmDialog).toHaveBeenCalledTimes(1));
+    const beforeDialog = vi.fn();
+    await askDeleteTables({ tables: [T1, T2] as never, nouns: facetNouns('physical'), pushToast: pushToast as never, deleteTables: vi.fn(), beforeDialog });
+    expect(confirmDialog).toHaveBeenCalledTimes(1);
+    expect(beforeDialog).toHaveBeenCalled();
+    expect(pushToast).toHaveBeenCalledWith('A delete on one of these tables is already in progress');
+    open();
+    await first;
+    const again = vi.fn(async () => {});
+    await askDeleteTable({ table: T1 as never, nouns: facetNouns('physical'), pushToast: pushToast as never, deleteTable: again });
+    expect(again).toHaveBeenCalledWith('t1');
+  });
+  it('con el menú cerrado mientras lee el impacto, no hay diálogo', async () => {
+    await askDeleteTables({ tables: [T1, T2] as never, nouns: facetNouns('physical'), pushToast: pushToast as never, deleteTables: vi.fn(), stillWanted: () => false });
+    expect(confirmDialog).not.toHaveBeenCalled();
+  });
+  it('quitar del canvas: un diálogo, los ids y el aviso', async () => {
+    const remove = vi.fn(async () => {});
+    await askRemoveTablesFromCanvas({ tables: [T1, T2] as never, nouns: facetNouns('physical'), pushToast: pushToast as never, remove });
+    expect(textOf(dialog().message)).toContain('Remove 2 tables from this canvas? They stay in the model');
+    expect(remove).toHaveBeenCalledWith(['t1', 't2']);
+    expect(pushToast).toHaveBeenCalledWith('2 tables removed from this canvas');
   });
 });

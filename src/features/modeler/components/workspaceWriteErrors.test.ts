@@ -42,6 +42,8 @@ const NOT_A_WRITE = [
   /`A subtype must be \$\{facetNouns\(st\.viewMode\)\.a\} on this canvas`/,
   /`\$\{capitalize\(facetNouns\(st\.viewMode\)\.a\)\} cannot be a subtype of itself`/,
   /`\$\{capitalize\(facetNouns\(st\.viewMode\)\.a\)\} cannot have an identifying relationship with itself`/,
+  // Las del grupo de tablas: el tope y el grupo copiado en otro proyecto.
+  /`Select up to \$\{GROUP_MAX\} /, /pushToast\(GROUP_PASTE_FOREIGN, 'err'\)/,
 ];
 
 describe('avisos de escrituras del canvas: esperan la revalidación', () => {
