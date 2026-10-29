@@ -161,23 +161,65 @@ describe('identificadores Oracle (comillas dobles)', () => {
   });
 });
 
-describe('comentarios (COMMENT ON)', () => {
-  it('encendidos: COMMENT ON TABLE / COLUMN después del CREATE; el físico manda', () => {
+describe('comentarios', () => {
+  it('encendidos, como Erwin: COMMENT al final de cada columna y el de la tabla después del «)»', () => {
+    const input: DatabricksDdlInput = {
+      ...BASE,
+      tables: [{ id: 't1', physicalName: 'DE_ASIGNACION', schema: 'stg', description: 'Data Entry que contiene información.' }],
+      columns: [
+        { id: 'c1', tableId: 't1', physicalName: 'CODPRODUCTO', dataType: 'VARCHAR(30)', ordinal: 0, isPrimaryKey: true, description: 'Codigo del Producto.' },
+        { id: 'c2', tableId: 't1', physicalName: 'NUMSECUENCIAL', dataType: 'INT', ordinal: 1, isPrimaryKey: true, description: 'Número secuencial' },
+        { id: 'c3', tableId: 't1', physicalName: 'FECACTUALIZACIONREGISTRO', dataType: 'DATETIME', ordinal: 2, description: "Fecha de 'Actualizacion'" },
+      ],
+    };
+    expect(oracleTableStatements(input, { ...ORA, includeComments: true })[0].sql).toBe(
+      'CREATE TABLE DE_ASIGNACION (\n'
+      + "  CODPRODUCTO VARCHAR(30) COMMENT 'Codigo del Producto.',\n"
+      + "  NUMSECUENCIAL INT COMMENT 'Número secuencial',\n"
+      + "  FECACTUALIZACIONREGISTRO DATETIME COMMENT 'Fecha de ''Actualizacion''',\n"
+      + '  PRIMARY KEY (CODPRODUCTO, NUMSECUENCIAL) DISABLE NOVALIDATE\n'
+      + ')\n'
+      + "COMMENT 'Data Entry que contiene información.';\n",
+    );
+  });
+
+  it('el físico manda; sin texto no hay COMMENT; NOT NULL va antes del COMMENT; nunca COMMENT ON en las tablas', () => {
     const input: DatabricksDdlInput = {
       ...BASE,
       columns: [
-        { id: 'c1', tableId: 't1', physicalName: 'CODPARAMETRO', dataType: 'VARCHAR(30)', ordinal: 0, description: 'lógico', physicalDescription: "físico 'x'" },
+        { id: 'c1', tableId: 't1', physicalName: 'CODPARAMETRO', dataType: 'VARCHAR(30)', ordinal: 0, isNullable: false, description: 'lógico', physicalDescription: "físico 'x'" },
         { id: 'c2', tableId: 't1', physicalName: 'DESPARAMETRO', dataType: 'VARCHAR(256)', ordinal: 1, description: 'Descripción', physicalDescription: '  ' },
         { id: 'c3', tableId: 't1', physicalName: 'SIN', dataType: 'INT', ordinal: 2 },
       ],
     };
-    const ddl = oracleDdl(input, { ...MODEL, includeComments: true });
-    expect(ddl).toContain(");\nCOMMENT ON TABLE STG_PARAM.DE_PARAMETRO IS 'Parámetros';\n");
-    expect(oracleDdl(input, { ...ORA, includeComments: true })).toContain("COMMENT ON COLUMN DE_PARAMETRO.CODPARAMETRO IS 'físico ''x''';\n");
-    expect(ddl).toContain("COMMENT ON COLUMN STG_PARAM.DE_PARAMETRO.CODPARAMETRO IS 'físico ''x''';\n");
-    expect(ddl).toContain("COMMENT ON COLUMN STG_PARAM.DE_PARAMETRO.DESPARAMETRO IS 'Descripción';\n");
-    expect(ddl).not.toContain('DE_PARAMETRO.SIN IS');
-    expect(ddl).not.toMatch(/INT COMMENT|\) COMMENT/);
+    const ddl = oracleDdl(input, { ...MODEL, includeComments: true, includeNotNull: true });
+    expect(ddl).toContain(
+      'CREATE TABLE STG_PARAM.DE_PARAMETRO (\n'
+      + "  CODPARAMETRO VARCHAR(30) NOT NULL COMMENT 'físico ''x''',\n"
+      + "  DESPARAMETRO VARCHAR(256) COMMENT 'Descripción',\n"
+      + '  SIN INT\n'
+      + ')\n'
+      + "COMMENT 'Parámetros';\n");
+    expect(ddl).not.toContain('COMMENT ON');
+    // tabla sin definición: el CREATE cierra como siempre
+    const plain = oracleDdl({ ...input, tables: [{ ...BASE.tables[0], description: ' ' }] }, { ...ORA, includeComments: true });
+    expect(plain).toContain("  SIN INT\n);\n");
+    // apagados: ni un COMMENT
+    expect(oracleDdl(input, ORA)).not.toContain('COMMENT');
+  });
+
+  it('un comentario de varias líneas queda dentro del literal de su columna, sin líneas que corten la sentencia', () => {
+    const input: DatabricksDdlInput = {
+      ...BASE,
+      columns: [{ id: 'c1', tableId: 't1', physicalName: 'TIPINGRESO', dataType: 'CHAR(1)', ordinal: 0,
+        description: 'Tipo de ingreso.\n\nValores;\nM - Masivo' }],
+    };
+    expect(oracleTableStatements(input, { ...ORA, includeComments: true })[0].sql).toBe(
+      'CREATE TABLE DE_PARAMETRO (\n'
+      + "  TIPINGRESO CHAR(1) COMMENT 'Tipo de ingreso.\nValores; M - Masivo'\n"
+      + ')\n'
+      + "COMMENT 'Parámetros';\n",
+    );
   });
 
   it('comentarios que no rompen SQL*Plus (línea que termina en «;», «/» sola, líneas largas)', () => {
@@ -233,7 +275,7 @@ describe('comentarios (COMMENT ON)', () => {
     // el recorte a 4 000 bytes que cae justo después de un salto no deja una línea vacía al final
     const cutAtBreak = oracleComment(`${'a'.repeat(1999)} ${'b'.repeat(1999)} ${'c'.repeat(10)}`);
     expect(cutAtBreak.endsWith('\n')).toBe(false);
-    // un texto que empieza con «#» (va en la línea de `COMMENT ON … IS '`) se parte normal
+    // un texto que empieza con «#» (va en la misma línea que `COMMENT '`) se parte normal
     const hash = oracleComment(`##${'x'.repeat(2500)}`);
     expect(hash.split('\n').map((l) => l.length)).toEqual([2000, 502]);
     const lead = oracleComment(` \r\n #\n  #x${'z'.repeat(2500)}`);

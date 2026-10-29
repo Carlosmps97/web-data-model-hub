@@ -260,3 +260,39 @@ describe('Regla de layout: las particiones van siempre en el PARTITIONED BY', ()
   });
 });
 
+describe('Acciones «Keep column» (columna) y «Don\'t generate» (tabla)', () => {
+  const OMIT: DdlRule = {
+    ...RULE, id: 'o1', name: 'sufijo_dac_sin_vistas_dac', target: 'table', condition: "tabla.nombre ENDS WITH 'DAC'",
+    udpRefs: [], action: { omit: true }, appliesTo: ['ddl.vista_tecnica_dac', 'ddl.vista_rej_dac'],
+  };
+  const KEEP: DdlRule = {
+    ...RULE, id: 'k1', name: 'sufijo_dac_conservar_columnas', target: 'column', condition: "tabla.nombre ENDS WITH 'DAC'",
+    udpRefs: [], action: { keep: true }, appliesTo: ['ddl.vista_tecnica', 'ddl.vista_rej'],
+  };
+  const panelOf = (tree: unknown, onChange?: (a: Record<string, unknown>) => void) => {
+    const el = [...walk(tree)].find((e) => typeof e.type === 'function' && e.type.name === 'RuleAction')!;
+    resetFake(null, { keepRefs: true });
+    return (el.type as (p: unknown) => unknown)(onChange ? { ...el.props, onChange } : el.props);
+  };
+  const segOf = (panel: unknown) => [...walk(panel)].find((e) => typeof e.type === 'function' && e.type.name === 'Segmented')!;
+
+  it('una regla guardada con omit / keep abre en su acción y explica qué hace', async () => {
+    const omit = panelOf(await open(OMIT));
+    expect(segOf(omit).props.value).toBe('omit');
+    expect(segOf(omit).props.options).toContainEqual(['omit', "Don't generate"]);
+    expect(textOf(omit)).toContain('are not generated');
+    const keep = panelOf(await open(KEEP));
+    expect(segOf(keep).props.value).toBe('keep');
+    expect(segOf(keep).props.options).toContainEqual(['keep', 'Keep column']);
+    expect(textOf(keep)).toContain('lower priority');
+  });
+
+  it('elegir la acción arma su JSON', async () => {
+    const onChange = vi.fn();
+    (segOf(panelOf(await open({ ...OMIT, action: { tags: { a: 'b' } } }), onChange)).props.onPick as (v: string) => void)('omit');
+    expect(onChange).toHaveBeenLastCalledWith({ omit: true });
+    (segOf(panelOf(await open({ ...KEEP, action: { exclude: true } }), onChange)).props.onPick as (v: string) => void)('keep');
+    expect(onChange).toHaveBeenLastCalledWith({ keep: true });
+  });
+});
+

@@ -123,7 +123,7 @@ function OracleFields({ value, onChange, disabled, viewsHint }: {
         <SwitchRow disabled={disabled} on={o.includeViews} onClick={() => set('includeViews', !o.includeViews)} label="Views" hint={viewsHint ?? 'Modeled views'} />
         <SwitchRow disabled={disabled} on={o.includeKeys} onClick={() => set('includeKeys', !o.includeKeys)} label="Primary & foreign keys" hint="PRIMARY KEY (…) DISABLE NOVALIDATE · FK" />
         <SwitchRow disabled={disabled} on={o.includeNotNull} onClick={() => set('includeNotNull', !o.includeNotNull)} label="NOT NULL" hint="Required columns" />
-        <SwitchRow disabled={disabled} on={o.includeComments} onClick={() => set('includeComments', !o.includeComments)} label="Comments" hint="COMMENT ON TABLE / COLUMN" />
+        <SwitchRow disabled={disabled} on={o.includeComments} onClick={() => set('includeComments', !o.includeComments)} label="Comments" hint="COMMENT '…' on columns and tables" />
       </div>
 
       <span className="exd-section">Identifier casing</span>

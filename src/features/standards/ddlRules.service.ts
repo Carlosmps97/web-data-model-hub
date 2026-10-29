@@ -140,6 +140,8 @@ export function ruleActionSummary(r: DdlRule): string {
   if (a.tags) return `SET TAGS (${Object.keys(a.tags as object).join(', ')})`;
   if (a.tblproperties) return `TBLPROPERTIES (${Object.keys(a.tblproperties as object).join(', ')})`;
   if (a.exclude === true) return 'Exclude column from the SELECT';
+  if (a.keep === true) return 'Keep column as is (lower-priority column rules skip it)';
+  if (a.omit === true) return `Don't generate: ${(r.appliesTo ?? []).join(', ')}`;
   if (a.statements) {
     const st = a.statements as { before?: string[]; after?: string[] };
     const n = (st.before?.length ?? 0) + (st.after?.length ?? 0);

@@ -87,7 +87,7 @@ export interface DdlRule {
   sourceArtifact?: string | null;         // solo kind='generator'
   condition: string;
   udpRefs: { udpId: string; level: UdpLevel }[];
-  action: Record<string, unknown>;        // expression|exclude|tags|types|tblproperties|statements|layout|emit
+  action: Record<string, unknown>;        // expression|exclude|keep|tags|types|tblproperties|statements|layout|omit|emit
   appliesTo: string[];
   priority: number;
   enabled: boolean;

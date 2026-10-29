@@ -13,11 +13,12 @@
 //    y de a lo sumo 128 bytes.
 //  - `NOT NULL` aparte de las llaves y apagado por default; sin esquema por
 //    default (`CREATE TABLE DE_X`), o el del modelo, o uno elegido.
-//  - Comentarios con `COMMENT ON TABLE / COLUMN` (Oracle no los acepta dentro
-//    del CREATE): recortados a 4 000 bytes y sin nada que corte la sentencia en
-//    SQL*Plus / SQL Developer (líneas en blanco, líneas que terminan en «;»,
-//    líneas de solo «/» o «.», líneas de más de 2 000 caracteres). Si algo trae
-//    «&», el script arranca con `SET DEFINE OFF`.
+//  - Comentarios como los escribe Erwin: `COMMENT '…'` al final de cada columna
+//    y el de la tabla después del `)` del CREATE; el de una vista, con
+//    `COMMENT ON TABLE`. Recortados a 4 000 bytes y sin nada que corte la
+//    sentencia en SQL*Plus / SQL Developer (líneas en blanco, líneas que
+//    terminan en «;», líneas de solo «/» o «.», líneas de más de 2 000
+//    caracteres). Si algo trae «&», el script arranca con `SET DEFINE OFF`.
 //  - Identificadores con comillas dobles solo si el nombre las necesita (o
 //    siempre, si así se configura).
 //  - Sin particiones, LOCATION, TBLPROPERTIES, tags, USING ni Unity Catalog:
@@ -45,7 +46,7 @@ export interface OracleDdlOptions {
   includeKeys: boolean;
   /** `NOT NULL` en las columnas obligatorias (y en las de la PK), aparte de las llaves. */
   includeNotNull: boolean;
-  /** `COMMENT ON TABLE / COLUMN` desde las definiciones. */
+  /** Comentarios de tablas, columnas y vistas desde las definiciones. */
   includeComments: boolean;
   identifierCase: IdentifierCase;
   quoteIdentifiers: QuoteMode;
@@ -124,10 +125,10 @@ export function oracleType(raw: string, o: Pick<OracleDdlOptions, 'typeCase'>): 
 
 // ── Comentarios ─────────────────────────────────────────────────────────────
 
-/** Máximo de un comentario en Oracle (COMMENT ON … IS '…'). */
+/** Máximo de un comentario en Oracle (4 000 bytes). */
 export const ORACLE_MAX_COMMENT_BYTES = 4000;
-// SQL*Plus no acepta líneas de más de 2 499 caracteres: con margen para el
-// `COMMENT ON COLUMN esquema.tabla.columna IS '` de la primera.
+// SQL*Plus no acepta líneas de más de 2 499 caracteres: con margen para lo que
+// va antes en la primera (`  COLUMNA TIPO COMMENT '`, `COMMENT ON TABLE vista IS '`).
 const MAX_COMMENT_LINE = 2000;
 
 // SQL*Plus / SQL Developer dentro de una sentencia: una línea que termina en «;»
@@ -136,7 +137,7 @@ const MAX_COMMENT_LINE = 2000;
 const ENDS_STATEMENT = (l: string) => l.endsWith(';');
 const LONE_BREAK = (l: string) => /^\s*[/.]\s*$/.test(l);
 // Peligrosa si queda al inicio de una línea física (la primera del literal va
-// en la misma línea que `COMMENT ON … IS '`: esa no cuenta).
+// en la misma línea que `COMMENT '`: esa no cuenta).
 const BREAKS_STATEMENT = (l: string) => LONE_BREAK(l) || /^\s*#/.test(l);
 
 /** Índice hasta el que una línea entra en el tope, medida como queda en el
@@ -304,7 +305,7 @@ function contextOf(input: DatabricksDdlInput, o: OracleDdlOptions): Ctx {
   return ctx;
 }
 
-/** CREATE TABLE (+ sus COMMENT ON) de una tabla — sin FK. */
+/** CREATE TABLE de una tabla, con sus comentarios adentro como Erwin — sin FK. */
 function tableDDL(t: DdlTable, ctx: Ctx): string {
   const { o, ident } = ctx;
   const full = qualify(t, ctx);
@@ -313,23 +314,16 @@ function tableDDL(t: DdlTable, ctx: Ctx): string {
   const inner = ordered.map((c) => {
     let l = `  ${ident(c.physicalName)} ${oracleType(c.dataType, o)}`;
     if (o.includeNotNull && (c.isNullable === false || c.isPrimaryKey)) l += ' NOT NULL';
+    // El comment físico manda; si no hay, la definición.
+    const cm = o.includeComments ? oracleComment((c.physicalDescription ?? '').trim() || (c.description ?? '')) : '';
+    if (cm) l += ` COMMENT ${lit(cm)}`;
     return l;
   });
   // Como Erwin: sin nombre de constraint y DISABLE NOVALIDATE.
   const pks = ordered.filter((c) => c.isPrimaryKey).map((c) => ident(c.physicalName));
   if (o.includeKeys && pks.length) inner.push(`  PRIMARY KEY (${pks.join(', ')}) DISABLE NOVALIDATE`);
-  let out = `CREATE TABLE ${full} (\n${inner.join(',\n')}\n);\n`;
-
-  if (o.includeComments) {
-    const td = oracleComment(t.description ?? '');
-    if (td) out += `COMMENT ON TABLE ${full} IS ${lit(td)};\n`;
-    for (const c of ordered) {
-      // El comment físico manda; si no hay, la definición.
-      const cm = oracleComment((c.physicalDescription ?? '').trim() || (c.description ?? ''));
-      if (cm) out += `COMMENT ON COLUMN ${full}.${ident(c.physicalName)} IS ${lit(cm)};\n`;
-    }
-  }
-  return out;
+  const td = o.includeComments ? oracleComment(t.description ?? '') : '';
+  return `CREATE TABLE ${full} (\n${inner.join(',\n')}\n)${td ? `\nCOMMENT ${lit(td)}` : ''};\n`;
 }
 
 /** Los `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY` del export: la tiene el
@@ -414,8 +408,8 @@ function exportViews(input: DatabricksDdlInput, ctx: Ctx): DdlView[] {
   });
 }
 
-/** Un statement por tabla del set exportado: su CREATE y sus COMMENT ON (las FK
- *  van en `oracleForeignKeysFile`). Alimenta el `.zip` (un archivo por objeto). */
+/** Un statement por tabla del set exportado: su CREATE con sus comentarios (las
+ *  FK van en `oracleForeignKeysFile`). Alimenta el `.zip` (un archivo por objeto). */
 export function oracleTableStatements(
   input: DatabricksDdlInput, o: OracleDdlOptions,
 ): { table: DdlTable; sql: string }[] {

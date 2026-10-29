@@ -21,7 +21,7 @@ todo import a los archivos internos. Expone:
 | Archivo | Responsabilidad |
 |---|---|
 | `generators.ts` | Generador puro de DDL Databricks sobre la forma canónica del diagrama (tablas, columnas, relaciones, vistas): `CREATE`, particiones, propiedades, tags y vistas con `col AS alias`. |
-| `oracle.ts` | Generador puro de DDL Oracle con la misma entrada: PK dentro del `CREATE TABLE` y FK como `ALTER TABLE … DISABLE NOVALIDATE` al final o en su propio archivo; tipos tal cual. |
+| `oracle.ts` | Generador puro de DDL Oracle con la misma entrada: PK dentro del `CREATE TABLE` y FK como `ALTER TABLE … DISABLE NOVALIDATE` al final o en su propio archivo; comentarios dentro del `CREATE TABLE` como Erwin; tipos tal cual. |
 | `outputSettings.ts` | Output settings (cómo se escribe el DDL y cómo se nombran los archivos), valores por defecto y fusión con lo guardado en el proyecto; espejo de `app/features/ddl_rules/output.py` del backend. |
 | `rulesBridge.ts` | Puente con las DDL Export Rules: lee las reglas, la configuración y las definiciones UDP del proyecto (`/api/projects/{id}/ddl-rules`, `/ddl-rules/config`, `/udp`), arma el payload con el estado efectivo del canvas (drafts incluidos) y ensambla el `.sql` con la respuesta de `POST /ddl-rules/render` y el sello de la versión de reglas. Sin reglas seleccionadas no interviene. |
 | `ddlExportBundle.ts` | Arma la lista de archivos del `.zip` (`{Tabla}/TABLE-…sql`, `VIEW_NEG-…`, `VIEW_TEC-…`) según las Output settings, resolviendo choques de nombre sin distinguir mayúsculas. |

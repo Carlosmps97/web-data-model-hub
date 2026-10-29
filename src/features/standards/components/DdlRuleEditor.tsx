@@ -189,7 +189,7 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
   const actionKind: RuleActionKind | 'emit' =
     draft.kind === 'generator' ? 'emit'
       : action.tags ? 'tags' : action.tblproperties ? 'tblproperties' : action.layout ? 'layout'
-        : action.types ? 'types'
+        : action.types ? 'types' : action.omit === true ? 'omit' : action.keep === true ? 'keep'
           : action.exclude === true ? 'exclude' : action.statements ? 'statements' : 'expression';
 
   return (
@@ -545,13 +545,14 @@ export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDe
 // ── sub-editores de action ─────────────────────────────────────────────────
 
 /** Acciones de una regla: por columna — expression, exclude (quita la
- *  proyección), tags y data types (renombra el tipo base al exportar, CHAR →
- *  VARCHAR); por tabla — tags, TBLPROPERTIES, statements (sentencias libres
- *  before/after) y column layout. */
-type RuleActionKind = 'expression' | 'exclude' | 'tags' | 'types' | 'tblproperties' | 'statements' | 'layout';
+ *  proyección), keep (la deja como está frente a las de menor prioridad), tags
+ *  y data types (renombra el tipo base al exportar, CHAR → VARCHAR); por tabla
+ *  — tags, TBLPROPERTIES, statements (sentencias libres before/after), column
+ *  layout y omit (no genera los objetos generados que apunta). */
+type RuleActionKind = 'expression' | 'exclude' | 'keep' | 'tags' | 'types' | 'tblproperties' | 'statements' | 'layout' | 'omit';
 
-const COLUMN_ACTIONS: [RuleActionKind, string][] = [['expression', 'Expression'], ['exclude', 'Exclude column'], ['tags', 'Tags'], ['types', 'Data types']];
-const TABLE_ACTIONS: [RuleActionKind, string][] = [['tags', 'Tags'], ['tblproperties', 'Properties'], ['statements', 'Statements'], ['layout', 'Column layout']];
+const COLUMN_ACTIONS: [RuleActionKind, string][] = [['expression', 'Expression'], ['exclude', 'Exclude column'], ['keep', 'Keep column'], ['tags', 'Tags'], ['types', 'Data types']];
+const TABLE_ACTIONS: [RuleActionKind, string][] = [['tags', 'Tags'], ['tblproperties', 'Properties'], ['statements', 'Statements'], ['layout', 'Column layout'], ['omit', "Don't generate"]];
 
 function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: {
   action: Record<string, unknown>;
@@ -581,7 +582,7 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
 
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
         <label style={{ ...lbl, marginBottom: 0 }}>Action</label>
         <div style={{ flex: 1 }} />
         <Segmented small options={options}
@@ -591,6 +592,8 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
             setKind(k);
             onChange(k === 'expression' ? { expression: (action.expression as string) ?? '', alias: (action.alias as string) ?? '{columna.nombre}' }
               : k === 'exclude' ? { exclude: true }
+                : k === 'keep' ? { keep: true }
+                : k === 'omit' ? { omit: true }
                 : k === 'tags' ? { tags: (action.tags as object) ?? {} }
                   : k === 'types' ? { types: (action.types as object) ?? { CHAR: 'VARCHAR' } }
                   : k === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last', partitionUdp: 'Particion' } }
@@ -629,6 +632,19 @@ function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: 
         <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16, fontSize: 11.5, color: '#56607A', lineHeight: 1.5 }}>
           The matching columns are <strong>removed from the SELECT</strong> of the target view artifacts
           (e.g. the DAC columns of the NoDAC technical view). Tags for those columns are not emitted there.
+        </div>
+      ) : kind === 'keep' ? (
+        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16, fontSize: 11.5, color: '#56607A', lineHeight: 1.5 }}>
+          The matching columns <strong>stay as they are</strong> in the target view artifacts: column rules with a
+          lower priority (exclude, expressions) don&apos;t touch them. Give this rule a higher priority than the rules
+          it should win over.
+        </div>
+      ) : kind === 'omit' ? (
+        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16, fontSize: 11.5, color: '#56607A', lineHeight: 1.5 }}>
+          For the matching tables, the generated objects you target <strong>are not generated</strong> — whatever
+          generator would create them — and neither is anything generated from them (e.g. no DAC views for a
+          legacy table with the DAC suffix). Only generated objects; the physical table and the modeled views
+          always export.
         </div>
       ) : kind === 'statements' ? (
         <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16 }}>

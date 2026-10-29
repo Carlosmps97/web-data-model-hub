@@ -805,8 +805,9 @@ está en `src/features/ddl/README.md`.
   (`tableSelection.ts`). Las vistas exportadas son las del canvas (`diagram.views`).
 - **Target dialect**: **Databricks** (Delta / Spark SQL, `generators.ts`) u **Oracle** (Oracle
   Database, `oracle.ts`). El modal abre con el dialecto por defecto del proyecto. En Oracle, la PK va
-  dentro de la tabla como `PRIMARY KEY (…) DISABLE NOVALIDATE`, las FK van en `FOREIGN_KEYS.sql` y
-  los tipos salen tal cual.
+  dentro de la tabla como `PRIMARY KEY (…) DISABLE NOVALIDATE`, las FK van en `FOREIGN_KEYS.sql`, los
+  tipos salen tal cual y los comentarios van como los escribe Erwin: `COMMENT '…'` al final de cada
+  columna y el de la tabla después del `)` del `CREATE TABLE`.
 - Pestaña **Output** (`DdlOutputForm.tsx`, `outputSettings.ts`): comillas, casing de tipos, forma del
   `CREATE`, tags en vistas, location y nombres de archivo. Arranca desde las Output settings del
   proyecto y se puede ajustar para un export puntual sin guardarlo. Oracle tiene su configuración

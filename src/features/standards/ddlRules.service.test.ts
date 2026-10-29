@@ -127,6 +127,9 @@ describe('ruleActionSummary — resumen de la acción en el catálogo', () => {
   });
   it('las demás acciones', () => {
     expect(ruleActionSummary(RULE)).toBe('sha2({col}, 512)');
+    expect(ruleActionSummary({ ...RULE, action: { keep: true } })).toBe('Keep column as is (lower-priority column rules skip it)');
+    expect(ruleActionSummary({ ...RULE, target: 'table', action: { omit: true }, appliesTo: ['ddl.vista_tecnica_dac', 'ddl.vista_rej_dac'] }))
+      .toBe("Don't generate: ddl.vista_tecnica_dac, ddl.vista_rej_dac");
     expect(ruleActionSummary({ ...RULE, action: { types: { CHAR: 'VARCHAR' } } })).toBe('Data types: CHAR → VARCHAR');
     expect(ruleActionSummary({ ...RULE, action: {} })).toBe('—');
   });
