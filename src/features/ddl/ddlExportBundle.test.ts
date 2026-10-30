@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  DEFAULT_FILE_NAMES, plainToObjects, statementsToObjects, objectsToEntries, viewKey, type DdlObject,
+  DEFAULT_FILE_NAMES, exportFolders, plainToObjects, objectsToEntries, type DdlObject,
 } from './ddlExportBundle';
 
 const paths = (objs: DdlObject[], f = DEFAULT_FILE_NAMES) => objectsToEntries(objs, f).map((e) => e.path).sort();
@@ -69,53 +69,24 @@ describe('plainToObjects + objectsToEntries', () => {
   });
 });
 
-describe('statementsToObjects (camino con reglas)', () => {
-  it('pliega los tags en el archivo del objeto sin líneas en blanco; tablas generadas TABLE, vistas generadas VIEW_TEC', () => {
-    const objs = statementsToObjects({
-      statements: [
-        { artifact: 'ddl.tabla_fisica', schema: 'v', name: 'CLIENTE', sql: 'CREATE TABLE cliente;' },
-        { artifact: 'ddl.tabla_fisica.tags', schema: 'v', name: 'CLIENTE', sql: 'ALTER TABLE cliente SET TAGS (x=1);' },
-        { artifact: 'ddl.tabla_fisica.extra', schema: 'v', name: 'CLIENTE', sql: 'OPTIMIZE cliente;' },
-        { artifact: 'ddl.tabla_rej', schema: 'v', name: 'CLIENTE_rej', sql: 'CREATE TABLE cliente_rej;' },
-        { artifact: 'ddl.vista_tecnica', schema: 'v_v', name: 'CLIENTE', sql: 'CREATE OR REPLACE VIEW v_v.cliente AS SELECT 1;' },
-        { artifact: 'ddl.vista_negocio', schema: 'v_vu', name: 'VW', sql: 'CREATE OR REPLACE VIEW vw AS SELECT 1;' },
-        { artifact: 'ddl.vista_negocio.tags', schema: 'v_vu', name: 'VW', sql: 'ALTER TABLE vw SET TAGS (d=4);' },
+describe('exportFolders: la carpeta que reciben las reglas es la del zip', () => {
+  it('tabla → su nombre; homónimas de esquemas distintos → desambiguadas; vista → su primera fuente exportada', () => {
+    const out = exportFolders({
+      tables: [
+        { id: 't1', physicalName: 'H_X', schema: 'a' }, { id: 't2', physicalName: 'H_X', schema: 'b' },
+        { id: 't3', physicalName: 'H/Y', schema: 'a' },
       ],
-      viewSources: new Map([[viewKey('v_vu', 'VW'), ['t1']]]),
-      tablesById: new Map([['t1', { physicalName: 'CLIENTE', schema: 'v' }]]),
+      views: [{ sourceTableIds: ['tx', 't3'] }, { sourceTableIds: [] }, { sourceTableIds: ['t1'] }],
     });
-    const byPath = Object.fromEntries(objectsToEntries(objs).map((e) => [e.path, e.content]));
-    expect(Object.keys(byPath).sort()).toEqual([
-      'CLIENTE/TABLE-CLIENTE.sql', 'CLIENTE/TABLE-CLIENTE_REJ.sql', 'CLIENTE/VIEW_NEG-VW.sql', 'CLIENTE/VIEW_TEC-CLIENTE.sql',
-    ]);
-    // CREATE y sus ALTER seguidos, sin líneas en blanco
-    expect(byPath['CLIENTE/TABLE-CLIENTE.sql']).toBe('CREATE TABLE cliente;\nALTER TABLE cliente SET TAGS (x=1);\nOPTIMIZE cliente;\n');
-    expect(byPath['CLIENTE/VIEW_NEG-VW.sql']).toBe('CREATE OR REPLACE VIEW vw AS SELECT 1;\nALTER TABLE vw SET TAGS (d=4);\n');
+    expect(out).toEqual({ tables: ['H_X (a)', 'H_X (b)', 'H_Y'], views: ['H_Y', '_views', 'H_X (a)'] });
   });
-
-  it('caso con reglas: las vistas _v y _vu del mismo nombre nunca chocan', () => {
-    const objs = statementsToObjects({
-      statements: [
-        { artifact: 'ddl.tabla_fisica', schema: 'stg', name: 'H_X', sql: 'CREATE TABLE h_x;' },
-        { artifact: 'ddl.vista_tecnica', schema: 'stg_v', name: 'H_X', sql: 'CREATE OR REPLACE VIEW stg_v.h_x AS SELECT 1;' },
-        { artifact: 'ddl.vista_tecnica_dac', schema: 'stg_v', name: 'H_Xdac', sql: 'CREATE OR REPLACE VIEW stg_v.h_xdac AS SELECT 1;' },
-        { artifact: 'ddl.vista_negocio', schema: 'stg_vu', name: 'H_XDAC', sql: 'CREATE OR REPLACE VIEW stg_vu.h_xdac AS SELECT 1;' },
-        { artifact: 'ddl.vista_negocio', schema: 'stg_vu', name: 'H_X', sql: 'CREATE OR REPLACE VIEW stg_vu.h_x AS SELECT 1;' },
-      ],
-      viewSources: new Map([[viewKey('stg_vu', 'H_XDAC'), ['t1']], [viewKey('stg_vu', 'H_X'), ['t1']]]),
-      tablesById: new Map([['t1', { physicalName: 'H_X', schema: 'stg' }]]),
-    });
-    expect(paths(objs)).toEqual([
-      'H_X/TABLE-H_X.sql', 'H_X/VIEW_NEG-H_X.sql', 'H_X/VIEW_NEG-H_XDAC.sql', 'H_X/VIEW_TEC-H_X.sql', 'H_X/VIEW_TEC-H_XDAC.sql',
-    ]);
-    // mismo prefijo y nombre con distinto casing o esquema → calificado con esquema, sin distinguir mayúsculas
-    const clash: DdlObject[] = [
-      { tableName: 'T', kind: 'view', origin: 'generated', schema: 'a', name: 'Tdac', sql: '1;' },
-      { tableName: 'T', kind: 'view', origin: 'generated', schema: 'b', name: 'TDAC', sql: '2;' },
-    ];
-    expect(paths(clash)).toEqual(['T/VIEW_TEC-A.TDAC.sql', 'T/VIEW_TEC-B.TDAC.sql']);
+  it('homónimas del mismo esquema comparten carpeta, como en el zip', () => {
+    const out = exportFolders({ tables: [{ id: 't1', physicalName: 'T', schema: 's' }, { id: 't2', physicalName: 'T', schema: 's' }], views: [] });
+    expect(out.tables).toEqual(['T', 'T']);
   });
+});
 
+describe('objectsToEntries: nombres de archivo', () => {
   it('fileNames: prefijos, separador y casing personalizados, y esquema "always"', () => {
     const objs: DdlObject[] = [
       { tableName: 'T', tableSchema: 's', kind: 'table', origin: 'model', schema: 's', name: 't', sql: 'x;' },

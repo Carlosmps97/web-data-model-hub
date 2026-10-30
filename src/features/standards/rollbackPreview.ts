@@ -22,5 +22,9 @@ export function rollbackSummary(p: RollbackPreview): string[] {
     ? `${fmt(n)} domain type change${n === 1 ? '' : 's'} · ${fmt(cols)} column${cols === 1 ? '' : 's'} re-typed (only the ones that follow each domain).`
     : 'No domain type changes — no column is re-typed.'];
   if (p.namesRederived) out.push(`Physical names are re-derived from the glossary and naming rules of ${p.target.label}.`);
+  if (p.ddlRulesKept) out.push(`The DDL export rules stay as they are: ${p.target.label} has them in the previous format (its output settings do come back).`);
+  if (p.ddlRulesMissingUdps.length) {
+    out.push(`The kept rules use UDPs that ${p.target.label} doesn't have (${p.ddlRulesMissingUdps.join(', ')}): their values come out empty in the DDL.`);
+  }
   return out;
 }

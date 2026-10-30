@@ -16,7 +16,7 @@ import { DEFAULT_DATABRICKS_OPTS, type DatabricksDdlOptions, type DdlDialect } f
 import { DEFAULT_FILE_NAMES, type DdlFileNames } from './ddlExportBundle';
 import { DEFAULT_ORACLE_OPTS, type OracleDdlOptions } from './oracle';
 
-export type DdlOutputSettings = Omit<DatabricksDdlOptions, 'partitionsLast'> & {
+export type DdlOutputSettings = DatabricksDdlOptions & {
   fileNames: DdlFileNames;
   /** Dialecto con el que abre el modal Export DDL. */
   dialect: DdlDialect;
@@ -105,5 +105,5 @@ export function mergeOutputSettings(raw?: Record<string, unknown> | null): DdlOu
 export function splitOutputSettings(s: DdlOutputSettings): { opts: DatabricksDdlOptions; fileNames: DdlFileNames } {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { fileNames, dialect, oracle, ...rest } = s;
-  return { opts: { ...rest, partitionsLast: false }, fileNames };
+  return { opts: rest, fileNames };
 }

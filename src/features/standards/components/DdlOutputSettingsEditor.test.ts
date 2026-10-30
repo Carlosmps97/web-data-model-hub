@@ -24,7 +24,7 @@ function rerender() {
   return tree;
 }
 function open(output: Record<string, unknown> | undefined = STORED) {
-  props = { projectId: 'p1', config: { lookups: {}, functions: [], output }, canEdit: true, onClose: vi.fn(), onApplied: vi.fn(async () => {}) };
+  props = { projectId: 'p1', config: { pieces: '', variables: {}, output }, canEdit: true, onClose: vi.fn(), onApplied: vi.fn(async () => {}) };
   resetFake();
   const tree = DdlOutputSettingsEditor(props);
   runEffects();

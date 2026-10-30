@@ -1,264 +1,163 @@
 /**
- * rulesBridge — puente del Export DDL con las DDL Export Rules.
+ * rulesBridge — puente del Export DDL con las reglas de Data Standards
+ * («Use export rules»).
  *
- * El motor de reglas vive en el backend y es puro: acá se arma el payload con
- * el estado efectivo que el canvas está exportando (drafts incluidos): cada
- * tabla con sus columnas (udpValues) y su CREATE base, cada vista con su SQL;
- * y el `.sql` final se ensambla con la respuesta + el sello de la versión de
- * reglas usada (la evidencia de por qué dos exports del mismo modelo salieron
- * distintos).
- *
- * Sin reglas seleccionadas el export no pasa por acá: sale byte-idéntico al del
- * generador local.
+ * Las reglas corren en el backend y devuelven archivos. Acá se arma el payload
+ * con lo que el popup exporta (drafts incluidos) y con el formato del generador
+ * de la web: tipos (`ddlType`), proyecciones y FROM de las vistas
+ * (`viewParts`) y la carpeta de cada objeto en el zip (`exportFolders`). Así
+ * el formato de las vistas tiene una sola fuente. Con «Use export settings» el
+ * export no pasa por acá.
  */
-import { apiGet, apiPost } from '@/services/http';
+import { ApiError, apiGet, apiPost } from '@/services/http';
 import { API_BASE } from '@/services/apiBase';
-import type { Diagram } from '@/features/modeler/services/modeler.service';
+import type { View } from '@/services/views.service';
 
 import {
-  tableStatements, viewStatements, ddlType, pkFirstColumns,
-  type DatabricksDdlInput, type DatabricksDdlOptions, type DdlColumn,
+  DEFAULT_DATABRICKS_OPTS, ddlType, exportTables, exportViews, sourceIdsOf, viewParts,
+  type DatabricksDdlInput, type DdlColumn, type DdlTable,
 } from './generators';
+import { exportFolders } from './ddlExportBundle';
+import { canvasDdlViews } from './canvasDdlViews';
 
-const PROJECT = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}`;
-const DDL_RULES = (pid: string) => `${PROJECT(pid)}/ddl-rules`;
+const DDL_RULES = (pid: string) => `${API_BASE}/api/projects/${encodeURIComponent(pid)}/ddl-rules`;
 
-/** Vista liviana de una regla para el selector del modal. */
+/** Una regla en la lista del popup (en el orden de Data Standards). */
 export interface ExportRule {
   id: string;
   name: string;
   /** Qué hace la regla, en una línea (la escribe el autor en Data Standards). */
   description?: string | null;
-  kind: 'rule' | 'generator';
-  /** Artefacto de entrada (solo generadores); encadena la cascada. */
-  sourceArtifact?: string | null;
-  priority: number;
+  scope: 'table' | 'view';
+  order: number;
   enabled: boolean;
-  validationState: 'valid' | 'invalid' | 'stale';
-  appliesTo: string[];
-  action: Record<string, unknown>;
 }
 
-/** Artefactos que existen siempre: nadie los genera, son la entrada del motor. */
-const ROOT_ARTIFACTS = new Set(['ddl.tabla_fisica', 'ddl.vista_negocio']);
-
-/** El `emit` de un generador, tal como lo guarda el kit. */
-interface EmitSpec { artifact?: string; type?: string; schema?: string; name?: string }
-const emitOf = (rule: ExportRule): EmitSpec | null =>
-  (rule.kind === 'generator' ? (rule.action.emit as EmitSpec | undefined) ?? null : null);
-
-// Los placeholders del motor, en el lenguaje del modelador.
-const PLACEHOLDERS: [RegExp, string][] = [
-  [/\{tabla\.esquema\}/g, '<schema>'],
-  [/\{tabla\.nombre\}/g, '<table>'],
-];
-const readable = (tpl: string) => PLACEHOLDERS.reduce((acc, [re, to]) => acc.replace(re, to), tpl);
-
-/** Objeto que crea un generador, legible: `{tabla.esquema}_v` + `{tabla.nombre}`
- *  ⇒ `<schema>_v.<table>`. Null si la regla no genera nada. */
-export function emitTarget(rule: ExportRule): { type: 'table' | 'view'; label: string } | null {
-  const emit = emitOf(rule);
-  const name = (emit?.name ?? '').trim();
-  if (!name) return null;
-  const schema = (emit?.schema ?? '').trim();
-  return {
-    type: emit?.type === 'view' ? 'view' : 'table',
-    label: readable(schema ? `${schema}.${name}` : name),
-  };
+/** De dónde salen los valores UDP del payload: el diagrama del canvas (o, en
+ *  la vista previa de Data Standards, la tabla leída del catálogo). */
+export interface RulesSource {
+  subjectArea?: { name?: string; udpValues?: Record<string, string> | null } | null;
+  tables: { id: string; udpValues?: Record<string, string> | null }[];
+  columns: { id: string; udpValues?: Record<string, string> | null }[];
 }
 
-/** Generador cuyo artefacto de entrada lo produce otro generador que no está
- *  seleccionado: la regla queda marcada pero no emite nada. Devuelve el nombre
- *  del generador que falta (null si no hay tal dependencia). */
-export function missingSource(
-  rule: ExportRule, rules: ExportRule[], selected: Set<string>,
-): string | null {
-  const src = rule.kind === 'generator' ? (rule.sourceArtifact ?? '') : '';
-  if (!src || ROOT_ARTIFACTS.has(src)) return null;
-  const producer = rules.find((r) => emitOf(r)?.artifact === src);
-  return producer && !selected.has(producer.id) ? producer.name : null;
+/** Lo que reciben las reglas (ver `engine/context.py` del backend). */
+export interface RulesPayload {
+  model: { name: string; udpValues: Record<string, string> };
+  tables: {
+    table: {
+      id: string; physicalName: string; schema: string | null; description: string | null;
+      udpValues: Record<string, string>; folder: string;
+    };
+    columns: {
+      id: string; physicalName: string; dataType: string; ddlType: string; ordinal: number;
+      isPrimaryKey: boolean; isNullable: boolean; isPartition: boolean; description: string | null;
+      udpValues: Record<string, string>;
+    }[];
+  }[];
+  views: {
+    id: string; name: string; schema: string; showOnCanvas: boolean; sourceTableIds: string[]; folder: string;
+    projections: { sql: string; alias: string | null; column: string | null; tableId: string | null; expression: boolean }[];
+    from: string;
+  }[];
 }
 
-/** Def UDP mínima para resolver por nombre el UDP que define las particiones. */
-export interface UdpDefLite { id: string; name: string; level: string; view?: string | null; }
-
-export interface RenderedStatement { artifact: string; schema?: string | null; name?: string | null; sql: string; }
-export interface RenderLogEntry { rule?: string | null; status: 'applied' | 'skipped'; reason?: string; column?: string; artifact?: string; }
-export interface RenderedExport {
-  statements: RenderedStatement[];
-  log: RenderLogEntry[];
-  rulesetVersion: string;
-  applied: number;
-  skipped: number;
+export interface RenderedFile { path: string; content: string; rule: string; object: string; objectKind: 'table' | 'view'; }
+/** `overridden`: una regla de más arriba escribió ese archivo para el mismo
+ *  objeto; `empty`: el contenido salió vacío (no se genera); `renamed`: la ruta
+ *  chocaba con la de otro objeto o tenía caracteres no válidos. */
+export interface RenderLogEntry {
+  rule: string; object: string; path: string; status: 'overridden' | 'empty' | 'renamed'; by?: string; to?: string;
 }
+export interface RenderedExport { files: RenderedFile[]; log: RenderLogEntry[]; rulesetVersion?: string; }
 
-/** Reglas del proyecto (cada proyecto tiene su ruleset). */
+/** Reglas del proyecto (cada proyecto tiene las suyas), en orden. */
 export const fetchExportRules = (projectId: string) => apiGet<ExportRule[]>(DDL_RULES(projectId));
 
-/** Defs UDP del proyecto (para `withUdpPartitions`). */
-export const fetchUdpDefs = (projectId: string) => apiGet<UdpDefLite[]>(`${PROJECT(projectId)}/udp`);
-
-/** Config del ruleset del proyecto: el modal toma de acá las Output settings. */
+/** Config de las reglas del proyecto: el popup toma de acá las Output settings. */
 export const fetchDdlConfig = (projectId: string) =>
   apiGet<{ output?: Record<string, unknown> | null }>(`${DDL_RULES(projectId)}/config`);
 
-export interface ExportLayout {
-  partitionsLast: boolean;
-  /** UDP de columna cuyos valores PART_nn definen las particiones
-   *  (qué columnas y en qué orden). null = el flag de la plataforma. */
-  partitionUdp: string | null;
-}
-
-/** Layout de columnas dictado por el ruleset: reglas de tabla seleccionadas
- *  sobre `ddl.tabla_fisica` con `action.layout`:
- *  `partitionColumns = 'last'` ⇒ particiones al final del CREATE (solo sin
- *  PARTITIONED BY; con él van siempre ahí, con su tipo);
- *  `partitionUdp` (también se acepta el alias `partitionOrderUdp`) ⇒
- *  particiones tomadas de ese UDP. Espejo de `layout_from_rules` del motor. */
-export function layoutFromRules(rules: ExportRule[], selected: Iterable<string>): ExportLayout {
-  const sel = new Set(selected);
-  const out: ExportLayout = { partitionsLast: false, partitionUdp: null };
-  const ordered = [...rules]
-    .filter((r) => sel.has(r.id) && r.kind === 'rule' && r.appliesTo.includes('ddl.tabla_fisica'))
-    .sort((a, b) => b.priority - a.priority || a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
-  for (const r of ordered) {
-    const lay = r.action.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string } | undefined;
-    if (!lay) continue;
-    if (lay.partitionColumns === 'last') out.partitionsLast = true;
-    const udp = (lay.partitionUdp ?? lay.partitionOrderUdp ?? '').trim();
-    if (udp && !out.partitionUdp) out.partitionUdp = udp;
-  }
-  return out;
-}
-
-
-// Misma convención del motor: PART_01 → 1.
-const PARTITION_RE = /^PART[_-]?(\d+)$/i;
-
-/** Valor UDP → correlativo de partición; valores fuera de la convención
- *  ('No Definido', vacío) → null. */
-export function partitionCorrelative(value: string | null | undefined): number | null {
-  const m = PARTITION_RE.exec((value ?? '').trim());
-  return m ? Number(m[1]) : null;
-}
-
-/** Particiones definidas por el UDP (espejo de `physical_columns` del
- *  motor): una columna es de partición si y solo si su valor es PART_nn,
- *  ordenada por nn; el flag `isPartition` de la plataforma se ignora. Sin UDP
- *  (o si el UDP no existe en el proyecto) las columnas vuelven intactas y rige
- *  el flag (export nativo). Puro. */
-export function withUdpPartitions<C extends { udpValues?: Record<string, string> | null; isPartition?: boolean }>(
-  columns: C[], udpDefs: UdpDefLite[], udpName: string | null,
-): (C & { partitionOrder?: number | null })[] {
-  if (!udpName) return columns;
-  const def = udpDefs.find((d) => d.level === 'column' && d.view !== 'logical' && d.name === udpName);
-  if (!def) return columns;
-  return columns.map((c) => {
-    const order = partitionCorrelative(c.udpValues?.[def.id]);
-    return { ...c, isPartition: order !== null, partitionOrder: order };
+/** Payload de las reglas: las tablas marcadas (en el orden del input) con sus
+ *  columnas y valores UDP del diagrama, y las vistas que entran al export. Puro. */
+export function buildRulesPayload({ diagram, input }: { diagram: RulesSource; input: DatabricksDdlInput }): RulesPayload {
+  const tables = exportTables(input);
+  const views = exportViews(input);
+  const folders = exportFolders({
+    tables: tables.map((t) => ({ id: t.id, physicalName: t.physicalName, schema: t.schema })),
+    views: views.map((v) => ({ sourceTableIds: sourceIdsOf(v) })),
   });
-}
-
-/** Reglas seleccionables en el modal: habilitadas y no-inválidas (las stale
- *  corren igual, solo avisan). Default del modal: todas marcadas. */
-export const selectableRules = (rules: ExportRule[]): ExportRule[] =>
-  rules.filter((r) => r.enabled && r.validationState !== 'invalid');
-
-/** Aplica las reglas seleccionadas al export y devuelve el `.sql` final. */
-export async function renderWithRules(args: {
-  projectId: string;
-  diagram: Diagram;
-  input: DatabricksDdlInput;         // el mismo input que recibe databricksDdl
-  opts: DatabricksDdlOptions;
-  ruleIds: string[];
-  modelName: string;
-}): Promise<{ sql: string; rendered: RenderedExport }> {
-  const { projectId, diagram, input, opts, ruleIds, modelName } = args;
-  const tables = tableStatements(input, opts);
-  const views = opts.includeViews ? viewStatements(input, opts) : [];
-  const colsByTable = new Map<string, DdlColumn[]>();
-  input.columns.forEach((c) => {
-    (colsByTable.get(c.tableId) ?? colsByTable.set(c.tableId, []).get(c.tableId)!).push(c);
-  });
-  const udpOfColumn = new Map(diagram.columns.map((c) => [c.id, c]));
-
-  const payload = {
-    ruleIds,
-    model: { name: diagram.subjectArea?.name, udpValues: diagram.subjectArea?.udpValues ?? {} },
-    // Opciones del modal: los artefactos generados (p.ej. la tabla _rej) salen
-    // como espejo del CREATE físico: mismo casing, USING, particiones y LOCATION
-    // (carpeta = nombre final con su sufijo y el casing de carpeta).
-    options: {
-      identifierCase: opts.identifierCase,
-      quoteIdentifiers: opts.quoteIdentifiers,
-      typeCase: opts.typeCase,
-      createTable: opts.createTable,
-      viewTagsAs: opts.viewTagsAs,
-      includeKeys: opts.includeKeys,                    // NOT NULL de las tablas generadas
-      tableFormat: opts.tableFormat,
-      external: opts.external,
-      location: opts.location,
-      locationFolderCase: opts.locationFolderCase ?? 'upper',
-      includePartitions: opts.includePartitions,
-      partitionsLast: !!opts.partitionsLast,            // informativo (el motor lo deriva de las reglas)
-    },
-    tables: tables.map(({ table, sql }) => ({
+  const tableUdp = new Map(diagram.tables.map((t) => [t.id, t.udpValues ?? {}]));
+  const columnUdp = new Map(diagram.columns.map((c) => [c.id, c.udpValues ?? {}]));
+  const tableById = new Map(input.tables.map((t) => [t.id, t]));
+  return {
+    model: { name: diagram.subjectArea?.name ?? input.modelName ?? '', udpValues: diagram.subjectArea?.udpValues ?? {} },
+    tables: tables.map((t, i) => ({
       table: {
-        id: table.id, physicalName: table.physicalName, schema: table.schema,
-        description: table.description,
-        udpValues: (diagram.tables.find((t) => t.id === table.id))?.udpValues ?? {},
+        // Esquema efectivo, como lo escribe el export (sin esquema ⇒ el por default).
+        id: t.id, physicalName: t.physicalName, schema: t.schema?.trim() || DEFAULT_DATABRICKS_OPTS.defaultSchema,
+        description: t.description?.trim() || null, udpValues: tableUdp.get(t.id) ?? {}, folder: folders.tables[i],
       },
-      // Orden único explícito (PK primero y cada bloque por ordinal): el motor
-      // no depende del orden de llegada.
-      columns: pkFirstColumns(colsByTable.get(table.id) ?? []).map((c) => {
-        const canon = udpOfColumn.get(c.id);
-        return {
-          physicalName: c.physicalName, dataType: c.dataType, ordinal: c.ordinal,
-          ddlType: ddlType(c.dataType, opts.typeCase ?? 'lower'),   // la _rej sale con el tipo de la física
-          isNullable: c.isNullable, isPrimaryKey: c.isPrimaryKey,
-          // sin esto la _rej no hereda el PARTITIONED BY de la física
-          isPartition: c.isPartition,
-          parentDomainId: canon?.parentDomainId, description: c.description,
-          udpValues: canon?.udpValues ?? {},
-        };
-      }),
-      baseSql: sql.trim(),
+      columns: input.columns.filter((c) => c.tableId === t.id).map((c) => ({
+        id: c.id, physicalName: c.physicalName, dataType: c.dataType, ddlType: ddlType(c.dataType, 'lower'),
+        ordinal: c.ordinal, isPrimaryKey: !!c.isPrimaryKey, isNullable: c.isNullable !== false,
+        isPartition: !!c.isPartition,
+        // El comentario que escribe el export: el físico (Comment de Erwin) o la definición.
+        description: (c.physicalDescription ?? '').trim() || (c.description ?? '').trim() || null,
+        udpValues: columnUdp.get(c.id) ?? {},
+      })),
     })),
-    views: views.map(({ view, sql }) => ({
-      name: view.name,
-      schema: view.schema ?? null,
-      sql: sql.trim(),
-      sourceTableIds: view.sourceTableIds?.length
-        ? view.sourceTableIds
-        : (view.tableId ? [view.tableId] : []),
-      // Vista de negocio = su `showOnCanvas` (el switch «Show on this canvas»
-      // guardado en la vista): solo esas se decoran con ddl.vista_negocio; el
-      // resto pasa intacto. No es la membresía del canvas: esa ya decidió qué
-      // vistas llegan acá (`canvasDdlViews`).
-      businessView: view.showOnCanvas !== false,
-    })),
+    views: views.map((v, i) => {
+      const parts = viewParts(v, DEFAULT_DATABRICKS_OPTS, tableById);
+      return {
+        id: v.id, name: v.name, schema: parts.schema, showOnCanvas: v.showOnCanvas !== false,
+        sourceTableIds: sourceIdsOf(v), folder: folders.views[i], projections: parts.projections, from: parts.from,
+      };
+    }),
   };
-
-  const rendered = await apiPost<RenderedExport>(`${DDL_RULES(projectId)}/render`, payload);
-  return { sql: assemble(rendered, modelName, tables.length), rendered };
 }
 
-/** Anexos de un objeto: `<artefacto>.tags` y `<artefacto>.extra`. */
-export const isAddendum = (artifact: string): boolean => /\.(tags|extra)$/.test(artifact);
+/** Payload de la vista previa de Data Standards: una tabla real con sus vistas,
+ *  como si el popup exportara solo esa tabla (`otherTables`: las demás fuentes
+ *  de sus vistas, solo para escribir el FROM). */
+export function tablePreviewPayload(args: {
+  table: DdlTable & { udpValues?: Record<string, string> | null };
+  columns: (DdlColumn & { udpValues?: Record<string, string> | null })[];
+  views: View[];
+  otherTables: DdlTable[];
+}): RulesPayload {
+  return buildRulesPayload({
+    diagram: { subjectArea: null, tables: [args.table], columns: args.columns },
+    input: {
+      tables: [args.table, ...args.otherTables], columns: args.columns, relationships: [],
+      views: canvasDdlViews({ views: args.views }), tableIds: [args.table.id],
+    },
+  });
+}
 
-/** Ensambla el archivo: header con el sello de reglas + statements en el orden
- *  del motor (por tabla: física → tags → generados; luego vistas). Los
- *  ALTER/anexos van pegados a su objeto; una línea en blanco solo entre
- *  objetos. */
-function assemble(rendered: RenderedExport, modelName: string, tableCount: number): string {
-  const header = `-- ${modelName || 'model'} · Databricks · ${tableCount} table(s)\n`
+/** Corre las reglas elegidas sobre el export y devuelve sus archivos. */
+export const renderWithRules = ({ projectId, diagram, input, ruleIds }: {
+  projectId: string; diagram: RulesSource; input: DatabricksDdlInput; ruleIds: string[];
+}) => apiPost<RenderedExport>(`${DDL_RULES(projectId)}/render`, { ruleIds, payload: buildRulesPayload({ diagram, input }) });
+
+/** El SQL único (Copy / preview): los archivos en el orden de las reglas, una
+ *  línea en blanco entre archivos, con el encabezado del export. */
+export function rulesSql(rendered: RenderedExport, modelName: string, tableCount: number): string {
+  const rules = new Set(rendered.files.map((f) => f.rule)).size;
+  const header = `-- ${modelName || 'model'} · ${tableCount} table(s)\n`
     + `-- Generated by Data Model Hub\n`
-    + `-- Export rules: ${rendered.rulesetVersion} · ${rendered.applied} applied`
-    + (rendered.skipped ? ` · ${rendered.skipped} skipped` : '') + `\n`;
-  const parts: string[] = [];
-  for (const s of rendered.statements) {
-    if (isAddendum(s.artifact)) parts.push(s.sql);                  // pegado a su objeto
-    else parts.push((parts.length ? '\n' : '') + s.sql);            // objeto nuevo
-  }
-  return `${header}\n${parts.join('\n')}`.trimEnd() + '\n';
+    + `-- Export rules${rendered.rulesetVersion ? `: ${rendered.rulesetVersion}` : ''} · ${rules} applied\n`;
+  return `${header}\n${rendered.files.map((f) => f.content).join('\n')}`.trimEnd() + '\n';
+}
+
+/** Una regla que falló al exportar (el 422 del backend trae regla, objeto,
+ *  archivo y línea): «Rule <rule> failed on <object> (<file>, line <n>): <message>».
+ *  Null si el error no es de una regla. */
+export function ruleErrorText(err: unknown): string | null {
+  if (!(err instanceof ApiError) || err.status !== 422 || !err.detail || typeof err.detail !== 'object') return null;
+  const d = err.detail as { message?: string; rule?: string | null; object?: string | null; file?: string | null; line?: number | null };
+  if (!d.message || !('file' in d)) return null;
+  const where = [d.file, d.line ? `line ${d.line}` : null].filter(Boolean).join(', ');
+  const head = d.rule ? `Rule ${d.rule} failed${d.object ? ` on ${d.object}` : ''}` : 'The export rules failed';
+  return `${head}${where ? ` (${where})` : ''}: ${d.message}`;
 }

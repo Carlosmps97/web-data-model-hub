@@ -63,46 +63,29 @@ export interface UdpDefinition {
   description?: string | null;
 }
 
-// ── DDL Export Rules: viven en el mismo snapshot/versionado ──
-export type DdlRuleKind = 'rule' | 'generator';
-export type DdlRuleTarget = 'column' | 'table';
-export type DdlValidationState = 'valid' | 'invalid' | 'stale';
-export interface DdlValidationCheck { name: string; ok: boolean | null; detail: string; }
-export interface DdlValidationError {
-  check: string; message: string; token?: string | null; suggestion?: string | null;
-  snippet?: string | null; line: number; col: number;
-}
-export interface DdlValidationReport {
-  state: 'valid' | 'invalid';
-  checks: DdlValidationCheck[];
-  errors: DdlValidationError[];
-  warnings: string[];
-}
+// ── Reglas del Export DDL: viven en el mismo snapshot/versionado ──
+/** Por cada tabla o cada vista del export. */
+export type DdlRuleScope = 'table' | 'view';
+/** Un archivo que escribe la regla: nombre y contenido son plantillas Jinja;
+ *  un contenido vacío no genera el archivo. */
+export interface DdlRuleFile { name: string; content: string; }
 export interface DdlRule {
   id: string;
   name: string;
   description?: string | null;
-  kind: DdlRuleKind;
-  target?: DdlRuleTarget | null;          // solo kind='rule'
-  sourceArtifact?: string | null;         // solo kind='generator'
-  condition: string;
-  udpRefs: { udpId: string; level: UdpLevel }[];
-  action: Record<string, unknown>;        // expression|exclude|keep|tags|types|tblproperties|statements|layout|omit|emit
-  appliesTo: string[];
-  priority: number;
+  scope: DdlRuleScope;
+  /** Expresión Jinja; vacía = siempre. */
+  when: string;
+  files: DdlRuleFile[];
+  /** Posición en la lista (0 = arriba = más prioridad). */
+  order: number;
   enabled: boolean;
-  validationState: DdlValidationState;
-  validationReport: Partial<DdlValidationReport>;
   updatedBy?: string | null;
 }
-export interface DdlLookup {
-  fromUdpId?: string; fromLevel?: UdpLevel;
-  values: Record<string, string | null>;
-  default?: string | null;
-}
 export interface DdlRulesetConfig {
-  lookups: Record<string, DdlLookup>;
-  functions: { name: string; params: string[]; body: string }[];
+  /** Piezas comunes: macros y constantes Jinja que todas las reglas pueden usar. */
+  pieces: string;
+  variables: Record<string, string>;
   /** Output settings del Export DDL (ver features/ddl/outputSettings). */
   output?: Record<string, unknown>;
 }
@@ -148,19 +131,15 @@ export interface UdpEditInput {
   allowedValues?: string[];
   description?: string;
 }
-/** Regla de DDL Export en el lote: `udpRefs`/estado los deriva el server. */
+/** Regla del Export DDL en el lote (sin `id` = alta). */
 export interface DdlRuleEditInput {
   id?: string;
   name: string;
   description?: string | null;
-  kind: DdlRuleKind;
-  target?: DdlRuleTarget | null;
-  sourceArtifact?: string | null;
-  condition: string;
-  udpRefs?: { udpId: string; level: UdpLevel }[];
-  action: Record<string, unknown>;
-  appliesTo: string[];
-  priority: number;
+  scope: DdlRuleScope;
+  when: string;
+  files: DdlRuleFile[];
+  order: number;
   enabled: boolean;
 }
 /** Alta/edición de un theme de color (sin `id` = alta). */
@@ -178,7 +157,7 @@ export interface ApplyStandardsBody {
   udpDelete?: string[];
   rulesUpsert?: DdlRuleEditInput[];
   rulesDelete?: string[];
-  ddlConfigPatch?: { lookups?: Record<string, DdlLookup>; functions?: DdlRulesetConfig['functions']; output?: Record<string, unknown> };
+  ddlConfigPatch?: { pieces?: string; variables?: Record<string, string>; output?: Record<string, unknown> };
   themesUpsert?: ThemeEditInput[];
   themesDelete?: string[];
 }
@@ -225,6 +204,10 @@ export interface RollbackPreview {
   domains: RollbackPreviewDomain[];
   /** Glosario o naming distintos ⇒ se re-derivan nombres físicos. */
   namesRederived: boolean;
+  /** La versión guarda reglas del Export DDL del formato anterior: quedan las vigentes. */
+  ddlRulesKept: boolean;
+  /** UDP que esas reglas vigentes citan y la versión no tiene (saldrían vacíos). */
+  ddlRulesMissingUdps: string[];
 }
 export const getRollbackPreview = (projectId: string, targetSeq: number) =>
   apiGet<RollbackPreview>(`${STD(projectId)}/rollback-preview?targetSeq=${targetSeq}`);

@@ -15,3 +15,8 @@ export { DEFAULT_OUTPUT_SETTINGS, mergeOutputSettings } from './outputSettings';
 export type { DdlOutputSettings } from './outputSettings';
 // Dialecto por defecto del proyecto (Databricks | Oracle).
 export type { DdlDialect } from './generators';
+
+// Reglas del Export DDL: la vista previa del editor de Data Standards arma el
+// mismo payload que el popup y lee sus errores igual.
+export { ruleErrorText, tablePreviewPayload } from './rulesBridge';
+export type { RenderedExport, RenderedFile, RenderLogEntry, RulesPayload } from './rulesBridge';

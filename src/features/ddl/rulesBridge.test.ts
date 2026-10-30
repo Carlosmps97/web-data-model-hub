@@ -1,144 +1,132 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn() }));
+vi.mock('@/services/http', async (orig) => ({
+  ...(await orig<typeof import('@/services/http')>()), apiGet: vi.fn(), apiPost: vi.fn(),
+}));
 
-import { apiPost } from '@/services/http';
-import { DEFAULT_DATABRICKS_OPTS } from './generators';
-import {
-  emitTarget, isAddendum, layoutFromRules, missingSource, partitionCorrelative, renderWithRules, withUdpPartitions,
-  type ExportRule,
-} from './rulesBridge';
+import { ApiError, apiPost } from '@/services/http';
+import type { DatabricksDdlInput } from './generators';
+import { buildRulesPayload, renderWithRules, ruleErrorText, rulesSql, type RenderedExport } from './rulesBridge';
 
 beforeEach(() => vi.clearAllMocks());
 
-const rule = (id: string, over: Partial<ExportRule> = {}): ExportRule => ({
-  id, name: id, kind: 'rule', priority: 100, enabled: true, validationState: 'valid',
-  appliesTo: ['ddl.tabla_fisica'], action: { layout: { partitionColumns: 'last' } }, ...over,
-});
+type Source = Parameters<typeof buildRulesPayload>[0]['diagram'];
+const asDiagram = (d: unknown) => d as Source;
 
-describe('layoutFromRules', () => {
-  it('regla de layout seleccionada sobre la física ⇒ partitionsLast', () => {
-    expect(layoutFromRules([rule('l1')], ['l1'])).toEqual({ partitionsLast: true, partitionUdp: null });
-  });
-  it('partitionUdp (o su alias partitionOrderUdp) ⇒ UDP que define las particiones', () => {
-    expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'last', partitionUdp: 'Particion' } } })], ['l1']))
-      .toEqual({ partitionsLast: true, partitionUdp: 'Particion' });
-    expect(layoutFromRules([rule('l1', { action: { layout: { partitionOrderUdp: ' Particion ' } } })], ['l1']))
-      .toEqual({ partitionsLast: false, partitionUdp: 'Particion' });
-  });
-  it('no seleccionada, keep, otro artefacto o generador ⇒ false', () => {
-    const off = { partitionsLast: false, partitionUdp: null };
-    expect(layoutFromRules([rule('l1')], [])).toEqual(off);
-    expect(layoutFromRules([rule('l1', { action: { layout: { partitionColumns: 'keep' } } })], ['l1'])).toEqual(off);
-    expect(layoutFromRules([rule('l1', { appliesTo: ['ddl.tabla_rej'] })], ['l1'])).toEqual(off);
-    expect(layoutFromRules([rule('l1', { kind: 'generator' })], ['l1'])).toEqual(off);
-    expect(layoutFromRules([rule('t1', { action: { tags: { a: 'b' } } })], ['t1'])).toEqual(off);
-  });
-});
+// Golden compartido con el backend (tests/features/ddl_rules/golden): lo que
+// exporta el popup para el set sintético y el payload que deben recibir las
+// reglas; el test del backend corre ese payload y compara los archivos.
+const GOLDEN = resolve(__dirname, '../../../../backend-data-model-hub/tests/features/ddl_rules/golden');
 
-describe('partitionCorrelative / withUdpPartitions', () => {
-  it('PART_01 → 1; valores fuera de la convención → null', () => {
-    expect(partitionCorrelative('PART_01')).toBe(1);
-    expect(partitionCorrelative('part-12')).toBe(12);
-    expect(partitionCorrelative('No Definido')).toBeNull();
-    expect(partitionCorrelative(undefined)).toBeNull();
+describe('buildRulesPayload', () => {
+  it.skipIf(!existsSync(GOLDEN))('arma exactamente el payload del golden del backend', () => {
+    const fx = JSON.parse(readFileSync(`${GOLDEN}/sintetico.input.json`, 'utf-8'));
+    const golden = JSON.parse(readFileSync(`${GOLDEN}/sintetico.payload.json`, 'utf-8'));
+    const input: DatabricksDdlInput = { ...fx.input, modelName: fx.modelName };
+    expect(buildRulesPayload({ diagram: asDiagram(fx.diagram), input })).toEqual(golden.payload);
   });
-  it('el UDP define las particiones: PART_nn ⇒ partición ordenada; el flag de la plataforma se ignora', () => {
-    const defs = [
-      { id: 'u-log', name: 'Particion', level: 'column', view: 'logical' },     // homónimo lógico: no cuenta
-      { id: 'u-part', name: 'Particion', level: 'column', view: 'physical' },
-    ];
-    const cols: { id: string; isPartition: boolean; udpValues: Record<string, string> }[] = [
-      { id: 'a', isPartition: true, udpValues: { 'u-part': 'PART_02' } },
-      { id: 'b', isPartition: false, udpValues: { 'u-part': 'PART_01' } },
-      { id: 'c', isPartition: true, udpValues: {} },
-    ];
-    const out = withUdpPartitions(cols, defs, 'Particion');
-    expect(out.map((c) => [c.id, c.isPartition, c.partitionOrder])).toEqual([['a', true, 2], ['b', true, 1], ['c', false, null]]);
-    expect(withUdpPartitions(cols, defs, null)).toBe(cols);
-    expect(withUdpPartitions(cols, [], 'Particion')).toBe(cols);    // UDP inexistente ⇒ flag
-  });
-});
 
-describe('isAddendum', () => {
-  it('.tags y .extra de cualquier artefacto son anexos', () => {
-    expect(isAddendum('ddl.tabla_fisica.tags')).toBe(true);
-    expect(isAddendum('ddl.vista_negocio.extra')).toBe(true);
-    expect(isAddendum('ddl.vista_tecnica')).toBe(false);
+  const diagram = asDiagram({
+    subjectArea: { name: 'Canvas', udpValues: { u9: 'x' } },
+    tables: [{ id: 't1', udpValues: { u1: 'DAC' } }, { id: 't2' }, { id: 't3' }],
+    columns: [{ id: 'c1', udpValues: { u2: 'DAC-NOMBRE' } }, { id: 'c2' }, { id: 'c3' }],
   });
-});
+  const input: DatabricksDdlInput = {
+    tables: [
+      { id: 't1', physicalName: 'HD_X', schema: 'a' }, { id: 't2', physicalName: 'HD_X', schema: 'b' },
+      { id: 't3', physicalName: 'HD_Y', schema: 'a' },
+    ],
+    columns: [
+      { id: 'c1', tableId: 't1', physicalName: 'NOMCLI', dataType: 'CHAR(20)', ordinal: 1, description: 'Def', physicalDescription: ' Fisico ' },
+      { id: 'c2', tableId: 't1', physicalName: 'CODCLI', dataType: 'INTEGER', ordinal: 0, isPrimaryKey: true, isNullable: false },
+      { id: 'c3', tableId: 't3', physicalName: 'CODSEG', dataType: 'varchar', ordinal: 0 },
+    ],
+    relationships: [],
+    views: [
+      { id: 'v1', name: 'VU_X', sourceTableIds: ['t1', 't3'], sources: [
+        { column: 'NOMCLI', tableId: 't1', outputAlias: 'NOMBRE' }, { column: 'CODSEG', tableId: 't3', castType: 'int' },
+        { expression: 'upper(t1.nomcli)', outputAlias: 'X' }, { expression: 'current_date()' },
+      ] },
+      { id: 'v2', name: 'VU_FUERA', schema: 's', tableId: 't2', showOnCanvas: false },
+      { id: 'v3', name: 'VU_STAR', schema: 's', sourceTableIds: ['t3'] },
+    ],
+    tableIds: ['t1', 't3'],
+    modelName: 'Modelo',
+  };
 
-// Generadores tal como los siembra el kit (templates.py): el `emit` lleva el
-// artefacto, el tipo y el nombre con placeholders del motor.
-const gen = (id: string, emit: Record<string, unknown>, over: Partial<ExportRule> = {}): ExportRule => ({
-  id, name: id, kind: 'generator', priority: 200, enabled: true, validationState: 'valid',
-  appliesTo: [], action: { emit }, ...over,
-});
-
-describe('emitTarget — qué objeto crea cada generador', () => {
-  it('traduce los placeholders del motor a un destino legible', () => {
-    expect(emitTarget(gen('vista_tecnica', {
-      artifact: 'ddl.vista_tecnica', type: 'view', schema: '{tabla.esquema}_v', name: '{tabla.nombre}',
-    }))).toEqual({ type: 'view', label: '<schema>_v.<table>' });
-    expect(emitTarget(gen('tabla_rechazos', {
-      artifact: 'ddl.tabla_rej', type: 'table', schema: '{tabla.esquema}', name: '{tabla.nombre}_rej',
-    }))).toEqual({ type: 'table', label: '<schema>.<table>_rej' });
-    expect(emitTarget(gen('vista_rechazos_dac', {
-      artifact: 'ddl.vista_rej_dac', type: 'view', schema: '{tabla.esquema}_v', name: '{tabla.nombre}dac_rej',
-    }))).toEqual({ type: 'view', label: '<schema>_v.<table>dac_rej' });
+  it('solo las tablas marcadas, con su carpeta del zip, UDP del diagrama y el tipo como lo escribe la web', () => {
+    const p = buildRulesPayload({ diagram, input });
+    expect(p.model).toEqual({ name: 'Canvas', udpValues: { u9: 'x' } });
+    expect(p.tables.map((t) => [t.table.id, t.table.folder, t.table.udpValues])).toEqual([
+      ['t1', 'HD_X', { u1: 'DAC' }], ['t3', 'HD_Y', {}],
+    ]);
+    expect(p.tables[0].columns).toEqual([
+      { id: 'c1', physicalName: 'NOMCLI', dataType: 'CHAR(20)', ddlType: 'char(20)', ordinal: 1, isPrimaryKey: false,
+        isNullable: true, isPartition: false, description: 'Fisico', udpValues: { u2: 'DAC-NOMBRE' } },
+      { id: 'c2', physicalName: 'CODCLI', dataType: 'INTEGER', ddlType: 'int', ordinal: 0, isPrimaryKey: true,
+        isNullable: false, isPartition: false, description: null, udpValues: {} },
+    ]);
   });
-  it('sin esquema usa solo el nombre; sin emit (o regla normal) devuelve null', () => {
-    expect(emitTarget(gen('g', { type: 'table', name: '{tabla.nombre}_x' })))
-      .toEqual({ type: 'table', label: '<table>_x' });
-    expect(emitTarget(gen('g', {}))).toBeNull();
-    expect(emitTarget(rule('r1'))).toBeNull();
+
+  it('las vistas que entran al export, con proyecciones y FROM como los escribe la web', () => {
+    const p = buildRulesPayload({ diagram, input });
+    expect(p.views.map((v) => [v.id, v.schema, v.folder, v.showOnCanvas])).toEqual([
+      ['v1', 'a', 'HD_X', true], ['v3', 's', 'HD_Y', true],
+    ]);
+    expect(p.views[0].projections).toEqual([
+      { sql: 't1.nomcli', alias: 'nombre', column: 'NOMCLI', tableId: 't1', expression: false },
+      { sql: 'CAST(t2.codseg AS int)', alias: 'codseg', column: 'CODSEG', tableId: 't3', expression: false },
+      { sql: 'upper(t1.nomcli)', alias: 'X', column: null, tableId: null, expression: true },
+      { sql: 'current_date()', alias: null, column: null, tableId: null, expression: true },
+    ]);
+    expect(p.views[0].from).toBe('a.hd_x t1,\n  a.hd_y t2');
+    expect(p.views[1]).toMatchObject({ projections: [], from: 'a.hd_y', sourceTableIds: ['t3'] });
   });
 });
 
-describe('missingSource — cascada de generadores', () => {
-  const rej = gen('tabla_rechazos', { artifact: 'ddl.tabla_rej', type: 'table', name: '{tabla.nombre}_rej' },
-    { sourceArtifact: 'ddl.tabla_fisica' });
-  const vistaRej = gen('vista_rechazos', { artifact: 'ddl.vista_rej', type: 'view', name: '{tabla.nombre}_rej' },
-    { sourceArtifact: 'ddl.tabla_rej' });
-  const all = [rej, vistaRej];
-
-  it('el generador que come de otro no seleccionado no emite nada: avisa de quién depende', () => {
-    expect(missingSource(vistaRej, all, new Set(['vista_rechazos']))).toBe('tabla_rechazos');
-  });
-  it('con su fuente seleccionada, o si la fuente es un artefacto raíz, no falta nada', () => {
-    expect(missingSource(vistaRej, all, new Set(['vista_rechazos', 'tabla_rechazos']))).toBeNull();
-    expect(missingSource(rej, all, new Set(['tabla_rechazos']))).toBeNull();
-    expect(missingSource(rule('r1'), all, new Set<string>())).toBeNull();
+describe('renderWithRules', () => {
+  it('manda las reglas elegidas y el payload al render del proyecto', async () => {
+    vi.mocked(apiPost).mockResolvedValue({ files: [], log: [] });
+    await renderWithRules({ projectId: 'p 1', diagram: asDiagram({ tables: [], columns: [] }),
+      input: { tables: [], columns: [], relationships: [] }, ruleIds: ['r2', 'r1'] });
+    const [url, body] = vi.mocked(apiPost).mock.calls[0];
+    expect(url).toMatch(/\/api\/projects\/p%201\/ddl-rules\/render$/);
+    expect(body).toMatchObject({ ruleIds: ['r2', 'r1'], payload: { tables: [], views: [] } });
   });
 });
 
-describe('renderWithRules — payload y ensamblado', () => {
-  it('manda las opciones de estilo y el ddlType; el .sql pega los ALTER a su objeto', async () => {
-    vi.mocked(apiPost).mockResolvedValue({
-      statements: [
-        { artifact: 'ddl.tabla_fisica', schema: 'core', name: 'T', sql: 'CREATE OR REPLACE TABLE core.t (a int);' },
-        { artifact: 'ddl.tabla_fisica.tags', schema: 'core', name: 'T', sql: "ALTER TABLE core.t SET TAGS ('k' = 'v');" },
-        { artifact: 'ddl.vista_tecnica', schema: 'core_v', name: 'T', sql: 'CREATE OR REPLACE VIEW core_v.t AS SELECT a AS a FROM core.t;' },
+describe('rulesSql', () => {
+  it('los archivos en orden, una línea en blanco entre ellos, con el encabezado', () => {
+    const rendered: RenderedExport = {
+      rulesetVersion: 'v7',
+      files: [
+        { path: 'A/T.sql', content: 'CREATE TABLE a;\nALTER TABLE a SET TAGS (x);\n', rule: 'r1', object: 's.A', objectKind: 'table' },
+        { path: 'A/V.sql', content: 'CREATE VIEW v;\n', rule: 'r2', object: 's.A', objectKind: 'table' },
+        { path: 'B/T.sql', content: 'CREATE TABLE b;\n', rule: 'r1', object: 's.B', objectKind: 'table' },
       ],
-      log: [], rulesetVersion: 'v3', applied: 1, skipped: 0,
-    });
-    const diagram = { tables: [{ id: 't1', udpValues: {} }], columns: [{ id: 'c1', udpValues: {} }], subjectArea: null };
-    const input = {
-      tables: [{ id: 't1', physicalName: 'T', schema: 'core' }],
-      columns: [{ id: 'c1', tableId: 't1', physicalName: 'A', dataType: 'INTEGER', ordinal: 0 }],
-      relationships: [], views: [], modelName: 'm',
+      log: [],
     };
-    const { sql } = await renderWithRules({
-      projectId: 'p1', diagram: diagram as unknown as Parameters<typeof renderWithRules>[0]['diagram'],
-      input, opts: DEFAULT_DATABRICKS_OPTS, ruleIds: ['r1'], modelName: 'm',
-    });
-    const body = vi.mocked(apiPost).mock.calls[0][1] as {
-      options: Record<string, unknown>; tables: { columns: { ddlType: string }[] }[];
-    };
-    expect(body.options).toMatchObject({
-      quoteIdentifiers: 'when-needed', typeCase: 'lower', createTable: 'or-replace', viewTagsAs: 'table', includeKeys: false,
-    });
-    expect(body.tables[0].columns[0].ddlType).toBe('int');
-    expect(sql).toContain("CREATE OR REPLACE TABLE core.t (a int);\nALTER TABLE core.t SET TAGS ('k' = 'v');\n\nCREATE OR REPLACE VIEW");
+    expect(rulesSql(rendered, 'Modelo', 2)).toBe([
+      '-- Modelo · 2 table(s)', '-- Generated by Data Model Hub', '-- Export rules: v7 · 2 applied', '',
+      'CREATE TABLE a;', 'ALTER TABLE a SET TAGS (x);', '', 'CREATE VIEW v;', '', 'CREATE TABLE b;', '',
+    ].join('\n'));
+  });
+});
+
+describe('ruleErrorText', () => {
+  it('regla, objeto, archivo y línea del 422 del motor', () => {
+    const err = new ApiError("'dict object' has no attribute 'nombr'", 422,
+      { message: "'dict object' has no attribute 'nombr'", rule: 'tabla_fisica', object: 'bcp.HD_X', file: 'HD_X/TABLE-HD_X.sql', line: 4 });
+    expect(ruleErrorText(err)).toBe("Rule tabla_fisica failed on bcp.HD_X (HD_X/TABLE-HD_X.sql, line 4): 'dict object' has no attribute 'nombr'");
+  });
+  it('error de las piezas (sin regla) y errores que no son de una regla', () => {
+    const pieces = new ApiError('unexpected end of template', 422,
+      { message: 'unexpected end of template', rule: null, object: null, file: 'pieces', line: 9 });
+    expect(ruleErrorText(pieces)).toBe('The export rules failed (pieces, line 9): unexpected end of template');
+    expect(ruleErrorText(new ApiError('x', 422, [{ loc: ['body'] }]))).toBeNull();
+    expect(ruleErrorText(new ApiError('Forbidden', 403, 'Forbidden'))).toBeNull();
+    expect(ruleErrorText(new Error('boom'))).toBeNull();
   });
 });

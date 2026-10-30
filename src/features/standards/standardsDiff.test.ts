@@ -8,7 +8,7 @@ import { mergeOutputSettings } from '@/features/ddl';
 import { revertForm } from './domainHistory';
 import type { DdlRule, DdlRulesetConfig, DomainHistoryEntry, SnapshotDomain, UdpDefinition } from './standards.service';
 import {
-  applyErrorNotice, ddlConfigChanged, domainChanged, lookupRow, NO_CHANGES, outputChanged, ruleChanged, udpChanged,
+  applyErrorNotice, ddlConfigChanged, domainChanged, NO_CHANGES, outputChanged, ruleChanged, udpChanged,
   udpEditInput, udpFormOf,
 } from './standardsDiff';
 
@@ -94,101 +94,43 @@ describe('UDP', () => {
 
 describe('regla de DDL', () => {
   const stored: DdlRule = {
-    id: 'r1', name: 'tag_dac', description: null, kind: 'rule', target: 'column', sourceArtifact: null,
-    condition: "columna.udp[\"Clasificacion\"] LIKE 'DAC-%'", udpRefs: [{ udpId: 'u1', level: 'column' }],
-    action: { tags: { clasificacion: '{udp:Clasificacion}', dominio: 'X' } }, appliesTo: ['ddl.tabla', 'ddl.vista_negocio'],
-    priority: 100, enabled: true, validationState: 'valid', validationReport: {},
+    id: 'r1', name: 'tabla_fisica', description: null, scope: 'table', when: "tabla.udp['DAC'] == 'DAC'",
+    files: [{ name: '{{ tabla.carpeta }}/TABLE-{{ tabla.nombre }}.sql', content: 'CREATE TABLE {{ tabla.nombre }};' }],
+    order: 2, enabled: true, updatedBy: 'otro',
   };
   const draftOf = (r: DdlRule) => ({
-    id: r.id, name: r.name, description: r.description ?? undefined, kind: r.kind, target: r.target ?? undefined,
-    sourceArtifact: r.sourceArtifact ?? undefined, condition: r.condition, udpRefs: r.udpRefs, action: r.action,
-    appliesTo: r.appliesTo, priority: r.priority, enabled: r.enabled,
+    id: r.id, name: r.name, description: r.description ?? undefined, scope: r.scope, when: r.when,
+    files: r.files.map((f) => ({ ...f })), order: r.order, enabled: r.enabled,
   });
   it('alta: siempre es un cambio', () => {
     expect(ruleChanged(draftOf(stored), null)).toBe(true);
   });
-  it('sin tocar (orden de claves, destinos reordenados, udpRefs del servidor, descripción ausente ≡ vacía): no', () => {
+  it('sin tocar (quién guardó, descripción ausente ≡ vacía): no', () => {
     expect(ruleChanged(draftOf(stored), stored)).toBe(false);
-    expect(ruleChanged({ ...draftOf(stored), action: { tags: { dominio: 'X', clasificacion: '{udp:Clasificacion}' } } }, stored)).toBe(false);
-    expect(ruleChanged({ ...draftOf(stored), appliesTo: ['ddl.vista_negocio', 'ddl.tabla'] }, stored)).toBe(false);
-    expect(ruleChanged({ ...draftOf(stored), udpRefs: [], description: '' }, stored)).toBe(false);
+    expect(ruleChanged({ ...draftOf(stored), description: '' }, { ...stored, updatedBy: 'ana' })).toBe(false);
   });
-  it('condición, acción, destinos, prioridad o estado: sí', () => {
+  it('nombre, para cada, cuándo, archivos, posición o estado: sí', () => {
     const d = draftOf(stored);
-    expect(ruleChanged({ ...d, condition: "columna.udp[\"Clasificacion\"] = 'DAC'" }, stored)).toBe(true);
-    expect(ruleChanged({ ...d, action: { tags: { clasificacion: '{udp:Clasificacion}' } } }, stored)).toBe(true);
-    expect(ruleChanged({ ...d, appliesTo: ['ddl.tabla'] }, stored)).toBe(true);
-    expect(ruleChanged({ ...d, priority: 50 }, stored)).toBe(true);
+    expect(ruleChanged({ ...d, name: 'tabla_fisica_v2' }, stored)).toBe(true);
+    expect(ruleChanged({ ...d, scope: 'view' }, stored)).toBe(true);
+    expect(ruleChanged({ ...d, when: '' }, stored)).toBe(true);
+    expect(ruleChanged({ ...d, files: [{ ...d.files[0], content: 'CREATE TABLE x;' }] }, stored)).toBe(true);
+    expect(ruleChanged({ ...d, files: [...d.files, { name: 'b.sql', content: '' }] }, stored)).toBe(true);
+    expect(ruleChanged({ ...d, order: 0 }, stored)).toBe(true);
     expect(ruleChanged({ ...d, enabled: false }, stored)).toBe(true);
-    expect(ruleChanged({ ...d, name: 'tag_dac_v2' }, stored)).toBe(true);
-  });
-  it('guardada invalid/stale y sin tocar: re-guardarla sí es un cambio (el backend graba la validación recalculada)', () => {
-    // Caso: reglas del seed/one-shot grabadas sin que el proyecto tuviera sus
-    // UDPs. Hoy validan, pero el export las salta: re-guardarlas es la salida.
-    expect(ruleChanged(draftOf(stored), { ...stored, validationState: 'invalid' })).toBe(true);
-    expect(ruleChanged(draftOf(stored), { ...stored, validationState: 'stale' })).toBe(true);
   });
 });
 
-describe('lookups y funciones', () => {
-  const config: DdlRulesetConfig = {
-    lookups: {
-      nivel: { fromUdpId: 'u1', fromLevel: 'column', values: { DAC: 'sha2', 'No DAC': null }, default: null },
-      pais: { fromUdpId: 'u2', fromLevel: 'table', values: {}, default: 'PE' },
-    },
-    functions: [{ name: 'mask', params: ['col', 'nivel'], body: 'CASE WHEN 1 THEN {col} END' }],
-    output: {},
-  };
-  const clone = () => structuredClone(config);
-  it('sin tocar, u «output vacío» escrito como null o como ausente (sin default): no es un cambio', () => {
-    expect(ddlConfigChanged(clone().lookups, clone().functions, config)).toBe(false);
-    const l = clone().lookups;
-    l.nivel.values = { DAC: 'sha2' };                        // default null: null ≡ ausente (ninguno emite)
-    l.pais = { values: {}, default: 'PE', fromLevel: 'table', fromUdpId: 'u2' };   // otro orden de claves
-    expect(ddlConfigChanged({ pais: l.pais, nivel: l.nivel }, clone().functions, config)).toBe(false);
-    // un default ausente ≡ null (el backend lee `lk.get("default")`)
-    const noDefault = clone().lookups.nivel;
-    delete noDefault.default;
-    expect(ddlConfigChanged({ ...clone().lookups, nivel: noDefault }, clone().functions, config)).toBe(false);
+describe('piezas y variables', () => {
+  const config: DdlRulesetConfig = { pieces: "{% set DAC = 'Clasificacion del Dato' %}", variables: { a: '1', b: '2' }, output: {} };
+  it('sin tocar (otro orden de las variables): no es un cambio', () => {
+    expect(ddlConfigChanged(config.pieces, { b: '2', a: '1' }, config)).toBe(false);
   });
-  it('con default, «nada» (null) no es «sin mapear»: el valor deja de emitir el default (backend `_resolve_lookup`)', () => {
-    const l = () => clone().lookups;
-    // es un cambio: el botón no queda en «No changes to apply»
-    expect(ddlConfigChanged({ ...l(), pais: { ...l().pais, values: { X: null } } }, clone().functions, config)).toBe(true);
-    // y al revés: lo guardado mapeado a «nada» que vuelve a heredar el default
-    const pinned: DdlRulesetConfig = { ...config, lookups: { ...l(), pais: { ...l().pais, values: { X: null } } } };
-    expect(ddlConfigChanged(l(), clone().functions, pinned)).toBe(true);
-    // '' se emite (vacío), null no: tampoco son lo mismo, ni en un valor ni en el default
-    expect(ddlConfigChanged({ ...l(), nivel: { ...l().nivel, values: { DAC: 'sha2', X: '' } } }, clone().functions, config)).toBe(true);
-    expect(ddlConfigChanged({ ...l(), nivel: { ...l().nivel, default: '' } }, clone().functions, config)).toBe(true);
-  });
-  it('un valor, el default, el UDP de origen, una alta/baja de lookup o una función distinta: sí', () => {
-    const l = () => clone().lookups;
-    expect(ddlConfigChanged({ ...l(), nivel: { ...l().nivel, values: { DAC: 'md5' } } }, clone().functions, config)).toBe(true);
-    expect(ddlConfigChanged({ ...l(), pais: { ...l().pais, default: null } }, clone().functions, config)).toBe(true);
-    expect(ddlConfigChanged({ ...l(), nivel: { ...l().nivel, fromUdpId: 'u9' } }, clone().functions, config)).toBe(true);
-    expect(ddlConfigChanged({ nivel: l().nivel }, clone().functions, config)).toBe(true);
-    expect(ddlConfigChanged(l(), [], config)).toBe(true);
-    expect(ddlConfigChanged(l(), [{ ...clone().functions[0], body: 'CASE WHEN 2 THEN {col} END' }], config)).toBe(true);
-  });
-});
-
-describe('lookupRow: qué dice cada fila del editor de lookups (espejo de `_resolve_lookup`)', () => {
-  const lk = (values: Record<string, string | null>, dflt: string | null = 'PE') =>
-    ({ fromUdpId: 'u1', fromLevel: 'table' as const, values, default: dflt });
-  it('con default: sin mapear emite el default (y se puede pasar a «nada»); «nada» no emite (y se puede des-mapear)', () => {
-    expect(lookupRow(lk({}), 'A')).toEqual({ placeholder: '— default (PE)', action: 'nothing' });
-    expect(lookupRow(lk({ A: null }), 'A')).toEqual({ placeholder: '— nothing (not emitted)', action: 'unmap' });
-    expect(lookupRow(lk({ A: 'X' }), 'A').action).toBe('unmap');
-    expect(lookupRow(lk({ A: '' }), 'A')).toEqual({ placeholder: "— empty value ('')", action: 'unmap' });
-  });
-  it('sin default: sin mapear y «nada» no emiten (son lo mismo) — no se ofrece una acción que no cambia nada', () => {
-    expect(lookupRow(lk({}, null), 'A')).toEqual({ placeholder: '— nothing (not emitted)', action: null });
-    expect(lookupRow(lk({ A: null }, null), 'A')).toEqual({ placeholder: '— nothing (not emitted)', action: null });
-    expect(lookupRow(lk({ A: 'X' }, null), 'A').action).toBe('unmap');
-  });
-  it('un valor como «constructor» no se confunde con el prototipo', () => {
-    expect(lookupRow(lk({}), 'constructor')).toEqual({ placeholder: '— default (PE)', action: 'nothing' });
+  it('las piezas, un valor, una variable más o menos: sí', () => {
+    expect(ddlConfigChanged(`${config.pieces}\n`, config.variables, config)).toBe(true);
+    expect(ddlConfigChanged(config.pieces, { a: '1', b: '3' }, config)).toBe(true);
+    expect(ddlConfigChanged(config.pieces, { a: '1' }, config)).toBe(true);
+    expect(ddlConfigChanged(config.pieces, { ...config.variables, c: '' }, config)).toBe(true);
   });
 });
 

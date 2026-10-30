@@ -1,28 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import { exportGate } from './exportGate';
+import { exportGate, initialMode } from './exportGate';
 
-// El modal no exporta (ni se edita la pestaña Output) hasta tener lo que decide el
-// DDL: las Output settings del proyecto y las defs UDP (particiones). Sin ellas, la
-// física y la _rej podrían salir con particiones distintas.
+// El popup no exporta hasta tener las Output settings y la lista de reglas (de
+// ella sale con qué opción abre); con «Use export rules», al menos una marcada.
 describe('exportGate', () => {
-  const base = { settingsReady: true, udpDefsReady: true, udpDefsFailed: false, rulesReady: true, rulesFailed: false, rulesSelected: 3 };
+  const base = { settingsReady: true, rulesReady: true, rulesFailed: false, mode: 'rules' as const, rulesSelected: 3 };
   it('todo cargado ⇒ listo', () => {
     expect(exportGate(base)).toEqual({ ready: true, note: null });
+    expect(exportGate({ ...base, mode: 'settings', rulesSelected: 0 })).toEqual({ ready: true, note: null });
   });
-  it('mientras carga settings o defs UDP ⇒ bloqueado con aviso', () => {
-    expect(exportGate({ ...base, settingsReady: false }).ready).toBe(false);
-    expect(exportGate({ ...base, udpDefsReady: false })).toEqual({ ready: false, note: 'Loading the project settings…' });
+  it('mientras cargan las settings o la lista de reglas ⇒ bloqueado con aviso', () => {
+    for (const i of [{ ...base, settingsReady: false }, { ...base, rulesReady: false }, { ...base, mode: 'settings' as const, rulesReady: false }]) {
+      expect(exportGate(i)).toEqual({ ready: false, note: 'Loading the project settings…' });
+    }
   });
-  it('lista de reglas: mientras carga ⇒ bloqueado; si falló ⇒ bloqueado con aviso (nunca con una selección anterior)', () => {
-    expect(exportGate({ ...base, rulesReady: false })).toEqual({ ready: false, note: 'Loading the project settings…' });
-    const failed = exportGate({ ...base, rulesFailed: true, rulesSelected: 0 });
-    expect(failed.ready).toBe(false);
-    expect(failed.note).toBe("Couldn't load the export rules — reopen the dialog to try again.");
+  it('si la lista de reglas no llegó ⇒ bloqueado con aviso, con cualquier opción', () => {
+    for (const mode of ['rules', 'settings'] as const) {
+      expect(exportGate({ ...base, mode, rulesFailed: true }))
+        .toEqual({ ready: false, note: "Couldn't load the export rules — reopen the dialog to try again." });
+    }
   });
-  it('defs UDP fallidas: con reglas ⇒ bloqueado; sin reglas (export nativo) ⇒ listo', () => {
-    const failed = { ...base, udpDefsFailed: true };
-    expect(exportGate(failed).ready).toBe(false);
-    expect(exportGate(failed).note).toMatch(/UDP definitions/);
-    expect(exportGate({ ...failed, rulesSelected: 0 })).toEqual({ ready: true, note: null });
+  it('«Use export rules» sin ninguna regla marcada ⇒ bloqueado con aviso', () => {
+    expect(exportGate({ ...base, rulesSelected: 0 })).toEqual({ ready: false, note: 'Select at least one export rule.' });
+  });
+});
+
+describe('initialMode', () => {
+  it('con reglas activas abre en «Use export rules»; sin reglas, en «Use export settings»', () => {
+    expect(initialMode(2)).toBe('rules');
+    expect(initialMode(0)).toBe('settings');
   });
 });

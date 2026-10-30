@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  databricksDdl, viewDDL, orderedPartitions, locationFolder,
+  databricksDdl, viewDDL, locationFolder,
   needsQuote, ddlType, createTableSql, tableStatements,
   DEFAULT_DATABRICKS_OPTS as DEF, type DatabricksDdlInput, type DatabricksDdlOptions, type DdlTable, type DdlView, ddlZipName,
 } from './generators';
@@ -479,7 +479,7 @@ describe('orden único: PK primero y PRIMARY KEY por ordinal (sin orden de llave
   });
 });
 
-describe('particiones: PARTITIONED BY con su tipo, partitionsLast y partitionOrder', () => {
+describe('particiones: PARTITIONED BY con su tipo', () => {
   const input: DatabricksDdlInput = {
     tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
     columns: [
@@ -495,67 +495,47 @@ describe('particiones: PARTITIONED BY con su tipo, partitionsLast y partitionOrd
     const body = ddl.slice(ddl.indexOf('(\n') + 2, ddl.indexOf('\n)'));
     return body.split(',\n').map((l) => l.trim().split(' ')[0]).filter((n) => n.startsWith('`'));
   };
-  it('con PARTITIONED BY las particiones salen de la lista y van ahí con su definición, con o sin la regla', () => {
-    for (const o of [{ ...CLASSIC, includeKeys: true }, { ...CLASSIC, includeKeys: true, partitionsLast: true }]) {
-      const ddl = databricksDdl(input, o);
-      expect(bodyNames(ddl)).toEqual(['`COD`', '`MTO`']);
-      expect(ddl).toContain('PARTITIONED BY (`CODMES` INT NOT NULL, `FECDIA` DATE)');
-      expect(ddl).toContain('PRIMARY KEY (`CODMES`)');
-    }
+  it('con PARTITIONED BY las particiones salen de la lista y van ahí con su definición', () => {
+    const ddl = databricksDdl(input, { ...CLASSIC, includeKeys: true });
+    expect(bodyNames(ddl)).toEqual(['`COD`', '`MTO`']);
+    expect(ddl).toContain('PARTITIONED BY (`CODMES` INT NOT NULL, `FECDIA` DATE)');
+    expect(ddl).toContain('PRIMARY KEY (`CODMES`)');
   });
-  const ordered: DatabricksDdlInput = {
-    ...input,
-    columns: input.columns.map((c) => (c.id === 'a' ? { ...c, partitionOrder: 2 } : c.id === 'c' ? { ...c, partitionOrder: 1 } : c)),
-  };
-  it('con partitionOrder (UDP PART_nn) el PARTITIONED BY sigue el correlativo', () => {
-    expect(databricksDdl(ordered, { ...CLASSIC, partitionsLast: true })).toContain('PARTITIONED BY (`FECDIA` DATE, `CODMES` INT)');
-    expect(databricksDdl(ordered, CLASSIC)).toContain('PARTITIONED BY (`FECDIA` DATE, `CODMES` INT)');
-  });
-  it('sin PARTITIONED BY (Partitions apagada) vuelven a la lista: al final con la regla, si no en orden físico', () => {
+  it('sin PARTITIONED BY (Partitions apagada) vuelven a la lista, en orden físico', () => {
     const off = { ...CLASSIC, includePartitions: false };
-    expect(bodyNames(databricksDdl(ordered, { ...off, partitionsLast: true }))).toEqual(['`COD`', '`MTO`', '`FECDIA`', '`CODMES`']);
-    expect(bodyNames(databricksDdl(ordered, off))).toEqual(['`CODMES`', '`COD`', '`FECDIA`', '`MTO`']);
-    expect(databricksDdl(ordered, off)).not.toContain('PARTITIONED BY');
-  });
-  it('orderedPartitions: correlativos primero, sin correlativo después en orden físico (estable)', () => {
-    const cols = [
-      { id: 'a', tableId: 't', physicalName: 'A', dataType: 'int', ordinal: 0, isPartition: true, partitionOrder: 2 },
-      { id: 'b', tableId: 't', physicalName: 'B', dataType: 'int', ordinal: 1 },
-      { id: 'c', tableId: 't', physicalName: 'C', dataType: 'int', ordinal: 2, isPartition: true },
-      { id: 'd', tableId: 't', physicalName: 'D', dataType: 'int', ordinal: 3, isPartition: true, partitionOrder: 1 },
-    ];
-    expect(orderedPartitions(cols).map((c) => c.physicalName)).toEqual(['D', 'A', 'C']);
+    expect(bodyNames(databricksDdl(input, off))).toEqual(['`CODMES`', '`COD`', '`FECDIA`', '`MTO`']);
+    expect(databricksDdl(input, off)).not.toContain('PARTITIONED BY');
   });
 });
 
-describe('particiones solo en el PARTITIONED BY (formato fijo, con o sin reglas)', () => {
+describe('particiones solo en el PARTITIONED BY (formato fijo)', () => {
   const input: DatabricksDdlInput = {
     tables: [{ id: 't1', physicalName: 'T', schema: 's' }],
     columns: [
-      { id: 'a', tableId: 't1', physicalName: 'CODMES', dataType: 'INTEGER', ordinal: 0, isPartition: true, partitionOrder: 2, isNullable: false, description: 'Mes' },
+      { id: 'a', tableId: 't1', physicalName: 'CODMES', dataType: 'INTEGER', ordinal: 0, isPartition: true, isNullable: false, description: 'Mes' },
       { id: 'b', tableId: 't1', physicalName: 'COD', dataType: 'string', ordinal: 1, isPrimaryKey: true },
-      { id: 'c', tableId: 't1', physicalName: 'FECDIA', dataType: 'date', ordinal: 2, isPartition: true, partitionOrder: 1 },
+      { id: 'c', tableId: 't1', physicalName: 'FECDIA', dataType: 'date', ordinal: 2, isPartition: true },
       { id: 'd', tableId: 't1', physicalName: 'MTO', dataType: 'decimal(18,2)', ordinal: 3 },
     ],
     relationships: [],
     modelName: 'm',
   };
   const opts: DatabricksDdlOptions = { ...DEF, external: false };
-  it('las particiones no van en la lista: se declaran con su tipo en el PARTITIONED BY, en orden PART_nn', () => {
+  it('las particiones no van en la lista: se declaran con su tipo en el PARTITIONED BY, en orden físico', () => {
     expect(tableStatements(input, opts)[0].sql).toBe(
-      'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  mto decimal(18,2)\n)\nUSING DELTA\nPARTITIONED BY (fecdia date, codmes int);\n');
+      'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  mto decimal(18,2)\n)\nUSING DELTA\nPARTITIONED BY (codmes int, fecdia date);\n');
   });
   it('la definición se mueve completa: NOT NULL (con keys) y COMMENT (con comments) van dentro del PARTITIONED BY', () => {
     const sql = tableStatements(input, { ...opts, includeKeys: true, includeComments: true })[0].sql;
     expect(sql).toBe([
       'CREATE OR REPLACE TABLE s.t (', '  cod string NOT NULL,', '  mto decimal(18,2),',
       '  CONSTRAINT pk_t PRIMARY KEY (cod)', ')', 'USING DELTA',
-      "PARTITIONED BY (fecdia date, codmes int NOT NULL COMMENT 'Mes');", '',
+      "PARTITIONED BY (codmes int NOT NULL COMMENT 'Mes', fecdia date);", '',
     ].join('\n'));
   });
   it('sin PARTITIONED BY (Output setting «Partitions» apagada) las particiones vuelven a la lista', () => {
-    expect(tableStatements(input, { ...opts, includePartitions: false, partitionsLast: true })[0].sql).toBe(
-      'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  mto decimal(18,2),\n  fecdia date,\n  codmes int\n)\nUSING DELTA;\n');
+    expect(tableStatements(input, { ...opts, includePartitions: false })[0].sql).toBe(
+      'CREATE OR REPLACE TABLE s.t (\n  cod string,\n  codmes int,\n  fecdia date,\n  mto decimal(18,2)\n)\nUSING DELTA;\n');
   });
   it('una tabla sin particiones sale sin PARTITIONED BY', () => {
     const plain: DatabricksDdlInput = { ...input, columns: input.columns.map((c) => ({ ...c, isPartition: false })) };
@@ -576,8 +556,7 @@ describe('ddlZipName', () => {
   });
 });
 
-// Tabla de referencia. Las particiones llegan como las deja
-// `withUdpPartitions` (PART_01 = codmes, PART_02 = nbrgrupo…).
+// Tabla de referencia; la tercera columna marca las particiones.
 const SPEC_ROWS: [string, string, number | null][] = [
   ['CODCLAVEPARTYCLI', 'VARCHAR(128)', null], ['TIPROLCLI', 'CHAR(20)', null],
   ['CODCLAVECTA', 'VARCHAR(128)', null], ['CODPRODUCTO', 'VARCHAR(30)', null],
@@ -597,7 +576,7 @@ const SPEC_INPUT: DatabricksDdlInput = {
   tables: [{ id: 't1', physicalName: 'H_SALDOCIERREPROCESOVENTAS', schema: 'core_int' }],
   columns: SPEC_ROWS.map(([n, t, part], i) => ({
     id: `c${i}`, tableId: 't1', physicalName: n, dataType: t, ordinal: i,
-    isPrimaryKey: i < 6, isNullable: i >= 6, isPartition: part !== null, partitionOrder: part,
+    isPrimaryKey: i < 6, isNullable: i >= 6, isPartition: part !== null,
   })),
   relationships: [], modelName: 'CORE INT',
 };
@@ -616,7 +595,7 @@ const SPEC_LOCATION = "LOCATION 'abfss://<container_name>@<storage_account_name>
 // Particiones solo en el PARTITIONED BY, con su tipo (formato fijo).
 const SPEC_BASE_SQL = [
   ...SPEC_LIST, '  fecdia date', ')', 'USING DELTA',
-  'PARTITIONED BY (codmes int, nbrgrupoprocesobcaminorista varchar(120))', SPEC_LOCATION,
+  'PARTITIONED BY (nbrgrupoprocesobcaminorista varchar(120), codmes int)', SPEC_LOCATION,
 ].join('\n');
 
 describe('estilo de salida (comillas, tipos, CREATE, NOT NULL)', () => {
@@ -665,8 +644,7 @@ describe('estilo de salida (comillas, tipos, CREATE, NOT NULL)', () => {
     expect(createTableSql({ createTable: 'if-not-exists', external: false })).toBe('CREATE TABLE IF NOT EXISTS');
   });
 
-  it('golden de la tabla de referencia: el CREATE físico que recibe el motor, igual con o sin la regla', () => {
-    expect(tableStatements(SPEC_INPUT, { ...DEF, partitionsLast: true })[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
+  it('golden de la tabla de referencia: el CREATE físico', () => {
     expect(tableStatements(SPEC_INPUT, DEF)[0].sql).toBe(`${SPEC_BASE_SQL}\n`);
   });
 });

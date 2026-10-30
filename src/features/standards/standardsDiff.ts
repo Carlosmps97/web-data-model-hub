@@ -12,7 +12,7 @@ import { mergeOutputSettings, type DdlOutputSettings } from '@/features/ddl';
 import { domainEditInput } from './domainForm';
 import { toEditInput } from './ddlRules.service';
 import type {
-  DdlLookup, DdlRule, DdlRuleEditInput, DdlRulesetConfig, DomainEditInput, SnapshotDomain, UdpDataType, UdpDefinition,
+  DdlRule, DdlRuleEditInput, DdlRulesetConfig, DomainEditInput, SnapshotDomain, UdpDataType, UdpDefinition,
   UdpEditInput, UdpLevel, UdpView,
 } from './standards.service';
 
@@ -97,62 +97,24 @@ export function udpChanged(form: UdpForm, seg: { level: UdpLevel; view: UdpView 
     .some((k) => k !== 'id' && next[k] !== undefined && !sameValue(next[k], base[k] ?? ''));
 }
 
-// ── DDL Export Rules ────────────────────────────────────────────────────────
+// ── Reglas del Export DDL ────────────────────────────────────────────────────
 
-/** Lo que define una regla (sin `id` ni `udpRefs`, que deriva el servidor);
- *  opcional ausente ≡ vacío y los destinos como conjunto. */
+/** Lo que define una regla (sin `id`); opcional ausente ≡ vacío. */
 const ruleShape = (r: DdlRuleEditInput) => ({
-  name: r.name, description: r.description ?? '', kind: r.kind, target: r.target ?? '',
-  sourceArtifact: r.sourceArtifact ?? '', condition: r.condition, action: r.action ?? {},
-  appliesTo: [...(r.appliesTo ?? [])].sort(), priority: r.priority, enabled: r.enabled,
+  name: r.name, description: r.description ?? '', scope: r.scope, when: r.when ?? '',
+  files: (r.files ?? []).map((f) => ({ name: f.name ?? '', content: f.content ?? '' })),
+  order: r.order, enabled: r.enabled,
 });
 
-/** Regla: ¿el guardado cambia algo? `stored` null = alta (siempre). El backend
- *  graba la validación recalculada (`same_rule`) y el editor solo guarda una
- *  regla válida: si lo guardado está `invalid`/`stale` (p. ej. sembrada sin que
- *  el proyecto tuviera sus UDPs), re-guardarla sin tocar nada sí es un cambio;
- *  sin él la regla seguiría fuera del export sin salida. */
+/** Regla: ¿el guardado cambia algo? `stored` null = alta (siempre). */
 export function ruleChanged(draft: DdlRuleEditInput, stored: DdlRule | null): boolean {
-  if (!stored || stored.validationState !== 'valid') return true;
+  if (!stored) return true;
   return !sameValue(ruleShape(draft), ruleShape(toEditInput(stored)));
 }
 
-/** Lo que emite un lookup (backend `_resolve_lookup`): un valor mapeado gana
- *  —null = no emitir; '' = emitir vacío— y, sin mapear, rige el default. Por eso
- *  «nada» (null) ≡ sin mapear solo si el default también es nada: con default,
- *  mapear a null deja de emitirlo. `undefined` no viaja (JSON). */
-const lookupShape = (l: DdlLookup) => {
-  const dflt = l.default ?? null;
-  const values = Object.fromEntries(Object.entries(l.values ?? {})
-    .filter(([, v]) => v !== undefined && !(v === null && dflt === null)));
-  return { fromUdpId: l.fromUdpId ?? '', fromLevel: l.fromLevel ?? '', values, default: dflt };
-};
-
-const NOT_EMITTED = '— nothing (not emitted)';
-
-/** Una fila del editor de lookups (misma regla que `lookupShape`): qué emite
- *  con el input vacío —sin mapear: el default o nada; «nada» (null): no se
- *  emite; '': se emite vacío— y qué acción la lleva al otro estado. 'nothing'
- *  solo sin mapear y con default; 'unmap' con un valor, o con null si hay
- *  default: sin default, «nada» y «sin mapear» son lo mismo. */
-export function lookupRow(l: DdlLookup, key: string): { placeholder: string; action: 'unmap' | 'nothing' | null } {
-  const dflt = l.default ?? null;
-  const v = Object.prototype.hasOwnProperty.call(l.values ?? {}, key) ? l.values[key] : undefined;
-  if (v === undefined) {
-    return dflt === null
-      ? { placeholder: NOT_EMITTED, action: null }
-      : { placeholder: `— default (${dflt === '' ? "''" : dflt})`, action: 'nothing' };
-  }
-  if (v === null) return { placeholder: NOT_EMITTED, action: dflt === null ? null : 'unmap' };
-  return { placeholder: v === '' ? "— empty value ('')" : NOT_EMITTED, action: 'unmap' };
-}
-
-/** Lookups & Functions: ¿el guardado cambia algo? «Nada» (null) ≡ sin mapear
- *  solo cuando el lookup no tiene default. */
-export function ddlConfigChanged(lookups: Record<string, DdlLookup>, functions: DdlRulesetConfig['functions'],
-                                 config: DdlRulesetConfig): boolean {
-  const shape = (ls: Record<string, DdlLookup>) => Object.fromEntries(Object.entries(ls).map(([k, l]) => [k, lookupShape(l)]));
-  return !sameValue(shape(lookups), shape(config.lookups ?? {})) || !sameValue(functions, config.functions ?? []);
+/** Piezas y variables: ¿el guardado cambia algo? */
+export function ddlConfigChanged(pieces: string, variables: Record<string, string>, config: DdlRulesetConfig): boolean {
+  return pieces !== (config.pieces ?? '') || !sameValue(variables, config.variables ?? {});
 }
 
 /** Output settings: ¿el guardado cambia algo? Lo guardado se lee con sus

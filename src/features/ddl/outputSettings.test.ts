@@ -32,7 +32,6 @@ describe('mergeOutputSettings', () => {
   it('splitOutputSettings separa opciones del generador y nombres de archivo', () => {
     const { opts, fileNames } = splitOutputSettings(DEFAULT_OUTPUT_SETTINGS);
     expect(opts.createTable).toBe('or-replace');
-    expect(opts.partitionsLast).toBe(false);
     expect('fileNames' in opts).toBe(false);
     expect('dialect' in opts).toBe(false);
     expect('oracle' in opts).toBe(false);

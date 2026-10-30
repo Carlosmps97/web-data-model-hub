@@ -142,8 +142,7 @@ export default function StandardsScreen() {
         ) : tab === 'themes' ? (
           <ThemesPage projectId={projectId} snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
         ) : (
-          <DdlRulesTab projectId={projectId} snapshot={snapshot} versions={versions} canEdit={canEdit}
-            meName={me?.name ?? me?.username} onApplied={reload} />
+          <DdlRulesTab projectId={projectId} snapshot={snapshot} canEdit={canEdit} onApplied={reload} />
         )}
       </div>
 

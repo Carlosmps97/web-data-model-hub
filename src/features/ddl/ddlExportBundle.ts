@@ -1,15 +1,15 @@
 /**
- * ddlExportBundle: arma la lista de archivos del `.zip` del Export DDL.
+ * ddlExportBundle: arma la lista de archivos del `.zip` del Export DDL con
+ * «Use export settings».
  *
- * Puro: no toca el DOM ni la red. Recibe el DDL ya partido por objeto (de
- * cualquiera de los dos caminos: `tableStatements`/`viewStatements` sin reglas,
- * o `rendered.statements` con reglas) y lo mapea a rutas `carpeta/archivo`:
- *   {Tabla}/TABLE-{TABLA}.sql · {Tabla}/VIEW_NEG-{VISTA}.sql · {Tabla}/VIEW_TEC-{VISTA}.sql
- * El prefijo depende de la categoría (tabla · vista modelada · vista generada por
- * reglas) y el nombre va en mayúscula; todo es configurable en las Output
- * settings (`fileNames`). Si dos archivos de una carpeta chocan (sin distinguir
- * mayúsculas: Mac/Windows no las distinguen al descomprimir), esos llevan su
- * esquema. El CREATE y sus ALTER van seguidos, sin líneas en blanco.
+ * Puro: no toca el DOM ni la red. Recibe el DDL ya partido por objeto
+ * (`tableStatements`/`viewStatements`) y lo mapea a rutas `carpeta/archivo`:
+ *   {Tabla}/TABLE-{TABLA}.sql · {Tabla}/VIEW_NEG-{VISTA}.sql
+ * El prefijo depende de la categoría y el nombre va en mayúscula; todo es
+ * configurable en las Output settings (`fileNames`). Si dos archivos de una
+ * carpeta chocan (sin distinguir mayúsculas: Mac/Windows no las distinguen al
+ * descomprimir), esos llevan su esquema. Con «Use export rules» los nombres
+ * los escriben las reglas; de acá toman la misma carpeta (`exportFolders`).
  */
 import type { ZipEntry } from '@/lib/zip';
 
@@ -50,22 +50,7 @@ export const DEFAULT_FILE_NAMES: DdlFileNames = {
   separator: '-', nameCase: 'upper', schema: 'when-needed',
 };
 
-// Artefactos del motor de reglas que el pipeline emite (backend).
-const PHYSICAL = 'ddl.tabla_fisica';
-const VIEW_BUSINESS = 'ddl.vista_negocio';
-const VIEW_PASSIVE = 'ddl.vista';
-/** Artefactos que vienen del modelo; cualquier otro lo generó una regla. */
-const MODELED = new Set([PHYSICAL, VIEW_BUSINESS, VIEW_PASSIVE]);
-// Anexos de cualquier objeto (`<artefacto>.tags` = ALTER … SET TAGS,
-// `<artefacto>.extra` = sentencias libres `after`): se pliegan al archivo del objeto.
-const ADDENDUM_RX = /^(.*)\.(tags|extra)$/;
-
 const ROOT_VIEWS = '_views';
-
-/** Clave estable para el mapa vista→fuentes: (schema, name). */
-export function viewKey(schema: string | null | undefined, name: string): string {
-  return JSON.stringify([schema ?? '', name]);
-}
 
 /** Sustituye los caracteres ilegales en Windows y los de control. */
 function sanitizeName(s: string): string {
@@ -78,11 +63,7 @@ function folderKey(o: DdlObject): string {
   return o.tableName === '' ? '__views_root__' : JSON.stringify([o.tableSchema ?? '', o.tableName]);
 }
 
-function isViewSql(sql: string): boolean {
-  return /^\s*CREATE\s+(OR\s+REPLACE\s+)?(TEMP(ORARY)?\s+)?VIEW\b/i.test(sql);
-}
-
-/** Camino sin reglas: todo viene del modelo; cada vista a su tabla fuente. */
+/** Todo viene del modelo; cada vista va a la carpeta de su primera fuente exportada. */
 export function plainToObjects(args: {
   tables: { id: string; physicalName: string; schema?: string; sql: string }[];
   views: { name: string; schema?: string; sourceTableIds: string[]; sql: string }[];
@@ -99,76 +80,6 @@ export function plainToObjects(args: {
       tableName: home?.physicalName ?? '', tableSchema: home?.schema,
       kind: 'view', origin: 'model', schema: v.schema, name: v.name, sql: v.sql,
     });
-  }
-  return objects;
-}
-
-/** Camino con reglas: agrupa los statements del motor por tabla. */
-export function statementsToObjects(args: {
-  statements: { artifact: string; schema?: string | null; name?: string | null; sql: string }[];
-  viewSources: Map<string, string[]>;
-  tablesById: Map<string, { physicalName: string; schema?: string }>;
-}): DdlObject[] {
-  const { statements, viewSources, tablesById } = args;
-  const objects: DdlObject[] = [];
-  let currentPhysical: DdlObject | null = null;
-  const byKey = new Map<string, DdlObject>();
-  const keyOf = (artifact: string, s: { schema?: string | null; name?: string | null }) =>
-    JSON.stringify([artifact, s.schema ?? '', s.name ?? '']);
-  const originOf = (artifact: string): DdlObject['origin'] => (MODELED.has(artifact) ? 'model' : 'generated');
-
-  const resolveHome = (s: { schema?: string | null; name?: string | null }) => {
-    const src = viewSources.get(viewKey(s.schema, s.name ?? '')) ?? [];
-    const homeId = src.find((id) => tablesById.has(id));
-    const t = homeId ? tablesById.get(homeId) : undefined;
-    return { tableName: t?.physicalName ?? '', tableSchema: t?.schema };
-  };
-
-  for (const s of statements) {
-    const addendum = ADDENDUM_RX.exec(s.artifact);
-    if (addendum) {
-      // `.tags` / `.extra`: al archivo de su objeto (emitido justo antes de ellos),
-      // pegados, sin línea en blanco.
-      const base = addendum[1];
-      const existing = byKey.get(keyOf(base, s));
-      let target: DdlObject;
-      if (existing) {
-        target = existing;
-      } else {
-        const home = base === VIEW_BUSINESS || base === VIEW_PASSIVE
-          ? resolveHome(s)
-          : { tableName: base === PHYSICAL ? (s.name ?? '') : (currentPhysical?.tableName ?? ''),
-              tableSchema: base === PHYSICAL ? (s.schema ?? undefined) : currentPhysical?.tableSchema };
-        target = { ...home, kind: /vista/.test(base) ? 'view' : 'table', origin: originOf(base),
-                   schema: s.schema ?? undefined, name: s.name ?? '', sql: '' };
-        byKey.set(keyOf(base, s), target);
-        objects.push(target);
-        if (base === PHYSICAL) currentPhysical = target;
-      }
-      target.sql = target.sql ? `${target.sql}\n${s.sql}` : s.sql;
-      continue;
-    }
-    let obj: DdlObject;
-    if (s.artifact === PHYSICAL) {
-      obj = {
-        tableName: s.name ?? '', tableSchema: s.schema ?? undefined,
-        kind: 'table', origin: 'model', schema: s.schema ?? undefined, name: s.name ?? '', sql: s.sql,
-      };
-      currentPhysical = obj;
-    } else if (s.artifact === VIEW_BUSINESS || s.artifact === VIEW_PASSIVE) {
-      obj = { ...resolveHome(s), kind: 'view', origin: 'model', schema: s.schema ?? undefined,
-              name: s.name ?? '', sql: s.sql };
-    } else {
-      // Artefacto generado (p.ej. _rej, vista técnica): archivo propio en la
-      // carpeta de la tabla que lo originó (la del grupo actual).
-      obj = {
-        tableName: currentPhysical?.tableName ?? '', tableSchema: currentPhysical?.tableSchema,
-        kind: isViewSql(s.sql) ? 'view' : 'table', origin: 'generated',
-        schema: s.schema ?? undefined, name: s.name ?? '', sql: s.sql,
-      };
-    }
-    byKey.set(keyOf(s.artifact, s), obj);
-    objects.push(obj);
   }
   return objects;
 }
@@ -205,6 +116,21 @@ function allocFolders(objects: DdlObject[]): Map<string, string> {
     display.set(k, final);
   }
   return display;
+}
+
+/** Carpeta de cada tabla y vista del export, con la misma asignación del zip
+ *  (las reglas la reciben como `tabla.carpeta` / `vista.carpeta`). */
+export function exportFolders(args: {
+  tables: { id: string; physicalName: string; schema?: string }[];
+  views: { sourceTableIds: string[] }[];
+}): { tables: string[]; views: string[] } {
+  const objects = plainToObjects({
+    tables: args.tables.map((t) => ({ ...t, sql: '' })),
+    views: args.views.map((v) => ({ name: '', sourceTableIds: v.sourceTableIds, sql: '' })),
+  });
+  const folder = allocFolders(objects);
+  const all = objects.map((o) => folder.get(folderKey(o))!);
+  return { tables: all.slice(0, args.tables.length), views: all.slice(args.tables.length) };
 }
 
 const caseName = (s: string, mode: DdlFileNames['nameCase']): string =>

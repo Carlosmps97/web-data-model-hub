@@ -6,10 +6,9 @@
 // que el generador sea puro y se pueda probar de forma unitaria.
 //
 // Defaults según la macro de referencia: identificadores en minúscula, tabla
-// externa con LOCATION ADLS `abfss://…` y la carpeta en mayúsculas; las columnas
-// de partición pueden ordenarse por el correlativo del UDP (PART_01, PART_02…)
-// que declara la regla de layout del ruleset; las proyecciones de columnas de
-// las vistas se emiten como `col AS alias` con el casing del export.
+// externa con LOCATION ADLS `abfss://…` y la carpeta en mayúsculas; las
+// proyecciones de columnas de las vistas se emiten como `col AS alias` con el
+// casing del export.
 //
 // Sin comillas salvo que el nombre las necesite (`quoteIdentifiers`), tipos con
 // `typeCase`, CREATE según `createTable`, `USING` en mayúscula y `NOT NULL` solo
@@ -17,8 +16,7 @@
 // cambia en Data Standards (Output settings).
 //
 // Con PARTITIONED BY las columnas de partición no van en la lista del CREATE:
-// se declaran ahí con su tipo (`PARTITIONED BY (codmes int)`). Formato fijo,
-// con o sin Export rules.
+// se declaran ahí con su tipo (`PARTITIONED BY (codmes int)`). Formato fijo.
 // ─────────────────────────────────────────────────────────────────────────────
 import { foldComplexType } from '@/lib/typeText';
 
@@ -52,11 +50,6 @@ export interface DdlColumn {
   isNullable?: boolean;
   /** Columna marcada como llave de partición. */
   isPartition?: boolean;
-  /** Correlativo de partición (PART_01 → 1) leído del UDP que declara la regla
-   *  de layout (`rulesBridge.withPartitionOrder`). Ordena las columnas de
-   *  partición en el bloque final del CREATE y en PARTITIONED BY; las
-   *  particiones sin correlativo van después, en orden físico. */
-  partitionOrder?: number | null;
   /** Definición funcional → se emite como `COMMENT` de la columna. */
   description?: string;
   /** Comment físico (Comment de Erwin): si existe, es el COMMENT; si no, `description`. */
@@ -109,7 +102,7 @@ export type QuoteMode = 'when-needed' | 'always';
 export type TypeCase = 'lower' | 'upper';
 /** Forma del CREATE TABLE. */
 export type CreateTableMode = 'or-replace' | 'if-not-exists';
-/** Keyword de los SET TAGS sobre vistas (lo aplica el motor de reglas). */
+/** Keyword de los SET TAGS sobre vistas (Output settings); ningún export lo lee: las reglas escriben sus tags. */
 export type ViewTagsAs = 'table' | 'view';
 
 export interface DatabricksDdlOptions {
@@ -141,12 +134,6 @@ export interface DatabricksDdlOptions {
   locationFolderCase?: IdentifierCase;
   /** Pares clave/valor opcionales de `TBLPROPERTIES (…)`. */
   tblProperties: { key: string; value: string }[];
-  /** Regla de layout del ruleset («Partition columns last»): las columnas de
-   *  partición se emiten al final de la lista del CREATE, solo cuando no hay
-   *  PARTITIONED BY (con él van siempre ahí, con su tipo). El orden físico del
-   *  modelo y el PRIMARY KEY no cambian. La fija el modal desde las reglas
-   *  seleccionadas (rulesBridge.layoutFromRules), nunca a mano. */
-  partitionsLast?: boolean;
   /** Casing de identificadores (schema/tabla/columna/constraints pk_/fk_ y
    *  columnas/alias de las proyecciones de vistas). Nunca aplica a literales,
    *  COMMENTs, tipos de datos, expresiones/castType de vistas ni alias
@@ -158,7 +145,7 @@ export interface DatabricksDdlOptions {
   typeCase: TypeCase;
   /** `or-replace` ⇒ CREATE OR REPLACE TABLE; `if-not-exists` ⇒ CREATE [EXTERNAL] TABLE IF NOT EXISTS. */
   createTable: CreateTableMode;
-  /** Tags sobre vistas: `ALTER TABLE` (como la macro) o `ALTER VIEW`. Viaja al motor. */
+  /** Tags sobre vistas: `ALTER TABLE` (como la macro) o `ALTER VIEW` (ver `ViewTagsAs`). */
   viewTagsAs: ViewTagsAs;
 }
 
@@ -207,7 +194,7 @@ const caseWith = (s: string, mode: IdentifierCase): string =>
 const applyCase = (s: string): string => caseWith(s, active.idCase);
 
 /** Palabras que no pueden ir sin comillas como identificador. Espejo exacto de
- *  `RESERVED_WORDS` del motor (backend engine/render.py). */
+ *  `RESERVED_WORDS` de las reglas (backend engine/sqltext.py). */
 export const RESERVED_WORDS: ReadonlySet<string> = new Set(`
 all alter and anti any as authorization between both by case cast check collate column
 constraint create cross current_date current_time current_timestamp current_user delete
@@ -255,24 +242,6 @@ export function pkFirstColumns<C extends { ordinal: number; isPrimaryKey?: boole
   return [...byOrdinal.filter((c) => c.isPrimaryKey), ...byOrdinal.filter((c) => !c.isPrimaryKey)];
 }
 
-/** Orden de emisión de las columnas de partición: primero las que traen
- *  correlativo (PART_01 < PART_02…), después las demás en orden físico
- *  (sort estable). Espejo de `ordered_partitions` del motor. */
-export function orderedPartitions(cols: DdlColumn[]): DdlColumn[] {
-  return cols
-    .filter((c) => c.isPartition)
-    .map((c, i) => ({ c, i }))
-    .sort((a, b) => {
-      const ao = a.c.partitionOrder ?? null;
-      const bo = b.c.partitionOrder ?? null;
-      if (ao === null && bo === null) return a.i - b.i;
-      if (ao === null) return 1;
-      if (bo === null) return -1;
-      return ao - bo || a.i - b.i;
-    })
-    .map(({ c }) => c);
-}
-
 /** Nombre completo de la tabla según Unity Catalog (comillas según `quoteIdentifiers`). */
 function qualify(t: DdlTable, o: DatabricksDdlOptions): string {
   const schema = (t.schema?.trim() || o.defaultSchema || 'default');
@@ -284,8 +253,7 @@ function qualify(t: DdlTable, o: DatabricksDdlOptions): string {
 
 /** Tipo Databricks de una columna tal como sale en el CREATE: simples mapeados
  *  y con el casing `typeCase`; complejos (con `<`) tal cual, plegados a una
- *  línea. El motor lo recibe como `ddlType` para que la `_rej` salga con el
- *  mismo tipo que la física. */
+ *  línea. Las reglas lo reciben como `tipo_ddl` (`rulesBridge`). */
 export function ddlType(raw: string, typeCase: TypeCase = 'lower'): string {
   const t0 = (raw || 'string').trim();
   // Tipos complejos (contienen '<'): verbatim. Cambiarles el casing rompería
@@ -310,7 +278,7 @@ export function ddlType(raw: string, typeCase: TypeCase = 'lower'): string {
   return typeCase === 'upper' ? out.toUpperCase() : out;
 }
 
-/** Encabezado del CREATE TABLE; espejo de `create_table_sql` del motor. */
+/** Encabezado del CREATE TABLE. */
 export function createTableSql(o: Pick<DatabricksDdlOptions, 'createTable' | 'external'>): string {
   if (o.createTable === 'if-not-exists') return o.external ? 'CREATE EXTERNAL TABLE IF NOT EXISTS' : 'CREATE TABLE IF NOT EXISTS';
   return 'CREATE OR REPLACE TABLE';
@@ -329,16 +297,11 @@ function tableDDL(
   // Orden único: PK primero y cada bloque por ordinal.
   const ordered = pkFirstColumns(cols);
   // Con PARTITIONED BY las particiones no van en la lista: se declaran ahí con
-  // su tipo (formato fijo, con o sin reglas). Sin él (Output setting
-  // «Partitions» apagada) van en la lista: al final y por su correlativo con la
-  // regla de layout; si no, en orden físico.
-  // Espejo de `partitions_in_clause`/`layout_columns` del motor.
-  const partitions = orderedPartitions(ordered);
+  // su tipo (formato fijo). Sin él (Output setting «Partitions» apagada) van en
+  // la lista, en orden físico.
+  const partitions = ordered.filter((c) => c.isPartition);
   const rest = ordered.filter((c) => !c.isPartition);
-  const inClause = o.includePartitions && partitions.length > 0;
-  const emitted = inClause ? rest
-    : o.partitionsLast ? [...rest, ...partitions]
-      : ordered;
+  const emitted = o.includePartitions && partitions.length > 0 ? rest : ordered;
 
   /** Definición de una columna: la misma en la lista o dentro del PARTITIONED BY. */
   const colDef = (c: DdlColumn): string => {
@@ -362,9 +325,8 @@ function tableDDL(
   out += `\nUSING ${o.tableFormat.toUpperCase()}`;
 
   if (o.includePartitions) {
-    // PARTITIONED BY sigue el correlativo del UDP cuando la regla de layout lo
-    // declara; sin correlativos, el orden físico. Cada partición va con su
-    // definición (`codmes int`), no solo con el nombre.
+    // En orden físico; cada partición va con su definición (`codmes int`), no
+    // solo con el nombre.
     const parts = partitions.map(colDef);
     if (parts.length) out += `\nPARTITIONED BY (${parts.join(', ')})`;
   }
@@ -412,25 +374,49 @@ function tableDDL(
   return out;
 }
 
-/** Un `CREATE OR REPLACE VIEW` desde una vista canónica (multi-fuente).
- *  Reglas por columna: `expression` verbatim (con su alias tal cual) >
- *  `CAST(col AS castType) AS alias` > `col AS alias` siempre explícito
- *  (alias = outputAlias o la misma columna), como escribe la macro. Las
- *  columnas y alias de proyección son identificadores del modelo y respetan
- *  `identifierCase`, con comillas solo si el nombre las necesita; con 2+
- *  fuentes se cualifican con alias posicionales t1, t2… (raw, nunca vía
- *  ident()) y el FROM las lista separadas por coma, sin JOIN ni ON (el default
- *  de Erwin: `from tabla1, tabla2`). Sin proyecciones ⇒ `SELECT *`, o la `sql`
- *  libre (sin su `;` final) si la primera fuente no se resuelve.
- *  `showOnCanvas` no cambia este SQL: qué vistas se exportan lo decide la
- *  membresía del canvas (`canvasDdlViews`); con Export rules, `showOnCanvas`
- *  marca la vista de negocio (`rulesBridge`). Exportada: el ViewEditor la usa
- *  para el preview (mismo SQL que el export). */
-export function viewDDL(
+/** Fuentes de una vista, en orden (con respaldo en `tableId` para documentos
+ *  que solo traen ese campo). */
+export const sourceIdsOf = (v: DdlView): string[] =>
+  (v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []));
+
+/** Una proyección de vista como la escribe el export: `sql` sin el alias
+ *  (`t1.codcli`, `CAST(codcli AS int)` o la expresión tal cual). */
+export interface ViewProjection {
+  sql: string;
+  /** Columnas: siempre (la misma columna si no tiene otro); expresión: el que
+   *  tipeó el modelador, o null. */
+  alias: string | null;
+  /** Columna fuente (nombre del modelo) y su tabla; null en una expresión. */
+  column: string | null;
+  tableId: string | null;
+  expression: boolean;
+}
+
+/** Las partes del `CREATE VIEW` de una vista: nombre completo, esquema
+ *  efectivo, proyecciones y FROM; `freeSql` es la SQL congelada que se usa de
+ *  cuerpo cuando no hay proyecciones ni primera fuente resoluble. */
+export interface ViewParts {
+  full: string;
+  schema: string;
+  projections: ViewProjection[];
+  from: string;
+  freeSql: string | null;
+}
+
+/** Partes del `CREATE OR REPLACE VIEW` de una vista canónica (multi-fuente).
+ *  Por columna: `expression` verbatim (con su alias tal cual) >
+ *  `CAST(col AS castType)` > `col`, siempre con alias explícito (outputAlias o
+ *  la misma columna), como escribe la macro. Las columnas y alias de proyección
+ *  son identificadores del modelo y respetan `identifierCase`, con comillas
+ *  solo si el nombre las necesita; con 2+ fuentes se cualifican con alias
+ *  posicionales t1, t2… (raw, nunca vía ident()) y el FROM las lista separadas
+ *  por coma, sin JOIN ni ON (el default de Erwin: `from tabla1, tabla2`). Las
+ *  usan `viewDDL` y el payload de las reglas (`rulesBridge`). */
+export function viewParts(
   v: DdlView,
   o: DatabricksDdlOptions,
   tableById: Map<string, DdlTable>,
-): string {
+): ViewParts {
   // Funnel de estilo: fija el estilo activo desde sus propias opciones.
   // - Como entry point directo (ViewEditor → viewDDL(...), nunca databricksDdl):
   //   deriva casing/comillas de sus opciones en vez de heredar el estilo que
@@ -438,8 +424,7 @@ export function viewDDL(
   // - Desde databricksDdl: idempotente (ya se fijó al mismo valor y pasa `o`
   //   tal cual) ⇒ respeta el estilo del export en curso.
   useStyle(o);
-  // Fuentes canónicas, con respaldo en `tableId` para documentos que solo traen ese campo.
-  const srcIds = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
+  const srcIds = sourceIdsOf(v);
   const base = srcIds.length ? tableById.get(srcIds[0]) : undefined;
   const schema = (v.schema?.trim() || base?.schema?.trim() || o.defaultSchema || 'default');
   const parts = o.unityCatalog ? [o.catalog || 'main', schema, v.name] : [schema, v.name];
@@ -467,34 +452,50 @@ export function viewDDL(
   else if (!aliased) from = refOf(srcIds[0]);
   else from = srcIds.map((id) => `${refOf(id)} ${aliasOf.get(id)}`).join(',\n  ');
 
-  // La vista lista sus columnas explícitas (una por línea) en el orden definido.
-  // `SELECT *` solo como fallback si la vista no tiene proyección por columna.
-  let body: string;
-  if (srcs.length === 0) {
-    body = (!base && v.sql?.trim())
-      ? v.sql.trim().replace(/;\s*$/, '')
-      : `SELECT *\nFROM ${from}`;
-  } else {
-    const projections = srcs.map((s) => {
-      const rawAlias = (s.outputAlias ?? '').trim();
-      const cast = foldComplexType((s.castType ?? '').trim());   // una sola línea
-      const expr = (s.expression ?? '').trim();
-      // Expresión libre: verbatim, alias incluido (lo tipeó el modelador junto
-      // con la expresión).
-      if (expr) return rawAlias && rawAlias !== expr ? `${expr} AS ${rawAlias}` : expr;
-      // Columna del modelo: identificador ⇒ casing del export, comillas solo si
-      // el nombre las necesita. Cualificada con su alias de fuente cuando hay 2+
-      // (sin tableId ⇒ t1, ítems de una sola tabla).
-      const colName = projIdent(s.column!);
-      const col = aliased ? `${aliasOf.get(s.tableId ?? '') ?? 't1'}.${colName}` : colName;
-      const alias = projIdent(rawAlias || s.column!);
-      if (cast) return `CAST(${col} AS ${cast}) AS ${alias}`;
-      return `${col} AS ${alias}`;
-    });
-    body = `SELECT\n  ${projections.join(',\n  ')}\nFROM ${from}`;
-  }
+  const projections = srcs.map((s): ViewProjection => {
+    const rawAlias = (s.outputAlias ?? '').trim();
+    const cast = foldComplexType((s.castType ?? '').trim());   // una sola línea
+    const expr = (s.expression ?? '').trim();
+    // Expresión libre: verbatim, alias incluido (lo tipeó el modelador junto
+    // con la expresión).
+    if (expr) return { sql: expr, alias: rawAlias || null, column: null, tableId: s.tableId ?? null, expression: true };
+    // Columna del modelo: identificador ⇒ casing del export, comillas solo si
+    // el nombre las necesita. Cualificada con su alias de fuente cuando hay 2+
+    // (sin tableId ⇒ t1, ítems de una sola tabla).
+    const colName = projIdent(s.column!);
+    const col = aliased ? `${aliasOf.get(s.tableId ?? '') ?? 't1'}.${colName}` : colName;
+    return {
+      sql: cast ? `CAST(${col} AS ${cast})` : col, alias: projIdent(rawAlias || s.column!),
+      column: s.column!, tableId: s.tableId ?? null, expression: false,
+    };
+  });
+  const freeSql = !projections.length && !base && v.sql?.trim() ? v.sql.trim().replace(/;\s*$/, '') : null;
+  return { full, schema, projections, from, freeSql };
+}
 
-  let out = `CREATE OR REPLACE VIEW ${full}`;
+/** Una proyección con su alias: la expresión lo lleva solo si es otro texto. */
+const projectionSql = (p: ViewProjection): string => (p.expression
+  ? (p.alias && p.alias !== p.sql ? `${p.sql} AS ${p.alias}` : p.sql)
+  : `${p.sql} AS ${p.alias}`);
+
+/** Un `CREATE OR REPLACE VIEW` desde una vista canónica (ver `viewParts`). La
+ *  vista lista sus columnas explícitas (una por línea) en el orden definido;
+ *  sin proyecciones ⇒ `SELECT *`, o la `sql` libre (sin su `;` final) si la
+ *  primera fuente no se resuelve.
+ *  `showOnCanvas` no cambia este SQL: qué vistas se exportan lo decide la
+ *  membresía del canvas (`canvasDdlViews`); con las reglas, `showOnCanvas`
+ *  marca la vista de negocio (`rulesBridge`). Exportada: el ViewEditor la usa
+ *  para el preview (mismo SQL que el export). */
+export function viewDDL(
+  v: DdlView,
+  o: DatabricksDdlOptions,
+  tableById: Map<string, DdlTable>,
+): string {
+  const p = viewParts(v, o, tableById);
+  const body = p.freeSql ?? (p.projections.length
+    ? `SELECT\n  ${p.projections.map(projectionSql).join(',\n  ')}\nFROM ${p.from}`
+    : `SELECT *\nFROM ${p.from}`);
+  let out = `CREATE OR REPLACE VIEW ${p.full}`;
   if (o.includeComments && v.description?.trim()) out += ` COMMENT ${lit(v.description.trim())}`;
   return out + ` AS\n${body};\n`;
 }
@@ -510,17 +511,31 @@ export interface DatabricksDdlInput {
   modelName?: string;
 }
 
+/** Las tablas del set exportado (`tableIds`; vacío ⇒ todas), en el orden del input. */
+export function exportTables(input: DatabricksDdlInput): DdlTable[] {
+  const wanted = input.tableIds && input.tableIds.length
+    ? new Set(input.tableIds)
+    : null;
+  return input.tables.filter((t) => !wanted || wanted.has(t.id));
+}
+
+/** Las vistas que entran al export: sin fuentes o con alguna fuente dentro del
+ *  set exportado. */
+export function exportViews(input: DatabricksDdlInput): DdlView[] {
+  const ids = new Set(exportTables(input).map((t) => t.id));
+  return (input.views ?? []).filter((v) => {
+    const src = sourceIdsOf(v);
+    return src.length === 0 || src.some((id) => ids.has(id));
+  });
+}
+
 /** Un statement por tabla del set exportado: el bloque que `databricksDdl`
- *  une, expuesto para el puente de Export rules (cada tabla viaja con su
- *  `baseSql` al motor). Mismo output que `databricksDdl`. */
+ *  une, expuesto para el zip. Mismo output que `databricksDdl`. */
 export function tableStatements(
   input: DatabricksDdlInput, o: DatabricksDdlOptions,
 ): { table: DdlTable; sql: string }[] {
   useStyle(o);
-  const wanted = input.tableIds && input.tableIds.length
-    ? new Set(input.tableIds)
-    : null;
-  const tables = input.tables.filter((t) => !wanted || wanted.has(t.id));
+  const tables = exportTables(input);
   const byTable = new Map<string, DdlColumn[]>();
   for (const c of input.columns) {
     (byTable.get(c.tableId) ?? byTable.set(c.tableId, []).get(c.tableId)!).push(c);
@@ -540,16 +555,8 @@ export function viewStatements(
   input: DatabricksDdlInput, o: DatabricksDdlOptions,
 ): { view: DdlView; sql: string }[] {
   useStyle(o);
-  const wanted = input.tableIds && input.tableIds.length
-    ? new Set(input.tableIds)
-    : null;
-  const ids = new Set(input.tables.filter((t) => !wanted || wanted.has(t.id)).map((t) => t.id));
   const tableById = new Map(input.tables.map((t) => [t.id, t]));
-  const exportViews = (input.views ?? []).filter((v) => {
-    const src = v.sourceTableIds?.length ? v.sourceTableIds : (v.tableId ? [v.tableId] : []);
-    return src.length === 0 || src.some((id) => ids.has(id));
-  });
-  return exportViews.map((v) => ({ view: v, sql: viewDDL(v, o, tableById) }));
+  return exportViews(input).map((v) => ({ view: v, sql: viewDDL(v, o, tableById) }));
 }
 
 /** Genera el DDL Databricks de las tablas seleccionadas de un diagrama. */

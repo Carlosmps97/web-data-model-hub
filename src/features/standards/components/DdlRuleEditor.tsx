@@ -1,894 +1,380 @@
 /**
- * Rule editor + validation bench, en split 50/50: la izquierda define (Form ↔
- * YAML) y la derecha valida (los 5 checks en vivo, error estilo compilador con
- * caret + "Did you mean", Test contra una tabla real del catálogo y el impacto
- * estimado). El panel derecho valida la regla; no es un preview del export.
+ * Editor de una regla del Export DDL: nombre, descripción, «For each» (cada
+ * tabla o cada vista del export), «When» (condición Jinja opcional), los
+ * archivos que escribe (nombre y contenido son plantillas Jinja; un contenido
+ * vacío no genera el archivo) y si está activa. Valida en vivo (errores con su
+ * campo y línea) y muestra la vista previa con una tabla real del catálogo:
+ * corre la lista completa con esta regla en su lugar, así se ve qué archivos
+ * salen, qué regla escribió cada uno y cuáles reemplaza. Al lado, la referencia
+ * de datos y funciones. Guardar registra una versión de Data Standards.
  */
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { useFloating } from '@/components/ui/useFloating';
-import { clipRect, contentBounds, placeAnchored } from '@/lib/floating';
-import { Check, ChevronDown, ChevronLeft, Clock3, Lock, Minus, Save, Trash2, TriangleAlert, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, Plus, Search, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-
-import { apiGet } from '@/services/http';
-import { API_BASE } from '@/services/apiBase';
+import { Button, SegmentedControl } from '@/components/ui';
+import { confirmDialog } from '@/components/ui/dialogs';
+import { udpView } from '@/lib/facets';
+import { ruleErrorText, type RenderedExport, type RulesPayload } from '@/features/ddl';
 
 import {
-  impactDdlRule, ruleToYaml, saveDdlRule, deleteDdlRule, testDdlRule, toEditInput,
-  validateDdlRule, yamlToRule,
-  type DdlArtifact, type DdlImpact, type DdlTestResult, type DdlValidateResult,
+  deleteDdlRule, previewDdlRules, previewPayloadFor, saveDdlRule, searchPreviewTables, toEditInput, validateDdlRule,
+  type DdlPreviewTable, type DdlValidation,
 } from '../ddlRules.service';
-import type {
-  DdlRule, DdlRuleEditInput, DdlRulesetConfig, UdpDefinition,
-} from '../standards.service';
+import { RULE_REFERENCE, ruleCompletions } from '../ddlRuleReference';
+import type { DdlRule, DdlRuleEditInput, DdlRuleScope, DdlRulesetConfig, UdpDefinition } from '../standards.service';
 import { applyErrorNotice, NO_CHANGES_HINT, ruleChanged } from '../standardsDiff';
+import CodeEditor from './CodeEditor';
+import { sortRules } from './DdlRuleList';
 
-interface CatalogTable { id: string; physicalName: string; schema?: string | null; }
+const SCOPES: { value: DdlRuleScope; label: string }[] = [{ value: 'table', label: 'Each table' }, { value: 'view', label: 'Each view' }];
 
-const LEVEL_OF = { columna: 'column', tabla: 'table', modelo: 'canvas' } as const;
+/** Una regla nueva: debajo de todas (las posiciones no son correlativas tras
+ *  un borrado), con un archivo por tabla. */
+export const newRuleDraft = (rules: DdlRule[]): DdlRuleEditInput => ({
+  name: '', description: '', scope: 'table', when: '', enabled: true,
+  order: rules.length ? Math.max(...rules.map((r) => r.order)) + 1 : 0,
+  files: [{ name: '{{ tabla.carpeta }}/TABLE-{{ tabla.nombre | upper }}.sql', content: '' }],
+});
 
-export default function DdlRuleEditor({ projectId, rule, draft: draftSeed, udpDefs, artifacts, canEdit, onBack, onSaved }: {
+/** La lista que corre la vista previa: las reglas guardadas en orden, con la
+ *  regla en edición en su lugar (activa aunque esté apagada, para verla). Pura. */
+export function previewRules(rules: DdlRule[], draft: DdlRuleEditInput): DdlRuleEditInput[] {
+  const shown = { ...draft, enabled: true };
+  const sorted = sortRules(rules);
+  const others = sorted.filter((r) => r.id !== draft.id).map(toEditInput);
+  const at = draft.id ? sorted.findIndex((r) => r.id === draft.id) : others.filter((r) => r.order <= draft.order).length;
+  return [...others.slice(0, Math.max(0, at)), shown, ...others.slice(Math.max(0, at))];
+}
+
+type PreviewState = { state: 'idle' } | { state: 'loading' } | { state: 'ok'; out: RenderedExport } | { state: 'error'; text: string };
+
+export default function DdlRuleEditor({ projectId, rule, rules, config, udpDefs, canEdit, canPreview, onBack, onSaved }: {
   projectId: string;
-  rule: DdlRule | null;                       // null = nueva
-  draft?: Partial<DdlRule>;                   // pre-carga de plantilla
+  rule: DdlRule | null;
   rules: DdlRule[];
   config: DdlRulesetConfig;
   udpDefs: UdpDefinition[];
-  artifacts: DdlArtifact[];
   canEdit: boolean;
+  /** La vista previa es el DDL del export: requiere el permiso `export`. */
+  canPreview: boolean;
   onBack: () => void;
   onSaved: () => Promise<void> | void;
 }) {
-  const isNew = rule === null;
-  const [draft, setDraft] = useState<DdlRuleEditInput>(() => rule ? toEditInput(rule) : {
-    name: '', kind: 'rule', target: 'column', condition: '', action: {},
-    appliesTo: [], priority: 100, enabled: true,
-    ...(draftSeed as Partial<DdlRuleEditInput> | undefined),
-  });
-  const [mode, setMode] = useState<'form' | 'yaml'>('form');
-  const [yamlText, setYamlText] = useState('');
-  const [yamlErr, setYamlErr] = useState<string | null>(null);
-  const [report, setReport] = useState<DdlValidateResult | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [impact, setImpact] = useState<DdlImpact | null>(null);
-  const [testTable, setTestTable] = useState<CatalogTable | null>(null);
-  const [testOut, setTestOut] = useState<DdlTestResult | null>(null);
-  const [tableQ, setTableQ] = useState('');
-  const [tableHits, setTableHits] = useState<CatalogTable[]>([]);
-  const [tablePick, setTablePick] = useState(false);
+  const isNew = !rule;
+  const [draft, setDraft] = useState<DdlRuleEditInput>(() => (rule ? toEditInput(rule) : newRuleDraft(rules)));
+  // Clave estable de cada archivo: al quitar uno, cada editor sigue con su texto.
+  const [fileKeys, setFileKeys] = useState<number[]>(() => draft.files.map((_, i) => i));
+  const nextKey = useRef(draft.files.length);
+  // La última tabla elegida para la vista previa (una respuesta anterior no la pisa).
+  const pickSeq = useRef(0);
+  const [validation, setValidation] = useState<DdlValidation | null>(null);
   const [saving, setSaving] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [ac, setAc] = useState<{ base: keyof typeof LEVEL_OF; partial: string; sel: number } | null>(null);
-  const condRef = useRef<HTMLInputElement>(null);
-  const pickBtnRef = useRef<HTMLButtonElement>(null);
+  const [side, setSide] = useState<'preview' | 'reference'>('preview');
+  const [tableQ, setTableQ] = useState('');
+  const [tableHits, setTableHits] = useState<DdlPreviewTable[]>([]);
+  const [table, setTable] = useState<DdlPreviewTable | null>(null);
+  const [payload, setPayload] = useState<RulesPayload | null>(null);
+  const [preview, setPreview] = useState<PreviewState>({ state: 'idle' });
 
   const patch = (p: Partial<DdlRuleEditInput>) => setDraft((d) => ({ ...d, ...p }));
+  const patchFile = (i: number, p: Partial<DdlRuleEditInput['files'][number]>) =>
+    setDraft((d) => ({ ...d, files: d.files.map((f, j) => (j === i ? { ...f, ...p } : f)) }));
 
-  // ── Validación en vivo (debounce) — los 5 checks del back ──
-  // La limpieza apaga la corrida entera, no solo el debounce: así la respuesta
-  // tardía de un borrador (o proyecto) anterior no pisa la vigente. Lo mismo en
-  // el impacto/Test y en el buscador de tablas.
+  const dirty = ruleChanged(draft, rule);
+  const errors = validation?.errors ?? [];
+  const errorsOf = (field: string) => errors.filter((e) => e.field === field);
+  const udpNames = useMemo(
+    () => [...new Set(udpDefs.filter((d) => udpView(d) === 'physical').map((d) => d.name))].sort(),
+    [udpDefs],
+  );
+  const completions = useMemo(() => ruleCompletions(config.pieces ?? '', config.variables ?? {}), [config.pieces, config.variables]);
+  const runList = useMemo(() => previewRules(rules, draft), [rules, draft]);
+
+  // Validación en vivo (no guarda): errores con su campo y línea, y avisos.
   useEffect(() => {
     let alive = true;
-    setChecking(true);
     const t = setTimeout(() => {
       validateDdlRule(projectId, draft)
-        .then((r) => { if (alive) setReport(r); })
-        .catch(() => { if (alive) setReport(null); })
-        .finally(() => { if (alive) setChecking(false); });
-    }, 450);
+        .then((v) => { if (alive) setValidation(v); })
+        .catch(() => { if (alive) setValidation(null); });
+    }, 300);
     return () => { alive = false; clearTimeout(t); };
   }, [projectId, draft]);
 
-  const valid = report?.state === 'valid';
-  // ¿El guardado cambia algo? En YAML cuenta el YAML (si no parsea, se deja
-  // guardar para que Save muestre el error); sin cambios no se registra una
-  // versión vacía.
-  const pending = useMemo(() => {
-    if (mode !== 'yaml') return draft;
-    try { return yamlToRule(yamlText, draft); } catch { return null; }
-  }, [mode, yamlText, draft]);
-  const dirty = isNew || pending === null || ruleChanged(pending, rule);
-  const canSave = canEdit && valid && !!draft.name.trim() && dirty;
-
-  // Impacto + Test se recalculan solo con regla válida.
+  // Buscador de tablas del catálogo para la vista previa.
   useEffect(() => {
-    if (!valid) { setImpact(null); setTestOut(null); return; }
+    if (table) return;
     let alive = true;
     const t = setTimeout(() => {
-      impactDdlRule(projectId, draft)
-        .then((r) => { if (alive) setImpact(r); }).catch(() => { if (alive) setImpact(null); });
-      if (testTable) {
-        testDdlRule(projectId, draft, testTable.id)
-          .then((r) => { if (alive) setTestOut(r); }).catch(() => { if (alive) setTestOut(null); });
-      }
+      searchPreviewTables(projectId, tableQ)
+        .then((hits) => { if (alive) setTableHits(hits); })
+        .catch(() => { if (alive) setTableHits([]); });
     }, 250);
     return () => { alive = false; clearTimeout(t); };
-  }, [projectId, valid, draft, testTable]);
+  }, [projectId, tableQ, table]);
 
-  // Buscador de tablas reales del catálogo.
+  const pickTable = (t: DdlPreviewTable) => {
+    const seq = ++pickSeq.current;
+    setTable(t); setPayload(null); setPreview({ state: 'loading' });
+    previewPayloadFor(t.id)
+      .then((p) => { if (pickSeq.current === seq) setPayload(p); })
+      .catch((e) => {
+        if (pickSeq.current === seq) setPreview({ state: 'error', text: e instanceof Error && e.message ? e.message : "Couldn't read the table" });
+      });
+  };
+  const changeTable = () => { pickSeq.current += 1; setTable(null); setPayload(null); setPreview({ state: 'idle' }); };
+  const addFile = () => {
+    patch({ files: [...draft.files, { name: '', content: '' }] });
+    setFileKeys((k) => [...k, nextKey.current++]);
+  };
+  const removeFile = (i: number) => {
+    patch({ files: draft.files.filter((_, j) => j !== i) });
+    setFileKeys((k) => k.filter((_, j) => j !== i));
+  };
+
+  // Vista previa: la lista completa con esta regla en su lugar, sobre la tabla elegida.
   useEffect(() => {
-    if (!tablePick) return;
+    if (!payload) return;
     let alive = true;
     const t = setTimeout(() => {
-      apiGet<CatalogTable[]>(`${API_BASE}/api/projects/${encodeURIComponent(projectId)}/catalog/tables?q=${encodeURIComponent(tableQ)}&limit=15`)
-        .then((hits) => { if (alive) setTableHits(hits); }).catch(() => { if (alive) setTableHits([]); });
-    }, 250);
+      setPreview({ state: 'loading' });
+      previewDdlRules(projectId, { rules: runList, pieces: config.pieces ?? '', variables: config.variables ?? {}, payload })
+        .then((out) => { if (alive) setPreview({ state: 'ok', out }); })
+        .catch((e) => {
+          if (alive) setPreview({ state: 'error', text: ruleErrorText(e) ?? (e instanceof Error && e.message ? e.message : "Couldn't run the preview") });
+        });
+    }, 500);
     return () => { alive = false; clearTimeout(t); };
-  }, [projectId, tableQ, tablePick]);
+  }, [projectId, payload, runList, config.pieces, config.variables]);
 
-  // ── Autocomplete de UDP: agrupa por clase, filtra al target ──
-  const acItems = useMemo(() => {
-    if (!ac) return [];
-    const level = LEVEL_OF[ac.base];
-    const p = ac.partial.toLowerCase();
-    return udpDefs.filter((d) => d.level === level && d.name.toLowerCase().includes(p)).slice(0, 8);
-  }, [ac, udpDefs]);
-
-  const onConditionChange = (value: string) => {
-    patch({ condition: value });
-    const m = /(columna|tabla|modelo)\.udp(?:\[\s*["']?([^"'\]]*)?)?$/.exec(value);
-    if (m && (draft.kind === 'generator' ? m[1] !== 'columna' : true)) {
-      setAc({ base: m[1] as keyof typeof LEVEL_OF, partial: m[2] ?? '', sel: 0 });
-    } else setAc(null);
+  /** Tras guardar o borrar, vuelve a la lista con los estándares recargados;
+   *  si la recarga falla, lo guardado ya quedó y se avisa aparte. */
+  const reload = async () => {
+    try { await onSaved(); } catch { toast.error("Saved, but couldn't reload the standards — reopen the tab"); }
   };
 
-  const insertUdp = (name: string) => {
-    if (!ac) return;
-    const value = draft.condition;
-    const m = /(columna|tabla|modelo)\.udp(?:\[\s*["']?(?:[^"'\]]*)?)?$/.exec(value);
-    if (!m) { setAc(null); return; }
-    // Siempre la forma canónica con corchetes.
-    const next = value.slice(0, m.index) + `${m[1]}.udp["${name}"]`;
-    patch({ condition: next });
-    setAc(null);
-    condRef.current?.focus();
-  };
-
-  const applySuggestion = (err: NonNullable<DdlValidateResult['errors']>[number]) => {
-    if (!err.token || !err.suggestion) return;
-    if (err.suggestion.startsWith('LIKE ')) {
-      // '= 'DAC'' → `LIKE 'DAC-%'` (la trampa del catálogo)
-      patch({ condition: draft.condition.replace(`= '${err.token}'`, err.suggestion) });
-    } else {
-      patch({ condition: draft.condition.replace(err.token, err.suggestion) });
-    }
-  };
-
-  const switchMode = (m: 'form' | 'yaml') => {
-    if (m === mode) return;
-    if (m === 'yaml') { setYamlText(ruleToYaml(draft)); setYamlErr(null); setMode('yaml'); return; }
-    try { setDraft(yamlToRule(yamlText, draft)); setYamlErr(null); setMode('form'); }
-    catch (e) { setYamlErr(e instanceof Error ? e.message : 'Invalid YAML'); }
-  };
-
-  const doSave = async () => {
-    let toSave = draft;
-    if (mode === 'yaml') {
-      try { toSave = yamlToRule(yamlText, draft); }
-      catch (e) { setYamlErr(e instanceof Error ? e.message : 'Invalid YAML'); return; }
-    }
+  const save = async () => {
     setSaving(true);
     try {
-      await saveDdlRule(projectId, toSave, isNew);
-      toast.success(`Rule ${toSave.name} saved`);
-      await onSaved();
-    } catch (e) { const n = applyErrorNotice(e, "Couldn't save the rule"); toast[n.kind](n.text); }
-    finally { setSaving(false); }
+      await saveDdlRule(projectId, { ...draft, name: draft.name.trim() }, isNew);
+    } catch (e) {
+      const n = applyErrorNotice(e, "Couldn't save the rule"); toast[n.kind](n.text);
+      setSaving(false);
+      return;
+    }
+    toast.success(isNew ? 'Rule added' : 'Rule saved');
+    await reload();
+    setSaving(false);
   };
 
-  const doDelete = async () => {
+  const remove = async () => {
     if (!rule) return;
-    setSaving(true);
-    try { await deleteDdlRule(projectId, rule); toast.success(`Rule ${rule.name} deleted`); await onSaved(); }
-    catch (e) { const n = applyErrorNotice(e, "Couldn't delete the rule"); toast[n.kind](n.text); setSaving(false); }
+    const ok = await confirmDialog({
+      title: `Delete rule ${rule.name}?`, message: 'Its files stop being generated. The change is recorded as a version (rollback available).',
+      confirmLabel: 'Delete', variant: 'danger', initialFocus: 'cancel',
+      action: () => deleteDdlRule(projectId, rule),
+    }).catch((e) => { const n = applyErrorNotice(e, "Couldn't delete the rule"); toast[n.kind](n.text); return false; });
+    if (ok) { toast.success('Rule deleted'); await reload(); }
   };
 
-  const errCount = report?.errors?.length ?? 0;
-  const action = draft.action as Record<string, unknown>;
-  const actionKind: RuleActionKind | 'emit' =
-    draft.kind === 'generator' ? 'emit'
-      : action.tags ? 'tags' : action.tblproperties ? 'tblproperties' : action.layout ? 'layout'
-        : action.types ? 'types' : action.omit === true ? 'omit' : action.keep === true ? 'keep'
-          : action.exclude === true ? 'exclude' : action.statements ? 'statements' : 'expression';
+  const canSave = canEdit && dirty && !saving && errors.length === 0 && draft.name.trim() !== '';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-      {/* barra de breadcrumb */}
-      <div style={{ height: 52, flex: 'none', display: 'flex', alignItems: 'center', gap: 11, padding: '0 24px', borderBottom: '1px solid #EAEDF2', background: '#fff' }}>
-        <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', fontSize: 12.5, fontWeight: 600, color: '#8A93A5', cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}>
-          <ChevronLeft size={13} /> Rule catalog
-        </button>
-        <span style={{ color: '#D4D9E2' }}>/</span>
-        <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 15, fontWeight: 700, color: '#1A2B4A' }}>{draft.name || 'new rule'}</span>
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: draft.kind === 'generator' ? '#8B5CF6' : '#2E5BFF', background: draft.kind === 'generator' ? '#F3EEFF' : '#EAF0FF', borderRadius: 999, padding: '2px 9px' }}>
-          {draft.kind === 'generator' ? 'Generator' : 'Rule'}
-        </span>
-        {checking
-          ? <span style={{ fontSize: 11.5, color: '#9AA3B2', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock3 size={12} /> checking…</span>
-          : errCount > 0
-            ? <span style={{ fontSize: 11.5, color: '#C0392B', display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#D6455D' }} />{errCount} error{errCount === 1 ? '' : 's'}</span>
-            : <span style={{ fontSize: 11.5, color: '#9AA3B2', display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16A37B' }} />Unsaved draft</span>}
-        <div style={{ flex: 1 }} />
-        {!isNew && canEdit && (
-          confirmDelete
-            ? <button onClick={doDelete} disabled={saving} style={{ ...ghostBtn, color: '#fff', background: '#D6455D', border: 'none' }}><Trash2 size={13} /> Confirm delete</button>
-            : <button onClick={() => setConfirmDelete(true)} style={{ ...ghostBtn, color: '#B23A2E' }}><Trash2 size={13} /> Delete</button>
+    <div style={{ padding: '22px 34px', background: '#FBFCFD', flex: 1, minHeight: 0, overflowY: 'auto' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 260 }}>
+          <button type="button" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, border: 'none', background: 'transparent', padding: 0, fontSize: 12, fontWeight: 600, color: '#8A93A5', cursor: 'pointer', fontFamily: 'inherit', marginBottom: 4 }}>
+            <ChevronLeft size={13} /> DDL export rules
+          </button>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#1A2B4A', letterSpacing: '-0.01em', fontFamily: draft.name ? 'var(--mono, monospace)' : undefined }}>
+            {draft.name.trim() || (isNew ? 'New rule' : rule?.name)}
+          </h1>
+        </div>
+        {!isNew && canEdit && <Button variant="danger" icon={Trash2} onClick={remove} disabled={saving}>Delete</Button>}
+        <Button variant="secondary" onClick={onBack}>{canEdit ? 'Cancel' : 'Back'}</Button>
+        {canEdit && (
+          <Button onClick={save} disabled={!canSave} title={dirty ? undefined : NO_CHANGES_HINT}>
+            {saving ? 'Saving…' : isNew ? 'Add rule' : 'Save rule'}
+          </Button>
         )}
-        <button onClick={onBack} style={{ width: 30, height: 30, borderRadius: 8, border: '1px solid #E6EAF0', background: '#fff', color: '#8A93A5', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}><X size={13} /></button>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        {/* ── Izquierda · definición ── */}
-        <div style={{ flex: 1, minWidth: 0, borderRight: '1px solid #EAEDF2', background: '#fff', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ height: 46, flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', borderBottom: '1px solid #F0F2F6' }}>
-            <span style={cap}>Definition</span>
-            <div style={{ flex: 1 }} />
-            <div style={{ display: 'inline-flex', alignItems: 'center', background: '#EFF1F5', border: '1px solid #E4E8EF', borderRadius: 8, padding: 2 }}>
-              {(['form', 'yaml'] as const).map((m) => (
-                <button key={m} onClick={() => switchMode(m)}
-                  style={{ height: 26, display: 'flex', alignItems: 'center', padding: '0 12px', border: 'none', background: mode === m ? '#fff' : 'transparent', color: mode === m ? '#1A2B4A' : '#A9B1BE', borderRadius: 6, fontSize: 12, fontWeight: mode === m ? 600 : 500, cursor: 'pointer', fontFamily: 'inherit', boxShadow: mode === m ? '0 1px 2px rgba(16,27,48,0.06)' : 'none' }}>
-                  {m === 'form' ? 'Form' : 'YAML'}
-                </button>
-              ))}
-            </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)', gap: 18, alignItems: 'start' }}>
+        {/* ── La regla ── */}
+        <div style={card}>
+          {(validation?.warnings ?? []).map((w) => (
+            <div key={w} style={{ fontSize: 12, color: '#8A6D1F', background: '#FFF8E6', border: '1px solid #F3E2B3', borderRadius: 9, padding: '8px 11px', marginBottom: 12 }}>{w}</div>
+          ))}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label="Name" errors={errorsOf('name')}>
+              <input className="rd-input" style={input} value={draft.name} disabled={!canEdit} placeholder="tabla_fisica"
+                onChange={(e) => patch({ name: e.target.value })} aria-label="Rule name" />
+            </Field>
+            <Field label="For each" errors={errorsOf('scope')}>
+              <SegmentedControl options={SCOPES} value={draft.scope} aria-label="For each"
+                onChange={(v) => { if (canEdit) patch({ scope: v }); }} />
+            </Field>
           </div>
+          <Field label="Description">
+            <input className="rd-input" style={input} value={draft.description ?? ''} disabled={!canEdit}
+              placeholder="What the rule writes, in one line" onChange={(e) => patch({ description: e.target.value })} aria-label="Description" />
+          </Field>
+          <Field label="When" hint="Optional Jinja condition; empty = always." errors={errorsOf('when')}>
+            <CodeEditor singleLine expression value={draft.when} readOnly={!canEdit} onChange={(v) => patch({ when: v })}
+              completions={completions} udpNames={udpNames} ariaLabel="When"
+              placeholder={draft.scope === 'view' ? 'vista.en_canvas' : "tabla.udp['Clasificacion del Dato'] == 'DAC'"} />
+          </Field>
 
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px' }}>
-            {mode === 'yaml' ? (
-              <>
-                <textarea value={yamlText} onChange={(e) => { setYamlText(e.target.value); setYamlErr(null); }}
-                  spellCheck={false} disabled={!canEdit}
-                  style={{ width: '100%', minHeight: 380, border: `1px solid ${yamlErr ? '#E0736A' : '#E2E6EE'}`, borderRadius: 9, padding: '10px 12px', fontFamily: 'var(--mono, monospace)', fontSize: 12.5, lineHeight: 1.55, color: '#1A2B4A', resize: 'vertical', outline: 'none', background: '#fff' }} />
-                {yamlErr && <div style={{ marginTop: 6, fontSize: 11.5, color: '#C0392B' }}>{yamlErr}</div>}
-                <div style={{ marginTop: 6, fontSize: 11, color: '#9AA3B2' }}>Keys map 1:1 with the form. Switch back to Form to apply.</div>
-              </>
-            ) : (
-              <>
-                <label style={lbl}>Rule name</label>
-                <input value={draft.name} onChange={(e) => patch({ name: e.target.value.replace(/\s+/g, '_') })}
-                  placeholder="my_rule_slug" disabled={!canEdit} style={inp} />
-
-                <div style={{ display: 'flex', gap: 14, margin: '16px 0' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={lbl}>Type</label>
-                    <Segmented options={[['generator', 'Generator'], ['rule', 'Rule']]}
-                      value={draft.kind} disabled={!canEdit}
-                      onPick={(v) => patch(v === 'generator'
-                        ? { kind: 'generator', target: undefined, appliesTo: [], action: { emit: (action.emit as object) ?? { artifact: 'ddl.', type: 'table', schema: '{tabla.esquema}', name: '{tabla.nombre}', columns: { inherit: 'all' } } } }
-                        : { kind: 'rule', target: draft.target ?? 'column', sourceArtifact: undefined, action: action.emit ? {} : action })} />
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    {draft.kind === 'rule' ? (
-                      <>
-                        <label style={lbl}>Target</label>
-                        <Segmented options={[['column', 'Column'], ['table', 'Table']]}
-                          value={draft.target ?? 'column'} disabled={!canEdit}
-                          onPick={(v) => patch({ target: v as 'column' | 'table' })} />
-                      </>
-                    ) : (
-                      <>
-                        <label style={lbl}>Source artifact</label>
-                        <select value={draft.sourceArtifact ?? ''} disabled={!canEdit}
-                          onChange={(e) => patch({ sourceArtifact: e.target.value || undefined })}
-                          style={{ ...inp, cursor: 'pointer' }}>
-                          <option value="">— pick a source —</option>
-                          {artifacts.map((a) => <option key={a.id} value={a.id}>{a.id}{a.kind ? ` · ${a.kind}` : ''}</option>)}
-                        </select>
-                      </>
-                    )}
-                  </div>
-                </div>
-
-                <label style={lbl}>Condition</label>
-                <div style={{ position: 'relative', marginBottom: 4 }}>
-                  <input ref={condRef} value={draft.condition} disabled={!canEdit}
-                    onChange={(e) => onConditionChange(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (!ac || !acItems.length) return;
-                      if (e.key === 'ArrowDown') { e.preventDefault(); setAc({ ...ac, sel: (ac.sel + 1) % acItems.length }); }
-                      if (e.key === 'ArrowUp') { e.preventDefault(); setAc({ ...ac, sel: (ac.sel - 1 + acItems.length) % acItems.length }); }
-                      if (e.key === 'Enter') { e.preventDefault(); insertUdp(acItems[ac.sel].name); }
-                      if (e.key === 'Escape') setAc(null);
-                    }}
-                    placeholder={'columna.udp["Clasificacion del Dato"] LIKE \'DAC-%\''}
-                    spellCheck={false}
-                    style={{ ...inp, fontFamily: 'var(--mono, monospace)', borderColor: errCount ? '#E0736A' : undefined, boxShadow: errCount ? '0 0 0 3px rgba(214,69,93,0.1)' : undefined }} />
-                  {ac && acItems.length > 0 && (
-                    <AnchoredDropdown anchor={condRef} matchWidth size={acItems.length}
-                      style={{ zIndex: 30, background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, boxShadow: '0 16px 38px rgba(16,27,48,0.2)', overflowX: 'hidden', overflowY: 'hidden' }}>
-                      <div style={{ padding: '8px 12px', borderBottom: '1px solid #F2F4F8', fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' }}>
-                        UDP catalog · {LEVEL_OF[ac.base]} <span style={{ fontWeight: 500, textTransform: 'none', letterSpacing: 0, color: '#B6BECD' }}>· closed list · exhaustive</span>
-                      </div>
-                      {acItems.map((d, i) => (
-                        <button key={d.id} onClick={() => insertUdp(d.name)}
-                          style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', padding: '8px 12px', border: 'none', borderLeft: i === ac.sel ? '2px solid #2E5BFF' : '2px solid transparent', background: i === ac.sel ? '#F4F7FF' : '#fff', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                          <span style={{ width: 20, height: 20, borderRadius: 5, background: '#F3EEFF', color: '#8B5CF6', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--mono, monospace)', fontSize: 10, fontWeight: 700, flex: 'none' }}>U</span>
-                          <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12.5, fontWeight: i === ac.sel ? 600 : 500, color: '#1A2B4A' }}>{d.name}</span>
-                          <span style={{ flex: 1 }} />
-                          <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 10.5, color: '#8A93A5' }}>
-                            {d.allowedValues.slice(0, 3).join(' · ')}{d.allowedValues.length > 3 ? ` +${d.allowedValues.length - 3} more` : ''}
-                          </span>
-                        </button>
-                      ))}
-                      <div style={{ padding: '7px 12px', borderTop: '1px solid #F2F4F8', background: '#FBFCFD', fontSize: 10.5, color: '#9AA3B2' }}>
-                        <span style={{ fontFamily: 'var(--mono, monospace)' }}>↵</span> insert · <span style={{ fontFamily: 'var(--mono, monospace)' }}>esc</span> dismiss
-                      </div>
-                    </AnchoredDropdown>
-                  )}
-                </div>
-                <div style={{ margin: '0 0 16px', fontSize: 11, color: '#9AA3B2' }}>
-                  Type <span style={{ fontFamily: 'var(--mono, monospace)', color: '#8A93A5' }}>columna.udp[</span> to autocomplete a
-                  UDP from the catalog (closed list). Empty condition = always applies. Use{' '}
-                  <span style={{ fontFamily: 'var(--mono, monospace)', color: '#8A93A5' }}>LIKE 'DAC-%'</span> for critical columns —
-                  never <span style={{ fontFamily: 'var(--mono, monospace)', color: '#8A93A5' }}>'%DAC%'</span> (it also matches 'No DAC').
-                </div>
-
-                {draft.kind === 'rule' ? (
-                  <RuleAction action={action} actionKind={actionKind} canEdit={canEdit} target={draft.target ?? 'column'}
-                    udpDefs={udpDefs} onChange={(a) => patch({ action: a })} />
-                ) : (
-                  <EmitAction action={action} canEdit={canEdit} onChange={(a) => patch({ action: a })} />
-                )}
-
-                {draft.kind === 'rule' && (
-                  <>
-                    <label style={lbl}>Target artifacts</label>
-                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 7, padding: 8, border: '1px solid #E2E6EE', borderRadius: 9, background: '#fff', marginBottom: 16 }}>
-                      {draft.appliesTo.map((a) => (
-                        <span key={a} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: 'var(--mono, monospace)', fontSize: 11.5, color: '#2E5BFF', background: '#EAF0FF', border: '1px solid #D4E0FF', borderRadius: 7, padding: '4px 8px' }}
-                          title={artifacts.find((x) => x.id === a)?.kind ? `${artifacts.find((x) => x.id === a)?.kind} artifact` : undefined}>
-                          {a}
-                          {artifacts.find((x) => x.id === a)?.kind && (
-                            <span style={{ fontFamily: 'inherit', fontSize: 9.5, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.04em', color: '#7FA0F0' }}>
-                              {artifacts.find((x) => x.id === a)?.kind}
-                            </span>
-                          )}
-                          {canEdit && <button onClick={() => patch({ appliesTo: draft.appliesTo.filter((x) => x !== a) })} style={{ border: 'none', background: 'transparent', color: '#7FA0F0', cursor: 'pointer', padding: 0, display: 'flex' }}><X size={10} /></button>}
-                        </span>
-                      ))}
-                      {canEdit && (
-                        <select value="" onChange={(e) => { if (e.target.value) patch({ appliesTo: [...draft.appliesTo, e.target.value] }); }}
-                          style={{ height: 28, padding: '0 10px', border: '1px dashed #C9D2E0', background: '#fff', color: '#8A93A5', borderRadius: 7, fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', outline: 'none', cursor: 'pointer' }}>
-                          <option value="">+ Add</option>
-                          {artifacts.filter((a) => !draft.appliesTo.includes(a.id)).map((a) => <option key={a.id} value={a.id}>{a.id}{a.kind ? ` · ${a.kind}` : ''}</option>)}
-                        </select>
-                      )}
-                    </div>
-                  </>
-                )}
-
-                <label style={lbl}>Priority</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <input type="number" value={draft.priority} disabled={!canEdit}
-                    onChange={(e) => patch({ priority: Number(e.target.value) || 0 })}
-                    style={{ ...inp, width: 90 }} />
-                  <span style={{ fontSize: 11.5, color: '#9AA3B2' }}>Higher priority runs first on export.</span>
-                </div>
-              </>
+          <div style={{ display: 'flex', alignItems: 'center', margin: '18px 0 8px' }}>
+            <span style={{ ...lbl, flex: 1 }}>Files</span>
+            {canEdit && (
+              <Button variant="secondary" size="sm" icon={Plus} onClick={addFile}>Add file</Button>
             )}
           </div>
+          {errorsOf('files').map((e) => <ErrorLine key={e.message} line={e.line} message={e.message} />)}
+          {draft.files.map((f, i) => (
+            <div key={fileKeys[i] ?? `f${i}`} style={{ border: '1px solid #EAEDF2', borderRadius: 10, padding: 12, marginBottom: 10, background: '#FCFDFE' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: '#56607A', flex: 1 }}>File {i + 1}</span>
+                {canEdit && draft.files.length > 1 && (
+                  <Button variant="ghost" size="sm" icon={Trash2} aria-label={`Remove file ${i + 1}`} title="Remove file"
+                    onClick={() => removeFile(i)} />
+                )}
+              </div>
+              <Field label="Name" hint="Path in the .zip; Jinja allowed." errors={errorsOf(`files[${i}].name`)}>
+                <CodeEditor singleLine value={f.name} readOnly={!canEdit} onChange={(v) => patchFile(i, { name: v })}
+                  completions={completions} udpNames={udpNames} ariaLabel={`File ${i + 1} name`} />
+              </Field>
+              <Field label="Content" hint="The DDL of the file; when it comes out empty the file is not generated." errors={errorsOf(`files[${i}].content`)}>
+                <CodeEditor value={f.content} readOnly={!canEdit} onChange={(v) => patchFile(i, { content: v })} minHeight={160}
+                  completions={completions} udpNames={udpNames} ariaLabel={`File ${i + 1} content`} />
+              </Field>
+            </div>
+          ))}
+
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: '#3A4658', marginTop: 6 }}>
+            <input type="checkbox" checked={draft.enabled} disabled={!canEdit} onChange={(e) => patch({ enabled: e.target.checked })} />
+            Active — runs on export
+          </label>
         </div>
 
-        {/* ── Derecha · validación ── */}
-        <div style={{ flex: 1, minWidth: 0, background: '#FBFCFD', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ height: 46, flex: 'none', display: 'flex', alignItems: 'center', gap: 10, padding: '0 24px', borderBottom: '1px solid #F0F2F6' }}>
-            <span style={cap}>Validation</span>
-            <div style={{ flex: 1 }} />
-            <span style={{ fontSize: 11, color: '#9AA3B2', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Clock3 size={12} color="#B6BECD" /> auto-checks as you type</span>
+        {/* ── Vista previa y referencia ── */}
+        <div style={card}>
+          <div className="wk-pp-tabs exd-tabs" role="tablist" style={{ marginBottom: 12 }}>
+            <button type="button" role="tab" aria-selected={side === 'preview'} className={`wk-pp-tab${side === 'preview' ? ' active' : ''}`} onClick={() => setSide('preview')}>Preview</button>
+            <button type="button" role="tab" aria-selected={side === 'reference'} className={`wk-pp-tab${side === 'reference' ? ' active' : ''}`} onClick={() => setSide('reference')}>Reference</button>
           </div>
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px' }}>
-            {valid ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 11, background: '#E9F7F0', border: '1px solid #BFE6D3', borderRadius: 11, padding: '12px 15px', marginBottom: 18 }}>
-                <span style={{ width: 26, height: 26, borderRadius: '50%', background: '#16A37B', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Check size={14} color="#fff" strokeWidth={2.8} /></span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#0E7A5C' }}>Valid</div>
-                  <div style={{ fontSize: 11.5, color: '#4E8C74' }}>All 5 checks passed · ready to save</div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 11, background: '#FDECEA', border: '1px solid #F3C9C2', borderRadius: 11, padding: '12px 15px', marginBottom: 16 }}>
-                <span style={{ width: 26, height: 26, borderRadius: '50%', background: '#D6455D', display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><X size={13} color="#fff" strokeWidth={2.8} /></span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: '#B23A2E' }}>{errCount || '—'} error{errCount === 1 ? '' : 's'}</div>
-                  <div style={{ fontSize: 11.5, color: '#B5675E' }}>Fix {errCount === 1 ? 'it' : 'them'} before this rule can be saved or applied</div>
-                </div>
-              </div>
-            )}
-
-            {(report?.errors?.length ?? 0) > 0 && (
-              <>
-                <div style={{ ...cap, marginBottom: 8 }}>Error detail</div>
-                <div style={{ background: '#FCF4F3', border: '1px solid #F1D9D5', borderRadius: 11, padding: '13px 15px', marginBottom: 20 }}>
-                  {report!.errors.map((err, i) => (
-                    <div key={i} style={{ marginBottom: i < report!.errors.length - 1 ? 12 : 0 }}>
-                      {err.snippet && (
-                        <pre style={{ margin: '0 0 8px', fontFamily: 'var(--mono, monospace)', fontSize: 12.5, lineHeight: 1.5, whiteSpace: 'pre', overflowX: 'auto', color: '#56607A' }}>{err.snippet}</pre>
-                      )}
-                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                        <TriangleAlert size={14} color="#C0392B" style={{ flex: 'none', marginTop: 1 }} />
-                        <div style={{ fontSize: 12.5, color: '#8A4038', lineHeight: 1.5 }}>
-                          {err.message}
-                          {err.suggestion && canEdit && (
-                            <>{' '}<button onClick={() => applySuggestion(err)}
-                              style={{ border: 'none', background: '#EAF0FF', color: '#2E5BFF', fontFamily: 'var(--mono, monospace)', fontWeight: 600, borderRadius: 4, padding: '0 4px', cursor: 'pointer', fontSize: 12 }}>
-                              {err.suggestion}
-                            </button></>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-
-            {(report?.warnings?.length ?? 0) > 0 && (
-              <div style={{ background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 11, padding: '11px 14px', marginBottom: 18 }}>
-                {report!.warnings.map((w, i) => (
-                  <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, color: '#7A6220', lineHeight: 1.5, marginBottom: i < report!.warnings.length - 1 ? 6 : 0 }}>
-                    <TriangleAlert size={13} color="#B98600" style={{ flex: 'none', marginTop: 2 }} />{w}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div style={{ ...cap, marginBottom: 10 }}>Checks</div>
-            <div style={{ border: '1px solid #EAEDF2', borderRadius: 11, overflow: 'hidden', background: '#fff', marginBottom: 20 }}>
-              {(report?.checks ?? DEFAULT_CHECKS).map((c, i, arr) => (
-                <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderBottom: i < arr.length - 1 ? '1px solid #F2F4F8' : 'none', background: c.ok === false ? '#FDF6F5' : '#fff' }}>
-                  {c.ok === true && <Check size={16} color="#16A37B" strokeWidth={2.2} style={{ flex: 'none' }} />}
-                  {c.ok === false && <X size={16} color="#D6455D" strokeWidth={2.2} style={{ flex: 'none' }} />}
-                  {c.ok === null && <Minus size={16} color="#C7CFDB" style={{ flex: 'none' }} />}
-                  <span style={{ flex: 1, fontSize: 12.5, color: c.ok === false ? '#B23A2E' : c.ok === null ? '#A9B1BE' : '#1A2B4A', fontWeight: c.ok === false ? 600 : 400 }}>{c.name}</span>
-                  <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: c.ok === false ? '#C0392B' : c.ok === null ? '#C7CFDB' : '#9AA3B2' }}>
-                    {c.ok === null ? 'waiting' : c.detail || (c.ok ? 'ok' : '✕')}
+          {side === 'reference' ? <Reference /> : !canPreview ? (
+            <div style={{ fontSize: 12.5, color: '#6B7689', lineHeight: 1.5 }}>
+              The preview writes the same DDL as the export, so it needs the export permission.
+            </div>
+          ) : (
+            <>
+              {table ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12.5, fontWeight: 600, color: '#1A2B4A', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {table.schema ? `${table.schema}.` : ''}{table.physicalName}
                   </span>
-                </div>
-              ))}
-            </div>
-
-            {/* ── Test contra una tabla real ── */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <span style={cap}>Test</span>
-              <div style={{ flex: 1 }} />
-              <div style={{ position: 'relative' }}>
-                <button ref={pickBtnRef} onClick={() => { setTablePick(!tablePick); setTableQ(''); }} disabled={!valid}
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 32, padding: '0 12px', border: '1px solid #E2E6EE', background: valid ? '#fff' : '#F4F6F9', borderRadius: 8, fontSize: 12, color: valid ? '#8A93A5' : '#A9B1BE', cursor: valid ? 'pointer' : 'default', fontFamily: 'inherit' }}>
-                  Sample table{' '}
-                  <span style={{ fontFamily: 'var(--mono, monospace)', fontWeight: 600, color: valid ? '#1A2B4A' : '#A9B1BE' }}>
-                    {testTable?.physicalName ?? 'pick one'}
-                  </span>
-                  <ChevronDown size={12} color="#9AA3B2" />
-                </button>
-                {tablePick && (
-                  <AnchoredDropdown anchor={pickBtnRef} align="end" size={tableHits.length}
-                    style={{ zIndex: 30, width: 300, background: '#fff', border: '1px solid #E2E6EE', borderRadius: 10, boxShadow: '0 16px 38px rgba(16,27,48,0.2)', overflowX: 'hidden', overflowY: 'hidden' }}>
-                    <input autoFocus value={tableQ} onChange={(e) => setTableQ(e.target.value)} placeholder="Search tables…"
-                      style={{ width: '100%', border: 'none', borderBottom: '1px solid #F0F2F6', outline: 'none', padding: '9px 12px', fontSize: 12.5, fontFamily: 'inherit' }} />
-                    <div style={{ maxHeight: 220, overflowY: 'auto' }}>
-                      {tableHits.map((t) => (
-                        <button key={t.id} onClick={() => { setTestTable(t); setTablePick(false); }}
-                          style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px', border: 'none', background: '#fff', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>
-                          <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12, color: '#1A2B4A' }}>{t.physicalName}</span>
-                          <span style={{ fontSize: 10.5, color: '#9AA3B2' }}>{t.schema ?? ''}</span>
-                        </button>
-                      ))}
-                      {tableHits.length === 0 && <div style={{ padding: '10px 12px', fontSize: 12, color: '#9AA3B2' }}>No results</div>}
-                    </div>
-                  </AnchoredDropdown>
-                )}
-              </div>
-            </div>
-            {!valid ? (
-              <div style={{ border: '1px dashed #E2E6EE', borderRadius: 11, background: '#FAFBFC', padding: '22px 18px', textAlign: 'center', marginBottom: 14 }}>
-                <Lock size={20} color="#C7CFDB" />
-                <div style={{ fontSize: 12.5, color: '#8A93A5', marginTop: 8 }}>Fix the error above to test this rule against a sample table.</div>
-              </div>
-            ) : testOut ? (
-              <div style={{ border: '1px solid #EAEDF2', borderRadius: 11, background: '#fff', overflow: 'hidden', marginBottom: 8 }}>
-                <div style={{ padding: '9px 14px', background: '#F7F9FC', borderBottom: '1px solid #EEF1F6', fontSize: 11.5, color: '#56607A' }}>
-                  <strong style={{ color: '#1A2B4A' }}>{testOut.matched} of {testOut.total} {testOut.total === 1 ? 'object' : 'columns'}</strong> match this rule — generated fragment:
-                </div>
-                {testOut.fragments.slice(0, 6).map((f, i) => (
-                  <div key={i} style={{ padding: '11px 14px', borderBottom: i < Math.min(testOut.fragments.length, 6) - 1 ? '1px solid #F2F4F8' : 'none' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#16A37B', flex: 'none' }} />
-                      <span style={{ fontFamily: 'var(--mono, monospace)', fontSize: 12, fontWeight: 600, color: '#1A2B4A' }}>{f.column ?? f.label}</span>
-                      {f.why && <span style={{ fontSize: 10.5, color: '#8A93A5' }}>{f.why}</span>}
-                    </div>
-                    <pre style={{ margin: 0, fontFamily: 'var(--mono, monospace)', fontSize: 12, background: '#F7F9FC', border: '1px solid #EEF1F6', borderRadius: 7, padding: '7px 9px', whiteSpace: 'pre-wrap', overflowX: 'auto', color: '#1A2B4A' }}>{f.sql}</pre>
-                  </div>
-                ))}
-                {testOut.matched === 0 && <div style={{ padding: '12px 14px', fontSize: 12, color: '#9AA3B2' }}>Nothing on this table matches the condition.</div>}
-              </div>
-            ) : (
-              <div style={{ border: '1px dashed #E2E6EE', borderRadius: 11, background: '#FAFBFC', padding: '18px', textAlign: 'center', marginBottom: 8, fontSize: 12.5, color: '#8A93A5' }}>
-                Pick a sample table to see the generated fragments.
-              </div>
-            )}
-            <div style={{ fontSize: 11, color: '#9AA3B2', margin: '0 0 18px', lineHeight: 1.45 }}>
-              Only the generated fragment for matching columns is shown — not the full DDL. The full DDL is
-              produced later, on Export DDL.
-            </div>
-
-            <div style={{ background: valid && impact ? 'linear-gradient(180deg,#F4F7FF,#FAFBFF)' : '#F7F9FC', border: `1px solid ${valid && impact ? '#D9E3FB' : '#EAEDF2'}`, borderRadius: 12, padding: '14px 16px' }}>
-              {valid && impact ? (
-                <div style={{ fontSize: 13.5, color: '#1A2B4A', lineHeight: 1.45 }}>
-                  Matches <strong style={{ color: '#2E5BFF' }}>{impact.columns} columns</strong> across{' '}
-                  <strong style={{ color: '#2E5BFF' }}>{impact.tables} tables</strong> when applied on export.
+                  <Button variant="secondary" size="sm" onClick={changeTable}>Change table</Button>
                 </div>
               ) : (
-                <div style={{ fontSize: 13, color: '#9AA3B2', lineHeight: 1.45 }}>Impact can't be estimated until the rule is valid.</div>
+                <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 34, padding: '0 10px', background: '#fff', border: '1px solid #E2E6EE', borderRadius: 9, marginBottom: 6 }}>
+                    <Search size={14} color="#9AA3B2" />
+                    <input value={tableQ} onChange={(e) => setTableQ(e.target.value)} placeholder="Pick a table of the catalog to preview…" aria-label="Preview table"
+                      style={{ flex: 1, border: 'none', outline: 'none', fontSize: 12.5, background: 'transparent', fontFamily: 'inherit' }} />
+                  </div>
+                  <div style={{ maxHeight: 240, overflowY: 'auto', border: '1px solid #F0F2F6', borderRadius: 9 }}>
+                    {tableHits.map((t) => (
+                      <button key={t.id} type="button" onClick={() => pickTable(t)}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', border: 'none', borderBottom: '1px solid #F4F6F9', background: '#fff', padding: '7px 10px', cursor: 'pointer', fontFamily: 'var(--mono, monospace)', fontSize: 12, color: '#1A2B4A' }}>
+                        {t.schema ? `${t.schema}.` : ''}{t.physicalName}
+                      </button>
+                    ))}
+                    {tableHits.length === 0 && <div style={{ padding: '10px', fontSize: 12, color: '#9AA3B2' }}>No tables.</div>}
+                  </div>
+                </>
               )}
-            </div>
-          </div>
+              {table && <PreviewOut preview={preview} ruleName={draft.name} />}
+              <p style={{ fontSize: 11, color: '#9AA3B2', margin: '10px 0 0', lineHeight: 1.5 }}>
+                Runs every active rule with this one in its place (even if it is off), on the published table and its views.
+              </p>
+            </>
+          )}
         </div>
-      </div>
-
-      {/* pie */}
-      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 14, padding: '14px 24px', borderTop: '1px solid #EAEDF2', background: '#fff' }}>
-        {valid
-          ? <span style={{ fontSize: 12, color: '#8A93A5', display: 'inline-flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#16A37B' }} />{dirty ? 'Validated · draft not saved' : `Validated · ${NO_CHANGES_HINT.toLowerCase()}`}</span>
-          : <span style={{ fontSize: 12, color: '#C0392B', display: 'inline-flex', alignItems: 'center', gap: 8 }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#D6455D' }} />{errCount || '—'} error{errCount === 1 ? '' : 's'} · can't save yet</span>}
-        <span style={{ flex: 1 }} />
-        <button onClick={onBack} style={ghostBtn}>Discard</button>
-        <button onClick={doSave} disabled={!canSave || saving} title={dirty ? undefined : NO_CHANGES_HINT}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 20px', border: 'none', background: !canSave ? '#EAECF1' : '#2E5BFF', color: !canSave ? '#A9B1BE' : '#fff', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: !canSave ? 'not-allowed' : 'pointer', fontFamily: 'inherit', boxShadow: canSave ? '0 1px 2px rgba(46,91,255,0.35)' : 'none' }}>
-          <Save size={14} /> {saving ? 'Saving…' : 'Save rule'}
-        </button>
       </div>
     </div>
   );
 }
 
-// ── sub-editores de action ─────────────────────────────────────────────────
-
-/** Acciones de una regla: por columna — expression, exclude (quita la
- *  proyección), keep (la deja como está frente a las de menor prioridad), tags
- *  y data types (renombra el tipo base al exportar, CHAR → VARCHAR); por tabla
- *  — tags, TBLPROPERTIES, statements (sentencias libres before/after), column
- *  layout y omit (no genera los objetos generados que apunta). */
-type RuleActionKind = 'expression' | 'exclude' | 'keep' | 'tags' | 'types' | 'tblproperties' | 'statements' | 'layout' | 'omit';
-
-const COLUMN_ACTIONS: [RuleActionKind, string][] = [['expression', 'Expression'], ['exclude', 'Exclude column'], ['keep', 'Keep column'], ['tags', 'Tags'], ['types', 'Data types']];
-const TABLE_ACTIONS: [RuleActionKind, string][] = [['tags', 'Tags'], ['tblproperties', 'Properties'], ['statements', 'Statements'], ['layout', 'Column layout'], ['omit', "Don't generate"]];
-
-function RuleAction({ action, actionKind, canEdit, target, udpDefs, onChange }: {
-  action: Record<string, unknown>;
-  actionKind: RuleActionKind | 'emit';
-  canEdit: boolean;
-  /** «Column layout» y «Statements» solo existen para reglas de tabla. */
-  target: 'column' | 'table';
-  udpDefs: UdpDefinition[];
-  onChange: (a: Record<string, unknown>) => void;
-}) {
-  const [kind, setKind] = useState<RuleActionKind>(actionKind === 'emit' ? 'expression' : actionKind);
-  const layout = (action.layout as { partitionColumns?: string; partitionUdp?: string; partitionOrderUdp?: string } | undefined) ?? {};
-  // `partitionUdp` (también se acepta el alias `partitionOrderUdp`, que se
-  // descarta al editar). Sin `partitionColumns` el motor deja el orden físico
-  // (`keep`) y el editor lo muestra igual.
-  const partitionUdp = layout.partitionUdp ?? layout.partitionOrderUdp ?? '';
-  const statements = (action.statements as { before?: string[]; after?: string[] } | undefined) ?? {};
-  const pairs = (k: 'tags' | 'tblproperties' | 'types') =>
-    Object.entries((action[k] as Record<string, string>) ?? {});
-  const setPairs = (k: 'tags' | 'tblproperties' | 'types', entries: [string, string][]) =>
-    onChange({ [k]: Object.fromEntries(entries.filter(([a]) => a.trim())) });
-  // UDP de columna (faceta física) para «Partition columns from UDP».
-  const columnUdps = udpDefs.filter((d) => d.level === 'column' && d.view !== 'logical').map((d) => d.name);
-  const setStatements = (pos: 'before' | 'after', text: string) =>
-    onChange({ statements: { ...statements, [pos]: text.split('\n') } });
-  const options = target === 'table' ? TABLE_ACTIONS : COLUMN_ACTIONS;
-
+function PreviewOut({ preview, ruleName }: { preview: PreviewState; ruleName: string }) {
+  if (preview.state === 'idle' || preview.state === 'loading') return <div style={{ fontSize: 12, color: '#8A93A5', padding: '8px 0' }}>Running the rules…</div>;
+  if (preview.state === 'error') {
+    return <div style={{ fontSize: 12, color: '#B23A2E', background: '#FDF2F1', border: '1px solid #F1D9D5', borderRadius: 9, padding: '9px 11px', whiteSpace: 'pre-wrap' }}>{preview.text}</div>;
+  }
+  const { files, log } = preview.out;
+  const mine = log.filter((e) => e.rule === ruleName);
   return (
-    <>
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <label style={{ ...lbl, marginBottom: 0 }}>Action</label>
-        <div style={{ flex: 1 }} />
-        <Segmented small options={options}
-          value={kind} disabled={!canEdit}
-          onPick={(v) => {
-            const k = v as RuleActionKind;
-            setKind(k);
-            onChange(k === 'expression' ? { expression: (action.expression as string) ?? '', alias: (action.alias as string) ?? '{columna.nombre}' }
-              : k === 'exclude' ? { exclude: true }
-                : k === 'keep' ? { keep: true }
-                : k === 'omit' ? { omit: true }
-                : k === 'tags' ? { tags: (action.tags as object) ?? {} }
-                  : k === 'types' ? { types: (action.types as object) ?? { CHAR: 'VARCHAR' } }
-                  : k === 'layout' ? { layout: (action.layout as object) ?? { partitionColumns: 'last', partitionUdp: 'Particion' } }
-                    : k === 'statements' ? { statements: (action.statements as object) ?? { before: ['-- DROP TABLE IF EXISTS {artefacto.ref};'] } }
-                      : { tblproperties: (action.tblproperties as object) ?? {} });
-          }} />
-      </div>
-      {kind === 'layout' ? (
-        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Without PARTITIONED BY</label>
-            <select value={layout.partitionColumns ?? 'keep'} disabled={!canEdit}
-              onChange={(e) => onChange({ layout: { partitionColumns: e.target.value, ...(partitionUdp ? { partitionUdp } : {}) } })}
-              style={{ ...inp, height: 32, fontSize: 12, flex: 1 }}>
-              <option value="last">Emit at the end of the CREATE TABLE</option>
-              <option value="keep">Keep the physical order</option>
-            </select>
+    <div>
+      {mine.map((e) => (
+        <div key={`${e.status}:${e.object}:${e.path}`} style={{ fontSize: 11.5, color: '#8A6D1F', background: '#FFF8E6', borderRadius: 7, padding: '5px 9px', marginBottom: 6 }}>
+          <code>{e.path}</code>{' '}
+          {e.status === 'overridden' ? `is not applied for ${e.object}: ${e.by} (above) writes it`
+            : e.status === 'empty' ? `came out empty for ${e.object}: not generated`
+              : `renamed to ${e.to}`}
+        </div>
+      ))}
+      {files.length === 0 && <div style={{ fontSize: 12, color: '#8A93A5', padding: '8px 0' }}>No files for this table.</div>}
+      {files.map((f) => (
+        <div key={f.path} style={{ marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+            <code style={{ fontSize: 11.5, fontWeight: 600, color: '#1A2B4A', flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{f.path}</code>
+            <span style={{ fontSize: 10.5, fontWeight: 600, borderRadius: 999, padding: '2px 8px', flex: 'none', color: f.rule === ruleName ? '#2E5BFF' : '#6B7689', background: f.rule === ruleName ? '#EAF0FF' : '#F2F4F8' }}>
+              {f.rule === ruleName ? 'this rule' : f.rule}
+            </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8 }}>
-            <label style={{ ...lbl, marginBottom: 0, flex: 'none' }}>Partition columns from UDP</label>
-            <input list="ddl-column-udps" value={partitionUdp} disabled={!canEdit} placeholder="Particion"
-              onChange={(e) => onChange({ layout: { partitionColumns: layout.partitionColumns ?? 'keep', partitionUdp: e.target.value || undefined } })}
-              style={{ ...inp, height: 32, fontSize: 12, flex: 1, fontFamily: 'var(--mono, monospace)' }} />
-            <datalist id="ddl-column-udps">{columnUdps.map((n) => <option key={n} value={n} />)}</datalist>
-          </div>
-          <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
-            Applies to every physical table of the export (leave the condition empty). With a column UDP,
-            the partition columns ARE the ones whose value is PART_01, PART_02… (the platform’s partition
-            flag is ignored), in that order; without a UDP, the partition flag decides. The DDL always
-            declares them in PARTITIONED BY with their type — PARTITIONED BY (codmes int, …) — and not in the
-            column list; “Without PARTITIONED BY” only applies when the export doesn’t write it (Output
-            settings → Partitions off). Generated tables mirror the same layout.
-          </div>
+          <pre style={{ margin: 0, maxHeight: 260, overflow: 'auto', background: '#0F1A2E', color: '#E6ECF5', borderRadius: 9, padding: '10px 12px', fontSize: 11.5, lineHeight: 1.5 }}>{f.content}</pre>
         </div>
-      ) : kind === 'exclude' ? (
-        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16, fontSize: 11.5, color: '#56607A', lineHeight: 1.5 }}>
-          The matching columns are <strong>removed from the SELECT</strong> of the target view artifacts
-          (e.g. the DAC columns of the NoDAC technical view). Tags for those columns are not emitted there.
-        </div>
-      ) : kind === 'keep' ? (
-        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16, fontSize: 11.5, color: '#56607A', lineHeight: 1.5 }}>
-          The matching columns <strong>stay as they are</strong> in the target view artifacts: column rules with a
-          lower priority (exclude, expressions) don&apos;t touch them. Give this rule a higher priority than the rules
-          it should win over.
-        </div>
-      ) : kind === 'omit' ? (
-        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16, fontSize: 11.5, color: '#56607A', lineHeight: 1.5 }}>
-          For the matching tables, the generated objects you target <strong>are not generated</strong> — whatever
-          generator would create them — and neither is anything generated from them (e.g. no DAC views for a
-          legacy table with the DAC suffix). Only generated objects; the physical table and the modeled views
-          always export.
-        </div>
-      ) : kind === 'statements' ? (
-        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16 }}>
-          {(['before', 'after'] as const).map((pos) => (
-            <div key={pos} style={{ marginBottom: pos === 'before' ? 10 : 0 }}>
-              <label style={lbl}>{pos === 'before' ? 'Before the CREATE' : 'After the tags'} · one statement per line</label>
-              <textarea value={(statements[pos] ?? []).join('\n')} disabled={!canEdit} spellCheck={false}
-                onChange={(e) => setStatements(pos, e.target.value)}
-                placeholder={pos === 'before' ? '-- DROP TABLE IF EXISTS {artefacto.ref};' : 'OPTIMIZE {artefacto.ref};'}
-                style={{ ...inp, height: 64, padding: '8px 12px', fontFamily: 'var(--mono, monospace)', fontSize: 12, resize: 'vertical' }} />
-            </div>
-          ))}
-          <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
-            Free SQL text with placeholders: <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{artefacto.ref}'}</span> (the
-            object being emitted, qualified), <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{tabla.nombre}'}</span>,{' '}
-            <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{udp:…}'}</span>, <span style={{ fontFamily: 'var(--mono, monospace)' }}>{'{lookup:…}'}</span>.
-            Applies to the table AND view artifacts you target.
-          </div>
-        </div>
-      ) : kind === 'expression' ? (
-        <>
-          <input value={(action.expression as string) ?? ''} disabled={!canEdit} spellCheck={false}
-            onChange={(e) => onChange({ ...action, expression: e.target.value })}
-            placeholder="security.decrypt_column_view({col}, '{lookup:dac_map}')"
-            style={{ ...inp, fontFamily: 'var(--mono, monospace)' }} />
-          <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 6, margin: '8px 0 16px' }}>
-            <span style={{ fontSize: 11, color: '#9AA3B2', fontWeight: 600, marginRight: 2 }}>Insert</span>
-            {['{col}', '{columna.nombre}', '{columna.tipo}', '{tabla.nombre}', '{tabla.esquema}', '{lookup:dac_map}'].map((t) => (
-              <button key={t} disabled={!canEdit}
-                onClick={() => onChange({ ...action, expression: `${(action.expression as string) ?? ''}${t}` })}
-                style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, color: '#56607A', background: '#F2F4F8', border: '1px solid #E6EAF0', borderRadius: 6, padding: '3px 8px', cursor: 'pointer' }}>
-                {t}
-              </button>
-            ))}
-          </div>
-        </>
-      ) : (
-        <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 10, marginBottom: 16 }}>
-          {pairs(kind).map(([k, v], i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-              <input value={k} disabled={!canEdit} placeholder={kind === 'types' ? 'from type · CHAR' : 'key'}
-                onChange={(e) => { const es = pairs(kind); es[i] = [e.target.value, v]; setPairs(kind, es); }}
-                style={{ ...inp, height: 32, fontSize: 12, fontFamily: 'var(--mono, monospace)', flex: 1 }} />
-              <input value={v} disabled={!canEdit} placeholder={kind === 'types' ? 'to type · VARCHAR' : '{udp:…} · {lookup:…} · text'}
-                onChange={(e) => { const es = pairs(kind); es[i] = [k, e.target.value]; setPairs(kind, es); }}
-                style={{ ...inp, height: 32, fontSize: 12, fontFamily: 'var(--mono, monospace)', flex: 1.4 }} />
-              {canEdit && <button onClick={() => setPairs(kind, pairs(kind).filter((_, j) => j !== i))}
-                style={{ border: 'none', background: 'transparent', color: '#B6BECD', cursor: 'pointer' }}><X size={13} /></button>}
-            </div>
-          ))}
-          {canEdit && (
-            <button onClick={() => setPairs(kind, [...pairs(kind), ['', '']])}
-              style={{ height: 28, padding: '0 10px', border: '1px dashed #C9D2E0', background: '#fff', color: '#8A93A5', borderRadius: 7, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-              + Add pair
-            </button>
-          )}
-          {kind === 'tags' && (
-            <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
-              Tags are emitted as <span style={{ fontFamily: 'var(--mono, monospace)' }}>ALTER TABLE|VIEW … SET TAGS</span> — one
-              statement per rule on tables and views; column rules emit one statement per matching column.
-            </div>
-          )}
-          {kind === 'types' && (
-            <div style={{ fontSize: 11, color: '#8A93A5', marginTop: 8, lineHeight: 1.45 }}>
-              Base type → base type, case-insensitive (<span style={{ fontFamily: 'var(--mono, monospace)' }}>CHAR → VARCHAR</span>).
-              Each matching column keeps its own length/precision when the target type takes arguments
-              (<span style={{ fontFamily: 'var(--mono, monospace)' }}>CHAR(10) → VARCHAR(10)</span>); otherwise they are dropped
-              (<span style={{ fontFamily: 'var(--mono, monospace)' }}>CHAR(10) → STRING</span>). Applies to the table artifacts you
-              target — the physical CREATE and generated tables; views declare no types. Comments and column names are never touched.
-            </div>
-          )}
-        </div>
-      )}
-    </>
-  );
-}
-
-const STRIP_OPTS = ['not_null', 'pk', 'fk', 'default', 'check'] as const;
-
-function EmitAction({ action, canEdit, onChange }: {
-  action: Record<string, unknown>; canEdit: boolean; onChange: (a: Record<string, unknown>) => void;
-}) {
-  const emit = (action.emit as Record<string, unknown>) ?? {};
-  const setEmit = (p: Record<string, unknown>) => onChange({ emit: { ...emit, ...p } });
-  const cols = (emit.columns as Record<string, unknown>) ?? { inherit: 'all' };
-  const setCols = (p: Record<string, unknown>) =>
-    setEmit({ columns: { inherit: cols.inherit ?? 'all', ...cols, ...p } });
-  const strip = Array.isArray(cols.strip) ? (cols.strip as string[]) : [];
-  const added = (emit.add_columns as { name: string; type: string }[]) ?? [];
-  const setAdded = (list: { name: string; type: string }[]) => setEmit({ add_columns: list });
-  const isTable = ((emit.type as string) ?? 'table') === 'table';
-  return (
-    <div style={{ border: '1px solid #E2E6EE', borderRadius: 9, padding: 12, marginBottom: 16 }}>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-        <div style={{ flex: 1.4 }}>
-          <label style={lbl}>Emits artifact</label>
-          <input value={(emit.artifact as string) ?? ''} disabled={!canEdit} placeholder="ddl.tabla_rej"
-            onChange={(e) => setEmit({ artifact: e.target.value })}
-            style={{ ...inp, height: 34, fontSize: 12, fontFamily: 'var(--mono, monospace)' }} />
-        </div>
-        <div style={{ flex: 0.7 }}>
-          <label style={lbl}>As</label>
-          <select value={(emit.type as string) ?? 'table'} disabled={!canEdit}
-            onChange={(e) => setEmit({ type: e.target.value })}
-            style={{ ...inp, height: 34, fontSize: 12, cursor: 'pointer' }}>
-            <option value="table">table</option>
-            <option value="view">view</option>
-          </select>
-        </div>
-      </div>
-      <div style={{ display: 'flex', gap: 10, marginBottom: 10 }}>
-        <div style={{ flex: 1 }}>
-          <label style={lbl}>Schema</label>
-          <input value={(emit.schema as string) ?? ''} disabled={!canEdit} placeholder="{tabla.esquema}_v"
-            onChange={(e) => setEmit({ schema: e.target.value })}
-            style={{ ...inp, height: 34, fontSize: 12, fontFamily: 'var(--mono, monospace)' }} />
-        </div>
-        <div style={{ flex: 1 }}>
-          <label style={lbl}>Name</label>
-          <input value={(emit.name as string) ?? ''} disabled={!canEdit} placeholder="{tabla.nombre}_rej"
-            onChange={(e) => setEmit({ name: e.target.value })}
-            style={{ ...inp, height: 34, fontSize: 12, fontFamily: 'var(--mono, monospace)' }} />
-        </div>
-        {isTable && (
-          <div style={{ flex: 0.8 }}>
-            <label style={lbl}>Force type</label>
-            <input value={(cols.force_type as string) ?? ''} disabled={!canEdit} placeholder="STRING"
-              onChange={(e) => setCols({ force_type: e.target.value || undefined })}
-              style={{ ...inp, height: 34, fontSize: 12, fontFamily: 'var(--mono, monospace)' }} />
-          </div>
-        )}
-      </div>
-
-      {isTable && (
-        <>
-          <label style={lbl}>Strip from inherited columns</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-            {STRIP_OPTS.map((s) => {
-              const on = strip.includes(s);
-              return (
-                <button key={s} disabled={!canEdit}
-                  onClick={() => setCols({ strip: on ? strip.filter((x) => x !== s) : [...strip, s] })}
-                  style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, padding: '3px 9px', borderRadius: 999, border: `1px solid ${on ? '#D4E0FF' : '#E6EAF0'}`, background: on ? '#EAF0FF' : '#fff', color: on ? '#2E5BFF' : '#8A93A5', cursor: canEdit ? 'pointer' : 'default', fontWeight: 600 }}>
-                  {s}
-                </button>
-              );
-            })}
-          </div>
-
-          <label style={lbl}>Partition columns</label>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-            <button disabled={!canEdit}
-              onClick={() => setCols({ keep_partition_type: !cols.keep_partition_type })}
-              title="Doc 76: the rejected table keeps the partition columns' data type (force type only applies to the rest)"
-              style={{ fontFamily: 'var(--mono, monospace)', fontSize: 11, padding: '3px 9px', borderRadius: 999, border: `1px solid ${cols.keep_partition_type ? '#D4E0FF' : '#E6EAF0'}`, background: cols.keep_partition_type ? '#EAF0FF' : '#fff', color: cols.keep_partition_type ? '#2E5BFF' : '#8A93A5', cursor: canEdit ? 'pointer' : 'default', fontWeight: 600 }}>
-              keep_partition_type{cols.keep_partition_type ? ' ✓' : ''}
-            </button>
-          </div>
-
-          <label style={lbl}>Added columns · appended after the inherited ones, before any partition column</label>
-          <div style={{ border: '1px solid #EAEDF2', borderRadius: 8, padding: 8, marginBottom: 4 }}>
-            {added.map((c, i) => (
-              <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-                <input value={c.name} disabled={!canEdit} placeholder="TIPREJECT"
-                  onChange={(e) => setAdded(added.map((x, j) => j === i ? { ...x, name: e.target.value } : x))}
-                  style={{ ...inp, height: 30, fontSize: 12, fontFamily: 'var(--mono, monospace)', flex: 1.4 }} />
-                <input value={c.type} disabled={!canEdit} placeholder="STRING"
-                  onChange={(e) => setAdded(added.map((x, j) => j === i ? { ...x, type: e.target.value } : x))}
-                  style={{ ...inp, height: 30, fontSize: 12, fontFamily: 'var(--mono, monospace)', flex: 0.8 }} />
-                {canEdit && (
-                  <button onClick={() => setAdded(added.filter((_, j) => j !== i))} aria-label="Remove column"
-                    style={{ border: 'none', background: 'transparent', color: '#B6BECD', cursor: 'pointer', display: 'flex', alignItems: 'center' }}><X size={13} /></button>
-                )}
-              </div>
-            ))}
-            {added.length === 0 && (
-              <div style={{ fontSize: 11.5, color: '#9AA3B2', padding: '2px 2px 6px' }}>No added columns.</div>
-            )}
-            {canEdit && (
-              <button onClick={() => setAdded([...added, { name: '', type: 'STRING' }])}
-                style={{ height: 26, padding: '0 10px', border: '1px dashed #C9D2E0', background: '#fff', color: '#8A93A5', borderRadius: 7, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-                + Add column
-              </button>
-            )}
-          </div>
-        </>
-      )}
-      <div style={{ fontSize: 11, color: '#9AA3B5' }}>
-        Inherits {String(cols.inherit ?? 'all')} columns from the source
-        {isTable ? ' — partitions, USING, LOCATION and identifier casing mirror the physical CREATE on export.' : '.'}
-      </div>
-    </div>
-  );
-}
-
-/** Desplegable anclado a un control con la regla única de flotantes: debajo,
- *  arriba si no entra (y se queda de ese lado mientras entre), siguiendo al
- *  control con el scroll. Se ubica en la ventana, debajo de la barra superior
- *  de la app (`contentBounds`); si el control sale de la
- *  vista de sus paneles, se oculta (`placeAnchored`). `matchWidth`: el ancho
- *  del control; `size` re-ubica cuando cambia la lista. El `style` usa
- *  `overflowX`/`overflowY`, no `overflow`: el alto máximo agrega `overflowY` y
- *  mezclar la abreviada con la larga hace que React avise al quitarla. */
-function AnchoredDropdown({ anchor, align = 'start', matchWidth, size, style, children }: {
-  anchor: RefObject<HTMLElement | null>;
-  align?: 'start' | 'end';
-  matchWidth?: boolean;
-  size: number;
-  style: CSSProperties;
-  children: ReactNode;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  const place = useFloating(ref, (box, viewport, prev) => {
-    const el = anchor.current;
-    if (!el) return null;
-    return placeAnchored(el.getBoundingClientRect(), clipRect(el), box, contentBounds(viewport), { side: prev?.side ?? 'bottom', align, gap: 6 });
-  }, [anchor, align, size], {
-    follow: true,
-    matchWidth: matchWidth ? () => anchor.current?.getBoundingClientRect().width : undefined,
-  });
-  return <div ref={ref} style={{ ...style, ...place }}>{children}</div>;
-}
-
-function Segmented({ options, value, onPick, disabled, small }: {
-  options: [string, string][]; value: string; onPick: (v: string) => void; disabled?: boolean; small?: boolean;
-}) {
-  return (
-    <div style={{ display: 'flex', background: '#EFF1F5', border: '1px solid #E4E8EF', borderRadius: 9, padding: 3 }}>
-      {options.map(([v, label]) => (
-        <button key={v} onClick={() => !disabled && onPick(v)} disabled={disabled}
-          style={{ flex: 1, height: small ? 26 : 32, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: small ? '0 10px' : undefined, border: 'none', background: value === v ? '#fff' : 'transparent', color: value === v ? '#1A2B4A' : '#A9B1BE', borderRadius: 7, fontSize: small ? 11.5 : 12.5, fontWeight: value === v ? 600 : 500, cursor: disabled ? 'default' : 'pointer', fontFamily: 'inherit', boxShadow: value === v ? '0 1px 2px rgba(16,27,48,0.06)' : 'none', whiteSpace: 'nowrap' }}>
-          {label}
-        </button>
       ))}
     </div>
   );
 }
 
-const DEFAULT_CHECKS = [
-  'Condition syntax', 'UDP exists in catalog', 'Value allowed for UDP',
-  'Expression syntax (Databricks)', 'Placeholders resolved',
-].map((name) => ({ name, ok: null as boolean | null, detail: '' }));
+function Reference() {
+  return (
+    <div style={{ maxHeight: 640, overflowY: 'auto' }}>
+      {RULE_REFERENCE.map((g) => (
+        <div key={g.title} style={{ marginBottom: 14 }}>
+          <div style={{ ...lbl, marginBottom: 6 }}>{g.title}</div>
+          {g.items.map((i) => (
+            <div key={i.label} style={{ display: 'flex', gap: 10, padding: '4px 0', borderBottom: '1px solid #F4F6F9' }}>
+              <code style={{ fontSize: 11.5, color: '#1A2B4A', flex: '0 0 44%', overflowWrap: 'anywhere' }}>{i.label}</code>
+              <span style={{ fontSize: 11.5, color: '#6B7689', flex: 1 }}>{i.detail}</span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
 
-const cap: React.CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2' };
-const lbl: React.CSSProperties = { display: 'block', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2', marginBottom: 6 };
-const inp: React.CSSProperties = { width: '100%', height: 40, border: '1px solid #E2E6EE', borderRadius: 9, padding: '0 12px', fontSize: 13, color: '#1A2B4A', background: '#fff', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box' };
-const ghostBtn: React.CSSProperties = { height: 40, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 18px', border: '1px solid #DDE2EC', background: '#fff', color: '#56607A', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' };
+function Field({ label, hint, errors = [], children }: {
+  label: string; hint?: string; errors?: { line: number | null; message: string }[]; children: React.ReactNode;
+}) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{ ...lbl, marginBottom: 5 }}>{label}</div>
+      {children}
+      {hint && <div style={{ fontSize: 11, color: '#9AA3B2', marginTop: 4 }}>{hint}</div>}
+      {errors.map((e) => <ErrorLine key={`${e.line}:${e.message}`} line={e.line} message={e.message} />)}
+    </div>
+  );
+}
+
+function ErrorLine({ line, message }: { line: number | null; message: string }) {
+  return <div style={{ fontSize: 11.5, color: '#B23A2E', marginTop: 4 }}>{line ? `Line ${line}: ` : ''}{message}</div>;
+}
+
+const card: React.CSSProperties = { background: '#fff', border: '1px solid #E6EAF0', borderRadius: 14, padding: '16px 18px', minWidth: 0 };
+const lbl: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#8A93A5' };
+const input: React.CSSProperties = { width: '100%', height: 34, boxSizing: 'border-box' };

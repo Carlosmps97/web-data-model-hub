@@ -1,137 +1,100 @@
-/** ddlRules.service: YAML round-trip 1:1 con el form, mutaciones vía
- *  standards/apply (versionadas) y el CTA de semillas. */
+/** ddlRules.service: mutaciones vía standards/apply (versionadas), orden de la
+ *  lista, set base, validación y el payload de la vista previa. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('@/services/http', () => ({ apiGet: vi.fn(), apiPost: vi.fn(), LONG_TIMEOUT_MS: 120_000 }));
+vi.mock('@/services/http', async (orig) => ({
+  ...(await orig<typeof import('@/services/http')>()), apiGet: vi.fn(), apiPost: vi.fn(),
+}));
 
 import { apiGet, apiPost } from '@/services/http';
+import { DEFAULT_OUTPUT_SETTINGS } from '@/features/ddl';
 import {
-  ruleActionSummary, ruleToYaml, saveDdlOutput, saveDdlRule, seedStarterRules, toEditInput, toggleDdlRule, withSeedFunctions, yamlToRule,
+  previewPayloadFor, reorderDdlRules, restoreBaseRuleSet, saveDdlOutput, saveDdlRule, toEditInput, toggleDdlRule,
+  validateDdlRule,
 } from './ddlRules.service';
 import type { DdlRule } from './standards.service';
 
-const RULE: DdlRule = {
-  id: 'r1', name: 'enmascarar_dac', description: null, kind: 'rule', target: 'column',
-  sourceArtifact: null, condition: 'columna.udp["Clasificacion del Dato"] LIKE \'DAC-%\'',
-  udpRefs: [{ udpId: 'u1', level: 'column' }],
-  action: { expression: 'sha2({col}, 512)', alias: '{columna.nombre}' },
-  appliesTo: ['ddl.vista_tecnica'], priority: 100, enabled: true,
-  validationState: 'valid', validationReport: {},
-};
-
-beforeEach(() => vi.clearAllMocks());
-
-describe('YAML ida y vuelta', () => {
-  it('form → yaml → form conserva los campos (claves en inglés)', () => {
-    const edit = toEditInput(RULE);
-    const yaml = ruleToYaml(edit);
-    expect(yaml).toContain('name: enmascarar_dac');
-    expect(yaml).toContain('condition:');
-    expect(yaml).toContain('appliesTo:');
-    const back = yamlToRule(yaml, edit);
-    expect(back.name).toBe(edit.name);
-    expect(back.condition).toBe(edit.condition);
-    expect(back.action).toEqual(edit.action);
-    expect(back.appliesTo).toEqual(edit.appliesTo);
-    expect(back.priority).toBe(100);
-    expect(back.id).toBe('r1');                        // conserva id del borrador
-    expect(back.udpRefs).toEqual(edit.udpRefs);        // y los bindings
-  });
-
-  it('yaml inválido lanza error legible', () => {
-    expect(() => yamlToRule('name: [rota', toEditInput(RULE))).toThrow(/Invalid YAML/);
-    expect(() => yamlToRule('- solo una lista', toEditInput(RULE))).toThrow(/mapping/);
-  });
+const rule = (id: string, order: number, over: Partial<DdlRule> = {}): DdlRule => ({
+  id, name: id, description: null, scope: 'table', when: '', order, enabled: true, updatedBy: 'otro',
+  files: [{ name: '{{ tabla.carpeta }}/{{ tabla.nombre }}.sql', content: 'CREATE TABLE {{ tabla.nombre }};' }], ...over,
 });
+const bodyOf = (i = 0) => vi.mocked(apiPost).mock.calls[i][1] as Record<string, unknown>;
+
+beforeEach(() => { vi.clearAllMocks(); vi.mocked(apiPost).mockResolvedValue({ seq: 9 }); });
 
 describe('mutaciones versionadas (standards/apply)', () => {
-  it('saveDdlRule postea rulesUpsert con kind ddl y título legible', async () => {
-    vi.mocked(apiPost).mockResolvedValue({ seq: 9 });
-    await saveDdlRule('p1', toEditInput(RULE), false);
-    const [url, body] = vi.mocked(apiPost).mock.calls[0];
+  it('saveDdlRule postea rulesUpsert con kind ddl, título legible y sus archivos', async () => {
+    await saveDdlRule('p1', toEditInput(rule('tabla_fisica', 2)), false);
+    const [url] = vi.mocked(apiPost).mock.calls[0];
     expect(String(url)).toContain('/api/projects/p1/standards/apply');
-    expect(body).toMatchObject({ kind: 'ddl', title: 'Rule enmascarar_dac · edited' });
-    expect((body as { rulesUpsert: unknown[] }).rulesUpsert).toHaveLength(1);
+    expect(bodyOf()).toMatchObject({ kind: 'ddl', title: 'Rule tabla_fisica · edited' });
+    expect(bodyOf().rulesUpsert).toEqual([{
+      id: 'tabla_fisica', name: 'tabla_fisica', description: undefined, scope: 'table', when: '', order: 2, enabled: true,
+      files: [{ name: '{{ tabla.carpeta }}/{{ tabla.nombre }}.sql', content: 'CREATE TABLE {{ tabla.nombre }};' }],
+    }]);
   });
 
-  it('toggleDdlRule manda la regla entera con enabled invertido', async () => {
-    vi.mocked(apiPost).mockResolvedValue({ seq: 10 });
-    await toggleDdlRule('p1', RULE, false);
-    const body = vi.mocked(apiPost).mock.calls[0][1] as {
-      rulesUpsert: { id: string; enabled: boolean }[]; title: string;
-    };
-    expect(body.rulesUpsert[0]).toMatchObject({ id: 'r1', enabled: false });
-    expect(body.title).toContain('disabled');
+  it('toggleDdlRule manda la regla entera con su estado nuevo', async () => {
+    await toggleDdlRule('p1', rule('r1', 0), false);
+    expect((bodyOf().rulesUpsert as { id: string; enabled: boolean }[])[0]).toMatchObject({ id: 'r1', enabled: false });
+    expect(bodyOf().title).toBe('Rule r1 · disabled');
   });
 
-  it('seedStarterRules aplica las semillas + lookups + Output settings como una versión', async () => {
+  it('reorderDdlRules: order = posición; solo viajan las que cambian; sin cambios no llama', async () => {
+    const [a, b, c] = [rule('a', 0), rule('b', 1), rule('c', 2)];
+    await reorderDdlRules('p1', [b, a, c]);
+    expect((bodyOf().rulesUpsert as { id: string; order: number }[]).map((r) => [r.id, r.order])).toEqual([['b', 0], ['a', 1]]);
+    expect(reorderDdlRules('p1', [a, b, c])).toBeNull();
+    expect(apiPost).toHaveBeenCalledTimes(1);
+  });
+
+  it('restoreBaseRuleSet: las reglas y piezas del set base; las variables del proyecto se conservan', async () => {
     vi.mocked(apiGet).mockResolvedValue({
-      templates: [], seedRules: [{ name: 'a' }, { name: 'b' }],
-      seedLookups: { vacuum_map: { values: {} } },
-      seedOutput: { typeCase: 'lower' },
+      rules: [{ name: 'a' }, { name: 'b' }], pieces: '{% macro m() %}{% endmacro %}',
+      variables: { location: 'abfss://x', desencriptar: 'security.decrypt_column_view' },
     });
-    vi.mocked(apiPost).mockResolvedValue({ seq: 11 });
-    await seedStarterRules('p1');
-    const body = vi.mocked(apiPost).mock.calls[0][1] as {
-      rulesUpsert: unknown[]; ddlConfigPatch: { lookups: Record<string, unknown> };
-    };
-    expect(body.rulesUpsert).toHaveLength(2);
-    expect(body.ddlConfigPatch.lookups.vacuum_map).toBeDefined();
-    expect((body as { ddlConfigPatch: { output?: unknown } }).ddlConfigPatch.output).toEqual({ typeCase: 'lower' });
-  });
-
-  it('restaurar el ruleset base conserva el dialecto por default y la config Oracle del proyecto', async () => {
-    vi.mocked(apiGet).mockResolvedValue({
-      templates: [], seedRules: [{ name: 'a' }], seedLookups: {},
-      seedOutput: { typeCase: 'lower', dialect: 'databricks', oracle: { typeCase: 'upper' } },
+    await restoreBaseRuleSet('p1', { pieces: '', variables: { desencriptar: 'bcp.decrypt' }, output: {} });
+    expect(String(vi.mocked(apiGet).mock.calls[0][0])).toContain('/api/projects/p1/ddl-rules/base');
+    expect(bodyOf()).toMatchObject({
+      kind: 'ddl', rulesUpsert: [{ name: 'a' }, { name: 'b' }],
+      ddlConfigPatch: { pieces: '{% macro m() %}{% endmacro %}', variables: { location: 'abfss://x', desencriptar: 'bcp.decrypt' } },
     });
-    vi.mocked(apiPost).mockResolvedValue({ seq: 13 });
-    await seedStarterRules('p1', { dialect: 'oracle', oracle: { includeComments: true }, typeCase: 'upper' });
-    const out = (vi.mocked(apiPost).mock.calls[0][1] as { ddlConfigPatch: { output: Record<string, unknown> } }).ddlConfigPatch.output;
-    // lo de Databricks vuelve a la semilla; el dialecto y Oracle quedan como estaban
-    expect(out).toEqual({ typeCase: 'lower', dialect: 'oracle', oracle: { includeComments: true } });
   });
 
-  it('restaurar agrega las funciones semilla que faltan y conserva la del proyecto', async () => {
-    const seedFn = { name: 'decrypt_dac', params: ['col'], body: "security.decrypt_column_view({col}, '{lookup:dac_map}')" };
-    vi.mocked(apiGet).mockResolvedValue({ templates: [], seedRules: [{ name: 'a' }], seedLookups: {}, seedFunctions: [seedFn] });
-    vi.mocked(apiPost).mockResolvedValue({ seq: 14 });
-    await seedStarterRules('p1', null, []);
-    let patch = (vi.mocked(apiPost).mock.calls[0][1] as { ddlConfigPatch: { functions?: unknown[] } }).ddlConfigPatch;
-    expect(patch.functions).toEqual([seedFn]);                       // el proyecto no la tenía
-    const propia = { name: 'decrypt_dac', params: ['col'], body: 'org.descifrar({col})' };
-    await seedStarterRules('p1', null, [propia]);
-    patch = (vi.mocked(apiPost).mock.calls[1][1] as { ddlConfigPatch: { functions?: unknown[] } }).ddlConfigPatch;
-    expect(patch.functions).toBeUndefined();                         // la del proyecto no se toca
-    expect(withSeedFunctions([propia], [seedFn])).toEqual([propia]);
-  });
-
-  it('saveDdlOutput guarda las Output settings como una versión (ddlConfigPatch.output)', async () => {
-    vi.mocked(apiPost).mockResolvedValue({ seq: 12 });
-    await saveDdlOutput('p1', { viewTagsAs: 'view' } as unknown as Parameters<typeof saveDdlOutput>[1]);
-    const [url, body] = vi.mocked(apiPost).mock.calls[0];
-    expect(String(url)).toContain('/api/projects/p1/standards/apply');
-    expect(body).toMatchObject({ kind: 'ddl', title: 'DDL output settings · edited', ddlConfigPatch: { output: { viewTagsAs: 'view' } } });
+  it('saveDdlOutput manda solo el bloque output', async () => {
+    await saveDdlOutput('p1', DEFAULT_OUTPUT_SETTINGS);
+    expect(Object.keys(bodyOf().ddlConfigPatch as object)).toEqual(['output']);
   });
 });
 
-describe('ruleActionSummary — resumen de la acción en el catálogo', () => {
-  const layout = (lay: Record<string, unknown>): DdlRule => ({ ...RULE, target: 'table', action: { layout: lay } });
-  it('el layout dice de dónde salen las particiones y qué pasa sin PARTITIONED BY', () => {
-    expect(ruleActionSummary(layout({ partitionColumns: 'last', partitionUdp: 'Particion' })))
-      .toBe('Column layout: partitions from UDP "Particion" · last when there is no PARTITIONED BY');
-    expect(ruleActionSummary(layout({ partitionColumns: 'keep' })))
-      .toBe('Column layout: partitions from the partition flag · in physical order when there is no PARTITIONED BY');
-    expect(ruleActionSummary(layout({ partitionUdp: 'Particion' })))
-      .toBe('Column layout: partitions from UDP "Particion" · in physical order when there is no PARTITIONED BY');
+describe('validación y vista previa', () => {
+  it('validateDdlRule: con regla, o solo piezas y variables', async () => {
+    vi.mocked(apiPost).mockResolvedValue({ errors: [], warnings: [] });
+    await validateDdlRule('p1', toEditInput(rule('r1', 0)));
+    await validateDdlRule('p1', null, '{% set A = 1 %}', { a: 'b' });
+    expect(String(vi.mocked(apiPost).mock.calls[0][0])).toContain('/api/projects/p1/ddl-rules/validate');
+    expect(bodyOf(1)).toEqual({ rule: null, pieces: '{% set A = 1 %}', variables: { a: 'b' } });
   });
-  it('las demás acciones', () => {
-    expect(ruleActionSummary(RULE)).toBe('sha2({col}, 512)');
-    expect(ruleActionSummary({ ...RULE, action: { keep: true } })).toBe('Keep column as is (lower-priority column rules skip it)');
-    expect(ruleActionSummary({ ...RULE, target: 'table', action: { omit: true }, appliesTo: ['ddl.vista_tecnica_dac', 'ddl.vista_rej_dac'] }))
-      .toBe("Don't generate: ddl.vista_tecnica_dac, ddl.vista_rej_dac");
-    expect(ruleActionSummary({ ...RULE, action: { types: { CHAR: 'VARCHAR' } } })).toBe('Data types: CHAR → VARCHAR');
-    expect(ruleActionSummary({ ...RULE, action: {} })).toBe('—');
+
+  it('previewPayloadFor: la tabla publicada con sus vistas; las otras fuentes solo para el FROM', async () => {
+    vi.mocked(apiGet).mockImplementation(async (url: string) => {
+      if (url.includes('/inspect/tables/')) {
+        return {
+          table: { id: 't1', physicalName: 'HD_X', schema: 's', udpValues: { u1: 'DAC' } },
+          columns: [{ id: 'c1', tableId: 't1', physicalName: 'COD', dataType: 'INTEGER', ordinal: 0, udpValues: {} }],
+          views: [
+            { id: 'v1', name: 'VU_X', schema: 's', sourceTableIds: ['t1', 't2'], sources: [{ column: 'COD', tableId: 't1' }] },
+            { id: 'v2', name: 'VU_Y', schema: 's', sourceTableIds: ['t1'] },
+          ],
+        };
+      }
+      return { sources: [{ id: 't1', physicalName: 'HD_X', schema: 's' }, { id: 't2', physicalName: 'HD_Z', schema: 'r' }] };
+    });
+    const p = await previewPayloadFor('t1');
+    expect(vi.mocked(apiGet).mock.calls.map(([u]) => String(u).replace(/^.*\/api/, '/api'))).toEqual([
+      '/api/catalog/inspect/tables/t1', '/api/catalog/inspect/views/v1',
+    ]);
+    expect(p.tables.map((t) => [t.table.id, t.table.udpValues])).toEqual([['t1', { u1: 'DAC' }]]);
+    expect(p.views.map((v) => [v.id, v.from])).toEqual([['v1', 's.hd_x t1,\n  r.hd_z t2'], ['v2', 's.hd_x']]);
   });
 });
-

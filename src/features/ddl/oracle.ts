@@ -22,7 +22,7 @@
 //  - Identificadores con comillas dobles solo si el nombre las necesita (o
 //    siempre, si así se configura).
 //  - Sin particiones, LOCATION, TBLPROPERTIES, tags, USING ni Unity Catalog:
-//    no existen en Oracle. Las Export rules tampoco corren (son de Databricks).
+//    no existen en Oracle.
 //  - Tipos: tal cual el modelo, solo con el casing elegido (sin mapeo de tipos
 //    ni ajustes: un tipo que Oracle no acepta es del modelo, no del export).
 //    Defaults espejo de `app/features/ddl_rules/output.py` (backend).
