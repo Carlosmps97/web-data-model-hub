@@ -15,6 +15,9 @@ export const updateSheetTemplate = (projectId: string, id: string, body: SheetTe
   apiPut<SheetTemplate>(`${TEMPLATES(projectId)}/${encodeURIComponent(id)}`, body);
 export const deleteSheetTemplate = (projectId: string, id: string) =>
   apiDelete<{ deleted: boolean }>(`${TEMPLATES(projectId)}/${encodeURIComponent(id)}`);
+/** Bloquea o desbloquea (solo admin; 403 si no). Manda el estado pedido, no «invertir». */
+export const setSheetTemplateLock = (projectId: string, id: string, locked: boolean) =>
+  apiPut<SheetTemplate>(`${TEMPLATES(projectId)}/${encodeURIComponent(id)}/lock`, { locked });
 /** Crea la built-in «QA_MODELO» en el proyecto (409 si ya la tiene). */
 export const createDefaultSheetTemplate = (projectId: string) =>
   apiPost<SheetTemplate>(`${TEMPLATES(projectId)}/default`, {});

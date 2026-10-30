@@ -64,6 +64,11 @@ export default function SheetTemplateCard({
   useEffect(() => { reload().catch(() => setTemplates([])); }, [reload]);
 
   const selected = templates.find((t) => t.id === selId) ?? null;
+  // El bloqueo cambia una sola plantilla: se reemplaza esa y las demás quedan
+  // como estaban (el editor no pisa lo que se está tecleando en otra).
+  const replaceTemplate = useCallback((t: SheetTemplate) => {
+    setTemplates((list) => list.map((x) => (x.id === t.id ? t : x)));
+  }, []);
 
   const exportTemplate = async () => {
     if (!selected) return;
@@ -136,7 +141,7 @@ export default function SheetTemplateCard({
       </div>
       {managing && (
         <SheetTemplateEditor projectId={projectId} templates={templates} me={me} isAdmin={isAdmin}
-          onClose={() => setManaging(false)} onChanged={reload} />
+          onClose={() => setManaging(false)} onChanged={reload} onLockChanged={replaceTemplate} />
       )}
     </div>
   );

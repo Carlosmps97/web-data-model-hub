@@ -19,9 +19,10 @@ vi.mock('react', async (orig) => (await import('./fakeReact.testutil')).fakeReac
 vi.mock('@/features/standards/standards.service', () => ({ getUdpDefs: vi.fn(async () => []) }));
 vi.mock('../sheetTemplates.service', () => ({
   createDefaultSheetTemplate: vi.fn(), createSheetTemplate: vi.fn(), deleteSheetTemplate: vi.fn(), updateSheetTemplate: vi.fn(),
+  setSheetTemplateLock: vi.fn(),
 }));
 import SheetTemplateEditor, { NextExportName } from './SheetTemplateEditor';
-import { updateSheetTemplate } from '../sheetTemplates.service';
+import { setSheetTemplateLock, updateSheetTemplate } from '../sheetTemplates.service';
 
 type FilterDraft = { source: string; op: string; text: string };
 type Draft = { id?: string; name: string; sheetName: string; description?: string | null; shared: boolean; fileName?: string | null; columns: { header: string; source: string }[]; filters: FilterDraft[] };
@@ -53,6 +54,7 @@ function render(shown: Draft, templates: SheetTemplate[] = [ALFA, BETA]) {
   resetFake((init) => (isDraft(init) ? shown : init));
   const tree = SheetTemplateEditor({
     projectId: 'p1', templates, me: 'ana', isAdmin: false, onClose: () => {}, onChanged: async () => {},
+    onLockChanged: () => {},
   });
   const draftState = fake.states.find((s) => isDraft(s.value));
   if (!draftState) throw new Error('draft state not found');
@@ -201,5 +203,108 @@ describe('filtros de la plantilla', () => {
     const { tree, draftCalls } = render(draftOf(ALFA), [ALFA, conFiltros]);
     (byText(tree, 'button', 'Beta').props.onClick as () => void)();
     expect(settle(BLANK, draftCalls[0]).filters).toEqual([{ source: 'column.dataType', op: 'isOneOf', text: 'A, B' }]);
+  });
+});
+
+describe('bloqueo de plantillas (solo admin)', () => {
+  type Opts = { isAdmin?: boolean; templates?: SheetTemplate[]; onLockChanged?: (t: SheetTemplate) => void; keep?: boolean;
+    busy?: boolean; confirmDelete?: boolean };
+  /** Editor con `shown` en pantalla; `keep` = re-render del mismo montaje (efectos ya corridos).
+   *  useState en orden: selId, draft, defs, busy, confirmDelete. */
+  function renderAs(shown: Draft, { isAdmin = false, templates = [ALFA, BETA], onLockChanged = () => {}, keep = false,
+    busy = false, confirmDelete = false }: Opts = {}) {
+    resetFake((init, i) => (isDraft(init) ? shown : i === 3 ? busy : i === 4 ? confirmDelete : init), { keepRefs: keep });
+    const tree = SheetTemplateEditor({
+      projectId: 'p1', templates, me: 'ana', isAdmin, onClose: () => {}, onChanged: async () => {}, onLockChanged,
+    });
+    const draftState = fake.states.find((st) => isDraft(st.value));
+    if (!draftState) throw new Error('draft state not found');
+    return { tree, draftCalls: draftState.calls };
+  }
+  const switches = (tree: unknown) => [...walk(tree)].filter((e) => e.props?.role === 'switch');
+  const switchOf = (tree: unknown, name: string) => {
+    const sw = switches(tree).find((e) => e.props['aria-label'] === `Lock ${name}`);
+    if (!sw) throw new Error(`no switch for «${name}»`);
+    return sw;
+  };
+  const fieldset = (tree: unknown) => [...walk(tree)].find((e) => e.type === 'fieldset');
+  const hasText = (tree: unknown, text: string) => [...walk(tree)].some((e) => textOf(e) === text);
+  const BETA_LOCKED: SheetTemplate = { ...BETA, locked: true };
+
+  it('cada plantilla de la lista trae su switch: lo ven todos y solo un admin lo usa', () => {
+    const user = renderAs(draftOf(ALFA), { templates: [ALFA, BETA_LOCKED] }).tree;
+    expect(switches(user).map((e) => [e.props['aria-label'], e.props['aria-checked'], e.props.disabled]))
+      .toEqual([['Lock Alfa', false, true], ['Lock Beta', true, true]]);
+    const admin = renderAs(draftOf(ALFA), { isAdmin: true, templates: [ALFA, BETA_LOCKED] }).tree;
+    expect(switches(admin).map((e) => e.props.disabled)).toEqual([false, false]);
+  });
+
+  it('el admin manda el estado contrario al que ve y la card recibe la plantilla del servidor', async () => {
+    const onLockChanged = vi.fn();
+    vi.mocked(setSheetTemplateLock).mockImplementation(async (_p, id, locked) => ({ ...(id === 'a' ? ALFA : BETA), locked }));
+    const { tree } = renderAs(draftOf(ALFA), { isAdmin: true, templates: [ALFA, BETA_LOCKED], onLockChanged });
+    await (switchOf(tree, 'Alfa').props.onClick as () => Promise<void>)();
+    await (switchOf(tree, 'Beta').props.onClick as () => Promise<void>)();
+    expect(vi.mocked(setSheetTemplateLock).mock.calls).toEqual([['p1', 'a', true], ['p1', 'b', false]]);
+    expect(onLockChanged.mock.calls).toEqual([[{ ...ALFA, locked: true }], [{ ...BETA, locked: false }]]);
+  });
+
+  it('con una petición en curso el switch del admin no se deshabilita (el foco sigue ahí) pero no manda nada', async () => {
+    const { tree } = renderAs(draftOf(ALFA), { isAdmin: true, busy: true });
+    const sw = switchOf(tree, 'Alfa');
+    expect(sw.props.disabled).toBe(false);
+    expect(sw.props['aria-disabled']).toBe(true);
+    await (sw.props.onClick as () => Promise<void> | undefined)();
+    expect(setSheetTemplateLock).not.toHaveBeenCalled();
+  });
+
+  it('la ayuda del switch va en el propio switch (la lee el lector de pantalla)', () => {
+    const user = renderAs(draftOf(ALFA), { templates: [ALFA, BETA_LOCKED] }).tree;
+    expect(switchOf(user, 'Beta').props.title).toBe('Locked by an admin: you can use it, but nobody can edit or delete it.');
+    const admin = renderAs(draftOf(ALFA), { isAdmin: true }).tree;
+    expect(switchOf(admin, 'Alfa').props.title).toBe('Lock it: nobody can edit or delete it, only use it.');
+  });
+
+  it('cambiar el bloqueo desarma «Click again to delete»', async () => {
+    vi.mocked(setSheetTemplateLock).mockResolvedValue({ ...BETA, locked: true });
+    const { tree } = renderAs(draftOf(ALFA), { isAdmin: true, confirmDelete: true });
+    expect(hasText(tree, 'Click again to delete')).toBe(true);
+    await (switchOf(tree, 'Beta').props.onClick as () => Promise<void>)();
+    expect(fake.states[4].calls).toContain(false);
+  });
+
+  it('la lista marca las bloqueadas', () => {
+    const { tree } = renderAs(draftOf(ALFA), { templates: [ALFA, BETA_LOCKED] });
+    const beta = byText(tree, 'button', 'Beta');
+    expect(textOf(beta)).toContain('locked');
+    expect(textOf(byText(tree, 'button', 'Alfa'))).not.toContain('locked');
+  });
+
+  it.each([
+    [false, 'Locked by an admin — read-only for everyone. Duplicate it to make your own version.'],
+    [true, 'Locked — read-only for everyone, admins included. Turn off its lock switch to edit or delete it.'],
+  ])('bloqueada (admin: %s) nadie la edita ni la borra, tampoco su dueña; se puede duplicar', (isAdmin, note) => {
+    const alfa = { ...ALFA, locked: true };
+    const { tree } = renderAs(draftOf(alfa), { isAdmin, templates: [alfa, BETA] });
+    expect(fieldset(tree)?.props.disabled).toBe(true);
+    expect(hasText(tree, 'Delete')).toBe(false);
+    expect(hasText(tree, 'Save changes')).toBe(false);
+    expect(hasText(tree, 'Duplicate')).toBe(true);
+    expect(hasText(tree, note)).toBe(true);
+    // Sin bloqueo, la dueña sí la edita (lo de siempre).
+    expect(fieldset(renderAs(draftOf(ALFA)).tree)?.props.disabled).toBe(false);
+  });
+
+  it('bloquear otra plantilla no pisa lo que se está editando; bloquear la abierta la recarga', () => {
+    const edited = { ...draftOf(ALFA), name: 'Alfa editada' };
+    renderAs(edited, { isAdmin: true });
+    runEffects();                                                        // montaje: sincroniza Alfa
+    const other = renderAs(edited, { isAdmin: true, templates: [ALFA, BETA_LOCKED], keep: true });
+    runEffects();
+    expect(other.draftCalls).toEqual([]);                                // Beta cambió: lo tecleado en Alfa sigue
+    const alfaLocked = { ...ALFA, locked: true };
+    const same = renderAs(edited, { isAdmin: true, templates: [alfaLocked, BETA_LOCKED], keep: true });
+    runEffects();
+    expect(same.draftCalls).toEqual([draftOf(alfaLocked)]);              // la abierta: se recarga (solo lectura)
   });
 });

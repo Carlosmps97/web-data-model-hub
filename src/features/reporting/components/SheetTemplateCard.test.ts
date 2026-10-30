@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '@/services/http';
 import type { ReportColumnRow, ReportTableRow } from '@/services/reporting.service';
 import type { SheetTemplate } from '../lib/sheetTemplates';
-import { byText, resetFake, runEffects, textOf } from './fakeReact.testutil';
+import { byText, fake, resetFake, runEffects, textOf, walk } from './fakeReact.testutil';
 
 vi.mock('react', async (orig) => (await import('./fakeReact.testutil')).fakeReact(await orig<object>()));
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() } }));
@@ -20,6 +20,7 @@ vi.mock('../sheetTemplates.service', () => ({ listSheetTemplates: vi.fn(async ()
 import { toast } from 'sonner';
 import { buildXlsx, saveXlsx, type WorkbookSheet } from '../lib/xlsxWriter';
 import SheetTemplateCard from './SheetTemplateCard';
+import SheetTemplateEditor from './SheetTemplateEditor';
 
 const TPL: SheetTemplate = {
   id: 't1', projectId: 'p1', origin: 'user', owner: 'ana', name: 'QA', sheetName: 'QA', shared: false, fileName: null,
@@ -186,5 +187,23 @@ describe('SheetTemplateCard', () => {
       expect(saveXlsx).not.toHaveBeenCalled();
       expect(toast.info).toHaveBeenCalledWith('No rows match the template filters — nothing was exported.');
     });
+  });
+});
+
+describe('SheetTemplateCard · bloqueo', () => {
+  it('reemplaza en su lista la plantilla que el editor bloqueó, sin recargar las demás', () => {
+    const otra: SheetTemplate = { ...TPL, id: 't2', name: 'Otra' };
+    // useState en orden: templates, selId, busy, managing (el editor abierto).
+    resetFake((init, i) => (i === 0 ? [TPL, otra] : i === 1 ? 't1' : i === 3 ? true : init));
+    const tree = SheetTemplateCard({
+      projectId: 'p1', selectedCount: 1, disabled: false, resolveTables: async () => [TABLE], fetchColumns: async () => [],
+    } as Props);
+    const editor = [...walk(tree)].find((e) => e.type === SheetTemplateEditor);
+    (editor?.props.onLockChanged as (t: SheetTemplate) => void)({ ...TPL, locked: true });
+    const [update] = fake.states[0].calls as ((l: SheetTemplate[]) => SheetTemplate[])[];
+    const list = [TPL, otra];
+    const next = update(list);
+    expect(next).toEqual([{ ...TPL, locked: true }, otra]);
+    expect(next[1]).toBe(otra);                            // la otra, el mismo objeto: su borrador no se re-sincroniza
   });
 });

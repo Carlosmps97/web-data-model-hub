@@ -4,11 +4,12 @@
  * filas (sale la fila que cumple todos). Son dato: se editan sin redesplegar.
  * Permisos: cada uno edita las suyas y comparte las que quiera; las compartidas
  * ajenas se ven en solo lectura y se pueden duplicar; un admin gobierna las
- * compartidas.
+ * compartidas y bloquea con el switch de la lista: bloqueada, nadie la edita ni
+ * la borra (tampoco el admin, que antes la desbloquea), pero se usa y se duplica.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { ArrowDown, ArrowUp, Copy, FileSpreadsheet, Plus, Save, Trash2, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Copy, FileSpreadsheet, Lock, Plus, Save, Trash2, X } from 'lucide-react';
 import { Button, Dialog } from '@/components/ui';
 import { apiErrorMessage } from '@/services/http';
 import { getUdpDefs, type UdpDefinition } from '@/features/standards/standards.service';
@@ -18,7 +19,7 @@ import {
   type SheetTemplateBody,
 } from '../lib/sheetTemplates';
 import {
-  createDefaultSheetTemplate, createSheetTemplate, deleteSheetTemplate, updateSheetTemplate,
+  createDefaultSheetTemplate, createSheetTemplate, deleteSheetTemplate, setSheetTemplateLock, updateSheetTemplate,
 } from '../sheetTemplates.service';
 
 type Draft = Omit<SheetTemplateBody, 'filters'> & { id?: string; filters: FilterDraft[] };
@@ -39,9 +40,11 @@ export function NextExportName({ draft }: { draft: Pick<SheetTemplateBody, 'name
   return <strong>{templateFileName(draft, now)}</strong>;
 }
 
-export default function SheetTemplateEditor({ projectId, templates, me, isAdmin, onClose, onChanged }: {
+export default function SheetTemplateEditor({ projectId, templates, me, isAdmin, onClose, onChanged, onLockChanged }: {
   projectId: string; templates: SheetTemplate[]; me: string | undefined; isAdmin: boolean;
   onClose: () => void; onChanged: () => Promise<void>;
+  /** El servidor bloqueó o desbloqueó esa plantilla: la card la reemplaza en su lista. */
+  onLockChanged: (t: SheetTemplate) => void;
 }) {
   const [selId, setSelId] = useState<string | null>(templates[0]?.id ?? null);
   const [draft, setDraft] = useState<Draft>(() => (templates[0] ? toDraft(templates[0]) : EMPTY));
@@ -51,15 +54,17 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
   const copyOf = useRef<Draft | null>(null);    // «Duplicate»: borrador que abre el alta
 
   useEffect(() => { getUdpDefs(projectId).then(setDefs).catch(() => setDefs([])); }, [projectId]);
-  // Re-sincroniza tras una recarga de la lista o una selección programática
-  // (guardar, borrar, crear la QA_MODELO). Los clics del usuario ya reinician
-  // el borrador en el mismo evento (`choose`); esto re-aplica lo mismo.
+  // Re-sincroniza cuando cambia la selección o la plantilla elegida: una recarga
+  // de la lista o una selección programática (guardar, borrar, crear la
+  // QA_MODELO), o su bloqueo. Bloquear otra reemplaza solo esa en la lista: lo
+  // tecleado aquí sigue. Los clics del usuario ya reinician el borrador en el
+  // mismo evento (`choose`); esto re-aplica lo mismo.
+  const selected = templates.find((x) => x.id === selId);
   useEffect(() => {
-    const t = templates.find((x) => x.id === selId);
-    setDraft(t ? toDraft(t) : copyOf.current ?? EMPTY);
+    setDraft(selected ? toDraft(selected) : copyOf.current ?? EMPTY);
     copyOf.current = null;
     setConfirmDelete(false);
-  }, [selId, templates]);
+  }, [selId, selected]);
 
   /** Elegir (lista, «New template», «Duplicate») reinicia el borrador en el
    *  mismo evento: si llegara solo por el efecto, quedaría una ventana con la
@@ -81,7 +86,7 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
   const problems = useMemo(() => templateProblems({ ...draft, filters: draft.filters.map(toFilterBody) }), [draft]);
   const hasBuiltin = templates.some((t) => t.origin === BUILTIN_ORIGIN);
   const current = templates.find((t) => t.id === draft.id) ?? null;
-  const editable = !draft.id || (current !== null && canEditTemplate(current, me, isAdmin));
+  const editable = !draft.id || (current !== null && !current.locked && canEditTemplate(current, me, isAdmin));
   // Admin sobre una compartida ajena: la edita, pero sigue compartida (el backend igual).
   const foreign = current !== null && current.owner !== me;
 
@@ -133,6 +138,18 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
 
   const duplicate = () => choose(null, { ...draft, id: undefined, name: `${draft.name} (copy)`, shared: false });
 
+  /** Solo un admin. Pide el estado contrario al que muestra la lista: un doble
+   *  clic manda dos veces lo mismo y no se anula. */
+  const toggleLock = async (t: SheetTemplate) => {
+    setConfirmDelete(false);
+    setBusy(true);
+    try {
+      const saved = await setSheetTemplateLock(projectId, t.id, !t.locked);
+      toast.success(saved.locked ? `Template ${saved.name} locked — nobody can edit or delete it.` : `Template ${saved.name} unlocked.`);
+      onLockChanged(saved);
+    } catch (e) { toast.error(apiErrorMessage(e, "Couldn't change the template lock.")); } finally { setBusy(false); }
+  };
+
   const createBuiltin = async () => {
     setBusy(true);
     try {
@@ -163,12 +180,25 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
       <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: 18, minHeight: 360 }}>
         <div style={{ borderRight: '1px solid #EEF1F6', paddingRight: 14, display: 'flex', flexDirection: 'column', gap: 6 }}>
           {templates.map((t) => (
-            <button key={t.id} type="button" onClick={() => choose(t.id)} style={listItem(t.id === selId)}>
-              <span style={{ fontWeight: 600, color: '#1A2B4A' }}>{t.name}</span>
-              <span style={{ fontSize: 11, color: '#8A93A5' }}>
-                sheet {t.sheetName} · {t.columns.length} columns{t.filters?.length ? ` · ${filtersLabel(t.filters.length)}` : ''} · {ownerLabel(t, me)}
+            <div key={t.id} style={listItem(t.id === selId)}>
+              <button type="button" onClick={() => choose(t.id)} style={listPick}>
+                <span style={{ fontWeight: 600, color: '#1A2B4A' }}>{t.name}</span>
+                <span style={{ fontSize: 11, color: '#8A93A5' }}>
+                  sheet {t.sheetName} · {t.columns.length} columns{t.filters?.length ? ` · ${filtersLabel(t.filters.length)}` : ''} · {ownerLabel(t, me)}{t.locked ? ' · locked' : ''}
+                </span>
+              </button>
+              {/* Lo ven todos; solo un admin lo cambia. Con una petición en curso no
+                  se deshabilita: el foco del teclado sigue en él. La ayuda va en el
+                  span (el mouse sobre un botón deshabilitado) y en el switch (lector). */}
+              <span style={lockCell} title={lockTitle(!!t.locked, isAdmin)}>
+                <Lock size={11} color={t.locked ? '#2E5BFF' : '#B6BECD'} aria-hidden />
+                <button type="button" role="switch" aria-checked={!!t.locked} aria-label={`Lock ${t.name}`}
+                  title={lockTitle(!!t.locked, isAdmin)} disabled={!isAdmin} aria-disabled={busy || undefined}
+                  onClick={() => (busy ? undefined : toggleLock(t))} style={lockSwitch(!!t.locked, !isAdmin || busy)}>
+                  <span style={lockKnob} />
+                </button>
               </span>
-            </button>
+            </div>
           ))}
           <Button variant="secondary" size="sm" icon={Plus} onClick={() => choose(null)}>New template</Button>
           {!hasBuiltin && (
@@ -176,7 +206,14 @@ export default function SheetTemplateEditor({ projectId, templates, me, isAdmin,
           )}
         </div>
         <fieldset disabled={!editable} style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, border: 0, padding: 0, margin: 0 }}>
-          {!editable && current && (
+          {current?.locked && (
+            <div style={note}>
+              {isAdmin
+                ? 'Locked — read-only for everyone, admins included. Turn off its lock switch to edit or delete it.'
+                : 'Locked by an admin — read-only for everyone. Duplicate it to make your own version.'}
+            </div>
+          )}
+          {!editable && current && !current.locked && (
             <div style={note}>Shared by {current.owner ?? 'someone else'} — read-only. Duplicate it to make your own version.</div>
           )}
           {editable && foreign && current && (
@@ -314,6 +351,12 @@ function opsShown(f: FilterDraft): { value: FilterDraft['op']; label: string }[]
 /** «1 filter» / «3 filters». */
 export const filtersLabel = (n: number): string => `${n} filter${n === 1 ? '' : 's'}`;
 
+/** Ayuda del switch de bloqueo según quién mira. */
+function lockTitle(locked: boolean, isAdmin: boolean): string {
+  if (isAdmin) return locked ? 'Locked: nobody can edit or delete it. Click to unlock.' : 'Lock it: nobody can edit or delete it, only use it.';
+  return locked ? 'Locked by an admin: you can use it, but nobody can edit or delete it.' : 'Only an admin can lock a template.';
+}
+
 /** «yours» / «shared by ana» / «yours · shared». */
 function ownerLabel(t: SheetTemplate, me: string | undefined): string {
   if (t.owner && t.owner === me) return t.shared ? 'yours · shared' : 'yours';
@@ -322,7 +365,11 @@ function ownerLabel(t: SheetTemplate, me: string | undefined): string {
 
 const note: React.CSSProperties = { fontSize: 12, color: '#7A6220', background: '#FFF9EE', border: '1px solid #F1E2BD', borderRadius: 9, padding: '8px 11px' };
 const checkLabel: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 7, fontSize: 12.5, color: '#56607A' };
-const listItem = (active: boolean): React.CSSProperties => ({ display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left', padding: '8px 10px', border: `1px solid ${active ? '#2E5BFF' : '#E6EAF0'}`, background: active ? '#F4F7FF' : '#fff', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' });
+const listItem = (active: boolean): React.CSSProperties => ({ display: 'flex', alignItems: 'flex-start', border: `1px solid ${active ? '#2E5BFF' : '#E6EAF0'}`, background: active ? '#F4F7FF' : '#fff', borderRadius: 9 });
+const listPick: React.CSSProperties = { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2, textAlign: 'left', padding: '8px 6px 8px 10px', border: 'none', background: 'transparent', borderRadius: 9, cursor: 'pointer', fontSize: 13, fontFamily: 'inherit' };
+const lockCell: React.CSSProperties = { flex: 'none', display: 'flex', alignItems: 'center', gap: 4, padding: '9px 10px 0 0' };
+const lockSwitch = (on: boolean, off: boolean): React.CSSProperties => ({ width: 30, height: 17, borderRadius: 999, border: 'none', padding: 2, background: on ? '#2E5BFF' : '#C7CFDB', cursor: off ? 'default' : 'pointer', display: 'inline-flex', justifyContent: on ? 'flex-end' : 'flex-start', opacity: off ? 0.55 : 1, transition: 'background 0.15s' });
+const lockKnob: React.CSSProperties = { width: 13, height: 13, borderRadius: '50%', background: '#fff', display: 'block' };
 const fieldLabel: React.CSSProperties = { display: 'flex', flexDirection: 'column', gap: 5, fontSize: 11.5, fontWeight: 600, color: '#56607A' };
 const hint: React.CSSProperties = { fontSize: 11.5, fontWeight: 400, color: '#8A93A5' };
 const sectionTitle: React.CSSProperties = { fontSize: 10.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: '#9AA3B2', marginTop: 4 };

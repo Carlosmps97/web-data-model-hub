@@ -25,7 +25,12 @@ export interface SheetTemplateBody {
    *  local de quien exporta); vacío ⇒ `<plantilla>-<AAAA-MM-DD>.xlsx`. */
   fileName?: string | null;
 }
-export interface SheetTemplate extends SheetTemplateBody { id: string; projectId: string; origin: string; owner?: string | null }
+export interface SheetTemplate extends SheetTemplateBody {
+  id: string; projectId: string; origin: string; owner?: string | null;
+  /** Bloqueada por un admin: nadie la edita ni la borra (tampoco el admin, que
+   *  antes la desbloquea); se sigue usando y duplicando. */
+  locked?: boolean;
+}
 
 /** ¿Puede editarla/borrarla? El dueño; un admin (`admin.manage`), además, las
  *  compartidas (así la QA_MODELO sembrada es editable). Espejo de `can_edit`. */
